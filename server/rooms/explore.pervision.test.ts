@@ -263,6 +263,20 @@ describe("the explore step's joins", () => {
     });
   }
 
+  test("a Blinded creature is still a source, so its player joins, and joins ticked with fog on (review PV3-OPUS-7)", () => {
+    clearVisionCache();
+    const state = room();
+    state.scenes = { s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } }) };
+    state.tokens.a = token("a", { kind: "pc", ownerIds: ["p1"], x: 4, y: 4, actor: dark() });
+    const result = applyOp(state, { t: "actor.effect.add", target: { tokenId: "a" }, effect: { id: "b1", key: "blinded" } }, { memberId: "dm1", role: "dm" }, env(2));
+    assert.ok(result.ok);
+    const blinded = result.state;
+    assert.ok(visionReport(blinded, "s1", { walls: sceneWalls }).members.some((m) => m.tokenId === "a" && m.lends), "it lends sight");
+    const op = exploreOp(blinded);
+    assert.deepEqual(op?.join, [{ memberId: "p1", on: true }]);
+    assert.ok(applied(blinded, op!).holders.s1?.entries.some((e) => e.memberId === "p1" && e.on));
+  });
+
   test("a shared character's players join by id, and a companion after the creatures the DM marked", () => {
     clearVisionCache();
     const state = room();
@@ -340,6 +354,8 @@ function randomEvent(r: () => number, state: RoomState): { op: Op; by: "dm" | "s
   if (roll < 0.45) return { op: { t: "token.update", tokenId, patch: { ownerIds: players.filter(() => chance(r, 0.3)) } }, by: "dm" };
   if (roll < 0.5) return { op: { t: "token.update", tokenId, patch: { partyVision: chance(r, 0.5) } }, by: "dm" };
   if (roll < 0.55) return { op: { t: "actor.life", target: { tokenId }, life: pick(r, ["alive", "alive", "dead"] as const) }, by: "dm" };
+  // Blinded keeps a creature a source (review PV3-OPUS-7). A removal of an effect it lacks is refused, and the step still runs.
+  if (roll < 0.6) return { op: chance(r, 0.6) ? { t: "actor.effect.add", target: { tokenId }, effect: { id: `blind-${tokenId}`, key: "blinded" } } : { t: "actor.effect.remove", target: { tokenId }, effectId: `blind-${tokenId}` }, by: "dm" };
   if (roll < 0.65) return { op: { t: "vision.holders", sceneId: "s1", on: players.filter(() => chance(r, 0.5)).slice(0, LIMITS.sightHoldersPerScene) }, by: "dm" };
   if (roll < 0.7) return { op: { t: "view.blackout", blackout: chance(r, 0.3) }, by: "dm" };
   if (roll < 0.76) return { op: { t: "scene.update", sceneId: "s1", patch: chance(r, 0.5) ? { fogEnabled: chance(r, 0.8) } : { vision: { on: chance(r, 0.85), light: pick(r, ["bright", "dim", "dark"] as const) } } }, by: "dm" };

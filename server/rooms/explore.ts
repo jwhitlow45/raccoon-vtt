@@ -104,7 +104,10 @@ function joinsOf(state: RoomState, scene: Scene): { memberId: string; on: boolea
   const listed = new Set(entries.map((e) => e.memberId));
   const unlisted = (id: string) => !listed.has(id) && state.members[id]?.kind === "player";
   // The source list costs a pass over the scene's lights and walls, so it is read only when some unlisted player owns a
-  // creature there that could be a source.
+  // creature there that could be a source. A creature that passes this test and still lends nothing (past the cap, its
+  // eye on a wall, under the ground) has the list read every batch. It is not cached: it takes about 0.2 ms on the
+  // dark cap scene, and the moves that make most batches replace the tokens a cache would be keyed by (review
+  // PV3-OPUS-8).
   if (!Object.values(state.tokens).some((t) => t.sceneId === scene.id && maySee(state, t) && ownersOf(state, t).some(unlisted))) return [];
   let on = entries.filter((e) => e.on && state.members[e.memberId]?.kind === "player").length;
   const join: { memberId: string; on: boolean }[] = [];
