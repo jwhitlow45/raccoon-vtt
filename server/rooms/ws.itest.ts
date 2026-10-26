@@ -458,16 +458,23 @@ describe("websocket: rates", () => {
   test("frames over the frame budget are dropped before parsing, and sustained abuse closes with 4008", async () => {
     const dm = t.client();
     const { roomId } = await dm.createRoom("Frames");
-    const s = await t.connect(roomId, dm);
-    await s.snapshot("c1");
-    // 300 pings at once: 200 pass (the burst), the rest are dropped unparsed, not punished.
-    for (let i = 0; i < 300; i++) s.send({ t: "ping", k: i });
-    let pongs = 0;
-    while (await s.maybe("pong", () => true, 200)) pongs++;
-    // The burst plus whatever refilled while the frames were in flight.
-    assert.ok(pongs >= 200 && pongs < 240, `pongs: ${pongs}`);
-    assert.equal(s.closeCode, null);
-    s.close();
+    // The socket's clock stands still from before it opens, so however slowly a loaded runner carries the
+    // frames, the burst refills nothing and the pongs are counted by the budget alone (FLAKE-WS-PONG).
+    frozenAt = Date.now();
+    try {
+      const s = await t.connect(roomId, dm);
+      await s.snapshot("c1");
+      // 300 pings at once: the burst's 200 frames are the hello and 199 pings, and the rest are dropped unparsed, not punished.
+      for (let i = 0; i < 300; i++) s.send({ t: "ping", k: i });
+      const answered: number[] = [];
+      for (let i = 0; i < 199; i++) answered.push((await s.next("pong")).k);
+      assert.deepEqual(answered, Array.from({ length: 199 }, (_, k) => k));
+      assert.equal(await s.maybe("pong", () => true, 500), null, "a pong past the burst");
+      assert.equal(s.closeCode, null);
+      s.close();
+    } finally {
+      frozenAt = null;
+    }
   });
 });
 
