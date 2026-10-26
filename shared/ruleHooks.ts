@@ -2,7 +2,7 @@ import type { MemberId, RoomState, SceneId, SightTile, Token } from "./model.ts"
 import type { DoorRef } from "./protocol.ts";
 import { legBlocker, lineClear, squeezeFits, type WalkEnd, type Walker } from "./rules/movement.ts";
 import type { Point } from "./rules/geom.ts";
-import { NO_PARTY_SIGHT, partySight, sightFromTiles, type VisionWorld } from "./rules/vision.ts";
+import { holderSight, partySight, sightFromTiles, type VisionWorld } from "./rules/vision.ts";
 import { sceneWalls } from "./rules/walls.ts";
 
 /**
@@ -106,12 +106,6 @@ const VISION_WORLD: VisionWorld = { walls: sceneWalls };
 
 export const visionRules: VisionRules = {
   partySight: (state, sceneId) => partySight(state, sceneId, VISION_WORLD),
-  /*
-   * Until each holder's sight is worked out (docs/design-v1-per-player-vision.md
-   * section 12, lane PV2), a per-player scene's holders and its shared
-   * sight see nothing, so no player is shown what another player's
-   * creatures see. Nothing in the app makes a scene per player before then.
-   */
-  holderSight: () => NO_PARTY_SIGHT,
+  holderSight: (state, sceneId, memberId) => holderSight(state, sceneId, memberId, VISION_WORLD),
   sightFromTiles,
 };

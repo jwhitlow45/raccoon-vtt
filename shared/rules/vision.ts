@@ -6,6 +6,7 @@ import {
   type Actor,
   type BuildChunk,
   type LightLevel,
+  type MemberId,
   type RoomState,
   type Scene,
   type SceneId,
@@ -1062,20 +1063,35 @@ type LightEntry = {
 /** One row of the light level: runs from `starts[k]` to the next start at `levels[k]`. Null rows are the scene's base level throughout. */
 type LightRow = { starts: Int16Array; levels: Uint8Array } | null;
 
-type SceneEntry = {
-  walls: Held<WallSet>;
+/**
+ * Sight drawn as tiles, whose levels are a function of the scene's size
+ * and light level, the entries of the sources drawn and the light rows,
+ * and nothing else (renderTile). The union's computation is one, drawing
+ * every source, and so is each sight holder's raster
+ * (docs/design-v1-per-player-vision.md 6.1).
+ */
+type Drawn = {
   w: number;
   h: number;
   level: LightLevel;
+  sources: ReadonlyMap<string, SourceEntry>;
+  lightRows: LightRow[] | null;
+  packed: (Uint8Array | null)[];
+  tiles: Map<string, SightTile>;
+  sight: TileSight;
+};
+
+type SceneEntry = Drawn & {
+  walls: Held<WallSet>;
   fpc: number;
   /** Everything the result came from, to answer a repeat without work. */
   signature: string;
   sources: Map<string, SourceEntry>;
   lights: Map<string, LightEntry>;
-  lightRows: LightRow[] | null;
-  packed: (Uint8Array | null)[];
-  tiles: Map<string, SightTile>;
-  sight: TileSight;
+  /** Names this computation for the rasters drawn from it. */
+  serial: number;
+  /** The holders' sights over this computation, by source set (holderSight). */
+  views: Map<string, PartySight>;
   bytes: number;
 };
 
@@ -1498,7 +1514,7 @@ const scratch = { levels: new Uint8Array(TILE_AREA), runs: [new Runs(), new Runs
  * per sub-cell. Returns the packed tile and the level it holds throughout,
  * or -1 when it varies.
  */
-function renderTile(inp: Inputs, tx: number, ty: number, sources: readonly SourceEntry[], lightRows: readonly LightRow[] | null): { packed: Uint8Array; uniform: number } {
+function renderTile(inp: Pick<Inputs, "level" | "W" | "H">, tx: number, ty: number, sources: readonly SourceEntry[], lightRows: readonly LightRow[] | null): { packed: Uint8Array; uniform: number } {
   const { levels, runs } = scratch;
   levels.fill(0);
   for (const r of runs) r.length = 0;
@@ -1708,11 +1724,36 @@ function compute(inp: Inputs, prev: SceneEntry | null): SceneEntry {
   // The union over every tile that may have changed.
   const packed = base ? base.packed.slice() : new Array<Uint8Array | null>(across * down).fill(null);
   const tiles = base ? new Map(base.tiles) : new Map<string, SightTile>();
-  const lending = [...sources.values()];
+  redraw(inp, across, down, dirty, [...sources.values()], lightRows, packed, tiles);
+  const sight = new TileSight(tiles, packedReader(packed, across, down));
+  let bytes = 4096 + 2 * inp.signature.length + tilesBytes(packed);
+  for (const s of sources.values()) bytes += sourceBytes(s);
+  for (const l of lights.values()) bytes += l.runs.data.byteLength + l.runs.off.byteLength + 2 * ARRAY_BYTES + 200;
+  if (lightRows) bytes += lightRowsBytes(lightRows);
+  return { walls: new WeakRef(inp.walls), w, h, level: inp.level, fpc: inp.fpc, signature: inp.signature, sources, lights, lightRows, packed, tiles, sight, serial: ++serials, views: new Map(), bytes };
+}
+
+let serials = 0;
+
+/*
+ * Draws every dirty tile again into `packed` and `tiles`. A tile drawn the
+ * same as before keeps its object, so a diff by identity finds it
+ * unchanged.
+ */
+function redraw(
+  dims: Pick<Inputs, "level" | "W" | "H">,
+  across: number,
+  down: number,
+  dirty: Uint8Array,
+  sources: readonly SourceEntry[],
+  lightRows: readonly LightRow[] | null,
+  packed: (Uint8Array | null)[],
+  tiles: Map<string, SightTile>,
+): void {
   for (let ty = 0; ty < down; ty++) {
     for (let tx = 0; tx < across; tx++) {
       if (dirty[ty * across + tx] !== 1) continue;
-      const { packed: p, uniform } = renderTile(inp, tx, ty, lending, lightRows);
+      const { packed: p, uniform } = renderTile(dims, tx, ty, sources, lightRows);
       const key = `${tx},${ty}`;
       if (uniform === 0) {
         packed[ty * across + tx] = null;
@@ -1725,19 +1766,33 @@ function compute(inp: Inputs, prev: SceneEntry | null): SceneEntry {
       if (!before || !sameTile(before, tile)) tiles.set(key, tile);
     }
   }
-  const sight = new TileSight(tiles, (tx, ty) => (tx >= 0 && tx < across && ty >= 0 && ty < down ? (packed[ty * across + tx] ?? null) : null));
-  /*
-   * What the entry holds, for the cache's byte cap: each array's contents
-   * plus about 160 bytes for the array itself, which measured at the caps
-   * (about 1 MB for a dark scene) shows is not small next to them.
-   */
-  const ARRAY = 160;
-  let bytes = 4096 + 2 * inp.signature.length + 8 * packed.length;
-  for (const p of packed) if (p && !UNIFORM.includes(p)) bytes += SIGHT_TILE_BYTES + 1400 + ARRAY;
-  for (const s of sources.values()) bytes += (s.spans ? s.spans.xs.byteLength + s.spans.off.byteLength + 2 * ARRAY : 0) + (s.senses ? s.senses.byteLength + ARRAY : 0) + 200;
-  for (const l of lights.values()) bytes += l.runs.data.byteLength + l.runs.off.byteLength + 2 * ARRAY + 200;
-  if (lightRows) for (const r of lightRows) bytes += r ? r.starts.byteLength + r.levels.byteLength + 2 * ARRAY : 8;
-  return { walls: new WeakRef(inp.walls), w, h, level: inp.level, fpc: inp.fpc, signature: inp.signature, sources, lights, lightRows, packed, tiles, sight, bytes };
+}
+
+function packedReader(packed: readonly (Uint8Array | null)[], across: number, down: number): (tx: number, ty: number) => Uint8Array | null {
+  return (tx, ty) => (tx >= 0 && tx < across && ty >= 0 && ty < down ? (packed[ty * across + tx] ?? null) : null);
+}
+
+/*
+ * What the cache holds, for its byte cap: each array's contents plus about
+ * 160 bytes for the array itself, which measured at the caps (about 1 MB
+ * for a dark scene) shows is not small next to them.
+ */
+const ARRAY_BYTES = 160;
+
+function tilesBytes(packed: readonly (Uint8Array | null)[]): number {
+  let bytes = 8 * packed.length;
+  for (const p of packed) if (p && !UNIFORM.includes(p)) bytes += SIGHT_TILE_BYTES + 1400 + ARRAY_BYTES;
+  return bytes;
+}
+
+function sourceBytes(s: SourceEntry): number {
+  return (s.spans ? s.spans.xs.byteLength + s.spans.off.byteLength + 2 * ARRAY_BYTES : 0) + (s.senses ? s.senses.byteLength + ARRAY_BYTES : 0) + 200;
+}
+
+function lightRowsBytes(rows: readonly LightRow[]): number {
+  let bytes = 0;
+  for (const r of rows) bytes += r ? r.starts.byteLength + r.levels.byteLength + 2 * ARRAY_BYTES : 8;
+  return bytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -1747,30 +1802,82 @@ function compute(inp: Inputs, prev: SceneEntry | null): SceneEntry {
  * Each scene keeps at most two computations, the committed state's and the
  * staged one's (section 2.1), and every computation starts from the newest:
  * the reuse rule above makes any starting point give the cold answer, so
- * which one it is only changes the work. Scenes are dropped least recently
- * used past 64 MB in all (section 4.3.6). Scene IDs are chosen by clients,
+ * which one it is only changes the work. Sight holders' rasters are kept
+ * beside them (below). Scenes are dropped least recently used past 64 MB in
+ * all (section 4.3.6), rasters included. Scene IDs are chosen by clients,
  * so two rooms may share one, which costs work and never a wrong answer.
  * The design also keeps each room to its 4 most recent vision scenes. The
  * state carries no room ID, so the byte cap alone bounds the cache.
  */
 const PER_SCENE = 2;
 export const VISION_CACHE_BYTES = 64 * 1024 * 1024;
-const cache = new Map<string, SceneEntry[]>();
+
+type SceneCache = {
+  entries: SceneEntry[];
+  /** Sight holders' rasters by source set, at most PER_SCENE a set, the set drawn least recently first. */
+  rasters: Map<string, Raster[]>;
+  bytes: number;
+};
+
+const cache = new Map<string, SceneCache>();
 let cacheBytes = 0;
-const results = new WeakMap<RoomState, Map<string, PartySight>>();
+
+/** A finished state's answers on one scene: the union's computation, and each viewer's sight over it. */
+type SceneResult = { entry: SceneEntry; views: Map<MemberId | null, PartySight> };
+const results = new WeakMap<RoomState, Map<string, SceneResult>>();
 
 function remember(sceneId: string, entry: SceneEntry, others: readonly SceneEntry[]): void {
-  const old = cache.get(sceneId) ?? [];
-  for (const e of old) cacheBytes -= e.bytes;
-  cache.delete(sceneId);
-  const kept = [entry, ...others.filter((e) => e !== entry)].slice(0, PER_SCENE);
-  for (const e of kept) cacheBytes += e.bytes;
-  cache.set(sceneId, kept);
+  const was = cache.get(sceneId);
+  const entries = [entry, ...others.filter((e) => e !== entry)].slice(0, PER_SCENE);
+  keep(sceneId, { entries, rasters: was?.rasters ?? new Map(), bytes: 0 }, was);
+}
+
+/** Puts a scene's record back as the most recently used, and drops the least recently used scenes past the cap. */
+function keep(sceneId: string, next: SceneCache, was: SceneCache | undefined): void {
+  if (was) {
+    cacheBytes -= was.bytes;
+    cache.delete(sceneId);
+  }
+  next.bytes = sceneBytes(next).bytes;
+  cacheBytes += next.bytes;
+  cache.set(sceneId, next);
   while (cacheBytes > VISION_CACHE_BYTES && cache.size > 1) {
     const oldest = cache.keys().next().value!;
-    for (const e of cache.get(oldest)!) cacheBytes -= e.bytes;
+    cacheBytes -= cache.get(oldest)!.bytes;
     cache.delete(oldest);
   }
+}
+
+/*
+ * A scene's bytes: its computations, and its rasters' own tiles. A raster
+ * also holds the source entries and light rows it was drawn from, which
+ * the scene's computations usually hold too. Those no computation holds
+ * any more are counted once, by the first raster that holds them.
+ */
+function sceneBytes(rec: SceneCache): { bytes: number; pinned: number } {
+  let bytes = 0;
+  let pinned = 0;
+  const counted = new Set<object>();
+  for (const e of rec.entries) {
+    bytes += e.bytes;
+    for (const s of e.sources.values()) counted.add(s);
+    if (e.lightRows) counted.add(e.lightRows);
+  }
+  for (const list of rec.rasters.values()) {
+    for (const r of list) {
+      bytes += r.bytes;
+      for (const s of r.sources.values()) {
+        if (counted.has(s)) continue;
+        counted.add(s);
+        pinned += sourceBytes(s);
+      }
+      if (r.lightRows && !counted.has(r.lightRows)) {
+        counted.add(r.lightRows);
+        pinned += lightRowsBytes(r.lightRows);
+      }
+    }
+  }
+  return { bytes: bytes + pinned, pinned };
 }
 
 /** Drops every cached computation. Tests use it to compare against cold. */
@@ -1780,28 +1887,57 @@ export function clearVisionCache(): void {
 }
 
 /**
- * The party's sight on a scene whose vision is on (section 4.3), on the
- * server: from the scene's last computation where its inputs allow,
- * otherwise cold, and always equal to the cold answer. A scene without
- * vision, or one the state lacks, sees nothing.
+ * What the cache holds now: the bytes it counts, the same counted again
+ * from nothing, of which `pinned` are source entries and light rows only
+ * rasters hold, its scenes and its rasters. For tests and benchmarks.
  */
-export function partySight(state: RoomState, sceneId: SceneId, world: VisionWorld): PartySight {
+export function visionCacheReport(): { bytes: number; recount: number; pinned: number; scenes: number; rasters: number } {
+  let recount = 0;
+  let pinned = 0;
+  let rasters = 0;
+  for (const rec of cache.values()) {
+    const counted = sceneBytes(rec);
+    recount += counted.bytes;
+    pinned += counted.pinned;
+    for (const list of rec.rasters.values()) rasters += list.length;
+  }
+  return { bytes: cacheBytes, recount, pinned, scenes: cache.size, rasters };
+}
+
+/*
+ * The union's computation for a scene whose vision is on: from the scene's
+ * last computation where its inputs allow, otherwise cold, and always equal
+ * to the cold answer. A finished state keeps it, and its viewers' sights.
+ */
+function resultOf(state: RoomState, sceneId: SceneId, world: VisionWorld): SceneResult | null {
   const scene = state.scenes[sceneId];
-  if (!scene || scene.vision?.on !== true) return NO_PARTY_SIGHT;
+  if (!scene || scene.vision?.on !== true) return null;
   const finished = !writes(state);
   let byScene = finished ? results.get(state) : undefined;
   const hit = byScene?.get(sceneId);
   if (hit) return hit;
   const inp = gather(state, scene, world);
-  const held = cache.get(sceneId) ?? [];
+  const held = cache.get(sceneId)?.entries ?? [];
   let entry = held.find((e) => e.walls.deref() === inp.walls && e.signature === inp.signature);
   if (!entry) entry = compute(inp, held[0] ?? null);
   remember(sceneId, entry, held);
+  const result: SceneResult = { entry, views: new Map() };
   if (finished) {
     if (!byScene) results.set(state, (byScene = new Map()));
-    byScene.set(sceneId, entry.sight);
+    byScene.set(sceneId, result);
   }
-  return entry.sight;
+  return result;
+}
+
+/**
+ * The party's sight on a scene whose vision is on (section 4.3), on the
+ * server: from the scene's last computation where its inputs allow,
+ * otherwise cold, and always equal to the cold answer. On a per-player
+ * scene this is the union of every source, the DM's. A scene without
+ * vision, or one the state lacks, sees nothing.
+ */
+export function partySight(state: RoomState, sceneId: SceneId, world: VisionWorld): PartySight {
+  return resultOf(state, sceneId, world)?.entry.sight ?? NO_PARTY_SIGHT;
 }
 
 /*
@@ -1819,6 +1955,308 @@ export function coldPartySight(state: RoomState, sceneId: SceneId, world: Vision
   const scene = state.scenes[sceneId];
   if (!scene || scene.vision?.on !== true) return NO_PARTY_SIGHT;
   return compute(gather(state, scene, world), null).sight;
+}
+
+// ---------------------------------------------------------------------------
+// Sight holders (docs/design-v1-per-player-vision.md 6.1)
+
+/**
+ * What one viewer sees on a per-player scene whose vision is on: with a
+ * member, that sight holder's sight, the sources marked to share sight with
+ * the party and the sources the member owns (project.ts `ownsToken`); with
+ * null, the shared sight alone, which every other viewer has. Both are
+ * among the union's sources, chosen by its cap and order, so each answer
+ * lies within `partySight`.
+ *
+ * Viewers whose sources that see are the same share one answer, and one
+ * holding every source that sees gets the union's own. Tiles are drawn
+ * only when first read, as a raster from the union's polygons and light
+ * rows. Until then `seesToken` is the point query, so a sweep's moment,
+ * which asks nothing else, draws no raster. A scene whose vision is off,
+ * or one the state lacks, sees nothing.
+ */
+export function holderSight(state: RoomState, sceneId: SceneId, memberId: MemberId | null, world: VisionWorld): PartySight {
+  const result = resultOf(state, sceneId, world);
+  if (!result) return NO_PARTY_SIGHT;
+  let view = result.views.get(memberId);
+  if (!view) result.views.set(memberId, (view = viewOf(state, sceneId, result.entry, memberId)));
+  return view;
+}
+
+/** project.ts `ownsToken`, which vision.ts may not import: the token's owners, or its character's. */
+function ownedBy(state: Pick<RoomState, "characters">, token: Token, memberId: MemberId): boolean {
+  if (token.ownerIds?.includes(memberId)) return true;
+  const a = token.actor;
+  return a !== undefined && "ref" in a && state.characters[a.ref]?.ownerIds?.includes(memberId) === true;
+}
+
+/** Whether a source of the union lends to this viewer: one marked to share sight lends to every player (decision 2), any other to its owners. */
+function lendsTo(state: RoomState, token: Token | undefined, memberId: MemberId | null): boolean {
+  if (!token) return false;
+  return token.partyVision === true || (memberId !== null && ownedBy(state, token, memberId));
+}
+
+function viewOf(state: RoomState, sceneId: SceneId, entry: SceneEntry, memberId: MemberId | null): PartySight {
+  const ids: string[] = [];
+  let seeing = 0;
+  for (const [id, s] of entry.sources) {
+    // A source whose sweep sees nothing adds nothing to any raster, so it divides no viewers.
+    if (!s.spans?.box) continue;
+    seeing++;
+    if (lendsTo(state, state.tokens[id], memberId)) ids.push(id);
+  }
+  if (ids.length === 0) return NO_PARTY_SIGHT;
+  if (ids.length === seeing) return entry.sight;
+  const key = JSON.stringify(ids);
+  let view = entry.views.get(key);
+  if (!view) entry.views.set(key, (view = new HolderSight(sceneId, entry, key, ids.map((id) => entry.sources.get(id)!))));
+  return view;
+}
+
+/** A holder's raster: the levels of its own sources over one computation of the union (`serial`). */
+type Raster = Drawn & { serial: number; key: string; bytes: number };
+
+/** One source set's sight over one computation of the union. */
+class HolderSight implements PartySight {
+  readonly #sceneId: string;
+  readonly #entry: SceneEntry;
+  readonly #key: string;
+  readonly #sources: readonly SourceEntry[];
+  #raster: Raster | null = null;
+
+  constructor(sceneId: string, entry: SceneEntry, key: string, sources: readonly SourceEntry[]) {
+    this.#sceneId = sceneId;
+    this.#entry = entry;
+    this.#key = key;
+    this.#sources = sources;
+  }
+
+  get tiles(): ReadonlyMap<string, SightTile> {
+    this.#raster ??= rasterFor(this.#sceneId, this.#entry, this.#key, this.#sources);
+    return this.#raster.tiles;
+  }
+
+  seesToken(probe: SightProbe): boolean {
+    this.#raster ??= heldRaster(this.#sceneId, this.#entry.serial, this.#key);
+    return this.#raster ? this.#raster.sight.seesToken(probe) : pointSees(this.#entry, this.#sources, probe);
+  }
+}
+
+/*
+ * The point query: whether any sub-cell center inside the probe's
+ * footprint has a level above 0 from any of the sources, each sub-cell's
+ * level worked out from the source's polygon, senses and the light rows by
+ * the table the raster reads (LEVEL_TABLE). It reads exactly the sub-cells
+ * TileSight.seesToken reads, so the two answer alike.
+ */
+function pointSees(entry: Drawn, sources: readonly SourceEntry[], probe: SightProbe): boolean {
+  const W = entry.w * SUB;
+  const H = entry.h * SUB;
+  const r = sightRect(probe);
+  const box: SubBox = {
+    c0: Math.max(0, firstCenterFrom(r.x0)),
+    r0: Math.max(0, firstCenterFrom(r.y0)),
+    c1: Math.min(W, firstCenterFrom(r.x1)),
+    r1: Math.min(H, firstCenterFrom(r.y1)),
+  };
+  if (box.c0 >= box.c1 || box.r0 >= box.r1) return false;
+  const near = sources.filter((s) => boxesMeet(s.spans?.box ?? null, box));
+  if (near.length === 0) return false;
+  const base = baseLevel(entry.level);
+  for (let sy = box.r0; sy < box.r1; sy++) {
+    const lrow = entry.lightRows ? (entry.lightRows[sy] ?? null) : null;
+    for (let sx = box.c0; sx < box.c1; sx++) {
+      const light = lrow ? lightAt(lrow, sx) : base;
+      for (const s of near) if (sourceLevel(s, sx, sy, light) !== NOT_SEEN) return true;
+    }
+  }
+  return false;
+}
+
+/** The light level a row's runs give column x. */
+function lightAt(row: NonNullable<LightRow>, x: number): number {
+  let lo = 0;
+  let hi = row.starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (row.starts[mid]! <= x) lo = mid;
+    else hi = mid - 1;
+  }
+  return row.levels[lo]!;
+}
+
+/** One source's level at a sub-cell, as renderTile fills it: 0 outside its polygon, else section 4.3.2's table. */
+function sourceLevel(src: SourceEntry, sx: number, sy: number, light: number): number {
+  const spans = src.spans!;
+  const k = sy - spans.r0;
+  if (k < 0 || k >= spans.off.length - 1) return NOT_SEEN;
+  for (let p = spans.off[k]!; p < spans.off[k + 1]!; p += 2) {
+    if (sx < spans.xs[p]! || sx >= spans.xs[p + 1]!) continue;
+    let bits = light | (src.blind ? 4 : 0);
+    const sv = src.senses;
+    if (sv) {
+      if (sx >= sv[6 * k]! && sx < sv[6 * k + 1]!) bits |= 8;
+      if (sx >= sv[6 * k + 2]! && sx < sv[6 * k + 3]!) bits |= 16;
+      if (sx >= sv[6 * k + 4]! && sx < sv[6 * k + 5]!) bits |= 32;
+    }
+    return LEVEL_TABLE[bits]!;
+  }
+  return NOT_SEEN;
+}
+
+function heldRaster(sceneId: string, serial: number, key: string): Raster | null {
+  return cache.get(sceneId)?.rasters.get(key)?.find((r) => r.serial === serial) ?? null;
+}
+
+/** At most this many source sets keep rasters on one scene: every holder and the shared sight, twice over for sets that just changed. */
+const RASTER_SETS_PER_SCENE = 2 * (LIMITS.sightHoldersPerScene + 1);
+
+function rasterFor(sceneId: string, entry: SceneEntry, key: string, sources: readonly SourceEntry[]): Raster {
+  const held = heldRaster(sceneId, entry.serial, key);
+  if (held) return held;
+  const mine = new Map(sources.map((s) => [s.id, s] as const));
+  const candidates: Drawn[] = [entry];
+  const rec = cache.get(sceneId);
+  if (rec) {
+    for (const e of rec.entries) if (e !== entry) candidates.push(e);
+    for (const list of rec.rasters.values()) candidates.push(...list);
+  }
+  const raster = drawRaster(entry, key, mine, closestBase(candidates, entry, mine));
+  keepRaster(sceneId, raster);
+  return raster;
+}
+
+function keepRaster(sceneId: string, raster: Raster): void {
+  const was = cache.get(sceneId);
+  const rasters = was?.rasters ?? new Map<string, Raster[]>();
+  const list = rasters.get(raster.key) ?? [];
+  rasters.delete(raster.key);
+  rasters.set(raster.key, [raster, ...list].slice(0, PER_SCENE));
+  while (rasters.size > RASTER_SETS_PER_SCENE) rasters.delete(rasters.keys().next().value!);
+  keep(sceneId, { entries: was?.entries ?? [], rasters, bytes: 0 }, was);
+}
+
+/*
+ * What a raster starts from: of the union's computations and the rasters
+ * the scene holds, the one whose source entries and light rows differ
+ * least from those this raster reads. The union is one, so a holder who
+ * lacks one source starts from the union with that source's tiles redrawn.
+ * Any starting point gives the same bits (drawRaster), so this changes
+ * only the work.
+ */
+function closestBase(candidates: readonly Drawn[], entry: SceneEntry, mine: ReadonlyMap<string, SourceEntry>): Drawn | null {
+  let best: Drawn | null = null;
+  let bestCost = Infinity;
+  for (const c of candidates) {
+    if (c.w !== entry.w || c.h !== entry.h || c.level !== entry.level) continue;
+    let cost = c.lightRows === entry.lightRows ? 0 : 1;
+    for (const [id, s] of c.sources) if (s.spans?.box && mine.get(id) !== s) cost++;
+    for (const [id, s] of mine) if (c.sources.get(id) !== s) cost++;
+    if (cost < bestCost) {
+      best = c;
+      bestCost = cost;
+    }
+  }
+  return best;
+}
+
+/*
+ * A raster over the union's computation `entry`, for the sources `mine`,
+ * from `base`, a raster of the same scene size and light level, or cold.
+ * A tile is drawn again wherever it can differ from the base's: within the
+ * box of every source entry one holds and the other does not (an entry
+ * replaced when its polygon, senses or Blinded changed, or a source
+ * gained, lost or of another set), and on every row where the light rows
+ * differ, within the box of a source this raster draws. Elsewhere every
+ * source both draw is the same entry and the light is the same, so the
+ * base's tile is this raster's, and the result equals a cold drawing bit
+ * for bit.
+ */
+function drawRaster(entry: SceneEntry, key: string, mine: ReadonlyMap<string, SourceEntry>, base: Drawn | null): Raster {
+  const { w, h, level } = entry;
+  const W = w * SUB;
+  const H = h * SUB;
+  const across = Math.max(1, Math.ceil(w / CHUNK_CELLS));
+  const down = Math.max(1, Math.ceil(h / CHUNK_CELLS));
+  const sources = [...mine.values()];
+  const dirty = new Uint8Array(across * down);
+  if (!base) dirty.fill(1);
+  else {
+    for (const [id, old] of base.sources) if (mine.get(id) !== old) markTiles(dirty, across, old.spans?.box ?? null);
+    for (const [id, now] of mine) if (base.sources.get(id) !== now) markTiles(dirty, across, now.spans?.box ?? null);
+    if (base.lightRows && entry.lightRows && base.lightRows !== entry.lightRows) {
+      for (const row of lightChanges(base.lightRows, entry.lightRows, W, baseLevel(level))) {
+        if (sources.some((s) => boxesMeet(s.spans?.box ?? null, row))) markTiles(dirty, across, row);
+      }
+    }
+  }
+  const bytesOf = (packed: (Uint8Array | null)[]) => 4096 + 2 * key.length + 64 * mine.size + tilesBytes(packed);
+  if (base && !dirty.includes(1)) {
+    return { serial: entry.serial, key, w, h, level, sources: mine, lightRows: entry.lightRows, packed: base.packed, tiles: base.tiles, sight: base.sight, bytes: bytesOf(base.packed) };
+  }
+  const packed = base ? base.packed.slice() : new Array<Uint8Array | null>(across * down).fill(null);
+  const tiles = base ? new Map(base.tiles) : new Map<string, SightTile>();
+  redraw({ level, W, H }, across, down, dirty, sources, entry.lightRows, packed, tiles);
+  return { serial: entry.serial, key, w, h, level, sources: mine, lightRows: entry.lightRows, packed, tiles, sight: new TileSight(tiles, packedReader(packed, across, down)), bytes: bytesOf(packed) };
+}
+
+const lightDiffs = new WeakMap<LightRow[], WeakMap<LightRow[], SubBox[]>>();
+
+/*
+ * Where two sets of light rows differ: per row, one box from the first
+ * column to the last whose level differs. Every raster drawn from the same
+ * pair asks the same, so the answer is kept by the pair.
+ */
+function lightChanges(a: LightRow[], b: LightRow[], W: number, base: number): SubBox[] {
+  let byA = lightDiffs.get(a);
+  if (!byA) lightDiffs.set(a, (byA = new WeakMap()));
+  const hit = byA.get(b);
+  if (hit) return hit;
+  const out: SubBox[] = [];
+  const n = Math.max(a.length, b.length);
+  for (let j = 0; j < n; j++) {
+    const ra = a[j] ?? null;
+    const rb = b[j] ?? null;
+    if (ra === rb) continue;
+    const span = rowChange(ra, rb, W, base);
+    if (span) out.push({ c0: span[0], c1: span[1], r0: j, r1: j + 1 });
+  }
+  byA.set(b, out);
+  return out;
+}
+
+/** The columns `[first, last)` from the first to the last where two light rows differ, or null where they agree. A null row is `base` throughout. */
+function rowChange(a: LightRow, b: LightRow, W: number, base: number): [number, number] | null {
+  let first = -1;
+  let last = -1;
+  let ia = 0;
+  let ib = 0;
+  let x = 0;
+  while (x < W) {
+    const ea = a && ia + 1 < a.starts.length ? a.starts[ia + 1]! : W;
+    const eb = b && ib + 1 < b.starts.length ? b.starts[ib + 1]! : W;
+    const end = Math.min(ea, eb);
+    if ((a ? a.levels[ia]! : base) !== (b ? b.levels[ib]! : base)) {
+      if (first < 0) first = x;
+      last = end;
+    }
+    x = end;
+    if (end === ea) ia++;
+    if (end === eb) ib++;
+  }
+  return first < 0 ? null : [first, last];
+}
+
+/**
+ * A viewer's sight computed from nothing (holderSight), ignoring and
+ * leaving the cache: the union's inputs with only the sources that lend to
+ * the viewer. For tests and benchmarks.
+ */
+export function coldHolderSight(state: RoomState, sceneId: SceneId, memberId: MemberId | null, world: VisionWorld): PartySight {
+  const scene = state.scenes[sceneId];
+  if (!scene || scene.vision?.on !== true) return NO_PARTY_SIGHT;
+  const inp = gather(state, scene, world);
+  return compute({ ...inp, sources: inp.sources.filter((p) => lendsTo(state, state.tokens[p.id], memberId)) }, null).sight;
 }
 
 /**
