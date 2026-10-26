@@ -70,10 +70,14 @@ export function sizeChange(token: PlacedToken, next: NextSize): SizeChange {
  * least to lie inside the scene on each axis the scene is big enough for.
  * Each axis is decided on its own, which is the same as the nearest middle
  * by straight line.
+ *
+ * On hexes it is the footprint keeping the reference hex (4.2), or where
+ * that would leave the scene, the one moved the least to lie wholly inside
+ * it, as squares are (decision D-261026-17).
  */
 export function resizeBase(token: PlacedToken, next: NextSize, scene: Pick<Scene, "bounds" | "gridShape">): Point {
   const g = sceneGrid(scene);
-  if (g.shape === "hex") return placedOnHex(g, sized(next, 0, 0), tokenRefHex(g, token));
+  if (g.shape === "hex") return placedOnHex(g, sized(next, 0, 0), hexBaseRef(g, token, next, scene.bounds));
   const c = storedCenter(token);
   const { w, h } = footprintSize(sized(next, 0, 0));
   const step = stepFor(w, h);
@@ -179,6 +183,37 @@ export function resizeRefusal(state: BuildState, token: MovingToken, next: NextS
   if (g.shape === "hex") return hexSpotAllowed(g, next, next, hexCandidates(g, token, next, scene, change)) ? null : RESIZE_KEEPS_PLACE;
   if (!allowedSpot(token, to, scene, change)) return RESIZE_KEEPS_PLACE;
   return scene.blockMovement === true ? wallRefusal(state, token, to, change) : null;
+}
+
+/** How far a hex base looks for a footprint inside the scene: past a Gargantuan's width, the most a growth at the edge must move. */
+const HEX_BASE_REACH = 4;
+
+/*
+ * The reference hex of the base spot on hexes: the creature's own when the
+ * new size's footprint there lies inside the scene, else the one within
+ * HEX_BASE_REACH steps whose footprint does and whose anchor is nearest the
+ * kept one's, ties in lattice order. A scene too small for the footprint
+ * keeps the creature's own.
+ */
+function hexBaseRef(g: HexGrid, token: PlacedToken, next: NextSize, bounds: Scene["bounds"]): Hex {
+  const size = sizeCategory(sized(next, 0, 0));
+  const ref = tokenRefHex(g, token);
+  const inside = (r: Hex) => footprintHexes(g, size, anchorOfHex(g, size, r)).every((h) => hexInScene(g, bounds, h));
+  if (inside(ref)) return ref;
+  const kept = anchorOfHex(g, size, ref);
+  const away = (r: Hex) => {
+    const a = anchorOfHex(g, size, r);
+    return (a.x - kept.x) ** 2 + (a.y - kept.y) ** 2;
+  };
+  let best: Hex | null = null;
+  for (let row = ref.row - HEX_BASE_REACH; row <= ref.row + HEX_BASE_REACH; row++) {
+    for (let col = ref.col - HEX_BASE_REACH; col <= ref.col + HEX_BASE_REACH; col++) {
+      const r = { col, row };
+      if (hexDistance(g, r, ref) > HEX_BASE_REACH || !inside(r)) continue;
+      if (best === null || away(r) - away(best) < -1e-9 || (Math.abs(away(r) - away(best)) <= 1e-9 && latticeOrder(g, r, best) < 0)) best = r;
+    }
+  }
+  return best ?? ref;
 }
 
 /*

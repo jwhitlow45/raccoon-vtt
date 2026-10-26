@@ -41,19 +41,40 @@ for (const shape of ["hexRows", "hexColumns"] as const) {
       }
     });
 
-    test("an owner's growth that would leave the scene takes another footprint covering the old hex, the DM's keeps the base", () => {
+    test("a growth that would leave the scene takes another footprint covering the old hex, the DM's moved the least to lie inside, as on squares (D-261026-17)", () => {
       // The last row: a Large's two lower hexes would lie below the scene.
       const span = sceneHexSpan(g, { w: 30, h: 20 });
       const hex: Hex = shape === "hexRows" ? { col: 10, row: span.rows - 1 } : { col: span.cols - 1, row: 10 };
       const t = on(g, "medium", hex);
-      const spot = resizeSpot(world(shape, t), t, { size: "large" }, { checked: true });
-      assert.ok(!("refused" in spot) && spot.shifted);
-      const grown = { ...t, size: "large" as const, x: spot.x, y: spot.y };
-      const hexes = occupiedHexes(g, grown);
-      assert.ok(hexes.some((h) => sameHex(h, hex)), "it covers the old hex");
-      assert.ok(hexes.every((h) => hexInScene(g, { w: 30, h: 20 }, h)), "inside the scene");
-      const dm = resizeSpot(world(shape, t), t, { size: "large" }, { checked: false });
-      assert.ok(!("refused" in dm) && sameHex(tokenRefHex(g, { ...t, size: "large", x: dm.x, y: dm.y }), hex));
+      const kept = hexAnchor(g, { size: "large", ...placedOnHex(g, { size: "large", x: 0, y: 0 }, hex) });
+      for (const checked of [true, false]) {
+        const spot = resizeSpot(world(shape, t), t, { size: "large" }, { checked });
+        assert.ok(!("refused" in spot));
+        const grown = { ...t, size: "large" as const, x: spot.x, y: spot.y };
+        const hexes = occupiedHexes(g, grown);
+        assert.ok(hexes.some((h) => sameHex(h, hex)), "it covers the old hex");
+        assert.ok(hexes.every((h) => hexInScene(g, { w: 30, h: 20 }, h)), "inside the scene");
+        // One step up, the least a footprint can move: its anchor one cell from the kept one's, both on the 1/64 lattice.
+        const a = hexAnchor(g, grown);
+        assert.ok(Math.abs(Math.hypot(a.x - kept.x, a.y - kept.y) - 1) < 1 / 32, `${checked ? "owner" : "DM"}: moved ${Math.hypot(a.x - kept.x, a.y - kept.y)}`);
+      }
+    });
+
+    test("a DM's Gargantuan grown in a scene's corner lies wholly inside it, moved the least of every footprint that does", () => {
+      const bounds = { w: 30, h: 20 };
+      const t = on(g, "medium", { col: 0, row: 0 });
+      const spot = resizeSpot(world(shape, t), t, { size: "gargantuan" }, { checked: false });
+      assert.ok(!("refused" in spot));
+      const grown = { size: "gargantuan" as const, x: spot.x, y: spot.y };
+      assert.ok(occupiedHexes(g, grown).every((h) => hexInScene(g, bounds, h)));
+      const kept = hexAnchor(g, { size: "gargantuan", ...placedOnHex(g, { size: "gargantuan", x: 0, y: 0 }, { col: 0, row: 0 }) });
+      const moved = (p: { x: number; y: number }) => Math.hypot(hexAnchor(g, { size: "gargantuan", ...p }).x - kept.x, hexAnchor(g, { size: "gargantuan", ...p }).y - kept.y);
+      for (let row = -2; row <= 6; row++) {
+        for (let col = -2; col <= 6; col++) {
+          const at = placedOnHex(g, { size: "gargantuan", x: 0, y: 0 }, { col, row });
+          if (occupiedHexes(g, { size: "gargantuan", ...at }).every((h) => hexInScene(g, bounds, h))) assert.ok(moved(spot) <= moved(at) + 1e-9, `${col},${row} moves less`);
+        }
+      }
     });
 
     test("candidates that tie fall in lattice order: the smaller row, then column, on hex rows, mirrored on hex columns (review HX2-OPUS-06)", () => {
@@ -92,7 +113,7 @@ for (const shape of ["hexRows", "hexColumns"] as const) {
       const last: Hex = shape === "hexRows" ? { col: 12, row: span.rows - 1 } : { col: span.cols - 1, row: 9 };
       const t = on(g, "medium", last);
       const spot = resizeSpot(world(shape, t), t, { size: "gargantuan" }, { checked: true });
-      assert.ok(!("refused" in spot) && spot.shifted);
+      assert.ok(!("refused" in spot));
       // Every Gargantuan covering the Large's hexes inside the scene, found from nothing.
       const old = occupiedHexes(g, t).map(hexKey);
       const from = hexAnchor(g, t);
