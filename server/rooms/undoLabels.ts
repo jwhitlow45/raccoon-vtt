@@ -1,8 +1,10 @@
 import { chunkKey, doorChunk, keys } from "#shared/keys.ts";
 import type { Actor, LogEvent, RoomState, Token, Viewer } from "#shared/model.ts";
-import { projectEntity, type ProjectedToken } from "#shared/project.ts";
+import { gridOfToken, projectEntity, type ProjectedToken } from "#shared/project.ts";
 import { isResizeOp, type ActorTarget, type ClientOp, type OpOf, type TokenPatch } from "#shared/protocol.ts";
 import { testText } from "#shared/rules/skills.ts";
+import { sizeCategory } from "#shared/rules/footprint.ts";
+import { cellWord, SQUARES, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
 /**
  * What an undo step did, as a short phrase for the toast that says what an
@@ -74,7 +76,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return `adding ${tokenName(op.token)}`;
     case "token.update": {
       if (op.patch.name !== undefined) return `renaming ${token(op.tokenId)} to ${quoted(op.patch.name, "nothing")}`;
-      if (isResizeOp(op)) return `resizing ${token(op.tokenId)} to ${sizeWords(op.patch, before.tokens[op.tokenId])}`;
+      if (isResizeOp(op)) {
+        const t = before.tokens[op.tokenId];
+        return `resizing ${token(op.tokenId)} to ${sizeWords(op.patch, t, t ? gridOfToken(before, t) : SQUARES)}`;
+      }
       const only = Object.keys(op.patch).length === 1;
       if (only && op.patch.light !== undefined) {
         const lit = (l: { bright: number; dim: number } | null | undefined) => !!l && (l.bright > 0 || l.dim > 0);
@@ -236,8 +241,10 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
       return op.up === null ? "clearing stairs" : "marking stairs";
     case "build.rough": {
       const count = op.cells?.length ?? 0;
-      const squares = count === 1 ? "1 square" : `${count} squares`;
-      return op.on ? `marking ${squares} as difficult ground on ${scene(op.sceneId)}` : `clearing difficult ground from ${squares} on ${scene(op.sceneId)}`;
+      // The scene's own cell word: "3 hexes" on a hex scene (docs/design-v1-hex-grids.md section 8).
+      const g = before.scenes[op.sceneId] ? sceneGrid(before.scenes[op.sceneId]!) : SQUARES;
+      const cells = count === 1 ? `1 ${cellWord(g)}` : `${count} ${cellWord(g, true)}`;
+      return op.on ? `marking ${cells} as difficult ground on ${scene(op.sceneId)}` : `clearing difficult ground from ${cells} on ${scene(op.sceneId)}`;
     }
     case "door.set":
       return doorPhrase(op, before);
@@ -665,12 +672,19 @@ function doorPhrase(op: OpOf<"door.set">, before: RoomState): string {
   return was === "locked" ? "unlocking a door" : "closing a door";
 }
 
-/** A resize's new size as its step names it: "Large", or a Custom size's squares, its width and height from the patch or the token. */
-function sizeWords(patch: TokenPatch, token: Token | undefined): string {
+/**
+ * A resize's new size as its step names it: "Large", or a Custom size's
+ * squares, its width and height from the patch or the token. On a hex
+ * scene a Custom size reads as its category (docs/design-v1-hex-grids.md
+ * 4.2), so its step names that.
+ */
+function sizeWords(patch: TokenPatch, token: Token | undefined, grid: Grid): string {
+  const named = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const size = patch.size ?? token?.size ?? "medium";
-  if (size !== "custom") return size.charAt(0).toUpperCase() + size.slice(1);
+  if (size !== "custom") return named(size);
   const w = patch.w ?? token?.w ?? 1;
   const h = patch.h ?? token?.h ?? 1;
+  if (grid.shape === "hex") return named(sizeCategory({ size, w, h }));
   return `${w} by ${h} squares`;
 }
 
