@@ -672,6 +672,13 @@ For maintainers. The image is built and pushed to Docker Hub only by GitHub
 Actions, in [`.github/workflows/image.yml`](.github/workflows/image.yml),
 never from a laptop.
 
+Once, before the first tag, create the repository `raccoon-vtt` on Docker
+Hub under the namespace the image uses, and make it public. A repository
+that a push creates takes the account's default visibility, which can be
+private, and hosts could not pull it. The workflow also counts a version
+as absent only when Docker Hub answers "not found", which needs the
+repository to exist.
+
 1. On main, bump `version` in `package.json` to the new `X.Y.Z` and run
    `pnpm selfhost`, which writes the new `X.Y` into `selfhost/`. Commit
    both. The unit tests fail while `selfhost/` is out of date.
@@ -688,14 +695,23 @@ the smoke test (`selfhost/smoke-test.sh`): the image comes up healthy with
 byte for byte. It then pushes amd64 and arm64 from the same build, checks
 that the amd64 image pushed is the one it tested, and only then tags it.
 
-Tags only move forward. A release always tags `X.Y.Z`. It moves `X.Y` only
-while it is the newest release of that minor, and `latest` only while it is
-the newest release of all, so a patch to an older minor, an older release
-that finishes last, or a re-run of an older one never moves a host back.
-A version already on Docker Hub is never pushed again: to change one,
-release the next patch. Releases run one at a time. Push one tag and let
-its run finish before the next, because a release waiting behind another
-is cancelled when a third arrives.
+Tags only move forward, by what Docker Hub holds. A release always tags
+`X.Y.Z`. It moves `X.Y` and `latest` only when that tag does not exist yet
+or holds this release or an older one, and otherwise leaves it with a
+warning naming the version it keeps. So a patch to an older minor, an
+older release that finishes last, or a re-run of an older one never moves a
+host back, and a tag whose release failed holds nothing back.
+
+A version already on Docker Hub is never rebuilt or replaced: to change
+one, release the next patch. The one exception is a run that pushed
+`X.Y.Z` and then stopped before `X.Y` or `latest`. Run it again: it finds
+`X.Y.Z` from the same commit and only adds the floating tags. A run that
+finds `X.Y.Z` from another commit refuses.
+
+Releases run one at a time, so push one tag at a time and let its run
+finish before you push the next. GitHub keeps only one run waiting for the
+slot, and a release waiting behind another is cancelled when a third
+arrives.
 
 The `dockerhub` environment, in the repository's settings, holds the
 secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
