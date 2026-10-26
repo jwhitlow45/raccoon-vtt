@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
-import { effectiveZoom } from "../features/device/layout.ts";
+import { effectiveZoom, pageHeldShort } from "../features/device/layout.ts";
 import { isCoarsePointer } from "./device.ts";
 import { opensKeyboard, type FocusTarget } from "./keyboardField.ts";
 
@@ -12,8 +12,11 @@ import { opensKeyboard, type FocusTarget } from "./keyboardField.ts";
  * pan the visible area down the page to show a field, which hides the top
  * instead. Android Chrome does the same, as index.html leaves it its
  * default (`resizes-visual`). A browser that resizes the layout viewport
- * hides nothing and reads no keyboard here, and features/device/layout.ts
- * keeps the room's size steady through it.
+ * hides nothing, and features/device/layout.ts keeps the room's size
+ * steady through it. The view then is the short page itself, top 0 and
+ * inset 0, since the page already ends at the keyboard: the surfaces that
+ * lay out by the room's steady size learn the real room from it, and
+ * nothing is lifted twice.
  *
  * A view starts only with focus in a field that opens a keyboard: a pinch
  * zoom shrinks the visual viewport too, and so can a browser's own bars
@@ -69,7 +72,8 @@ let detach: (() => void) | null = null;
 export function readKeyboardView(): KeyboardView | null {
   if (typeof window === "undefined") return null;
   const open = detach !== null && current !== null;
-  return keyboardView({ layoutHeight: window.innerHeight, viewport: window.visualViewport ?? null, field: open || opensKeyboard(document.activeElement as FocusTarget | null) });
+  const view = keyboardView({ layoutHeight: window.innerHeight, viewport: window.visualViewport ?? null, field: open || opensKeyboard(document.activeElement as FocusTarget | null) });
+  return view ?? (pageHeldShort() ? { top: 0, height: Math.round(window.innerHeight), inset: 0 } : null);
 }
 
 function refresh(): void {

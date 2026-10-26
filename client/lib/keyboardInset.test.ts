@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, describe, test } from "node:test";
 import { SHEET_MIN_HEIGHT, sheetCap, sheetFoot, sheetKeyboard, sheetMaxHeight, sheetRoom, sheetTop } from "../components/sheetCap.ts";
-import { fieldScroll, holdsField, keyboardView, keyboardViewNow, opensKeyboard, subscribeKeyboard, type FocusTarget, type ViewportSource } from "./keyboardInset.ts";
+import { fieldScroll, holdsField, keyboardView, keyboardViewNow, opensKeyboard, readKeyboardView, subscribeKeyboard, type FocusTarget, type ViewportSource } from "./keyboardInset.ts";
 
 /** A 390 x 844 phone, as the Room lays its sheet: the 52 px top bar and the 60 px toolbar, no safe areas. */
 const PHONE = { height: 844, safeTop: 0, safeBottom: 0, insetTop: 52, insetBottom: 60 };
@@ -76,12 +76,14 @@ class FakeViewport extends EventTarget implements ViewportSource {
 describe("the keyboard's view as the page hears it, with a fake visual viewport", () => {
   const viewport = new FakeViewport();
   const doc = Object.assign(new EventTarget(), { activeElement: null as FocusTarget | null });
-  const g = globalThis as unknown as { window?: unknown; document?: unknown };
-  g.window = Object.assign(new EventTarget(), { innerHeight: 844, visualViewport: viewport });
+  const g = globalThis as unknown as { window?: unknown; document?: unknown; matchMedia?: unknown };
+  const win = Object.assign(new EventTarget(), { innerWidth: 390, innerHeight: 844, visualViewport: viewport });
+  g.window = win;
   g.document = doc;
   after(() => {
     delete g.window;
     delete g.document;
+    delete g.matchMedia;
   });
 
   test("follows the viewport's resize and the field's focus, and tells each listener once a change", () => {
@@ -125,6 +127,35 @@ describe("the keyboard's view as the page hears it, with a fake visual viewport"
     assert.equal(heard, 3, "nothing heard once stopped");
     assert.deepEqual(keyboardViewNow(), { top: 0, height: 400, inset: 444 }, "read afresh with no one listening");
     viewport.show(844);
+    doc.activeElement = null;
+  });
+
+  test("a browser that shrinks the page itself: the short page is the view, nothing hidden, until it grows back, on a touch device only", () => {
+    const touch = (on: boolean) => void (g.matchMedia = () => ({ matches: on }));
+    /** The page and its visual viewport made `height` tall together, as such a browser does for its keyboard. */
+    const page = (height: number) => {
+      win.innerHeight = height;
+      viewport.show(height);
+    };
+    touch(true);
+    page(844);
+    doc.activeElement = field;
+    assert.equal(readKeyboardView(), null, "the page at its height");
+    page(544);
+    assert.deepEqual(readKeyboardView(), { top: 0, height: 544, inset: 0 }, "the page already ends at the keyboard: nothing hidden, nothing to lift twice");
+    doc.activeElement = { tagName: "BUTTON" };
+    assert.deepEqual(readKeyboardView(), { top: 0, height: 544, inset: 0 }, "a tap on Spend keeps it while the page stays short");
+    page(844);
+    assert.equal(readKeyboardView(), null, "the page grows back");
+    page(544);
+    assert.equal(readKeyboardView(), null, "no field, no keyboard: a browser's own bars");
+    page(844);
+    assert.equal(readKeyboardView(), null, "the page at its height again");
+    touch(false);
+    doc.activeElement = field;
+    page(544);
+    assert.equal(readKeyboardView(), null, "a computer's window made shorter is only shorter");
+    page(844);
     doc.activeElement = null;
   });
 });

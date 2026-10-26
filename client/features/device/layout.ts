@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import type { Camera, Insets, Point, Size } from "../../lib/camera.ts";
 import { isCoarsePointer } from "../../lib/device.ts";
 import { typingNow } from "../../lib/keyboardField.ts";
-import { subscribeUiScale, uiScale, useUiScale } from "./settings.ts";
+import { subscribeUiScale, uiScale } from "./settings.ts";
 
 /**
  * The interface size (docs/design-v1-dm-tools.md 3.16) without rewriting
@@ -65,17 +65,33 @@ export function steadySize(kept: SteadySize, next: Size, typing: boolean): Stead
   return same && !kept.held ? kept : { size: same ? kept.size : next, held: false };
 }
 
+/** The page's steady size, one for every reader, so the room and the keyboard's view (lib/keyboardInset.ts) agree on whether it is held. */
+let steadyNow: SteadySize | null = null;
+
+/**
+ * The steady size for the page as it measures now, brought up to date:
+ * whoever reads first after a resize updates it, and the next reader gets
+ * the same answer, so the order of their listeners never matters.
+ */
+export function readSteady(): SteadySize {
+  const next = layoutSize(window, uiScale());
+  // A computer opens no on-screen keyboard: its window made shorter is the size to read, field in focus or not.
+  const typing = isCoarsePointer() && typingNow();
+  steadyNow = steadySize(steadyNow ?? { size: next, held: false }, next, typing);
+  return steadyNow;
+}
+
+/** Whether the page is shorter than the size the room keeps, as a browser that shrinks the page for its keyboard leaves it while someone types. */
+export function pageHeldShort(): boolean {
+  return typeof window !== "undefined" && readSteady().held;
+}
+
 /** The layout size, kept up to date through resizes and changes of the interface size, and steady while someone types on a touch device (steadySize). */
 export function useLayoutSize(): Size {
-  const scale = useUiScale();
-  const [steady, setSteady] = useState<SteadySize>(() => ({ size: layoutSize(window, scale), held: false }));
+  const [size, setSize] = useState<Size>(() => readSteady().size);
   useEffect(() => {
-    const read = () => {
-      const next = layoutSize(window, uiScale());
-      // A computer opens no on-screen keyboard: its window made shorter is the size to read, field in focus or not.
-      const typing = isCoarsePointer() && typingNow();
-      setSteady((kept) => steadySize(kept, next, typing));
-    };
+    // The steady size keeps its identity while nothing changes, so an unchanged read renders nothing.
+    const read = () => setSize(readSteady().size);
     read();
     window.addEventListener("resize", read);
     const unsubscribe = subscribeUiScale(read);
@@ -84,7 +100,7 @@ export function useLayoutSize(): Size {
       unsubscribe();
     };
   }, []);
-  return steady.size;
+  return size;
 }
 
 /**
