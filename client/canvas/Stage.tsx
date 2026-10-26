@@ -300,11 +300,23 @@ export function MapStage(props: {
    */
   const fittedRef = useRef<Fit | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  // A new suggestion or a turn waits while this device drags a token (ISO-D3, features/view/choice.ts viewGestureSlot). Pinches and rulers join in ISO-4.
-  useLayoutEffect(() => {
+  /*
+   * A new suggestion or a turn waits for any gesture on the map to end
+   * (ISO-D3, features/view/choice.ts viewGestureSlot): a token's drag, and
+   * while any pointer is down on the map, a pinch, a pan, a held ruler or a
+   * box among them, so the map never turns under a finger.
+   */
+  const viewGestureRef = useRef({ drag: false, pointers: false });
+  const syncGesture = useCallback(() => {
+    const g = viewGestureRef.current;
+    const active = g.drag || g.pointers;
     const slot = scope.get(viewGestureSlot);
-    slot.setState({ active: draggingId !== null });
-  }, [scope, draggingId]);
+    if (slot.getState().active !== active) slot.setState({ active });
+  }, [scope]);
+  useLayoutEffect(() => {
+    viewGestureRef.current.drag = draggingId !== null;
+    syncGesture();
+  }, [draggingId, syncGesture]);
   useLayoutEffect(() => () => scope.get(viewGestureSlot).setState({ active: false }), [scope]);
   /** The tokens this device's drag carries, which draw their own decorations so they travel with them. */
   const [carried, setCarried] = useState<ReadonlySet<string>>(NOT_CARRIED);
@@ -1261,18 +1273,31 @@ export function MapStage(props: {
       if (e.button === 1) e.preventDefault();
     };
 
-    el.addEventListener("pointerdown", onDown);
+    // Whether a pointer is down on the map, read after each press and lift, for the gesture a view change waits on.
+    const pointersDown = () => {
+      viewGestureRef.current.pointers = gesture.pointers.size > 0;
+      syncGesture();
+    };
+    const onDownMarked = (e: PointerEvent) => {
+      onDown(e);
+      pointersDown();
+    };
+    const onUpMarked = (e: PointerEvent) => {
+      onUp(e);
+      pointersDown();
+    };
+    el.addEventListener("pointerdown", onDownMarked);
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
+    window.addEventListener("pointerup", onUpMarked);
+    window.addEventListener("pointercancel", onUpMarked);
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("contextmenu", onContextMenu);
     el.addEventListener("mousedown", onMouseDown);
     return () => {
-      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointerdown", onDownMarked);
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("pointerup", onUpMarked);
+      window.removeEventListener("pointercancel", onUpMarked);
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("contextmenu", onContextMenu);
       el.removeEventListener("mousedown", onMouseDown);
@@ -1281,7 +1306,7 @@ export function MapStage(props: {
     };
     // The listeners read the camera and the tool through refs, so they
     // attach once, when the stage first exists, and again to a remounted one.
-  }, [hasStage, stageKey, scheduleCam, stopTokenDrag, popovers, isoShown, isoStage]);
+  }, [hasStage, stageKey, scheduleCam, stopTokenDrag, popovers, isoShown, isoStage, syncGesture]);
 
   // Safari's own pinch-zoom of the page would fight the canvas pinch. The
   // Room page prevents it for the whole room (Room.tsx useNoPageZoom).
