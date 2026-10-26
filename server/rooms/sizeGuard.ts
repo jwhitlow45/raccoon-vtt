@@ -613,9 +613,38 @@ function perPlayerSceneReserve(state: RoomState, scene: Scene): number {
   const tiles = layerEntries(widestLayer(scene, null));
   // `"sightAll":{…}`, `"fogAll":{…}` and `"exploredAny":{…}`, each with its comma, and `"holders":{"<scene>":<list>}`.
   bytes += fieldBytes("sightAll") + 3 + tilesAcross(scene.bounds.w) * tilesAcross(scene.bounds.h) * sightEntryMaxBytes(scene.id);
-  bytes += fieldBytes("fogAll") + 3 + tiles + fieldBytes("exploredAny") + 3 + tiles;
+  bytes += fieldBytes("fogAll") + 3 + tiles + fogPastBounds(state.fogTiles, scene) + fieldBytes("exploredAny") + 3 + tiles;
   const list = state.holders?.[scene.id];
   return bytes + fieldBytes("holders") + 3 + (list ? fieldBytes(scene.id) + valueBytes(list) : 0);
+}
+
+/*
+ * The shared fog's tiles past a per-player scene's bounds, each at its
+ * widest with its comma. The fold keeps no layer's tile there (review
+ * PV3-ASTRA-1), but the DM's own fog keeps its tiles when the scene
+ * shrinks, and the shared fog holds one over each. Only the DM's fog
+ * decides how many, which no player's sight does. Kept per fog collection
+ * and scene, each replaced and never changed.
+ */
+const fogPast = new WeakMap<object, WeakMap<Scene, number>>();
+
+function fogPastBounds(fogTiles: RoomState["fogTiles"], scene: Scene): number {
+  let byScene = fogPast.get(fogTiles);
+  let bytes = byScene?.get(scene);
+  if (bytes === undefined) {
+    bytes = 0;
+    const across = tilesAcross(scene.bounds.w);
+    const down = tilesAcross(scene.bounds.h);
+    for (const [key, t] of Object.entries(fogTiles)) {
+      if (t.sceneId !== scene.id || (t.tx < across && t.ty < down)) continue;
+      bytes += fieldBytes(key) + serializedBytes({ sceneId: scene.id, tx: t.tx, ty: t.ty, rev: WIDEST_REV, bits: FULL_TILE }) + 1;
+    }
+    if (!isWritable(fogTiles)) {
+      if (!byScene) fogPast.set(fogTiles, (byScene = new WeakMap()));
+      byScene.set(scene, bytes);
+    }
+  }
+  return bytes;
 }
 
 // ---------------------------------------------------------------------------

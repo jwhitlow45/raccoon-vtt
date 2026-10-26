@@ -204,6 +204,14 @@ export function visionHolders(tx: Tx, op: OpOf<"vision.holders">): void {
  * `visionHolders`, which forgets the layers of the holders it turns off,
  * and would otherwise leave a layer the restored list no longer allows, or
  * an entry on for a player made DM since (reviews PV1-ASTRA-2, PV1-O5).
+ *
+ * And a per-player scene keeps no layer's tile past its bounds: after an
+ * op that shrank one, an undo's included, or made one per player, the
+ * party's layer and every holder's forget what lies outside, as
+ * bookkeeping too. The size guard counts those layers at their widest
+ * inside the bounds and never their contents, so a tile kept outside would
+ * count nowhere (review PV3-ASTRA-1). A whole-party scene still remembers
+ * past its bounds, for when they grow back.
  */
 export function foldSight(tx: Tx, before: RoomState): void {
   for (const sceneId of Object.keys(before.scenes).sort()) {
@@ -217,6 +225,13 @@ export function foldSight(tx: Tx, before: RoomState): void {
     for (const memberId of owners) forgetHolder(tx, sceneId, memberId);
     if (list) tx.writeBookkeeping(keys.holders(sceneId), null);
   }
+  for (const sceneId of Object.keys(tx.state.scenes).sort()) {
+    const now = tx.state.scenes[sceneId]!;
+    const was = before.scenes[sceneId];
+    if (now === was || now.vision?.perPlayer !== true) continue;
+    if (was?.vision?.perPlayer === true && tilesAcross(now.bounds.w) >= tilesAcross(was.bounds.w) && tilesAcross(now.bounds.h) >= tilesAcross(was.bounds.h)) continue;
+    forgetPastBounds(tx, now);
+  }
   if (tx.state.holders === before.holders && tx.state.members === before.members) return;
   for (const sceneId of Object.keys(tx.state.holders ?? {}).sort()) {
     const list = tx.state.holders[sceneId]!;
@@ -226,6 +241,21 @@ export function foldSight(tx: Tx, before: RoomState): void {
   const scenes = new Set(Object.values(tx.state.exploredBy ?? {}).map((t) => t.sceneId));
   for (const sceneId of [...scenes].sort()) {
     for (const memberId of layerOwners(tx.state, sceneId)) if (!seesForThemselves(tx.state, sceneId, memberId)) forgetHolder(tx, sceneId, memberId);
+  }
+}
+
+/** Removes, as bookkeeping, every tile of the scene's layers, the party's and its holders', that lies past its bounds. */
+function forgetPastBounds(tx: Tx, scene: Scene): void {
+  const across = tilesAcross(scene.bounds.w);
+  const down = tilesAcross(scene.bounds.h);
+  const past = (t: { sceneId: string; tx: number; ty: number }) => t.sceneId === scene.id && (t.tx >= across || t.ty >= down);
+  for (const key of Object.keys(tx.state.exploredTiles).sort()) {
+    const t = tx.state.exploredTiles[key]!;
+    if (past(t)) tx.writeBookkeeping(keys.explored(scene.id, t.tx, t.ty), null);
+  }
+  for (const key of Object.keys(tx.state.exploredBy ?? {}).sort()) {
+    const t = tx.state.exploredBy[key]!;
+    if (past(t)) tx.writeBookkeeping(keys.exploredBy(scene.id, t.memberId, t.tx, t.ty), null);
   }
 }
 

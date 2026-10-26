@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { holderTileKey } from "#shared/keys.ts";
+import { holderTileKey, tileKey } from "#shared/keys.ts";
 import type { Encounter, RoomState } from "#shared/model.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { entry, member, room, scene, token } from "#shared/testutil.ts";
@@ -86,6 +86,20 @@ describe("an import of a per-player room", () => {
     );
     const ids = new Set(Object.keys(out.members));
     for (const list of [out.encounter?.turnStart?.seenBy ?? [], ...out.encounterHistory.map((snap) => snap.encounter.turnStart?.seenBy ?? [])]) for (const m of list) assert.ok(ids.has(m), `${m} is on the roster`);
+  });
+
+  test("keeps no layer's tile past a per-player scene's bounds, where the size guard would count it nowhere (review PV3-ASTRA-1)", () => {
+    const state = perPlayerRoom();
+    // A hand-made backup can hold what the fold never leaves: layers past the bounds, here a scene of one tile.
+    state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 16, h: 16 } };
+    state.exploredTiles = Object.fromEntries([0, 1, 2].map((tx) => [tileKey("s1", tx, 0), { sceneId: "s1", tx, ty: 0, rev: 1, bits: BITS }]));
+    const { out, id } = imported(state);
+    const sceneId = Object.keys(out.holders)[0]!;
+    assert.deepEqual(Object.keys(out.exploredTiles), [tileKey(sceneId, 0, 0)]);
+    assert.deepEqual(Object.keys(out.exploredBy), [holderTileKey(sceneId, id("p1"), 0, 0)]);
+    // A whole-party scene's layer comes through whole, as it always did.
+    state.scenes.s1 = { ...state.scenes.s1!, vision: { on: true, light: "dark" } };
+    assert.equal(Object.keys(imported(state).out.exploredTiles).length, 3);
   });
 
   test("a list and layers on a scene that is not per player do not come through, and the imported room parses", () => {

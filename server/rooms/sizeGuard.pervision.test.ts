@@ -197,3 +197,79 @@ describe("the measure row", () => {
     assert.ok(endA.log.length < 8, "the limit refused some of the chats, alike in both rooms");
   });
 });
+
+/**
+ * A per-player scene the DM shrinks (review PV3-ASTRA-1): the widest
+ * reserve counts every tile inside the bounds, so no layer may keep a tile
+ * past them, where no reserve would count it and the measure would leave
+ * it out. The DM's own fog keeps its tiles there, and the shared fog the
+ * DM's projection holds over them counts at its widest too.
+ */
+describe("a per-player scene that shrinks", () => {
+  /** The full room, the DM's fog revealed on every tile, then the scene shrunk to one cell, or to one row of cells. */
+  function shrunk(bounds = { w: 1, h: 1 }, visionOn = true): { before: RoomState; after: RoomState } {
+    const before = perPlayerRoom("full", PLAYERS, visionOn);
+    for (const key of Object.keys(before.exploredTiles)) before.fogTiles[key] = { ...before.exploredTiles[key]!, rev: 1 };
+    const result = applyOp(before, { t: "scene.update", sceneId: "s1", patch: { bounds } }, DM, env(2));
+    assert.ok(result.ok);
+    return { before, after: result.state };
+  }
+
+  test("forgets every layer's tiles past its bounds, and the DM's fog keeps its own", () => {
+    const { before, after } = shrunk();
+    assert.deepEqual(Object.keys(after.exploredTiles), [tileKey("s1", 0, 0)]);
+    assert.deepEqual(Object.keys(after.exploredBy).sort(), PLAYERS.slice(0, 6).map((id) => holderTileKey("s1", id, 0, 0)).sort());
+    assert.deepEqual(Object.keys(after.fogTiles), Object.keys(before.fogTiles), "the DM's fog is the DM's");
+  });
+
+  for (const [bounds, visionOn] of [
+    [{ w: 1, h: 1 }, true],
+    [{ w: 40, h: 1 }, false],
+  ] as const) {
+  test(`the measures still hold every byte the room stores and the DM's projection holds, before and after a reload, shrunk to ${bounds.w} by ${bounds.h}`, () => {
+    // With vision off the DM's projection holds no sight, whose reserve would otherwise leave room to spare.
+    const { after } = shrunk(bounds, visionOn);
+    const stored = storedAsItIs(after);
+    const measure = measuredStateBytes(after);
+    assert.ok(stored <= measure, `stored ${stored} within the measure ${measure}`);
+    assert.equal(measuredFromStored(serializedBytes(after), after), measure, "a snapshot's bytes measure alike");
+    const projected = serializedBytes({ ...projectState(after, DM, { sceneId: "s1" }), companionBlocks: {} });
+    assert.ok(projected <= projectedSceneBytes(after, "s1"), `the DM's projection ${projected} within the scene's measure ${projectedSceneBytes(after, "s1")}`);
+    // A room loaded from that snapshot, with limits just under what it holds, is refused.
+    assert.equal(new SizeGuard({ stateLimit: stored - 1 }).check(after, [], 0).ok, false, "the room's limit");
+    assert.equal(new SizeGuard({ sceneLimit: projected - 1 }).check(after, ["s1"], 0).ok, false, "the scene's limit");
+  });
+  }
+
+  for (const bounds of [
+    { w: 200, h: 16 },
+    { w: 16, h: 200 },
+  ]) {
+    test(`the shared fog over the DM's fog past the bounds counts at its widest, a 200 by 200 scene shrunk to ${bounds.w} by ${bounds.h}`, () => {
+      // Far more of the DM's fog lies past the bounds than any reserve inside them could hide.
+      const state = room({ members: { dm1: member("dm1", "dm"), p1: member("p1") } });
+      state.scenes = { s1: scene("s1", { bounds: { w: 200, h: 200 }, fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } }) };
+      for (let ty = 0; ty < tilesAcross(200); ty++) for (let tx = 0; tx < tilesAcross(200); tx++) state.fogTiles[tileKey("s1", tx, ty)] = { sceneId: "s1", tx, ty, rev: WIDE, bits: BITS };
+      const result = applyOp(state, { t: "scene.update", sceneId: "s1", patch: { bounds } }, DM, env(2));
+      assert.ok(result.ok);
+      const projected = projectState(result.state, DM, { sceneId: "s1" });
+      assert.equal(Object.keys(projected.fogAll ?? {}).length, tilesAcross(200) ** 2, "the shared fog keeps a tile over each of the DM's");
+      const bytes = serializedBytes({ ...projected, companionBlocks: {} });
+      assert.ok(bytes <= projectedSceneBytes(result.state, "s1"), `the DM's projection ${bytes} within the scene's measure ${projectedSceneBytes(result.state, "s1")}`);
+    });
+  }
+
+  test("a scene shrunk while it shared sight with the party keeps its layer, and loses it past the bounds when it turns per player", () => {
+    const whole = perPlayerRoom("full", PLAYERS);
+    whole.scenes.s1 = { ...whole.scenes.s1!, vision: { on: false, light: "bright" } };
+    whole.holders = {};
+    whole.exploredBy = {};
+    const small = applyOp(whole, { t: "scene.update", sceneId: "s1", patch: { bounds: { w: 1, h: 1 } } }, DM, env(2));
+    assert.ok(small.ok);
+    assert.equal(Object.keys(small.state.exploredTiles).length, 6, "a whole-party scene remembers past its bounds, as it always did");
+    const switched = applyOp(small.state, { t: "scene.update", sceneId: "s1", patch: { vision: { on: false, light: "bright", perPlayer: true } } }, DM, env(3));
+    assert.ok(switched.ok);
+    assert.deepEqual(Object.keys(switched.state.exploredTiles), [tileKey("s1", 0, 0)]);
+    assert.ok(storedAsItIs(switched.state) <= measuredStateBytes(switched.state));
+  });
+});

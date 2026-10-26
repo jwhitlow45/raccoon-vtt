@@ -1,5 +1,6 @@
 import { uuidv7 } from "#shared/ids.ts";
 import { chunkKey, compareLogIds, holderTileKey, tileKey } from "#shared/keys.ts";
+import { tilesAcross } from "#shared/rules/fog.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
 import { cutLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
 import type {
@@ -318,10 +319,17 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     const sceneId = scenes.of(t.sceneId);
     out.fogTiles[tileKey(sceneId, t.tx, t.ty)] = { ...t, sceneId };
   }
+  // On a per-player scene no layer keeps a tile past the bounds, which the size guard counts at their widest and never
+  // past them, so an import drops what the fold would have (review PV3-ASTRA-1).
+  const pastBounds = (sceneId: string, t: { tx: number; ty: number }) => {
+    const scene = out.scenes[sceneId];
+    return scene?.vision?.perPlayer === true && (t.tx >= tilesAcross(scene.bounds.w) || t.ty >= tilesAcross(scene.bounds.h));
+  };
   // The party's explored layer follows its scene, as the fog does (docs/design-v1-maps-vision.md 4.3.3).
   for (const t of Object.values(state.exploredTiles)) {
     if (!scenes.has(t.sceneId)) continue;
     const sceneId = scenes.of(t.sceneId);
+    if (pastBounds(sceneId, t)) continue;
     out.exploredTiles[tileKey(sceneId, t.tx, t.ty)] = { ...t, sceneId };
   }
   // Who sees for themselves on a per-player scene, and each one's own explored layer, follow their scene and their
@@ -336,7 +344,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (!scenes.has(t.sceneId) || !members.has(t.memberId)) continue;
     const sceneId = scenes.of(t.sceneId);
     const memberId = members.of(t.memberId);
-    if (!out.holders[sceneId]?.entries.some((e) => e.on && e.memberId === memberId)) continue;
+    if (!out.holders[sceneId]?.entries.some((e) => e.on && e.memberId === memberId) || pastBounds(sceneId, t)) continue;
     out.exploredBy[holderTileKey(sceneId, memberId, t.tx, t.ty)] = { ...t, sceneId, memberId };
   }
   for (const d of Object.values(state.fogDrafts)) {
