@@ -6,9 +6,13 @@ import { canApply } from "#shared/permissions.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { readFileSync } from "node:fs";
 import { applyOp } from "#shared/reducer.ts";
+import { placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
+import { hexDistance, hexNeighbors } from "#shared/rules/hex.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { monsterView } from "#shared/statBlock.ts";
 import { character, companionBlock, entry, env, imageRef, room, token } from "#shared/testutil.ts";
+import { snapPosition } from "../../lib/scene.ts";
 import {
   NEW_COMPANION,
   blockHpHelp,
@@ -17,6 +21,7 @@ import {
   companionInput,
   companionSpot,
   draftError,
+  dmPlacement,
   draftWith,
   joinFightOp,
   lateCompanionText,
@@ -263,4 +268,31 @@ describe("an own-turn companion made mid-fight joins it (docs/design-v1-combat-f
     without.encounter!.entries = without.encounter!.entries.filter((e) => e.id !== "e-bree");
     assert.equal(joinFightOp(without, companionInput(owl, at, character), "e1"), null, "Bree is not in it");
   });
+});
+
+describe("where a player's companion goes on a hex scene (docs/design-v1-hex-grids.md 4.2)", () => {
+  for (const orient of ["rows", "columns"] as const) {
+    test(`${orient}: a hex next to the character, 5 ft away, which the server takes, and none once the six around it are taken`, () => {
+      const state = bree();
+      state.scenes.s1 = { ...state.scenes.s1!, gridShape: orient === "rows" ? "hexRows" : "hexColumns" };
+      const g = sceneGrid(state.scenes.s1!);
+      assert.ok(g.shape === "hex");
+      const home = { col: 5, row: 5 };
+      state.tokens.bt = { ...state.tokens.bt!, ...placedOnHex(g, state.tokens.bt!, home) };
+      const placed = playerPlacement(state, state.characters.bree!, { size: "small" });
+      assert.ok(placed.ok);
+      const ref = tokenRefHex(g, { size: "small", x: placed.x, y: placed.y });
+      assert.equal(hexDistance(g, ref, home), 1);
+      assert.deepEqual(snapPosition(g, placed.x, placed.y, { w: 1, h: 1 }), { x: placed.x, y: placed.y }, "on its hex's anchor, as a drop snaps");
+      const op = { t: "token.create" as const, token: companionInput(spirit, { id: "ws", sceneId: placed.sceneId, x: placed.x, y: placed.y, elevation: placed.elevation }, state.characters.bree!) };
+      assert.ok(canApply(op, { memberId: "p1", role: "player" }, state, { canUseAsset: () => true }).ok);
+      for (const [i, h] of hexNeighbors(g, home).entries()) state.tokens[`n${i}`] = token(`n${i}`, placedOnHex(g, { size: "medium", x: 0, y: 0 }, h));
+      assert.equal(companionSpot(state, state.tokens.bt!, { size: "small" }), null, "two hexes out is 10 ft, past 5 ft");
+      // The DM's has no reach rule: the nearest free hex round Bree, on its anchor.
+      const dm = dmPlacement(state, state.characters.bree!, { size: "small" }, { sceneId: "s1", center: { x: 0, y: 0 } });
+      assert.ok(dm.ok);
+      assert.equal(hexDistance(g, tokenRefHex(g, { size: "small", x: dm.x, y: dm.y }), home), 2);
+      assert.deepEqual(snapPosition(g, dm.x, dm.y, { w: 1, h: 1 }), { x: dm.x, y: dm.y });
+    });
+  }
 });

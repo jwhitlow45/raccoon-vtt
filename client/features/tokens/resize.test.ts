@@ -3,6 +3,8 @@ import { describe, test } from "node:test";
 import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type RoomState, type Token } from "#shared/model.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
+import type { HexGrid } from "#shared/rules/hex.ts";
 import { NO_ROOM_TO_GROW } from "#shared/rules/resize.ts";
 import { DM, P1, character, room, token } from "#shared/testutil.ts";
 import { canResize } from "./access.ts";
@@ -195,4 +197,29 @@ describe("the creature's own size, and the steps", () => {
       assert.equal(canApply({ t: "token.update", tokenId: "thorn", patch: answer.patch }, viewer, state, deps).ok, true, viewer.memberId);
     }
   });
+});
+
+describe("resizePatch on a hex scene (docs/design-v1-hex-grids.md 4.2)", () => {
+  for (const orient of ["rows", "columns"] as const) {
+    const g: HexGrid = { shape: "hex", orient };
+    test(`${orient}: a Medium grows Large with its hex as the Large's top hex, which the server takes, and shrinks back onto it`, () => {
+      const state = room();
+      state.scenes.s1 = { ...state.scenes.s1!, gridShape: orient === "rows" ? "hexRows" : "hexColumns" };
+      state.characters.thorn = character("thorn", { ownerIds: ["p1"], name: "Thorn", size: "medium" });
+      const home = { col: 6, row: 5 };
+      state.tokens.thorn = token("thorn", { kind: "pc", name: "Thorn", ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, home), actor: { ref: "thorn" }, ownerIds: [] });
+      const thorn = state.tokens.thorn;
+      for (const role of ["dm", "player"] as const) {
+        const grown = resizePatch(state, thorn, { size: "large" }, role);
+        const large = after(thorn, grown);
+        assert.deepEqual(tokenRefHex(g, large), home, `${role}: the Large's reference hex`);
+        assert.deepEqual(occupiedHexes(g, large)[0], home, "its top hex");
+        assert.ok(canApply({ t: "token.update", tokenId: "thorn", patch: sent(grown).patch }, role === "dm" ? DM : P1, state, deps).ok);
+        for (const growths of [[], sent(grown).growths]) {
+          const back = after(large, resizePatch(state, large, { size: "medium" }, role, growths));
+          assert.deepEqual(tokenRefHex(g, back), home, `${role}: back on its hex${growths.length ? ", remembered" : ""}`);
+        }
+      }
+    });
+  }
 });

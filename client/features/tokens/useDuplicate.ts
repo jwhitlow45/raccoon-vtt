@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import type { Token } from "#shared/model.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { handFocusOn } from "../../lib/handFocus.ts";
 import { footprint } from "../../lib/scene.ts";
 import { useRoomActions, useRoomStore, useRoomUi } from "../../state/view.ts";
@@ -27,7 +28,7 @@ export function useDuplicate(token: Token, focus: DuplicateFocus): () => void {
     if (!view || !scene) return;
     const fp = footprint(token);
     const occupied = occupiedBoxes(Object.values(view.tokens), token.sceneId);
-    const [at] = spreadPositions({ center: { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, footprint: fp, count: 1, bounds: scene.bounds, occupied });
+    const [at] = spreadPositions({ grid: sceneGrid(scene), center: { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, footprint: fp, count: 1, bounds: scene.bounds, occupied });
     const id = actions.newId();
     const copy = duplicateToken(token, { id, at: at ?? { x: token.x + fp.w, y: token.y }, chunks: view.buildChunks ?? {}, blocks: view.companionBlocks ?? {} });
     // The scope is read while the pressed button still stands in it.

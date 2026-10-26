@@ -246,7 +246,7 @@ export function companionSpot(view: PlaceView, beside: Token, draft: Pick<TokenI
     if (!withinCompanionReach(view.meta.settings, sceneGrid(scene), { ...placed, elevation: beside.elevation }, beside)) return false;
     return scene.blockMovement !== true || companionLegBlocker(view as RoomState, placed, beside) === null;
   };
-  return firstFreeSpot({ center: { x: beside.x + near.w / 2, y: beside.y + near.h / 2 }, footprint: fp, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), beside.sceneId), accept });
+  return firstFreeSpot({ grid: sceneGrid(scene), center: { x: beside.x + near.w / 2, y: beside.y + near.h / 2 }, footprint: fp, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), beside.sceneId), accept });
 }
 
 /** The character's tokens on a scene, by id, the first the one a companion goes beside. */
@@ -286,7 +286,7 @@ export function dmPlacement(view: PlaceView, character: Pick<Character, "id">, d
   const beside = characterTokensOn(view, character.id, scene.id)[0];
   const fp = sizeFootprint(draft.size, draft.w !== undefined && draft.h !== undefined ? { w: draft.w, h: draft.h } : undefined);
   const center = beside ? { x: beside.x + footprint(beside).w / 2, y: beside.y + footprint(beside).h / 2 } : at.center;
-  const [spot] = spreadPositions({ center, footprint: fp, count: 1, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), scene.id) });
+  const [spot] = spreadPositions({ grid: sceneGrid(scene), center, footprint: fp, count: 1, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), scene.id) });
   if (!spot) return { ok: false, reason: "No map to place it on yet." };
   return { ok: true, sceneId: scene.id, x: spot.x, y: spot.y, elevation: beside?.elevation ?? 0 };
 }

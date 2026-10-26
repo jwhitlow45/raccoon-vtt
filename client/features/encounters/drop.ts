@@ -1,5 +1,6 @@
 import { lairCounts } from "#shared/dice/uses.ts";
 import type { Actor, ImageRef, RoomState, SavedEncounterMonster, Scene } from "#shared/model.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import type { StatBlockMonster } from "#shared/srd/monsters.ts";
 import { MAX_ENTRIES_PER_OP, type ClientOp, type EntryInput, type TokenInput } from "#shared/protocol.ts";
 import { monsterImage, refOf } from "../monsters/images.ts";
@@ -34,7 +35,7 @@ export function dropPlan(input: {
   monsters: readonly SavedEncounterMonster[];
   resolve(m: SavedEncounterMonster): Resolved;
   state: Pick<RoomState, "tokens" | "monsters" | "srdImages" | "encounter"> & Partial<Pick<RoomState, "buildChunks">>;
-  scene: Pick<Scene, "id" | "bounds">;
+  scene: Pick<Scene, "id" | "bounds" | "gridShape">;
   center: Point;
   options: DropOptions;
   newId(): string;
@@ -55,7 +56,7 @@ export function dropPlan(input: {
     }
     const m = resolved.view;
     const fp = sizeFootprint(m.size);
-    const spots = spreadPositions({ center: input.center, footprint: fp, count: line.count, bounds: input.scene.bounds, occupied });
+    const spots = spreadPositions({ grid: sceneGrid(input.scene), center: input.center, footprint: fp, count: line.count, bounds: input.scene.bounds, occupied });
     const monsterId = "monsterId" in line ? line.monsterId : undefined;
     const ref = refOf(m, monsterId);
     const image: ImageRef | undefined = ref ? monsterImage(input.state, ref) : undefined;

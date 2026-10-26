@@ -1,7 +1,10 @@
 import { SIZE_CELLS, type Actor, type BuildChunk, type Character, type CompanionBlock, type CreatureSize, type ImageRef, type Token, type TokenKind } from "#shared/model.ts";
 import type { CharacterInput, TokenInput } from "#shared/protocol.ts";
+import { occupiedHexes, placedOnHex, sizeCategory, type PlacedToken } from "#shared/rules/footprint.ts";
+import type { Grid } from "#shared/rules/grid.ts";
+import { hexInScene, hexKey, referenceHex, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { monsterActor, type StatBlockMonster } from "#shared/srd/monsters.ts";
-import { footprint } from "../../lib/scene.ts";
+import { footprint, hexRing } from "../../lib/scene.ts";
 import { landedElevation } from "../movement/drop.ts";
 
 /**
@@ -271,9 +274,12 @@ function inside(p: Placed, bounds: Bounds): boolean {
  * Where to put `count` creatures of one footprint around a tapped point: the
  * nearest free spots on the grid, ring by ring, never on top of each other
  * or of tokens already there, and inside the scene. When there is no room
- * nearby, the rest stack on the tapped spot rather than fail.
+ * nearby, the rest stack on the tapped spot rather than fail. On a hex
+ * scene the rings are of hexes and each spot stands on its anchor
+ * (docs/design-v1-hex-grids.md 4.2), as a drop there snaps.
  */
 export function spreadPositions(input: {
+  grid: Grid;
   center: Point;
   footprint: Footprint;
   count: number;
@@ -281,7 +287,7 @@ export function spreadPositions(input: {
   occupied: Placed[];
 }): Point[] {
   const out = freeSpots(input);
-  const start = clampCorner(cornerFor(input.center, input.footprint), input.footprint, input.bounds);
+  const start = input.grid.shape === "hex" ? hexStart(input.grid, input).at : clampCorner(cornerFor(input.center, input.footprint), input.footprint, input.bounds);
   while (out.length < input.count) out.push(start);
   return out;
 }
@@ -291,12 +297,15 @@ export function spreadPositions(input: {
  * when none does: a companion's place beside its character
  * (docs/design-v1-combat-flow.md 3.6.3), which must not stack anywhere.
  */
-export function firstFreeSpot(input: { center: Point; footprint: Footprint; bounds: Bounds; occupied: Placed[]; accept(p: Point): boolean }): Point | null {
+export function firstFreeSpot(input: { grid: Grid; center: Point; footprint: Footprint; bounds: Bounds; occupied: Placed[]; accept(p: Point): boolean }): Point | null {
   return freeSpots({ ...input, count: 1 })[0] ?? null;
 }
 
+type SpotSearch = { grid: Grid; center: Point; footprint: Footprint; count: number; bounds: Bounds; occupied: Placed[]; accept?(p: Point): boolean };
+
 /** Up to `count` free spots, ring by ring from the tapped point, each one `accept` takes. */
-function freeSpots(input: { center: Point; footprint: Footprint; count: number; bounds: Bounds; occupied: Placed[]; accept?(p: Point): boolean }): Point[] {
+function freeSpots(input: SpotSearch): Point[] {
+  if (input.grid.shape === "hex") return freeHexSpots(input.grid, input);
   const { footprint: fp, bounds } = input;
   const step = Math.max(snapStep(fp), Math.max(fp.w, fp.h) >= 1 ? 1 : 0.5);
   const start = clampCorner(cornerFor(input.center, fp), fp, bounds);
@@ -315,6 +324,46 @@ function freeSpots(input: { center: Point; footprint: Footprint; count: number; 
     }
   }
   return out;
+}
+
+/**
+ * Free spots on a hex scene: rings of hexes round the reference hex nearest
+ * the tapped point, each spot the box whose anchor stands on that hex, kept
+ * when none of its hexes is taken and all of them lie inside the scene, the
+ * test the server makes of a player's placement (permissions.ts insideScene).
+ */
+function freeHexSpots(g: HexGrid, input: SpotSearch): Point[] {
+  const { bounds } = input;
+  const { creature, ref } = hexStart(g, input);
+  const taken = new Set(input.occupied.flatMap((b) => occupiedHexes(g, { size: "custom", ...b }).map(hexKey)));
+  const out: Point[] = [];
+  // Forty rings is a 200 ft search, far past anywhere the DM meant to drop a creature.
+  const maxRing = Math.min(40, Math.ceil(Math.max(bounds.w, bounds.h)) + 1);
+  for (let ring = 0; ring <= maxRing && out.length < input.count; ring++) {
+    for (const h of hexRing(g, ref, ring)) {
+      if (out.length >= input.count) break;
+      const at = placedOnHex(g, creature, h);
+      const hexes = occupiedHexes(g, { ...creature, ...at });
+      if (!hexes.every((o) => hexInScene(g, bounds, o)) || hexes.some((o) => taken.has(hexKey(o)))) continue;
+      if (input.accept && !input.accept(at)) continue;
+      for (const o of hexes) taken.add(hexKey(o));
+      out.push(at);
+    }
+  }
+  return out;
+}
+
+/** Where a hex search starts: the reference hex under the tapped point, pulled inside the scene, and the box standing on it. */
+function hexStart(g: HexGrid, input: Pick<SpotSearch, "center" | "footprint" | "bounds">): { creature: PlacedToken; ref: Hex; at: Point } {
+  const { footprint: fp, bounds } = input;
+  const creature: PlacedToken = { size: "custom", w: fp.w, h: fp.h, x: 0, y: 0 };
+  const center = {
+    x: Math.min(Math.max(fp.w / 2, input.center.x), Math.max(fp.w / 2, bounds.w - fp.w / 2)),
+    y: Math.min(Math.max(fp.h / 2, input.center.y), Math.max(fp.h / 2, bounds.h - fp.h / 2)),
+  };
+  const size = sizeCategory(creature);
+  const ref = referenceHex(g, size, snapAnchor(g, size, center));
+  return { creature, ref, at: placedOnHex(g, creature, ref) };
 }
 
 function clampCorner(p: Point, fp: Footprint, bounds: Bounds): Point {

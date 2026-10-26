@@ -1,5 +1,6 @@
 import { LIMITS } from "#shared/limits.ts";
 import type { Character, RoomState, Scene } from "#shared/model.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import type { TokenInput } from "#shared/protocol.ts";
 import { ownsCharacter } from "./access.ts";
 import { characterToken, occupiedBoxes, sizeFootprint, spreadPositions, type Point } from "./factory.ts";
@@ -32,7 +33,7 @@ export function onScene(view: Pick<RoomState, "tokens">, characterId: string, sc
  */
 export function playerToken(input: {
   view: View;
-  scene: Pick<Scene, "id" | "bounds">;
+  scene: Pick<Scene, "id" | "bounds" | "gridShape">;
   character: Pick<Character, "id" | "name" | "size" | "defaultImage" | "ownerIds">;
   memberId: string;
   center: Point;
@@ -42,6 +43,6 @@ export function playerToken(input: {
   if (view.meta.settings.playersCreateCharacters !== true || view.meta.playerSceneId !== scene.id) return null;
   if (!ownsCharacter(input.memberId, character) || onScene(view, character.id, scene.id)) return null;
   const fp = sizeFootprint(character.size);
-  const [at] = spreadPositions({ center: input.center, footprint: fp, count: 1, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), scene.id) });
+  const [at] = spreadPositions({ grid: sceneGrid(scene), center: input.center, footprint: fp, count: 1, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), scene.id) });
   return at ? characterToken(character, { id: input.id, sceneId: scene.id, at }) : null;
 }

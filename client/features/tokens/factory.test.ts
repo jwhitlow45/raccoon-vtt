@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { Token } from "#shared/model.ts";
+import { canApply } from "#shared/permissions.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
+import { hexCenter, hexDistance, hexInScene, hexKey, type HexGrid } from "#shared/rules/hex.ts";
 import { clientOpSchema, MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema } from "#shared/protocol.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { monsterView } from "#shared/statBlock.ts";
+import { snapPosition } from "../../lib/scene.ts";
 import { DM, actor, apply, blockOf, character, companionBlock, customMonster, room, token } from "#shared/testutil.ts";
 import {
   blankToken,
@@ -308,7 +313,7 @@ describe("placement", () => {
 
   test("several creatures spread to the nearest free cells, never overlapping", () => {
     const occupied = occupiedBoxes([{ sceneId: "s1", x: 6, y: 5, size: "medium" }, { sceneId: "s2", x: 4, y: 5, size: "medium" }], "s1");
-    const spots = spreadPositions({ center: { x: 5.5, y: 5.5 }, footprint: { w: 1, h: 1 }, count: 4, bounds: { w: 30, h: 20 }, occupied });
+    const spots = spreadPositions({ grid: SQUARES, center: { x: 5.5, y: 5.5 }, footprint: { w: 1, h: 1 }, count: 4, bounds: { w: 30, h: 20 }, occupied });
     assert.equal(spots.length, 4);
     assert.deepEqual(spots[0], { x: 5, y: 5 });
     const keys = new Set(spots.map((p) => `${p.x},${p.y}`));
@@ -318,7 +323,7 @@ describe("placement", () => {
   });
 
   test("large creatures do not overlap each other, and everything stays inside the scene", () => {
-    const spots = spreadPositions({ center: { x: 0.2, y: 0.2 }, footprint: { w: 2, h: 2 }, count: 3, bounds: { w: 10, h: 10 }, occupied: [] });
+    const spots = spreadPositions({ grid: SQUARES, center: { x: 0.2, y: 0.2 }, footprint: { w: 2, h: 2 }, count: 3, bounds: { w: 10, h: 10 }, occupied: [] });
     for (const [i, a] of spots.entries()) {
       assert.ok(a.x >= 0 && a.y >= 0 && a.x + 2 <= 10 && a.y + 2 <= 10);
       for (const b of spots.slice(i + 1)) assert.ok(Math.abs(a.x - b.x) >= 2 || Math.abs(a.y - b.y) >= 2);
@@ -326,7 +331,61 @@ describe("placement", () => {
   });
 
   test("a full scene stacks the rest on the tap rather than fail", () => {
-    const spots = spreadPositions({ center: { x: 0.5, y: 0.5 }, footprint: { w: 1, h: 1 }, count: 3, bounds: { w: 1, h: 1 }, occupied: [] });
+    const spots = spreadPositions({ grid: SQUARES, center: { x: 0.5, y: 0.5 }, footprint: { w: 1, h: 1 }, count: 3, bounds: { w: 1, h: 1 }, occupied: [] });
     assert.deepEqual(spots, [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 }]);
   });
+});
+
+describe("placement on a hex scene (docs/design-v1-hex-grids.md 4.2)", () => {
+  for (const orient of ["rows", "columns"] as const) {
+    const g: HexGrid = { shape: "hex", orient };
+    const hexesOf = (p: { x: number; y: number }, side: number) => occupiedHexes(g, { size: "custom", w: side, h: side, ...p });
+
+    test(`${orient}: four goblins spread round the tapped hex, each on its anchor, none on a hex already taken`, () => {
+      const taken = placedOnHex(g, { size: "medium", x: 0, y: 0 }, { col: 6, row: 5 });
+      const occupied = occupiedBoxes([{ sceneId: "s1", size: "medium", ...taken }], "s1");
+      const tap = hexCenter(g, { col: 5, row: 5 });
+      const spots = spreadPositions({ grid: g, center: { x: tap.x + 0.2, y: tap.y - 0.1 }, footprint: { w: 1, h: 1 }, count: 4, bounds: { w: 30, h: 20 }, occupied });
+      assert.equal(spots.length, 4);
+      assert.deepEqual(tokenRefHex(g, { size: "medium", ...spots[0]! }), { col: 5, row: 5 }, "the first on the tapped hex");
+      const seen = new Set([hexKey({ col: 6, row: 5 })]);
+      for (const p of spots) {
+        assert.deepEqual(snapPosition(g, p.x, p.y, { w: 1, h: 1 }), p, `${p.x},${p.y} stands on its anchor, as a drop snaps`);
+        const [h] = hexesOf(p, 1);
+        assert.ok(hexDistance(g, h!, { col: 5, row: 5 }) <= 1, `${h!.col},${h!.row} is next to the tap`);
+        assert.ok(!seen.has(hexKey(h!)), `${h!.col},${h!.row} is free`);
+        seen.add(hexKey(h!));
+      }
+    });
+
+    test(`${orient}: Large ogres tapped at the corner stay inside the scene, as the server judges it, and never share a hex`, () => {
+      const spots = spreadPositions({ grid: g, center: { x: 0.2, y: 0.2 }, footprint: { w: 2, h: 2 }, count: 3, bounds: { w: 10, h: 10 }, occupied: [] });
+      const state = room();
+      state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 10, h: 10 }, gridShape: orient === "rows" ? "hexRows" : "hexColumns" };
+      const seen = new Set<string>();
+      for (const [i, p] of spots.entries()) {
+        const hexes = hexesOf(p, 2);
+        assert.equal(hexes.length, 3);
+        for (const h of hexes) {
+          assert.ok(hexInScene(g, { w: 10, h: 10 }, h), `${h.col},${h.row} inside`);
+          assert.ok(!seen.has(hexKey(h)), `${h.col},${h.row} held once`);
+          seen.add(hexKey(h));
+        }
+        const op = { t: "token.create" as const, token: blankToken({ id: `ogre${i}`, sceneId: "s1", kind: "npc", at: p }) };
+        const ogre = { ...op, token: { ...op.token, size: "large" as const } };
+        assert.ok(canApply(ogre, DM, state, { canUseAsset: () => true }).ok);
+      }
+    });
+
+    test(`${orient}: a scene with room for one stacks the rest on its spot rather than fail`, () => {
+      const spots = spreadPositions({ grid: g, center: { x: 0.6, y: 0.6 }, footprint: { w: 1, h: 1 }, count: 3, bounds: { w: 1.2, h: 1.2 }, occupied: [] });
+      assert.equal(spots.length, 3);
+      assert.deepEqual(spots[1], spots[0]);
+      assert.deepEqual(spots[2], spots[0]);
+      assert.ok(hexInScene(g, { w: 1.2, h: 1.2 }, hexesOf(spots[0]!, 1)[0]!));
+      // A tap well off the scene stacks on its nearest spot inside.
+      const off = spreadPositions({ grid: g, center: { x: -4, y: -4 }, footprint: { w: 1, h: 1 }, count: 2, bounds: { w: 1.2, h: 1.2 }, occupied: [] });
+      assert.deepEqual(off, [spots[0], spots[0]]);
+    });
+  }
 });

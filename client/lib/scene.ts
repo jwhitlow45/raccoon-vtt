@@ -81,7 +81,7 @@ export function hexBallOutline(g: HexGrid, from: readonly Hex[], steps: number):
 }
 
 /** The hexes exactly `k` steps from one, round the ring from its north-west corner, clockwise on hex rows. */
-function hexRing(g: HexGrid, center: Hex, k: number): Hex[] {
+export function hexRing(g: HexGrid, center: Hex, k: number): Hex[] {
   if (k <= 0) return [center];
   let h = center;
   for (let i = 0; i < k; i++) h = hexNeighbors(g, h)[4]!;
