@@ -253,7 +253,8 @@ export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
     // off again, and a patch that names fog itself decides.
     if (p.vision.on && scene.vision?.on !== true && p.fogEnabled === undefined) next.fogEnabled = true;
   }
-  tx.write(keys.scene(scene.id), p.phases !== undefined ? withPhases(next, p.phases) : next);
+  // A new phase list writes the map from the scene's reference grid, held on hexes as every other map write is (review HX2-OPUS-04).
+  tx.write(keys.scene(scene.id), p.phases !== undefined ? onHexGrid(withPhases(next, p.phases)) : next);
 }
 
 /** Removes a scene and everything on it. The last scene stays, so a room is never empty. */

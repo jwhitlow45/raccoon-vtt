@@ -31,6 +31,16 @@ describe("a phase switch on a hex scene (HXD-6)", () => {
     assert.deepEqual([r.code, r.message], ["invalid", HEX_ORIGIN]);
   });
 
+  test("and so is a new phase list, which writes the map from the same reference grid (review HX2-OPUS-04)", () => {
+    const state = room({ scenes: { s1: phased("hexRows"), s2: scene("s2", { order: 1 }) } });
+    const phases = state.scenes.s1!.phases!.map(({ id, name, assetId, widthPx, heightPx }) => ({ id, name, assetId, widthPx, heightPx }));
+    const r = refused(state, { t: "scene.update", sceneId: "s1", patch: { phases: [...phases, { id: "p3", name: "Dusk", assetId: "dusk", widthPx: 2000, heightPx: 1000 }] } });
+    assert.deepEqual([r.code, r.message], ["invalid", HEX_ORIGIN]);
+    // On squares the same list goes through.
+    const squares = apply(room({ scenes: { s1: phased(), s2: scene("s2", { order: 1 }) } }), { t: "scene.update", sceneId: "s1", patch: { phases } });
+    assert.equal(squares.scenes.s1!.phases!.length, 2);
+  });
+
   test("goes through on squares, where such an origin marks a file's own grid", () => {
     const state = apply(room({ scenes: { s1: phased(), s2: scene("s2", { order: 1 }) } }), { t: "scene.setPhase", sceneId: "s1", phaseId: "p2" });
     assert.equal(state.scenes.s1!.phaseId, "p2");
