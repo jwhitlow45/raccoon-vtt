@@ -1432,6 +1432,41 @@ describe("sight holders", () => {
     }
   });
 
+  test("a holder's source whose senses change, or that walks along the scene's edge, redraws their raster from their last one", () => {
+    clearVisionCache();
+    // The first player's character alone by the east edge, and two of the second player's that see most of the scene, so the union is a poor start.
+    let s = visionRoom({
+      w: 40,
+      h: 24,
+      light: "dim",
+      tokens: [pc("a", 37, 10, { ownerIds: ["p1"] }), pc("b", 6, 4, { ownerIds: ["p2"], senses: "darkvision 60 ft" }), pc("c", 6, 18, { ownerIds: ["p2"], senses: "darkvision 60 ft" })],
+      lights: [light("all", 20, 12, 0, 120, { walls: false })],
+    });
+    s.buildChunks = chunksOf("s1", { edges: roomEdges(30, 2, 10, 20) });
+    const a = (s: RoomState) => s.tokens.a!;
+    const senses = (line: string) => (s: RoomState) => withToken(s, { ...a(s), actor: { inline: actor({ senses: line }) } });
+    const steps: [string, (s: RoomState) => RoomState][] = [
+      ["darkvision", senses("darkvision 30 ft")],
+      ["more darkvision", senses("darkvision 60 ft")],
+      ["truesight", senses("truesight 30 ft")],
+      ["blindsight", senses("blindsight 10 ft")],
+      ["north along the edge", (s) => withToken(s, { ...a(s), y: a(s).y - 1 })],
+      ["south along the edge", (s) => withToken(s, { ...a(s), y: a(s).y + 3 })],
+      ["darkvision again", senses("darkvision 150 ft")],
+      ["to the corner", (s) => withToken(s, { ...a(s), x: 39, y: 21 })],
+    ];
+    void holderSight(s, "s1", "p1", world).tiles;
+    for (const [name, step] of steps) {
+      s = step(s);
+      sameTiles(holderSight(s, "s1", "p1", world).tiles, coldHolderSight(s, "s1", "p1", world).tiles, name);
+      for (const dark of [false, true]) {
+        // The same on a dark scene, where the big light keeps the sweep box as senses change.
+        const d = dark ? { ...s, scenes: { s1: { ...s.scenes.s1!, vision: { on: true, light: "dark" as const } } } } : s;
+        sameTiles(holderSight(d, "s1", "p1", world).tiles, coldHolderSight(d, "s1", "p1", world).tiles, `${name}${dark ? ", dark" : ""}`);
+      }
+    }
+  });
+
   test("the point query reads Blinded, the senses and the light as the raster does", () => {
     // A Blinded creature with blindsight, one with darkvision and one with truesight, in the dark around lights, each its own player's.
     const s = visionRoom({
