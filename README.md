@@ -490,18 +490,54 @@ Its project, network and volume names are the same as
 
 ### What you need
 
-- A Linux server with Docker Engine 28 or later and the Docker Compose v2
-  plugin, as in [Before the first deploy](#before-the-first-deploy).
+- A Linux server with Docker Engine 28 or later, as in
+  [Before the first deploy](#before-the-first-deploy).
+- The Docker Compose plugin, 2.31 or later, the oldest tested. Older ones
+  cannot read the file's inline configs, its volume `subpath` mounts or
+  `restart` in `depends_on`. Check with `docker compose version`.
 - A hostname for the site, for example `vtt.example.com`.
 - One way to serve it over HTTPS:
   - The `https` profile. The hostname's DNS record points at the server,
     and ports 80 and 443 are open to the internet. Caddy gets and renews
     the certificate on its own.
   - Or your own reverse proxy or tunnel, set up as in
-    [Put HTTPS in front of it](#5-put-https-in-front-of-it).
+    [Put HTTPS in front of it](#5-put-https-in-front-of-it). Behind
+    Cloudflare, use this, a tunnel or your own proxy, rather than the
+    `https` profile: Caddy would see every visitor as a Cloudflare address.
 
 The networks use the subnets listed in Before the first deploy, and Caddy's
-adds 172.31.243.16/28.
+adds 172.31.243.16/28. If any of them clash with a network on your host,
+do not edit `compose.yml`, which every update replaces. Put new subnets in
+a file named `compose.override.yml` next to it, which Compose reads on its
+own, for example:
+
+```yaml
+networks:
+  raccoon-edge:
+    ipam:
+      config: !override
+        - subnet: 10.89.6.0/24
+  raccoon-data:
+    ipam:
+      config: !override
+        - subnet: 10.89.7.0/24
+  raccoon-proxy:
+    ipam:
+      config: !override
+        - subnet: 10.89.8.0/24
+  raccoon-egress:
+    ipam:
+      config: !override
+        - subnet: 10.89.9.0/28
+  raccoon-https:
+    ipam:
+      config: !override
+        - subnet: 10.89.9.16/28
+```
+
+List only the networks you move. `!override` replaces the subnet instead
+of adding a second one. The firewall rules name the bridges, not their
+subnets, so they need no change.
 
 ### 1. Download the files
 
@@ -562,6 +598,20 @@ Without the `https` profile, put your own front end on `raccoon-edge`, as
 in [Put HTTPS in front of it](#5-put-https-in-front-of-it). Either way, add
 the [firewall rules](#4-firewall-rules-recommended-once) once, and if the
 site is behind Cloudflare, check [its settings](#6-if-you-use-cloudflare).
+
+With the `https` profile, Caddy's bridge, `br-rvtt-https`, has a real
+gateway too, so a compromised Caddy could reach the host and your network.
+Two more rules, once, keep it to the internet. They match only connections
+Caddy starts, so the answers to visitors on ports 80 and 443 still pass:
+
+```bash
+sudo iptables -I INPUT 1 -i br-rvtt-https -m conntrack --ctstate NEW -j DROP
+sudo iptables -I DOCKER-USER -i br-rvtt-https -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16 -m conntrack --ctstate NEW -j DROP
+sudo netfilter-persistent save
+```
+
+Caddy resolves names through Cloudflare's 1.1.1.1, as the egress proxy
+does, so these rules never cut off its DNS.
 
 ### 4. Make your group's room
 
@@ -636,8 +686,16 @@ run's page, once. After the approval it builds the amd64 image and runs
 the smoke test (`selfhost/smoke-test.sh`): the image comes up healthy with
 `selfhost/compose.yml`, and the files its services mount match `docker/`
 byte for byte. It then pushes amd64 and arm64 from the same build, checks
-that the amd64 image pushed is the one it tested, and only then tags
-`X.Y.Z`, `X.Y` and `latest`.
+that the amd64 image pushed is the one it tested, and only then tags it.
+
+Tags only move forward. A release always tags `X.Y.Z`. It moves `X.Y` only
+while it is the newest release of that minor, and `latest` only while it is
+the newest release of all, so a patch to an older minor, an older release
+that finishes last, or a re-run of an older one never moves a host back.
+A version already on Docker Hub is never pushed again: to change one,
+release the next patch. Releases run one at a time. Push one tag and let
+its run finish before the next, because a release waiting behind another
+is cancelled when a third arrives.
 
 The `dockerhub` environment, in the repository's settings, holds the
 secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
