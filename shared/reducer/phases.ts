@@ -1,6 +1,7 @@
 import { keys } from "../keys.ts";
 import type { MapPhase, PhaseGrid, Scene, SceneMap } from "../model.ts";
 import type { MapPhaseInput, OpOf } from "../protocol.ts";
+import { HEX_ORIGIN, hexOriginBefore } from "../rules/grid.ts";
 import { gone, invalid, type Tx } from "./tx.ts";
 
 /**
@@ -112,7 +113,9 @@ export function withPhases(scene: Scene, phases: MapPhaseInput[]): Scene {
 /**
  * Every op that stores phases checks them, so this refusal is for a scene
  * no op made, such as one a hand-made backup brought in: a switch never
- * writes a map the protocol would refuse.
+ * writes a map the protocol would refuse. For the same reason it refuses a
+ * map whose origin lies before the image on a hex scene, as every other op
+ * that writes a map does (reducer/room.ts onHexGrid, D-261026-8).
  */
 export function sceneSetPhase(tx: Tx, op: OpOf<"scene.setPhase">): void {
   const scene = tx.scene(op.sceneId);
@@ -121,7 +124,9 @@ export function sceneSetPhase(tx: Tx, op: OpOf<"scene.setPhase">): void {
   if (phase.id === scene.phaseId) return;
   const problem = phaseProblem(scene.phaseGrid, phase);
   if (problem) throw invalid(problem);
-  tx.write(keys.scene(scene.id), withPhaseLight({ ...scene, phaseId: phase.id, map: phaseMap(scene.phaseGrid, phase) }, phase));
+  const next = withPhaseLight({ ...scene, phaseId: phase.id, map: phaseMap(scene.phaseGrid, phase) }, phase);
+  if (hexOriginBefore(next)) throw invalid(HEX_ORIGIN);
+  tx.write(keys.scene(scene.id), next);
 }
 
 /**
