@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { LIMITS } from "#shared/limits.ts";
 import type { ClassResource } from "#shared/model.ts";
 import { wrappedButtons } from "./helpers/wraps.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
@@ -772,6 +773,46 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await line.waitFor({ state: "detached" });
     await focusOnAdd("the level-up's Update");
     await closeSheets(pat);
+  });
+
+  test("fu32-cr-a. by keyboard on Thorn's token panel, the Add sheet's Add that fills the list takes Add away for the limit's line, and focus goes to the section's first button, never the page (LP22-OPUS-5c)", async () => {
+    await setUp(pat, patCdp, PHONE);
+    const before = stored();
+    const fill = Array.from({ length: LIMITS.resourcesPerCharacter - 1 - before.length }, (_, i) => ({ id: randomUUID(), name: `Knack ${i + 1}`, max: 1, reset: "long" as const }));
+    try {
+      await ops.send({ t: "character.update", characterId: run.thorn, patch: { resources: [...before, ...fill] } });
+      await storedReads("one short of the limit", (list) => list.length, LIMITS.resourcesPerCharacter - 1);
+      const panel = await thornsPanel(pat);
+      const uses = section(panel);
+      await uses.getByRole("button", { name: "Add a class resource" }).focus();
+      await pat.keyboard.press("Enter");
+      const add = sheet(pat, "Add a class resource");
+      await add.waitFor();
+      await add.getByRole("radio", { name: "Your own" }).check();
+      await add.getByRole("textbox", { name: "Name" }).fill("Last Knack");
+      await add.getByRole("textbox", { name: "Count" }).fill("1");
+      await add.getByRole("button", { name: "Add", exact: true }).focus();
+      await pat.keyboard.press("Enter");
+      await add.waitFor({ state: "detached" });
+      await uses.getByText(`A character holds at most ${LIMITS.resourcesPerCharacter} class resources. Remove one to add another.`, { exact: true }).waitFor();
+      // With no Add left, the section's first button takes focus (UsesSection.tsx).
+      const onFirst = () =>
+        uses.evaluate((el) => {
+          const { document } = globalThis as unknown as { document: { activeElement: unknown } };
+          return (el as unknown as { querySelector(s: string): unknown }).querySelector("button") === document.activeElement;
+        });
+      await waitFor("focus on the section's first button", () => onFirst().then((on) => (on ? true : null)), 5_000).catch(async () =>
+        assert.fail(
+          `focus is on "${await pat.evaluate(() => {
+            const el = (globalThis as unknown as { document: { activeElement: (DomNode & { tagName: string }) | null } }).document.activeElement;
+            return !el || el.tagName === "BODY" ? "the page" : (el.textContent ?? "").trim();
+          })}"`,
+        ),
+      );
+    } finally {
+      await ops.send({ t: "character.update", characterId: run.thorn, patch: { resources: before } });
+      await closeSheets(pat);
+    }
   });
 
   test("cr-c-13. no console errors on any page", () => {
