@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { CHUNK_CELLS, type BuildChunk, type Token } from "#shared/model.ts";
+import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type FogTile, type Token } from "#shared/model.ts";
+import { tileKey } from "#shared/keys.ts";
+import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { actor, effect, token as makeToken } from "#shared/testutil.ts";
 import { dropLanding, dropView } from "../features/movement/drop.ts";
 import { raised, world } from "../features/movement/testing.ts";
+import { seenChunks } from "./relief/seenChunks.ts";
 import { SHADOW_CORE, shadowShape, tokenLift } from "./tokenShadow.ts";
 
 /** A scene "s1" whose first chunk has these heights, keyed "x,y". */
@@ -104,5 +107,64 @@ describe("a dragged token's shadow lands as the drop does (review AT-O-23)", () 
     const at = { x: 4, y: 4 };
     assert.equal(tokenLift(s.buildChunks, s.tokens.kobold!, at), 0, "by its own footing it would land on the low ground");
     assert.equal(tokenLift(s.buildChunks, s.tokens.kobold!, at, dropLanding(dropView(s, "player"), s.tokens.kobold!, at)), 10);
+  });
+});
+
+describe("a player's shadow reads only the ground the fog shows (FLIER-SHADOW-FOG)", () => {
+  /** Fog over the whole first tile but the cells listed, keyed "x,y". */
+  function fogShowing(...cells: string[]): Record<string, FogTile> {
+    const bits = new Uint8Array(TILE_BYTES);
+    for (const key of cells) {
+      const [x, y] = key.split(",").map(Number);
+      for (let sy = 0; sy < FOG_SUBCELLS; sy++) {
+        for (let sx = 0; sx < FOG_SUBCELLS; sx++) {
+          const i = (y! * FOG_SUBCELLS + sy) * TILE_SUB + x! * FOG_SUBCELLS + sx;
+          bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+        }
+      }
+    }
+    return { [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) } };
+  }
+  const bounds = { w: 16, h: 16 };
+
+  test("a flier over a fogged platform casts the shadow of its whole height, as over the ground the player has seen", () => {
+    const c = chunks({ "3,3": 10 });
+    const seen = seenChunks({ chunks: c, sceneId: "s1", bounds, fog: fogShowing() });
+    assert.equal(tokenLift(c, token(3, 3, 25)), 15, "the room's real ground");
+    assert.equal(tokenLift(seen, token(3, 3, 25)), 25);
+    // A still token at the platform's height on fogged ground keeps a shadow too, as it is 10 ft over the ground the player sees.
+    assert.equal(tokenLift(seen, token(3, 3, 10)), 10);
+  });
+
+  test("ground with any revealed sub-cell is seen, and the DM reads the real ground", () => {
+    const c = chunks({ "3,3": 10 });
+    assert.equal(tokenLift(seenChunks({ chunks: c, sceneId: "s1", bounds, fog: fogShowing("3,3") }), token(3, 3, 25)), 15);
+    const corner = new Uint8Array(TILE_BYTES);
+    const i = 3 * FOG_SUBCELLS * TILE_SUB + 3 * FOG_SUBCELLS;
+    corner[i >> 3] = 1 << (i & 7);
+    const one = { [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(corner) } };
+    assert.equal(tokenLift(seenChunks({ chunks: c, sceneId: "s1", bounds, fog: one }), token(3, 3, 25)), 15, "one sub-cell of the platform revealed");
+    assert.equal(seenChunks({ chunks: c, sceneId: "s1", bounds, fog: null }), c);
+  });
+
+  test("the same visible state over different hidden heights gives the same shadow, still and while dragged", () => {
+    const fog = fogShowing("2,2", "3,2");
+    for (const hidden of [0, 10, 30, -20]) {
+      const c = chunks({ "2,2": 5, "6,6": hidden, "7,6": hidden });
+      const seen = seenChunks({ chunks: c, sceneId: "s1", bounds, fog });
+      assert.equal(tokenLift(seen, token(6, 6, 20)), 20, `still, over hidden ${hidden} ft`);
+      assert.equal(tokenLift(seen, token(2, 2, 20), { x: 6, y: 6 }), 20, `dragged onto hidden ${hidden} ft`);
+      assert.equal(tokenLift(seen, token(2, 2, 5), { x: 6, y: 6 }), 0, `a walker dragged onto hidden ${hidden} ft lands on the ground it sees`);
+    }
+  });
+
+  test("heights past the scene's edge read as no ground, and other scenes' chunks are left alone", () => {
+    const c = { ...chunks({ "12,3": 10 }), "s2:0,0": { ...chunks({ "3,3": 10 })["s1:0,0"]!, sceneId: "s2" } };
+    const fog = fogShowing("12,3");
+    const seen = seenChunks({ chunks: c, sceneId: "s1", bounds: { w: 10, h: 10 }, fog });
+    assert.equal(tokenLift(seen, token(12, 3, 25)), 25);
+    assert.equal(seen["s2:0,0"], c["s2:0,0"]);
+    // Kept while nothing changes, so every shadow shares one copy.
+    assert.equal(seenChunks({ chunks: c, sceneId: "s1", bounds: { w: 10, h: 10 }, fog }), seen);
   });
 });

@@ -62,6 +62,10 @@ type Lifted = PlacedToken & { sceneId: SceneId; elevation: number };
  * the drop's (dropLanding, which lands a token on a holder by the holder),
  * else its own footing (`landedElevation`). So the shadow during a drag
  * never disagrees with where the token lands.
+ *
+ * `chunks` is the ground this viewer may read: for a player on a scene with
+ * fog, the chunks of relief/seenChunks.ts, so the shadow never follows
+ * heights under the fog (TokenShadow.tsx).
  */
 export function tokenLift(chunks: Chunks, token: Lifted, at?: { x: number; y: number }, landing?: number): number {
   if (!at || (at.x === token.x && at.y === token.y)) return Math.max(0, token.elevation - footprintGround(chunks, token));

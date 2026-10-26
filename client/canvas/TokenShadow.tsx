@@ -1,15 +1,18 @@
 import { memo, useMemo } from "react";
 import { Circle } from "react-konva";
 import { useStore } from "zustand";
-import type { BuildChunk } from "#shared/model.ts";
+import type { BuildChunk, FogTile } from "#shared/model.ts";
 import type { ViewToken } from "../lib/scene.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useScoped } from "../state/scope.ts";
 import { useRoomView } from "../state/view.ts";
 import { dropLanding, dropView } from "../features/movement/drop.ts";
+import { seenChunks } from "./relief/seenChunks.ts";
 import { SHADOW_CORE, shadowShape, tokenLift } from "./tokenShadow.ts";
 
 const EMPTY: Record<string, BuildChunk> = {};
+const NO_TILES: Record<string, FogTile> = {};
+const NO_BOUNDS = { w: 0, h: 0 };
 
 /**
  * A token's shadow when it is above the ground (tokenShadow.ts), drawn in
@@ -25,6 +28,9 @@ const EMPTY: Record<string, BuildChunk> = {};
  * `at` is where a ghost of another member's drag stands. This device's own
  * drag is read from the cell its token is over (state/localDrags.ts), so the
  * shadow says what height the token would land at.
+ *
+ * A player reads only the ground they have seen (relief/seenChunks.ts), as
+ * the height readout does, so a shadow never tracks heights under the fog.
  */
 export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; w: number; h: number; at?: { x: number; y: number } }) {
   const { token, w, h } = props;
@@ -36,12 +42,16 @@ export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; 
   // Only a token being dragged reads the room, for the drop's landing: by its holder while it sits on one every player sees.
   const view = useRoomView((s) => (ax === undefined ? null : s.view));
   const role = useRoomView((s) => s.you?.role ?? "player");
+  const fogged = useRoomView((s) => role === "player" && s.view?.scenes[token.sceneId]?.fogEnabled !== false);
+  const tiles = useRoomView((s) => (fogged ? (s.view?.fogTiles ?? NO_TILES) : null));
+  const bounds = useRoomView((s) => s.view?.scenes[token.sceneId]?.bounds ?? NO_BOUNDS);
   const lift = useMemo(() => {
+    const ground = seenChunks({ chunks, sceneId: token.sceneId, bounds, fog: tiles });
     const spotAt = ax === undefined || ay === undefined ? undefined : { x: ax, y: ay };
-    const landing = spotAt && view ? dropLanding(dropView(view, role), token, spotAt) : undefined;
-    return tokenLift(chunks, token, spotAt, landing);
+    const landing = spotAt && view ? dropLanding({ ...dropView(view, role), buildChunks: ground }, token, spotAt) : undefined;
+    return tokenLift(ground, token, spotAt, landing);
     // The fields that place the token, not the token itself, so a change of its HP reads no ground. The room only while dragged.
-  }, [chunks, token.sceneId, token.x, token.y, token.size, token.w, token.h, token.squeeze, token.elevation, ax, ay, view, role]);
+  }, [chunks, tiles, bounds, token.sceneId, token.x, token.y, token.size, token.w, token.h, token.squeeze, token.elevation, ax, ay, view, role]);
   const shape = shadowShape(lift, { w, h });
   if (!shape) return null;
   return (
