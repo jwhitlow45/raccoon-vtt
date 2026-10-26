@@ -4,6 +4,7 @@ import type { Scene } from "#shared/model.ts";
 import { phasePreloads, usePhasePreload } from "../../features/phases/preload.ts";
 import { mapSwap, sameShown, type ShownMap } from "../../features/phases/swap.ts";
 import type { AssetVariant } from "../../lib/api.ts";
+import type { Rect as WorldRect } from "../../lib/camera.ts";
 import { mapWorldRect } from "../../lib/scene.ts";
 import { mapFailureText } from "../../state/sceneLoad.ts";
 import { useAssets, useRoomUi, useRoomView } from "../../state/view.ts";
@@ -40,18 +41,45 @@ function sameMapInputs(a: { scene: Scene; variant: AssetVariant }, b: { scene: S
 }
 
 function MapLayerImpl(props: { scene: Scene; variant: AssetVariant }) {
-  const { scene, variant } = props;
-  const { w, h } = scene.bounds;
   return (
     <Layer listening={false}>
-      <Rect x={0} y={0} width={w} height={h} fill={scene.background || "#2b2b31"} />
-      {scene.map ? <MapImage sceneId={scene.id} map={scene.map} phases={scene.phases} variant={variant} sceneName={scene.name} /> : null}
-      {scene.grid?.show ? <Grid scene={scene} /> : null}
+      <MapContent scene={props.scene} variant={props.variant} report />
     </Layer>
   );
 }
 
-function MapImage(props: { sceneId: string; map: NonNullable<Scene["map"]>; phases: Scene["phases"]; variant: AssetVariant; sceneName: string }) {
+/** The image a map draws, as the board drew it last, for the isometric view's side tints (relief/looks.ts). */
+export type DrawnMap = { image: MapSource; rect: WorldRect };
+
+/**
+ * The background, the map image and the grid, for a layer of their own in
+ * Top-down and for the isometric view's ground stage. Only the tree on
+ * screen reports the map's progress (`report`), so the loading notice and
+ * a failed download's toast come once.
+ */
+export const MapContent = memo(function MapContent(props: { scene: Scene; variant: AssetVariant; report: boolean; onDrawn?: (drawn: DrawnMap | null) => void }) {
+  const { scene, variant } = props;
+  const { w, h } = scene.bounds;
+  return (
+    <>
+      <Rect x={0} y={0} width={w} height={h} fill={scene.background || "#2b2b31"} />
+      {scene.map ? <MapImage sceneId={scene.id} map={scene.map} phases={scene.phases} variant={variant} sceneName={scene.name} report={props.report} onDrawn={props.onDrawn} /> : null}
+      {scene.grid?.show ? <Grid scene={scene} /> : null}
+    </>
+  );
+}, (a, b) => a.report === b.report && a.onDrawn === b.onDrawn && sameMapInputs(a, b));
+
+const NO_PRELOADS: ReturnType<typeof phasePreloads> = [];
+
+function MapImage(props: {
+  sceneId: string;
+  map: NonNullable<Scene["map"]>;
+  phases: Scene["phases"];
+  variant: AssetVariant;
+  sceneName: string;
+  report: boolean;
+  onDrawn?: (drawn: DrawnMap | null) => void;
+}) {
   const assets = useAssets();
   const ui = useRoomUi();
   const progress = useMapProgressStore();
@@ -76,7 +104,8 @@ function MapImage(props: { sceneId: string; map: NonNullable<Scene["map"]>; phas
     () => (dm ? phasePreloads(props.phases, props.map.assetId, props.variant, assets.url) : []),
     [dm, props.phases, props.map.assetId, props.variant, assets],
   );
-  usePhasePreload(preloads, status === "ready");
+  // Once per device: only the tree on screen preloads.
+  usePhasePreload(props.report ? preloads : NO_PRELOADS, status === "ready");
 
   // The loading notice over the canvas waits for this report. A map that
   // cannot be placed or will not load ends it as failed, so it never spins
@@ -87,7 +116,9 @@ function MapImage(props: { sceneId: string; map: NonNullable<Scene["map"]>; phas
   // The name only words the toast, so a rename does not report again.
   const nameRef = useRef(props.sceneName);
   nameRef.current = props.sceneName;
+  const reports = props.report;
   useEffect(() => {
+    if (!reports) return;
     const report = (state: "loading" | "drawn" | "failed") => progress.setState({ progress: { assetId, state, swap: swapping } });
     if (!placeable) return report("failed");
     if (status === "loading") return report("loading");
@@ -100,9 +131,17 @@ function MapImage(props: { sceneId: string; map: NonNullable<Scene["map"]>; phas
     // after Konva's, so by the time it runs the map is on the canvas.
     const frame = requestAnimationFrame(() => report("drawn"));
     return () => cancelAnimationFrame(frame);
-  }, [assetId, placeable, status, swapping, progress, ui]);
+  }, [reports, assetId, placeable, status, swapping, progress, ui]);
 
   const drawn = swap.draw;
+  const onDrawn = props.onDrawn;
+  const drawnImage = drawn?.image ?? null;
+  // The rectangle is made anew on each render, so its numbers say when it changed.
+  const [rx, ry, rw, rh] = drawn ? [drawn.rect.x, drawn.rect.y, drawn.rect.width, drawn.rect.height] : [0, 0, 0, 0];
+  useEffect(() => {
+    if (!onDrawn) return;
+    onDrawn(drawnImage ? { image: drawnImage, rect: { x: rx, y: ry, width: rw, height: rh } } : null);
+  }, [onDrawn, drawnImage, rx, ry, rw, rh]);
   if (!drawn) return null;
   // Every variant is stretched to the calibrated rectangle, so a phone's
   // 4096 px copy and a desktop's 8192 px original agree with the printed
@@ -140,3 +179,4 @@ function Grid(props: { scene: Scene }) {
     />
   );
 }
+
