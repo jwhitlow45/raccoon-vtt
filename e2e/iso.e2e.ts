@@ -439,6 +439,10 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         await menu.getByRole("menuitem", { name: "Turn left", exact: true }).waitFor();
         const at = `display ${size.width}x${size.height}${scale === 1 ? "" : "-130"}`;
         const found = alignmentLines(await measureAlignment(menu.getByRole("group", { name: "View" })), at);
+        // "Top-down" on one line, never broken at its hyphen (ISO5-OPUS-5).
+        for (const n of await menu.locator("[data-view-name]").evaluateAll((els) => els.map((el) => (el as unknown as { getClientRects(): { length: number } }).getClientRects().length))) {
+          if (n !== 1) found.push(`${at}: the view's name in the help drawn over ${n} lines`);
+        }
         lines.push(...found);
         if (found.length > 0) await shots.take(tv, `iso-display-${size.width}-${Math.round(scale * 100)}`);
         const box = await menu.boundingBox();

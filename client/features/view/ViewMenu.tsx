@@ -17,7 +17,7 @@ import {
   pickOf,
   menuLine,
   sayView,
-  suggestionHelp,
+  suggestedKind,
   topDownTool,
   TURN_LEFT,
   TURN_LEFT_DESCRIPTION,
@@ -25,6 +25,7 @@ import {
   TURN_RIGHT_DESCRIPTION,
   VIEW_CHOICES,
   VIEW_GROUP,
+  VIEW_NAMES,
   viewGestureSlot,
   viewSaid,
   viewVoiceSlot,
@@ -159,7 +160,7 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; keyOpen?: boolean
                 <span>{choiceWords(c)}</span>
                 {c === "follow" ? (
                   <span id={helpId} style={{ fontSize: theme.font.small, fontWeight: theme.weight.regular, color: theme.color.textMuted, lineHeight: theme.leading.body }}>
-                    {suggestionHelp(choice.suggested)}
+                    <SuggestionHelp suggested={choice.suggested} />
                   </span>
                 ) : null}
               </span>
@@ -187,6 +188,22 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; keyOpen?: boolean
       ) : null}
       <ViewVoice />
     </div>
+  );
+}
+
+/**
+ * The help under Follow the scene (choice.ts suggestionHelp), the view's
+ * name kept on one line: at 320 px and 130% "Top-down" broke at its hyphen.
+ */
+export function SuggestionHelp(props: { suggested: Scene["suggestedView"] }) {
+  return (
+    <>
+      This scene suggests{" "}
+      <span data-view-name="" style={{ whiteSpace: "nowrap" }}>
+        {VIEW_NAMES[suggestedKind(props.suggested)]}
+      </span>
+      .
+    </>
   );
 }
 

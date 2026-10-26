@@ -3803,6 +3803,14 @@ async function isoTopBar(sweep: Sweep, page: Page, screen: string): Promise<void
   if (a && b && Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) > LIMIT_PX) sweep.lines.push(`${sweep.at} ${screen}: View's middle ${a.y + a.height / 2} is off Fit's ${b.y + b.height / 2}`);
 }
 
+/** A line for each view name in the help that breaks over lines: "Top-down" broke at its hyphen at 320 px and 130% (ISO5-OPUS-5). */
+async function viewNameWhole(root: Locator, at: string): Promise<string[]> {
+  const names = root.locator("[data-view-name]");
+  await names.first().waitFor();
+  const rects = await names.evaluateAll((els) => els.map((el) => [(el as unknown as { textContent: string }).textContent, (el as unknown as { getClientRects(): { length: number } }).getClientRects().length] as const));
+  return rects.filter(([, n]) => n !== 1).map(([words, n]) => `${at} iso5-help: "${words}" drawn over ${n} lines`);
+}
+
 /** iso5-a, last in alignment-icons.e2e.ts. */
 export function isoChoiceTests(): void {
   test(`iso5-a. the top bar with the View button, for the DM and for Pat, the View menu in Top-down and in Isometric, and Scene settings' Suggested view, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-isometric-view.md 8)`, async () => {
@@ -3832,6 +3840,7 @@ export function isoChoiceTests(): void {
       await isoTopBar(sweep, page, "iso5-top-bar");
       await open();
       await sweep.measure(page, "iso5-menu-top-down", menu);
+      await sweep.add(page, "iso5-menu-top-down", await viewNameWhole(menu, sweep.at));
       await shots.take(page, `alignment-iso5-menu-top-down-${atName(at)}`);
       await menu.getByRole("radio", { name: "Isometric" }).check();
       await menu.getByRole("button", { name: "Turn right", exact: true }).waitFor();

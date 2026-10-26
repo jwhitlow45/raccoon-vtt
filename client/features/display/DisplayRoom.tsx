@@ -32,9 +32,9 @@ import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "../hando
 import { nextPopup, pageName, showingKey } from "../handouts/handouts.ts";
 import { useXCard, XCardHost } from "../xcard/XCardHost.tsx";
 import { UI_SCALES, uiScaleLabel, useUiScale } from "../device/settings.ts";
-import { choiceOf, choiceWords, isoOffered, pickOf, suggestionHelp, TURN_LEFT, TURN_LEFT_DESCRIPTION, TURN_RIGHT, TURN_RIGHT_DESCRIPTION, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
+import { choiceOf, choiceWords, isoOffered, pickOf, TURN_LEFT, TURN_LEFT_DESCRIPTION, TURN_RIGHT, TURN_RIGHT_DESCRIPTION, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
 import { displayViewKey, pickView, turnView } from "../view/store.ts";
-import { useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
+import { SuggestionHelp, useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
 import {
   BAR_BUTTONS,
   barFirstFocus,
@@ -975,7 +975,7 @@ function DisplayView(props: { choice: ViewChoiceState; onTouch(): void }) {
         ))}
       </div>
       <p id={helpId} style={{ margin: 0, color: theme.color.textMuted, fontSize: TV_TEXT.small, lineHeight: theme.leading.body }}>
-        {suggestionHelp(choice.suggested)}
+        <SuggestionHelp suggested={choice.suggested} />
       </p>
       {choice.shown.kind === "isometric" ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
