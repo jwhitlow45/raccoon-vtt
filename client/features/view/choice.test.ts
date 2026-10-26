@@ -11,7 +11,6 @@ import {
   menuLine,
   otherViewPress,
   pickOf,
-  suggestionHelp,
   topDownLine,
   topDownTool,
   turnedSaid,
@@ -93,8 +92,6 @@ describe("the view choice (docs/design-v1-isometric-view.md 7, 8)", () => {
   test("the words shown are the design's", () => {
     assert.equal(viewButtonLabel(TOP_DOWN), "View: Top-down");
     assert.equal(viewButtonLabel(isometric(2)), "View: Isometric");
-    assert.equal(suggestionHelp("isometric"), "This scene suggests Isometric.");
-    assert.equal(suggestionHelp(undefined), "This scene suggests Top-down.");
     assert.equal(kindSaid("isometric"), "Isometric view.");
     assert.equal(kindSaid("topDown"), "Top-down view.");
     assert.equal(followSaid("isometric"), "Following the scene: isometric.");

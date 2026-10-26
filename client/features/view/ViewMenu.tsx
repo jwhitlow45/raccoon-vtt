@@ -262,7 +262,7 @@ export function ViewSheetDialog(props: { choice: ViewChoiceState; opener?: RefOb
   );
 }
 
-/** The help under Follow the scene (choice.ts suggestionHelp). */
+/** The help under Follow the scene, on the View menu and the display's. Its words are only here, and e2e/iso.e2e.ts reads them as drawn. */
 export function SuggestionHelp(props: { suggested: Scene["suggestedView"] }) {
   return (
     <>

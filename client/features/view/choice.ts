@@ -88,9 +88,6 @@ export const VIEW_TIP = "Change the view";
 /** The menu's group, and the display's. */
 export const VIEW_GROUP = "View";
 
-/** The help under Follow the scene. */
-export const suggestionHelp = (suggested: Scene["suggestedView"]): string => `This scene suggests ${VIEW_NAMES[suggestedKind(suggested)]}.`;
-
 /** Scene settings' row. */
 export const SUGGESTED_VIEW = "Suggested view";
 export const SUGGESTED_VIEW_HELP = "Devices that follow the scene show this view.";
