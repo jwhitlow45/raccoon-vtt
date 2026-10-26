@@ -1,4 +1,4 @@
-import { FOG_SUBCELLS, type WallFeature } from "#shared/model.ts";
+import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type WallFeature } from "#shared/model.ts";
 import type { WallSet } from "#shared/rules/walls.ts";
 import type { FogView } from "./fogView.ts";
 
@@ -18,8 +18,12 @@ import type { FogView } from "./fogView.ts";
  * merge within each cell.
  */
 
-/** How a piece stands: a wall in stone, a closed door's leaf in wood, a window's pane. An open door lies flat on the ground. */
-export type WallKind = "wall" | "door" | "window";
+/**
+ * How a piece stands: a wall in stone, a closed door's leaf in wood, a
+ * window's pane, a pillar's stone drum (pillarPieces). An open door lies
+ * flat on the ground.
+ */
+export type WallKind = "wall" | "door" | "window" | "pillar";
 
 export type WallPiece = {
   /** Stable across rebuilds: the segment and where along it the piece starts. */
@@ -201,4 +205,28 @@ function piecesOf(s: Segment, fog: FogView, out: WallPiece[]): void {
     }
   }
   close(ts[ts.length - 1]!);
+}
+
+/**
+ * The pillars that stand (5.5): each pillar cell of the scene whose every
+ * sub-cell this viewer has revealed, by the stand rule. The rest lie flat
+ * on the ground stage under the fog (builder/draw.ts `standing`).
+ */
+export function pillarPieces(chunks: Readonly<Record<string, BuildChunk | undefined>>, sceneId: string, bounds: { w: number; h: number }, fog: FogView): WallPiece[] {
+  const out: WallPiece[] = [];
+  for (const chunk of Object.values(chunks)) {
+    if (!chunk || chunk.sceneId !== sceneId) continue;
+    for (const [key, terrain] of Object.entries(chunk.cells)) {
+      if (terrain !== "pillar") continue;
+      const [xs, ys] = key.split(",");
+      const x = Number(xs);
+      const y = Number(ys);
+      if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= bounds.w || y >= bounds.h) continue;
+      // A cell key outside its chunk is not this chunk's to draw.
+      if (Math.floor(x / CHUNK_CELLS) !== chunk.cx || Math.floor(y / CHUNK_CELLS) !== chunk.cy) continue;
+      if (!fog.boxClear({ x0: x, y0: y, x1: x + 1, y1: y + 1 })) continue;
+      out.push({ id: `p${x},${y}`, kind: "pillar", ax: x, ay: y, bx: x + 1, by: y + 1, cx: x, cy: y, beside: null });
+    }
+  }
+  return out;
 }

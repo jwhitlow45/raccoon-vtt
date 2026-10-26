@@ -115,6 +115,13 @@ export function facesOf(p: CellPiece, turn: Turn): Face[] {
   return out;
 }
 
+const CORNERS = [
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+] as const;
+
 /** A box in view units. */
 export type VBox = { x0: number; y0: number; x1: number; y1: number };
 
@@ -136,6 +143,11 @@ function grow(box: VBox, turn: Turn, x: number, y: number, z0: number, z1: numbe
  */
 export function boundsOf(p: StaticPiece, turn: Turn): VBox {
   const box: VBox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  if (p.kind === "wall" && p.piece.kind === "pillar") {
+    // A pillar's drum stands inside its cell: the cell's corners bound it.
+    for (const [cx, cy] of CORNERS) grow(box, turn, p.piece.ax + cx, p.piece.ay + cy, p.base, p.base + WALL_RISE);
+    return box;
+  }
   if (p.kind === "wall") {
     grow(box, turn, p.piece.ax, p.piece.ay, p.base, p.base + WALL_RISE);
     grow(box, turn, p.piece.bx, p.piece.by, p.base, p.base + WALL_RISE);
@@ -143,14 +155,7 @@ export function boundsOf(p: StaticPiece, turn: Turn): VBox {
   }
   // A column's sides reach down to 0 at the lowest. A pit draws only inside its opening at 0.
   const high = p.kind === "column" ? p.z : 0;
-  for (const [cx, cy] of [
-    [0, 0],
-    [1, 0],
-    [1, 1],
-    [0, 1],
-  ] as const) {
-    grow(box, turn, p.x + cx, p.y + cy, 0, high);
-  }
+  for (const [cx, cy] of CORNERS) grow(box, turn, p.x + cx, p.y + cy, 0, high);
   return box;
 }
 

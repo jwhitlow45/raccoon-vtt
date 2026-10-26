@@ -81,6 +81,15 @@ export class FogView {
     return true;
   }
 
+  /** Whether any sub-cell a box touches is revealed, the scene's edge counting as fog. */
+  boxAny(box: CellBox): boolean {
+    if (!this.tiles) return true;
+    const [sx0, sx1] = subRange(box.x0, box.x1);
+    const [sy0, sy1] = subRange(box.y0, box.y1);
+    for (let sy = Math.max(0, sy0); sy < sy1; sy++) for (let sx = Math.max(0, sx0); sx < sx1; sx++) if (this.revealed(sx, sy)) return true;
+    return false;
+  }
+
   /** Whether any sub-cell of the cell at x, y is revealed: the cell is seen, as `seenGround` counts it. */
   cellSeen(x: number, y: number): boolean {
     if (!this.tiles) return x >= 0 && y >= 0 && x < this.bounds.w && y < this.bounds.h;

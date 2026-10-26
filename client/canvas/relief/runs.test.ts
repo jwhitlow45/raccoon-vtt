@@ -7,7 +7,7 @@ import { encodeHeights } from "#shared/rules/heights.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { rng } from "#shared/testutil.ts";
 import { FogView } from "./fogView.ts";
-import { wallPieces, type WallPiece } from "./runs.ts";
+import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 
 const SCENE = { id: "s1", autoWalls: "off" as const, bounds: { w: 16, h: 16 } };
 const WALL: WallFeature = { kind: "wall" };
@@ -114,6 +114,21 @@ describe("standing wall runs", () => {
     assert.equal(walls.free.length, 1);
     assert.equal(wallPieces(walls, fogOf([[9, 9]])).length, 1);
     assert.equal(wallPieces(walls, fogOf([[8, 9], [10, 9], [9, 8], [9, 10]])).length, 0);
+  });
+
+  test("security: a pillar stands only where every sub-cell of its cell is revealed, and the DM sees every pillar stand", () => {
+    const chunks = build({}, [], { cells: { "2,2": "pillar", "5,5": "pillar", "6,6": "stone" } });
+    const whole: [number, number][] = [];
+    for (let sy = 8; sy < 12; sy++) for (let sx = 8; sx < 12; sx++) whole.push([sx, sy]);
+    // Cell 5, 5 with all but one sub-cell revealed.
+    const most: [number, number][] = [];
+    for (let sy = 20; sy < 24; sy++) for (let sx = 20; sx < 24; sx++) if (sx + sy > 40) most.push([sx, sy]);
+    assert.deepEqual(
+      pillarPieces(chunks, "s1", SCENE.bounds, fogOf([...whole, ...most])).map((p) => p.id),
+      ["p2,2"],
+    );
+    assert.deepEqual(pillarPieces(chunks, "s1", SCENE.bounds, ALL).map((p) => p.id).sort(), ["p2,2", "p5,5"]);
+    assert.equal(pillarPieces(chunks, "s1", { w: 4, h: 4 }, ALL).length, 1, "a pillar past the scene's edge does not stand");
   });
 
   test("property: every standing piece's runs each have a revealed sub-cell beside them, and every run with one stands", () => {
