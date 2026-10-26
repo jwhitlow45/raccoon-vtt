@@ -3,7 +3,7 @@ import { after, before, describe, test } from "node:test";
 import type { RoomState } from "#shared/model.ts";
 import { cellVision } from "#shared/perPlayerTestutil.ts";
 import { visionRules } from "#shared/ruleHooks.ts";
-import { character, member, room, scene, token } from "#shared/testutil.ts";
+import { actor, character, effect, member, room, scene, token } from "#shared/testutil.ts";
 import { HOLDERS_UNDER, holderRows, holdersAfter, lendsText, sharedOnlyText, unsharedMounts, untickQuestion } from "./holders.ts";
 
 /** "Who sees for themselves", "Who lends sight" and the mount's note (docs/design-v1-per-player-vision.md 7.1), from the DM's view. */
@@ -92,8 +92,10 @@ describe("a mount not every player sees (7.1, risk 2)", () => {
     const free = riding();
     free.tokens.thorn = { ...free.tokens.thorn!, attached: { to: "horse", kind: "ride" } };
     assert.deepEqual(unsharedMounts(free, "s1"), []);
+    // The note is a per-player scene's (7.1), so a whole-party scene says nothing even where no creature sees the horse.
     const whole = riding();
     whole.scenes.s1 = { ...whole.scenes.s1!, vision: { on: true, light: "dark" } };
+    whole.tokens.thorn = { ...whole.tokens.thorn!, actor: { inline: actor({ effects: [effect("b", { key: "blinded" })] }) } };
     assert.deepEqual(unsharedMounts(whole, "s1"), []);
     const lent = riding();
     lent.tokens.horse = { ...lent.tokens.horse!, partyVision: true };
