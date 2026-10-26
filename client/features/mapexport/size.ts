@@ -1,4 +1,5 @@
 import type { SceneMap } from "#shared/model.ts";
+import { cellWord, type Grid } from "#shared/rules/grid.ts";
 
 /**
  * How large an exported map image is, and which copy of the map art it is
@@ -51,6 +52,23 @@ export function exportSize(bounds: { w: number; h: number }, requested: number, 
   // The square root can land a hair above the true value.
   while (px > 1 && w * px * h * px > limits.maxPixels) px--;
   return { pxPerCell: px, requested: ask, width: w * px, height: h * px };
+}
+
+/**
+ * The export's words for the scene's cell: "square" or "hex" (grid.ts
+ * cellWord), the size line, and the grid switch's name, "Hex lines" on a
+ * hex scene (docs/design-v1-hex-grids.md 4, Words shown). A hex scene's
+ * line names no count, since its rows hold a different number of hexes.
+ */
+export function exportWords(g: Grid, bounds: { w: number; h: number }, size: Pick<ExportSize, "width" | "height" | "pxPerCell">): { cell: string; sizeLine: string; gridSwitch: string } {
+  const hex = g.shape === "hex";
+  return {
+    cell: cellWord(g),
+    sizeLine: hex
+      ? `${size.width} × ${size.height} px: hexes at ${size.pxPerCell} px.`
+      : `${size.width} × ${size.height} px: ${bounds.w} × ${bounds.h} squares at ${size.pxPerCell} px each.`,
+    gridSwitch: hex ? "Hex lines" : "Grid",
+  };
 }
 
 /** The phone-sized copy of a map is at most this many pixels on its long side (design 11.1). */

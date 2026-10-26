@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { RoomState, Scene } from "#shared/model.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
@@ -14,7 +15,7 @@ import { exportContent, hasBuildOn, type ExportView } from "./content.ts";
 import { exportFileName } from "./fileName.ts";
 import { ExportError, loadMapImage, renderMapPng } from "./render.ts";
 import { prefersShare, shareFile } from "./save.ts";
-import { DEFAULT_PX_PER_CELL, exportSize, mapVariantFor, PX_PER_CELL_CHOICES } from "./size.ts";
+import { DEFAULT_PX_PER_CELL, exportSize, exportWords, mapVariantFor, PX_PER_CELL_CHOICES } from "./size.ts";
 
 /**
  * "Export as image" in the scene's settings: the map image and the build
@@ -60,6 +61,7 @@ export function MapExport(props: { scene: Scene }) {
   const labels = useRoomView((s) => s.view?.labels ?? EMPTY_LABELS);
   const hasBuild = useMemo(() => hasBuildOn(scene.id, chunks, labels), [scene.id, chunks, labels]);
   const size = exportSize(scene.bounds, pxPerCell);
+  const words = exportWords(sceneGrid(scene), scene.bounds, size);
 
   const forget = () => {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -72,7 +74,7 @@ export function MapExport(props: { scene: Scene }) {
     runRef.current++;
     forget();
     setStatus({ kind: "idle" });
-  }, [pxPerCell, grid, view, scene.id, scene.name, scene.bounds.w, scene.bounds.h]);
+  }, [pxPerCell, grid, view, scene.id, scene.name, scene.bounds.w, scene.bounds.h, scene.gridShape]);
 
   useEffect(
     () => () => {
@@ -111,7 +113,7 @@ export function MapExport(props: { scene: Scene }) {
     try {
       const blob = await renderMapPng({ scene, size, content, grid, map, assets });
       if (run !== runRef.current) return;
-      const file = new File([blob], exportFileName(scene.name, scene.bounds, size.pxPerCell, view), { type: "image/png" });
+      const file = new File([blob], exportFileName(sceneGrid(scene), scene.name, scene.bounds, size.pxPerCell, view), { type: "image/png" });
       const url = URL.createObjectURL(file);
       urlRef.current = url;
       setStatus({
@@ -156,25 +158,21 @@ export function MapExport(props: { scene: Scene }) {
       {/* No box of its own, so the row stays an item of the section. */}
       <div ref={options} style={{ display: "contents" }}>
         <SettingRow
-          name="Pixels per square"
-          help={
-            size.pxPerCell < size.requested
-              ? undefined
-              : `${size.width} × ${size.height} px: ${scene.bounds.w} × ${scene.bounds.h} squares at ${size.pxPerCell} px each.`
-          }
+          name={`Pixels per ${words.cell}`}
+          help={size.pxPerCell < size.requested ? undefined : words.sizeLine}
           wide
         >
           <Segmented<number>
-            label="Pixels per square"
+            label={`Pixels per ${words.cell}`}
             value={pxPerCell}
-            options={PX_PER_CELL_CHOICES.map((v) => ({ value: v, label: `${v} px`, title: `${v} pixels per square` }))}
+            options={PX_PER_CELL_CHOICES.map((v) => ({ value: v, label: `${v} px`, title: `${v} pixels per ${words.cell}` }))}
             onChange={setPxPerCell}
           />
         </SettingRow>
       </div>
       {size.pxPerCell < size.requested ? (
         <Note>
-          Lowered to {size.pxPerCell} px per square, so the image stays within 16.7 million pixels, the most an iPhone can draw. It will be {size.width} × {size.height} px.
+          Lowered to {size.pxPerCell} px per {words.cell}, so the image stays within 16.7 million pixels, the most an iPhone can draw. It will be {size.width} × {size.height} px.
         </Note>
       ) : null}
 
@@ -198,7 +196,7 @@ export function MapExport(props: { scene: Scene }) {
         />
       </SettingRow>
 
-      <Checkbox label="Grid" help="Leave the grid off for another VTT. It draws its own grid over the image." checked={grid} onChange={setGrid} />
+      <Checkbox label={words.gridSwitch} help="Leave the grid off for another VTT. It draws its own grid over the image." checked={grid} onChange={setGrid} />
 
       <Row>
         <Button size="sm" disabled={busy} onClick={() => setOpen(false)}>
@@ -217,7 +215,7 @@ export function MapExport(props: { scene: Scene }) {
       {made ? (
         <>
           <Help>
-            Made {made.file.name}: {made.width} × {made.height} px at {made.pxPerCell} px per square, {formatBytes(made.file.size)}.
+            Made {made.file.name}: {made.width} × {made.height} px at {made.pxPerCell} px per {words.cell}, {formatBytes(made.file.size)}.
           </Help>
           {made.notes.map((n) => (
             <Help key={n}>{n}</Help>

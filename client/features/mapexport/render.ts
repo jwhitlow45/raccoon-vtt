@@ -1,4 +1,6 @@
 import type { Scene } from "#shared/model.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { hexLinesInView, type PathSink } from "../../canvas/layers/hexSpans.ts";
 import { assetUrl } from "../../lib/api.ts";
 import { mapWorldRect } from "../../lib/scene.ts";
 import type { AssetSource } from "../../state/view.ts";
@@ -19,7 +21,7 @@ import type { ExportSize } from "./size.ts";
 export class ExportError extends Error {}
 
 export type RenderInput = {
-  scene: Pick<Scene, "bounds" | "background" | "grid" | "map" | "autoWalls">;
+  scene: Pick<Scene, "bounds" | "background" | "grid" | "gridShape" | "map" | "autoWalls">;
   size: ExportSize;
   content: ExportContent;
   grid: boolean;
@@ -68,23 +70,37 @@ async function loadTextures(terrains: readonly TexturedTerrain[]): Promise<Parti
 }
 
 function drawGrid(g: CanvasRenderingContext2D, scene: RenderInput["scene"], pxPerCell: number): void {
-  const { w, h } = scene.bounds;
   const { color, opacity, lineWidth } = scene.grid;
   g.save();
   g.globalAlpha = Number.isFinite(opacity) ? opacity : 0.25;
   g.strokeStyle = color || "#ffffff";
   g.lineWidth = (lineWidth > 0 ? lineWidth : 1) / pxPerCell;
   g.beginPath();
-  for (let x = 0; x <= w; x++) {
-    g.moveTo(x, 0);
-    g.lineTo(x, h);
-  }
-  for (let y = 0; y <= h; y++) {
-    g.moveTo(0, y);
-    g.lineTo(w, y);
-  }
+  traceGrid(scene, pxPerCell, g);
   g.stroke();
   g.restore();
+}
+
+/**
+ * The grid's lines as one path: a square scene's lines x = 0..w and
+ * y = 0..h, and a hex scene's sides, each once, as the board draws them
+ * (canvas/layers/hexSpans.ts), over the whole scene.
+ */
+export function traceGrid(scene: Pick<RenderInput["scene"], "bounds" | "gridShape">, pxPerCell: number, sink: PathSink): void {
+  const { w, h } = scene.bounds;
+  const grid = sceneGrid(scene);
+  if (isHex(grid)) {
+    hexLinesInView(grid, scene.bounds, { corners: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: h }, { x: 0, y: h }], pxPerCell }, sink);
+    return;
+  }
+  for (let x = 0; x <= w; x++) {
+    sink.moveTo(x, 0);
+    sink.lineTo(x, h);
+  }
+  for (let y = 0; y <= h; y++) {
+    sink.moveTo(0, y);
+    sink.lineTo(w, y);
+  }
 }
 
 export async function renderMapPng(input: RenderInput): Promise<Blob> {

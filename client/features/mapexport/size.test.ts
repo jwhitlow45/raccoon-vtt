@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { DEFAULT_PX_PER_CELL, exportSize, mapVariantFor, MAX_EXPORT_PIXELS, MAX_EXPORT_SIDE } from "./size.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
+import { DEFAULT_PX_PER_CELL, exportSize, exportWords, mapVariantFor, MAX_EXPORT_PIXELS, MAX_EXPORT_SIDE } from "./size.ts";
 
 describe("exportSize", () => {
   test("a scene that fits keeps the chosen scale", () => {
@@ -81,5 +82,15 @@ describe("mapVariantFor", () => {
 
   test("a small map's phone copy is the full image, so it is always enough", () => {
     assert.equal(mapVariantFor({ widthPx: 2000, heightPx: 1500, cellPx: 50 }, 100, "full"), "mobile");
+  });
+});
+
+describe("the export's words on a hex scene (docs/design-v1-hex-grids.md 4, Words shown)", () => {
+  test("pixels per hex, hexes at 70 px, and the switch Hex lines, while a square scene's words stay", () => {
+    const size = exportSize({ w: 30, h: 20 }, 70);
+    for (const orient of ["rows", "columns"] as const) {
+      assert.deepEqual(exportWords({ shape: "hex", orient }, { w: 30, h: 20 }, size), { cell: "hex", sizeLine: "2100 × 1400 px: hexes at 70 px.", gridSwitch: "Hex lines" });
+    }
+    assert.deepEqual(exportWords(SQUARES, { w: 30, h: 20 }, size), { cell: "square", sizeLine: "2100 × 1400 px: 30 × 20 squares at 70 px each.", gridSwitch: "Grid" });
   });
 });
