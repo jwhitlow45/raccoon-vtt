@@ -1,9 +1,10 @@
 import { keys } from "#shared/keys.ts";
-import type { RoomState, Token } from "#shared/model.ts";
+import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
-import { inSightOfNonOwners, ownsToken, projectEntity, viewerSceneId, withheldWhereItStands } from "#shared/project.ts";
+import { inSightOfNonOwners, ownsToken, perPlayerScene, projectEntity, sightHolders, viewerSceneId, withheldFromViewer } from "#shared/project.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
 import type { EphEvent } from "#shared/protocol.ts";
+import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
 import { previewSqueezed, walkEnd, walkStates, type WalkEnd } from "#shared/rules/movement.ts";
 import type { Connection, PreviewKind } from "./connection.ts";
 
@@ -14,7 +15,9 @@ import type { Connection, PreviewKind } from "./connection.ts";
  * on a vision scene, the party's sight, so a drag into the dark or a ruler
  * to a hidden creature never shows players where it is. A player who was
  * showing a preview that is now withheld gets a bare cancel instead, so the
- * preview disappears rather than freezing.
+ * preview disappears rather than freezing. On a per-player scene each
+ * player is judged by their own sight and fog
+ * (docs/design-v1-per-player-vision.md 7.5).
  */
 
 function previewOf(e: EphEvent): { kind: PreviewKind; id: string; ends: boolean } | null {
@@ -104,10 +107,14 @@ function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string)
 }
 
 /**
- * Whether players may not see a drag preview where it is now: projection's
- * own rule for a token standing there (section 13.4 on the merged fog, the
- * party's sight on a vision scene, party members and exempt tokens always
- * shown). The footprint is the server's to judge, whatever the frame says
+ * Whether a player may not see a drag preview where it is now: projection's
+ * own rule for a token standing there, by that player's sight and fog
+ * (section 13.4 on the merged fog, the party's sight on a vision scene,
+ * party members and exempt tokens always shown, and on a per-player scene
+ * the player's own, docs/design-v1-per-player-vision.md 6.2). Which
+ * players a drag carries along a holder with it stays a public rule, read
+ * from what every player sees (`inSightOfNonOwners`). The footprint is the
+ * server's to judge, whatever the frame says
  * (docs/design-v1-maps-vision.md 4.1, "Drag previews"): one size smaller
  * around the preview point where a creature that can squeeze stands with
  * its core clear and a blocker through its full footprint, as along a
@@ -126,12 +133,12 @@ function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string)
  * off the ground may reach (movement.ts walkStates, review AT-ASTRA-22),
  * and withheld when any of them withholds it.
  */
-function previewWithheld(state: RoomState, token: Token, x: number, y: number, path: readonly number[] | undefined): boolean {
+function previewWithheld(state: RoomState, viewer: Viewer, token: Token, x: number, y: number, path: readonly number[] | undefined): boolean {
   const { squeeze: _squeeze, ...rest } = token;
   const seen = (t: { id: string }) => state.tokens[t.id] !== undefined && inSightOfNonOwners(state, state.tokens[t.id]!, {});
   const walker = walkerFor(state, token, seen);
   const at = { x, y };
-  const withheldAs = (end: WalkEnd) => withheldWhereItStands(state, previewSqueezed(state, end) ? { ...rest, x, y, squeeze: true } : { ...rest, x, y });
+  const withheldAs = (end: WalkEnd) => withheldFromViewer(state, viewer, previewSqueezed(state, end) ? { ...rest, x, y, squeeze: true } : { ...rest, x, y });
   if (path === undefined) return walkStates(state.buildChunks, walker).some((w) => withheldAs(walkEnd(state, w, at)));
   const corners: { x: number; y: number }[] = [];
   for (let i = 0; i + 1 < path.length; i += 2) corners.push({ x: path[i]!, y: path[i + 1]! });
@@ -139,17 +146,38 @@ function previewWithheld(state: RoomState, token: Token, x: number, y: number, p
 }
 
 /**
- * Whether this receiver may see the event. `withheld` answers, once per
- * event, whether players may not see a drag preview where it is now.
+ * What a player's judgment of a drag preview reads (docs/design-v1-per-player-vision.md
+ * 7.5), so players who read the same are judged once per event: with
+ * vision on, the sight they read, which viewers with the same sources share,
+ * with fog alone, their fog (each holder alone, the rest together), and
+ * with both off nothing, since nothing is withheld then. A whole-party
+ * scene reads the same for every player. Null when nothing is withheld.
  */
-function allowed(state: RoomState, receiver: Connection, e: EphEvent, withheld: () => boolean): boolean {
+function judgedBy(state: RoomState, sceneId: string, receiver: Connection, sights: Map<PartySight, number>): string | null {
+  const scene = state.scenes[sceneId];
+  if (!scene || (scene.vision?.on !== true && !scene.fogEnabled)) return null;
+  if (!perPlayerScene(scene)) return "party";
+  const holder = sightHolders(state, sceneId).includes(receiver.memberId);
+  if (scene.vision?.on !== true) return holder ? `fog|${receiver.memberId}` : "fog|shared";
+  const view = visionRules.holderSight(state, sceneId, holder ? receiver.memberId : null);
+  let n = sights.get(view);
+  if (n === undefined) sights.set(view, (n = sights.size));
+  return `sight|${n}`;
+}
+
+/**
+ * Whether this receiver may see the event. `withheld` answers, once per
+ * event and judgment (judgedBy), whether the receiver may not see a drag
+ * preview where it is now.
+ */
+function allowed(state: RoomState, receiver: Connection, e: EphEvent, withheld: (receiver: Connection) => boolean): boolean {
   switch (e.k) {
     case "dragStart":
     case "dragMove":
     case "dragEnd": {
       const token = state.tokens[e.tokenId];
       if (!token || !tokenVisibleTo(state, receiver, e.tokenId)) return false;
-      if (receiver.role === "player" && withheld()) return false;
+      if (receiver.role === "player" && withheld(receiver)) return false;
       return true;
     }
     case "ruler":
@@ -173,22 +201,14 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
   if (preview) {
     const id = `${preview.kind}:${preview.id}`;
     if (preview.ends) sender.previewsSent.delete(id);
-    else sender.previewsSent.set(id, { kind: preview.kind, id: preview.id, sceneId });
+    else sender.previewsSent.set(id, { kind: preview.kind, id: preview.id, sceneId, last: e });
   }
   if (!shared(sender, e)) return;
   // A drag the sender may not make is withheld from everyone, and one
   // already showing (the token was locked mid-drag, say) is cancelled.
   const senderMay = !(e.k === "dragStart" || e.k === "dragMove" || e.k === "dragEnd") || mayMove(state, sender, e.tokenId);
   const heldKey = preview ? `${sender.memberId}|${preview.kind}:${preview.id}` : null;
-  // The same for every player, and a wall test besides, so it is worked out once per event.
-  let previewHidden: boolean | undefined;
-  const withheld = (): boolean => {
-    if (previewHidden === undefined) {
-      const token = "tokenId" in e ? state.tokens[e.tokenId] : undefined;
-      previewHidden = token !== undefined && "x" in e && "y" in e && previewWithheld(state, token, e.x, e.y, e.k === "dragMove" ? e.path : e.k === "dragStart" ? [] : undefined);
-    }
-    return previewHidden;
-  };
+  const withheld = withheldFor(state, sceneId, e);
   // A bare end names only what stopped, so it goes to those showing that preview. Sent to
   // everyone, a cancelled drag of a hidden or fogged token would hand players its id.
   const bareEnd = e.k === "dragCancel" || e.k === "rulerEnd" || e.k === "aoeEnd";
@@ -208,6 +228,53 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
     } else if (heldKey && preview && receiver.previewsHeld.has(heldKey)) {
       receiver.previewsHeld.delete(heldKey);
       receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(preview.kind, preview.id) });
+    }
+  }
+}
+
+/**
+ * Whether players may not see a drag frame where it stands, worked out once
+ * per event for each judgment (judgedBy), since it is a wall test besides:
+ * on a per-player scene one per source set with vision on, or per fog
+ * class with fog alone (docs/design-v1-per-player-vision.md 7.5).
+ */
+function withheldFor(state: RoomState, sceneId: string, e: EphEvent): (receiver: Connection) => boolean {
+  const answers = new Map<string, boolean>();
+  const sights = new Map<PartySight, number>();
+  const token = "tokenId" in e ? state.tokens[e.tokenId] : undefined;
+  return (receiver) => {
+    if (token === undefined || !("x" in e) || !("y" in e)) return false;
+    const by = judgedBy(state, sceneId, receiver, sights);
+    if (by === null) return false;
+    let hidden = answers.get(by);
+    if (hidden === undefined) answers.set(by, (hidden = previewWithheld(state, receiver.viewer, token, e.x, e.y, e.k === "dragMove" ? e.path : e.k === "dragStart" ? [] : undefined)));
+    return hidden;
+  };
+}
+
+/**
+ * Previews held on other screens, judged again after a batch that set
+ * `global` (docs/design-v1-per-player-vision.md 7.2): a switch to or from
+ * Per player, a holder pick or any other change that re-projects
+ * everything can leave a receiver showing a drag or a live ruler it may no
+ * longer see. Each is judged by its last frame, as it would be routed now,
+ * and a receiver that may no longer have it gets its bare cancel.
+ */
+export function rejudgePreviews(state: RoomState, connections: Iterable<Connection>): void {
+  const all = [...connections];
+  for (const sender of all) {
+    for (const { kind, id, sceneId, last } of sender.previewsSent.values()) {
+      const heldKey = `${sender.memberId}|${kind}:${id}`;
+      const judged = state.scenes[sceneId] !== undefined;
+      const senderMay = !(last.k === "dragStart" || last.k === "dragMove" || last.k === "dragEnd") || mayMove(state, sender, last.tokenId);
+      const withheld = withheldFor(state, sceneId, last);
+      for (const receiver of all) {
+        if (receiver === sender || receiver.closed || !receiver.previewsHeld.has(heldKey)) continue;
+        const here = judged && viewerSceneId(state, receiver.viewer, { sceneId: receiver.sceneId }) === sceneId;
+        if (here && senderMay && allowed(state, receiver, last, withheld)) continue;
+        receiver.previewsHeld.delete(heldKey);
+        receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(kind, id) });
+      }
     }
   }
 }

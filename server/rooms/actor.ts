@@ -23,7 +23,7 @@ import { SnapshotBudget, TokenBucket, type Clock } from "./budgets.ts";
 import { CloseWrites } from "./closeWrites.ts";
 import { CLOSE, clientKey, type ClientKey, type Connection } from "./connection.ts";
 import { isDiceOp, resolveDice } from "./dice.ts";
-import { cancelPreviews, routeEphemeral } from "./ephemeral.ts";
+import { cancelPreviews, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp } from "./explore.ts";
 import { buildSnapshot, publishBatch, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import type { SocketFilter } from "./gateway.ts";
@@ -1525,6 +1525,8 @@ export class RoomActor {
       this.#connections,
       (key) => this.#clients.get(key),
     );
+    // A batch that re-projects everything can take away what a held drag or live ruler showed (docs/design-v1-per-player-vision.md 7.2).
+    if (batch.global) rejudgePreviews(batch.state, this.#connections);
     for (const s of batch.sys) s.resolve();
     for (const h of batch.hellos) {
       if (!h.conn.closed && this.#clients.get(h.key) === h.conn && h.conn.held === null) this.#snapshot(h.conn, h.key);

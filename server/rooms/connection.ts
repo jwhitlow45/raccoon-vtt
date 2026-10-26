@@ -2,7 +2,7 @@ import type { WebSocket } from "ws";
 import type { EntityKey } from "#shared/keys.ts";
 import type { HeldEntry } from "#shared/project.ts";
 import type { Viewer } from "#shared/model.ts";
-import type { ServerMessage } from "#shared/protocol.ts";
+import type { EphEvent, ServerMessage } from "#shared/protocol.ts";
 import { FrameBudget, OpRate, TokenBucket, type Clock } from "./budgets.ts";
 
 /** Close codes from design section 7.1. */
@@ -77,8 +77,13 @@ export class Connection {
   readonly frames: FrameBudget;
   readonly opRate: OpRate;
   readonly eph: TokenBucket;
-  /** Previews other viewers hold from this socket, keyed `kind:id`, with the scene they were sent for. */
-  readonly previewsSent = new Map<string, { kind: PreviewKind; id: string; sceneId: string }>();
+  /**
+   * Previews other viewers hold from this socket, keyed `kind:id`, with the
+   * scene they were sent for and the last frame, by which a batch that
+   * re-projects everything judges each receiver's again (ephemeral.ts
+   * rejudgePreviews).
+   */
+  readonly previewsSent = new Map<string, { kind: PreviewKind; id: string; sceneId: string; last: EphEvent }>();
   /** Previews this viewer currently shows, keyed `from|kind:id`. */
   readonly previewsHeld = new Set<string>();
   /** Timers that belong to this socket and die with it. */
