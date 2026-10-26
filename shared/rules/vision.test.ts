@@ -1612,6 +1612,20 @@ describe("sight holders", () => {
     }
   });
 
+  test("a holder's source gone Blinded with the same polygon redraws their raster from their last one, bright to grey (review PV2-ASTRA-4)", () => {
+    clearVisionCache();
+    // Blindsight 150 ft sees the whole open scene, so Blinded keeps the polygon and the sweep box, and only the levels inside change. The second player's source keeps the union bright.
+    const blindsight = (effects: { id: string; key: "blinded" }[]) => ({ inline: actor({ senses: "blindsight 150 ft", effects }) });
+    let s = perPlayer(visionRoom({ w: 16, h: 16, light: "bright", tokens: [pc("a", 7, 7, { ownerIds: ["p1"], actor: blindsight([]) }), pc("b", 2, 2, { ownerIds: ["p2"] })] }));
+    const before = holderSight(s, "s1", "p1", world).tiles;
+    assert.deepEqual(before.get("0,0"), { f: 3 }, "bright before");
+    s = withToken(s, { ...s.tokens.a!, actor: blindsight([{ id: "e", key: "blinded" }]) });
+    const after = holderSight(s, "s1", "p1", world).tiles;
+    assert.deepEqual(after.get("0,0"), { f: 1 }, "grey once Blinded, by blindsight alone");
+    sameTiles(after, coldHolderSight(s, "s1", "p1", world).tiles, "Blinded");
+    sameTiles(partySight(s, "s1", world).tiles, coldPartySight(s, "s1", world).tiles, "the union");
+  });
+
   test("a scene keeps rasters for at most 14 source sets", () => {
     clearVisionCache();
     const r = rng(101);
