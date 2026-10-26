@@ -114,6 +114,37 @@ describe("per-player vision over the socket", () => {
   });
   after(() => t.close());
 
+  test("a drag every player shows ends for the player who no longer sees it once the DM makes sight per player", async () => {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom("Held drag");
+    const pip = t.client();
+    const pipId = await pip.join(roomId, "Pip");
+    const quin = t.client();
+    const quinId = await quin.join(roomId, "Quin");
+    const dmSocket = await t.connect(roomId, dm);
+    const sceneId = ((await dmSocket.snapshot("dm")).state as ProjectedState).meta.playerSceneId!;
+    await dmSocket.apply({ t: "scene.update", sceneId, patch: { vision: { on: true, light: "dark" } } });
+    const gob = uuidv7();
+    for (const [id, fields] of [
+      [uuidv7(), { kind: "pc", name: "Pip's", disposition: "ally", ownerIds: [pipId], x: 3, y: 8, actor: inline("Darkvision 30 ft.") }],
+      [uuidv7(), { kind: "pc", name: "Quin's", disposition: "ally", ownerIds: [quinId], x: 26, y: 8, actor: inline("Darkvision 30 ft.") }],
+      [gob, { x: 6, y: 8 }],
+    ] as const) {
+      await dmSocket.apply({ t: "token.create", token: { id, sceneId, kind: "monster", name: "Goblin", size: "medium", actor: inline(""), ...fields } } as Op);
+    }
+    const pipSocket = await t.connect(roomId, pip);
+    await pipSocket.snapshot("pip");
+    const quinSocket = await t.connect(roomId, quin);
+    await quinSocket.snapshot("quin");
+    // The party sees the goblin by Pip's character, so both players show the DM's drag of it.
+    dmSocket.send({ t: "eph", sceneId, e: { k: "dragStart", tokenId: gob, x: 6, y: 8 } });
+    for (const s of [pipSocket, quinSocket]) await s.next("eph", (m) => m.e.k === "dragStart");
+    await dmSocket.apply({ t: "scene.update", sceneId, patch: { vision: { on: true, light: "dark", perPlayer: true } } });
+    const ended = await quinSocket.next("eph", (m) => m.e.k === "dragCancel");
+    assert.deepEqual(ended.e, { k: "dragCancel", tokenId: gob }, "Quin's character does not see the goblin, so Quin's drag ends");
+    assert.equal(await pipSocket.maybe("eph", (m) => m.e.k === "dragCancel"), null, "Pip's sees it, so Pip's stays");
+  });
+
   test("each player gets only their own sight, fog, labels, stamps and creatures, and the display only what every player shares", async () => {
     const tbl = await table(t);
     const { pip, quin, display } = tbl.seats;
