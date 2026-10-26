@@ -48,10 +48,10 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * its modifier's error, and of his own with Spend an amount, the Update
  * and Edit sheets, his death save card, his turn card with a pool's amount
  * field, and Thorn's Uses in his row and his bar. The DM measures the
- * section in Thorn's token panel, the dragon's Uses in its row and its
- * bar, In lair while it waits for the server, the dragon's recharge card
- * and its turn card folded and open, and the troll's Regeneration card
- * with its death save card waiting for it.
+ * section in Thorn's token panel, the dragon's Uses in its row, its bar
+ * and its token panel, In lair while it waits for the server, the dragon's
+ * recharge card and its turn card folded and open, and the troll's
+ * Regeneration card with its death save card waiting for it.
  *
  * The second icon pass (docs/design-v1-icons-2.md 15) is measured at its
  * own seven sizes: 320 x 568 and 390 x 844 at 130%, 390 x 844 at 115% and
@@ -1250,7 +1250,7 @@ async function patCombatScreens(sweep: Sweep, page: Page): Promise<void> {
 
 /**
  * The DM's combat screens: the section in Thorn's token panel, the
- * dragon's Uses in its row and its bar, In lair while it waits for the
+ * dragon's Uses in its row, its bar and its token panel, In lair while it waits for the
  * server, then the dragon's turn with its recharge card and its turn card,
  * and the troll's with Regeneration and its death save card waiting.
  */
@@ -1297,6 +1297,22 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     await sweep.measure(page, "cu-bar-drawer", dragon.drawer);
     await closeBar(dragon.bar);
   } else await sweep.missing(page, "cu-bar-drawer", "a tap on the dragon opened no window");
+
+  // The dragon's Uses in its Token panel, each count as pips at its title line's right end (docs/design-v1-monster-uses.md 3.1).
+  const dragonBar = await selectToken(page, RED_DRAGON, { x: DRAGON_AT.x + 1, y: DRAGON_AT.y + 1 });
+  if (dragonBar) {
+    await (await barControl(dragonBar, "Details")).click();
+    const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
+    await panel.getByRole("heading", { name: RED_DRAGON }).first().waitFor();
+    const combat = panel.getByRole("button", { name: "Combat", exact: true });
+    if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
+    const section = resourcesSection(panel);
+    await section.locator("[data-use-pips]").first().waitFor();
+    await section.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "cu-panel-uses", section);
+    await closeSheets(page);
+    await escapeAll(page);
+  } else await sweep.missing(page, "cu-panel-uses", "a tap on the dragon opened no window");
 
   // The row's chips for what the dragon spent, on their own line under its LA and LR.
   const chips = (await openTracker(page)).locator("li[data-entry-row]").filter({ has: page.getByRole("button", { name: `${RED_DRAGON} options` }) }).locator("[data-spent-chips]");

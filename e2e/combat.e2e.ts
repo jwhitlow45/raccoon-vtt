@@ -1596,7 +1596,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     await lands(dm, /^button Wildfire Spirit, acts on Bree's turn/, "Revive in the sub-row's options");
   });
 
-  test("13g-2. by keyboard, a bar's Uses drawer keeps focus as Restore takes itself away, so Escape then closes the drawer alone (LP21-COMBAT-2)", async () => {
+  test("13g-2. by keyboard, a bar's Uses drawer keeps focus on Restore as the last restore turns it off, so Escape then closes the drawer alone (LP21-COMBAT-2, docs/design-v1-monster-uses.md 5)", async () => {
     const focused = () =>
       dm.evaluate(() => {
         const a = (globalThis as unknown as { document: { activeElement: { tagName: string; getAttribute(n: string): string | null; textContent: string | null } | null } }).document.activeElement;
@@ -1628,8 +1628,9 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
       await drawer.getByRole("button", { name: "Restore one Legendary Resistance" }).focus();
       await dm.keyboard.press("Enter");
       await waitFor("the Legendary Resistance back", () => (goblinState(i)?.legendary?.resistUsed === 0 ? true : null));
-      // Restore goes with the use it gave back: focus moves to the row's Use, not to the page.
-      await lands(/^button Use Legendary Resistance, 2 left$/, "Restore handed focus on");
+      // Restore stays once the count is full, off, so focus stays on it rather than falling to the page.
+      await lands(/^button Restore one Legendary Resistance$/, "Restore keeps focus");
+      assert.equal(await drawer.getByRole("button", { name: "Restore one Legendary Resistance" }).getAttribute("aria-disabled"), "true", "off while full");
       await dm.keyboard.press("Escape");
       await drawer.waitFor({ state: "detached" });
       assert.equal(await b.isVisible(), true, "Escape closed the bar, not the drawer");
@@ -1855,7 +1856,7 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     }
   });
 
-  test("s1-c-a. the DM's row options lead with the creature's uses, its pips wrapping, Reaction used and Ready, then the row's own from Row hidden from players to Remove, and a companion's sub-row lists its uses first, in line at 1280 x 800, 390 x 844 at 100% and 130% and 320 x 568 at 130%, the row's own line with its LA and LR together where they fit (docs/design-v1-token-sections.md 4, S1-ROW-1)", async () => {
+  test("s1-c-a. the DM's row options lead with the creature's uses, its counts of 10 in words at their title lines' right end, Reaction used and Ready, then the row's own from Row hidden from players to Remove, and a companion's sub-row lists its uses first, in line at 1280 x 800, 390 x 844 at 100% and 130% and 320 x 568 at 130%, the row's own line with its LA and LR together where they fit (docs/design-v1-token-sections.md 4, S1-ROW-1)", async () => {
     const boss = randomUUID();
     const skitter = randomUUID();
     await ops.send({ t: "token.create", token: { id: boss, sceneId: run.sceneId, kind: "monster", name: "Goblin Boss", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 3, resistMax: 10, resistUsed: 1 } } } } });
@@ -1894,7 +1895,8 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
         // A filter's inner locator is read inside each row, so it starts from the page, not the tracker.
         const row = tracker.locator("li[data-entry-row]").filter({ has: dm.getByRole("button", { name: "Goblin Boss options", exact: true }) });
         const uses = row.locator('[data-uses-group][aria-label="Goblin Boss\'s uses"]');
-        await uses.getByRole("group", { name: "Legendary Actions used", exact: true }).waitFor();
+        // Past 6, each count reads in words where its pips would stand (docs/design-v1-monster-uses.md 3.1).
+        await uses.locator('[data-use-row="legendary"] [data-use-pips]').getByText(/^\d+ of 10$/).waitFor();
         await tops(row, [
           ["Uses", uses],
           ["Reaction used", row.getByRole("switch", { name: /^Reaction used/ })],
@@ -1905,11 +1907,11 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
           ["Remove", row.getByRole("button", { name: "Remove from the fight" })],
         ]);
         assert.equal(await row.getByRole("switch", { name: /^In lair/ }).count(), 0, `${at}: In lair on a creature with no stat block`);
-        // The pips at 10 wrap inside the row: none past its right edge.
+        // The counts stand inside the row: none past its right edge.
         const rowBox = (await row.boundingBox())!;
-        for (const pip of await uses.locator("[data-pips] button").all()) {
-          const b = (await pip.boundingBox())!;
-          assert.ok(b.x + b.width <= rowBox.x + rowBox.width + 0.5, `${at}: a pip at ${b.x + b.width} past the row's ${rowBox.x + rowBox.width}`);
+        for (const count of await uses.locator("[data-use-pips]").all()) {
+          const b = (await count.boundingBox())!;
+          assert.ok(b.x + b.width <= rowBox.x + rowBox.width + 0.5, `${at}: a count at ${b.x + b.width} past the row's ${rowBox.x + rowBox.width}`);
         }
         await row.scrollIntoViewIfNeeded();
         // Its options, which S1 reordered, and the row's own line: AC with HP and LA with LR each wrap as one part, so no tag stands alone where two fit (S1-ROW-1).

@@ -169,9 +169,33 @@ function row(scope: Locator, name: string): Locator {
   return section(scope).getByRole("listitem").filter({ has: scope.page().getByText(name, { exact: true }) });
 }
 
+/**
+ * Waits for a resource's count to read `count` ("2 of 3"): with a most of 6
+ * or fewer as its pips, filled for each one left, and the same words
+ * spoken after its name, else in words beside its name
+ * (docs/design-v1-monster-uses.md 3.7).
+ */
 async function countReads(scope: Locator, name: string, count: string): Promise<void> {
   const r = row(scope, name);
-  await r.getByText(count, { exact: true }).waitFor({ timeout: 10_000 }).catch(async () => assert.fail(`${name} reads "${(await r.textContent()) ?? ""}", not ${count}`));
+  const reads = () =>
+    r.evaluate((el) => {
+      type E = { querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; textContent: string | null };
+      const li = el as unknown as E;
+      const pips = li.querySelector("[data-use-pips]");
+      if (!pips) return { pips: null, text: li.textContent ?? "" };
+      return { pips: `${pips.querySelectorAll('[data-pip="left"]').length} of ${pips.querySelectorAll("[data-pip]").length}`, text: li.textContent ?? "" };
+    });
+  const [left, most] = count.split(" of ").map(Number);
+  let last = { pips: null as string | null, text: "" };
+  await waitFor(
+    `${name} reading ${count}`,
+    async () => {
+      last = await reads();
+      const ok = most! <= 6 ? last.pips === count && last.text.includes(`, ${count} left`) : last.pips === null && (await r.getByText(count, { exact: true }).count()) === 1;
+      return ok ? true : null;
+    },
+    10_000,
+  ).catch(() => assert.fail(`${name} reads ${last.pips === null ? `"${last.text}"` : `pips ${last.pips}`}, not ${count} (${left} left)`));
 }
 
 /** Thorn's resources as the DM's socket holds them. */

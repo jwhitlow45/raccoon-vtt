@@ -39,6 +39,11 @@ import { barControl, ConsoleWatch, expandBar, OpSocket, openPage, Shots, SocketW
  * - The Dice panel's X/Day Use with none left says so on a tap.
  * - Where the SRD's stat blocks did not load, In lair and every join
  *   stay off beside the failure's reload.
+ * - Each count shows as pips on its row's title line, to read only
+ *   (docs/design-v1-monster-uses.md): Restore corrects it, off while full,
+ *   Undo takes back exactly a mis-tap, Pat lent an Aboleth reads the same
+ *   rows, and the title lines keep their rule at every size, for the
+ *   Aboleth, the dragon, a Tarrasque's 6 and Thorn's class resources.
  * Every new screen is measured with the alignment check at 1440 x 900,
  * 390 x 844 and 320 x 568, at 100% and 130%.
  *
@@ -88,6 +93,9 @@ const run = {
   goblin: randomUUID(),
   lair: [randomUUID(), randomUUID(), randomUUID()],
   dretch: randomUUID(),
+  /** The monster Uses steps' creatures (mu-c, mu-d): an Aboleth lent to Pat, and a Tarrasque, whose Legendary Resistance counts 6. */
+  aboleth: randomUUID(),
+  tarrasque: randomUUID(),
   /** The link that signs a device in as the DM, a session of its own (cu-b-1, cu-b-14). */
   dmLink: "",
 };
@@ -96,6 +104,8 @@ const DRAGON = "Adult Red Dragon";
 const DRAGON_AT = { x: 13, y: 5 };
 const THORN_AT = { x: 5, y: 5 };
 const BREATH = "actions:fire-breath";
+const ABOLETH_AT = { x: 26, y: 2 };
+const TARRASQUE_AT = { x: 25, y: 9 };
 
 type View = { width: number; height: number; scale: number };
 const DESK: View = { width: 1440, height: 900, scale: 1 };
@@ -476,10 +486,10 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
 
   test("cu-b-2. on Thorn's turn the DM's phone takes Fiery Rays from the dragon's row, greyed after, and a Legendary Resistance", async () => {
     const group = await rowUses(phone, DRAGON);
-    await group.getByText("Legendary Actions 3 of 3", { exact: true }).waitFor();
+    await countShows(group, "legendary", "3 of 3");
     await shots.take(phone, "cu-b-row-uses");
     await group.getByRole("button", { name: "Use Fiery Rays, Legendary Action, 3 left" }).click();
-    await group.getByText("Legendary Actions 2 of 3", { exact: true }).waitFor();
+    await countShows(group, "legendary", "2 of 3");
     await waitFor("Fiery Rays marked until the dragon's turn", () => (dragon()?.uses?.["legendaryActions:fiery-rays"]?.kind === "turn" ? true : null));
     const rays = group.getByRole("button", { name: "Use Fiery Rays, Legendary Action, 2 left" });
     assert.equal(await rays.getAttribute("aria-disabled"), "true", "greyed until the start of its next turn");
@@ -487,18 +497,18 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await rays.click({ force: true });
     await group.getByRole("status").getByText("Fiery Rays: until the start of its next turn.", { exact: true }).waitFor();
     await group.getByRole("button", { name: "Use Legendary Resistance, 3 left" }).click();
-    await group.getByText("Legendary Resistance 2 of 3", { exact: true }).waitFor();
+    await countShows(group, "resist", "2 of 3");
     await waitFor("one Resistance spent", () => (dragon()?.legendary?.resistUsed === 1 ? true : null));
     await shots.take(phone, "cu-b-row-uses-spent");
   });
 
   test("cu-b-3. the phone's bar takes Pounce from its Uses drawer, and Pat's copy holds no count", async () => {
     const drawer = await barUses(phone);
-    await drawer.getByText("Legendary Actions 2 of 3", { exact: true }).waitFor();
+    await countShows(drawer, "legendary", "2 of 3");
     await shots.take(phone, "cu-b-bar-drawer");
     await drawer.getByRole("button", { name: "Use Pounce, Legendary Action, 2 left" }).click();
     await waitFor("Pounce spent", () => (dragon()?.legendary?.actionsUsed === 2 ? true : null));
-    await drawer.getByText("Legendary Actions 1 of 3", { exact: true }).waitFor();
+    await countShows(drawer, "legendary", "1 of 3");
     // What Pat's copy holds of the dragon: no counts, no marks, no record, and use lines by name alone (8).
     await waitFor("Pat reads the uses", () => (useLines(patSocket.state).length >= 3 ? true : null));
     const seen = actorOf(patSocket.state, run.dragon) as Partial<Actor> | undefined;
@@ -623,8 +633,11 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await phoneCard.waitFor();
     const turn = alerts(desk, "turn");
     await turn.getByText(`${DRAGON}'s turn`, { exact: true }).waitFor();
-    await turn.getByText("Legendary Actions 3 of 3, after other creatures' turns", { exact: true }).waitFor();
-    await turn.getByText("Legendary Resistance 2 of 3", { exact: true }).waitFor();
+    // The card's Legendary Actions: the title with its pips and when they come, with no buttons (docs/design-v1-monster-uses.md 3.2).
+    await countShows(turn, "legendary", "3 of 3");
+    await turn.locator('[data-use-row="legendary"]').getByText("After other creatures' turns", { exact: true }).waitFor();
+    assert.equal(await turn.locator('[data-use-row="legendary"] button').count(), 0, "no legendary action on the card");
+    await countShows(turn, "resist", "2 of 3");
     await alerts(phone, "turn").getByText(`${DRAGON}'s turn: 3 uses`, { exact: true }).waitFor();
     await shots.take(desk, "cu-b-dragon-turn-desk");
     await shots.take(phone, "cu-b-dragon-turn-phone");
@@ -632,7 +645,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const group = await rowUses(phone, DRAGON);
     const rays = group.getByRole("button", { name: "Use Fiery Rays, Legendary Action, 3 left" });
     assert.equal(await rays.getAttribute("aria-disabled"), "true");
-    await group.getByText("Legendary Actions 3 of 3", { exact: true }).waitFor();
+    await countShows(group, "legendary", "3 of 3");
     await closeSheets(phone);
 
     await deskCard.getByRole("button", { name: "Roll", exact: true }).click();
@@ -692,7 +705,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const m = srd.find((x) => x.srdId === "adult-red-dragon")!;
     assert.equal(dragon()?.xp, m.xpInLair);
     assert.equal(dragon()?.legendary?.resistUsed, 1, "what was used stays used");
-    await tracker.getByText("Legendary Resistance 3 of 4", { exact: true }).first().waitFor();
+    await countShows(tracker, "resist", "3 of 4");
     await untilReady(lair, "In lair");
     await lair.click();
     await waitFor("back to its counts", () => (dragon()?.legendary?.actionsMax === 3 ? true : null));
@@ -1064,7 +1077,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.deepEqual(patConsole.errors, [], "Pat's page");
   });
 
-  test("s1-cu-a. the DM's legendary pips at maxima of 1 to 10 wrap under their words with fixed 44 px targets in the dragon's row, none past its row, each dot centered, in line at 320 x 568 and 390 x 844 at 130%, and a tap sets the count (D-261024-40)", async () => {
+  test("mu-a. the dragon's row shows its counts as pips on their title lines, to read only: a most of 1 to 6 as pips at the line's right end and on its buttons' right edge, beside the name where its longest word fits and as one part on the next line where not, and 7 in words, in line at 320 x 568 and 390 x 844 at 130% (docs/design-v1-monster-uses.md 3.1)", async () => {
     const before = dragon()!.legendary!;
     const seen: string[] = [];
     try {
@@ -1072,47 +1085,26 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         const at = `${view.width} x ${view.height} at 130%`;
         await setUp(phone, phoneCdp, view);
         const group = await rowUses(phone, DRAGON);
-        for (let max = 1; max <= 10; max++) {
-          await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { actionsMax: max, actionsUsed: Math.min(1, max), resistMax: max, resistUsed: 0 } } } });
-          for (const name of ["Legendary Actions used", "Legendary Resistances used today"]) {
-            const pips = group.getByRole("group", { name, exact: true }).getByRole("button");
-            await waitFor(`${max} pips in ${name}`, async () => ((await pips.count()) === max ? true : null));
+        for (let max = 1; max <= 7; max++) {
+          await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { actionsMax: max, actionsUsed: 1, resistMax: max, resistUsed: 0 } } } });
+          await countShows(group, "legendary", `${max - 1} of ${max}`);
+          await countShows(group, "resist", `${max} of ${max}`);
+          assert.equal(await group.locator("[data-use-pips]").count(), 3, "both counts and Fire Breath's state at the right end");
+          assert.equal(await group.locator("[data-use-pips] [data-pip]").count(), max > 6 ? 0 : 2 * max, max > 6 ? "words past 6" : "a pip for each use");
+          assert.equal(await group.locator("[data-use-pips] button, [data-pips]").count(), 0, "nothing among the pips to tap, and no pips block");
+          await titlesInLine(group, `the row at a most of ${max} at ${at}`, seen);
+          await measure(phone, group, `the row's counts at a most of ${max} at ${at}`);
+          if (max >= 5) {
+            await group.locator('[data-use-row="resist"]').scrollIntoViewIfNeeded();
+            await shots.take(phone, `mu-row-counts-${max}-${view.width}`);
           }
-          const blocks = await pipGeometry(group);
-          assert.equal(blocks.length, 2, "both pip blocks");
-          for (const b of blocks) {
-            const what = `${b.label} at a maximum of ${max} at ${at}`;
-            const target = theme44 * view.scale;
-            const past = b.pips.filter((p) => p.right > b.row.right + 0.5 || p.left < b.row.left - 0.5 || p.right > b.box.right + 0.5);
-            assert.deepEqual(past, [], `${what}: a pip past its row`);
-            for (const p of b.pips) assert.ok(Math.abs(p.width - target) <= 0.5 && Math.abs(p.height - target) <= 0.5, `${what}: a pip of ${p.width} x ${p.height}, not ${target}`);
-            const tops = [...new Set(b.pips.map((p) => Math.round(p.top)))];
-            const perRow = b.pips.filter((p) => Math.round(p.top) === tops[0]).length;
-            // Wrapped only where the next pip would not fit: as many to a row as the row's width holds.
-            assert.equal(perRow, Math.min(max, Math.floor((b.box.width + 0.5) / target)), `${what}: ${perRow} to a row in ${b.box.width} px`);
-            assert.equal(tops.length, Math.ceil(max / perRow), `${what}: ${tops.length} rows`);
-            const off = Math.max(...b.dots.map((d) => Math.max(Math.abs(d.x), Math.abs(d.y))));
-            assert.ok(off <= 1, `${what}: a dot ${off} px off its pip's center`);
-            const lines = Math.round(b.words.height / (b.lineHeight * view.scale));
-            seen.push(`${at} ${b.label} max ${max}: ${perRow} a row, ${tops.length} rows, words on ${lines} line(s), block ${Math.round(b.box.bottom - b.words.top)} px, dot off ${off.toFixed(2)} px`);
-          }
-          await measure(phone, group, `the row's pips at a maximum of ${max} at ${at}`);
         }
-        await group.locator("[data-pips]").first().scrollIntoViewIfNeeded();
-        await shots.take(phone, `s1-cu-pips-10-${view.width}`);
-        // The pips are the one control for the counts used: a tap sets that many, and a tap on the last used one gives one back.
-        const actions = group.getByRole("group", { name: "Legendary Actions used", exact: true });
-        await actions.getByRole("button", { name: "3 used", exact: true }).click();
-        await waitFor("three used", () => (dragon()?.legendary?.actionsUsed === 3 ? true : null));
-        await actions.getByRole("button", { name: "3 used", exact: true }).click();
-        await waitFor("one given back", () => (dragon()?.legendary?.actionsUsed === 2 ? true : null));
-        assert.equal(await actions.getByRole("button", { name: "2 used", exact: true }).getAttribute("aria-pressed"), "true");
         await closeSheets(phone);
       }
     } finally {
       await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: before } } });
     }
-    console.log(`s1 pips:\n${seen.join("\n")}`);
+    console.log(`mu row counts:\n${seen.join("\n")}`);
     assert.deepEqual(sweep, [], "out of line by more than 1 px");
   });
 
@@ -1197,7 +1189,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.deepEqual(patConsole.errors, [], "Pat's page");
   });
 
-  test("s2-cu-a. the DM on the dragon's Token panel: Combat runs Hit Points, Conditions, Uses with Fiery Rays and the pips, Reaction, Range rings and Rest; its Uses waits under Loading the uses while the block loads; Fiery Rays from there spends a pip the row and the bar's drawer show; the pips wrap at maxima of 3 and 10 at 320 x 568 and 390 x 844 at 130%; and Combat in line, with its heights (docs/design-v1-token-sections.md 3)", async () => {
+  test("s2-cu-a. the DM on the dragon's Token panel: Combat runs Hit Points, Conditions, Uses with Fiery Rays and its counts as pips, Reaction, Range rings and Rest; its Uses waits under Loading the uses while the block loads; Fiery Rays from there spends a Legendary Action the row and the bar's drawer show; counts of 3, 6 and 7 at 320 x 568 and 390 x 844 at 130%; and Combat in line, with its heights (docs/design-v1-token-sections.md 3, docs/design-v1-monster-uses.md 3.1)", async () => {
     const before = dragon()!.legendary!;
     const seen: string[] = [];
     try {
@@ -1216,21 +1208,23 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       await uses.getByText("Loading the uses…", { exact: true }).waitFor({ state: "detached" });
       await desk.unroute(/\/assets\/monsters-[^/]*\.js$/);
       assert.deepEqual(await combatSections(panel), ["Hit Points", "Conditions", "Uses", "Reaction", "Range rings", "Rest"]);
-      for (const name of ["Legendary Actions used", "Legendary Resistances used today"]) await uses.getByRole("group", { name, exact: true }).waitFor();
+      assert.ok((await uses.locator("[data-use-pips] [data-pip]").count()) > 0, "its counts as pips on their rows");
+      assert.equal(await uses.locator("[data-pips]").count(), 0, "no pips block under the list");
       await uses.scrollIntoViewIfNeeded();
       await shots.take(desk, "s2-cu-dragon-combat");
 
-      // Fiery Rays from the panel spends a legendary action, which the row's pips and the bar's drawer read too.
+      // Fiery Rays from the panel spends a Legendary Action, which the panel's pips, the row's and the bar's drawer's read too.
       const spent = dragon()!.legendary!.actionsUsed;
       await uses.getByRole("button", { name: /^Use Fiery Rays, Legendary Action, / }).click();
       await waitFor("a pip spent", () => (dragon()?.legendary?.actionsUsed === spent + 1 ? true : null));
       const max = dragon()!.legendary!.actionsMax;
-      await uses.getByText(`Legendary Actions used: ${spent + 1} of ${max}`, { exact: true }).waitFor();
+      const left = `${max - spent - 1} of ${max}`;
+      await countShows(uses, "legendary", left);
       const drawer = await barUses(desk);
-      await drawer.getByText(`Legendary Actions ${max - spent - 1} of ${max}`, { exact: true }).waitFor();
+      await countShows(drawer, "legendary", left);
       await closeBar(desk);
       const row = await rowUses(desk, DRAGON);
-      await row.getByText(`Legendary Actions used: ${spent + 1} of ${max}`, { exact: true }).waitFor();
+      await countShows(row, "legendary", left);
       await closeSheets(desk);
       // Restore from the panel frees Fiery Rays for the steps after.
       panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
@@ -1265,34 +1259,21 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         await sectionIn(panel, "Uses").waitFor();
       }
 
-      // The pips in the panel's Uses wrap with 44 px targets as the row's do, at maxima of 3 and 10.
+      // The panel's counts at a most of 3, 6 and 7: pips at the title line's right end, beside the name where they fit, and words past 6.
       for (const view of [{ ...SMALL, scale: 1.3 }, { ...PHONE, scale: 1.3 }]) {
         const at = `${view.width} x ${view.height} at 130%`;
         await setUp(desk, deskCdp, view);
         await dismissTurnCard(desk);
         panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
         const list = sectionIn(panel, "Uses");
-        for (const most of [3, 10]) {
+        for (const most of [3, 6, 7]) {
           await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { actionsMax: most, actionsUsed: 1, resistMax: most, resistUsed: 0 } } } });
-          for (const name of ["Legendary Actions used", "Legendary Resistances used today"]) {
-            const pips = list.getByRole("group", { name, exact: true }).getByRole("button");
-            await waitFor(`${most} pips in ${name}`, async () => ((await pips.count()) === most ? true : null));
-          }
-          const blocks = await pipGeometry(list, "section");
-          assert.equal(blocks.length, 2, "both pip blocks");
-          for (const b of blocks) {
-            const what = `the panel's ${b.label} at a maximum of ${most} at ${at}`;
-            const target = theme44 * view.scale;
-            assert.deepEqual(b.pips.filter((p) => p.right > b.row.right + 0.5 || p.left < b.row.left - 0.5), [], `${what}: a pip past its section`);
-            for (const p of b.pips) assert.ok(Math.abs(p.width - target) <= 0.5 && Math.abs(p.height - target) <= 0.5, `${what}: a pip of ${p.width} x ${p.height}`);
-            const tops = [...new Set(b.pips.map((p) => Math.round(p.top)))];
-            const perRow = b.pips.filter((p) => Math.round(p.top) === tops[0]).length;
-            assert.equal(perRow, Math.min(most, Math.floor((b.box.width + 0.5) / target)), `${what}: ${perRow} to a row in ${b.box.width} px`);
-            seen.push(`${at} panel ${b.label} max ${most}: ${perRow} a row, ${tops.length} rows, block ${Math.round(b.box.bottom - b.words.top)} px`);
-          }
-          await measure(desk, list, `the panel's pips at a maximum of ${most} at ${at}`);
-          await list.locator("[data-pips]").first().scrollIntoViewIfNeeded();
-          await shots.take(desk, `s2-cu-panel-pips-${most}-${view.width}`);
+          await countShows(list, "legendary", `${most - 1} of ${most}`);
+          await countShows(list, "resist", `${most} of ${most}`);
+          await titlesInLine(list, `the panel at a most of ${most} at ${at}`, seen);
+          await measure(desk, list, `the panel's counts at a most of ${most} at ${at}`);
+          await list.scrollIntoViewIfNeeded();
+          await shots.take(desk, `mu-panel-counts-${most}-${view.width}`);
         }
       }
     } finally {
@@ -1357,6 +1338,162 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.deepEqual(sweep, [], "out of line by more than 1 px");
   });
 
+  test("mu-b. Restore is the hand correction: off while full and saying why on a tap, keeping its focus after the last restore; on another creature's turn it frees a spent Fiery Rays first, as before, and Undo takes back exactly the mis-tap; on the dragon's own turn it gives back one (docs/design-v1-monster-uses.md 3.3)", async () => {
+    await setUp(desk, deskCdp, DESK);
+    // The dragon's turn starts with its actions back and its marks gone, then another creature's turn lets it take them.
+    await turnTo("fu26-dragon");
+    await turnTo("fu26-thorn");
+    await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { ...dragon()!.legendary!, actionsUsed: 0, resistUsed: 0 } } } });
+    const panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
+    const uses = sectionIn(panel, "Uses");
+    const resist = uses.locator('[data-use-row="resist"]');
+    const restoreResist = resist.getByRole("button", { name: "Restore one Legendary Resistance", exact: true });
+    await countShows(uses, "resist", "4 of 4");
+    assert.equal(await restoreResist.getAttribute("aria-disabled"), "true", "off while full");
+    // Off, it keeps its tap, which says why: Playwright takes aria-disabled for disabled, so the tap is forced.
+    await restoreResist.click({ force: true });
+    await uses.getByRole("status").getByText("Legendary Resistance is full.", { exact: true }).waitFor();
+    await shots.take(desk, "mu-restore-full");
+
+    // Spent, then restored by keyboard: Restore turns off and keeps the focus, since it stays where it was.
+    await resist.getByRole("button", { name: /^Use Legendary Resistance/ }).click();
+    await waitFor("a Resistance spent", () => (dragon()?.legendary?.resistUsed === 1 ? true : null));
+    await waitFor("Restore on", async () => ((await restoreResist.getAttribute("aria-disabled")) === null ? true : null));
+    await restoreResist.focus();
+    await desk.keyboard.press("Enter");
+    await waitFor("the Resistance back", () => (dragon()?.legendary?.resistUsed === 0 ? true : null));
+    // The count the old pips wrote, now with its line in the log, which the pips never wrote.
+    await waitFor("the restore's log line", () => (useLines(deskSocket.state).some((l) => l.what === "resist" && l.back === true && l.left === 4 && l.max === 4) ? true : null));
+    await waitFor("Restore off", async () => ((await restoreResist.getAttribute("aria-disabled")) === "true" ? true : null));
+    // A focus hand-off would move focus within a few frames of the answer, so it is read after them.
+    await desk.waitForTimeout(500);
+    assert.ok(await restoreResist.evaluate((el) => el === el.ownerDocument.activeElement), "focus stays on Restore");
+
+    // Fiery Rays taken, then Pounce mis-tapped: Restore frees Fiery Rays, as before, and Undo takes back exactly what was pressed.
+    const actions = uses.locator('[data-use-row="legendary"]');
+    const RAYS = "legendaryActions:fiery-rays";
+    await actions.getByRole("button", { name: /^Use Fiery Rays, Legendary Action, / }).click();
+    await waitFor("Fiery Rays spent", () => (dragon()?.uses?.[RAYS]?.kind === "turn" && dragon()?.legendary?.actionsUsed === 1 ? true : null));
+    await actions.getByRole("button", { name: /^Use Pounce, Legendary Action, / }).click();
+    await waitFor("Pounce spent", () => (dragon()?.legendary?.actionsUsed === 2 ? true : null));
+    await countShows(uses, "legendary", "2 of 4");
+    await actions.getByRole("button", { name: "Restore one Legendary Action", exact: true }).click();
+    await waitFor("Fiery Rays freed", () => (dragon()?.uses?.[RAYS] === undefined && dragon()?.legendary?.actionsUsed === 1 ? true : null));
+    assert.equal(await actions.getByRole("button", { name: /^Use Fiery Rays/ }).getAttribute("aria-disabled"), null, "Fiery Rays can be taken again");
+    await desk.keyboard.press("Control+z");
+    await waitFor("the Restore taken back", () => (dragon()?.uses?.[RAYS]?.kind === "turn" && dragon()?.legendary?.actionsUsed === 2 ? true : null));
+    await desk.keyboard.press("Control+z");
+    await waitFor("Pounce taken back, Fiery Rays still spent", () => (dragon()?.uses?.[RAYS]?.kind === "turn" && dragon()?.legendary?.actionsUsed === 1 ? true : null));
+    await countShows(uses, "legendary", "3 of 4");
+    assert.equal(await actions.getByRole("button", { name: /^Use Fiery Rays/ }).getAttribute("aria-disabled"), "true", "Fiery Rays waits for the dragon's turn again");
+
+    // On its own turn its actions are off, and Restore still corrects a count set by hand, one at a time (MU-OPUS-09).
+    await turnTo("fu26-dragon");
+    await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { ...dragon()!.legendary!, actionsUsed: 1 } } } });
+    await countShows(uses, "legendary", "3 of 4");
+    assert.equal(await actions.getByRole("button", { name: /^Use Pounce/ }).getAttribute("aria-disabled"), "true", "no legendary action on its own turn");
+    const back = actions.getByRole("button", { name: "Restore one Legendary Action", exact: true });
+    assert.equal(await back.getAttribute("aria-disabled"), null, "Restore on");
+    await back.click();
+    await waitFor("one back on its own turn", () => (dragon()?.legendary?.actionsUsed === 0 ? true : null));
+    await countShows(uses, "legendary", "4 of 4");
+    assert.equal(await back.getAttribute("aria-disabled"), "true", "and off once full");
+    await shots.take(desk, "mu-restore-own-turn");
+    await closeSheets(desk);
+    await deselect(desk);
+  });
+
+  test("mu-c. Pat, lent an Aboleth in the fight, reads its rows as the DM does: its counts as pips, with Use and Restore, and his Restore lands (docs/design-v1-monster-uses.md 3.5)", async () => {
+    await ops.send({ t: "token.create", token: { id: run.aboleth, sceneId: run.sceneId, visibility: "all", kind: "monster", name: "Aboleth", size: "large", x: ABOLETH_AT.x, y: ABOLETH_AT.y, disposition: "hostile", ownerIds: [run.patId], actor: { inline: srdActor("aboleth") } } });
+    await ops.send({ t: "token.create", token: { id: run.tarrasque, sceneId: run.sceneId, visibility: "all", kind: "monster", name: "Tarrasque", size: "gargantuan", x: TARRASQUE_AT.x, y: TARRASQUE_AT.y, disposition: "hostile", actor: { inline: srdActor("tarrasque") } } });
+    await ops.send({ t: "encounter.add", entries: [{ id: "mu-aboleth", tokenId: run.aboleth, value: 6 }, { id: "mu-tarrasque", tokenId: run.tarrasque, value: 4 }] });
+    await waitFor("both in the fight", () => (deskSocket.state?.encounter?.entries.length === 6 ? true : null));
+    const blockOf = (id: string) => limitedUses(srd.find((x) => x.srdId === id)! as never);
+    const lash = blockOf("aboleth").find((u) => u.name === "Lash")!;
+    const dominate = blockOf("aboleth").find((u) => u.name === "Dominate Mind")!;
+    assert.ok(lash.kind === "legendary" && dominate.kind === "day");
+    // The dragon acts now, so the Aboleth may take a Legendary Action.
+    await ops.send({ t: "actor.use", target: { tokenId: run.aboleth }, use: { kind: "resist" } });
+    await ops.send({ t: "actor.use", target: { tokenId: run.aboleth }, use: { kind: "legendary", cost: 1, key: lash.key, name: lash.name } });
+    await ops.send({ t: "actor.use", target: { tokenId: run.aboleth }, use: { kind: "ability", key: dominate.key, name: dominate.name, limit: "day", max: dominate.max } });
+    await ops.send({ t: "actor.use", target: { tokenId: run.tarrasque }, use: { kind: "resist" } });
+    await waitFor("the uses spent", () => (actorOf(deskSocket.state, run.aboleth)?.uses?.[dominate.key] && actorOf(deskSocket.state, run.tarrasque)?.legendary?.resistUsed === 1 ? true : null));
+
+    await setUp(pat, patCdp, PHONE);
+    const panel = await creaturePanel(pat, "Aboleth", { x: ABOLETH_AT.x + 1, y: ABOLETH_AT.y + 1 });
+    const uses = sectionIn(panel, "Uses");
+    await countShows(uses, "resist", "2 of 3");
+    await countShows(uses, "legendary", "2 of 3");
+    await countShows(uses, "ability", "1 of 2");
+    for (const name of ["Use Legendary Resistance, 2 left", "Restore one Legendary Resistance", "Restore one Legendary Action", "Restore one use of Dominate Mind"]) {
+      assert.equal(await uses.getByRole("button", { name, exact: true }).getAttribute("aria-disabled"), null, `${name} on`);
+    }
+    await uses.scrollIntoViewIfNeeded();
+    await measure(pat, uses, "the Aboleth's panel Uses for Pat at 390 x 844 at 100%");
+    await shots.take(pat, "mu-pat-aboleth-uses");
+    await uses.getByRole("button", { name: "Restore one Legendary Resistance", exact: true }).click();
+    await waitFor("Pat's Restore lands", () => (actorOf(deskSocket.state, run.aboleth)?.legendary?.resistUsed === 0 ? true : null));
+    await countShows(uses, "resist", "3 of 3");
+    await closeSheets(pat);
+    await deselect(pat);
+    await pat.goto("about:blank");
+  });
+
+  test("mu-d. every Uses title line in line at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: the Aboleth's, the dragon's, the Tarrasque's 6 and Thorn's class resources in their Token panels, and the Tarrasque's, the Aboleth's and Thorn's with Rage at 6 in their tracker rows (docs/design-v1-monster-uses.md 3.1, 3.7)", async () => {
+    const resources = deskSocket.state!.characters[run.thorn]!.resources!;
+    const seen: string[] = [];
+    try {
+      // Second Wind and Action Surge as a fighter has them, beside Rage and Lay on Hands; Rage at 6 for a short name beside 6 pips.
+      await ops.send({
+        t: "character.update",
+        characterId: run.thorn,
+        patch: {
+          resources: [
+            { id: "rage", name: "Rage", max: 6, used: 1, reset: "shortOne" },
+            { id: "sw", name: "Second Wind", max: 3, used: 1, reset: "shortOne" },
+            { id: "as", name: "Action Surge", max: 1, used: 0, reset: "short" },
+            { id: "loh", name: "Lay on Hands", max: 25, used: 5, reset: "long", pool: true },
+          ],
+        },
+      });
+      await turnTo("fu26-thorn");
+      for (const view of [DESK, { ...DESK, scale: 1.3 }, PHONE, { ...PHONE, scale: 1.3 }, SMALL, { ...SMALL, scale: 1.3 }]) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        const tag = `${view.width}-${Math.round(view.scale * 100)}`;
+        await setUp(desk, deskCdp, view);
+        for (const [name, cell] of [
+          ["Aboleth", { x: ABOLETH_AT.x + 1, y: ABOLETH_AT.y + 1 }],
+          [DRAGON, DRAGON_AT],
+          ["Tarrasque", { x: TARRASQUE_AT.x + 1, y: TARRASQUE_AT.y + 1 }],
+          ["Thorn", THORN_AT],
+        ] as const) {
+          const panel = await creaturePanel(desk, name, cell);
+          const uses = sectionIn(panel, "Uses");
+          await uses.locator("[data-use-pips]").first().waitFor();
+          await uses.scrollIntoViewIfNeeded();
+          await titlesInLine(uses, `${name}'s panel at ${at}`, seen);
+          await measure(desk, uses, `${name}'s panel Uses at ${at}`);
+          await shots.take(desk, `mu-panel-${name.split(" ").pop()!.toLowerCase()}-${tag}`);
+        }
+        await closeSheets(desk);
+        await deselect(desk);
+        for (const name of ["Tarrasque", "Aboleth", "Thorn"]) {
+          const group = await rowUses(desk, name);
+          await group.scrollIntoViewIfNeeded();
+          await titlesInLine(group, `${name}'s row at ${at}`, seen);
+          await measure(desk, group, `${name}'s row Uses at ${at}`);
+          await shots.take(desk, `mu-row-${name.toLowerCase()}-${tag}`);
+          await closeSheets(desk);
+        }
+      }
+    } finally {
+      await ops.send({ t: "character.update", characterId: run.thorn, patch: { resources } });
+      await setUp(desk, deskCdp, DESK);
+    }
+    console.log(`mu title lines:\n${seen.join("\n")}`);
+    assert.deepEqual(sweep, [], "out of line by more than 1 px");
+  });
+
   test("s2-cu-z. no console errors after the s2 steps", () => {
     assert.deepEqual(deskConsole.errors, [], "the desk");
     assert.deepEqual(phoneConsole.errors, [], "the DM's phone");
@@ -1364,44 +1501,109 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
   });
 });
 
-/** A pip's target in layout px: the touch size (client/lib/theme.ts). */
-const theme44 = 44;
+/** A row's count as its pips show it, "2 of 3" for two of three filled, or its words where it shows no pips ("7 of 7"). */
+function shownCount(scope: Locator, kind: string): Promise<string | null> {
+  return scope
+    .locator(`[data-use-row="${kind}"]`)
+    .first()
+    .evaluate((el) => {
+      type E = { querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; textContent: string | null };
+      const pips = (el as unknown as E).querySelector("[data-use-pips]");
+      if (!pips) return null;
+      const all = pips.querySelectorAll("[data-pip]").length;
+      return all === 0 ? pips.textContent : `${pips.querySelectorAll('[data-pip="left"]').length} of ${all}`;
+    });
+}
 
-type Box = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+/** Waits for a row's count to show `count`, as its pips and the words spoken after its name both say (docs/design-v1-monster-uses.md 3.1). */
+async function countShows(scope: Locator, kind: string, count: string): Promise<void> {
+  const row = scope.locator(`[data-use-row="${kind}"]`).first();
+  await waitFor(`${kind} shows ${count}`, async () => ((await shownCount(scope, kind)) === count && ((await row.textContent()) ?? "").includes(`, ${count} left`) ? true : null), 10_000).catch(async () =>
+    assert.fail(`${kind} shows ${await shownCount(scope, kind).catch(() => "nothing")}, reading "${await row.textContent().catch(() => "")}", not ${count}`),
+  );
+}
 
 /**
- * Each pip block in a Uses group as the browser lays it out: its label,
- * its tracker row's box, its pips' box and each pip's, each dot's offset
- * from its pip's center, and its words' box with their line height in
- * layout px, which the interface size scales.
+ * Each counted row's title line under `root` as laid out
+ * (docs/design-v1-monster-uses.md 3.1): its name, its pips' count and
+ * width, whether they share the name's line or stand on the next, how far
+ * their right end stands from the title line's and from the row's
+ * buttons', and whether they should share it: the name's longest word,
+ * the gap and the pips side by side within the line.
  */
-function pipGeometry(group: Locator, within = "li[data-entry-row], li[data-companion-row]"): Promise<{ label: string; row: Box; box: Box; words: Box; lineHeight: number; pips: Box[]; dots: { x: number; y: number }[] }[]> {
-  return group.evaluate((root, within) => {
-    type R = { left: number; right: number; top: number; bottom: number; width: number; height: number };
-    type E = { getBoundingClientRect(): R; querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; closest(s: string): E | null; firstElementChild: E | null; getAttribute(n: string): string | null };
-    const el = root as unknown as E;
-    const box = (e: E): R => {
-      const r = e.getBoundingClientRect();
-      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+function titleLines(root: Locator): Promise<{ name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; text: string }[]> {
+  return root.first().evaluate((el) => {
+    type R = { left: number; right: number; top: number; bottom: number; width: number };
+    type E = {
+      getBoundingClientRect(): R;
+      querySelector(s: string): E | null;
+      querySelectorAll(s: string): ArrayLike<E>;
+      textContent: string | null;
+      previousElementSibling: E | null;
+      parentElement: E | null;
+      firstElementChild: E | null;
+      childNodes: ArrayLike<{ nodeType: number; textContent: string | null }>;
     };
-    const lineHeight = (e: E) => parseFloat((globalThis as unknown as { getComputedStyle(e: E): { lineHeight: string } }).getComputedStyle(e).lineHeight);
-    return Array.from(el.querySelectorAll("[data-pips]")).map((block) => {
-      const pips = block.querySelector('[role="group"]')!;
-      const words = block.firstElementChild!;
-      const buttons = Array.from(pips.querySelectorAll("button"));
-      return {
-        label: pips.getAttribute("aria-label") ?? "",
-        row: box(block.closest(within)!),
-        box: box(pips),
-        words: box(words),
-        lineHeight: lineHeight(words),
-        pips: buttons.map(box),
-        dots: buttons.map((b) => {
-          const p = box(b);
-          const d = box(b.firstElementChild!);
-          return { x: (d.left + d.right) / 2 - (p.left + p.right) / 2, y: (d.top + d.bottom) / 2 - (p.top + p.bottom) / 2 };
-        }),
+    const doc = (el as unknown as { ownerDocument: { createRange(): { setStart(n: unknown, o: number): void; setEnd(n: unknown, o: number): void; getBoundingClientRect(): R } } }).ownerDocument;
+    const style = (e: E) => (globalThis as unknown as { getComputedStyle(e: E): { columnGap: string; width: string; whiteSpace: string } }).getComputedStyle(e);
+    const out: { name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; text: string }[] = [];
+    for (const pips of Array.from((el as unknown as E).querySelectorAll("[data-use-pips]"))) {
+      const nameBox = pips.previousElementSibling!;
+      const nameEl = nameBox.firstElementChild!;
+      const line = pips.parentElement!;
+      const name = nameEl.textContent ?? "";
+      // The name's longest word, laid out as it stands: what it needs beside the pips before it wraps them. A part kept on one line, such as "Recharge 5–6", is one word.
+      let longest = 0;
+      const measureWords = (parent: E) => {
+        for (const child of Array.from(parent.childNodes)) {
+          if (child.nodeType === 1) {
+            const el = child as unknown as E;
+            if (style(el).whiteSpace === "nowrap") longest = Math.max(longest, el.getBoundingClientRect().width);
+            else measureWords(el);
+            continue;
+          }
+          const text = child.textContent ?? "";
+          let at = 0;
+          for (const word of text.split(" ")) {
+            if (word) {
+              const range = doc.createRange();
+              range.setStart(child, at);
+              range.setEnd(child, at + word.length);
+              longest = Math.max(longest, range.getBoundingClientRect().width);
+            }
+            at += word.length + 1;
+          }
+        }
       };
-    });
-  }, within);
+      measureWords(nameEl);
+      const p = pips.getBoundingClientRect();
+      // The interface size zooms the page, so its boxes are scaled and its styles' lengths are not.
+      const scale = p.width / parseFloat(style(pips).width) || 1;
+      const n = nameBox.getBoundingClientRect();
+      const l = line.getBoundingClientRect();
+      const row = line.parentElement!;
+      const buttons = Array.from(row.querySelectorAll("button")).map((b) => b.getBoundingClientRect().right);
+      out.push({
+        name,
+        pips: pips.querySelectorAll("[data-pip]").length,
+        shares: p.top < n.bottom - 1,
+        fits: longest + parseFloat(style(line).columnGap) * scale + p.width <= l.width + 0.5,
+        endOff: Math.abs(p.right - l.right),
+        buttonsOff: buttons.length > 0 ? Math.abs(p.right - Math.max(...buttons)) : null,
+        text: `${name}: pips ${Math.round(p.width)} px, name's longest word ${Math.round(longest)} px, line ${Math.round(l.width)} px`,
+      });
+    }
+    return out;
+  });
+}
+
+/** The title lines' rule, as `titleLines` reads them: the pips at the line's right end and on the buttons' right edge, sharing the name's line exactly where they fit beside its longest word. */
+async function titlesInLine(root: Locator, screen: string, seen: string[]): Promise<void> {
+  for (const t of await titleLines(root)) {
+    const what = `${screen}, ${t.name}`;
+    seen.push(`${what}: ${t.shares ? "beside the name" : "on the next line"} (${t.text})`);
+    assert.ok(t.endOff <= 1, `${what}: the pips ${t.endOff} px from the line's right end`);
+    if (t.buttonsOff !== null) assert.ok(t.buttonsOff <= 1, `${what}: the pips ${t.buttonsOff} px from the buttons' right edge`);
+    assert.equal(t.shares, t.fits, `${what}: ${t.shares ? "beside the name where they do not fit" : "on the next line where they fit beside the name"} (${t.text})`);
+  }
 }

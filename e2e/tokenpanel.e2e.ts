@@ -1530,7 +1530,7 @@ panelFile(null, () => {
     }
   });
 
-  test("s2-tp-f. the DM's Stats on a legendary creature hold the maxima alone, and its Uses the pips that count them used", async () => {
+  test("s2-tp-f. the DM's Stats on a legendary creature hold the maxima alone, and its Uses the pips that count what is left, with no pips block (docs/design-v1-monster-uses.md 3.1)", async () => {
     await ops.send({ t: "token.update", tokenId: run.dragon.id, patch: { actor: { legendary: { actionsMax: 3, actionsUsed: 1, resistMax: 3, resistUsed: 0 } } } });
     try {
       const panel = await panelOf(dm, { x: run.dragon.at.x + 1, y: run.dragon.at.y + 1 }, "Adult White Dragon");
@@ -1540,7 +1540,11 @@ panelFile(null, () => {
       assert.equal(await stats.getByText(/Actions used|Resistances? used/).count(), 0, "no used count's row in Stats");
       assert.equal(await stats.getByRole("textbox", { name: /^Legendary (Actions|Resistance) used/ }).count(), 0, "no used stepper in Stats");
       const uses = sectionIn(panel, "Uses");
-      for (const name of ["Legendary Actions used", "Legendary Resistances used today"]) await uses.getByRole("group", { name, exact: true }).waitFor();
+      for (const [kind, left] of [["legendary", 2], ["resist", 3]] as const) {
+        const pips = uses.locator(`[data-use-row="${kind}"] [data-use-pips]`);
+        await waitFor(`${kind}'s ${left} of 3 pips`, async () => ((await pips.locator('[data-pip="left"]').count()) === left && (await pips.locator("[data-pip]").count()) === 3 ? true : null));
+      }
+      assert.equal(await uses.locator("[data-pips]").count(), 0, "no pips block under the list");
       await stats.getByRole("textbox", { name: "Legendary Actions per round", exact: true }).scrollIntoViewIfNeeded();
       await shots.take(dm, "s2-tp-dragon-stats-maxima");
     } finally {
