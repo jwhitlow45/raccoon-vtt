@@ -29,10 +29,11 @@ export const IMAGE = "docker.io/jwhitlow45/raccoon-vtt";
 
 /**
  * The https profile's Caddy, pinned by digest as the server stack's images
- * are, to a release at least two weeks old. Refresh deliberately with
+ * are, to a release at least two weeks past its release date. 2.11.7 fixes
+ * 2.11.6's HTTP/2 crash in reverse_proxy. Refresh deliberately with
  * `docker buildx imagetools inspect caddy:<version>-alpine`.
  */
-const CADDY_IMAGE = "caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9";
+const CADDY_IMAGE = "caddy:2.11.7-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f";
 
 export type Sources = {
   serverCompose: string;
