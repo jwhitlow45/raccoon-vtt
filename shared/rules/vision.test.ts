@@ -4,7 +4,7 @@ import { wallChunk } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type FreeWall, type Light, type RoomState, type Scene, type SightTile, type TerrainId, type Token } from "../model.ts";
 import { ownsToken } from "../project.ts";
-import { visionRules } from "../ruleHooks.ts";
+import { visionRules, type PartySight } from "../ruleHooks.ts";
 import { actor, character, rng, room, scene, token } from "../testutil.ts";
 import { decodeTile, getBit } from "./fog.ts";
 import { footprintRect } from "./footprint.ts";
@@ -575,21 +575,21 @@ describe("raised edges", () => {
 
   test("a Medium creature on the ground sees over a 5 ft ledge but not onto a 10 ft platform", () => {
     const low = partySight(visionRoom({ w: 20, h: 12, build: { heights: ledge }, tokens: [pc("a", 3, 5)] }), "s1", world);
-    assert.equal(low.seesToken({ size: "medium", x: 15, y: 5 }), true);
+    assert.equal(low.seesToken({ size: "medium", x: 15, y: 5 }, SQUARES), true);
     const high = partySight(visionRoom({ w: 20, h: 12, build: { heights: platform }, tokens: [pc("a", 3, 5)] }), "s1", world);
-    assert.equal(high.seesToken({ size: "medium", x: 11, y: 5 }), false, "the platform's top is hidden");
-    assert.equal(high.seesToken({ size: "medium", x: 15, y: 5 }), false, "and so is the ground behind it");
-    assert.equal(high.seesToken({ size: "medium", x: 5, y: 1 }), true);
+    assert.equal(high.seesToken({ size: "medium", x: 11, y: 5 }, SQUARES), false, "the platform's top is hidden");
+    assert.equal(high.seesToken({ size: "medium", x: 15, y: 5 }, SQUARES), false, "and so is the ground behind it");
+    assert.equal(high.seesToken({ size: "medium", x: 5, y: 1 }, SQUARES), true);
   });
 
   test("a creature on the platform sees down over its edge, and a creature in a pit cannot see out", () => {
     const up = partySight(visionRoom({ w: 20, h: 12, build: { heights: platform }, tokens: [pc("a", 11, 5, { elevation: 10 })] }), "s1", world);
-    assert.equal(up.seesToken({ size: "medium", x: 3, y: 5 }), true);
+    assert.equal(up.seesToken({ size: "medium", x: 3, y: 5 }, SQUARES), true);
     const pit: Record<string, number> = {};
     for (let y = 4; y < 7; y++) for (let x = 4; x < 7; x++) pit[`${x},${y}`] = -10;
     const down = partySight(visionRoom({ w: 20, h: 12, build: { heights: pit }, tokens: [pc("a", 5, 5, { elevation: -10 })] }), "s1", world);
-    assert.equal(down.seesToken({ size: "medium", x: 5, y: 4 }), true, "the pit itself");
-    assert.equal(down.seesToken({ size: "medium", x: 12, y: 5 }), false);
+    assert.equal(down.seesToken({ size: "medium", x: 5, y: 4 }, SQUARES), true, "the pit itself");
+    assert.equal(down.seesToken({ size: "medium", x: 12, y: 5 }, SQUARES), false);
   });
 
   test("the raised tag vision reads is the wall set's", () => {
@@ -617,20 +617,20 @@ describe("the eye on a wall", () => {
       const split = visionRoom({ w: 12, h: 12, build: { walls: [main, splitter] }, tokens: [t] });
       const a = coldPartySight(plain, "s1", world);
       sameTiles(a.tiles, coldPartySight(split, "s1", world).tiles, `eye at y ${y}`);
-      assert.equal(a.seesToken({ size: "tiny", ...sees }), true, `eye at y ${y} sees its own side`);
-      assert.equal(a.seesToken({ size: "tiny", ...hidden }), false, `eye at y ${y} does not see the other side`);
+      assert.equal(a.seesToken({ size: "tiny", ...sees }, SQUARES), true, `eye at y ${y} sees its own side`);
+      assert.equal(a.seesToken({ size: "tiny", ...hidden }, SQUARES), false, `eye at y ${y} does not see the other side`);
     }
   });
 
   test("eyes beside a wall keep their side: (1.0149, 4.5) west of x = 65/64, and a 1.99-cell token at x = 0 beside x = 1", () => {
     const west = visionRoom({ w: 10, h: 10, build: { walls: [free(65 / 64, 0, 65 / 64, 8)] }, tokens: [token("a", { kind: "pc", ownerIds: ["p1"], size: "custom", w: 0.5, h: 0.5, x: 1.0149 - 0.25, y: 4.25 })] });
     const sw = coldPartySight(west, "s1", world);
-    assert.equal(sw.seesToken({ size: "tiny", x: 0, y: 4 }), true);
-    assert.equal(sw.seesToken({ size: "tiny", x: 3, y: 4 }), false);
+    assert.equal(sw.seesToken({ size: "tiny", x: 0, y: 4 }, SQUARES), true);
+    assert.equal(sw.seesToken({ size: "tiny", x: 3, y: 4 }, SQUARES), false);
     const wide = visionRoom({ w: 10, h: 10, build: { walls: [free(1, 0, 1, 8)] }, tokens: [token("a", { kind: "pc", ownerIds: ["p1"], size: "custom", w: 1.99, h: 1, x: 0, y: 0 })] });
     const ww = coldPartySight(wide, "s1", world);
-    assert.equal(ww.seesToken({ size: "tiny", x: 0.25, y: 6 }), true);
-    assert.equal(ww.seesToken({ size: "tiny", x: 3, y: 6 }), false);
+    assert.equal(ww.seesToken({ size: "tiny", x: 0.25, y: 6 }, SQUARES), true);
+    assert.equal(ww.seesToken({ size: "tiny", x: 3, y: 6 }, SQUARES), false);
   });
 
   test("walls 1/64 cell apart and junctions of three and four walls leave the eye between them", () => {
@@ -642,10 +642,10 @@ describe("the eye on a wall", () => {
     const sc = coldPartySight(cross, "s1", world);
     // Stepped by (1, 2) first, the eye is between the south arm and the diagonal, and sees only that wedge.
     const wedges = [
-      sc.seesToken({ size: "tiny", x: 4.5, y: 7 }),
-      sc.seesToken({ size: "tiny", x: 5, y: 3 }),
-      sc.seesToken({ size: "tiny", x: 3, y: 5 }),
-      sc.seesToken({ size: "tiny", x: 7, y: 5 }),
+      sc.seesToken({ size: "tiny", x: 4.5, y: 7 }, SQUARES),
+      sc.seesToken({ size: "tiny", x: 5, y: 3 }, SQUARES),
+      sc.seesToken({ size: "tiny", x: 3, y: 5 }, SQUARES),
+      sc.seesToken({ size: "tiny", x: 7, y: 5 }, SQUARES),
     ];
     assert.deepEqual(wedges, [true, false, false, false]);
   });
@@ -656,8 +656,8 @@ describe("the footprint predicate", () => {
     // A wall across cell (6, 4) at x = 6.5: the creature in the cell's east half is behind it.
     const s = visionRoom({ w: 12, h: 10, build: { walls: [free(6.5, 0, 6.5, 5), free(6.5, 5, 6.5, 10)] }, tokens: [pc("a", 2, 4)] });
     const sight = coldPartySight(s, "s1", world);
-    assert.equal(sight.seesToken({ size: "tiny", x: 6, y: 4 }), true, "the west half");
-    assert.equal(sight.seesToken({ size: "tiny", x: 6.5, y: 4 }), false, "the east half, though occupiedCells says the same cell");
+    assert.equal(sight.seesToken({ size: "tiny", x: 6, y: 4 }, SQUARES), true, "the west half");
+    assert.equal(sight.seesToken({ size: "tiny", x: 6.5, y: 4 }, SQUARES), false, "the east half, though occupiedCells says the same cell");
   });
 
   test("a squeezed creature is judged by its squeezed footprint", () => {
@@ -670,8 +670,8 @@ describe("the footprint predicate", () => {
     const s = visionRoom({ w: 12, h: 10, build: { edges }, tokens: [pc("a", 5, 1)] });
     const sight = coldPartySight(s, "s1", world);
     const large = { size: "large" as const, x: 4.5, y: 3.5 };
-    assert.equal(sight.seesToken(large), true, "full size it reaches into the room");
-    assert.equal(sight.seesToken({ ...large, squeeze: true }), false, "squeezed it is in the corridor");
+    assert.equal(sight.seesToken(large, SQUARES), true, "full size it reaches into the room");
+    assert.equal(sight.seesToken({ ...large, squeeze: true }, SQUARES), false, "squeezed it is in the corridor");
     assert.deepEqual(sightRect({ ...large, squeeze: true }), { x0: 5, y0: 4, x1: 6, y1: 5 });
     const fr = footprintRect(SQUARES, { ...large, squeeze: true });
     assert.deepEqual({ x0: fr.x, y0: fr.y, x1: fr.x + fr.w, y1: fr.y + fr.h }, sightRect({ ...large, squeeze: true }), "the same rectangle footprint.ts gives");
@@ -680,8 +680,8 @@ describe("the footprint predicate", () => {
   test("custom sizes and fractional positions read the centers inside the rectangle", () => {
     const s = visionRoom({ w: 12, h: 10, tokens: [pc("a", 2, 2)] });
     const sight = coldPartySight(s, "s1", world);
-    assert.equal(sight.seesToken({ size: "custom", w: 1.99, h: 0.6, x: 3.3, y: 7.1 }), true);
-    assert.equal(sight.seesToken({ size: "medium", x: -3, y: -3 }), false, "outside the scene nothing is seen");
+    assert.equal(sight.seesToken({ size: "custom", w: 1.99, h: 0.6, x: 3.3, y: 7.1 }, SQUARES), true);
+    assert.equal(sight.seesToken({ size: "medium", x: -3, y: -3 }, SQUARES), false, "outside the scene nothing is seen");
   });
 });
 
@@ -716,8 +716,8 @@ describe("tiles", () => {
 
   test("an unreadable tile counts as nothing seen", () => {
     const sight = sightFromTiles({ "s1:0,0": { b: "not base64" }, "s1:1,0": { f: 7 as 1 } }, "s1");
-    assert.equal(sight.seesToken({ size: "medium", x: 2, y: 2 }), false);
-    assert.equal(sight.seesToken({ size: "medium", x: 18, y: 2 }), false);
+    assert.equal(sight.seesToken({ size: "medium", x: 2, y: 2 }, SQUARES), false);
+    assert.equal(sight.seesToken({ size: "medium", x: 18, y: 2 }, SQUARES), false);
   });
 
   test("a client reading the tiles the server sent answers as the server does", () => {
@@ -729,7 +729,7 @@ describe("tiles", () => {
     const client = sightFromTiles(sent, "s1");
     for (let k = 0; k < 2000; k++) {
       const probe = { size: (["tiny", "medium", "large", "huge"] as const)[k % 4]!, x: r() * 40, y: r() * 40, squeeze: k % 7 === 0 ? (true as const) : undefined };
-      assert.equal(client.seesToken(probe), server.seesToken(probe));
+      assert.equal(client.seesToken(probe, SQUARES), server.seesToken(probe, SQUARES));
     }
   });
 
@@ -747,7 +747,7 @@ describe("the plug-in", () => {
     const s = visionRoom({ tokens: [pc("a", 3, 3)] });
     assert.ok(visionRules.partySight(s, "s1").tiles.size > 0);
     assert.equal(visionRules.partySight({ ...s, scenes: { s1: { ...s.scenes.s1!, vision: { on: false, light: "bright" } } } }, "s1").tiles.size, 0);
-    assert.equal(visionRules.sightFromTiles({}, "s1").seesToken({ size: "medium", x: 3, y: 3 }), false);
+    assert.equal(visionRules.sightFromTiles({}, "s1").seesToken({ size: "medium", x: 3, y: 3 }, SQUARES), false);
   });
 });
 
@@ -935,13 +935,13 @@ describe("incremental equals cold", () => {
     }
     for (let y = 4; y < 8; y++) edges[`10,${y},w`] = WALL;
     const open = visionRoom({ w: 40, h: 16, build: { edges }, tokens: [pc("a", 12, 5)] });
-    assert.equal(partySight(open, "s1", world).seesToken({ size: "medium", x: 30, y: 6 }), true);
+    assert.equal(partySight(open, "s1", world).seesToken({ size: "medium", x: 30, y: 6 }, SQUARES), true);
     const door = free(16, 4, 16.25, 8);
     assert.deepEqual(wallChunk(door), { cx: 1, cy: 0 });
     const closed = { ...open, buildChunks: { ...open.buildChunks, "s1:1,0": { sceneId: "s1", cx: 1, cy: 0, rev: 1, cells: {}, edges: {}, walls: [door] } } };
     const got = partySight(closed, "s1", world);
     sameTiles(got.tiles, coldPartySight(closed, "s1", world).tiles, "closed");
-    assert.equal(got.seesToken({ size: "medium", x: 30, y: 6 }), false);
+    assert.equal(got.seesToken({ size: "medium", x: 30, y: 6 }, SQUARES), false);
   });
 
   test("a light on a wall it cannot step off lights nothing", () => {
@@ -1270,7 +1270,7 @@ describe("sight holders", () => {
   const west = { size: "medium" as const, x: 5, y: 7 };
   const middle = { size: "medium" as const, x: 15, y: 7 };
   const east = { size: "medium" as const, x: 25, y: 7 };
-  const seen = (sight: { seesToken(p: typeof west): boolean }) => [west, middle, east].map((p) => sight.seesToken(p));
+  const seen = (sight: PartySight) => [west, middle, east].map((p) => sight.seesToken(p, SQUARES));
 
   test("a holder sees through the sources they own, directly or through a character, and those that share sight, and never another player's", () => {
     clearVisionCache();
@@ -1433,7 +1433,7 @@ describe("sight holders", () => {
         const levels = levelsOf(sight.tiles, w, h);
         for (let k = 0; k < 150; k++) {
           const probe = randomProbe(r, w);
-          assert.equal(sight.seesToken(probe), bruteSees(levels, w, h, probe), `step ${step}, ${viewer}: ${JSON.stringify(probe)}`);
+          assert.equal(sight.seesToken(probe, SQUARES), bruteSees(levels, w, h, probe), `step ${step}, ${viewer}: ${JSON.stringify(probe)}`);
         }
       }
     }
@@ -1452,14 +1452,14 @@ describe("sight holders", () => {
       const at = { ...s };
       const sights = VIEWERS.map((viewer) => holderSight(at, "s1", viewer, world));
       const probes = Array.from({ length: 120 }, () => randomProbe(r, SIZE));
-      const asked = sights.map((sight) => probes.map((p) => sight.seesToken(p)));
+      const asked = sights.map((sight) => probes.map((p) => sight.seesToken(p, SQUARES)));
       assert.equal(visionCacheReport().rasters, 0, `step ${step}: seesToken drew a raster`);
       const union = partySight(at, "s1", world);
       for (const [i, sight] of sights.entries()) {
         if (sight !== union && sight !== NO_PARTY_SIGHT) queried++;
         // Reading the tiles draws the raster, and seesToken then reads it.
         void sight.tiles;
-        const drawn = probes.map((p) => sight.seesToken(p));
+        const drawn = probes.map((p) => sight.seesToken(p, SQUARES));
         assert.deepEqual(asked[i], drawn, `step ${step}, ${VIEWERS[i]}`);
         both += drawn.filter(Boolean).length > 0 && drawn.some((d) => !d) ? 1 : 0;
       }
@@ -1605,7 +1605,7 @@ describe("sight holders", () => {
     for (const viewer of ["p1", "p2", "p3"]) {
       clearVisionCache();
       const sight = holderSight(s, "s1", viewer, world);
-      const asked = probes.map((p) => sight.seesToken(p));
+      const asked = probes.map((p) => sight.seesToken(p, SQUARES));
       assert.equal(visionCacheReport().rasters, 0);
       const levels = levelsOf(sight.tiles, 32, 16);
       assert.deepEqual(asked, probes.map((p) => bruteSees(levels, 32, 16, p)), `${viewer}`);

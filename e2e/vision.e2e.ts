@@ -12,6 +12,7 @@ import { groundAt } from "#shared/rules/heights.ts";
 import { partyMember, partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, pickOption, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { SQUARES } from "../shared/rules/grid.ts";
 
 /**
  * The v1 wave 4 run (docs/design-v1-maps-vision.md section 4): the real
@@ -193,7 +194,7 @@ function viewProblem(): string | null {
   const sight = sightFromDm();
   for (const token of Object.values(dmState.tokens)) {
     if (!token || token.sceneId !== run.sceneId) continue;
-    const shown = token.visibility === "all" && (partyMember(dmState, token) || token.fogExempt || sight.seesToken(token));
+    const shown = token.visibility === "all" && (partyMember(dmState, token) || token.fogExempt || sight.seesToken(token, SQUARES));
     const has = mine.tokens[token.id] !== undefined;
     if (shown !== has) return `${token.name} at ${token.x},${token.y}: expected ${shown ? "shown" : "withheld"}, the player ${has ? "has it" : "does not"}`;
   }
@@ -502,8 +503,8 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     assert.equal(tokenOf(playerSocket.state, run.goblinId), undefined, "the goblin in the dark reached the player");
     assert.equal(Object.keys(playerSocket.state?.lights ?? {}).length, 0);
     run.startSight = sightFromDm();
-    assert.equal(run.startSight.seesToken({ size: "medium", x: 11, y: 4 }), true, "the torch reaches (11, 4)");
-    assert.equal(run.startSight.seesToken({ size: "medium", x: 12, y: 4 }), false, "the torch stops short of (12, 4)");
+    assert.equal(run.startSight.seesToken({ size: "medium", x: 11, y: 4 }, SQUARES), true, "the torch reaches (11, 4)");
+    assert.equal(run.startSight.seesToken({ size: "medium", x: 12, y: 4 }, SQUARES), false, "the torch stops short of (12, 4)");
     await openSideTab(dm, "Scenes");
     await shots.take(dm, "vision-dm-scene");
     await shots.take(player, "vision-player-torchlight");
@@ -748,7 +749,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     assert.equal(revealedIn(playerSocket.state?.fogTiles, sx, sy), true, "the player's fog forgot explored ground");
     assert.equal(revealedIn(dmSocket.state?.exploredTiles, sx, sy), true, "the DM's explored layer lacks it");
     assert.equal(revealedIn(dmSocket.state?.fogTiles, sx, sy), false, "the DM's own fog layer was written");
-    assert.equal(sightFromDm().seesToken({ size: "medium", x: START.x, y: START.y }), false, "the party still sees Thorn's first square");
+    assert.equal(sightFromDm().seesToken({ size: "medium", x: START.x, y: START.y }, SQUARES), false, "the party still sees Thorn's first square");
     assert.equal(tokenOf(playerSocket.state, run.goblinId), undefined, "the goblin on explored ground reached the player");
 
     // The DM moves the goblin across the explored room: still nothing reaches the player.
@@ -971,7 +972,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
         // The goblin reached the player only while it stood in the torchlight, before Thorn moved.
         const goblin = change.value as Token;
         assert.ok(i < run.thornMovedAt, `frame ${i}: the goblin reached the player after it left the light`);
-        assert.equal(start.seesToken(goblin), true, `frame ${i}: the goblin at ${goblin.x},${goblin.y} reached the player out of sight`);
+        assert.equal(start.seesToken(goblin, SQUARES), true, `frame ${i}: the goblin at ${goblin.x},${goblin.y} reached the player out of sight`);
       }
       const e = frame.t === "eph" ? frame.e : undefined;
       if (e?.k === "ruler") {
@@ -988,7 +989,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
         assert.equal(e.path, undefined, `frame ${i}: a drag frame carried its path`);
         if (e.tokenId === run.goblinId && e.k !== "dragCancel") {
           assert.ok(i < run.goblinGoneAt, `frame ${i}: a goblin drag frame after it left the light`);
-          assert.equal(start.seesToken({ size: "medium", x: e.x!, y: e.y! }), true, `frame ${i}: a goblin ${e.k} at ${e.x},${e.y} out of sight`);
+          assert.equal(start.seesToken({ size: "medium", x: e.x!, y: e.y! }, SQUARES), true, `frame ${i}: a goblin ${e.k} at ${e.x},${e.y} out of sight`);
           goblinDrags++;
         }
       }

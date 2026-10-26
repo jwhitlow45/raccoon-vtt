@@ -27,6 +27,7 @@ import { DEFAULT_SETTINGS, type BuildChunk, type EdgeFeature, type FreeWall, typ
 import { encodeHeights } from "../shared/rules/heights.ts";
 import { clearVisionCache, holderSight, partySight, seenFogBits, sightTileLevels, type VisionWorld } from "../shared/rules/vision.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
+import { SQUARES } from "../shared/rules/grid.ts";
 
 const SIZE = 200;
 const CHUNK = 16;
@@ -625,7 +626,7 @@ function perPlayerRows(runs: number, rows: BenchRow[]): void {
     let n = 0;
     for (const id of [...dark.holders, null]) {
       const sight = holderSight(s, "bench", id, world);
-      for (const c of creatures) if (sight.seesToken(c)) n++;
+      for (const c of creatures) if (sight.seesToken(c, SQUARES)) n++;
     }
     if (n < 0) throw new Error("unreachable");
   };

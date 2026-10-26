@@ -15,8 +15,9 @@ import {
   type TokenLight,
 } from "../model.ts";
 import type { PartySight, SightProbe } from "../ruleHooks.ts";
-import { footprintSize, isSqueezed, squeezedRect, storedCenter, tokenHeightFt } from "./footprint.ts";
+import { footprintSize, footprintSubcells, isSqueezed, squeezedRect, storedCenter, tokenHeightFt } from "./footprint.ts";
 import type { Bounds } from "./geom.ts";
+import type { Grid } from "./grid.ts";
 import { footprintGround, groundAt, standing } from "./heights.ts";
 import { boundsOf, clipToBox, crossingsAt, indexPolygon, orient, SIGHT, stepOffWalls, type Polygon } from "./segments.ts";
 import type { SightSet, WallSet } from "./walls.ts";
@@ -68,6 +69,9 @@ export type VisionWorld = {
  * The rectangle sight judges a creature by (section 4.3.2): its footprint
  * at its stored position, where the map draws it, never snapped. While it
  * squeezes, the squeezed footprint centered on the same point (footprint.ts).
+ * Squares only: on hexes sight reads the sub-cells inside the creature's
+ * hexes (footprint.ts footprintSubcells, docs/design-v1-hex-grids.md
+ * HX-D10), never a rectangle.
  */
 export function sightRect(probe: SightProbe): Bounds {
   if (isSqueezed(probe)) {
@@ -348,7 +352,8 @@ class TileSight implements PartySight {
     return packed ? levelIn(packed, (sy - ty * TILE) * TILE + (sx - tx * TILE)) : NOT_SEEN;
   }
 
-  seesToken(probe: SightProbe): boolean {
+  seesToken(probe: SightProbe, g: Grid): boolean {
+    if (g.shape === "hex") return footprintSubcells(g, probe).some(([sx, sy]) => this.levelAt(sx, sy) !== NOT_SEEN);
     return rectSeen(sightRect(probe), (sx, sy) => this.levelAt(sx, sy));
   }
 }
@@ -2141,9 +2146,9 @@ class HolderSight implements PartySight {
     return rasterFor(this.#sceneId, this.#entry, this.#key, this.#sources).tiles;
   }
 
-  seesToken(probe: SightProbe): boolean {
+  seesToken(probe: SightProbe, g: Grid): boolean {
     const raster = heldRaster(this.#sceneId, this.#entry.serial, this.#key);
-    return raster ? raster.sight.seesToken(probe) : pointSees(this.#entry, this.#sources, probe);
+    return raster ? raster.sight.seesToken(probe, g) : pointSees(this.#entry, this.#sources, probe, g);
   }
 }
 
@@ -2152,11 +2157,13 @@ class HolderSight implements PartySight {
  * footprint has a level above 0 from any of the sources, each sub-cell's
  * level worked out from the source's polygon, senses and the light rows by
  * the table the raster reads (LEVEL_TABLE). It reads exactly the sub-cells
- * TileSight.seesToken reads, so the two answer alike.
+ * TileSight.seesToken reads, so the two answer alike: on hexes those
+ * inside the creature's hexes.
  */
-function pointSees(entry: Drawn, sources: readonly SourceEntry[], probe: SightProbe): boolean {
+function pointSees(entry: Drawn, sources: readonly SourceEntry[], probe: SightProbe, g: Grid): boolean {
   const W = entry.w * SUB;
   const H = entry.h * SUB;
+  if (g.shape === "hex") return subcellsSeen(entry, sources, footprintSubcells(g, probe).filter(([sx, sy]) => sx >= 0 && sy >= 0 && sx < W && sy < H));
   const r = sightRect(probe);
   const box: SubBox = {
     c0: Math.max(0, firstCenterFrom(r.x0)),
@@ -2174,6 +2181,27 @@ function pointSees(entry: Drawn, sources: readonly SourceEntry[], probe: SightPr
       const light = lrow ? lightAt(lrow, sx) : base;
       for (const s of near) if (sourceLevel(s, sx, sy, light) !== NOT_SEEN) return true;
     }
+  }
+  return false;
+}
+
+/** `pointSees` over a list of sub-cells inside the scene. */
+function subcellsSeen(entry: Drawn, sources: readonly SourceEntry[], subs: readonly (readonly [number, number])[]): boolean {
+  if (subs.length === 0) return false;
+  const box: SubBox = { c0: Infinity, r0: Infinity, c1: -Infinity, r1: -Infinity };
+  for (const [sx, sy] of subs) {
+    box.c0 = Math.min(box.c0, sx);
+    box.r0 = Math.min(box.r0, sy);
+    box.c1 = Math.max(box.c1, sx + 1);
+    box.r1 = Math.max(box.r1, sy + 1);
+  }
+  const near = sources.filter((s) => boxesMeet(s.spans?.box ?? null, box));
+  if (near.length === 0) return false;
+  const base = baseLevel(entry.level);
+  for (const [sx, sy] of subs) {
+    const lrow = entry.lightRows ? (entry.lightRows[sy] ?? null) : null;
+    const light = lrow ? lightAt(lrow, sx) : base;
+    for (const s of near) if (sourceLevel(s, sx, sy, light) !== NOT_SEEN) return true;
   }
   return false;
 }

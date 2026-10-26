@@ -249,7 +249,7 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
     const fogged = sceneId !== null && !vision && state.scenes[sceneId]!.fogEnabled && !member && isTokenFullyFogged(SQUARES, fog, sceneId, t);
     assert.ok(!fogged, `${label}: token ${id} under fog leaked`);
     // On a vision scene a creature reaches players only in the party's sight, unless a party member or exempt.
-    if (vision && !member) assert.ok(partySightOf(state, sceneId).seesToken(t), `${label}: token ${id} out of the party's sight leaked`);
+    if (vision && !member) assert.ok(partySightOf(state, sceneId).seesToken(t, SQUARES), `${label}: token ${id} out of the party's sight leaked`);
     assert.equal(pt.aboveFog, member, `${label}: aboveFog of ${id}`);
     assert.ok(!("partyVision" in pt), `${label}: party membership of ${id} leaked`);
     assert.equal(pt.rev, 0, `${label}: rev of ${id}`);

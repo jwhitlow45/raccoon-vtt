@@ -4,6 +4,7 @@ import { LIMITS } from "../limits.ts";
 import type { RoomState } from "../model.ts";
 import { visionRules } from "../ruleHooks.ts";
 import { actor, character, room, scene, token } from "../testutil.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * Senses and lights in cells as well as feet (docs/design-v1-maps-vision.md
@@ -20,7 +21,7 @@ function open(feetPerCell: number): RoomState {
 
 /** Whether the party sees a Medium goblin standing with its west edge `dx` cells east of the cell at `x`. */
 function seesAt(state: RoomState, x: number, y: number, dx: number): boolean {
-  return visionRules.partySight(state, "s1").seesToken(token("gob", { x: x + dx, y }));
+  return visionRules.partySight(state, "s1").seesToken(token("gob", { x: x + dx, y }), SQUARES);
 }
 
 describe("senses and lights on a fine grid", () => {

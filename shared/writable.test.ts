@@ -9,6 +9,7 @@ import { visionRules } from "./ruleHooks.ts";
 import { sceneWalls } from "./rules/walls.ts";
 import { DM, FULL_TILE_BITS, P1, env, room, scene, token } from "./testutil.ts";
 import { isWritable, markFinished, markWritable } from "./writable.ts";
+import { SQUARES } from "./rules/grid.ts";
 
 /**
  * Caches keyed on a state or a collection keep nothing about one an op may
@@ -67,8 +68,8 @@ describe("caches and objects an op still writes into", () => {
     });
     tx.write(keys.chunk("s1", 0, 0), wall(10));
     const between = visionRules.partySight(tx.state, "s1");
-    assert.equal(between.seesToken({ size: "medium", x: 20, y: 8 }), false, "the first wall hides the far side");
-    assert.equal(between.seesToken({ size: "medium", x: 5, y: 8 }), true);
+    assert.equal(between.seesToken({ size: "medium", x: 20, y: 8 }, SQUARES), false, "the first wall hides the far side");
+    assert.equal(between.seesToken({ size: "medium", x: 5, y: 8 }, SQUARES), true);
     assert.equal(sceneWalls(tx.state.scenes.s1!, tx.state.buildChunks).stored.xy[0], 10);
     tx.write(keys.chunk("s1", 0, 0), { ...wall(10), edges: {} });
     tx.write(keys.chunk("s1", 1, 0), wall(20));
@@ -77,8 +78,8 @@ describe("caches and objects an op still writes into", () => {
     const walls = sceneWalls(done.scenes.s1!, done.buildChunks);
     assert.deepEqual([walls.stored.n, walls.stored.xy[0]], [1, 20], "the finished build has the second chunk's wall in place of the first's");
     const sight = visionRules.partySight(done, "s1");
-    assert.equal(sight.seesToken({ size: "medium", x: 15, y: 8 }), true, "the first wall is gone");
-    assert.equal(sight.seesToken({ size: "medium", x: 25, y: 8 }), false, "the second one stands");
+    assert.equal(sight.seesToken({ size: "medium", x: 15, y: 8 }, SQUARES), true, "the first wall is gone");
+    assert.equal(sight.seesToken({ size: "medium", x: 25, y: 8 }, SQUARES), false, "the second one stands");
     assert.deepEqual([...sight.tiles], [...visionRules.partySight(JSON.parse(JSON.stringify(done)) as RoomState, "s1").tiles], "and it is what a fresh copy sees");
   });
 

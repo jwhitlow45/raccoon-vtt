@@ -114,7 +114,7 @@ function zoneSeen(state: RoomState, sceneId: string): (trap: Trap) => boolean {
   if (scene.vision?.on === true) {
     // The DM's own hint, so on a per-player scene it reads what any player's creatures see (docs/design-v1-per-player-vision.md decision 14).
     const sight = unionSightOf(state, sceneId);
-    return (trap) => zoneRanges(state, sceneId, trap.zone).some((r) => anyCell(r, (x, y) => sight.seesToken({ size: "medium", x, y })));
+    return (trap) => zoneRanges(state, sceneId, trap.zone).some((r) => anyCell(r, (x, y) => sight.seesToken({ size: "medium", x, y }, SQUARES)));
   }
   if (!scene.fogEnabled) return () => true;
   // The union too: ground any holder remembers (review PV1-O11).

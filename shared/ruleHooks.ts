@@ -2,6 +2,7 @@ import type { MemberId, RoomState, SceneId, SightTile, Token } from "./model.ts"
 import type { DoorRef } from "./protocol.ts";
 import { legBlocker, lineClear, squeezeFits, type WalkEnd, type Walker } from "./rules/movement.ts";
 import type { Point } from "./rules/geom.ts";
+import type { Grid } from "./rules/grid.ts";
 import { holderSight, partySight, sightFromTiles, type VisionWorld } from "./rules/vision.ts";
 import { sceneWalls } from "./rules/walls.ts";
 
@@ -60,10 +61,12 @@ export type PartySight = {
   /**
    * Whether the creature is in the party's sight (section 4.3.2): any
    * sub-cell whose center lies inside its footprint, the squeezed one while
-   * it squeezes, has a level above 0. Projection, drag frames and the "seen"
-   * marks all ask this one question.
+   * it squeezes, has a level above 0. On a hex scene its footprint is its
+   * hexes (docs/design-v1-hex-grids.md HX-D10), so the scene's grid is the
+   * second argument. Projection, drag frames and the "seen" marks all ask
+   * this one question.
    */
-  seesToken(token: SightProbe): boolean;
+  seesToken(token: SightProbe, grid: Grid): boolean;
   /** Every tile with a level above 0, keyed `"<tx>,<ty>"`, as players and DMs receive them. */
   readonly tiles: ReadonlyMap<string, SightTile>;
 };

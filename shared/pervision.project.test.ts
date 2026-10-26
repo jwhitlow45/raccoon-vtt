@@ -8,6 +8,7 @@ import { visionRules } from "./ruleHooks.ts";
 import { decodeTile, getBit, rasterizeFogOps } from "./rules/fog.ts";
 import { publicToken } from "./rules/walkWorld.ts";
 import { DM, actor, effect, member, room, scene, token } from "./testutil.ts";
+import { SQUARES } from "./rules/grid.ts";
 
 /**
  * Per-player vision's projection and what a device reads from it
@@ -178,11 +179,11 @@ describe("a device fails closed (security rule 10)", () => {
     s.tokens.gob = token("gob", { name: "Goblin", x: 21, y: 20 });
     const one = view(s, P1);
     assert.ok(one.tokens.gob, "p1's own sight sees the goblin beside Thorn");
-    assert.equal(partySightOf(one, "s1").seesToken(one.tokens.ogre!), true, "the shared sight sees the ogre");
-    assert.equal(partySightOf(one, "s1").seesToken(one.tokens.gob!), false, "and not the goblin, which only p1's sight sees");
+    assert.equal(partySightOf(one, "s1").seesToken(one.tokens.ogre!, SQUARES), true, "the shared sight sees the ogre");
+    assert.equal(partySightOf(one, "s1").seesToken(one.tokens.gob!, SQUARES), false, "and not the goblin, which only p1's sight sees");
     const bare = { ...one } as RoomState & { sightAll?: unknown };
     delete bare.sightAll;
-    assert.equal(partySightOf(bare, "s1").seesToken(one.tokens.ogre!), false);
+    assert.equal(partySightOf(bare, "s1").seesToken(one.tokens.ogre!, SQUARES), false);
   });
 
   test("the shared ground on a copy reads fogAll, and a copy without it is fully fogged", () => {

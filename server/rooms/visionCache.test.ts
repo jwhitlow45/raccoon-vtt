@@ -7,6 +7,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { visionRules } from "#shared/ruleHooks.ts";
 import { actor, deepClone, DM, env, P1, room, scene, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
+import { SQUARES } from "../../shared/rules/grid.ts";
 
 /**
  * Sight asked for in the middle of an op, as the reducer's "seen" marks
@@ -138,7 +139,7 @@ describe("sight asked for during an op", () => {
       const heroFirst = groupMove(true);
       assert.deepEqual(marks(wolfFirst), marks(heroFirst), "the same marks in either order");
       // The finished state's own answer, from a copy no cache has seen.
-      const cold = visionRules.partySight(deepClone(wolfFirst), "s1").seesToken(wolfFirst.tokens.wolf!);
+      const cold = visionRules.partySight(deepClone(wolfFirst), "s1").seesToken(wolfFirst.tokens.wolf!, SQUARES);
       assert.equal(cold, lit);
       assert.deepEqual(marks(wolfFirst), [
         [30, 10, false],

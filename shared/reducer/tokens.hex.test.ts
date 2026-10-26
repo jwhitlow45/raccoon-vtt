@@ -3,9 +3,12 @@ import { describe, test } from "node:test";
 import type { GridShape, PathStop, RoomState, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { placedOnHex, type PlacedToken } from "../rules/footprint.ts";
-import { gridOfShape } from "../rules/grid.ts";
-import { hexDistance, type Hex, type HexGrid } from "../rules/hex.ts";
+import { placedOnHex, tokenRefHex, type PlacedToken } from "../rules/footprint.ts";
+import { rasterizeFogOps } from "../rules/fog.ts";
+import { gridOfShape, SQUARES } from "../rules/grid.ts";
+import { hexDistance, hexKey, hexSubcells, type Hex, type HexGrid } from "../rules/hex.ts";
+import { ownWalk } from "../rules/movement.ts";
+import { routeWalk } from "../rules/route.ts";
 import { DM, env, room, scene, token } from "../testutil.ts";
 
 /**
@@ -72,3 +75,37 @@ for (const shape of ["hexRows", "hexColumns"] as const) {
     });
   });
 }
+
+describe("a leg through one fogged hex (section 9)", () => {
+  /** Fog on, every sub-cell revealed but those of `hex`. */
+  function allBut(state: RoomState, g: HexGrid, hex: Hex): void {
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+    const ops = [
+      { id: "all", mode: "reveal" as const, shape: { kind: "rect" as const, x: 0, y: 0, w: 30, h: 20 } },
+      ...hexSubcells(g, hex).map(([sx, sy], i) => ({ id: `h${i}`, mode: "hide" as const, shape: { kind: "rect" as const, x: sx / 4, y: sy / 4, w: 0.25, h: 0.25 } })),
+    ];
+    for (const [key, tile] of Object.entries(rasterizeFogOps(state.fogTiles, "s1", state.scenes.s1.bounds, ops))) {
+      if (tile === null) delete state.fogTiles[key];
+      else state.fogTiles[key] = tile;
+    }
+  }
+
+  test("is not routeSeen, though its ends are seen, and the square samples of the same leg miss that hex", () => {
+    // Two rows straight down on hex rows: the line passes hex 4,3 of the odd row between, by its nudge.
+    const f = fight("hexRows", "medium", { col: 4, row: 2 }, (s) => allBut(s, gridOfShape("hexRows") as HexGrid, { col: 4, row: 3 }));
+    f.move({ col: 4, row: 4 });
+    const stop = f.stops()[1]!;
+    assert.deepEqual([f.stops()[0]!.seen, stop.seen, stop.routeSeen], [true, true, undefined]);
+    // Without the hex line, the leg's top-left samples stand on hex 3,3 between, so every spot would read as seen.
+    const from = ownWalk({ ...token("o", { size: "medium" }), ...placedOnHex(f.g, { size: "medium", x: 0, y: 0 }, { col: 4, row: 2 }) });
+    const to = { ...from, ...placedOnHex(f.g, from, { col: 4, row: 4 }) };
+    const squares = routeWalk(SQUARES, [from, to], { buildChunks: {} }).map((p) => hexKey(tokenRefHex(f.g, { size: "medium", x: p.x, y: p.y })));
+    assert.ok(!squares.includes("4,3"), squares.join(" "));
+  });
+
+  test("a leg beside it is routeSeen", () => {
+    const f = fight("hexRows", "medium", { col: 4, row: 2 }, (s) => allBut(s, gridOfShape("hexRows") as HexGrid, { col: 8, row: 3 }));
+    f.move({ col: 4, row: 4 });
+    assert.equal(f.stops()[1]!.routeSeen, true);
+  });
+});

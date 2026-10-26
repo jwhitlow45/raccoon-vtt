@@ -35,6 +35,7 @@ import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
 import { checkWholeScenes, growthBound, measuredStateBytes, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
+import { SQUARES } from "../../shared/rules/grid.ts";
 
 /**
  * The actor's commit and replay failure paths (design 7.2 and 16.2), against
@@ -2240,7 +2241,7 @@ describe("the lit token light cap in the limits step (docs/design-v1-maps-vision
   }
 
   /** Whether the party sees Ayla's own square, which only her torch lights. */
-  const aylaLit = (state: RoomState) => partySight(state, state.meta.playerSceneId!, world).seesToken({ size: "medium", x: 1, y: 1 });
+  const aylaLit = (state: RoomState) => partySight(state, state.meta.playerSceneId!, world).seesToken({ size: "medium", x: 1, y: 1 }, SQUARES);
 
   test("a player's torch is never refused, and lights, at 20 and 25 lit creatures, shown out of sight or hidden", async () => {
     const cap = LIMITS.litTokenLightsPerScene;

@@ -1,7 +1,7 @@
 import { keys } from "#shared/keys.ts";
 import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
-import { inSightOfNonOwners, ownsToken, perPlayerScene, projectEntity, viewerSceneId, withheldFromViewer } from "#shared/project.ts";
+import { gridOfToken, inSightOfNonOwners, ownsToken, perPlayerScene, projectEntity, viewerSceneId, withheldFromViewer } from "#shared/project.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
 import type { EphEvent } from "#shared/protocol.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
@@ -145,9 +145,15 @@ function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string)
  * stands or past a corner, on its holder or past it, at any footing a walk
  * off the ground may reach (movement.ts walkStates, review AT-ASTRA-22),
  * and withheld when any of them withholds it.
+ *
+ * On a hex scene nothing squeezes and no walls stand until phase H2 of hex
+ * grids, so the preview is judged at full size, by the sub-cells inside
+ * the hexes it stands on there (docs/design-v1-hex-grids.md HX-D10), as
+ * projection judges a creature standing there.
  */
 function previewWithheld(state: RoomState, viewer: Viewer, token: Token, x: number, y: number, path: readonly number[] | undefined): boolean {
   const { squeeze: _squeeze, ...rest } = token;
+  if (gridOfToken(state, token).shape === "hex") return withheldFromViewer(state, viewer, { ...rest, x, y });
   const seen = (t: { id: string }) => state.tokens[t.id] !== undefined && inSightOfNonOwners(state, state.tokens[t.id]!, {});
   const walker = walkerFor(state, token, seen);
   const at = { x, y };

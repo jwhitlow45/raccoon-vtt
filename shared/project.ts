@@ -57,7 +57,7 @@ import { isWritable } from "./writable.ts";
 import { autoWallBetween, paintedAt } from "./rules/autoWalls.ts";
 import { visionRules, type PartySight } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
-import { footprintRect, occupiedCells, occupiedRange, type CellRange } from "./rules/footprint.ts";
+import { footprintRect, footprintSubcells, occupiedCells, occupiedRange, type CellRange } from "./rules/footprint.ts";
 import { sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
@@ -297,8 +297,12 @@ function holdsSight(state: RoomState, sceneId: string, memberId: string): boolea
  * sight, their own explored layer is merged in too
  * (docs/design-v1-per-player-vision.md 6.3). On a projected state it reads
  * the fog the projection holds, its viewer's own.
+ *
+ * It answers whether a whole cell is fogged, and through `sub` whether one
+ * sub-cell is, by its scene-wide raster index, which a creature on hexes is
+ * read by (docs/design-v1-hex-grids.md HX-D10).
  */
-type FogReader = (sceneId: string, cx: number, cy: number) => boolean;
+type FogReader = ((sceneId: string, cx: number, cy: number) => boolean) & { sub(sceneId: string, sx: number, sy: number): boolean };
 
 function fogReader(state: RoomState, memberId: string | null = null): FogReader {
   const cache = new Map<string, Uint8Array | null>();
@@ -331,20 +335,25 @@ function sharedFogReader(state: RoomState): FogReader {
     const tile = fogAll[tileKey(sceneId, tx, ty)];
     return tile ? bitsOf(tile) : null;
   });
-  return (sceneId, cx, cy) => (perPlayerScene(state.scenes[sceneId]) ? shared(sceneId, cx, cy) : plain(sceneId, cx, cy));
+  const which = (sceneId: string) => (perPlayerScene(state.scenes[sceneId]) ? shared : plain);
+  return Object.assign((sceneId: string, cx: number, cy: number) => which(sceneId)(sceneId, cx, cy), { sub: (sceneId: string, sx: number, sy: number) => which(sceneId).sub(sceneId, sx, sy) });
 }
 
 /** A fog reader over the revealed bits `bitsAt` gives each tile, null where no layer holds it, decoded once a tile. */
 function cellReader(cache: Map<string, Uint8Array | null>, bitsAt: (sceneId: string, tx: number, ty: number) => Uint8Array | null): FogReader {
-  return (sceneId, cx, cy) => {
-    const tx = Math.floor(cx / TILE_CELLS);
-    const ty = Math.floor(cy / TILE_CELLS);
+  const tileBits = (sceneId: string, tx: number, ty: number): Uint8Array | null => {
     const key = tileKey(sceneId, tx, ty);
     let bits = cache.get(key);
     if (bits === undefined) {
       bits = bitsAt(sceneId, tx, ty);
       cache.set(key, bits);
     }
+    return bits;
+  };
+  const cell = (sceneId: string, cx: number, cy: number): boolean => {
+    const tx = Math.floor(cx / TILE_CELLS);
+    const ty = Math.floor(cy / TILE_CELLS);
+    const bits = tileBits(sceneId, tx, ty);
     if (!bits) return true;
     const bx = (cx - tx * TILE_CELLS) * FOG_SUBCELLS;
     const by = (cy - ty * TILE_CELLS) * FOG_SUBCELLS;
@@ -353,6 +362,15 @@ function cellReader(cache: Map<string, Uint8Array | null>, bitsAt: (sceneId: str
     }
     return true;
   };
+  const sub = (sceneId: string, sx: number, sy: number): boolean => {
+    if (sx < 0 || sy < 0) return true;
+    const side = TILE_CELLS * FOG_SUBCELLS;
+    const tx = Math.floor(sx / side);
+    const ty = Math.floor(sy / side);
+    const bits = tileBits(sceneId, tx, ty);
+    return !bits || !getBit(bits, sx - tx * side, sy - ty * side);
+  };
+  return Object.assign(cell, { sub });
 }
 
 /**
@@ -627,7 +645,8 @@ function tokenVisibleTo(ctx: Ctx, token: Token, revealedSeen = false): boolean {
  * every cell it stands on is fully fogged, the two fog layers merged. The
  * sight and fog are whichever viewer's the caller passes: one player's own
  * on a per-player scene, or what every viewer shares
- * (docs/design-v1-per-player-vision.md 6.2).
+ * (docs/design-v1-per-player-vision.md 6.2). On a hex scene both read the
+ * fog sub-cells inside the creature's hexes (`footprintFogged`).
  *
  * A creature revealed on its turn follows that rule too (rules/fog.ts
  * isAboveFog). `revealedSeen` brings back the rule that ops stored before
@@ -643,8 +662,20 @@ function withheldFromPlayers(state: RoomState, fogged: FogReader, sight: (sceneI
   if (!scene) return false;
   if (!visionOn(scene) && !scene.fogEnabled) return false;
   if (isAboveFog(token, isPartyMember(state, token)) || (revealedSeen && token.fogExemptAuto)) return false;
-  if (visionOn(scene)) return !sight(scene.id).seesToken(token);
-  return occupiedCells(SQUARES, token).every((cell) => fogged(token.sceneId, cell.x, cell.y));
+  const grid = sceneGrid(scene);
+  if (visionOn(scene)) return !sight(scene.id).seesToken(token, grid);
+  return footprintFogged(grid, fogged, token);
+}
+
+/**
+ * Whether every part of a creature's footprint is fogged by `fogged`: each
+ * cell it stands on on squares, and on hexes each fog sub-cell inside its
+ * hexes (docs/design-v1-hex-grids.md HX-D10), so a hex half in a revealed
+ * cell shows it only where a revealed sub-cell lies inside the hex.
+ */
+function footprintFogged(grid: Grid, fogged: FogReader, token: Token): boolean {
+  if (grid.shape === "hex") return footprintSubcells(grid, token).every(([sx, sy]) => fogged.sub(token.sceneId, sx, sy));
+  return occupiedCells(grid, token).every((cell) => fogged(token.sceneId, cell.x, cell.y));
 }
 
 /**
@@ -733,7 +764,11 @@ export function seenAtEvery(state: RoomState, token: Token, spots: readonly { x:
   if (!spots.every((p) => !withheldFromPlayers(state, shared.fogged, shared.sight, placed(p), revealed))) return false;
   const scene = state.scenes[token.sceneId];
   if (!perPlayerScene(scene) || !scene?.fogEnabled) return true;
-  return spots.every((p) => occupiedCells(SQUARES, placed(p)).every((cell) => !shared.fogged(token.sceneId, cell.x, cell.y)));
+  // Every part of the footprint on shared ground: each cell on squares, each sub-cell of its hexes on hexes.
+  const grid = sceneGrid(scene);
+  const open = (t: Token) =>
+    grid.shape === "hex" ? footprintSubcells(grid, t).every(([sx, sy]) => !shared.fogged.sub(token.sceneId, sx, sy)) : occupiedCells(grid, t).every((cell) => !shared.fogged(token.sceneId, cell.x, cell.y));
+  return spots.every((p) => open(placed(p)));
 }
 
 /** The same question for an initiative row, by the encounter projection's rule: not hidden, in the order players see, and its creature in sight. */
@@ -2989,7 +3024,10 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
  *
  * A token counts by the cells the fog rule reads and by the unsnapped
  * rectangle sight judges it by, which can reach a cell further where the
- * DM dropped it off the grid.
+ * DM dropped it off the grid. On a hex scene both read the sub-cells inside
+ * its hexes, so it counts by the cells those lie in, which reach past its
+ * box where it was dropped off its anchor (docs/design-v1-hex-grids.md
+ * HX-D10).
  */
 function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet<string>>, add: (key: EntityKey) => void, tokenIds: Set<string>): void {
   const on = (sceneId: string, r: CellRange): boolean => {
@@ -3002,9 +3040,10 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
   };
   for (const token of Object.values(state.tokens)) {
     if (!tiles.has(token.sceneId)) continue;
-    const cells = occupiedRange(SQUARES, token);
-    const seen = sightRect(token);
-    const r = { x0: Math.min(cells.x0, Math.floor(seen.x0)), y0: Math.min(cells.y0, Math.floor(seen.y0)), x1: Math.max(cells.x1, Math.ceil(seen.x1)), y1: Math.max(cells.y1, Math.ceil(seen.y1)) };
+    const grid = gridOfToken(state, token);
+    const cells = occupiedRange(grid, token);
+    const seen = grid.shape === "hex" ? null : sightRect(token);
+    const r = seen ? { x0: Math.min(cells.x0, Math.floor(seen.x0)), y0: Math.min(cells.y0, Math.floor(seen.y0)), x1: Math.max(cells.x1, Math.ceil(seen.x1)), y1: Math.max(cells.y1, Math.ceil(seen.y1)) } : cells;
     if (!on(token.sceneId, r)) continue;
     add(keys.token(token.id));
     tokenIds.add(token.id);
