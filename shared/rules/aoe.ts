@@ -1368,13 +1368,12 @@ class HexSampler {
    * Whether a point is inside at height `z`, as squares read a creature's
    * middle under "center": inside the shape, or on an emanation `d` steps
    * from its source with the creature's `layers` within its reach, and seen
-   * by its polygons, on one of the scene's hexes. The DM may stand a token
-   * on a hex past the scene's edge, such as the one past an odd row's end,
-   * whose center lies on the scene's right edge, and that hex is never
-   * shaded, so it catches no one, as `count` reads it (review HX2-OPUS-14).
+   * by its polygons, within the scene. Not by the hex under it: a Large
+   * or Gargantuan anchor is a corner three hexes share, and which of them
+   * `hexAt` picks there turns on the row (review FU33-O2).
    */
   pointIn(p: Point, z: number, d: number | undefined, layers: [number, number]): boolean {
-    if (!hexInScene(this.g, this.scene, hexAt(this.g, p))) return false;
+    if (p.x < 0 || p.y < 0 || p.x > this.scene.w || p.y > this.scene.h) return false;
     const reach = this.area.reach;
     if (reach ? !withinReach(reach, d ?? hexSetSteps(this.g, reach.from, [hexAt(this.g, p)]), layers[0], layers[1]) : !this.area.shape.inside(p.x, p.y, z)) return false;
     return this.seen(p.x, p.y);
@@ -1402,11 +1401,15 @@ class HexSampler {
  * anchor is a corner three hexes share, which no one hex holds the same way
  * on every row (review HX2-OPUS-01). Each is measured at its own height,
  * as on squares, and an emanation's reach counts the vertical steps to its
- * layers.
+ * layers. A creature none of whose hexes is the scene's is caught by no
+ * rule: the DM may stand a token on the hex past an odd row's end, whose
+ * center lies on the scene's edge, and no hex past the edge is shaded
+ * (review HX2-OPUS-14).
  */
 function creaturesOnHexes(g: HexGrid, template: AreaTemplateInput, area: ResolvedArea, tokens: Iterable<AreaToken>, ctx: AreaContext): TokenId[] {
   const fpc = feetPerCellOf(ctx);
-  const s = new HexSampler(g, area, samplesOf(ctx), sceneBounds(ctx));
+  const scene = sceneBounds(ctx);
+  const s = new HexSampler(g, area, samplesOf(ctx), scene);
   const { aoeCoverage, aoeInclusion } = ctx.settings;
   const caught: TokenId[] = [];
   for (const t of tokens) {
@@ -1417,13 +1420,14 @@ function creaturesOnHexes(g: HexGrid, template: AreaTemplateInput, area: Resolve
     const layers: [number, number] = [z0, Math.max(z0 + 1, Math.ceil(hi / fpc))];
     const sliceZ = area.sliceZ;
     const zsAt = (p: Point) => (sliceZ ? heightsThrough(lo / fpc, hi / fpc, sliceZ(p.x, p.y)) : [clamp(area.originZ, lo / fpc, hi / fpc)]);
+    const hexes = occupiedHexes(g, t);
     if (aoeInclusion === "center") {
+      if (!hexes.some((h) => hexInScene(g, scene, h))) continue;
       const p = hexAnchor(g, t);
-      const d = area.reach ? hexSetSteps(g, area.reach.from, occupiedHexes(g, t)) : undefined;
+      const d = area.reach ? hexSetSteps(g, area.reach.from, hexes) : undefined;
       if (zsAt(p).some((z) => s.pointIn(p, z, d, layers))) caught.push(t.id);
       continue;
     }
-    const hexes = occupiedHexes(g, t);
     const best = hexes.map((h) => {
       let top = 0;
       let center = false;

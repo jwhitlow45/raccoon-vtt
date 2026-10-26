@@ -311,6 +311,23 @@ describe("under \"center\" a creature on a hex past the scene's edge is not caug
       }
       assert.ok(seen > 50, `only ${seen} placements inside`);
     });
+
+    test(`${name}: a Large with 2 of its 3 hexes inside, on an even or an odd row or column, is caught the same by a sphere around its anchor`, () => {
+      // Its anchor is a corner three hexes share, and which of them hexAt picks there turns on the row, so the scene's hexes must not be read at the anchor (review FU33-O2).
+      const scene = { w: 40, h: 40 };
+      const parities = new Set<number>();
+      for (let a = -2; a < 42; a++) {
+        for (let b = -2; b < 42; b++) {
+          const hex = { col: a, row: b };
+          const large = on(g, "l", "large", hex);
+          if (occupiedHexes(g, large).filter((h) => hexInScene(g, scene, h)).length !== 2) continue;
+          parities.add(Math.abs(g.orient === "rows" ? hex.row : hex.col) % 2);
+          const sphere = template("s", { shape: "sphere", size: 5, origin: { ...hexAnchor(g, large), z: 0 }, includeOrigin: true });
+          assert.deepEqual(creaturesInArea(sphere, [large], ctx(g, {}, { inclusion: "center" })), ["l"], `${a},${b}`);
+        }
+      }
+      assert.deepEqual([...parities].sort(), [0, 1], "placements on both even and odd lines");
+    });
   }
 });
 
