@@ -117,9 +117,9 @@ export function ViewVoice() {
 /**
  * The menu's rows: the radio group "View", the line of a tool that shows
  * Top-down, and Turn left and Turn right while the board is Isometric. A
- * pick keeps the menu open, so Isometric's turns are a tap away. A sheet
- * opened by a key puts focus on the checked radio (`keyOpen`), as the
- * popover does on its own.
+ * pick keeps the menu open, so Isometric's turns are a tap away. However
+ * it opens, by a key, a click or a tap, focus goes to the checked radio
+ * (design 8, D-261026-12), whose ring shows only after keys (globals.css).
  *
  * A popover keeps the size it opened with, and its content scrolls past
  * it (components/Popover.tsx), so a pick of Isometric would add the turns
@@ -127,8 +127,13 @@ export function ViewVoice() {
  * the board shows Top-down and no tool holds it there, which only a tool
  * change ends, and a tool change closes the popover.
  */
-export function ViewMenuBody(props: { choice: ViewChoiceState; keyOpen?: boolean; reserveTurns?: boolean }) {
+export function ViewMenuBody(props: { choice: ViewChoiceState; reserveTurns?: boolean }) {
   const { choice } = props;
+  const group = useRef<HTMLDivElement>(null);
+  // After the sheet's dialog has opened and the popover has placed itself, both in layout effects.
+  useEffect(() => {
+    group.current?.querySelector<HTMLInputElement>("input:checked")?.focus({ preventScroll: true });
+  }, []);
   const name = useId();
   const helpId = useId();
   const leftId = useId();
@@ -141,7 +146,7 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; keyOpen?: boolean
   };
   return (
     <div data-view-menu="" style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
-      <div role="radiogroup" aria-label={VIEW_GROUP} style={{ display: "grid", gap: theme.space(0.5), minWidth: 0 }}>
+      <div ref={group} role="radiogroup" aria-label={VIEW_GROUP} style={{ display: "grid", gap: theme.space(0.5), minWidth: 0 }}>
         {VIEW_CHOICES.map((c) => {
           const chosen = c === value;
           return (
@@ -151,7 +156,6 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; keyOpen?: boolean
                 name={name}
                 value={c}
                 checked={chosen}
-                autoFocus={props.keyOpen === true && chosen}
                 aria-describedby={c === "follow" ? helpId : undefined}
                 onChange={() => pickView(choice.key, pickOf(c))}
                 style={RADIO_COVER}

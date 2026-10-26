@@ -121,7 +121,22 @@ async function openMenu(page: Page, touch: boolean): Promise<Locator> {
   else await viewButton(page).click();
   const menu = viewMenu(page);
   await menu.waitFor();
+  await onCheckedRadio(page, menu);
   return menu;
+}
+
+/**
+ * Any open of the menu, a tap and a click too, puts focus on the checked
+ * radio, and after a pointer draws no ring (design 8, D-261026-12).
+ */
+async function onCheckedRadio(page: Page, menu: Locator): Promise<void> {
+  const checked = menu.locator("input[type=radio]:checked");
+  await waitFor("focus on the checked radio", () => checked.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement || null));
+  const ring = await checked.evaluate((el) => {
+    const label = (el as unknown as { parentElement: unknown }).parentElement;
+    return (globalThis as unknown as { getComputedStyle(e: unknown): { outlineStyle: string } }).getComputedStyle(label).outlineStyle;
+  });
+  assert.equal(ring, "none", "no ring after a pointer");
 }
 
 async function closeMenu(page: Page, touch: boolean): Promise<void> {

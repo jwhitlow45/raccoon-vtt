@@ -357,22 +357,21 @@ function ViewPopover(props: { choice: ViewChoiceState; onOpen?(open: boolean): v
 
 function ViewSheet(props: { choice: ViewChoiceState }) {
   const opener = useRef<HTMLElement | null>(null);
-  // Null while closed, else whether a key opened it, so focus goes to the checked radio as the popover's does.
-  const [open, setOpen] = useState<{ byKey: boolean } | null>(null);
+  const [open, setOpen] = useState(false);
   return (
     <>
       <ViewIconButton
         choice={props.choice}
-        onClick={(e) => setOpen({ byKey: e.detail === 0 })}
+        onClick={() => setOpen(true)}
         anchor={{
           ref: (el) => void (opener.current = el),
           "aria-haspopup": "dialog",
-          "aria-expanded": open !== null,
+          "aria-expanded": open,
         }}
       />
       {open ? (
-        <SheetDialog title={VIEW_GROUP} opener={opener} onClose={() => setOpen(null)} width={theme.layout.dialog.sm}>
-          <ViewMenuBody choice={props.choice} keyOpen={open.byKey} />
+        <SheetDialog title={VIEW_GROUP} opener={opener} onClose={() => setOpen(false)} width={theme.layout.dialog.sm}>
+          <ViewMenuBody choice={props.choice} />
         </SheetDialog>
       ) : (
         <ViewVoice />
