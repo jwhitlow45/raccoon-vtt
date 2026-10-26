@@ -100,6 +100,8 @@ const ALL_TEXTURES: readonly TexturedTerrain[] = ["stone", "wood", "grass", "dir
 const GROUND_LAYERS = isoLayersOf("ground", "board");
 const GROUND_MARKS = [...isoLayersOf("ground", "underDecor"), ...isoLayersOf("ground", "overlay")];
 const MOVING_LAYERS = isoLayersOf("moving");
+/** None yet: ISO-3 moves pills and pins here. Drawn now, so a layer moved to "upright" draws without a change here. */
+const UPRIGHT_LAYERS = isoLayersOf("upright");
 /** The lift margin grows in steps, so a pan that changes the highest lift in view seldom reallocates the ground stage's canvas (section 11). */
 const MARGIN_STEP_PX = 128;
 /** The culling box grows in steps of screen pixels, so a pan sorts the view again only when it crosses one. */
@@ -375,6 +377,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
               <Silhouette key={s.id} token={byId.get(s.id)!} turn={turn} standee={standees.find((x) => x.id === s.id)!} scale={cam.scale} />
             ))}
             <UprightLabels labels={uprightLabels} turn={turn} ground={(x, y) => heights.at(Math.floor(x), Math.floor(y))} />
+            {UPRIGHT_LAYERS.map(({ id, Component }) => (
+              <Component key={id} {...props.layerProps} />
+            ))}
             {(["marks", "label", "plate"] as const).flatMap((part) =>
               props.decorTokens
                 .filter((t) => part !== "plate" || props.hasPlate(t))

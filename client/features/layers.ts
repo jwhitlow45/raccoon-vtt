@@ -100,9 +100,10 @@ export type LayerProps = {
  * - `ground`: on the ground stage, under the fog where Top-down draws it
  *   under the fog and over it where Top-down draws it over, lifted onto
  *   raised ground with the tops that copy it. Nothing that moves each frame.
- * - `moving`: on the overlay, on the ground plane, for marks that move
- *   each frame (rulers, the laser, previews). Shows through the fog, as
- *   Top-down's overlay does.
+ * - `moving`: on the main stage's drag layer, on the ground plane, for
+ *   marks that move each frame (previews, movement paths), so their frames
+ *   redraw none of the overlay's text. Shows through the fog, as Top-down's
+ *   overlay does.
  * - `upright`: on the overlay in view space, standing up.
  * - `off`: not drawn in Isometric: its tool shows Top-down while in use, or
  *   its effects have not moved into a controller yet.

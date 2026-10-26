@@ -213,3 +213,18 @@ describe("map labels in Isometric", () => {
     assert.match(iso, /labelShape\(l, view, \{ measure: measureLabel, upright: true, ground: ground\(l\.x, l\.y\) \}\)/);
   });
 });
+
+describe("every isometric place draws", () => {
+  test("a layer on the ground, moving or upright draws in Isometric, whichever layer of Top-down it came from", () => {
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    assert.match(iso, /const GROUND_LAYERS = isoLayersOf\("ground", "board"\);/);
+    assert.match(iso, /const GROUND_MARKS = \[\.\.\.isoLayersOf\("ground", "underDecor"\), \.\.\.isoLayersOf\("ground", "overlay"\)\];/);
+    assert.match(iso, /const MOVING_LAYERS = isoLayersOf\("moving"\);/);
+    assert.match(iso, /const UPRIGHT_LAYERS = isoLayersOf\("upright"\);/);
+    for (const list of ["GROUND_LAYERS", "GROUND_MARKS", "MOVING_LAYERS", "UPRIGHT_LAYERS"]) assert.match(iso, new RegExp(`\\{${list}\\.map\\(`), `${list} is drawn`);
+    // The upright ones in the overlay, in view space.
+    const main = iso.slice(iso.indexOf("<Stage key={`main:"));
+    const overlay = main.split(/<Layer[ >]/)[3]!;
+    assert.match(overlay, /UPRIGHT_LAYERS\.map\(/);
+  });
+});
