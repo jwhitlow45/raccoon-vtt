@@ -176,3 +176,20 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     assert.match(overlay!, /UprightLabels/);
   });
 });
+
+describe("both trees share one map image", () => {
+  test("the board loads the map once, above both trees, and a tree's map layer loads its own only outside the board", () => {
+    const stage = read("canvas/Stage.tsx");
+    const wrap = stage.indexOf("<SharedMapImage scene={scene} variant={variant}>");
+    assert.ok(wrap > 0 && wrap < stage.indexOf("<Frozen frozen=") && stage.indexOf("</SharedMapImage>") > stage.indexOf("<IsoBoard"), "it wraps both trees");
+    const map = read("canvas/layers/MapLayer.tsx");
+    assert.match(map, /const own = useMapImage\(shared \? null : source\.url, source\.fallback\);/);
+    assert.match(map, /shared \? \(shared\.url === source\.url \? shared\.state : LOADING\) : own/);
+    assert.equal(map.match(/useMapImage\(/g)?.length, 2, "the shared loader and the fallback, nothing else");
+  });
+
+  test("only the tree on screen reports the map's progress", () => {
+    assert.match(read("canvas/Stage.tsx"), /<MapLayer scene=\{scene\} variant=\{variant\} report=\{!isoShown\} \/>/);
+    assert.match(read("canvas/relief/IsoBoard.tsx"), /<MapContent scene=\{scene\} variant=\{props\.variant\} report=\{!hidden\}/);
+  });
+});

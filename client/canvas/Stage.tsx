@@ -81,7 +81,7 @@ import { emptyTap, putAway } from "./emptyTap.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
 import { FogShape } from "./FogShape.tsx";
-import { MapLayer } from "./layers/MapLayer.tsx";
+import { MapLayer, SharedMapImage } from "./layers/MapLayer.tsx";
 import { createEasedDrags, RemoteDragClock, RemoteDrags } from "./RemoteDrags.tsx";
 import { TreeShownContext } from "./relief/context.ts";
 import { IsoBoard } from "./relief/IsoBoard.tsx";
@@ -1457,82 +1457,84 @@ export function MapStage(props: {
           <RemoteDragClock eased={eased} />
           <TokenInteractionContext.Provider value={interaction}>
             <BoardViewContext.Provider value={boardView}>
-              <TreeShownContext.Provider value={!isoShown}>
-                <Frozen frozen={isoShown}>
-                  <Stage
-                    key={stageKey}
-                    ref={stageRef}
-                    width={isoShown ? 0 : size.width}
-                    height={isoShown ? 0 : size.height}
-                    // The memo stops camera renders, not its layers' own store subscriptions, so hidden it skips the draws they still ask for.
-                    visible={!isoShown}
-                    x={cam.x}
-                    y={cam.y}
-                    scaleX={cam.scale}
-                    scaleY={cam.scale}
-                    style={stageStyle}
-                  >
-                    <MapLayer scene={scene} variant={variant} />
-                    {BOARD_LAYERS.length > 0 ? (
+              <SharedMapImage scene={scene} variant={variant}>
+                <TreeShownContext.Provider value={!isoShown}>
+                  <Frozen frozen={isoShown}>
+                    <Stage
+                      key={stageKey}
+                      ref={stageRef}
+                      width={isoShown ? 0 : size.width}
+                      height={isoShown ? 0 : size.height}
+                      // The memo stops camera renders, not its layers' own store subscriptions, so hidden it skips the draws they still ask for.
+                      visible={!isoShown}
+                      x={cam.x}
+                      y={cam.y}
+                      scaleX={cam.scale}
+                      scaleY={cam.scale}
+                      style={stageStyle}
+                    >
+                      <MapLayer scene={scene} variant={variant} report={!isoShown} />
+                      {BOARD_LAYERS.length > 0 ? (
+                        <Layer>
+                          {BOARD_LAYERS.map(({ id, Component }) => (
+                            <Component key={id} {...layerProps} />
+                          ))}
+                        </Layer>
+                      ) : null}
                       <Layer>
-                        {BOARD_LAYERS.map(({ id, Component }) => (
-                          <Component key={id} {...layerProps} />
-                        ))}
+                        {below.map((t) => renderToken(t))}
+                        <RemoteDrags tokens={tokens} scale={cam.scale} youId={youId} draggingId={draggingId} eased={eased} />
+                        {overlay ? null : decor}
                       </Layer>
-                    ) : null}
-                    <Layer>
-                      {below.map((t) => renderToken(t))}
-                      <RemoteDrags tokens={tokens} scale={cam.scale} youId={youId} draggingId={draggingId} eased={eased} />
-                      {overlay ? null : decor}
-                    </Layer>
-                    {overlay ? (
-                      <Layer>
-                        {sightMode ? <SightOverlay scene={scene} mode={sightMode} /> : null}
-                        {fog ? <FogShape sceneId={scene.id} bounds={scene.bounds} tiles={drawnFogTiles} translucent={role === "dm"} /> : null}
-                        {above.map((t) => renderToken(t))}
-                        {UNDER_DECOR_LAYERS.map(({ id, Component }) => (
-                          <Component key={id} {...layerProps} />
-                        ))}
-                        {decor}
-                        {OVERLAY_LAYERS.map(({ id, Component }) => (
-                          <Component key={id} {...layerProps} />
-                        ))}
-                      </Layer>
-                    ) : null}
-                  </Stage>
-                </Frozen>
-              </TreeShownContext.Provider>
-              {isoEverRef.current ? (
-                <IsoBoard
-                  hidden={!isoShown}
-                  stageKey={stageKey}
-                  turn={shown.kind === "isometric" ? shown.turn : 0}
-                  cam={cam}
-                  size={size}
-                  scene={scene}
-                  role={role}
-                  fog={fog}
-                  sightMode={sightMode}
-                  drawnFogTiles={drawnFogTiles}
-                  viewerFog={role === "player" && fog ? fogTiles : null}
-                  playersFog={role === "dm" && fog ? fogTiles : null}
-                  tokens={tokens}
-                  aboveFog={aboveFogOf}
-                  renderToken={renderToken}
-                  renderDecor={(t, part, at) => <TokenDecor key={`${part}:${t.id}`} part={part} token={t} scale={cam.scale} text={boardText.get(t.id)} lockMark={lockShown(t)} atX={at.x} atY={at.y} />}
-                  decorTokens={decorTokens}
-                  hasPlate={(t) => !!boardText.get(t.id)?.plate}
-                  layerProps={layerProps}
-                  variant={variant}
-                  lowPower={lowPower}
-                  keepIds={keepIds}
-                  eased={eased}
-                  youId={youId}
-                  draggingId={draggingId}
-                  onStage={setIsoStage}
-                  stageStyle={stageStyle}
-                />
-              ) : null}
+                      {overlay ? (
+                        <Layer>
+                          {sightMode ? <SightOverlay scene={scene} mode={sightMode} /> : null}
+                          {fog ? <FogShape sceneId={scene.id} bounds={scene.bounds} tiles={drawnFogTiles} translucent={role === "dm"} /> : null}
+                          {above.map((t) => renderToken(t))}
+                          {UNDER_DECOR_LAYERS.map(({ id, Component }) => (
+                            <Component key={id} {...layerProps} />
+                          ))}
+                          {decor}
+                          {OVERLAY_LAYERS.map(({ id, Component }) => (
+                            <Component key={id} {...layerProps} />
+                          ))}
+                        </Layer>
+                      ) : null}
+                    </Stage>
+                  </Frozen>
+                </TreeShownContext.Provider>
+                {isoEverRef.current ? (
+                  <IsoBoard
+                    hidden={!isoShown}
+                    stageKey={stageKey}
+                    turn={shown.kind === "isometric" ? shown.turn : 0}
+                    cam={cam}
+                    size={size}
+                    scene={scene}
+                    role={role}
+                    fog={fog}
+                    sightMode={sightMode}
+                    drawnFogTiles={drawnFogTiles}
+                    viewerFog={role === "player" && fog ? fogTiles : null}
+                    playersFog={role === "dm" && fog ? fogTiles : null}
+                    tokens={tokens}
+                    aboveFog={aboveFogOf}
+                    renderToken={renderToken}
+                    renderDecor={(t, part, at) => <TokenDecor key={`${part}:${t.id}`} part={part} token={t} scale={cam.scale} text={boardText.get(t.id)} lockMark={lockShown(t)} atX={at.x} atY={at.y} />}
+                    decorTokens={decorTokens}
+                    hasPlate={(t) => !!boardText.get(t.id)?.plate}
+                    layerProps={layerProps}
+                    variant={variant}
+                    lowPower={lowPower}
+                    keepIds={keepIds}
+                    eased={eased}
+                    youId={youId}
+                    draggingId={draggingId}
+                    onStage={setIsoStage}
+                    stageStyle={stageStyle}
+                  />
+                ) : null}
+              </SharedMapImage>
             </BoardViewContext.Provider>
           </TokenInteractionContext.Provider>
         </>

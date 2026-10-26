@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Image as KImage, Layer, Rect, Shape } from "react-konva";
 import type { Scene } from "#shared/model.ts";
 import { phasePreloads, usePhasePreload } from "../../features/phases/preload.ts";
@@ -9,7 +9,7 @@ import { mapWorldRect } from "../../lib/scene.ts";
 import { mapFailureText } from "../../state/sceneLoad.ts";
 import { useAssets, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useMapProgressStore } from "../mapProgress.ts";
-import { useMapImage, type MapSource } from "../useImage.ts";
+import { useMapImage, type MapImageState, type MapSource } from "../useImage.ts";
 
 /**
  * Layer 1 of 4 (design section 14.2): the scene background, the map image and
@@ -19,7 +19,7 @@ import { useMapImage, type MapSource } from "../useImage.ts";
  * This layer mounts only after the gate opens (section 13.3), so the map
  * request itself starts after the snapshot and its fog are applied.
  */
-export const MapLayer = memo(MapLayerImpl, sameMapInputs);
+export const MapLayer = memo(MapLayerImpl, (a, b) => a.report === b.report && sameMapInputs(a, b));
 
 /*
  * Every build op bumps the scene's walls version, which writes a new scene
@@ -40,12 +40,42 @@ function sameMapInputs(a: { scene: Scene; variant: AssetVariant }, b: { scene: S
   );
 }
 
-function MapLayerImpl(props: { scene: Scene; variant: AssetVariant }) {
+function MapLayerImpl(props: { scene: Scene; variant: AssetVariant; report: boolean }) {
   return (
     <Layer listening={false}>
-      <MapContent scene={props.scene} variant={props.variant} report />
+      <MapContent scene={props.scene} variant={props.variant} report={props.report} />
     </Layer>
   );
+}
+
+/** Where a scene's map image loads from: the variant this device draws, and the full copy to fall back on. Null where the map cannot be placed. */
+function mapSource(assets: ReturnType<typeof useAssets>, map: NonNullable<Scene["map"]>, variant: AssetVariant): { url: string | null; fallback: string | null } {
+  return { url: mapWorldRect(map) ? assets.url(map.assetId, variant) : null, fallback: variant === "full" ? null : assets.url(map.assetId, "full") };
+}
+
+/** The map image the board's trees share: what it loads from, and how far it got. */
+type SharedMap = { url: string | null; state: MapImageState };
+
+const SharedMapContext = createContext<SharedMap | null>(null);
+
+const LOADING: MapImageState = { image: null, status: "loading" };
+
+/**
+ * Loads the scene's map image once for both of the board's drawing trees
+ * (docs/design-v1-isometric-view.md 5.1, ISO-D15). A map decodes to as much
+ * as 256 MiB, so each tree loading its own would hold it twice. The trees'
+ * map layers read this one through context, which reaches the frozen tree
+ * past its memo. A tree on another scene's map, as a frozen one can be,
+ * sees it loading and draws nothing of it.
+ */
+export function SharedMapImage(props: { scene: Scene; variant: AssetVariant; children: ReactNode }) {
+  const assets = useAssets();
+  const map = props.scene.map;
+  const source = map ? mapSource(assets, map, props.variant) : { url: null, fallback: null };
+  const { image, status } = useMapImage(source.url, source.fallback);
+  // The same object until the image or its status changes, so a camera render reaches no map layer.
+  const shared = useMemo(() => ({ url: source.url, state: { image, status } }), [source.url, image, status]);
+  return <SharedMapContext.Provider value={shared}>{props.children}</SharedMapContext.Provider>;
 }
 
 /** The image a map draws, as the board drew it last, for the isometric view's side tints (relief/looks.ts). */
@@ -84,9 +114,11 @@ function MapImage(props: {
   const ui = useRoomUi();
   const progress = useMapProgressStore();
   const rect = mapWorldRect(props.map);
-  const url = assets.url(props.map.assetId, props.variant);
-  const fallback = props.variant === "full" ? null : assets.url(props.map.assetId, "full");
-  const { image, status } = useMapImage(rect ? url : null, fallback);
+  const source = mapSource(assets, props.map, props.variant);
+  // Under the board's shared loader, this tree draws its image. Anywhere else it loads its own.
+  const shared = useContext(SharedMapContext);
+  const own = useMapImage(shared ? null : source.url, source.fallback);
+  const { image, status } = shared ? (shared.url === source.url ? shared.state : LOADING) : own;
 
   // The image last drawn stays up while a new one for the same scene loads
   // (features/phases/swap.ts). The hook frees an image only once a new one
