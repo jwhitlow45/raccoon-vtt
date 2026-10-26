@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Circle, Group, Line } from "react-konva";
 import type { Drawing, RoomState, Token } from "#shared/model.ts";
+import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { useDelayed } from "../../components/Loading.tsx";
 import { footprint, snapPosition } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
@@ -139,7 +140,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
       {Object.entries(drags).map(([key, d]) =>
         // This device's own drag is measured from Konva's node below. Another device of the same member counts as remote.
         d.ended || d.tokenId === localDrag?.tokenId ? null : (
-          <RemoteDragMeasure key={key} drag={d} token={tokens[d.tokenId]} read={read} scale={props.scale} />
+          <RemoteDragMeasure key={key} drag={d} token={tokens[d.tokenId]} read={read} scale={props.scale} grid={sceneGrid(props.scene)} />
         ),
       )}
       {/* The route is this drag's, set as it starts: a rider's drag walks its mount, whose route and cost these are (docs/design-v1-attach.md 4.2). */}
@@ -148,7 +149,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
       ) : localDrag && tokens[localDrag.tokenId] ? (
         <DragMeasure
           token={tokens[localDrag.tokenId]!}
-          to={snapPosition(localDrag.x, localDrag.y, footprint(tokens[localDrag.tokenId]!))}
+          to={snapPosition(sceneGrid(props.scene), localDrag.x, localDrag.y, footprint(tokens[localDrag.tokenId]!))}
           group={dropRoom ? { room: dropRoom, role } : undefined}
           read={read}
           scale={props.scale}
@@ -390,7 +391,7 @@ function DragMeasure(props: { token: Token; to: Point; read: ReadDrag; scale: nu
  * viewer (design 7.6), and the corners on scenes with fog or vision, so the
  * measurement shows only what the ghost token below it shows.
  */
-function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined; read: ReadDrag; scale: number }) {
+function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined; read: ReadDrag; scale: number; grid: Grid }) {
   const { drag, token } = props;
   const corners = useMemo(() => {
     const out: Point[] = [];
@@ -402,7 +403,7 @@ function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined;
   return (
     <DragMeasure
       token={token}
-      to={snapPosition(drag.x, drag.y, footprint(token))}
+      to={snapPosition(props.grid, drag.x, drag.y, footprint(token))}
       read={props.read}
       scale={props.scale}
       corners={corners}

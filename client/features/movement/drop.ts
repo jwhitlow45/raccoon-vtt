@@ -3,6 +3,7 @@ import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorR
 import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, publicMembers, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { footing, footprintGround } from "#shared/rules/heights.ts";
 import { groundUnder, landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { followerTrace, routeLattice, routePoints, routeStop, routeWalkers, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
@@ -27,6 +28,18 @@ import { displayName, snapPosition } from "../../lib/scene.ts";
 
 export type Role = "dm" | "player";
 export type Point = { x: number; y: number };
+
+/**
+ * The grid of the scene a token stands on, squares where this copy does
+ * not hold the scene. On a hex scene (docs/design-v1-hex-grids.md phase
+ * H1) a drop snaps to its size's nearest anchor and walks the straight
+ * leg: the server refuses a route or a squeeze there, and a hex scene has
+ * no walls, ledges or difficult ground to stop or slow it until H2.
+ */
+export function dropGrid(state: Pick<BuildState, "scenes">, token: Pick<DropToken, "sceneId">): Grid {
+  const scene = state.scenes[token.sceneId];
+  return scene ? sceneGrid(scene) : SQUARES;
+}
 
 /** The token fields a drop reads. */
 export type DropToken = Pick<Token, "id" | "sceneId" | "size" | "x" | "y" | "elevation"> & Partial<Pick<Token, "w" | "h" | "squeeze" | "name" | "number">>;
@@ -230,9 +243,10 @@ export function landed(state: DropState, token: DropToken, at: Point & { squeeze
  * in it, and a nudge leaves it where it is.
  */
 export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode: DropMode): (Point & { squeeze: true }) | null {
-  if (!canSqueeze(token)) return null;
+  const g = dropGrid(state, token);
+  if (!canSqueeze(token) || isHex(g)) return null;
   const size = footprintSize(token);
-  const to = snapPosition(raw.x, raw.y, size);
+  const to = snapPosition(g, raw.x, raw.y, size);
   const spot = { x: size.w >= 2 ? Math.floor(raw.x) + 0.5 : to.x, y: size.h >= 2 ? Math.floor(raw.y) + 0.5 : to.y };
   const land = landing(state, walkerOf(state, token), { ...spot, elevation: dropLanding(state, token, spot) }, mode);
   return land.squeeze && !land.stopped && land.x === spot.x && land.y === spot.y ? { ...spot, squeeze: true } : null;
@@ -248,8 +262,11 @@ export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode
 export function planOne(state: DropView, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">): DropPlan {
   const squeezed = squeezedSpot(state, token, raw, mode);
   if (squeezed) return { moves: moved(token, squeezed) ? [landed(state, token, squeezed)] : [], stop: null, held: [] };
-  const to = snapPosition(raw.x, raw.y, footprintSize(token));
+  const g = dropGrid(state, token);
+  const to = snapPosition(g, raw.x, raw.y, footprintSize(token));
   if (to.x === token.x && to.y === token.y) return { moves: [], stop: null, held: [] };
+  // Nothing on a hex scene stops or lines up a drop in phase H1, so it lands where it snaps, never squeezed.
+  if (isHex(g)) return { moves: [landed(state, token, { ...to, squeeze: false })], stop: null, held: [] };
   const elevation = dropLanding(state, token, to);
   // Walked as the route search, the server's check and the route walk it (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
   const land = landing(state, walkerOf(state, token), { x: to.x, y: to.y, elevation }, mode);
@@ -274,6 +291,8 @@ export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "
 export function routeTarget(state: DropView, token: DropToken, raw: Point): Point & { squeeze: boolean } {
   const placed = planOne(state, token, raw, "free").moves[0];
   const at = placed ? { x: placed.x, y: placed.y, squeeze: placed.squeeze === true } : { x: token.x, y: token.y, squeeze: token.squeeze === true };
+  // A hex scene walks no route (phase H1), so the target is where the drop snaps.
+  if (isHex(dropGrid(state, token))) return at;
   const L = routeLattice(token);
   const onLattice = (v: number, from: number) => from + Math.round((v - from) / L) * L;
   return { x: onLattice(at.x, token.x), y: onLattice(at.y, token.y), squeeze: at.squeeze };
@@ -500,8 +519,13 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
   const moves: Landed[] = [];
   const held: DropPlan["held"] = [];
   for (const token of tokens) {
-    const to = snapPosition(token.x + dx, token.y + dy, footprintSize(token));
+    const g = dropGrid(state, token);
+    const to = snapPosition(g, token.x + dx, token.y + dy, footprintSize(token));
     if (to.x === token.x && to.y === token.y) continue;
+    if (isHex(g)) {
+      moves.push(landed(state, token, { ...to, squeeze: false }));
+      continue;
+    }
     const elevation = dropLanding(state, token, to);
     const from = { x: token.x, y: token.y, elevation: token.elevation };
     // Its leg and what it drags beside it, walked as the server walks them (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.

@@ -1,4 +1,7 @@
 import { SIZE_CELLS, type Character, type Member, type RoomState, type Scene, type SceneMap, type Token } from "#shared/model.ts";
+import { sizeCategory } from "#shared/rules/footprint.ts";
+import type { Grid } from "#shared/rules/grid.ts";
+import { snapAnchor } from "#shared/rules/hex.ts";
 import type { Rect } from "./camera.ts";
 
 /**
@@ -24,8 +27,20 @@ export function footprint(token: Pick<Token, "size" | "w" | "h">): { w: number; 
  * (Tiny), whole cells otherwise. A whole-cell corner puts odd-size tokens on
  * square centers and even-size tokens on grid intersections, as the feature
  * list asks, with no special case.
+ *
+ * On hexes (docs/design-v1-hex-grids.md 4.2) the box's middle goes to the
+ * nearest anchor of its size, a hex's center or for Large and Gargantuan
+ * the corner their top three hexes share, ties as the rules break them.
+ * The size is read from the box alone, as the rules read a custom size by
+ * its longer side: Small and Medium share a box and one hex, so nothing is
+ * lost. The answer is the rules' own spot (footprint.ts placedOnHex), so a
+ * drop the board sends is one the server reads on the same hexes.
  */
-export function snapPosition(x: number, y: number, size: { w: number; h: number }): { x: number; y: number } {
+export function snapPosition(g: Grid, x: number, y: number, size: { w: number; h: number }): { x: number; y: number } {
+  if (g.shape === "hex") {
+    const a = snapAnchor(g, sizeCategory({ size: "custom", w: size.w, h: size.h }), { x: x + size.w / 2, y: y + size.h / 2 });
+    return { x: a.x - size.w / 2 + 0, y: a.y - size.h / 2 + 0 };
+  }
   const step = Math.min(size.w, size.h) < 1 ? 0.5 : 1;
   return { x: Math.round(x / step) * step, y: Math.round(y / step) * step };
 }

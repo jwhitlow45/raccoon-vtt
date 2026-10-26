@@ -8,7 +8,6 @@ import { scopeSlot, type RoomScope } from "../state/scope.ts";
 import { FogView } from "./relief/fogView.ts";
 import { creatureStands } from "./relief/stand.ts";
 import { cappedBase } from "./relief/standee.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * What a press on the board means (docs/design-v1-isometric-view.md 6.1):
@@ -104,9 +103,9 @@ export function pressGap(pick: Pick<BoardPick, "view" | "camera" | "heights">, p
  * the chrome over a token, a switch's held point and a drag's grab. The
  * rules keep the logical base. 0 in Top-down.
  */
-export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell" | "camera" | "canvasHeight">, token: FootprintToken, stands = true): number {
+export function tokenBase(pick: Pick<BoardPick, "view" | "grid" | "src" | "feetPerCell" | "camera" | "canvasHeight">, token: FootprintToken, stands = true): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  const range = occupiedRange(SQUARES, token);
+  const range = occupiedRange(pick.grid, token);
   const ground = drawnFootprintGround(pick.src, range) / pick.feetPerCell;
   return drawnRing(pick, stands)(drawnBase(pick.src, range, token.elevation) / pick.feetPerCell, ground);
 }
@@ -123,17 +122,17 @@ export function drawnRing(pick: Pick<BoardPick, "camera" | "canvasHeight">, stan
 }
 
 /** Which tokens stand as standees for this pick's viewer, by the stand rule (relief/stand.ts creatureStands) with one read of the fog for them all. */
-export function standsFor(pick: Pick<BoardPick, "src">, aboveFog: (t: ViewToken) => boolean): (t: ViewToken) => boolean {
+export function standsFor(pick: Pick<BoardPick, "src" | "grid">, aboveFog: (t: ViewToken) => boolean): (t: ViewToken) => boolean {
   const src = pick.src;
   if (!src?.fog) return () => true;
   const fog = new FogView(src.fog, src.sceneId, src.bounds);
-  return (t) => creatureStands(fog, t, aboveFog(t));
+  return (t) => creatureStands(fog, pick.grid, t, aboveFog(t));
 }
 
 /** The highest drawn ground under a footprint, in cells (view.ts drawnFootprintGround): where a ghost of it stands. 0 in Top-down. */
-export function groundUnder(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, token: Omit<FootprintToken, "elevation">): number {
+export function groundUnder(pick: Pick<BoardPick, "view" | "grid" | "src" | "feetPerCell">, token: Omit<FootprintToken, "elevation">): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  return drawnFootprintGround(pick.src, occupiedRange(SQUARES, token)) / pick.feetPerCell;
+  return drawnFootprintGround(pick.src, occupiedRange(pick.grid, token)) / pick.feetPerCell;
 }
 
 /** The highest drawn ground under a world rectangle's cells, in cells, down in a pit when every cell is: where an outline row's box stands. 0 in Top-down. */
@@ -146,7 +145,7 @@ export function groundIn(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, 
 }
 
 /** Where a token's ring's center shows on screen: its footprint's middle where its ring draws (`tokenBase`). */
-export function ringCenter(pick: Pick<BoardPick, "view" | "camera" | "src" | "feetPerCell" | "canvasHeight">, token: FootprintToken, stands = true): Point {
+export function ringCenter(pick: Pick<BoardPick, "view" | "grid" | "camera" | "src" | "feetPerCell" | "canvasHeight">, token: FootprintToken, stands = true): Point {
   const fp = footprint(token);
   return screenAt(pick, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, tokenBase(pick, token, stands));
 }

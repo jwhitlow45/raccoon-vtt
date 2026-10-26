@@ -46,7 +46,7 @@ import { previewLanding, seenChunks } from "./seenChunks.ts";
 import { dimmedForDm, ghostStands, ghostTagStands, splitTokens, tokenBox } from "./stand.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 
 /**
  * The isometric board (docs/design-v1-isometric-view.md 5.1): two stages,
@@ -137,6 +137,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const feet = useShownView(!hidden, (s) => s.view?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell);
   const allLabels = useShownView(!hidden, (s) => s.view?.labels);
   const { w, h } = scene.bounds;
+  // Footprints read the scene's grid as Top-down's do, so both views stand and lay flat the same hexes (hex grids 4.2).
+  const grid = useMemo(() => sceneGrid(scene), [scene.gridShape]);
   const stand = heightsStand(cam.scale, props.lowPower);
   const fog = useMemo(() => new FogView(props.viewerFog, scene.id, { w, h }), [props.viewerFog, scene.id, w, h]);
   const dmFog = useMemo(() => (props.dmFog ? new FogView(props.dmFog, scene.id, { w, h }) : null), [props.dmFog, scene.id, w, h]);
@@ -192,14 +194,14 @@ function IsoBoardImpl(props: IsoBoardProps) {
   }, [hidden, relief, scene.id, w, h, chunks, props.viewerFog, grouped, global, heights, fog, tints]);
 
   // Who stands and who lies flat, by the stand rule.
-  const { standing, flat } = useMemo(() => splitTokens(fog, props.tokens, props.aboveFog), [fog, props.tokens, props.aboveFog]);
+  const { standing, flat } = useMemo(() => splitTokens(fog, grid, props.tokens, props.aboveFog), [fog, grid, props.tokens, props.aboveFog]);
   const byId = useMemo(() => new Map(props.tokens.map((t) => [t.id, t])), [props.tokens]);
   const standees = useMemo(() => {
     const standingIds = new Set(standing.map((t) => t.id));
     const all = Object.fromEntries(props.tokens.map((t) => [t.id, t]));
     return standing.map((t): Standing => {
       const fp = footprint(t);
-      const range = occupiedRange(SQUARES, t);
+      const range = occupiedRange(grid, t);
       const base = drawnBase(src, range, t.elevation) / feet;
       const ground = drawnFootprintGround(src, range) / feet;
       const link = t.attached;
@@ -227,7 +229,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
         ring: shape.ring,
       };
     });
-  }, [standing, src, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens]);
+  }, [standing, src, grid, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens]);
 
   // The canvas's view box, grown and snapped in steps, so a pan lays out again only when it crosses a step.
   const step = CULL_STEP_PX / cam.scale;
@@ -270,13 +272,13 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const seated = holder !== undefined && (riding || (room !== null && seenSeat(dropView(room, props.role), t)?.keptAt(spot) === true));
       const kept = seated ? seat : ON_GROUND;
       const fp = footprint(t);
-      const range = occupiedRange(SQUARES, { ...t, x: spot.x, y: spot.y, squeeze: undefined });
+      const range = occupiedRange(grid, { ...t, x: spot.x, y: spot.y, squeeze: undefined });
       const base = drawnBase(src, range, landing) / feet;
       const ground = drawnFootprintGround(src, range) / feet;
       const shape = standeeShape(turn, { x: spot.x, y: spot.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, kept);
       return { base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: kept.rise, inset: kept.inset };
     },
-    [store, chunks, scene.id, w, h, props.viewerFog, props.role, byId, spots, src, feet, turn, cam.scale, size.height],
+    [store, chunks, scene.id, w, h, props.viewerFog, props.role, byId, spots, src, grid, feet, turn, cam.scale, size.height],
   );
 
   // Each standee's placing, kept while it is the same, so its node does not render again for a pan.
@@ -287,7 +289,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       if (item.kind !== "standee") continue;
       const s = byStandee.get(item.id)!;
       const t = byId.get(item.id)!;
-      const dim = props.role === "dm" && dimmedForDm(dmFog, t);
+      const dim = props.role === "dm" && dimmedForDm(dmFog, grid, t);
       const spot = spots[item.id];
       const placed = spot ? movedIso(t, spot, { rise: s.rise, inset: s.inset }) : s;
       const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false, press: [] };
@@ -296,7 +298,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     }
     isoCache.current = next;
     return next;
-  }, [items, byStandee, byId, turn, props.role, dmFog, spots, movedIso]);
+  }, [items, byStandee, byId, turn, props.role, dmFog, grid, spots, movedIso]);
   const silhouettes = useMemo(() => items.filter((i): i is Extract<Item, { kind: "standee" }> => i.kind === "standee" && i.silhouette), [items]);
 
   // The lift margin: the highest drawn lift in view, in steps, at most one canvas height.
@@ -356,7 +358,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     return same ? prev : (framesRef.current = next);
   }, [standees]);
   // A creature lying flat lays out on the drawn ground under it, where the ground stage copies its picture up a seen column.
-  const flatGround = useCallback((t: ViewToken) => drawnFootprintGround(src, occupiedRange(SQUARES, t)) / feet, [src, feet]);
+  const flatGround = useCallback((t: ViewToken) => drawnFootprintGround(src, occupiedRange(grid, t)) / feet, [src, grid, feet]);
   const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id), flatGround(t)), [turn, frames, flatGround]);
   const viewPills = useMemo(() => props.text.pills.map((p) => viewPill(p, isometric(turn), groundAt)), [props.text.pills, turn, groundAt]);
   const labelInk = useMemo(
@@ -384,22 +386,22 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const ghostOf = useCallback(
     (t: ViewToken, at: { x: number; y: number }, name: string): IsoGhost => {
       const fp = footprint(t);
-      const range = occupiedRange(SQUARES, { ...t, x: at.x, y: at.y, squeeze: undefined });
+      const range = occupiedRange(grid, { ...t, x: at.x, y: at.y, squeeze: undefined });
       // It previews where the drop would land it there, on the ground this viewer has seen, as this device's own drag does (4.3).
       const room = store.getState().view;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
       const landing = room ? previewLanding(room, props.role, seen, t, at) : t.elevation;
       const base = drawnBase(src, range, landing) / feet;
       const ground = drawnFootprintGround(src, range) / feet;
-      if (ghostStands(fog, t, at)) {
+      if (ghostStands(fog, grid, t, at)) {
         const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
         const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, inset: 1, pits: [], dim: false, pressOnly: false, press: [] };
         // The tag stands over the art when the pill Top-down draws for it is clear too, and is left out otherwise.
         return { standee, clip: null, tag: ghostTagStands(fog, t, at, name, cam.scale) ? { x: (shape.art.x0 + shape.art.x1) / 2, y: shape.art.y0 } : null };
       }
-      return { standee: null, clip: fog.revealedRects(tokenBox(t, at)), tag: null };
+      return { standee: null, clip: fog.revealedRects(tokenBox(grid, t, at)), tag: null };
     },
-    [src, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role],
+    [src, grid, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role],
   );
 
   return (

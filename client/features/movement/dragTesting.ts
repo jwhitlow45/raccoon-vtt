@@ -5,7 +5,7 @@ import { findRoute, WorkBudget, type WalkInput } from "#shared/rules/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 import type { DragRead } from "../measure/movement.ts";
 import { RoomScope } from "../../state/scope.ts";
-import { dropView, routeTarget, type DropPlan, type Point, type Role } from "./drop.ts";
+import { dropGrid, dropView, routeTarget, type DropPlan, type Point, type Role } from "./drop.ts";
 import { worldFor } from "./press.ts";
 import { groupReading } from "./preview.ts";
 import { RouteDrag, type RouteAnswer, type Settled } from "./routeDrag.ts";
@@ -132,7 +132,7 @@ export function groupDragOf(copy: RoomState, role: Role, tokenIds: readonly stri
   const group = tokenIds.map((id) => copy.tokens[id]!);
   const finger = { x: () => raw.x, y: () => raw.y, position: () => {} };
   const lead = group[0]!;
-  const label = groupReading(dropView(copy, role), lead, snapPosition(raw.x, raw.y, footprintSize(lead)), role);
+  const label = groupReading(dropView(copy, role), lead, snapPosition(dropGrid(copy, lead), raw.x, raw.y, footprintSize(lead)), role);
   const frame = stops.groupFields(lead, raw);
   frames.frame();
   stops.start(lead.id);

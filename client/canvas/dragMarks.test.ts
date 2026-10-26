@@ -46,7 +46,7 @@ test("a moving aura that catches a Gargantuan by one corner cell clips its ring 
   const fog = fogWestOf(9);
   assert.equal(auraClip(fog, { x0: cov.x0 - 2, y0: cov.y0 - 2, x1: cov.x0 + cov.w + 2, y1: cov.y0 + cov.h + 2 }), null);
   for (const scale of [12, 40, 120]) {
-    const box = auraBox(cov, caught.map((id) => state.tokens[id]!), scale);
+    const box = auraBox(cov, caught.map((id) => state.tokens[id]!), scale, SQUARES);
     // The ring as TokenRing draws it: its gap and its stroke's outer half, which grow with the token's ring.
     const k = boardSizes(scale).ringPx / 3;
     const outer = ((CAUGHT_RING.gapPx + CAUGHT_RING.widthPx / 2) * k) / scale;
@@ -55,16 +55,16 @@ test("a moving aura that catches a Gargantuan by one corner cell clips its ring 
     assert.ok(clip !== null && clip.every((r) => r.x + r.w <= 9 + 1e-9), `scale ${scale}: it clips at the fog's edge`);
   }
   // With the dragon wholly revealed, it shows whole.
-  assert.equal(auraClip(fogWestOf(16), auraBox(cov, caught.map((id) => state.tokens[id]!), 40)), null);
+  assert.equal(auraClip(fogWestOf(16), auraBox(cov, caught.map((id) => state.tokens[id]!), 40, SQUARES)), null);
 });
 
 test("a moving aura that catches nobody keeps its window and margin", () => {
-  assert.deepEqual(auraBox({ x0: 3, y0: 4, w: 5, h: 2 }, [], 40), { x0: 1, y0: 2, x1: 10, y1: 8 });
+  assert.deepEqual(auraBox({ x0: 3, y0: 4, w: 5, h: 2 }, [], 40, SQUARES), { x0: 1, y0: 2, x1: 10, y1: 8 });
 });
 
 test("the drag layer clips each moving aura by that box, with the creatures PlacedArea rings, and judges each tether by its stroke", () => {
   const src = readFileSync(new URL("./DragMarks.tsx", import.meta.url), "utf8");
-  assert.match(src, /const caught = caughtTokens\(a, areas\.ctx, layer\.scene\.id\)\.flatMap\(\(id\) => areas\.ctx\.tokens\?\.\[id\] \?\? \[\]\);\n\s*const box = auraBox\(cachedCoverage\(a, areas\.ctx\), caught, layer\.scale\);/);
+  assert.match(src, /const caught = caughtTokens\(a, areas\.ctx, layer\.scene\.id\)\.flatMap\(\(id\) => areas\.ctx\.tokens\?\.\[id\] \?\? \[\]\);\n\s*const box = auraBox\(cachedCoverage\(a, areas\.ctx\), caught, layer\.scale, grid\);/);
   assert.match(src, /moving=\{\{ z, clip: auraClip\(iso\.fog, box\) \}\}/);
   // A tether's stand test takes its stroke's half width, as TetherLine strokes it (ISO34-ASTRA-7).
   assert.match(src, /const show = tetherShows\(iso\.fog, l\.from, l\.to, tetherPx\(layer\.scale\) \/ 2 \/ layer\.scale\);/);

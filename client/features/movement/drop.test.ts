@@ -21,6 +21,9 @@ import { frameFields, groupLanding, groupReading, walkPreview } from "./preview.
 import { CLOSED, line, onTurn, raised, recordedCost, seenRoom, thorn, world } from "./testing.ts";
 import { ownWalk } from "#shared/rules/movement.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
+import { footprintHexes, hexCenter, snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
+import { placedOnHex } from "#shared/rules/footprint.ts";
+import { dragOf } from "./dragTesting.ts";
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -202,7 +205,7 @@ describe("a group drag", () => {
       assert.equal(read.dragFt, cost, `case ${n}: ${size} by ${dx},${dy} under ${diagonal}`);
       // The DM's device reads the frames the drag sends of it, which carry the leg's cost, so it reads the height the move lands at, its band too (review MV-O-29).
       const sent = groupDragOf(copyFor(view, P1), "player", ["lead", "mate"], to);
-      const remote = remoteReading({ token: lead, to: snapPosition(to.x, to.y, footprintSize(lead)), encounter: view.encounter, activeTokenId: "lead", speeds: { walk: 30 }, rules: { feetPerCell: 5, diagonal }, role: "dm" }, { corners: [], ...(sent.frame.ft !== undefined ? { costFt: sent.frame.ft } : {}) });
+      const remote = remoteReading({ token: lead, to: snapPosition(SQUARES, to.x, to.y, footprintSize(lead)), encounter: view.encounter, activeTokenId: "lead", speeds: { walk: 30 }, rules: { feetPerCell: 5, diagonal }, role: "dm" }, { corners: [], ...(sent.frame.ft !== undefined ? { costFt: sent.frame.ft } : {}) });
       assert.deepEqual([remote.dragFt, remote.left], [cost, sent.label.left], `case ${n}: another device's read of ${size} by ${dx},${dy} under ${diagonal}`);
     }
     assert.ok(climbed > 10, `${climbed} landed at another height`);
@@ -732,4 +735,60 @@ describe("a holder that drags a creature beside it (docs/design-v1-attach.md 4.2
     assert.deepEqual(plan.moves.map((m) => m.tokenId), ["other"]);
     assert.deepEqual(plan.held.map((h) => h.token.id), ["thorn"]);
   });
+});
+
+describe("drops on a hex scene (docs/design-v1-hex-grids.md 4.2, phase H1)", () => {
+  /** A 30 by 30 hex scene whose walls stop moves, with Thorn standing on hex (4, 4), a Large ogre on (9, 3) and a goblin on (6, 6). */
+  function hexRoom(orient: "rows" | "columns") {
+    const g: HexGrid = { shape: "hex", orient };
+    const on = (t: Token, hex: { col: number; row: number }) => ({ ...t, ...placedOnHex(g, t, hex) });
+    const state = world({ tokens: [on(thorn(), { col: 4, row: 4 }), on(token("ogre", { size: "large" }), { col: 9, row: 3 }), on(token("goblin"), { col: 6, row: 6 })] });
+    state.scenes.s1 = { ...state.scenes.s1!, gridShape: orient === "rows" ? "hexRows" : "hexColumns" };
+    return { g, state };
+  }
+  const permitted = (state: RoomState, op: ReturnType<typeof moveOpsOf>[number], who = P1) => canApply(op, who, state, { canUseAsset: () => true });
+
+  for (const orient of ["rows", "columns"] as const) {
+    test(`${orient}: a Medium dropped between hexes lands on the nearest hex's center, walked straight with no route or squeeze, and the server takes it`, () => {
+      const { g, state } = hexRoom(orient);
+      const view = seenRoom(state);
+      const target = hexCenter(g, { col: 7, row: 9 });
+      const plan = planOne(view, view.tokens.thorn!, { x: target.x - 0.5 + 0.3, y: target.y - 0.5 - 0.2 }, "walk");
+      assert.deepEqual(plan.moves, [{ tokenId: "thorn", x: target.x - 0.5, y: target.y - 0.5 }]);
+      assert.equal(plan.stop, null);
+      assert.ok(permitted(state, moveOpsOf(plan.moves)[0]!).ok);
+      // A route's target is the snapped spot itself: a hex scene walks no route on the square lattice.
+      assert.deepEqual(routeTarget(view, view.tokens.thorn!, { x: target.x - 0.2, y: target.y - 0.7 }), { x: target.x - 0.5, y: target.y - 0.5, squeeze: false });
+    });
+
+    test(`${orient}: the board's drag and its drop send a plain move the server takes, and a Large creature lands on its corner`, () => {
+      const { g, state } = hexRoom(orient);
+      const to = hexCenter(g, { col: 12, row: 8 });
+      const drag = dragOf(state, "player", "thorn", { x: to.x - 0.4, y: to.y - 0.6 });
+      assert.deepEqual(drag.op, { t: "token.move", tokenId: "thorn", x: to.x - 0.5, y: to.y - 0.5 });
+      assert.deepEqual(drag.preview.corners, [], "no corners: the walk is the straight leg");
+      assert.ok(permitted(state, drag.op!).ok);
+      const big = dragOf(state, "dm", "ogre", { x: 14.2, y: 11.7 });
+      const m = big.op as { x: number; y: number };
+      const anchor = snapAnchor(g, "large", { x: 15.2, y: 12.7 });
+      assert.deepEqual([m.x, m.y], [anchor.x - 1, anchor.y - 1]);
+      assert.equal(footprintHexes(g, "large", { x: m.x + 1, y: m.y + 1 }).length, 3);
+      assert.ok(permitted(state, big.op!, DM).ok);
+    });
+
+    test(`${orient}: a group drag lands each on its own anchor as one moveMany the server takes`, () => {
+      const { g, state } = hexRoom(orient);
+      const view = seenRoom(state, "dm");
+      const group = [view.tokens.thorn!, view.tokens.ogre!, view.tokens.goblin!];
+      const plan = planGroup(view, group, 3.2, 2.1, "free");
+      assert.equal(plan.moves.length, 3);
+      for (const m of plan.moves) {
+        const t = view.tokens[m.tokenId]!;
+        const fp = footprintSize(t);
+        const anchor = { x: m.x + fp.w / 2, y: m.y + fp.h / 2 };
+        assert.deepEqual(anchor, snapAnchor(g, t.size === "large" ? "large" : "medium", anchor), `${t.id} on an anchor`);
+      }
+      assert.ok(permitted(state, moveOpsOf(plan.moves)[0]!, DM).ok);
+    });
+  }
 });

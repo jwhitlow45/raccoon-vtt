@@ -3,7 +3,7 @@ import { Group } from "react-konva";
 import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
 import type { CoverageResult } from "#shared/rules/aoe.ts";
 import { footprintRect, type FootprintToken } from "#shared/rules/footprint.ts";
-import { cachedCoverage, caughtTokens } from "../features/areas/coverage.ts";
+import { cachedCoverage, caughtTokens, coveredWindow } from "../features/areas/coverage.ts";
 import { ringReach } from "../features/areas/draw.tsx";
 import { useLiveTokens } from "../features/areas/useLiveTokens.ts";
 import { CAUGHT_RING, Clipped, PlacedArea, useAreaParts } from "../features/areas/TemplateLayer.tsx";
@@ -17,7 +17,7 @@ import { boxGround } from "./isoPlace.ts";
 import { auraClip, tetherShows } from "./markStand.ts";
 import { IsoGroundContext, useTreeShownView, type IsoGround } from "./relief/context.ts";
 import type { CellBox } from "./relief/fogView.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
 const EMPTY_TOKENS: RoomState["tokens"] = {};
@@ -31,11 +31,13 @@ const AURA_MARGIN = 2;
  * cell), with the ring's gap and stroke at this zoom. An aura shows whole
  * only when every sub-cell of it is revealed (markStand.ts auraClip).
  */
-export function auraBox(cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h">, caught: readonly FootprintToken[], scale: number): CellBox {
-  const box = { x0: cov.x0 - AURA_MARGIN, y0: cov.y0 - AURA_MARGIN, x1: cov.x0 + cov.w + AURA_MARGIN, y1: cov.y0 + cov.h + AURA_MARGIN };
+export function auraBox(cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h" | "hexes">, caught: readonly FootprintToken[], scale: number, grid: Grid): CellBox {
+  // On hexes the window is where the covered hexes lie (coverage.ts coveredWindow).
+  const win = coveredWindow(cov, grid);
+  const box = { x0: win.x0 - AURA_MARGIN, y0: win.y0 - AURA_MARGIN, x1: win.x0 + win.w + AURA_MARGIN, y1: win.y0 + win.h + AURA_MARGIN };
   const reach = ringReach(scale, CAUGHT_RING.widthPx, CAUGHT_RING.gapPx);
   for (const t of caught) {
-    const r = footprintRect(SQUARES, t);
+    const r = footprintRect(grid, t);
     box.x0 = Math.min(box.x0, r.x - reach);
     box.y0 = Math.min(box.y0, r.y - reach);
     box.x1 = Math.max(box.x1, r.x + r.w + reach);
@@ -74,9 +76,11 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
   const diagonal = useTreeShownView((s) => s.view?.meta.settings.diagonal ?? "five");
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
   const lines = useMemo(() => (ids.size === 0 ? [] : tethers(tokens, layer.scene.id).filter((l) => ids.has(l.id) || ids.has(l.holderId))), [tokens, layer.scene.id, ids]);
+  // The scene's grid, as Top-down's marks read it (hex grids 4.2).
+  const grid = sceneGrid(layer.scene);
   if (ids.size === 0 || !areas) return null;
   const groundOf = (t: Token) => {
-    const r = footprintRect(SQUARES, t);
+    const r = footprintRect(grid, t);
     return boxGround(iso, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h });
   };
   const moving = [...ids].flatMap((id) => {
@@ -93,7 +97,7 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
             <Group key={t.id}>
               {attached.map((a) => {
                 const caught = caughtTokens(a, areas.ctx, layer.scene.id).flatMap((id) => areas.ctx.tokens?.[id] ?? []);
-                const box = auraBox(cachedCoverage(a, areas.ctx), caught, layer.scale);
+                const box = auraBox(cachedCoverage(a, areas.ctx), caught, layer.scale, grid);
                 return (
                   <PlacedArea
                     key={a.id}

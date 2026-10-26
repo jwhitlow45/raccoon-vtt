@@ -5,6 +5,7 @@ import { footprintSize } from "#shared/rules/footprint.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
 import { LegCheck, WalkWorld, WorkBudget, worldUnits, type WalkRoute } from "#shared/rules/walk.ts";
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
+import { isHex } from "#shared/rules/grid.ts";
 import { walkersCut, walkersFor, walkersOfGroup } from "../attach/walk.ts";
 import { snapPosition } from "../../lib/scene.ts";
 import type { OpAnswer } from "../../state/types.ts";
@@ -12,7 +13,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, sameCut, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, sameCut, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -295,8 +296,10 @@ export function dragStops(deps: DragDeps): DragStops {
       return;
     }
     // The picture ends where planOne lands, not at the spot under the pointer (review MV-O-24).
-    const qx = Math.floor(raw.x * 4);
-    const qy = Math.floor(raw.y * 4);
+    // On hexes a drop snaps to the nearest anchor, whose lines cross quarter cells, so it is asked again for each spot the drop snaps to.
+    const hex = isHex(dropGrid(view, token));
+    const qx = hex ? target.x : Math.floor(raw.x * 4);
+    const qy = hex ? target.y : Math.floor(raw.y * 4);
     if (!memo || memo.view !== view || memo.token !== token || memo.qx !== qx || memo.qy !== qy || memo.mode !== mode) {
       const plan = planOne(view, token, raw, mode);
       memo = { view, token, qx, qy, mode, stop: plan.stop, lands: planLands(plan, token) };
@@ -332,8 +335,10 @@ export function dragStops(deps: DragDeps): DragStops {
       const w: Walk = { tokenId: token.id, drag: null as unknown as RouteDrag, world: null, basis, token, target: null, held: null, walkers: null, waiting: false, node: null, drawn: null, straight: null };
       w.drag = new RouteDrag(
         () => {
-          w.world = worldFor(seenView(store.getState().view) ?? view, w.token, role);
-          return w.world.input;
+          const now = seenView(store.getState().view) ?? view;
+          // A hex scene walks no route in phase H1 (docs/design-v1-hex-grids.md 6): every spot reads as the straight leg.
+          w.world = isHex(dropGrid(now, w.token)) ? null : worldFor(now, w.token, role);
+          return w.world?.input ?? null;
         },
         work,
         // An answer that came in a later frame holds the preview at the wall as one that came at once does.
@@ -395,7 +400,7 @@ export function dragStops(deps: DragDeps): DragStops {
       const view = seenView(store.getState().view);
       const full = view?.tokens[token.id];
       if (!view || !full) return {};
-      return { ft: groupReading(view, full, snapPosition(at.x, at.y, footprintSize(full)), role).dragFt };
+      return { ft: groupReading(view, full, snapPosition(dropGrid(view, full), at.x, at.y, footprintSize(full)), role).dragFt };
     },
     press(node, drawn, drawnGroup) {
       const asked = raw?.tokenId === drawn.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };

@@ -12,6 +12,7 @@ import { flatHeights, isometric, toView, type Turn, type ViewPoint } from "../li
 import { boardPickFor, DrawnHeightsMemo, drawnRing, ringCenter, standsFor, type BoardPick } from "./boardPick.ts";
 import { cappedBase, standeeShape } from "./relief/standee.ts";
 import { dragBound, dragGround, dragLanding, dragPlan, levelsOf, type DragGround, type DragPlan } from "./isoDrag.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 const CAM: Camera = { x: 600, y: 80, scale: 40 };
 
@@ -23,9 +24,9 @@ function pickFor(state: RoomState, role: "dm" | "player", turn: Turn = 0): Board
 function landAt(state: RoomState, role: "dm" | "player", id: string, p: { x: number; y: number }, z: number, turn: Turn = 0) {
   const pick = pickFor(state, role, turn);
   const t = state.tokens[id]! as Token;
-  const plan = dragPlan({ room: state, role, src: pick.src!, feetPerCell: pick.feetPerCell, token: t });
+  const plan = dragPlan({ room: state, role, src: pick.src!, grid: SQUARES, feetPerCell: pick.feetPerCell, token: t });
   const v = toView(pick.view, p, z);
-  return dragLanding(pick.view, dragGround(pick.heights, t), plan, v);
+  return dragLanding(pick.view, dragGround(pick.heights, t, SQUARES), plan, v);
 }
 
 /** The cell a landing's footprint center stands in, and its height in feet. */
@@ -43,7 +44,7 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
       const node = viewToScreen(CAM, toView(pick.view, { x: t.x, y: t.y }));
       const ring = ringCenter(pick, t);
       assert.notDeepEqual(ring, node, "the ring stands apart from the corner");
-      const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, t), plan: dragPlan({ room: state, role: "dm", src: pick.src!, feetPerCell: 5, token: t }), start: { node, ring }, rel: { x: 0, y: 0 } };
+      const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, t, SQUARES), plan: dragPlan({ room: state, role: "dm", src: pick.src!, grid: SQUARES, feetPerCell: 5, token: t }), start: { node, ring }, rel: { x: 0, y: 0 } };
       const at = dragBound(input, node);
       assert.ok(Math.abs(at.x - node.x) < 1e-6 && Math.abs(at.y - node.y) < 1e-6, `turn ${turn}: ${JSON.stringify([at, node])}`);
     }
@@ -62,8 +63,8 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
       const drawn = viewToScreen(cam, { x: (shape.ring.x0 + shape.ring.x1) / 2, y: (shape.ring.y0 + shape.ring.y1) / 2 } as ViewPoint);
       assert.ok(Math.hypot(ring.x - drawn.x, ring.y - drawn.y) < 1e-6, `turn ${turn}: the ring as it draws`);
       const node = viewToScreen(cam, toView(pick.view, { x: t.x, y: t.y }));
-      const plan = dragPlan({ room: state, role: "dm", src: pick.src!, feetPerCell: 5, token: t, drawn: (base, ground) => cappedBase(base, ground, cam.scale, 600) });
-      const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, t), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
+      const plan = dragPlan({ room: state, role: "dm", src: pick.src!, grid: SQUARES, feetPerCell: 5, token: t, drawn: (base, ground) => cappedBase(base, ground, cam.scale, 600) });
+      const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, t, SQUARES), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
       const still = dragBound(input, node);
       assert.ok(Math.abs(still.x - node.x) < 1e-6 && Math.abs(still.y - node.y) < 1e-6, `turn ${turn}: no jump at the first move`);
       // A finger moved two cells' width along the screen carries the ring with it, the roc at 100 ft.
@@ -86,10 +87,10 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
       // As Stage.tsx grips it: one stand rule read for the grab and for the ray. Another member's bat is not above the fog.
       const stands = standsFor(pick, () => false)(t as ViewToken);
       assert.equal(stands, false, "it lies flat");
-      const plan = dragPlan({ room: state, role: "player", src: pick.src!, feetPerCell: 5, token: t, drawn: drawnRing(pick, stands) });
+      const plan = dragPlan({ room: state, role: "player", src: pick.src!, grid: SQUARES, feetPerCell: 5, token: t, drawn: drawnRing(pick, stands) });
       const node = viewToScreen(CAM, toView(pick.view, { x: t.x, y: t.y }));
       const ring = ringCenter(pick, t, stands);
-      const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, t), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
+      const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, t, SQUARES), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
       const still = dragBound(input, node);
       assert.ok(Math.abs(still.x - node.x) < 1e-6 && Math.abs(still.y - node.y) < 1e-6, `turn ${turn}: no jump at the first move`);
       const finger = { x: ring.x + 2 * CAM.scale, y: ring.y - CAM.scale };
@@ -106,10 +107,10 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
     const t = state.tokens.roc! as Token;
     for (const turn of [0, 1, 2, 3] as Turn[]) {
       const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: true, view: isometric(turn), camera: cam, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
-      const plan = dragPlan({ room: state, role: "dm", src: pick.src!, feetPerCell: 5, token: t, drawn: drawnRing(pick, true) });
+      const plan = dragPlan({ room: state, role: "dm", src: pick.src!, grid: SQUARES, feetPerCell: 5, token: t, drawn: drawnRing(pick, true) });
       const node = viewToScreen(cam, toView(pick.view, { x: t.x, y: t.y }));
       const ring = ringCenter(pick, t);
-      const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, t), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
+      const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, t, SQUARES), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
       const still = dragBound(input, node);
       assert.ok(Math.hypot(still.x - node.x, still.y - node.y) < 1e-6, `turn ${turn}: ${JSON.stringify([still, node])}`);
       const at = dragLanding(pick.view, input.ground, plan, screenToView(cam, ring));
@@ -162,8 +163,8 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
       assert.equal(at.z, 2, `${id} stands at the top it straddles`);
       assert.ok(Math.abs(at.x + fp.w / 2 - 9.9) < 1e-9, `${id} centered under the finger`);
       // The same footprint judged by the cell under its center alone would stand where that cell is.
-      const ground = dragGround(pickFor(state, "dm").heights, t);
-      const corner = snapPosition(at.x, at.y, fp);
+      const ground = dragGround(pickFor(state, "dm").heights, t, SQUARES);
+      const corner = snapPosition(SQUARES, at.x, at.y, fp);
       assert.equal(ground.footGround(corner), 2);
     }
   });
@@ -181,7 +182,7 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
     // Where its own height meets the tower, it lands on the top, as the drop would.
     const onto = landAt(state, "dm", "owl", { x: 13.5, y: 7.5 }, 4);
     assert.deepEqual(landed(onto, t).cell, "13,7");
-    assert.equal(dropLanding(dropView(state, "dm"), t, snapPosition(onto.x, onto.y, footprint(t))), 40, "the drop there lands on the tower");
+    assert.equal(dropLanding(dropView(state, "dm"), t, snapPosition(SQUARES, onto.x, onto.y, footprint(t))), 40, "the drop there lands on the tower");
   });
 
   test("a flier over a tower wide enough to meet its own height lands on the top under the finger", () => {
@@ -192,7 +193,7 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
   test("a token inside seen ground keeps its base and never rises", () => {
     const state = world({ blockMovement: false, heights: raised(0, 0, 30, 30, 10), tokens: [token("mole", { x: 2, y: 2, elevation: 0 })] });
     const t = state.tokens.mole! as Token;
-    const plan = dragPlan({ room: state, role: "dm", src: pickFor(state, "dm").src!, feetPerCell: 5, token: t });
+    const plan = dragPlan({ room: state, role: "dm", src: pickFor(state, "dm").src!, grid: SQUARES, feetPerCell: 5, token: t });
     assert.deepEqual(plan.own, { kind: "fixed", base: 0 });
     assert.equal(landAt(state, "dm", "mole", { x: 5.5, y: 5.5 }, 0).z, 0);
   });
@@ -223,9 +224,9 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
       const at = landAt(state, "dm", "bree", c.to, z);
       assert.equal(at.z * 5, c.feet, c.name);
       // What the drop lands it at from there agrees with the preview.
-      const spot = snapPosition(at.x, at.y, fp);
+      const spot = snapPosition(SQUARES, at.x, at.y, fp);
       assert.equal(dropLanding(dropView(state, "dm"), t, spot), c.feet, `${c.name}: the drop`);
-      const plan = dragPlan({ room: state, role: "dm", src: pickFor(state, "dm").src!, feetPerCell: 5, token: t }) as DragPlan;
+      const plan = dragPlan({ room: state, role: "dm", src: pickFor(state, "dm").src!, grid: SQUARES, feetPerCell: 5, token: t }) as DragPlan;
       assert.equal(plan.seat?.keptAt(spot), c.kept, `${c.name}: the seat`);
     }
   });
@@ -275,7 +276,7 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
     const horse = state.tokens.horse! as Token;
     const node = viewToScreen(CAM, toView(pick.view, { x: 4.5, y: 4.5 }));
     const ring = ringCenter(pick, horse);
-    const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, horse), plan: dragPlan({ room: state, role: "dm", src: pick.src!, feetPerCell: 5, token: horse }), start: { node, ring }, rel: { x: 0.5, y: 0.5 } };
+    const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, horse, SQUARES), plan: dragPlan({ room: state, role: "dm", src: pick.src!, grid: SQUARES, feetPerCell: 5, token: horse }), start: { node, ring }, rel: { x: 0.5, y: 0.5 } };
     const moved = dragBound(input, { x: node.x + 40, y: node.y });
     const world2 = screenToView(CAM, moved) as ViewPoint;
     assert.ok(Number.isFinite(world2.x));

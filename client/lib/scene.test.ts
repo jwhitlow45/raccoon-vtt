@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { SQUARES } from "#shared/rules/grid.ts";
+import { footprintHexes, hexCenter, snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
+import { placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
+import { rng } from "#shared/testutil.ts";
 import type { Member, RoomState, Scene } from "#shared/model.ts";
 import { createInitialState } from "#shared/initial.ts";
 import { dotColor } from "./connection.ts";
@@ -102,8 +106,41 @@ describe("geometry", () => {
   });
 
   test("snapping: half cells for Tiny, whole cells otherwise", () => {
-    assert.deepEqual(snapPosition(2.3, 4.8, { w: 0.5, h: 0.5 }), { x: 2.5, y: 5 });
-    assert.deepEqual(snapPosition(2.3, 4.8, { w: 2, h: 2 }), { x: 2, y: 5 });
+    assert.deepEqual(snapPosition(SQUARES, 2.3, 4.8, { w: 0.5, h: 0.5 }), { x: 2.5, y: 5 });
+    assert.deepEqual(snapPosition(SQUARES, 2.3, 4.8, { w: 2, h: 2 }), { x: 2, y: 5 });
+  });
+
+  test("snapping on hexes: the box's middle goes to its size's nearest anchor, ties by row then column, mirrored on hex columns", () => {
+    const rows: HexGrid = { shape: "hex", orient: "rows" };
+    const columns: HexGrid = { shape: "hex", orient: "columns" };
+    const medium = { w: 1, h: 1 };
+    // Hex (2, 1) on rows has its center at (3, HEX_R + HEX_S): a drop a little off it lands on it.
+    const c21 = hexCenter(rows, { col: 2, row: 1 });
+    assert.deepEqual(snapPosition(rows, c21.x - 0.5 + 0.2, c21.y - 0.5 - 0.15, medium), { x: c21.x - 0.5, y: c21.y - 0.5 });
+    // Halfway between two hexes of one row, the smaller column wins, and halfway between rows, the smaller row.
+    const c00 = hexCenter(rows, { col: 0, row: 0 });
+    const c10 = hexCenter(rows, { col: 1, row: 0 });
+    assert.deepEqual(snapPosition(rows, (c00.x + c10.x) / 2 - 0.5, c00.y - 0.5, medium), { x: c00.x - 0.5, y: c00.y - 0.5 });
+    // On hex columns the same tie goes to the smaller column, then the smaller row.
+    const k00 = hexCenter(columns, { col: 0, row: 0 });
+    const k01 = hexCenter(columns, { col: 0, row: 1 });
+    assert.deepEqual(snapPosition(columns, k00.x - 0.5, (k00.y + k01.y) / 2 - 0.5, medium), { x: k00.x - 0.5, y: k00.y - 0.5 });
+    // A Large creature's box centers on the corner its top three hexes share, a hex's second point.
+    const large = { w: 2, h: 2 };
+    const at = snapPosition(rows, 4.1, 3.2, large);
+    const anchor = snapAnchor(rows, "large", { x: 5.1, y: 4.2 });
+    assert.deepEqual(at, { x: anchor.x - 1, y: anchor.y - 1 });
+    assert.deepEqual(footprintHexes(rows, "large", anchor).length, 3);
+    // Snapping is idempotent, and the spot is the rules' own (footprint.ts placedOnHex).
+    const random = rng(26117);
+    for (let i = 0; i < 2000; i++) {
+      const g = random() < 0.5 ? rows : columns;
+      const size = (["tiny", "small", "medium", "large", "huge", "gargantuan"] as const)[Math.floor(random() * 6)]!;
+      const box = footprint({ size });
+      const spot = snapPosition(g, random() * 30, random() * 20, box);
+      assert.deepEqual(snapPosition(g, spot.x, spot.y, box), spot, `idempotent for ${size}`);
+      assert.deepEqual(spot, placedOnHex(g, { size, x: spot.x, y: spot.y }, tokenRefHex(g, { size, x: spot.x, y: spot.y })), `the rules' spot for ${size}`);
+    }
   });
 
   test("the map covers its calibrated world rectangle", () => {

@@ -1,4 +1,5 @@
 import type { Token } from "#shared/model.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 import { footprint, snapPosition } from "../../lib/scene.ts";
 
 /**
@@ -17,16 +18,17 @@ import { footprint, snapPosition } from "../../lib/scene.ts";
 export type Spot = { x: number; y: number };
 type Placed = Pick<Token, "x" | "y" | "size" | "w" | "h">;
 
-/** The cell each drag would drop its token on, leaving out drags that would not move it. */
-export function dragSpots(
-  tokens: Readonly<Record<string, Placed | undefined>>,
+/** The spot each drag would drop its token on, snapped on its scene's grid (`gridOf`), leaving out drags that would not move it. */
+export function dragSpots<T extends Placed>(
+  tokens: Readonly<Record<string, T | undefined>>,
   drags: Iterable<{ tokenId: string; x: number; y: number }>,
+  gridOf: (token: T) => Grid,
 ): Map<string, Spot> {
   const spots = new Map<string, Spot>();
   for (const d of drags) {
     const t = tokens[d.tokenId];
     if (!t || !Number.isFinite(d.x) || !Number.isFinite(d.y)) continue;
-    const at = snapPosition(d.x, d.y, footprint(t));
+    const at = snapPosition(gridOf(t), d.x, d.y, footprint(t));
     if (at.x !== t.x || at.y !== t.y) spots.set(d.tokenId, at);
     else spots.delete(d.tokenId);
   }

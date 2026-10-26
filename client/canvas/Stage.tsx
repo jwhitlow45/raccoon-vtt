@@ -6,6 +6,7 @@ import { Layer, Stage } from "react-konva";
 import { DEFAULT_SETTINGS, type RoomState, type Scene, type Token } from "#shared/model.ts";
 import { holderOf as linkedHolder, linkHolds } from "#shared/rules/attach.ts";
 import { labelBox } from "#shared/rules/labels.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { activeTool, type ToolContext, type ToolDef, type ToolPointer } from "../features/tools.ts";
 import { LabelPaneHost } from "../features/builder/LabelPaneHost.tsx";
 import { ReadoutHost } from "../features/builder/heights/ReadoutHost.tsx";
@@ -1322,7 +1323,7 @@ export function MapStage(props: {
   const localDrags = scope.get(localDragSlot);
   const setSpot = useCallback(
     (token: ViewToken, x: number, y: number) => {
-      const at = snapPosition(x, y, footprint(token));
+      const at = snapPosition(sceneGrid(sceneRef.current), x, y, footprint(token));
       const prev = localDrags.getState().spots[token.id];
       if (prev && prev.x === at.x && prev.y === at.y) return;
       localDrags.setState({ spots: { ...localDrags.getState().spots, [token.id]: at } });
@@ -1392,12 +1393,12 @@ export function MapStage(props: {
       if (pick.view.kind !== "isometric" || !pick.src) return [];
       // The ring as it draws, its lift capped, or on the ground when it lies under the fog, and the ray at that same height, so no move jumps (ISO34-OPUS-10, OPUS-11).
       const stands = standsFor(pick, aboveFogRef.current)(lead);
-      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, feetPerCell: pick.feetPerCell, token: lead, drawn: drawnRing(pick, stands) });
+      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, grid: pick.grid, feetPerCell: pick.feetPerCell, token: lead, drawn: drawnRing(pick, stands) });
       const start = { node: node.getAbsolutePosition(), ring: ringCenter(pick, lead, stands) };
       const rel = { x: pressed.x - lead.x, y: pressed.y - lead.y };
       node.dragBoundFunc((pos) => {
         const now = pickOfRef.current(currentCam() ?? c);
-        return dragBound({ camera: now.camera, view: now.view, ground: dragGround(now.heights, lead), plan, start, rel }, pos);
+        return dragBound({ camera: now.camera, view: now.view, ground: dragGround(now.heights, lead, now.grid), plan, start, rel }, pos);
       });
       const target = stage.findOne<Konva.Group>(`.${DRAG_GROUND}`);
       return target ? liftToDragLayer(target, [node, ...followers.map((f) => f.node)]) : [];

@@ -1,10 +1,10 @@
 import { FOG_SUBCELLS } from "#shared/model.ts";
-import { footprintRect } from "#shared/rules/footprint.ts";
+import { footprintRect, footprintSubcells } from "#shared/rules/footprint.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
 import type { CellBox, FogView } from "./fogView.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The stand rule (docs/design-v1-isometric-view.md 5.2, D-261026-5), the
@@ -18,6 +18,12 @@ import { SQUARES } from "#shared/rules/grid.ts";
  * Every caller that stands something up asks here, and the board routes
  * whatever is refused to the ground stage (`splitTokens`), so no upright
  * path can skip the test.
+ *
+ * On a hex scene a creature's footprint is its hexes (docs/design-v1-hex-grids.md
+ * 4.2), which reach past its drawn box at their points, so the rule reads
+ * the fog sub-cells inside those hexes, the very ones the server's
+ * footprint test reads (footprint.ts footprintSubcells), beside the box
+ * its art is drawn in.
  */
 
 /** Whether a box in cells stands for this viewer: every sub-cell it touches is revealed. */
@@ -32,17 +38,35 @@ type BoxToken = Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze" | "ro
  * turned by its rotation about its middle as TokenNode.tsx's TokenBody
  * turns the art and its clip, and the footprint the rules read (snapped,
  * and squeezed while it squeezes). Testing both fails closed whichever of
- * the two a later change draws.
+ * the two a later change draws. On hexes the second is the box around the
+ * fog sub-cells of its hexes (`hexRule`).
  */
-export function tokenBoxes(token: BoxToken, at: { x: number; y: number } = token): [CellBox, CellBox] {
-  const rule = footprintRect(SQUARES, { ...token, x: at.x, y: at.y });
-  return [turnedBody(at, footprint(token), token.rotation, token.kind === "object"), { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h }];
+export function tokenBoxes(g: Grid, token: BoxToken, at: { x: number; y: number } = token): [CellBox, CellBox] {
+  const body = turnedBody(at, footprint(token), token.rotation, token.kind === "object");
+  if (g.shape === "hex") return [body, subcellBox(footprintSubcells(g, { ...token, x: at.x, y: at.y }))];
+  const rule = footprintRect(g, { ...token, x: at.x, y: at.y });
+  return [body, { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h }];
 }
 
 /** One box around both of a token's boxes, for a flat ghost's clip and the DM's dimming. */
-export function tokenBox(token: BoxToken, at: { x: number; y: number } = token): CellBox {
-  const [body, rule] = tokenBoxes(token, at);
+export function tokenBox(g: Grid, token: BoxToken, at: { x: number; y: number } = token): CellBox {
+  const [body, rule] = tokenBoxes(g, token, at);
   return { x0: Math.min(body.x0, rule.x0), y0: Math.min(body.y0, rule.y0), x1: Math.max(body.x1, rule.x1), y1: Math.max(body.y1, rule.y1) };
+}
+
+/** The box in cells around fog sub-cells, each its whole square. */
+function subcellBox(subs: readonly (readonly [number, number])[]): CellBox {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [sx, sy] of subs) {
+    x0 = Math.min(x0, sx);
+    y0 = Math.min(y0, sy);
+    x1 = Math.max(x1, sx + 1);
+    y1 = Math.max(y1, sy + 1);
+  }
+  return { x0: x0 / FOG_SUBCELLS, y0: y0 / FOG_SUBCELLS, x1: x1 / FOG_SUBCELLS, y1: y1 / FOG_SUBCELLS };
 }
 
 /**
@@ -52,13 +76,23 @@ export function tokenBox(token: BoxToken, at: { x: number; y: number } = token):
  * ground on a per-player scene, so a creature on ground a player explored
  * stays bright, as the DM's map shows that ground (D-261026-18).
  */
-export function dimmedForDm(fog: FogView | null, token: BoxToken): boolean {
-  return fog !== null && !fog.boxAny(tokenBox(token));
+export function dimmedForDm(fog: FogView | null, g: Grid, token: BoxToken): boolean {
+  if (fog === null) return false;
+  if (g.shape !== "hex") return !fog.boxAny(tokenBox(g, token));
+  const [body] = tokenBoxes(g, token);
+  return !fog.boxAny(body) && !footprintSubcells(g, token).some(([sx, sy]) => fog.revealed(sx, sy));
 }
 
-/** Whether both of a token's boxes stand. */
-function tokenStands(fog: FogView, token: BoxToken, at: { x: number; y: number } = token): boolean {
-  const [body, rule] = tokenBoxes(token, at);
+/**
+ * Whether both of a token's boxes stand: on hexes its drawn body and every
+ * fog sub-cell inside its hexes, each one as the server reads it.
+ */
+function tokenStands(fog: FogView, g: Grid, token: BoxToken, at: { x: number; y: number } = token): boolean {
+  if (g.shape === "hex") {
+    const [body] = tokenBoxes(g, token, at);
+    return boxStands(fog, body) && footprintSubcells(g, { ...token, x: at.x, y: at.y }).every(([sx, sy]) => fog.revealed(sx, sy));
+  }
+  const [body, rule] = tokenBoxes(g, token, at);
   return boxStands(fog, body) && boxStands(fog, rule);
 }
 
@@ -98,9 +132,9 @@ function snapUnit(v: number): number {
  * player sees (`aboveFog`, lib/scene.ts drawsAboveFog) draw above the fog
  * in Top-down, so they stand wherever they are.
  */
-export function creatureStands(fog: FogView, token: ViewToken, aboveFog: boolean): boolean {
+export function creatureStands(fog: FogView, g: Grid, token: ViewToken, aboveFog: boolean): boolean {
   if (fog.all || aboveFog) return true;
-  return tokenStands(fog, token);
+  return tokenStands(fog, g, token);
 }
 
 /**
@@ -108,9 +142,9 @@ export function creatureStands(fog: FogView, token: ViewToken, aboveFog: boolean
  * that frame's spot, so a ghost whose path crosses fog lies flat on every
  * frame it is over fog. Its name tag is judged by its own box.
  */
-export function ghostStands(fog: FogView, token: ViewToken, at: { x: number; y: number }): boolean {
+export function ghostStands(fog: FogView, g: Grid, token: ViewToken, at: { x: number; y: number }): boolean {
   if (fog.all) return true;
-  return tokenStands(fog, token, at);
+  return tokenStands(fog, g, token, at);
 }
 
 /**
@@ -129,10 +163,10 @@ export function ghostTagStands(fog: FogView, token: Pick<ViewToken, "size" | "w"
 }
 
 /** Which tokens stand as standees and which lie flat under the fog, for the board's two stages. */
-export function splitTokens<T extends ViewToken>(fog: FogView, tokens: readonly T[], aboveFog: (t: T) => boolean): { standing: T[]; flat: T[] } {
+export function splitTokens<T extends ViewToken>(fog: FogView, g: Grid, tokens: readonly T[], aboveFog: (t: T) => boolean): { standing: T[]; flat: T[] } {
   const standing: T[] = [];
   const flat: T[] = [];
-  for (const t of tokens) (creatureStands(fog, t, aboveFog(t)) ? standing : flat).push(t);
+  for (const t of tokens) (creatureStands(fog, g, t, aboveFog(t)) ? standing : flat).push(t);
   return { standing, flat };
 }
 

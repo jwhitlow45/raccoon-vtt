@@ -373,7 +373,7 @@ describe("the board's view (ISO-5's hooks)", () => {
     const stage = read("canvas/Stage.tsx");
     assert.match(stage, /<FogShape sceneId=\{scene\.id\} bounds=\{scene\.bounds\} tiles=\{drawnFogTiles\}/, "Top-down's fog image");
     assert.match(stage, /dmFog=\{role === "dm" && fog \? drawnFogTiles : null\}/, "the standees' dimming");
-    assert.match(bodyOf(read("canvas/relief/IsoBoard.tsx"), "IsoBoard")!, /dimmedForDm\(dmFog, t\)/);
+    assert.match(bodyOf(read("canvas/relief/IsoBoard.tsx"), "IsoBoard")!, /dimmedForDm\(dmFog, grid, t\)/);
   });
 
   test("the test hook picks for the display by the view it is given, not by its camera, which comes later", () => {

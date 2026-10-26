@@ -1,10 +1,11 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { WalkWorld, worldUnits, type WorkBudget } from "#shared/rules/walk.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
+import { isHex } from "#shared/rules/grid.ts";
 import { groupWalkWorld, type PublicWorld } from "#shared/rules/walkWorld.ts";
 import { pathNow } from "../measure/movement.ts";
 import { walkersFor, walkersOfGroup } from "../attach/walk.ts";
-import { cutForWalkers, dropMode, dropView, planGroup, planOne, planPress, rebased, type DropPlan, type DropToken, type Point, type Role } from "./drop.ts";
+import { cutForWalkers, dropGrid, dropMode, dropView, planGroup, planOne, planPress, rebased, type DropPlan, type DropToken, type Point, type Role } from "./drop.ts";
 
 /**
  * The public world for a walk by this token as this device sees the room
@@ -37,6 +38,8 @@ export function pressPlan(copy: RoomState, drawn: DropToken, asked: Point, drawn
   if (group.length > 1) return planGroup(view, group, at.x - token.x, at.y - token.y, mode, walkersOfGroup(view, group, role));
   const full = view.tokens[token.id];
   if (!full) return planOne(view, token, at, mode);
+  // A hex scene walks no route in phase H1, so its press is the straight drop (drop.ts dropGrid).
+  if (isHex(dropGrid(view, full))) return planOne(view, token, at, mode);
   const world = new WalkWorld(worldFor(view, full, role).input);
   budget.charge(worldUnits(world));
   // A holder's press stops where a creature it drags beside it would meet a wall (docs/design-v1-attach.md 4.2).

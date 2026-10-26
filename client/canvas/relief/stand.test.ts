@@ -13,6 +13,12 @@ import { dragTagPill } from "../dragTag.ts";
 import { boxStands, creatureStands, dimmedForDm, ghostStands, ghostTagStands, lineStands, splitTokens, tokenBox, tokenBoxes } from "./stand.ts";
 import { withExplored } from "../../features/vision/exploredFog.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
+import { readFileSync } from "node:fs";
+import { footprintSubcells, hexAnchor, occupiedHexes, placedOnHex } from "#shared/rules/footprint.ts";
+import { hexAt, hexCenter, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { snapPosition } from "../../lib/scene.ts";
+import { isometric, toView } from "../../lib/view.ts";
+import { standeeShape } from "./standee.ts";
 
 /**
  * The stand rule is the isometric view's security rule
@@ -176,7 +182,7 @@ describe("the stand rule", () => {
       const mask = revealedMask(scene.bounds, scene.id, scene.tiles);
       const tokens = Array.from({ length: 12 }, (_, i) => randomToken(random, scene, i));
       const above = new Set(tokens.filter(() => random() < 0.15).map((t) => t.id));
-      const { standing, flat } = splitTokens(fog, tokens, (t) => above.has(t.id));
+      const { standing, flat } = splitTokens(fog, SQUARES, tokens, (t) => above.has(t.id));
       assert.equal(standing.length + flat.length, tokens.length);
       for (const t of standing) {
         stood++;
@@ -221,7 +227,7 @@ describe("the stand rule", () => {
       const to = { x: random() * scene.bounds.w, y: random() * scene.bounds.h };
       for (let f = 0; f <= 20; f++) {
         const at = { x: t.x + ((to.x - t.x) * f) / 20, y: t.y + ((to.y - t.y) * f) / 20 };
-        const stands = ghostStands(fog, t, at);
+        const stands = ghostStands(fog, SQUARES, t, at);
         if (!stands) flatFrames++;
         assert.equal(stands, oracleToken(mask, t, at), `round ${round} frame ${f}`);
       }
@@ -270,7 +276,7 @@ describe("the stand rule", () => {
       for (let i = 0; i < 12; i++) {
         const angles = [45, 90, 135, 180, 270, 30, -60, random() * 360];
         const t = { ...randomToken(random, scene, i), rotation: angles[Math.floor(random() * angles.length)]!, kind: random() < 0.5 ? "object" : "monster" } as ViewToken;
-        const stands = creatureStands(fog, t, false);
+        const stands = creatureStands(fog, SQUARES, t, false);
         if (!stands) {
           lay++;
           continue;
@@ -289,22 +295,22 @@ describe("the stand rule", () => {
   test("a square turned 45 degrees reaches past its cell, and a 4 by 1 turned 90 degrees stands across, not along", () => {
     const crate = makeToken("crate", { kind: "object", x: 4, y: 4, rotation: 45 }) as ViewToken;
     const cellOnly = fogOf([[4, 4, 5, 5]]);
-    assert.equal(creatureStands(fog3x3(4, 4), crate, false), true, "with the cells around it revealed");
-    assert.equal(creatureStands(cellOnly, crate, false), false, "its corners lie over the fogged cells around it");
-    assert.equal(creatureStands(cellOnly, { ...crate, rotation: 0 } as ViewToken, false), true, "unturned, it fits its cell");
+    assert.equal(creatureStands(fog3x3(4, 4), SQUARES, crate, false), true, "with the cells around it revealed");
+    assert.equal(creatureStands(cellOnly, SQUARES, crate, false), false, "its corners lie over the fogged cells around it");
+    assert.equal(creatureStands(cellOnly, SQUARES, { ...crate, rotation: 0 } as ViewToken, false), true, "unturned, it fits its cell");
     // A round creature looks the same at any turn, so it still fits its cell.
-    assert.equal(creatureStands(cellOnly, { ...crate, kind: "monster" } as ViewToken, false), true);
+    assert.equal(creatureStands(cellOnly, SQUARES, { ...crate, kind: "monster" } as ViewToken, false), true);
 
     const plank = makeToken("plank", { kind: "object", size: "custom", w: 4, h: 1, x: 4, y: 4, rotation: 90 }) as ViewToken;
     const along = fogOf([[4, 4, 8, 5]]);
-    assert.equal(creatureStands(along, plank, false), false, "Top-down draws it across [5.5, 6.5] by [2.5, 6.5], mostly under fog");
-    assert.equal(creatureStands(along, { ...plank, rotation: 0 } as ViewToken, false), true);
+    assert.equal(creatureStands(along, SQUARES, plank, false), false, "Top-down draws it across [5.5, 6.5] by [2.5, 6.5], mostly under fog");
+    assert.equal(creatureStands(along, SQUARES, { ...plank, rotation: 0 } as ViewToken, false), true);
     const both = fogOf([[4, 4, 8, 5], [5, 2, 7, 7]]);
-    assert.equal(creatureStands(both, plank, false), true, "with its turned art and its footprint revealed");
-    assert.equal(creatureStands(fogOf([[4, 2, 8, 7]]), plank, false), true);
-    assert.deepEqual(tokenBox(plank), { x0: 4, y0: 2.5, x1: 8, y1: 6.5 }, "one box around the turned art and the rules' footprint, for a flat ghost's clip");
+    assert.equal(creatureStands(both, SQUARES, plank, false), true, "with its turned art and its footprint revealed");
+    assert.equal(creatureStands(fogOf([[4, 2, 8, 7]]), SQUARES, plank, false), true);
+    assert.deepEqual(tokenBox(SQUARES, plank), { x0: 4, y0: 2.5, x1: 8, y1: 6.5 }, "one box around the turned art and the rules' footprint, for a flat ghost's clip");
     // A ghost turns the same way.
-    assert.equal(ghostStands(along, plank, { x: 4, y: 4 }), false);
+    assert.equal(ghostStands(along, SQUARES, plank, { x: 4, y: 4 }), false);
   });
 
   test("a turned rectangle's box is its turned corners', and a turned ellipse's is no wider than its art", () => {
@@ -317,12 +323,12 @@ describe("the stand rule", () => {
         [1.5, 0.5],
         [-1.5, 0.5],
       ].map(([u, v]) => ({ x: 3.5 + u! * Math.cos(rad) - v! * Math.sin(rad), y: 5.5 + u! * Math.sin(rad) + v! * Math.cos(rad) }));
-      const [body] = tokenBoxes(slab);
+      const [body] = tokenBoxes(SQUARES, slab);
       const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
       assert.ok(near(body.x0, Math.min(...corners.map((c) => c.x))) && near(body.x1, Math.max(...corners.map((c) => c.x))), `x at ${rotation}`);
       assert.ok(near(body.y0, Math.min(...corners.map((c) => c.y))) && near(body.y1, Math.max(...corners.map((c) => c.y))), `y at ${rotation}`);
       // The same footprint as a creature draws an ellipse, inside the rectangle's box and touching it nowhere wider.
-      const [oval] = tokenBoxes({ ...slab, kind: "monster" } as ViewToken);
+      const [oval] = tokenBoxes(SQUARES, { ...slab, kind: "monster" } as ViewToken);
       const points = Array.from({ length: 3600 }, (_, i) => {
         const t = (i / 3600) * 2 * Math.PI;
         const u = 1.5 * Math.cos(t);
@@ -338,7 +344,7 @@ describe("the stand rule", () => {
     const at = { x: 10, y: 4 };
     // Its body and the two cells over its middle revealed, and nothing higher.
     const near = fogOf([[9, 3, 12, 5]]);
-    assert.equal(ghostStands(near, ghost, at), true);
+    assert.equal(ghostStands(near, SQUARES, ghost, at), true);
     const pill = pillReach(dragTagPill(ghost, at, "Dana", 12));
     assert.ok(pill.y0 < 3 && pill.y1 - pill.y0 > 1, `at 12 px a cell the pill reaches past two cells: ${JSON.stringify(pill)}`);
     assert.equal(ghostTagStands(near, ghost, at, "Dana", 12), false, "the pill's top lies over fog");
@@ -354,13 +360,13 @@ describe("the stand rule", () => {
 
   test("a turn that is not finite draws, and is judged, unturned", () => {
     const plank = makeToken("plank", { kind: "object", size: "custom", w: 4, h: 1, x: 4, y: 4, rotation: Number.NaN }) as ViewToken;
-    assert.deepEqual(tokenBox(plank), { x0: 4, y0: 4, x1: 8, y1: 5 });
+    assert.deepEqual(tokenBox(SQUARES, plank), { x0: 4, y0: 4, x1: 8, y1: 5 });
   });
 
   test("everything stands for a viewer who sees all the ground: the DM, or a scene without fog", () => {
     const fog = new FogView(null, "s1", { w: 10, h: 10 });
     const t = makeToken("t", { x: 3, y: 3 }) as ViewToken;
-    assert.equal(creatureStands(fog, t, false), true);
+    assert.equal(creatureStands(fog, SQUARES, t, false), true);
     assert.equal(boxStands(fog, { x0: -5, y0: -5, x1: 50, y1: 50 }), true);
     assert.equal(lineStands(fog, { x: 0, y: 0 }, { x: 9, y: 9 }), true);
   });
@@ -374,11 +380,11 @@ describe("the stand rule", () => {
     scene.tiles[tileKey("s1", 0, 0)] = { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) };
     const fog = new FogView(scene.tiles, scene.id, scene.bounds);
     const goblin = makeToken("g", { x: 3, y: 3 }) as ViewToken;
-    assert.equal(creatureStands(fog, goblin, false), false);
-    assert.equal(creatureStands(fog, goblin, true), true);
-    assert.equal(creatureStands(fog, { ...goblin, x: 4 }, false), true);
+    assert.equal(creatureStands(fog, SQUARES, goblin, false), false);
+    assert.equal(creatureStands(fog, SQUARES, goblin, true), true);
+    assert.equal(creatureStands(fog, SQUARES, { ...goblin, x: 4 }, false), true);
     // A Large one beside it touches that sub-cell too.
-    assert.equal(creatureStands(fog, makeToken("l", { x: 2, y: 2, size: "large" }) as ViewToken, false), false);
+    assert.equal(creatureStands(fog, SQUARES, makeToken("l", { x: 2, y: 2, size: "large" }) as ViewToken, false), false);
   });
 
   test("a line along a sub-cell line, a line through a corner and a box with no area each count the sub-cells on both sides", () => {
@@ -453,11 +459,11 @@ describe("the stand rule", () => {
     const goblin = makeToken("g", { x: 6, y: 4 }) as ViewToken;
     const imp = makeToken("i", { x: 1, y: 1 }) as ViewToken;
     const ghoul = makeToken("h", { x: 3, y: 6 }) as ViewToken;
-    assert.equal(dimmedForDm(drawn, goblin), false, "on explored ground: bright, as the DM's map shows it");
-    assert.equal(dimmedForDm(drawn, imp), false, "on ground the DM revealed");
-    assert.equal(dimmedForDm(drawn, ghoul), true, "on ground nobody revealed: dimmed");
-    assert.equal(dimmedForDm(new FogView(dmLayer, id, bounds), goblin), true, "the shared fog alone would dim it");
-    assert.equal(dimmedForDm(null, ghoul), false, "a scene without fog dims nothing");
+    assert.equal(dimmedForDm(drawn, SQUARES, goblin), false, "on explored ground: bright, as the DM's map shows it");
+    assert.equal(dimmedForDm(drawn, SQUARES, imp), false, "on ground the DM revealed");
+    assert.equal(dimmedForDm(drawn, SQUARES, ghoul), true, "on ground nobody revealed: dimmed");
+    assert.equal(dimmedForDm(new FogView(dmLayer, id, bounds), SQUARES, goblin), true, "the shared fog alone would dim it");
+    assert.equal(dimmedForDm(null, SQUARES, ghoul), false, "a scene without fog dims nothing");
   });
 
   test("a tile filed under another tile's key reveals nothing", () => {
@@ -491,6 +497,137 @@ describe("the stand rule", () => {
           if (sx < mask.width && sy < mask.height && mask.revealed[sy * mask.width + sx] === 1) assert.ok(covered.has(`${sx},${sy}`), `round ${round}: revealed ${sx}, ${sy} left out`);
         }
       }
+    }
+  });
+});
+
+describe("the stand rule on a hex scene (hex grids 4.2, ISOREB-OPUS-01)", () => {
+  /** The sub-cells a hex holds, found from nothing: every sub-cell whose center hexAt puts in it, in a window round its center. */
+  function subcellsOf(g: HexGrid, h: Hex): [number, number][] {
+    const c = hexCenter(g, h);
+    const k = FOG_SUBCELLS;
+    const out: [number, number][] = [];
+    for (let sy = Math.floor((c.y - 1) * k); sy <= Math.ceil((c.y + 1) * k); sy++) {
+      for (let sx = Math.floor((c.x - 1) * k); sx <= Math.ceil((c.x + 1) * k); sx++) {
+        const at = hexAt(g, { x: (sx + 0.5) / k, y: (sy + 0.5) / k });
+        if (at.col === h.col && at.row === h.row) out.push([sx, sy]);
+      }
+    }
+    return out;
+  }
+
+  /** A creature on a hex scene: of any size, snapped to its anchor as the board drops it, or left where a shape switch left it. */
+  function hexToken(random: () => number, g: HexGrid, scene: Scene, i: number): ViewToken {
+    const sizes = ["tiny", "small", "medium", "large", "huge", "gargantuan", "custom"] as const;
+    const size = sizes[Math.floor(random() * sizes.length)]!;
+    const t = makeToken(`h${i}`, { size, x: random() * (scene.bounds.w + 2) - 1, y: random() * (scene.bounds.h + 2) - 1, w: 0.5 + random() * 3, h: 0.5 + random() * 3 }) as ViewToken;
+    if (random() < 0.7) Object.assign(t, snapPosition(g, t.x, t.y, footprint(t)));
+    return t;
+  }
+
+  /** A scene mostly revealed, with fogged rectangles and single sub-cells flipped, so creatures stand often and miss by one sub-cell often. */
+  function openScene(random: () => number, bounds: { w: number; h: number }): Scene {
+    const sw = bounds.w * FOG_SUBCELLS;
+    const sh = bounds.h * FOG_SUBCELLS;
+    const open = new Uint8Array(sw * sh).fill(1);
+    for (let i = Math.floor(random() * 10); i > 0; i--) {
+      const x0 = Math.floor(random() * sw);
+      const y0 = Math.floor(random() * sh);
+      const x1 = Math.min(sw, x0 + 1 + Math.floor(random() * 16));
+      const y1 = Math.min(sh, y0 + 1 + Math.floor(random() * 16));
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) open[y * sw + x] = 0;
+    }
+    for (let i = 0; i < 60; i++) open[Math.floor(random() * sh) * sw + Math.floor(random() * sw)] = 0;
+    const tiles: Record<string, FogTile> = {};
+    for (let ty = 0; ty * TILE_SUB < sh; ty++) {
+      for (let tx = 0; tx * TILE_SUB < sw; tx++) {
+        const bits = new Uint8Array(TILE_BYTES);
+        for (let y = 0; y < TILE_SUB; y++) {
+          for (let x = 0; x < TILE_SUB; x++) {
+            const gx = tx * TILE_SUB + x;
+            const gy = ty * TILE_SUB + y;
+            if (gx >= sw || gy >= sh || open[gy * sw + gx] !== 1) continue;
+            const i = y * TILE_SUB + x;
+            bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+          }
+        }
+        tiles[tileKey("s1", tx, ty)] = { sceneId: "s1", tx, ty, rev: 1, bits: encodeTile(bits) };
+      }
+    }
+    return { id: "s1", bounds, tiles };
+  }
+
+  test("a standee stands only where every sub-cell of the hexes Top-down outlines, and of its drawn box, is revealed: the party's fog and a player's own alike", () => {
+    const random = rng(26116);
+    let stood = 0;
+    let lay = 0;
+    let pointsOnly = 0;
+    for (const orient of ["rows", "columns"] as const) {
+      const g: HexGrid = { shape: "hex", orient };
+      for (let round = 0; round < 60; round++) {
+        const bounds = { w: 6 + Math.floor(random() * 20), h: 6 + Math.floor(random() * 20) };
+        const party = openScene(random, bounds);
+        // Per-player vision: the same scene under one player's own fog, which reveals other ground.
+        const own = openScene(random, bounds);
+        for (const scene of [party, own]) {
+          const fog = new FogView(scene.tiles, scene.id, scene.bounds);
+          const mask = revealedMask(scene.bounds, scene.id, scene.tiles);
+          const open = ([sx, sy]: [number, number]) => sx >= 0 && sy >= 0 && sx < mask.width && sy < mask.height && mask.revealed[sy * mask.width + sx] === 1;
+          const tokens = Array.from({ length: 10 }, (_, i) => hexToken(random, g, scene, i));
+          const { standing } = splitTokens(fog, g, tokens, () => false);
+          for (const t of tokens) {
+            const fp = footprint(t);
+            // The hexes Top-down outlines and the server's footprint test reads (footprint.ts occupiedHexes).
+            const hexes = occupiedHexes(g, t).flatMap((h) => subcellsOf(g, h));
+            const body = oracleClear(mask, { x0: t.x, y0: t.y, x1: t.x + fp.w, y1: t.y + fp.h });
+            const expected = body && hexes.every(open);
+            if (body && !expected) pointsOnly++;
+            assert.equal(creatureStands(fog, g, t, false), expected, `${orient} round ${round}: ${t.id} ${t.size} at ${t.x},${t.y}`);
+            assert.equal(standing.includes(t), expected);
+            if (expected) stood++;
+            else lay++;
+            // A ghost of it, anywhere a drag eases it, by the same reading.
+            const at = { x: random() * scene.bounds.w, y: random() * scene.bounds.h };
+            const ghostHexes = occupiedHexes(g, { ...t, x: at.x, y: at.y }).flatMap((h) => subcellsOf(g, h));
+            assert.equal(ghostStands(fog, g, t, at), oracleClear(mask, { x0: at.x, y0: at.y, x1: at.x + fp.w, y1: at.y + fp.h }) && ghostHexes.every(open));
+            // A standee's ring stands where Top-down's hexes are: on the anchor, its box's middle.
+            if (t.size !== "custom") {
+              const shape = standeeShape(0, { x: t.x, y: t.y, w: fp.w, h: fp.h }, 0, 0, 40, 900);
+              const ring = toView(isometric(0), hexAnchor(g, t), 0);
+              const snapped = snapPosition(g, t.x, t.y, fp);
+              if (snapped.x === t.x && snapped.y === t.y) assert.ok(Math.abs(shape.base.x - ring.x) < 1e-9 && Math.abs(shape.base.y - ring.y) < 1e-9, `${t.id}'s ring on its anchor`);
+            }
+          }
+        }
+      }
+    }
+    assert.ok(stood > 100 && lay > 100, `${stood} stood and ${lay} lay flat`);
+    // Creatures whose drawn box is clear but a point of a hex is fogged: a box alone would have stood them.
+    assert.ok(pointsOnly > 10, `${pointsOnly} lay flat by a hex's point alone`);
+  });
+
+  test("the DM's dimming and a flat ghost's clip read the hexes too", () => {
+    const g: HexGrid = { shape: "hex", orient: "rows" };
+    // A Tiny creature takes a whole hex, which reaches past its half-cell box.
+    const goblin = makeToken("g", { size: "tiny", ...placedOnHex(g, { size: "tiny", x: 0, y: 0 }, { col: 5, row: 5 }) }) as ViewToken;
+    const mid = hexCenter(g, { col: 5, row: 5 });
+    // Only a sub-cell at the hex's west side revealed, outside the drawn box.
+    const sub: [number, number] = [Math.floor((mid.x - 0.375) * FOG_SUBCELLS), Math.floor(mid.y * FOG_SUBCELLS)];
+    const bits = new Uint8Array(TILE_BYTES);
+    const i = sub[1] * TILE_SUB + sub[0];
+    bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+    const fog = new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) } }, "s1", { w: 16, h: 16 });
+    assert.ok(footprintSubcells(g, goblin).some(([sx, sy]) => sx === sub[0] && sy === sub[1]), "the point is the goblin's");
+    assert.equal(dimmedForDm(fog, g, goblin), false, "a revealed point of its hex keeps it bright");
+    assert.equal(dimmedForDm(fog, SQUARES, goblin), true, "on squares nothing under it is revealed");
+    const box = tokenBox(g, goblin);
+    assert.ok(box.x0 <= sub[0] / FOG_SUBCELLS && box.x0 < goblin.x, "the clip's box reaches the hex's sub-cells past the drawn box");
+  });
+
+  test("no footprint read of the isometric view passes squares (ISOREB-OPUS-01)", () => {
+    for (const file of ["../DragMarks.tsx", "../boardPick.ts", "../isoDrag.ts", "./IsoBoard.tsx", "./stand.ts"]) {
+      const src = readFileSync(new URL(file, import.meta.url), "utf8");
+      assert.doesNotMatch(src, /\bSQUARES\b/, `${file} reads every footprint on the scene's grid`);
     }
   });
 });

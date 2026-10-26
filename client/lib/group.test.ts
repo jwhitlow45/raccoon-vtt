@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema, MAX_MOVES } from "#shared/protocol.ts";
 import { groupDrop, groupFollowers, moveOps, tokensByCenter, tokensInBox } from "./group.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
+import { snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
+import { footprint } from "./scene.ts";
 
 const tok = (id: string, x: number, y: number, size: "tiny" | "medium" | "large" = "medium", locked = false) => ({ id, x, y, size, locked });
 
@@ -36,13 +40,34 @@ describe("moving a group", () => {
   });
 
   test("each token snaps by its own footprint, and one that does not move is left out", () => {
-    assert.deepEqual(groupDrop(tokens.slice(0, 3), 1.4, -0.2), [
+    assert.deepEqual(groupDrop(SQUARES, tokens.slice(0, 3), 1.4, -0.2), [
       { tokenId: "a", x: 3, y: 2 },
       { tokenId: "b", x: 5, y: 2 },
       { tokenId: "mouse", x: 5, y: 4 },
     ]);
-    assert.deepEqual(groupDrop([tokens[2]!], 0.6, 0), [{ tokenId: "mouse", x: 4, y: 4 }]);
-    assert.deepEqual(groupDrop(tokens.slice(0, 2), 0.3, 0.3), []);
+    assert.deepEqual(groupDrop(SQUARES, [tokens[2]!], 0.6, 0), [{ tokenId: "mouse", x: 4, y: 4 }]);
+    assert.deepEqual(groupDrop(SQUARES, tokens.slice(0, 2), 0.3, 0.3), []);
+  });
+
+  test("a party of four group-dragged on hexes lands each on its own anchor (hex grids 4.2)", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      const g: HexGrid = { shape: "hex", orient };
+      // A party standing on their anchors: three Medium on their hexes' centers and a Large on its corner.
+      const on = (id: string, size: "medium" | "large", hex: { col: number; row: number }) => ({ id, size, ...placedOnHex(g, { size, x: 0, y: 0 }, hex) });
+      const party = [on("a", "medium", { col: 2, row: 2 }), on("b", "medium", { col: 3, row: 2 }), on("c", "medium", { col: 2, row: 3 }), on("ogre", "large", { col: 5, row: 1 })];
+      const moves = groupDrop(g, party, 2.3, 1.6);
+      assert.equal(moves.length, 4, orient);
+      for (const m of moves) {
+        const t = party.find((p) => p.id === m.tokenId)!;
+        const box = footprint(t);
+        const anchor = { x: m.x + box.w / 2, y: m.y + box.h / 2 };
+        assert.deepEqual(anchor, snapAnchor(g, t.size, anchor), `${orient}: ${t.id} stands on an anchor of its size`);
+        assert.deepEqual(m, { tokenId: t.id, ...placedOnHex(g, { ...t, x: m.x, y: m.y }, tokenRefHex(g, { ...t, x: m.x, y: m.y })) });
+      }
+      // Each lands on its own hexes: no two of the party share one.
+      const taken = moves.flatMap((m) => occupiedHexes(g, { ...party.find((p) => p.id === m.tokenId)!, x: m.x, y: m.y }).map((h) => `${h.col},${h.row}`));
+      assert.equal(new Set(taken).size, taken.length, `${orient}: no hex taken twice`);
+    }
   });
 
   test("one token is a plain move, a group is one moveMany the server accepts", () => {

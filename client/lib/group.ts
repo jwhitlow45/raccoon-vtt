@@ -1,5 +1,6 @@
 import type { ClientOp } from "#shared/protocol.ts";
 import { MAX_MOVES } from "#shared/protocol.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 import { footprint, snapPosition } from "./scene.ts";
 
 /**
@@ -53,11 +54,15 @@ export function groupFollowers<T extends { id: string }>(
   return out.filter((t) => !ridesOnMoving(t));
 }
 
-/** Where each token lands after the group moved by (dx, dy), snapped by its own footprint. Tokens that end where they began are left out. */
-export function groupDrop(tokens: readonly Placed[], dx: number, dy: number): Move[] {
+/**
+ * Where each token lands after the group moved by (dx, dy), snapped by its
+ * own footprint, on hexes to its own size's nearest anchor. Tokens that end
+ * where they began are left out.
+ */
+export function groupDrop(g: Grid, tokens: readonly Placed[], dx: number, dy: number): Move[] {
   const moves: Move[] = [];
   for (const t of tokens) {
-    const at = snapPosition(t.x + dx, t.y + dy, footprint(t));
+    const at = snapPosition(g, t.x + dx, t.y + dy, footprint(t));
     if (at.x !== t.x || at.y !== t.y) moves.push({ tokenId: t.id, x: at.x, y: at.y });
   }
   return moves;
