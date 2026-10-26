@@ -18,7 +18,12 @@ import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
+import { useStore } from "zustand";
+import { seenSeat, dropView } from "../../features/movement/drop.ts";
+import { localDragSlot } from "../../state/localDrags.ts";
+import { useScoped } from "../../state/scope.ts";
 import { useRoomStore } from "../../state/view.ts";
+import { DRAG_GROUND } from "../dragLayer.ts";
 import { useBoardFontEpoch } from "../boardFont.ts";
 import { FogShape } from "../FogShape.tsx";
 import { MapContent, useReadableMap, type DrawnMap } from "../layers/MapLayer.tsx";
@@ -99,6 +104,7 @@ export type IsoBoardProps = {
 };
 
 const EMPTY_CHUNKS: Record<string, BuildChunk> = {};
+const NO_SPOTS: Readonly<Record<string, { x: number; y: number }>> = {};
 const ALL_TEXTURES: readonly TexturedTerrain[] = ["stone", "wood", "grass", "dirt", "cave", "water", "difficult", "rubble"];
 const GROUND_LAYERS = isoLayersOf("ground", "board");
 const GROUND_MARKS = [...isoLayersOf("ground", "underDecor"), ...isoLayersOf("ground", "overlay")];
@@ -228,6 +234,39 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // Looked up by id for each standee, silhouette and decor: a search of the list each time is quadratic at 500 tokens.
   const byStandee = useMemo(() => new Map(standees.map((s) => [s.id, s])), [standees]);
 
+  /*
+   * Where this device's drag would land each token it moves (state/localDrags.ts),
+   * for the standee's base mid-drag (4.3, ISO-OP-34): the drop's landing on
+   * the ground this viewer has seen, a kept seat at its holder's height
+   * first, else the holder's footing, so a fogged platform never lifts it.
+   * A token whose holder moves with it rides at the holder's landing. It
+   * changes only when a token crosses into another cell.
+   */
+  const store = useRoomStore();
+  const spots = useStore(useScoped(localDragSlot), (st) => (hidden ? NO_SPOTS : st.spots));
+  const movedIso = useCallback(
+    (t: ViewToken, spot: { x: number; y: number }, seat: Seat): Pick<IsoToken, "base" | "ground" | "drawn" | "capped" | "rise" | "inset"> => {
+      const room = store.getState().view;
+      const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
+      const landingOf = (tok: ViewToken, at: { x: number; y: number }) => (room ? previewLanding(room, props.role, seen, tok, at) : tok.elevation);
+      const holderId = t.attached && onHolder(t.attached.kind) ? t.attached.to : null;
+      const holder = holderId ? byId.get(holderId) : undefined;
+      const holderSpot = holderId ? spots[holderId] : undefined;
+      const riding = holder !== undefined && holderSpot !== undefined;
+      const landing = riding ? landingOf(holder, holderSpot) : landingOf(t, spot);
+      // Off its holder's footprint a rider stands on its own, unless the holder moves with it.
+      const seated = holder !== undefined && (riding || (room !== null && seenSeat(dropView(room, props.role), t)?.keptAt(spot) === true));
+      const kept = seated ? seat : ON_GROUND;
+      const fp = footprint(t);
+      const range = occupiedRange({ ...t, x: spot.x, y: spot.y, squeeze: undefined });
+      const base = drawnBase(src, range, landing) / feet;
+      const ground = drawnFootprintGround(src, range) / feet;
+      const shape = standeeShape(turn, { x: spot.x, y: spot.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, kept);
+      return { base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: kept.rise, inset: kept.inset };
+    },
+    [store, chunks, scene.id, w, h, props.viewerFog, props.role, byId, spots, src, feet, turn, cam.scale, size.height],
+  );
+
   // Each standee's placing, kept while it is the same, so its node does not render again for a pan.
   const isoCache = useRef(new Map<string, IsoToken>());
   const isoOf = useMemo(() => {
@@ -237,13 +276,15 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const s = byStandee.get(item.id)!;
       const t = byId.get(item.id)!;
       const dim = props.role === "dm" && playersFog !== null && !playersFog.boxAny(tokenBox(t));
-      const fresh: IsoToken = { turn, base: s.base, ground: s.ground, drawn: s.drawn, capped: s.capped, rise: s.rise, inset: s.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false };
+      const spot = spots[item.id];
+      const placed = spot ? movedIso(t, spot, { rise: s.rise, inset: s.inset }) : s;
+      const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false };
       const old = isoCache.current.get(item.id);
       next.set(item.id, old && sameIso(old, fresh) ? old : fresh);
     }
     isoCache.current = next;
     return next;
-  }, [items, byStandee, byId, turn, props.role, playersFog]);
+  }, [items, byStandee, byId, turn, props.role, playersFog, spots, movedIso]);
   const silhouettes = useMemo(() => items.filter((i): i is Extract<Item, { kind: "standee" }> => i.kind === "standee" && i.silhouette), [items]);
 
   // The lift margin: the highest drawn lift in view, in steps, at most one canvas height.
@@ -297,7 +338,6 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const height = hidden ? 0 : size.height;
 
   // Each ghost of another member's drag, standing or flat and clipped, at each eased spot (5.2).
-  const store = useRoomStore();
   const ghostOf = useCallback(
     (t: ViewToken, at: { x: number; y: number }, name: string): IsoGhost => {
       const fp = footprint(t);
@@ -379,7 +419,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
               </Group>
             </Group>
             <Group scaleY={groups.outer.scaleY}>
-              <Group rotation={groups.inner.rotation} />
+              <Group rotation={groups.inner.rotation} name={DRAG_GROUND} />
             </Group>
             <Group scaleY={groups.outer.scaleY} listening={false}>
               <Group rotation={groups.inner.rotation}>

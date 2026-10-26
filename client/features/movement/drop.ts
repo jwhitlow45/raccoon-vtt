@@ -129,7 +129,7 @@ export function dropLanding(state: DropState, token: DropToken, at: Point & { sq
 }
 
 /** The holder a token sits on, when every player sees both, and whether its link still holds with the token dropped at a spot. */
-function seenSeat(state: DropState, token: DropToken): { holder: DropToken; keptAt: (at: Point) => boolean } | null {
+export function seenSeat(state: DropState, token: DropToken): { holder: DropToken; keptAt: (at: Point) => boolean } | null {
   const seated = state.tokens?.[token.id];
   const link = seated?.attached;
   const holder = seated && link && onHolder(link.kind) && state.tokens ? (holderOf(state.tokens, seated) as NonNullable<typeof seated> | undefined) : undefined;

@@ -153,7 +153,7 @@ describe("standees", () => {
     assert.match(standee, /standeeParts\(iso\.turn, iso\.drawn, iso\.ground,/);
     assert.doesNotMatch(standee, /iso\.base/);
     const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
-    assert.equal(board.match(/drawn: shape\.drawnBase/g)?.length, 2, "standees and ghosts both carry the capped base");
+    assert.equal(board.match(/drawn: shape\.drawnBase/g)?.length, 3, "standees, ghosts and a local drag's standees all carry the capped base");
   });
 
   test("at 12 px a cell a standee on a seen 10 ft platform stands 10 ft up, and at 11 px it stands on the flat ground", () => {

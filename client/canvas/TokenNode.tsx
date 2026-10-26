@@ -1,5 +1,5 @@
 import type Konva from "konva";
-import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef } from "react";
+import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Arc, Circle, Ellipse, Group, Image as KImage, Line, Rect, Shape, Text } from "react-konva";
 import type { Actor, Effect } from "#shared/model.ts";
 import { shownLife } from "#shared/rules/hp.ts";
@@ -158,7 +158,18 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
         iso.pressOnly ? (
           <FootprintPress w={fp.w} h={fp.h} />
         ) : (
-          <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} iso={iso} />
+          <Standee
+            token={token}
+            actor={actor}
+            w={fp.w}
+            h={fp.h}
+            scale={scale}
+            name={name}
+            active={active}
+            selected={selected}
+            iso={iso}
+            decor={props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+          />
         )
       ) : props.inset ? (
         <>
@@ -177,7 +188,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
       ) : (
         <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} />
       )}
-      {props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+      {props.decor && !(iso && !iso.pressOnly) ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
     </Group>
   );
 });
@@ -233,9 +244,11 @@ function clipToOpenings(ctx: Konva.Context, iso: IsoToken, at: { x: number; y: n
  * ground casts a shadow there, joined to the ring by a stem. A turned token
  * shows a short tick on its ring toward its facing. The node itself stays
  * at the token's world x and y inside the ground group, so a drag reads
- * world cells as it does in Top-down.
+ * world cells as it does in Top-down. A standee this device drags carries
+ * its own decor (`decor`), upright on the box the overlay lays it out on
+ * (standee.ts frame), so it travels with the standee in the drag layer.
  */
-function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; iso: IsoToken }) {
+function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; iso: IsoToken; decor?: ReactNode }) {
   const { token, w, h, scale, iso } = props;
   // Drawn from the capped base the layout read, so the art is where it culls, decorates and casts silhouettes.
   const parts = standeeParts(iso.turn, iso.drawn, iso.ground, { w, h }, iso);
@@ -266,6 +279,11 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
           <Group x={parts.art.x} y={parts.art.y} scaleX={parts.art.scale} scaleY={parts.art.scale}>
             <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * parts.art.scale} name={props.name} upright />
           </Group>
+          {props.decor ? (
+            <Group x={-w / 2} y={-h - iso.rise} listening={false}>
+              {props.decor}
+            </Group>
+          ) : null}
         </Group>
       </Group>
     </>

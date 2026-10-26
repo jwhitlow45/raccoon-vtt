@@ -78,7 +78,9 @@ import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/v
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, ringCenter, type BoardPick } from "./boardPick.ts";
+import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
+import { dragBound, dragGround, dragPlan } from "./isoDrag.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
 import { FogShape } from "./FogShape.tsx";
@@ -840,6 +842,8 @@ export function MapStage(props: {
     cancelled: boolean;
     /** Everything else that moves with this token, by the same offset: the rest of the selection (lib/group.ts) and what each carries. */
     followers: { token: ViewToken; node: Konva.Node }[];
+    /** In Isometric, where each node the drag moved into the drag layer stood (dragLayer.ts). */
+    homes: Home[];
   } & DragParts | null>(null);
   /**
    * A box being dragged over the map to select the tokens under it, in
@@ -1301,6 +1305,34 @@ export function MapStage(props: {
   );
 
   const interaction = useMemo<TokenInteraction>(() => {
+    /**
+     * An isometric drag's start (6.3): the adapter lands the lead on the
+     * drawn ground under the finger, the pressed node keeping its offset
+     * from the lead, and every node the drag moves goes into the drag
+     * layer, so its frames never redraw the relief.
+     */
+    const gripIso = (node: Konva.Node, pressed: ViewToken, lead: ViewToken, followers: readonly { node: Konva.Node }[]): Home[] => {
+      const c = currentCam();
+      const room = store.getState().view;
+      const stage = node.getStage();
+      if (!c || !room || !stage) return [];
+      const pick = pickOfRef.current(c);
+      if (pick.view.kind !== "isometric" || !pick.src) return [];
+      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, feetPerCell: pick.feetPerCell, token: lead });
+      const start = { node: node.getAbsolutePosition(), ring: ringCenter(pick, lead) };
+      const rel = { x: pressed.x - lead.x, y: pressed.y - lead.y };
+      node.dragBoundFunc((pos) => {
+        const now = pickOfRef.current(currentCam() ?? c);
+        return dragBound({ camera: now.camera, view: now.view, ground: dragGround(now.heights, lead), plan, start, rel }, pos);
+      });
+      const target = stage.findOne<Konva.Group>(`.${DRAG_GROUND}`);
+      return target ? liftToDragLayer(target, [node, ...followers.map((f) => f.node)]) : [];
+    };
+    /** The drag's end, dropped or cancelled: the adapter goes, and each node goes back to its place among the relief's (dragLayer.ts). */
+    const letGoIso = (node: Konva.Node, homes: readonly Home[]) => {
+      node.dragBoundFunc(undefined as unknown as (pos: Konva.Vector2d) => Konva.Vector2d);
+      returnHome(homes);
+    };
     /** Puts every token of a drop back where it stood, and tells the room the drag ended without a move. */
     const putBack = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[]) => {
       node.position({ x: token.x, y: token.y });
@@ -1398,7 +1430,7 @@ export function MapStage(props: {
             if (member && n) followers.push({ token: member, node: n });
           }
         }
-        dragRef.current = { node, tokenId: token.id, cancelled: false, followers, ...parts };
+        dragRef.current = { node, tokenId: token.id, cancelled: false, followers, homes: [], ...parts };
         if (parts.refusal) {
           uiRef.current.notify(parts.refusal);
           stopTokenDrag();
@@ -1409,6 +1441,7 @@ export function MapStage(props: {
           stopTokenDrag();
           return;
         }
+        if (shownRef.current.kind === "isometric") dragRef.current.homes = gripIso(node, token, parts.lead, followers);
         setDraggingId(token.id);
         setCarried(new Set([token.id, ...followers.map((f) => f.token.id)]));
         dragStopsRef.current.start(parts.lead.id);
@@ -1447,6 +1480,7 @@ export function MapStage(props: {
       dragEnd(node, token) {
         const drag = dragRef.current;
         dragRef.current = null;
+        if (drag) letGoIso(drag.node, drag.homes);
         setDraggingId(null);
         setCarried(NOT_CARRIED);
         const followers = drag?.followers ?? [];
@@ -1460,7 +1494,7 @@ export function MapStage(props: {
         dragStopsRef.current.drop(leadNode, drag.lead, drag.named, (plan) => landDrop(node, token, followers, drag, plan));
       },
     };
-  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers, tappedAgain]);
+  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers, tappedAgain, store]);
 
   const memberMap = members ?? {};
   const below: ViewToken[] = [];
