@@ -2,7 +2,8 @@ import type { AreaTemplate } from "#shared/model.ts";
 import type { AreaContext, AreaToken } from "#shared/rules/aoe.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
-import { boardPickOf, pressGap } from "../../canvas/boardPick.ts";
+import { boardPickOf, drawnAt, pressGap, pressView } from "../../canvas/boardPick.ts";
+import { toWorld } from "../../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 import type { RoomActions } from "../../state/types.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
@@ -11,6 +12,7 @@ import { areaCreatures, castFrom, draftCaster, idleTapPicks, pickedPress, savedC
 import { areaContext } from "./coverage.ts";
 import {
   areaContains,
+  draftTemplate,
   handlePoint,
   isDirectional,
   liveOrigin,
@@ -121,6 +123,25 @@ export function templateAt(env: AreaEnv, actx: AreaContext, p: { x: number; y: n
   return null;
 }
 
+/**
+ * Where a press aims an area, or turns one: on the ground plane at the
+ * drawn ground under the area's origin, where its preview draws
+ * (AreaPreviewLayer.tsx), not where the press's ray meets other ground, so
+ * a cone points at the finger as drawn (design 6.4). The press's own point
+ * in Top-down.
+ */
+function aimPoint(ctx: ToolContext, p: ToolPointer, origin: { x: number; y: number }): { x: number; y: number } {
+  const pick = boardPickOf(ctx);
+  if (pick.view.kind === "topDown") return p.world;
+  return toWorld(pick.view, pressView(pick, p.screen), drawnAt(pick, origin));
+}
+
+/** A draft's origin as its preview draws it, or the pivot it turns on when it has none yet. */
+function draftOrigin(env: AreaEnv, d: AreaDraft, pivot: { x: number; y: number }): { x: number; y: number } {
+  const t = draftTemplate(d, env.view.tokens, env.view.meta.settings.feetPerCell);
+  return t ? liveOrigin(t, areaContext(env.view, env.scene)) : pivot;
+}
+
 function aimed(env: AreaEnv, d: AreaDraft, pivot: { x: number; y: number }, to: { x: number; y: number }): AreaDraft {
   const yaw = yawToward(pivot, to);
   return yaw === null ? d : { ...d, yaw: snapYaw(yaw, env.area.store.getState().snap) };
@@ -151,7 +172,8 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
   const fpc = env.view.meta.settings.feetPerCell;
   // On screen, through the view on show (canvas/boardPick.ts pressGap), so a handle on a raised top is reached where it draws.
   const gap = pressGap(boardPickOf(ctx), p);
-  const near = (a: { x: number; y: number }) => gap(a) <= GRAB_PX;
+  const near = (a: { x: number; y: number }, z?: number) => gap(a, z) <= GRAB_PX;
+  const aimAt = (d: AreaDraft, pivot: { x: number; y: number }) => aimPoint(ctx, p, draftOrigin(env, d, pivot));
   const begin = (g: Gesture) => {
     local.gesture = { ...g, screen: p.screen, moved: false };
   };
@@ -177,7 +199,8 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
       const press = pickedPress({
         directional,
         onCaster: pivot.onCaster,
-        handle: directional && near(handlePoint(t, actx, HANDLE_GAP_PX / scale)),
+        // The handle draws with the whole preview, on the plane at the origin's drawn ground.
+        handle: directional && near(handlePoint(t, actx, HANDLE_GAP_PX / scale), drawnAt(boardPickOf(ctx), liveOrigin(t, actx))),
         casterToken: !!token && token.id === t.casterId,
         inside: areaContains(t, actx, p.world),
         nearOrigin: near(liveOrigin(t, actx)),
@@ -242,7 +265,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
     case "cube": {
       if (from) {
         const pivot = centerOf(from);
-        setDraft(env, aimed(env, d, pivot, p.world));
+        setDraft(env, aimed(env, d, pivot, aimAt(d, pivot)));
         return begin({ kind: "aim", pivot });
       }
       if (d.shape === "cube") {
@@ -254,7 +277,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
           setDraft(env, { ...d, point: { ...center, z: freePointHeight(env.view.buildChunks, env.scene.id, center, d.point) } });
           return begin({ kind: "center" });
         }
-        setDraft(env, aimed(env, d, d.point, p.world));
+        setDraft(env, aimed(env, d, d.point, aimAt(d, d.point)));
         return begin({ kind: "aim", pivot: { x: d.point.x, y: d.point.y } });
       }
       if (!d.point) {
@@ -266,7 +289,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
         setDraft(env, d);
         return begin({ kind: "point" });
       }
-      setDraft(env, aimed(env, d, d.point, p.world));
+      setDraft(env, aimed(env, d, d.point, aimAt(d, d.point)));
       return begin({ kind: "aim", pivot: { x: d.point.x, y: d.point.y } });
     }
   }
@@ -290,13 +313,13 @@ function onMove(p: ToolPointer, ctx: ToolContext): void {
     return;
   }
   if (g.kind === "turnTemplate") {
-    const yaw = yawToward(g.pivot, p.world);
+    const yaw = yawToward(g.pivot, aimPoint(ctx, p, liveOrigin(g.template, areaContext(env.view, env.scene))));
     if (yaw !== null) areaStore.setState({ live: rotatePatch(g.template, snapYaw(yaw, st.snap), env.view.tokens, fpc) });
     return;
   }
   const d = st.draft;
   if (!d) return;
-  if (g.kind === "aim") setDraft(env, aimed(env, d, g.pivot, p.world));
+  if (g.kind === "aim") setDraft(env, aimed(env, d, g.pivot, aimPoint(ctx, p, draftOrigin(env, d, g.pivot))));
   else if (g.kind === "center") {
     const center = snapCubeCenter(p.world, d.size, fpc);
     setDraft(env, { ...d, point: { ...center, z: freePointHeight(env.view.buildChunks, env.scene.id, center, d.point) } });
