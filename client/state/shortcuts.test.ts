@@ -185,13 +185,15 @@ describe("the shortcut table", () => {
       assert.equal(find(e, press({ key: "z", code: "KeyZ", ctrlKey: true })), "undo", "Ctrl+Z is undo's whatever Z picks");
     });
 
-    test("a press finds the device's own keys, and a change that clashes is ignored", () => {
+    test("a press finds the device's own keys, and a change on another row's default wins over it", () => {
       assert.equal(shortcutKeys({ "tool:fog": "k" })["tool:fog"], "k");
-      assert.equal(shortcutKeys({ "tool:fog": "v" })["tool:fog"], "f", "V is Select's");
+      assert.equal(shortcutKeys({ "tool:fog": "v" })["tool:fog"], "v", "V was Select's");
+      assert.equal(shortcutKeys({ "tool:fog": "v" })["tool:select"], "", "and Select has no key");
       assert.equal(shortcutKeys({ "tool:fog": "v", "tool:select": "f" })["tool:fog"], "v", "a swap holds");
       assert.equal(shortcutKeys({})["tool:fog"], "f");
-      const clash = shortcutKeys({ "tool:fog": "x" });
-      assert.equal(clash["tool:fog"], "f", "X is Trap's");
+      const clash = shortcutKeys({ "tool:fog": "x", "tool:ruler": "x" });
+      assert.equal(clash["tool:fog"], "f", "two changes on X: neither holds");
+      assert.equal(clash["tool:ruler"], "r");
       assert.equal(clash["tool:trap"], "x");
     });
   });

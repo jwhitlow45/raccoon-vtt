@@ -14,6 +14,7 @@ import {
   resetKey,
   sameKey,
   swapKey,
+  UNBOUND,
   WITH_MODIFIER,
   type KeyChanges,
   type KeyEvent,
@@ -130,13 +131,30 @@ describe("the keys in effect", () => {
     assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "ArrowUp" }), DEFAULTS);
   });
 
-  test("a change that shares a key is ignored for its row, which takes its default", () => {
-    assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "v" }), DEFAULTS, "with a default");
-    assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "=" }), DEFAULTS, "= is Zoom in's");
+  test("changes that share a key with each other are ignored, and each of those rows takes its default", () => {
     assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "x", "tool:ruler": "x" }), DEFAULTS, "with each other");
-    // Fog and Ruler clash on v, and once Fog has F back, Select's F clashes too.
-    assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "v", "tool:ruler": "v", "tool:select": "f" }), DEFAULTS);
     assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "v", "tool:ruler": "v", "tool:select": "q" }), { ...DEFAULTS, "tool:select": "q" });
+  });
+
+  test("a change on another row's default wins, and leaves that row with no key (D-261026-12)", () => {
+    // As a device that gave Fog Q before Q became Turn left's default.
+    assert.deepEqual(keysInEffect({ ...DEFAULTS, turnLeft: "q" }, { "tool:fog": "q" }), { ...DEFAULTS, "tool:fog": "q", turnLeft: UNBOUND });
+    assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "v" }), { ...DEFAULTS, "tool:fog": "v", "tool:select": UNBOUND }, "with a default");
+    assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "=" }), { ...DEFAULTS, "tool:fog": "=", zoomIn: UNBOUND }, "= is Zoom in's");
+    // Fog and Ruler clash on v, so Fog goes back to F, which Select's change holds: Select keeps it, and Fog has no key.
+    assert.deepEqual(keysInEffect(DEFAULTS, { "tool:fog": "v", "tool:ruler": "v", "tool:select": "f" }), { ...DEFAULTS, "tool:select": "f", "tool:fog": UNBOUND });
+    assert.equal(holder(keysInEffect(DEFAULTS, { "tool:fog": "v" }), "tool:fog", UNBOUND), null, "no row holds no key");
+  });
+
+  test("a row with no key changes, swaps and resets as any row does, and is never kept as a change", () => {
+    const withQ = { ...DEFAULTS, turnLeft: "q" };
+    const changes = { "tool:fog": "q" };
+    assert.deepEqual(changeKey(withQ, changes, "turnLeft", "x"), { t: "done", changes: { "tool:fog": "q", turnLeft: "x" } });
+    assert.deepEqual(changeKey(withQ, changes, "fit", "9"), { t: "done", changes: { "tool:fog": "q", fit: "9" } }, "another row's change keeps no UNBOUND");
+    assert.deepEqual(changeKey(withQ, changes, "turnLeft", "q"), { t: "taken", by: "tool:fog" });
+    // Reset takes Q back, and Fog, swapped onto no key, goes back to its own F.
+    assert.deepEqual(resetKey(withQ, changes, "turnLeft"), {});
+    assert.deepEqual(changeKey(withQ, changes, "tool:fog", "f"), { t: "done", changes: {} }, "Fog back to F gives Turn left Q again");
   });
 });
 
@@ -172,10 +190,11 @@ describe("changing, swapping and resetting a key", () => {
    * Many random runs of what the sheet does (change, a refused key, swap,
    * reset, reset all, and a store edited by hand) on the room's real
    * table. Invariants, after every step:
-   * 1. no two shortcuts share a key in effect,
+   * 1. no two shortcuts with a key share it,
    * 2. what is kept holds only changes from the defaults, each of them in effect,
    * 3. it reads back from storage as it was written,
-   * 4. a change that went through gives the row its key, and a taken key changes nothing.
+   * 4. a change that went through gives the row its key, and a taken key changes nothing,
+   * 5. a row has no key only while another row's change holds its default.
    */
   test("random runs of changes, swaps and resets never leave two shortcuts on one key", () => {
     const ids = Object.keys(DEFAULT_KEYS);
@@ -222,13 +241,17 @@ describe("changing, swapping and resetting a key", () => {
           byHand = true;
         }
         const keys = keysInEffect(DEFAULT_KEYS, changes);
-        const inUse = Object.values(keys);
+        const inUse = Object.values(keys).filter((k) => k !== UNBOUND);
         for (const [i, k] of inUse.entries()) assert.ok(!inUse.some((other, j) => j !== i && sameKey(other, k)), `two rows on ${k}: ${JSON.stringify(changes)}`);
         assert.deepEqual(parseKeyChanges(formatKeyChanges(changes)), Object.fromEntries(Object.entries(changes).filter(([, k]) => bindable(k))));
         if (byHand) continue;
         for (const [cid, k] of Object.entries(changes)) {
           assert.notEqual(k, DEFAULT_KEYS[cid], `${cid} kept at its default`);
           assert.equal(keys[cid], k, `${cid}'s kept change is in effect`);
+        }
+        // 5. a row has no key only while a change in effect holds its default.
+        for (const [uid, k] of Object.entries(keys)) {
+          if (k === UNBOUND) assert.ok(Object.entries(keys).some(([other, ok]) => other !== uid && ok !== DEFAULT_KEYS[other] && sameKey(ok, DEFAULT_KEYS[uid]!)), `${uid} has no key for no reason`);
         }
       }
     }

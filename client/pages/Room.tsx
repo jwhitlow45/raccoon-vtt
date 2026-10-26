@@ -2626,7 +2626,8 @@ function Toolbar(props: {
   const frame = useMemo(() => toolbarPopoverFrame(props.popover, props.toolbar), [props.popover, props.toolbar]);
   // Each tool's key in its tooltip, as this device has it (the shortcut sheet may have changed it).
   const keys = useShortcutKeys();
-  const hint = (t: ToolDef) => (keys[`tool:${t.id}`] === undefined ? undefined : keyText(`tool:${t.id}`, keys));
+  // None where the tool has no key: none in the table, or its default taken by another tool's change (keyBindings.ts UNBOUND).
+  const hint = (t: ToolDef) => (keys[`tool:${t.id}`] ? keyText(`tool:${t.id}`, keys) : undefined);
 
   const tile = (t: ToolDef): MenuItem => ({
     id: t.id,

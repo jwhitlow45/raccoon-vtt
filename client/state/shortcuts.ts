@@ -16,7 +16,7 @@ import { noteKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
 import { turned } from "../lib/view.ts";
-import { keyLabel, keysInEffect, pressKeys, sameKey, type KeyChanges, type KeyMap } from "./keyBindings.ts";
+import { keyLabel, keysInEffect, pressKeys, sameKey, UNBOUND, type KeyChanges, type KeyMap } from "./keyBindings.ts";
 import { scopeSlot, type RoomScope } from "./scope.ts";
 import { sayTool, tuckEvent } from "./toolbar.ts";
 import type { RoomUi } from "./store.ts";
@@ -989,10 +989,14 @@ const SURFACE_INTRO: Partial<Record<Surface, string>> = {
     "Choose an image, the stamp picker, New scene's Map image, Show a handout, and a scene's Map image or Add a phase with focus there. In a text field, only a copied image with no text.",
 };
 
+/** What the sheet writes for a row whose default key another row's change took (keyBindings.ts UNBOUND). */
+export const NO_KEY = "No key";
+
 function keyRow(s: Shortcut, keys: KeyMap): SheetRow {
   if (s.key === undefined) return { id: s.id, input: s.keys, does: s.does, keys: true };
   const key = keys[s.id] ?? s.key;
-  return { id: s.id, input: keyLabel(key), does: s.does, keys: true, rebind: { name: s.name, changed: key !== s.key } };
+  const rebind = { name: s.name, changed: key !== s.key };
+  return key === UNBOUND ? { id: s.id, input: NO_KEY, does: s.does, keys: false, rebind } : { id: s.id, input: keyLabel(key), does: s.does, keys: true, rebind };
 }
 
 function sheetRow(b: Behavior): SheetRow {

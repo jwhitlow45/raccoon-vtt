@@ -50,7 +50,7 @@ let tv: Page;
 let ops: OpSocket;
 const dmSocket = new SocketWatch("dm");
 const patSocket = new SocketWatch("pat");
-const consoles = { dm: new ConsoleWatch("dm"), pat: new ConsoleWatch("pat"), tv: new ConsoleWatch("tv"), phone: new ConsoleWatch("phone") };
+const consoles = { dm: new ConsoleWatch("dm"), pat: new ConsoleWatch("pat"), tv: new ConsoleWatch("tv"), phone: new ConsoleWatch("phone"), keys: new ConsoleWatch("keys") };
 
 const run = {
   roomId: "",
@@ -1387,6 +1387,65 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await shots.take(pat, "iso-47-pat-flat-lurker-on-top");
     await ops.send({ t: "token.delete", tokenId: lurker });
     await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 11.75, y: 5.75, w: 0.25, h: 0.25 } }] });
+  });
+
+  test("ISO-50. a key someone gave another shortcut before Q was Turn left's stays theirs: the sheet shows Turn left with no key, and its Reset takes Q back (D-261026-12)", async () => {
+    const keysContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, storageState: await dmContext.storageState() });
+    await keysContext.addInitScript(OFFER);
+    try {
+      const page = await keysContext.newPage();
+      consoles.keys.attach(page);
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      // As a device that moved Fit the map to Q before Q was a default.
+      await page.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.keys", JSON.stringify({ v: 1, keys: { fit: "q" } })));
+      const sheet = page.getByRole("dialog", { name: /shortcuts/i });
+      const keyOf = (does: string) => sheet.getByRole("row").filter({ has: page.getByText(does, { exact: true }) }).locator("th");
+      const openSheet = async () => {
+        await page.getByRole("button", { name: "Fit the map to the screen" }).waitFor();
+        await blur(page);
+        await page.keyboard.press("?");
+        await sheet.waitFor();
+      };
+      // The row with no key, its words beside a 44 px Change, within 1 px at each size.
+      const lines: string[] = [];
+      for (const at of [
+        { width: 1440, height: 900, scale: 1 },
+        { width: 1440, height: 900, scale: 1.3 },
+        { width: 390, height: 844, scale: 1 },
+        { width: 390, height: 844, scale: 1.3 },
+        { width: 320, height: 568, scale: 1 },
+        { width: 320, height: 568, scale: 1.3 },
+      ]) {
+        const name = `${at.width}x${at.height}${at.scale === 1 ? "" : "-130"}`;
+        await page.setViewportSize({ width: at.width, height: at.height });
+        await page.evaluate((scale) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(scale)), at.scale);
+        await reopenRoom(page);
+        await openSheet();
+        const row = keyOf("Turn the isometric view left").locator("xpath=..");
+        await row.scrollIntoViewIfNeeded();
+        assert.equal((await keyOf("Turn the isometric view left").textContent())?.trim(), "No key", name);
+        assert.equal((await keyOf("Fit the map").textContent())?.trim(), "Q", `${name}: the device's own key stays`);
+        lines.push(...alignmentLines(await measureAlignment(row), `${name} no key`));
+        await shots.take(page, `iso-sheet-turn-left-no-key-${name}`);
+        await page.keyboard.press("Escape");
+        await sheet.waitFor({ state: "detached" });
+      }
+      assert.deepEqual(lines, [], "the row with no key");
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
+      await reopenRoom(page);
+      await openSheet();
+      await sheet.getByRole("button", { name: "Reset the key for Turn left", exact: true }).click();
+      await sheet.getByRole("status").filter({ hasText: "Turn left is back to Q, and Fit the map is now 0." }).waitFor({ state: "attached" });
+      assert.equal((await keyOf("Turn the isometric view left").textContent())?.trim(), "Q");
+      assert.equal((await keyOf("Fit the map").textContent())?.trim(), "0");
+      const kept = await page.evaluate(() => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.keys"));
+      assert.deepEqual(kept === null ? {} : (JSON.parse(kept) as { keys: unknown }).keys, {}, "nothing left changed");
+      await page.keyboard.press("Escape");
+      await sheet.waitFor({ state: "detached" });
+    } finally {
+      await keysContext.close();
+    }
   });
 
   test("ISO-12. no page logged an error", () => {

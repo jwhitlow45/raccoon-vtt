@@ -11,7 +11,7 @@ import type { RoomView } from "./types.ts";
  * file, since a page reads the flag once, as it loads.
  */
 (globalThis as Record<string, unknown>).__rvttIsoTest = true;
-const { BEHAVIORS, DEFAULT_KEYS, sheetSections, SHORTCUTS, shortcutFor, VIEW_BEHAVIORS, VIEW_SHORTCUTS } = await import("./shortcuts.ts");
+const { BEHAVIORS, DEFAULT_KEYS, NO_KEY, sheetSections, SHORTCUTS, shortcutFor, shortcutKeys, VIEW_BEHAVIORS, VIEW_SHORTCUTS } = await import("./shortcuts.ts");
 const { ISO_TEST_FLAG, isoOffered, viewVoiceSlot } = await import("../features/view/choice.ts");
 const { pickView, readView, viewKey, withPick } = await import("../features/view/store.ts");
 const { sameKey } = await import("./keyBindings.ts");
@@ -133,6 +133,29 @@ describe("I, Q and E once Isometric is offered (docs/design-v1-isometric-view.md
     assert.equal(readView(building.key).pick, "isometric");
     assert.equal(building.notes.at(-1), "The map builder works top-down. Isometric comes back when you switch tools.");
     assert.equal(withPick(readView(building.key), null).pick, null);
+  });
+
+  test("a key someone gave another shortcut before Q was Turn left's stays theirs, and Turn left has no key, in the sheet too (D-261026-12)", () => {
+    // A device that moved Fit to Q and the sheet's ? to E.
+    const keys = shortcutKeys({ fit: "q", sheet: "e" });
+    assert.equal(keys.fit, "q");
+    assert.equal(keys.turnLeft, "", "Turn left has no key");
+    assert.equal(keys.turnRight, "", "nor Turn right");
+    assert.equal(keys.view, "i", "I is no one else's");
+    const dm = page({ role: "dm", suggested: "isometric" });
+    assert.equal(shortcutFor(press("q"), dm.env, { dialogOpen: false, preview: false }, keys)?.id, "fit", "Q fits the map");
+    assert.equal(shortcutFor(press("e"), dm.env, { dialogOpen: false, preview: false }, keys)?.id, "sheet");
+    for (const role of ["dm", "player"] as const) {
+      const rows = sheetSections(role, { mouse: true, android: false }, keys).find((s) => s.title === "Keys")!.rows;
+      for (const id of ["turnLeft", "turnRight"]) {
+        const row = rows.find((r) => r.id === id)!;
+        assert.equal(row.input, NO_KEY, `${role} ${id}`);
+        assert.equal(row.keys, false, "written as words, not a key");
+        assert.equal(row.rebind?.changed, true, "with its Reset");
+      }
+      assert.equal(rows.find((r) => r.id === "sheet")?.input, "E");
+    }
+    assert.equal(NO_KEY, "No key");
   });
 
   test("with no scene on screen the keys are free", () => {

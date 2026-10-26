@@ -5,7 +5,7 @@ import { Help, Section } from "../../components/Panel.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { hasKeyboard, sheetDevice } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
-import { captureKey, changeKey, holder, keyLabel, resetKey, swapKey } from "../../state/keyBindings.ts";
+import { captureKey, changeKey, holder, keyLabel, keysInEffect, resetKey, swapKey, UNBOUND } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { DEFAULT_KEYS, setShortcutSheet, sheetSections, SHORTCUTS, shortcutSheetSlot, useShortcutKeys, type SheetRow } from "../../state/shortcuts.ts";
 import { ConfirmButton } from "../scenes/controls.tsx";
@@ -86,6 +86,9 @@ export function ShortcutSheetHost(props: { role: "dm" | "player" }) {
   );
 }
 
+/** A key as the sheet says it aloud, "no key" for a row whose default another row's change took. */
+const spoken = (key: string) => (key === UNBOUND ? "no key" : keyLabel(key));
+
 /** A row waiting for its key, refused one, or asked for one another row has. */
 type Editing = { id: string; step: "listening"; refused?: string } | { id: string; step: "taken"; key: string; by: string };
 
@@ -136,7 +139,7 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
       if (got.t === "wait") return;
       if (got.t === "cancel") {
         setEditing(null);
-        say(`${name} keeps ${keyLabel(keys[listening] ?? "")}.`);
+        say(`${name} keeps ${spoken(keys[listening] ?? "")}.`);
         return;
       }
       if (got.t === "refused") {
@@ -169,7 +172,7 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
       e.stopImmediatePropagation();
       setEditing(null);
       focusNext.current = asking;
-      say(`${nameOf(asking)} keeps ${keyLabel(keys[asking] ?? "")}.`);
+      say(`${nameOf(asking)} keeps ${spoken(keys[asking] ?? "")}.`);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -188,27 +191,29 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
     },
     swap() {
       if (editing?.step !== "taken") return;
-      const old = keys[editing.id] ?? "";
-      setKeyChanges(swapKey(DEFAULT_KEYS, keyChanges(), editing.id, editing.key));
+      const next = swapKey(DEFAULT_KEYS, keyChanges(), editing.id, editing.key);
+      setKeyChanges(next);
       setEditing(null);
       focusNext.current = editing.id;
-      say(`${nameOf(editing.id)} is now ${keyLabel(editing.key)}, and ${nameOf(editing.by)} is now ${keyLabel(old)}.`);
+      // Read back, not assumed: swapped with a row that had no key, the other takes its own default again.
+      say(`${nameOf(editing.id)} is now ${keyLabel(editing.key)}, and ${nameOf(editing.by)} is now ${spoken(keysInEffect(DEFAULT_KEYS, next)[editing.by] ?? "")}.`);
     },
     cancel() {
       if (!editing) return;
       setEditing(null);
       focusNext.current = editing.id;
-      say(`${nameOf(editing.id)} keeps ${keyLabel(keys[editing.id] ?? "")}.`);
+      say(`${nameOf(editing.id)} keeps ${spoken(keys[editing.id] ?? "")}.`);
     },
     reset(id) {
       const own = DEFAULT_KEYS[id] ?? "";
       // Where another row has taken the default since, the two swap (keyBindings.ts resetKey).
       const moved = holder(keys, id, own);
-      setKeyChanges(resetKey(DEFAULT_KEYS, keyChanges(), id));
+      const next = resetKey(DEFAULT_KEYS, keyChanges(), id);
+      setKeyChanges(next);
       setEditing(null);
       focusNext.current = id;
       const back = `${nameOf(id)} is back to ${keyLabel(own)}`;
-      say(moved ? `${back}, and ${nameOf(moved)} is now ${keyLabel(keys[id] ?? "")}.` : `${back}.`);
+      say(moved ? `${back}, and ${nameOf(moved)} is now ${spoken(keysInEffect(DEFAULT_KEYS, next)[moved] ?? "")}.` : `${back}.`);
     },
     ref(id, el) {
       if (el) changeButtons.current.set(id, el);

@@ -133,14 +133,18 @@ export function formatKeyChanges(changes: KeyChanges): string {
   return JSON.stringify({ v: KEYS_VERSION, keys: changes });
 }
 
+/** A row with no key on this device: its default is another row's change. */
+export const UNBOUND = "";
+
 /**
  * The key each shortcut has on this device: its change where that still
  * makes sense, else its default. A change for a shortcut the table no
- * longer has, or one that shares its key with another shortcut, is ignored.
- * A change dropped that way gives its row the default key back, which may
- * be another change's key, so it repeats until no two rows share one. Each
- * round drops a change, and the defaults never share a key
- * (shortcuts.test.ts), so it ends.
+ * longer has is ignored, and so are changes that share one key with each
+ * other: each of those rows takes its default back. A change that meets
+ * another row's default wins, and that row is left UNBOUND (D-261026-12):
+ * a key someone chose stays theirs when a new default comes along, as I,
+ * Q and E did. Unbinding moves no change and no default, so one pass ends
+ * it, and the defaults never share a key (shortcuts.test.ts).
  */
 export function keysInEffect(defaults: KeyMap, changes: KeyChanges): KeyMap {
   const keys: Record<string, string> = { ...defaults };
@@ -150,18 +154,18 @@ export function keysInEffect(defaults: KeyMap, changes: KeyChanges): KeyMap {
     keys[id] = key;
     changed.add(id);
   }
-  for (;;) {
-    const clashing = [...changed].filter((id) => holder(keys, id, keys[id]!) !== null);
-    if (clashing.length === 0) return keys;
-    for (const id of clashing) {
-      keys[id] = defaults[id]!;
-      changed.delete(id);
-    }
+  const sharing = (id: string) => [...changed].some((other) => other !== id && sameKey(keys[other]!, keys[id]!));
+  for (const id of [...changed].filter(sharing)) {
+    keys[id] = defaults[id]!;
+    changed.delete(id);
   }
+  for (const id of Object.keys(keys)) if (!changed.has(id) && sharing(id)) keys[id] = UNBOUND;
+  return keys;
 }
 
-/** The shortcut other than `id` that has this key, or null. */
+/** The shortcut other than `id` that has this key, or null. No row holds UNBOUND. */
 export function holder(keys: KeyMap, id: string, key: string): string | null {
+  if (key === UNBOUND) return null;
   for (const [other, k] of Object.entries(keys)) if (other !== id && sameKey(k, key)) return other;
   return null;
 }
@@ -169,7 +173,8 @@ export function holder(keys: KeyMap, id: string, key: string): string | null {
 /** The changes that give these keys: the rows that differ from their defaults. */
 function changesFrom(defaults: KeyMap, keys: KeyMap): KeyChanges {
   const changes: Record<string, string> = {};
-  for (const [id, key] of Object.entries(keys)) if (Object.hasOwn(defaults, id) && key !== defaults[id]) changes[id] = key;
+  // An unbound row is no change of its own: it gets its key back once the change on it goes.
+  for (const [id, key] of Object.entries(keys)) if (Object.hasOwn(defaults, id) && key !== defaults[id] && key !== UNBOUND) changes[id] = key;
   return changes;
 }
 
