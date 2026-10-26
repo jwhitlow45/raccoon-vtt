@@ -345,7 +345,7 @@ export type LegendaryOff = "ownTurn" | "once" | "needs" | null;
 export type LegendaryButton = { key?: UseKey; name: string; cost: number; once: boolean; off: LegendaryOff };
 
 export type UseRow =
-  /** Legendary actions with their pips left: on the card a line alone, in the list a button each, or "Spend a legendary action" for counts set by hand. */
+  /** Legendary Actions, with what is left for their pips: on the card a line alone, in the list a button each, or "Spend a Legendary Action" for counts set by hand. */
   | { kind: "legendary"; left: number; max: number; buttons: LegendaryButton[] }
   | { kind: "resist"; left: number; max: number }
   /** A recharge, a rest or an X/Day ability of the block, with its mark when spent. */
@@ -490,9 +490,14 @@ export function rowCount(row: UseRow): { left: number; max: number } | null {
 /** An ability's name on its title line: "Fire Breath, Recharge 5–6", "Phantasms, after a rest", "Dominate Mind, 2/Day", whose pips then count what is left. */
 export function abilityHead(row: Extract<UseRow, { kind: "ability" }>): string {
   const { use } = row;
-  if (use.kind === "recharge") return `${use.name}, Recharge ${rechargeRange(use.min)}`;
+  if (use.kind === "recharge") return `${use.name}, ${rechargeLimit(use.min)}`;
   if (use.kind === "rest") return `${use.name}, after a rest`;
   return `${use.name}, ${use.max}/Day`;
+}
+
+/** A recharge's limit on its title line: "Recharge 5–6". */
+export function rechargeLimit(min: number): string {
+  return `Recharge ${rechargeRange(min)}`;
 }
 
 export function dayLeft(use: DayUse, mark: UseMark | undefined): number {

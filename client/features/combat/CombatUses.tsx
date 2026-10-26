@@ -44,6 +44,7 @@ import {
   otherBackOp,
   otherHead,
   promptOp,
+  rechargeLimit,
   rechargeRollOp,
   regenerationLine,
   resistOp,
@@ -63,8 +64,8 @@ import {
  * Legendary Actions, the block's recharge, rest and X/Day abilities, the
  * marks its block no longer lists, Regeneration's line, the turn's skipped
  * prompts and the character's class resources. Each count shows as pips
- * on its row's title line, to read only (docs/design-v1-monster-uses.md):
- * Use and Restore change it. `uses` is the block's (state.ts
+ * on its row's title line, to read only, or past 6 in words there
+ * (docs/design-v1-monster-uses.md): Use and Restore change it. `uses` is the block's (state.ts
  * useCreaturesUses), null while it loads, so counts on the actor show at
  * once and the rows that need the block wait under the shared Loading.
  *
@@ -333,9 +334,16 @@ function UseLine(props: LineProps) {
       break;
     case "ability": {
       const { use, mark } = row;
-      const title = abilityHead(row);
       // "Recharge 5–6" stays whole: a line may break after its en dash, which would leave the "6" alone on the next one.
-      head = use.kind === "recharge" ? <>{title.slice(0, use.name.length + 2)}<span style={{ whiteSpace: "nowrap" }}>{title.slice(use.name.length + 2)}</span></> : title;
+      head =
+        use.kind === "recharge" ? (
+          <>
+            {`${use.name}, `}
+            <span style={{ whiteSpace: "nowrap" }}>{rechargeLimit(use.min)}</span>
+          </>
+        ) : (
+          abilityHead(row)
+        );
       state = abilityState(row, recharge.total);
       if (use.kind === "day") {
         const left = dayLeft(use, mark);
