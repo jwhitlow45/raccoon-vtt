@@ -5,7 +5,7 @@ import type { AssetVariant } from "../lib/api.ts";
 import { theme } from "../lib/theme.ts";
 import { Room } from "../pages/Room.tsx";
 import { createRoomActions } from "../state/actions.ts";
-import { browserEnv, createRoomSocket, type ConnectionEnv } from "../state/socket.ts";
+import { browserEnv, createRoomSocket, type ConnectionEnv, type SocketLike } from "../state/socket.ts";
 import { createRoomStore, type RoomStore } from "../state/store.ts";
 import type { RoomActions } from "../state/types.ts";
 import { RoomProvider, type AssetSource } from "../state/view.ts";
@@ -20,7 +20,9 @@ import { drawMap, drawPortrait } from "./placeholders.ts";
  * acks, refusals, reconnects and previews all take their production paths.
  *
  * Query parameters:
- * - `as=player` shows Thorn's projection instead of the DM's view.
+ * - `as=player` shows Thorn's projection instead of the DM's view. As the
+ *   DM, View as a player in the DM panel shows Thorn's or Vex's, served by
+ *   the LocalServer as the server serves a preview.
  * - `conn=down` never connects. `conn=offline` also reports the browser offline.
  * - `snapshot=late` delays every snapshot by 2 s, to watch the gate.
  * - `fog=off|corrupt|none` turns fog off, corrupts every tile, or sends no tiles.
@@ -89,6 +91,31 @@ async function placeholderAssets(): Promise<AssetSource> {
 
 type Dev = { room: RoomStore; actions: RoomActions; drop(): void };
 
+const ROOM_ID = "DEVR00M0";
+
+/**
+ * View as a player opens a socket of its own with `new WebSocket`
+ * (features/dm/PlayerPreview.tsx, state/socket.ts previewSocketUrl), and
+ * the fixture has no server for it to reach. So while the fixture is up,
+ * a socket for this room that asks `as` is the LocalServer's, which
+ * serves it by the server's rule (D-261026-10). Every other socket, Vite's
+ * own included, is the browser's.
+ */
+function routePreviewSockets(create: (url: string) => SocketLike): () => void {
+  const Browser = window.WebSocket;
+  const Routed = function (url: string | URL, protocols?: string | string[]) {
+    const href = String(url);
+    const query = href.indexOf("?");
+    const params = new URLSearchParams(query < 0 ? "" : href.slice(query + 1));
+    return params.get("room") === ROOM_ID && params.has("as") ? create(href) : new Browser(url, protocols);
+  } as unknown as typeof WebSocket;
+  Object.assign(Routed, { CONNECTING: Browser.CONNECTING, OPEN: Browser.OPEN, CLOSING: Browser.CLOSING, CLOSED: Browser.CLOSED, prototype: Browser.prototype });
+  window.WebSocket = Routed;
+  return () => {
+    if (window.WebSocket === Routed) window.WebSocket = Browser;
+  };
+}
+
 export default function DevRoom() {
   const options = useMemo(readOptions, []);
   const [assets, setAssets] = useState<AssetSource | null>(null);
@@ -109,8 +136,9 @@ export default function DevRoom() {
       members: () => online,
     });
     const env: ConnectionEnv = options.offline ? { isOnline: () => false, subscribe: () => () => {} } : browserEnv();
-    const room = createRoomStore({ roomId: "DEVR00M0", you: viewer });
+    const room = createRoomStore({ roomId: ROOM_ID, you: viewer });
     const socket = createRoomSocket({ url: "local", room, env, createSocket: sockets.create });
+    const unroute = routePreviewSockets(sockets.create);
     socket.start();
     const stopGhost = options.ghost ? startGhost(server, sockets.push) : () => {};
     setDev({ room, actions: createRoomActions(room, socket), drop: sockets.drop });
@@ -119,6 +147,7 @@ export default function DevRoom() {
     return () => {
       stopGhost();
       socket.dispose();
+      unroute();
       room.dispose();
       setDev(null);
     };
