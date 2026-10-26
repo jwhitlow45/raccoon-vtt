@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { holderTileKey, tileKey } from "./keys.ts";
-import { LIMITS } from "./limits.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS } from "./limits.ts";
 import { FOG_SUBCELLS, type FogTile, type RoomState, type SightHolder } from "./model.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
@@ -138,7 +138,7 @@ function expectedJoin(before: readonly SightHolder[], join: readonly { memberId:
   const out = before.map((e) => ({ ...e }));
   for (const j of join) {
     if (out.some((e) => e.memberId === j.memberId) || state.members[j.memberId]?.kind !== "player") continue;
-    out.push({ memberId: j.memberId, on: j.on && out.filter((e) => e.on && state.members[e.memberId]?.kind === "player").length < LIMITS.sightHoldersPerScene });
+    out.push({ memberId: j.memberId, on: j.on && out.filter((e) => e.on && state.members[e.memberId]?.kind === "player").length < MOST_SIGHT_HOLDERS });
   }
   return out;
 }

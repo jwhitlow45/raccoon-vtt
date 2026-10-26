@@ -1,7 +1,7 @@
 import { cellIndex, decodeHeights, decodeRough, decodeStairs, encodeHeights, encodeRough, encodeStairs } from "../heightCodec.ts";
 import { cellOf, chunkKey, doorChunk, holderTileKey, keys, tileKey, wallChunk, wallMidpoint } from "../keys.ts";
 import { CHUNK_CELLS, type BuildChunk, type ExploredTile, type FogDraft, type FogOp, type FogTile, type FreeWall, type Label, type Light, type RoomState, type Scene, type SightHolders, type Stamp, type TerrainId, type Token, type WallFeature } from "../model.ts";
-import { LIMITS } from "../limits.ts";
+import { MOST_SIGHT_HOLDERS, SIGHT_HOLDERS_FULL } from "../limits.ts";
 import { MAX_BUILD_CELLS, MAX_FOG_DRAFT_OPS, type OpOf } from "../protocol.ts";
 import { allRevealedTiles, decodeTile, encodeTile, isEmptyBits, pointInPolygonFixed, rasterizeFogOps, tilesAcross } from "../rules/fog.ts";
 import { occupiedCells } from "../rules/footprint.ts";
@@ -147,23 +147,24 @@ function joinedBits(scene: Scene, t: { tx: number; ty: number; bits: string }, h
 /**
  * The players the explore step found owning a seeing creature on the scene
  * with no entry (docs/design-v1-per-player-vision.md 6.1), each added at
- * the end as the step decided, on only while fewer than the cap are. A
- * player already listed, or no longer a player on the roster, is passed
- * over, so the op replays to the same list.
+ * the end as the step decided: the step turns one on only while fewer than
+ * the cap in force are. A player already listed, or no longer a player on
+ * the roster, is passed over, so the op replays to the same list.
  */
 function joinHolders(tx: Tx, scene: Scene, join: readonly { memberId: string; on: boolean }[]): void {
   const list: SightHolders = tx.state.holders?.[scene.id] ?? { sceneId: scene.id, rev: 0, entries: [] };
   const entries = [...list.entries];
   for (const j of join) {
     if (entries.some((e) => e.memberId === j.memberId) || tx.state.members[j.memberId]?.kind !== "player") continue;
-    // Only players' entries hold a place, so one left on for a member since made DM keeps no player out (review PV1-O5).
-    entries.push({ memberId: j.memberId, on: j.on && entries.filter((e) => e.on && tx.state.members[e.memberId]?.kind === "player").length < LIMITS.sightHoldersPerScene });
+    // As the step that wrote it decided, under the cap in force then: replay never clamps a join again (review
+    // PV1-ASTRA-4). Only the design's most bounds it, and only players' entries hold a place (review PV1-O5).
+    entries.push({ memberId: j.memberId, on: j.on && entries.filter((e) => e.on && tx.state.members[e.memberId]?.kind === "player").length < MOST_SIGHT_HOLDERS });
   }
   if (entries.length !== list.entries.length) tx.write(keys.holders(scene.id), { ...list, entries });
 }
 
-/** The refusal of a seventh player who would see for themselves (docs/design-v1-per-player-vision.md 7.1). */
-export const HOLDERS_FULL = `At most ${LIMITS.sightHoldersPerScene} players see for themselves here. Untick one first.`;
+/** The refusal of a seventh player who would see for themselves (docs/design-v1-per-player-vision.md 7.1), as the live cap writes it (limits.ts). */
+export const HOLDERS_FULL = SIGHT_HOLDERS_FULL;
 
 /**
  * The DM's pick of who sees for themselves on a per-player scene
@@ -175,7 +176,9 @@ export const HOLDERS_FULL = `At most ${LIMITS.sightHoldersPerScene} players see 
 export function visionHolders(tx: Tx, op: OpOf<"vision.holders">): void {
   const scene = tx.scene(op.sceneId);
   if (scene.vision?.perPlayer !== true) throw invalid("the scene's sight is the whole party's");
-  if (op.on.length > LIMITS.sightHoldersPerScene) throw invalid(HOLDERS_FULL);
+  // The design's most, which never changes, so a pick stored under a higher cap than today's replays. The cap in force is
+  // a live op's alone (limits.ts checkLimits, review PV1-ASTRA-4).
+  if (op.on.length > MOST_SIGHT_HOLDERS) throw invalid(HOLDERS_FULL);
   for (const id of op.on) if (tx.state.members[id]?.kind !== "player") throw invalid("only a player on the roster sees for themselves");
   const list: SightHolders = tx.state.holders?.[scene.id] ?? { sceneId: scene.id, rev: 0, entries: [] };
   const named = new Set(op.on);
