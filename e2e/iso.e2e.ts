@@ -5,7 +5,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -407,7 +407,37 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await sheet.waitFor({ state: "detached" });
   });
 
-  test("ISO-7. the table display picks its own view, apart from a member's pick in the same browser, and its rows sit within 1 px at each size", async () => {
+  test("ISO-7. View as a player keeps a view of its own: a pick and a turn there leave the DM's pick, turns and storage as they were", async () => {
+    const key = `rvtt.view.${run.roomId}`;
+    const before = await stored(dm, key);
+    const shownBefore = await shownView(dm);
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("DM") });
+    await panel.getByRole("combobox", { name: "View as a player" }).selectOption({ label: "Pat" });
+    await panel.getByRole("button", { name: "View", exact: true }).click();
+    const preview = dm.locator('dialog[aria-label="Viewing as Pat"]');
+    await preview.waitFor();
+    const button = preview.getByRole("button", { name: /^View: / });
+    await waitFor("the preview's View button", async () => ((await button.getAttribute("aria-label")) === "View: Top-down" ? true : null));
+    await button.click();
+    const menu = preview.getByRole("dialog", { name: "View" });
+    await menu.waitFor();
+    await menu.getByRole("radio", { name: "Follow the scene", checked: true }).waitFor();
+    await menu.getByRole("radio", { name: "Isometric" }).check();
+    await waitFor("the preview in Isometric", async () => ((await button.getAttribute("aria-label")) === "View: Isometric" ? true : null));
+    await menu.getByRole("button", { name: "Turn right", exact: true }).click();
+    await menu.locator("[data-rvtt-view-status]").filter({ hasText: "Turned right." }).waitFor({ state: "attached" });
+    // Its anchor closes it, as Escape would leave the preview too.
+    await button.click();
+    await menu.waitFor({ state: "detached" });
+    assert.deepEqual(await stored(dm, key), before, "the DM's stored view is untouched");
+    await preview.getByRole("button", { name: "Exit", exact: true }).click();
+    await preview.waitFor({ state: "detached" });
+    assert.equal(await shownView(dm), shownBefore, "the DM's board shows what it showed");
+    assert.deepEqual(await stored(dm, key), before, "and nothing was saved after");
+  });
+
+  test("ISO-8. the table display picks its own view, apart from a member's pick in the same browser, and its rows sit within 1 px at each size", async () => {
     tvContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await tvContext.addInitScript(OFFER);
     tv = await tvContext.newPage();
@@ -483,7 +513,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     assert.deepEqual(lines, [], "the display's View rows");
   });
 
-  test("ISO-8. no page logged an error", () => {
+  test("ISO-9. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
 });

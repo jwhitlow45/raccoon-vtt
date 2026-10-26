@@ -16,6 +16,7 @@ import {
   isoOffered,
   pickOf,
   menuLine,
+  previewViewSlot,
   sayView,
   turnsReason,
   suggestedKind,
@@ -33,7 +34,9 @@ import {
   wantedKind,
   type ViewState,
 } from "./choice.ts";
-import { pickView, settledView, shownView, turnView, useStoredView, viewKey, type StoredView } from "./store.ts";
+import { createStore, type StoreApi } from "zustand/vanilla";
+import { usePreview } from "../dm/previewContext.ts";
+import { FOLLOW_THE_SCENE, pickView, settledView, shownView, turnView, useStoredView, viewKey, withPick, withTurn, type StoredView, type ViewPick } from "./store.ts";
 
 /*
  * The view choice's parts (docs/design-v1-isometric-view.md 7 and 8): the
@@ -54,34 +57,64 @@ export type ViewChoiceState = {
   wanted: ViewKind;
   /** The view the board shows. */
   shown: View;
+  /** Picks a view, or Follow the scene with null, where this page keeps its view. */
+  pick(pick: ViewPick): void;
+  /** Turns this scene's view a step, while the board shows Isometric. */
+  turn(by: 1 | -1): void;
 };
+
+/** Read when a page keeps its view in storage, so the hooks run the same on every page. */
+const NO_MEMORY = createStore<StoredView>(() => FOLLOW_THE_SCENE);
 
 /**
  * A page's view from where its pick is kept: the pick, else the scene's
  * suggestion, at the scene's turn, Top-down while Isometric is not offered
  * or a tool shows Top-down (store.ts shownView). A change waits for a
  * gesture under way to end (settledView), so the map never turns under a
- * finger.
+ * finger. `memory` keeps it in memory instead of this device's storage, as
+ * "View as a player" does (choice.ts previewViewSlot).
  */
-export function useViewChoice(input: { key: string; sceneId: string | null; suggested: Scene["suggestedView"]; tool?: string | null; gesture?: boolean }): ViewChoiceState {
-  const stored = useStoredView(input.key);
+export function useViewChoice(input: {
+  key: string;
+  sceneId: string | null;
+  suggested: Scene["suggestedView"];
+  tool?: string | null;
+  gesture?: boolean;
+  memory?: StoreApi<StoredView> | null;
+}): ViewChoiceState {
+  const saved = useStoredView(input.key);
+  const kept = useStore(input.memory ?? NO_MEMORY);
+  const { memory, key, sceneId } = input;
+  const stored = memory ? kept : saved;
   const forcedBy = topDownTool(input.tool);
   const target = shownView({ stored, sceneId: input.sceneId ?? "", suggested: input.suggested, forcedTopDown: forcedBy !== null, ready: isoOffered });
   const [showing, setShowing] = useState(target);
   // Views are kept one object each (lib/view.ts isometric), so the same view is the same object.
   const shown = settledView(showing, target, input.gesture === true);
   if (shown !== showing) setShowing(shown);
-  return { key: input.key, sceneId: input.sceneId, suggested: input.suggested, stored, forcedBy, wanted: wantedKind(stored, input.suggested), shown };
+  const pick = (p: ViewPick) => {
+    if (memory) memory.setState(withPick(memory.getState(), p), true);
+    else pickView(key, p);
+  };
+  const turn = (by: 1 | -1) => {
+    if (shown.kind !== "isometric" || !sceneId) return;
+    const next = turned(shown.turn, by);
+    if (memory) memory.setState(withTurn(memory.getState(), sceneId, next), true);
+    else turnView(key, sceneId, next);
+  };
+  return { key, sceneId, suggested: input.suggested, stored, forcedBy, wanted: wantedKind(stored, input.suggested), shown, pick, turn };
 }
 
-/** The Room page's view: this device's pick in this room, the scene on screen, the tool in use and the board's gestures. */
+/** The Room page's view: this device's pick in this room, or a preview's own, the scene on screen, the tool in use and the board's gestures. */
 export function useRoomViewChoice(): ViewChoiceState {
+  const preview = usePreview() !== null;
+  const memory = useScoped(previewViewSlot);
   const roomId = useRoomView((s) => s.roomId);
   const sceneId = useRoomView((s) => s.sceneId);
   const suggested = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.suggestedView : undefined));
   const tool = useRoomView((s) => s.local.tool);
   const gesture = useStore(useScoped(viewGestureSlot), (g) => g.active);
-  return useViewChoice({ key: viewKey(roomId), sceneId, suggested, tool, gesture });
+  return useViewChoice({ key: viewKey(roomId), sceneId, suggested, tool, gesture, memory: preview ? memory : null });
 }
 
 /** Says each change of the view in the polite status (choice.ts viewSaid), whatever made it: the menu, a key, the DM's suggestion or a tool. */
@@ -146,9 +179,6 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boo
   const reasonId = useId();
   const reason = props.steadyTurns ? turnsReason(choice) : null;
   const described = (id: string) => (reason ? `${id} ${reasonId}` : id);
-  const turn = (by: 1 | -1) => {
-    if (choice.shown.kind === "isometric" && choice.sceneId) turnView(choice.key, choice.sceneId, turned(choice.shown.turn, by));
-  };
   return (
     <div data-view-menu="" style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
       <div ref={group} role="radiogroup" aria-label={VIEW_GROUP} style={{ display: "grid", gap: theme.space(0.5), minWidth: 0 }}>
@@ -162,7 +192,7 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boo
                 value={c}
                 checked={chosen}
                 aria-describedby={c === "follow" ? helpId : undefined}
-                onChange={() => pickView(choice.key, pickOf(c))}
+                onChange={() => choice.pick(pickOf(c))}
                 style={RADIO_COVER}
               />
               <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 2 }}>
@@ -181,10 +211,10 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boo
       {forced && !props.steadyTurns ? <Help>{forced}</Help> : null}
       {turns || props.steadyTurns ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-          <Button size="sm" icon="turnLeft" disabled={!turns} aria-describedby={described(leftId)} onClick={() => turn(-1)} style={TURN_BUTTON}>
+          <Button size="sm" icon="turnLeft" disabled={!turns} aria-describedby={described(leftId)} onClick={() => choice.turn(-1)} style={TURN_BUTTON}>
             {TURN_LEFT}
           </Button>
-          <Button size="sm" icon="turnRight" disabled={!turns} aria-describedby={described(rightId)} onClick={() => turn(1)} style={TURN_BUTTON}>
+          <Button size="sm" icon="turnRight" disabled={!turns} aria-describedby={described(rightId)} onClick={() => choice.turn(1)} style={TURN_BUTTON}>
             {TURN_RIGHT}
           </Button>
           <span id={leftId} style={VISUALLY_HIDDEN}>

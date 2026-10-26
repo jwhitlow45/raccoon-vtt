@@ -14,7 +14,7 @@ import { useTooltip } from "../../components/Tooltip.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { api, ApiError, displayAssetUrl, type AssetVariant } from "../../lib/api.ts";
 import { fitRect, NO_INSETS, type Camera, type Rect, type Size } from "../../lib/camera.ts";
-import { TOP_DOWN, turned, viewBox } from "../../lib/view.ts";
+import { TOP_DOWN, viewBox } from "../../lib/view.ts";
 import { BANNER_DELAY_MS, type ConnectionState } from "../../lib/connection.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
 import { exitFullscreen, fullscreenSupported, toggleFullscreen, useFullscreen } from "../../lib/fullscreen.ts";
@@ -33,7 +33,7 @@ import { nextPopup, pageName, showingKey } from "../handouts/handouts.ts";
 import { useXCard, XCardHost } from "../xcard/XCardHost.tsx";
 import { UI_SCALES, uiScaleLabel, useUiScale } from "../device/settings.ts";
 import { choiceOf, choiceWords, isoOffered, pickOf, TURN_LEFT, TURN_LEFT_DESCRIPTION, TURN_RIGHT, TURN_RIGHT_DESCRIPTION, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
-import { displayViewKey, pickView, turnView } from "../view/store.ts";
+import { displayViewKey } from "../view/store.ts";
 import { SuggestionHelp, useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
 import {
   BAR_BUTTONS,
@@ -950,7 +950,7 @@ function DisplayView(props: { choice: ViewChoiceState; onTouch(): void }) {
   const rightId = useId();
   const value = choiceOf(choice.stored.pick);
   const turn = (by: 1 | -1) => {
-    if (choice.shown.kind === "isometric" && choice.sceneId) turnView(choice.key, choice.sceneId, turned(choice.shown.turn, by));
+    choice.turn(by);
     props.onTouch();
   };
   return (
@@ -966,7 +966,7 @@ function DisplayView(props: { choice: ViewChoiceState; onTouch(): void }) {
             grow
             describedBy={c === "follow" ? helpId : undefined}
             onClick={() => {
-              pickView(choice.key, pickOf(c));
+              choice.pick(pickOf(c));
               props.onTouch();
             }}
           >

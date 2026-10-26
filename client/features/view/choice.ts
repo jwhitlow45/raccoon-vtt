@@ -2,7 +2,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import type { Scene } from "#shared/model.ts";
 import type { Turn, View, ViewKind } from "../../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
-import { isoReady, type StoredView, type ViewPick } from "./store.ts";
+import { FOLLOW_THE_SCENE, isoReady, type StoredView, type ViewPick } from "./store.ts";
 
 /*
  * The view choice's rules and words (docs/design-v1-isometric-view.md 7
@@ -186,6 +186,15 @@ export function sayView(scope: RoomScope, text: string): void {
   const voice = scope.get(viewVoiceSlot);
   voice.setState({ key: voice.getState().key + 1, text });
 }
+
+/**
+ * "View as a player" keeps a view of its own, never saved, as nothing in
+ * it is (features/dm/PlayerPreview.tsx): the preview's Room page holds its
+ * pick and turns here, in its own scope, and leaves the DM's pick, turns and
+ * this device's storage as they were (ISO5-ASTRA-02). It starts following
+ * the scene, as a player's new device does.
+ */
+export const previewViewSlot = scopeSlot<StoreApi<StoredView>>(() => createStore<StoredView>(() => FOLLOW_THE_SCENE));
 
 /**
  * Whether a gesture on the map is under way: a drag, a pinch or a ruler
