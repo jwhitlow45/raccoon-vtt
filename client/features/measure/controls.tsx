@@ -1051,7 +1051,8 @@ function isRadio(target: EventTarget): target is HTMLInputElement {
 /** An option the whole of its tile or row, as in Segmented: a tap anywhere on it hits the radio. */
 const RADIO_COVER: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" };
 
-export type TileOption<T extends string> = { value: T; label: string; glyph?: ReactNode; title?: string };
+/** `spoken` names the tile for a screen reader where its words would read badly, as "Walls/doors" reads "Walls slash doors". */
+export type TileOption<T extends string> = { value: T; label: string; spoken?: string; glyph?: ReactNode; title?: string };
 
 /**
  * Tiles (7.2): a choice as 60 px tiles, words with a glyph or swatch above
@@ -1080,7 +1081,7 @@ export function ChoiceTiles<T extends string>(props: {
         const chosen = o.value === props.value;
         return (
           <label key={o.value} className="rvtt-choice" title={o.title} style={{ ...TILE, ...(props.even ? EVEN_TILE : null), ...choiceLook(chosen) }}>
-            <input type="radio" name={name} value={o.value} checked={chosen} aria-label={accessibleName(o.label, o.title)} onChange={() => props.onChange(o.value)} style={RADIO_COVER} />
+            <input type="radio" name={name} value={o.value} checked={chosen} aria-label={o.spoken ?? accessibleName(o.label, o.title)} onChange={() => props.onChange(o.value)} style={RADIO_COVER} />
             {o.glyph ? (
               <span aria-hidden style={{ display: "grid", placeItems: "center" }}>
                 {o.glyph}

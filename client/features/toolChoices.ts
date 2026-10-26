@@ -135,13 +135,16 @@ export const fogCycle: ToolCycle = {
   },
 };
 
+/** The builder's modes by the names a press says: "Walls and doors" where the tile shows "Walls/doors" (FU32-SR-NAMES). */
+const BUILD_SAID: readonly ChoiceOption[] = BUILD_MODES.map((m) => ({ value: m.value, label: m.spoken ?? m.label }));
+
 /** The builder's mode, once the scene is loaded. A mode change drops a shape room's corners and closes a label's pane with its unsaved words, so both hold. */
 export const builderCycle: ToolCycle = {
   now(env) {
     if (!shownScene(env.getState())) return null;
     const st = env.scope.get(builderSlot).store.getState();
     const held = st.mode === "poly" && st.poly.length > 0 ? ROOM_HELD : env.scope.get(labelPaneSlot).getState().labelId !== null ? LABEL_HELD : undefined;
-    return { options: BUILD_MODES, value: st.mode, ...(held ? { held } : {}) };
+    return { options: BUILD_SAID, value: st.mode, ...(held ? { held } : {}) };
   },
   pick(env, value) {
     const mode = known(BUILD_MODES, value);

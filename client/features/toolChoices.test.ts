@@ -223,14 +223,14 @@ describe("each tool's main choice", () => {
     assert.equal(fogCycle.now(env)?.held, undefined, "fog never holds");
   });
 
-  test("the builder: its eleven modes once the scene is loaded, held for a shape room's corners and an open label pane, and a pick clears the gesture", () => {
+  test("the builder: its eleven modes once the scene is loaded, by the names a press says (FU32-SR-NAMES), held for a shape room's corners and an open label pane, and a pick clears the gesture", () => {
     assert.equal(builderCycle.now(room({ scene: false }).env), null);
     const { env, scope } = room();
     const builder = scope.get(builderSlot).store;
     const choice = builderCycle.now(env)!;
     assert.deepEqual(
       choice.options.map((o) => o.label),
-      ["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls/doors", "Heights/stairs", "Difficult ground", "Label", "Lights", "Stamp"],
+      ["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp"],
     );
     assert.equal(choice.value, "paint");
     builder.setState({ mode: "poly", poly: [{ x: 1, y: 1 }, { x: 2, y: 1 }] });

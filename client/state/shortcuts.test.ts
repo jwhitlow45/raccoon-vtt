@@ -966,7 +966,7 @@ describe("a second press of the tool's key moves through its main choice (docs/d
       hit(r.env, press({ key: "b", code: "KeyB" }));
       seen.push(r.said().text.replace("Map builder: ", ""));
     }
-    assert.deepEqual(seen, ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls/doors", "Heights/stairs", "Difficult ground", "Label", "Lights", "Stamp", "Brush"]);
+    assert.deepEqual(seen, ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp", "Brush"]);
     hit(r.env, press({ key: "B", code: "KeyB", shiftKey: true }));
     assert.equal(r.scope.get(builderSlot).store.getState().mode, "stamp");
   });

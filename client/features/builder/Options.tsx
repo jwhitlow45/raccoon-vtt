@@ -140,7 +140,8 @@ export default function BuilderOptions() {
       />
     ),
   });
-  const modeName = BUILD_MODES.find((m) => m.value === s.mode)?.label ?? s.mode;
+  const mode = BUILD_MODES.find((m) => m.value === s.mode);
+  const modeName = mode?.spoken ?? mode?.label ?? s.mode;
 
   const slots: (Slot | false)[] = [
     {
@@ -159,7 +160,7 @@ export default function BuilderOptions() {
           options={BUILD_MODES.map((m) => ({ key: m.value, words: m.short, glyph: <Icon name={m.icon} /> }))}
         >
           <PickCloses>
-            <ChoiceTiles<BuildMode> label="Builder mode" even value={s.mode} options={BUILD_MODES.map((m) => ({ value: m.value, label: m.label, glyph: <Icon name={m.icon} /> }))} onChange={(mode) => pickBuildMode(scope, mode)} />
+            <ChoiceTiles<BuildMode> label="Builder mode" even value={s.mode} options={BUILD_MODES.map((m) => ({ value: m.value, label: m.label, ...(m.spoken ? { spoken: m.spoken } : null), glyph: <Icon name={m.icon} /> }))} onChange={(mode) => pickBuildMode(scope, mode)} />
           </PickCloses>
         </ValueChip>
       ),

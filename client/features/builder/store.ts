@@ -53,19 +53,21 @@ export const TERRAINS: readonly { value: TerrainId; label: string }[] = [
 ];
 
 /**
- * Each mode's whole name, which its tile and the chip's name keep, the
- * short word the chip shows (docs/design-v1-tool-options.md 6.2), and its
- * icon, on its tile and as the chip's glyph (D-261026-3), in the row's
- * order, which the tool's key steps through too.
+ * Each mode's whole name, which its tile shows, the short word the chip
+ * shows (docs/design-v1-tool-options.md 6.2), and its icon, on its tile and
+ * as the chip's glyph (D-261026-3), in the row's order, which the tool's
+ * key steps through too. `spoken` is the name a screen reader says where
+ * the shown one has a slash, which it would read as "slash": its tile's
+ * name, the chip's name and what the key's press says (FU32-SR-NAMES).
  */
-export const BUILD_MODES: readonly { value: BuildMode; label: string; short: string; icon: IconName }[] = [
+export const BUILD_MODES: readonly { value: BuildMode; label: string; spoken?: string; short: string; icon: IconName }[] = [
   { value: "paint", label: "Brush", short: "Brush", icon: "paint" },
   { value: "rect", label: "Rectangle room", short: "Rect room", icon: "shapeBox" },
   { value: "poly", label: "Shape room", short: "Shape room", icon: "shapePolygon" },
   { value: "erase", label: "Erase", short: "Erase", icon: "eraser" },
   { value: "eraseRect", label: "Erase area", short: "Erase area", icon: "eraseArea" },
-  { value: "edge", label: "Walls/doors", short: "Walls", icon: "walls" },
-  { value: "height", label: "Heights/stairs", short: "Heights", icon: "heights" },
+  { value: "edge", label: "Walls/doors", spoken: "Walls and doors", short: "Walls", icon: "walls" },
+  { value: "height", label: "Heights/stairs", spoken: "Heights and stairs", short: "Heights", icon: "heights" },
   { value: "rough", label: "Difficult ground", short: "Difficult", icon: "difficultGround" },
   { value: "label", label: "Label", short: "Label", icon: "mapLabel" },
   { value: "light", label: "Lights", short: "Lights", icon: "light" },

@@ -473,7 +473,8 @@ export const STATES: State[] = [
       await ops.send({ t: "fog.discard", sceneId: run.sceneId });
     },
   },
-  ...(["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls/doors", "Heights/stairs", "Difficult ground", "Label", "Lights", "Stamp"] as const).map(
+  // Each mode by its tile's name, which a screen reader says: "Walls and doors" where the tile shows "Walls/doors".
+  ...(["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp"] as const).map(
     (mode): State => ({
       name: `Builder, ${mode}`,
       roles: DM_ONLY,
