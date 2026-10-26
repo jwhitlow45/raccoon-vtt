@@ -3,7 +3,7 @@ import { axisSteps, hexSetSteps, legFeet } from "./distance.ts";
 import { footprintRect, hexAnchor, occupiedHexes, occupiedRange, sizeCategory, tokenHeightFt, verticalExtentFt, type FootprintToken } from "./footprint.ts";
 import { clamp, distToSegment, sdBox3, sdCorner2, yawVector, type Bounds, type Point, type Point3, type Rect } from "./geom.ts";
 import { SQUARES, type Grid } from "./grid.ts";
-import { cornerAt, footprintHexes, HEX_R, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
+import { cornerAt, footprintHexes, HEX_R, HEX_S, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
 import { AREAS, stepOffWalls } from "./segments.ts";
 import { cachedVisibility, crossingsAt, indexPolygon, insideCrossings, markPolygonCells, type Polygon, type PolygonIndex, type WallSet } from "./walls.ts";
 
@@ -1257,18 +1257,39 @@ class HexSampler {
     return anyInside(rows, x);
   }
 
-  /** The hexes the area can reach, by its reach on an emanation, else every hex whose center lies within its bounds and a hex's reach. */
-  candidates(): Hex[] {
+  /**
+   * The hexes the area can reach, with their centers: by its reach on an
+   * emanation, else every hex of the scene in its bounds whose center lies
+   * within a hex's reach of its surface at height `z`. Centers are worked
+   * out on the rows lattice as hexCenter does, so a hex far from the area
+   * costs one distance and nothing more.
+   */
+  candidates(z: number): { hex: Hex; c: Point }[] {
+    const g = this.g;
     const reach = this.area.reach;
-    if (reach) return [...hexesWithin(this.g, reach.from, reach.steps).values()].map((e) => e.hex).filter((h) => hexInScene(this.g, this.scene, h));
+    if (reach) {
+      return [...hexesWithin(g, reach.from, reach.steps).values()].flatMap((e) => (hexInScene(g, this.scene, e.hex) ? [{ hex: e.hex, c: hexCenter(g, e.hex) }] : []));
+    }
+    const rows = g.orient === "rows";
     const b = this.area.shape.bounds;
-    const lo = hexAt(this.g, { x: Math.max(0, b.x0 - 1), y: Math.max(0, b.y0 - 1) });
-    const hi = hexAt(this.g, { x: Math.min(this.scene.w, b.x1 + 1), y: Math.min(this.scene.h, b.y1 + 1) });
-    const out: Hex[] = [];
-    for (let row = Math.min(lo.row, hi.row) - 1; row <= Math.max(lo.row, hi.row) + 1; row++) {
-      for (let col = Math.min(lo.col, hi.col) - 1; col <= Math.max(lo.col, hi.col) + 1; col++) {
-        const h = { col, row };
-        if (hexInScene(this.g, this.scene, h)) out.push(h);
+    // The bounds on the rows lattice, clipped to the scene: as they are on rows, x and y swapped on columns.
+    const w = rows ? this.scene.w : this.scene.h;
+    const h = rows ? this.scene.h : this.scene.w;
+    const x0 = Math.max(0, rows ? b.x0 : b.y0);
+    const x1 = Math.min(w, rows ? b.x1 : b.y1);
+    const y0 = Math.max(0, rows ? b.y0 : b.x0);
+    const y1 = Math.min(h, rows ? b.y1 : b.x1);
+    const out: { hex: Hex; c: Point }[] = [];
+    const shape = this.area.shape;
+    for (let r = Math.max(0, Math.floor((y0 - HEX_R) / HEX_S) - 1); r <= Math.floor((y1 - HEX_R) / HEX_S) + 1; r++) {
+      const cy = HEX_R + r * HEX_S;
+      const shift = 0.5 + 0.5 * (r & 1);
+      for (let col = Math.max(0, Math.floor(x0) - 1); col <= Math.floor(x1) + 1; col++) {
+        const cx = col + shift;
+        const c = rows ? { x: cx, y: cy } : { x: cy, y: cx };
+        if (shape.sd(c.x, c.y, z) > HEX_R) continue;
+        const hex = rows ? { col, row: r } : { col: r, row: col };
+        if (hexInScene(g, this.scene, hex)) out.push({ hex, c });
       }
     }
     return out;
@@ -1279,9 +1300,8 @@ class HexSampler {
    * emanation `d` is the hex's steps from its source and `layers` the
    * creature's: a hex out of reach counts none, one in reach its seen ones.
    */
-  count(h: Hex, z: number, d?: number, layers?: [number, number]): number {
+  count(h: Hex, z: number, d?: number, layers?: [number, number], c: Point = hexCenter(this.g, h)): number {
     this.center = false;
-    const c = hexCenter(this.g, h);
     const reach = this.area.reach;
     let whole: boolean;
     if (reach) {
@@ -1313,9 +1333,9 @@ class HexSampler {
     const reach = this.area.reach;
     const steps = reach ? hexesWithin(this.g, reach.from, reach.steps) : null;
     const out: CoveredHex[] = [];
-    for (const h of this.candidates()) {
+    for (const { hex: h, c } of this.candidates(z)) {
       // The shading slice is the source's own height, so only the steps between the hexes count there.
-      const n = this.count(h, z, steps?.get(hexKey(h))?.d, reach ? [reach.z0, reach.z0 + 1] : undefined);
+      const n = this.count(h, z, steps?.get(hexKey(h))?.d, reach ? [reach.z0, reach.z0 + 1] : undefined, c);
       if (passes(n, this.total, this.center, rule)) out.push({ col: h.col, row: h.row, coverage: n / this.total });
     }
     return out;
