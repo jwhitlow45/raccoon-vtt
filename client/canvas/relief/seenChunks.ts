@@ -1,6 +1,7 @@
-import { CHUNK_CELLS, type BuildChunk, type FogTile } from "#shared/model.ts";
+import { CHUNK_CELLS, type BuildChunk, type FogTile, type RoomState } from "#shared/model.ts";
 import { chunkHeights, encodeHeights } from "#shared/rules/heights.ts";
 import type { GroundSource } from "../../features/builder/heights/ground.ts";
+import { dropLanding, dropView, type DropToken, type Point, type Role } from "../../features/movement/drop.ts";
 import { FogView } from "./fogView.ts";
 
 type Chunks = Readonly<Record<string, BuildChunk>>;
@@ -53,4 +54,16 @@ function masked(chunks: Chunks, tiles: Readonly<Record<string, FogTile | undefin
     out[key] = changed ? { ...chunk, heights: encodeHeights(changed) } : chunk;
   }
   return out;
+}
+
+/**
+ * The elevation a drag's preview shows at a spot, in feet, this device's
+ * or another member's: the drop's landing (movement/drop.ts dropLanding),
+ * a kept seat at its holder's height, read on the ground this viewer has
+ * seen (`seen`, from seenChunks), so a fogged platform never lifts it
+ * (docs/design-v1-isometric-view.md 4.3). A shadow and a standing ghost
+ * both read this one landing.
+ */
+export function previewLanding(view: RoomState, role: Role, seen: Chunks, token: DropToken, at: Point): number {
+  return dropLanding({ ...dropView(view, role), buildChunks: seen }, token, at);
 }

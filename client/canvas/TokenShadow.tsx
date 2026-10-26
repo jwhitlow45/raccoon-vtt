@@ -6,9 +6,8 @@ import type { ViewToken } from "../lib/scene.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useScoped } from "../state/scope.ts";
 import { useRoomView } from "../state/view.ts";
-import { dropLanding, dropView } from "../features/movement/drop.ts";
 import { useTreeShown } from "./relief/context.ts";
-import { seenChunks } from "./relief/seenChunks.ts";
+import { previewLanding, seenChunks } from "./relief/seenChunks.ts";
 import { SHADOW_CORE, shadowShape, tokenLift } from "./tokenShadow.ts";
 
 const EMPTY: Record<string, BuildChunk> = {};
@@ -51,7 +50,7 @@ export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; 
   const lift = useMemo(() => {
     const ground = seenChunks({ chunks, sceneId: token.sceneId, bounds, fog: tiles });
     const spotAt = ax === undefined || ay === undefined ? undefined : { x: ax, y: ay };
-    const landing = spotAt && view ? dropLanding({ ...dropView(view, role), buildChunks: ground }, token, spotAt) : undefined;
+    const landing = spotAt && view ? previewLanding(view, role, ground, token, spotAt) : undefined;
     return tokenLift(ground, token, spotAt, landing);
     // The fields that place the token, not the token itself, so a change of its HP reads no ground. The room only while dragged.
   }, [chunks, tiles, bounds, token.sceneId, token.x, token.y, token.size, token.w, token.h, token.squeeze, token.elevation, ax, ay, view, role]);

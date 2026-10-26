@@ -7,7 +7,8 @@ import { encodeHeights } from "#shared/rules/heights.ts";
 import { actor, effect, token as makeToken } from "#shared/testutil.ts";
 import { dropLanding, dropView } from "../features/movement/drop.ts";
 import { raised, world } from "../features/movement/testing.ts";
-import { seenChunks } from "./relief/seenChunks.ts";
+import { readFileSync } from "node:fs";
+import { previewLanding, seenChunks } from "./relief/seenChunks.ts";
 import { SHADOW_CORE, shadowShape, tokenLift } from "./tokenShadow.ts";
 
 /** A scene "s1" whose first chunk has these heights, keyed "x,y". */
@@ -166,5 +167,54 @@ describe("a player's shadow reads only the ground the fog shows (FLIER-SHADOW-FO
     assert.equal(seen["s2:0,0"], c["s2:0,0"]);
     // Kept while nothing changes, so every shadow shares one copy.
     assert.equal(seenChunks({ chunks: c, sceneId: "s1", bounds: { w: 10, h: 10 }, fog }), seen);
+  });
+});
+
+describe("a drag's preview lands as the drop would, here or as another member's ghost (ISO2-ASTRA-06)", () => {
+  const bounds = { w: 16, h: 16 };
+  const fogShowing = (...cells: string[]): Record<string, FogTile> => {
+    const bits = new Uint8Array(TILE_BYTES);
+    for (const key of cells) {
+      const [x, y] = key.split(",").map(Number);
+      for (let sy = 0; sy < FOG_SUBCELLS; sy++) {
+        for (let sx = 0; sx < FOG_SUBCELLS; sx++) {
+          const i = (y! * FOG_SUBCELLS + sy) * TILE_SUB + x! * FOG_SUBCELLS + sx;
+          bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+        }
+      }
+    }
+    return { [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) } };
+  };
+
+  test("a walker onto a seen 10 ft platform previews 10 ft, and onto a fogged one the ground the player sees", () => {
+    const walker = makeToken("w", { x: 2, y: 3, elevation: 0 });
+    const s = world({ blockMovement: false, heights: raised(6, 3, 8, 5, 10), tokens: [walker] });
+    const to = { x: 6, y: 3 };
+    assert.equal(previewLanding(s, "dm", s.buildChunks, walker, to), 10);
+    const seen = seenChunks({ chunks: s.buildChunks, sceneId: "s1", bounds, fog: fogShowing("2,3", "6,3", "7,3", "6,4", "7,4") });
+    assert.equal(previewLanding(s, "player", seen, walker, to), 10, "the platform in sight");
+    const fogged = seenChunks({ chunks: s.buildChunks, sceneId: "s1", bounds, fog: fogShowing("2,3") });
+    assert.equal(previewLanding(s, "player", fogged, walker, to), 0, "a fogged platform never lifts it");
+  });
+
+  test("a flier keeps its height over lower ground and rises to higher ground", () => {
+    const high = makeToken("f", { x: 2, y: 3, elevation: 30 });
+    const low = makeToken("g", { x: 2, y: 4, elevation: 5 });
+    const s = world({ blockMovement: false, heights: raised(6, 3, 8, 5, 10), tokens: [high, low] });
+    assert.equal(previewLanding(s, "dm", s.buildChunks, high, { x: 6, y: 3 }), 30);
+    assert.equal(previewLanding(s, "dm", s.buildChunks, { ...low, elevation: 5 }, { x: 6, y: 3 }), 10);
+  });
+
+  test("a rider moved within its mount keeps its seat at the mount's height", () => {
+    const horse = makeToken("horse", { name: "Warhorse", kind: "npc", size: "large", x: 4, y: 4, elevation: 10, ownerIds: ["p1"] });
+    const kobold = makeToken("kobold", { name: "Kobold", size: "small", x: 5, y: 4, elevation: 10, attached: { to: "horse", kind: "carry" } });
+    const s = world({ blockMovement: false, heights: raised(5, 4, 6, 6, 10), tokens: [horse, kobold] });
+    assert.equal(previewLanding(s, "player", s.buildChunks, s.tokens.kobold!, { x: 4, y: 4 }), 10);
+  });
+
+  test("the isometric board's ghosts and every shadow read this landing", () => {
+    const board = readFileSync(new URL("./relief/IsoBoard.tsx", import.meta.url), "utf8");
+    assert.match(board, /const landing = room \? previewLanding\(room, props\.role, seen, t, at\) : t\.elevation;\n\s+const base = drawnBase\(src, range, landing\)/);
+    assert.match(readFileSync(new URL("./TokenShadow.tsx", import.meta.url), "utf8"), /previewLanding\(view, role, ground, token, spotAt\)/);
   });
 });

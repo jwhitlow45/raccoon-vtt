@@ -18,7 +18,7 @@ import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
-import { useRoomView } from "../../state/view.ts";
+import { useRoomStore, useRoomView } from "../../state/view.ts";
 import { FogShape } from "../FogShape.tsx";
 import { MapContent, type DrawnMap } from "../layers/MapLayer.tsx";
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
@@ -31,6 +31,7 @@ import { cellLook, CellTints, imageReader } from "./looks.ts";
 import type { StaticPiece, VBox } from "./pieces.ts";
 import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 import { FrameScheduler } from "./scheduler.ts";
+import { previewLanding, seenChunks } from "./seenChunks.ts";
 import { ghostStands, ghostTagStands, splitTokens, tokenBox } from "./stand.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
@@ -269,11 +270,16 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const height = hidden ? 0 : size.height;
 
   // Each ghost of another member's drag, standing or flat and clipped, at each eased spot (5.2).
+  const store = useRoomStore();
   const ghostOf = useCallback(
     (t: ViewToken, at: { x: number; y: number }, name: string): IsoGhost => {
       const fp = footprint(t);
       const range = occupiedRange({ ...t, x: at.x, y: at.y, squeeze: undefined });
-      const base = drawnBase(src, range, t.elevation) / feet;
+      // It previews where the drop would land it there, on the ground this viewer has seen, as this device's own drag does (4.3).
+      const room = store.getState().view;
+      const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });
+      const landing = room ? previewLanding(room, props.role, seen, t, at) : t.elevation;
+      const base = drawnBase(src, range, landing) / feet;
       const ground = drawnFootprintGround(src, range) / feet;
       if (ghostStands(fog, t, at)) {
         const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
@@ -283,7 +289,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       }
       return { standee: null, clip: fog.revealedRects(tokenBox(t, at)), tag: null };
     },
-    [src, feet, fog, turn, cam.scale, size.height],
+    [src, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role],
   );
 
   const labels = useMemo(() => Object.values(allLabels ?? {}).filter((l): l is NonNullable<typeof l> => !!l && l.sceneId === scene.id), [allLabels, scene.id]);
