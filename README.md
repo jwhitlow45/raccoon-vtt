@@ -194,7 +194,7 @@ It reads `E2E_PORT`, `DATABASE_URL` and `E2E_SCREENSHOT_DIR` as
 `test-results/e2e-logs`, and its screenshots to a folder of its own. Shards
 can run side by side on one machine when each has its own database and its
 own `E2E_PORT`, at least 30 apart: a file uses ports up to `E2E_PORT` plus
-23, and the join limits count every run from one address in the database.
+29, and the join limits count every run from one address in the database.
 
 ## Deploying
 
