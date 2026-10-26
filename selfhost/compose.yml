@@ -390,7 +390,7 @@ services:
   config-files:
     image: *postgres-image
     labels:
-      raccoon.config-sha256: "3abe7c814c876b8d2a107d1da8e5e61613aac6958f297091e736ee9cb06d5aa2"
+      raccoon.config-sha256: "fa1b73293f1bf299c08cc3891061ba17fb65938614d0212a5b98d86fc2fdd0b7"
     command:
       - sh
       - -c
@@ -1248,7 +1248,7 @@ configs:
           }
           [ "$$others" = 0 ] && break
           [ "$$try" = 3 ] && {
-            complain "Something is still connected to the database. Stop raccoon first: docker compose -f docker-compose.server.yml stop raccoon"
+            complain "Something is still connected to the database. Stop raccoon first (docker compose stop raccoon, with -f docker-compose.server.yml for the server stack), then restore again."
             return 1
           }
           sleep 1

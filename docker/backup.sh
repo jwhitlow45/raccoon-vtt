@@ -528,7 +528,7 @@ restore_locked() {
     }
     [ "$others" = 0 ] && break
     [ "$try" = 3 ] && {
-      complain "Something is still connected to the database. Stop raccoon first: docker compose -f docker-compose.server.yml stop raccoon"
+      complain "Something is still connected to the database. Stop raccoon first (docker compose stop raccoon, with -f docker-compose.server.yml for the server stack), then restore again."
       return 1
     }
     sleep 1
