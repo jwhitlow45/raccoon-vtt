@@ -27,6 +27,9 @@ import { barControl, ConsoleWatch, OpSocket, Shots, SocketWatch, startServer, ta
  *   the field keeps focus and shows with Spend.
  * - A scroll of Pat's own while he types, by the wheel or a finger, is
  *   kept when the keyboard changes height.
+ * - Over the keyboard, whole, on top and unclipped: Lay on Hands' field and
+ *   Spend in the token bar's Uses drawer, the bar's HP entry and Apply,
+ *   and Add a class resource's Name with Add, a dialog's sheet.
  * - Then in a fight, on Thorn's turn, the alerts fold into the dock on the
  *   sheet's top edge, which rides the raised sheet. The small phone at 130%
  *   has room under the turn band for the field alone.
@@ -221,6 +224,62 @@ async function measure(page: Page, root: Locator, screen: string, keyboardHeight
   }
 }
 
+/** Thorn's action bar, from a tap on his token: a strip at the map's foot on a phone held upright. */
+async function thornsBar(page: Page): Promise<Locator> {
+  await tapCell(page, run.bounds, { x: 5, y: 5 });
+  const bar = page.getByRole("dialog", { name: "Thorn actions" });
+  await bar.waitFor();
+  return bar;
+}
+
+/**
+ * Whether `el` shows whole: inside the visual viewport, inside every box
+ * around it that clips, and on top at its middle, so a tap there reaches it.
+ */
+async function shownWhole(el: Locator): Promise<string | null> {
+  return el.evaluate((node) => {
+    type R = { top: number; bottom: number; left: number; right: number };
+    type E = { getBoundingClientRect(): R; parentElement: E | null; contains(n: unknown): boolean };
+    const g = globalThis as unknown as { visualViewport: { offsetTop: number; height: number }; getComputedStyle(e: unknown): { overflowX: string; overflowY: string }; document: { elementFromPoint(x: number, y: number): unknown } };
+    const e = node as unknown as E;
+    const r = e.getBoundingClientRect();
+    const v = g.visualViewport;
+    if (r.top < v.offsetTop - 0.5 || r.bottom > v.offsetTop + v.height + 0.5) return `outside the visible area (${Math.round(r.top)} to ${Math.round(r.bottom)}, visible to ${Math.round(v.offsetTop + v.height)})`;
+    for (let p = e.parentElement; p; p = p.parentElement) {
+      const cs = g.getComputedStyle(p);
+      if (cs.overflowX === "visible" && cs.overflowY === "visible") continue;
+      const b = p.getBoundingClientRect();
+      if (r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5) return `clipped by a box from ${Math.round(b.top)} to ${Math.round(b.bottom)} (${Math.round(r.top)} to ${Math.round(r.bottom)})`;
+    }
+    const hit = g.document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+    return hit && (hit === node || e.contains(hit)) ? null : "covered at its middle";
+  });
+}
+
+/**
+ * The keyboard opens over a field that has focus: each of `controls`
+ * shows whole above it (shownWhole), then `seen` runs, and the keyboard
+ * closes.
+ */
+async function overKeyboard(page: Page, view: View, controls: Record<string, Locator>, what: string, seen: () => Promise<void>): Promise<void> {
+  const layout = await page.evaluate(() => (globalThis as unknown as KeyboardWindow).innerHeight);
+  try {
+    await keyboard(page, layout - view.keyboard);
+    const why: Record<string, string> = {};
+    await waitFor(`${what}: in view`, async () => {
+      for (const [name, control] of Object.entries(controls)) {
+        const off = await shownWhole(control);
+        if (off) why[name] = off;
+        else delete why[name];
+      }
+      return Object.keys(why).length === 0 ? true : null;
+    }, 5_000).catch(() => assert.fail(`${what}: ${Object.entries(why).map(([n, w]) => `${n} ${w}`).join(", ")}`));
+    await seen();
+  } finally {
+    await keyboard(page, null);
+  }
+}
+
 /**
  * Use… on Lay on Hands, at the body's foot where a keyboard covers what
  * opens under it, then the keyboard: the sheet's foot on it, the field and
@@ -248,6 +307,7 @@ async function layOnHands(view: View, shows: "Spend" | "field", fight?: "fight")
     await wholeInView(sheet, shows === "Spend" ? { field, Spend: spend } : { field }, `Lay on Hands ${where}`);
     await dockRides(pat, sheet, `Lay on Hands ${where}`);
     await measure(pat, hands, `Lay on Hands' row with its field over the keyboard ${where}`, view.keyboard);
+    await measure(pat, sheet.locator("[data-creature-header]").first(), `Thorn's header in the Token sheet ${where}`, view.keyboard);
     const dock = pat.locator("[data-rvtt-dock]");
     if ((await dock.count()) > 0) await measure(pat, dock, `the dock on the raised sheet ${where}`, view.keyboard);
     await shotWithKeyboard(pat, `kb-lay-on-hands-${tag}`, view.keyboard);
@@ -445,7 +505,61 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     await field.waitFor({ state: "detached" });
   });
 
-  test("kb-6. Thorn's turn in a fight: the alerts fold into the dock on a phone's sheet", async () => {
+  for (const view of VIEWS) {
+    test(`kb-6. at ${viewName(view)}, Use… on Lay on Hands in the token bar's Uses drawer: the field and Spend show over the keyboard`, async () => {
+      await setUp(pat, view);
+      const bar = await thornsBar(pat);
+      const uses = await barControl(bar, "Uses");
+      await waitFor("the Uses button ready", async () => ((await uses.isEnabled()) ? true : null));
+      if ((await uses.getAttribute("aria-pressed")) !== "true") await uses.click();
+      const drawer = bar.locator("[data-uses-drawer]");
+      await drawer.waitFor();
+      const hands = drawer.getByRole("listitem").filter({ has: pat.getByText("Lay on Hands", { exact: true }) });
+      await hands.getByRole("button", { name: "Use Lay on Hands, 25 of 25 left" }).tap();
+      const field = hands.getByRole("textbox", { name: "Lay on Hands to spend, up to 25" });
+      await field.waitFor();
+      await overKeyboard(pat, view, { field, Spend: hands.getByRole("button", { name: "Spend", exact: true }) }, `the bar's Uses drawer at ${viewName(view)}`, async () => {
+        await measure(pat, hands, `Lay on Hands' row in the bar's Uses drawer over the keyboard at ${viewName(view)}`, view.keyboard);
+        await shotWithKeyboard(pat, `kb-bar-uses-${view.width}-${Math.round(view.scale * 100)}`, view.keyboard);
+      });
+      await hands.getByRole("button", { name: "Cancel", exact: true }).tap();
+      await field.waitFor({ state: "detached" });
+    });
+
+    test(`kb-7. at ${viewName(view)}, the token bar's HP entry and Apply show over the keyboard`, async () => {
+      await setUp(pat, view);
+      const bar = await thornsBar(pat);
+      const hp = (await barControl(bar, "HP change", "textbox")).first();
+      await hp.tap();
+      const form = bar.locator("form").filter({ has: pat.getByRole("textbox", { name: "HP change" }) }).first();
+      await overKeyboard(pat, view, { "HP change": hp, Apply: form.getByRole("button", { name: "Apply", exact: true }) }, `the bar's HP entry at ${viewName(view)}`, async () => {
+        await measure(pat, form, `the bar's HP entry over the keyboard at ${viewName(view)}`, view.keyboard);
+        await shotWithKeyboard(pat, `kb-bar-hp-${view.width}-${Math.round(view.scale * 100)}`, view.keyboard);
+      });
+      await hp.blur();
+    });
+
+    test(`kb-8. at ${viewName(view)}, a sheet dialog's field, Add a class resource's Name, shows over the keyboard with Add`, async () => {
+      await setUp(pat, view);
+      const sheet = await thornsSheet(pat);
+      const add = sheet.locator('xpath=.//section[*[self::h3 or self::h4][normalize-space()="Uses"]]').getByRole("button", { name: "Add a class resource" });
+      await add.scrollIntoViewIfNeeded();
+      await add.tap();
+      const dialog = pat.getByRole("dialog", { name: "Add a class resource", exact: true });
+      await dialog.waitFor();
+      await dialog.getByRole("radio", { name: "Your own" }).check();
+      const name = dialog.getByRole("textbox", { name: "Name" });
+      await name.tap();
+      await overKeyboard(pat, view, { Name: name, Add: dialog.getByRole("button", { name: "Add", exact: true }) }, `Add a class resource at ${viewName(view)}`, async () => {
+        await measure(pat, dialog.locator("section").first(), `Add a class resource over the keyboard at ${viewName(view)}`, view.keyboard);
+        await shotWithKeyboard(pat, `kb-dialog-add-${view.width}-${Math.round(view.scale * 100)}`, view.keyboard);
+      });
+      await dialog.getByRole("button", { name: /^Close/ }).first().click();
+      await dialog.waitFor({ state: "detached" });
+    });
+  }
+
+  test("kb-9. Thorn's turn in a fight: the alerts fold into the dock on a phone's sheet", async () => {
     await ops.send({
       t: "encounter.start",
       entries: [
@@ -465,15 +579,15 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
      */
     const cramped = view.width === 320 && view.scale > 1;
     const shows = cramped ? "field" : "Spend";
-    test(`kb-7. in the fight at ${viewName(view)}, the dock rides the raised sheet, and Lay on Hands' ${cramped ? "field shows" : "field and Spend show"}`, () => layOnHands(view, shows, "fight"));
+    test(`kb-10. in the fight at ${viewName(view)}, the dock rides the raised sheet, and Lay on Hands' ${cramped ? "field shows" : "field and Spend show"}`, () => layOnHands(view, shows, "fight"));
   }
 
-  test("kb-8. the raised sheets line up, nothing over 1 px, and the dock rode them on the tall phone", () => {
+  test("kb-11. the raised sheets line up, nothing over 1 px, and the dock rode them on the tall phone", () => {
     assert.deepEqual(sweep, []);
     for (const view of VIEWS.filter((v) => v.height === 844)) assert.ok(docked.has(`Lay on Hands in the fight at ${viewName(view)}`), `no dock on the sheet at ${viewName(view)}`);
   });
 
-  test("kb-9. no console errors on any page", () => {
+  test("kb-12. no console errors on any page", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page");
     assert.deepEqual(patConsole.errors, [], "Pat's page");
   });
