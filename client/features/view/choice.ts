@@ -104,6 +104,9 @@ export const TURN_RIGHT_DESCRIPTION = "Turn the map right";
 /** Q or E while the board shows Top-down. */
 export const TURN_NEEDS_ISOMETRIC = "Turning needs the isometric view.";
 
+/** Why the popover's turn buttons are disabled in Top-down. */
+export const TURNING_WORKS_IN_ISOMETRIC = "Turning works in Isometric.";
+
 /** Where the map's top edge faces at each turn (section 4.1's table). */
 const FACES: Readonly<Record<Turn, string>> = { 0: "up and to the right", 1: "down and to the right", 2: "down and to the left", 3: "up and to the left" };
 
@@ -139,6 +142,15 @@ export function viewSaid(before: ViewState, after: ViewState): string | null {
   if (after.sceneId !== before.sceneId || after.shown.kind !== "isometric" || before.shown.kind !== "isometric" || after.shown.turn === before.shown.turn) return null;
   // One step each way, as the buttons and keys turn: three steps right is one left.
   return turnedSaid((after.shown.turn - before.shown.turn + 4) % 4 === 3 ? -1 : 1, after.shown.turn);
+}
+
+/**
+ * Why the popover's turns are disabled, or null while the board is
+ * Isometric and they turn it: the tool's line while a tool hides the
+ * Isometric wanted, else that turning works in Isometric (D-261026-12).
+ */
+export function turnsReason(choice: { shown: View; forcedBy: string | null; wanted: ViewKind }): string | null {
+  return choice.shown.kind === "isometric" ? null : (menuLine(choice) ?? TURNING_WORKS_IN_ISOMETRIC);
 }
 
 /**

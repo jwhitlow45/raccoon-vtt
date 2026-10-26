@@ -17,6 +17,7 @@ import {
   pickOf,
   menuLine,
   sayView,
+  turnsReason,
   suggestedKind,
   topDownTool,
   TURN_LEFT,
@@ -123,11 +124,12 @@ export function ViewVoice() {
  *
  * A popover keeps the size it opened with, and its content scrolls past
  * it (components/Popover.tsx), so a pick of Isometric would add the turns
- * under "Scroll for more". `reserveTurns` keeps their room, unseen, while
- * the board shows Top-down and no tool holds it there, which only a tool
- * change ends, and a tool change closes the popover.
+ * under "Scroll for more". With `steadyTurns` the turns stay in every view,
+ * disabled in Top-down with their reason under them (choice.ts
+ * turnsReason), which holds a tool's line too, so the panel keeps its size
+ * and never shows an empty band (D-261026-12).
  */
-export function ViewMenuBody(props: { choice: ViewChoiceState; reserveTurns?: boolean }) {
+export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boolean }) {
   const { choice } = props;
   const group = useRef<HTMLDivElement>(null);
   // After the sheet's dialog has opened and the popover has placed itself, both in layout effects.
@@ -141,6 +143,9 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; reserveTurns?: bo
   const value = choiceOf(choice.stored.pick);
   const forced = menuLine(choice);
   const turns = choice.shown.kind === "isometric";
+  const reasonId = useId();
+  const reason = props.steadyTurns ? turnsReason(choice) : null;
+  const described = (id: string) => (reason ? `${id} ${reasonId}` : id);
   const turn = (by: 1 | -1) => {
     if (choice.shown.kind === "isometric" && choice.sceneId) turnView(choice.key, choice.sceneId, turned(choice.shown.turn, by));
   };
@@ -173,13 +178,13 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; reserveTurns?: bo
           );
         })}
       </div>
-      {forced ? <Help>{forced}</Help> : null}
-      {turns || (props.reserveTurns && !forced) ? (
-        <div aria-hidden={turns ? undefined : true} inert={!turns} style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), visibility: turns ? undefined : "hidden" }}>
-          <Button size="sm" icon="turnLeft" aria-describedby={leftId} onClick={() => turn(-1)} style={TURN_BUTTON}>
+      {forced && !props.steadyTurns ? <Help>{forced}</Help> : null}
+      {turns || props.steadyTurns ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+          <Button size="sm" icon="turnLeft" disabled={!turns} aria-describedby={described(leftId)} onClick={() => turn(-1)} style={TURN_BUTTON}>
             {TURN_LEFT}
           </Button>
-          <Button size="sm" icon="turnRight" aria-describedby={rightId} onClick={() => turn(1)} style={TURN_BUTTON}>
+          <Button size="sm" icon="turnRight" disabled={!turns} aria-describedby={described(rightId)} onClick={() => turn(1)} style={TURN_BUTTON}>
             {TURN_RIGHT}
           </Button>
           <span id={leftId} style={VISUALLY_HIDDEN}>
@@ -190,6 +195,7 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; reserveTurns?: bo
           </span>
         </div>
       ) : null}
+      {reason ? <Help id={reasonId}>{reason}</Help> : null}
       <ViewVoice />
     </div>
   );

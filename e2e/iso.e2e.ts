@@ -337,7 +337,9 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     const menu = await openMenu(dm, false);
     await menu.getByRole("radio", { name: "Isometric", checked: true }).waitFor();
     await menu.getByText("The map builder works top-down. Isometric comes back when you switch tools.").waitFor();
-    assert.equal(await menu.getByRole("button", { name: "Turn right", exact: true }).count(), 0, "no turns while the builder shows Top-down");
+    // The popover keeps its turns, disabled, with the tool's line as their reason (D-261026-12).
+    assert.ok(await menu.getByRole("button", { name: "Turn right", exact: true }).isDisabled(), "no turns while the builder shows Top-down");
+    assert.ok((await description(menu.getByRole("button", { name: "Turn right", exact: true }))).includes("The map builder works top-down."), "the tool's line says why");
     await shots.take(dm, "iso-dm-menu-builder");
     await closeMenu(dm, false);
     await dm.keyboard.press("e");
@@ -369,10 +371,17 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     const menu = viewMenu(dm);
     await menu.waitFor();
     await waitFor("focus on Top-down", () => dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { value?: string } | null } }).document.activeElement?.value === "topDown" || null));
+    // In Top-down the turns are there, disabled, and say why: the panel has no empty band (D-261026-12).
+    const left = menu.getByRole("button", { name: "Turn left", exact: true });
+    assert.ok(await left.isDisabled(), "Turn left is disabled in Top-down");
+    await menu.getByText("Turning works in Isometric.").waitFor();
+    assert.ok((await description(left)).includes("Turning works in Isometric."), "its reason is its description");
+    await shots.take(dm, "iso-dm-menu-top-down");
     await dm.keyboard.press("ArrowDown");
     await untilShown(dm, "isometric 0");
-    await menu.getByRole("button", { name: "Turn left", exact: true }).waitFor();
-    // The popover keeps the size it opened with, and kept the turns' room, so they show without a scroll.
+    await waitFor("Turn left enabled", async () => ((await left.isEnabled()) ? true : null));
+    assert.equal(await menu.getByText("Turning works in Isometric.").count(), 0, "no reason once they turn");
+    // The popover keeps the size it opened with, and the turns' place, so they show without a scroll.
     for (const name of ["Turn left", "Turn right"]) assert.ok(await wholeInReach(menu.getByRole("button", { name, exact: true })), `${name} shows whole`);
     // Named by their words, with what turns in the description (D-261026-11).
     for (const [name, says] of [

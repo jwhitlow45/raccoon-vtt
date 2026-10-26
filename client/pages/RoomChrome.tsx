@@ -348,7 +348,7 @@ function ViewPopover(props: { choice: ViewChoiceState; onOpen?(open: boolean): v
     <>
       <ViewIconButton choice={props.choice} onClick={onClick} anchor={anchor} />
       <Popover handle={handle} side="below" bound={viewportBound} title={VIEW_GROUP}>
-        <ViewMenuBody choice={props.choice} reserveTurns />
+        <ViewMenuBody choice={props.choice} steadyTurns />
       </Popover>
       {open ? null : <ViewVoice />}
     </>

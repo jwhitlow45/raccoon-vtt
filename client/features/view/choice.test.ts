@@ -16,6 +16,7 @@ import {
   topDownTool,
   turnedSaid,
   turnRefused,
+  turnsReason,
   viewButtonLabel,
   VIEW_CHOICES,
   viewSaid,
@@ -64,6 +65,13 @@ describe("the view choice (docs/design-v1-isometric-view.md 7, 8)", () => {
     assert.equal(menuLine({ forcedBy: "build", wanted: "isometric" }), line);
     assert.equal(menuLine({ forcedBy: "build", wanted: "topDown" }), null, "a Top-down pick keeps Top-down after the tool");
     assert.equal(menuLine({ forcedBy: null, wanted: "isometric" }), null);
+  });
+
+  test("the popover's turns say why they are disabled in Top-down, and nothing while they turn", () => {
+    assert.equal(turnsReason({ shown: TOP_DOWN, forcedBy: null, wanted: "topDown" }), "Turning works in Isometric.");
+    assert.equal(turnsReason({ shown: TOP_DOWN, forcedBy: "fog", wanted: "isometric" }), "Fog works top-down. Isometric comes back when you switch tools.");
+    assert.equal(turnsReason({ shown: TOP_DOWN, forcedBy: "fog", wanted: "topDown" }), "Turning works in Isometric.");
+    assert.equal(turnsReason({ shown: isometric(1), forcedBy: null, wanted: "isometric" }), null);
   });
 
   test("the words shown are the design's", () => {
