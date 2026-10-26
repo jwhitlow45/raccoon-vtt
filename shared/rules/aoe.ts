@@ -1368,10 +1368,13 @@ class HexSampler {
    * Whether a point is inside at height `z`, as squares read a creature's
    * middle under "center": inside the shape, or on an emanation `d` steps
    * from its source with the creature's `layers` within its reach, and seen
-   * by its polygons, within the scene.
+   * by its polygons, on one of the scene's hexes. The DM may stand a token
+   * on a hex past the scene's edge, such as the one past an odd row's end,
+   * whose center lies on the scene's right edge, and that hex is never
+   * shaded, so it catches no one, as `count` reads it (review HX2-OPUS-14).
    */
   pointIn(p: Point, z: number, d: number | undefined, layers: [number, number]): boolean {
-    if (p.x < 0 || p.y < 0 || p.x > this.scene.w || p.y > this.scene.h) return false;
+    if (!hexInScene(this.g, this.scene, hexAt(this.g, p))) return false;
     const reach = this.area.reach;
     if (reach ? !withinReach(reach, d ?? hexSetSteps(this.g, reach.from, [hexAt(this.g, p)]), layers[0], layers[1]) : !this.area.shape.inside(p.x, p.y, z)) return false;
     return this.seen(p.x, p.y);

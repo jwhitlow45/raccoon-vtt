@@ -187,4 +187,12 @@ describe("a player's token inside a hex scene (section 4.2)", () => {
     assert.equal(decide(place(onHex({ col: 39, row: 0 })), setup(), P1), "ok");
     assert.equal(decide(place(onHex({ col: 39, row: 1 })), setup(), P1), "forbidden: place it inside the map", "an odd row holds one fewer");
   });
+
+  test("the DM may still stand a token on the hex past an odd row's end, so an area reads a creature there (review HX2-OPUS-14)", () => {
+    const state = setup();
+    const past = onHex({ col: 39, row: 1 });
+    assert.equal(decide({ t: "token.create", token: { id: "g1", sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", ...past, actor: { inline: actor() } } }, state), "ok");
+    state.tokens.g1 = token("g1", { sceneId: "s1", x: 2, y: 2 });
+    assert.equal(decide({ t: "token.move", tokenId: "g1", ...past }, state), "ok");
+  });
 });

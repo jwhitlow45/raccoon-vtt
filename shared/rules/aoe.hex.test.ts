@@ -5,7 +5,7 @@ import { template, token } from "../testutil.ts";
 import { castFromToken, computeCoverage, creaturesInArea, emanationFootprint, type AreaContext, type AreaToken } from "./aoe.ts";
 import { hexAnchor, occupiedHexes, placedOnHex, type SizeCategory } from "./footprint.ts";
 import { gridOfShape } from "./grid.ts";
-import { cornerAt, HEX_R, hexAt, hexCenter, hexCorners, hexDistance, hexKey, hexNeighbors, sceneHexes, type Hex, type HexGrid } from "./hex.ts";
+import { cornerAt, HEX_R, hexAt, hexCenter, hexCorners, hexDistance, hexInScene, hexKey, hexNeighbors, sceneHexes, type Hex, type HexGrid } from "./hex.ts";
 
 /**
  * Areas on hexes (docs/design-v1-hex-grids.md HX-D11 and section 9):
@@ -278,6 +278,38 @@ describe("a hex past the scene's edge catches no one, as it is never shaded (rev
       // One step inside, the same sphere catches it.
       const inside = on(g, "i", "medium", { col: 1, row: 6 });
       assert.deepEqual(creaturesInArea({ ...sphere, origin: { ...hexCenter(g, { col: 1, row: 6 }), z: 0 } }, [inside], ctx(g)), ["i"]);
+    });
+  }
+});
+
+describe("under \"center\" a creature on a hex past the scene's edge is not caught either (review HX2-OPUS-14)", () => {
+  for (const [name, g] of GRIDS) {
+    // The hex past an odd row's end on a 40 by 40 scene: its center lies on the scene's edge, and the DM may stand a token there (permissions.hex.test.ts).
+    const past: Hex = g.orient === "rows" ? { col: 39, row: 7 } : { col: 7, row: 39 };
+    const inside: Hex = g.orient === "rows" ? { col: 38, row: 7 } : { col: 7, row: 38 };
+
+    test(`${name}: a creature on the hex past an odd row's end, its center on the edge, is caught by no rule, and one step in it is`, () => {
+      const c = hexCenter(g, past);
+      assert.equal(g.orient === "rows" ? c.x : c.y, 40, "its center lies on the scene's edge");
+      assert.equal(hexInScene(g, { w: 40, h: 40 }, past), false, "the hex is not the scene's");
+      const sphere = template("s", { shape: "sphere", size: 5, origin: { ...c, z: 0 }, includeOrigin: true });
+      for (const inclusion of ["center", "anyCell", "majority"] as const) assert.deepEqual(creaturesInArea(sphere, [on(g, "o", "medium", past)], ctx(g, {}, { inclusion })), [], inclusion);
+      const within = template("s", { shape: "sphere", size: 5, origin: { ...hexCenter(g, inside), z: 0 }, includeOrigin: true });
+      assert.deepEqual(creaturesInArea(within, [on(g, "i", "medium", inside)], ctx(g, {}, { inclusion: "center" })), ["i"]);
+    });
+
+    test(`${name}: a Large wholly inside, its anchor a corner on any row and column by the far edges, is still caught by a sphere around its anchor`, () => {
+      let seen = 0;
+      for (let a = 30; a < 40; a++) {
+        for (let b = 30; b < 40; b++) {
+          const large = on(g, "l", "large", g.orient === "rows" ? { col: a, row: b } : { col: b, row: a });
+          if (!occupiedHexes(g, large).every((h) => hexInScene(g, { w: 40, h: 40 }, h))) continue;
+          seen++;
+          const sphere = template("s", { shape: "sphere", size: 5, origin: { ...hexAnchor(g, large), z: 0 }, includeOrigin: true });
+          assert.deepEqual(creaturesInArea(sphere, [large], ctx(g, {}, { inclusion: "center" })), ["l"], `${a},${b}`);
+        }
+      }
+      assert.ok(seen > 50, `only ${seen} placements inside`);
     });
   }
 });
