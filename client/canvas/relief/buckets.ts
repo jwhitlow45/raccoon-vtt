@@ -116,8 +116,11 @@ export class ReliefIndex {
         const key = `${cx},${cy}`;
         seen.add(key);
         const at = (dx: number, dy: number) => `${sceneId}:${cx + dx},${cy + dy}`;
+        // The scene's size decides which cells a bucket holds and what lies past its edge, so a resize rebuilds it.
         const sig = [
           input.global,
+          input.bounds.w,
+          input.bounds.h,
           input.walls.get(key),
           ...[
             [0, 0],

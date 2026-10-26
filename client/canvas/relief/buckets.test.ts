@@ -213,6 +213,31 @@ describe("buckets", () => {
     assert.equal(relief.size, 1);
   });
 
+  test("a resize rebuilds the buckets it straddles, with the chunks and the fog the same objects", () => {
+    const ground = { "12,3": 2, "5,3": 2 };
+    const sync = (relief: ReliefIndex, w: number) => {
+      const bounds = { w, h: 16 };
+      relief.sync({ sceneId: "s1", bounds, chunks: {}, tiles: null, walls: new Map(), global: ground, src: source(ground, bounds) });
+    };
+    const cells = (relief: ReliefIndex) => order(relief.layout(0, EVERYTHING, [])).filter((id) => id.startsWith("c"));
+    const shrinking = new ReliefIndex();
+    sync(shrinking, 16);
+    assert.ok(shrinking.cellAt(12, 3) && cells(shrinking).includes("c12,3"));
+    sync(shrinking, 8);
+    assert.equal(shrinking.cellAt(12, 3), undefined, "a column past the new edge goes");
+    assert.ok(!cells(shrinking).includes("c12,3") && cells(shrinking).includes("c5,3"), `${cells(shrinking)}`);
+    const growing = new ReliefIndex();
+    sync(growing, 8);
+    assert.ok(!cells(growing).includes("c12,3"));
+    sync(growing, 16);
+    assert.ok(cells(growing).includes("c12,3"), "a column inside the grown scene comes back");
+    // And down: a shorter scene drops the column below its new edge.
+    const tall = { "3,12": 2 };
+    const down = new ReliefIndex();
+    for (const h of [16, 8]) down.sync({ sceneId: "s1", bounds: { w: 16, h }, chunks: {}, tiles: null, walls: new Map(), global: tall, src: source(tall, { w: 16, h }) });
+    assert.equal(down.cellAt(3, 12), undefined);
+  });
+
   test("groupWalls keeps a bucket's array while its pieces are the same", () => {
     const a = wall(3, 5, 4, 5);
     const b = wall(20, 5, 21, 5);
