@@ -29,7 +29,8 @@
  * `--parity <dir>` saves the board's canvas for each scene at two cameras
  * instead of timing anything, and `--compare <dir> <dir>` says whether two
  * such sets match pixel for pixel: the Top-down check that a change to the
- * board left today's drawing as it was.
+ * board left today's drawing as it was. With `--shots <dir>` it also saves
+ * a screenshot of the whole page at each camera, to look at.
  *
  * It runs the real server on the production build, so it needs `pnpm build`
  * first and a Postgres in DATABASE_URL. It makes its rooms and deletes them
@@ -378,7 +379,7 @@ async function openView(context: BrowserContext, page: Page, view: View, roomId:
 
 // ---------------------------------------------------------------- the run
 
-export async function runBench(view: View, opts: { parity?: string } = {}): Promise<BenchRow[]> {
+export async function runBench(view: View, opts: { parity?: string; shots?: string } = {}): Promise<BenchRow[]> {
   if (!existsSync(path.join(ROOT, "dist/index.html"))) throw new Error("No production build in dist/. Run `pnpm build` first.");
   const port = Number(process.env.BENCH_PORT ?? 7590);
   const databaseUrl = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
@@ -425,6 +426,11 @@ export async function runBench(view: View, opts: { parity?: string } = {}): Prom
             return konva.stages.filter((s) => s.width() > 0).map((s) => s.toDataURL({ pixelRatio: 2 }));
           });
           pngs.forEach((data, i) => writeFileSync(path.join(opts.parity!, `${kind}-${shot}-${i}.png`), Buffer.from(data.split(",")[1]!, "base64")));
+          // The whole page as a person sees it, both stages and the chrome, for looking at rather than comparing.
+          if (opts.shots) {
+            mkdirSync(opts.shots, { recursive: true });
+            await page.screenshot({ path: path.join(opts.shots, `${view}-${kind}-${shot}.png`) });
+          }
         }
       }
       return [];
@@ -623,7 +629,8 @@ if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts
   } else {
     const view: View = arg("--view") === "isometric" ? "isometric" : "topDown";
     const parity = arg("--parity");
-    const rows = await runBench(view, parity ? { parity } : {});
+    const shots = arg("--shots");
+    const rows = await runBench(view, parity ? { parity, ...(shots ? { shots } : {}) } : {});
     const out = arg("--out");
     if (out) writeFileSync(out, JSON.stringify(rows, null, 2));
     if (!parity) console.log(formatReport([rows]));
