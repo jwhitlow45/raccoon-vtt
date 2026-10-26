@@ -1,9 +1,8 @@
 import { holderTileKey, keys, tileKey } from "../keys.ts";
 import type { AreaTemplate, Drawing, Effect, Label, Light, Pin, RoomState, Scene, Stamp, Token, Trap, TrapAction } from "../model.ts";
-import { hash128, inSightOfNonOwners } from "../project.ts";
+import { gridOfScene, hash128, inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { footprintRect } from "../rules/footprint.ts";
-import { sceneGrid, SQUARES } from "../rules/grid.ts";
 import { sortedById } from "./tokens.ts";
 import { invalid, type Env, type Tx } from "./tx.ts";
 import { withoutTurnScoped } from "./uses.ts";
@@ -179,8 +178,7 @@ function copiedRuler(state: RoomState, sceneId: string, drawing: Drawing, copied
     const token = state.tokens[tokenId];
     if (token?.sceneId === sceneId) {
       // The middle of its footprint: on hexes the anchor it snaps to, where the ruler tool measured from.
-      const scene = state.scenes[sceneId];
-      const r = footprintRect(scene ? sceneGrid(scene) : SQUARES, token);
+      const r = footprintRect(gridOfScene(state, sceneId), token);
       points[2 * i] = r.x + r.w / 2;
       points[2 * i + 1] = r.y + r.h / 2;
     }

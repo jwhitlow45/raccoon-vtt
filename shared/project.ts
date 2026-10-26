@@ -254,10 +254,15 @@ function viewerSightOf(state: RoomState, viewer: Viewer, sceneId: string): Party
   return visionRules.holderSight(state, sceneId, holdsSight(state, sceneId, viewer.memberId) ? viewer.memberId : null);
 }
 
+/** The grid of a scene, squares for a scene the state lacks. */
+export function gridOfScene(state: Pick<RoomState, "scenes">, sceneId: string): Grid {
+  const scene = state.scenes[sceneId];
+  return scene ? sceneGrid(scene) : SQUARES;
+}
+
 /** The grid of the scene a token stands on, squares for a scene the state lacks. */
 export function gridOfToken(state: Pick<RoomState, "scenes">, token: Pick<Token, "sceneId">): Grid {
-  const scene = state.scenes[token.sceneId];
-  return scene ? sceneGrid(scene) : SQUARES;
+  return gridOfScene(state, token.sceneId);
 }
 
 /** Whether a scene has party vision on. */

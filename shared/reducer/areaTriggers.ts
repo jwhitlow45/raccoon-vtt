@@ -1,6 +1,6 @@
 import { attaches, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token } from "../model.ts";
-import { areaSeenMark, inSightOfNonOwners, seenByNonOwners } from "../project.ts";
+import { areaSeenMark, gridOfScene, inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
@@ -9,7 +9,7 @@ import type { HexGrid } from "../rules/hex.ts";
 import { hexPiece, pieceReach, placedOnTrace, routePoints, type HexPiece, type RoutePoint } from "../rules/route.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
-import { sceneGrid, SQUARES } from "../rules/grid.ts";
+import { sceneGrid } from "../rules/grid.ts";
 
 /**
  * Reminders that an area hits a creature again (features section 9): the
@@ -305,10 +305,7 @@ function alongWalkBeforeV14(after: RoomState, walk: Walked): RoomState[] {
 function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, routed: boolean): RoomState[] {
   const fpc = after.meta.settings.feetPerCell;
   const { named, all } = moved.walks;
-  const gridOf = (walk: MovedToken) => {
-    const scene = after.scenes[walk.to.sceneId];
-    return scene ? sceneGrid(scene) : SQUARES;
-  };
+  const gridOf = (walk: MovedToken) => gridOfScene(after, walk.to.sceneId);
   // A straight leg's hex line, built once a walk and read at its walker's size where the leg starts.
   const pieces = new Map<MovedToken, HexPiece>();
   const pieceOf = (g: HexGrid, walk: MovedToken): HexPiece => {

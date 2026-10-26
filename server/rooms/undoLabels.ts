@@ -1,10 +1,10 @@
 import { chunkKey, doorChunk, keys } from "#shared/keys.ts";
 import type { Actor, LogEvent, RoomState, Token, Viewer } from "#shared/model.ts";
-import { gridOfToken, projectEntity, type ProjectedToken } from "#shared/project.ts";
+import { gridOfScene, gridOfToken, projectEntity, type ProjectedToken } from "#shared/project.ts";
 import { isResizeOp, type ActorTarget, type ClientOp, type OpOf, type TokenPatch } from "#shared/protocol.ts";
 import { testText } from "#shared/rules/skills.ts";
 import { sizeCategory } from "#shared/rules/footprint.ts";
-import { cellWord, SQUARES, sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { cellWord, SQUARES, type Grid } from "#shared/rules/grid.ts";
 
 /**
  * What an undo step did, as a short phrase for the toast that says what an
@@ -242,7 +242,7 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     case "build.rough": {
       const count = op.cells?.length ?? 0;
       // The scene's own cell word: "3 hexes" on a hex scene (docs/design-v1-hex-grids.md section 8).
-      const g = before.scenes[op.sceneId] ? sceneGrid(before.scenes[op.sceneId]!) : SQUARES;
+      const g = gridOfScene(before, op.sceneId);
       const cells = count === 1 ? `1 ${cellWord(g)}` : `${count} ${cellWord(g, true)}`;
       return op.on ? `marking ${cells} as difficult ground on ${scene(op.sceneId)}` : `clearing difficult ground from ${cells} on ${scene(op.sceneId)}`;
     }
