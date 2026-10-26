@@ -180,31 +180,42 @@ function useDmPlayerLink(roomId: string, dm: boolean, shown: boolean): string | 
 /**
  * The View row, while the narrowest phone's top bar has folded its View
  * button away (features/view/choice.ts viewFoldSlot, D-261026-12): it
- * opens the same View sheet the button does, over the menu.
+ * opens the same View sheet the button does, over the menu. Its place
+ * stays in the menu, empty while the bar holds the button, so the menu's
+ * sheet can still be found from it once the row is gone.
  */
 function ViewRow() {
   const folded = useStore(useScoped(viewFoldSlot), (s) => s.folded);
   const choice = useRoomViewChoice();
   const [open, setOpen] = useState(false);
-  if (!folded) {
+  const place = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (folded || !open) return;
     // A widening that unfolds the row closes its sheet for good, so a narrowing after never opens it unasked (ISO5-ASTRA-04).
-    if (open) setOpen(false);
-    return null;
-  }
+    setOpen(false);
+    // Focus was in that sheet, and the row it would go back to is gone with it, so it goes to the menu's title, as a panel's subpage hands it over (features/panels.ts useSubpageFocus).
+    const active = document.activeElement;
+    const title = place.current?.closest("dialog")?.querySelector<HTMLElement>("h1, h2, h3");
+    if (title && (active === null || active === document.body)) title.focus({ preventScroll: true });
+  }, [folded, open]);
   return (
-    <>
-      <MenuItem
-        icon={choice.shown.kind === "isometric" ? "viewIsometric" : "viewTopDown"}
-        title="View"
-        detail={
-          <>
-            Showing <ViewName kind={choice.shown.kind} /> on this device. Follow the scene, <ViewName kind="topDown" /> or Isometric, and turning the map.
-          </>
-        }
-        onClick={() => setOpen(true)}
-      />
-      {open ? <ViewSheetDialog choice={choice} onClose={() => setOpen(false)} /> : null}
-    </>
+    <div ref={place} style={{ display: "contents" }}>
+      {folded ? (
+        <>
+          <MenuItem
+            icon={choice.shown.kind === "isometric" ? "viewIsometric" : "viewTopDown"}
+            title="View"
+            detail={
+              <>
+                Showing <ViewName kind={choice.shown.kind} /> on this device. Follow the scene, <ViewName kind="topDown" /> or Isometric, and turning the map.
+              </>
+            }
+            onClick={() => setOpen(true)}
+          />
+          {open ? <ViewSheetDialog choice={choice} onClose={() => setOpen(false)} /> : null}
+        </>
+      ) : null}
+    </div>
   );
 }
 

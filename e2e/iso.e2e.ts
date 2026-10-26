@@ -864,6 +864,9 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       await phone.setViewportSize({ width: 390, height: 844 });
       await viewButton(phone).waitFor();
       await sheet.waitFor({ state: "detached" });
+      // Focus, which was in the sheet, goes to the menu's title, never to the page under the menu (ISO5-FOCUS-UNFOLD).
+      const menuTitle = roomMenu.getByRole("heading", { name: "Menu", exact: true });
+      await waitFor("focus on the menu's title", () => menuTitle.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement || null));
       await phone.setViewportSize({ width: 320, height: 568 });
       await waitFor("the View button folded again", folded);
       await row.waitFor();
