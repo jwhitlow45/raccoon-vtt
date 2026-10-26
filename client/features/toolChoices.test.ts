@@ -177,6 +177,15 @@ describe("each tool's main choice", () => {
     assert.equal(areaCycle.now(env), null);
   });
 
+  test("Area draws nothing with no scene shown or before the room says who you are, and so has no choice (TCB-4)", () => {
+    const noScene = room();
+    (noScene.state as { sceneId: unknown }).sceneId = null;
+    assert.equal(areaCycle.now(noScene.env), null, "no scene");
+    const noYou = room();
+    (noYou.state as { you: unknown }).you = null;
+    assert.equal(areaCycle.now(noYou.env), null, "no you");
+  });
+
   test("Draw: its drawing tool on the full row, held for a shape with corners and for text waiting", () => {
     const { env, scope } = room();
     const draw = scope.get(drawSlot).store;
