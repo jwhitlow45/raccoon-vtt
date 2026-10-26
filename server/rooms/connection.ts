@@ -102,12 +102,14 @@ export class Connection {
   readonly previewsSent = new Map<string, SentPreview>();
   /**
    * Previews this viewer currently shows, keyed `from|kind:id`, each with
-   * the socket that sent its current frame. A screen shows one preview per
-   * member and id, so of two sockets of one member previewing the same
-   * thing only the one that sent the latest frame may cancel it when its
-   * own entry goes (review PV3-ASTRA-3).
+   * the id of the socket that sent its current frame. A screen shows one
+   * preview per member and id, so of two sockets of one member previewing
+   * the same thing only the one that sent the latest frame may cancel it
+   * when its own entry goes (review PV3-ASTRA-3). An id rather than the
+   * socket, so an entry nothing cleans up never keeps a closed socket
+   * reachable (review PV3-ASTRA-4).
    */
-  readonly previewsHeld = new Map<string, Connection>();
+  readonly previewsHeld = new Map<string, number>();
   /** Timers that belong to this socket and die with it. */
   readonly timers = new Set<NodeJS.Timeout>();
 

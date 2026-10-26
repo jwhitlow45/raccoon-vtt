@@ -506,7 +506,7 @@ describe("two sockets of one member on one preview", () => {
     reveal(later, "s1", { x: 8, y: 0, w: 8, h: 8 });
     rejudgePreviews(later, t.all);
     assert.deepEqual(cancels(t.p1.got), []);
-    assert.equal(t.p1.conn.previewsHeld.get("dm1|drag:gob"), t.b.conn, "the screen holds the newer socket's frame");
+    assert.equal(t.p1.conn.previewsHeld.get("dm1|drag:gob"), t.b.conn.id, "the screen holds the newer socket's frame");
   });
 
   test("the older socket's entry goes at a global batch once no screen shows its frame, with no cancel", () => {
@@ -518,7 +518,7 @@ describe("two sockets of one member on one preview", () => {
     t.b.conn.sceneId = "s2";
     t.send(t.a.conn, { k: "dragStart", tokenId: "gob", x: 2, y: 2 });
     t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 3, y: 2 });
-    assert.equal(t.p1.conn.previewsHeld.get("dm1|drag:gob"), t.b.conn);
+    assert.equal(t.p1.conn.previewsHeld.get("dm1|drag:gob"), t.b.conn.id);
     rejudgePreviews(state, t.all);
     assert.equal(t.a.conn.previewsSent.size, 0, "the older entry keeps no frame no screen shows");
     assert.deepEqual([...t.b.conn.previewsSent.keys()], ["drag:gob"]);
@@ -537,6 +537,27 @@ describe("two sockets of one member on one preview", () => {
     // The newer socket closing ends it.
     cancelPreviews(t.b.conn, t.all);
     assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
+  });
+
+  test("an end a screen misses while it resyncs, then its sender closing, leaves that screen holding no socket, and a new socket's frame still shows (review PV3-ASTRA-4)", () => {
+    const state = room();
+    const t = twoDms(state);
+    const ruler: EphEvent = { k: "ruler", id: "r1", points: [{ x: 1.5, y: 1.5 }], shared: true };
+    t.send(t.a.conn, ruler);
+    assert.ok(t.p1.conn.previewsHeld.has("dm1|ruler:r1"));
+    // p1 resyncs as the end arrives, so routing passes it by, and then the sender goes.
+    const held = t.p1.conn.held;
+    t.p1.conn.held = null;
+    t.send(t.a.conn, { k: "rulerEnd", id: "r1" });
+    cancelPreviews(t.a.conn, t.all);
+    t.p1.conn.held = held;
+    for (const owner of t.p1.conn.previewsHeld.values()) assert.equal(typeof owner, "number", "an entry names its socket by id, never the socket");
+    // A new socket of the same member previews the same ruler, and the screen shows it.
+    const c = viewer(DM);
+    t.p1.got.length = 0;
+    routeEphemeral(state, c.conn, "s1", ruler, [...t.all, c.conn]);
+    assert.deepEqual(t.p1.got, [ruler]);
+    assert.equal(t.p1.conn.previewsHeld.get("dm1|ruler:r1"), c.conn.id);
   });
 
   test("an explicit end from either socket ends the member's preview, as the screen keys it", () => {

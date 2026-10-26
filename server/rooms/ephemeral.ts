@@ -231,7 +231,7 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
       receiver.send({ t: "eph", from: sender.memberId, e: receiver.role === "player" ? forPlayer(state, sceneId, e, receiver) : e });
       if (heldKey && preview) {
         if (preview.ends) receiver.previewsHeld.delete(heldKey);
-        else receiver.previewsHeld.set(heldKey, sender);
+        else receiver.previewsHeld.set(heldKey, sender.id);
       }
     } else if (heldKey && preview && receiver.previewsHeld.has(heldKey)) {
       receiver.previewsHeld.delete(heldKey);
@@ -277,13 +277,13 @@ function dropSent(sender: Connection, key: string, sent: { kind: PreviewKind; id
  * socket, as the screen reads it, and routeEphemeral ends it everywhere.
  */
 function release(receiver: Connection, heldKey: string, sender: Connection): boolean {
-  if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender) return false;
+  if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender.id) return false;
   receiver.previewsHeld.delete(heldKey);
   return true;
 }
 
 function showsAnywhere(sender: Connection, heldKey: string, receivers: readonly Connection[]): boolean {
-  return receivers.some((r) => r !== sender && !r.closed && r.previewsHeld.get(heldKey) === sender);
+  return receivers.some((r) => r !== sender && !r.closed && r.previewsHeld.get(heldKey) === sender.id);
 }
 
 /**
@@ -325,7 +325,7 @@ export function rejudgePreviews(state: RoomState, connections: Iterable<Connecti
       const withheld = withheldFor(state, sceneId, last);
       for (const receiver of all) {
         // Only the screens showing this socket's frame are judged by it.
-        if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender) continue;
+        if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender.id) continue;
         const here = judged && viewerSceneId(state, receiver.viewer, { sceneId: receiver.sceneId }) === sceneId;
         if (here && senderMay && allowed(state, receiver, last, withheld)) continue;
         release(receiver, heldKey, sender);
