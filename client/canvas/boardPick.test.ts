@@ -5,7 +5,7 @@ import { encodeHeights } from "#shared/rules/heights.ts";
 import { reveal, rng, room, scene } from "#shared/testutil.ts";
 import { screenToView, viewToScreen, type Camera } from "../lib/camera.ts";
 import { isometric, K, TOP_DOWN, toView, toWorld, type Turn } from "../lib/view.ts";
-import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, pressAt, pressGap, ringCenter, screenAt, tokenBase, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, nudgeStep, pressAt, pressGap, ringCenter, screenAt, tokenBase, type BoardPick } from "./boardPick.ts";
 
 /** One chunk of scene s1 with these cells raised or lowered, in feet. */
 function chunkWith(heights: Record<string, number>): BuildChunk {
@@ -126,3 +126,18 @@ describe("the board's pick (docs/design-v1-isometric-view.md 6.1)", () => {
     assert.notEqual(memo.get({ ...input, chunks: { ...state.buildChunks } }).heights, first.heights);
   });
 });
+
+describe("arrow keys move by the screen (docs/design-v1-isometric-view.md 6.5)", () => {
+  test("Up is north at turn 0, west at 1, south at 2 and east at 3, and every arrow turns with it", () => {
+    const compass = { north: [0, -1], east: [1, 0], south: [0, 1], west: [-1, 0] } as const;
+    const up = [0, -1] as const;
+    assert.deepEqual(nudgeStep(isometric(0), ...up), compass.north);
+    assert.deepEqual(nudgeStep(isometric(1), ...up), compass.west);
+    assert.deepEqual(nudgeStep(isometric(2), ...up), compass.south);
+    assert.deepEqual(nudgeStep(isometric(3), ...up), compass.east);
+    assert.deepEqual(nudgeStep(isometric(1), 1, 0), compass.north, "Right at turn 1 moves toward the edge facing down and to the right");
+    assert.deepEqual(nudgeStep(TOP_DOWN, 0, -1), compass.north);
+    assert.deepEqual(nudgeStep(TOP_DOWN, -1, 0), compass.west);
+  });
+});
+

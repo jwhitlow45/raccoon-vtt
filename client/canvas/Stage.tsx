@@ -77,7 +77,7 @@ import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
-import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, ringCenter, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, boardPickSlot, DrawnHeightsMemo, nudgeStep, pressAt, ringCenter, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { dragBound, dragGround, dragPlan } from "./isoDrag.ts";
@@ -946,7 +946,9 @@ export function MapStage(props: {
         return;
       }
       const moved = parts.lead;
-      const node = { x: () => moved.x + dx, y: () => moved.y + dy, position: () => {} };
+      // Arrows move by the screen in Isometric (6.5).
+      const [sx, sy] = nudgeStep(shownRef.current, dx, dy);
+      const node = { x: () => moved.x + sx, y: () => moved.y + sy, position: () => {} };
       dragStopsRef.current.press(node, moved, parts.named);
     };
     // A tool's key moves nothing of the tool's while it follows a pointer (docs/design-v1-tool-cycle.md 2.7).

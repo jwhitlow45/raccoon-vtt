@@ -3,7 +3,7 @@ import { occupiedRange, type FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { cameraOfStage, screenToView, viewToScreen, type Camera, type Point } from "../lib/camera.ts";
 import { footprint } from "../lib/scene.ts";
-import { drawnBase, drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
+import { arrowStep, drawnBase, drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 
 /**
@@ -84,6 +84,18 @@ export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">,
 export function ringCenter(pick: Pick<BoardPick, "view" | "camera" | "src" | "feetPerCell">, token: FootprintToken): Point {
   const fp = footprint(token);
   return screenAt(pick, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, tokenBase(pick, token));
+}
+
+const ARROW_OF: Readonly<Record<string, string>> = { "0,-1": "ArrowUp", "1,0": "ArrowRight", "0,1": "ArrowDown", "-1,0": "ArrowLeft" };
+
+/**
+ * An arrow key's square step, which the keys give as Top-down's (state/shortcuts.ts),
+ * as the view shows the map (ISO-D11, view.ts arrowStep): in Isometric Up
+ * moves toward the map edge facing up and to the right, and so round.
+ */
+export function nudgeStep(view: View, dx: number, dy: number): readonly [number, number] {
+  const key = ARROW_OF[`${dx},${dy}`];
+  return (key ? arrowStep(view, key) : null) ?? [dx, dy];
 }
 
 /** The press's point in view space, for a test against a box that stands up, such as a label's (builder/labelShape.ts). */
