@@ -61,6 +61,35 @@ export function drawsHere(iso: Pick<IsoGround, "place"> | null, stands: boolean)
   return false;
 }
 
+/** A part of a flat creature's press area: a piece of its footprint inside one cell, from the node's corner, in cells, and that cell's drawn ground. */
+export type PressCell = { x: number; y: number; w: number; h: number; z: number };
+
+/**
+ * A flat creature's press area as the ground stage lays its picture: its
+ * footprint cut at the cell lines, each piece on its own cell's drawn
+ * ground, since a seen raised cell copies the picture over it up and the
+ * rest stays down (ISO34-ASTRA-14). From the node's corner `at`.
+ */
+export function pressCells(at: Point, size: { w: number; h: number }, ground: (x: number, y: number) => number): PressCell[] {
+  const out: PressCell[] = [];
+  for (let y = at.y; y < at.y + size.h - 1e-9; y = Math.min(Math.floor(y) + 1, at.y + size.h)) {
+    const y1 = Math.min(Math.floor(y) + 1, at.y + size.h);
+    for (let x = at.x; x < at.x + size.w - 1e-9; x = Math.min(Math.floor(x) + 1, at.x + size.w)) {
+      const x1 = Math.min(Math.floor(x) + 1, at.x + size.w);
+      out.push({ x: x - at.x, y: y - at.y, w: x1 - x, h: y1 - y, z: ground(Math.floor(x) + 0.5, Math.floor(y) + 0.5) });
+    }
+  }
+  return out;
+}
+
+/** The pieces of a press area as they draw in the ground plane, each lifted by its cell's ground. */
+export function pressRects(turn: Turn, cells: readonly PressCell[]): { x: number; y: number; w: number; h: number }[] {
+  return cells.map((c) => {
+    const d = liftInPlane(turn, c.z);
+    return { x: c.x + d.x, y: c.y + d.y, w: c.w, h: c.h };
+  });
+}
+
 /** The view units a lift of `z` cells of height raises a thing on screen. */
 export function liftView(z: number): number {
   return K * z;

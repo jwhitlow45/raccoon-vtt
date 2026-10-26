@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { rng } from "#shared/testutil.ts";
 import { groundGroups, isometric, K, toView, TOP_DOWN, type Turn } from "../lib/view.ts";
-import { boxGround, drawsHere, liftInPlane, liftView, viewPointOf } from "./isoPlace.ts";
+import { readFileSync } from "node:fs";
+import { boxGround, drawsHere, liftInPlane, liftView, pressCells, pressRects, viewPointOf } from "./isoPlace.ts";
 
 const TURNS: readonly Turn[] = [0, 1, 2, 3];
 
@@ -73,6 +74,35 @@ describe("where marks go in Isometric", () => {
     // A Large's footprint, as DragMarks.tsx and MoveLayer.tsx read it at each spot of the drag.
     assert.equal(boxGround(pit, { x0: 3, y0: 3, x1: 5, y1: 5 }), -2);
     assert.equal(boxGround(pit, { x0: 5, y0: 3, x1: 7, y1: 5 }), 0);
+  });
+
+  test("a flat Large straddling a 10 ft ledge takes a press on each part of its picture at that part's own drawn ground (ISO34-ASTRA-14)", () => {
+    // A Large at 6, 6, partly fogged, so it lies flat: of its cells only 7, 6 is a seen 10 ft top.
+    const ground = (x: number, y: number) => (Math.floor(x) === 7 && Math.floor(y) === 6 ? 2 : 0);
+    const cells = pressCells({ x: 6, y: 6 }, { w: 2, h: 2 }, ground);
+    assert.deepEqual(cells, [
+      { x: 0, y: 0, w: 1, h: 1, z: 0 },
+      { x: 1, y: 0, w: 1, h: 1, z: 2 },
+      { x: 0, y: 1, w: 1, h: 1, z: 0 },
+      { x: 1, y: 1, w: 1, h: 1, z: 0 },
+    ]);
+    for (const turn of TURNS) {
+      const rects = pressRects(turn, cells);
+      // A point of the picture draws where the ground stage lays it: its own cell's height.
+      for (const p of [{ x: 6.5, y: 7.5 }, { x: 7.5, y: 6.5 }, { x: 6.2, y: 6.8 }, { x: 7.9, y: 7.9 }]) {
+        const d = liftInPlane(turn, ground(p.x, p.y));
+        const local = { x: p.x - 6 + d.x, y: p.y - 6 + d.y };
+        assert.ok(rects.some((r) => local.x >= r.x && local.x <= r.x + r.w && local.y >= r.y && local.y <= r.y + r.h), `turn ${turn}: ${JSON.stringify(p)}`);
+      }
+    }
+    // A Tiny's half cell is one piece, and a footprint off the grid lines cuts where the cells do.
+    assert.deepEqual(pressCells({ x: 6.5, y: 6 }, { w: 0.5, h: 0.5 }, ground), [{ x: 0, y: 0, w: 0.5, h: 0.5, z: 0 }]);
+    assert.deepEqual(pressCells({ x: 6.5, y: 6 }, { w: 1, h: 1 }, ground).map((c) => [c.x, c.w, c.z]), [[0, 0.5, 0], [0.5, 0.5, 2]]);
+    // The node presses by those pieces, and the board gives a flat creature its own.
+    const node = readFileSync(new URL("./TokenNode.tsx", import.meta.url), "utf8");
+    assert.match(node, /<FootprintPress rects=\{pressRects\(iso\.turn, iso\.press\)\} \/>/);
+    const board = readFileSync(new URL("./relief/IsoBoard.tsx", import.meta.url), "utf8");
+    assert.match(board, /pressOnly\(turn, flatGround\(t\), pressCells\(\{ x: t\.x, y: t\.y \}, footprint\(t\), groundAt\)\)/);
   });
 
   test("a thing under the stand rule draws in exactly one place: flat on the ground stage, or upright on the overlay", () => {

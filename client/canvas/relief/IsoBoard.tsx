@@ -31,6 +31,7 @@ import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx"
 import { DragMarks } from "../DragMarks.tsx";
 import { useBoardText, type BoardTextInput, type TokenText } from "../useBoardText.ts";
 import { decorPlace, mapLabelInk, viewPill } from "./isoText.ts";
+import { pressCells, type PressCell } from "../isoPlace.ts";
 import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
@@ -284,7 +285,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const dim = props.role === "dm" && playersFog !== null && !playersFog.boxAny(tokenBox(t));
       const spot = spots[item.id];
       const placed = spot ? movedIso(t, spot, { rise: s.rise, inset: s.inset }) : s;
-      const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false };
+      const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false, press: [] };
       const old = isoCache.current.get(item.id);
       next.set(item.id, old && sameIso(old, fresh) ? old : fresh);
     }
@@ -387,7 +388,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const ground = drawnFootprintGround(src, range) / feet;
       if (ghostStands(fog, t, at)) {
         const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
-        const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, inset: 1, pits: [], dim: false, pressOnly: false };
+        const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, inset: 1, pits: [], dim: false, pressOnly: false, press: [] };
         // The tag stands over the art when the pill Top-down draws for it is clear too, and is left out otherwise.
         return { standee, clip: null, tag: ghostTagStands(fog, t, at, name, cam.scale) ? { x: (shape.art.x0 + shape.art.x1) / 2, y: shape.art.y0 } : null };
       }
@@ -439,7 +440,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
                 {items.map((item, i) =>
                   item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!, isoText.get(item.id)),
                 )}
-                {flat.map((t) => props.renderToken(t, pressOnly(turn, flatGround(t))))}
+                {flat.map((t) => props.renderToken(t, pressOnly(turn, flatGround(t), pressCells({ x: t.x, y: t.y }, footprint(t), groundAt))))}
               </Group>
             </Group>
           </Layer>
@@ -504,9 +505,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
 /** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
 type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox; ring: VBox };
 
-/** A flat creature's press area on the relief, on the drawn ground under it (`ground`, cells). */
-function pressOnly(turn: Turn, ground: number): IsoToken {
-  return { turn, base: ground, ground, drawn: ground, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true };
+/** A flat creature's press area on the relief, piece by piece on the drawn ground under it (`press`), its decor on the highest (`ground`, cells). */
+function pressOnly(turn: Turn, ground: number, press: readonly PressCell[]): IsoToken {
+  return { turn, base: ground, ground, drawn: ground, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true, press };
 }
 
 /** One run of relief pieces, drawn by one shape that does not listen. */
@@ -609,6 +610,8 @@ function sameIso(a: IsoToken, b: IsoToken): boolean {
     a.inset === b.inset &&
     a.dim === b.dim &&
     a.pressOnly === b.pressOnly &&
+    a.press.length === b.press.length &&
+    a.press.every((c, i) => { const d = b.press[i]!; return c.x === d.x && c.y === d.y && c.w === d.w && c.h === d.h && c.z === d.z; }) &&
     a.pits.length === b.pits.length &&
     a.pits.every((p, i) => p.x === b.pits[i]!.x && p.y === b.pits[i]!.y)
   );

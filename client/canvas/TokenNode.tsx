@@ -1,7 +1,7 @@
 import type Konva from "konva";
 import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Arc, Circle, Ellipse, Group, Image as KImage, Line, Rect, Shape, Text } from "react-konva";
-import { liftInPlane } from "./isoPlace.ts";
+import { liftInPlane, pressRects, type PressCell } from "./isoPlace.ts";
 import type { Actor, Effect } from "#shared/model.ts";
 import { shownLife } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
@@ -65,6 +65,8 @@ export type IsoToken = {
   /** On the DM's device, a standee the players cannot see draws dimmed (5.4). */
   dim: boolean;
   pressOnly: boolean;
+  /** A flat creature's press area, piece by piece on each cell's drawn ground (isoPlace.ts pressCells). Empty for a standee. */
+  press: readonly PressCell[];
 };
 
 const APPLE = isAppleDevice();
@@ -157,11 +159,13 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
     >
       {iso ? (
         iso.pressOnly ? (
-          // On the drawn ground under it, where the ground stage lays its picture (5.2).
-          <Group {...liftInPlane(iso.turn, iso.ground)}>
-            <FootprintPress w={fp.w} h={fp.h} />
-            {props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
-          </Group>
+          // Each piece where the ground stage lays that part of its picture, and its decor on the highest drawn ground under it (5.2).
+          <>
+            <FootprintPress rects={pressRects(iso.turn, iso.press)} />
+            <Group {...liftInPlane(iso.turn, iso.ground)}>
+              {props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+            </Group>
+          </>
         ) : (
           <Standee
             token={token}
@@ -199,13 +203,13 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
 });
 
 /** A flat creature's press area on the isometric relief: its footprint, on the hit canvas alone, over its picture on the ground stage below (5.2). */
-function FootprintPress(props: { w: number; h: number }) {
+function FootprintPress(props: { rects: readonly { x: number; y: number; w: number; h: number }[] }) {
   return (
     <Shape
       sceneFunc={() => {}}
       hitFunc={(ctx, shape) => {
         ctx.beginPath();
-        ctx.rect(0, 0, props.w, props.h);
+        for (const r of props.rects) ctx.rect(r.x, r.y, r.w, r.h);
         ctx.fillStrokeShape(shape);
       }}
     />
