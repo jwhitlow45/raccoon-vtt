@@ -74,6 +74,8 @@ The panel's order stays header, stat block, groups by use, setup (docs/design-v1
 
 ### 3.1 Uses
 
+Since rebuilt by docs/design-v1-monster-uses.md: each count shows as display-only pips on its own row's title line, the DM's pips under the list are gone, and Restore, always there on a count and off while full, is the hand correction.
+
 - **The list**: `CombatUses` in its `list` form, the drawer's and the row group's. Legendary Resistance with Use, and Restore once one is spent. Legendary actions by name with their off reasons. Recharge and X/Day abilities, Other used, Regeneration's line, a character's class resources, and the turn's skipped prompts with Reopen (below). Its status line, busy buttons and loading line (`Loading the uses…`, or the inline reload) as built.
 - **Who**: the DM and the creature's owners, where `useUsesPresence` is `yes` or `loading`, as the bar's button. For a character, the DM and its players always, so Add is reached with no resource yet. A player lent only a character's token gets no class resources, as today (`holdsClassResources`).
 - **Skipped prompts** join the list form while their record is current (`usesRows`' card-only branch becomes both forms). `usesPresence` takes the creature's current record (`currentRecord`) in place of `null`, so a creature whose only rows are skipped prompts, such as a goblin whose death save was skipped, shows Uses on the panel, the bar and the row while the turn lasts. After Next the record is not current, and the rows and the presence go (D-261024-40).

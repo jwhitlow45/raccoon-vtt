@@ -269,6 +269,8 @@ Today's card (RechargeCard.tsx), now from the record: one per key due. "Fire Bre
 
 ## 5. The tracker row
 
+Since rebuilt by docs/design-v1-monster-uses.md: the pips are display-only, on each count's own title line, and the DM's pips that set the counts used are gone.
+
 **Options** (`RowMenu`, Row.tsx:806-967) gain a **Uses** group where the pips stand (905-920), holding them, in its off-turn form:
 - Legendary actions as buttons: "Pounce", "Fiery Rays", and "Wing Attack (2)" for an older block's cost of 2. A once-marked one is disabled, "Until the start of its next turn". Too few pips: "Needs 2". On the creature's own turn: "After another creature's turn".
 - **Use Legendary Resistance (2 left)**, and the pips as today.

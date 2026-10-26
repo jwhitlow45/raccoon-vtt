@@ -32,7 +32,7 @@ Each row opens with a title line: the name at the left, in bold at 16 px (the ch
 
 | Use | Title line | Buttons (list) | Buttons (turn card) |
 |---|---|---|---|
-| Legendary Actions | **Legendary Actions** with pips | One per action by name ("Lash", "Psychic Drain", "Wing Attack (2)" for a cost of 2), then **Restore**, off while full. With no block to read: "Spend a legendary action" | None. A muted line under the title: "After other creatures' turns" |
+| Legendary Actions | **Legendary Actions** with pips | One per action by name ("Lash", "Psychic Drain", "Wing Attack (2)" for a cost of 2), then **Restore**, off while full. With no block to read: "Spend a Legendary Action" | None. A muted line under the title: "After other creatures' turns" |
 | Legendary Resistance | **Legendary Resistance** with pips | **Use**, **Restore** | **Use** |
 | X/Day | **Dominate Mind, 2/Day** with pips | **Use**, **Restore** | **Use**, none with nothing left |
 | Recharge | **Fire Breath, Recharge 5–6**, state at the right: "Ready", "Used", "Rolled 5: ready", "Rolled 2: used" | Ready: **Use**. Used: **Roll recharge**, **Mark ready** | Ready: **Use** |
@@ -46,7 +46,7 @@ Off buttons keep today's words and behavior: "After another creature's turn", "U
 
 The pips no longer set a count, so **Restore** is the hand correction. On Legendary Actions, Legendary Resistance and X/Day it is always there in the list, off while the count is full ("Legendary Actions are full.", "Legendary Resistance is full.", "Dominate Mind is full."), as on a character's row, so the row never changes shape at the first tap (D-261026-2's seventh amendment). It stays usable on the creature's own turn, as a correction, though the actions themselves are off then.
 
-Restore keeps today's behavior. On Legendary Actions it gives back the first once-a-turn action still marked, clearing its mark and giving back that action's cost, so it may give back more than one. Only with no such mark does it give back one. So when Fiery Rays (once a turn) was taken and then Pounce was mis-tapped, Restore frees Fiery Rays, not Pounce. The exact correction for a mis-tap is **Undo**, since each Use and Restore is its own undo step. A count too high is corrected by the use itself, which is what happened at the table. Each correction is now a logged use or restore, which the old pips never were.
+Restore keeps today's behavior. On Legendary Actions it gives back the first once-a-turn action still marked, clearing its mark and giving back that action's cost, so it may give back more than one. Only with no such mark does it give back one. On the creature's own turn it gives back one plain pip and leaves any once-a-turn mark, since `legendaryOff` says "ownTurn" before "once", so no button reads as once-marked then. Play cannot leave a count spent on the creature's own turn (its turn's start refills it), so the case's test sets one with a `token.update` of `actionsUsed`. So when Fiery Rays (once a turn) was taken and then Pounce was mis-tapped, Restore frees Fiery Rays, not Pounce. The exact correction for a mis-tap is **Undo**, since each Use and Restore is its own undo step. A count too high is corrected by the use itself, which is what happened at the table. Each correction is now a logged use or restore, which the old pips never were.
 
 ### 3.4 Order
 
@@ -68,7 +68,7 @@ The owner's seventh line (D-261026-2's fifth and sixth amendments). A class reso
 
 - **Filled pips are uses left**, since they stand where "x of y" (x left) stood. Rejected: filled for used, the old DM pips' meaning. Those pips go entirely, so no pips and no bare count in the app read the other way: the tracker row's chips "LA 2/3", "LR 2/3" and "Dominate Mind 1/2" already count what is left. Stats' hints ("1 of 3 used") and an unlisted mark's row ("Dominate Mind, 1 of 2 used") count used, but say "used" in words. The death save pips count successes and failures, not uses.
 - **Legendary Actions buttons start at their words' width and grow to fill their line.** Each line ends on the pips' right edge, and a button that wraps alone fills its line. Rejected: buttons that keep their words' width. Built and measured, they leave a ragged edge under the pips (6 to 102 px short of it), and at 130% Restore wraps alone (the sweep's wrap-orphan, 62 px). Growing adds no line, since a flex line breaks on the words' width.
-- **Pips for counts up to 6** (D-261026-2's sixth amendment). 2024 counts that top out at 6 (Rage at level 17, Superiority Dice, the Tarrasque's Legendary Resistance) then stay pips all campaign. Rejected: 5, the mock's limit, which turns those four to words late in a campaign, and 8, wider than a phone line needs. Legendary Actions reach 4 in a lair, X/Day 4.
+- **Pips for counts up to 6** (D-261026-2's sixth amendment). 2024 counts that top out at 6 (Rage at level 17, Superiority Dice at 15, Favored Enemy at 17, the Tarrasque's Legendary Resistance) then stay pips all campaign. Rejected: 5, the mock's limit, which turns those four to words late in a campaign, and 8, wider than a phone line needs. Legendary Actions reach 4 in a lair, X/Day 4.
 - **No "comes back" line** under monster rows. Rejected: the character row's "Back on a Long Rest" line, a line per row for what a DM knows, against "they don't take up a ton of space".
 - **Restore always on Legendary Actions, Legendary Resistance and X/Day, off when full.** Rejected: Restore only while spent, which today turns a full-width Use into two half buttons at the first tap.
 - **Restore as today, Undo for exact corrections** (3.3). Rejected: a separate count-only control, since the owner asked for pips that take no taps, and the block would grow.
@@ -76,13 +76,13 @@ The owner's seventh line (D-261026-2's fifth and sixth amendments). A class reso
 - **The character row's 16 px title and 12 px gaps.** Rejected: today's 14 px and 4 px, which the owner's screenshot shows crowded.
 - **Order kept.** Rejected: Legendary Actions first. They are tapped most, but the section is now short enough that order costs no scroll, and the card and stat block read Resistance first.
 - **The same rows for the DM and owners.** Rejected: DM-only pips (the first plan), since the pips only restate a count owners already read.
-- **"Legendary Actions"** with a capital A, as the 2024 rules write the term and as "Legendary Resistance" stands (D-261026-6). Rejected: lowering "Legendary resistance", the stat block's own name.
+- **"Legendary Actions"** with a capital A, as the 2024 rules write the term and as "Legendary Resistance" stands (D-261026-6), and "Legendary Action" in capitals wherever the app writes the game term, singular too: the button names ("Use Lash, Legendary Action, 2 left", "Spend a Legendary Action", "Restore one Legendary Action"), an off button's words ("A Legendary Action: after another creature's turn."), the refusal ("No Legendary Actions left."), the undo label ("using a Legendary Action for Adult Red Dragon") and the log ("Adult Red Dragon used Fiery Rays, a Legendary Action."). A log line is worded from its stored event each time it is read (`shared/logText.ts` `useText`), so older lines read with the capitals too and no stored line is rewritten. Rejected: lowering "Legendary resistance", the stat block's own name.
 
 ## 5. UI checklist
 
 - **Words shown**: as 3.2, 3.1 and 3.7. Nothing else on screen changes.
 - **Keys and focus**: the pips take no focus, so the DM's Tab no longer stops on up to 20 pips. Off buttons keep their focus and say why on a tap, as today. Restore stays after the last restore, now on Legendary Actions too, so focus stays on it.
-- **Screen readers**: the pips are `aria-hidden`. The name carries hidden words after it, so a row reads "Legendary Actions, 2 of 3 left", "Legendary Resistance, 3 of 3 left", "Dominate Mind, 2/Day, 1 of 2 left", "Rage, 2 of 3 left", and over 6 "7 of 10 left". A recharge reads "Fire Breath, Recharge 5–6, Used". Button names stay: "Use Lash, legendary action, 2 left", "Restore one Legendary Resistance", "Restore one use of Dominate Mind".
+- **Screen readers**: the pips are `aria-hidden`. The name carries hidden words after it, so a row reads "Legendary Actions, 2 of 3 left", "Legendary Resistance, 3 of 3 left", "Dominate Mind, 2/Day, 1 of 2 left", "Rage, 2 of 3 left", and over 6 "7 of 10 left". A recharge reads "Fire Breath, Recharge 5–6, Used". Button names stay, with "Legendary Action" in capitals (D-261026-6): "Use Lash, Legendary Action, 2 left", "Restore one Legendary Action", "Restore one Legendary Resistance", "Restore one use of Dominate Mind".
 - **Loading and busy**: unchanged ("Loading the uses…", busy buttons that refuse a second tap, the status line).
 - **Large interface sizes**: measured at 390 x 844, 320 x 568 and 1280 x 800, at 100% and 130%. The sweep found nothing over 1 px, and every pip's right edge sat on its buttons' right edge, 0.0 px off, in all three surfaces.
 
@@ -92,7 +92,7 @@ The owner's seventh line (D-261026-2's fifth and sixth amendments). A class reso
 |---|---|---|
 | Aboleth, DM, 1 Resistance and 1 Lash spent | Pips ●●○ on both lines, no pips block under the list | UsesSection.test.ts, combatuses.e2e.ts |
 | Dragon on another creature's turn | **Legendary Actions** with pips, its three actions and Restore, Fiery Rays off once taken | logic.test.ts, combatuses.e2e.ts |
-| Counts set by hand, no block | "Spend a legendary action" under the pips | logic.test.ts |
+| Counts set by hand, no block | "Spend a Legendary Action" under the pips | logic.test.ts |
 | Legendary Resistance full | Use, and Restore off. A tap on Restore says "Legendary Resistance is full." | combatuses.e2e.ts |
 | Dominate Mind full | Restore off. A tap says "Dominate Mind is full." | UsesSection.test.ts |
 | Dominate Mind, none left | No pip filled, Use off with its reason, Restore on | logic.test.ts |
@@ -136,4 +136,18 @@ The best pair is `before-phone-100-aboleth-panel-sheet.png` and `proposal-phone-
 
 ## As built
 
-(The builder fills this in.)
+Where the build went its own way, or settled what the design left open:
+
+- **The name's basis is its longest word**, not a 50% flex-basis (3.1). `NameLine` (client/components/CountPips.tsx) gives the name `width: min-content` with `overflow-wrap: break-word`, which, unlike `anywhere`, leaves the longest word as its `min-content`, and still breaks a word longer than the line. The e2e checks the rule at every title line it measures: the pips share the name's line exactly where its longest word, the gap and the pips fit side by side.
+- **The pips are one SVG**, `aria-hidden`, a circle for each use, filled in the accent for each one left. As spans, a row of pips read to the alignment sweep as a row of boxes, so Rage's row (3 pips) was taken for kin of Lay on Hands' row with its amount field open, and failed kind-height by 48 px. One picture reads as an icon beside the words, as the pips are.
+- **The name stands in an element of its own** inside the bold name, beside the hidden count words, so a search by the name's words alone, as the e2e files' rows by name do, still finds it.
+- **A character's row over 6 keeps today's markup exactly**, its words beside its name. Only a row of 6 or fewer takes the shared name line. ResourceRows.test.ts pins both against the markup the build found: only Rage's name line differs, and Lay on Hands' row not at all.
+- **Regeneration and skipped prompts take the 16 px title line** too (3.1, "each row"), their words as today. A player character's skipped death save row is one of these, and its words and buttons are as before.
+- **Legendary Actions' Restore, off while full, says "Legendary Actions are full."**, as the other counts say theirs.
+- **A recharge's state** stands at the right end `aria-hidden`, and the name carries it as hidden words (", Used"), as a count's.
+- **"Recharge 5–6" stays on one line.** At 16 px the dragon's "Fire Breath, Recharge 5–6" no longer fits beside "Ready" in its tracker row at 390 x 844 and 130% (253 px for about 255), and a line may break after an en dash, which left the "6" alone on the next line. The range now wraps whole, after "Fire Breath,".
+- **"Legendary Action" in capitals** reached three files outside the design's list: shared/logText.ts (the log's words), shared/reducer/uses.ts (the refusal) and server/rooms/undoLabels.ts (the undo label), each with its test.
+- **The turn card** (MU-OPUS-06) is measured by the existing sweep in combatuses cu-b-9, at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%, which shoots it at each, and cu-b-5 checks its Legendary Actions: the pips, "After other creatures' turns" and no button.
+- **Measured** in combatuses (mu-a, s2-cu-a, mu-d) at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: the Aboleth, the dragon (its counts at a most of 1 to 7 in its row and 3, 6 and 7 in its panel), the Tarrasque's 6, and Thorn's Rage at 6, Second Wind (3), Action Surge (1) and Lay on Hands (25), in their Token panels and tracker rows. Every count ends on its line's right end and its buttons' right edge within 1 px, and the alignment check found nothing over 1 px. The pips share the name's line everywhere but one place: "Legendary Resistance" with 6 pips in a tracker row at 320 x 568 and 130%, where its longest word (110 px), the gap (10 px) and the pips (135 px) need 255 px of a 254 px line, so the pips stand as one part at the next line's right end. In the panel at that size (276 px) they share it, as Rage's 6 do in the row.
+- **The alignment sweep** gains the dragon's Token panel Uses as a root (`cu-panel-uses`, e2e/alignmentRoom.ts). Its row group, its bar's drawer, its turn card and Thorn's Uses were roots already.
+
