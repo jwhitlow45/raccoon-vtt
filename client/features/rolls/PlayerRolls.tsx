@@ -16,7 +16,7 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { GRABBER_ROOM, SheetGrabber } from "../../components/SheetGrabber.tsx";
 import { dockSummaryButton, RETURN_RANK, sheetFocusSlot, useAlertsSummary, useSheetReturnFocus } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
-import { useFieldInView, useKeyboardView, useTypingWithin } from "../../lib/keyboardInset.ts";
+import { bodyHoldsField, useFieldInView, useKeyboardView, useTypingWithin } from "../../lib/keyboardInset.ts";
 import { displayName } from "../../lib/scene.ts";
 import { GRAB_ATTR, GRAB_STYLE, useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -457,13 +457,23 @@ function RollCard(props: {
   // The toolbar and the active tool's options as Room measured them (canvas/barDock.ts Chrome), in the card's own pixels, lifted onto the on-screen keyboard while someone types (placedChrome).
   const measured = useStore(useScoped(barDockSlot), (s) => s.chrome);
   const typing = useStore(useScoped(barDockSlot), (s) => s.typing);
-  const chrome = useMemo(() => (measured ? placedChrome(measured, typing) : null), [measured, typing]);
+  /*
+   * Where what shows over the keyboard is too short for its total and Send
+   * under its header, as at 320 x 568 at 130% in a fight over a 300 px
+   * keyboard, the card first rises over the bars, then its header stops
+   * sticking: one step at a time, each once the card has laid out, held
+   * until the keyboard closes so nothing moves under a finger on its way to
+   * Send. 0 is neither, 1 over the bars, 2 over the bars and unstuck.
+   */
+  const [cramped, setCramped] = useState(0);
+  const chrome = useMemo(() => (measured ? placedChrome(measured, typing, cramped > 0) : null), [measured, typing, cramped]);
   // Only while it shows, so a card folded under a sheet, or one that arrived there, never takes Back from the sheet.
   useBackClose(props.sheet && !props.hidden, props.onFold);
   // At the screen's foot a swipe down puts it off as Later does, with what was typed kept, so unsaved input never holds it (docs/design-v1-sheet-swipe.md section 3).
   useSheetSwipe(props.cardRef, { enabled: props.sheet && !props.hidden, onClose: props.onFold, item: props.request.id, clip: "screen", keeps: true });
   // At the foot it stands on the on-screen keyboard (placedChrome above), and its total shows with Send.
-  useFieldInView(props.cardRef, useKeyboardView(), theme.space(2));
+  const view = useKeyboardView();
+  useFieldInView(props.cardRef, useMemo(() => ({ view, cramped }), [view, cramped]), theme.space(2));
   /*
    * A roll that lands while the card shows, from its Roll or from the Dice
    * panel, is news to the player, so the card shows its result in place
@@ -504,7 +514,16 @@ function RollCard(props: {
    */
   const headerRef = useRef<HTMLDivElement>(null);
   const { onMeasure, request: shownRequest } = props;
-  const sticks = props.sheet && props.stickyHeader;
+  const sticks = props.sheet && props.stickyHeader && cramped < 2;
+  // A header that sticks covers the card's top: the field keepers keep a field below it (lib/keyboardInset.ts reads the scroll padding).
+  useLayoutEffect(() => {
+    const card = props.cardRef.current;
+    if (card) card.style.scrollPaddingTop = sticks && headerRef.current ? `${headerRef.current.offsetHeight}px` : "";
+  });
+  useLayoutEffect(() => {
+    if (typing === null) setCramped(0);
+    else if (props.sheet && !props.hidden && cramped < 2 && props.cardRef.current && bodyHoldsField(props.cardRef.current, theme.space(2)) === false) setCramped(cramped + 1);
+  });
   useLayoutEffect(() => {
     const card = props.cardRef.current;
     const header = headerRef.current;
