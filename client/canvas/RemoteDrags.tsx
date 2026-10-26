@@ -152,7 +152,8 @@ function Ghost(props: {
   const shown = lowPower || !eased ? { x: drag.x, y: drag.y } : eased;
   if (props.iso) {
     const ghost = props.iso(token, shown, props.name);
-    if (props.part === "tag") return ghost.tag ? <Pill x={ghost.tag.x} y={ghost.tag.y - 4 / scale} scale={scale} name={props.name} size="map" color={color} small above /> : null;
+    // The pill Top-down draws and the stand rule judges (dragTag.ts), placed over the standing art.
+    if (props.part === "tag") return ghost.tag ? <Pill {...dragTagPill(token, shown, props.name, scale)} x={ghost.tag.x} y={ghost.tag.y - 4 / scale} color={color} /> : null;
     return <TokenGhost token={token} x={shown.x} y={shown.y} scale={scale} color={color} iso={ghost.standee} clip={ghost.clip} />;
   }
   return (

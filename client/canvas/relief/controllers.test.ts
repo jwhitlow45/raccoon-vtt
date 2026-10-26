@@ -178,6 +178,13 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     assert.match(read("features/traps/TrapLayer.tsx"), /const traps = useTreeShownView\(\(s\) => s\.view\?\.traps /);
   });
 
+  test("a standing ghost's tag is the pill Top-down draws and the stand rule judges, placed over its art (ISO2-FV-6)", () => {
+    const drags = read("canvas/RemoteDrags.tsx");
+    assert.equal(drags.match(/<Pill \{\.\.\.dragTagPill\(token, shown, props\.name, scale\)\}/g)?.length, 2, "both views spread one pill's props");
+    assert.match(drags, /<Pill \{\.\.\.dragTagPill\(token, shown, props\.name, scale\)\} x=\{ghost\.tag\.x\} y=\{ghost\.tag\.y - 4 \/ scale\} color=\{color\} \/>/);
+    assert.equal(drags.match(/<Pill /g)?.length, 2);
+  });
+
   test("ghosts and shadows read no drag while their tree is hidden", () => {
     assert.match(read("canvas/RemoteDrags.tsx"), /useRoomView\(\(s\) => \(shown \? s\.ephemeral\.drags : NO_DRAGS\)\)/);
     assert.match(read("canvas/TokenShadow.tsx"), /\(shown \? s\.spots\[token\.id\] : undefined\)/);
