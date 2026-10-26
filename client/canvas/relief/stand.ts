@@ -22,21 +22,61 @@ export function boxStands(fog: FogView, box: CellBox): boolean {
   return fog.boxClear(box);
 }
 
+type BoxToken = Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze" | "rotation" | "kind">;
+
 /**
- * The box a token covers in Top-down: the body as it is drawn, at its
- * stored corner, joined with the footprint the rules read (snapped, and
- * squeezed while it squeezes). Joining both fails closed whichever of the
- * two a later change draws.
+ * The two boxes a token covers in Top-down: the body as it is drawn,
+ * turned by its rotation about its middle as TokenNode.tsx's TokenBody
+ * turns the art and its clip, and the footprint the rules read (snapped,
+ * and squeezed while it squeezes). Testing both fails closed whichever of
+ * the two a later change draws.
  */
-export function tokenBox(token: Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze">, at: { x: number; y: number } = token): CellBox {
-  const fp = footprint(token);
+export function tokenBoxes(token: BoxToken, at: { x: number; y: number } = token): [CellBox, CellBox] {
   const rule = footprintRect({ ...token, x: at.x, y: at.y });
-  return {
-    x0: Math.min(at.x, rule.x),
-    y0: Math.min(at.y, rule.y),
-    x1: Math.max(at.x + fp.w, rule.x + rule.w),
-    y1: Math.max(at.y + fp.h, rule.y + rule.h),
-  };
+  return [turnedBody(at, footprint(token), token.rotation, token.kind === "object"), { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h }];
+}
+
+/** One box around both of a token's boxes, for a flat ghost's clip and the DM's dimming. */
+export function tokenBox(token: BoxToken, at: { x: number; y: number } = token): CellBox {
+  const [body, rule] = tokenBoxes(token, at);
+  return { x0: Math.min(body.x0, rule.x0), y0: Math.min(body.y0, rule.y0), x1: Math.max(body.x1, rule.x1), y1: Math.max(body.y1, rule.y1) };
+}
+
+/** Whether both of a token's boxes stand. */
+function tokenStands(fog: FogView, token: BoxToken, at: { x: number; y: number } = token): boolean {
+  const [body, rule] = tokenBoxes(token, at);
+  return boxStands(fog, body) && boxStands(fog, rule);
+}
+
+/** How far from a right angle a turn may be and still be drawn as one, so a stored 90 reads as exactly 90. */
+const RIGHT_ANGLE_EPS = 1e-12;
+
+/**
+ * The box of a body w by h with its corner at `at`, turned by `rotation`
+ * degrees about its middle: the rectangle's corners for an object, whose
+ * clip is square, and the ellipse's extent for anything else. A turn that
+ * is not finite draws unturned, as Top-down draws it. A circle, and any
+ * body at a right angle, gets an exact box, so a token on a sub-cell line
+ * touches no sub-cell past it: rounding in the general form would push its
+ * edge a hair over the line.
+ */
+export function turnedBody(at: { x: number; y: number }, size: { w: number; h: number }, rotation: number, square: boolean): CellBox {
+  const rad = ((Number.isFinite(rotation) ? rotation : 0) * Math.PI) / 180;
+  const c = snapUnit(Math.abs(Math.cos(rad)));
+  const s = snapUnit(Math.abs(Math.sin(rad)));
+  if (s === 0 || (!square && size.w === size.h)) return { x0: at.x, y0: at.y, x1: at.x + size.w, y1: at.y + size.h };
+  const cx = at.x + size.w / 2;
+  const cy = at.y + size.h / 2;
+  const a = size.w / 2;
+  const b = size.h / 2;
+  if (c === 0) return { x0: cx - b, y0: cy - a, x1: cx + b, y1: cy + a };
+  const hx = square ? a * c + b * s : Math.sqrt(a * a * c * c + b * b * s * s);
+  const hy = square ? a * s + b * c : Math.sqrt(a * a * s * s + b * b * c * c);
+  return { x0: cx - hx, y0: cy - hy, x1: cx + hx, y1: cy + hy };
+}
+
+function snapUnit(v: number): number {
+  return v < RIGHT_ANGLE_EPS ? 0 : v > 1 - RIGHT_ANGLE_EPS ? 1 : v;
 }
 
 /**
@@ -46,7 +86,7 @@ export function tokenBox(token: Pick<ViewToken, "x" | "y" | "size" | "w" | "h" |
  */
 export function creatureStands(fog: FogView, token: ViewToken, aboveFog: boolean): boolean {
   if (fog.all || aboveFog) return true;
-  return boxStands(fog, tokenBox(token));
+  return tokenStands(fog, token);
 }
 
 /**
@@ -56,7 +96,7 @@ export function creatureStands(fog: FogView, token: ViewToken, aboveFog: boolean
  */
 export function ghostStands(fog: FogView, token: ViewToken, at: { x: number; y: number }): boolean {
   if (fog.all) return true;
-  return boxStands(fog, tokenBox(token, at));
+  return tokenStands(fog, token, at);
 }
 
 /** Which tokens stand as standees and which lie flat under the fog, for the board's two stages. */

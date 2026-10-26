@@ -8,7 +8,7 @@ import { rng, token as makeToken } from "#shared/testutil.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { FogView, type CellBox } from "./fogView.ts";
-import { boxStands, creatureStands, ghostStands, lineStands, splitTokens } from "./stand.ts";
+import { boxStands, creatureStands, ghostStands, lineStands, splitTokens, tokenBox, tokenBoxes } from "./stand.ts";
 
 /**
  * The stand rule is the isometric view's security rule
@@ -107,6 +107,60 @@ function oracleToken(mask: Mask, t: ViewToken, at: { x: number; y: number } = t)
   return oracleClear(mask, { x0: at.x, y0: at.y, x1: at.x + fp.w, y1: at.y + fp.h }) && oracleClear(mask, { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h });
 }
 
+/** The rules' footprint of a token, as a box. */
+function footprintBox(t: ViewToken): CellBox {
+  const rule = footprintRect(t);
+  return { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h };
+}
+
+/**
+ * The sub-cells Top-down's turned art covers, found by its own drawing's
+ * geometry rather than by stand.ts: points across the body in its own
+ * frame (a rectangle for an object, an ellipse otherwise), turned about its
+ * middle as Konva turns a group, clockwise with y down.
+ */
+function drawnSubcells(t: ViewToken): [number, number][] {
+  const fp = footprint(t);
+  const a = fp.w / 2;
+  const b = fp.h / 2;
+  const cx = t.x + a;
+  const cy = t.y + b;
+  const rad = (t.rotation * Math.PI) / 180;
+  const out = new Map<string, [number, number]>();
+  const n = 60;
+  for (let i = 0; i <= n; i++) {
+    for (let j = 0; j <= n; j++) {
+      const u = -a + (2 * a * i) / n;
+      const v = -b + (2 * b * j) / n;
+      if (t.kind !== "object" && (u / a) ** 2 + (v / b) ** 2 > 1) continue;
+      // Points a hair inside the outline, so one lying on a sub-cell line is not counted on the far side.
+      const x = cx + 0.999 * (u * Math.cos(rad) - v * Math.sin(rad));
+      const y = cy + 0.999 * (u * Math.sin(rad) + v * Math.cos(rad));
+      const sx = Math.floor(x * FOG_SUBCELLS);
+      const sy = Math.floor(y * FOG_SUBCELLS);
+      out.set(`${sx},${sy}`, [sx, sy]);
+    }
+  }
+  return [...out.values()];
+}
+
+/** Fog with these cell rectangles [x0, y0, x1, y1) revealed, on a 16 by 16 scene. */
+function fogOf(rects: readonly (readonly [number, number, number, number])[]): FogView {
+  const bits = new Uint8Array(TILE_BYTES);
+  for (const [x0, y0, x1, y1] of rects) {
+    for (let sy = y0 * FOG_SUBCELLS; sy < y1 * FOG_SUBCELLS; sy++) {
+      for (let sx = x0 * FOG_SUBCELLS; sx < x1 * FOG_SUBCELLS; sx++) {
+        const i = sy * TILE_SUB + sx;
+        bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+      }
+    }
+  }
+  return new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) } }, "s1", { w: 16, h: 16 });
+}
+
+/** The 3 by 3 cells around one cell revealed. */
+const fog3x3 = (x: number, y: number) => fogOf([[x - 1, y - 1, x + 2, y + 2]]);
+
 describe("the stand rule", () => {
   test("property: a creature stands only where every sub-cell under it is revealed, and every other one lies flat", () => {
     const random = rng(26105);
@@ -198,6 +252,86 @@ describe("the stand rule", () => {
       }
     }
     assert.ok(stood > 20, `${stood} lines stood`);
+  });
+
+  test("property: a turned token stands only where every sub-cell under its turned art is revealed", () => {
+    const random = rng(26110);
+    let stood = 0;
+    let lay = 0;
+    // Turned art reaches further, so fewer stand: more rounds give both outcomes enough cases.
+    for (let round = 0; round < 500; round++) {
+      const scene = randomScene(random);
+      const fog = new FogView(scene.tiles, scene.id, scene.bounds);
+      const mask = revealedMask(scene.bounds, scene.id, scene.tiles);
+      for (let i = 0; i < 12; i++) {
+        const angles = [45, 90, 135, 180, 270, 30, -60, random() * 360];
+        const t = { ...randomToken(random, scene, i), rotation: angles[Math.floor(random() * angles.length)]!, kind: random() < 0.5 ? "object" : "monster" } as ViewToken;
+        const stands = creatureStands(fog, t, false);
+        if (!stands) {
+          lay++;
+          continue;
+        }
+        stood++;
+        for (const [sx, sy] of drawnSubcells(t)) {
+          const open = sx >= 0 && sy >= 0 && sx < mask.width && sy < mask.height && mask.revealed[sy * mask.width + sx] === 1;
+          assert.ok(open, `round ${round}: ${t.id} (${t.kind}, ${t.size} ${footprint(t).w}x${footprint(t).h}, turned ${t.rotation}) stood with its art over fogged ${sx}, ${sy}`);
+        }
+        assert.ok(oracleClear(mask, footprintBox(t)), `round ${round}: ${t.id} stood with its footprint over fog`);
+      }
+    }
+    assert.ok(stood > 100 && lay > 100, `${stood} stood and ${lay} lay flat`);
+  });
+
+  test("a square turned 45 degrees reaches past its cell, and a 4 by 1 turned 90 degrees stands across, not along", () => {
+    const crate = makeToken("crate", { kind: "object", x: 4, y: 4, rotation: 45 }) as ViewToken;
+    const cellOnly = fogOf([[4, 4, 5, 5]]);
+    assert.equal(creatureStands(fog3x3(4, 4), crate, false), true, "with the cells around it revealed");
+    assert.equal(creatureStands(cellOnly, crate, false), false, "its corners lie over the fogged cells around it");
+    assert.equal(creatureStands(cellOnly, { ...crate, rotation: 0 } as ViewToken, false), true, "unturned, it fits its cell");
+    // A round creature looks the same at any turn, so it still fits its cell.
+    assert.equal(creatureStands(cellOnly, { ...crate, kind: "monster" } as ViewToken, false), true);
+
+    const plank = makeToken("plank", { kind: "object", size: "custom", w: 4, h: 1, x: 4, y: 4, rotation: 90 }) as ViewToken;
+    const along = fogOf([[4, 4, 8, 5]]);
+    assert.equal(creatureStands(along, plank, false), false, "Top-down draws it across [5.5, 6.5] by [2.5, 6.5], mostly under fog");
+    assert.equal(creatureStands(along, { ...plank, rotation: 0 } as ViewToken, false), true);
+    const both = fogOf([[4, 4, 8, 5], [5, 2, 7, 7]]);
+    assert.equal(creatureStands(both, plank, false), true, "with its turned art and its footprint revealed");
+    assert.equal(creatureStands(fogOf([[4, 2, 8, 7]]), plank, false), true);
+    assert.deepEqual(tokenBox(plank), { x0: 4, y0: 2.5, x1: 8, y1: 6.5 }, "one box around the turned art and the rules' footprint, for a flat ghost's clip");
+    // A ghost turns the same way.
+    assert.equal(ghostStands(along, plank, { x: 4, y: 4 }), false);
+  });
+
+  test("a turned rectangle's box is its turned corners', and a turned ellipse's is no wider than its art", () => {
+    for (const rotation of [30, 60, 120, 200, -15]) {
+      const slab = makeToken("slab", { kind: "object", size: "custom", w: 3, h: 1, x: 2, y: 5, rotation }) as ViewToken;
+      const rad = (rotation * Math.PI) / 180;
+      const corners = [
+        [-1.5, -0.5],
+        [1.5, -0.5],
+        [1.5, 0.5],
+        [-1.5, 0.5],
+      ].map(([u, v]) => ({ x: 3.5 + u! * Math.cos(rad) - v! * Math.sin(rad), y: 5.5 + u! * Math.sin(rad) + v! * Math.cos(rad) }));
+      const [body] = tokenBoxes(slab);
+      const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+      assert.ok(near(body.x0, Math.min(...corners.map((c) => c.x))) && near(body.x1, Math.max(...corners.map((c) => c.x))), `x at ${rotation}`);
+      assert.ok(near(body.y0, Math.min(...corners.map((c) => c.y))) && near(body.y1, Math.max(...corners.map((c) => c.y))), `y at ${rotation}`);
+      // The same footprint as a creature draws an ellipse, inside the rectangle's box and touching it nowhere wider.
+      const [oval] = tokenBoxes({ ...slab, kind: "monster" } as ViewToken);
+      const points = Array.from({ length: 3600 }, (_, i) => {
+        const t = (i / 3600) * 2 * Math.PI;
+        const u = 1.5 * Math.cos(t);
+        const v = 0.5 * Math.sin(t);
+        return { x: 3.5 + u * Math.cos(rad) - v * Math.sin(rad), y: 5.5 + u * Math.sin(rad) + v * Math.cos(rad) };
+      });
+      assert.ok(Math.abs(oval.x1 - Math.max(...points.map((p) => p.x))) < 1e-5 && Math.abs(oval.y1 - Math.max(...points.map((p) => p.y))) < 1e-5, `ellipse at ${rotation}`);
+    }
+  });
+
+  test("a turn that is not finite draws, and is judged, unturned", () => {
+    const plank = makeToken("plank", { kind: "object", size: "custom", w: 4, h: 1, x: 4, y: 4, rotation: Number.NaN }) as ViewToken;
+    assert.deepEqual(tokenBox(plank), { x0: 4, y0: 4, x1: 8, y1: 5 });
   });
 
   test("everything stands for a viewer who sees all the ground: the DM, or a scene without fog", () => {
