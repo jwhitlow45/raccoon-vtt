@@ -51,6 +51,7 @@ export function PingController(props: ControllerProps): null {
     tool === "select",
     (stage, p) => {
       const b = board.current;
+      // Seam for ISO-4: once its pick is stacked under this, read the press through `pressAt(boardPickOf(...), screen)` (design 6.2) in place of pickOnBoard.
       return pickOnBoard(stage, b.view, { room: store.getState().view, scene: b.scene, role: b.role, fog: b.fog, lowPower: b.lowPower }, p);
     },
     (x, y, pointerId) => {
