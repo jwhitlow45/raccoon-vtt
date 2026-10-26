@@ -100,7 +100,7 @@ describe("the shard script ends once it has reported", () => {
     mkdirSync(path.join(dir, "scripts"));
     mkdirSync(path.join(dir, "e2e"));
     mkdirSync(path.join(dir, "dist"));
-    for (const f of ["e2e-shard.ts", "e2e-shard-plan.ts", "e2e-join-counts.ts", "e2e-results.ts"]) copyFileSync(path.join(ROOT, "scripts", f), path.join(dir, "scripts", f));
+    for (const f of ["e2e-shard.ts", "e2e-shard-plan.ts", "e2e-join-counts.ts"]) copyFileSync(path.join(ROOT, "scripts", f), path.join(dir, "scripts", f));
     copyFileSync(path.join(ROOT, "package.json"), path.join(dir, "package.json"));
     symlinkSync(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"));
     writeFileSync(path.join(dir, "dist/index.html"), "<!doctype html>\n");

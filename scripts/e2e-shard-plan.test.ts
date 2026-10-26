@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { anyRerun, attempt, CLEANUP_SECONDS, filePassed, generousLimit, NO_TIME, outcome, passedOnRerun, plan, rerunSkips, runLimit, secondsFor, skipPattern, SLOW, summaryCount, withTimeout, type AttemptSteps, type Durations, type Result, type Run, type TestResult } from "./e2e-shard-plan.ts";
+import { anyRerun, attempt, CLEANUP_SECONDS, filePassed, generousLimit, NO_TIME, outcome, passedOnRerun, plan, runLimit, secondsFor, SLOW, summaryCount, withTimeout, type AttemptSteps, type Durations, type Result, type Run } from "./e2e-shard-plan.ts";
 
 const durations: Durations = { defaultSeconds: 60, seconds: { swipe: 284, reach: 179, bardock: 169, layout: 124, pdf: 69, dice: 12, kit: 4 } };
 const files = ["dice", "kit", "layout", "pdf", "reach", "swipe", "bardock", "brandnew"];
 
 function run(over: Partial<Run> = {}): Run {
-  return { ok: true, seconds: 30, tests: 10, passed: 10, todo: 0, leftOut: 0, timedOut: false, countsCleared: true, ...over };
+  return { ok: true, seconds: 30, tests: 10, passed: 10, todo: 0, timedOut: false, countsCleared: true, ...over };
 }
 
 describe("the shard plan", () => {
@@ -77,12 +77,6 @@ describe("the report's lines", () => {
     assert.equal(outcome(run({ ok: false, timedOut: true, tests: null, passed: null })), "timed out in 30 s");
     assert.equal(outcome(run({ countsCleared: false })), "passed (10 tests) in 30 s, join counts not cleared");
     assert.equal(outcome(NO_TIME), "not run, too little of the job's time left");
-  });
-
-  test("a rerun that left tests out says how many", () => {
-    assert.equal(outcome(run({ seconds: 40, tests: 8, leftOut: 3 })), "passed (8 tests, 3 left out) in 40 s");
-    assert.equal(outcome(run({ ok: false, tests: 8, passed: 7, todo: 1, leftOut: 3 })), "failed (7 of 8 tests passed, 1 todo, 3 left out) in 30 s");
-    assert.equal(outcome(run({ ok: false, timedOut: true, tests: null, passed: null, leftOut: 3 })), "timed out (3 left out) in 30 s");
   });
 });
 
@@ -175,7 +169,7 @@ function fakeSteps(opts: { cleanupStalls?: boolean; runStalls?: boolean; cleanup
       runs.push(seconds);
       const took = opts.runStalls ? seconds : Math.min(seconds, opts.runSeconds ?? 30);
       clock.now += took;
-      return { ok: !opts.runStalls, seconds: took, tests: 1, passed: opts.runStalls ? 0 : 1, todo: 0, leftOut: 0, timedOut: opts.runStalls === true };
+      return { ok: !opts.runStalls, seconds: took, tests: 1, passed: opts.runStalls ? 0 : 1, todo: 0, timedOut: opts.runStalls === true };
     },
     note: (line) => notes.push(line),
   };
@@ -234,63 +228,5 @@ describe("an attempt and the cleanup before it", () => {
       await attempt(limit!, f.steps);
     }
     assert.ok(left() >= SLOW * rest, `${left()} s left for ${SLOW * rest} s of files`);
-  });
-});
-
-describe("what a rerun leaves out", () => {
-  const pass = (full: string): TestResult => ({ full, ok: true });
-  const fail = (full: string): TestResult => ({ full, ok: false });
-
-  test("the passes after the last failure, and nothing up to it", () => {
-    const results = [pass("s 0. room"), fail("s 1. a"), pass("s 2. b"), fail("s 3. c"), pass("s 4. d"), pass("s inner 5. e")];
-    assert.deepEqual(rerunSkips(results, 6), ["s 4. d", "s inner 5. e"]);
-  });
-
-  test("nothing, so the whole file runs again, when no test failed or the last one did", () => {
-    assert.deepEqual(rerunSkips([pass("s 0"), pass("s 1")], 2), [], "an after hook or the process failed the file");
-    assert.deepEqual(rerunSkips([pass("s 0"), fail("s 1")], 2), []);
-  });
-
-  test("nothing when the results are not whole: missing, cut short, or a result with no full name", () => {
-    assert.deepEqual(rerunSkips([], 3), []);
-    assert.deepEqual(rerunSkips([fail("s 0"), pass("s 1")], null), [], "a run with no totals, as one killed");
-    assert.deepEqual(rerunSkips([fail("s 0"), pass("s 1")], 3), [], "a result missing");
-    assert.deepEqual(rerunSkips([fail("s 0"), pass("s 1"), { full: null, ok: true }], 3), []);
-  });
-
-  test("a name shared with a test that runs again is kept, and a name twice is left out once", () => {
-    assert.deepEqual(rerunSkips([pass("s check"), fail("s 1"), pass("s check"), pass("s 2"), pass("s 2")], 5), ["s 2"]);
-  });
-
-  /**
-   * Many runs of random results, against the rule's invariants: every
-   * failed test runs again (I1), every test up to the last failure runs
-   * again (I2), only a test that passed after it is left out (I3), and a
-   * run with no failure, or results not whole, reruns whole (I4).
-   */
-  test("random results keep the invariants", () => {
-    let seed = 7;
-    const random = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
-    for (let n = 0; n < 2000; n++) {
-      const names = Array.from({ length: 1 + Math.floor(random() * 6) }, (_, i) => `s ${i}`);
-      const results: TestResult[] = Array.from({ length: Math.floor(random() * 12) }, () => ({ full: random() < 0.05 ? null : names[Math.floor(random() * names.length)]!, ok: random() < 0.7 }));
-      const tests = random() < 0.1 ? results.length + 1 : results.length;
-      const skips = new Set(rerunSkips(results, tests));
-      const last = results.findLastIndex((r) => !r.ok);
-      const label = JSON.stringify({ results, tests, skips: [...skips] });
-      for (const r of results.filter((r) => !r.ok)) assert.ok(!skips.has(r.full!), `I1 ${label}`);
-      for (const r of results.slice(0, last + 1)) assert.ok(!skips.has(r.full!), `I2 ${label}`);
-      for (const full of skips) assert.ok(results.slice(last + 1).some((r) => r.ok && r.full === full), `I3 ${label}`);
-      if (last < 0 || tests !== results.length || results.some((r) => r.full === null)) assert.equal(skips.size, 0, `I4 ${label}`);
-    }
-  });
-
-  test("a skip pattern matches its full name whole and nothing else, whatever marks the name holds", () => {
-    const names = ["raccoon-vtt alignment sweep: phones pl3-b1. at 390 x 844 at 100% (on touch): every screen [1 px]", "s a.b*c+d?e^f$g{h}i|j/k\\l", "s 1. a"];
-    for (const full of names) {
-      const re = new RegExp(skipPattern(full));
-      assert.ok(re.test(full), full);
-      for (const other of [`${full} more`, `more ${full}`, full.slice(1), "s 1. ab", "s 1x a"]) assert.ok(!re.test(other), `${full} matched ${other}`);
-    }
   });
 });

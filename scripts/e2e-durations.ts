@@ -17,27 +17,26 @@ import type { Durations } from "./e2e-shard-plan.ts";
  * file, such as "barrest  passed (29 tests) in 906 s", which
  * scripts/e2e-shard.ts prints.
  *
- * A file's time is that of a whole run that passed, the first or its
- * rerun, and the largest over the runs given, as the list has always
- * held. A rerun that left tests out is not a whole run. A file no run
- * passed keeps its old time, and a file that no longer exists is dropped.
- * Give a few green runs of one commit or of commits close together.
+ * A file's time is that of a run that passed, the first or its rerun, and
+ * the largest over the runs given, as the list has always held. A file no
+ * run passed keeps its old time, and a file that no longer exists is
+ * dropped. Give a few green runs of one commit or of commits close together.
  */
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const LIST = path.join(ROOT, "e2e/durations.json");
 const USAGE = "Usage: node scripts/e2e-durations.ts <run id> [<run id> ...] [--print]";
 
-/** A run as the shard's report line gives it. `partial` is a rerun that left tests out, whose time is not the file's. */
-export type ReportedRun = { how: "passed" | "failed" | "timed out" | "not run"; seconds: number | null; partial: boolean };
+/** A run as the shard's report line gives it. */
+export type ReportedRun = { how: "passed" | "failed" | "timed out" | "not run"; seconds: number | null };
 export type Reported = { file: string; first: ReportedRun; rerun: ReportedRun | null };
 
-const RUN = /^(passed|failed|timed out)(?: \(([^)]*)\))? in (\d+) s/;
+const RUN = /^(passed|failed|timed out)(?: \([^)]*\))? in (\d+) s/;
 
 function readRun(text: string): ReportedRun {
   const m = RUN.exec(text);
-  if (!m) return { how: "not run", seconds: null, partial: false };
-  return { how: m[1] as ReportedRun["how"], seconds: Number(m[3]), partial: /\bleft out\b/.test(m[2] ?? "") };
+  if (!m) return { how: "not run", seconds: null };
+  return { how: m[1] as ReportedRun["how"], seconds: Number(m[2]) };
 }
 
 /**
@@ -72,10 +71,10 @@ export function readReport(log: string): Reported[] {
   return out;
 }
 
-/** The seconds of the whole run that passed, or null when neither did, or only a rerun that left tests out. */
+/** The seconds of the run that passed, or null when neither did. */
 export function passedSeconds(r: Reported): number | null {
   if (r.first.how === "passed") return r.first.seconds;
-  if (r.rerun?.how === "passed" && !r.rerun.partial) return r.rerun.seconds;
+  if (r.rerun?.how === "passed") return r.rerun.seconds;
   return null;
 }
 
