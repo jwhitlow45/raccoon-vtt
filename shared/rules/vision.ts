@@ -1630,7 +1630,13 @@ function renderTile(
   return uniform >= 0 ? { packed: UNIFORM[uniform]!, uniform, sole } : { packed, uniform, sole };
 }
 
-/** A tile's sole sources not worked out: every source counts as one, so nothing is skipped. */
+/**
+ * A tile's sole sources not worked out: every source counts as one, so
+ * nothing is skipped. Since it takes every bit of the Uint16 masks, a mask
+ * names at most 15 sources by place, and a source past that would lose its
+ * bit and skip tiles it needs. LIMITS.partySourcesPerScene is 12, and a
+ * test keeps it at 15 or less.
+ */
 const SOLE_UNKNOWN = 0xffff;
 
 /*
@@ -1639,7 +1645,7 @@ const SOLE_UNKNOWN = 0xffff;
  * source changes nothing in the tile. A source's runs in a row never
  * overlap, so counting the runs at a sub-cell's own level counts the
  * sources that give it. At most LIMITS.partySourcesPerScene sources draw,
- * which a mask of 16 bits holds.
+ * which the mask holds while it is 15 or less (SOLE_UNKNOWN).
  */
 function soleSources(levels: Uint8Array, runs: typeof scratch.runs): number {
   const { count, who } = scratch;
@@ -2102,20 +2108,27 @@ function viewOf(state: RoomState, sceneId: SceneId, entry: SceneEntry, memberId:
   if (ids.length === seeing) return entry.sight;
   const key = JSON.stringify(ids);
   let view = entry.views.get(key);
-  if (!view) entry.views.set(key, (view = new HolderSight(sceneId, entry, key, ids.map((id) => entry.sources.get(id)!))));
+  if (!view) {
+    entry.views.set(key, (view = new HolderSight(sceneId, entry, key, ids.map((id) => entry.sources.get(id)!))));
+    // Ownership edits keep one computation of the union, so its sets are bounded as the scene's rasters are, the oldest dropped first.
+    while (entry.views.size > RASTER_SETS_PER_SCENE) entry.views.delete(entry.views.keys().next().value!);
+  }
   return view;
 }
 
 /** A holder's raster: the levels of its own sources over one computation of the union (`serial`). */
 type Raster = Drawn & { serial: number; key: string; bytes: number };
 
-/** One source set's sight over one computation of the union. */
+/*
+ * One source set's sight over one computation of the union. It holds no
+ * raster itself: the scene's cache holds them, under its byte cap, and
+ * one the cache dropped is drawn again when next read, the same bits.
+ */
 class HolderSight implements PartySight {
   readonly #sceneId: string;
   readonly #entry: SceneEntry;
   readonly #key: string;
   readonly #sources: readonly SourceEntry[];
-  #raster: Raster | null = null;
 
   constructor(sceneId: string, entry: SceneEntry, key: string, sources: readonly SourceEntry[]) {
     this.#sceneId = sceneId;
@@ -2125,13 +2138,12 @@ class HolderSight implements PartySight {
   }
 
   get tiles(): ReadonlyMap<string, SightTile> {
-    this.#raster ??= rasterFor(this.#sceneId, this.#entry, this.#key, this.#sources);
-    return this.#raster.tiles;
+    return rasterFor(this.#sceneId, this.#entry, this.#key, this.#sources).tiles;
   }
 
   seesToken(probe: SightProbe): boolean {
-    this.#raster ??= heldRaster(this.#sceneId, this.#entry.serial, this.#key);
-    return this.#raster ? this.#raster.sight.seesToken(probe) : pointSees(this.#entry, this.#sources, probe);
+    const raster = heldRaster(this.#sceneId, this.#entry.serial, this.#key);
+    return raster ? raster.sight.seesToken(probe) : pointSees(this.#entry, this.#sources, probe);
   }
 }
 
@@ -2221,10 +2233,10 @@ function rasterFor(sceneId: string, entry: SceneEntry, key: string, sources: rea
     for (const e of rec.entries) if (e !== entry) others.push(e);
     for (const [k, list] of rec.rasters) if (k !== key) others.push(...list);
   }
-  const candidates = [entry, ...(rec?.rasters.get(key) ?? []), closestBase(others, entry, mine)];
-  let start: { base: Drawn | null; dirty: Uint8Array } | null = null;
-  let fewest = Infinity;
-  for (const base of candidates) {
+  // The union's own computation always starts it, so another start is taken only when it leaves fewer tiles.
+  let start = { base: entry as Drawn, dirty: dirtyFrom(entry, mine, entry)! };
+  let fewest = start.dirty.reduce((n, d) => n + d, 0);
+  for (const base of [...(rec?.rasters.get(key) ?? []), closestBase(others, entry, mine)]) {
     const dirty = base && dirtyFrom(entry, mine, base);
     if (!dirty) continue;
     let n = 0;
@@ -2234,8 +2246,7 @@ function rasterFor(sceneId: string, entry: SceneEntry, key: string, sources: rea
       fewest = n;
     }
   }
-  const all = new Uint8Array(Math.max(1, Math.ceil(entry.w / CHUNK_CELLS)) * Math.max(1, Math.ceil(entry.h / CHUNK_CELLS))).fill(1);
-  const raster = drawRaster(entry, key, mine, start ?? { base: null, dirty: all });
+  const raster = drawRaster(entry, key, mine, start);
   keepRaster(sceneId, raster);
   return raster;
 }
@@ -2288,6 +2299,8 @@ function closestBase(candidates: readonly Drawn[], entry: SceneEntry, mine: Read
  */
 function dirtyFrom(entry: SceneEntry, mine: ReadonlyMap<string, SourceEntry>, base: Drawn): Uint8Array | null {
   const { w, h, level } = entry;
+  // The level check carries weight: a dim and a bright computation keep the same polygons and senses, and a bright one has no
+  // light rows, so nothing below would see that the light differs everywhere.
   if (base.w !== w || base.h !== h || base.level !== level) return null;
   const across = Math.max(1, Math.ceil(w / CHUNK_CELLS));
   const dirty = new Uint8Array(across * Math.max(1, Math.ceil(h / CHUNK_CELLS)));
@@ -2329,17 +2342,17 @@ function dirtyFrom(entry: SceneEntry, mine: ReadonlyMap<string, SourceEntry>, ba
   return dirty;
 }
 
-/** A raster over the union's computation `entry`, for the sources `mine`, drawn from `base` again where `dirty` says (dirtyFrom). */
-function drawRaster(entry: SceneEntry, key: string, mine: ReadonlyMap<string, SourceEntry>, { base, dirty }: { base: Drawn | null; dirty: Uint8Array }): Raster {
+/** A raster over the union's computation `entry`, for the sources `mine`, drawn from `base` again where `dirty` says (dirtyFrom). Every start is a drawing of the same scene size and light level, the union's at worst. */
+function drawRaster(entry: SceneEntry, key: string, mine: ReadonlyMap<string, SourceEntry>, { base, dirty }: { base: Drawn; dirty: Uint8Array }): Raster {
   const { w, h, level } = entry;
   const across = Math.max(1, Math.ceil(w / CHUNK_CELLS));
   const down = Math.max(1, Math.ceil(h / CHUNK_CELLS));
   const bytesOf = (packed: (Uint8Array | null)[]) => 4096 + 2 * key.length + 64 * mine.size + tilesBytes(packed);
-  if (base && !dirty.includes(1)) {
+  if (!dirty.includes(1)) {
     return { serial: entry.serial, key, w, h, level, sources: mine, lightRows: entry.lightRows, packed: base.packed, tiles: base.tiles, sight: base.sight, bytes: bytesOf(base.packed) };
   }
-  const packed = base ? base.packed.slice() : new Array<Uint8Array | null>(across * down).fill(null);
-  const tiles = base ? new Map(base.tiles) : new Map<string, SightTile>();
+  const packed = base.packed.slice();
+  const tiles = new Map(base.tiles);
   redraw({ level, W: w * SUB, H: h * SUB }, across, down, dirty, [...mine.values()], entry.lightRows, packed, tiles);
   return { serial: entry.serial, key, w, h, level, sources: mine, lightRows: entry.lightRows, packed, tiles, sight: new TileSight(tiles, packedReader(packed, across, down)), bytes: bytesOf(packed) };
 }
