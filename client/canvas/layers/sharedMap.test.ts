@@ -50,14 +50,20 @@ describe("the board's trees share one map image", () => {
   test("a drawn map stays readable only while the loader still holds it, and never once freed", () => {
     const a = bitmap("a");
     const b = bitmap("b");
-    assert.equal(mapReadable(a, ready(a)), true);
-    assert.equal(mapReadable(a, LOADING), true, "the loader holds the last image while the next loads");
+    assert.equal(mapReadable(a, { url: "a", state: ready(a) }), true);
+    assert.equal(mapReadable(a, { url: "b", state: LOADING }), true, "the loader holds the last image while the next loads");
     // The render in which b settles, before the commit that frees a.
-    assert.equal(mapReadable(a, ready(b)), false);
-    assert.equal(mapReadable(a, { image: null, status: "failed" }), false);
+    assert.equal(mapReadable(a, { url: "b", state: ready(b) }), false);
+    assert.equal(mapReadable(a, { url: "b", state: { image: null, status: "failed" } }), false);
     assert.equal(mapReadable(a, null), true, "an image a reader's own hook loaded");
     release(a);
-    assert.equal(mapReadable(a, LOADING), false, "a freed bitmap, whatever the loader says");
+    assert.equal(mapReadable(a, { url: "b", state: LOADING }), false, "a freed bitmap, whatever the loader says");
     assert.equal(mapReadable(a, null), false);
+  });
+
+  test("a removed map is never read: with no map to load, the last image is unreadable at once, before it is freed (ISO2-ASTRA-10)", () => {
+    const a = bitmap("a");
+    assert.equal(mapReadable(a, { url: null, state: LOADING }), false);
+    assert.equal(mapReadable(a, { url: null, state: ready(a) }), false, "whatever the loader still answers");
   });
 });

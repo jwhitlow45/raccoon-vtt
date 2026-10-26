@@ -52,7 +52,11 @@ export type MapImageState = { image: MapSource | null; status: "loading" | "read
 export function useMapImage(url: string | null, fallbackUrl: string | null): MapImageState {
   const [loaded, setLoaded] = useState<{ url: string; image: MapSource | null } | null>(null);
   useEffect(() => {
-    if (!url) return;
+    if (!url) {
+      // No map now, so nothing draws the last one: let it go rather than hold it until the next map. The cleanup below frees it after this commit.
+      setLoaded(null);
+      return;
+    }
     let cancelled = false;
     const controller = new AbortController();
     loadMap(url, controller.signal)
@@ -89,13 +93,16 @@ export function useMapImage(url: string | null, fallbackUrl: string | null): Map
  * made it answers now. A drawImage of a freed bitmap throws. The loader
  * frees an image in the commit after another settles in its place, so a
  * reader lets go in that commit's render, before the free: once the loader
- * answers ready or failed with another image, or none. While it loads,
- * it still holds the last image it made. `loader` is null for an image a
+ * answers ready or failed with another image, or none. While it loads
+ * another map, it still holds the last image it made. With no map to load,
+ * the map is gone and nothing is read. `loader` is null for an image a
  * reader's own hook loaded.
  */
-export function mapReadable(image: MapSource, loader: MapImageState | null): boolean {
+export function mapReadable(image: MapSource, loader: { url: string | null; state: MapImageState } | null): boolean {
   if (freed.has(image)) return false;
-  return loader === null || loader.status === "loading" || loader.image === image;
+  if (loader === null) return true;
+  if (loader.url === null) return false;
+  return loader.state.status === "loading" || loader.state.image === image;
 }
 
 /**

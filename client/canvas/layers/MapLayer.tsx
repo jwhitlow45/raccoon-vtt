@@ -80,7 +80,7 @@ export type DrawnMap = { image: MapSource; rect: WorldRect };
 /** The drawn map while its pixels can still be read, else null (useImage.ts mapReadable). */
 export function useReadableMap(drawn: DrawnMap | null): DrawnMap | null {
   const shared = useContext(SharedMapContext);
-  return drawn && mapReadable(drawn.image, shared ? shared.state : null) ? drawn : null;
+  return drawn && mapReadable(drawn.image, shared) ? drawn : null;
 }
 
 /**
@@ -178,6 +178,8 @@ function MapImage(props: {
     if (!onDrawn) return;
     onDrawn(drawnImage ? { image: drawnImage, rect: { x: rx, y: ry, width: rw, height: rh } } : null);
   }, [onDrawn, drawnImage, rx, ry, rw, rh]);
+  // A map removed from its scene unmounts this, and nothing may go on reading the image it drew.
+  useEffect(() => () => onDrawn?.(null), [onDrawn]);
   if (!drawn) return null;
   // Every variant is stretched to the calibrated rectangle, so a phone's
   // 4096 px copy and a desktop's 8192 px original agree with the printed

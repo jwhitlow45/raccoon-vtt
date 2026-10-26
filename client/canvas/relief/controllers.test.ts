@@ -216,7 +216,9 @@ describe("both trees share one map image", () => {
   test("a tree on another map than the shared one keeps no image, and the tints read only an image the loader still holds (ISO2-OPUS-11)", () => {
     const map = read("canvas/layers/MapLayer.tsx");
     assert.match(map, /mapSwap\(\{ sceneId: props\.sceneId, assetId: props\.map\.assetId, rect, status, image \}, keepsLast \? kept : null\)/);
-    assert.match(map, /return drawn && mapReadable\(drawn\.image, shared \? shared\.state : null\) \? drawn : null;/);
+    assert.match(map, /return drawn && mapReadable\(drawn\.image, shared\) \? drawn : null;/);
+    // A map removed from its scene unmounts the map layer's image, which tells the tints it is gone (ISO2-ASTRA-10).
+    assert.match(map, /useEffect\(\(\) => \(\) => onDrawn\?\.\(null\), \[onDrawn\]\);/);
     const iso = read("canvas/relief/IsoBoard.tsx");
     assert.match(iso, /const readable = useReadableMap\(drawnMap\);/);
     const tints = iso.slice(iso.indexOf("const tints = useMemo("), iso.indexOf("}, [readable]);"));

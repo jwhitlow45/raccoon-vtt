@@ -187,6 +187,23 @@ async function suggest(view: "Top-down" | "Isometric"): Promise<void> {
   await group.getByRole("radio", { name: view }).check();
 }
 
+/** A plain map image of one color, uploaded as the DM, placed at 25 px a cell. */
+async function uploadMap(rgb: [number, number, number]) {
+  const data = await sharp({ create: { width: 500, height: 400, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer();
+  const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
+  assert.ok(res.ok(), `the upload answered ${res.status()}`);
+  const row = (await res.json()) as { id: string; width: number; height: number };
+  return { assetId: row.id, widthPx: row.width, heightPx: row.height, cellPx: 25, originPx: { x: 0, y: 0 } };
+}
+
+/** The scale of the board on screen, in pixels a cell. */
+function boardScale(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const konva = (globalThis as unknown as { Konva: { stages: { width(): number; scaleX(): number }[] } }).Konva;
+    return Math.max(...konva.stages.filter((st) => st.width() > 0).map((st) => st.scaleX()));
+  });
+}
+
 describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -691,15 +708,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       };
     });
     const maps = () => dm.evaluate(() => (globalThis as unknown as { __isoMaps: { made: number; freed: number } }).__isoMaps);
-    const upload = async (rgb: [number, number, number]) => {
-      const data = await sharp({ create: { width: 500, height: 400, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer();
-      const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
-      assert.ok(res.ok(), `the upload answered ${res.status()}`);
-      const row = (await res.json()) as { id: string; width: number; height: number };
-      return { assetId: row.id, widthPx: row.width, heightPx: row.height, cellPx: 25, originPx: { x: 0, y: 0 } };
-    };
-    const first = await upload([150, 140, 120]);
-    const second = await upload([70, 110, 90]);
+    const first = await uploadMap([150, 140, 120]);
+    const second = await uploadMap([70, 110, 90]);
     const shownIs = (kind: string) => waitFor(`the board in ${kind}`, async () => ((await shownView(dm)).startsWith(kind) ? true : null));
     // I goes to the other view, as a DM's key does.
     const show = async (kind: "isometric" | "top-down") => {
@@ -709,11 +719,6 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       }
       await shownIs(kind);
     };
-    const boardScale = () =>
-      dm.evaluate(() => {
-        const konva = (globalThis as unknown as { Konva: { stages: { width(): number; scaleX(): number }[] } }).Konva;
-        return Math.max(...konva.stages.filter((st) => st.width() > 0).map((st) => st.scaleX()));
-      });
 
     // Isometric with the first map: the board reads its tints from that bitmap.
     await ops.send({ t: "scene.setMap", sceneId: run.sceneId, map: first });
@@ -721,7 +726,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await waitFor("the first map decoded", async () => ((await maps()).made >= 1 ? true : null));
     await dm.waitForTimeout(500);
     // A height stands at this zoom (lib/view.ts STAND_MIN_PX), or no side is read.
-    assert.ok((await boardScale()) >= 12, "the DM's board is zoomed in far enough for heights to stand");
+    assert.ok((await boardScale(dm)) >= 12, "the DM's board is zoomed in far enough for heights to stand");
 
     // Top-down, then the second map: once it settles the first bitmap is freed, while Isometric's tree is hidden.
     await show("top-down");
@@ -746,7 +751,78 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await show("top-down");
   });
 
-  test("ISO-11. no page logged an error", () => {
+  test("ISO-11. a map removed while Pat's Isometric shows is never read again: a raised cell revealed after shows the neutral side, and the bitmap is freed (ISO2-ASTRA-10)", async () => {
+    const vault = randomUUID();
+    const raised = "2,2";
+    await ops.send({ t: "scene.create", scene: { id: vault, name: "The vault", bounds: { w: 8, h: 6 }, fogEnabled: true } });
+    await ops.send({ t: "scene.update", sceneId: vault, patch: { suggestedView: "isometric" } });
+    await ops.send({ t: "build.height", sceneId: vault, cells: [raised], height: 10 });
+    // Everything revealed but the raised cell, so no side of it has been read.
+    await ops.send({
+      t: "fog.live",
+      sceneId: vault,
+      ops: [
+        { id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 8, h: 6 } },
+        { id: randomUUID(), mode: "hide", shape: { kind: "cells", cells: [raised] } },
+      ],
+    });
+    // Pat's page counts the map bitmaps it makes and frees, and, once watching, every draw of one.
+    await pat.evaluate(() => {
+      const g = globalThis as unknown as {
+        createImageBitmap: (...a: unknown[]) => Promise<{ close(): void }>;
+        CanvasRenderingContext2D: { prototype: { drawImage(...a: unknown[]): void } };
+        __isoGone?: { made: number; freed: number; watching: boolean; drawn: number };
+      };
+      const gone = (g.__isoGone = { made: 0, freed: 0, watching: false, drawn: 0 });
+      const bitmaps = new Set<unknown>();
+      const make = g.createImageBitmap.bind(g);
+      g.createImageBitmap = async (...a: unknown[]) => {
+        const bitmap = await make(...a);
+        gone.made++;
+        bitmaps.add(bitmap);
+        const close = bitmap.close.bind(bitmap);
+        bitmap.close = () => {
+          gone.freed++;
+          close();
+        };
+        return bitmap;
+      };
+      const draw = g.CanvasRenderingContext2D.prototype.drawImage;
+      g.CanvasRenderingContext2D.prototype.drawImage = function (this: unknown, ...a: unknown[]) {
+        if (gone.watching && bitmaps.has(a[0])) gone.drawn++;
+        return draw.apply(this, a);
+      };
+    });
+    const gone = () => pat.evaluate(() => (globalThis as unknown as { __isoGone: { made: number; freed: number; drawn: number } }).__isoGone);
+    await ops.send({ t: "scene.setMap", sceneId: vault, map: await uploadMap([150, 140, 120]) });
+    await ops.send({ t: "room.setPlayerScene", sceneId: vault });
+    await waitFor("Pat on the vault", () => (patSocket.state?.meta.playerSceneId === vault ? true : null));
+    await waitFor("Pat's board in Isometric", async () => ((await shownView(pat)).startsWith("isometric") ? true : null));
+    await waitFor("the vault's map decoded", async () => ((await gone()).made >= 1 ? true : null));
+    await pat.waitForTimeout(500);
+    assert.ok((await boardScale(pat)) >= 24, "Pat's board is zoomed in far enough for heights to stand, even in low power");
+
+    await ops.send({ t: "scene.setMap", sceneId: vault, map: null });
+    await waitFor("the map gone from Pat's room", () => (patSocket.state?.scenes[vault] && !patSocket.state.scenes[vault]!.map ? true : null));
+    // Past the frame that stopped drawing it.
+    await pat.waitForTimeout(500);
+    await pat.evaluate(() => void ((globalThis as unknown as { __isoGone: { watching: boolean } }).__isoGone.watching = true));
+    await ops.send({ t: "fog.live", sceneId: vault, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "cells", cells: [raised] } }] });
+    await pat.waitForTimeout(800);
+    assert.equal((await gone()).drawn, 0, "nothing drew or read the removed map's image");
+    await waitFor("the removed map's bitmap freed, not held until the next map", async () => {
+      const g = await gone();
+      return g.freed >= g.made ? true : null;
+    });
+    assert.deepEqual(consoles.pat.errors, [], "Pat's board drew without an error");
+    await shots.take(pat, "iso-pat-map-removed-cell-revealed");
+
+    // The room as it was, for the tests after.
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await waitFor("Pat back on the first scene", () => (patSocket.state?.meta.playerSceneId === run.sceneId ? true : null));
+  });
+
+  test("ISO-12. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
 });
