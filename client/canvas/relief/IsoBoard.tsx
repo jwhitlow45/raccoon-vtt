@@ -218,11 +218,13 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // The box is made anew each render, so its numbers say when it changed.
   const items = useMemo(() => relief.layout(turn, cull, standees), [relief, synced, turn, cullKey, standees]);
 
+  // Looked up by id for each standee, silhouette and decor: a search of the list each time is quadratic at 500 tokens.
+  const byStandee = useMemo(() => new Map(standees.map((s) => [s.id, s])), [standees]);
+
   // Each standee's placing, kept while it is the same, so its node does not render again for a pan.
   const isoCache = useRef(new Map<string, IsoToken>());
   const isoOf = useMemo(() => {
     const next = new Map<string, IsoToken>();
-    const byStandee = new Map(standees.map((s) => [s.id, s]));
     for (const item of items) {
       if (item.kind !== "standee") continue;
       const s = byStandee.get(item.id)!;
@@ -234,7 +236,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     }
     isoCache.current = next;
     return next;
-  }, [items, standees, byId, turn, props.role, playersFog]);
+  }, [items, byStandee, byId, turn, props.role, playersFog]);
   const silhouettes = useMemo(() => items.filter((i): i is Extract<Item, { kind: "standee" }> => i.kind === "standee" && i.silhouette), [items]);
 
   // The lift margin: the highest drawn lift in view, in steps, at most one canvas height.
@@ -374,7 +376,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
           </Layer>
           <Layer listening={false}>
             {silhouettes.map((s) => (
-              <Silhouette key={s.id} token={byId.get(s.id)!} turn={turn} standee={standees.find((x) => x.id === s.id)!} scale={cam.scale} />
+              <Silhouette key={s.id} token={byId.get(s.id)!} turn={turn} standee={byStandee.get(s.id)!} scale={cam.scale} />
             ))}
             <UprightLabels labels={uprightLabels} turn={turn} ground={(x, y) => heights.at(Math.floor(x), Math.floor(y))} />
             {UPRIGHT_LAYERS.map(({ id, Component }) => (
@@ -384,7 +386,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
               props.decorTokens
                 .filter((t) => part !== "plate" || props.hasPlate(t))
                 .flatMap((t) => {
-                  const at = decorAt(t, standees, view, cull, props.keepIds);
+                  const at = decorAt(t, byStandee, view, cull, props.keepIds);
                   return at ? [props.renderDecor(t, part, at)] : [];
                 }),
             )}
@@ -430,12 +432,12 @@ const ReliefRun = memo(function ReliefRun(props: { pieces: StaticPiece[]; dc: { 
  */
 function decorAt(
   t: ViewToken,
-  standees: readonly Standing[],
+  standees: ReadonlyMap<string, Standing>,
   view: ReturnType<typeof isometric>,
   cull: VBox,
   keep: ReadonlySet<string>,
 ): { x: number; y: number } | null {
-  const s = standees.find((x) => x.id === t.id);
+  const s = standees.get(t.id);
   if (s) {
     if (!s.keep && !meets(s.bounds, cull)) return null;
     return { x: s.frame.x0, y: s.frame.y0 };

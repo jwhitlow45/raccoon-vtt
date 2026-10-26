@@ -214,6 +214,12 @@ describe("map labels in Isometric", () => {
   });
 });
 
+describe("the isometric board's lookups", () => {
+  test("standees are found by id in a map, never by searching the list", () => {
+    assert.doesNotMatch(read("canvas/relief/IsoBoard.tsx"), /standees\.find\(/);
+  });
+});
+
 describe("every isometric place draws", () => {
   test("a layer on the ground, moving or upright draws in Isometric, whichever layer of Top-down it came from", () => {
     const iso = read("canvas/relief/IsoBoard.tsx");
