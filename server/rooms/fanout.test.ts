@@ -6,7 +6,8 @@ import { applyChanges, changedSightKeys, hashValue, heldOf, projectState, stable
 import { opSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { LIMITS } from "#shared/limits.ts";
-import { DM, P1, P2, actor, effect, entry, env, randomOp, randomState, reveal, rng, room, scene, template, token } from "#shared/testutil.ts";
+import { withCellVision } from "#shared/perPlayerTestutil.ts";
+import { DM, P1, P2, actor, effect, entry, env, member, randomOp, randomState, reveal, rng, room, scene, template, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
 import { exploreOp } from "./explore.ts";
 import { buildSnapshot, publishBatch } from "./fanout.ts";
@@ -313,5 +314,36 @@ describe("a mount's path in its rider's turn (docs/design-v1-attach.md 7.2)", ()
     assert.equal(viewers[0]!.view.tokens.horse?.path, undefined, "with the goblin's row out of sight, so is the path");
     step({ t: "token.move", tokenId: "gob", x: 7, y: 2 });
     assert.ok(viewers[0]!.view.tokens.horse?.path, "and back with it");
+  });
+});
+
+describe("a per-player scene in the fan-out (docs/design-v1-per-player-vision.md 6.9, review SEC-PV1-1)", () => {
+  test("two holders' sight never shares one projection: each gets their own tile, and each copy stays its fresh projection", () => {
+    withCellVision(() => {
+      // Thorn, p1's, in the north west and Bree, p2's, in the south east, each seeing three cells out by the stub.
+      const state = room({
+        members: { dm1: member("dm1", "dm"), p1: member("p1"), p2: member("p2") },
+        tokens: {
+          thorn: token("thorn", { name: "Thorn", kind: "pc", ownerIds: ["p1"], disposition: "ally", x: 5, y: 5 }),
+          bree: token("bree", { name: "Bree", kind: "pc", ownerIds: ["p2"], disposition: "ally", x: 30, y: 25 }),
+        },
+      });
+      state.scenes.s1 = scene("s1", { vision: { on: true, light: "bright", perPlayer: true } });
+      state.holders.s1 = { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }, { memberId: "p2", on: true }] };
+      const viewers = [open(state, P1, "s1"), open(state, P2, "s1")];
+      const result = applyOp(state, { t: "token.move", tokenId: "thorn", x: 6, y: 5 }, DM, env(700));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      publishBatch({ seq: 700, before: state, after: result.state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      const tile = (v: Viewing) => {
+        const ev = v.inbox.find((m): m is Extract<ServerMessage, { t: "ev" }> => m.t === "ev");
+        return JSON.stringify(ev?.changes.find((c) => c.key === "sight:s1:0,0") ?? null);
+      };
+      assert.notEqual(tile(viewers[0]!), "null", "Thorn's player gets his new sight");
+      assert.notEqual(tile(viewers[0]!), tile(viewers[1]!), "and Bree's player never gets it");
+      for (const v of viewers) {
+        for (const msg of v.inbox.splice(0)) if (msg.t === "ev") v.view = applyChanges(v.view, msg.changes as Change[]);
+        assert.deepEqual(JSON.parse(JSON.stringify(v.view)), JSON.parse(JSON.stringify(projectState(result.state, v.conn.viewer, { sceneId: "s1" }))), v.conn.memberId);
+      }
+    });
   });
 });

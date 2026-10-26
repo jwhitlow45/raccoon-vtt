@@ -1,7 +1,7 @@
 import { keys, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
-import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, projectEntity, projectState, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
+import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, perPlayerScene, projectEntity, projectState, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import type { Change, RefusalCode } from "#shared/protocol.ts";
 import type { ClientKey, Connection } from "./connection.ts";
 
@@ -92,6 +92,8 @@ function hashOf(projected: unknown): string {
  * level switch, costs one player's projection of it rather than one per
  * player (docs/design-v1-maps-vision.md 4.3.6), and each value is hashed
  * once. Lights and the explored layer are the DM's and project to nothing.
+ * On a per-player scene sight, fog, labels and stamps do read who the player
+ * is, so a room with one shares none of them (publishBatch).
  */
 const SAME_FOR_EVERY_PLAYER = new Set(["chunk", "fog", "sight", "scene", "label", "stamp", "light", "explored", "fogDraft"]);
 
@@ -112,6 +114,9 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
   ].sort();
   const projections = new Map<string, Map<EntityKey, unknown>>();
   const forPlayers = new Map<EntityKey, unknown>();
+  // On a per-player scene sight, fog, labels and stamps are each player's own (docs/design-v1-per-player-vision.md 6.2), so a
+  // room with one projects every player alone until the projection classes of 6.9 replace this (review SEC-PV1-1).
+  const shareable = !Object.values(batch.after.scenes).some((scene) => perPlayerScene(scene));
   for (const conn of all) {
     if (conn.closed || conn.held === null) continue;
     const cls = viewerClass(conn, batch.after);
@@ -119,7 +124,7 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     if (!next) {
       next = new Map<EntityKey, unknown>();
       for (const key of candidates) {
-        const alike = conn.role === "player" && SAME_FOR_EVERY_PLAYER.has(key.slice(0, key.indexOf(":")));
+        const alike = shareable && conn.role === "player" && SAME_FOR_EVERY_PLAYER.has(key.slice(0, key.indexOf(":")));
         if (alike && forPlayers.has(key)) {
           next.set(key, forPlayers.get(key));
           continue;
