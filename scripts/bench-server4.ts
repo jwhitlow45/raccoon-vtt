@@ -41,6 +41,7 @@ import { SNAPSHOT_VERSION } from "../shared/migrate.ts";
 import { DEFAULT_SETTINGS, type EdgeFeature, type Member, type RoomState, type Token } from "../shared/model.ts";
 import type { Op } from "../shared/protocol.ts";
 import { encodeTile } from "../shared/rules/fog.ts";
+import { visionRules, type PartySight } from "../shared/ruleHooks.ts";
 import { clearVisionCache } from "../shared/rules/vision.ts";
 import { RoomActor, type ActorDeps } from "../server/rooms/actor.ts";
 import { SnapshotBudget } from "../server/rooms/budgets.ts";
@@ -158,18 +159,53 @@ function checkMode(state: RoomState, perPlayer: boolean): void {
   if (mode !== perPlayer || on !== (perPlayer ? PLAYERS : 0)) throw new Error(`the bench room is ${mode ? "per player" : "for the whole party"} with ${on} holders`);
 }
 
+/** The commit and fan-out of the op being timed: when its batch's COMMIT ran, and how long holders' tiles took to read since. */
+type Span = { commitAt: number; drawn: number };
+
+/** The span of the table sitting at the bench, which the wrapped holder sight below adds to. */
+let live: Span | null = null;
+
+/*
+ * Holders' rasters drawn, timed apart from the rest of the fan-out (PV3's
+ * gate needs the two apart): per player, the fan-out is the first to read
+ * each holder's tiles, so reading them there draws the rasters. Each read
+ * after the commit adds its time to the span. One wrapper per sight keeps
+ * a sight's identity across reads.
+ */
+const wrapped = new WeakMap<PartySight, PartySight>();
+const holderSight = visionRules.holderSight;
+visionRules.holderSight = (state, sceneId, memberId) => {
+  const sight = holderSight(state, sceneId, memberId);
+  let timedSight = wrapped.get(sight);
+  if (!timedSight) {
+    timedSight = new Proxy(sight, {
+      get(target, prop) {
+        const start = performance.now();
+        const value: unknown = Reflect.get(target, prop, target);
+        if (prop === "tiles" && live && live.commitAt > 0) live.drawn += performance.now() - start;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    wrapped.set(sight, timedSight);
+  }
+  return timedSight;
+};
+
 /**
  * A database that answers every statement at once from memory: the snapshot
- * to load, no op rows, the DM's grant, and success for every write. `commitAt`
- * is when the last batch's COMMIT ran.
+ * to load, no op rows, the DM's grant, and success for every write. A COMMIT
+ * starts the fan-out's span.
  */
-function memoryPool(state: RoomState, at: { commitAt: number }): Pool {
+function memoryPool(state: RoomState, at: Span): Pool {
   const run = (sql: string): Promise<{ rows: unknown[]; rowCount?: number }> =>
     Promise.resolve().then(() => {
       const s = sql.trim();
       if (s.includes("from room_snapshots")) return { rows: [{ seq: "0", state, schema_version: SNAPSHOT_VERSION }] };
       if (s.includes("from grants")) return { rows: [{ member_id: "dm" }] };
-      if (s === "commit") at.commitAt = performance.now();
+      if (s === "commit") {
+        at.commitAt = performance.now();
+        at.drawn = 0;
+      }
       return { rows: [], rowCount: 0 };
     });
   return { query: run, connect: () => Promise.resolve({ query: run, release: () => undefined }) } as unknown as Pool;
@@ -181,7 +217,7 @@ type Table = {
   players: Connection[];
   /** When anything was last sent to any socket, and the last message to the socket that sent the op being timed. */
   sent: { last: number; sender: Connection | null; senderText: string };
-  db: { commitAt: number };
+  db: Span;
   n: Map<Connection, number>;
 };
 
@@ -190,7 +226,8 @@ type SitDownTimes = { load: number[]; first: number[]; later: number[] };
 /** Loads the room and connects the DM and the players, each with its snapshot, as a table sitting down. */
 async function sitDown(state: RoomState, times?: SitDownTimes): Promise<Table> {
   const t0 = performance.now();
-  const db = { commitAt: 0 };
+  const db: Span = { commitAt: 0, drawn: 0 };
+  live = db;
   const deps: ActorDeps = {
     pool: memoryPool(state, db),
     info: { roomId: "BENCH000", pinned: true, createdIp: null, readOnly: false },
@@ -246,15 +283,16 @@ function settle(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-type Timing = { total: number; fanout: number };
+type Timing = { total: number; fanout: number; drawn: number };
 
-/** Sends one op from `conn` and times it to the last `ev` any socket was sent, and from the commit to that `ev`. */
+/** Sends one op from `conn` and times it to the last `ev` any socket was sent, from the commit to that `ev`, and the holders' rasters drawn in between. */
 async function send(table: Table, conn: Connection, op: Op, refusalOk = false): Promise<Timing> {
   const n = (table.n.get(conn) ?? 0) + 1;
   table.n.set(conn, n);
   table.sent.sender = conn;
   const t0 = performance.now();
   table.db.commitAt = 0;
+  table.db.drawn = 0;
   await table.actor.op(conn, n, op);
   // An op that applied commits at once (one op per batch). A refusal changes nothing and waits for the batch timer,
   // so its time is the actor's work on it, which is over when `op` returns.
@@ -275,8 +313,8 @@ async function send(table: Table, conn: Connection, op: Op, refusalOk = false): 
   const refused = answer.rejects?.find((r) => r.n === n);
   if (refused && !refusalOk) throw new Error(`${op.t} was refused: ${refused.message}`);
   if (!refused && refusalOk) throw new Error(`${op.t} was meant to be refused`);
-  if (refused) return { total: worked, fanout: 0 };
-  return { total: table.sent.last - t0, fanout: table.db.commitAt > 0 ? table.sent.last - table.db.commitAt : 0 };
+  if (refused) return { total: worked, fanout: 0, drawn: 0 };
+  return { total: table.sent.last - t0, fanout: table.db.commitAt > 0 ? table.sent.last - table.db.commitAt : 0, drawn: table.db.drawn };
 }
 
 type Ms = { median: number; max: number };
@@ -287,17 +325,21 @@ function stats(times: number[]): Ms {
   return { median: sorted[Math.floor(sorted.length / 2)]!, max: sorted[sorted.length - 1]! };
 }
 
-/** Runs `step` two times to warm up and then RUNS times, keeping both timings of each timed run. */
-async function timed(step: (run: number) => Promise<Timing>): Promise<{ total: Ms; fanout: Ms }> {
+/** Runs `step` two times to warm up and then RUNS times, keeping each timed run's timings, its fan-out split into the rasters drawn and the rest. */
+async function timed(step: (run: number) => Promise<Timing>): Promise<{ total: Ms; fanout: Ms; drawn: Ms; rest: Ms }> {
   const totals: number[] = [];
   const fanouts: number[] = [];
+  const drawn: number[] = [];
+  const rest: number[] = [];
   for (let r = 0; r < RUNS + 2; r++) {
     const t = await step(r);
     if (r < 2) continue;
     totals.push(t.total);
     fanouts.push(t.fanout);
+    drawn.push(t.drawn);
+    rest.push(t.fanout - t.drawn);
   }
-  return { total: stats(totals), fanout: stats(fanouts) };
+  return { total: stats(totals), fanout: stats(fanouts), drawn: stats(drawn), rest: stats(rest) };
 }
 
 let jiggles = 0;
@@ -351,8 +393,13 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
     budget: 10,
     ms: move.fanout,
     // Per player, the fan-out is the first to read each holder's tiles, so their rasters are drawn in it.
-    covers: `commit to the last ev of that move, 7 sockets${perPlayer ? ", each holder's raster drawn" : ""}`,
+    covers: `commit to the last ev of that move, 7 sockets${perPlayer ? ", each holder's raster drawn" : ""}: the gate reads its 10 ms budget on the server box and 6.7 ms (10 over 1.5) on a laptop`,
   });
+  if (perPlayer) {
+    const part = "a part of the fan-out row above, which the gate reads, shown against the same limit";
+    rows.push({ row: `Holders' rasters drawn in that fan-out, ${where}`, budget: 10, ms: move.drawn, covers: `${part}: each holder's tiles read the first time` });
+    rows.push({ row: `The rest of that fan-out, ${where}`, budget: 10, ms: move.rest, covers: `${part}: the per-player projection, its sight diffs and the sends` });
+  }
 
   if (level === "dark") {
     const lightOp = (kind: "added" | "moved" | "switched" | "removed", r: number): Op => {
