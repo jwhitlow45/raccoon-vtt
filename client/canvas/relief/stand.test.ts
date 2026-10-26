@@ -414,6 +414,25 @@ describe("the stand rule", () => {
     }
   });
 
+  test("a view looks each tile up once, both layers, however many of its sub-cells it reads (ISO5P2-FV-3)", () => {
+    const random = rng(26119);
+    const dm = randomScene(random);
+    const drawn = withExplored(dm.tiles, randomScene(random, dm.bounds).tiles) as Record<string, FogTile>;
+    let lookups = 0;
+    const counted = new Proxy(drawn, {
+      get(target, key, receiver) {
+        if (typeof key === "string") lookups++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const fog = new FogView(counted, dm.id, dm.bounds);
+    const mask = revealedMask(dm.bounds, dm.id, drawn);
+    for (let sy = 0; sy < mask.height; sy++) for (let sx = 0; sx < mask.width; sx++) assert.equal(fog.revealed(sx, sy), mask.revealed[sy * mask.width + sx] === 1, `at ${sx},${sy}`);
+    // The tile's own layer and its explored layer, each read once.
+    const tiles = Math.ceil(mask.width / TILE_SUB) * Math.ceil(mask.height / TILE_SUB);
+    assert.ok(lookups <= 2 * tiles, `${lookups} lookups for ${tiles} tiles`);
+  });
+
   test("on a per-player scene the DM's standee on ground only a player explored is not dimmed, and one on ground nobody revealed is (D-261026-18)", () => {
     const id = "s1";
     const bounds = { w: 8, h: 8 };

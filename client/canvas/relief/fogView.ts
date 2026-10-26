@@ -50,11 +50,21 @@ export class FogView {
   readonly tiles: Tiles | null;
   readonly sceneId: string;
   readonly bounds: { readonly w: number; readonly h: number };
+  /**
+   * Each tile's bits as first read, by its place. A view's tiles never
+   * change, and a box, a cell or a clip reads one tile for each of its
+   * sub-cells, so each tile's two keys are built and looked up once per
+   * view rather than per sub-cell (ISO5P2-FV-3).
+   */
+  private readonly read = new Map<number, Uint8Array | null>();
+  /** Tiles across the scene, which numbers each tile's place. */
+  private readonly across: number;
 
   constructor(tiles: Tiles | null, sceneId: string, bounds: { w: number; h: number }) {
     this.tiles = tiles;
     this.sceneId = sceneId;
     this.bounds = bounds;
+    this.across = Math.ceil((bounds.w * FOG_SUBCELLS) / TILE_SUB);
   }
 
   /** Whether this viewer sees every sub-cell, so nothing needs a test. */
@@ -62,8 +72,15 @@ export class FogView {
     return this.tiles === null;
   }
 
-  /** The bits of the tile at tx, ty, both layers', or null where the whole tile is fogged. */
+  /** The bits of the tile at tx, ty, both layers', or null where the whole tile is fogged. Every caller keeps tx, ty inside the scene. */
   private tileBits(tx: number, ty: number): Uint8Array | null {
+    const at = ty * this.across + tx;
+    let bits = this.read.get(at);
+    if (bits === undefined) this.read.set(at, (bits = this.readTile(tx, ty)));
+    return bits;
+  }
+
+  private readTile(tx: number, ty: number): Uint8Array | null {
     const own = this.layerTile(tileKey(this.sceneId, tx, ty), tx, ty);
     const explored = this.layerTile(`explored:${tileKey(this.sceneId, tx, ty)}`, tx, ty);
     if (own && explored) return unionOf(own, explored);
