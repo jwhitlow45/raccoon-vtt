@@ -242,7 +242,8 @@ export function wallItems(src: Pick<PieceSource, "ground">, pieces: readonly Wal
       continue;
     }
     const top = Math.min(high, Math.max(Math.min(a, b), 0)) + WALL_RISE;
-    if (high >= top) continue;
+    // Ground is whole feet over feet per cell, so a top level with the higher ground can land a float's hair above it, which would draw a hairline. A real rise is at least 1 / 200 cell.
+    if (top - high < 1e-9) continue;
     out.push({ kind: "wall", id, piece, base: high, rise: top - high });
   }
   return out;

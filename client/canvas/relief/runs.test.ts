@@ -222,6 +222,12 @@ describe("automatic walls beside raised ground", () => {
     assert.equal(itemOn(room({ "3,2": 5 }, {}, 10), "3,2n"), undefined);
   });
 
+  test("beside ground a wall's height above the floor in feet that do not divide evenly, an automatic wall stands nothing, not a hairline", () => {
+    // 5 and 8 ft on 6 ft cells, and 7 and 22 ft on 30 ft cells: in floats the top lands a hair above the higher ground.
+    assert.equal(itemOn(room({ "3,2": 5, "3,1": 8 }, {}, 6), "3,2n"), undefined);
+    assert.equal(itemOn(room({ "3,2": 7, "3,1": 22 }, {}, 30), "3,2n"), undefined);
+  });
+
   test("beside a platform lower than a wall, an automatic wall stands the rest, its top level with the wall on flat ground beside it, and its bounds are what it stands", () => {
     const items = room({ "4,2": 1 });
     const low = itemOn(items, "4,2n")!;
