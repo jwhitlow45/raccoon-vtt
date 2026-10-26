@@ -1,5 +1,5 @@
 import type { BuildChunk, FogDraft, GridShape, RoomState, Scene, Token, Trap } from "../model.ts";
-import { hexInScene, parseHexKey, type HexGrid } from "./hex.ts";
+import { hexInScene, hexKey, parseHexKey, type HexGrid } from "./hex.ts";
 
 /**
  * A scene's grid (docs/design-v1-hex-grids.md section 7). Rule functions
@@ -40,7 +40,8 @@ export function cellWord(g: Grid, many = false): string {
 /**
  * Whether a cell key names a cell of the scene (section 4.3): on squares a
  * cell inside the bounds, as every builder check reads it today, and on
- * hexes a hex wholly inside the scene's rectangle.
+ * hexes a hex wholly inside the scene's rectangle, by its one key, so
+ * "01,1" or "-0,1" never stands for hex 1,1 or 0,1 beside it.
  */
 export function inScene(g: Grid, bounds: { w: number; h: number }, key: string): boolean {
   if (g.shape === "squares") {
@@ -50,7 +51,7 @@ export function inScene(g: Grid, bounds: { w: number; h: number }, key: string):
     return x >= 0 && y >= 0 && x < bounds.w && y < bounds.h;
   }
   const hex = parseHexKey(key);
-  return hex !== null && hexInScene(g, bounds, hex);
+  return hex !== null && hexKey(hex) === key && hexInScene(g, bounds, hex);
 }
 
 /**

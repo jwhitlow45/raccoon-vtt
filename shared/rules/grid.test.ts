@@ -66,6 +66,9 @@ describe("a scene's grid", () => {
     assert.ok(!inScene(COLUMNS, bounds, "34,0"));
     assert.ok(!inScene(COLUMNS, bounds, "1,19"), "odd columns hold one fewer");
     assert.ok(!inScene(ROWS, bounds, "a,b"));
+    // One hex, one key: the protocol's cell key lets these through, and they would name hexes that have a key already.
+    assert.ok(inScene(ROWS, bounds, "0,1") && inScene(ROWS, bounds, "1,1"));
+    for (const other of ["-0,1", "01,1", "0,01", "+1,1", " 1,1"]) assert.ok(!inScene(ROWS, bounds, other), other);
   });
 
   test("came with its grid: the import's mark, or a first grid line before the image", () => {
