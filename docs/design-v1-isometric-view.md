@@ -344,6 +344,23 @@ ISO-4 stacks on ISO-2 for Stage.tsx. ISO-3's edits are mechanical and suit a lig
 
 Filled by each lane's docs commit, with every place the build went its own way, one real-phone spot check (a pan on the typical scene at 40 px, both views), and one canvas-memory check on a 2x tablet with both trees mounted.
 
+### ISO-1 Contract
+
+Nothing a user sees changes: `isoReady` is false, so every device shows Top-down. The phone and memory checks wait for ISO-2, which draws something to check.
+
+- **Reloads (ISO-ASTRA-22).** Section 4.2's protocol line and section 7's Versions line say the version step forces an open page to reload. It does not: the client has no version check, so nothing reloads a page. A page open across the deploy, a table display above all, keeps its old strict schema and drops an Isometric DM's `view` event until someone reloads it. The op step's deploy note in shared/migrate.ts says to reload every open page, table displays included, and ISO-5 puts the same line in the README's update notes.
+- **Versions.** Snapshot 25 to 26 and op 24 to 25, both identity steps, on top of the hex grids' H1. HX-1's test of its own numbers now asks for at least them.
+- **The view API.** `View` is `{ kind: "topDown" }` or `{ kind: "isometric", turn }`, with `TOP_DOWN` and `isometric(turn)`. `ViewPoint` and `ViewBox` are brands that exist only in the types. `fitRect` and `rectClear` take a `ViewBox` (`viewBox(view, rect, lift)`), and `cameraForView` takes a `ViewPoint` and a zoom. `zoomAt` and `pinchCamera` keep their screen anchors, since no world point goes in. `keepInView`, `barShift` and `sceneMinScale` keep the scene's bounds, which stand for its box on screen in Top-down only. ISO-4 adds ISO-D14's ground clamp for Isometric beside them.
+- **New helpers.** `cameraAt` (the camera that shows a view point at a screen point), `holdStill` (a turn or switch that keeps one world point put), `cameraOfStage` and `liveOfStage` (the only reads of a Konva stage's camera), `groundGroups` (the ground's two Konva groups and the upright group, pinned to `toView` within 1e-9 px), `heightsStand`, `drawnHeights`, `flatHeights` and `drawnBase` (4.3's base formula). `turnAxes` and `depth` take a turn, since only Isometric has depth.
+- **`groundAtMiddle(live, insets?)`.** `Live` is the camera, the canvas size and the view, and `StageCamera` is now a `Live`, which the Stage publishes with `TOP_DOWN` until ISO-2 passes the shown view. Every site the rename routed through it keeps the whole canvas's middle, as before. The clear area's middle is there for ISO-4's keep-in-view, by passing the insets.
+- **`viewFromCamera`, `focusFromStage` and `viewEvent`** take a `Live`. CameraLayer reads the stage through `liveOfStage`, whose `scaleX() || 1` meets the guards they already had, so the numbers are the same.
+- **The rename's reach.** Besides section 4.1's files and section 13's list, the scan's patterns brought in `boardViewOf` (canvas/boardView.ts, its corners through `screenToView`), Stage.tsx's pan to an initiative row's token and Find my token's camera (both through `cameraAt`), and one call each in SceneSettings.tsx and stageCamera.ts. The codemod also renamed the call sites in files later lanes own: Stage.tsx, pins/rules.ts, DoorPill.tsx, StopNote.tsx, ReadoutHost.tsx and emptyTap.ts. Every remaining Top-down assumption is a `TOP_DOWN` at its call site, for the later lanes to find.
+- **`pickGround`.** The walk clips the trace to the scene first, since the ground outside it is 0: a trace that reaches 0 before the scene hits there, and one that leaves the scene hits the outside ground's face or top. Its bound is 2√2·K·Δz + 3 cells, not + 2: a stretch of trace crosses at most one more cell line on each axis than its length along that axis. It also returns the height it met. On a hex scene it reads flat ground, since H1 refuses heights on hexes, until H3's hex walk.
+- **`arrowStep`** is built and tested, and ISO-4 wires Stage.tsx's nudge through it.
+- **The view store** holds the pick, the turns, `shownView` (Top-down while `isoReady` is false or a tool forces it) and `settledView` (a switch waits for any gesture in progress). ISO-4 and ISO-5 wire them.
+- **Players** receive `suggestedView` in the scene copy as section 7 says, table displays too. The DM alone sets it.
+- **Mutation checks.** Two mutants survive as equivalent: a near face entered exactly at its ground's height, which the top rule returns at the same point, and a walk that steps one axis at an exact corner crossing, where the ray passes through the corner itself and either reading names a cell that touches it.
+
 ## 15. Review dispositions
 
 ### Round 1
