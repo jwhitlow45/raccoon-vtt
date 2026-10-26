@@ -6,8 +6,9 @@ import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { isometric, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
 
 /**
  * The isometric view's choice (docs/design-v1-isometric-view.md 7 and 8,
@@ -203,6 +204,87 @@ function boardScale(page: Page): Promise<number> {
     return Math.max(...konva.stages.filter((st) => st.width() > 0).map((st) => st.scaleX()));
   });
 }
+
+/**
+ * What the visible isometric board draws, read from Konva's own nodes
+ * (lane ISO-3): on the ground stage, which never listens, and on the main
+ * stage's drag layer and overlay. A ring's line is a Shape dashed 8 by 5
+ * (measure/ringScene.ts), an aura's shading a Shape filled in its color,
+ * and a pill a Label with its words. `clipped` counts the aura's shadings
+ * under a group with a clip, as one moving over fog draws.
+ */
+type IsoMarks = { ground: { rings: number; aura: number; texts: string[] }; drag: { texts: string[]; uprightTexts: string[]; circles: number }; overlay: { rings: number; aura: number; clipped: number; texts: string[] } };
+
+function isoMarks(page: Page, auraColor: string): Promise<IsoMarks | null> {
+  return page.evaluate((color) => {
+    type Node = {
+      dash?: () => number[] | undefined;
+      fill?: () => string | undefined;
+      text?: () => string;
+      clipFunc?: () => unknown;
+      getParent(): Node | null;
+      getAbsoluteTransform(): { decompose(): { rotation: number; scaleX: number; scaleY: number } };
+      find(selector: string): Node[];
+    };
+    type Stage = { width(): number; visible(): boolean; listening(): boolean; getLayers(): Node[]; find(s: string): Node[] };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const shown = konva.stages.filter((s) => s.width() > 0 && s.visible());
+    const ground = shown.find((s) => !s.listening());
+    const main = shown.find((s) => s.listening());
+    if (!ground || !main) return null;
+    const layers = main.getLayers();
+    const drag = layers[1]!;
+    const overlay = layers[2]!;
+    const rings = (n: { find(s: string): Node[] }) => n.find("Shape").filter((x) => JSON.stringify(x.dash?.()) === "[8,5]").length;
+    const auras = (n: { find(s: string): Node[] }) => n.find("Shape").filter((x) => x.fill?.() === color);
+    const texts = (n: { find(s: string): Node[] }) => n.find("Text").map((t) => t.text?.() ?? "");
+    const clippedBy = (x: Node) => {
+      for (let p = x.getParent(); p; p = p.getParent()) if (p.clipFunc?.()) return true;
+      return false;
+    };
+    const upright = (t: Node) => {
+      const d = t.getAbsoluteTransform().decompose();
+      return Math.abs(d.rotation % 360) < 0.01 && Math.abs(d.scaleX - d.scaleY) < 1e-6 * Math.abs(d.scaleX);
+    };
+    return {
+      ground: { rings: rings(ground), aura: auras(ground).length, texts: texts(ground) },
+      drag: { texts: texts(drag), uprightTexts: drag.find("Text").filter(upright).map((t) => t.text?.() ?? ""), circles: drag.find("Circle").length },
+      overlay: { rings: rings(overlay), aura: auras(overlay).length, clipped: auras(overlay).filter(clippedBy).length, texts: overlay.find("Text").filter(upright).map((t) => t.text?.() ?? "") },
+    };
+  }, auraColor);
+}
+
+/** The isometric main stage's camera and the page point of its corner. */
+async function isoCamera(page: Page): Promise<{ x: number; y: number; scale: number; left: number; top: number }> {
+  const cam = await page.evaluate(() => {
+    const konva = (globalThis as unknown as { Konva: { stages: { width(): number; visible(): boolean; listening(): boolean; x(): number; y(): number; scaleX(): number; container(): { getBoundingClientRect(): { left: number; top: number } } }[] } }).Konva;
+    const main = konva.stages.find((s) => s.width() > 0 && s.visible() && s.listening());
+    if (!main) return null;
+    const r = main.container().getBoundingClientRect();
+    return { x: main.x(), y: main.y(), scale: main.scaleX(), left: r.left, top: r.top };
+  });
+  assert.ok(cam, "the isometric board shows");
+  return cam;
+}
+
+/** Where a token's standee shows on the page: the middle of its node's box on screen. */
+async function standeeAt(page: Page, tokenId: string): Promise<{ x: number; y: number }> {
+  const at = await page.evaluate((id) => {
+    const konva = (globalThis as unknown as { Konva: { stages: { width(): number; visible(): boolean; listening(): boolean; findOne(s: string): { getClientRect(): { x: number; y: number; width: number; height: number } } | undefined; container(): { getBoundingClientRect(): { left: number; top: number } } }[] } }).Konva;
+    const main = konva.stages.find((s) => s.width() > 0 && s.visible() && s.listening());
+    const node = main?.findOne(`#${id}`);
+    if (!main || !node) return null;
+    const r = node.getClientRect();
+    const c = main.container().getBoundingClientRect();
+    return { x: c.left + r.x + r.width / 2, y: c.top + r.y + r.height / 2 };
+  }, tokenId);
+  assert.ok(at, `${tokenId} stands on the board`);
+  return at;
+}
+
+/** The moving marks' room (lane ISO-3): a fogged hall with a goblin that wears an aura and a ring, and Pat's Bree with a ring of her own. */
+const hall = { sceneId: "", patId: "", goblin: randomUUID(), bree: randomUUID() };
+const AURA = "#e5484d";
 
 describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   before(async () => {
@@ -817,6 +899,147 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     assert.deepEqual(consoles.pat.errors, [], "Pat's board drew without an error");
     await shots.take(pat, "iso-pat-map-removed-cell-revealed");
 
+    // The room as it was, for the tests after.
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await waitFor("Pat back on the first scene", () => (patSocket.state?.meta.playerSceneId === run.sceneId ? true : null));
+  });
+
+  test("ISO-30. Pat in Isometric on a fogged scene: a goblin the DM drags carries its range ring and its aura as moving marks, the aura clipped to Pat's revealed ground, and both lie on the ground again after the drop", async () => {
+    hall.sceneId = randomUUID();
+    const dmId = dmSocket.you!.memberId;
+    hall.patId = patSocket.you!.memberId;
+    await ops.send({ t: "scene.create", scene: { id: hall.sceneId, name: "The hall", bounds: { w: 16, h: 12 }, fogEnabled: true } });
+    await ops.send({ t: "scene.update", sceneId: hall.sceneId, patch: { suggestedView: "isometric" } });
+    // Revealed: columns 0 to 9. The goblin's aura reaches the fog past column 10.
+    await ops.send({ t: "fog.live", sceneId: hall.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 10, h: 12 } }] });
+    const actor = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+    await ops.send({ t: "token.create", token: { id: hall.goblin, sceneId: hall.sceneId, kind: "monster", name: "Goblin", size: "medium", x: 6, y: 5, disposition: "hostile", visibility: "all", rangeRings: [15], actor: { inline: actor } } });
+    await ops.send({ t: "token.create", token: { id: hall.bree, sceneId: hall.sceneId, kind: "monster", name: "Bree", size: "medium", x: 2, y: 8, disposition: "ally", visibility: "all", ownerIds: [hall.patId], rangeRings: [10], actor: { inline: actor } } });
+    await ops.send({
+      t: "template.create",
+      template: { id: randomUUID(), sceneId: hall.sceneId, shape: "emanation", size: 15, origin: { x: 6.5, y: 5.5, z: 0 }, yaw: 0, attachedTo: hall.goblin, includeOrigin: false, color: AURA, ownerId: dmId, visibility: "all" },
+    });
+    await ops.send({ t: "room.setPlayerScene", sceneId: hall.sceneId });
+    await waitFor("Pat on the hall", () => (patSocket.state?.meta.playerSceneId === hall.sceneId ? true : null));
+    await waitFor("Pat's board in Isometric", async () => ((await shownView(pat)).startsWith("isometric") ? true : null));
+    // The DM drags in Top-down, as any DM may while a player shows Isometric.
+    await dm.bringToFront();
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^The hall/ }).first().click();
+    await waitFor("the goblin on the DM's board", () =>
+      dm.evaluate((id) => !!(globalThis as unknown as { Konva: { stages: { width(): number; findOne(s: string): unknown }[] } }).Konva.stages.find((s) => s.width() > 0 && s.findOne(`#${id}`)) || null, hall.goblin),
+    );
+    if (!(await shownView(dm)).startsWith("top-down")) {
+      await blur(dm);
+      await dm.keyboard.press("i");
+    }
+    await waitFor("the DM's board in Top-down", async () => ((await shownView(dm)).startsWith("top-down") ? true : null));
+
+    let still: IsoMarks | null = null;
+    await waitFor("the goblin's ring and aura on Pat's ground stage", async () => {
+      still = await isoMarks(pat, AURA);
+      return still && still.ground.rings >= 2 && still.ground.aura >= 1 ? true : null;
+    });
+    assert.equal(still!.overlay.aura, 0, "no aura moves before a drag");
+    assert.ok(still!.overlay.texts.includes("15 ft"), "the ring's label stands on the overlay, above the fog as in Top-down");
+
+    // Down on the goblin and part of the way to a new cell, held there.
+    const from = await pagePoint(dm, { w: 16, h: 12 }, { x: 6.5, y: 5.5 });
+    const to = await pagePoint(dm, { w: 16, h: 12 }, { x: 7.5, y: 6.5 });
+    await dm.mouse.move(from.x, from.y);
+    await dm.mouse.down();
+    await dm.mouse.move(from.x + (to.x - from.x) * 0.2, from.y + (to.y - from.y) * 0.2, { steps: 3 });
+    await dm.mouse.move(to.x, to.y, { steps: 10 });
+    try {
+      let moving: IsoMarks | null = null;
+      await waitFor("the goblin's ring and aura moving on Pat's overlay", async () => {
+        moving = await isoMarks(pat, AURA);
+        return moving && moving.overlay.rings >= 1 && moving.overlay.aura >= 1 ? true : null;
+      });
+      // Only Bree's ring is left on the ground: the goblin's is the drag's.
+      assert.equal(moving!.ground.aura, 0, "the aura left the ground stage");
+      assert.equal(moving!.overlay.clipped, moving!.overlay.aura, "the aura shows only through Pat's revealed sub-cells");
+      assert.ok(moving!.overlay.texts.includes("15 ft"), "the moving ring's label stands");
+      await shots.take(pat, "iso-pat-goblin-dragged-ring-aura");
+    } finally {
+      await dm.mouse.up();
+    }
+    await waitFor("the goblin's ring and aura back on Pat's ground stage", async () => {
+      const after = await isoMarks(pat, AURA);
+      return after && after.ground.aura >= 1 && after.overlay.aura === 0 && after.overlay.rings === 0 ? true : null;
+    });
+  });
+
+  test("ISO-31. Pat drags Bree in Isometric: her ring moves on the overlay with the drag and lies on the ground stage after the drop", async () => {
+    await pat.bringToFront();
+    const at = await standeeAt(pat, hall.bree);
+    await pat.mouse.move(at.x, at.y);
+    await pat.mouse.down();
+    await pat.mouse.move(at.x + 20, at.y, { steps: 3 });
+    await pat.mouse.move(at.x + 70, at.y + 10, { steps: 10 });
+    try {
+      await waitFor("Bree's ring moving on Pat's overlay", async () => {
+        const m = await isoMarks(pat, AURA);
+        return m && m.overlay.rings >= 1 && m.overlay.texts.includes("10 ft") ? true : null;
+      });
+      await shots.take(pat, "iso-pat-bree-dragged-ring");
+    } finally {
+      await pat.mouse.up();
+    }
+    await waitFor("Bree's ring back on the ground stage", async () => {
+      const m = await isoMarks(pat, AURA);
+      return m && m.overlay.rings === 0 && m.ground.rings >= 2 ? true : null;
+    });
+  });
+
+  test("ISO-32. Pat measures in Isometric: the ruler's line and its distance draw in the drag layer, the distance standing upright", async () => {
+    await pickTool(pat, "Ruler");
+    const cam = await isoCamera(pat);
+    // Empty ground near the scene's middle, between the two creatures.
+    const a = { x: cam.left + cam.x + 0 * cam.scale, y: cam.top + cam.y + 5 * cam.scale };
+    const b = { x: a.x + 3 * cam.scale, y: a.y + 1 * cam.scale };
+    await pat.mouse.move(a.x, a.y);
+    await pat.mouse.down();
+    await pat.mouse.move(b.x, b.y, { steps: 12 });
+    try {
+      let m: IsoMarks | null = null;
+      await waitFor("the ruler's distance in Pat's drag layer", async () => {
+        m = await isoMarks(pat, AURA);
+        return m && m.drag.texts.some((t) => / ft$/.test(t)) ? true : null;
+      });
+      assert.ok(m!.drag.uprightTexts.some((t) => / ft$/.test(t)), "the distance stands upright, not turned into the ground");
+      assert.ok(!m!.ground.texts.some((t) => / ft$/.test(t)), "nothing of the ruler draws on the ground stage");
+      await shots.take(pat, "iso-pat-ruler");
+    } finally {
+      await pat.mouse.up();
+    }
+    await pickTool(pat, "Select");
+  });
+
+  test("ISO-33. Pat holds to ping in Isometric: the DM gets the ground point the press means, and Pat's drag layer draws the ping", async () => {
+    const cam = await isoCamera(pat);
+    const turn = Number((await shownView(pat)).split(" ")[1]) as Turn;
+    // Empty, flat ground: what the press means is the ground under it at 0.
+    const screen = { x: cam.x + 1 * cam.scale, y: cam.y + 6 * cam.scale };
+    const want = toWorld(isometric(turn), { x: (screen.x - cam.x) / cam.scale, y: (screen.y - cam.y) / cam.scale } as ViewPoint);
+    const seen = dmSocket.received.length;
+    await pat.mouse.move(cam.left + screen.x, cam.top + screen.y);
+    await pat.mouse.down();
+    await pat.waitForTimeout(800);
+    await pat.mouse.up();
+    const ping = await waitFor("the DM's ping from Pat", () => {
+      for (const f of dmSocket.received.slice(seen)) {
+        const msg = JSON.parse(f) as { t?: string; from?: string; e?: { k?: string; x?: number; y?: number } };
+        if (msg.t === "eph" && msg.e?.k === "ping" && msg.from === hall.patId) return { x: msg.e.x!, y: msg.e.y! };
+      }
+      return null;
+    });
+    assert.ok(Math.abs(ping.x - want.x) < 0.05 && Math.abs(ping.y - want.y) < 0.05, `pinged at ${ping.x}, ${ping.y}, the press meant ${want.x}, ${want.y}`);
+    await waitFor("the ping's rings in Pat's drag layer", async () => {
+      const m = await isoMarks(pat, AURA);
+      return m && m.drag.circles >= 2 ? true : null;
+    });
+    await shots.take(pat, "iso-pat-ping");
     // The room as it was, for the tests after.
     await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
     await waitFor("Pat back on the first scene", () => (patSocket.state?.meta.playerSceneId === run.sceneId ? true : null));
