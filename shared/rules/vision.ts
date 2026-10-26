@@ -1092,6 +1092,13 @@ type SceneEntry = Drawn & {
   serial: number;
   /** The holders' sights over this computation, by source set (holderSight). */
   views: Map<string, PartySight>;
+  /**
+   * On a per-player scene, per tile, the sources by their place in
+   * `sources` that alone give some sub-cell its level (soleSources): a
+   * holder who lacks one source has the union's tile wherever it is not
+   * among them. Null on a whole-party scene.
+   */
+  sole: Uint16Array | null;
   bytes: number;
 };
 
@@ -1492,20 +1499,26 @@ function lightRow(j: number, W: number, base: number, lights: readonly LightEntr
 /** Growable list of `[start, end)` pairs into a tile's level array. */
 class Runs {
   data = new Int32Array(1024);
+  /** Per pair, the index of the source it came from. */
+  who = new Uint8Array(512);
   length = 0;
-  push(a: number, b: number): void {
+  push(a: number, b: number, source: number): void {
     if (this.length + 2 > this.data.length) {
       const next = new Int32Array(this.data.length * 2);
       next.set(this.data);
       this.data = next;
+      const who = new Uint8Array(this.who.length * 2);
+      who.set(this.who);
+      this.who = who;
     }
+    this.who[this.length >> 1] = source;
     this.data[this.length++] = a;
     this.data[this.length++] = b;
   }
 }
 
 /** Scratch reused across tiles: the levels of one tile, and its runs by level. */
-const scratch = { levels: new Uint8Array(TILE_AREA), runs: [new Runs(), new Runs(), new Runs(), new Runs()] as const };
+const scratch = { levels: new Uint8Array(TILE_AREA), count: new Uint8Array(TILE_AREA), who: new Uint8Array(TILE_AREA), runs: [new Runs(), new Runs(), new Runs(), new Runs()] as const };
 
 /*
  * One tile's levels: every source's contribution, each run of sub-cells at
@@ -1514,7 +1527,14 @@ const scratch = { levels: new Uint8Array(TILE_AREA), runs: [new Runs(), new Runs
  * per sub-cell. Returns the packed tile and the level it holds throughout,
  * or -1 when it varies.
  */
-function renderTile(inp: Pick<Inputs, "level" | "W" | "H">, tx: number, ty: number, sources: readonly SourceEntry[], lightRows: readonly LightRow[] | null): { packed: Uint8Array; uniform: number } {
+function renderTile(
+  inp: Pick<Inputs, "level" | "W" | "H">,
+  tx: number,
+  ty: number,
+  sources: readonly SourceEntry[],
+  lightRows: readonly LightRow[] | null,
+  askSole = false,
+): { packed: Uint8Array; uniform: number; sole: number } {
   const { levels, runs } = scratch;
   levels.fill(0);
   for (const r of runs) r.length = 0;
@@ -1524,7 +1544,8 @@ function renderTile(inp: Pick<Inputs, "level" | "W" | "H">, tx: number, ty: numb
   const c1 = Math.min(c0 + TILE, inp.W);
   const r1 = Math.min(r0 + TILE, inp.H);
   const tileBox: SubBox = { c0, r0, c1, r1 };
-  for (const src of sources) {
+  for (let si = 0; si < sources.length; si++) {
+    const src = sources[si]!;
     const spans = src.spans;
     if (!spans || !boxesMeet(spans.box, tileBox)) continue;
     const blindBit = src.blind ? 4 : 0;
@@ -1546,7 +1567,7 @@ function renderTile(inp: Pick<Inputs, "level" | "W" | "H">, tx: number, ty: numb
         const end = Math.min(spans.xs[p + 1]!, c1);
         if (x >= end) continue;
         if (!lrow && base === BRIGHT && blindBit === 0) {
-          runs[BRIGHT].push(rowAt + x, rowAt + end);
+          runs[BRIGHT].push(rowAt + x, rowAt + end, si);
           continue;
         }
         // The light run holding x.
@@ -1583,7 +1604,7 @@ function renderTile(inp: Pick<Inputs, "level" | "W" | "H">, tx: number, ty: numb
             if (b1 < next) next = b1;
           } else if (b0 > x && b0 < next) next = b0;
           const v = LEVEL_TABLE[bits]!;
-          if (v > 0) runs[v as 1 | 2 | 3].push(rowAt + x, rowAt + next);
+          if (v > 0) runs[v as 1 | 2 | 3].push(rowAt + x, rowAt + next, si);
           if (lrow && li + 1 < lrow.starts.length && next >= lrow.starts[li + 1]!) li++;
           x = next;
         }
@@ -1594,6 +1615,7 @@ function renderTile(inp: Pick<Inputs, "level" | "W" | "H">, tx: number, ty: numb
     const r = runs[v as 1 | 2 | 3];
     for (let p = 0; p < r.length; p += 2) levels.fill(v, r.data[p]!, r.data[p + 1]!);
   }
+  const sole = askSole ? soleSources(levels, runs) : SOLE_UNKNOWN;
   const first = levels[0]!;
   let uniform = first;
   const packed = new Uint8Array(SIGHT_TILE_BYTES);
@@ -1605,7 +1627,38 @@ function renderTile(inp: Pick<Inputs, "level" | "W" | "H">, tx: number, ty: numb
     if (uniform >= 0 && (a0 !== first || a1 !== first || a2 !== first || a3 !== first)) uniform = -1;
     packed[b] = a0 | (a1 << 2) | (a2 << 4) | (a3 << 6);
   }
-  return uniform >= 0 ? { packed: UNIFORM[uniform]!, uniform } : { packed, uniform };
+  return uniform >= 0 ? { packed: UNIFORM[uniform]!, uniform, sole } : { packed, uniform, sole };
+}
+
+/** A tile's sole sources not worked out: every source counts as one, so nothing is skipped. */
+const SOLE_UNKNOWN = 0xffff;
+
+/*
+ * The sources, by their index in the list drawn, that alone give some
+ * sub-cell of the tile its level, as a mask: leaving out any other one
+ * source changes nothing in the tile. A source's runs in a row never
+ * overlap, so counting the runs at a sub-cell's own level counts the
+ * sources that give it. At most LIMITS.partySourcesPerScene sources draw,
+ * which a mask of 16 bits holds.
+ */
+function soleSources(levels: Uint8Array, runs: typeof scratch.runs): number {
+  const { count, who } = scratch;
+  count.fill(0);
+  for (let v = 1; v <= 3; v++) {
+    const r = runs[v as 1 | 2 | 3];
+    for (let p = 0; p < r.length; p += 2) {
+      const end = r.data[p + 1]!;
+      const from = r.who[p >> 1]!;
+      for (let i = r.data[p]!; i < end; i++) {
+        if (levels[i] !== v) continue;
+        count[i] = count[i]! + 1;
+        who[i] = from;
+      }
+    }
+  }
+  let mask = 0;
+  for (let i = 0; i < TILE_AREA; i++) if (count[i] === 1) mask |= 1 << who[i]!;
+  return mask;
 }
 
 function subOf(b: Bounds | null, W: number, H: number): SubBox | null {
@@ -1724,16 +1777,45 @@ function compute(inp: Inputs, prev: SceneEntry | null): SceneEntry {
   // The union over every tile that may have changed.
   const packed = base ? base.packed.slice() : new Array<Uint8Array | null>(across * down).fill(null);
   const tiles = base ? new Map(base.tiles) : new Map<string, SightTile>();
-  redraw(inp, across, down, dirty, [...sources.values()], lightRows, packed, tiles);
+  const sole = inp.scene.vision?.perPlayer === true ? keptSole(base, sources, across * down) : null;
+  redraw(inp, across, down, dirty, [...sources.values()], lightRows, packed, tiles, sole);
   const sight = new TileSight(tiles, packedReader(packed, across, down));
   let bytes = 4096 + 2 * inp.signature.length + tilesBytes(packed);
   for (const s of sources.values()) bytes += sourceBytes(s);
   for (const l of lights.values()) bytes += l.runs.data.byteLength + l.runs.off.byteLength + 2 * ARRAY_BYTES + 200;
   if (lightRows) bytes += lightRowsBytes(lightRows);
-  return { walls: new WeakRef(inp.walls), w, h, level: inp.level, fpc: inp.fpc, signature: inp.signature, sources, lights, lightRows, packed, tiles, sight, serial: ++serials, views: new Map(), bytes };
+  return { walls: new WeakRef(inp.walls), w, h, level: inp.level, fpc: inp.fpc, signature: inp.signature, sources, lights, lightRows, packed, tiles, sight, serial: ++serials, views: new Map(), sole, bytes };
 }
 
 let serials = 0;
+
+/*
+ * The sole sources of the tiles a computation keeps from its base, by
+ * their place in the new list of sources. Such a tile's sources gave it the
+ * same runs, so its mask stands once each place is moved to the new one.
+ * A tile the base never worked out, or one whose source is gone, is not
+ * known, which only redraws more.
+ */
+function keptSole(base: SceneEntry | null, sources: ReadonlyMap<string, SourceEntry>, tiles: number): Uint16Array {
+  const out = new Uint16Array(tiles).fill(SOLE_UNKNOWN);
+  if (!base?.sole) return out;
+  const place = new Map<string, number>();
+  let at = 0;
+  for (const id of sources.keys()) place.set(id, at++);
+  const moved: number[] = [];
+  for (const id of base.sources.keys()) moved.push(place.get(id) ?? -1);
+  for (let i = 0; i < tiles; i++) {
+    const was = base.sole[i]!;
+    if (was === SOLE_UNKNOWN) continue;
+    let now = 0;
+    for (let k = 0; k < moved.length && now !== SOLE_UNKNOWN; k++) {
+      if ((was & (1 << k)) === 0) continue;
+      now = moved[k]! < 0 ? SOLE_UNKNOWN : now | (1 << moved[k]!);
+    }
+    out[i] = now;
+  }
+  return out;
+}
 
 /*
  * Draws every dirty tile again into `packed` and `tiles`. A tile drawn the
@@ -1750,11 +1832,13 @@ function redraw(
   lightRows: readonly LightRow[] | null,
   packed: (Uint8Array | null)[],
   tiles: Map<string, SightTile>,
+  sole: Uint16Array | null = null,
 ): void {
   for (let ty = 0; ty < down; ty++) {
     for (let tx = 0; tx < across; tx++) {
       if (dirty[ty * across + tx] !== 1) continue;
-      const { packed: p, uniform } = renderTile(dims, tx, ty, sources, lightRows);
+      const { packed: p, uniform, sole: alone } = renderTile(dims, tx, ty, sources, lightRows, sole !== null);
+      if (sole) sole[ty * across + tx] = alone;
       const key = `${tx},${ty}`;
       if (uniform === 0) {
         packed[ty * across + tx] = null;
@@ -2207,6 +2291,26 @@ function dirtyFrom(entry: SceneEntry, mine: ReadonlyMap<string, SourceEntry>, ba
   if (base.w !== w || base.h !== h || base.level !== level) return null;
   const across = Math.max(1, Math.ceil(w / CHUNK_CELLS));
   const dirty = new Uint8Array(across * Math.max(1, Math.ceil(h / CHUNK_CELLS)));
+  if (base === entry && entry.sole) {
+    // From the union itself, a holder who lacks one source that sees redraws only where that source alone gives some level.
+    let lacking: SubBox | null = null;
+    let bit = 0;
+    let lacks = 0;
+    let at = 0;
+    for (const [id, s] of entry.sources) {
+      if (s.spans?.box && !mine.has(id)) {
+        lacking = s.spans.box;
+        bit = 1 << at;
+        lacks++;
+      }
+      at++;
+    }
+    if (lacks === 1 && lacking) {
+      markTiles(dirty, across, lacking);
+      for (let i = 0; i < dirty.length; i++) if ((entry.sole[i]! & bit) === 0) dirty[i] = 0;
+      return dirty;
+    }
+  }
   for (const [id, old] of base.sources) {
     const now = mine.get(id);
     if (now === old) continue;
@@ -2371,10 +2475,32 @@ function rowChange(a: LightRow, b: LightRow, W: number, base: number): [number, 
  * the viewer. For tests and benchmarks.
  */
 export function coldHolderSight(state: RoomState, sceneId: SceneId, memberId: MemberId | null, world: VisionWorld): PartySight {
+  return coldSightOf(state, sceneId, (id) => lendsTo(state, state.tokens[id], memberId), world);
+}
+
+/** The sight of the union's sources that `keep` keeps, computed from nothing. For tests. */
+export function coldSightOf(state: RoomState, sceneId: SceneId, keep: (tokenId: string) => boolean, world: VisionWorld): PartySight {
   const scene = state.scenes[sceneId];
   if (!scene || scene.vision?.on !== true) return NO_PARTY_SIGHT;
   const inp = gather(state, scene, world);
-  return compute({ ...inp, sources: inp.sources.filter((p) => lendsTo(state, state.tokens[p.id], memberId)) }, null).sight;
+  return compute({ ...inp, sources: inp.sources.filter((p) => keep(p.id)) }, null).sight;
+}
+
+/**
+ * Per tile of the union's computation on a per-player scene, the sources
+ * it holds alone give some sub-cell its level, by token ID, or "unknown".
+ * Null on a whole-party scene. For tests.
+ */
+export function soleSourcesOf(state: RoomState, sceneId: SceneId, world: VisionWorld): Map<string, string[] | "unknown"> | null {
+  const entry = resultOf(state, sceneId, world)?.entry;
+  if (!entry?.sole) return null;
+  const ids = [...entry.sources.keys()];
+  const across = Math.max(1, Math.ceil(entry.w / CHUNK_CELLS));
+  const out = new Map<string, string[] | "unknown">();
+  for (const [i, mask] of entry.sole.entries()) {
+    out.set(`${i % across},${Math.floor(i / across)}`, mask === SOLE_UNKNOWN ? "unknown" : ids.filter((_, k) => (mask & (1 << k)) !== 0));
+  }
+  return out;
 }
 
 /**
