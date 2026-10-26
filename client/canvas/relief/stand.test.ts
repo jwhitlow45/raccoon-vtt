@@ -640,6 +640,17 @@ describe("the stand rule on a hex scene (hex grids 4.2, ISOREB-OPUS-01)", () => 
     assert.ok(!footprintSubcells(g, goblin).some(([sx, sy]) => sx === corner[0] && sy === corner[1]), "the point is not the goblin's");
     assert.ok(outside.boxAny(box), "and lies in the box round its hex");
     assert.equal(dimmedForDm(outside, g, goblin), true, "a revealed point beside its hex keeps it dimmed");
+    // A snapped Medium's drawn body reaches past its hex at the corners: a sub-cell revealed there alone, the server withholds it, so it dims (HX3-VIEW-01).
+    const medium = makeToken("m", { size: "medium", ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, { col: 8, row: 8 }) }) as ViewToken;
+    const mine = new Set(footprintSubcells(g, medium).map(([sx, sy]) => `${sx},${sy}`));
+    const nook: [number, number] = [Math.floor(medium.x * FOG_SUBCELLS), Math.floor(medium.y * FOG_SUBCELLS)];
+    assert.ok(!mine.has(`${nook[0]},${nook[1]}`), "the body's corner sub-cell is not its hex's");
+    const corner2 = new Uint8Array(TILE_BYTES);
+    const k = nook[1] * TILE_SUB + nook[0];
+    corner2[k >> 3] = corner2[k >> 3]! | (1 << (k & 7));
+    const bodyCorner = new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(corner2) } }, "s1", { w: 16, h: 16 });
+    assert.ok(bodyCorner.boxAny(tokenBoxes(g, medium)[0]), "the body holds the revealed sub-cell");
+    assert.equal(dimmedForDm(bodyCorner, g, medium), true, "dimmed, as players are withheld it");
   });
 
   test("no footprint read of the isometric view passes squares (ISOREB-OPUS-01)", () => {

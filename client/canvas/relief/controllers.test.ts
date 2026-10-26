@@ -374,6 +374,10 @@ describe("the board's view (ISO-5's hooks)", () => {
     assert.match(stage, /<FogShape sceneId=\{scene\.id\} bounds=\{scene\.bounds\} tiles=\{drawnFogTiles\}/, "Top-down's fog image");
     assert.match(stage, /dmFog=\{role === "dm" && fog \? drawnFogTiles : null\}/, "the standees' dimming");
     assert.match(bodyOf(read("canvas/relief/IsoBoard.tsx"), "IsoBoard")!, /dimmedForDm\(dmFog, grid, t\)/);
+    // Who stands up reads the scene's own grid, the security read on a hex scene (HX3-OPUS-03).
+    assert.match(bodyOf(read("canvas/relief/IsoBoard.tsx"), "IsoBoard")!, /const grid = useMemo\(\(\) => sceneGrid\(scene\), \[scene\.gridShape\]\);/);
+    assert.match(bodyOf(read("canvas/relief/IsoBoard.tsx"), "IsoBoard")!, /splitTokens\(fog, grid, props\.tokens, props\.aboveFog\)/);
+    assert.match(bodyOf(read("canvas/relief/IsoBoard.tsx"), "IsoBoard")!, /ghostStands\(fog, grid, t, at\)/);
   });
 
   test("the test hook picks for the display by the view it is given, not by its camera, which comes later", () => {

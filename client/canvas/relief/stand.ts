@@ -39,7 +39,7 @@ type BoxToken = Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze" | "ro
  * turns the art and its clip, and the footprint the rules read (snapped,
  * and squeezed while it squeezes). Testing both fails closed whichever of
  * the two a later change draws. On hexes the second is the box around the
- * fog sub-cells of its hexes (`hexRule`).
+ * fog sub-cells of its hexes (`subcellBox(footprintSubcells(...))`).
  */
 export function tokenBoxes(g: Grid, token: BoxToken, at: { x: number; y: number } = token): [CellBox, CellBox] {
   const body = turnedBody(at, footprint(token), token.rotation, token.kind === "object");
@@ -74,13 +74,16 @@ function subcellBox(subs: readonly (readonly [number, number])[]): CellBox {
  * under it is revealed in `fog`, the fog the DM's map draws, or never
  * where the scene has no fog (null). That fog holds the party's explored
  * ground on a per-player scene, so a creature on ground a player explored
- * stays bright, as the DM's map shows that ground (D-261026-18).
+ * stays bright, as the DM's map shows that ground (D-261026-18). On hexes
+ * it reads the sub-cells of the creature's hexes alone, the server's
+ * footprint test (project.ts footprintFogged), so a standee dims exactly
+ * when players are withheld it, whatever the corners of its drawn body
+ * hold (D-261026-24).
  */
 export function dimmedForDm(fog: FogView | null, g: Grid, token: BoxToken): boolean {
   if (fog === null) return false;
   if (g.shape !== "hex") return !fog.boxAny(tokenBox(g, token));
-  const [body] = tokenBoxes(g, token);
-  return !fog.boxAny(body) && !footprintSubcells(g, token).some(([sx, sy]) => fog.revealed(sx, sy));
+  return !footprintSubcells(g, token).some(([sx, sy]) => fog.revealed(sx, sy));
 }
 
 /**
