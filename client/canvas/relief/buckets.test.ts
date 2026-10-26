@@ -19,7 +19,7 @@ function source(ground: Record<string, number>, bounds = { w: 40, h: 40 }): Piec
 
 function index(ground: Record<string, number>, walls: WallPiece[] = [], bounds = { w: 40, h: 40 }): ReliefIndex {
   const relief = new ReliefIndex();
-  relief.sync({ sceneId: "s1", bounds, chunks: {}, tiles: null, walls: groupWalls(walls, null), global: ground, src: source(ground, bounds) });
+  relief.sync({ sceneId: "s1", bounds, chunks: {}, tiles: null, walls: groupWalls(walls, null, bounds), global: ground, src: source(ground, bounds) });
   return relief;
 }
 
@@ -216,10 +216,26 @@ describe("buckets", () => {
   test("groupWalls keeps a bucket's array while its pieces are the same", () => {
     const a = wall(3, 5, 4, 5);
     const b = wall(20, 5, 21, 5);
-    const first = groupWalls([a, b], null);
-    const second = groupWalls([{ ...a }, { ...b, ax: 20.25 }], first);
+    const first = groupWalls([a, b], null, { w: 40, h: 40 });
+    const second = groupWalls([{ ...a }, { ...b, ax: 20.25 }], first, { w: 40, h: 40 });
     assert.equal(second.get("0,0"), first.get("0,0"));
     assert.notEqual(second.get("1,0"), first.get("1,0"));
+  });
+
+  test("walls on the east and south edges of a scene whose size is a multiple of 16 lay out, as do walls between buckets", () => {
+    const pieces = (items: Item[]) => items.flatMap((i) => (i.kind === "run" ? i.pieces.map((p) => p.id) : []));
+    for (const bounds of [
+      { w: 16, h: 16 },
+      { w: 32, h: 48 },
+    ]) {
+      const east = wall(bounds.w, 3, bounds.w, 4);
+      const south = wall(3, bounds.h, 4, bounds.h);
+      const corner = wall(bounds.w, bounds.h - 1, bounds.w, bounds.h);
+      const inner = wall(16, 5, 16, 6);
+      const relief = index({}, [east, south, corner, inner], bounds);
+      const laid = pieces(relief.layout(0, EVERYTHING, []));
+      for (const w of [east, south, corner, inner]) assert.ok(laid.includes(`w${w.id}`), `${w.id} on a ${bounds.w} by ${bounds.h} scene: ${laid}`);
+    }
   });
 
   test("meets is inclusive at the edges", () => {

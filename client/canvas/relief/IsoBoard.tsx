@@ -124,7 +124,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const wallGroups = useRef<Map<string, readonly WallPiece[]> | null>(null);
   const grouped = useMemo(() => {
     const pieces = stand ? [...wallPieces(walls, fog), ...pillarPieces(chunks, scene.id, { w, h }, fog)] : [];
-    return (wallGroups.current = groupWalls(pieces, wallGroups.current));
+    return (wallGroups.current = groupWalls(pieces, wallGroups.current, { w, h }));
   }, [stand, walls, fog, chunks, scene.id, w, h]);
 
   // The map image Top-down draws, for the side tints of cells with no builder terrain (looks.ts).

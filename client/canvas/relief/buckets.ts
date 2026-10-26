@@ -338,11 +338,20 @@ export class ReliefIndex {
   }
 }
 
-/** Standing wall pieces grouped by bucket key, each group kept as the same array while its pieces are the same, so unchanged buckets keep their sort. */
-export function groupWalls(pieces: readonly WallPiece[], prev: ReadonlyMap<string, readonly WallPiece[]> | null): Map<string, readonly WallPiece[]> {
+/**
+ * Standing wall pieces grouped by bucket key, each group kept as the same
+ * array while its pieces are the same, so unchanged buckets keep their
+ * sort. A piece on the scene's east or south edge has its middle on the
+ * cell past the edge, which at a multiple of 16 cells is a bucket `sync`
+ * never makes, so it goes to the bucket inside the scene beside it.
+ */
+export function groupWalls(pieces: readonly WallPiece[], prev: ReadonlyMap<string, readonly WallPiece[]> | null, bounds: { w: number; h: number }): Map<string, readonly WallPiece[]> {
+  const across = Math.max(1, Math.ceil(bounds.w / CHUNK_CELLS));
+  const down = Math.max(1, Math.ceil(bounds.h / CHUNK_CELLS));
+  const clamp = (v: number, n: number) => Math.max(0, Math.min(n - 1, v));
   const groups = new Map<string, WallPiece[]>();
   for (const p of pieces) {
-    const key = `${Math.floor(p.cx / CHUNK_CELLS)},${Math.floor(p.cy / CHUNK_CELLS)}`;
+    const key = `${clamp(Math.floor(p.cx / CHUNK_CELLS), across)},${clamp(Math.floor(p.cy / CHUNK_CELLS), down)}`;
     const list = groups.get(key);
     if (list) list.push(p);
     else groups.set(key, [p]);
