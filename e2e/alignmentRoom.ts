@@ -852,19 +852,37 @@ async function openPanelOf(page: Page, title: string): Promise<Locator> {
   return sheet;
 }
 
+/** pv-a: the sizes where the sweep measures the whole Vision section on a per-player scene, as docs/design-v1-per-player-vision.md 11 asks. */
+const VISION_SECTION_AT = new Set([...PHONE_ROOTS, "1440x900"]);
+
 /**
  * pv4: per-player vision's Vision settings (docs/design-v1-per-player-vision.md
  * 7.1 and 11): the Sight row, and who sees for themselves with Pat
  * unticked, listed off, and asked about as the DM unticks him. The scene
  * is made per player with vision and fog off, so nothing Pat sees
- * changes, and whole party again after.
+ * changes, and whole party again after. At VISION_SECTION_AT's sizes the
+ * whole section is measured first with vision on (pv-a), so its fog line,
+ * Turn fog on and the rows that lend sight to Pat show too: Pat's page is
+ * closed by then, and the fold back to whole party empties the list.
  */
-async function visionScreens(sweep: Sweep, page: Page): Promise<void> {
+async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const sceneId = run.sceneId;
-  const sight = (perPlayer: boolean) => ops.send({ t: "scene.update", sceneId, patch: { vision: { on: false, light: "bright", perPlayer } } });
-  await sight(true);
+  // Fog stays off, as the room has it: turning vision on would turn it on too, and fog would hide from Pat what the next size's screens show him.
+  const sight = (perPlayer: boolean, on = false) => ops.send({ t: "scene.update", sceneId, patch: { fogEnabled: false, vision: { on, light: "bright", perPlayer } } });
   try {
     await escapeAll(page);
+    if (VISION_SECTION_AT.has(size.name)) {
+      await sight(true, true);
+      const panel = await openPanelOf(page, "Scenes");
+      const lends = panel.getByText("Lends its sight to Pat");
+      if (await showsWithin(lends.first(), 5_000)) {
+        const section = panel.locator("[data-vision-sight]").locator("xpath=ancestor::section[1]");
+        await section.scrollIntoViewIfNeeded();
+        await sweep.measure(page, "vision-section", section);
+      } else await sweep.missing(page, "vision-section", "the Vision section on a per-player scene with vision on named no creature lending its sight to Pat");
+      await escapeAll(page);
+    }
+    await sight(true);
     const panel = await openPanelOf(page, "Scenes");
     const row = panel.locator("[data-vision-sight]");
     if (!(await showsWithin(row, 5_000))) {
@@ -2936,7 +2954,7 @@ export function sizeTests(names: readonly string[]): void {
           await openAt(page, size, scale);
           await waitFor("the DM's snapshot", () => dmSocket.state);
           await dmScreens(sweep, page, size);
-          await visionScreens(sweep, page);
+          await visionScreens(sweep, page, size);
           await previewWaitScreens(sweep, page, scale);
           if (DICE_AT.has(size.name)) await dmDiceScreens(sweep, page);
           if (COMBAT_AT.has(size.name)) await combatScreens(sweep, page, size, scale);
