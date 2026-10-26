@@ -71,29 +71,40 @@ export function auraClip(fog: FogView, box: CellBox): Rect[] | null {
   return fog.revealedRects(box);
 }
 
+/** A part of a mark as the ground stage lays it: the mark, in cells, drawn inside `clip` (whole when null) and lifted by `lift`, in the ground plane's units. */
+export type GroundPiece = { lift: { x: number; y: number }; clip: Rect[] | null };
+
 /**
- * The clip for a mark drawn point by point at its drawn height in the drag
- * layer (a stroke being drawn): the revealed sub-cells its box touches, in
- * the ground plane's units, each row's run cut where the drawn ground
- * changes and lifted by it, so the mark draws only on the tops of revealed
- * ground. Null when it shows whole: a viewer who sees all the ground, or a
- * box with every sub-cell revealed on one ground, where the mark lies on
- * one plane inside its box.
+ * How a mark moving in the drag layer lies on the drawn ground, as the
+ * ground stage would lay it (a stroke being drawn): the cells its box
+ * touches, grouped by drawn ground, each group the mark clipped to those
+ * cells and lifted by their ground, so every part of it draws at its own
+ * cell's height. For a player only the revealed sub-cells count: it draws
+ * nothing over a fogged sub-cell, and no fogged part of it lands on a
+ * revealed top, since each part is cut from the mark where it lies before
+ * it is lifted (ISO34-ASTRA-10). One piece, whole, when the box lies on one
+ * ground with every sub-cell of it revealed.
  */
-export function liftedClip(iso: Pick<IsoGround, "fog" | "turn" | "ground">, box: CellBox): Rect[] | null {
+export function groundPieces(iso: Pick<IsoGround, "fog" | "turn" | "ground">, box: CellBox): GroundPiece[] {
   const { fog } = iso;
-  if (fog.all) return null;
   const cellAt = (x: number, y: number) => iso.ground(x + 0.5, y + 0.5);
-  if (fog.boxClear(box)) {
-    const first = cellAt(Math.floor(box.x0), Math.floor(box.y0));
+  const clear = fog.boxClear(box);
+  const cx0 = Math.floor(box.x0);
+  const cy0 = Math.floor(box.y0);
+  const cx1 = Math.max(cx0 + 1, Math.ceil(box.x1));
+  const cy1 = Math.max(cy0 + 1, Math.ceil(box.y1));
+  if (clear) {
+    const first = cellAt(cx0, cy0);
     let flat = true;
-    for (let y = Math.floor(box.y0); flat && y < Math.max(Math.floor(box.y0) + 1, Math.ceil(box.y1)); y++) {
-      for (let x = Math.floor(box.x0); flat && x < Math.max(Math.floor(box.x0) + 1, Math.ceil(box.x1)); x++) flat = cellAt(x, y) === first;
-    }
-    if (flat) return null;
+    for (let y = cy0; flat && y < cy1; y++) for (let x = cx0; flat && x < cx1; x++) flat = cellAt(x, y) === first;
+    if (flat) return [{ lift: liftInPlane(iso.turn, first), clip: null }];
   }
-  const out: Rect[] = [];
-  for (const r of fog.revealedRects(box)) {
+  // Each row of the box's cells where all of it shows, else each row's run of revealed sub-cells.
+  const rows: Rect[] = [];
+  if (clear) for (let y = cy0; y < cy1; y++) rows.push({ x: box.x0, y: Math.max(y, box.y0), w: box.x1 - box.x0, h: Math.min(y + 1, box.y1) - Math.max(y, box.y0) });
+  else rows.push(...fog.revealedRects(box));
+  const byGround = new Map<number, Rect[]>();
+  for (const r of rows) {
     const cy = Math.floor(r.y);
     const end = r.x + r.w;
     let a = r.x;
@@ -101,11 +112,12 @@ export function liftedClip(iso: Pick<IsoGround, "fog" | "turn" | "ground">, box:
       const g = cellAt(Math.floor(a), cy);
       let b = Math.min(end, Math.floor(a) + 1);
       while (b < end && cellAt(b, cy) === g) b = Math.min(end, b + 1);
-      const d = liftInPlane(iso.turn, g);
-      out.push({ x: a + d.x, y: r.y + d.y, w: b - a, h: r.h });
+      let list = byGround.get(g);
+      if (!list) byGround.set(g, (list = []));
+      list.push({ x: a, y: r.y, w: b - a, h: r.h });
       a = b;
     }
   }
-  return out;
+  return [...byGround].map(([g, clip]) => ({ lift: liftInPlane(iso.turn, g), clip }));
 }
 

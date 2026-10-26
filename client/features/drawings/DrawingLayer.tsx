@@ -1,8 +1,8 @@
 import { memo } from "react";
 import { Arrow, Circle, Ellipse, Group, Line, Rect, Text } from "react-konva";
 import type { Drawing, DrawingKind, RoomState } from "#shared/model.ts";
-import { drawsHere, liftInPlane, viewPointOf } from "../../canvas/isoPlace.ts";
-import { liftedClip, markStands } from "../../canvas/markStand.ts";
+import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
+import { groundPieces, markStands, type GroundPiece } from "../../canvas/markStand.ts";
 import { measurePill } from "../../canvas/measureText.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { theme } from "../../lib/theme.ts";
@@ -24,7 +24,7 @@ import { textDrawingBox, type MeasureEm } from "./textBox.ts";
  * In Isometric drawings lie on the ground stage, and a text drawing stands
  * on the overlay by the stand rule, else lies flat under the fog. The stroke
  * being drawn moves in the drag layer, so drawing never redraws the ground,
- * each point at its own drawn height and, for a player, clipped to the
+ * each part on its own cell's drawn ground and, for a player, cut to the
  * revealed sub-cells that Top-down's fog would show it over
  * (docs/design-v1-isometric-view.md 5.2 and 5.3).
  */
@@ -93,28 +93,27 @@ function IsoText(props: { drawing: Drawing; iso: IsoGround }) {
 
 type Point = { x: number; y: number };
 
-/** How the stroke being drawn draws: its shape's points, a polygon's corner handles, the dot where a text will go, and the clip it draws inside. */
+/** How the stroke being drawn draws: its shape's points, a polygon's corner handles and the dot where a text will go, all in cells, and the pieces of the ground it lies on. */
 export type DraftDrawn = {
   kind: DrawingKind;
   points: number[];
   handles: number[];
   dot: Point | null;
-  clip: { x: number; y: number; w: number; h: number }[] | null;
+  pieces: GroundPiece[];
 };
 
-/** The points an ellipse's outline is drawn through in Isometric, enough that it reads round at any zoom a stroke is drawn at. */
-const ELLIPSE_STEPS = 48;
+const FLAT: GroundPiece[] = [{ lift: { x: 0, y: 0 }, clip: null }];
 
 /**
- * The stroke this device is drawing, as it draws: in Top-down its points as
- * they are. In Isometric's drag layer each point is lifted by its own drawn
- * ground, so the stroke stays under the finger across heights, as a ruler
- * does, and a rectangle or an ellipse becomes its outline's points so each
- * corner lifts too. Top-down draws a draft on the board layer, under the
- * fog, so a player's draft draws clipped to the revealed sub-cells of the
- * box it paints (canvas/markStand.ts liftedClip), each lifted with its
- * ground: its fill, stroke, arrowhead and handles show nothing over a
- * fogged sub-cell.
+ * The stroke this device is drawing, as it draws: in Top-down as it is. In
+ * Isometric's drag layer it lies as the ground stage will lay it once
+ * stored, each part on its own cell's drawn ground (canvas/markStand.ts
+ * groundPieces), so it stays under the finger across heights and does not
+ * jump at the drop. Top-down draws a draft on the board layer, under the
+ * fog, so for a player each part is cut to the revealed sub-cells of the
+ * box it paints before it is lifted: its fill, stroke, arrowhead and
+ * handles show nothing over a fogged sub-cell, and nothing drawn over fog
+ * lands on a revealed top.
  */
 export function draftDrawn(
   iso: Pick<IsoGround, "fog" | "turn" | "ground"> | null,
@@ -124,43 +123,10 @@ export function draftDrawn(
   scale: number,
 ): DraftDrawn {
   const kind: DrawingKind = !draft ? "line" : draft.kind === "polygon" ? "line" : draft.kind;
-  if (!iso) return { kind, points: draft?.points ?? [], handles: draft?.kind === "polygon" ? draft.points : [], dot: textAt, clip: null };
-  const outline = draft && (draft.kind === "rect" || draft.kind === "ellipse");
-  const raw = !draft ? [] : draft.kind === "rect" || draft.kind === "ellipse" ? outlineOf(draft.kind, draft.points) : draft.points;
-  const lift = (pts: readonly number[]) => liftEach(iso, pts);
-  const points = lift(raw);
-  const dot = textAt ? lift([textAt.x, textAt.y]) : null;
-  return {
-    kind: outline ? "polygon" : kind,
-    points,
-    handles: draft?.kind === "polygon" ? points : [],
-    dot: dot ? { x: dot[0]!, y: dot[1]! } : null,
-    clip: liftedClip(iso, paintBox(draft?.kind ?? "line", textAt ? [...raw, textAt.x, textAt.y] : raw, width, scale)),
-  };
-}
-
-/** Points in cells, each lifted by the drawn ground under it, in the ground plane's units. */
-function liftEach(iso: Pick<IsoGround, "turn" | "ground">, pts: readonly number[]): number[] {
-  const out: number[] = [];
-  for (let i = 0; i + 1 < pts.length; i += 2) {
-    const d = liftInPlane(iso.turn, iso.ground(pts[i]!, pts[i + 1]!));
-    out.push(pts[i]! + d.x, pts[i + 1]! + d.y);
-  }
-  return out;
-}
-
-/** A rectangle's corners, or points round an ellipse, from the two corners its draft holds. */
-function outlineOf(kind: "rect" | "ellipse", pts: readonly number[]): number[] {
-  const b = bounds(pts);
-  if (kind === "rect") return [b.x0, b.y0, b.x1, b.y0, b.x1, b.y1, b.x0, b.y1];
-  const cx = (b.x0 + b.x1) / 2;
-  const cy = (b.y0 + b.y1) / 2;
-  const out: number[] = [];
-  for (let i = 0; i < ELLIPSE_STEPS; i++) {
-    const a = (2 * Math.PI * i) / ELLIPSE_STEPS;
-    out.push(cx + Math.cos(a) * (b.x1 - cx), cy + Math.sin(a) * (b.y1 - cy));
-  }
-  return out;
+  const points = draft?.points ?? [];
+  const drawn = { kind, points, handles: draft?.kind === "polygon" ? points : [], dot: textAt };
+  if (!iso) return { ...drawn, pieces: FLAT };
+  return { ...drawn, pieces: groundPieces(iso, paintBox(draft?.kind ?? "line", textAt ? [...points, textAt.x, textAt.y] : points, width, scale)) };
 }
 
 /**
@@ -199,7 +165,15 @@ function Draft(props: {
       {at.dot ? <Circle x={at.dot.x} y={at.dot.y} radius={5 / scale} fill={stroke} stroke={theme.color.textHalo} strokeWidth={1} strokeScaleEnabled={false} /> : null}
     </>
   );
-  return at.clip ? <Clipped rects={at.clip}>{marks}</Clipped> : marks;
+  return (
+    <>
+      {at.pieces.map((piece, i) => (
+        <Group key={i} x={piece.lift.x} y={piece.lift.y} listening={false}>
+          {piece.clip ? <Clipped rects={piece.clip}>{marks}</Clipped> : marks}
+        </Group>
+      ))}
+    </>
+  );
 }
 
 function DrawingShape(props: { kind: DrawingKind; points: number[]; style: Drawing["style"]; text?: string; faded?: boolean }) {
