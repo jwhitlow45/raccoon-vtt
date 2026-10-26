@@ -30,21 +30,32 @@ export function decorPlace(view: View, t: ViewToken, standee: { frame: VBox; rin
 }
 
 /**
- * The box a map label's ink can touch as the board draws it. One that
- * stands (by the stand rule over its ink, labelShape.ts labelStands) is a
- * block on its anchor at the drawn ground, its text centered on the block's
- * middle with LABEL_INK's reach round it. One lying flat under the fog is
- * its ink box on the ground at 0, seen through the projection.
+ * The box a map label's ink can touch as the board draws it, `ground` the
+ * drawn ground of a cell in cells. One that stands (by the stand rule over
+ * its ink, labelShape.ts labelStands) is a block on its anchor at the drawn
+ * ground there, its text centered on the block's middle with LABEL_INK's
+ * reach round it. One lying flat draws on the ground stage, each part
+ * lifted with the cell it lies on, so its box holds its ink box seen at the
+ * lowest and the highest ground under it, and every part between.
  */
-export function mapLabelInk(label: Pick<Label, "x" | "y" | "text" | "size">, view: View, upright: boolean, ground: number, measure: MeasureText): Box {
+export function mapLabelInk(label: Pick<Label, "x" | "y" | "text" | "size">, view: View, upright: boolean, ground: (x: number, y: number) => number, measure: MeasureText): Box {
   const k = label.size;
   if (upright) {
-    const { box } = labelShape(label, view, { measure, upright: true, ground });
+    const { box } = labelShape(label, view, { measure, upright: true, ground: ground(label.x, label.y) });
     const middle = box.y + box.height / 2;
     return { x0: box.x - LABEL_INK.side * k, y0: middle - LABEL_INK.above * k, x1: box.x + box.width + LABEL_INK.side * k, y1: middle + LABEL_INK.below * k };
   }
   const ink = labelInkBox(label, measure);
-  const corners = [toView(view, { x: ink.x0, y: ink.y0 }), toView(view, { x: ink.x1, y: ink.y0 }), toView(view, { x: ink.x1, y: ink.y1 }), toView(view, { x: ink.x0, y: ink.y1 })];
+  let low = Infinity;
+  let high = -Infinity;
+  for (let y = Math.floor(ink.y0); y < Math.ceil(ink.y1); y++) {
+    for (let x = Math.floor(ink.x0); x < Math.ceil(ink.x1); x++) {
+      const g = ground(x + 0.5, y + 0.5);
+      low = Math.min(low, g);
+      high = Math.max(high, g);
+    }
+  }
+  const corners = [low, high].flatMap((z) => [toView(view, { x: ink.x0, y: ink.y0 }, z), toView(view, { x: ink.x1, y: ink.y0 }, z), toView(view, { x: ink.x1, y: ink.y1 }, z), toView(view, { x: ink.x0, y: ink.y1 }, z)]);
   const xs = corners.map((c) => c.x);
   const ys = corners.map((c) => c.y);
   return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };

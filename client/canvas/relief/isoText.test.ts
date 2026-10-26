@@ -102,13 +102,25 @@ describe("token labels in Isometric lay out in view space (docs/design-v1-isomet
   test("a map label that stands keeps its ink round the block on its anchor, one lying flat its ink box seen through the view", () => {
     const label = { x: 6.5, y: 4.5, text: "Crypt", size: 1 };
     const view = isometric(0);
-    const up = mapLabelInk(label, view, true, 2, measureLabel);
+    const up = mapLabelInk(label, view, true, () => 2, measureLabel);
     const { box } = labelShape(label, view, { measure: measureLabel, upright: true, ground: 2 });
     assert.ok(up.x0 < box.x && up.x1 > box.x + box.width && up.y0 < box.y && up.y1 > box.y + box.height - 1e-9, "the ink reaches past the block");
-    const flat = mapLabelInk(label, view, false, 2, measureLabel);
+    const flat = mapLabelInk(label, view, false, () => 0, measureLabel);
     const anchor = toView(view, label);
-    assert.ok(flat.y0 <= anchor.y && flat.y1 >= anchor.y, "the flat ink lies round its anchor at 0, not raised");
+    assert.ok(flat.y0 <= anchor.y && flat.y1 >= anchor.y, "the flat ink lies round its anchor on flat ground");
     assert.ok(up.y1 < anchor.y, "the standing one stands raised on its 10 ft ground");
+  });
+
+  test("a flat label across a ledge is bounded on both heights its parts are drawn at (ISO34-FV-4)", () => {
+    const label = { x: 6, y: 4.5, text: "Long hallway", size: 1 };
+    const view = isometric(0);
+    // East of x = 6 a 10 ft top, which lifts that part of the label.
+    const ground = (x: number) => (x >= 6 ? 2 : 0);
+    const box = mapLabelInk(label, view, false, ground, measureLabel);
+    for (const z of [0, 2]) {
+      const part = mapLabelInk(label, view, false, () => z, measureLabel);
+      assert.ok(box.x0 <= part.x0 + 1e-9 && box.y0 <= part.y0 + 1e-9 && box.x1 >= part.x1 - 1e-9 && box.y1 >= part.y1 - 1e-9, `holds the label seen at ${z}`);
+    }
   });
 
   test("a pill stands on its point at the drawn ground there", () => {

@@ -354,7 +354,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id), flatGround(t)), [turn, frames, flatGround]);
   const viewPills = useMemo(() => props.text.pills.map((p) => viewPill(p, isometric(turn), groundAt)), [props.text.pills, turn, groundAt]);
   const labelInk = useMemo(
-    () => labels.map((l) => mapLabelInk(l, isometric(turn), uprightIds.has(l.id), groundAt(l.x, l.y), measureLabel)),
+    () => labels.map((l) => mapLabelInk(l, isometric(turn), uprightIds.has(l.id), groundAt, measureLabel)),
     [labels, uprightIds, turn, groundAt, fontEpoch],
   );
   const isoText = useBoardText({ ...props.text, tokens: hidden ? NO_TOKENS : props.tokens, scale: cam.scale, pills: viewPills, mapLabels: labelInk, place: placeOf });

@@ -5,7 +5,7 @@ import { useDelayed } from "../../components/Loading.tsx";
 import { footprint, snapPosition } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { MarkPill, MarkPillStack, Upright } from "../../canvas/IsoParts.tsx";
-import { viewPointOf } from "../../canvas/isoPlace.ts";
+import { boxGround, viewPointOf } from "../../canvas/isoPlace.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { DragPreview } from "../../state/types.ts";
@@ -234,12 +234,13 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
  * Where a drag's label stack hangs: off the bottom right corner of the
  * footprint it would land in, in Top-down. In Isometric that corner points
  * nowhere useful at most turns, so the stack hangs off the footprint's
- * middle at its drawn height, which a standee's ring marks.
+ * middle at the highest drawn ground under it, where a walker's ring
+ * stands, a Large across a ledge on its upper side.
  */
-function endOf(iso: IsoGround | null, to: Point, fp: { w: number; h: number }): { x: number; y: number; z?: number } {
+export function endOf(iso: IsoGround | null, to: Point, fp: { w: number; h: number }): { x: number; y: number; z?: number } {
   if (!iso) return { x: to.x + fp.w, y: to.y + fp.h };
   const c = { x: to.x + fp.w / 2, y: to.y + fp.h / 2 };
-  return { ...c, z: iso.ground(c.x, c.y) };
+  return { ...c, z: boxGround(iso, { x0: to.x, y0: to.y, x1: to.x + fp.w, y1: to.y + fp.h }) };
 }
 
 /** A line's points in view units, each at its drawn height: in Top-down, the points as they are. */
