@@ -1,9 +1,13 @@
-import { useSyncExternalStore } from "react";
+import { useId, useSyncExternalStore } from "react";
 import { Button } from "../../components/Button.tsx";
+import { Select } from "../../components/Field.tsx";
+import { GRABBER_DESIGNS, GRABBER_TOP, grabberDesign, parseGrabber, type GrabberId } from "../../components/grabberDesigns.ts";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
+import { GrabberDrawing } from "../../components/SheetGrabber.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { enterFullscreen, exitFullscreen, fullscreenSupported, useFullscreen } from "../../lib/fullscreen.ts";
+import { theme } from "../../lib/theme.ts";
 import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { keyText, setShortcutSheet, useShortcutKeys } from "../../state/shortcuts.ts";
@@ -17,6 +21,7 @@ import {
   setMapDetail,
   setRollAnimation,
   setRollToasts,
+  setSheetHandle,
   setUiScale,
   UI_SCALES,
   uiScaleLabel,
@@ -24,6 +29,7 @@ import {
   useMapVariant,
   useRollAnimation,
   useRollToastsOn,
+  useSheetHandle,
   useUiScale,
   type UiScale,
 } from "./settings.ts";
@@ -68,6 +74,8 @@ export default function ThisDevice() {
   const fullscreen = useFullscreen();
   // The keys the help below names, as this device has them.
   const keys = useShortcutKeys();
+  const handle = useSheetHandle();
+  const handleHelp = useId();
   return (
     <div style={{ display: "grid" }}>
       <Section label="Interface size" divider={false}>
@@ -137,6 +145,52 @@ export default function ThisDevice() {
           Show the shortcuts
         </Button>
       </Section>
+      <Section label="Sheet handle">
+        <Help id={handleHelp}>The mark at the top of a phone's sheets that shows you can swipe them. It lights up in your color while you hold one.</Help>
+        <Select aria-label="Sheet handle" aria-describedby={handleHelp} value={handle} onChange={(e) => setSheetHandle(parseGrabber(e.target.value))} style={{ width: "100%" }}>
+          {GRABBER_DESIGNS.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+        </Select>
+        <SheetHandlePreview id={handle} />
+      </Section>
+    </div>
+  );
+}
+
+/** The preview's band, and how far below its top the sheet's top edge rises in it: room for the tallest design under its 5 px. */
+const PREVIEW_HEIGHT = 32;
+const PREVIEW_SHEET_TOP = theme.space(2);
+
+/**
+ * The chosen handle at its real size, so the choice shows without opening
+ * a sheet (docs/design-v1-sheet-swipe.md 4.8): drawn as a sheet's top edge
+ * rising over the map's ground, with the handle where a sheet puts it, 5 px
+ * under that edge inside its border, in its color at rest. One picture to
+ * a screen reader, which already hears the choice from the select.
+ */
+function SheetHandlePreview(props: { id: GrabberId }) {
+  const design = grabberDesign(props.id);
+  return (
+    <div
+      role="img"
+      aria-label={`${design.name} on a sheet`}
+      style={{ position: "relative", height: PREVIEW_HEIGHT, overflow: "hidden", borderRadius: theme.radius.md, background: theme.color.bg }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: `${PREVIEW_SHEET_TOP}px ${theme.space(3)}px 0`,
+          background: theme.color.surface,
+          border: `${theme.line.border}px solid ${theme.color.border}`,
+          borderBottom: "none",
+          borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`,
+        }}
+      >
+        <GrabberDrawing design={design} attrs={{ "data-grabber-preview": "" }} style={{ position: "absolute", top: GRABBER_TOP, left: "50%", marginLeft: -design.width / 2, color: theme.color.controlBorder }} />
+      </div>
     </div>
   );
 }
