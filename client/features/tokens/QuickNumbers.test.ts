@@ -50,6 +50,26 @@ describe("the quick numbers under a token's name", () => {
     assert.ok(names.includes("Armor Class 12"));
   });
 
+  test("AC and the speed make one part and the rest another, so no number wraps alone under the others", () => {
+    const parts = (markup: string) =>
+      [...markup.matchAll(/<span data-quick-part="(\w+)"[^>]*>(.*?)(?=<span data-quick-part=|<\/div>$)/g)].map((m) => [m[1]!, [...m[2]!.matchAll(/aria-label="([^"]+)"/g)].map((n) => n[1]!)] as const);
+    const one = numbersFor(DM, token("g", { actor: { inline: actor({ ac: 15, speeds: { walk: 30 }, passivePerception: 11, initBonus: 1 }) } }));
+    assert.deepEqual(parts(one.markup), [
+      ["lead", ["Armor Class 15", "Speed 30 ft"]],
+      ["rest", ["Passive Perception 11", "Initiative +1"]],
+    ]);
+    // A speed of two modes keeps its last with Passive Perception, in the second part, hidden there from a screen reader.
+    const two = numbersFor(DM, token("g", { elevation: 20, actor: { inline: actor({ ac: 15, speeds: { walk: 30, fly: 60 }, passivePerception: 14, initBonus: 2 }) } }));
+    assert.deepEqual(parts(two.markup), [
+      ["lead", ["Armor Class 15", "Speed 30 ft, Fly 60 ft"]],
+      ["rest", ["Passive Perception 14", "Initiative +2", "Elevation 20 ft"]],
+    ]);
+    assert.match(two.markup, /<span data-quick-part="rest"[^>]*><span data-speed-pp-part=""[^>]*><strong data-unit="speed" aria-hidden="true"[^>]*>Fly 60 ft<\/strong>/);
+    // Only the rest: a player's view of a monster.
+    const rest = numbersFor(P1, token("g", { elevation: -10, actor: { inline: actor({ ac: 15 }) } }));
+    assert.deepEqual(parts(rest.markup), [["rest", ["Elevation -10 ft"]]]);
+  });
+
   test("an object has no speed, Passive Perception or initiative, and nothing draws when there is nothing to say", () => {
     const chest = token("o", { kind: "object", actor: { inline: actor({ ac: 0, passivePerception: undefined, initBonus: 3 }) } });
     const { names, markup } = numbersFor(DM, chest);
