@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useStore } from "zustand";
 import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
+import { boardPickOf, pressGap } from "../../canvas/boardPick.ts";
 import { theme } from "../../lib/theme.ts";
 import { groundSource, seenGround } from "../builder/heights/ground.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
@@ -65,7 +66,8 @@ function groundOf(ctx: ToolContext): GroundReader {
 function onDown(p: ToolPointer, ctx: ToolContext): void {
   const tool = ctx.scope.get(rulerSlot);
   const before = tool.store.getState().ruler;
-  tool.gesture = { ...beginGesture(before, p.world, sceneToken(ctx, p.tokenId), ctx.camera().scale), screen: p.screen, before };
+  const gap = pressGap(boardPickOf(ctx), p);
+  tool.gesture = { ...beginGesture(before, p.world, sceneToken(ctx, p.tokenId), (stop) => gap(stop)), screen: p.screen, before };
 }
 
 function onMove(p: ToolPointer, ctx: ToolContext): void {

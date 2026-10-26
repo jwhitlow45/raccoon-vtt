@@ -3,6 +3,7 @@ import { useStore } from "zustand";
 import type { DrawingKind } from "#shared/model.ts";
 import type { DrawingInput } from "#shared/protocol.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
+import { boardPickOf, pressGap } from "../../canvas/boardPick.ts";
 import { Icon, type IconName } from "../../components/Icon.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { memberColorName } from "../../components/Swatches.tsx";
@@ -200,7 +201,7 @@ function onUp(p: ToolPointer, ctx: ToolContext): void {
       if (g.moved) return;
       const pts = d?.kind === "polygon" ? d.points : [];
       const n = pts.length / 2;
-      if (n >= 3 && Math.hypot(p.world.x - pts[0]!, p.world.y - pts[1]!) * scale <= CLOSE_PX) {
+      if (n >= 3 && pressGap(boardPickOf(ctx), p)({ x: pts[0]!, y: pts[1]! }) <= CLOSE_PX) {
         finishPolygon(ctx);
         return;
       }

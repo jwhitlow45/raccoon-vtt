@@ -2,6 +2,7 @@ import type { AreaTemplate } from "#shared/model.ts";
 import type { AreaContext, AreaToken } from "#shared/rules/aoe.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
+import { boardPickOf, pressGap } from "../../canvas/boardPick.ts";
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 import type { RoomActions } from "../../state/types.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
@@ -148,7 +149,9 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
   const token = sceneToken(env, p.tokenId);
   const scale = ctx.camera().scale;
   const fpc = env.view.meta.settings.feetPerCell;
-  const near = (a: { x: number; y: number }) => Math.hypot(a.x - p.world.x, a.y - p.world.y) * scale <= GRAB_PX;
+  // On screen, through the view on show (canvas/boardPick.ts pressGap), so a handle on a raised top is reached where it draws.
+  const gap = pressGap(boardPickOf(ctx), p);
+  const near = (a: { x: number; y: number }) => gap(a) <= GRAB_PX;
   const begin = (g: Gesture) => {
     local.gesture = { ...g, screen: p.screen, moved: false };
   };

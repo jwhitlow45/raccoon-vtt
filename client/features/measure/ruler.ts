@@ -144,14 +144,20 @@ export type RulerGesture = { start: Point; startToken: RulerToken | undefined; e
 /** How close, in screen pixels, a finger must land to the last stop to carry the ruler on. */
 export const EXTEND_RADIUS_PX = 28;
 
+/**
+ * `reach` is the camera's scale, or how far a stop shows from the press in
+ * screen pixels where that is not the world distance times the scale, as
+ * in the isometric view (canvas/boardPick.ts pressGap).
+ */
 export function beginGesture(
   state: RulerState | null,
   world: Point,
   token: RulerToken | undefined,
-  scale: number,
+  reach: number | ((stop: RulerStop) => number),
 ): RulerGesture {
   const last = state?.stops[state.stops.length - 1];
-  const extend = !!last && Math.hypot(world.x - last.x, world.y - last.y) * scale <= EXTEND_RADIUS_PX;
+  const gap = (stop: RulerStop) => (typeof reach === "number" ? Math.hypot(world.x - stop.x, world.y - stop.y) * reach : reach(stop));
+  const extend = !!last && gap(last) <= EXTEND_RADIUS_PX;
   return { start: world, startToken: token, extend, dragging: false };
 }
 
