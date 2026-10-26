@@ -3,6 +3,7 @@ import { MAX_PATH_CORNERS, MAX_PATH_STOPS } from "../protocol.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
 import type { PlacedToken } from "./footprint.ts";
 import { legSteps, routeLattice, spotRect, straightCost, type LegCost, type SizedSpot } from "./route.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * A creature's path on its turn (features section 4, design 6): the rules
@@ -161,7 +162,7 @@ function capCorners(stops: PathStop[]): void {
  */
 export function legTaken(token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
   if (to.moved !== undefined) return { moved: to.moved, cost: to.cost ?? to.moved, diag: to.diag ?? [0, 0] };
-  const geometry = straightCost(token, from, to, rules, counter);
+  const geometry = straightCost(SQUARES, token, from, to, rules, counter);
   return to.cost !== undefined ? { ...geometry, cost: to.cost } : geometry;
 }
 
@@ -273,7 +274,7 @@ function plainStop(stop: PathStop, uncounted: boolean): PathStop {
 export function legOnGround(token: PlacedToken, from: PathStop, to: PathStop, ground: (x: number, y: number) => boolean): boolean {
   const lattice = Math.min(routeLattice(sizedAt(token, from)), routeLattice(sizedAt(token, to)));
   const covered = (p: SizedSpot) => {
-    const r = spotRect(token, p);
+    const r = spotRect(SQUARES, token, p);
     for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) if (!ground(x, y)) return false;
     return true;
   };
@@ -320,7 +321,7 @@ export function legGeometry(token: PlacedToken, from: PathStop, to: PathStop, ru
   const running = { ...counter };
   let moved = 0;
   for (const [a, b] of legParts(from, to)) {
-    const t = straightCost(token, a, b, rules, running);
+    const t = straightCost(SQUARES, token, a, b, rules, running);
     moved += t.moved;
     running.h += t.diag[0];
     running.v += t.diag[1];

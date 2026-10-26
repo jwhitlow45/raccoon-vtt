@@ -5,6 +5,7 @@ import { overlaps } from "./attach.ts";
 import type { BuildState } from "../ruleHooks.ts";
 import { walkFrom, walkOn, type Walker } from "./movement.ts";
 import { routeFeet, routePoints, routeWalk, routeWalkers, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint } from "./route.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * Getting off a ride on the rider's own turn (docs/design-v1-attach.md
@@ -30,7 +31,7 @@ export type DismountSplit = { off: RoutePoint; prefix: readonly RoutePiece[] | u
  * true when the first clear spot is the walk's end, so there is no rest.
  */
 export function dismountSplit(build: Pick<BuildState, "buildChunks">, rider: Walker, mount: PlacedToken, points: readonly RoutePoint[], route?: readonly RoutePiece[]): DismountSplit {
-  const walk = routeWalk(walkTrace(build.buildChunks, rider, points), build, snapStep(rider));
+  const walk = routeWalk(SQUARES, walkTrace(build.buildChunks, rider, points), build, snapStep(rider));
   const at = walk.findIndex((p, i) => i > 0 && !overlaps({ ...rider, x: p.x, y: p.y }, mount));
   const clear = walk[at] ?? walk[walk.length - 1]!;
   const end = points[points.length - 1]!;
@@ -71,13 +72,13 @@ export function dismountCost(
   const along = (from: Walker, pieces: readonly RoutePiece[], landing: number) =>
     routeFeet(routePoints(build.buildChunks, from, pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, running, opts);
   let running = counter;
-  const first = split.prefix ? along(rider, split.prefix, split.off.elevation) : straightCost(rider, seat, split.off, rules, counter);
+  const first = split.prefix ? along(rider, split.prefix, split.off.elevation) : straightCost(SQUARES, rider, seat, split.off, rules, counter);
   if (split.whole) return { moved: first.moved, cost: halfFt, diag: first.diag };
   running = { h: counter.h + first.diag[0], v: counter.v + first.diag[1] };
   const end = points[points.length - 1]!;
   // The rest of the walk goes on from where the walk off the mount left the rider (movement.ts walkOn).
   const start = walkFrom(build.buildChunks, rider);
   const off = split.prefix ? routeWalkers(build.buildChunks, rider, split.prefix, split.off.elevation).at(-1)! : walkOn(build.buildChunks, start, split.off, split.off.elevation);
-  const rest = split.rest ? along(off, split.rest, end.elevation) : straightCost(rider, split.off, end, rules, running);
+  const rest = split.rest ? along(off, split.rest, end.elevation) : straightCost(SQUARES, rider, split.off, end, rules, running);
   return { moved: first.moved + rest.moved, cost: halfFt + rest.cost, diag: [first.diag[0] + rest.diag[0], first.diag[1] + rest.diag[1]] };
 }

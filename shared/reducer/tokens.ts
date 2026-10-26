@@ -1,7 +1,7 @@
 import { keys } from "../keys.ts";
 import { attaches, healRevivesDead, oneLinkPerActor, resizeStop, shapeKeepsOwnNumbers, syncsFromDdb, walksRoutes } from "../migrate.ts";
 import type { Actor, AreaTemplate, Character, ClassResource, DdbSync, Drawing, PathStop, RoomState, Token, TokenPath, TurnStart } from "../model.ts";
-import { inSightOfNonOwners, seenAtEvery, seenMark } from "../project.ts";
+import { gridOfToken, inSightOfNonOwners, seenAtEvery, seenMark } from "../project.ts";
 import { MAX_RULER_STOPS, SYNC_AT_AHEAD, syncAtAhead, syncStamp, type ActorPatch, type CharacterPatch, type DdbSyncPatch, type Op, type OpOf, type TokenPatch } from "../protocol.ts";
 import { LIMITS, serializedBytes } from "../limits.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
@@ -597,10 +597,14 @@ export function sharesTurn(state: RoomState, mountId: string, turn: TurnStart): 
  * the turn's counted legs. A Swim Speed, which only the DM and the owners
  * receive, takes the swimming foot off `cost` alone. The route's corners
  * are `via`, and `routeSeen` marks a leg players who do not own the token
- * saw at every spot, before and after the move (7.2).
+ * saw at every spot, before and after the move (7.2). On a hex scene a
+ * plain leg's feet are the hex steps between its ends' reference hexes, and
+ * its spots stand on the hex line between them
+ * (docs/design-v1-hex-grids.md 4.2 and 4.4).
  */
 function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, after: Token, judged: Judged, route: readonly RoutePiece[] | undefined, carried?: Pick<MovedToken, "route" | "trace">): PathStop {
   const rules = tx.state.meta.settings;
+  const grid = gridOfToken(tx.state, after);
   const from = path.stops[path.stops.length - 1]!;
   const counter = pathCounters(after, path.stops, rules);
   const walker = walkerFor(tx.state, before, seenNow(tx), { opVersion: tx.env.opVersion, to: after });
@@ -618,7 +622,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   } else {
     trace = routeWalkers(tx.state.buildChunks, walker, [[after.x, after.y, 0, 0]], after.elevation);
     // From where the walk starts, on the ground under its footprint off a holder on the ground, as a route's first piece does (movement.ts walkFrom).
-    taken = straightCost(after, { ...from, elevation: trace[0]!.elevation }, stop, rules, counter);
+    taken = straightCost(grid, after, { ...from, elevation: trace[0]!.elevation }, stop, rules, counter);
   }
   const walk = carried ? [...carried.route] : pointsOf(trace);
   const out: PathStop = carried ? { ...stop, moved: taken.moved } : { ...stop, moved: taken.moved, cost: taken.cost };
@@ -627,7 +631,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   // Each spot with the footprint the walk's trace has there, squeezed where it ends as it will be (route.ts onTrace). Ops
   // before version 14 read the full footprint between its ends, squeezed only where it starts.
   const spots = attaches(tx.env.opVersion)
-    ? routeWalk(trace, judged.before).map((p) => ({ ...p, squeezed: isSqueezed(onTrace(trace, p.progress[0], p.progress[1] === p.progress[2] && p.progress[2] > 0, after)) }))
+    ? routeWalk(grid, trace, judged.before).map((p) => ({ ...p, squeezed: isSqueezed(onTrace(trace, p.progress[0], p.progress[1] === p.progress[2] && p.progress[2] > 0, after)) }))
     : routeWalkBeforeV14(walk, walker, judged.before).map((p, i, all) => ({ ...p, squeezed: i === all.length - 1 ? isSqueezed(after) : i === 0 && isSqueezed(before) }));
   if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
   return out;

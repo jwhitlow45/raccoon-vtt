@@ -6,6 +6,7 @@ import { sizeCategory, sizeSteps } from "./footprint.ts";
 import { legStop } from "./movement.ts";
 import { alongStraightLeg, legSteps, onRouteLattice, routeFeet, routeLattice, routePoints, routeReach, routeSpots, routeStop, straightFeet, trueLength, type RoutePoint } from "./route.ts";
 import { free, line, tok, world } from "./testWorld.ts";
+import { SQUARES } from "./grid.ts";
 
 const RULES: DiagonalRule[] = ["five", "fiveTen", "euclid"];
 const at = (x: number, y: number, elevation = 0): RoutePoint => ({ x, y, elevation });
@@ -106,7 +107,7 @@ describe("routeFeet (docs/design-v1-movement.md 6.2)", () => {
       const counter = { h: Math.floor(rand() * 4), v: Math.floor(rand() * 3) };
       const rules = { feetPerCell, diagonal };
       const before = { ...counter };
-      const today = straightFeet(token, { ...token, elevation: 0 }, { ...to, elevation: rise }, rules, before);
+      const today = straightFeet(SQUARES, token, { ...token, elevation: 0 }, { ...to, elevation: rise }, rules, before);
       const out = routeFeet([at(token.x, token.y), at(to.x, to.y, rise)], plain(1), rules, counter, { swimSpeed: false, step });
       assert.equal(out.moved, today, JSON.stringify({ diagonal, feetPerCell, size, token, to, rise, counter }));
       // The float count drifts where the exact one does not, a fifth of a square at a time.

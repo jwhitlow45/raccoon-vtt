@@ -10,6 +10,7 @@ import { resizeGroup } from "../tokens/resize.ts";
 import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, trailSegments, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
 import { ownWalk, type Walker } from "#shared/rules/movement.ts";
 import { walkTrace } from "#shared/rules/route.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
 const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" as const };
@@ -28,16 +29,16 @@ const stop = (x: number, y: number, elevation = 0): PathStop => ({ x, y, elevati
 describe("movement since the turn began", () => {
   test("counts the corner's steps by the diagonal rule, with climbing as vertical steps", () => {
     const from = { x: 0, y: 0, elevation: 0 };
-    assert.equal(movedFeet(tok(), from, { x: 3, y: 2, elevation: 0 }, five), 15);
-    assert.equal(movedFeet(tok(), from, { x: 3, y: 2, elevation: 0 }, fiveTen), 20);
-    assert.equal(movedFeet(tok(), from, { x: 3, y: 4, elevation: 0 }, euclid), 25);
-    assert.equal(movedFeet(tok(), from, { x: 1, y: 0, elevation: 30 }, five), 30, "flying up 30 ft while moving a square");
-    assert.equal(movedFeet(tok({ size: "large" }), from, { x: 1, y: 0, elevation: 0 }, five), 5, "a Large creature moved one square moved 5 ft");
+    assert.equal(movedFeet(SQUARES, tok(), from, { x: 3, y: 2, elevation: 0 }, five), 15);
+    assert.equal(movedFeet(SQUARES, tok(), from, { x: 3, y: 2, elevation: 0 }, fiveTen), 20);
+    assert.equal(movedFeet(SQUARES, tok(), from, { x: 3, y: 4, elevation: 0 }, euclid), 25);
+    assert.equal(movedFeet(SQUARES, tok(), from, { x: 1, y: 0, elevation: 30 }, five), 30, "flying up 30 ft while moving a square");
+    assert.equal(movedFeet(SQUARES, tok({ size: "large" }), from, { x: 1, y: 0, elevation: 0 }, five), 5, "a Large creature moved one square moved 5 ft");
   });
 
   test("reads from snapped positions, so a token dropped off the grid counts whole squares", () => {
-    assert.equal(movedFeet(tok(), { x: 0.2, y: 0, elevation: 0 }, { x: 2.4, y: 0, elevation: 0 }, five), 10);
-    assert.equal(movedFeet(tok({ size: "tiny" }), { x: 0, y: 0, elevation: 0 }, { x: 0.5, y: 0, elevation: 0 }, five), 2.5);
+    assert.equal(movedFeet(SQUARES, tok(), { x: 0.2, y: 0, elevation: 0 }, { x: 2.4, y: 0, elevation: 0 }, five), 10);
+    assert.equal(movedFeet(SQUARES, tok({ size: "tiny" }), { x: 0, y: 0, elevation: 0 }, { x: 0.5, y: 0, elevation: 0 }, five), 2.5);
   });
 
   test("the trail runs through every stop of this turn, and Moved adds up the legs that count, out and back included", () => {
@@ -182,10 +183,10 @@ describe("a resize on the turn (docs/design-v1-token-window.md 8.7)", () => {
 
   test("each end of a leg is measured at its own stop's size, and a leg across sizes between the two middles", () => {
     const familiar = tok({ size: "medium" });
-    assert.equal(movedFeet(familiar, { ...stop(4, 4), footprint: TINY }, { ...stop(4.5, 4), footprint: TINY }, five), 2.5, "a Tiny's half-square leg after it grew");
-    assert.equal(movedFeet(familiar, stop(4, 4), stop(4.5, 4), five), 5, "read at the size now, it would be a whole square");
-    assert.equal(movedFeet(tok({ size: "large" }), { ...stop(4, 4), footprint: MEDIUM }, stop(4, 4), five), 2.5, "Medium to Large in place: the middle moves half a square each way");
-    assert.equal(movedFeet(tok({ size: "huge" }), { ...stop(4, 4), footprint: MEDIUM }, stop(3, 3), five), 0, "Medium to Huge keeps the middle");
+    assert.equal(movedFeet(SQUARES, familiar, { ...stop(4, 4), footprint: TINY }, { ...stop(4.5, 4), footprint: TINY }, five), 2.5, "a Tiny's half-square leg after it grew");
+    assert.equal(movedFeet(SQUARES, familiar, stop(4, 4), stop(4.5, 4), five), 5, "read at the size now, it would be a whole square");
+    assert.equal(movedFeet(SQUARES, tok({ size: "large" }), { ...stop(4, 4), footprint: MEDIUM }, stop(4, 4), five), 2.5, "Medium to Large in place: the middle moves half a square each way");
+    assert.equal(movedFeet(SQUARES, tok({ size: "huge" }), { ...stop(4, 4), footprint: MEDIUM }, stop(3, 3), five), 0, "Medium to Huge keeps the middle");
   });
 
   /** Thorn, P1's druid at 1,1, whose turn it is, a goblin far off, every op through the reducer with the next seq. */
@@ -274,7 +275,7 @@ describe("a resize on the turn (docs/design-v1-token-window.md 8.7)", () => {
     const stops = state.tokens.thorn!.path!.stops;
     assert.deepEqual(stops.map((s) => s.footprint), [{ w: 2, h: 2 }, { w: 2, h: 2, squeeze: true }, undefined], "each earlier stop holds the footprint it was made with");
     const thorn = state.tokens.thorn as MovingToken;
-    assert.equal(movedFeet(thorn, stops[0]!, stops[1]!, five), 37.5, "into the corridor, between the middles");
+    assert.equal(movedFeet(SQUARES, thorn, stops[0]!, stops[1]!, five), 37.5, "into the corridor, between the middles");
     for (const trail of trails(state)) assert.equal(trail.legs.length, 2);
   });
 
@@ -372,7 +373,7 @@ describe("a resize on the turn (docs/design-v1-token-window.md 8.7)", () => {
         if (!path) return [];
         const rules = { feetPerCell: state.meta.settings.feetPerCell, diagonal: state.meta.settings.diagonal };
         const counter = { h: 0, v: 0 };
-        return path.stops.slice(1).map((to, i) => ({ counted: to.uncounted !== true, ft: to.uncounted === true ? 0 : movedFeet(thorn, path.stops[i]!, to, rules, counter) }));
+        return path.stops.slice(1).map((to, i) => ({ counted: to.uncounted !== true, ft: to.uncounted === true ? 0 : movedFeet(SQUARES, thorn, path.stops[i]!, to, rules, counter) }));
       });
     const total = (legs: { ft: number }[]) => legs.reduce((sum, leg) => sum + leg.ft, 0);
     // How often a change of footprint in place came up, so the run is known to try the case it guards.

@@ -6,6 +6,7 @@ import type { Point } from "./geom.ts";
 import { footing } from "./heights.ts";
 import { crossesInnerLedges, groundUnder, legStop, offKey, onOffHolder, pastHolder, stepTester, walkFrom, walkOn, type MovingToken, type StepTester, type Walker } from "./movement.ts";
 import { legSteps, routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * Finding the way a creature walks (docs/design-v1-movement.md section 5):
@@ -1678,7 +1679,7 @@ export class LegCheck {
       const route = this.#route!;
       late(route.pieces.length);
       const { rules, counter } = world.input;
-      const straight = straightCost(token, { x: token.x, y: token.y, elevation: route.points[0]!.elevation }, route.points[route.points.length - 1]!, rules, counter);
+      const straight = straightCost(SQUARES, token, { x: token.x, y: token.y, elevation: route.points[0]!.elevation }, route.points[route.points.length - 1]!, rules, counter);
       const walked = routeFeet(route.points, route.pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed: false, step: snapStep(token) });
       this.#open = straight.cost === walked.cost && straight.diag[0] === walked.diag[0] && straight.diag[1] === walked.diag[1];
       this.#phase = "done";

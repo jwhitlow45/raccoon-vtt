@@ -20,6 +20,7 @@ import { groupDragOf } from "./dragTesting.ts";
 import { frameFields, groupLanding, groupReading, walkPreview } from "./preview.ts";
 import { CLOSED, line, onTurn, raised, recordedCost, seenRoom, thorn, world } from "./testing.ts";
 import { ownWalk } from "#shared/rules/movement.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -385,7 +386,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     /** What a move costs as the reducer counts it: its route's feet, or the plain straight leg's, squeezed where it lands squeezed. */
     const moveFeet = (c: Case, at: { x: number; y: number; squeeze?: true }, pieces: readonly RoutePiece[] | undefined) => {
       const landing = landedElevation(c.view.buildChunks, c.mover, at);
-      if (!pieces) return plainLegCost(c.mover, { ...c.mover, ...at, elevation: landing }, c.rules, { h: 0, v: 0 }).cost;
+      if (!pieces) return plainLegCost(SQUARES, c.mover, { ...c.mover, ...at, elevation: landing }, c.rules, { h: 0, v: 0 }).cost;
       return routeFeet(routePoints(c.view.buildChunks, ownWalk(c.mover), pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), c.rules, { h: 0, v: 0 }, { swimSpeed: false, step: snapStep(c.mover) }).cost;
     };
     const cases: Case[] = [];
@@ -449,7 +450,7 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
       if (dx > 1e-9 && dy > 1e-9 && Math.abs(dx - dy) > 1e-9) continue;
       walked++;
       // The route along the leg the move walks, one piece a step as the reducer steps it (route.ts routeWalk), each with what that step pays.
-      const spots = routeWalk(walkTrace(c.view.buildChunks, ownWalk(c.mover), [{ x: c.mover.x, y: c.mover.y, elevation: c.mover.elevation }, { x: move.x, y: move.y, elevation: landedElevation(c.view.buildChunks, c.mover, move) }]), c.view);
+      const spots = routeWalk(SQUARES, walkTrace(c.view.buildChunks, ownWalk(c.mover), [{ x: c.mover.x, y: c.mover.y, elevation: c.mover.elevation }, { x: move.x, y: move.y, elevation: landedElevation(c.view.buildChunks, c.mover, move) }]), c.view);
       const each: RoutePiece[] = spots.slice(1).map((q, i) => {
         const p = spots[i]!;
         const node = w.nodeAt(q);

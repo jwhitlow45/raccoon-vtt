@@ -298,7 +298,7 @@ describe("a drag of an attached token plans the walk the server takes and stores
         const rules = c.state.meta.settings;
         const walked = route
           ? routeFeet([start, ...routePoints(c.state.buildChunks, seat, route, landing).slice(1)], route.map(([, , extra, swim]) => ({ extra, swim })), rules, { h: 0, v: 0 }, { swimSpeed: false, step: snapStep(mover) }).moved
-          : straightCost(after, start, { x: op.x, y: op.y, elevation: landing }, rules, { h: 0, v: 0 }).moved;
+          : straightCost(SQUARES, after, start, { x: op.x, y: op.y, elevation: landing }, rules, { h: 0, v: 0 }).moved;
         const storedMoved = (after.path?.stops ?? []).slice(before).reduce((sum, s) => sum + (s.moved ?? 0), 0);
         assert.equal(storedMoved, walked, `${where}: the walk ${seated ? "on" : "off"} the holder counted ${storedMoved} ft where it walked ${walked} from ${seated ? "its seat" : "the ground under it"}, ${JSON.stringify(op)}`);
         if (seated) seatedStep++;

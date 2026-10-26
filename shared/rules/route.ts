@@ -1,9 +1,10 @@
 import type { PathStop } from "../model.ts";
 import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
-import { canSqueeze, footprintRect, footprintSize, isSqueezed, rangeAtInto, snapStep, stopFootprint, type CellRange, type PlacedToken } from "./footprint.ts";
+import { canSqueeze, footprintRect, footprintSize, isSqueezed, placedOnHex, rangeAtInto, snapStep, stopFootprint, tokenRefHex, type CellRange, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
-import { SQUARES } from "./grid.ts";
+import { SQUARES, type Grid } from "./grid.ts";
+import { hexDistance, hexLine, type HexGrid } from "./hex.ts";
 import { footing, footprintGround, sceneGround } from "./heights.ts";
 import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear, walkEnds, walkFrom, walkOn, type MovingToken, type WalkEnd, type Walker, type Walking } from "./movement.ts";
 
@@ -17,6 +18,13 @@ import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear,
  * arithmetic on the op and the state before it, so replay rebuilds the same
  * costs and spots from the stored op. If any rule here changes, the op
  * version moves with it.
+ *
+ * On a hex scene (docs/design-v1-hex-grids.md 4.2 to 4.4) a leg is
+ * straight from its start's reference hex to its end's: its feet are the
+ * hex steps between them, and its spots stand on the hex line between them.
+ * Routes, blocking and squeezing on hexes are phase H2's, and the server
+ * refuses a routed or squeezed move on a hex scene until then, so the
+ * route, lattice and stand rules here stay square.
  */
 
 /** One piece as `token.move` carries it: where it ends, the public extra feet each foot costs, and whether one of them is the swimming foot. */
@@ -284,7 +292,7 @@ function multiplier(piece: { extra: number; swim: 0 | 1 } | undefined, swimSpeed
  */
 export type SizedSpot = RoutePoint & Pick<PathStop, "footprint">;
 
-/** The token as it stood at a spot, at the size it had there and squeezed if it was. */
+/** The token as it stood at a spot, at the size it had there and squeezed if it was: a stop's footprint box reads as its size's category on hexes. */
 function standingAt(token: PlacedToken, spot: SizedSpot): PlacedToken {
   if (!spot.footprint) return { ...token, x: spot.x, y: spot.y };
   const { w, h, squeeze } = spot.footprint;
@@ -292,8 +300,8 @@ function standingAt(token: PlacedToken, spot: SizedSpot): PlacedToken {
 }
 
 /** The footprint a trail draws at a spot, in cells, at the size the creature had there. */
-export function spotRect(token: PlacedToken, spot: SizedSpot): Rect {
-  return footprintRect(SQUARES, standingAt(token, spot));
+export function spotRect(g: Grid, token: PlacedToken, spot: SizedSpot): Rect {
+  return footprintRect(g, standingAt(token, spot));
 }
 
 /**
@@ -312,10 +320,16 @@ export function spotRect(token: PlacedToken, spot: SizedSpot): Rect {
  * `counter` carries the diagonals of earlier legs under the 5-10-5 rule,
  * which counts every second diagonal of the whole move double, and is
  * updated in place, as a ruler's legs do (rules/distance.ts).
+ *
+ * On hexes a leg's steps are the hex steps between its start's and its
+ * end's reference hexes, each read at the size its spot holds (4.2), so a
+ * leg whose stops differ in size still counts, and the room's rule only
+ * combines them with the change of elevation (4.3).
  */
-export function straightFeet(token: PlacedToken, from: SizedSpot, to: SizedSpot, rules: DistanceSettings, counter?: DiagonalCounter): number {
-  const a = spotRect(token, from);
-  const b = spotRect(token, to);
+export function straightFeet(g: Grid, token: PlacedToken, from: SizedSpot, to: SizedSpot, rules: DistanceSettings, counter?: DiagonalCounter): number {
+  if (g.shape === "hex") return hexLegFeet(g, token, from, to, rules, counter);
+  const a = spotRect(g, token, from);
+  const b = spotRect(g, token, to);
   const standA = standingAt(token, from);
   const standB = standingAt(token, to);
   const sizeA = footprintSize(standA);
@@ -327,10 +341,17 @@ export function straightFeet(token: PlacedToken, from: SizedSpot, to: SizedSpot,
   return rules.diagonal === "euclid" ? Math.round(ft) : ft;
 }
 
+function hexLegFeet(g: HexGrid, token: PlacedToken, from: SizedSpot, to: SizedSpot, rules: DistanceSettings, counter?: DiagonalCounter): number {
+  const steps = hexDistance(g, tokenRefHex(g, standingAt(token, from)), tokenRefHex(g, standingAt(token, to)));
+  const dz = Math.abs(to.elevation - from.elevation) / rules.feetPerCell;
+  const ft = legFeet(steps, 0, dz, rules.diagonal, rules.feetPerCell, counter);
+  return rules.diagonal === "euclid" ? Math.round(ft) : ft;
+}
+
 /** What a plain straight leg takes: its feet as `straightFeet` counts them, no extras, and the diagonals it took. */
-export function straightCost(token: PlacedToken, from: SizedSpot, to: SizedSpot, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
+export function straightCost(g: Grid, token: PlacedToken, from: SizedSpot, to: SizedSpot, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
   const running = { ...counter };
-  const moved = straightFeet(token, from, to, rules, running);
+  const moved = straightFeet(g, token, from, to, rules, running);
   return { moved, cost: moved, diag: rules.diagonal === "fiveTen" ? [running.h - counter.h, running.v - counter.v] : [0, 0] };
 }
 
@@ -341,9 +362,9 @@ export function straightCost(token: PlacedToken, from: SizedSpot, to: SizedSpot,
  * footprints' middles. The drag's label reads a plain drop by it (review
  * ASTRA-18).
  */
-export function plainLegCost(before: PlacedToken & { elevation: number }, after: PlacedToken & { elevation: number }, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
+export function plainLegCost(g: Grid, before: PlacedToken & { elevation: number }, after: PlacedToken & { elevation: number }, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
   const from: SizedSpot = { x: before.x, y: before.y, elevation: before.elevation, ...(isSqueezed(before) !== isSqueezed(after) ? { footprint: stopFootprint(before) } : {}) };
-  return straightCost(after, from, { x: after.x, y: after.y, elevation: after.elevation }, rules, counter);
+  return straightCost(g, after, from, { x: after.x, y: after.y, elevation: after.elevation }, rules, counter);
 }
 
 /** A spot a walk passes (6.1, contract 4.3), with where the walk is at it: step `k` of piece `piece`'s `n`. */
@@ -374,11 +395,57 @@ export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress">;
  * The walk is its trace (`WalkTrace`), its walker at every point: a walker
  * on the ground takes the ground under the footprint the walk has at each
  * spot, any other token rises and falls evenly between its pieces' ends.
+ *
+ * On hexes each piece's spots stand on the hex line from its start's
+ * reference hex to its end's (4.4), one a hex, the creature's box placed
+ * so its anchor stands on that hex (footprint.ts placedOnHex) and the last
+ * where the piece ends. So every reader of a walk's spots, `routeSeen`,
+ * the area sweep and the drag preview's, reads the same hexes. `step`
+ * means nothing there.
  */
-export function routeWalk(trace: WalkTrace, build: Pick<BuildState, "buildChunks">, step?: number): WalkSpot[] {
+export function routeWalk(g: Grid, trace: WalkTrace, build: Pick<BuildState, "buildChunks">, step?: number): WalkSpot[] {
   const first = trace[0];
   if (!first) return [];
+  if (g.shape === "hex") return hexWalkSpots(g, trace, build);
   return walkSpots(trace, first, build, step, (piece) => trace[piece]!);
+}
+
+/** The hex steps of a piece of a walk on hexes, at least 1, so a piece within one hex still ends where it ends. */
+export function hexPieceSteps(g: HexGrid, walker: PlacedToken, a: Point, b: Point): number {
+  return Math.max(1, hexDistance(g, tokenRefHex(g, { ...walker, x: a.x, y: a.y }), tokenRefHex(g, { ...walker, x: b.x, y: b.y })));
+}
+
+/**
+ * The spot at fraction `f` of a piece on hexes (4.4): on the hex line's hex
+ * at that fraction of its steps, rounded, at the walker's size, or where
+ * the piece ends at its end. Its elevation is the caller's. The area sweep
+ * samples a piece by it at its own density, and `routeWalk` at each hex.
+ */
+export function hexPieceSpot(g: HexGrid, walker: PlacedToken, a: Point, b: Point, f: number): Point {
+  if (f >= 1) return { x: b.x, y: b.y };
+  if (f <= 0) return { x: a.x, y: a.y };
+  const line = hexLine(g, tokenRefHex(g, { ...walker, x: a.x, y: a.y }), tokenRefHex(g, { ...walker, x: b.x, y: b.y }));
+  const at = line[Math.round(f * (line.length - 1))]!;
+  return placedOnHex(g, walker, at);
+}
+
+function hexWalkSpots(g: HexGrid, trace: WalkTrace, build: Pick<BuildState, "buildChunks">): WalkSpot[] {
+  const first = trace[0]!;
+  const grounded = walkFrom(build.buildChunks, first).grounded;
+  const stepsOf = (i: number) => hexPieceSteps(g, trace[i - 1]!, trace[i - 1]!, trace[i]!);
+  const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, trace.length > 1 ? stepsOf(1) : 0] }];
+  for (let i = 1; i < trace.length; i++) {
+    const a = trace[i - 1]!;
+    const b = trace[i]!;
+    const n = stepsOf(i);
+    for (let k = 1; k <= n; k++) {
+      const end = k === n;
+      const { x, y } = hexPieceSpot(g, a, a, b, k / n);
+      const elevation = end ? b.elevation : grounded ? groundUnder(build.buildChunks, a, { x, y }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
+      spots.push({ x, y, elevation, progress: [i - 1, k, n] });
+    }
+  }
+  return spots;
 }
 
 /**
@@ -455,8 +522,9 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
  */
 export function routeStands(build: BuildState, route: readonly RoutePoint[], token: Walker, step?: number, opts: { squeeze?: boolean } = {}, spots?: readonly WalkSpot[]): { walk: readonly WalkSpot[]; trace: WalkTrace; spot: (s: number) => RouteSpot } {
   // The walker where each piece starts, as the walk carries it (`WalkTrace`): ledges, the squeeze and the leg test count from here.
+  // Routes are square until hex grids' phase H2, which refuses them on hexes.
   const trace = walkTrace(build.buildChunks, token, route);
-  const walk = spots ?? routeWalk(trace, build, step);
+  const walk = spots ?? routeWalk(SQUARES, trace, build, step);
   const lattice = step ?? routeLattice(token);
   const grid = snapStep(token);
   const blocks = build.scenes[token.sceneId]?.blockMovement === true;

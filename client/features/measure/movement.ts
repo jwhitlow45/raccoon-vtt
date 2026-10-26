@@ -135,7 +135,7 @@ export function turnTrail(input: {
     diagonals.h += taken.diag[0];
     diagonals.v += taken.diag[1];
   }
-  const rects = stops.map((stop) => spotRect(token, stop));
+  const rects = stops.map((stop) => spotRect(SQUARES, token, stop));
   return { spots, rects, legs, movedFt, usedFt, diagonals, from: rects[0]!, to: footprintRect(SQUARES, token) };
 }
 
@@ -365,8 +365,8 @@ export function dragReading(input: {
     walk?.route
       ? routeFeet(upTo, pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed, step })
       : landed && upTo[upTo.length - 1] === end
-        ? plainLegCost(token, landed, rules, counter)
-        : straightCost(token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
+        ? plainLegCost(SQUARES, token, landed, rules, counter)
+        : straightCost(SQUARES, token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
   const leg = legCost(points);
   // Walked off its mount on its own turn, the leg costs what getting off costs and then the rest, as the reducer stores it.
   const off = active && input.dismount && input.costFt === undefined ? input.dismount : undefined;
@@ -431,7 +431,7 @@ export function remoteWalk(token: MovingToken, to: Point, corners: readonly Poin
 
 /** The last spot of the walk, short of its end, where the creature would stand in a Half Speed area, with the piece it is on: each spot read from the walk's trace (review AT-ASTRA-27). */
 function lastHalvedSpot(walk: DragWalk): { piece: number; at: RoutePoint } | null {
-  const spots = routeWalk(walk.trace, walk.build);
+  const spots = routeWalk(SQUARES, walk.trace, walk.build);
   for (let i = spots.length - 2; i > 0; i--) {
     const s = spots[i]!;
     const at = { x: s.x, y: s.y, elevation: s.elevation };

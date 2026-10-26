@@ -497,7 +497,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
     const cache = new Map<number, readonly WalkSpot[]>();
     const base = (s: number): readonly WalkSpot[] => {
       let hit = cache.get(s);
-      if (!hit) cache.set(s, (hit = head.how === "teleport" ? twoSpots(head.route) : routeWalk(head.trace, build, s)));
+      if (!hit) cache.set(s, (hit = head.how === "teleport" ? twoSpots(head.route) : routeWalk(SQUARES, head.trace, build, s)));
       return hit;
     };
     // The public members: every member seen by all. One under a holder players cannot see walks as itself (listed reveal 2).
@@ -524,7 +524,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
         carriedOn: linkSeen && kind !== undefined && onHolder(kind),
         ...(holder ? { holder } : {}),
         // A member on a route of its own is a creature its holder drags beside it, which walks as itself (moveLeg.ts stoppedAtWalls).
-        spots: shared ? base(mine) : e.how === "teleport" ? twoSpots(e.route) : routeWalk(e.trace, build, mine),
+        spots: shared ? base(mine) : e.how === "teleport" ? twoSpots(e.route) : routeWalk(SQUARES, e.trace, build, mine),
         ox: shared ? ox : 0,
         oy: shared ? oy : 0,
         step: mine,
