@@ -627,6 +627,8 @@ up?: string        // 256 characters, row-major: '.' not a stair, 'a' a stair po
 - Every "seen by players" mark in the model (log lines, a turn's start, path stops) is one bit, set when "players who do not own the token could see it" (design.md 7.3). Per-player vision turns each into a set of members and every projection of a creature into a per-player computation.
 - One computation per scene serves every player, which keeps the server's cost flat in the number of players.
 
+Since docs/design-v1-per-player-vision.md (the project owner, 2026-10-25, D-261025-7), the DM chooses per scene: Sight is Whole party, the model above and still the default, or Per player, where each player sees through the creatures they own and those marked to share sight, and keeps a map of their own. A scene on Whole party keeps every rule of this section, byte for byte.
+
 **Party members and sources.** Three rules, kept apart so each reads only what it needs:
 
 - A **party member** is a token that is owned by a player or marked `partyVision` by the DM. Membership alone decides "always shown": every party member is sent to players like a player-owned token (`aboveFog`), whatever its conditions, its life and the source cap. A creature the party sees through must be on their screen, so an allied NPC lending sight from the dark stays visible. Membership changes only when those token fields change, so the fan-out finds it on the token itself.
@@ -780,7 +782,7 @@ MapPhase.light?: 'bright' | 'dim' | 'dark'     // applied by scene.setPhase
 
 #### 4.3.10 Out of scope
 
-Per-player vision (the project owner chose party vision). Colored and flickering light. Cone lights (the Bullseye Lantern). Magical darkness. Invisible creatures hidden automatically (the DM hides them). Sight cones and facing. Hearing and tremorsense. Half and three-quarters cover. 3D light and sense ranges. A live sight preview while dragging. Light from areas of effect (a Daylight spell is a light the DM places).
+Per-player vision, built later as a choice per scene (docs/design-v1-per-player-vision.md). Colored and flickering light. Cone lights (the Bullseye Lantern). Magical darkness. Invisible creatures hidden automatically (the DM hides them). Sight cones and facing. Hearing and tremorsense. Half and three-quarters cover. 3D light and sense ranges. A live sight preview while dragging. Light from areas of effect (a Daylight spell is a light the DM places).
 
 ### 4.4 Token shadows (depth cue)
 

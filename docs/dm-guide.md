@@ -340,9 +340,10 @@ Whenever one of these makes a walk cost more, the label on the drag says what it
 
 ## Light and party vision
 
-There are two ways to decide what your players see. With fog alone, you reveal the map by hand, and players see whatever you uncover. **Party vision** instead works out what the party can actually see, from each creature's senses, the walls and the light. The party shares that sight: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. You turn it on in the scene's **Vision** settings, which hold three things:
+There are two ways to decide what your players see. With fog alone, you reveal the map by hand, and players see whatever you uncover. **Party vision** instead works out what the party can actually see, from each creature's senses, the walls and the light. Normally the party shares that sight: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. If you would rather each player see only through their own character's eyes, you can choose that too (see [Sight for each player](#sight-for-each-player)). You turn party vision on in the scene's **Vision** settings, which hold four things:
 
 - **Party vision**: when it is on, players see only what the party can see together. Ground the party has explored stays on the players' map, dimmed and without creatures, and ground nobody has seen stays fogged. Turning party vision on turns fog on too.
+- **Sight**: **Whole party**, the default, where the party shares one view and one map, or **Per player**, where each player sees and remembers for themselves.
 - **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on.
 - **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 
@@ -356,6 +357,45 @@ Darkvision, Blindsight and Truesight come from each creature's senses (from its 
 To check what your players see, use **View as a player** or **Party sight** in the [DM panel](#dm-panel). Your own map always stays fully lit, so you never lose track of anything in the dark.
 
 ![The Vision settings of the crypt: Party vision on, Light set to Dark, and the party creatures who lend their sight.](dm-guide/vision-settings.webp)
+
+### Sight for each player
+
+With **Sight** set to **Whole party**, the party shares its eyes and its map. Some tables want more mystery than that: the rogue who slips ahead should be the only one who sees the guard post, and it's up to her player what to tell the others. For that, set **Sight** to **Per player**. The row sits right under **Party vision** and shows whenever party vision is on.
+
+On a per-player scene, each player sees what their own creatures see: their character, its companions, and any creature you've given them to play. On top of that, every player sees through the creatures you've marked **Shares sight with the party**, such as a hireling carrying a lantern. Everything else stays dark for them, even where another player's character is looking. The party's own characters are still visible to everyone, so nobody loses track of their friends. But a goblin standing in Thorn's torchlight shows up only for Thorn's player, and so does its row in the Initiative order. While it acts, the other players see "Another creature's turn".
+
+A creature that shares sight sees by any light, as every creature does, a character's torch included. So if your lantern-carrying hireling stands in the same hall as Thorn, it sees the goblin in Thorn's torchlight too, and so does every player. Keep such a creature somewhere of its own when you want each player's view to stay their own.
+
+![Sight set to Per player in the Vision settings of the chapel ruins: Ana and Ben ticked under Who sees for themselves and Cy not, and Thorn lending his sight to Ana and Bree hers to Ben. On the map, the goblin and the Old altar lie in Thorn's torchlight, and Pip holds a candle in the west room.](dm-guide/vision-per-player.webp)
+
+**Each player keeps their own map.** The ground a player's creatures have seen stays on that player's map, dimmed, just as explored ground does for the whole party, and ground seen by a creature that shares sight goes on everyone's map. So when Thorn explores the chapel, the ground stays unexplored on Bree's player's map, and a label or pin you put there reaches only the players whose maps show it. Your fog tools still work on everyone's map at once: a reveal shows ground to every player, **Add fog** makes every player forget the ground under it, and **Fog all** wipes every player's memory of the scene.
+
+![View as a player for Ana, who plays Thorn: the hall in Thorn's torchlight with the goblin and the Old altar label, Pip's candlelit corner of the west room, and the goblin's turn in the strip and the order.](dm-guide/view-as-ana.webp)
+
+![View as a player for Ben, who plays Bree: the east room in Bree's torchlight and Pip's candlelit corner, Thorn shown in the dark, no goblin or altar, and "Another creature's turn" over the order.](dm-guide/view-as-ben.webp)
+
+**Who sees for themselves.** Under the Sight row, the list **Who sees for themselves** names every player in the room. Up to 6 players on a scene can see and remember for themselves, each with a tick. A player gets a place, ticked, the first time they own a creature that can see on the scene, as long as fewer than 6 places are ticked. Anyone without a tick, and the table display, sees only what the creatures that share sight can see, and keeps only the map the whole party shares.
+
+- Tick a player to give them a place. With 6 already ticked, the list asks you to untick someone first.
+- Untick a player to take their place away. The app asks first, because they forget their map of this scene. Their row then says they see only what creatures that share sight see.
+- Places are sticky. A player keeps theirs when their character falls unconscious or steps off the scene for a while, and exploring never changes the list: only your ticks do. So at a big table, where more than 6 players could see for themselves, decide who should and tick them yourself.
+
+Under the list, **Who lends sight** shows each creature with its senses and light, and whose sight it adds to: "Lends its sight to Ana", "Lends its sight to Ana and Ben", or "Lends its sight to every player" for a creature that shares sight with the party.
+
+**Changing your mind.** A new Sight setting takes effect at once, even in the middle of a fight. Switching to **Whole party** pools every player's map into the party's shared map, and it stays pooled: if you switch back to **Per player** later, each player starts from that pooled map. Switching the map to another phase, such as from Day to Night, or changing the light leaves Sight as it is.
+
+**Checking what each player sees.** Use **View as a player** in the [DM panel](#dm-panel). It shows you exactly what one player sees, their own sight and map included. It never shows whispers between players, so you can look in without reading notes they passed each other. **Party sight** still shades what no player can see on your own map.
+
+**The table display** shows what a player without a place sees: only what the creatures that share sight see, on the map the whole party shares. If you want the TV to show more of a per-player scene, mark a creature that's with the party, such as a torch-bearing hireling, to share its sight.
+
+**What players can still work out.** Per-player sight keeps creatures and ground private, but a few things stay shared, as they do on every scene. It's worth knowing them, so nothing surprises you:
+
+- **Doors are shared.** A door is open or closed for everyone at once. When Thorn opens a door, the change reaches every player's device, and any player whose map shows that doorway sees it swing open, even if none of their own creatures can see it. Secret doors work the same way: once you mark one found, every player who has explored that wall sees a door there.
+- **Areas and light pass through doors**, as they always do. If an aura reaches through a doorway, or a torch shines through it, a player who can see the far side can tell that the door is open. So can a player who watches a party member walk through it.
+- **The room counts its changes.** When one player's creatures see new ground, the room records it as a change of its own. A player who watches the room's change numbers in the browser's developer tools could tell that someone's map just grew. It never says whose map, or where, and your own work out of the players' sight already gives the same small signal.
+- **The rules everyone shares use only what everyone can see.** A creature that only some players can see counts as unseen for the rules that must give every player the same answer. A horse you control that a character rides shares no turn with its rider unless every player can see it, a trap your monster sets off goes off without the players noticing, and the corners of its path stay hidden. When that matters, make the creature always visible, or mark it to share its sight. The Vision settings point it out for a mount.
+- **Paths follow each player's own map.** When a player drags their own token, the path finds its way over the ground that player remembers, and past creatures only they can see. Other players see the corners of that path only where they know the ground too. A trap it sets off goes off for everyone, as it does whenever a party member walks into one.
+- **Places go by who came first.** Who holds the 6 places depends on the order in which players first owned a creature that could see on the scene, and then on your ticks, never on what anyone has explored. A player who doesn't get a place learns only that the places are taken.
 
 ## Fog
 
@@ -374,7 +414,7 @@ The draft lets you set up a reveal, check it, and show it all at once. If you wo
 
 **Builder room** fills everything joined to the room you tap, and only walls, windows and closed doors stop it. Close the doors between rooms first, or the reveal spills into the next room.
 
-**With party vision on**, the players' fog also remembers what the party has explored, and **Add fog** can't hide explored ground again. Only **Fog all** makes the players forget it. If you undo a Fog all, the ground you had revealed is revealed again, but the party's memory of what it explored doesn't come back, so anything the party had only explored stays fogged until the party sees it again or you reveal it.
+**With party vision on**, the players' fog also remembers what the party has explored, and **Add fog** can't hide explored ground again. Only **Fog all** makes the players forget it. If you undo a Fog all, the ground you had revealed is revealed again, but the party's memory of what it explored doesn't come back, so anything the party had only explored stays fogged until the party sees it again or you reveal it. On a scene where each player sees for themselves, **Add fog** and **Fog all** reach every player's own map as well.
 
 ## Map phases, imports and exports
 
@@ -1133,7 +1173,7 @@ The **DM** panel holds the tools that act on your players' screens.
   - **Follow me**: the players' maps follow yours as you pan and zoom, until you turn it off.
   - **Bring everyone here**: moves every player's map to what you see right now, once.
   - **Black out players' screens**: players see only black and "The DM has paused the game." Use it for a break, or to set up a reveal out of sight. While it is on, your top bar reads "Players see black".
-- **Check their view**: pick a player under **View as a player** and press **View** to see exactly what they see, fog and party vision included, without anything hidden. If you are on another scene, this also takes you to the players' scene. Nothing you do there is saved, and **Exit** or Escape brings you back. On a scene with party vision, **Party sight** shades what the party can't see on your own map instead.
+- **Check their view**: pick a player under **View as a player** and press **View** to see exactly what they see, fog and party vision included, without anything hidden. It shows the players' scene, whichever scene you are on, and on a scene where each player sees for themselves it shows that player's own sight and map. It says it is loading what they see until it arrives, and it never shows whispers between players. Nothing you do there is saved, and **Exit** or Escape brings you back. On a scene with party vision, **Party sight** shades what the party can't see on your own map instead.
 - **Player link**: **Show the player link** shows the link and its QR code, for players at the table to scan.
 - **Table display**: see [The table display](#the-table-display).
 
@@ -1245,7 +1285,7 @@ If your group plays around a table, a TV can show the players' view of the map, 
 
 ![Add a TV in the DM panel: the code to type on the TV, how long it lasts, and its QR code.](dm-guide/table-display.webp)
 
-The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. It shows no panels, chat or Initiative strip, unless you tap the display and turn on **Show whose turn it is**. To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. A room can have up to 4 displays.
+The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). It shows no panels, chat or Initiative strip, unless you tap the display and turn on **Show whose turn it is**. To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. A room can have up to 4 displays.
 
 ## Room settings for fights and maps
 

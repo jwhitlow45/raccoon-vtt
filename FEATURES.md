@@ -11,7 +11,7 @@ The app's Docs page (/docs) lists every written doc. To learn the tools as a DM,
 ## Secrets stay secret
 
 - The DM sees everything. Hidden things show translucent or dimmed to the DM.
-- Players' devices never receive what players may not see: hidden tokens, monsters and map labels under the fog, hidden stamps, lights, DM notes, monster stats, other players' companion stat blocks, the DM's fog edits before they are published, the map's other phases, scene folders and thumbnails, DM-only journal pages, secrets not yet revealed, creatures out of the party's sight, traps nobody has found and what any trap does, and, where the DM keeps them secret, monsters' places in the Initiative order and their Initiative rolls until their turn. So even a reload or the browser's developer tools cannot show them.
+- Players' devices never receive what players may not see: hidden tokens, monsters and map labels under the fog, hidden stamps, lights, DM notes, monster stats, other players' companion stat blocks, the DM's fog edits before they are published, the map's other phases, scene folders and thumbnails, DM-only journal pages, secrets not yet revealed, creatures out of the party's sight, on a scene where each player sees for themselves the creatures and ground only other players' characters have seen, traps nobody has found and what any trap does, and, where the DM keeps them secret, monsters' places in the Initiative order and their Initiative rolls until their turn. So even a reload or the browser's developer tools cannot show them.
 - The log never tells players what happened to a creature while they could not see it, even after it is revealed.
 - The map image itself reaches players whole, and each player's device draws the fog over it. A group has to trust its players with that.
 
@@ -227,7 +227,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - Fog never flashes the map. A player's map stays hidden until the fog has loaded, and missing fog reads as all fogged.
 - Monsters and labels standing fully under the fog never reach players. Player characters always stay visible to the party.
 - A creature a player drags under the fog vanishes for them, with a note saying so.
-- "View as a player" shows the DM exactly what a chosen player sees.
+- "View as a player" shows the DM exactly what a chosen player sees, their own sight and map included, and no whispers between players.
 - **Party vision.** The "Party vision" switch in a scene's Vision settings makes players see only what their characters see. The same settings set the light to Bright, Dim or Dark. Every player then sees what any party creature sees.
   - Walls, closed doors, secret doors not yet found, pillars, and raised ground above a creature's eyes block sight. Windows do not.
   - Darkvision, Blindsight and Truesight come from the creature's senses. Darkvision shows darkness in gray.
@@ -238,6 +238,13 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - The DM's own map stays fully lit. The "Party sight" switch shades what the party cannot see.
   - Moving players to a scene where no party creature can see warns first.
   - A creature a player drags out of the party's sight vanishes for them too, with a note saying so once the server answers the move, since a light it carries can keep it in sight.
+- **Sight per player.** Under Party vision, a scene's "Sight" is "Whole party" (the default) or "Per player".
+  - Per player, each player sees only what the creatures they own see, plus the creatures marked to share sight with the party, and keeps their own map of where they have been. Party members stay visible to everyone.
+  - A creature only another player's character sees, its Initiative row, and labels, pins and stamps on ground only another player remembers never reach a player. They see "Another creature's turn" while it acts.
+  - "Who sees for themselves" lists the room's players. Up to 6 a scene see for themselves: a player joins, ticked, the first time they own a creature that sees there, while fewer than 6 are. The DM ticks and unticks them, and an untick asks first, since that player forgets their map of the scene. Places stay until the DM changes them. Players not ticked, and the table display, see only what creatures that share sight see.
+  - "Who lends sight" says whose sight each creature adds to: "Lends its sight to Ana", or "to every player" for one that shares sight.
+  - The DM's reveals, hides and Fog all apply to every player's map. Switching to Whole party pools every player's map into the party's, and it stays pooled when the scene goes back to Per player. A map phase or a light change keeps the choice.
+  - Doors stay shared: a door's state is the same for everyone, drawn on each player's own map.
 
 ## Areas of effect
 
@@ -384,7 +391,7 @@ The DM asks players for a saving throw or an ability check, and each player roll
 
 ## DM tools
 
-- "View as a player" shows exactly what a chosen player sees.
+- "View as a player" shows exactly what a chosen player sees, whichever scene the DM is on, with "Loading what Ana sees…" until it arrives.
 - "Follow me" makes players' maps follow the DM's as they pan and zoom. "Bring everyone here" moves them once. A ping with "Look here" on moves every player's view to that spot.
 - "Black out players' screens" for a break or a reveal. Players see only a black screen that says "The DM has paused the game." Meanwhile their devices receive nothing from the game but the X-card. When the game resumes, each player's selected token, its action bar and any HP typed into it and not applied come back as they were.
 - Undo and Redo for the DM's changes, each saying what it took back. They sit in the top bar.
@@ -430,7 +437,7 @@ Show the players' view of the map on a TV at the table, with nothing else on scr
 - The DM sets it up from the DM panel's Table display section:
   - "Add a TV" shows a code of 10 letters and numbers (such as `K7QH 2MXA 4F`), a link and a QR code, good once and for 10 minutes. On the TV's browser, "Set up a table display" on Home takes the code.
   - "Open on this device" opens the display in a new window, for a laptop wired to the TV. The window draws only what players get, but the laptop is still signed in as the DM.
-- The display shows the players' scene as players see it: the map, the fog, party vision, tokens, shared areas, drawings, pins (except those linked to a page not every player can read), and pings and rulers. It shows no bars, panels, chat or log, roll requests or Initiative strip, and the room sends it no log lines at all.
+- The display shows the players' scene as players see it: the map, the fog, party vision (on a scene where each player sees for themselves, only what creatures that share sight see), tokens, shared areas, drawings, pins (except those linked to a page not every player can read), and pings and rulers. It shows no bars, panels, chat or log, roll requests or Initiative strip, and the room sends it no log lines at all.
 - It also shows the pause screen during a blackout, handouts shown to everyone, the X-card, and "Waiting for the DM to choose a scene" when there is none.
 - A handout of several pages shows one page at a time, with its page number. The arrow and page keys step through it, and a tap shows Previous page, Next page and Close.
 - A tap, a click or any key shows a menu for 5 seconds: Follow the DM, Fit the map, "Show whose turn it is" (off at first), Text size (85% to 130% for the names, chips and badges on the map), Full screen, and Leave. The display remembers these choices. While the X-card or a one-page handout is open, a tap closes it instead.
