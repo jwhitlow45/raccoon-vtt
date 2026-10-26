@@ -3,8 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <!-- viewport-fit=cover lets the map run under the notch and home bar.
-         The UI keeps clear of them with env(safe-area-inset-*). -->
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+         The UI keeps clear of them with env(safe-area-inset-*).
+         interactive-widget=resizes-content has Android Chrome shrink the page
+         for the on-screen keyboard, so a sheet at the foot stays above it.
+         iOS Safari ignores it and shrinks only the visual viewport, which
+         lib/keyboardInset.ts reads. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#16161a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
