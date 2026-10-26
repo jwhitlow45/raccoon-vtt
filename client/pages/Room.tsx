@@ -109,6 +109,7 @@ import { inModal, ModalSlots, useModalSlot } from "./modalSlot.tsx";
 import {
   FLOAT_MAX,
   inToolbarRow,
+  optionsLift,
   lastToolIn,
   mapWidthOf,
   mergedEdges,
@@ -199,10 +200,10 @@ const NO_OPTIONS: OptionsBox = { row: 0, reserve: 0, controls: 0 };
  * keyboard, and the row measures again as it changes, since the row moves
  * without changing size.
  */
-function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>, lift: number): [(el: HTMLElement | null) => (() => void) | undefined, OptionsBox] {
+function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>, lifts: { foot: number; row: number }): [(el: HTMLElement | null) => (() => void) | undefined, OptionsBox] {
   const [box, setBox] = useState<OptionsBox>(NO_OPTIONS);
-  const liftNow = useRef(lift);
-  liftNow.current = lift;
+  const liftNow = useRef(lifts);
+  liftNow.current = lifts;
   const measureNow = useRef<(() => void) | null>(null);
   const ref = useCallback(
     (el: HTMLElement | null) => {
@@ -217,7 +218,8 @@ function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>, li
       const measure = () => {
         const nav = toolbar.current;
         if (!nav) return;
-        const foot = nav.getBoundingClientRect().top - liftNow.current;
+        // Measured as the row rests, so the keyboard moves neither the map's insets nor the chrome's controls.
+        const foot = nav.getBoundingClientRect().top - optionsLift(el.dataset.rvttArrangement, liftNow.current);
         const r = el.getBoundingClientRect();
         const atFoot = el.dataset.rvttArrangement === "stacked" || el.dataset.rvttArrangement === "floating";
         const row = atFoot && r.height > 0 ? Math.max(0, Math.round(foot - r.top)) : 0;
@@ -248,7 +250,7 @@ function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>, li
     // The scale is read through the element's rectangle, but a change must measure again.
     [scale, toolbar],
   );
-  useLayoutEffect(() => measureNow.current?.(), [lift]);
+  useLayoutEffect(() => measureNow.current?.(), [lifts.foot, lifts.row]);
   return [ref, box];
 }
 
@@ -336,11 +338,14 @@ function RoomPage() {
    * and every size decision read from it, stays as it was. The toolbar
    * stays under the keyboard, and the map's insets and size do not change.
    */
+  const safe = useSafeAreas();
   const keyboard = useKeyboardView();
   const keyboardLift = keyboard ? Math.max(0, keyboard.inset - toolbarExact) : 0;
   const keyboardTop = keyboard?.top ?? 0;
   useFocusedFieldInView(theme.space(2));
-  const [optionsRef, optionsBox] = useOptionsBox(zoom, toolbarEl, keyboardLift);
+  // A row in the toolbar's row stands on the keyboard from the screen's safe area, a toolbar's height lower than the rest (ToolOptions `onKeys`).
+  const rowLift = keyboard ? Math.max(0, keyboard.inset - safe.bottom * zoom) : 0;
+  const [optionsRef, optionsBox] = useOptionsBox(zoom, toolbarEl, useMemo(() => ({ foot: keyboardLift, row: rowLift }), [keyboardLift, rowLift]));
   const optionsBottom = optionsBox.row + optionsBox.reserve;
   const insets = useMemo<Insets>(() => ({ top: topBarHeight, right: 0, bottom: toolbarHeight + optionsBottom, left: 0 }), [topBarHeight, toolbarHeight, optionsBottom]);
   // A map pane at the foot stands on the options as they stand over the keyboard, and keeps below the visible area's top.
@@ -650,7 +655,6 @@ function RoomPage() {
   // A map pane's bottom sheet folds the alerts column too (fold.ts useFoldUnderPane), and their summary row docks on the pane's top edge where it has room (RoomDock.tsx usePaneDock), so what arrives under it is still read out.
   const underPane = useStore(dockStore, (s) => s.paneSheets > 0);
   const summary = useDockSummary();
-  const safe = useSafeAreas();
   /*
    * Where a sheet stands: at the foot of an upright phone, on the right of
    * one held sideways, or, where that would leave its body under 88 px, in
@@ -714,8 +718,10 @@ function RoomPage() {
    * the header.
    */
   const sheetKeys = sheetKeyboard(keyboard, zoom);
+  // The page as it is: shorter than the room's steady height where a browser shrank it for its keyboard, whose view then hides nothing more.
+  const pageHeight = keyboard ? (keyboard.top + keyboard.height + keyboard.inset) / zoom : height;
   const [sheetTall, setSheetTall] = useState(false);
-  const dockInHeader = docked && (full || landscape || sheetTall || !dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, keyboard: sheetKeys }));
+  const dockInHeader = docked && (full || landscape || sheetTall || !dockFits({ height: pageHeight, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, keyboard: sheetKeys }));
   const sheetHeight = useLayoutHeight(sheetEl, zoom);
   // The dock's row rides the sheet's swipe (lib/sheetSwipe.ts).
   const [dockEl, setDockEl] = useState<HTMLElement | null>(null);
@@ -774,7 +780,10 @@ function RoomPage() {
         : null,
     [topBarExact, toolbarExact, optionsBottom, optionsBox.controls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown],
   );
-  const typing = useMemo<Typing | null>(() => (keyboard ? { top: keyboard.top / zoom, bottom: (keyboard.top + keyboard.height) / zoom, lift: keyboardLift / zoom } : null), [keyboard, keyboardLift, zoom]);
+  const typing = useMemo<Typing | null>(
+    () => (keyboard ? { top: keyboard.top / zoom, bottom: (keyboard.top + keyboard.height) / zoom, lift: keyboardLift / zoom, page: (keyboard.top + keyboard.height + keyboard.inset) / zoom } : null),
+    [keyboard, keyboardLift, zoom],
+  );
   useLayoutEffect(() => {
     barDock.setState({ chrome, typing });
   }, [barDock, chrome, typing]);
@@ -945,7 +954,7 @@ function RoomPage() {
 
   const reserveTop = docked && !dockInHeader ? DOCK_PX + DOCK_GAP : undefined;
   // The cap the sheet takes once it stands at its normal height again, with the dock back on its edge where it fits there, for a long swipe from full screen after a change of layout.
-  const normalReserve = docked && !landscape && dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, keyboard: sheetKeys }) ? DOCK_PX + DOCK_GAP : undefined;
+  const normalReserve = docked && !landscape && dockFits({ height: pageHeight, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, keyboard: sheetKeys }) ? DOCK_PX + DOCK_GAP : undefined;
   const normalCap = sheetCap({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, reserveTop: normalReserve });
   const expandSheet = (on: boolean) => ui.expandSheet(on);
   const headerActions = dockInHeader ? <DockHeaderActions summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : undefined;

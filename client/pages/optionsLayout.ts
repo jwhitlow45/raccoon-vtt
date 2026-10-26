@@ -176,6 +176,18 @@ export function inToolbarRow(arrangement: Arrangement): boolean {
   return arrangement === "merged" || arrangement === "pair";
 }
 
+/**
+ * How far the options row stands raised over the on-screen keyboard, in
+ * screen px, by where it rests: a row at the foot, stacked or floating,
+ * rises by `foot`, as far as the keyboard reaches above the toolbar, and a
+ * row in the toolbar's own row rises by `row`, as far as it reaches above
+ * the screen's safe area, a toolbar's height more. What measures the row
+ * against the toolbar takes this off, so the raised row counts as resting.
+ */
+export function optionsLift(arrangement: string | undefined, lifts: { foot: number; row: number }): number {
+  return arrangement === "merged" || arrangement === "pair" ? lifts.row : lifts.foot;
+}
+
 // ------------------------------------------------------------ the fit (6.3, 6.4)
 
 /** Between two controls in the row. */

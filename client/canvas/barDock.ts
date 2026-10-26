@@ -108,25 +108,32 @@ export const NO_SIDES: Sides = { top: 0, right: 0, bottom: 0, left: 0 };
  * The room while someone types with the on-screen keyboard up
  * (lib/keyboardInset.ts), in the chrome's own pixels, which Room publishes
  * beside its chrome: the visible area's top and bottom from the layout's
- * top, and `lift`, how far what stands on the toolbar rises to stand on
- * the keyboard. Placement reads it (placedChrome). A size decision reads
- * the chrome alone, so typing never turns the bar compact, folds a roll
- * card or hides what holds the field (docs/design.md 14.4).
+ * top, `lift`, how far what stands on the toolbar rises to stand on the
+ * keyboard, and `page`, the page's real height. That is the layout's
+ * height, except where a browser shrank the page itself for its keyboard
+ * and the room keeps its taller size (features/device/layout.ts
+ * steadySize): placement then fits the short page, and `lift` is 0, since
+ * the page already ends at the keyboard. Placement reads it
+ * (placedChrome). A size decision reads the chrome alone, so typing never
+ * turns the bar compact, folds a roll card or hides what holds the field
+ * (docs/design.md 14.4).
  */
-export type Typing = { top: number; bottom: number; lift: number };
+export type Typing = { top: number; bottom: number; lift: number; page: number };
 
 /**
  * The chrome a surface is placed by while someone types: the bars down to
  * the visible area's top, what stands on the toolbar lifted onto the
- * keyboard. A surface whose field has too little room under the bars
- * (`overBars`) takes the visible area from its top, inside the safe area,
- * as a sheet does (components/Sheet.tsx).
+ * keyboard. A surface whose field has too little room between the bars
+ * and the toolbar (`overBars`) takes the whole visible area, from its top,
+ * inside the safe area, to its foot, as a sheet does (components/Sheet.tsx):
+ * over the toolbar too, where a browser that shrank the page leaves it
+ * showing above the keyboard.
  */
 export function placedChrome(chrome: Chrome, typing: Typing | null, overBars = false): Chrome {
   if (!typing) return chrome;
   const lift = typing.lift;
-  const top = overBars ? Math.max(chrome.safe.top, typing.top) : Math.max(chrome.top, typing.top);
-  return { ...chrome, top, bottom: chrome.bottom + lift, controls: chrome.controls + lift, toolbar: chrome.toolbar + lift };
+  if (overBars) return { ...chrome, top: Math.max(chrome.safe.top, typing.top), bottom: Math.max(0, typing.page - typing.bottom), controls: chrome.controls + lift, toolbar: chrome.toolbar + lift };
+  return { ...chrome, top: Math.max(chrome.top, typing.top), bottom: chrome.bottom + lift, controls: chrome.controls + lift, toolbar: chrome.toolbar + lift };
 }
 
 /** Until Room has measured: a 52 px top bar and a 60 px toolbar, no safe areas. */
@@ -886,9 +893,11 @@ export function placeBar(input: {
   const decided = freeArea(input.viewport, input.chrome, input.foot);
   const mode = input.keepMode ?? heldOrOpenMode({ layout: input.layout, free: decided, foot: input.foot, cardAt: input.cardAt ?? null, heldMode: input.heldMode ?? null });
   const chrome = placedChrome(input.chrome, input.typing ?? null, input.overBars === true);
-  const free = freeArea(input.viewport, chrome, input.foot);
+  // Placed on the page as it is, which a browser may have made shorter than the room it keeps.
+  const page = input.typing ? { width: input.viewport.width, height: input.typing.page } : input.viewport;
+  const free = freeArea(page, chrome, input.foot);
   if (mode === "span") {
-    const strip = input.restFoot === undefined ? free : freeArea(input.viewport, chrome, input.restFoot);
+    const strip = input.restFoot === undefined ? free : freeArea(page, chrome, input.restFoot);
     const state = input.state ?? "rest";
     const hang = restHang(strip, state, input.expandedHeight ?? null);
     const lane = state === "expanded" && input.expandedHeight != null ? expandedLane(input.column, strip) : restLane(input.column, hang.at - hang.room);
@@ -908,7 +917,7 @@ export function placeBar(input: {
   const cap = resizable && input.size?.h !== undefined ? Math.max(MIN_WINDOW_HEIGHT, input.size.h) : undefined;
   const content = cap === undefined ? input.height : Math.min(input.height, cap);
   const width = resizable ? Math.max(barWidth, input.size?.w ?? barWidth) : barWidth;
-  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, chrome, barWidth) : spotHang(input.spot, room, { width, height: content });
+  const hang = mode === "compact" ? compactHang(input.layout, page, chrome, barWidth) : spotHang(input.spot, room, { width, height: content });
   const capped = (h: Hang): Hang => (cap === undefined ? h : { ...h, room: Math.min(h.room, cap) });
   if (!input.column || !overlapsLane(hang, free)) return { mode, free, hang: capped(hang), lane: "none", resizable, room };
   const left = laneLeft(free) - reach.right;

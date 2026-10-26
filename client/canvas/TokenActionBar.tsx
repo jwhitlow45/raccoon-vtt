@@ -1686,13 +1686,15 @@ function BarFrame(props: {
   const controls: FrameControls = { handle, sticky: mode === "dock" || (mode === "span" && !scrolls), place, rest, header, short, raise: setRaised, strip };
 
   const { hang } = placed;
+  // Placed on the page as it is while someone types, which a browser may have made shorter than the room it keeps (barDock.ts Typing).
+  const pageHeight = typing ? typing.page : props.viewport.height;
   const where = dragBox
     ? heldPlace(dragBox, spot.corner, props.viewport)
     : mode === "span"
-      ? { left: hang.left, bottom: props.viewport.height - hang.at, width: hang.width, height: hang.room }
+      ? { left: hang.left, bottom: pageHeight - hang.at, width: hang.width, height: hang.room }
       : hang.anchor === "top"
         ? { left: hang.left, top: hang.at, width: hang.width, maxHeight: hang.room }
-        : { left: hang.left, bottom: props.viewport.height - hang.at, width: hang.width, maxHeight: hang.room };
+        : { left: hang.left, bottom: pageHeight - hang.at, width: hang.width, maxHeight: hang.room };
   // The resting strip's paddings and gap, which give way in that order where the free area makes it shorter than 114 (3.1).
   const pads = mode === "span" && restState === "rest" ? stripPads(hang.room) : null;
   // The handle stands at the corner opposite the spot's, and its bands along the two edges that meet there (5.3).

@@ -13,6 +13,7 @@ import {
   mergedRoom,
   MORE_ROOM,
   optionsArrangement,
+  optionsLift,
   PAIR,
   PART_DIVIDER,
   POPOVER_MIN,
@@ -591,5 +592,16 @@ describe("the popovers' frame (7.3)", () => {
 
   test("its least height is the title and one 44 px row", () => {
     assert.equal(POPOVER_MIN, 24 + 2 + 16 + 8 + 44);
+  });
+});
+
+describe("the options row over the keyboard", () => {
+  test("a row in the toolbar's row rises by its own lift, a row at the foot by the toolbar's", () => {
+    const lifts = { foot: 85, row: 166 };
+    assert.equal(optionsLift("merged", lifts), 166);
+    assert.equal(optionsLift("pair", lifts), 166);
+    assert.equal(optionsLift("stacked", lifts), 85);
+    assert.equal(optionsLift("floating", lifts), 85);
+    assert.equal(optionsLift(undefined, lifts), 85, "before it says where it stands");
   });
 });

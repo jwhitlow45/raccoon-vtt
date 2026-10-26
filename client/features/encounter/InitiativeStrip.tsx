@@ -583,7 +583,7 @@ function FightAlerts() {
   // ------------------------------------------------ the lane it shares with the token bar
   const dock = useScoped(barDockSlot);
   const chrome = useStore(dock, (s) => s.chrome);
-  // The column's foot ends over the on-screen keyboard while someone types (barDock.ts placedChrome). Its fold rules read the chrome alone.
+  // The column's foot ends over the on-screen keyboard while someone types (barDock.ts placedChrome), on the page as it is (Typing `page`). Its fold rules read the chrome alone.
   const typing = useStore(dock, (s) => s.typing);
   const placed = useMemo(() => (chrome ? placedChrome(chrome, typing) : null), [chrome, typing]);
   const lasting = useStore(dock, (s) => s.notices);
@@ -1029,7 +1029,7 @@ function FightAlerts() {
           : stacked !== null
             ? stacked + EDGE
             : placed
-              ? Math.max(0, height - placed.top - (asked === "column" ? placed.toolbar : placed.bottom) - push)
+              ? Math.max(0, (typing?.page ?? height) - placed.top - (asked === "column" ? placed.toolbar : placed.bottom) - push)
               : `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar + push}px)`,
         // Stacked over the bar, the foot keeps no shadow room: it would count as more to scroll to, and the bar sits 8 px below anyway.
         padding: `${EDGE}px ${rightPad} ${stacked !== null ? 0 : SHADOW_ROOM}px ${leftPad}`,
@@ -1048,7 +1048,7 @@ function FightAlerts() {
               left: 0,
               right: 0,
               width: "auto",
-              height: `calc(${asked === "fullScreen" ? height : height - placed.toolbar}px - ${theme.safe.top})`,
+              height: `calc(${(typing?.page ?? height) - (asked === "fullScreen" ? 0 : placed.toolbar)}px - ${theme.safe.top})`,
               maxHeight: undefined,
               padding: 0,
               overflowY: "hidden",

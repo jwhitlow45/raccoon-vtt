@@ -1919,7 +1919,7 @@ describe("the bar while someone types with the keyboard up (docs/design.md 14.4)
   const sideways = { width: 649, height: 300 };
   const chrome = { top: 52, bottom: 81, controls: 81, toolbar: 81, safe: { top: 0, right: 47, bottom: 21, left: 47 }, sheet: 0 };
   /** An iPhone SE's 216 px number pad at 130%: 134 px show, and the toolbar's 81 px foot rises by 166 less 81. */
-  const typing: Typing = { top: 0, bottom: 134, lift: 216 / 1.3 - 81 };
+  const typing: Typing = { top: 0, bottom: 134, lift: 216 / 1.3 - 81, page: 300 };
   const room = { layout: sideways, viewport: sideways, chrome, foot: 0, spot: DEFAULT_SPOT, height: 200, column: null };
 
   test("no keyboard leaves the chrome as it is", () => {
@@ -1935,8 +1935,10 @@ describe("the bar while someone types with the keyboard up (docs/design.md 14.4)
     assert.equal(placedChrome(chrome, { ...typing, top: 90 }).top, 90);
   });
 
-  test("over the bars, the top is the visible area's, inside the safe area", () => {
+  test("over the bars, the top is the visible area's, inside the safe area, and the foot the visible area's, over the toolbar where it shows", () => {
     assert.equal(placedChrome(chrome, typing, true).top, 0);
+    assert.equal(placedChrome(chrome, typing, true).bottom, 300 - 134, "on the keyboard, as the lifted chrome stands");
+    assert.equal(placedChrome(chrome, { top: 0, bottom: 134, lift: 0, page: 134 }, true).bottom, 0, "a page the browser shrank: down to its foot, over its toolbar");
     assert.equal(placedChrome({ ...chrome, safe: { ...chrome.safe, top: 20 } }, typing, true).top, 20);
     assert.equal(placedChrome(chrome, { ...typing, top: 40 }, true).top, 40);
   });
@@ -1954,6 +1956,13 @@ describe("the bar while someone types with the keyboard up (docs/design.md 14.4)
   test("a mode kept while someone types in the bar wins over the free area's", () => {
     assert.equal(placeBar({ ...room, typing, keepMode: "compact" })!.mode, "compact");
     assert.equal(placeBar({ ...room, keepMode: null })!.mode, "dock");
+  });
+
+  test("where a browser shrank the page itself, the window fits the short page, lifted by nothing more, and keeps its mode", () => {
+    const native: Typing = { top: 0, bottom: 134, lift: 0, page: 134 };
+    const placed = placeBar({ ...room, typing: native })!;
+    assert.equal(placed.mode, "dock");
+    assert.equal(placed.free.top + placed.free.height, 134 - 81 - EDGE, "the free area ends on the short page's toolbar");
   });
 
   test("a window whose field has no room under the bars is placed from the visible area's top", () => {
