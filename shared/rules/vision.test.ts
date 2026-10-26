@@ -1093,6 +1093,61 @@ describe("what the vision cache keeps alive", () => {
     assert.equal(weak.deref(), undefined, "the first scene's wall set is collected");
     clearVisionCache();
   });
+
+  /*
+   * Ownership edits keep one computation of the union, so one computation
+   * may be asked for every set of its sources. The rasters drawn for them
+   * must stay within what the cache holds and counts (review PV2-ASTRA-1):
+   * a hundred sets asked, every state dropped, and after a collection no
+   * more of their tiles alive than the cache's rasters.
+   */
+  test("a computation asked for many source sets keeps alive only the rasters the cache counts", async () => {
+    const { setFlagsFromString } = await import("node:v8");
+    const { runInNewContext } = await import("node:vm");
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    clearVisionCache();
+    const ids = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    const room = visionRoom({ w: 40, h: 30, tokens: ids.map((id, k) => pc(id, 3 + 5 * k, 4 + 3 * (k % 4), { ownerIds: ["p5"] })), build: { cells: { "10,10": "pillar", "25,12": "pillar" } } });
+    const views: WeakRef<object>[] = [];
+    const weak = ((): WeakRef<object>[] => {
+      const out: WeakRef<object>[] = [];
+      for (let k = 1; out.length < 100; k++) {
+        // The player "q" owns the sources of the k-th subset. Every source stays owned, so the union's computation is the same one.
+        const tokens = Object.fromEntries(Object.entries(room.tokens).map(([id, t], i) => [id, { ...t, ownerIds: k & (1 << i) ? ["q", "p5"] : ["p5"] }]));
+        const s = { ...room, tokens };
+        const sight = holderSight(s, "s1", "q", world);
+        if (sight === partySight(s, "s1", world)) continue;
+        out.push(new WeakRef(sight.tiles));
+        views.push(new WeakRef(sight));
+      }
+      return out;
+    })();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    gc();
+    gc();
+    const alive = weak.filter((w) => w.deref() !== undefined).length;
+    const report = visionCacheReport();
+    assert.ok(report.rasters <= 28, `${report.rasters} rasters cached`);
+    assert.ok(alive <= report.rasters, `${alive} of 100 holders' tiles alive, ${report.rasters} counted`);
+    const answers = views.filter((w) => w.deref() !== undefined).length;
+    assert.ok(answers <= 14, `${answers} of 100 holders' answers kept by the computation`);
+
+    // The computation stays cached while every one of its rasters is dropped for a newer one's: its answers keep none of them.
+    const moved = (k: number) => ({ ...room, tokens: Object.fromEntries(Object.entries(room.tokens).map(([id, t], i) => [id, { ...t, x: t.x + (id === "a" ? 1 : 0), ownerIds: k & (1 << i) ? ["q", "p5"] : ["p5"] }])) });
+    const older = ((): WeakRef<object>[] => {
+      const out: WeakRef<object>[] = [];
+      for (let k = 1; k <= 14; k++) out.push(new WeakRef(holderSight({ ...room, tokens: Object.fromEntries(Object.entries(room.tokens).map(([id, t], i) => [id, { ...t, ownerIds: k & (1 << i) ? ["q", "p5"] : ["p5"] }])) }, "s1", "q", world).tiles));
+      for (let k = 101; k <= 114; k++) void holderSight(moved(k), "s1", "q", world).tiles;
+      return out;
+    })();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    gc();
+    gc();
+    const stale = older.filter((w) => w.deref() !== undefined).length;
+    assert.equal(stale, 0, `${stale} rasters the cache dropped are still alive`);
+    clearVisionCache();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1314,12 +1369,18 @@ describe("sight holders", () => {
     }
   });
 
+  test("the sole-source masks have a bit for every source the cap lets draw, beside the mark for not worked out", () => {
+    // A Uint16 mask whose 0xffff means not worked out holds 15 sources (vision.ts SOLE_UNKNOWN).
+    assert.ok(LIMITS.partySourcesPerScene <= 15, `${LIMITS.partySourcesPerScene} sources a scene`);
+  });
+
   test("a tile that changes when any one source is left out names that source among its sole sources, through random edits", () => {
     clearVisionCache();
     const r = rng(58);
     let s = holderStart(r, "dim");
     const names = Object.keys(holderEdits);
     let checked = 0;
+    let known = 0;
     for (let step = 0; step < 40; step++) {
       s = holderEdits[names[Math.floor(r() * names.length)]!]!(r, s);
       const union = partySight(s, "s1", world).tiles;
@@ -1333,11 +1394,14 @@ describe("sight holders", () => {
           if (a === b || (a && b && JSON.stringify(a) === JSON.stringify(b))) continue;
           const named = sole.get(key);
           checked++;
+          if (named !== "unknown") known++;
           assert.ok(named === "unknown" || named?.includes(id), `step ${step}: tile ${key} changes without ${id}, whose sole sources are ${JSON.stringify(named)}`);
         }
       }
     }
     assert.ok(checked > 100, `${checked} tiles checked`);
+    // Marks never worked out would pass the check above and save nothing.
+    assert.ok(known > checked / 2, `${known} of ${checked} tiles had their sole sources worked out`);
   });
 
   test("every holder's raster and the shared sight together are the sight of every source any of them sees through", () => {
