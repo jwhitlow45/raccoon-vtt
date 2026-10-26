@@ -331,7 +331,7 @@ export function CompanionForm(props: {
       <FieldRow label="Name" fill>
         <Input aria-label="Name" value={draft.name} maxLength={80} error={error !== null && !draft.name.trim()} onChange={(e) => set({ name: e.target.value })} style={{ flex: 1 }} />
       </FieldRow>
-      <FieldRow label="It is">
+      <FieldRow label="It is" fixed>
         <Segmented<CompanionWhat> label="What it is" value={draft.what} options={WHAT_OPTIONS} onChange={(what) => set({ what })} />
       </FieldRow>
       {draft.what === "creature" ? (
@@ -512,7 +512,7 @@ export function CompanionSection(props: {
           Belongs to {name}. Whoever plays {name} controls it.
         </Help>
       )}
-      <FieldRow label="It is">
+      <FieldRow label="It is" fixed>
         <Segmented<CompanionWhat>
           label="What it is"
           value={what}

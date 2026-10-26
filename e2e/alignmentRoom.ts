@@ -1101,16 +1101,21 @@ async function closeBar(bar: Locator): Promise<void> {
 
 /** The Characters panel: the side panel's tab where there is a side panel, else a sheet from the tool bar's Panels list. */
 async function openCharacters(page: Page): Promise<Locator> {
+  return openPanel(page, "Characters");
+}
+
+/** A panel by its title: the side panel's tab where the page has one, else the Panels sheet's. */
+async function openPanel(page: Page, title: string): Promise<Locator> {
   const tabs = page.getByRole("tablist", { name: "Panels" });
   if (await visible(tabs)) {
-    await openSideTab(page, "Characters");
-    return page.getByRole("tabpanel", { name: sideTabName("Characters") });
+    await openSideTab(page, title);
+    return page.getByRole("tabpanel", { name: sideTabName(title) });
   }
-  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+  const sheet = page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`);
   if (await visible(sheet)) return sheet;
   await closeSheets(page);
   await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
-  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${title}`) }).click();
   await sheet.waitFor();
   return sheet;
 }
@@ -3305,4 +3310,120 @@ async function openThornResync(page: Page): Promise<Locator | null> {
   const review = page.getByRole("dialog", { name: "Check what changes" });
   await review.waitFor();
   return review;
+}
+
+/** Where fu32-a's companion of Thorn stands, and its Fireball's middle, clear of the room's other tokens. */
+const HOUND_AT = { x: 18, y: 1 };
+const FIREBALL_AT = { x: 18, y: 12 };
+
+/**
+ * A fixed FieldRow's screen (components/Field.tsx, `fixed`), by its
+ * label's words: the part the row sits in, measured with the rows beside
+ * it, and the row's control whole inside the row on one line, since a
+ * fixed control neither shrinks nor wraps to fit.
+ */
+async function fixedRowScreen(sweep: Sweep, page: Page, screen: string, scope: Locator, label: string): Promise<void> {
+  const row = scope.locator(`xpath=.//label[normalize-space()="${label}"]/..`).first();
+  await row.scrollIntoViewIfNeeded();
+  await sweep.measure(page, screen, row.locator("xpath=.."));
+  const off = await row.evaluate((el) => {
+    type R = { left: number; right: number; top: number; bottom: number };
+    type E = { getBoundingClientRect(): R; querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; nextElementSibling: E | null };
+    const box = (el as unknown as E).getBoundingClientRect();
+    const cell = (el as unknown as E).querySelector(":scope > label")?.nextElementSibling;
+    if (!cell) return ["it has no control after its label"];
+    const c = cell.getBoundingClientRect();
+    const out: string[] = [];
+    if (c.left < box.left - 0.5 || c.right > box.right + 0.5) out.push(`its control (${c.left.toFixed(1)} to ${c.right.toFixed(1)} px) runs out of its row (${box.left.toFixed(1)} to ${box.right.toFixed(1)} px)`);
+    // One line: every part starts above where every part ends.
+    const parts = Array.from(cell.querySelectorAll("button, input:not([type=radio]), .rvtt-choice")).map((p) => p.getBoundingClientRect());
+    if (parts.length === 0) out.push("its control has no parts");
+    else if (Math.max(...parts.map((p) => p.top)) >= Math.min(...parts.map((p) => p.bottom))) out.push("its control wraps onto more than one line");
+    return out;
+  });
+  await sweep.add(page, screen, off.map((l) => `${sweep.at} ${screen}: ${label}: ${l}`));
+  await shots.take(page, `alignment-fu32-${sweep.at}-${screen.replace(/^fu32-/, "")}`);
+}
+
+/** A panel's group by the name on its fold, unfolded. */
+async function openedGroup(panel: Locator, name: string): Promise<Locator> {
+  const fold = panel.getByRole("button", { name, exact: true });
+  await fold.first().waitFor();
+  if ((await fold.first().getAttribute("aria-expanded")) === "false") await fold.first().click();
+  await waitFor(`${name} open`, async () => ((await fold.first().getAttribute("aria-expanded")) === "true" ? true : null), 3_000);
+  // A filter's inner locator is read inside each group, so it starts from the page, not the panel.
+  return panel.locator("[data-panel-group]").filter({ has: panel.page().getByRole("button", { name, exact: true }) });
+}
+
+/** fu32-a's screens at one size: each short label beside its Stepper or choices, and the part around it. */
+async function stepperRowScreens(sweep: Sweep, page: Page, fireball: string): Promise<void> {
+  // The Monsters panel's place card: How many.
+  await closeSheets(page);
+  await escapeAll(page);
+  const monsters = await openPanel(page, "Monsters");
+  await monsters.getByRole("searchbox", { name: "Search monsters" }).fill("goblin");
+  await monsters.getByRole("button", { name: /^Goblin/ }).first().click();
+  await monsters.getByRole("button", { name: "How many plus 1", exact: true }).waitFor();
+  await fixedRowScreen(sweep, page, "fu32-how-many", monsters, "How many");
+  const back = monsters.getByRole("button", { name: "Back to Monsters", exact: true });
+  if (await visible(back)) await back.click();
+
+  // An area's group save, from a Fireball Thorn cast: Slot level, in the outcome's fields.
+  await closeSheets(page);
+  await escapeAll(page);
+  const areas = await openPanel(page, "Areas");
+  await areas.locator(`[data-opener="area-${fireball}"]`).click();
+  if (!(await showsWithin(areas.getByRole("button", { name: "Slot level plus 1", exact: true }), 4_000))) await sweep.missing(page, "fu32-slot-level", "Save and damage opened no page with a Slot level");
+  else await fixedRowScreen(sweep, page, "fu32-slot-level", areas, "Slot level");
+  const discard = areas.getByRole("button", { name: "Discard", exact: true });
+  if (await visible(discard)) await discard.first().click();
+
+  // A character's Add a companion form: It is.
+  await closeSheets(page);
+  await escapeAll(page);
+  const thorn = await thornsPage(page);
+  await (await openedGroup(thorn, "Companions")).getByRole("button", { name: "Add a companion", exact: true }).click();
+  await thorn.getByRole("radiogroup", { name: "What it is" }).waitFor();
+  await fixedRowScreen(sweep, page, "fu32-it-is-form", thorn, "It is");
+  await thorn.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  // A companion token's Companion group: It is.
+  const panel = await ic2TokenPanel(page, "Hound", "Hound", HOUND_AT);
+  if (!panel) await sweep.missing(page, "fu32-it-is-token", "a tap on the hound opened no window");
+  else {
+    const group = await openedGroup(panel, "Companion");
+    await group.getByRole("radiogroup", { name: "What it is" }).waitFor();
+    await fixedRowScreen(sweep, page, "fu32-it-is-token", group, "It is");
+  }
+  await closeSheets(page);
+  await escapeAll(page);
+}
+
+/** Follow-up batch 32's roots, which the sizes' sweep never reaches. */
+export function fu32Tests(): void {
+  test(`fu32-a. a short label stands beside its Stepper or choices wherever both fit: the Monsters place card's How many, an area's group save's Slot level, and a companion's It is in Add a companion and its token's Companion group, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (FU31-STEPPER-ROWS)`, async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const hound = randomUUID();
+    const fireball = randomUUID();
+    const lines: string[] = [];
+    try {
+      await ops.send({ t: "token.create", token: { id: hound, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Hound", ...HOUND_AT, disposition: "ally", ownerIds: [run.patId], companion: { of: run.ids.thornChar, turn: "shared" }, actor: { inline: actor({ srdId: "mastiff" }) } } });
+      const dmId = await waitFor("the DM's member id", () => dmSocket.you?.memberId ?? null);
+      await ops.send({ t: "template.create", template: { id: fireball, sceneId: run.sceneId, shape: "sphere", size: 20, origin: { ...FIREBALL_AT, z: 0 }, yaw: 0, includeOrigin: false, color: "#e5484d", spell: "Fireball", casterId: run.ids.thorn, ownerId: dmId, visibility: "all" } });
+      await waitFor("the hound and the Fireball", () => (dmSocket.state?.tokens[hound] && dmSocket.state.templates[fireball] ? true : null));
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(atName(at));
+        const page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await stepperRowScreens(sweep, page, fireball);
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      await ops.send({ t: "template.delete", templateId: fireball }).catch(() => {});
+      await ops.send({ t: "token.delete", tokenId: hound }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "a short label's row out of line");
+  });
 }

@@ -196,7 +196,7 @@ function MonsterDetail(props: {
           <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>CR {m.cr}</span>
           {listed.source === "room" ? <RoomBadge /> : null}
         </div>
-        <FieldRow label="How many">
+        <FieldRow label="How many" fixed>
           <Stepper label="How many" value={count} step={1} min={1} max={20} onChange={setCount} />
         </FieldRow>
         <Checkbox

@@ -797,7 +797,7 @@ function OutcomePanel(props: {
         </ChipRow>
       ) : null}
       {props.onSlot && page.outcome.slot !== undefined ? (
-        <FieldRow label="Slot level">
+        <FieldRow label="Slot level" fixed>
           <Stepper label="Slot level" value={page.outcome.slot} step={1} min={1} max={9} onChange={props.onSlot} />
         </FieldRow>
       ) : null}
