@@ -1,7 +1,9 @@
 import { useId, useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { layoutWidth } from "../features/device/layout.ts";
+import { useUiScale } from "../features/device/settings.ts";
 import { useBackClose } from "../lib/backClose.ts";
+import { useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { useModalDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
@@ -165,6 +167,11 @@ export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | 
  * header, or from anywhere once its body is at its top. It provides its
  * body the context that reports unsaved input, which makes a swipe spring
  * back instead.
+ *
+ * While the on-screen keyboard is open (lib/keyboardInset.ts) the dialog
+ * covers only what shows above it, so a sheet from the bottom stands on
+ * the keyboard and a whole-screen card ends there, and the field with
+ * focus scrolls into view in the body with its form.
  */
 export function Dialog(props: DialogProps) {
   const { onClose, header = true } = props;
@@ -178,6 +185,10 @@ export function Dialog(props: DialogProps) {
   const card = useRef<HTMLElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const drafts = useDraftRegistry();
+  const deviceScale = useUiScale();
+  const scale = props.zoom === false ? 1 : deviceScale;
+  const view = useKeyboardView();
+  useFieldInView(body, view, theme.space(2));
   // Its title names its step, as the scene menu's do, so a new step ends a drag.
   useSheetSwipe(card, { enabled: bottom, onClose, scroller: body, item: props.title, clip: "screen", drafts });
   const headlessSheet = bottom && !header;
@@ -195,9 +206,10 @@ export function Dialog(props: DialogProps) {
       }}
       style={{
         position: "fixed",
-        inset: 0,
+        // The dialog's own px are zoomed by the interface size (useModalDialog), and the keyboard's are the page's.
+        inset: view ? `${view.top / scale}px 0 ${view.inset / scale}px` : 0,
         width: "100%",
-        height: "100%",
+        height: view ? "auto" : "100%",
         maxWidth: "none",
         maxHeight: "none",
         margin: 0,
