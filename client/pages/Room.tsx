@@ -75,6 +75,7 @@ import { popoverSlot } from "../components/popoverRules.ts";
 import { toolbarSlot, toolChanged, toolVoiceSlot, tuckEvent } from "../state/toolbar.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
+import { isoOffered } from "../features/view/choice.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
@@ -126,7 +127,7 @@ import {
 } from "./optionsLayout.ts";
 import { OptionsFrameContext, type OptionsFrame } from "../features/measure/controls.tsx";
 import type { Rect } from "../components/popoverPlace.ts";
-import { Badge, FindButton, FitButton, FullscreenButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle } from "./RoomChrome.tsx";
+import { Badge, FindButton, FitButton, FullscreenButton, PauseScreen, Stacked, UndoButtons, useAccentVars, useEscape, useNoPageZoom, usePreloadAndReopen, useRoomTitle, ViewButton } from "./RoomChrome.tsx";
 import { DockHeaderActions, DockRow, FoldStatus, SAFE_PROBE_STYLE, useDockSummary, useLayoutHeight, useSafeAreas, type DockActions } from "./RoomDock.tsx";
 
 /** What the DM panel's count says while a PDF upload waits on the DM. */
@@ -1341,7 +1342,8 @@ function MapArea(props: {
 
 /**
  * The top bar: the room name beside the DM's or the player's chip, a DM's
- * Undo and Redo, Find my token, Fit map, and from 900 px up Full screen
+ * Undo and Redo, Find my token, the View button once Isometric is offered
+ * (features/view/choice.ts), Fit map, and from 900 px up Full screen
  * where the browser can go full screen. The initiative strip sits in
  * its row or in a band of its own under it (`placement`,
  * features/encounter/band.ts). `compact` keeps only the tight gaps, the
@@ -1353,7 +1355,11 @@ function MapArea(props: {
  * goes back to the band until the layout is wider than that. Where the row
  * still overflows without the strip, the DM's chip keeps only its dot, as
  * a player's does, again until the layout is wider: on a 320 px phone at
- * 130% the whole chip pushed Fit off the screen. A DM's row from 900 px up
+ * 130% the whole chip pushed Fit off the screen. Where a phone's row still
+ * overflows, its gaps tighten from 6 px to 2, and then a DM's Redo leaves
+ * it, each again until the layout is wider: with the View button there, a
+ * 320 px phone at 130% had no room for Fit (Undo stays, and Draw's and the
+ * builder's options keep a Redo). A DM's row from 900 px up
  * checks too, since Undo and Redo sit in it on every layout
  * (docs/design-v1-layout-hierarchy.md M2): there the strip stays, the chip
  * gives way to its dot first, then Full screen leaves the bar, then the
@@ -1387,6 +1393,8 @@ function TopBar(props: {
   const activeEntryId = useRoomView((s) => s.view?.encounter?.activeEntryId ?? null);
   const round = useRoomView((s) => s.view?.encounter?.round ?? null);
   const notice = useYourTurnNotice();
+  // While the View menu's popover is open, the bar holding it stands over the notices with it (docs/design-v1-tool-options.md 7.6).
+  const [viewOpen, setViewOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
   const recordOverflow = useRecordOverflow();
@@ -1394,6 +1402,12 @@ function TopBar(props: {
   // The layout width at which the DM's whole chip last overflowed the row: up to it, the chip is its dot.
   const [dmDotUpTo, setDmDotUpTo] = useState(0);
   const dmDot = role === "dm" && width <= dmDotUpTo;
+  // On a phone, the width at which the row still overflowed with the chip's dot: up to it, the gaps tighten.
+  const [tightUpTo, setTightUpTo] = useState(0);
+  const tight = props.compact && width <= tightUpTo;
+  // And the width at which a DM's row still overflowed with tight gaps: up to it, Redo leaves the bar.
+  const [redoOffUpTo, setRedoOffUpTo] = useState(0);
+  const redo = !(props.compact && role === "dm" && width <= redoOffUpTo);
   // From 900 px up, the width at which the row still overflowed with the chip's dot: up to it, the Phase menu leaves the bar.
   const [phaseOffUpTo, setPhaseOffUpTo] = useState(0);
   const phaseMenu = !props.compact && width > phaseOffUpTo;
@@ -1413,12 +1427,14 @@ function TopBar(props: {
     const tuck = last ? Math.max(0, -parseFloat(getComputedStyle(last).marginRight) || 0) : 0;
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     if (overflow <= 0) return;
-    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then Full screen, which the Menu and a key still reach, then the Phase menu.
+    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then on a phone the gaps' room and then Redo, then Full screen, which the Menu and a key still reach, then the Phase menu.
     if (measured) recordOverflow(layoutWidth(), overflow);
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
+    else if (props.compact && !tight) setTightUpTo(layoutWidth());
+    else if (role === "dm" && props.compact && redo) setRedoOffUpTo(layoutWidth());
     else if (fullscreen) setFullscreenOffUpTo(layoutWidth());
     else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
-  }, [checks, measured, recordOverflow, role, dmDot, fullscreen, phaseMenu]);
+  }, [checks, measured, recordOverflow, role, dmDot, props.compact, tight, redo, fullscreen, phaseMenu]);
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
@@ -1438,7 +1454,7 @@ function TopBar(props: {
         top: 0,
         left: 0,
         right: 0,
-        zIndex: alertsOverlay ? theme.z.alertsOverlay : theme.z.bars,
+        zIndex: alertsOverlay ? theme.z.alertsOverlay : viewOpen ? theme.z.popover : theme.z.bars,
         padding: `${theme.safe.top} calc(${theme.safe.mapRight} + ${theme.space(3)}px) 0 calc(${theme.safe.left} + ${theme.space(3)}px)`,
         background: theme.color.overlay,
         borderBottom: `${theme.line.border}px solid ${theme.color.border}`,
@@ -1450,8 +1466,8 @@ function TopBar(props: {
         style={{
           display: "flex",
           alignItems: "center",
-          // A DM's phone fits the name, Undo, Redo and Fit only with tighter gaps.
-          gap: props.compact ? theme.space(1.5) : theme.space(3),
+          // A DM's phone fits the name, Undo, Redo and Fit only with tighter gaps, and the narrowest phones the View button only with tighter still.
+          gap: props.compact ? theme.space(tight ? 0.5 : 1.5) : theme.space(3),
           height: TOP_BAR,
         }}
       >
@@ -1483,10 +1499,11 @@ function TopBar(props: {
           </Chip>
         ) : null}
         <div style={{ flex: 1 }} />
-        {props.undo ? <UndoButtons /> : null}
+        {props.undo ? <UndoButtons redo={redo} /> : null}
         {phaseMenu ? <PhaseMenu /> : null}
         {props.placement === "bar" ? <InitiativeStrip placement="bar" notice={notice} stripRef={setStrip} /> : null}
         {props.canFit && role === "player" ? <FindButton openSheet={props.openSheet} /> : null}
+        {props.canFit && isoOffered ? <ViewButton onOpen={setViewOpen} /> : null}
         {props.canFit ? <FitButton /> : null}
         {fullscreen ? <FullscreenButton /> : null}
       </div>

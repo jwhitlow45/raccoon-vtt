@@ -120,7 +120,11 @@ export type IconName =
   | "difficultGround"
   | "mapLabel"
   | "light"
-  | "stamp";
+  | "stamp"
+  | "viewTopDown"
+  | "viewIsometric"
+  | "turnLeft"
+  | "turnRight";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -599,6 +603,33 @@ const SHAPES: Record<IconName, ReactNode> = {
   light: <path {...STROKE} d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5M9 18h6M10 22h4" />,
   // Lucide stamp: the builder's Stamp, a picture placed on the map.
   stamp: <path {...STROKE} d="M14 13V8.5C14 7 15 7 15 5a3 3 0 0 0-6 0c0 2 1 2 1 3.5V13M20 15.5a2.5 2.5 0 0 0-2.5-2.5h-11A2.5 2.5 0 0 0 4 15.5V17a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1zM5 22h14" />,
+  // The board's two views (docs/design-v1-isometric-view.md 7): the map from above as a square grid, and from the side as a 2:1 diamond.
+  viewTopDown: (
+    <g {...STROKE}>
+      <rect x="4" y="4" width="16" height="16" rx="1" />
+      <path d="M12 4v16M4 12h16" />
+    </g>
+  ),
+  // The map's top edge is the one marked, so a flip of the drawing (pages/RoomChrome.tsx ViewButton) shows where it faces at each turn.
+  viewIsometric: (
+    <g {...STROKE}>
+      <path d="M2 13l10-5 10 5-10 5zM7 10.5l10 5M7 15.5l10-5" />
+      <path d="M13.5 5.8l8 4" />
+    </g>
+  ),
+  // The map turning on its middle, an arrow over the diamond: left, counterclockwise, and right, clockwise.
+  turnLeft: (
+    <g {...STROKE}>
+      <path d="M19 10a7 7 0 0 0-14 0M8.5 9.5 5 11 3.5 7.5" />
+      <path d="M12 14l7 3.5-7 3.5-7-3.5z" />
+    </g>
+  ),
+  turnRight: (
+    <g {...STROKE}>
+      <path d="M5 10a7 7 0 0 1 14 0M15.5 9.5 19 11l1.5-3.5" />
+      <path d="M12 14l7 3.5-7 3.5-7-3.5z" />
+    </g>
+  ),
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

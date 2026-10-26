@@ -1,13 +1,20 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from "react";
 import { largerEach } from "../canvas/barDock.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
 import { ReconnectBanner } from "../components/ConnectionStatus.tsx";
 import { Icon, type IconName } from "../components/Icon.tsx";
+import { Popover, usePopover, type Rect } from "../components/Popover.tsx";
 import { addsWords, useTooltip } from "../components/Tooltip.tsx";
+import { useLayoutSize } from "../features/device/layout.ts";
+import { uiScale } from "../features/device/settings.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { findCamera, findRect, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
 import { badgeText } from "../features/log/unread.ts";
+import { SheetDialog } from "../features/tokens/SheetDialog.tsx";
+import { VIEW_GROUP, VIEW_TIP, viewButtonLabel } from "../features/view/choice.ts";
+import { useRoomViewChoice, useViewVoice, ViewMenuBody, ViewVoice, type ViewChoiceState } from "../features/view/ViewMenu.tsx";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
+import type { Turn } from "../lib/view.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { accentVars } from "../lib/accent.ts";
 import { escapeTarget } from "../lib/escape.ts";
@@ -217,16 +224,18 @@ export function PauseScreen() {
  * The DM's Undo and Redo, one click or tap away in the top bar on every
  * layout (docs/design-v1-layout-hierarchy.md M2): Undo is used every
  * scene, and a DM with a mouse had only the DM panel's copy or Ctrl+Z.
+ * Redo leaves (`redo` false) where a phone's row has no room even with the
+ * chip as its dot, as on a 320 px phone at 130% with the View button.
  * They undo this member's own changes (design 7.7), and the server
  * answers an empty stack with a notice, so both stay enabled: knowing the
  * depth here would need a new field on the socket for each member.
  */
-export function UndoButtons() {
+export function UndoButtons(props: { redo?: boolean }) {
   const actions = useRoomActions();
   return (
     <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>
       <IconButton label="Undo" title="Undo your last change" draw="undo" onClick={() => actions.undo()} />
-      <IconButton label="Redo" title="Redo what you undid" draw="redo" onClick={() => actions.redo()} />
+      {props.redo === false ? null : <IconButton label="Redo" title="Redo what you undid" draw="redo" onClick={() => actions.redo()} />}
     </span>
   );
 }
@@ -238,7 +247,16 @@ export function UndoButtons() {
  * them keep the text color: they are the bar's actions, not a header's
  * close.
  */
-function IconButton(props: { label: string; title: string; draw: IconName | { path: string }; onClick(): void }) {
+function IconButton(props: {
+  label: string;
+  title: string;
+  draw: IconName | { path: string };
+  onClick(e: { detail: number }): void;
+  /** On the icon, such as the View button's flip to the view's turn. */
+  iconStyle?: CSSProperties;
+  /** What a popover's anchor adds (components/Popover.tsx anchorProps). */
+  anchor?: Pick<ButtonHTMLAttributes<HTMLButtonElement>, "aria-haspopup" | "aria-expanded" | "aria-controls" | "onKeyDown"> & { ref?(el: HTMLElement | null): void };
+}) {
   // The name on hover, keyboard focus and a long press, never the native title (docs/design-v1-icons.md 3.2).
   const tooltip = useTooltip(props.title, { describes: addsWords(props.title, props.label) });
   return (
@@ -246,6 +264,7 @@ function IconButton(props: { label: string; title: string; draw: IconName | { pa
       <button
         type="button"
         aria-label={props.label}
+        {...props.anchor}
         {...tooltip.anchor()}
         onClick={props.onClick}
         style={{
@@ -263,7 +282,7 @@ function IconButton(props: { label: string; title: string; draw: IconName | { pa
         }}
       >
         {typeof props.draw === "string" ? (
-          <Icon name={props.draw} />
+          <Icon name={props.draw} style={props.iconStyle} />
         ) : (
           <svg aria-hidden viewBox="0 0 24 24" width={theme.icon.md} height={theme.icon.md} style={{ display: "block" }}>
             <path d={props.draw.path} fill="currentColor" />
@@ -273,6 +292,98 @@ function IconButton(props: { label: string; title: string; draw: IconName | { pa
       {tooltip.tip}
     </>
   );
+}
+
+/**
+ * The View button (docs/design-v1-isometric-view.md 7), before Fit in the
+ * top bar on every layout, for the DM and players, once Isometric is
+ * offered (features/view/choice.ts isoOffered). Named and drawn for the
+ * view the board shows: a square grid in Top-down, and in Isometric a
+ * diamond with the map's top edge marked, flipped to face where that edge
+ * faces at the view's turn. It opens the View menu, a popover from 900 px
+ * up and a bottom sheet on a phone. `onOpen` hears whether the popover is
+ * open, so the bar can stand over the notices while it is
+ * (docs/design-v1-tool-options.md 7.6). It also says each change of the
+ * view in the polite status, whatever made it.
+ */
+export function ViewButton(props: { onOpen?(open: boolean): void }) {
+  const choice = useRoomViewChoice();
+  useViewVoice(choice);
+  const wide = useLayoutSize().width >= theme.layout.wideMinWidth;
+  // No tuck into the bar's padding, as the last button has: Fit always follows it, and a phone's 6 px gap would leave the two overlapping.
+  return (
+    <span style={{ flex: "none", display: "flex" }}>
+      {wide ? <ViewPopover choice={choice} onOpen={props.onOpen} /> : <ViewSheet choice={choice} />}
+    </span>
+  );
+}
+
+/** Where the marked edge faces at each turn: the drawing's up and to the right, flipped (Icon.tsx viewIsometric). */
+const ISO_FLIP: Readonly<Record<Turn, CSSProperties | undefined>> = { 0: undefined, 1: { transform: "scaleY(-1)" }, 2: { transform: "scale(-1, -1)" }, 3: { transform: "scaleX(-1)" } };
+
+function ViewIconButton(props: { choice: ViewChoiceState; onClick(e: { detail: number }): void; anchor?: Parameters<typeof IconButton>[0]["anchor"] }) {
+  const { shown } = props.choice;
+  return (
+    <IconButton
+      label={viewButtonLabel(shown)}
+      title={VIEW_TIP}
+      draw={shown.kind === "isometric" ? "viewIsometric" : "viewTopDown"}
+      iconStyle={shown.kind === "isometric" ? ISO_FLIP[shown.turn] : undefined}
+      onClick={props.onClick}
+      anchor={props.anchor}
+    />
+  );
+}
+
+function ViewPopover(props: { choice: ViewChoiceState; onOpen?(open: boolean): void }) {
+  const handle = usePopover({ kind: "dialog" });
+  const { onOpen } = props;
+  const open = handle.open;
+  useEffect(() => {
+    onOpen?.(open);
+  }, [open, onOpen]);
+  useEffect(() => () => onOpen?.(false), [onOpen]);
+  const { onClick, ...anchor } = handle.anchorProps;
+  return (
+    <>
+      <ViewIconButton choice={props.choice} onClick={onClick} anchor={anchor} />
+      <Popover handle={handle} side="below" bound={viewportBound} title={VIEW_GROUP}>
+        <ViewMenuBody choice={props.choice} reserveTurns />
+      </Popover>
+      {open ? null : <ViewVoice />}
+    </>
+  );
+}
+
+function ViewSheet(props: { choice: ViewChoiceState }) {
+  const opener = useRef<HTMLElement | null>(null);
+  // Null while closed, else whether a key opened it, so focus goes to the checked radio as the popover's does.
+  const [open, setOpen] = useState<{ byKey: boolean } | null>(null);
+  return (
+    <>
+      <ViewIconButton
+        choice={props.choice}
+        onClick={(e) => setOpen({ byKey: e.detail === 0 })}
+        anchor={{
+          ref: (el) => void (opener.current = el),
+          "aria-haspopup": "dialog",
+          "aria-expanded": open !== null,
+        }}
+      />
+      {open ? (
+        <SheetDialog title={VIEW_GROUP} opener={opener} onClose={() => setOpen(null)} width={theme.layout.dialog.sm}>
+          <ViewMenuBody choice={props.choice} keyOpen={open.byKey} />
+        </SheetDialog>
+      ) : (
+        <ViewVoice />
+      )}
+    </>
+  );
+}
+
+function viewportBound(): Rect {
+  const scale = uiScale();
+  return { left: 0, top: 0, right: window.innerWidth / scale, bottom: window.innerHeight / scale };
 }
 
 /**
