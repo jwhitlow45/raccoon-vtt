@@ -103,6 +103,7 @@ for (const [name, g] of GRIDS) {
       const sphere = template("s", { shape: "sphere", size: 20, origin: { ...corner, z: 0 } });
       const result = computeCoverage(sphere, ctx(g));
       const covered = hexSet(result);
+      const touched = hexSet(computeCoverage(sphere, ctx(g, {}, { coverage: "any" })));
       const shares = new Map((result.hexes ?? []).map((h) => [`${h.col},${h.row}`, h.coverage]));
       let checked = 0;
       for (const h of sceneHexes(g, { w: 40, h: 40 })) {
@@ -120,6 +121,9 @@ for (const [name, g] of GRIDS) {
           }
         }
         const share = inside / total;
+        // Under "any" a hex is covered by any part inside, its center outside or not.
+        if (share > 0.05) assert.ok(touched.has(hexKey(h)), `${hexKey(h)} touched at ${share.toFixed(3)}`);
+        if (share === 0) assert.ok(!touched.has(hexKey(h)), `${hexKey(h)} untouched`);
         // Each hex's pattern grades it as finely as the sampler does, within a few samples.
         const graded = shares.get(hexKey(h));
         if (graded !== undefined) assert.ok(Math.abs(graded - share) < 0.03, `${hexKey(h)}: ${graded.toFixed(3)} graded, ${share.toFixed(3)} sampled`);
