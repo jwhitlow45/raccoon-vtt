@@ -47,7 +47,8 @@ function run(seed: number): { input: string; output: string } {
   const inputs: string[] = [stableStringify(state)];
   const outputs: string[] = [];
   for (let i = 0; i < OPS; i++) {
-    const who = i % 4 === 3 ? (i % 2 === 0 ? P1 : P2) : DM;
+    // Every fourth op is a player's, the two taking turns.
+    const who = i % 4 === 3 ? (Math.floor(i / 4) % 2 === 0 ? P1 : P2) : DM;
     const op = opSchema.parse(randomOp(r, state, who));
     inputs.push(stableStringify(op));
     const decision = canApply(op, who, state, deps);
