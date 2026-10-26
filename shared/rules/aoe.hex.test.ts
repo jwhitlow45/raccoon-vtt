@@ -101,7 +101,9 @@ for (const [name, g] of GRIDS) {
     test("a 20 ft sphere on a hex corner covers the hexes at least half inside, as a brute-force sampler counts", () => {
       const corner = cornerAt(g, hexCorners(g, { col: 12, row: 12 })[0]!);
       const sphere = template("s", { shape: "sphere", size: 20, origin: { ...corner, z: 0 } });
-      const covered = hexSet(computeCoverage(sphere, ctx(g)));
+      const result = computeCoverage(sphere, ctx(g));
+      const covered = hexSet(result);
+      const shares = new Map((result.hexes ?? []).map((h) => [`${h.col},${h.row}`, h.coverage]));
       let checked = 0;
       for (const h of sceneHexes(g, { w: 40, h: 40 })) {
         const c = hexCenter(g, h);
@@ -118,6 +120,9 @@ for (const [name, g] of GRIDS) {
           }
         }
         const share = inside / total;
+        // Each hex's pattern grades it as finely as the sampler does, within a few samples.
+        const graded = shares.get(hexKey(h));
+        if (graded !== undefined) assert.ok(Math.abs(graded - share) < 0.03, `${hexKey(h)}: ${graded.toFixed(3)} graded, ${share.toFixed(3)} sampled`);
         if (Math.abs(share - 0.5) < 0.03) continue;
         checked++;
         assert.equal(covered.has(hexKey(h)), share >= 0.5, `${hexKey(h)} at ${share.toFixed(3)}`);
@@ -136,6 +141,11 @@ for (const [name, g] of GRIDS) {
       assert.deepEqual(creaturesInArea(sphere, [large], ctx(g, {}, { coverage: "any", inclusion: "majority" })), [], "far less than half of its three");
       const over = template("o", { shape: "sphere", size: 10, origin: { ...hexAnchor(g, large), z: 0 } });
       assert.deepEqual(creaturesInArea(over, [large], ctx(g, {}, { inclusion: "majority" })), ["l"]);
+      // A 5 ft cube on its top hex covers most of that hex and little of the other two: a third of the creature.
+      const cube = template("c", { shape: "cube", size: 5, origin: { ...hexCenter(g, top), z: 0 }, faceOffset: { u: 0, v: 0 }, includeOrigin: true });
+      const centered = { ...cube, origin: { x: hexCenter(g, top).x - 0.5, y: hexCenter(g, top).y, z: 3 } };
+      assert.deepEqual(creaturesInArea(centered, [large], ctx(g)), ["l"], "its top hex is more than half covered");
+      assert.deepEqual(creaturesInArea(centered, [large], ctx(g, {}, { inclusion: "majority" })), [], "but not the most of its three hexes");
     });
   });
 }

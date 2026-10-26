@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { GridShape, Token } from "../model.ts";
 import { int, rng, scene, token } from "../testutil.ts";
-import { occupiedHexes, placedOnHex, tokenRefHex, type SizeCategory } from "./footprint.ts";
+import { hexAnchor, occupiedHexes, placedOnHex, tokenRefHex, type SizeCategory } from "./footprint.ts";
 import { gridOfShape } from "./grid.ts";
 import { hexInScene, hexKey, sameHex, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
 import { NO_ROOM_TO_GROW, RESIZE_KEEPS_PLACE, resizeRefusal, resizeSpot } from "./resize.ts";
@@ -54,6 +54,30 @@ for (const shape of ["hexRows", "hexColumns"] as const) {
       assert.ok(hexes.every((h) => hexInScene(g, { w: 30, h: 20 }, h)), "inside the scene");
       const dm = resizeSpot(world(shape, t), t, { size: "large" }, { checked: false });
       assert.ok(!("refused" in dm) && sameHex(tokenRefHex(g, { ...t, size: "large", x: dm.x, y: dm.y }), hex));
+    });
+
+    test("of the footprints that fit, an owner's growth takes the one whose anchor is nearest, ties to the smaller row, then column", () => {
+      const span = sceneHexSpan(g, { w: 30, h: 20 });
+      const last: Hex = shape === "hexRows" ? { col: 12, row: span.rows - 1 } : { col: span.cols - 1, row: 9 };
+      const t = on(g, "medium", last);
+      const spot = resizeSpot(world(shape, t), t, { size: "gargantuan" }, { checked: true });
+      assert.ok(!("refused" in spot) && spot.shifted);
+      // Every Gargantuan covering the Large's hexes inside the scene, found from nothing.
+      const old = occupiedHexes(g, t).map(hexKey);
+      const from = hexAnchor(g, t);
+      const fits: { ref: Hex; d: number }[] = [];
+      for (let row = last.row - 4; row <= last.row + 4; row++) {
+        for (let col = last.col - 4; col <= last.col + 4; col++) {
+          const at = placedOnHex(g, { size: "gargantuan", x: 0, y: 0 }, { col, row });
+          const hexes = occupiedHexes(g, { size: "gargantuan", ...at });
+          if (!old.every((k) => hexes.some((h) => hexKey(h) === k)) || !hexes.every((h) => hexInScene(g, { w: 30, h: 20 }, h))) continue;
+          const a = hexAnchor(g, { size: "gargantuan", ...at });
+          fits.push({ ref: { col, row }, d: (a.x - from.x) ** 2 + (a.y - from.y) ** 2 });
+        }
+      }
+      fits.sort((a, b) => a.d - b.d || a.ref.row - b.ref.row || a.ref.col - b.ref.col);
+      assert.ok(new Set(fits.map((f) => f.d.toFixed(6))).size > 1, "the candidates lie at different distances");
+      assert.ok(sameHex(tokenRefHex(g, { size: "gargantuan", x: spot.x, y: spot.y }), fits[0]!.ref));
     });
 
     test("a Gargantuan with no room anywhere is refused for an owner", () => {

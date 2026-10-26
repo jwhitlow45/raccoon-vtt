@@ -86,7 +86,7 @@ function randomHexRoom(seed: number): Case {
   state.exploredTiles = randomLayer(r, w, h, "s1", (tx, ty) => tileKey("s1", tx, ty));
   if (perPlayer) {
     state.holders = { s1: { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }] } };
-    state.exploredBy = randomLayer(r, w, h, "s1", (tx, ty) => holderTileKey("s1", "p1", tx, ty));
+    state.exploredBy = Object.fromEntries(Object.entries(randomLayer(r, w, h, "s1", (tx, ty) => holderTileKey("s1", "p1", tx, ty))).map(([k, t]) => [k, { ...t, memberId: "p1" }]));
   }
   return { state, g: gridOfShape(shape) as HexGrid, perPlayer, vision, fog };
 }

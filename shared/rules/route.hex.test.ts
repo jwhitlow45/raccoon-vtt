@@ -105,19 +105,13 @@ for (const [name, g] of GRIDS) {
 }
 
 describe("the line's nudge decides a walk along the side between two hexes (section 10's mutant)", () => {
-  test("a Medium walking two rows straight down on hex rows passes the row between on the hex the nudge picks", () => {
-    // From 4,2 to 4,4 the straight line runs down the side between hexes 3,3 and 4,3 of the odd row between.
-    const start = walker("medium", placedOnHex(ROWS, { size: "medium", x: 0, y: 0 }, { col: 4, row: 2 }));
-    const end = { ...start, ...placedOnHex(ROWS, start, { col: 4, row: 4 }) };
-    const spots = routeWalk(ROWS, [start, end], NO_BUILD);
-    assert.deepEqual(
-      spots.map((s) => hexKey(tokenRefHex(ROWS, { size: "medium", x: s.x, y: s.y }))),
-      ["4,2", "4,3", "4,4"],
-    );
-    const mirrored = routeWalk(COLUMNS, [{ ...start, ...placedOnHex(COLUMNS, start, { col: 2, row: 4 }) }, { ...start, ...placedOnHex(COLUMNS, start, { col: 4, row: 4 }) }], NO_BUILD);
-    assert.deepEqual(
-      mirrored.map((s) => hexKey(tokenRefHex(COLUMNS, { size: "medium", x: s.x, y: s.y }))),
-      ["2,4", "3,4", "4,4"],
-    );
+  test("a Medium walking from 4,4 to 5,5 on hex rows passes 4,5, not 5,4, and the mirror on hex columns", () => {
+    // The straight line from 4,4 to 5,5 runs along the side between 4,5 and 5,4: only the nudge picks one.
+    const walk = (g: HexGrid, a: Hex, b: Hex) => {
+      const start = walker("medium", placedOnHex(g, { size: "medium", x: 0, y: 0 }, a));
+      return routeWalk(g, [start, { ...start, ...placedOnHex(g, start, b) }], NO_BUILD).map((s) => hexKey(tokenRefHex(g, { size: "medium", x: s.x, y: s.y })));
+    };
+    assert.deepEqual(walk(ROWS, { col: 4, row: 4 }, { col: 5, row: 5 }), ["4,4", "4,5", "5,5"]);
+    assert.deepEqual(walk(COLUMNS, { col: 4, row: 4 }, { col: 5, row: 5 }), ["4,4", "5,4", "5,5"]);
   });
 });

@@ -6,7 +6,7 @@ import { applyOp } from "../reducer.ts";
 import { computeCoverage, emanationFootprint } from "../rules/aoe.ts";
 import { hexAnchor, placedOnHex, type SizeCategory } from "../rules/footprint.ts";
 import { gridOfShape } from "../rules/grid.ts";
-import { hexCenter, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
+import { hexAt, hexCenter, hexNeighbors, type Hex, type HexGrid } from "../rules/hex.ts";
 import { DM, entry, env, room, scene, template, token } from "../testutil.ts";
 
 /**
@@ -56,9 +56,30 @@ describe("a sweep on hexes keeps height (4.4)", () => {
     assert.equal(reminders.length, 1);
   });
 
+  test("section 9's case: rising from 0 to 50 ft through a 5 ft sphere at 25 ft enters it", () => {
+    const mid = { ...sphere, origin: { ...sphere.origin, z: 25 } };
+    assert.equal(play(fight([mid]), { t: "token.move", tokenId: "g1", ...at("medium", { col: 11, row: 10 }), elevation: 50 }).reminders.length, 1);
+  });
+
   test("a creature walking the floor under it does not", () => {
     const { reminders } = play(fight([sphere]), { t: "token.move", tokenId: "g1", ...at("medium", { col: 13, row: 10 }) });
     assert.deepEqual(reminders, []);
+  });
+});
+
+describe("a sweep on hexes stands on the hex line (4.4)", () => {
+  test("a goblin walking two rows down enters a sphere over the line's middle hex, which even steps of its corner never stand on", () => {
+    // From 4,2 to 4,4 the line passes 4,3. Halfway, an even step of the corner stands exactly between 3,3 and 4,3, which 3,3 takes.
+    const start = { col: 4, row: 2 };
+    const end = { col: 4, row: 4 };
+    const sphere = template("s", { shape: "sphere", size: 5, origin: { ...hexCenter(ROWS, { col: 4, row: 3 }), z: 0 }, triggers: ["enter"], spell: "Orb" });
+    const state = fight([sphere]);
+    state.tokens.g1 = { ...state.tokens.g1!, ...at("medium", start) };
+    const a = at("medium", start);
+    const b = at("medium", end);
+    assert.deepEqual(hexAt(ROWS, { x: (a.x + b.x) / 2 + 0.5, y: (a.y + b.y) / 2 + 0.5 }), { col: 3, row: 3 });
+    const { reminders } = play(state, { t: "token.move", tokenId: "g1", ...b });
+    assert.equal(reminders.length, 1);
   });
 });
 
