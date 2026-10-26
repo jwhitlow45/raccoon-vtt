@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { CHUNK_CELLS, type BuildChunk, type RoomState } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
@@ -172,6 +173,25 @@ describe("a token's ring as the board draws it (ISO34-ASTRA-3, ASTRA-9)", () => 
     }
   });
 
+  test("a switch from Top-down holds a flier half revealed to a player where Isometric lays it, flat, not where it would stand (ISO34-ASTRA-12)", () => {
+    const state = heightsRoom({});
+    reveal(state, "s1", { x: 0, y: 0, w: 6.5, h: 16 });
+    const bat = token("bat", { x: 6, y: 6, elevation: 20 }) as ViewToken;
+    const viewport = { width: 800, height: 600 };
+    const cam: Camera = { x: 400 - 6.5 * 40, y: 300 - 6.5 * 40, scale: 40 };
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      const was = boardPickFor({ room: state, scene: state.scenes.s1!, role: "player", fog: true, view: TOP_DOWN, camera: cam, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+      const now = boardPickFor({ room: state, scene: state.scenes.s1!, role: "player", fog: true, view: isometric(turn), camera: cam, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+      const held = heldPoint(was, now, bat, viewport, NO_INSETS, (pick) => standsFor(pick, () => false)(bat));
+      assert.deepEqual({ before: held.before, after: held.after }, { before: 0, after: 0 }, `turn ${turn}: it lies on the ground in Isometric`);
+      const next = holdStill(cam, toView(TOP_DOWN, held.at, held.before), toView(now.view, held.at, held.after));
+      const after = ringCenter({ ...now, camera: next }, bat, standsFor(now, () => false)(bat));
+      assert.ok(Math.hypot(after.x - 400, after.y - 300) < 1e-9, `turn ${turn}: ${JSON.stringify(after)}`);
+    }
+    // The canvas judges standing by each view's own pick.
+    assert.match(readFileSync(new URL("./Stage.tsx", import.meta.url), "utf8"), /heldPoint\(was, now, selected, s, insetsRef\.current, \(pick\) => !selected \|\| standsFor\(pick, aboveFogRef\.current\)\(selected\)\);/);
+  });
+
   test("a flier half revealed to a player lies flat under the fog, and its ring is taken where the ground stage lays it", () => {
     const state = heightsRoom({});
     reveal(state, "s1", { x: 0, y: 0, w: 6.5, h: 16 });
@@ -190,7 +210,7 @@ describe("a token's ring as the board draws it (ISO34-ASTRA-3, ASTRA-9)", () => 
     const cam: Camera = { x: 60 - at.x * 40, y: 100 - at.y * 40, scale: 40 };
     const was = pickFor(state, "player", cam);
     const now = pickFor(state, "player", cam, 1);
-    const held = heldPoint(was, now, bat, viewport, NO_INSETS, false);
+    const held = heldPoint(was, now, bat, viewport, NO_INSETS, () => false);
     const next = holdStill(cam, toView(was.view, held.at, held.before), toView(now.view, held.at, held.after));
     const before = ringCenter(was, bat, false);
     const after = ringCenter({ ...now, camera: next }, bat, false);

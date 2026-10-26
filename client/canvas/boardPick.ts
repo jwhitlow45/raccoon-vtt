@@ -256,15 +256,17 @@ export class DrawnHeightsMemo {
  * The world point a turn or a switch keeps still (4.2), with its drawn
  * height in the view before and after: the selected token's ring while it
  * shows in the clear part of the canvas, else where a press at that part's
- * middle meets the drawn ground.
+ * middle meets the drawn ground. Whether the token stands is each view's
+ * own (`stands`, by its pick): Top-down has no fog to lay it flat under,
+ * and Isometric may (ISO34-ASTRA-12).
  */
-export function heldPoint(was: BoardPick, now: BoardPick, selected: FootprintToken | undefined, viewport: Size, insets: Insets, stands = true): { at: Point; before: number; after: number } {
+export function heldPoint(was: BoardPick, now: BoardPick, selected: FootprintToken | undefined, viewport: Size, insets: Insets, stands: (pick: BoardPick) => boolean = () => true): { at: Point; before: number; after: number } {
   const clear = { x0: insets.left, y0: insets.top, x1: viewport.width - insets.right, y1: viewport.height - insets.bottom };
   if (selected) {
-    const ring = ringCenter(was, selected, stands);
+    const ring = ringCenter(was, selected, stands(was));
     if (ring.x >= clear.x0 && ring.x <= clear.x1 && ring.y >= clear.y0 && ring.y <= clear.y1) {
       const fp = footprint(selected);
-      return { at: { x: selected.x + fp.w / 2, y: selected.y + fp.h / 2 }, before: tokenBase(was, selected, stands), after: tokenBase(now, selected, stands) };
+      return { at: { x: selected.x + fp.w / 2, y: selected.y + fp.h / 2 }, before: tokenBase(was, selected, stands(was)), after: tokenBase(now, selected, stands(now)) };
     }
   }
   const press = pickWalk(was, { x: (clear.x0 + clear.x1) / 2, y: (clear.y0 + clear.y1) / 2 });

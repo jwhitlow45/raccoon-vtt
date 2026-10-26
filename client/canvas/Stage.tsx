@@ -412,7 +412,7 @@ export function MapStage(props: {
     const was = pickIn(before);
     const now = pickIn(shown);
     const selected = tokensByIdRef.current.get(store.getState().local.selectedId ?? "");
-    const held = heldPoint(was, now, selected, s, insetsRef.current, !selected || standsFor(was, aboveFogRef.current)(selected));
+    const held = heldPoint(was, now, selected, s, insetsRef.current, (pick) => !selected || standsFor(pick, aboveFogRef.current)(selected));
     const next = holdStill(c, toView(before, held.at, held.before), toView(shown, held.at, held.after));
     pendingCamRef.current = null;
     fittedRef.current = null;
