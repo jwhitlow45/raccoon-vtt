@@ -90,10 +90,10 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * drawn cases, the upright phones and the scrolling strip,
  * alignment-wide.e2e.ts the sideways phone, the tablet, the desktop and
  * 480 x 320, and alignment-icons.e2e.ts the second icon pass, follow-up
- * batch 30's roots, the app icon's places, follow-up batch 32's roots and
- * the view choice. This module holds every step, from alignmentFile on,
- * and each file lists the ones it runs, so a step keeps its id whichever
- * file runs it.
+ * batch 30's roots, the app icon's places, follow-up batch 32's roots,
+ * This device's Sheet handle and the view choice. This module holds every
+ * step, from alignmentFile on, and each file lists the ones it runs, so a
+ * step keeps its id whichever file runs it.
  *
  * Each file runs with `pnpm test:e2e` on E2E_PORT plus twenty-seven, one
  * file after another as the others. The other environment variables are
@@ -3754,6 +3754,38 @@ export function fu32Tests(): void {
       lines.push(...sweep.lines);
     }
     assert.deepEqual(lines, [], "the builder's row, picker or brush out of line");
+  });
+}
+
+/*
+ * This device's Sheet handle (docs/design-v1-sheet-swipe.md 4.8): its
+ * section with its help, the select and the preview under it, at FU30_AT's
+ * sizes. The section was in no sweep before (GRAB-ALIGN).
+ */
+export function grabberTests(): void {
+  test(`grab-e. This device's Sheet handle section, its help, select and preview, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-sheet-swipe.md 4.8)`, async () => {
+    const lines: string[] = [];
+    for (const at of FU30_AT) {
+      const sweep = new Sweep(atName(at));
+      const page = await dmPageFor(at.size);
+      page.setDefaultTimeout(10_000);
+      await openAt(page, at.size, at.scale);
+      const menu = await openMenu(page);
+      const choice = menu.getByRole("combobox", { name: "Sheet handle" });
+      // The Menu may open on another of its pages, as the last step left it.
+      const back = menu.getByRole("button", { name: /^Back to Menu/ });
+      if (!(await visible(choice)) && (await visible(back))) await back.click();
+      if (!(await visible(choice))) await menu.getByRole("button", { name: /^This device/ }).click();
+      await choice.scrollIntoViewIfNeeded();
+      // The innermost section holding its heading: the panel around it is a section too.
+      await sweep.measure(page, "grab-sheet-handle", menu.locator("section").filter({ has: page.getByRole("heading", { name: "Sheet handle", exact: true }) }).last());
+      await shots.take(page, `alignment-grab-${sweep.at}-sheet-handle`);
+      if (await visible(back)) await back.click();
+      await closeSheets(page);
+      await escapeAll(page);
+      lines.push(...sweep.lines);
+    }
+    assert.deepEqual(lines, [], "the Sheet handle section out of line");
   });
 }
 

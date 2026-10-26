@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
+import { GRABBER_DESIGNS, grabberRoom, type GrabberId } from "../client/components/grabberDesigns.ts";
 import { barControl, ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -1362,7 +1363,8 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const fills = await list.evaluate((el) => {
         const g = globalThis as unknown as Win;
         const pill = (el as unknown as El).querySelector("[data-sheet-grabber]");
-        return { pill: pill ? g.getComputedStyle(pill).backgroundColor : "", sheet: g.getComputedStyle(el as unknown as El).backgroundColor };
+        // Drawn in its color, `currentColor`.
+        return { pill: pill ? g.getComputedStyle(pill).color : "", sheet: g.getComputedStyle(el as unknown as El).backgroundColor };
       });
       assert.ok(fills.pill !== "" && fills.pill !== fills.sheet && !/^rgba\(.*, 0\)$|^transparent$/.test(fills.pill ?? ""), `under forced colors the pill is not seen: ${JSON.stringify(fills)}`);
       await shots.take(dm, "grabber-panels-forced-colors");
@@ -1570,7 +1572,243 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       await ops.send({ t: "roll.close", rollIds: [request] });
     }
   });
+
+  test("grab-a. This device's Sheet handle offers the six designs, Ringed tail first and chosen, and a choice changes the open sheet's grabber and the preview at once and stays after a reload", async () => {
+    try {
+      await setUp(dm, { width: 375, height: 667, scale: 1 });
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sheetHandle"));
+      await setUp(dm, { width: 375, height: 667, scale: 1 });
+      const menu = await openPanel(dm, "Menu");
+      await menu.getByRole("button", { name: /^This device/ }).click();
+      const choice = menu.getByRole("combobox", { name: "Sheet handle" });
+      await choice.scrollIntoViewIfNeeded();
+      assert.deepEqual(await choice.locator("option").allTextContents(), ["Ringed tail", "Bandit mask", "Paw beans", "Scroll rod", "Rune divider", "Plain pill"]);
+      assert.equal(await choice.inputValue(), "tail");
+      const preview = menu.getByRole("img", { name: /on a sheet$/ });
+      assert.equal(await designOf(menu.locator("[data-sheet-grabber]")), "tail");
+      assert.equal(await designOf(preview.locator("[data-grabber-preview]")), "tail");
+      await expectGrabbers(dm, ["Menu"], "This device with its preview");
+      await shots.take(dm, "grab-a-this-device-tail-375x667-100");
+      // The open sheet's grabber and its header's room follow the choice at once, and so does the preview, at its real size.
+      await choice.selectOption("mask");
+      await waitFor("the open sheet's grabber to change", async () => ((await designOf(menu.locator("[data-sheet-grabber]"))) === "mask" ? true : null), 3_000);
+      assert.equal(await designOf(preview.locator("[data-grabber-preview]")), "mask");
+      assert.equal(await preview.getAttribute("aria-label"), "Bandit mask on a sheet");
+      const drawn = await rectOf(preview.locator("[data-grabber-preview]"));
+      assert.ok(Math.abs(drawn.width - 40) < 0.6 && Math.abs(drawn.height - 9) < 0.6, `the preview is not at its real size: ${JSON.stringify(drawn)}`);
+      await expectGrabbers(dm, ["Menu"], "This device after the choice");
+      const fit = await checkFit(menu, 1, "the Menu sheet with the mask", { width: 40, height: 9 });
+      assert.ok(Math.abs(fit.area.height - (56 + 15 - 6)) < 0.6, `the Menu's header is ${fit.area.height} px tall with the mask`);
+      assert.equal(await dm.evaluate(() => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem("rvtt.sheetHandle")), "mask");
+      await shots.take(dm, "grab-a-this-device-mask-375x667-100");
+      await setUp(dm, { width: 375, height: 667, scale: 1 });
+      const log = await openPanel(dm, "Log");
+      await steadyRect(log);
+      assert.equal(await designOf(log.locator("[data-sheet-grabber]")), "mask", "the choice did not stay after a reload");
+      await log.getByRole("button", { name: "Close Log" }).click();
+      // A stored id this version does not know reads as the ringed tail.
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.sheetHandle", "lantern"));
+      await setUp(dm, { width: 375, height: 667, scale: 1 });
+      const again = await openPanel(dm, "Log");
+      await steadyRect(again);
+      assert.equal(await designOf(again.locator("[data-sheet-grabber]")), "tail", "an unknown stored design");
+      await again.getByRole("button", { name: "Close Log" }).click();
+    } finally {
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sheetHandle"));
+    }
+  });
+
+  test("grab-b. each design is centered at the top of a phone's sheet, 5 px under its edge, and the header keeps the room its height needs, the mask the tallest, on a pane and the roll card too", async () => {
+    const heights = new Map<GrabberId, number>();
+    try {
+      for (const view of [
+        { width: 375, height: 667, scale: 1 },
+        { width: 320, height: 568, scale: 1.3 },
+      ]) {
+        // Picked in This device, as a person does, rather than stored and loaded again: a reload for each design spent the DM session's snapshot budget, whose abuse rule then closed the op socket.
+        await setUp(dm, view);
+        for (const design of GRABBER_DESIGNS) {
+          const where = `${design.name} on the Log at ${view.width} x ${view.height} at ${view.scale * 100}%`;
+          await pickHandle(dm, design.id);
+          const sheet = await openPanel(dm, "Log");
+          await steadyRect(sheet);
+          await expectGrabbers(dm, ["Log"], where);
+          assert.equal(await designOf(sheet.locator("[data-sheet-grabber]")), design.id, where);
+          // checkFit measures its middle against the sheet's within 1 px, and its place 5 px under the edge.
+          const fit = await checkFit(sheet, view.scale, where, design);
+          const room = grabberRoom(design.id);
+          assert.ok(Math.abs(fit.area.height - (56 + room - 6) * view.scale) < 0.6, `${where}: the header is ${fit.area.height} px tall, not ${(56 + room - 6) * view.scale}`);
+          assert.ok(fit.close && Math.abs(fit.close.top - fit.area.top - room * view.scale) < 0.6, `${where}: Close is not ${room} px down: ${JSON.stringify(fit)}`);
+          if (view.scale === 1) heights.set(design.id, fit.area.height);
+          await shots.take(dm, `grab-b-${design.id}-${view.width}x${view.height}-${view.scale * 100}`);
+          await sheet.getByRole("button", { name: "Close Log" }).click();
+        }
+      }
+      const tallest = [...heights.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      assert.equal(tallest, "mask", `the tallest header: ${JSON.stringify([...heights])}`);
+      // A pane as a sheet keeps the same room, with the mask: its close 1 + 4 + 9 + 2 px down, its buttons 9 px lower than without a grabber.
+      await setUp(dm, { width: 375, height: 667, scale: 1 });
+      await pickHandle(dm, "mask");
+      const label = await openLabel(0);
+      await steadyRect(label);
+      const fit = await checkFit(label, 1, "the label pane with the mask", { width: 40, height: 9 });
+      assert.ok(fit.close && Math.abs(fit.close.top - fit.surface.top - 16) < 0.6, `the label pane's close is not 16 px down with the mask: ${JSON.stringify(fit)}`);
+      await shots.take(dm, "grab-b-mask-label-pane-375x667-100");
+      await label.getByRole("button", { name: "Close without saving" }).click();
+      await pickTool(dm, "Select");
+      // A player's roll card at a phone's foot: its question and Later stand the mask's 15 px under the card's top edge.
+      await player.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.sheetHandle", "mask"));
+      const request = randomUUID();
+      await ops.send({ t: "roll.ask", request: { id: request, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn.characterId }] } });
+      try {
+        await setUp(player, { width: 375, height: 667, scale: 1 });
+        const rollCard = player.getByRole("dialog", { name: "The DM asks for a roll" });
+        await steadyRect(rollCard);
+        await expectGrabbers(player, ["The DM asks for a roll"], "the roll card with the mask");
+        const card = await checkFit(rollCard, 1, "the roll card with the mask", { width: 40, height: 9 });
+        assert.ok(Math.abs(card.firstLine - card.area.top - 15) < 0.6, `the roll card's first line is not 15 px down with the mask: ${JSON.stringify(card)}`);
+        await shots.take(player, "grab-b-mask-roll-card-375x667-100");
+      } finally {
+        await ops.send({ t: "roll.close", rollIds: [request] });
+      }
+    } finally {
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sheetHandle"));
+      await player.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sheetHandle"));
+    }
+  });
+
+  test("grab-c. the grabber lights up in the member's own color from a press on the header until the lift, fading 150 ms, and a tap on Close lights nothing", async () => {
+    // Pat's page, whose accent is his green, not the crest yellow.
+    await setUp(player, { width: 375, height: 667, scale: 1 });
+    const sheet = await openPanel(player, "Log");
+    await steadyRect(sheet);
+    const pill = sheet.locator("[data-sheet-grabber]");
+    const colors = await systemColors(player);
+    // Pat's green, lifted for contrast on a dark surface (lib/accent.ts), and neither the crest yellow nor the grey at rest.
+    assert.match(colors.accent, /^rgb\(\d+, \d+, \d+\)$/);
+    assert.notEqual(colors.accent, "rgb(247, 223, 0)", "Pat's accent is the crest yellow");
+    assert.notEqual(colors.accent, colors.rest);
+    const [r = 0, gr = 0, b = 0] = (colors.accent.match(/\d+/g) ?? []).map(Number);
+    assert.ok(gr > r && gr > b, `Pat's accent is not his green: ${colors.accent}`);
+    assert.equal(await colorOf(pill), colors.rest, "at rest");
+    const look = await pill.evaluate((el) => {
+      const s = (globalThis as unknown as Win).getComputedStyle(el as unknown as El);
+      return { property: s.transitionProperty ?? "", duration: s.transitionDuration ?? "" };
+    });
+    assert.deepEqual(look, { property: "color", duration: "0.15s" });
+    const finger = new Finger(playerCdp, player);
+    await finger.down(await headerPoint(sheet));
+    assert.equal(await sheet.getAttribute("data-sheet-held"), "", "the press on the header did not hold the sheet");
+    await waitFor("the glow to warm", async () => ((await colorOf(pill)) === colors.accent ? true : null), 1_000);
+    await shots.take(player, "grab-c-held-375x667-100");
+    await finger.drag(30);
+    assert.equal(await colorOf(pill), colors.accent, "dragged");
+    await finger.up();
+    assert.equal(await settled(sheet), "rest", "a short drag springs back");
+    assert.equal(await sheet.getAttribute("data-sheet-held"), null);
+    await waitFor("the glow to cool", async () => ((await colorOf(pill)) === colors.rest ? true : null), 1_000);
+    // Under forced colors: the system's muted text at rest, its highlight while held.
+    await player.emulateMedia({ forcedColors: "active" });
+    try {
+      const forced = await systemColors(player);
+      // The switch to forced colors fades too.
+      await waitFor("the muted text at rest", async () => ((await colorOf(pill)) === forced.grayText ? true : null), 1_000);
+      assert.notEqual(forced.grayText, forced.highlight);
+      await finger.down(await headerPoint(sheet));
+      await waitFor("the highlight while held", async () => ((await colorOf(pill)) === forced.highlight ? true : null), 1_000);
+      await shots.take(player, "grab-c-held-forced-colors-375x667-100");
+      await finger.up();
+      await waitFor("the muted text again", async () => ((await colorOf(pill)) === forced.grayText ? true : null), 1_000);
+    } finally {
+      await player.emulateMedia({ forcedColors: "none" });
+    }
+    // A press on Close is its tap, not a hold of the sheet.
+    const close = sheet.getByRole("button", { name: "Close Log" });
+    await finger.down(await middleOf(close));
+    await sleep(250);
+    assert.equal(await sheet.getAttribute("data-sheet-held"), null, "a press on Close held the sheet");
+    assert.equal(await colorOf(pill), colors.rest, "a press on Close lit the grabber");
+    await finger.up(40);
+    assert.equal(await settled(sheet), "gone", "the tap on Close did not close the sheet");
+  });
+
+  test("grab-d. with reduced motion the glow comes and goes at once, with no fade", async () => {
+    await player.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      await setUp(player, { width: 375, height: 667, scale: 1 });
+      const sheet = await openPanel(player, "Log");
+      await steadyRect(sheet);
+      const pill = sheet.locator("[data-sheet-grabber]");
+      const colors = await systemColors(player);
+      const duration = await pill.evaluate((el) => parseFloat((globalThis as unknown as Win).getComputedStyle(el as unknown as El).transitionDuration ?? ""));
+      assert.ok(duration <= 0.00001, `the glow still fades over ${duration} s`);
+      const finger = new Finger(playerCdp, player);
+      await finger.down(await headerPoint(sheet));
+      // Read in the frame after the press: no fade to wait for.
+      assert.equal(await colorAfterFrame(pill), colors.accent, "the glow did not come at once");
+      await finger.up();
+      assert.equal(await colorAfterFrame(pill), colors.rest, "the glow did not go at once");
+      await sheet.getByRole("button", { name: "Close Log" }).click();
+    } finally {
+      await player.emulateMedia({ reducedMotion: null });
+    }
+  });
 });
+
+/** Picks a design in Menu, This device, as a person does, and puts the Menu away: every sheet takes it at once, with no reload. */
+async function pickHandle(page: Page, id: GrabberId): Promise<void> {
+  const menu = await openPanel(page, "Menu");
+  const choice = menu.getByRole("combobox", { name: "Sheet handle" });
+  // The Menu opens on the page it showed last.
+  if (!(await choice.isVisible())) {
+    const back = menu.getByRole("button", { name: /^Back to Menu/ });
+    if (await back.isVisible()) await back.click();
+    await menu.getByRole("button", { name: /^This device/ }).click();
+  }
+  await choice.selectOption(id);
+  await waitFor(`the Menu's grabber to become ${id}`, async () => ((await designOf(menu.locator("[data-sheet-grabber]"))) === id ? true : null), 3_000);
+  await menu.locator("header").getByRole("button", { name: /^Close/ }).click();
+  assert.equal(await settled(menu), "gone", "the Menu did not close");
+}
+
+/** Which design a grabber or a preview draws. */
+function designOf(locator: Locator): Promise<string | null> {
+  return locator.first().getAttribute("data-grabber-design");
+}
+
+/** An element's color now, as the browser draws it. */
+function colorOf(locator: Locator): Promise<string> {
+  return locator.first().evaluate((el) => (globalThis as unknown as Win).getComputedStyle(el as unknown as El).color ?? "");
+}
+
+/** An element's color in the second frame from now: the frame that draws a change starts its transition, and the next shows where it stands, so a 150 ms fade is still under way there. */
+function colorAfterFrame(locator: Locator): Promise<string> {
+  return locator.first().evaluate(
+    (el) =>
+      new Promise<string>((resolve) => {
+        const g = globalThis as unknown as Win & { requestAnimationFrame(fn: () => void): number };
+        g.requestAnimationFrame(() => g.requestAnimationFrame(() => resolve(g.getComputedStyle(el as unknown as El).color ?? "")));
+      }),
+  );
+}
+
+/** The colors the grabber may take on this page: controlBorder at rest, the member's accent, and the system's muted text and highlight under forced colors. */
+function systemColors(page: Page): Promise<{ rest: string; accent: string; grayText: string; highlight: string }> {
+  return page.evaluate(() => {
+    type Probe = { style: Record<string, string>; remove(): void };
+    const g = globalThis as unknown as Win & { document: { createElement(t: string): Probe; body: { appendChild(n: Probe): void } } };
+    const read = (color: string) => {
+      const probe = g.document.createElement("span");
+      probe.style.forcedColorAdjust = "none";
+      probe.style.color = color;
+      g.document.body.appendChild(probe);
+      const out = g.getComputedStyle(probe as unknown as El).color ?? "";
+      probe.remove();
+      return out;
+    };
+    return { rest: read("#76747f"), accent: read("var(--rvtt-accent)"), grayText: read("GrayText"), highlight: read("Highlight") };
+  });
+}
 
 /** Opens the page called Notes that says `text`, of the two that share the title. */
 async function openNotes(sheet: Locator, text: string): Promise<void> {
@@ -1708,16 +1946,17 @@ async function grabberFit(surface: Locator): Promise<{ pill: Rect; area: Rect; s
 }
 
 /**
- * The pill is about 36 x 4 at the interface size, centered, on a grab area
+ * The pill is its design's size at the interface size (36 x 4 for the
+ * default ringed tail), centered, on a grab area
  * that starts at the surface's top edge (inside its 1 px border, or at the
  * screen's top in full screen, where the sheet has none), 5 px under that
  * edge on every surface alike, at least 1 px above its first line, moves
  * nothing, and lets a touch through to the header.
  */
-async function checkFit(surface: Locator, scale: number, where: string): Promise<Awaited<ReturnType<typeof grabberFit>>> {
+async function checkFit(surface: Locator, scale: number, where: string, size = { width: 36, height: 4 }): Promise<Awaited<ReturnType<typeof grabberFit>>> {
   const fit = await grabberFit(surface);
   const say = `${where}: ${JSON.stringify(fit)}`;
-  assert.ok(Math.abs(fit.pill.width - 36 * scale) < 0.6 && Math.abs(fit.pill.height - 4 * scale) < 0.6, `the pill's size, ${say}`);
+  assert.ok(Math.abs(fit.pill.width - size.width * scale) < 0.6 && Math.abs(fit.pill.height - size.height * scale) < 0.6, `the pill's size, ${say}`);
   assert.ok(Math.abs((fit.pill.left + fit.pill.right) / 2 - (fit.surface.left + fit.surface.right) / 2) < 1, `the pill is off center, ${say}`);
   assert.ok(fit.area.top >= fit.surface.top - 0.5 && fit.area.top <= fit.surface.top + 1.5 * scale, `the grab area does not start at the surface's top edge, ${say}`);
   assert.ok(Math.abs(fit.pill.top - fit.area.top - 5 * scale) < 0.6, `the pill is not 5 px under the surface's top edge, ${say}`);
