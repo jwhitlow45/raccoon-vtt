@@ -6,7 +6,8 @@ import { pickTemplate } from "../areas/AreaTool.tsx";
 import { lightSlot } from "../builder/lightTap.ts";
 import { builderSlot, labelPaneSlot } from "../builder/store.ts";
 import { stampSlot } from "../builder/stamps/store.ts";
-import { findCamera } from "../find/findToken.ts";
+import { findCamera, frameOf } from "../find/findToken.ts";
+import { groundIn } from "../../canvas/boardPick.ts";
 import { lightModeSlot } from "../lights/store.ts";
 import { pinSlot } from "../pins/store.ts";
 import { trapSlot } from "../traps/store.ts";
@@ -27,7 +28,8 @@ export function focusOutlineRow(row: OutlineRow, env: { scope: RoomScope; ui: Ro
   pick(row, env);
   // After the pick, so a token lands clear of the action bar it opens, and nothing else keeps clear of a bar the pick closed (canvas/barDock.ts).
   const target = frameRect(row.rect);
-  env.scope.get(fitSlot).show?.((viewport, bars, bar, view) => findCamera(viewport, target, bars, bar, view));
+  // Its middle at the highest drawn ground under the item's box.
+  env.scope.get(fitSlot).show?.((viewport, bars, bar, pick) => findCamera(viewport, target, bars, bar, frameOf(pick, target, groundIn(pick, row.rect))));
 }
 
 function pick(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: RoomActions; sceneId: string }): void {

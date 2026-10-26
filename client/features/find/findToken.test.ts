@@ -5,7 +5,9 @@ import { character, token } from "#shared/testutil.ts";
 import { fitRect, NO_INSETS, viewToScreen } from "../../lib/camera.ts";
 import { isometric, TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
 import { barCover, largerEach, pastBars } from "../../canvas/barDock.ts";
-import { FIND_ROOM_CELLS, findCamera, findRect, nextOwnToken, sheetCover } from "./findToken.ts";
+import { FIND_ROOM_CELLS, findCamera, findRect, frameOf, nextOwnToken, sheetCover } from "./findToken.ts";
+import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, groundIn, ringCenter, tokenBase } from "../../canvas/boardPick.ts";
+import { world } from "../movement/testing.ts";
 
 function view(tokens: Token[], characters: Character[] = []) {
   return { tokens: Object.fromEntries(tokens.map((t) => [t.id, t])), characters: Object.fromEntries(characters.map((c) => [c.id, c])) };
@@ -113,13 +115,58 @@ describe("find my token", () => {
   });
 });
 
+describe("Find my token on raised ground, in a pit and in the air (ISO34-ASTRA-2)", () => {
+  const viewport = { width: 800, height: 600 };
+  const bars = { top: 56, right: 0, bottom: 64, left: 0 };
+  // A 20 ft platform over cells 8 to 13 each way, and a 10 ft pit over cells 2 to 5.
+  const heights: Record<string, number> = {};
+  for (let y = 8; y < 14; y++) for (let x = 8; x < 14; x++) heights[`${x},${y}`] = 20;
+  for (let y = 2; y < 6; y++) for (let x = 2; x < 6; x++) heights[`${x},${y}`] = -10;
+  const state = world({ heights });
+  const cases = [
+    { name: "on a 20 ft platform", t: token("t1", { x: 10, y: 10, elevation: 20 }), base: 4 },
+    { name: "down in a 10 ft pit", t: token("t2", { x: 3, y: 3, elevation: -10 }), base: -2 },
+    { name: "flying 30 ft over flat ground", t: token("t3", { x: 20, y: 4, elevation: 30 }), base: 6 },
+    { name: "on the ground beside the 20 ft platform", t: token("t4", { x: 6, y: 10 }), base: 0 },
+  ];
+  for (const c of cases) {
+    test(`its ring shows in the middle of the map left clear, and the room round it fits, ${c.name}, at every turn`, () => {
+      for (const turn of [0, 1, 2, 3] as const) {
+        const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: false, view: isometric(turn), camera: { x: 0, y: 0, scale: 40 }, lowPower: false }, new DrawnHeightsMemo());
+        const target = findRect(c.t);
+        assert.equal(tokenBase(pick, c.t), c.base);
+        const cam = findCamera(viewport, target, bars, NO_INSETS, frameOf(pick, target, tokenBase(pick, c.t)));
+        const ring = ringCenter({ ...pick, camera: cam }, c.t);
+        assert.ok(Math.abs(ring.x - 400) < 1e-6 && Math.abs(ring.y - (56 + (600 - 120) / 2)) < 1e-6, `turn ${turn}: ${JSON.stringify(ring)}`);
+        // The room's ground, every cell's top where it is raised, inside the map left clear.
+        for (let y = target.y; y < target.y + target.height - 1e-9; y++) {
+          for (let x = target.x; x < target.x + target.width - 1e-9; x++) {
+            const z = Math.max(0, drawnAt(pick, { x: x + 0.01, y: y + 0.01 }));
+            for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+              const at = viewToScreen(cam, toView(isometric(turn), { x: Math.min(x + dx, target.x + target.width), y: Math.min(y + dy, target.y + target.height) }, z));
+              assert.ok(at.x >= -1e-6 && at.x <= 800 + 1e-6 && at.y >= 56 - 1e-6 && at.y <= 600 - 64 + 1e-6, `turn ${turn}, cell ${x},${y}: ${JSON.stringify(at)}`);
+            }
+          }
+        }
+      }
+    });
+  }
+
+  test("an outline row's box frames on the highest drawn ground under it", () => {
+    const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: false, view: isometric(0), camera: { x: 0, y: 0, scale: 40 }, lowPower: false }, new DrawnHeightsMemo());
+    assert.equal(groundIn(pick, { x: 7.5, y: 9, width: 2, height: 1 }), 4);
+    assert.equal(groundIn(pick, { x: 3, y: 3, width: 1, height: 1 }), -2);
+    assert.equal(groundIn(flatPick({ x: 0, y: 0, scale: 40 }), { x: 7.5, y: 9, width: 2, height: 1 }), 0);
+  });
+});
+
 describe("Find my token in Isometric (docs/design-v1-isometric-view.md 4.2)", () => {
   test("the found token's middle shows in the middle of the map left clear, at every turn", () => {
     const viewport = { width: 390, height: 844 };
     const bars = { top: 56, right: 0, bottom: 64, left: 0 };
     const target = findRect(token("t1", { x: 12, y: 7 }));
     for (const turn of [0, 1, 2, 3] as const) {
-      const cam = findCamera(viewport, target, bars, NO_INSETS, isometric(turn));
+      const cam = findCamera(viewport, target, bars, NO_INSETS, { view: isometric(turn), lift: 0, z: 0 });
       const shown = viewToScreen(cam, toView(isometric(turn), { x: target.x + target.width / 2, y: target.y + target.height / 2 }));
       assert.ok(Math.abs(shown.x - 195) < 1e-9 && Math.abs(shown.y - (56 + (844 - 120) / 2)) < 1e-9, `turn ${turn}`);
       // The room around it fits as the board draws it, a diamond wider than the square it stands for.

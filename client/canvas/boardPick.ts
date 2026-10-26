@@ -115,6 +115,15 @@ export function groundUnder(pick: Pick<BoardPick, "view" | "src" | "feetPerCell"
   return drawnFootprintGround(pick.src, occupiedRange(token)) / pick.feetPerCell;
 }
 
+/** The highest drawn ground under a world rectangle's cells, in cells, down in a pit when every cell is: where an outline row's box stands. 0 in Top-down. */
+export function groundIn(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, rect: { x: number; y: number; width: number; height: number }): number {
+  if (pick.view.kind === "topDown" || !pick.src) return 0;
+  const x0 = Math.floor(rect.x);
+  const y0 = Math.floor(rect.y);
+  const range = { x0, y0, x1: Math.max(x0 + 1, Math.ceil(rect.x + rect.width)), y1: Math.max(y0 + 1, Math.ceil(rect.y + rect.height)) };
+  return drawnFootprintGround(pick.src, range) / pick.feetPerCell;
+}
+
 /** Where a token's ring's center shows on screen: its footprint's middle where its ring draws (`tokenBase`). */
 export function ringCenter(pick: Pick<BoardPick, "view" | "camera" | "src" | "feetPerCell" | "canvasHeight">, token: FootprintToken, stands = true): Point {
   const fp = footprint(token);

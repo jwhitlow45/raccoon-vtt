@@ -543,12 +543,13 @@ export function MapStage(props: {
     // "Find my token" (features/find/findToken.ts). A plain camera rather
     // than a fit, so the bars changing never move it back. The token bar's
     // cover goes with it, past the bars, counting a bar about to open.
-    const show = (camera: (viewport: Size, bars: Insets, bar: Insets, view: View) => Camera) => {
+    const show = (camera: (viewport: Size, bars: Insets, bar: Insets, pick: BoardPick) => Camera) => {
       const s = sizeRef.current;
-      if (!s) return;
+      const c = pendingCamRef.current ?? camRef.current;
+      if (!s || !c) return;
       fittedRef.current = null;
       pendingCamRef.current = null;
-      setCam(camera(s, insetsRef.current, pastBars(barCoverRef.current(s, "opening"), insetsRef.current), shownRef.current));
+      setCam(camera(s, insetsRef.current, pastBars(barCoverRef.current(s, "opening"), insetsRef.current), pickOfRef.current(c)));
     };
     slot.fit = fit;
     slot.show = show;

@@ -1,7 +1,8 @@
 import type { MemberId, RoomState, SceneId, Token } from "#shared/model.ts";
 import { cameraAt, fitRect, type Camera, type Insets, type Rect, type Size } from "../../lib/camera.ts";
-import { TOP_DOWN, toView, viewBox, type View } from "../../lib/view.ts";
+import { TOP_DOWN, toView, viewBox, type View, type ViewBox } from "../../lib/view.ts";
 import { footprint } from "../../lib/scene.ts";
+import { liftIn, type BoardPick } from "../../canvas/boardPick.ts";
 import { ownsToken } from "../tokens/access.ts";
 
 /**
@@ -59,8 +60,14 @@ export function findRect(token: Pick<Token, "x" | "y" | "size" | "w" | "h">): Re
  * surroundings under the sheet. In the view the board shows
  * (docs/design-v1-isometric-view.md 4.2).
  */
-export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: Insets, view: View = TOP_DOWN): Camera {
-  const { scale } = fitRect(viewport, viewBox(view, target), 24, bars);
+export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: Insets, frame: FindFrame = FLAT_FRAME): Camera {
+  const { view } = frame;
+  const middle = toView(view, { x: target.x + target.width / 2, y: target.y + target.height / 2 }, frame.z);
+  // The box as the board draws it, grown evenly round the middle, which centers: a ring raised over the box's middle or down in a pit still leaves all of it in view.
+  const box = viewBox(view, target, frame.lift);
+  const hw = Math.max(middle.x - box.x, box.x + box.width - middle.x);
+  const hh = Math.max(middle.y - box.y, box.y + box.height - middle.y);
+  const { scale } = fitRect(viewport, { x: middle.x - hw, y: middle.y - hh, width: 2 * hw, height: 2 * hh } as ViewBox, 24, bars);
   const left = bars.left + cover.left;
   const right = bars.right + cover.right;
   const top = bars.top + cover.top;
@@ -69,7 +76,23 @@ export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: In
   const clear = viewport.width - left - right > 0 && viewport.height - top - bottom > 0;
   const cx = clear ? left + (viewport.width - left - right) / 2 : bars.left + (viewport.width - bars.left - bars.right) / 2;
   const cy = clear ? top + (viewport.height - top - bottom) / 2 : bars.top + (viewport.height - bars.top - bars.bottom) / 2;
-  return cameraAt({ x: cx, y: cy }, toView(view, { x: target.x + target.width / 2, y: target.y + target.height / 2 }), scale);
+  return cameraAt({ x: cx, y: cy }, middle, scale);
+}
+
+/**
+ * How the board shows a found target, in cells of height: the view, the
+ * highest drawn ground in its box, which raises the box's top as a fit's
+ * does, and the height its middle draws at (a token's ring, or the ground
+ * under an outline row's box), each from this viewer's drawn heights
+ * (docs/design-v1-isometric-view.md 4.2).
+ */
+export type FindFrame = { view: View; lift: number; z: number };
+
+const FLAT_FRAME: FindFrame = { view: TOP_DOWN, lift: 0, z: 0 };
+
+/** A target's frame on the board as `pick` shows it, its middle drawn at `z`. */
+export function frameOf(pick: Pick<BoardPick, "view" | "heights">, target: Rect, z: number): FindFrame {
+  return { view: pick.view, lift: pick.view.kind === "topDown" ? 0 : liftIn(pick.heights, target), z: pick.view.kind === "topDown" ? 0 : z };
 }
 
 /** A phone's open sheet as it stands on screen: at the bottom in portrait, docked on the right in landscape. */
