@@ -14,9 +14,10 @@ import { useTooltip } from "../../components/Tooltip.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { api, ApiError, displayAssetUrl, type AssetVariant } from "../../lib/api.ts";
 import { fitRect, NO_INSETS, type Camera, type Rect, type Size } from "../../lib/camera.ts";
-import { TOP_DOWN, viewBox } from "../../lib/view.ts";
+import { viewBox, type View } from "../../lib/view.ts";
 import { BANNER_DELAY_MS, type ConnectionState } from "../../lib/connection.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
+import { liftIn } from "../../canvas/boardPick.ts";
 import { exitFullscreen, fullscreenSupported, toggleFullscreen, useFullscreen } from "../../lib/fullscreen.ts";
 import { navigate } from "../../lib/navigation.ts";
 import { sceneGate } from "../../lib/scene.ts";
@@ -43,6 +44,7 @@ import {
   containRect,
   displayPress,
   endedText,
+  displaySeen,
   fitMapTarget,
   followCamera,
   MENU_MS,
@@ -218,7 +220,7 @@ function DisplayTable(props: { roomId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [menu, overlay, press, paging]);
 
-  const camera = useDisplayCamera(gate, mode);
+  const camera = useDisplayCamera(gate, mode, viewChoice.shown);
   const turn = useRoomView((s) => (showTurn && s.view ? turnText({ encounter: s.view.encounter, tokens: s.view.tokens, characters: s.view.characters }) : null));
 
   return (
@@ -311,8 +313,12 @@ function Centered(props: { children: ReactNode }) {
  * - Follow the DM fits the area a DM device sends (`view`), and until one
  *   arrives on this scene it fits the map. When the DM leaves for another
  *   scene the display keeps its last view.
+ *
+ * Each fits in the display's own view (`shown`), raised by the heights the
+ * display has seen, through its shared fog (docs/design-v1-isometric-view.md
+ * 4.2): never a height hidden from the players.
  */
-function useDisplayCamera(gate: ReturnType<typeof sceneGate>, mode: DisplayMode): ((viewport: Size) => Camera) | null {
+function useDisplayCamera(gate: ReturnType<typeof sceneGate>, mode: DisplayMode, shown: View): ((viewport: Size) => Camera) | null {
   const scene = gate.kind === "ready" ? gate.scene : null;
   const fog = gate.kind === "ready" && gate.fog;
   const tokens = useRoomView((s) => s.view?.tokens);
@@ -345,14 +351,21 @@ function useDisplayCamera(gate: ReturnType<typeof sceneGate>, mode: DisplayMode)
   }, [target, sceneId, current]);
 
   const fitRectNow = current?.rect ?? null;
+  const room = useRoomView((s) => s.view);
+  // Every height the display may see, whatever its zoom, read only where a view is Isometric: the display's own or the DM's it follows.
+  const isoInPlay = shown.kind === "isometric" || (mode === "follow" && dmView?.iso !== undefined);
+  // Made again only when the build, the fog or the feet a cell change, not on every change to the room.
+  const chunks = room?.buildChunks;
+  const feet = room?.meta.settings.feetPerCell;
+  const seen = useMemo(() => (isoInPlay && scene && room ? displaySeen({ room, scene, fog }) : null), [isoInPlay, scene, chunks, fogTiles, feet, fog]);
   return useMemo(() => {
     if (mode === "follow" && dmView) {
-      const v = { x: dmView.x, y: dmView.y, w: dmView.w, h: dmView.h };
-      return (viewport: Size) => followCamera(viewport, v);
+      const v = { x: dmView.x, y: dmView.y, w: dmView.w, h: dmView.h, ...(dmView.iso ? { iso: dmView.iso } : {}) };
+      return (viewport: Size) => followCamera(viewport, v, shown, seen);
     }
     if (!fitRectNow) return null;
-    return (viewport: Size) => fitRect(viewport, viewBox(TOP_DOWN, fitRectNow), 24);
-  }, [mode, dmView, fitRectNow]);
+    return (viewport: Size) => fitRect(viewport, viewBox(shown, fitRectNow, seen ? liftIn(seen, fitRectNow) : 0), 24);
+  }, [mode, dmView, fitRectNow, shown, seen]);
 }
 
 /** The menu a tap or a key shows for 5 s, and its timer. */

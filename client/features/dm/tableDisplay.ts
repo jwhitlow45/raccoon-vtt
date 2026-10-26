@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { EphEvent } from "#shared/protocol.ts";
-import { groundAtMiddle, type Live } from "../../lib/view.ts";
+import { screenToView } from "../../lib/camera.ts";
+import { groundAtMiddle, toWorld, type Live } from "../../lib/view.ts";
 
 /**
  * The DM's side of table displays (docs/design-v1-dm-tools.md 3.1): the
@@ -51,16 +52,34 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * (lib/view.ts groundAtMiddle) and its width and height, in cells, inside
  * the protocol's bounds (shared/protocol.ts), so the server never drops it
  * for its schema.
+ *
+ * An Isometric DM's (docs/design-v1-isometric-view.md ISO-D17) keeps x, y,
+ * w and h as the box of its canvas's corners on the ground at 0, and adds
+ * its turn and its canvas's size in view units, centered on its middle at
+ * 0. Every number is the DM's camera alone: no height is read, so hidden
+ * terrain changes nothing it sends.
  */
 export function viewEvent(live: Live): Extract<EphEvent, { k: "view" }> {
   const scale = live.camera.scale > 0 ? live.camera.scale : 1;
-  const middle = groundAtMiddle({ ...live, camera: { ...live.camera, scale } });
+  const camera = { ...live.camera, scale };
+  const middle = groundAtMiddle({ ...live, camera });
+  const { width, height } = live.viewport;
+  const at = { k: "view" as const, x: clamp(middle.x, -1_000, 1_000), y: clamp(middle.y, -1_000, 1_000) };
+  if (live.view.kind === "topDown") return { ...at, w: clamp(width / scale, 0.01, 2_000), h: clamp(height / scale, 0.01, 2_000) };
+  const view = live.view;
+  const corners = [
+    { x: 0, y: 0 },
+    { x: width, y: 0 },
+    { x: 0, y: height },
+    { x: width, y: height },
+  ].map((p) => toWorld(view, screenToView(camera, p)));
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
   return {
-    k: "view",
-    x: clamp(middle.x, -1_000, 1_000),
-    y: clamp(middle.y, -1_000, 1_000),
-    w: clamp(live.viewport.width / scale, 0.01, 2_000),
-    h: clamp(live.viewport.height / scale, 0.01, 2_000),
+    ...at,
+    w: clamp(Math.max(...xs) - Math.min(...xs), 0.01, 2_000),
+    h: clamp(Math.max(...ys) - Math.min(...ys), 0.01, 2_000),
+    iso: { turn: view.turn, vw: clamp(width / scale, 0.01, 2_000), vh: clamp(height / scale, 0.01, 2_000) },
   };
 }
 

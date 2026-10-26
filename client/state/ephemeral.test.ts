@@ -53,6 +53,10 @@ describe("ephemeral lifecycle", () => {
     assert.equal(applyEph(EMPTY_EPHEMERAL, "dm1", view, 5, { local: false, role: "dm" }), EMPTY_EPHEMERAL, "a DM's view never follows one");
     assert.equal(applyEph(EMPTY_EPHEMERAL, "dm1", view, 5, { local: true, role: "player" }), EMPTY_EPHEMERAL, "nor its own echo");
     assert.equal(nextExpiry(shown), null, "a camera never times out");
+    // An Isometric DM's turn and size come along, for the display's fit (docs/design-v1-isometric-view.md ISO-D17).
+    const iso = applyEph(EMPTY_EPHEMERAL, "dm1", { ...view, iso: { turn: 2, vw: 10, vh: 20 } }, 7, remote);
+    assert.deepEqual(iso.view?.iso, { turn: 2, vw: 10, vh: 20 });
+    assert.equal(shown.view && "iso" in shown.view, false);
   });
 
   test("a reconnect keeps only this device's own previews", () => {

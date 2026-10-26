@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { entry, reveal, room, scene, token } from "#shared/testutil.ts";
+import type { RoomState } from "#shared/model.ts";
+import { entry, reveal, rng, room, scene, token } from "#shared/testutil.ts";
 import { projectState } from "#shared/project.ts";
 import { screenToView } from "../../lib/camera.ts";
-import { TOP_DOWN, toWorld } from "../../lib/view.ts";
+import { isometric, TOP_DOWN, toView, toWorld, type Turn } from "../../lib/view.ts";
+import { viewEvent } from "../dm/tableDisplay.ts";
+import { raised, world } from "../movement/testing.ts";
 import { pageName } from "../handouts/handouts.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
 import {
@@ -16,7 +19,9 @@ import {
   displayPress,
   endedText,
   fitMapTarget,
+  displaySeen,
   followCamera,
+  followGround,
   formatDisplayCode,
   normalizeDisplayCode,
   pageLine,
@@ -235,5 +240,67 @@ describe("the end of a display", () => {
     assert.equal(endedText("revoked", null).title, "This display was signed out");
     assert.equal(endedText("deleted", "ROOMBBBB").title, "This room was deleted", "a deleted room says so whatever this device shows");
     assert.equal(endedText("denied", null).title, "The room refused this display");
+  });
+});
+
+describe("following an Isometric DM (docs/design-v1-isometric-view.md 4.2, ISO-D17)", () => {
+  const dmCam = { x: 220, y: -40, scale: 40 };
+  const dmViewport = { width: 400, height: 800 };
+  const heightsOf = (state: RoomState, fog: boolean) => displaySeen({ room: state, scene: state.scenes.s1!, fog });
+  const eventAt = (turn: Turn) => viewEvent({ camera: dmCam, viewport: dmViewport, view: isometric(turn) });
+
+  test("a display in Isometric at the DM's turn frames the DM's view rectangle exactly", () => {
+    const e = eventAt(1);
+    for (const viewport of [{ width: 1920, height: 1080 }, { width: 400, height: 800 }]) {
+      const cam = followCamera(viewport, e, isometric(1), null);
+      const mid = toView(isometric(1), { x: e.x, y: e.y });
+      const tl = screenToView(cam, { x: 0, y: 0 });
+      const br = screenToView(cam, { x: viewport.width, y: viewport.height });
+      assert.ok(tl.x <= mid.x - 5 + 1e-9 && br.x >= mid.x + 5 - 1e-9 && tl.y <= mid.y - 10 + 1e-9 && br.y >= mid.y + 10 - 1e-9);
+      assert.ok(Math.abs(br.x - tl.x - 10) < 1e-6 || Math.abs(br.y - tl.y - 20) < 1e-6, "one side fits exactly");
+    }
+  });
+
+  test("a revealed platform outside the box at 0 but inside the DM's rectangle is in the fit, of a Top-down display too", () => {
+    const e = eventAt(0);
+    const ground = followGround(e, null);
+    // A tall platform just past the box's far edge toward the viewer: its ground lies below the rectangle, its top rises into it.
+    const below = { x: Math.floor(ground.x + ground.width) + 1, y: Math.floor(ground.y + ground.height) + 1 };
+    const state = world({ blockMovement: false, heights: raised(below.x, below.y, below.x + 1, below.y + 1, 150) });
+    state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 60, h: 60 }, fogEnabled: true };
+    reveal(state, "s1", { x: 0, y: 0, w: 60, h: 60 });
+    const grown = followGround(e, heightsOf(state, true));
+    assert.ok(grown.x + grown.width >= below.x + 1 && grown.y + grown.height >= below.y + 1, `${JSON.stringify(grown)} holds ${JSON.stringify(below)}`);
+    const cam = followCamera({ width: 1920, height: 1080 }, e, TOP_DOWN, heightsOf(state, true));
+    const br = toWorld(TOP_DOWN, screenToView(cam, { x: 1920, y: 1080 }));
+    assert.ok(br.x >= below.x + 1 - 1e-9 && br.y >= below.y + 1 - 1e-9, "the Top-down display shows the platform");
+  });
+
+  test("security: one DM camera and shared fog over different hidden heights give the same event and fit", () => {
+    const random = rng(5);
+    for (let round = 0; round < 8; round++) {
+      const turn = (round % 4) as Turn;
+      const e = eventAt(turn);
+      const shown: Record<string, number> = {};
+      const a: Record<string, number> = {};
+      const b: Record<string, number> = {};
+      for (let y = 0; y < 40; y++) {
+        for (let x = 0; x < 40; x++) {
+          if (x < 20) shown[`${x},${y}`] = Math.round(random() * 8) * 5;
+          else {
+            a[`${x},${y}`] = Math.round(random() * 20) * 5;
+            b[`${x},${y}`] = Math.round(random() * 20) * 5 - 30;
+          }
+        }
+      }
+      const fits = [{ ...shown, ...a }, { ...shown, ...b }].map((heights) => {
+        const state = world({ blockMovement: false, heights });
+        state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 40, h: 40 }, fogEnabled: true };
+        reveal(state, "s1", { x: 0, y: 0, w: 20, h: 40 });
+        const seen = heightsOf(state, true);
+        return [followCamera({ width: 1280, height: 720 }, e, isometric(((turn + 1) % 4) as Turn), seen), followCamera({ width: 1280, height: 720 }, e, TOP_DOWN, seen)];
+      });
+      assert.deepEqual(fits[0], fits[1], `round ${round}`);
+    }
   });
 });

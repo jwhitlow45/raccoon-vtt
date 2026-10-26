@@ -57,7 +57,7 @@ export type FocusRequest = { id: number; from: MemberId; x: number; y: number; z
  * store records one, since the server sends `view` to displays alone. `id`
  * changes for every event, so a display's camera can follow each once.
  */
-export type ViewRequest = { id: number; from: MemberId; x: number; y: number; w: number; h: number; at: number };
+export type ViewRequest = { id: number; from: MemberId; x: number; y: number; w: number; h: number; at: number; iso?: { turn: number; vw: number; vh: number } };
 
 export type Ephemeral = {
   /** Keyed `"<from>|<tokenId>"`. */

@@ -1,6 +1,6 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { fitRect, type Camera, type Rect, type Size } from "../../lib/camera.ts";
-import { TOP_DOWN, viewBox } from "../../lib/view.ts";
+import { drawnHeights, isometric, K, TOP_DOWN, toView, toWorld, viewBox, type DrawnHeights, type Turn, type View, type ViewBox, type ViewPoint } from "../../lib/view.ts";
 import { fitTarget } from "../../lib/fitTarget.ts";
 import type { FogMask } from "../../lib/fogTiles.ts";
 import { footprint } from "../../lib/scene.ts";
@@ -51,17 +51,101 @@ export function codeFromHash(hash: string): string | null {
 /** How the display's camera moves, chosen on the display and kept on the device. */
 export type DisplayMode = "follow" | "fit";
 
-/** A DM device's visible map area: its center and size, in cells (the `view` event). */
-export type ViewRect = { x: number; y: number; w: number; h: number };
+/**
+ * A DM device's visible map area: its center and size, in cells (the `view`
+ * event). An Isometric DM's adds its turn and its canvas's size in view
+ * units (docs/design-v1-isometric-view.md ISO-D17).
+ */
+export type ViewRect = { x: number; y: number; w: number; h: number; iso?: { turn: number; vw: number; vh: number } };
 
 /**
  * Follow the DM: the area a DM device sees, fitted to this screen, so a TV
  * shows the same area as the DM's phone, not the same pixels per cell. The
  * whole area stays in view: a narrow phone's view on a wide TV shows more
  * on each side.
+ *
+ * In the display's own view (`shown`, ISO-D16). A display in Isometric at
+ * an Isometric DM's turn frames the DM's view rectangle exactly. Any other
+ * fits the world box followGround gives through its own projection, its
+ * top raised by the highest ground it has seen inside (`seen`, 4.2).
  */
-export function followCamera(viewport: Size, view: ViewRect): Camera {
-  return fitRect(viewport, viewBox(TOP_DOWN, { x: view.x - view.w / 2, y: view.y - view.h / 2, width: view.w, height: view.h }), 0);
+export function followCamera(viewport: Size, view: ViewRect, shown: View = TOP_DOWN, seen: DrawnHeights | null = null): Camera {
+  if (view.iso && shown.kind === "isometric" && shown.turn === view.iso.turn) {
+    const mid = toView(shown, { x: view.x, y: view.y });
+    return fitRect(viewport, { x: mid.x - view.iso.vw / 2, y: mid.y - view.iso.vh / 2, width: view.iso.vw, height: view.iso.vh } as ViewBox, 0);
+  }
+  const ground = followGround(view, seen);
+  return fitRect(viewport, viewBox(shown, ground, shown.kind === "isometric" && seen ? highestIn(seen, ground) : 0), 0);
+}
+
+/**
+ * The heights a display may see, whatever its zoom (4.2): the ground under
+ * its shared fog where the scene has fog, every height read through it
+ * (lib/view.ts drawnHeights), so a fit never shows terrain the players
+ * have not seen.
+ */
+export function displaySeen(input: { room: Pick<RoomState, "buildChunks" | "fogTiles" | "meta">; scene: { id: string; bounds: { w: number; h: number } }; fog: boolean }): DrawnHeights {
+  const { room, scene } = input;
+  return drawnHeights({ chunks: room.buildChunks, sceneId: scene.id, bounds: scene.bounds, fog: input.fog ? room.fogTiles : null, stand: true }, room.meta.settings.feetPerCell);
+}
+
+/**
+ * The world box a display fits to follow the DM (4.2): the DM's area, and
+ * for an Isometric DM the ground at 0 under its view rectangle, grown by
+ * every raised cell of the display's own seen ground (`seen`, its shared
+ * fog's heights) whose full projected bounds at the DM's turn meet the
+ * rectangle. A column's top reaches up the screen K a cell of height, so
+ * one whose ground lies below the rectangle can still show in it: the
+ * search covers the rectangle grown downward by K times the highest seen
+ * height. It reads only the DM's camera and the display's seen ground, so
+ * hidden terrain changes neither the event nor the fit.
+ */
+export function followGround(view: ViewRect, seen: DrawnHeights | null): Rect {
+  if (!view.iso) return { x: view.x - view.w / 2, y: view.y - view.h / 2, width: view.w, height: view.h };
+  const dm = isometric((view.iso.turn % 4) as Turn);
+  const mid = toView(dm, { x: view.x, y: view.y });
+  const r = { x0: mid.x - view.iso.vw / 2, x1: mid.x + view.iso.vw / 2, y0: mid.y - view.iso.vh / 2, y1: mid.y + view.iso.vh / 2 };
+  const boxOf = (y1: number) => worldBox([toWorld(dm, at(r.x0, r.y0)), toWorld(dm, at(r.x1, r.y0)), toWorld(dm, at(r.x0, y1)), toWorld(dm, at(r.x1, y1))]);
+  let box = boxOf(r.y1);
+  if (!seen || seen.high <= 0) return rect(box);
+  const search = boxOf(r.y1 + K * seen.high);
+  const { w, h } = seen.bounds;
+  for (let y = Math.max(0, Math.floor(search.y0)); y < Math.min(h, Math.ceil(search.y1)); y++) {
+    for (let x = Math.max(0, Math.floor(search.x0)); x < Math.min(w, Math.ceil(search.x1)); x++) {
+      const g = seen.at(x, y);
+      if (g <= 0) continue;
+      const corners = [toView(dm, { x, y }), toView(dm, { x: x + 1, y }), toView(dm, { x, y: y + 1 }), toView(dm, { x: x + 1, y: y + 1 })];
+      const vx0 = Math.min(...corners.map((c) => c.x));
+      const vx1 = Math.max(...corners.map((c) => c.x));
+      const vy0 = Math.min(...corners.map((c) => c.y)) - K * g;
+      const vy1 = Math.max(...corners.map((c) => c.y));
+      if (vx1 < r.x0 || vx0 > r.x1 || vy1 < r.y0 || vy0 > r.y1) continue;
+      box = { x0: Math.min(box.x0, x), y0: Math.min(box.y0, y), x1: Math.max(box.x1, x + 1), y1: Math.max(box.y1, y + 1) };
+    }
+  }
+  return rect(box);
+}
+
+const at = (x: number, y: number) => ({ x, y }) as ViewPoint;
+
+function worldBox(points: readonly { x: number; y: number }[]): { x0: number; y0: number; x1: number; y1: number } {
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
+function rect(b: { x0: number; y0: number; x1: number; y1: number }): Rect {
+  return { x: b.x0, y: b.y0, width: b.x1 - b.x0, height: b.y1 - b.y0 };
+}
+
+/** The highest seen ground inside a world box, in cells, at least 0. */
+function highestIn(seen: DrawnHeights, box: Rect): number {
+  let top = 0;
+  const { w, h } = seen.bounds;
+  for (let y = Math.max(0, Math.floor(box.y)); y < Math.min(h, Math.ceil(box.y + box.height)); y++) {
+    for (let x = Math.max(0, Math.floor(box.x)); x < Math.min(w, Math.ceil(box.x + box.width)); x++) top = Math.max(top, seen.at(x, y));
+  }
+  return top;
 }
 
 /**
