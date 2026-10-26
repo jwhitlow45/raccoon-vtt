@@ -6,7 +6,7 @@ import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { estimateText, labelBox } from "#shared/rules/labels.ts";
 import { FogView } from "../../canvas/relief/fogView.ts";
 import { isometric, toView, TOP_DOWN } from "../../lib/view.ts";
-import { labelShape, splitLabels } from "./labelShape.ts";
+import { labelShape, labelSplitter, splitLabels } from "./labelShape.ts";
 
 const label = { x: 5, y: 4, text: "Crypt", size: 1 };
 
@@ -62,5 +62,26 @@ describe("labelShape", () => {
     const all = encodeTile(new Uint8Array(TILE_BYTES).fill(0xff));
     const open = new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: all } }, "s1", { w: 16, h: 16 });
     assert.deepEqual(splitLabels(open, [label, far], estimateText).upright.length, 2);
+  });
+
+  test("security: labels split in the fallback font split again when Inter's wider widths arrive, with the labels and fog the same (ISO2-ASTRA-09)", () => {
+    // Revealed: every sub-cell of cells 0 to 5 on rows 0 to 9. Cell 6 is fogged.
+    const bits = new Uint8Array(TILE_BYTES);
+    for (let sy = 0; sy < 10 * FOG_SUBCELLS; sy++) {
+      for (let sx = 0; sx < 6 * FOG_SUBCELLS; sx++) {
+        const i = sy * TILE_SUB + sx;
+        bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+      }
+    }
+    const fog = new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) } }, "s1", { w: 16, h: 16 });
+    const labels = [label];
+    // The fallback font is narrower: "Crypt" spans x 4.17 to 5.83, then 3.42 to 6.58 in Inter.
+    let perChar = 0.3;
+    const split = labelSplitter((text) => text.length * perChar);
+    assert.equal(split(fog, labels, 0).upright.length, 1, "it stands in the fallback's widths");
+    perChar = 0.6;
+    assert.equal(split(fog, labels, 0).upright.length, 1, "kept while the font is the same");
+    assert.deepEqual(split(fog, labels, 1).upright, [], "Inter's widths reach the fogged cell 6: it lies flat");
+    assert.equal(split(fog, labels, 1).flat.length, 1);
   });
 });

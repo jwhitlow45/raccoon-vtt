@@ -233,6 +233,12 @@ describe("map labels in Isometric", () => {
     assert.match(iso, /labelShape\(l, view, \{ measure: measureLabel, upright: true, ground: ground\(l\.x, l\.y\) \}\)/);
   });
 
+  test("the split is made again when Inter loads, since it was measured in the fallback font (ISO2-ASTRA-09)", () => {
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    assert.match(iso, /const fontEpoch = useBoardFontEpoch\(\);/);
+    assert.match(iso, /labelSplitter<[^>]*>\(measureLabel\)/);
+    assert.match(iso, /splitLabels\(fog, labels, fontEpoch\)/);
+  });
 });
 
 describe("the isometric board's lookups", () => {

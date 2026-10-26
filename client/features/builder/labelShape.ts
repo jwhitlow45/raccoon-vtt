@@ -62,3 +62,19 @@ export function splitLabels<L extends Pick<Label, "x" | "y" | "text" | "size">>(
   for (const l of labels) (labelStands(fog, l, measure) ? upright : flat).push(l);
   return { upright, flat };
 }
+
+/**
+ * `splitLabels`, made again only when the fog, the labels or the font they
+ * are measured in change. A label's box is measured in the board's font,
+ * and Inter's widths replace the fallback's when it loads
+ * (canvas/boardFont.ts), so a label that stood in the fallback can reach a
+ * fogged sub-cell in Inter.
+ */
+export function labelSplitter<L extends Pick<Label, "x" | "y" | "text" | "size">>(measure: MeasureText): (fog: FogView, labels: readonly L[], fontEpoch: number) => { upright: L[]; flat: L[] } {
+  let last: { fog: FogView; labels: readonly L[]; fontEpoch: number; split: { upright: L[]; flat: L[] } } | null = null;
+  return (fog, labels, fontEpoch) => {
+    if (last && last.fog === fog && last.labels === labels && last.fontEpoch === fontEpoch) return last.split;
+    last = { fog, labels, fontEpoch, split: splitLabels(fog, labels, measure) };
+    return last.split;
+  };
+}

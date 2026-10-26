@@ -7,7 +7,7 @@ import { occupiedRange } from "#shared/rules/footprint.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import type { TexturedTerrain } from "../../features/builder/geometry.ts";
 import { drawLabel, measureLabel } from "../../features/builder/draw.ts";
-import { labelShape, splitLabels } from "../../features/builder/labelShape.ts";
+import { labelShape, labelSplitter } from "../../features/builder/labelShape.ts";
 import { useTextures } from "../../features/builder/textures.ts";
 import { isoLayersOf, type LayerProps } from "../../features/layers.ts";
 import { SightOverlay } from "../../features/vision/SightOverlay.tsx";
@@ -19,6 +19,7 @@ import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { useRoomStore } from "../../state/view.ts";
+import { useBoardFontEpoch } from "../boardFont.ts";
 import { FogShape } from "../FogShape.tsx";
 import { MapContent, useReadableMap, type DrawnMap } from "../layers/MapLayer.tsx";
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
@@ -272,8 +273,11 @@ function IsoBoardImpl(props: IsoBoardProps) {
   }, [props.stageKey, onStage]);
 
   // Map labels split once by the stand rule: those that stand draw in the overlay, and the build on the ground stage leaves them out by id.
+  // Split again when Inter loads, since the widths measured in the fallback font no longer hold.
   const labels = useMemo(() => Object.values(allLabels ?? {}).filter((l): l is NonNullable<typeof l> => !!l && l.sceneId === scene.id), [allLabels, scene.id]);
-  const uprightLabels = useMemo(() => splitLabels(fog, labels, measureLabel).upright, [fog, labels]);
+  const fontEpoch = useBoardFontEpoch();
+  const [splitLabels] = useState(() => labelSplitter<(typeof labels)[number]>(measureLabel));
+  const uprightLabels = splitLabels(fog, labels, fontEpoch).upright;
   const uprightIds = useMemo(() => new Set(uprightLabels.map((l) => l.id)), [uprightLabels]);
   const groundCtx: IsoGround = useMemo(() => ({ turn, fog, heights: stand, uprightLabels: uprightIds }), [turn, fog, stand, uprightIds]);
   const groups = groundGroups(turn);
