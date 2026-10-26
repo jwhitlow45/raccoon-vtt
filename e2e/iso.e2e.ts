@@ -525,7 +525,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await menu.locator("[data-rvtt-view-status]").filter({ hasText: "Turned right. The map's top edge faces down and to the right." }).waitFor({ state: "attached" });
     await closeMenu(pat, true);
     await untilShown(pat, "isometric 1");
-    assert.deepEqual(await stored(pat, `rvtt.view.${run.roomId}`), { v: 1, turns: { [run.sceneId]: 1 } }, "a turn alone is no pick");
+    assert.deepEqual(await stored(pat, `rvtt.view.${run.roomId}`), { v: 1, turns: [[run.sceneId, 1]] }, "a turn alone is no pick");
 
     await reopenRoom(pat);
     await untilShown(pat, "isometric 1");
@@ -543,7 +543,13 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await untilShown(pat, "isometric 3");
     await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
     await untilShown(pat, "isometric 1");
-    assert.deepEqual(await stored(pat, `rvtt.view.${run.roomId}`), { v: 1, turns: { [run.sceneId]: 1, [run.secondId]: 3 } });
+    assert.deepEqual(await stored(pat, `rvtt.view.${run.roomId}`), {
+      v: 1,
+      turns: [
+        [run.sceneId, 1],
+        [run.secondId, 3],
+      ],
+    });
 
     await suggest("Top-down");
     await untilShown(pat, "top-down");
@@ -617,7 +623,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await untilShown(dm, "top-down");
     await dm.keyboard.press("q");
     await dm.locator("[data-toast]").filter({ hasText: "Turning needs the isometric view." }).first().waitFor();
-    assert.deepEqual(await stored(dm, `rvtt.view.${run.roomId}`), { v: 1, pick: "topDown", turns: { [run.sceneId]: 0 } });
+    assert.deepEqual(await stored(dm, `rvtt.view.${run.roomId}`), { v: 1, pick: "topDown", turns: [[run.sceneId, 0]] });
 
     // A Top-down pick keeps Top-down after the builder, so the menu promises no Isometric back (ISO5-ASTRA-03).
     await dm.keyboard.press("b");
@@ -778,8 +784,8 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await view.getByRole("menuitemradio", { name: "Isometric" }).click();
     await menu.getByRole("menuitem", { name: "Turn right", exact: true }).click();
     await shots.take(tv, "iso-display-menu");
-    assert.deepEqual(await stored(tv, `rvtt.displayView.${run.roomId}`), { v: 1, pick: "isometric", turns: { [run.sceneId]: 1 } });
-    assert.deepEqual(await stored(tv, `rvtt.view.${run.roomId}`), { v: 1, pick: "isometric", turns: {} }, "the member's pick untouched");
+    assert.deepEqual(await stored(tv, `rvtt.displayView.${run.roomId}`), { v: 1, pick: "isometric", turns: [[run.sceneId, 1]] });
+    assert.deepEqual(await stored(tv, `rvtt.view.${run.roomId}`), { v: 1, pick: "isometric", turns: {} }, "the member's pick untouched, as this test wrote it");
     await view.getByRole("menuitemradio", { name: "Top-down" }).click();
     assert.equal((await stored(tv, `rvtt.view.${run.roomId}`) as { pick: string }).pick, "isometric", "the display's Top-down is its own");
 

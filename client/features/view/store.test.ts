@@ -19,7 +19,9 @@ Object.assign(globalThis, {
 });
 
 const store = await import("./store.ts");
-const { displayViewKey, FOLLOW_THE_SCENE, isoReady, MAX_TURNS, parseStoredView, pickView, readView, serializeStoredView, settledView, shownView, turnView, viewKey, withPick, withTurn } = store;
+const { displayViewKey, FOLLOW_THE_SCENE, isoReady, MAX_TURNS, parseStoredView, pickView, readView, serializeStoredView, settledView, shownView, turnOf, turnView, viewKey, withPick, withTurn } = store;
+
+const ids = (s: { turns: readonly (readonly [string, Turn])[] }) => s.turns.map(([id]) => id);
 
 /** The module as a reloaded page has it: its own cache, the same storage. */
 let reloads = 0;
@@ -66,13 +68,46 @@ describe("the view store (docs/design-v1-isometric-view.md 7)", () => {
     for (let i = 0; i < MAX_TURNS; i++) s = withTurn(s, `s${i}`, 1);
     s = withTurn(s, "s0", 2);
     s = withTurn(s, "new", 3);
-    const ids = Object.keys(s.turns);
-    assert.equal(ids.length, MAX_TURNS);
-    assert.ok(!ids.includes("s1"), "the oldest went");
-    assert.ok(ids.includes("s0"), "turned again, so kept");
-    assert.deepEqual(ids.slice(-2), ["s0", "new"]);
+    const kept = ids(s);
+    assert.equal(kept.length, MAX_TURNS);
+    assert.ok(!kept.includes("s1"), "the oldest went");
+    assert.ok(kept.includes("s0"), "turned again, so kept");
+    assert.deepEqual(kept.slice(-2), ["s0", "new"]);
     const few = withTurn(withTurn(withTurn(withTurn(FOLLOW_THE_SCENE, "a", 1), "b", 1), "c", 1), "a", 2);
-    assert.deepEqual(Object.keys(few.turns), ["b", "c", "a"], "the newest last, so the oldest goes first");
+    assert.deepEqual(ids(few), ["b", "c", "a"], "the newest last, so the oldest goes first");
+  });
+
+  test("any scene id is a scene's own: none reads the object prototype, and an integer-like id keeps its place (ISO1-OPUS-1)", () => {
+    const ready = true;
+    const odd = ["constructor", "__proto__", "7", "toString", "hasOwnProperty"];
+    const iso = withPick(FOLLOW_THE_SCENE, "isometric");
+    for (const id of odd) {
+      assert.equal(turnOf(iso, id), 0, `${id} unturned`);
+      assert.equal(shownView({ stored: iso, sceneId: id, suggested: undefined, ready }), isometric(0), `${id} shows at turn 0`);
+    }
+    let s = iso;
+    s = withTurn(s, "a", 1);
+    s = withTurn(s, "7", 2);
+    s = withTurn(s, "constructor", 3);
+    s = withTurn(s, "__proto__", 1);
+    assert.deepEqual(ids(s), ["a", "7", "constructor", "__proto__"], "in the order turned");
+    assert.equal(shownView({ stored: s, sceneId: "constructor", suggested: undefined, ready }), isometric(3));
+    assert.equal(shownView({ stored: s, sceneId: "__proto__", suggested: undefined, ready }), isometric(1));
+    assert.equal(shownView({ stored: s, sceneId: "7", suggested: undefined, ready }), isometric(2));
+    const back = parseStoredView(serializeStoredView(s));
+    assert.deepEqual(back, s, "a reload keeps every turn, in order");
+    // At the cap the oldest goes, not the integer-like id the object form would list first.
+    let full: typeof s = withTurn(FOLLOW_THE_SCENE, "first", 1);
+    full = withTurn(full, "7", 2);
+    for (let i = 0; i < MAX_TURNS - 2; i++) full = withTurn(full, `s${i}`, 1);
+    full = withTurn(parseStoredView(serializeStoredView(full)), "new", 3);
+    assert.ok(!ids(full).includes("first"), "the oldest went");
+    assert.equal(turnOf(full, "7"), 2, "the integer-like id stayed");
+    // Turns kept as an object read too, own keys only.
+    assert.deepEqual(parseStoredView('{"v":1,"turns":{"__proto__":2,"constructor":1}}').turns, [
+      ["__proto__", 2],
+      ["constructor", 1],
+    ]);
   });
 
   test("a following device switches only once a gesture in progress ends", () => {
@@ -83,14 +118,18 @@ describe("the view store (docs/design-v1-isometric-view.md 7)", () => {
   });
 
   test("the stored form is the design's, and whatever cannot be read reads as its default", () => {
-    assert.deepEqual(parseStoredView('{"v":1,"pick":"isometric","turns":{"s1":1}}'), { pick: "isometric", turns: { s1: 1 } });
-    assert.equal(serializeStoredView({ pick: "isometric", turns: { s1: 1 } }), '{"v":1,"pick":"isometric","turns":{"s1":1}}');
-    assert.equal(serializeStoredView(FOLLOW_THE_SCENE), '{"v":1,"turns":{}}', "no pick: Follow the scene");
+    assert.deepEqual(parseStoredView('{"v":1,"pick":"isometric","turns":[["s1",1]]}'), { pick: "isometric", turns: [["s1", 1]] });
+    assert.equal(serializeStoredView({ pick: "isometric", turns: [["s1", 1]] }), '{"v":1,"pick":"isometric","turns":[["s1",1]]}');
+    assert.equal(serializeStoredView(FOLLOW_THE_SCENE), '{"v":1,"turns":[]}', "no pick: Follow the scene");
     for (const raw of [null, "", "{", "null", "[]", '{"v":2,"pick":"isometric"}', '"isometric"']) assert.deepEqual(parseStoredView(raw), FOLLOW_THE_SCENE, String(raw));
-    assert.deepEqual(parseStoredView('{"v":1,"pick":"sideways","turns":{"s1":2,"s2":4,"s3":"1","s4":1.5}}'), { pick: null, turns: { s1: 2 } });
-    const many: Record<string, Turn> = {};
-    for (let i = 0; i < 150; i++) many[`s${i}`] = 1;
-    assert.equal(Object.keys(parseStoredView(JSON.stringify({ v: 1, turns: many })).turns).length, MAX_TURNS);
+    assert.deepEqual(parseStoredView('{"v":1,"pick":"sideways","turns":[["s1",2],["s2",4],["s3","1"],["s4",1.5],[5,1],["",1],["s5"],"s6"]}'), { pick: null, turns: [["s1", 2]] });
+    assert.deepEqual(parseStoredView('{"v":1,"turns":[["a",1],["b",2],["a",3]]}').turns, [["b", 2], ["a", 3]], "a scene named twice keeps its last turn, last");
+    assert.deepEqual(parseStoredView('{"v":1,"turns":{"s1":2,"s2":4}}').turns, [["s1", 2]], "turns kept as an object still read");
+    const many: [string, Turn][] = [];
+    for (let i = 0; i < 150; i++) many.push([`s${i}`, 1]);
+    const read = parseStoredView(JSON.stringify({ v: 1, turns: many }));
+    assert.equal(read.turns.length, MAX_TURNS);
+    assert.equal(read.turns[0]?.[0], "s50", "the oldest went");
   });
 
   test("a pick survives a reload, reaches every scene of the room, and leaves the display's and another room's alone", async () => {
@@ -98,7 +137,7 @@ describe("the view store (docs/design-v1-isometric-view.md 7)", () => {
     pickView(viewKey("r1"), "isometric");
     turnView(viewKey("r1"), "s2", 2);
     const page = await reloaded();
-    assert.deepEqual(page.readView(page.viewKey("r1")), { pick: "isometric", turns: { s2: 2 } });
+    assert.deepEqual(page.readView(page.viewKey("r1")), { pick: "isometric", turns: [["s2", 2]] });
     assert.deepEqual(page.readView(page.displayViewKey("r1")), FOLLOW_THE_SCENE, "the display's is apart");
     assert.deepEqual(page.readView(page.viewKey("r2")), FOLLOW_THE_SCENE, "another room is a separate game");
     pickView(displayViewKey("r1"), "topDown");

@@ -379,7 +379,7 @@ describe("the board's view (ISO-5's hooks)", () => {
     const { TOP_DOWN } = await import("../../lib/view.ts");
     assert.equal(isoReady, false);
     assert.equal(isoOffered, false, "no page here sets the test flag");
-    const stored = { v: 1 as const, pick: "isometric" as const, turns: { s1: 2 as const } };
+    const stored = { pick: "isometric" as const, turns: [["s1", 2]] as const };
     assert.equal(shownView({ stored, sceneId: "s1", suggested: "isometric", ready: isoOffered }), TOP_DOWN);
     // The room's choice passes isoOffered as `ready`, and the board draws that choice.
     assert.match(bodyOf(read("features/view/ViewMenu.tsx"), "useViewChoice")!, /ready: isoOffered/);

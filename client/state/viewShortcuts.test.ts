@@ -99,16 +99,19 @@ describe("I, Q and E once Isometric is offered (docs/design-v1-isometric-view.md
   test("E and Q turn this scene's Isometric one step each way, never as a pick, and the scene's turn alone", () => {
     const p = page({ suggested: "isometric" });
     assert.equal(p.hit("e"), "turnRight");
-    assert.deepEqual(readView(p.key), { pick: null, turns: { s1: 1 } }, "Q while following still follows");
+    assert.deepEqual(readView(p.key), { pick: null, turns: [["s1", 1]] }, "Q while following still follows");
     p.hit("e");
     p.hit("q");
     p.hit("q");
     p.hit("q");
-    assert.deepEqual(readView(p.key).turns, { s1: 3 }, "round past 0");
+    assert.deepEqual(readView(p.key).turns, [["s1", 3]], "round past 0");
     p.state.sceneId = "s2";
     pickView(p.key, "isometric");
     p.hit("e");
-    assert.deepEqual(readView(p.key).turns, { s1: 3, s2: 1 });
+    assert.deepEqual(readView(p.key).turns, [
+      ["s1", 3],
+      ["s2", 1],
+    ]);
     assert.deepEqual(p.notes, []);
   });
 
@@ -116,12 +119,12 @@ describe("I, Q and E once Isometric is offered (docs/design-v1-isometric-view.md
     const flat = page();
     assert.equal(flat.hit("q"), "turnLeft");
     assert.equal(flat.hit("e"), "turnRight");
-    assert.deepEqual(readView(flat.key), { pick: null, turns: {} });
+    assert.deepEqual(readView(flat.key), { pick: null, turns: [] });
     assert.deepEqual(flat.notes, ["Turning needs the isometric view.", "Turning needs the isometric view."]);
 
     const building = page({ role: "dm", tool: "build", suggested: "isometric" });
     building.hit("e");
-    assert.deepEqual(readView(building.key).turns, {}, "the board shows Top-down");
+    assert.deepEqual(readView(building.key).turns, [], "the board shows Top-down");
     assert.deepEqual(building.notes, ["The map builder works top-down. Isometric comes back when you switch tools."]);
     building.hit("i");
     assert.equal(readView(building.key).pick, "topDown", "I records the pick");
