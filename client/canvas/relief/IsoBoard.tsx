@@ -24,7 +24,7 @@ import { MapContent, type DrawnMap } from "../layers/MapLayer.tsx";
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
-import { IsoGroundContext, type IsoGround } from "./context.ts";
+import { IsoGroundContext, TreeShownContext, type IsoGround } from "./context.ts";
 import { drawRun, type DrawContext } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { cellLook, CellTints, imageReader } from "./looks.ts";
@@ -285,78 +285,82 @@ function IsoBoardImpl(props: IsoBoardProps) {
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: hidden ? "none" : undefined }} aria-hidden={hidden || undefined}>
-      <Stage
-        key={`ground:${props.stageKey}`}
-        ref={groundStageRef}
-        width={width}
-        height={hidden ? 0 : height + margin}
-        x={cam.x}
-        y={cam.y}
-        scaleX={cam.scale}
-        scaleY={cam.scale}
-        listening={false}
-        style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}
-      >
-        <Layer ref={groundLayerRef} listening={false}>
-          <Group scaleY={groups.outer.scaleY}>
-            <Group rotation={groups.inner.rotation}>
-              <IsoGroundContext.Provider value={groundCtx}>
-                <MapContent scene={scene} variant={props.variant} report={!hidden} onDrawn={onDrawn} />
-                {GROUND_LAYERS.map(({ id, Component }) => (
+      <TreeShownContext.Provider value={!hidden}>
+        <Stage
+          key={`ground:${props.stageKey}`}
+          ref={groundStageRef}
+          width={width}
+          height={hidden ? 0 : height + margin}
+          x={cam.x}
+          y={cam.y}
+          scaleX={cam.scale}
+          scaleY={cam.scale}
+          listening={false}
+          // Hidden, both stages skip the draws their layers' own store subscriptions still ask for, past the memo.
+          visible={!hidden}
+          style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}
+        >
+          <Layer ref={groundLayerRef} listening={false}>
+            <Group scaleY={groups.outer.scaleY}>
+              <Group rotation={groups.inner.rotation}>
+                <IsoGroundContext.Provider value={groundCtx}>
+                  <MapContent scene={scene} variant={props.variant} report={!hidden} onDrawn={onDrawn} />
+                  {GROUND_LAYERS.map(({ id, Component }) => (
+                    <Component key={id} {...props.layerProps} />
+                  ))}
+                  {flat.map((t) => props.renderToken(t, null))}
+                  {props.sightMode ? <SightOverlay scene={scene} mode={props.sightMode} /> : null}
+                  {props.fog ? <FogShape sceneId={scene.id} bounds={scene.bounds} tiles={props.drawnFogTiles} translucent={props.role === "dm"} /> : null}
+                  {GROUND_MARKS.map(({ id, Component }) => (
+                    <Component key={id} {...props.layerProps} />
+                  ))}
+                </IsoGroundContext.Provider>
+              </Group>
+            </Group>
+          </Layer>
+        </Stage>
+        <Stage key={`main:${props.stageKey}`} ref={mainRef} width={width} height={height} x={cam.x} y={cam.y} scaleX={cam.scale} scaleY={cam.scale} visible={!hidden} style={{ ...props.stageStyle, position: "absolute", left: 0, top: 0 }}>
+          <Layer ref={reliefLayerRef}>
+            <Group scaleY={groups.outer.scaleY}>
+              <Group rotation={groups.inner.rotation}>
+                {items.map((item, i) =>
+                  item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!),
+                )}
+                {flat.map((t) => props.renderToken(t, PRESS_ONLY))}
+              </Group>
+            </Group>
+          </Layer>
+          {/* What a local drag moves comes here at its start (ISO-4), so a drag redraws only this layer. */}
+          <Layer>
+            <Group scaleY={groups.outer.scaleY}>
+              <Group rotation={groups.inner.rotation} />
+            </Group>
+          </Layer>
+          <Layer listening={false}>
+            {silhouettes.map((s) => (
+              <Silhouette key={s.id} token={byId.get(s.id)!} turn={turn} standee={standees.find((x) => x.id === s.id)!} scale={cam.scale} />
+            ))}
+            <Group scaleY={groups.outer.scaleY}>
+              <Group rotation={groups.inner.rotation}>
+                <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="ghost" />
+                {MOVING_LAYERS.map(({ id, Component }) => (
                   <Component key={id} {...props.layerProps} />
                 ))}
-                {flat.map((t) => props.renderToken(t, null))}
-                {props.sightMode ? <SightOverlay scene={scene} mode={props.sightMode} /> : null}
-                {props.fog ? <FogShape sceneId={scene.id} bounds={scene.bounds} tiles={props.drawnFogTiles} translucent={props.role === "dm"} /> : null}
-                {GROUND_MARKS.map(({ id, Component }) => (
-                  <Component key={id} {...props.layerProps} />
-                ))}
-              </IsoGroundContext.Provider>
+              </Group>
             </Group>
-          </Group>
-        </Layer>
-      </Stage>
-      <Stage key={`main:${props.stageKey}`} ref={mainRef} width={width} height={height} x={cam.x} y={cam.y} scaleX={cam.scale} scaleY={cam.scale} style={{ ...props.stageStyle, position: "absolute", left: 0, top: 0 }}>
-        <Layer ref={reliefLayerRef}>
-          <Group scaleY={groups.outer.scaleY}>
-            <Group rotation={groups.inner.rotation}>
-              {items.map((item, i) =>
-                item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!),
-              )}
-              {flat.map((t) => props.renderToken(t, PRESS_ONLY))}
-            </Group>
-          </Group>
-        </Layer>
-        {/* What a local drag moves comes here at its start (ISO-4), so a drag redraws only this layer. */}
-        <Layer>
-          <Group scaleY={groups.outer.scaleY}>
-            <Group rotation={groups.inner.rotation} />
-          </Group>
-        </Layer>
-        <Layer listening={false}>
-          {silhouettes.map((s) => (
-            <Silhouette key={s.id} token={byId.get(s.id)!} turn={turn} standee={standees.find((x) => x.id === s.id)!} scale={cam.scale} />
-          ))}
-          <Group scaleY={groups.outer.scaleY}>
-            <Group rotation={groups.inner.rotation}>
-              <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="ghost" />
-              {MOVING_LAYERS.map(({ id, Component }) => (
-                <Component key={id} {...props.layerProps} />
-              ))}
-            </Group>
-          </Group>
-          <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="tag" />
-          <UprightLabels labels={uprightLabels} turn={turn} ground={(x, y) => heights.at(Math.floor(x), Math.floor(y))} />
-          {(["marks", "label", "plate"] as const).flatMap((part) =>
-            props.decorTokens
-              .filter((t) => part !== "plate" || props.hasPlate(t))
-              .flatMap((t) => {
-                const at = decorAt(t, standees, view, cull, props.keepIds);
-                return at ? [props.renderDecor(t, part, at)] : [];
-              }),
-          )}
-        </Layer>
-      </Stage>
+            <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="tag" />
+            <UprightLabels labels={uprightLabels} turn={turn} ground={(x, y) => heights.at(Math.floor(x), Math.floor(y))} />
+            {(["marks", "label", "plate"] as const).flatMap((part) =>
+              props.decorTokens
+                .filter((t) => part !== "plate" || props.hasPlate(t))
+                .flatMap((t) => {
+                  const at = decorAt(t, standees, view, cull, props.keepIds);
+                  return at ? [props.renderDecor(t, part, at)] : [];
+                }),
+            )}
+          </Layer>
+        </Stage>
+      </TreeShownContext.Provider>
     </div>
   );
 }

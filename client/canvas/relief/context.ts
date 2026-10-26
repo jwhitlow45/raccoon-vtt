@@ -21,3 +21,17 @@ export const IsoGroundContext = createContext<IsoGround | null>(null);
 export function useIsoGround(): IsoGround | null {
   return useContext(IsoGroundContext);
 }
+
+/**
+ * Whether the drawing tree a part sits in shows. Both trees stay mounted
+ * once Isometric has shown (ISO-D15), and a memo stops only renders from
+ * above: a part that reads a store itself, as a ghost reads its eased spot
+ * and a shadow its drag's cell, would still work each frame in the hidden
+ * tree. Such a part reads nothing while this is false. True outside both
+ * trees and wherever no tree says otherwise.
+ */
+export const TreeShownContext = createContext(true);
+
+export function useTreeShown(): boolean {
+  return useContext(TreeShownContext);
+}

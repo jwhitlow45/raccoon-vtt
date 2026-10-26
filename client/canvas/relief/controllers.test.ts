@@ -75,3 +75,20 @@ describe("the board's controllers mount once", () => {
     assert.doesNotMatch(rest, /requestAnimationFrame/);
   });
 });
+
+describe("a hidden drawing tree works for nothing each frame", () => {
+  test("each tree's stages hide, and the tree tells the parts that read stores", () => {
+    const stage = read("canvas/Stage.tsx");
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    const topDown = stage.slice(stage.indexOf("<TreeShownContext.Provider value={!isoShown}>"), stage.indexOf("</TreeShownContext.Provider>"));
+    assert.ok(topDown.includes("<Frozen frozen={isoShown}>"), "the provider wraps Top-down's tree");
+    assert.match(topDown, /<Stage[^>]*visible=\{!isoShown\}/);
+    assert.equal(iso.match(/visible=\{!hidden\}/g)?.length, 2, "both isometric stages hide");
+    assert.match(iso, /<TreeShownContext\.Provider value=\{!hidden\}>/);
+  });
+
+  test("ghosts and shadows read no drag while their tree is hidden", () => {
+    assert.match(read("canvas/RemoteDrags.tsx"), /useRoomView\(\(s\) => \(shown \? s\.ephemeral\.drags : NO_DRAGS\)\)/);
+    assert.match(read("canvas/TokenShadow.tsx"), /\(shown \? s\.spots\[token\.id\] : undefined\)/);
+  });
+});

@@ -9,6 +9,9 @@ import type { DragPreview } from "../state/types.ts";
 import { useRoomView } from "../state/view.ts";
 import { dragTag } from "./dragTag.ts";
 import { TokenGhost, type IsoToken } from "./TokenNode.tsx";
+import { useTreeShown } from "./relief/context.ts";
+
+const NO_DRAGS: Readonly<Record<string, DragPreview>> = {};
 
 /**
  * Other members' token drags (design sections 7.6 and 13.3), drawn on the
@@ -42,7 +45,9 @@ export const RemoteDrags = memo(function RemoteDrags(props: {
   /** In the isometric view the ghosts draw in the ground group and their tags in view space, so each place draws its part. */
   part?: "ghost" | "tag";
 }) {
-  const drags = useRoomView((s) => s.ephemeral.drags);
+  // A hidden tree reads no drags, so its ghosts unmount and nothing there works each frame.
+  const shown = useTreeShown();
+  const drags = useRoomView((s) => (shown ? s.ephemeral.drags : NO_DRAGS));
   const members = useRoomView((s) => s.view?.members);
   const byId = useMemo(() => new Map(props.tokens.map((t) => [t.id, t])), [props.tokens]);
   const list = Object.entries(drags);

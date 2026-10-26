@@ -81,6 +81,7 @@ import { fitSlot } from "./fitSlot.ts";
 import { FogShape } from "./FogShape.tsx";
 import { MapLayer } from "./layers/MapLayer.tsx";
 import { createEasedDrags, RemoteDragClock, RemoteDrags } from "./RemoteDrags.tsx";
+import { TreeShownContext } from "./relief/context.ts";
 import { IsoBoard } from "./relief/IsoBoard.tsx";
 import { useTestView } from "./relief/isoTest.ts";
 import { placedTextBoxes } from "./textBoxes.ts";
@@ -1444,47 +1445,51 @@ export function MapStage(props: {
           <RemoteDragClock eased={eased} />
           <TokenInteractionContext.Provider value={interaction}>
             <BoardViewContext.Provider value={boardView}>
-              <Frozen frozen={isoShown}>
-                <Stage
-                  key={stageKey}
-                  ref={stageRef}
-                  width={isoShown ? 0 : size.width}
-                  height={isoShown ? 0 : size.height}
-                  x={cam.x}
-                  y={cam.y}
-                  scaleX={cam.scale}
-                  scaleY={cam.scale}
-                  style={stageStyle}
-                >
-                  <MapLayer scene={scene} variant={variant} />
-                  {BOARD_LAYERS.length > 0 ? (
+              <TreeShownContext.Provider value={!isoShown}>
+                <Frozen frozen={isoShown}>
+                  <Stage
+                    key={stageKey}
+                    ref={stageRef}
+                    width={isoShown ? 0 : size.width}
+                    height={isoShown ? 0 : size.height}
+                    // The memo stops camera renders, not its layers' own store subscriptions, so hidden it skips the draws they still ask for.
+                    visible={!isoShown}
+                    x={cam.x}
+                    y={cam.y}
+                    scaleX={cam.scale}
+                    scaleY={cam.scale}
+                    style={stageStyle}
+                  >
+                    <MapLayer scene={scene} variant={variant} />
+                    {BOARD_LAYERS.length > 0 ? (
+                      <Layer>
+                        {BOARD_LAYERS.map(({ id, Component }) => (
+                          <Component key={id} {...layerProps} />
+                        ))}
+                      </Layer>
+                    ) : null}
                     <Layer>
-                      {BOARD_LAYERS.map(({ id, Component }) => (
-                        <Component key={id} {...layerProps} />
-                      ))}
+                      {below.map((t) => renderToken(t))}
+                      <RemoteDrags tokens={tokens} scale={cam.scale} youId={youId} draggingId={draggingId} eased={eased} />
+                      {overlay ? null : decor}
                     </Layer>
-                  ) : null}
-                  <Layer>
-                    {below.map((t) => renderToken(t))}
-                    <RemoteDrags tokens={tokens} scale={cam.scale} youId={youId} draggingId={draggingId} eased={eased} />
-                    {overlay ? null : decor}
-                  </Layer>
-                  {overlay ? (
-                    <Layer>
-                      {sightMode ? <SightOverlay scene={scene} mode={sightMode} /> : null}
-                      {fog ? <FogShape sceneId={scene.id} bounds={scene.bounds} tiles={drawnFogTiles} translucent={role === "dm"} /> : null}
-                      {above.map((t) => renderToken(t))}
-                      {UNDER_DECOR_LAYERS.map(({ id, Component }) => (
-                        <Component key={id} {...layerProps} />
-                      ))}
-                      {decor}
-                      {OVERLAY_LAYERS.map(({ id, Component }) => (
-                        <Component key={id} {...layerProps} />
-                      ))}
-                    </Layer>
-                  ) : null}
-                </Stage>
-              </Frozen>
+                    {overlay ? (
+                      <Layer>
+                        {sightMode ? <SightOverlay scene={scene} mode={sightMode} /> : null}
+                        {fog ? <FogShape sceneId={scene.id} bounds={scene.bounds} tiles={drawnFogTiles} translucent={role === "dm"} /> : null}
+                        {above.map((t) => renderToken(t))}
+                        {UNDER_DECOR_LAYERS.map(({ id, Component }) => (
+                          <Component key={id} {...layerProps} />
+                        ))}
+                        {decor}
+                        {OVERLAY_LAYERS.map(({ id, Component }) => (
+                          <Component key={id} {...layerProps} />
+                        ))}
+                      </Layer>
+                    ) : null}
+                  </Stage>
+                </Frozen>
+              </TreeShownContext.Provider>
               {isoEverRef.current ? (
                 <IsoBoard
                   hidden={!isoShown}
