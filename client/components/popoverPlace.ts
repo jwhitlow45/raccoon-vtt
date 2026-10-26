@@ -85,6 +85,13 @@ export function needsPlace(last: PlaceFrame | null, next: PlaceFrame): boolean {
   return !sameRect(last.anchor, next.anchor) || !sameRect(last.bound, next.bound) || !sameRect(last.rise, next.rise);
 }
 
+/** `rect` cut to what shows above the on-screen keyboard (lib/keyboardInset.ts visibleSpan), so a popover never opens under it. Never inverted: a rect wholly hidden keeps its top as its bottom. */
+export function clipToVisible(rect: Rect, visible: { top: number; bottom: number } | null): Rect {
+  if (!visible) return rect;
+  const top = Math.max(rect.top, visible.top);
+  return { ...rect, top, bottom: Math.max(top, Math.min(rect.bottom, visible.bottom)) };
+}
+
 /** A client rectangle in the chrome's own px. */
 export function chromeRect(r: { left: number; top: number; right: number; bottom: number }, scale: number): Rect {
   return { left: r.left / scale, top: r.top / scale, right: r.right / scale, bottom: r.bottom / scale };

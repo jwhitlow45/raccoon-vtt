@@ -16,12 +16,13 @@ import {
 import { ScrollForMore } from "../canvas/TokenActionBar.tsx";
 import { subscribeUiScale, uiScale } from "../features/device/settings.ts";
 import { useBackClose } from "../lib/backClose.ts";
+import { keepFocusInView, readKeyboardView, visibleSpan } from "../lib/keyboardInset.ts";
 import { stopIndex, tabStops, type RadioMark } from "../lib/modalDialog.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
 import { isTextField } from "../state/shortcuts.ts";
 import { sectionLabelLook } from "./Panel.tsx";
-import { chromeRect, needsPlace, popoverPlace, type PlaceFrame, type PopoverSide, type Rect } from "./popoverPlace.ts";
+import { chromeRect, clipToVisible, needsPlace, popoverPlace, type PlaceFrame, type PopoverSide, type Rect } from "./popoverPlace.ts";
 import {
   closesAfterTab,
   escapeCloses,
@@ -315,7 +316,9 @@ function OpenPopover(props: PopoverProps) {
         return;
       }
       const scale = uiScale();
-      const next: PlaceFrame = { anchor: chromeRect(a, scale), bound: resolve(p.bound), rise: p.rise ? resolve(p.rise) : null };
+      // With the on-screen keyboard open it opens in what shows above it, placed again on the visual viewport's resize below.
+      const visible = visibleSpan(readKeyboardView(), scale);
+      const next: PlaceFrame = { anchor: chromeRect(a, scale), bound: clipToVisible(resolve(p.bound), visible), rise: p.rise ? clipToVisible(resolve(p.rise), visible) : null };
       const gap = typeof p.gap === "function" ? p.gap(next.anchor) : (p.gap ?? theme.layout.popover.gap);
       if (!force && !needsPlace(frame.current, next)) return;
       frame.current = next;
@@ -336,6 +339,8 @@ function OpenPopover(props: PopoverProps) {
       });
       Object.assign(box.style, { maxWidth: "", minWidth: "", left: `${at.left}px`, top: `${at.top}px`, width: `${at.width}px`, height: `${at.height}px` });
       box.scrollTop = scrolled;
+      // A field inside that the keyboard's coming made the box shorter under stays in view (lib/keyboardInset.ts).
+      if (visible) keepFocusInView(box, theme.space(2));
       updateMore();
     },
     [updateMore],

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { mousePans } from "../lib/gestures.ts";
 import { RoomScope } from "../state/scope.ts";
-import { chromeRect, needsPlace, popoverPlace, type PlaceInput, type Rect } from "./popoverPlace.ts";
+import { visibleSpan } from "../lib/keyboardInset.ts";
+import { chromeRect, clipToVisible, needsPlace, popoverPlace, type PlaceInput, type Rect } from "./popoverPlace.ts";
 import {
   closesAfterTab,
   dismissedBy,
@@ -128,6 +129,34 @@ describe("where a popover stands", () => {
 
   test("measured rectangles are taken in the chrome's own px", () => {
     assert.deepEqual(chromeRect({ left: 200, top: 100, right: 400, bottom: 200 }, 2), rect(100, 50, 200, 100));
+  });
+});
+
+describe("a popover over the on-screen keyboard (lib/keyboardInset.ts)", () => {
+  // A 390 x 844 phone, the bars at 52 and 784, the keyboard hiding from 544 down.
+  const bound = rect(0, 52, 390, 784);
+
+  test("its bound and rise region end where the keyboard starts", () => {
+    assert.deepEqual(clipToVisible(bound, { top: 0, bottom: 544 }), rect(0, 52, 390, 544));
+  });
+
+  test("a page panned up keeps it under the visible area's top", () => {
+    assert.deepEqual(clipToVisible(bound, { top: 120, bottom: 664 }), rect(0, 120, 390, 664));
+  });
+
+  test("no keyboard, or one below the bound, changes nothing", () => {
+    assert.equal(clipToVisible(bound, null), bound);
+    assert.deepEqual(clipToVisible(bound, { top: 0, bottom: 800 }), bound);
+  });
+
+  test("a bound wholly under the keyboard is empty, never inverted", () => {
+    assert.deepEqual(clipToVisible(rect(0, 600, 390, 784), { top: 0, bottom: 544 }), rect(0, 600, 390, 600));
+  });
+
+  test("the visible span comes in the chrome's own px at the interface size", () => {
+    assert.deepEqual(visibleSpan({ top: 0, height: 544, inset: 300 }, 1), { top: 0, bottom: 544 });
+    assert.deepEqual(visibleSpan({ top: 130, height: 520, inset: 194 }, 1.3), { top: 100, bottom: 500 });
+    assert.equal(visibleSpan(null, 1.3), null);
   });
 });
 

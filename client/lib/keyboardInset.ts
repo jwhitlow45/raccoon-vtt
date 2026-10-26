@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObject } from "react";
 import { effectiveZoom } from "../features/device/layout.ts";
+import { isCoarsePointer } from "./device.ts";
 
 /*
  * The on-screen keyboard's place, for what stands at the screen's foot
@@ -63,13 +64,14 @@ let current: KeyboardView | null = null;
 const listeners = new Set<() => void>();
 let detach: (() => void) | null = null;
 
-function readView(): KeyboardView | null {
+/** The keyboard's view read afresh from the page, for a surface that places itself on an event of its own, before the store may have heard it. */
+export function readKeyboardView(): KeyboardView | null {
   if (typeof window === "undefined") return null;
   return keyboardView({ layoutHeight: window.innerHeight, viewport: window.visualViewport ?? null, field: opensKeyboard(document.activeElement as FocusTarget | null) });
 }
 
 function refresh(): void {
-  const next = readView();
+  const next = readKeyboardView();
   if (sameView(next, current)) return;
   current = next;
   for (const listener of [...listeners]) listener();
@@ -97,7 +99,7 @@ export function subscribeKeyboard(listener: () => void): () => void {
   listeners.add(listener);
   if (!detach) {
     detach = attach();
-    current = readView();
+    current = readKeyboardView();
   }
   return () => {
     listeners.delete(listener);
@@ -109,7 +111,7 @@ export function subscribeKeyboard(listener: () => void): () => void {
 
 /** The keyboard's view now, as subscribeKeyboard last heard it, or read afresh with no one subscribed. */
 export function keyboardViewNow(): KeyboardView | null {
-  return detach ? current : readView();
+  return detach ? current : readKeyboardView();
 }
 
 /** The keyboard's view, rendering again as it changes. Null where no keyboard hides any of the page. */
@@ -119,6 +121,11 @@ export function useKeyboardView(): KeyboardView | null {
 
 /** A box's top and bottom on the screen, in CSS px. */
 export type Span = { top: number; bottom: number };
+
+/** What of the page shows above the keyboard, from the layout viewport's top, in px at the interface size `scale`. Null with no keyboard. */
+export function visibleSpan(view: KeyboardView | null, scale: number): Span | null {
+  return view ? { top: view.top / scale, bottom: (view.top + view.height) / scale } : null;
+}
 
 /**
  * How far to scroll a pane's body so a focused field shows with what goes
@@ -153,7 +160,8 @@ export function useFieldInView(scroller: RefObject<HTMLElement | null>, view: Ke
   const following = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const el = scroller.current;
-    if (!el) return;
+    // A computer opens no on-screen keyboard, and its browser shows a focused field itself.
+    if (!el || !isCoarsePointer()) return;
     const onFocusIn = (e: FocusEvent) => {
       const target = e.target instanceof HTMLElement && opensKeyboard(e.target) ? e.target : null;
       following.current = target;
@@ -195,6 +203,73 @@ export function useFieldInView(scroller: RefObject<HTMLElement | null>, view: Ke
     const field = following.current;
     if (el && field?.isConnected && el.contains(field)) keepInView(el, field, margin);
   }, [scroller, view, margin]);
+}
+
+/**
+ * useFieldInView for every surface at once, mounted once by the room: the
+ * field with focus, wherever it is, kept in view in the nearest box that
+ * scrolls it, two frames after each change of the keyboard's view or the
+ * page's size, once the surfaces have laid out for it. It serves the
+ * surfaces that keep no scroller of their own here, such as the token bar
+ * and its drawers, a map pane, a roll card at the foot or an alert card.
+ * Where a sheet or a dialog also keeps the field, the second pass finds it
+ * in view and moves nothing. Unlike useFieldInView it does nothing as a
+ * field takes focus: with no keyboard up nothing covers the field, and the
+ * token bar's strip, scrolled by the viewer while a refusal shows under
+ * its HP entry, moved back under them (e2e/barrest.e2e.ts br-f-16). A
+ * touch drag or a wheel anywhere stops it until a field takes focus again.
+ */
+export function useFocusedFieldInView(margin: number): void {
+  useEffect(() => {
+    // A computer opens no on-screen keyboard, and its browser shows a focused field itself.
+    if (!isCoarsePointer()) return;
+    let following: HTMLElement | null = null;
+    let frame = 0;
+    const keep = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(() => {
+          const field = following;
+          if (!field?.isConnected || document.activeElement !== field) return;
+          const scroller = scrollerOf(field);
+          if (scroller) keepInView(scroller, field, margin);
+        });
+      });
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      following = e.target instanceof HTMLElement && opensKeyboard(e.target) ? e.target : null;
+    };
+    const onUserScroll = () => {
+      following = null;
+    };
+    const stop = subscribeKeyboard(keep);
+    document.addEventListener("focusin", onFocusIn, true);
+    document.addEventListener("touchmove", onUserScroll, { capture: true, passive: true });
+    document.addEventListener("wheel", onUserScroll, { capture: true, passive: true });
+    window.addEventListener("resize", keep);
+    return () => {
+      stop();
+      cancelAnimationFrame(frame);
+      document.removeEventListener("focusin", onFocusIn, true);
+      document.removeEventListener("touchmove", onUserScroll, true);
+      document.removeEventListener("wheel", onUserScroll, true);
+      window.removeEventListener("resize", keep);
+    };
+  }, [margin]);
+}
+
+/** The nearest box around `el` that scrolls up and down, and has more than it shows. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (p.scrollHeight > p.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(p).overflowY)) return p;
+  }
+  return null;
+}
+
+/** keepInView for the field that has focus now, where it opens a keyboard and is inside `scroller`: for a surface that lays itself out on an event of its own, such as a popover placed again. */
+export function keepFocusInView(scroller: HTMLElement, margin: number): void {
+  const field = document.activeElement;
+  if (field instanceof HTMLElement && field !== scroller && scroller.contains(field) && opensKeyboard(field)) keepInView(scroller, field, margin);
 }
 
 function keepInView(scroller: HTMLElement, field: HTMLElement, margin: number): void {
