@@ -1973,9 +1973,10 @@ export function lineReach(state: RoomState, entry: Pick<LogEntry, "kind" | "data
 }
 
 /**
- * lineReach for every line of one room: the players' reads share one fog
- * and sight reader and one context each, so an op of many lines judges
- * them all against the same room for about the cost of reading each.
+ * lineReach for every line of one room: each player's read keeps one
+ * context, with that player's own fog and sight reader, across every line,
+ * so an op of many lines judges them all against the same room for about
+ * the cost of reading each.
  */
 export function lineReader(state: RoomState): (entry: Pick<LogEntry, "kind" | "data">) => LineReach {
   // Each reader with their own sight and fog, which on a per-player scene are theirs alone, and any player the shared

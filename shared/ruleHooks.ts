@@ -78,9 +78,9 @@ export type VisionRules = {
   partySight(state: RoomState, sceneId: SceneId): PartySight;
   /**
    * On the server, for a per-player scene whose vision is on
-   * (docs/design-v1-per-player-vision.md 6.1): with a member, what that
-   * sight holder sees, the sources marked to share sight with the party and
-   * the sources they own, among the union's sources; with null, the shared
+   * (docs/design-v1-per-player-vision.md 6.1). With a member, what that
+   * sight holder sees: the sources marked to share sight with the party and
+   * the sources they own, among the union's sources. With null, the shared
    * sight alone, which every other viewer has. The union's own source cap
    * and order choose the sources, so each answer lies within `partySight`.
    * Viewers with the same sources may share one answer, and its tiles may
