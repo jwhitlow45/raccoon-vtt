@@ -147,10 +147,10 @@ export type ControllerDef = { id: string; Component: ComponentType<ControllerPro
 
 /** Every canvas renderer, one per line. */
 export const LAYERS: readonly LayerDef[] = [
-  { id: "drawings", layer: "board", order: 20, iso: "ground", Component: DrawingLayer },
-  { id: "templates", layer: "board", order: 30, iso: "off", Component: TemplateLayer },
-  { id: "rangeRings", layer: "overlay", order: 6, iso: "ground", Component: RangeRingLayer },
-  { id: "turnStart", layer: "overlay", order: 8, iso: "ground", Component: TurnStartLayer },
+  { id: "drawings", layer: "board", order: 20, iso: ["ground", "moving", "upright"], Component: DrawingLayer },
+  { id: "templates", layer: "board", order: 30, iso: ["ground", "upright"], Component: TemplateLayer },
+  { id: "rangeRings", layer: "overlay", order: 6, iso: ["ground", "upright"], Component: RangeRingLayer },
+  { id: "turnStart", layer: "overlay", order: 8, iso: ["ground", "upright"], Component: TurnStartLayer },
   { id: "rulers", layer: "overlay", order: 10, iso: "moving", Component: RulerLayer },
   { id: "pings", layer: "overlay", order: 20, iso: "moving", Component: PingLayer },
   { id: "laser", layer: "overlay", order: 30, iso: "moving", Component: LaserLayer },
@@ -165,8 +165,8 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "movement", layer: "overlay", order: 9, iso: "moving", Component: MoveLayer },
   { id: "outlinerFlash", layer: "overlay", order: 95, iso: "moving", Component: FlashLayer },
   { id: "pins", layer: "overlay", order: 15, iso: "upright", Component: PinLayer },
-  { id: "tethers", layer: "board", order: 40, iso: "off", Component: TetherLayer },
-  { id: "traps", layer: "board", order: 35, iso: "ground", Component: TrapLayer },
+  { id: "tethers", layer: "board", order: 40, iso: "ground", Component: TetherLayer },
+  { id: "traps", layer: "board", order: 35, iso: ["ground", "upright"], Component: TrapLayer },
 ];
 
 /** Everything that runs effects for the board and draws nothing, mounted once outside both drawing trees. */

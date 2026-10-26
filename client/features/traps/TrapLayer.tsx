@@ -1,20 +1,21 @@
 import type Konva from "konva";
 import { memo, useMemo, type ReactNode } from "react";
 import { Circle, Ellipse, Group, Line, Path, Rect, Shape } from "react-konva";
-import { useStore } from "zustand";
 import type { BuildChunk, CellRect, RoomSettings, Scene, Trap, TrapRig } from "#shared/model.ts";
 import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
-import { useTreeShownView } from "../../canvas/relief/context.ts";
+import { MarkPill } from "../../canvas/IsoParts.tsx";
+import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
+import { markStands, pillStands } from "../../canvas/markStand.ts";
+import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
-import { useRoomView } from "../../state/view.ts";
 import { contextFrom } from "../areas/coverage.ts";
 import { OutlineShape } from "../areas/draw.tsx";
 import { areaOutline } from "../areas/placement.ts";
 import { findDoor } from "../doors/doors.ts";
 import type { LayerProps } from "../layers.ts";
-import { Pill } from "../measure/Pill.tsx";
+import { BADGE_PX, trapBadgeBox } from "./badge.ts";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
 import { boxCenter, trapNameShown, zoneBox, type SeenTrap } from "./rules.ts";
 import { trapSlot, type TrapDraft } from "./store.ts";
@@ -23,8 +24,6 @@ const NO_TRAPS: Readonly<Record<string, Trap>> = {};
 const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 const NO_TOKENS = {};
 
-/** The badge's size on screen, in pixels: the wolf trap in a disc. */
-const BADGE_PX = 20;
 const ICON_PX = 13;
 /** Hatching's spacing, in screen pixels. */
 const HATCH_PX = 7;
@@ -42,17 +41,23 @@ const HATCH_PX = 7;
  * color, "Disarmed" once the DM disarms it, and never whether it is armed.
  * With the Trap tool, the zone being drawn shows too. Nothing animates: it
  * redraws when a trap, the build or the zoom changes.
+ *
+ * In Isometric the zones lie on the ground stage, and each badge and name
+ * stands on the overlay by the stand rule, else lies flat under the fog
+ * (docs/design-v1-isometric-view.md 5.2 and 5.3).
  */
 export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
   // Both trees publish a trap's name pill under one key, so a hidden tree holds its traps with the build they lie on and never sends a pill placed on an old build.
   const traps = useTreeShownView((s) => s.view?.traps ?? NO_TRAPS);
   const chunks = useTreeShownView((s) => s.view?.buildChunks ?? NO_CHUNKS);
-  const settings = useRoomView((s) => s.view?.meta.settings);
-  const tool = useRoomView((s) => s.local.tool);
+  const settings = useTreeShownView((s) => s.view?.meta.settings);
+  const tool = useTreeShownView((s) => s.local.tool);
   const store = useScoped(trapSlot).store;
-  const draft = useStore(store, (s) => s.draft);
-  const paneId = useStore(store, (s) => s.paneId);
+  const draft = useTreeShownStore(store, (s) => s.draft);
+  const paneId = useTreeShownStore(store, (s) => s.paneId);
   const dm = props.role === "dm";
+  const iso = useIsoGround();
+  const ground = iso === null || iso.place === "ground";
   const list = useMemo(
     () =>
       Object.values(traps)
@@ -64,10 +69,10 @@ export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
   return (
     <Group listening={false}>
       {list.map((t) => (
-        <TrapMark key={t.id} trap={t} chunks={chunks} scale={props.scale} dm={dm} />
+        <TrapMark key={t.id} trap={t} chunks={chunks} scale={props.scale} dm={dm} iso={iso} />
       ))}
-      {open?.rig && settings ? <TrapHits trap={open} rig={open.rig} chunks={chunks} scene={props.scene} settings={settings} /> : null}
-      {dm && draft ? <Draft draft={draft} scale={props.scale} /> : null}
+      {ground && open?.rig && settings ? <TrapHits trap={open} rig={open.rig} chunks={chunks} scene={props.scene} settings={settings} /> : null}
+      {ground && dm && draft ? <Draft draft={draft} scale={props.scale} /> : null}
     </Group>
   );
 });
@@ -108,7 +113,7 @@ export function trapNamePill(trap: Trap, chunks: Readonly<Record<string, BuildCh
 
 const NO_PILLS: readonly PillSpec[] = [];
 
-const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean }) {
+const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null }) {
   const { trap, scale, dm } = props;
   const seen = trap as SeenTrap;
   const look = lookOf(seen, dm);
@@ -140,11 +145,18 @@ const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Re
     if (door) badge = door.mid;
   }
   if (!badge) return null;
+  const found = dm && trap.found;
+  const iso = props.iso;
+  // Top-down draws the badge and name under the fog, so each stands only where every sub-cell under it is revealed (5.2).
+  const badgeHere = drawsHere(iso, iso ? markStands(iso.fog, trapBadgeBox(badge, scale, found)) : true);
+  const nameHere = name !== null && drawsHere(iso, iso ? pillStands(iso.fog, { ...name, scale }) : true);
+  const badgeAt = iso?.place === "upright" ? viewPointOf(iso, badge) : badge;
   return (
     <Group opacity={dm && trap.state === "sprung" ? 0.8 : 1}>
-      {body}
-      <Badge x={badge.x} y={badge.y} scale={scale} look={look} found={dm && trap.found} />
-      {name ? <Pill {...name} scale={scale} color={look.color} /> : null}
+      {iso === null || iso.place === "ground" ? body : null}
+      {/* Flat on the ground stage in cells, or standing on the overlay in view units. */}
+      {badgeHere ? <Badge x={badgeAt.x} y={badgeAt.y} scale={scale} look={look} found={found} /> : null}
+      {nameHere ? <MarkPill {...name} scale={scale} color={look.color} /> : null}
     </Group>
   );
 });

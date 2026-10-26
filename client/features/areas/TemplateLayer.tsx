@@ -1,18 +1,23 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import { Group } from "react-konva";
-import type { AreaTemplate, RoomState } from "#shared/model.ts";
+import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
 import type { AreaContext } from "#shared/rules/aoe.ts";
-import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { useBoardPillsExcept, usePublishPills } from "../../canvas/boardView.ts";
+import { useDraggedIds } from "../../canvas/draggedIds.ts";
+import { Lift, MarkPill } from "../../canvas/IsoParts.tsx";
+import { drawsHere } from "../../canvas/isoPlace.ts";
+import { pillStands } from "../../canvas/markStand.ts";
 import { measureLabel } from "../../canvas/measureText.ts";
+import type { FogView } from "../../canvas/relief/fogView.ts";
+import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import { Pill, pillGeometry, pillReach } from "../measure/Pill.tsx";
 import { areaTitle } from "./labels.ts";
 import { cachedCoverage, caughtTokens, contextFrom } from "./coverage.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
 import { areaLabelSpot, foggedCells, tokenBoxes, type Box } from "./labelSpot.ts";
 import { areaOutline, liveOrigin, outlineBottom, outlineTop, type Outline } from "./placement.ts";
-import { samplesNow, useAreaTool } from "./store.ts";
+import { samplesNow, useAreaScope } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
 
 /**
@@ -27,6 +32,12 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  * dragged, here or on another device, counts at the cell it would drop on
  * (useLiveTokens.ts), so an aura and its rings follow it during the drag.
  *
+ * In Isometric an area lies on the ground stage, and its name stands on the
+ * overlay by the stand rule, else lies flat under the fog with the area
+ * (docs/design-v1-isometric-view.md 5.2 and 5.3). An area attached to a
+ * token being dragged leaves the ground for the drag's moving marks until
+ * the drop (canvas/DragMarks.tsx), so a drag never redraws the ground.
+ *
  * It only draws. The reminders that an area hits a creature again, and
  * the count of selection changes for the area tool, run in the board's
  * area controller (AreaController.ts), mounted once outside both drawing
@@ -34,18 +45,63 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  */
 
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
+const EMPTY_TOKENS: RoomState["tokens"] = {};
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
 const EMPTY_TILES: RoomState["fogTiles"] = {};
 
 export const TemplateLayer = memo(function TemplateLayer(props: LayerProps) {
-  const { scene, scale, role, fog } = props;
-  const templates = useRoomView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
-  // Tokens being dragged count where they would drop, so an aura follows its token during the drag.
-  const { tokens, moving } = useLiveTokens();
-  const buildChunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const settings = useRoomView((s) => s.view?.meta.settings);
+  const { scene, scale, role } = props;
+  const templates = useTreeShownView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
   // The template being moved or turned is drawn by the preview layer until its update lands.
-  const editing = useAreaTool((s) => (s.live ? s.selectedId : null));
+  const editing = useTreeShownStore(useAreaScope().store, (s) => (s.live ? s.selectedId : null));
+  const iso = useIsoGround();
+  // In Isometric what moves with a dragged token draws as the drag's moving marks instead (canvas/DragMarks.tsx).
+  const dragged = useDraggedIds();
+  const list = useMemo(
+    () => Object.values(templates).filter((t): t is AreaTemplate => !!t && t.sceneId === scene.id && t.id !== editing && !(iso && t.attachedTo !== undefined && dragged.all.has(t.attachedTo))),
+    [templates, scene.id, editing, iso, dragged],
+  );
+  // In Isometric the still areas read where tokens stand, not where drags would drop them, so a drag changes nothing on the ground stage.
+  const areas = useAreaParts(props, iso === null ? "live" : "stored", iso ? dragged.all : null);
+  if (!areas || list.length === 0) return null;
+  const mode = iso ? iso.place : "topDown";
+  return (
+    <Group listening={false}>
+      {list.map((t) => (
+        <PlacedArea key={t.id} template={t} {...areas} scale={scale} sceneId={scene.id} dm={role === "dm"} mode={mode} fog={iso?.fog ?? null} />
+      ))}
+    </Group>
+  );
+});
+
+/**
+ * What every placed area reads to draw and to place its name: the coverage
+ * context, and where names keep off. Null until the room's settings
+ * arrive. `tokens` "live" counts tokens being dragged where they would
+ * drop, so an aura and its rings follow the drag, as Top-down draws them.
+ * "stored" reads where they stand, sampled finely, for the isometric
+ * ground stage, which a drag must not redraw: there the dragged tokens'
+ * own rings in still areas wait for the drop (`hide`), and their attached
+ * areas move with the drag (canvas/DragMarks.tsx).
+ */
+export function useAreaParts(
+  props: Pick<LayerProps, "scene" | "scale" | "role" | "fog">,
+  which: "live" | "stored",
+  hide: ReadonlySet<string> | null,
+): {
+  ctx: AreaContext;
+  avoid: readonly Box[];
+  fogged: ((cx: number, cy: number) => boolean) | undefined;
+} | null {
+  const { scene, scale, role, fog } = props;
+  // Tokens being dragged count where they would drop, so an aura follows its token during the drag.
+  const live = useLiveTokens();
+  const stored = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
+  const shown = which === "live" ? live.tokens : stored;
+  const moving = which === "live" && live.moving;
+  const tokens = useMemo(() => (hide && hide.size > 0 ? withoutTokens(shown, hide) : shown), [shown, hide]);
+  const buildChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
+  const settings = useTreeShownView((s) => s.view?.meta.settings);
   const ctx = useMemo(
     () => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, samplesNow(moving)) : null),
     [tokens, buildChunks, settings, scene, moving],
@@ -66,19 +122,16 @@ export const TemplateLayer = memo(function TemplateLayer(props: LayerProps) {
     [tokens, scene.id, scale, others],
   );
   // A player's names keep off the opaque fog as well, which would cut them off. The DM sees through it.
-  const fogTiles = useRoomView((s) => s.view?.fogTiles ?? EMPTY_TILES);
+  const fogTiles = useTreeShownView((s) => s.view?.fogTiles ?? EMPTY_TILES);
   const fogged = useMemo(() => (role === "player" && fog ? foggedCells(fogTiles, scene.id, scene.bounds) : undefined), [role, fog, fogTiles, scene.id, scene.bounds]);
-  if (!ctx) return null;
-  const list = Object.values(templates).filter((t): t is AreaTemplate => !!t && t.sceneId === scene.id && t.id !== editing);
-  if (list.length === 0) return null;
-  return (
-    <Group listening={false}>
-      {list.map((t) => (
-        <PlacedArea key={t.id} template={t} ctx={ctx} scale={scale} sceneId={scene.id} dm={role === "dm"} avoid={avoid} fogged={fogged} />
-      ))}
-    </Group>
-  );
-});
+  return useMemo(() => (ctx ? { ctx, avoid, fogged } : null), [ctx, avoid, fogged]);
+}
+
+function withoutTokens(tokens: Readonly<Record<string, Token | undefined>>, hide: ReadonlySet<string>): Record<string, Token> {
+  const out: Record<string, Token> = {};
+  for (const [id, t] of Object.entries(tokens)) if (t && !hide.has(id)) out[id] = t;
+  return out;
+}
 
 /**
  * The room an area's name takes for areaLabelSpot: its pill with the
@@ -117,7 +170,17 @@ function outlineEdge(o: Outline, dx: number, side: "top" | "bottom"): { x: numbe
   return { x: mid.x + dx, y: mid.y };
 }
 
-function PlacedArea(props: {
+/**
+ * Where a placed area draws: as Top-down draws it, on the isometric
+ * ground stage, its standing name on the overlay, or as a dragged token's
+ * moving mark (canvas/DragMarks.tsx).
+ */
+export type AreaMode = "topDown" | "ground" | "upright" | "moving";
+
+/** Shading is cached per coverage key, so a memo keeps a still area's shape, and the ground stage, from redrawing as a drag crosses cells. */
+const StillShading = memo(Shading);
+
+export const PlacedArea = memo(function PlacedArea(props: {
   template: AreaTemplate;
   ctx: AreaContext;
   scale: number;
@@ -125,6 +188,11 @@ function PlacedArea(props: {
   dm: boolean;
   avoid: readonly Box[];
   fogged: ((cx: number, cy: number) => boolean) | undefined;
+  mode: AreaMode;
+  /** This viewer's fog for the stand rule, in Isometric. */
+  fog: FogView | null;
+  /** In the moving mode: the drawn height it moves at, and the revealed sub-cells it shows in, null when it shows whole. */
+  moving?: { z: number; clip: readonly { x: number; y: number; w: number; h: number }[] | null };
 }) {
   const { template: t, ctx, scale } = props;
   const cov = cachedCoverage(t, ctx);
@@ -151,17 +219,60 @@ function PlacedArea(props: {
     () => ({ x: spot.x, y: spot.y, name, size: "map" as const, small: true, maxLines, above, below: !above }),
     [spot.x, spot.y, name, maxLines, above],
   );
-  // Token labels keep off the name (useBoardText.ts).
+  // Token labels keep off the name (useBoardText.ts). Every place it draws in publishes the same pill under its one key.
   usePublishPills(`area:${t.id}`, useMemo(() => [spec], [spec]));
-  return (
-    <Group opacity={hidden ? 0.6 : 1}>
-      <Shading cov={cov} color={t.color} opacity={0.26} />
+  const iso = useIsoGround();
+  const shapes = (
+    <>
+      <StillShading cov={cov} color={t.color} opacity={0.26} />
       {outline ? <OutlineShape outline={outline} color={t.color} widthPx={2} dash={hidden ? [6, 4] : undefined} /> : null}
       {caught.map((id) => {
         const token = ctx.tokens?.[id];
         return token ? <TokenRing key={id} token={token} color={t.color} scale={scale} widthPx={3} gapPx={3} /> : null;
       })}
-      <Pill {...spec} scale={scale} color={t.color} />
+    </>
+  );
+  if (props.mode === "topDown") {
+    return (
+      <Group opacity={hidden ? 0.6 : 1}>
+        {shapes}
+        <Pill {...spec} scale={scale} color={t.color} />
+      </Group>
+    );
+  }
+  // Top-down draws the name under the fog, so it stands only where every sub-cell its box can reach is revealed (5.2).
+  const stands = props.fog ? pillStands(props.fog, { ...spec, scale }) : true;
+  const pill = <MarkPill {...spec} z={props.moving?.z ?? (iso ? iso.ground(spec.x, spec.y) : 0)} scale={scale} color={t.color} />;
+  if (props.mode === "moving") {
+    const clip = props.moving?.clip ?? null;
+    return (
+      <Group opacity={hidden ? 0.6 : 1}>
+        <Lift z={props.moving?.z ?? 0}>{clip ? <Clipped rects={clip}>{shapes}</Clipped> : shapes}</Lift>
+        {/* A name that does not stand is left out while it moves: it cannot lie under the fog, and shows less, never more. */}
+        {stands ? pill : null}
+      </Group>
+    );
+  }
+  return (
+    <Group opacity={hidden ? 0.6 : 1}>
+      {props.mode === "ground" ? shapes : null}
+      {drawsHere({ place: props.mode }, stands) ? pill : null}
+    </Group>
+  );
+});
+
+/** Children shown only inside `rects`, in cells: an aura moving over fog shows only in the revealed sub-cells (canvas/markStand.ts). */
+export function Clipped(props: { rects: readonly { x: number; y: number; w: number; h: number }[]; children: ReactNode }) {
+  const { rects } = props;
+  return (
+    <Group
+      listening={false}
+      clipFunc={(ctx) => {
+        ctx.beginPath();
+        for (const r of rects) ctx.rect(r.x, r.y, r.w, r.h);
+      }}
+    >
+      {props.children}
     </Group>
   );
 }

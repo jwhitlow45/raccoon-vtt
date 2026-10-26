@@ -3,17 +3,18 @@ import { Circle, Ellipse, Group, Line } from "react-konva";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { halvedAt, speedAreas } from "#shared/rules/walkWorld.ts";
 import { usePublishPills } from "../../canvas/boardView.ts";
+import { MarkPill } from "../../canvas/IsoParts.tsx";
+import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { measureLabel } from "../../canvas/measureText.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { overlaps, type Box } from "../../lib/boardText.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomView } from "../../state/view.ts";
 import { riderLine, turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
 import { speedsOf } from "../movement/preview.ts";
 import { halvedSpeeds, movementText, speedsLeft, trailSegments, turnTrail, type MovingToken, type TurnTrail } from "./movement.ts";
-import { Pill, pillPlace } from "./Pill.tsx";
+import { pillPlace } from "./Pill.tsx";
 import type { DistanceRules } from "./ruler.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 
@@ -47,6 +48,10 @@ import { SQUARES } from "#shared/rules/grid.ts";
  * speeds, with a second line for the rider's own feet when they are not
  * 0. The rider's own trail still draws, without a pill. Until the mount
  * has moved, the rider's pill reads as before.
+ *
+ * In Isometric the trail lies on the ground stage, above the fog, and the
+ * pill stands on the overlay at the drawn height under its point, since
+ * Top-down draws it above the fog (docs/design-v1-isometric-view.md 5.3).
  */
 
 const LINE_PX = 2.5;
@@ -56,27 +61,27 @@ const DOT_PX = 3.5;
 const UNCOUNTED_OPACITY = 0.4;
 
 export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
-  const encounter = useRoomView((s) => s.view?.encounter);
-  const role = useRoomView((s) => s.you?.role ?? "player");
-  const activeTokenId = useRoomView((s) => {
+  const encounter = useTreeShownView((s) => s.view?.encounter);
+  const role = useTreeShownView((s) => s.you?.role ?? "player");
+  const activeTokenId = useTreeShownView((s) => {
     const e = s.view?.encounter;
     return e?.entries.find((entry) => entry.id === e.activeEntryId)?.tokenId;
   });
-  const moverId = useRoomView((s) => turnMoverId(s.view));
-  const rider = useRoomView((s) => (activeTokenId ? s.view?.tokens[activeTokenId] : undefined));
-  const mount = useRoomView((s) => (moverId !== undefined && moverId !== activeTokenId ? s.view?.tokens[moverId] : undefined));
-  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
-  const diagonal = useRoomView((s) => s.view?.meta.settings.diagonal ?? "five");
+  const moverId = useTreeShownView((s) => turnMoverId(s.view));
+  const rider = useTreeShownView((s) => (activeTokenId ? s.view?.tokens[activeTokenId] : undefined));
+  const mount = useTreeShownView((s) => (moverId !== undefined && moverId !== activeTokenId ? s.view?.tokens[moverId] : undefined));
+  const feetPerCell = useTreeShownView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const diagonal = useTreeShownView((s) => s.view?.meta.settings.diagonal ?? "five");
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
   const riderTrail = useMemo(() => turnTrail({ encounter, sceneId: props.scene.id, token: rider, rules, role }), [encounter, props.scene.id, rider, rules, role]);
   const mountTrail = useMemo(() => (mount ? turnTrail({ encounter, sceneId: props.scene.id, token: mount, rules, role }) : null), [encounter, props.scene.id, mount, rules, role]);
   // The pill's creature: the mount once it has a trail, else the active creature.
   const token = mountTrail ? mount : rider;
   const trail = mountTrail ?? riderTrail;
-  const speeds = useRoomView((s) => (token && s.view ? speedsOf(s.view, token) : undefined));
+  const speeds = useTreeShownView((s) => (token && s.view ? speedsOf(s.view, token) : undefined));
   const second = mountTrail && rider ? riderLine(displayName(rider), riderTrail) : null;
-  const templates = useRoomView((s) => s.view?.templates);
-  const halved = useRoomView((s) => {
+  const templates = useTreeShownView((s) => s.view?.templates);
+  const halved = useTreeShownView((s) => {
     // Only a viewer who knows the speeds reads them, and a Half Speed area halves them where the creature stands.
     if (!s.view || !token || !speeds || !templates || !Object.values(templates).some((t) => t?.slows?.kind === "halfSpeed")) return false;
     return halvedAt(speedAreas(s.view, token, { role }), token) !== null;
@@ -91,14 +96,17 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   const spec = marker ? { x: marker.x, y: marker.y, value: marker.value, size: "screen" as const, small: true, below: marker.below, above: !marker.below } : null;
   const specKey = spec ? JSON.stringify(spec) : "";
   usePublishPills("turnStart", useMemo(() => (spec ? [spec] : []), [specKey]));
+  const iso = useIsoGround();
   if (!trail || !token || !marker) return null;
 
   const color = theme.color.accentSoft;
+  const lines = iso === null || iso.place === "ground";
+  const pill = iso === null || iso.place === "upright";
   return (
     <>
-      {mountTrail && riderTrail ? <TrailLines trail={riderTrail} color={color} scale={scale} /> : null}
-      <TrailLines trail={trail} color={color} scale={scale} />
-      <Pill x={marker.x} y={marker.y} scale={scale} value={marker.value} size="screen" color={color} small below={marker.below} above={!marker.below} />
+      {lines && mountTrail && riderTrail ? <TrailLines trail={riderTrail} color={color} scale={scale} /> : null}
+      {lines ? <TrailLines trail={trail} color={color} scale={scale} /> : null}
+      {pill ? <MarkPill x={marker.x} y={marker.y} scale={scale} value={marker.value} size="screen" color={color} small below={marker.below} above={!marker.below} /> : null}
     </>
   );
 });
