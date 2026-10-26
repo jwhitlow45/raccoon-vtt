@@ -6,8 +6,9 @@ import { theme } from "../lib/theme.ts";
  * The most a count shows as pips (D-261026-2). Counts that top out at 6,
  * such as Rage at level 17 or the Tarrasque's Legendary Resistance, then
  * stay pips all campaign, and 6 pips still fit beside a short name in the
- * narrowest uses line, a tracker row's at 320 px wide and 130%. A pool of
- * 20 would not, so a larger count keeps its words.
+ * narrowest uses line, a tracker row's at 320 px wide and 130%. A count of
+ * 20 would not, so a larger count keeps its words. A pool, spent by an
+ * amount, shows its words at any size (`words`).
  */
 export const PIPS_MOST = 6;
 

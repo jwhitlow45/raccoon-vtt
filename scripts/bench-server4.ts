@@ -171,26 +171,33 @@ let live: Span | null = null;
  * gate needs the two apart): per player, the fan-out is the first to read
  * each holder's tiles, so reading them there draws the rasters. Each read
  * after the commit adds its time to the span. One wrapper per sight keeps
- * a sight's identity across reads.
+ * a sight's identity across reads. Only a run wraps the hook, and it puts
+ * the hook back after, so a file that imports this one is left as it was
+ * (review PV2-BENCH-PROXY). Returns what puts it back.
  */
-const wrapped = new WeakMap<PartySight, PartySight>();
-const holderSight = visionRules.holderSight;
-visionRules.holderSight = (state, sceneId, memberId) => {
-  const sight = holderSight(state, sceneId, memberId);
-  let timedSight = wrapped.get(sight);
-  if (!timedSight) {
-    timedSight = new Proxy(sight, {
-      get(target, prop) {
-        const start = performance.now();
-        const value: unknown = Reflect.get(target, prop, target);
-        if (prop === "tiles" && live && live.commitAt > 0) live.drawn += performance.now() - start;
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    });
-    wrapped.set(sight, timedSight);
-  }
-  return timedSight;
-};
+function timeHolderSight(): () => void {
+  const wrapped = new WeakMap<PartySight, PartySight>();
+  const holderSight = visionRules.holderSight;
+  visionRules.holderSight = (state, sceneId, memberId) => {
+    const sight = holderSight(state, sceneId, memberId);
+    let timedSight = wrapped.get(sight);
+    if (!timedSight) {
+      timedSight = new Proxy(sight, {
+        get(target, prop) {
+          const start = performance.now();
+          const value: unknown = Reflect.get(target, prop, target);
+          if (prop === "tiles" && live && live.commitAt > 0) live.drawn += performance.now() - start;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      wrapped.set(sight, timedSight);
+    }
+    return timedSight;
+  };
+  return () => {
+    visionRules.holderSight = holderSight;
+  };
+}
 
 /**
  * A database that answers every statement at once from memory: the snapshot
@@ -595,20 +602,25 @@ async function runWalk(perPlayer: boolean, rows: Row[]): Promise<void> {
 
 export async function runServerBench(): Promise<Row[]> {
   const rows: Row[] = [];
-  await runLevel("bright", 5, rows);
-  await runLevel("dark", 5, rows);
-  // The finest scale the room settings allow, where each light and sense covers the most cells (and so the most walls).
-  await runLevel("dark", 1, rows);
-  await runFreeLight(5, false, rows);
-  await runFreeLight(1, false, rows);
-  await runWalk(false, rows);
-  // The same per player, at the worst ownership the holder cap allows.
-  await runLevel("bright", 5, rows, true);
-  await runLevel("dark", 5, rows, true);
-  await runFogOff("bright", rows);
-  await runFogOff("dark", rows);
-  await runFreeLight(5, true, rows);
-  await runWalk(true, rows);
+  const untime = timeHolderSight();
+  try {
+    await runLevel("bright", 5, rows);
+    await runLevel("dark", 5, rows);
+    // The finest scale the room settings allow, where each light and sense covers the most cells (and so the most walls).
+    await runLevel("dark", 1, rows);
+    await runFreeLight(5, false, rows);
+    await runFreeLight(1, false, rows);
+    await runWalk(false, rows);
+    // The same per player, at the worst ownership the holder cap allows.
+    await runLevel("bright", 5, rows, true);
+    await runLevel("dark", 5, rows, true);
+    await runFogOff("bright", rows);
+    await runFogOff("dark", rows);
+    await runFreeLight(5, true, rows);
+    await runWalk(true, rows);
+  } finally {
+    untime();
+  }
   return rows;
 }
 

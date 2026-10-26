@@ -142,13 +142,13 @@ type PerceptionUnit = Extract<QuickUnit, { key: "passivePerception" }>;
  * A speed of two modes or more with Passive Perception after it, as the
  * panel's header and a summary line draw them (StatSummary.tsx
  * VitalsLine): the speed's last mode and Passive Perception wrap as one
- * part, so where the modes do not
- * fit on one line, the last never stands alone under the others, as
- * "Climb 40 ft" did in More stats on the narrowest phone (FU30-NOTED).
- * The speed keeps its whole name, so a screen reader hears it once, and
- * the last mode drawn beside Passive Perception is hidden from it. Under a
- * pointer the last mode names the whole speed and takes the taps over the
- * sheet link's reach, as the rest of the speed does (FU31 review F7).
+ * part, so where the modes do not fit on one line, the last never stands
+ * alone under the others, as "Climb 40 ft" did in More stats on the
+ * narrowest phone (FU30-NOTED). The speed keeps its whole name, so a
+ * screen reader hears it once, and the last mode drawn beside Passive
+ * Perception is hidden from it. Under a pointer the last mode names the
+ * whole speed and takes the taps over the sheet link's reach, as the rest
+ * of the speed does (FU31 review F7).
  *
  * The two parts are the line's own items, not one box around them: a box
  * whose contents wrap takes its whole line, and the item after Passive

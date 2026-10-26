@@ -59,17 +59,16 @@ import {
 
 /**
  * One creature's combat uses (docs/design-v1-combat-controls.md 4.2, 5 and
- * 6), the one list the turn card (`card`), the tracker row's Uses group and
- * the token bar's Uses drawer (`list`) share: Legendary Resistance and
+ * 6), the one list the turn card (`card`), the tracker row's Uses group
+ * and the token bar's Uses drawer (`list`) share: Legendary Resistance and
  * Legendary Actions, the block's recharge, rest and X/Day abilities, the
  * marks its block no longer lists, Regeneration's line, the turn's skipped
- * prompts and the character's class resources. Each count shows as pips
- * at the right end of its row's title line, to read only, or in words
- * there past 6 and for a class resource's pool
- * (docs/design-v1-monster-uses.md): Use and Restore change it. `uses` is
- * the block's (state.ts useCreaturesUses), null while it loads, so counts
- * on the actor show at once and the rows that need the block wait under
- * the shared Loading.
+ * prompts and the character's class resources. Each count shows as pips at
+ * the right end of its row's title line, to read only, or in words there
+ * past 6 and for a class resource's pool (docs/design-v1-monster-uses.md):
+ * Use and Restore change it. `uses` is the block's (state.ts
+ * useCreaturesUses), null while it loads, so counts on the actor show at
+ * once and the rows that need the block wait under the shared Loading.
  *
  * The Combat section's Uses (UsesSection.tsx) passes `edit`, which puts
  * Edit on each class resource's button line, inside the list's box, so a
