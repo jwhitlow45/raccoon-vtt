@@ -260,10 +260,12 @@ jobs:
         run: |
           trap 'docker logout docker.io' EXIT
           printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          # A value as one line of a workflow command: % and line breaks escaped, so text from Docker Hub cannot start a command of its own.
+          plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
           if ! found=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Image}}' 2>&1); then
             case $found in
               *"not found"*) echo "MODE=build" >> "$GITHUB_ENV"; echo "$VERSION is not on Docker Hub yet: building it."; exit 0 ;;
-              *) echo "::error::Could not tell whether $VERSION is on Docker Hub: $found"; exit 1 ;;
+              *) echo "::error::Could not tell whether $(plain "$VERSION") is on Docker Hub: $(plain "$found")"; exit 1 ;;
             esac
           fi
           label() { jq -r --arg l "$1" '."linux/amd64".config.Labels[$l] // empty' <<< "$found"; }
@@ -271,7 +273,7 @@ jobs:
           source_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
           if [ "$(label org.opencontainers.image.revision)" != "$REVISION" ] || [ "$(label org.opencontainers.image.version)" != "$VERSION" ] \
             || [ "$(label org.opencontainers.image.source)" != "$source_url" ] || [ "$platforms" != "linux/amd64 linux/arm64" ]; then
-            echo "::error::$VERSION is already on Docker Hub, and not as this run would push it: revision '$(label org.opencontainers.image.revision)' (this run's '$REVISION'), version '$(label org.opencontainers.image.version)' (this run's '$VERSION'), source '$(label org.opencontainers.image.source)' (this run's '$source_url'), platforms '$platforms' (this run's 'linux/amd64 linux/arm64'). A published version is never rebuilt or replaced: release a new one."
+            echo "::error::$(plain "$VERSION") is already on Docker Hub, and not as this run would push it: revision '$(plain "$(label org.opencontainers.image.revision)")' (this run's '$(plain "$REVISION")'), version '$(plain "$(label org.opencontainers.image.version)")' (this run's '$(plain "$VERSION")'), source '$(plain "$(label org.opencontainers.image.source)")' (this run's '$(plain "$source_url")'), platforms '$(plain "$platforms")' (this run's 'linux/amd64 linux/arm64'). A published version is never rebuilt or replaced: release a new one."
             exit 1
           fi
           index=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
@@ -332,18 +334,20 @@ jobs:
             --provenance mode=max --sbom "generator=$SBOM_SCANNER" \
             --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
             --metadata-file "$RUNNER_TEMP/push.json" .
+          # As in the check of what Docker Hub holds: the digests below come back from Docker Hub.
+          plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
           index=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/push.json")
           raw=$(docker buildx imagetools inspect --raw "$IMAGE@$index")
           platform() { jq -r --arg arch "$1" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' <<< "$raw"; }
           amd64=$(platform amd64)
           arm64=$(platform arm64)
           if [ -z "$amd64" ] || [ -z "$arm64" ]; then
-            echo "::error::The pushed index $index lacks a platform: amd64 '$amd64', arm64 '$arm64'."
+            echo "::error::The pushed index $(plain "$index") lacks a platform: amd64 '$(plain "$amd64")', arm64 '$(plain "$arm64")'."
             exit 1
           fi
           pushed=$(docker buildx imagetools inspect --raw "$IMAGE@$amd64" | jq -r .config.digest)
           if [ "$pushed" != "$TESTED_CONFIG" ]; then
-            echo "::error::The pushed linux/amd64 image has config $pushed, but the smoke test ran $TESTED_CONFIG. Nothing was tagged."
+            echo "::error::The pushed linux/amd64 image has config $(plain "$pushed"), but the smoke test ran $(plain "$TESTED_CONFIG"). Nothing was tagged."
             exit 1
           fi
           echo "INDEX=$index" >> "$GITHUB_ENV"
@@ -362,6 +366,8 @@ jobs:
             docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$INDEX"
             echo "Tagged $VERSION: $INDEX."
           fi
+          # As in the check of what Docker Hub holds: a tag's version label and Docker Hub's errors come from Docker Hub.
+          plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
           # The version a tag holds now, or "none" when Docker Hub has no such tag.
           holds() {
             local out
@@ -371,7 +377,7 @@ jobs:
             fi
             case $out in
               *"not found"*) echo none ;;
-              *) echo "::error::Could not read $1 on Docker Hub: $out" >&2; return 1 ;;
+              *) echo "::error::Could not read $(plain "$1") on Docker Hub: $(plain "$out")" >&2; return 1 ;;
             esac
           }
           minor_holds=$(holds "$MINOR")
@@ -382,8 +388,8 @@ jobs:
             node scripts/release-tags.ts "$VERSION" "$minor_holds" "$latest_holds" > "$RUNNER_TEMP/floating.env"
           . "$RUNNER_TEMP/floating.env"
           args=()
-          if [ "$TAG_MINOR" = true ]; then args+=(--tag "$IMAGE:$MINOR"); else echo "::warning::$MINOR stays at $minor_holds, which is newer than $VERSION."; fi
-          if [ "$TAG_LATEST" = true ]; then args+=(--tag "$IMAGE:latest"); else echo "::warning::latest stays at $latest_holds, which is newer than $VERSION."; fi
+          if [ "$TAG_MINOR" = true ]; then args+=(--tag "$IMAGE:$MINOR"); else echo "::warning::$(plain "$MINOR") stays at $(plain "$minor_holds"), which is newer than $(plain "$VERSION")."; fi
+          if [ "$TAG_LATEST" = true ]; then args+=(--tag "$IMAGE:latest"); else echo "::warning::latest stays at $(plain "$latest_holds"), which is newer than $(plain "$VERSION")."; fi
           if [ "${#args[@]}" -gt 0 ]; then
             docker buildx imagetools create "${args[@]}" "$IMAGE@$INDEX"
           fi

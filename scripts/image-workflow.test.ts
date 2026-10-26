@@ -10,7 +10,9 @@ import { describe, test } from "node:test";
  * version (.github/workflows/image.yml), run as the workflow runs it, with
  * a stand-in for docker: a version from this very commit resumes, and any
  * other is refused with all four things it compares, each as Docker Hub
- * holds it and as this run would push it (review DH1-OPUS-18).
+ * holds it and as this run would push it (review DH1-OPUS-18). What Docker
+ * Hub sends reaches the refusal escaped, so a line break in a label starts
+ * no workflow command of its own (review FU33-ASTRA-01).
  */
 
 const STEP = "What Docker Hub holds for this version";
@@ -35,17 +37,35 @@ function stepScript(): string {
 
 type Held = { revision: string; version: string; source: string; platforms: readonly string[] };
 
-/** The step run against a Docker Hub that holds `held` for 0.2.0: its exit, what it printed, and what it left for later steps. */
-function check(held: Held): { status: number | null; out: string; env: string } {
+/**
+ * The step run against a Docker Hub that holds `held` for 0.2.0, or that
+ * answers the inspect with an error, `{ fails }`: its exit, what it
+ * printed, and what it left for later steps.
+ */
+function check(held: Held | { fails: string }): { status: number | null; out: string; env: string } {
   const dir = mkdtempSync(path.join(tmpdir(), "raccoon-image-step-"));
   try {
-    const labels = { "org.opencontainers.image.revision": held.revision, "org.opencontainers.image.version": held.version, "org.opencontainers.image.source": held.source };
-    const image = Object.fromEntries(held.platforms.map((p) => [p, { config: { Labels: labels } }]));
-    writeFileSync(path.join(dir, "image.json"), JSON.stringify(image));
-    // Login and logout succeed, and inspect answers with the image's platforms and labels, or the index's digest.
+    let image = "";
+    if ("fails" in held) writeFileSync(path.join(dir, "fails.txt"), held.fails);
+    else {
+      const labels = { "org.opencontainers.image.revision": held.revision, "org.opencontainers.image.version": held.version, "org.opencontainers.image.source": held.source };
+      image = JSON.stringify(Object.fromEntries(held.platforms.map((p) => [p, { config: { Labels: labels } }])));
+    }
+    writeFileSync(path.join(dir, "image.json"), image);
+    // Login and logout succeed, and inspect answers with the image's platforms and labels, the index's digest, or the error.
+    const fails = path.join(dir, "fails.txt");
     writeFileSync(
       path.join(dir, "docker"),
-      ["#!/bin/bash", 'case "$*" in', '  login*) cat > /dev/null ;;', '  logout*) ;;', `  *".Image"*) cat "${path.join(dir, "image.json")}" ;;`, '  *".Manifest"*) echo \'{"digest":"sha256:feed"}\' ;;', "esac", ""].join("\n"),
+      [
+        "#!/bin/bash",
+        'case "$*" in',
+        "  login*) cat > /dev/null ;;",
+        "  logout*) ;;",
+        `  *".Image"*) if [ -f "${fails}" ]; then cat "${fails}"; exit 1; fi; cat "${path.join(dir, "image.json")}" ;;`,
+        '  *".Manifest"*) echo \'{"digest":"sha256:feed"}\' ;;',
+        "esac",
+        "",
+      ].join("\n"),
     );
     chmodSync(path.join(dir, "docker"), 0o755);
     writeFileSync(path.join(dir, "step.sh"), stepScript());
@@ -71,6 +91,12 @@ function check(held: Held): { status: number | null; out: string; env: string } 
 }
 
 const SAME: Held = { revision: REVISION, version: "0.2.0", source: SOURCE, platforms: ["linux/amd64", "linux/arm64"] };
+
+/** A value as a workflow command carries it: %, CR and LF escaped. */
+const escaped = (v: string) => v.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+
+/** The workflow commands a run printed: lines starting "::". */
+const commands = (out: string) => out.split("\n").filter((l) => l.startsWith("::"));
 const jq = spawnSync("jq", ["--version"]).status === 0;
 
 describe("the image workflow's check of a version Docker Hub holds already", { skip: jq ? false : "jq is not installed" }, () => {
@@ -100,4 +126,26 @@ describe("the image workflow's check of a version Docker Hub holds already", { s
       }
     });
   }
+
+  test("labels with line breaks and percent signs reach the refusal escaped, starting no command of their own", () => {
+    const held: Held = { ...SAME, revision: "abc%0Adef", version: "0.2.0\r\n::warning::from the version", source: "https://example.com/x\n::warning::injected annotation\n" };
+    const r = check(held);
+    assert.equal(r.status, 1, r.out);
+    assert.deepEqual(commands(r.out).map((l) => l.split("::")[1]), ["error"], r.out);
+    const error = commands(r.out)[0]!;
+    // A trailing line break is gone with the command substitution that reads the label.
+    for (const [field, have] of [
+      ["revision", held.revision],
+      ["version", held.version],
+      ["source", held.source.replace(/\n$/, "")],
+    ] as const) {
+      assert.ok(error.includes(`${field} '${escaped(have)}'`), `${field} in: ${error}`);
+    }
+  });
+
+  test("an error from Docker Hub other than not found stops the step, its text escaped onto the one error line", () => {
+    const r = check({ fails: "ERROR: 500 at 100%\n::warning::injected annotation" });
+    assert.equal(r.status, 1, r.out);
+    assert.deepEqual(commands(r.out), [`::error::Could not tell whether 0.2.0 is on Docker Hub: ${escaped("ERROR: 500 at 100%\n::warning::injected annotation")}`]);
+  });
 });
