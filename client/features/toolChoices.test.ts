@@ -230,7 +230,7 @@ describe("each tool's main choice", () => {
     const choice = builderCycle.now(env)!;
     assert.deepEqual(
       choice.options.map((o) => o.label),
-      ["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp"],
+      ["Brush", "Rectangle room", "Shape room", "Erase", "Erase area", "Walls/doors", "Heights/stairs", "Difficult ground", "Label", "Lights", "Stamp"],
     );
     assert.equal(choice.value, "paint");
     builder.setState({ mode: "poly", poly: [{ x: 1, y: 1 }, { x: 2, y: 1 }] });

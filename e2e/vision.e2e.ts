@@ -577,7 +577,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
 
     // The DM's + held climbs from 10 ft to 100 ft, and the hold ends there with the finger still down, so the value is spoken.
     await dm.getByRole("button", { name: "Map builder" }).first().click();
-    await pickOption(dm, "Map builder", "Builder mode", "Heights and stairs");
+    await pickOption(dm, "Map builder", "Builder mode", "Heights/stairs");
     const stepper = dm.getByRole("group", { name: "Height" });
     const plus = stepper.getByRole("button", { name: "5 ft higher" });
     assert.equal((await stepper.innerText()).trim(), "10 ft up");

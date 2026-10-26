@@ -873,7 +873,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
   test("tc-f. on a computer, B moves the builder's mode through all eleven and back to Brush, Shift+B goes to Stamp, focus on Terrain goes to the row's neighbor, and a shape room with corners and an open label pane hold", async () => {
     await keyOn(dm, "b");
     await chipShows(dm, "Map builder", "Builder mode", "Brush");
-    for (const mode of ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls and doors", "Heights and stairs", "Difficult ground", "Label", "Lights", "Stamp", "Brush"]) {
+    for (const mode of ["Rectangle room", "Shape room", "Erase", "Erase area", "Walls/doors", "Heights/stairs", "Difficult ground", "Label", "Lights", "Stamp", "Brush"]) {
       await keyOn(dm, "b");
       await chipShows(dm, "Map builder", "Builder mode", mode);
       await saidNow(dm, `Map builder: ${mode}`);

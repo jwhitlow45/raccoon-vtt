@@ -9,7 +9,7 @@ import { builderSlot } from "./store.ts";
 const FREE_WALL_REACH_PX = 22;
 
 /**
- * A tap in the Walls and doors mode, as free walls see it
+ * A tap in the Walls/doors mode, as free walls see it
  * (docs/design-v1-maps-vision.md section 2.2). With Door it steps a free
  * door through closed, open and locked, and with Remove it takes a free
  * wall, door or window off. Returns whether the tap was a free wall's, so
