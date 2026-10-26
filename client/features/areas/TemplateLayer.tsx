@@ -180,6 +180,9 @@ export type AreaMode = "topDown" | "ground" | "upright" | "moving";
 /** Shading is cached per coverage key, so a memo keeps a still area's shape, and the ground stage, from redrawing as a drag crosses cells. */
 const StillShading = memo(Shading);
 
+/** A placed area's ring round each creature it catches, in screen pixels. */
+export const CAUGHT_RING = { widthPx: 3, gapPx: 3 } as const;
+
 export const PlacedArea = memo(function PlacedArea(props: {
   template: AreaTemplate;
   ctx: AreaContext;
@@ -228,7 +231,7 @@ export const PlacedArea = memo(function PlacedArea(props: {
       {outline ? <OutlineShape outline={outline} color={t.color} widthPx={2} dash={hidden ? [6, 4] : undefined} /> : null}
       {caught.map((id) => {
         const token = ctx.tokens?.[id];
-        return token ? <TokenRing key={id} token={token} color={t.color} scale={scale} widthPx={3} gapPx={3} /> : null;
+        return token ? <TokenRing key={id} token={token} color={t.color} scale={scale} {...CAUGHT_RING} /> : null;
       })}
     </>
   );

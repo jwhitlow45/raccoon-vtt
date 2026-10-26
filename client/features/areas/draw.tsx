@@ -45,11 +45,20 @@ export function OutlineShape(props: { outline: Outline; color: string; widthPx: 
   }
 }
 
+/** How much a ring's screen sizes grow at this zoom: with the token's own ring (lib/boardScale.ts). */
+function ringGrowth(scale: number): number {
+  return boardSizes(scale).ringPx / 3;
+}
+
+/** How far a ring of this width and gap paints past its token's footprint, in cells: the gap and the stroke's outer half. */
+export function ringReach(scale: number, widthPx: number, gapPx: number): number {
+  return ((gapPx + widthPx / 2) * ringGrowth(scale)) / scale;
+}
+
 /** A ring around a caught token's footprint. */
 export function TokenRing(props: { token: FootprintToken; color: string; scale: number; widthPx: number; gapPx: number }) {
   const r = footprintRect(SQUARES, props.token);
-  // A ring grows and shrinks with the token's own ring (lib/boardScale.ts).
-  const k = boardSizes(props.scale).ringPx / 3;
+  const k = ringGrowth(props.scale);
   const gap = (props.gapPx * k) / props.scale;
   return (
     <Rect

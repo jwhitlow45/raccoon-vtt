@@ -1,10 +1,12 @@
 import { memo, useMemo } from "react";
 import { Group } from "react-konva";
 import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
-import { footprintRect } from "#shared/rules/footprint.ts";
-import { cachedCoverage } from "../features/areas/coverage.ts";
+import type { CoverageResult } from "#shared/rules/aoe.ts";
+import { footprintRect, type FootprintToken } from "#shared/rules/footprint.ts";
+import { cachedCoverage, caughtTokens } from "../features/areas/coverage.ts";
+import { ringReach } from "../features/areas/draw.tsx";
 import { useLiveTokens } from "../features/areas/useLiveTokens.ts";
-import { Clipped, PlacedArea, useAreaParts } from "../features/areas/TemplateLayer.tsx";
+import { CAUGHT_RING, Clipped, PlacedArea, useAreaParts } from "../features/areas/TemplateLayer.tsx";
 import { tethers } from "../features/attach/groups.ts";
 import { TetherLine } from "../features/attach/TetherLayer.tsx";
 import type { LayerProps } from "../features/layers.ts";
@@ -14,11 +16,32 @@ import { Lift } from "./IsoParts.tsx";
 import { boxGround } from "./isoPlace.ts";
 import { auraClip, tetherShows } from "./markStand.ts";
 import { IsoGroundContext, useTreeShownView, type IsoGround } from "./relief/context.ts";
+import type { CellBox } from "./relief/fogView.ts";
 
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
 const EMPTY_TOKENS: RoomState["tokens"] = {};
-/** How far past an aura's covered window its outline's stroke and its rings round caught creatures can reach, in cells. */
+/** How far past an aura's covered window its outline and its stroke can reach, in cells. */
 const AURA_MARGIN = 2;
+
+/**
+ * The box an aura moving with a dragged token paints, in cells: its covered
+ * window grown by its outline's reach, and each creature it catches, whose
+ * ring can stand cells past the window (a Gargantuan caught by one corner
+ * cell), with the ring's gap and stroke at this zoom. An aura shows whole
+ * only when every sub-cell of it is revealed (markStand.ts auraClip).
+ */
+export function auraBox(cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h">, caught: readonly FootprintToken[], scale: number): CellBox {
+  const box = { x0: cov.x0 - AURA_MARGIN, y0: cov.y0 - AURA_MARGIN, x1: cov.x0 + cov.w + AURA_MARGIN, y1: cov.y0 + cov.h + AURA_MARGIN };
+  const reach = ringReach(scale, CAUGHT_RING.widthPx, CAUGHT_RING.gapPx);
+  for (const t of caught) {
+    const r = footprintRect(t);
+    box.x0 = Math.min(box.x0, r.x - reach);
+    box.y0 = Math.min(box.y0, r.y - reach);
+    box.x1 = Math.max(box.x1, r.x + r.w + reach);
+    box.y1 = Math.max(box.y1, r.y + r.h + reach);
+  }
+  return box;
+}
 
 /**
  * The moving marks of tokens being dragged (docs/design-v1-isometric-view.md
@@ -68,8 +91,8 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
           return (
             <Group key={t.id}>
               {attached.map((a) => {
-                const cov = cachedCoverage(a, areas.ctx);
-                const box = { x0: cov.x0 - AURA_MARGIN, y0: cov.y0 - AURA_MARGIN, x1: cov.x0 + cov.w + AURA_MARGIN, y1: cov.y0 + cov.h + AURA_MARGIN };
+                const caught = caughtTokens(a, areas.ctx, layer.scene.id).flatMap((id) => areas.ctx.tokens?.[id] ?? []);
+                const box = auraBox(cachedCoverage(a, areas.ctx), caught, layer.scale);
                 return (
                   <PlacedArea
                     key={a.id}
