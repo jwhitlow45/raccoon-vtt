@@ -112,7 +112,15 @@ export type IconName =
   | "image"
   | "stats"
   | "companion"
-  | "uses";
+  | "uses"
+  | "paint"
+  | "eraseArea"
+  | "walls"
+  | "heights"
+  | "difficultGround"
+  | "mapLabel"
+  | "light"
+  | "stamp";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -175,6 +183,14 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   stats: "hash",
   companion: "paw-print",
   uses: "zap",
+  paint: "paintbrush",
+  eraseArea: "square-dashed",
+  walls: "brick-wall",
+  heights: "mountain",
+  difficultGround: "snail",
+  mapLabel: "type",
+  light: "lightbulb",
+  stamp: "stamp",
 };
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -551,6 +567,38 @@ const SHAPES: Record<IconName, ReactNode> = {
   ),
   // Lucide zap: the token bar's Uses, what a creature can spend (docs/design-v1-icons-2.md 8). Never a lightning damage type, which stays words.
   uses: <path {...STROKE} d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" />,
+  /*
+   * The map builder's modes (D-261026-3), each in its picker's tile and on
+   * the chip that shows it. Rectangle room and Shape room take shapeBox and
+   * shapePolygon, and Erase takes eraser, the same meanings drawn the same.
+   */
+  // Lucide paintbrush: the builder's Brush, painting ground square by square. Never Draw's pencil or Fog's brush stroke.
+  paint: <path {...STROKE} d="m14.622 17.897-10.68-2.913M18.376 2.622a1 1 0 1 1 3.002 3.002L17.36 9.643a.5.5 0 0 0 0 .707l.944.944a2.41 2.41 0 0 1 0 3.408l-.944.944a.5.5 0 0 1-.707 0L8.354 7.348a.5.5 0 0 1 0-.707l.944-.944a2.41 2.41 0 0 1 3.408 0l.944.944a.5.5 0 0 0 .707 0zM9 8c-1.804 2.71-3.97 3.46-6.583 3.948a.507.507 0 0 0-.302.819l7.32 8.883a1 1 0 0 0 1.185.204C12.735 20.405 16 16.792 16 15" />,
+  // Lucide square-dashed: the builder's Erase area, everything a dragged box covers.
+  eraseArea: <path {...STROKE} d="M5 3a2 2 0 0 0-2 2M19 3a2 2 0 0 1 2 2M21 19a2 2 0 0 1-2 2M5 21a2 2 0 0 1-2-2M9 3h1M9 21h1M14 3h1M14 21h1M3 9v1M21 9v1M3 14v1M21 14v1" />,
+  // Lucide brick-wall: the builder's Walls/doors.
+  walls: (
+    <g {...STROKE}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M12 9v6M16 15v6M16 3v6M3 15h18M3 9h18M8 15v6M8 3v6" />
+    </g>
+  ),
+  // Lucide mountain: the builder's Heights/stairs, ground raised or lowered.
+  heights: <path {...STROKE} d="m8 3 4 8 5-5 5 15H2L8 3z" />,
+  // Lucide snail: the builder's Difficult ground, which costs extra movement.
+  difficultGround: (
+    <g {...STROKE}>
+      <path d="M2 13a6 6 0 1 0 12 0 4 4 0 1 0-8 0 2 2 0 0 0 4 0" />
+      <circle cx="10" cy="13" r="8" />
+      <path d="M2 21h12c4.4 0 8-3.6 8-8V7a2 2 0 1 0-4 0v6M18 3 19.1 5.2M22 3 20.9 5.2" />
+    </g>
+  ),
+  // Lucide type: the builder's Label, words placed on the map.
+  mapLabel: <path {...STROKE} d="M12 4v16M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2M9 20h6" />,
+  // Lucide lightbulb: the builder's Lights, a light placed on the map.
+  light: <path {...STROKE} d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5M9 18h6M10 22h4" />,
+  // Lucide stamp: the builder's Stamp, a picture placed on the map.
+  stamp: <path {...STROKE} d="M14 13V8.5C14 7 15 7 15 5a3 3 0 0 0-6 0c0 2 1 2 1 3.5V13M20 15.5a2.5 2.5 0 0 0-2.5-2.5h-11A2.5 2.5 0 0 0 4 15.5V17a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1zM5 22h14" />,
 };
 
 export const ICON_NAMES = Object.keys(SHAPES) as IconName[];

@@ -5,6 +5,7 @@ import type { TerrainId } from "#shared/model.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, ValueChip, type Slot } from "../measure/controls.tsx";
+import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
 import type { BrushSize } from "./cells.ts";
 import { LABEL_SIZES } from "./labelEdit.ts";
@@ -143,10 +144,20 @@ export default function BuilderOptions() {
     {
       id: "mode",
       priority: 1 + drop,
+      // The mode's icon, as on its tile (D-261026-3), by the chips' glyph rule (docs/design-v1-tool-options.md 6.2):
+      // beside the words where the row has room, and alone where the row's priority-1 controls need the room.
+      compact: true,
+      glyph: true,
       control: (
-        <ValueChip label="Builder mode" kind="choice" value={s.mode} valueName={modeName} options={BUILD_MODES.map((m) => ({ key: m.value, words: m.short }))}>
+        <ValueChip
+          label="Builder mode"
+          kind="choice"
+          value={s.mode}
+          valueName={modeName}
+          options={BUILD_MODES.map((m) => ({ key: m.value, words: m.short, glyph: <Icon name={m.icon} /> }))}
+        >
           <PickCloses>
-            <ChoiceTiles<BuildMode> label="Builder mode" value={s.mode} options={BUILD_MODES.map((m) => ({ value: m.value, label: m.label }))} onChange={(mode) => pickBuildMode(scope, mode)} />
+            <ChoiceTiles<BuildMode> label="Builder mode" even value={s.mode} options={BUILD_MODES.map((m) => ({ value: m.value, label: m.label, glyph: <Icon name={m.icon} /> }))} onChange={(mode) => pickBuildMode(scope, mode)} />
           </PickCloses>
         </ValueChip>
       ),

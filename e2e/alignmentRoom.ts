@@ -3409,6 +3409,95 @@ async function stepperRowScreens(sweep: Sweep, page: Page, fireball: string): Pr
   await escapeAll(page);
 }
 
+/**
+ * The builder's mode picker as the browser lays it out (D-261026-3): each
+ * tile's box, whether its name runs out of it, how many lines it takes for
+ * how many words (a slash counted as a break), and its icon's middle
+ * against the tile's. A line for each tile whose name is cut or breaks
+ * inside a word, that runs out of the picker, or whose icon stands more
+ * than 1 px off its tile's middle, and for tiles that are not all one
+ * width and one height.
+ */
+async function modeTileLines(tiles: Locator, at: string): Promise<string[]> {
+  return tiles.evaluate((group, at) => {
+    type R = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+    type E = {
+      textContent: string | null;
+      scrollWidth: number;
+      clientWidth: number;
+      parentElement: E | null;
+      getBoundingClientRect(): R;
+      querySelector(s: string): E | null;
+      querySelectorAll(s: string): ArrayLike<E>;
+      ownerDocument: { createRange(): { selectNodeContents(n: E): void; getClientRects(): ArrayLike<R> }; defaultView: { innerWidth: number; getComputedStyle(e: E): { overflowX: string } } };
+    };
+    const out: string[] = [];
+    const root = group as unknown as E;
+    const tiles = Array.from(root.querySelectorAll("label.rvtt-choice"));
+    // The box that cuts the picker off at its sides: its first ancestor that clips, else the window.
+    let clip: { left: number; right: number } = { left: 0, right: root.ownerDocument.defaultView.innerWidth };
+    for (let up = root.parentElement; up; up = up.parentElement) {
+      if (root.ownerDocument.defaultView.getComputedStyle(up).overflowX === "visible") continue;
+      const r = up.getBoundingClientRect();
+      clip = { left: Math.max(r.left, clip.left), right: Math.min(r.right, clip.right) };
+      break;
+    }
+    const widths: number[] = [];
+    const heights: number[] = [];
+    for (const tile of tiles) {
+      const box = tile.getBoundingClientRect();
+      widths.push(box.width);
+      heights.push(box.height);
+      const words = tile.querySelector(":scope > span:last-child")!;
+      const icon = tile.querySelector("svg");
+      const name = (words.textContent ?? "").trim();
+      if (words.scrollWidth > words.clientWidth + 1) out.push(`${at}: "${name}" runs out of its tile`);
+      if (box.left < clip.left - 1 || box.right > clip.right + 1) out.push(`${at}: "${name}"'s tile runs ${Math.max(clip.left - box.left, box.right - clip.right).toFixed(1)} px out of the picker`);
+      const range = tile.ownerDocument.createRange();
+      range.selectNodeContents(words);
+      const lines = new Set(Array.from(range.getClientRects()).map((r) => Math.round(r.top))).size;
+      // A slash is a place to break, as between two words: an even grid lets "Heights/" stand over "stairs".
+      if (lines > name.split(/\s+|(?<=\/)/).length) out.push(`${at}: "${name}" breaks inside a word, on ${lines} lines`);
+      if (!icon) out.push(`${at}: "${name}" has no icon`);
+      else {
+        const i = icon.getBoundingClientRect();
+        const off = Math.abs((i.left + i.right) / 2 - (box.left + box.right) / 2);
+        if (off > 1) out.push(`${at}: "${name}"'s icon stands ${off.toFixed(1)} px off its tile's middle`);
+      }
+    }
+    const spread = (ns: number[]): number => Math.max(...ns) - Math.min(...ns);
+    if (spread(widths) > 1) out.push(`${at}: the tiles differ in width by ${spread(widths).toFixed(1)} px`);
+    if (spread(heights) > 1) out.push(`${at}: the tiles differ in height by ${spread(heights).toFixed(1)} px`);
+    return out;
+  }, at);
+}
+
+/** fu32-b's screens at one size: the builder's row with its mode chip, and the mode picker's tiles. */
+async function builderScreens(sweep: Sweep, page: Page): Promise<void> {
+  await closeSheets(page);
+  await escapeAll(page);
+  await pickTool(page, "Map builder");
+  const bar = page.getByRole("toolbar", { name: "Map builder options" });
+  await bar.waitFor();
+  await page.locator('[data-options-line="shown"]').first().waitFor();
+  await pickOption(page, "Map builder", "Builder mode", "Brush");
+  const chip = bar.getByRole("button", { name: /^Builder mode: Brush/ });
+  await chip.waitFor();
+  // By the chips' glyph rule (docs/design-v1-tool-options.md 6.2) the icon is the first thing to give way in a short row, so only the wide window's row must show it.
+  const iconed = (await chip.locator("svg").count()) >= 2;
+  if (!iconed && sweep.at.startsWith("1440x900")) await sweep.missing(page, "fu32-builder-row", "the mode chip shows no icon beside its caret");
+  await sweep.measure(page, "fu32-builder-row", bar);
+  await chip.click();
+  const picker = page.getByRole("dialog", { name: "Builder mode" });
+  await picker.waitFor();
+  const tiles = picker.getByRole("radiogroup", { name: "Builder mode" });
+  await sweep.measure(page, "fu32-mode-picker", tiles);
+  await sweep.add(page, "fu32-mode-picker", await modeTileLines(tiles, `${sweep.at} fu32-mode-picker`));
+  await shots.take(page, `alignment-fu32-${sweep.at}-mode-picker`);
+  await escapeAll(page);
+  await pickTool(page, "Select");
+}
+
 /** Follow-up batch 32's roots, which the sizes' sweep never reaches. */
 export function fu32Tests(): void {
   test(`fu32-a. a short label stands beside its Stepper or choices wherever both fit: the Monsters place card's How many, an area's group save's Slot level, and a companion's It is in Add a companion and its token's Companion group, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (FU31-STEPPER-ROWS)`, async () => {
@@ -3435,5 +3524,19 @@ export function fu32Tests(): void {
       await ops.send({ t: "token.delete", tokenId: hound }).catch(() => {});
     }
     assert.deepEqual(lines, [], "a short label's row out of line");
+  });
+
+  test(`fu32-b. the Map builder's row, its mode picker's tiles with an icon on each, even and none of their names cut, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (D-261026-3)`, async () => {
+    const lines: string[] = [];
+    for (const at of FU30_AT) {
+      const sweep = new Sweep(atName(at));
+      const page = await dmPageFor(at.size);
+      page.setDefaultTimeout(10_000);
+      await openAt(page, at.size, at.scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      await builderScreens(sweep, page);
+      lines.push(...sweep.lines);
+    }
+    assert.deepEqual(lines, [], "the builder's row or picker out of line");
   });
 }

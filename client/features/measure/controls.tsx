@@ -1059,21 +1059,34 @@ export type TileOption<T extends string> = { value: T; label: string; glyph?: Re
  * builds its options: one Tab stop, and the arrows move the choice. Wrap
  * it in PickCloses so a pick closes its popover.
  */
-export function ChoiceTiles<T extends string>(props: { label: string; value: T; options: readonly TileOption<T>[]; onChange(value: NoInfer<T>): void }) {
+export function ChoiceTiles<T extends string>(props: {
+  label: string;
+  value: T;
+  options: readonly TileOption<T>[];
+  onChange(value: NoInfer<T>): void;
+  /**
+   * Every tile one width and one height, in a grid of as many columns as
+   * fit, for names of uneven length such as the builder's modes, where
+   * tiles that each took their own width stood ragged and a long name ran
+   * out of its tile (D-261026-3). A name may break after a slash there
+   * ("Heights/" over "stairs").
+   */
+  even?: boolean;
+}) {
   const name = useId();
   return (
-    <div role="radiogroup" aria-label={props.label} style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), maxWidth: TILES_MAX }}>
+    <div role="radiogroup" aria-label={props.label} style={props.even ? EVEN_TILES : { display: "flex", flexWrap: "wrap", gap: theme.space(1), maxWidth: TILES_MAX }}>
       {props.options.map((o) => {
         const chosen = o.value === props.value;
         return (
-          <label key={o.value} className="rvtt-choice" title={o.title} style={{ ...TILE, ...choiceLook(chosen) }}>
+          <label key={o.value} className="rvtt-choice" title={o.title} style={{ ...TILE, ...(props.even ? EVEN_TILE : null), ...choiceLook(chosen) }}>
             <input type="radio" name={name} value={o.value} checked={chosen} aria-label={accessibleName(o.label, o.title)} onChange={() => props.onChange(o.value)} style={RADIO_COVER} />
             {o.glyph ? (
               <span aria-hidden style={{ display: "grid", placeItems: "center" }}>
                 {o.glyph}
               </span>
             ) : null}
-            <span>{o.label}</span>
+            <span>{props.even ? breaksAfterSlashes(o.label) : o.label}</span>
           </label>
         );
       })}
@@ -1081,8 +1094,27 @@ export function ChoiceTiles<T extends string>(props: { label: string; value: T; 
   );
 }
 
+/** A name with a place to break after each slash, which a line otherwise never takes between two words joined by one. */
+function breaksAfterSlashes(label: string): ReactNode {
+  const parts = label.split("/");
+  return parts.flatMap((part, i) => (i < parts.length - 1 ? [part, "/", <wbr key={i} />] : [part]));
+}
+
 /** Four tiles to a row, so a choice of eight or ten reads as a grid on any screen. */
 const TILES_MAX = 4 * (theme.layout.popover.tile + 36) + 3 * theme.space(1);
+
+/** An even grid: as many columns as fit, each at least 24 px wider than a tile and all sharing the width left over, and every row as tall as the tallest. */
+const EVEN_TILES: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: `repeat(auto-fill, minmax(${theme.layout.popover.tile + 24}px, 1fr))`,
+  gridAutoRows: "1fr",
+  gap: theme.space(1),
+  // The window's width, not four columns at the least, decides how many fit, so a narrow window takes fewer.
+  width: "100%",
+  minWidth: 0,
+  maxWidth: TILES_MAX,
+};
+const EVEN_TILE: CSSProperties = { minWidth: 0, maxWidth: "none" };
 
 const TILE: CSSProperties = {
   position: "relative",
