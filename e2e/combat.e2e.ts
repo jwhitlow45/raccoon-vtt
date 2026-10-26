@@ -2025,6 +2025,77 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
+  test("fu33-b. a legendary row in its lair, Lair its only tag beside LA 10/10 and LR 9/10, in line within 1 px at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: at 390 x 844 LA with LR is alone under AC, HP and Lair by need, since Lair with them runs wider than the line, and Lair never stands alone where they fit beside it; and the check still flags a last part that could share its line (FU32-LAIR-ALONE)", async () => {
+    const boss = { id: randomUUID(), entryId: "fu33-boss" };
+    const order = dmSocket.state?.meta.settings.playersSeeOrder ?? "all";
+    // Players see the whole order, so the row is no secret and Lair is its only tag, as live play saw it.
+    await ops.send({ t: "room.update", settings: { playersSeeOrder: "all" } });
+    await ops.send({ t: "token.create", token: { id: boss.id, sceneId: run.sceneId, kind: "monster", name: "Goblin Boss", size: "medium", x: 17, y: 15, visibility: "all", disposition: "hostile", actor: { inline: { ...actor(21), legendary: { actionsMax: 10, actionsUsed: 0, resistMax: 10, resistUsed: 1 } } } } });
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    await ops.send({ t: "encounter.start", entries: [{ id: boss.entryId, tokenId: boss.id, value: 18 }, { id: "fu33-bree", tokenId: run.bree.id, value: 12 }] });
+    await ops.send({ t: "encounter.update", entryId: boss.entryId, patch: { inLair: true } });
+    await waitFor("the boss in its lair", () => (dmSocket.state?.encounter?.entries.find((e) => e.id === boss.entryId)?.inLair ? true : null));
+    const off: string[] = [];
+    try {
+      for (const view of [1440, 390, 320].flatMap((width) => [1, 1.3].map((scale) => ({ width, height: { 1440: 900, 390: 844, 320: 568 }[width]!, scale })))) {
+        const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
+        await setUp(dm, dmCdp, view);
+        const tracker = await openTracker(dm);
+        const row = tracker.locator("li[data-entry-row]").filter({ has: dm.getByRole("button", { name: "Goblin Boss options", exact: true }) });
+        const line = row.locator("[data-row-button]");
+        for (const tag of ["Lair", "LA 10/10", "LR 9/10"]) await line.getByText(tag, { exact: true }).waitFor();
+        await row.scrollIntoViewIfNeeded();
+        off.push(...alignmentLines(await measureAlignment(line), `the boss's row line at ${at}`));
+        const lair = await line.evaluate((button) => {
+          const doc = button.ownerDocument;
+          const desc = doc.getElementById(button.getAttribute("aria-describedby") ?? "")!;
+          // Each tag's words, and the line's other words and numbers, are spans with no element inside.
+          const leaves = [...desc.querySelectorAll("span")].filter((el) => el.children.length === 0 && el.getBoundingClientRect().width > 1);
+          const tag = (text: string) => leaves.find((el) => el.textContent === text)!;
+          const box = tag("Lair").getBoundingClientRect();
+          const pair = tag("LA 10/10").closest("[data-line-part]")!.getBoundingClientRect();
+          const beside = leaves.filter((el) => {
+            const b = el.getBoundingClientRect();
+            const middle = (b.top + b.bottom) / 2;
+            return el !== tag("Lair") && middle > box.top && middle < box.bottom;
+          });
+          const gap = parseFloat(doc.defaultView!.getComputedStyle(desc).columnGap) || 0;
+          return { alone: beside.length === 0, fits: box.width + gap + pair.width <= desc.getBoundingClientRect().width + 0.5 };
+        });
+        if (lair.alone && lair.fits) off.push(`${at}: Lair alone on its line, though LA and LR fit beside it`);
+        await shots.take(dm, `fu33-lair-row-${view.width}-${Math.round(view.scale * 100)}`);
+      }
+      // Two drawn rows of three parts, 158 px across as the row's line is at 390 x 844: the last part alone where the part before it fits beside it, and alone by need.
+      const drawn = await dm.evaluate(() => {
+        type El = { id: string; style: { cssText: string }; append(child: El): void };
+        const doc = (globalThis as unknown as { document: { createElement(tag: string): El; body: El } }).document;
+        for (const [id, last] of [["fu33-could-share", 100], ["fu33-by-need", 132]] as const) {
+          const row = doc.createElement("div");
+          row.id = id;
+          row.style.cssText = "position: fixed; left: 8px; top: 8px; width: 158px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; z-index: 9999";
+          for (const width of [70, 38, last]) {
+            const part = doc.createElement("span");
+            part.style.cssText = `display: inline-block; width: ${width}px; height: 18px; background: #888`;
+            row.append(part);
+          }
+          doc.body.append(row);
+        }
+        return true;
+      });
+      assert.ok(drawn);
+      const share = await measureAlignment(dm.locator("#fu33-could-share"));
+      assert.ok(share.some((f) => f.check === "wrap-orphan"), `a last part that could share its line is not flagged: ${JSON.stringify(share)}`);
+      assert.deepEqual(alignmentLines(await measureAlignment(dm.locator("#fu33-by-need")), "a last part alone by need"), []);
+    } finally {
+      await dm.evaluate(() => (globalThis as unknown as { document: { querySelectorAll(s: string): { forEach(fn: (el: { remove(): void }) => void): void } } }).document.querySelectorAll("#fu33-could-share, #fu33-by-need").forEach((el) => el.remove())).catch(() => {});
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+      await ops.send({ t: "token.delete", tokenId: boss.id });
+      await ops.send({ t: "room.update", settings: { playersSeeOrder: order } });
+      await setUp(dm, dmCdp, { ...DESK, scale: 1 });
+    }
+    assert.deepEqual(off, [], "Lair alone, or out of line by more than 1 px");
+  });
+
   test("14. no page logged an error", () => {
     assert.deepEqual(dmConsole.errors, [], "the DM's page logged errors");
     assert.deepEqual(anaConsole.errors, [], "Ana's page logged errors");

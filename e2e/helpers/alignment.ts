@@ -17,7 +17,9 @@ import type { Locator, Page } from "playwright-core";
  *    side padding and a gap.
  * 4. Edges: a column of rows starts each row's words at one left edge.
  * 5. Wrapping: a name alone on its line above its control, or one part
- *    alone on a wrapped row's last line.
+ *    alone on a wrapped row's last line where it could share it: where it
+ *    fits on one line beside the part before it, which is the only part
+ *    a wrap can move down to it.
  *
  * A line of text is measured by its line box, as CSS lays it out: the
  * text's Range rect grown by half the leading above and below. In a
@@ -666,13 +668,18 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             const held = union(controls.map((it) => it.v));
             return need <= content.r - content.l - (held.r - held.l) + LIMIT;
           };
+          // A lone last part has company only where the part before it, the last on the line above, fits beside it on a line: a legendary row's LA with LR under its AC, HP and Lair is alone by need where Lair with LA and LR runs wider than the line (FU32-LAIR-ALONE).
+          const couldShare = (above: Item[], lone: Item) => {
+            const last = above.reduce((a, c) => (c.box.l > a.box.l ? c : a));
+            return last.box.r - last.box.l + gap + (lone.box.r - lone.box.l) <= content.r - content.l + LIMIT;
+          };
           for (let i = 1; i < lines.length; i++) {
             const prev = lines[i - 1]!.items.filter((it) => !ownLine(it));
             const cur = lines[i]!.items.filter((it) => !ownLine(it));
             if (!prev.length || !cur.length) continue;
             if (i === 1 && prev.every(words) && !prev.some(prose) && cur.some((it) => !words(it))) {
               if (roomBeside(prev, cur)) push({ check: "wrap-label", role: roleOf(el), name: nameOf(el), offset: round(mid(cur[0]!.box) - mid(prev[0]!.box)), box: union([...prev, ...cur].map((it) => it.box)), what: `${prev.map((it) => it.what).join(" + ")} alone above ${cur.map((it) => it.what).join(" + ")}`, detail: `in ${width} px` });
-            } else if (i === lines.length - 1 && cur.length === 1 && prev.length >= 2 && !choices && !fills(cur[0]!)) {
+            } else if (i === lines.length - 1 && cur.length === 1 && prev.length >= 2 && !choices && !fills(cur[0]!) && couldShare(prev, cur[0]!)) {
               push({ check: "wrap-orphan", role: roleOf(el), name: nameOf(el), offset: round(mid(cur[0]!.box) - mid(prev[0]!.box)), box: union([...prev, ...cur].map((it) => it.box)), what: `${cur[0]!.what} alone under ${prev.map((it) => it.what).join(" + ")}`, detail: `in ${width} px` });
             }
           }
