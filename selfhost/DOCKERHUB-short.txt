@@ -1,0 +1,1 @@
+A self-hosted virtual tabletop for D&D groups playing the 2024 rules, made for phones first
