@@ -1,4 +1,7 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.27.1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
+# The frontend that reads this file, pinned like the images below: it decides
+# how every step builds. Refresh with
+# `docker buildx imagetools inspect docker/dockerfile:1`.
 
 # The base is pinned by digest as well as by tag, so a rebuild a year from now
 # gets this runtime rather than whatever `24-trixie-slim` has moved to. The

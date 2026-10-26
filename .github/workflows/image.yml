@@ -15,8 +15,12 @@
 # never pushes a version Docker Hub already has, and it moves X.Y and latest
 # only forward (scripts/release-tags.ts).
 #
-# A run on a ci/ branch that changes the image, and a run started by hand,
-# do the checks and the smoke test, and never push.
+# A run on a ci/ branch that changes the image's own files, and a run
+# started by hand, do the checks and the smoke test, and never push. A change
+# to the app's code alone (server/, shared/, client/, db/, public/) does not
+# start a branch run, so the image first meets such a change in the next
+# release's run, which fails before it pushes anything if the image is
+# broken.
 #
 # Only actions/checkout, pinned as in ci.yml. Everything else is the docker
 # CLI and buildx in run steps, so no third-party action ever sees the token.
@@ -30,11 +34,12 @@ on:
     # apply path filters to tags.
     paths:
       - Dockerfile
+      - .dockerignore
       - selfhost/**
       - docker/**
       - docker-compose.server.yml
       - .github/workflows/image.yml
-      - scripts/selfhost-compose.ts
+      - scripts/**
       - package.json
       - pnpm-lock.yaml
   workflow_dispatch:
@@ -54,6 +59,9 @@ env:
   # the one that was reviewed. Refresh deliberately with
   # `docker buildx imagetools inspect moby/buildkit:buildx-stable-1`.
   BUILDKIT_IMAGE: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+  # The SBOM scanner, pinned the same way. Refresh with
+  # `docker buildx imagetools inspect docker/buildkit-syft-scanner:stable-1`.
+  SBOM_SCANNER: docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
 
 jobs:
   check:
@@ -143,7 +151,18 @@ jobs:
           REVISION: ${{ needs.check.outputs.sha }}
         run: |
           docker buildx build --platform linux/arm64 \
-            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --load --tag raccoon-vtt:arm64 .
+      # The two native modules, which pnpm installs per CPU, load and work.
+      - name: sharp and argon2 run on arm64
+        run: |
+          docker run --rm --read-only --network none raccoon-vtt:arm64 node --input-type=module -e "
+            const sharp = (await import('sharp')).default;
+            const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#808080' } }).png().toBuffer();
+            const { hash, verify } = await import('@node-rs/argon2');
+            if (!(await verify(await hash('raccoon'), 'raccoon'))) throw new Error('argon2 failed');
+            console.log('sharp made a ' + png.length + ' byte PNG, and argon2 hashed and verified, on ' + process.arch);
+          "
 
   # The smoke test of a run that does not publish. A tag run does the same
   # inside its publish job, on the image it then pushes.
@@ -203,6 +222,9 @@ jobs:
       VERSION: ${{ needs.check.outputs.version }}
       MINOR: ${{ needs.check.outputs.minor }}
       REVISION: ${{ needs.check.outputs.sha }}
+      # The username is an account name, not a credential. Only the push
+      # step sees the token.
+      IMAGE: docker.io/${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/raccoon-vtt
     steps:
       - name: The Docker Hub secrets are set
         env:
@@ -219,6 +241,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # One source for the image's name: the one hosts pull, from the
+      # generator's IMAGE through selfhost/compose.yml.
+      - name: The repository pushed to is the one hosts pull
+        run: |
+          pulled=$(sed -n 's/^ *image: ${RACCOON_IMAGE:-\([^}]*\)}:.*/\1/p' selfhost/compose.yml)
+          if [ "$pulled" != "$IMAGE" ]; then
+            echo "::error::selfhost/compose.yml pulls '$pulled', but this job would push to '$IMAGE'. Change IMAGE in scripts/selfhost-compose.ts, or the dockerhub environment's namespace."
+            exit 1
+          fi
       # QEMU for arm64, from tonistiigi/binfmt qemu-v10.2.1 by digest. Only
       # the production install runs emulated: the Dockerfile builds the
       # client on the runner's own platform.
@@ -244,6 +275,13 @@ jobs:
           echo "Built linux/amd64 with config $config."
       - name: Smoke test
         run: sh selfhost/smoke-test.sh raccoon-vtt:smoke
+      # Both architectures into the builder's cache before the login, so the
+      # emulated arm64 install never runs while the token is on disk. The
+      # push below then only exports from this cache.
+      - name: Build both architectures into the cache
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
       # `latest` and X.Y only move forward (scripts/release-tags.ts). The
       # tags are read from the repository now, inside the one release slot,
       # so a tag pushed while this run waited still counts.
@@ -253,14 +291,14 @@ jobs:
           node_image=$(sed -n 's/^ARG NODE_IMAGE=//p' Dockerfile)
           docker run --rm -i --network none --read-only --user "$(id -u):$(id -g)" \
             --volume "$PWD:/repo:ro" --workdir /repo "$node_image" \
-            node scripts/release-tags.ts "$VERSION" < "$RUNNER_TEMP/tags.txt" | tee -a "$GITHUB_ENV"
+            node scripts/release-tags.ts "$VERSION" < "$RUNNER_TEMP/tags.txt" > "$RUNNER_TEMP/floating.env"
+          cat "$RUNNER_TEMP/floating.env" | tee -a "$GITHUB_ENV"
       # The login lives inside this one step: the token reaches docker login
       # on stdin, never on a command line, and the trap logs out however the
       # step ends. Both architectures are pushed by digest first, and tagged
       # only once the amd64 image is shown to be the one smoke-tested.
       - name: Push, check and tag
         env:
-          IMAGE: docker.io/${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/raccoon-vtt
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
@@ -277,7 +315,7 @@ jobs:
           esac
           docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --provenance mode=max --sbom true \
+            --provenance mode=max --sbom "generator=$SBOM_SCANNER" \
             --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
             --metadata-file "$RUNNER_TEMP/push.json" .
           index=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/push.json")

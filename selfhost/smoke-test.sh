@@ -30,7 +30,18 @@ if [ "${server%%.*}" -lt "${SMOKE_DOCKER_MIN:-28}" ]; then
   echo "Docker Engine $server is too old. compose.yml's internal networks set gateway_mode_ipv4: isolated, which needs Docker Engine 28 or later." >&2
   exit 1
 fi
-docker compose version
+# The oldest Compose tested with the inline configs, the volume subpath
+# mounts and restart in depends_on, as README.md and compose.yml say.
+compose_version=$(docker compose version --short)
+compose_version=${compose_version#v}
+major=${compose_version%%.*}
+rest=${compose_version#*.}
+minor=${rest%%[!0-9]*}
+if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 31 ]; }; then
+  echo "Docker Compose $compose_version is too old. compose.yml needs 2.31 or later." >&2
+  exit 1
+fi
+echo "Docker Engine $server, Docker Compose $compose_version."
 
 dir=$(mktemp -d)
 compose() {
