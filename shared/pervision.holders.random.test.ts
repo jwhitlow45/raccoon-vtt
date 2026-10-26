@@ -15,7 +15,8 @@ import { DM, chance, env, int, member, pick, rng, room, scene } from "./testutil
  * applied op is checked against these invariants:
  *
  * - L1, the list: no player twice, at most 6 on, only members on the
- *   roster, and a list only on a per-player scene.
+ *   roster, an entry on only for a player, and a list only on a
+ *   per-player scene.
  * - L2, the layers: each under its own key, only on a per-player scene,
  *   and only for a member whose entry is on.
  * - J1, joins: `sys.explore`'s join appends, in its order, each player who
@@ -101,7 +102,8 @@ function opFor(r: () => number, state: RoomState): Op {
     const id = pick(r, PLAYERS);
     return { t: "sys.memberJoin", member: { id, name: id, color: "#123456", kind: "player", createdAt: "2026-10-01T00:00:00.000Z" } };
   }
-  return { t: "sys.memberSetKind", memberId: pick(r, PLAYERS), kind: chance(r, 0.5) ? "dm" : "player" };
+  if (roll < 0.97) return { t: "sys.memberSetKind", memberId: pick(r, PLAYERS), kind: chance(r, 0.5) ? "dm" : "player" };
+  return { t: "member.update", memberId: pick(r, PLAYERS), name: "Renamed" };
 }
 
 /** The bits of a layer's tile, or none. */
@@ -136,7 +138,7 @@ function expectedJoin(before: readonly SightHolder[], join: readonly { memberId:
   const out = before.map((e) => ({ ...e }));
   for (const j of join) {
     if (out.some((e) => e.memberId === j.memberId) || state.members[j.memberId]?.kind !== "player") continue;
-    out.push({ memberId: j.memberId, on: j.on && out.filter((e) => e.on).length < LIMITS.sightHoldersPerScene });
+    out.push({ memberId: j.memberId, on: j.on && out.filter((e) => e.on && state.members[e.memberId]?.kind === "player").length < LIMITS.sightHoldersPerScene });
   }
   return out;
 }
@@ -152,6 +154,7 @@ function check(before: RoomState, op: Op, after: RoomState, undone: boolean, whe
     assert.equal(new Set(ids).size, ids.length, `${where} L1: no player twice`);
     assert.ok(list.entries.filter((e) => e.on).length <= LIMITS.sightHoldersPerScene, `${where} L1: at most 6 on`);
     for (const id of ids) assert.ok(after.members[id], `${where} L1: ${id} is on the roster`);
+    for (const e of list.entries) if (e.on) assert.equal(after.members[e.memberId]?.kind, "player", `${where} L1: ${e.memberId}'s entry is on, so they are a player`);
   }
   for (const [key, tile] of Object.entries(after.exploredBy)) {
     assert.equal(key, holderTileKey(tile.sceneId, tile.memberId, tile.tx, tile.ty), `${where} L2: a layer tile under its own key`);
@@ -274,7 +277,7 @@ describe("the holder list, the layers and the fold over random sequences (6.1, 6
       const undo: { entries: NonNullable<Extract<ReturnType<typeof applyOp>, { ok: true }>["inverse"]> }[] = [];
       for (let i = 0; i < 60; i++) {
         const undoing = undo.length > 0 && chance(r, 0.12);
-        const op: Op = undoing ? { t: "sys.restore", entries: undo.pop()!.entries, from: "undo" } : opFor(r, state);
+        const op: Op = undoing ? { t: "sys.restore", entries: undo.pop()!.entries, from: "undo", deps: true } : opFor(r, state);
         const where = `seed ${seed} op ${i} (${op.t})`;
         if (!opSchema.safeParse(op).success) continue;
         const was = JSON.stringify(state);
@@ -285,7 +288,8 @@ describe("the holder list, the layers and the fold over random sequences (6.1, 6
           continue;
         }
         check(state, op, result.state, undoing, where);
-        if (!undoing && result.inverse && result.inverse.length > 0) undo.push({ entries: result.inverse });
+        // The server puts the DM's ops on the undo stack, never a system op such as the explore step.
+        if (!undoing && !op.t.startsWith("sys.") && result.inverse && result.inverse.length > 0) undo.push({ entries: result.inverse });
         state = result.state;
       }
     }

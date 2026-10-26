@@ -156,7 +156,8 @@ function joinHolders(tx: Tx, scene: Scene, join: readonly { memberId: string; on
   const entries = [...list.entries];
   for (const j of join) {
     if (entries.some((e) => e.memberId === j.memberId) || tx.state.members[j.memberId]?.kind !== "player") continue;
-    entries.push({ memberId: j.memberId, on: j.on && entries.filter((e) => e.on).length < LIMITS.sightHoldersPerScene });
+    // Only players' entries hold a place, so one left on for a member since made DM keeps no player out (review PV1-O5).
+    entries.push({ memberId: j.memberId, on: j.on && entries.filter((e) => e.on && tx.state.members[e.memberId]?.kind === "player").length < LIMITS.sightHoldersPerScene });
   }
   if (entries.length !== list.entries.length) tx.write(keys.holders(scene.id), { ...list, entries });
 }
@@ -192,6 +193,14 @@ export function visionHolders(tx: Tx, op: OpOf<"vision.holders">): void {
  * the undo step, so undoing the switch does not split the maps again: each
  * holder then starts from the pooled map. Only scenes the op wrote can have
  * stopped.
+ *
+ * Then, after an op that changed a holder list or the roster, an entry on
+ * for a member who is no player turns off, and every layer of a member who
+ * no longer sees for themselves on its scene goes, as bookkeeping too. An
+ * undo or a redo of the DM's pick restores the list without passing
+ * `visionHolders`, which forgets the layers of the holders it turns off,
+ * and would otherwise leave a layer the restored list no longer allows, or
+ * an entry on for a player made DM since (reviews PV1-ASTRA-2, PV1-O5).
  */
 export function foldSight(tx: Tx, before: RoomState): void {
   for (const sceneId of Object.keys(before.scenes).sort()) {
@@ -205,6 +214,21 @@ export function foldSight(tx: Tx, before: RoomState): void {
     for (const memberId of owners) forgetHolder(tx, sceneId, memberId);
     if (list) tx.writeBookkeeping(keys.holders(sceneId), null);
   }
+  if (tx.state.holders === before.holders && tx.state.members === before.members) return;
+  for (const sceneId of Object.keys(tx.state.holders ?? {}).sort()) {
+    const list = tx.state.holders[sceneId]!;
+    if (!list.entries.some((e) => e.on && tx.state.members[e.memberId]?.kind !== "player")) continue;
+    tx.writeBookkeeping(keys.holders(sceneId), { ...list, entries: list.entries.map((e) => (e.on && tx.state.members[e.memberId]?.kind !== "player" ? { memberId: e.memberId, on: false } : e)) });
+  }
+  const scenes = new Set(Object.values(tx.state.exploredBy ?? {}).map((t) => t.sceneId));
+  for (const sceneId of [...scenes].sort()) {
+    for (const memberId of layerOwners(tx.state, sceneId)) if (!seesForThemselves(tx.state, sceneId, memberId)) forgetHolder(tx, sceneId, memberId);
+  }
+}
+
+/** Whether a member holds sight on a scene: a player whose entry on its list is on (6.1). */
+function seesForThemselves(state: RoomState, sceneId: string, memberId: string): boolean {
+  return state.members[memberId]?.kind === "player" && state.holders?.[sceneId]?.entries.some((e) => e.on && e.memberId === memberId) === true;
 }
 
 /** ORs each holder's layer into the party's, a tile at a time in tile order, as bookkeeping. */

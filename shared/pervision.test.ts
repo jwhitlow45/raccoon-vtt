@@ -125,6 +125,39 @@ describe("the holder list (6.1)", () => {
     assert.equal(undone.exploredBy[holderTileKey("s1", "p1", 0, 0)], undefined);
   });
 
+  test("undoing a tick forgets the map the holder made since, so ticking them again starts from the party's (PV1-ASTRA-2)", () => {
+    const s = perPlayerRoom();
+    const tick = applyOp(s, { t: "vision.holders", sceneId: "s1", on: ["p1", "p2", "p3"] }, DM, env(5));
+    assert.ok(tick.ok);
+    const bits = layerTile("s1", { x: 20, y: 20, w: 2, h: 2 }).bits;
+    const explored = apply(tick.state, { t: "sys.explore", sceneId: "s1", tiles: [], members: [{ memberId: "p3", tiles: [{ tx: 1, ty: 1, bits }] }] });
+    assert.ok(explored.exploredBy[holderTileKey("s1", "p3", 1, 1)]);
+    const undone = apply(explored, { t: "sys.restore", entries: tick.inverse!, from: "undo", deps: true });
+    assert.equal(undone.holders.s1!.entries.find((e) => e.memberId === "p3")?.on, false);
+    assert.equal(undone.exploredBy[holderTileKey("s1", "p3", 1, 1)], undefined, "p3 sees for themselves no longer, so their map goes");
+    assert.ok(undone.exploredBy[holderTileKey("s1", "p1", 0, 0)], "the others keep theirs");
+    const again = apply(undone, { t: "vision.holders", sceneId: "s1", on: ["p1", "p2", "p3"] });
+    assert.equal(again.exploredBy[holderTileKey("s1", "p3", 1, 1)], undefined, "ticked again, p3 starts from the party's map");
+  });
+
+  test("a player made DM sees for themselves no more, and a join counts only players' entries (PV1-O5)", () => {
+    const s = perPlayerRoom();
+    const made = apply(s, { t: "sys.memberSetKind", memberId: "p1", kind: "dm" });
+    assert.equal(made.holders.s1!.entries.find((e) => e.memberId === "p1")?.on, false);
+    assert.equal(made.exploredBy[holderTileKey("s1", "p1", 0, 0)], undefined);
+    assert.ok(made.exploredBy[holderTileKey("s1", "p2", 0, 0)]);
+    // A list from before this rule, a DM's entry still on among six.
+    const old = perPlayerRoom();
+    for (const id of ["p4", "p5", "p6", "p7"]) old.members[id] = member(id);
+    old.members.p1 = { ...old.members.p1!, kind: "dm" };
+    old.holders.s1 = { sceneId: "s1", rev: 1, entries: ["p1", "p2", "p4", "p5", "p6", "p7"].map((memberId) => ({ memberId, on: true })) };
+    const joined = apply(old, { t: "sys.explore", sceneId: "s1", tiles: [], join: [{ memberId: "p3x", on: true }] });
+    assert.equal(joined.holders.s1, old.holders.s1, "no such member joins");
+    old.members.p8 = member("p8");
+    const eighth = apply(old, { t: "sys.explore", sceneId: "s1", tiles: [], join: [{ memberId: "p8", on: true }] });
+    assert.deepEqual(eighth.holders.s1!.entries.at(-1), { memberId: "p8", on: true }, "five players are on, so p8 joins on");
+  });
+
   test("the explore step's joins go on in order while fewer than six are on, once each, and only players", () => {
     const s = perPlayerRoom();
     for (const id of ["p4", "p5", "p6", "p7", "p8"]) s.members[id] = member(id);
