@@ -22,7 +22,7 @@ import { footprintRect, hexAnchor, occupiedHexes, sizeCategory, tokenHeightFt } 
 import { clamp, yawVector, type Point, type Rect } from "#shared/rules/geom.ts";
 import { rangeGround } from "#shared/rules/heights.ts";
 import type { Grid } from "#shared/rules/grid.ts";
-import { cornerAt, hexAt, hexCenter, hexCorners, hexKey, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexKey, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { hexBallOutline } from "../../lib/scene.ts";
 
 /**
@@ -685,7 +685,12 @@ export function movePatch(g: Grid, t: Pick<AreaTemplate, "origin">, dx: number, 
   if (g.shape === "hex") {
     const from = hexCenter(g, { col: 0, row: 0 });
     const to = hexCenter(g, hexAt(g, { x: from.x + dx, y: from.y + dy }));
-    return { origin: { x: t.origin.x + (to.x - from.x), y: t.origin.y + (to.y - from.y), z: t.origin.z } };
+    const moved = { x: t.origin.x + (to.x - from.x), y: t.origin.y + (to.y - from.y) };
+    // A corner is stored rounded (hex.ts cornerAt), so one moved by a step lands a hair off the next: snapped again, it is the corner a fresh placement there takes.
+    const snapped = snapPoint(g, t.origin);
+    const onLattice = Math.abs(snapped.x - t.origin.x) < 1e-6 && Math.abs(snapped.y - t.origin.y) < 1e-6;
+    const at = onLattice ? snapPoint(g, moved) : moved;
+    return { origin: { x: at.x, y: at.y, z: t.origin.z } };
   }
   return { origin: { x: t.origin.x + Math.round(dx), y: t.origin.y + Math.round(dy), z: t.origin.z } };
 }
@@ -797,10 +802,21 @@ export function handlePoint(t: AreaTemplateInput, ctx: AreaContext, beyondCells:
   return { x: o.x + d.x * (L + beyondCells), y: o.y + d.y * (L + beyondCells) };
 }
 
-/** Whether a map point is inside a template's shading slice, for tapping a placed area to pick it. */
+/**
+ * Whether a map point is inside a template's shading slice, for tapping a
+ * placed area to pick it. On hexes an emanation is the hexes within its
+ * steps, as its outline draws them (areaOutline), so a tap picks it only
+ * on one of those hexes, not in the rounded box the rules bound it by.
+ */
 export function areaContains(t: AreaTemplateInput, ctx: AreaContext, p: Point): boolean {
   const area = resolveArea(t, ctx);
-  return !!area && (area.shade ?? area.shape).inside(p.x, p.y, area.originZ);
+  if (!area) return false;
+  if (area.reach) {
+    const { g, from, steps } = area.reach;
+    const at = hexAt(g, p);
+    return from.some((h) => hexDistance(g, h, at) <= steps);
+  }
+  return (area.shade ?? area.shape).inside(p.x, p.y, area.originZ);
 }
 
 /** The height in feet of a point a sphere or cylinder is dropped on: a token's feet, or the ground. */

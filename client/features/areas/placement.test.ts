@@ -628,7 +628,29 @@ describe("placing areas on a hex scene (docs/design-v1-hex-grids.md HX-D11)", ()
         const h = hexAt(g, fromCorner);
         const corners = [h, ...hexNeighbors(g, h)].flatMap((n) => hexCorners(g, n).map((c) => cornerAt(g, c)));
         assert.ok(corners.some((c) => Math.hypot(c.x - fromCorner.x, c.y - fromCorner.y) < 1 / 64), "a corner lands on a corner");
+        // Exactly the stored corner a fresh placement there takes, not a hair off it (HX3-OPUS-08).
+        assert.ok(corners.some((c) => c.x === fromCorner.x && c.y === fromCorner.y), `exactly a corner: ${fromCorner.x},${fromCorner.y}`);
       }
+    });
+
+    test(`${orient}: a tap picks a hex emanation only on the hexes its outline draws round (HX3-OPUS-04)`, () => {
+      const cleric = on("c", "medium", { col: 10, row: 10 });
+      const tokens = { c: cleric };
+      const aura = { ...placed(draft({ shape: "emanation", size: 10, fromId: "c", casterId: "c", attached: true }), tokens), sceneId: "s" };
+      const ctx = hexCtx(tokens);
+      const ref = tokenRefHex(g, cleric);
+      let outside = 0;
+      for (let row = 5; row < 16; row++) {
+        for (let col = 5; col < 16; col++) {
+          const h = { col, row };
+          const c = hexCenter(g, h);
+          const within = hexDistance(g, ref, h) <= 2;
+          // Its middle and a point near a corner, inside the hex.
+          for (const p of [c, { x: c.x + 0.3, y: c.y + 0.15 }]) assert.equal(areaContains(aura, ctx, p), within, `${col},${row} at ${p.x},${p.y}`);
+          if (!within && hexDistance(g, ref, h) === 3) outside++;
+        }
+      }
+      assert.ok(outside > 0);
     });
 
     test(`${orient}: an emanation's outline runs round the hexes it covers, and a stationary one keeps its size`, () => {
