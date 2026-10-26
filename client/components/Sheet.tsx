@@ -1,8 +1,8 @@
-import { useCallback, useRef, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { subpageBack, subpageKey, usePanelScroll, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
-import { useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
+import { bodyHoldsField, useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { useSheetDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
@@ -67,7 +67,11 @@ export type SheetMode = "bottom" | "side" | "full";
  * visible area's bottom with its height capped to fit there (sheetCap.ts),
  * and on the right or over the whole screen it takes the visible area's
  * height. The field with focus scrolls into view in its body, with its
- * form, such as an amount's Spend and Cancel (useFieldInView).
+ * form, such as an amount's Spend and Cancel (useFieldInView). Where its
+ * body is then too short to hold the field and its buttons, as on a phone
+ * held sideways at 130%, it takes the visible area's whole height over the
+ * bars while the keyboard stays up (`onTall`), still not modal, so focus
+ * stays in the field, and comes back to its shape as the keyboard closes.
  */
 export function Sheet(props: {
   ref?: Ref<HTMLElement>;
@@ -110,6 +114,8 @@ export function Sheet(props: {
   onExpand?(on: boolean): void;
   /** The sheet's height cap at the foot for the layout now, in layout px (sheetCap.ts), which a long swipe from full screen measures by after a change of layout. */
   cap?: number;
+  /** Whether it took the visible area's whole height to show the field typed in, which leaves the dock no edge to ride. */
+  onTall?(tall: boolean): void;
   children: ReactNode;
 }) {
   const { mode, inset, subpage } = props;
@@ -146,7 +152,17 @@ export function Sheet(props: {
   useSheetDialog(dialogRef, { shown, modal: mode === "full" || (filled && !swipe.rising), onCancel: props.onClose, hideFocus: props.hideFocus, modalFocus: filled ? titleRef : undefined });
   // After the dialog opens, since a closed dialog's body has no box to scroll.
   usePanelScroll(props.scrollKey ?? null, subpage ?? null, bodyRef, props.scrollSubject ?? null);
-  useFieldInView(bodyRef, view, theme.space(2));
+  // Decided once the body has laid out over the keyboard, and kept until the keyboard closes, so the shape never flips under a finger.
+  const [tall, setTall] = useState(false);
+  const canTall = view !== null && mode !== "full" && !filled;
+  useLayoutEffect(() => {
+    if (!canTall) setTall(false);
+    else if (!tall && bodyRef.current && bodyHoldsField(bodyRef.current, theme.space(2)) === false) setTall(true);
+  }, [canTall, view, tall]);
+  const { onTall } = props;
+  useEffect(() => onTall?.(tall), [onTall, tall]);
+  useEffect(() => () => onTall?.(false), [onTall]);
+  useFieldInView(bodyRef, useMemo(() => ({ view, tall }), [view, tall]), theme.space(2));
   const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
   const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
   const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });
@@ -212,7 +228,9 @@ export function Sheet(props: {
   const fullHeight: CSSProperties = { ...wholeScreen, ...bottomWidth, borderRadius: sheetCorners, boxShadow: theme.shadow.sheet };
   // Beside the map while a drag holds it above its normal top, so it is drawn over the bars as it rises.
   const rising: CSSProperties = { ...fullHeight, zIndex: theme.z.overBars };
-  const shape = swipe.rising ? rising : filled ? fullHeight : box;
+  // Typing with no room for the field: the visible area's height over the bars, at the foot as a rising sheet stands, on the right at its own width.
+  const tallShape: CSSProperties = mode === "side" && keyboard ? { ...box, top: `${keyboard.top}px`, bottom: `${keyboard.inset}px`, zIndex: theme.z.overBars } : rising;
+  const shape = swipe.rising ? rising : filled ? fullHeight : tall && canTall ? tallShape : box;
   return (
     <dialog
       ref={setDialog}

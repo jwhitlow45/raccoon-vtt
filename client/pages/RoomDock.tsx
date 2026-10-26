@@ -256,7 +256,9 @@ export function PaneDockRow(props: { ref?: Ref<HTMLDivElement>; pane: RefObject<
  * name, whose tap shows the bar as "Show Thorn actions" does, with no
  * close of its own, so the header holds one close, the sheet's. Then the
  * alerts summary. The sheet's title shrinks first, down to a few letters,
- * then the button's name and the summary's text.
+ * then the button's name and the summary's text. Each is marked as the
+ * dock's (`data-rvtt-dock-action`), for the checks that find the dock
+ * wherever it stands.
  */
 export function DockHeaderActions(props: { summary: AlertsSummary | null; actions: DockActions; showRef: Ref<HTMLButtonElement>; summaryRef: Ref<HTMLButtonElement> }) {
   const bar = useStore(useScoped(dockSlot), (s) => s.bar);
@@ -264,12 +266,12 @@ export function DockHeaderActions(props: { summary: AlertsSummary | null; action
   return (
     <>
       {bar ? (
-        <Button ref={props.showRef} size="sm" aria-label={bar.show} title={bar.show} onClick={actions.showBar} style={headerButton}>
+        <Button ref={props.showRef} size="sm" aria-label={bar.show} title={bar.show} onClick={actions.showBar} style={headerButton} data-rvtt-dock-action="">
           <span style={ellipsis}>{bar.text}</span>
         </Button>
       ) : null}
       {summary ? (
-        <Button ref={props.summaryRef} size="sm" aria-label={summary.name} title={summary.name} onClick={() => actions.showAlerts(summary)} style={{ ...headerButton, gap: theme.space(1.5) }}>
+        <Button ref={props.summaryRef} size="sm" aria-label={summary.name} title={summary.name} onClick={() => actions.showAlerts(summary)} style={{ ...headerButton, gap: theme.space(1.5) }} data-rvtt-dock-action="">
           {/* No chevron here, as Show beside it has none: the header's few pixels go to the words. */}
           <SummaryWords summary={summary} chevron={false} />
         </Button>

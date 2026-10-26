@@ -1,9 +1,9 @@
-import { useId, useLayoutEffect, useRef, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { layoutWidth } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { useBackClose } from "../lib/backClose.ts";
-import { useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
+import { bodyHoldsField, useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { useModalDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
@@ -171,7 +171,11 @@ export function dialogCard(layoutPx: number, props: Pick<DialogProps, "phone" | 
  * While the on-screen keyboard is open (lib/keyboardInset.ts) the dialog
  * covers only what shows above it, so a sheet from the bottom stands on
  * the keyboard and a whole-screen card ends there, and the field with
- * focus scrolls into view in the body with its form.
+ * focus scrolls into view in the body with its form. Where the body is
+ * then too short for the field and what goes with it, as on a phone held
+ * sideways at 130%, the card takes all of what shows and its header steps
+ * out of sight (the dialog keeps its name), so the field and the footer's
+ * buttons show together, until the keyboard closes.
  */
 export function Dialog(props: DialogProps) {
   const { onClose, header = true } = props;
@@ -188,7 +192,14 @@ export function Dialog(props: DialogProps) {
   const deviceScale = useUiScale();
   const scale = props.zoom === false ? 1 : deviceScale;
   const view = useKeyboardView();
-  useFieldInView(body, view, theme.space(2));
+  // Decided once the body has laid out over the keyboard, and kept until it closes, so nothing moves under a finger on its way to Add.
+  const [cramped, setCramped] = useState(false);
+  useLayoutEffect(() => {
+    if (view === null) setCramped(false);
+    else if (!cramped && body.current && bodyHoldsField(body.current, theme.space(2)) === false) setCramped(true);
+  }, [view, cramped]);
+  const tight = cramped && view !== null;
+  useFieldInView(body, useMemo(() => ({ view, tight }), [view, tight]), theme.space(2));
   // Its title names its step, as the scene menu's do, so a new step ends a drag.
   useSheetSwipe(card, { enabled: bottom, onClose, scroller: body, item: props.title, clip: "screen", drafts });
   const headlessSheet = bottom && !header;
@@ -235,9 +246,10 @@ export function Dialog(props: DialogProps) {
           boxShadow: theme.shadow.dialog,
           overflow: "hidden",
           ...cardStyle,
+          ...(tight ? { alignSelf: "stretch", height: "auto", maxHeight: "none" } : null),
         }}
       >
-        {header ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider grab={bottom} /> : null}
+        {header && !tight ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider grab={bottom} /> : null}
         <div ref={body} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: BODY_PAD, ...props.bodyStyle, ...(headlessSheet ? { position: "relative" } : null) }}>
           {/* With no header to hold it, the X-card's pill sits at the top of its body, all it has to swipe by, in the 20 px its content keeps above its first line. */}
           {headlessSheet ? <SheetGrabber /> : null}

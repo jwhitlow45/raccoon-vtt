@@ -27,6 +27,7 @@ import {
   type Chrome,
   type ToastEdges,
   type ToastPlaces,
+  type Typing,
 } from "../canvas/barDock.ts";
 import { BarWidthProbe } from "../canvas/BarWidthProbe.tsx";
 import { SCROLL_FOR_MORE_PX, ScrollForMore } from "../canvas/TokenActionBar.tsx";
@@ -46,7 +47,7 @@ import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
 import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx";
-import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetCap, sheetMode, sheetWidth, sideSheetWidth } from "../components/sheetCap.ts";
+import { headerStacks, SHEET_HEADER, SHEET_HEADER_STACKED, sheetCap, sheetKeyboard, sheetMode, sheetWidth, sideSheetWidth } from "../components/sheetCap.ts";
 import { SHORT_LANDSCAPE_MAX, useRecordOverflow, useTopBars, useTurnPlacement, type TurnPlacement } from "../features/encounter/band.ts";
 import { FightWatch, InitiativeStrip, useYourTurnNotice } from "../features/encounter/InitiativeStrip.tsx";
 import { panelById, panelSections, panelsFor, panelSubject, subpageBack, usePanelScroll, useSubpageFocus, type PanelClose, type PanelDef, type PanelHeader } from "../features/panels.ts";
@@ -330,8 +331,10 @@ function RoomPage() {
    * the toolbar: what stands on the toolbar stands on the keyboard instead,
    * by this much more, in screen px. The tool's options, the token bar,
    * the alerts, a roll card at the foot and a map pane all go up together,
-   * through `chrome` and the panes' insets. The toolbar itself stays under
-   * the keyboard, and the map's insets and size do not change.
+   * placed by the room while typing that Room publishes beside its chrome
+   * (canvas/barDock.ts Typing) and by the panes' insets. The chrome itself,
+   * and every size decision read from it, stays as it was. The toolbar
+   * stays under the keyboard, and the map's insets and size do not change.
    */
   const keyboard = useKeyboardView();
   const keyboardLift = keyboard ? Math.max(0, keyboard.inset - toolbarExact) : 0;
@@ -703,7 +706,16 @@ function RoomPage() {
   const folded = foldsUnderSheet({ width, height, sheetOpen, full, sideRoom });
   const docked = folded && (hasBar || summary !== null);
   // Over the whole screen there is no edge to dock on, nor beside a sideways sheet that leaves a window too little room, so the dock's buttons join the header, as where the dock has no room.
-  const dockInHeader = docked && (full || landscape || !dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR }));
+  /*
+   * While someone types, the dock rides the sheet raised onto the keyboard
+   * (Sheet.tsx), so it fits only if it stays below the bars and the visible
+   * area's top there, and a sheet that took the visible area's height to
+   * show its field (`sheetTall`) leaves it no edge at all: its buttons join
+   * the header.
+   */
+  const sheetKeys = sheetKeyboard(keyboard, zoom);
+  const [sheetTall, setSheetTall] = useState(false);
+  const dockInHeader = docked && (full || landscape || sheetTall || !dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, keyboard: sheetKeys }));
   const sheetHeight = useLayoutHeight(sheetEl, zoom);
   // The dock's row rides the sheet's swipe (lib/sheetSwipe.ts).
   const [dockEl, setDockEl] = useState<HTMLElement | null>(null);
@@ -751,20 +763,21 @@ function RoomPage() {
     () =>
       topBarExact > 0 && toolbarExact > 0
         ? {
-            top: Math.max(topBarExact, keyboardTop) / zoom,
-            bottom: (toolbarExact + keyboardLift + optionsBottom) / zoom,
-            controls: (toolbarExact + keyboardLift + optionsBox.controls) / zoom,
-            toolbar: (toolbarExact + keyboardLift) / zoom,
+            top: topBarExact / zoom,
+            bottom: (toolbarExact + optionsBottom) / zoom,
+            controls: (toolbarExact + optionsBox.controls) / zoom,
+            toolbar: toolbarExact / zoom,
             // Beside the side panel the map never touches the right edge, so its free area keeps no right inset.
             safe: { top: safe.top, right: sideShown ? 0 : safe.right, bottom: safe.bottom, left: safe.left },
             sheet: sheetRight,
           }
         : null,
-    [topBarExact, toolbarExact, optionsBottom, optionsBox.controls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown, keyboardLift, keyboardTop],
+    [topBarExact, toolbarExact, optionsBottom, optionsBox.controls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown],
   );
+  const typing = useMemo<Typing | null>(() => (keyboard ? { top: keyboard.top / zoom, bottom: (keyboard.top + keyboard.height) / zoom, lift: keyboardLift / zoom } : null), [keyboard, keyboardLift, zoom]);
   useLayoutEffect(() => {
-    barDock.setState({ chrome });
-  }, [barDock, chrome]);
+    barDock.setState({ chrome, typing });
+  }, [barDock, chrome, typing]);
 
   /*
    * The notices over the map (design 1.3): with 320 px or more left of the
@@ -932,7 +945,7 @@ function RoomPage() {
 
   const reserveTop = docked && !dockInHeader ? DOCK_PX + DOCK_GAP : undefined;
   // The cap the sheet takes once it stands at its normal height again, with the dock back on its edge where it fits there, for a long swipe from full screen after a change of layout.
-  const normalReserve = docked && !landscape && dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR }) ? DOCK_PX + DOCK_GAP : undefined;
+  const normalReserve = docked && !landscape && dockFits({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, keyboard: sheetKeys }) ? DOCK_PX + DOCK_GAP : undefined;
   const normalCap = sheetCap({ height, safeTop: safe.top, safeBottom: safe.bottom, insetTop: topInset, insetBottom: TOOLBAR, reserveTop: normalReserve });
   const expandSheet = (on: boolean) => ui.expandSheet(on);
   const headerActions = dockInHeader ? <DockHeaderActions summary={summary} actions={dockActions} showRef={showRef} summaryRef={summaryRef} /> : undefined;
@@ -1036,6 +1049,7 @@ function RoomPage() {
             expanded={sheetExpanded}
             onExpand={expandSheet}
             cap={normalCap}
+            onTall={setSheetTall}
             backRef={backRef}
             closeRef={closeRef}
             titleRef={sheetTitleRef}
@@ -1059,6 +1073,7 @@ function RoomPage() {
             expanded={sheetExpanded}
             onExpand={expandSheet}
             cap={normalCap}
+            onTall={setSheetTall}
             backRef={backRef}
             closeRef={closeRef}
           >
@@ -1097,7 +1112,7 @@ function RoomPage() {
             overNotice={overNotice}
             popover={popoverInputs}
             toolbar={toolbarEl}
-            keyboardLift={keyboardLift / zoom}
+            keyboard={keyboard ? keyboard.inset / zoom : null}
           />
         ) : null}
         {/* The toolbar's fill and top edge, under the options, so a row in the toolbar's own row is never painted under them (10.1). */}
@@ -1407,6 +1422,7 @@ function TopBar(props: {
   return (
     <header
       ref={props.ref}
+      data-rvtt-topbar=""
       {...smallUi(props.zoom)}
       style={{
         position: "absolute",
@@ -2288,8 +2304,8 @@ function ToolOptions(props: {
   onShow(): void;
   popover: RefObject<PopoverInputs>;
   toolbar: RefObject<HTMLElement | null>;
-  /** How far the on-screen keyboard lifts the options above the toolbar, in their own px (Room `keyboardLift`). */
-  keyboardLift: number;
+  /** How much of the layout's foot the on-screen keyboard hides, in the options' own px, or null with none: each arrangement stands on it as it stands on the toolbar or the screen's foot. */
+  keyboard: number | null;
 }) {
   const Options = props.tool.Options;
   const own = useRef<HTMLDivElement | null>(null);
@@ -2330,6 +2346,7 @@ function ToolOptions(props: {
         : { left: props.safe.left + theme.space(2), maxWidth: lineMax, lift: 0 };
   const popoverInputs = props.popover;
   const { toolbar, onShow, tucked, covered } = props;
+  const lifted = props.keyboard !== null;
   const frame = useMemo<OptionsFrame>(() => {
     const popover = () => {
       const p = popoverInputs.current;
@@ -2343,7 +2360,8 @@ function ToolOptions(props: {
         rise: () => popover().rise,
         // 6 px above the row's top, or the toolbar's in its row, whatever the control's place inside them (7.3).
         gap: (anchor: Rect) => {
-          const edge = inRow ? toolbar.current : own.current;
+          // Lifted onto the keyboard, the row in the toolbar's row has left the toolbar under it.
+          const edge = inRow && !lifted ? toolbar.current : own.current;
           if (!edge) return theme.layout.popover.gap;
           return anchor.top - edge.getBoundingClientRect().top / uiScaleNow() + theme.layout.popover.gap;
         },
@@ -2359,17 +2377,18 @@ function ToolOptions(props: {
       toolButton: () => toolbar.current?.querySelector<HTMLElement>('button[data-active="true"]') ?? null,
     };
     // `line` is rebuilt each render from these numbers.
-  }, [room, arrangement, inRow, line.left, line.maxWidth, line.lift, popoverInputs, toolbar, tucked, covered, onShow]);
+  }, [room, arrangement, inRow, lifted, line.left, line.maxWidth, line.lift, popoverInputs, toolbar, tucked, covered, onShow]);
   if (!Options) return null;
-  const { keyboardLift } = props;
+  // With the keyboard up, each arrangement's foot stands on it as far up as it stands on the toolbar or the screen's foot now.
+  const onKeys = (normal: string, above: number) => (props.keyboard === null ? normal : `max(${normal}, ${props.keyboard + above}px)`);
   const place: CSSProperties = boxless
     ? // Tucked, or with no row, the options take no height: only the line, or the "options hidden" pill, stands above the toolbar (5.4, 6.6).
-      { left: 0, right: 0, bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + keyboardLift}px)`, height: 0, background: "transparent" }
+      { left: 0, right: 0, bottom: onKeys(`calc(${theme.safe.bottom} + ${TOOLBAR}px)`, 0), height: 0, background: "transparent" }
     : arrangement === "floating"
       ? {
           left: `calc(${theme.safe.left} + ${theme.space(2)}px)`,
           right: "auto",
-          bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + theme.layout.popover.gap + keyboardLift}px)`,
+          bottom: onKeys(`calc(${theme.safe.bottom} + ${TOOLBAR + theme.layout.popover.gap}px)`, theme.layout.popover.gap),
           maxWidth: FLOAT_MAX,
           padding: `${theme.space(1)}px ${theme.space(2)}px`,
           border: `${theme.line.border}px solid ${theme.color.border}`,
@@ -2380,7 +2399,7 @@ function ToolOptions(props: {
             left: `calc(${theme.safe.left} + ${props.edges.left}px)`,
             // Its own padding and border at the right take the 8 px before Panels, so its controls keep the room.
             right: `calc(${theme.safe.mapRight} + ${props.edges.right - theme.space(2) - theme.line.border}px)`,
-            bottom: `calc(${theme.safe.bottom} + ${lift + keyboardLift}px)`,
+            bottom: onKeys(`calc(${theme.safe.bottom} + ${lift}px)`, lift),
             padding: `${theme.space(1)}px ${theme.space(2)}px`,
             border: `${theme.line.border}px solid ${theme.color.border}`,
             borderRadius: theme.radius.md,
@@ -2390,16 +2409,17 @@ function ToolOptions(props: {
               // In the toolbar's row, over its backdrop, from 6 px after the last tool, its 1 px divider and 8 px padding before its first control.
               left: `calc(${theme.safe.left} + ${props.edges.left}px)`,
               right: `calc(${theme.safe.mapRight} + ${props.edges.right}px)`,
-              bottom: `calc(${theme.safe.bottom} + ${keyboardLift}px)`,
+              bottom: onKeys(theme.safe.bottom, 0),
               height: TOOLBAR,
               paddingLeft: theme.space(2),
               borderLeft: `${theme.line.border}px solid ${theme.color.border}`,
-              background: "transparent",
+              // Over the keyboard the toolbar's fill stays under it, so the row takes that fill itself.
+              background: lifted ? theme.color.overlay : "transparent",
             }
           : {
               left: 0,
               right: 0,
-              bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + keyboardLift}px)`,
+              bottom: onKeys(`calc(${theme.safe.bottom} + ${TOOLBAR}px)`, 0),
               minHeight: theme.layout.options.row,
               padding: `${theme.space(1)}px calc(${theme.safe.mapRight} + ${theme.space(2)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
               borderTop: `${theme.line.border}px solid ${theme.color.border}`,
