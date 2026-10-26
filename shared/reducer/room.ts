@@ -229,6 +229,9 @@ export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
   if (p.fogEnabled !== undefined) next.fogEnabled = p.fogEnabled;
   if (p.defaultView === null) delete next.defaultView;
   else if (p.defaultView !== undefined) next.defaultView = p.defaultView;
+  // Top-down is stored as no field, so a scene set back hashes as it did before (undo guards).
+  if (p.suggestedView === "topDown") delete next.suggestedView;
+  else if (p.suggestedView !== undefined) next.suggestedView = p.suggestedView;
   if (p.folder === null) delete next.folder;
   else if (p.folder !== undefined) next.folder = p.folder;
   if (p.thumb === null) delete next.thumb;

@@ -61,6 +61,7 @@ function fullScene(): Required<Scene> {
     vision: { on: false, light: "bright" },
     gridFromFile: true,
     gridShape: "hexRows",
+    suggestedView: "isometric",
   };
 }
 

@@ -155,6 +155,8 @@ const scene = z
     gridFromFile: z.literal(true).optional(),
     // Backups from before hex grids have none, which reads as squares (docs/design-v1-hex-grids.md section 7).
     gridShape: mapSchemas.gridShape.optional(),
+    // Backups from before the isometric view have none, which reads as Top-down (docs/design-v1-isometric-view.md 7).
+    suggestedView: z.literal("isometric").optional(),
   })
   .refine(
     (s) =>

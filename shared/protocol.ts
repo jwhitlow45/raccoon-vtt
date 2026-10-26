@@ -119,6 +119,8 @@ const longText = z.string().max(MAX_CHAT).regex(MULTI_LINE, "control characters 
 const color = z.string().regex(/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/);
 /** A world coordinate in cells. Scenes are at most 200 cells wide, with some room to park things outside. */
 const coord = z.number().min(-1_000).max(1_000);
+/** A table display's view of the DM's camera, in cells or view units (the `view` event). */
+const viewSize = z.number().min(0.01).max(2_000);
 const feet = z.number().int().min(-100_000).max(100_000);
 /** A cell's ground height, as `build.height` paints it. */
 const groundFeet = z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT);
@@ -1818,6 +1820,8 @@ export const clientOps = [
        * came with its own grid (docs/design-v1-hex-grids.md HX-D14).
        */
       gridShape: gridShapeChoice.optional(),
+      /** The view a following device shows (Scene.suggestedView). "topDown" removes the stored field. */
+      suggestedView: z.enum(["topDown", "isometric"]).optional(),
     }),
   }),
   /**
@@ -2595,8 +2599,21 @@ export const ephEventSchema = z.discriminatedUnion("k", [
    * A DM device's camera for table displays (wave 5, docs/design-v1-dm-tools.md
    * 3.1): the center, width and height of its visible map area, in cells.
    * Only a DM sends it, and only display sockets on its scene receive it.
+   *
+   * An Isometric DM adds `iso` (docs/design-v1-isometric-view.md ISO-D17):
+   * its turn, and its canvas's size in view units centered on its middle.
+   * It holds the DM's camera alone, nothing about the map. A page loaded
+   * before it checks events against its old strict schema and drops this
+   * one, so it stops following an Isometric DM until it is reloaded.
    */
-  z.strictObject({ k: z.literal("view"), x: coord, y: coord, w: z.number().min(0.01).max(2_000), h: z.number().min(0.01).max(2_000) }),
+  z.strictObject({
+    k: z.literal("view"),
+    x: coord,
+    y: coord,
+    w: viewSize,
+    h: viewSize,
+    iso: z.strictObject({ turn: z.number().int().min(0).max(3), vw: viewSize, vh: viewSize }).optional(),
+  }),
 ]);
 export type EphEvent = z.infer<typeof ephEventSchema>;
 

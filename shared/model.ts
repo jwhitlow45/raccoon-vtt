@@ -386,6 +386,13 @@ export type Scene = {
    * read it through `sceneGrid` (shared/rules/grid.ts).
    */
   gridShape?: GridShape;
+  /**
+   * The view a device that follows the scene shows here
+   * (docs/design-v1-isometric-view.md 7). Absent reads as Top-down, the
+   * view of every scene from before it, and "topDown" in a patch removes
+   * it, so a scene set back is stored as it was.
+   */
+  suggestedView?: "isometric";
 };
 
 /**

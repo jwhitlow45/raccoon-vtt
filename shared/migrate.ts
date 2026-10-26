@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 25;
-export const OP_VERSION = 24;
+export const SNAPSHOT_VERSION = 26;
+export const OP_VERSION = 25;
 
 export type MigrationStep = {
   from: number;
@@ -179,6 +179,10 @@ export const snapshotMigrations: MigrationStep[] = [
   // reads as squares, so a v24 room is a v25 room as it is. The number moves so that an older build, which would draw a
   // hex scene as squares and read its hexes as squares, refuses a v25 snapshot instead of loading it.
   { from: 24, to: 25, apply: (state) => state },
+  // The isometric view (docs/design-v1-isometric-view.md 7): a scene's `suggestedView` is a new optional field whose
+  // absence reads as Top-down, so a v25 room is a v26 room as it is. The number moves so that an older build, whose
+  // strict state schema refuses the field, refuses a v26 snapshot instead of loading it.
+  { from: 25, to: 26, apply: (state) => state },
 ];
 
 /**
@@ -696,6 +700,24 @@ export const opMigrations: MigrationStep[] = [
     // snapshot and a version 24 op (runMigrations).
     from: 23,
     to: 24,
+    apply: (op) => op,
+  },
+  {
+    // The isometric view (docs/design-v1-isometric-view.md 7): a
+    // `scene.update` may carry `suggestedView`, a new optional field, so no
+    // stored op changes shape and the step is the identity. The `view`
+    // event's `iso` is ephemeral and never stored.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 25, and the shutdown writes version 26 snapshots
+    // (snapshotMigrations). Reload every page left open, table displays
+    // included: there is no client version check, so nothing makes an old
+    // page reload, and an old display drops an Isometric DM's `view` event
+    // until it does. Rollback: restore the backup taken before the deploy,
+    // as for any snapshot version bump. An older build refuses a version 26
+    // snapshot and a version 25 op (runMigrations).
+    from: 24,
+    to: 25,
     apply: (op) => op,
   },
 ];

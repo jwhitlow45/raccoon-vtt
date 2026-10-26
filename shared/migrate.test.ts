@@ -1261,9 +1261,11 @@ describe("per-player vision: op version 23, snapshot version 24 (docs/design-v1-
 });
 
 describe("hex grids, phase H1: op version 24, snapshot version 25 (docs/design-v1-hex-grids.md section 7)", () => {
-  test("are the versions now", () => {
-    assert.equal(OP_VERSION, 24);
-    assert.equal(SNAPSHOT_VERSION, 25);
+  test("brought op version 24 and snapshot version 25", () => {
+    assert.ok(OP_VERSION >= 24);
+    assert.ok(SNAPSHOT_VERSION >= 25);
+    assert.ok(opMigrations.some((s) => s.from === 23 && s.to === 24));
+    assert.ok(snapshotMigrations.some((s) => s.from === 24 && s.to === 25));
   });
 
   test("the snapshot step is the identity, a room with a hex scene, its default and every stamp included", () => {
@@ -1297,5 +1299,35 @@ describe("hex grids, phase H1: op version 24, snapshot version 25 (docs/design-v
   test("a version 24 op and a version 25 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 24, 23, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 25, 24, snapshotMigrations), /down/);
+  });
+});
+
+describe("the isometric view: op version 25, snapshot version 26 (docs/design-v1-isometric-view.md 7)", () => {
+  test("are the versions now", () => {
+    assert.equal(OP_VERSION, 25);
+    assert.equal(SNAPSHOT_VERSION, 26);
+  });
+
+  test("the snapshot step is the identity, a scene's suggested view included", () => {
+    const plain = room();
+    assert.equal(runMigrations(plain, 25, 26, snapshotMigrations), plain);
+    assert.equal(migrateSnapshot(plain, 25), plain);
+    const suggesting = room({ scenes: { s1: { ...room().scenes.s1!, suggestedView: "isometric" }, s2: room().scenes.s2! } });
+    assert.equal(runMigrations(suggesting, 25, 26, snapshotMigrations), suggesting);
+  });
+
+  test("the op step is the identity, a suggested view's patch included", () => {
+    const ops: unknown[] = [
+      { t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric" } },
+      { t: "scene.update", sceneId: "s1", patch: { suggestedView: "topDown", name: "Crypt" } },
+      { t: "log.chat", text: "hi" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 24, 25, opMigrations), op);
+    assert.deepEqual(migrateOp({ t: "log.chat", text: "hi" }, 24), { t: "log.chat", text: "hi" });
+  });
+
+  test("a version 25 op and a version 26 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 25, 24, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 26, 25, snapshotMigrations), /down/);
   });
 });

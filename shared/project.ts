@@ -1576,6 +1576,8 @@ export const SCENE_FOR_PLAYERS = {
   gridFromFile: "dm: the import's mark, which only Find the grid reads",
   // Players' devices snap, draw and measure by it (docs/design-v1-hex-grids.md section 7).
   gridShape: "copied",
+  // A following player's device shows it (docs/design-v1-isometric-view.md 7). It names a view, nothing of the map.
+  suggestedView: "copied",
 } as const satisfies Record<keyof Scene, PlayerField>;
 
 /** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules. */
@@ -1599,6 +1601,8 @@ function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   if (scene.blockMovement !== undefined) out.blockMovement = scene.blockMovement;
   if (scene.vision !== undefined) out.vision = scene.vision;
   if (scene.gridShape !== undefined) out.gridShape = scene.gridShape;
+  // A following player's device shows it (docs/design-v1-isometric-view.md 7). It names a view, nothing of the map.
+  if (scene.suggestedView !== undefined) out.suggestedView = scene.suggestedView;
   return out;
 }
 
