@@ -149,7 +149,10 @@ function tokenVisibleTo(state: RoomState, receiver: Connection, tokenId: string)
  * On a hex scene nothing squeezes and no walls stand until phase H2 of hex
  * grids, so the preview is judged at full size, by the sub-cells inside
  * the hexes it stands on there (docs/design-v1-hex-grids.md HX-D10), as
- * projection judges a creature standing there.
+ * projection judges a creature standing there. The walker path below would
+ * give the same answer, since every walk state lands at that spot at full
+ * size: the hex branch only skips working out those states (review
+ * HX2-SEC-02).
  */
 function previewWithheld(state: RoomState, viewer: Viewer, token: Token, x: number, y: number, path: readonly number[] | undefined): boolean {
   const { squeeze: _squeeze, ...rest } = token;

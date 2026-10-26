@@ -140,13 +140,17 @@ export function isCellFullyFogged(tiles: TileMap, sceneId: string, cell: Cell): 
  * On hexes, every fog sub-cell inside its hexes (docs/design-v1-hex-grids.md
  * HX-D10), so a hex half in a revealed cell shows the creature only when a
  * revealed sub-cell lies inside one of its hexes.
+ *
+ * Only tests read it, against one tile map. The live rule is project.ts
+ * `footprintFogged`, which reads the layers each viewer's fog joins
+ * (reviews HX2-OPUS-09, HX2-SEC-03).
  */
 export function isTokenFullyFogged(g: Grid, tiles: TileMap, sceneId: string, token: PlacedToken): boolean {
   if (g.shape === "hex") return footprintSubcells(g, token).every(([sx, sy]) => isSubcellFogged(tiles, sceneId, sx, sy));
   return occupiedCells(g, token).every((cell) => isCellFullyFogged(tiles, sceneId, cell));
 }
 
-/** Whether one fog sub-cell, by its scene-wide raster index, is fogged. A missing or unreadable tile counts as fogged. */
+/** Whether one fog sub-cell, by its scene-wide raster index, is fogged. A missing or unreadable tile counts as fogged. It decodes the tile each time, so it serves tests, as `isTokenFullyFogged` does. */
 export function isSubcellFogged(tiles: TileMap, sceneId: string, sx: number, sy: number): boolean {
   if (sx < 0 || sy < 0) return true;
   const tx = Math.floor(sx / TILE_SUB);
