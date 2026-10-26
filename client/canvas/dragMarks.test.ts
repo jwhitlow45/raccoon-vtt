@@ -71,6 +71,6 @@ test("the drag layer clips each moving aura by that box, with the creatures Plac
   assert.match(readFileSync(new URL("../features/attach/TetherLayer.tsx", import.meta.url), "utf8"), /const px = tetherPx\(scale\);[\s\S]*strokeWidth=\{px\}[\s\S]*lineCap="round"/);
   const layer = readFileSync(new URL("../features/areas/TemplateLayer.tsx", import.meta.url), "utf8");
   assert.match(layer, /const caught = caughtTokens\(t, ctx, props\.sceneId\);/);
-  assert.match(layer, /<TokenRing key=\{id\} token=\{token\} color=\{t\.color\} scale=\{scale\} \{\.\.\.CAUGHT_RING\} \/>/);
+  assert.match(layer, /<TokenRing key=\{id\} token=\{token\} grid=\{ctx\.grid\} color=\{t\.color\} scale=\{scale\} \{\.\.\.CAUGHT_RING\} \/>/);
 });
 

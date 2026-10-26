@@ -1,7 +1,7 @@
 import { SIZE_CELLS, type Character, type Member, type RoomState, type Scene, type SceneMap, type Token } from "#shared/model.ts";
 import { occupiedHexes, sizeCategory, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
-import { HEX_R, hexCenter, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { HEX_R, hexAt, hexCenter, hexDistance, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import type { Rect } from "./camera.ts";
 
 /**
@@ -62,30 +62,62 @@ export function hexFootprintOutline(g: HexGrid, token: PlacedToken): number[] {
  * reads them.
  */
 export function hexOutline(g: HexGrid, hexes: readonly Hex[]): number[] {
-  // Each side as its two corners, keyed so a side two hexes share has one key either way round.
+  const held = new Set(hexes.map(hexKey));
+  return outerLoop(g, hexes, (h) => held.has(hexKey(h)));
+}
+
+/**
+ * The outline round every hex within `steps` of a set of hexes, as one
+ * closed loop: an emanation's on a hex scene (docs/design-v1-hex-grids.md
+ * HX-D11). Only the ring of hexes exactly `steps` out is walked, so a
+ * 1,000 ft emanation costs the hexes round its edge, not the thousands
+ * inside it.
+ */
+export function hexBallOutline(g: HexGrid, from: readonly Hex[], steps: number): number[] {
+  const away = (h: Hex) => from.reduce((d, f) => Math.min(d, hexDistance(g, f, h)), Infinity);
+  const ring = new Map<string, Hex>();
+  for (const f of from) for (const h of hexRing(g, f, steps)) if (away(h) === steps) ring.set(hexKey(h), h);
+  return outerLoop(g, [...ring.values()], (h) => away(h) <= steps);
+}
+
+/** The hexes exactly `k` steps from one, round the ring from its north-west corner, clockwise on hex rows. */
+function hexRing(g: HexGrid, center: Hex, k: number): Hex[] {
+  if (k <= 0) return [center];
+  let h = center;
+  for (let i = 0; i < k; i++) h = hexNeighbors(g, h)[4]!;
+  const out: Hex[] = [];
+  for (let side = 0; side < 6; side++) {
+    for (let i = 0; i < k; i++) {
+      out.push(h);
+      h = hexNeighbors(g, h)[side]!;
+    }
+  }
+  return out;
+}
+
+/**
+ * The loop along the sides of `edge`'s hexes whose hex across is not
+ * `inside`, each run in its hex's own clockwise turning and chained end to
+ * start, its straight runs merged.
+ */
+function outerLoop(g: HexGrid, edge: readonly Hex[], inside: (h: Hex) => boolean): number[] {
   const key = (p: { x: number; y: number }) => `${Math.round(p.x * 4096)},${Math.round(p.y * 4096)}`;
-  const sides = new Map<string, { a: { x: number; y: number }; b: { x: number; y: number }; n: number }>();
-  for (const h of hexes) {
+  const next = new Map<string, { x: number; y: number }>();
+  let first: { x: number; y: number } | undefined;
+  for (const h of edge) {
+    const c = hexCenter(g, h);
     const pts = hexPoints(g, h);
     for (let i = 0; i < 6; i++) {
       const a = pts[i]!;
       const b = pts[(i + 1) % 6]!;
-      const k = key(a) < key(b) ? `${key(a)}|${key(b)}` : `${key(b)}|${key(a)}`;
-      const seen = sides.get(k);
-      if (seen) seen.n++;
-      else sides.set(k, { a, b, n: 1 });
+      // The hex across a side has its center mirrored through the side's middle.
+      if (inside(hexAt(g, { x: a.x + b.x - c.x, y: a.y + b.y - c.y }))) continue;
+      next.set(key(a), b);
+      first ??= a;
     }
   }
-  // The outer sides, each run in its hex's own turning, chained end to start.
-  const next = new Map<string, { x: number; y: number }>();
-  const first: { x: number; y: number }[] = [];
-  for (const side of sides.values()) {
-    if (side.n !== 1) continue;
-    next.set(key(side.a), side.b);
-    if (first.length === 0) first.push(side.a);
-  }
   const loop: { x: number; y: number }[] = [];
-  let at = first[0];
+  let at = first;
   for (let guard = 0; at && guard <= next.size; guard++) {
     loop.push(at);
     at = next.get(key(at));

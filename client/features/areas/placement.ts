@@ -10,6 +10,7 @@ import {
   defaultIncludeOrigin,
   edgeOrigin,
   emanationFootprint,
+  hexEdgeOrigin,
   MAX_PITCH,
   pitchOf,
   resolveArea,
@@ -17,10 +18,12 @@ import {
   type AreaTemplateInput,
   type AreaToken,
 } from "#shared/rules/aoe.ts";
-import { footprintRect, tokenHeightFt } from "#shared/rules/footprint.ts";
+import { footprintRect, hexAnchor, occupiedHexes, sizeCategory, tokenHeightFt } from "#shared/rules/footprint.ts";
 import { clamp, yawVector, type Point, type Rect } from "#shared/rules/geom.ts";
 import { rangeGround } from "#shared/rules/heights.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import type { Grid } from "#shared/rules/grid.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexKey, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { hexBallOutline } from "../../lib/scene.ts";
 
 /**
  * Placing and aiming areas of effect (design section 9.3), as pure functions
@@ -35,6 +38,13 @@ import { SQUARES } from "#shared/rules/grid.ts";
  * Template origins carry z as whole feet (the op schema says so), so every
  * origin taken from a token is rounded here, once, and the preview uses the
  * rounded value too.
+ *
+ * On a hex scene (docs/design-v1-hex-grids.md HX-D11) a free origin snaps
+ * to the nearest hex corner or center, a cone, line or cube cast from a
+ * token starts at the corner or side midpoint of its hexes' outline where
+ * the aim leaves it, the 45 degree step reads 30, and a placed area moves
+ * by whole steps of the hex lattice. Every function that places by the
+ * grid takes it, so the typecheck lists every caller.
  */
 
 export type Point3 = { x: number; y: number; z: number };
@@ -212,11 +222,20 @@ export function normalizeYaw(deg: number): number {
   return n >= 359.9995 ? 0 : n;
 }
 
-/** Rotation snapping: to 15 degrees, to 45 degrees, or free (to a tenth of a degree). */
-export function snapYaw(deg: number, mode: SnapMode): number {
+/**
+ * Rotation snapping: to 15 degrees, to 45 degrees, or free (to a tenth of a
+ * degree). On hexes the 45 degree step is 30, the angle between a hex's
+ * sides and corners, so a cone snaps along the lattice.
+ */
+export function snapYaw(g: Grid, deg: number, mode: SnapMode): number {
   if (mode === "free") return normalizeYaw(Math.round(deg * 10) / 10);
-  const step = mode === "45" ? 45 : 15;
+  const step = mode === "45" ? (g.shape === "hex" ? 30 : 45) : 15;
   return normalizeYaw(Math.round(deg / step) * step);
+}
+
+/** The words for the wide snap step: "45°" on squares, "30°" on hexes. */
+export function wideSnapLabel(g: Grid): string {
+  return g.shape === "hex" ? "30°" : "45°";
 }
 
 /** An aim up or down, kept to whole degrees between straight down and straight up. */
@@ -242,9 +261,25 @@ export function yawToward(from: Point, to: Point): number | null {
 
 /**
  * A free point snaps to the nearest grid intersection or cell center, the
- * two places a sphere or cone is usually centered on.
+ * two places a sphere or cone is usually centered on: on hexes the nearest
+ * hex corner or center, a corner as the rules round it (hex.ts cornerAt).
+ * The nearest corner is always one of the six of the hex the point is in.
  */
-export function snapPoint(p: Point): Point {
+export function snapPoint(g: Grid, p: Point): Point {
+  if (g.shape === "hex") {
+    const h = hexAt(g, p);
+    let best = hexCenter(g, h);
+    let bestD = Math.hypot(p.x - best.x, p.y - best.y);
+    for (const c of hexCorners(g, h)) {
+      const at = cornerAt(g, c);
+      const d = Math.hypot(p.x - at.x, p.y - at.y);
+      if (d < bestD) {
+        bestD = d;
+        best = at;
+      }
+    }
+    return best;
+  }
   const corner = { x: Math.round(p.x), y: Math.round(p.y) };
   const center = { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
   return Math.hypot(p.x - corner.x, p.y - corner.y) <= Math.hypot(p.x - center.x, p.y - center.y) ? corner : center;
@@ -257,12 +292,14 @@ export function snapPoint(p: Point): Point {
  * cell's middle. A footprint of part of a cell (a Tiny token) snaps like a
  * plain point.
  */
-export function snapFootprintCenter(p: Point, fp: Pick<AreaFootprint, "w" | "h">): Point {
+export function snapFootprintCenter(g: Grid, p: Point, fp: Pick<AreaFootprint, "w" | "h" | "size">): Point {
+  // On hexes it is the anchor of the size it surrounds, as the rules read its hexes around the origin (HX-D11).
+  if (g.shape === "hex") return snapAnchor(g, fp.size ?? sizeCategory({ size: "custom", w: fp.w, h: fp.h }), p);
   const axis = (v: number, cells: number, plain: number) => {
     if (!Number.isInteger(cells) || cells < 1) return plain;
     return cells % 2 === 0 ? Math.round(v) : Math.floor(v) + 0.5;
   };
-  const plain = snapPoint(p);
+  const plain = snapPoint(g, p);
   return { x: axis(p.x, fp.w, plain.x), y: axis(p.y, fp.h, plain.y) };
 }
 
@@ -271,9 +308,11 @@ export function snapFootprintCenter(p: Point, fp: Pick<AreaFootprint, "w" | "h">
  * the grid: an even number of cells across centers on an intersection, an
  * odd number on a cell center.
  */
-export function snapCubeCenter(p: Point, sizeFt: number, feetPerCell: number): Point {
+export function snapCubeCenter(g: Grid, p: Point, sizeFt: number, feetPerCell: number): Point {
+  // A cube's square never lines up with hexes, so its center snaps as any free point does there.
+  if (g.shape === "hex") return snapPoint(g, p);
   const cells = sizeFt / feetPerCell;
-  if (!Number.isInteger(cells)) return snapPoint(p);
+  if (!Number.isInteger(cells)) return snapPoint(g, p);
   if (cells % 2 === 0) return { x: Math.round(p.x), y: Math.round(p.y) };
   return { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
 }
@@ -301,14 +340,20 @@ export function cubeOrigin(face: Point, bottomFt: number, sizeFt: number, u: num
  * the caster's footprint.
  */
 export function originFromToken(
+  g: Grid,
   d: Pick<AreaDraft, "shape" | "size" | "yaw" | "anchor" | "faceU">,
   token: AreaToken,
   feetPerCell: number,
 ): { origin: Point3; faceOffset?: { u: number; v: number } } {
   const size = clampFeet(d.size);
-  if (d.shape === "cube") return cubeOrigin(edgeOrigin(footprintRect(SQUARES, token), d.yaw), token.elevation, size, d.faceU);
-  const o = castFromToken(SQUARES, { shape: d.shape, size, yaw: d.yaw, anchor: d.anchor }, token, feetPerCell).origin;
+  if (d.shape === "cube") return cubeOrigin(tokenEdge(g, token, d.yaw), token.elevation, size, d.faceU);
+  const o = castFromToken(g, { shape: d.shape, size, yaw: d.yaw, anchor: d.anchor }, token, feetPerCell).origin;
   return { origin: { x: o.x, y: o.y, z: Math.round(o.z) } };
+}
+
+/** Where an aim leaves a token: its footprint's edge on squares, and on hexes the corner or side midpoint of its hexes' outline (HX-D11). */
+function tokenEdge(g: Grid, token: AreaToken, yaw: number): Point {
+  return g.shape === "hex" ? hexEdgeOrigin(g, occupiedHexes(g, token), hexAnchor(g, token), yaw) : edgeOrigin(footprintRect(g, token), yaw);
 }
 
 /** The origin of a freely placed area. A cube's point is its center on the ground. */
@@ -346,7 +391,7 @@ export type DraftTemplate = AreaTemplateInput & {
  * no token picked and no point tapped. A token the view no longer holds
  * counts as not picked.
  */
-export function draftTemplate(d: AreaDraft, tokens: AreaTokens, feetPerCell: number): DraftTemplate | null {
+export function draftTemplate(g: Grid, d: AreaDraft, tokens: AreaTokens, feetPerCell: number): DraftTemplate | null {
   const base: DraftTemplate = {
     id: d.id,
     rev: 0,
@@ -369,7 +414,7 @@ export function draftTemplate(d: AreaDraft, tokens: AreaTokens, feetPerCell: num
   }
   const from = d.fromId && usesFrom(d.shape) ? tokens[d.fromId] : undefined;
   if (from) {
-    const placed = originFromToken(d, from, feetPerCell);
+    const placed = originFromToken(g, d, from, feetPerCell);
     base.origin = placed.origin;
     if (placed.faceOffset) base.faceOffset = placed.faceOffset;
     // The token it starts from is its caster, but for Ice Knife, whose target it is.
@@ -382,7 +427,7 @@ export function draftTemplate(d: AreaDraft, tokens: AreaTokens, feetPerCell: num
       // emanation that stays put also keeps the footprint it was cast from,
       // so it holds its shape once the caster walks away.
       if (caster) base.casterId = caster;
-      if (d.shape === "emanation") base.footprint = emanationFootprint(SQUARES, from, feetPerCell);
+      if (d.shape === "emanation") base.footprint = emanationFootprint(g, from, feetPerCell);
     }
     return base;
   }
@@ -480,7 +525,7 @@ export function freePointOf(
 }
 
 /** A placed template as a draft, to place a copy of it (Fire Storm's ten cubes, Meteor Swarm's four spheres). */
-export function draftFromTemplate(t: AreaTemplate, id: string, tokens: AreaTokens, feetPerCell: number): AreaDraft {
+export function draftFromTemplate(g: Grid, t: AreaTemplate, id: string, tokens: AreaTokens, feetPerCell: number): AreaDraft {
   const d = newDraft(id, t.shape, t.color);
   d.size = t.size;
   if (t.width !== undefined) d.width = t.width;
@@ -510,7 +555,7 @@ export function draftFromTemplate(t: AreaTemplate, id: string, tokens: AreaToken
     return d;
   }
   d.attached = false;
-  const pivot = templatePivot(t, tokens, feetPerCell);
+  const pivot = templatePivot(g, t, tokens, feetPerCell);
   if (usesFrom(t.shape) && pivot.onCaster && caster) {
     d.fromId = caster;
     d.casterId = caster;
@@ -521,7 +566,7 @@ export function draftFromTemplate(t: AreaTemplate, id: string, tokens: AreaToken
   // left where it was cast, and copies from there: a caster that moved but
   // still covers the old origin would otherwise drag the copy along.
   const from = caster ? tokens[caster] : undefined;
-  if (t.shape === "emanation" && !t.footprint && from && insideRect(footprintRect(SQUARES, from), t.origin)) {
+  if (t.shape === "emanation" && !t.footprint && from && insideRect(footprintRect(g, from), t.origin)) {
     d.fromId = caster;
     d.casterId = caster;
     return d;
@@ -540,13 +585,14 @@ export function draftFromTemplate(t: AreaTemplate, id: string, tokens: AreaToken
  * caster's edge as it turns). A free cube turns around its center.
  */
 export function templatePivot(
+  g: Grid,
   t: Pick<AreaTemplate, "shape" | "size" | "origin" | "yaw" | "faceOffset" | "casterId">,
   tokens: AreaTokens,
   feetPerCell: number,
 ): { point: Point; onCaster: boolean } {
   const caster = t.casterId ? tokens[t.casterId] : undefined;
-  if (caster && isDirectional(t.shape) && onRectEdge(footprintRect(SQUARES, caster), t.origin)) {
-    const r = footprintRect(SQUARES, caster);
+  if (caster && isDirectional(t.shape) && onTokenEdge(g, caster, t.origin)) {
+    const r = footprintRect(g, caster);
     return { point: { x: r.x + r.w / 2, y: r.y + r.h / 2 }, onCaster: true };
   }
   if (t.shape === "cube") return { point: cubeCenter(t, feetPerCell), onCaster: false };
@@ -556,6 +602,32 @@ export function templatePivot(
 function insideRect(r: Rect, p: Point): boolean {
   const E = 1e-6;
   return p.x >= r.x - E && p.x <= r.x + r.w + E && p.y >= r.y - E && p.y <= r.y + r.h + E;
+}
+
+/** Whether a point lies on a token's edge: its footprint's box on squares, the outer sides of its hexes on hexes. */
+function onTokenEdge(g: Grid, token: AreaToken, p: Point): boolean {
+  return g.shape === "hex" ? onHexOutline(g, occupiedHexes(g, token), p) : onRectEdge(footprintRect(g, token), p);
+}
+
+/** Whether a point lies on a side of these hexes that no two of them share, the sides' corners as the rules round them. */
+function onHexOutline(g: HexGrid, hexes: readonly Hex[], p: Point): boolean {
+  const held = new Set(hexes.map(hexKey));
+  for (const h of hexes) {
+    const c = hexCenter(g, h);
+    const corners = hexCorners(g, h).map((k) => cornerAt(g, k));
+    for (let i = 0; i < 6; i++) {
+      const a = corners[i]!;
+      const b = corners[(i + 1) % 6]!;
+      if (held.has(hexKey(hexAt(g, { x: a.x + b.x - c.x, y: a.y + b.y - c.y })))) continue;
+      const ex = b.x - a.x;
+      const ey = b.y - a.y;
+      const len = Math.hypot(ex, ey);
+      const along = ((p.x - a.x) * ex + (p.y - a.y) * ey) / len;
+      const off = Math.abs((p.x - a.x) * ey - (p.y - a.y) * ex) / len;
+      if (off < 1e-6 && along > -1e-6 && along < len + 1e-6) return true;
+    }
+  }
+  return false;
 }
 
 function onRectEdge(r: Rect, p: Point): boolean {
@@ -582,12 +654,12 @@ export function cubeCenter(t: Pick<AreaTemplate, "size" | "origin" | "yaw" | "fa
  * that starts on its caster's edge moves its origin along that edge, so it
  * keeps starting at the caster. A free cube turns around its center.
  */
-export function rotatePatch(t: AreaTemplate, yaw: number, tokens: AreaTokens, feetPerCell: number): TemplatePatch {
+export function rotatePatch(g: Grid, t: AreaTemplate, yaw: number, tokens: AreaTokens, feetPerCell: number): TemplatePatch {
   const next = normalizeYaw(yaw);
-  const pivot = templatePivot(t, tokens, feetPerCell);
+  const pivot = templatePivot(g, t, tokens, feetPerCell);
   const caster = t.casterId ? tokens[t.casterId] : undefined;
   if (pivot.onCaster && caster) {
-    const e = edgeOrigin(footprintRect(SQUARES, caster), next);
+    const e = tokenEdge(g, caster, next);
     return { yaw: next, origin: { x: e.x, y: e.y, z: t.origin.z } };
   }
   if (t.shape === "cube") {
@@ -603,8 +675,18 @@ export function rotatePatch(t: AreaTemplate, yaw: number, tokens: AreaTokens, fe
   return { yaw: next };
 }
 
-/** The patch that moves a placed template by whole cells, so it keeps its place on the grid. */
-export function movePatch(t: Pick<AreaTemplate, "origin">, dx: number, dy: number): TemplatePatch {
+/**
+ * The patch that moves a placed template by whole cells, so it keeps its
+ * place on the grid: on hexes by the whole step of the hex lattice nearest
+ * the drag, the vector between two hex centers, so an origin on a corner
+ * or a center lands on another.
+ */
+export function movePatch(g: Grid, t: Pick<AreaTemplate, "origin">, dx: number, dy: number): TemplatePatch {
+  if (g.shape === "hex") {
+    const from = hexCenter(g, { col: 0, row: 0 });
+    const to = hexCenter(g, hexAt(g, { x: from.x + dx, y: from.y + dy }));
+    return { origin: { x: t.origin.x + (to.x - from.x), y: t.origin.y + (to.y - from.y), z: t.origin.z } };
+  }
   return { origin: { x: t.origin.x + Math.round(dx), y: t.origin.y + Math.round(dy), z: t.origin.z } };
 }
 
@@ -619,7 +701,7 @@ export type Outline =
 export function liveOrigin(t: AreaTemplateInput, ctx: AreaContext): Point3 {
   const attached = t.attachedTo ? ctx.tokens?.[t.attachedTo] : undefined;
   if (!attached) return t.origin;
-  return castFromToken(SQUARES, { shape: t.shape, size: t.size, yaw: t.yaw, anchor: t.anchor }, attached, ctx.settings.feetPerCell).origin;
+  return castFromToken(ctx.grid, { shape: t.shape, size: t.size, yaw: t.yaw, anchor: t.anchor }, attached, ctx.settings.feetPerCell).origin;
 }
 
 /**
@@ -658,7 +740,10 @@ export function areaOutline(t: AreaTemplateInput, ctx: AreaContext): Outline | n
       return { kind: "poly", points: boxCorners({ x: o.x + (d.x * L) / 2, y: o.y + (d.y * L) / 2 }, d, n, L / 2, hw) };
     }
     case "emanation": {
-      const r = resolveArea(t, ctx)?.box;
+      const area = resolveArea(t, ctx);
+      // On hexes the hexes within its steps of the hexes it surrounds, the rules' own reach (HX-D11).
+      if (area?.reach) return { kind: "poly", points: hexBallOutline(area.reach.g, area.reach.from, area.reach.steps) };
+      const r = area?.box;
       if (!r) return { kind: "circle", x: o.x, y: o.y, r: L };
       return { kind: "roundRect", x: r.x - L, y: r.y - L, w: r.w + 2 * L, h: r.h + 2 * L, r: L };
     }
@@ -748,7 +833,7 @@ export function freePointHeight(chunks: Readonly<Record<string, BuildChunk>>, sc
 }
 
 /** A token's center and middle height, for measuring from a caster. */
-export function tokenCenter(token: AreaToken, feetPerCell: number): Point3 {
-  const r = footprintRect(SQUARES, token);
+export function tokenCenter(g: Grid, token: AreaToken, feetPerCell: number): Point3 {
+  const r = footprintRect(g, token);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2, z: token.elevation + tokenHeightFt(token, feetPerCell) / 2 };
 }

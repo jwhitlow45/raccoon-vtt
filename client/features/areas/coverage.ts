@@ -10,7 +10,7 @@ import {
   type CoverageResult,
 } from "#shared/rules/aoe.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
-import { SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { HEX_R, hexCenter } from "#shared/rules/hex.ts";
 import { displayName } from "../../lib/scene.ts";
 
@@ -48,7 +48,7 @@ export function contextFrom(inputs: AreaInputs, scene: Scene, samples: number = 
   return {
     settings: inputs.settings,
     bounds: scene.bounds,
-    grid: SQUARES,
+    grid: sceneGrid(scene),
     walls: sceneWalls(scene, inputs.buildChunks),
     tokens: inputs.tokens as Readonly<Record<string, AreaToken>>,
     samples,

@@ -21,6 +21,7 @@ import {
   OptSwatches,
   PickCloses,
   Stepper,
+  StripText,
   useOpenInSlot,
   usePopoverFrame,
   useSlotPlace,
@@ -42,6 +43,7 @@ import {
   liveOrigin,
   normalizeTriggers,
   usesFrom,
+  wideSnapLabel,
   withSlows,
   type AreaDraft,
   type SnapMode,
@@ -71,7 +73,7 @@ import {
   type AreaToolState,
 } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 
 /**
  * The area tool's options (docs/design-v1-tool-options.md 9.3): its line
@@ -89,6 +91,15 @@ const SNAPS: readonly { value: SnapMode; label: string }[] = [
   { value: "45", label: "45°" },
   { value: "free", label: "Free" },
 ];
+
+/** The Rotation snap's choices on this scene: on hexes the wide step is 30 degrees, and says so (placement.ts snapYaw). */
+function snapsFor(env: Pick<AreaEnv, "scene">): readonly { value: SnapMode; label: string }[] {
+  const grid = sceneGrid(env.scene);
+  return isHex(grid) ? SNAPS.map((s) => (s.value === "45" ? { ...s, label: wideSnapLabel(grid) } : s)) : SNAPS;
+}
+
+/** What an area's Movement inside says on a hex scene, where movement is counted on squares until hex grids' phase H2. */
+export const COUNTED_ON_SQUARES = "Counted on squares only.";
 
 const SHAPE_GLYPHS: Record<AreaShape, IconName> = {
   cone: "areaCone",
@@ -374,11 +385,13 @@ const SLOWS: readonly { value: SlowsChoice; label: string }[] = [
  * kind keeps it, so a player whose copy hides the caster cannot clear it
  * by picking another kind.
  */
-function slowSlots(props: { value: AreaSlows | undefined; caster: boolean; onChange(next: AreaSlows | null): void }): Slot[] {
+function slowSlots(props: { value: AreaSlows | undefined; caster: boolean; hex: boolean; onChange(next: AreaSlows | null): void }): Slot[] {
   const v = props.value;
   const kind = (next: SlowsChoice) => props.onChange(next === "normal" ? null : { kind: next, ...(v?.foes ? { foes: true as const } : {}) });
   return [
     more("slows", <OptSegmented label="Movement inside" value={v?.kind ?? "normal"} options={SLOWS} onChange={kind} />),
+    // The choice is kept with the area, and a walk on hexes reads none of it yet (hex grids, section 6).
+    ...(props.hex ? [more("slowsHex", <StripText>{COUNTED_ON_SQUARES}</StripText>)] : []),
     ...(v && props.caster
       ? [
           more(
@@ -412,7 +425,7 @@ const IDLE_HINT = "Tap a token to cast from it, or tap the map. Tap an area on t
  * else's token, the area's own caster, does not.
  */
 function pickFrom(env: AreaEnv, d: AreaDraft | null, offer: AreaCreature | null): void {
-  if (d) setDraft(env, castFrom(d, offer?.tokenId ?? null, env.view.tokens, env.view.meta.settings.feetPerCell));
+  if (d) setDraft(env, castFrom(sceneGrid(env.scene), d, offer?.tokenId ?? null, env.view.tokens, env.view.meta.settings.feetPerCell));
   if (offer === null) setChoice(env, "none");
   else if (offer.yours) setChoice(env, choiceOf(offer));
 }
@@ -460,7 +473,8 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
 
   let range: ReactNode = null;
   if (t && caster && !usesFrom(d.shape)) {
-    const ft = boxDistanceFt(tokenCellBox(SQUARES, caster, fpc), pointCellBox(SQUARES, t.origin, fpc), env.view.meta.settings);
+    const grid = sceneGrid(env.scene);
+    const ft = boxDistanceFt(tokenCellBox(grid, caster, fpc), pointCellBox(grid, t.origin, fpc), env.view.meta.settings);
     const over = d.rangeFt !== undefined && ft > d.rangeFt;
     range = (
       <span style={{ color: over ? theme.color.warning : theme.color.textMuted }}>
@@ -522,7 +536,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
           ),
         },
         { id: "spell", priority: 5, flex: theme.layout.options.field, home: "shape", control: <SpellField env={env} st={st} base={() => d} /> },
-        more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={SNAPS} onChange={(snap) => env.area.store.setState({ snap })} />),
+        more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={snapsFor(env)} onChange={(snap) => env.area.store.setState({ snap })} />),
         canPitch(d.shape) && more("aim", <AimControl pitch={clampPitch(d.pitch)} onChange={(pitch) => set({ pitch })} />),
         d.shape === "line" && more("width", <Stepper label="Width" unit="ft" value={d.width} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(width) => set({ width })} />),
         d.shape === "cylinder" && more("height", <Stepper label="Height" unit="ft" value={d.height} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(height) => set({ height })} />),
@@ -579,7 +593,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
           </OptButton>,
         ),
         ...triggerSlots({ value: d.triggers, once: d.oncePerTurn, onChange: (triggers) => set({ triggers }), onOnce: (oncePerTurn) => set({ oncePerTurn }) }),
-        ...slowSlots({ value: d.slows, caster: !!casterId, onChange: (slows) => setDraft(env, withSlows(d, slows)) }),
+        ...slowSlots({ value: d.slows, caster: !!casterId, hex: isHex(sceneGrid(env.scene)), onChange: (slows) => setDraft(env, withSlows(d, slows)) }),
         more("color", <OptSwatches label="Color" value={d.color} options={MEMBER_COLORS} onChange={(color) => set({ color })} />),
         env.role === "dm" &&
           more(
@@ -641,7 +655,7 @@ function TrapAreaOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDr
             </OptButton>
           ),
         },
-        more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={SNAPS} onChange={(snap) => env.area.store.setState({ snap })} />),
+        more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={snapsFor(env)} onChange={(snap) => env.area.store.setState({ snap })} />),
         canPitch(d.shape) && more("aim", <AimControl pitch={clampPitch(d.pitch)} onChange={(pitch) => set({ pitch })} />),
         d.shape === "line" && more("width", <Stepper label="Width" unit="ft" value={d.width} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(width) => set({ width })} />),
         d.shape === "cylinder" && more("height", <Stepper label="Height" unit="ft" value={d.height} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(height) => set({ height })} />),
@@ -661,7 +675,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
   const fpc = env.view.meta.settings.feetPerCell;
   const copy = () => {
     select(env.area, null);
-    setDraft(env, draftFromTemplate(template, env.actions.newId(), env.view.tokens, fpc));
+    setDraft(env, draftFromTemplate(sceneGrid(env.scene), template, env.actions.newId(), env.view.tokens, fpc));
   };
   const ask = useAreaAsk(template);
   const by = (
@@ -734,7 +748,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
             </OptButton>
           ),
         },
-        editable && more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={SNAPS} onChange={(snap) => env.area.store.setState({ snap })} />),
+        editable && more("snap", <OptSegmented label="Rotation snap" value={st.snap} options={snapsFor(env)} onChange={(snap) => env.area.store.setState({ snap })} />),
         editable && canPitch(t.shape) && more("aim", <AimControl pitch={pitchOf(t)} onChange={(pitch) => update({ pitch: pitch === 0 ? null : pitch })} />),
         editable && t.shape === "line" && more("width", <Stepper label="Width" unit="ft" value={t.width ?? 5} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(width) => update({ width })} />),
         editable && t.shape === "cylinder" && more("height", <Stepper label="Height" unit="ft" value={t.height ?? 40} step={5} min={AREA_MIN_FT} max={AREA_MAX_FT} onChange={(height) => update({ height })} />),
@@ -760,7 +774,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
                   // where it was first cast, and keep the token's footprint there.
                   const o = liveOrigin(t, liveContext(env.view, env.scene, false));
                   const token = env.view.tokens[t.attachedTo];
-                  update({ attachedTo: null, origin: { x: o.x, y: o.y, z: Math.round(o.z) }, ...(token ? { footprint: emanationFootprint(SQUARES, token, fpc) } : {}) });
+                  update({ attachedTo: null, origin: { x: o.x, y: o.y, z: Math.round(o.z) }, ...(token ? { footprint: emanationFootprint(sceneGrid(env.scene), token, fpc) } : {}) });
                 } else if (caster) {
                   update({ attachedTo: caster.id });
                 }
@@ -777,7 +791,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
               onOnce: (once) => update({ oncePerTurn: once ? true : null }),
             })
           : []),
-        ...(editable ? slowSlots({ value: t.slows, caster: t.casterId !== undefined, onChange: (slows) => update({ slows }) }) : []),
+        ...(editable ? slowSlots({ value: t.slows, caster: t.casterId !== undefined, hex: isHex(sceneGrid(env.scene)), onChange: (slows) => update({ slows }) }) : []),
         editable && more("color", <OptSwatches label="Color" value={t.color} options={MEMBER_COLORS} onChange={(color) => update({ color })} />),
       ]}
     />

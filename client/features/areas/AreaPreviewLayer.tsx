@@ -15,7 +15,6 @@ import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
 import { areaGrips, areaOutline, draftTemplate, frameTemplate, handlePoint, liveOrigin, outlineTop, usesFrom } from "./placement.ts";
 import { canEdit, HANDLE_GAP_PX, samplesNow, useAreaScope } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Areas being aimed, on the overlay layer above the fog (design 13.3): this
@@ -68,7 +67,7 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
 
   let active: { t: AreaTemplateInput; color: string; shade: boolean; casterId?: string; pointShape: boolean; editable: boolean } | null = null;
   if (tool === "area" && draft) {
-    const t = draftTemplate(draft, tokens, settings.feetPerCell);
+    const t = draftTemplate(ctx.grid, draft, tokens, settings.feetPerCell);
     if (t) active = { t, color: draft.color, shade: true, casterId: draft.casterId, pointShape: !usesFrom(draft.shape), editable: true };
   } else if (tool === "area" && selectedId) {
     const placed = templates[selectedId];
@@ -115,19 +114,19 @@ function ActiveArea(props: {
   const z = iso ? iso.ground(o.x, o.y) : 0;
   let range: { from: { x: number; y: number }; ft: number } | null = null;
   if (caster) {
-    const r = footprintRect(SQUARES, caster);
+    const r = footprintRect(ctx.grid, caster);
     const fpc = ctx.settings.feetPerCell;
-    range = { from: { x: r.x + r.w / 2, y: r.y + r.h / 2 }, ft: boxDistanceFt(tokenCellBox(SQUARES, caster, fpc), pointCellBox(SQUARES, t.origin, fpc), { feetPerCell: fpc, diagonal: props.diagonal }) };
+    range = { from: { x: r.x + r.w / 2, y: r.y + r.h / 2 }, ft: boxDistanceFt(tokenCellBox(ctx.grid, caster, fpc), pointCellBox(ctx.grid, t.origin, fpc), { feetPerCell: fpc, diagonal: props.diagonal }) };
   }
   return (
     <>
       <Lift z={z}>
-        {props.shade ? <Shading cov={cachedCoverage(t, ctx)} color={color} opacity={0.3} /> : null}
+        {props.shade ? <Shading cov={cachedCoverage(t, ctx)} grid={ctx.grid} color={color} opacity={0.3} /> : null}
         {outline ? <OutlineShape outline={outline} color={theme.color.textHalo} widthPx={5} opacity={0.5} /> : null}
         {outline ? <OutlineShape outline={outline} color={color} widthPx={2.5} /> : null}
         {caught.map((id) => {
           const token = ctx.tokens?.[id];
-          return token ? <TokenRing key={id} token={token} color={color} scale={scale} widthPx={3} gapPx={4} /> : null;
+          return token ? <TokenRing key={id} token={token} grid={ctx.grid} color={color} scale={scale} widthPx={3} gapPx={4} /> : null;
         })}
         {range ? <Line points={[range.from.x, range.from.y, o.x, o.y]} stroke={color} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 5]} /> : null}
         {grips.origin ? <Circle x={o.x} y={o.y} radius={4 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} /> : null}
@@ -154,7 +153,7 @@ function RemotePreview(props: { preview: AoePreview; ctx: AreaContext; scale: nu
   return (
     <>
       <Lift z={z}>
-        <Shading cov={cachedCoverage(t, ctx)} color={color} opacity={0.18} />
+        <Shading cov={cachedCoverage(t, ctx)} grid={ctx.grid} color={color} opacity={0.18} />
         {outline ? <OutlineShape outline={outline} color={color} widthPx={2} dash={[8, 5]} /> : null}
       </Lift>
       {props.name && outline ? <MarkPill {...outlineTop(outline)} z={z} scale={scale} name={props.name} size="map" color={color} small above /> : null}

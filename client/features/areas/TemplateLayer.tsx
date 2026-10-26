@@ -227,11 +227,11 @@ export const PlacedArea = memo(function PlacedArea(props: {
   const iso = useIsoGround();
   const shapes = (
     <>
-      <StillShading cov={cov} color={t.color} opacity={0.26} />
+      <StillShading cov={cov} grid={ctx.grid} color={t.color} opacity={0.26} />
       {outline ? <OutlineShape outline={outline} color={t.color} widthPx={2} dash={hidden ? [6, 4] : undefined} /> : null}
       {caught.map((id) => {
         const token = ctx.tokens?.[id];
-        return token ? <TokenRing key={id} token={token} color={t.color} scale={scale} {...CAUGHT_RING} /> : null;
+        return token ? <TokenRing key={id} token={token} grid={ctx.grid} color={t.color} scale={scale} {...CAUGHT_RING} /> : null;
       })}
     </>
   );

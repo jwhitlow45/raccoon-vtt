@@ -1,6 +1,7 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { CHUNK_CELLS, type RoomState } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { room, scene, template, token } from "#shared/testutil.ts";
@@ -97,7 +98,7 @@ for (const turn of TURNS) {
     state.tokens.ogre = token("ogre", { size: "huge", x: 7, y: 4 });
     const d = { ...newDraft("d1", "cone", "#ff8800"), size: 30, casterId: "ogre", fromId: "ogre" };
     area.store.setState({ draft: d });
-    const origin = draftTemplate(d, state.tokens, 5)!.origin;
+    const origin = draftTemplate(SQUARES, d, state.tokens, 5)!.origin;
     assert.equal(drawnAt(pick, origin), 0, "the cone starts on the east edge, off the platform");
     assert.equal(drawnAt(pick, { x: 8.5, y: 5.5 }), TOP, "while the creature's center, the aim's pivot, is on it");
     const press = viewToScreen(CAM, toView(pick.view, { x: 13, y: 7.5 }, 0));

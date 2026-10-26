@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { SQUARES } from "#shared/rules/grid.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import { AREA_SPELLS } from "#shared/srd/area-spells.ts";
 import { actor, character, template, token } from "#shared/testutil.ts";
@@ -198,16 +199,16 @@ describe("what the control shows (3.3)", () => {
 
   test("idle shows the saved choice, placing the area's caster", () => {
     assert.equal(fromShows({ draft: null, saved: "t" }), "t");
-    assert.equal(fromShows({ draft: castFrom(draft("cone"), "t", tokens, FPC), saved: null }), "t");
+    assert.equal(fromShows({ draft: castFrom(SQUARES, draft("cone"), "t", tokens, FPC), saved: null }), "t");
     assert.equal(fromShows({ draft: draft("cone"), saved: "t" }), null, "a draft with no caster is off, whatever the choice");
   });
 
   test("Copy of a goblin's area, Set caster on a goblin, None, and the caster deleted", () => {
     const placed = template("a", { shape: "sphere", casterId: "g1" });
-    assert.equal(fromShows({ draft: draftFromTemplate(placed, "c", tokens, FPC), saved: "t" }), "g1");
-    assert.equal(fromShows({ draft: castFrom(castFrom(draft("cone"), "t", tokens, FPC), "g1", tokens, FPC), saved: "t" }), "g1");
-    assert.equal(fromShows({ draft: castFrom(castFrom(draft("cone"), "t", tokens, FPC), null, tokens, FPC), saved: "t" }), null);
-    assert.equal(fromShows({ draft: withoutCreature(castFrom(draft("cone"), "t", tokens, FPC), "t"), saved: "pip" }), null, "off, no substitute");
+    assert.equal(fromShows({ draft: draftFromTemplate(SQUARES, placed, "c", tokens, FPC), saved: "t" }), "g1");
+    assert.equal(fromShows({ draft: castFrom(SQUARES, castFrom(SQUARES, draft("cone"), "t", tokens, FPC), "g1", tokens, FPC), saved: "t" }), "g1");
+    assert.equal(fromShows({ draft: castFrom(SQUARES, castFrom(SQUARES, draft("cone"), "t", tokens, FPC), null, tokens, FPC), saved: "t" }), null);
+    assert.equal(fromShows({ draft: withoutCreature(castFrom(SQUARES, draft("cone"), "t", tokens, FPC), "t"), saved: "pip" }), null, "off, no substitute");
   });
 
   test("Ice Knife's target is never its caster", () => {
@@ -243,10 +244,10 @@ describe("the control's form (3.1, 3.2)", () => {
 
   test("the area's caster joins when it is not yours, and stays after off", () => {
     const view = table();
-    const fromGoblin = castFrom(draft("cone"), "g1", view.tokens, FPC);
+    const fromGoblin = castFrom(SQUARES, draft("cone"), "g1", view.tokens, FPC);
     const chip = offers(view, fromGoblin, "t");
     assert.ok(chip.form === "chip" && chip.on === "g1" && names(chip.offers).join() === "Thorn,Goblin 1");
-    const off = offers(view, castFrom(fromGoblin, null, view.tokens, FPC), "t");
+    const off = offers(view, castFrom(SQUARES, fromGoblin, null, view.tokens, FPC), "t");
     assert.ok(off.form === "chip" && off.on === null && names(off.offers).join() === "Thorn,Goblin 1", "a dropped caster can come back");
   });
 
@@ -254,15 +255,15 @@ describe("the control's form (3.1, 3.2)", () => {
     const view = table();
     assert.deepEqual(offers(view, null, null, DANA), { form: "none" });
     assert.deepEqual(offers(view, draft("cone"), null, DANA), { form: "none" });
-    const on = offers(view, castFrom(draft("cone"), "g1", view.tokens, FPC), null, DANA);
+    const on = offers(view, castFrom(SQUARES, draft("cone"), "g1", view.tokens, FPC), null, DANA);
     assert.ok(on.form === "toggle" && on.on && on.offer.name === "Goblin 1");
-    const off = offers(view, castFrom(castFrom(draft("cone"), "g1", view.tokens, FPC), null, view.tokens, FPC), null, DANA);
+    const off = offers(view, castFrom(SQUARES, castFrom(SQUARES, draft("cone"), "g1", view.tokens, FPC), null, view.tokens, FPC), null, DANA);
     assert.ok(off.form === "toggle" && !off.on, "the toggle stays for that area");
   });
 
   test("two offers that would read the same are numbered, the area's caster included", () => {
     const view = table({ t2: token("t2", { kind: "monster", name: "Thorn", x: 20, y: 3 }) });
-    const chip = offers(view, castFrom(draft("cone"), "t2", view.tokens, FPC), "t");
+    const chip = offers(view, castFrom(SQUARES, draft("cone"), "t2", view.tokens, FPC), "t");
     assert.ok(chip.form === "chip" && names(chip.offers).join() === "Thorn,Thorn 2");
   });
 });
@@ -270,8 +271,8 @@ describe("the control's form (3.1, 3.2)", () => {
 describe("on and off while placing (3.4)", () => {
   const view = table();
   const tokens = view.tokens;
-  const on = (d: AreaDraft) => castFrom(d, "t", tokens, FPC);
-  const off = (d: AreaDraft) => castFrom(d, null, tokens, FPC);
+  const on = (d: AreaDraft) => castFrom(SQUARES, d, "t", tokens, FPC);
+  const off = (d: AreaDraft) => castFrom(SQUARES, d, null, tokens, FPC);
 
   test("a cone or line starts at the caster's edge keeping its aim, and off stays where it stands", () => {
     for (const shape of ["cone", "line"] as const) {
@@ -280,12 +281,12 @@ describe("on and off while placing (3.4)", () => {
       assert.equal(d.casterId, "t");
       assert.equal(d.point, null);
       assert.equal(d.yaw, 90);
-      const placed = draftTemplate(d, tokens, FPC)!;
+      const placed = draftTemplate(SQUARES, d, tokens, FPC)!;
       const free = off(d);
       assert.equal(free.fromId, undefined);
       assert.equal(free.casterId, undefined);
       assert.equal(free.lastCaster, "t");
-      assert.deepEqual(draftTemplate(free, tokens, FPC)!.origin, placed.origin, "the free one stands where the cast one did");
+      assert.deepEqual(draftTemplate(SQUARES, free, tokens, FPC)!.origin, placed.origin, "the free one stands where the cast one did");
     }
   });
 
@@ -310,7 +311,7 @@ describe("on and off while placing (3.4)", () => {
     const free = off(aura);
     assert.equal(free.fromId, undefined);
     assert.ok(free.footprint, "the token's footprint kept");
-    assert.deepEqual(draftTemplate(free, tokens, FPC)!.origin, draftTemplate(aura, tokens, FPC)!.origin);
+    assert.deepEqual(draftTemplate(SQUARES, free, tokens, FPC)!.origin, draftTemplate(SQUARES, aura, tokens, FPC)!.origin);
   });
 
   test("Ice Knife keeps its target either way", () => {
@@ -339,14 +340,14 @@ describe("on and off while placing (3.4)", () => {
 
 describe("a creature that leaves while an area is placed (3.3)", () => {
   const tokens = table().tokens;
-  const on = (d: AreaDraft) => castFrom(d, "t", tokens, FPC);
+  const on = (d: AreaDraft) => castFrom(SQUARES, d, "t", tokens, FPC);
 
   test("the active caster of a cone: no caster, no origin, waiting for a tap", () => {
     const d = withoutCreature(on(draft("cone")), "t");
     assert.equal(d.casterId, undefined);
     assert.equal(d.fromId, undefined);
     assert.equal(d.lastCaster, undefined);
-    assert.equal(draftTemplate(d, tokens, FPC), null);
+    assert.equal(draftTemplate(SQUARES, d, tokens, FPC), null);
   });
 
   test("of a sphere or an Entangle cube: no caster, the area stays", () => {
@@ -369,7 +370,7 @@ describe("a creature that leaves while an area is placed (3.3)", () => {
   });
 
   test("an Ice Knife on a goblin with From off: only the offer to turn Thorn back on goes", () => {
-    const off = castFrom(on({ ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }), null, tokens, FPC);
+    const off = castFrom(SQUARES, on({ ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }), null, tokens, FPC);
     const after = withoutCreature(off, "t");
     assert.deepEqual(after, (({ lastCaster: _, ...rest }) => rest)(off));
     assert.equal(after.fromId, "g1", "still around the goblin");
@@ -387,7 +388,7 @@ describe("a tap on a token while placing (3.5)", () => {
   const view = table({ pip });
   const tokens = view.tokens;
   const base = { tokens, snap: "15" as const, chunks: {}, sceneId: "s1", feetPerCell: FPC };
-  const fromThorn = (shape: AreaDraft["shape"]) => castFrom(draft(shape), "t", tokens, FPC);
+  const fromThorn = (shape: AreaDraft["shape"]) => castFrom(SQUARES, draft(shape), "t", tokens, FPC);
 
   test("with your creature casting, another token aims a cone, line or edge cube at its center, and the caster grabs the aim", () => {
     for (const shape of ["cone", "line", "cube"] as const) {
@@ -395,21 +396,21 @@ describe("a tap on a token while placing (3.5)", () => {
       assert.equal(tokenTap(fromThorn(shape), "pip", true), "aim", `${shape}, at Pip`);
       assert.equal(tokenTap(fromThorn(shape), "t", true), "grab", shape);
     }
-    const r = tappedToken({ ...base, draft: fromThorn("cone"), token: tokens.g1!, yours: true });
+    const r = tappedToken({ grid: SQUARES, ...base, draft: fromThorn("cone"), token: tokens.g1!, yours: true });
     assert.equal(r.draft.fromId, "t", "still from Thorn");
     assert.equal(r.draft.yaw, 0, "toward the goblin, east");
     assert.deepEqual(r.gesture, { kind: "aim", pivot: { x: 3.5, y: 3.5 } }, "a drag from that press keeps aiming");
-    const up = tappedToken({ ...base, draft: fromThorn("cone"), token: token("n", { x: 3, y: 0 }), yours: true });
+    const up = tappedToken({ grid: SQUARES, ...base, draft: fromThorn("cone"), token: token("n", { x: 3, y: 0 }), yours: true });
     assert.equal(up.draft.yaw, 270);
   });
 
   test("Entangle with Thorn as caster centers on the tapped token, fresh or standing elsewhere, and a drag moves it", () => {
-    const fresh = castFrom(presetDraft(spell("Entangle"), draft("cube"), undefined), "t", tokens, FPC);
+    const fresh = castFrom(SQUARES, presetDraft(spell("Entangle"), draft("cube"), undefined), "t", tokens, FPC);
     const elsewhere = { ...fresh, point: { x: 30, y: 30, z: 0 } };
     for (const d of [fresh, elsewhere]) {
       for (const tapped of ["g1", "t"]) {
         assert.equal(tokenTap(d, tapped, true), "center");
-        const r = tappedToken({ ...base, draft: d, token: tokens[tapped]!, yours: true });
+        const r = tappedToken({ grid: SQUARES, ...base, draft: d, token: tokens[tapped]!, yours: true });
         const t = tokens[tapped]!;
         // Entangle is 20 ft, four cells, so it centers on the grid line through the token's middle.
         assert.deepEqual(r.draft.point, { x: Math.round(t.x + 0.5), y: Math.round(t.y + 0.5), z: 0 });
@@ -423,23 +424,23 @@ describe("a tap on a token while placing (3.5)", () => {
   test("a sphere goes on the token, an emanation stays around its caster, and Ice Knife picks its target", () => {
     for (const yours of [true, false]) assert.equal(tokenTap(fromThorn("sphere"), "g1", yours), "place");
     assert.equal(tokenTap(fromThorn("emanation"), "g1", true), "stay");
-    const knife = castFrom(presetDraft(spell("Ice Knife"), draft("sphere"), undefined), "t", tokens, FPC);
+    const knife = castFrom(SQUARES, presetDraft(spell("Ice Knife"), draft("sphere"), undefined), "t", tokens, FPC);
     assert.equal(tokenTap(knife, "g1", true), "target");
-    assert.equal(tappedToken({ ...base, draft: knife, token: tokens.g1!, yours: true }).draft.fromId, "g1");
+    assert.equal(tappedToken({ grid: SQUARES, ...base, draft: knife, token: tokens.g1!, yours: true }).draft.fromId, "g1");
   });
 
   test("with no caster, someone else's, or for the DM, a tap casts from the token, as it always has", () => {
     for (const shape of ["cone", "line", "cube", "emanation"] as const) {
       assert.equal(tokenTap(draft(shape), "g1", false), "cast", shape);
-      assert.equal(tokenTap(castFrom(draft(shape), "g1", tokens, FPC), "g2", false), "cast", `${shape} from a goblin`);
+      assert.equal(tokenTap(castFrom(SQUARES, draft(shape), "g1", tokens, FPC), "g2", false), "cast", `${shape} from a goblin`);
     }
-    const r = tappedToken({ ...base, draft: draft("cone", { point: { x: 9, y: 9, z: 0 } }), token: tokens.g1!, yours: false });
+    const r = tappedToken({ grid: SQUARES, ...base, draft: draft("cone", { point: { x: 9, y: 9, z: 0 } }), token: tokens.g1!, yours: false });
     assert.equal(r.draft.fromId, "g1");
     assert.equal(r.draft.casterId, "g1");
     assert.equal(r.draft.lastCaster, "g1");
     assert.equal(r.draft.point, null);
-    assert.equal(tokenTap(castFrom(draft("cone"), "g1", tokens, FPC), "g1", false), "grab");
-    assert.equal(tokenTap(castFrom(draft("emanation"), "g1", tokens, FPC), "g1", false), "stay");
+    assert.equal(tokenTap(castFrom(SQUARES, draft("cone"), "g1", tokens, FPC), "g1", false), "grab");
+    assert.equal(tokenTap(castFrom(SQUARES, draft("emanation"), "g1", tokens, FPC), "g1", false), "stay");
   });
 });
 
@@ -447,7 +448,7 @@ describe("rebuilt drafts keep the caster (3.4)", () => {
   const tokens = table({ pip }).tokens;
 
   test("off, a shape change, on: from the same creature. Off, a spell, on: the same", () => {
-    const off = castFrom(castFrom(draft("cone"), "t", tokens, FPC), null, tokens, FPC);
+    const off = castFrom(SQUARES, castFrom(SQUARES, draft("cone"), "t", tokens, FPC), null, tokens, FPC);
     for (const rebuilt of [withShape(off, "line"), withShape(off, "sphere"), presetDraft(spell("Burning Hands"), off, draftCaster(off) ?? undefined)]) {
       assert.equal(draftCaster(rebuilt), null, "still off");
       assert.equal(rebuilt.lastCaster, "t");
@@ -455,15 +456,15 @@ describe("rebuilt drafts keep the caster (3.4)", () => {
   });
 
   test("a shape change from Ice Knife starts from its caster, not from its target", () => {
-    const knife = castFrom({ ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }, "t", tokens, FPC);
+    const knife = castFrom(SQUARES, { ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }, "t", tokens, FPC);
     const cone = withShape(knife, "cone");
     assert.equal(cone.fromId, "t");
     assert.equal(cone.casterId, "t");
   });
 
   test("Ice Knife's target never becomes its caster: From off, or its caster deleted, then any other shape stays off", () => {
-    const knife = castFrom({ ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }, "t", tokens, FPC);
-    const off = castFrom(knife, null, tokens, FPC);
+    const knife = castFrom(SQUARES, { ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }, "t", tokens, FPC);
+    const off = castFrom(SQUARES, knife, null, tokens, FPC);
     const gone = withoutCreature(knife, "t");
     for (const [label, d, last] of [["From off", off, "t"], ["its caster deleted", gone, undefined]] as const) {
       // Ice Knife is an emanation already, so every other shape.
@@ -473,33 +474,33 @@ describe("rebuilt drafts keep the caster (3.4)", () => {
         assert.equal(next.casterId, undefined, `${label}, to a ${shape}`);
         assert.equal(next.fromId, undefined, `${label}, to a ${shape}: never cast from the goblin`);
         assert.equal(next.lastCaster, last, `${label}, to a ${shape}: the one to turn on again`);
-        assert.equal(draftTemplate(next, tokens, FPC), null, `${label}, to a ${shape}: waits for a tap`);
+        assert.equal(draftTemplate(SQUARES, next, tokens, FPC), null, `${label}, to a ${shape}: waits for a tap`);
       }
     }
   });
 
   test("Ice Knife placed with From off copies as a target with no caster, and its template names no caster", () => {
-    const off = castFrom(castFrom({ ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }, "t", tokens, FPC), null, tokens, FPC);
-    const placed = draftTemplate(off, tokens, FPC)!;
+    const off = castFrom(SQUARES, castFrom(SQUARES, { ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1" }, "t", tokens, FPC), null, tokens, FPC);
+    const placed = draftTemplate(SQUARES, off, tokens, FPC)!;
     assert.equal(placed.casterId, undefined);
     assert.equal(placed.attachedTo, "g1");
-    const copy = draftFromTemplate(template("k", { shape: "emanation", size: 5, attachedTo: "g1", origin: placed.origin }), "c", tokens, FPC);
+    const copy = draftFromTemplate(SQUARES, template("k", { shape: "emanation", size: 5, attachedTo: "g1", origin: placed.origin }), "c", tokens, FPC);
     assert.equal(copy.targetsOther, true);
     assert.equal(copy.fromId, "g1");
     assert.equal(draftCaster(copy), null, "From off on the copy too");
     assert.equal(fromShows({ draft: copy, saved: "t" }), null);
-    const withCaster = draftFromTemplate(template("k2", { shape: "emanation", size: 5, attachedTo: "g1", casterId: "t", origin: placed.origin }), "c2", tokens, FPC);
+    const withCaster = draftFromTemplate(SQUARES, template("k2", { shape: "emanation", size: 5, attachedTo: "g1", casterId: "t", origin: placed.origin }), "c2", tokens, FPC);
     assert.equal(withCaster.targetsOther, true);
     assert.equal(draftCaster(withCaster), "t");
-    const aura = draftFromTemplate(template("k3", { shape: "emanation", size: 10, attachedTo: "t", casterId: "t", origin: placed.origin }), "c3", tokens, FPC);
+    const aura = draftFromTemplate(SQUARES, template("k3", { shape: "emanation", size: 10, attachedTo: "t", casterId: "t", origin: placed.origin }), "c3", tokens, FPC);
     assert.equal(aura.targetsOther, false, "an aura around its own caster is no target");
     assert.equal(draftCaster(aura), "t");
   });
 
   test("a target emanation that stays put still never names its target as caster", () => {
     const knife = { ...presetDraft(spell("Ice Knife"), draft("sphere"), undefined), fromId: "g1", attached: false };
-    assert.equal(draftTemplate(knife, tokens, FPC)!.casterId, undefined);
-    assert.equal(draftTemplate({ ...knife, casterId: "t" }, tokens, FPC)!.casterId, "t");
+    assert.equal(draftTemplate(SQUARES, knife, tokens, FPC)!.casterId, undefined);
+    assert.equal(draftTemplate(SQUARES, { ...knife, casterId: "t" }, tokens, FPC)!.casterId, "t");
   });
 
   /**
@@ -527,11 +528,11 @@ describe("rebuilt drafts keep the caster (3.4)", () => {
         const before = d;
         if (kind === 0 && ids.length > 0) {
           const id = ids[rand(ids.length)]!;
-          d = castFrom(d, id, tokens, FPC);
+          d = castFrom(SQUARES, d, id, tokens, FPC);
           assert.equal(draftCaster(d), id, "on names the creature turned on");
           assert.equal(d.lastCaster, id);
         } else if (kind === 1) {
-          d = castFrom(d, null, tokens, FPC);
+          d = castFrom(SQUARES, d, null, tokens, FPC);
           assert.equal(draftCaster(d), null, "off names no one");
           assert.equal(d.lastCaster, before.lastCaster, "and keeps the one to turn on again");
         } else if (kind === 2) {
@@ -545,7 +546,7 @@ describe("rebuilt drafts keep the caster (3.4)", () => {
         } else if (kind === 4 && ids.length > 0) {
           const id = ids[rand(ids.length)]!;
           const yours = draftCaster(d) === "t" || draftCaster(d) === "pip";
-          d = tappedToken({ draft: d, token: tokens[id]!, yours, tokens, snap: "15", chunks: {}, sceneId: "s1", feetPerCell: FPC }).draft;
+          d = tappedToken({ grid: SQUARES, draft: d, token: tokens[id]!, yours, tokens, snap: "15", chunks: {}, sceneId: "s1", feetPerCell: FPC }).draft;
           if (yours && !before.targetsOther) assert.equal(draftCaster(d), draftCaster(before), "a tap never takes the caster from your creature");
         } else if (ids.length > 0) {
           const id = ids[rand(ids.length)]!;

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { AreaShape, AreaTemplate, RoomState, Scene } from "#shared/model.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { askedArea } from "#shared/permissions.ts";
 import type { TemplatePatch } from "#shared/protocol.ts";
 import { PREVIEW_SAMPLES, SAMPLES } from "#shared/rules/aoe.ts";
@@ -149,8 +150,8 @@ export function canEdit(env: Pick<AreaEnv, "role" | "youId"> & { view?: Pick<Roo
   return t.id === undefined || env.view === undefined || !askedArea(env.view, t.id);
 }
 
-export function currentTemplate(env: Pick<AreaEnv, "view">, draft: AreaDraft | null): DraftTemplate | null {
-  return draft ? draftTemplate(draft, env.view.tokens, env.view.meta.settings.feetPerCell) : null;
+export function currentTemplate(env: Pick<AreaEnv, "view" | "scene">, draft: AreaDraft | null): DraftTemplate | null {
+  return draft ? draftTemplate(sceneGrid(env.scene), draft, env.view.tokens, env.view.meta.settings.feetPerCell) : null;
 }
 
 /**

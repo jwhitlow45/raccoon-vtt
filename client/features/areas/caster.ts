@@ -21,7 +21,7 @@ import {
   type SnapMode,
 } from "./placement.ts";
 import { placedAtPoint } from "./presets.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 
 /**
  * Which token a new area starts from, and what a tap picks, for the area
@@ -218,7 +218,7 @@ function unnumbered(view: Pick<RoomState, "tokens">) {
  * Ice Knife keeping its target. An emanation keeps the square it
  * surrounded. The creature stays as `lastCaster`, to turn it on again.
  */
-export function castFrom(d: AreaDraft, casterId: string | null, tokens: AreaTokens, feetPerCell: number): AreaDraft {
+export function castFrom(g: Grid, d: AreaDraft, casterId: string | null, tokens: AreaTokens, feetPerCell: number): AreaDraft {
   if (casterId === null) {
     if (d.targetsOther) {
       // Ice Knife stands on its target, which keeps it in place: only the caster goes.
@@ -226,12 +226,12 @@ export function castFrom(d: AreaDraft, casterId: string | null, tokens: AreaToke
       delete next.casterId;
       return next;
     }
-    const t = draftTemplate(d, tokens, feetPerCell);
+    const t = draftTemplate(g, d, tokens, feetPerCell);
     const next: AreaDraft = { ...d, point: d.point ?? (t ? freePointOf(t, feetPerCell) : null) };
     delete next.casterId;
     delete next.fromId;
     const around = d.shape === "emanation" && d.fromId !== undefined ? tokens[d.fromId] : undefined;
-    if (around) next.footprint = emanationFootprint(SQUARES, around, feetPerCell);
+    if (around) next.footprint = emanationFootprint(g, around, feetPerCell);
     return next;
   }
   const next: AreaDraft = { ...d, casterId, lastCaster: casterId };
@@ -354,8 +354,8 @@ export function pickedPress(at: {
   return null;
 }
 
-function centerOf(t: AreaToken): Point {
-  const r = footprintRect(SQUARES, t);
+function centerOf(g: Grid, t: AreaToken): Point {
+  const r = footprintRect(g, t);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
@@ -374,10 +374,12 @@ export function tappedToken(input: {
   snap: SnapMode;
   chunks: Readonly<Record<string, BuildChunk>>;
   sceneId: string;
+  /** The scene's grid: on hexes a token's center is its anchor, and the snaps are the hex lattice's. */
+  grid: Grid;
   feetPerCell: number;
 }): { draft: AreaDraft; gesture: TapGesture } {
-  const { draft: d, token } = input;
-  const at = centerOf(token);
+  const { draft: d, token, grid } = input;
+  const at = centerOf(grid, token);
   const from = d.fromId !== undefined ? input.tokens[d.fromId] : undefined;
   switch (tokenTap(d, token.id, input.yours)) {
     case "cast":
@@ -385,14 +387,14 @@ export function tappedToken(input: {
     case "target":
       return { draft: { ...d, fromId: token.id, point: null }, gesture: { kind: "none" } };
     case "aim": {
-      const pivot = from ? centerOf(from) : d.point ? { x: d.point.x, y: d.point.y } : at;
+      const pivot = from ? centerOf(grid, from) : d.point ? { x: d.point.x, y: d.point.y } : at;
       const yaw = yawToward(pivot, at);
-      return { draft: yaw === null ? d : { ...d, yaw: snapYaw(yaw, input.snap) }, gesture: { kind: "aim", pivot } };
+      return { draft: yaw === null ? d : { ...d, yaw: snapYaw(grid, yaw, input.snap) }, gesture: { kind: "aim", pivot } };
     }
     case "grab":
-      return { draft: d, gesture: { kind: "aim", pivot: from ? centerOf(from) : at } };
+      return { draft: d, gesture: { kind: "aim", pivot: from ? centerOf(grid, from) : at } };
     case "center": {
-      const c = snapCubeCenter(at, d.size, input.feetPerCell);
+      const c = snapCubeCenter(grid, at, d.size, input.feetPerCell);
       return { draft: { ...d, point: { ...c, z: freePointHeight(input.chunks, input.sceneId, c, d.point) } }, gesture: { kind: "center" } };
     }
     case "place":

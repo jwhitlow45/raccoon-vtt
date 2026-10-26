@@ -50,7 +50,7 @@ import {
 } from "./store.ts";
 import { areaCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 
 /**
  * The area of effect tool (design section 9.3, features section 9).
@@ -108,8 +108,8 @@ function sceneToken(env: AreaEnv, id: string | null): AreaToken | undefined {
   return t && t.sceneId === env.scene.id ? t : undefined;
 }
 
-function centerOf(t: AreaToken): { x: number; y: number } {
-  const r = footprintRect(SQUARES, t);
+function centerOf(env: AreaEnv, t: AreaToken): { x: number; y: number } {
+  const r = footprintRect(sceneGrid(env.scene), t);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
@@ -138,19 +138,20 @@ function aimPoint(ctx: ToolContext, p: ToolPointer, origin: { x: number; y: numb
 
 /** A draft's origin as its preview draws it, or the pivot it turns on when it has none yet. */
 function draftOrigin(env: AreaEnv, d: AreaDraft, pivot: { x: number; y: number }): { x: number; y: number } {
-  const t = draftTemplate(d, env.view.tokens, env.view.meta.settings.feetPerCell);
+  const t = draftTemplate(sceneGrid(env.scene), d, env.view.tokens, env.view.meta.settings.feetPerCell);
   return t ? liveOrigin(t, areaContext(env.view, env.scene)) : pivot;
 }
 
 function aimed(env: AreaEnv, d: AreaDraft, pivot: { x: number; y: number }, to: { x: number; y: number }): AreaDraft {
   const yaw = yawToward(pivot, to);
-  return yaw === null ? d : { ...d, yaw: snapYaw(yaw, env.area.store.getState().snap) };
+  return yaw === null ? d : { ...d, yaw: snapYaw(sceneGrid(env.scene), yaw, env.area.store.getState().snap) };
 }
 
 /** Where an area goes on open map, at the height placement.ts freePointHeight gives it. */
 function freePoint(env: AreaEnv, d: AreaDraft, world: { x: number; y: number }, token: AreaToken | undefined): Point3 {
-  if (token) return { ...centerOf(token), z: pointHeight(token) };
-  const at = d.shape === "emanation" && d.footprint ? snapFootprintCenter(world, d.footprint) : snapPoint(world);
+  if (token) return { ...centerOf(env, token), z: pointHeight(token) };
+  const grid = sceneGrid(env.scene);
+  const at = d.shape === "emanation" && d.footprint ? snapFootprintCenter(grid, world, d.footprint) : snapPoint(grid, world);
   return { ...at, z: freePointHeight(env.view.buildChunks, env.scene.id, at, d.point) };
 }
 
@@ -182,7 +183,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
     areaStore.setState({ pickCaster: false });
     if (token && st.draft) {
       // As the From control turning on with this token: a cube placed at a point stays there.
-      setDraft(env, castFrom(st.draft, token.id, env.view.tokens, fpc));
+      setDraft(env, castFrom(sceneGrid(env.scene), st.draft, token.id, env.view.tokens, fpc));
       noteCaster(env, token.id);
     }
     return begin({ kind: "none" });
@@ -194,7 +195,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
     const t = env.view.templates[st.selectedId];
     if (t && canEdit(env, t)) {
       const directional = isDirectional(t.shape);
-      const pivot = templatePivot(t, env.view.tokens, fpc);
+      const pivot = templatePivot(actx.grid, t, env.view.tokens, fpc);
       const other = templateAt(env, actx, p.world);
       const press = pickedPress({
         directional,
@@ -237,6 +238,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
       yours: castsYours(env, d),
       tokens: env.view.tokens,
       snap: st.snap,
+      grid: sceneGrid(env.scene),
       chunks: env.view.buildChunks,
       sceneId: env.scene.id,
       feetPerCell: fpc,
@@ -264,7 +266,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
     case "line":
     case "cube": {
       if (from) {
-        const pivot = centerOf(from);
+        const pivot = centerOf(env, from);
         setDraft(env, aimed(env, d, pivot, aimAt(d, pivot)));
         return begin({ kind: "aim", pivot });
       }
@@ -273,7 +275,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
         const half = d.size / fpc / 2;
         const inside = d.point && Math.abs(p.world.x - d.point.x) <= half && Math.abs(p.world.y - d.point.y) <= half;
         if (!d.point || inside || near(d.point)) {
-          const center = snapCubeCenter(p.world, d.size, fpc);
+          const center = snapCubeCenter(actx.grid, p.world, d.size, fpc);
           setDraft(env, { ...d, point: { ...center, z: freePointHeight(env.view.buildChunks, env.scene.id, center, d.point) } });
           return begin({ kind: "center" });
         }
@@ -309,19 +311,20 @@ function onMove(p: ToolPointer, ctx: ToolContext): void {
   const st = areaStore.getState();
   const fpc = env.view.meta.settings.feetPerCell;
   if (g.kind === "moveTemplate") {
-    areaStore.setState({ live: movePatch(g.template, p.world.x - g.start.x, p.world.y - g.start.y) });
+    areaStore.setState({ live: movePatch(sceneGrid(env.scene), g.template, p.world.x - g.start.x, p.world.y - g.start.y) });
     return;
   }
   if (g.kind === "turnTemplate") {
     const yaw = yawToward(g.pivot, aimPoint(ctx, p, liveOrigin(g.template, areaContext(env.view, env.scene))));
-    if (yaw !== null) areaStore.setState({ live: rotatePatch(g.template, snapYaw(yaw, st.snap), env.view.tokens, fpc) });
+    const grid = sceneGrid(env.scene);
+    if (yaw !== null) areaStore.setState({ live: rotatePatch(grid, g.template, snapYaw(grid, yaw, st.snap), env.view.tokens, fpc) });
     return;
   }
   const d = st.draft;
   if (!d) return;
   if (g.kind === "aim") setDraft(env, aimed(env, d, g.pivot, aimPoint(ctx, p, draftOrigin(env, d, g.pivot))));
   else if (g.kind === "center") {
-    const center = snapCubeCenter(p.world, d.size, fpc);
+    const center = snapCubeCenter(sceneGrid(env.scene), p.world, d.size, fpc);
     setDraft(env, { ...d, point: { ...center, z: freePointHeight(env.view.buildChunks, env.scene.id, center, d.point) } });
   }
   else setDraft(env, { ...d, point: freePoint(env, d, p.world, undefined) });

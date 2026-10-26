@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LIMITS } from "#shared/limits.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, MIN_HEIGHT_FT, type AbilityKey, type BuildChunk, type ConditionKey, type SkillKey, type Trap, type TrapAction, type TrapCheck, type TrapRig, type TrapSound } from "#shared/model.ts";
 import { MAX_NAME, TRAP_SOUNDS, type TrapPatch } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
@@ -597,7 +598,8 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
     const id = `trap-area-${trap.id}`;
     const area = typeof rig.hits === "object" && "area" in rig.hits ? rig.hits.area : null;
     const draft = area
-      ? draftFromTemplate({ ...area, id, rev: 0, sceneId: trap.sceneId, color: theme.color.danger, visibility: "dm", ownerId: "" }, id, view.tokens, fpc)
+      ? // Traps are square only until hex grids' phase H2, so a trap's area copies on squares.
+        draftFromTemplate(SQUARES, { ...area, id, rev: 0, sceneId: trap.sceneId, color: theme.color.danger, visibility: "dm", ownerId: "" }, id, view.tokens, fpc)
       : { ...newDraft(id, "cone", theme.color.danger), point: { x: center.x, y: center.y, z: zoneGroundAt(chunks, trap.sceneId, center) } };
     aimTrapArea(scope, ui, trap.id, draft);
   };
