@@ -75,6 +75,7 @@ describe("actor.use (docs/design-v1-combat-controls.md 3.1)", () => {
     assert.equal(refused(spent, use({ kind: "legendary", cost: 2, key: "legendaryActions:wing-attack", name: "Wing Attack" })).message, NO_LEGENDARY_LEFT);
     assert.equal(dragon(apply(spent, use({ kind: "legendary", cost: 1 }))).legendary!.actionsUsed, 3);
     assert.equal(refused(table({ legendary: undefined }), use({ kind: "legendary", cost: 1 })).message, NO_LEGENDARY_LEFT);
+    assert.equal(NO_LEGENDARY_LEFT, "No Legendary Actions left.", "the game term in capitals (D-261026-6)");
   });
 
   test("giving a legendary action back returns its pips and its mark, and with nothing to give changes nothing", () => {

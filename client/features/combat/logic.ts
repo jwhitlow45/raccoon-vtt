@@ -443,7 +443,7 @@ export function usesCount(rows: readonly UseRow[], resources: readonly ClassReso
 
 /** "Wing Attack (2)" for a cost above 1 (5). */
 export function legendaryText(button: LegendaryButton): string {
-  if (!button.name) return "Spend a legendary action";
+  if (!button.name) return "Spend a Legendary Action";
   return button.cost > 1 ? `${button.name} (${button.cost})` : button.name;
 }
 
@@ -461,9 +461,9 @@ export function legendaryOffText(button: LegendaryButton): string | null {
   }
 }
 
-/** A legendary action's name for a screen reader (9): "Use Fiery Rays, legendary action, 3 left". */
+/** A legendary action's name for a screen reader (9): "Use Fiery Rays, Legendary Action, 3 left", the game term in capitals (D-261026-6). */
 export function legendaryLabel(button: LegendaryButton, left: number): string {
-  const what = button.name ? `Use ${button.name}, legendary action` : "Spend a legendary action";
+  const what = button.name ? `Use ${button.name}, Legendary Action` : "Spend a Legendary Action";
   return `${what}${button.cost > 1 ? `, costs ${button.cost}` : ""}, ${left} left`;
 }
 

@@ -18,7 +18,7 @@ describe("combat uses' undo step labels (docs/design-v1-combat-controls.md 3.5)"
   test("a use names what it spent or gave back, and for whom", () => {
     const s = state();
     assert.equal(describeOp({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 1, key: "legendaryActions:fiery-rays", name: "Fiery Rays", once: true } }, s), "using Fiery Rays for Adult Red Dragon");
-    assert.equal(describeOp({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 1 } }, s), "using a legendary action for Adult Red Dragon");
+    assert.equal(describeOp({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "legendary", cost: 1 } }, s), "using a Legendary Action for Adult Red Dragon");
     assert.equal(describeOp({ t: "actor.use", target: { tokenId: "lich" }, use: { kind: "resist" } }, s), "using Legendary Resistance for Lich");
     assert.equal(
       describeOp({ t: "actor.use", target: { tokenId: "dragon" }, use: { kind: "ability", key: "actions:fire-breath", name: "Fire Breath", limit: "recharge", max: 1, min: 5 }, back: true }, s),

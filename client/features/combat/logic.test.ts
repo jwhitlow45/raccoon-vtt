@@ -201,7 +201,7 @@ describe("the list", () => {
     assert.equal(LEGENDARY_RESISTANCE, "Legendary Resistance");
     assert.deepEqual(rowCount(resist), { left: 2, max: 3 });
     assert.equal(rowCount(rows.find((r) => r.kind === "ability")!), null, "a recharge says its state, not a count");
-    assert.equal(legendaryLabel(la.buttons[1]!, 3), "Use Fiery Rays, legendary action, 3 left");
+    assert.equal(legendaryLabel(la.buttons[1]!, 3), "Use Fiery Rays, Legendary Action, 3 left");
   });
 
   test("a once-marked action waits until its creature's next turn, a dear one needs its pips, and none goes on its own turn", () => {
@@ -221,7 +221,7 @@ describe("the list", () => {
   test("counts set by hand with no block's actions: one plain button", () => {
     const la = legendaryRow(rowsOf("list", { list: [] }));
     assert.deepEqual(la.buttons, [{ name: "", cost: 1, once: false, off: null }]);
-    assert.equal(legendaryText(la.buttons[0]!), "Spend a legendary action");
+    assert.equal(legendaryText(la.buttons[0]!), "Spend a Legendary Action");
   });
 
   test("the card lists no legendary action buttons, and says the pips come after other creatures' turns", () => {

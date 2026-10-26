@@ -22,7 +22,7 @@ type UseLine = Extract<LogEvent, { type: "use" }>;
 
 /** The refusal of a spend that would hold one mark past `LIMITS.usesPerActor`. */
 export const USES_FULL = "Too many uses are spent. A rest brings them back.";
-export const NO_LEGENDARY_LEFT = "No legendary actions left.";
+export const NO_LEGENDARY_LEFT = "No Legendary Actions left.";
 export const NO_RESISTANCE = "No Legendary Resistance left.";
 export const NO_RESOURCES = "Only a character has class resources.";
 export const AMOUNT_FOR_A_POOL = "Only a pool spends an amount.";

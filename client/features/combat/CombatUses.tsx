@@ -326,9 +326,9 @@ function UseLine(props: LineProps) {
       if (form === "card") note = LEGENDARY_CARD_LINE;
       for (const [i, b] of row.buttons.entries()) {
         const off = legendaryOffText(b);
-        add(`la${i}`, { text: legendaryText(b), label: legendaryLabel(b, row.left), off: off === null ? null : `${b.name || "A legendary action"}: ${off.toLowerCase()}.`, offId: `${id}-la${i}`, op: legendaryOp(target, b), onOff: props.onStatus });
+        add(`la${i}`, { text: legendaryText(b), label: legendaryLabel(b, row.left), off: off === null ? null : `${b.name || "A Legendary Action"}: ${off.toLowerCase()}.`, offId: `${id}-la${i}`, op: legendaryOp(target, b), onOff: props.onStatus });
       }
-      if (form === "list") add("back", { text: "Restore", label: "Restore one legendary action", off: row.left >= row.max ? "Legendary Actions are full." : null, offId: `${id}-full`, op: legendaryBackOp(target, row.buttons, props.actor), onOff: props.onStatus });
+      if (form === "list") add("back", { text: "Restore", label: "Restore one Legendary Action", off: row.left >= row.max ? "Legendary Actions are full." : null, offId: `${id}-full`, op: legendaryBackOp(target, row.buttons, props.actor), onOff: props.onStatus });
       break;
     case "ability": {
       head = abilityHead(row);
@@ -394,8 +394,11 @@ function UseLine(props: LineProps) {
 
 /**
  * Restore for legendary actions: the first once-a-turn action still
- * marked, with its pips, else one pip, so a mis-tap of Fiery Rays frees
- * Fiery Rays again.
+ * marked, with its cost, else one, so a mis-tap of Fiery Rays frees Fiery
+ * Rays again. On the creature's own turn its actions read as off for that
+ * (legendaryOff), never as once-marked, so Restore gives back one and
+ * leaves any mark. Undo is the exact correction
+ * (docs/design-v1-monster-uses.md 3.3).
  */
 function legendaryBackOp(target: ActorTarget, buttons: readonly LegendaryButton[], actor: LineProps["actor"]): ClientOp {
   const marked = buttons.find((b) => b.key !== undefined && b.off === "once");

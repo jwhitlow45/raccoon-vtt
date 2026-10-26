@@ -478,10 +478,10 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const group = await rowUses(phone, DRAGON);
     await group.getByText("Legendary Actions 3 of 3", { exact: true }).waitFor();
     await shots.take(phone, "cu-b-row-uses");
-    await group.getByRole("button", { name: "Use Fiery Rays, legendary action, 3 left" }).click();
+    await group.getByRole("button", { name: "Use Fiery Rays, Legendary Action, 3 left" }).click();
     await group.getByText("Legendary Actions 2 of 3", { exact: true }).waitFor();
     await waitFor("Fiery Rays marked until the dragon's turn", () => (dragon()?.uses?.["legendaryActions:fiery-rays"]?.kind === "turn" ? true : null));
-    const rays = group.getByRole("button", { name: "Use Fiery Rays, legendary action, 2 left" });
+    const rays = group.getByRole("button", { name: "Use Fiery Rays, Legendary Action, 2 left" });
     assert.equal(await rays.getAttribute("aria-disabled"), "true", "greyed until the start of its next turn");
     // Off, it keeps its tap, which says why: Playwright takes aria-disabled for disabled, so the tap is forced.
     await rays.click({ force: true });
@@ -496,7 +496,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const drawer = await barUses(phone);
     await drawer.getByText("Legendary Actions 2 of 3", { exact: true }).waitFor();
     await shots.take(phone, "cu-b-bar-drawer");
-    await drawer.getByRole("button", { name: "Use Pounce, legendary action, 2 left" }).click();
+    await drawer.getByRole("button", { name: "Use Pounce, Legendary Action, 2 left" }).click();
     await waitFor("Pounce spent", () => (dragon()?.legendary?.actionsUsed === 2 ? true : null));
     await drawer.getByText("Legendary Actions 1 of 3", { exact: true }).waitFor();
     // What Pat's copy holds of the dragon: no counts, no marks, no record, and use lines by name alone (8).
@@ -630,7 +630,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await shots.take(phone, "cu-b-dragon-turn-phone");
     // On its own turn the dragon takes no legendary action, wherever the DM looks.
     const group = await rowUses(phone, DRAGON);
-    const rays = group.getByRole("button", { name: "Use Fiery Rays, legendary action, 3 left" });
+    const rays = group.getByRole("button", { name: "Use Fiery Rays, Legendary Action, 3 left" });
     assert.equal(await rays.getAttribute("aria-disabled"), "true");
     await group.getByText("Legendary Actions 3 of 3", { exact: true }).waitFor();
     await closeSheets(phone);
@@ -1212,7 +1212,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       await uses.getByText("Loading the uses…", { exact: true }).waitFor();
       await uses.scrollIntoViewIfNeeded();
       await shots.take(desk, "s2-cu-dragon-uses-loading");
-      await uses.getByRole("button", { name: /^Use Fiery Rays, legendary action, / }).waitFor();
+      await uses.getByRole("button", { name: /^Use Fiery Rays, Legendary Action, / }).waitFor();
       await uses.getByText("Loading the uses…", { exact: true }).waitFor({ state: "detached" });
       await desk.unroute(/\/assets\/monsters-[^/]*\.js$/);
       assert.deepEqual(await combatSections(panel), ["Hit Points", "Conditions", "Uses", "Reaction", "Range rings", "Rest"]);
@@ -1222,7 +1222,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
 
       // Fiery Rays from the panel spends a legendary action, which the row's pips and the bar's drawer read too.
       const spent = dragon()!.legendary!.actionsUsed;
-      await uses.getByRole("button", { name: /^Use Fiery Rays, legendary action, / }).click();
+      await uses.getByRole("button", { name: /^Use Fiery Rays, Legendary Action, / }).click();
       await waitFor("a pip spent", () => (dragon()?.legendary?.actionsUsed === spent + 1 ? true : null));
       const max = dragon()!.legendary!.actionsMax;
       await uses.getByText(`Legendary Actions used: ${spent + 1} of ${max}`, { exact: true }).waitFor();
@@ -1234,7 +1234,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       await closeSheets(desk);
       // Restore from the panel frees Fiery Rays for the steps after.
       panel = await creaturePanel(desk, DRAGON, DRAGON_AT);
-      await sectionIn(panel, "Uses").getByRole("button", { name: "Restore one legendary action", exact: true }).click();
+      await sectionIn(panel, "Uses").getByRole("button", { name: "Restore one Legendary Action", exact: true }).click();
       await waitFor("the pip back", () => (dragon()?.legendary?.actionsUsed === spent ? true : null));
 
       // A phone's column folds the troll's open Regeneration into a row over the dragon's cells, so it is settled first.

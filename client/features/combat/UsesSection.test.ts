@@ -200,7 +200,7 @@ describe("a monster's rows, its counts as pips", () => {
       restores(fullList).map((b) => [/aria-label="([^"]+)"/.exec(b)![1], /aria-disabled="true"/.test(b), off(fullList, b)]),
       [
         ["Restore one Legendary Resistance", true, "Legendary Resistance is full."],
-        ["Restore one legendary action", true, "Legendary Actions are full."],
+        ["Restore one Legendary Action", true, "Legendary Actions are full."],
         ["Restore one use of Dominate Mind", true, "Dominate Mind is full."],
       ],
     );
@@ -213,8 +213,8 @@ describe("a monster's rows, its counts as pips", () => {
 
   test("on its own turn its legendary actions are off and Restore still corrects the count", () => {
     const markup = list(spent, { ownTurn: true });
-    assert.match(named(markup, "Use Lash, legendary action, 2 left")!, /aria-disabled="true"/);
-    assert.doesNotMatch(named(markup, "Restore one legendary action")!, /aria-disabled/);
+    assert.match(named(markup, "Use Lash, Legendary Action, 2 left")!, /aria-disabled="true"/);
+    assert.doesNotMatch(named(markup, "Restore one Legendary Action")!, /aria-disabled/);
   });
 
   test("the turn card: Legendary Actions' pips and when they come, no buttons for them, and no Restore", () => {

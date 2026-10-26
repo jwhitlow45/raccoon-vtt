@@ -549,9 +549,9 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
 /**
  * A creature's use of a limited ability, or one it regains
  * (docs/design-v1-combat-controls.md 8), with the counts the reader's line
- * kept: "Adult Red Dragon used Fiery Rays (legendary action, 2 of 3 left)."
- * for the DM and its owners, "Adult Red Dragon used Fiery Rays, a legendary
- * action." for other players, and "Young Red Dragon: Fire Breath is ready
+ * kept: "Adult Red Dragon used Fiery Rays (Legendary Action, 2 of 3 left)."
+ * for the DM and its owners, "Adult Red Dragon used Fiery Rays, a Legendary
+ * Action." for other players, and "Young Red Dragon: Fire Breath is ready
  * again." for a recharge, and "Adult Red Dragon regains a Legendary Resistance
  * (2 of 3 left)." for a use restored.
  */
@@ -562,7 +562,7 @@ export function useText(data: Extract<LogEvent, { type: "use" }>, who: string): 
   if (data.back) {
     switch (data.what) {
       case "legendary":
-        return `${who} regains ${data.name ?? (several ? `${data.cost} legendary actions` : "a legendary action")}${after}.`;
+        return `${who} regains ${data.name ?? (several ? `${data.cost} Legendary Actions` : "a Legendary Action")}${after}.`;
       case "resist":
         return `${who} regains a Legendary Resistance${after}.`;
       case "ability":
@@ -573,9 +573,10 @@ export function useText(data: Extract<LogEvent, { type: "use" }>, who: string): 
   }
   switch (data.what) {
     case "legendary":
-      if (!counts) return data.name ? `${who} used ${data.name}, a legendary action.` : `${who} used a legendary action.`;
-      if (data.name) return `${who} used ${data.name} (${several ? `${data.cost} actions` : "legendary action"}, ${counts}).`;
-      return `${who} used ${several ? `${data.cost} legendary actions` : "a legendary action"}${after}.`;
+      // The game term in capitals (D-261026-6). A line is worded from its stored event each time it is read, so older lines read so too.
+      if (!counts) return data.name ? `${who} used ${data.name}, a Legendary Action.` : `${who} used a Legendary Action.`;
+      if (data.name) return `${who} used ${data.name} (${several ? `${data.cost} actions` : "Legendary Action"}, ${counts}).`;
+      return `${who} used ${several ? `${data.cost} Legendary Actions` : "a Legendary Action"}${after}.`;
     case "resist":
       return `${who} used Legendary Resistance${after}.`;
     case "ability":

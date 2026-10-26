@@ -600,7 +600,7 @@ function usePhrase(op: OpOf<"actor.use">, before: RoomState, who: string): strin
   if (use.kind === "regenerate") return `Regeneration for ${who}`;
   const name =
     use.kind === "legendary"
-      ? quoted(use.name, "a legendary action")
+      ? quoted(use.name, "a Legendary Action")
       : use.kind === "resist"
         ? "Legendary Resistance"
         : use.kind === "ability"

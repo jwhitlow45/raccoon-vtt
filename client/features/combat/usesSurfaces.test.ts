@@ -188,7 +188,7 @@ function mountedFight() {
   return { get state() { return state; }, next: () => run({ t: "encounter.next" }) };
 }
 
-const OFF = /A legendary action: after another creature(&#x27;|')s turn\./;
+const OFF = /A Legendary Action: after another creature(&#x27;|')s turn\./;
 
 describe("a controlled mount on its rider's turn: the row and the bar agree it acts now (CCB-ASTRA-03, CCB-OPUS-6)", () => {
   test("on Bree's turn both hold its legendary actions, and both free them once a turn of another creature comes", () => {
@@ -209,7 +209,7 @@ describe("a controlled mount on its rider's turn: the row and the bar agree it a
     assert.equal(f.state.encounter!.activeEntryId, "ed");
     assert.doesNotMatch(rowMenu(f.state, "eh"), OFF);
     assert.doesNotMatch(drawer(f.state, "horse"), OFF);
-    assert.match(drawer(f.state, "horse"), /Spend a legendary action/);
+    assert.match(drawer(f.state, "horse"), /Spend a Legendary Action/);
   });
 });
 
