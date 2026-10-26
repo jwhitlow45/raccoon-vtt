@@ -121,6 +121,12 @@ describe("a class resource's count as pips", () => {
     assert.deepEqual(pips(second), { left: 1, spent: 3 }, "Second Wind none left, Action Surge one");
   });
 
+  test("a pool keeps its words at every size, as a paladin's 5 points of Lay on Hands (D-261026-2's eighth amendment)", () => {
+    const markup = rows([{ ...hands, max: 5, used: 1 }], "list");
+    assert.deepEqual(pips(markup), { left: 0, spent: 0 });
+    assert.match(markup, />Lay on Hands<\/span> <span style="[^"]*">4 of 5<\/span>/);
+  });
+
   test("a most of 7 keeps its words beside the name", () => {
     const markup = rows([{ ...rage, max: 7, used: 2 }], "list");
     assert.deepEqual(pips(markup), { left: 0, spent: 0 });

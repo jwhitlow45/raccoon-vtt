@@ -151,8 +151,11 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
     <li style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch }}>
         <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-          {/* A small count shows as the monster rows' pips at the line's right end, a pool's words stay beside its name (docs/design-v1-monster-uses.md 3.7). */}
-          {r.max <= PIPS_MOST ? (
+          {/*
+           * A counted use of 6 or fewer shows as the monster rows' pips at the line's right end (docs/design-v1-monster-uses.md 3.7).
+           * A pool keeps its words at every size: it is spent by an amount, not a pip at a time, and a small one would flip to words as it grows (D-261026-2).
+           */}
+          {!pool && r.max <= PIPS_MOST ? (
             <NameLine name={r.name} spoken={countWords({ left: remaining, max: r.max })} end={<CountPips left={remaining} max={r.max} />} />
           ) : (
             <div style={{ fontSize: theme.font.input, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
