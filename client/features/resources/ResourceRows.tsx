@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode, type Ref } from "re
 import type { CharacterId, ClassResource } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
+import { CountPips, countWords, NameLine, PIPS_MOST } from "../../components/CountPips.tsx";
 import { Input } from "../../components/Field.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { theme } from "../../lib/theme.ts";
@@ -150,9 +151,14 @@ function ResourceRow(props: { characterId: CharacterId; resource: ClassResource;
     <li style={{ display: "grid", gap: theme.space(1) }}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch }}>
         <div style={{ flex: "1 1 auto", minWidth: 0 }}>
-          <div style={{ fontSize: theme.font.input, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
-            <span style={{ fontWeight: theme.weight.strong }}>{r.name}</span> <span style={{ color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>{countText(r)}</span>
-          </div>
+          {/* A small count shows as the monster rows' pips at the line's right end, a pool's words stay beside its name (docs/design-v1-monster-uses.md 3.7). */}
+          {r.max <= PIPS_MOST ? (
+            <NameLine name={r.name} spoken={countWords({ left: remaining, max: r.max })} end={<CountPips left={remaining} max={r.max} />} />
+          ) : (
+            <div style={{ fontSize: theme.font.input, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
+              <span style={{ fontWeight: theme.weight.strong }}>{r.name}</span> <span style={{ color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>{countText(r)}</span>
+            </div>
+          )}
           <div style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>{RESET_WORDS[r.reset]}</div>
         </div>
         <div style={{ flex: "1 1 100%", minWidth: 0, maxWidth: "100%", display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>

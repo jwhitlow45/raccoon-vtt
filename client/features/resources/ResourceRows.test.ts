@@ -43,8 +43,8 @@ describe("a character's class resource rows", () => {
 
   test("each row reads its name, what is left of its most and its rest", () => {
     const markup = rows([rage, hands], "list");
-    assert.match(markup, /Rage<\/span> <span[^>]*>2 of 3<\/span>/);
-    assert.match(markup, /Lay on Hands<\/span> <span[^>]*>25 of 25<\/span>/);
+    assert.match(markup, />Rage<span style="[^"]*">, 2 of 3 left<\/span><\/span><span data-use-pips="" aria-hidden="true"/, "pips for a most of 6 or fewer");
+    assert.match(markup, /Lay on Hands<\/span> <span[^>]*>25 of 25<\/span>/, "its words beside the name past 6");
     assert.match(markup, />One back on a Short Rest, all on a Long Rest</);
     assert.match(markup, />Back on a Long Rest</);
     assert.match(markup, /^<div data-resource-list[^>]*><ul/, "a list, its rows its items");
@@ -90,6 +90,41 @@ describe("a character's class resource rows", () => {
 
   test("every button is a 44 px target", () => {
     for (const b of buttons(rows([rage, hands], "list"))) assert.match(b, /min-height:44px/, b);
+  });
+});
+
+/*
+ * The count as pips (D-261026-2's fifth and sixth amendments,
+ * docs/design-v1-monster-uses.md 3.7): only the count changes. The row's
+ * layout, its buttons and its "comes back" line stay as they were.
+ */
+describe("a class resource's count as pips", () => {
+  /** The rows before the pips, Rage's 3 and Lay on Hands' 25, Edit and all, as the build found them. */
+  const BEFORE = `<div data-resource-list="true" style="display:grid;gap:4px"><ul aria-label="Pat&#x27;s uses" style="list-style:none;margin:0;padding:0;display:grid;gap:12px"><li style="display:grid;gap:4px"><div style="display:flex;flex-wrap:wrap;align-items:center;column-gap:8px;row-gap:4px;min-height:44px"><div style="flex:1 1 auto;min-width:0"><div style="font-size:16px;line-height:1.2;overflow-wrap:anywhere"><span style="font-weight:600">Rage</span> <span style="color:#a7a5ad;font-variant-numeric:tabular-nums">2 of 3</span></div><div style="font-size:13px;line-height:1.4;color:#a7a5ad">One back on a Short Rest, all on a Long Rest</div></div><div style="flex:1 1 100%;min-width:0;max-width:100%;display:flex;flex-wrap:wrap;gap:4px"><button type="button" aria-label="Use Rage, 2 of 3 left" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;min-width:44px;font-size:14px;padding:0 12px;border-radius:10px;font-weight:600;font-family:Inter, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;cursor:pointer;background:#2a2a32;border:1px solid #3a3a44;color:#f1efe9;white-space:nowrap;flex:1 1 auto">Use</button><button type="button" aria-label="Restore one use of Rage" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;min-width:44px;font-size:14px;padding:0 12px;border-radius:10px;font-weight:600;font-family:Inter, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;cursor:pointer;background:#2a2a32;border:1px solid #3a3a44;color:#f1efe9;white-space:nowrap;flex:1 1 auto">Restore</button><button type="button" aria-label="Edit Rage" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;min-width:44px;font-size:14px;padding:0;border-radius:10px;font-weight:600;font-family:Inter, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;cursor:pointer;background:#2a2a32;border:1px solid #3a3a44;color:#f1efe9;flex:none"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20" style="display:block;flex:none"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497zM15 5l4 4"></path></svg></button><div id="_R_39l_" role="tooltip" popover="manual" style="display:none;visibility:hidden;position:fixed;inset:auto;margin:0;overflow:visible;padding:4px 8px;border:1px solid #3a3a44;border-radius:6px;background:#2a2a32;color:#f1efe9;font-family:Inter, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;font-size:13px;line-height:1.2;box-shadow:0 4px 16px rgba(0, 0, 0, 0.4);pointer-events:none">Edit Rage</div></div><span id="_R_5_-none" hidden="">Rage has no uses left.</span><span id="_R_5_-full" hidden="">Rage is full.</span></div></li><li style="display:grid;gap:4px"><div style="display:flex;flex-wrap:wrap;align-items:center;column-gap:8px;row-gap:4px;min-height:44px"><div style="flex:1 1 auto;min-width:0"><div style="font-size:16px;line-height:1.2;overflow-wrap:anywhere"><span style="font-weight:600">Lay on Hands</span> <span style="color:#a7a5ad;font-variant-numeric:tabular-nums">25 of 25</span></div><div style="font-size:13px;line-height:1.4;color:#a7a5ad">Back on a Long Rest</div></div><div style="flex:1 1 100%;min-width:0;max-width:100%;display:flex;flex-wrap:wrap;gap:4px"><button type="button" aria-expanded="false" aria-label="Use Lay on Hands, 25 of 25 left" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;min-width:44px;font-size:14px;padding:0 12px;border-radius:10px;font-weight:600;font-family:Inter, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;cursor:pointer;background:#2a2a32;border:1px solid #3a3a44;color:#f1efe9;white-space:nowrap;flex:1 1 auto">Use…</button><button type="button" aria-expanded="false" aria-label="Restore Lay on Hands" aria-disabled="true" aria-describedby="_R_9_-full" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;min-width:44px;font-size:14px;padding:0 12px;border-radius:10px;font-weight:600;font-family:Inter, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;cursor:default;background:#2a2a32;border:1px solid #3a3a44;color:#7c7a84;white-space:nowrap;flex:1 1 auto">Restore…</button><button type="button" aria-label="Edit Lay on Hands" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;min-width:44px;font-size:14px;padding:0;border-radius:10px;font-weight:600;font-family:Inter, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;cursor:pointer;background:#2a2a32;border:1px solid #3a3a44;color:#f1efe9;flex:none"><svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20" style="display:block;flex:none"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497zM15 5l4 4"></path></svg></button><div id="_R_39p_" role="tooltip" popover="manual" style="display:none;visibility:hidden;position:fixed;inset:auto;margin:0;overflow:visible;padding:4px 8px;border:1px solid #3a3a44;border-radius:6px;background:#2a2a32;color:#f1efe9;font-family:Inter, system-ui, -apple-system, &quot;Segoe UI&quot;, Roboto, sans-serif;font-size:13px;line-height:1.2;box-shadow:0 4px 16px rgba(0, 0, 0, 0.4);pointer-events:none">Edit Lay on Hands</div></div><span id="_R_9_-none" hidden="">No Lay on Hands is left.</span><span id="_R_9_-full" hidden="">Lay on Hands is full.</span></div></li></ul></div>`;
+  /** A row's name line: the only part that may change, the line before its "comes back" words. */
+  const NAME_LINE = /<div style="[^"]*">(?:(?!<div).)*?<\/div>(?=<div style="font-size:13px)/;
+  const withEdit = (resources: ClassResource[]) => render(character("pat", { name: "Pat", resources }), createElement(ClassResourceRows, { characterId: "pat", form: "list", label: "Pat's uses", edit() {} }));
+  const pips = (html: string) => ({ left: [...html.matchAll(/data-pip="left"/g)].length, spent: [...html.matchAll(/data-pip="spent"/g)].length });
+
+  test("only Rage's name line changed: its layout, Use, Restore, Edit and its rest as before, and Lay on Hands, past 6, as before throughout", () => {
+    const now = withEdit([rage, hands]);
+    assert.notEqual(now, BEFORE, "Rage's count changed");
+    assert.equal(now.replace(NAME_LINE, "NAME_LINE"), BEFORE.replace(NAME_LINE, "NAME_LINE"));
+  });
+
+  test("a most of 6 or fewer: a pip for each use, filled for each one left, to read only, and the count spoken after the name", () => {
+    const markup = rows([{ ...rage, max: 6, used: 2 }], "list");
+    assert.deepEqual(pips(markup), { left: 4, spent: 2 });
+    assert.match(markup, />Rage<span style="[^"]*">, 4 of 6 left<\/span><\/span>/);
+    assert.doesNotMatch(markup, />4 of 6</, "no count in words on screen");
+    const second = rows([{ id: "sw", name: "Second Wind", max: 3, used: 3, reset: "shortOne" }, { id: "as", name: "Action Surge", max: 1, used: 0, reset: "short" }], "card");
+    assert.deepEqual(pips(second), { left: 1, spent: 3 }, "Second Wind none left, Action Surge one");
+  });
+
+  test("a most of 7 keeps its words beside the name", () => {
+    const markup = rows([{ ...rage, max: 7, used: 2 }], "list");
+    assert.deepEqual(pips(markup), { left: 0, spent: 0 });
+    assert.match(markup, />Rage<\/span> <span style="[^"]*">5 of 7<\/span>/);
   });
 });
 
