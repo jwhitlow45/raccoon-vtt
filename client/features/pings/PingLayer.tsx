@@ -15,6 +15,8 @@ import { Pill } from "../measure/Pill.tsx";
 import { playPing, unlockAudio, vibrate } from "./feedback.ts";
 import { reportHoldPing } from "./hold.ts";
 import { markOwner } from "./who.ts";
+import { cameraOfStage, screenToView } from "../../lib/camera.ts";
+import { TOP_DOWN, toWorld } from "../../lib/view.ts";
 
 /**
  * Pings on the overlay layer (design 13.3): rings that pulse outward in the
@@ -173,8 +175,8 @@ function useHoldToPing(ref: RefObject<Konva.Group | null>, enabled: boolean, pin
       const pointerId = e.pointerId;
       timer = setTimeout(() => {
         timer = null;
-        const scale = stage.scaleX() || 1;
-        pingRef.current((p.x - stage.x()) / scale, (p.y - stage.y()) / scale, pointerId);
+        const at = toWorld(TOP_DOWN, screenToView(cameraOfStage(stage), p));
+        pingRef.current(at.x, at.y, pointerId);
       }, LONG_PRESS_MS);
     };
     const move = (e: PointerEvent) => {

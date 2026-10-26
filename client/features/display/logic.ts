@@ -1,5 +1,6 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import { fitRect, type Camera, type Rect, type Size } from "../../lib/camera.ts";
+import { TOP_DOWN, viewBox } from "../../lib/view.ts";
 import { fitTarget } from "../../lib/fitTarget.ts";
 import type { FogMask } from "../../lib/fogTiles.ts";
 import { footprint } from "../../lib/scene.ts";
@@ -60,7 +61,7 @@ export type ViewRect = { x: number; y: number; w: number; h: number };
  * on each side.
  */
 export function followCamera(viewport: Size, view: ViewRect): Camera {
-  return fitRect(viewport, { x: view.x - view.w / 2, y: view.y - view.h / 2, width: view.w, height: view.h }, 0);
+  return fitRect(viewport, viewBox(TOP_DOWN, { x: view.x - view.w / 2, y: view.y - view.h / 2, width: view.w, height: view.h }), 0);
 }
 
 /**

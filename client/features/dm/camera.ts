@@ -1,5 +1,6 @@
 import type { EphEvent } from "#shared/protocol.ts";
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
+import { groundAtMiddle, type Live } from "../../lib/view.ts";
 
 /**
  * Where the DM is looking, for "Follow me" and "Bring everyone here"
@@ -32,13 +33,14 @@ export function subscribeFocus(scope: RoomScope, listener: () => void): () => vo
 }
 
 /**
- * The world point at the middle of the canvas and its zoom (screen pixels
- * per cell), the form a focus event carries. A receiving canvas centers that
- * point at the same zoom, whatever its own size.
+ * The ground at the middle of the canvas (lib/view.ts groundAtMiddle) and
+ * its zoom (screen pixels per cell), the form a focus event carries. A
+ * receiving canvas centers that point at the same zoom, whatever its own
+ * size and view.
  */
-export function focusFromStage(stage: { x: number; y: number; scale: number; width: number; height: number }): { x: number; y: number; zoom: number } {
-  const scale = stage.scale > 0 ? stage.scale : 1;
-  return { x: (stage.width / 2 - stage.x) / scale, y: (stage.height / 2 - stage.y) / scale, zoom: scale };
+export function focusFromStage(live: Live): { x: number; y: number; zoom: number } {
+  const scale = live.camera.scale > 0 ? live.camera.scale : 1;
+  return { ...groundAtMiddle({ ...live, camera: { ...live.camera, scale } }), zoom: scale };
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { FOG_SUBCELLS } from "#shared/model.ts";
 import { fitRect, keepInView, sceneMinScale, zoomAt, pinchCamera, MIN_SCALE } from "./camera.ts";
+import { TOP_DOWN, viewBox } from "./view.ts";
 import { fitTarget } from "./fitTarget.ts";
 
 const bounds = { w: 20, h: 10 };
@@ -35,7 +36,7 @@ describe("fit map", () => {
   });
 
   test("fits inside what the top bar and toolbar leave clear", () => {
-    const cam = fitRect({ width: 400, height: 800 }, { x: 0, y: 0, width: 10, height: 10 }, 0, { top: 52, bottom: 60, left: 0, right: 0 });
+    const cam = fitRect({ width: 400, height: 800 }, viewBox(TOP_DOWN, { x: 0, y: 0, width: 10, height: 10 }), 0, { top: 52, bottom: 60, left: 0, right: 0 });
     assert.equal(cam.scale, 40);
     // The 400 px square sits centered between the bars, not the canvas.
     assert.equal(cam.y, 52 + (688 - 400) / 2);

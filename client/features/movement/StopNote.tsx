@@ -5,7 +5,8 @@ import { Button } from "../../components/Button.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
-import { worldToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
+import { viewToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
+import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -92,7 +93,7 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
   if (!shown || !note || !token) return null;
 
   const fp = footprint(token);
-  const anchor = worldToScreen(props.camera, { x: note.ghost.x + fp.w / 2, y: note.ghost.y + fp.h });
+  const anchor = viewToScreen(props.camera, toView(TOP_DOWN, { x: note.ghost.x + fp.w / 2, y: note.ghost.y + fp.h }));
   // A card over the map as wide as a map pane, inside the canvas's 8 px margins.
   const width = Math.min(PANE_WIDTH, props.viewport.width - 2 * theme.space(2));
   /*

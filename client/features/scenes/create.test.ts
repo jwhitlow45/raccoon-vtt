@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { apply, room } from "#shared/testutil.ts";
 import { builderScene, fogsWithFirstMap, guessCellPx, mapScene, matScene, nameFromFile, replaceMap, sameArt, viewFromCamera } from "./create.ts";
+import { TOP_DOWN } from "../../lib/view.ts";
 
 function valid(scene: unknown) {
   const parsed = clientOpSchema.safeParse({ t: "scene.create", scene });
@@ -76,9 +77,9 @@ describe("new scenes", () => {
 
 describe("scene list", () => {
   test("the default view is the world point at the canvas center, within the schema", () => {
-    const view = viewFromCamera({ x: 100, y: 50, scale: 40 }, { width: 900, height: 600 });
+    const view = viewFromCamera({ camera: { x: 100, y: 50, scale: 40 }, viewport: { width: 900, height: 600 }, view: TOP_DOWN });
     assert.deepEqual(view, { x: 8.75, y: 6.25, zoom: 40 });
-    const close = viewFromCamera({ x: 0, y: 0, scale: 300 }, { width: 900, height: 600 });
+    const close = viewFromCamera({ camera: { x: 0, y: 0, scale: 300 }, viewport: { width: 900, height: 600 }, view: TOP_DOWN });
     assert.equal(close.zoom, 100);
     const parsed = clientOpSchema.safeParse({ t: "scene.update", sceneId: "s1", patch: { defaultView: close } });
     assert.ok(parsed.success);

@@ -63,7 +63,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
       return;
     }
     const live = currentStageCamera(scope);
-    if (live) update({ defaultView: viewFromCamera(live.camera, live.viewport) });
+    if (live) update({ defaultView: viewFromCamera(live) });
   };
 
   return (

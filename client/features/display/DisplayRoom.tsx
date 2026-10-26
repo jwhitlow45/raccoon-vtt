@@ -13,6 +13,7 @@ import { Notice } from "../../components/Notice.tsx";
 import { useTooltip } from "../../components/Tooltip.tsx";
 import { api, ApiError, displayAssetUrl, type AssetVariant } from "../../lib/api.ts";
 import { fitRect, NO_INSETS, type Camera, type Rect, type Size } from "../../lib/camera.ts";
+import { TOP_DOWN, viewBox } from "../../lib/view.ts";
 import { BANNER_DELAY_MS, type ConnectionState } from "../../lib/connection.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
 import { exitFullscreen, fullscreenSupported, toggleFullscreen, useFullscreen } from "../../lib/fullscreen.ts";
@@ -339,7 +340,7 @@ function useDisplayCamera(gate: ReturnType<typeof sceneGate>, mode: DisplayMode)
       return (viewport: Size) => followCamera(viewport, v);
     }
     if (!fitRectNow) return null;
-    return (viewport: Size) => fitRect(viewport, fitRectNow, 24);
+    return (viewport: Size) => fitRect(viewport, viewBox(TOP_DOWN, fitRectNow), 24);
   }, [mode, dmView, fitRectNow]);
 }
 

@@ -1,7 +1,8 @@
 import type { CSSProperties } from "react";
 import type { Label } from "#shared/model.ts";
 import { labelBox, type LabelBox } from "#shared/rules/labels.ts";
-import { worldToScreen, type Camera } from "../../lib/camera.ts";
+import { viewToScreen, type Camera } from "../../lib/camera.ts";
+import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { theme } from "../../lib/theme.ts";
 import { measureLabel } from "./draw.ts";
 import type { PanePlacement } from "./labelEdit.ts";
@@ -12,8 +13,8 @@ export const PANE_HEIGHT_UNMEASURED = 200;
 /** A label's box on screen, in pixels from the canvas's top left. */
 export function labelScreenBox(label: Pick<Label, "x" | "y" | "text" | "size">, camera: Camera): LabelBox {
   const box = labelBox(label, measureLabel);
-  const topLeft = worldToScreen(camera, { x: box.x0, y: box.y0 });
-  const bottomRight = worldToScreen(camera, { x: box.x1, y: box.y1 });
+  const topLeft = viewToScreen(camera, toView(TOP_DOWN, { x: box.x0, y: box.y0 }));
+  const bottomRight = viewToScreen(camera, toView(TOP_DOWN, { x: box.x1, y: box.y1 }));
   return { x0: topLeft.x, y0: topLeft.y, x1: bottomRight.x, y1: bottomRight.y };
 }
 

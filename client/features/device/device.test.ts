@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { cameraForView, worldToScreen } from "../../lib/camera.ts";
+import { cameraForView, viewToScreen } from "../../lib/camera.ts";
+import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { EPH_PER_SECOND } from "../../state/socket.ts";
 import { barInset, cameraInZoomed, chromeZoom, effectiveZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi, steadySize, type SteadySize, type ZoomedElement } from "./layout.ts";
 import { ephRate, mapVariantFor, parseDiceSet, parseLowPower, parseRollAnimation, parseUiScale, pixelRatioFor, stageMountKey, UI_SCALES, uiScaleLabel } from "./settings.ts";
@@ -130,12 +131,12 @@ describe("interface size", () => {
 
   test("the action bar lands under its token at every scale", () => {
     const viewport = { width: 390, height: 844 };
-    const cam = cameraForView(viewport, { x: 10, y: 12, zoom: 48 });
+    const cam = cameraForView(viewport, toView(TOP_DOWN, { x: 10, y: 12 }), 48);
     const token = { x: 10.5, y: 13 };
-    const onScreen = worldToScreen(cam, token);
+    const onScreen = viewToScreen(cam, toView(TOP_DOWN, token));
     for (const scale of UI_SCALES) {
       // Inside a layer zoomed by `scale`, a point at p draws at p * scale.
-      const inLayer = worldToScreen(cameraInZoomed(cam, scale), token);
+      const inLayer = viewToScreen(cameraInZoomed(cam, scale), toView(TOP_DOWN, token));
       assert.ok(Math.abs(inLayer.x * scale - onScreen.x) < 1e-9 && Math.abs(inLayer.y * scale - onScreen.y) < 1e-9, uiScaleLabel(scale));
       const anchor = inZoomed(onScreen, scale);
       assert.ok(Math.abs(anchor.x * scale - onScreen.x) < 1e-9);

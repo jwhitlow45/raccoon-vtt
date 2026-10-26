@@ -43,7 +43,7 @@ export function FrameViewBar() {
   const save = () => {
     const live = currentStageCamera(scope);
     if (live) {
-      actions.dispatch({ t: "scene.update", sceneId: framing, patch: { defaultView: viewFromCamera(live.camera, live.viewport) } });
+      actions.dispatch({ t: "scene.update", sceneId: framing, patch: { defaultView: viewFromCamera(live) } });
       ui.notify("Starting view saved.");
     }
     stop();

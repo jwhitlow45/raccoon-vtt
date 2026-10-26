@@ -1,6 +1,7 @@
 import type { RoomState, Scene } from "#shared/model.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
-import { worldToScreen, type Point } from "../../../lib/camera.ts";
+import { viewToScreen, type Point } from "../../../lib/camera.ts";
+import { TOP_DOWN, toView } from "../../../lib/view.ts";
 import type { ToolContext } from "../../tools.ts";
 import { pinUnder } from "../../pins/rules.ts";
 import { cellReadout, groundSource, type Cell, type ReadoutWords } from "./ground.ts";
@@ -24,7 +25,7 @@ export function tapGround(ctx: Pick<ToolContext, "getState" | "scene" | "camera"
   const camera = ctx.camera();
   // A pin answers its own tap (features/pins/PinLayer.tsx), and a reading beside its popover would be two things floating at once.
   const cell = { x: Math.floor(world.x), y: Math.floor(world.y) };
-  const words = tool === "select" && view && !pinUnder(view, ctx.scene.id, camera, worldToScreen(camera, world)) ? wordsAt(view, ctx.scene, ctx.role, cell) : null;
+  const words = tool === "select" && view && !pinUnder(view, ctx.scene.id, camera, viewToScreen(camera, toView(TOP_DOWN, world))) ? wordsAt(view, ctx.scene, ctx.role, cell) : null;
   if (!words) {
     closeReadout(slot);
     return false;

@@ -13,6 +13,7 @@ import { Pill } from "../measure/Pill.tsx";
 import { onHoldPing } from "../pings/hold.ts";
 import { dmOnlyPin, HEAD_CENTER_PX, LABEL_MIN_CELL_PX, pinOutline, pinTapCounts, pinUnder } from "./rules.ts";
 import { closePopoverOnSelect, pinSlot } from "./store.ts";
+import { cameraOfStage } from "../../lib/camera.ts";
 
 const OUTLINE = pinOutline();
 /** How long a label-only pin's popover stays after a tap. */
@@ -133,7 +134,7 @@ function useTapPin(ref: RefObject<Konva.Group | null>, enabled: boolean, sceneId
       if (!pinTapCounts({ start, end: p, several, held: wasHeld })) return;
       const view = store.getState().view;
       if (!view) return;
-      const hit = pinUnder(view, sceneRef.current, { x: stage.x(), y: stage.y(), scale: stage.scaleX() || 1 }, p);
+      const hit = pinUnder(view, sceneRef.current, cameraOfStage(stage), p);
       if (!hit) return;
       const pinState = scope.get(pinSlot).store;
       if (hit.pageId !== undefined && view.journal[hit.pageId]) {

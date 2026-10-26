@@ -5,7 +5,8 @@ import { tapDoor } from "../features/doors/tap.ts";
 import { pinUnder } from "../features/pins/rules.ts";
 import { closePinPopover } from "../features/pins/store.ts";
 import type { ToolContext } from "../features/tools.ts";
-import { worldToScreen, type Point } from "../lib/camera.ts";
+import { viewToScreen, type Point } from "../lib/camera.ts";
+import { TOP_DOWN, toView } from "../lib/view.ts";
 
 /**
  * A tap on empty map with the Select tool, the one tool without pointer
@@ -49,6 +50,6 @@ export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boo
  */
 export function putAway(ctx: ToolContext, world: Point, options: { readout: boolean } = { readout: true }): void {
   const camera = ctx.camera();
-  if (!pinUnder(ctx.getState().view, ctx.scene.id, camera, worldToScreen(camera, world))) closePinPopover(ctx.scope);
+  if (!pinUnder(ctx.getState().view, ctx.scene.id, camera, viewToScreen(camera, toView(TOP_DOWN, world)))) closePinPopover(ctx.scope);
   if (options.readout) closeReadout(ctx.scope.get(readoutSlot));
 }

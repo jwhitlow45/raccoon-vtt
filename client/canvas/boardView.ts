@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { PillProps } from "../features/measure/Pill.tsx";
 import type { Box } from "../lib/boardText.ts";
-import { NO_INSETS, type Camera, type Insets, type Size } from "../lib/camera.ts";
+import { NO_INSETS, screenToView, type Camera, type Insets, type Size } from "../lib/camera.ts";
 import { scopeSlot, useScoped } from "../state/scope.ts";
 
 /**
@@ -17,12 +17,9 @@ export type BoardViews = { clear: Box; canvas: Box };
 
 /** The part of the scene in `insets` of the canvas, in cells. */
 export function boardViewOf(cam: Camera, size: Size, insets: Insets): Box {
-  return {
-    x0: (insets.left - cam.x) / cam.scale,
-    y0: (insets.top - cam.y) / cam.scale,
-    x1: (size.width - insets.right - cam.x) / cam.scale,
-    y1: (size.height - insets.bottom - cam.y) / cam.scale,
-  };
+  const a = screenToView(cam, { x: insets.left, y: insets.top });
+  const b = screenToView(cam, { x: size.width - insets.right, y: size.height - insets.bottom });
+  return { x0: a.x, y0: a.y, x1: b.x, y1: b.y };
 }
 
 export function boardViewsOf(cam: Camera, size: Size, insets: Insets): BoardViews {

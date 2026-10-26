@@ -2,7 +2,8 @@ import { Suspense } from "react";
 import type { EdgeFeature } from "#shared/model.ts";
 import { MAX_POLY_VERTICES } from "#shared/protocol.ts";
 import { Loading } from "../../components/Loading.tsx";
-import { worldToScreen } from "../../lib/camera.ts";
+import { viewToScreen } from "../../lib/camera.ts";
+import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { dispatchGesture } from "../../state/actions.ts";
@@ -114,7 +115,7 @@ function tapPoly(p: ToolPointer, ctx: ToolContext): void {
   const builderState = ctx.scope.get(builderSlot).store;
   const { poly } = builderState.getState();
   const first = poly[0];
-  if (first && poly.length >= 3 && distance(worldToScreen(ctx.camera(), first), p.screen) <= CLOSE_PX) {
+  if (first && poly.length >= 3 && distance(viewToScreen(ctx.camera(), toView(TOP_DOWN, first)), p.screen) <= CLOSE_PX) {
     closePolygon(ctx);
     return;
   }

@@ -3,7 +3,8 @@ import { useStore } from "zustand";
 import type { BuildChunk, FogTile, Scene } from "#shared/model.ts";
 import { measurePill } from "../../../canvas/measureText.ts";
 import { VISUALLY_HIDDEN } from "../../../lib/a11y.ts";
-import { worldToScreen, type Camera, type Insets, type Size } from "../../../lib/camera.ts";
+import { viewToScreen, type Camera, type Insets, type Size } from "../../../lib/camera.ts";
+import { TOP_DOWN, toView } from "../../../lib/view.ts";
 import { theme } from "../../../lib/theme.ts";
 import { useScoped } from "../../../state/scope.ts";
 import { TOAST_MS } from "../../../state/store.ts";
@@ -92,7 +93,7 @@ export function ReadoutHost(props: { scene: Scene; tool: string; camera: Camera;
 function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number }; camera: Camera; viewport: Size; insets: Insets }) {
   const { words } = props;
   const width = Math.ceil(measurePill(words.pill, FONT_PX, theme.font.body)) + 2 * PAD_PX;
-  const anchor = worldToScreen(props.camera, { x: props.cell.x + 0.5, y: props.cell.y + 0.5 });
+  const anchor = viewToScreen(props.camera, toView(TOP_DOWN, { x: props.cell.x + 0.5, y: props.cell.y + 0.5 }));
   const place = readoutPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: BODY_HEIGHT });
   if (!place) return null;
   const bodyTop = place.pointer?.side === "up" ? POINTER_PX : 0;

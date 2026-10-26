@@ -1,6 +1,7 @@
 import type { JournalPage, Member, Pin } from "#shared/model.ts";
 import { MAX_NAME, type PinInput } from "#shared/protocol.ts";
-import { worldToScreen, type Camera, type Point } from "../../lib/camera.ts";
+import { viewToScreen, type Camera, type Point } from "../../lib/camera.ts";
+import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { cleanLabelText } from "../builder/labelEdit.ts";
@@ -47,7 +48,7 @@ export function pinAt<P extends Pick<Pin, "id" | "x" | "y">>(pins: readonly P[],
   let best: P | null = null;
   let bestDist = HIT_RADIUS_PX;
   for (const pin of pins) {
-    const tip = worldToScreen(camera, pin);
+    const tip = viewToScreen(camera, toView(TOP_DOWN, pin));
     const d = Math.hypot(screen.x - tip.x, screen.y - (tip.y - PIN_HEIGHT_PX / 2));
     if (d <= bestDist) {
       best = pin;
@@ -82,7 +83,7 @@ export function pinTapCounts(input: { start: Point; end: Point; several: boolean
 
 /** The marker's box on screen, for placing the pane beside it. */
 export function pinScreenBox(pin: Pick<Pin, "x" | "y">, camera: Camera): { x0: number; y0: number; x1: number; y1: number } {
-  const tip = worldToScreen(camera, pin);
+  const tip = viewToScreen(camera, toView(TOP_DOWN, pin));
   return { x0: tip.x - HEAD_RADIUS_PX, y0: tip.y - PIN_HEIGHT_PX, x1: tip.x + HEAD_RADIUS_PX, y1: tip.y };
 }
 

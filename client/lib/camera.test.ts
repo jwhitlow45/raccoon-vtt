@@ -3,22 +3,20 @@ import { describe, test } from "node:test";
 import {
   barShift,
   cameraForView,
-  keepInView,
   clampScale,
   fitRect,
-  rectClear,
+  keepInView,
   MAX_SCALE,
   MIN_SCALE,
   pinchCamera,
-  screenToWorld,
+  rectClear,
   wheelZoomFactor,
-  worldToScreen,
   zoomAt,
   type Camera,
 } from "./camera.ts";
 import { cameraAt, cameraOfStage, holdStill, screenToView, viewToScreen } from "./camera.ts";
 import { CameraGesture, LongPress } from "./gestures.ts";
-import { isometric, toView, turned, viewBox, type Turn } from "./view.ts";
+import { isometric, TOP_DOWN, toView, toWorld, turned, viewBox, type Turn } from "./view.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 
@@ -26,17 +24,17 @@ describe("camera", () => {
   const cam: Camera = { x: 100, y: 50, scale: 40 };
 
   test("world and screen round trip", () => {
-    const s = worldToScreen(cam, { x: 2.5, y: -1 });
+    const s = viewToScreen(cam, toView(TOP_DOWN, { x: 2.5, y: -1 }));
     assert.deepEqual(s, { x: 200, y: 10 });
-    assert.deepEqual(screenToWorld(cam, s), { x: 2.5, y: -1 });
+    assert.deepEqual(toWorld(TOP_DOWN, screenToView(cam, s)), { x: 2.5, y: -1 });
   });
 
   test("zooming keeps the point under the cursor in place", () => {
     const anchor = { x: 321, y: 123 };
-    const before = screenToWorld(cam, anchor);
+    const before = toWorld(TOP_DOWN, screenToView(cam, anchor));
     const zoomed = zoomAt(cam, anchor, 1.7);
     close(zoomed.scale, 68);
-    const after = screenToWorld(zoomed, anchor);
+    const after = toWorld(TOP_DOWN, screenToView(zoomed, anchor));
     close(after.x, before.x);
     close(after.y, before.y);
   });
@@ -54,9 +52,9 @@ describe("camera", () => {
   });
 
   test("fit centers the rectangle and fits its longer side", () => {
-    const fitted = fitRect({ width: 400, height: 300 }, { x: 0, y: 0, width: 30, height: 20 }, 0);
+    const fitted = fitRect({ width: 400, height: 300 }, viewBox(TOP_DOWN, { x: 0, y: 0, width: 30, height: 20 }), 0);
     close(fitted.scale, 400 / 30);
-    const center = worldToScreen(fitted, { x: 15, y: 10 });
+    const center = viewToScreen(fitted, toView(TOP_DOWN, { x: 15, y: 10 }));
     close(center.x, 200);
     close(center.y, 150);
   });
@@ -65,9 +63,9 @@ describe("camera", () => {
     // A tablet: a 52 px top bar, and a 56 px toolbar under a 53 px tool options bar.
     const viewport = { width: 820, height: 1180 };
     const insets = { top: 52, right: 0, bottom: 109, left: 0 };
-    const fitted = fitRect(viewport, { x: 0, y: 0, width: 30, height: 40 }, 12, insets);
-    const topLeft = worldToScreen(fitted, { x: 0, y: 0 });
-    const bottomRight = worldToScreen(fitted, { x: 30, y: 40 });
+    const fitted = fitRect(viewport, viewBox(TOP_DOWN, { x: 0, y: 0, width: 30, height: 40 }), 12, insets);
+    const topLeft = viewToScreen(fitted, toView(TOP_DOWN, { x: 0, y: 0 }));
+    const bottomRight = viewToScreen(fitted, toView(TOP_DOWN, { x: 30, y: 40 }));
     assert.ok(topLeft.y >= 52 + 12 - 1e-9, `top row at ${topLeft.y} is under the top bar`);
     assert.ok(bottomRight.y <= 1180 - 109 - 12 + 1e-9, `bottom row at ${bottomRight.y} is under the bars`);
     close((topLeft.y + bottomRight.y) / 2, 52 + (1180 - 52 - 109) / 2);
@@ -75,24 +73,24 @@ describe("camera", () => {
   });
 
   test("a rectangle is clear when no inset covers any of it", () => {
-    const fitted = fitRect({ width: 400, height: 300 }, { x: 0, y: 0, width: 30, height: 20 }, 0, { top: 0, right: 0, bottom: 50, left: 0 });
+    const fitted = fitRect({ width: 400, height: 300 }, viewBox(TOP_DOWN, { x: 0, y: 0, width: 30, height: 20 }), 0, { top: 0, right: 0, bottom: 50, left: 0 });
     const rect = { x: 0, y: 0, width: 30, height: 20 };
-    assert.equal(rectClear(fitted, rect, { width: 400, height: 300 }, { top: 0, right: 0, bottom: 50, left: 0 }), true);
-    assert.equal(rectClear(fitted, rect, { width: 400, height: 300 }, { top: 0, right: 0, bottom: 20, left: 0 }), true);
-    assert.equal(rectClear(fitted, rect, { width: 400, height: 300 }, { top: 0, right: 0, bottom: 80, left: 0 }), false);
+    assert.equal(rectClear(fitted, viewBox(TOP_DOWN, rect), { width: 400, height: 300 }, { top: 0, right: 0, bottom: 50, left: 0 }), true);
+    assert.equal(rectClear(fitted, viewBox(TOP_DOWN, rect), { width: 400, height: 300 }, { top: 0, right: 0, bottom: 20, left: 0 }), true);
+    assert.equal(rectClear(fitted, viewBox(TOP_DOWN, rect), { width: 400, height: 300 }, { top: 0, right: 0, bottom: 80, left: 0 }), false);
   });
 
   test("a saved view puts its point at the center", () => {
-    const c = cameraForView({ width: 400, height: 300 }, { x: 10, y: 5, zoom: 50 });
-    assert.deepEqual(worldToScreen(c, { x: 10, y: 5 }), { x: 200, y: 150 });
+    const c = cameraForView({ width: 400, height: 300 }, toView(TOP_DOWN, { x: 10, y: 5 }), 50);
+    assert.deepEqual(viewToScreen(c, toView(TOP_DOWN, { x: 10, y: 5 })), { x: 200, y: 150 });
   });
 
   test("pinch keeps the world point under the fingers pinned while they move", () => {
     const base = { cam, mid: { x: 200, y: 200 }, dist: 100 };
-    const pinned = screenToWorld(cam, base.mid);
+    const pinned = toWorld(TOP_DOWN, screenToView(cam, base.mid));
     const next = pinchCamera(base, { mid: { x: 260, y: 180 }, dist: 150 });
     close(next.scale, 60);
-    const under = screenToWorld(next, { x: 260, y: 180 });
+    const under = toWorld(TOP_DOWN, screenToView(next, { x: 260, y: 180 }));
     close(under.x, pinned.x);
     close(under.y, pinned.y);
   });
@@ -233,8 +231,8 @@ describe("camera gesture", () => {
     assert.ok(zoomed);
     close(zoomed.scale, 100);
     // The midpoint moved from 150 to 200 and the world point under it stayed.
-    const pinned = screenToWorld(cam, { x: 150, y: 100 });
-    const under = screenToWorld(zoomed, { x: 200, y: 100 });
+    const pinned = toWorld(TOP_DOWN, screenToView(cam, { x: 150, y: 100 }));
+    const under = toWorld(TOP_DOWN, screenToView(zoomed, { x: 200, y: 100 }));
     close(under.x, pinned.x);
     close(under.y, pinned.y);
   });

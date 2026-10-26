@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { entry, reveal, room, scene, token } from "#shared/testutil.ts";
 import { projectState } from "#shared/project.ts";
-import { screenToWorld } from "../../lib/camera.ts";
+import { screenToView } from "../../lib/camera.ts";
+import { TOP_DOWN, toWorld } from "../../lib/view.ts";
 import { pageName } from "../handouts/handouts.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
 import {
@@ -57,11 +58,11 @@ describe("the display's camera", () => {
       { width: 844, height: 390 },
     ]) {
       const cam = followCamera(viewport, view);
-      const tl = screenToWorld(cam, { x: 0, y: 0 });
-      const br = screenToWorld(cam, { x: viewport.width, y: viewport.height });
+      const tl = toWorld(TOP_DOWN, screenToView(cam, { x: 0, y: 0 }));
+      const br = toWorld(TOP_DOWN, screenToView(cam, { x: viewport.width, y: viewport.height }));
       assert.ok(tl.x <= view.x - view.w / 2 + 1e-9 && tl.y <= view.y - view.h / 2 + 1e-9, `${viewport.width}x${viewport.height} keeps the top left`);
       assert.ok(br.x >= view.x + view.w / 2 - 1e-9 && br.y >= view.y + view.h / 2 - 1e-9, `${viewport.width}x${viewport.height} keeps the bottom right`);
-      const center = screenToWorld(cam, { x: viewport.width / 2, y: viewport.height / 2 });
+      const center = toWorld(TOP_DOWN, screenToView(cam, { x: viewport.width / 2, y: viewport.height / 2 }));
       assert.ok(Math.abs(center.x - view.x) < 1e-9 && Math.abs(center.y - view.y) < 1e-9, "centered on the DM's center");
       // One side fits exactly: the same area, not the same pixels per cell.
       const fitsWidth = Math.abs(br.x - tl.x - view.w) < 1e-6;

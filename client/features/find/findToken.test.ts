@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import type { Character, Token } from "#shared/model.ts";
 import { character, token } from "#shared/testutil.ts";
 import { fitRect, NO_INSETS } from "../../lib/camera.ts";
+import { TOP_DOWN, viewBox } from "../../lib/view.ts";
 import { barCover, largerEach, pastBars } from "../../canvas/barDock.ts";
 import { FIND_ROOM_CELLS, findCamera, findRect, nextOwnToken, sheetCover } from "./findToken.ts";
 
@@ -74,7 +75,7 @@ describe("find my token", () => {
     const bars = { top: 52, right: 0, bottom: 60, left: 0 };
     const target = findRect({ x: 10, y: 6, size: "medium" });
     const cam = findCamera(viewport, target, bars, NO_INSETS);
-    assert.deepEqual(cam, fitRect(viewport, target, 24, bars));
+    assert.deepEqual(cam, fitRect(viewport, viewBox(TOP_DOWN, target), 24, bars));
     // The token's middle lands in the middle of the part the bars leave clear.
     assert.equal(10.5 * cam.scale + cam.x, 195);
     assert.equal(6.5 * cam.scale + cam.y, 52 + (844 - 52 - 60) / 2);
@@ -86,7 +87,7 @@ describe("find my token", () => {
     const target = findRect({ x: 10, y: 6, size: "medium" });
     const cover = sheetCover({ placement: "bottom", width: 390, height: 400 });
     const cam = findCamera(viewport, target, bars, cover);
-    assert.equal(cam.scale, fitRect(viewport, target, 24, bars).scale);
+    assert.equal(cam.scale, fitRect(viewport, viewBox(TOP_DOWN, target), 24, bars).scale);
     assert.equal(6.5 * cam.scale + cam.y, 52 + (844 - 52 - 60 - cover.bottom) / 2);
   });
 
@@ -97,7 +98,7 @@ describe("find my token", () => {
     // The bar in the lane covers the right 312 px and the 8 px margin past the bars (canvas/barDock.ts barCover).
     const cover = largerEach(NO_INSETS, pastBars(barCover(viewport, bars, { box: { left: 608, top: 300, width: 304, height: 432 }, laneLeft: 600, freeRight: 912 }), bars));
     const cam = findCamera(viewport, target, bars, cover);
-    assert.equal(cam.scale, fitRect(viewport, target, 24, bars).scale);
+    assert.equal(cam.scale, fitRect(viewport, viewBox(TOP_DOWN, target), 24, bars).scale);
     const x = 30.5 * cam.scale + cam.x;
     assert.equal(x, (920 - 320) / 2);
     assert.ok(x + 0.5 * cam.scale <= 600, "the token ends left of the bar");

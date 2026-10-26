@@ -54,6 +54,7 @@ import {
 } from "./draft.ts";
 import { useSrdMonsters, type SrdList } from "./useSrd.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
+import { groundAtMiddle } from "../../lib/view.ts";
 
 /**
  * The DM's encounter builder (features section 10, v1): fights built ahead
@@ -325,7 +326,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
     if (!scene) return;
     const live = currentStageCamera(scope);
     const center = live
-      ? { x: (live.viewport.width / 2 - live.camera.x) / live.camera.scale, y: (live.viewport.height / 2 - live.camera.y) / live.camera.scale }
+      ? groundAtMiddle(live)
       : { x: scene.bounds.w / 2, y: scene.bounds.h / 2 };
     const placed = place(s.view, scene, center);
     if (!placed) return;

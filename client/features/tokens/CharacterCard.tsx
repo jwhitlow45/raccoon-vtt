@@ -38,6 +38,7 @@ import { CardNotesField, SheetUrlField, StatsFields } from "./StatsSection.tsx";
 import { ConfirmButton, NumberField, TextField } from "./ui.tsx";
 import { isAssetImage } from "#shared/imageRef.ts";
 import type { PanelClose } from "../panels.ts";
+import { groundAtMiddle } from "../../lib/view.ts";
 
 export const SIZE_OPTIONS: { value: CreatureSize; label: string }[] = [
   { value: "tiny", label: "Tiny" },
@@ -301,7 +302,7 @@ function PlaceToken(props: { character: Character; close: PanelClose }) {
 export function myToken(scope: RoomScope, input: Omit<Parameters<typeof playerToken>[0], "center"> & { view: Pick<RoomState, "buildChunks"> }): TokenInput | null {
   const live = currentStageCamera(scope);
   const center = live
-    ? { x: (live.viewport.width / 2 - live.camera.x) / live.camera.scale, y: (live.viewport.height / 2 - live.camera.y) / live.camera.scale }
+    ? groundAtMiddle(live)
     : { x: input.scene.bounds.w / 2, y: input.scene.bounds.h / 2 };
   const token = playerToken({ ...input, center });
   return token && placeOnGround(input.view.buildChunks, token);

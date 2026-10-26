@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { Loading } from "../../components/Loading.tsx";
-import { worldToScreen } from "../../lib/camera.ts";
+import { viewToScreen } from "../../lib/camera.ts";
+import { groundAtMiddle, TOP_DOWN, toView } from "../../lib/view.ts";
 import { distance } from "../../lib/gestures.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
@@ -21,7 +22,7 @@ export function centeredBox(ctx: ToolContext): CalBox | null {
   const cam = ctx.camera();
   const live = currentStageCamera(ctx.scope);
   const center = live
-    ? { x: (live.viewport.width / 2 - cam.x) / cam.scale, y: (live.viewport.height / 2 - cam.y) / cam.scale }
+    ? groundAtMiddle({ ...live, camera: cam })
     : { x: ctx.scene.bounds.w / 2, y: ctx.scene.bounds.h / 2 };
   return boxAtCell(map, Math.floor(center.x) - 1, Math.floor(center.y) - 1);
 }
@@ -33,7 +34,7 @@ function cornerAt(ctx: ToolContext, box: CalBox, screen: { x: number; y: number 
   let best: Corner | null = null;
   let bestDist = HANDLE_HIT_PX;
   for (const corner of CORNERS) {
-    const d = distance(worldToScreen(cam, canonicalToWorld(map, boxCorner(box, corner))), screen);
+    const d = distance(viewToScreen(cam, toView(TOP_DOWN, canonicalToWorld(map, boxCorner(box, corner)))), screen);
     if (d <= bestDist) {
       best = corner;
       bestDist = d;
@@ -116,7 +117,7 @@ export const gridTool: ToolDef = {
         gridState.setState({ box: { ...drag.start, x: drag.start.x + b.x - a.x, y: drag.start.y + b.y - a.y } });
       } else {
         const cam = ctx.camera();
-        const moved = drag.moved || distance(worldToScreen(cam, drag.from), p.screen) > TAP_PX;
+        const moved = drag.moved || distance(viewToScreen(cam, toView(TOP_DOWN, drag.from)), p.screen) > TAP_PX;
         if (!moved) return;
         endFinding(gridState, ctx.scene.id);
         gridState.setState({ drag: { ...drag, moved }, box: boxFromDrag(map, drag.from, p.world) });

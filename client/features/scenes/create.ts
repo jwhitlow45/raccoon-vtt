@@ -1,6 +1,7 @@
 import type { Scene, SceneMap } from "#shared/model.ts";
 import { MAX_NAME, MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { fitBounds, MAX_CELL_PX, MIN_CELL_PX } from "../grid/calibrate.ts";
+import { groundAtMiddle, type Live } from "../../lib/view.ts";
 
 /**
  * Building the scene ops the Scenes panel sends (design sections 5, 6 and
@@ -163,20 +164,18 @@ const MIN_ZOOM = 0.01;
 const MAX_ZOOM = 100;
 
 /**
- * A scene's starting view from the camera on screen: the world point at the
- * center of the canvas and the zoom, the shape Stage.tsx opens a scene at.
- * The schema caps zoom at 100 pixels per cell, so a closer camera saves at
- * that zoom.
+ * A scene's starting view from the camera on screen: the ground at the
+ * middle of the canvas (lib/view.ts groundAtMiddle) and the zoom, the shape
+ * Stage.tsx opens a scene at. The schema caps zoom at 100 pixels per cell,
+ * so a closer camera saves at that zoom.
  */
-export function viewFromCamera(
-  camera: { x: number; y: number; scale: number },
-  viewport: { width: number; height: number },
-): { x: number; y: number; zoom: number } {
+export function viewFromCamera(live: Live): { x: number; y: number; zoom: number } {
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   const round = (v: number) => Math.round(v * 100) / 100;
+  const middle = groundAtMiddle(live);
   return {
-    x: round(clamp((viewport.width / 2 - camera.x) / camera.scale, -VIEW_COORD, VIEW_COORD)),
-    y: round(clamp((viewport.height / 2 - camera.y) / camera.scale, -VIEW_COORD, VIEW_COORD)),
-    zoom: round(clamp(camera.scale, MIN_ZOOM, MAX_ZOOM)),
+    x: round(clamp(middle.x, -VIEW_COORD, VIEW_COORD)),
+    y: round(clamp(middle.y, -VIEW_COORD, VIEW_COORD)),
+    zoom: round(clamp(live.camera.scale, MIN_ZOOM, MAX_ZOOM)),
   };
 }

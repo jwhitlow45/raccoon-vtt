@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { EphEvent } from "#shared/protocol.ts";
+import { groundAtMiddle, type Live } from "../../lib/view.ts";
 
 /**
  * The DM's side of table displays (docs/design-v1-dm-tools.md 3.1): the
@@ -46,18 +47,20 @@ export function useShowView(roomId: string): boolean {
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
- * The `view` event for a canvas: the center of its map area and its width
- * and height, in cells, inside the protocol's bounds (shared/protocol.ts), so
- * the server never drops it for its schema.
+ * The `view` event for a canvas: the ground at the middle of its map area
+ * (lib/view.ts groundAtMiddle) and its width and height, in cells, inside
+ * the protocol's bounds (shared/protocol.ts), so the server never drops it
+ * for its schema.
  */
-export function viewEvent(stage: { x: number; y: number; scale: number; width: number; height: number }): Extract<EphEvent, { k: "view" }> {
-  const scale = stage.scale > 0 ? stage.scale : 1;
+export function viewEvent(live: Live): Extract<EphEvent, { k: "view" }> {
+  const scale = live.camera.scale > 0 ? live.camera.scale : 1;
+  const middle = groundAtMiddle({ ...live, camera: { ...live.camera, scale } });
   return {
     k: "view",
-    x: clamp((stage.width / 2 - stage.x) / scale, -1_000, 1_000),
-    y: clamp((stage.height / 2 - stage.y) / scale, -1_000, 1_000),
-    w: clamp(stage.width / scale, 0.01, 2_000),
-    h: clamp(stage.height / scale, 0.01, 2_000),
+    x: clamp(middle.x, -1_000, 1_000),
+    y: clamp(middle.y, -1_000, 1_000),
+    w: clamp(live.viewport.width / scale, 0.01, 2_000),
+    h: clamp(live.viewport.height / scale, 0.01, 2_000),
   };
 }
 

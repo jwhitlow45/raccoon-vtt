@@ -6,6 +6,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { currentFocus, focusEvent, focusFromStage, publishFocus } from "./camera.ts";
 import { sendsView, useShowView, viewEvent } from "./tableDisplay.ts";
+import { liveOfStage, TOP_DOWN } from "../../lib/view.ts";
 
 /** At most this often while the DM pans with "Follow me" on: smooth enough to follow, light on the players' phones. */
 const FOLLOW_MS = 120;
@@ -49,7 +50,7 @@ export function CameraLayer(props: LayerProps) {
   const sendView = (again = false) => {
     const stage = groupRef.current?.getStage();
     if (!stage) return;
-    const e = viewEvent({ x: stage.x(), y: stage.y(), scale: stage.scaleX(), width: stage.width(), height: stage.height() });
+    const e = viewEvent(liveOfStage(stage, TOP_DOWN));
     const sent = `${e.x},${e.y},${e.w},${e.h}`;
     if (!again && sent === lastViewRef.current) return;
     lastViewRef.current = sent;
@@ -68,7 +69,7 @@ export function CameraLayer(props: LayerProps) {
     if (!dm) return;
     const stage = groupRef.current?.getStage();
     if (!stage) return;
-    publishFocus(scope, { sceneId, ...focusFromStage({ x: stage.x(), y: stage.y(), scale: stage.scaleX(), width: stage.width(), height: stage.height() }) });
+    publishFocus(scope, { sceneId, ...focusFromStage(liveOfStage(stage, TOP_DOWN)) });
     if (toDisplays) {
       const viewWait = FOLLOW_MS - (performance.now() - viewSentRef.current);
       if (viewWait <= 0) sendView();

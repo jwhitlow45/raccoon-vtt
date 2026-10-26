@@ -4,7 +4,8 @@ import type { BuildChunk, FogTile, Scene, Token } from "#shared/model.ts";
 import { DOOR_TOO_FAR, reachesDoor } from "#shared/permissions.ts";
 import { Button } from "../../components/Button.tsx";
 import { PaneHeader } from "../../components/SheetHeader.tsx";
-import { worldToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
+import { viewToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
+import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { theme } from "../../lib/theme.ts";
 import { localDragSlot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -61,7 +62,7 @@ function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Sce
   };
   const choices = doorActions(scene.id, door, role);
   const width = Math.min(role === "dm" ? 300 : 160, props.viewport.width - 16);
-  const anchor = worldToScreen(props.camera, door.mid);
+  const anchor = viewToScreen(props.camera, toView(TOP_DOWN, door.mid));
   const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: PILL_HEIGHT, gap: 14, prefer: "above" });
   const name = doorName(door, role);
 

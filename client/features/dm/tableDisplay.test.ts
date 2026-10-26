@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { displaysText, sendsView, viewEvent } from "./tableDisplay.ts";
+import { TOP_DOWN } from "../../lib/view.ts";
 
 describe("the DM's side", () => {
   test("the view event is the canvas's map area in cells, inside the protocol's bounds", () => {
-    assert.deepEqual(viewEvent({ x: -400, y: -200, scale: 40, width: 400, height: 800 }), { k: "view", x: 15, y: 15, w: 10, h: 20 });
-    const far = viewEvent({ x: 0, y: 0, scale: 0.001, width: 4000, height: 4000 });
+    assert.deepEqual(viewEvent({ camera: { x: -400, y: -200, scale: 40 }, viewport: { width: 400, height: 800 }, view: TOP_DOWN }), { k: "view", x: 15, y: 15, w: 10, h: 20 });
+    const far = viewEvent({ camera: { x: 0, y: 0, scale: 0.001 }, viewport: { width: 4000, height: 4000 }, view: TOP_DOWN });
     assert.equal(far.w, 2_000);
     assert.equal(far.x, 1_000);
     const on = { dm: true, on: true, sceneId: "s1", playerSceneId: "s1", blackout: false };

@@ -1,5 +1,6 @@
 import type { MemberId, RoomState, SceneId, Token } from "#shared/model.ts";
-import { fitRect, type Camera, type Insets, type Rect, type Size } from "../../lib/camera.ts";
+import { cameraAt, fitRect, type Camera, type Insets, type Rect, type Size } from "../../lib/camera.ts";
+import { TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
 import { footprint } from "../../lib/scene.ts";
 import { ownsToken } from "../tokens/access.ts";
 
@@ -58,7 +59,7 @@ export function findRect(token: Pick<Token, "x" | "y" | "size" | "w" | "h">): Re
  * surroundings under the sheet.
  */
 export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: Insets): Camera {
-  const { scale } = fitRect(viewport, target, 24, bars);
+  const { scale } = fitRect(viewport, viewBox(TOP_DOWN, target), 24, bars);
   const left = bars.left + cover.left;
   const right = bars.right + cover.right;
   const top = bars.top + cover.top;
@@ -67,7 +68,7 @@ export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: In
   const clear = viewport.width - left - right > 0 && viewport.height - top - bottom > 0;
   const cx = clear ? left + (viewport.width - left - right) / 2 : bars.left + (viewport.width - bars.left - bars.right) / 2;
   const cy = clear ? top + (viewport.height - top - bottom) / 2 : bars.top + (viewport.height - bars.top - bars.bottom) / 2;
-  return { x: cx - (target.x + target.width / 2) * scale, y: cy - (target.y + target.height / 2) * scale, scale };
+  return cameraAt({ x: cx, y: cy }, toView(TOP_DOWN, { x: target.x + target.width / 2, y: target.y + target.height / 2 }), scale);
 }
 
 /** A phone's open sheet as it stands on screen: at the bottom in portrait, docked on the right in landscape. */

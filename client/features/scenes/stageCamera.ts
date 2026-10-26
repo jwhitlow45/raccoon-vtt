@@ -1,6 +1,8 @@
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
+import type { Live } from "../../lib/view.ts";
 
-export type StageCamera = { camera: { x: number; y: number; scale: number }; viewport: { width: number; height: number } };
+/** The camera, the canvas's size and the view it shows. */
+export type StageCamera = Live;
 
 /**
  * The map canvas's camera, read live from the canvas of this Room page. The

@@ -24,6 +24,7 @@ import { SightOverlay } from "../features/vision/SightOverlay.tsx";
 import { useDrawnFogTiles, useSightMode } from "../features/vision/stageHooks.ts";
 import {
   barShift,
+  cameraAt,
   cameraForView,
   fitRect,
   keepInView,
@@ -32,9 +33,9 @@ import {
   rectClear,
   sameCamera,
   sceneMinScale,
-  screenToWorld,
+  screenToView,
+  viewToScreen,
   wheelZoomFactor,
-  worldToScreen,
   zoomAt,
   type Camera,
   type Insets,
@@ -42,6 +43,7 @@ import {
   type Rect,
   type Size,
 } from "../lib/camera.ts";
+import { TOP_DOWN, toView, toWorld, viewBox } from "../lib/view.ts";
 import { isAppleDevice } from "../lib/device.ts";
 import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
@@ -134,7 +136,7 @@ function fitKey(size: Size, scene: Scene): string {
 }
 
 function fitScene(size: Size, scene: Scene, insets: Insets, target: Rect | null = null, cover: Insets = NO_INSETS): Fit {
-  return { cam: fitRect(size, target ?? sceneRect(scene), 24, largerEach(insets, cover)), key: fitKey(size, scene), target, cover, zoom: uiScale() };
+  return { cam: fitRect(size, viewBox(TOP_DOWN, target ?? sceneRect(scene)), 24, largerEach(insets, cover)), key: fitKey(size, scene), target, cover, zoom: uiScale() };
 }
 
 /**
@@ -267,7 +269,7 @@ export function MapStage(props: {
     const read = () => {
       const c = pendingCamRef.current ?? camRef.current;
       const s = sizeRef.current;
-      return c && s ? { camera: { x: c.x, y: c.y, scale: c.scale }, viewport: { width: s.width, height: s.height } } : null;
+      return c && s ? { camera: { x: c.x, y: c.y, scale: c.scale }, viewport: { width: s.width, height: s.height }, view: TOP_DOWN } : null;
     };
     slot.read = read;
     return () => {
@@ -292,7 +294,7 @@ export function MapStage(props: {
     let next: Camera;
     if (scene.defaultView) {
       fittedRef.current = null;
-      next = cameraForView(size, scene.defaultView);
+      next = cameraForView(size, toView(TOP_DOWN, scene.defaultView), scene.defaultView.zoom);
     } else {
       fittedRef.current = fitScene(size, scene, insetsRef.current);
       next = fittedRef.current.cam;
@@ -368,7 +370,7 @@ export function MapStage(props: {
     if (fitKey(s, current) !== fitted.key || z !== fitted.zoom) settleRef.current = { until: now + SETTLE_MS, shows: barShowsRef.current() };
     const settle = settleRef.current && now <= settleRef.current.until ? settleRef.current : null;
     const next = fitScene(s, current, bars, fitted.target, settle ? barCoverRef.current(s, "fresh", settle.shows) : fitted.cover);
-    if (!settle && rectClear(c, fitted.target ?? sceneRect(current), s, largerEach(bars, fitted.cover))) return;
+    if (!settle && rectClear(c, viewBox(TOP_DOWN, fitted.target ?? sceneRect(current)), s, largerEach(bars, fitted.cover))) return;
     fittedRef.current = next;
     if (sameCamera(next.cam, c)) return;
     // Seen at once, so a second measure in the same frame still finds the camera it fitted.
@@ -437,7 +439,7 @@ export function MapStage(props: {
     focusRef.current = focus.id;
     if (ignoreFocus) return;
     pendingCamRef.current = null;
-    setCam(cameraForView(size, focus));
+    setCam(cameraForView(size, toView(TOP_DOWN, focus), focus.zoom));
   }, [focus, size, ignoreFocus]);
 
   // A table display's camera mode, after the scene's own first camera so it wins.
@@ -475,7 +477,7 @@ export function MapStage(props: {
         if (!s || !c) return;
         pendingCamRef.current = null;
         const at = clearAnchor({ x: s.width * p.anchor.x, y: s.height * p.anchor.y }, s, insetsRef.current, barCoverRef.current(s, "opening"));
-        setCam({ ...c, x: at.x - p.x * c.scale, y: at.y - p.y * c.scale });
+        setCam(cameraAt(at, toView(TOP_DOWN, p), c.scale));
       }),
     [scope, scene.id],
   );
@@ -893,7 +895,7 @@ export function MapStage(props: {
       return hit?.findAncestor(".token", true)?.id() ?? null;
     };
     const toolPointer = (e: PointerEvent, p: Point, c: Camera, tokenId: string | null): ToolPointer => ({
-      world: screenToWorld(c, p),
+      world: toWorld(TOP_DOWN, screenToView(c, p)),
       screen: p,
       pointerId: e.pointerId,
       pointerType: e.pointerType,
@@ -1080,15 +1082,15 @@ export function MapStage(props: {
         // A cancelled press neither selects nor counts as a tap.
         const lifted = e.type !== "pointercancel";
         if (lifted && (box.moved || distance(box.start, p) > TAP_SLOP_PX)) {
-          const picked = tokensInBox(tokensByIdRef.current.values(), screenToWorld(c, box.start), screenToWorld(c, p));
+          const picked = tokensInBox(tokensByIdRef.current.values(), toWorld(TOP_DOWN, screenToView(c, box.start)), toWorld(TOP_DOWN, screenToView(c, p)));
           if (picked.length > 0) uiRef.current.selectMany(picked.map((t) => t.id));
         } else if (lifted && !held && !box.add) {
           // Multi-select's tap off hides the group's bar and keeps the group (state/selection.ts tapToken), and opens nothing, as before.
           onSelectRef.current(null);
-          putAway(toolContextRef.current, screenToWorld(c, p));
+          putAway(toolContextRef.current, toWorld(TOP_DOWN, screenToView(c, p)));
         }
       }
-      if (tapOnEmpty) emptyTap(toolContextRef.current, toolRef.current.id, screenToWorld(c, local(e)), held, () => onSelectRef.current(null));
+      if (tapOnEmpty) emptyTap(toolContextRef.current, toolRef.current.id, toWorld(TOP_DOWN, screenToView(c, local(e))), held, () => onSelectRef.current(null));
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -1488,10 +1490,10 @@ function belowLabel(anchor: Point, text: TokenText | undefined): Point {
 /** The screen point under a token's bottom center, where its action bar hangs. */
 function worldAnchor(cam: Camera, token: ViewToken): Point {
   const fp = footprint(token);
-  return worldToScreen(cam, { x: token.x + fp.w / 2, y: token.y + fp.h });
+  return viewToScreen(cam, toView(TOP_DOWN, { x: token.x + fp.w / 2, y: token.y + fp.h }));
 }
 
 /** How far a token's top stands above the point under its label, in the chrome's pixels (barDock.ts clearShift's `tokenHeight`). */
 function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number): number {
-  return (anchor.y - worldToScreen(cam, { x: token.x, y: token.y }).y) / zoom;
+  return (anchor.y - viewToScreen(cam, toView(TOP_DOWN, { x: token.x, y: token.y })).y) / zoom;
 }

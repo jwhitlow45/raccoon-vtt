@@ -56,6 +56,7 @@ import {
 } from "./companions.ts";
 import { SIZE_WORDS } from "./resize.ts";
 import { FieldRow, NumberField, Select } from "./ui.tsx";
+import { groundAtMiddle } from "../../lib/view.ts";
 
 /**
  * Companions in the interface (docs/design-v1-combat-flow.md 3.6.3, 3.6.9
@@ -273,7 +274,7 @@ export function CompanionForm(props: {
   const live = currentStageCamera(scope);
   const scene = sceneId ? view?.scenes[sceneId] : undefined;
   const center = live
-    ? { x: (live.viewport.width / 2 - live.camera.x) / live.camera.scale, y: (live.viewport.height / 2 - live.camera.y) / live.camera.scale }
+    ? groundAtMiddle(live)
     : { x: (scene?.bounds.w ?? 0) / 2, y: (scene?.bounds.h ?? 0) / 2 };
   const placement = !view ? null : dm ? dmPlacement(view, character, { size: draft.size }, { sceneId, center }) : playerPlacement(view, character, { size: draft.size });
   const choices = turnChoices(name, draft.what);
