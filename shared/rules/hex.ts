@@ -217,10 +217,14 @@ function onLattice(v: number): number {
  * so every hex around it gets the very same point.
  */
 export function cornerAt(g: HexGrid, corner: HexCorner): Point {
-  const l = toLat(g, corner.hex);
+  return mirror(g, latCorner(toLat(g, corner.hex), corner.k));
+}
+
+/** A corner on the rows lattice, by its hex and point, on the 1/64 lattice: the one place a corner's numbers come from. */
+function latCorner(l: Lat, k: 0 | 1): Point {
   const x = l.c + 0.5 + 0.5 * parity(l.r);
   const top = l.r * HEX_S;
-  return mirror(g, { x: onLattice(x), y: onLattice(corner.k === 0 ? top : top + 2 * HEX_R) });
+  return { x: onLattice(x), y: onLattice(k === 0 ? top : top + 2 * HEX_R) };
 }
 
 /**
@@ -250,14 +254,30 @@ function onCorner(size: HexSize): boolean {
  * The anchor nearest a point for a creature of this size (section 4.2): a
  * hex's center, or for Large and Gargantuan the shared corner, a hex's
  * second point. Those corners are the centers moved by HEX_R toward the
- * second point, so the nearest is the second point of the hex nearest the
- * point moved back by as much, and ties go as `hexAt` sends them.
+ * second point, so the nearest unrounded one is the second point of the
+ * hex nearest the point moved back by as much. Anchors are the corners as
+ * rounded to the 1/64 lattice, which can make a neighbor's the nearer, so
+ * the rounded corners of that hex and its six neighbors are compared, ties
+ * to the smaller row, then the smaller column, as `hexAt` sends them.
  */
 export function snapAnchor(g: HexGrid, size: HexSize, center: Point): Point {
   if (!onCorner(size)) return hexCenter(g, hexAt(g, center));
   const p = mirror(g, center);
-  const top = fromLat(g, latAt({ x: p.x, y: p.y - HEX_R }));
-  return cornerAt(g, { hex: top, k: 1 });
+  const near = latAt({ x: p.x, y: p.y - HEX_R });
+  const candidates = [near, ...DIRECTIONS.map((_, i) => latStep(near, i))].sort((a, b) => a.r - b.r || a.c - b.c);
+  let best = near;
+  let bestD = Infinity;
+  for (const l of candidates) {
+    const corner = latCorner(l, 1);
+    const dx = p.x - corner.x;
+    const dy = p.y - corner.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      best = l;
+    }
+  }
+  return mirror(g, latCorner(best, 1));
 }
 
 /**

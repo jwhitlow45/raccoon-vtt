@@ -196,11 +196,12 @@ for (const [name, g] of GRIDS) {
         const ref = referenceHex(g, size, a);
         if (size === "large" || size === "gargantuan") assert.deepEqual(a, cornerAt(g, { hex: ref, k: 1 }));
         else assert.deepEqual(a, hexCenter(g, ref));
-        // Nothing nearer: the anchors of the reference hex's neighbors are no closer.
-        const d = Math.hypot(a.x - p.x, a.y - p.y);
-        for (const n of hexNeighbors(g, ref)) {
-          const b = size === "large" || size === "gargantuan" ? cornerAt(g, { hex: n, k: 1 }) : hexCenter(g, n);
-          assert.ok(d <= Math.hypot(b.x - p.x, b.y - p.y) + 1 / 64);
+        // Nothing nearer, exactly: no anchor of a hex within two steps is closer than the one it snapped to.
+        const d = (a.x - p.x) * (a.x - p.x) + (a.y - p.y) * (a.y - p.y);
+        for (const n of bfs(g, ref, 2).keys()) {
+          const hex = parseHexKey(n)!;
+          const b = size === "large" || size === "gargantuan" ? cornerAt(g, { hex, k: 1 }) : hexCenter(g, hex);
+          assert.ok(d <= (b.x - p.x) * (b.x - p.x) + (b.y - p.y) * (b.y - p.y), `${size} at ${p.x},${p.y}: ${n}'s anchor is nearer`);
         }
       }
     });
@@ -357,6 +358,22 @@ describe("hex cases (section 9)", () => {
     // Exactly on the upright side between two hexes of a row: the smaller column.
     assert.deepEqual(hexAt(ROWS, { x: 1, y: HEX_R }), { col: 0, row: 0 });
     assert.deepEqual(hexAt(COLUMNS, { x: HEX_R, y: 1 }), { col: 0, row: 0 });
+  });
+
+  test("a Large snaps to the nearest corner as rounded, not to the rounding of the nearest true corner", () => {
+    // The true corner of hex 0,0 is nearer, but rounded onto the 1/64 lattice the corner of 0,1 is: 0.2462 against 0.2480.
+    assert.deepEqual(snapAnchor(ROWS, "large", { x: 0.75, y: 1.587 }), { x: 1, y: 2.015625 });
+    assert.deepEqual(snapAnchor(COLUMNS, "large", { x: 1.587, y: 0.75 }), { x: 2.015625, y: 1 });
+    assert.deepEqual(snapAnchor(ROWS, "gargantuan", { x: 0.75, y: 1.587 }), { x: 1, y: 2.015625 });
+    assert.deepEqual(referenceHex(ROWS, "large", { x: 1, y: 2.015625 }), { col: 0, row: 1 });
+  });
+
+  test("a Large exactly between two corners of a row takes the smaller column's, mirrored on columns", () => {
+    const a = cornerAt(ROWS, { hex: { col: 2, row: 2 }, k: 1 });
+    const b = cornerAt(ROWS, { hex: { col: 3, row: 2 }, k: 1 });
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    assert.deepEqual(snapAnchor(ROWS, "large", mid), a);
+    assert.deepEqual(snapAnchor(COLUMNS, "large", { x: mid.y, y: mid.x }), { x: a.y, y: a.x });
   });
 
   test("a Large's three hexes are a hex and the two below it, standing on the corner they share", () => {
