@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { holderTileKey, tileKey } from "./keys.ts";
+import { holderTileKey, keys, tileKey } from "./keys.ts";
 import type { ExploredTile, FogTile, RoomState, Viewer } from "./model.ts";
 import { cellVision } from "./perPlayerTestutil.ts";
-import { partySightOf, presenceOf, projectState, sharedGround, withheldFromViewer } from "./project.ts";
+import { partySightOf, presenceOf, projectEntity, projectState, sharedGround, withheldFromViewer } from "./project.ts";
 import { visionRules } from "./ruleHooks.ts";
 import { decodeTile, getBit, rasterizeFogOps } from "./rules/fog.ts";
 import { publicToken } from "./rules/walkWorld.ts";
@@ -148,6 +148,14 @@ describe("what reaches whom (6.2, security rules 3 and 7)", () => {
       assert.equal(JSON.stringify([p.sightAll, p.fogAll]), shared, `${v.memberId} gets the shared maps unchanged`);
     }
     assert.ok(!reveals(dm.fogAll![tileKey("s1", 0, 0)], 1, 1), "the shared fog holds no holder's layer");
+  });
+
+  test("a list a restored room holds on a whole-party scene reaches no one, by snapshot or by key (PV1-O9)", () => {
+    const s = table();
+    s.scenes.s1 = { ...s.scenes.s1!, vision: { on: true, light: "dark" } };
+    s.exploredBy = {};
+    assert.equal(projectEntity(keys.holders("s1"), s, DM, ON_S1), null);
+    assert.equal((view(s, DM) as RoomState & { holders?: unknown }).holders, undefined);
   });
 
   test("a whole-party scene holds none of the derived maps", () => {

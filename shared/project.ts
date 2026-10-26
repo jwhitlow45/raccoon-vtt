@@ -1294,9 +1294,14 @@ function holderTiles(state: RoomState, sceneId: string, tx: number, ty: number):
   return out;
 }
 
-/** A scene's sight holder list is the DM's, on the scene the DM views (docs/design-v1-per-player-vision.md 6.1). */
+/**
+ * A scene's sight holder list is the DM's, on the per-player scene the DM
+ * views (docs/design-v1-per-player-vision.md 6.1), as the snapshot gives it
+ * (perPlayerMapsCtx). The reducer never leaves one on a whole-party scene,
+ * but a restored room might hold one (review PV1-O9).
+ */
 function projectHoldersCtx(ctx: Ctx, list: SightHolders): SightHolders | null {
-  return ctx.viewer.role === "dm" && list.sceneId === ctx.sceneId ? list : null;
+  return ctx.viewer.role === "dm" && list.sceneId === ctx.sceneId && perPlayerScene(ctx.state.scenes[list.sceneId]) ? list : null;
 }
 
 /**
