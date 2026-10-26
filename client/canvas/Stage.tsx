@@ -1513,6 +1513,7 @@ export function MapStage(props: {
                   youId={youId}
                   draggingId={draggingId}
                   onStage={setIsoStage}
+                  stageStyle={stageStyle}
                 />
               ) : null}
             </BoardViewContext.Provider>

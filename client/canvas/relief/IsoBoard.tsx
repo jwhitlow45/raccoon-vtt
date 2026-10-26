@@ -1,5 +1,5 @@
 import type Konva from "konva";
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Ellipse, Group, Layer, Rect, Shape, Stage } from "react-konva";
 import { CHUNK_CELLS, DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene, type TerrainId } from "#shared/model.ts";
 import { onHolder } from "#shared/rules/attach.ts";
@@ -89,6 +89,8 @@ export type IsoBoardProps = {
   draggingId: string | null;
   /** The main stage, for the board's gestures, once it exists. */
   onStage: (stage: Konva.Stage | null) => void;
+  /** Top-down's stage style, which the main stage takes too: no browser touch gestures, no text selection, the tool's cursor. */
+  stageStyle: CSSProperties;
 };
 
 const EMPTY_CHUNKS: Record<string, BuildChunk> = {};
@@ -314,7 +316,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
           </Group>
         </Layer>
       </Stage>
-      <Stage key={`main:${props.stageKey}`} ref={mainRef} width={width} height={height} x={cam.x} y={cam.y} scaleX={cam.scale} scaleY={cam.scale} style={{ position: "absolute", left: 0, top: 0 }}>
+      <Stage key={`main:${props.stageKey}`} ref={mainRef} width={width} height={height} x={cam.x} y={cam.y} scaleX={cam.scale} scaleY={cam.scale} style={{ ...props.stageStyle, position: "absolute", left: 0, top: 0 }}>
         <Layer ref={reliefLayerRef}>
           <Group scaleY={groups.outer.scaleY}>
             <Group rotation={groups.inner.rotation}>
