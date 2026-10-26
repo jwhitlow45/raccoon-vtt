@@ -2,12 +2,13 @@ import type Konva from "konva";
 import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Arc, Circle, Ellipse, Group, Image as KImage, Line, Rect, Shape, Text } from "react-konva";
 import { liftInPlane, pressRects, type PressCell } from "./isoPlace.ts";
-import type { Actor, Effect } from "#shared/model.ts";
+import type { Actor, Effect, GridShape } from "#shared/model.ts";
 import { shownLife } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
 import { isAppleDevice } from "../lib/device.ts";
 import { lineHeight, type LabelLine } from "../lib/boardText.ts";
-import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
+import { displayName, footprint, hexFootprintOutline, type ViewToken } from "../lib/scene.ts";
+import { gridOfShape } from "#shared/rules/grid.ts";
 import { theme } from "../lib/theme.ts";
 import { cropSourceRect, DECOR_MIN_PX, DISPOSITION_RING, effectChip, effectCount, initials, type Chip } from "../lib/tokenView.ts";
 import { useAccent } from "../state/accent.ts";
@@ -120,6 +121,8 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
   const name = displayName(token);
+  const gridShape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
+  const hexes = useSelectedHexes(gridShape, token, selected);
   /*
    * A drag moves the node by hand, and a drop puts it where the plan lands
    * it (Stage.tsx landDrop). react-konva then sets only the coordinates
@@ -176,6 +179,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
             name={name}
             active={active}
             selected={selected}
+            hexes={hexes}
             iso={iso}
             decor={props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
           />
@@ -190,12 +194,12 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
       ) : holes ? (
         <>
           <Group listening={false}>
-            <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} />
+            <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
           </Group>
           <PressArea w={fp.w} h={fp.h} inset={false} holes={holes} />
         </>
       ) : (
-        <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} />
+        <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} hexes={hexes} />
       )}
       {props.decor && !iso ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
     </Group>
@@ -257,7 +261,7 @@ function clipToOpenings(ctx: Konva.Context, iso: IsoToken, at: { x: number; y: n
  * its own decor (`decor`), upright on the box the overlay lays it out on
  * (standee.ts frame), so it travels with the standee in the drag layer.
  */
-function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; iso: IsoToken; decor?: ReactNode }) {
+function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; hexes: SelectedHexes | null; iso: IsoToken; decor?: ReactNode }) {
   const { token, w, h, scale, iso } = props;
   // Drawn from the capped base the layout read, so the art is where it culls, decorates and casts silhouettes.
   const parts = standeeParts(iso.turn, iso.drawn, iso.ground, { w, h }, iso);
@@ -282,7 +286,7 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
           />
         ) : null}
         {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
-        {props.selected ? <SelectedOutline w={w} h={h} scale={scale} /> : null}
+        {props.selected ? <SelectedOutline w={w} h={h} scale={scale} hexes={props.hexes} /> : null}
         <Group x={w / 2} y={h / 2} rotation={upright.rotation} scaleY={upright.scaleY}>
           {parts.stem > 0 ? <Line points={[0, 0, 0, parts.stem]} stroke={theme.relief.stem} strokeWidth={1} strokeScaleEnabled={false} dash={iso.capped ? [6 / scale, 4 / scale] : undefined} listening={false} /> : null}
           <Group x={parts.art.x} y={parts.art.y} scaleX={parts.art.scale} scaleY={parts.art.scale}>
@@ -315,14 +319,14 @@ function PressArea(props: { w: number; h: number; inset: boolean; holes: readonl
 }
 
 /** The token's own picture: its shadow, its body and the rings that mark it active or selected. */
-function TokenFace(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean }) {
+function TokenFace(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; hexes?: SelectedHexes | null }) {
   const { token, actor, w, h, scale, name } = props;
   return (
     <>
       <TokenShadow token={token} w={w} h={h} />
       <TokenBody token={token} actor={actor} w={w} h={h} scale={scale} name={name} />
       {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
-      {props.selected ? <SelectedOutline w={w} h={h} scale={scale} /> : null}
+      {props.selected ? <SelectedOutline w={w} h={h} scale={scale} hexes={props.hexes ?? null} /> : null}
     </>
   );
 }
@@ -492,7 +496,7 @@ export const TokenGhost = memo(function TokenGhost(props: {
   if (props.iso) {
     return (
       <Group x={x} y={y} opacity={theme.relief.ghostOpacity} listening={false}>
-        <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={displayName(token)} active={false} selected={false} iso={props.iso} />
+        <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={displayName(token)} active={false} selected={false} hexes={null} iso={props.iso} />
       </Group>
     );
   }
@@ -633,9 +637,52 @@ function IconGlyph(props: { iconKey: string; d: string; side: number; color: str
 }
 
 /** Its own component, so only a selected token reads the accent. */
-function SelectedOutline(props: { w: number; h: number; scale: number }) {
+/**
+ * The hexes a selected token stands on, as its node draws them: the
+ * outline in cells from the node's own corner, the token's stored x and y,
+ * so a drag moves it with the token. Null on squares or while unselected.
+ */
+type SelectedHexes = { points: number[] };
+
+function useSelectedHexes(gridShape: GridShape | undefined, token: ViewToken, selected: boolean): SelectedHexes | null {
+  const { x, y, size, w, h } = token;
+  return useMemo(() => {
+    const g = gridOfShape(gridShape);
+    if (!selected || g.shape !== "hex") return null;
+    // On the hex sides themselves, so the outline says which hexes the creature takes.
+    const loop = hexFootprintOutline(g, { size, x, y, w, h });
+    return { points: loop.map((v, i) => (i % 2 === 0 ? v - x : v - y)) };
+  }, [gridShape, selected, x, y, size, w, h]);
+}
+
+/**
+ * The selection's ring: on a hex scene the outline of the creature's hexes
+ * (docs/design-v1-hex-grids.md 3), drawn on the ground in both views, the
+ * same dash and accent as the ring a square scene draws.
+ */
+function SelectedOutline(props: { w: number; h: number; scale: number; hexes: SelectedHexes | null }) {
   const { accent } = useAccent();
+  if (props.hexes) return <HexOutline points={props.hexes.points} scale={props.scale} color={accent} widthPx={2} />;
   return <Outline {...props} gapPx={3} color={accent} widthPx={2} dash />;
+}
+
+/** A closed outline along hex sides, as wide and dashed as `Outline`'s ring at this zoom. */
+function HexOutline(props: { points: number[]; scale: number; color: string; widthPx: number }) {
+  const { scale } = props;
+  const k = boardSizes(scale).ringPx / 3;
+  return (
+    <Line
+      points={props.points}
+      closed
+      stroke={props.color}
+      strokeWidth={Math.max(props.widthPx, props.widthPx * k)}
+      strokeScaleEnabled={false}
+      lineJoin="round"
+      dash={[(6 * Math.max(1, k)) / scale, (4 * Math.max(1, k)) / scale]}
+      listening={false}
+      perfectDrawEnabled={false}
+    />
+  );
 }
 
 /**

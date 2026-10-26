@@ -1,7 +1,7 @@
 import { SIZE_CELLS, type Character, type Member, type RoomState, type Scene, type SceneMap, type Token } from "#shared/model.ts";
-import { sizeCategory } from "#shared/rules/footprint.ts";
+import { occupiedHexes, sizeCategory, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
-import { snapAnchor } from "#shared/rules/hex.ts";
+import { HEX_R, hexCenter, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import type { Rect } from "./camera.ts";
 
 /**
@@ -43,6 +43,81 @@ export function snapPosition(g: Grid, x: number, y: number, size: { w: number; h
   }
   const step = Math.min(size.w, size.h) < 1 ? 0.5 : 1;
   return { x: Math.round(x / step) * step, y: Math.round(y / step) * step };
+}
+
+/**
+ * The outline round a creature's hexes on a hex scene, the selected token's
+ * outline (docs/design-v1-hex-grids.md 3, "a hex outline when selected"):
+ * one closed loop of points in cells, `[x0, y0, x1, y1, ...]`, clockwise on
+ * screen, along the sides no two of its hexes share. A footprint's 1, 3, 7
+ * or 12 hexes are joined without holes, so its outline is one loop.
+ */
+export function hexFootprintOutline(g: HexGrid, token: PlacedToken): number[] {
+  return hexOutline(g, occupiedHexes(g, token));
+}
+
+/**
+ * The outer outline of a set of joined hexes without holes, as one closed
+ * loop. Corners are worked out from centers for drawing only: no rule
+ * reads them.
+ */
+export function hexOutline(g: HexGrid, hexes: readonly Hex[]): number[] {
+  // Each side as its two corners, keyed so a side two hexes share has one key either way round.
+  const key = (p: { x: number; y: number }) => `${Math.round(p.x * 4096)},${Math.round(p.y * 4096)}`;
+  const sides = new Map<string, { a: { x: number; y: number }; b: { x: number; y: number }; n: number }>();
+  for (const h of hexes) {
+    const pts = hexPoints(g, h);
+    for (let i = 0; i < 6; i++) {
+      const a = pts[i]!;
+      const b = pts[(i + 1) % 6]!;
+      const k = key(a) < key(b) ? `${key(a)}|${key(b)}` : `${key(b)}|${key(a)}`;
+      const seen = sides.get(k);
+      if (seen) seen.n++;
+      else sides.set(k, { a, b, n: 1 });
+    }
+  }
+  // The outer sides, each run in its hex's own turning, chained end to start.
+  const next = new Map<string, { x: number; y: number }>();
+  const first: { x: number; y: number }[] = [];
+  for (const side of sides.values()) {
+    if (side.n !== 1) continue;
+    next.set(key(side.a), side.b);
+    if (first.length === 0) first.push(side.a);
+  }
+  const loop: { x: number; y: number }[] = [];
+  let at = first[0];
+  for (let guard = 0; at && guard <= next.size; guard++) {
+    loop.push(at);
+    at = next.get(key(at));
+    if (at && key(at) === key(loop[0]!)) break;
+  }
+  return dropStraight(loop).flatMap((p) => [p.x, p.y]);
+}
+
+/** A hex's six points from its center, clockwise on screen for both orientations. */
+function hexPoints(g: HexGrid, h: Hex): { x: number; y: number }[] {
+  const c = hexCenter(g, h);
+  const half = HEX_R / 2;
+  const rows = [
+    { x: 0, y: -HEX_R },
+    { x: 0.5, y: -half },
+    { x: 0.5, y: half },
+    { x: 0, y: HEX_R },
+    { x: -0.5, y: half },
+    { x: -0.5, y: -half },
+  ];
+  // Swapping x and y mirrors the turning, so columns run the rows' points backward to stay clockwise.
+  const pts = g.orient === "rows" ? rows : rows.map((p) => ({ x: p.y, y: p.x })).reverse();
+  return pts.map((p) => ({ x: c.x + p.x, y: c.y + p.y }));
+}
+
+/** The loop without points that lie on a straight run, so a dashed outline's corners fall where the shape turns. */
+function dropStraight(loop: readonly { x: number; y: number }[]): { x: number; y: number }[] {
+  return loop.filter((p, i) => {
+    const a = loop[(i + loop.length - 1) % loop.length]!;
+    const b = loop[(i + 1) % loop.length]!;
+    return Math.abs((p.x - a.x) * (b.y - p.y) - (p.y - a.y) * (b.x - p.x)) > 1e-9;
+  });
 }
 
 /**

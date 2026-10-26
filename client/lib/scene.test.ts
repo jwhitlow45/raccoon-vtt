@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { SQUARES } from "#shared/rules/grid.ts";
-import { footprintHexes, hexCenter, snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
-import { placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
+import { cornerAt, footprintHexes, hexCenter, hexCorners, HEX_R, snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
 import { rng } from "#shared/testutil.ts";
 import type { Member, RoomState, Scene } from "#shared/model.ts";
 import { createInitialState } from "#shared/initial.ts";
@@ -12,6 +12,7 @@ import {
   displayName,
   drawsAboveFog,
   footprint,
+  hexFootprintOutline,
   mapWorldRect,
   sceneGate,
   selectionScene,
@@ -140,6 +141,30 @@ describe("geometry", () => {
       const spot = snapPosition(g, random() * 30, random() * 20, box);
       assert.deepEqual(snapPosition(g, spot.x, spot.y, box), spot, `idempotent for ${size}`);
       assert.deepEqual(spot, placedOnHex(g, { size, x: spot.x, y: spot.y }, tokenRefHex(g, { size, x: spot.x, y: spot.y })), `the rules' spot for ${size}`);
+    }
+  });
+
+  test("a selected creature's hex outline runs round its hexes' outer sides, one closed loop, rows and columns", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      const g: HexGrid = { shape: "hex", orient };
+      for (const [size, count] of [["tiny", 6], ["medium", 6], ["large", 12], ["huge", 18], ["gargantuan", 24]] as const) {
+        const token = { size, ...placedOnHex(g, { size, x: 0, y: 0 }, { col: 6, row: 5 }) };
+        const loop = hexFootprintOutline(g, token);
+        const pts = Array.from({ length: loop.length / 2 }, (_, i) => ({ x: loop[2 * i]!, y: loop[2 * i + 1]! }));
+        assert.equal(pts.length, count, `${orient} ${size}: one corner a turn of its outer sides`);
+        // Each point is a corner of the creature's hexes, as the rules round them.
+        const corners = occupiedHexes(g, token).flatMap((h) => hexCorners(g, h).map((c) => cornerAt(g, c)));
+        for (const p of pts) assert.ok(corners.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < 1 / 64), `${orient} ${size}: ${p.x},${p.y} is a hex corner`);
+        // Its sides are each one hex side long, and the loop turns clockwise on screen.
+        let area = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i]!;
+          const b = pts[(i + 1) % pts.length]!;
+          assert.ok(Math.abs(Math.hypot(b.x - a.x, b.y - a.y) - HEX_R) < 1e-9, `${orient} ${size}: side ${i}`);
+          area += a.x * b.y - b.x * a.y;
+        }
+        assert.ok(area > 0, `${orient} ${size}: clockwise with y down`);
+      }
     }
   });
 
