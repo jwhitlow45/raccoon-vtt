@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { Character, Token } from "#shared/model.ts";
-import { character, token } from "#shared/testutil.ts";
+import type { Character, RoomState, Token } from "#shared/model.ts";
+import { character, reveal, token } from "#shared/testutil.ts";
 import { fitRect, NO_INSETS, viewToScreen, type Camera } from "../../lib/camera.ts";
-import { heightsStand, isometric, TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
+import { heightsStand, isometric, standScale, TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
 import { barCover, largerEach, pastBars } from "../../canvas/barDock.ts";
 import { FIND_ROOM_CELLS, findCamera, findRect, findTokenCamera, frameOf, nextOwnToken, sheetCover } from "./findToken.ts";
 import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, groundIn, ringCenter, tokenBase } from "../../canvas/boardPick.ts";
-import { world } from "../movement/testing.ts";
+import { raised, world } from "../movement/testing.ts";
 
 function view(tokens: Token[], characters: Character[] = []) {
   return { tokens: Object.fromEntries(tokens.map((t) => [t.id, t])), characters: Object.fromEntries(characters.map((c) => [c.id, c])) };
@@ -236,6 +236,78 @@ describe("Find my token in Isometric (docs/design-v1-isometric-view.md 4.2)", ()
         const at = viewToScreen(cam, toView(isometric(turn), c));
         assert.ok(at.x >= 0 && at.x <= 390 && at.y >= 56 && at.y <= 844 - 64, `turn ${turn}, corner ${c.x},${c.y}`);
       }
+    }
+  });
+});
+
+describe("Find never settles on a zoom its board does not fit at (ISO34-ASTRA-16)", () => {
+  const viewport = { width: 800, height: 600 };
+  const bars = { top: 56, right: 0, bottom: 64, left: 0 };
+
+  /** Every corner of the room round the target, each cell's at its drawn ground on the board as it draws at the camera found, between the bars. */
+  function roomFits(board: ReturnType<typeof boardPickFor>, cam: Camera, target: { x: number; y: number; width: number; height: number }, turn: 0 | 1 | 2 | 3, label: string) {
+    for (let y = target.y; y < target.y + target.height - 1e-9; y++) {
+      for (let x = target.x; x < target.x + target.width - 1e-9; x++) {
+        const z = drawnAt(board, { x: x + 0.01, y: y + 0.01 });
+        for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+          const at = viewToScreen(cam, toView(isometric(turn), { x: Math.min(x + dx, target.x + target.width), y: Math.min(y + dy, target.y + target.height) }, z));
+          assert.ok(at.x >= -1e-6 && at.x <= 800 + 1e-6 && at.y >= 56 - 1e-6 && at.y <= 600 - 64 + 1e-6, `${label}, cell ${x},${y}: ${JSON.stringify(at)}`);
+        }
+      }
+    }
+  }
+
+  const cases = [
+    { name: "on a 100 ft platform, from close in", feet: 100, start: 80, lowPower: false },
+    { name: "on a 100 ft platform, from far out", feet: 100, start: 10, lowPower: false },
+    { name: "on a 40 ft platform in Low power, from close in", feet: 40, start: 80, lowPower: true },
+    { name: "on a 40 ft platform in Low power, from far out", feet: 40, start: 10, lowPower: true },
+  ];
+  for (const c of cases) {
+    test(`a token ${c.name}: the zoom found is one its board fits at, standing as the board the fit read, at every turn`, () => {
+      const state = world({ heights: raised(8, 8, 14, 14, c.feet) });
+      const t = token("t1", { x: 10, y: 10, elevation: c.feet });
+      for (const turn of [0, 1, 2, 3] as const) {
+        const board = (camera: Camera) => boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: false, view: isometric(turn), camera, lowPower: c.lowPower, canvasHeight: 600 }, new DrawnHeightsMemo());
+        const target = findRect(t);
+        const cam = findTokenCamera(viewport, target, bars, NO_INSETS, board({ x: 0, y: 0, scale: c.start }), t);
+        const shown = board(cam);
+        const label = `${c.name}, turn ${turn}, scale ${cam.scale}`;
+        // The platform standing needs a zoom where it lies flat, and lying flat fits at one where it stands: from either side the fit shows it flat, just under the threshold, and does not swing back.
+        assert.equal(shown.src!.stand, false, label);
+        assert.ok(cam.scale < standScale(c.lowPower) && cam.scale > standScale(c.lowPower) - 0.01, label);
+        const ring = ringCenter(shown, t);
+        assert.ok(Math.abs(ring.x - 400) < 1e-6 && Math.abs(ring.y - 296) < 1e-6, `${label}: ${JSON.stringify(ring)}`);
+        roomFits(shown, cam, target, turn, label);
+      }
+    });
+  }
+});
+
+describe("a player's Find reads only the ground that player has seen (ISO34-FV-5)", () => {
+  const viewport = { width: 800, height: 600 };
+  const bars = { top: 56, right: 0, bottom: 64, left: 0 };
+
+  /** A room whose only difference from another is the ground under the player's fog: east of x = 12, which the find room round (10, 10) reaches. */
+  function hidden(feet: number): RoomState {
+    const state = world({ heights: raised(12, 6, 15, 15, feet) });
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+    reveal(state, "s1", { x: 0, y: 0, w: 12, h: 40 });
+    return state;
+  }
+
+  test("two rooms differing only in a platform under a player's fog give that player's Find from far out the same camera, and the DM's another", () => {
+    const t = token("t1", { x: 10, y: 10 });
+    const target = findRect(t);
+    for (const turn of [0, 1, 2, 3] as const) {
+      const find = (state: RoomState, role: "dm" | "player") =>
+        findTokenCamera(viewport, target, bars, NO_INSETS, boardPickFor({ room: state, scene: state.scenes.s1!, role, fog: true, view: isometric(turn), camera: { x: 0, y: 0, scale: 10 }, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo()), t);
+      const low = find(hidden(20), "player");
+      const high = find(hidden(60), "player");
+      assert.ok(heightsStand(low.scale, false), `turn ${turn}: the fit crosses the stand threshold (${low.scale})`);
+      assert.deepEqual(low, high, `turn ${turn}: the hidden platform moves nothing for the player`);
+      const dm = find(hidden(60), "dm");
+      assert.notDeepEqual(dm, high, `turn ${turn}: the DM, who sees the platform, frames it`);
     }
   });
 });

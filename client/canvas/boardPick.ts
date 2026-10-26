@@ -3,7 +3,7 @@ import { occupiedRange, type FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
 import { footprint, type ViewToken } from "../lib/scene.ts";
-import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
+import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, standScale, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 import { FogView } from "./relief/fogView.ts";
 import { creatureStands } from "./relief/stand.ts";
@@ -30,6 +30,8 @@ export type BoardPick = PickSource & {
    * through here, never a copy with only its camera swapped (ISO34-ASTRA-13).
    */
   at(camera: Camera): BoardPick;
+  /** The zoom from which this board's heights stand (view.ts standScale), Low power's when it is on. */
+  standScale: number;
 };
 
 /**
@@ -42,7 +44,7 @@ export const boardPickSlot = scopeSlot(() => ({ read: null as (() => BoardPick |
 
 /** Top-down's pick, with no heights: what a tool reads before the canvas has measured itself, and in tests. */
 export function flatPick(camera: Camera, bounds: { w: number; h: number } = { w: 0, h: 0 }, grid: Grid = sceneGrid({})): BoardPick {
-  return { camera, view: TOP_DOWN, grid, heights: flatHeights(bounds), src: null, feetPerCell: 5, canvasHeight: Infinity, at: (c) => flatPick(c, bounds, grid) };
+  return { camera, view: TOP_DOWN, grid, heights: flatHeights(bounds), src: null, feetPerCell: 5, canvasHeight: Infinity, at: (c) => flatPick(c, bounds, grid), standScale: standScale(false) };
 }
 
 /** The board's pick in this Room, or Top-down's at the tool's camera. */
@@ -209,11 +211,11 @@ export function boardPickFor(
   const { scene, room, camera, view } = input;
   const grid = sceneGrid(scene);
   const at = (c: Camera) => boardPickFor({ ...input, camera: c }, memo);
-  if (view.kind === "topDown") return { ...flatPick(camera, scene.bounds, grid), canvasHeight: input.canvasHeight ?? Infinity, at };
+  if (view.kind === "topDown") return { ...flatPick(camera, scene.bounds, grid), canvasHeight: input.canvasHeight ?? Infinity, at, standScale: standScale(input.lowPower) };
   const feetPerCell = room?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell;
   const fog = input.role === "player" && input.fog ? (room?.fogTiles ?? NO_FOG) : null;
   const { src, heights } = memo.get({ chunks: room?.buildChunks ?? NO_CHUNKS, sceneId: scene.id, bounds: scene.bounds, fog, feetPerCell, scale: camera.scale, lowPower: input.lowPower });
-  return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity, at };
+  return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity, at, standScale: standScale(input.lowPower) };
 }
 
 const NO_FOG: RoomState["fogTiles"] = {};

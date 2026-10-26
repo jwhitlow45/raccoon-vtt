@@ -176,7 +176,12 @@ export function liveOfStage(stage: { x(): number; y(): number; scaleX(): number;
 export const STAND_MIN_PX = 12;
 
 export function heightsStand(scale: number, lowPower: boolean): boolean {
-  return scale >= (lowPower ? 2 : 1) * STAND_MIN_PX;
+  return scale >= standScale(lowPower);
+}
+
+/** The zoom in screen pixels a cell from which heights stand: STAND_MIN_PX, twice it in Low power. */
+export function standScale(lowPower: boolean): number {
+  return (lowPower ? 2 : 1) * STAND_MIN_PX;
 }
 
 /** What drawn heights read: the ground this viewer may see (heights/ground.ts), and whether heights stand at this zoom. */

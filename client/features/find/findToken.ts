@@ -100,19 +100,37 @@ export type FindMiddle = { fit(pick: BoardPick): number; at(pick: BoardPick): nu
  * fit picks (findCamera). That zoom decides whether heights stand at all
  * (the stand threshold, Low power's too) and how far a standee's lift may
  * rise, so the board is read again at it, built the way the board builds
- * it (BoardPick.at): a fit that lands where heights stand otherwise fits
- * again on that board, and the middle centers on the board at the zoom
- * found (ISO34-ASTRA-13), as a scene's fit reads its lift again at the
- * zoom it found (Stage.tsx fitScene).
+ * it (BoardPick.at), and the zoom returned is always one fitted on a board
+ * that stands as the board at that zoom does (ISO34-ASTRA-13, ASTRA-16):
+ *
+ * - a fit that lands where heights stand as they did keeps its zoom;
+ * - one that lands where they stand otherwise fits again on that board,
+ *   and keeps that zoom if heights there stand as on that board;
+ * - else each side sends the fit to the other: no zoom where heights stand
+ *   fits the target with them, so it shows flat, at the closest zoom flat
+ *   ground both fits at and stays flat at, just under the threshold.
+ *
+ * The middle then centers on the board at that zoom, as a scene's fit
+ * reads its lift again at the zoom it found (Stage.tsx fitScene).
  */
 export function findOnBoard(viewport: Size, target: Rect, bars: Insets, cover: Insets, pick: BoardPick, middle: FindMiddle): Camera {
-  const fit = (board: BoardPick) => findCamera(viewport, target, bars, cover, frameOf(board, target, middle.fit(board)));
-  let fitted = fit(pick);
-  const there = pick.at(fitted);
-  if (there.src?.stand !== pick.src?.stand) fitted = fit(there);
-  const shown = pick.at(fitted);
-  return findCamera(viewport, target, bars, cover, frameOf(shown, target, middle.at(shown)), fitted.scale);
+  const fit = (board: BoardPick) => findCamera(viewport, target, bars, cover, frameOf(board, target, middle.fit(board))).scale;
+  const center = (scale: number) => {
+    const shown = pick.at({ ...pick.camera, scale });
+    return findCamera(viewport, target, bars, cover, frameOf(shown, target, middle.at(shown)), scale);
+  };
+  const stands = (scale: number) => pick.at({ ...pick.camera, scale }).src?.stand;
+  const first = fit(pick);
+  if (stands(first) === pick.src?.stand) return center(first);
+  const there = pick.at({ ...pick.camera, scale: first });
+  const second = fit(there);
+  if (stands(second) === there.src?.stand) return center(second);
+  const flat = pick.src?.stand ? second : first;
+  return center(Math.min(flat, pick.standScale - FLAT_MARGIN));
 }
+
+/** How far under the stand threshold a fit that must show flat ground zooms, so its heights surely lie flat. */
+const FLAT_MARGIN = 1e-6;
 
 /**
  * The camera that finds a token, its ring centered where it draws at the
