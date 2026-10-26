@@ -1,7 +1,7 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import type { RoomState, Token, Trap } from "../model.ts";
-import { playersSeeGround, playersToken, unionSightOf } from "../project.ts";
+import { groundAnyPlayerSees, playersToken, unionSightOf } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { boxDistanceFt, tokenCellBox } from "../rules/distance.ts";
 import { groundAt } from "../rules/heights.ts";
@@ -116,7 +116,8 @@ function zoneSeen(state: RoomState, sceneId: string): (trap: Trap) => boolean {
     return (trap) => zoneRanges(state, sceneId, trap.zone).some((r) => anyCell(r, (x, y) => sight.seesToken({ size: "medium", x, y })));
   }
   if (!scene.fogEnabled) return () => true;
-  const sees = playersSeeGround(state, sceneId);
+  // The union too: ground any holder remembers (review PV1-O11).
+  const sees = groundAnyPlayerSees(state, sceneId);
   return (trap) => zoneRanges(state, sceneId, trap.zone).some((r) => anyCell(r, sees));
 }
 

@@ -364,6 +364,19 @@ export function playersSeeGround(state: RoomState, sceneId: string): (x: number,
 }
 
 /**
+ * The ground any player remembers on a scene, which the DM's tools read
+ * (docs/design-v1-per-player-vision.md decision 14): `playersSeeGround`,
+ * and on a per-player scene each sight holder's own layer joined to it, as
+ * `exploredAny` shows the DM.
+ */
+export function groundAnyPlayerSees(state: RoomState, sceneId: string): (x: number, y: number) => boolean {
+  const shared = playersSeeGround(state, sceneId);
+  if (!perPlayerScene(state.scenes[sceneId]) || sightOf(state) !== undefined) return shared;
+  const own = sightHolders(state, sceneId).map((id) => fogReader(state, id));
+  return (x, y) => shared(x, y) || own.some((fogged) => !fogged(sceneId, x, y));
+}
+
+/**
  * The ground every player shares on a scene (docs/design-v1-per-player-vision.md
  * 6.3): `playersSeeGround` on a whole-party scene, and on a per-player one
  * the DM's and party's layers alone, on every device, for shared and kept

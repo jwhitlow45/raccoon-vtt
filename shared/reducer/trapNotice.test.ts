@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { holderTileKey } from "../keys.ts";
 import { describeEvent } from "../logText.ts";
 import type { RoomState, Trap, TrapRig, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
+import { rasterizeFogOps } from "../rules/fog.ts";
 import { actor, character, DM, env, P1, reveal, room, token, trap as trapOf } from "../testutil.ts";
 
 /** The Passive Perception hint (docs/design-v1-traps.md 4.6). */
@@ -106,5 +108,18 @@ describe("the Passive Perception hint", () => {
     assert.equal(notices(walk(raised({ cells: [{ x: 10, y: 5, w: 2, h: 1 }] }), 8).state).length, 1, "one rectangle of both squares");
     assert.equal(notices(walk(raised({ cells: [{ x: 10, y: 5, w: 1, h: 1 }, { x: 11, y: 5, w: 1, h: 1 }] }), 8).state).length, 1, "a rectangle each");
     assert.equal(notices(walk(raised({ cells: [{ x: 11, y: 5, w: 1, h: 1 }] }), 9).state).length, 0, "the raised square alone is 50 ft up");
+  });
+});
+
+describe("the hint on a per-player scene (docs/design-v1-per-player-vision.md decision 14, review PV1-O11)", () => {
+  test("with fog alone, the zone counts as seen on ground only one holder remembers", () => {
+    const s = world();
+    s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } };
+    reveal(s, "s1", { x: 0, y: 0, w: 9, h: 10 });
+    s.holders.s1 = { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }] };
+    assert.equal(notices(walk(s, 8).state).length, 0, "the zone lies under every layer");
+    const tile = Object.values(rasterizeFogOps({}, "s1", s.scenes.s1!.bounds, [{ id: "r", mode: "reveal", shape: { kind: "rect", x: 9, y: 4, w: 3, h: 3 } }]))[0]!;
+    s.exploredBy[holderTileKey("s1", "p1", tile.tx, tile.ty)] = { ...tile, memberId: "p1" };
+    assert.equal(notices(walk(s, 8).state).length, 1, "p1's own map holds the zone");
   });
 });
