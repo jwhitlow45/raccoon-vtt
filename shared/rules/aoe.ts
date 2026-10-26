@@ -562,9 +562,14 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
   const g = ctx.grid;
   let originToken: AreaToken | undefined = attached;
   if (!originToken && caster) {
-    const r = footprintRect(g, caster);
-    const E = 1e-6;
-    if (origin.x >= r.x - E && origin.x <= r.x + r.w + E && origin.y >= r.y - E && origin.y <= r.y + r.h + E) originToken = caster;
+    // On hexes a cast starts on the footprint's outline (castFromToken), which its drawing box does not hold (review HX2-ASTRA-02).
+    if (g.shape === "hex") {
+      if (onHexes(g, occupiedHexes(g, caster), origin)) originToken = caster;
+    } else {
+      const r = footprintRect(g, caster);
+      const E = 1e-6;
+      if (origin.x >= r.x - E && origin.x <= r.x + r.w + E && origin.y >= r.y - E && origin.y <= r.y + r.h + E) originToken = caster;
+    }
   }
 
   const ox = origin.x;
@@ -1125,6 +1130,30 @@ function withinReach(reach: HexReach, h: number, z0: number, z1: number): boolea
   const dz = axisSteps(reach.z0, reach.z1, z0, z1);
   const ft = legFeet(h, 0, dz, reach.rule, reach.fpc);
   return (reach.rule === "euclid" ? Math.round(ft) : ft) <= reach.ft;
+}
+
+/**
+ * Whether a point lies on any of these hexes, its outline included: on or
+ * inside each side of one, the corners rounded as `hexEdgeOrigin` takes
+ * them, so a cast's origin on a corner or a side's midpoint is on its
+ * caster.
+ */
+function onHexes(g: HexGrid, hexes: readonly Hex[], p: Point): boolean {
+  const E = 1e-6;
+  return hexes.some((h) => {
+    const corners = hexCorners(g, h).map((k) => cornerAt(g, k));
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < 6; i++) {
+      const a = corners[i]!;
+      const b = corners[(i + 1) % 6]!;
+      const side = ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / Math.hypot(b.x - a.x, b.y - a.y);
+      lo = Math.min(lo, side);
+      hi = Math.max(hi, side);
+    }
+    // The same side of every edge, whichever way the corners run.
+    return lo >= -E || hi <= E;
+  });
 }
 
 /** Every hex within `steps` of a hex of `from`, with its steps, by walking neighbors. */

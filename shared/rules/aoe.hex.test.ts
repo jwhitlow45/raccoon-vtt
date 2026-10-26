@@ -169,6 +169,24 @@ describe("a cone, line or cube cast from a token on hexes starts on its outline 
   });
 });
 
+describe("a stationary cast on hexes knows its caster by the footprint's outline (review HX2-ASTRA-02)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a Tiny and a Medium casting a cube, cone or line north or at 15°, left out, are never caught by it`, () => {
+      for (const size of ["tiny", "medium"] as const) {
+        for (const yaw of [270, 15]) {
+          for (const shape of ["cube", "cone", "line"] as const) {
+            const caster = on(g, "c", size, { col: 10, row: 10 });
+            const cast = castFromToken(g, { shape, size: 15, yaw }, caster, 5);
+            const area = template("a", { shape, size: 15, yaw, casterId: "c", origin: cast.origin, ...(cast.faceOffset ? { faceOffset: cast.faceOffset } : {}), includeOrigin: false });
+            const caught = creaturesInArea(area, [caster], ctx(g, { c: caster }, { coverage: "any" }));
+            assert.deepEqual(caught, [], `${size} ${shape} at ${yaw}°`);
+          }
+        }
+      }
+    });
+  }
+});
+
 describe("a template on hexes reaches players' copies unchanged", () => {
   test("its footprint's size is plain data", () => {
     const t: AreaTemplate = template("s", { shape: "emanation", footprint: { w: 3, h: 3, elevation: 0, height: 15, size: "huge" } });
