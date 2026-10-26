@@ -213,6 +213,32 @@ export const theme = {
      */
     mapRight: "var(--rvtt-map-safe-right, env(safe-area-inset-right, 0px))",
   },
+  /** The isometric view's raised ground, walls and standees (docs/design-v1-isometric-view.md 5.4 and 5.5). */
+  relief: {
+    /** A standee's ring on the ground, under its disposition's outline. */
+    ring: "rgba(0, 0, 0, 0.25)",
+    /** A side with nothing else to wear: a map image's cell not wholly revealed, or a texture not yet loaded. */
+    side: "#5c5852",
+    /** The light from the left on a side facing left, and the shade on one facing right. */
+    lit: "rgba(255, 255, 255, 0.12)",
+    shaded: "rgba(0, 0, 0, 0.3)",
+    /** The thin line around every side and wall, so a height reads on flat art. */
+    edge: "rgba(0, 0, 0, 0.45)",
+    /** A wall's stone, pulled toward the builder's wall color, and a pillar's toward its swatch. */
+    wallTint: "rgba(21, 18, 15, 0.35)",
+    pillarTint: "rgba(143, 137, 126, 0.3)",
+    /** A window's pane, half opaque. */
+    pane: "rgba(160, 210, 245, 0.5)",
+    /** A pit's floor, darkened by its depth. */
+    pitShade: "rgba(0, 0, 0, 0.4)",
+    /** A standee's stem and shadow. */
+    stem: "rgba(0, 0, 0, 0.6)",
+    shadow: "rgba(0, 0, 0, 0.35)",
+    /** A covered standee's outline (5.6), a ghost's and a drag's standee, and one the players cannot see on the DM's device. */
+    silhouetteOpacity: 0.35,
+    ghostOpacity: 0.6,
+    hiddenOpacity: 0.5,
+  },
 } as const;
 
 /**
