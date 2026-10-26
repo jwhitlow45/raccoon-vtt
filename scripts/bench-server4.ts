@@ -26,13 +26,20 @@
  *   node scripts/bench-server4.ts            (a laptop: budgets over 1.5, the reference server's ratio on this bench)
  *   node scripts/bench-server4.ts --server   (the server box itself: budgets as they are)
  *
+ * Then the bright and dark scenes again per player
+ * (docs/design-v1-per-player-vision.md 8.1), with the six players as the
+ * scene's sight holders at the worst ownership the cap allows, and a routed
+ * walk across areas during a turn on each kind of scene.
+ *
  * The phone rows (the derive on a phone, applying sight tiles, the leg test
  * while dragging) run in a browser and are not here. A row over its budget
  * means a cap comes down (section 4.3.6), not that this file changes.
  */
+import { holderTileKey, tileKey } from "../shared/keys.ts";
 import { SNAPSHOT_VERSION } from "../shared/migrate.ts";
 import { DEFAULT_SETTINGS, type EdgeFeature, type Member, type RoomState, type Token } from "../shared/model.ts";
 import type { Op } from "../shared/protocol.ts";
+import { encodeTile } from "../shared/rules/fog.ts";
 import { clearVisionCache } from "../shared/rules/vision.ts";
 import { RoomActor, type ActorDeps } from "../server/rooms/actor.ts";
 import { SnapshotBudget } from "../server/rooms/budgets.ts";
@@ -63,21 +70,32 @@ function members(): Record<string, Member> {
   return out;
 }
 
-/** Part 4C's room at the caps as a whole stored state, with walls that stop players' moves, at a grid scale. */
-function benchRoom(level: "bright" | "dark", feetPerCell: number): RoomState {
+/*
+ * Part 4C's room at the caps as a whole stored state, with walls that stop
+ * players' moves, at a grid scale. Per player (docs/design-v1-per-player-vision.md
+ * 8.1), at the worst ownership the cap allows: the scene is per player, the
+ * six players are its sight holders, and player k owns every character but
+ * the k-th, so no two share a raster. The fog projection then has each
+ * holder's own layer and the party's over the whole scene, and labels and
+ * stamps on it, to read.
+ */
+function benchRoom(level: "bright" | "dark", feetPerCell: number, perPlayer = false): RoomState {
   const cap = capRoom(level).state;
   const tokens: Record<string, Token> = {};
+  const players = Array.from({ length: PLAYERS }, (_, i) => `p${i + 1}`);
   for (const t of Object.values(cap.tokens)) {
     const k = t.kind === "pc" ? Number(t.id.slice(2)) : -1;
-    tokens[t.id] = k >= 0 ? { ...t, ownerIds: [`p${(k % PLAYERS) + 1}`] } : t;
+    tokens[t.id] = k < 0 ? t : { ...t, ownerIds: perPlayer ? players.filter((_, i) => i !== k) : [`p${(k % PLAYERS) + 1}`] };
   }
-  const scene = { ...cap.scenes[SCENE]!, blockMovement: true };
+  const base = { ...cap.scenes[SCENE]!, blockMovement: true };
+  const scene = perPlayer ? { ...base, vision: { ...base.vision!, perPlayer: true as const } } : base;
+  const layers = perPlayer ? perPlayerLayers(players) : { holders: {}, exploredBy: {}, exploredTiles: {}, labels: {}, stamps: {} };
   return {
     meta: { name: "Bench", settings: { ...DEFAULT_SETTINGS, feetPerCell }, playerSceneId: SCENE, view: { follow: false, blackout: false } },
     members: members(),
     scenes: { [SCENE]: scene },
     buildChunks: cap.buildChunks,
-    labels: {},
+    labels: layers.labels,
     fogTiles: {},
     fogDrafts: {},
     tokens,
@@ -91,11 +109,11 @@ function benchRoom(level: "bright" | "dark", feetPerCell: number): RoomState {
     monsters: {},
     srdImages: {},
     savedEncounters: {},
-    stamps: {},
+    stamps: layers.stamps,
     lights: cap.lights,
-    exploredTiles: {},
-    holders: {},
-    exploredBy: {},
+    exploredTiles: layers.exploredTiles,
+    holders: layers.holders,
+    exploredBy: layers.exploredBy,
     journal: {},
     pins: {},
     rolls: {},
@@ -106,6 +124,29 @@ function benchRoom(level: "bright" | "dark", feetPerCell: number): RoomState {
     trapLog: [],
     trapSeen: [],
   };
+}
+
+/** Every tile of the scene explored in a random pattern, for the party and for each holder, and 150 labels and 150 stamps about it. */
+function perPlayerLayers(players: readonly string[]): Pick<RoomState, "holders" | "exploredBy" | "exploredTiles" | "labels" | "stamps"> {
+  let seed = 7;
+  const rand = () => ((seed = (Math.imul(seed, 1103515245) + 12345) >>> 0) / 4294967296);
+  const bits = () => encodeTile(Uint8Array.from({ length: 512 }, () => (rand() < 0.5 ? 0xff : Math.floor(rand() * 256))));
+  const across = Math.ceil(200 / 16);
+  const exploredTiles: RoomState["exploredTiles"] = {};
+  const exploredBy: RoomState["exploredBy"] = {};
+  for (let ty = 0; ty < across; ty++) {
+    for (let tx = 0; tx < across; tx++) {
+      exploredTiles[tileKey(SCENE, tx, ty)] = { sceneId: SCENE, tx, ty, rev: 0, bits: bits() };
+      for (const id of players) exploredBy[holderTileKey(SCENE, id, tx, ty)] = { sceneId: SCENE, memberId: id, tx, ty, rev: 0, bits: bits() };
+    }
+  }
+  const labels: RoomState["labels"] = {};
+  const stamps: RoomState["stamps"] = {};
+  for (let k = 0; k < 150; k++) {
+    labels[`lab${k}`] = { id: `lab${k}`, rev: 0, sceneId: SCENE, x: rand() * 200, y: rand() * 200, text: `Room ${k}`, size: 1 };
+    stamps[`st${k}`] = { id: `st${k}`, rev: 0, sceneId: SCENE, art: { key: "barrel" }, x: rand() * 200, y: rand() * 200, w: 1, h: 1, rotation: 0, z: k, visibility: "all" };
+  }
+  return { holders: { [SCENE]: { sceneId: SCENE, rev: 0, entries: players.map((memberId) => ({ memberId, on: true })) } }, exploredBy, exploredTiles, labels, stamps };
 }
 
 /**
@@ -273,11 +314,15 @@ async function everyoneUp(table: Table): Promise<void> {
 const pcs = (s: RoomState) => Object.values(s.tokens).filter((t) => t.kind === "pc" && t.id !== "pc0a");
 const owner = (table: Table, t: Token) => table.players[Number(t.ownerIds[0]!.slice(1)) - 1]!;
 
-async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row[]): Promise<void> {
+/** How a per-player row names its scene. */
+const PER_PLAYER = `per player with ${PLAYERS} holders`;
+
+async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row[], perPlayer = false): Promise<void> {
   clearVisionCache();
   // Every light, sense and box is the same number of cells at any scale of 5 ft or more, so only a finer one costs more.
-  const where = feetPerCell === 5 ? `${level} scene` : `${level} scene at ${feetPerCell} ft per cell`;
-  const table = await sitDown(benchRoom(level, feetPerCell));
+  const scale = feetPerCell === 5 ? `${level} scene` : `${level} scene at ${feetPerCell} ft per cell`;
+  const where = perPlayer ? `${scale}, ${PER_PLAYER}` : scale;
+  const table = await sitDown(benchRoom(level, feetPerCell, perPlayer));
   const state = () => table.actor.committed.state;
 
   // A player moves a character one cell east and back, so each run is a new position for the cache.
@@ -291,7 +336,13 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
     ms: move.total,
     covers: "a player's token.move, with the leg test, explore and the fan-out",
   });
-  rows.push({ row: `Sight fan-out for all players in one batch, ${where}`, budget: 10, ms: move.fanout, covers: "commit to the last ev of that move, 7 sockets" });
+  rows.push({
+    row: `Sight fan-out for all players in one batch, ${where}`,
+    budget: 10,
+    ms: move.fanout,
+    // Per player, the fan-out is the first to read each holder's tiles, so their rasters are drawn in it.
+    covers: `commit to the last ev of that move, 7 sockets${perPlayer ? ", each holder's raster drawn" : ""}`,
+  });
 
   if (level === "dark") {
     const lightOp = (kind: "added" | "moved" | "switched" | "removed", r: number): Op => {
@@ -307,6 +358,16 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
       const light = await timed((r) => send(table, table.dm, lightOp(kind, r)));
       rows.push({ row: `A light ${kind}, ${where}`, budget: 10, ms: light.total, covers: "the DM's build.lights" + (kind === "added" ? " (one in, one out, at the cap of 100)" : "") });
     }
+    /*
+     * A free light every source sees (docs/design-v1-per-player-vision.md
+     * decision 15): in the gap west of the hall's dividing wall, which
+     * lights both halves, in place of another so the scene stays at its
+     * cap, then moved a cell a run.
+     */
+    const put = (y: number) => ({ id: "hall", x: 64.5, y, bright: 120, dim: 120, on: true, walls: true });
+    await send(table, table.dm, { t: "build.lights", sceneId: SCENE, put: [put(100.5)], remove: [Object.keys(state().lights).sort()[0]!] });
+    const hall = await timed((r) => send(table, table.dm, { t: "build.lights", sceneId: SCENE, put: [put(r % 2 === 0 ? 101.5 : 100.5)] }));
+    rows.push({ row: `A free light every source sees moved, ${where}`, budget: 30, ms: hall.total, covers: "the DM's build.lights on a light in the hall" });
   }
 
   /*
@@ -407,12 +468,46 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
   rows.push({ row: `Each later snapshot, ${where}`, budget: 250, ms: stats(times.later), covers: "a player's snapshot with sight" });
 }
 
+/*
+ * A routed walk across three areas that remind on entering, during the
+ * walker's turn (docs/design-v1-per-player-vision.md 8.1): the reminders
+ * judge who saw each crossing at its moment along the walk, which on a
+ * per-player scene asks every holder's point query and draws no raster.
+ * The DM walks the last character east through the areas and back.
+ */
+async function runWalk(perPlayer: boolean, rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const room = benchRoom("dark", 5, perPlayer);
+  room.encounter = { rev: 0, round: 1, activeEntryId: "e11", entries: [{ id: "e11", tokenId: "pc11", value: 15, tieOrder: 0, hidden: false, reactionUsed: false, inLair: false, hadTurn: true }] };
+  for (const [k, x] of [126, 130, 134].entries()) {
+    room.templates[`area${k}`] = { id: `area${k}`, rev: 0, sceneId: SCENE, shape: "sphere", size: 10, origin: { x, y: 111, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: "dm", visibility: "all", triggers: ["enter"] };
+  }
+  const table = await sitDown(room);
+  const walk = await timed(async () => {
+    // A new turn first, untimed, since an area reminds about a creature once a turn.
+    await send(table, table.dm, { t: "encounter.next" });
+    const from = table.actor.committed.state.tokens.pc11!.x;
+    const xs = from < 130 ? [124, 126, 128, 130, 132, 134, 136, 138] : [136, 134, 132, 130, 128, 126, 124, 122];
+    const route = xs.map((x): [number, number, number, 0 | 1] => [x, 110, 0, 0]);
+    return send(table, table.dm, { t: "token.move", tokenId: "pc11", x: xs[xs.length - 1]!, y: 110, route });
+  });
+  const reminded = table.actor.committed.state.log.filter((e) => e.data?.type === "area").length;
+  if (reminded < 3 * RUNS) throw new Error(`the walks reminded ${reminded} times`);
+  rows.push({ row: `A routed walk across three areas during its turn, dark scene${perPlayer ? `, ${PER_PLAYER}` : ""}`, budget: 30, ms: walk.total, covers: "the DM's token.move with a route, each crossing judged at its moment" });
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+}
+
 export async function runServerBench(): Promise<Row[]> {
   const rows: Row[] = [];
   await runLevel("bright", 5, rows);
   await runLevel("dark", 5, rows);
   // The finest scale the room settings allow, where each light and sense covers the most cells (and so the most walls).
   await runLevel("dark", 1, rows);
+  await runWalk(false, rows);
+  // The same per player, at the worst ownership the holder cap allows.
+  await runLevel("bright", 5, rows, true);
+  await runLevel("dark", 5, rows, true);
+  await runWalk(true, rows);
   return rows;
 }
 

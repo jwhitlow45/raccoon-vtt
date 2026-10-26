@@ -3,7 +3,13 @@
  * section 4.3.6), on scenes at the caps: 6,000 potential sight pieces from a
  * 200 x 200 dungeon with crossing free walls, pillars and raised areas, 12
  * party sources with 150 ft darkvision, and 100 free lights plus 20 lit
- * token lights, each 120 ft bright and 120 ft dim beyond. Run it on the
+ * token lights, each 120 ft bright and 120 ft dim beyond.
+ *
+ * Then the same scenes per player (docs/design-v1-per-player-vision.md
+ * 8.1) at the worst ownership the cap allows: 6 sight holders, each owning
+ * 11 of the 12 sources with a different one missing, so no two share a
+ * raster. Each such row times the union and every holder's raster and the
+ * shared sight drawn, as a batch's fan-out reads them. Run it on the
  * machine being gated:
  *
  *   node scripts/bench-vision.ts            (a laptop: budgets over 1.4, the reference server's ratio)
@@ -19,7 +25,7 @@ import { wallChunk } from "../shared/keys.ts";
 import { LIMITS } from "../shared/limits.ts";
 import { DEFAULT_SETTINGS, type BuildChunk, type EdgeFeature, type FreeWall, type Light, type RoomState, type SightTile, type TerrainId, type Token } from "../shared/model.ts";
 import { encodeHeights } from "../shared/rules/heights.ts";
-import { clearVisionCache, partySight, sightTileLevels, type VisionWorld } from "../shared/rules/vision.ts";
+import { clearVisionCache, holderSight, partySight, seenFogBits, sightTileLevels, type VisionWorld } from "../shared/rules/vision.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
 
 const SIZE = 200;
@@ -228,6 +234,32 @@ export function capRoom(level: "bright" | "dark"): { state: RoomState; pieces: n
     members: {},
   } as unknown as RoomState;
   return { state, pieces: sceneWalls(scene, buildChunks).sightPotential };
+}
+
+/**
+ * The per-player scene at the caps: `capRoom` with its scene per player and
+ * `holders` sight holders, holder k owning every source but the k-th (so
+ * 11 of 12 with 6 holders, the most a token's 16 owners allow), and the
+ * first `shared` sources marked to share sight with the party.
+ */
+export function perPlayerRoom(level: "bright" | "dark", holders: number = LIMITS.sightHoldersPerScene, shared = 0): { state: RoomState; holders: string[] } {
+  const { state } = capRoom(level);
+  const ids = Array.from({ length: holders }, (_, k) => `h${k + 1}`);
+  const tokens: Record<string, Token> = {};
+  for (const t of Object.values(state.tokens)) {
+    const k = t.kind === "pc" ? Number(t.id.slice(2)) : -1;
+    tokens[t.id] = k < 0 ? t : { ...t, ownerIds: ids.filter((_, h) => h !== k), ...(k < shared ? { partyVision: true } : {}) };
+  }
+  const scene = state.scenes.bench!;
+  return { state: { ...state, tokens, scenes: { bench: { ...scene, vision: { ...scene.vision!, perPlayer: true } } } }, holders: ids };
+}
+
+/** The union, every holder's raster and the shared sight, drawn as a batch's fan-out reads them. */
+function everyRaster(holders: readonly string[]): (s: RoomState) => void {
+  return (s) => {
+    partySight(s, "bench", world);
+    for (const id of [...holders, null]) void holderSight(s, "bench", id, world).tiles;
+  };
 }
 
 type Ms = { median: number; max: number };
@@ -461,7 +493,171 @@ export function runBench(runs = 15): { rows: BenchRow[]; pieces: Record<string, 
     rows.push({ row: "Changed sight tiles decoded into the overlay's pixels, one source moved", where: "phone", budget: 4, ms: stats(times), note: "measured here on the laptop: run in a phone's browser for the gate" });
   }
 
+  perPlayerRows(runs, rows);
   return { rows, pieces: { bright: bright.pieces, dark: dark.pieces } };
+}
+
+/*
+ * A free light every source sees: one in the gap west of the hall's
+ * dividing wall, which lights both halves, moved a cell a run (decision 15
+ * of the per-player design, 30 ms, as a source moved among lit lights).
+ * The sources' own lights already light the hall bright where they see,
+ * so it changes no level there: the union sweeps and lights it, and a
+ * holder's raster finds its light rows unchanged where its sources see.
+ */
+function hallLight(s: RoomState, run: number): RoomState {
+  const lights = { ...s.lights };
+  if (!lights.hall) lights.hall = { id: "hall", rev: 0, sceneId: "bench", x: 64.5, y: 100.5, ...MAX_LIGHT, on: true, walls: true };
+  else lights.hall = { ...lights.hall, y: lights.hall.y + (run % 2 === 0 ? 1 : -1) };
+  return { ...s, lights };
+}
+
+/** The per-player rows (docs/design-v1-per-player-vision.md 8.1), each against the whole-party row above it. */
+function perPlayerRows(runs: number, rows: BenchRow[]): void {
+  const pcs = (s: RoomState) => Object.values(s.tokens).filter((t) => t.kind === "pc");
+  const moveBy = (s: RoomState, run: number) => {
+    const t = pcs(s)[run % LIMITS.partySourcesPerScene]!;
+    return withToken(s, { ...t, x: t.x + (run % 2 === 0 ? 1 : -1) });
+  };
+  const union = (s: RoomState) => void partySight(s, "bench", world);
+  const holders = (n: number) => ` with ${n} holders`;
+  clearVisionCache();
+  for (const shared of [0, 2]) {
+    const also = shared > 0 ? `, ${shared} sources sharing sight` : "";
+    const bright = perPlayerRoom("bright", 6, shared);
+    const dark = perPlayerRoom("dark", 6, shared);
+    rows.push({ row: `One held source moved, bright scene${holders(6)}${also}`, where: "server", budget: 25, ms: timed(runs, bright.state, moveBy, everyRaster(bright.holders)) });
+    rows.push({ row: `A held source and its light every source sees moved, dark scene${holders(6)}${also}`, where: "server", budget: 30, ms: timed(runs, dark.state, moveBy, everyRaster(dark.holders)) });
+    if (shared === 0) rows.push({ row: "A free light every source sees moved, dark scene", where: "server", budget: 30, ms: timed(runs, dark.state, hallLight, union) });
+    rows.push({ row: `A free light every source sees moved, dark scene${holders(6)}${also}`, where: "server", budget: 30, ms: timed(runs, dark.state, hallLight, everyRaster(dark.holders)) });
+  }
+  const five = perPlayerRoom("dark", 5);
+  rows.push({ row: `A free light every source sees moved, dark scene${holders(5)}`, where: "server", budget: 30, ms: timed(runs, five.state, hallLight, everyRaster(five.holders)) });
+
+  const bright = perPlayerRoom("bright");
+  const dark = perPlayerRoom("dark");
+  const lightStep = (kind: "added" | "moved" | "switched" | "removed") => (s: RoomState, run: number): RoomState => {
+    const id = `l${(run * 7) % LIMITS.lightsPerScene}`;
+    const lights = { ...s.lights };
+    if (kind === "added") {
+      delete lights[id];
+      lights[`new${run}`] = { id: `new${run}`, rev: 0, sceneId: "bench", x: 20 + run, y: 30 + run, ...MAX_LIGHT, on: true, walls: true };
+      return { ...s, lights };
+    }
+    const l = lights[id] ?? Object.values(lights)[0]!;
+    if (kind === "moved") lights[l.id] = { ...l, x: l.x + 1 };
+    else if (kind === "switched") lights[l.id] = { ...l, on: !l.on };
+    else delete lights[l.id];
+    return { ...s, lights };
+  };
+  for (const kind of ["added", "moved", "switched", "removed"] as const) {
+    rows.push({ row: `A light ${kind}, dark scene${holders(6)}`, where: "server", budget: 10, ms: timed(runs, dark.state, lightStep(kind), everyRaster(dark.holders)) });
+  }
+  for (const [level, room] of [
+    ["bright", bright],
+    ["dark", dark],
+  ] as const) {
+    rows.push({ row: `A door every source sees, with the derive, ${level} scene${holders(6)}`, where: "server", budget: 250, ms: timed(runs, room.state, (s) => flipDoor(s, "100,100,n"), everyRaster(room.holders)) });
+  }
+  rows.push({
+    row: `Every raster whole: a light level switch, computed from nothing (dark to dim and back)${holders(6)}`,
+    where: "server",
+    budget: 250,
+    ms: timed(
+      runs,
+      dark.state,
+      (s) => {
+        clearVisionCache();
+        const sc = s.scenes.bench!;
+        return { ...s, scenes: { bench: { ...sc, vision: { ...sc.vision!, light: sc.vision!.light === "dark" ? "dim" : "dark" } } } };
+      },
+      everyRaster(dark.holders),
+    ),
+  });
+
+  /*
+   * 500 creatures judged for every holder: by their rasters, as a committed
+   * state's projection reads them, and by the point query, as a sweep's
+   * moment asks before any raster is drawn.
+   */
+  const rand = mulberry32(7);
+  const creatures = Array.from({ length: 500 }, () => ({ size: "medium" as const, x: Math.floor(rand() * 400) / 2, y: Math.floor(rand() * 400) / 2 }));
+  const judge = (s: RoomState) => {
+    let n = 0;
+    for (const id of [...dark.holders, null]) {
+      const sight = holderSight(s, "bench", id, world);
+      for (const c of creatures) if (sight.seesToken(c)) n++;
+    }
+    if (n < 0) throw new Error("unreachable");
+  };
+  {
+    let s = dark.state;
+    const times: number[] = [];
+    for (let r = 0; r < runs + 2; r++) {
+      s = moveBy(s, r);
+      everyRaster(dark.holders)(s);
+      const t = performance.now();
+      judge(s);
+      if (r >= 2) times.push(performance.now() - t);
+    }
+    rows.push({ row: `500 creatures judged by every holder's raster, dark scene${holders(6)}`, where: "server", budget: 10, ms: stats(times), note: "no budget of its own: part of a batch's projection" });
+  }
+  {
+    let s = dark.state;
+    const times: number[] = [];
+    for (let r = 0; r < runs + 2; r++) {
+      s = moveBy(s, r);
+      union(s);
+      const t = performance.now();
+      judge(s);
+      if (r >= 2) times.push(performance.now() - t);
+    }
+    rows.push({ row: `500 creatures judged by the point query for every holder, a sweep's moment, dark scene${holders(6)}`, where: "server", budget: 10, ms: stats(times), note: "no budget of its own: part of a walk's moments" });
+  }
+
+  // The explore step's share: every holder's seen bits on every tile they see.
+  {
+    let s = dark.state;
+    const times: number[] = [];
+    for (let r = 0; r < runs + 2; r++) {
+      s = moveBy(s, r);
+      everyRaster(dark.holders)(s);
+      const t = performance.now();
+      let bits = 0;
+      for (const id of [...dark.holders, null]) for (const tile of holderSight(s, "bench", id, world).tiles.values()) bits += seenFogBits(tile)[0]!;
+      if (r >= 2) times.push(performance.now() - t);
+      if (bits < 0) throw new Error("unreachable");
+    }
+    rows.push({ row: `Explore bits, every holder, every tile, dark scene${holders(6)}`, where: "server", budget: 10, ms: stats(times), note: "no budget of its own: part of the explore step" });
+  }
+
+  // The fan-out's share: every raster's changed tiles found and hashed once after a held source moves.
+  {
+    let s = dark.state;
+    const viewers = [...dark.holders, null];
+    const tilesOf = (state: RoomState) => [partySight(state, "bench", world).tiles, ...viewers.map((id) => holderSight(state, "bench", id, world).tiles)];
+    let before = tilesOf(s);
+    const times: number[] = [];
+    for (let r = 0; r < runs + 2; r++) {
+      s = moveBy(s, r);
+      const after = tilesOf(s);
+      const t = performance.now();
+      let h = 0;
+      for (const [i, now] of after.entries()) {
+        const was = before[i]!;
+        for (const key of new Set([...was.keys(), ...now.keys()])) {
+          const tile = now.get(key);
+          if (tile === was.get(key)) continue;
+          const text = tile ? JSON.stringify(tile) : "";
+          for (let c = 0; c < text.length; c++) h = Math.imul(h ^ text.charCodeAt(c), 16777619);
+        }
+      }
+      if (r >= 2) times.push(performance.now() - t);
+      before = after;
+      if (h === 0.5) throw new Error("unreachable");
+    }
+    rows.push({ row: `Every raster's tiles diffed and hashed once, one held source moved, dark scene${holders(6)}`, where: "server", budget: 10, ms: stats(times) });
+  }
 }
 
 export function formatBench(result: ReturnType<typeof runBench>, onServer: boolean): string {
