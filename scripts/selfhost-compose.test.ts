@@ -65,16 +65,20 @@ describe("the self-host compose file", () => {
 // The tests below read the files as Compose does, so they need its plugin. CI's runners have it.
 const haveCompose = spawnSync("docker", ["compose", "version"], { encoding: "utf8" }).status === 0;
 
-/** `docker compose config --format json` of a file, with the three required variables set. */
-function composeConfig(file: string, args: string[] = []): ComposeModel {
+/**
+ * `docker compose config --format json` of a file, with the three required
+ * variables set. With no file, of whatever Compose finds in `cwd` itself.
+ */
+function composeConfig(file: string | null, args: string[] = [], cwd = ROOT): ComposeModel {
   const dir = mkdtempSync(path.join(tmpdir(), "selfhost-compose-"));
   try {
     // An empty env file, so a .env a developer keeps next to either file cannot change the result.
     const envFile = path.join(dir, "empty.env");
     writeFileSync(envFile, "");
     const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: process.env.HOME, DOCKER_CONFIG: process.env.DOCKER_CONFIG, POSTGRES_PASSWORD: "pw", PUBLIC_ORIGIN: "https://vtt.example.com", ROOM_SECRET_KEY: "key" };
-    const r = spawnSync("docker", ["compose", "-f", file, "--env-file", envFile, ...args, "config", "--format", "json"], { encoding: "utf8", env, cwd: ROOT });
-    assert.equal(r.status, 0, `docker compose config ${file} failed: ${r.stderr}`);
+    const files = file === null ? [] : ["-f", file];
+    const r = spawnSync("docker", ["compose", ...files, "--env-file", envFile, ...args, "config", "--format", "json"], { encoding: "utf8", env, cwd });
+    assert.equal(r.status, 0, `docker compose config ${file ?? cwd} failed: ${r.stderr}`);
     return JSON.parse(r.stdout) as ComposeModel;
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -192,6 +196,28 @@ describe("the self-host compose file as compose reads it", { skip: haveCompose ?
     assert.equal(copier.network_mode, "none");
     assert.deepEqual(copier.cap_drop, ["ALL"]);
     assert.deepEqual(copier.security_opt, ["no-new-privileges:true"]);
+  });
+
+  test("takes README's compose.override.yml example on its own, moving the subnets it names and nothing else", () => {
+    const readme = read("README.md");
+    const section = readme.slice(readme.indexOf("## Self-hosting with the published image"));
+    const example = /```yaml\n([\s\S]*?)```/.exec(section.slice(section.indexOf("`compose.override.yml`")))?.[1] ?? "";
+    assert.ok(example.includes("!override"), "README.md's self-host section has no compose.override.yml example");
+    const dir = mkdtempSync(path.join(tmpdir(), "selfhost-override-"));
+    try {
+      writeFileSync(path.join(dir, "compose.yml"), read(COMPOSE_PATH));
+      writeFileSync(path.join(dir, "compose.override.yml"), example);
+      const moved = composeConfig(null, ["--profile", "https"], dir);
+      const subnets = (m: ComposeModel) =>
+        Object.fromEntries(Object.entries(m.networks).map(([name, n]) => [name, ((n as { ipam: { config: { subnet: string }[] } }).ipam.config).map((c) => c.subnet)]));
+      const wanted = Object.fromEntries([...example.matchAll(/^ {2}([\w-]+):\n[\s\S]*?subnet: (\S+)$/gm)].map((m) => [m[1]!, [m[2]!]]));
+      assert.deepEqual(subnets(moved), { ...subnets(selfhost!), ...wanted });
+      assert.equal(Object.keys(wanted).length, 5, "the example moves all five networks");
+      const rest = (m: ComposeModel) => Object.fromEntries(Object.entries(m.networks).map(([name, n]) => [name, { ...(n as object), ipam: null }]));
+      assert.deepEqual(rest(moved), rest(selfhost!), "nothing but the subnets changes");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("leaves Caddy out without the https profile", () => {
