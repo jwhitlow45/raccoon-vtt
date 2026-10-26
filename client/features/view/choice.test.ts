@@ -17,6 +17,7 @@ import {
   turnedSaid,
   turnRefused,
   turnsReason,
+  turnsReasons,
   viewButtonLabel,
   VIEW_CHOICES,
   viewSaid,
@@ -72,6 +73,21 @@ describe("the view choice (docs/design-v1-isometric-view.md 7, 8)", () => {
     assert.equal(turnsReason({ shown: TOP_DOWN, forcedBy: "fog", wanted: "isometric" }), "Fog works top-down. Isometric comes back when you switch tools.");
     assert.equal(turnsReason({ shown: TOP_DOWN, forcedBy: "fog", wanted: "topDown" }), "Turning works in Isometric.");
     assert.equal(turnsReason({ shown: isometric(1), forcedBy: null, wanted: "isometric" }), null);
+  });
+
+  test("the popover holds a place for every reason its turns can give under the tool, so a pick never resizes it", () => {
+    for (const forcedBy of [null, "build", "fog", "grid", "trap", "select"]) {
+      const holds = turnsReasons(forcedBy);
+      for (const shown of [TOP_DOWN, isometric(0), isometric(3)]) {
+        for (const wanted of ["topDown", "isometric"] as const) {
+          // A tool that shows Top-down never shows Isometric.
+          if (topDownLine(forcedBy) !== null && shown.kind === "isometric") continue;
+          const reason = turnsReason({ shown, forcedBy, wanted });
+          assert.ok(reason === null || holds.includes(reason), `${forcedBy} ${shown.kind} ${wanted}: "${reason}" has no place held`);
+        }
+      }
+    }
+    assert.deepEqual(turnsReasons(null), ["Turning works in Isometric."]);
   });
 
   test("the words shown are the design's", () => {

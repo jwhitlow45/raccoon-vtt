@@ -154,6 +154,17 @@ export function turnsReason(choice: { shown: View; forcedBy: string | null; want
 }
 
 /**
+ * Every reason turnsReason can give under this tool. A pick, or the
+ * scene's suggestion, moves between them while the popover is open, and
+ * the popover keeps the size it opened with, so it holds a place as tall
+ * as the tallest (ISO5-OPUS-9). A tool change closes the popover.
+ */
+export function turnsReasons(forcedBy: string | null): string[] {
+  const line = topDownLine(forcedBy);
+  return line === null ? [TURNING_WORKS_IN_ISOMETRIC] : [TURNING_WORKS_IN_ISOMETRIC, line];
+}
+
+/**
  * What I does (section 6.5): picks the other view than the one wanted. A
  * tool that shows Top-down keeps it showing, so the key says the tool's
  * line where the pick is Isometric. The view's own change is said by the

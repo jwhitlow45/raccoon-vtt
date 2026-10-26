@@ -20,6 +20,7 @@ import {
   previewViewSlot,
   sayView,
   turnsReason,
+  turnsReasons,
   suggestedKind,
   topDownTool,
   TURN_LEFT,
@@ -160,8 +161,9 @@ export function ViewVoice() {
  * it (components/Popover.tsx), so a pick of Isometric would add the turns
  * under "Scroll for more". With `steadyTurns` the turns stay in every view,
  * disabled in Top-down with their reason under them (choice.ts
- * turnsReason), which holds a tool's line too, so the panel keeps its size
- * and never shows an empty band (D-261026-12).
+ * turnsReason), which holds a tool's line too (D-261026-12). The reason's
+ * place is held in every view, so a pick never pushes it past the panel's
+ * foot or leaves the panel taller than what it holds (ISO5-OPUS-9).
  */
 export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boolean }) {
   const { choice } = props;
@@ -226,7 +228,22 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boo
           </span>
         </div>
       ) : null}
-      {reason ? <Help id={reasonId}>{reason}</Help> : null}
+      {props.steadyTurns ? (
+        // Every reason in one cell, the one that applies shown: the place is as tall as the tallest.
+        <div style={{ display: "grid" }}>
+          {turnsReasons(choice.forcedBy).map((line) =>
+            line === reason ? (
+              <Help key={line} id={reasonId} style={STACKED}>
+                {line}
+              </Help>
+            ) : (
+              <div key={line} aria-hidden="true" style={{ ...STACKED, visibility: "hidden" }}>
+                <Help>{line}</Help>
+              </div>
+            ),
+          )}
+        </div>
+      ) : null}
       <ViewVoice />
     </div>
   );
@@ -280,6 +297,8 @@ const ROW: CSSProperties = {
 };
 
 const RADIO_COVER: CSSProperties = { position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" };
+
+const STACKED: CSSProperties = { gridArea: "1 / 1", minWidth: 0 };
 
 /** The two share their line, and stack where one line cannot hold both. */
 const TURN_BUTTON: CSSProperties = { flex: "1 1 auto" };

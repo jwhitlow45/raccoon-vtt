@@ -106,6 +106,30 @@ function description(el: Locator): Promise<string> {
   });
 }
 
+/**
+ * Where the popover's turn row and its whole menu end. The popover keeps
+ * the size it opened with (components/Popover.tsx), so a pick that moves
+ * either leaves an empty band or pushes the reason under "Scroll for more"
+ * (ISO5-OPUS-9).
+ */
+async function menuFoot(menu: Locator): Promise<{ turns: number; body: number }> {
+  const bottom = async (el: Locator) => {
+    const b = await el.boundingBox();
+    assert.ok(b, "drawn");
+    return b.y + b.height;
+  };
+  return { turns: await bottom(menu.getByRole("button", { name: "Turn right", exact: true })), body: await bottom(menu.locator("[data-view-menu]")) };
+}
+
+async function sameFoot(menu: Locator, before: { turns: number; body: number }, what: string): Promise<void> {
+  const after = await menuFoot(menu);
+  assert.ok(Math.abs(after.turns - before.turns) <= 1, `${what}: the turn row ended at ${before.turns}, now ${after.turns}`);
+  assert.ok(Math.abs(after.body - before.body) <= 1, `${what}: the menu ended at ${before.body}, now ${after.body}`);
+  assert.equal(await menu.getByText("Scroll for more").count(), 0, `${what}: the popover says Scroll for more`);
+  const [scroll, client] = await menu.evaluate((el) => [(el as unknown as { scrollHeight: number }).scrollHeight, (el as unknown as { clientHeight: number }).clientHeight]);
+  assert.ok(scroll <= client + 1, `${what}: the popover scrolls, ${scroll} past ${client}`);
+}
+
 /** Pairs a display page with the room by a code from the DM. */
 async function pairDisplay(page: Page): Promise<void> {
   const res = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/display/code`, { headers: { Origin: server.origin } });
@@ -371,6 +395,14 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     assert.ok(await menu.getByRole("button", { name: "Turn right", exact: true }).isDisabled(), "no turns while the builder shows Top-down");
     assert.ok((await description(menu.getByRole("button", { name: "Turn right", exact: true }))).includes("The map builder works top-down."), "the tool's line says why");
     await shots.take(dm, "iso-dm-menu-builder");
+    // A pick of Top-down swaps the tool's line for the plain reason in the place the panel holds for the taller.
+    const opened = await menuFoot(menu);
+    await menu.getByRole("radio", { name: "Top-down", exact: true }).check();
+    await menu.getByText("Turning works in Isometric.").waitFor();
+    await sameFoot(menu, opened, "the builder's line, Top-down picked");
+    await menu.getByRole("radio", { name: "Isometric", exact: true }).check();
+    await menu.getByText("The map builder works top-down. Isometric comes back when you switch tools.").waitFor();
+    await sameFoot(menu, opened, "the builder's line, Isometric picked again");
     await closeMenu(dm, false);
     await dm.keyboard.press("e");
     await dm.locator("[data-toast]").filter({ hasText: "The map builder works top-down. Isometric comes back when you switch tools." }).first().waitFor();
@@ -390,7 +422,9 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await dm.keyboard.press("b");
     const flat = await openMenu(dm, false);
     await flat.getByRole("radio", { name: "Top-down", checked: true }).waitFor();
-    assert.equal(await flat.getByText(/Isometric comes back/).count(), 0, "no promise of Isometric");
+    // Its place in the popover is held, unseen and unread (ISO5-OPUS-9).
+    assert.equal(await flat.getByText(/Isometric comes back/).filter({ visible: true }).count(), 0, "no promise of Isometric");
+    assert.ok(!(await description(flat.getByRole("button", { name: "Turn right", exact: true }))).includes("Isometric comes back"), "nor one read with the turns");
     await closeMenu(dm, false);
     // And in the sheet a phone's layout opens.
     await dm.setViewportSize({ width: 390, height: 844 });
@@ -417,12 +451,15 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await menu.getByText("Turning works in Isometric.").waitFor();
     assert.ok((await description(left)).includes("Turning works in Isometric."), "its reason is its description");
     await shots.take(dm, "iso-dm-menu-top-down");
+    const opened = await menuFoot(menu);
     await dm.keyboard.press("ArrowDown");
     await untilShown(dm, "isometric 0");
     await waitFor("Turn left enabled", async () => ((await left.isEnabled()) ? true : null));
-    assert.equal(await menu.getByText("Turning works in Isometric.").count(), 0, "no reason once they turn");
+    assert.ok(!(await menu.getByText("Turning works in Isometric.").isVisible()), "no reason shows once they turn");
+    assert.ok(!(await description(left)).includes("Turning works in Isometric."), "nor describes them");
     // The popover keeps the size it opened with, and the turns' place, so they show without a scroll.
     for (const name of ["Turn left", "Turn right"]) assert.ok(await wholeInReach(menu.getByRole("button", { name, exact: true })), `${name} shows whole`);
+    await sameFoot(menu, opened, "opened in Top-down, Isometric picked");
     // Named by their words, with what turns in the description (D-261026-11).
     for (const [name, says] of [
       ["Turn left", "Turn the map left"],
@@ -438,6 +475,20 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await dm.keyboard.press("Escape");
     await menu.waitFor({ state: "detached" });
     await waitFor("focus back on the View button", () => viewButton(dm).evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement || null));
+
+    // Opened in Isometric, a pick of Top-down shows the reason whole in the same panel, with nothing to scroll.
+    const again = await openMenu(dm, false);
+    const fromIsometric = await menuFoot(again);
+    await again.getByRole("radio", { name: "Top-down", exact: true }).check();
+    await untilShown(dm, "top-down");
+    const reason = again.getByText("Turning works in Isometric.");
+    await reason.waitFor();
+    assert.ok(await wholeInReach(reason), "the reason shows whole");
+    await sameFoot(again, fromIsometric, "opened in Isometric, Top-down picked");
+    await shots.take(dm, "iso-dm-menu-isometric-then-top-down");
+    await again.getByRole("radio", { name: "Isometric", exact: true }).check();
+    await untilShown(dm, "isometric 3");
+    await closeMenu(dm, false);
 
     await dm.keyboard.press("?");
     const sheet = dm.getByRole("dialog", { name: /shortcuts/i });
