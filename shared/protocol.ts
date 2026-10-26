@@ -163,6 +163,10 @@ const imageRef = z.union([assetImage, iconImage]);
 const srdId = z.string().min(1).max(80).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "not an SRD monster id");
 
 const sizeSchema = z.enum(["tiny", "small", "medium", "large", "huge", "gargantuan", "custom"]);
+/** A scene's stored grid shape (Scene.gridShape). Squares are stored as no shape at all. */
+const gridShape = z.enum(["hexRows", "hexColumns"]);
+/** A grid shape as an op names it: "squares" stores no shape, so a square scene's stored form and its undo hash never change. */
+const gridShapeChoice = z.enum(["squares", "hexRows", "hexColumns"]);
 const tokenKind = z.enum(["pc", "npc", "monster", "object"]);
 const visibility = z.enum(["all", "dm"]);
 const lifeState = z.enum(["alive", "dying", "stable", "dead"]);
@@ -349,6 +353,8 @@ const settingsPatch = z.strictObject({
   critRule: z.enum(CRIT_RULES).optional(),
   /** Which creatures players see in the initiative order before their turn (docs/design-v1-combat-flow.md 11). */
   playersSeeOrder: z.enum(ORDER_REVEALS).optional(),
+  /** The grid new scenes start with, "squares" clearing it (docs/design-v1-hex-grids.md HX-D19). Only the new scene form reads it. */
+  newScenes: gridShapeChoice.optional(),
 });
 
 const fogShape = z.discriminatedUnion("kind", [
@@ -1111,12 +1117,17 @@ const savedEncounterPatch = z.strictObject({ name: name.optional(), monsters: sa
 /** How an area changes movement inside it (AreaTemplate.slows). */
 export const areaSlows = z.strictObject({ kind: z.enum(["difficult", "halfSpeed", "quarter"]), foes: z.literal(true).optional() });
 
-/** Bounded like a token's custom size, elevation and height, since it is copied from one. */
+/**
+ * Bounded like a token's custom size, elevation and height, since it is
+ * copied from one. `size` is the size it was cast from, never custom, read
+ * around the origin on hexes (docs/design-v1-hex-grids.md HX-D11).
+ */
 const areaFootprint = z.strictObject({
   w: z.number().min(0.5).max(20),
   h: z.number().min(0.5).max(20),
   elevation: feet,
   height: z.number().min(0).max(10_000),
+  size: monsterSize.optional(),
 });
 
 const templateFields = {
@@ -1775,6 +1786,8 @@ export const clientOps = [
       vision: sceneVision.optional(),
       /** A Universal VTT import's mark (Scene.gridFromFile). No patch takes it, so it stays with the scene. */
       gridFromFile: z.literal(true).optional(),
+      /** Absent makes squares, whatever the room's New scenes says: only the form reads that (docs/design-v1-hex-grids.md HX-D19). */
+      gridShape: gridShapeChoice.optional(),
     }),
   }),
   op("scene.update", {
@@ -1800,6 +1813,11 @@ export const clientOps = [
       blockMovement: z.boolean().optional(),
       /** Turning vision on turns the scene's fog on too, unless the same patch says otherwise (section 4.3.1). */
       vision: sceneVisionPatch.optional(),
+      /**
+       * The scene's grid shape, refused while the scene holds cell data or
+       * came with its own grid (docs/design-v1-hex-grids.md HX-D14).
+       */
+      gridShape: gridShapeChoice.optional(),
     }),
   }),
   /**
@@ -2481,6 +2499,7 @@ export const textSchemas = { name, shortText, notes, longText };
  * bounds and the Universal VTT import checks what it will send.
  */
 export const mapSchemas = {
+  gridShape,
   freeWall,
   freeWallId,
   wallFeature,

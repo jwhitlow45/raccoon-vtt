@@ -41,6 +41,7 @@ import {
 } from "#shared/protocol.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { phaseMap, phaseProblem } from "#shared/reducer/phases.ts";
+import { sceneHolds, standsWords } from "#shared/rules/grid.ts";
 
 /**
  * The shape of a stored room state, for validating an imported `room.json`
@@ -94,6 +95,8 @@ const settings = z.strictObject({
   critRule: z.enum(CRIT_RULES).default("rollTwice"),
   // Backups from before it showed players the whole order, which is what they keep (docs/design-v1-combat-flow.md 11.1).
   playersSeeOrder: z.enum(ORDER_REVEALS).default("all"),
+  // Backups from before hex grids have none, which reads as squares (docs/design-v1-hex-grids.md HX-D19).
+  newScenes: mapSchemas.gridShape.optional(),
 });
 
 const meta = z.strictObject({
@@ -150,6 +153,8 @@ const scene = z
     vision: mapSchemas.sceneVision.optional(),
     // Backups from before schema version 13 have none, and their imports keep the older sign (Scene.gridFromFile).
     gridFromFile: z.literal(true).optional(),
+    // Backups from before hex grids have none, which reads as squares (docs/design-v1-hex-grids.md section 7).
+    gridShape: mapSchemas.gridShape.optional(),
   })
   .refine(
     (s) =>
@@ -202,6 +207,8 @@ const chunk = z.strictObject({
   up: z.string().regex(new RegExp(`^[.aensw]{${STAIRS_CHARS}}$`)).optional(),
   // Difficult ground marks (docs/design-v1-movement.md 6.3), absent when there are none.
   rough: z.string().regex(new RegExp(`^[.d]{${ROUGH_CHARS}}$`)).optional(),
+  // The hex shape its cell data was written under, absent for squares (docs/design-v1-hex-grids.md HX-D14).
+  grid: mapSchemas.gridShape.optional(),
 });
 
 const label = z.strictObject({ id, rev, sceneId: id, x: coord, y: coord, text: shortText, size: z.number().min(0.1).max(20) });
@@ -214,7 +221,7 @@ const fogTile = z.strictObject({
   bits: z.string().length(684),
 });
 
-const fogDraft = z.strictObject({ sceneId: id, rev, ops: z.array(fogOpSchema).max(500) });
+const fogDraft = z.strictObject({ sceneId: id, rev, ops: z.array(fogOpSchema).max(500), grid: mapSchemas.gridShape.optional() });
 
 /**
  * Per-player vision (docs/design-v1-per-player-vision.md 6.7): who saw a
@@ -358,6 +365,8 @@ const template = z.strictObject({
       h: z.number().min(0.5).max(20),
       elevation: z.number().int().min(-100_000).max(100_000),
       height: z.number().min(0).max(10_000),
+      // The size a stationary emanation was cast from (docs/design-v1-hex-grids.md HX-D11), never custom.
+      size: sizeSchema.exclude(["custom"]).optional(),
     })
     .optional(),
   triggers: areaTriggersSchema.optional(),
@@ -752,6 +761,8 @@ const trap = z.strictObject({
       due: z.array(trapDue).max(LIMITS.trapDuePerTrap).optional(),
     })
     .optional(),
+  // The hex shape its zone was written under, absent for squares (docs/design-v1-hex-grids.md HX-D14).
+  grid: mapSchemas.gridShape.optional(),
 });
 
 /** The lines of the two trap logs (docs/design-v1-traps.md 6.3). */
@@ -873,6 +884,13 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
     return { ok: false, message: `${issue?.path.join(".") ?? ""}: ${issue?.message ?? "invalid"}` };
   }
   const state = parsed.data as RoomState;
+  // Cell data stands only on the shape it was written for, and a hex scene holds only what its phase supports
+  // (docs/design-v1-hex-grids.md HX-D14), as every op leaves a room. A backup made by hand can break that, and the
+  // rules would read its square keys as hexes.
+  for (const scene of Object.values(state.scenes).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    const found = sceneHolds(state, scene);
+    if (found) return { ok: false, message: `scenes.${scene.id}: ${standsWords(found, scene)}` };
+  }
   for (const character of Object.values(state.characters)) {
     if (character.ddbSync && syncAtAhead(character.ddbSync.at, now)) character.ddbSync = { ...character.ddbSync, at: new Date(now).toISOString() };
   }

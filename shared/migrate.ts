@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 24;
-export const OP_VERSION = 23;
+export const SNAPSHOT_VERSION = 25;
+export const OP_VERSION = 24;
 
 export type MigrationStep = {
   from: number;
@@ -174,6 +174,11 @@ export const snapshotMigrations: MigrationStep[] = [
       return { ...room, holders: room.holders ?? {}, exploredBy: room.exploredBy ?? {} };
     },
   },
+  // Hex grids, phase H1 (docs/design-v1-hex-grids.md section 7): a scene's `gridShape`, the room's `newScenes`, a
+  // stationary emanation's `size` and the stamps of a chunk, a trap and a fog draft are optional fields whose absence
+  // reads as squares, so a v24 room is a v25 room as it is. The number moves so that an older build, which would draw a
+  // hex scene as squares and read its hexes as squares, refuses a v25 snapshot instead of loading it.
+  { from: 24, to: 25, apply: (state) => state },
 ];
 
 /**
@@ -671,6 +676,26 @@ export const opMigrations: MigrationStep[] = [
     // version 24 snapshot and a version 23 op (runMigrations).
     from: 22,
     to: 23,
+    apply: (op) => op,
+  },
+  {
+    // Hex grids, phase H1 (docs/design-v1-hex-grids.md section 7): a
+    // `scene.create` and a `scene.update` may carry `gridShape`, a
+    // `room.update` the setting `newScenes`, and an area's footprint its
+    // `size`, all new optional fields, so no stored op changes shape and
+    // the step is the identity. No older op ever met a hex scene, and the
+    // server refuses on one every op whose rules are not hex yet
+    // (HX-D20), so no rule needs a gate below this version.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 24, and the shutdown writes version 25 snapshots
+    // (snapshotMigrations). Reload every page left open: there is no
+    // client version check, and an old page would treat a hex scene as
+    // squares. Rollback: restore the backup taken before the deploy, as
+    // for any snapshot version bump. An older build refuses a version 25
+    // snapshot and a version 24 op (runMigrations).
+    from: 23,
+    to: 24,
     apply: (op) => op,
   },
 ];

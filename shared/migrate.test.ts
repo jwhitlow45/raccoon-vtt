@@ -1223,9 +1223,11 @@ describe("class resources from D&D Beyond: op version 22, snapshot version 23 (d
 });
 
 describe("per-player vision: op version 23, snapshot version 24 (docs/design-v1-per-player-vision.md 6.7)", () => {
-  test("are the versions now", () => {
-    assert.equal(OP_VERSION, 23);
-    assert.equal(SNAPSHOT_VERSION, 24);
+  test("brought op version 23 and snapshot version 24", () => {
+    assert.ok(OP_VERSION >= 23);
+    assert.ok(SNAPSHOT_VERSION >= 24);
+    assert.ok(opMigrations.some((s) => s.from === 22 && s.to === 23));
+    assert.ok(snapshotMigrations.some((s) => s.from === 23 && s.to === 24));
   });
 
   test("a version 23 room gets an empty holder list and holder layers, and nothing else about it changes", () => {
@@ -1255,5 +1257,39 @@ describe("per-player vision: op version 23, snapshot version 24 (docs/design-v1-
   test("a version 23 op and a version 24 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 23, 22, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 24, 23, snapshotMigrations), /down/);
+  });
+});
+
+describe("hex grids, phase H1: op version 24, snapshot version 25 (docs/design-v1-hex-grids.md section 7)", () => {
+  test("are the versions now", () => {
+    assert.equal(OP_VERSION, 24);
+    assert.equal(SNAPSHOT_VERSION, 25);
+  });
+
+  test("the snapshot step is the identity, a room with a hex scene, its default and every stamp included", () => {
+    const plain = room();
+    assert.equal(runMigrations(plain, 24, 25, snapshotMigrations), plain);
+    assert.equal(migrateSnapshot(plain, 24), plain);
+    const hex = room({
+      meta: { ...room().meta, settings: { ...room().meta.settings, newScenes: "hexRows" } },
+      scenes: { s1: { ...room().scenes.s1!, gridShape: "hexColumns" }, s2: room().scenes.s2! },
+      templates: { a1: template("a1", { shape: "emanation", footprint: { w: 2, h: 2, elevation: 0, height: 10, size: "large" } }) },
+    });
+    assert.equal(runMigrations(hex, 24, 25, snapshotMigrations), hex);
+  });
+
+  test("the op step is the identity, a create, a switch, a default and a stationary footprint included", () => {
+    const ops: unknown[] = [
+      { t: "scene.create", scene: { id: "s9", name: "Mat", bounds: { w: 30, h: 20 }, gridShape: "hexRows" } },
+      { t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } },
+      { t: "room.update", settings: { newScenes: "hexColumns" } },
+      { t: "log.chat", text: "hi" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 23, 24, opMigrations), op);
+  });
+
+  test("a version 24 op and a version 25 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 24, 23, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 25, 24, snapshotMigrations), /down/);
   });
 });

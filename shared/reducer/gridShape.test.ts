@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import type { RoomState, Viewer } from "../model.ts";
+import { opSchema, type Op, type RestoreEntry, type TrapInput } from "../protocol.ts";
+import { applyOp, type ApplyResult } from "../reducer.ts";
+import { OWN_SQUARE_GRID } from "../rules/grid.ts";
+import { env, room, template, token, trap } from "../testutil.ts";
+
+/*
+ * A scene's grid shape in the reducer (docs/design-v1-hex-grids.md HX-D14
+ * and HX-D19): a new scene's shape, the room's default and the switch.
+ */
+
+const A: Viewer = { memberId: "dmA", role: "dm" };
+
+let seq = 1;
+function step(state: RoomState, op: Op, who: Viewer = A): ApplyResult {
+  return applyOp(state, opSchema.parse(op), who, env(seq++));
+}
+
+function run(state: RoomState, op: Op, who: Viewer = A): { state: RoomState; inverse: RestoreEntry[]; global: boolean } {
+  const r = step(state, op, who);
+  assert.ok(r.ok, `${op.t}: ${r.ok ? "" : `${r.code}: ${r.message}`}`);
+  return { state: r.state, inverse: r.inverse ?? [], global: r.global };
+}
+
+function refusal(state: RoomState, op: Op, who: Viewer = A): string {
+  const r = step(state, op, who);
+  assert.ok(!r.ok, `${op.t} should be refused`);
+  return r.message;
+}
+
+const toHex = (sceneId = "s1", shape: "hexRows" | "hexColumns" | "squares" = "hexRows"): Op => ({ t: "scene.update", sceneId, patch: { gridShape: shape } });
+const undo = (entries: RestoreEntry[]): Op => ({ t: "sys.restore", entries, from: "undo", deps: true });
+
+function trapInput(id: string): TrapInput {
+  const { rev: _rev, state: _state, rig, ...rest } = trap(id);
+  return { ...rest, rig: rig! } as TrapInput;
+}
+
+const wall = { id: "w00000000001", a: [2, 2] as [number, number], b: [5, 2] as [number, number], f: { kind: "wall" as const } };
+
+describe("a new scene's shape (HX-D19)", () => {
+  const mat = (extra: object = {}): Op => ({ t: "scene.create", scene: { id: "mat", name: "Mat", bounds: { w: 30, h: 20 }, ...extra } });
+
+  test("a create stores the shape it names, and squares as none", () => {
+    assert.equal(run(room(), mat({ gridShape: "hexRows" })).state.scenes.mat!.gridShape, "hexRows");
+    assert.equal(run(room(), mat({ gridShape: "hexColumns" })).state.scenes.mat!.gridShape, "hexColumns");
+    assert.ok(!("gridShape" in run(room(), mat({ gridShape: "squares" })).state.scenes.mat!));
+    assert.ok(!("gridShape" in run(room(), mat()).state.scenes.mat!));
+  });
+
+  test("a create without a shape makes squares in a room whose New scenes is hexes: only the form reads it", () => {
+    const hexRoom = room({ meta: { ...room().meta, settings: { ...room().meta.settings, newScenes: "hexRows" } } });
+    assert.equal(run(hexRoom, mat()).state.scenes.mat!.gridShape, undefined);
+  });
+
+  test("a scene with its own square grid from its file is never made on hexes", () => {
+    assert.equal(refusal(room(), mat({ gridShape: "hexRows", gridFromFile: true })), OWN_SQUARE_GRID);
+    const map = { assetId: "a1", widthPx: 700, heightPx: 700, cellPx: 70, originPx: { x: -20, y: 0 } };
+    assert.equal(refusal(room(), mat({ gridShape: "hexColumns", map })), OWN_SQUARE_GRID);
+    assert.ok(run(room(), mat({ gridShape: "hexColumns", map: { ...map, originPx: { x: 20, y: 0 } } })).state.scenes.mat!.gridShape);
+  });
+});
+
+describe("the room's New scenes (D-261025-10)", () => {
+  test("a patch stores a hex shape and squares clears it, leaving the other settings as they were", () => {
+    const set = run(room(), { t: "room.update", settings: { newScenes: "hexColumns" } });
+    assert.equal(set.state.meta.settings.newScenes, "hexColumns");
+    assert.ok(set.global, "a settings change reprojects, as every one does");
+    const cleared = run(set.state, { t: "room.update", settings: { newScenes: "squares" } }).state.meta.settings;
+    assert.ok(!("newScenes" in cleared));
+    assert.deepEqual(cleared, room().meta.settings);
+  });
+
+  test("a settings patch without it keeps it", () => {
+    const set = run(room(), { t: "room.update", settings: { newScenes: "hexRows" } }).state;
+    assert.equal(run(set, { t: "room.update", settings: { diagonal: "fiveTen" } }).state.meta.settings.newScenes, "hexRows");
+  });
+});
+
+describe("the shape switch (HX-D14)", () => {
+  test("an empty scene switches, to either hex shape and back, and squares stores no shape", () => {
+    const rows = run(room(), toHex()).state;
+    assert.equal(rows.scenes.s1!.gridShape, "hexRows");
+    const columns = run(rows, toHex("s1", "hexColumns")).state;
+    assert.equal(columns.scenes.s1!.gridShape, "hexColumns");
+    const back = run(columns, toHex("s1", "squares")).state;
+    assert.ok(!("gridShape" in back.scenes.s1!));
+    assert.equal(run(room(), toHex("s1", "squares")).state.scenes.s1!.gridShape, undefined);
+  });
+
+  test("switching with difficult ground and two traps is refused, naming them in the scene's cell word", () => {
+    let state = run(room(), { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true }).state;
+    state = run(state, { t: "trap.create", trap: trapInput("t1") }).state;
+    state = run(state, { t: "trap.create", trap: trapInput("t2") }).state;
+    assert.equal(refusal(state, toHex()), "This scene has difficult ground and 2 traps on its squares, which can't stand on hexes. Remove them to change the grid.");
+    assert.ok(run(state, toHex("s2")).state.scenes.s2!.gridShape, "the other scene is free to switch");
+  });
+
+  test("switching with painted ground, walls on the grid lines, heights or stairs is refused", () => {
+    for (const op of [
+      { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,1"] },
+      { t: "build.edge", sceneId: "s1", edges: [{ key: "1,1,n", feature: { kind: "wall" } }] },
+      { t: "build.height", sceneId: "s1", cells: ["1,1"], height: 10 },
+      { t: "build.stairs", sceneId: "s1", cells: ["1,1"], up: "n" },
+    ] as Op[]) {
+      assert.match(refusal(run(room(), op).state, toHex()), /^This scene has (painted ground|walls and doors|heights|stairs) on its squares/, op.t);
+    }
+  });
+
+  test("in H1, a free wall, an attach link or a squeezed token keeps a scene off hexes too", () => {
+    const walled = run(room(), { t: "build.walls", sceneId: "s1", put: [wall] }).state;
+    assert.equal(refusal(walled, toHex()), "This scene has walls and doors on its squares, which can't stand on hexes. Remove them to change the grid.");
+    const ridden = room({ tokens: { horse: token("horse", { size: "large", x: 4, y: 4 }), bree: token("bree", { x: 4, y: 4, attached: { to: "horse", kind: "ride" } }) } });
+    assert.equal(refusal(ridden, toHex()), "This scene has an attached creature on its squares, which can't stand on hexes. Remove them to change the grid.");
+    const squeezed = room({ tokens: { ogre: token("ogre", { size: "large", squeeze: true }) } });
+    assert.match(refusal(squeezed, toHex()), /a squeezing creature/);
+  });
+
+  test("a fog draft of rects and strokes goes along, and the switch's undo is accepted", () => {
+    let state = run(room(), {
+      t: "fog.draft",
+      sceneId: "s1",
+      add: [
+        { id: "f1", mode: "reveal", shape: { kind: "rect", x: 1, y: 1, w: 4, h: 4 } },
+        { id: "f2", mode: "hide", shape: { kind: "stroke", points: [0, 0, 6, 6], width: 1 } },
+      ],
+    }).state;
+    const switched = run(state, toHex());
+    state = switched.state;
+    assert.equal(state.scenes.s1!.gridShape, "hexRows");
+    assert.equal(run(state, undo(switched.inverse)).state.scenes.s1!.gridShape, undefined);
+  });
+
+  test("a draft holding Reveal room's cells keeps the scene on squares", () => {
+    const state = run(room(), { t: "fog.draft", sceneId: "s1", add: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1", "2,1"] } }] }).state;
+    assert.match(refusal(state, toHex()), /Reveal room in its fog draft/);
+  });
+
+  test("a stationary emanation goes through a switch, rows to columns, as it was: it holds a size, never cell keys", () => {
+    const area = template("a1", { shape: "emanation", size: 10, origin: { x: 5, y: 5, z: 0 }, footprint: { w: 2, h: 2, elevation: 0, height: 10, size: "large" } });
+    const rows = room({ scenes: { ...room().scenes, s1: { ...room().scenes.s1!, gridShape: "hexRows" } }, templates: { a1: area } });
+    const columns = run(rows, toHex("s1", "hexColumns")).state;
+    assert.deepEqual(columns.templates.a1, area);
+  });
+});

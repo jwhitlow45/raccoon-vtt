@@ -1,7 +1,8 @@
 import { keys } from "../keys.ts";
-import type { Encounter, MemberId, PathStop, Scene, SceneVision, TurnStart } from "../model.ts";
+import type { Encounter, GridShape, MemberId, PathStop, RoomSettings, Scene, SceneVision, TurnStart } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
+import { OWN_SQUARE_GRID, cameWithGrid, gridOfShape, switchRefusal } from "../rules/grid.ts";
 import { setGridWithPhases, setMapWithPhases, withPhases } from "./phases.ts";
 import { forgetExplored, forgetHolder } from "./map.ts";
 import { invalid, gone, type Tx } from "./tx.ts";
@@ -12,8 +13,22 @@ export function roomUpdate(tx: Tx, op: OpOf<"room.update">): void {
   tx.write(keys.meta, {
     ...meta,
     name: op.name ?? meta.name,
-    settings: op.settings ? { ...meta.settings, ...op.settings } : meta.settings,
+    settings: op.settings ? patchedSettings(meta.settings, op.settings) : meta.settings,
   });
+}
+
+/** Settings after a patch. New scenes on "squares" is stored as no setting, as every room from before it has. */
+function patchedSettings(settings: RoomSettings, patch: NonNullable<OpOf<"room.update">["settings"]>): RoomSettings {
+  const { newScenes, ...rest } = patch;
+  const next: RoomSettings = { ...settings, ...rest };
+  if (newScenes === "squares") delete next.newScenes;
+  else if (newScenes !== undefined) next.newScenes = newScenes;
+  return next;
+}
+
+/** A shape as an op names it, stored: squares as no shape at all. */
+function storedShape(choice: "squares" | GridShape): GridShape | undefined {
+  return choice === "squares" ? undefined : choice;
 }
 
 export function roomSetPlayerScene(tx: Tx, op: OpOf<"room.setPlayerScene">): void {
@@ -184,6 +199,12 @@ export function sceneCreate(tx: Tx, op: OpOf<"scene.create">): void {
     if (input.vision.on && input.fogEnabled === undefined) scene.fogEnabled = true;
   }
   if (input.gridFromFile) scene.gridFromFile = true;
+  const shape = input.gridShape === undefined ? undefined : storedShape(input.gridShape);
+  if (shape !== undefined) {
+    // A Universal VTT scene's walls stand in its file's squares (docs/design-v1-hex-grids.md HX-D13).
+    if (cameWithGrid(scene)) throw invalid(OWN_SQUARE_GRID);
+    scene.gridShape = shape;
+  }
   tx.write(keys.scene(scene.id), scene);
 }
 
@@ -208,6 +229,14 @@ export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
     if (autoWallsOf(scene) !== p.autoWalls) next.wallsVersion = scene.wallsVersion + 1;
   }
   if (p.blockMovement !== undefined) next.blockMovement = p.blockMovement;
+  if (p.gridShape !== undefined) {
+    // Cell data belongs to the shape it was written under, so the scene must hold none to change (HX-D14).
+    const shape = storedShape(p.gridShape);
+    const refusal = switchRefusal(tx.state, scene, gridOfShape(shape));
+    if (refusal !== null) throw invalid(refusal);
+    if (shape === undefined) delete next.gridShape;
+    else next.gridShape = shape;
+  }
   if (p.vision !== undefined) {
     next.vision = patchedVision(scene.vision, p.vision);
     // Turning vision on turns fog on, since only fog remembers what the party explored (section 4.3.1). The DM can turn it

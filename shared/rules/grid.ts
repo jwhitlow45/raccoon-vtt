@@ -295,6 +295,11 @@ export function switchRefusal(state: Holds, scene: Pick<Scene, "id" | "gridShape
  * difficult ground on squares can't stand on this scene's hexes."
  */
 export function restoreRefusal(from: "undo" | "redo", found: { held: ShapeHeld[]; from: GridShape | "squares" }, scene: Pick<Scene, "gridShape">): string {
+  return `Can't ${from} that: ${standsWords(found, scene)}.`;
+}
+
+/** "difficult ground on squares can't stand on this scene's hexes": what holds where, as the restore and the import say it. */
+export function standsWords(found: { held: ShapeHeld[]; from: GridShape | "squares" }, scene: Pick<Scene, "gridShape">): string {
   const shape = shapeName(sceneGrid(scene));
-  return `Can't ${from} that: ${heldList(found.held)} on ${shapeWords(found.from, shape)} can't stand on this scene's ${shapeWords(shape, found.from)}.`;
+  return `${heldList(found.held)} on ${shapeWords(found.from, shape)} can't stand on this scene's ${shapeWords(shape, found.from)}`;
 }
