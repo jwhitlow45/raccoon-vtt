@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { cornerAt, hexCenter, hexCorners, HEX_R, sceneHexes, type HexGrid } from "#shared/rules/hex.ts";
 import { rng } from "#shared/testutil.ts";
 import { isometric, toWorld, type ViewPoint } from "../../lib/view.ts";
-import { hexesInView } from "./hexSpans.ts";
+import { hexesInView, hexLinesInView, hexRowSpans, strokeHexLines } from "./hexSpans.ts";
 
 /** Whether a point lies inside a convex polygon, either winding. */
 function inside(poly: readonly { x: number; y: number }[], p: { x: number; y: number }): boolean {
@@ -79,3 +79,83 @@ function nearEdge(poly: readonly { x: number; y: number }[], p: { x: number; y: 
   }
   return false;
 }
+
+describe("hex lines (hex grids HX-D18)", () => {
+  /** A sink that keeps each side drawn, its ends rounded so one side drawn from either hex is one key. */
+  function sides() {
+    const out: string[] = [];
+    let at = { x: 0, y: 0 };
+    const key = (p: { x: number; y: number }) => `${p.x.toFixed(6)},${p.y.toFixed(6)}`;
+    return {
+      out,
+      moveTo(x: number, y: number) {
+        at = { x, y };
+      },
+      lineTo(x: number, y: number) {
+        const a = key(at);
+        const b = key({ x, y });
+        out.push(a < b ? `${a}|${b}` : `${b}|${a}`);
+        at = { x, y };
+      },
+    };
+  }
+
+  /** A hex's six sides as keys, from its corners worked out by the rules (hex.ts cornerAt), to 1/64 of a cell. */
+  function hexSides(g: HexGrid, h: { col: number; row: number }): string[] {
+    const pts = hexCorners(g, h).map((c) => cornerAt(g, c));
+    const near = (p: { x: number; y: number }) => `${(Math.round(p.x * 64) / 64).toFixed(6)},${(Math.round(p.y * 64) / 64).toFixed(6)}`;
+    return pts.map((p, i) => {
+      const q = pts[(i + 1) % 6]!;
+      const a = near(p);
+      const b = near(q);
+      return a < b ? `${a}|${b}` : `${b}|${a}`;
+    });
+  }
+
+  test("each side of each hex in view is drawn once, the shared ones by one hex, rows and columns alike", () => {
+    const random = rng(26118);
+    for (const orient of ["rows", "columns"] as const) {
+      const g: HexGrid = { shape: "hex", orient };
+      for (let round = 0; round < 30; round++) {
+        const bounds = { w: 3 + Math.floor(random() * 30), h: 3 + Math.floor(random() * 30) };
+        const x0 = random() * bounds.w;
+        const y0 = random() * bounds.h;
+        const view = [
+          { x: x0, y: y0 },
+          { x: x0 + 1 + random() * 12, y: y0 },
+          { x: x0 + 1 + random() * 12, y: y0 + 1 + random() * 12 },
+          { x: x0, y: y0 + 1 + random() * 12 },
+        ];
+        const spans = hexRowSpans(g, bounds, view);
+        const hexes = hexesInView(g, bounds, view);
+        const sink = sides();
+        const count = strokeHexLines(g, spans, sink);
+        assert.equal(count, sink.out.length);
+        assert.equal(new Set(sink.out).size, sink.out.length, `${orient} round ${round}: a side drawn twice`);
+        // Drawn from centers, a side lies within a hair of the rules' rounded corners: snap both to 1/64 to compare.
+        const snapped = new Set(sink.out.map((k) => k.split("|").map((p) => p.split(",").map((v) => (Math.round(Number(v) * 64) / 64).toFixed(6)).join(",")).sort().join("|")));
+        const wanted = new Set(hexes.flatMap((h) => hexSides(g, h)));
+        assert.deepEqual([...snapped].sort(), [...wanted].sort(), `${orient} round ${round}: the sides of the hexes in view, no more`);
+      }
+    }
+  });
+
+  test("a 30 by 20 hex rows mat draws 22 rows, 30 hexes in even rows and 29 in odd, and its columns mirror it", () => {
+    const whole = (b: { w: number; h: number }) => [{ x: -1, y: -1 }, { x: b.w + 1, y: -1 }, { x: b.w + 1, y: b.h + 1 }, { x: -1, y: b.h + 1 }];
+    const rows = hexRowSpans({ shape: "hex", orient: "rows" }, { w: 30, h: 20 }, whole({ w: 30, h: 20 }));
+    assert.equal(rows.length, 22);
+    for (const s of rows) assert.deepEqual([s.c0, s.c1], [0, s.r % 2 === 0 ? 29 : 28], `row ${s.r}`);
+    const columns = hexRowSpans({ shape: "hex", orient: "columns" }, { w: 20, h: 30 }, whole({ w: 20, h: 30 }));
+    assert.deepEqual(columns, rows);
+  });
+
+  test("lines skip while a hex is under 6 px, as a 200 by 200 scene fitted on a phone is, and draw from 6 px", () => {
+    const g: HexGrid = { shape: "hex", orient: "rows" };
+    const bounds = { w: 200, h: 200 };
+    const corners = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 200 }, { x: 0, y: 200 }];
+    // A 390 px wide phone fits 200 cells at under 2 px a cell.
+    assert.equal(hexLinesInView(g, bounds, { corners, pxPerCell: 390 / 200 }, sides()), 0);
+    assert.equal(hexLinesInView(g, bounds, { corners, pxPerCell: 5.99 }, sides()), 0);
+    assert.ok(hexLinesInView(g, bounds, { corners: corners.map((p) => ({ x: p.x / 4, y: p.y / 4 })), pxPerCell: 6 }, sides()) > 0);
+  });
+});

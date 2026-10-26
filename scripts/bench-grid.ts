@@ -7,8 +7,15 @@
  * `capRoom`'s walls). 9.3 budgets one placed recompute at 8 ms on a phone,
  * so a laptop's time should sit well under it. A hex scene holds no walls
  * until phase H2, so its rows are open. The preview rows sample 4 a cell
- * side, as an area being aimed does. Hex lines on the board are the board's
- * own rows (HX-3).
+ * side, as an area being aimed does.
+ *
+ * The board's hex lines (HX-D18, HX-3) add three rows: the path a redraw
+ * builds for what a 1440 by 900 canvas shows of the largest hex scene, at
+ * fit (under 6 px a hex, so none), at 40 px a cell, and at 6 px a cell,
+ * the most hexes a view ever draws lines for. They time the walk of the
+ * hexes in view and the path's points, which is this code's part of a
+ * frame. The stroke itself is the canvas's, and the isometric bench
+ * (bench-iso.ts) times whole frames.
  *
  * Beside them, two rows review HX2-ASTRA-03 and 04 asked for: a 1,000 ft
  * emanation, whose reach once walked every hex within its steps before
@@ -28,6 +35,7 @@ import { hexPiece, routeWalk } from "../shared/rules/route.ts";
 import { token } from "../shared/testutil.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
 import { capRoom } from "./bench-vision.ts";
+import { hexLinesInView } from "../client/canvas/layers/hexSpans.ts";
 
 const RUNS = 21;
 const BUDGET_MS = 8;
@@ -103,6 +111,19 @@ function walkRow(): Row {
   });
 }
 
+/** The hex lines a 1440 by 900 canvas at `px` a cell shows of a 200 by 200 hex rows scene, from its middle, into a sink that only counts. */
+function linesRow(name: string, px: number): Row {
+  const g = gridOfShape("hexRows") as HexGrid;
+  const w = 1440 / px;
+  const h = 900 / px;
+  const x0 = 100 - w / 2;
+  const y0 = 100 - h / 2;
+  const corners = [{ x: x0, y: y0 }, { x: x0 + w, y: y0 }, { x: x0 + w, y: y0 + h }, { x: x0, y: y0 + h }];
+  let points = 0;
+  const sink = { moveTo: () => void points++, lineTo: () => void points++ };
+  return timed(name, () => hexLinesInView(g, { w: 200, h: 200 }, { corners, pxPerCell: px }, sink));
+}
+
 export function runGridBench(): Row[] {
   return [
     row("Squares, walled (9.3's worst case)", SQUARES, true),
@@ -113,6 +134,9 @@ export function runGridBench(): Row[] {
     emanationRow("Hex rows, a 1,000 ft emanation, 200 by 200", 200, 200, 5),
     emanationRow("Hex rows, a 1,000 ft emanation at 1 ft a cell, 20 by 20", 20, 20, 1),
     walkRow(),
+    linesRow("Hex lines, 200 by 200, a 1440 by 900 canvas at fit (4.5 px a cell)", 900 / 200),
+    linesRow("Hex lines, 200 by 200, a 1440 by 900 canvas at 40 px a cell", 40),
+    linesRow("Hex lines, 200 by 200, a 1440 by 900 canvas at 6 px a cell", 6),
   ];
 }
 
@@ -120,7 +144,7 @@ export function formatGridBench(rows: readonly Row[]): string {
   const lines = [
     `Coverage of a 1,000 ft line at 37° on a 200 by 200 scene, then the emanation and walk rows, ${RUNS - 1} timed runs, median / max ms, against 9.3's ${BUDGET_MS} ms on a phone.`,
     "",
-    "row | cells, hexes or spots | ms (median / max)",
+    "row | cells, hexes, spots or sides | ms (median / max)",
     "--- | --- | ---",
     ...rows.map((r) => `${r.row} | ${r.covered} | ${r.median.toFixed(2)} / ${r.max.toFixed(2)}`),
   ];

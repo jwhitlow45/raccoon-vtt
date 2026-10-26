@@ -1,6 +1,8 @@
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Image as KImage, Layer, Rect, Shape } from "react-konva";
+import type Konva from "konva";
 import type { Scene } from "#shared/model.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { phasePreloads, usePhasePreload } from "../../features/phases/preload.ts";
 import { mapSwap, sameShown, type ShownMap } from "../../features/phases/swap.ts";
 import type { AssetVariant } from "../../lib/api.ts";
@@ -10,6 +12,7 @@ import { mapFailureText } from "../../state/sceneLoad.ts";
 import { useAssets, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useMapProgressStore } from "../mapProgress.ts";
 import { mapReadable, useMapImage, type MapSource } from "../useImage.ts";
+import { hexLinesInView } from "./hexSpans.ts";
 import { treeMap, type SharedMap } from "./sharedMap.ts";
 
 /**
@@ -37,7 +40,8 @@ function sameMapInputs(a: { scene: Scene; variant: AssetVariant }, b: { scene: S
     a.scene.background === b.scene.background &&
     a.scene.map === b.scene.map &&
     a.scene.phases === b.scene.phases &&
-    a.scene.grid === b.scene.grid
+    a.scene.grid === b.scene.grid &&
+    a.scene.gridShape === b.scene.gridShape
   );
 }
 
@@ -191,10 +195,19 @@ function MapImage(props: {
 /**
  * The whole grid is one shape with one path, so it is one draw call however
  * large the scene. Lines keep their width on screen at any zoom.
+ *
+ * A hex scene's lines (docs/design-v1-hex-grids.md HX-D18) are drawn in the
+ * same redraws, but only the hexes in view and only while a hex is at
+ * least HEX_LINES_MIN_PX across, so a pan costs the hexes on screen and not
+ * the 46,000 of the largest scene. What is in view is read from the
+ * shape's own transform as it draws, the camera's and in Isometric the
+ * ground's turn and squash, so both views draw the very same hexes, each
+ * through its own projection.
  */
 function Grid(props: { scene: Scene }) {
   const { w, h } = props.scene.bounds;
   const { color, opacity, lineWidth } = props.scene.grid;
+  const grid = sceneGrid(props.scene);
   return (
     <Shape
       stroke={color || "#ffffff"}
@@ -204,6 +217,12 @@ function Grid(props: { scene: Scene }) {
       perfectDrawEnabled={false}
       sceneFunc={(ctx, shape) => {
         ctx.beginPath();
+        if (grid.shape === "hex") {
+          const view = groundInView(shape);
+          if (view) hexLinesInView(grid, props.scene.bounds, view, ctx);
+          ctx.strokeShape(shape);
+          return;
+        }
         for (let x = 0; x <= w; x++) {
           ctx.moveTo(x, 0);
           ctx.lineTo(x, h);
@@ -216,5 +235,22 @@ function Grid(props: { scene: Scene }) {
       }}
     />
   );
+}
+
+/**
+ * Where a shape's stage shows the ground: the stage's canvas corners taken
+ * back through the shape's absolute transform, and the screen pixels one
+ * cell takes there, the transform's area scale, so a squashed isometric
+ * ground counts by both its axes.
+ */
+function groundInView(shape: Konva.Shape): { corners: { x: number; y: number }[]; pxPerCell: number } | null {
+  const stage = shape.getStage();
+  if (!stage) return null;
+  const t = shape.getAbsoluteTransform();
+  const [a = 1, b = 0, c = 0, d = 1] = t.getMatrix();
+  const back = t.copy().invert();
+  const W = stage.width();
+  const H = stage.height();
+  return { corners: [back.point({ x: 0, y: 0 }), back.point({ x: W, y: 0 }), back.point({ x: W, y: H }), back.point({ x: 0, y: H })], pxPerCell: Math.sqrt(Math.abs(a * d - b * c)) };
 }
 
