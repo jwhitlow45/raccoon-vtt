@@ -1,7 +1,7 @@
 import type { JournalPage, Member, Pin } from "#shared/model.ts";
 import { MAX_NAME, type PinInput } from "#shared/protocol.ts";
 import { viewToScreen, type Camera, type Point } from "../../lib/camera.ts";
-import { TOP_DOWN, toView } from "../../lib/view.ts";
+import { TOP_DOWN, toView, type View, type ViewPoint } from "../../lib/view.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { cleanLabelText } from "../builder/labelEdit.ts";
@@ -43,12 +43,26 @@ export function pinOutline(steps = 20): number[] {
   return points;
 }
 
+/**
+ * Where pins stand in the board's view: the view, and the drawn ground
+ * under a point in cells of height (docs/design-v1-isometric-view.md 5.3,
+ * a pin upright at its drawn ground). Top-down's when left out.
+ */
+export type PinView = { view: View; ground: (x: number, y: number) => number };
+
+const FLAT: PinView = { view: TOP_DOWN, ground: () => 0 };
+
+/** A pin's tip in view units: on its point, at the drawn ground under it in Isometric. */
+export function pinTip(pin: Pick<Pin, "x" | "y">, shown: PinView = FLAT): ViewPoint {
+  return toView(shown.view, pin, shown.view.kind === "isometric" ? shown.ground(pin.x, pin.y) : 0);
+}
+
 /** The pin under a screen point, the nearest when two overlap, or null. Pins are drawn at a fixed screen size, so this works in pixels. */
-export function pinAt<P extends Pick<Pin, "id" | "x" | "y">>(pins: readonly P[], camera: Camera, screen: Point): P | null {
+export function pinAt<P extends Pick<Pin, "id" | "x" | "y">>(pins: readonly P[], camera: Camera, screen: Point, shown: PinView = FLAT): P | null {
   let best: P | null = null;
   let bestDist = HIT_RADIUS_PX;
   for (const pin of pins) {
-    const tip = viewToScreen(camera, toView(TOP_DOWN, pin));
+    const tip = viewToScreen(camera, pinTip(pin, shown));
     const d = Math.hypot(screen.x - tip.x, screen.y - (tip.y - PIN_HEIGHT_PX / 2));
     if (d <= bestDist) {
       best = pin;
@@ -63,10 +77,10 @@ export function pinAt<P extends Pick<Pin, "id" | "x" | "y">>(pins: readonly P[],
  * finds it (PinLayer.tsx useTapPin), or null. The height readout yields to
  * it, since the pin answers that tap itself.
  */
-export function pinUnder(view: { pins: Readonly<Record<string, Pin | undefined>> } | null, sceneId: string, camera: Camera, screen: Point): Pin | null {
+export function pinUnder(view: { pins: Readonly<Record<string, Pin | undefined>> } | null, sceneId: string, camera: Camera, screen: Point, shown: PinView = FLAT): Pin | null {
   if (!view) return null;
   const pins = Object.values(view.pins).filter((pin): pin is Pin => !!pin && pin.sceneId === sceneId);
-  return pinAt(pins, camera, screen);
+  return pinAt(pins, camera, screen, shown);
 }
 
 /**

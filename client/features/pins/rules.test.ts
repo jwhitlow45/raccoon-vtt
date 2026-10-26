@@ -3,7 +3,9 @@ import { describe, test } from "node:test";
 import type { JournalPage, Pin } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { editDraft, saveAnswered, saveSent, saveState } from "../journal/pendingSave.ts";
-import { dmOnlyPin, PIN_HEIGHT_PX, pinAt, pinAudience, pinCommit, pinDraftOf, pinOutline, pinSaveAnswer, pinTapCounts, pinToolTap, pinUnder, withDmOnly, withPage, withPageGone } from "./rules.ts";
+import { isometric, toView } from "../../lib/view.ts";
+import { viewToScreen } from "../../lib/camera.ts";
+import { dmOnlyPin, PIN_HEIGHT_PX, pinAt, pinTip, pinAudience, pinCommit, pinDraftOf, pinOutline, pinSaveAnswer, pinTapCounts, pinToolTap, pinUnder, withDmOnly, withPage, withPageGone } from "./rules.ts";
 
 const page = (id: string, title: string, access: JournalPage["access"]): JournalPage => ({ id, rev: 0, title, access, blocks: [] });
 const PAGES = { all: page("all", "Tavern", "all"), dm: page("dm", "Villain plans", "dm"), thorn: page("thorn", "Old Map", { member: "m1" }), mira: page("mira", "Letter", { member: "m2" }) };
@@ -41,6 +43,21 @@ describe("map pins", () => {
     assert.equal(pinUnder(view, "s1", camera, start)?.id, "p1");
     assert.equal(pinUnder(view, "s3", camera, start), null, "a pin on another scene");
     assert.equal(pinUnder(null, "s1", camera, start), null);
+  });
+
+  test("in Isometric a pin stands at the drawn ground under it, and a tap finds it there, not where Top-down drew it", () => {
+    const camera = { x: 300, y: 200, scale: 40 };
+    const raised = { view: isometric(1), ground: (x: number, y: number) => (Math.floor(x) === 4 && Math.floor(y) === 3 ? 2 : 0) };
+    const p = pin();
+    const tip = pinTip(p, raised);
+    assert.deepEqual(tip, toView(isometric(1), p, 2));
+    const atTip = viewToScreen(camera, tip);
+    const head = { x: atTip.x, y: atTip.y - PIN_HEIGHT_PX / 2 };
+    assert.equal(pinAt([p], camera, head, raised)?.id, "p1");
+    assert.equal(pinUnder({ pins: { p1: p } }, "s1", camera, head, raised)?.id, "p1");
+    // The same press finds nothing where the flat ground would put the pin, 2 cells of height lower.
+    assert.equal(pinAt([p], camera, head, { view: isometric(1), ground: () => 0 }), null);
+    assert.deepEqual(pinTip(p), { x: p.x, y: p.y }, "Top-down's tip is the pin's point");
   });
 
   test("a tap with the Pin tool: a waiting page places a linked pin, a pin opens, away closes, else a new pin", () => {

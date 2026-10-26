@@ -164,7 +164,7 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "exploredEdge", layer: "overlay", order: 2, iso: "ground", Component: ExploredEdgeLayer },
   { id: "movement", layer: "overlay", order: 9, iso: "moving", Component: MoveLayer },
   { id: "outlinerFlash", layer: "overlay", order: 95, iso: "moving", Component: FlashLayer },
-  { id: "pins", layer: "overlay", order: 15, iso: "off", Component: PinLayer },
+  { id: "pins", layer: "overlay", order: 15, iso: "upright", Component: PinLayer },
   { id: "tethers", layer: "board", order: 40, iso: "off", Component: TetherLayer },
   { id: "traps", layer: "board", order: 35, iso: "ground", Component: TrapLayer },
 ];

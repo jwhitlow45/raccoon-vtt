@@ -2,8 +2,9 @@ import type Konva from "konva";
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import { popoverSlot } from "../../components/popoverRules.ts";
+import { drawnSourceOf } from "../../canvas/boardPick.ts";
 import { cameraOfStage } from "../../lib/camera.ts";
-import type { View } from "../../lib/view.ts";
+import { drawnGround, type View } from "../../lib/view.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useIsDisplay, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useLowPower } from "../device/settings.ts";
@@ -95,7 +96,12 @@ function useTapPin(stage: Konva.Stage | null, enabled: boolean, board: BoardRef)
       if (!pinTapCounts({ start, end: p, several, held: wasHeld })) return;
       const view = store.getState().view;
       if (!view) return;
-      const hit = pinUnder(view, board.current.scene.id, cameraOfStage(stage), p);
+      // In Isometric a pin stands at its drawn ground (PinLayer.tsx), and the tap finds it there.
+      const b = board.current;
+      const camera = cameraOfStage(stage);
+      const src = drawnSourceOf({ room: view, scene: b.scene, role: b.role, fog: b.fog, lowPower: b.lowPower }, camera.scale);
+      const feet = view.meta.settings.feetPerCell;
+      const hit = pinUnder(view, b.scene.id, camera, p, { view: b.view, ground: (x, y) => drawnGround(src, { x: Math.floor(x), y: Math.floor(y) }) / feet });
       if (!hit) return;
       const pinState = scope.get(pinSlot).store;
       if (hit.pageId !== undefined && view.journal[hit.pageId]) {
