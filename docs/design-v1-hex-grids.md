@@ -366,3 +366,17 @@ HX-2 and HX-3 work beside each other on HX-1's contract. Each lane adds the expl
 ## As built
 
 Filled by each lane's docs commit, with every place the build went its own way.
+
+**HX-1** (contract). Built on the per-player vision run's PV1. Every place the build went its own way, and what it leaves to later lanes:
+
+- **Versions.** Snapshot 25 and op 24, both identity steps on top of PV1's 24 and 23.
+- **`hex.ts`** exports what section 7 lists, plus `hexKey`, `parseHexKey`, `sameHex`, `hexCorners` (a hex's six corners by name, clockwise from its first point), `hexInScene` and `sceneHexSpan` (the columns and rows a scene's keys run over, for the Size row's line). A corner is named `{ hex, k }`, the one hex whose first (`k` 0, north on rows) or second (`k` 1) point it is, so every corner has one name. Large and Gargantuan anchors are a hex's second point. `hexLine` nudges the whole line by one fixed offset, so ties along a line all fall the same way. Ties in `hexAt` are read on the rows lattice, so on hex columns they go to the smaller column, then the smaller row. A scene shallower than one hex (1 cell on rows) holds no hexes: HX-4 decides whether the Size row allows it.
+- **`grid.ts`** holds `Grid`, `sceneGrid`, `cellWord` (shared, so the server's words and HX-4's word helper read one function), `inScene`, a shared `cameWithGrid` beside the client's copy in `findGrid.ts`, and the invariant: `switchHolds`, `restoredHolds` (the stamp and phase checks), `sceneHolds` and the words, `switchRefusal` and `restoreRefusal`. HX-4's Grid row can call `switchRefusal` to disable a choice with the reducer's words.
+- **Words.** The switch and the restore name painted ground, walls and doors (grid-line walls, "no wall" marks and, in H1, free walls), heights, stairs, difficult ground, traps by count, "Reveal room in its fog draft", squeezing creatures and attached creatures. Between two hex shapes they say "hex rows" or "hex columns". A Universal VTT scene is refused only when leaving squares.
+- **Ops.** `scene.create` takes "squares" too, storing no shape. A create with a hex shape on a scene that came with its grid is refused with the Grid row's words.
+- **Restores** also check, as a switch would, every scene whose shape the restore changes or brings back, so undoing a switch never leaves another shape's data behind.
+- **The room import** refuses a room whose scenes break the invariant, naming the scene and what stands where.
+- **Phase H1's refusals** live in `canApply` (`ON_HEXES`, with `invalid`). A squeeze on hexes reads "Squeezing needs squares.", a line the limit lines do not have. A player's placement and a companion's spot are inside a hex scene when every hex the token snaps to is.
+- **Companion reach** on hexes is read in `permissions.ts` by a small local footprint (`standsOn`) and hex steps with the room's rule for height. HX-2's footprint and distance rules should take it over. The one caller outside the owned files, `client/features/tokens/companions.ts`, passes the scene's grid.
+- **Left to HX-2**: the players' scene copy does not carry `gridShape` yet (`project.ts`), so until HX-2 a player's device draws a hex scene as squares. No UI makes a hex scene before HX-4.
+- **Square scenes stay byte for byte**: `shared/hex.golden.test.ts` pins, for random rooms and ops recorded before the run, every permission decision, state, answer, projection and undo.
