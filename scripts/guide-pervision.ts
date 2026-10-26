@@ -120,7 +120,9 @@ try {
   await ops.send({ t: "build.edge", sceneId, edges });
   await ops.send({ t: "build.label", sceneId, labelId: randomUUID(), label: { x: 7.5, y: 1.5, text: "Old altar", size: 1 } });
 
-  const ids = { thorn: randomUUID(), bree: randomUUID(), pip: randomUUID(), goblin: randomUUID() };
+  // Sources list player characters by token id, so Thorn takes the smaller one and leads the list in every run's picture.
+  const [first, second] = [randomUUID(), randomUUID()].sort();
+  const ids = { thorn: first!, bree: second!, pip: randomUUID(), goblin: randomUUID() };
   const token = (id: string, name: string, x: number, y: number, extra: Record<string, unknown>) => ({
     t: "token.create",
     token: { id, sceneId, kind: "monster", name, size: "medium", x, y, visibility: "all", actor: { inline: actor() }, ...extra },
