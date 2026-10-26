@@ -136,7 +136,9 @@ function Ghost(props: {
 }) {
   const { drag, token, scale, color } = props;
   const eased = useStore(props.eased, (s) => s[props.id]);
-  const shown = eased ?? { x: drag.x, y: drag.y };
+  // Low power shows each frame as it arrives, with no wait for the clock's store.
+  const lowPower = useLowPower();
+  const shown = lowPower || !eased ? { x: drag.x, y: drag.y } : eased;
   if (props.iso) {
     const ghost = props.iso(token, shown);
     if (props.part === "tag") return ghost.tag ? <Pill x={ghost.tag.x} y={ghost.tag.y - 4 / scale} scale={scale} name={props.name} size="map" color={color} small above /> : null;

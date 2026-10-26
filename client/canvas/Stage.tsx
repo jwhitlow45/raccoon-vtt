@@ -45,7 +45,8 @@ import {
   type Rect,
   type Size,
 } from "../lib/camera.ts";
-import { groundAtMiddle, TOP_DOWN, toView, toWorld, viewBox, type Live, type View } from "../lib/view.ts";
+import { groundAtMiddle, TOP_DOWN, toView, toWorld, viewBox, type Live, type View, type ViewPoint } from "../lib/view.ts";
+import { ellipseBox } from "./relief/standee.ts";
 import { isAppleDevice } from "../lib/device.ts";
 import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
@@ -1528,9 +1529,9 @@ export function MapStage(props: {
             <GroupActionBar
               tokens={group}
               movable={group.filter(canDrag).length}
-              anchor={inZoomed(worldAnchor(cam, selected), zoom)}
+              anchor={inZoomed(worldAnchor(cam, selected, shown), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, worldAnchor(cam, selected), zoom)}
+              tokenHeight={tokenRise(cam, selected, worldAnchor(cam, selected, shown), zoom, shown)}
               onClose={() => ui.select(null)}
               onShift={shiftForBar}
             />
@@ -1539,9 +1540,9 @@ export function MapStage(props: {
               // Keyed by token, so an armed Delete or a half-typed HP entry never carries over to the next token tapped.
               key={selected.id}
               token={selected}
-              anchor={inZoomed(belowLabel(worldAnchor(cam, selected), boardText.get(selected.id)), zoom)}
+              anchor={inZoomed(belowLabel(worldAnchor(cam, selected, shown), boardText.get(selected.id)), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected), boardText.get(selected.id)), zoom)}
+              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected, shown), boardText.get(selected.id)), zoom, shown)}
               fullAccess={role === "dm" || ownsToken(selected)}
               onDetails={() => onOpenDetails(selected.id)}
               onShift={shiftForBar}
@@ -1588,13 +1589,22 @@ function belowLabel(anchor: Point, text: TokenText | undefined): Point {
   return { x: anchor.x, y: anchor.y + Math.max(0, block.y + block.height - text.heightPx + 4 - 34) };
 }
 
-/** The screen point under a token's bottom center, where its action bar hangs. */
-function worldAnchor(cam: Camera, token: ViewToken): Point {
+/**
+ * The screen point under a token's bottom center, where its action bar
+ * hangs: in Isometric, under its ring on the ground (design 5.4). Drawn
+ * heights lift it in ISO-4.
+ */
+function worldAnchor(cam: Camera, token: ViewToken, view: View): Point {
   const fp = footprint(token);
-  return viewToScreen(cam, toView(TOP_DOWN, { x: token.x + fp.w / 2, y: token.y + fp.h }));
+  if (view.kind === "topDown") return viewToScreen(cam, toView(TOP_DOWN, { x: token.x + fp.w / 2, y: token.y + fp.h }));
+  const center = toView(view, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 });
+  return viewToScreen(cam, { x: center.x, y: ellipseBox(view.turn, fp.w, fp.h, center).y1 } as ViewPoint);
 }
 
-/** How far a token's top stands above the point under its label, in the chrome's pixels (barDock.ts clearShift's `tokenHeight`). */
-function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number): number {
-  return (anchor.y - viewToScreen(cam, toView(TOP_DOWN, { x: token.x, y: token.y })).y) / zoom;
+/** How far a token's top stands above the point under its label, in the chrome's pixels (barDock.ts clearShift's `tokenHeight`): in Isometric, its standee's art box's top. */
+function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number, view: View): number {
+  if (view.kind === "topDown") return (anchor.y - viewToScreen(cam, toView(TOP_DOWN, { x: token.x, y: token.y })).y) / zoom;
+  const fp = footprint(token);
+  const center = toView(view, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 });
+  return (anchor.y - viewToScreen(cam, { x: center.x, y: center.y - fp.h } as ViewPoint).y) / zoom;
 }
