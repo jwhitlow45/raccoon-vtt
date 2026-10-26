@@ -155,7 +155,7 @@ describe("the row's options lead with the creature's things in its Combat sectio
 
   test("the DM's: Uses, Reaction used, Ready, then Roll again, Row hidden from players, In lair, the reminder, and Remove last", () => {
     const markup = rowMenu(state, "ed");
-    const order = at(markup, ["data-uses-group", "Legendary Actions<span", reaction, 'aria-label="Trigger for the Ready action"', "Roll again, replaces 10", "Row hidden from players", "In lair", "Initiative roll reminder", 'aria-label="Remove from the fight"']);
+    const order = at(markup, ["data-uses-group", "Legendary Actions</span><span", reaction, 'aria-label="Trigger for the Ready action"', "Roll again, replaces 10", "Row hidden from players", "In lair", "Initiative roll reminder", 'aria-label="Remove from the fight"']);
     assert.deepEqual(order, [...order].sort((a, b) => a - b), JSON.stringify(order));
   });
 

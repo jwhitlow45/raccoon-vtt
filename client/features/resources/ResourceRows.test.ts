@@ -43,7 +43,7 @@ describe("a character's class resource rows", () => {
 
   test("each row reads its name, what is left of its most and its rest", () => {
     const markup = rows([rage, hands], "list");
-    assert.match(markup, />Rage<span style="[^"]*">, 2 of 3 left<\/span><\/span><span data-use-pips="" aria-hidden="true"/, "pips for a most of 6 or fewer");
+    assert.match(markup, />Rage<\/span><span style="[^"]*">, 2 of 3 left<\/span><\/span><span data-use-pips="" aria-hidden="true"/, "pips for a most of 6 or fewer");
     assert.match(markup, /Lay on Hands<\/span> <span[^>]*>25 of 25<\/span>/, "its words beside the name past 6");
     assert.match(markup, />One back on a Short Rest, all on a Long Rest</);
     assert.match(markup, />Back on a Long Rest</);
@@ -115,7 +115,7 @@ describe("a class resource's count as pips", () => {
   test("a most of 6 or fewer: a pip for each use, filled for each one left, to read only, and the count spoken after the name", () => {
     const markup = rows([{ ...rage, max: 6, used: 2 }], "list");
     assert.deepEqual(pips(markup), { left: 4, spent: 2 });
-    assert.match(markup, />Rage<span style="[^"]*">, 4 of 6 left<\/span><\/span>/);
+    assert.match(markup, />Rage<\/span><span style="[^"]*">, 4 of 6 left<\/span><\/span>/);
     assert.doesNotMatch(markup, />4 of 6</, "no count in words on screen");
     const second = rows([{ id: "sw", name: "Second Wind", max: 3, used: 3, reset: "shortOne" }, { id: "as", name: "Action Surge", max: 1, used: 0, reset: "short" }], "card");
     assert.deepEqual(pips(second), { left: 1, spent: 3 }, "Second Wind none left, Action Surge one");

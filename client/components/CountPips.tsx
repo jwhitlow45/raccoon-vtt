@@ -37,7 +37,8 @@ export function NameLine(props: { name: ReactNode; spoken?: string; end?: ReactN
   return (
     <div style={{ flex: "1 1 100%", minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), fontSize: theme.font.input, lineHeight: theme.leading.tight }}>
       <span style={{ position: "relative", flex: "1 1 auto", width: "min-content", minWidth: 0, overflowWrap: "break-word", fontWeight: theme.weight.strong }}>
-        {props.name}
+        {/* The name in an element of its own, so a search by its words alone still finds it beside the spoken count. */}
+        <span>{props.name}</span>
         {props.spoken ? <span style={VISUALLY_HIDDEN}>{`, ${props.spoken}`}</span> : null}
       </span>
       {props.end}

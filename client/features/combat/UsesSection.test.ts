@@ -109,7 +109,7 @@ describe("Combat's Uses for a creature of its own", () => {
   test("the DM reads its counts as pips on its rows, with no pips block under the list (docs/design-v1-monster-uses.md 3.1)", () => {
     const markup = of("dragon", DM);
     assert.match(markup, />Uses<\/h/);
-    assert.match(markup, /Legendary Actions<span[^>]*>, 2 of 3 left</, "the list's row");
+    assert.match(markup, /Legendary Actions<\/span><span[^>]*>, 2 of 3 left</, "the list's row");
     assert.equal([...markup.matchAll(/data-pip="left"/g)].length, 4, "2 of 3 and 2 of 2 left");
     assert.doesNotMatch(markup, /data-pips|Legendary Actions used|Legendary Resistances used/);
     assert.doesNotMatch(markup, /aria-pressed/, "no pip to tap");
@@ -118,7 +118,7 @@ describe("Combat's Uses for a creature of its own", () => {
 
   test("its player reads the same rows", () => {
     const markup = of("dragon", P1);
-    assert.match(markup, /Legendary Actions<span[^>]*>, 2 of 3 left</);
+    assert.match(markup, /Legendary Actions<\/span><span[^>]*>, 2 of 3 left</);
     assert.equal([...markup.matchAll(/data-pip="left"/g)].length, 4);
     assert.doesNotMatch(markup, /Legendary Actions used/);
   });
@@ -163,9 +163,9 @@ describe("a monster's rows, its counts as pips", () => {
     assert.deepEqual(pips(row(markup, "resist")), { left: 2, spent: 1 });
     assert.deepEqual(pips(row(markup, "legendary")), { left: 2, spent: 1 });
     assert.deepEqual(pips(row(markup, "ability", 0)), { left: 1, spent: 1 }, "Dominate Mind");
-    assert.match(row(markup, "resist"), />Legendary Resistance<span/);
-    assert.match(row(markup, "legendary"), />Legendary Actions<span/);
-    assert.match(row(markup, "ability", 0), />Dominate Mind, 2\/Day<span/);
+    assert.match(row(markup, "resist"), />Legendary Resistance<\/span><span/);
+    assert.match(row(markup, "legendary"), />Legendary Actions<\/span><span/);
+    assert.match(row(markup, "ability", 0), />Dominate Mind, 2\/Day<\/span><span/);
     assert.doesNotMatch(markup, />[^<]*\d of \d(?! left)[^<]*</, "no count in words on screen");
     // The pips only show: no button among them, and hidden from a screen reader.
     for (const part of markup.match(/<span data-use-pips=""[^>]*>.*?<\/span><\/div>/g) ?? []) {
@@ -176,11 +176,11 @@ describe("a monster's rows, its counts as pips", () => {
 
   test("a screen reader hears each count after its name, and a recharge its state", () => {
     const markup = list({ ...spent, uses: { ...spent.uses, [breath.key]: { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 } } });
-    assert.match(row(markup, "legendary"), />Legendary Actions<span style="[^"]*">, 2 of 3 left<\/span><\/span>/);
-    assert.match(row(markup, "resist"), />Legendary Resistance<span style="[^"]*">, 2 of 3 left<\/span><\/span>/);
-    assert.match(row(markup, "ability", 0), />Dominate Mind, 2\/Day<span style="[^"]*">, 1 of 2 left<\/span><\/span>/);
+    assert.match(row(markup, "legendary"), />Legendary Actions<\/span><span style="[^"]*">, 2 of 3 left<\/span><\/span>/);
+    assert.match(row(markup, "resist"), />Legendary Resistance<\/span><span style="[^"]*">, 2 of 3 left<\/span><\/span>/);
+    assert.match(row(markup, "ability", 0), />Dominate Mind, 2\/Day<\/span><span style="[^"]*">, 1 of 2 left<\/span><\/span>/);
     const fire = row(markup, "ability", 1);
-    assert.match(fire, />Fire Breath, Recharge 5–6<span style="[^"]*">, Used<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>Used<\/span>/, "its state at the right end, as the pips stand");
+    assert.match(fire, />Fire Breath, Recharge 5–6<\/span><span style="[^"]*">, Used<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>Used<\/span>/, "its state at the right end, as the pips stand");
   });
 
   test("a count of 6 shows 6 pips, as the Tarrasque's Legendary Resistance, and of 7 its words where they would stand", () => {
