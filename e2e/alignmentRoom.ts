@@ -3083,24 +3083,26 @@ export function fu30Tests(): void {
   /*
    * The app icon's places (D-261025-16), measured since its look changed
    * from a disc to the iOS app icon shape: Home's header, the docs pages'
-   * bar and About's header, at FU30_AT's sizes.
+   * bar and About's header, at FU30_AT's sizes. Only a room, About with
+   * it, takes the interface size, so Home and the docs pages are measured
+   * once at each width (APPICON-OPUS-1).
    */
-  test(`appicon-a. Home's header, the docs pages' bar and About's header, each icon drawn in the square box its size gives it, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (D-261025-16)`, async () => {
+  test(`appicon-a. Home's header and the docs pages' bar at 1440 x 900, 390 x 844 and 320 x 568, and About's header there at 100% and 130%, each icon drawn in the square box its size gives it, within ${LIMIT_PX} px (D-261025-16)`, async () => {
     const lines: string[] = [];
     for (const at of FU30_AT) {
       const sweep = new Sweep(atName(at));
       const page = await dmPageFor(at.size);
       page.setDefaultTimeout(10_000);
-      await page.setViewportSize({ width: at.size.width, height: at.size.height });
-      await page.goto(`${server.origin}/`);
-      await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), at.scale);
-      for (const [screen, path] of [
-        ["appicon-home", "/"],
-        ["appicon-docs", "/docs"],
-        ["appicon-guide", "/docs/dm-guide"],
-      ] as const) {
-        await page.goto(`${server.origin}${path}`);
-        await iconPlace(sweep, page, screen, page.locator(':is(header, div):has(> img[src="/icon.svg"])'));
+      if (at.scale === 1) {
+        await page.setViewportSize({ width: at.size.width, height: at.size.height });
+        for (const [screen, path] of [
+          ["appicon-home", "/"],
+          ["appicon-docs", "/docs"],
+          ["appicon-guide", "/docs/dm-guide"],
+        ] as const) {
+          await page.goto(`${server.origin}${path}`);
+          await iconPlace(sweep, page, screen, page.locator(':is(header, div):has(> img[src="/icon.svg"])'));
+        }
       }
       await openAt(page, at.size, at.scale);
       const menu = await openMenu(page);
