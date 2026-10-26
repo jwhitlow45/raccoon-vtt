@@ -388,3 +388,5 @@ Filled by each lane's docs commit, with every place the build went its own way.
 - Large and Gargantuan snap to the nearest of seven candidate corners as rounded, so the anchor is the nearest one stored.
 - On hexes `inScene` takes only a hex's own key, so one hex has one key.
 - The golden test sends every fourth op as each player in turn, its fixture written again on the tree before hex grids.
+
+**HX-1, fix round 2.** A player's and a table display's copy of a scene now carries `gridShape`, and the copies of a chunk and a found trap carry their stamps. `shared/project.ts` holds a list beside each of those projections (`SCENE_FOR_PLAYERS`, `CHUNK_FOR_PLAYERS`, `TRAP_FOR_PLAYERS`) naming what players take of every field and why the DM keeps the rest, typed against every key of the stored type, and `project.fields.test.ts` holds each projection to its list. This takes the scene copy from HX-2's list. Templates and the room's settings already reach players whole, so a stationary footprint's `size` and `newScenes` needed nothing.
