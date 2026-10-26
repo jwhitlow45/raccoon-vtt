@@ -862,12 +862,16 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     // An op may name an effect with any id of 1 to 64 characters.
     const effectId = 'lp22 "r1" a';
     await ops.send({ t: "actor.effect.add", target: { characterId: run.bree.characterId }, effect: { id: effectId, key: "blinded" } });
-    const conditions = await breeConditions(ana);
-    await pressKey(ana, conditions.locator("[data-effect-row]").filter({ hasText: "Blinded" }));
-    await focusLands(ana, /^Back$/, "the row opened its form");
-    await pressKey(ana, conditions.getByRole("button", { name: "Back", exact: true }));
-    await focusLands(ana, /^Blinded/, "Back");
-    await ops.send({ t: "actor.effect.remove", target: { characterId: run.bree.characterId }, effectId });
+    // A failure leaves Bree as the next step expects her, without Blinded (LP22-OPUS-6).
+    try {
+      const conditions = await breeConditions(ana);
+      await pressKey(ana, conditions.locator("[data-effect-row]").filter({ hasText: "Blinded" }));
+      await focusLands(ana, /^Back$/, "the row opened its form");
+      await pressKey(ana, conditions.getByRole("button", { name: "Back", exact: true }));
+      await focusLands(ana, /^Blinded/, "Back");
+    } finally {
+      await ops.send({ t: "actor.effect.remove", target: { characterId: run.bree.characterId }, effectId });
+    }
   });
 
   test("lp22-r1-b. a press that focuses nothing, as a tap on a phone, opens a condition's form and closes it with focus left where it was (LP22-OPUS-1)", async () => {
@@ -893,19 +897,25 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   test("lp22-r1-c. by keyboard in a fight, Save on Readied's form hands focus to its row, and It fired, which takes the row away, to Add (LP22-OPUS-5)", async () => {
     const characterId = run.bree.characterId;
     const entryId = randomUUID();
+    const effectId = randomUUID();
     await ops.send({ t: "encounter.start", entries: [{ id: entryId, tokenId: run.bree.tokenId, value: 12 }] });
-    await ops.send({ t: "actor.effect.add", target: { characterId }, effect: { id: randomUUID(), key: "readied", duration: { mode: "turnStart", of: { entryId } } } });
     const readied = () => (anaSocket.state?.characters[characterId]?.actor.effects ?? []).some((e) => e.key === "readied");
-    const conditions = await breeConditions(ana);
-    const row = conditions.locator("[data-effect-row]").filter({ hasText: "Readied" });
-    await pressKey(ana, row);
-    await pressKey(ana, conditions.getByRole("button", { name: "Save", exact: true }));
-    await focusLands(ana, /^Readied/, "Save");
-    await pressKey(ana, row);
-    await pressKey(ana, conditions.getByRole("button", { name: "It fired: Reaction used", exact: true }));
-    await waitFor("Readied off Bree", () => (readied() ? null : true));
-    await focusLands(ana, /^Add$/, "It fired");
-    await ops.send({ t: "encounter.end" });
+    // A failure ends the fight and takes Readied off Bree, as It fired would have (LP22-OPUS-6).
+    try {
+      await ops.send({ t: "actor.effect.add", target: { characterId }, effect: { id: effectId, key: "readied", duration: { mode: "turnStart", of: { entryId } } } });
+      const conditions = await breeConditions(ana);
+      const row = conditions.locator("[data-effect-row]").filter({ hasText: "Readied" });
+      await pressKey(ana, row);
+      await pressKey(ana, conditions.getByRole("button", { name: "Save", exact: true }));
+      await focusLands(ana, /^Readied/, "Save");
+      await pressKey(ana, row);
+      await pressKey(ana, conditions.getByRole("button", { name: "It fired: Reaction used", exact: true }));
+      await waitFor("Readied off Bree", () => (readied() ? null : true));
+      await focusLands(ana, /^Add$/, "It fired");
+    } finally {
+      if (dmSocket.state?.characters[characterId]?.actor.effects?.some((e) => e.id === effectId)) await ops.send({ t: "actor.effect.remove", target: { characterId }, effectId });
+      if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    }
   });
 
   test("lp22-r1-d. by keyboard on Bree's page, a condition's form hands focus as in the token panel: to Back, the condition's row or Add, never the page (LP22-OPUS-5)", async () => {
@@ -959,38 +969,58 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
   test("lp22-r1-f. by keyboard on a character with no block, Take a shape moves to the fold's row with the shape and focus goes to the Stat block's fold, and Save on a first block leaves it on Edit, where Add a stat block stood, never the page (LP22-OPUS-2)", async () => {
     const cal = { characterId: randomUUID(), tokenId: randomUUID() };
     await ops.send({ t: "character.create", character: { id: cal.characterId, name: "Cal", size: "medium", ownerIds: [], actor: actor() } });
-    await ops.send({ t: "token.create", token: { id: cal.tokenId, sceneId: run.sceneId, kind: "pc", name: "Cal", size: "medium", x: 9, y: 5, disposition: "ally", actor: { ref: cal.characterId } } });
-    const calOf = () => dmSocket.state?.characters[cal.characterId];
-    await waitFor("Cal on the DM's device", () => calOf());
-    await reopenRoom(dm);
-    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
-    await dm.locator(".konvajs-content").first().waitFor();
-    await tapCell(dm, BOUNDS, { x: 9, y: 5 });
-    await dm.getByRole("dialog", { name: "Cal actions" }).waitFor();
-    await openSideTab(dm, "Token");
-    const panel = tokenPanel(dm);
-    const fold = panel.getByRole("button", { name: "Stat block", exact: true });
-    if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+    // Cal is this step's alone, so he and his token go at its end, whether it passes or not (LP22-OPUS-6).
+    try {
+      await ops.send({ t: "token.create", token: { id: cal.tokenId, sceneId: run.sceneId, kind: "pc", name: "Cal", size: "medium", x: 9, y: 5, disposition: "ally", actor: { ref: cal.characterId } } });
+      const calOf = () => dmSocket.state?.characters[cal.characterId];
+      await waitFor("Cal on the DM's device", () => calOf());
+      await reopenRoom(dm);
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await dm.locator(".konvajs-content").first().waitFor();
+      await tapCell(dm, BOUNDS, { x: 9, y: 5 });
+      await dm.getByRole("dialog", { name: "Cal actions" }).waitFor();
+      await openSideTab(dm, "Token");
+      const panel = tokenPanel(dm);
+      const fold = panel.getByRole("button", { name: "Stat block", exact: true });
+      if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
 
-    await pressKey(dm, panel.getByRole("button", { name: "Take a shape", exact: true }));
-    const picker = dm.getByRole("dialog", { name: "Take a shape" });
-    await picker.getByRole("searchbox", { name: "Search creatures" }).fill("wolf");
-    await pressKey(dm, picker.getByRole("button", { name: /^Wolf/ }).first());
-    await pressKey(dm, dm.getByRole("dialog", { name: "Take the shape of Wolf" }).getByRole("button", { name: "Take the shape", exact: true }));
-    await waitFor("Cal in Wild Shape", () => (calOf()?.actor.wildShape ? true : null));
-    await focusLands(dm, /^fold Stat block/, "Take the shape");
-    await pressKey(dm, panel.getByRole("button", { name: "End the shape" }));
-    await waitFor("the shape ended", () => (calOf()?.actor.srdId === undefined ? true : null));
-    await focusLands(dm, /^fold Stat block/, "End the shape");
+      await pressKey(dm, panel.getByRole("button", { name: "Take a shape", exact: true }));
+      const picker = dm.getByRole("dialog", { name: "Take a shape" });
+      await picker.getByRole("searchbox", { name: "Search creatures" }).fill("wolf");
+      await pressKey(dm, picker.getByRole("button", { name: /^Wolf/ }).first());
+      await pressKey(dm, dm.getByRole("dialog", { name: "Take the shape of Wolf" }).getByRole("button", { name: "Take the shape", exact: true }));
+      await waitFor("Cal in Wild Shape", () => (calOf()?.actor.wildShape ? true : null));
+      await focusLands(dm, /^fold Stat block/, "Take the shape");
+      await pressKey(dm, panel.getByRole("button", { name: "End the shape" }));
+      await waitFor("the shape ended", () => (calOf()?.actor.srdId === undefined ? true : null));
+      await focusLands(dm, /^fold Stat block/, "End the shape");
 
-    await pressKey(dm, panel.getByRole("button", { name: "Add a stat block" }));
-    const sheet = dm.getByRole("dialog", { name: "Cal's stat block" });
-    await sheet.getByLabel("Level", { exact: true }).fill("3");
-    await pressKey(dm, sheet.getByRole("button", { name: "Save", exact: true }));
-    await sheet.waitFor({ state: "detached" });
-    await waitFor("Cal's block", () => calOf()?.stats);
-    // React keeps the button and gives it Edit's words, so the editor hands focus back to it.
-    await focusLands(dm, /^Edit$/, "Save");
+      await pressKey(dm, panel.getByRole("button", { name: "Add a stat block" }));
+      const sheet = dm.getByRole("dialog", { name: "Cal's stat block" });
+      await sheet.getByLabel("Level", { exact: true }).fill("3");
+      await pressKey(dm, sheet.getByRole("button", { name: "Save", exact: true }));
+      await sheet.waitFor({ state: "detached" });
+      await waitFor("Cal's block", () => calOf()?.stats);
+      // React keeps the button and gives it Edit's words, so the editor hands focus back to it.
+      await focusLands(dm, /^Edit$/, "Save");
+    } finally {
+      if (dmSocket.state?.tokens[cal.tokenId]) await ops.send({ t: "token.delete", tokenId: cal.tokenId });
+      await ops.send({ t: "character.delete", characterId: cal.characterId });
+    }
+  });
+
+  test("lp22-r1-z. the lp22-r1 steps leave nothing behind them: no Cal or his token, Bree without Blinded or Readied, and no fight (LP22-OPUS-6)", async () => {
+    // The DM's copy hears the last cleanup's ops a moment after their answers.
+    const settled = () => {
+      const s = dmSocket.state;
+      return s && !Object.values(s.characters).some((c) => c.name === "Cal") && !Object.values(s.tokens).some((t) => t.name === "Cal") ? s : null;
+    };
+    const state = await waitFor("the steps' leftovers gone", settled, 5_000).catch(() => dmSocket.state!);
+    assert.deepEqual(Object.values(state.characters).filter((c) => c.name === "Cal").map((c) => c.id), [], "Cal's character");
+    assert.deepEqual(Object.values(state.tokens).filter((t) => t.name === "Cal").map((t) => t.id), [], "Cal's token");
+    const left = (state.characters[run.bree.characterId]?.actor.effects ?? []).filter((e) => e.key === "blinded" || e.key === "readied").map((e) => e.key);
+    assert.deepEqual(left, [], "Bree's conditions from the steps");
+    assert.equal(state.encounter ?? null, null, "a fight");
   });
 
   test("6. no page logged an error", () => {
