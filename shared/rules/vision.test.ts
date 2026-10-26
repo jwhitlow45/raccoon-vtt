@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { wallChunk } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type FreeWall, type Light, type RoomState, type Scene, type SightTile, type TerrainId, type Token } from "../model.ts";
+import { ownsToken } from "../project.ts";
 import { visionRules } from "../ruleHooks.ts";
 import { actor, character, rng, room, scene, token } from "../testutil.ts";
 import { decodeTile, getBit } from "./fog.ts";
@@ -11,7 +12,10 @@ import { encodeHeights } from "./heights.ts";
 import { contact, orient, pointInPolygon, SIGHT, stepOffWalls } from "./segments.ts";
 import {
   clearVisionCache,
+  coldHolderSight,
   coldPartySight,
+  holderSight,
+  NO_PARTY_SIGHT,
   parseSenses,
   partyMember,
   partySight,
@@ -23,6 +27,7 @@ import {
   sightTileLevels,
   sourcePolygon,
   visibleFrom,
+  visionCacheReport,
   visionReport,
   type VisionWorld,
 } from "./vision.ts";
@@ -743,6 +748,139 @@ describe("the plug-in", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Random edits, as ops make them
+
+type Edit = (r: () => number, s: RoomState) => RoomState;
+
+const chunkAt = (s: RoomState, cx: number, cy: number): BuildChunk => s.buildChunks[`s1:${cx},${cy}`] ?? { sceneId: "s1", cx, cy, rev: 0, cells: {}, edges: {} };
+const withChunk = (s: RoomState, c: BuildChunk): RoomState => ({ ...s, buildChunks: { ...s.buildChunks, [`s1:${c.cx},${c.cy}`]: c } });
+const withToken = (s: RoomState, t: Token): RoomState => ({ ...s, tokens: { ...s.tokens, [t.id]: t } });
+const pickToken = (r: () => number, s: RoomState): Token | undefined => {
+  const all = Object.values(s.tokens).sort((a, b) => (a.id < b.id ? -1 : 1));
+  return all[Math.floor(r() * all.length)];
+};
+const SIZE = 40;
+
+const edits: Record<string, Edit> = {
+  move(r, s) {
+    const t = pickToken(r, s);
+    return t ? withToken(s, { ...t, x: Math.floor(r() * SIZE), y: Math.floor(r() * SIZE) }) : s;
+  },
+  nudge(r, s) {
+    // A step of a cell, the common case at the table.
+    const t = pickToken(r, s);
+    return t ? withToken(s, { ...t, x: Math.max(0, Math.min(SIZE - 1, t.x + Math.floor(r() * 3) - 1)), y: Math.max(0, Math.min(SIZE - 1, t.y + Math.floor(r() * 3) - 1)) }) : s;
+  },
+  door(r, s) {
+    const x = Math.floor(r() * SIZE);
+    const y = Math.floor(r() * SIZE);
+    const c = chunkAt(s, Math.floor(x / 16), Math.floor(y / 16));
+    const state = (["open", "closed", "locked"] as const)[Math.floor(r() * 3)]!;
+    return withChunk(s, { ...c, edges: { ...c.edges, [`${x},${y},${r() < 0.5 ? "n" : "w"}`]: { kind: "door", state, secret: r() < 0.3, discovered: r() < 0.5 } } });
+  },
+  wall(r, s) {
+    // Long walls near chunk borders, so one stored in one chunk closes a room in the next.
+    const ax = 16 * Math.floor(r() * 3) + lattice(r, 4) - 2;
+    const ay = lattice(r, SIZE);
+    const bx = Math.max(0, Math.min(SIZE, ax + lattice(r, 8) - 4));
+    const by = Math.max(0, Math.min(SIZE, ay + lattice(r, 8) - 4));
+    const w = free(Math.max(0, ax), ay, bx, by);
+    if (w.a[0] === w.b[0] && w.a[1] === w.b[1]) return s;
+    const { cx, cy } = wallChunk(w);
+    const c = chunkAt(s, cx, cy);
+    return withChunk(s, { ...c, walls: [...(c.walls ?? []), w] });
+  },
+  unwall(r, s) {
+    const holders = Object.values(s.buildChunks).filter((c) => (c.walls?.length ?? 0) > 0);
+    const c = holders[Math.floor(r() * holders.length)];
+    if (!c) return s;
+    const walls = c.walls!.filter((_, i) => i !== Math.floor(r() * c.walls!.length));
+    return withChunk(s, { ...c, walls });
+  },
+  paint(r, s) {
+    const x0 = Math.floor(r() * SIZE);
+    const y0 = Math.floor(r() * SIZE);
+    const top = [0, 5, 10, 20, -10][Math.floor(r() * 5)]!;
+    let next = s;
+    for (let y = y0; y < Math.min(SIZE, y0 + 1 + Math.floor(r() * 6)); y++) {
+      for (let x = x0; x < Math.min(SIZE, x0 + 1 + Math.floor(r() * 6)); x++) {
+        const c = chunkAt(next, Math.floor(x / 16), Math.floor(y / 16));
+        const feet = new Array<number>(256).fill(0);
+        if (c.heights) {
+          const bytes = Buffer.from(c.heights, "base64");
+          for (let i = 0; i < 256; i++) feet[i] = bytes.readInt16LE(2 * i);
+        }
+        feet[(y % 16) * 16 + (x % 16)] = top;
+        const heights = encodeHeights(feet);
+        const { heights: _old, ...rest } = c;
+        next = withChunk(next, heights ? { ...rest, heights } : rest);
+      }
+    }
+    return next;
+  },
+  light(r, s) {
+    const ids = Object.keys(s.lights).sort();
+    const roll = r();
+    if (roll < 0.3 || ids.length === 0) {
+      const l = light(`l${Math.floor(r() * 1e9)}`, lattice(r, SIZE), lattice(r, SIZE), [0, 10, 20][Math.floor(r() * 3)]!, [10, 20, 40][Math.floor(r() * 3)]!, { walls: r() < 0.8 });
+      return { ...s, lights: { ...s.lights, [l.id]: l } };
+    }
+    const id = ids[Math.floor(r() * ids.length)]!;
+    if (roll < 0.45) {
+      const { [id]: _gone, ...rest } = s.lights;
+      return { ...s, lights: rest };
+    }
+    const old = s.lights[id]!;
+    return { ...s, lights: { ...s.lights, [id]: roll < 0.7 ? { ...old, on: !old.on } : { ...old, x: lattice(r, SIZE), y: lattice(r, SIZE) } } };
+  },
+  actor(r, s) {
+    const t = pickToken(r, s);
+    if (!t || !("inline" in t.actor)) return s;
+    const roll = r();
+    const a = t.actor.inline;
+    const next =
+      roll < 0.3
+        ? { ...a, senses: ["", "darkvision 60 ft", "blindsight 15 ft", "truesight 30 ft", "darkvision 150 ft"][Math.floor(r() * 5)]! }
+        : roll < 0.6
+          ? { ...a, effects: a.effects.length > 0 ? [] : [{ id: "e", key: (r() < 0.5 ? "blinded" : "unconscious") as "blinded" }] }
+          : { ...a, life: a.life === "alive" ? ("dead" as const) : ("alive" as const) };
+    return withToken(s, { ...t, actor: { inline: next } });
+  },
+  rise(r, s) {
+    const t = pickToken(r, s);
+    return t ? withToken(s, { ...t, elevation: [0, 5, 10, 30, -10][Math.floor(r() * 5)]! }) : s;
+  },
+  carry(r, s) {
+    const t = pickToken(r, s);
+    if (!t) return s;
+    if (t.light) {
+      const { light: _l, ...rest } = t;
+      return withToken(s, rest as Token);
+    }
+    return withToken(s, { ...t, light: { bright: [0, 20][Math.floor(r() * 2)]!, dim: 20 } });
+  },
+  join(r, s) {
+    const t = pickToken(r, s);
+    if (!t) return s;
+    return withToken(s, r() < 0.5 ? { ...t, partyVision: !t.partyVision } : { ...t, visibility: t.visibility === "all" ? "dm" : "all" });
+  },
+  rule(r, s) {
+    const sc = s.scenes.s1!;
+    return { ...s, scenes: { s1: { ...sc, autoWalls: (["all", "floor", "off"] as const)[Math.floor(r() * 3)] } } };
+  },
+};
+
+function start(r: () => number, level: "bright" | "dim" | "dark"): RoomState {
+  const tokens: Token[] = [];
+  for (let k = 0; k < 5; k++) tokens.push(pc(`p${k}`, Math.floor(r() * SIZE), Math.floor(r() * SIZE), { senses: ["", "darkvision 60 ft", "blindsight 10 ft"][k % 3] }));
+  tokens.push(token("m1", { x: Math.floor(r() * SIZE), y: Math.floor(r() * SIZE), light: { bright: 20, dim: 20 } }));
+  const build = randomBuild(r, SIZE, { freeWalls: 30 });
+  for (let x = 0; x < SIZE; x += 3) for (let y = 0; y < SIZE; y += 4) build.cells![`${x},${y}`] ??= "stone";
+  const lights = [light("la", 10, 10, 20, 20), light("lb", 30, 25, 0, 30, { walls: false })];
+  return visionRoom({ w: SIZE, h: SIZE, light: level, build, tokens, lights, autoWalls: "all" });
+}
+
 describe("incremental equals cold", () => {
   /*
    * Random edits, each a new state as ops make them (changed entities
@@ -751,136 +889,6 @@ describe("incremental equals cold", () => {
    * staged state is computed and thrown away, as the size guard refuses
    * one, so later answers must not depend on it.
    */
-  type Edit = (r: () => number, s: RoomState) => RoomState;
-
-  const chunkAt = (s: RoomState, cx: number, cy: number): BuildChunk => s.buildChunks[`s1:${cx},${cy}`] ?? { sceneId: "s1", cx, cy, rev: 0, cells: {}, edges: {} };
-  const withChunk = (s: RoomState, c: BuildChunk): RoomState => ({ ...s, buildChunks: { ...s.buildChunks, [`s1:${c.cx},${c.cy}`]: c } });
-  const withToken = (s: RoomState, t: Token): RoomState => ({ ...s, tokens: { ...s.tokens, [t.id]: t } });
-  const pickToken = (r: () => number, s: RoomState): Token | undefined => {
-    const all = Object.values(s.tokens).sort((a, b) => (a.id < b.id ? -1 : 1));
-    return all[Math.floor(r() * all.length)];
-  };
-  const SIZE = 40;
-
-  const edits: Record<string, Edit> = {
-    move(r, s) {
-      const t = pickToken(r, s);
-      return t ? withToken(s, { ...t, x: Math.floor(r() * SIZE), y: Math.floor(r() * SIZE) }) : s;
-    },
-    nudge(r, s) {
-      // A step of a cell, the common case at the table.
-      const t = pickToken(r, s);
-      return t ? withToken(s, { ...t, x: Math.max(0, Math.min(SIZE - 1, t.x + Math.floor(r() * 3) - 1)), y: Math.max(0, Math.min(SIZE - 1, t.y + Math.floor(r() * 3) - 1)) }) : s;
-    },
-    door(r, s) {
-      const x = Math.floor(r() * SIZE);
-      const y = Math.floor(r() * SIZE);
-      const c = chunkAt(s, Math.floor(x / 16), Math.floor(y / 16));
-      const state = (["open", "closed", "locked"] as const)[Math.floor(r() * 3)]!;
-      return withChunk(s, { ...c, edges: { ...c.edges, [`${x},${y},${r() < 0.5 ? "n" : "w"}`]: { kind: "door", state, secret: r() < 0.3, discovered: r() < 0.5 } } });
-    },
-    wall(r, s) {
-      // Long walls near chunk borders, so one stored in one chunk closes a room in the next.
-      const ax = 16 * Math.floor(r() * 3) + lattice(r, 4) - 2;
-      const ay = lattice(r, SIZE);
-      const bx = Math.max(0, Math.min(SIZE, ax + lattice(r, 8) - 4));
-      const by = Math.max(0, Math.min(SIZE, ay + lattice(r, 8) - 4));
-      const w = free(Math.max(0, ax), ay, bx, by);
-      if (w.a[0] === w.b[0] && w.a[1] === w.b[1]) return s;
-      const { cx, cy } = wallChunk(w);
-      const c = chunkAt(s, cx, cy);
-      return withChunk(s, { ...c, walls: [...(c.walls ?? []), w] });
-    },
-    unwall(r, s) {
-      const holders = Object.values(s.buildChunks).filter((c) => (c.walls?.length ?? 0) > 0);
-      const c = holders[Math.floor(r() * holders.length)];
-      if (!c) return s;
-      const walls = c.walls!.filter((_, i) => i !== Math.floor(r() * c.walls!.length));
-      return withChunk(s, { ...c, walls });
-    },
-    paint(r, s) {
-      const x0 = Math.floor(r() * SIZE);
-      const y0 = Math.floor(r() * SIZE);
-      const top = [0, 5, 10, 20, -10][Math.floor(r() * 5)]!;
-      let next = s;
-      for (let y = y0; y < Math.min(SIZE, y0 + 1 + Math.floor(r() * 6)); y++) {
-        for (let x = x0; x < Math.min(SIZE, x0 + 1 + Math.floor(r() * 6)); x++) {
-          const c = chunkAt(next, Math.floor(x / 16), Math.floor(y / 16));
-          const feet = new Array<number>(256).fill(0);
-          if (c.heights) {
-            const bytes = Buffer.from(c.heights, "base64");
-            for (let i = 0; i < 256; i++) feet[i] = bytes.readInt16LE(2 * i);
-          }
-          feet[(y % 16) * 16 + (x % 16)] = top;
-          const heights = encodeHeights(feet);
-          const { heights: _old, ...rest } = c;
-          next = withChunk(next, heights ? { ...rest, heights } : rest);
-        }
-      }
-      return next;
-    },
-    light(r, s) {
-      const ids = Object.keys(s.lights).sort();
-      const roll = r();
-      if (roll < 0.3 || ids.length === 0) {
-        const l = light(`l${Math.floor(r() * 1e9)}`, lattice(r, SIZE), lattice(r, SIZE), [0, 10, 20][Math.floor(r() * 3)]!, [10, 20, 40][Math.floor(r() * 3)]!, { walls: r() < 0.8 });
-        return { ...s, lights: { ...s.lights, [l.id]: l } };
-      }
-      const id = ids[Math.floor(r() * ids.length)]!;
-      if (roll < 0.45) {
-        const { [id]: _gone, ...rest } = s.lights;
-        return { ...s, lights: rest };
-      }
-      const old = s.lights[id]!;
-      return { ...s, lights: { ...s.lights, [id]: roll < 0.7 ? { ...old, on: !old.on } : { ...old, x: lattice(r, SIZE), y: lattice(r, SIZE) } } };
-    },
-    actor(r, s) {
-      const t = pickToken(r, s);
-      if (!t || !("inline" in t.actor)) return s;
-      const roll = r();
-      const a = t.actor.inline;
-      const next =
-        roll < 0.3
-          ? { ...a, senses: ["", "darkvision 60 ft", "blindsight 15 ft", "truesight 30 ft", "darkvision 150 ft"][Math.floor(r() * 5)]! }
-          : roll < 0.6
-            ? { ...a, effects: a.effects.length > 0 ? [] : [{ id: "e", key: (r() < 0.5 ? "blinded" : "unconscious") as "blinded" }] }
-            : { ...a, life: a.life === "alive" ? ("dead" as const) : ("alive" as const) };
-      return withToken(s, { ...t, actor: { inline: next } });
-    },
-    rise(r, s) {
-      const t = pickToken(r, s);
-      return t ? withToken(s, { ...t, elevation: [0, 5, 10, 30, -10][Math.floor(r() * 5)]! }) : s;
-    },
-    carry(r, s) {
-      const t = pickToken(r, s);
-      if (!t) return s;
-      if (t.light) {
-        const { light: _l, ...rest } = t;
-        return withToken(s, rest as Token);
-      }
-      return withToken(s, { ...t, light: { bright: [0, 20][Math.floor(r() * 2)]!, dim: 20 } });
-    },
-    join(r, s) {
-      const t = pickToken(r, s);
-      if (!t) return s;
-      return withToken(s, r() < 0.5 ? { ...t, partyVision: !t.partyVision } : { ...t, visibility: t.visibility === "all" ? "dm" : "all" });
-    },
-    rule(r, s) {
-      const sc = s.scenes.s1!;
-      return { ...s, scenes: { s1: { ...sc, autoWalls: (["all", "floor", "off"] as const)[Math.floor(r() * 3)] } } };
-    },
-  };
-
-  function start(r: () => number, level: "bright" | "dim" | "dark"): RoomState {
-    const tokens: Token[] = [];
-    for (let k = 0; k < 5; k++) tokens.push(pc(`p${k}`, Math.floor(r() * SIZE), Math.floor(r() * SIZE), { senses: ["", "darkvision 60 ft", "blindsight 10 ft"][k % 3] }));
-    tokens.push(token("m1", { x: Math.floor(r() * SIZE), y: Math.floor(r() * SIZE), light: { bright: 20, dim: 20 } }));
-    const build = randomBuild(r, SIZE, { freeWalls: 30 });
-    for (let x = 0; x < SIZE; x += 3) for (let y = 0; y < SIZE; y += 4) build.cells![`${x},${y}`] ??= "stone";
-    const lights = [light("la", 10, 10, 20, 20), light("lb", 30, 25, 0, 30, { walls: false })];
-    return visionRoom({ w: SIZE, h: SIZE, light: level, build, tokens, lights, autoWalls: "all" });
-  }
-
   for (const level of ["bright", "dim", "dark"] as const) {
     test(`random edits on a ${level} scene`, () => {
       clearVisionCache();
@@ -1012,6 +1020,38 @@ describe("golden bits", () => {
       assert.deepEqual(got, GOLDEN[level]);
     });
   }
+
+  /*
+   * The dark dungeon per player (docs/design-v1-per-player-vision.md 6.1):
+   * a is the first player's, d the second's, b a character both play, and
+   * c the creature the DM marked to share sight with the party.
+   */
+  const GOLDEN_PER_PLAYER: Record<string, { tiles: number; hash: string }> = {
+    p1: { tiles: 5, hash: "472cbffb" },
+    p2: { tiles: 5, hash: "76969b13" },
+    shared: { tiles: 4, hash: "a93ebf52" },
+  };
+
+  test("the dark dungeon per player", () => {
+    clearVisionCache();
+    const s = dungeon("dark");
+    for (const [id, ownerIds] of [
+      ["a", ["p1"]],
+      ["b", ["p1", "p2"]],
+      ["d", ["p2"]],
+    ] as const) {
+      s.tokens[id] = { ...s.tokens[id]!, ownerIds: [...ownerIds] };
+    }
+    const got: Record<string, { tiles: number; hash: string }> = {};
+    for (const viewer of ["p1", "p2", null]) {
+      const tiles = holderSight(s, "s1", viewer, world).tiles;
+      sameTiles(tiles, coldHolderSight(s, "s1", viewer, world).tiles, `${viewer}`);
+      got[viewer ?? "shared"] = { tiles: tiles.size, hash: hashTiles(tiles) };
+    }
+    assert.deepEqual(got, GOLDEN_PER_PLAYER);
+    // Every viewer's sight lies within the union's, and the union is the whole-party dungeon's.
+    assert.deepEqual({ tiles: partySight(s, "s1", world).tiles.size, hash: hashTiles(partySight(s, "s1", world).tiles) }, GOLDEN.dark);
+  });
 });
 
 describe("what the vision cache keeps alive", () => {
@@ -1037,8 +1077,10 @@ describe("what the vision cache keeps alive", () => {
         s.buildChunks = chunksOf(id, { walls });
         // A light, so the scene's entry holds a light swept over the scene's sight pieces, and a source to need it.
         s.lights = { l: { ...light("l", 6, 6, 20, 20), sceneId: id } };
-        s.tokens = { a: { ...pc("a", 3, 6), sceneId: id } };
+        // And a second player's source, so a sight holder's raster is drawn and kept too.
+        s.tokens = { a: { ...pc("a", 3, 6), sceneId: id }, b: { ...pc("b", 15, 6, { ownerIds: ["p2"] }), sceneId: id } };
         partySight(s, id, world);
+        assert.ok(holderSight(s, id, "p1", world).tiles.size > 0);
         if (k === 0) first = new WeakRef(sceneWalls(s.scenes[id]!, s.buildChunks));
       }
       return first!;
@@ -1048,5 +1090,391 @@ describe("what the vision cache keeps alive", () => {
     gc();
     assert.equal(weak.deref(), undefined, "the first scene's wall set is collected");
     clearVisionCache();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sight holders (docs/design-v1-per-player-vision.md 6.1, lane PV2)
+
+/** The players asked about, and null for the shared sight that every other viewer has. */
+const HOLDERS = ["p1", "p2", "p3", "p4"] as const;
+const VIEWERS: readonly (string | null)[] = [...HOLDERS, null];
+
+/** Owners drawn at random from the holders, and now and then a player none of them is. */
+function someOwners(r: () => number): string[] {
+  const owners: string[] = HOLDERS.filter(() => r() < 0.4);
+  if (r() < 0.2) owners.push("p5");
+  return owners;
+}
+
+/*
+ * The random edits above, and what decides whose sight a source is part
+ * of: who owns it, directly or through a character, whether it shares
+ * sight with the party, and the light level.
+ */
+const holderEdits: Record<string, Edit> = {
+  ...edits,
+  own(r, s) {
+    const t = pickToken(r, s);
+    return t ? withToken(s, { ...t, ownerIds: someOwners(r) }) : s;
+  },
+  share(r, s) {
+    const t = pickToken(r, s);
+    return t ? withToken(s, { ...t, partyVision: t.partyVision ? undefined : true }) : s;
+  },
+  hero(r, s) {
+    // A token played through a character, whose owners are the character's.
+    const t = pickToken(r, s);
+    if (!t) return s;
+    const id = `c-${t.id}`;
+    const a = "inline" in t.actor ? t.actor.inline : (s.characters[t.actor.ref]?.actor ?? actor());
+    const c = character(id, { ownerIds: someOwners(r), actor: a });
+    return { ...withToken(s, { ...t, ownerIds: r() < 0.5 ? [] : someOwners(r), actor: { ref: id } }), characters: { ...s.characters, [id]: c } };
+  },
+  level(r, s) {
+    const sc = s.scenes.s1!;
+    return { ...s, scenes: { s1: { ...sc, vision: { on: true, light: (["bright", "dim", "dark"] as const)[Math.floor(r() * 3)]! } } } };
+  },
+};
+
+function holderStart(r: () => number, level: "bright" | "dim" | "dark"): RoomState {
+  let s = start(r, level);
+  for (const t of Object.values(s.tokens)) s = withToken(s, { ...t, ownerIds: t.kind === "pc" ? someOwners(r) : [] });
+  // The monster lends its sight to every player.
+  return withToken(s, { ...s.tokens.m1!, partyVision: true });
+}
+
+/** The same room with one more member, `extra`, owning every source any of `members` owns. */
+function withOwnerOfAll(s: RoomState, extra: string, members: readonly string[]): RoomState {
+  const add = (ids: readonly string[]) => (ids.some((id) => members.includes(id)) ? [...ids, extra] : [...ids]);
+  const tokens: Record<string, Token> = {};
+  for (const [id, t] of Object.entries(s.tokens)) tokens[id] = { ...t, ownerIds: add(t.ownerIds) };
+  const characters = Object.fromEntries(Object.entries(s.characters).map(([id, c]) => [id, { ...c, ownerIds: add(c.ownerIds) }]));
+  return { ...s, tokens, characters };
+}
+
+function maxInto(out: Uint8Array, levels: Uint8Array): void {
+  for (let i = 0; i < out.length; i++) if (levels[i]! > out[i]!) out[i] = levels[i]!;
+}
+
+const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan", "custom"] as const;
+
+/** A creature anywhere on or just off a scene of `size` cells, any size, squeezed or not, at fractional spots. */
+function randomProbe(r: () => number, size: number): { size: (typeof SIZES)[number]; x: number; y: number; w?: number; h?: number; squeeze?: true } {
+  const kind = SIZES[Math.floor(r() * SIZES.length)]!;
+  const probe = { size: kind, x: Math.floor(r() * (size + 4) * 8) / 8 - 2, y: Math.floor(r() * (size + 4) * 8) / 8 - 2 };
+  const sized = kind === "custom" ? { ...probe, w: 0.25 + Math.floor(r() * 24) / 8, h: 0.25 + Math.floor(r() * 24) / 8 } : probe;
+  return r() < 0.3 ? { ...sized, squeeze: true } : sized;
+}
+
+/** Whether any sub-cell center in the probe's sight rectangle has a level above 0: the predicate by brute force over a scene's levels. */
+function bruteSees(levels: Uint8Array, w: number, h: number, probe: Parameters<typeof sightRect>[0]): boolean {
+  const r = sightRect(probe);
+  for (let sy = 0; sy < h * 4; sy++) {
+    if (center(sy) < r.y0 || center(sy) >= r.y1) continue;
+    for (let sx = 0; sx < w * 4; sx++) if (center(sx) >= r.x0 && center(sx) < r.x1 && levels[sy * w * 4 + sx]! > 0) return true;
+  }
+  return false;
+}
+
+describe("sight holders", () => {
+  /*
+   * Three rooms in a row, walled apart, on a bright scene: the first
+   * player's character in the west, the second player's character (played
+   * through its character sheet) in the middle, and an NPC the DM marked to
+   * share sight with the party in the east. One creature stands in each.
+   */
+  function rooms(): RoomState {
+    const edges: Record<string, EdgeFeature> = {};
+    for (let y = 0; y < 10; y++) {
+      edges[`10,${y},w`] = WALL;
+      edges[`20,${y},w`] = WALL;
+    }
+    const s = visionRoom({
+      w: 30,
+      h: 10,
+      build: { edges },
+      tokens: [
+        pc("a", 4, 4, { ownerIds: ["p1", "p4"] }),
+        token("b", { kind: "pc", ownerIds: [], x: 14, y: 4, actor: { ref: "hero" } }),
+        token("c", { kind: "npc", partyVision: true, x: 24, y: 4, actor: { inline: actor() } }),
+      ],
+    });
+    s.characters.hero = character("hero", { ownerIds: ["p2", "p4"] });
+    return s;
+  }
+  const west = { size: "medium" as const, x: 5, y: 7 };
+  const middle = { size: "medium" as const, x: 15, y: 7 };
+  const east = { size: "medium" as const, x: 25, y: 7 };
+  const seen = (sight: { seesToken(p: typeof west): boolean }) => [west, middle, east].map((p) => sight.seesToken(p));
+
+  test("a holder sees through the sources they own, directly or through a character, and those that share sight, and never another player's", () => {
+    clearVisionCache();
+    const s = rooms();
+    assert.deepEqual(seen(partySight(s, "s1", world)), [true, true, true], "the union, the DM's");
+    assert.deepEqual(seen(holderSight(s, "s1", "p1", world)), [true, false, true], "the first player");
+    assert.deepEqual(seen(holderSight(s, "s1", "p2", world)), [false, true, true], "the second player, through the character");
+    assert.deepEqual(seen(holderSight(s, "s1", null, world)), [false, false, true], "the shared sight");
+    assert.deepEqual(seen(holderSight(s, "s1", "p3", world)), [false, false, true], "a player who owns nothing");
+    // The same through the tiles, once drawn.
+    for (const viewer of ["p1", "p2", null]) {
+      const tiles = holderSight(s, "s1", viewer, world).tiles;
+      assert.deepEqual(seen(sightFromTiles(Object.fromEntries([...tiles].map(([k, t]) => [`s1:${k}`, t])), "s1")), seen(coldHolderSight(s, "s1", viewer, world)), `${viewer}`);
+    }
+  });
+
+  test("the sources a holder sees through are those project.ts says they own, and every one marked to share sight", () => {
+    const r = rng(41);
+    let s = holderStart(r, "bright");
+    const names = Object.keys(holderEdits);
+    for (let step = 0; step < 60; step++) {
+      s = holderEdits[names[Math.floor(r() * names.length)]!]!(r, s);
+      const union = Object.values(s.tokens).filter((t) => partySight({ ...s, tokens: { [t.id]: t } }, "s1", world).tiles.size > 0);
+      for (const viewer of VIEWERS) {
+        // Each source alone on the scene: the viewer sees through it exactly when it lends to them.
+        for (const t of union) {
+          const alone = { ...s, tokens: { [t.id]: t } };
+          const lends = t.partyVision === true || (viewer !== null && ownsToken(s, { memberId: viewer, role: "player" }, t));
+          assert.equal(holderSight(alone, "s1", viewer, world).tiles.size > 0, lends, `step ${step}: ${t.id} for ${viewer}`);
+        }
+      }
+    }
+  });
+
+  test("viewers with the same sources share one answer, one holding every source gets the union's, and one with none sees nothing", () => {
+    clearVisionCache();
+    const s = rooms();
+    assert.equal(holderSight(s, "s1", "p3", world), holderSight(s, "s1", null, world), "a player who owns nothing has the shared sight");
+    assert.equal(holderSight(s, "s1", "p4", world), partySight(s, "s1", world), "the fourth player owns both characters");
+    const none = { ...s, tokens: { ...s.tokens, c: { ...s.tokens.c!, partyVision: undefined } } };
+    assert.equal(holderSight(none, "s1", null, world), NO_PARTY_SIGHT, "nothing shares sight");
+    assert.equal(holderSight({ ...s, scenes: { s1: { ...s.scenes.s1!, vision: { on: false, light: "bright" } } } }, "s1", "p1", world), NO_PARTY_SIGHT, "vision off");
+    assert.equal(holderSight(s, "missing", "p1", world), NO_PARTY_SIGHT, "a scene the state lacks");
+  });
+
+  for (const level of ["bright", "dim", "dark"] as const) {
+    test(`every raster equals a cold computation after random edits, on a ${level} scene`, () => {
+      clearVisionCache();
+      const r = rng(level === "bright" ? 51 : level === "dim" ? 52 : 53);
+      let s = holderStart(r, level);
+      const names = Object.keys(holderEdits);
+      for (let step = 0; step < 70; step++) {
+        const name = names[Math.floor(r() * names.length)]!;
+        // Some viewers each step, in a random order, so rasters start from the union, from their own last one or from another set's.
+        const asked = VIEWERS.filter(() => r() < 0.7).sort(() => r() - 0.5);
+        if (step % 9 === 4) {
+          // A staged state the size guard refused: drawn, then dropped.
+          const staged = holderEdits[name]!(r, s);
+          for (const viewer of asked) void holderSight(staged, "s1", viewer, world).tiles;
+          continue;
+        }
+        s = holderEdits[name]!(r, s);
+        for (const viewer of asked) sameTiles(holderSight(s, "s1", viewer, world).tiles, coldHolderSight(s, "s1", viewer, world).tiles, `step ${step} (${name}), ${viewer}`);
+        sameTiles(partySight(s, "s1", world).tiles, coldPartySight(s, "s1", world).tiles, `step ${step} (${name}), the union`);
+      }
+    });
+  }
+
+  test("every raster equals a cold computation through lights changing on a dim scene", () => {
+    clearVisionCache();
+    const r = rng(54);
+    let s = holderStart(r, "dim");
+    const mix: Edit[] = [edits.light!, edits.light!, edits.light!, edits.carry!, edits.nudge!, holderEdits.own!];
+    for (let step = 0; step < 60; step++) {
+      s = mix[Math.floor(r() * mix.length)]!(r, s);
+      for (const viewer of VIEWERS) sameTiles(holderSight(s, "s1", viewer, world).tiles, coldHolderSight(s, "s1", viewer, world).tiles, `step ${step}, ${viewer}`);
+    }
+  });
+
+  test("every holder's raster and the shared sight together are the sight of every source any of them sees through", () => {
+    clearVisionCache();
+    const r = rng(61);
+    let s = holderStart(r, "dark");
+    const names = Object.keys(holderEdits);
+    for (let step = 0; step < 30; step++) {
+      s = holderEdits[names[Math.floor(r() * names.length)]!]!(r, s);
+      const { w, h } = s.scenes.s1!.bounds;
+      const merged = new Uint8Array(w * h * 16);
+      for (const viewer of VIEWERS) maxInto(merged, levelsOf(holderSight(s, "s1", viewer, world).tiles, w, h));
+      const together = withOwnerOfAll(s, "all", HOLDERS);
+      assert.deepEqual(merged, levelsOf(coldHolderSight(together, "s1", "all", world).tiles, w, h), `step ${step}`);
+    }
+  });
+
+  test("a raster's in-sight test is a brute force over its sub-cells, squeezed and Tiny footprints included", () => {
+    clearVisionCache();
+    const r = rng(71);
+    let s = holderStart(r, "dim");
+    const names = Object.keys(holderEdits);
+    for (let step = 0; step < 12; step++) {
+      s = holderEdits[names[Math.floor(r() * names.length)]!]!(r, s);
+      const { w, h } = s.scenes.s1!.bounds;
+      for (const viewer of VIEWERS) {
+        const sight = holderSight(s, "s1", viewer, world);
+        const levels = levelsOf(sight.tiles, w, h);
+        for (let k = 0; k < 150; k++) {
+          const probe = randomProbe(r, w);
+          assert.equal(sight.seesToken(probe), bruteSees(levels, w, h, probe), `step ${step}, ${viewer}: ${JSON.stringify(probe)}`);
+        }
+      }
+    }
+  });
+
+  test("the point query answers as the raster later drawn, and asking it draws no raster", () => {
+    const r = rng(81);
+    let s = holderStart(r, "dark");
+    const names = Object.keys(holderEdits);
+    let queried = 0;
+    let both = 0;
+    for (let step = 0; step < 40; step++) {
+      s = holderEdits[names[Math.floor(r() * names.length)]!]!(r, s);
+      // A moment's state: the union's computation is there, and no holder's raster.
+      clearVisionCache();
+      const at = { ...s };
+      const sights = VIEWERS.map((viewer) => holderSight(at, "s1", viewer, world));
+      const probes = Array.from({ length: 120 }, () => randomProbe(r, SIZE));
+      const asked = sights.map((sight) => probes.map((p) => sight.seesToken(p)));
+      assert.equal(visionCacheReport().rasters, 0, `step ${step}: seesToken drew a raster`);
+      const union = partySight(at, "s1", world);
+      for (const [i, sight] of sights.entries()) {
+        if (sight !== union && sight !== NO_PARTY_SIGHT) queried++;
+        // Reading the tiles draws the raster, and seesToken then reads it.
+        void sight.tiles;
+        const drawn = probes.map((p) => sight.seesToken(p));
+        assert.deepEqual(asked[i], drawn, `step ${step}, ${VIEWERS[i]}`);
+        both += drawn.filter(Boolean).length > 0 && drawn.some((d) => !d) ? 1 : 0;
+      }
+    }
+    assert.ok(queried > 80, `the point query answered for ${queried} viewers`);
+    assert.ok(both > 40, `${both} viewers saw some probes and not others`);
+  });
+
+  test("the cache's running count of bytes is its contents counted again, through random edits and draws", () => {
+    clearVisionCache();
+    const r = rng(91);
+    let s = holderStart(r, "dark");
+    const names = Object.keys(holderEdits);
+    let most = 0;
+    for (let step = 0; step < 40; step++) {
+      s = holderEdits[names[Math.floor(r() * names.length)]!]!(r, s);
+      for (const viewer of VIEWERS.filter(() => r() < 0.7)) void holderSight(s, "s1", viewer, world).tiles;
+      const report = visionCacheReport();
+      assert.equal(report.bytes, report.recount, `step ${step}`);
+      most = Math.max(most, report.rasters);
+    }
+    assert.ok(most > 0);
+    clearVisionCache();
+    assert.deepEqual(visionCacheReport(), { bytes: 0, recount: 0, pinned: 0, scenes: 0, rasters: 0 });
+  });
+
+  test("a raster counts its tiles, and the source entries it holds once no computation does", () => {
+    clearVisionCache();
+    const s = rooms();
+    partySight(s, "s1", world);
+    const before = visionCacheReport();
+    const tiles = holderSight(s, "s1", "p1", world).tiles;
+    const drawn = visionCacheReport();
+    const varied = [...tiles.values()].filter((t) => "b" in t).length;
+    assert.ok(varied > 0);
+    assert.ok(drawn.bytes - before.bytes >= varied * 1024, "a varied tile counts its 1,024 levels at least");
+    assert.equal(drawn.pinned, 0, "the union's computation holds what the raster read");
+    // Every source moves, twice, so neither computation the scene keeps holds the source entries the raster read.
+    let next: RoomState = s;
+    for (const dx of [1, 2]) {
+      next = { ...next, tokens: Object.fromEntries(Object.entries(s.tokens).map(([id, t]) => [id, { ...t, x: t.x + dx }])) };
+      partySight(next, "s1", world);
+    }
+    const kept = visionCacheReport();
+    assert.equal(kept.rasters, 1);
+    assert.ok(kept.pinned >= 2 * 200, "the raster's two source entries are counted");
+    assert.equal(kept.bytes, kept.recount);
+  });
+
+  test("a raster counts the light rows it holds once no computation does", () => {
+    clearVisionCache();
+    // A light over the whole scene keeps every source's sweep box, so a small light moving changes the light rows alone.
+    const s = { ...rooms(), scenes: { s1: { ...rooms().scenes.s1!, vision: { on: true, light: "dark" as const } } }, lights: { all: light("all", 15, 5, 60, 60), l: light("l", 5, 5, 10, 10) } };
+    void holderSight(s, "s1", "p1", world).tiles;
+    assert.equal(visionCacheReport().pinned, 0);
+    let next: RoomState = s;
+    for (const x of [6, 7]) {
+      next = { ...next, lights: { ...next.lights, l: { ...next.lights.l!, x } } };
+      partySight(next, "s1", world);
+    }
+    const kept = visionCacheReport();
+    assert.ok(kept.pinned >= 40 * 8, "the raster's light rows are counted, 8 bytes a row at least");
+    assert.equal(kept.bytes, kept.recount);
+  });
+
+  test("a light that changes where a holder sees redraws their raster from their last one", () => {
+    clearVisionCache();
+    // A dim hall: the first player's two characters, one by a light that straddles a tile's edge at x = 16, and three of the second player's far away.
+    let s = visionRoom({
+      w: 40,
+      h: 40,
+      light: "dim",
+      tokens: [pc("a", 14, 6, { ownerIds: ["p1"] }), pc("e", 30, 34, { ownerIds: ["p1"] }), ...["b", "c", "d"].map((id, i) => pc(id, 4 + 12 * i, 36, { ownerIds: ["p2"] }))],
+      lights: [light("l", 16, 8, 20, 10)],
+    });
+    // Walls around the first character's corner, so the far sources do not see where the light moves.
+    s.buildChunks = chunksOf("s1", { edges: roomEdges(8, 2, 16, 12) });
+    const steps: ((s: RoomState) => RoomState)[] = [
+      (s) => ({ ...s, lights: { ...s.lights, l: { ...s.lights.l!, x: 17 } } }),
+      (s) => ({ ...s, lights: { ...s.lights, l: { ...s.lights.l!, on: false } } }),
+      (s) => ({ ...s, lights: { ...s.lights, l: { ...s.lights.l!, on: true, x: 15.5, y: 9 } } }),
+      (s) => ({ ...s, lights: { ...s.lights, m: light("m", 20, 4, 10, 10) } }),
+      (s) => ({ ...s, lights: { l: s.lights.l! } }),
+    ];
+    void holderSight(s, "s1", "p1", world).tiles;
+    for (const [i, step] of steps.entries()) {
+      s = step(s);
+      sameTiles(holderSight(s, "s1", "p1", world).tiles, coldHolderSight(s, "s1", "p1", world).tiles, `step ${i}`);
+    }
+  });
+
+  test("the point query reads Blinded, the senses and the light as the raster does", () => {
+    // A Blinded creature with blindsight, one with darkvision and one with truesight, in the dark around lights, each its own player's.
+    const s = visionRoom({
+      w: 32,
+      h: 16,
+      light: "dark",
+      tokens: [
+        pc("blind", 4, 4, { ownerIds: ["p1"], actor: { inline: actor({ senses: "blindsight 10 ft", effects: [{ id: "e", key: "blinded" }] }) } }),
+        pc("dark", 14, 8, { ownerIds: ["p2"], senses: "darkvision 30 ft" }),
+        pc("true", 26, 8, { ownerIds: ["p3"], senses: "truesight 20 ft" }),
+        pc("other", 28, 2, { ownerIds: ["p4"] }),
+      ],
+      lights: [light("l1", 6, 10, 10, 10), light("l2", 24, 12, 0, 15)],
+    });
+    const r = rng(111);
+    const probes = Array.from({ length: 600 }, () => randomProbe(r, 32));
+    for (const viewer of ["p1", "p2", "p3"]) {
+      clearVisionCache();
+      const sight = holderSight(s, "s1", viewer, world);
+      const asked = probes.map((p) => sight.seesToken(p));
+      assert.equal(visionCacheReport().rasters, 0);
+      const levels = levelsOf(sight.tiles, 32, 16);
+      assert.deepEqual(asked, probes.map((p) => bruteSees(levels, 32, 16, p)), `${viewer}`);
+      assert.ok(asked.some(Boolean) && asked.some((a) => !a), `${viewer} sees some probes and not others`);
+    }
+  });
+
+  test("a scene keeps rasters for at most 14 source sets", () => {
+    clearVisionCache();
+    const r = rng(101);
+    const s = holderStart(r, "bright");
+    const sources = Object.keys(s.tokens);
+    let drawn = 0;
+    for (let k = 1; k < 2 ** sources.length - 1; k++) {
+      // A player owning the k-th subset of the sources, and nothing that shares sight.
+      const owned = { ...s, tokens: Object.fromEntries(Object.entries(s.tokens).map(([id, t], i) => [id, { ...t, partyVision: undefined, ownerIds: k & (1 << i) ? ["q"] : ["p5"] }])) };
+      const sight = holderSight(owned, "s1", "q", world);
+      if (sight === partySight(owned, "s1", world) || sight === NO_PARTY_SIGHT) continue;
+      void sight.tiles;
+      drawn++;
+      assert.ok(visionCacheReport().rasters <= 14, `after ${drawn} sets`);
+    }
+    assert.ok(drawn > 14, `${drawn} sets drawn`);
+    assert.equal(visionCacheReport().rasters, 14);
   });
 });
