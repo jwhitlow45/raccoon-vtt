@@ -18,6 +18,11 @@ export function PreviewWait(props: { name: string; failed: boolean; zoom: number
         role="status"
         style={{
           ...chromeZoom(zoom),
+          // A flex row, so the spinner and the words center in its line, where an inline row sat on the status's baseline.
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: theme.space(2),
           maxWidth: 420,
           minWidth: 0,
           textAlign: "center",
@@ -30,10 +35,10 @@ export function PreviewWait(props: { name: string; failed: boolean; zoom: number
         {props.failed ? (
           `Could not load what ${props.name} sees. Close and try again.`
         ) : slow ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2) }}>
+          <>
             <Spinner size={18} />
             <span style={{ minWidth: 0 }}>{`Loading what ${props.name} sees…`}</span>
-          </span>
+          </>
         ) : null}
       </div>
     </div>
