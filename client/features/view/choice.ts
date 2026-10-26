@@ -63,6 +63,15 @@ export function topDownLine(tool: string | null | undefined): string | null {
   return id === null ? null : `${TOP_DOWN_TOOLS[id]} top-down. Isometric comes back when you switch tools.`;
 }
 
+/**
+ * The tool's line as the menu shows it: only while the tool hides the
+ * Isometric the user wants, since a user who wants Top-down gets no
+ * Isometric back when they switch tools.
+ */
+export function menuLine(choice: { forcedBy: string | null; wanted: ViewKind }): string | null {
+  return choice.wanted === "isometric" ? topDownLine(choice.forcedBy) : null;
+}
+
 // ---------------------------------------------------------------- the words
 
 export const VIEW_NAMES: Readonly<Record<ViewKind, string>> = { topDown: "Top-down", isometric: "Isometric" };

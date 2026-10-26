@@ -8,6 +8,7 @@ import {
   ISO_TEST_FLAG,
   isoOffered,
   kindSaid,
+  menuLine,
   otherViewPress,
   pickOf,
   suggestionHelp,
@@ -56,6 +57,13 @@ describe("the view choice (docs/design-v1-isometric-view.md 7, 8)", () => {
       assert.equal(topDownTool(tool), null, String(tool));
       assert.equal(topDownLine(tool), null, String(tool));
     }
+  });
+
+  test("the menu promises Isometric back only to a user who wants it", () => {
+    const line = "The map builder works top-down. Isometric comes back when you switch tools.";
+    assert.equal(menuLine({ forcedBy: "build", wanted: "isometric" }), line);
+    assert.equal(menuLine({ forcedBy: "build", wanted: "topDown" }), null, "a Top-down pick keeps Top-down after the tool");
+    assert.equal(menuLine({ forcedBy: null, wanted: "isometric" }), null);
   });
 
   test("the words shown are the design's", () => {

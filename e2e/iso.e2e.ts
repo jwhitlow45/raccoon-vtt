@@ -327,6 +327,14 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await dm.keyboard.press("q");
     await dm.locator("[data-toast]").filter({ hasText: "Turning needs the isometric view." }).first().waitFor();
     assert.deepEqual(await stored(dm, `rvtt.view.${run.roomId}`), { v: 1, pick: "topDown", turns: { [run.sceneId]: 0 } });
+
+    // A Top-down pick keeps Top-down after the builder, so the menu promises no Isometric back (ISO5-ASTRA-03).
+    await dm.keyboard.press("b");
+    const flat = await openMenu(dm, false);
+    await flat.getByRole("radio", { name: "Top-down", checked: true }).waitFor();
+    assert.equal(await flat.getByText(/Isometric comes back/).count(), 0, "no promise of Isometric");
+    await closeMenu(dm, false);
+    await dm.keyboard.press("v");
   });
 
   test("ISO-6. the View button by keyboard: focus on the checked radio, the arrows choose, Tab reaches the turns, Escape goes back to the button", async () => {

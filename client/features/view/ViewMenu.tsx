@@ -15,9 +15,9 @@ import {
   choiceWords,
   isoOffered,
   pickOf,
+  menuLine,
   sayView,
   suggestionHelp,
-  topDownLine,
   topDownTool,
   TURN_LEFT,
   TURN_LEFT_LABEL,
@@ -131,7 +131,7 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; keyOpen?: boolean
   const name = useId();
   const helpId = useId();
   const value = choiceOf(choice.stored.pick);
-  const forced = topDownLine(choice.forcedBy);
+  const forced = menuLine(choice);
   const turns = choice.shown.kind === "isometric";
   const turn = (by: 1 | -1) => {
     if (choice.shown.kind === "isometric" && choice.sceneId) turnView(choice.key, choice.sceneId, turned(choice.shown.turn, by));
