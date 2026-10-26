@@ -367,11 +367,22 @@ export function playersSeeGround(state: RoomState, sceneId: string): (x: number,
  * The ground any player remembers on a scene, which the DM's tools read
  * (docs/design-v1-per-player-vision.md decision 14): `playersSeeGround`,
  * and on a per-player scene each sight holder's own layer joined to it, as
- * `exploredAny` shows the DM.
+ * `exploredAny` shows the DM. A DM's device reads that `exploredAny`, so it
+ * predicts the trap hint from the ground the server reads (review PV1-O14).
+ * A player's copy holds none, and reads its own ground.
  */
 export function groundAnyPlayerSees(state: RoomState, sceneId: string): (x: number, y: number) => boolean {
   const shared = playersSeeGround(state, sceneId);
-  if (!perPlayerScene(state.scenes[sceneId]) || sightOf(state) !== undefined) return shared;
+  if (!perPlayerScene(state.scenes[sceneId])) return shared;
+  if (sightOf(state) !== undefined) {
+    const joined = viewMapsOf(state).exploredAny;
+    if (!joined) return shared;
+    const any = cellReader(new Map(), (s, tx, ty) => {
+      const tile = joined[tileKey(s, tx, ty)];
+      return tile ? bitsOf(tile) : null;
+    });
+    return (x, y) => shared(x, y) || !any(sceneId, x, y);
+  }
   const own = sightHolders(state, sceneId).map((id) => fogReader(state, id));
   return (x, y) => shared(x, y) || own.some((fogged) => !fogged(sceneId, x, y));
 }

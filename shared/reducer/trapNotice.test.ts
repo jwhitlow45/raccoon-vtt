@@ -4,6 +4,7 @@ import { holderTileKey } from "../keys.ts";
 import { describeEvent } from "../logText.ts";
 import type { RoomState, Trap, TrapRig, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
+import { projectState } from "../project.ts";
 import { applyOp } from "../reducer.ts";
 import { rasterizeFogOps } from "../rules/fog.ts";
 import { actor, character, DM, env, P1, reveal, room, token, trap as trapOf } from "../testutil.ts";
@@ -121,5 +122,11 @@ describe("the hint on a per-player scene (docs/design-v1-per-player-vision.md de
     const tile = Object.values(rasterizeFogOps({}, "s1", s.scenes.s1!.bounds, [{ id: "r", mode: "reveal", shape: { kind: "rect", x: 9, y: 4, w: 3, h: 3 } }]))[0]!;
     s.exploredBy[holderTileKey("s1", "p1", tile.tx, tile.ty)] = { ...tile, memberId: "p1" };
     assert.equal(notices(walk(s, 8).state).length, 1, "p1's own map holds the zone");
+    // The DM's device predicts the hint from its own copy, which holds every holder's map joined as exploredAny (review PV1-O14).
+    const copy = projectState(s, DM, { sceneId: "s1" }) as unknown as RoomState;
+    assert.ok((copy as RoomState & { exploredAny?: object }).exploredAny);
+    const predicted = applyOp(copy, { t: "token.move", tokenId: "thorn", x: 8, y: 5 }, DM, env(seq++));
+    assert.ok(predicted.ok, predicted.ok ? "" : predicted.message);
+    assert.equal(notices(predicted.state).length, 1, "as the server does");
   });
 });
