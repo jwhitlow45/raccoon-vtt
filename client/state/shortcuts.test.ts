@@ -1011,7 +1011,7 @@ describe("a second press of the tool's key moves through its main choice (docs/d
     let seed = 20261025;
     const random = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
     const keyed = SHORTCUTS.filter((s) => s.id.startsWith("tool:") && CYCLES[s.id.slice(5)]);
-    assert.ok(keyed.length >= 6, "every cycling tool with a key is run");
+    assert.equal(keyed.length, Object.keys(CYCLES).length, "every cycling tool has a key, and each is run");
     for (const s of keyed) {
       const id = s.id.slice(5);
       const r = room({ tool: id });
