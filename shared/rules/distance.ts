@@ -15,8 +15,11 @@ import { hexAt, hexDistance, type Hex, type HexGrid } from "./hex.ts";
  * stands on, and the steps between two boxes are the fewest hex steps
  * between any hex of one and any hex of the other, with no second axis:
  * a hex has no diagonal, so the room's rule only combines those steps with
- * the vertical ones. A box is built for a grid, so the typecheck lists
- * every place that builds one.
+ * the vertical ones. `tokenCellBox` and `pointCellBox` take the grid, so
+ * the typecheck lists every place that builds a box from a creature or a
+ * point. A box written out by hand is a square one, and steps between a
+ * box on hexes and one on squares throw rather than read the hex box's
+ * cells as squares (review HX2-OPUS-05).
  */
 
 export type DistanceSettings = Pick<RoomSettings, "feetPerCell" | "diagonal">;
@@ -79,6 +82,7 @@ export function axisSteps(a0: number, a1: number, b0: number, b1: number): numbe
 export function stepsBetween(a: CellBox, b: CellBox): { dx: number; dy: number; dz: number } {
   const dz = axisSteps(a.z0, a.z1, b.z0, b.z1);
   if (a.hexes && b.hexes) return { dx: hexSetSteps(a.hexes.g, a.hexes.at, b.hexes.at), dy: 0, dz };
+  if (a.hexes || b.hexes) throw new Error("steps between a box on hexes and one on squares");
   return {
     dx: axisSteps(a.x0, a.x1, b.x0, b.x1),
     dy: axisSteps(a.y0, a.y1, b.y0, b.y1),

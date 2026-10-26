@@ -116,3 +116,13 @@ describe("squares keep their boxes", () => {
     assert.deepEqual(stepsBetween(box, pointCellBox(SQUARES, { x: 6.5, y: 7.5 }, 5)), { dx: 3, dy: 4, dz: 0 });
   });
 });
+
+describe("a box on hexes and one written out by hand have no steps between them (review HX2-OPUS-05)", () => {
+  test("they throw, either way round, rather than read the hex box's cells as squares", () => {
+    const [, g] = GRIDS[0]!;
+    const hexBox = tokenCellBox(g, on(g, "medium", { col: 4, row: 4 }), 5);
+    const literal = { x0: 9, x1: 10, y0: 4, y1: 5, z0: 0, z1: 1 };
+    assert.throws(() => stepsBetween(hexBox, literal), /on hexes and one on squares/);
+    assert.throws(() => stepsBetween(literal, hexBox), /on hexes and one on squares/);
+  });
+});
