@@ -1531,7 +1531,7 @@ async function countShows(scope: Locator, kind: string, count: string): Promise<
  * buttons', and whether they should share it: the name's longest word,
  * the gap and the pips side by side within the line.
  */
-function titleLines(root: Locator): Promise<{ name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; text: string }[]> {
+function titleLines(root: Locator): Promise<{ name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; under: number; text: string }[]> {
   return root.first().evaluate((el) => {
     type R = { left: number; right: number; top: number; bottom: number; width: number };
     type E = {
@@ -1546,7 +1546,7 @@ function titleLines(root: Locator): Promise<{ name: string; pips: number; shares
     };
     const doc = (el as unknown as { ownerDocument: { createRange(): { setStart(n: unknown, o: number): void; setEnd(n: unknown, o: number): void; getBoundingClientRect(): R } } }).ownerDocument;
     const style = (e: E) => (globalThis as unknown as { getComputedStyle(e: E): { columnGap: string; width: string; whiteSpace: string } }).getComputedStyle(e);
-    const out: { name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; text: string }[] = [];
+    const out: { name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; under: number; text: string }[] = [];
     for (const pips of Array.from((el as unknown as E).querySelectorAll("[data-use-pips]"))) {
       const nameBox = pips.previousElementSibling!;
       const nameEl = nameBox.firstElementChild!;
@@ -1590,6 +1590,7 @@ function titleLines(root: Locator): Promise<{ name: string; pips: number; shares
         fits: longest + parseFloat(style(line).columnGap) * scale + p.width <= l.width + 0.5,
         endOff: Math.abs(p.right - l.right),
         buttonsOff: buttons.length > 0 ? Math.abs(p.right - Math.max(...buttons)) : null,
+        under: p.top - n.bottom,
         text: `${name}: pips ${Math.round(p.width)} px, name's longest word ${Math.round(longest)} px, line ${Math.round(l.width)} px`,
       });
     }
@@ -1605,5 +1606,7 @@ async function titlesInLine(root: Locator, screen: string, seen: string[]): Prom
     assert.ok(t.endOff <= 1, `${what}: the pips ${t.endOff} px from the line's right end`);
     if (t.buttonsOff !== null) assert.ok(t.buttonsOff <= 1, `${what}: the pips ${t.buttonsOff} px from the buttons' right edge`);
     assert.equal(t.shares, t.fits, `${what}: ${t.shares ? "beside the name where they do not fit" : "on the next line where they fit beside the name"} (${t.text})`);
+    // Dropped, they stand right under the name, as its second line would, so the row is as tall as one whose name wraps beside them.
+    if (!t.shares) assert.ok(Math.abs(t.under) <= 1, `${what}: ${t.under} px between the name and the pips under it`);
   }
 }

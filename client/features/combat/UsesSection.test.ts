@@ -238,6 +238,12 @@ describe("a monster's rows, its counts as pips", () => {
     assert.match(markup, /<ul aria-label="Aboleth&#x27;s uses" style="[^"]*gap:12px/);
   });
 
+  test("a part that wraps under the name stands a line under it with no gap, so the row is as tall as one whose name takes two lines beside its pips (the alignment sweep's cu-turn at 320 x 568 and 130%)", () => {
+    const titles = list(spent).match(/<div style="flex:1 1 100%;min-width:0;display:flex[^"]*"/g) ?? [];
+    assert.equal(titles.length, 4);
+    for (const t of titles) assert.match(t, /row-gap:0[;"]/, t);
+  });
+
   test("a lent monster's player reads the same rows and pips", () => {
     const markup = list(spent, { viewer: P1 });
     assert.deepEqual(pips(row(markup, "resist")), { left: 2, spent: 1 });

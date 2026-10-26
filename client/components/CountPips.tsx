@@ -32,10 +32,15 @@ export function countWords(count: Count): string {
  * width would drop 3 pips under "Legendary Resistance" there.
  * `break-word`, unlike `anywhere`, leaves the longest word as the name's
  * `min-content`, and still breaks a word longer than the whole line.
+ * `end` that drops stands right under the name with no gap, as a second
+ * line of the name would, so the row is as tall as one whose name wraps
+ * beside its end (the alignment sweep's kind-height on a turn card at
+ * 320 px and 130%, a recharge's "Rolled 5: ready" beside Legendary
+ * Resistance's two lines).
  */
 export function NameLine(props: { name: ReactNode; spoken?: string; end?: ReactNode }) {
   return (
-    <div style={{ flex: "1 1 100%", minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), fontSize: theme.font.input, lineHeight: theme.leading.tight }}>
+    <div style={{ flex: "1 1 100%", minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: 0, fontSize: theme.font.input, lineHeight: theme.leading.tight }}>
       <span style={{ position: "relative", flex: "1 1 auto", width: "min-content", minWidth: 0, overflowWrap: "break-word", fontWeight: theme.weight.strong }}>
         {/* The name in an element of its own, so a search by its words alone still finds it beside the spoken count. */}
         <span>{props.name}</span>
