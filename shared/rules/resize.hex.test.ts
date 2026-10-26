@@ -5,7 +5,7 @@ import { int, rng, scene, token } from "../testutil.ts";
 import { hexAnchor, occupiedHexes, placedOnHex, tokenRefHex, type SizeCategory } from "./footprint.ts";
 import { gridOfShape } from "./grid.ts";
 import { hexInScene, hexKey, sameHex, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
-import { NO_ROOM_TO_GROW, RESIZE_KEEPS_PLACE, resizeRefusal, resizeSpot } from "./resize.ts";
+import { NO_ROOM_TO_GROW, RESIZE_KEEPS_PLACE, resizeCandidates, resizeRefusal, resizeSpot } from "./resize.ts";
 
 /**
  * A resize on hexes keeps the reference hex where it was
@@ -56,6 +56,37 @@ for (const shape of ["hexRows", "hexColumns"] as const) {
       assert.ok(!("refused" in dm) && sameHex(tokenRefHex(g, { ...t, size: "large", x: dm.x, y: dm.y }), hex));
     });
 
+    test("candidates that tie fall in lattice order: the smaller row, then column, on hex rows, mirrored on hex columns (review HX2-OPUS-06)", () => {
+      const lattice = (h: Hex) => (shape === "hexRows" ? [h.row, h.col] : [h.col, h.row]);
+      let ties = 0;
+      const sizes = ["tiny", "medium", "large", "huge", "gargantuan"] as const;
+      for (const from of sizes) {
+        for (const to of sizes) {
+          if (from === to || (from === "tiny" && to === "medium") || (from === "medium" && to === "tiny")) continue;
+          for (const hex of [{ col: 10, row: 8 }, { col: 11, row: 9 }]) {
+            const t = on(g, from, hex);
+            const ref = tokenRefHex(g, t);
+            const from0 = hexAnchor(g, t);
+            const refs = resizeCandidates(t, { size: to }, world(shape, t).scenes.s1).map((p) => tokenRefHex(g, { size: to, ...p }));
+            const d = (r: Hex) => {
+              const a = hexAnchor(g, { size: to, ...placedOnHex(g, { size: to, x: 0, y: 0 }, r) });
+              return (a.x - from0.x) ** 2 + (a.y - from0.y) ** 2;
+            };
+            const want = [...refs].sort((a, b) => {
+              if (sameHex(a, ref)) return -1;
+              if (sameHex(b, ref)) return 1;
+              const [ar, ac] = lattice(a);
+              const [br, bc] = lattice(b);
+              return d(a) - d(b) || ar! - br! || ac! - bc!;
+            });
+            assert.deepEqual(refs.map(hexKey), want.map(hexKey), `${from} to ${to} at ${hexKey(hex)}`);
+            for (let i = 1; i < refs.length; i++) if (Math.abs(d(refs[i]!) - d(refs[i - 1]!)) < 1e-9 && !sameHex(refs[i - 1]!, ref)) ties++;
+          }
+        }
+      }
+      assert.ok(ties > 10, `${ties} ties`);
+    });
+
     test("of the footprints that fit, an owner's growth takes the one whose anchor is nearest, ties to the smaller row, then column", () => {
       const span = sceneHexSpan(g, { w: 30, h: 20 });
       const last: Hex = shape === "hexRows" ? { col: 12, row: span.rows - 1 } : { col: span.cols - 1, row: 9 };
@@ -75,7 +106,7 @@ for (const shape of ["hexRows", "hexColumns"] as const) {
           fits.push({ ref: { col, row }, d: (a.x - from.x) ** 2 + (a.y - from.y) ** 2 });
         }
       }
-      fits.sort((a, b) => a.d - b.d || a.ref.row - b.ref.row || a.ref.col - b.ref.col);
+      fits.sort((a, b) => a.d - b.d || (shape === "hexRows" ? a.ref.row - b.ref.row || a.ref.col - b.ref.col : a.ref.col - b.ref.col || a.ref.row - b.ref.row));
       assert.ok(new Set(fits.map((f) => f.d.toFixed(6))).size > 1, "the candidates lie at different distances");
       assert.ok(sameHex(tokenRefHex(g, { size: "gargantuan", x: spot.x, y: spot.y }), fits[0]!.ref));
     });

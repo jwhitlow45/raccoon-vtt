@@ -182,13 +182,23 @@ export function resizeRefusal(state: BuildState, token: MovingToken, next: NextS
 }
 
 /*
+ * Lattice order: the rows lattice's row, then its column, so a tie falls
+ * the same way on hex columns as on hex rows, mirrored (4.1). On hex
+ * columns a lattice row is a column of hexes.
+ */
+function latticeOrder(g: HexGrid, a: Hex, b: Hex): number {
+  return g.orient === "rows" ? a.row - b.row || a.col - b.col : a.col - b.col || a.row - b.row;
+}
+
+/*
  * A hex resize's spots by rule 4 (4.2): a growth's footprints that cover
  * every hex the creature stood on and lie inside the scene, a shrink's
  * inside them, the one keeping the reference hex first, then by how far
- * the new anchor is from the old one, ties to the smaller row, then the
- * smaller column. Every footprint holds its reference hex and lies within
- * 2 steps of it, so the references within 2 steps of the old one hold all
- * the footprints that can cover it or lie inside it.
+ * the new anchor is from the old one, ties in lattice order (the smaller
+ * row, then column, mirrored on hex columns). Every footprint holds its
+ * reference hex and lies within 2 steps of it, so the references within 2
+ * steps of the old one hold all the footprints that can cover it or lie
+ * inside it.
  */
 function hexCandidates(g: HexGrid, token: PlacedToken, next: NextSize, scene: Pick<Scene, "bounds">, change: "grow" | "shrink"): Point[] {
   const size = sizeCategory(sized(next, 0, 0));
@@ -215,7 +225,7 @@ function hexCandidates(g: HexGrid, token: PlacedToken, next: NextSize, scene: Pi
     const dy = a.y - from.y;
     return dx * dx + dy * dy;
   };
-  refs.sort((a, b) => (sameHex(a, ref) ? -1 : sameHex(b, ref) ? 1 : away(a) - away(b) || a.row - b.row || a.col - b.col));
+  refs.sort((a, b) => (sameHex(a, ref) ? -1 : sameHex(b, ref) ? 1 : away(a) - away(b) || latticeOrder(g, a, b)));
   return refs.map((r) => placedOnHex(g, sized(next, 0, 0), r));
 }
 
