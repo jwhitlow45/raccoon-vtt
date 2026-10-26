@@ -286,6 +286,105 @@ async function standeeAt(page: Page, tokenId: string): Promise<{ x: number; y: n
 const hall = { sceneId: "", patId: "", goblin: randomUUID(), bree: randomUUID() };
 const AURA = "#e5484d";
 
+// ---------------------------------------------------------------- input (lane ISO-4)
+
+const BREE = randomUUID();
+const GRUM = randomUUID();
+const FRONT = randomUUID();
+const BEHIND = randomUUID();
+/** View units a cell of height lifts (client/lib/view.ts K). */
+const K = 0.8660254037844386;
+
+function tokenOp(id: string, extra: Record<string, unknown>) {
+  const actor = { hp: { cur: 30, max: 30, temp: 0 }, life: "alive", ac: 12, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+  return { t: "token.create", token: { id, sceneId: run.sceneId, size: "medium", visibility: "all", actor: { inline: actor }, ...extra } };
+}
+
+/**
+ * The first scene as the input cases want it: fog on and all revealed, moves
+ * not stopped by ledges, a 10 ft platform over cells 8 to 11 by 4 to 7, and
+ * every page reopened at 40 px a cell around it.
+ */
+async function setUpSteps(): Promise<void> {
+  const cells: string[] = [];
+  for (let y = 4; y < 8; y++) for (let x = 8; x < 12; x++) cells.push(`${x},${y}`);
+  await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { fogEnabled: true, blockMovement: false, defaultView: { x: 8, y: 6, zoom: 40 } } });
+  await ops.send({ t: "build.height", sceneId: run.sceneId, cells, height: 10 });
+  await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 20, h: 16 } }] });
+  await reopenRoom(pat);
+  await reopenRoom(dm);
+}
+
+/** Picks Isometric at a turn on a page, as the View menu does (relief/isoTest.ts), and waits for its board. */
+async function isoOn(page: Page, turn: 0 | 1 | 2 | 3): Promise<void> {
+  await page.evaluate((t) => {
+    const hook = (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void; turn(t: number): void } }).__rvttIsoHook;
+    hook.pick("isometric");
+    hook.turn(t);
+  }, turn);
+  await untilShown(page, `isometric ${turn}`);
+}
+
+/** Where a world point at a height of `z` cells shows on the page, through the isometric board's relief (relief/IsoBoard.tsx). */
+function isoPoint(page: Page, p: { x: number; y: number }, z: number): Promise<{ x: number; y: number }> {
+  return page.evaluate(
+    ([p, z, k]) => {
+      type Node = { getChildren(): Node[]; getAbsoluteTransform(): { point(p: { x: number; y: number }): { x: number; y: number } } };
+      type Stage = Node & { width(): number; listening(): boolean; scaleY(): number; getLayers(): Node[]; container(): { getBoundingClientRect(): { left: number; top: number } } };
+      const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+      // The isometric main stage: on screen, and listening, which its ground stage never does.
+      const stage = konva.stages.find((s) => s.width() > 0 && s.listening() && s.getLayers().length === 3);
+      if (!stage) throw new Error("no isometric board on screen");
+      const ground = stage.getLayers()[0]!.getChildren()[0]!.getChildren()[0]!;
+      const at = ground.getAbsoluteTransform().point(p);
+      const box = stage.container().getBoundingClientRect();
+      return { x: box.left + at.x, y: box.top + at.y - k * z * stage.scaleY() };
+    },
+    [p, z, K] as const,
+  );
+}
+
+/** Where a world point shows on the page in Top-down. */
+function flatPoint(page: Page, p: { x: number; y: number }): Promise<{ x: number; y: number }> {
+  return page.evaluate((p) => {
+    type Stage = { width(): number; x(): number; y(): number; scaleX(): number; container(): { getBoundingClientRect(): { left: number; top: number } } };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const stage = konva.stages.find((s) => s.width() > 0);
+    if (!stage) throw new Error("no board on screen");
+    const box = stage.container().getBoundingClientRect();
+    return { x: box.left + stage.x() + p.x * stage.scaleX(), y: box.top + stage.y() + p.y * stage.scaleX() };
+  }, p);
+}
+
+/** The name of a token node's parent on the isometric main stage: the drag layer's ground group while a local drag moves it. */
+function parentOf(page: Page, id: string): Promise<string> {
+  return page.evaluate((tokenId) => {
+    type Node = { getParent(): Node | null; name(): string };
+    type Stage = { width(): number; listening(): boolean; getLayers(): unknown[]; findOne(s: string): Node | undefined };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const stage = konva.stages.find((s) => s.width() > 0 && s.listening() && s.getLayers().length === 3);
+    return stage?.findOne(`#${tokenId}`)?.getParent()?.name() ?? "none";
+  }, id);
+}
+
+/** A one-finger drag from one page point to another, in steps a frame apart, and the dragged node's parent mid-drag and after. */
+async function touchDrag(page: Page, cdp: import("playwright-core").CDPSession, from: { x: number; y: number }, to: { x: number; y: number }, id: string): Promise<{ during: string; after: string }> {
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: from.x, y: from.y, id: 0 }] });
+  await page.waitForTimeout(50);
+  const steps = 12;
+  for (let i = 1; i <= steps; i++) {
+    const x = from.x + ((to.x - from.x) * i) / steps;
+    const y = from.y + ((to.y - from.y) * i) / steps;
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y, id: 0 }] });
+    await page.waitForTimeout(20);
+  }
+  const during = await parentOf(page, id);
+  await page.waitForTimeout(200);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await page.waitForTimeout(300);
+  return { during, after: await parentOf(page, id) };
+}
+
 describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -1043,6 +1142,167 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     // The room as it was, for the tests after.
     await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
     await waitFor("Pat back on the first scene", () => (patSocket.state?.meta.playerSceneId === run.sceneId ? true : null));
+  });
+
+  // ---------------------------------------------------------------- input (lane ISO-4, docs/design-v1-isometric-view.md 6)
+
+  test("ISO-40. Pat drags in Isometric: up a revealed platform to its top at 10 ft, and a Large across a ledge stays under the finger, each moving in the drag layer", async () => {
+    const patId = patSocket.you!.memberId;
+    await setUpSteps();
+    await ops.send(tokenOp(BREE, { kind: "npc", name: "Bree", x: 3, y: 5, ownerIds: [patId], disposition: "ally" }));
+    await ops.send(tokenOp(GRUM, { kind: "npc", name: "Grum", size: "large", x: 9, y: 10, ownerIds: [patId], disposition: "ally" }));
+    await waitFor("Bree and Grum on Pat's page", () => (patSocket.state?.tokens[BREE] && patSocket.state.tokens[GRUM] ? true : null));
+    await isoOn(pat, 0);
+    await pat.waitForTimeout(400);
+    assert.ok((await boardScale(pat)) >= 24, "heights stand at Pat's zoom");
+
+    const cdp = await patContext.newCDPSession(pat);
+    try {
+      // The ring's middle to the platform's top cell (9, 5), 10 ft up.
+      const layers = await touchDrag(pat, cdp, await isoPoint(pat, { x: 3.5, y: 5.5 }, 0), await isoPoint(pat, { x: 9.5, y: 5.5 }, 2), BREE);
+      assert.equal(layers.during, "dragGround", "mid-drag the standee draws in the drag layer");
+      assert.notEqual(layers.after, "dragGround", "after the drop it is back among the relief's pieces");
+      await waitFor("Bree on the platform", () => {
+        const t = dmSocket.state?.tokens[BREE];
+        return t && t.x === 9 && t.y === 5 && t.elevation === 10 ? true : null;
+      });
+      await shots.take(pat, "iso-40-pat-walker-on-platform");
+
+      // Grum's ring to just short of the ledge at x = 8: half its footprint on the 10 ft side.
+      await touchDrag(pat, cdp, await isoPoint(pat, { x: 10, y: 11 }, 0), await isoPoint(pat, { x: 7.9, y: 6 }, 2), GRUM);
+      await waitFor("Grum across the ledge at 10 ft", () => {
+        const t = dmSocket.state?.tokens[GRUM];
+        return t && t.x === 7 && t.y === 5 && t.elevation === 10 ? true : null;
+      });
+      await shots.take(pat, "iso-40-pat-large-across-ledge");
+    } finally {
+      await cdp.detach();
+    }
+  });
+
+  test("ISO-41. a tap again on the DM's standee picks the one behind it, front to back and round again", async () => {
+    await dm.bringToFront();
+    await ops.send(tokenOp(FRONT, { kind: "monster", name: "Front", x: 13, y: 9, disposition: "hostile" }));
+    await ops.send(tokenOp(BEHIND, { kind: "monster", name: "Behind", x: 12, y: 8, disposition: "hostile" }));
+    await waitFor("both on the DM's page", () => (dmSocket.state?.tokens[FRONT] && dmSocket.state.tokens[BEHIND] ? true : null));
+    await isoOn(dm, 0);
+    await blur(dm);
+    await dm.keyboard.press("Escape");
+    await dm.waitForTimeout(400);
+    // At turn 0 the front one's art rises over the ring of the one behind: a press there hits both.
+    const both = await isoPoint(dm, { x: 12.5 + 0.1, y: 8.5 + 0.1 }, 0);
+    const bar = (name: string) => dm.getByRole("dialog", { name: `${name} actions` });
+    await dm.mouse.click(both.x, both.y);
+    await bar("Front").waitFor();
+    await dm.mouse.click(both.x, both.y);
+    await bar("Behind").waitFor();
+    await shots.take(dm, "iso-41-dm-tap-again-behind");
+    await dm.mouse.click(both.x, both.y);
+    await bar("Front").waitFor();
+    await dm.keyboard.press("Escape");
+  });
+
+  test("ISO-42. Pat's arrow keys move Bree by the screen at each turn: Up is north, west, south, then east", async () => {
+    await pat.bringToFront();
+    // Down off the platform onto open ground near the middle, in view at every turn, and Grum out of the way, so no art stands over Bree's.
+    await pat.keyboard.press("Escape");
+    await ops.send({ t: "token.move", tokenId: GRUM, x: 17, y: 13, elevation: 0 });
+    await ops.send({ t: "token.move", tokenId: BREE, x: 6, y: 9, elevation: 0 });
+    await waitFor("Bree on open ground", () => (patSocket.state?.tokens[BREE]?.x === 6 && patSocket.state.tokens[BREE]!.elevation === 0 ? true : null));
+    const expected = [
+      { dx: 0, dy: -1 },
+      { dx: -1, dy: 0 },
+      { dx: 0, dy: 1 },
+      { dx: 1, dy: 0 },
+    ];
+    for (const [turn, step] of expected.entries()) {
+      await isoOn(pat, turn as 0 | 1 | 2 | 3);
+      await pat.waitForTimeout(200);
+      const at = await isoPoint(pat, { x: patSocket.state!.tokens[BREE]!.x + 0.5, y: patSocket.state!.tokens[BREE]!.y + 0.5 }, 0);
+      await pat.touchscreen.tap(at.x, at.y - 10);
+      await shots.take(pat, `iso-42-pat-turn-${turn}-tapped`);
+      await pat.getByRole("dialog", { name: "Bree actions" }).waitFor({ timeout: 5000 });
+      const before = { ...dmSocket.state!.tokens[BREE]! };
+      await blur(pat);
+      await pat.keyboard.press("ArrowUp");
+      await waitFor(`turn ${turn}: Bree moved`, () => {
+        const t = dmSocket.state?.tokens[BREE];
+        return t && (t.x !== before.x || t.y !== before.y) ? t : null;
+      });
+      const t = dmSocket.state!.tokens[BREE]!;
+      assert.deepEqual({ dx: t.x - before.x, dy: t.y - before.y }, step, `turn ${turn}`);
+      await pat.keyboard.press("Escape");
+    }
+  });
+
+  test("ISO-43. the DM's builder shows Top-down centered on the selected token and comes back to Isometric with it in place", async () => {
+    await dm.bringToFront();
+    await isoOn(dm, 1);
+    await dm.waitForTimeout(300);
+    const at = await isoPoint(dm, { x: 13.5, y: 9.5 }, 0);
+    await dm.mouse.click(at.x, at.y - 8);
+    await dm.getByRole("dialog", { name: "Front actions" }).waitFor();
+    const ring = await isoPoint(dm, { x: 13.5, y: 9.5 }, 0);
+    await blur(dm);
+    await dm.keyboard.press("b");
+    await untilShown(dm, "top-down");
+    await dm.waitForTimeout(300);
+    const flat = await flatPoint(dm, { x: 13.5, y: 9.5 });
+    assert.ok(Math.hypot(flat.x - ring.x, flat.y - ring.y) <= 1, `the builder's Top-down keeps the token where it was: ${JSON.stringify([ring, flat])}`);
+    await shots.take(dm, "iso-43-dm-builder-top-down");
+    await dm.keyboard.press("v");
+    await untilShown(dm, "isometric 1");
+    await dm.waitForTimeout(300);
+    const back = await isoPoint(dm, { x: 13.5, y: 9.5 }, 0);
+    assert.ok(Math.hypot(back.x - ring.x, back.y - ring.y) <= 1, `back in Isometric it stands where it was: ${JSON.stringify([ring, back])}`);
+    await dm.keyboard.press("Escape");
+  });
+
+  test("ISO-44. a label on the platform tapped with Select in Isometric opens its pane by the label as drawn", async () => {
+    await dm.bringToFront();
+    const labelId = randomUUID();
+    await ops.send({ t: "build.label", sceneId: run.sceneId, labelId, label: { x: 10.5, y: 6.5, text: "Altar", size: 1 } });
+    await waitFor("the label on the DM's page", () => (dmSocket.state?.labels[labelId] ? true : null));
+    await isoOn(dm, 0);
+    await dm.waitForTimeout(300);
+    // The text stands on its anchor on the 10 ft top: its middle is half a text height above it.
+    const foot = await isoPoint(dm, { x: 10.5, y: 6.5 }, 2);
+    const scale = await boardScale(dm);
+    await dm.mouse.click(foot.x, foot.y - 0.5 * scale);
+    const pane = dm.getByRole("dialog", { name: "Edit label" });
+    await pane.waitFor();
+    const box = await pane.boundingBox();
+    assert.ok(box && box.x <= foot.x + 1 && box.x + box.width >= foot.x - 1, `the pane stands by the label: ${JSON.stringify([box, foot])}`);
+    await shots.take(dm, "iso-44-dm-label-pane");
+    await dm.keyboard.press("Escape");
+    await ops.send({ t: "build.label", sceneId: run.sceneId, labelId, label: null });
+  });
+
+  test("ISO-45. a held ruler keeps Pat's view through a new suggestion, which follows once the finger lifts", async () => {
+    await pat.bringToFront();
+    await pat.evaluate(() => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick("follow"));
+    await suggest("Isometric");
+    await waitFor("Pat following into Isometric", async () => ((await shownView(pat)).startsWith("isometric") ? true : null));
+    const following = await shownView(pat);
+    await pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Ruler/ }).tap();
+    const cdp = await patContext.newCDPSession(pat);
+    try {
+      // The board's middle, on screen at any turn.
+      const board = await pat.locator(".konvajs-content").filter({ visible: true }).first().boundingBox();
+      assert.ok(board, "the board on screen");
+      const from = { x: board.x + board.width / 2, y: board.y + board.height / 2 };
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...from, id: 0 }] });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + 40, y: from.y + 10, id: 0 }] });
+      await suggest("Top-down");
+      await pat.waitForTimeout(600);
+      assert.equal(await shownView(pat), following, "the view waits for the finger");
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await untilShown(pat, "top-down");
+    } finally {
+      await cdp.detach();
+    }
+    await pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Select/ }).tap();
+    await suggest("Top-down");
   });
 
   test("ISO-12. no page logged an error", () => {
