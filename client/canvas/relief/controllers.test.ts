@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { withExplored } from "../../features/vision/exploredFog.ts";
 
 /**
  * Both of the board's drawing trees stay mounted once Isometric has shown
@@ -232,5 +233,32 @@ describe("every isometric place draws", () => {
     const main = iso.slice(iso.indexOf("<Stage key={`main:"));
     const overlay = main.split(/<Layer[ >]/)[3]!;
     assert.match(overlay, /UPRIGHT_LAYERS\.map\(/);
+  });
+});
+
+describe("the ground stage hides what Top-down hides (5.2, 12)", () => {
+  test("flat creatures draw before the fog, and the ground marks after it, as Top-down's layers order them", () => {
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    const ground = iso.slice(iso.indexOf("<Stage\n          key={`ground:"), iso.indexOf("<Stage key={`main:"));
+    const at = (needle: string) => {
+      const i = ground.indexOf(needle);
+      assert.ok(i >= 0, `${needle} on the ground stage`);
+      return i;
+    };
+    const order = ["<MapContent ", "{GROUND_LAYERS.map(", "{flat.map((t) => props.renderToken(t, null))}", "<SightOverlay ", "<FogShape ", "{GROUND_MARKS.map("].map(at);
+    assert.deepEqual([...order].sort((a, b) => a - b), order, "map, board layers, flat creatures, sight, fog, then ground marks");
+    // Top-down's tree the same way: the tokens under the fog draw before it, in their own layer.
+    const stage = read("canvas/Stage.tsx");
+    assert.ok(stage.indexOf("{below.map((t) => renderToken(t))}") < stage.indexOf("<FogShape sceneId={scene.id}"));
+  });
+
+  test("a player's stand rule reads the very tiles their fog draws from", () => {
+    const stage = read("canvas/Stage.tsx");
+    assert.match(stage, /viewerFog=\{role === "player" && fog \? fogTiles : null\}/);
+    assert.match(stage, /const drawnFogTiles = useDrawnFogTiles\(fogTiles, role\);/);
+    assert.match(read("features/vision/stageHooks.ts"), /const explored = useRoomView\(\(s\) => \(role === "dm" \? s\.view\?\.exploredTiles : undefined\)\);/);
+    // With no explored tiles, which only the DM reads, the drawn fog is the fog itself.
+    const tiles = {};
+    assert.equal(withExplored(tiles, undefined), tiles);
   });
 });
