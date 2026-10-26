@@ -2,7 +2,8 @@ import type { MemberId, RoomState, SceneId, Token } from "#shared/model.ts";
 import { cameraAt, fitRect, type Camera, type Insets, type Rect, type Size } from "../../lib/camera.ts";
 import { TOP_DOWN, toView, viewBox, type View, type ViewBox } from "../../lib/view.ts";
 import { footprint } from "../../lib/scene.ts";
-import { liftIn, type BoardPick } from "../../canvas/boardPick.ts";
+import { liftIn, tokenBase, type BoardPick } from "../../canvas/boardPick.ts";
+import type { FootprintToken } from "#shared/rules/footprint.ts";
 import { ownsToken } from "../tokens/access.ts";
 
 /**
@@ -58,16 +59,17 @@ export function findRect(token: Pick<Token, "x" | "y" | "size" | "w" | "h">): Re
  * canvas/barDock.ts barCover). The zoom ignores the cover, so a press with
  * the Log open shows the token as large as one without, with some of its
  * surroundings under the sheet. In the view the board shows
- * (docs/design-v1-isometric-view.md 4.2).
+ * (docs/design-v1-isometric-view.md 4.2). A given `zoom` keeps that scale
+ * and only centers.
  */
-export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: Insets, frame: FindFrame = FLAT_FRAME): Camera {
+export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: Insets, frame: FindFrame = FLAT_FRAME, zoom?: number): Camera {
   const { view } = frame;
   const middle = toView(view, { x: target.x + target.width / 2, y: target.y + target.height / 2 }, frame.z);
   // The box as the board draws it, grown evenly round the middle, which centers: a ring raised over the box's middle or down in a pit still leaves all of it in view.
   const box = viewBox(view, target, frame.lift);
   const hw = Math.max(middle.x - box.x, box.x + box.width - middle.x);
   const hh = Math.max(middle.y - box.y, box.y + box.height - middle.y);
-  const { scale } = fitRect(viewport, { x: middle.x - hw, y: middle.y - hh, width: 2 * hw, height: 2 * hh } as ViewBox, 24, bars);
+  const scale = zoom ?? fitRect(viewport, { x: middle.x - hw, y: middle.y - hh, width: 2 * hw, height: 2 * hh } as ViewBox, 24, bars).scale;
   const left = bars.left + cover.left;
   const right = bars.right + cover.right;
   const top = bars.top + cover.top;
@@ -89,6 +91,21 @@ export function findCamera(viewport: Size, target: Rect, bars: Insets, cover: In
 export type FindFrame = { view: View; lift: number; z: number };
 
 const FLAT_FRAME: FindFrame = { view: TOP_DOWN, lift: 0, z: 0 };
+
+/**
+ * The camera that finds a token, its ring centered where it draws at the
+ * zoom the fit picks (findCamera). A standee's lift is capped by the zoom
+ * (relief/standee.ts cappedBase), so the fit runs on its uncapped base,
+ * and its ring's base at the fitted zoom then centers at that zoom, as a
+ * scene's fit reads its lift again at the zoom it found (Stage.tsx
+ * fitScene). Outline rows for tokens share it.
+ */
+export function findTokenCamera(viewport: Size, target: Rect, bars: Insets, cover: Insets, pick: BoardPick, token: FootprintToken): Camera {
+  const uncapped = tokenBase({ ...pick, canvasHeight: Infinity }, token);
+  const fitted = findCamera(viewport, target, bars, cover, frameOf(pick, target, uncapped));
+  const z = tokenBase({ ...pick, camera: fitted }, token);
+  return z === uncapped ? fitted : findCamera(viewport, target, bars, cover, frameOf(pick, target, z), fitted.scale);
+}
 
 /** A target's frame on the board as `pick` shows it, its middle drawn at `z`. */
 export function frameOf(pick: Pick<BoardPick, "view" | "heights">, target: Rect, z: number): FindFrame {

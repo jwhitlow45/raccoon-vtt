@@ -110,7 +110,7 @@ function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
   const pick = (row: OutlineRow) => {
     // On a phone the sheet closes first, so the item is not under it.
     if (!wide) props.close();
-    focusOutlineRow(row, { scope, ui, actions, sceneId: props.sceneId });
+    focusOutlineRow(row, { scope, ui, actions, sceneId: props.sceneId, tokens: view?.tokens ?? {} });
   };
   const toggle = (g: OutlineGroup) =>
     setFolded((prev) => {

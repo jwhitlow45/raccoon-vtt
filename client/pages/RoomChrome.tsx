@@ -8,8 +8,7 @@ import { addsWords, useTooltip } from "../components/Tooltip.tsx";
 import { useLayoutSize } from "../features/device/layout.ts";
 import { uiScale } from "../features/device/settings.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
-import { findCamera, findRect, frameOf, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
-import { tokenBase } from "../canvas/boardPick.ts";
+import { findRect, findTokenCamera, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
 import { badgeText } from "../features/log/unread.ts";
 import { VIEW_GROUP, VIEW_TIP, viewButtonLabel } from "../features/view/choice.ts";
 import { useRoomViewChoice, useViewVoice, ViewMenuBody, ViewSheetDialog, ViewVoice, type ViewChoiceState } from "../features/view/ViewMenu.tsx";
@@ -446,8 +445,8 @@ export function FindButton(props: { openSheet(): OpenSheet | null }) {
     const target = findRect(token);
     const cover = sheetCover(props.openSheet());
     // The open sheet's cover and the token bar's, the larger on each side.
-    // Its ring where it draws, on a platform or down in a pit (boardPick.ts tokenBase): a player's own token always stands.
-    slot.show?.((viewport, bars, bar, pick) => findCamera(viewport, target, bars, largerEach(cover, bar), frameOf(pick, target, tokenBase(pick, token))));
+    // Its ring where it draws at the zoom found, on a platform, down in a pit or high in the air: a player's own token always stands.
+    slot.show?.((viewport, bars, bar, pick) => findTokenCamera(viewport, target, bars, largerEach(cover, bar), pick, token));
   };
   return (
     <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>

@@ -5,7 +5,7 @@ import { character, token } from "#shared/testutil.ts";
 import { fitRect, NO_INSETS, viewToScreen } from "../../lib/camera.ts";
 import { isometric, TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
 import { barCover, largerEach, pastBars } from "../../canvas/barDock.ts";
-import { FIND_ROOM_CELLS, findCamera, findRect, frameOf, nextOwnToken, sheetCover } from "./findToken.ts";
+import { FIND_ROOM_CELLS, findCamera, findRect, findTokenCamera, frameOf, nextOwnToken, sheetCover } from "./findToken.ts";
 import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, groundIn, ringCenter, tokenBase } from "../../canvas/boardPick.ts";
 import { world } from "../movement/testing.ts";
 
@@ -151,6 +151,30 @@ describe("Find my token on raised ground, in a pit and in the air (ISO34-ASTRA-2
       }
     });
   }
+
+  test("a flier whose lift the zoom caps: its ring centers where it draws at the zoom found, from a close zoom (ISO34-ASTRA-13, OPUS-13)", () => {
+    for (const feet of [100, 500, 1000]) {
+      const t = token("roc", { x: 20, y: 4, elevation: feet });
+      for (const turn of [0, 1, 2, 3] as const) {
+        const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: false, view: isometric(turn), camera: { x: 0, y: 0, scale: 80 }, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+        const target = findRect(t);
+        const cam = findTokenCamera(viewport, target, bars, NO_INSETS, pick, t);
+        const ring = ringCenter({ ...pick, camera: cam }, t);
+        assert.ok(Math.abs(ring.x - 400) < 1e-6 && Math.abs(ring.y - (56 + (600 - 120) / 2)) < 1e-6, `${feet} ft, turn ${turn}: ${JSON.stringify([ring, cam.scale])}`);
+        if (feet > 100) continue;
+        // 100 ft fits with its ground at a zoom farther than the cap at 80 px would give, so the ground round it shows too.
+        for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+          const at = viewToScreen(cam, toView(isometric(turn), { x: target.x + dx * target.width, y: target.y + dy * target.height }, 0));
+          assert.ok(at.x >= -1e-6 && at.x <= 800 + 1e-6 && at.y >= 56 - 1e-6 && at.y <= 600 - 64 + 1e-6, `turn ${turn}: the room's corner ${JSON.stringify(at)}`);
+        }
+      }
+    }
+    // 1000 ft is capped even at the farthest zoom, so the second pass centers the capped ring there.
+    const far = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: false, view: isometric(0), camera: { x: 0, y: 0, scale: 80 }, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+    const high = token("roc", { x: 20, y: 4, elevation: 1000 });
+    const cam = findTokenCamera(viewport, findRect(high), bars, NO_INSETS, far, high);
+    assert.ok(tokenBase({ ...far, camera: cam }, high) < 200, "its lift is capped at the zoom found");
+  });
 
   test("an outline row's box frames on the highest drawn ground under it", () => {
     const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: false, view: isometric(0), camera: { x: 0, y: 0, scale: 40 }, lowPower: false }, new DrawnHeightsMemo());

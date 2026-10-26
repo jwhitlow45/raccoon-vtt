@@ -1,4 +1,5 @@
 import { fitSlot } from "../../canvas/fitSlot.ts";
+import type { RoomState } from "#shared/model.ts";
 import type { RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
@@ -6,7 +7,7 @@ import { pickTemplate } from "../areas/AreaTool.tsx";
 import { lightSlot } from "../builder/lightTap.ts";
 import { builderSlot, labelPaneSlot } from "../builder/store.ts";
 import { stampSlot } from "../builder/stamps/store.ts";
-import { findCamera, frameOf } from "../find/findToken.ts";
+import { findCamera, findTokenCamera, frameOf } from "../find/findToken.ts";
 import { groundIn } from "../../canvas/boardPick.ts";
 import { lightModeSlot } from "../lights/store.ts";
 import { pinSlot } from "../pins/store.ts";
@@ -24,12 +25,15 @@ import { frameRect, type OutlineRow } from "./rows.ts";
  *
  * The caller closes a phone's sheet first, so the item is not under it.
  */
-export function focusOutlineRow(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: RoomActions; sceneId: string }): void {
+export function focusOutlineRow(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: RoomActions; sceneId: string; tokens: RoomState["tokens"] }): void {
   pick(row, env);
   // After the pick, so a token lands clear of the action bar it opens, and nothing else keeps clear of a bar the pick closed (canvas/barDock.ts).
   const target = frameRect(row.rect);
-  // Its middle at the highest drawn ground under the item's box.
-  env.scope.get(fitSlot).show?.((viewport, bars, bar, pick) => findCamera(viewport, target, bars, bar, frameOf(pick, target, groundIn(pick, row.rect))));
+  const token = row.kind === "token" ? env.tokens[row.id] : undefined;
+  // A token's ring where it draws, as Find my token frames it (the DM's every token stands), and anything else at the highest drawn ground under its box.
+  env.scope.get(fitSlot).show?.((viewport, bars, bar, pick) =>
+    token ? findTokenCamera(viewport, target, bars, bar, pick, token) : findCamera(viewport, target, bars, bar, frameOf(pick, target, groundIn(pick, row.rect))),
+  );
 }
 
 function pick(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: RoomActions; sceneId: string }): void {
