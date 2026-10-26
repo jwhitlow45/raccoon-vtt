@@ -3758,12 +3758,13 @@ export function fu32Tests(): void {
 }
 
 /*
- * This device's Sheet handle (docs/design-v1-sheet-swipe.md 4.8): its
- * section with its help, the select and the preview under it, at FU30_AT's
- * sizes. The section was in no sweep before (GRAB-ALIGN).
+ * This device's Sheet handle (docs/design-v1-sheet-swipe.md 4.8): the
+ * Menu's This device row, whose detail names it among the page's settings,
+ * and the section with its help, the select and the preview under it, at
+ * FU30_AT's sizes. Neither was in a sweep before (GRAB-ALIGN).
  */
 export function grabberTests(): void {
-  test(`grab-e. This device's Sheet handle section, its help, select and preview, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-sheet-swipe.md 4.8)`, async () => {
+  test(`grab-e. the Menu's This device row, its detail whole with no word alone on its last line, and This device's Sheet handle section, its help, select and preview, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-sheet-swipe.md 4.8)`, async () => {
     const lines: string[] = [];
     for (const at of FU30_AT) {
       const sweep = new Sweep(atName(at));
@@ -3774,8 +3775,16 @@ export function grabberTests(): void {
       const choice = menu.getByRole("combobox", { name: "Sheet handle" });
       // The Menu may open on another of its pages, as the last step left it.
       const back = menu.getByRole("button", { name: /^Back to Menu/ });
-      if (!(await visible(choice)) && (await visible(back))) await back.click();
-      if (!(await visible(choice))) await menu.getByRole("button", { name: /^This device/ }).click();
+      if (await visible(back)) await back.click();
+      const row = menu.getByRole("button", { name: /^This device/ });
+      await row.scrollIntoViewIfNeeded();
+      await sweep.measure(page, "grab-menu-row", row);
+      const detail = await detailLines(row, "handle.");
+      if (!detail.found) sweep.lines.push(`${sweep.at} grab-menu-row: the detail does not end "sheet handle."`);
+      if (detail.cut) sweep.lines.push(`${sweep.at} grab-menu-row: the detail is cut (${detail.cut})`);
+      if (detail.alone) sweep.lines.push(`${sweep.at} grab-menu-row: "${detail.alone}" stands alone on the detail's last line of ${detail.lines}`);
+      await shots.take(page, `alignment-grab-${sweep.at}-menu-row`);
+      await row.click();
       await choice.scrollIntoViewIfNeeded();
       // The innermost section holding its heading: the panel around it is a section too.
       await sweep.measure(page, "grab-sheet-handle", menu.locator("section").filter({ has: page.getByRole("heading", { name: "Sheet handle", exact: true }) }).last());
@@ -3785,8 +3794,45 @@ export function grabberTests(): void {
       await escapeAll(page);
       lines.push(...sweep.lines);
     }
-    assert.deepEqual(lines, [], "the Sheet handle section out of line");
+    assert.deepEqual(lines, [], "the This device row or the Sheet handle section out of line");
   });
+}
+
+/**
+ * A row's detail line as drawn: how many lines it wraps onto, whether its
+ * box cuts its words, and its last word when that stands alone on the last
+ * line though the line above has others. A no-break space joins two words
+ * into one that wraps whole, so it counts as words that share the line.
+ */
+async function detailLines(row: Locator, ending: string): Promise<{ found: boolean; lines: number; cut: string; alone: string }> {
+  return row.evaluate((el, end) => {
+    type Rect = { left: number; top: number; width: number };
+    type TextNode = { textContent: string | null; parentElement: { scrollWidth: number; clientWidth: number; scrollHeight: number; clientHeight: number; parentElement: unknown } | null };
+    type R = { setStart(n: TextNode, o: number): void; setEnd(n: TextNode, o: number): void; getClientRects(): ArrayLike<Rect> };
+    const doc = (globalThis as unknown as { document: { createRange(): R; createTreeWalker(root: unknown, what: number): { nextNode(): TextNode | null } } }).document;
+    const walker = doc.createTreeWalker(el, 4);
+    let node: TextNode | null = null;
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if ((n.textContent ?? "").trim().endsWith(end)) node = n;
+    if (!node) return { found: false, lines: 0, cut: "", alone: "" };
+    const text = node.textContent ?? "";
+    const whole = doc.createRange();
+    whole.setStart(node, 0);
+    whole.setEnd(node, text.length);
+    const rects = Array.from(whole.getClientRects()).filter((r) => r.width > 1);
+    const tops = [...new Set(rects.map((r) => Math.round(r.top)))];
+    // The words' own span wraps inside the row's detail box, which cuts with an ellipsis what it cannot show.
+    const box = node.parentElement?.parentElement as { scrollWidth: number; clientWidth: number; scrollHeight: number; clientHeight: number } | null;
+    const cut = box && (box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1) ? `${box.scrollWidth} x ${box.scrollHeight} in ${box.clientWidth} x ${box.clientHeight}` : "";
+    const lastWord = text.trimEnd().slice(Math.max(text.trimEnd().lastIndexOf(" "), text.trimEnd().lastIndexOf("\u00a0")) + 1);
+    const word = doc.createRange();
+    word.setStart(node, text.trimEnd().length - lastWord.length);
+    word.setEnd(node, text.trimEnd().length);
+    const wordRect = Array.from(word.getClientRects()).filter((r) => r.width > 1)[0];
+    const lastLine = rects.filter((r) => Math.round(r.top) === tops[tops.length - 1]);
+    const lineLeft = Math.min(...lastLine.map((r) => r.left));
+    const alone = tops.length > 1 && wordRect !== undefined && Math.abs(wordRect.left - lineLeft) < 1 ? lastWord : "";
+    return { found: true, lines: tops.length, cut, alone };
+  }, ending);
 }
 
 /*
