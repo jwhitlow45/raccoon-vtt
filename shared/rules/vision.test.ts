@@ -14,6 +14,7 @@ import {
   clearVisionCache,
   coldHolderSight,
   coldPartySight,
+  coldSightOf,
   holderSight,
   NO_PARTY_SIGHT,
   parseSenses,
@@ -25,6 +26,7 @@ import {
   sightFromTiles,
   sightRect,
   sightTileLevels,
+  soleSourcesOf,
   sourcePolygon,
   visibleFrom,
   visionCacheReport,
@@ -1133,15 +1135,21 @@ const holderEdits: Record<string, Edit> = {
   },
   level(r, s) {
     const sc = s.scenes.s1!;
-    return { ...s, scenes: { s1: { ...sc, vision: { on: true, light: (["bright", "dim", "dark"] as const)[Math.floor(r() * 3)]! } } } };
+    return { ...s, scenes: { s1: { ...sc, vision: { ...sc.vision!, on: true, light: (["bright", "dim", "dark"] as const)[Math.floor(r() * 3)]! } } } };
   },
 };
 
 function holderStart(r: () => number, level: "bright" | "dim" | "dark"): RoomState {
-  let s = start(r, level);
+  let s = perPlayer(start(r, level));
   for (const t of Object.values(s.tokens)) s = withToken(s, { ...t, ownerIds: t.kind === "pc" ? someOwners(r) : [] });
   // The monster lends its sight to every player.
   return withToken(s, { ...s.tokens.m1!, partyVision: true });
+}
+
+/** The room with its scene per player, as the DM's Sight row sets it. */
+function perPlayer(s: RoomState): RoomState {
+  const sc = s.scenes.s1!;
+  return { ...s, scenes: { ...s.scenes, s1: { ...sc, vision: { ...sc.vision!, perPlayer: true } } } };
 }
 
 /** The same room with one more member, `extra`, owning every source any of `members` owns. */
@@ -1284,6 +1292,52 @@ describe("sight holders", () => {
       s = mix[Math.floor(r() * mix.length)]!(r, s);
       for (const viewer of VIEWERS) sameTiles(holderSight(s, "s1", viewer, world).tiles, coldHolderSight(s, "s1", viewer, world).tiles, `step ${step}, ${viewer}`);
     }
+  });
+
+  test("every raster equals a cold computation when each holder lacks one source of many that see the same ground", () => {
+    clearVisionCache();
+    // Six sources in one open room, so most tiles have each level from two of them, and holder k owns all but the k-th.
+    const r = rng(57);
+    for (const level of ["bright", "dim", "dark"] as const) {
+      const ids = ["q0", "q1", "q2", "q3", "q4", "q5"];
+      const tokens = ids.map((id, k) => pc(id, 8 + 4 * k, 10 + (k % 2) * 4, { ownerIds: ids.map((_, h) => `h${h}`).filter((_, h) => h !== k), senses: k % 3 === 0 ? "darkvision 60 ft" : "" }));
+      let s = perPlayer(visionRoom({ w: 40, h: 30, light: level, build: { edges: roomEdges(2, 2, 34, 24), cells: { "18,14": "pillar", "26,8": "pillar" } }, tokens, lights: [light("l", 20, 14, 20, 20)] }));
+      const viewers = [...ids.map((_, h) => `h${h}`), null];
+      // First as a whole-party scene, then per player: the union's computation from before has no marks for its tiles.
+      const whole = { ...s, scenes: { s1: { ...s.scenes.s1!, vision: { on: true, light: level } } } };
+      void partySight(whole, "s1", world);
+      for (let step = 0; step < 25; step++) {
+        const t = s.tokens[ids[Math.floor(r() * ids.length)]!]!;
+        s = r() < 0.8 ? withToken(s, { ...t, x: Math.max(3, Math.min(34, t.x + Math.floor(r() * 3) - 1)), y: Math.max(3, Math.min(24, t.y + Math.floor(r() * 3) - 1)) }) : holderEdits.light!(r, s);
+        for (const viewer of viewers) sameTiles(holderSight(s, "s1", viewer, world).tiles, coldHolderSight(s, "s1", viewer, world).tiles, `${level} step ${step}, ${viewer}`);
+      }
+    }
+  });
+
+  test("a tile that changes when any one source is left out names that source among its sole sources, through random edits", () => {
+    clearVisionCache();
+    const r = rng(58);
+    let s = holderStart(r, "dim");
+    const names = Object.keys(holderEdits);
+    let checked = 0;
+    for (let step = 0; step < 40; step++) {
+      s = holderEdits[names[Math.floor(r() * names.length)]!]!(r, s);
+      const union = partySight(s, "s1", world).tiles;
+      const sole = soleSourcesOf(s, "s1", world);
+      assert.ok(sole, "a per-player scene works out its sole sources");
+      for (const id of Object.keys(s.tokens)) {
+        const without = coldSightOf(s, "s1", (t) => t !== id, world).tiles;
+        for (const key of new Set([...union.keys(), ...without.keys()])) {
+          const a = union.get(key);
+          const b = without.get(key);
+          if (a === b || (a && b && JSON.stringify(a) === JSON.stringify(b))) continue;
+          const named = sole.get(key);
+          checked++;
+          assert.ok(named === "unknown" || named?.includes(id), `step ${step}: tile ${key} changes without ${id}, whose sole sources are ${JSON.stringify(named)}`);
+        }
+      }
+    }
+    assert.ok(checked > 100, `${checked} tiles checked`);
   });
 
   test("every holder's raster and the shared sight together are the sight of every source any of them sees through", () => {
