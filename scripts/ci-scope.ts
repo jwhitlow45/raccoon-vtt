@@ -27,14 +27,14 @@ import { appendFileSync } from "node:fs";
 export const SHARDS = 14;
 
 /**
- * Whether a changed path is a doc: anything under docs/, which holds the
- * design notes, the DM guide and its pictures, and a Markdown file outside
- * the code's folders. A Markdown file under client/, server/ or shared/
- * may be part of the app, as shared/srd/NOTICE.md is in the About panel.
+ * Whether a changed path is a doc: a Markdown file, a picture or a drawing's
+ * source under docs/, which holds the design notes, the DM guide and its
+ * pictures, or a Markdown file at the repository's root. Anything else may
+ * reach the app or its image, as public/ ships in the bundle, scripts/ and
+ * db/ go in the image, and shared/srd/NOTICE.md shows in the About panel.
  */
 export function isDoc(file: string): boolean {
-  if (file.startsWith("docs/")) return true;
-  return file.endsWith(".md") && !/^(client|server|shared)\//.test(file);
+  return /^docs\/.+\.(md|webp|png|jpg|svg|excalidraw)$/.test(file) || /^[^/]+\.md$/.test(file);
 }
 
 export type Scope = { docsOnly: boolean; why: string };

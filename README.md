@@ -130,11 +130,11 @@ These jobs run on Ubuntu:
 A push to a `ci/` branch whose merge base is `main`'s tip, and that
 changes only docs against it, runs just the typecheck, the unit tests, the
 build and `e2e/guide.e2e.ts`, which draws the DM guide from `docs/`, and
-still ends green, so the deploy gate takes it. The docs are the files under
-`docs/` and the Markdown files outside `client/`, `server/` and `shared/`,
-whose Markdown the app may import (`scripts/ci-scope.ts`). Any other push,
-a branch behind `main` among them, and every push to `main`, runs
-everything.
+still ends green, so the deploy gate takes it. The docs are the Markdown
+files, pictures and Excalidraw sources under `docs/`, and the Markdown
+files at the repository's root (`scripts/ci-scope.ts`). Anything else may
+reach the app, its image or its tests. Any other push, a branch behind
+`main` among them, and every push to `main`, runs everything.
 
 The app draws its text in Inter, which it serves itself from
 `public/fonts/`, so a page lays out the same on the Linux shards as on a

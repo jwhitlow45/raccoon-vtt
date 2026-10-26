@@ -7,12 +7,18 @@ import { after, describe, test } from "node:test";
 import { changedFiles, isDoc, scopeOf, type Changes } from "./ci-scope.ts";
 
 describe("a doc", () => {
-  test("is anything under docs/, the guide's pictures among them, or a Markdown file outside the code's folders", () => {
-    for (const f of ["docs/design.md", "docs/dm-guide.md", "docs/dm-guide/areas-phone.webp", "README.md", "FEATURES.md", "CREDITS.md", "e2e/fixtures/README.md", ".github/notes.md"]) assert.ok(isDoc(f), f);
+  test("is Markdown, a picture or a drawing's source under docs/, or Markdown at the root", () => {
+    for (const f of ["docs/design.md", "docs/dm-guide.md", "docs/dm-guide/areas-phone.webp", "docs/a.png", "docs/a.jpg", "docs/a.svg", "docs/diagrams/a.excalidraw", "README.md", "FEATURES.md", "CREDITS.md"])
+      assert.ok(isDoc(f), f);
   });
 
   test("is never code, a picture outside docs/, or Markdown the app may import", () => {
     for (const f of ["client/App.tsx", "server/main.ts", ".github/workflows/ci.yml", "e2e/guide.e2e.ts", "scripts/ci-scope.ts", "package.json", "public/icon.svg", "shared/srd/NOTICE.md", "client/notes.md", "server/x.md", "docs.md.ts", "README.mdx", "docsx/a.md.ts", "Docs/a.ts"])
+      assert.ok(!isDoc(f), f);
+  });
+
+  test("is never Markdown in a folder that ships or tests, nor docs/ code or data", () => {
+    for (const f of ["public/x.md", "scripts/x.md", "db/x.md", "e2e/x.md", "e2e/fixtures/README.md", ".github/notes.md", "docs/x.ts", "docs/x.json", "docs/dm-guide/x.tsx", "docs/x.md.ts"])
       assert.ok(!isDoc(f), f);
   });
 });
