@@ -6,9 +6,10 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import type { Token } from "../shared/model.ts";
-import { placedOnHex, tokenRefHex } from "../shared/rules/footprint.ts";
-import { cornerAt, hexAt, hexCenter, hexCorners, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
+import { FOG_SUBCELLS, type AreaTemplate, type Token } from "../shared/model.ts";
+import { creaturesInArea } from "../shared/rules/aoe.ts";
+import { footprintSubcells, placedOnHex, tokenRefHex } from "../shared/rules/footprint.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 import { arrowStep, isometric } from "../client/lib/view.ts";
 import { assertCanvasAt, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
@@ -54,6 +55,8 @@ let server: Server;
 let browser: Browser;
 let dmContext: BrowserContext;
 let patContext: BrowserContext;
+/** Ben's browser, which only joins the room, so a creature of his sees on the scene. */
+let benContext: BrowserContext;
 let dm: Page;
 let pat: Page;
 let ops: OpSocket;
@@ -69,6 +72,13 @@ const run = {
   goblin: randomUUID(),
   ogre: randomUUID(),
   entry: randomUUID(),
+  patId: "",
+  benId: "",
+  thorn: randomUUID(),
+  bree: randomUUID(),
+  imp: randomUUID(),
+  fireball: randomUUID(),
+  guardians: randomUUID(),
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -148,6 +158,73 @@ function boardTexts(page: Page): Promise<string[]> {
   });
 }
 
+/** Picks a view on a page through the test hook, as the View menu would. */
+async function pickView(page: Page, pick: "isometric" | "follow"): Promise<void> {
+  await waitFor("the test hook", () => page.evaluate(() => ("__rvttIsoHook" in globalThis ? true : null)));
+  await page.evaluate((p) => (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void } }).__rvttIsoHook.pick(p), pick);
+}
+
+/**
+ * A token's node on the isometric board (pervision.e2e.ts isoNode):
+ * "standee" with its opacity on the relief stage, "flat" on the ground
+ * stage only, where the stand rule lays a creature under the viewer's fog,
+ * or null where the page draws none.
+ */
+async function isoNode(page: Page, tokenId: string): Promise<{ as: "standee"; opacity: number } | { as: "flat" } | null> {
+  return page.evaluate((id) => {
+    type Node = { opacity(): number };
+    type Stage = { width(): number; listening(): boolean; getLayers(): unknown[]; findOne(s: string): Node | undefined };
+    const stages = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages.filter((s) => s.width() > 0);
+    const relief = stages.find((s) => s.listening() && s.getLayers().length === 3);
+    if (!relief) return null;
+    const ground = stages.find((s) => s !== relief && !s.listening() && s.findOne(`#${id}`) !== undefined);
+    if (ground) return { as: "flat" as const };
+    const node = relief.findOne(`#${id}`);
+    return node ? { as: "standee" as const, opacity: node.opacity() } : null;
+  }, tokenId);
+}
+
+async function isoNodeIs(page: Page, tokenId: string, want: "standee" | "flat" | null, what: string): Promise<void> {
+  let seen: string | null = null;
+  await waitFor(what, async () => {
+    const node = await isoNode(page, tokenId);
+    seen = node?.as ?? null;
+    return seen === want ? true : null;
+  }).catch((err: Error) => {
+    throw new Error(`${err.message}: it is ${seen}`);
+  });
+}
+
+/** Reveals one fog sub-cell, by a square inside it, since a fog shape takes the sub-cells whose middles it holds. */
+function revealSubcell(sx: number, sy: number) {
+  return { id: randomUUID(), mode: "reveal" as const, shape: { kind: "rect" as const, x: (sx + 0.25) / FOG_SUBCELLS, y: (sy + 0.25) / FOG_SUBCELLS, w: 0.5 / FOG_SUBCELLS, h: 0.5 / FOG_SUBCELLS } };
+}
+
+function creature(id: string, name: string, size: "tiny" | "medium" | "large", hex: Hex, extra: Record<string, unknown> = {}) {
+  return { t: "token.create" as const, token: { id, sceneId: run.sceneId, kind: "monster", name, size, ...placedOnHex(G, { size, x: 0, y: 0 }, hex), disposition: "hostile", visibility: "all", actor: { inline: ACTOR }, ...extra } };
+}
+
+async function moveTo(id: string, size: "tiny" | "medium" | "large", hex: Hex): Promise<void> {
+  const at = placedOnHex(G, { size, x: 0, y: 0 }, hex);
+  await ops.send({ t: "token.update", tokenId: id, patch: at });
+  await waitFor(`${id} on hex ${hex.col},${hex.row}`, () => {
+    const t = dmSocket.state?.tokens[id];
+    return t && Math.abs(t.x - at.x) < 1e-9 && Math.abs(t.y - at.y) < 1e-9 ? true : null;
+  });
+}
+
+/** The Area tool's reading after a tap inside a placed area: its "In area" list. */
+async function areaReading(page: Page, world: { x: number; y: number }, title: string): Promise<string> {
+  await pickTool(page, "Area");
+  const p = await pagePoint(page, BOUNDS, world);
+  await assertCanvasAt(page, p);
+  if (page === dm) await page.mouse.click(p.x, p.y);
+  else await page.touchscreen.tap(p.x, p.y);
+  const line = page.getByRole("toolbar", { name: "Area options" }).locator("[data-options-line]").first();
+  await line.filter({ hasText: title }).waitFor();
+  return (await line.textContent()) ?? "";
+}
+
 /** Presses on a world point and moves to another in steps, leaving the button down. */
 async function holdDrag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
   const a = await pagePoint(page, BOUNDS, from);
@@ -224,7 +301,8 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     patContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-    await dmContext.addInitScript(HOOK_FLAG);
+    benContext = await browser.newContext();
+    for (const c of [dmContext, patContext]) await c.addInitScript(HOOK_FLAG);
     dm = await dmContext.newPage();
     pat = await patContext.newPage();
     consoles.dm.attach(dm);
@@ -284,7 +362,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await blankAt(dm, sideMiddle({ col: 3, row: 22 }, 4), "where a row 22 would be");
     await shots.take(dm, "hex-dm-board");
 
-    await join(patContext, "Pat", "#30a46c");
+    run.patId = await join(patContext, "Pat", "#30a46c");
     await pat.goto(`${server.origin}/r/${run.roomId}`);
     await waitFor("Pat's snapshot", () => patSocket.state);
     await pat.locator(".konvajs-content").first().waitFor();
@@ -418,7 +496,104 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await section.getByRole("button", { name: "Close", exact: true }).click();
   });
 
-  test("HX-8. the ruler's row and Measure choice, an area's options and the export sit within 1 px at each size", async () => {
+  test("HX-8. under fog a goblin reaches neither of Pat's boards, a revealed sub-cell of its hex sends it lying flat, its whole hex stands it, and a Tiny imp revealed past its drawn box lies flat for Pat and stands bright for the DM", async () => {
+    // Thorn, Pat's cleric, on the revealed west strip. The goblin and a Tiny imp under fog to the east.
+    await ops.send(creature(run.thorn, "Thorn", "medium", { col: 3, row: 12 }, { kind: "pc", disposition: "ally", ownerIds: [run.patId] }));
+    await ops.send(creature(run.imp, "Imp", "tiny", { col: 14, row: 12 }));
+    await moveTo(run.goblin, "medium", { col: 9, row: 12 });
+    await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { fogEnabled: true } });
+    await ops.send({ t: "fog.reset", sceneId: run.sceneId, to: "hidden" });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 6, h: 20 } }] });
+    await waitFor("Thorn in Pat's copy", () => (patSocket.state?.tokens[run.thorn] ? true : null));
+    await waitFor("the goblin and the imp out of Pat's copy", () => (!patSocket.state?.tokens[run.goblin] && !patSocket.state?.tokens[run.imp] ? true : null));
+    await shots.take(pat, "hex-pat-fog-top-down");
+    await pickView(pat, "isometric");
+    await pickView(dm, "isometric");
+    await isoNodeIs(pat, run.thorn, "standee", "Thorn standing on Pat's board");
+    assert.equal(await isoNode(pat, run.goblin), null, "Pat's board draws the fogged goblin");
+
+    // One sub-cell of the goblin's hex, its middle's: the server sends it, and Pat's board lays it flat, the rest of its hex fogged.
+    const goblinAt = goblin();
+    const mid = hexCenter(G, { col: 9, row: 12 });
+    const subs = footprintSubcells(G, goblinAt);
+    const [sx, sy] = subs.reduce((best, s) => (Math.hypot((s[0] + 0.5) / FOG_SUBCELLS - mid.x, (s[1] + 0.5) / FOG_SUBCELLS - mid.y) < Math.hypot((best[0] + 0.5) / FOG_SUBCELLS - mid.x, (best[1] + 0.5) / FOG_SUBCELLS - mid.y) ? s : best));
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [revealSubcell(sx, sy)] });
+    await waitFor("the goblin in Pat's copy", () => (patSocket.state?.tokens[run.goblin] ? true : null));
+    await isoNodeIs(pat, run.goblin, "flat", "the goblin lying flat on Pat's board");
+    // Its whole hex and drawn box revealed: it stands.
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: mid.x - 0.75, y: mid.y - 0.75, w: 1.5, h: 1.5 } }] });
+    await isoNodeIs(pat, run.goblin, "standee", "the goblin standing on Pat's board");
+    await shots.take(pat, "hex-pat-fog-isometric");
+
+    // A sub-cell of the imp's hex past its half-cell drawn box (HX3-VIEW-03): Pat gets it, lying flat, and the DM's standee is bright.
+    const imp = dmSocket.state!.tokens[run.imp]!;
+    const past = footprintSubcells(G, imp).find(([x, y]) => (x + 1) / FOG_SUBCELLS <= imp.x || x / FOG_SUBCELLS >= imp.x + 0.5 || (y + 1) / FOG_SUBCELLS <= imp.y || y / FOG_SUBCELLS >= imp.y + 0.5);
+    assert.ok(past, "the imp's hex reaches past its drawn box");
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [revealSubcell(past[0], past[1])] });
+    await waitFor("the imp in Pat's copy", () => (patSocket.state?.tokens[run.imp] ? true : null));
+    await isoNodeIs(pat, run.imp, "flat", "the imp lying flat on Pat's board");
+    await isoNodeIs(dm, run.imp, "standee", "the imp standing on the DM's board");
+    assert.equal((await isoNode(dm, run.imp)) && (await isoNode(dm, run.imp) as { opacity: number }).opacity, 1, "bright, as players get it");
+    await shots.take(dm, "hex-dm-fog-isometric");
+    await pickView(pat, "follow");
+    await pickView(dm, "follow");
+  });
+
+  test("HX-9. per player on a hex scene: a goblin in the dark that Ben's darkvision sees reaches Pat while the party shares sight, and leaves both of Pat's boards once each sees for themselves", async () => {
+    // A hex scene has no walls in H1, so a lit goblin shows from anywhere: darkvision, which reaches only so far, makes the two players' sight differ.
+    run.benId = await join(benContext, "Ben", "#0090ff");
+    await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: true, light: "dark" } } });
+    await ops.send(creature(run.bree, "Bree", "medium", { col: 22, row: 6 }, { kind: "pc", disposition: "ally", ownerIds: [run.benId], actor: { inline: { ...ACTOR, senses: "Darkvision 60 ft." } } }));
+    await moveTo(run.goblin, "medium", { col: 24, row: 6 });
+    await waitFor("the goblin in Pat's copy by the party's sight", () => (patSocket.state?.tokens[run.goblin] ? true : null));
+    await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: true, light: "dark", perPlayer: true } } });
+    // Each player sees for themselves, as the DM's list in Scenes picks them.
+    await ops.send({ t: "vision.holders", sceneId: run.sceneId, on: [run.patId, run.benId] });
+    await waitFor("the goblin out of Pat's copy, per player", () => (patSocket.state?.tokens[run.goblin] ? null : true));
+    await shots.take(pat, "hex-pat-per-player-top-down");
+    await pickView(pat, "isometric");
+    await waitFor("Pat's board up, with Thorn on it", async () => ((await isoNode(pat, run.thorn)) ? true : null));
+    assert.equal(await isoNode(pat, run.goblin), null, "Pat's board draws a goblin only Ben sees");
+    await shots.take(pat, "hex-pat-per-player-isometric");
+    await pickView(pat, "follow");
+  });
+
+  test("HX-10. a fireball on a hex corner and Spirit Guardians on Thorn read the creatures the rules catch, for the DM and for Pat alike", async () => {
+    // Everyone in plain sight, so Pat's list is the whole list.
+    await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { fogEnabled: false, vision: { on: false, light: "bright", perPlayer: false } } });
+    await moveTo(run.goblin, "medium", { col: 10, row: 8 });
+    await moveTo(run.ogre, "large", { col: 12, row: 9 });
+    await moveTo(run.imp, "tiny", { col: 5, row: 13 });
+    const dmId = dmSocket.you!.memberId;
+    const corner = cornerAt(G, { hex: { col: 11, row: 9 }, k: 0 });
+    await ops.send({ t: "template.create", template: { id: run.fireball, sceneId: run.sceneId, shape: "sphere", size: 20, origin: { ...corner, z: 0 }, yaw: 0, includeOrigin: true, color: "#e5484d", ownerId: dmId, visibility: "all" } });
+    await ops.send({ t: "template.create", template: { id: run.guardians, sceneId: run.sceneId, shape: "emanation", size: 15, origin: { ...hexCenter(G, { col: 3, row: 12 }), z: 0 }, yaw: 0, attachedTo: run.thorn, casterId: run.thorn, includeOrigin: false, color: "#ffc53d", ownerId: dmId, visibility: "all" } });
+    await waitFor("both areas in Pat's copy", () => (patSocket.state?.templates[run.fireball] && patSocket.state?.templates[run.guardians] ? true : null));
+    const state = dmSocket.state!;
+    const ctx = { settings: state.meta.settings, bounds: BOUNDS, grid: G, walls: null, tokens: state.tokens as Record<string, Token> };
+    const names = (id: string) => creaturesInArea(state.templates[id] as AreaTemplate, Object.values(state.tokens) as Token[], ctx).map((t) => state.tokens[t]!.name);
+    const fireball = names(run.fireball);
+    const guardians = names(run.guardians);
+    assert.ok(fireball.includes("Goblin") && fireball.includes("Ogre") && !fireball.includes("Imp"), `the fireball catches ${fireball.join(", ")}`);
+    assert.ok(guardians.includes("Imp") && !guardians.includes("Goblin"), `the guardians catch ${guardians.join(", ")}`);
+    // A tap inside each, off any creature: the fireball by its corner, the guardians two hexes east of Thorn.
+    const inFire = { x: corner.x, y: corner.y - 0.1 };
+    const inGuard = hexCenter(G, { col: 4, row: 11 });
+    for (const page of [dm, pat]) {
+      for (const [where, want] of [[inFire, fireball], [inGuard, guardians]] as const) {
+        const reading = await areaReading(page, where, "In area");
+        assert.match(reading, new RegExp(`In area \\(${want.length}\\): `), `${page === dm ? "the DM" : "Pat"}: ${reading}`);
+        for (const name of want) assert.ok(reading.includes(name), `${page === dm ? "the DM" : "Pat"} reads ${name}: ${reading}`);
+        await page.keyboard.press("Escape");
+      }
+      await shots.take(page, page === dm ? "hex-dm-area-catch" : "hex-pat-area-catch");
+      await pickTool(page, "Select");
+    }
+    await ops.send({ t: "template.delete", templateId: run.fireball });
+    await ops.send({ t: "template.delete", templateId: run.guardians });
+  });
+
+  test("HX-11. the ruler's row and Measure choice, an area's options and the export sit within 1 px at each size", async () => {
     const off: string[] = [];
     let phoneContext: BrowserContext | null = null;
     try {
@@ -478,7 +653,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
-  test("HX-9. no page logged an error", () => {
+  test("HX-12. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s console`);
   });
 });
