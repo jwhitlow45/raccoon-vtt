@@ -92,6 +92,11 @@ export function roomSocketUrl(roomId: string, loc: { protocol: string; host: str
   return `${scheme}://${loc.host}/ws?room=${encodeURIComponent(roomId)}`;
 }
 
+/** A DM's preview socket for one player (docs/design-v1-per-player-vision.md 7.4): the room's, asking `as` that member. */
+export function previewSocketUrl(roomId: string, memberId: string, loc: { protocol: string; host: string } = location): string {
+  return `${roomSocketUrl(roomId, loc)}&as=${encodeURIComponent(memberId)}`;
+}
+
 export type RoomSocketOptions = {
   url: string;
   room: RoomStore;
@@ -114,6 +119,17 @@ export type RoomSocketOptions = {
    * Without it, 4001 is terminal at once.
    */
   recheck?: () => Promise<You | null>;
+  /**
+   * A DM's preview of this player (docs/design-v1-per-player-vision.md
+   * 7.4, previewSocketUrl). It is read only: it sends only `hello` and
+   * pings, never an op, an ephemeral event or a scene, which the server
+   * answers by closing it. A snapshot for anyone but this player as a
+   * player is refused unread, so a server that does not honour `as` never
+   * shows the DM's own view as the player's. Any close before the first
+   * snapshot ends it, since the preview then says it could not load
+   * rather than wait on a retry.
+   */
+  previewOf?: string;
 };
 
 export type RoomSocket = {
@@ -217,6 +233,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   let ephScene: string | null = null;
 
   const role = () => room.store.getState().you?.role ?? "player";
+  const previewOf = options.previewOf;
 
   function setConnection(state: "connecting" | "open" | "reconnecting" | "offline"): void {
     room.setConnection(state);
@@ -229,6 +246,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
 
   function sendRaw(msg: ClientMessage): boolean {
     if (!ws || ws.readyState !== OPEN) return false;
+    if (previewOf !== undefined && msg.t !== "hello" && msg.t !== "ping") return false;
     try {
       ws.send(JSON.stringify(msg));
       return true;
@@ -311,12 +329,20 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     } catch {
       // Already closed.
     }
+    if (previewOf !== undefined && !everOpen) {
+      end("denied", CLOSE_CLIENT_GAVE_UP);
+      return;
+    }
     setConnection(lostState());
     scheduleReconnect(backoffDelay(attempt++, random, capMs));
   }
 
   function closed(code: number): void {
     detach();
+    if (previewOf !== undefined && !everOpen) {
+      end("denied", code);
+      return;
+    }
     switch (code) {
       case CLOSE_DENIED:
         end("denied", code);
@@ -452,6 +478,18 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   }
 
   function onSnapshot(msg: Extract<ServerMessage, { t: "snapshot" }>): void {
+    if (previewOf !== undefined && (msg.you.memberId !== previewOf || msg.you.role !== "player")) {
+      // Never applied: it is not this player's view.
+      const socket = ws;
+      detach();
+      try {
+        socket?.close(CLOSE_CLIENT_GAVE_UP, "not the player asked for");
+      } catch {
+        // Already closed.
+      }
+      end("denied", CLOSE_DENIED);
+      return;
+    }
     deadline.clear();
     staleTimer.clear();
     phase = "open";
