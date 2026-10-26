@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { holderTileKey, tileKey } from "#shared/keys.ts";
 import { LIMITS } from "#shared/limits.ts";
-import type { Actor, EdgeFeature, FogTile, RoomState, Token } from "#shared/model.ts";
-import { perPlayerScene, sightHolders } from "#shared/project.ts";
+import type { Actor, EdgeFeature, FogTile, RoomState, SightTile, Token } from "#shared/model.ts";
+import { changedSightKeys, perPlayerScene, sightHolders } from "#shared/project.ts";
 import { serverOnlyOpSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { visionRules } from "#shared/ruleHooks.ts";
@@ -167,6 +167,26 @@ describe("the explore step on a per-player scene", () => {
       { memberId: "p1", on: true },
     ]);
     assert.ok(cellSet(after.exploredBy[holderTileKey("s1", "p1", 0, 0)], 4, 8));
+  });
+
+  test("each fan-out finds the raster the step before it drew for its state before, so it draws none again (design 8.1)", () => {
+    clearVisionCache();
+    // The room's first state has the union computed, as the DM's snapshot computes it, and no holder's raster drawn.
+    // So the first fan-out draws one for its state before, which no step read. That must not cost every later fan-out one.
+    let before = corridor();
+    visionRules.partySight(before, "s1");
+    let drawnByLastStep: ReadonlyMap<string, SightTile> | null = null;
+    for (let step = 1; step <= 4; step++) {
+      const a = before.tokens.a!;
+      const after = { ...before, tokens: { ...before.tokens, a: { ...a, x: a.x + 1 } } };
+      const op = exploreOp(after);
+      const committed = op ? applied(after, op) : after;
+      const drawn = visionRules.holderSight(committed, "s1", "p1").tiles;
+      changedSightKeys(before, committed, ["s1"]);
+      if (drawnByLastStep) assert.equal(visionRules.holderSight(before, "s1", "p1").tiles, drawnByLastStep, `step ${step}'s fan-out read the raster step ${step - 1} drew`);
+      drawnByLastStep = drawn;
+      before = committed;
+    }
   });
 });
 
