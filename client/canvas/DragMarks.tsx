@@ -1,10 +1,11 @@
 import { memo, useMemo } from "react";
 import { Group } from "react-konva";
-import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
-import type { CoverageResult } from "#shared/rules/aoe.ts";
+import type { AreaTemplate, RoomState, Scene, Token } from "#shared/model.ts";
+import type { AreaContext, CoverageResult } from "#shared/rules/aoe.ts";
 import { footprintRect, type FootprintToken } from "#shared/rules/footprint.ts";
 import { cachedCoverage, caughtTokens, coveredWindow } from "../features/areas/coverage.ts";
 import { ringReach } from "../features/areas/draw.tsx";
+import { areaOutline, type Outline } from "../features/areas/placement.ts";
 import { useLiveTokens } from "../features/areas/useLiveTokens.ts";
 import { CAUGHT_RING, Clipped, PlacedArea, useAreaParts } from "../features/areas/TemplateLayer.tsx";
 import { tethers } from "../features/attach/groups.ts";
@@ -21,29 +22,61 @@ import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
 const EMPTY_TOKENS: RoomState["tokens"] = {};
-/** How far past an aura's covered window its outline and its stroke can reach, in cells. */
+/** How far past an aura's covered window the box reaches, in cells: room the square path has always kept. */
 const AURA_MARGIN = 2;
+/** The outline's stroke in screen pixels, as PlacedArea draws it (TemplateLayer.tsx), all of it counted past the outline's line. */
+const OUTLINE_PX = 2;
 
 /**
  * The box an aura moving with a dragged token paints, in cells: its covered
- * window grown by its outline's reach, and each creature it catches, whose
- * ring can stand cells past the window (a Gargantuan caught by one corner
- * cell), with the ring's gap and stroke at this zoom. An aura shows whole
+ * window and a margin, its outline's own bounds and stroke, and each
+ * creature it catches, whose ring can stand cells past the window (a
+ * Gargantuan caught by one corner cell), with the ring's gap and stroke at
+ * this zoom. The outline is counted on its own since it can run well past
+ * the shading: a thin line under "center" covers few hexes or none, and an
+ * empty window says nothing of where the area lies. An aura shows whole
  * only when every sub-cell of it is revealed (markStand.ts auraClip).
  */
-export function auraBox(cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h" | "hexes">, caught: readonly FootprintToken[], scale: number, grid: Grid): CellBox {
-  // On hexes the window is where the covered hexes lie (coverage.ts coveredWindow).
+export function auraBox(cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h" | "hexes">, outline: Outline | null, caught: readonly FootprintToken[], scale: number, grid: Grid): CellBox {
+  let box: CellBox | null = null;
+  const add = (x0: number, y0: number, x1: number, y1: number) => {
+    box = box ? { x0: Math.min(box.x0, x0), y0: Math.min(box.y0, y0), x1: Math.max(box.x1, x1), y1: Math.max(box.y1, y1) } : { x0, y0, x1, y1 };
+  };
+  // On hexes the window is where the covered hexes lie (coverage.ts coveredWindow), which may be none.
   const win = coveredWindow(cov, grid);
-  const box = { x0: win.x0 - AURA_MARGIN, y0: win.y0 - AURA_MARGIN, x1: win.x0 + win.w + AURA_MARGIN, y1: win.y0 + win.h + AURA_MARGIN };
+  if (win.w > 0 && win.h > 0) add(win.x0 - AURA_MARGIN, win.y0 - AURA_MARGIN, win.x0 + win.w + AURA_MARGIN, win.y0 + win.h + AURA_MARGIN);
+  if (outline) {
+    const b = outlineBounds(outline);
+    const stroke = OUTLINE_PX / scale;
+    add(b.x0 - stroke, b.y0 - stroke, b.x1 + stroke, b.y1 + stroke);
+  }
   const reach = ringReach(scale, CAUGHT_RING.widthPx, CAUGHT_RING.gapPx);
   for (const t of caught) {
     const r = footprintRect(grid, t);
-    box.x0 = Math.min(box.x0, r.x - reach);
-    box.y0 = Math.min(box.y0, r.y - reach);
-    box.x1 = Math.max(box.x1, r.x + r.w + reach);
-    box.y1 = Math.max(box.y1, r.y + r.h + reach);
+    add(r.x - reach, r.y - reach, r.x + r.w + reach, r.y + r.h + reach);
   }
-  return box;
+  return box ?? { x0: 0, y0: 0, x1: 0, y1: 0 };
+}
+
+/** An outline's bounds in cells, without its stroke. */
+function outlineBounds(o: Outline): CellBox {
+  switch (o.kind) {
+    case "circle":
+      return { x0: o.x - o.r, y0: o.y - o.r, x1: o.x + o.r, y1: o.y + o.r };
+    case "roundRect":
+      return { x0: o.x, y0: o.y, x1: o.x + o.w, y1: o.y + o.h };
+    case "poly": {
+      const xs = o.points.filter((_, i) => i % 2 === 0);
+      const ys = o.points.filter((_, i) => i % 2 === 1);
+      return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+    }
+  }
+}
+
+/** The clip box of an attached area moving with a dragged token, on its scene's grid: the box DragMarks clips it by. */
+export function movingAuraBox(a: AreaTemplate, ctx: AreaContext, scene: Pick<Scene, "id" | "gridShape">, scale: number): CellBox {
+  const caught = caughtTokens(a, ctx, scene.id).flatMap((id) => ctx.tokens?.[id] ?? []);
+  return auraBox(cachedCoverage(a, ctx), areaOutline(a, ctx), caught, scale, sceneGrid(scene));
 }
 
 /**
@@ -96,8 +129,7 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
           return (
             <Group key={t.id}>
               {attached.map((a) => {
-                const caught = caughtTokens(a, areas.ctx, layer.scene.id).flatMap((id) => areas.ctx.tokens?.[id] ?? []);
-                const box = auraBox(cachedCoverage(a, areas.ctx), caught, layer.scale, grid);
+                const box = movingAuraBox(a, areas.ctx, layer.scene, layer.scale);
                 return (
                   <PlacedArea
                     key={a.id}
