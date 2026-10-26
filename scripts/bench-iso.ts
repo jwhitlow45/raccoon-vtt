@@ -21,10 +21,13 @@
  * crowd at 40 px), a local drag (each whole frame), the ringed and aura'd
  * scout dragged here and by another member, a group of 4 and the horse with
  * its rider dragged at the caps, a ping's frames, a round trip to the map
- * builder, and a brush stroke's steps arriving from another device. With
- * `--view isometric`, also the switch, a turn, and a pan with both drawing
- * trees mounted, and the brush stroke runs back in Top-down with the
- * isometric tree mounted and hidden. Isometric is out of reach until the
+ * builder, and a brush stroke's steps and a map image's coming and going,
+ * each arriving from another device. With `--view isometric`, also the
+ * ground stage's draws while the scout crosses cells, here and by another
+ * member, a count that must be none, the switch, a turn, and a pan with
+ * both drawing trees mounted, and the brush stroke and the map image run
+ * back in Top-down with the isometric tree mounted and hidden. `--only`
+ * times just the rows named. Isometric is out of reach until the
  * integration commit (client/features/view/store.ts isoReady), so the page
  * turns it on through the test flag the view choice reads
  * (client/features/view/choice.ts ISO_TEST_FLAG).
@@ -371,7 +374,45 @@ async function touchPan(page: Page, cdp: CDPSession, steps: number): Promise<num
   return out;
 }
 
-async function touchDrag(page: Page, cdp: CDPSession, id: string, steps: number, opts: { keepSelection?: boolean; down?: number } = {}): Promise<number[]> {
+/**
+ * Starts counting the isometric ground stage's draws: its one layer's draw,
+ * which the board's frame scheduler calls (relief/scheduler.ts), wrapped in
+ * an own property that counts. `groundDraws` reads the count.
+ */
+function countGroundDraws(page: Page): Promise<void> {
+  return page.evaluate(() => {
+    type Layer = { draw(): unknown; __benchDraws?: number };
+    type Stage = { width(): number; visible(): boolean; listening(): boolean; getLayers(): Layer[] };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const ground = konva.stages.find((s) => s.width() > 0 && s.visible() && !s.listening())?.getLayers()[0];
+    if (!ground) throw new Error("no isometric ground stage on screen");
+    if (ground.__benchDraws === undefined) {
+      const draw = ground.draw.bind(ground);
+      ground.draw = () => {
+        ground.__benchDraws = (ground.__benchDraws ?? 0) + 1;
+        return draw();
+      };
+    }
+    ground.__benchDraws = 0;
+  });
+}
+
+function groundDraws(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    type Layer = { __benchDraws?: number };
+    type Stage = { width(): number; visible(): boolean; listening(): boolean; getLayers(): Layer[] };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    return konva.stages.find((s) => s.width() > 0 && s.visible() && !s.listening())?.getLayers()[0]?.__benchDraws ?? -1;
+  });
+}
+
+/**
+ * A touch drag of a token: `steps` moves toward the canvas's middle, each
+ * timed, then back and up. With `watch`, one untimed move goes first, so
+ * the drag has begun and what leaves the ground for it has left, and
+ * `watch` is told when the timed moves start and end.
+ */
+async function touchDrag(page: Page, cdp: CDPSession, id: string, steps: number, opts: { keepSelection?: boolean; down?: number; watch?: { start(): Promise<void>; stop(): Promise<void> } } = {}): Promise<number[]> {
   // A token selected by an earlier row opens its bar, which can cover the next one: start each lone drag with none.
   if (!opts.keepSelection) {
     await page.keyboard.press("Escape");
@@ -385,7 +426,14 @@ async function touchDrag(page: Page, cdp: CDPSession, id: string, steps: number,
   const start = await nodeAt(page, id);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...from, id: 0 }] });
   await frames(page, 2);
+  if (opts.watch) {
+    // Past Konva's drag distance (8 px for touch), so the drag has started, and its marks left the ground stage, before the count starts.
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + sx * 10, y: from.y + sy * 4, id: 0 }] });
+    await frames(page, 8);
+    await opts.watch.start();
+  }
   const out = await timed(page, cdp, steps, (i) => cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + sx * (i + 1) * 7, y: from.y + sy * (i + 1) * 3, id: 0 }] }).then(() => {}));
+  await opts.watch?.stop();
   // The token must have followed the finger, or the row timed nothing.
   const mid = await nodeAt(page, id);
   if (!(Math.hypot(mid.x - start.x, mid.y - start.y) > 20)) {
@@ -447,7 +495,7 @@ async function openView(context: BrowserContext, page: Page, view: View, roomId:
 
 // ---------------------------------------------------------------- the run
 
-export async function runBench(view: View, opts: { parity?: string; shots?: string } = {}): Promise<BenchRow[]> {
+export async function runBench(view: View, opts: { parity?: string; shots?: string; only?: readonly string[] } = {}): Promise<BenchRow[]> {
   if (!existsSync(path.join(ROOT, "dist/index.html"))) throw new Error("No production build in dist/. Run `pnpm build` first.");
   const port = Number(process.env.BENCH_PORT ?? 7590);
   const databaseUrl = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
@@ -506,7 +554,11 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 
     const cdp = await context.newCDPSession(page);
     await cdp.send("Performance.enable", { timeDomain: "timeTicks" });
-    const add = (row: string, times: number[]) => rows.push({ row, view, ms: stats(times) });
+    /** Times a row, unless `only` names others. */
+    const add = async (row: string, run: () => Promise<number[]>) => {
+      if (opts.only && !opts.only.some((o) => row.includes(o))) return;
+      rows.push({ row, view, ms: stats(await run()) });
+    };
     /** Each round's steps, a first round warming the engine up and not counted. */
     const rounds = async (run: () => Promise<number[]>) => {
       await run();
@@ -532,17 +584,17 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
     {
       const { room, scene } = built.typical!;
       await open("typical", 40);
-      add("pan, typical, 40 px", await throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
-      add("local drag, whole frame, typical, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
-      add("local drag of a token with two range rings and an aura, typical", await throttled(() => rounds(() => touchDrag(page, cdp, scene.scout!, STEPS))));
+      await add("pan, typical, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      await add("local drag, whole frame, typical, 40 px", () => throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
+      await add("local drag of a token with two range rings and an aura, typical", () => throttled(() => rounds(() => touchDrag(page, cdp, scene.scout!, STEPS))));
       // Another device of the DM's drags it: the page draws that as another member's drag (RemoteDrags.tsx).
       const cookie = (await context.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
       const other = await Socket.open(server.origin, room.roomId, cookie);
       sockets.push(other);
       const at = scene.scoutAt!;
-      add(
+      await add(
         "remote drag of the ringed and aura'd token, typical",
-        await throttled(() =>
+        () => throttled(() =>
           rounds(async () => {
             other.eph(other.sceneId, { k: "dragStart", tokenId: scene.scout, x: at.x, y: at.y });
             const out = await timed(page, cdp, STEPS, async (i) => other.eph(other.sceneId, { k: "dragMove", tokenId: scene.scout, x: at.x + (i + 1) * 0.25, y: at.y }));
@@ -552,9 +604,27 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           }),
         ),
       );
-      add(
+      if (view === "isometric" && (!opts.only || opts.only.some((o) => GROUND_LOCAL_ROW.includes(o)))) {
+        // A drag across cells moves the token's rings, aura and tethers on the overlay, and redraws nothing on the ground stage (ISO2-RANGERING, design 5.1).
+        let local = 0;
+        await touchDrag(page, cdp, scene.scout!, STEPS, { watch: { start: () => countGroundDraws(page), stop: async () => void (local = await groundDraws(page)) } });
+        rows.push({ row: GROUND_LOCAL_ROW, view, ms: { median: local, max: local, n: 1 } });
+        other.eph(other.sceneId, { k: "dragStart", tokenId: scene.scout, x: at.x, y: at.y });
+        other.eph(other.sceneId, { k: "dragMove", tokenId: scene.scout, x: at.x + 0.25, y: at.y });
+        await frames(page, 30);
+        await countGroundDraws(page);
+        for (let i = 0; i < STEPS; i++) {
+          other.eph(other.sceneId, { k: "dragMove", tokenId: scene.scout, x: at.x + (i + 2) * 0.25, y: at.y });
+          await frames(page, 4);
+        }
+        const remote = await groundDraws(page);
+        other.eph(other.sceneId, { k: "dragCancel", tokenId: scene.scout });
+        await frames(page, 30);
+        rows.push({ row: GROUND_REMOTE_ROW, view, ms: { median: remote, max: remote, n: 1 } });
+      }
+      await add(
         "ping, each frame of its animation, typical",
-        await throttled(() =>
+        () => throttled(() =>
           rounds(async () => {
             await holdPing(page, cdp);
             const out = await timed(page, cdp, 30, async () => {}, 1);
@@ -563,35 +633,39 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           }),
         ),
       );
-      add(
+      await add(
         "a round trip to the map builder, each way, typical",
-        await throttled(() => rounds(() => timed(page, cdp, 2, (i) => page.keyboard.press(i === 0 ? "b" : "v"), 8))),
+        () => throttled(() => rounds(() => timed(page, cdp, 2, (i) => page.keyboard.press(i === 0 ? "b" : "v"), 8))),
       );
     }
+
+    // A map image for the caps, set and taken away by the map row.
+    const capsMap = !opts.only || opts.only.some((o) => MAP_ROW.includes(o)) ? await uploadMap(context, server.origin, built.caps!.room.roomId) : null;
 
     // The caps.
     {
       const { scene } = built.caps!;
       await open("caps", "fit");
-      add("pan, caps, fit", await throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      await add("pan, caps, fit", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
       await open("caps", 40);
-      add("pan, caps, 40 px", await throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      await add("pan, caps, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
       await select(page, scene.group!);
-      add("group drag of 4, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.group![0]!, STEPS, { keepSelection: true }))));
+      await add("group drag of 4, caps, 40 px", () => throttled(() => rounds(() => touchDrag(page, cdp, scene.group![0]!, STEPS, { keepSelection: true }))));
       await page.keyboard.press("Escape");
       await frames(page, 8);
       // Pressed near its foot, clear of the rider on its back, which a press would lift off it.
-      add("a horse with its rider dragged, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.horse!, STEPS, { down: 0.92 }))));
+      await add("a horse with its rider dragged, caps, 40 px", () => throttled(() => rounds(() => touchDrag(page, cdp, scene.horse!, STEPS, { down: 0.92 }))));
       // In Isometric this row runs last, in Top-down with the isometric tree mounted and hidden.
-      if (view === "topDown") add(BRUSH_ROW, await throttled(() => rounds(() => brushStrokes(page, cdp, built.caps!.dm))));
+      if (view === "topDown") await add(BRUSH_ROW, () => throttled(() => rounds(() => brushStrokes(page, cdp, built.caps!.dm))));
+      if (view === "topDown") await add(MAP_ROW, () => throttled(() => rounds(() => mapSwaps(page, cdp, built.caps!.dm, capsMap!))));
     }
 
     // The crowd.
     {
       const { scene } = built.crowd!;
       await open("crowd", 40);
-      add("pan, 500 tokens, 40 px", await throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
-      add("local drag, whole frame, 500 tokens, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
+      await add("pan, 500 tokens, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      await add("local drag, whole frame, 500 tokens, 40 px", () => throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
     }
 
     if (view === "isometric") {
@@ -599,13 +673,23 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       // The board's hook beside the test flag (relief/isoTest.ts): a pick or a turn as the View menu makes them.
       const hook = (call: "turn" | "pick", arg: unknown) =>
         page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => void> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
-      add("turn, caps, 40 px", await throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
-      add("switch, caps, 40 px, both trees mounted", await throttled(() => rounds(() => timed(page, cdp, 2, async (i) => void (await hook("pick", i === 0 ? "topDown" : "isometric")), 4))));
-      add("pan, caps, 40 px, both trees mounted", await throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      await add("turn, caps, 40 px", () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
+      await add("switch, caps, 40 px, both trees mounted", () => throttled(() => rounds(() => timed(page, cdp, 2, async (i) => void (await hook("pick", i === 0 ? "topDown" : "isometric")), 4))));
+      await add("pan, caps, 40 px, both trees mounted", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
       // Back in Top-down, as the builder will force it (ISO-4): a stroke must cost what it does with no isometric tree.
       await hook("pick", "topDown");
       await frames(page, 30);
-      add(BRUSH_ROW, await throttled(() => rounds(() => brushStrokes(page, cdp, built.caps!.dm))));
+      await add(BRUSH_ROW, () => throttled(() => rounds(() => brushStrokes(page, cdp, built.caps!.dm))));
+      if (capsMap) {
+        // The map first drawn while Isometric shows, so the hidden tree holds its side tints when Top-down takes it away.
+        await hook("pick", "isometric");
+        await built.caps!.dm.op({ t: "scene.setMap", sceneId: built.caps!.dm.sceneId, map: capsMap });
+        await page.waitForTimeout(1000);
+        await frames(page, 30);
+        await hook("pick", "topDown");
+        await frames(page, 30);
+      }
+      await add(MAP_ROW, () => throttled(() => rounds(() => mapSwaps(page, cdp, built.caps!.dm, capsMap!))));
     }
     return rows;
   } finally {
@@ -621,6 +705,30 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 }
 
 const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
+/** In Isometric's pass it runs back in Top-down with the isometric tree mounted and hidden, whose side tints read the map (ISO2-OPUS-12). */
+const MAP_ROW = "a map image set and taken away from another device of the DM's, caps, 40 px";
+
+type MapRef = { assetId: string; widthPx: number; heightPx: number; cellPx: number; originPx: { x: number; y: number } };
+
+/** A plain map image as big as the caps at 8 px a cell, uploaded to its room. */
+async function uploadMap(context: BrowserContext, origin: string, roomId: string): Promise<MapRef> {
+  const data = await sharp({ create: { width: 1600, height: 1600, channels: 3, background: { r: 120, g: 110, b: 90 } } }).png().toBuffer();
+  const res = await context.request.put(`${origin}/api/rooms/${roomId}/assets?kind=map`, { headers: { Origin: origin, "content-type": "image/png" }, data });
+  if (!res.ok()) throw new Error(`the map upload answered ${res.status()}`);
+  const row = (await res.json()) as { id: string; width: number; height: number };
+  return { assetId: row.id, widthPx: row.width, heightPx: row.height, cellPx: 8, originPx: { x: 0, y: 0 } };
+}
+
+/** Each step sets the map image or takes it away, from another device of the DM's, and waits for the page to load and draw what follows. */
+async function mapSwaps(page: Page, cdp: CDPSession, dm: Socket, map: MapRef): Promise<number[]> {
+  return timed(page, cdp, 4, async (i) => {
+    await dm.op({ t: "scene.setMap", sceneId: dm.sceneId, map: i % 2 === 0 ? map : null });
+    await page.waitForTimeout(400);
+  }, 30);
+}
+/** Counts, not times: the ground stage's draws while the ringed and aura'd scout crosses cells, which must be none. */
+const GROUND_LOCAL_ROW = "ground stage draws while the ringed and aura'd token is dragged here across cells, typical (draws, not ms)";
+const GROUND_REMOTE_ROW = "ground stage draws while another member drags the ringed and aura'd token across cells, typical (draws, not ms)";
 
 /** Each step paints a 2 by 2 patch of the caps in one terrain or another, as a builder stroke on another device does, and the page draws what arrives. */
 async function brushStrokes(page: Page, cdp: CDPSession, dm: Socket): Promise<number[]> {
@@ -648,6 +756,7 @@ async function select(page: Page, ids: readonly string[]): Promise<void> {
 /** Section 11's gates: every frame at most max(16 ms, 1.75 times Top-down's same frame), a turn at the caps at most 150 ms whole. */
 export function gate(row: string, iso: number, topDown: number | undefined): string {
   if (row.startsWith("turn")) return iso <= 150 ? "ok" : "OVER 150 ms";
+  if (row.startsWith("ground stage draws")) return iso === 0 ? "ok (none)" : `OVER: ${iso} ground draws`;
   if (topDown === undefined) return "";
   const budget = Math.max(16, 1.75 * topDown);
   return iso <= budget ? `ok (budget ${budget.toFixed(1)})` : `OVER (budget ${budget.toFixed(1)})`;
@@ -714,7 +823,9 @@ if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts
     const view: View = arg("--view") === "isometric" ? "isometric" : "topDown";
     const parity = arg("--parity");
     const shots = arg("--shots");
-    const rows = await runBench(view, parity ? { parity, ...(shots ? { shots } : {}) } : {});
+    // `--only a,b` times just the rows whose names hold one of those words, for a quick look at a change.
+    const only = arg("--only")?.split(",");
+    const rows = await runBench(view, parity ? { parity, ...(shots ? { shots } : {}) } : only ? { only } : {});
     const out = arg("--out");
     if (out) writeFileSync(out, JSON.stringify(rows, null, 2));
     if (!parity) console.log(formatReport([rows]));
