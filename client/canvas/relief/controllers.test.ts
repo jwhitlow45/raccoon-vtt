@@ -202,8 +202,18 @@ describe("both trees share one map image", () => {
     assert.ok(wrap > 0 && wrap < stage.indexOf("<Frozen frozen=") && stage.indexOf("</SharedMapImage>") > stage.indexOf("<IsoBoard"), "it wraps both trees");
     const map = read("canvas/layers/MapLayer.tsx");
     assert.match(map, /const own = useMapImage\(shared \? null : source\.url, source\.fallback\);/);
-    assert.match(map, /shared \? \(shared\.url === source\.url \? shared\.state : LOADING\) : own/);
+    assert.match(map, /const \{ state, keepsLast \} = treeMap\(shared, source\.url, own\);/);
     assert.equal(map.match(/useMapImage\(/g)?.length, 2, "the shared loader and the fallback, nothing else");
+  });
+
+  test("a tree on another map than the shared one keeps no image, and the tints read only an image the loader still holds (ISO2-OPUS-11)", () => {
+    const map = read("canvas/layers/MapLayer.tsx");
+    assert.match(map, /mapSwap\(\{ sceneId: props\.sceneId, assetId: props\.map\.assetId, rect, status, image \}, keepsLast \? kept : null\)/);
+    assert.match(map, /return drawn && mapReadable\(drawn\.image, shared \? shared\.state : null\) \? drawn : null;/);
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    assert.match(iso, /const readable = useReadableMap\(drawnMap\);/);
+    const tints = iso.slice(iso.indexOf("const tints = useMemo("), iso.indexOf("}, [readable]);"));
+    assert.ok(tints.length > 0 && !tints.includes("drawnMap"), "the tints read the readable map only");
   });
 
   test("only the tree on screen reports the map's progress", () => {
@@ -222,6 +232,7 @@ describe("map labels in Isometric", () => {
     assert.match(iso, /uprightLabels: uprightIds/);
     assert.match(iso, /labelShape\(l, view, \{ measure: measureLabel, upright: true, ground: ground\(l\.x, l\.y\) \}\)/);
   });
+
 });
 
 describe("the isometric board's lookups", () => {

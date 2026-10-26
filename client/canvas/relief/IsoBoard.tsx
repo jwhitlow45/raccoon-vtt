@@ -20,7 +20,7 @@ import { theme } from "../../lib/theme.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { useRoomStore } from "../../state/view.ts";
 import { FogShape } from "../FogShape.tsx";
-import { MapContent, type DrawnMap } from "../layers/MapLayer.tsx";
+import { MapContent, useReadableMap, type DrawnMap } from "../layers/MapLayer.tsx";
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
@@ -134,13 +134,15 @@ function IsoBoardImpl(props: IsoBoardProps) {
   // The map image Top-down draws, for the side tints of cells with no builder terrain (looks.ts).
   const [drawnMap, setDrawnMap] = useState<DrawnMap | null>(null);
   const onDrawn = useCallback((d: DrawnMap | null) => setDrawnMap((prev) => (prev?.image === d?.image && sameRect(prev?.rect, d?.rect) ? prev : d)), []);
+  // Read only while the shared loader still holds that image: it frees it once another settles, and a hidden tree learns of that late.
+  const readable = useReadableMap(drawnMap);
   const tints = useMemo(() => {
-    if (!drawnMap) return null;
-    const read = imageReader(drawnMap.image);
-    const iw = "naturalWidth" in drawnMap.image ? drawnMap.image.naturalWidth : drawnMap.image.width;
-    const ih = "naturalHeight" in drawnMap.image ? drawnMap.image.naturalHeight : drawnMap.image.height;
-    return read && iw > 0 && ih > 0 ? new CellTints(read, drawnMap.rect, { width: iw, height: ih }) : null;
-  }, [drawnMap]);
+    if (!readable) return null;
+    const read = imageReader(readable.image);
+    const iw = "naturalWidth" in readable.image ? readable.image.naturalWidth : readable.image.width;
+    const ih = "naturalHeight" in readable.image ? readable.image.naturalHeight : readable.image.height;
+    return read && iw > 0 && ih > 0 ? new CellTints(read, readable.rect, { width: iw, height: ih }) : null;
+  }, [readable]);
   // The builder's textures load with the first Isometric view (section 8).
   const textures = useTextures(ALL_TEXTURES);
 

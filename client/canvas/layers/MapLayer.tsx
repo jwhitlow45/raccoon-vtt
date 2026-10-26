@@ -9,7 +9,8 @@ import { mapWorldRect } from "../../lib/scene.ts";
 import { mapFailureText } from "../../state/sceneLoad.ts";
 import { useAssets, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useMapProgressStore } from "../mapProgress.ts";
-import { useMapImage, type MapImageState, type MapSource } from "../useImage.ts";
+import { mapReadable, useMapImage, type MapSource } from "../useImage.ts";
+import { treeMap, type SharedMap } from "./sharedMap.ts";
 
 /**
  * Layer 1 of 4 (design section 14.2): the scene background, the map image and
@@ -53,20 +54,15 @@ function mapSource(assets: ReturnType<typeof useAssets>, map: NonNullable<Scene[
   return { url: mapWorldRect(map) ? assets.url(map.assetId, variant) : null, fallback: variant === "full" ? null : assets.url(map.assetId, "full") };
 }
 
-/** The map image the board's trees share: what it loads from, and how far it got. */
-type SharedMap = { url: string | null; state: MapImageState };
-
 const SharedMapContext = createContext<SharedMap | null>(null);
-
-const LOADING: MapImageState = { image: null, status: "loading" };
 
 /**
  * Loads the scene's map image once for both of the board's drawing trees
  * (docs/design-v1-isometric-view.md 5.1, ISO-D15). A map decodes to as much
  * as 256 MiB, so each tree loading its own would hold it twice. The trees'
  * map layers read this one through context, which reaches the frozen tree
- * past its memo. A tree on another scene's map, as a frozen one can be,
- * sees it loading and draws nothing of it.
+ * past its memo. A tree on another map, as a frozen one can be, draws
+ * nothing of it and keeps nothing of its own (sharedMap.ts treeMap).
  */
 export function SharedMapImage(props: { scene: Scene; variant: AssetVariant; children: ReactNode }) {
   const assets = useAssets();
@@ -80,6 +76,12 @@ export function SharedMapImage(props: { scene: Scene; variant: AssetVariant; chi
 
 /** The image a map draws, as the board drew it last, for the isometric view's side tints (relief/looks.ts). */
 export type DrawnMap = { image: MapSource; rect: WorldRect };
+
+/** The drawn map while its pixels can still be read, else null (useImage.ts mapReadable). */
+export function useReadableMap(drawn: DrawnMap | null): DrawnMap | null {
+  const shared = useContext(SharedMapContext);
+  return drawn && mapReadable(drawn.image, shared ? shared.state : null) ? drawn : null;
+}
 
 /**
  * The background, the map image and the grid, for a layer of their own in
@@ -118,14 +120,16 @@ function MapImage(props: {
   // Under the board's shared loader, this tree draws its image. Anywhere else it loads its own.
   const shared = useContext(SharedMapContext);
   const own = useMapImage(shared ? null : source.url, source.fallback);
-  const { image, status } = shared ? (shared.url === source.url ? shared.state : LOADING) : own;
+  const { state, keepsLast } = treeMap(shared, source.url, own);
+  const { image, status } = state;
 
   // The image last drawn stays up while a new one for the same scene loads
   // (features/phases/swap.ts). The hook frees an image only once a new one
   // has settled, after the commit that stopped drawing it, so the kept one
-  // is still whole whenever it is drawn.
+  // is still whole whenever it is drawn. Under the shared loader that holds
+  // only for a tree on the loader's map, so a tree on another keeps nothing.
   const [kept, setKept] = useState<ShownMap<MapSource> | null>(null);
-  const swap = mapSwap({ sceneId: props.sceneId, assetId: props.map.assetId, rect, status, image }, kept);
+  const swap = mapSwap({ sceneId: props.sceneId, assetId: props.map.assetId, rect, status, image }, keepsLast ? kept : null);
   useEffect(() => {
     if (!sameShown(swap.keep, kept)) setKept(swap.keep);
   }, [swap.keep, kept]);

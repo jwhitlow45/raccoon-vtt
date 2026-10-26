@@ -31,9 +31,14 @@ async function loadMap(src: string, signal: AbortSignal): Promise<MapSource> {
   return createImageBitmap(await res.blob());
 }
 
+/** The bitmaps freed so far, so a reader still holding one can tell before it draws it. */
+const freed = new WeakSet<MapSource>();
+
 /** Frees a bitmap's pixels now, instead of at the next garbage collection. An image element has nothing to free. */
-function release(image: MapSource | null | undefined): void {
-  if (image && "close" in image) image.close();
+export function release(image: MapSource | null | undefined): void {
+  if (!image || !("close" in image)) return;
+  freed.add(image);
+  image.close();
 }
 
 export type MapImageState = { image: MapSource | null; status: "loading" | "ready" | "failed" };
@@ -76,6 +81,21 @@ export function useMapImage(url: string | null, fallbackUrl: string | null): Map
   useEffect(() => () => release(loaded?.image), [loaded]);
   if (!loaded || loaded.url !== url) return { image: null, status: "loading" };
   return loaded.image ? { image: loaded.image, status: "ready" } : { image: null, status: "failed" };
+}
+
+/**
+ * Whether a map image a tree drew can still be read, as the isometric
+ * view's side tints read it (relief/looks.ts), given what the loader that
+ * made it answers now. A drawImage of a freed bitmap throws. The loader
+ * frees an image in the commit after another settles in its place, so a
+ * reader lets go in that commit's render, before the free: once the loader
+ * answers ready or failed with another image, or none. While it loads,
+ * it still holds the last image it made. `loader` is null for an image a
+ * reader's own hook loaded.
+ */
+export function mapReadable(image: MapSource, loader: MapImageState | null): boolean {
+  if (freed.has(image)) return false;
+  return loader === null || loader.status === "loading" || loader.image === image;
 }
 
 /**

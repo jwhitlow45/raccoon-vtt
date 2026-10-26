@@ -5,6 +5,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import sharp from "sharp";
 import { ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
@@ -671,7 +672,81 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     }
   });
 
-  test("ISO-10. no page logged an error", () => {
+  test("ISO-10. a map changed while Isometric is hidden: back in Isometric, a cell raised meanwhile draws, with no error (ISO2-OPUS-11)", async () => {
+    await dm.bringToFront();
+    // Counts the map bitmaps the page makes and frees, so the test knows the first is freed before it goes back.
+    await dm.evaluate(() => {
+      const g = globalThis as unknown as { createImageBitmap: (...a: unknown[]) => Promise<{ close(): void }>; __isoMaps?: { made: number; freed: number } };
+      const maps = (g.__isoMaps = { made: 0, freed: 0 });
+      const make = g.createImageBitmap.bind(g);
+      g.createImageBitmap = async (...a: unknown[]) => {
+        const bitmap = await make(...a);
+        maps.made++;
+        const close = bitmap.close.bind(bitmap);
+        bitmap.close = () => {
+          maps.freed++;
+          close();
+        };
+        return bitmap;
+      };
+    });
+    const maps = () => dm.evaluate(() => (globalThis as unknown as { __isoMaps: { made: number; freed: number } }).__isoMaps);
+    const upload = async (rgb: [number, number, number]) => {
+      const data = await sharp({ create: { width: 500, height: 400, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer();
+      const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
+      assert.ok(res.ok(), `the upload answered ${res.status()}`);
+      const row = (await res.json()) as { id: string; width: number; height: number };
+      return { assetId: row.id, widthPx: row.width, heightPx: row.height, cellPx: 25, originPx: { x: 0, y: 0 } };
+    };
+    const first = await upload([150, 140, 120]);
+    const second = await upload([70, 110, 90]);
+    const shownIs = (kind: string) => waitFor(`the board in ${kind}`, async () => ((await shownView(dm)).startsWith(kind) ? true : null));
+    // I goes to the other view, as a DM's key does.
+    const show = async (kind: "isometric" | "top-down") => {
+      if (!(await shownView(dm)).startsWith(kind)) {
+        await blur(dm);
+        await dm.keyboard.press("i");
+      }
+      await shownIs(kind);
+    };
+    const boardScale = () =>
+      dm.evaluate(() => {
+        const konva = (globalThis as unknown as { Konva: { stages: { width(): number; scaleX(): number }[] } }).Konva;
+        return Math.max(...konva.stages.filter((st) => st.width() > 0).map((st) => st.scaleX()));
+      });
+
+    // Isometric with the first map: the board reads its tints from that bitmap.
+    await ops.send({ t: "scene.setMap", sceneId: run.sceneId, map: first });
+    await show("isometric");
+    await waitFor("the first map decoded", async () => ((await maps()).made >= 1 ? true : null));
+    await dm.waitForTimeout(500);
+    // A height stands at this zoom (lib/view.ts STAND_MIN_PX), or no side is read.
+    assert.ok((await boardScale()) >= 12, "the DM's board is zoomed in far enough for heights to stand");
+
+    // Top-down, then the second map: once it settles the first bitmap is freed, while Isometric's tree is hidden.
+    await show("top-down");
+    await ops.send({ t: "scene.setMap", sceneId: run.sceneId, map: second });
+    await waitFor("the second map decoded and the first freed", async () => {
+      const m = await maps();
+      return m.made >= 2 && m.freed >= 1 ? true : null;
+    });
+    // A cell raised meanwhile, with no terrain and inside the map, so its sides read a tint no one has read yet.
+    await ops.send({ t: "build.height", sceneId: run.sceneId, cells: ["3,3"], height: 10 });
+    await dm.waitForTimeout(300);
+
+    await show("isometric");
+    await dm.waitForTimeout(500);
+    await dm.locator(".konvajs-content").filter({ visible: true }).first().waitFor();
+    assert.deepEqual(consoles.dm.errors, [], "the board drew without an error");
+    await shots.take(dm, "iso-dm-map-swapped-while-hidden");
+
+    // The room as it was, for the tests after.
+    await ops.send({ t: "build.height", sceneId: run.sceneId, cells: ["3,3"], height: 0 });
+    await ops.send({ t: "scene.setMap", sceneId: run.sceneId, map: null });
+    await show("top-down");
+  });
+
+  test("ISO-11. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
 });
