@@ -29,6 +29,8 @@ import { FogShape } from "../FogShape.tsx";
 import { MapContent, useReadableMap, type DrawnMap } from "../layers/MapLayer.tsx";
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
 import { DragMarks } from "../DragMarks.tsx";
+import { useBoardText, type BoardTextInput, type TokenText } from "../useBoardText.ts";
+import { decorPlace, mapLabelInk, viewPill } from "./isoText.ts";
 import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
@@ -82,13 +84,15 @@ export type IsoBoardProps = {
   tokens: readonly ViewToken[];
   aboveFog: (t: ViewToken) => boolean;
   /** Today's TokenNode for a token, placed on the relief (`iso`) or on the ground stage (null). */
-  renderToken: (t: ViewToken, iso: IsoToken | null) => ReactNode;
+  renderToken: (t: ViewToken, iso: IsoToken | null, text?: TokenText) => ReactNode;
   /** Today's decor pass for a token, its box's top left at a view point. */
-  renderDecor: (t: ViewToken, part: "marks" | "label" | "plate", at: { x: number; y: number }) => ReactNode;
+  renderDecor: (t: ViewToken, part: "marks" | "label" | "plate", at: { x: number; y: number }, text: TokenText | undefined) => ReactNode;
   /** The tokens that draw decor in the passes over the board, as Top-down's: all but the ones a drag carries. */
   decorTokens: readonly ViewToken[];
-  /** Whether a token has a plate to draw. */
-  hasPlate: (t: ViewToken) => boolean;
+  /** What the token labels' layout reads besides where things stand (useBoardText.ts), which the board lays out again in view space (5.4). */
+  text: Omit<BoardTextInput, "tokens" | "scale" | "mapLabels" | "place">;
+  /** The labels as laid out here, for the chrome that hangs below a token's label (Stage.tsx's action bar). */
+  onText: (text: ReadonlyMap<string, TokenText>) => void;
   layerProps: LayerProps;
   variant: AssetVariant;
   lowPower: boolean;
@@ -105,6 +109,7 @@ export type IsoBoardProps = {
 
 const EMPTY_CHUNKS: Record<string, BuildChunk> = {};
 const NO_SPOTS: Readonly<Record<string, { x: number; y: number }>> = {};
+const NO_TOKENS: readonly ViewToken[] = [];
 const ALL_TEXTURES: readonly TexturedTerrain[] = ["stone", "wood", "grass", "dirt", "cave", "water", "difficult", "rubble"];
 const GROUND_LAYERS = isoLayersOf("ground", "board");
 const GROUND_MARKS = [...isoLayersOf("ground", "underDecor"), ...isoLayersOf("ground", "overlay")];
@@ -213,6 +218,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
         drawn: shape.drawnBase,
         rise: seat.rise,
         inset: seat.inset,
+        ring: shape.ring,
       };
     });
   }, [standing, src, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens]);
@@ -324,6 +330,25 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const [splitLabels] = useState(() => labelSplitter<(typeof labels)[number]>(measureLabel));
   const uprightLabels = splitLabels(fog, labels, fontEpoch).upright;
   const uprightIds = useMemo(() => new Set(uprightLabels.map((l) => l.id)), [uprightLabels]);
+
+  /*
+   * Token labels laid out in view space (5.4): each token's box is where its
+   * decor stands, a standee's ring below it, and they keep off the pills and
+   * the map labels where this board draws them, a map label by its ink as it
+   * stands or lies by the stand rule. Hidden, it lays out nothing.
+   */
+  const groundAt = useCallback((x: number, y: number) => (x >= 0 && y >= 0 && x < w && y < h ? heights.at(Math.floor(x), Math.floor(y)) : 0), [heights, w, h]);
+  const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, byStandee.get(t.id)), [turn, byStandee]);
+  const viewPills = useMemo(() => props.text.pills.map((p) => viewPill(p, isometric(turn), groundAt)), [props.text.pills, turn, groundAt]);
+  const labelInk = useMemo(
+    () => labels.map((l) => mapLabelInk(l, isometric(turn), uprightIds.has(l.id), groundAt(l.x, l.y), measureLabel)),
+    [labels, uprightIds, turn, groundAt, fontEpoch],
+  );
+  const isoText = useBoardText({ ...props.text, tokens: hidden ? NO_TOKENS : props.tokens, scale: cam.scale, pills: viewPills, mapLabels: labelInk, place: placeOf });
+  const onText = props.onText;
+  useLayoutEffect(() => {
+    if (!hidden) onText(isoText);
+  }, [hidden, isoText, onText]);
   // One context per place, so a renderer drawn in several knows which part it draws there (features/layers.ts IsoPlace).
   const groundCtx: IsoGround = useMemo(
     () => ({ turn, fog, heights: stand, uprightLabels: uprightIds, place: "ground", ground: (x: number, y: number) => heights.at(Math.floor(x), Math.floor(y)) }),
@@ -399,7 +424,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
             <Group scaleY={groups.outer.scaleY}>
               <Group rotation={groups.inner.rotation}>
                 {items.map((item, i) =>
-                  item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!),
+                  item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!, isoText.get(item.id)),
                 )}
                 {flat.map((t) => props.renderToken(t, PRESS_ONLY))}
               </Group>
@@ -450,10 +475,10 @@ function IsoBoardImpl(props: IsoBoardProps) {
             <DragMarks tokenIds={dragged.remote} iso={uprightCtx} layer={props.layerProps} />
             {(["marks", "label", "plate"] as const).flatMap((part) =>
               props.decorTokens
-                .filter((t) => part !== "plate" || props.hasPlate(t))
+                .filter((t) => part !== "plate" || !!isoText.get(t.id)?.plate)
                 .flatMap((t) => {
                   const at = decorAt(t, byStandee, view, cull, props.keepIds);
-                  return at ? [props.renderDecor(t, part, at)] : [];
+                  return at ? [props.renderDecor(t, part, at, isoText.get(t.id))] : [];
                 }),
             )}
           </Layer>
@@ -464,7 +489,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
 }
 
 /** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
-type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox };
+type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox; ring: VBox };
 
 const PRESS_ONLY: IsoToken = { turn: 0, base: 0, ground: 0, drawn: 0, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true };
 
@@ -496,16 +521,12 @@ function decorAt(
   keep: ReadonlySet<string>,
 ): { x: number; y: number } | null {
   const s = standees.get(t.id);
-  if (s) {
-    if (!s.keep && !meets(s.bounds, cull)) return null;
-    return { x: s.frame.x0, y: s.frame.y0 };
-  }
+  const at = decorPlace(view, t, s);
+  if (s) return s.keep || meets(s.bounds, cull) ? at : null;
   // A creature lying flat draws its decor above the fog, as Top-down's decor already is (5.2): every token a player holds is partly in sight.
   const fp = footprint(t);
-  const c = toView(view, { x: t.x + fp.w / 2, y: t.y + fp.h / 2 });
-  const box = { x0: c.x - fp.w, y0: c.y - fp.h, x1: c.x + fp.w, y1: c.y + fp.h };
-  if (!keep.has(t.id) && !meets(box, cull)) return null;
-  return { x: c.x - fp.w / 2, y: c.y - fp.h / 2 };
+  const box = { x0: at.x - fp.w / 2, y0: at.y - fp.h / 2, x1: at.x + fp.w * 1.5, y1: at.y + fp.h * 1.5 };
+  return keep.has(t.id) || meets(box, cull) ? at : null;
 }
 
 /** A covered standee's outline over whatever covers it (5.6). */

@@ -140,7 +140,10 @@ describe("standees", () => {
 
   test("the board lays decor out on the frame and draws silhouettes from the seated art", () => {
     const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
-    assert.match(board, /return \{ x: s\.frame\.x0, y: s\.frame\.y0 \};/);
+    // The decor and the label layout both place a standee's decor by its frame (isoText.ts decorPlace).
+    assert.match(board, /const at = decorPlace\(view, t, s\);/);
+    const text = readFileSync(new URL("./isoText.ts", import.meta.url), "utf8");
+    assert.match(text, /if \(standee\) return \{ x: standee\.frame\.x0, y: standee\.frame\.y0, ring: standee\.ring \};/);
     assert.match(board, /standeeShape\(turn, \{ x: t\.x, y: t\.y, w: fp\.w, h: fp\.h \}, base, ground, cam\.scale, size\.height, seat\)/);
     assert.match(board, /rise: seat\.rise,\n\s+inset: seat\.inset,/);
     const node = readFileSync(new URL("../TokenNode.tsx", import.meta.url), "utf8");

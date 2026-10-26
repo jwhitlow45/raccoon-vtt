@@ -317,6 +317,8 @@ async function setUpSteps(): Promise<void> {
 
 /** Picks Isometric at a turn on a page, as the View menu does (relief/isoTest.ts), and waits for its board. */
 async function isoOn(page: Page, turn: 0 | 1 | 2 | 3): Promise<void> {
+  // A page just opened sets the hook once its board mounts.
+  await waitFor("the test hook", () => page.evaluate(() => ("__rvttIsoHook" in globalThis ? true : null)));
   await page.evaluate((t) => {
     const hook = (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void; turn(t: number): void } }).__rvttIsoHook;
     hook.pick("isometric");
@@ -1307,6 +1309,49 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     }
     await pat.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Select/ }).tap();
     await suggest("Top-down");
+  });
+
+  test("ISO-46. in Isometric the names of a crowd lay out in view space: none lies on another creature's standee", async () => {
+    await dm.bringToFront();
+    const crowd = [[15, 10], [16, 11], [17, 12], [15, 12], [17, 10], [16, 13], [18, 11], [14, 11], [16, 9]].map(([x, y], i) => ({ id: randomUUID(), x: x!, y: y!, name: `Kob${i + 1}` }));
+    // Grum stands clear of the crowd, so only the crowd decides where its names go, and the DM's camera comes back to the scene's starting view.
+    await ops.send({ t: "token.move", tokenId: GRUM, x: 2, y: 2, elevation: 0 });
+    for (const k of crowd) await ops.send(tokenOp(k.id, { kind: "monster", name: k.name, x: k.x, y: k.y, disposition: "hostile" }));
+    await waitFor("the crowd on the DM's page", () => (crowd.every((k) => dmSocket.state?.tokens[k.id]) ? true : null));
+    await reopenRoom(dm);
+    await isoOn(dm, 0);
+    await dm.waitForTimeout(400);
+    await shots.take(dm, "iso-46-dm-crowd-names");
+    const seen = await dm.evaluate((ids) => {
+      type Rect = { x: number; y: number; width: number; height: number };
+      type Node = { getClientRect(): Rect; text?: () => string; className: string; isVisible(): boolean; find(s: string): Node[] };
+      type Stage = { width(): number; visible(): boolean; listening(): boolean; getLayers(): { find(s: string): Node[] }[]; findOne(s: string): Node | undefined };
+      const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+      const main = konva.stages.find((s) => s.width() > 0 && s.visible() && s.listening());
+      if (!main) return null;
+      // A standee as it draws: the union of the shapes it shows, its art, ring and outlines (the node's own box also holds its invisible press area).
+      const drawn = (node: Node | undefined): Rect | null => {
+        const rects = (node?.find("Shape") ?? []).filter((c) => c.isVisible()).map((c) => c.getClientRect());
+        if (rects.length === 0) return null;
+        const x0 = Math.min(...rects.map((r) => r.x));
+        const y0 = Math.min(...rects.map((r) => r.y));
+        return { x: x0, y: y0, width: Math.max(...rects.map((r) => r.x + r.width)) - x0, height: Math.max(...rects.map((r) => r.y + r.height)) - y0 };
+      };
+      const bodies = ids.map((k) => ({ ...k, rect: drawn(main.findOne(`#${k.id}`)) }));
+      // Each name as the overlay draws it: a Text node with the creature's name.
+      const names = main.getLayers()[2]!.find("Text").filter((t) => t.isVisible() && ids.some((k) => t.text?.() === k.name)).map((t) => ({ name: t.text!(), rect: t.getClientRect() }));
+      return { bodies, names };
+    }, crowd);
+    assert.ok(seen, "the isometric board shows");
+    assert.ok(seen.names.length >= 3, `some names show: ${seen.names.map((n) => n.name).join(", ")}`);
+    const meet = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) => a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
+    for (const n of seen.names) {
+      for (const b of seen.bodies) {
+        if (b.name === n.name || !b.rect) continue;
+        assert.ok(!meet(n.rect, b.rect), `${n.name}'s name ${JSON.stringify(n.rect)} lies on ${b.name}'s standee ${JSON.stringify(b.rect)}`);
+      }
+    }
+    for (const k of crowd) await ops.send({ t: "token.delete", tokenId: k.id });
   });
 
   test("ISO-12. no page logged an error", () => {

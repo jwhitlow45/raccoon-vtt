@@ -100,6 +100,7 @@ const SETTLE_MS = 1_000;
 const EMPTY_TILES: RoomState["fogTiles"] = {};
 const EMPTY_MAP_LABELS: RoomState["labels"] = {};
 const NOT_CARRIED: ReadonlySet<string> = new Set();
+const NO_TEXT: ReadonlyMap<string, TokenText> = new Map();
 const APPLE = isAppleDevice();
 const BOARD_LAYERS = layersOf("board");
 const OVERLAY_LAYERS = layersOf("overlay");
@@ -723,6 +724,9 @@ export function MapStage(props: {
   // The lock shows where it is the only thing in the way of a drag.
   const lockShown = useCallback((t: ViewToken) => t.locked && (role === "dm" || ownsToken(t) || movesAny(t)), [role, ownsToken, movesAny]);
   const boardText = useBoardText({ tokens, scale, characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, mapLabels, lockShown, fontEpoch });
+  // The isometric board lays the same labels out again in view space (5.4, relief/IsoBoard.tsx), and the chrome under a token reads those there.
+  const isoTextInput = useMemo(() => ({ characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, lockShown, fontEpoch }), [characters, role, ownsToken, activeTokenId, selectedId, plateIds, pills, lockShown, fontEpoch]);
+  const [isoText, setIsoText] = useState<ReadonlyMap<string, TokenText>>(NO_TEXT);
   /*
    * The attach rules' parts of a drag (docs/design-v1-attach.md 4.2 and 6),
    * from this copy: a press on a rider of a controlled mount, or on one
@@ -1567,12 +1571,12 @@ export function MapStage(props: {
   // The party stays above the sight overlay as it does above the fog, fog or no fog (docs/design-v1-maps-vision.md 4.3.7).
   for (const t of tokens) ((fog || sightMode !== null) && drawsAboveFog(t, role, memberMap, characters) ? above : below).push(t);
 
-  const renderToken = (t: ViewToken, iso: IsoToken | null = null) => (
+  const renderToken = (t: ViewToken, iso: IsoToken | null = null, text?: TokenText) => (
     <TokenNode
       key={t.id}
       token={t}
       scale={cam?.scale ?? 1}
-      text={boardText.get(t.id)}
+      text={text ?? boardText.get(t.id)}
       lockMark={lockShown(t)}
       decor={carried.has(t.id)}
       selected={selectedSet.has(t.id)}
@@ -1593,6 +1597,8 @@ export function MapStage(props: {
   const selected = selectedId ? tokensById.get(selectedId) : undefined;
   const group = selectedIds.flatMap((id) => tokensById.get(id) ?? []);
   const barShown = actionBar && selecting && cam && size && draggingId === null;
+  // The labels as the board on screen laid them out.
+  const shownText = isoShown ? isoText : boardText;
 
   const stageStyle: CSSProperties = {
     touchAction: "none",
@@ -1692,9 +1698,10 @@ export function MapStage(props: {
                     tokens={tokens}
                     aboveFog={aboveFogOf}
                     renderToken={renderToken}
-                    renderDecor={(t, part, at) => <TokenDecor key={`${part}:${t.id}`} part={part} token={t} scale={cam.scale} text={boardText.get(t.id)} lockMark={lockShown(t)} atX={at.x} atY={at.y} />}
+                    renderDecor={(t, part, at, text) => <TokenDecor key={`${part}:${t.id}`} part={part} token={t} scale={cam.scale} text={text} lockMark={lockShown(t)} atX={at.x} atY={at.y} />}
                     decorTokens={decorTokens}
-                    hasPlate={(t) => !!boardText.get(t.id)?.plate}
+                    text={isoTextInput}
+                    onText={setIsoText}
                     layerProps={layerProps}
                     variant={variant}
                     lowPower={lowPower}
@@ -1732,9 +1739,9 @@ export function MapStage(props: {
               // Keyed by token, so an armed Delete or a half-typed HP entry never carries over to the next token tapped.
               key={selected.id}
               token={selected}
-              anchor={inZoomed(belowLabel(worldAnchor(cam, selected, pick!), boardText.get(selected.id)), zoom)}
+              anchor={inZoomed(belowLabel(worldAnchor(cam, selected, pick!), shownText.get(selected.id)), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected, pick!), boardText.get(selected.id)), zoom, pick!)}
+              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected, pick!), shownText.get(selected.id)), zoom, pick!)}
               fullAccess={role === "dm" || ownsToken(selected)}
               onDetails={() => onOpenDetails(selected.id)}
               onShift={shiftForBar}
@@ -1778,7 +1785,8 @@ export function MapStage(props: {
 function belowLabel(anchor: Point, text: TokenText | undefined): Point {
   const block = text?.plate ?? text?.label;
   if (!text || !block || block.y < text.heightPx) return anchor;
-  return { x: anchor.x, y: anchor.y + Math.max(0, block.y + block.height - text.heightPx + 4 - 34) };
+  // The anchor is the token's foot: its box's bottom, or in Isometric its ring's (useBoardText.ts footPx).
+  return { x: anchor.x, y: anchor.y + Math.max(0, block.y + block.height - (text.footPx ?? text.heightPx) + 4 - 34) };
 }
 
 /**
