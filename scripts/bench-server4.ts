@@ -149,6 +149,13 @@ function perPlayerLayers(players: readonly string[]): Pick<RoomState, "holders" 
   return { holders: { [SCENE]: { sceneId: SCENE, rev: 0, entries: players.map((memberId) => ({ memberId, on: true })) } }, exploredBy, exploredTiles, labels, stamps };
 }
 
+/** Throws unless the room is in the mode its rows name: per player with every player holding sight, or for the whole party with no holders. */
+function checkMode(state: RoomState, perPlayer: boolean): void {
+  const mode = state.scenes[SCENE]?.vision?.perPlayer === true;
+  const on = state.holders[SCENE]?.entries.filter((e) => e.on).length ?? 0;
+  if (mode !== perPlayer || on !== (perPlayer ? PLAYERS : 0)) throw new Error(`the bench room is ${mode ? "per player" : "for the whole party"} with ${on} holders`);
+}
+
 /**
  * A database that answers every statement at once from memory: the snapshot
  * to load, no op rows, the DM's grant, and success for every write. `commitAt`
@@ -323,6 +330,7 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
   const scale = feetPerCell === 5 ? `${level} scene` : `${level} scene at ${feetPerCell} ft per cell`;
   const where = perPlayer ? `${scale}, ${PER_PLAYER}` : scale;
   const table = await sitDown(benchRoom(level, feetPerCell, perPlayer));
+  checkMode(table.actor.committed.state, perPlayer);
   const state = () => table.actor.committed.state;
 
   // A player moves a character one cell east and back, so each run is a new position for the cache.
@@ -459,8 +467,9 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
   const times: SitDownTimes = { load: [], first: [], later: [] };
   for (let r = 0; r < 5; r++) {
     clearVisionCache();
-    const fresh = JSON.parse(JSON.stringify(benchRoom(level, feetPerCell))) as RoomState;
+    const fresh = JSON.parse(JSON.stringify(benchRoom(level, feetPerCell, perPlayer))) as RoomState;
     const t = await sitDown(fresh, times);
+    checkMode(t.actor.committed.state, perPlayer);
     await t.actor.shutdown({ code: 1012, snapshot: false });
   }
   rows.push({ row: `Room load, ${where}`, budget: 250, ms: stats(times.load), covers: "the snapshot read and replay" });
@@ -483,6 +492,7 @@ async function runWalk(perPlayer: boolean, rows: Row[]): Promise<void> {
     room.templates[`area${k}`] = { id: `area${k}`, rev: 0, sceneId: SCENE, shape: "sphere", size: 10, origin: { x, y: 111, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: "dm", visibility: "all", triggers: ["enter"] };
   }
   const table = await sitDown(room);
+  checkMode(table.actor.committed.state, perPlayer);
   const walk = await timed(async () => {
     // A new turn first, untimed, since an area reminds about a creature once a turn.
     await send(table, table.dm, { t: "encounter.next" });
