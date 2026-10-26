@@ -135,10 +135,10 @@ type PerceptionUnit = Extract<QuickUnit, { key: "passivePerception" }>;
  * whose contents wrap takes its whole line, and the item after Passive
  * Perception then stood alone under it where it fit beside it, as
  * "Init +0" did under "Burrow 30 ft PP 21" (FU31 review F1). So the
- * speed stands from its last mode by the gap of the line they stand in:
- * the modes' own 4 px in the panel's header, and 6 in a summary line. No
- * margin on the speed takes it back, since a negative one let the speed
- * stay on a line it ran past (FU31 review F10). `style` goes on the part
+ * speed stands from its last mode by the gap of the line they stand in,
+ * the modes' own 4 px, in the panel's header and a summary line alike
+ * (FU31-SUMMARY-GAP). No margin on the speed takes it back, since a
+ * negative one let the speed stay on a line it ran past (FU31 review F10). `style` goes on the part
  * with Passive Perception, which ends this.
  */
 export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUnit; style?: CSSProperties }) {

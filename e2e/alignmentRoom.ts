@@ -3240,6 +3240,14 @@ async function speedEndLines(bar: Locator, at: string): Promise<string[]> {
         const beside = [before, ...(pp ? [pp.getBoundingClientRect()] : [])].some((r) => Math.abs(mid(r) - mid(last)) < 2);
         const fits = last.width + 4 * zoom + before.width <= box.width + 0.5 || (pp !== null && last.width + 12 * zoom + pp.getBoundingClientRect().width <= box.width + 0.5);
         if (!beside && fits) out.push(`${at}: "${(modes[modes.length - 1]!.textContent ?? "").trim()}" stands alone on its line in ${box.width.toFixed(1)} px, where it fits beside the mode before it or PP`);
+        // Modes that share a line stand 4 px apart, the last too, though it stands in the tail beside PP (FU31-SUMMARY-GAP).
+        for (let i = 1; i < modes.length; i++) {
+          const a = modes[i - 1]!.getBoundingClientRect();
+          const b = modes[i]!.getBoundingClientRect();
+          if (Math.abs(mid(a) - mid(b)) >= 2) continue;
+          const gap = b.left - a.right;
+          if (Math.abs(gap - 4 * zoom) > 1) out.push(`${at}: "${(modes[i]!.textContent ?? "").trim()}" stands ${gap.toFixed(1)} px from the mode before it, not ${(4 * zoom).toFixed(1)}`);
+        }
       }
       return out;
     },

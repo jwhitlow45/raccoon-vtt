@@ -130,7 +130,21 @@ function Unit(props: { unit: VitalUnit }) {
  */
 export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: ReactNode; end?: ReactNode }) {
   if (props.items.length === 0 && props.end == null) return null;
-  const betweenAfter = (i: number) => (i < props.items.length - 1 ? { marginInlineEnd: theme.space(1.5) } : undefined);
+  const indexed = props.items.map((item, i) => ({ item, i }));
+  const numbers = indexed.filter(({ item }) => item.key === "ac" || item.key === "hp");
+  const rest = indexed.filter(({ item }) => item.key !== "ac" && item.key !== "hp");
+  const lastQuick = rest.at(-1)?.i;
+  /*
+   * The second part takes the panel header's rule (QuickNumbers.tsx): the
+   * speed's 4 px between its modes is its line's gap, which its last mode
+   * keeps from the rest (SpeedThenPerception), and an item another follows
+   * adds 8, so items stand 12 px apart there as in the header.
+   */
+  const betweenAfter = (i: number) => {
+    if (i === lastQuick) return props.end != null ? QUICK_BETWEEN : undefined;
+    if (rest.some((r) => r.i === i)) return QUICK_BETWEEN;
+    return i < props.items.length - 1 ? { marginInlineEnd: theme.space(1.5) } : undefined;
+  };
   const drawn = (item: VitalItem, i: number): ReactNode[] => {
     const between = betweenAfter(i);
     const quick = quickUnit(item);
@@ -145,9 +159,6 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
       return unit.kind === "tag" && props.afterTag ? [shown, <span key={`${item.key}:after`} style={{ display: "inline-flex", ...OVER_REACH }}>{props.afterTag}</span>] : [shown];
     });
   };
-  const indexed = props.items.map((item, i) => ({ item, i }));
-  const numbers = indexed.filter(({ item }) => item.key === "ac" || item.key === "hp");
-  const rest = indexed.filter(({ item }) => item.key !== "ac" && item.key !== "hp");
   const quick: ReactNode[] = [];
   for (let n = 0; n < rest.length; n++) {
     const { item, i } = rest[n]!;
@@ -168,7 +179,7 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
   }
   const part = (name: "numbers" | "quick", units: ReactNode[]) =>
     units.length > 0 ? (
-      <span key={name} data-vitals-part={name} style={VITALS_PART}>
+      <span key={name} data-vitals-part={name} style={name === "quick" ? QUICK_PART : VITALS_PART}>
         {units}
       </span>
     ) : null;
@@ -183,6 +194,8 @@ export function VitalsLine(props: { items: readonly VitalItem[]; afterTag?: Reac
 /** A part of a summary line that wraps as a whole, and inside itself only where it alone is wider than the box. */
 const LINE_PART = { display: "inline-flex", flexWrap: "wrap", rowGap: theme.space(1), columnGap: theme.space(1.5), minWidth: 0, maxWidth: "100%" } as const;
 const VITALS_PART = { ...LINE_PART, alignItems: "center" } as const;
+const QUICK_PART = { ...VITALS_PART, columnGap: theme.space(1) } as const;
+const QUICK_BETWEEN = { marginInlineEnd: theme.space(2) } as const;
 const SAVES_PART = { ...LINE_PART, alignItems: "baseline" } as const;
 
 /**
