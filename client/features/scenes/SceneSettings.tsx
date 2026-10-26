@@ -9,10 +9,12 @@ import { ErrorText, FieldRow, Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Help, Note, Section } from "../../components/Panel.tsx";
+import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
+import type { ViewKind } from "../../lib/view.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
@@ -25,6 +27,7 @@ import { MapExport } from "../mapexport/MapExport.tsx";
 import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
 import { PhasesSection } from "../phases/PhasesSection.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
+import { isoOffered, suggestedKind, SUGGESTED_VIEW, SUGGESTED_VIEW_HELP, VIEW_NAMES } from "../view/choice.ts";
 import { VisionSettings } from "../vision/VisionSettings.tsx";
 import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
@@ -37,7 +40,8 @@ import type { PanelClose } from "../panels.ts";
 
 /**
  * Settings of the scene the DM is looking at: name, map image, fog,
- * starting view, size and background, then map phases and vision, used in
+ * starting view, the view it suggests once Isometric is offered
+ * (features/view/choice.ts), size and background, then map phases and vision, used in
  * play, above the grid, set up once (docs/design-v1-layout-hierarchy.md
  * M5), then movement, the build, export and deleting it. Every change is
  * one op, so it shows at once and undo covers it, and a setting that is on
@@ -89,6 +93,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
             ) : null}
           </div>
         </SettingRow>
+        {isoOffered ? <SuggestedView scene={scene} onChange={(suggestedView) => update({ suggestedView })} /> : null}
         <SettingRow name="Size in squares" wide>
           <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
             <NumberInput label="Squares across" value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
@@ -149,6 +154,25 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         <Help id={deleteHelp}>{deleteWhy ?? "Removes its tokens, drawings, build and fog too."}</Help>
       </Section>
     </>
+  );
+}
+
+const VIEWS: readonly { value: ViewKind; label: string }[] = [
+  { value: "topDown", label: VIEW_NAMES.topDown },
+  { value: "isometric", label: VIEW_NAMES.isometric },
+];
+
+/**
+ * The view devices that follow the scene show on it
+ * (docs/design-v1-isometric-view.md 7): Top-down, which stores nothing, or
+ * Isometric. Each device may pick its own view instead, from the View
+ * button, and a pick holds until it follows the scene again.
+ */
+function SuggestedView(props: { scene: Scene; onChange(view: ViewKind): void }) {
+  return (
+    <SettingRow name={SUGGESTED_VIEW} help={SUGGESTED_VIEW_HELP} wide>
+      {(ids) => <Segmented<ViewKind> labelledBy={ids.nameId} value={suggestedKind(props.scene.suggestedView)} options={VIEWS} onChange={props.onChange} />}
+    </SettingRow>
   );
 }
 
