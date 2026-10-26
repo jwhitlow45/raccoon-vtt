@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { viewMapsOf } from "#shared/keys.ts";
 import type { RoomState } from "#shared/model.ts";
 import { Chip, ChipRow } from "../../components/Chip.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -53,6 +54,8 @@ function useScenePieces(): RoomState | null {
     view?.meta,
     view?.characters,
     (view as { sight?: unknown } | null)?.sight,
+    // Every holder's map joined, which the rows read on a per-player scene (vision/union.ts).
+    view ? viewMapsOf(view).exploredAny : undefined,
   ];
   // The view itself changes with any op, a log line included, so only these pieces decide when the rows are made again.
   return useMemo(() => view, pieces);

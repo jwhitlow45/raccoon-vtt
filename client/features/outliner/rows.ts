@@ -6,6 +6,7 @@ import type { Rect } from "../../lib/camera.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
 import { shippedStamp } from "../builder/stamps/rules.ts";
 import { zoneBox } from "../traps/rules.ts";
+import { unionView } from "../vision/union.ts";
 
 /**
  * The scene outliner's rows (docs/design-v1-dm-tools.md 3.2), as pure
@@ -18,6 +19,11 @@ import { zoneBox } from "../traps/rules.ts";
  * projection leaves out is marked by why. So the outliner and what players
  * receive never disagree, through fog, party vision, hidden tokens, DM-only
  * stamps and pins linked to pages.
+ *
+ * On a per-player scene that player sees what any player sees, the union
+ * of every source and every player's map (docs/design-v1-per-player-vision.md
+ * decision 14, vision/union.ts), so a row is marked only when no player
+ * gets it.
  */
 
 export type OutlineGroup = "tokens" | "map" | "areas" | "drawings" | "doors" | "traps";
@@ -125,7 +131,7 @@ function companionOf(view: RoomState, t: Token, sceneId: string): { detail: stri
 export function outlineRows(view: RoomState, sceneId: string): OutlineRow[] {
   const scene = view.scenes[sceneId];
   if (!scene) return [];
-  const forPlayers = asPlayersScene(view, sceneId);
+  const forPlayers = asPlayersScene(unionView(view), sceneId);
   const seen = projectState(forPlayers, ANYONE, { sceneId: null });
   const vision = scene.vision?.on === true;
   const memberName = (id: string) => view.members[id]?.name ?? "A former member";

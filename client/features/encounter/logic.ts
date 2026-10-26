@@ -2,11 +2,12 @@ import type { Effect, Encounter, InitEntry, LogEntry, RoomState, Token } from "#
 import type { ClientOp, EntryInput } from "#shared/protocol.ts";
 import { MAX_ENTRIES_PER_OP } from "#shared/protocol.ts";
 import type { ProjectedActor } from "#shared/project.ts";
-import { orderShown, withheldWhereItStands } from "#shared/project.ts";
+import { orderShown } from "#shared/project.ts";
 import { hpLess } from "#shared/rules/hp.ts";
 import { actsOnCharacterTurn } from "#shared/reducer/companions.ts";
 import { advantageHint, compareEntries, rowCharacter, rowGroup } from "#shared/rules/initiative.ts";
 import { displayName } from "../../lib/scene.ts";
+import { withheldFromEveryPlayer } from "../vision/union.ts";
 
 /**
  * The initiative tracker's decisions, kept free of React and the DOM so they
@@ -510,7 +511,8 @@ function tokenOrder(a: Token, b: Token): number {
  * vision scene the party's sight (design 13.4 and 13.6). The DM's view
  * holds both layers and the sight tiles of the scene on screen, so a fog
  * check alone would leave out every monster the party sees in explored
- * ground.
+ * ground. On a per-player scene it is what any player sees, the union
+ * (docs/design-v1-per-player-vision.md decision 14, vision/union.ts).
  */
 export function addCandidates(view: RoomState, sceneId: string | null, mode: AddMode, selectedId: string | null): Token[] {
   if (sceneId === null) return [];
@@ -525,7 +527,7 @@ export function addCandidates(view: RoomState, sceneId: string | null, mode: Add
       continue;
     }
     if (token.kind === "object" || isDefeated(entryActor(view, { tokenId: token.id }))) continue;
-    if (mode === "visible" && (token.visibility === "dm" || withheldWhereItStands(view, token))) continue;
+    if (mode === "visible" && (token.visibility === "dm" || withheldFromEveryPlayer(view, token))) continue;
     out.push(token);
   }
   return out.sort(tokenOrder);
