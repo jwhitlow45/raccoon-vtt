@@ -189,6 +189,16 @@ describe("an aura's reminder (6.5)", () => {
     assert.deepEqual(readers(lines(aura(false), north).log, "area"), ["all"], "a whole-party scene keeps today's rule");
   });
 
+  test("a player who holds no sight but owns the area, and sees the creature by the shared sight, is a witness (PV1-ASTRA-3)", () => {
+    const s = fight(table(), "ogre");
+    s.meta.settings = { ...s.meta.settings, playersSeeAoeOfOthers: false };
+    s.tokens.imp = token("imp", { name: "Imp", x: 36, y: 20 });
+    s.templates.ward = template("ward", { shape: "emanation", size: 10, attachedTo: "scout", casterId: "scout", includeOrigin: false, label: "Ward", ownerId: "p3", triggers: ["enter"] });
+    const { log } = lines(s, { t: "token.move", tokenId: "imp", x: 32, y: 20 });
+    assert.ok(log.some((l) => l.data?.type === "area"), "the crossing reminds");
+    assert.deepEqual(readers(log, "area"), ["p3"], "p3 sees their own area and the imp, which the scout shows every player");
+  });
+
   test("a creature crossing where only Thorn sees it reaches only Thorn's player, though it ends where Bree's player sees it too", () => {
     const s = fight(table(), "gob");
     s.tokens.gob = { ...s.tokens.gob!, x: 12, y: 5 };

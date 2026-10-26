@@ -750,22 +750,27 @@ export function rowSeenMark(state: RoomState, entry: InitEntry, env: Pick<Env, "
  * 6.5), judged in the room as it stood then (`at`): the players who saw
  * both the creature and the area, its owners among them. `seen` when every
  * viewer did, else `seenBy`, perhaps empty. `hidden` only for an area the
- * DM hid or one on a token no player sees. Null on a whole-party scene,
- * whose reminders keep their rule.
+ * DM hid or one on a token no player sees, a line only the DM reads, which
+ * so holds no list. Null on a whole-party scene, whose reminders keep their
+ * rule.
+ *
+ * Every player on the roster may be a witness, as `lineReader` reads them:
+ * one who holds no sight of their own still sees by the shared sight, and
+ * sees an area of their own whatever the room's setting for others' areas
+ * (review PV1-ASTRA-3).
  */
 export function areaSeenMark(at: RoomState, template: AreaTemplate, token: Token, env: Pick<Env, "opVersion">): (SeenMark & { hidden?: true }) | null {
   const scene = at.scenes[token.sceneId];
   if (!perPlayerScene(scene) || sightOf(at) !== undefined) return null;
   const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
   const seesAttached = attached === undefined || seenByNonOwners(at, attached, env) || (seenMark(at, attached, env, "here").seenBy ?? []).length > 0;
-  const hidden = template.visibility === "dm" || !seesAttached;
-  const out: SeenMark & { hidden?: true } = hidden ? { hidden: true } : {};
-  if (behindBlackout(at) || token.sceneId !== at.meta.playerSceneId) return out;
+  if (template.visibility === "dm" || !seesAttached) return { hidden: true };
+  if (behindBlackout(at) || token.sceneId !== at.meta.playerSceneId) return {};
   const witnessed = (ctx: Ctx) => tokenVisibleTo(ctx, token, revealSeenAnywhere(env.opVersion)) && projectTemplateCtx(ctx, template) !== null;
   const sceneId = token.sceneId;
-  if (witnessed(ctxOf(at, ANY_PLAYER, { sceneId }))) return { ...out, seen: true };
-  const players = new Set([...sightHolders(at, sceneId), ...ownersOf(at, token).filter((id) => at.members[id]?.kind === "player")]);
-  return { ...out, seenBy: [...players].filter((id) => witnessed(ctxOf(at, { memberId: id, role: "player" }, { sceneId }))).sort() };
+  if (witnessed(ctxOf(at, ANY_PLAYER, { sceneId }))) return { seen: true };
+  const players = Object.values(at.members).flatMap((m) => (m.kind === "player" ? [m.id] : []));
+  return { seenBy: players.filter((id) => witnessed(ctxOf(at, { memberId: id, role: "player" }, { sceneId }))).sort() };
 }
 
 function tokenVisibleById(ctx: Ctx, tokenId: string, revealedSeen = false): boolean {
