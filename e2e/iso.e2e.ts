@@ -427,14 +427,19 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     assert.ok(!(await description(flat.getByRole("button", { name: "Turn right", exact: true }))).includes("Isometric comes back"), "nor one read with the turns");
     await closeMenu(dm, false);
     // And in the sheet a phone's layout opens.
+    // Each resize waits for the room's layout to follow, or the View button pressed next is the other layout's, gone a moment later with what it opened.
+    const sidePanels = dm.getByRole("tablist", { name: "Panels" });
     await dm.setViewportSize({ width: 390, height: 844 });
     try {
+      await sidePanels.waitFor({ state: "hidden" });
       const sheet = await openMenu(dm, false);
+      assert.equal(await sheet.getAttribute("aria-modal"), "true", "the phone's sheet, not the popover");
       await sheet.getByRole("radio", { name: "Top-down", checked: true }).waitFor();
       assert.equal(await sheet.getByText(/Isometric comes back/).count(), 0, "no promise of Isometric in the sheet");
       await closeMenu(dm, false);
     } finally {
       await dm.setViewportSize({ width: 1280, height: 800 });
+      await sidePanels.waitFor();
     }
     await dm.keyboard.press("v");
   });
