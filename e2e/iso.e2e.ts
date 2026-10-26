@@ -392,6 +392,16 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await flat.getByRole("radio", { name: "Top-down", checked: true }).waitFor();
     assert.equal(await flat.getByText(/Isometric comes back/).count(), 0, "no promise of Isometric");
     await closeMenu(dm, false);
+    // And in the sheet a phone's layout opens.
+    await dm.setViewportSize({ width: 390, height: 844 });
+    try {
+      const sheet = await openMenu(dm, false);
+      await sheet.getByRole("radio", { name: "Top-down", checked: true }).waitFor();
+      assert.equal(await sheet.getByText(/Isometric comes back/).count(), 0, "no promise of Isometric in the sheet");
+      await closeMenu(dm, false);
+    } finally {
+      await dm.setViewportSize({ width: 1280, height: 800 });
+    }
     await dm.keyboard.press("v");
   });
 
