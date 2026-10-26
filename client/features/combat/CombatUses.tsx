@@ -332,9 +332,11 @@ function UseLine(props: LineProps) {
       if (form === "list") add("back", { text: "Restore", label: "Restore one Legendary Action", off: row.left >= row.max ? "Legendary Actions are full." : null, offId: `${id}-full`, op: legendaryBackOp(target, row.buttons, props.actor), onOff: props.onStatus });
       break;
     case "ability": {
-      head = abilityHead(row);
-      state = abilityState(row, recharge.total);
       const { use, mark } = row;
+      const title = abilityHead(row);
+      // "Recharge 5–6" stays whole: a line may break after its en dash, which would leave the "6" alone on the next one.
+      head = use.kind === "recharge" ? <>{title.slice(0, use.name.length + 2)}<span style={{ whiteSpace: "nowrap" }}>{title.slice(use.name.length + 2)}</span></> : title;
+      state = abilityState(row, recharge.total);
       if (use.kind === "day") {
         const left = dayLeft(use, mark);
         if (form === "card" && left === 0) break;

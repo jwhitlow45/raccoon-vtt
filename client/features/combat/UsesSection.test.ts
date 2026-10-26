@@ -186,7 +186,7 @@ describe("a monster's rows, its counts as pips", () => {
     assert.match(row(markup, "resist"), />Legendary Resistance<\/span><span style="[^"]*">, 2 of 3 left<\/span><\/span>/);
     assert.match(row(markup, "ability", 0), />Dominate Mind, 2\/Day<\/span><span style="[^"]*">, 1 of 2 left<\/span><\/span>/);
     const fire = row(markup, "ability", 1);
-    assert.match(fire, />Fire Breath, Recharge 5–6<\/span><span style="[^"]*">, Used<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>Used<\/span>/, "its state at the right end, as the pips stand");
+    assert.match(fire, />Fire Breath, <span style="white-space:nowrap">Recharge 5–6<\/span><\/span><span style="[^"]*">, Used<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>Used<\/span>/, "its state at the right end, as the pips stand, and its limit kept whole, which a line could break after its en dash");
   });
 
   test("a count of 6 shows 6 pips, as the Tarrasque's Legendary Resistance, and of 7 its words where they would stand", () => {
