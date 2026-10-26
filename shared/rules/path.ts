@@ -264,9 +264,14 @@ function plainStop(stop: PathStop, uncounted: boolean): PathStop {
  * per-player scene an owner gets a private leg's corners only where this
  * holds for ground their own fog reveals, so one co-owner's memory never
  * draws for another.
+ *
+ * The lattice is the one the leg was walked at, read from its stops' own
+ * sizes, the finer of the two for a leg joined across a resize. The
+ * token's size now would sample a Tiny creature's half-cell walk at whole
+ * cells once it grew, and skip cells the walk crossed (review PV1-ASTRA-1).
  */
 export function legOnGround(token: PlacedToken, from: PathStop, to: PathStop, ground: (x: number, y: number) => boolean): boolean {
-  const lattice = routeLattice(token);
+  const lattice = Math.min(routeLattice(sizedAt(token, from)), routeLattice(sizedAt(token, to)));
   const covered = (p: SizedSpot) => {
     const r = spotRect(token, p);
     for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) if (!ground(x, y)) return false;
@@ -278,6 +283,13 @@ export function legOnGround(token: PlacedToken, from: PathStop, to: PathStop, gr
     for (let k = 1; k <= steps.n; k++) if (!covered({ ...b, ...steps.at(k) })) return false;
   }
   return true;
+}
+
+/** The creature as it stood at a stop, at the size the stop holds where that differs from its size now. */
+function sizedAt(token: PlacedToken, stop: PathStop): PlacedToken {
+  if (!stop.footprint) return token;
+  const { w, h, squeeze } = stop.footprint;
+  return { size: "custom", w, h, x: stop.x, y: stop.y, ...(squeeze ? { squeeze } : {}) };
 }
 
 /**

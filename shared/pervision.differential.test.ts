@@ -55,8 +55,10 @@ function sharedButGap(s: RoomState): void {
   reveal(s, "s1", { x: 0, y: 14, w: 40, h: 16 });
 }
 
-function layer(s: RoomState, memberId: string, rect: { x: number; y: number; w: number; h: number }): void {
-  for (const tile of Object.values(rasterizeFogOps({}, "s1", s.scenes.s1!.bounds, [{ id: "r", mode: "reveal", shape: { kind: "rect", ...rect } }]))) {
+/** A holder's layer revealing a rectangle, but for the cells of `holes`. */
+function layer(s: RoomState, memberId: string, rect: { x: number; y: number; w: number; h: number }, holes: readonly [number, number][] = []): void {
+  const ops = [{ id: "r", mode: "reveal" as const, shape: { kind: "rect" as const, ...rect } }, ...holes.map(([x, y], i) => ({ id: `h${i}`, mode: "hide" as const, shape: { kind: "rect" as const, x, y, w: 1, h: 1 } }))];
+  for (const tile of Object.values(rasterizeFogOps({}, "s1", s.scenes.s1!.bounds, ops))) {
     if (!tile) continue;
     s.exploredBy[holderTileKey("s1", memberId, tile.tx, tile.ty)] = { ...tile, memberId } as ExploredTile;
   }
@@ -127,6 +129,26 @@ describe("an owner's route corners (6.5)", () => {
     const remembers = deepClone(moved);
     layer(remembers, "p2", GAP);
     assert.deepEqual(stopsFor(remembers, P2)[1]!.via, leg.via, "once the co-owner remembers it they get them");
+  });
+
+  test("a resize never thins a private leg's samples, so a co-owner who never saw a cell the Tiny walk crossed still gets no corners (PV1-ASTRA-1)", () => {
+    const s = base({ on: false, light: "bright", perPlayer: true }, true);
+    s.tokens.thorn = { ...s.tokens.thorn!, ownerIds: ["p1", "p2"], size: "tiny", x: 0.5, y: 0 };
+    const fought = fight(s);
+    layer(fought, "p1", { x: 0, y: 0, w: 5, h: 5 });
+    // Every cell a whole-cell walk of the leg meets, but not (1, 0) or (2, 1), which the half-cell walk of a Tiny creature crosses.
+    layer(fought, "p2", { x: 0, y: 0, w: 5, h: 5 }, [[1, 0], [2, 1]]);
+    const r = applyOp(fought, { t: "token.move", tokenId: "thorn", x: 2.5, y: 3, route: [[2.5, 2, 0, 0], [2.5, 3, 0, 0]] }, P1, env(40));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    const leg = stopsFor(r.state, DM)[1]!;
+    assert.deepEqual(leg.via, [2.5, 2]);
+    assert.notEqual(leg.routeSeen, true);
+    assert.deepEqual(stopsFor(r.state, P1)[1]!.via, [2.5, 2]);
+    assert.equal(stopsFor(r.state, P2)[1]!.via, undefined, "Tiny, the walk crossed ground p2 never saw");
+    const grown = apply(r.state, { t: "token.update", tokenId: "thorn", patch: { size: "medium" } });
+    assert.equal(grown.tokens.thorn!.size, "medium");
+    assert.equal(stopsFor(grown, P2)[1]!.via, undefined, "Medium now, the leg was still walked at half cells");
+    assert.deepEqual(stopsFor(grown, P1)[1]!.via, [2.5, 2]);
   });
 
   test("a public routed leg keeps its corners for its owner after a hide, so the next diagonal costs the same on every device and the server", () => {
