@@ -101,7 +101,7 @@ const ALL_TEXTURES: readonly TexturedTerrain[] = ["stone", "wood", "grass", "dir
 const GROUND_LAYERS = isoLayersOf("ground", "board");
 const GROUND_MARKS = [...isoLayersOf("ground", "underDecor"), ...isoLayersOf("ground", "overlay")];
 const MOVING_LAYERS = isoLayersOf("moving");
-/** None yet: ISO-3 moves pills and pins here. Drawn now, so a layer moved to "upright" draws without a change here. */
+/** Pins, and the parts of other layers that stand: pills, badges and text, by the stand rule where Top-down draws them under the fog. */
 const UPRIGHT_LAYERS = isoLayersOf("upright");
 /** The lift margin grows in steps, so a pan that changes the highest lift in view seldom reallocates the ground stage's canvas (section 11). */
 const MARGIN_STEP_PX = 128;
@@ -279,7 +279,13 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const [splitLabels] = useState(() => labelSplitter<(typeof labels)[number]>(measureLabel));
   const uprightLabels = splitLabels(fog, labels, fontEpoch).upright;
   const uprightIds = useMemo(() => new Set(uprightLabels.map((l) => l.id)), [uprightLabels]);
-  const groundCtx: IsoGround = useMemo(() => ({ turn, fog, heights: stand, uprightLabels: uprightIds }), [turn, fog, stand, uprightIds]);
+  // One context per place, so a renderer drawn in several knows which part it draws there (features/layers.ts IsoPlace).
+  const groundCtx: IsoGround = useMemo(
+    () => ({ turn, fog, heights: stand, uprightLabels: uprightIds, place: "ground", ground: (x: number, y: number) => heights.at(Math.floor(x), Math.floor(y)) }),
+    [turn, fog, stand, uprightIds, heights],
+  );
+  const movingCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "moving" }), [groundCtx]);
+  const uprightCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "upright" }), [groundCtx]);
   const groups = groundGroups(turn);
   const width = hidden ? 0 : size.width;
   const height = hidden ? 0 : size.height;
@@ -371,9 +377,11 @@ function IsoBoardImpl(props: IsoBoardProps) {
             </Group>
             <Group scaleY={groups.outer.scaleY} listening={false}>
               <Group rotation={groups.inner.rotation}>
-                {MOVING_LAYERS.map(({ id, Component }) => (
-                  <Component key={id} {...props.layerProps} />
-                ))}
+                <IsoGroundContext.Provider value={movingCtx}>
+                  {MOVING_LAYERS.map(({ id, Component }) => (
+                    <Component key={id} {...props.layerProps} />
+                  ))}
+                </IsoGroundContext.Provider>
               </Group>
             </Group>
             <Group listening={false}>
@@ -385,9 +393,11 @@ function IsoBoardImpl(props: IsoBoardProps) {
               <Silhouette key={s.id} token={byId.get(s.id)!} turn={turn} standee={byStandee.get(s.id)!} scale={cam.scale} />
             ))}
             <UprightLabels labels={uprightLabels} turn={turn} ground={(x, y) => heights.at(Math.floor(x), Math.floor(y))} />
-            {UPRIGHT_LAYERS.map(({ id, Component }) => (
-              <Component key={id} {...props.layerProps} />
-            ))}
+            <IsoGroundContext.Provider value={uprightCtx}>
+              {UPRIGHT_LAYERS.map(({ id, Component }) => (
+                <Component key={id} {...props.layerProps} />
+              ))}
+            </IsoGroundContext.Provider>
             {(["marks", "label", "plate"] as const).flatMap((part) =>
               props.decorTokens
                 .filter((t) => part !== "plate" || props.hasPlate(t))

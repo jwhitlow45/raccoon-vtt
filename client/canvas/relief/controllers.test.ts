@@ -17,7 +17,7 @@ import { withExplored } from "../../features/vision/exploredFog.ts";
 const CLIENT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (path: string) => readFileSync(join(CLIENT, path), "utf8");
 
-type Entry = { id: string; iso: string; component: string };
+type Entry = { id: string; iso: string[]; component: string };
 
 function registry(): { layers: Entry[]; controllers: { id: string; component: string }[]; files: Map<string, string> } {
   const src = read("features/layers.ts");
@@ -28,7 +28,12 @@ function registry(): { layers: Entry[]; controllers: { id: string; component: st
   // The lazily loaded ones name their module in the loader.
   for (const m of src.matchAll(/const (\w+) = quietLazy<LayerProps>\(\(\) => import\("\.\/([^"]+)"\)/g)) files.set(m[1]!, `features/${m[2]}`);
   const list = (name: string) => src.slice(src.indexOf(`export const ${name}`), src.indexOf("];", src.indexOf(`export const ${name}`)));
-  const layers = [...list("LAYERS").matchAll(/\{ id: "([^"]+)", layer: "\w+", order: \d+, iso: "(\w+)", Component: (\w+) \}/g)].map((m) => ({ id: m[1]!, iso: m[2]!, component: m[3]! }));
+  // A renderer names one place, or a list of the places it draws in.
+  const layers = [...list("LAYERS").matchAll(/\{ id: "([^"]+)", layer: "\w+", order: \d+, iso: ("\w+"|\[[^\]]*\]), Component: (\w+) \}/g)].map((m) => ({
+    id: m[1]!,
+    iso: [...m[2]!.matchAll(/"(\w+)"/g)].map((p) => p[1]!),
+    component: m[3]!,
+  }));
   const controllers = [...list("CONTROLLERS").matchAll(/\{ id: "([^"]+)", Component: (\w+) \}/g)].map((m) => ({ id: m[1]!, component: m[2]! }));
   return { layers, controllers, files };
 }
@@ -112,11 +117,13 @@ describe("the board's controllers mount once", () => {
     assert.equal(layers.length, lines.length, "every LAYERS line parsed");
     assert.ok(layers.length >= 20);
     for (const l of layers) {
-      assert.match(l.iso, /^(ground|moving|upright|off)$/);
+      assert.ok(l.iso.length > 0);
+      for (const place of l.iso) assert.match(place, /^(ground|moving|upright|off)$/);
+      assert.ok(!(l.iso.includes("off") && l.iso.length > 1), `${l.id} is off or drawn, not both`);
       const file = files.get(l.component);
       assert.ok(file, `${l.component} has a file`);
       const reached = effectsReached(file!);
-      if (l.iso !== "off") assert.deepEqual(reached, [], `${l.id} reaches effects, which would run in both trees`);
+      if (!l.iso.includes("off")) assert.deepEqual(reached, [], `${l.id} reaches effects, which would run in both trees`);
     }
   });
 
@@ -198,7 +205,7 @@ describe("a hidden drawing tree works for nothing each frame", () => {
 
   test("a renderer drawn in Isometric reads the build only while its tree shows, so a brush stroke rebuilds no paths or coverage in the hidden one", () => {
     const { layers, files } = registry();
-    const sources = new Set([...layers.filter((l) => l.iso !== "off").map((l) => files.get(l.component)!), "canvas/TokenShadow.tsx"]);
+    const sources = new Set([...layers.filter((l) => !l.iso.includes("off")).map((l) => files.get(l.component)!), "canvas/TokenShadow.tsx"]);
     for (const file of sources) assert.doesNotMatch(read(file), /useRoomView\([^;]*\bbuildChunks\b/, `${file} reads the build through useTreeShownView`);
     assert.match(read("canvas/relief/context.ts"), /return useShownView\(useTreeShown\(\), select\);/);
     // A trap's name pill sits on its door, and both trees publish it under one key, so the hidden tree holds the traps with the build.

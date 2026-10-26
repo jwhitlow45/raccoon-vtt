@@ -7,16 +7,23 @@ import { LEADING, pillGeometry, pillPlace, pillStackPlace, POINTER_WIDTH_PX, typ
 
 export { pillGeometry, pillPlace, pillReach, pillStackPlace, type PillProps, type StackPill } from "./pillPlace.ts";
 
-/** A label in a rounded box over the map: a distance, a movement, a name. */
-export function Pill(props: PillProps) {
+/**
+ * A label in a rounded box over the map: a distance, a movement, a name.
+ * `slide` false keeps it on its point at the screen's edge, for a pill the
+ * isometric view lays flat on the ground, where the screen's box means
+ * nothing (canvas/IsoParts.tsx MarkPill).
+ */
+export function Pill(props: PillProps & { slide?: boolean }) {
   // A readout slides into the part of the map the bars leave clear (canvas/boardView.ts).
-  const view = useBoardView()?.clear ?? null;
+  const clear = useBoardView()?.clear ?? null;
+  const view = props.slide === false ? null : clear;
   return <PillShape {...props} at={pillPlace(props, view)} />;
 }
 
 /** Readouts that stand together, drawn and slid back into view as one (pillStackPlace). A pill left out (`null` or `false`) takes no room. */
-export function PillStack(props: { x: number; y: number; scale: number; offsetPx?: number; pills: readonly (StackPill | null | false)[] }) {
-  const view = useBoardView()?.clear ?? null;
+export function PillStack(props: { x: number; y: number; scale: number; offsetPx?: number; pills: readonly (StackPill | null | false)[]; slide?: boolean }) {
+  const clear = useBoardView()?.clear ?? null;
+  const view = props.slide === false ? null : clear;
   const pills = props.pills.filter((p): p is StackPill => !!p);
   const place = pillStackPlace({ x: props.x, y: props.y, scale: props.scale, offsetPx: props.offsetPx, pills }, view);
   return (

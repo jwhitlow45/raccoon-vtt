@@ -6,11 +6,12 @@ import { useRoomView, type RoomView } from "../../state/view.ts";
 import type { FogView } from "./fogView.ts";
 
 /**
- * What a renderer drawing on the isometric view's ground stage needs to
- * know (docs/design-v1-isometric-view.md 5.1): the turn, this viewer's fog
- * for the stand rule, and whether heights stand at this zoom (ISO-D12).
- * Absent (null) in Top-down, so a renderer that reads it draws exactly as
- * it always has there.
+ * What a renderer drawing in the isometric view needs to know
+ * (docs/design-v1-isometric-view.md 5.1): the turn, this viewer's fog for
+ * the stand rule, whether heights stand at this zoom (ISO-D12), the drawn
+ * ground, and which of the board's places it draws in. Absent (null) in
+ * Top-down, so a renderer that reads it draws exactly as it always has
+ * there.
  */
 export type IsoGround = {
   turn: Turn;
@@ -19,6 +20,14 @@ export type IsoGround = {
   heights: boolean;
   /** The map labels that stand, by id, split once by the board so the ground's build and the overlay never both draw one, or neither. */
   uprightLabels: ReadonlySet<string>;
+  /**
+   * Where this part of the board draws (features/layers.ts IsoPlace): on
+   * the ground stage or the drag layer, inside the ground plane's turned and
+   * squashed groups, in cells, or on the overlay, upright in view space.
+   */
+  place: "ground" | "moving" | "upright";
+  /** The drawn ground under a point in cells, in cells of height (lib/view.ts drawnGround): 0 outside the scene, below the threshold and on ground this viewer has not seen. */
+  ground: (x: number, y: number) => number;
 };
 
 export const IsoGroundContext = createContext<IsoGround | null>(null);

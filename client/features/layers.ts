@@ -115,6 +115,11 @@ export type LayerProps = {
  * - `upright`: on the overlay in view space, standing up.
  * - `off`: not drawn in Isometric: its tool shows Top-down while in use, or
  *   its effects have not moved into a controller yet.
+ *
+ * A renderer may draw in several places, listed, such as an area's shading
+ * on the ground and its name upright. Each part reads its place through
+ * useIsoGround().place (canvas/relief/context.ts) and draws only what goes
+ * there (canvas/isoPlace.ts).
  */
 export type IsoPlace = "ground" | "moving" | "upright" | "off";
 
@@ -123,7 +128,7 @@ export type LayerDef = {
   layer: "board" | "underDecor" | "overlay";
   /** Draw order within the layer, lowest first. */
   order: number;
-  iso: IsoPlace;
+  iso: IsoPlace | readonly Exclude<IsoPlace, "off">[];
   Component: ComponentType<LayerProps>;
 };
 
@@ -181,8 +186,13 @@ export function layersOf(layer: LayerDef["layer"]): LayerDef[] {
   return LAYERS.filter((l) => l.layer === layer).sort((a, b) => a.order - b.order);
 }
 
+/** The places a renderer draws in, in the isometric view. */
+export function isoPlacesOf(def: Pick<LayerDef, "iso">): readonly IsoPlace[] {
+  return typeof def.iso === "string" ? [def.iso] : def.iso;
+}
+
 /** The renderers drawn in one place of the isometric view, in Top-down's layer order and then their own. */
 export function isoLayersOf(place: IsoPlace, layer?: LayerDef["layer"]): LayerDef[] {
   const rank = { board: 0, underDecor: 1, overlay: 2 } as const;
-  return LAYERS.filter((l) => l.iso === place && (layer === undefined || l.layer === layer)).sort((a, b) => rank[a.layer] - rank[b.layer] || a.order - b.order);
+  return LAYERS.filter((l) => isoPlacesOf(l).includes(place) && (layer === undefined || l.layer === layer)).sort((a, b) => rank[a.layer] - rank[b.layer] || a.order - b.order);
 }
