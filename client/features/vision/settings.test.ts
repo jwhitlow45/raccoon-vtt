@@ -38,6 +38,20 @@ describe("a scene's Vision settings", () => {
     assert.equal(fogNote({ fogEnabled: true }).warning, false);
   });
 
+  test("on a per-player scene the fog line speaks of each player's own map and of what creatures that share sight add to every map (review PV5-OPUS-5)", () => {
+    const perPlayer = { on: true, light: "dark" as const, perPlayer: true as const };
+    const whole = { on: true, light: "dark" as const };
+    for (const fogEnabled of [true, false]) {
+      const own = fogNote({ fogEnabled, vision: perPlayer });
+      assert.equal(own.warning, !fogEnabled);
+      assert.match(own.text, /Each player/, `fog ${fogEnabled ? "on" : "off"}: ${own.text}`);
+      assert.match(own.text, /creatures that share sight/, `fog ${fogEnabled ? "on" : "off"}: ${own.text}`);
+      assert.doesNotMatch(own.text, /the party/, `fog ${fogEnabled ? "on" : "off"}: ${own.text}`);
+      assert.equal(fogNote({ fogEnabled, vision: whole }).text, fogNote({ fogEnabled }).text, "a whole-party scene keeps its words");
+    }
+    assert.equal(fogNote({ fogEnabled: true, vision: whole }).text, "Ground the party has seen stays on players' maps, dimmed, with no creatures on it.");
+  });
+
   test("past 20 lit token lights the DM is told how many light nothing, not counting tokens the DM hid", () => {
     const tokens: RoomState["tokens"] = {};
     const add = (id: string, patch: Parameters<typeof token>[1] = {}) => (tokens[id] = token(id, { light: { bright: 20, dim: 20 }, ...patch }));

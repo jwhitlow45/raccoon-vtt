@@ -112,10 +112,20 @@ export function phaseWithLight(phases: readonly MapPhase[] | undefined, phaseId:
   return changed ? next : null;
 }
 
-/** What the Vision settings say about the scene's fog while party vision is on. */
-export function fogNote(scene: Pick<Scene, "fogEnabled">): { text: string; warning: boolean } {
-  return scene.fogEnabled
-    ? { text: "Ground the party has seen stays on players' maps, dimmed, with no creatures on it.", warning: false }
+/**
+ * What the Vision settings say about the scene's fog while party vision is
+ * on. On a per-player scene each map is a player's own, and what creatures
+ * that share sight see goes on every map (review PV5-OPUS-5).
+ */
+export function fogNote(scene: Pick<Scene, "fogEnabled" | "vision">): { text: string; warning: boolean } {
+  const perPlayer = scene.vision?.perPlayer === true;
+  if (scene.fogEnabled) {
+    return perPlayer
+      ? { text: "Each player's map keeps the ground their own creatures have seen, and every map keeps what creatures that share sight have seen, dimmed, with no creatures on it.", warning: false }
+      : { text: "Ground the party has seen stays on players' maps, dimmed, with no creatures on it.", warning: false };
+  }
+  return perPlayer
+    ? { text: "Explored ground is not remembered while fog is off. Each player sees the whole map dimmed outside what their own creatures and creatures that share sight see.", warning: true }
     : { text: "Explored ground is not remembered while fog is off. Players see the whole map dimmed outside the party's sight.", warning: true };
 }
 
