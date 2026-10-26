@@ -28,8 +28,9 @@
  *
  * Then the bright and dark scenes again per player
  * (docs/design-v1-per-player-vision.md 8.1), with the six players as the
- * scene's sight holders at the worst ownership the cap allows, and a routed
- * walk across areas during a turn on each kind of scene.
+ * scene's sight holders at the worst ownership the cap allows, a free light
+ * every source sees on a hall it alone lights, and a routed walk across
+ * areas during a turn on each kind of scene.
  *
  * The phone rows (the derive on a phone, applying sight tiles, the leg test
  * while dragging) run in a browser and are not here. A row over its budget
@@ -46,7 +47,7 @@ import { SnapshotBudget } from "../server/rooms/budgets.ts";
 import { Connection } from "../server/rooms/connection.ts";
 import type { RoomGateway } from "../server/rooms/gateway.ts";
 import type { Pool } from "../server/rooms/persistence.ts";
-import { capRoom } from "./bench-vision.ts";
+import { capRoom, lightReachesEveryHolder, lightScene } from "./bench-vision.ts";
 
 const SCENE = "bench";
 const PLAYERS = 6;
@@ -79,8 +80,9 @@ function members(): Record<string, Member> {
  * holder's own layer and the party's over the whole scene, and labels and
  * stamps on it, to read.
  */
-function benchRoom(level: "bright" | "dark", feetPerCell: number, perPlayer = false): RoomState {
-  const cap = capRoom(level).state;
+/** The bench room at the caps, per player or not, and with `hallLitAlone` on bench-vision.ts `lightScene`'s scene. */
+function benchRoom(level: "bright" | "dark", feetPerCell: number, perPlayer = false, hallLitAlone = false): RoomState {
+  const cap = hallLitAlone ? lightScene(capRoom(level).state, false) : capRoom(level).state;
   const tokens: Record<string, Token> = {};
   const players = Array.from({ length: PLAYERS }, (_, i) => `p${i + 1}`);
   for (const t of Object.values(cap.tokens)) {
@@ -366,16 +368,6 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
       const light = await timed((r) => send(table, table.dm, lightOp(kind, r)));
       rows.push({ row: `A light ${kind}, ${where}`, budget: 10, ms: light.total, covers: "the DM's build.lights" + (kind === "added" ? " (one in, one out, at the cap of 100)" : "") });
     }
-    /*
-     * A free light every source sees (docs/design-v1-per-player-vision.md
-     * decision 15): in the gap west of the hall's dividing wall, which
-     * lights both halves, in place of another so the scene stays at its
-     * cap, then moved a cell a run.
-     */
-    const put = (y: number) => ({ id: "hall", x: 64.5, y, bright: 120, dim: 120, on: true, walls: true });
-    await send(table, table.dm, { t: "build.lights", sceneId: SCENE, put: [put(100.5)], remove: [Object.keys(state().lights).sort()[0]!] });
-    const hall = await timed((r) => send(table, table.dm, { t: "build.lights", sceneId: SCENE, put: [put(r % 2 === 0 ? 101.5 : 100.5)] }));
-    rows.push({ row: `A free light every source sees moved, ${where}`, budget: 30, ms: hall.total, covers: "the DM's build.lights on a light in the hall" });
   }
 
   /*
@@ -478,6 +470,30 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
 }
 
 /*
+ * A free light every source sees (docs/design-v1-per-player-vision.md
+ * decision 15), on bench-vision.ts `lightScene`'s scene: the characters
+ * carry no light and the hall's free lights stand outside it, so the hall's
+ * light alone gives the hall its levels, and its move changes tiles of the
+ * union and of every holder's raster (checked before the timed runs). It
+ * goes in the gap west of the hall's dividing wall, in place of another so
+ * the scene stays at its cap, then moves half a cell a run through eight
+ * spots, so no timed run meets a state the vision cache still holds.
+ */
+async function runFreeLight(feetPerCell: number, perPlayer: boolean, rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const scale = feetPerCell === 5 ? "dark scene" : `dark scene at ${feetPerCell} ft per cell`;
+  const table = await sitDown(benchRoom("dark", feetPerCell, perPlayer, true));
+  checkMode(table.actor.committed.state, perPlayer);
+  const put = (spot: number) => ({ id: "hall", x: 64.5, y: 98.5 + (spot % 8) / 2, bright: 120, dim: 120, on: true, walls: true });
+  await send(table, table.dm, { t: "build.lights", sceneId: SCENE, put: [put(0)], remove: [Object.keys(table.actor.committed.state.lights).sort()[0]!] });
+  lightReachesEveryHolder(table.actor.committed.state, perPlayer ? table.players.map((p) => p.memberId) : []);
+  clearVisionCache();
+  const hall = await timed((r) => send(table, table.dm, { t: "build.lights", sceneId: SCENE, put: [put(r + 1)] }));
+  rows.push({ row: `A free light every source sees moved, ${scale}, hall lit by it alone${perPlayer ? `, ${PER_PLAYER}` : ""}`, budget: 30, ms: hall.total, covers: "the DM's build.lights on the hall's light" });
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+}
+
+/*
  * A routed walk across three areas that remind on entering, during the
  * walker's turn (docs/design-v1-per-player-vision.md 8.1): the reminders
  * judge who saw each crossing at its moment along the walk, which on a
@@ -513,10 +529,13 @@ export async function runServerBench(): Promise<Row[]> {
   await runLevel("dark", 5, rows);
   // The finest scale the room settings allow, where each light and sense covers the most cells (and so the most walls).
   await runLevel("dark", 1, rows);
+  await runFreeLight(5, false, rows);
+  await runFreeLight(1, false, rows);
   await runWalk(false, rows);
   // The same per player, at the worst ownership the holder cap allows.
   await runLevel("bright", 5, rows, true);
   await runLevel("dark", 5, rows, true);
+  await runFreeLight(5, true, rows);
   await runWalk(true, rows);
   return rows;
 }
