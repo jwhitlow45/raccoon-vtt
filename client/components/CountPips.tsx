@@ -58,14 +58,15 @@ const PIP_GAP = theme.space(1);
 
 /**
  * A count to read, never to tap: a pip for each use, filled for each one
- * left, from the left, as "2 of 3" left read before. Past PIPS_MOST its
- * words, "7 of 10", where the pips would stand. Hidden from a screen
+ * left, from the left, as "2 of 3" left read before. Past PIPS_MOST, or
+ * where `words` asks for them (a pool, spent by an amount), its words,
+ * "7 of 10", where the pips would stand. Hidden from a screen
  * reader, which hears `countWords` after the name instead. One picture,
  * as an icon is, so the row reads as its name beside a mark and not as a
  * row of boxes.
  */
-export function CountPips(props: Count) {
-  if (props.max > PIPS_MOST) return <EndWords>{`${props.left} of ${props.max}`}</EndWords>;
+export function CountPips(props: Count & { words?: boolean }) {
+  if (props.words || props.max > PIPS_MOST) return <EndWords>{`${props.left} of ${props.max}`}</EndWords>;
   const width = props.max * PIP + (props.max - 1) * PIP_GAP;
   return (
     <svg data-use-pips="" aria-hidden="true" width={width} height={PIP} viewBox={`0 0 ${width} ${PIP}`} style={{ flex: "none", marginLeft: "auto", display: "block", overflow: "visible" }}>
@@ -84,10 +85,10 @@ export function CountPips(props: Count) {
   );
 }
 
-/** Muted words at the right end of a name line, where pips would stand: a count past PIPS_MOST, or a recharge's state. */
+/** Muted words at the right end of a name line, where pips would stand: a count past PIPS_MOST or a pool's, or a recharge's state. They drop as one part, never breaking inside "20 of 25". */
 export function EndWords(props: { children: string }) {
   return (
-    <span data-use-pips="" aria-hidden="true" style={{ flex: "none", marginLeft: "auto", color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
+    <span data-use-pips="" aria-hidden="true" style={{ flex: "none", marginLeft: "auto", whiteSpace: "nowrap", color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
       {props.children}
     </span>
   );

@@ -44,11 +44,20 @@ describe("a character's class resource rows", () => {
   test("each row reads its name, what is left of its most and its rest", () => {
     const markup = rows([rage, hands], "list");
     assert.match(markup, />Rage<\/span><span style="[^"]*">, 2 of 3 left<\/span><\/span><svg data-use-pips="" aria-hidden="true"/, "pips for a most of 6 or fewer");
-    assert.match(markup, /Lay on Hands<\/span> <span[^>]*>25 of 25<\/span>/, "its words beside the name past 6");
+    assert.match(markup, />Lay on Hands<\/span><span style="[^"]*">, 25 of 25 left<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>25 of 25<\/span>/, "its words at the line's right end past 6, as pips stand, spoken once after the name");
     assert.match(markup, />One back on a Short Rest, all on a Long Rest</);
     assert.match(markup, />Back on a Long Rest</);
     assert.match(markup, /^<div data-resource-list[^>]*><ul/, "a list, its rows its items");
     assert.equal([...markup.matchAll(/<li /g)].length, 2);
+  });
+
+  test("a pool's words stand at the line's right end at every size, never as pips, and never break inside", () => {
+    const small: ClassResource = { ...hands, name: "Focus Points", max: 5, used: 1 };
+    const markup = rows([small], "list");
+    assert.match(markup, />Focus Points<\/span><span style="[^"]*">, 4 of 5 left<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>4 of 5<\/span>/);
+    assert.doesNotMatch(markup, /data-pip=/, "no pips for a pool of 5");
+    assert.match(markup, /<span data-use-pips=""[^>]*white-space:nowrap[^>]*>4 of 5<\/span>/, "one unbreakable part");
+    assert.equal([...markup.matchAll(/4 of 5/g)].length, 3, "the words once, the spoken count once, and Use's name once");
   });
 
   test("the off-turn list: Use and Restore, a pool's Use… and Restore…, each named with its resource", () => {
@@ -118,9 +127,9 @@ describe("a class resource's count as pips", () => {
       assert.match(c.li, new RegExp(`<div style="font-size:13px;line-height:1.4;color:[^"]*">${c.rest}</div>`), `${c.name}: the rest's words as before`);
       assert.deepEqual(buttons(c.li).map((b) => /aria-label="([^"]+)"/.exec(b)?.[1]), c.labels, c.name);
     }
-    // Rage's count as pips on its name line, Lay on Hands' in words beside its name, as before.
+    // Rage's count as pips and Lay on Hands' in words, both at the name line's right end.
     assert.match(items[0]!, /<div style="flex:1 1 100%;min-width:0;display:flex[^"]*"><span[^>]*><span>Rage<\/span><span style="[^"]*">, 2 of 3 left<\/span><\/span><svg data-use-pips=""/);
-    assert.match(items[1]!, /<div style="font-size:16px;line-height:1.2;overflow-wrap:anywhere"><span style="font-weight:600">Lay on Hands<\/span> <span style="[^"]*">25 of 25<\/span><\/div>/);
+    assert.match(items[1]!, /<div style="flex:1 1 100%;min-width:0;display:flex[^"]*"><span[^>]*><span>Lay on Hands<\/span><span style="[^"]*">, 25 of 25 left<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>25 of 25<\/span>/);
   });
 
   test("a most of 6 or fewer: a pip for each use, filled for each one left, to read only, and the count spoken after the name", () => {
@@ -135,13 +144,13 @@ describe("a class resource's count as pips", () => {
   test("a pool keeps its words at every size, as a paladin's 5 points of Lay on Hands (D-261026-2's eighth amendment)", () => {
     const markup = rows([{ ...hands, max: 5, used: 1 }], "list");
     assert.deepEqual(pips(markup), { left: 0, spent: 0 });
-    assert.match(markup, />Lay on Hands<\/span> <span style="[^"]*">4 of 5<\/span>/);
+    assert.match(markup, />Lay on Hands<\/span><span style="[^"]*">, 4 of 5 left<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>4 of 5<\/span>/);
   });
 
-  test("a most of 7 keeps its words beside the name", () => {
+  test("a most of 7 keeps its words at the name line's right end", () => {
     const markup = rows([{ ...rage, max: 7, used: 2 }], "list");
     assert.deepEqual(pips(markup), { left: 0, spent: 0 });
-    assert.match(markup, />Rage<\/span> <span style="[^"]*">5 of 7<\/span>/);
+    assert.match(markup, />Rage<\/span><span style="[^"]*">, 5 of 7 left<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>5 of 7<\/span>/);
   });
 });
 
