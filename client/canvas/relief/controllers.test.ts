@@ -262,3 +262,36 @@ describe("the ground stage hides what Top-down hides (5.2, 12)", () => {
     assert.equal(withExplored(tiles, undefined), tiles);
   });
 });
+
+describe("the board's view (ISO-5's hooks)", () => {
+  test("the test hook picks for the display by the view it is given, not by its camera, which comes later", () => {
+    assert.match(read("canvas/Stage.tsx"), /useIsoTestHook\(props\.view !== undefined \? displayViewKey\(roomId\) : viewKey\(roomId\), scene\.id\);/);
+  });
+
+  test("the board shows Top-down while Isometric is not offered, even with Isometric stored as this device's pick", async () => {
+    const { isoOffered } = await import("../../features/view/choice.ts");
+    const { shownView, isoReady } = await import("../../features/view/store.ts");
+    const { TOP_DOWN } = await import("../../lib/view.ts");
+    assert.equal(isoReady, false);
+    assert.equal(isoOffered, false, "no page here sets the test flag");
+    const stored = { v: 1 as const, pick: "isometric" as const, turns: { s1: 2 as const } };
+    assert.equal(shownView({ stored, sceneId: "s1", suggested: "isometric", ready: isoOffered }), TOP_DOWN);
+    // The room's choice passes isoOffered as `ready`, and the board draws that choice.
+    assert.match(bodyOf(read("features/view/ViewMenu.tsx"), "useViewChoice")!, /ready: isoOffered/);
+    assert.match(read("canvas/Stage.tsx"), /const shown: View = props\.view \?\? roomChoice\.shown;/);
+  });
+
+  test("on a table display the room's choice, which the board reads and ignores, runs no effects, writes nothing and says nothing", () => {
+    const menu = read("features/view/ViewMenu.tsx");
+    for (const hook of ["useRoomViewChoice", "useViewChoice"]) {
+      const body = bodyOf(menu, hook)!;
+      assert.doesNotMatch(body, EFFECTS, `${hook} runs no effect`);
+      assert.doesNotMatch(body, /sayView\(|useViewVoice\(/, `${hook} says nothing`);
+      // It writes only from its pick and turn, which nothing on the board calls.
+      assert.doesNotMatch(body.replace(/const (pick|turn) = [\s\S]*?\n  \};\n/g, ""), /pickView\(|turnView\(|setState\(/, `${hook} writes nothing as it reads`);
+    }
+    assert.doesNotMatch(bodyOf(read("features/view/store.ts"), "useStoredView")!, EFFECTS);
+    const stage = read("canvas/Stage.tsx");
+    assert.doesNotMatch(stage, /useViewVoice\(|roomChoice\.(pick|turn)\(/);
+  });
+});

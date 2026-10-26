@@ -244,7 +244,8 @@ export function MapStage(props: {
    */
   const roomId = useRoomView((s) => s.roomId);
   const roomChoice = useRoomViewChoice();
-  useIsoTestHook(props.controlledCamera ? displayViewKey(roomId) : viewKey(roomId), scene.id);
+  // A table display is the board given its own view, whether or not its camera has arrived yet.
+  useIsoTestHook(props.view !== undefined ? displayViewKey(roomId) : viewKey(roomId), scene.id);
   const shown: View = props.view ?? roomChoice.shown;
   const isoShown = shown.kind === "isometric";
   const shownRef = useRef(shown);
