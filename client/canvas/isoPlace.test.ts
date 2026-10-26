@@ -68,6 +68,13 @@ describe("where marks go in Isometric", () => {
     assert.equal(boxGround(iso, { x0: 0, y0: 0, x1: 2, y1: 2 }), 0);
   });
 
+  test("a token dragged wholly inside a 10 ft pit keeps its marks down in it, and one half out of it stands at the rim", () => {
+    const pit = { ground: (x: number, y: number) => (x >= 2 && x < 6 && y >= 2 && y < 6 ? -2 : 0) };
+    // A Large's footprint, as DragMarks.tsx and MoveLayer.tsx read it at each spot of the drag.
+    assert.equal(boxGround(pit, { x0: 3, y0: 3, x1: 5, y1: 5 }), -2);
+    assert.equal(boxGround(pit, { x0: 5, y0: 3, x1: 7, y1: 5 }), 0);
+  });
+
   test("a thing under the stand rule draws in exactly one place: flat on the ground stage, or upright on the overlay", () => {
     for (const stands of [true, false]) {
       assert.equal(drawsHere(null, stands), true, "Top-down draws everything");

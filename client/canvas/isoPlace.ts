@@ -35,13 +35,14 @@ export function viewPointOf(iso: Pick<IsoGround, "turn" | "ground"> | null, p: P
   return toView(isometric(iso.turn), p, z ?? iso.ground(p.x, p.y));
 }
 
-/** The highest drawn ground under a box in cells, its far edges left out: where a mark round a footprint stands. */
+/** The highest drawn ground under a box in cells, its far edges left out: where a mark round a footprint stands, down in a pit when every cell is. */
 export function boxGround(iso: Pick<IsoGround, "ground">, box: { x0: number; y0: number; x1: number; y1: number }): number {
   const x0 = Math.floor(box.x0);
   const y0 = Math.floor(box.y0);
   const x1 = Math.max(x0 + 1, Math.ceil(box.x1));
   const y1 = Math.max(y0 + 1, Math.ceil(box.y1));
-  let top = 0;
+  // The box always covers a cell, so the start never survives.
+  let top = -Infinity;
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) top = Math.max(top, iso.ground(x + 0.5, y + 0.5));
   return top;
 }
