@@ -1429,6 +1429,8 @@ async function dmCombatScreens(sweep: Sweep, page: Page): Promise<void> {
     await (await barControl(thorn, "Details")).click();
     const panel = page.getByRole("tabpanel", { name: sideTabName("Token") }).or(page.getByRole("region", { name: "Token", exact: true }));
     await panel.getByRole("heading", { name: "Thorn" }).first().waitFor();
+    // The creature's header: its name's first line at its picture's middle (CreatureHeader.tsx).
+    await sweep.measure(page, "creature-header", panel.locator("[data-creature-header]").first());
     const combat = panel.getByRole("button", { name: "Combat", exact: true });
     if ((await combat.getAttribute("aria-expanded")) === "false") await combat.click();
     const section = resourcesSection(panel);
