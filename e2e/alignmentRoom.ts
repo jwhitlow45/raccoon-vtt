@@ -247,7 +247,7 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
   "cu-turn-folded": { phones: 4, wide: 1 },
   // With the dragon's bar across the column, the turn card folds to its row, or leaves the column where even its row would meet the bar (4.2).
   // At 844 x 390 the recharge card and the fade's room under it leave the bar too little room to stack, so it docks beside the column (barDock.ts COLUMN_FADE).
-  "cu-turn-fold-bar": { phones: 4, wide: 1 },
+  "cu-turn-fold-bar": { phones: 4, wide: 2 },
   // Not on the upright phones, whose bar rests as the strip at the map's foot, clear of the card (docs/design-v1-bar-compact.md 3.1).
   "cu-turn-hidden-bar": { phones: 0, wide: 4 },
 };
