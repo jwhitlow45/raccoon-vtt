@@ -10,8 +10,8 @@
 # run `pnpm selfhost`. A unit test fails while this file differs from what
 # the generator makes.
 #
-# It is the server stack, whose header draws the whole picture, with these
-# changes:
+# It is the server stack, docker-compose.server.yml in the repository, whose
+# header draws the whole picture, with these changes:
 #
 #   - `raccoon` runs the published image instead of building one.
 #   - squid.conf and backup.sh are inline, in the configs at the end. The
@@ -29,7 +29,9 @@
 # http://raccoon:3000 (README.md, "Put HTTPS in front of it").
 #
 # The internal networks set `gateway_mode_ipv4: isolated`, which needs Docker
-# Engine 28 or later.
+# Engine 28 or later. The inline configs, the volume `subpath` mounts and
+# `restart` in depends_on need Docker Compose 2.31 or later, the oldest
+# tested.
 #
 # Secrets come from .env, which compose reads for the ${...} substitutions
 # below. The required ones use `:?`, so compose refuses to start without
@@ -78,10 +80,9 @@ services:
       # makes the stored passwords unreadable until each DM sets a new one.
       - ROOM_SECRET_KEY=${ROOM_SECRET_KEY:?set ROOM_SECRET_KEY in .env, made with openssl rand -base64 32}
       - ASSET_DIR=/data/assets
-      # Safe only while the front end is the only way in and overwrites this
-      # header with the real client address, as Cloudflare does. Behind a
-      # proxy that does not overwrite it, set it to 0 or configure the proxy
-      # to (README, "Put HTTPS in front of it").
+      # From .env, and 0 unless .env sets it, the app's own default: limits
+      # key on the address that connected. env.example says when 1, which
+      # takes the address from the CF-Connecting-IP header, is safe.
       - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-0}
       # Every outbound call goes through squid, on the port that matches its
       # trust (design section 10.6). The app passes these to an explicit
@@ -386,7 +387,10 @@ services:
   # `docker compose up -d` recreates this copier. `restart: true` in each
   # reader's depends_on then restarts the reader, which is what makes it
   # read the new file. A file is replaced rather than rewritten, because the
-  # backup loop's shell reads its script as it runs.
+  # backup loop's shell reads its script as it runs. A copy left behind by a
+  # run that died is removed first. It is read-only, and root without
+  # capabilities cannot write into it, so the copy must not depend on cp
+  # replacing it (busybox's does, other cps need -f).
   config-files:
     image: *postgres-image
     labels:
@@ -398,6 +402,7 @@ services:
         set -eu
         for f in squid.conf backup.sh Caddyfile; do
           cmp -s "/src/$$f" "/config/$$f" && continue
+          rm -f "/config/.$$f.new"
           cp "/src/$$f" "/config/.$$f.new"
           mv -f "/config/.$$f.new" "/config/$$f"
         done

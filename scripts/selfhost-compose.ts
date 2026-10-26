@@ -128,8 +128,8 @@ const HEADER = `# Self-hosting raccoon-vtt with the published image (README.md,
 # run \`pnpm selfhost\`. A unit test fails while this file differs from what
 # the generator makes.
 #
-# It is the server stack, whose header draws the whole picture, with these
-# changes:
+# It is the server stack, docker-compose.server.yml in the repository, whose
+# header draws the whole picture, with these changes:
 #
 #   - \`raccoon\` runs the published image instead of building one.
 #   - squid.conf and backup.sh are inline, in the configs at the end. The
@@ -147,7 +147,9 @@ const HEADER = `# Self-hosting raccoon-vtt with the published image (README.md,
 # http://raccoon:3000 (README.md, "Put HTTPS in front of it").
 #
 # The internal networks set \`gateway_mode_ipv4: isolated\`, which needs Docker
-# Engine 28 or later.
+# Engine 28 or later. The inline configs, the volume \`subpath\` mounts and
+# \`restart\` in depends_on need Docker Compose 2.31 or later, the oldest
+# tested.
 #
 # Secrets come from .env, which compose reads for the \${...} substitutions
 # below. The required ones use \`:?\`, so compose refuses to start without
@@ -219,7 +221,10 @@ function extraServices(configHash: string): string {
   # \`docker compose up -d\` recreates this copier. \`restart: true\` in each
   # reader's depends_on then restarts the reader, which is what makes it
   # read the new file. A file is replaced rather than rewritten, because the
-  # backup loop's shell reads its script as it runs.
+  # backup loop's shell reads its script as it runs. A copy left behind by a
+  # run that died is removed first. It is read-only, and root without
+  # capabilities cannot write into it, so the copy must not depend on cp
+  # replacing it (busybox's does, other cps need -f).
   config-files:
     image: *postgres-image
     labels:
@@ -231,6 +236,7 @@ function extraServices(configHash: string): string {
         set -eu
         for f in squid.conf backup.sh Caddyfile; do
           cmp -s "/src/$$f" "/config/$$f" && continue
+          rm -f "/config/.$$f.new"
           cp "/src/$$f" "/config/.$$f.new"
           mv -f "/config/.$$f.new" "/config/$$f"
         done
@@ -369,7 +375,22 @@ export function renderCompose(s: Sources): string {
 `,
       "raccoon's build",
     );
-    return replaceOnce(b, "      - TRUST_CF_CONNECTING_IP=1\n", "      - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-0}\n", "raccoon's TRUST_CF_CONNECTING_IP");
+    // The server stack's comment explains its fixed 1, which this file does not have.
+    return replaceOnce(
+      b,
+      `      # Safe only while the front end is the only way in and overwrites this
+      # header with the real client address, as Cloudflare does. Behind a
+      # proxy that does not overwrite it, set it to 0 or configure the proxy
+      # to (README, "Put HTTPS in front of it").
+      - TRUST_CF_CONNECTING_IP=1
+`,
+      `      # From .env, and 0 unless .env sets it, the app's own default: limits
+      # key on the address that connected. env.example says when 1, which
+      # takes the address from the CF-Connecting-IP header, is safe.
+      - TRUST_CF_CONNECTING_IP=\${TRUST_CF_CONNECTING_IP:-0}
+`,
+      "raccoon's TRUST_CF_CONNECTING_IP",
+    );
   });
 
   const dependsOnPostgres = "    depends_on:\n      postgres:\n        condition: service_healthy\n";
@@ -446,7 +467,9 @@ function envExtra(minor: string): string {
 # when every request reaches the app through something that overwrites that
 # header with the visitor's address: Cloudflare, or the https profile's
 # Caddy. Anywhere else, anyone could send the header and pick an address
-# (README.md, "Put HTTPS in front of it").
+# (README.md, "Put HTTPS in front of it"). Behind Cloudflare, use a tunnel or
+# your own proxy on raccoon-edge, not the https profile: Caddy would replace
+# the header with a Cloudflare address.
 # TRUST_CF_CONNECTING_IP=1
 `;
 }
