@@ -184,6 +184,20 @@ function useDmPlayerLink(roomId: string, dm: boolean, shown: boolean): string | 
  * stays in the menu, empty while the bar holds the button, so the menu's
  * sheet can still be found from it once the row is gone.
  */
+/**
+ * Where focus goes when the Menu loses the control that held it: a phone
+ * sheet's title, or in the side panel, which draws no title, the tab or the
+ * split bar's name that labels the pane (pages/Room.tsx SidePane). The wide
+ * bar folds View into the Menu too, and there the Menu is no <dialog>.
+ */
+function menuFallback(place: HTMLElement | null): HTMLElement | null {
+  const sheet = place?.closest("dialog");
+  if (sheet) return sheet.querySelector<HTMLElement>("h1, h2, h3");
+  const pane = place?.closest('[role="tabpanel"][aria-labelledby], [role="group"][aria-labelledby]');
+  const label = pane?.getAttribute("aria-labelledby");
+  return label ? document.getElementById(label) : null;
+}
+
 function ViewRow() {
   const folded = useStore(useScoped(viewFoldSlot), (s) => s.folded);
   const choice = useRoomViewChoice();
@@ -193,10 +207,10 @@ function ViewRow() {
     if (folded || !open) return;
     // A widening that unfolds the row closes its sheet for good, so a narrowing after never opens it unasked (ISO5-ASTRA-04).
     setOpen(false);
-    // Focus was in that sheet, and the row it would go back to is gone with it, so it goes to the menu's title, as a panel's subpage hands it over (features/panels.ts useSubpageFocus).
+    // Focus was in that sheet, and the row it would go back to is gone with it, so it goes where a panel's subpage hands it when its title is gone (features/panels.ts useSubpageFocus).
     const active = document.activeElement;
-    const title = place.current?.closest("dialog")?.querySelector<HTMLElement>("h1, h2, h3");
-    if (title && (active === null || active === document.body)) title.focus({ preventScroll: true });
+    const target = menuFallback(place.current);
+    if (target && (active === null || active === document.body)) target.focus({ preventScroll: true });
   }, [folded, open]);
   return (
     <div ref={place} style={{ display: "contents" }}>

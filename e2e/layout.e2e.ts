@@ -1289,6 +1289,41 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await view(desk, deskCdp, { width: 1280, height: 800 });
   });
 
+  test("9. at 900 x 800 in a fight with the players' screens black, narrow gaps alone do not fit: View folds into the side panel's Menu, and a widening that brings it back hands focus to the Menu's tab", async () => {
+    await startFight();
+    await ops.send({ t: "view.blackout", blackout: true });
+    try {
+      await view(desk, deskCdp, { width: 900, height: 800 });
+      await topBar(desk).getByText("Players see black").waitFor();
+      const viewButton = topBar(desk).getByRole("button", { name: /^View: / });
+      await waitFor("the View button folded into the Menu", async () => ((await viewButton.count()) === 0 ? true : null));
+      if (await sidePanel(desk).isHidden()) await toolbar(desk).getByRole("button", { name: "Panels" }).click();
+      await openSideTab(desk, "Menu");
+      const menu = desk.getByRole("tabpanel", { name: sideTabName("Menu") });
+      const row = menu.getByRole("button", { name: /^View/ });
+      await row.click();
+      const sheet = desk.getByRole("dialog", { name: "View" });
+      await sheet.waitFor();
+      await shots.take(desk, "layout-desk-900-blackout-view-from-menu");
+
+      await view(desk, deskCdp, { width: 1280, height: 800 });
+      await viewButton.waitFor();
+      await sheet.waitFor({ state: "detached" });
+      // The side panel draws no title, so focus, which was in the sheet, goes to the tab that names the Menu, never to the page under it (ISO5P2-ASTRA-01).
+      const label = await menu.getAttribute("aria-labelledby");
+      await waitFor("focus on the Menu's tab", () =>
+        desk.evaluate((id) => {
+          const active = (globalThis as unknown as { document: { activeElement: { id?: string } | null } }).document.activeElement;
+          return active?.id === id ? true : null;
+        }, label),
+      );
+    } finally {
+      await ops.send({ t: "view.blackout", blackout: false });
+      await endFight();
+      await view(desk, deskCdp, { width: 1280, height: 800 });
+    }
+  });
+
   test("9. the Panels list in play order for both roles, with the DM's groups labeled", async () => {
     await view(phone, phoneCdp, { width: 390, height: 844 }, { top: 47, bottom: 34 });
     await reloadAt(phone, 1);
