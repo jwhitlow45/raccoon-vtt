@@ -241,7 +241,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - A scene with a map or a build starts fully fogged, unless a Universal VTT import was made with "Start under fog" off. A blank battle mat starts with none, and keeps none when a build is added to it.
 - The Fog tool clears or adds fog with a rectangle, a polygon, a brush, or a whole builder room in one tap (the "Builder room" shape). The DM sees the fog as translucent.
 - The DM edits fog privately and publishes it when ready. A live mode shows each edit at once.
-- Fog never flashes the map. A player's map stays hidden until the fog has loaded, and missing fog reads as all fogged.
+- Fog never flashes the map. A player's map stays hidden until the fog has loaded, and missing fog reads as all fogged. At the scene's edge no hairline of map shows through the fog at any zoom, in Top-down or Isometric, and the DM's fog stays one even tint there.
 - Monsters and labels standing fully under the fog never reach players. Player characters always stay visible to the party.
 - A creature a player drags under the fog vanishes for them, with a note saying so.
 - "View as a player" shows the DM exactly what a chosen player sees, their own sight and map included, and no whispers between players.
