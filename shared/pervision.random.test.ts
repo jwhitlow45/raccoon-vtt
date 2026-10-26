@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, type EntityKey } from "./keys.ts";
 import { lineAudience, linesPastStart } from "./logRings.ts";
-import type { LogEntry, PathStop, RoomState, Token, Viewer } from "./model.ts";
-import { exploreFor, foggedFor, givenTo, holds, perPlayerOp, perPlayerState, playersOf, playerSees, cellsFor, withCellVision } from "./perPlayerTestutil.ts";
+import type { InitEntry, LogEntry, PathStop, RoomState, Token, Viewer } from "./model.ts";
+import { exploreFor, foggedFor, givenTo, holds, perPlayerOp, perPlayerState, playersOf, playerSees, cellsFor, templateGiven, withCellVision } from "./perPlayerTestutil.ts";
 import { opSchema, type Op, type RestoreEntry } from "./protocol.ts";
-import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, heldOf, ownsToken, perPlayerScene, projectEntity, projectState, stableStringify, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
+import { allKeys, applyChanges, areaSeenMark, changedSightKeys, dependents, diffProjection, heldOf, isPartyMember, ownsToken, perPlayerScene, projectEntity, projectState, rowSeenMark, seenMark, stableStringify, viewerSceneId, type HeldEntry, type ProjectedState, type SeenMark } from "./project.ts";
 import { applyOp, type ApplyResult } from "./reducer.ts";
 import { legOnGround, seenWhole } from "./rules/path.ts";
-import { DM, chance, env, pick, rng } from "./testutil.ts";
+import { DM, chance, entry, env, int, pick, rng, template, token } from "./testutil.ts";
 
 /**
  * The property test of per-player vision (docs/design-v1-per-player-vision.md
@@ -21,15 +21,19 @@ import { DM, chance, env, pick, rng } from "./testutil.ts";
  *   viewer's last projection, give the fresh projection, the DMs', each
  *   player's and a table display's.
  * - O1, the oracle: each player and a display hold exactly the creatures,
- *   labels, stamps, pins and traps their own sight, fog and journal access
- *   give them, worked out from nothing.
+ *   labels, stamps, pins, traps, areas, drawings, tracker rows and turn
+ *   start their own sight, fog and journal access give them, worked out
+ *   from nothing.
  * - O2, route corners: an owner gets a leg's corners on a per-player scene
  *   with fog only for a leg every player saw whole or one on ground their
  *   own fog reveals, and anyone else only for a leg every player saw whole.
  * - M1, lists: a list written by the batch names only holders whose entry
- *   is on and who do not own the creature, sorted.
- * - M2, reach: a log line about a creature reaches a player only when they
- *   own it or saw it, by the oracle, before or after the op.
+ *   is on, who do not own the creature and who see it, by the oracle,
+ *   sorted.
+ * - M2, reach: a log line about a creature, a turn line's row's included,
+ *   reaches a player only when they own it or saw it, and an area's
+ *   reminder only when they may know of the area too, by the oracle,
+ *   before or after the op.
  * - M3, no list outlives its op in the log.
  * - P1, players' data: no list, holder list, holder layer or joined layer
  *   in any player's or display's data, and `sightAll` and `fogAll` the same
@@ -110,6 +114,10 @@ function checkViews(where: string, state: RoomState, conns: readonly Connection[
       stamps: Object.keys(view.stamps).sort(),
       pins: Object.keys(view.pins).sort(),
       traps: Object.keys(view.traps).sort(),
+      templates: Object.keys(view.templates).sort(),
+      drawings: Object.keys(view.drawings).sort(),
+      rows: (view.encounter?.entries ?? []).map((e) => e.id).sort(),
+      turnStart: view.encounter?.turnStart !== undefined,
     };
     assert.deepEqual(got, givenTo(state, id), `${where}: ${id} holds what their own sight and fog do not give, or lacks what they do`);
     // O2.
@@ -136,12 +144,18 @@ function checkViews(where: string, state: RoomState, conns: readonly Connection[
   }
 }
 
-/** The tokens of an event line, or none. */
-function tokensOf(line: LogEntry): string[] {
+/** The tokens of an event line, or none: a turn line's its row's, and the row it resumes when the reader's line names it. */
+function tokensOf(line: LogEntry, ...states: RoomState[]): string[] {
   const data = line.data;
   if (!data) return [];
   if (data.type === "dice") return data.rolls.flatMap((r) => (r.tokenId !== undefined ? [r.tokenId] : []));
-  if (data.type === "area" || data.type === "turn" || data.type === "trap" || data.type === "trapSeen" || data.type === "trapNotice") return [];
+  if (data.type === "turn") {
+    const rowToken = (entryId: string) => states.map((s) => s.encounter?.entries.find((e) => e.id === entryId)?.tokenId).find((id) => id !== undefined);
+    // A copy holds its reader's view, where `to` stands only when they saw that row resume. A shared line's needs `toSeen`.
+    const named = data.to !== undefined && (line.to !== undefined || data.toSeen === true) ? [data.to] : [];
+    return [data.entryId, ...named].flatMap((id) => rowToken(id) ?? []);
+  }
+  if (data.type === "trap" || data.type === "trapSeen" || data.type === "trapNotice") return [];
   return "tokenId" in data && data.tokenId !== undefined ? [data.tokenId] : [];
 }
 
@@ -155,6 +169,7 @@ function checkMarks(where: string, before: RoomState, after: RoomState, result: 
     for (const id of list) {
       assert.ok(on.has(id), `${where}: ${what}'s list names ${id}, who holds no sight there`);
       assert.ok(!ownsToken(after, { memberId: id, role: "player" }, token), `${where}: ${what}'s list names its owner ${id}`);
+      assert.ok(playerSees(after, id, token, cellsFor(after, token.sceneId, id), foggedFor(after, token.sceneId, id)), `${where}: ${what}'s list names ${id}, who does not see it`);
     }
   };
   const start = after.encounter?.turnStart;
@@ -171,7 +186,11 @@ function checkMarks(where: string, before: RoomState, after: RoomState, result: 
     if (line.kind !== "event") continue;
     const audience = lineAudience(line);
     const readers = audience === "party" ? [line.to![0]!] : audience === "shared" ? playersOf(after).map((p) => p.memberId) : [];
-    for (const tokenId of tokensOf(line)) {
+    if (line.data?.type === "area") {
+      const templateId = line.data.templateId;
+      for (const reader of readers) assert.ok([before, after].some((state) => templateGiven(state, reader, templateId)), `${where}: line ${line.id}, an area's reminder, reaches ${reader}, who may not know of the area`);
+    }
+    for (const tokenId of tokensOf(line, after, before)) {
       for (const reader of readers) {
         const saw = [before, after].some((state) => {
           const t = state.tokens[tokenId];
@@ -225,7 +244,7 @@ function run(seed: number, steps: number): { applied: number; perPlayer: number;
     checkViews(where, after, conns);
     if (op.t === "scene.update" && op.patch.vision?.perPlayer !== undefined) undo = result.inverse;
     if (seenText(after).includes('"seenBy"')) lists++;
-    copies += result.log.filter((l) => lineAudience(l) === "party" && l.to !== undefined && tokensOf(l).some((id) => perPlayerScene(after.scenes[after.tokens[id]?.sceneId ?? ""]))).length;
+    copies += result.log.filter((l) => lineAudience(l) === "party" && l.to !== undefined && tokensOf(l, after, before).some((id) => perPlayerScene(after.scenes[after.tokens[id]?.sceneId ?? ""]))).length;
     holders = Math.max(holders, ...Object.keys(after.scenes).map((id) => playersOf(after).filter((p) => holds(after, id, p.memberId)).length));
     state = after;
     return true;
@@ -269,6 +288,71 @@ describe("per-player vision over random rooms (docs/design-v1-per-player-vision.
       assert.ok(lists > 30, `only ${lists} states held a list of who saw`);
       assert.ok(copies > 25, `only ${copies} lines about a creature on a per-player scene reached only some players`);
       assert.ok(full > 3, `only ${full} rooms filled a holder list`);
+    });
+  });
+});
+
+/*
+ * Random sequences rarely leave a creature where some holders see it and
+ * others do not, so the marks themselves are checked here against the
+ * oracle, over random rooms with the DM's creatures set beside holders'
+ * own sources (review SEC-PV1-3).
+ */
+describe("the marks by the oracle (docs/design-v1-per-player-vision.md 6.5, review SEC-PV1-3)", () => {
+  test("M1 and M2: a creature's, a row's and an area's lists name exactly the players the oracle finds", () => {
+    withCellVision(() => {
+      const counted = { creatures: 0, named: 0, partial: 0, rows: 0, rowsNamed: 0, areas: 0, areasNamed: 0 };
+      for (let seed = 1; seed <= 400; seed++) {
+        const r = rng(seed * 7717);
+        const s = perPlayerState(r);
+        s.meta.view = { ...s.meta.view, blackout: false };
+        // Half the rooms show every row from the start, so a row's list depends on sight alone.
+        if (chance(r, 0.5)) s.meta.settings = { ...s.meta.settings, playersSeeOrder: "all" };
+        const sceneId = s.meta.playerSceneId;
+        const scene = sceneId === null ? undefined : s.scenes[sceneId];
+        if (sceneId === null || !scene || !perPlayerScene(scene)) continue;
+        const holders = playersOf(s).filter((p) => holds(s, sceneId, p.memberId)).map((p) => p.memberId);
+        const sources = Object.values(s.tokens).filter((t) => t.sceneId === sceneId && t.ownerIds.some((id) => holders.includes(id)));
+        for (const [i, by] of sources.entries()) {
+          s.tokens[`near-${i}`] = token(`near-${i}`, { name: "Goblin", sceneId, x: Math.min(scene.bounds.w - 1, Math.max(0, Math.round(by.x) + int(r, -3, 3))), y: Math.min(scene.bounds.h - 1, Math.max(0, Math.round(by.y) + int(r, -3, 3))) });
+        }
+        const monsters = Object.values(s.tokens).filter((t) => t.sceneId === sceneId && !isPartyMember(s, t) && t.visibility === "all");
+        s.encounter = { rev: 0, round: 1, activeEntryId: null, entries: monsters.map((t, i) => entry(`row-${t.id}`, { tokenId: t.id, value: 30 - i, tieOrder: i })) };
+        const players = playersOf(s).map((p) => p.memberId);
+        const given = new Map([...players, DISPLAY.memberId].map((id) => [id, givenTo(s, id)]));
+        const everyone = given.get(DISPLAY.memberId)!;
+        for (const t of monsters) {
+          // M1: seen by all, or exactly the holders who see it and do not own it.
+          const sees = (id: string) => given.get(id)!.tokens.includes(t.id);
+          const mark = seenMark(s, t, {}, "here");
+          const expected = everyone.tokens.includes(t.id) ? { seen: true } : { seenBy: holders.filter((id) => sees(id) && !ownsToken(s, { memberId: id, role: "player" }, t)).sort() };
+          assert.deepEqual(mark, expected, `seed ${seed}: ${t.id}'s mark`);
+          counted.creatures++;
+          if ((mark.seenBy?.length ?? 0) > 0) counted.named++;
+          if ((mark.seenBy?.length ?? 0) > 0 && mark.seenBy!.length < holders.length) counted.partial++;
+          // M2, a row: the holders whose tracker shows it.
+          const row: InitEntry = s.encounter.entries.find((e) => e.tokenId === t.id)!;
+          const rowMark = rowSeenMark(s, row, {});
+          const rowExpected: SeenMark = everyone.rows.includes(row.id) ? { seen: true } : { seenBy: holders.filter((id) => given.get(id)!.rows.includes(row.id) && !ownsToken(s, { memberId: id, role: "player" }, t)).sort() };
+          assert.deepEqual(rowMark, rowExpected, `seed ${seed}: ${row.id}'s mark`);
+          counted.rows++;
+          if ((rowMark.seenBy?.length ?? 0) > 0) counted.rowsNamed++;
+          // M2, an area: every player who knows of both the creature and an aura of a holder's creature.
+          const on = sources.length > 0 ? pick(r, sources) : undefined;
+          if (!on) continue;
+          const aura = template(`aura-${t.id}`, { sceneId, shape: "emanation", size: 15, attachedTo: on.id, casterId: on.id, includeOrigin: false, ownerId: pick(r, [...on.ownerIds, "dm1"]), triggers: ["enter"] });
+          s.templates[aura.id] = aura;
+          const knows = new Map([...players, DISPLAY.memberId].map((id) => [id, givenTo(s, id)]));
+          const both = (id: string) => knows.get(id)!.tokens.includes(t.id) && knows.get(id)!.templates.includes(aura.id);
+          const areaMark = areaSeenMark(s, aura, t, {});
+          const areaExpected = !knows.get(DISPLAY.memberId)!.tokens.includes(on.id) ? { hidden: true } : both(DISPLAY.memberId) ? { seen: true } : { seenBy: players.filter(both).sort() };
+          assert.deepEqual(areaMark, areaExpected, `seed ${seed}: the aura on ${on.id} and ${t.id}`);
+          counted.areas++;
+          if ((areaMark?.seenBy?.length ?? 0) > 0) counted.areasNamed++;
+          delete s.templates[aura.id];
+        }
+      }
+      assert.ok(counted.named > 100 && counted.partial > 60 && counted.rowsNamed > 50 && counted.areasNamed > 100, JSON.stringify(counted));
     });
   });
 });

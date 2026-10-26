@@ -3,7 +3,7 @@ import { chunkKey, doorChunk, holderTileKey, tileKey } from "./keys.ts";
 import { LIMITS } from "./limits.ts";
 import { FOG_SUBCELLS, type Actor, type FogTile, type RoomState, type SightTile, type Token, type Viewer } from "./model.ts";
 import type { Op } from "./protocol.ts";
-import { ownsToken, pageReadableBy, perPlayerScene, pinCells, playerOwned, stampCells } from "./project.ts";
+import { orderShown, ownsToken, pageReadableBy, perPlayerScene, pinCells, playerOwned, stampCells } from "./project.ts";
 import { visionRules, type PartySight, type SightProbe, type VisionRules } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
 import { occupiedCells, type CellRange } from "./rules/footprint.ts";
@@ -18,7 +18,7 @@ import { actor, chance, int, member, pick, randomOp, randomState, token } from "
  * nothing what each viewer may be given. Not a test file itself.
  *
  * The stub sees whole cells: each source sees the square of cells around
- * the middle of its footprint, 4 cells out, or in the dark 1, 3 with
+ * the middle of its footprint, 3 cells out, or in the dark 1, 2 with
  * darkvision. Its sources are vision.ts's rule in small (party members on
  * the scene, shown, alive, awake and not Blinded, the cap's order and
  * number), and a holder's are the shared ones and their own among them. It
@@ -333,19 +333,41 @@ export function perPlayerOp(r: () => number, state: RoomState, who: Viewer): Op 
   const encounter = state.encounter;
   const active = encounter?.turnStart?.tokenId;
   switch (int(r, 0, 21)) {
+    case 15:
     case 16:
     case 17:
     case 18: {
       // A fight on the players' scene: one starts, its turns pass and come back, and the creature whose turn it is moves.
       if (!encounter || encounter.entries.length === 0) {
-        const here = Object.values(state.tokens).filter((t) => t.sceneId === state.meta.playerSceneId).slice(0, 8);
+        // The DM's creatures first, so most turns are of creatures only some players may see.
+        const here = Object.values(state.tokens)
+          .filter((t) => t.sceneId === state.meta.playerSceneId)
+          .sort((a, b) => Number(a.ownerIds.length > 0 || a.partyVision === true) - Number(b.ownerIds.length > 0 || b.partyVision === true))
+          .slice(0, 8);
         if (here.length === 0) return { t: "log.chat", text: "hi" };
         return { t: "encounter.start", entries: here.map((t, i) => ({ id: `e-${t.id}-${int(r, 0, 1e6)}`, tokenId: t.id, value: 20 - i })) };
       }
-      const roll = int(r, 0, 9);
-      if (roll < 5) return { t: "encounter.next" };
-      if (roll < 6) return { t: "encounter.prev" };
-      return active && state.tokens[active] ? { t: "token.move", tokenId: active, x: int(r, 0, 30), y: int(r, 0, 30) } : { t: "encounter.next" };
+      // A spot beside a sight holder's own source, often, so the creature that moves there is seen by some holders and not others.
+      const owned = Object.values(state.tokens).filter((t) => t.sceneId === state.meta.playerSceneId && t.ownerIds.some((id) => players.includes(id)));
+      const spot = (sceneId: string | undefined) => {
+        const sources = Object.values(state.tokens).filter((t) => t.sceneId === sceneId && lends(state, t) && t.ownerIds.some((id) => holds(state, sceneId, id)));
+        const by = sources.length > 0 && chance(r, 0.8) ? pick(r, sources) : null;
+        const bounds = state.scenes[sceneId ?? ""]?.bounds ?? { w: 30, h: 30 };
+        const within = (v: number, n: number) => Math.min(n - 1, Math.max(0, v));
+        return by ? { x: within(Math.round(by.x) + int(r, -1, 1), bounds.w), y: within(Math.round(by.y) + int(r, -1, 1), bounds.h) } : { x: int(r, 0, 30), y: int(r, 0, 30) };
+      };
+      const roll = int(r, 0, 11);
+      if (roll < 4) return { t: "encounter.next" };
+      if (roll < 5) return { t: "encounter.prev" };
+      if (roll < 9) return active && state.tokens[active] ? { t: "token.move", tokenId: active, ...spot(state.tokens[active].sceneId) } : { t: "encounter.next" };
+      if (roll < 10 && owned.length > 0) {
+        // An aura on a player's creature, which reminds as a creature enters it.
+        const on = pick(r, owned);
+        const ownerId = chance(r, 0.6) ? pick(r, on.ownerIds) : pick(r, ["dm1", ...players]);
+        return { t: "template.create", template: { id: `aura-${int(r, 0, 1e6)}`, sceneId: on.sceneId, shape: "emanation", size: pick(r, [10, 15, 20]), origin: { x: on.x, y: on.y, z: 0 }, yaw: 0, attachedTo: on.id, casterId: on.id, includeOrigin: false, color: "#ff8800", spell: "Spirit Guardians", ownerId, visibility: "all", triggers: ["enter"] } };
+      }
+      const monsters = Object.values(state.tokens).filter((t) => t.sceneId === state.meta.playerSceneId && t.ownerIds.length === 0 && t.partyVision !== true);
+      return monsters.length > 0 ? { t: "token.move", tokenId: pick(r, monsters).id, ...spot(state.meta.playerSceneId ?? undefined) } : { t: "encounter.next" };
     }
     case 19:
       return { t: "actor.hp", target: { tokenId: anyToken() }, change: { kind: "damage", amount: int(r, 1, 6) } };
@@ -391,8 +413,13 @@ export function perPlayerOp(r: () => number, state: RoomState, who: Viewer): Op 
 // ---------------------------------------------------------------------------
 // The oracle
 
-/** What one viewer may be given of a room, worked out from nothing (docs/design-v1-per-player-vision.md section 10). */
-export type Given = { tokens: string[]; labels: string[]; stamps: string[]; pins: string[]; traps: string[] };
+/**
+ * What one viewer may be given of a room, worked out from nothing
+ * (docs/design-v1-per-player-vision.md section 10): the creatures, labels,
+ * stamps, pins, traps, areas and drawings of the player scene, the
+ * tracker's rows, and whether the active creature's turn start.
+ */
+export type Given = { tokens: string[]; labels: string[]; stamps: string[]; pins: string[]; traps: string[]; templates: string[]; drawings: string[]; rows: string[]; turnStart: boolean };
 
 /** Whether a member sees for themselves on a scene: a player whose entry on its list is on. */
 export function holds(state: RoomState, sceneId: string, memberId: string): boolean {
@@ -458,7 +485,7 @@ export function playerSees(state: RoomState, memberId: string, token: Token, cel
 
 /** Everything of the player scene a player or a table display may be given, from the room alone. */
 export function givenTo(state: RoomState, memberId: string): Given {
-  const out: Given = { tokens: [], labels: [], stamps: [], pins: [], traps: [] };
+  const out: Given = { tokens: [], labels: [], stamps: [], pins: [], traps: [], templates: [], drawings: [], rows: [], turnStart: false };
   const sceneId = state.meta.view?.blackout === true ? null : state.meta.playerSceneId;
   const scene = sceneId === null ? undefined : state.scenes[sceneId];
   if (!scene || sceneId === null) return out;
@@ -486,6 +513,44 @@ export function givenTo(state: RoomState, memberId: string): Given {
     if (fogOn && zoneRanges(state, sceneId, trap.zone).every((r) => rangeFogged(fogged, r))) continue;
     out.traps.push(trap.id);
   }
-  for (const list of Object.values(out)) list.sort();
+  const seen = new Set(out.tokens);
+  for (const t of Object.values(state.templates)) {
+    if (t.sceneId !== sceneId || t.visibility === "dm") continue;
+    if (t.attachedTo !== undefined && !seen.has(t.attachedTo)) continue;
+    if (t.ownerId !== memberId && !state.meta.settings.playersSeeAoeOfOthers && state.members[t.ownerId]?.kind !== "dm") continue;
+    out.templates.push(t.id);
+  }
+  for (const d of Object.values(state.drawings)) {
+    if (d.sceneId !== sceneId || d.visibility === "dm") continue;
+    if ((d.anchors ?? []).some((id) => id !== null && !seen.has(id))) continue;
+    out.drawings.push(d.id);
+  }
+  const encounter = state.encounter;
+  if (encounter) {
+    const viewer: Viewer = { memberId, role: "player" };
+    // The order rule reads no sight, so the oracle takes it as the projection does.
+    for (const e of encounter.entries) {
+      if (e.hidden || !orderShown(state, e, viewer)) continue;
+      if (e.tokenId !== undefined && !seen.has(e.tokenId)) continue;
+      if (e.characterId !== undefined && !state.characters[e.characterId]) continue;
+      out.rows.push(e.id);
+    }
+    const start = encounter.turnStart;
+    const t = start ? state.tokens[start.tokenId] : undefined;
+    out.turnStart =
+      start !== undefined &&
+      t !== undefined &&
+      start.entryId === encounter.activeEntryId &&
+      out.rows.includes(start.entryId) &&
+      seen.has(t.id) &&
+      t.sceneId === start.sceneId &&
+      (start.seen === true || start.seenBy?.includes(memberId) === true || ownsToken(state, viewer, t));
+  }
+  for (const list of Object.values(out)) if (Array.isArray(list)) list.sort();
   return out;
+}
+
+/** Whether a player may know of an area, by the oracle: one of `given`'s. */
+export function templateGiven(state: RoomState, memberId: string, templateId: string): boolean {
+  return givenTo(state, memberId).templates.includes(templateId);
 }
