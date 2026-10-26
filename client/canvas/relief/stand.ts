@@ -1,6 +1,8 @@
 import { FOG_SUBCELLS } from "#shared/model.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
+import { pillReach } from "../../features/measure/pillPlace.ts";
+import { dragTagPill } from "../dragTag.ts";
 import type { CellBox, FogView } from "./fogView.ts";
 
 /**
@@ -97,6 +99,18 @@ export function creatureStands(fog: FogView, token: ViewToken, aboveFog: boolean
 export function ghostStands(fog: FogView, token: ViewToken, at: { x: number; y: number }): boolean {
   if (fog.all) return true;
   return tokenStands(fog, token, at);
+}
+
+/**
+ * Whether a standing ghost's name tag stands too: by the box of the pill
+ * Top-down draws for it at this zoom (dragTag.ts dragTagPill), anywhere its
+ * slide along the screen's edge can put it (pillPlace.ts pillReach). At low
+ * zoom that pill covers many cells, all of which must be revealed, since
+ * Top-down draws it under the fog.
+ */
+export function ghostTagStands(fog: FogView, token: Pick<ViewToken, "size" | "w" | "h">, at: { x: number; y: number }, name: string, scale: number): boolean {
+  if (fog.all) return true;
+  return boxStands(fog, pillReach(dragTagPill(token, at, name, scale)));
 }
 
 /** Which tokens stand as standees and which lie flat under the fog, for the board's two stages. */

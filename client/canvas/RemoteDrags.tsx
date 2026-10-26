@@ -3,11 +3,11 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useLowPower } from "../features/device/settings.ts";
 import { Pill } from "../features/measure/Pill.tsx";
-import { footprint, type ViewToken } from "../lib/scene.ts";
+import type { ViewToken } from "../lib/scene.ts";
 import { approach } from "../state/ephemeral.ts";
 import type { DragPreview } from "../state/types.ts";
 import { useRoomView } from "../state/view.ts";
-import { dragTag } from "./dragTag.ts";
+import { dragTag, dragTagPill } from "./dragTag.ts";
 import { TokenGhost, type IsoToken } from "./TokenNode.tsx";
 import { useTreeShown } from "./relief/context.ts";
 
@@ -41,7 +41,7 @@ export const RemoteDrags = memo(function RemoteDrags(props: {
    * or flat and clipped by the stand rule (docs/design-v1-isometric-view.md
    * 5.2), and where its tag goes, or null to leave the tag out.
    */
-  iso?: ((token: ViewToken, at: { x: number; y: number }) => IsoGhost) | null;
+  iso?: ((token: ViewToken, at: { x: number; y: number }, name: string) => IsoGhost) | null;
   /** In the isometric view the ghosts draw in the ground group and their tags in view space, so each place draws its part. */
   part?: "ghost" | "tag";
 }) {
@@ -136,7 +136,7 @@ function Ghost(props: {
   color: string;
   name: string;
   eased: EasedDrags;
-  iso: ((token: ViewToken, at: { x: number; y: number }) => IsoGhost) | null;
+  iso: ((token: ViewToken, at: { x: number; y: number }, name: string) => IsoGhost) | null;
   part: "ghost" | "tag" | null;
 }) {
   const { drag, token, scale, color } = props;
@@ -145,14 +145,14 @@ function Ghost(props: {
   const lowPower = useLowPower();
   const shown = lowPower || !eased ? { x: drag.x, y: drag.y } : eased;
   if (props.iso) {
-    const ghost = props.iso(token, shown);
+    const ghost = props.iso(token, shown, props.name);
     if (props.part === "tag") return ghost.tag ? <Pill x={ghost.tag.x} y={ghost.tag.y - 4 / scale} scale={scale} name={props.name} size="map" color={color} small above /> : null;
     return <TokenGhost token={token} x={shown.x} y={shown.y} scale={scale} color={color} iso={ghost.standee} clip={ghost.clip} />;
   }
   return (
     <>
       <TokenGhost token={token} x={shown.x} y={shown.y} scale={scale} color={color} />
-      <Pill x={shown.x + footprint(token).w / 2} y={shown.y - 4 / scale} scale={scale} name={props.name} size="map" color={color} small above />
+      <Pill {...dragTagPill(token, shown, props.name, scale)} color={color} />
     </>
   );
 }

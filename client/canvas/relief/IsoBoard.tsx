@@ -31,7 +31,7 @@ import { cellLook, CellTints, imageReader } from "./looks.ts";
 import type { StaticPiece, VBox } from "./pieces.ts";
 import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 import { FrameScheduler } from "./scheduler.ts";
-import { ghostStands, splitTokens, tokenBox } from "./stand.ts";
+import { ghostStands, ghostTagStands, splitTokens, tokenBox } from "./stand.ts";
 import { standeeShape } from "./standee.ts";
 
 /**
@@ -263,17 +263,16 @@ function IsoBoardImpl(props: IsoBoardProps) {
 
   // Each ghost of another member's drag, standing or flat and clipped, at each eased spot (5.2).
   const ghostOf = useCallback(
-    (t: ViewToken, at: { x: number; y: number }): IsoGhost => {
+    (t: ViewToken, at: { x: number; y: number }, name: string): IsoGhost => {
       const fp = footprint(t);
       const range = occupiedRange({ ...t, x: at.x, y: at.y, squeeze: undefined });
       const base = drawnBase(src, range, t.elevation) / feet;
       const ground = drawnFootprintGround(src, range) / feet;
       if (ghostStands(fog, t, at)) {
         const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
-        const tagBox = { x0: at.x + fp.w / 2 - 1, y0: at.y - 1, x1: at.x + fp.w / 2 + 1, y1: at.y };
         const standee: IsoToken = { turn, base, ground, capped: shape.capped, rise: 0, pits: [], dim: false, pressOnly: false };
-        // The tag stands over the art when its own box is clear too, and is left out otherwise.
-        return { standee, clip: null, tag: fog.boxClear(tagBox) ? { x: (shape.art.x0 + shape.art.x1) / 2, y: shape.art.y0 } : null };
+        // The tag stands over the art when the pill Top-down draws for it is clear too, and is left out otherwise.
+        return { standee, clip: null, tag: ghostTagStands(fog, t, at, name, cam.scale) ? { x: (shape.art.x0 + shape.art.x1) / 2, y: shape.art.y0 } : null };
       }
       return { standee: null, clip: fog.revealedRects(tokenBox(t, at)), tag: null };
     },

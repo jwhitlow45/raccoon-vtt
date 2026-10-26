@@ -8,7 +8,9 @@ import { rng, token as makeToken } from "#shared/testutil.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { FogView, type CellBox } from "./fogView.ts";
-import { boxStands, creatureStands, ghostStands, lineStands, splitTokens, tokenBox, tokenBoxes } from "./stand.ts";
+import { pillReach } from "../../features/measure/pillPlace.ts";
+import { dragTagPill } from "../dragTag.ts";
+import { boxStands, creatureStands, ghostStands, ghostTagStands, lineStands, splitTokens, tokenBox, tokenBoxes } from "./stand.ts";
 
 /**
  * The stand rule is the isometric view's security rule
@@ -327,6 +329,25 @@ describe("the stand rule", () => {
       });
       assert.ok(Math.abs(oval.x1 - Math.max(...points.map((p) => p.x))) < 1e-5 && Math.abs(oval.y1 - Math.max(...points.map((p) => p.y))) < 1e-5, `ellipse at ${rotation}`);
     }
+  });
+
+  test("security: at low zoom a ghost's tag is judged by the whole pill Top-down draws, not by a box of two cells", () => {
+    const ghost = makeToken("g", { x: 10, y: 4 }) as ViewToken;
+    const at = { x: 10, y: 4 };
+    // Its body and the two cells over its middle revealed, and nothing higher.
+    const near = fogOf([[9, 3, 12, 5]]);
+    assert.equal(ghostStands(near, ghost, at), true);
+    const pill = pillReach(dragTagPill(ghost, at, "Dana", 12));
+    assert.ok(pill.y0 < 3 && pill.y1 - pill.y0 > 1, `at 12 px a cell the pill reaches past two cells: ${JSON.stringify(pill)}`);
+    assert.equal(ghostTagStands(near, ghost, at, "Dana", 12), false, "the pill's top lies over fog");
+    assert.equal(ghostTagStands(fogOf([[0, 0, 16, 5]]), ghost, at, "Dana", 12), true, "with every cell it covers revealed");
+    // A long name makes a wider pill, which must be clear across its whole width.
+    const wide = pillReach(dragTagPill(ghost, at, "Bartholomew the Unready", 12));
+    assert.ok(wide.x1 - wide.x0 > pill.x1 - pill.x0);
+    assert.equal(ghostTagStands(fogOf([[Math.floor(pill.x0), 0, Math.ceil(pill.x1), 5]]), ghost, at, "Bartholomew the Unready", 12), false);
+    // At a close zoom the same pill covers less of the map.
+    const close = pillReach(dragTagPill(ghost, at, "Dana", 80));
+    assert.ok(close.y1 - close.y0 < pill.y1 - pill.y0);
   });
 
   test("a turn that is not finite draws, and is judged, unturned", () => {
