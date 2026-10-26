@@ -14,7 +14,7 @@ Every screen was measured at 390 x 844, 360 x 740, 320 x 568, 844 x 390, 820 x 1
 2. **One row.** Items side by side in a flex or grid row share a middle, and controls among them share a height. Rows set on their baseline are left out.
 3. **Same kind.** Sibling controls of one tag and role share a height, side padding and gap.
 4. **Edges.** A column of rows starts its content at one left edge.
-5. **Wrapping.** A label alone on its line above its control, or one part alone on a wrapped row's last line.
+5. **Wrapping.** A label alone on its line above its control, or one part alone on a wrapped row's last line where it could share it: where it fits on a line beside the part before it, the only part a wrap can move down to it (FU32-LAIR-ALONE).
 
 Anything over 1 px is a finding. Board text was read from the code (Konva's `Text` puts the baseline at the line's middle plus half of ascent less descent, Pill.tsx sizes its `Tag` to its `Text`) and checked as ink: the rows of bright pixels in a 2x shot of each pill's body against the body's middle.
 
