@@ -115,8 +115,9 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
   const projections = new Map<string, Map<EntityKey, unknown>>();
   const forPlayers = new Map<EntityKey, unknown>();
   // On a per-player scene sight, fog, labels and stamps are each player's own (docs/design-v1-per-player-vision.md 6.2), so a
-  // room with one projects every player alone until the projection classes of 6.9 replace this (review SEC-PV1-1).
-  const shareable = !Object.values(batch.after.scenes).some((scene) => perPlayerScene(scene));
+  // room with one, before or after the batch, projects every player alone until the projection classes of 6.9 replace
+  // this (review SEC-PV1-1).
+  const shareable = !Object.values(batch.before.scenes).some(perPlayerScene) && !Object.values(batch.after.scenes).some(perPlayerScene);
   for (const conn of all) {
     if (conn.closed || conn.held === null) continue;
     const cls = viewerClass(conn, batch.after);
