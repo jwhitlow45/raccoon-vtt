@@ -60,6 +60,8 @@ describe("the Vision settings on a per-player scene (7.1, 11)", () => {
     assert.match(html, /<input type="radio"[^>]*checked=""[^>]*value="player"/);
     assert.ok(html.indexOf("data-vision-sight") > html.indexOf("Party vision"), "under the switch");
     assert.doesNotMatch(html, /aria-busy/);
+    // Each row's question speaks through a status mounted before it has words (PV4-OP-5), so a screen reader hears them come.
+    assert.equal((html.match(/<p role="status"[^>]*><\/p>/g) ?? []).length, 2, "Ana's row and Gus's");
   });
 
   test("the switch's help on a per-player scene, and no row on a whole-party scene with vision off", () => {

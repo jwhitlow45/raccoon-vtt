@@ -84,7 +84,7 @@ export function VisionSettings(props: { scene: Scene }) {
         busy={showWorking}
         onChange={(next) => update({ vision: visionPatch(scene, next) })}
       />
-      {showWorking ? <Help>Working out what the party sees…</Help> : null}
+      {showWorking ? <Help>{sightWorkingText(perPlayer)}</Help> : null}
       {sightShown(scene) ? <SightRow scene={scene} working={sightWorking} /> : null}
       {perPlayer ? <HolderList sceneId={scene.id} busy={sightWorking !== null} /> : null}
       {on ? fog.warning ? <Note>{fog.text}</Note> : <Help>{fog.text}</Help> : null}
@@ -203,6 +203,13 @@ function HolderList(props: { sceneId: string; busy: boolean }) {
     setAsking(null);
     boxes.current.get(memberId)?.focus();
   };
+  // Escape answers the question no wherever focus is in its row, the box included, where focus stays as it opens.
+  const escapeFrom = (memberId: string) => (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    backTo(memberId);
+  };
   const change = (memberId: string, tick: boolean) => {
     if (busy) return;
     if (!tick) {
@@ -228,7 +235,7 @@ function HolderList(props: { sceneId: string; busy: boolean }) {
       </span>
       <div style={{ display: "grid", minWidth: 0 }}>
         {rows.map((row) => (
-          <div key={row.memberId} style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
+          <div key={row.memberId} onKeyDown={asking === row.memberId ? escapeFrom(row.memberId) : undefined} style={{ display: "grid", minWidth: 0 }}>
             <Checkbox
               ref={(el) => {
                 if (el) boxes.current.set(row.memberId, el);
@@ -239,18 +246,17 @@ function HolderList(props: { sceneId: string; busy: boolean }) {
               checked={row.on}
               onChange={(tick) => change(row.memberId, tick)}
             />
-            {asking === row.memberId ? (
-              <UntickQuestion
-                name={row.name}
-                busy={busy}
-                onCancel={() => backTo(row.memberId)}
-                onConfirm={() => {
-                  const next = holdersAfter(rows, row.memberId, false);
-                  if ("on" in next) send(next.on);
-                  backTo(row.memberId);
-                }}
-              />
-            ) : null}
+            <UntickQuestion
+              open={asking === row.memberId}
+              name={row.name}
+              busy={busy}
+              onCancel={() => backTo(row.memberId)}
+              onConfirm={() => {
+                const next = holdersAfter(rows, row.memberId, false);
+                if ("on" in next) send(next.on);
+                backTo(row.memberId);
+              }}
+            />
           </div>
         ))}
       </div>
@@ -260,41 +266,46 @@ function HolderList(props: { sceneId: string; busy: boolean }) {
   );
 }
 
-/** The question an untick asks, under its box, as a polite status. Escape answers no. While another change is on its way, Untick waits. */
-function UntickQuestion(props: { name: string; busy: boolean; onCancel(): void; onConfirm(): void }) {
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "Escape") return;
-    e.preventDefault();
-    e.stopPropagation();
-    props.onCancel();
-  };
+/**
+ * The question an untick asks, under its box. Its words go in a status
+ * that stays mounted, empty while nothing is asked, so a screen reader
+ * hears them as they come. Escape answers no (HolderList's row). While
+ * another change is on its way, Untick waits.
+ */
+function UntickQuestion(props: { open: boolean; name: string; busy: boolean; onCancel(): void; onConfirm(): void }) {
+  const { open } = props;
   return (
     <div
-      role="group"
-      aria-label={`Untick ${props.name}?`}
-      onKeyDown={onKeyDown}
-      style={{
-        display: "grid",
-        gap: theme.space(2),
-        padding: theme.space(3),
-        marginBottom: theme.space(1),
-        borderRadius: theme.radius.md,
-        border: `${theme.line.border}px solid ${theme.color.border}`,
-        background: theme.color.bg,
-        minWidth: 0,
-      }}
+      role={open ? "group" : undefined}
+      aria-label={open ? `Untick ${props.name}?` : undefined}
+      style={
+        open
+          ? {
+              display: "grid",
+              gap: theme.space(2),
+              padding: theme.space(3),
+              margin: `${theme.space(1)}px 0`,
+              borderRadius: theme.radius.md,
+              border: `${theme.line.border}px solid ${theme.color.border}`,
+              background: theme.color.bg,
+              minWidth: 0,
+            }
+          : undefined
+      }
     >
       <p role="status" style={{ margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body, overflowWrap: "anywhere" }}>
-        {untickQuestion(props.name)}
+        {open ? untickQuestion(props.name) : null}
       </p>
-      <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
-        <Button size="sm" onClick={props.onCancel}>
-          Cancel
-        </Button>
-        <Button size="sm" variant="primary" busy={props.busy} onClick={props.onConfirm}>
-          Untick
-        </Button>
-      </div>
+      {open ? (
+        <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+          <Button size="sm" onClick={props.onCancel}>
+            Cancel
+          </Button>
+          <Button size="sm" variant="primary" busy={props.busy} onClick={props.onConfirm}>
+            Untick
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
