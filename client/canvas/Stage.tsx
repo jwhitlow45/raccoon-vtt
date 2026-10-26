@@ -78,9 +78,8 @@ import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/v
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { footAnchor, headAnchor } from "./anchors.ts";
-import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, viewGround, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, drawnRing, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, viewGround, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
-import { cappedBase } from "./relief/standee.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { dragBound, dragGround, dragPlan } from "./isoDrag.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
@@ -1392,9 +1391,10 @@ export function MapStage(props: {
       if (!c || !room || !stage) return [];
       const pick = pickOfRef.current(c);
       if (pick.view.kind !== "isometric" || !pick.src) return [];
-      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, feetPerCell: pick.feetPerCell, token: lead, drawn: (base, ground) => cappedBase(base, ground, pick.camera.scale, pick.canvasHeight) });
-      // The ring as it draws, its lift capped and flat when it lies under the fog, so the first move does not jump (ISO34-OPUS-10).
-      const start = { node: node.getAbsolutePosition(), ring: ringCenter(pick, lead, standsFor(pick, aboveFogRef.current)(lead)) };
+      // The ring as it draws, its lift capped, or on the ground when it lies under the fog, and the ray at that same height, so no move jumps (ISO34-OPUS-10, OPUS-11).
+      const stands = standsFor(pick, aboveFogRef.current)(lead);
+      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, feetPerCell: pick.feetPerCell, token: lead, drawn: drawnRing(pick, stands) });
+      const start = { node: node.getAbsolutePosition(), ring: ringCenter(pick, lead, stands) };
       const rel = { x: pressed.x - lead.x, y: pressed.y - lead.y };
       node.dragBoundFunc((pos) => {
         const now = pickOfRef.current(currentCam() ?? c);

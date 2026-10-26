@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { RoomState, Token } from "#shared/model.ts";
+import type { ViewToken } from "../lib/scene.ts";
 import { reveal, rng, token } from "#shared/testutil.ts";
 import { dropLanding, dropView } from "../features/movement/drop.ts";
 import { raised, world } from "../features/movement/testing.ts";
 import { screenToView, viewToScreen, type Camera } from "../lib/camera.ts";
 import { footprint, snapPosition } from "../lib/scene.ts";
 import { flatHeights, isometric, toView, type Turn, type ViewPoint } from "../lib/view.ts";
-import { boardPickFor, DrawnHeightsMemo, ringCenter, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, DrawnHeightsMemo, drawnRing, ringCenter, standsFor, type BoardPick } from "./boardPick.ts";
 import { cappedBase, standeeShape } from "./relief/standee.ts";
-import { dragBound, dragGround, dragLanding, dragPlan, levelsOf, type DragPlan } from "./isoDrag.ts";
+import { dragBound, dragGround, dragLanding, dragPlan, levelsOf, type DragGround, type DragPlan } from "./isoDrag.ts";
 
 const CAM: Camera = { x: 600, y: 80, scale: 40 };
 
@@ -73,6 +75,54 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
       const bound = dragBound(input, moved);
       assert.ok(Math.abs(bound.x - moved.x) < 1e-6 && Math.abs(bound.y - moved.y) < 1e-6, `turn ${turn}: the node follows the finger`);
     }
+  });
+
+  test("a player drags a 20 ft flier half under the fog, lying flat: no jump at the first move, and the drop under the finger, at every turn (ISO34-OPUS-11)", () => {
+    const state = world({ blockMovement: false, tokens: [token("bat", { x: 6, y: 6, elevation: 20 })] });
+    reveal(state, "s1", { x: 0, y: 0, w: 6.5, h: 16 });
+    const t = state.tokens.bat! as Token;
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "player", fog: true, view: isometric(turn), camera: CAM, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+      // As Stage.tsx grips it: one stand rule read for the grab and for the ray. Another member's bat is not above the fog.
+      const stands = standsFor(pick, () => false)(t as ViewToken);
+      assert.equal(stands, false, "it lies flat");
+      const plan = dragPlan({ room: state, role: "player", src: pick.src!, feetPerCell: 5, token: t, drawn: drawnRing(pick, stands) });
+      const node = viewToScreen(CAM, toView(pick.view, { x: t.x, y: t.y }));
+      const ring = ringCenter(pick, t, stands);
+      const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, t), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
+      const still = dragBound(input, node);
+      assert.ok(Math.abs(still.x - node.x) < 1e-6 && Math.abs(still.y - node.y) < 1e-6, `turn ${turn}: no jump at the first move`);
+      const finger = { x: ring.x + 2 * CAM.scale, y: ring.y - CAM.scale };
+      const at = dragLanding(pick.view, input.ground, plan, screenToView(CAM, finger));
+      assert.equal(at.z, 4, `turn ${turn}: the bat keeps its 20 ft`);
+      const under = viewToScreen(CAM, toView(pick.view, { x: at.x + 0.5, y: at.y + 0.5 }, 0));
+      assert.ok(Math.hypot(under.x - finger.x, under.y - finger.y) < 1e-6, `turn ${turn}: the drop's ring on the ground under the finger`);
+    }
+  });
+
+  test("Stage.tsx grips with one stand rule for the grab and the ray", () => {
+    const stage = readFileSync(new URL("./Stage.tsx", import.meta.url), "utf8");
+    assert.match(stage, /const stands = standsFor\(pick, aboveFogRef\.current\)\(lead\);\n\s*const plan = dragPlan\(\{[^\n]*drawn: drawnRing\(pick, stands\) \}\);\n\s*const start = \{ node: node\.getAbsolutePosition\(\), ring: ringCenter\(pick, lead, stands\) \};/);
+  });
+
+  test("a capped flier over uneven ground: the ray height is sought until the spot it finds holds, so its ring draws under the finger (ISO34-OPUS-12)", () => {
+    const view = isometric(0);
+    // The ring draws 3 cells over the ground wherever it goes, its lift capped.
+    const plan: DragPlan = { w: 1, h: 1, own: { kind: "fixed", base: 20 }, seat: null, drawn: (_base, g) => g + 3 };
+    const steps: Record<string, number> = { "11,11": 1, "12,12": 0.5 };
+    const ground: DragGround = { levels: [0], footGround: (at) => steps[`${at.x},${at.y}`] ?? 0, snap: (p) => ({ x: Math.round(p.x), y: Math.round(p.y) }) };
+    // The ray at 3 finds 11, 11, whose ground puts it at 4 and 12, 12, whose ground puts it at 3.5, and 12, 12 again.
+    const v = toView(view, { x: 8, y: 8 }, 0);
+    const at = dragLanding(view, ground, plan, v);
+    assert.deepEqual(ground.snap(at), { x: 12, y: 12 });
+    assert.equal(at.z, 20);
+    const ring = toView(view, { x: at.x + 0.5, y: at.y + 0.5 }, plan.drawn(20, ground.footGround(ground.snap(at))));
+    assert.ok(Math.hypot(ring.x - v.x, ring.y - v.y) < 1e-9, JSON.stringify([ring, v]));
+    // Two spots that send the ray to each other: the search stops all the same.
+    const turns: Record<string, number> = { "11,11": 1, "12,12": 0 };
+    const swap: DragGround = { ...ground, footGround: (p) => turns[`${p.x},${p.y}`] ?? 0 };
+    const settled = dragLanding(view, swap, plan, v);
+    assert.ok(["11,11", "12,12"].includes(`${swap.snap(settled).x},${swap.snap(settled).y}`) && settled.z === 20);
   });
 
   test("a finger on a 10 ft platform's top lands the walker on that cell, at 10 ft, and on the ground beside it at 0", () => {

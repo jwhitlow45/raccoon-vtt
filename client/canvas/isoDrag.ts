@@ -73,9 +73,17 @@ export function dragLanding(view: View, ground: DragGround, plan: DragPlan, v: V
     return { x: c.x - plan.w / 2, y: c.y - plan.h / 2, z };
   };
   // A base held above the ground meets the ray where its ring draws, lower than it stands where its lift is capped (ISO34-OPUS-10), and keeps its height.
+  // That height hangs on the ground at the spot the ray finds, so it is sought until the spot holds (ISO34-OPUS-12): a few steps, bounded, since two spots on uneven ground can take turns.
   const place = (z: number): Point & { z: number } => {
-    const first = at(z, plan.drawn(z, ground.footGround(ground.snap(at(z, z)))));
-    return at(z, plan.drawn(z, ground.footGround(ground.snap(first))));
+    let spot = ground.snap(at(z, z));
+    let found = at(z, plan.drawn(z, ground.footGround(spot)));
+    for (let step = 0; step < SETTLE_STEPS; step++) {
+      const next = ground.snap(found);
+      if (next.x === spot.x && next.y === spot.y) break;
+      spot = next;
+      found = at(z, plan.drawn(z, ground.footGround(spot)));
+    }
+    return found;
   };
   if (plan.seat) {
     const seated = place(plan.seat.base);
@@ -84,6 +92,9 @@ export function dragLanding(view: View, ground: DragGround, plan: DragPlan, v: V
   }
   return byRule(plan.own, place, ground);
 }
+
+/** How many more spots a capped ring's ray height may be sought at before the last one stands. */
+const SETTLE_STEPS = 4;
 
 function byRule(rule: DragRule, place: (z: number) => Point & { z: number }, ground: DragGround): Point & { z: number } {
   if (rule.kind === "fixed") return place(rule.base);

@@ -97,8 +97,18 @@ export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell" |
   if (pick.view.kind === "topDown" || !pick.src) return 0;
   const range = occupiedRange(token);
   const ground = drawnFootprintGround(pick.src, range) / pick.feetPerCell;
-  if (!stands) return ground;
-  return cappedBase(drawnBase(pick.src, range, token.elevation) / pick.feetPerCell, ground, pick.camera.scale, pick.canvasHeight);
+  return drawnRing(pick, stands)(drawnBase(pick.src, range, token.elevation) / pick.feetPerCell, ground);
+}
+
+/**
+ * The height a token's ring draws at, from its base over a drawn ground:
+ * its lift capped while it stands, and the ground while it lies flat. A
+ * drag casts its ray at it (isoDrag.ts DragPlan.drawn), so the grab, taken
+ * from `tokenBase` with the same `stands`, and every move agree.
+ */
+export function drawnRing(pick: Pick<BoardPick, "camera" | "canvasHeight">, stands: boolean): (base: number, ground: number) => number {
+  if (!stands) return (_base, ground) => ground;
+  return (base, ground) => cappedBase(base, ground, pick.camera.scale, pick.canvasHeight);
 }
 
 /** Which tokens stand as standees for this pick's viewer, by the stand rule (relief/stand.ts creatureStands) with one read of the fog for them all. */
