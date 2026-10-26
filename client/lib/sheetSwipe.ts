@@ -48,6 +48,10 @@ export const SWIPES_ATTR = "data-sheet-swipes";
 export const SLIDE_TO_ATTR = "data-sheet-swipe-to";
 /** Sent on the surface once a swipe is over and it stands at rest again, for whatever held its measure. */
 export const SWIPE_REST_EVENT = "rvtt-sheet-swipe-rest";
+/** On the surface while a finger holds it (SheetSwipe.holding), for the forced colors rule and the checks of the held glow. */
+export const HELD_ATTR = "data-sheet-held";
+/** The custom property the surface sets while held, which its grabber takes as its color (components/SheetGrabber.tsx): the held glow (4.8). */
+export const HELD_COLOR_VAR = "--rvtt-grabber-held";
 
 /** The style that makes a header a grab area: no pan starts there, so every move is the page's to read, and pinch zoom still works where the page allows it. */
 export const GRAB_STYLE = { touchAction: "pinch-zoom" } as const;
@@ -75,6 +79,8 @@ export type SwipeStart = {
   stand: SwipeStand;
   /** The travel to full screen in screen px, 0 for a surface that cannot fill it (4.7). */
   up: number;
+  /** The press landed on a control in the grab area (onControl), whose tap is its own: no hold of the surface until it claims (4.8). */
+  control?: boolean;
 };
 
 export type SwipeMove = { dx: number; dy: number; at: number; cancelable: boolean };
@@ -163,6 +169,20 @@ export class SheetSwipe {
   /** Where the surface shows now. */
   get position(): number {
     return this.shown();
+  }
+
+  /**
+   * A finger holds the surface, for the held glow (4.8): from a press on
+   * the grab area clear of its controls, or from the claim of any touch,
+   * until the touch lifts, is cancelled or is left to the browser. A tap on
+   * Back or Close holds nothing, and neither does a touch on content that
+   * has not claimed, such as a tap on a checkbox.
+   */
+  get holding(): boolean {
+    const s = this.begun;
+    if (!s) return false;
+    if (this.phase === "claimed") return true;
+    return (this.phase === "slop" || this.phase === "upward") && s.on === "grab" && s.control !== true;
   }
 
   /**
@@ -348,6 +368,8 @@ export type SwipeHost = {
   reducedMotion(): boolean;
   /** Whether the surface holds unsaved input now (4.5). */
   unsaved(): boolean;
+  /** Marks the surface held by a finger, or no longer (4.8). Called on each change only. */
+  held(on: boolean): void;
 };
 
 /** A touch's start, with where a close slides the surface to: until it shows none of itself or its riders (4.5). */
@@ -363,6 +385,8 @@ export class SwipeSession {
   private stopMotion: (() => void) | null = null;
   /** The presses that went down on the surface or a rider during a slide, by pointer, held to their end. */
   private readonly held = new Set<number>();
+  /** What the host was last told of the touch's hold (4.8). */
+  private holdShown = false;
 
   constructor(host: SwipeHost) {
     this.host = host;
@@ -382,12 +406,14 @@ export class SwipeSession {
       this.watching = true;
       this.host.watch(true);
     }
+    this.showHold();
     return followed;
   }
 
   /** The touch moved. Returns whether to cancel the move. */
   move(m: SwipeMove): boolean {
     const step = this.touch.move(m);
+    this.showHold();
     const s = this.begun;
     if (step.position === null || !s) return step.cancel;
     let position = step.position;
@@ -409,6 +435,7 @@ export class SwipeSession {
     const s = this.begun;
     this.begun = null;
     const { end, cancel } = this.touch.end(at);
+    this.showHold();
     if (s && (end === "full" || end === "normal" || end === "closed")) this.settle(end, s, false);
     return cancel;
   }
@@ -417,7 +444,9 @@ export class SwipeSession {
   cancel(): void {
     const s = this.begun;
     this.begun = null;
-    if (this.touch.cancel() && s) this.settle(s.stand, s, true);
+    const moved = this.touch.cancel();
+    this.showHold();
+    if (moved && s) this.settle(s.stand, s, true);
   }
 
   /** The last finger lifted. */
@@ -434,6 +463,7 @@ export class SwipeSession {
    */
   stop(): void {
     this.touch.replaced();
+    this.showHold();
     this.begun = null;
     this.stopMotion?.();
     this.stopMotion = null;
@@ -476,6 +506,14 @@ export class SwipeSession {
   /** A held press ended, and the click that could follow it has passed. */
   release(id: number): void {
     if (this.held.delete(id) && this.held.size === 0) this.host.guard(false);
+  }
+
+  /** Tells the host when the touch's hold changes, so the grabber's glow follows the swipe's own state. */
+  private showHold(): void {
+    const on = this.touch.holding;
+    if (on === this.holdShown) return;
+    this.holdShown = on;
+    this.host.held(on);
   }
 
   /** Slides to the end's place, then does what the end means. `back` is a spring back, which changes no stand. */
@@ -576,6 +614,24 @@ export function startsOn(target: SwipeNode | null, surface: SwipeNode, riders: r
     if (n === surface) return "content";
   }
   return null;
+}
+
+/** A control whose tap is its own: by its tag, or by its role. */
+const CONTROL_TAGS = new Set(["BUTTON", "A", "SUMMARY", "LABEL"]);
+const CONTROL_ROLES = new Set(["button", "link", "checkbox", "switch", "radio", "tab", "menuitem", "option"]);
+
+/**
+ * Whether a touch on `target` in the grab area lands on a control there,
+ * such as Back, Close, a dock button or the roll card's Later, walking up
+ * to the grab area or the rider that holds it. A tap there is the
+ * control's, so the press holds the surface only once it claims (4.8).
+ */
+export function onControl(target: SwipeNode | null, riders: readonly SwipeNode[]): boolean {
+  for (let n = target; n; n = n.parentElement) {
+    if (CONTROL_TAGS.has(n.tagName) || CONTROL_ROLES.has(n.getAttribute("role") ?? "")) return true;
+    if (n.hasAttribute(GRAB_ATTR) || riders.includes(n)) return false;
+  }
+  return false;
 }
 
 /**
@@ -953,6 +1009,12 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
         const active = document.activeElement;
         return active !== null && el.contains(active) && values.changed(active as unknown as FieldNode);
       },
+      held(on) {
+        el.toggleAttribute(HELD_ATTR, on);
+        // The member's own color, which every other control in view wears: a custom property inherited by the grabber, so the swipe renders nothing.
+        if (on) el.style.setProperty(HELD_COLOR_VAR, theme.color.accent);
+        else el.style.removeProperty(HELD_COLOR_VAR);
+      },
     };
     const swipe = new SwipeSession(host);
     session.current = swipe;
@@ -1042,7 +1104,8 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       const stand: SwipeStand = o.full?.on ? "full" : "normal";
       const read = readGeometry(stand);
       geometry = read.geometry;
-      const started = swipe.begin({ on, atTop: top, typing, fingers: e.touches.length, scale: latest.current.scale, at: e.timeStamp, stand, up: read.geometry.up, closeAt: read.closeAt });
+      const control = on === "grab" && onControl(target, list as unknown as SwipeNode[]);
+      const started = swipe.begin({ on, atTop: top, typing, fingers: e.touches.length, scale: latest.current.scale, at: e.timeStamp, stand, up: read.geometry.up, closeAt: read.closeAt, control });
       if (started) followed = { id: t.identifier, x: t.clientX, y: t.clientY };
     };
     const onMove = (e: TouchEvent) => {

@@ -12,6 +12,7 @@ import {
   drawnAt,
   GRAB_ATTR,
   normalFromHeld,
+  onControl,
   SheetSwipe,
   SLIDE_MS,
   SPEED_WINDOW_MS,
@@ -74,6 +75,8 @@ function sheet() {
   const surface = el("dialog", null, { rect: { top: 267, bottom: 607 } });
   const header = el("header", surface, { attrs: { [GRAB_ATTR]: "" }, touchAction: "pinch-zoom" });
   const close = el("button", header);
+  const closeIcon = el("svg", close);
+  const title = el("h2", header);
   const body = el("div", surface, { overflowY: "auto", scrollHeight: 900, clientHeight: 300 });
   const list = el("div", body, { overflowY: "auto", scrollHeight: 600, clientHeight: 200 });
   const row = el("div", list);
@@ -89,7 +92,8 @@ function sheet() {
   const footer = el("footer", surface);
   const dock = el("div", null, { rect: { top: 211, bottom: 259 } });
   const dockButton = el("button", dock);
-  return { surface, header, close, body, list, row, table, text, search, check, range, select, area, editable, handle, footer, dock, dockButton };
+  const dockGap = el("span", dock);
+  return { surface, header, close, closeIcon, title, body, list, row, table, text, search, check, range, select, area, editable, handle, footer, dock, dockButton, dockGap };
 }
 
 function start(over: Partial<SwipeStart> = {}): SwipeStart {
@@ -688,6 +692,117 @@ describe("11. three ends", () => {
   });
 });
 
+// ------------------------------------------------------------ 13. the held glow
+
+describe("13. the held glow", () => {
+  test("a press on the grab area clear of its controls holds the surface from the press, and the lift lets go", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    session.begin(sessionStart({ on: "grab", control: false }));
+    assert.equal(page.heldOn, true, "held from the press, before any move");
+    session.move({ dx: 0, dy: 4, at: 10, cancelable: true });
+    assert.equal(page.heldOn, true, "inside the slop");
+    assert.equal(session.end(200), false, "a tap's lift");
+    assert.deepEqual(page.helds, [true, false]);
+  });
+
+  test("held through the claim and the drag, and let go at the release, before the slide runs", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    session.begin(sessionStart({ on: "grab" }));
+    for (const [i, dy] of ramp(300).entries()) {
+      session.move({ dx: 0, dy, at: 10 * (i + 1), cancelable: true });
+      assert.equal(page.heldOn, true, `at ${dy} px`);
+    }
+    session.end(500);
+    assert.equal(session.sliding, true);
+    assert.equal(page.heldOn, false, "the finger lifted, though the surface still slides");
+    page.settle();
+    assert.deepEqual(page.helds, [true, false], "one hold, told once each way");
+  });
+
+  test("a press on Back, Close or a dock button holds nothing while it may be a tap, and holds the surface once it claims", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    session.begin(sessionStart({ on: "grab", control: true }));
+    session.move({ dx: 0, dy: 5, at: 10, cancelable: true });
+    session.end(80);
+    assert.deepEqual(page.helds, [], "a tap on Close");
+    session.lifted();
+    session.begin(sessionStart({ on: "grab", control: true }));
+    assert.equal(page.heldOn, false);
+    session.move({ dx: 0, dy: 20, at: 20, cancelable: true });
+    assert.equal(page.heldOn, true, "dragged from Close, the finger holds the sheet");
+    session.end(400);
+    assert.equal(page.heldOn, false);
+  });
+
+  test("content holds the surface only from the claim, so a tap on a checkbox never lights the grabber", () => {
+    const page = new FakePage();
+    const session = new SwipeSession(page.host);
+    session.begin(sessionStart({ on: "content", atTop: true }));
+    session.move({ dx: 0, dy: 6, at: 10, cancelable: true });
+    assert.equal(page.heldOn, false, "inside the slop");
+    session.move({ dx: 0, dy: 30, at: 40, cancelable: true });
+    assert.equal(page.heldOn, true, "claimed: the X-card's drag holds it");
+    session.end(400);
+    assert.equal(page.heldOn, false);
+  });
+
+  test("a touch left to the browser, a second finger, a touchcancel, a new item and an unmount each let go at once", () => {
+    const cases: [string, (session: InstanceType<typeof SwipeSession>) => void][] = [
+      ["a sideways move", (s) => s.move({ dx: 30, dy: 2, at: 30, cancelable: true })],
+      ["a move the browser will not let the page cancel", (s) => s.move({ dx: 0, dy: 20, at: 30, cancelable: false })],
+      ["a second finger", (s) => s.cancel()],
+      ["a touchcancel", (s) => s.cancel()],
+      ["a new item", (s) => s.stop()],
+      ["an unmount", (s) => s.dispose()],
+    ];
+    for (const [what, act] of cases) {
+      for (const claimFirst of [false, true]) {
+        const page = new FakePage();
+        const session = new SwipeSession(page.host);
+        session.begin(sessionStart({ on: "grab" }));
+        if (claimFirst && !what.startsWith("a sideways") && !what.startsWith("a move")) session.move({ dx: 0, dy: 40, at: 20, cancelable: true });
+        assert.equal(page.heldOn, true, what);
+        act(session);
+        assert.equal(page.heldOn, false, `${what}${claimFirst ? " after the claim" : ""}`);
+        session.end(600);
+        page.settle();
+        assert.equal(page.heldOn, false, `${what}: held again by the lift`);
+      }
+    }
+  });
+
+  test("a touch that may not swipe holds nothing: an owned control, a second finger down, content scrolled down", () => {
+    for (const over of [{ on: "owned" as const }, { fingers: 2 }, { on: "content" as const, atTop: false }]) {
+      const page = new FakePage();
+      const session = new SwipeSession(page.host);
+      session.begin(sessionStart(over));
+      session.move({ dx: 0, dy: 40, at: 20, cancelable: true });
+      session.end(300);
+      assert.deepEqual(page.helds, [], JSON.stringify(over));
+    }
+  });
+
+  test("onControl: Back, Close and a dock button are controls, the header's own ground, its title and a gap in the dock are not", () => {
+    const t = sheet();
+    const riders = [t.dock];
+    assert.equal(onControl(t.close, riders), true, "Close");
+    assert.equal(onControl(t.closeIcon, riders), true, "the icon inside Close");
+    assert.equal(onControl(t.dockButton, riders), true, "a dock button");
+    assert.equal(onControl(t.header, riders), false, "the header's own ground");
+    assert.equal(onControl(t.title, riders), false, "the title");
+    assert.equal(onControl(t.dockGap, riders), false, "a gap in the dock");
+    const link = el("span", t.header, { attrs: { role: "link" } });
+    assert.equal(onControl(link, riders), true, "a role that taps");
+    // The walk stops at the grab area: a surface inside a button would be no reason to call its header one.
+    const wrapper = el("button", null);
+    const outer = el("header", wrapper, { attrs: { [GRAB_ATTR]: "" } });
+    assert.equal(onControl(el("h2", outer), []), false);
+  });
+});
+
 // ------------------------------------------------------------ 12. randomized
 
 /** A record of the page a session acts on, with a clock for its slides. */
@@ -703,6 +818,9 @@ class FakePage {
   /** Whether the surface's owner keeps it open after its close. */
   keepsOpen = false;
   shown = true;
+  /** The held glow as the host was last told, and every change it was told of. */
+  heldOn = false;
+  helds: boolean[] = [];
   unsavedNow: boolean;
   last: { look: SwipeLook | null; ease: boolean } | null = null;
   looks: SwipeLook[] = [];
@@ -746,6 +864,11 @@ class FakePage {
       shows: () => this.shown,
       reducedMotion: () => opts.reduced ?? false,
       unsaved: () => this.unsavedNow,
+      held: (on) => {
+        assert.notEqual(this.heldOn, on, "the hold told twice");
+        this.heldOn = on;
+        this.helds.push(on);
+      },
     };
   }
 
@@ -823,7 +946,7 @@ describe("12. randomized touches, from both stands", () => {
   test("the invariants hold after every event of many random sequences", () => {
     const RUNS = 1500;
     // What the sequences reached, so a generator that stopped reaching an end fails rather than passing on nothing.
-    const reached = { closes: 0, fills: 0, stepsDown: 0, claims: 0, taps: 0, heldPresses: 0, freePresses: 0, heldPastSlide: 0, backswings: 0 };
+    const reached = { closes: 0, fills: 0, stepsDown: 0, claims: 0, taps: 0, heldPresses: 0, freePresses: 0, heldPastSlide: 0, backswings: 0, holds: 0 };
     let pointer = 100;
     for (let run = 1; run <= RUNS; run++) {
       const rnd = random(run);
@@ -849,12 +972,15 @@ describe("12. randomized touches, from both stands", () => {
           stand,
           up,
           closeAt: 300 + Math.floor(rnd() * 300),
+          control: rnd() < 0.3,
         });
         page.unsavedNow = rnd() < 0.25;
         const closesBefore = page.closes;
         const standsBefore = page.stands.length;
         const pressesBefore = page.presses;
         const followed = session.begin(s);
+        // The held glow (4.8): from the press only on the grab area clear of its controls.
+        assert.equal(page.heldOn, followed && s.on === "grab" && !s.control, `${where}: held at the press`);
         let at = 0;
         let dx = 0;
         let dy = 0;
@@ -900,11 +1026,18 @@ describe("12. randomized touches, from both stands", () => {
           // Never above full screen, and never above its place for a surface that cannot fill it.
           for (const look of page.looks) assert.ok(look.position >= -up - 1e-9, `${where}: shown above full at ${look.position}`);
           page.looks = [];
+          // The glow follows the machine's own hold: on from a claim until the touch stops, never for a control's tap or a touch that may not swipe.
+          assert.equal(page.heldOn, session.touch.holding, `${where}: the host's glow differs from the hold`);
+          if (!followed || stopped) assert.equal(page.heldOn, false, `${where}: held by a touch that may not swipe, or one stopped`);
+          else if (claimedAt !== null) assert.equal(page.heldOn, true, `${where}: a claimed touch not held`);
+          else if (s.control) assert.equal(page.heldOn, false, `${where}: a tap on a control held the surface`);
+          if (page.heldOn) reached.holds++;
         }
         at += pick([1, 5, 40, 150]);
         const atLift = session.touch.position;
         const speed = speedAt(trail, at);
         const liftCancelled = session.end(at);
+        assert.equal(page.heldOn, false, `${where}: held past the lift`);
         if (liftCancelled) assert.notEqual(claimedAt, null, `${where}: a lift cancelled for an unclaimed touch`);
         // Other presses on the surface or a rider while it slides or rests: one held is stopped to its end, after the slide too, and one at rest is never held.
         const presses2 = new Map<number, boolean>();
@@ -978,6 +1111,7 @@ describe("12. randomized touches, from both stands", () => {
       }
       // Unmounted with a press held mid-slide: nothing stays held or listened for.
       session.dispose();
+      assert.equal(page.heldOn, false);
       assert.equal(page.watching, false);
       assert.equal(page.guarding, false);
       assert.equal(session.holding, false);
