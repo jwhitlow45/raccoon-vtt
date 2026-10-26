@@ -945,7 +945,8 @@ export function computeCoverage(template: AreaTemplateInput, ctx: AreaContext): 
     const hs = new HexSampler(ctx.grid, area.shade ? { ...area, shape: area.shade } : area, n, sceneBounds(ctx));
     const excluded = !template.includeOrigin && area.originTokenId ? ctx.tokens?.[area.originTokenId] : undefined;
     const own = new Set(excluded ? occupiedHexes(ctx.grid, excluded).map(hexKey) : []);
-    const hexes = hs.covered(area.originZ, ctx.settings.aoeCoverage).filter((c) => !own.has(`${c.col},${c.row}`));
+    const covered = hs.covered(area.originZ, ctx.settings.aoeCoverage);
+    const hexes = own.size === 0 ? covered : covered.filter((c) => !own.has(`${c.col},${c.row}`));
     return { key, samples: n, hexes, cells: [], x0: 0, y0: 0, w: 0, h: 0, counts: new Uint16Array(0), centers: new Uint8Array(0), covered: new Uint8Array(0) };
   }
   // An aimed cone or line shades what it covers seen from above (ResolvedArea.shade).
@@ -1321,11 +1322,27 @@ class HexSampler {
     this.center = false;
     // A hex past the scene's edge is never shaded, so it catches no one either (review HX2-OPUS-02).
     if (!hexInScene(this.g, this.scene, h)) return 0;
+    return this.grade(h, z, d, layers, c);
+  }
+
+  /** Whether `d` steps from an emanation's source are within its reach at the shading slice, worked out once a distance. */
+  private readonly sliceReach: boolean[] = [];
+
+  /** `count` for a hex known to lie in the scene, as every candidate does. */
+  private grade(h: Hex, z: number, d: number | undefined, layers: [number, number] | undefined, c: Point): number {
     const reach = this.area.reach;
     let whole: boolean;
     if (reach) {
-      const zl = layers ?? [Math.floor(z), Math.floor(z) + 1];
-      if (!withinReach(reach, d ?? hexSetSteps(this.g, reach.from, [h]), zl[0], zl[1])) return 0;
+      const steps = d ?? hexSetSteps(this.g, reach.from, [h]);
+      if (layers === undefined && d !== undefined) {
+        // The shading slice, the source's own layer: the answer depends on the steps alone.
+        let ok = this.sliceReach[steps];
+        if (ok === undefined) this.sliceReach[steps] = ok = withinReach(reach, steps, reach.z0, reach.z0 + 1);
+        if (!ok) return 0;
+      } else {
+        const zl = layers ?? [Math.floor(z), Math.floor(z) + 1];
+        if (!withinReach(reach, steps, zl[0], zl[1])) return 0;
+      }
       whole = true;
     } else {
       const sd = this.area.shape.sd(c.x, c.y, z);
@@ -1366,7 +1383,7 @@ class HexSampler {
     const out: CoveredHex[] = [];
     for (const { hex: h, c, d } of this.candidates(z)) {
       // The shading slice is the source's own height, so only the steps between the hexes count there.
-      const n = this.count(h, z, d, reach ? [reach.z0, reach.z0 + 1] : undefined, c);
+      const n = this.grade(h, z, d, undefined, c);
       if (passes(n, this.total, this.center, rule)) out.push({ col: h.col, row: h.row, coverage: n / this.total });
     }
     return out;
