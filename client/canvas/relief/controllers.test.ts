@@ -212,6 +212,35 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     assert.match(read("features/traps/TrapLayer.tsx"), /const traps = useTreeShownView\(\(s\) => s\.view\?\.traps /);
   });
 
+  test("the moving marks' layers read every store only while their tree shows, so a drag or a ping in one view renders nothing in the other (ISO-3)", () => {
+    const files = [
+      "features/pings/PingLayer.tsx",
+      "features/pings/LaserLayer.tsx",
+      "features/pins/PinLayer.tsx",
+      "features/measure/RulerLayer.tsx",
+      "features/measure/RangeRingLayer.tsx",
+      "features/measure/TurnStartLayer.tsx",
+      "features/movement/MoveLayer.tsx",
+      "features/attach/TetherLayer.tsx",
+      "features/areas/TemplateLayer.tsx",
+      "features/areas/AreaPreviewLayer.tsx",
+      "features/areas/useLiveTokens.ts",
+      "features/traps/TrapLayer.tsx",
+      "features/drawings/DrawingLayer.tsx",
+      "features/outliner/FlashLayer.tsx",
+      "canvas/DragMarks.tsx",
+      "canvas/draggedIds.ts",
+      "features/pings/frameClock.ts",
+    ];
+    for (const file of files) {
+      const src = read(file);
+      assert.doesNotMatch(src, /\buseRoomView\(|\buseStore\(|\buseAreaTool\(|\buseDrawTool\(|\buseAccent\(/, `${file} reads a store past its tree's hold`);
+      assert.match(src, /useTreeShown(View|Store)\(/, `${file} reads through the hold`);
+    }
+    // The hold itself: a hidden tree's read keeps its last value.
+    assert.match(read("canvas/relief/context.ts"), /useStore\(store, \(s\) => \(shown \|\| !last\.current \? select\(s\) : last\.current\.value\)\)/);
+  });
+
   test("a standing ghost's tag is the pill Top-down draws and the stand rule judges, placed over its art (ISO2-FV-6)", () => {
     const drags = read("canvas/RemoteDrags.tsx");
     assert.equal(drags.match(/<Pill \{\.\.\.dragTagPill\(token, shown, props\.name, scale\)\}/g)?.length, 2, "both views spread one pill's props");
