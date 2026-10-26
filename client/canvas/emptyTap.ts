@@ -1,3 +1,4 @@
+import { boardPickOf, viewGround } from "./boardPick.ts";
 import { tapMapLabel } from "../features/builder/labelTap.ts";
 import { tapGround } from "../features/builder/heights/tap.ts";
 import { closeReadout, readoutSlot } from "../features/builder/heights/store.ts";
@@ -50,14 +51,15 @@ export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boo
 /**
  * Puts away what floats over the map after a tap that opens nothing, such
  * as Multi-select's tap off (Stage.tsx), so one thing floats at a time.
- * A pin's popover stays when a pin is under the tap: the pin layer answers
- * that tap itself (features/pins/PinLayer.tsx), and closing here would
+ * A pin's popover stays when a pin is under the tap: the pin controller
+ * answers that tap itself (features/pins/PinController.ts), and closing here would
  * close the popover the same tap opened. `readout` puts the height readout
  * away too, which emptyTap leaves to the steps that follow. `screen` is
  * the press, as emptyTap takes it.
  */
 export function putAway(ctx: ToolContext, world: Point, options: { readout: boolean; screen?: Point } = { readout: true }): void {
-  if (!pinUnder(ctx.getState().view, ctx.scene.id, ctx.camera(), options.screen ?? topDownScreen(ctx, world))) closePinPopover(ctx.scope);
+  const pick = boardPickOf(ctx);
+  if (!pinUnder(ctx.getState().view, ctx.scene.id, pick.camera, options.screen ?? viewToScreen(pick.camera, toView(TOP_DOWN, world)), viewGround(pick))) closePinPopover(ctx.scope);
   if (options.readout) closeReadout(ctx.scope.get(readoutSlot));
 }
 

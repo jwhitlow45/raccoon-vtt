@@ -2,6 +2,7 @@ import type { RoomState, Scene } from "#shared/model.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { viewToScreen, type Point } from "../../../lib/camera.ts";
 import { TOP_DOWN, toView } from "../../../lib/view.ts";
+import { boardPickOf, viewGround } from "../../../canvas/boardPick.ts";
 import type { ToolContext } from "../../tools.ts";
 import { pinUnder } from "../../pins/rules.ts";
 import { cellReadout, groundSource, type Cell, type ReadoutWords } from "./ground.ts";
@@ -24,14 +25,19 @@ export function wordsAt(view: Pick<RoomState, "buildChunks" | "fogTiles">, scene
 export function tapGround(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point, screen?: Point): boolean {
   const slot = ctx.scope.get(readoutSlot);
   const view = ctx.getState().view;
-  const camera = ctx.camera();
-  // A pin answers its own tap (features/pins/PinLayer.tsx), and a reading beside its popover would be two things floating at once.
+  // A pin answers its own tap (features/pins/PinController.ts), where it stands in the view shown, and a reading beside its popover would be two things floating at once.
   const cell = { x: Math.floor(world.x), y: Math.floor(world.y) };
-  const words = tool === "select" && view && !pinUnder(view, ctx.scene.id, camera, screen ?? viewToScreen(camera, toView(TOP_DOWN, world))) ? wordsAt(view, ctx.scene, ctx.role, cell) : null;
+  const words = tool === "select" && view && !pinUnderPress(ctx, view, world, screen) ? wordsAt(view, ctx.scene, ctx.role, cell) : null;
   if (!words) {
     closeReadout(slot);
     return false;
   }
   showReadout(slot, { sceneId: ctx.scene.id, cell }, words.spoken);
   return true;
+}
+
+/** The pin under a press, where it stands in the view shown (pins/rules.ts pinUnder), measured with the board's own camera. */
+function pinUnderPress(ctx: Pick<ToolContext, "scene" | "camera" | "scope">, view: RoomState, world: Point, screen: Point | undefined) {
+  const pick = boardPickOf(ctx);
+  return pinUnder(view, ctx.scene.id, pick.camera, screen ?? viewToScreen(pick.camera, toView(TOP_DOWN, world)), viewGround(pick));
 }

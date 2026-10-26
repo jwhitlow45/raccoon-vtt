@@ -1,9 +1,9 @@
 import { DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene } from "#shared/model.ts";
 import { occupiedRange, type FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
-import { cameraOfStage, screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
+import { screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
 import { footprint } from "../lib/scene.ts";
-import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
+import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 
 /**
@@ -49,6 +49,11 @@ export function drawnAt(pick: Pick<BoardPick, "view" | "heights">, p: Point): nu
   const y = Math.floor(p.y);
   const { w, h } = pick.heights.bounds;
   return x < 0 || y < 0 || x >= w || y >= h ? 0 : pick.heights.at(x, y);
+}
+
+/** The view shown with its drawn ground at a world point, in cells: what a mark standing on the ground reads, such as a pin's tip (pins/rules.ts PinView). */
+export function viewGround(pick: Pick<BoardPick, "view" | "heights">): { view: View; ground: (x: number, y: number) => number } {
+  return { view: pick.view, ground: (x, y) => drawnAt(pick, { x, y }) };
 }
 
 /** Where a world point at height `z` cells shows on screen. */
@@ -219,46 +224,4 @@ export function heldPoint(was: BoardPick, now: BoardPick, selected: FootprintTok
   }
   const press = pickWalk(was, { x: (clear.x0 + clear.x1) / 2, y: (clear.y0 + clear.y1) / 2 });
   return { at: press.point, before: press.z, after: drawnAt(now, press.point) };
-}
-
-/**
- * The map point a press on the board means, from what the board itself
- * reads (docs/design-v1-isometric-view.md 4.3 and 6.2): in Top-down the
- * point under it, and in Isometric the first ground its ray meets, on the
- * drawn heights this viewer may see, so a press never reads terrain the
- * fog hides. For what answers a press outside the board's own gestures,
- * such as the hold-to-ping.
- */
-
-export type BoardGround = {
-  room: Pick<RoomState, "buildChunks" | "fogTiles" | "meta"> | null;
-  scene: Pick<Scene, "id" | "bounds" | "gridShape">;
-  role: "dm" | "player";
-  /** Whether the scene draws fog (features/layers.ts LayerProps). */
-  fog: boolean;
-  lowPower: boolean;
-};
-
-/** The drawn heights' source as the isometric board reads it (relief/IsoBoard.tsx): a player's own fog on a scene with fog, else all the ground. */
-export function drawnSourceOf(input: BoardGround, scale: number): DrawnSource {
-  const { room, scene } = input;
-  return {
-    chunks: room?.buildChunks ?? {},
-    sceneId: scene.id,
-    bounds: scene.bounds,
-    fog: input.role === "player" && input.fog ? (room?.fogTiles ?? {}) : null,
-    stand: heightsStand(scale, input.lowPower),
-  };
-}
-
-export function pickAt(camera: Camera, view: View, input: BoardGround, screen: Point): Point {
-  // Top-down reads no heights, so it builds none.
-  if (view.kind === "topDown") return pickGround({ camera, view, grid: sceneGrid(input.scene), heights: flatHeights(input.scene.bounds) }, screen);
-  const feet = input.room?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell;
-  return pickGround({ camera, view, grid: sceneGrid(input.scene), heights: drawnHeights(drawnSourceOf(input, camera.scale), feet) }, screen);
-}
-
-/** `pickAt` with the camera of the stage pressed. */
-export function pickOnBoard(stage: { x(): number; y(): number; scaleX(): number }, view: View, input: BoardGround, screen: Point): Point {
-  return pickAt(cameraOfStage(stage), view, input, screen);
 }

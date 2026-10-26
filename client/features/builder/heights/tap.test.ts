@@ -3,7 +3,9 @@ import { beforeEach, describe, test } from "node:test";
 import { CHUNK_CELLS, STAIRS_CHARS, type BuildChunk, type RoomState } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { room, scene } from "#shared/testutil.ts";
+import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, screenAt } from "../../../canvas/boardPick.ts";
 import { emptyTap, putAway } from "../../../canvas/emptyTap.ts";
+import { isometric } from "../../../lib/view.ts";
 import { RoomScope } from "../../../state/scope.ts";
 import type { RoomUi } from "../../../state/store.ts";
 import type { RoomActions, RoomView } from "../../../state/types.ts";
@@ -138,6 +140,22 @@ describe("the height readout's tap", () => {
     ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });
     tap(2.5, 5.5, true);
     assert.ok(popover());
+  });
+
+  test("in Isometric a pin keeps its tap where it stands on the 10 ft platform, and a press where it would lie at 0 reads the ground", () => {
+    const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "player", fog: false, view: isometric(0), camera: { x: 300, y: 100, scale: 40 }, lowPower: false }, new DrawnHeightsMemo());
+    ctx.scope.get(boardPickSlot).read = () => pick;
+    const popover = () => ctx.scope.get(pinSlot).store.getState().popover;
+    // The pin's head is 14 px over its tip, which stands at the platform's top.
+    const tip = screenAt(pick, { x: 3.5, y: 3.5 }, 2);
+    const head = { x: tip.x, y: tip.y - 14 };
+    ctx.scope.get(pinSlot).store.setState({ popover: { id: "pin", at: 0 } });
+    putAway(ctx, pressAt(pick, head), { readout: true, screen: head });
+    assert.ok(popover(), "the pin's own tap leaves its popover up");
+    assert.equal(tapGround(ctx, "select", pressAt(pick, head), head), false);
+    const flat = screenAt(pick, { x: 3.5, y: 3.5 }, 0);
+    const flatHead = { x: flat.x, y: flat.y - 14 };
+    assert.equal(tapGround(ctx, "select", pressAt(pick, flatHead), flatHead), true);
   });
 
   test("Multi-select's tap off puts floaters away and opens nothing, and keeps a popover its own pin opened", () => {

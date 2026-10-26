@@ -2,12 +2,10 @@ import type Konva from "konva";
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import { popoverSlot } from "../../components/popoverRules.ts";
-import { drawnSourceOf } from "../../canvas/boardPick.ts";
+import { boardPickOf, viewGround } from "../../canvas/boardPick.ts";
 import { cameraOfStage } from "../../lib/camera.ts";
-import { drawnGround, type View } from "../../lib/view.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useIsDisplay, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
-import { useLowPower } from "../device/settings.ts";
 import { journalSlot } from "../journal/store.ts";
 import type { ControllerProps } from "../layers.ts";
 import { onHoldPing } from "../pings/hold.ts";
@@ -37,7 +35,6 @@ export function PinController(props: ControllerProps): null {
   const popover = useStore(pinStore, (s) => s.popover);
   const room = useRoomStore();
   const scope = useRoomScope();
-  const lowPower = useLowPower();
   useEffect(() => closePopoverOnSelect(room, scope), [room, scope]);
 
   useEffect(() => {
@@ -46,13 +43,13 @@ export function PinController(props: ControllerProps): null {
     return () => clearTimeout(timer);
   }, [popover, pinStore]);
 
-  const board = useRef({ view: props.live.view, scene: props.scene, role: props.role, fog: props.fog, lowPower });
-  board.current = { view: props.live.view, scene: props.scene, role: props.role, fog: props.fog, lowPower };
+  const board = useRef({ scene: props.scene });
+  board.current = { scene: props.scene };
   useTapPin(props.stage, tool === "select" && !display, board);
   return null;
 }
 
-type BoardRef = { readonly current: { view: View; scene: ControllerProps["scene"]; role: "dm" | "player"; fog: boolean; lowPower: boolean } };
+type BoardRef = { readonly current: { scene: ControllerProps["scene"] } };
 
 /**
  * A tap with the Select tool on a pin: its page opens in the Journal, or a
@@ -97,11 +94,8 @@ function useTapPin(stage: Konva.Stage | null, enabled: boolean, board: BoardRef)
       const view = store.getState().view;
       if (!view) return;
       // In Isometric a pin stands at its drawn ground (PinLayer.tsx), and the tap finds it there.
-      const b = board.current;
-      const camera = cameraOfStage(stage);
-      const src = drawnSourceOf({ room: view, scene: b.scene, role: b.role, fog: b.fog, lowPower: b.lowPower }, camera.scale);
-      const feet = view.meta.settings.feetPerCell;
-      const hit = pinUnder(view, b.scene.id, camera, p, { view: b.view, ground: (x, y) => drawnGround(src, { x: Math.floor(x), y: Math.floor(y) }) / feet });
+      const pick = boardPickOf({ scope, camera: () => cameraOfStage(stage) });
+      const hit = pinUnder(view, board.current.scene.id, pick.camera, p, viewGround(pick));
       if (!hit) return;
       const pinState = scope.get(pinSlot).store;
       if (hit.pageId !== undefined && view.journal[hit.pageId]) {

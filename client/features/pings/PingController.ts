@@ -1,11 +1,12 @@
 import type Konva from "konva";
 import { useEffect, useRef } from "react";
 import { popoverSlot } from "../../components/popoverRules.ts";
-import { pickOnBoard } from "../../canvas/boardPick.ts";
+import { boardPickOf, pressAt } from "../../canvas/boardPick.ts";
+import { cameraOfStage } from "../../lib/camera.ts";
 import { LONG_PRESS_MS, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import type { Ping } from "../../state/types.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { useLowPower } from "../device/settings.ts";
 import type { ControllerProps } from "../layers.ts";
 import { playPing, unlockAudio, vibrate } from "./feedback.ts";
@@ -37,23 +38,16 @@ export function PingController(props: ControllerProps): null {
   const focus = useRoomView((s) => s.ephemeral.focus);
   const tool = useRoomView((s) => s.local.tool);
   const actions = useRoomActions();
-  const store = useRoomStore();
   const scope = useRoomScope();
   const lowPower = useLowPower();
   useRunFrameClock(scope.get(frameClockSlot), !lowPower && (pings.length > 0 || lasing));
   useFeedback(pings, focus?.id ?? null);
 
-  // The latest of what a hold reads when it fires, so the listeners need not attach again on every camera render.
-  const board = useRef({ view: props.live.view, scene: props.scene, role: props.role, fog: props.fog, lowPower });
-  board.current = { view: props.live.view, scene: props.scene, role: props.role, fog: props.fog, lowPower };
   useHoldToPing(
     props.stage,
     tool === "select",
-    (stage, p) => {
-      const b = board.current;
-      // Seam for ISO-4: once its pick is stacked under this, read the press through `pressAt(boardPickOf(...), screen)` (design 6.2) in place of pickOnBoard.
-      return pickOnBoard(stage, b.view, { room: store.getState().view, scene: b.scene, role: b.role, fog: b.fog, lowPower: b.lowPower }, p);
-    },
+    // The board's own pick (design 6.2), the Stage's camera standing in until the board has measured itself.
+    (stage, p) => pressAt(boardPickOf({ scope, camera: () => cameraOfStage(stage) }), p),
     (x, y, pointerId) => {
       actions.sendEph({ k: "ping", x, y });
       reportHoldPing(scope, pointerId);
