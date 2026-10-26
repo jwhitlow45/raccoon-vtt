@@ -1365,7 +1365,11 @@ function MapArea(props: {
  * checks too, since Undo and Redo sit in it on every layout
  * (docs/design-v1-layout-hierarchy.md M2): there the strip stays, the chip
  * gives way to its dot first, then Full screen leaves the bar, then the
- * Phase menu, each until the layout is wider. The Menu and a key still
+ * Phase menu, and once Isometric is offered the gaps take a phone's 6 px
+ * and last the View button folds into the room's menu, each until the
+ * layout is wider: at 900 px in a fight on a scene with phases the View
+ * button overflowed the row by 5 px. Any row checks once Isometric is
+ * offered, a player's too. The Menu and a key still
  * reach full screen, and a scene's "Show a phase" chips still switch
  * phases. A player's row from 900 px up checks while it holds Full screen,
  * which is the only thing in it that gives way: at 900 px with the strip,
@@ -1406,10 +1410,13 @@ function TopBar(props: {
   const dmDot = role === "dm" && width <= dmDotUpTo;
   // On a phone, the width at which the row still overflowed with the chip's dot: up to it, the gaps tighten.
   const [tightUpTo, setTightUpTo] = useState(0);
-  const tight = isoOffered && props.compact && width <= tightUpTo;
   // And the width at which the row still overflowed with tight gaps: up to it, the View button folds into the room's menu.
   const [viewFoldUpTo, setViewFoldUpTo] = useState(0);
-  const viewFolded = isoOffered && props.compact && props.canFit && width <= viewFoldUpTo;
+  // From 900 px up the same two steps come last, after Full screen and the Phase menu, each with a width of its own so a wide window's steps never reach a phone's layout.
+  const [wideTightUpTo, setWideTightUpTo] = useState(0);
+  const [wideFoldUpTo, setWideFoldUpTo] = useState(0);
+  const tight = isoOffered && width <= (props.compact ? tightUpTo : wideTightUpTo);
+  const viewFolded = isoOffered && props.canFit && width <= (props.compact ? viewFoldUpTo : wideFoldUpTo);
   const fold = useScoped(viewFoldSlot);
   useLayoutEffect(() => fold.setState({ folded: viewFolded }), [fold, viewFolded]);
   useEffect(() => () => fold.setState({ folded: false }), [fold]);
@@ -1422,8 +1429,8 @@ function TopBar(props: {
   const phases = useRoomView((s) => (s.sceneId ? (s.view?.scenes[s.sceneId]?.phases?.length ?? 0) : 0));
   // From 900 px up the strip sits in the bar whatever it holds, so only a phone's bar records it.
   const measured = props.placement === "bar" && props.compact;
-  // A phone's row, a DM's row from 900 px up, which holds Undo, Redo and the Phase menu, and any row that holds Full screen.
-  const checks = props.compact || role === "dm" || fullscreen;
+  // A phone's row, a DM's row from 900 px up, which holds Undo, Redo and the Phase menu, any row that holds Full screen, and once Isometric is offered every row, which holds the View button.
+  const checks = props.compact || role === "dm" || fullscreen || isoOffered;
   const check = useCallback(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
@@ -1432,13 +1439,15 @@ function TopBar(props: {
     const tuck = last ? Math.max(0, -parseFloat(getComputedStyle(last).marginRight) || 0) : 0;
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     if (overflow <= 0) return;
-    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu.
+    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu, and from 900 px up the gaps' room and the View button last.
     if (measured) recordOverflow(layoutWidth(), overflow);
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
     else if (isoOffered && props.compact && !tight) setTightUpTo(layoutWidth());
     else if (isoOffered && props.compact && props.canFit && !viewFolded) setViewFoldUpTo(layoutWidth());
     else if (fullscreen) setFullscreenOffUpTo(layoutWidth());
     else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
+    else if (isoOffered && !props.compact && !tight) setWideTightUpTo(layoutWidth());
+    else if (isoOffered && !props.compact && props.canFit && !viewFolded) setWideFoldUpTo(layoutWidth());
   }, [checks, measured, recordOverflow, role, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
   useLayoutEffect(() => {
     const row = rowRef.current;
@@ -1471,8 +1480,8 @@ function TopBar(props: {
         style={{
           display: "flex",
           alignItems: "center",
-          // A DM's phone fits the name, Undo, Redo and Fit only with tighter gaps, and the narrowest phones the View button only with tighter still.
-          gap: props.compact ? theme.space(tight ? 0.5 : 1.5) : theme.space(3),
+          // A DM's phone fits the name, Undo, Redo and Fit only with tighter gaps, and the narrowest phones the View button only with tighter still. From 900 px up a full row takes a phone's gaps before the View button folds.
+          gap: props.compact ? theme.space(tight ? 0.5 : 1.5) : theme.space(tight ? 1.5 : 3),
           height: TOP_BAR,
         }}
       >
