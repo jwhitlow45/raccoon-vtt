@@ -1883,6 +1883,21 @@ function cardWaitMs(): number {
 /** The widest a toast stands, and a stack that scrolls with it, so the map either side still takes a tap. */
 const TOAST_MAX_PX = 520;
 
+/**
+ * What a tool's key said (docs/design-v1-tool-cycle.md 4.3), "Area:
+ * Sphere", in a polite status beside the toolbar, mounted with it, so a
+ * phone's sheet over the options never takes it away. It alone reads its
+ * slot, so a press re-renders it and not the page.
+ */
+function ToolVoice() {
+  const said = useStore(useScoped(toolVoiceSlot));
+  return (
+    <div role="status" data-rvtt-tool-status="" style={VISUALLY_HIDDEN}>
+      <span key={said.key}>{said.text}</span>
+    </div>
+  );
+}
+
 /** Which toasts this Room has said, by the newest id said: ids only grow, and the record outlives Toasts through a blackout. */
 const toastVoiceSlot = scopeSlot(() => ({ through: 0 }));
 
@@ -1900,21 +1915,6 @@ function toastWords(t: Toast): string {
  * record of what it has said stays in the Room's scope, and its region
  * starts empty in a new place, so a move or a blackout says nothing again.
  */
-/**
- * What a tool's key said (docs/design-v1-tool-cycle.md 4.3), "Area:
- * Sphere", in a polite status beside the toolbar, mounted with it, so a
- * phone's sheet over the options never takes it away. It alone reads its
- * slot, so a press re-renders it and not the page.
- */
-function ToolVoice() {
-  const said = useStore(useScoped(toolVoiceSlot));
-  return (
-    <div role="status" data-rvtt-tool-status="" style={VISUALLY_HIDDEN}>
-      <span key={said.key}>{said.text}</span>
-    </div>
-  );
-}
-
 function ToastVoice(props: { toasts: readonly Toast[] }) {
   const voice = useScoped(toastVoiceSlot);
   const slot = useModalSlot("status");

@@ -25,14 +25,14 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * warhorse, a goblin carrying a lantern and dragging a prisoner), and
  * walls with a door. For each of 6 sizes at 100% and 130% the DM measures
  * the toolbar's Setup tools or Tools menu where it has one, the shortcut
- * sheet's Toolbar section, the Trap tool, the four traps' panes with every group unfolded, the
- * alerts as traps go off on Pat's walks (the toast under a pane, the
- * column, a toast under its first card, the summary row and the alerts
- * over the screen), the board's pills, the Attach list and Ride, and the
- * holder's, rider's and group windows: their headers, play rows and group
- * lines (the windows' older rows are not this sweep's), and on an upright
- * phone Thorn's whole bar in its larger size. Pat measures the
- * Ruler's options, readings and kept list, a drag's stop note, and the
+ * sheet's Toolbar section, the Trap tool, the four traps' panes with every
+ * group unfolded, the alerts as traps go off on Pat's walks (the toast
+ * under a pane, the column, a toast under its first card, the summary row
+ * and the alerts over the screen), the board's pills, the Attach list and
+ * Ride, and the holder's, rider's and group windows: their headers, play
+ * rows and group lines (the windows' older rows are not this sweep's), and
+ * on an upright phone Thorn's whole bar in its larger size. Pat measures
+ * the Ruler's options, readings and kept list, a drag's stop note, and the
  * toast of his own walk. Three older screens the trap flows open are
  * measured too, as live play 17 found them: Pat's ask card and Request a
  * roll from the needle trap's Ask to disarm at 390 and 320, and the group
@@ -42,30 +42,30 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * measured at 390 x 844, 320 x 568 and 1440 x 900, at 100% and 130%, in a
  * fight of their own: Thorn dying with his class resources, an adult red
  * dragon with Fire Breath used, and a troll at 0 HP that took Fire, with
- * monsters dying at 0 HP off. Pat measures Thorn's Uses
- * section with its level-up question, a pool's amount field open and with
- * its range error, the Add sheet with no class, from Barbarian 14, Ranger
- * 3 and Bard with its modifier's error, and of his own with Spend an
- * amount, the Update and Edit sheets, his death save card, his turn card
- * with a pool's amount field, and Thorn's Uses in his row and his bar.
- * The DM measures the section in Thorn's token panel, the dragon's Uses
- * in its row and its bar, In lair while it waits for the server, the
- * dragon's recharge card and its turn card folded and open, and the
- * troll's Regeneration card with its death save card waiting for it.
+ * monsters dying at 0 HP off. Pat measures Thorn's Uses section with its
+ * level-up question, a pool's amount field open and with its range error,
+ * the Add sheet with no class, from Barbarian 14, Ranger 3 and Bard with
+ * its modifier's error, and of his own with Spend an amount, the Update
+ * and Edit sheets, his death save card, his turn card with a pool's amount
+ * field, and Thorn's Uses in his row and his bar. The DM measures the
+ * section in Thorn's token panel, the dragon's Uses in its row and its
+ * bar, In lair while it waits for the server, the dragon's recharge card
+ * and its turn card folded and open, and the troll's Regeneration card
+ * with its death save card waiting for it.
  *
  * The second icon pass (docs/design-v1-icons-2.md 15) is measured at its
- * own seven sizes: 320 x 568 and 390 x 844 at 130%, 390 x 844 at 115%
- * and 85%, and 1280 x 800 at 100%, 115% and 85%, in a fight of its own:
- * Thorn at level 7 with a stat block and a counted Hex, Wren a druid with
- * known forms, Exhaustion 2 and Poisoned, and the goblin hidden, locked
- * and its name hidden. The DM measures the side panel's tabs (one line, each 44 px, no
- * name cut) or a phone's Panels list, Thorn's and Wren's panels with every
- * group folded (each name on one line, a summary never under its 4em
- * floor, and on a computer the Stat block's action on its name's line),
- * the goblin's header tags, the round header with its clock as tall as
- * without the timer, the tracker's and party bar's chips in their 20 x 18
- * box, and the time-up and ended-effect lines as tall and on as many lines
- * with their lead as without it.
+ * own seven sizes: 320 x 568 and 390 x 844 at 130%, 390 x 844 at 115% and
+ * 85%, and 1280 x 800 at 100%, 115% and 85%, in a fight of its own: Thorn
+ * at level 7 with a stat block and a counted Hex, Wren a druid with known
+ * forms, Exhaustion 2 and Poisoned, and the goblin hidden, locked and its
+ * name hidden. The DM measures the side panel's tabs (one line, each
+ * 44 px, no name cut) or a phone's Panels list, Thorn's and Wren's panels
+ * with every group folded (each name on one line, a summary never under
+ * its 4em floor, and on a computer the Stat block's action on its name's
+ * line), the goblin's header tags, the round header with its clock as tall
+ * as without the timer, the tracker's and party bar's chips in their
+ * 20 x 18 box, and the time-up and ended-effect lines as tall and on as
+ * many lines with their lead as without it.
  *
  * Each size's step gathers every line the helper reports, shoots the
  * screens that have any, and fails once with all of them. A screen the
@@ -85,9 +85,9 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * drawn cases, the upright phones and the scrolling strip,
  * alignment-wide.e2e.ts the sideways phone, the tablet, the desktop and
  * 480 x 320, and alignment-icons.e2e.ts the second icon pass, follow-up
- * batch 30's roots and the app icon's places. This module holds every
- * step, from alignmentFile on, and each file lists the ones it runs, so a
- * step keeps its id whichever file runs it.
+ * batch 30's roots, the app icon's places and follow-up batch 32's roots.
+ * This module holds every step, from alignmentFile on, and each file lists
+ * the ones it runs, so a step keeps its id whichever file runs it.
  *
  * Each file runs with `pnpm test:e2e` on E2E_PORT plus twenty-seven, one
  * file after another as the others. The other environment variables are
