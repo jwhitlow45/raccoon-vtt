@@ -4,14 +4,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import type { BuildChunk, Drawing, EdgeFeature, RoomState, SightTile, Token } from "#shared/model.ts";
 import type { PartySight } from "#shared/ruleHooks.ts";
 import { decodeTile, getBit, isCellFullyFogged, TILE_CELLS } from "#shared/rules/fog.ts";
 import { groundAt } from "#shared/rules/heights.ts";
 import { partyMember, partySight, type VisionWorld } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
-import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, pickOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, pickOption, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * The v1 wave 4 run (docs/design-v1-maps-vision.md section 4): the real
@@ -104,6 +104,8 @@ const run = {
   lightId: randomUUID(),
   pinId: randomUUID(),
   entryId: randomUUID(),
+  /** pv4: the six players who join to fill the scene's list of who sees for themselves. */
+  extraIds: [] as string[],
   /** The DM's frames from where the player's ruler began to where it ended, and the player's fog meanwhile, which nothing changes then. */
   playerRulers: null as { from: number; to: number; fog: RoomState["fogTiles"] } | null,
   /** The player's frame count when the goblin left the party's sight. */
@@ -368,6 +370,58 @@ function boardTexts(page: Page): Promise<string[]> {
 /** A cell's ground as the layout painted it. The run paints nothing after, so it is the ground every ruler stood on. */
 function layoutGround(x: number, y: number): number {
   return groundAt(dmSocket.state?.buildChunks ?? {}, run.sceneId, Math.floor(x), Math.floor(y));
+}
+
+/**
+ * pv4: a second DM page, Dana's on the same device, whose room socket the
+ * run reads every frame the page sends on, and can hold the Vision
+ * settings' changes on. The first DM page's socket opened before any
+ * route could be set, so it can do neither.
+ */
+const dm2 = {
+  page: null as Page | null,
+  /** Every frame the page sent on its room socket, as text. */
+  sent: [] as string[],
+  /** While set, a scene.update that changes the vision waits here, and the server never hears of it until it is let go. */
+  held: null as string[] | null,
+  upstream: null as WebSocketRoute | null,
+};
+
+async function openDm2(): Promise<Page> {
+  const page = await dmContext.newPage();
+  dmConsole.attach(page);
+  await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+    const upstream = ws.connectToServer();
+    dm2.upstream = upstream;
+    ws.onMessage((m) => {
+      const text = typeof m === "string" ? m : m.toString("utf8");
+      dm2.sent.push(text);
+      if (dm2.held && text.includes('"t":"scene.update"') && text.includes('"vision"')) dm2.held.push(text);
+      else upstream.send(m);
+    });
+    upstream.onMessage((m) => ws.send(m));
+  });
+  await page.goto(`${server.origin}/r/${run.roomId}`);
+  await page.getByRole("status", { name: "Connected" }).first().waitFor();
+  dm2.page = page;
+  return page;
+}
+
+/** The `vision.holders` ops the second DM page sent from the frame at `index` on. */
+function holderOpsSent(index: number): { on: string[] }[] {
+  return dm2.sent.slice(index).flatMap((text) => {
+    const msg = JSON.parse(text) as { t?: string; op?: { t?: string; on?: string[] } };
+    return msg.t === "op" && msg.op?.t === "vision.holders" ? [{ on: msg.op.on ?? [] }] : [];
+  });
+}
+
+function hasFocus(target: Locator): Promise<boolean> {
+  return target.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement);
+}
+
+/** The scene's holder entry of a member in the DM's state, or undefined while there is none. */
+function holderEntry(memberId: string): { on: boolean } | undefined {
+  return dmSocket.state?.holders?.[run.sceneId]?.entries.find((e) => e.memberId === memberId);
 }
 
 describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
@@ -967,6 +1021,118 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
       }
     }
     assert.ok(playerStops > 0, "no stop of the player's stood on raised ground");
+  });
+
+  test("pv4-1. on a per-player scene the DM's list of who sees for themselves asks before an untick, Escape and Cancel answer no and Untick sends the list, focus on the box through each", async () => {
+    // Six more players, who own no creature here, so the server's join step never lists them.
+    for (const [name, color] of [["Ash", "#e5484d"], ["Bo", "#f76b15"], ["Cy", "#ffc53d"], ["Dee", "#46a758"], ["Eli", "#0090ff"], ["Fen", "#8e4ec6"]] as const) {
+      const context = await browser.newContext();
+      try {
+        const headers = { Origin: server.origin, "content-type": "application/json" };
+        const joined = await context.request.post(`${server.origin}/api/rooms/${run.roomId}/join`, { headers, data: { password: run.password } });
+        assert.ok(joined.ok(), `joining answered ${joined.status()}`);
+        const { ticket } = (await joined.json()) as { ticket: string };
+        const done = await context.request.post(`${server.origin}/api/rooms/${run.roomId}/join/complete`, { headers, data: { ticket, name, color } });
+        assert.ok(done.ok(), `completing the join answered ${done.status()}`);
+        run.extraIds.push(((await done.json()) as { member: { id: string } }).member.id);
+      } finally {
+        await context.close();
+      }
+    }
+    const page = await openDm2();
+    await openSideTab(page, "Scenes");
+    const panel = page.getByRole("tabpanel", { name: sideTabName("Scenes") });
+    await panel.getByRole("radiogroup", { name: "Sight" }).getByRole("radio", { name: "Per player" }).check();
+    await waitFor("the scene per player in the DM's state", () => dmSocket.state?.scenes[run.sceneId]?.vision?.perPlayer === true || null);
+    await ops.send({ t: "vision.holders", sceneId: run.sceneId, on: [run.patId] });
+    await waitFor("Pat listed on", () => holderEntry(run.patId)?.on === true || null);
+    const list = panel.getByRole("group", { name: "Who sees for themselves" });
+    const pat = list.getByRole("checkbox", { name: "Pat" });
+    await waitFor("Pat ticked", async () => (await pat.isChecked()) || null, 5_000);
+    const question = list.getByRole("group", { name: "Untick Pat?" });
+    const ask = async (how: string) => {
+      await pat.focus();
+      await page.keyboard.press("Space");
+      await question.waitFor();
+      assert.equal(await hasFocus(pat), true, `focus left Pat's box as the question opened${how}`);
+      assert.equal(await pat.isChecked(), true, `Pat's box unticked before the question was answered${how}`);
+      assert.match((await question.getByRole("status").innerText()).trim(), /^Untick Pat\? They forget their map of this scene\.$/);
+    };
+
+    // Escape, pressed on the box itself, answers no and leaves the panel open (review PV4-ASTRA-1).
+    let from = dm2.sent.length;
+    await ask("");
+    await page.keyboard.press("Escape");
+    await question.waitFor({ state: "detached" });
+    assert.equal(await hasFocus(pat), true, "focus left Pat's box on Escape");
+    assert.equal(await pat.isChecked(), true, "Escape unticked Pat");
+    assert.equal(await list.isVisible(), true, "Escape closed the Scenes panel too");
+    await shots.take(page, "vision-pv4-holders-after-escape");
+
+    await ask(", the second time");
+    await question.getByRole("button", { name: "Cancel", exact: true }).click();
+    await question.waitFor({ state: "detached" });
+    assert.equal(await hasFocus(pat), true, "focus did not come back to Pat's box from Cancel");
+    assert.equal(await pat.isChecked(), true, "Cancel unticked Pat");
+    assert.deepEqual(holderOpsSent(from), [], "Escape or Cancel sent the list");
+
+    from = dm2.sent.length;
+    await ask(", the third time");
+    await question.getByRole("button", { name: "Untick", exact: true }).click();
+    await question.waitFor({ state: "detached" });
+    assert.deepEqual(holderOpsSent(from), [{ on: [] }], "Untick sent no list, or another");
+    await waitFor("Pat listed off", () => holderEntry(run.patId)?.on === false || null);
+    await list.getByText("Pat sees only what creatures that share sight see here.").waitFor();
+    assert.equal(await pat.isChecked(), false, "the list kept Pat ticked");
+    assert.equal(await hasFocus(pat), true, "focus did not come back to Pat's box from Untick");
+    await shots.take(page, "vision-pv4-holders-pat-off");
+  });
+
+  test("pv4-2. with six players ticked a seventh tick is refused in the list's own status, and the page sends nothing", async () => {
+    const page = dm2.page!;
+    const panel = page.getByRole("tabpanel", { name: sideTabName("Scenes") });
+    const list = panel.getByRole("group", { name: "Who sees for themselves" });
+    await ops.send({ t: "vision.holders", sceneId: run.sceneId, on: run.extraIds });
+    for (const name of ["Ash", "Bo", "Cy", "Dee", "Eli", "Fen"]) {
+      const box = list.getByRole("checkbox", { name });
+      await waitFor(`${name} ticked`, async () => (await box.isChecked()) || null, 5_000);
+    }
+    const from = dm2.sent.length;
+    const pat = list.getByRole("checkbox", { name: "Pat" });
+    await pat.click();
+    await list.getByRole("status").filter({ hasText: "At most 6 players see for themselves here. Untick one first." }).waitFor();
+    assert.equal(await pat.isChecked(), false, "a refused tick shows Pat ticked");
+    assert.equal(await hasFocus(pat), true, "focus left Pat's box on the refusal");
+    await page.waitForTimeout(300);
+    assert.deepEqual(holderOpsSent(from), [], "a refused tick left the device");
+    assert.equal(holderEntry(run.patId)?.on, false);
+    await shots.take(page, "vision-pv4-holders-refused");
+  });
+
+  test("pv4-3. while a light change is on its way on a per-player scene, the line under Party vision says what each player sees is worked out", async () => {
+    const page = dm2.page!;
+    const panel = page.getByRole("tabpanel", { name: sideTabName("Scenes") });
+    try {
+      dm2.held = [];
+      await panel.getByRole("radiogroup", { name: "Light level" }).getByRole("radio", { name: "Dim", exact: true }).check();
+      await waitFor("the light change held", () => dm2.held!.length > 0 || null, 5_000);
+      const working = panel.getByText("Working out what each player sees…", { exact: true });
+      await working.waitFor();
+      await working.scrollIntoViewIfNeeded();
+      assert.equal(await panel.getByText("Working out what the party sees…").count(), 0, "the working line spoke of the party on a per-player scene");
+      await shots.take(page, "vision-pv4-light-working");
+      const held = dm2.held!;
+      dm2.held = null;
+      for (const text of held) dm2.upstream!.send(text);
+      await working.waitFor({ state: "detached" });
+      await waitFor("the dim light in the DM's state", () => dmSocket.state?.scenes[run.sceneId]?.vision?.light === "dim" || null);
+    } finally {
+      dm2.held = null;
+      await ops.send({ t: "vision.holders", sceneId: run.sceneId, on: [run.patId] });
+      await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: true, light: "dark", perPlayer: false } } });
+      await page.close();
+      dm2.page = null;
+    }
   });
 
   test("12. no page logged an error or a warning", () => {
