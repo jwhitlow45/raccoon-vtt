@@ -7,7 +7,7 @@ import { pickTemplate } from "../areas/AreaTool.tsx";
 import { lightSlot } from "../builder/lightTap.ts";
 import { builderSlot, labelPaneSlot } from "../builder/store.ts";
 import { stampSlot } from "../builder/stamps/store.ts";
-import { findCamera, findTokenCamera, frameOf } from "../find/findToken.ts";
+import { findOnBoard, findTokenCamera } from "../find/findToken.ts";
 import { groundIn } from "../../canvas/boardPick.ts";
 import { lightModeSlot } from "../lights/store.ts";
 import { pinSlot } from "../pins/store.ts";
@@ -32,7 +32,9 @@ export function focusOutlineRow(row: OutlineRow, env: { scope: RoomScope; ui: Ro
   const token = row.kind === "token" ? env.tokens[row.id] : undefined;
   // A token's ring where it draws, as Find my token frames it (the DM's every token stands), and anything else at the highest drawn ground under its box.
   env.scope.get(fitSlot).show?.((viewport, bars, bar, pick) =>
-    token ? findTokenCamera(viewport, target, bars, bar, pick, token) : findCamera(viewport, target, bars, bar, frameOf(pick, target, groundIn(pick, row.rect))),
+    token
+      ? findTokenCamera(viewport, target, bars, bar, pick, token)
+      : findOnBoard(viewport, target, bars, bar, pick, { fit: (board) => groundIn(board, row.rect), at: (board) => groundIn(board, row.rect) }),
   );
 }
 

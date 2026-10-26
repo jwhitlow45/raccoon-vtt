@@ -2,12 +2,12 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { token } from "#shared/testutil.ts";
-import { boardPickFor, DrawnHeightsMemo, ringCenter, type BoardPick } from "../../canvas/boardPick.ts";
+import { boardPickFor, DrawnHeightsMemo, groundIn, ringCenter, type BoardPick } from "../../canvas/boardPick.ts";
 import { fitSlot } from "../../canvas/fitSlot.ts";
 import { NO_INSETS, viewToScreen, type Camera, type Insets, type Size } from "../../lib/camera.ts";
 import { isometric, toView } from "../../lib/view.ts";
 import { RoomScope } from "../../state/scope.ts";
-import { world } from "../movement/testing.ts";
+import { raised, world } from "../movement/testing.ts";
 import type { OutlineRow } from "./rows.ts";
 
 const { focusOutlineRow } = await import("./focus.ts");
@@ -48,3 +48,19 @@ test("an outline row for anything else frames its box's middle at the ground und
   const middle = viewToScreen(cam, toView(isometric(1), { x: 11, y: 11 }, 0));
   assert.ok(Math.abs(middle.x - 400) < 1e-6 && Math.abs(middle.y - 296) < 1e-6, JSON.stringify(middle));
 });
+
+test("an outline row on a 20 ft platform, tapped from far out where the platform lies flat, centers on its top as the board draws it at the zoom found (ISO34-ASTRA-13)", () => {
+  const state = world({ heights: raised(8, 8, 14, 14, 20) });
+  for (const lowPower of [false, true]) {
+    for (const turn of [0, 1, 2, 3] as const) {
+      const board = (camera: Camera) => boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: false, view: isometric(turn), camera, lowPower, canvasHeight: 600 }, new DrawnHeightsMemo());
+      const rect = { x: 10, y: 10, width: 2, height: 2 };
+      const cam = framed(row("drawing", "d1", rect), {}, board({ x: 0, y: 0, scale: lowPower ? 20 : 10 }));
+      const shown = board(cam);
+      assert.equal(groundIn(shown, rect), 4, "the platform stands at the zoom found");
+      const middle = viewToScreen(cam, toView(isometric(turn), { x: 11, y: 11 }, 4));
+      assert.ok(Math.abs(middle.x - 400) < 1e-6 && Math.abs(middle.y - 296) < 1e-6, `Low power ${lowPower}, turn ${turn}: ${JSON.stringify(middle)}`);
+    }
+  }
+});
+

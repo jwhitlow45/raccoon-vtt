@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, Token } from "#shared/model.ts";
 import { character, token } from "#shared/testutil.ts";
-import { fitRect, NO_INSETS, viewToScreen } from "../../lib/camera.ts";
-import { isometric, TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
+import { fitRect, NO_INSETS, viewToScreen, type Camera } from "../../lib/camera.ts";
+import { heightsStand, isometric, TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
 import { barCover, largerEach, pastBars } from "../../canvas/barDock.ts";
 import { FIND_ROOM_CELLS, findCamera, findRect, findTokenCamera, frameOf, nextOwnToken, sheetCover } from "./findToken.ts";
 import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, groundIn, ringCenter, tokenBase } from "../../canvas/boardPick.ts";
@@ -174,6 +174,39 @@ describe("Find my token on raised ground, in a pit and in the air (ISO34-ASTRA-2
     const high = token("roc", { x: 20, y: 4, elevation: 1000 });
     const cam = findTokenCamera(viewport, findRect(high), bars, NO_INSETS, far, high);
     assert.ok(tokenBase({ ...far, camera: cam }, high) < 200, "its lift is capped at the zoom found");
+  });
+
+  test("Find reads the board rebuilt at the zoom it finds: a platform that comes to stand there or lies down there, Low power too, and a capped flier (ISO34-ASTRA-13)", () => {
+    const cases = [
+      { name: "on the 20 ft platform, from far out where it lies flat", t: token("t1", { x: 10, y: 10, elevation: 20 }), start: 10, lowPower: false, crosses: true },
+      { name: "on the 20 ft platform in Low power, from below its threshold", t: token("t1", { x: 10, y: 10, elevation: 20 }), start: 20, lowPower: true, crosses: true },
+      { name: "300 ft over the platform, from close in to where it lies flat", t: token("t5", { x: 10, y: 10, elevation: 300 }), start: 80, lowPower: false, crosses: true },
+      { name: "100 ft over the platform in Low power, to a zoom flat only in Low power", t: token("t6", { x: 10, y: 10, elevation: 100 }), start: 80, lowPower: true, crosses: true },
+      { name: "1000 ft over the platform, capped at the zoom found", t: token("t7", { x: 10, y: 10, elevation: 1000 }), start: 80, lowPower: false, crosses: true },
+    ];
+    for (const c of cases) {
+      for (const turn of [0, 1, 2, 3] as const) {
+        const board = (camera: Camera) => boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: false, view: isometric(turn), camera, lowPower: c.lowPower, canvasHeight: 600 }, new DrawnHeightsMemo());
+        const cam = findTokenCamera(viewport, findRect(c.t), bars, NO_INSETS, board({ x: 0, y: 0, scale: c.start }), c.t);
+        assert.equal(heightsStand(c.start, c.lowPower) !== heightsStand(cam.scale, c.lowPower), c.crosses, `${c.name}: the fit crosses the stand threshold (${cam.scale})`);
+        // The board as it then draws, built at the zoom found.
+        const shown = board(cam);
+        const ring = ringCenter(shown, c.t);
+        assert.ok(Math.abs(ring.x - 400) < 1e-6 && Math.abs(ring.y - 296) < 1e-6, `${c.name}, turn ${turn}: ${JSON.stringify([ring, cam.scale])}`);
+        if (c.t.elevation > 20) continue;
+        // The room round it fits as that board draws it, every cell's top where the platform stands.
+        const target = findRect(c.t);
+        for (let y = target.y; y < target.y + target.height - 1e-9; y++) {
+          for (let x = target.x; x < target.x + target.width - 1e-9; x++) {
+            const z = Math.max(0, drawnAt(shown, { x: x + 0.01, y: y + 0.01 }));
+            for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+              const at = viewToScreen(cam, toView(isometric(turn), { x: Math.min(x + dx, target.x + target.width), y: Math.min(y + dy, target.y + target.height) }, z));
+              assert.ok(at.x >= -1e-6 && at.x <= 800 + 1e-6 && at.y >= 56 - 1e-6 && at.y <= 600 - 64 + 1e-6, `${c.name}, turn ${turn}, cell ${x},${y}: ${JSON.stringify(at)}`);
+            }
+          }
+        }
+      }
+    }
   });
 
   test("an outline row's box frames on the highest drawn ground under it", () => {

@@ -92,19 +92,36 @@ export type FindFrame = { view: View; lift: number; z: number };
 
 const FLAT_FRAME: FindFrame = { view: TOP_DOWN, lift: 0, z: 0 };
 
+/** Where a found target's middle draws on a board, in cells of height: what the fit makes room for, and what it then centers. */
+export type FindMiddle = { fit(pick: BoardPick): number; at(pick: BoardPick): number };
+
+/**
+ * The camera that finds a target on the board as it draws at the zoom the
+ * fit picks (findCamera). That zoom decides whether heights stand at all
+ * (the stand threshold, Low power's too) and how far a standee's lift may
+ * rise, so the board is read again at it, built the way the board builds
+ * it (BoardPick.at): a fit that lands where heights stand otherwise fits
+ * again on that board, and the middle centers on the board at the zoom
+ * found (ISO34-ASTRA-13), as a scene's fit reads its lift again at the
+ * zoom it found (Stage.tsx fitScene).
+ */
+export function findOnBoard(viewport: Size, target: Rect, bars: Insets, cover: Insets, pick: BoardPick, middle: FindMiddle): Camera {
+  const fit = (board: BoardPick) => findCamera(viewport, target, bars, cover, frameOf(board, target, middle.fit(board)));
+  let fitted = fit(pick);
+  const there = pick.at(fitted);
+  if (there.src?.stand !== pick.src?.stand) fitted = fit(there);
+  const shown = pick.at(fitted);
+  return findCamera(viewport, target, bars, cover, frameOf(shown, target, middle.at(shown)), fitted.scale);
+}
+
 /**
  * The camera that finds a token, its ring centered where it draws at the
- * zoom the fit picks (findCamera). A standee's lift is capped by the zoom
- * (relief/standee.ts cappedBase), so the fit runs on its uncapped base,
- * and its ring's base at the fitted zoom then centers at that zoom, as a
- * scene's fit reads its lift again at the zoom it found (Stage.tsx
- * fitScene). Outline rows for tokens share it.
+ * zoom found. A standee's lift is capped by the zoom (relief/standee.ts
+ * cappedBase), so the fit makes room for its uncapped base, and its ring
+ * centers capped at the zoom found. Outline rows for tokens share it.
  */
 export function findTokenCamera(viewport: Size, target: Rect, bars: Insets, cover: Insets, pick: BoardPick, token: FootprintToken): Camera {
-  const uncapped = tokenBase({ ...pick, canvasHeight: Infinity }, token);
-  const fitted = findCamera(viewport, target, bars, cover, frameOf(pick, target, uncapped));
-  const z = tokenBase({ ...pick, camera: fitted }, token);
-  return z === uncapped ? fitted : findCamera(viewport, target, bars, cover, frameOf(pick, target, z), fitted.scale);
+  return findOnBoard(viewport, target, bars, cover, pick, { fit: (board) => tokenBase({ ...board, canvasHeight: Infinity }, token), at: (board) => tokenBase(board, token) });
 }
 
 /** A target's frame on the board as `pick` shows it, its middle drawn at `z`. */

@@ -22,6 +22,14 @@ export type BoardPick = PickSource & {
   feetPerCell: number;
   /** The canvas's height in px, which caps how far a standee's lift draws (relief/standee.ts cappedBase). */
   canvasHeight: number;
+  /**
+   * The board as it would draw at another camera, built again the way the
+   * board builds it: the zoom decides whether heights stand at all (the
+   * stand threshold, Low power's too) and how far a lift may rise, so
+   * whatever reads the board at a zoom other than this one's reads it
+   * through here, never a copy with only its camera swapped (ISO34-ASTRA-13).
+   */
+  at(camera: Camera): BoardPick;
 };
 
 /**
@@ -34,7 +42,7 @@ export const boardPickSlot = scopeSlot(() => ({ read: null as (() => BoardPick |
 
 /** Top-down's pick, with no heights: what a tool reads before the canvas has measured itself, and in tests. */
 export function flatPick(camera: Camera, bounds: { w: number; h: number } = { w: 0, h: 0 }, grid: Grid = sceneGrid({})): BoardPick {
-  return { camera, view: TOP_DOWN, grid, heights: flatHeights(bounds), src: null, feetPerCell: 5, canvasHeight: Infinity };
+  return { camera, view: TOP_DOWN, grid, heights: flatHeights(bounds), src: null, feetPerCell: 5, canvasHeight: Infinity, at: (c) => flatPick(c, bounds, grid) };
 }
 
 /** The board's pick in this Room, or Top-down's at the tool's camera. */
@@ -200,11 +208,12 @@ export function boardPickFor(
 ): BoardPick {
   const { scene, room, camera, view } = input;
   const grid = sceneGrid(scene);
-  if (view.kind === "topDown") return { ...flatPick(camera, scene.bounds, grid), canvasHeight: input.canvasHeight ?? Infinity };
+  const at = (c: Camera) => boardPickFor({ ...input, camera: c }, memo);
+  if (view.kind === "topDown") return { ...flatPick(camera, scene.bounds, grid), canvasHeight: input.canvasHeight ?? Infinity, at };
   const feetPerCell = room?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell;
   const fog = input.role === "player" && input.fog ? (room?.fogTiles ?? NO_FOG) : null;
   const { src, heights } = memo.get({ chunks: room?.buildChunks ?? NO_CHUNKS, sceneId: scene.id, bounds: scene.bounds, fog, feetPerCell, scale: camera.scale, lowPower: input.lowPower });
-  return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity };
+  return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity, at };
 }
 
 const NO_FOG: RoomState["fogTiles"] = {};

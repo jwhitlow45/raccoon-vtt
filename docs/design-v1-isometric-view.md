@@ -546,6 +546,7 @@ The drag layer is where a local drag now draws: a frame of a 500-token drag redr
   - **The stroke being drawn (ISO34-ASTRA-10).** It lies in ground pieces (`groundPieces`): the cells its box touches, grouped by drawn ground, each the stroke clipped to those cells where it lies and then lifted by their ground. A player's pieces take only revealed sub-cells, so no part drawn over fog lands on a revealed top. It draws as the ground stage will lay it, so it no longer jumps at the drop.
   - **A flat creature's press area (ISO34-ASTRA-14)** is its footprint cut at the cell lines, each piece at its own cell's drawn ground (`pressCells`), as the ground stage copies its picture. Its decor stays on the highest.
   - **Equivalent mutant.** A second Find fit at the capped base: the cap only bites at the farthest zoom, where the fit clamps again.
+- **Review round 3.** **Find at the zoom found, heights too (ISO34-ASTRA-13).** A board pick rebuilds itself at another camera the way the board builds it (`BoardPick.at`), since the zoom decides whether heights stand (the stand threshold, Low power's too) as well as the lift's cap. Find and every outline row fit again on the board rebuilt at the zoom found when heights stand otherwise there, and center on it (`findOnBoard`). Nothing reads a pick at another zoom with only its camera swapped.
 
 ## 15. Review dispositions
 
