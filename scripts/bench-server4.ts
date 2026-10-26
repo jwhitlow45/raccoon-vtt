@@ -28,9 +28,10 @@
  *
  * Then the bright and dark scenes again per player
  * (docs/design-v1-per-player-vision.md 8.1), with the six players as the
- * scene's sight holders at the worst ownership the cap allows, a free light
- * every source sees on a hall it alone lights, and a routed walk across
- * areas during a turn on each kind of scene.
+ * scene's sight holders at the worst ownership the cap allows, a player's
+ * move on each with fog off, a free light every source sees on a hall it
+ * alone lights, and a routed walk across areas during a turn on each kind
+ * of scene.
  *
  * The phone rows (the derive on a phone, applying sight tiles, the leg test
  * while dragging) run in a browser and are not here. A row over its budget
@@ -517,6 +518,28 @@ async function runLevel(level: "bright" | "dark", feetPerCell: number, rows: Row
 }
 
 /*
+ * A player's move on a per-player scene with fog off, where the explore
+ * step writes nothing and still draws every holder's raster before the
+ * commit (review PV3-OPUS-4), so its fan-out is the gate's to read too.
+ */
+async function runFogOff(level: "bright" | "dark", rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const room = benchRoom(level, 5, true);
+  room.scenes[SCENE] = { ...room.scenes[SCENE]!, fogEnabled: false };
+  const table = await sitDown(room);
+  checkMode(table.actor.committed.state, true);
+  const state = () => table.actor.committed.state;
+  const move = await timed(async (r) => {
+    const t = pcs(state())[r % 12]!;
+    return send(table, owner(table, t), { t: "token.move", tokenId: t.id, x: t.x + (r % 24 < 12 ? 1 : -1), y: t.y });
+  });
+  const where = `${level} scene, ${PER_PLAYER}, fog off`;
+  rows.push({ row: `Sight fan-out for all players in one batch, ${where}`, budget: 10, ms: move.fanout, covers: "commit to the last ev of a player's token.move, 7 sockets: the gate reads its 10 ms budget on the server box and 6.7 ms (10 over 1.5) on a laptop" });
+  rows.push({ row: `Holders' rasters drawn in that fan-out, ${where}`, budget: 10, ms: move.drawn, covers: "a part of the fan-out row above, shown against the same limit: each holder's tiles read the first time" });
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+}
+
+/*
  * A free light every source sees (docs/design-v1-per-player-vision.md
  * decision 15), on bench-vision.ts `lightScene`'s scene: the characters
  * carry no light and the hall's free lights stand outside it, so the hall's
@@ -582,6 +605,8 @@ export async function runServerBench(): Promise<Row[]> {
   // The same per player, at the worst ownership the holder cap allows.
   await runLevel("bright", 5, rows, true);
   await runLevel("dark", 5, rows, true);
+  await runFogOff("bright", rows);
+  await runFogOff("dark", rows);
   await runFreeLight(5, true, rows);
   await runWalk(true, rows);
   return rows;
