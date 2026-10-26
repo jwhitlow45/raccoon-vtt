@@ -13,7 +13,19 @@ import { pointInPolygonFixed } from "#shared/rules/fog.ts";
 
 export type Point = { x: number; y: number };
 export type Bounds = { w: number; h: number };
-export type BrushSize = 1 | 2 | 3;
+/** A square brush's side in squares, from BRUSH_MIN to BRUSH_MAX (D-261026-4). */
+export type BrushSize = number;
+
+export const BRUSH_MIN = 1;
+
+/**
+ * The largest brush. Its 100 squares a sample stay far inside an op's
+ * 2,000 cells (MAX_BUILD_CELLS): a stroke sends what it painted every
+ * PAINT_FLUSH_MS, which even a fast drag at this size keeps to an op or
+ * two, and paintOps splits anything larger into ops of the stroke's one
+ * undo group, so no stroke is refused for its size.
+ */
+export const BRUSH_MAX = 10;
 
 export function cellKey(x: number, y: number): string {
   return `${x},${y}`;

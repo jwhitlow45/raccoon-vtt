@@ -4,6 +4,8 @@ import type { BuildChunk, FreeWall, RoomState } from "#shared/model.ts";
 import { clientOpSchema, MAX_BUILD_CELLS, type ClientOp } from "#shared/protocol.ts";
 import { apply, room } from "#shared/testutil.ts";
 import {
+  BRUSH_MAX,
+  BRUSH_MIN,
   brushCells,
   edgeDistance,
   edgeInBounds,
@@ -65,6 +67,34 @@ describe("brush cells", () => {
     assert.deepEqual(rest, ["1,0", "2,0", "3,0", "4,0", "5,0", "6,0", "7,0", "8,0", "9,0"]);
     // Going back over painted cells adds nothing.
     assert.deepEqual(strokeCells({ x: 9.5, y: 0.5 }, { x: 2.5, y: 0.5 }, 1, BOUNDS, seen), []);
+  });
+
+  test("the stepper's sizes, one to ten squares: each a square of that side, an even one on the nearest corner and an odd one on the cell (D-261026-4)", () => {
+    assert.deepEqual([BRUSH_MIN, BRUSH_MAX], [1, 10]);
+    const square = (cells: string[]) => {
+      const pts = cells.map((k) => k.split(",").map(Number) as [number, number]);
+      const xs = pts.map((p) => p[0]);
+      const ys = pts.map((p) => p[1]);
+      return { n: cells.length, x: [Math.min(...xs), Math.max(...xs)], y: [Math.min(...ys), Math.max(...ys)] };
+    };
+    assert.deepEqual(square(brushCells({ x: 10.5, y: 10.5 }, BRUSH_MIN, BOUNDS)), { n: 1, x: [10, 10], y: [10, 10] });
+    assert.deepEqual(square(brushCells({ x: 10.2, y: 10.8 }, 4, BOUNDS)), { n: 16, x: [8, 11], y: [9, 12] }, "four squares about the nearest corner, 10, 11");
+    assert.deepEqual(square(brushCells({ x: 10.5, y: 10.5 }, 5, BOUNDS)), { n: 25, x: [8, 12], y: [8, 12] }, "five squares about the cell");
+    assert.deepEqual(square(brushCells({ x: 20.4, y: 15.6 }, BRUSH_MAX, BOUNDS)), { n: 100, x: [15, 24], y: [11, 20] }, "ten squares about the nearest corner, 20, 16");
+  });
+
+  test("a fast stroke with the largest brush sends what it painted in ops the server takes, each within its 2,000 cells", () => {
+    const big = { w: 200, h: 200 };
+    // A flick across 150 squares between two samples, about what one flush gathers of the fastest drag.
+    const seen = new Set<string>();
+    const cells = [...strokeCells(null, { x: 20.5, y: 100.5 }, BRUSH_MAX, big, seen), ...strokeCells({ x: 20.5, y: 100.5 }, { x: 170.5, y: 100.5 }, BRUSH_MAX, big, seen)];
+    assert.equal(cells.length, 160 * BRUSH_MAX, "every square the brush swept, once");
+    const ops = paintOps("s1", cells, "stone", () => undefined);
+    assert.ok(ops.length <= 2, `${ops.length} ops for one flush`);
+    for (const op of ops) {
+      assert.ok(clientOpSchema.safeParse(op).success, "the schema takes it");
+      assert.ok(op.t === "build.paint" && op.cells.length <= MAX_BUILD_CELLS);
+    }
   });
 
   test("a diagonal stroke leaves no gaps", () => {

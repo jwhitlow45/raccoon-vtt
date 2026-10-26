@@ -4,10 +4,10 @@ import { useShallow } from "zustand/react/shallow";
 import type { TerrainId } from "#shared/model.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, ValueChip, type Slot } from "../measure/controls.tsx";
+import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, Stepper, ValueChip, type Slot } from "../measure/controls.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
-import type { BrushSize } from "./cells.ts";
+import { BRUSH_MAX, BRUSH_MIN } from "./cells.ts";
 import { LABEL_SIZES } from "./labelEdit.ts";
 import { lightModeHint, sceneHasLights } from "./lightTap.ts";
 import { BUILD_MODES, pickBuildMode, TERRAINS, useBuilderStore, type BuildMode, type EdgeKind } from "./store.ts";
@@ -124,17 +124,19 @@ export default function BuilderOptions() {
   const brush = (priority: number): Slot => ({
     id: "brush",
     priority,
-    compact: true,
     control: (
-      <OptSegmented<BrushSize>
+      <Stepper
         label="Brush size"
         value={s.brush}
+        step={1}
+        min={BRUSH_MIN}
+        max={BRUSH_MAX}
+        format={(n) => `${n} ${n === 1 ? "square" : "squares"}`}
+        less="Smaller brush"
+        more="Larger brush"
         onChange={(brush) => set({ brush })}
-        options={[
-          { value: 1, label: "1", title: "One square" },
-          { value: 2, label: "2", title: "Two squares" },
-          { value: 3, label: "3", title: "Three squares" },
-        ]}
+        // Each step is spoken in the group named Brush size: "Brush size, 3 squares".
+        live
       />
     ),
   });

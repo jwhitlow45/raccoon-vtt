@@ -1,7 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { StairDirection } from "#shared/model.ts";
 import { scopeSlot, useScoped } from "../../../state/scope.ts";
-import type { BrushSize, Point } from "../cells.ts";
+import type { Point } from "../cells.ts";
 
 /**
  * Height mode's choices and its gesture in progress (docs/design-v1-maps-vision.md
@@ -14,8 +14,8 @@ import type { BrushSize, Point } from "../cells.ts";
 export type HeightPaint = "height" | "stairs" | "rough";
 /** Difficult ground mode's choice: mark the cells or clear their marks (docs/design-v1-movement.md 3.4). */
 export type RoughChoice = "mark" | "clear";
-/** A brush of 1 to 3 cells, or an area dragged from corner to corner. */
-export type HeightShape = BrushSize | "area";
+/** A brush of 1 to 3 cells, or an area dragged from corner to corner. Brush and Erase's size goes to 10 (D-261026-4), and this one keeps its three. */
+export type HeightShape = 1 | 2 | 3 | "area";
 /** The way marked stairs point: by the rule ("a"), one way, or "remove" to take marks away. */
 export type StairChoice = StairDirection | "remove";
 

@@ -3472,7 +3472,16 @@ async function modeTileLines(tiles: Locator, at: string): Promise<string[]> {
   }, at);
 }
 
-/** fu32-b's screens at one size: the builder's row with its mode chip, and the mode picker's tiles. */
+/** The builder's Brush size stepper, in its row or in ⋯ where the row has no room for it. */
+async function brushStepper(page: Page): Promise<Locator> {
+  const bar = page.getByRole("toolbar", { name: "Map builder options" });
+  const inRow = bar.getByRole("group", { name: "Brush size", exact: true });
+  if (await showsWithin(inRow, 1_500)) return inRow;
+  await bar.getByRole("button", { name: "More options" }).click();
+  return page.getByRole("dialog", { name: "More Map builder options" }).getByRole("group", { name: "Brush size", exact: true });
+}
+
+/** fu32-b's screens at one size: the builder's row with its mode chip, the mode picker's tiles, and Brush size from 1 to 10 squares. */
 async function builderScreens(sweep: Sweep, page: Page): Promise<void> {
   await closeSheets(page);
   await escapeAll(page);
@@ -3494,6 +3503,22 @@ async function builderScreens(sweep: Sweep, page: Page): Promise<void> {
   await sweep.measure(page, "fu32-mode-picker", tiles);
   await sweep.add(page, "fu32-mode-picker", await modeTileLines(tiles, `${sweep.at} fu32-mode-picker`));
   await shots.take(page, `alignment-fu32-${sweep.at}-mode-picker`);
+  await escapeAll(page);
+  // Brush size: Smaller off at 1, Larger off at 10, and named with its size in squares.
+  const stepper = await brushStepper(page);
+  const smaller = () => stepper.getByRole("button", { name: "Smaller brush", exact: true });
+  const larger = () => stepper.getByRole("button", { name: "Larger brush", exact: true });
+  if (!(await smaller().isDisabled())) sweep.lines.push(`${sweep.at} fu32-brush: Smaller brush is not off at 1 square`);
+  await stepper.getByText("1 square", { exact: true }).filter({ visible: true }).first().waitFor();
+  for (let n = 2; n <= 10; n++) await larger().click();
+  await stepper.getByText("10 squares", { exact: true }).filter({ visible: true }).first().waitFor();
+  if (!(await larger().isDisabled())) sweep.lines.push(`${sweep.at} fu32-brush: Larger brush is not off at 10 squares`);
+  // Spoken in the group's name as it changes: "Brush size, 10 squares".
+  if ((await stepper.locator('[aria-live="polite"]', { hasText: "10 squares" }).count()) === 0) sweep.lines.push(`${sweep.at} fu32-brush: the size is not spoken as it changes`);
+  await sweep.measure(page, "fu32-brush", stepper);
+  await shots.take(page, `alignment-fu32-${sweep.at}-brush`);
+  for (let n = 9; n >= 1; n--) await smaller().click();
+  await stepper.getByText("1 square", { exact: true }).filter({ visible: true }).first().waitFor();
   await escapeAll(page);
   await pickTool(page, "Select");
 }
@@ -3526,7 +3551,7 @@ export function fu32Tests(): void {
     assert.deepEqual(lines, [], "a short label's row out of line");
   });
 
-  test(`fu32-b. the Map builder's row, its mode picker's tiles with an icon on each, even and none of their names cut, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (D-261026-3)`, async () => {
+  test(`fu32-b. the Map builder's row, its mode picker's tiles with an icon on each, even and none of their names cut, and Brush size from 1 to 10 squares, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (D-261026-3, D-261026-4)`, async () => {
     const lines: string[] = [];
     for (const at of FU30_AT) {
       const sweep = new Sweep(atName(at));
@@ -3537,6 +3562,6 @@ export function fu32Tests(): void {
       await builderScreens(sweep, page);
       lines.push(...sweep.lines);
     }
-    assert.deepEqual(lines, [], "the builder's row or picker out of line");
+    assert.deepEqual(lines, [], "the builder's row, picker or brush out of line");
   });
 }
