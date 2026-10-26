@@ -18,13 +18,13 @@ import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { drawnBase, drawnFootprintGround, drawnHeights, groundGroups, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
-import { useRoomStore, useRoomView, type RoomView } from "../../state/view.ts";
+import { useRoomStore } from "../../state/view.ts";
 import { FogShape } from "../FogShape.tsx";
 import { MapContent, type DrawnMap } from "../layers/MapLayer.tsx";
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
-import { IsoGroundContext, TreeShownContext, type IsoGround } from "./context.ts";
+import { IsoGroundContext, TreeShownContext, useShownView, type IsoGround } from "./context.ts";
 import { drawRun, type DrawContext } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { cellLook, CellTints, imageReader } from "./looks.ts";
@@ -399,14 +399,6 @@ function IsoBoardImpl(props: IsoBoardProps) {
 
 /** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
 type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox };
-
-/** A read of the room that holds its last value while `shown` is false, so the store's changes reach nothing then. */
-function useShownView<T>(shown: boolean, select: (s: RoomView) => T): T {
-  const last = useRef<{ value: T } | null>(null);
-  const value = useRoomView((s) => (shown || !last.current ? select(s) : last.current.value));
-  last.current = { value };
-  return value;
-}
 
 const PRESS_ONLY: IsoToken = { turn: 0, base: 0, ground: 0, drawn: 0, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true };
 

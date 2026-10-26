@@ -5,6 +5,7 @@ import { useStore } from "zustand";
 import type { BuildChunk, CellRect, RoomSettings, Scene, Trap, TrapRig } from "#shared/model.ts";
 import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
+import { useTreeShownView } from "../../canvas/relief/context.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -43,9 +44,9 @@ const HATCH_PX = 7;
  * redraws when a trap, the build or the zoom changes.
  */
 export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
-  // Mounted with the board, which every room draws, as the falling reminder is (attach/TetherLayer.tsx).
-  const traps = useRoomView((s) => s.view?.traps ?? NO_TRAPS);
-  const chunks = useRoomView((s) => s.view?.buildChunks ?? NO_CHUNKS);
+  // Both trees publish a trap's name pill under one key, so a hidden tree holds its traps with the build they lie on and never sends a pill placed on an old build.
+  const traps = useTreeShownView((s) => s.view?.traps ?? NO_TRAPS);
+  const chunks = useTreeShownView((s) => s.view?.buildChunks ?? NO_CHUNKS);
   const settings = useRoomView((s) => s.view?.meta.settings);
   const tool = useRoomView((s) => s.local.tool);
   const store = useScoped(trapSlot).store;

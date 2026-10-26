@@ -10,7 +10,7 @@ import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { parseCellKey, polygonCells, rectBetween } from "./cells.ts";
 import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, pillarPaths } from "./draw.ts";
-import { useIsoGround } from "../../canvas/relief/context.ts";
+import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boxStands } from "../../canvas/relief/stand.ts";
 import { isSymbolTerrain, type TexturedTerrain } from "./geometry.ts";
 import { labelBox } from "#shared/rules/labels.ts";
@@ -55,8 +55,9 @@ const BuildBoard = memo(function BuildBoard(props: {
 }) {
   const { sceneId, grid, autoWalls, role, scale } = props;
   const { w, h } = props.bounds;
-  const allChunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const allLabels = useRoomView((s) => s.view?.labels ?? EMPTY_LABELS);
+  // The build's paths are the costliest part of a build edit, so the tree not on screen keeps its last read.
+  const allChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
+  const allLabels = useTreeShownView((s) => s.view?.labels ?? EMPTY_LABELS);
   const chunks = useMemo(() => Object.values(allChunks).filter((c): c is BuildChunk => !!c && c.sceneId === sceneId), [allChunks, sceneId]);
   const labels = useMemo(() => Object.values(allLabels).filter((l): l is Label => !!l && l.sceneId === sceneId), [allLabels, sceneId]);
   const paths = useMemo(() => buildPaths(chunks, role, { autoWalls, bounds: { w, h } }), [chunks, role, autoWalls, w, h]);

@@ -1,5 +1,6 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useRef } from "react";
 import type { Turn } from "../../lib/view.ts";
+import { useRoomView, type RoomView } from "../../state/view.ts";
 import type { FogView } from "./fogView.ts";
 
 /**
@@ -36,4 +37,21 @@ export const TreeShownContext = createContext(true);
 
 export function useTreeShown(): boolean {
   return useContext(TreeShownContext);
+}
+
+/** A read of the room that holds its last value while `shown` is false, so the store's changes reach nothing then. */
+export function useShownView<T>(shown: boolean, select: (s: RoomView) => T): T {
+  const last = useRef<{ value: T } | null>(null);
+  const value = useRoomView((s) => (shown || !last.current ? select(s) : last.current.value));
+  last.current = { value };
+  return value;
+}
+
+/**
+ * A read of the room held while the part's tree is hidden. A build edit
+ * changes the build's chunks, and a part that rebuilds from them would
+ * rebuild in the hidden tree too: the build's paths, an area's coverage.
+ */
+export function useTreeShownView<T>(select: (s: RoomView) => T): T {
+  return useShownView(useTreeShown(), select);
 }

@@ -4,6 +4,7 @@ import type { AreaTemplate, DiagonalRule, RoomState, Token } from "#shared/model
 import { PREVIEW_SAMPLES, type AreaContext, type AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
+import { useTreeShownView } from "../../canvas/relief/context.ts";
 import { theme } from "../../lib/theme.ts";
 import type { AoePreview } from "../../state/types.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -40,7 +41,7 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   // Tokens being dragged count where they would drop, so an aimed area's targets follow them.
   const dragged = useLiveTokens();
   const tokens = dragged.tokens;
-  const buildChunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
+  const buildChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
   const templates = useRoomView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
   const settings = useRoomView((s) => s.view?.meta.settings);
   const members = useRoomView((s) => s.view?.members);

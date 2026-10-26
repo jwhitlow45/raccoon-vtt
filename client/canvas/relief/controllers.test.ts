@@ -166,7 +166,16 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     const impl = iso.slice(iso.indexOf("function IsoBoardImpl("), iso.indexOf("\n}\n", iso.indexOf("function IsoBoardImpl(")));
     assert.doesNotMatch(impl, /useRoomView\(/, "every read of the room goes through useShownView");
     assert.equal(impl.match(/useShownView\(!hidden, /g)?.length, 3);
-    assert.match(iso, /useRoomView\(\(s\) => \(shown \|\| !last\.current \? select\(s\) : last\.current\.value\)\)/);
+    assert.match(read("canvas/relief/context.ts"), /useRoomView\(\(s\) => \(shown \|\| !last\.current \? select\(s\) : last\.current\.value\)\)/);
+  });
+
+  test("a renderer drawn in Isometric reads the build only while its tree shows, so a brush stroke rebuilds no paths or coverage in the hidden one", () => {
+    const { layers, files } = registry();
+    const sources = new Set([...layers.filter((l) => l.iso !== "off").map((l) => files.get(l.component)!), "canvas/TokenShadow.tsx"]);
+    for (const file of sources) assert.doesNotMatch(read(file), /useRoomView\([^;]*\bbuildChunks\b/, `${file} reads the build through useTreeShownView`);
+    assert.match(read("canvas/relief/context.ts"), /return useShownView\(useTreeShown\(\), select\);/);
+    // A trap's name pill sits on its door, and both trees publish it under one key, so the hidden tree holds the traps with the build.
+    assert.match(read("features/traps/TrapLayer.tsx"), /const traps = useTreeShownView\(\(s\) => s\.view\?\.traps /);
   });
 
   test("ghosts and shadows read no drag while their tree is hidden", () => {

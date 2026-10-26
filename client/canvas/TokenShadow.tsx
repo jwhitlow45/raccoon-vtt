@@ -6,7 +6,7 @@ import type { ViewToken } from "../lib/scene.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useScoped } from "../state/scope.ts";
 import { useRoomView } from "../state/view.ts";
-import { useTreeShown } from "./relief/context.ts";
+import { useTreeShown, useTreeShownView } from "./relief/context.ts";
 import { previewLanding, seenChunks } from "./relief/seenChunks.ts";
 import { SHADOW_CORE, shadowShape, tokenLift } from "./tokenShadow.ts";
 
@@ -34,7 +34,7 @@ const NO_BOUNDS = { w: 0, h: 0 };
  */
 export const TokenShadow = memo(function TokenShadow(props: { token: ViewToken; w: number; h: number; at?: { x: number; y: number } }) {
   const { token, w, h } = props;
-  const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY);
+  const chunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY);
   // In a hidden tree (relief/context.ts) a drag's cell is never read, so the drag does no landing search there.
   const shown = useTreeShown();
   const spot = useStore(useScoped(localDragSlot), (s) => (shown ? s.spots[token.id] : undefined));
