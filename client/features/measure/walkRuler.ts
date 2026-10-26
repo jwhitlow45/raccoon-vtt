@@ -1,3 +1,4 @@
+import { sightOf, viewMapsOf } from "#shared/keys.ts";
 import type { Actor, PathStop, RoomState, Token, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -67,12 +68,17 @@ function walkerAt(view: RoomState, sceneId: string, first: RulerStop): Token | n
 
 const NO_ACTOR: Actor = { hp: { cur: 1, max: 1, temp: 0 }, life: "alive", ac: 10, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
 
-/** The parts of the room a ruler's walk reads (publicWorld, walkerAt). While each is the same object, the walks and searches kept for it still hold. */
-type Basis = Pick<RoomState, "buildChunks" | "templates" | "tokens" | "fogTiles" | "exploredTiles" | "meta" | "members" | "characters"> & { scene: unknown };
+/**
+ * The parts of the room a ruler's walk reads (publicWorld, walkerAt). While each is the same object, the walks and searches kept for it still hold.
+ * Who players see reads the sight a copy holds, and on a per-player scene the shared sight and fog
+ * (docs/design-v1-per-player-vision.md 6.6), so a light or a holder's change that moves only those still walks the ruler again.
+ */
+type Basis = Pick<RoomState, "buildChunks" | "templates" | "tokens" | "fogTiles" | "exploredTiles" | "meta" | "members" | "characters"> & { scene: unknown; sight: unknown; sightAll: unknown; fogAll: unknown };
 
 function basisOf(view: RoomState, sceneId: string): Basis {
   const { buildChunks, templates, tokens, fogTiles, exploredTiles, meta, members, characters } = view;
-  return { buildChunks, templates, tokens, fogTiles, exploredTiles, meta, members, characters, scene: view.scenes[sceneId] };
+  const { sightAll, fogAll } = viewMapsOf(view);
+  return { buildChunks, templates, tokens, fogTiles, exploredTiles, meta, members, characters, scene: view.scenes[sceneId], sight: sightOf(view), sightAll, fogAll };
 }
 
 function sameBasis(a: Basis, b: Basis): boolean {
@@ -162,7 +168,8 @@ function searchFor(view: RoomState, at: Walked, walker: Token & Walker, input: W
   else {
     // Who players see of the tokens the legs before moved, by where those legs left them, on every copy alike.
     const moved = new Set(Object.keys(at.sim.tokens).filter((id) => !samePose(at.sim.tokens[id], view.tokens[id])));
-    const world = groupWalkWorld(at.sim, walker, input.viewer, at.left, ownRuler(input) ? { creatures: false, everything: true, moved } : { creatures: false, seenGround: true, moved, unseen: unseenAtStart(view, input) });
+    // A shared or kept ruler keeps to the ground every player shares, never this player's own memory (docs/design-v1-per-player-vision.md 6.6).
+    const world = groupWalkWorld(at.sim, walker, input.viewer, at.left, ownRuler(input) ? { creatures: false, everything: true, moved } : { creatures: false, seenGround: true, sharedGround: true, moved, unseen: unseenAtStart(view, input) });
     search = new WalkSearch(new WalkWorld({ ...world.input, prone: false }));
     budget.charge(worldUnits(search.world) + Math.ceil((search.world.nx * search.world.ny) / 400));
     if (kept.searches.size >= MAX_SEARCHES) kept.searches.delete(kept.searches.keys().next().value!);

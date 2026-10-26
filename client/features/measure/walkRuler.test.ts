@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { chunkKey } from "#shared/keys.ts";
+import { chunkKey, holderTileKey } from "#shared/keys.ts";
 import type { EdgeFeature, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { P1, reveal, template, token } from "#shared/testutil.ts";
+import { DM, P1, P2, reveal, template, token } from "#shared/testutil.ts";
+import { rasterizeFogOps } from "#shared/rules/fog.ts";
 import { line, world } from "../movement/testing.ts";
 import { keptDrawing, keptStops, tokenStop, type RulerStop } from "./ruler.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
@@ -97,6 +98,40 @@ describe("the walking ruler", () => {
     assert.deepEqual(onGob.onDm, onGob.onPlayer);
     assert.deepEqual(onGob.onDm, [15, true]);
     assert.deepEqual(read(fogged(10), stops, true).onDm, [55, false], "the DM's own ruler, before it is shared, reads the DM's map");
+  });
+
+  test("on a per-player scene a shared ruler keeps to the ground every player shares, on every device, though a holder remembers the way round (docs/design-v1-per-player-vision.md 6.6)", () => {
+    const state = room();
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: false, light: "dark", perPlayer: true } };
+    reveal(state, "s1", { x: 0, y: 0, w: 30, h: 10 });
+    state.holders.s1 = { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }] };
+    // p1 alone remembers the ground below the wall's end, so p1's own map shows the way round.
+    const own = Object.values(rasterizeFogOps({}, "s1", state.scenes.s1!.bounds, [{ id: "r", mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 30, h: 12 } }]))[0]!;
+    state.exploredBy[holderTileKey("s1", "p1", own.tx, own.ty)] = { ...own, memberId: "p1" };
+    const stops = [free(2, 5), free(9, 5)];
+    const read = (viewer: typeof P1) => {
+      const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
+      const m = measureWalk({ view, sceneId: "s1", stops, viewer: { role: viewer.role }, everything: false })!;
+      return [m.totalFt, m.legs[0]!.none];
+    };
+    assert.deepEqual(read(P1), [15, true], "held at the wall, as on every other device");
+    assert.deepEqual(read(P2), [15, true]);
+    assert.deepEqual(read(DM), [15, true]);
+  });
+
+  test("a ruler is walked again when only the shared fog or sight a copy holds changes, as when the DM reveals the way round on a per-player scene", () => {
+    const fogged = (h: number) => {
+      const state = room();
+      state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: false, light: "dark", perPlayer: true } };
+      reveal(state, "s1", { x: 0, y: 0, w: 30, h });
+      return projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
+    };
+    const stops = [free(2, 5), free(9, 5)];
+    const first = fogged(10);
+    const walk = (view: RoomState) => measureWalk({ view, sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!.totalFt;
+    assert.equal(walk(first), 15);
+    const wider = fogged(12) as RoomState & { fogAll?: unknown; sightAll?: unknown };
+    assert.equal(walk({ ...first, fogAll: wider.fogAll } as RoomState), 55, "only the shared fog changed");
   });
 
   test("a player's ruler under true distance into ground the party never explored reads the straight walk, not No way through (review MV-O-21)", () => {
