@@ -8,7 +8,7 @@ import { clearVisionCache } from "#shared/rules/vision.ts";
 import { DM, P1, P2, actor, env, room, scene, token } from "#shared/testutil.ts";
 import { SERVER_ACTOR } from "./actor.ts";
 import { Connection } from "./connection.ts";
-import { rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
+import { MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 import { exploreOp } from "./explore.ts";
 
 /**
@@ -21,7 +21,7 @@ import { exploreOp } from "./explore.ts";
 
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
 
-function viewer(who: Viewer, display = false): { conn: Connection; got: EphEvent[] } {
+function viewer(who: Viewer, display = false, now?: () => number): { conn: Connection; got: EphEvent[] } {
   const got: EphEvent[] = [];
   const socket = {
     readyState: 1,
@@ -34,17 +34,17 @@ function viewer(who: Viewer, display = false): { conn: Connection; got: EphEvent
     close: () => undefined,
     terminate: () => undefined,
   };
-  const conn = new Connection(socket as never, { sessionId: `s-${who.memberId}`, roomId: "ROOM0000", memberId: who.memberId, role: who.role, display }, "203.0.113.1");
+  const conn = new Connection(socket as never, { sessionId: `s-${who.memberId}`, roomId: "ROOM0000", memberId: who.memberId, role: who.role, display }, "203.0.113.1", now ? { now } : {});
   conn.held = new Map();
   conn.sceneId = "s1";
   return { conn, got };
 }
 
-function table() {
-  const dm = viewer(DM);
-  const p1 = viewer(P1);
-  const p2 = viewer(P2);
-  const display = viewer(DISPLAY, true);
+function table(now?: () => number) {
+  const dm = viewer(DM, false, now);
+  const p1 = viewer(P1, false, now);
+  const p2 = viewer(P2, false, now);
+  const display = viewer(DISPLAY, true, now);
   const all = [dm.conn, p1.conn, p2.conn, display.conn];
   return { dm, p1, p2, display, all, clear: () => [dm, p1, p2, display].forEach((v) => (v.got.length = 0)) };
 }
@@ -179,5 +179,47 @@ describe("previews held across a batch that re-projects everything", () => {
     assert.deepEqual(t.p2.got, [{ k: "dragCancel", tokenId: "a" }]);
     assert.deepEqual(t.dm.got, [{ k: "dragCancel", tokenId: "a" }]);
     assert.equal(t.p1.conn.previewsSent.size, 0, "a preview no screen shows keeps no frame (review PV3-ASTRA-2)");
+  });
+});
+
+/**
+ * A preview's entry that goes, by expiry or past the socket's most, sends
+ * its bare cancel only to the screens showing it (review PV3-SEC-4): a
+ * cancel to any other would hand that player the id of a creature they
+ * never saw dragged.
+ */
+describe("a preview that goes ends only where it showed", () => {
+  /** p1's character sees the goblin, p2's does not, and the shared sight sees nothing there. */
+  function visionTable() {
+    clearVisionCache();
+    const state = room();
+    state.scenes.s1 = scene("s1", { bounds: { w: 48, h: 16 }, fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } });
+    state.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }, { memberId: "p2", on: true }] } };
+    state.tokens.a = token("a", { kind: "pc", ownerIds: ["p1"], x: 16, y: 8, actor: dark() });
+    state.tokens.b = token("b", { kind: "pc", ownerIds: ["p2"], x: 36, y: 8, actor: dark() });
+    state.tokens.gob = token("gob", { x: 12, y: 8 });
+    let clock = 1_000_000;
+    const t = table(() => clock);
+    routeEphemeral(state, t.dm.conn, "s1", { k: "dragStart", tokenId: "gob", x: 12, y: 8 }, t.all);
+    assert.deepEqual(t.p1.got, [{ k: "dragStart", tokenId: "gob", x: 12, y: 8 }], "p1 sees the drag");
+    assert.deepEqual([t.p2.got, t.display.got], [[], []], "p2 and the display do not");
+    t.clear();
+    return { state, t, tick: (ms: number) => (clock += ms) };
+  }
+
+  test("expired, it cancels for p1 alone", () => {
+    const { state, t, tick } = visionTable();
+    tick(PREVIEW_STALE_MS);
+    rejudgePreviews(state, t.all);
+    assert.deepEqual(t.p1.got, [{ k: "dragCancel", tokenId: "gob" }]);
+    assert.deepEqual([t.p2.got, t.display.got], [[], []]);
+  });
+
+  test("evicted by a 65th preview, it cancels for p1 alone", () => {
+    const { state, t } = visionTable();
+    for (let i = 0; i < MOST_PREVIEWS_SENT; i++) routeEphemeral(state, t.dm.conn, "s1", { k: "ruler", id: `r-${i}`, points: [{ x: 16.5, y: 8.5 }], shared: true }, t.all);
+    assert.ok(!t.dm.conn.previewsSent.has("drag:gob"));
+    assert.deepEqual(t.p1.got.filter((e) => e.k === "dragCancel"), [{ k: "dragCancel", tokenId: "gob" }]);
+    for (const v of [t.p2, t.display]) assert.deepEqual(v.got.filter((e) => e.k === "dragCancel"), [], v.conn.memberId);
   });
 });
