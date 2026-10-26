@@ -10,9 +10,12 @@ import { tokenAccess } from "../features/tokens/access.ts";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
 import { cycleStep, type ToolCycle } from "../features/toolChoices.ts";
+import { isoOffered, kindSaid, otherViewPress, sayView, topDownTool, turnRefused } from "../features/view/choice.ts";
+import { pickView, readView, shownView, turnView, viewKey } from "../features/view/store.ts";
 import { noteKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
+import { turned } from "../lib/view.ts";
 import { keyLabel, keysInEffect, pressKeys, sameKey, type KeyChanges, type KeyMap } from "./keyBindings.ts";
 import { scopeSlot, type RoomScope } from "./scope.ts";
 import { sayTool, tuckEvent } from "./toolbar.ts";
@@ -298,6 +301,71 @@ export function deletedText(names: readonly string[]): string {
   return names.length === 1 ? `Deleted ${names[0]}. Ctrl+Z brings it back.` : `Deleted ${names.length} tokens. Ctrl+Z brings them back.`;
 }
 
+/** The scene this page shows, with what the view keys read of it. */
+function viewScene(env: ShortcutEnv) {
+  const s = env.getState();
+  const scene = s.sceneId ? s.view?.scenes[s.sceneId] : undefined;
+  if (!scene) return null;
+  const key = viewKey(s.roomId);
+  return { key, sceneId: scene.id, suggested: scene.suggestedView, tool: s.local.tool, stored: readView(key) };
+}
+
+/**
+ * Q and E turn the view, on this scene only and never as a pick
+ * (docs/design-v1-isometric-view.md 6.5). Where the board shows Top-down
+ * they say why they did nothing, which no change on the board would.
+ */
+function turnKey(env: ShortcutEnv, by: 1 | -1): void {
+  const at = viewScene(env);
+  if (!at) return;
+  const shown = shownView({ stored: at.stored, sceneId: at.sceneId, suggested: at.suggested, forcedTopDown: topDownTool(at.tool) !== null, ready: isoOffered });
+  if (shown.kind === "isometric") turnView(at.key, at.sceneId, turned(shown.turn, by));
+  else env.ui.notify(turnRefused(at.stored, at.suggested, at.tool));
+}
+
+/**
+ * I, Q and E (docs/design-v1-isometric-view.md 6.5), for everyone, in the
+ * table only once Isometric is offered (features/view/choice.ts isoOffered),
+ * so neither the sheet nor FEATURES.md lists a key that does nothing.
+ */
+export const VIEW_SHORTCUTS: readonly Shortcut[] = [
+  {
+    id: "view",
+    ...single("i"),
+    name: "Switch view",
+    does: "Switch between top-down and isometric",
+    roles: ["dm", "player"],
+    when: (env) => viewScene(env) !== null,
+    run: (env) => {
+      const at = viewScene(env);
+      if (!at) return;
+      const press = otherViewPress(at.stored, at.suggested, at.tool);
+      pickView(at.key, press.pick);
+      // The status says a change the board shows. While a tool shows Top-down the board shows none, so the key says it.
+      if (press.toast) env.ui.notify(press.toast);
+      else if (topDownTool(at.tool) !== null) sayView(env.scope, kindSaid(press.pick));
+    },
+  },
+  {
+    id: "turnLeft",
+    ...single("q"),
+    name: "Turn left",
+    does: "Turn the isometric view left",
+    roles: ["dm", "player"],
+    when: (env) => viewScene(env) !== null,
+    run: (env) => turnKey(env, -1),
+  },
+  {
+    id: "turnRight",
+    ...single("e"),
+    name: "Turn right",
+    does: "Turn the isometric view right",
+    roles: ["dm", "player"],
+    when: (env) => viewScene(env) !== null,
+    run: (env) => turnKey(env, 1),
+  },
+];
+
 /** Every shortcut, one per line, in the order the sheet lists them. */
 export const SHORTCUTS: readonly Shortcut[] = [
   {
@@ -442,6 +510,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
     roles: ["dm", "player"],
     run: (env) => env.scope.get(fitSlot).fit?.(),
   },
+  ...(isoOffered ? VIEW_SHORTCUTS : []),
   {
     id: "outliner",
     ...single("/"),
@@ -583,6 +652,13 @@ const EVERYONE = ["dm", "player"] as const;
 const DM = ["dm"] as const;
 const PLAYER = ["player"] as const;
 
+/**
+ * The isometric view's row beside its keys (docs/design-v1-isometric-view.md
+ * 6.2: the standees' tap, in canvas/Stage.tsx and state/selection.ts), in
+ * the table only once Isometric is offered, as VIEW_SHORTCUTS are.
+ */
+export const VIEW_BEHAVIORS: readonly Behavior[] = [{ id: "tapAgain", input: "Tap a standee again", does: "Pick the one behind it, in isometric", roles: EVERYONE, device: "pointer" }];
+
 /** Every row beside the keys, in the order the sheet lists them. */
 export const BEHAVIORS: readonly Behavior[] = [
   // The whole room: components/Popover.tsx, which takes the key first, then lib/escape.ts, pages/RoomChrome.tsx useEscape, state/selection.ts dismissal and barDismiss.
@@ -678,6 +754,7 @@ export const BEHAVIORS: readonly Behavior[] = [
     when: "with the Select tool",
     device: "pointer",
   },
+  ...(isoOffered ? VIEW_BEHAVIORS : []),
 
   // The toolbar: state/shortcuts.ts toolShortcut, components/Menu.tsx in Setup and the tool menu (pages/Room.tsx Toolbar).
   // Keys are drawn whole on one line in the sheet, so a row's key stays short and its condition goes in `when`.

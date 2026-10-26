@@ -29,6 +29,8 @@ import {
   stageKeysSlot,
   SURFACES,
   undoShortcut,
+  VIEW_BEHAVIORS,
+  VIEW_SHORTCUTS,
   whoText,
   ZOOM_STEP,
   MOUSE_SECTION,
@@ -524,6 +526,12 @@ describe("the shortcut table", () => {
     assert.equal(keyText("tool:fog", DEFAULT_KEYS), "F");
     assert.equal(keyText("undo", keys), "Ctrl+Z");
     assert.equal(sheetSections("dm", { mouse: true, android: false }, DEFAULT_KEYS)[0]!.rows.find((r) => r.id === "tool:fog")?.input, "F");
+  });
+
+  test("while no page offers Isometric, I, Q, E and the standee's tap are in neither table, so the sheet and FEATURES.md leave them out", () => {
+    for (const s of VIEW_SHORTCUTS) assert.ok(!SHORTCUTS.includes(s), s.id);
+    for (const b of VIEW_BEHAVIORS) assert.ok(!BEHAVIORS.includes(b), b.id);
+    for (const k of ["i", "q", "e"]) assert.ok(!Object.values(DEFAULT_KEYS).includes(k), k);
   });
 
   test("the sheet lists each role's keys from the table itself", () => {
