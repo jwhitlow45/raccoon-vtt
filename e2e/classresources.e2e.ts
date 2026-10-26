@@ -170,32 +170,33 @@ function row(scope: Locator, name: string): Locator {
 }
 
 /**
- * Waits for a resource's count to read `count` ("2 of 3"): with a most of 6
- * or fewer as its pips, filled for each one left, and the same words
- * spoken after its name, else in words beside its name
- * (docs/design-v1-monster-uses.md 3.7).
+ * Waits for a resource's count to read `count` ("2 of 3"): as its pips, filled
+ * for each one left, with a most of 6 or fewer and no `pool`, else as words at
+ * the same place, the line's right end. Either way the same words are spoken
+ * once after its name (docs/design-v1-monster-uses.md 3.7).
  */
-async function countReads(scope: Locator, name: string, count: string): Promise<void> {
+async function countReads(scope: Locator, name: string, count: string, pool = false): Promise<void> {
   const r = row(scope, name);
   const reads = () =>
     r.evaluate((el) => {
       type E = { querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; textContent: string | null };
       const li = el as unknown as E;
-      const pips = li.querySelector("[data-use-pips]");
-      if (!pips) return { pips: null, text: li.textContent ?? "" };
-      return { pips: `${pips.querySelectorAll('[data-pip="left"]').length} of ${pips.querySelectorAll("[data-pip]").length}`, text: li.textContent ?? "" };
+      const end = li.querySelector("[data-use-pips]");
+      if (!end) return { shown: null, words: false, text: li.textContent ?? "" };
+      const pips = end.querySelectorAll("[data-pip]").length;
+      return pips === 0 ? { shown: end.textContent, words: true, text: li.textContent ?? "" } : { shown: `${end.querySelectorAll('[data-pip="left"]').length} of ${pips}`, words: false, text: li.textContent ?? "" };
     });
   const [left, most] = count.split(" of ").map(Number);
-  let last = { pips: null as string | null, text: "" };
+  const wantWords = pool || most! > 6;
+  let last = { shown: null as string | null, words: false, text: "" };
   await waitFor(
     `${name} reading ${count}`,
     async () => {
       last = await reads();
-      const ok = most! <= 6 ? last.pips === count && last.text.includes(`, ${count} left`) : last.pips === null && (await r.getByText(count, { exact: true }).count()) === 1;
-      return ok ? true : null;
+      return last.shown === count && last.words === wantWords && last.text.includes(`, ${count} left`) && (await r.getByText(count, { exact: true }).count()) <= 1 ? true : null;
     },
     10_000,
-  ).catch(() => assert.fail(`${name} reads ${last.pips === null ? `"${last.text}"` : `pips ${last.pips}`}, not ${count} (${left} left)`));
+  ).catch(() => assert.fail(`${name} reads ${last.shown === null ? `"${last.text}"` : `${last.words ? "words" : "pips"} ${last.shown}`}, not ${wantWords ? "words" : "pips"} ${count} (${left} left)`));
 }
 
 /** Thorn's resources as the DM's socket holds them. */
@@ -364,7 +365,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await add.getByRole("checkbox", { name: "Channel Divinity" }).uncheck();
     await add.getByRole("button", { name: "Add 1 resource" }).tap();
     await add.waitFor({ state: "detached" });
-    await countReads(page, "Lay on Hands", "15 of 15");
+    await countReads(page, "Lay on Hands", "15 of 15", true);
 
     add = await openAdd(page);
     await add.getByRole("radio", { name: "Your own" }).check();
@@ -422,14 +423,14 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await shots.take(pat, "cr-c-amount-refused");
     await field.fill("5");
     await hands.getByRole("button", { name: "Spend", exact: true }).tap();
-    await countReads(panel, "Lay on Hands", "10 of 15");
+    await countReads(panel, "Lay on Hands", "10 of 15", true);
     await field.waitFor({ state: "detached" });
     await usedIs("Lay on Hands", 5);
     await waitFor("focus back on Use…", () => pat.evaluate(() => (globalThis as unknown as Doc).document.activeElement?.getAttribute("aria-label") ?? "").then((n) => (n === "Use Lay on Hands, 10 of 15 left" ? true : null)), 5_000);
     await hands.getByRole("button", { name: "Restore Lay on Hands" }).tap();
     await hands.getByRole("textbox", { name: "Lay on Hands to restore, up to 5" }).fill("2");
     await hands.getByRole("button", { name: "Restore", exact: true }).tap();
-    await countReads(panel, "Lay on Hands", "12 of 15");
+    await countReads(panel, "Lay on Hands", "12 of 15", true);
     await usedIs("Lay on Hands", 3);
   });
 
@@ -450,7 +451,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await panel.getByRole("button", { name: "Finish the Short Rest" }).tap();
     await countReads(panel, "Rage", "2 of 3");
     await countReads(panel, "Superiority Dice", "4 of 4");
-    await countReads(panel, "Lay on Hands", "12 of 15");
+    await countReads(panel, "Lay on Hands", "12 of 15", true);
   });
 
   test("cr-c-7. a Long Rest says what it restores and restores all", async () => {
@@ -459,7 +460,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await panel.getByText("A Long Rest also restores Rage and Lay on Hands.", { exact: true }).waitFor();
     await panel.getByRole("button", { name: "Finish the Long Rest" }).tap();
     await countReads(panel, "Rage", "3 of 3");
-    await countReads(panel, "Lay on Hands", "15 of 15");
+    await countReads(panel, "Lay on Hands", "15 of 15", true);
     await waitFor("nothing spent in the DM's copy", () => (stored().every((x) => x.used === 0) ? true : null), 10_000);
   });
 
@@ -550,7 +551,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await setUp(pat, patCdp, PHONE);
     const page = await thornsPage(pat);
     await countReads(page, "Rage", "2 of 4");
-    await countReads(page, "Lay on Hands", "15 of 15");
+    await countReads(page, "Lay on Hands", "15 of 15", true);
 
     const panel = await thornsPanel(dm);
     const combat = panel.getByRole("button", { name: "Combat", exact: true });
@@ -668,7 +669,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await waitFor("focus back on Use…", () => pat.evaluate(() => (globalThis as unknown as Doc).document.activeElement?.getAttribute("aria-label") ?? "").then((n) => (n === "Use Lay on Hands, 0 of 15 left" ? true : null)), 5_000);
     await shots.take(pat, "cr-c-pool-emptied-elsewhere");
     await ops.send({ t: "actor.use", target: { characterId: run.thorn }, use: { kind: "resource", id, amount: 15 }, back: true });
-    await countReads(page, "Lay on Hands", "15 of 15");
+    await countReads(page, "Lay on Hands", "15 of 15", true);
   });
 
   test("cr-c-12c. Pat spends the whole pool from the field and restores it all: each closes the field with no status line, offline and once answered", async () => {
@@ -683,7 +684,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     assert.equal(await status.count(), 0, "a new tap takes the old reason away");
     await hands.getByRole("textbox", { name: "Lay on Hands to spend, up to 15" }).fill("15");
     await hands.getByRole("button", { name: "Spend", exact: true }).tap();
-    await countReads(page, "Lay on Hands", "0 of 15");
+    await countReads(page, "Lay on Hands", "0 of 15", true);
     await hands.getByRole("textbox").waitFor({ state: "detached" });
     await pat.waitForTimeout(500);
     assert.equal(await status.count(), 0, "no status line while the use waits for its answer");
@@ -696,7 +697,7 @@ describe("raccoon-vtt: class resources", { timeout: 900_000 }, () => {
     await hands.getByRole("button", { name: "Restore Lay on Hands" }).tap();
     await hands.getByRole("textbox", { name: "Lay on Hands to restore, up to 15" }).fill("15");
     await hands.getByRole("button", { name: "Restore", exact: true }).tap();
-    await countReads(page, "Lay on Hands", "15 of 15");
+    await countReads(page, "Lay on Hands", "15 of 15", true);
     await hands.getByRole("textbox").waitFor({ state: "detached" });
     await usedIs("Lay on Hands", 0);
     await pat.waitForTimeout(300);

@@ -1439,8 +1439,9 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await pat.goto("about:blank");
   });
 
-  test("mu-d. every Uses title line in line at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: the Aboleth's, the dragon's, the Tarrasque's 6 and Thorn's class resources in their Token panels, and the Tarrasque's, the Aboleth's and Thorn's with Rage at 6 in their tracker rows (docs/design-v1-monster-uses.md 3.1, 3.7)", async () => {
+  test("mu-d. every Uses title line in line at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%: the Aboleth's, the dragon's, the Tarrasque's 6 and Thorn's class resources (a count over 6 and a pool, in words at the right end) in their Token panels, and the Tarrasque's, the Aboleth's and Thorn's with Rage at 6 in their tracker rows (docs/design-v1-monster-uses.md 3.1, 3.7)", async () => {
     const resources = deskSocket.state!.characters[run.thorn]!.resources!;
+    const legendary = dragon()!.legendary!;
     const seen: string[] = [];
     try {
       // Second Wind and Action Surge as a fighter has them, beside Rage and Lay on Hands. Rage at 6 is a short name beside 6 pips.
@@ -1453,9 +1454,13 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
             { id: "sw", name: "Second Wind", max: 3, used: 1, reset: "shortOne" },
             { id: "as", name: "Action Surge", max: 1, used: 0, reset: "short" },
             { id: "loh", name: "Lay on Hands", max: 25, used: 5, reset: "long", pool: true },
+            { id: "sd", name: "Superiority Dice", max: 8, used: 2, reset: "short" },
+            { id: "fp", name: "Focus Points", max: 5, used: 1, reset: "short", pool: true },
           ],
         },
       });
+      // The dragon's counts past 6 stand in words, the monster rows' own, beside Thorn's.
+      await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary: { actionsMax: 7, actionsUsed: 1, resistMax: 7, resistUsed: 0 } } } });
       await turnTo("fu26-thorn");
       for (const view of [DESK, { ...DESK, scale: 1.3 }, PHONE, { ...PHONE, scale: 1.3 }, SMALL, { ...SMALL, scale: 1.3 }]) {
         const at = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
@@ -1471,7 +1476,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
           const uses = sectionIn(panel, "Uses");
           await uses.locator("[data-use-pips]").first().waitFor();
           await uses.scrollIntoViewIfNeeded();
-          await titlesInLine(uses, `${name}'s panel at ${at}`, seen);
+          await titlesInLine(uses, `${name}'s panel at ${at}`, seen, EXPECTED_TITLES[name]);
           await measure(desk, uses, `${name}'s panel Uses at ${at}`);
           await shots.take(desk, `mu-panel-${name.split(" ").pop()!.toLowerCase()}-${tag}`);
         }
@@ -1480,7 +1485,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
         for (const name of ["Tarrasque", "Aboleth", "Thorn"]) {
           const group = await rowUses(desk, name);
           await group.scrollIntoViewIfNeeded();
-          await titlesInLine(group, `${name}'s row at ${at}`, seen);
+          await titlesInLine(group, `${name}'s row at ${at}`, seen, EXPECTED_TITLES[name]);
           await measure(desk, group, `${name}'s row Uses at ${at}`);
           await shots.take(desk, `mu-row-${name.toLowerCase()}-${tag}`);
           await closeSheets(desk);
@@ -1488,6 +1493,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       }
     } finally {
       await ops.send({ t: "character.update", characterId: run.thorn, patch: { resources } });
+      await ops.send({ t: "token.update", tokenId: run.dragon, patch: { actor: { legendary } } });
       await setUp(desk, deskCdp, DESK);
     }
     console.log(`mu title lines:\n${seen.join("\n")}`);
@@ -1500,6 +1506,12 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     assert.deepEqual(patConsole.errors, [], "Pat's page");
   });
 });
+
+/** The counts mu-d must see a title line for: words past 6 on a monster and on a character, and a pool's at any size. */
+const EXPECTED_TITLES: Record<string, string[]> = {
+  [DRAGON]: ["Legendary Resistance", "Legendary Actions"],
+  Thorn: ["Rage", "Superiority Dice", "Lay on Hands", "Focus Points"],
+};
 
 /** A row's count as its pips show it, "2 of 3" for two of three filled, or its words where it shows no pips ("7 of 7"). */
 function shownCount(scope: Locator, kind: string): Promise<string | null> {
@@ -1531,9 +1543,9 @@ async function countShows(scope: Locator, kind: string, count: string): Promise<
  * buttons', and whether they should share it: the name's longest word,
  * the gap and the pips side by side within the line.
  */
-function titleLines(root: Locator): Promise<{ name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; under: number; text: string }[]> {
+function titleLines(root: Locator): Promise<{ name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; under: number; words: boolean; broken: boolean; text: string }[]> {
   return root.first().evaluate((el) => {
-    type R = { left: number; right: number; top: number; bottom: number; width: number };
+    type R = { left: number; right: number; top: number; bottom: number; width: number; height: number };
     type E = {
       getBoundingClientRect(): R;
       querySelector(s: string): E | null;
@@ -1546,8 +1558,8 @@ function titleLines(root: Locator): Promise<{ name: string; pips: number; shares
       childNodes: ArrayLike<{ nodeType: number; textContent: string | null }>;
     };
     const doc = (el as unknown as { ownerDocument: { createRange(): { setStart(n: unknown, o: number): void; setEnd(n: unknown, o: number): void; getBoundingClientRect(): R } } }).ownerDocument;
-    const style = (e: E) => (globalThis as unknown as { getComputedStyle(e: E): { columnGap: string; width: string; whiteSpace: string } }).getComputedStyle(e);
-    const out: { name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; under: number; text: string }[] = [];
+    const style = (e: E) => (globalThis as unknown as { getComputedStyle(e: E): { columnGap: string; width: string; whiteSpace: string; fontSize: string } }).getComputedStyle(e);
+    const out: { name: string; pips: number; shares: boolean; fits: boolean; endOff: number; buttonsOff: number | null; under: number; words: boolean; broken: boolean; text: string }[] = [];
     for (const pips of Array.from((el as unknown as E).querySelectorAll("[data-use-pips]"))) {
       const nameBox = pips.previousElementSibling!;
       const nameEl = nameBox.firstElementChild!;
@@ -1593,6 +1605,9 @@ function titleLines(root: Locator): Promise<{ name: string; pips: number; shares
         endOff: Math.abs(p.right - l.right),
         buttonsOff: buttons.length > 0 ? Math.abs(p.right - Math.max(...buttons)) : null,
         under: p.top - n.bottom,
+        words: pips.querySelector("[data-pip]") === null,
+        // Words are one line tall, so they were not broken inside "20 of 25". The interface size zooms the page, so the font's length is scaled to match the box.
+        broken: p.height > parseFloat(style(pips).fontSize) * scale * 1.9,
         text: `${name}: pips ${Math.round(p.width)} px, name's longest word ${Math.round(longest)} px, line ${Math.round(l.width)} px`,
       });
     }
@@ -1600,10 +1615,14 @@ function titleLines(root: Locator): Promise<{ name: string; pips: number; shares
   });
 }
 
-/** The title lines' rule, as `titleLines` reads them: the pips at the line's right end and on the buttons' right edge, sharing the name's line exactly where they fit beside its longest word. */
-async function titlesInLine(root: Locator, screen: string, seen: string[]): Promise<void> {
-  for (const t of await titleLines(root)) {
+/** The title lines' rule, as `titleLines` reads them: the pips, or the words of a count past 6 or a pool's, at the line's right end and on the buttons' right edge, sharing the name's line exactly where they fit beside its longest word. */
+async function titlesInLine(root: Locator, screen: string, seen: string[], expect: readonly string[] = []): Promise<void> {
+  const lines = await titleLines(root);
+  // A count the rule never reached is not in line, it is missing: every name the caller expects stands among the lines read.
+  for (const name of expect) assert.ok(lines.some((t) => t.name === name), `${screen}: no title line read for ${name} (${lines.map((t) => t.name).join(", ")})`);
+  for (const t of lines) {
     const what = `${screen}, ${t.name}`;
+    if (t.words) assert.equal(t.broken, false, `${what}: its words broke inside the count`);
     seen.push(`${what}: ${t.shares ? "beside the name" : "on the next line"} (${t.text})`);
     assert.ok(t.endOff <= 1, `${what}: the pips ${t.endOff} px from the line's right end`);
     if (t.buttonsOff !== null) assert.ok(t.buttonsOff <= 1, `${what}: the pips ${t.buttonsOff} px from the buttons' right edge`);
