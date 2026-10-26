@@ -67,7 +67,7 @@ One `PartySight` per scene (`shared/rules/vision.ts`, through `shared/ruleHooks.
 | Fog tiles | `projectFogCtx` (840) | DM and party layers | DM, party and own layers |
 | Labels, stamps, pins, found traps | `fogReader` (223), `anyFogTiles` (301) | shared fog | own fog and presence map |
 | Door states in chunks | `projectChunkForPlayer` (781) | live, everywhere | unchanged (D-261025-17) |
-| Door reach | `doorSeen` on the device (client/features/doors/doors.ts:180), `doorCheck` on the server (permissions.ts:1860) | shared fog on the device, the projected chunk, reach and a clear line on the server | own fog on the device, the server's check unchanged |
+| Door reach | `doorSeen` and `seenDoor` on the device (client/features/doors/doors.ts:93, 147), `doorCheck` on the server (permissions.ts:1861) | shared fog on the device. The server reads no fog: the projected chunk, reach and a clear line | own fog on the device, the server's check unchanged |
 | A player's own drag | walkWorld.ts:142 | the device's fog and tokens | own ground, shared creatures |
 | Shared and kept walking rulers | walkWorld.ts:142, 245 | the device's fog and tokens | shared ground and creatures |
 | Traps going off, players' trap lines, found marks | traps.ts:167, rules/traps.ts:406, 1370, 1427 | seen by all | unchanged, shared |
@@ -143,7 +143,7 @@ One `PartySight` per scene (`shared/rules/vision.ts`, through `shared/ruleHooks.
 | A player's own drag (attach/walk.ts:24, movement/drop.ts:105) | own fog, creatures by `publicToken` |
 | Shared and kept walking rulers (measure/walkRuler.ts:244), attach lists (attach/list.ts:153) | `fogAll`, `publicToken` |
 | The reducer's predicted marks | the shared branch, never a list |
-| Door reach before sending (`doorSeen`, client/features/doors/doors.ts:180) | own fog, while the server's `doorCheck` stays as it is |
+| Door reach before sending (`doorSeen` and `seenDoor`, client/features/doors/doors.ts:93, 147) | own fog. The fog check is the device's alone: the server's `doorCheck` reads no fog and stays as it is |
 
 Doors come from the chunks on every device, as today. A display's own sight and fog are already the shared ones. A DM's device keeps the union for its tools and reads the shared fog from the DM's and party's layers.
 
@@ -346,7 +346,22 @@ Door memory per player (decision 8, its own feature if the owner asks). Traps fo
 
 ## 14. As built
 
-The builder fills this in the lane's docs commit with every place the build went its own way.
+**PV1** (contract, marks and memory). Every place the build went its own way, and what it leaves to later lanes:
+
+- **The hook.** `visionRules` gains one hook, `holderSight(state, sceneId, memberId | null): PartySight`, where `null` asks for the shared sight. There is no `unionSight` (7.5's Ctx line): `partySight` already is the union and stays the DM's. The shipped stub returns no sight, so a per-player scene fails closed until PV2. PV2 can serve sweep moments (6.1) from the same hook, with a `PartySight` whose `seesToken` is the point query and whose tiles are drawn only when read: the witness checks of a moment read only `seesToken`.
+- **The list's shape.** `RoomState.holders[sceneId]` is `{ sceneId, rev, entries }`, an entity like the others, rather than a bare array, so its key, its projection and the undo step treat it as they treat every entity.
+- **The merge rule** is not gated by op version. A patch without `perPlayer` keeps it, and `false` clears it, for every op. No op stored before op version 23 ran on a per-player scene, since none existed, so replay is unchanged, as the golden test shows. The protocol's patch takes `perPlayer: boolean` (`sceneVisionPatch`), while the stored scene takes only `true`.
+- **Versions.** Snapshot 24 adds empty `holders` and `exploredBy` and returns the same object when both are there. Op 23 has no step: its ops replay as stored.
+- **No explore step yet.** `exploringSceneId` answers null on a per-player scene, so neither the party's layer nor any holder's grows there until PV3 builds the step's per-holder bits and joins (`server/rooms/explore.ts`). The reducer already takes `sys.explore { members, join }` and refuses both on a whole-party scene.
+- **The derived maps.** `sightAll`, `fogAll`, `exploredAny` and `holders` are in a projection only on a per-player scene and only while they hold something, so a whole-party projection is today's, byte for byte. `fogAll` goes to every viewer, the DM too, and whether or not fog is on: the DM's device is a projection as well, and reads shared rulers by it.
+- **Failing closed.** On a per-player scene a copy without `sightAll` sees nothing for "seen by all", and one without `fogAll` is fully fogged, by `partySightOf` and `sharedGround` (security rule 10).
+- **Route corners.** `routeSeen` on a per-player scene with fog also needs every spot of the leg on shared ground (`seenAtEvery`), so non-owners get corners only there. An owner keeps a public leg's corners whatever their fog. A private leg keeps them only where `legOnGround` finds every spot on that owner's ground, sampled along the route's lattice at the stop's size.
+- **`publicToken`** on a player's copy of a per-player scene reads `aboveFog` as exempt, as `seenWhereMoved` does, since a copy holds no owners of another's token. `WorldOptions.sharedGround` is the option a shared or kept walking ruler passes. PV4 wires it on the device.
+- **Marks.** `seenMark` and `rowSeenMark` return `{ seen: true }`, a sorted `seenBy` (present when empty), or nothing. Area reminders use `areaSeenMark` at the sweep moment: the holders and the creature's player owners who saw both the creature and the area then. A line holding a list settles as a party line, the DM's line drops its lists (`listsStripped`), and each copy reads `seen: true` for its reader. A reminder still reaches a witness only while they see the creature and the area when they read it, as on a whole-party scene.
+- **The fold** runs after every op in `shared/reducer.ts`, an undo included, so undoing a switch to Per player pools the maps too. Duplicating a scene with its fog copies its list and layers, and removing a member scrubs their entries, layers, stop and turn-start lists, and the turn starts in `encounterHistory`.
+- **Outside the owned files**, kept minimal: `shared/reducer.ts` (the fold and the new op), `shared/permissions.ts` (players may not send `vision.holders`), `shared/reads.ts`, and the exhaustive cases of `server/rooms/sizeGuard.ts`, `remap.ts` and the bench rooms. Test fakes of `VisionRules` gained `holderSight`.
+- **The differential harness** judges a table display beside every player, and a pair may set `ownSightDiffers` for the variant of section 10, which still requires the mover's fog to be equal in both rooms.
+- **Left to PV3**: the measure row of the differential test and every reserve of 6.8 (`sizeGuard.ts`), `SAME_FOR_EVERY_PLAYER` and `KEPT_AS_VALUES` in the fan-out, the 6.9 memo and its mutants, import mapping of lists, and the preview socket. Until then a DM who sends `perPlayer: true` by hand gets a scene where every player has the stub's empty sight and the shared fog, which leaks nothing.
 
 ## 15. Review dispositions
 
