@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkKey, keys, tileKey, type EntityKey } from "#shared/keys.ts";
-import type { BuildChunk, Label, RoomState, Viewer } from "#shared/model.ts";
+import type { BuildChunk, Label, LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, diffProjection, hashValue, perPlayerScene, projectEntity, projectState, stableStringify, viewerSceneId, type ProjectedState } from "#shared/project.ts";
 import { opSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -10,7 +10,7 @@ import { clearVisionCache } from "#shared/rules/vision.ts";
 import { exploreFor, perPlayerOp, perPlayerState, playersOf, withCellVision } from "#shared/perPlayerTestutil.ts";
 import { DM, env, pick, rng, room, scene, trap } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
-import { buildSnapshot, candidateKeys, publishBatch, type CommittedBatch } from "./fanout.ts";
+import { buildSnapshot, candidateKeys, previewOmits, publishBatch, type CommittedBatch } from "./fanout.ts";
 
 /**
  * The fan-out's projection classes (docs/design-v1-per-player-vision.md
@@ -22,18 +22,27 @@ import { buildSnapshot, candidateKeys, publishBatch, type CommittedBatch } from 
 
 type Socket = { conn: Connection; sent: string[] };
 
-function socket(state: RoomState, viewer: Viewer & { display?: boolean }, sceneId: string | null, n: number): Socket {
+/** A viewer, a table display, or a DM's view as the player `previewOf`. */
+type Opened = Viewer & { display?: boolean; previewOf?: string };
+
+function socket(state: RoomState, viewer: Opened, sceneId: string | null, n: number): Socket {
   const sent: string[] = [];
   const raw = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(text), close: () => undefined, terminate: () => undefined };
-  const conn = new Connection(raw as never, { sessionId: `s-${viewer.memberId}-${n}`, roomId: "CLASSES1", memberId: viewer.memberId, role: viewer.role, display: viewer.display === true }, "203.0.113.9");
+  const grant = { sessionId: `s-${viewer.memberId}-${n}`, roomId: "CLASSES1", memberId: viewer.memberId, role: viewer.role, display: viewer.display === true, ...(viewer.previewOf === undefined ? {} : { previewOf: viewer.previewOf }) };
+  const conn = new Connection(raw as never, grant, "203.0.113.9");
   conn.sceneId = sceneId;
   conn.held = buildSnapshot(state, 0, conn, 0).held;
   return { conn, sent };
 }
 
-/** The DM on each scene, every player with two sockets, and a table display, opened in pairs: one for the classes, one alone. */
+/**
+ * The DM on each scene, every player with two sockets, a table display,
+ * and the DM's view as the first player beside that player's own (review
+ * PV3-SEC-2), opened in pairs: one for the classes, one alone.
+ */
 function table(state: RoomState): { classes: Socket[]; alone: Socket[] } {
-  const viewers: [Viewer & { display?: boolean }, string | null][] = [
+  const first = playersOf(state)[0];
+  const viewers: [Opened, string | null][] = [
     [DM, "s1"],
     [DM, "s2"],
     ...playersOf(state).flatMap((p): [Viewer, null][] => [
@@ -41,6 +50,7 @@ function table(state: RoomState): { classes: Socket[]; alone: Socket[] } {
       [p, null],
     ]),
     [{ memberId: "display:abcdefghijkl", role: "player", display: true }, null],
+    ...(first ? [[{ ...DM, previewOf: first.memberId }, null] as [Opened, null]] : []),
   ];
   return { classes: viewers.map(([v, s], i) => socket(state, v, s, i)), alone: viewers.map(([v, s], i) => socket(state, v, s, i)) };
 }
@@ -56,11 +66,23 @@ function publishAlone(batch: CommittedBatch, sockets: readonly Socket[]): void {
   const candidates = [...candidateKeys(batch, watched, live.map((c) => c.viewer))].sort();
   for (const conn of live) {
     const next = new Map<EntityKey, unknown>();
-    for (const key of candidates) next.set(key, projectEntity(key, batch.after, conn.viewer, { sceneId: conn.sceneId }));
+    for (const key of candidates) {
+      const value = projectEntity(key, batch.after, conn.viewer, { sceneId: conn.sceneId });
+      // A view as a player leaves out every whisper its DM is not party to.
+      const omitted = conn.previewBy !== null && key.startsWith("log:") && value !== null && previewOmits(value as LogEntry, conn.previewBy);
+      next.set(key, omitted ? null : value);
+    }
     const diff = diffProjection(conn.held!, next, hashValue);
     conn.held = diff.held;
     if (diff.changes.length > 0) conn.send({ t: "ev", seq: batch.seq, changes: diff.changes });
   }
+}
+
+/** A socket's fresh projection: a view as a player's leaves out every whisper its DM is not party to, as its snapshot does. */
+function shownTo(state: RoomState, conn: Connection): ProjectedState {
+  const fresh = projectState(state, conn.viewer, { sceneId: conn.sceneId });
+  const by = conn.previewBy;
+  return by === null ? fresh : { ...fresh, log: fresh.log.filter((line) => !previewOmits(line, by)) };
 }
 
 function batchOf(seq: number, before: RoomState, after: RoomState, touched: EntityKey[], global: boolean): CommittedBatch {
@@ -73,6 +95,7 @@ describe("the fan-out's projection classes", () => {
       let compared = 0;
       let perPlayerBatches = 0;
       let sharedSight = 0;
+      let omitted = 0;
       for (let seed = 1; seed <= 40; seed++) {
         clearVisionCache();
         const r = rng(seed * 9173);
@@ -80,8 +103,10 @@ describe("the fan-out's projection classes", () => {
         let { classes, alone } = table(state);
         for (let i = 0; i < 40; i++) {
           const players = playersOf(state);
-          const who: Viewer = i % 4 === 3 && players.length > 0 ? pick(r, players) : DM;
-          const raw: Op = perPlayerOp(r, state, who);
+          // Now and then the first player whispers to the second, which the DM's view as the first must leave out.
+          const whisper = i % 8 === 5 && players.length > 1;
+          const who: Viewer = whisper ? players[0]! : i % 4 === 3 && players.length > 0 ? pick(r, players) : DM;
+          const raw: Op = whisper ? { t: "log.whisper", to: [players[1]!.memberId], text: `psst ${i}` } : perPlayerOp(r, state, who);
           const parsed = opSchema.safeParse(raw);
           if (!parsed.success) continue;
           const before = state;
@@ -102,6 +127,13 @@ describe("the fan-out's projection classes", () => {
           const batch = batchOf(100 + i, before, after, touched, global);
           publishBatch(batch, classes.map((s) => s.conn), () => undefined);
           publishAlone(batch, alone);
+          if (whisper) {
+            const own = classes.find((c) => c.conn.previewBy === null && c.conn.memberId === players[0]!.memberId)!;
+            const view = classes.find((c) => c.conn.previewBy !== null)!;
+            assert.ok(own.sent.some((text) => text.includes(`psst ${i}`)), `seed ${seed} op ${i}: the whisper reached its sender`);
+            assert.ok(!view.sent.some((text) => text.includes(`psst ${i}`)), `seed ${seed} op ${i}: the view as its sender left it out`);
+            omitted++;
+          }
           const scene = after.meta.playerSceneId === null ? undefined : after.scenes[after.meta.playerSceneId];
           if (perPlayerScene(scene)) perPlayerBatches++;
           for (const [k, a] of classes.entries()) {
@@ -124,36 +156,51 @@ describe("the fan-out's projection classes", () => {
       assert.ok(compared > 2000, `only ${compared} events compared`);
       assert.ok(perPlayerBatches > 500, `only ${perPlayerBatches} batches on a per-player scene`);
       assert.ok(sharedSight > 20, `only ${sharedSight} batches with holders sharing a raster`);
+      assert.ok(omitted > 40, `only ${omitted} whispers between players`);
     });
   });
 
-  test("a socket's events still give its fresh projection after many batches", () => {
+  test("a socket's events still give its fresh projection after many batches, the explore step's included", () => {
     withCellVision(() => {
-      for (let seed = 1; seed <= 12; seed++) {
+      let layers = 0;
+      for (let seed = 1; seed <= 24; seed++) {
         clearVisionCache();
         const r = rng(seed * 31);
         let state = perPlayerState(r);
         const { classes } = table(state);
-        const views = classes.map((s) => projectState(state, s.conn.viewer, { sceneId: s.conn.sceneId }));
+        const views = classes.map((s) => shownTo(state, s.conn));
         const players = playersOf(state).map((p) => p.memberId).join();
         for (let i = 0; i < 30; i++) {
           const parsed = opSchema.safeParse(perPlayerOp(r, state, DM));
           if (!parsed.success) continue;
-          const result = applyOp(state, parsed.data, DM, env(100 + i));
+          const result = applyOp(state, parsed.data, DM, env(200 + 2 * i));
           if (!result.ok || parsed.data.t === "sys.memberRemove" || parsed.data.t === "sys.memberJoin") continue;
-          publishBatch(batchOf(100 + i, state, result.state, result.touched, result.global), classes.map((s) => s.conn), () => undefined);
-          state = result.state;
+          let after = result.state;
+          const touched = [...result.touched];
+          let global = result.global;
+          // The explore step in the same batch, as the actor appends it, so holders' layers are written here too (review PV3-SEC-1).
+          const explore = exploreFor(after);
+          if (explore) {
+            const second = applyOp(after, opSchema.parse(explore), DM, env(201 + 2 * i));
+            assert.ok(second.ok, `seed ${seed} op ${i}: the explore step was refused`);
+            after = second.state;
+            touched.push(...second.touched);
+            global ||= second.global;
+            if (second.touched.some((key) => key.startsWith("exploredBy:"))) layers++;
+          }
+          publishBatch(batchOf(100 + i, state, after, touched, global), classes.map((s) => s.conn), () => undefined);
+          state = after;
           for (const [k, s] of classes.entries()) {
             for (const text of s.sent.splice(0)) {
               const msg = JSON.parse(text) as ServerMessage;
               if (msg.t === "ev") views[k] = applyChanges(views[k]!, msg.changes as Change[]);
             }
-            const fresh = projectState(state, s.conn.viewer, { sceneId: s.conn.sceneId });
-            assert.equal(stableStringify(views[k]), stableStringify(fresh), `seed ${seed} op ${i}: ${s.conn.memberId}`);
+            assert.equal(stableStringify(views[k]), stableStringify(shownTo(state, s.conn)), `seed ${seed} op ${i}: ${s.conn.memberId}${s.conn.previewBy === null ? "" : " (a view as them)"}`);
           }
         }
         assert.equal(playersOf(state).map((p) => p.memberId).join(), players);
       }
+      assert.ok(layers >= 10, `only ${layers} batches wrote a holder's layer`);
     });
   });
 });
