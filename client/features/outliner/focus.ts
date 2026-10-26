@@ -27,7 +27,7 @@ export function focusOutlineRow(row: OutlineRow, env: { scope: RoomScope; ui: Ro
   pick(row, env);
   // After the pick, so a token lands clear of the action bar it opens, and nothing else keeps clear of a bar the pick closed (canvas/barDock.ts).
   const target = frameRect(row.rect);
-  env.scope.get(fitSlot).show?.((viewport, bars, bar) => findCamera(viewport, target, bars, bar));
+  env.scope.get(fitSlot).show?.((viewport, bars, bar, view) => findCamera(viewport, target, bars, bar, view));
 }
 
 function pick(row: OutlineRow, env: { scope: RoomScope; ui: RoomUi; actions: RoomActions; sceneId: string }): void {

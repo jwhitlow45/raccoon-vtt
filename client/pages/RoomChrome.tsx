@@ -445,7 +445,7 @@ export function FindButton(props: { openSheet(): OpenSheet | null }) {
     const target = findRect(token);
     const cover = sheetCover(props.openSheet());
     // The open sheet's cover and the token bar's, the larger on each side.
-    slot.show?.((viewport, bars, bar) => findCamera(viewport, target, bars, largerEach(cover, bar)));
+    slot.show?.((viewport, bars, bar, view) => findCamera(viewport, target, bars, largerEach(cover, bar), view));
   };
   return (
     <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>

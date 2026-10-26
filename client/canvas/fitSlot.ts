@@ -1,4 +1,5 @@
 import type { Camera, Insets, Size } from "../lib/camera.ts";
+import type { View } from "../lib/view.ts";
 import { scopeSlot } from "../state/scope.ts";
 
 /**
@@ -11,9 +12,9 @@ import { scopeSlot } from "../state/scope.ts";
  * - `show` moves to a camera the caller works out from the canvas size, the
  *   bars over it and what the docked token bar covers past those bars
  *   (canvas/barDock.ts barCover), as "Find my token" does
- *   (features/find/findToken.ts).
+ *   (features/find/findToken.ts), in the view the board shows.
  */
 export const fitSlot = scopeSlot(() => ({
   fit: null as (() => void) | null,
-  show: null as ((camera: (viewport: Size, bars: Insets, bar: Insets) => Camera) => void) | null,
+  show: null as ((camera: (viewport: Size, bars: Insets, bar: Insets, view: View) => Camera) => void) | null,
 }));

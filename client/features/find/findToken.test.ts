@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Character, Token } from "#shared/model.ts";
 import { character, token } from "#shared/testutil.ts";
-import { fitRect, NO_INSETS } from "../../lib/camera.ts";
-import { TOP_DOWN, viewBox } from "../../lib/view.ts";
+import { fitRect, NO_INSETS, viewToScreen } from "../../lib/camera.ts";
+import { isometric, TOP_DOWN, toView, viewBox } from "../../lib/view.ts";
 import { barCover, largerEach, pastBars } from "../../canvas/barDock.ts";
 import { FIND_ROOM_CELLS, findCamera, findRect, nextOwnToken, sheetCover } from "./findToken.ts";
 
@@ -112,3 +112,17 @@ describe("find my token", () => {
     assert.equal(6.5 * cam.scale + cam.y, 52 + (300 - 52 - 60) / 2);
   });
 });
+
+describe("Find my token in Isometric (docs/design-v1-isometric-view.md 4.2)", () => {
+  test("the found token's middle shows in the middle of the map left clear, at every turn", () => {
+    const viewport = { width: 390, height: 844 };
+    const bars = { top: 56, right: 0, bottom: 64, left: 0 };
+    const target = findRect(token("t1", { x: 12, y: 7 }));
+    for (const turn of [0, 1, 2, 3] as const) {
+      const cam = findCamera(viewport, target, bars, NO_INSETS, isometric(turn));
+      const shown = viewToScreen(cam, toView(isometric(turn), { x: target.x + target.width / 2, y: target.y + target.height / 2 }));
+      assert.ok(Math.abs(shown.x - 195) < 1e-9 && Math.abs(shown.y - (56 + (844 - 120) / 2)) < 1e-9, `turn ${turn}`);
+    }
+  });
+});
+
