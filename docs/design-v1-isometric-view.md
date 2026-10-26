@@ -1,12 +1,12 @@
 # raccoon-vtt v1: an isometric view of the board
 
-Status: draft 3, revised for design review rounds 1 and 2 (section 15 maps every finding) and D-261026-5. Code is cited from main at `8b23756c`. Nothing is built. The build starts after the hex grids' H1 lands, and so after per-player vision.
+Status: draft 4, revised for design review rounds 1 to 3 (section 15 maps every finding), D-261026-5 and D-261026-7. Code is cited from main at `8b23756c`. Nothing is built. The build starts after the hex grids' H1 lands, and so after per-player vision.
 
 ## 1. The owner's words
 
 The project owner, 2026-10-26: "Also if possible adding an option for an isometric view of the board would be great wherever that fits in".
 
-D-261026-1 sets the scope: a per-device view choice, Top-down (today's board, the default) or Isometric. The DM may set a scene's suggested view, which a device follows until its user picks one. Play works in it with the same rules. Map building tools may switch the board to Top-down while in use, each with a reason. Tokens stand up as standees with their existing art, known heights show as height, and the view turns in 90 degree steps, projected as the common 2:1 game "isometric". D-261026-5 settles round 1: a pick holds for the whole room until the user picks "Follow the scene" again, a turn alone is never a pick, and Isometric never shows a player more than Top-down (5.2). Asking the owner is off, so every other choice is a guess at the owner's likely answer, listed with the options it rejects.
+D-261026-1 sets the scope: a per-device view choice, Top-down (today's board, the default) or Isometric. The DM may set a scene's suggested view, which a device follows until its user picks one. Play works in it with the same rules. Map building tools may switch the board to Top-down while in use, each with a reason. Tokens stand up as standees with their existing art, known heights show as height, and the view turns in 90 degree steps, projected as the common 2:1 game "isometric". D-261026-5 settles round 1: a pick holds for the whole room until the user picks "Follow the scene" again, a turn alone is never a pick, and Isometric never shows a player more than Top-down (5.2). The owner then asked whether walls and raised ground are textured, and D-261026-7 says yes, from the builder's existing textures (5.5). Asking the owner is off, so every other choice is a guess at the owner's likely answer, listed with the options it rejects.
 
 ## 2. The answer in short
 
@@ -14,7 +14,7 @@ D-261026-1 sets the scope: a per-device view choice, Top-down (today's board, th
 - **2:1 dimetric.** The ground turns 45 degrees and halves in height, heights rise √3/2 of a cell per cell, and the view turns in four steps.
 - **Standees.** Each token's art stands upright on its ring, in depth order with raised ground and walls. A covered standee shows its outline, and a second tap picks the one behind.
 - **The stand rule.** For a player, anything that stands up stands only where every fog sub-cell under it is revealed to that viewer. Otherwise it lies flat under the fog, as Top-down draws it. Drawn heights never read terrain the viewer has not seen.
-- **Heights stand.** Seen raised ground becomes columns whose tops carry the map, grid, areas and fog. Pits open. Walls stand half a cell high, per quarter-cell run of revealed fog.
+- **Heights stand.** Seen raised ground becomes columns whose tops carry the map, grid, areas and fog and whose sides wear the builder's textures. Pits open. Walls stand half a cell high in stone, per quarter-cell run of revealed fog.
 - **Four DM tools show Top-down while in use:** the map builder, fog, line up grid and traps.
 - **The choice:** a View button beside Fit, keys I, Q and E, a pick per device and room, and a DM's "Suggested view" per scene.
 - **Cost**, from the prototype's draw-call timings on the 4x CPU stand-in for a mid phone: a typical scene's pan frame is about 2 ms over Top-down's, and a local drag redraws only the drag layer. At the caps a pan frame is 1.4 to 1.6 times Top-down's, with walls and columns flat below 12 px a cell. Every gate is `TaskDuration`, measured by ISO-2's bench (11).
@@ -37,7 +37,8 @@ D-261026-1 sets the scope: a per-device view choice, Top-down (today's board, th
 - **ISO-D14 Keep in view:** the ground under the clear area's middle stays on the scene. Rejected: the 64 px rule on the diamond's box (its empty corners).
 - **ISO-D15 Both drawing trees stay mounted** once Isometric has shown in the room, the hidden one's Stage at 0x0, and every controller with effects mounted once outside both (5.1). Rejected: remounting on each switch (194 to 332 ms at the caps, draw calls).
 - **ISO-D16 The table display** picks its own view under its own key. Rejected: mirroring the DM's view.
-- **ISO-D17 Follow the DM** sends the world box of all the ground the DM sees, heights included. Rejected: a tight square on the middle (cuts raised ground at the edges), a new event field (a protocol change for a display nicety).
+- **ISO-D17 Follow the DM** sends the DM's camera, never ground: its middle at 0, its size in view units, its view and turn. Each display fits the ground it may see. Rejected: a box over the DM's drawn heights (its size showed displays hidden terrain), a box at 0 plus a fixed margin (cuts high ground or overshoots by a guess), a tight square on the middle.
+- **ISO-D18 Textures (D-261026-7):** sides wear their cell's builder texture, walls stone, closed doors wood, all from the builder's openly licensed textures. Rejected: flat tones only, the top's edge pixels stretched down (smears), stone on every side (a grassy bank would read as a wall).
 
 ## 4. The projection
 
@@ -63,24 +64,27 @@ depth(x, y)      = s*x + c*y                // larger is nearer the viewer
 - In Konva the ground is two groups, `scaleY 0.5` outside `rotation 45 + 90q`. Their inverse, for upright parts inside, is one group with `rotation -(45 + 90q), scaleY 2`. A unit test pins Konva's absolute transform to `toView` within 1e-9 px.
 - **No exactness is needed.** No rule reads the view. Round trips agree within 1e-9 cells.
 - **`ViewPoint`** is a branded point. `worldToScreen` and `screenToWorld` become `viewToScreen` and `screenToView`, and `zoomAt`, `fitRect`, `rectClear`, `cameraForView` and `keepInView` take view points, so the typecheck lists every caller.
-- **`groundAtMiddle(live)`** gives the ground point under the clear area's middle and replaces every hand-written `(viewport / 2 - cam.x) / scale` and every read of `stage.x()` and `stage.scaleX()`: `viewFromCamera` (scenes/create.ts:171), the spawns (CharacterCard.tsx:304, CompanionsSection.tsx:276, EncountersPanel.tsx:328, grid/tool.tsx:24), `focusFromStage` (dm/camera.ts:41), the view event (dm/tableDisplay.ts:57), CameraLayer.tsx:52 and 71, PingLayer.tsx:177 and PinLayer.tsx:136. A unit test scans client/ and fails on those patterns outside lib/camera.ts and lib/view.ts.
+- **`groundAtMiddle(live)`** gives the point at 0 under the clear area's middle. It reads no heights, so no point a device sends depends on terrain another viewer cannot see. It replaces every hand-written `(viewport / 2 - cam.x) / scale` and every read of `stage.x()` and `stage.scaleX()`: `viewFromCamera` (scenes/create.ts:171), the spawns (CharacterCard.tsx:304, CompanionsSection.tsx:276, EncountersPanel.tsx:328, grid/tool.tsx:24), `focusFromStage` (dm/camera.ts:41), the view event (dm/tableDisplay.ts:57), CameraLayer.tsx:52 and 71, PingLayer.tsx:177 and PinLayer.tsx:136. A unit test scans client/ and fails on those patterns outside lib/camera.ts and lib/view.ts.
 
 ### 4.2 Pan, zoom, fit, turns and following
 
 - **Pan, pinch and wheel** are unchanged, in view space.
 - **Fit** fits the target's view box: its four corners through `toView` at 0, the top raised by the highest drawn lift inside. `sceneMinScale` reads the same box.
 - **Keep in view** clamps the ground under the clear area's middle into the scene's rectangle. `barShift` pans by its dy and clamps the same way.
-- **A turn or a view switch** keeps one world point still on screen: the selected token's ground center while on screen, else `groundAtMiddle`. The scale stays.
+- **A turn or a view switch** keeps one world point still on screen: the selected token's ground center while on screen, else `pickGround` of the clear area's middle, on this device only. The scale stays.
 - **Boxes.** `boardViewOf` returns view boxes, so upright pills slide as today.
 - **World points with a zoom** (a starting view, Follow me, Bring everyone here, Look here, follow the turn, Find my token) keep their meaning. Each device centers the point in its own view.
-- **Follow the DM (ISO-D17).** An Isometric DM's device sends the world box of the clear canvas's corners through `toWorld` at the lowest and the highest drawn ground in view, as the event's world x, y, w and h. So a raised platform in view is inside it. The box can hold up to about 3.3 times the ground the DM sees at 390 by 844, and the display shows at least what the DM sees. The receiver fits the box through its own projection. A Top-down DM sends today's numbers.
+- **Follow the DM (ISO-D17).** A Top-down DM's `view` event stays as today. An Isometric DM's event keeps x, y, w and h as the box of its clear canvas's corners at 0, terrain-free, and adds `iso: { turn, vw, vh }`: its turn, and its clear canvas's size over its scale in view units, centered on its middle at 0.
+  - **Protocol.** The schema (shared/protocol.ts:2542) takes `iso` as an optional strict object, `turn` an integer 0 to 3, `vw` and `vh` from 0.01 to 2,000 like `w` and `h`. The server routes it to displays as today (ephemeral.ts:161). A display page not yet reloaded reads only x, y, w and h, and fits the box at 0.
+  - **The fit.** A display in Isometric at the same turn frames the DM's view rectangle exactly. Any other display takes that rectangle's ground at 0 and grows it by its own drawn heights inside it (its shared fog, 4.3), then fits the world box through its own projection. It promises the ground the display may see under the DM's camera.
+  - The event depends on the DM's camera alone, so hidden terrain changes neither the event nor the fit.
 
 ### 4.3 Drawn heights and what lies under the pointer
 
 **One source of drawn heights.** `drawnGround(cell)` is 0 below the ISO-D12 threshold and on cells this viewer has not seen (`seenGround`, client/features/builder/heights/ground.ts:36, is null), else the cell's ground. `seenFootprintGround` is the highest `seenGround` under a footprint, unseen cells counting 0, and `drawnFootprintGround` the same through `drawnGround`.
 
 - **A standee's base** is `drawnFootprintGround + elevation - seenFootprintGround`. Above the threshold that is its elevation. Below it, its lift over the seen ground. Hidden terrain never enters, so the same visible state over different hidden heights draws the same pixels. A negative offset, a token inside the ground, appears only where that ground is seen.
-- **Mid-drag**, the previewed base applies the landing rule (`landedElevation`, movement/drop.ts) to drawn ground, so a fogged platform never lifts a standee. After the drop the stored elevation draws by the formula above.
+- **Mid-drag**, the previewed base applies the landing rule (`landedElevation`, movement/drop.ts) to drawn ground, so a fogged platform never lifts a standee. After the drop the stored elevation draws by the formula above, so after a drop onto hidden ground the stem shows the badge's own number, as Top-down's badge already does.
 - Columns, pits, wall bases, uprights, picking, fit, the lift margin and culling all read drawn heights. Rules keep reading real heights, so a ruler stop's stored z is still `seenGround`.
 
 `pickGround(screen)`, grid-owned, gives the world point a press means. In Top-down it is `toWorld(screenToView(screen))`.
@@ -108,7 +112,7 @@ In Isometric the board is two stages, one over the other:
 2. **The main stage** holds three layers. The relief holds the ground group again, with the depth list of 5.6. The drag layer holds what a local drag moves: the pressed standee, its decor, its path and label, and its rings, attached areas and tethers. The overlay, in view space, holds uprights, silhouettes, decor and the moving marks: pings, the hold ring, the laser, area previews, rulers, other members' previews, and the rings, attached areas and tethers of a token another member is dragging.
 
 - **One draw a frame.** In Isometric the Stage owns one requestAnimationFrame scheduler. After mount it assigns `batchDraw` on the ground and relief Layer instances to a function that marks the scheduler, so react-konva's commits, Konva's own calls and `Stage.batchDraw` all reach it. Each frame it draws the ground if marked, then the relief if marked or if the ground drew. The drag and overlay layers keep Konva's own `batchDraw`. The bench counts draws per frame.
-- **Moving marks.** While a token is live-dragged, here or on another device, its range rings, attached areas (auras) and tethers draw as moving marks at their drawn height, and return to the ground stage at the drop. Rings are above the fog in Top-down and draw whole. An aura or tether, under the fog in Top-down, draws clipped to the viewer's revealed sub-cells.
+- **Moving marks.** While a token is live-dragged, here or on another device, its range rings, attached areas (auras) and tethers draw as moving marks at their drawn height, and return to the ground stage at the drop. Rings are above the fog in Top-down and draw whole. An aura or tether, under the fog in Top-down, draws clipped to the viewer's revealed sub-cells, with the cosmetic loss 5.2 accepts.
 - **Both trees (ISO-D15).** The Top-down and Isometric drawing trees are drawing only. Every controller with effects mounts once, outside both, whichever view shows: CameraLayer's camera events, PingLayer's sound and vibration, TemplateLayer's and TetherLayer's reminder subscriptions, and the frame clocks (remote drag easing, ping and laser animation, sight tile writes). The hidden tree's Stage is sized 0x0, which frees its canvases and keeps its nodes, and it is memoized out of camera renders.
 - Top-down keeps today's four layers. `LayerDef` (client/features/layers.ts) gains `iso: "ground" | "moving" | "upright" | "off"`.
 
@@ -119,7 +123,6 @@ In Isometric the board is two stages, one over the other:
 - **Always standing:** party members and tokens every player always sees (`drawsAboveFog`), and everything on the DM's device or on a scene without fog.
 - **Flat creatures** keep an invisible press area on their footprint in the relief layer, and their decor on the view box of their footprint's diamond, ((w + h)·r wide), above the fog as Top-down's decor already is (design 13.4). They get no silhouette.
 - **A flat ghost and its tag** draw on the overlay at the ghost's drawn ground, each clipped to the revealed sub-cells of its own box. Fogged sub-cells are opaque (lib/fogTiles.ts:50), so this exposes no unrevealed content. The fog's 35% edge tint and the sight shading are not drawn over a clipped ghost, a cosmetic loss accepted. Overlay ghosts, standing or flat, draw over the relief whatever its depth, also accepted.
-- **Columns** keep `seenGround`'s cell rule (5.5), and walls stand per quarter-cell run. Section 12 says why both show nothing new.
 
 ### 5.3 Each layer
 
@@ -132,8 +135,7 @@ In Isometric the board is two stages, one over the other:
 | Areas, traps, other drawings, range rings, tethers | ground stage, draping over columns, and moving marks while their token is dragged (5.1) |
 | Sight with its memory, fog | ground stage. Tops copy them |
 | Turn start, explored outline | ground stage, above the fog |
-| Pings, hold ring, laser, area previews, outliner flash | moving: overlay ground shapes at their drawn height. Pills upright |
-| Rulers | moving: upright lines through each point's drawn height. Pills upright |
+| Pings, hold ring, laser, area previews, outliner flash, rulers | moving: overlay ground shapes, rulers upright lines, at their drawn height. Pills upright |
 | Pins | upright at the pin's drawn ground |
 | A local drag: the standee, its decor, path and label, drop ghost | the drag layer, the ghost at 0.6 |
 | Other members' drags | overlay, standing at 0.6 or flat (5.2), each eased frame |
@@ -154,12 +156,13 @@ In Isometric the board is two stages, one over the other:
 
 ### 5.5 Raised ground and walls
 
-- **Columns.** A cell whose drawn ground is above 0 draws its sides that face the viewer, from the neighbor's drawn ground up to its own, the left face lighter than the right (two theme tokens), then its top: the ground stage's pixels under the cell, copied up by the lift, clipped to the lifted diamond, read only from the source box. Neighboring tops with one lift share a clip and a copy.
+- **Columns.** A cell whose drawn ground is above 0 draws its sides that face the viewer, from the neighbor's drawn ground up to its own, then its top: the ground stage's pixels under the cell, copied up by the lift, clipped to the lifted diamond, read only from the source box. Neighboring tops with one lift share a clip and a copy.
+- **Textures (D-261026-7).** A side wears its cell's builder terrain texture (client/features/builder/textures.ts), laid along the face one tile per `TEXTURE_CELLS` cells of edge and of height, then shaded lighter on the left face and darker on the right. A stair's side takes the stair swatch. A cell with no builder terrain, on a map image, takes a flat tone tinted to its top's average color, read once per map from its 512 px thumb into a color per cell. For a player only cells with every sub-cell revealed take the tint, the rest the neutral side tone, so no tint carries art from under the fog. Patterns are made once per texture and face direction and kept with the bucket.
 - **Pits.** A cell below 0 is an opening. Inside its diamond it draws its floor (the ground pixels copied down) and its far sides. Everything on a pit's cells, standees included, is clipped to the openings swept upward past the canvas top, so the near rim hides what is below it.
 - **Stairs** are columns, and their treads come up with their tops. Connected stair edges draw no face. Past the margin, a top whose source lies below the ground stage fills with the face tone until panned up.
 - **Wall segments** are the derived set's walls, doors and windows (`deriveWalls`, shared/rules/walls.ts:1110), so automatic walls stand and "no wall" marks do not. Its raised-edge and pillar segments are not walls. Free walls are split where they cross, keeping their door and window features.
-- **Runs.** Each segment is cut at sub-cell lines into quarter-cell runs. For a player, a run stands only where a fog sub-cell beside it, on either side, is revealed, since Top-down shows that half of the line there. A free-wall run inside one sub-cell stands by that sub-cell. Neighboring standing runs of one segment merge within each cell, so there is at most one piece per wall cell. A piece stands `WALL_RISE` = 0.5 cell high from the higher drawn ground beside it, in the wall color, a closed door's leaf color, or a window's pane color at half opacity. An open door lies flat. Locks and secret marks stay the DM's. Pillars follow the stand rule.
-- **Sight.** Faces and wall pieces take the darkness the sight overlay gives their cell, cached per sight tile object.
+- **Runs.** Each segment is cut at sub-cell lines into quarter-cell runs. For a player, a run stands only where a fog sub-cell beside it, on either side, is revealed, since Top-down shows that half of the line there. A free-wall run inside one sub-cell stands by that sub-cell. Neighboring standing runs of one segment merge within each cell, so there is at most one piece per wall cell. A piece stands `WALL_RISE` = 0.5 cell high from the higher drawn ground beside it, walls in the stone texture tinted toward the wall color, a closed door's leaf in the wood texture, a window as a half-opaque pane. An open door lies flat. Locks and secret marks stay the DM's. Pillars follow the stand rule, in stone tinted toward the pillar swatch.
+- **Sight.** Sides and wall pieces keep the darkness the sight overlay gives their cell, cached per sight tile object.
 
 ### 5.6 Depth order
 
@@ -195,9 +198,10 @@ Each piece has its full projected bounds in view space: a column with its faces 
 A footprint-aware drag adapter, `dragBoundFunc` on each standee:
 
 - **Grab.** At the start it keeps the grab offset, the screen vector from the pointer to the ring's center.
-- **Where it lands.** Each move takes pointer plus offset as the ring's screen point `v`. For a token on the ground at the start, it scans the drawn heights along the ray from the highest down. At each height h it places the footprint centered on `toWorld(v, h)`, snapped as the drop would snap it. It keeps the first h where the landing rule over drawn ground (the footprint's highest drawn ground) stands it at h. Failing an exact match, it keeps the first h where it would stand at or above h. A flier keeps its base: `toWorld(v, base)`, unless the footprint's drawn ground there is higher, when the walker's scan applies. A Large or Huge straddling heights therefore stays under the finger.
-- **Readers unchanged.** It returns the footprint's top-left as an absolute position through the ground group, so `node.x()` and `node.y()` stay world cells for Stage.tsx's `dragMove`, movement/stageHooks.ts with its held previews, and RulerLayer.tsx's listener. Followers and carried riders move by the lead's world delta as today. A carried token dragged off its holder lands by the walker's scan.
-- **The drag layer.** On dragstart the Stage calls `node.moveTo` into the drag layer's ground group. On dragend, and on `putBack` for a cancelled drag (Stage.tsx:1302-1316), it moves the node back into the relief's ground group at its sorted index before React's next commit of that token, since react-konva never re-parents a node.
+- **Where it lands.** Each move takes pointer plus offset as the ring's screen point `v`. For a token on the ground at the start, it scans the drawn heights along the ray from the highest down. At each height h it places the footprint centered on `toWorld(v, h)`, snapped as the drop would snap it. It keeps the first h where the landing rule over drawn ground (the footprint's highest drawn ground) stands it at h. Failing an exact match, it keeps the first h where it would stand at or above h. A flier keeps its base: `toWorld(v, base)`, unless the footprint's drawn ground there is higher, when the walker's scan applies. A token inside seen ground keeps its base and never rises. A Large or Huge straddling heights therefore stays under the finger.
+- **Off a holder.** A carried token dragged off its holder takes its branch from the holder's footing, as `landedElevation` does (drop.ts:71), judged on seen ground: off a holder on the ground, the walker's scan. Off a flying holder, the flier's rule at its own base. Off a holder inside seen ground, its own base, fixed. So pick and preview agree with the stored drop wherever its ground is seen. Where the holder's real footing differs on hidden ground, the preview follows the seen branch, and the stored elevation then draws by 4.3.
+- **Readers unchanged.** It returns the footprint's top-left as an absolute position through the ground group, so `node.x()` and `node.y()` stay world cells for Stage.tsx's `dragMove`, movement/stageHooks.ts with its held previews, and RulerLayer.tsx's listener. Followers and carried riders move by the lead's world delta as today.
+- **The drag layer.** On dragstart the Stage calls `node.moveTo` on every node the drag moves, into the drag layer's ground group, with their decor and moving marks: the pressed standee, the group's followers, carried riders and their riders. On dragend, and on `putBack` for a cancelled drag (Stage.tsx:1302-1316), it moves each back into the relief's ground group at its sorted index before React's next commit of those tokens, since react-konva never re-parents a node.
 - Snapping, routes, legs, labels, refusals and drops are unchanged.
 
 ### 6.4 Tools
@@ -211,10 +215,9 @@ A footprint-aware drag adapter, `dragBoundFunc` on each standee:
 | Doors, action bar, turns, Fit, Find my token, View as a player, label editing | works | 6.2 |
 | Map builder, every mode | Top-down while in use | it paints cells and picks edges, which shrink to half-height diamonds and standing pieces, Heights would raise the ground under the brush, and its panes and handles are square to the map |
 | Fog | Top-down while in use | it paints the ground the fog lies on, and a reveal behind a column could be neither seen nor reached |
-| Line up grid | Top-down while in use | it lines a box up with the image's own axes |
-| Trap | Top-down while in use | zones are rects of cells and wires end on half-cell points |
+| Line up grid, Trap | Top-down while in use | the grid box lines up with the image's own axes, and trap zones are rects of cells with wires on half-cell points |
 
-Choosing one of the last four shows Top-down at once, centered on the same ground point, and any other tool brings Isometric back. The pick does not change.
+Choosing one of these four tools shows Top-down at once, centered on the same ground point, and any other tool brings Isometric back. The pick does not change.
 
 ### 6.5 Keys
 
@@ -247,6 +250,7 @@ suggestedView?: "isometric";
 - **Keys and focus.** The View button opens the menu with focus on the checked radio. Arrow keys move within it, Tab reaches the turn buttons, Escape closes with focus back on the button. A forced Top-down keeps focus where it is. I, Q and E in the sheet.
 - **Screen readers.** A polite status for each change: "Isometric view.", "Top-down view.", "Following the scene: isometric.", "Turned right. The map's top edge faces down and to the right.", and once per tool choice the forced line.
 - **Large interface sizes.** At 130% on a 320 px phone the radio rows wrap rather than cut a word, and the turn buttons stack.
+- **Look.** Raised sides wear the builder's textures, lighter left and darker right, walls stone, doors wood, windows a pane. Map-image sides take a tone from their top. The textures load through the builder's loader with the first Isometric view, behind the same indicator.
 - **Touch.** 44 px targets. No hold anywhere. Tap again picks the standee behind.
 - **Alignment.** The top bar with the View button, the View menu in both views, Scene settings' row and the display's rows are measured with `measureAlignment` at 1440x900, 390x844 and 320x568, at 100% and 130%, nothing over 1 px, with roots in e2e/alignmentRoom.ts.
 
@@ -255,10 +259,8 @@ suggestedView?: "isometric";
 | Case | Expected | Test |
 |---|---|---|
 | Any device after the deploy | Top-down, nothing changed | view store unit, reach |
-| A point through each turn and back, z over the model's range, hex centers too | the same point within 1e-9 cells | view unit |
-| Konva's ground group against `toView` | within 1e-9 px each turn | view unit |
-| A press on a 10 ft platform's top, on its near face, over a pit | that cell, that cell, the pit's floor or far side | pickGround unit |
-| A press over a fogged platform (player) | the ground behind, at 0 | pickGround unit |
+| A point through each turn and back, z over the model's range, hex centers too, and Konva's ground group | the same point within 1e-9 cells, Konva within 1e-9 px | view unit |
+| A press on a 10 ft platform's top, its near face, over a pit, over a fogged platform (player) | that cell, that cell, the pit's floor or far side, the ground behind at 0 | pickGround unit |
 | At 12 and at 11 px a cell: a press behind a 30 ft platform, a standee on a seen 10 ft one | the top and 10 ft, then the flat cell and the flat ground | pickGround unit, standee unit |
 | The trace at 1 and 5 ft a cell over −100 to 200 ft | within the stated bound | pickGround unit |
 | A Medium behind a wall, and one in front of it | the one behind draws before the wall, the one in front after | depth unit |
@@ -271,18 +273,21 @@ suggestedView?: "isometric";
 | Two standees under one tap, then a tap again | front, then the one behind, then front | selection unit, iso e2e |
 | A player drags a token 4 cells | lands as the same move in Top-down, "20 ft" | iso e2e |
 | A finger on a 10 ft platform's top | lands on that cell, at 10 ft | drag unit, iso e2e |
-| A Large and a Huge dragged across a ledge, a carried token dragged off, a flier over a lower platform | under the finger, landing by the rule, the flier at its height | drag unit |
-| A drag cancelled | the node back in the relief at its place | drag unit |
+| A Large and a Huge dragged across a ledge, a flier over a lower platform | under the finger, the flier at its height | drag unit |
+| A rider dragged off a holder on the ground, one flying at 20 ft, one inside seen ground | lands as `landedElevation` does, on the ground, at 20 ft, at its elevation, the preview agreeing | drag unit, iso e2e |
+| A group of 4, and a mount with its rider, dragged and then cancelled | every moving node on the drag layer, each back in its place | drag unit, bench |
 | A ruler from a token to a platform, a hold-to-ping | the same feet as Top-down, the same world point for the DM | iso e2e |
 | Arrow Up at each turn | north, west, south, east | shortcuts unit |
 | Q with the selected token on screen, Fit, a pan past the scene | the token stays put, the whole diamond, the middle on the scene | camera unit |
 | The builder chosen in Isometric, ten times | Top-down and back, one frame each way, one camera stream, one ping sound, one reminder | iso e2e, controllers unit, bench |
 | A pick, a reload, another scene, and a display page in the same browser | the pick kept across the room, the display's apart | view store unit, iso e2e |
 | Q while following, then the DM changes the suggestion | the device still follows, and switches after any drag in progress | view store unit, iso e2e |
-| Follow the DM with a raised platform whose ground lies outside the DM's canvas | the display shows at least the ground the DM sees, the platform included | display unit |
+| Follow the DM across views and turns, with a raised platform the display may see | the same rectangle at the same turn, else at least the ground the display may see, the platform included | display unit |
+| A grass bank, a stone platform, a map-image platform | grass sides, stone sides, a tone from the top on fully revealed cells | relief unit |
 | `scene.update` with `suggestedView: "topDown"`, undone, and from a player | removed, restored, refused | room reducer unit, permissions unit |
 | A label tapped with Select in Isometric | the label pane opens on the drawn label | label unit, iso e2e |
-| **Security:** a party token on fogged ground over hidden 0 ft and hidden 10 ft, still and mid-drag | the same pixels | standee unit, drag unit |
+| **Security:** a party token at one stored elevation on fogged ground over hidden 0 ft and hidden 10 ft, still and mid-drag | the same pixels | standee unit, drag unit |
+| **Security:** one DM camera and shared fog over different hidden heights | the same `view` event, focus point and display fit | display unit, camera unit |
 | **Security:** a partly fogged goblin | flat under the fog, press area and decor kept | stand unit, iso e2e screenshot |
 | **Security:** an area wholly under fog, a found trap's pill on fogged ground, a label with every cell partly revealed | each flat under the fog | stand unit |
 | **Security:** a ghost whose eased path crosses fog between two allowed frames | ghost and tag flat and clipped on the fogged frames | stand unit |
@@ -293,36 +298,29 @@ suggestedView?: "isometric";
 ## 10. Tests
 
 - **Units.** Every case marked unit, in `client/lib/view.test.ts` (seeded `rng`, a few thousand points a turn) and beside each module: `pickGround`, the drag adapter, depth order, silhouettes, culling, the stand rule, wall runs, camera, the view store, `arrowStep`, `labelShape`, the controllers mounted once, and the scan that bans hand-written camera math.
-- **Mutation checks.** Each new test fails with its rule removed: the turn's sign, the lift's sign, a tie order, the own-cell rule, the pit clip, the 1e-6 nudge, the stand rule's every-sub-cell test, the either-side run test, the flat threshold, `seenFootprintGround` swapped for real ground, the footprint scan swapped for the center ray, a bucket's horizontal bounds, the grab offset, the front-to-back walk, the tap-again order, the room-wide pick, a controller moved into a drawing tree.
+- **Mutation checks.** Each new test fails with its rule removed: the turn's sign, the lift's sign, a tie order, the own-cell rule, the pit clip, the 1e-6 nudge, the stand rule's every-sub-cell test, the either-side run test, the flat threshold, `seenFootprintGround` swapped for real ground, the footprint scan swapped for the center ray, a bucket's horizontal bounds, the grab offset, the front-to-back walk, the tap-again order, the room-wide pick, a controller moved into a drawing tree, the holder's footing branch, heights read in `groundAtMiddle`, the display fit's seen heights, the tint on partly revealed cells.
 - **e2e.** A new `e2e/iso.e2e.ts` (prefix ISO): the DM suggests Isometric, a player's page follows, the player drags, measures and pings on a square scene and on a hex rows scene, turns, picks Top-down and reloads. The DM switches to the builder and back, and edits a label through Select. Screen points come through the drag test hook (movement/dragTesting.ts). Plus `maps.e2e.ts`, the alignment files and `reach`.
-- **Bench.** `scripts/bench-iso.ts`, ISO-2's first commit, reads `TaskDuration` as bench-height-pills.ts does. Rows: pan, pan with both trees mounted, local drag (whole frame), a drag of a token with two range rings and an aura, local and remote, ping, switch, builder round trip, turn, and hex lines.
+- **Bench.** `scripts/bench-iso.ts`, ISO-2's first commit, reads `TaskDuration` as bench-height-pills.ts does. Rows: pan, pan with both trees mounted, local drag (whole frame), a drag of a token with two range rings and an aura, local and remote, a group drag of 4 and a mount with its rider at the caps, textured sides and walls at the caps, ping, switch, builder round trip, turn, and hex lines.
 
 ## 11. Cost
 
-Every number here and in Appendix A is a draw-call median from the prototype on the stand-in (Chrome at 4x CPU, 390 by 844 at 2x pixels, software raster). None is `TaskDuration`, which comes with ISO-2's bench.
+Every number is a draw-call median from the prototype on the stand-in (Chrome at 4x CPU, 390 by 844 at 2x pixels, software raster), never `TaskDuration`, which comes with ISO-2's bench. Appendix A has them all. In short, a typical scene's pan frame is about 2 ms over Top-down's. 500 tokens add 25 to 50% to Top-down's already slow frames. The caps pan at 1.4 to 1.6 times Top-down's. A switch with both trees costs one frame (48 ms at the caps) against a 194 to 332 ms remount. Textured sides and walls add about 9% at the caps.
 
-- **Typical scene** (100 by 100, 40 tokens, 4,000 wall edges, 334 raised or sunken cells) at 40 px a cell: pan 5.2 to 5.7 ms against 3.5 to 4.0. The drag layer with the standee alone draws in under 0.2 ms against Top-down's tokens layer at 1.1 to 1.4. Its decor, path and moving marks were not in it.
-- **500 tokens:** Top-down's pan is already 39 to 43 ms, since tokens are not culled. Isometric adds 25 to 50%.
-- **The cap scene** (200 by 200, 20,000 walls, 6,171 raised or sunken cells, 500 tokens) at 40 px: pan 60 to 63 ms against 38 to 42. At fit, 162 standing and 60 flat (ISO-D12) against 44.
-- **A switch** with both trees mounted: the target view's first frame, 4.2 ms typical and 48 at the caps. A remount: 194 to 332.
-- **The overlay alone** (a ping): 1.5 typical and 19.7 at the caps, against Top-down's 1.4 and 15.8.
-- **Sorting** everything: 1.6 to 2.9 typical, 9 to 48 at the caps.
+**Gates**, in `TaskDuration` at 4x on ISO-2's bench: every frame kind (pan, pan with both trees, a whole local drag, a group or mount drag, remote drag, a ringed and aura'd drag, textured pans, ping, switch, builder round trip) at most max(16 ms, 1.75 times Top-down's same frame). A turn at the caps at most 150 ms whole. Hex lines on the 200 by 200 hex scene at most 2.5 times Top-down's.
 
-**Gates**, in `TaskDuration` at 4x on ISO-2's bench: every frame kind (pan, pan with both trees, local drag as a whole frame, remote drag, a ringed and aura'd drag, ping, switch, builder round trip) at most max(16 ms, 1.75 times Top-down's same frame). A turn at the caps at most 150 ms whole. Hex lines on the 200 by 200 hex scene at most 2.5 times Top-down's.
+**Target, unmet in the prototype:** the overlay under 16 ms wherever Top-down's is. It drew 19.7 against 15.8 at the caps. The way there is culling overlay decor and silhouettes by bucket bounds (5.7), measured before it is claimed.
 
-**Targets, unmet in the prototype:** the overlay under 16 ms wherever Top-down's is. It drew 19.7 against 15.8 at the caps. The way there is culling overlay decor and silhouettes by bucket bounds (5.7), measured by ISO-2's bench before it is claimed.
-
-**Kept, never per frame:** buckets with their bounds, seen sub-cells and sight darkness per tile object, wall pieces per chunk object, the silhouette set, and the ground stage's canvas. Nothing animates at rest. The ground stage redraws only on a camera, map, fog, sight or still-mark change.
+**Kept, never per frame:** buckets with their bounds and patterns, seen sub-cells and sight darkness per tile object, wall pieces per chunk object, the silhouette set, the thumb's colors per map, and the ground stage's canvas. Nothing animates at rest. The ground stage redraws only on a camera, map, fog, sight or still-mark change.
 
 **Risks.** Software raster may overstate the copies and understate a phone's fill. Crossing a 128 px margin step reallocates a canvas. The depth order is approximate between snapped spots (5.6).
 
 ## 12. Security
 
-- **The view never changes what a device receives.** It adds no event and no projection rule. The table display's `view` event keeps its fields and audience, and its box only grows to the ground the DM sees.
+- **The view never changes what a device receives.** It adds no event and no projection rule. The table display's `view` event keeps its audience, and its new `iso` field holds a turn and a size, nothing about the map. It depends on the DM's camera alone, each display fits only ground it may see (4.2), and `groundAtMiddle` reads no heights, so no point sent to another device carries terrain.
 - **One new field**, `Scene.suggestedView`, set by the DM through `scene.update`, refused for players, sent with the scene. It names a view, nothing about the map.
 - **A player's Isometric screen never shows more than Top-down's.**
   - By the stand rule (5.2), anything upright stands only over wholly revealed sub-cells, else lies flat under the fog, at every eased frame for ghosts and their tags. Party members and tokens every player sees stand always, as Top-down draws them above the fog.
-  - Tops copy the ground stage, fog and sight included. Moving auras and tethers are clipped to revealed sub-cells.
+  - Tops copy the ground stage, fog and sight included. Moving auras and tethers are clipped to revealed sub-cells. A side's tint reads only fully revealed cells.
   - Drawn heights, the standee base, the drag preview and `pickGround` read only seen ground. A base never subtracts hidden terrain, so different hidden heights draw the same pixels.
 - **Two cell-level reaches remain, both shown today.** A column stands on a cell with any revealed sub-cell, so its faces reach up to one cell past the revealed part. The height readout already shows that cell's height (docs/design-v1-heights-readout.md 1). A wall run stands where either side's sub-cell is revealed, where Top-down already draws half the line.
 - **Per-player vision:** each device reads its own fog and draws its own projection (per-player vision 6.6).
@@ -333,10 +331,10 @@ Order: after the hex grids' H1. ISO-1, then ISO-2 and ISO-5 beside each other, t
 
 | Lane | Owns | After |
 |---|---|---|
-| ISO-1 Contract | `client/lib/view.ts` (`toView`, `toWorld`, `depth`, `ViewPoint`, `drawnGround`, `seenFootprintGround`, `pickGround`, `arrowStep`, `groundAtMiddle`) and tests, `client/lib/camera.ts`, `client/features/view/store.ts`, the camera scan test, `shared/model.ts`, `shared/protocol.ts`, `shared/migrate.ts`, `server/rooms/stateSchema.ts`, `shared/reducer/room.ts`, `shared/project.ts`, `shared/permissions.ts`, `server/rooms/undoLabels.ts`. One mechanical commit renames every camera call site to the view API with Top-down's identity and routes the hand-written sites through `groundAtMiddle`, every file in 4.1 (CameraLayer.tsx included) plus traps/paneBox.ts, lights/paneBox.ts, builder/tool.tsx, builder/labelPaneFrame.ts, builder/heights/tap.ts, fog/tool.tsx, display/DisplayRoom.tsx and scenes/FrameView.tsx, so trunk stays green | H1 |
-| ISO-2 Ground and standees | `scripts/bench-iso.ts` (first commit), `client/canvas/Stage.tsx` (stages, drag layer, scheduler, layer routing, both trees, the controllers lifted out), `layers/MapLayer.tsx` (hex row spans), `TokenNode.tsx`, `TokenShadow.tsx`, `tokenShadow.ts`, `RemoteDrags.tsx`, new `client/canvas/relief/*` (pieces, runs, buckets, bounds, the stand rule, silhouettes, pits), `client/features/layers.ts`, `dm/CameraLayer.tsx` (as a controller), `builder/BuilderLayer.tsx` and `draw.ts`, new `builder/labelShape.ts`, `client/lib/theme.ts` | ISO-1 |
+| ISO-1 Contract | `client/lib/view.ts` (`toView`, `toWorld`, `depth`, `ViewPoint`, `drawnGround`, `seenFootprintGround`, `pickGround`, `arrowStep`, `groundAtMiddle`) and tests, `client/lib/camera.ts`, `client/features/view/store.ts`, the camera scan test, `shared/model.ts`, `shared/protocol.ts` (with the `view` event's `iso`), `shared/migrate.ts`, `server/rooms/stateSchema.ts`, `shared/reducer/room.ts`, `shared/project.ts`, `shared/permissions.ts`, `server/rooms/undoLabels.ts`. One mechanical commit renames every camera call site to the view API with Top-down's identity and routes the hand-written sites through `groundAtMiddle`, every file in 4.1 (CameraLayer.tsx included) plus traps/paneBox.ts, lights/paneBox.ts, builder/tool.tsx, builder/labelPaneFrame.ts, builder/heights/tap.ts, fog/tool.tsx, display/DisplayRoom.tsx and scenes/FrameView.tsx, so trunk stays green | H1 |
+| ISO-2 Ground and standees | `scripts/bench-iso.ts` (first commit), `client/canvas/Stage.tsx` (stages, drag layer, scheduler, layer routing, both trees, the controllers lifted out), `layers/MapLayer.tsx` (hex row spans), `TokenNode.tsx`, `TokenShadow.tsx`, `tokenShadow.ts`, `RemoteDrags.tsx`, new `client/canvas/relief/*` (pieces, runs, buckets, bounds, the stand rule, silhouettes, pits), `client/features/layers.ts`, `dm/CameraLayer.tsx` (as a controller), `builder/BuilderLayer.tsx` and `draw.ts`, new `builder/labelShape.ts`, `client/lib/theme.ts`, the texture patterns and thumb colors | ISO-1 |
 | ISO-3 Upright and moving marks | `measure/Pill.tsx`, `RulerLayer.tsx`, `RangeRingLayer.tsx`, `TurnStartLayer.tsx`, `movement/MoveLayer.tsx`, `pings/PingLayer.tsx` with its hold and its controller, `LaserLayer.tsx`, `pins/PinLayer.tsx` with its tap, `pins/rules.ts`, `attach/TetherLayer.tsx` and `areas/TemplateLayer.tsx` with their reminder controllers, `areas/AreaPreviewLayer.tsx`, `traps/TrapLayer.tsx`, `drawings/DrawingLayer.tsx`, `outliner/FlashLayer.tsx`, `canvas/useBoardText.ts`, `textBoxes.ts`, `boardView.ts` | ISO-2 |
-| ISO-4 Input | Stage.tsx's pointer, tap, box, drag adapter, drag layer moves and nudge code and its anchors, `canvas/emptyTap.ts`, `builder/labelTap.ts`, `builder/labelPaneFrame.ts`, `LabelPaneHost.tsx`, `lib/group.ts`, `state/selection.ts`, `doors/tap.ts`, the slops and grab radii (6.1), `doors/DoorPill.tsx`, `heights/ReadoutHost.tsx`, `movement/StopNote.tsx`, `dm/camera.ts`, `dm/tableDisplay.ts`, `display/logic.ts`, `encounter/followTurn.ts`, the forced Top-down for the four tools | ISO-2, beside ISO-3 |
+| ISO-4 Input | Stage.tsx's pointer, tap, box, drag adapter, drag layer moves and nudge code and its anchors, `canvas/emptyTap.ts`, `builder/labelTap.ts`, `builder/labelPaneFrame.ts`, `LabelPaneHost.tsx`, `lib/group.ts`, `state/selection.ts`, `doors/tap.ts`, the slops and grab radii (6.1), `doors/DoorPill.tsx`, `heights/ReadoutHost.tsx`, `movement/StopNote.tsx`, `dm/camera.ts`, `dm/tableDisplay.ts` and `display/logic.ts` (the `iso` fit), `encounter/followTurn.ts`, the forced Top-down for the four tools | ISO-2, beside ISO-3 |
 | ISO-5 Choice and docs | `client/features/view/ViewMenu.tsx`, `pages/RoomChrome.tsx`, `pages/Room.tsx`, `scenes/SceneSettings.tsx`, `display/DisplayRoom.tsx` (its menu), `state/shortcuts.ts`, `components/Icon.tsx`, `e2e/iso.e2e.ts`, alignment roots, the integration commit, then FEATURES.md and the docs | ISO-1, its last two commits after all |
 
 ISO-4 stacks on ISO-2 for Stage.tsx. ISO-3's edits are mechanical and suit a lighter model. H3's brief adds hex columns and the hex walk (4.4).
@@ -354,38 +352,36 @@ Filled by each lane's docs commit, with every place the build went its own way, 
 | Finding | Where it went |
 |---|---|
 | ISO-OP-1, OP-5, OP-19, FR-1, FR-3, FR-10, ASTRA-02, Opus question 2 | the stand rule (5.2, D-261026-5), 5.3, 12, security cases |
-| ISO-ASTRA-01, FR-2, ASTRA-05 | quarter-cell wall runs, split segments, the bounded error (5.5, 5.6), cases |
-| ISO-ASTRA-03, OP-3, OP-13 | the drag adapter (6.3), drawn heights while dragging (4.3, 12), cases |
-| ISO-OP-2, ASTRA-04, ASTRA-06, FR-6 | drawn heights (4.3), ISO-D12, culling by bounds (5.7), cases |
-| ISO-OP-4, FR-7, FR-8 | own cells and the pit clip (5.5, 5.6), cases |
-| ISO-OP-6, OP-7, FR-4, FR-5, FR-12, FR-13 | drag layer, moving marks, one scheduler (5.1), `TaskDuration` bench and gates (10, 11), visible-bucket turns (5.6) |
-| ISO-OP-8 | both trees mounted (ISO-D15), first mount behind the indicator (8) |
-| ISO-ASTRA-07, OP-11, OP-12, Opus question 1 | the world box (4.2), the room-wide pick, `rvtt.displayView` (ISO-D2, 7) |
-| ISO-ASTRA-08, OP-9, OP-18 | `labelShape` (6.2), ISO-1's rename, `groundAtMiddle` and its scan, owners, `isoReady`, FEATURES tables (13) |
-| ISO-ASTRA-09, ASTRA-10, FR-11, OP-10, OP-15 | row spans, grid-owned walk, hex lines (4.4), the walk bound (4.3), the lift cap (5.4) |
+| ISO-ASTRA-01, ASTRA-03, ASTRA-04, ASTRA-05, ASTRA-06, OP-2, OP-3, OP-4, OP-13, FR-2, FR-6, FR-7, FR-8 | wall runs, own cells, the pit clip (5.5, 5.6), drawn heights (4.3), the drag adapter (6.3), culling (5.7), cases |
+| ISO-OP-6, OP-7, OP-8, FR-4, FR-5, FR-12, FR-13 | the drag layer, moving marks, one scheduler, both trees (5.1, ISO-D15), the bench and gates (10, 11), visible-bucket turns (5.6) |
+| ISO-ASTRA-07, ASTRA-08, OP-9, OP-11, OP-12, OP-18, Opus question 1 | Follow the DM (4.2), the room-wide pick, `rvtt.displayView` (7), `labelShape` (6.2), ISO-1's rename and `groundAtMiddle`, owners, `isoReady`, FEATURES tables (13) |
+| ISO-ASTRA-09, ASTRA-10, FR-11, OP-10, OP-15 | row spans, the grid-owned walk, hex lines (4.4), the walk bound (4.3), the lift cap (5.4) |
 | ISO-OP-14, OP-16, OP-17, FR-9 | sight darkness, pillars, segments (5.5), slops (6.1), facing tick and dimming (5.4), threshold pits (ISO-D12), runs that do not listen (6.2) |
 
 ### Round 2
 
 | Finding | Where it went |
 |---|---|
-| ISO-ASTRA-11 | the base formula with `seenFootprintGround` (4.3), 12, the hidden-height differential case |
-| ISO-FR-R2-1, ASTRA-16 | the ghost's tag under the stand rule, the narrowed claim, tint and shading accepted as lost (5.2), the ghost case |
-| ISO-FR-R2-2 | the stand test on `labelShape`'s measured box (5.2, 6.2) |
-| ISO-OP-22, ASTRA-13 | rings, auras and tethers as moving marks while dragged (5.1, 5.3), the ringed drag bench row, the aura case |
-| ISO-OP-20 | the drag layer holds the whole local drag (5.1, 5.3), drags gated as whole frames (11), section 2 |
-| ISO-OP-21, ASTRA-14 | gates at max(16 ms, 1.75x), the overlay target marked unmet with its optimization (11) |
-| Astra's verification note | every number labeled as draw calls (2, 8, 11, Appendix A) |
-| ISO-OP-23, ASTRA-12 | controllers mounted once, the hidden Stage at 0x0 and memoized (5.1, ISO-D15), bench row, memory check (14), the switch case |
-| ISO-FR-R2-3, FR-R2-4, FR-R2-5 | `batchDraw` assignment (5.1), `moveTo` and the cancelled case (6.3), runs merged per cell (5.5) |
-| ISO-ASTRA-03 | the footprint-aware scan (6.3), straddling and carried cases |
-| ISO-ASTRA-06 | full projected bounds (5.7), left and right edge cases |
-| ISO-ASTRA-07, OP-27 | the world box with the drawn-height range, "at least the ground the DM sees" (ISO-D17, 4.2), the platform case |
-| ISO-OP-24 | every own cell above the base draws after (5.6) |
-| ISO-OP-25 | walls, doors and windows only, split with features kept (5.5), the ledge and pillar case |
-| ISO-OP-28, OP-29 | overlay ghosts' depth accepted, the flat ghost's height, the in-sub-cell run, the diamond's decor box (5.2, 5.5) |
-| ISO-ASTRA-15 | the integration commit (13) |
-| ISO-OP-26 | CameraLayer.tsx in ISO-1's commit (4.1, 13) |
+| ISO-ASTRA-11, OP-24 | the base formula with `seenFootprintGround` (4.3), own cells above the base after (5.6), the hidden-height case |
+| ISO-FR-R2-1, FR-R2-2, ASTRA-16, OP-28, OP-29 | the ghost's tag, `labelShape`'s measured box, the narrowed clip claim, ghost depth and height, the in-sub-cell run, the diamond's decor box (5.2, 5.5) |
+| ISO-OP-20, OP-21, OP-22, ASTRA-13, ASTRA-14, Astra's note | the whole local drag and moving marks on the drag layer and overlay (5.1, 5.3), max(16 ms, 1.75x) gates, the unmet overlay target, numbers labeled as draw calls (11, Appendix A) |
+| ISO-OP-23, ASTRA-12, FR-R2-3, FR-R2-4, FR-R2-5 | controllers once, the hidden Stage at 0x0 (5.1, ISO-D15), `batchDraw` (5.1), `moveTo` (6.3), runs merged per cell (5.5), the memory check (14) |
+| ISO-ASTRA-03, ASTRA-06, OP-25 | the footprint scan (6.3), full projected bounds (5.7), walls, doors and windows only (5.5), cases |
+| ISO-ASTRA-07, OP-27 | superseded by round 3's camera geometry (4.2) |
+| ISO-ASTRA-15, OP-26 | the integration commit, CameraLayer.tsx in ISO-1 (13) |
+
+### Round 3
+
+| Finding | Where it went |
+|---|---|
+| ISO-ASTRA-18 | camera geometry in `iso: { turn, vw, vh }`, each display fitting its own seen ground, the terrain-free middle (ISO-D17, 4.1, 4.2, 12), the differential case |
+| ISO-ASTRA-19 | moot: the height-range box is gone, and the promise is the ground the display may see (4.2) |
+| ISO-ASTRA-17 | the holder's seen footing picks the branch (6.3), three holder cases |
+| ISO-OP-30 | every node a drag moves on the drag layer (6.3), group and mount cases, bench rows |
+| ISO-OP-31 | the case at one stored elevation, the stem line (4.3) |
+| ISO-OP-32 | Top-down's flier shadow, outside this design, left to the coordinator's follow-ups |
+| ISO-FR-R3-1 | the cosmetic loss named for auras and tethers (5.1) |
+| D-261026-7 | textures (ISO-D18, 5.5, 8, cases, bench rows) |
 
 ## Appendix A. Measurements
 
@@ -407,6 +403,7 @@ All draw-call medians, not `TaskDuration`: a throwaway prototype outside the rep
 | A switch's first frame, both trees mounted, typical and caps | 3.3, 33.1 | 4.2, 47.9 |
 | Every node rebuilt (a remount), 500 tokens and caps | | 160 to 220, 194 to 332 |
 | Sort of every piece, typical (4,374) and caps (26,671) | | 1.6 to 2.9, 9 to 48 |
+| Pan with textured sides and walls, typical and caps, one later session | | 7.9 and 77.0, against 7.1 and 70.8 flat-toned in the same session |
 
 - A copied top costs about 15 µs. The caps at 20 px walked all 26,671 pieces to cull them, which the buckets avoid. Not measured: a whole local drag frame, ringed and aura'd drags, a pan with both trees mounted.
 - A screenshot of the prototype is in the screenshots folder `raccoon-vtt/iso`.
