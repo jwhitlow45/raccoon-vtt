@@ -24,7 +24,8 @@ import { usePreview } from "../features/dm/previewContext.ts";
 import { ExportLog } from "../features/log/ExportLog.tsx";
 import { TakeBack } from "../features/encounter/HpLog.tsx";
 import type { PanelProps } from "../features/panels.ts";
-import { api, ApiError } from "../lib/api.ts";
+import { ApiError } from "../lib/api.ts";
+import { olderLogPage } from "./olderLog.ts";
 import { useUnsavedInput } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
@@ -138,7 +139,7 @@ export default function LogPanel(_props: PanelProps) {
     setPaging({ status: "loading", nextBefore: before });
     try {
       // In "view as a player" the older pages are that player's, as the preview's socket gives the rest (docs/design-v1-per-player-vision.md 7.4).
-      const page = await api.getLog(roomId, { before, sceneId: you?.role === "dm" ? sceneId : null, ...(preview ? { as: preview.memberId } : {}) });
+      const page = await olderLogPage(roomId, before, { sceneId: you?.role === "dm" ? sceneId : null, previewOf: preview?.memberId ?? null });
       const el = scrollParent(listRef.current);
       if (el && page.entries.length > 0) keepOffset.current = { el, height: el.scrollHeight };
       setOlder((list) => mergeLog(page.entries, list));

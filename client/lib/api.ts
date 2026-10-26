@@ -72,6 +72,12 @@ export type LogPage = {
   entries: LogEntry[];
   /** Pass as `before` for the page after this one. Null when there are no older entries. */
   nextBefore: string | null;
+  /**
+   * The member a page asked for `as` was answered as, a DM's preview of
+   * that player (docs/design-v1-per-player-vision.md 7.4, D-261026-10).
+   * Absent from every other page.
+   */
+  as?: MemberId;
 };
 /**
  * What the server holds of the caller's own ops of one tag
