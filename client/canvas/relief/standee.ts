@@ -29,6 +29,8 @@ export type StandeeShape = {
   bounds: VBox;
   /** Whether the lift was capped, so the stem draws a break mark. */
   capped: boolean;
+  /** The base as drawn, in cells: the logical base, or lower where the lift is capped. Drawing and layout both read this one. */
+  drawnBase: number;
 };
 
 /** The view box of a footprint's ellipse, w by h cells on the ground, at a view point: the same at every turn, since the ground turns by 45 degrees plus right angles. */
@@ -66,5 +68,20 @@ export function standeeShape(turn: Turn, box: { x: number; y: number; w: number;
     y0: art.y0 - DECOR_REACH_PX.top * k,
     y1: Math.max(ring.y1, shadow?.y1 ?? -Infinity) + DECOR_REACH_PX.bottom * k,
   };
-  return { ground: g, base: at, art, ring, shadow, bounds, capped };
+  return { ground: g, base: at, art, ring, shadow, bounds, capped, drawnBase: capped ? ground + lift / K : base };
+}
+
+/**
+ * Where a standee's parts draw inside the ground group, in world cells
+ * from the footprint's corner, for TokenNode.tsx's Standee: the shadow's
+ * and the ring's offsets, and the stem's length in view units, all from the
+ * drawn base, so what draws is the box the layout culls and decorates. A
+ * lift of K z view units up the screen is a shift of (-2K z s, -2K z c) in
+ * the ground group, which squashes and turns it.
+ */
+export function standeeParts(turn: Turn, drawnBase: number, ground: number): { shadow: { x: number; y: number } | null; base: { x: number; y: number }; stem: number } {
+  const { c, s } = turnAxes(turn);
+  const lift = (z: number) => ({ x: -2 * K * z * s, y: -2 * K * z * c });
+  const raised = drawnBase > ground;
+  return { shadow: raised ? lift(ground) : null, base: lift(drawnBase), stem: raised ? K * (drawnBase - ground) : 0 };
 }

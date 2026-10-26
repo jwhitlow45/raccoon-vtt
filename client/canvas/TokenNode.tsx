@@ -23,7 +23,8 @@ import { useTokenImage } from "./useImage.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 import { glyphColor, glyphSide, iconPath2D, imageFace, useIconGlyph } from "../features/images/icons.ts";
 import { COVER_INSET, pressBoxes, type CellBox } from "../features/attach/groups.ts";
-import { groundGroups, isometric, K, toView, turnAxes, type Turn } from "../lib/view.ts";
+import { groundGroups, isometric, toView, type Turn } from "../lib/view.ts";
+import { standeeParts } from "./relief/standee.ts";
 
 /** How the canvas wants to hear about taps, menus, drags and the mouse over tokens. */
 export type TokenInteraction = {
@@ -50,6 +51,8 @@ export type IsoToken = {
   /** Its drawn base and the drawn ground under its footprint, in cells (view.ts drawnBase). */
   base: number;
   ground: number;
+  /** The base as it draws, in cells: `base`, or lower where the lift on screen is capped (standee.ts standeeShape). */
+  drawn: number;
   /** The lift on screen was capped, so the stem shows a break (5.4). */
   capped: boolean;
   /** How far up its holder it rides, in view units: half the holder's art height. */
@@ -232,22 +235,18 @@ function clipToOpenings(ctx: Konva.Context, iso: IsoToken, at: { x: number; y: n
  */
 function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; iso: IsoToken; inset: boolean }) {
   const { token, w, h, scale, iso } = props;
-  const { c, s } = turnAxes(iso.turn);
-  // A lift of K * z view units up the screen is this shift in world cells inside the ground group.
-  const lift = (z: number) => ({ x: -2 * K * z * s, y: -2 * K * z * c });
-  const base = lift(iso.base);
-  const ground = lift(iso.ground);
+  // Drawn from the capped base the layout read, so the art is where it culls, decorates and casts silhouettes.
+  const parts = standeeParts(iso.turn, iso.drawn, iso.ground);
   const upright = groundGroups(iso.turn).upright;
   const ringPx = boardSizes(scale).ringPx;
   const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
-  const raised = iso.base > iso.ground;
   const turnedBy = Number.isFinite(token.rotation) ? token.rotation : 0;
   const facing = (turnedBy * Math.PI) / 180;
   const k = props.inset ? COVER_INSET : 1;
   return (
     <>
-      {raised ? <Ellipse x={w / 2 + ground.x} y={h / 2 + ground.y} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.shadow} listening={false} /> : null}
-      <Group x={base.x} y={base.y}>
+      {parts.shadow ? <Ellipse x={w / 2 + parts.shadow.x} y={h / 2 + parts.shadow.y} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.shadow} listening={false} /> : null}
+      <Group x={parts.base.x} y={parts.base.y}>
         <Ellipse x={w / 2} y={h / 2} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.ring} stroke={ring} strokeWidth={ringPx} strokeScaleEnabled={false} />
         {turnedBy !== 0 ? (
           <Line
@@ -262,7 +261,7 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
         {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
         {props.selected ? <SelectedOutline w={w} h={h} scale={scale} /> : null}
         <Group x={w / 2} y={h / 2} rotation={upright.rotation} scaleY={upright.scaleY}>
-          {raised ? <Line points={[0, 0, 0, K * (iso.base - iso.ground)]} stroke={theme.relief.stem} strokeWidth={1} strokeScaleEnabled={false} dash={iso.capped ? [6 / scale, 4 / scale] : undefined} listening={false} /> : null}
+          {parts.stem > 0 ? <Line points={[0, 0, 0, parts.stem]} stroke={theme.relief.stem} strokeWidth={1} strokeScaleEnabled={false} dash={iso.capped ? [6 / scale, 4 / scale] : undefined} listening={false} /> : null}
           <Group x={(-w * k) / 2} y={-h * k - iso.rise} scaleX={k} scaleY={k}>
             <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * k} name={props.name} upright />
           </Group>

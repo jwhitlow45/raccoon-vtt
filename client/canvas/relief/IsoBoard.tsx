@@ -167,7 +167,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const byId = useMemo(() => new Map(props.tokens.map((t) => [t.id, t])), [props.tokens]);
   const standees = useMemo(() => {
     const standingIds = new Set(standing.map((t) => t.id));
-    return standing.map((t): StandeeIn & { ground: number; capped: boolean; rise: number } => {
+    return standing.map((t): StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number } => {
       const fp = footprint(t);
       const range = occupiedRange(t);
       const base = drawnBase(src, range, t.elevation) / feet;
@@ -188,6 +188,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
         keep: props.keepIds.has(t.id),
         ground,
         capped: shape.capped,
+        drawn: shape.drawnBase,
         rise: holderToken ? footprint(holderToken).h / 2 : 0,
       };
     });
@@ -217,7 +218,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const s = byStandee.get(item.id)!;
       const t = byId.get(item.id)!;
       const dim = props.role === "dm" && playersFog !== null && !playersFog.boxAny(tokenBox(t));
-      const fresh: IsoToken = { turn, base: s.base, ground: s.ground, capped: s.capped, rise: s.rise, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false };
+      const fresh: IsoToken = { turn, base: s.base, ground: s.ground, drawn: s.drawn, capped: s.capped, rise: s.rise, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false };
       const old = isoCache.current.get(item.id);
       next.set(item.id, old && sameIso(old, fresh) ? old : fresh);
     }
@@ -270,7 +271,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const ground = drawnFootprintGround(src, range) / feet;
       if (ghostStands(fog, t, at)) {
         const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
-        const standee: IsoToken = { turn, base, ground, capped: shape.capped, rise: 0, pits: [], dim: false, pressOnly: false };
+        const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, pits: [], dim: false, pressOnly: false };
         // The tag stands over the art when the pill Top-down draws for it is clear too, and is left out otherwise.
         return { standee, clip: null, tag: ghostTagStands(fog, t, at, name, cam.scale) ? { x: (shape.art.x0 + shape.art.x1) / 2, y: shape.art.y0 } : null };
       }
@@ -375,7 +376,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   );
 }
 
-const PRESS_ONLY: IsoToken = { turn: 0, base: 0, ground: 0, capped: false, rise: 0, pits: [], dim: false, pressOnly: true };
+const PRESS_ONLY: IsoToken = { turn: 0, base: 0, ground: 0, drawn: 0, capped: false, rise: 0, pits: [], dim: false, pressOnly: true };
 
 /** One run of relief pieces, drawn by one shape that does not listen. */
 const ReliefRun = memo(function ReliefRun(props: { pieces: StaticPiece[]; dc: { readonly current: DrawContext | null } }) {
@@ -468,6 +469,7 @@ function sameIso(a: IsoToken, b: IsoToken): boolean {
   return (
     a.turn === b.turn &&
     a.base === b.base &&
+    a.drawn === b.drawn &&
     a.ground === b.ground &&
     a.capped === b.capped &&
     a.rise === b.rise &&

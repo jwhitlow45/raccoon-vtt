@@ -6,7 +6,8 @@ import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { occupiedRange } from "#shared/rules/footprint.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { drawnBase, drawnFootprintGround, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
-import { ellipseBox, standeeShape } from "./standee.ts";
+import { readFileSync } from "node:fs";
+import { ellipseBox, standeeParts, standeeShape } from "./standee.ts";
 
 const FEET = 5;
 
@@ -80,6 +81,45 @@ describe("standees", () => {
       assert.deepEqual(shapes[1], shapes[0], `at ${elevation} ft`);
       assert.deepEqual(shapes[2], shapes[0], `at ${elevation} ft`);
     }
+  });
+
+  test("the ring, shadow and stem draw where the layout puts them, capped or not, at every turn", () => {
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      for (const [base, ground] of [
+        [1, 0],
+        [3, 2],
+        [100, 0],
+        [400, 10],
+        [0, 0],
+      ] as const) {
+        const box = { x: 3, y: 4, w: 2, h: 2 };
+        const shape = standeeShape(turn, box, base, ground, 40, 800);
+        const parts = standeeParts(turn, shape.drawnBase, ground);
+        const view = isometric(turn);
+        const middle = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
+        // The ring's group and the shadow sit at these world shifts inside the ground group, whose own lift is 0.
+        const ring = toView(view, { x: middle.x + parts.base.x, y: middle.y + parts.base.y });
+        const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+        assert.ok(near(ring.x, shape.base.x) && near(ring.y, shape.base.y), `ring at turn ${turn}, base ${base}`);
+        assert.ok(near(shape.art.y1, ring.y), "the art stands on the ring");
+        if (parts.shadow) {
+          const shadow = toView(view, { x: middle.x + parts.shadow.x, y: middle.y + parts.shadow.y });
+          assert.ok(near(shadow.y, shape.ground.y) && near(shadow.x, shape.ground.x), "the shadow on the ground");
+          assert.ok(near(ring.y + parts.stem, shape.ground.y), "the stem from the ring down to the shadow");
+        } else assert.equal(parts.stem, 0);
+        if (shape.capped) assert.ok(shape.drawnBase < base && near(shape.ground.y - shape.base.y, 800 / 40), "a capped lift draws one canvas height up");
+        else assert.equal(shape.drawnBase, base);
+      }
+    }
+  });
+
+  test("the standee draws from the base the layout capped, never the logical one", () => {
+    const node = readFileSync(new URL("../TokenNode.tsx", import.meta.url), "utf8");
+    const standee = node.slice(node.indexOf("function Standee("), node.indexOf("\n}\n", node.indexOf("function Standee(")));
+    assert.match(standee, /standeeParts\(iso\.turn, iso\.drawn, iso\.ground\)/);
+    assert.doesNotMatch(standee, /iso\.base/);
+    const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
+    assert.equal(board.match(/drawn: shape\.drawnBase/g)?.length, 2, "standees and ghosts both carry the capped base");
   });
 
   test("at 12 px a cell a standee on a seen 10 ft platform stands 10 ft up, and at 11 px it stands on the flat ground", () => {
