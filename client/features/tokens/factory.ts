@@ -372,17 +372,25 @@ function hexFallback(g: HexGrid, input: Pick<SpotSearch, "center" | "footprint" 
   return at;
 }
 
-/** Where a hex search starts: the reference hex under the tapped point, pulled inside the scene, and the box standing on it. */
+/**
+ * Where a hex search starts: the reference hex under the tapped point, pulled
+ * inside the scene, and the box standing on it. A custom drawing wider than
+ * the scene still stands on its size's hexes, which can fit, so on that axis
+ * the tap is only kept inside the scene: pulling the box's middle in would put
+ * the start past the far edge, out of the rings' reach of every spot inside.
+ */
 function hexStart(g: HexGrid, input: Pick<SpotSearch, "center" | "footprint" | "bounds">): { creature: PlacedToken; ref: Hex; at: Point } {
   const { footprint: fp, bounds } = input;
   const creature: PlacedToken = { size: "custom", w: fp.w, h: fp.h, x: 0, y: 0 };
-  const center = {
-    x: Math.min(Math.max(fp.w / 2, input.center.x), Math.max(fp.w / 2, bounds.w - fp.w / 2)),
-    y: Math.min(Math.max(fp.h / 2, input.center.y), Math.max(fp.h / 2, bounds.h - fp.h / 2)),
-  };
+  const center = { x: pullInside(input.center.x, fp.w, bounds.w), y: pullInside(input.center.y, fp.h, bounds.h) };
   const size = sizeCategory(creature);
   const ref = referenceHex(g, size, snapAnchor(g, size, center));
   return { creature, ref, at: placedOnHex(g, creature, ref) };
+}
+
+/** A tapped coordinate pulled so a box `side` long around it lies on `0..span`, or only onto `0..span` when the box is longer. */
+function pullInside(tap: number, side: number, span: number): number {
+  return side > span ? Math.min(Math.max(0, tap), span) : Math.min(Math.max(side / 2, tap), span - side / 2);
 }
 
 function clampCorner(p: Point, fp: Footprint, bounds: Bounds): Point {

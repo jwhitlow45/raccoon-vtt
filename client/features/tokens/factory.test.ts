@@ -10,12 +10,13 @@ import { clientOpSchema, MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema } from
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { monsterView } from "#shared/statBlock.ts";
 import { snapPosition } from "../../lib/scene.ts";
-import { DM, actor, apply, blockOf, character, companionBlock, customMonster, room, token } from "#shared/testutil.ts";
+import { DM, actor, apply, blockOf, character, companionBlock, customMonster, rng, room, token } from "#shared/testutil.ts";
 import {
   blankToken,
   characterToken,
   cornerFor,
   duplicateToken,
+  firstFreeSpot,
   hasLairValues,
   monsterToken,
   newCharacter,
@@ -393,6 +394,42 @@ describe("placement on a hex scene (docs/design-v1-hex-grids.md 4.2)", () => {
       // A tap well off the scene stacks on its nearest spot inside.
       const off = spreadPositions({ grid: g, center: { x: -4, y: -4 }, footprint: { w: 1, h: 1 }, count: 2, bounds: { w: 1.2, h: 1.2 }, occupied: [] });
       assert.deepEqual(off, [spots[0], spots[0]]);
+    });
+
+    test(`${orient}: a custom drawing larger than the scene stands on hexes inside it, free or stacked (HX3-ASTRA-02)`, () => {
+      // A 20 by 20 drawing stands on a Gargantuan's hexes, which fit a 6 by 6 scene, though its box does not.
+      const box = { w: 6, h: 6 };
+      const fp = { w: 20, h: 20 };
+      const fits = (p: { x: number; y: number } | null | undefined) => !!p && hexesOf(p, 20).every((h) => hexInScene(g, box, h));
+      const full = occupiedBoxes(sceneHexes(g, box).map((h) => ({ sceneId: "s1", size: "medium" as const, ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, h) })), "s1");
+      for (const tap of [{ x: 6, y: 6 }, { x: 0, y: 0 }, { x: 3, y: 3 }, { x: 6, y: 0 }, { x: 40, y: -9 }]) {
+        const free = firstFreeSpot({ grid: g, center: tap, footprint: fp, bounds: box, occupied: [], accept: () => true });
+        assert.ok(fits(free), `${tap.x},${tap.y}: free ${JSON.stringify(free)} inside`);
+        const [stacked] = spreadPositions({ grid: g, center: tap, footprint: fp, count: 1, bounds: box, occupied: full });
+        assert.ok(fits(stacked), `${tap.x},${tap.y}: stacked ${JSON.stringify(stacked)} inside`);
+      }
+    });
+
+    test(`${orient}: on random scenes every custom drawing lands inside whenever its hexes fit somewhere (HX3-ASTRA-02)`, () => {
+      const r = rng(orient === "rows" ? 26129 : 26130);
+      for (let i = 0; i < 300; i++) {
+        const box = { w: 1 + Math.floor(r() * 12), h: 1 + Math.floor(r() * 12) };
+        const fp = { w: 0.5 + Math.floor(r() * 40) / 2, h: 0.5 + Math.floor(r() * 40) / 2 };
+        const tap = { x: -3 + r() * (box.w + 6), y: -3 + r() * (box.h + 6) };
+        const creature = { size: "custom" as const, ...fp };
+        const fits = (p: { x: number; y: number } | null | undefined) => !!p && occupiedHexes(g, { ...creature, ...p }).every((h) => hexInScene(g, box, h));
+        const somewhere = sceneHexes(g, box).some((h) => fits(placedOnHex(g, { ...creature, x: 0, y: 0 }, h)));
+        const label = `${JSON.stringify(box)} ${JSON.stringify(fp)} ${tap.x.toFixed(2)},${tap.y.toFixed(2)}`;
+        const free = firstFreeSpot({ grid: g, center: tap, footprint: fp, bounds: box, occupied: [], accept: () => true });
+        if (!somewhere) {
+          assert.equal(free, null, `${label}: no spot`);
+          continue;
+        }
+        assert.ok(fits(free), `${label}: free ${JSON.stringify(free)} inside`);
+        const full = occupiedBoxes(sceneHexes(g, box).map((h) => ({ sceneId: "s1", size: "medium" as const, ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, h) })), "s1");
+        const [stacked] = spreadPositions({ grid: g, center: tap, footprint: fp, count: 1, bounds: box, occupied: full });
+        assert.ok(fits(stacked), `${label}: stacked ${JSON.stringify(stacked)} inside`);
+      }
     });
   }
 });
