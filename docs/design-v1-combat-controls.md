@@ -37,7 +37,7 @@ The project owner, 2026-10-23: "For anything (sans things most characters have l
 ## 0. Today and the answer in short
 
 **Today.**
-- `Actor.legendary` holds `actionsMax`, `actionsUsed`, `resistMax` and `resistUsed` (shared/model.ts:886). Only the DM changes them, with the pips in a row's options (Row.tsx:905-920) and the Stats steppers (StatsSection.tsx:217-245). Save cards spend Resistance through `actor.outcome`'s `resist` (reducer/outcome.ts:37-39). Nothing spends a pip for a legendary action.
+- `Actor.legendary` holds `actionsMax`, `actionsUsed`, `resistMax` and `resistUsed` (shared/model.ts:886). (Since rebuilt by docs/design-v1-monster-uses.md: the pips that set the counts used are gone, and Use and Restore change them.) Only the DM changes them, with the pips in a row's options (Row.tsx:905-920) and the Stats steppers (StatsSection.tsx:217-245). Save cards spend Resistance through `actor.outcome`'s `resist` (reducer/outcome.ts:37-39). Nothing spends a pip for a legendary action.
 - In lair sets `InitEntry.inLair` and nothing else (reducer/encounter.ts:301).
 - Recharge "Used" lives in one tab's sessionStorage (dice/options.ts:391-423). The recharge card reads Used as the turn starts, from turn lines that arrive while the page is open (InitiativeStrip.tsx:1200-1250), so a reload or a second DM device loses it.
 - X/Day is display text (dice/named.ts:215-231). Regeneration is not read. The token bar has no combat items (canvas/barButtons.ts:64-83). Characters have no class resources. Nothing prompts a death save.
