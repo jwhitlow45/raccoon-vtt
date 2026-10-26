@@ -232,7 +232,9 @@ describe("the token window's summary and the panel's header", () => {
       const header = renderToStaticMarkup(createElement(QuickNumbers, { items: vitals({ actor: a, token: t, fullAccess: true, place: "panel" }), actor: a, token: { kind: t.kind, elevation: 0 } }));
       const ours = quickMarkup(line);
       assert.equal(ours.size, 2, `${label}: ${[...ours.keys()].join(", ")}`);
-      assert.deepEqual(ours, quickMarkup(header), label);
+      const theirs = quickMarkup(header);
+      // The header keeps a speed of several modes whole (QuickNumbers.tsx, D-261026-15), where the window keeps its last mode with PP.
+      for (const [name, markup] of ours) if (!line.includes("data-speed-pp") || !name.startsWith("Speed")) assert.equal(theirs.get(name), markup, `${label}: ${name}`);
       assert.doesNotMatch(line, />Passive Perception</, `${label}: the words stay in the name`);
       assert.match(line, />HP <\/span><span[^>]*>\d+\/\d+</, `${label}: HP keeps its words`);
     }
@@ -247,14 +249,19 @@ describe("the token window's summary and the panel's header", () => {
    * filled a line and "Climb 40 ft" stood alone on the next, with PP under
    * it (FU30-NOTED). The last mode now wraps with PP.
    */
-  test("a speed of several modes keeps its last beside Passive Perception, in the window and the header, and names itself whole once", () => {
+  test("a speed of several modes keeps its last beside Passive Perception in the window, stays whole in the header, and names itself whole once", () => {
     for (const [label, a, t] of creatures.slice(1, 3)) {
       const line = renderToStaticMarkup(createElement(VitalsLine, { items: vitals({ actor: a, token: t, fullAccess: true, place: "bar" }) }));
       const header = renderToStaticMarkup(createElement(QuickNumbers, { items: vitals({ actor: a, token: t, fullAccess: true, place: "panel" }), actor: a, token: { kind: t.kind, elevation: 0 } }));
       const speed = quickUnit(vitals({ actor: a, token: t, fullAccess: true, place: "bar" }).find((item) => item.key === "speed")!);
       assert.ok(speed?.key === "speed", label);
       const last = speed.modes.at(-1)!;
-      for (const [where, markup] of [["window", line], ["header", header]] as const) {
+      // The header's first part holds the whole speed, every mode in its picture, and nothing of it goes with PP (D-261026-15).
+      const whole = quickMarkup(header).get(speed.name);
+      assert.ok(whole, `${label}, header: the speed names itself whole`);
+      for (const mode of speed.modes) assert.match(whole, new RegExp(`>${mode.replace(/[()]/g, "\\$&")},?<`), `${label}, header: ${mode} in the speed`);
+      assert.doesNotMatch(header, /data-speed-pp/, `${label}, header: no mode with PP`);
+      for (const [where, markup] of [["window", line]] as const) {
         const img = quickMarkup(markup).get(speed.name);
         assert.ok(img, `${label}, ${where}: the speed names itself whole`);
         assert.doesNotMatch(img, new RegExp(`>${last.replace(/[()]/g, "\\$&")}<`), `${label}, ${where}: the last mode stays out of the picture`);

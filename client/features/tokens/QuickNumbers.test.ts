@@ -58,13 +58,15 @@ describe("the quick numbers under a token's name", () => {
       ["lead", ["Armor Class 15", "Speed 30 ft"]],
       ["rest", ["Passive Perception 11", "Initiative +1"]],
     ]);
-    // A speed of two modes keeps its last with Passive Perception, in the second part, hidden there from a screen reader.
+    // A speed of two modes stays whole with AC (D-261026-15), each mode its own unbroken piece for the part to wrap between.
     const two = numbersFor(DM, token("g", { elevation: 20, actor: { inline: actor({ ac: 15, speeds: { walk: 30, fly: 60 }, passivePerception: 14, initBonus: 2 }) } }));
     assert.deepEqual(parts(two.markup), [
       ["lead", ["Armor Class 15", "Speed 30 ft, Fly 60 ft"]],
       ["rest", ["Passive Perception 14", "Initiative +2", "Elevation 20 ft"]],
     ]);
-    assert.match(two.markup, /<span data-quick-part="rest"[^>]*><span data-speed-pp-part=""[^>]*><strong data-unit="speed" aria-hidden="true"[^>]*>Fly 60 ft<\/strong>/);
+    const lead = /<span data-quick-part="lead"[^>]*>(.*?)<span data-quick-part="rest"/.exec(two.markup)?.[1] ?? "";
+    assert.match(lead, /<strong data-unit="speed" style="white-space:nowrap">30 ft,<\/strong><strong data-unit="speed" style="white-space:nowrap">Fly 60 ft<\/strong>/);
+    assert.doesNotMatch(two.markup, /data-speed-pp/, "no mode of the speed goes with Passive Perception");
     // Only the rest: a player's view of a monster.
     const rest = numbersFor(P1, token("g", { elevation: -10, actor: { inline: actor({ ac: 15 }) } }));
     assert.deepEqual(parts(rest.markup), [["rest", ["Elevation -10 ft"]]]);

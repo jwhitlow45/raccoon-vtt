@@ -24,8 +24,9 @@ import { quickUnit, type QuickUnit, type VitalItem } from "./statSummary.ts";
  * sheet link, as the action bar's summary parts AC and HP from the rest
  * (StatSummary.tsx VitalsLine, D-261024-42). Each part wraps as a whole,
  * so where the line does not hold them all, the second stands together on
- * a line of its own. A speed of several modes keeps its last with Passive
- * Perception, so that mode goes with the second part.
+ * a line of its own. A speed of several modes stays whole in the first
+ * part (D-261026-15), and where that part alone is wider than the line it
+ * wraps between the speed's modes, never inside one.
  */
 export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partial<Actor> | undefined; token: Pick<Token, "elevation" | "kind"> }) {
   // Each unit drawn with the margin it takes when another follows it: AC and the speed first, the rest after.
@@ -49,13 +50,7 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
       if (sheet?.kind === "sheet") sheetUrl = sheet.url;
     } else {
       const unit = quickUnit(item);
-      const next = props.items[n + 1];
-      const pp = next ? quickUnit(next) : null;
-      if (unit?.key === "speed" && unit.modes.length > 1 && pp?.key === "passivePerception") {
-        lead.push(() => <SpeedLead key="speed" speed={unit} />);
-        units.push((between) => <SpeedLastThenPerception key="speed-pp" speed={unit} pp={pp} style={between} />);
-        n++;
-      } else if (unit) (unit.key === "speed" ? lead : units).push((between) => <QuickNumberUnit key={unit.key} unit={unit} style={between} />);
+      if (unit) (unit.key === "speed" ? lead : units).push((between) => <QuickNumberUnit key={unit.key} unit={unit} style={between} />);
     }
   }
   const init = props.actor?.initBonus;
@@ -83,13 +78,11 @@ export function QuickNumbers(props: { items: readonly VitalItem[]; actor: Partia
   }
   if (lead.length + units.length === 0) return null;
   /*
-   * The line's own gap is the speed's 4 px between its modes, which its last
-   * mode keeps from the rest (SpeedThenPerception), and a unit another
-   * follows adds 8 more, so the units stand 12 px apart, across the parts
-   * too. A trailing margin can only send a unit to the next line a little
-   * early. A negative one let the speed stay on a line it ran 8 px past
-   * (FU31 review F10). The speed's leading modes take no margin: their
-   * last mode follows them by the line's gap alone.
+   * The line's own gap is 4 px, the speed's between its modes, and a unit
+   * another follows adds 8 more, so the units stand 12 px apart, across the
+   * parts too. A trailing margin can only send a unit to the next line a
+   * little early. A negative one let the speed stay on a line it ran 8 px
+   * past (FU31 review F10).
    */
   const drawn = [...lead, ...units];
   const last = drawn.length - 1;
@@ -168,38 +161,24 @@ type PerceptionUnit = Extract<QuickUnit, { key: "passivePerception" }>;
  * with Passive Perception, which ends this.
  */
 export function SpeedThenPerception(props: { speed: SpeedUnit; pp: PerceptionUnit; style?: CSSProperties }) {
+  const { speed } = props;
+  const last = speed.modes.length - 1;
   return (
     <span data-speed-pp="" style={{ display: "contents" }}>
-      <SpeedLead speed={props.speed} />
-      <SpeedLastThenPerception speed={props.speed} pp={props.pp} style={props.style} />
-    </span>
-  );
-}
-
-/** A speed of several modes but its last, which SpeedLastThenPerception draws: the footprints and the leading modes, named as the whole speed. */
-function SpeedLead(props: { speed: SpeedUnit }) {
-  const { speed } = props;
-  return (
-    <Unit name={speed.name} wraps>
-      <Icon name="speed" size="sm" style={{ color: theme.color.textMuted }} />
-      {speed.modes.slice(0, -1).map((mode, i) => (
-        <strong key={i} data-unit="speed" style={{ whiteSpace: "nowrap" }}>
-          {`${mode},`}
+      <Unit name={speed.name} wraps>
+        <Icon name="speed" size="sm" style={{ color: theme.color.textMuted }} />
+        {speed.modes.slice(0, last).map((mode, i) => (
+          <strong key={i} data-unit="speed" style={{ whiteSpace: "nowrap" }}>
+            {`${mode},`}
+          </strong>
+        ))}
+      </Unit>
+      <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(3), minWidth: 0, maxWidth: "100%", ...props.style }}>
+        <strong data-unit="speed" aria-hidden="true" title={speed.name} style={{ whiteSpace: "nowrap", ...OVER_REACH }}>
+          {speed.modes[last]}
         </strong>
-      ))}
-    </Unit>
-  );
-}
-
-/** The speed's last mode with Passive Perception, one part, the mode hidden from a screen reader, which hears the speed whole from SpeedLead. */
-function SpeedLastThenPerception(props: { speed: SpeedUnit; pp: PerceptionUnit; style?: CSSProperties }) {
-  const { speed } = props;
-  return (
-    <span data-speed-pp-part="" style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", rowGap: theme.space(1), columnGap: theme.space(3), minWidth: 0, maxWidth: "100%", ...props.style }}>
-      <strong data-unit="speed" aria-hidden="true" title={speed.name} style={{ whiteSpace: "nowrap", ...OVER_REACH }}>
-        {speed.modes[speed.modes.length - 1]}
-      </strong>
-      <QuickNumberUnit unit={props.pp} />
+        <QuickNumberUnit unit={props.pp} />
+      </span>
     </span>
   );
 }
