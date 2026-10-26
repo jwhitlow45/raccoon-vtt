@@ -5,7 +5,7 @@ import { Help, Section } from "../../components/Panel.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { hasKeyboard, sheetDevice } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
-import { captureKey, changeKey, holder, keyLabel, keysInEffect, resetKey, swapKey, UNBOUND } from "../../state/keyBindings.ts";
+import { captureKey, changeKey, holder, keyLabel, keysInEffect, resetKey, swapKey, UNBOUND, type KeyChanges } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { DEFAULT_KEYS, setShortcutSheet, sheetSections, SHORTCUTS, shortcutSheetSlot, useShortcutKeys, type SheetRow } from "../../state/shortcuts.ts";
 import { ConfirmButton } from "../scenes/controls.tsx";
@@ -89,6 +89,24 @@ export function ShortcutSheetHost(props: { role: "dm" | "player" }) {
 /** A key as the sheet says it aloud, "no key" for a row whose default another row's change took. */
 const spoken = (key: string) => (key === UNBOUND ? "no key" : keyLabel(key));
 
+/**
+ * What the sheet asks once the key pressed for a row is taken: the line
+ * under the row, the words it says, and its button's name. From a row with
+ * a key the two swap. From a row with no key the other row is left with
+ * none, or with its own default back where the change that took this row's
+ * key goes with the swap, so the question reads the other row's key from
+ * what the button applies (ISO5P2-OPUS-5).
+ */
+export function takenWords(changes: KeyChanges, taken: { id: string; key: string; by: string }, nameOf: (id: string) => string): { line: string; say: string; button: "Swap" | "Take" } {
+  const by = nameOf(taken.by);
+  const own = keysInEffect(DEFAULT_KEYS, changes)[taken.id] ?? UNBOUND;
+  const left = keysInEffect(DEFAULT_KEYS, swapKey(DEFAULT_KEYS, changes, taken.id, taken.key))[taken.by] ?? UNBOUND;
+  const asked = `${keyLabel(taken.key)} is already used by ${by}.`;
+  if (own !== UNBOUND && left === own) return { line: `Already ${by}.`, say: `${asked} Swap the two keys, or cancel.`, button: "Swap" };
+  const then = left === UNBOUND ? `${by} will have no key.` : `${by} goes back to ${keyLabel(left)}.`;
+  return { line: `Already ${by}. ${then}`, say: `${asked} ${then} Take it, or cancel.`, button: "Take" };
+}
+
 /** A row waiting for its key, refused one, or asked for one another row has. */
 type Editing = { id: string; step: "listening"; refused?: string } | { id: string; step: "taken"; key: string; by: string };
 
@@ -151,7 +169,7 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
       if (result.t === "taken") {
         setEditing({ id: listening, step: "taken", key: got.key, by: result.by });
         focusNext.current = "swap";
-        say(`${keyLabel(got.key)} is already used by ${nameOf(result.by)}. Swap the two keys, or cancel.`);
+        say(takenWords(keyChanges(), { id: listening, key: got.key, by: result.by }, nameOf).say);
         return;
       }
       setKeyChanges(result.changes);
@@ -233,7 +251,7 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: theme.font.body14 }}>
               <tbody>
                 {section.rows.map((row) => (
-                  <KeyRows key={row.id} row={row} controls={controls} editing={editing?.id === row.id ? editing : null} takenBy={editing?.step === "taken" && editing.id === row.id ? nameOf(editing.by) : ""} actions={actions} />
+                  <KeyRows key={row.id} row={row} controls={controls} editing={editing?.id === row.id ? editing : null} taken={editing?.step === "taken" && editing.id === row.id ? takenWords(keyChanges(), editing, nameOf) : null} actions={actions} />
                 ))}
               </tbody>
             </table>
@@ -257,9 +275,9 @@ type RowActions = {
 /**
  * One row of the sheet, and with `controls` a third cell for its Change
  * and Reset. While the row waits, or its key is taken, a line under it
- * says so, with Swap and Cancel for a taken key.
+ * says so, with Swap (Take from a row with no key) and Cancel for a taken key.
  */
-function KeyRows(props: { row: SheetRow; controls: boolean; editing: Editing | null; takenBy: string; actions: RowActions }) {
+function KeyRows(props: { row: SheetRow; controls: boolean; editing: Editing | null; taken: ReturnType<typeof takenWords> | null; actions: RowActions }) {
   const { row, editing, actions } = props;
   const lineId = `rvtt-key-${row.id}`;
   const border = `${theme.line.border}px solid ${theme.color.border}`;
@@ -314,12 +332,12 @@ function KeyRows(props: { row: SheetRow; controls: boolean; editing: Editing | n
                 ? editing.refused
                   ? `${editing.refused} Press another key, or Escape to cancel.`
                   : "Press a key, or Escape to cancel."
-                : `Already ${props.takenBy}.`}
+                : props.taken?.line}
             </div>
             {editing.step === "taken" ? (
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), marginTop: theme.space(1) }}>
                 <Button ref={actions.swapRef} size="sm" variant="primary" aria-describedby={lineId} onClick={actions.swap}>
-                  Swap
+                  {props.taken?.button ?? "Swap"}
                 </Button>
                 <Button size="sm" onClick={actions.cancel}>
                   Cancel
