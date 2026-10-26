@@ -4,6 +4,7 @@ import { dispatchGesture } from "../../state/actions.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, ValueChip } from "./controls.tsx";
+import { gridOfShape } from "#shared/rules/grid.ts";
 import { formatFeet, keptStops, measureStops } from "./ruler.ts";
 
 /**
@@ -32,18 +33,20 @@ export function useKeptRulers(role: "dm" | "player"): KeptRuler[] {
   const members = useRoomView((s) => s.view?.members);
   const tokens = useRoomView((s) => s.view?.tokens);
   const settings = useRoomView((s) => s.view?.meta.settings);
+  const gridShape = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.gridShape : undefined));
   return useMemo(() => {
     if (!tokens || !settings) return [];
+    const grid = gridOfShape(gridShape);
     const kept = Object.values(drawings)
       .filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === sceneId && (role === "dm" || d.ownerId === youId))
       .sort((a, b) => (a.id < b.id ? -1 : 1));
     const describe = (d: Drawing) => {
-      const total = formatFeet(measureStops(keptStops(d), tokens, settings).totalFt);
+      const total = formatFeet(measureStops(grid, keptStops(d), tokens, settings).totalFt);
       const owner = d.ownerId === youId ? null : (members?.[d.ownerId]?.name ?? "Someone");
       return [owner, total, d.visibility === "dm" ? "only DMs see it" : null].filter(Boolean).join(" · ");
     };
     return kept.map((d) => ({ id: d.id, text: describe(d) }));
-  }, [drawings, sceneId, youId, members, tokens, settings, role]);
+  }, [drawings, sceneId, youId, members, tokens, settings, gridShape, role]);
 }
 
 /** "Kept rulers (2)", or "Kept (2)" where the row is short, with room for two digits so a count never moves its neighbors. */

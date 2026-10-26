@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { chunkKey, holderTileKey } from "#shared/keys.ts";
 import type { EdgeFeature, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
@@ -62,7 +63,7 @@ describe("the walking ruler", () => {
   test("it walks the token it starts on, leaves out other creatures, and only the DM's own ruler reads a DM-only area", () => {
     const state = world({ tokens: [token("ogre", { size: "large", x: 1, y: 4 }), token("wall", { x: 5, y: 5 })] });
     state.templates.web = template("web", { shape: "sphere", size: 10, origin: { x: 6, y: 5, z: 0 }, visibility: "dm", ownerId: "dm1", slows: { kind: "difficult" } });
-    const stops = [tokenStop(state.tokens.ogre!), free(10, 5)];
+    const stops = [tokenStop(SQUARES, state.tokens.ogre!), free(10, 5)];
     const shared = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: false })!;
     assert.deepEqual(shared.size, { w: 2, h: 2 });
     assert.equal(shared.totalFt, 45, "the goblin in the way will have moved, and players do not see the web");
@@ -94,7 +95,7 @@ describe("the walking ruler", () => {
     // On a monster too, which a DM's drag would walk on the DM's own map.
     const monster = fogged(10);
     monster.tokens.gob = token("gob", { x: 2, y: 5 });
-    const onGob = read(monster, [tokenStop(monster.tokens.gob), free(9, 5)]);
+    const onGob = read(monster, [tokenStop(SQUARES, monster.tokens.gob), free(9, 5)]);
     assert.deepEqual(onGob.onDm, onGob.onPlayer);
     assert.deepEqual(onGob.onDm, [15, true]);
     assert.deepEqual(read(fogged(10), stops, true).onDm, [55, false], "the DM's own ruler, before it is shared, reads the DM's map");
@@ -155,7 +156,7 @@ describe("the walking ruler", () => {
 
   test("a kept walking ruler follows every token it is anchored to", () => {
     const state = world({ blockMovement: false, tokens: [token("a", { x: 1, y: 1 }), token("b", { x: 4, y: 1 })] });
-    const kept = keptDrawing({ id: "k", sceneId: "s1", stops: [tokenStop(state.tokens.a!), tokenStop(state.tokens.b!)], ownerId: "dm1", color: "#fff", shared: true, walk: true })!;
+    const kept = keptDrawing({ id: "k", sceneId: "s1", stops: [tokenStop(SQUARES, state.tokens.a!), tokenStop(SQUARES, state.tokens.b!)], ownerId: "dm1", color: "#fff", shared: true, walk: true })!;
     const read = (view: RoomState) => measureWalk({ view, sceneId: "s1", stops: keptStops(kept), viewer: { role: "dm" }, everything: false })!;
     assert.deepEqual([read(state).totalFt, read(state).legs[0]!.to], [15, { x: 4, y: 1 }]);
     const moved = { ...state, tokens: { ...state.tokens, b: { ...state.tokens.b!, x: 8 } } };
@@ -251,7 +252,7 @@ describe("the walking ruler", () => {
     // Two rulers from a Large creature past a short wall, ends five squares apart, as astra drew them.
     const state = world({ edges: line("w", 20, 0, 5), tokens: [token("ogre", { size: "large", x: 2, y: 2 })] });
     state.scenes.s1 = { ...state.scenes.s1!, bounds: { w: 200, h: 200 } };
-    const at = tokenStop(state.tokens.ogre!);
+    const at = tokenStop(SQUARES, state.tokens.ogre!);
     const byTurns = (rulers: RulerStop[][], view: RoomState, turns: number) => {
       const got: (ReturnType<typeof measureWalk> | undefined)[] = rulers.map(() => undefined);
       let t = 0;
@@ -294,7 +295,7 @@ describe("the walking ruler", () => {
       let view = world({ edges: edgesOf(), tokens: [ogre] });
       const spot = () => free(Math.floor(rand() * 28), Math.floor(rand() * 28));
       // Rulers often start on one creature or spot, so they share searches.
-      const starts = [tokenStop(ogre), free(1, 1)];
+      const starts = [tokenStop(SQUARES, ogre), free(1, 1)];
       const rulers = Array.from({ length: 2 + Math.floor(rand() * 4) }, () => [starts[Math.floor(rand() * 2)]!, ...Array.from({ length: 1 + Math.floor(rand() * 3) }, spot)]);
       const measure = (k: number) => measureWalk({ view, sceneId: "s1", stops: rulers[k]!, viewer: { role: "player" }, everything: false, deadline: -Infinity })!;
       for (let turn = 0; turn < 300; turn++) {

@@ -7,6 +7,7 @@ import { theme } from "../../lib/theme.ts";
 import { groundSource, seenGround } from "../builder/heights/ground.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
+import { isHex, sceneGrid, SQUARES } from "#shared/rules/grid.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { OptButton, OptionsStrip, OptSegmented } from "./controls.tsx";
 import { KeptRulersChip, useKeptRulers } from "./KeptRulers.tsx";
@@ -23,7 +24,7 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
-import { MEASURES, pickMeasure, publish, rulerSlot, shares } from "./rulerStore.ts";
+import { MEASURES, pickMeasure, publish, rulerSlot, shares, walksOn, WALKING_NEEDS_SQUARES } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
 import { heldKey, walkShown, walkText } from "./walkRuler.ts";
 import { rulerCycle } from "../toolChoices.ts";
@@ -67,7 +68,7 @@ function onDown(p: ToolPointer, ctx: ToolContext): void {
   const tool = ctx.scope.get(rulerSlot);
   const before = tool.store.getState().ruler;
   const gap = pressGap(boardPickOf(ctx), p);
-  tool.gesture = { ...beginGesture(before, p.world, sceneToken(ctx, p.tokenId), (stop) => gap(stop)), screen: p.screen, before };
+  tool.gesture = { ...beginGesture(before, p.world, sceneToken(ctx, p.tokenId), (stop) => gap(stop), sceneGrid(ctx.scene)), screen: p.screen, before };
 }
 
 function onMove(p: ToolPointer, ctx: ToolContext): void {
@@ -118,7 +119,7 @@ function keep(ctx: ToolContext, ruler: RulerState | null): void {
           ownerId: you.memberId,
           color: s.view?.members[you.memberId]?.color ?? theme.color.crest,
           shared: shares(ctx),
-          walk: ctx.scope.get(rulerSlot).store.getState().walk,
+          walk: walksOn(ctx.scope.get(rulerSlot).store.getState().walk, ctx.scene),
         }
       : null,
   );
@@ -154,9 +155,13 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   const scope = useRoomScope();
   const tool = useScoped(rulerSlot);
   const rulerStore = tool.store;
-  const { ruler, share, walk } = useStore(rulerStore);
+  const { ruler, share, walk: wantsWalk } = useStore(rulerStore);
   const tokens = useRoomView((s) => s.view?.tokens);
   const settings = useRoomView((s) => s.view?.meta.settings);
+  const scene = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
+  // Walking is off on a hex scene, and the row says so (rulerStore.ts walksOn).
+  const hex = scene !== undefined && isHex(sceneGrid(scene));
+  const walk = walksOn(wantsWalk, scene);
   const view = useRoomView((s) => (walk ? s.view : null));
   const kept = useKeptRulers(props.role);
   const stops = ruler ? allStops(ruler) : [];
@@ -186,7 +191,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
       </>
     );
   } else if (!walked && stops.length > 1 && tokens && settings) {
-    const { totalFt, legsFt } = measureStops(stops, tokens, settings);
+    const { totalFt, legsFt } = measureStops(scene ? sceneGrid(scene) : SQUARES, stops, tokens, settings);
     reading = true;
     info = (
       <>
@@ -205,6 +210,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
           <>
             {info}
             {reading && settings ? <span style={{ color: theme.color.textMuted }}> · {diagonalLabel(settings.diagonal)}</span> : null}
+            {hex ? <span style={{ color: theme.color.textMuted }}> · {WALKING_NEEDS_SQUARES}</span> : null}
           </>
         ),
       }}
@@ -247,7 +253,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
             <OptSegmented
               label="Measure"
               value={walk ? "walking" : "straight"}
-              options={MEASURES}
+              options={hex ? MEASURES.map((m) => (m.value === "walking" ? { ...m, disabled: true, title: WALKING_NEEDS_SQUARES } : m)) : MEASURES}
               onChange={(v) => pickMeasure(scope, v)}
             />
           ),

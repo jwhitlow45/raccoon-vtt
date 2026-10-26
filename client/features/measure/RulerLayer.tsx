@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react";
 import { Circle, Group, Line } from "react-konva";
 import type { Drawing, RoomState, Token } from "#shared/model.ts";
-import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useDelayed } from "../../components/Loading.tsx";
 import { footprint, snapPosition } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
@@ -93,6 +93,10 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   const feetPerCell = settings?.feetPerCell ?? 5;
   const diagonal = settings?.diagonal ?? "five";
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
+  // The scene's grid: on hexes a ruler counts hex steps, and walking is off (rulerStore.ts walksOn).
+  const gridShape = props.scene.gridShape;
+  const grid = useMemo(() => sceneGrid({ gridShape }), [gridShape]);
+  const hex = isHex(grid);
   const route = useTreeShownStore(useScoped(routeSlot), (s) => s.route);
   // The turn's walker: the active creature, or the controlled mount sharing its turn (docs/design-v1-attach.md 7.2).
   const activeTokenId = useTreeShownView((s) => turnMoverId(s.view) ?? null);
@@ -100,9 +104,9 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
     return (token, to, walk) => {
       // Speeds are the actor's, which only the DM and the creature's owners receive.
       const speeds: Speeds | undefined = "inline" in token.actor ? token.actor.inline.speeds : characters?.[token.actor.ref]?.actor.speeds;
-      return remoteReading({ token, to, encounter, activeTokenId, speeds, rules, role }, walk);
+      return remoteReading({ token, grid, to, encounter, activeTokenId, speeds, rules, role }, walk);
     };
-  }, [encounter, activeTokenId, characters, rules, role]);
+  }, [encounter, activeTokenId, characters, rules, role, grid]);
   if (!settings) return null;
   const colorOf = (id: string) => members?.[id]?.color ?? theme.color.crest;
   const kept = Object.values(drawings).filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === props.scene.id);
@@ -115,14 +119,15 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
           drawing={d}
           tokens={tokens}
           rules={rules}
+          grid={grid}
           scale={props.scale}
           color={members?.[d.ownerId]?.color ?? d.style.stroke}
           owner={markOwner({ from: d.ownerId, local: d.ownerId === youId }, members)}
-          walk={d.walk && view ? { view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && d.visibility === "dm" } : undefined}
+          walk={d.walk && view && !hex ? { view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && d.visibility === "dm" } : undefined}
         />
       ))}
       {Object.entries(rulers).map(([key, r]) =>
-        r.walk && view ? (
+        r.walk && view && !hex ? (
           // Only the DM's own ruler, before it is shared, may read what players cannot see (docs/design-v1-movement.md 3.3).
           <WalkRuler
             key={key}
@@ -134,13 +139,13 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
             owner={markOwner(r, members)}
           />
         ) : (
-          <Ruler key={key} stops={r.points} tokens={tokens} rules={rules} scale={props.scale} color={colorOf(r.from)} owner={markOwner(r, members)} />
+          <Ruler key={key} stops={r.points} tokens={tokens} rules={rules} grid={grid} scale={props.scale} color={colorOf(r.from)} owner={markOwner(r, members)} />
         ),
       )}
       {Object.entries(drags).map(([key, d]) =>
         // This device's own drag is measured from Konva's node below. Another device of the same member counts as remote.
         d.ended || d.tokenId === localDrag?.tokenId ? null : (
-          <RemoteDragMeasure key={key} drag={d} token={tokens[d.tokenId]} read={read} scale={props.scale} grid={sceneGrid(props.scene)} />
+          <RemoteDragMeasure key={key} drag={d} token={tokens[d.tokenId]} read={read} scale={props.scale} grid={grid} />
         ),
       )}
       {/* The route is this drag's, set as it starts: a rider's drag walks its mount, whose route and cost these are (docs/design-v1-attach.md 4.2). */}
@@ -149,7 +154,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
       ) : localDrag && tokens[localDrag.tokenId] ? (
         <DragMeasure
           token={tokens[localDrag.tokenId]!}
-          to={snapPosition(sceneGrid(props.scene), localDrag.x, localDrag.y, footprint(tokens[localDrag.tokenId]!))}
+          to={snapPosition(grid, localDrag.x, localDrag.y, footprint(tokens[localDrag.tokenId]!))}
           group={dropRoom ? { room: dropRoom, role } : undefined}
           read={read}
           scale={props.scale}
@@ -161,7 +166,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
 
 type WalkSource = Omit<WalkInput, "stops">;
 
-function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rules: DistanceRules; scale: number; color: string; owner: string | null; walk: WalkSource | undefined }) {
+function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rules: DistanceRules; grid: Grid; scale: number; color: string; owner: string | null; walk: WalkSource | undefined }) {
   const { drawing } = props;
   const stops = useMemo(() => keptStops(drawing), [drawing]);
   return (
@@ -169,7 +174,7 @@ function KeptRuler(props: { drawing: Drawing; tokens: Record<string, Token>; rul
       {props.walk ? (
         <WalkRuler stops={stops} walk={props.walk} scale={props.scale} color={props.color} owner={props.owner} kept />
       ) : (
-        <Ruler stops={stops} tokens={props.tokens} rules={props.rules} scale={props.scale} color={props.color} owner={props.owner} kept />
+        <Ruler stops={stops} tokens={props.tokens} rules={props.rules} grid={props.grid} scale={props.scale} color={props.color} owner={props.owner} kept />
       )}
     </Group>
   );
@@ -192,7 +197,8 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
   const slow = useDelayed(m?.searching === true);
   // One component draws one ruler by its id, which a fresh start keeps, so the start tells them apart.
   const held = useHeldWalk(m, heldKey("", stops));
-  if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
+  // A walking ruler is a square scene's (rulerStore.ts walksOn), so its straight stand-in reads squares.
+  if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} grid={SQUARES} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
   const shown = walkShown(m, held, slow);
   const mid = (p: Point) => ({ x: p.x + m.size.w / 2, y: p.y + m.size.h / 2 });
   const last = mid(m.legs[m.legs.length - 1]!.to);
@@ -262,13 +268,13 @@ function midway(iso: IsoGround | null, a: Point, b: Point): { x: number; y: numb
  * `owner` names whoever is measuring, on someone else's ruler (pings/who.ts).
  * A kept ruler draws its line solid, so it never reads as one being measured now.
  */
-function Ruler(props: { stops: readonly RulerStop[]; tokens: Record<string, Token>; rules: DistanceRules; scale: number; color: string; owner: string | null; kept?: boolean }) {
-  const { stops, tokens, rules, scale, color } = props;
+function Ruler(props: { stops: readonly RulerStop[]; tokens: Record<string, Token>; rules: DistanceRules; grid: Grid; scale: number; color: string; owner: string | null; kept?: boolean }) {
+  const { stops, tokens, rules, grid, scale, color } = props;
   const iso = useIsoGround();
   const { points, totalFt, legsFt } = useMemo(() => {
-    const m = stops.length > 1 ? measureStops(stops, tokens, rules) : { totalFt: 0, legsFt: [] };
-    return { points: drawnPoints(stops, tokens), ...m };
-  }, [stops, tokens, rules]);
+    const m = stops.length > 1 ? measureStops(grid, stops, tokens, rules) : { totalFt: 0, legsFt: [] };
+    return { points: drawnPoints(grid, stops, tokens), ...m };
+  }, [stops, tokens, rules, grid]);
   const flat = viewFlat(iso, points);
   const last = points[points.length - 1];
   if (!last) return null;

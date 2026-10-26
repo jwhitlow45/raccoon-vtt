@@ -417,7 +417,7 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   // Drags on squares only: a ruler's stop is a square's center, never a squeezed spot.
   const onSquares: Case = { ...c, aim: undefined };
   let room = c.state;
-  const stops: RulerStop[] = [tokenStop(room.tokens[c.mover]!)];
+  const stops: RulerStop[] = [tokenStop(SQUARES, room.tokens[c.mover]!)];
   const read: number[] = [];
   // A player's ruler reads the copy it starts on: a token a drag brings into view later is in none of its legs.
   const startCopy = dm ? c.state : copyFor(c.state, c.who);
@@ -431,7 +431,7 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
     if (!applied.ok) break;
     const landed = applied.state.tokens[c.mover]!;
     if (landed.squeeze) break;
-    const { x, y } = tokenStop(landed);
+    const { x, y } = tokenStop(SQUARES, landed);
     stops.push({ x, y });
     read.push(drag.preview.read.dragFt);
     if (room.tokens[c.mover]!.attached && !landed.attached) n.offHolder++;

@@ -8,7 +8,7 @@ import { areaTitle } from "../areas/labels.ts";
 import { dragReading, pathNow, type DragRead, type Speeds } from "../measure/movement.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import { seenIn, towingWord } from "../attach/walk.ts";
-import { cutPieces, dropLanding, routeLanding, samePose, walkerOf, walkStart, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
+import { cutPieces, dropGrid, dropLanding, routeLanding, samePose, walkerOf, walkStart, type DropState, type DropView, type Point, type Pose, type Role, type WalkersCut } from "./drop.ts";
 import type { RouteAnswer } from "./routeDrag.ts";
 import type { DragRoute } from "./store.ts";
 
@@ -52,6 +52,7 @@ export function groupReading(view: DropView, token: Token, to: Point, role: Role
   const dismount = dismountOf(view, token, { x: to.x, y: to.y, elevation: landing.elevation }, role);
   return dragReading({
     token: walkStart(view, walkerOf(view, token, to)),
+    grid: dropGrid(view, token),
     standing: token,
     to,
     landing,
@@ -166,6 +167,7 @@ export function walkPreview(input: { view: DropView; token: Token; target: Point
   const trace = routeWalkers(view.buildChunks, walking, pieces ?? [[to.x, to.y, 0, 0]], end.elevation);
   const read = dragReading({
     token: start,
+    grid: dropGrid(view, token),
     standing: token,
     to,
     encounter,

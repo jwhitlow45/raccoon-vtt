@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { SQUARES } from "#shared/rules/grid.ts";
 import type { Encounter, RoomState, Token, TurnStart } from "#shared/model.ts";
 import { character, entry, P1, P2, room, token } from "#shared/testutil.ts";
 import { ownWalk } from "#shared/rules/movement.ts";
@@ -72,7 +73,7 @@ describe("whose movement the turn reads", () => {
     });
     const horse = state.tokens.horse!;
     const rules = { feetPerCell: 5, diagonal: "five" as const };
-    const read = (activeTokenId: string | null) => dragReading({ token: ownWalk(horse), to: { x: 7, y: 5 }, encounter: state.encounter, activeTokenId, speeds: { walk: 40 }, rules, role: "dm" });
+    const read = (activeTokenId: string | null) => dragReading({ grid: SQUARES, token: ownWalk(horse), to: { x: 7, y: 5 }, encounter: state.encounter, activeTokenId, speeds: { walk: 40 }, rules, role: "dm" });
     assert.deepEqual(read(turnMoverId(state) ?? null).left, { kind: "walk", speed: 40, leftFt: 20, band: "walk" }, "10 ft walked and 10 ft more leave 20 ft of 40 ft");
     assert.equal(read("bree").left, undefined, "read as the rider's turn, the mount is just another creature");
   });

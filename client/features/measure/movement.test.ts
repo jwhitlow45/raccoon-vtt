@@ -43,43 +43,43 @@ describe("movement since the turn began", () => {
 
   test("the trail runs through every stop of this turn, and Moved adds up the legs that count, out and back included", () => {
     const stops: PathStop[] = [stop(2, 2), stop(4, 2), { ...stop(4, 4), uncounted: true }, stop(5, 4)];
-    const trail = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 5, y: 4, path: { turn: 7, stops } }), rules: five, role: "dm" })!;
+    const trail = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 5, y: 4, path: { turn: 7, stops } }), rules: five, role: "dm" })!;
     assert.deepEqual(trail.spots, stops.map((s) => ({ x: s.x, y: s.y, elevation: s.elevation })));
     assert.deepEqual(trail.legs.map((l) => l.counted), [true, false, true]);
     assert.equal(trail.movedFt, 15, "10 ft and 5 ft, without the 10 ft shove");
     assert.deepEqual([trail.from, trail.to], [{ x: 2, y: 2, w: 1, h: 1 }, { x: 5, y: 4, w: 1, h: 1 }]);
-    const back = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 2, y: 2, path: { turn: 7, stops: [stop(2, 2), stop(6, 2), stop(2, 2)] } }), rules: five, role: "dm" })!;
+    const back = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 2, y: 2, path: { turn: 7, stops: [stop(2, 2), stop(6, 2), stop(2, 2)] } }), rules: five, role: "dm" })!;
     assert.equal(back.movedFt, 40, "out and back is the whole walk, not the difference");
-    const climb = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 2, y: 2, elevation: 10, path: { turn: 7, stops: [stop(2, 2), stop(2, 2, 10)] } }), rules: five, role: "dm" })!;
+    const climb = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 2, y: 2, elevation: 10, path: { turn: 7, stops: [stop(2, 2), stop(2, 2, 10)] } }), rules: five, role: "dm" })!;
     assert.equal(climb.movedFt, 10, "flying straight up is moving");
-    const diagonal = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 2, y: 2, path: { turn: 7, stops: [stop(0, 0), stop(1, 1), stop(2, 2)] } }), rules: fiveTen, role: "dm" })!;
+    const diagonal = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 2, y: 2, path: { turn: 7, stops: [stop(0, 0), stop(1, 1), stop(2, 2)] } }), rules: fiveTen, role: "dm" })!;
     assert.equal(diagonal.movedFt, 15, "the 5-10-5 count runs along the whole path, not leg by leg");
-    const shoved = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 3, y: 3, path: { turn: 7, stops: [stop(0, 0), stop(1, 1), { ...stop(2, 2), uncounted: true }, stop(3, 3)] } }), rules: fiveTen, role: "dm" })!;
+    const shoved = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 3, y: 3, path: { turn: 7, stops: [stop(0, 0), stop(1, 1), { ...stop(2, 2), uncounted: true }, stop(3, 3)] } }), rules: fiveTen, role: "dm" })!;
     assert.equal(shoved.movedFt, 15, "a shove's diagonal is not the creature's");
   });
 
   test("the DM's trail draws no leg a holder carried the creature, which its holder's own trail shows (docs/design-v1-attach.md 7.2)", () => {
     const stops: PathStop[] = [stop(2, 2), stop(4, 2), { ...stop(8, 2), uncounted: true, carried: true }, stop(8, 4)];
-    const trail = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 8, y: 4, path: { turn: 7, stops } }), rules: five, role: "dm" })!;
+    const trail = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 8, y: 4, path: { turn: 7, stops } }), rules: five, role: "dm" })!;
     assert.deepEqual(trail.legs.map((l) => [l.counted, l.carried]), [[true, false], [false, true], [true, false]]);
     assert.equal(trail.movedFt, 20, "the carried leg counts nothing");
     assert.deepEqual(trailSegments(trail).map((s) => s.leg), [0, 2]);
     // A player's copy holds the same leg as an uncounted one, without the mark: drawn faint, as any leg that does not count.
-    const theirs = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 8, y: 4, path: { turn: 7, stops: stops.map(({ carried: _c, ...rest }) => rest) } }), rules: five, role: "player" })!;
+    const theirs = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 8, y: 4, path: { turn: 7, stops: stops.map(({ carried: _c, ...rest }) => rest) } }), rules: five, role: "player" })!;
     assert.deepEqual(trailSegments(theirs).map((s) => [s.leg, s.counted]), [[0, true], [1, false], [2, true]]);
   });
 
   test("an earlier turn's path, another row's turn or another scene draws no trail, and a turn from before paths reads straight from its start", () => {
     const token = tok({ x: 5, y: 4, path: { turn: 6, stops: [stop(9, 9), stop(5, 4)] } });
-    const stale = turnTrail({ encounter: fight, sceneId: "s1", token, rules: five, role: "dm" })!;
+    const stale = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token, rules: five, role: "dm" })!;
     assert.deepEqual(stale.spots, [{ x: 2, y: 2, elevation: 0 }, { x: 5, y: 4, elevation: 0 }], "from where this turn began, not along the old path");
     const older: TurnView = { ...fight, turnStart: start };
-    assert.equal(turnTrail({ encounter: older, sceneId: "s1", token: tok({ x: 5, y: 4 }), rules: five, role: "dm" })!.movedFt, 15);
-    assert.equal(turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 2, y: 2 }), rules: five, role: "dm" }), null, "not moved yet");
-    assert.equal(turnTrail({ encounter: { ...fight, activeEntryId: "e2" }, sceneId: "s1", token, rules: five, role: "dm" }), null, "another row's turn");
-    assert.equal(turnTrail({ encounter: fight, sceneId: "s2", token, rules: five, role: "dm" }), null, "another scene in view");
-    assert.equal(turnTrail({ encounter: fight, sceneId: "s1", token: undefined, rules: five, role: "dm" }), null, "a token this viewer cannot see");
-    assert.equal(turnTrail({ encounter: null, sceneId: "s1", token, rules: five, role: "dm" }), null);
+    assert.equal(turnTrail({ grid: SQUARES, encounter: older, sceneId: "s1", token: tok({ x: 5, y: 4 }), rules: five, role: "dm" })!.movedFt, 15);
+    assert.equal(turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 2, y: 2 }), rules: five, role: "dm" }), null, "not moved yet");
+    assert.equal(turnTrail({ grid: SQUARES, encounter: { ...fight, activeEntryId: "e2" }, sceneId: "s1", token, rules: five, role: "dm" }), null, "another row's turn");
+    assert.equal(turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s2", token, rules: five, role: "dm" }), null, "another scene in view");
+    assert.equal(turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: undefined, rules: five, role: "dm" }), null, "a token this viewer cannot see");
+    assert.equal(turnTrail({ grid: SQUARES, encounter: null, sceneId: "s1", token, rules: five, role: "dm" }), null);
   });
 
   test("a player trusts a path of the active creature without the turn's start to check it against, and the DM never does", () => {
@@ -89,7 +89,7 @@ describe("movement since the turn began", () => {
     assert.equal(pathNow(unknown, token, "dm"), null);
     assert.equal(pathNow({ ...unknown, entries: [{ id: "e1", tokenId: "t2" }] }, token, "player"), null);
     assert.equal(pathNow(fight, { ...token, path: { turn: 6, stops: [] } }, "player"), null, "with the start, a player checks too");
-    const trail = turnTrail({ encounter: unknown, sceneId: "s1", token, rules: five, role: "player" })!;
+    const trail = turnTrail({ grid: SQUARES, encounter: unknown, sceneId: "s1", token, rules: five, role: "player" })!;
     assert.deepEqual(trail.spots.map((s) => s.x), [2, 4, 6], "where it stands now, which they see, joins the stops they saw");
     assert.equal(trail.movedFt, 20);
   });
@@ -131,10 +131,10 @@ describe("movement since the turn began", () => {
     // A 30 ft Speed, 25 ft of corners, and 45 ft as the dragging device counted it through rubble.
     const walker = tok({ x: 0, y: 0 });
     const to = { x: 5, y: 0 };
-    const read = dragReading({ token: walker, to, encounter: null, activeTokenId: null, speeds: { walk: 30 }, rules: five, role: "dm", walk: remoteWalk(walker, to, []), costFt: 45 });
+    const read = dragReading({ grid: SQUARES, token: walker, to, encounter: null, activeTokenId: null, speeds: { walk: 30 }, rules: five, role: "dm", walk: remoteWalk(walker, to, []), costFt: 45 });
     assert.equal(dragLabel(read), "45 ft · 15 ft left with Dash");
     assert.equal(read.left!.band, "dash", "drawn yellow");
-    const plain = dragReading({ token: walker, to, encounter: null, activeTokenId: null, speeds: { walk: 30 }, rules: five, role: "dm", walk: remoteWalk(walker, to, []) });
+    const plain = dragReading({ grid: SQUARES, token: walker, to, encounter: null, activeTokenId: null, speeds: { walk: 30 }, rules: five, role: "dm", walk: remoteWalk(walker, to, []) });
     assert.equal(dragLabel(plain), "25 ft · 5 ft left", "a frame without a cost reads its corners");
   });
 
@@ -142,7 +142,7 @@ describe("movement since the turn began", () => {
     const walker = tok({ x: 5, y: 2 });
     const entries = [{ id: "e1", tokenId: "t1" }];
     const older: TurnView = { activeEntryId: "e1", turnStart: start, entries };
-    const base = { token: walker, to: { x: 7, y: 2 }, encounter: older, activeTokenId: "t1", speeds: { walk: 30 }, rules: five, role: "dm" as const };
+    const base = { token: walker, grid: SQUARES, to: { x: 7, y: 2 }, encounter: older, activeTokenId: "t1", speeds: { walk: 30 }, rules: five, role: "dm" as const };
     assert.deepEqual(dragReading(base), { dragFt: 10, diag: [0, 0], left: { kind: "walk", speed: 30, leftFt: 5, band: "walk" } }, "a turn from before paths: 15 ft straight from its start, 10 ft more");
     assert.equal(dragReading({ ...base, to: { x: 9, y: 2 } }).left!.band, "dash");
     assert.equal(dragReading({ ...base, to: { x: 17, y: 2 } }).left!.band, "over");
@@ -159,7 +159,7 @@ describe("movement since the turn began", () => {
 
   test("the active creature's drag adds its leg to the path so far, without the legs that do not count", () => {
     const along = (stops: PathStop[], at: { x: number; y: number }) => tok({ ...at, path: { turn: 7, stops } });
-    const base = { to: { x: 7, y: 2 }, encounter: fight, activeTokenId: "t1", speeds: { walk: 30 }, rules: five, role: "dm" as const };
+    const base = { grid: SQUARES, to: { x: 7, y: 2 }, encounter: fight, activeTokenId: "t1", speeds: { walk: 30 }, rules: five, role: "dm" as const };
     const zigzag = along([stop(2, 2), stop(2, 4), stop(5, 2)], { x: 5, y: 2 });
     assert.deepEqual(dragReading({ ...base, token: zigzag }), { dragFt: 10, diag: [0, 0], left: { kind: "walk", speed: 30, leftFt: 25, band: "dash" } }, "25 ft of path and 10 ft more is 35 ft, into the Dash");
     const shoved = along([stop(2, 2), { ...stop(5, 2), uncounted: true }], { x: 5, y: 2 });
@@ -207,7 +207,7 @@ describe("a resize on the turn (docs/design-v1-token-window.md 8.7)", () => {
     return [DM, P1, P2].map((viewer) => {
       const copy = projectState(state, viewer, { sceneId: state.meta.playerSceneId }) as unknown as RoomState;
       const encounter = copy.encounter as unknown as TurnView;
-      return turnTrail({ encounter, sceneId: "s1", token: copy.tokens.thorn as MovingToken, rules: { feetPerCell: rules.feetPerCell, diagonal: rules.diagonal }, role: viewer.role })!;
+      return turnTrail({ grid: SQUARES, encounter, sceneId: "s1", token: copy.tokens.thorn as MovingToken, rules: { feetPerCell: rules.feetPerCell, diagonal: rules.diagonal }, role: viewer.role })!;
     });
   }
 
@@ -453,31 +453,31 @@ describe("a drag along a route (docs/design-v1-movement.md 3.1, 3.2 and 4.2)", (
         [4, 0, 1, 0],
       ],
     );
-    const read = dragReading({ ...calm, token: walker, to: { x: 4, y: 0 }, walk: rubble });
+    const read = dragReading({ grid: SQUARES, ...calm, token: walker, to: { x: 4, y: 0 }, walk: rubble });
     assert.equal(read.dragFt, 30);
     assert.deepEqual(read.extra, { ft: 10, words: "+10 ft for difficult terrain" });
     const wade = walk([[0, 0], [2, 0]], [[2, 0, 2, 1]]);
-    assert.equal(dragReading({ ...calm, token: walker, to: { x: 2, y: 0 }, walk: wade }).extra!.words, "+20 ft for difficult terrain and swimming");
-    assert.equal(dragReading({ ...calm, speeds: { walk: 30, swim: 30 }, token: walker, to: { x: 2, y: 0 }, walk: wade }).extra!.words, "+10 ft for difficult terrain", "a Swim Speed takes the swimming foot off");
-    assert.equal(dragReading({ ...calm, token: walker, to: { x: 2, y: 0 }, walk: walk([[0, 0], [2, 0]], [[2, 0, 1, 0]], undefined, true) }).extra!.words, "+10 ft for crawling");
-    assert.equal(dragReading({ ...calm, token: walker, to: { x: 2, y: 0 }, walk: walk([[0, 0], [2, 0]], [[2, 0, 3, 0]]) }).extra!.words, "+30 ft for overgrowth");
+    assert.equal(dragReading({ grid: SQUARES, ...calm, token: walker, to: { x: 2, y: 0 }, walk: wade }).extra!.words, "+20 ft for difficult terrain and swimming");
+    assert.equal(dragReading({ grid: SQUARES, ...calm, speeds: { walk: 30, swim: 30 }, token: walker, to: { x: 2, y: 0 }, walk: wade }).extra!.words, "+10 ft for difficult terrain", "a Swim Speed takes the swimming foot off");
+    assert.equal(dragReading({ grid: SQUARES, ...calm, token: walker, to: { x: 2, y: 0 }, walk: walk([[0, 0], [2, 0]], [[2, 0, 1, 0]], undefined, true) }).extra!.words, "+10 ft for crawling");
+    assert.equal(dragReading({ grid: SQUARES, ...calm, token: walker, to: { x: 2, y: 0 }, walk: walk([[0, 0], [2, 0]], [[2, 0, 3, 0]]) }).extra!.words, "+30 ft for overgrowth");
     assert.equal(dragLabel(read), "30 ft · 0 ft left\n+10 ft for difficult terrain");
   });
 
   test("Spirit Guardians: 10 ft outside and 10 ft inside reads yellow from the second step in, and stays yellow after it leaves", () => {
     const inside = (x: number) => x >= 2 && x <= 4;
     const pieces: [number, number, number, 0 | 1][] = [[2, 0, 0, 0], [4, 0, 0, 0]];
-    const into = dragReading({ ...calm, token: walker, to: { x: 4, y: 0 }, walk: walk([[0, 0], [2, 0], [4, 0]], pieces, inside) });
+    const into = dragReading({ grid: SQUARES, ...calm, token: walker, to: { x: 4, y: 0 }, walk: walk([[0, 0], [2, 0], [4, 0]], pieces, inside) });
     assert.equal(into.halfSpeed, "Spirit Guardians");
     assert.deepEqual(into.left, { kind: "walk", speed: 15, leftFt: 10, band: "dash" }, "20 ft used against 15: a Dash, 10 ft left with it");
-    const first = dragReading({ ...calm, token: walker, to: { x: 3, y: 0 }, walk: walk([[0, 0], [2, 0], [3, 0]], [[2, 0, 0, 0], [3, 0, 0, 0]], inside) });
+    const first = dragReading({ grid: SQUARES, ...calm, token: walker, to: { x: 3, y: 0 }, walk: walk([[0, 0], [2, 0], [3, 0]], [[2, 0, 0, 0], [3, 0, 0, 0]], inside) });
     assert.equal(first.left!.band, "walk", "the first step in is 15 ft against 15");
-    const out = dragReading({ ...calm, token: walker, to: { x: 6, y: 0 }, walk: walk([[0, 0], [2, 0], [4, 0], [6, 0]], [...pieces, [6, 0, 0, 0]], inside) });
+    const out = dragReading({ grid: SQUARES, ...calm, token: walker, to: { x: 6, y: 0 }, walk: walk([[0, 0], [2, 0], [4, 0], [6, 0]], [...pieces, [6, 0, 0, 0]], inside) });
     assert.equal(out.halfSpeed, undefined);
     assert.deepEqual(out.left, { kind: "walk", speed: 30, leftFt: 30, band: "dash" }, "out again with the full Speed, but the walk needed a Dash");
     // 35 ft inside, past its halved Dash of 30, then 5 ft out: 40 ft is within the full Dash, so the words are the area's.
     const deep = (x: number) => x < 7.5;
-    const past = dragReading({ ...calm, token: walker, to: { x: 8, y: 0 }, walk: walk([[0, 0], [8, 0]], [[8, 0, 0, 0]], deep) });
+    const past = dragReading({ grid: SQUARES, ...calm, token: walker, to: { x: 8, y: 0 }, walk: walk([[0, 0], [8, 0]], [[8, 0, 0, 0]], deep) });
     assert.deepEqual(past.left, { kind: "walk", speed: 15, leftFt: 5, band: "over" });
     assert.equal(dragLabel(past), "40 ft · 5 ft past Dash");
   });
@@ -491,11 +491,11 @@ describe("a drag along a route (docs/design-v1-movement.md 3.1, 3.2 and 4.2)", (
 
   test("the trail reads stored costs where the copy holds them, and corners' geometry everywhere else", () => {
     const stops: PathStop[] = [stop(2, 2), { ...stop(4, 4), via: [2, 4], moved: 20, cost: 30 }];
-    const owned = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 4, y: 4, path: { turn: 7, stops } }), rules: five, role: "dm" })!;
+    const owned = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 4, y: 4, path: { turn: 7, stops } }), rules: five, role: "dm" })!;
     assert.deepEqual([owned.movedFt, owned.usedFt], [20, 30]);
     assert.deepEqual(owned.legs[0]!.via, [{ x: 2, y: 4 }]);
     const theirs: PathStop[] = [stop(2, 2), { ...stop(4, 4), via: [2, 4] }];
-    const seen = turnTrail({ encounter: fight, sceneId: "s1", token: tok({ x: 4, y: 4, path: { turn: 7, stops: theirs } }), rules: five, role: "player" })!;
+    const seen = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 4, y: 4, path: { turn: 7, stops: theirs } }), rules: five, role: "player" })!;
     assert.deepEqual([seen.movedFt, seen.usedFt], [20, 20], "down two squares, then across two: never the straight 10 ft");
   });
 });

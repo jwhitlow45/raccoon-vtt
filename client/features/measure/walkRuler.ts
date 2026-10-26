@@ -329,7 +329,8 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   for (const [k, drawn] of stops.slice(1).entries()) {
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
-    const stop = on ? tokenStop(on) : drawn;
+    // A walk is phase H2's on hexes, so a walking ruler reads squares: the ruler's row turns Walking off on a hex scene.
+    const stop = on ? tokenStop(SQUARES, on) : drawn;
     const raw = { x: stop.x - size.w / 2 + shift.x, y: stop.y - size.h / 2 + shift.y };
     if (waiting) {
       legs.push({ from: waiting, to: raw, corners: [], ft: 0, none: false, searching: true });
@@ -408,6 +409,8 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, tar
     move && trace
       ? dragReading({
           token: walkStart(at.sim, reading),
+          // A walk is phase H2's on hexes: the walking ruler reads squares, and is off on a hex scene.
+          grid: SQUARES,
           to: { x: move.x, y: move.y },
           encounter: null,
           activeTokenId: null,

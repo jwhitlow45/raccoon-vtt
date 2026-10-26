@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { SQUARES } from "#shared/rules/grid.ts";
 import type { EdgeFeature, RoomState, Token } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -114,7 +115,7 @@ describe("a holder's route search walks the creature it drags beside it with it 
     assert.deepEqual([drag.preview.read.dragFt, drag.frame.ft], [stored, stored]);
     // A walking ruler reads the drag it stands for, the same way round.
     const copy = copyFor(state, P1);
-    const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(copy.tokens.thorn!), { x: 4.5, y: 11.5 }], viewer: { role: "player" }, everything: false })!;
+    const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(SQUARES, copy.tokens.thorn!), { x: 4.5, y: 11.5 }], viewer: { role: "player" }, everything: false })!;
     assert.deepEqual(ruler.legs.map((leg) => [leg.ft, leg.none]), [[stored, false]]);
   });
 
@@ -130,7 +131,7 @@ describe("a holder's route search walks the creature it drags beside it with it 
     assert.ok(canApply(op, P1, state, { canUseAsset: () => true }).ok, JSON.stringify(op));
     // The ruler reads the leg as no way through too.
     const copy = copyFor(state, P1);
-    const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(copy.tokens.thorn!), { x: 5.5, y: 11.5 }], viewer: { role: "player" }, everything: false })!;
+    const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(SQUARES, copy.tokens.thorn!), { x: 5.5, y: 11.5 }], viewer: { role: "player" }, everything: false })!;
     assert.deepEqual(ruler.legs.map((leg) => leg.none), [true]);
   });
 
@@ -628,7 +629,7 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     const state = gap();
     state.tokens.imp = token("imp", { name: "Imp", kind: "pc", ownerIds: ["p1"], x: 9, y: 6, elevation: 10, attached: { to: "cart", kind: "carry" } });
     const view = copyFor(state, P1);
-    const ruler = measureWalk({ view, sceneId: "s1", stops: [tokenStop(view.tokens.imp!), { x: 8.5, y: 6.5 }, { x: 9.5, y: 6.5 }], viewer: { role: "player" }, everything: false })!;
+    const ruler = measureWalk({ view, sceneId: "s1", stops: [tokenStop(SQUARES, view.tokens.imp!), { x: 8.5, y: 6.5 }, { x: 9.5, y: 6.5 }], viewer: { role: "player" }, everything: false })!;
     // The same two drags, made one after the other: the first leaves the cart, so the second walks on the ground.
     const off = dragOf(view, "player", "imp", { x: 8, y: 6 });
     const r = applyOp(state, off.op as Op, P1, env(9));
@@ -672,13 +673,13 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     // On the cart into the fog, off it west, back onto its revealed corner, which no seat there holds, and one more step.
     const state = fogged();
     const spots = [{ x: 9, y: 8 }, { x: 8, y: 8 }, { x: 11, y: 6 }, { x: 10, y: 6 }];
-    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.imp!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: "dm" }, everything: true })!;
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(SQUARES, state.tokens.imp!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: "dm" }, everything: true })!;
     assert.deepEqual(ruler.legs.map((leg) => leg.ft), dragsOf(state, spots));
   });
 
   test("a shared walking ruler reads the same on a player's copy as on the DM's, a token it moves into the fog seen by neither (review AT-SOL-5)", () => {
     const state = fogged();
-    const stops = [tokenStop(state.tokens.imp!), { x: 9.5, y: 8.5 }, { x: 8.5, y: 8.5 }];
+    const stops = [tokenStop(SQUARES, state.tokens.imp!), { x: 9.5, y: 8.5 }, { x: 8.5, y: 8.5 }];
     const dm = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: false })!;
     const player = measureWalk({ view: copyFor(state, P1), sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!;
     assert.deepEqual(player.legs.map((leg) => leg.ft), dm.legs.map((leg) => leg.ft));
@@ -689,7 +690,7 @@ describe("a squeeze at the end of a walk off a holder is judged as the walk read
     // Its first leg keeps the imp on the cart, in the fog, where no player sees it, so its next leg west off the cart walks as a
     // token with no holder: 10 ft up, over low ground. The DM's own ruler reads the fogged ground, as the DM's drag does.
     const state = fogged();
-    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.imp!), { x: 9.5, y: 8.5 }, { x: 8.5, y: 8.5 }], viewer: { role: "dm" }, everything: true })!;
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(SQUARES, state.tokens.imp!), { x: 9.5, y: 8.5 }, { x: 8.5, y: 8.5 }], viewer: { role: "dm" }, everything: true })!;
     const along = dragOf(state, "dm", "imp", { x: 9, y: 8 });
     const r = applyOp(state, along.op as Op, DM, env(9));
     assert.ok(r.ok);
@@ -806,7 +807,7 @@ describe("a walking ruler's later legs search the room its earlier legs leave (r
     const state = world({ tokens: [token("pc", { name: "Pc", kind: "pc", x: 3, y: 3 }), token("gob", { name: "Gob", size: "small", disposition: "ally", x: 2, y: 3, attached: { to: "pc", kind: "drag" } })] });
     state.templates.pg = template("pg", { shape: "emanation", size: 15, attachedTo: "gob", includeOrigin: true, slows: { kind: "quarter" } });
     const spots = [{ x: 8, y: 3 }, { x: 13, y: 3 }];
-    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.pc!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: "dm" }, everything: false })!;
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(SQUARES, state.tokens.pc!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: "dm" }, everything: false })!;
     const drags = dragsFrom(state, "pc", spots);
     assert.equal(drags[0], drags[1]);
     assert.ok(drags[0]! > 25, `the area costs: ${drags}`);
@@ -825,7 +826,7 @@ describe("a walking ruler's later legs search the room its earlier legs leave (r
     });
     state.templates.dt = template("dt", { shape: "emanation", size: 10, attachedTo: "lamp", includeOrigin: true, slows: { kind: "difficult" } });
     const spots = [{ x: 12, y: 10 }, { x: 12, y: 4 }];
-    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.horse!), ...spots.map((p) => ({ x: p.x + 1, y: p.y + 1 }))], viewer: { role: "dm" }, everything: true })!;
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(SQUARES, state.tokens.horse!), ...spots.map((p) => ({ x: p.x + 1, y: p.y + 1 }))], viewer: { role: "dm" }, everything: true })!;
     const drags = dragsFrom(state, "horse", spots);
     assert.deepEqual(drags, [40, 35], "the first step north is in the area, 5 ft more than its distance");
     assert.deepEqual(ruler.legs.map((leg) => leg.ft), drags);
@@ -859,7 +860,7 @@ describe("a walking ruler sees a party member its legs move where every player s
         read.push(drag.preview.read.dragFt);
       }
       assert.deepEqual([read, room.tokens.hero!.y], wall ? [[50, 20], 3] : [[50, 40], 1], `wall ${wall}`);
-      const stops = [tokenStop(state.tokens.hero!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))];
+      const stops = [tokenStop(SQUARES, state.tokens.hero!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))];
       const theirs = measureWalk({ view: copyFor(state, P1), sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!;
       assert.deepEqual(theirs.legs.map((leg) => leg.ft), read, `wall ${wall}, p1's ruler`);
       const shared = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: false })!;
@@ -897,7 +898,7 @@ describe("an area on a token carried rigidly with the mover never costs it (revi
         const read = dragsBy(state, who, "pc", spots);
         assert.equal(read.reduce((a, b) => a + b, 0), 50, `${cuts} stops, ${who.memberId}'s drags read ${read}`);
         const view = who.role === "dm" ? state : copyFor(state, who);
-        const ruler = measureWalk({ view, sceneId: "s1", stops: [tokenStop(view.tokens.pc!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: who.role }, everything: who.role === "dm" })!;
+        const ruler = measureWalk({ view, sceneId: "s1", stops: [tokenStop(SQUARES, view.tokens.pc!), ...spots.map((p) => ({ x: p.x + 0.5, y: p.y + 0.5 }))], viewer: { role: who.role }, everything: who.role === "dm" })!;
         assert.deepEqual(ruler.legs.map((leg) => leg.ft), read, `${cuts} stops, ${who.memberId}'s ruler`);
       }
     }
@@ -951,14 +952,14 @@ describe("a walking ruler counts the extra foot a drag pays for what the walker 
         });
         const copy = (room: RoomState) => (who.role === "dm" ? room : copyFor(room, who));
         let room = state;
-        const stops: RulerStop[] = [tokenStop(copy(state).tokens.hero!)];
+        const stops: RulerStop[] = [tokenStop(SQUARES, copy(state).tokens.hero!)];
         const read: number[] = [];
         for (const [i, to] of [{ x: 8, y: 5 }, { x: 8, y: 8 }].entries()) {
           const drag = dragOf(copy(room), who.role, "hero", to);
           const r = applyOp(room, drag.op as Op, who, env(5 + i));
           assert.ok(r.ok, r.ok ? "" : r.message);
           room = r.state;
-          const { x, y } = tokenStop(room.tokens.hero!);
+          const { x, y } = tokenStop(SQUARES, room.tokens.hero!);
           stops.push({ x, y });
           read.push(drag.preview.read.dragFt);
         }
@@ -1011,14 +1012,14 @@ describe("a walking ruler from a rider of a controlled mount walks the mount, as
       const copy = (room: RoomState) => (who.role === "dm" ? room : copyFor(room, who));
       let room = state;
       const read: number[] = [];
-      const stops: RulerStop[] = [tokenStop(copy(state).tokens.bree!)];
+      const stops: RulerStop[] = [tokenStop(SQUARES, copy(state).tokens.bree!)];
       for (const [i, to] of [{ x: 7, y: 2 }, { x: 7, y: 6 }].entries()) {
         const drag = dragOf(copy(room), who.role, "horse", to);
         const r = applyOp(room, drag.op as Op, who, env(5 + i));
         assert.ok(r.ok, r.ok ? "" : r.message);
         room = r.state;
         assert.equal(room.tokens.bree!.attached?.to, "horse", "Bree rides on");
-        const { x, y } = tokenStop(room.tokens.bree!);
+        const { x, y } = tokenStop(SQUARES, room.tokens.bree!);
         stops.push({ x, y });
         read.push(drag.preview.read.dragFt);
       }
@@ -1041,8 +1042,8 @@ describe("a walking ruler from a rider of a controlled mount walks the mount, as
       assert.ok(op.route && op.route.length > 1, `${who.memberId}'s drag bends round the wall: ${JSON.stringify(op)}`);
       const r = applyOp(state, op, who, env(5));
       assert.ok(r.ok, r.ok ? "" : r.message);
-      const { x, y } = tokenStop(r.state.tokens.bree!);
-      const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(copy.tokens.bree!), { x, y }], viewer: { role: who.role }, everything: who.role === "dm" })!;
+      const { x, y } = tokenStop(SQUARES, r.state.tokens.bree!);
+      const ruler = measureWalk({ view: copy, sceneId: "s1", stops: [tokenStop(SQUARES, copy.tokens.bree!), { x, y }], viewer: { role: who.role }, everything: who.role === "dm" })!;
       // Bree sits one square east of the horse's corner, so each of the horse's corners is drawn one square east of it.
       const seat = { x: 1, y: 0 };
       assert.deepEqual(ruler.legs[0]!.corners, op.route.slice(0, -1).map(([cx, cy]) => ({ x: cx + seat.x, y: cy + seat.y })), `${who.memberId}'s corners`);
@@ -1052,7 +1053,7 @@ describe("a walking ruler from a rider of a controlled mount walks the mount, as
 
   test("with the frame's budget spent, a leg still searching is drawn from Bree's place, and so is the one after it (review HF20-O-2)", () => {
     const state = riding();
-    const stops: RulerStop[] = [tokenStop(state.tokens.bree!), { x: 8.5, y: 2.5 }, { x: 8.5, y: 6.5 }];
+    const stops: RulerStop[] = [tokenStop(SQUARES, state.tokens.bree!), { x: 8.5, y: 2.5 }, { x: 8.5, y: 6.5 }];
     const ruler = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: true, budget: WorkBudget.none() })!;
     assert.equal(ruler.searching, true);
     assert.deepEqual(
@@ -1067,7 +1068,7 @@ describe("a walking ruler from a rider of a controlled mount walks the mount, as
   test("a shared ruler from a rider on a mount players do not see walks the rider on every copy, and only the DM's own ruler walks the mount", () => {
     const state = riding();
     state.tokens.horse = { ...state.tokens.horse!, visibility: "dm" };
-    const stops: RulerStop[] = [tokenStop(state.tokens.bree!), { x: 8.5, y: 2.5 }];
+    const stops: RulerStop[] = [tokenStop(SQUARES, state.tokens.bree!), { x: 8.5, y: 2.5 }];
     const shared = measureWalk({ view: state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: false })!;
     const theirs = measureWalk({ view: copyFor(state, P1), sceneId: "s1", stops, viewer: { role: "player" }, everything: false })!;
     assert.deepEqual(shared.legs.map((leg) => [leg.from, leg.to, leg.ft]), theirs.legs.map((leg) => [leg.from, leg.to, leg.ft]));
@@ -1080,7 +1081,7 @@ describe("a walking ruler from a rider of a controlled mount walks the mount, as
   test("a ruler from a rider on an independent ride still walks her off on her own", () => {
     const state = riding({ attached: { to: "horse", kind: "ride" } });
     const drag = dragOf(state, "dm", "bree", { x: 8, y: 2 });
-    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(state.tokens.bree!), { x: 8.5, y: 2.5 }], viewer: { role: "dm" }, everything: true })!;
+    const ruler = measureWalk({ view: state, sceneId: "s1", stops: [tokenStop(SQUARES, state.tokens.bree!), { x: 8.5, y: 2.5 }], viewer: { role: "dm" }, everything: true })!;
     assert.deepEqual(ruler.legs.map((leg) => leg.ft), [drag.preview.read.dragFt]);
     assert.equal(ruler.legs[0]!.ft, 30, "her own 25 ft and 5 ft for the dust on the horse she walks off");
   });

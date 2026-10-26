@@ -115,9 +115,9 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
               {(t.rangeRings?.length ?? 0) > 0 ? (
                 <>
                   <Lift z={z}>
-                    <TokenRings token={t} rules={rules} bounds={layer.scene.bounds} scale={layer.scale} part="rings" />
+                    <TokenRings token={t} rules={rules} grid={grid} bounds={layer.scene.bounds} scale={layer.scale} part="rings" />
                   </Lift>
-                  <TokenRings token={t} rules={rules} bounds={layer.scene.bounds} scale={layer.scale} part="labels" z={z} />
+                  <TokenRings token={t} rules={rules} grid={grid} bounds={layer.scene.bounds} scale={layer.scale} part="labels" z={z} />
                 </>
               ) : null}
             </Group>

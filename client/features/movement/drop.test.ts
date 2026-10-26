@@ -21,7 +21,9 @@ import { frameFields, groupLanding, groupReading, walkPreview } from "./preview.
 import { CLOSED, line, onTurn, raised, recordedCost, seenRoom, thorn, world } from "./testing.ts";
 import { ownWalk } from "#shared/rules/movement.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
-import { footprintHexes, hexCenter, snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
+import { footprintHexes, hexCenter, hexDistance, hexNeighbors, snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
+import type { Op } from "#shared/protocol.ts";
+import { dragLabel } from "../measure/movement.ts";
 import { placedOnHex } from "#shared/rules/footprint.ts";
 import { dragOf } from "./dragTesting.ts";
 
@@ -201,11 +203,11 @@ describe("a group drag", () => {
       if (move.elevation !== undefined && move.elevation !== lead.elevation) climbed++;
       const cost = recordedCost(view, moveOpsOf(plan.moves)[0]!, "lead");
       const to = { x: lead.x + dx, y: lead.y + dy };
-      const read = dragReading({ token: walkerOf(seenRoom(view), lead), to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view, lead, to) });
+      const read = dragReading({ grid: SQUARES, token: walkerOf(seenRoom(view), lead), to: { x: move.x, y: move.y }, encounter: view.encounter, activeTokenId: "lead", speeds: undefined, rules: { feetPerCell: 5, diagonal }, role: "player", landing: groupLanding(view, lead, to) });
       assert.equal(read.dragFt, cost, `case ${n}: ${size} by ${dx},${dy} under ${diagonal}`);
       // The DM's device reads the frames the drag sends of it, which carry the leg's cost, so it reads the height the move lands at, its band too (review MV-O-29).
       const sent = groupDragOf(copyFor(view, P1), "player", ["lead", "mate"], to);
-      const remote = remoteReading({ token: lead, to: snapPosition(SQUARES, to.x, to.y, footprintSize(lead)), encounter: view.encounter, activeTokenId: "lead", speeds: { walk: 30 }, rules: { feetPerCell: 5, diagonal }, role: "dm" }, { corners: [], ...(sent.frame.ft !== undefined ? { costFt: sent.frame.ft } : {}) });
+      const remote = remoteReading({ grid: SQUARES, token: lead, to: snapPosition(SQUARES, to.x, to.y, footprintSize(lead)), encounter: view.encounter, activeTokenId: "lead", speeds: { walk: 30 }, rules: { feetPerCell: 5, diagonal }, role: "dm" }, { corners: [], ...(sent.frame.ft !== undefined ? { costFt: sent.frame.ft } : {}) });
       assert.deepEqual([remote.dragFt, remote.left], [cost, sent.label.left], `case ${n}: another device's read of ${size} by ${dx},${dy} under ${diagonal}`);
     }
     assert.ok(climbed > 10, `${climbed} landed at another height`);
@@ -774,6 +776,22 @@ describe("drops on a hex scene (docs/design-v1-hex-grids.md 4.2, phase H1)", () 
       assert.deepEqual([m.x, m.y], [anchor.x - 1, anchor.y - 1]);
       assert.equal(footprintHexes(g, "large", { x: m.x + 1, y: m.y + 1 }).length, 3);
       assert.ok(permitted(state, big.op!, DM).ok);
+    });
+
+    test(`${orient}: a drag of 4 hexes on the active creature's turn reads 20 ft on its label, its frames and the path the move stores`, () => {
+      const { g, state } = hexRoom(orient);
+      const turn = onTurn(state, "thorn");
+      // Four steps one way along a slant of the lattice, and the drop a little off the last hex's center.
+      let hex = { col: 4, row: 4 };
+      for (let i = 0; i < 4; i++) hex = hexNeighbors(g, hex)[1]!;
+      assert.equal(hexDistance(g, { col: 4, row: 4 }, hex), 4);
+      const to = hexCenter(g, hex);
+      const drag = dragOf(turn, "player", "thorn", { x: to.x - 0.5 + 0.2, y: to.y - 0.5 + 0.1 });
+      assert.equal(drag.preview.read.dragFt, 20, "the label");
+      assert.equal(drag.frame.ft, 20, "what its frames tell others");
+      assert.equal(recordedCost(turn, drag.op as Op, "thorn"), 20, "the path the move stores");
+      // The label's band reads the same 20 ft against the speed.
+      assert.equal(dragLabel(drag.preview.read).split(" · ")[0], "20 ft");
     });
 
     test(`${orient}: a group drag lands each on its own anchor as one moveMany the server takes`, () => {

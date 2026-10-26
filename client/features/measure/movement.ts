@@ -8,7 +8,7 @@ import { dismountCost } from "#shared/rules/dismount.ts";
 import { ownWalk, type Walker } from "#shared/rules/movement.ts";
 import { plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkTrace } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 
 /**
  * How far a creature has moved this turn (features sections 4 and 10), kept
@@ -20,6 +20,10 @@ import { SQUARES } from "#shared/rules/grid.ts";
  * the room's diagonal rule with climbing counted, less the legs marked as
  * not counting, such as a shove. A turn that began before paths were
  * recorded reads straight from where it began, as it did before.
+ *
+ * Every reading takes the scene's grid: on a hex scene a leg counts the hex
+ * steps between its stops' reference hexes (docs/design-v1-hex-grids.md
+ * 4.2 and 4.3), as the reducer counts it.
  */
 
 /** Where a token stands, as far as movement counts it: cells and feet. */
@@ -106,11 +110,13 @@ export type TurnTrail = {
 export function turnTrail(input: {
   encounter: TurnView | null | undefined;
   sceneId: string;
+  /** The scene's grid. */
+  grid: Grid;
   token: MovingToken | undefined;
   rules: DistanceRules;
   role: "dm" | "player";
 }): TurnTrail | null {
-  const { encounter, token } = input;
+  const { encounter, token, grid } = input;
   if (!encounter || !token || token.sceneId !== input.sceneId) return null;
   const path = pathNow(encounter, token, input.role);
   const start = encounter.turnStart;
@@ -129,14 +135,14 @@ export function turnTrail(input: {
   let usedFt = 0;
   for (const [i, leg] of legs.entries()) {
     if (!leg.counted) continue;
-    const taken = legRead(token, stops[i]!, stops[i + 1]!, input.rules, diagonals);
+    const taken = legRead(grid, token, stops[i]!, stops[i + 1]!, input.rules, diagonals);
     movedFt += taken.moved;
     usedFt += taken.cost;
     diagonals.h += taken.diag[0];
     diagonals.v += taken.diag[1];
   }
-  const rects = stops.map((stop) => spotRect(SQUARES, token, stop));
-  return { spots, rects, legs, movedFt, usedFt, diagonals, from: rects[0]!, to: footprintRect(SQUARES, token) };
+  const rects = stops.map((stop) => spotRect(grid, token, stop));
+  return { spots, rects, legs, movedFt, usedFt, diagonals, from: rects[0]!, to: footprintRect(grid, token) };
 }
 
 /** A stop's corners as points. */
@@ -152,8 +158,8 @@ function corners(stop: Pick<PathStop, "via">): Point[] {
  * the copy holds it (the DM's and the owners'), else from its stops and
  * corners, never from a total the viewer was not sent.
  */
-function legRead(token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceRules, counter: DiagonalCounter): LegCost {
-  return to.moved !== undefined || to.cost !== undefined ? legTaken(SQUARES, token, from, to, rules, counter) : legGeometry(SQUARES, token, from, to, rules, counter);
+function legRead(g: Grid, token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceRules, counter: DiagonalCounter): LegCost {
+  return to.moved !== undefined || to.cost !== undefined ? legTaken(g, token, from, to, rules, counter) : legGeometry(g, token, from, to, rules, counter);
 }
 
 /**
@@ -319,6 +325,8 @@ const NO_BUILD: Pick<BuildState, "buildChunks"> = { buildChunks: {} };
 export function dragReading(input: {
   /** The creature as its walk reads it (rules/attach.ts walkerFor). */
   token: MovingToken & Walker;
+  /** The grid of the scene it stands on. */
+  grid: Grid;
   /**
    * The creature where it stands, when its walk starts elsewhere: on the
    * ground under its seat, off a holder (movement/drop.ts walkStart). The
@@ -350,12 +358,12 @@ export function dragReading(input: {
   /** The 5-10-5 count a leg read outside a turn runs on from, as a walking ruler's later legs run on from its earlier ones. */
   counter?: DiagonalCounter;
 }): DragRead {
-  const { token, encounter, rules, walk } = input;
+  const { token, encounter, rules, walk, grid } = input;
   const end: RoutePoint = { x: input.to.x, y: input.to.y, elevation: input.landing?.elevation ?? token.elevation };
   const landed = input.landing ? { ...token, x: end.x, y: end.y, elevation: end.elevation, squeeze: input.landing.squeeze } : null;
   const fighting = encounter ? (encounter.started ?? encounter.activeEntryId !== null) : false;
   const active = fighting && input.activeTokenId === token.id;
-  const trail = active ? turnTrail({ encounter, sceneId: token.sceneId, token: input.standing ?? token, rules, role: input.role }) : null;
+  const trail = active ? turnTrail({ encounter, sceneId: token.sceneId, grid, token: input.standing ?? token, rules, role: input.role }) : null;
   const counter = trail ? trail.diagonals : (input.counter ?? { h: 0, v: 0 });
   const swimSpeed = (input.speeds?.swim ?? 0) > 0;
   const points: readonly RoutePoint[] = walk?.route?.points ?? [{ x: token.x, y: token.y, elevation: token.elevation }, end];
@@ -365,8 +373,8 @@ export function dragReading(input: {
     walk?.route
       ? routeFeet(upTo, pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed, step })
       : landed && upTo[upTo.length - 1] === end
-        ? plainLegCost(SQUARES, token, landed, rules, counter)
-        : straightCost(SQUARES, token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
+        ? plainLegCost(grid, token, landed, rules, counter)
+        : straightCost(grid, token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);
   const leg = legCost(points);
   // Walked off its mount on its own turn, the leg costs what getting off costs and then the rest, as the reducer stores it.
   const off = active && input.dismount && input.costFt === undefined ? input.dismount : undefined;
@@ -384,7 +392,7 @@ export function dragReading(input: {
   if (!atEnd) return out;
   let band = atEnd.band;
   // The last spot inside a Half Speed area before the end, if the leg leaves one: its band may be worse than the end's.
-  const inside = walk && !endHalved ? lastHalvedSpot(walk) : null;
+  const inside = walk && !endHalved ? lastHalvedSpot(grid, walk) : null;
   if (inside) {
     const prefix = [...points.slice(0, inside.piece + 1), inside.at];
     const there = speedsLeft(halvedSpeeds(input.speeds), token.elevation, before + legCost(prefix).cost + surcharge).find((s) => s.kind === atEnd.kind);
@@ -430,8 +438,8 @@ export function remoteWalk(token: MovingToken, to: Point, corners: readonly Poin
 }
 
 /** The last spot of the walk, short of its end, where the creature would stand in a Half Speed area, with the piece it is on: each spot read from the walk's trace (review AT-ASTRA-27). */
-function lastHalvedSpot(walk: DragWalk): { piece: number; at: RoutePoint } | null {
-  const spots = routeWalk(SQUARES, walk.trace, walk.build);
+function lastHalvedSpot(g: Grid, walk: DragWalk): { piece: number; at: RoutePoint } | null {
+  const spots = routeWalk(g, walk.trace, walk.build);
   for (let i = spots.length - 2; i > 0; i--) {
     const s = spots[i]!;
     const at = { x: s.x, y: s.y, elevation: s.elevation };

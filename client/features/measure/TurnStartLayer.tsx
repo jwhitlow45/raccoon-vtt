@@ -16,7 +16,7 @@ import { speedsOf } from "../movement/preview.ts";
 import { halvedSpeeds, movementText, speedsLeft, trailSegments, turnTrail, type MovingToken, type TurnTrail } from "./movement.ts";
 import { pillPlace } from "./Pill.tsx";
 import type { DistanceRules } from "./ruler.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
 /**
  * Where the active creature has been this turn (features sections 4 and
@@ -73,8 +73,10 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   const feetPerCell = useTreeShownView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const diagonal = useTreeShownView((s) => s.view?.meta.settings.diagonal ?? "five");
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
-  const riderTrail = useMemo(() => turnTrail({ encounter, sceneId: props.scene.id, token: rider, rules, role }), [encounter, props.scene.id, rider, rules, role]);
-  const mountTrail = useMemo(() => (mount ? turnTrail({ encounter, sceneId: props.scene.id, token: mount, rules, role }) : null), [encounter, props.scene.id, mount, rules, role]);
+  const gridShape = props.scene.gridShape;
+  const grid = useMemo(() => sceneGrid({ gridShape }), [gridShape]);
+  const riderTrail = useMemo(() => turnTrail({ encounter, sceneId: props.scene.id, grid, token: rider, rules, role }), [encounter, props.scene.id, grid, rider, rules, role]);
+  const mountTrail = useMemo(() => (mount ? turnTrail({ encounter, sceneId: props.scene.id, grid, token: mount, rules, role }) : null), [encounter, props.scene.id, grid, mount, rules, role]);
   // The pill's creature: the mount once it has a trail, else the active creature.
   const token = mountTrail ? mount : rider;
   const trail = mountTrail ?? riderTrail;
@@ -90,8 +92,8 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
   const marker = useMemo(() => {
     if (!trail || !token) return null;
     const moved = movementText(trail.movedFt, speedsLeft(halved ? halvedSpeeds(speeds) : speeds, token.elevation, trail.usedFt), trail.usedFt);
-    return markerPlace({ from: trail.from, token, value: second ? `${moved}\n${second}` : moved, scale });
-  }, [trail, token, speeds, halved, scale, second]);
+    return markerPlace({ from: trail.from, token, value: second ? `${moved}\n${second}` : moved, scale, grid });
+  }, [trail, token, speeds, halved, scale, second, grid]);
   // Token labels keep off the marker (useBoardText.ts).
   const spec = marker ? { x: marker.x, y: marker.y, value: marker.value, size: "screen" as const, small: true, below: marker.below, above: !marker.below } : null;
   const specKey = spec ? JSON.stringify(spec) : "";
@@ -118,9 +120,9 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
  * the token alone, never from where its label went, since the label keeps
  * off the marker (useBoardText.ts).
  */
-function markerPlace(input: { from: { x: number; y: number; w: number; h: number }; token: MovingToken & { name: string; number?: number }; value: string; scale: number }) {
+function markerPlace(input: { from: { x: number; y: number; w: number; h: number }; token: MovingToken & { name: string; number?: number }; value: string; scale: number; grid: Grid }) {
   const { from, token, value, scale } = input;
-  const fp = footprintRect(SQUARES, token);
+  const fp = footprintRect(input.grid, token);
   const sizes = boardSizes(scale);
   const nameHalf = Math.min(measureLabel(displayName(token), sizes.namePx) / 2 + 4, 120) / scale;
   const cx = fp.x + fp.w / 2;

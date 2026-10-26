@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Group, Shape } from "react-konva";
 import type { Token } from "#shared/model.ts";
+import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { useDraggedIds } from "../../canvas/draggedIds.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
@@ -41,10 +42,11 @@ export const RangeRingLayer = memo(function RangeRingLayer(props: LayerProps) {
   const ringed = Object.values(tokens).filter((t) => t.sceneId === props.scene.id && (t.rangeRings?.length ?? 0) > 0 && !(iso && dragged.all.has(t.id)));
   if (ringed.length === 0) return null;
   const part = iso === null ? "both" : iso.place === "upright" ? "labels" : "rings";
+  const grid = sceneGrid(props.scene);
   return (
     <Group listening={false}>
       {ringed.map((t) => (
-        <TokenRings key={t.id} token={t} rules={rules} bounds={props.scene.bounds} scale={props.scale} part={part} />
+        <TokenRings key={t.id} token={t} rules={rules} grid={grid} bounds={props.scene.bounds} scale={props.scale} part={part} />
       ))}
     </Group>
   );
@@ -55,15 +57,15 @@ export const RangeRingLayer = memo(function RangeRingLayer(props: LayerProps) {
  * on the isometric ground, the labels standing on its overlay, or a dragged
  * token's moving marks (canvas/DragMarks.tsx).
  */
-export function TokenRings(props: { token: Token; rules: DistanceRules; bounds: { w: number; h: number }; scale: number; part: "both" | "rings" | "labels"; z?: number }) {
-  const { token, rules, bounds } = props;
+export function TokenRings(props: { token: Token; rules: DistanceRules; grid: Grid; bounds: { w: number; h: number }; scale: number; part: "both" | "rings" | "labels"; z?: number }) {
+  const { token, rules, bounds, grid } = props;
   const { x, y, elevation, size, w, h, height } = token;
   const rings = token.rangeRings ?? [];
   const key = rings.join(",");
   const shapes = useMemo(
-    () => rings.map((ft) => ({ ft, shape: ringShape({ x, y, elevation, size, w, h, height }, ft, rules, bounds) })),
+    () => rings.map((ft) => ({ ft, shape: ringShape(grid, { x, y, elevation, size, w, h, height }, ft, rules, bounds) })),
     // The ring list is compared by its contents, so a token update that keeps it costs nothing.
-    [key, x, y, elevation, size, w, h, height, rules, bounds.w, bounds.h],
+    [key, x, y, elevation, size, w, h, height, rules, bounds.w, bounds.h, grid.shape === "hex" ? grid.orient : "squares"],
   );
   const color = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
   return (
