@@ -251,11 +251,11 @@ function forgetPastBounds(tx: Tx, scene: Scene): void {
   const past = (t: { sceneId: string; tx: number; ty: number }) => t.sceneId === scene.id && (t.tx >= across || t.ty >= down);
   for (const key of Object.keys(tx.state.exploredTiles).sort()) {
     const t = tx.state.exploredTiles[key]!;
-    if (past(t)) tx.writeBookkeeping(keys.explored(scene.id, t.tx, t.ty), null);
+    if (past(t)) tx.writeBookkeeping(keys.explored(t.sceneId, t.tx, t.ty), null);
   }
   for (const key of Object.keys(tx.state.exploredBy ?? {}).sort()) {
     const t = tx.state.exploredBy[key]!;
-    if (past(t)) tx.writeBookkeeping(keys.exploredBy(scene.id, t.memberId, t.tx, t.ty), null);
+    if (past(t)) tx.writeBookkeeping(keys.exploredBy(t.sceneId, t.memberId, t.tx, t.ty), null);
   }
 }
 

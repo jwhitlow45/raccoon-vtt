@@ -215,6 +215,20 @@ describe("a per-player scene that shrinks", () => {
     return { before, after: result.state };
   }
 
+  test("forgets only the shrunk scene's tiles: another per-player scene keeps its tiles past those bounds (review PV3-SEC-3)", () => {
+    const before = perPlayerRoom("full", PLAYERS, true);
+    const holder = PLAYERS[0]!;
+    before.scenes.s2 = scene("s2", { order: 1, bounds: { w: 40, h: 30 }, fogEnabled: true, vision: { on: true, light: "bright", perPlayer: true } });
+    before.holders.s2 = { sceneId: "s2", rev: 0, entries: [{ memberId: holder, on: true }] };
+    before.exploredTiles[tileKey("s2", 2, 1)] = { sceneId: "s2", tx: 2, ty: 1, rev: 1, bits: BITS };
+    before.exploredBy[holderTileKey("s2", holder, 2, 1)] = { sceneId: "s2", tx: 2, ty: 1, rev: 1, bits: BITS, memberId: holder };
+    const result = applyOp(before, { t: "scene.update", sceneId: "s1", patch: { bounds: { w: 1, h: 1 } } }, DM, env(2));
+    assert.ok(result.ok);
+    assert.ok(result.state.exploredTiles[tileKey("s2", 2, 1)], "s2's party tile stays");
+    assert.ok(result.state.exploredBy[holderTileKey("s2", holder, 2, 1)], "s2's holder tile stays");
+    assert.equal(result.state.exploredTiles[tileKey("s1", 2, 1)], undefined, "s1's goes");
+  });
+
   test("forgets every layer's tiles past its bounds, and the DM's fog keeps its own", () => {
     const { before, after } = shrunk();
     assert.deepEqual(Object.keys(after.exploredTiles), [tileKey("s1", 0, 0)]);
