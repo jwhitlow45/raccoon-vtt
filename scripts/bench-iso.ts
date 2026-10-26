@@ -151,7 +151,8 @@ function typical(sceneId: string, dmId: string): Built {
     t: "template.create",
     template: { id: benchId("area"), sceneId, shape: "emanation", size: 10, origin: { x: 24.5, y: 22.5, z: 0 }, yaw: 0, attachedTo: scout.id, includeOrigin: false, color: "#3fa7ff", ownerId: dmId, visibility: "all" },
   });
-  return { ops, scout: scout.id as string, scoutAt: { x: 24, y: 22 }, walker: tokens[4]!.id as string, bounds: { w: 40, h: 30 }, at40: { x: 20, y: 15 } };
+  // The walker is Hero 2, beside the camera's middle in both views, so the drag presses a token on screen.
+  return { ops, scout: scout.id as string, scoutAt: { x: 24, y: 22 }, walker: tokens[1]!.id as string, bounds: { w: 40, h: 30 }, at40: { x: 20, y: 15 } };
 }
 
 function caps(sceneId: string): Built {
@@ -280,24 +281,68 @@ async function timed(page: Page, cdp: CDPSession, steps: number, act: (i: number
   return out;
 }
 
-/** A token's middle on the page, wherever its node stands, in whichever stage holds it. */
+/**
+ * A token's middle on the page, in whichever stage on screen holds its node.
+ * It must lie inside the canvas, or a row would press nothing and time an
+ * idle page.
+ */
 async function tokenPoint(page: Page, id: string): Promise<{ x: number; y: number }> {
   const p = await page.evaluate((tokenId) => {
     type Node = { getClientRect(): { x: number; y: number; width: number; height: number } };
-    type Stage = { findOne(sel: string): Node | undefined; width(): number; container(): { getBoundingClientRect(): { left: number; top: number } } };
+    type Stage = { findOne(sel: string): Node | undefined; width(): number; height(): number; container(): { getBoundingClientRect(): { left: number; top: number } } };
     const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
     for (const stage of konva.stages) {
       if (stage.width() === 0) continue;
       const node = stage.findOne(`#${tokenId}`);
       if (!node) continue;
       const r = node.getClientRect();
+      const x = r.x + r.width / 2;
+      const y = r.y + r.height * 0.75;
+      if (x < 0 || y < 0 || x > stage.width() || y > stage.height()) return { off: true as const };
       const box = stage.container().getBoundingClientRect();
-      return { x: box.left + r.x + r.width / 2, y: box.top + r.y + r.height * 0.75 };
+      // Nothing over the canvas there, such as the action bar, may take the press.
+      const doc = (globalThis as unknown as { document: { elementFromPoint(x: number, y: number): { closest(s: string): unknown } | null } }).document;
+      if (!doc.elementFromPoint(box.left + x, box.top + y)?.closest(".konvajs-content")) return { off: true as const };
+      return { x: box.left + x, y: box.top + y };
     }
     return null;
   }, id);
   if (!p) throw new Error(`token ${id} is not on the board`);
+  if ("off" in p) throw new Error(`token ${id} is off the screen or under the chrome`);
   return p;
+}
+
+/** Where a token's node stands on the canvas, on screen or not, to check that a drag moved it. */
+function nodeAt(page: Page, id: string): Promise<{ x: number; y: number }> {
+  return page.evaluate((tokenId) => {
+    type Stage = { width(): number; findOne(sel: string): { absolutePosition(): { x: number; y: number } } | undefined };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    for (const stage of konva.stages) {
+      const node = stage.width() > 0 ? stage.findOne(`#${tokenId}`) : undefined;
+      if (node) return node.absolutePosition();
+    }
+    return { x: NaN, y: NaN };
+  }, id);
+}
+
+/** The camera of the board on screen, to check that a pan moved it. */
+function stageAt(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => {
+    type Stage = { width(): number; x(): number; y(): number; listening(): boolean };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    // The isometric board's ground stage never listens, and its main stage holds the same camera.
+    const stage = konva.stages.find((s) => s.width() > 0 && s.listening());
+    return stage ? { x: stage.x(), y: stage.y() } : { x: NaN, y: NaN };
+  });
+}
+
+/** The page's box of the board on screen, Top-down's stage or the isometric board's main stage. */
+async function boardBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
+  for (const el of await page.locator(".konvajs-content").all()) {
+    const box = await el.boundingBox();
+    if (box && box.width > 0 && box.height > 0) return box;
+  }
+  throw new Error("no canvas on screen");
 }
 
 /** Where the scene opens: fitted, or at `zoom` px a cell around a point, as its saved starting view (the page reopens it after). */
@@ -306,23 +351,44 @@ function startAt(dm: Socket, world: { x: number; y: number }, zoom: number | "fi
 }
 
 async function touchPan(page: Page, cdp: CDPSession, steps: number): Promise<number[]> {
-  const box = await page.locator(".konvajs-content").first().boundingBox();
-  if (!box) throw new Error("no canvas");
-  // An empty spot on screen: the middle of the canvas's left edge, inside the scene at every camera here.
+  const box = await boardBox(page);
+  // An empty spot on screen: the middle of the canvas's left edge, with no token under it at every camera here.
   const start = { x: box.x + 30, y: box.y + box.height * 0.45 };
+  const before = await stageAt(page);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...start, id: 0 }] });
   await frames(page, 2);
   const out = await timed(page, cdp, steps, (i) => cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: start.x + (i + 1) * 9, y: start.y + (i + 1) * 4, id: 0 }] }).then(() => {}));
+  const moved = await stageAt(page);
+  // Back where it started, so every round, and the rows after, see the same camera.
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...start, id: 0 }] });
+  await frames(page, 2);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await frames(page, 4);
+  if (!(Math.abs(moved.x - before.x) > 20)) throw new Error("the pan did not move the map");
   return out;
 }
 
-async function touchDrag(page: Page, cdp: CDPSession, id: string, steps: number): Promise<number[]> {
+async function touchDrag(page: Page, cdp: CDPSession, id: string, steps: number, opts: { keepSelection?: boolean } = {}): Promise<number[]> {
+  // A token selected by an earlier row opens its bar, which can cover the next one: start each lone drag with none.
+  if (!opts.keepSelection) {
+    await page.keyboard.press("Escape");
+    await frames(page, 8);
+  }
   const from = await tokenPoint(page, id);
+  // Toward the canvas's middle, so the token stays on screen.
+  const box = await boardBox(page);
+  const sx = from.x < box.x + box.width / 2 ? 1 : -1;
+  const sy = from.y < box.y + box.height / 2 ? 1 : -1;
+  const start = await nodeAt(page, id);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...from, id: 0 }] });
   await frames(page, 2);
-  const out = await timed(page, cdp, steps, (i) => cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + (i + 1) * 7, y: from.y + (i + 1) * 3, id: 0 }] }).then(() => {}));
+  const out = await timed(page, cdp, steps, (i) => cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + sx * (i + 1) * 7, y: from.y + sy * (i + 1) * 3, id: 0 }] }).then(() => {}));
+  // The token must have followed the finger, or the row timed nothing.
+  const mid = await nodeAt(page, id);
+  if (!(Math.hypot(mid.x - start.x, mid.y - start.y) > 20)) {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    throw new Error(`the drag did not move token ${id}`);
+  }
   // Back where it started, so the drop moves nothing and every round starts alike.
   await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ ...from, id: 0 }] });
   await frames(page, 2);
@@ -509,7 +575,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       await open("caps", 40);
       add("pan, caps, 40 px", await throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
       await select(page, scene.group!);
-      add("group drag of 4, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.group![0]!, STEPS))));
+      add("group drag of 4, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.group![0]!, STEPS, { keepSelection: true }))));
       await page.keyboard.press("Escape");
       await frames(page, 8);
       add("a horse with its rider dragged, caps, 40 px", await throttled(() => rounds(() => touchDrag(page, cdp, scene.horse!, STEPS))));
