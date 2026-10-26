@@ -4,8 +4,9 @@ import type { EdgeFeature, RoomState } from "#shared/model.ts";
 import { applyChanges, projectState, stableStringify, type ProjectedState } from "#shared/project.ts";
 import type { Change, ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
+import { visionRules } from "#shared/ruleHooks.ts";
 import { clearVisionCache } from "#shared/rules/vision.ts";
-import { DM, P1, P2, actor, env, room, scene, token } from "#shared/testutil.ts";
+import { DM, P1, P2, actor, env, member, room, scene, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
 import { buildSnapshot, publishBatch } from "./fanout.ts";
 
@@ -62,6 +63,60 @@ describe("the fan-out on a per-player scene", () => {
         const fresh = projectState(state, v.conn.viewer, { sceneId: "s1" });
         assert.equal(stableStringify(v.view), stableStringify(fresh), `move ${i}, ${v.conn.memberId}`);
       }
+    }
+  });
+
+  /*
+   * A walled room with a dead-end alcove in its north wall (review
+   * PV2-ISO-2). Both characters start on one cell in the room, which sees
+   * the whole room and the whole alcove. The second steps into the alcove,
+   * from where it sees less, all of it ground the first still sees: the
+   * union, the DM's sight, does not change, and only that holder's does. A
+   * fan-out that diffed only the union would leave their view stale.
+   */
+  test("a holder's sight that changes while the union does not still reaches that holder, and a player who owns nothing sees nothing", () => {
+    clearVisionCache();
+    const P3 = { memberId: "p3", role: "player" as const };
+    let state = room();
+    state.members.p3 = member("p3");
+    state.scenes = { s1: scene("s1", { bounds: { w: 16, h: 16 }, vision: { on: true, light: "bright", perPlayer: true }, autoWalls: "off" }) };
+    const edges: Record<string, EdgeFeature> = {};
+    for (let x = 2; x < 12; x++) {
+      if (x !== 7) edges[`${x},2,n`] = { kind: "wall" };
+      edges[`${x},12,n`] = { kind: "wall" };
+    }
+    for (let y = 2; y < 12; y++) {
+      edges[`2,${y},w`] = { kind: "wall" };
+      edges[`12,${y},w`] = { kind: "wall" };
+    }
+    for (let y = 0; y < 2; y++) {
+      edges[`7,${y},w`] = { kind: "wall" };
+      edges[`8,${y},w`] = { kind: "wall" };
+    }
+    edges["7,0,n"] = { kind: "wall" };
+    state.buildChunks = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges } };
+    state.tokens = {
+      a: token("a", { kind: "pc", ownerIds: [P1.memberId], x: 7, y: 7, actor: { inline: actor() } }),
+      b: token("b", { kind: "pc", ownerIds: [P2.memberId], x: 7, y: 7, actor: { inline: actor() } }),
+    };
+    state.holders = { s1: { sceneId: "s1", rev: 0, entries: [P1, P2].map((v) => ({ memberId: v.memberId, on: true })) } };
+    const viewers = [open(state, DM), open(state, P1), open(state, P2), open(state, P3)];
+    const tiles = (s: RoomState, who: string | null) => stableStringify([...(who === "union" ? visionRules.partySight(s, "s1") : visionRules.holderSight(s, "s1", who)).tiles]);
+    let seq = 20;
+    for (const [i, y] of [4, 1, 0, 7].entries()) {
+      const before = state;
+      const result = applyOp(state, { t: "token.move", tokenId: "b", x: 7, y }, DM, env(++seq));
+      assert.ok(result.ok);
+      state = result.state;
+      assert.equal(tiles(state, "union"), tiles(before, "union"), `move ${i}: the union stays as it was`);
+      if (i === 2) assert.notEqual(tiles(state, P2.memberId), tiles(state, P1.memberId), "in the alcove the second holder sees less");
+      publishBatch({ seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      for (const v of viewers) {
+        for (const msg of v.inbox.splice(0)) if (msg.t === "ev") v.view = applyChanges(v.view, msg.changes as Change[]);
+        const fresh = projectState(state, v.conn.viewer, { sceneId: "s1" });
+        assert.equal(stableStringify(v.view), stableStringify(fresh), `move ${i}, ${v.conn.memberId}`);
+      }
+      assert.deepEqual(Object.keys(viewers[3]!.view.sight ?? {}), [], "the player who owns nothing has no sight of their own");
     }
   });
 });
