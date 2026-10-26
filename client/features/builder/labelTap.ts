@@ -20,10 +20,14 @@ const LABEL_SLOP_PX = 6;
  * 6.2): in Isometric standing on the drawn ground under its anchor where
  * the stand rule lets it, as IsoBoard.tsx draws it, else lying flat.
  */
-export function labelLook(pick: BoardPick, sceneId: string, label: Pick<Label, "x" | "y" | "text" | "size">): LabelLook {
+export function labelLook(pick: BoardPick, sceneId: string, label: Pick<Label, "x" | "y" | "text" | "size">, fog: FogView = viewerFog(pick, sceneId)): LabelLook {
   if (pick.view.kind !== "isometric") return { view: TOP_DOWN, upright: false, ground: 0 };
-  const fog = new FogView(pick.src?.fog ?? null, sceneId, pick.heights.bounds);
   return { view: pick.view, upright: labelStands(fog, label, measureLabel), ground: drawnAt(pick, label) };
+}
+
+/** The viewer's fog on the board's scene, for the stand rule: one for every label a press tests. */
+function viewerFog(pick: BoardPick, sceneId: string): FogView {
+  return new FogView(pick.src?.fog ?? null, sceneId, pick.heights.bounds);
 }
 
 /**
@@ -37,10 +41,11 @@ export function labelUnder(ctx: Pick<ToolContext, "getState" | "scene" | "camera
   const slop = LABEL_SLOP_PX / ctx.camera().scale;
   if (pick.view.kind !== "isometric" || !screen) return labelAt(ctx.getState().view, ctx.scene.id, world, { measure: measureLabel, slop });
   const v = pressView(pick, screen);
+  const fog = viewerFog(pick, ctx.scene.id);
   let hit: Label | null = null;
   for (const label of Object.values(ctx.getState().view?.labels ?? {})) {
     if (!label || label.sceneId !== ctx.scene.id) continue;
-    const look = labelLook(pick, ctx.scene.id, label);
+    const look = labelLook(pick, ctx.scene.id, label, fog);
     if (look.upright) {
       const { box } = labelShape(label, pick.view, { measure: measureLabel, upright: true, ground: look.ground });
       if (v.x >= box.x - slop && v.x <= box.x + box.width + slop && v.y >= box.y - slop && v.y <= box.y + box.height + slop) hit = label;

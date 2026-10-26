@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { before, describe, test } from "node:test";
 import type { Label, RoomState } from "#shared/model.ts";
 import { reveal } from "#shared/testutil.ts";
@@ -66,3 +67,12 @@ describe("a map label tapped in Isometric (docs/design-v1-isometric-view.md 6.2)
     assert.deepEqual({ upright: seen.upright, ground: seen.ground }, { upright: true, ground: 2 });
   });
 });
+
+test("a press in Isometric builds the viewer's fog once for every label it tests (ISO34-OPUS-9)", () => {
+  const src = readFileSync(new URL("./labelTap.ts", import.meta.url), "utf8");
+  const under = src.slice(src.indexOf("export function labelUnder("), src.indexOf("export function tapMapLabel("));
+  assert.match(under, /const fog = viewerFog\(pick, ctx\.scene\.id\);\n\s*let hit: Label \| null = null;\n\s*for \(const label of /);
+  assert.match(under, /const look = labelLook\(pick, ctx\.scene\.id, label, fog\);/);
+  assert.equal(under.match(/new FogView|viewerFog\(/g)?.length, 1);
+});
+
