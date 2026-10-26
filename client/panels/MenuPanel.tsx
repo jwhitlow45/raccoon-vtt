@@ -186,7 +186,11 @@ function ViewRow() {
   const folded = useStore(useScoped(viewFoldSlot), (s) => s.folded);
   const choice = useRoomViewChoice();
   const [open, setOpen] = useState(false);
-  if (!folded) return null;
+  if (!folded) {
+    // A widening that unfolds the row closes its sheet for good, so a narrowing after never opens it unasked (ISO5-ASTRA-04).
+    if (open) setOpen(false);
+    return null;
+  }
   return (
     <>
       <MenuItem

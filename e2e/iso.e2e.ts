@@ -48,7 +48,7 @@ let tv: Page;
 let ops: OpSocket;
 const dmSocket = new SocketWatch("dm");
 const patSocket = new SocketWatch("pat");
-const consoles = { dm: new ConsoleWatch("dm"), pat: new ConsoleWatch("pat"), tv: new ConsoleWatch("tv") };
+const consoles = { dm: new ConsoleWatch("dm"), pat: new ConsoleWatch("pat"), tv: new ConsoleWatch("tv"), phone: new ConsoleWatch("phone") };
 
 const run = {
   roomId: "",
@@ -629,7 +629,49 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     assert.deepEqual(lines, [], "the display's View rows");
   });
 
-  test("ISO-9. no page logged an error", () => {
+  test("ISO-9. on the narrowest phone the room's menu holds View, and a widening that gives the bar its View button back closes the sheet for good", async () => {
+    // As alignment-icons' iso5-a finds it: the DM at 320 x 568 and 130% folds the View button into the menu (D-261026-12).
+    const phoneContext = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+    await phoneContext.addInitScript(OFFER);
+    try {
+      const phone = await phoneContext.newPage();
+      consoles.phone.attach(phone);
+      await phone.goto(`${server.origin}/r/${run.roomId}`);
+      await phone.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
+      await reopenRoom(phone);
+      await phone.getByRole("button", { name: "Fit the map to the screen" }).waitFor();
+      const folded = async () => ((await viewButton(phone).count()) === 0 ? true : null);
+      await waitFor("the View button folded into the menu", folded);
+      await phone.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+      await phone.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+      const roomMenu = phone.locator('dialog[data-rvtt-sheet][aria-label="Menu"]');
+      const row = roomMenu.getByRole("button", { name: /^View/ });
+      // The menu's panel loads as it opens.
+      await row.waitFor();
+      await row.click();
+      const sheet = viewMenu(phone);
+      await sheet.waitFor();
+      await onCheckedRadio(phone, sheet);
+      await shots.take(phone, "iso-dm-320-130-view-sheet-from-menu");
+
+      await phone.setViewportSize({ width: 390, height: 844 });
+      await viewButton(phone).waitFor();
+      await sheet.waitFor({ state: "detached" });
+      await phone.setViewportSize({ width: 320, height: 568 });
+      await waitFor("the View button folded again", folded);
+      await row.waitFor();
+      // Long enough for a sheet that would open unasked to open.
+      await phone.waitForTimeout(500);
+      assert.equal(await sheet.count(), 0, "the View sheet stays closed (ISO5-ASTRA-04)");
+      await row.click();
+      await sheet.waitFor();
+      await closeMenu(phone, true);
+    } finally {
+      await phoneContext.close();
+    }
+  });
+
+  test("ISO-10. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });
 });
