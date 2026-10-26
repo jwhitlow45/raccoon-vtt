@@ -61,10 +61,13 @@ test("a moving aura that catches nobody keeps its window and margin", () => {
   assert.deepEqual(auraBox({ x0: 3, y0: 4, w: 5, h: 2 }, [], 40), { x0: 1, y0: 2, x1: 10, y1: 8 });
 });
 
-test("the drag layer clips each moving aura by that box, with the creatures PlacedArea rings", () => {
+test("the drag layer clips each moving aura by that box, with the creatures PlacedArea rings, and judges each tether by its stroke", () => {
   const src = readFileSync(new URL("./DragMarks.tsx", import.meta.url), "utf8");
   assert.match(src, /const caught = caughtTokens\(a, areas\.ctx, layer\.scene\.id\)\.flatMap\(\(id\) => areas\.ctx\.tokens\?\.\[id\] \?\? \[\]\);\n\s*const box = auraBox\(cachedCoverage\(a, areas\.ctx\), caught, layer\.scale\);/);
   assert.match(src, /moving=\{\{ z, clip: auraClip\(iso\.fog, box\) \}\}/);
+  // A tether's stand test takes its stroke's half width, as TetherLine strokes it (ISO34-ASTRA-7).
+  assert.match(src, /const show = tetherShows\(iso\.fog, l\.from, l\.to, tetherPx\(layer\.scale\) \/ 2 \/ layer\.scale\);/);
+  assert.match(readFileSync(new URL("../features/attach/TetherLayer.tsx", import.meta.url), "utf8"), /const px = tetherPx\(scale\);[\s\S]*strokeWidth=\{px\}[\s\S]*lineCap="round"/);
   const layer = readFileSync(new URL("../features/areas/TemplateLayer.tsx", import.meta.url), "utf8");
   assert.match(layer, /const caught = caughtTokens\(t, ctx, props\.sceneId\);/);
   assert.match(layer, /<TokenRing key=\{id\} token=\{token\} color=\{t\.color\} scale=\{scale\} \{\.\.\.CAUGHT_RING\} \/>/);

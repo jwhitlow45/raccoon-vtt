@@ -8,7 +8,7 @@ import { ringReach } from "../features/areas/draw.tsx";
 import { useLiveTokens } from "../features/areas/useLiveTokens.ts";
 import { CAUGHT_RING, Clipped, PlacedArea, useAreaParts } from "../features/areas/TemplateLayer.tsx";
 import { tethers } from "../features/attach/groups.ts";
-import { TetherLine } from "../features/attach/TetherLayer.tsx";
+import { TetherLine, tetherPx } from "../features/attach/TetherLayer.tsx";
 import type { LayerProps } from "../features/layers.ts";
 import { TokenRings } from "../features/measure/RangeRingLayer.tsx";
 import type { DistanceRules } from "../features/measure/ruler.ts";
@@ -121,7 +121,8 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
         {lines.map((l) => {
           // At the dragged end's height: the holder's when it moves, as it carries the other.
           const lead = tokens[ids.has(l.holderId) ? l.holderId : l.id];
-          const show = tetherShows(iso.fog, l.from, l.to);
+          // Its stroke's half width with its round caps, so neither paints over a fogged sub-cell beside the line.
+          const show = tetherShows(iso.fog, l.from, l.to, tetherPx(layer.scale) / 2 / layer.scale);
           const line = <TetherLine line={l} holder={stored[l.holderId]} scale={layer.scale} />;
           return (
             <Lift key={l.id} z={lead ? groundOf(lead) : 0}>

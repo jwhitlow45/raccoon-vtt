@@ -196,21 +196,36 @@ describe("the stand rule for the board's marks", () => {
     const random = rng(33004);
     let whole = 0;
     let clipped = 0;
-    for (let round = 0; round < 60; round++) {
+    for (let round = 0; round < 150; round++) {
       const scene = randomScene(random);
       const fog = new FogView(scene.tiles, scene.id, scene.bounds);
       const mask = revealedMask(scene.bounds, scene.id, scene.tiles);
       for (let i = 0; i < 12; i++) {
         const a = { x: random() * scene.bounds.w, y: random() * scene.bounds.h };
         const b = random() < 0.2 ? { x: a.x, y: a.y + random() * 4 } : { x: a.x + (random() - 0.5) * 10, y: a.y + (random() - 0.5) * 10 };
-        const show = tetherShows(fog, a, b);
+        // Its stroke's half width as TetherLine draws it, from 1.5 px at 8 px a cell to wide strokes at low zoom.
+        const r = i % 3 === 0 ? 0 : (0.75 + random() * 2) / (4 + random() * 60);
+        const show = tetherShows(fog, a, b, r);
         if (show.whole) {
           whole++;
+          // Points of the stroke: along the line, out to its half width on either side, and round each cap.
+          const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+          const nx = -(b.y - a.y) / len;
+          const ny = (b.x - a.x) / len;
           for (let k = 0; k <= 400; k++) {
             const t = k / 400;
-            const x = a.x + (b.x - a.x) * t;
-            const y = a.y + (b.y - a.y) * t;
-            assert.ok(revealedAt(mask, Math.floor(x * FOG_SUBCELLS), Math.floor(y * FOG_SUBCELLS)), `round ${round}: a whole tether crossed fog`);
+            for (const o of [-1, -0.5, 0, 0.5, 1]) {
+              const x = a.x + (b.x - a.x) * t + nx * r * o * 0.999;
+              const y = a.y + (b.y - a.y) * t + ny * r * o * 0.999;
+              assert.ok(revealedAt(mask, Math.floor(x * FOG_SUBCELLS), Math.floor(y * FOG_SUBCELLS)), `round ${round}: a whole tether's stroke crossed fog`);
+            }
+          }
+          for (const end of [a, b]) {
+            for (let k = 0; k < 32; k++) {
+              const x = end.x + Math.cos((k * Math.PI) / 16) * r * 0.999;
+              const y = end.y + Math.sin((k * Math.PI) / 16) * r * 0.999;
+              assert.ok(revealedAt(mask, Math.floor(x * FOG_SUBCELLS), Math.floor(y * FOG_SUBCELLS)), `round ${round}: a whole tether's cap crossed fog`);
+            }
           }
         } else {
           clipped++;
@@ -267,7 +282,7 @@ describe("the stand rule for the board's marks", () => {
   test("the DM, or a scene without fog, sees every mark whole", () => {
     const all = new FogView(null, "s1", { w: 16, h: 16 });
     assert.equal(pillStands(all, { x: 3, y: 3, scale: 40, name: "Pit", size: "map", small: true, above: true }), true);
-    assert.deepEqual(tetherShows(all, { x: 1, y: 1 }, { x: 9, y: 4 }), { whole: true });
+    assert.deepEqual(tetherShows(all, { x: 1, y: 1 }, { x: 9, y: 4 }, 0.2), { whole: true });
     assert.equal(auraClip(all, { x0: 0, y0: 0, x1: 20, y1: 20 }), null);
   });
 
@@ -276,7 +291,7 @@ describe("the stand rule for the board's marks", () => {
     const fog = fogOf([[0, 0, 3, 10], [4, 0, 10, 10], [3, 0, 4, 2], [3, 3, 4, 10]], [
       [12, 9], [13, 9], [14, 9], [15, 9], [13, 8], [14, 8], [15, 8], [12, 10], [13, 10], [14, 10], [15, 10], [12, 11], [13, 11], [14, 11], [15, 11],
     ]);
-    const show = tetherShows(fog, { x: 1, y: 2.1 }, { x: 6, y: 2.1 });
+    const show = tetherShows(fog, { x: 1, y: 2.1 }, { x: 6, y: 2.1 }, 0);
     assert.equal(show.whole, false);
     assert.ok(!show.whole && show.clip.length > 0 && show.clip.every((r) => !(r.x === 3 && r.y === 2)));
     const clip = auraClip(fog, { x0: 2, y0: 1, x1: 5, y1: 4 });
@@ -359,4 +374,25 @@ describe("the stand rule for the board's marks", () => {
       assert.equal(liftedClip({ fog: new FogView(null, "s1", { w: 16, h: 16 }), turn, ground }, { x0: 3, y0: 1, x1: 7, y1: 2 }), null);
     }
   });
+
+  test("a moving tether whose line clears fog but whose stroke or round cap reaches it is clipped, at low zoom too (ISO34-ASTRA-7, OPUS-5)", () => {
+    // Sub-cell (12, 8), in cell 3, 2, is fogged: x 3 to 3.25, y 2 to 2.25.
+    const fog = fogOf([[0, 0, 3, 10], [4, 0, 10, 10], [3, 0, 4, 2], [3, 3, 4, 10]], [
+      [12, 9], [13, 9], [14, 9], [15, 9], [13, 8], [14, 8], [15, 8], [12, 10], [13, 10], [14, 10], [15, 10], [12, 11], [13, 11], [14, 11], [15, 11],
+    ]);
+    // At 8 px a cell TetherLine strokes 1.5 px: 0.094 cells either side.
+    const r = 1.5 / 2 / 8;
+    // A line 0.05 cells below the fogged sub-cell: its center misses it, its stroke does not.
+    const side = { a: { x: 1, y: 2.3 }, b: { x: 6, y: 2.3 } };
+    assert.deepEqual(tetherShows(fog, side.a, side.b, 0), { whole: true }, "the line alone stays on revealed sub-cells");
+    const edge = tetherShows(fog, side.a, side.b, r);
+    assert.equal(edge.whole, false);
+    assert.ok(!edge.whole && edge.clip.every((c) => !(c.x === 3 && c.y === 2)), "and its clip leaves the fogged sub-cell out");
+    assert.ok(!edge.whole && edge.clip.some((c) => c.x === 3.25 && c.y === 2), "but keeps the revealed one beside it the stroke reaches");
+    // A line ending 0.05 cells short of it: its round cap reaches it.
+    const cap = tetherShows(fog, { x: 1, y: 2.125 }, { x: 2.95, y: 2.125 }, r);
+    assert.equal(cap.whole, false);
+    assert.deepEqual(tetherShows(fog, { x: 1, y: 2.125 }, { x: 2.95 - 2 * r, y: 2.125 }, r), { whole: true }, "a cap clear of it");
+  });
 });
+

@@ -125,50 +125,80 @@ export function splitTokens<T extends ViewToken>(fog: FogView, tokens: readonly 
 }
 
 /**
- * Whether a line in cells stands, a tether's: every sub-cell it crosses is
- * revealed. The walk visits each sub-cell the segment passes through,
- * corners included, so a line that grazes a fogged corner stays flat.
+ * Whether a line in cells stands, a tether's: every sub-cell it can paint
+ * is revealed, by its stroke's half width `r` in cells with round caps
+ * (strokeSubcells). With no width, every sub-cell the segment passes
+ * through, corners included, so a line that grazes a fogged corner stays
+ * flat.
  */
-export function lineStands(fog: FogView, a: { x: number; y: number }, b: { x: number; y: number }): boolean {
+export function lineStands(fog: FogView, a: { x: number; y: number }, b: { x: number; y: number }, r = 0): boolean {
   if (fog.all) return true;
   let ok = true;
-  lineSubcells(a, b, (sx, sy) => {
+  strokeSubcells(a, b, r, (sx, sy) => {
     if (!fog.revealed(sx, sy)) ok = false;
     return ok;
   });
   return ok;
 }
 
+type P = { x: number; y: number };
+
 /**
- * Every sub-cell whose closed square meets the segment, row by row, until
- * `visit` says stop. Closed squares fail closed: a line along a sub-cell
- * line, or through a corner, counts the sub-cells on both sides of it.
+ * Every sub-cell whose closed square lies within `r` cells of the segment,
+ * row by row, until `visit` says stop: what a stroke of half width r with
+ * round caps can paint. Closed squares fail closed: a line along a
+ * sub-cell line, or through a corner, counts the sub-cells on both sides
+ * of it, and a stroke whose edge only touches a square counts it.
  */
-export function lineSubcells(a: { x: number; y: number }, b: { x: number; y: number }, visit: (sx: number, sy: number) => boolean): void {
-  const ax = a.x * FOG_SUBCELLS;
-  const ay = a.y * FOG_SUBCELLS;
-  const bx = b.x * FOG_SUBCELLS;
-  const by = b.y * FOG_SUBCELLS;
-  const yLo = Math.min(ay, by);
-  const yHi = Math.max(ay, by);
-  for (let row = lowCell(yLo); row <= Math.floor(yHi); row++) {
-    // The segment's x over this row's closed band, y from row to row + 1.
-    const t0 = ay === by ? 0 : clamp01((row - ay) / (by - ay));
-    const t1 = ay === by ? 1 : clamp01((row + 1 - ay) / (by - ay));
-    const xa = ax + (bx - ax) * t0;
-    const xb = ax + (bx - ax) * t1;
-    const x0 = Math.min(xa, xb);
-    const x1 = Math.max(xa, xb);
-    for (let col = lowCell(x0); col <= Math.floor(x1); col++) if (!visit(col, row)) return;
+export function strokeSubcells(a: P, b: P, r: number, visit: (sx: number, sy: number) => boolean): void {
+  const k = FOG_SUBCELLS;
+  const s = 1 / k;
+  // Float slack, so a square the stroke's edge touches is never missed.
+  const near = Math.max(0, r) + 1e-9;
+  const x0 = Math.floor((Math.min(a.x, b.x) - near) * k) - 1;
+  const x1 = Math.floor((Math.max(a.x, b.x) + near) * k);
+  const y0 = Math.floor((Math.min(a.y, b.y) - near) * k) - 1;
+  const y1 = Math.floor((Math.max(a.y, b.y) + near) * k);
+  for (let sy = y0; sy <= y1; sy++) {
+    for (let sx = x0; sx <= x1; sx++) if (squareGap(a, b, sx * s, sy * s, s) <= near && !visit(sx, sy)) return;
   }
 }
 
-/** The lowest sub-cell whose closed square holds `v`: the one below as well when `v` lies on a line. */
-function lowCell(v: number): number {
-  const f = Math.floor(v);
-  return f === v ? f - 1 : f;
+/** The distance from the segment a to b to the closed square at x, y of side s: 0 where they meet. */
+function squareGap(a: P, b: P, x: number, y: number, s: number): number {
+  if (segmentMeetsBox(a, b, x, y, x + s, y + s)) return 0;
+  let d = Math.min(boxGap(a, x, y, s), boxGap(b, x, y, s));
+  for (const c of [{ x, y }, { x: x + s, y }, { x, y: y + s }, { x: x + s, y: y + s }]) d = Math.min(d, segmentGap(c, a, b));
+  return d;
 }
 
-function clamp01(t: number): number {
-  return t < 0 ? 0 : t > 1 ? 1 : t;
+/** Whether the segment meets the closed box: Liang and Barsky's clip, which keeps a part of it. */
+function segmentMeetsBox(a: P, b: P, x0: number, y0: number, x1: number, y1: number): boolean {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  let lo = 0;
+  let hi = 1;
+  for (const [p, q] of [[-dx, a.x - x0], [dx, x1 - a.x], [-dy, a.y - y0], [dy, y1 - a.y]] as const) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const t = q / p;
+    if (p < 0) lo = Math.max(lo, t);
+    else hi = Math.min(hi, t);
+    if (lo > hi) return false;
+  }
+  return true;
+}
+
+function boxGap(p: P, x: number, y: number, s: number): number {
+  return Math.hypot(Math.max(x - p.x, 0, p.x - x - s), Math.max(y - p.y, 0, p.y - y - s));
+}
+
+function segmentGap(p: P, a: P, b: P): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
 }

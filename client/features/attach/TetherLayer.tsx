@@ -51,10 +51,15 @@ export const TetherLayer = memo(function TetherLayer(props: LayerProps) {
   );
 });
 
+/** A tether's stroke in screen pixels at this zoom: half the token's ring, and never under 1.5. */
+export function tetherPx(scale: number): number {
+  return Math.max(1.5, boardSizes(scale).ringPx / 2);
+}
+
 /** One tether, its points and dash kept while the line and the zoom are the same, so a render for anything else redraws nothing. */
 export const TetherLine = memo(function TetherLine(props: { line: Tether; holder: Token | undefined; scale: number }) {
   const { line: l, holder, scale } = props;
-  const px = Math.max(1.5, boardSizes(scale).ringPx / 2);
+  const px = tetherPx(scale);
   const points = useMemo(() => [l.from.x, l.from.y, l.to.x, l.to.y], [l.from.x, l.from.y, l.to.x, l.to.y]);
   const dash = useMemo(() => [(6 * px) / scale, (4 * px) / scale], [px, scale]);
   return (

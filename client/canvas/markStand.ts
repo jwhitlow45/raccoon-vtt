@@ -3,7 +3,7 @@ import { pillReach, type PillProps } from "../features/measure/pillPlace.ts";
 import { liftInPlane } from "./isoPlace.ts";
 import type { IsoGround } from "./relief/context.ts";
 import type { CellBox, FogView } from "./relief/fogView.ts";
-import { boxStands, lineStands, lineSubcells } from "./relief/stand.ts";
+import { boxStands, lineStands, strokeSubcells } from "./relief/stand.ts";
 
 /**
  * The stand rule (docs/design-v1-isometric-view.md 5.2, D-261026-5) for the
@@ -46,14 +46,15 @@ export type LineShow = { whole: true } | { whole: false; clip: Rect[] };
 
 /**
  * How a tether moving with a dragged token shows (5.1): whole when every
- * sub-cell it crosses is revealed (stand.ts lineStands), else clipped to
- * the revealed ones among them, so it draws nothing over a fogged sub-cell.
+ * sub-cell its stroke can paint is revealed, its half width `r` in cells
+ * and its round caps included (stand.ts lineStands), else clipped to the
+ * revealed ones among them, so it draws nothing over a fogged sub-cell.
  */
-export function tetherShows(fog: FogView, a: { x: number; y: number }, b: { x: number; y: number }): LineShow {
-  if (lineStands(fog, a, b)) return { whole: true };
+export function tetherShows(fog: FogView, a: { x: number; y: number }, b: { x: number; y: number }, r: number): LineShow {
+  if (lineStands(fog, a, b, r)) return { whole: true };
   const clip: Rect[] = [];
   const k = 1 / FOG_SUBCELLS;
-  lineSubcells(a, b, (sx, sy) => {
+  strokeSubcells(a, b, r, (sx, sy) => {
     if (fog.revealed(sx, sy)) clip.push({ x: sx * k, y: sy * k, w: k, h: k });
     return true;
   });
