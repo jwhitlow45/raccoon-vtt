@@ -5,6 +5,7 @@ import { dropView, seenSeat, type DropToken, type Role } from "../features/movem
 import { screenToView, viewToScreen, type Camera, type Point } from "../lib/camera.ts";
 import { footprint, snapPosition } from "../lib/scene.ts";
 import { drawnBase, seenFootprintGround, toView, toWorld, type DrawnHeights, type DrawnSource, type View, type ViewPoint } from "../lib/view.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The isometric view's drag adapter (docs/design-v1-isometric-view.md 6.3),
@@ -161,7 +162,7 @@ export function dragGround(heights: DrawnHeights, token: Placed): DragGround {
   const size = footprint(token);
   return {
     levels: levelsOf(heights),
-    footGround: (at) => highest(heights, occupiedRange({ ...token, x: at.x, y: at.y, squeeze: undefined })),
+    footGround: (at) => highest(heights, occupiedRange(SQUARES, { ...token, x: at.x, y: at.y, squeeze: undefined })),
     snap: (at) => snapPosition(at.x, at.y, size),
   };
 }
@@ -187,7 +188,7 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
   const drawn = input.drawn ?? UNCAPPED;
   const size = footprint(token);
   const ruleOf = (t: Placed, base: number): DragRule => ruleFor(seenStanding(src, t), base);
-  const ownBase = drawnBase(src, occupiedRange(token), token.elevation) / feetPerCell;
+  const ownBase = drawnBase(src, occupiedRange(SQUARES, token), token.elevation) / feetPerCell;
   const own = ruleOf(token, ownBase);
   const seat = seenSeat(dropView(room, role), token);
   if (!seat) return { w: size.w, h: size.h, own, seat: null, drawn };
@@ -197,7 +198,7 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
     h: size.h,
     own,
     seat: {
-      base: drawnBase(src, occupiedRange(holder), holder.elevation) / feetPerCell,
+      base: drawnBase(src, occupiedRange(SQUARES, holder), holder.elevation) / feetPerCell,
       keptAt: seat.keptAt,
       // Off a holder on the ground the token walks, off a flier it keeps its own height, off one inside the ground its own base.
       off: ruleFor(seenStanding(src, holder), ownBase),
@@ -209,7 +210,7 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
 const UNCAPPED: DragPlan["drawn"] = (base) => base;
 
 function seenStanding(src: DrawnSource, t: Placed): Standing {
-  return standing(t.elevation, seenFootprintGround(src, occupiedRange(t)));
+  return standing(t.elevation, seenFootprintGround(src, occupiedRange(SQUARES, t)));
 }
 
 function ruleFor(footing: Standing, base: number): DragRule {

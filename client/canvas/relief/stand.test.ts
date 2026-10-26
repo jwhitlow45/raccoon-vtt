@@ -11,6 +11,7 @@ import { FogView, type CellBox } from "./fogView.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
 import { boxStands, creatureStands, ghostStands, ghostTagStands, lineStands, splitTokens, tokenBox, tokenBoxes } from "./stand.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The stand rule is the isometric view's security rule
@@ -105,13 +106,13 @@ function randomToken(random: () => number, scene: Scene, i: number): ViewToken {
 /** Both boxes a token covers in Top-down, the oracle's own way: the drawn body and the rules' footprint. */
 function oracleToken(mask: Mask, t: ViewToken, at: { x: number; y: number } = t): boolean {
   const fp = footprint(t);
-  const rule = footprintRect({ ...t, x: at.x, y: at.y });
+  const rule = footprintRect(SQUARES, { ...t, x: at.x, y: at.y });
   return oracleClear(mask, { x0: at.x, y0: at.y, x1: at.x + fp.w, y1: at.y + fp.h }) && oracleClear(mask, { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h });
 }
 
 /** The rules' footprint of a token, as a box. */
 function footprintBox(t: ViewToken): CellBox {
-  const rule = footprintRect(t);
+  const rule = footprintRect(SQUARES, t);
   return { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h };
 }
 

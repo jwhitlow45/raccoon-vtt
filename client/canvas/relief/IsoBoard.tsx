@@ -46,6 +46,7 @@ import { previewLanding, seenChunks } from "./seenChunks.ts";
 import { ghostStands, ghostTagStands, splitTokens, tokenBox } from "./stand.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The isometric board (docs/design-v1-isometric-view.md 5.1): two stages,
@@ -194,7 +195,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     const all = Object.fromEntries(props.tokens.map((t) => [t.id, t]));
     return standing.map((t): Standing => {
       const fp = footprint(t);
-      const range = occupiedRange(t);
+      const range = occupiedRange(SQUARES, t);
       const base = drawnBase(src, range, t.elevation) / feet;
       const ground = drawnFootprintGround(src, range) / feet;
       const link = t.attached;
@@ -265,7 +266,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const seated = holder !== undefined && (riding || (room !== null && seenSeat(dropView(room, props.role), t)?.keptAt(spot) === true));
       const kept = seated ? seat : ON_GROUND;
       const fp = footprint(t);
-      const range = occupiedRange({ ...t, x: spot.x, y: spot.y, squeeze: undefined });
+      const range = occupiedRange(SQUARES, { ...t, x: spot.x, y: spot.y, squeeze: undefined });
       const base = drawnBase(src, range, landing) / feet;
       const ground = drawnFootprintGround(src, range) / feet;
       const shape = standeeShape(turn, { x: spot.x, y: spot.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, kept);
@@ -351,7 +352,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     return same ? prev : (framesRef.current = next);
   }, [standees]);
   // A creature lying flat lays out on the drawn ground under it, where the ground stage copies its picture up a seen column.
-  const flatGround = useCallback((t: ViewToken) => drawnFootprintGround(src, occupiedRange(t)) / feet, [src, feet]);
+  const flatGround = useCallback((t: ViewToken) => drawnFootprintGround(src, occupiedRange(SQUARES, t)) / feet, [src, feet]);
   const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id), flatGround(t)), [turn, frames, flatGround]);
   const viewPills = useMemo(() => props.text.pills.map((p) => viewPill(p, isometric(turn), groundAt)), [props.text.pills, turn, groundAt]);
   const labelInk = useMemo(
@@ -379,7 +380,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const ghostOf = useCallback(
     (t: ViewToken, at: { x: number; y: number }, name: string): IsoGhost => {
       const fp = footprint(t);
-      const range = occupiedRange({ ...t, x: at.x, y: at.y, squeeze: undefined });
+      const range = occupiedRange(SQUARES, { ...t, x: at.x, y: at.y, squeeze: undefined });
       // It previews where the drop would land it there, on the ground this viewer has seen, as this device's own drag does (4.3).
       const room = store.getState().view;
       const seen = seenChunks({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog });

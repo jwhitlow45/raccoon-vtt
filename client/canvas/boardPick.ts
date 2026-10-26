@@ -8,6 +8,7 @@ import { scopeSlot, type RoomScope } from "../state/scope.ts";
 import { FogView } from "./relief/fogView.ts";
 import { creatureStands } from "./relief/stand.ts";
 import { cappedBase } from "./relief/standee.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * What a press on the board means (docs/design-v1-isometric-view.md 6.1):
@@ -105,7 +106,7 @@ export function pressGap(pick: Pick<BoardPick, "view" | "camera" | "heights">, p
  */
 export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell" | "camera" | "canvasHeight">, token: FootprintToken, stands = true): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  const range = occupiedRange(token);
+  const range = occupiedRange(SQUARES, token);
   const ground = drawnFootprintGround(pick.src, range) / pick.feetPerCell;
   return drawnRing(pick, stands)(drawnBase(pick.src, range, token.elevation) / pick.feetPerCell, ground);
 }
@@ -132,7 +133,7 @@ export function standsFor(pick: Pick<BoardPick, "src">, aboveFog: (t: ViewToken)
 /** The highest drawn ground under a footprint, in cells (view.ts drawnFootprintGround): where a ghost of it stands. 0 in Top-down. */
 export function groundUnder(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, token: Omit<FootprintToken, "elevation">): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  return drawnFootprintGround(pick.src, occupiedRange(token)) / pick.feetPerCell;
+  return drawnFootprintGround(pick.src, occupiedRange(SQUARES, token)) / pick.feetPerCell;
 }
 
 /** The highest drawn ground under a world rectangle's cells, in cells, down in a pit when every cell is: where an outline row's box stands. 0 in Top-down. */

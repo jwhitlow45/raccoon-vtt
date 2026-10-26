@@ -17,6 +17,7 @@ import { boxGround } from "./isoPlace.ts";
 import { auraClip, tetherShows } from "./markStand.ts";
 import { IsoGroundContext, useTreeShownView, type IsoGround } from "./relief/context.ts";
 import type { CellBox } from "./relief/fogView.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
 const EMPTY_TOKENS: RoomState["tokens"] = {};
@@ -34,7 +35,7 @@ export function auraBox(cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h">, caug
   const box = { x0: cov.x0 - AURA_MARGIN, y0: cov.y0 - AURA_MARGIN, x1: cov.x0 + cov.w + AURA_MARGIN, y1: cov.y0 + cov.h + AURA_MARGIN };
   const reach = ringReach(scale, CAUGHT_RING.widthPx, CAUGHT_RING.gapPx);
   for (const t of caught) {
-    const r = footprintRect(t);
+    const r = footprintRect(SQUARES, t);
     box.x0 = Math.min(box.x0, r.x - reach);
     box.y0 = Math.min(box.y0, r.y - reach);
     box.x1 = Math.max(box.x1, r.x + r.w + reach);
@@ -75,7 +76,7 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
   const lines = useMemo(() => (ids.size === 0 ? [] : tethers(tokens, layer.scene.id).filter((l) => ids.has(l.id) || ids.has(l.holderId))), [tokens, layer.scene.id, ids]);
   if (ids.size === 0 || !areas) return null;
   const groundOf = (t: Token) => {
-    const r = footprintRect(t);
+    const r = footprintRect(SQUARES, t);
     return boxGround(iso, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h });
   };
   const moving = [...ids].flatMap((id) => {

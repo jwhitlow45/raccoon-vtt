@@ -4,6 +4,7 @@ import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
 import type { CellBox, FogView } from "./fogView.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The stand rule (docs/design-v1-isometric-view.md 5.2, D-261026-5), the
@@ -34,7 +35,7 @@ type BoxToken = Pick<ViewToken, "x" | "y" | "size" | "w" | "h" | "squeeze" | "ro
  * the two a later change draws.
  */
 export function tokenBoxes(token: BoxToken, at: { x: number; y: number } = token): [CellBox, CellBox] {
-  const rule = footprintRect({ ...token, x: at.x, y: at.y });
+  const rule = footprintRect(SQUARES, { ...token, x: at.x, y: at.y });
   return [turnedBody(at, footprint(token), token.rotation, token.kind === "object"), { x0: rule.x, y0: rule.y, x1: rule.x + rule.w, y1: rule.y + rule.h }];
 }
 

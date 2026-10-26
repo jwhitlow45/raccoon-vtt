@@ -9,6 +9,7 @@ import { drawnBase, drawnFootprintGround, heightsStand, isometric, K, toView, ty
 import { readFileSync } from "node:fs";
 import { COVER_INSET } from "../../features/attach/groups.ts";
 import { DECOR_REACH_PX, ellipseBox, standeeParts, standeeShape } from "./standee.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 const FEET = 5;
 
@@ -39,7 +40,7 @@ function fogHiding(...hidden: string[]): Record<string, FogTile> {
 
 /** A standee's shape as the board places it: base and ground from the drawn heights, in cells. */
 function placed(src: DrawnSource, token: { x: number; y: number; elevation: number }, turn: Turn = 0) {
-  const range = occupiedRange({ ...token, size: "medium" });
+  const range = occupiedRange(SQUARES, { ...token, size: "medium" });
   const base = drawnBase(src, range, token.elevation) / FEET;
   const ground = drawnFootprintGround(src, range) / FEET;
   return standeeShape(turn, { x: token.x, y: token.y, w: 1, h: 1 }, base, ground, 40, 800);

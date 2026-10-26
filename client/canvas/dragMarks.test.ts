@@ -11,6 +11,7 @@ import { areaContext, cachedCoverage, caughtTokens } from "../features/areas/cov
 import { boardSizes } from "../lib/boardScale.ts";
 import { auraClip } from "./markStand.ts";
 import { FogView } from "./relief/fogView.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 const { auraBox } = await import("./DragMarks.tsx");
 const { CAUGHT_RING } = await import("../features/areas/TemplateLayer.tsx");
@@ -39,7 +40,7 @@ test("a moving aura that catches a Gargantuan by one corner cell clips its ring 
   const caught = caughtTokens(aura, ctx, "s1");
   assert.ok(caught.includes("dragon"), JSON.stringify(caught));
   const cov = cachedCoverage(aura, ctx);
-  const dragon = footprintRect(state.tokens.dragon!);
+  const dragon = footprintRect(SQUARES, state.tokens.dragon!);
   assert.equal(dragon.x + dragon.w, cov.x0 + cov.w + 2, "the footprint reaches the margin's edge, so its ring's gap and stroke go past it");
   // Revealed to the margin's edge: the old box, the window and its margin, was clear.
   const fog = fogWestOf(9);
