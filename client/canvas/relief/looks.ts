@@ -109,19 +109,25 @@ export class CellTints {
  */
 export function imageReader(image: CanvasImageSource): ReadPixels | null {
   if (typeof document === "undefined") return null;
-  const canvas = document.createElement("canvas");
-  const g = canvas.getContext("2d", { willReadFrequently: true });
-  if (!g) return null;
+  const g = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  return g ? pixelReader(image, g) : null;
+}
+
+/** What `pixelReader` uses of a 2D context. */
+export type PixelContext = Pick<CanvasRenderingContext2D, "canvas" | "clearRect" | "drawImage" | "getImageData" | "imageSmoothingEnabled">;
+
+/** `imageReader` over a given context, its canvas grown to each rectangle read. */
+export function pixelReader(image: CanvasImageSource, g: PixelContext): ReadPixels {
   return (r) => {
-    if (canvas.width < r.sw) canvas.width = r.sw;
-    if (canvas.height < r.sh) canvas.height = r.sh;
-    g.clearRect(0, 0, r.sw, r.sh);
-    g.imageSmoothingEnabled = false;
-    g.drawImage(image, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
     try {
+      if (g.canvas.width < r.sw) g.canvas.width = r.sw;
+      if (g.canvas.height < r.sh) g.canvas.height = r.sh;
+      g.clearRect(0, 0, r.sw, r.sh);
+      g.imageSmoothingEnabled = false;
+      g.drawImage(image, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
       return g.getImageData(0, 0, r.sw, r.sh).data;
     } catch {
-      // A map from another origin without CORS would taint the canvas: no tint then, the neutral tone.
+      // No tint then, the neutral tone: a closed bitmap or one with no pixels throws on the draw, and a map from another origin without CORS taints the canvas.
       return null;
     }
   };

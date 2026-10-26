@@ -7,7 +7,7 @@ import { rng } from "#shared/testutil.ts";
 import { TERRAIN_COLORS, TERRAIN_SWATCHES } from "../../features/builder/textures.ts";
 import { theme } from "../../lib/theme.ts";
 import { FogView } from "./fogView.ts";
-import { averageColor, cellLook, CellTints, pixelsInside, sideLook, type PixelRect } from "./looks.ts";
+import { averageColor, cellLook, CellTints, pixelReader, pixelsInside, sideLook, type PixelContext, type PixelRect } from "./looks.ts";
 
 /** An image of `w` by `h` pixels, RGBA, from a color per pixel. */
 function image(w: number, h: number, color: (x: number, y: number) => [number, number, number]) {
@@ -91,5 +91,49 @@ describe("side looks", () => {
     assert.equal(cellLook(fog, tints, 2, 2, null).color, theme.relief.side);
     assert.equal(cellLook(new FogView(null, "s1", { w: 4, h: 4 }), tints, 2, 2, null).color, "rgb(200, 10, 10)");
     assert.equal(cellLook(fog, tints, 2, 2, "grass").texture, "grass");
+  });
+});
+
+describe("a map image that can no longer be read", () => {
+  /** A context whose drawImage throws as a browser's does for a closed bitmap or one with no pixels. */
+  function closedContext(): PixelContext & { reads: number } {
+    const g = {
+      canvas: { width: 0, height: 0 },
+      imageSmoothingEnabled: true,
+      reads: 0,
+      clearRect() {},
+      drawImage() {
+        throw new DOMException("The image source is detached.", "InvalidStateError");
+      },
+      getImageData() {
+        g.reads++;
+        return { data: new Uint8ClampedArray(4) };
+      },
+    };
+    return g as unknown as PixelContext & { reads: number };
+  }
+
+  test("a closed bitmap gives no tint, the neutral tone, and never throws (ISO2-OPUS-11)", () => {
+    const g = closedContext();
+    const read = pixelReader({} as CanvasImageSource, g);
+    assert.equal(read({ sx: 0, sy: 0, sw: 4, sh: 4 }), null);
+    assert.equal(g.reads, 0, "nothing read past the failed draw");
+    const tints = new CellTints(read, { x: 0, y: 0, width: 2, height: 2 }, { width: 8, height: 8 });
+    assert.equal(tints.at(1, 1), null);
+    assert.deepEqual(cellLook(new FogView(null, "s", { w: 2, h: 2 }), tints, 1, 1, null), sideLook(null, null));
+  });
+
+  test("a source with no pixels gives no tint and reads nothing", () => {
+    let reads = 0;
+    const tints = new CellTints(
+      () => {
+        reads++;
+        return null;
+      },
+      { x: 0, y: 0, width: 2, height: 2 },
+      { width: 0, height: 0 },
+    );
+    assert.equal(tints.at(0, 0), null);
+    assert.equal(reads, 0);
   });
 });
