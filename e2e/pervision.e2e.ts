@@ -8,6 +8,7 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page, t
 import sharp from "sharp";
 import type { BuildChunk, EdgeFeature, RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
+import { privateFieldsIn } from "#shared/privateFields.ts";
 import { isCellFullyFogged } from "#shared/rules/fog.ts";
 import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
@@ -236,9 +237,6 @@ async function tapAway(page: Page, cell: { x: number; y: number }): Promise<void
   await tapCell(page, BOUNDS, cell);
   await page.getByRole("group", { name: /door$/ }).waitFor({ state: "detached" });
 }
-
-/** What reaches DMs only on a per-player scene (design section 9, rule 3): the holder list, the layers and every list of who saw. */
-const DM_ONLY = ['"holders:', '"exploredAny:', "exploredBy", "seenBy"];
 
 type Frame = { t?: string; state?: ProjectedState; changes?: Parameters<typeof applyChanges>[1]; you?: { memberId: string; role: string } };
 
@@ -593,13 +591,16 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
       // So the rule above judged copies of a per-player scene, not only whole-party ones.
       assert.ok(perPlayer > 5, `${who}'s page held a per-player scene after only ${perPlayer} frames`);
       // Every frame as sent, of every kind, drag frames, rows and log lines included. Before the pool the goblin never
-      // reached this page, so not even a deletion may name it, and the label's words never did.
+      // reached this page, so not even a deletion may name it, and the label's words never did. And no frame ever holds
+      // what reaches DMs only (design section 9, rule 3), read from the parsed frame so a snapshot's properties, an event's
+      // keys and an ephemeral payload all count (review PV5-ASTRA-5).
       const named = watch.received.flatMap((text, index) => {
         const found: string[] = [];
         if (index < pooledAt && text.includes(run.goblinId)) found.push("the goblin's id");
         if (index < pooledAt && text.includes(LABEL_TEXT)) found.push("the label's words");
-        for (const needle of DM_ONLY) if (text.includes(needle)) found.push(needle);
-        return found.length > 0 ? [`frame ${index} (${(JSON.parse(text) as Frame).t}): ${found.join(", ")}`] : [];
+        const frame = JSON.parse(text) as Frame;
+        found.push(...privateFieldsIn(frame));
+        return found.length > 0 ? [`frame ${index} (${frame.t}): ${found.join(", ")}`] : [];
       });
       assert.deepEqual(named, [], `${who}'s page`);
     }
