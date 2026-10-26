@@ -8,7 +8,7 @@ import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, P2, actor, character, env, reveal, room, scene, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
-import { MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
+import { cancelPreviews, MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 
 /** A connection that has had its snapshot, keeping what it is sent, on the clock given or the real one. */
 function viewer(who: Viewer, now?: () => number): { conn: Connection; got: EphEvent[] } {
@@ -412,7 +412,7 @@ describe("what a socket's previews keep", () => {
     const ends = t.p2.got.filter((e) => e.k === "rulerEnd").map((e) => (e as { id: string }).id);
     const shown = new Set(t.p2.got.filter((e) => e.k === "ruler").map((e) => (e as { id: string }).id));
     assert.equal(ends.length + MOST_PREVIEWS_SENT, shown.size, "every ruler shown and no longer kept was ended on the screen");
-    assert.deepEqual([...t.p2.conn.previewsHeld].sort(), [...t.p1.conn.previewsSent.keys()].map((k) => `p1|${k}`).sort());
+    assert.deepEqual([...t.p2.conn.previewsHeld.keys()].sort(), [...t.p1.conn.previewsSent.keys()].map((k) => `p1|${k}`).sort());
   });
 
   test("a preview with no frame for a while goes at the next frame or global batch, and one kept alive stays", () => {
@@ -431,11 +431,122 @@ describe("what a socket's previews keep", () => {
       t.p2.got.filter((e) => e.k === "rulerEnd"),
       [{ k: "rulerEnd", id: "still" }],
     );
-    assert.deepEqual([...t.p2.conn.previewsHeld], ["p1|ruler:alive"]);
+    assert.deepEqual([...t.p2.conn.previewsHeld.keys()], ["p1|ruler:alive"]);
     t.tick(PREVIEW_STALE_MS);
     rejudgePreviews(state, t.all);
     assert.equal(t.p1.conn.previewsSent.size, 0);
     assert.deepEqual(t.p2.got.at(-1), { k: "rulerEnd", id: "alive" });
     assert.equal(t.p2.conn.previewsHeld.size, 0);
+  });
+});
+
+/**
+ * Two sockets of one member previewing the same thing (review PV3-ASTRA-3),
+ * as a DM with a laptop and a phone dragging one token: a screen shows one
+ * preview per member and id, from whichever socket sent its latest frame.
+ * Tidying the other socket's entry, by expiry, eviction, a global batch's
+ * judgment or that socket going away, leaves the screen's preview alone and
+ * sends it nothing.
+ */
+describe("two sockets of one member on one preview", () => {
+  function twoDms(state: RoomState) {
+    let clock = 1_000_000;
+    const now = () => clock;
+    const a = viewer(DM, now);
+    const b = viewer(DM, now);
+    const p1 = viewer(P1, now);
+    const all = [a.conn, b.conn, p1.conn];
+    const send = (from: Connection, e: EphEvent) => routeEphemeral(state, from, "s1", e, all);
+    return { a, b, p1, all, send, tick: (ms: number) => (clock += ms) };
+  }
+  const cancels = (got: EphEvent[]) => got.filter((e) => e.k === "dragCancel");
+
+  test("the older socket's entry expiring leaves the newer one's drag on the screen", () => {
+    const state = room();
+    state.tokens.gob = token("gob", { x: 2, y: 2 });
+    const t = twoDms(state);
+    t.send(t.a.conn, { k: "dragStart", tokenId: "gob", x: 2, y: 2 });
+    t.tick(9_000);
+    t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 3, y: 2 });
+    t.tick(1_001);
+    rejudgePreviews(state, t.all);
+    assert.deepEqual(cancels(t.p1.got), []);
+    assert.ok(t.p1.conn.previewsHeld.has("dm1|drag:gob"), "the screen still holds the drag");
+    assert.equal(t.a.conn.previewsSent.size, 0, "the older entry went");
+    assert.deepEqual([...t.b.conn.previewsSent.keys()], ["drag:gob"]);
+    // Once the newer one is stale too, the screen gets its cancel.
+    t.tick(PREVIEW_STALE_MS);
+    rejudgePreviews(state, t.all);
+    assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
+  });
+
+  test("the older socket's entry evicted past the most leaves the newer one's drag on the screen", () => {
+    const state = room();
+    state.tokens.gob = token("gob", { x: 2, y: 2 });
+    const t = twoDms(state);
+    t.send(t.a.conn, { k: "dragStart", tokenId: "gob", x: 2, y: 2 });
+    t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 3, y: 2 });
+    for (let i = 0; i < MOST_PREVIEWS_SENT; i++) t.send(t.a.conn, { k: "ruler", id: `r-${i}`, points: [{ x: 1.5, y: 1.5 }], shared: true });
+    assert.ok(!t.a.conn.previewsSent.has("drag:gob"), "the older socket's drag was its oldest, and went");
+    assert.deepEqual(cancels(t.p1.got), []);
+    assert.ok(t.p1.conn.previewsHeld.has("dm1|drag:gob"));
+  });
+
+  test("a global batch judges the newer frame the screen shows, not the older socket's", () => {
+    const state = room();
+    state.scenes.s1 = scene("s1", { fogEnabled: true });
+    // The goblin stands on ground that stays revealed, so only where each frame shows it decides.
+    state.tokens.gob = token("gob", { x: 12, y: 2 });
+    reveal(state, "s1", { x: 0, y: 0, w: 16, h: 8 });
+    const t = twoDms(state);
+    t.send(t.a.conn, { k: "dragMove", tokenId: "gob", x: 2, y: 2 });
+    t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 12, y: 2 });
+    // The DM hides the west, where the older socket's frame stands, and the newer one's stays revealed.
+    const later = { ...state, fogTiles: {} };
+    reveal(later, "s1", { x: 8, y: 0, w: 8, h: 8 });
+    rejudgePreviews(later, t.all);
+    assert.deepEqual(cancels(t.p1.got), []);
+    assert.equal(t.p1.conn.previewsHeld.get("dm1|drag:gob"), t.b.conn, "the screen holds the newer socket's frame");
+  });
+
+  test("the older socket's entry goes at a global batch once no screen shows its frame, with no cancel", () => {
+    const state = room();
+    state.scenes.s2 = scene("s2", { order: 1 });
+    state.tokens.gob = token("gob", { x: 2, y: 2 });
+    const t = twoDms(state);
+    // The newer socket is on another scene, so it never shows the older one's frame.
+    t.b.conn.sceneId = "s2";
+    t.send(t.a.conn, { k: "dragStart", tokenId: "gob", x: 2, y: 2 });
+    t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 3, y: 2 });
+    assert.equal(t.p1.conn.previewsHeld.get("dm1|drag:gob"), t.b.conn);
+    rejudgePreviews(state, t.all);
+    assert.equal(t.a.conn.previewsSent.size, 0, "the older entry keeps no frame no screen shows");
+    assert.deepEqual([...t.b.conn.previewsSent.keys()], ["drag:gob"]);
+    assert.deepEqual(cancels(t.p1.got), []);
+  });
+
+  test("the older socket closing leaves the newer one's drag on the screen", () => {
+    const state = room();
+    state.tokens.gob = token("gob", { x: 2, y: 2 });
+    const t = twoDms(state);
+    t.send(t.a.conn, { k: "dragStart", tokenId: "gob", x: 2, y: 2 });
+    t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 3, y: 2 });
+    cancelPreviews(t.a.conn, t.all);
+    assert.deepEqual(cancels(t.p1.got), []);
+    assert.ok(t.p1.conn.previewsHeld.has("dm1|drag:gob"));
+    // The newer socket closing ends it.
+    cancelPreviews(t.b.conn, t.all);
+    assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
+  });
+
+  test("an explicit end from either socket ends the member's preview, as the screen keys it", () => {
+    const state = room();
+    state.tokens.gob = token("gob", { x: 2, y: 2 });
+    const t = twoDms(state);
+    t.send(t.a.conn, { k: "dragStart", tokenId: "gob", x: 2, y: 2 });
+    t.send(t.b.conn, { k: "dragMove", tokenId: "gob", x: 3, y: 2 });
+    t.send(t.a.conn, { k: "dragCancel", tokenId: "gob" });
+    assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
+    assert.ok(!t.p1.conn.previewsHeld.has("dm1|drag:gob"));
   });
 });

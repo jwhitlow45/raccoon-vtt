@@ -231,7 +231,7 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
       receiver.send({ t: "eph", from: sender.memberId, e: receiver.role === "player" ? forPlayer(state, sceneId, e, receiver) : e });
       if (heldKey && preview) {
         if (preview.ends) receiver.previewsHeld.delete(heldKey);
-        else receiver.previewsHeld.add(heldKey);
+        else receiver.previewsHeld.set(heldKey, sender);
       }
     } else if (heldKey && preview && receiver.previewsHeld.has(heldKey)) {
       receiver.previewsHeld.delete(heldKey);
@@ -241,11 +241,10 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
   if (preview && !preview.ends) keepSent(sender, `${preview.kind}:${preview.id}`, { kind: preview.kind, id: preview.id, sceneId, last: e, at: sender.now() }, all);
 }
 
-/** Keeps a preview's last frame while some screen shows it, and none nobody receives, within the socket's most. */
+/** Keeps a preview's last frame while some screen shows this socket's frame of it, and none nobody receives, within the socket's most. */
 function keepSent(sender: Connection, key: string, sent: SentPreview, receivers: readonly Connection[]): void {
   sender.previewsSent.delete(key);
-  const heldKey = `${sender.memberId}|${key}`;
-  if (!receivers.some((r) => r !== sender && !r.closed && r.previewsHeld.has(heldKey))) return;
+  if (!showsAnywhere(sender, `${sender.memberId}|${key}`, receivers)) return;
   sender.previewsSent.set(key, sent);
   for (const [oldest, kept] of sender.previewsSent) {
     if (sender.previewsSent.size <= MOST_PREVIEWS_SENT) break;
@@ -266,10 +265,25 @@ function expireStale(sender: Connection, receivers: readonly Connection[]): void
 function dropSent(sender: Connection, key: string, sent: { kind: PreviewKind; id: string }, receivers: readonly Connection[]): void {
   sender.previewsSent.delete(key);
   const heldKey = `${sender.memberId}|${key}`;
-  for (const receiver of receivers) {
-    if (receiver === sender || receiver.closed || !receiver.previewsHeld.delete(heldKey)) continue;
-    receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(sent.kind, sent.id) });
-  }
+  for (const receiver of receivers) if (release(receiver, heldKey, sender)) receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(sent.kind, sent.id) });
+}
+
+/*
+ * A screen holds one preview per member and id, whichever of the member's
+ * sockets sent its latest frame (review PV3-ASTRA-3). So a socket's entry
+ * that goes ends the preview only on the screens where that socket's frame
+ * is the one shown, and one whose frames another socket has replaced
+ * everywhere just goes. An explicit end is the member's, from either
+ * socket, as the screen reads it, and routeEphemeral ends it everywhere.
+ */
+function release(receiver: Connection, heldKey: string, sender: Connection): boolean {
+  if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender) return false;
+  receiver.previewsHeld.delete(heldKey);
+  return true;
+}
+
+function showsAnywhere(sender: Connection, heldKey: string, receivers: readonly Connection[]): boolean {
+  return receivers.some((r) => r !== sender && !r.closed && r.previewsHeld.get(heldKey) === sender);
 }
 
 /**
@@ -310,14 +324,15 @@ export function rejudgePreviews(state: RoomState, connections: Iterable<Connecti
       const senderMay = !(last.k === "dragStart" || last.k === "dragMove" || last.k === "dragEnd") || mayMove(state, sender, last.tokenId);
       const withheld = withheldFor(state, sceneId, last);
       for (const receiver of all) {
-        if (receiver === sender || receiver.closed || !receiver.previewsHeld.has(heldKey)) continue;
+        // Only the screens showing this socket's frame are judged by it.
+        if (receiver === sender || receiver.closed || receiver.previewsHeld.get(heldKey) !== sender) continue;
         const here = judged && viewerSceneId(state, receiver.viewer, { sceneId: receiver.sceneId }) === sceneId;
         if (here && senderMay && allowed(state, receiver, last, withheld)) continue;
-        receiver.previewsHeld.delete(heldKey);
+        release(receiver, heldKey, sender);
         receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(kind, id) });
       }
-      // A preview no screen shows any more keeps no frame.
-      if (!all.some((r) => r !== sender && !r.closed && r.previewsHeld.has(heldKey))) sender.previewsSent.delete(key);
+      // A preview no screen shows from this socket any more keeps no frame.
+      if (!showsAnywhere(sender, heldKey, all)) sender.previewsSent.delete(key);
     }
   }
 }
@@ -328,9 +343,7 @@ export function cancelPreviews(sender: Connection, receivers: Iterable<Connectio
   for (const receiver of receivers) {
     if (receiver === sender || receiver.closed) continue;
     for (const { kind, id } of sender.previewsSent.values()) {
-      const heldKey = `${sender.memberId}|${kind}:${id}`;
-      if (!receiver.previewsHeld.delete(heldKey)) continue;
-      receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(kind, id) });
+      if (release(receiver, `${sender.memberId}|${kind}:${id}`, sender)) receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(kind, id) });
     }
   }
   sender.previewsSent.clear();

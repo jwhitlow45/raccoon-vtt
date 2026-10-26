@@ -100,8 +100,14 @@ export class Connection {
    * at most MOST_PREVIEWS_SENT, the one framed least recently first.
    */
   readonly previewsSent = new Map<string, SentPreview>();
-  /** Previews this viewer currently shows, keyed `from|kind:id`. */
-  readonly previewsHeld = new Set<string>();
+  /**
+   * Previews this viewer currently shows, keyed `from|kind:id`, each with
+   * the socket that sent its current frame. A screen shows one preview per
+   * member and id, so of two sockets of one member previewing the same
+   * thing only the one that sent the latest frame may cancel it when its
+   * own entry goes (review PV3-ASTRA-3).
+   */
+  readonly previewsHeld = new Map<string, Connection>();
   /** Timers that belong to this socket and die with it. */
   readonly timers = new Set<NodeJS.Timeout>();
 
