@@ -21,7 +21,7 @@ import { frameFields, groupLanding, groupReading, walkPreview } from "./preview.
 import { CLOSED, line, onTurn, raised, recordedCost, seenRoom, thorn, world } from "./testing.ts";
 import { ownWalk } from "#shared/rules/movement.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
-import { footprintHexes, hexCenter, hexDistance, hexNeighbors, snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
+import { footprintHexes, hexAt, hexCenter, hexDistance, hexNeighbors, snapAnchor, type HexGrid } from "#shared/rules/hex.ts";
 import type { Op } from "#shared/protocol.ts";
 import { dragLabel } from "../measure/movement.ts";
 import { placedOnHex } from "#shared/rules/footprint.ts";
@@ -792,6 +792,39 @@ describe("drops on a hex scene (docs/design-v1-hex-grids.md 4.2, phase H1)", () 
       assert.equal(recordedCost(turn, drag.op as Op, "thorn"), 20, "the path the move stores");
       // The label's band reads the same 20 ft against the speed.
       assert.equal(dragLabel(drag.preview.read).split(" · ")[0], "20 ft");
+    });
+
+    test(`${orient}: a group drag's lead on its turn reads 4 hexes as 20 ft on its label and in its frames`, () => {
+      const { g, state } = hexRoom(orient);
+      const turn = onTurn(state, "thorn");
+      let hex = { col: 4, row: 4 };
+      for (let i = 0; i < 4; i++) hex = hexNeighbors(g, hex)[1]!;
+      const to = hexCenter(g, hex);
+      const drag = groupDragOf(turn, "dm", ["thorn", "goblin"], { x: to.x - 0.5 + 0.2, y: to.y - 0.5 + 0.1 });
+      assert.equal(drag.label.dragFt, 20, "the label");
+      assert.equal(drag.frame.ft, 20, "what its frames tell others");
+    });
+
+    test(`${orient}: a group drag's label and frames read the hex the drop snaps to, not the one its square would`, () => {
+      const { g, state } = hexRoom(orient);
+      const turn = onTurn(state, "thorn");
+      const start = { col: 4, row: 4 };
+      // A box middle whose square snap would stand in another hex, a different number of steps away.
+      let raw: { x: number; y: number } | null = null;
+      let want = 0;
+      for (let i = 0; i < 400 && !raw; i++) {
+        const p = { x: 3 + (i % 20) * 0.37, y: 3 + Math.floor(i / 20) * 0.41 };
+        const hex = hexAt(g, p);
+        const square = hexAt(g, { x: Math.round(p.x - 0.5) + 0.5, y: Math.round(p.y - 0.5) + 0.5 });
+        if (hexDistance(g, start, hex) !== hexDistance(g, start, square) && hexDistance(g, start, hex) <= 5) {
+          raw = { x: p.x - 0.5, y: p.y - 0.5 };
+          want = 5 * hexDistance(g, start, hex);
+        }
+      }
+      assert.ok(raw, "such a spot");
+      const drag = groupDragOf(turn, "dm", ["thorn", "goblin"], raw);
+      assert.equal(drag.label.dragFt, want, "the label");
+      assert.equal(drag.frame.ft, want, "what its frames tell others");
     });
 
     test(`${orient}: a group drag lands each on its own anchor as one moveMany the server takes`, () => {

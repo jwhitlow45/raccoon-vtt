@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { SQUARES } from "#shared/rules/grid.ts";
+import { snapPosition } from "../../lib/scene.ts";
 import { dragSpots, parseSpotsKey, spotsKey, withSpots } from "./liveTokens.ts";
 
 const tok = (x: number, y: number, size: "medium" | "large" | "tiny" = "medium") => ({ x, y, size });
@@ -38,5 +39,17 @@ describe("tokens where they are being dragged", () => {
     assert.deepEqual(moved.a, { x: 7, y: 3, size: "medium" });
     assert.equal(moved.big, tokens.big);
     assert.deepEqual(tokens.a, { x: 2, y: 2, size: "medium" });
+  });
+});
+
+describe("tokens where they are being dragged on a hex scene (docs/design-v1-hex-grids.md HX-D11)", () => {
+  test("a drag counts at the hex anchor its scene's drop would snap it to", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      const g = { shape: "hex", orient } as const;
+      const tokens = { a: tok(2, 2) };
+      const at = dragSpots(tokens, [{ tokenId: "a", x: 6.3, y: 4.2 }], () => g).get("a");
+      assert.deepEqual(at, snapPosition(g, 6.3, 4.2, { w: 1, h: 1 }), orient);
+      assert.notDeepEqual(at, dragSpots(tokens, [{ tokenId: "a", x: 6.3, y: 4.2 }], squares).get("a"), "not the square under it");
+    }
   });
 });

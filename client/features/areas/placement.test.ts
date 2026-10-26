@@ -579,6 +579,8 @@ describe("placing areas on a hex scene (docs/design-v1-hex-grids.md HX-D11)", ()
         assert.ok(candidates.some((c) => c.x === snapped.x && c.y === snapped.y), "a corner or the center");
         const best = Math.min(...candidates.map((c) => Math.hypot(c.x - p.x, c.y - p.y)));
         assert.ok(Math.abs(Math.hypot(snapped.x - p.x, snapped.y - p.y) - best) < 1e-12, "the nearest");
+        // A cube's square never lines up with hexes, so it snaps as a point does.
+        assert.deepEqual(snapCubeCenter(g, p, 15, 5), snapped);
       }
     });
 

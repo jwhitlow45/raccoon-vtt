@@ -286,3 +286,17 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
     assert.ok(Math.abs(moved.x - expected.x) < 1e-6 && Math.abs(moved.y - expected.y) < 1e-6);
   });
 });
+
+describe("an isometric drag on a hex scene (docs/design-v1-hex-grids.md, ISOREB-OPUS-01)", () => {
+  test("snaps to the hex anchor Top-down's drop snaps to", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      const g = { shape: "hex", orient } as const;
+      const t = { id: "t", sceneId: "s1", size: "medium" as const, x: 2, y: 2, elevation: 0 };
+      const ground = dragGround(flatHeights({ w: 16, h: 16 }), t, g);
+      for (const at of [{ x: 6.3, y: 4.2 }, { x: 3.9, y: 7.6 }]) {
+        assert.deepEqual(ground.snap(at), snapPosition(g, at.x, at.y, footprint(t)), `${orient} ${at.x},${at.y}`);
+        assert.notDeepEqual(ground.snap(at), snapPosition(SQUARES, at.x, at.y, footprint(t)), "not the square's");
+      }
+    }
+  });
+});

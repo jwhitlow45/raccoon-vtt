@@ -112,6 +112,15 @@ async function brightAt(page: Page, world: { x: number; y: number }): Promise<nu
   return most;
 }
 
+/** Whether the accent's yellow lies within a pixel of a point on the map. */
+async function accentNear(page: Page, world: { x: number; y: number }): Promise<boolean> {
+  const p = await pagePoint(page, BOUNDS, world);
+  const png = await page.screenshot({ clip: { x: Math.round(p.x) - 1, y: Math.round(p.y) - 1, width: 3, height: 3 } });
+  const { data, info } = await sharp(png).raw().toBuffer({ resolveWithObject: true });
+  for (let i = 0; i < data.length; i += info.channels) if (data[i]! > 150 && data[i + 1]! > 130 && data[i + 2]! < 90) return true;
+  return false;
+}
+
 async function lineAt(page: Page, world: { x: number; y: number }, what: string): Promise<void> {
   let seen = 0;
   await waitFor(`a grid line ${what}`, async () => ((seen = await brightAt(page, world)) > 58 ? true : null), 8_000).catch((err: Error) => {
@@ -267,7 +276,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await ops.send({ t: "token.create", token: { id: run.ogre, sceneId: run.sceneId, kind: "monster", name: "Ogre", size: "large", ...at("large", { col: 22, row: 4 }), disposition: "hostile", visibility: "all", actor: { inline: ACTOR } } });
     await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
 
-    // A hex's sides and not its middle; row 21, the scene's last, and nothing of a row 22 below it.
+    // A hex's sides and not its middle. Then row 21, the scene's last, and nothing of a row 22 below it.
     await lineAt(dm, sideMiddle({ col: 3, row: 3 }, 1), "on hex 3,3's side");
     await lineAt(dm, sideMiddle({ col: 3, row: 3 }, 2), "on hex 3,3's slanted side");
     await blankAt(dm, hexCenter(G, { col: 3, row: 3 }), "in hex 3,3's middle");
@@ -295,6 +304,24 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await dm.mouse.up();
     await goblinAt(placedOnHex(G, goblin(), { col: 10, row: 6 }), "the goblin on hex 10,6");
     assert.deepEqual(tokenRefHex(G, goblin()), { col: 10, row: 6 });
+
+    // Selected, it shows the outline of its hex in the accent, on the hex's own sides: zoomed in, a ring round its box would pass a few pixels outside their middles.
+    await blur(dm);
+    for (let i = 0; i < 4; i++) await dm.keyboard.press("+");
+    const hex = { col: 10, row: 6 };
+    const on = await pagePoint(dm, BOUNDS, hexCenter(G, hex));
+    await dm.mouse.click(on.x, on.y);
+    await dm.getByRole("dialog", { name: /^Goblin/ }).first().waitFor();
+    let sides = 0;
+    await waitFor("the selected goblin's hex outline", async () => {
+      sides = 0;
+      for (let i = 0; i < 6; i++) if (await accentNear(dm, sideMiddle(hex, i))) sides++;
+      return sides >= 2 ? true : null;
+    }, 5_000).catch((err: Error) => {
+      throw new Error(`${err.message}: the accent at ${sides} of its 6 sides' middles`);
+    });
+    await shots.take(dm, "hex-dm-selected-outline");
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
   });
 
   test("HX-3. on the goblin's turn a drag of 4 hexes reads 20 ft on its label and in the path it stores", async () => {
@@ -346,9 +373,12 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await bar.waitFor();
     const line = bar.locator("[data-options-line]");
     await line.filter({ hasText: "Walking needs squares." }).waitFor();
-    await holdDrag(dm, hexCenter(G, { col: 4, row: 14 }), hexCenter(G, { col: 7, row: 14 }));
+    // Six hexes down a slant of the lattice: 30 ft, where the squares under its ends would read 25.
+    let end: Hex = { col: 4, row: 8 };
+    for (let i = 0; i < 6; i++) end = hexNeighbors(G, end)[1]!;
+    await holdDrag(dm, hexCenter(G, { col: 4, row: 8 }), hexCenter(G, end));
     await dm.mouse.up();
-    await line.filter({ hasText: /^15 ft · / }).waitFor();
+    await line.filter({ hasText: /^30 ft · / }).waitFor();
     await shots.take(dm, "hex-dm-ruler");
     const { group, popover } = await measureChoice(dm);
     // Its title names it, so the reason is what a screen reader hears (lib/a11y.ts accessibleName).

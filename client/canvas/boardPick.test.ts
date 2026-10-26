@@ -135,6 +135,20 @@ describe("the board's pick (docs/design-v1-isometric-view.md 6.1)", () => {
   });
 });
 
+describe("the board's pick on a hex scene (docs/design-v1-hex-grids.md HX-D11, ISOREB-OPUS-01)", () => {
+  test("both views read the scene's grid, so a standee's footprint and stand rule read its hexes as Top-down does", () => {
+    for (const shape of ["hexRows", "hexColumns"] as const) {
+      const state = room();
+      state.scenes.s1 = scene("s1", { bounds: { w: 16, h: 16 }, fogEnabled: true, gridShape: shape });
+      const grid = { shape: "hex", orient: shape === "hexRows" ? "rows" : "columns" };
+      for (const view of [TOP_DOWN, isometric(0), isometric(3)]) {
+        const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "player", fog: true, view, camera: CAM, lowPower: false }, new DrawnHeightsMemo());
+        assert.deepEqual(pick.grid, grid, `${shape}, ${view.kind}`);
+      }
+    }
+  });
+});
+
 describe("arrow keys move by the screen (docs/design-v1-isometric-view.md 6.5)", () => {
   test("Up is north at turn 0, west at 1, south at 2 and east at 3, and every arrow turns with it", () => {
     const compass = { north: [0, -1], east: [1, 0], south: [0, 1], west: [-1, 0] } as const;

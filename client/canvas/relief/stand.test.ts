@@ -622,6 +622,24 @@ describe("the stand rule on a hex scene (hex grids 4.2, ISOREB-OPUS-01)", () => 
     assert.equal(dimmedForDm(fog, SQUARES, goblin), true, "on squares nothing under it is revealed");
     const box = tokenBox(g, goblin);
     assert.ok(box.x0 <= sub[0] / FOG_SUBCELLS && box.x0 < goblin.x, "the clip's box reaches the hex's sub-cells past the drawn box");
+    // A sub-cell in the box round its hex but outside the hex and its drawn body: the server withholds the goblin, so the DM's standee dims.
+    const own = new Set(footprintSubcells(g, goblin).map(([sx, sy]) => `${sx},${sy}`));
+    const [body] = tokenBoxes(g, goblin);
+    let corner: [number, number] | null = null;
+    for (let sy = Math.round(box.y0 * FOG_SUBCELLS); sy < Math.round(box.y1 * FOG_SUBCELLS) && !corner; sy++) {
+      for (let sx = Math.round(box.x0 * FOG_SUBCELLS); sx < Math.round(box.x1 * FOG_SUBCELLS) && !corner; sx++) {
+        const inBody = (sx + 0.5) / FOG_SUBCELLS > body.x0 && (sx + 0.5) / FOG_SUBCELLS < body.x1 && (sy + 0.5) / FOG_SUBCELLS > body.y0 && (sy + 0.5) / FOG_SUBCELLS < body.y1;
+        if (!own.has(`${sx},${sy}`) && !inBody) corner = [sx, sy];
+      }
+    }
+    assert.ok(corner, "the box round a hex holds sub-cells of its neighbors");
+    const near = new Uint8Array(TILE_BYTES);
+    const j = corner[1] * TILE_SUB + corner[0];
+    near[j >> 3] = near[j >> 3]! | (1 << (j & 7));
+    const outside = new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(near) } }, "s1", { w: 16, h: 16 });
+    assert.ok(!footprintSubcells(g, goblin).some(([sx, sy]) => sx === corner[0] && sy === corner[1]), "the point is not the goblin's");
+    assert.ok(outside.boxAny(box), "and lies in the box round its hex");
+    assert.equal(dimmedForDm(outside, g, goblin), true, "a revealed point beside its hex keeps it dimmed");
   });
 
   test("no footprint read of the isometric view passes squares (ISOREB-OPUS-01)", () => {
