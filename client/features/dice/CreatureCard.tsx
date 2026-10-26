@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { theme } from "../../lib/theme.ts";
 import { ImagePreview } from "../images/IconDisk.tsx";
-import type { CreaturePicture } from "../tokens/CreatureHeader.tsx";
+import { Unbroken, type CreaturePicture } from "../tokens/CreatureHeader.tsx";
 import type { KindLine } from "../tokens/creatureKind.ts";
 import type { CreatureBadge } from "./creatureLook.ts";
 
@@ -88,7 +88,8 @@ function CardLine(props: { line: KindLine | string }) {
         <>
           {/* "Companion of Thorn" is its own element with exactly those words, as in the token panel's header. */}
           {line.companionOf === undefined ? line.kind : <span>{line.kind}</span>}
-          {` · ${line.size}`}
+          {" · "}
+          <Unbroken>{line.size}</Unbroken>
         </>
       )}
     </p>

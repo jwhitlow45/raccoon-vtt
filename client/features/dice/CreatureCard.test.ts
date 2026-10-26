@@ -41,7 +41,8 @@ describe("the creature card", () => {
     });
     assert.deepEqual(widths(markup), [48]);
     assert.match(markup, /<h3 style="[^"]*font-size:18px;font-weight:700[^"]*">Adult Black Dragon<\/h3>/);
-    assert.match(markup, /<p data-kind-line="" style="[^"]*font-size:13px[^"]*">Monster, CR 14 · Huge \(15 ft\)<\/p>/);
+    // The size stays whole on one line, so a wrapped line never leaves "ft)" alone (FU32-FT-ALONE).
+    assert.match(markup, /<p data-kind-line="" style="[^"]*font-size:13px[^"]*">Monster, CR 14 · <span style="white-space:nowrap">Huge \(15 ft\)<\/span><\/p>/);
     assert.ok(markup.indexOf("Adult Black Dragon") < markup.indexOf("Monster, CR 14"));
     assert.ok(markup.indexOf("Huge (15 ft)") < markup.indexOf('id="body"'), "the body under the header");
     assert.match(markup, /<span aria-hidden="true"/, "the picture is decoration");
@@ -57,7 +58,7 @@ describe("the creature card", () => {
     });
     assert.match(markup, new RegExp(`outline:${theme.line.strong}px solid ${theme.color.bg}`));
     assert.doesNotMatch(markup, new RegExp(theme.color.surface), "never the panel's surface, which the card does not wear");
-    assert.match(markup, /<span>Companion of Thorn<\/span> · Medium \(5 ft\)/);
+    assert.match(markup, /<span>Companion of Thorn<\/span> · <span style="white-space:nowrap">Medium \(5 ft\)<\/span>/);
   });
 
   test("several selected: up to three 32 px pictures, each after the first overlapping by 8 px, and no badge", () => {
@@ -103,6 +104,6 @@ describe("the creature card", () => {
   test("the header shows with no body, as while the options load", () => {
     const markup = card({ pictures: [picture("Th")], name: "Thorn", line: { kind: "Level 5 character", size: "Medium (5 ft)" } });
     assert.match(markup, /Thorn<\/h3>/);
-    assert.match(markup, /Level 5 character · Medium \(5 ft\)/);
+    assert.match(markup, /Level 5 character · <span style="white-space:nowrap">Medium \(5 ft\)<\/span>/);
   });
 });

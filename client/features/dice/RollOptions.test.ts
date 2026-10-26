@@ -193,7 +193,7 @@ describe("the creature's card and groups", () => {
     assert.ok(!markup.includes('role="tablist"'), "one creature takes no tabs");
     assert.deepEqual(headings(markup, "h3"), ["Thorn", "Saves and checks", "Skills", "Actions", "Spells"], "the heading keys walk the creature, then its groups");
     const card = markup.slice(markup.indexOf("data-dice-card"), markup.indexOf("Saves and checks"));
-    assert.match(card, /Level 5 character · Medium \(5 ft\)/);
+    assert.match(card, /Level 5 character · <span style="white-space:nowrap">Medium \(5 ft\)<\/span>/);
     assert.match(card, /Initiative \+2/, "Initiative stands in the card");
   });
 

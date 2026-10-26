@@ -30,7 +30,7 @@ import { ownsCharacter, tokenAccess, tokenOwnerIds, type TokenAccess } from "../
 import { useAltImages } from "../features/tokens/AltImages.tsx";
 import { CompanionOwners, CompanionSection, MakeCompanion, followsPartyHp } from "../features/tokens/CompanionsSection.tsx";
 import { characterPageSlot, openCharacterPage } from "../features/tokens/characterPage.ts";
-import { CREATURE_HEADING, CreatureHeader, type HeaderTag } from "../features/tokens/CreatureHeader.tsx";
+import { CREATURE_HEADING, CreatureHeader, Unbroken, type HeaderTag } from "../features/tokens/CreatureHeader.tsx";
 import { kindLine, sizeText, tokenKind } from "../features/tokens/creatureKind.ts";
 import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
@@ -630,7 +630,14 @@ function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAc
   if (!access.dm && (token.locked || !access.resize)) {
     return (
       <FieldRow label="Size">
-        {SIZE_WORDS[token.size]} ({fp.w * props.feetPerCell} ft), locked by the DM
+        {/*
+         * The words in one span, so the row takes them as one part rather than each run of text as its own, which stood out
+         * of line. The size stays whole, and the DM with its article, so no unit or word stands alone on a wrapped last
+         * line (FU32-FT-ALONE).
+         */}
+        <span>
+          <Unbroken>{`${SIZE_WORDS[token.size]} (${fp.w * props.feetPerCell} ft),`}</Unbroken> locked by <Unbroken>the DM</Unbroken>
+        </span>
       </FieldRow>
     );
   }

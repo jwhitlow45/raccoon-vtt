@@ -85,7 +85,8 @@ export function CreatureHeader(props: {
         <p data-kind-line="" style={{ margin: 0, color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body, overflowWrap: "anywhere" }}>
           {/* "Companion of Thorn" is always its own element with exactly those words, which the tracker's row repeats. */}
           {line.companionOf === undefined ? line.kind : props.onCompanionOf ? <CompanionOfLink onClick={props.onCompanionOf}>{line.kind}</CompanionOfLink> : <span>{line.kind}</span>}
-          {` · ${line.size}`}
+          {" · "}
+          <Unbroken>{line.size}</Unbroken>
         </p>
         {props.tags.length > 0 ? (
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
@@ -115,6 +116,16 @@ export function CreatureHeader(props: {
       </div>
     </div>
   );
+}
+
+/**
+ * Words kept on one line, such as the size at the kind line's end,
+ * "Medium (5 ft)", so a wrapped line never leaves "ft)" or "(5 ft)" alone
+ * on its last line (FU32-FT-ALONE). Only for words far shorter than the
+ * narrowest line.
+ */
+export function Unbroken(props: { children: ReactNode }) {
+  return <span style={{ whiteSpace: "nowrap" }}>{props.children}</span>;
 }
 
 /**
