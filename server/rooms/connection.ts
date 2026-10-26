@@ -27,6 +27,9 @@ export function clientKey(sessionId: string, clientId: string): ClientKey {
 /** What a socket sends through the ephemeral channel and may still be showing on other screens. */
 export type PreviewKind = "drag" | "ruler" | "aoe";
 
+/** A preview other screens hold from a socket: the scene it was sent for, its last frame and when that came. */
+export type SentPreview = { kind: PreviewKind; id: string; sceneId: string; last: EphEvent; at: number };
+
 export type ConnectionOptions = {
   now?: Clock;
   /** Per-socket ephemeral rate (design 7.6): 40 per second, burst 80. */
@@ -87,13 +90,16 @@ export class Connection {
   readonly frames: FrameBudget;
   readonly opRate: OpRate;
   readonly eph: TokenBucket;
+  /** The socket's clock, which its budgets read and its previews are timed by. */
+  readonly now: Clock;
   /**
    * Previews other viewers hold from this socket, keyed `kind:id`, with the
-   * scene they were sent for and the last frame, by which a batch that
+   * scene they were sent for, the last frame, by which a batch that
    * re-projects everything judges each receiver's again (ephemeral.ts
-   * rejudgePreviews).
+   * rejudgePreviews), and when it came. Only previews some viewer holds,
+   * at most MOST_PREVIEWS_SENT, the one framed least recently first.
    */
-  readonly previewsSent = new Map<string, { kind: PreviewKind; id: string; sceneId: string; last: EphEvent }>();
+  readonly previewsSent = new Map<string, SentPreview>();
   /** Previews this viewer currently shows, keyed `from|kind:id`. */
   readonly previewsHeld = new Set<string>();
   /** Timers that belong to this socket and die with it. */
@@ -114,6 +120,7 @@ export class Connection {
     this.display = grant.display === true;
     this.ip = ip;
     const now = opts.now ?? Date.now;
+    this.now = now;
     this.frames = new FrameBudget(now);
     this.opRate = new OpRate(now);
     this.eph = new TokenBucket(opts.ephPerSec ?? 40, opts.ephBurst ?? 80, now);

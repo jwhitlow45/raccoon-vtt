@@ -178,5 +178,6 @@ describe("previews held across a batch that re-projects everything", () => {
     rejudgePreviews(locked, t.all);
     assert.deepEqual(t.p2.got, [{ k: "dragCancel", tokenId: "a" }]);
     assert.deepEqual(t.dm.got, [{ k: "dragCancel", tokenId: "a" }]);
+    assert.equal(t.p1.conn.previewsSent.size, 0, "a preview no screen shows keeps no frame (review PV3-ASTRA-2)");
   });
 });

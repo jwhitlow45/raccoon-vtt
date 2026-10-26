@@ -6,7 +6,7 @@ import { walkerFor } from "#shared/rules/attach.ts";
 import type { EphEvent } from "#shared/protocol.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
 import { previewSqueezed, walkEnd, walkStates, type WalkEnd } from "#shared/rules/movement.ts";
-import type { Connection, PreviewKind } from "./connection.ts";
+import type { Connection, PreviewKind, SentPreview } from "./connection.ts";
 
 /**
  * The ephemeral channel (design 7.6). Nothing here is stored: an event is
@@ -40,6 +40,18 @@ function previewOf(e: EphEvent): { kind: PreviewKind; id: string; ends: boolean 
       return null;
   }
 }
+
+/*
+ * What a socket's previews may keep on the server (review PV3-ASTRA-2):
+ * each holds its last frame, so a socket may keep at most this many, the
+ * one framed least recently going first. A device keeps a still preview
+ * alive with a frame a second and the ephemeral rate allows 40 a second,
+ * so no socket keeps more alive than this. One with no frame for
+ * PREVIEW_STALE_MS has long left every screen, which drops a preview after
+ * 3 s without one (client/state/ephemeral.ts PREVIEW_IDLE_MS), and goes.
+ */
+export const MOST_PREVIEWS_SENT = 64;
+export const PREVIEW_STALE_MS = 10_000;
 
 function cancelEvent(kind: PreviewKind, id: string): EphEvent {
   switch (kind) {
@@ -197,12 +209,10 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
   if (!state.scenes[sceneId]) return;
   // A player previews only on the scene they are on. The DM may be anywhere.
   if (sender.role === "player" && state.meta.playerSceneId !== sceneId) return;
+  const all = [...receivers];
+  expireStale(sender, all);
   const preview = previewOf(e);
-  if (preview) {
-    const id = `${preview.kind}:${preview.id}`;
-    if (preview.ends) sender.previewsSent.delete(id);
-    else sender.previewsSent.set(id, { kind: preview.kind, id: preview.id, sceneId, last: e });
-  }
+  if (preview?.ends) sender.previewsSent.delete(`${preview.kind}:${preview.id}`);
   if (!shared(sender, e)) return;
   // A drag the sender may not make is withheld from everyone, and one
   // already showing (the token was locked mid-drag, say) is cancelled.
@@ -212,7 +222,7 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
   // A bare end names only what stopped, so it goes to those showing that preview. Sent to
   // everyone, a cancelled drag of a hidden or fogged token would hand players its id.
   const bareEnd = e.k === "dragCancel" || e.k === "rulerEnd" || e.k === "aoeEnd";
-  for (const receiver of receivers) {
+  for (const receiver of all) {
     if (receiver === sender || receiver.closed || receiver.held === null) continue;
     if (viewerSceneId(state, receiver.viewer, { sceneId: receiver.sceneId }) !== sceneId) continue;
     if (bareEnd) {
@@ -229,6 +239,38 @@ export function routeEphemeral(state: RoomState, sender: Connection, sceneId: st
       receiver.previewsHeld.delete(heldKey);
       receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(preview.kind, preview.id) });
     }
+  }
+  if (preview && !preview.ends) keepSent(sender, `${preview.kind}:${preview.id}`, { kind: preview.kind, id: preview.id, sceneId, last: e, at: sender.now() }, all);
+}
+
+/** Keeps a preview's last frame while some screen shows it, and none nobody receives, within the socket's most. */
+function keepSent(sender: Connection, key: string, sent: SentPreview, receivers: readonly Connection[]): void {
+  sender.previewsSent.delete(key);
+  const heldKey = `${sender.memberId}|${key}`;
+  if (!receivers.some((r) => r !== sender && !r.closed && r.previewsHeld.has(heldKey))) return;
+  sender.previewsSent.set(key, sent);
+  for (const [oldest, kept] of sender.previewsSent) {
+    if (sender.previewsSent.size <= MOST_PREVIEWS_SENT) break;
+    dropSent(sender, oldest, kept, receivers);
+  }
+}
+
+/** Every preview of the socket's with no frame for PREVIEW_STALE_MS goes, with a bare cancel to each screen still holding it. */
+function expireStale(sender: Connection, receivers: readonly Connection[]): void {
+  const now = sender.now();
+  for (const [key, sent] of sender.previewsSent) {
+    // The map holds them in the order of their last frames.
+    if (now - sent.at < PREVIEW_STALE_MS) break;
+    dropSent(sender, key, sent, receivers);
+  }
+}
+
+function dropSent(sender: Connection, key: string, sent: { kind: PreviewKind; id: string }, receivers: readonly Connection[]): void {
+  sender.previewsSent.delete(key);
+  const heldKey = `${sender.memberId}|${key}`;
+  for (const receiver of receivers) {
+    if (receiver === sender || receiver.closed || !receiver.previewsHeld.delete(heldKey)) continue;
+    receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(sent.kind, sent.id) });
   }
 }
 
@@ -263,7 +305,8 @@ function withheldFor(state: RoomState, sceneId: string, e: EphEvent): (receiver:
 export function rejudgePreviews(state: RoomState, connections: Iterable<Connection>): void {
   const all = [...connections];
   for (const sender of all) {
-    for (const { kind, id, sceneId, last } of sender.previewsSent.values()) {
+    expireStale(sender, all);
+    for (const [key, { kind, id, sceneId, last }] of [...sender.previewsSent]) {
       const heldKey = `${sender.memberId}|${kind}:${id}`;
       const judged = state.scenes[sceneId] !== undefined;
       const senderMay = !(last.k === "dragStart" || last.k === "dragMove" || last.k === "dragEnd") || mayMove(state, sender, last.tokenId);
@@ -275,6 +318,8 @@ export function rejudgePreviews(state: RoomState, connections: Iterable<Connecti
         receiver.previewsHeld.delete(heldKey);
         receiver.send({ t: "eph", from: sender.memberId, e: cancelEvent(kind, id) });
       }
+      // A preview no screen shows any more keeps no frame.
+      if (!all.some((r) => r !== sender && !r.closed && r.previewsHeld.has(heldKey))) sender.previewsSent.delete(key);
     }
   }
 }

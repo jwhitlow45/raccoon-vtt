@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type RoomState, type Viewer } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
-import type { EphEvent, Op, ServerMessage } from "#shared/protocol.ts";
+import { MAX_EPH_BYTES, type EphEvent, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, P2, actor, character, env, reveal, room, scene, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
-import { routeEphemeral } from "./ephemeral.ts";
+import { MOST_PREVIEWS_SENT, PREVIEW_STALE_MS, rejudgePreviews, routeEphemeral } from "./ephemeral.ts";
 
-/** A connection that has had its snapshot, keeping what it is sent. */
-function viewer(who: Viewer): { conn: Connection; got: EphEvent[] } {
+/** A connection that has had its snapshot, keeping what it is sent, on the clock given or the real one. */
+function viewer(who: Viewer, now?: () => number): { conn: Connection; got: EphEvent[] } {
   const got: EphEvent[] = [];
   const socket = {
     readyState: 1,
@@ -24,7 +24,7 @@ function viewer(who: Viewer): { conn: Connection; got: EphEvent[] } {
     close: () => undefined,
     terminate: () => undefined,
   };
-  const conn = new Connection(socket as never, { sessionId: `s-${who.memberId}`, roomId: "ROOM0000", memberId: who.memberId, role: who.role }, "203.0.113.1");
+  const conn = new Connection(socket as never, { sessionId: `s-${who.memberId}`, roomId: "ROOM0000", memberId: who.memberId, role: who.role }, "203.0.113.1", now ? { now } : {});
   conn.held = new Map();
   conn.sceneId = "s1";
   return { conn, got };
@@ -64,6 +64,7 @@ describe("drag previews", () => {
     state.tokens.mine = { ...state.tokens.mine!, locked: true };
     t.send(t.p1.conn, { k: "dragMove", tokenId: "mine", x: 5, y: 5 });
     assert.deepEqual(t.p2.got.at(-1), { k: "dragCancel", tokenId: "mine" });
+    assert.equal(t.p1.conn.previewsSent.size, 0, "a preview no screen shows any more keeps no frame (review PV3-ASTRA-2)");
   });
 
   test("a cancelled drag, ruler or area reaches only those showing it, so a hidden token's id stays with the DM", () => {
@@ -358,5 +359,83 @@ describe("drag previews on vision scenes (docs/design-v1-maps-vision.md 4.3.5)",
     assert.deepEqual(t.p1.got, [{ k: "dragMove", tokenId: "gob", x: 9, y: 1 }]);
     t.send(t.dm.conn, { k: "dragMove", tokenId: "gob", x: 20, y: 1 });
     assert.deepEqual(t.p1.got.at(-1), { k: "dragCancel", tokenId: "gob" });
+  });
+});
+
+/**
+ * What a socket's previews keep on the server (review PV3-ASTRA-2): the
+ * last frame of each preview some screen shows, and no other, at most
+ * MOST_PREVIEWS_SENT of them, each gone once it has had no frame for
+ * PREVIEW_STALE_MS, with a bare cancel to the screens still holding it.
+ */
+describe("what a socket's previews keep", () => {
+  function clocked(state: RoomState) {
+    let clock = 1_000_000;
+    const now = () => clock;
+    const dm = viewer(DM, now);
+    const p1 = viewer(P1, now);
+    const p2 = viewer(P2, now);
+    const all = [dm.conn, p1.conn, p2.conn];
+    // Through the socket's own ephemeral budget, as the actor routes a frame.
+    const send = (from: Connection, e: EphEvent) => {
+      if (from.eph.take()) routeEphemeral(state, from, "s1", e, all);
+    };
+    return { dm, p1, p2, all, send, tick: (ms: number) => (clock += ms) };
+  }
+  const ruler = (id: string, shared?: boolean): EphEvent => ({ k: "ruler", id, points: Array.from({ length: 20 }, (_, i) => ({ x: 1.5 + i, y: 1.5 })), ...(shared === undefined ? {} : { shared }) });
+  const keptBytes = (conn: Connection) => [...conn.previewsSent.values()].reduce((n, sent) => n + JSON.stringify(sent.last).length, 0);
+
+  test("a preview no screen shows keeps no frame: rulers a player keeps to themselves, and a drag only its sender sees", () => {
+    const state = room();
+    state.tokens.lurker = token("lurker", { visibility: "dm" });
+    const t = clocked(state);
+    for (let i = 0; i < 1_000; i++) {
+      t.send(t.p1.conn, ruler(`own-${i}`, false));
+      t.tick(25);
+    }
+    assert.equal(t.p1.conn.previewsSent.size, 0);
+    t.send(t.dm.conn, { k: "dragStart", tokenId: "lurker", x: 3, y: 3 });
+    assert.equal(t.dm.conn.previewsSent.size, 0, "no player may see the hidden creature");
+    assert.equal(t.p2.got.length, 0);
+  });
+
+  test("new rulers at the most the rate allows keep at most the socket's most, and the oldest's screens get a bare cancel", () => {
+    const t = clocked(room());
+    for (let i = 0; i < 1_000; i++) {
+      t.send(t.p1.conn, ruler(`r-${i}`));
+      assert.ok(t.p1.conn.previewsSent.size <= MOST_PREVIEWS_SENT, `after ${i + 1}: ${t.p1.conn.previewsSent.size} kept`);
+      assert.ok(t.p2.conn.previewsHeld.size <= MOST_PREVIEWS_SENT);
+      t.tick(25);
+    }
+    assert.equal(t.p1.conn.previewsSent.size, MOST_PREVIEWS_SENT);
+    assert.ok(keptBytes(t.p1.conn) <= MOST_PREVIEWS_SENT * MAX_EPH_BYTES, `${keptBytes(t.p1.conn)} bytes kept`);
+    const ends = t.p2.got.filter((e) => e.k === "rulerEnd").map((e) => (e as { id: string }).id);
+    const shown = new Set(t.p2.got.filter((e) => e.k === "ruler").map((e) => (e as { id: string }).id));
+    assert.equal(ends.length + MOST_PREVIEWS_SENT, shown.size, "every ruler shown and no longer kept was ended on the screen");
+    assert.deepEqual([...t.p2.conn.previewsHeld].sort(), [...t.p1.conn.previewsSent.keys()].map((k) => `p1|${k}`).sort());
+  });
+
+  test("a preview with no frame for a while goes at the next frame or global batch, and one kept alive stays", () => {
+    const state = room();
+    const t = clocked(state);
+    // The one kept alive came first, so only its later frames put it after the still one.
+    t.send(t.p1.conn, ruler("alive"));
+    t.send(t.p1.conn, ruler("still"));
+    // A device sends a still preview's frame again every second.
+    for (let s = 0; s < 30; s++) {
+      t.tick(1_000);
+      t.send(t.p1.conn, ruler("alive"));
+    }
+    assert.deepEqual([...t.p1.conn.previewsSent.keys()], ["ruler:alive"]);
+    assert.deepEqual(
+      t.p2.got.filter((e) => e.k === "rulerEnd"),
+      [{ k: "rulerEnd", id: "still" }],
+    );
+    assert.deepEqual([...t.p2.conn.previewsHeld], ["p1|ruler:alive"]);
+    t.tick(PREVIEW_STALE_MS);
+    rejudgePreviews(state, t.all);
+    assert.equal(t.p1.conn.previewsSent.size, 0);
+    assert.deepEqual(t.p2.got.at(-1), { k: "rulerEnd", id: "alive" });
+    assert.equal(t.p2.conn.previewsHeld.size, 0);
   });
 });
