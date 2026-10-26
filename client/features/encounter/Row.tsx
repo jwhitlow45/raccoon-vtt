@@ -38,7 +38,7 @@ import { LegendaryPips } from "./Pips.tsx";
 import { ReactionSwitch } from "./ReactionSection.tsx";
 import { CreatureUses, useUsesPresence } from "../combat/CombatUses.tsx";
 import { markChips } from "../combat/logic.ts";
-import { useLairCounts } from "../combat/state.ts";
+import { offersLair, useLairCounts } from "../combat/state.ts";
 
 export type RowDrag = {
   /** Pointer handlers for the drag handle. Absent when the row has no tie to reorder. */
@@ -884,15 +884,19 @@ function RowMenu(props: {
       {dm ? (
         <>
           <Switch label="Row hidden from players" help="Players do not see this row" checked={entry.hidden} onChange={(hidden) => update({ hidden })} />
-          <Switch
-            label="In lair"
-            help={lair.counts(true) ? "Its lair's legendary counts and XP" : undefined}
-            checked={entry.inLair}
-            disabled={lair.state === "failed"}
-            busy={lair.state === "loading" || lairSend.waiting}
-            onChange={setLair}
-          />
-          {lair.state === "failed" ? <SrdLoadFailed what="Its stat block" inline /> : null}
+          {offersLair(lair, entry.inLair) ? (
+            <>
+              <Switch
+                label="In lair"
+                help={lair.counts(true) ? "Its lair's legendary counts and XP" : undefined}
+                checked={entry.inLair}
+                disabled={lair.state === "failed"}
+                busy={lair.state === "loading" || lairSend.waiting}
+                onChange={setLair}
+              />
+              {lair.state === "failed" ? <SrdLoadFailed what="Its stat block" inline /> : null}
+            </>
+          ) : null}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
             <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Initiative roll reminder. Auto follows its conditions.</span>
             {/* Each grows to fill its line, so where the three do not fit on one, as in the side panel, Disadvantage never stands alone under the other two. */}

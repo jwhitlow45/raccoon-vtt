@@ -148,7 +148,8 @@ describe("the row's options lead with the creature's things in its Combat sectio
   const state = room({ characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"], resources: [{ id: "rage", name: "Rage", max: 2, used: 0, reset: "long" }] }) } });
   state.tokens.dragon = token("dragon", { name: "Dragon", x: 6, y: 2, actor: { inline: actor({ legendary }) } });
   state.tokens.bt = token("bt", { kind: "pc", name: "Bree", x: 4, y: 2, actor: { ref: "bree" } });
-  state.encounter = { rev: 0, round: 1, activeEntryId: "eb", entries: [entry("eb", { tokenId: "bt", value: 12 }), entry("ed", { tokenId: "dragon", value: 10 })] };
+  // The dragon has no stat block, so only a row already in its lair offers In lair (GP2-1).
+  state.encounter = { rev: 0, round: 1, activeEntryId: "eb", entries: [entry("eb", { tokenId: "bt", value: 12 }), entry("ed", { tokenId: "dragon", value: 10, inLair: true })] };
   const reaction = /role="switch"[^>]*aria-labelledby="[^"]*"[^>]*>(?:(?!<\/button>).)*Reaction used/;
 
   test("the DM's: Uses with the pips, Reaction used, Ready, then Roll again, Row hidden from players, In lair, the reminder, and Remove last", () => {

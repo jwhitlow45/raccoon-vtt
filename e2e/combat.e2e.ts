@@ -1900,10 +1900,11 @@ describe("raccoon-vtt: the combat flow", { timeout: 900_000 }, () => {
           ["Reaction used", row.getByRole("switch", { name: /^Reaction used/ })],
           ["Ready", row.getByRole("textbox", { name: "Trigger for the Ready action" })],
           ["Row hidden from players", row.getByRole("switch", { name: /^Row hidden from players/ })],
-          ["In lair", row.getByRole("switch", { name: /^In lair/ })],
+          // The boss has no stat block, so its row offers no In lair (GP2-1). usesSurfaces.test.ts places In lair among the options.
           ["Initiative roll reminder", row.getByRole("group", { name: "Initiative roll reminder" })],
           ["Remove", row.getByRole("button", { name: "Remove from the fight" })],
         ]);
+        assert.equal(await row.getByRole("switch", { name: /^In lair/ }).count(), 0, `${at}: In lair on a creature with no stat block`);
         // The pips at 10 wrap inside the row: none past its right edge.
         const rowBox = (await row.boundingBox())!;
         for (const pip of await uses.locator("[data-pips] button").all()) {

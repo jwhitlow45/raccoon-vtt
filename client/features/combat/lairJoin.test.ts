@@ -6,7 +6,7 @@ import type { RoomState, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { ClientOp, EntryInput } from "#shared/protocol.ts";
 import { loadedMonsters, loadMonsters } from "#shared/srd/monsters.ts";
-import { DM, actor, entry, room, token } from "#shared/testutil.ts";
+import { DM, actor, customMonster, entry, room, token } from "#shared/testutil.ts";
 import { lairCounts } from "#shared/dice/uses.ts";
 import { fightOps } from "../tokens/groupEdit.ts";
 import type { DiceView } from "../dice/creature.ts";
@@ -38,6 +38,14 @@ function table(): RoomState {
   state.tokens.away = token("away", { name: "Away Dragon", size: "huge", x: 8, y: 2, actor: { inline: actor({ srdId: "adult-red-dragon", legendary: BASE }) } });
   state.tokens.gob = token("gob", { name: "Goblin", x: 14, y: 2, actor: { inline: actor({ srdId: "goblin-warrior" }) } });
   state.tokens.ogre = token("ogre", { name: "Ogre", x: 18, y: 2, actor: { inline: actor({ legendary: BASE }) } });
+  state.tokens.troll = token("troll", { name: "Troll", size: "large", x: 22, y: 2, actor: { inline: actor({ srdId: "troll" }) } });
+  // A room's own blocks: two from an older book, whose Lair Actions the editor keeps as a heading's text or a named entry, and one with no lair.
+  state.monsters.keeper = customMonster("keeper", { name: "Crypt Keeper", legendaryActions: [{ name: "", text: "Lair Actions" }, { name: "Grasping Dead", text: "Hands burst from the floor." }] });
+  state.monsters.warden = customMonster("warden", { name: "Bog Warden", traits: [{ name: "Lair Actions", text: "On initiative count 20, the bog rises." }] });
+  state.monsters.plain = customMonster("plain", { name: "Cave Lurker", traits: [{ name: "Homebody", text: "It never leaves its lair, and it takes no lair actions." }] });
+  state.tokens.keeper = token("keeper", { name: "Crypt Keeper", x: 26, y: 2, actor: { inline: actor({ monsterId: "keeper" }) } });
+  state.tokens.warden = token("warden", { name: "Bog Warden", x: 34, y: 2, actor: { inline: actor({ monsterId: "warden" }) } });
+  state.tokens.plain = token("plain", { name: "Cave Lurker", x: 30, y: 2, actor: { inline: actor({ monsterId: "plain" }) } });
   return state;
 }
 
@@ -66,9 +74,9 @@ function joined(state: RoomState, ids: readonly string[]): { state: string; rows
   return JSON.parse(/<pre>(.*)<\/pre>/.exec(markup)![1]!.replaceAll("&quot;", '"')) as { state: string; rows: EntryInput[] };
 }
 
-/** The DM's options for a dragon's row, open, and its In lair switch. */
-function lairSwitch(state: RoomState, tokenId: string): string {
-  const s = { ...state, encounter: { rev: 0, round: 1, activeEntryId: null, entries: [entry("e1", { tokenId, value: 15 })] } };
+/** The DM's options for a creature's row, open, and its In lair switch, or null where the row offers none. */
+function lairSwitch(state: RoomState, tokenId: string | undefined, inLair = false): string | null {
+  const s = { ...state, encounter: { rev: 0, round: 1, activeEntryId: null, entries: [entry("e1", { ...(tokenId !== undefined ? { tokenId } : { label: "Lair action" }), value: 15, inLair })] } };
   const view = projectState(s, DM, { sceneId: "s1" });
   const row = createElement(EntryRow, {
     entry: view.encounter!.entries[0]!,
@@ -85,9 +93,9 @@ function lairSwitch(state: RoomState, tokenId: string): string {
     rowRef: () => {},
   });
   const markup = provide(s, createElement("ol", null, row));
+  assert.match(markup, /Row hidden from players/, "the row's options are open");
   const at = markup.indexOf("In lair");
-  assert.ok(at >= 0, "the switch is there");
-  return markup.slice(markup.lastIndexOf("<button", at), markup.indexOf("</button>", at));
+  return at < 0 ? null : markup.slice(markup.lastIndexOf("<button", at), markup.indexOf("</button>", at));
 }
 
 const dmYou = { role: "dm" as const, memberId: "dm1" };
@@ -105,11 +113,11 @@ describe("whether a join or In lair can read its creature's lair (CCB-ASTRA-04, 
     assert.equal(joinState(diceOf(state, []), false, [t("lair")]), "ready");
   });
 
-  test("In lair waits only for a block not read yet, and keeps its manual path for a creature with no block", () => {
+  test("In lair waits only for a block not read yet, and never for a creature with no block", () => {
     const state = table();
     assert.equal(lairState(diceOf(state, null), false, { tokenId: "lair" }), "loading");
     assert.equal(lairState(diceOf(state, null), true, { tokenId: "lair" }), "failed");
-    assert.equal(lairState(diceOf(state, null), true, { tokenId: "ogre" }), "ready", "no block: In lair alone, with no counts");
+    assert.equal(lairState(diceOf(state, null), true, { tokenId: "ogre" }), "ready", "no block: nothing to wait for");
     assert.equal(lairState(diceOf(state, []), false, { tokenId: "lair" }), "ready");
     assert.equal(lairState(null, false, { tokenId: "lair" }), "loading");
     assert.equal(lairState(diceOf(state, null), true, null), "ready");
@@ -121,8 +129,9 @@ describe("whether a join or In lair can read its creature's lair (CCB-ASTRA-04, 
     const read = joined(state, ["lair", "away", "gob"]);
     assert.equal(read.state, "loading");
     assert.ok(read.rows.every((r) => r.inLair === undefined), "no row marked while its block loads");
-    assert.match(lairSwitch(state, "lair"), /aria-busy="true"/);
-    assert.doesNotMatch(lairSwitch(state, "ogre"), /aria-busy/, "a creature with no block sets In lair at once");
+    assert.match(lairSwitch(state, "lair") ?? "", /aria-busy="true"/);
+    assert.match(lairSwitch(state, "troll") ?? "", /aria-busy="true"/, "only its block can say a troll has no lair");
+    assert.equal(lairSwitch(state, "ogre"), null, "a creature with no block has no lair to be in");
   });
 
   test("once read: the dragon placed in its lair joins with In lair on, the one at its base counts and the goblin without", async () => {
@@ -142,7 +151,22 @@ describe("whether a join or In lair can read its creature's lair (CCB-ASTRA-04, 
       ],
     );
     const sw = lairSwitch(state, "lair");
+    assert.ok(sw !== null);
     assert.doesNotMatch(sw, /aria-busy|disabled/);
+  });
+
+  test("once read: only a creature whose block has a lair offers In lair, and a row in its lair keeps it (GP2-1)", async () => {
+    await loadMonsters();
+    const state = table();
+    assert.notEqual(lairSwitch(state, "lair"), null, "lair counts and XP");
+    assert.notEqual(lairSwitch(state, "keeper"), null, "lair actions under their heading");
+    assert.notEqual(lairSwitch(state, "warden"), null, "lair actions as an entry");
+    assert.equal(lairSwitch(state, "troll"), null, "the troll has no lair");
+    assert.equal(lairSwitch(state, "gob"), null);
+    assert.equal(lairSwitch(state, "plain"), null, "a room's block with no lair");
+    assert.equal(lairSwitch(state, "ogre"), null, "no block");
+    assert.equal(lairSwitch(state, undefined), null, "a row with no creature");
+    assert.match(lairSwitch(state, "troll", true) ?? "", /aria-checked="true"/, "a troll already in its lair can be taken out");
   });
 
   test("the group bar's Start a fight and Add to the fight carry the mark on every row they send", async () => {
