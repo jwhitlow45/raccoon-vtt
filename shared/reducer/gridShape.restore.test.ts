@@ -128,4 +128,24 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     const switched = run(undone.state, toHex(), B).state;
     assert.equal(refusal(switched, redo(undone.inverse)), "Can't redo that: difficult ground on squares can't stand on this scene's hexes.");
   });
+
+  test("in H1 a value stamped with the hex scene's own shape is refused too, for every grid-keyed kind (D-261026-8)", () => {
+    const hex = twoDms({ scenes: { ...room().scenes, s1: { ...room().scenes.s1!, gridShape: "hexRows" } } });
+    const key = "chunk:s1:0,0";
+    const kinds: [object, string][] = [
+      [{ cells: { "1,1": "stone" } }, "painted ground"],
+      [{ edges: { "1,1,n": { kind: "wall" } } }, "walls and doors"],
+      [{ rough: "d".padEnd(256, ".") }, "difficult ground"],
+      [{ heights: "A".repeat(683) + "=" }, "heights"],
+      [{ up: ".".repeat(256) }, "stairs"],
+    ];
+    for (const [content, words] of kinds) {
+      const value = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, ...content, grid: "hexRows" };
+      assert.equal(refusal(hex, redo([{ key, value, expectRev: null }])), `Can't redo that: ${words} can't stand on this scene's hexes.`);
+    }
+    const draft = { sceneId: "s1", rev: 0, grid: "hexRows", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
+    assert.equal(refusal(hex, undo([{ key: "fogDraft:s1", value: draft, expectRev: null }])), "Can't undo that: Reveal room in its fog draft can't stand on this scene's hexes.");
+    const stamped = { ...trap("t1"), grid: "hexRows" };
+    assert.equal(refusal(hex, undo([{ key: "trap:t1", value: stamped, expectRev: null }])), "Can't undo that: a trap can't stand on this scene's hexes.");
+  });
 });

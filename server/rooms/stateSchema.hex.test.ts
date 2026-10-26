@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkKey } from "#shared/keys.ts";
-import type { RoomState } from "#shared/model.ts";
+import type { BuildChunk, RoomState } from "#shared/model.ts";
 import { room, scene, template, token, trap } from "#shared/testutil.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
@@ -46,11 +46,34 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     }
   });
 
-  test("stamps on a chunk, a trap and a fog draft load where they match their scene", () => {
+  test("in H1 a hex scene holds no grid-keyed content, whatever its stamp (D-261026-8)", () => {
+    const kinds: [Partial<BuildChunk>, RegExp][] = [
+      [{ cells: { "1,1": "stone" } }, /painted ground/],
+      [{ edges: { "1,1,n": { kind: "wall" } } }, /walls and doors/],
+      [{ rough: ROUGH }, /difficult ground/],
+      [{ heights: "A".repeat(683) + "=" }, /heights/],
+      [{ up: ".".repeat(256) }, /stairs/],
+    ];
+    for (const [content, words] of kinds) {
+      const s = hexRoom();
+      s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, ...content, grid: "hexRows" };
+      const parsed = parseRoomState(s);
+      assert.ok(!parsed.ok);
+      assert.match(parsed.message, words);
+      assert.match(parsed.message, /^scenes\.s1: .* can't stand on this scene's hexes$/);
+    }
+    const drafted = hexRoom();
+    drafted.fogDrafts.s1 = { sceneId: "s1", rev: 1, grid: "hexRows", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
+    assert.equal((parseRoomState(drafted) as { message: string }).message, "scenes.s1: Reveal room in its fog draft can't stand on this scene's hexes");
+    const trapped = hexRoom();
+    trapped.traps.t1 = trap("t1", { grid: "hexRows" });
+    assert.equal((parseRoomState(trapped) as { message: string }).message, "scenes.s1: a trap can't stand on this scene's hexes");
+  });
+
+  test("what carries no grid keys loads on a hex scene: a draft of rects, a chunk emptied", () => {
     const s = hexRoom();
-    s.scenes.s2 = scene("s2", { order: 1, gridShape: "hexColumns" });
-    s.buildChunks[chunkKey("s2", 0, 0)] = { sceneId: "s2", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, rough: ROUGH, grid: "hexColumns" };
-    // H1 refuses rough on hexes as a phase rule of the server, not of the stored room: H2 writes it so.
+    s.fogDrafts.s1 = { sceneId: "s1", rev: 1, ops: [{ id: "f1", mode: "reveal", shape: { kind: "rect", x: 1, y: 1, w: 2, h: 2 } }] };
+    s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {} };
     const parsed = parseRoomState(s);
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });

@@ -105,7 +105,7 @@ function draftKeyed(draft: FogDraft): boolean {
 /**
  * A chunk's free walls. A hex scene cannot hold them in this phase
  * (section 6, H1), nor traps, attach links or squeezed tokens. H2 lifts
- * walls and links.
+ * walls, links, squeezing and traps other than pits.
  */
 function phaseWalls(chunk: BuildChunk): boolean {
   return chunk.walls !== undefined && chunk.walls.length > 0;
@@ -165,12 +165,18 @@ function dedupe(held: ShapeHeld[]): ShapeHeld[] {
  *   draft's Reveal room shapes, any trap): its stamp must be the scene's
  *   shape. A value with none, such as a draft of rects or a chunk of free
  *   walls only, means the same on every grid and is never compared.
- * - The phase check, on everything written onto a hex scene: free walls,
- *   traps, attach links and squeezed tokens are refused in H1.
+ * - The phase check, on everything written onto a hex scene, whatever its
+ *   stamp (D-261026-8). In H1 a hex scene holds no grid-keyed content at
+ *   all: painted ground and grid-line walls never (they stay square in
+ *   every phase), difficult ground until H2, heights and stairs until H3,
+ *   Reveal room's cells until H3. Nor free walls, traps, attach links or
+ *   squeezed tokens, which H2 lifts (traps but pits). A hand-made backup
+ *   could stamp any of these with the scene's own shape, and this phase
+ *   has no hex rules to read them by.
  *
- * `from` is the shape the value's data stands on, for the words: its stamp
- * for the stamp check, squares for the phase check, the only shape that
- * holds those in H1.
+ * `from` is the shape the value's data stands on, for the words: its stamp,
+ * or squares for what carries none (free walls, links, squeezes), the only
+ * shape that holds those in H1.
  */
 export function restoredHolds(
   state: Holds,
@@ -184,17 +190,21 @@ export function restoredHolds(
     keyed.length > 0 && stampShape(grid) !== shape ? { held: dedupe(tally(keyed)), from: stampShape(grid) } : null;
   if (kind === "chunk") {
     const chunk = value as BuildChunk;
-    const stamped = stamp(chunkKeyed(chunk), chunk.grid);
+    const keyed = chunkKeyed(chunk);
+    const stamped = stamp(keyed, chunk.grid);
     if (stamped) return stamped;
-    return isHex(g) && phaseWalls(chunk) ? { held: [{ what: "walls", count: 1 }], from: "squares" } : null;
+    if (!isHex(g)) return null;
+    const held: ShapeHolding[] = phaseWalls(chunk) ? [...keyed, "walls"] : keyed;
+    return held.length > 0 ? { held: dedupe(tally(held)), from: keyed.length > 0 ? stampShape(chunk.grid) : "squares" } : null;
   }
   if (kind === "fogDraft") {
     const draft = value as FogDraft;
-    return stamp(draftKeyed(draft) ? ["roomFog"] : [], draft.grid);
+    const keyed: ShapeHolding[] = draftKeyed(draft) ? ["roomFog"] : [];
+    return stamp(keyed, draft.grid) ?? (isHex(g) && keyed.length > 0 ? { held: tally(keyed), from: stampShape(draft.grid) } : null);
   }
   if (kind === "trap") {
     const trap = value as Trap;
-    return stamp(["trap"], trap.grid) ?? (isHex(g) ? { held: [{ what: "trap", count: 1 }], from: "squares" } : null);
+    return stamp(["trap"], trap.grid) ?? (isHex(g) ? { held: [{ what: "trap", count: 1 }], from: stampShape(trap.grid) } : null);
   }
   const token = value as Token;
   if (!isHex(g)) return null;
@@ -298,8 +308,15 @@ export function restoreRefusal(from: "undo" | "redo", found: { held: ShapeHeld[]
   return `Can't ${from} that: ${standsWords(found, scene)}.`;
 }
 
-/** "difficult ground on squares can't stand on this scene's hexes": what holds where, as the restore and the import say it. */
+/**
+ * "difficult ground on squares can't stand on this scene's hexes": what
+ * holds where, as the restore and the import say it. Data stamped with the
+ * scene's own shape that the phase leaves out says only that it can't stand
+ * on the scene's hexes.
+ */
 export function standsWords(found: { held: ShapeHeld[]; from: GridShape | "squares" }, scene: Pick<Scene, "gridShape">): string {
-  const shape = shapeName(sceneGrid(scene));
+  const g = sceneGrid(scene);
+  const shape = shapeName(g);
+  if (found.from === shape) return `${heldList(found.held)} can't stand on this scene's ${cellWord(g, true)}`;
   return `${heldList(found.held)} on ${shapeWords(found.from, shape)} can't stand on this scene's ${shapeWords(shape, found.from)}`;
 }
