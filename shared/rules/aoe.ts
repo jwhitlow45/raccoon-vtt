@@ -1357,6 +1357,19 @@ class HexSampler {
     return n;
   }
 
+  /**
+   * Whether a point is inside at height `z`, as squares read a creature's
+   * middle under "center": inside the shape, or on an emanation `d` steps
+   * from its source with the creature's `layers` within its reach, and seen
+   * by its polygons, within the scene.
+   */
+  pointIn(p: Point, z: number, d: number | undefined, layers: [number, number]): boolean {
+    if (p.x < 0 || p.y < 0 || p.x > this.scene.w || p.y > this.scene.h) return false;
+    const reach = this.area.reach;
+    if (reach ? !withinReach(reach, d ?? hexSetSteps(this.g, reach.from, [hexAt(this.g, p)]), layers[0], layers[1]) : !this.area.shape.inside(p.x, p.y, z)) return false;
+    return this.seen(p.x, p.y);
+  }
+
   /** The hexes passing the coverage rule at the shading height. */
   covered(z: number, rule: AoeCoverage): CoveredHex[] {
     const reach = this.area.reach;
@@ -1374,9 +1387,13 @@ class HexSampler {
 /**
  * The creatures an area catches on a hex scene, by their hexes (HX-D11):
  * any of them passing the coverage rule by default, more than half of
- * their hexes' samples under "majority", and under "center" the hex of
- * their anchor. Each is measured at its own height, as on squares, and an
- * emanation's reach counts the vertical steps to its layers.
+ * their hexes' samples under "majority", and under "center" the anchor
+ * point itself, as squares read the footprint's middle, with an
+ * emanation's steps counted from all their hexes. A Large or Gargantuan
+ * anchor is a corner three hexes share, which no one hex holds the same way
+ * on every row (review HX2-OPUS-01). Each is measured at its own height,
+ * as on squares, and an emanation's reach counts the vertical steps to its
+ * layers.
  */
 function creaturesOnHexes(g: HexGrid, template: AreaTemplateInput, area: ResolvedArea, tokens: Iterable<AreaToken>, ctx: AreaContext): TokenId[] {
   const fpc = feetPerCellOf(ctx);
@@ -1391,7 +1408,13 @@ function creaturesOnHexes(g: HexGrid, template: AreaTemplateInput, area: Resolve
     const layers: [number, number] = [z0, Math.max(z0 + 1, Math.ceil(hi / fpc))];
     const sliceZ = area.sliceZ;
     const zsAt = (p: Point) => (sliceZ ? heightsThrough(lo / fpc, hi / fpc, sliceZ(p.x, p.y)) : [clamp(area.originZ, lo / fpc, hi / fpc)]);
-    const hexes = aoeInclusion === "center" ? [hexAt(g, hexAnchor(g, t))] : occupiedHexes(g, t);
+    if (aoeInclusion === "center") {
+      const p = hexAnchor(g, t);
+      const d = area.reach ? hexSetSteps(g, area.reach.from, occupiedHexes(g, t)) : undefined;
+      if (zsAt(p).some((z) => s.pointIn(p, z, d, layers))) caught.push(t.id);
+      continue;
+    }
+    const hexes = occupiedHexes(g, t);
     const best = hexes.map((h) => {
       let top = 0;
       let center = false;
@@ -1404,12 +1427,7 @@ function creaturesOnHexes(g: HexGrid, template: AreaTemplateInput, area: Resolve
       }
       return { n: top, center };
     });
-    const hit =
-      aoeInclusion === "majority"
-        ? 2 * best.reduce((a, b) => a + b.n, 0) > best.length * s.total
-        : aoeInclusion === "center"
-          ? best[0]!.center
-          : best.some((b) => passes(b.n, s.total, b.center, aoeCoverage));
+    const hit = aoeInclusion === "majority" ? 2 * best.reduce((a, b) => a + b.n, 0) > best.length * s.total : best.some((b) => passes(b.n, s.total, b.center, aoeCoverage));
     if (hit) caught.push(t.id);
   }
   return caught;

@@ -187,6 +187,41 @@ describe("a stationary cast on hexes knows its caster by the footprint's outline
   }
 });
 
+describe("under \"center\" a creature on hexes is judged at its anchor point, the same on every row (review HX2-OPUS-01)", () => {
+  for (const [name, g] of GRIDS) {
+    test(`${name}: a Large on rows 0 to 9 is never caught by a 5 ft cube on its top hex alone, and always by a 5 ft sphere around its anchor`, () => {
+      for (let row = 0; row < 10; row++) {
+        const large = on(g, "l", "large", { col: 10, row });
+        const top = occupiedHexes(g, large).find((h) => hexKey(h) === hexKey({ col: 10, row }))!;
+        const a = hexAnchor(g, large);
+        const c = hexCenter(g, top);
+        const cube = template("q", { shape: "cube", size: 5, yaw: 0, origin: { x: c.x - 0.5, y: c.y, z: 0 }, includeOrigin: true });
+        const sphere = template("s", { shape: "sphere", size: 5, origin: { ...a, z: 0 }, includeOrigin: true });
+        const opts = ctx(g, {}, { inclusion: "center" });
+        assert.deepEqual(creaturesInArea(cube, [large], opts), [], `row ${row}: the cube`);
+        assert.deepEqual(creaturesInArea(sphere, [large], opts), ["l"], `row ${row}: the sphere`);
+      }
+    });
+
+    test(`${name}: a Large one step from a 5 ft emanation's caster by any of its hexes is caught, on every row, and two steps away it is not`, () => {
+      const caster = on(g, "c", "medium", { col: 10, row: 10 });
+      const aura = template("e", { shape: "emanation", size: 5, attachedTo: "c", casterId: "c", includeOrigin: false });
+      let near = 0;
+      for (let row = 6; row <= 14; row++) {
+        for (let col = 6; col <= 14; col++) {
+          const large = on(g, "l", "large", { col, row });
+          const steps = Math.min(...occupiedHexes(g, large).map((h) => hexDistance(g, h, { col: 10, row: 10 })));
+          if (steps === 0) continue;
+          const caught = creaturesInArea(aura, [large], ctx(g, { c: caster }, { inclusion: "center" }));
+          assert.deepEqual(caught, steps <= 1 ? ["l"] : [], `${col},${row}: ${steps} steps`);
+          if (steps === 1) near++;
+        }
+      }
+      assert.ok(near > 4);
+    });
+  }
+});
+
 describe("a template on hexes reaches players' copies unchanged", () => {
   test("its footprint's size is plain data", () => {
     const t: AreaTemplate = template("s", { shape: "emanation", footprint: { w: 3, h: 3, elevation: 0, height: 15, size: "huge" } });
