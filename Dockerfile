@@ -118,6 +118,21 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
 
+# What a registry shows for the published image. .github/workflows/image.yml
+# passes VERSION, REVISION and SOURCE_URL, the repository it builds from, so
+# no file here names it. Last in the stage, because a changed build argument
+# would otherwise rebuild every layer after it. The defaults mark a local
+# build.
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG SOURCE_URL=
+LABEL org.opencontainers.image.title="raccoon-vtt" \
+      org.opencontainers.image.description="A self-hosted virtual tabletop for D&D groups playing the 2024 rules, made for phones first" \
+      org.opencontainers.image.source="${SOURCE_URL}" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
+
 # The server's .ts files run directly through Node's type stripping. There is
 # no server build step.
 CMD ["node", "server/main.ts"]
