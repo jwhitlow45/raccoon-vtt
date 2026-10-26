@@ -267,4 +267,18 @@ describe("automatic walls beside raised ground", () => {
     assert.equal(items.length, 16, "every edge around the room stands");
     for (const w of items) assert.deepEqual([w.base, w.rise], [0, WALL_RISE], w.piece.id);
   });
+
+  test("on a raised floor, an automatic wall's top sits a wall's height above that floor", () => {
+    const w = itemOn(room({ "3,2": 5, "3,1": 6 }), "3,2n")!;
+    assert.equal(w.base, 1.2);
+    assert.ok(Math.abs(w.base + w.rise - 1.5) < 1e-9, `top ${w.base + w.rise}`);
+  });
+
+  test("between a pit and raised ground, an automatic wall's top stays a wall's height above 0", () => {
+    const low = itemOn(room({ "3,2": -10, "3,1": 1 }), "3,2n")!;
+    assert.equal(low.base, 0.2);
+    assert.ok(Math.abs(low.rise - 0.3) < 1e-9, `rise ${low.rise}`);
+    assert.equal(itemOn(room({ "3,2": -10, "3,1": 5 }), "3,2n"), undefined, "beside 5 ft on 5 ft cells");
+    assert.equal(itemOn(room({ "3,2": -10, "3,1": 5 }, {}, 10), "3,2n"), undefined, "beside exactly half a cell");
+  });
 });
