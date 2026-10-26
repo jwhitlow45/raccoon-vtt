@@ -36,6 +36,7 @@ import { token } from "../shared/testutil.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
 import { capRoom } from "./bench-vision.ts";
 import { hexLinesInView } from "../client/canvas/layers/hexSpans.ts";
+import { ringShape } from "../client/features/measure/rings.ts";
 
 const RUNS = 21;
 const BUDGET_MS = 8;
@@ -124,6 +125,22 @@ function linesRow(name: string, px: number): Row {
   return timed(name, () => hexLinesInView(g, { w: 200, h: 200 }, { corners, pxPerCell: px }, sink));
 }
 
+/**
+ * A Gargantuan's range ring on a 200 by 200 scene at 5 ft a cell, each run
+ * drawn again as a ring is: standing at one spot, or dragged a hex a run,
+ * since a ring is worked out again on every change of a drag.
+ */
+function ringRow(name: string, grid: Grid, ft: number, dragging: boolean): Row {
+  const g = grid.shape === "hex" ? grid : null;
+  const rules = { feetPerCell: 5, diagonal: "five" as const };
+  let step = 0;
+  return timed(name, () => {
+    const col = 90 + (dragging ? step++ % 20 : 0);
+    const at = g ? placedOnHex(g, { size: "gargantuan", x: 0, y: 0 }, { col, row: 100 }) : { x: col, y: 100 };
+    return ringShape(grid, { ...token("g", { size: "gargantuan" }), ...at }, ft, rules, { w: 200, h: 200 }).segments.length / 4;
+  });
+}
+
 export function runGridBench(): Row[] {
   return [
     row("Squares, walled (9.3's worst case)", SQUARES, true),
@@ -137,6 +154,11 @@ export function runGridBench(): Row[] {
     linesRow("Hex lines, 200 by 200, a 1440 by 900 canvas at fit (4.5 px a cell)", 900 / 200),
     linesRow("Hex lines, 200 by 200, a 1440 by 900 canvas at 40 px a cell", 40),
     linesRow("Hex lines, 200 by 200, a 1440 by 900 canvas at 6 px a cell", 6),
+    ringRow("Squares, a 1,000 ft range ring round a Gargantuan, 200 by 200, standing", SQUARES, 1000, false),
+    ringRow("Hex rows, a 150 ft range ring round a Gargantuan, 200 by 200, standing", gridOfShape("hexRows"), 150, false),
+    ringRow("Hex rows, a 150 ft range ring round a Gargantuan, 200 by 200, dragged a hex a run", gridOfShape("hexRows"), 150, true),
+    ringRow("Hex rows, a 1,000 ft range ring round a Gargantuan, 200 by 200, standing", gridOfShape("hexRows"), 1000, false),
+    ringRow("Hex rows, a 1,000 ft range ring round a Gargantuan, 200 by 200, dragged a hex a run", gridOfShape("hexRows"), 1000, true),
   ];
 }
 

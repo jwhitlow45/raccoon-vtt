@@ -1,7 +1,7 @@
 import { legFeet, pointCellBox, stepsBetween, tokenCellBox, type CellBox } from "#shared/rules/distance.ts";
 import { hexAnchor, type FootprintToken } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
-import { HEX_R, hexCenter, hexInScene, hexKey, hexNeighbors, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { HEX_R, HEX_S, hexCenter, hexInScene, hexNeighbors, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import type { DistanceRules } from "./ruler.ts";
 
 /**
@@ -113,55 +113,142 @@ function groundInRange(box: CellBox, ground: CellBox, rangeFt: number, rules: Di
 }
 
 /**
- * A ring on hexes: the sides between a hex in range and a scene hex out
- * of range, found by walking out from the token's hexes a step at a time
- * as far as the range could reach, so it costs the hexes round the ring.
- * The label goes on the top or bottom point of the ring over the token's
- * anchor, where its hexes meet a side the ring draws.
+ * A ring on hexes: the sides between a scene hex in range and a scene hex
+ * out of range. Range on hexes grows with steps alone, the height rule's
+ * part the same for every ground hex, so the hexes in range are those
+ * within some number of steps of the token's hexes, and the ring runs
+ * between the band of hexes exactly that many steps out and the band one
+ * step further. Only those two bands are walked, so a 1,000 ft ring costs
+ * the hexes round its edge. The token's own hexes may lie off the scene,
+ * after a move onto an edge hex or a switch from squares: each band is
+ * found from all of them, and only its scene hexes draw.
  */
 function hexRingShape(g: HexGrid, token: FootprintToken, rangeFt: number, rules: DistanceRules, bounds: { w: number; h: number }): RingShape {
   const box = tokenCellBox(g, token, rules.feetPerCell);
   const own = box.hexes?.at ?? [];
-  const reach = Math.ceil(rangeFt / rules.feetPerCell) + 1;
-  const ground = (h: Hex) => pointCellBox(g, hexCenter(g, h), rules.feetPerCell);
-  // Every scene hex within `reach` steps of the token's hexes, each with whether it is in range.
-  const inside = new Map<string, boolean>();
-  let edge = own.filter((h) => hexInScene(g, bounds, h));
-  const seen = new Set(own.map(hexKey));
-  for (const h of edge) inside.set(hexKey(h), groundInRange(box, ground(h), rangeFt, rules));
-  for (let step = 0; step < reach && edge.length > 0; step++) {
-    const next: Hex[] = [];
-    for (const h of edge) {
-      for (const n of hexNeighbors(g, h)) {
-        const k = hexKey(n);
-        if (seen.has(k)) continue;
-        seen.add(k);
-        if (!hexInScene(g, bounds, n)) continue;
-        inside.set(k, groundInRange(box, ground(n), rangeFt, rules));
-        next.push(n);
-      }
-    }
-    edge = next;
-  }
+  const steps = hexStepsInRange(g, box, own, rangeFt, rules);
+  if (steps < 0) return { segments: [], label: null };
+  const cubes = new OwnCubes(g, own);
   const corners = hexPointsAround(g);
   const segments: number[] = [];
-  const kept: Hex[] = [];
-  for (const [k, inRange] of inside) {
-    if (!inRange) continue;
-    const [col, row] = k.split(",").map(Number) as [number, number];
-    const h = { col, row };
-    kept.push(h);
+  for (const [q, r] of cubes.band(steps)) {
+    const h = cubes.hexOf(q, r);
+    if (!hexInScene(g, bounds, h)) continue;
     const c = hexCenter(g, h);
-    const around = hexNeighbors(g, h);
     for (let i = 0; i < 6; i++) {
-      const n = around[i]!;
+      const [dq, dr] = CUBE_STEPS[i]!;
       // A side on the scene's edge is not the ring's, as on squares.
-      if (inside.get(hexKey(n)) !== false) continue;
+      if (cubes.away(q + dq, r + dr) !== steps + 1 || !hexInScene(g, bounds, cubes.hexOf(q + dq, r + dr))) continue;
       const [a, b] = corners[i]!;
       segments.push(c.x + a.x, c.y + a.y, c.x + b.x, c.y + b.y);
     }
   }
-  return { segments, label: hexRingLabel(g, token, kept, inside) };
+  return { segments, label: hexRingLabel(g, token, cubes, steps, bounds) };
+}
+
+/** Steps to the six neighbors in cube coordinates (q, r), in hexNeighbors' order, on the rows lattice. */
+const CUBE_STEPS: readonly (readonly [number, number])[] = [
+  [1, 0],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+  [0, -1],
+  [1, -1],
+];
+
+/**
+ * A token's hexes in cube coordinates on the rows lattice (hex columns
+ * mirrored onto it, as hex.ts does), for the many distance reads a ring
+ * makes without building a hex for each.
+ */
+class OwnCubes {
+  private readonly g: HexGrid;
+  private readonly qs: number[] = [];
+  private readonly rs: number[] = [];
+
+  constructor(g: HexGrid, own: readonly Hex[]) {
+    this.g = g;
+    for (const h of own) {
+      const c = g.orient === "rows" ? h.col : h.row;
+      const r = g.orient === "rows" ? h.row : h.col;
+      this.qs.push(c - Math.floor(r / 2));
+      this.rs.push(r);
+    }
+  }
+
+  /** The cube coordinates of a hex. */
+  cubeOf(h: Hex): [number, number] {
+    const c = this.g.orient === "rows" ? h.col : h.row;
+    const r = this.g.orient === "rows" ? h.row : h.col;
+    return [c - Math.floor(r / 2), r];
+  }
+
+  hexOf(q: number, r: number): Hex {
+    const c = q + Math.floor(r / 2) + 0;
+    return this.g.orient === "rows" ? { col: c, row: r + 0 } : { col: r + 0, row: c };
+  }
+
+  /** Steps from the nearest of the token's hexes. */
+  away(q: number, r: number): number {
+    let best = Infinity;
+    for (let i = 0; i < this.qs.length; i++) {
+      const dq = q - this.qs[i]!;
+      const dr = r - this.rs[i]!;
+      const d = Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  /** The hexes exactly `k` steps from the nearest of the token's hexes: each own hex's ring of `k`, less what another holds closer. */
+  band(k: number): [number, number][] {
+    const out: [number, number][] = [];
+    const taken = new Set<number>();
+    const visit = (q: number, r: number) => {
+      // A scene is at most a few thousand cells across, so this key never collides.
+      const key = (q + 1e6) * 4e6 + (r + 1e6);
+      if (taken.has(key) || this.away(q, r) !== k) return;
+      taken.add(key);
+      out.push([q, r]);
+    };
+    for (let i = 0; i < this.qs.length; i++) {
+      if (k === 0) {
+        visit(this.qs[i]!, this.rs[i]!);
+        continue;
+      }
+      // Round the ring from its start `k` steps one way, as scene.ts hexRing walks it.
+      let q = this.qs[i]! + CUBE_STEPS[4]![0] * k;
+      let r = this.rs[i]! + CUBE_STEPS[4]![1] * k;
+      for (let side = 0; side < 6; side++) {
+        const [dq, dr] = CUBE_STEPS[side]!;
+        for (let j = 0; j < k; j++) {
+          visit(q, r);
+          q += dq;
+          r += dr;
+        }
+      }
+    }
+    return out;
+  }
+}
+
+/**
+ * The most hex steps from a token's hexes that are in range of it, the
+ * room's rule counting height, or -1 when none is. Feet grow with steps
+ * under every rule, so the first step out of range ends the count.
+ */
+function hexStepsInRange(g: HexGrid, box: CellBox, own: readonly Hex[], rangeFt: number, rules: DistanceRules): number {
+  if (own.length === 0) return -1;
+  // The ground's height part is the same at every hex, so one ground box gives it.
+  const { dz } = stepsBetween(box, pointCellBox(g, hexCenter(g, own[0]!), rules.feetPerCell));
+  const inRange = (n: number) => {
+    const ft = legFeet(n, 0, dz, rules.diagonal, rules.feetPerCell);
+    return (rules.diagonal === "euclid" ? Math.round(ft) : ft) <= rangeFt;
+  };
+  const most = Math.ceil(rangeFt / rules.feetPerCell);
+  let n = -1;
+  while (n < most && inRange(n + 1)) n++;
+  return n;
 }
 
 /**
@@ -192,30 +279,46 @@ function hexPointsAround(g: HexGrid): [{ x: number; y: number }, { x: number; y:
  * Where a hex ring's label sits: the top of the highest hex in range over
  * the token's anchor, or the bottom of the lowest when the scene's edge
  * cuts the top, or none when it cuts both. A hex is over the anchor when
- * its center is no further across than its own half width.
+ * its center is no further across than its own half width, and of two in
+ * one row the one further left counts.
  */
-function hexRingLabel(g: HexGrid, token: FootprintToken, kept: readonly Hex[], inside: ReadonlyMap<string, boolean>): RingShape["label"] {
+function hexRingLabel(g: HexGrid, token: FootprintToken, cubes: OwnCubes, steps: number, bounds: { w: number; h: number }): RingShape["label"] {
   const a = hexAnchor(g, token);
   const half = g.orient === "rows" ? { x: 0.5, y: HEX_R } : { x: HEX_R, y: 0.5 };
-  let top: { h: Hex; y: number } | null = null;
-  let bottom: { h: Hex; y: number } | null = null;
-  for (const h of kept) {
+  const held = (h: Hex) => hexInScene(g, bounds, h) && cubes.away(...cubes.cubeOf(h)) <= steps;
+  const out = (h: Hex) => hexInScene(g, bounds, h) && cubes.away(...cubes.cubeOf(h)) > steps;
+  let top: { h: Hex; x: number; y: number } | null = null;
+  let bottom: { h: Hex; x: number; y: number } | null = null;
+  for (const h of hexesOver(g, a, steps + 8)) {
     const c = hexCenter(g, h);
-    if (Math.abs(c.x - a.x) > half.x + 1e-9) continue;
-    if (!top || c.y < top.y) top = { h, y: c.y };
-    if (!bottom || c.y > bottom.y) bottom = { h, y: c.y };
+    if (Math.abs(c.x - a.x) > half.x + 1e-9 || !held(h)) continue;
+    if (!top || c.y < top.y || (c.y === top.y && c.x < top.x)) top = { h, x: c.x, y: c.y };
+    if (!bottom || c.y > bottom.y || (c.y === bottom.y && c.x < bottom.x)) bottom = { h, x: c.x, y: c.y };
   }
   // The ring draws a side above (below) its end hex where a neighbor that way is out of range on the scene.
-  const opens = (h: Hex, up: boolean) => hexNeighbors(g, h).some((n) => (hexCenter(g, n).y < hexCenter(g, h).y) === up && hexCenter(g, n).y !== hexCenter(g, h).y && inside.get(hexKey(n)) === false);
-  if (top && opens(top.h, true)) {
-    const c = hexCenter(g, top.h);
-    return { x: c.x, y: c.y - half.y, below: false };
-  }
-  if (bottom && opens(bottom.h, false)) {
-    const c = hexCenter(g, bottom.h);
-    return { x: c.x, y: c.y + half.y, below: true };
-  }
+  const opens = (h: Hex, up: boolean) => hexNeighbors(g, h).some((n) => (hexCenter(g, n).y < hexCenter(g, h).y) === up && hexCenter(g, n).y !== hexCenter(g, h).y && out(n));
+  if (top && opens(top.h, true)) return { x: top.x, y: top.y - half.y, below: false };
+  if (bottom && opens(bottom.h, false)) return { x: bottom.x, y: bottom.y + half.y, below: true };
   return null;
+}
+
+/**
+ * The hexes whose centers lie within a hex's half width across of `a`,
+ * and within `span` cells up or down: one or two a row on hex rows, one or
+ * two columns on hex columns. A few at each end may fall outside the band,
+ * which the caller's own test leaves out.
+ */
+function* hexesOver(g: HexGrid, a: { x: number; y: number }, span: number): Generator<Hex> {
+  if (g.orient === "rows") {
+    for (let r = Math.floor((a.y - span) / HEX_S) - 1; r <= Math.ceil((a.y + span) / HEX_S) + 1; r++) {
+      const shift = r - 2 * Math.floor(r / 2) === 1 ? 0.5 : 0;
+      for (let c = Math.floor(a.x - 1 - shift) - 1; c <= Math.ceil(a.x - shift) + 1; c++) yield { col: c, row: r };
+    }
+    return;
+  }
+  for (let col = Math.floor((a.x - 2 * HEX_R) / HEX_S) - 1; col <= Math.ceil(a.x / HEX_S) + 1; col++) {
+    for (let row = Math.floor(a.y - span) - 1; row <= Math.ceil(a.y + span) + 1; row++) yield { col, row };
+  }
 }
 
 /** "30 ft", or "30/60 ft" style for the menu's summary of a token's rings. */
