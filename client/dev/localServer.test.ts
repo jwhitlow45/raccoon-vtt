@@ -138,4 +138,37 @@ describe("the dev room's View as a player (D-261026-10, docs/design-v1-per-playe
       assert.deepEqual(again.closes, [4003], `${msg.t} closes it`);
     }
   });
+
+  test("a late snapshot is built when its delay ends, so a chat sent meanwhile is in it and no event comes before it (review PV5-ASTRA-2)", async () => {
+    for (const as of ["p1", null]) {
+      const server = new LocalServer(room(), DM, "s1");
+      const sockets = localSocketFactory({ server, latencyMs: 0, snapshotDelayMs: 150, members: () => ["dm1"] });
+      const socket = sockets.create(as === null ? "local" : `ws://local/ws?room=DEVR00M0&as=${as}`);
+      const got: ServerMessage[] = [];
+      socket.onmessage = (e) => got.push(JSON.parse(e.data as string) as ServerMessage);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      socket.send(JSON.stringify({ t: "hello", clientId: "c", resumeFrom: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      server.external({ t: "log.chat", text: "during the wait" }, DM);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const kinds = got.map((m) => m.t).filter((t) => t !== "presence");
+      assert.equal(kinds[0], "snapshot", `${as ?? "the room's socket"}: ${kinds.join(", ")}`);
+      const snapshot = got.find((m) => m.t === "snapshot");
+      assert.ok(snapshot?.t === "snapshot" && (snapshot.state as ProjectedState).log.some((line) => line.text === "during the wait"), `${as ?? "the room's socket"}: the snapshot lacks the chat sent while it waited`);
+    }
+  });
+
+  test("a socket closed before it connects never opens, and registers no preview (review PV5-ASTRA-4)", async () => {
+    const server = new LocalServer(room(), DM, "s1");
+    const sockets = localSocketFactory({ server, latencyMs: 0, members: () => ["dm1"] });
+    const socket = sockets.create("ws://local/ws?room=DEVR00M0&as=p1");
+    const events: string[] = [];
+    socket.onopen = () => events.push("open");
+    socket.onclose = () => events.push("close");
+    socket.close();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.deepEqual(events, ["close"]);
+    assert.equal(socket.readyState, 3);
+    assert.equal((server as unknown as { previews: Set<unknown> }).previews.size, 0, "a preview was registered for a closed socket");
+  });
 });

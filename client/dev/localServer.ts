@@ -318,6 +318,8 @@ export function localSocketFactory(options: LocalSocketOptions): {
 
     constructor(as: string | null) {
       setTimeout(() => {
+        // A socket closed while it was connecting stays closed, and registers no preview (review PV5-ASTRA-4).
+        if (this.readyState !== 0) return;
         if (options.down?.()) {
           this.closeWith(1006);
           return;
@@ -358,14 +360,14 @@ export function localSocketFactory(options: LocalSocketOptions): {
         return;
       }
       switch (msg.t) {
-        case "hello": {
-          const snapshot = options.server.hello(msg);
+        case "hello":
+          // Built when the delay ends, so no change made meanwhile reaches the client before its snapshot (review PV5-ASTRA-2).
           setTimeout(() => {
-            this.emit(snapshot);
+            if (this.readyState !== 1) return;
+            this.emit(options.server.hello(msg));
             this.emit({ t: "presence", online: options.members() });
           }, options.snapshotDelayMs ?? 0);
           return;
-        }
         case "op":
           // A 20 ms batch window, as the actor's.
           this.queue.push({ n: msg.n, op: msg.op });
@@ -398,9 +400,11 @@ export function localSocketFactory(options: LocalSocketOptions): {
         this.closeWith(4003);
         return;
       }
-      const snapshot = preview.hello();
-      if (!snapshot) return;
+      // Built when the delay ends, and the preview hears no batch until then, so its snapshot always comes before its events (review PV5-ASTRA-2).
       setTimeout(() => {
+        if (this.readyState !== 1) return;
+        const snapshot = preview.hello();
+        if (!snapshot) return;
         this.emit(snapshot);
         this.emit({ t: "presence", online: options.members() });
       }, options.snapshotDelayMs ?? 0);
