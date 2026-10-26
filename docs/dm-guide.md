@@ -366,7 +366,7 @@ On a per-player scene, each player sees what their own creatures see: their char
 
 A creature that shares sight sees by any light, as every creature does, a character's torch included. So if your lantern-carrying hireling stands in the same hall as Thorn, it sees the goblin in Thorn's torchlight too, and so does every player. Keep such a creature somewhere of its own when you want each player's view to stay their own.
 
-![Sight set to Per player in the Vision settings of the chapel ruins: Ana and Ben ticked under Who sees for themselves and Cy not, and Thorn lending his sight to Ana and Bree hers to Ben. On the map, the goblin and the Old altar lie in Thorn's torchlight, and Pip holds a candle in the west room.](dm-guide/vision-per-player.webp)
+![Sight set to Per player in the chapel ruins' Vision settings: Ana and Ben ticked under Who sees for themselves and Cy not, the line on each player's map, and Thorn lending his sight to Ana. On the map, the goblin and the Old altar lie in Thorn's torchlight, and Pip holds a candle in the west room.](dm-guide/vision-per-player.webp)
 
 **Each player keeps their own map.** The ground a player's creatures have seen stays on that player's map, dimmed, just as explored ground does for the whole party, and ground seen by a creature that shares sight goes on everyone's map. So when Thorn explores the chapel, the ground stays unexplored on Bree's player's map, and a label or pin you put there reaches only the players whose maps show it. Your fog tools still work on everyone's map at once: a reveal shows ground to every player, **Add fog** makes every player forget the ground under it, and **Fog all** wipes every player's memory of the scene.
 
@@ -378,7 +378,7 @@ A creature that shares sight sees by any light, as every creature does, a charac
 
 - Tick a player to give them a place. With 6 already ticked, the list asks you to untick someone first.
 - Untick a player to take their place away. The app asks first, because they forget their map of this scene. Their row then says they see only what creatures that share sight see.
-- Places are sticky. A player keeps theirs when their character falls unconscious or steps off the scene for a while, and exploring never changes the list: only your ticks do. So at a big table, where more than 6 players could see for themselves, decide who should and tick them yourself.
+- Places are sticky. A player keeps theirs when their character falls unconscious or steps off the scene for a while. A player gets a place on their own only the first time they own a creature that can see there, and after that only your ticks change who holds one: exploring never moves a place from one player to another. So at a big table, where more than 6 players could see for themselves, decide who should and tick them yourself.
 
 Under the list, **Who lends sight** shows each creature with its senses and light, and whose sight it adds to: "Lends its sight to Ana", "Lends its sight to Ana and Ben", or "Lends its sight to every player" for a creature that shares sight with the party.
 
@@ -414,7 +414,7 @@ The draft lets you set up a reveal, check it, and show it all at once. If you wo
 
 **Builder room** fills everything joined to the room you tap, and only walls, windows and closed doors stop it. Close the doors between rooms first, or the reveal spills into the next room.
 
-**With party vision on**, the players' fog also remembers what the party has explored, and **Add fog** can't hide explored ground again. Only **Fog all** makes the players forget it. If you undo a Fog all, the ground you had revealed is revealed again, but the party's memory of what it explored doesn't come back, so anything the party had only explored stays fogged until the party sees it again or you reveal it. On a scene where each player sees for themselves, **Add fog** and **Fog all** reach every player's own map as well.
+**With party vision on**, the players' fog also remembers what the party has explored. **Add fog** makes the players forget the ground under its shape, the map the party shares and, on a scene where each player sees for themselves, every player's own map too. The one exception is ground their creatures can see right now, which they explore again at once. **Fog all** makes them forget the whole scene. Undo brings back your own fog edits, but never the memory they erased: if you undo a Fog all, the ground you had revealed is revealed again, but anything the party had only explored stays fogged until the party sees it again or you reveal it.
 
 ## Map phases, imports and exports
 
