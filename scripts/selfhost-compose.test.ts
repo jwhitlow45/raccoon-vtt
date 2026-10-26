@@ -185,6 +185,8 @@ describe("the self-host compose file as compose reads it", { skip: haveCompose ?
     assert.deepEqual(caddy.security_opt, ["no-new-privileges:true"]);
     assert.deepEqual(Object.keys(caddy.networks as object).sort(), ["raccoon-edge", "raccoon-https"]);
     assert.equal((caddy.environment as Record<string, string>).SITE_ADDRESS, "https://vtt.example.com");
+    // Public resolvers, so README.md's firewall rules for its bridge never cut its DNS.
+    assert.deepEqual(caddy.dns, ["1.1.1.1", "1.0.0.1"]);
 
     const copier = selfhost!.services["config-files"]!;
     assert.equal(copier.network_mode, "none");

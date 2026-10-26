@@ -451,6 +451,13 @@ services:
       - "443:443"
       # HTTP/3.
       - "443:443/udp"
+    # Names resolve through Cloudflare, as squid's do, rather than through the
+    # host's resolver, which may sit on the LAN that README.md's firewall
+    # rules for this bridge keep Caddy away from. Docker's own DNS still
+    # answers for raccoon.
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
     environment:
       # The Caddyfile's {$SITE_ADDRESS}.
       SITE_ADDRESS: ${SITE_ADDRESS:-${PUBLIC_ORIGIN:?set PUBLIC_ORIGIN in .env, for example https://vtt.example.com}}
