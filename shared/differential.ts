@@ -40,11 +40,34 @@ export type Pair = {
    * fog (docs/design-v1-heights-readout.md 1), which projections carry.
    */
   unshown?: readonly (keyof RoomState)[];
+  /**
+   * The acting player's copies may differ in what their own creatures see
+   * on a per-player scene, while their fog is the same in both rooms
+   * (docs/design-v1-per-player-vision.md section 10). Their drag searches
+   * the public world alone, so it must still send the same op, and every
+   * other viewer must observe the same of it.
+   */
+  ownSightDiffers?: true;
 };
 
-/** The players a pair is judged for: every player member. */
+/** A table display, which holds what every viewer shares (docs/design-v1-per-player-vision.md 6.2). */
+const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
+
+/** The viewers a pair is judged for: every player member and a table display. */
 function players(state: RoomState): Viewer[] {
-  return Object.values(state.members).flatMap((m) => (m && m.kind === "player" ? [{ memberId: m.id, role: "player" as const }] : []));
+  return [...Object.values(state.members).flatMap((m) => (m && m.kind === "player" ? [{ memberId: m.id, role: "player" as const }] : [])), DISPLAY];
+}
+
+/**
+ * The acting player's copies, when a pair lets them differ in what that
+ * player's creatures see: their fog must still be the same in both rooms,
+ * which their device's search reads.
+ */
+function actorTested(pair: Pick<Pair, "a" | "b" | "ownSightDiffers">, same: readonly Viewer[], who: Viewer, sceneId: string): boolean {
+  if (same.some((p) => p.memberId === who.memberId)) return true;
+  if (!pair.ownSightDiffers) return false;
+  const fog = (state: RoomState) => projectState(state, who, { sceneId }).fogTiles;
+  return isDeepEqual(fog(pair.a), fog(pair.b));
 }
 
 /** The room as this viewer's device holds it. */
@@ -67,7 +90,7 @@ function stopsNow(view: RoomState, token: Token, role: Viewer["role"]): readonly
  * happens not to bend this route still fails. Null when the device holds
  * no such token.
  */
-function dragged(state: RoomState, drag: Drag): { route: unknown; op: Op; inputs: unknown } | null {
+export function dragged(state: RoomState, drag: Drag): { route: unknown; op: Op; inputs: unknown } | null {
   const token = state.tokens[drag.tokenId];
   if (!token) return null;
   const view = deviceView(state, drag.who, token.sceneId);
@@ -103,7 +126,7 @@ export function checkPair(pair: Pair, seq = 3): void {
     const seen = (state: RoomState, p: Viewer) => shown(projectState(state, p, { sceneId }), pair.unshown);
     const same = players(pair.a).filter((p) => isDeepEqual(seen(pair.a, p), seen(pair.b, p)));
     assert.ok(same.length > 0, `${where}: the rooms differ for every player, so the pair tests nothing`);
-    if (drag.who.role === "player") assert.ok(same.some((p) => p.memberId === drag.who.memberId), `${where}: the acting player's copies differ, so the pair tests nothing`);
+    if (drag.who.role === "player") assert.ok(actorTested(pair, same, drag.who, sceneId), `${where}: the acting player's copies differ, so the pair tests nothing`);
     const da = dragged(pair.a, drag);
     const db = dragged(pair.b, drag);
     assert.deepEqual(da?.route, db?.route, `${where}: the route differs`);
@@ -167,7 +190,7 @@ export function checkOps(pair: OpPair, applier: Applier = serverApply, firstSeq 
   let b = pair.b;
   for (const [i, step] of pair.steps.entries()) {
     const where = `${pair.name}, step ${i + 1}${step.note ? ` (${step.note})` : ""} by ${step.who.memberId}`;
-    if (step.who.role === "player") assert.ok(same.some((p) => p.memberId === step.who.memberId), `${where}: the acting player's copies differ, so the step tests nothing`);
+    if (step.who.role === "player") assert.ok(actorTested(pair, same, step.who, sceneId), `${where}: the acting player's copies differ, so the step tests nothing`);
     const make = (state: RoomState) => (typeof step.op === "function" ? step.op(deviceView(state, step.who, sceneId), state) : step.op);
     const oa = make(a);
     const ob = make(b);
