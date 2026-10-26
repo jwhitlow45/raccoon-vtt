@@ -59,7 +59,7 @@ const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isM
 const CPU_SLOWDOWN = 4;
 const STEPS = 16;
 const ROUNDS = 3;
-/** The global Stage.tsx reads to show Isometric before isoReady, for tests and this bench only. */
+/** The global the view choice reads to offer Isometric before isoReady (client/features/view/choice.ts), for tests and this bench only. */
 const ISO_TEST_FLAG = "__rvttIsoTest";
 
 type View = "topDown" | "isometric";

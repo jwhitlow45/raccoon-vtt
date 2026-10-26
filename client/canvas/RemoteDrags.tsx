@@ -14,19 +14,25 @@ import { useTreeShown } from "./relief/context.ts";
 const NO_DRAGS: Readonly<Record<string, DragPreview>> = {};
 
 /**
- * Other members' token drags (design sections 7.6 and 13.3), drawn on the
- * tokens layer, under the fog, so a creature dragged into the dark stays
- * hidden there even between the server's checks.
+ * Other members' token drags (design sections 7.6 and 13.3). In Top-down
+ * they draw on the tokens layer, under the fog, so a creature dragged into
+ * the dark stays hidden there even between the server's checks. In
+ * Isometric they draw in the drag layer over everything, so the stand rule
+ * judges each frame instead (`iso`, docs/design-v1-isometric-view.md 5.2):
+ * a ghost stands only where all of it is revealed, and otherwise lies flat,
+ * clipped to the revealed sub-cells.
  *
  * Each ghost carries a tag with the name of who is dragging it, in their
- * color (dragTag.ts). It is drawn here with the ghost, under the fog, so a
- * tag never shows where a creature in the dark is being moved.
+ * color (dragTag.ts). In Top-down it is drawn here with the ghost, under
+ * the fog, so a tag never shows where a creature in the dark is being
+ * moved. In Isometric it stands only where the whole pill Top-down would
+ * draw is revealed.
  *
  * Frames arrive at up to 30 a second. Each ghost glides toward the latest
- * one with a short animation loop that stops as soon as it arrives, so a
- * preview at rest costs nothing (design 14.2). In low power
- * (docs/design-v1-dm-tools.md 3.15) it shows each frame as it arrives,
- * with no loop at all.
+ * one, eased by the one clock (RemoteDragClock), which stops as soon as
+ * every ghost arrives, so a preview at rest costs nothing (design 14.2). In
+ * low power (docs/design-v1-dm-tools.md 3.15) it shows each frame as it
+ * arrives, with no loop at all.
  */
 export const RemoteDrags = memo(function RemoteDrags(props: {
   tokens: readonly ViewToken[];

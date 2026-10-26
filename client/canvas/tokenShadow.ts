@@ -61,11 +61,13 @@ type Lifted = PlacedToken & { sceneId: SceneId; elevation: number };
  * (features/movement/drop.ts, section 4.2): `landing` when the caller has
  * the drop's (dropLanding, which lands a token on a holder by the holder),
  * else its own footing (`landedElevation`). So the shadow during a drag
- * never disagrees with where the token lands.
+ * agrees with where the token lands, on the ground the viewer has seen.
  *
  * `chunks` is the ground this viewer may read: for a player on a scene with
  * fog, the chunks of relief/seenChunks.ts, so the shadow never follows
- * heights under the fog (TokenShadow.tsx).
+ * heights under the fog (TokenShadow.tsx). A player who drops a token onto
+ * a fogged platform therefore sees its shadow fall as onto level ground,
+ * while the drop the server stores lands it on the platform.
  */
 export function tokenLift(chunks: Chunks, token: Lifted, at?: { x: number; y: number }, landing?: number): number {
   if (!at || (at.x === token.x && at.y === token.y)) return Math.max(0, token.elevation - footprintGround(chunks, token));
