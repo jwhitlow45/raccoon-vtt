@@ -54,7 +54,7 @@ services:
   # ----------------------------------------------------------------- app
   raccoon:
     # The published image. RACCOON_VERSION in .env pins another release.
-    image: ${RACCOON_IMAGE:-docker.io/jwhitlow45/raccoon-vtt}:${RACCOON_VERSION:-0.1}
+    image: ${RACCOON_IMAGE:-docker.io/jwhitlow45/raccoon-vtt}:${RACCOON_VERSION:-0.2}
     networks:
       # One network per thing it talks to. `raccoon-edge` is how the tunnel
       # reaches it, `raccoon-data` how it reaches postgres, `raccoon-proxy`
