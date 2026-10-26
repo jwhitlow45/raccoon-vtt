@@ -48,7 +48,7 @@ describe("other speeds fold under Walk (docs/design-v1-look-pass.md 3.1, L14)", 
 });
 
 describe("the legendary maxima (docs/design-v1-token-sections.md 3.1)", () => {
-  test("the DM's Stats sets how many a round and a day, and leaves how many are used to the pips in Uses", () => {
+  test("the DM's Stats sets how many a round and a day, and leaves how many are used to Use and Restore in Uses", () => {
     const legendary = { actionsMax: 3, actionsUsed: 1, resistMax: 3, resistUsed: 0 };
     const html = renderToStaticMarkup(createElement(StatsFields, { actor: actor({ legendary }), canEdit: () => true, onPatch() {}, dm: true }));
     assert.match(html, /Legendary Actions per round/);

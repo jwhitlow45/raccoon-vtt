@@ -60,19 +60,18 @@ import {
  * One creature's combat uses (docs/design-v1-combat-controls.md 4.2, 5 and
  * 6), the one list the turn card (`card`), the tracker row's Uses group and
  * the token bar's Uses drawer (`list`) share: Legendary Resistance and
- * legendary actions with their pips, the block's recharge, rest and X/Day
- * abilities, the marks its block no longer lists, Regeneration's line, the
- * turn's skipped prompts and the character's class resources. `uses` is
- * the block's (state.ts useCreaturesUses), null while it loads, so counts
- * on the actor show at once and the rows that need the block wait under
- * the shared Loading.
+ * Legendary Actions, the block's recharge, rest and X/Day abilities, the
+ * marks its block no longer lists, Regeneration's line, the turn's skipped
+ * prompts and the character's class resources. Each count shows as pips
+ * on its row's title line, to read only (docs/design-v1-monster-uses.md):
+ * Use and Restore change it. `uses` is the block's (state.ts
+ * useCreaturesUses), null while it loads, so counts on the actor show at
+ * once and the rows that need the block wait under the shared Loading.
  *
- * Two slots serve the Combat section's Uses (UsesSection.tsx) and the
- * tracker row's group: `edit` puts Edit on each class resource's button
- * line, and `pips`, the DM's legendary pips, stand under the list and its
- * status line. Both sit inside the list's box, so a press that takes the
- * list's last use button away hands focus to them before anything around
- * the list (usesFocusTarget).
+ * The Combat section's Uses (UsesSection.tsx) passes `edit`, which puts
+ * Edit on each class resource's button line, inside the list's box, so a
+ * press that takes the list's last use button away hands focus to it
+ * before anything around the list (usesFocusTarget).
  *
  * Each button waits for the server's answer, busy and deaf to a second
  * tap, since a use's rules are the server's. One status line under the
@@ -128,13 +127,12 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
           {shown.text}
         </p>
       ) : null}
-      {props.pips}
     </div>
   );
 }
 
-/** What a uses list adds where it stands: Edit on each class resource's line, and the DM's legendary pips under it. */
-export type UsesSlots = { edit?(resource: ClassResource, opener: HTMLElement): void; pips?: ReactNode };
+/** What a uses list adds where it stands: Edit on each class resource's line. */
+export type UsesSlots = { edit?(resource: ClassResource, opener: HTMLElement): void };
 
 /** The off-turn list for a creature, reading its block and whose turn it is itself: the tracker row's Uses group, a companion's, the token bar's Uses drawer and the Combat section's Uses. */
 export function CreatureUses(props: UsesSlots & { target: ActorTarget; name: string }) {

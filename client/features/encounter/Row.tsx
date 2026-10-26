@@ -34,7 +34,6 @@ import { entryActor, entryName, hpView, nestedCompanions, parseInitiative, rollR
 import { Chips, DescribedHp, DescribedItems, linePart, Portrait, RollBadge, Spinner } from "./parts.tsx";
 import { readiedEffect, rowTarget, type ReactionTarget } from "./ready.ts";
 import { ReadyControls } from "./ReadyControls.tsx";
-import { LegendaryPips } from "./Pips.tsx";
 import { ReactionSwitch } from "./ReactionSection.tsx";
 import { CreatureUses, useUsesPresence } from "../combat/CombatUses.tsx";
 import { markChips } from "../combat/logic.ts";
@@ -62,8 +61,7 @@ export type RowDrag = {
  * One initiative row: picture, name, AC and HP as the viewer may see them,
  * condition chips, roll reminders and the typed value. Its options open
  * under it, at full touch size, instead of crowding it: the creature's
- * things first (uses with the DM's legendary pips, reaction, ready, stat
- * block), then the DM's setup of the row (hidden, lair, reminders, tie
+ * things first (uses, reaction, ready, stat block), then the DM's setup of the row (hidden, lair, reminders, tie
  * order), then removal.
  */
 export function EntryRow(props: {
@@ -865,7 +863,7 @@ function RowMenu(props: {
           </span>
         </div>
       ) : null}
-      {props.target ? <UsesGroup target={props.target} name={props.name} pips={dm ? <LegendaryPips target={props.target} /> : undefined} /> : null}
+      {props.target ? <UsesGroup target={props.target} name={props.name} /> : null}
       <ReactionSwitch answer={rowAnswer(entry)} dm={dm} />
       {props.target ? <ReadyControls answer={rowAnswer(entry)} target={props.target} readied={props.readied} dm={dm} playerOwned={props.playerOwned} /> : null}
       {props.statBlockTokenId !== null ? (
@@ -946,19 +944,17 @@ function RowMenu(props: {
 const GROW: CSSProperties = { flex: "1 1 auto" };
 
 /**
- * The row's Uses group (docs/design-v1-combat-controls.md 5), where the
- * DM's pips stand: the creature's combat uses in their off-turn form, the
- * same list as its token bar's Uses drawer, then the pips, which set the
- * counts by hand. Nothing for a creature with no use.
+ * The row's Uses group (docs/design-v1-combat-controls.md 5): the
+ * creature's combat uses in their off-turn form, the same list as its
+ * token bar's Uses drawer. Nothing for a creature with no use.
  */
-function UsesGroup(props: { target: ActorTarget; name: string; pips?: ReactNode }) {
-  // The pips come only with legendary counts, which make a row of the list, so presence alone decides.
+function UsesGroup(props: { target: ActorTarget; name: string }) {
   const presence = useUsesPresence(props.target);
   if (presence === "no") return null;
   return (
     <div role="group" aria-label={`${props.name}'s uses`} data-uses-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
       <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, color: theme.color.textMuted }}>Uses</span>
-      <CreatureUses target={props.target} name={props.name} pips={props.pips} />
+      <CreatureUses target={props.target} name={props.name} />
     </div>
   );
 }

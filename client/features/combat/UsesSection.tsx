@@ -7,8 +7,6 @@ import type { IconName } from "../../components/Icon.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { handFocusNow } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomView } from "../../state/view.ts";
-import { LegendaryPips } from "../encounter/Pips.tsx";
 import { updateTitle } from "../resources/logic.ts";
 import { ResourceSheet, type SheetMode } from "../resources/ResourceSheet.tsx";
 import { Section, SmallButton } from "../tokens/ui.tsx";
@@ -24,8 +22,7 @@ const ADD_BOX = "[data-uses-add]";
  * Combat's Uses section on the token panel and a character's page
  * (docs/design-v1-token-sections.md 3.1): the one list the token bar's
  * drawer and the tracker row's group show, for the DM and the creature's
- * owners while it has something in it. For the DM, the legendary pips
- * under it. With `character`, the character whose class resources this
+ * owners while it has something in it. With `character`, the character whose class resources this
  * viewer edits (the DM and its players, never a player lent only its
  * token), it also stands with nothing in it, so Add is reached: each
  * resource gains Edit on its button line, a level that rose past what a
@@ -35,7 +32,6 @@ const ADD_BOX = "[data-uses-add]";
 export function UsesSection(props: { target: ActorTarget; name: string; character?: Character }) {
   const { character } = props;
   const presence = useUsesPresence(props.target);
-  const dm = useRoomView((s) => s.you?.role === "dm");
   const [sheet, setSheet] = useState<SheetMode | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const box = useRef<HTMLElement | null>(null);
@@ -68,7 +64,7 @@ export function UsesSection(props: { target: ActorTarget; name: string; characte
             </div>
           ))
         : null}
-      <CreatureUses target={props.target} name={props.name} edit={character ? (r, from) => open({ kind: "edit", id: r.id }, from) : undefined} pips={dm ? <LegendaryPips target={props.target} /> : null} />
+      <CreatureUses target={props.target} name={props.name} edit={character ? (r, from) => open({ kind: "edit", id: r.id }, from) : undefined} />
       {character && presence === "no" ? <Help>{NOTHING_TO_LIST}</Help> : null}
       {!character ? null : full ? (
         <Help>{`A character holds at most ${LIMITS.resourcesPerCharacter} class resources. Remove one to add another.`}</Help>

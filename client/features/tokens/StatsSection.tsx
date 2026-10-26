@@ -216,10 +216,9 @@ function Stat(props: { label: string; value: string | number | undefined; editab
 
 /**
  * How many legendary actions a round and Legendary Resistances a day the
- * creature has. How many are used is play, set by the pips in its Uses
- * (encounter/Pips.tsx), the one control for the counts used
- * (docs/design-v1-token-sections.md 3.1). A lower maximum lowers a count
- * used past it.
+ * creature has. How many are used is play, set by Use and Restore in its
+ * Uses, whose pips show what is left (docs/design-v1-monster-uses.md). A
+ * lower maximum lowers a count used past it.
  */
 function LegendaryFields(props: { actor: Partial<Actor>; onPatch(patch: ActorPatch): void }) {
   const legendary = props.actor.legendary ?? { actionsMax: 0, actionsUsed: 0, resistMax: 0, resistUsed: 0 };

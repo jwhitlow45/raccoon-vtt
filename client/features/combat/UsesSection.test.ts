@@ -20,8 +20,8 @@ const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
  * moved from the Class resources section's test: what it is for while a
  * character has nothing in it, its rows with Restore and Edit, Add after
  * them or the limit in its place, and the question a rise in level asks
- * once per class. Then the DM's pips under a monster's list, and nothing
- * at all for a creature with no use.
+ * once per class. Then a monster's list, its counts as pips on its rows,
+ * and nothing at all for a creature with no use.
  */
 
 const rage: ClassResource = { id: "rage", name: "Rage", max: 3, used: 1, reset: "shortOne", preset: "barbarian-rage", level: 5, atLevel: 5 };
@@ -106,22 +106,20 @@ describe("Combat's Uses for a creature of its own", () => {
   state.tokens.goblin = token("goblin", { name: "Goblin" });
   const of = (tokenId: string, viewer: Viewer) => render(state, viewer, createElement(UsesSection, { target: { tokenId }, name: tokenId }));
 
-  test("the DM's pips stand under the list, each count's words over its pips", () => {
+  test("the DM reads its counts as pips on its rows, with no pips block under the list (docs/design-v1-monster-uses.md 3.1)", () => {
     const markup = of("dragon", DM);
     assert.match(markup, />Uses<\/h/);
     assert.match(markup, /Legendary Actions<span[^>]*>, 2 of 3 left</, "the list's row");
-    assert.match(markup, /Legendary Actions used: 1 of 3/);
-    assert.match(markup, /Legendary Resistances used today: 0 of 2/);
-    assert.ok(markup.indexOf(", 2 of 3 left") < markup.indexOf("Legendary Actions used: 1 of 3"), "the pips after the list");
-    assert.equal(buttons(markup).filter((b) => /aria-label="\d+ used"/.test(b)).length, 5, "a pip for each of 3 and 2");
-    assert.ok(named(markup, "1 used")?.includes('aria-pressed="true"'));
-    assert.ok(named(markup, "2 used")?.includes('aria-pressed="false"'));
+    assert.equal([...markup.matchAll(/data-pip="left"/g)].length, 4, "2 of 3 and 2 of 2 left");
+    assert.doesNotMatch(markup, /data-pips|Legendary Actions used|Legendary Resistances used/);
+    assert.doesNotMatch(markup, /aria-pressed/, "no pip to tap");
     assert.doesNotMatch(markup, /Add a class resource/, "no class resources for a creature of its own");
   });
 
-  test("its player reads the list with no pips", () => {
+  test("its player reads the same rows", () => {
     const markup = of("dragon", P1);
     assert.match(markup, /Legendary Actions<span[^>]*>, 2 of 3 left</);
+    assert.equal([...markup.matchAll(/data-pip="left"/g)].length, 4);
     assert.doesNotMatch(markup, /Legendary Actions used/);
   });
 
