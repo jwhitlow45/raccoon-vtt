@@ -5,9 +5,8 @@ import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
-import { tokenRefHex } from "../rules/footprint.ts";
-import { hexDistance } from "../rules/hex.ts";
-import { hexPieceSpot, pieceReach, placedOnTrace, routePoints, type RoutePoint } from "../rules/route.ts";
+import type { HexGrid } from "../rules/hex.ts";
+import { hexPiece, pieceReach, placedOnTrace, routePoints, type HexPiece, type RoutePoint } from "../rules/route.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
 import { sceneGrid, SQUARES } from "../rules/grid.ts";
@@ -310,8 +309,13 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
     const scene = after.scenes[walk.to.sceneId];
     return scene ? sceneGrid(scene) : SQUARES;
   };
-  // The size a straight leg's hexes are read at: its walker where the leg starts.
-  const walkerOf = (walk: MovedToken) => walk.trace[0] ?? after.tokens[walk.tokenId]!;
+  // A straight leg's hex line, built once a walk and read at its walker's size where the leg starts.
+  const pieces = new Map<MovedToken, HexPiece>();
+  const pieceOf = (g: HexGrid, walk: MovedToken): HexPiece => {
+    let piece = pieces.get(walk);
+    if (!piece) pieces.set(walk, (piece = hexPiece(g, walk.trace[0] ?? after.tokens[walk.tokenId]!, walk.route[0]!, walk.route[walk.route.length - 1]!)));
+    return piece;
+  };
   // The spot at progress `f` along piece `piece` (1 the first) of a walk, with which of its trace's walkers stands there.
   const at = (walk: MovedToken, piece: number, f: number): { spot: RoutePoint; piece: number; end: boolean } => {
     const points = walk.route;
@@ -319,7 +323,7 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
     if (!routed && g.shape === "hex") {
       const a = points[0]!;
       const b = points[points.length - 1]!;
-      return { spot: { ...hexPieceSpot(g, walkerOf(walk), a, b, f), elevation: lerp(a.elevation, b.elevation, f) }, piece: 0, end: f >= 1 };
+      return { spot: { ...pieceOf(g, walk).at(f), elevation: lerp(a.elevation, b.elevation, f) }, piece: 0, end: f >= 1 };
     }
     if (!routed) return { spot: lerpPoint(points[0]!, points[points.length - 1]!, f), piece: 0, end: f >= 1 };
     if (piece >= points.length) return { spot: points[points.length - 1]!, piece: points.length - 2, end: true };
@@ -351,9 +355,7 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
       if (walk.from.sceneId !== walk.to.sceneId) continue;
       const g = gridOf(walk);
       if (g.shape === "hex") {
-        const walker = walkerOf(walk);
-        const steps = hexDistance(g, tokenRefHex(g, { ...walker, x: walk.from.x, y: walk.from.y }), tokenRefHex(g, { ...walker, x: walk.to.x, y: walk.to.y }));
-        reach = Math.max(reach, steps, Math.abs(walk.to.elevation - walk.from.elevation) / fpc);
+        reach = Math.max(reach, pieceOf(g, walk).steps, Math.abs(walk.to.elevation - walk.from.elevation) / fpc);
       } else reach = Math.max(reach, pieceReach(walk.from, walk.to, fpc));
     }
     const points = Math.min(MAX_SWEEP_POINTS, Math.max(1, Math.ceil(reach / SWEEP_STEP)));

@@ -4,7 +4,7 @@ import { int, pick, rng } from "../testutil.ts";
 import { placedOnHex, tokenRefHex, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import { hexDistance, hexKey, hexLine, sameHex, type Hex, type HexGrid } from "./hex.ts";
 import { ownWalk } from "./movement.ts";
-import { hexPieceSpot, plainLegCost, routeWalk, straightCost, straightFeet, type SizedSpot } from "./route.ts";
+import { hexPiece, plainLegCost, routeWalk, straightCost, straightFeet, type SizedSpot } from "./route.ts";
 
 /**
  * Straight legs and walk spots on hexes (docs/design-v1-hex-grids.md 4.2
@@ -49,7 +49,7 @@ for (const [name, g] of GRIDS) {
     test("a Large creature moved one hex has moved 5 ft, and a leg across a resize counts each end at its own size", () => {
       const large: PlacedToken = { size: "large", x: 0, y: 0 };
       assert.equal(straightFeet(g, large, spotOn(g, large, { col: 4, row: 4 }), spotOn(g, large, { col: 5, row: 4 }), five), 5);
-      // A Medium on hex 4,4 stopped there; it then grew Large keeping 4,4 as its top hex, and moved two hexes.
+      // A Medium stopped on hex 4,4. It then grew Large keeping 4,4 as its top hex, and moved two hexes.
       const from: SizedSpot = { ...spotOn(g, { size: "medium", x: 0, y: 0 }, { col: 4, row: 4 }), footprint: { w: 1, h: 1 } };
       assert.equal(straightFeet(g, large, from, spotOn(g, large, { col: 6, row: 4 }), five), 10);
     });
@@ -96,8 +96,10 @@ for (const [name, g] of GRIDS) {
       const a = placedOnHex(g, t, { col: 2, row: 2 });
       const b = placedOnHex(g, t, { col: 10, row: 2 });
       const line = hexLine(g, { col: 2, row: 2 }, { col: 10, row: 2 });
+      const piece = hexPiece(g, t, a, b);
+      assert.equal(piece.steps, 8);
       for (let k = 0; k <= 16; k++) {
-        const p = hexPieceSpot(g, t, a, b, k / 16);
+        const p = piece.at(k / 16);
         assert.ok(sameHex(tokenRefHex(g, { ...t, ...p }), line[Math.round((k / 16) * 8)]!));
       }
     });

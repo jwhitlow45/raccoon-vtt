@@ -293,7 +293,7 @@ function multiplier(piece: { extra: number; swim: 0 | 1 } | undefined, swimSpeed
 export type SizedSpot = RoutePoint & Pick<PathStop, "footprint">;
 
 /** The token as it stood at a spot, at the size it had there and squeezed if it was: a stop's footprint box reads as its size's category on hexes. */
-function standingAt(token: PlacedToken, spot: SizedSpot): PlacedToken {
+export function standingAt(token: PlacedToken, spot: SizedSpot): PlacedToken {
   if (!spot.footprint) return { ...token, x: spot.x, y: spot.y };
   const { w, h, squeeze } = spot.footprint;
   return { size: "custom", w, h, x: spot.x, y: spot.y, ...(squeeze ? { squeeze } : {}) };
@@ -410,37 +410,49 @@ export function routeWalk(g: Grid, trace: WalkTrace, build: Pick<BuildState, "bu
   return walkSpots(trace, first, build, step, (piece) => trace[piece]!);
 }
 
-/** The hex steps of a piece of a walk on hexes, at least 1, so a piece within one hex still ends where it ends. */
-export function hexPieceSteps(g: HexGrid, walker: PlacedToken, a: Point, b: Point): number {
-  return Math.max(1, hexDistance(g, tokenRefHex(g, { ...walker, x: a.x, y: a.y }), tokenRefHex(g, { ...walker, x: b.x, y: b.y })));
+/**
+ * A piece of a walk on hexes (4.4): the hex line from its start's reference
+ * hex to its end's at the walker's size, built once, so a long piece costs
+ * one line however many spots are read from it. `steps` is the line's hex
+ * steps. `at(f)` is the spot at fraction `f`: on the line's hex at that
+ * fraction of its steps, rounded, the creature's box placed so its anchor
+ * stands there (footprint.ts placedOnHex), or where the piece ends at its
+ * end. Its elevation is the caller's. The area sweep samples a piece by it
+ * at its own density, and `routeWalk` and a private leg's ground check at
+ * each hex.
+ */
+export type HexPiece = { steps: number; at(f: number): Point };
+
+export function hexPiece(g: HexGrid, walker: PlacedToken, a: Point, b: Point): HexPiece {
+  const line = hexLine(g, tokenRefHex(g, { ...walker, x: a.x, y: a.y }), tokenRefHex(g, { ...walker, x: b.x, y: b.y }));
+  const last = line.length - 1;
+  return {
+    steps: last,
+    at: (f) => (f >= 1 ? { x: b.x, y: b.y } : f <= 0 ? { x: a.x, y: a.y } : placedOnHex(g, walker, line[Math.round(f * last)]!)),
+  };
 }
 
-/**
- * The spot at fraction `f` of a piece on hexes (4.4): on the hex line's hex
- * at that fraction of its steps, rounded, at the walker's size, or where
- * the piece ends at its end. Its elevation is the caller's. The area sweep
- * samples a piece by it at its own density, and `routeWalk` at each hex.
- */
-export function hexPieceSpot(g: HexGrid, walker: PlacedToken, a: Point, b: Point, f: number): Point {
-  if (f >= 1) return { x: b.x, y: b.y };
-  if (f <= 0) return { x: a.x, y: a.y };
-  const line = hexLine(g, tokenRefHex(g, { ...walker, x: a.x, y: a.y }), tokenRefHex(g, { ...walker, x: b.x, y: b.y }));
-  const at = line[Math.round(f * (line.length - 1))]!;
-  return placedOnHex(g, walker, at);
+/** The spots a piece on hexes passes after its start, one a hex and at least one, so a piece within one hex still ends where it ends. */
+export function hexPieceSpots(piece: HexPiece): Point[] {
+  const n = Math.max(1, piece.steps);
+  const out: Point[] = [];
+  for (let k = 1; k <= n; k++) out.push(piece.at(k / n));
+  return out;
 }
 
 function hexWalkSpots(g: HexGrid, trace: WalkTrace, build: Pick<BuildState, "buildChunks">): WalkSpot[] {
   const first = trace[0]!;
   const grounded = walkFrom(build.buildChunks, first).grounded;
-  const stepsOf = (i: number) => hexPieceSteps(g, trace[i - 1]!, trace[i - 1]!, trace[i]!);
-  const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, trace.length > 1 ? stepsOf(1) : 0] }];
+  const pieces = trace.slice(1).map((b, i) => hexPieceSpots(hexPiece(g, trace[i]!, trace[i]!, b)));
+  const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, pieces[0]?.length ?? 0] }];
   for (let i = 1; i < trace.length; i++) {
     const a = trace[i - 1]!;
     const b = trace[i]!;
-    const n = stepsOf(i);
+    const piece = pieces[i - 1]!;
+    const n = piece.length;
     for (let k = 1; k <= n; k++) {
       const end = k === n;
-      const { x, y } = hexPieceSpot(g, a, a, b, k / n);
+      const { x, y } = piece[k - 1]!;
       const elevation = end ? b.elevation : grounded ? groundUnder(build.buildChunks, a, { x, y }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
       spots.push({ x, y, elevation, progress: [i - 1, k, n] });
     }
