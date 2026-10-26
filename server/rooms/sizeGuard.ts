@@ -887,11 +887,27 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     if (parsed?.kind === "log" && lineAudience(next as LogEntry) !== "shared") continue;
     const prev = readEntity(before, key);
     const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
-    const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value));
+    const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value) - namesOf(parsed?.kind, value));
     const delta = size(next) + (added ? entryKeyBytes(key) : -size(prev));
     if (delta > 0) growth += delta;
   }
   return growth;
+}
+
+/**
+ * The bytes a token's, the fight's or the saved steps' lists of who saw
+ * hold beyond `[]`, which no measure counts: each list counts at its widest
+ * in the reserve instead, whose change the bound adds apart. Counted with
+ * them, a move that joins away a corner naming players and adds a stop
+ * naming none would shrink the bound below the measure's growth, and the
+ * guard's fast path would answer by whom the lists named (review
+ * PV3-OPUS-2).
+ */
+function namesOf(kind: string | undefined, value: unknown): number {
+  if (kind === "token") return tokenLists(value as Token).extra;
+  if (kind === "encounter") return encounterLists(value as Encounter | null).extra;
+  if (kind === "encounterHistory") return historyLists(value as EncounterSnapshot[]).extra;
+  return 0;
 }
 
 /** The most a trap's pit adds to its scene's reserve: its chunks, and the moved tokens' reserve as if it were the scene's only pit. */

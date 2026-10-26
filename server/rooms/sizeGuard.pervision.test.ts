@@ -273,3 +273,84 @@ describe("a per-player scene that shrinks", () => {
     assert.ok(storedAsItIs(switched.state) <= measuredStateBytes(switched.state));
   });
 });
+
+/**
+ * The growth bound on lists of who saw (review PV3-OPUS-2): the measures
+ * count each list at its widest, so the bound must count a token, the
+ * fight and its saved steps without the names their lists hold. Otherwise
+ * a move that joins away a corner naming a player and adds a stop naming
+ * none grows the measure while the room's bytes shrink, and the guard's
+ * fast path both lets the room past its limit and answers by whom the
+ * lists named.
+ */
+describe("the growth bound and lists of who saw", () => {
+  /** Two rooms whose goblin's full path names the six longest ids in one and no one in the other, with no layer, so every new stop names no one. */
+  function pathRooms(): { named: RoomState; nobody: RoomState } {
+    const make = (names: string[]) => {
+      const state = perPlayerRoom("empty", PLAYERS);
+      const stops: PathStop[] = Array.from({ length: 50 }, (_, i) => ({ x: 2 + (i % 2), y: 3 + Math.floor(i / 2), elevation: 0, seenBy: [...names] }));
+      state.tokens.gob = { ...state.tokens.gob!, x: stops.at(-1)!.x, y: stops.at(-1)!.y, path: { turn: 7, stops } };
+      return state;
+    };
+    return { named: make([...PLAYERS].slice(0, 6).sort()), nobody: make([]) };
+  }
+
+  const move = (state: RoomState, i: number) => ({ t: "token.move" as const, tokenId: "gob", x: 20 + (i % 2), y: 3 + i });
+
+  test("covers the measure's growth when a move joins away a corner whose list named players", () => {
+    const { named } = pathRooms();
+    let state = named;
+    for (let i = 0; i < 12; i++) {
+      const result = applyOp(state, move(state, i), DM, env(10 + i));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      assert.equal(result.state.tokens.gob!.path!.stops.length, 50, "the path stays full");
+      const grown = measuredStateBytes(result.state) - measuredStateBytes(state);
+      const bound = growthBound(state, result.state, result.touched);
+      assert.ok(bound >= grown, `move ${i}: the bound ${bound} covers the measure's growth ${grown}`);
+      state = result.state;
+    }
+  });
+
+  test("covers the measure's growth when the fight or a saved step trades a list naming players for one naming none", () => {
+    const before = perPlayerRoom("full", PLAYERS);
+    // Each grows by a new entry while its turn start's list goes from six names to none.
+    const renamed = (e: Encounter): Encounter => ({ ...e, entries: [...e.entries, entry("e2", { tokenId: "gob" })], turnStart: { ...e.turnStart!, seenBy: [] } });
+    const fight = { ...before, encounter: renamed(before.encounter!) };
+    const history = { ...before, encounterHistory: before.encounterHistory.map((snap) => ({ ...snap, encounter: renamed(snap.encounter) })) };
+    for (const [after, key] of [
+      [fight, "encounter"],
+      [history, "encounterHistory"],
+    ] as const) {
+      const grown = measuredStateBytes(after) - measuredStateBytes(before);
+      assert.ok(grown > 0, `${key} grew by ${grown}`);
+      assert.ok(growthBound(before, after, [key]) >= grown, `${key}: the bound ${growthBound(before, after, [key])} covers ${grown}`);
+    }
+  });
+
+  test("the DM's moves get the same answers a few bytes under the limit, whoever the path's lists name", () => {
+    const { named, nobody } = pathRooms();
+    assert.equal(measuredStateBytes(named), measuredStateBytes(nobody));
+    // The first move grows the measure by 77 bytes and each later one by about 24, so six fit.
+    const limit = measuredStateBytes(named) + 200;
+    const guards = new WeakMap<RoomState, SizeGuard>();
+    for (const s of [named, nobody]) {
+      const guard = new SizeGuard({ stateLimit: limit });
+      assert.ok(guard.check(s, [], 0).ok);
+      guards.set(s, guard);
+    }
+    const guarded: Applier = (state, op, who, seq) => {
+      const guard = guards.get(state)!;
+      const r = serverApply(state, op, who, seq);
+      if (!r.ok) return r;
+      const result = applyOp(state, op, who, env(seq));
+      if (!result.ok) return result;
+      const size = guard.check(result.state, touchedScenes(state, result.state, result.touched), growthBound(state, result.state, result.touched), state);
+      if (!size.ok) return size;
+      guards.set(r.state, guard);
+      return r;
+    };
+    const steps = Array.from({ length: 12 }, (_, i) => ({ who: DM, op: move(named, i), note: `move ${i}` }));
+    const { a: end } = checkOps({ name: "the DM's moves a few bytes under the limit", a: named, b: nobody, steps }, guarded);
+    assert.equal(end.tokens.gob!.y, 3 + 5, "six moves fit and the limit refused the rest, alike in both rooms");
+  });
+});
