@@ -6,6 +6,7 @@ import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } fro
 import { accentFor } from "../../lib/accent.ts";
 import { isometric, toView } from "../../lib/view.ts";
 import { useScoped } from "../../state/scope.ts";
+import { sideGround } from "../doors/tap.ts";
 import type { LayerProps } from "../layers.ts";
 import { flashSlot, type Flash } from "./flash.ts";
 
@@ -53,9 +54,9 @@ export type FlashShape =
   | { kind: "hull"; points: number[] };
 
 /**
- * Where a flash draws. A door's line lies at the highest drawn ground of
- * the cells either side of it (`boxGround`), where relief/runs.ts stands
- * its piece. A box lies round its cells, padded 6 px, at their drawn
+ * Where a flash draws. A door's line lies at the higher drawn ground of
+ * the two cells it divides (doors/tap.ts sideGround), where relief/runs.ts
+ * stands its piece. A box lies round its cells, padded 6 px, at their drawn
  * ground when they share one, and otherwise becomes the outline round the
  * box seen at both the lowest and the highest drawn ground under it, so
  * every fragment the ground stage draws of a drawing across a ledge lies
@@ -64,9 +65,8 @@ export type FlashShape =
 export function flashShape(iso: Pick<IsoGround, "turn" | "ground"> | null, flash: Pick<Flash, "rect" | "segment">, scale: number): FlashShape {
   if (flash.segment) {
     const { a, b } = flash.segment;
-    // A quarter cell either side takes in the cells the line divides, and no more.
-    const side = { x0: Math.min(a.x, b.x) - 0.25, y0: Math.min(a.y, b.y) - 0.25, x1: Math.max(a.x, b.x) + 0.25, y1: Math.max(a.y, b.y) + 0.25 };
-    return { kind: "line", points: [a.x, a.y, b.x, b.y], z: iso ? boxGround(iso, side) : 0 };
+    // As the door's own tap and pill read it (doors/tap.ts doorGround), so no cell past its ends lifts it.
+    return { kind: "line", points: [a.x, a.y, b.x, b.y], z: iso ? sideGround((p) => iso.ground(p.x, p.y), a, b) : 0 };
   }
   const pad = 6 / scale;
   const { x, y, width, height } = flash.rect;

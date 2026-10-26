@@ -104,11 +104,17 @@ export function doorPieceStands(pick: Pick<BoardPick, "src">, d: Pick<DoorOnMap,
 }
 
 /** The higher drawn ground on either side of a door's middle, as its standing piece rises from (relief/runs.ts), in cells. */
-export function doorGround(pick: BoardPick, d: Pick<DoorOnMap, "a" | "b" | "mid">): number {
-  const len = Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y) || 1;
-  const nx = (-(d.b.y - d.a.y) / len) * 0.25;
-  const ny = ((d.b.x - d.a.x) / len) * 0.25;
-  return Math.max(drawnAt(pick, { x: d.mid.x + nx, y: d.mid.y + ny }), drawnAt(pick, { x: d.mid.x - nx, y: d.mid.y - ny }));
+export function doorGround(pick: BoardPick, d: Pick<DoorOnMap, "a" | "b">): number {
+  return sideGround((p) => drawnAt(pick, p), d.a, d.b);
+}
+
+/** The higher ground a quarter cell either side of a segment's middle: of the two cells a door divides, never one past its ends. */
+export function sideGround(ground: (p: Point) => number, a: Point, b: Point): number {
+  const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const nx = (-(b.y - a.y) / len) * 0.25;
+  const ny = ((b.x - a.x) / len) * 0.25;
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  return Math.max(ground({ x: mid.x + nx, y: mid.y + ny }), ground({ x: mid.x - nx, y: mid.y - ny }));
 }
 
 /** The distance from `p` to the band swept from the segment a-b straight up the screen by `up` px: 0 inside it. */

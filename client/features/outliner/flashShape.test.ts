@@ -46,6 +46,14 @@ for (const turn of [0, 1, 2, 3] as Turn[]) {
   });
 }
 
+test("a door's flash reads only the two cells it divides, not a 50 ft column past its end (ISO34-ASTRA-15)", () => {
+  const column = (x: number, y: number) => (Math.floor(y) === 1 ? 10 : 0);
+  for (const turn of [0, 1, 2, 3] as Turn[]) {
+    assert.equal((flashShape({ turn, ground: column }, { rect: RECT, segment: { a: { x: 5, y: 2 }, b: { x: 5, y: 3 } } }, 40) as { z: number }).z, 0);
+    assert.equal((flashShape({ turn, ground: column }, { rect: RECT, segment: { a: { x: 4, y: 2 }, b: { x: 5, y: 2 } } }, 40) as { z: number }).z, 10, "a door on the column's edge takes its top");
+  }
+});
+
 test("a flash round cells on one ground is the padded box at that ground, and in Top-down at 0", () => {
   const top = flashShape({ turn: 1, ground: () => 2 }, { rect: RECT }, 40);
   assert.deepEqual(top, { kind: "rect", x: 3 - 0.15, y: 2 - 0.15, width: 4.3, height: 2.3, z: 2 });
