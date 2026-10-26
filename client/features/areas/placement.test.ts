@@ -34,13 +34,14 @@ import {
 } from "./placement.ts";
 import { placementHint, presetDraft, rangeFeet, searchAreaSpells } from "./presets.ts";
 import { apply, room } from "#shared/testutil.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 function tok(id: string, over: Partial<AreaToken> = {}): AreaToken {
   return { id, rev: 1, sceneId: "s", size: "medium", x: 0, y: 0, elevation: 0, ...over };
 }
 
 function ctx(tokens: AreaTokens): AreaContext {
-  return { settings: { feetPerCell: 5, aoeCoverage: "half", aoeInclusion: "anyCell" }, bounds: { w: 40, h: 40 }, tokens: tokens as Record<string, AreaToken> };
+  return { settings: { feetPerCell: 5, aoeCoverage: "half", aoeInclusion: "anyCell" }, bounds: { w: 40, h: 40 }, grid: SQUARES, tokens: tokens as Record<string, AreaToken> };
 }
 
 function draft(over: Partial<AreaDraft> = {}): AreaDraft {
@@ -79,7 +80,7 @@ describe("origins from a token", () => {
     const tokens = { c: caster };
     for (const yaw of [0, 30, 90, 135, 270]) {
       const mine = draftTemplate(draft({ shape: "cube", size: 15, yaw, fromId: "c" }), tokens, 5)!;
-      const rules = { ...mine, ...castFromToken({ shape: "cube", size: 15, yaw }, caster, 5) };
+      const rules = { ...mine, ...castFromToken(SQUARES, { shape: "cube", size: 15, yaw }, caster, 5) };
       const cells = (t: typeof mine) => computeCoverage(t, ctx(tokens)).cells.map((c) => `${c.x},${c.y}`).join(" ");
       assert.equal(cells(mine), cells(rules), `yaw ${yaw}`);
     }

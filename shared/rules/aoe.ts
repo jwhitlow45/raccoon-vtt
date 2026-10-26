@@ -1,9 +1,11 @@
-import type { AoeCoverage, AreaFootprint, AreaShape, AreaTemplate, RoomSettings, Token, TokenId } from "../model.ts";
-import { footprintRect, occupiedRange, tokenHeightFt, verticalExtentFt, type FootprintToken } from "./footprint.ts";
+import type { AoeCoverage, AreaFootprint, AreaShape, AreaTemplate, DiagonalRule, RoomSettings, Token, TokenId } from "../model.ts";
+import { axisSteps, hexSetSteps, legFeet } from "./distance.ts";
+import { footprintRect, hexAnchor, occupiedHexes, occupiedRange, sizeCategory, tokenHeightFt, verticalExtentFt, type FootprintToken } from "./footprint.ts";
 import { clamp, distToSegment, sdBox3, sdCorner2, yawVector, type Bounds, type Point, type Point3, type Rect } from "./geom.ts";
+import { SQUARES, type Grid } from "./grid.ts";
+import { cornerAt, footprintHexes, HEX_R, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
 import { AREAS, stepOffWalls } from "./segments.ts";
 import { cachedVisibility, crossingsAt, indexPolygon, insideCrossings, markPolygonCells, type Polygon, type PolygonIndex, type WallSet } from "./walls.ts";
-import { SQUARES } from "./grid.ts";
 
 /**
  * Areas of effect (design section 9.3).
@@ -19,6 +21,15 @@ import { SQUARES } from "./grid.ts";
  * creatures it catches, but its slice through the origin's height can be
  * little more than a point. It shades and outlines what it covers seen from
  * above instead, so the map shows where it reaches.
+ *
+ * On a hex scene (docs/design-v1-hex-grids.md HX-D11) shapes keep their
+ * true geometry, graded per hex by the room's coverage rule over a fixed
+ * pattern of samples in each hex, and a creature is caught by its hexes.
+ * An emanation is the exception: it covers every hex within
+ * `floor(size / feetPerCell)` steps of its creature's hexes, height counted
+ * by the room's rule from the footprint's vertical extent, so it agrees
+ * with the ruler. One that stays put keeps its creature's size and reads
+ * its hexes around its origin on every read, so they move with it.
  */
 
 /** Area sizes in feet (design section 10.5). */
@@ -44,9 +55,12 @@ export type AreaTemplateInput = Pick<AreaTemplate, "id" | "rev" | "shape" | "siz
 export type AreaToken = FootprintToken & Pick<Token, "id" | "rev"> & Partial<Pick<Token, "sceneId">>;
 
 export type AreaContext = {
-  settings: Pick<RoomSettings, "feetPerCell" | "aoeCoverage" | "aoeInclusion">;
+  /** The room's settings areas read. The diagonal rule counts an emanation's height on hexes, `five` where a caller leaves it out. */
+  settings: Pick<RoomSettings, "feetPerCell" | "aoeCoverage" | "aoeInclusion"> & Partial<Pick<RoomSettings, "diagonal">>;
   /** Scene size in cells. Coverage is clipped to it. */
   bounds: { w: number; h: number };
+  /** The scene's grid: on hexes coverage is per hex and an emanation counts steps (HX-D11). */
+  grid: Grid;
   /** The scene's derived walls, or null for a scene without a build. */
   walls?: WallSet | null;
   /** Tokens by id, used to resolve `attachedTo` and `casterId`. */
@@ -77,6 +91,8 @@ export type ResolvedArea = {
   originTokenId: TokenId | undefined;
   /** The footprint an emanation surrounds, in cells, when it surrounds one rather than a point. */
   box?: Rect;
+  /** On hexes, an emanation's reach in steps from the hexes it surrounds (HX-D11), which coverage and catching read in place of `shape`. */
+  reach?: HexReach;
   /** Visibility polygons whose union clips the area. Empty on a scene without walls. */
   polygons: Polygon[];
   /**
@@ -98,9 +114,14 @@ export type ResolvedArea = {
 
 export type CoveredCell = { x: number; y: number; coverage: number };
 
+/** A hex an area covers on a hex scene, by its offset coordinates, with the fraction of its samples inside. */
+export type CoveredHex = { col: number; row: number; coverage: number };
+
 export type CoverageResult = {
   key: string;
   samples: number;
+  /** On a hex scene, the hexes that pass the coverage rule (HX-D11), and the square window below is empty. */
+  hexes?: CoveredHex[];
   /** Cells that pass the room's coverage rule, with the fraction of their samples inside. */
   cells: CoveredCell[];
   /** The window of cells examined: the area's bounds clipped to the scene. */
@@ -182,21 +203,24 @@ export function edgeOrigin(rect: Rect, yawDeg: number): Point {
  * cylinder's anchored circle sits at the caster's feet (bottom) or head (top).
  */
 export function castFromToken(
+  g: Grid,
   area: { shape: AreaShape; size: number; yaw: number; anchor?: "bottom" | "top" },
   caster: FootprintToken,
   feetPerCell: number,
 ): { origin: { x: number; y: number; z: number }; faceOffset?: { u: number; v: number }; includeOrigin: boolean } {
-  const rect = footprintRect(SQUARES, caster);
+  const rect = footprintRect(g, caster);
   const height = tokenHeightFt(caster, feetPerCell);
   const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
   const includeOrigin = INCLUDE_ORIGIN[area.shape];
+  // On hexes the edge is the footprint's outline: a corner or a side's midpoint where the aim leaves it (HX-D11).
+  const edge = () => (g.shape === "hex" ? hexEdgeOrigin(g, occupiedHexes(g, caster), center, area.yaw) : edgeOrigin(rect, area.yaw));
   switch (area.shape) {
     case "cone":
     case "line":
-      return { origin: { ...edgeOrigin(rect, area.yaw), z: caster.elevation + height / 2 }, includeOrigin };
+      return { origin: { ...edge(), z: caster.elevation + height / 2 }, includeOrigin };
     case "cube":
       return {
-        origin: { ...edgeOrigin(rect, area.yaw), z: caster.elevation + areaFt(area.size, AREA_MIN_FT) / 2 },
+        origin: { ...edge(), z: caster.elevation + areaFt(area.size, AREA_MIN_FT) / 2 },
         faceOffset: { u: 0, v: 0 },
         includeOrigin,
       };
@@ -208,10 +232,16 @@ export function castFromToken(
   }
 }
 
-/** What an emanation that stays put keeps of the token it was cast from (`AreaTemplate.footprint`). */
-export function emanationFootprint(token: FootprintToken, feetPerCell: number): AreaFootprint {
-  const r = footprintRect(SQUARES, token);
-  return { w: r.w, h: r.h, elevation: token.elevation, height: tokenHeightFt(token, feetPerCell) };
+/**
+ * What an emanation that stays put keeps of the token it was cast from
+ * (`AreaTemplate.footprint`). On hexes also its size, which its hexes are
+ * read from around the origin (HX-D11), beside the size's box, so a square
+ * scene after a switch or a restore reads the same creature.
+ */
+export function emanationFootprint(g: Grid, token: FootprintToken, feetPerCell: number): AreaFootprint {
+  const r = footprintRect(g, token);
+  const kept = { w: r.w, h: r.h, elevation: token.elevation, height: tokenHeightFt(token, feetPerCell) };
+  return g.shape === "hex" ? { ...kept, size: sizeCategory(token) } : kept;
 }
 
 function sphereShape(ox: number, oy: number, oz: number, r: number): Shape3 {
@@ -525,13 +555,14 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
   const caster = template.casterId ? ctx.tokens?.[template.casterId] : undefined;
   const sizeFt = areaFt(template.size, AREA_MIN_FT);
   const origin = attached
-    ? castFromToken({ shape: template.shape, size: sizeFt, yaw: template.yaw, anchor: template.anchor }, attached, fpc).origin
+    ? castFromToken(ctx.grid, { shape: template.shape, size: sizeFt, yaw: template.yaw, anchor: template.anchor }, attached, fpc).origin
     : template.origin;
   if (![origin.x, origin.y, origin.z, template.yaw].every(Number.isFinite)) return null;
 
+  const g = ctx.grid;
   let originToken: AreaToken | undefined = attached;
   if (!originToken && caster) {
-    const r = footprintRect(SQUARES, caster);
+    const r = footprintRect(g, caster);
     const E = 1e-6;
     if (origin.x >= r.x - E && origin.x <= r.x + r.w + E && origin.y >= r.y - E && origin.y <= r.y + r.h + E) originToken = caster;
   }
@@ -547,7 +578,8 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
   let probes: Probe[];
   let box: Rect | undefined;
   let top: Pick<ResolvedArea, "shade" | "outline" | "sliceZ"> | undefined;
-  const toward = originToken ? rectCenter(footprintRect(SQUARES, originToken)) : null;
+  let reach: HexReach | undefined;
+  const toward = originToken ? rectCenter(footprintRect(g, originToken)) : null;
 
   switch (template.shape) {
     case "sphere":
@@ -614,6 +646,21 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
       break;
     }
     case "emanation": {
+      if (g.shape === "hex") {
+        // It counts steps from the hexes it surrounds (HX-D11), each read on the grid now, so a stationary one's move with its origin.
+        const around = (attached ? tokenHexes(g, attached, fpc) : storedHexes(g, template.footprint, origin)) ?? (originToken ? tokenHexes(g, originToken, fpc) : null);
+        const src = around ?? { hexes: [hexAt(g, origin)], center: { x: origin.x, y: origin.y }, side: 0, lo: origin.z, hi: origin.z };
+        const half = src.side / 2;
+        if (src.side > 0) box = { x: src.center.x - half, y: src.center.y - half, w: src.side, h: src.side };
+        const z0 = Math.floor(src.lo / fpc);
+        // A zero-height thing still stands in the layer of cells it is in, as distance.ts reads a creature.
+        reach = { g, from: src.hexes, steps: Math.floor(sizeFt / fpc + 1e-9), ft: sizeFt, z0, z1: Math.max(z0 + 1, Math.ceil(src.hi / fpc)), fpc, rule: ctx.settings.diagonal ?? "five" };
+        // The continuous shape bounds what can be covered: every hex within its steps lies within that many cells and a hex of its box.
+        shape = emanationShape(src.center.x - half, src.center.y - half, src.lo / fpc, src.center.x + half, src.center.y + half, src.hi / fpc, reach.steps + 1);
+        originZ = (src.lo + src.hi) / 2 / fpc;
+        probes = src.hexes.map((h) => ({ at: hexCenter(g, h), prefer: src.center }));
+        break;
+      }
       // An attached emanation follows its token. One that stays put keeps the
       // footprint it was cast with, and an older one without that reads its
       // caster's footprint while the caster still stands on the origin.
@@ -642,13 +689,37 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
 
   const walls = ctx.walls;
   const polygons = walls && walls.blockers.length > 0 ? probes.map((p) => visibleFrom(walls, p, sceneBounds(ctx))) : [];
-  return { shape, originZ, originTokenId: originToken?.id, ...(box ? { box } : {}), polygons, ...top };
+  return { shape, originZ, originTokenId: originToken?.id, ...(box ? { box } : {}), ...(reach ? { reach } : {}), polygons, ...top };
 }
 
 type EmanationBox = { rect: Rect; lo: number; hi: number };
 
+/** The box a square emanation surrounds: the hex path never reads it. */
 function tokenBox(token: AreaToken, fpc: number): EmanationBox {
   return { rect: footprintRect(SQUARES, token), ...verticalExtentFt(token, fpc) };
+}
+
+/** The hexes an emanation surrounds on hexes, the middle and side of their size's box, and their vertical extent in feet. */
+type EmanationHexes = { hexes: readonly Hex[]; center: Point; side: number; lo: number; hi: number };
+
+function tokenHexes(g: HexGrid, token: AreaToken, fpc: number): EmanationHexes {
+  return { hexes: occupiedHexes(g, token), center: hexAnchor(g, token), side: footprintRect(g, token).w, ...verticalExtentFt(token, fpc) };
+}
+
+/**
+ * A stationary emanation's hexes (HX-D11): its kept size's, around the
+ * anchor nearest its origin, found in world space on every read, so they
+ * move with the origin across an odd row as across an even one. An older
+ * footprint with only a box reads as the size whose box that is, the
+ * longer side for an uneven one.
+ */
+function storedHexes(g: HexGrid, footprint: AreaTemplate["footprint"], origin: { x: number; y: number }): EmanationHexes | null {
+  if (!footprint) return null;
+  const { w, h, elevation, height } = footprint;
+  if (![w, h, elevation, height].every(Number.isFinite) || w <= 0 || h <= 0 || height < 0) return null;
+  const size = footprint.size ?? sizeCategory({ size: "custom", w, h });
+  const anchor = snapAnchor(g, size, origin);
+  return { hexes: footprintHexes(g, size, anchor), center: anchor, side: footprintRect(g, { size, x: anchor.x, y: anchor.y }).w, lo: elevation, hi: elevation + height };
 }
 
 function storedBox(footprint: AreaTemplate["footprint"], origin: { x: number; y: number }): EmanationBox | null {
@@ -851,6 +922,9 @@ export function coverageCacheKey(template: AreaTemplateInput, ctx: AreaContext):
     ctx.bounds.h,
     ctx.walls?.version ?? null,
     samplesOf(ctx),
+    ctx.grid.shape === "hex" ? ctx.grid.orient : null,
+    template.footprint?.size,
+    ctx.grid.shape === "hex" ? ctx.settings.diagonal : null,
   ]);
 }
 
@@ -862,6 +936,13 @@ export function computeCoverage(template: AreaTemplateInput, ctx: AreaContext): 
   if (!area) {
     return { key, samples: n, cells: [], x0: 0, y0: 0, w: 0, h: 0, counts: new Uint16Array(0), centers: new Uint8Array(0), covered: new Uint8Array(0) };
   }
+  if (ctx.grid.shape === "hex") {
+    const hs = new HexSampler(ctx.grid, area.shade ? { ...area, shape: area.shade } : area, n, sceneBounds(ctx));
+    const excluded = !template.includeOrigin && area.originTokenId ? ctx.tokens?.[area.originTokenId] : undefined;
+    const own = new Set(excluded ? occupiedHexes(ctx.grid, excluded).map(hexKey) : []);
+    const hexes = hs.covered(area.originZ, ctx.settings.aoeCoverage).filter((c) => !own.has(`${c.col},${c.row}`));
+    return { key, samples: n, hexes, cells: [], x0: 0, y0: 0, w: 0, h: 0, counts: new Uint16Array(0), centers: new Uint8Array(0), covered: new Uint8Array(0) };
+  }
   // An aimed cone or line shades what it covers seen from above (ResolvedArea.shade).
   const s = new Sampler(area.shade ? { ...area, shape: area.shade } : area, n, sceneBounds(ctx));
   const counts = new Uint16Array(s.nx * s.ny);
@@ -869,7 +950,7 @@ export function computeCoverage(template: AreaTemplateInput, ctx: AreaContext): 
   const covered = new Uint8Array(s.nx * s.ny);
   const rule = ctx.settings.aoeCoverage;
   const excluded = !template.includeOrigin && area.originTokenId ? ctx.tokens?.[area.originTokenId] : undefined;
-  const ex = excluded ? occupiedRange(SQUARES, excluded) : null;
+  const ex = excluded ? occupiedRange(ctx.grid, excluded) : null;
   const cells: CoveredCell[] = [];
   for (let j = s.gy; j < s.gy + s.ny; j++) {
     for (let i = s.gx; i < s.gx + s.nx; i++) {
@@ -902,6 +983,7 @@ export function computeCoverage(template: AreaTemplateInput, ctx: AreaContext): 
 export function creaturesInArea(template: AreaTemplateInput, tokens: Iterable<AreaToken>, ctx: AreaContext): TokenId[] {
   const area = resolveArea(template, ctx);
   if (!area) return [];
+  if (ctx.grid.shape === "hex") return creaturesOnHexes(ctx.grid, template, area, tokens, ctx);
   const fpc = feetPerCellOf(ctx);
   const s = new Sampler(area, samplesOf(ctx), sceneBounds(ctx));
   const { aoeCoverage, aoeInclusion } = ctx.settings;
@@ -913,7 +995,7 @@ export function creaturesInArea(template: AreaTemplateInput, tokens: Iterable<Ar
     const sliceZ = area.sliceZ;
     const zsAt: HeightsAt = sliceZ ? (x, y) => heightsThrough(lo / fpc, hi / fpc, sliceZ(x, y)) : () => [clamp(area.originZ, lo / fpc, hi / fpc)];
     if (aoeInclusion === "center") {
-      const r = footprintRect(SQUARES, t);
+      const r = footprintRect(ctx.grid, t);
       const cx = r.x + r.w / 2;
       const cy = r.y + r.h / 2;
       if (zsAt(cx, cy).some((z) => s.pointInside(cx, cy, z))) caught.push(t.id);
@@ -1024,4 +1106,262 @@ export class CoverageCache {
     }
     return result;
   }
+}
+
+/*
+ * Areas on hexes (docs/design-v1-hex-grids.md HX-D11).
+ */
+
+/**
+ * An emanation's reach on hexes: every hex within `steps` of a hex of
+ * `from`, the hexes it surrounds. A creature's hex counts when the room's
+ * rule between those steps and the vertical ones from the layers `z0` to
+ * `z1` gives at most `ft`, as the ruler measures it.
+ */
+export type HexReach = { g: HexGrid; from: readonly Hex[]; steps: number; ft: number; z0: number; z1: number; fpc: number; rule: DiagonalRule };
+
+/** Whether a hex `h` steps from the source, its layers `[z0, z1)`, is within the reach. */
+function withinReach(reach: HexReach, h: number, z0: number, z1: number): boolean {
+  const dz = axisSteps(reach.z0, reach.z1, z0, z1);
+  const ft = legFeet(h, 0, dz, reach.rule, reach.fpc);
+  return (reach.rule === "euclid" ? Math.round(ft) : ft) <= reach.ft;
+}
+
+/** Every hex within `steps` of a hex of `from`, with its steps, by walking neighbors. */
+function hexesWithin(g: HexGrid, from: readonly Hex[], steps: number): Map<string, { hex: Hex; d: number }> {
+  const out = new Map(from.map((h) => [hexKey(h), { hex: h, d: 0 }]));
+  let frontier = [...from];
+  for (let d = 1; d <= steps; d++) {
+    const next: Hex[] = [];
+    for (const h of frontier) {
+      for (const n of hexNeighbors(g, h)) {
+        const k = hexKey(n);
+        if (out.has(k)) continue;
+        out.set(k, { hex: n, d });
+        next.push(n);
+      }
+    }
+    frontier = next;
+  }
+  return out;
+}
+
+/**
+ * The point on a footprint's outline that a cone, line or cube cast from
+ * it starts at (HX-D11): where the aim from its anchor leaves the outline,
+ * moved to the nearest of the outline's corners and side midpoints, as
+ * `edgeOrigin` does on a rectangle. Sides between two of its hexes are
+ * inside it and offer none.
+ */
+export function hexEdgeOrigin(g: HexGrid, hexes: readonly Hex[], anchor: Point, yawDeg: number): Point {
+  const held = new Set(hexes.map(hexKey));
+  const sides: [Point, Point][] = [];
+  for (const h of hexes) {
+    const c = hexCenter(g, h);
+    const corners = hexCorners(g, h).map((k) => cornerAt(g, k));
+    for (let i = 0; i < 6; i++) {
+      const a = corners[i]!;
+      const b = corners[(i + 1) % 6]!;
+      // The hex across a side has its center mirrored through the side's midpoint.
+      const across = hexAt(g, { x: a.x + b.x - c.x, y: a.y + b.y - c.y });
+      if (!held.has(hexKey(across))) sides.push([a, b]);
+    }
+  }
+  const d = yawVector(yawDeg);
+  let exit: Point = anchor;
+  let far = -Infinity;
+  for (const [a, b] of sides) {
+    // The ray anchor + t d against the side a + s (b - a), 0 <= s <= 1.
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const den = d.x * ey - d.y * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const t = ((a.x - anchor.x) * ey - (a.y - anchor.y) * ex) / den;
+    const s = ((a.x - anchor.x) * d.y - (a.y - anchor.y) * d.x) / den;
+    if (t < 0 || s < -1e-9 || s > 1 + 1e-9 || t <= far) continue;
+    far = t;
+    exit = { x: anchor.x + d.x * t, y: anchor.y + d.y * t };
+  }
+  let best = exit;
+  let bestDist = Infinity;
+  for (const [a, b] of sides) {
+    for (const p of [a, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }]) {
+      const dist = Math.hypot(p.x - exit.x, p.y - exit.y);
+      if (dist < bestDist - 1e-12) {
+        bestDist = dist;
+        best = p;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The fixed pattern of samples in a hex, as offsets from its center on hex
+ * rows (mirrored on hex columns): an `n` by `n` grid of points per cell, the
+ * same for every hex, kept where they lie strictly inside the hexagon, so
+ * every hex is graded on the same count. About 222 at 16 per cell side.
+ */
+const PATTERNS = new Map<number, readonly Point[]>();
+
+function hexPattern(n: number): readonly Point[] {
+  let pattern = PATTERNS.get(n);
+  if (pattern) return pattern;
+  const out: Point[] = [];
+  const rows = Math.ceil(2 * HEX_R * n);
+  for (let j = 0; j < rows; j++) {
+    const dy = (j - (rows - 1) / 2) / n;
+    for (let i = 0; i < n; i++) {
+      const dx = (i + 0.5) / n - 0.5;
+      // A pointed-top hexagon: |dx| within half a cell and |dy| within HEX_R less the slope of its sloped sides.
+      if (Math.abs(dy) < HEX_R * (1 - Math.abs(dx))) out.push({ x: dx, y: dy });
+    }
+  }
+  PATTERNS.set(n, (pattern = out));
+  return pattern;
+}
+
+/**
+ * Per-hex sample counts for one resolved area on a hex scene: each hex's
+ * pattern of samples inside its shape and its visibility polygons, or for
+ * an emanation, whether the hex is within its reach and how much of the
+ * hex its polygons see. A hex far enough from the surface is all in or all
+ * out without sampling, as a square cell is.
+ */
+class HexSampler {
+  readonly g: HexGrid;
+  readonly area: ResolvedArea;
+  readonly pattern: readonly Point[];
+  readonly scene: { w: number; h: number };
+  readonly crossings = new Map<number, Float64Array[]>();
+  readonly polys: PolygonIndex[];
+  /** Whether the center of the hex last passed to `count` is inside. */
+  center = false;
+
+  constructor(g: HexGrid, area: ResolvedArea, n: number, scene: { w: number; h: number }) {
+    this.g = g;
+    this.area = area;
+    this.pattern = hexPattern(n).map((p) => (g.orient === "rows" ? p : { x: p.y, y: p.x }));
+    this.scene = scene;
+    this.polys = area.polygons.map((p) => indexPolygon(p, 0, Math.max(1, scene.h)));
+  }
+
+  get total(): number {
+    return this.pattern.length;
+  }
+
+  private seen(x: number, y: number): boolean {
+    if (this.polys.length === 0) return true;
+    let rows = this.crossings.get(y);
+    if (!rows) this.crossings.set(y, (rows = this.polys.map((p) => crossingsAt(p, y))));
+    return anyInside(rows, x);
+  }
+
+  /** The hexes the area can reach, by its reach on an emanation, else every hex whose center lies within its bounds and a hex's reach. */
+  candidates(): Hex[] {
+    const reach = this.area.reach;
+    if (reach) return [...hexesWithin(this.g, reach.from, reach.steps).values()].map((e) => e.hex).filter((h) => hexInScene(this.g, this.scene, h));
+    const b = this.area.shape.bounds;
+    const lo = hexAt(this.g, { x: Math.max(0, b.x0 - 1), y: Math.max(0, b.y0 - 1) });
+    const hi = hexAt(this.g, { x: Math.min(this.scene.w, b.x1 + 1), y: Math.min(this.scene.h, b.y1 + 1) });
+    const out: Hex[] = [];
+    for (let row = Math.min(lo.row, hi.row) - 1; row <= Math.max(lo.row, hi.row) + 1; row++) {
+      for (let col = Math.min(lo.col, hi.col) - 1; col <= Math.max(lo.col, hi.col) + 1; col++) {
+        const h = { col, row };
+        if (hexInScene(this.g, this.scene, h)) out.push(h);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Inside samples of hex `h` at height `z`, and `center` set. On an
+   * emanation `d` is the hex's steps from its source and `layers` the
+   * creature's: a hex out of reach counts none, one in reach its seen ones.
+   */
+  count(h: Hex, z: number, d?: number, layers?: [number, number]): number {
+    this.center = false;
+    const c = hexCenter(this.g, h);
+    const reach = this.area.reach;
+    let whole: boolean;
+    if (reach) {
+      const zl = layers ?? [Math.floor(z), Math.floor(z) + 1];
+      if (!withinReach(reach, d ?? hexSetSteps(this.g, reach.from, [h]), zl[0], zl[1])) return 0;
+      whole = true;
+    } else {
+      const sd = this.area.shape.sd(c.x, c.y, z);
+      if (sd > HEX_R) return 0;
+      whole = sd < -HEX_R;
+    }
+    if (whole && this.area.polygons.length === 0) {
+      this.center = true;
+      return this.total;
+    }
+    this.center = (whole || this.area.shape.inside(c.x, c.y, z)) && this.seen(c.x, c.y);
+    let n = 0;
+    for (const p of this.pattern) {
+      const x = c.x + p.x;
+      const y = c.y + p.y;
+      if (!whole && !this.area.shape.inside(x, y, z)) continue;
+      if (this.seen(x, y)) n++;
+    }
+    return n;
+  }
+
+  /** The hexes passing the coverage rule at the shading height. */
+  covered(z: number, rule: AoeCoverage): CoveredHex[] {
+    const reach = this.area.reach;
+    const steps = reach ? hexesWithin(this.g, reach.from, reach.steps) : null;
+    const out: CoveredHex[] = [];
+    for (const h of this.candidates()) {
+      // The shading slice is the source's own height, so only the steps between the hexes count there.
+      const n = this.count(h, z, steps?.get(hexKey(h))?.d, reach ? [reach.z0, reach.z0 + 1] : undefined);
+      if (passes(n, this.total, this.center, rule)) out.push({ col: h.col, row: h.row, coverage: n / this.total });
+    }
+    return out;
+  }
+}
+
+/**
+ * The creatures an area catches on a hex scene, by their hexes (HX-D11):
+ * any of them passing the coverage rule by default, more than half of
+ * their hexes' samples under "majority", and under "center" the hex of
+ * their anchor. Each is measured at its own height, as on squares, and an
+ * emanation's reach counts the vertical steps to its layers.
+ */
+function creaturesOnHexes(g: HexGrid, template: AreaTemplateInput, area: ResolvedArea, tokens: Iterable<AreaToken>, ctx: AreaContext): TokenId[] {
+  const fpc = feetPerCellOf(ctx);
+  const s = new HexSampler(g, area, samplesOf(ctx), sceneBounds(ctx));
+  const { aoeCoverage, aoeInclusion } = ctx.settings;
+  const caught: TokenId[] = [];
+  for (const t of tokens) {
+    if (template.sceneId !== undefined && t.sceneId !== undefined && t.sceneId !== template.sceneId) continue;
+    if (!template.includeOrigin && t.id === area.originTokenId) continue;
+    const { lo, hi } = verticalExtentFt(t, fpc);
+    const z0 = Math.floor(lo / fpc);
+    const layers: [number, number] = [z0, Math.max(z0 + 1, Math.ceil(hi / fpc))];
+    const sliceZ = area.sliceZ;
+    const zsAt = (p: Point) => (sliceZ ? heightsThrough(lo / fpc, hi / fpc, sliceZ(p.x, p.y)) : [clamp(area.originZ, lo / fpc, hi / fpc)]);
+    const hexes = aoeInclusion === "center" ? [hexAt(g, hexAnchor(g, t))] : occupiedHexes(g, t);
+    const best = hexes.map((h) => {
+      let top = 0;
+      let center = false;
+      for (const z of zsAt(hexCenter(g, h))) {
+        const n = s.count(h, z, undefined, layers);
+        if (n > top || (n === top && s.center)) {
+          top = n;
+          center = s.center;
+        }
+      }
+      return { n: top, center };
+    });
+    const hit =
+      aoeInclusion === "majority"
+        ? 2 * best.reduce((a, b) => a + b.n, 0) > best.length * s.total
+        : aoeInclusion === "center"
+          ? best[0]!.center
+          : best.some((b) => passes(b.n, s.total, b.center, aoeCoverage));
+    if (hit) caught.push(t.id);
+  }
+  return caught;
 }

@@ -11,6 +11,7 @@ import {
 } from "#shared/rules/aoe.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { displayName } from "../../lib/scene.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The client's side of area coverage: the rules context for a scene, and
@@ -41,6 +42,7 @@ export function contextFrom(inputs: AreaInputs, scene: Scene, samples: number = 
   return {
     settings: inputs.settings,
     bounds: scene.bounds,
+    grid: SQUARES,
     walls: sceneWalls(scene, inputs.buildChunks),
     tokens: inputs.tokens as Readonly<Record<string, AreaToken>>,
     samples,

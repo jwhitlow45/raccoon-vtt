@@ -231,7 +231,7 @@ export function castFrom(d: AreaDraft, casterId: string | null, tokens: AreaToke
     delete next.casterId;
     delete next.fromId;
     const around = d.shape === "emanation" && d.fromId !== undefined ? tokens[d.fromId] : undefined;
-    if (around) next.footprint = emanationFootprint(around, feetPerCell);
+    if (around) next.footprint = emanationFootprint(SQUARES, around, feetPerCell);
     return next;
   }
   const next: AreaDraft = { ...d, casterId, lastCaster: casterId };

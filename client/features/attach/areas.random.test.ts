@@ -10,6 +10,7 @@ import { pieceReach, type RoutePoint } from "#shared/rules/route.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { DM, chance, env, int, pick, rng, template, token } from "#shared/testutil.ts";
 import { raised, world } from "../movement/testing.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The areas a committed walk reminds a creature of, against an oracle that
@@ -155,7 +156,7 @@ describe("a walk reminds a creature of every area its walk's footprint enters (d
       if (walks.length === 0) continue;
       cases++;
       const scene = after.scenes.s1!;
-      const ctx = (state: RoomState): AreaContext => ({ settings: state.meta.settings, bounds: scene.bounds, walls: sceneWalls(scene, state.buildChunks), tokens: state.tokens as Readonly<Record<string, AreaToken>> });
+      const ctx = (state: RoomState): AreaContext => ({ settings: state.meta.settings, bounds: scene.bounds, grid: SQUARES, walls: sceneWalls(scene, state.buildChunks), tokens: state.tokens as Readonly<Record<string, AreaToken>> });
       const beforeCtx = ctx(before);
       const afterCtx = ctx(after);
       const fine = progress(walks, routed, after.meta.settings.feetPerCell, DENSER);

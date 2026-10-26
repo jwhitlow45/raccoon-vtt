@@ -307,7 +307,7 @@ export function originFromToken(
 ): { origin: Point3; faceOffset?: { u: number; v: number } } {
   const size = clampFeet(d.size);
   if (d.shape === "cube") return cubeOrigin(edgeOrigin(footprintRect(SQUARES, token), d.yaw), token.elevation, size, d.faceU);
-  const o = castFromToken({ shape: d.shape, size, yaw: d.yaw, anchor: d.anchor }, token, feetPerCell).origin;
+  const o = castFromToken(SQUARES, { shape: d.shape, size, yaw: d.yaw, anchor: d.anchor }, token, feetPerCell).origin;
   return { origin: { x: o.x, y: o.y, z: Math.round(o.z) } };
 }
 
@@ -382,7 +382,7 @@ export function draftTemplate(d: AreaDraft, tokens: AreaTokens, feetPerCell: num
       // emanation that stays put also keeps the footprint it was cast from,
       // so it holds its shape once the caster walks away.
       if (caster) base.casterId = caster;
-      if (d.shape === "emanation") base.footprint = emanationFootprint(from, feetPerCell);
+      if (d.shape === "emanation") base.footprint = emanationFootprint(SQUARES, from, feetPerCell);
     }
     return base;
   }
@@ -619,7 +619,7 @@ export type Outline =
 export function liveOrigin(t: AreaTemplateInput, ctx: AreaContext): Point3 {
   const attached = t.attachedTo ? ctx.tokens?.[t.attachedTo] : undefined;
   if (!attached) return t.origin;
-  return castFromToken({ shape: t.shape, size: t.size, yaw: t.yaw, anchor: t.anchor }, attached, ctx.settings.feetPerCell).origin;
+  return castFromToken(SQUARES, { shape: t.shape, size: t.size, yaw: t.yaw, anchor: t.anchor }, attached, ctx.settings.feetPerCell).origin;
 }
 
 /**

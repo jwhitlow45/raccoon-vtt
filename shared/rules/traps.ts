@@ -1463,7 +1463,7 @@ export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): 
     .filter(isCreature)
     .sort((a, b) => cmp(a.id, b.id));
   const template = { id: `trap:${trap.id}`, rev: 0, sceneId: trap.sceneId, ...hits.area };
-  const ctx = { settings: moment.meta.settings, bounds: scene.bounds, walls: sceneWalls(scene, moment.buildChunks), tokens: moment.tokens as Readonly<Record<string, AreaToken>> };
+  const ctx = { settings: moment.meta.settings, bounds: scene.bounds, grid: SQUARES, walls: sceneWalls(scene, moment.buildChunks), tokens: moment.tokens as Readonly<Record<string, AreaToken>> };
   return creaturesInArea(template, creatures, ctx).sort(cmp);
 }
 

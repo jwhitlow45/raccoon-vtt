@@ -17,6 +17,7 @@ import {
   type AreaToken,
 } from "./aoe.ts";
 import { deriveWalls, indexBuild, pointInPolygon, type WallSet } from "./walls.ts";
+import { SQUARES } from "./grid.ts";
 
 function mulberry32(seed: number): () => number {
   let a = seed;
@@ -39,7 +40,7 @@ function tok(id: string, over: Partial<AreaToken> = {}): AreaToken {
 
 function ctx(over: Partial<AreaContext> & { coverage?: AoeCoverage; inclusion?: AoeInclusion } = {}): AreaContext {
   const { coverage = "half", inclusion = "anyCell", ...rest } = over;
-  return { settings: { feetPerCell: 5, aoeCoverage: coverage, aoeInclusion: inclusion }, bounds: { w: 40, h: 40 }, ...rest };
+  return { settings: { feetPerCell: 5, aoeCoverage: coverage, aoeInclusion: inclusion }, bounds: { w: 40, h: 40 }, grid: SQUARES, ...rest };
 }
 
 function covered(t: AreaTemplateInput, c: AreaContext): Set<string> {
@@ -149,7 +150,7 @@ describe("coverage matches the published counts", () => {
 describe("shapes", () => {
   test("a cube cast from a token sits in front of it, bottom at its elevation", () => {
     const caster = tok("c", { x: 10, y: 10, elevation: 10 });
-    const cast = castFromToken({ shape: "cube", size: 15, yaw: 0 }, caster, 5);
+    const cast = castFromToken(SQUARES, { shape: "cube", size: 15, yaw: 0 }, caster, 5);
     assert.deepEqual(cast.origin, { x: 11, y: 10.5, z: 17.5 });
     assert.equal(cast.includeOrigin, false);
     const t = tpl({ shape: "cube", size: 15, ...cast });
@@ -183,7 +184,7 @@ describe("shapes", () => {
     assert.deepEqual(edgeOrigin(rect, 200), { x: 10, y: 10.5 });
     assert.deepEqual(edgeOrigin({ x: 0, y: 0, w: 2, h: 2 }, 300), { x: 2, y: 0 });
     const caster = tok("c", { x: 10, y: 10 });
-    const line = castFromToken({ shape: "line", size: 30, yaw: 0 }, caster, 5);
+    const line = castFromToken(SQUARES, { shape: "line", size: 30, yaw: 0 }, caster, 5);
     assert.deepEqual(line.origin, { x: 11, y: 10.5, z: 2.5 });
     const cells = covered(tpl({ shape: "line", size: 30, ...line }), ctx());
     assert.deepEqual([...cells].sort(), ["11,10", "12,10", "13,10", "14,10", "15,10", "16,10"]);
@@ -376,7 +377,7 @@ describe("walls clip areas", () => {
   test("a cone from a caster whose corner is on a wall stays on the caster's side", () => {
     // The caster stands against the wall at x = 10, west of it, and casts north along it.
     const caster = tok("c", { x: 9, y: 9 });
-    const cast = castFromToken({ shape: "cone", size: 15, yaw: 300 }, caster, 5);
+    const cast = castFromToken(SQUARES, { shape: "cone", size: 15, yaw: 300 }, caster, 5);
     assert.deepEqual({ x: cast.origin.x, y: cast.origin.y }, { x: 10, y: 9 });
     const cone = tpl({ shape: "cone", size: 15, yaw: 270, ...cast, casterId: "c" });
     const cells = covered(cone, ctx({ walls, tokens: { c: caster }, coverage: "any" }));
@@ -425,7 +426,7 @@ describe("an area's origin on a free wall", () => {
     // The wall passes through the creature's center and the corner the cone starts from, so the creature's side cannot choose.
     const walls = freeWalls([[3, 3, 6, 6]]);
     const creature = tok("e", { x: 4, y: 4 });
-    const cast = castFromToken({ shape: "cone", size: 15, yaw: 45 }, creature, 5);
+    const cast = castFromToken(SQUARES, { shape: "cone", size: 15, yaw: 45 }, creature, 5);
     assert.deepEqual({ x: cast.origin.x, y: cast.origin.y }, { x: 5, y: 5 });
     const area = resolveArea(tpl({ shape: "cone", size: 15, yaw: 45, attachedTo: "e" }), ctx({ walls, tokens: { e: creature } }));
     assert.ok(area && area.polygons.length === 1);
@@ -437,7 +438,7 @@ describe("an area's origin on a free wall", () => {
     // A wall runs south from the Large creature's southwest corner, and the cone aims southwest past its end.
     const walls = freeWalls([[7, 13, 7, 15]]);
     const creature = tok("e", { size: "large", x: 7, y: 11 });
-    const cast = castFromToken({ shape: "cone", size: 20, yaw: 135 }, creature, 5);
+    const cast = castFromToken(SQUARES, { shape: "cone", size: 20, yaw: 135 }, creature, 5);
     assert.deepEqual({ x: cast.origin.x, y: cast.origin.y }, { x: 7, y: 13 });
     const area = resolveArea(tpl({ shape: "cone", size: 20, yaw: 135, attachedTo: "e" }), ctx({ walls, tokens: { e: creature } }));
     assert.ok(area && area.polygons.length === 1);
@@ -549,8 +550,8 @@ describe("creaturesInArea", () => {
     const hut = tpl({
       shape: "emanation",
       size: 10,
-      origin: castFromToken({ shape: "emanation", size: 10, yaw: 0 }, caster, 5).origin,
-      footprint: emanationFootprint(caster, 5),
+      origin: castFromToken(SQUARES, { shape: "emanation", size: 10, yaw: 0 }, caster, 5).origin,
+      footprint: emanationFootprint(SQUARES, caster, 5),
       casterId: "c",
     });
     assert.deepEqual(hut.footprint, { w: 1, h: 1, elevation: 0, height: 5 });

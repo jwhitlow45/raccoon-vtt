@@ -28,6 +28,7 @@ import {
   visibilityPolygon,
   type WallSet,
 } from "./walls.ts";
+import { SQUARES } from "./grid.ts";
 
 function chunk(cells: string[], edges: Record<string, EdgeFeature> = {}): BuildChunk {
   return { sceneId: "s", cx: 0, cy: 0, rev: 1, cells: Object.fromEntries(cells.map((k) => [k, "stone" as const])), edges };
@@ -503,7 +504,7 @@ describe("areas behind crossing free walls", () => {
   // A room of four free walls that overshoot each other at the corners, crossing off the lattice.
   const roomWalls = [free("n", 1.5, 2, 9, 2.5), free("s", 1.5, 8, 9, 7.5), free("w", 2, 1.5, 2.5, 9), free("e", 8, 1.5, 7.5, 9)];
   const walls = deriveWalls(indexBuild([buildChunk({}, {}, roomWalls)]), 1, { rule: "off", bounds: { w: 12, h: 12 } });
-  const context = (w: WallSet | null): AreaContext => ({ settings: { feetPerCell: 5, aoeCoverage: "half", aoeInclusion: "anyCell" }, bounds: { w: 12, h: 12 }, walls: w });
+  const context = (w: WallSet | null): AreaContext => ({ settings: { feetPerCell: 5, aoeCoverage: "half", aoeInclusion: "anyCell" }, bounds: { w: 12, h: 12 }, grid: SQUARES, walls: w });
   const fireball: AreaTemplateInput = { id: "f", rev: 1, shape: "sphere", size: 30, origin: { x: 5, y: 5, z: 0 }, yaw: 0, includeOrigin: defaultIncludeOrigin("sphere") };
   const token = (id: string, x: number, y: number): AreaToken => ({ id, rev: 1, size: "medium", x, y, elevation: 0 });
 

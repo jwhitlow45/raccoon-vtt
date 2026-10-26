@@ -331,7 +331,7 @@ describe("squeezing (decided 2026-10-14, section 4.1)", () => {
     const inside = { id: "big", rev: 1, ...tok(corridor, { size: "large", x: 13.5, y: 4.5, squeeze: true }) };
     // A 5 ft cube on the cell north of the corridor, beyond its wall: the full footprint would reach it.
     const cube: AreaTemplateInput = { id: "c", rev: 1, shape: "cube", size: 5, origin: { x: 14, y: 4, z: 0 }, yaw: 0, includeOrigin: defaultIncludeOrigin("cube") };
-    const context = { settings: { feetPerCell: 5, aoeCoverage: "half" as const, aoeInclusion: "anyCell" as const }, bounds: { w: 30, h: 30 } };
+    const context = { settings: { feetPerCell: 5, aoeCoverage: "half" as const, aoeInclusion: "anyCell" as const }, bounds: { w: 30, h: 30 }, grid: SQUARES };
     assert.ok(computeCoverage(cube, context).cells.some((c) => c.x === 14 && c.y === 4));
     assert.deepEqual(creaturesInArea(cube, [inside], context), []);
     assert.deepEqual(creaturesInArea(cube, [{ ...inside, squeeze: undefined, x: 14, y: 4 }], context), ["big"]);

@@ -760,7 +760,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
                   // where it was first cast, and keep the token's footprint there.
                   const o = liveOrigin(t, liveContext(env.view, env.scene, false));
                   const token = env.view.tokens[t.attachedTo];
-                  update({ attachedTo: null, origin: { x: o.x, y: o.y, z: Math.round(o.z) }, ...(token ? { footprint: emanationFootprint(token, fpc) } : {}) });
+                  update({ attachedTo: null, origin: { x: o.x, y: o.y, z: Math.round(o.z) }, ...(token ? { footprint: emanationFootprint(SQUARES, token, fpc) } : {}) });
                 } else if (caster) {
                   update({ attachedTo: caster.id });
                 }

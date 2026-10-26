@@ -7,6 +7,7 @@ import { creaturesInArea } from "../rules/aoe.ts";
 import { tokenHeightFt } from "../rules/footprint.ts";
 import { DM, P1, apply, entry, env, refused, room, template, token, withoutWalked } from "../testutil.ts";
 import { RESHAPE_NOT_A_MOVE } from "./tokens.ts";
+import { SQUARES } from "../rules/grid.ts";
 
 /**
  * A resize as the reducer applies it (docs/design-v1-token-window.md 8.5
@@ -56,7 +57,7 @@ describe("a resize patch", () => {
     state.tokens.g1 = token("g1", { name: "Goblin", number: 1, x: 9, y: 5 });
     state.templates.sg = template("sg", { shape: "emanation", size: 15, attachedTo: "cleric", casterId: "cleric", includeOrigin: false, spell: "Spirit Guardians", ownerId: "p1", triggers: ["enter"] });
     state.encounter = { rev: 0, round: 1, activeEntryId: "e-g1", entries: [entry("e-g1", { tokenId: "g1", value: 15 }), entry("e-cleric", { tokenId: "cleric", value: 10, tieOrder: 1 })] };
-    const ctx = (s: RoomState) => ({ settings: s.meta.settings, bounds: s.scenes.s1!.bounds, tokens: s.tokens });
+    const ctx = (s: RoomState) => ({ settings: s.meta.settings, bounds: s.scenes.s1!.bounds, grid: SQUARES, tokens: s.tokens });
     const covered = (s: RoomState) => creaturesInArea(s.templates.sg!, [s.tokens.g1!], ctx(s));
     assert.deepEqual(covered(state), [], "the goblin stands just past its edge");
     const grown = apply(state, { t: "token.update", tokenId: "cleric", patch: { size: "huge", x: 4, y: 4 } });

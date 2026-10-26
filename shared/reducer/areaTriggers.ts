@@ -5,9 +5,12 @@ import { MAX_NAME, type Op } from "../protocol.ts";
 import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
-import { pieceReach, placedOnTrace, routePoints, type RoutePoint } from "../rules/route.ts";
+import { tokenRefHex } from "../rules/footprint.ts";
+import { hexDistance } from "../rules/hex.ts";
+import { hexPieceSpot, pieceReach, placedOnTrace, routePoints, type RoutePoint } from "../rules/route.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
+import { sceneGrid, SQUARES } from "../rules/grid.ts";
 
 /**
  * Reminders that an area hits a creature again (features section 9): the
@@ -68,6 +71,7 @@ function contextOf(state: RoomState, sceneId: string): AreaContext | null {
   return {
     settings: state.meta.settings,
     bounds: scene.bounds,
+    grid: sceneGrid(scene),
     // Keyed on the scene's chunk objects and automatic walls rule, never on the walls version (walls.ts).
     walls: sceneWalls(scene, state.buildChunks),
     tokens: state.tokens as Readonly<Record<string, AreaToken>>,
@@ -291,13 +295,32 @@ function alongWalkBeforeV14(after: RoomState, walk: Walked): RoomState[] {
  * stands with the footprint its walk's trace has at each point, as its
  * path's visibility reads it (route.ts onTrace): its own walk's, or the
  * one its holder takes it along by.
+ *
+ * On a hex scene a straight leg's reach is the larger of its hex steps,
+ * between its ends' reference hexes, and its vertical steps, and each point
+ * stands on the hex line's hex at its fraction, its elevation even between
+ * the ends (docs/design-v1-hex-grids.md 4.4). So a creature rising through
+ * a sphere on a steep diagonal enters it, and the sweep reads the same
+ * hexes as the walk's spots.
  */
 function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, routed: boolean): RoomState[] {
   const fpc = after.meta.settings.feetPerCell;
   const { named, all } = moved.walks;
+  const gridOf = (walk: MovedToken) => {
+    const scene = after.scenes[walk.to.sceneId];
+    return scene ? sceneGrid(scene) : SQUARES;
+  };
+  // The size a straight leg's hexes are read at: its walker where the leg starts.
+  const walkerOf = (walk: MovedToken) => walk.trace[0] ?? after.tokens[walk.tokenId]!;
   // The spot at progress `f` along piece `piece` (1 the first) of a walk, with which of its trace's walkers stands there.
   const at = (walk: MovedToken, piece: number, f: number): { spot: RoutePoint; piece: number; end: boolean } => {
     const points = walk.route;
+    const g = gridOf(walk);
+    if (!routed && g.shape === "hex") {
+      const a = points[0]!;
+      const b = points[points.length - 1]!;
+      return { spot: { ...hexPieceSpot(g, walkerOf(walk), a, b, f), elevation: lerp(a.elevation, b.elevation, f) }, piece: 0, end: f >= 1 };
+    }
     if (!routed) return { spot: lerpPoint(points[0]!, points[points.length - 1]!, f), piece: 0, end: f >= 1 };
     if (piece >= points.length) return { spot: points[points.length - 1]!, piece: points.length - 2, end: true };
     return { spot: lerpPoint(points[piece - 1]!, points[piece]!, f), piece: piece - 1, end: f >= 1 };
@@ -326,7 +349,12 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
     let reach = 0;
     for (const walk of named) {
       if (walk.from.sceneId !== walk.to.sceneId) continue;
-      reach = Math.max(reach, pieceReach(walk.from, walk.to, fpc));
+      const g = gridOf(walk);
+      if (g.shape === "hex") {
+        const walker = walkerOf(walk);
+        const steps = hexDistance(g, tokenRefHex(g, { ...walker, x: walk.from.x, y: walk.from.y }), tokenRefHex(g, { ...walker, x: walk.to.x, y: walk.to.y }));
+        reach = Math.max(reach, steps, Math.abs(walk.to.elevation - walk.from.elevation) / fpc);
+      } else reach = Math.max(reach, pieceReach(walk.from, walk.to, fpc));
     }
     const points = Math.min(MAX_SWEEP_POINTS, Math.max(1, Math.ceil(reach / SWEEP_STEP)));
     for (let k = 1; k < points; k++) out.push(place(1, k / points));

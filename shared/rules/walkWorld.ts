@@ -273,6 +273,8 @@ function areaContext(state: RoomState, token: Token, shown: ReadonlyMap<string, 
   return {
     settings: state.meta.settings,
     bounds: scene?.bounds ?? { w: 0, h: 0 },
+    // Areas that slow a walk are square until hex grids' phase H2, which refuses routes on hexes.
+    grid: SQUARES,
     walls: scene ? sceneWalls(scene, asPlayers ? playersChunks(state, scene.id) : state.buildChunks) : null,
     tokens: Object.fromEntries([...shown].map(([id, t]) => [id, t as AreaToken])),
   };
