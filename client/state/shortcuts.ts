@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import type { Token } from "#shared/model.ts";
 import { drawsAllowed } from "#shared/permissions.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import { placedOnHex, tokenRefHex, type PlacedToken } from "#shared/rules/footprint.ts";
+import type { HexGrid } from "#shared/rules/hex.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
 import { popoverSlot } from "../components/popoverRules.ts";
 import { keyChanges, useKeyChanges } from "../features/device/settings.ts";
@@ -77,6 +79,20 @@ export function isTextField(target: unknown): boolean {
   if (tag === "TEXTAREA" || tag === "SELECT") return true;
   if (tag !== "INPUT") return false;
   return !NOT_TYPED.has(typeof el.type === "string" ? el.type.toLowerCase() : "text");
+}
+
+/**
+ * Where an arrow key's step takes a token on a hex scene
+ * (docs/design-v1-hex-grids.md HX-D15): its reference hex moves one along
+ * the lattice's own numbering. On hex rows Left and Right go along the row,
+ * and Up and Down take the same column's hex in the next row, which lies
+ * right of straight from an even row and left of it from an odd one, so
+ * presses zigzag and keep to one column. Hex columns mirror it. `step` is
+ * the Top-down step the view gives (canvas/boardPick.ts nudgeStep).
+ */
+export function hexNudge(g: HexGrid, token: PlacedToken, step: readonly [number, number]): { x: number; y: number } {
+  const ref = tokenRefHex(g, token);
+  return placedOnHex(g, token, { col: ref.col + step[0], row: ref.row + step[1] });
 }
 
 /** The groups whose arrow and Page keys move their own choice, value, tab or item, and the split's bar, whose grip is a separator they move (docs/design-v1-split-panel.md 9.1). */
@@ -400,7 +416,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     id: "nudge",
     keys: "Arrow keys",
-    does: "Move the selected tokens one square",
+    does: "Move the selected tokens one square, or one hex on a hex scene",
     roles: ["dm", "player"],
     match: keyIs("ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"),
     navigation: true,

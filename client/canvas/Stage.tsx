@@ -6,7 +6,7 @@ import { Layer, Stage } from "react-konva";
 import { DEFAULT_SETTINGS, type RoomState, type Scene, type Token } from "#shared/model.ts";
 import { holderOf as linkedHolder, linkHolds } from "#shared/rules/attach.ts";
 import { labelBox } from "#shared/rules/labels.ts";
-import { sceneGrid } from "#shared/rules/grid.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { activeTool, type ToolContext, type ToolDef, type ToolPointer } from "../features/tools.ts";
 import { LabelPaneHost } from "../features/builder/LabelPaneHost.tsx";
 import { ReadoutHost } from "../features/builder/heights/ReadoutHost.tsx";
@@ -72,7 +72,7 @@ import { mapFocusSlot, spaceMovesMap } from "../pages/mapFocus.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
 import { addsToSelection, barDismiss, frontToBack, nextUnderTap } from "../state/selection.ts";
-import { stageKeysSlot } from "../state/shortcuts.ts";
+import { hexNudge, stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen, type Opening } from "../state/types.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
@@ -1004,9 +1004,11 @@ export function MapStage(props: {
         return;
       }
       const moved = parts.lead;
-      // Arrows move by the screen in Isometric (6.5).
-      const [sx, sy] = nudgeStep(shownRef.current, dx, dy);
-      const node = { x: () => moved.x + sx, y: () => moved.y + sy, position: () => {} };
+      // Arrows move by the screen in Isometric (6.5), and one hex on a hex scene.
+      const step = nudgeStep(shownRef.current, dx, dy);
+      const grid = sceneGrid(sceneRef.current);
+      const to = isHex(grid) ? hexNudge(grid, moved, step) : { x: moved.x + step[0], y: moved.y + step[1] };
+      const node = { x: () => to.x, y: () => to.y, position: () => {} };
       dragStopsRef.current.press(node, moved, parts.named);
     };
     // A tool's key moves nothing of the tool's while it follows a pointer (docs/design-v1-tool-cycle.md 2.7).

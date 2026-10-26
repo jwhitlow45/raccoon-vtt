@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import type { ClientOp } from "#shared/protocol.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex, type PlacedToken } from "#shared/rules/footprint.ts";
+import { hexCenter, hexDistance, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { popoverSlot } from "../components/popoverRules.ts";
 import { setKeyChanges } from "../features/device/settings.ts";
 import { areaSlot } from "../features/areas/store.ts";
@@ -9,6 +11,7 @@ import { newDraft } from "../features/areas/placement.ts";
 import { builderSlot } from "../features/builder/store.ts";
 import { drawSlot } from "../features/drawings/store.ts";
 import { areaCycle, builderCycle, drawCycle, fogCycle, placeCycle, rulerCycle, SPELL_HELD, trapCycle, type ToolCycle } from "../features/toolChoices.ts";
+import { footprint, snapPosition } from "../lib/scene.ts";
 import { RoomScope } from "./scope.ts";
 import { toolbarSlot, toolVoiceSlot } from "./toolbar.ts";
 import { keyLabel, sameKey, type KeyMap } from "./keyBindings.ts";
@@ -16,6 +19,7 @@ import {
   BEHAVIORS,
   DEFAULT_KEYS,
   deletedText,
+  hexNudge,
   isTextField,
   keyText,
   sheetSections,
@@ -1035,6 +1039,52 @@ describe("a second press of the tool's key moves through its main choice (docs/d
         const at = cycle.now(r.env)!.options.findIndex((o) => o.value === cycle.now(r.env)!.value);
         assert.equal(at, (((start + net) % n) + n) % n, `${id} after press ${i + 1}`);
       }
+    }
+  });
+});
+
+describe("arrow keys on a hex scene (docs/design-v1-hex-grids.md HX-D15)", () => {
+  const press = (g: HexGrid, token: PlacedToken, step: readonly [number, number], times: number) => {
+    const seen: Hex[] = [tokenRefHex(g, token)];
+    let at = token;
+    for (let i = 0; i < times; i++) {
+      at = { ...at, ...hexNudge(g, at, step) };
+      assert.deepEqual(snapPosition(g, at.x, at.y, footprint(at)), { x: at.x, y: at.y }, "on its anchor, as a drop lands");
+      seen.push(tokenRefHex(g, at));
+      assert.equal(hexDistance(g, seen[i]!, seen[i + 1]!), 1, "one hex a press");
+    }
+    return seen;
+  };
+  const medium = (g: HexGrid, hex: Hex): PlacedToken => ({ size: "medium", ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, hex) });
+
+  test("Arrow Up five times on hex rows keeps to one column, right of straight from an even row and left from an odd one", () => {
+    const g: HexGrid = { shape: "hex", orient: "rows" };
+    const seen = press(g, medium(g, { col: 4, row: 6 }), [0, -1], 5);
+    assert.deepEqual(seen.map((h) => h.col), [4, 4, 4, 4, 4, 4]);
+    assert.deepEqual(seen.map((h) => h.row), [6, 5, 4, 3, 2, 1]);
+    const xs = seen.map((h) => hexCenter(g, h).x);
+    assert.deepEqual(xs.slice(1).map((x, i) => Math.sign(x - xs[i]!)), [1, -1, 1, -1, 1], "a zigzag up one column");
+    assert.deepEqual(press(g, medium(g, { col: 4, row: 6 }), [1, 0], 2).map((h) => [h.col, h.row]), [[4, 6], [5, 6], [6, 6]], "Right goes along the row");
+  });
+
+  test("hex columns mirror it: Left five times keeps to one row, and Up goes straight up its column", () => {
+    const g: HexGrid = { shape: "hex", orient: "columns" };
+    const seen = press(g, medium(g, { col: 6, row: 4 }), [-1, 0], 5);
+    assert.deepEqual(seen.map((h) => h.row), [4, 4, 4, 4, 4, 4]);
+    assert.deepEqual(seen.map((h) => h.col), [6, 5, 4, 3, 2, 1]);
+    const ys = seen.map((h) => hexCenter(g, h).y);
+    assert.deepEqual(ys.slice(1).map((y, i) => Math.sign(y - ys[i]!)), [1, -1, 1, -1, 1], "the mirror of the rows' zigzag");
+    const up = press(g, medium(g, { col: 6, row: 4 }), [0, -1], 3).map((h) => hexCenter(g, h).x);
+    assert.ok(up.every((x) => x === up[0]), "straight up");
+  });
+
+  test("a Large creature moves its top hex one hex, and keeps its three", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      const g: HexGrid = { shape: "hex", orient };
+      const ogre: PlacedToken = { size: "large", ...placedOnHex(g, { size: "large", x: 0, y: 0 }, { col: 5, row: 5 }) };
+      const seen = press(g, ogre, [0, 1], 4);
+      assert.deepEqual(seen.map((h) => h.row), [5, 6, 7, 8, 9]);
+      assert.equal(occupiedHexes(g, { ...ogre, ...hexNudge(g, ogre, [0, 1]) }).length, 3);
     }
   });
 });

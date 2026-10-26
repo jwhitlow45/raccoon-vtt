@@ -506,7 +506,7 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | Ctrl+Shift+Z | Redo what you undid | everyone |
 | V, R, A, D, P | Select, Ruler, Area, Draw, Ping | everyone (Draw only for players who may draw) |
 | T, M, X, F, B, G | Add token, Pin, Trap, Fog, Builder, Grid | DM |
-| Arrow keys | Move the selected tokens one square. Each press is a move, so walls stop it and it adds to the turn's path | anyone, on tokens they may move |
+| Arrow keys | Move the selected tokens one square, or one hex on a hex scene. Each press is a move, so walls stop it and it adds to the turn's path | anyone, on tokens they may move |
 | Page Up, Page Down | Raise or lower the selected tokens 5 ft | anyone, on tokens they may change |
 | H | Hide or show the selected tokens | DM |
 | L | Lock or unlock the selected tokens | DM |
