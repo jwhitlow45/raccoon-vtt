@@ -338,7 +338,18 @@ function IsoBoardImpl(props: IsoBoardProps) {
    * stands or lies by the stand rule. Hidden, it lays out nothing.
    */
   const groundAt = useCallback((x: number, y: number) => (x >= 0 && y >= 0 && x < w && y < h ? heights.at(Math.floor(x), Math.floor(y)) : 0), [heights, w, h]);
-  const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, byStandee.get(t.id)), [turn, byStandee]);
+  // The frames alone, kept while none moves, so a drag's start, which marks its standee kept, lays nothing out again.
+  const framesRef = useRef<ReadonlyMap<string, { frame: VBox; ring: VBox }> | null>(null);
+  const frames = useMemo(() => {
+    const next = new Map(standees.map((s) => [s.id, { frame: s.frame, ring: s.ring }]));
+    const prev = framesRef.current;
+    const same = prev !== null && prev.size === next.size && [...next].every(([id, f]) => {
+      const p = prev.get(id);
+      return p !== undefined && sameBox(p.frame, f.frame) && sameBox(p.ring, f.ring);
+    });
+    return same ? prev : (framesRef.current = next);
+  }, [standees]);
+  const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id)), [turn, frames]);
   const viewPills = useMemo(() => props.text.pills.map((p) => viewPill(p, isometric(turn), groundAt)), [props.text.pills, turn, groundAt]);
   const labelInk = useMemo(
     () => labels.map((l) => mapLabelInk(l, isometric(turn), uprightIds.has(l.id), groundAt(l.x, l.y), measureLabel)),
@@ -570,6 +581,10 @@ const UprightLabels = memo(function UprightLabels(props: { labels: readonly Pick
 function terrainAt(chunks: Readonly<Record<string, BuildChunk | undefined>>, sceneId: string, x: number, y: number): TerrainId | null {
   const chunk = chunks[`${sceneId}:${Math.floor(x / CHUNK_CELLS)},${Math.floor(y / CHUNK_CELLS)}`];
   return chunk?.cells[`${x},${y}`] ?? null;
+}
+
+function sameBox(a: VBox, b: VBox): boolean {
+  return a.x0 === b.x0 && a.y0 === b.y0 && a.x1 === b.x1 && a.y1 === b.y1;
 }
 
 function sameRect(a: { x: number; y: number; width: number; height: number } | undefined, b: { x: number; y: number; width: number; height: number } | undefined): boolean {
