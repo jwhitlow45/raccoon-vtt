@@ -1,5 +1,7 @@
 import { FOG_SUBCELLS } from "#shared/model.ts";
 import { pillReach, type PillProps } from "../features/measure/pillPlace.ts";
+import { liftInPlane } from "./isoPlace.ts";
+import type { IsoGround } from "./relief/context.ts";
 import type { CellBox, FogView } from "./relief/fogView.ts";
 import { boxStands, lineStands, lineSubcells } from "./relief/stand.ts";
 
@@ -67,3 +69,42 @@ export function auraClip(fog: FogView, box: CellBox): Rect[] | null {
   if (fog.all || fog.boxClear(box)) return null;
   return fog.revealedRects(box);
 }
+
+/**
+ * The clip for a mark drawn point by point at its drawn height in the drag
+ * layer (a stroke being drawn): the revealed sub-cells its box touches, in
+ * the ground plane's units, each row's run cut where the drawn ground
+ * changes and lifted by it, so the mark draws only on the tops of revealed
+ * ground. Null when it shows whole: a viewer who sees all the ground, or a
+ * box with every sub-cell revealed on one ground, where the mark lies on
+ * one plane inside its box.
+ */
+export function liftedClip(iso: Pick<IsoGround, "fog" | "turn" | "ground">, box: CellBox): Rect[] | null {
+  const { fog } = iso;
+  if (fog.all) return null;
+  const cellAt = (x: number, y: number) => iso.ground(x + 0.5, y + 0.5);
+  if (fog.boxClear(box)) {
+    const first = cellAt(Math.floor(box.x0), Math.floor(box.y0));
+    let flat = true;
+    for (let y = Math.floor(box.y0); flat && y < Math.max(Math.floor(box.y0) + 1, Math.ceil(box.y1)); y++) {
+      for (let x = Math.floor(box.x0); flat && x < Math.max(Math.floor(box.x0) + 1, Math.ceil(box.x1)); x++) flat = cellAt(x, y) === first;
+    }
+    if (flat) return null;
+  }
+  const out: Rect[] = [];
+  for (const r of fog.revealedRects(box)) {
+    const cy = Math.floor(r.y);
+    const end = r.x + r.w;
+    let a = r.x;
+    while (a < end) {
+      const g = cellAt(Math.floor(a), cy);
+      let b = Math.min(end, Math.floor(a) + 1);
+      while (b < end && cellAt(b, cy) === g) b = Math.min(end, b + 1);
+      const d = liftInPlane(iso.turn, g);
+      out.push({ x: a + d.x, y: r.y + d.y, w: b - a, h: r.h });
+      a = b;
+    }
+  }
+  return out;
+}
+

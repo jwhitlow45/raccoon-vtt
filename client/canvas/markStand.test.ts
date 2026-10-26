@@ -10,7 +10,9 @@ import { ghostTagStands } from "./relief/stand.ts";
 import { textDrawingBox } from "../features/drawings/textBox.ts";
 import { textCells } from "../features/drawings/geometry.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
-import { auraClip, markStands, pillStands, tetherShows } from "./markStand.ts";
+import { auraClip, liftedClip, markStands, pillStands, tetherShows } from "./markStand.ts";
+import { liftInPlane } from "./isoPlace.ts";
+import type { Turn } from "../lib/view.ts";
 import { FogView } from "./relief/fogView.ts";
 
 /**
@@ -279,5 +281,82 @@ describe("the stand rule for the board's marks", () => {
     assert.ok(!show.whole && show.clip.length > 0 && show.clip.every((r) => !(r.x === 3 && r.y === 2)));
     const clip = auraClip(fog, { x0: 2, y0: 1, x1: 5, y1: 4 });
     assert.ok(clip !== null && clip.every((r) => !(r.y === 2 && r.x <= 3 && r.x + r.w > 3)));
+  });
+
+  test("property: a mark drawn point by point at its drawn height (a stroke being drawn) shows whole only over revealed sub-cells on one ground, and clipped only on revealed tops, each lifted by its own ground", () => {
+    const random = rng(33006);
+    let whole = 0;
+    let clipped = 0;
+    for (let round = 0; round < 60; round++) {
+      const scene = randomScene(random);
+      const fog = new FogView(scene.tiles, scene.id, scene.bounds);
+      const mask = revealedMask(scene.bounds, scene.id, scene.tiles);
+      const turn = Math.floor(random() * 4) as Turn;
+      // A raised block and a pit somewhere, so boxes cross ledges.
+      const bx = Math.floor(random() * scene.bounds.w);
+      const by = Math.floor(random() * scene.bounds.h);
+      const ground = (x: number, y: number) => {
+        const cx = Math.floor(x);
+        const cy = Math.floor(y);
+        return cx >= bx && cx < bx + 4 && cy >= by && cy < by + 3 ? 3 : cx === bx - 1 ? -1 : 0;
+      };
+      const iso = { fog, turn, ground };
+      /** Every point of a box, sampled as the oracle samples, on ground `g`. */
+      const onGround = (u: { x0: number; y0: number; x1: number; y1: number }, g: number) => {
+        for (let k = 0; k <= 48; k++) {
+          for (let j = 0; j <= 48; j++) if (ground(u.x0 + (u.x1 - u.x0) * (0.0005 + (0.999 * k) / 48), u.y0 + (u.y1 - u.y0) * (0.0005 + (0.999 * j) / 48)) !== g) return false;
+        }
+        return true;
+      };
+      for (let i = 0; i < 10; i++) {
+        const x0 = random() * scene.bounds.w - 2;
+        const y0 = random() * scene.bounds.h - 2;
+        const box = { x0, y0, x1: x0 + 0.25 + random() * (random() < 0.5 ? 1 : 8), y1: y0 + 0.25 + random() * (random() < 0.5 ? 1 : 8) };
+        const clip = liftedClip(iso, box);
+        if (clip === null) {
+          whole++;
+          assert.ok(oracleCovers(mask, box), `round ${round}: a whole mark covered fog`);
+          assert.ok(onGround(box, ground(box.x0 + 0.0005, box.y0 + 0.0005)), `round ${round}: a whole mark crossed a ledge`);
+          continue;
+        }
+        clipped++;
+        let area = 0;
+        for (const r of clip) {
+          area += r.w * r.h;
+          // Some ground lifts it back onto cells of that ground, every sub-cell of them revealed.
+          const fits = [-1, 0, 3].some((g) => {
+            const d = liftInPlane(turn, g);
+            const u = { x0: r.x - d.x, y0: r.y - d.y, x1: r.x - d.x + r.w, y1: r.y - d.y + r.h };
+            return oracleCovers(mask, u) && onGround(u, g);
+          });
+          assert.ok(fits, `round ${round}: a clip piece lies on fog or on another ground: ${JSON.stringify(r)}`);
+        }
+        // And it keeps every revealed sub-cell the box touches.
+        let open = 0;
+        for (let sy = Math.floor(box.y0 * FOG_SUBCELLS); sy < Math.ceil(box.y1 * FOG_SUBCELLS); sy++) for (let sx = Math.floor(box.x0 * FOG_SUBCELLS); sx < Math.ceil(box.x1 * FOG_SUBCELLS); sx++) if (revealedAt(mask, sx, sy)) open++;
+        assert.ok(Math.abs(area - open / FOG_SUBCELLS ** 2) < 1e-9, `round ${round}: ${area} of ${open} sub-cells kept`);
+      }
+    }
+    assert.ok(whole > 10 && clipped > 50, `${whole} whole and ${clipped} clipped`);
+  });
+
+  test("a revealed box across a ledge clips anyway, each piece lifted by its own ground, and the DM's never clips", () => {
+    const fog = fogOf([[0, 0, 10, 10]]);
+    const ground = (x: number) => (x < 5 ? 2 : 0);
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      assert.equal(liftedClip({ fog, turn, ground }, { x0: 5, y0: 1, x1: 8, y1: 3 }), null, "on one ground, it draws whole");
+      const clip = liftedClip({ fog, turn, ground }, { x0: 3, y0: 1, x1: 7, y1: 2 })!;
+      const up = liftInPlane(turn, 2);
+      assert.deepEqual(
+        clip.slice(0, 2),
+        [
+          { x: 3 + up.x, y: 1 + up.y, w: 2, h: 0.25 },
+          { x: 5, y: 1, w: 2, h: 0.25 },
+        ],
+        `turn ${turn}`,
+      );
+      assert.equal(clip.length, 8, "two pieces on each of the four sub-rows");
+      assert.equal(liftedClip({ fog: new FogView(null, "s1", { w: 16, h: 16 }), turn, ground }, { x0: 3, y0: 1, x1: 7, y1: 2 }), null);
+    }
   });
 });
