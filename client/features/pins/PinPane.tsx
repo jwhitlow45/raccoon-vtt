@@ -24,7 +24,7 @@ import { PaneFooter } from "../builder/PaneFooter.tsx";
 import { accessText, groupPages } from "../journal/draft.ts";
 import { journalSlot } from "../journal/store.ts";
 import { closedAnswerText, editDraft, pendingCloseText, saveAnswered, saveNotSent, saveSent, saveState } from "../journal/pendingSave.ts";
-import { pinAudience, pinCommit, pinDraftOf, pinSaveAnswer, pinScreenBox, withDmOnly, withPage, withPageGone, type PinDraft } from "./rules.ts";
+import { pinAudience, pinCommit, pinDraftOf, pinSaveAnswer, pinScreenBox, withDmOnly, withPage, withPageGone, type PinDraft, type PinView } from "./rules.ts";
 
 const EMPTY_PAGES: Record<string, JournalPage> = {};
 const EMPTY_MEMBERS: Record<string, Member> = {};
@@ -40,7 +40,7 @@ const EMPTY_MEMBERS: Record<string, Member> = {};
  * the same save (rules.ts withPage), so a pin never reaches more people than
  * before without the DM's say.
  */
-export default function PinPane(props: { pin: Pin; camera: Camera; viewport: Size; insets: Insets; onClose(): void }) {
+export default function PinPane(props: { pin: Pin; camera: Camera; viewport: Size; insets: Insets; shown?: PinView; onClose(): void }) {
   const { pin } = props;
   const paneRef = useRef<HTMLDivElement>(null);
   // Escape and Android Back close the way × does, through the editor's own close, which knows whether Done is still pending and says so (W5-ASTRA-07).
@@ -74,7 +74,7 @@ export default function PinPane(props: { pin: Pin; camera: Camera; viewport: Siz
     return () => observer.disconnect();
   }, []);
 
-  const box = pinScreenBox(pin, props.camera);
+  const box = pinScreenBox(pin, props.camera, props.shown);
   // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars, and a toast that shows meanwhile starts under its header (pages/RoomDock.tsx usePaneDock).
   // As a card it keeps left of the column's cards, or under the summary row it has the column show where the lane leaves it no room (labelEdit.ts panePlacement).
   const sheet = props.viewport.width < SHEET_BELOW_PX;

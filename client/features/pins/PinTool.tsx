@@ -8,7 +8,9 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { OptButton, OptionsStrip, PopoverSwatches, ValueChip } from "../measure/controls.tsx";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { pinAt, pinToolTap } from "./rules.ts";
+import { boardPickOf, pressAt, viewGround } from "../../canvas/boardPick.ts";
+import { viewToScreen } from "../../lib/camera.ts";
+import { pinAt, pinTip, pinToolTap } from "./rules.ts";
 import { pinSlot } from "./store.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
@@ -58,8 +60,12 @@ function place(ctx: ToolContext, p: ToolPointer, pageId: string | null): void {
 function onDown(p: ToolPointer, ctx: ToolContext): void {
   const slot = ctx.scope.get(pinSlot);
   const placing = slot.store.getState().placing !== null;
-  const hit = placing ? null : pinAt(scenePins(ctx), ctx.camera(), p.screen);
-  slot.gesture = { start: p.screen, hit: hit?.id ?? null, grab: hit ? { dx: p.world.x - hit.x, dy: p.world.y - hit.y } : null, moved: false };
+  // A pin stands at the drawn ground under it in Isometric, and is pressed and dragged by its tip there (design 6.4).
+  const pick = boardPickOf(ctx);
+  const shown = viewGround(pick);
+  const hit = placing ? null : pinAt(scenePins(ctx), pick.camera, p.screen, shown);
+  const tip = hit ? viewToScreen(pick.camera, pinTip(hit, shown)) : null;
+  slot.gesture = { start: p.screen, hit: hit?.id ?? null, grab: tip ? { dx: p.screen.x - tip.x, dy: p.screen.y - tip.y } : null, moved: false };
 }
 
 function onMove(p: ToolPointer, ctx: ToolContext): void {
@@ -68,7 +74,10 @@ function onMove(p: ToolPointer, ctx: ToolContext): void {
   if (!g) return;
   if (!g.moved && Math.hypot(p.screen.x - g.start.x, p.screen.y - g.start.y) < TAP_SLOP_PX) return;
   g.moved = true;
-  if (g.hit && g.grab) slot.store.setState({ drag: { id: g.hit, x: round(p.world.x - g.grab.dx), y: round(p.world.y - g.grab.dy) } });
+  if (!g.hit || !g.grab) return;
+  // The tip follows the finger by the offset it was grabbed at, onto the drawn ground under it.
+  const at = pressAt(boardPickOf(ctx), { x: p.screen.x - g.grab.dx, y: p.screen.y - g.grab.dy });
+  slot.store.setState({ drag: { id: g.hit, x: round(at.x), y: round(at.y) } });
 }
 
 function onUp(p: ToolPointer, ctx: ToolContext): void {

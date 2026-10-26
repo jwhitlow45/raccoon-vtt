@@ -78,7 +78,7 @@ import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/v
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { footAnchor, headAnchor } from "./anchors.ts";
-import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, viewGround, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
 import { cappedBase } from "./relief/standee.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
@@ -1761,7 +1761,7 @@ export function MapStage(props: {
           ) : null}
           {role === "dm" && pick ? <LabelPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} pick={pick} /> : null}
           {role === "dm" ? <LightPaneHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
-          {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
+          {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} {...(pick ? { shown: viewGround(pick) } : {})} /> : null}
           {role === "dm" ? <TrapPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
           {pick ? <DoorPillHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} pick={pick} /> : null}
           {pick ? <ReadoutHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} pick={pick} /> : null}

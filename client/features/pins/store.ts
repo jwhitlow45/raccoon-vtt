@@ -23,7 +23,7 @@ export type PinToolState = {
 /** One Room page's pin tool, pane and popover (state/scope.ts), so "view as a player" keeps its own. */
 export const pinSlot = scopeSlot(() => ({
   store: createStore<PinToolState>(() => ({ paneId: null, placing: null, drag: null, color: null, dmOnly: true, popover: null })),
-  /** The pointer gesture in progress with the Pin tool. */
+  /** The pointer gesture in progress with the Pin tool: where it started, the pin it grabbed, and the press's offset from that pin's tip on screen. */
   gesture: null as { start: { x: number; y: number }; hit: string | null; grab: { dx: number; dy: number } | null; moved: boolean } | null,
 }));
 

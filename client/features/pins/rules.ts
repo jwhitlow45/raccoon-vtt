@@ -95,9 +95,9 @@ export function pinTapCounts(input: { start: Point; end: Point; several: boolean
   return Math.hypot(input.end.x - input.start.x, input.end.y - input.start.y) <= TAP_SLOP_PX;
 }
 
-/** The marker's box on screen, for placing the pane beside it. */
-export function pinScreenBox(pin: Pick<Pin, "x" | "y">, camera: Camera): { x0: number; y0: number; x1: number; y1: number } {
-  const tip = viewToScreen(camera, toView(TOP_DOWN, pin));
+/** The marker's box on screen, for placing the pane beside it: its tip where the board stands it (`pinTip`), at the drawn ground in Isometric. */
+export function pinScreenBox(pin: Pick<Pin, "x" | "y">, camera: Camera, shown: PinView = FLAT): { x0: number; y0: number; x1: number; y1: number } {
+  const tip = viewToScreen(camera, pinTip(pin, shown));
   return { x0: tip.x - HEAD_RADIUS_PX, y0: tip.y - PIN_HEIGHT_PX, x1: tip.x + HEAD_RADIUS_PX, y1: tip.y };
 }
 
