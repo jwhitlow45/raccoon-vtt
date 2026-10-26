@@ -285,6 +285,18 @@ function shapeWords(shape: GridShape | "squares", other: GridShape | "squares"):
 export const OWN_SQUARE_GRID = "This scene came with its own square grid from its file.";
 
 /**
+ * The refusal of a map whose first grid line lies before the image on a
+ * hex scene (D-261026-8): Line up grid reduces the origin into the image
+ * (section 4.1), so a negative one stays the mark of a file's own grid.
+ */
+export const HEX_ORIGIN = "On hexes the map's grid starts at or after the image's top-left corner.";
+
+/** Whether a scene is on hexes with a map whose origin lies before the image, which no hex scene may have. */
+export function hexOriginBefore(scene: Pick<Scene, "gridShape" | "map">): boolean {
+  return isHex(sceneGrid(scene)) && scene.map !== undefined && (scene.map.originPx.x < 0 || scene.map.originPx.y < 0);
+}
+
+/**
  * Why a scene cannot switch to `to`, in the words the Grid settings show
  * (section 7): "This scene has difficult ground and 2 traps on its
  * squares, which can't stand on hexes. Remove them to change the grid."

@@ -2,7 +2,7 @@ import { keys } from "../keys.ts";
 import type { Encounter, GridShape, MemberId, PathStop, RoomSettings, Scene, SceneVision, TurnStart } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
-import { OWN_SQUARE_GRID, cameWithGrid, gridOfShape, switchRefusal } from "../rules/grid.ts";
+import { HEX_ORIGIN, OWN_SQUARE_GRID, gridOfShape, hexOriginBefore, switchRefusal } from "../rules/grid.ts";
 import { setGridWithPhases, setMapWithPhases, withPhases } from "./phases.ts";
 import { forgetExplored, forgetHolder } from "./map.ts";
 import { invalid, gone, type Tx } from "./tx.ts";
@@ -202,10 +202,20 @@ export function sceneCreate(tx: Tx, op: OpOf<"scene.create">): void {
   const shape = input.gridShape === undefined ? undefined : storedShape(input.gridShape);
   if (shape !== undefined) {
     // A Universal VTT scene's walls stand in its file's squares (docs/design-v1-hex-grids.md HX-D13).
-    if (cameWithGrid(scene)) throw invalid(OWN_SQUARE_GRID);
+    if (scene.gridFromFile) throw invalid(OWN_SQUARE_GRID);
     scene.gridShape = shape;
   }
-  tx.write(keys.scene(scene.id), scene);
+  tx.write(keys.scene(scene.id), onHexGrid(scene));
+}
+
+/**
+ * A scene as an op leaves it, refused when it is on hexes with its map's
+ * origin before the image (D-261026-8), so `cameWithGrid` never reads a hex
+ * scene as a file's own square grid.
+ */
+function onHexGrid(scene: Scene): Scene {
+  if (hexOriginBefore(scene)) throw invalid(HEX_ORIGIN);
+  return scene;
 }
 
 export function sceneUpdate(tx: Tx, op: OpOf<"scene.update">): void {
@@ -286,21 +296,21 @@ export function sceneReorder(tx: Tx, op: OpOf<"scene.reorder">): void {
 export function sceneSetMap(tx: Tx, op: OpOf<"scene.setMap">): void {
   const scene = tx.scene(op.sceneId);
   if (scene.phases) {
-    tx.write(keys.scene(scene.id), setMapWithPhases(scene, op.map));
+    tx.write(keys.scene(scene.id), onHexGrid(setMapWithPhases(scene, op.map)));
     return;
   }
   const next: Scene = { ...scene };
   if (op.map === null) delete next.map;
   else next.map = op.map;
-  tx.write(keys.scene(scene.id), next);
+  tx.write(keys.scene(scene.id), onHexGrid(next));
 }
 
 export function sceneSetGrid(tx: Tx, op: OpOf<"scene.setGrid">): void {
   const scene = tx.scene(op.sceneId);
   if (!scene.map) throw invalid("the scene has no map to align");
   if (scene.phases) {
-    tx.write(keys.scene(scene.id), setGridWithPhases(scene, op));
+    tx.write(keys.scene(scene.id), onHexGrid(setGridWithPhases(scene, op)));
     return;
   }
-  tx.write(keys.scene(scene.id), { ...scene, map: { ...scene.map, cellPx: op.cellPx, originPx: op.originPx } });
+  tx.write(keys.scene(scene.id), onHexGrid({ ...scene, map: { ...scene.map, cellPx: op.cellPx, originPx: op.originPx } }));
 }

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { RoomState, Viewer } from "../model.ts";
 import { opSchema, type Op, type RestoreEntry, type TrapInput } from "../protocol.ts";
 import { applyOp, type ApplyResult } from "../reducer.ts";
-import { OWN_SQUARE_GRID } from "../rules/grid.ts";
+import { HEX_ORIGIN, OWN_SQUARE_GRID } from "../rules/grid.ts";
 import { env, room, template, token, trap } from "../testutil.ts";
 
 /*
@@ -58,8 +58,41 @@ describe("a new scene's shape (HX-D19)", () => {
   test("a scene with its own square grid from its file is never made on hexes", () => {
     assert.equal(refusal(room(), mat({ gridShape: "hexRows", gridFromFile: true })), OWN_SQUARE_GRID);
     const map = { assetId: "a1", widthPx: 700, heightPx: 700, cellPx: 70, originPx: { x: -20, y: 0 } };
-    assert.equal(refusal(room(), mat({ gridShape: "hexColumns", map })), OWN_SQUARE_GRID);
+    assert.equal(refusal(room(), mat({ gridShape: "hexColumns", map })), HEX_ORIGIN);
     assert.ok(run(room(), mat({ gridShape: "hexColumns", map: { ...map, originPx: { x: 20, y: 0 } } })).state.scenes.mat!.gridShape);
+    assert.ok(run(room(), mat({ map })).state.scenes.mat!.map, "a square scene keeps a negative origin, as an import's does");
+  });
+});
+
+describe("a hex scene's map origin is never negative (D-261026-8)", () => {
+  const map = { assetId: "a1", widthPx: 700, heightPx: 700, cellPx: 70, originPx: { x: 10, y: 10 } };
+  const hexMap = (): RoomState => room({ scenes: { ...room().scenes, s1: { ...room().scenes.s1!, gridShape: "hexRows", map } } });
+
+  test("a new map or a lined-up grid before the image is refused on hexes, and goes on squares", () => {
+    const before = { x: -5, y: 10 };
+    assert.equal(refusal(hexMap(), { t: "scene.setMap", sceneId: "s1", map: { ...map, originPx: before } }), HEX_ORIGIN);
+    assert.equal(refusal(hexMap(), { t: "scene.setGrid", sceneId: "s1", cellPx: 70, originPx: { x: 10, y: -1 } }), HEX_ORIGIN);
+    assert.ok(run(hexMap(), { t: "scene.setGrid", sceneId: "s1", cellPx: 70, originPx: { x: 0, y: 35 } }).state);
+    assert.ok(run(hexMap(), { t: "scene.setMap", sceneId: "s1", map: null }).state, "taking the map away");
+    const squares = room({ scenes: { ...room().scenes, s1: { ...room().scenes.s1!, map } } });
+    assert.equal(run(squares, { t: "scene.setGrid", sceneId: "s1", cellPx: 70, originPx: { x: 10, y: -1 } }).state.scenes.s1!.map!.originPx.y, -1);
+  });
+
+  test("with phases too: a lined-up grid or a new image before the image is refused on hexes", () => {
+    const phases = [
+      { id: "day", name: "Day", assetId: "a1", widthPx: 700, heightPx: 700 },
+      { id: "night", name: "Night", assetId: "a2", widthPx: 700, heightPx: 700 },
+    ];
+    const phased = run(hexMap(), { t: "scene.update", sceneId: "s1", patch: { phases } }).state;
+    assert.ok(phased.scenes.s1!.phaseGrid);
+    assert.equal(refusal(phased, { t: "scene.setGrid", sceneId: "s1", cellPx: 70, originPx: { x: -3, y: 0 } }), HEX_ORIGIN);
+    const unaligned = { ...phased, scenes: { ...phased.scenes, s1: { ...phased.scenes.s1!, phaseGrid: { ...phased.scenes.s1!.phaseGrid!, originPx: { x: -4, y: 0 } } } } };
+    assert.equal(refusal(unaligned, { t: "scene.setMap", sceneId: "s1", map: { ...map, assetId: "a3" } }), HEX_ORIGIN, "a hand-made backup's reference grid");
+  });
+
+  test("so a hex scene switched back to squares can always come back", () => {
+    const back = run(hexMap(), toHex("s1", "squares")).state;
+    assert.equal(run(back, toHex("s1", "hexColumns")).state.scenes.s1!.gridShape, "hexColumns");
   });
 });
 

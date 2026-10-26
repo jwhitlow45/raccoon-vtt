@@ -103,4 +103,16 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     ridden.tokens = { horse: token("horse", { size: "large" }), bree: token("bree", { attached: { to: "horse", kind: "ride" } }) };
     assert.match((parseRoomState(ridden) as { message: string }).message, /attached creature/);
   });
+
+  test("an import refuses a hex scene that reads as having come with its own square grid (D-261026-8)", () => {
+    const marked = hexRoom();
+    marked.scenes.s1 = scene("s1", { gridShape: "hexRows", gridFromFile: true });
+    assert.equal((parseRoomState(marked) as { message: string }).message, "scenes.s1: This scene came with its own square grid from its file.");
+    const before = hexRoom();
+    before.scenes.s1 = scene("s1", { gridShape: "hexColumns", map: { assetId: "a1", widthPx: 700, heightPx: 700, cellPx: 70, originPx: { x: -10, y: 0 } } });
+    assert.equal(parseRoomState(before).ok, false);
+    const square = room();
+    square.scenes.s1 = scene("s1", { gridFromFile: true, map: { assetId: "a1", widthPx: 700, heightPx: 700, cellPx: 70, originPx: { x: -10, y: 0 } } });
+    assert.ok(parseRoomState(square).ok, "a square import keeps its mark");
+  });
 });

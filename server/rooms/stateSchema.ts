@@ -41,7 +41,7 @@ import {
 } from "#shared/protocol.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { phaseMap, phaseProblem } from "#shared/reducer/phases.ts";
-import { sceneHolds, standsWords } from "#shared/rules/grid.ts";
+import { OWN_SQUARE_GRID, cameWithGrid, isHex, sceneGrid, sceneHolds, standsWords } from "#shared/rules/grid.ts";
 
 /**
  * The shape of a stored room state, for validating an imported `room.json`
@@ -888,6 +888,8 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
   // (docs/design-v1-hex-grids.md HX-D14), as every op leaves a room. A backup made by hand can break that, and the
   // rules would read its square keys as hexes.
   for (const scene of Object.values(state.scenes).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    // A hex scene never reads as a file's own square grid (D-261026-8), as `scene.create` and the map ops refuse it.
+    if (isHex(sceneGrid(scene)) && cameWithGrid(scene)) return { ok: false, message: `scenes.${scene.id}: ${OWN_SQUARE_GRID}` };
     const found = sceneHolds(state, scene);
     if (found) return { ok: false, message: `scenes.${scene.id}: ${standsWords(found, scene)}` };
   }
