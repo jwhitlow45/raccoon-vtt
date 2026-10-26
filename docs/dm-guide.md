@@ -327,7 +327,7 @@ Heights are easier to read when you can see them. The isometric view tilts the m
 
 ![The isometric view: the hall's raised dais with Thorn and Bree on it, the stair down from it, a goblin by the pit in the floor, an imp flying 20 ft up over its shadow, and the View menu open beside Fit.](dm-guide/isometric-menu.webp)
 
-**Choosing a view.** Each device chooses for itself. Press the **View** button in the top bar, beside **Fit**. Its menu offers **Follow the scene**, **Top-down** and **Isometric**. A choice holds for the whole room, every scene, until you pick **Follow the scene** again, and it is kept on that device alone, so choosing Isometric on your laptop changes nothing on your players' phones. On the narrowest phones at a large interface size, the View button moves into **Menu** as a **View** row, so Undo and Redo keep their place in the bar.
+**Choosing a view.** Each device chooses for itself. Press the **View** button in the top bar, beside **Fit**. Its menu offers **Follow the scene**, **Top-down** and **Isometric**. A choice holds for the whole room, every scene, until you pick **Follow the scene** again, and it is kept on that device alone, so choosing Isometric on your laptop changes nothing on your players' phones. On the narrowest phones at a large interface size, or when a wide top bar is crowded, the View button moves into **Menu** as a **View** row, so Undo and Redo keep their place in the bar.
 
 **Turning the map.** In Isometric, **Turn left** and **Turn right** in the same menu turn the map a quarter at a time, so a wall or a tall creature never hides what stands behind it for long. Each scene remembers its own turn. A creature hidden behind another can still be picked: tap the selected one again and the one behind it is selected instead.
 
@@ -341,7 +341,7 @@ Heights are easier to read when you can see them. The isometric view tilts the m
 - `Q` turns the map left, and `E` turns it right. In Top-down they say that turning needs the isometric view.
 - The arrow keys move the selection one square by the screen, whichever way the map is turned: Up moves it toward the map's edge that faces up and to the right.
 
-**What players see.** Isometric shows a player nothing more than Top-down does. Under the fog, nothing stands up: a creature, a wall or a label stands only where every bit of the ground under it is revealed to that player, and anything else lies flat under the fog as it always has. On your own device, a creature on ground your map shows as fogged draws dimmed, so you can tell at a glance what the players cannot see. On a scene where each player sees for themselves, ground the party has explored counts as revealed for this, just as your map draws it.
+**What players see.** Isometric shows a player nothing more than Top-down does. Under the fog, nothing stands up: a creature, a wall or a label stands only where every bit of the ground under it is revealed to that player, and anything else lies flat under the fog as it always has. On your own device, a creature on ground your map shows as fogged draws dimmed, so you can tell at a glance what your map still hides under fog. On a scene where each player sees for themselves, ground the party has explored counts as revealed for this, just as your map draws it.
 
 ![The same hall in Isometric, turned once, with the menu closed.](dm-guide/isometric.webp)
 

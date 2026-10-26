@@ -479,7 +479,7 @@ async function openView(context: BrowserContext, page: Page, view: View, roomId:
       ({ flag, key }) => {
         (globalThis as unknown as Record<string, boolean>)[flag] = true;
         try {
-          localStorage.setItem(key, JSON.stringify({ v: 1, pick: "isometric", turns: {} }));
+          localStorage.setItem(key, JSON.stringify({ v: 1, pick: "isometric", turns: [] }));
         } catch {
           // No storage: the bench has nothing to time then.
         }

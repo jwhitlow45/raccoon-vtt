@@ -95,7 +95,7 @@ try {
     edges.push({ key: `${BOUNDS.w - 1},${y},w`, feature: wall });
   }
   await ops.send({ t: "build.edge", sceneId, edges });
-  await ops.send({ t: "build.label", sceneId, labelId: randomUUID(), label: { x: 4.5, y: 2.5, text: "Dais", size: 0.7 } });
+  await ops.send({ t: "build.label", sceneId, labelId: randomUUID(), label: { x: 3, y: 4, text: "Dais", size: 0.7 } });
 
   const token = (name: string, x: number, y: number, extra: Record<string, unknown>) => ({
     t: "token.create",
