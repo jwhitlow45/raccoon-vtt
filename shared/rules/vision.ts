@@ -1738,7 +1738,8 @@ let serials = 0;
 /*
  * Draws every dirty tile again into `packed` and `tiles`. A tile drawn the
  * same as before keeps its object, so a diff by identity finds it
- * unchanged.
+ * unchanged, and is not encoded again: most tiles a change redraws come
+ * out as they were.
  */
 function redraw(
   dims: Pick<Inputs, "level" | "W" | "H">,
@@ -1760,12 +1761,20 @@ function redraw(
         tiles.delete(key);
         continue;
       }
+      const was = packed[ty * across + tx];
+      if (was && samePacked(was, p) && tiles.has(key)) continue;
       packed[ty * across + tx] = p;
       const tile = tileOf(p, uniform);
       const before = tiles.get(key);
       if (!before || !sameTile(before, tile)) tiles.set(key, tile);
     }
   }
+}
+
+function samePacked(a: Uint8Array, b: Uint8Array): boolean {
+  if (a === b) return true;
+  for (let i = 0; i < SIGHT_TILE_BYTES; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 function packedReader(packed: readonly (Uint8Array | null)[], across: number, down: number): (tx: number, ty: number) => Uint8Array | null {
@@ -1968,8 +1977,8 @@ export function coldPartySight(state: RoomState, sceneId: SceneId, world: Vision
  * among the union's sources, chosen by its cap and order, so each answer
  * lies within `partySight`.
  *
- * Viewers whose sources that see are the same share one answer, and one
- * holding every source that sees gets the union's own. Tiles are drawn
+ * Viewers lent the same sources that see share one answer, and a viewer
+ * lent every source that sees gets the union's own. Tiles are drawn
  * only when first read, as a raster from the union's polygons and light
  * rows. Until then `seesToken` is the point query, so a sweep's moment,
  * which asks nothing else, draws no raster. A scene whose vision is off,
@@ -2115,13 +2124,34 @@ function rasterFor(sceneId: string, entry: SceneEntry, key: string, sources: rea
   const held = heldRaster(sceneId, entry.serial, key);
   if (held) return held;
   const mine = new Map(sources.map((s) => [s.id, s] as const));
-  const candidates: Drawn[] = [entry];
+  /*
+   * Where to start: the union's computation itself, this set's last
+   * rasters, and the closest of the rest, whichever leaves the fewest
+   * tiles to draw. The union is the usual start for a holder who lacks one
+   * source, and the set's last raster after a light changes where none of
+   * its sources moved.
+   */
   const rec = cache.get(sceneId);
+  const others: Drawn[] = [];
   if (rec) {
-    for (const e of rec.entries) if (e !== entry) candidates.push(e);
-    for (const list of rec.rasters.values()) candidates.push(...list);
+    for (const e of rec.entries) if (e !== entry) others.push(e);
+    for (const [k, list] of rec.rasters) if (k !== key) others.push(...list);
   }
-  const raster = drawRaster(entry, key, mine, closestBase(candidates, entry, mine));
+  const candidates = [entry, ...(rec?.rasters.get(key) ?? []), closestBase(others, entry, mine)];
+  let start: { base: Drawn | null; dirty: Uint8Array } | null = null;
+  let fewest = Infinity;
+  for (const base of candidates) {
+    const dirty = base && dirtyFrom(entry, mine, base);
+    if (!dirty) continue;
+    let n = 0;
+    for (const d of dirty) n += d;
+    if (n < fewest) {
+      start = { base, dirty };
+      fewest = n;
+    }
+  }
+  const all = new Uint8Array(Math.max(1, Math.ceil(entry.w / CHUNK_CELLS)) * Math.max(1, Math.ceil(entry.h / CHUNK_CELLS))).fill(1);
+  const raster = drawRaster(entry, key, mine, start ?? { base: null, dirty: all });
   keepRaster(sceneId, raster);
   return raster;
 }
@@ -2137,12 +2167,9 @@ function keepRaster(sceneId: string, raster: Raster): void {
 }
 
 /*
- * What a raster starts from: of the union's computations and the rasters
- * the scene holds, the one whose source entries and light rows differ
- * least from those this raster reads. The union is one, so a holder who
- * lacks one source starts from the union with that source's tiles redrawn.
- * Any starting point gives the same bits (drawRaster), so this changes
- * only the work.
+ * Of the scene's other computations and rasters, the one whose source
+ * entries and light rows differ least in number from those this raster
+ * reads, to try as a start beside the union and the set's own rasters.
  */
 function closestBase(candidates: readonly Drawn[], entry: SceneEntry, mine: ReadonlyMap<string, SourceEntry>): Drawn | null {
   let best: Drawn | null = null;
@@ -2161,43 +2188,134 @@ function closestBase(candidates: readonly Drawn[], entry: SceneEntry, mine: Read
 }
 
 /*
- * A raster over the union's computation `entry`, for the sources `mine`,
- * from `base`, a raster of the same scene size and light level, or cold.
- * A tile is drawn again wherever it can differ from the base's: within the
- * box of every source entry one holds and the other does not (an entry
- * replaced when its polygon, senses or Blinded changed, or a source
- * gained, lost or of another set), and on every row where the light rows
- * differ, within the box of a source this raster draws. Elsewhere every
- * source both draw is the same entry and the light is the same, so the
- * base's tile is this raster's, and the result equals a cold drawing bit
- * for bit.
+ * The tiles a raster over the union's computation `entry`, for the sources
+ * `mine`, must draw again when it starts from `base`, or null for a base
+ * of another scene size or light level, which cannot start it. A tile
+ * can differ from the base's only where a source entry one holds and the
+ * other does not reaches (an entry is replaced when its polygon, senses or
+ * Blinded change, and a source may be gained, lost or of another set), or
+ * where the light rows differ within the box of a source this
+ * raster draws, since light changes no level where no source sees. A
+ * source both draw with different entries redraws only where they differ
+ * (sourceChanges), a source only one draws its whole box. Elsewhere every
+ * source is the same entry or gives the same levels under the same light,
+ * so the base's tile is this raster's, and the result equals a cold
+ * drawing bit for bit.
  */
-function drawRaster(entry: SceneEntry, key: string, mine: ReadonlyMap<string, SourceEntry>, base: Drawn | null): Raster {
+function dirtyFrom(entry: SceneEntry, mine: ReadonlyMap<string, SourceEntry>, base: Drawn): Uint8Array | null {
   const { w, h, level } = entry;
-  const W = w * SUB;
-  const H = h * SUB;
+  if (base.w !== w || base.h !== h || base.level !== level) return null;
   const across = Math.max(1, Math.ceil(w / CHUNK_CELLS));
-  const down = Math.max(1, Math.ceil(h / CHUNK_CELLS));
-  const sources = [...mine.values()];
-  const dirty = new Uint8Array(across * down);
-  if (!base) dirty.fill(1);
-  else {
-    for (const [id, old] of base.sources) if (mine.get(id) !== old) markTiles(dirty, across, old.spans?.box ?? null);
-    for (const [id, now] of mine) if (base.sources.get(id) !== now) markTiles(dirty, across, now.spans?.box ?? null);
-    if (base.lightRows && entry.lightRows && base.lightRows !== entry.lightRows) {
-      for (const row of lightChanges(base.lightRows, entry.lightRows, W, baseLevel(level))) {
-        if (sources.some((s) => boxesMeet(s.spans?.box ?? null, row))) markTiles(dirty, across, row);
+  const dirty = new Uint8Array(across * Math.max(1, Math.ceil(h / CHUNK_CELLS)));
+  for (const [id, old] of base.sources) {
+    const now = mine.get(id);
+    if (now === old) continue;
+    if (!now) markTiles(dirty, across, old.spans?.box ?? null);
+    else for (const row of sourceChanges(old, now, w * SUB)) markTiles(dirty, across, row);
+  }
+  for (const [id, now] of mine) if (!base.sources.has(id)) markTiles(dirty, across, now.spans?.box ?? null);
+  if (base.lightRows && entry.lightRows && base.lightRows !== entry.lightRows) {
+    for (const row of lightChanges(base.lightRows, entry.lightRows, w * SUB, baseLevel(level))) {
+      for (const s of mine.values()) {
+        const b = s.spans?.box ?? null;
+        if (b && boxesMeet(b, row)) markTiles(dirty, across, { c0: Math.max(row.c0, b.c0), r0: row.r0, c1: Math.min(row.c1, b.c1), r1: row.r1 });
       }
     }
   }
+  return dirty;
+}
+
+/** A raster over the union's computation `entry`, for the sources `mine`, drawn from `base` again where `dirty` says (dirtyFrom). */
+function drawRaster(entry: SceneEntry, key: string, mine: ReadonlyMap<string, SourceEntry>, { base, dirty }: { base: Drawn | null; dirty: Uint8Array }): Raster {
+  const { w, h, level } = entry;
+  const across = Math.max(1, Math.ceil(w / CHUNK_CELLS));
+  const down = Math.max(1, Math.ceil(h / CHUNK_CELLS));
   const bytesOf = (packed: (Uint8Array | null)[]) => 4096 + 2 * key.length + 64 * mine.size + tilesBytes(packed);
   if (base && !dirty.includes(1)) {
     return { serial: entry.serial, key, w, h, level, sources: mine, lightRows: entry.lightRows, packed: base.packed, tiles: base.tiles, sight: base.sight, bytes: bytesOf(base.packed) };
   }
   const packed = base ? base.packed.slice() : new Array<Uint8Array | null>(across * down).fill(null);
   const tiles = base ? new Map(base.tiles) : new Map<string, SightTile>();
-  redraw({ level, W, H }, across, down, dirty, sources, entry.lightRows, packed, tiles);
+  redraw({ level, W: w * SUB, H: h * SUB }, across, down, dirty, [...mine.values()], entry.lightRows, packed, tiles);
   return { serial: entry.serial, key, w, h, level, sources: mine, lightRows: entry.lightRows, packed, tiles, sight: new TileSight(tiles, packedReader(packed, across, down)), bytes: bytesOf(packed) };
+}
+
+const sourceDiffs = new WeakMap<SourceEntry, WeakMap<SourceEntry, SubBox[]>>();
+
+/*
+ * Where two entries of one source can give a sub-cell different levels
+ * under the same light: per row, each run of columns where one polygon
+ * holds a center and the other does not, or both hold it with different
+ * senses there or a different Blinded. A source that moves a cell keeps
+ * most of what it sees, so this redraws far less than its boxes would.
+ * Every raster drawn from the same pair asks the same, so the answer is
+ * kept by the pair.
+ */
+function sourceChanges(a: SourceEntry, b: SourceEntry, W: number): SubBox[] {
+  let byA = sourceDiffs.get(a);
+  if (!byA) sourceDiffs.set(a, (byA = new WeakMap()));
+  const hit = byA.get(b);
+  if (hit) return hit;
+  const out: SubBox[] = [];
+  const rows = (e: SourceEntry) => (e.spans ? { r0: e.spans.r0, r1: e.spans.r0 + e.spans.off.length - 1 } : { r0: 0, r1: 0 });
+  const ra = rows(a);
+  const rb = rows(b);
+  const j0 = Math.min(ra.r0, rb.r0);
+  const j1 = Math.max(ra.r1, rb.r1);
+  const cuts: number[] = [];
+  for (let j = j0; j < j1; j++) {
+    cuts.length = 0;
+    rowCuts(a, j, cuts);
+    rowCuts(b, j, cuts);
+    if (cuts.length === 0) continue;
+    cuts.push(0, W);
+    cuts.sort((x, y) => x - y);
+    let open = -1;
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const x = cuts[i]!;
+      const end = cuts[i + 1]!;
+      if (x >= end || x >= W) continue;
+      const differs = stateAt(a, j, x) !== stateAt(b, j, x);
+      if (differs && open < 0) open = x;
+      if (!differs && open >= 0) {
+        out.push({ c0: open, r0: j, c1: x, r1: j + 1 });
+        open = -1;
+      }
+    }
+    if (open >= 0) out.push({ c0: open, r0: j, c1: W, r1: j + 1 });
+  }
+  byA.set(b, out);
+  return out;
+}
+
+/** Every column where a source's row of spans or senses starts or ends. */
+function rowCuts(e: SourceEntry, j: number, cuts: number[]): void {
+  const spans = e.spans;
+  if (!spans) return;
+  const k = j - spans.r0;
+  if (k < 0 || k >= spans.off.length - 1) return;
+  for (let p = spans.off[k]!; p < spans.off[k + 1]!; p++) cuts.push(spans.xs[p]!);
+  if (e.senses) for (let q = 6 * k; q < 6 * k + 6; q++) cuts.push(e.senses[q]!);
+}
+
+/** What a source's levels at column x of row j are a function of, beside the light: outside its polygon, or inside with these senses and Blinded. */
+function stateAt(e: SourceEntry, j: number, x: number): number {
+  const spans = e.spans;
+  if (!spans) return 0;
+  const k = j - spans.r0;
+  if (k < 0 || k >= spans.off.length - 1) return 0;
+  for (let p = spans.off[k]!; p < spans.off[k + 1]!; p += 2) {
+    if (x < spans.xs[p]! || x >= spans.xs[p + 1]!) continue;
+    let bits = e.blind ? 2 : 1;
+    const sv = e.senses;
+    if (sv) {
+      if (x >= sv[6 * k]! && x < sv[6 * k + 1]!) bits |= 4;
+      if (x >= sv[6 * k + 2]! && x < sv[6 * k + 3]!) bits |= 8;
+      if (x >= sv[6 * k + 4]! && x < sv[6 * k + 5]!) bits |= 16;
+    }
+    return bits;
+  }
+  return 0;
 }
 
 const lightDiffs = new WeakMap<LightRow[], WeakMap<LightRow[], SubBox[]>>();
