@@ -100,27 +100,44 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
     }
   });
 
+  test("a 100 ft flier over a 30 ft platform, its lift capped at 80 px a cell: the first move leaves it where it stands, at every turn (ISO34-ASTRA-11)", () => {
+    const state = world({ blockMovement: false, heights: raised(6, 6, 10, 10, 30), tokens: [token("roc", { x: 7, y: 7, elevation: 100 })] });
+    const cam: Camera = { x: 600, y: 80, scale: 80 };
+    const t = state.tokens.roc! as Token;
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: true, view: isometric(turn), camera: cam, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+      const plan = dragPlan({ room: state, role: "dm", src: pick.src!, feetPerCell: 5, token: t, drawn: drawnRing(pick, true) });
+      const node = viewToScreen(cam, toView(pick.view, { x: t.x, y: t.y }));
+      const ring = ringCenter(pick, t);
+      const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, t), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
+      const still = dragBound(input, node);
+      assert.ok(Math.hypot(still.x - node.x, still.y - node.y) < 1e-6, `turn ${turn}: ${JSON.stringify([still, node])}`);
+      const at = dragLanding(pick.view, input.ground, plan, screenToView(cam, ring));
+      assert.ok(Math.abs(at.x - 7) < 1e-9 && Math.abs(at.y - 7) < 1e-9 && at.z === 20, `turn ${turn}: it stays at 7, 7 at 100 ft`);
+    }
+  });
+
   test("Stage.tsx grips with one stand rule for the grab and the ray", () => {
     const stage = readFileSync(new URL("./Stage.tsx", import.meta.url), "utf8");
     assert.match(stage, /const stands = standsFor\(pick, aboveFogRef\.current\)\(lead\);\n\s*const plan = dragPlan\(\{[^\n]*drawn: drawnRing\(pick, stands\) \}\);\n\s*const start = \{ node: node\.getAbsolutePosition\(\), ring: ringCenter\(pick, lead, stands\) \};/);
   });
 
-  test("a capped flier over uneven ground: the ray height is sought until the spot it finds holds, so its ring draws under the finger (ISO34-OPUS-12)", () => {
+  test("a capped flier over uneven ground: the ray height is the drawn ground whose spot has that ground under it, so its ring draws under the finger (ISO34-OPUS-12)", () => {
     const view = isometric(0);
     // The ring draws 3 cells over the ground wherever it goes, its lift capped.
     const plan: DragPlan = { w: 1, h: 1, own: { kind: "fixed", base: 20 }, seat: null, drawn: (_base, g) => g + 3 };
     const steps: Record<string, number> = { "11,11": 1, "12,12": 0.5 };
-    const ground: DragGround = { levels: [0], footGround: (at) => steps[`${at.x},${at.y}`] ?? 0, snap: (p) => ({ x: Math.round(p.x), y: Math.round(p.y) }) };
-    // The ray at 3 finds 11, 11, whose ground puts it at 4 and 12, 12, whose ground puts it at 3.5, and 12, 12 again.
+    const ground: DragGround = { levels: [1, 0.5, 0], footGround: (at) => steps[`${at.x},${at.y}`] ?? 0, snap: (p) => ({ x: Math.round(p.x), y: Math.round(p.y) }) };
+    // The ray at 4, over ground 1, finds 12, 12, whose ground is 0.5. The ray at 3.5 finds 12, 12 again: there it stands.
     const v = toView(view, { x: 8, y: 8 }, 0);
     const at = dragLanding(view, ground, plan, v);
     assert.deepEqual(ground.snap(at), { x: 12, y: 12 });
     assert.equal(at.z, 20);
     const ring = toView(view, { x: at.x + 0.5, y: at.y + 0.5 }, plan.drawn(20, ground.footGround(ground.snap(at))));
     assert.ok(Math.hypot(ring.x - v.x, ring.y - v.y) < 1e-9, JSON.stringify([ring, v]));
-    // Two spots that send the ray to each other: the search stops all the same.
+    // Two spots that send the ray to each other, so no height holds: it still lands, by the scan's fallback.
     const turns: Record<string, number> = { "11,11": 1, "12,12": 0 };
-    const swap: DragGround = { ...ground, footGround: (p) => turns[`${p.x},${p.y}`] ?? 0 };
+    const swap: DragGround = { ...ground, levels: [1, 0], footGround: (p) => turns[`${p.x},${p.y}`] ?? 0 };
     const settled = dragLanding(view, swap, plan, v);
     assert.ok(["11,11", "12,12"].includes(`${swap.snap(settled).x},${swap.snap(settled).y}`) && settled.z === 20);
   });

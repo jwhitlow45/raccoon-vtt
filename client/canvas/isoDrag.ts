@@ -73,37 +73,50 @@ export function dragLanding(view: View, ground: DragGround, plan: DragPlan, v: V
     return { x: c.x - plan.w / 2, y: c.y - plan.h / 2, z };
   };
   // A base held above the ground meets the ray where its ring draws, lower than it stands where its lift is capped (ISO34-OPUS-10), and keeps its height.
-  // That height hangs on the ground at the spot the ray finds, so it is sought until the spot holds (ISO34-OPUS-12): a few steps, bounded, since two spots on uneven ground can take turns.
-  const place = (z: number): Point & { z: number } => {
-    let spot = ground.snap(at(z, z));
-    let found = at(z, plan.drawn(z, ground.footGround(spot)));
-    for (let step = 0; step < SETTLE_STEPS; step++) {
-      const next = ground.snap(found);
-      if (next.x === spot.x && next.y === spot.y) break;
-      spot = next;
-      found = at(z, plan.drawn(z, ground.footGround(spot)));
-    }
-    return found;
-  };
+  const place = (z: number): Point & { z: number } => placeDrawn(at, ground, (g) => plan.drawn(z, g), z);
+  // A token standing on the ground at z has no lift to cap: its ring draws at z.
+  const stand = (z: number): Point & { z: number } => at(z, z);
   if (plan.seat) {
     const seated = place(plan.seat.base);
     if (plan.seat.keptAt(ground.snap(seated))) return seated;
-    return byRule(plan.seat.off, place, ground);
+    return byRule(plan.seat.off, place, stand, ground);
   }
-  return byRule(plan.own, place, ground);
+  return byRule(plan.own, place, stand, ground);
 }
 
-/** How many more spots a capped ring's ray height may be sought at before the last one stands. */
-const SETTLE_STEPS = 4;
+/**
+ * Where a token at height `z` goes for the ray, when its ring draws at a
+ * height that hangs on the ground under it (`drawn`): a capped lift, or a
+ * flat creature on the ground. Each drawn ground from the highest down
+ * gives a ray height and a spot, and the first whose spot has that ground
+ * under it wins, so the ring stands where it draws there: a fixed point
+ * (ISO34-OPUS-12, ASTRA-11). Failing one, the first whose spot's ground is
+ * higher, then the lowest, as the scan's are. A ring that draws at one
+ * height over any ground takes the ray there at once.
+ */
+function placeDrawn(at: (z: number, ray: number) => Point & { z: number }, ground: DragGround, drawn: (g: number) => number, z: number): Point & { z: number } {
+  const levels = ground.levels;
+  const lowest = levels[levels.length - 1] ?? 0;
+  const top = drawn(levels[0] ?? 0);
+  if (top === drawn(lowest)) return at(z, top);
+  let above: (Point & { z: number }) | null = null;
+  for (const g of levels) {
+    const found = at(z, drawn(g));
+    const under = ground.footGround(ground.snap(found));
+    if (under === g) return found;
+    if (under > g) above ??= found;
+  }
+  return above ?? at(z, drawn(lowest));
+}
 
-function byRule(rule: DragRule, place: (z: number) => Point & { z: number }, ground: DragGround): Point & { z: number } {
+function byRule(rule: DragRule, place: (z: number) => Point & { z: number }, stand: (z: number) => Point & { z: number }, ground: DragGround): Point & { z: number } {
   if (rule.kind === "fixed") return place(rule.base);
-  if (rule.kind === "walk") return scan(place, ground, ground.levels, (at) => ground.footGround(at));
+  if (rule.kind === "walk") return scan(stand, ground, ground.levels, (at) => ground.footGround(at));
   const flying = place(rule.base);
   if (ground.footGround(ground.snap(flying)) <= rule.base) return flying;
   // Over higher ground a flier lands on it, as the drop lands it: the scan by that rule, its own height among the ones tried.
   const levels = [...new Set([...ground.levels, rule.base])].sort((a, b) => b - a);
-  return scan(place, ground, levels, (at) => Math.max(rule.base, ground.footGround(at)));
+  return scan((z) => (z === rule.base ? flying : stand(z)), ground, levels, (at) => Math.max(rule.base, ground.footGround(at)));
 }
 
 /**
