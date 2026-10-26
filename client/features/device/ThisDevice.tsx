@@ -4,6 +4,7 @@ import { Help, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { enterFullscreen, exitFullscreen, fullscreenSupported, useFullscreen } from "../../lib/fullscreen.ts";
+import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { keyText, setShortcutSheet, useShortcutKeys } from "../../state/shortcuts.ts";
 import { RadioGroup } from "../dm/controls.tsx";
@@ -26,6 +27,28 @@ import {
   useUiScale,
   type UiScale,
 } from "./settings.ts";
+
+/*
+ * The help below names a key as this device has it. A shortcut can have no
+ * key, where a change took its default (state/keyBindings.ts keysInEffect),
+ * and then the help says so, as the sheet's "No key" does, rather than
+ * leave a gap where the key would be (ISO5P2-OPUS-1).
+ */
+
+/** Full screen's help, with its key as this device has it. */
+export function fullscreenHelp(keys: KeyMap): string {
+  const key = keys.fullscreen === UNBOUND ? null : keyText("fullscreen", keys);
+  return `The room fills the whole screen, without the browser's bars. ${key ? `With a keyboard, ${key} turns it on and off.` : "Its shortcut has no key on this device."}`;
+}
+
+/** The Shortcuts section's help, with Next turn's key as this device has it. */
+export function shortcutsHelp(keys: KeyMap): string {
+  const key = keys.turn === UNBOUND ? null : keyText("turn", keys);
+  const keyboard = key
+    ? `With a keyboard, letters pick tools, arrow keys move the selected tokens, and ${key} moves the turn on.`
+    : "With a keyboard, letters pick tools and arrow keys move the selected tokens. Next turn has no key on this device.";
+  return `${keyboard} The list also says what Shift, Ctrl or Space do with the mouse, and with a keyboard its Change moves a key, on this device only.`;
+}
 
 /**
  * Menu, This device (docs/design-v1-dm-tools.md 2.7): what belongs to this
@@ -56,7 +79,7 @@ export default function ThisDevice() {
         <Section label="Screen">
           <Switch
             label="Full screen"
-            help={`The room fills the whole screen, without the browser's bars. With a keyboard, ${keyText("fullscreen", keys)} turns it on and off.`}
+            help={fullscreenHelp(keys)}
             checked={fullscreen}
             onChange={(on) => void (on ? enterFullscreen() : exitFullscreen())}
           />
@@ -109,9 +132,7 @@ export default function ThisDevice() {
         <DiceSetPicker />
       </Section>
       <Section label="Shortcuts">
-        <Help>
-          With a keyboard, letters pick tools, arrow keys move the selected tokens, and {keyText("turn", keys)} moves the turn on. The list also says what Shift, Ctrl or Space do with the mouse, and with a keyboard its Change moves a key, on this device only.
-        </Help>
+        <Help>{shortcutsHelp(keys)}</Help>
         <Button size="sm" onClick={() => setShortcutSheet(scope, true)} style={{ justifySelf: "start" }}>
           Show the shortcuts
         </Button>
