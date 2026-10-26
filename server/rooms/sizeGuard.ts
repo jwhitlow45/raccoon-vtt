@@ -1,10 +1,11 @@
 import { chunkKey, holderTileKey, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
 import { lineAudience } from "#shared/logRings.ts";
-import { CHUNK_CELLS, type LogEntry, type Trap } from "#shared/model.ts";
+import { CHUNK_CELLS, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
-import { exploredReserve, exploringSceneId, LIMITS, NO_ROOM_TO_EXPLORE, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
+import { exploredReserve, exploringSceneId, LIMITS, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
 import type { RoomState, Scene } from "#shared/model.ts";
-import { tilesAcross } from "#shared/rules/fog.ts";
+import { perPlayerScene } from "#shared/project.ts";
+import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { isWritable } from "#shared/writable.ts";
 
@@ -28,6 +29,13 @@ import { isWritable } from "#shared/writable.ts";
  * take (`exploredReserve`), and an explore only spends it. Sight is derived
  * and never stored, so every projected check of a vision scene adds the
  * most its sight tiles can take instead of measuring them.
+ *
+ * Per-player vision (docs/design-v1-per-player-vision.md 6.8) adds what a
+ * player's own sight decides: on a per-player scene the party's layer and
+ * each holder's, and on any scene the lists of who saw a creature's stop
+ * or turn start. No measure reads them. Each counts at its widest instead,
+ * from the scenes and the roster alone, so the answer an op gets never
+ * depends on what another player's creatures saw (security rule 11).
  *
  * Wave 5 (docs/design-v1-dm-tools.md 2.4) splits a DM's projected scene into
  * the room-level part every DM projection shares (the monsters, the journal,
@@ -120,8 +128,26 @@ export class SizeGuard {
    * part and its reserves included, compared exactly with `before`: a
    * shortened name or a deleted token on it passes, as does every edit
    * elsewhere. Without `before`, any op on the scene counts as growing it.
+   *
+   * An op that makes a scene per player, whose refusal comes of the room
+   * per-player sight needs there (docs/design-v1-per-player-vision.md 6.8),
+   * says so in the DM's words (PER_PLAYER_FULL).
    */
   check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState): LimitCheck {
+    const answer = this.#check(next, sceneIds, growth, before);
+    if (answer.ok || before === undefined) return answer;
+    const switched = Object.values(next.scenes).filter((scene) => perPlayerScene(scene) && !perPlayerScene(before.scenes[scene.id]));
+    if (switched.length === 0) return answer;
+    const plain = { ...next, scenes: { ...next.scenes } };
+    for (const scene of switched) {
+      const { perPlayer: _perPlayer, ...vision } = scene.vision!;
+      plain.scenes[scene.id] = { ...scene, vision };
+    }
+    const fits = new SizeGuard({ stateLimit: this.stateLimit, sceneLimit: this.sceneLimit }).#check(plain, sceneIds, growth, before).ok;
+    return fits ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : answer;
+  }
+
+  #check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState): LimitCheck {
     const updates: Array<() => void> = [];
     const exploring = exploringSceneId(next);
     const newlyExploring = exploring !== null && before !== undefined && exploringSceneId(before) !== exploring;
@@ -143,7 +169,7 @@ export class SizeGuard {
     const touched = new Set(sceneIds);
     for (const sceneId of scenes.keys()) if (!next.scenes[sceneId]) updates.push(() => scenes.delete(sceneId));
     for (const scene of Object.values(next.scenes)) {
-      const sight = sightReserve(scene);
+      const sight = sightReserve(scene) + perPlayerSceneReserve(next, scene);
       const explored = scene.id === exploring ? reserve : 0;
       const measure = scenes.get(scene.id);
       const added = touched.has(scene.id) ? growth : 0;
@@ -227,10 +253,17 @@ export function touchedScenes(before: RoomState, after: RoomState, touched: read
  * its limit, which a room reaches rarely.
  */
 function neededBefore(before: RoomState, sceneId: string): number {
-  const scene = before.scenes[sceneId];
-  if (!scene) return 0;
-  const explored = exploringSceneId(before) === sceneId ? exploredReserve(before) : 0;
-  return SHELL_BYTES + roomLevelBytes(before) + sceneOwnBytes(before, sceneId) + sightReserve(scene) + explored;
+  return before.scenes[sceneId] ? projectedSceneBytes(before, sceneId) : 0;
+}
+
+/**
+ * A scene's whole measure (design 10.5): a DM's projection of it as the
+ * checks count it, with every reserve, the room-level part included.
+ */
+export function projectedSceneBytes(state: RoomState, sceneId: string): number {
+  const scene = state.scenes[sceneId]!;
+  const explored = exploringSceneId(state) === sceneId ? exploredReserve(state) : 0;
+  return SHELL_BYTES + roomLevelBytes(state) + sceneOwnBytes(state, sceneId) + sightReserve(scene) + perPlayerSceneReserve(state, scene) + explored;
 }
 
 /** The most a vision scene's sight tiles can add to its projection, from its own key (section 4.3.4). */
@@ -345,7 +378,10 @@ export function roomLevelBytes(state: RoomState): number {
   for (const name of ROOM_LEVEL) {
     if ((name === "trapLog" || name === "trapSeen") && trapped) bytes += fieldBytes(name) + (name === "trapLog" ? TRAP_LOG_RESERVE : TRAP_SEEN_RESERVE + DUE_RESERVE);
     else if (name === "log") bytes += fieldBytes(name) + collectionBytes(measuredLog(state.log));
-    else bytes += fieldBytes(name) + (name === "meta" || name === "encounter" ? valueBytes(state[name]) : collectionBytes(state[name] ?? (name === "trapLog" || name === "trapSeen" ? [] : {})));
+    // Each list of who saw at its widest, whoever it names (docs/design-v1-per-player-vision.md 6.8).
+    else if (name === "encounter") bytes += fieldBytes(name) + valueBytes(state.encounter) - encounterLists(state.encounter).extra + encounterLists(state.encounter).count * widestListExtra(state.members);
+    else if (name === "encounterHistory") bytes += fieldBytes(name) + collectionBytes(state.encounterHistory) - historyLists(state.encounterHistory).extra + historyLists(state.encounterHistory).count * widestListExtra(state.members);
+    else bytes += fieldBytes(name) + (name === "meta" ? valueBytes(state[name]) : collectionBytes(state[name] ?? (name === "trapLog" || name === "trapSeen" ? [] : {})));
   }
   return bytes;
 }
@@ -365,6 +401,221 @@ export function measuredLog(log: readonly LogEntry[]): readonly LogEntry[] {
   const kept = log.some((e) => lineAudience(e) !== "shared") ? log.filter((e) => lineAudience(e) === "shared") : log;
   if (!isWritable(log)) measuredLogs.set(log, kept);
   return kept;
+}
+
+// ---------------------------------------------------------------------------
+// Per-player vision's reserves (docs/design-v1-per-player-vision.md 6.8)
+
+/**
+ * The refusal of a switch to Per player that the room cannot hold
+ * (docs/design-v1-per-player-vision.md 6.8): each holder's map and the
+ * party's count at their widest from the switch on.
+ */
+export const PER_PLAYER_FULL = "The room is too full for per-player sight on this scene: each player's map and the paths this fight recorded need room. Delete unused scenes to free space.";
+
+/*
+ * Who a list names and what a holder explored depend on that player's
+ * sight, so no measure reads them (security rule 11): a measure counts the
+ * state without them, every list of who saw as `[]` and no layer of a
+ * per-player scene, and reserves each at its widest instead. So the answer
+ * an op gets never depends on what another player's creatures saw. Every
+ * reserve reads only the roster, the scenes and how many lists there are,
+ * which every player's own ops can observe anyway.
+ */
+const WIDEST_REV = Number.MAX_SAFE_INTEGER;
+const FULL_TILE = encodeTile(fullTileBits());
+
+/** The roster's ids, longest as JSON first, kept per members collection, which is replaced and never changed. */
+const longest = new WeakMap<object, { any: number[]; players: string[] }>();
+
+function rosterIds(members: RoomState["members"]): { any: number[]; players: string[] } {
+  let hit = longest.get(members);
+  if (!hit) {
+    const byLength = (ids: string[]) => ids.map((id) => ({ id, bytes: utf8Bytes(JSON.stringify(id)) })).sort((a, b) => b.bytes - a.bytes);
+    hit = {
+      any: byLength(Object.keys(members)).slice(0, MOST_SIGHT_HOLDERS).map((e) => e.bytes),
+      players: byLength(Object.keys(members).filter((id) => members[id]!.kind === "player")).slice(0, MOST_SIGHT_HOLDERS).map((e) => e.id),
+    };
+    if (!isWritable(members)) longest.set(members, hit);
+  }
+  return hit;
+}
+
+/**
+ * What a list of who saw adds beyond `[]` at its widest: the 6 longest
+ * encoded ids of the roster, quoted, with their commas. Every member of the
+ * roster counts, a DM too, so a list that names a player made DM since is
+ * never wider than this.
+ */
+function widestListExtra(members: RoomState["members"]): number {
+  const ids = rosterIds(members).any;
+  return ids.length === 0 ? 0 : ids.reduce((sum, b) => sum + b, 0) + ids.length - 1;
+}
+
+type Lists = { count: number; extra: number };
+const NO_LISTS: Lists = { count: 0, extra: 0 };
+const listsKept = new WeakMap<object, Lists>();
+
+/** The lists of who saw an object holds and what they add beyond `[]`, kept per object, which is replaced and never changed. */
+function listsOf(value: object, find: () => readonly (readonly string[] | undefined)[]): Lists {
+  let hit = listsKept.get(value);
+  if (!hit) {
+    let count = 0;
+    let extra = 0;
+    for (const list of find()) {
+      if (list === undefined) continue;
+      count++;
+      extra += serializedBytes(list) - 2;
+    }
+    hit = count === 0 ? NO_LISTS : { count, extra };
+    if (!isWritable(value)) listsKept.set(value, hit);
+  }
+  return hit;
+}
+
+function tokenLists(token: Token): Lists {
+  return token.path ? listsOf(token, () => token.path!.stops.map((s) => s.seenBy)) : NO_LISTS;
+}
+
+function encounterLists(encounter: Encounter | null): Lists {
+  return encounter ? listsOf(encounter, () => [encounter.turnStart?.seenBy]) : NO_LISTS;
+}
+
+function historyLists(history: readonly EncounterSnapshot[]): Lists {
+  return listsOf(history, () => history.map((snap) => snap.encounter.turnStart?.seenBy));
+}
+
+/** A layer of a scene at its widest, every tile present: its entries' bytes, key and colon included, and how many. */
+type Widest = { bytes: number; entries: number };
+const widestLayers = new WeakMap<Scene, Map<string, Widest>>();
+
+function widestLayer(scene: Scene, memberId: string | null): Widest {
+  let byLayer = widestLayers.get(scene);
+  if (!byLayer) widestLayers.set(scene, (byLayer = new Map()));
+  const at = memberId ?? "";
+  let hit = byLayer.get(at);
+  if (!hit) {
+    const across = tilesAcross(scene.bounds.w);
+    const down = tilesAcross(scene.bounds.h);
+    // A tile's value with one-digit coordinates, which the loop widens by each tile's digits.
+    const value = serializedBytes(memberId === null ? { sceneId: scene.id, tx: 0, ty: 0, rev: WIDEST_REV, bits: FULL_TILE } : { sceneId: scene.id, tx: 0, ty: 0, rev: WIDEST_REV, bits: FULL_TILE, memberId });
+    let bytes = 0;
+    for (let ty = 0; ty < down; ty++) {
+      for (let tx = 0; tx < across; tx++) {
+        const key = memberId === null ? tileKey(scene.id, tx, ty) : holderTileKey(scene.id, memberId, tx, ty);
+        bytes += fieldBytes(key) + value + String(tx).length + String(ty).length - 2;
+      }
+    }
+    byLayer.set(at, (hit = { bytes, entries: across * down }));
+  }
+  return hit;
+}
+
+/** A widest layer as a map's entries, with a comma after each. */
+function layerEntries(widest: Widest): number {
+  return widest.bytes + widest.entries;
+}
+
+/**
+ * What per-player vision adds to the stored state at its widest: on each
+ * per-player scene the party's layer and a layer for each of up to 6
+ * players, the roster's longest ids, every tile present, and every list
+ * of who saw as wide as the roster allows. Kept per scenes and members
+ * collection, with the lists counted per token, fight and history.
+ */
+const storedLayers = new WeakMap<object, WeakMap<object, number>>();
+
+export function perPlayerStoredReserve(state: RoomState): number {
+  let byMembers = storedLayers.get(state.scenes);
+  let layers = byMembers?.get(state.members);
+  if (layers === undefined) {
+    layers = 0;
+    const players = rosterIds(state.members).players;
+    for (const scene of Object.values(state.scenes)) {
+      if (!perPlayerScene(scene)) continue;
+      layers += layerEntries(widestLayer(scene, null));
+      for (const id of players) layers += layerEntries(widestLayer(scene, id));
+    }
+    if (!isWritable(state.scenes) && !isWritable(state.members)) {
+      if (!byMembers) storedLayers.set(state.scenes, (byMembers = new WeakMap()));
+      byMembers.set(state.members, layers);
+    }
+  }
+  return layers + storedLists(state).count * widestListExtra(state.members);
+}
+
+/** The lists of who saw the paths hold, in all and per scene, kept per tokens collection, which is replaced and never changed. */
+const pathLists = new WeakMap<object, { all: Lists; byScene: Map<string, number> }>();
+
+function listsInPaths(tokens: RoomState["tokens"]): { all: Lists; byScene: Map<string, number> } {
+  let hit = pathLists.get(tokens);
+  if (!hit) {
+    let count = 0;
+    let extra = 0;
+    const byScene = new Map<string, number>();
+    for (const token of Object.values(tokens)) {
+      const l = tokenLists(token);
+      if (l.count === 0) continue;
+      count += l.count;
+      extra += l.extra;
+      byScene.set(token.sceneId, (byScene.get(token.sceneId) ?? 0) + l.count);
+    }
+    hit = { all: { count, extra }, byScene };
+    if (!isWritable(tokens)) pathLists.set(tokens, hit);
+  }
+  return hit;
+}
+
+/** Every list of who saw the stored state holds: in paths, the fight's turn start and every saved step's. */
+function storedLists(state: RoomState): Lists {
+  const paths = listsInPaths(state.tokens).all;
+  const fight = encounterLists(state.encounter);
+  const history = historyLists(state.encounterHistory);
+  return { count: paths.count + fight.count + history.count, extra: paths.extra + fight.extra + history.extra };
+}
+
+/**
+ * The bytes of the stored state the measures leave out, exactly: every
+ * list's names, and each per-player scene's layers, the party's and its
+ * holders', with their keys and the commas between entries, so what is
+ * left is the state as if they held nothing.
+ */
+function privateStateBytes(state: RoomState): number {
+  const layer = (collection: Record<string, { sceneId: string }>): number => {
+    let kept = 0;
+    let left = 0;
+    let bytes = 0;
+    for (const [key, tile] of Object.entries(collection)) {
+      if (!perPlayerScene(state.scenes[tile.sceneId])) {
+        kept++;
+        continue;
+      }
+      left++;
+      bytes += fieldBytes(key) + valueBytes(tile) + 1;
+    }
+    // A map left with no entry loses one comma fewer than it had entries.
+    return kept === 0 && left > 0 ? bytes - 1 : bytes;
+  };
+  return layer(state.exploredTiles) + layer(state.exploredBy ?? {}) + storedLists(state).extra;
+}
+
+/**
+ * What a per-player scene adds to its DM projection at its widest, beyond
+ * its own part (docs/design-v1-per-player-vision.md 6.8): the shared sight
+ * beside the union, the shared fog and every holder's layer joined, every
+ * tile present, and its holder list as it is, with their fields. On every
+ * scene, each list of who saw that its creatures' paths hold, as wide as
+ * the roster allows.
+ */
+function perPlayerSceneReserve(state: RoomState, scene: Scene): number {
+  let bytes = (listsInPaths(state.tokens).byScene.get(scene.id) ?? 0) * widestListExtra(state.members);
+  if (!perPlayerScene(scene)) return bytes;
+  const tiles = layerEntries(widestLayer(scene, null));
+  // `"sightAll":{…}`, `"fogAll":{…}` and `"exploredAny":{…}`, each with its comma, and `"holders":{"<scene>":<list>}`.
+  bytes += fieldBytes("sightAll") + 3 + tilesAcross(scene.bounds.w) * tilesAcross(scene.bounds.h) * sightEntryMaxBytes(scene.id);
+  bytes += fieldBytes("fogAll") + 3 + tiles + fieldBytes("exploredAny") + 3 + tiles;
+  const list = state.holders?.[scene.id];
+  return bytes + fieldBytes("holders") + 3 + (list ? fieldBytes(scene.id) + valueBytes(list) : 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -451,7 +702,7 @@ function trapsMeasure(state: RoomState): number {
  * or fails by what they cannot read.
  */
 export function measuredStateBytes(state: RoomState): number {
-  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined }) + trapsMeasure(state);
+  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined }) + trapsMeasure(state) - privateStateBytes(state) + perPlayerStoredReserve(state);
 }
 
 /**
@@ -467,7 +718,7 @@ export function measuredFromStored(bytes: number, state: RoomState): number {
   const roomLog = measuredLog(state.log);
   // The record's field, `,"reminded":{…}`, is its object's bytes less the braces, and the comma before it.
   const reminded = state.reminded === undefined ? 0 : serializedBytes({ reminded: state.reminded }) - 1;
-  const outside = reminded + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog));
+  const outside = reminded + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state);
   if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes - outside;
   return bytes - outside - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
 }
@@ -479,25 +730,44 @@ function sceneOfEntry(name: SceneLevel, key: string, value: unknown): string | u
   return typeof sceneId === "string" ? sceneId : undefined;
 }
 
-/** One scene's own part of a DM's projection: its scene-level collections, filtered to it, with their field names, and its pit reserve. */
+/**
+ * One scene's own part of a DM's projection: its scene-level collections,
+ * filtered to it, with their field names, and its pit reserve. On a
+ * per-player scene the party's layer counts at its widest whatever it
+ * holds (docs/design-v1-per-player-vision.md 6.8).
+ */
 export function sceneOwnBytes(state: RoomState, sceneId: string): number {
   let bytes = pitReserve(state, sceneId);
+  const widest = widestPartyLayer(state, sceneId);
   for (const name of SCENE_LEVEL) {
     let count = 0;
     let inside = 0;
-    for (const [key, value] of Object.entries(state[name] ?? {})) {
-      if (sceneOfEntry(name, key, value) !== sceneId) continue;
-      count++;
-      inside += fieldBytes(key) + entryBytes(name, value);
+    if (name === "exploredTiles" && widest) {
+      count = widest.entries;
+      inside = widest.bytes;
+    } else {
+      for (const [key, value] of Object.entries(state[name] ?? {})) {
+        if (sceneOfEntry(name, key, value) !== sceneId) continue;
+        count++;
+        inside += fieldBytes(key) + entryBytes(name, value);
+      }
     }
     bytes += fieldBytes(name) + 2 + inside + Math.max(0, count - 1);
   }
   return bytes;
 }
 
-/** An entity as a scene's part counts it: a trap by its measure, anything else exactly. */
+/** A per-player scene's party layer at its widest, or null on any other scene, whose layer counts as it is. */
+function widestPartyLayer(state: RoomState, sceneId: string): Widest | null {
+  const scene = state.scenes[sceneId];
+  return scene && perPlayerScene(scene) ? widestLayer(scene, null) : null;
+}
+
+/** An entity as a scene's part counts it: a trap by its measure, a token with every list of who saw in its path as `[]`, anything else exactly. */
 function entryBytes(name: SceneLevel, value: unknown): number {
-  return name === "traps" ? trapMeasure(value as Trap) : valueBytes(value);
+  if (name === "traps") return trapMeasure(value as Trap);
+  if (name === "tokens") return valueBytes(value) - tokenLists(value as Token).extra;
+  return valueBytes(value);
 }
 
 /** Every scene's own part, in one pass over the state's scene-level entities. */
@@ -512,11 +782,18 @@ function allScenesOwnBytes(state: RoomState): Map<string, number> {
     for (const [key, value] of Object.entries(state[name] ?? {})) {
       const sceneId = sceneOfEntry(name, key, value);
       const count = sceneId === undefined ? undefined : counts.get(sceneId);
-      if (!count) continue;
+      if (!count || (name === "exploredTiles" && perPlayerScene(state.scenes[sceneId!]))) continue;
       count[i]! += 1;
       sizes.get(sceneId!)![i]! += fieldBytes(key) + entryBytes(name, value);
     }
   });
+  const layer = SCENE_LEVEL.indexOf("exploredTiles");
+  for (const id of Object.keys(state.scenes)) {
+    const widest = widestPartyLayer(state, id);
+    if (!widest) continue;
+    counts.get(id)![layer] = widest.entries;
+    sizes.get(id)![layer] = widest.bytes;
+  }
   const out = new Map<string, number>();
   for (const id of Object.keys(state.scenes)) {
     const count = counts.get(id)!;
@@ -546,7 +823,7 @@ export function checkWholeScenes(state: RoomState, sceneLimit: number = LIMITS.p
   const room = roomLevelBytes(state);
   for (const [sceneId, own] of allScenesOwnBytes(state)) {
     const scene = state.scenes[sceneId]!;
-    const need = SHELL_BYTES + room + own + sightReserve(scene);
+    const need = SHELL_BYTES + room + own + sightReserve(scene) + perPlayerSceneReserve(state, scene);
     if (need + (sceneId === exploring ? explored : 0) <= sceneLimit) continue;
     return sceneId === exploring && need <= sceneLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : sceneFull(sceneLimit);
   }
@@ -565,7 +842,9 @@ export function checkWholeScenes(state: RoomState, sceneLimit: number = LIMITS.p
  * it.
  */
 export function growthBound(before: RoomState, after: RoomState, touched: readonly EntityKey[]): number {
-  let growth = 0;
+  // Per-player vision's reserves move with the roster, the scenes and how many lists there are, none of them an entity
+  // whose own size says so (docs/design-v1-per-player-vision.md 6.8).
+  let growth = Math.max(0, perPlayerStoredReserve(after) - perPlayerStoredReserve(before));
   const trapped = hasTraps(after);
   // A room's first trap brings the room's reserves for occurrences and both trap logs (docs/design-v1-traps.md 6.7).
   if (trapped && !hasTraps(before)) growth += DUE_RESERVE + TRAP_LOG_RESERVE + TRAP_SEEN_RESERVE;
