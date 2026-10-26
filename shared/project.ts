@@ -1185,6 +1185,24 @@ export function projectChunkForPlayer(all: Readonly<Record<string, BuildChunk>>,
  */
 const playerChunks = new WeakMap<BuildChunk, { all: object; autoWalls: AutoWalls | undefined; out: BuildChunk | null }>();
 
+/** A chunk's fields for players (projectChunkForPlayer), held to every key of BuildChunk as SCENE_FOR_PLAYERS is. */
+export const CHUNK_FOR_PLAYERS = {
+  sceneId: "copied",
+  cx: "copied",
+  cy: "copied",
+  rev: "zeroed",
+  cells: "copied",
+  edges: "changed: a hidden secret door reads as a wall or goes, and a lock reads closed",
+  walls: "changed: a hidden secret free door reads as a wall, a lock reads closed, sorted by their ends",
+  // Heights and stair marks are map data, like the floor, and not secret (docs/design-v1-maps-vision.md 4.2).
+  heights: "copied",
+  up: "copied",
+  // Difficult ground marks are map data too: players see them where they see the map (docs/design-v1-movement.md 3.4).
+  rough: "copied",
+  // The shape its cell keys were written for, as public as the scene's shape (docs/design-v1-hex-grids.md HX-D14).
+  grid: "copied",
+} as const satisfies Record<keyof BuildChunk, PlayerField>;
+
 function playerChunkOf(all: Readonly<Record<string, BuildChunk>>, chunk: BuildChunk, autoWalls: AutoWalls | undefined): BuildChunk | null {
   const rule = autoWalls ?? "all";
   // The one painted predicate, stair marks included, across chunk borders: the walls ask the same (section 2.1).
@@ -1210,11 +1228,10 @@ function playerChunkOf(all: Readonly<Record<string, BuildChunk>>, chunk: BuildCh
   if (empty && chunk.heights === undefined && chunk.up === undefined && chunk.rough === undefined) return null;
   const out: BuildChunk = { sceneId: chunk.sceneId, cx: chunk.cx, cy: chunk.cy, rev: 0, cells: chunk.cells, edges };
   if (walls.length > 0) out.walls = walls;
-  // Heights and stair marks are map data, like the floor, and not secret (docs/design-v1-maps-vision.md 4.2).
   if (chunk.heights !== undefined) out.heights = chunk.heights;
   if (chunk.up !== undefined) out.up = chunk.up;
-  // Difficult ground marks are map data too: players see them where they see the map (docs/design-v1-movement.md 3.4).
   if (chunk.rough !== undefined) out.rough = chunk.rough;
+  if (chunk.grid !== undefined) out.grid = chunk.grid;
   return out;
 }
 
@@ -1422,12 +1439,29 @@ function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
     if (zoneRanges(ctx.state, trap.sceneId, zone).every(fogged)) return null;
   }
   let out = playerTraps.get(trap);
-  if (!out) playerTraps.set(trap, (out = { id: trap.id, rev: 0, sceneId: trap.sceneId, name: trap.name, zone, ...(trap.state === "disarmed" ? { disarmed: true as const } : {}) }));
+  if (!out) {
+    out = { id: trap.id, rev: 0, sceneId: trap.sceneId, name: trap.name, zone, ...(trap.state === "disarmed" ? { disarmed: true as const } : {}), ...(trap.grid !== undefined ? { grid: trap.grid } : {}) };
+    playerTraps.set(trap, out);
+  }
   return out;
 }
 
 /* A player's trap, kept per trap object, which is replaced and never changed, so a re-projection that changes nothing sends nothing. */
 const playerTraps = new WeakMap<Trap, ProjectedTrap>();
+
+/** A found trap's fields for players (docs/design-v1-traps.md 6.2), held to every key of Trap as SCENE_FOR_PLAYERS is. */
+export const TRAP_FOR_PLAYERS = {
+  id: "copied",
+  rev: "zeroed",
+  sceneId: "copied",
+  name: "copied",
+  zone: "copied",
+  state: "changed: players read only that it is disarmed, as `disarmed`",
+  found: "dm: a player's copy exists only while the trap is found",
+  rig: "dm: what it does and who it catches",
+  // The shape its zone was written for, as public as the scene's shape (docs/design-v1-hex-grids.md HX-D14).
+  grid: "copied",
+} as const satisfies Record<keyof Trap, PlayerField>;
 
 /**
  * A players' trap line (docs/design-v1-traps.md 6.3): every player and
@@ -1450,15 +1484,50 @@ function projectLightCtx(ctx: Ctx, light: Light): Light | null {
 }
 
 /**
- * A scene as a player gets it: an allowlist (docs/design-v1-maps-vision.md
- * 3.3). Its folder, thumbnail and phases are the DM's, so neither the other
- * images of the map nor their names ("On fire") reach a player. Its rev,
- * order and walls version are 0, as a chunk's rev is, so a DM's edit of
- * those fields, a thumbnail landing in the background included, changes
- * nothing players receive. The walls version moves with every build op,
- * a hidden secret door's or a lock's edit too, which players cannot see.
- * No client reads it: the rules caches follow the derived wall set.
+ * How a player's or table display's copy of a stored entity takes each of
+ * its fields: "copied" as stored, "zeroed" to 0, "changed" with why, or
+ * kept by the DM with why. Each list `satisfies` every key of its type, so
+ * a new field fails the typecheck until someone decides, and
+ * project.fields.test.ts holds each projection to its list.
  */
+export type PlayerField = "copied" | "zeroed" | `changed: ${string}` | `dm: ${string}`;
+
+/**
+ * A scene's fields for players (docs/design-v1-maps-vision.md 3.3). Its
+ * rev, order and walls version are 0, as a chunk's rev is, so a DM's edit
+ * of those fields, a thumbnail landing in the background included,
+ * changes nothing players receive. The walls version moves with every
+ * build op, a hidden secret door's or a lock's edit too, which players
+ * cannot see. No client reads it: the rules caches follow the derived wall
+ * set.
+ */
+export const SCENE_FOR_PLAYERS = {
+  id: "copied",
+  rev: "zeroed",
+  name: "copied",
+  order: "zeroed",
+  bounds: "copied",
+  map: "copied",
+  grid: "copied",
+  background: "copied",
+  fogEnabled: "copied",
+  wallsVersion: "zeroed",
+  defaultView: "copied",
+  autoWalls: "copied",
+  folder: "dm: how the DM files scenes in the Scenes panel",
+  thumb: "dm: the Scenes panel's picture, which a background render moves",
+  phases: "dm: the map's other images and their names (On fire)",
+  phaseId: "dm: which of the DM's images is showing, with the phases",
+  phaseGrid: "dm: the phases' reference grid",
+  // Players' devices draw sight and stop drags at walls by these (docs/design-v1-maps-vision.md 4.3.5).
+  blockMovement: "copied",
+  vision: "copied",
+  gridFromFile: "dm: the import's mark, which only Find the grid reads",
+  // Players' devices snap, draw and measure by it (docs/design-v1-hex-grids.md section 7).
+  gridShape: "copied",
+} as const satisfies Record<keyof Scene, PlayerField>;
+
+/** A scene as a player gets it: an allowlist, field by field as SCENE_FOR_PLAYERS rules. */
 function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   if (ctx.viewer.role === "dm") return scene;
   if (scene.id !== ctx.sceneId) return null;
@@ -1476,9 +1545,9 @@ function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   if (scene.map !== undefined) out.map = scene.map;
   if (scene.defaultView !== undefined) out.defaultView = scene.defaultView;
   if (scene.autoWalls !== undefined) out.autoWalls = scene.autoWalls;
-  // Players' devices draw sight and stop drags at walls by these (docs/design-v1-maps-vision.md 4.3.5).
   if (scene.blockMovement !== undefined) out.blockMovement = scene.blockMovement;
   if (scene.vision !== undefined) out.vision = scene.vision;
+  if (scene.gridShape !== undefined) out.gridShape = scene.gridShape;
   return out;
 }
 
