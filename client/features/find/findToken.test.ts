@@ -122,6 +122,16 @@ describe("Find my token in Isometric (docs/design-v1-isometric-view.md 4.2)", ()
       const cam = findCamera(viewport, target, bars, NO_INSETS, isometric(turn));
       const shown = viewToScreen(cam, toView(isometric(turn), { x: target.x + target.width / 2, y: target.y + target.height / 2 }));
       assert.ok(Math.abs(shown.x - 195) < 1e-9 && Math.abs(shown.y - (56 + (844 - 120) / 2)) < 1e-9, `turn ${turn}`);
+      // The room around it fits as the board draws it, a diamond wider than the square it stands for.
+      for (const c of [
+        { x: target.x, y: target.y },
+        { x: target.x + target.width, y: target.y },
+        { x: target.x, y: target.y + target.height },
+        { x: target.x + target.width, y: target.y + target.height },
+      ]) {
+        const at = viewToScreen(cam, toView(isometric(turn), c));
+        assert.ok(at.x >= 0 && at.x <= 390 && at.y >= 56 && at.y <= 844 - 64, `turn ${turn}, corner ${c.x},${c.y}`);
+      }
     }
   });
 });

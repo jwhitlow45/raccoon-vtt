@@ -125,6 +125,9 @@ describe("the board's pick (docs/design-v1-isometric-view.md 6.1)", () => {
     assert.notEqual(memo.get({ ...input, scale: 11 }).heights, first.heights, "below the threshold they lie flat");
     assert.equal(memo.get({ ...input, scale: 11 }).heights.high, 0);
     assert.notEqual(memo.get({ ...input, chunks: { ...state.buildChunks } }).heights, first.heights);
+    // A player's fog, nothing yet revealed: the platform lies flat for them.
+    memo.get(input);
+    assert.equal(memo.get({ ...input, fog: {} }).heights.high, 0);
   });
 });
 

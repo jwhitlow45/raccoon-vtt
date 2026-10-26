@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { EdgeFeature, RoomState } from "#shared/model.ts";
 import { isometric, K, type Turn } from "../../lib/view.ts";
-import { boardPickFor, DrawnHeightsMemo, screenAt, type BoardPick } from "../../canvas/boardPick.ts";
+import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, screenAt, type BoardPick } from "../../canvas/boardPick.ts";
 import { WALL_RISE } from "../../canvas/relief/pieces.ts";
 import { CLOSED, line, OPEN, raised, world } from "../movement/testing.ts";
-import { DOOR_SLOP_PX, isoDoorUnder, sweepGap } from "./tap.ts";
+import { RoomScope } from "../../state/scope.ts";
+import { segmentDistance } from "./doors.ts";
+import { doorPillSlot } from "./store.ts";
+import { DOOR_SLOP_PX, isoDoorUnder, sweepGap, tapDoor } from "./tap.ts";
 
 const CAM = { x: 500, y: 100, scale: 40 };
 
@@ -32,6 +35,21 @@ describe("a door tapped in Isometric (docs/design-v1-isometric-view.md 6.2)", ()
       const above = screenAt(pick, { x: 6, y: 5.5 }, 2 + WALL_RISE + 1);
       assert.equal(under(above, { x: 6.2, y: 5.5 }), null, `turn ${turn}, above the piece`);
     }
+  });
+
+  test("near the top of a closed door's piece, taller than the slop at this zoom, the press still reaches it, and the tap shows its pill", () => {
+    const state = hall();
+    const pick = pickOf(state, 0, 80);
+    assert.ok(K * WALL_RISE * pick.camera.scale > DOOR_SLOP_PX + 8, "the piece is taller than the slop at this zoom");
+    const top = screenAt(pick, { x: 6, y: 5.5 }, 2 + WALL_RISE * 0.9);
+    // The press meets the raised ground behind the piece, further from the door than the slop in world cells.
+    const world = pressAt(pick, top);
+    assert.ok(segmentDistance(world, { x: 6, y: 5 }, { x: 6, y: 6 }) > DOOR_SLOP_PX / pick.camera.scale);
+    const scope = new RoomScope();
+    scope.get(boardPickSlot).read = () => pick;
+    const ctx = { getState: () => ({ view: state }) as never, scene: state.scenes.s1!, camera: () => pick.camera, role: "dm" as const, scope };
+    assert.equal(tapDoor(ctx, "select", world, null, top), true);
+    assert.deepEqual(scope.get(doorPillSlot).getState().pill, { sceneId: "s1", ref: { edge: "6,5,w" } });
   });
 
   test("an open door lies flat: only its line on the ground reaches it", () => {
