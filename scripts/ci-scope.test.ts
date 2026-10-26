@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { changedFiles, isDoc, scopeOf } from "./ci-scope.ts";
+import { changedFiles, isDoc, scopeOf, type Changes } from "./ci-scope.ts";
 
 describe("a doc", () => {
   test("is anything under docs/, the guide's pictures among them, or a Markdown file outside the code's folders", () => {
@@ -18,22 +18,33 @@ describe("a doc", () => {
 });
 
 describe("a run's scope", () => {
-  const push = (changed: readonly string[] | null) => scopeOf("push", "refs/heads/ci/x", changed);
+  const onTip = (files: readonly string[]) => ({ files, onMainTip: true });
+  const push = (changed: Changes | null) => scopeOf("push", "refs/heads/ci/x", changed);
 
-  test("a branch's push that changes only docs is docs-only", () => {
-    assert.equal(push(["docs/dm-guide.md", "docs/dm-guide/areas.webp", "FEATURES.md"]).docsOnly, true);
+  test("a branch's push on main's tip that changes only docs is docs-only", () => {
+    assert.equal(push(onTip(["docs/dm-guide.md", "docs/dm-guide/areas.webp", "FEATURES.md"])).docsOnly, true);
   });
 
   test("one file that is not a doc checks everything", () => {
-    const s = push(["docs/dm-guide.md", "client/App.tsx"]);
+    const s = push(onTip(["docs/dm-guide.md", "client/App.tsx"]));
     assert.equal(s.docsOnly, false);
     assert.match(s.why, /client\/App\.tsx/);
   });
 
+  test("a branch behind main checks everything, and says so, though it changes only docs", () => {
+    const s = push({ files: ["docs/dm-guide.md"], onMainTip: false });
+    assert.equal(s.docsOnly, false);
+    assert.match(s.why, /behind main/);
+  });
+
+  test("a branch behind main that changes code names the code, the first reason to check everything", () => {
+    assert.match(push({ files: ["client/App.tsx"], onMainTip: false }).why, /client\/App\.tsx/);
+  });
+
   test("a push to main, a run by hand, nothing changed or git failing check everything", () => {
-    assert.equal(scopeOf("push", "refs/heads/main", ["docs/design.md"]).docsOnly, false);
-    assert.equal(scopeOf("workflow_dispatch", "refs/heads/ci/x", ["docs/design.md"]).docsOnly, false);
-    assert.equal(push([]).docsOnly, false);
+    assert.equal(scopeOf("push", "refs/heads/main", onTip(["docs/design.md"])).docsOnly, false);
+    assert.equal(scopeOf("workflow_dispatch", "refs/heads/ci/x", onTip(["docs/design.md"])).docsOnly, false);
+    assert.equal(push(onTip([])).docsOnly, false);
     assert.equal(push(null).docsOnly, false);
   });
 });
@@ -76,7 +87,15 @@ describe("the files a push changes, from git", () => {
     return r;
   }
 
-  test("are the branch's own since its merge base, not main's later ones", () => {
+  test("on main's tip, are the branch's own, and a docs change there is docs-only", () => {
+    const r = start();
+    r.write("docs/dm-guide.md", "guide, longer\n");
+    r.commit("docs");
+    assert.deepEqual(changedFiles(r.dir), { files: ["docs/dm-guide.md"], onMainTip: true });
+    assert.equal(scopeOf("push", "refs/heads/ci/x", changedFiles(r.dir)).docsOnly, true);
+  });
+
+  test("behind main, are the branch's own since its merge base, not main's later ones, and check everything", () => {
     const r = start();
     r.write("docs/dm-guide.md", "guide, longer\n");
     r.commit("docs");
@@ -86,15 +105,17 @@ describe("the files a push changes, from git", () => {
     r.commit("code on main");
     r.git("update-ref", "refs/remotes/origin/main", "HEAD");
     r.git("checkout", "-q", "ci/x");
-    assert.deepEqual(changedFiles(r.dir), ["docs/dm-guide.md"]);
-    assert.equal(scopeOf("push", "refs/heads/ci/x", changedFiles(r.dir)).docsOnly, true);
+    assert.deepEqual(changedFiles(r.dir), { files: ["docs/dm-guide.md"], onMainTip: false });
+    const s = scopeOf("push", "refs/heads/ci/x", changedFiles(r.dir));
+    assert.equal(s.docsOnly, false);
+    assert.match(s.why, /behind main/);
   });
 
   test("name both sides of a move, so code moved under docs/ is not a doc", () => {
     const r = start();
     r.git("mv", "client/App.tsx", "docs/App.tsx");
     r.commit("move");
-    assert.deepEqual(changedFiles(r.dir)?.sort(), ["client/App.tsx", "docs/App.tsx"]);
+    assert.deepEqual(changedFiles(r.dir)?.files.toSorted(), ["client/App.tsx", "docs/App.tsx"]);
     assert.equal(scopeOf("push", "refs/heads/ci/x", changedFiles(r.dir)).docsOnly, false);
   });
 
@@ -105,7 +126,7 @@ describe("the files a push changes, from git", () => {
     r.write("client/App.tsx", "app\n");
     r.write("README.md", "readme\n");
     r.commit("code back, and a readme");
-    assert.deepEqual(changedFiles(r.dir), ["README.md"]);
+    assert.deepEqual(changedFiles(r.dir)?.files, ["README.md"]);
   });
 
   test("are null where there is no origin/main, so everything is checked", () => {

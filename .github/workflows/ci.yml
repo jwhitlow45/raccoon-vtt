@@ -4,10 +4,11 @@
 # account's 20, so a run that overlaps it queues part of its shards: a single
 # run's speed was chosen over two runs at full speed at once.
 #
-# A push to a ci/ branch that changes only docs against its merge base with
-# main (scripts/ci-scope.ts) runs the typecheck, the unit tests, the build
-# and e2e/guide.e2e.ts, in one shard, and skips the rest, so the run still
-# ends green. Anything else, main included, runs everything.
+# A push to a ci/ branch on main's tip that changes only docs
+# (scripts/ci-scope.ts) runs the typecheck, the unit tests, the build and
+# e2e/guide.e2e.ts, in one shard, and skips the rest, so the run still ends
+# green. Anything else, main and a branch behind main included, runs
+# everything.
 #
 # The e2e shards run on Ubuntu, since macOS runners are far slower and the
 # account runs up to 20 Linux jobs at a time. The app draws its
