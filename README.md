@@ -198,6 +198,10 @@ own `E2E_PORT`, at least 30 apart: a file uses ports up to `E2E_PORT` plus
 
 ## Deploying
 
+This section builds the image on the server from a copy of the repository.
+To run the image each release publishes instead, with no copy and no build,
+see [Self-hosting with the published image](#self-hosting-with-the-published-image).
+
 The production stack is `docker-compose.server.yml`. It runs four
 containers, and none of them publishes a port:
 
@@ -465,6 +469,176 @@ ID, a generated player password, the player link and the DM link. Open the
 DM link on the DM's device, then add more DM devices from inside the app.
 Send the player link to the players: it carries the password, so opening it
 joins without typing anything. Replace `ABCD-EFGH` with the printed room ID.
+
+## Self-hosting with the published image
+
+Each release is also an image on Docker Hub,
+`docker.io/jwhitlow45/raccoon-vtt`, for linux/amd64 and linux/arm64. With
+it a server needs no copy of this repository and builds nothing: two files
+are the whole setup. `selfhost/compose.yml` is the stack of
+[Deploying](#deploying) with the published image in place of the build, so
+what that section says about the containers, the networks and the egress
+proxy holds here too. It adds two things:
+
+- `config-files`, which copies the egress proxy's rules, the backup script
+  and Caddy's settings onto a volume, then exits. All three are written
+  into `compose.yml` itself, so there is nothing else to download.
+- An optional `https` profile that runs Caddy as the HTTPS front end.
+
+Its project, network and volume names are the same as
+`docker-compose.server.yml`'s, so the two cannot run on one host at once.
+
+### What you need
+
+- A Linux server with Docker Engine 28 or later and the Docker Compose v2
+  plugin, as in [Before the first deploy](#before-the-first-deploy).
+- A hostname for the site, for example `vtt.example.com`.
+- One way to serve it over HTTPS:
+  - The `https` profile. The hostname's DNS record points at the server,
+    and ports 80 and 443 are open to the internet. Caddy gets and renews
+    the certificate on its own.
+  - Or your own reverse proxy or tunnel, set up as in
+    [Put HTTPS in front of it](#5-put-https-in-front-of-it).
+
+The networks use the subnets listed in Before the first deploy, and Caddy's
+adds 172.31.243.16/28.
+
+### 1. Download the files
+
+Pick a release from the repository's tags, `vX.Y.Z`, and download its two
+files into a folder of their own. Replace `<this repository's URL>` with
+the GitHub address of this repository:
+
+```bash
+mkdir ~/raccoon-vtt && cd ~/raccoon-vtt
+tag=vX.Y.Z
+curl -fsSLo compose.yml "<this repository's URL>/raw/$tag/selfhost/compose.yml"
+curl -fsSLo .env "<this repository's URL>/raw/$tag/selfhost/env.example"
+chmod 600 .env
+```
+
+Every command from here on runs in that folder. `compose.yml` is the only
+compose file in it, so no command needs `-f`.
+
+### 2. Write the .env file
+
+```bash
+sed -i "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env
+sed -i "s|^ROOM_SECRET_KEY=$|ROOM_SECRET_KEY=$(openssl rand -base64 32)|" .env
+```
+
+Then open `.env` in an editor. Set `PUBLIC_ORIGIN` and the optional
+settings as in [Write the .env file](#2-write-the-env-file), which also says
+why to keep `ROOM_SECRET_KEY`. Three more lines are new here, and the file
+explains each:
+
+- `COMPOSE_PROFILES=https`: uncomment it to run Caddy. Every
+  `docker compose` command then includes it, `pull` and `down` too.
+- `RACCOON_VERSION`: the release to run. Unset, it is the minor release the
+  file came with, such as `0.1`, so updates bring its newest patch.
+- `TRUST_CF_CONNECTING_IP`: leave it at 1 with Caddy or Cloudflare. Behind
+  a proxy that cannot overwrite the `CF-Connecting-IP` header, set it to 0
+  (Client addresses and rate limits, in
+  [Put HTTPS in front of it](#5-put-https-in-front-of-it)).
+
+### 3. Start it
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+`raccoon`, `postgres`, `egress` and, with the profile, `caddy` should show
+`(healthy)` within about 30 seconds. `backup` shows `Up`, and
+`config-files` shows `Exited (0)` once it has copied its files. A missing
+variable stops compose before anything starts, and
+`docker compose logs raccoon` says why the app will not start.
+
+Without the `https` profile, put your own front end on `raccoon-edge`, as
+in [Put HTTPS in front of it](#5-put-https-in-front-of-it). Either way, add
+the [firewall rules](#4-firewall-rules-recommended-once) once, and if the
+site is behind Cloudflare, check [its settings](#6-if-you-use-cloudflare).
+
+### 4. Make your group's room
+
+`https://<your host>/healthz` should answer `{"status":"ok"}`. Then, as in
+[Check it and make your group's room](#7-check-it-and-make-your-groups-room):
+
+```bash
+docker compose exec raccoon node scripts/admin.ts create-room "Game Night" "Dana"
+docker compose exec raccoon node scripts/admin.ts pin ABCD-EFGH
+```
+
+The [Admin commands](#admin-commands) and the [Admin page](#admin-page) work
+the same way here. Write each of their commands without
+`-f docker-compose.server.yml`.
+
+### Update to a new release
+
+Back up first, then pull the release and recreate what changed:
+
+```bash
+cd ~/raccoon-vtt
+docker compose exec backup sh /backup/backup.sh once
+docker compose pull
+docker compose up -d
+```
+
+`pull` brings the newest image of the release in `RACCOON_VERSION`. Left
+unset, that is the newest patch of the file's minor release. Set an exact
+release such as `RACCOON_VERSION=0.1.2` to change versions only when you
+edit that line.
+
+A new minor or major release can come with a new `compose.yml`. Download
+the one at its tag, as in step 1, but keep your `.env`. Then run the three
+commands above. When the new file changes the proxy's rules or the backup
+script, `up -d` restarts `egress` and `backup` with them on its own. Read
+[Updating](#updating) for the release you move to: some updates change how
+rooms are saved, and older releases cannot read them. Going back to one is
+a restore.
+
+### Back up and restore
+
+[Backups](#backups) applies as it is, with the same volumes. Run its
+commands in this folder and without `-f docker-compose.server.yml`, for
+example:
+
+```bash
+docker compose exec backup sh /backup/backup.sh once
+docker compose exec backup ls /backups
+docker compose --profile restore run --rm restore sh /backup/backup.sh restore raccoon-2026-10-14-090000-abcd1234
+```
+
+On a new server, follow steps 1 to 3 above with the same `ROOM_SECRET_KEY`,
+then [Restore](#restore) from putting the copied backups onto the volume. A message from the backup script that names
+`-f docker-compose.server.yml` means the same command without it.
+
+## Releasing
+
+For maintainers. The image is built and pushed to Docker Hub only by GitHub
+Actions, in [`.github/workflows/image.yml`](.github/workflows/image.yml),
+never from a laptop.
+
+1. On main, bump `version` in `package.json` to the new `X.Y.Z` and run
+   `pnpm selfhost`, which writes the new `X.Y` into `selfhost/`. Commit
+   both. The unit tests fail while `selfhost/` is out of date.
+2. Wait for CI to pass on that commit.
+3. Tag the commit `vX.Y.Z` and push the tag.
+
+The tag starts the Image workflow. It checks that the tag matches
+`package.json`, that the commit is on main and that CI passed on that exact
+commit. It builds both architectures and runs the smoke test: the amd64
+image comes up healthy with `selfhost/compose.yml`, and its mounted configs
+match `docker/` byte for byte. Then the publish waits for a reviewer to
+approve the `dockerhub` environment on the run's page. After the approval
+it pushes each architecture and tags `X.Y.Z`, `X.Y` and `latest`.
+
+The `dockerhub` environment, in the repository's settings, holds the
+secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
+token that can read and write), admits only `v*` tags and has a required
+reviewer. A `DOCKERHUB_NAMESPACE` variable there publishes under another
+namespace than the username. A run started by hand from the Actions tab
+builds and smoke-tests any branch, and never pushes.
 
 ## Admin commands
 

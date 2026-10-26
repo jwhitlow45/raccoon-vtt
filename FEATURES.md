@@ -665,6 +665,7 @@ Choose an image, the stamp picker, New scene's Map image, Show a handout, and a 
 For whoever runs RaccoonVTT. [README.md](README.md) has the setup steps and every command.
 
 - It runs with Docker Compose behind any HTTPS reverse proxy or tunnel, such as Caddy, nginx or Cloudflare Tunnel, with no open ports. An outbound proxy is its only way to the internet, for image search and imports from a link.
+- **Published image**: each release is an image on Docker Hub for amd64 and arm64 servers. A host needs only `selfhost/compose.yml` and an `.env`, with an optional `https` profile that runs Caddy and gets the certificate on its own.
 - Google image search needs a SerpApi key. Openverse needs none. The Turnstile human check is optional.
 - The strict egress port also allows `character-service.dndbeyond.com`, for the D&D Beyond import. Removing it from `docker/squid.conf` turns the link import off, and pasted JSON still works.
 - **Nightly backups**: every night (at 04:00 by default) a backup copies the database and the images it needs, then checks the copy. It keeps the newest 7 good backups and one from each of the last 4 weeks. A run that cannot finish deletes nothing, so the last good backup always remains, and every run leaves 2 GiB free on the disk. One command runs a backup now, and another restores one. The backups live on the same disk as everything else, so copy them off the server now and then.
