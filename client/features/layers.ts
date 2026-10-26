@@ -151,7 +151,7 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "templates", layer: "board", order: 30, iso: "off", Component: TemplateLayer },
   { id: "rangeRings", layer: "overlay", order: 6, iso: "ground", Component: RangeRingLayer },
   { id: "turnStart", layer: "overlay", order: 8, iso: "ground", Component: TurnStartLayer },
-  { id: "rulers", layer: "overlay", order: 10, iso: "off", Component: RulerLayer },
+  { id: "rulers", layer: "overlay", order: 10, iso: "moving", Component: RulerLayer },
   { id: "pings", layer: "overlay", order: 20, iso: "moving", Component: PingLayer },
   { id: "laser", layer: "overlay", order: 30, iso: "moving", Component: LaserLayer },
   { id: "aoePreviews", layer: "overlay", order: 40, iso: "moving", Component: AreaPreviewLayer },

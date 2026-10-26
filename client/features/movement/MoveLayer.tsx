@@ -1,14 +1,14 @@
 import { memo } from "react";
 import { Ellipse, Group } from "react-konva";
-import { useStore } from "zustand";
+import { Lift, MarkPill } from "../../canvas/IsoParts.tsx";
+import { boxGround } from "../../canvas/isoPlace.ts";
+import { useIsoGround, useTreeShownStore, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import { TokenGhost } from "../../canvas/TokenNode.tsx";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
-import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
-import { BoardLabel } from "./boardText.tsx";
 import { holdLabel, type Point } from "./drop.ts";
 import { holdSlot, stopNoteSlot } from "./store.ts";
 
@@ -20,22 +20,29 @@ import { holdSlot, stopNoteSlot } from "./store.ts";
  * Both are of a token this member is moving, which they see, so they may
  * draw above the fog. Nothing here moves at rest.
  *
+ * In Isometric both draw in the drag layer on the ground at the drawn
+ * height under the token, the label standing over the ring
+ * (docs/design-v1-isometric-view.md 5.3).
+ *
  * The DM's teleport toasts (toasts.ts) run as one of the board's
  * controllers, mounted once whichever view shows.
  */
 export const MoveLayer = memo(function MoveLayer(props: LayerProps) {
-  const hold = useStore(useScoped(holdSlot), (s) => s.hold);
-  const note = useStore(useScoped(stopNoteSlot), (s) => s.note);
-  const held = useRoomView((s) => (hold ? s.view?.tokens[hold.tokenId] : undefined));
-  const ghosted = useRoomView((s) => (note ? s.view?.tokens[note.tokenId] : undefined));
+  const hold = useTreeShownStore(useScoped(holdSlot), (s) => s.hold);
+  const note = useTreeShownStore(useScoped(stopNoteSlot), (s) => s.note);
+  const held = useTreeShownView((s) => (hold ? s.view?.tokens[hold.tokenId] : undefined));
+  const ghosted = useTreeShownView((s) => (note ? s.view?.tokens[note.tokenId] : undefined));
+  const iso = useIsoGround();
   return (
     <>
       {note && ghosted && note.sceneId === props.scene.id ? (
-        <Group opacity={0.6} listening={false}>
-          <TokenGhost token={ghosted} x={note.ghost.x} y={note.ghost.y} scale={props.scale} color={theme.color.danger} />
-        </Group>
+        <Lift z={iso ? groundUnder(iso, ghosted, note.ghost) : 0}>
+          <Group opacity={0.6} listening={false}>
+            <TokenGhost token={ghosted} x={note.ghost.x} y={note.ghost.y} scale={props.scale} color={theme.color.danger} />
+          </Group>
+        </Lift>
       ) : null}
-      {hold && held && held.sceneId === props.scene.id ? <HoldMark token={held} at={hold.at} scale={props.scale} text={holdLabel(hold.blocker, hold.noWay === true)} /> : null}
+      {hold && held && held.sceneId === props.scene.id ? <HoldMark token={held} at={hold.at} scale={props.scale} text={holdLabel(hold.blocker, hold.noWay === true)} iso={iso} /> : null}
     </>
   );
 });
@@ -55,23 +62,41 @@ export function holdMarkSizes(scale: number): { ringPx: number; gapPx: number; l
   return { ringPx: Math.max(3, 3 * k), gapPx: 3 * Math.max(0.5, k), liftPx: Math.max(sizes.chipPx, Math.ceil(sizes.badgeTextPx + 7)) / 2 + sizes.gapPx };
 }
 
-/** A red ring a few pixels outside the held token, the way a selected token is ringed, and the label over it. */
-function HoldMark(props: { token: ViewToken; at: Point; scale: number; text: string }) {
+/** The drawn ground under a token's footprint at a spot, where its marks stand in Isometric. */
+function groundUnder(iso: IsoGround, token: ViewToken, at: Point): number {
+  const { w, h } = footprint(token);
+  return boxGround(iso, { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h });
+}
+
+/**
+ * A red ring a few pixels outside the held token, the way a selected token
+ * is ringed, and the label over it (movement/boardText.tsx BoardLabel's
+ * pill). In Isometric the ring lies on the ground and the label stands over
+ * the ring's far edge, the ring's half height in view units being about an
+ * eighth of the footprint's width and height together.
+ */
+function HoldMark(props: { token: ViewToken; at: Point; scale: number; text: string; iso: IsoGround | null }) {
   const { w, h } = footprint(props.token);
   const sizes = holdMarkSizes(props.scale);
   const gap = sizes.gapPx / props.scale;
+  const z = props.iso ? groundUnder(props.iso, props.token, props.at) : 0;
+  const label = props.iso
+    ? { x: props.at.x + w / 2, y: props.at.y + h / 2, offsetPx: sizes.liftPx + ((w + h) / 8) * props.scale }
+    : { x: props.at.x + w / 2, y: props.at.y - sizes.liftPx / props.scale };
   return (
     <Group listening={false}>
-      <Ellipse
-        x={props.at.x + w / 2}
-        y={props.at.y + h / 2}
-        radiusX={w / 2 + gap}
-        radiusY={h / 2 + gap}
-        stroke={theme.color.danger}
-        strokeWidth={sizes.ringPx}
-        strokeScaleEnabled={false}
-      />
-      <BoardLabel x={props.at.x + w / 2} y={props.at.y - sizes.liftPx / props.scale} scale={props.scale} text={props.text} color={theme.color.danger} />
+      <Lift z={z}>
+        <Ellipse
+          x={props.at.x + w / 2}
+          y={props.at.y + h / 2}
+          radiusX={w / 2 + gap}
+          radiusY={h / 2 + gap}
+          stroke={theme.color.danger}
+          strokeWidth={sizes.ringPx}
+          strokeScaleEnabled={false}
+        />
+      </Lift>
+      <MarkPill {...label} z={z} scale={props.scale} value={props.text} size="screen" color={theme.color.danger} small above />
     </Group>
   );
 }
