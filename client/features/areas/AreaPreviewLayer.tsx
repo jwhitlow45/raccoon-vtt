@@ -4,17 +4,16 @@ import type { AreaTemplate, DiagonalRule, RoomState, Token } from "#shared/model
 import { PREVIEW_SAMPLES, type AreaContext, type AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
-import { useTreeShownView } from "../../canvas/relief/context.ts";
+import { Lift, MarkPill } from "../../canvas/IsoParts.tsx";
+import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import { theme } from "../../lib/theme.ts";
 import type { AoePreview } from "../../state/types.ts";
-import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
-import { Pill } from "../measure/Pill.tsx";
 import { formatFeet } from "../measure/ruler.ts";
 import { cachedCoverage, caughtTokens, contextFrom } from "./coverage.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
 import { areaGrips, areaOutline, draftTemplate, frameTemplate, handlePoint, liveOrigin, outlineTop, usesFrom } from "./placement.ts";
-import { canEdit, HANDLE_GAP_PX, samplesNow, useAreaTool } from "./store.ts";
+import { canEdit, HANDLE_GAP_PX, samplesNow, useAreaScope } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 
@@ -29,6 +28,10 @@ import { SQUARES } from "#shared/rules/grid.ts";
  * from the ephemeral store's echo, because only the tool knows its caster
  * and whom it leaves out. While the finger moves, the shading samples
  * boundary cells at 4x4, and it refines to 16x16 when the finger rests.
+ *
+ * In Isometric an area being aimed draws in the drag layer on the ground,
+ * lifted to the drawn height at its origin, its pills standing
+ * (docs/design-v1-isometric-view.md 5.3).
  */
 
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
@@ -37,22 +40,23 @@ const EMPTY_CASTS: RoomState["casts"] = {};
 
 export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps) {
   const { scene, scale } = props;
-  const aoes = useRoomView((s) => s.ephemeral.aoes);
+  const aoes = useTreeShownView((s) => s.ephemeral.aoes);
   // Tokens being dragged count where they would drop, so an aimed area's targets follow them.
   const dragged = useLiveTokens();
   const tokens = dragged.tokens;
   const buildChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
-  const templates = useRoomView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
-  const settings = useRoomView((s) => s.view?.meta.settings);
-  const members = useRoomView((s) => s.view?.members);
-  const tool = useRoomView((s) => s.local.tool);
-  const draft = useAreaTool((s) => s.draft);
-  const selectedId = useAreaTool((s) => s.selectedId);
-  const live = useAreaTool((s) => s.live);
-  const moving = useAreaTool((s) => s.moving);
-  const role = useRoomView((s) => s.you?.role ?? "player");
-  const youId = useRoomView((s) => s.you?.memberId ?? "");
-  const casts = useRoomView((s) => s.view?.casts ?? EMPTY_CASTS);
+  const templates = useTreeShownView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
+  const settings = useTreeShownView((s) => s.view?.meta.settings);
+  const members = useTreeShownView((s) => s.view?.members);
+  const tool = useTreeShownView((s) => s.local.tool);
+  const areaStore = useAreaScope().store;
+  const draft = useTreeShownStore(areaStore, (s) => s.draft);
+  const selectedId = useTreeShownStore(areaStore, (s) => s.selectedId);
+  const live = useTreeShownStore(areaStore, (s) => s.live);
+  const moving = useTreeShownStore(areaStore, (s) => s.moving);
+  const role = useTreeShownView((s) => s.you?.role ?? "player");
+  const youId = useTreeShownView((s) => s.you?.memberId ?? "");
+  const casts = useTreeShownView((s) => s.view?.casts ?? EMPTY_CASTS);
 
   const fine = useMemo(() => (settings ? contextFrom({ tokens, buildChunks, settings }, scene) : null), [tokens, buildChunks, settings, scene]);
   const coarse = useMemo(
@@ -107,6 +111,8 @@ function ActiveArea(props: {
   const grips = areaGrips(t.shape, props.editable);
   const handle = grips.handle ? handlePoint(t, ctx, HANDLE_GAP_PX / scale) : null;
   const caster = props.pointShape && props.casterId ? props.tokens[props.casterId] : undefined;
+  const iso = useIsoGround();
+  const z = iso ? iso.ground(o.x, o.y) : 0;
   let range: { from: { x: number; y: number }; ft: number } | null = null;
   if (caster) {
     const r = footprintRect(SQUARES, caster);
@@ -115,27 +121,25 @@ function ActiveArea(props: {
   }
   return (
     <>
-      {props.shade ? <Shading cov={cachedCoverage(t, ctx)} color={color} opacity={0.3} /> : null}
-      {outline ? <OutlineShape outline={outline} color={theme.color.textHalo} widthPx={5} opacity={0.5} /> : null}
-      {outline ? <OutlineShape outline={outline} color={color} widthPx={2.5} /> : null}
-      {caught.map((id) => {
-        const token = ctx.tokens?.[id];
-        return token ? <TokenRing key={id} token={token} color={color} scale={scale} widthPx={3} gapPx={4} /> : null;
-      })}
-      {range ? (
-        <>
-          <Line points={[range.from.x, range.from.y, o.x, o.y]} stroke={color} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 5]} />
-          <Pill x={(range.from.x + o.x) / 2} y={(range.from.y + o.y) / 2} scale={scale} value={formatFeet(range.ft)} size="map" color={color} small />
-        </>
-      ) : null}
-      {grips.origin ? <Circle x={o.x} y={o.y} radius={4 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} /> : null}
-      {handle ? (
-        <>
-          <Line points={[o.x, o.y, handle.x, handle.y]} stroke={color} strokeWidth={1.5} strokeScaleEnabled={false} dash={[3, 4]} opacity={0.8} />
-          <Circle x={handle.x} y={handle.y} radius={11 / scale} fill={theme.color.overlay} stroke={color} strokeWidth={2.5} strokeScaleEnabled={false} />
-          <Circle x={handle.x} y={handle.y} radius={4 / scale} fill={color} />
-        </>
-      ) : null}
+      <Lift z={z}>
+        {props.shade ? <Shading cov={cachedCoverage(t, ctx)} color={color} opacity={0.3} /> : null}
+        {outline ? <OutlineShape outline={outline} color={theme.color.textHalo} widthPx={5} opacity={0.5} /> : null}
+        {outline ? <OutlineShape outline={outline} color={color} widthPx={2.5} /> : null}
+        {caught.map((id) => {
+          const token = ctx.tokens?.[id];
+          return token ? <TokenRing key={id} token={token} color={color} scale={scale} widthPx={3} gapPx={4} /> : null;
+        })}
+        {range ? <Line points={[range.from.x, range.from.y, o.x, o.y]} stroke={color} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 5]} /> : null}
+        {grips.origin ? <Circle x={o.x} y={o.y} radius={4 / scale} fill={color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} /> : null}
+        {handle ? (
+          <>
+            <Line points={[o.x, o.y, handle.x, handle.y]} stroke={color} strokeWidth={1.5} strokeScaleEnabled={false} dash={[3, 4]} opacity={0.8} />
+            <Circle x={handle.x} y={handle.y} radius={11 / scale} fill={theme.color.overlay} stroke={color} strokeWidth={2.5} strokeScaleEnabled={false} />
+            <Circle x={handle.x} y={handle.y} radius={4 / scale} fill={color} />
+          </>
+        ) : null}
+      </Lift>
+      {range ? <MarkPill x={(range.from.x + o.x) / 2} y={(range.from.y + o.y) / 2} z={z} scale={scale} value={formatFeet(range.ft)} size="map" color={color} small /> : null}
     </>
   );
 }
@@ -144,11 +148,16 @@ function RemotePreview(props: { preview: AoePreview; ctx: AreaContext; scale: nu
   const { preview, ctx, scale, color } = props;
   const t = frameTemplate(preview);
   const outline = areaOutline(t, ctx);
+  const iso = useIsoGround();
+  const o = liveOrigin(t, ctx);
+  const z = iso ? iso.ground(o.x, o.y) : 0;
   return (
     <>
-      <Shading cov={cachedCoverage(t, ctx)} color={color} opacity={0.18} />
-      {outline ? <OutlineShape outline={outline} color={color} widthPx={2} dash={[8, 5]} /> : null}
-      {props.name && outline ? <Pill {...outlineTop(outline)} scale={scale} name={props.name} size="map" color={color} small above /> : null}
+      <Lift z={z}>
+        <Shading cov={cachedCoverage(t, ctx)} color={color} opacity={0.18} />
+        {outline ? <OutlineShape outline={outline} color={color} widthPx={2} dash={[8, 5]} /> : null}
+      </Lift>
+      {props.name && outline ? <MarkPill {...outlineTop(outline)} z={z} scale={scale} name={props.name} size="map" color={color} small above /> : null}
     </>
   );
 }

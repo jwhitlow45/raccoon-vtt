@@ -1,13 +1,13 @@
 import { memo } from "react";
 import { Circle, Group } from "react-konva";
-import { useTreeShownView } from "../../canvas/relief/context.ts";
+import { Lift, MarkPill } from "../../canvas/IsoParts.tsx";
+import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
 import { useLowPower } from "../device/settings.ts";
 import { theme } from "../../lib/theme.ts";
 import { PING_MS } from "../../state/ephemeral.ts";
 import type { Ping } from "../../state/types.ts";
 import type { LayerProps } from "../layers.ts";
-import { Pill } from "../measure/Pill.tsx";
 import { useFrameNow } from "./frameClock.ts";
 import { markOwner } from "./who.ts";
 
@@ -18,6 +18,9 @@ import { markOwner } from "./who.ts";
  * (frameClock.ts), which runs only while a ping is on screen (design
  * 14.2). In low power (docs/design-v1-dm-tools.md 3.15) a ping is one
  * still ring for its 3 s, with no loop, until the store sweeps it.
+ *
+ * In Isometric a ping draws in the drag layer on the ground at its drawn
+ * height, its name standing over it (docs/design-v1-isometric-view.md 5.3).
  *
  * This layer only draws. A ping's tone and buzz, the clock and the select
  * tool's hold-to-ping run in the board's ping controller
@@ -34,16 +37,17 @@ export const PingLayer = memo(function PingLayer(props: LayerProps) {
   const members = useTreeShownView((s) => s.view?.members);
   const still = useLowPower();
   const now = useFrameNow(pings.length > 0 && !still);
+  const iso = useIsoGround();
   return (
     <Group listening={false}>
       {pings.map((p) => (
-        <PingRings key={p.id} ping={p} now={now} still={still} scale={props.scale} color={members?.[p.from]?.color ?? theme.color.accentSoft} name={markOwner(p, members)} />
+        <PingRings key={p.id} ping={p} now={now} still={still} scale={props.scale} color={members?.[p.from]?.color ?? theme.color.accentSoft} name={markOwner(p, members)} z={iso ? iso.ground(p.x, p.y) : 0} />
       ))}
     </Group>
   );
 });
 
-function PingRings(props: { ping: Ping; now: number; still: boolean; scale: number; color: string; name: string | null }) {
+function PingRings(props: { ping: Ping; now: number; still: boolean; scale: number; color: string; name: string | null; z: number }) {
   // A still ping has no clock to age by. The store drops it after its 3 s.
   const age = props.still ? 0 : Math.max(0, props.now - props.ping.at);
   if (age >= PING_MS) return null;
@@ -58,11 +62,13 @@ function PingRings(props: { ping: Ping; now: number; still: boolean; scale: numb
       });
   return (
     <>
-      {rings.map((r, i) => (
-        <Circle key={i} x={props.ping.x} y={props.ping.y} radius={r.r} stroke={props.color} strokeWidth={3} strokeScaleEnabled={false} opacity={r.opacity} listening={false} />
-      ))}
-      <Circle x={props.ping.x} y={props.ping.y} radius={5 * s} fill={props.color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} opacity={fade} listening={false} />
-      {props.name ? <Pill x={props.ping.x} y={props.ping.y} scale={props.scale} name={props.name} size="map" color={props.color} small offsetPx={14} /> : null}
+      <Lift z={props.z}>
+        {rings.map((r, i) => (
+          <Circle key={i} x={props.ping.x} y={props.ping.y} radius={r.r} stroke={props.color} strokeWidth={3} strokeScaleEnabled={false} opacity={r.opacity} listening={false} />
+        ))}
+        <Circle x={props.ping.x} y={props.ping.y} radius={5 * s} fill={props.color} stroke={theme.color.textHalo} strokeWidth={1.5} strokeScaleEnabled={false} opacity={fade} listening={false} />
+      </Lift>
+      {props.name ? <MarkPill x={props.ping.x} y={props.ping.y} z={props.z} scale={props.scale} name={props.name} size="map" color={props.color} small offsetPx={14} /> : null}
     </>
   );
 }

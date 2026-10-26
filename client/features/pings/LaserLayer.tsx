@@ -4,9 +4,10 @@ import { theme } from "../../lib/theme.ts";
 import { useLowPower } from "../device/settings.ts";
 import { LASER_FADE_MS } from "../../state/ephemeral.ts";
 import type { LaserTrail } from "../../state/types.ts";
-import { useTreeShownView } from "../../canvas/relief/context.ts";
+import { MarkPill, Upright } from "../../canvas/IsoParts.tsx";
+import { viewPointOf } from "../../canvas/isoPlace.ts";
+import { useIsoGround, useTreeShownView, type IsoGround } from "../../canvas/relief/context.ts";
 import type { LayerProps } from "../layers.ts";
-import { Pill } from "../measure/Pill.tsx";
 import { useFrameNow } from "./frameClock.ts";
 import { markOwner } from "./who.ts";
 
@@ -20,6 +21,10 @@ import { markOwner } from "./who.ts";
  * points. In low power (docs/design-v1-dm-tools.md 3.15) the trail does
  * not fade: it draws whole with no loop, and each point goes when the
  * store drops it.
+ *
+ * In Isometric the trail draws in the drag layer, standing in view space,
+ * each point at the drawn height of the ground under it
+ * (docs/design-v1-isometric-view.md 5.3).
  */
 
 const CORE_PX = 3;
@@ -31,6 +36,7 @@ export const LaserLayer = memo(function LaserLayer(props: LayerProps) {
   const trails = Object.values(lasers).filter((t) => t.points.length > 0);
   const still = useLowPower();
   const now = useFrameNow(trails.length > 0 && !still);
+  const iso = useIsoGround();
   if (trails.length === 0) return null;
   return (
     <Group listening={false}>
@@ -40,8 +46,10 @@ export const LaserLayer = memo(function LaserLayer(props: LayerProps) {
         const head = t.points[t.points.length - 1];
         return (
           <Group key={t.from}>
-            <Trail trail={t} now={now} still={still} scale={props.scale} color={color} />
-            {name && head ? <Pill x={head.x} y={head.y} scale={props.scale} name={name} size="map" color={color} small offsetPx={12} /> : null}
+            <Upright>
+              <Trail trail={t} now={now} still={still} scale={props.scale} color={color} iso={iso} />
+            </Upright>
+            {name && head ? <MarkPill x={head.x} y={head.y} scale={props.scale} name={name} size="map" color={color} small offsetPx={12} /> : null}
           </Group>
         );
       })}
@@ -49,9 +57,10 @@ export const LaserLayer = memo(function LaserLayer(props: LayerProps) {
   );
 });
 
-function Trail(props: { trail: LaserTrail; now: number; still: boolean; scale: number; color: string }) {
-  const { trail, now, still, scale, color } = props;
-  const pts = trail.points;
+/** The trail in view units, each point at its drawn height: in Top-down, its points as they are. */
+function Trail(props: { trail: LaserTrail; now: number; still: boolean; scale: number; color: string; iso: IsoGround | null }) {
+  const { trail, now, still, scale, color, iso } = props;
+  const pts = iso ? trail.points.map((p) => ({ ...viewPointOf(iso, p), at: p.at })) : trail.points;
   return (
     <Shape
       listening={false}
