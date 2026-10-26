@@ -95,9 +95,27 @@ export function monsterToken(
   return token;
 }
 
-/** Whether the stat block has different numbers in its lair, so the drop form offers the toggle. */
+/**
+ * Whether the stat block has different numbers in its lair. The Monsters
+ * place card offers In its lair only then: a token keeps its counts and
+ * XP and nothing else of the choice, so for a block whose lair changes
+ * neither, the tick would reach no fight (encounters/drop.ts placedInLair).
+ */
 export function hasLairValues(m: StatBlockMonster): boolean {
   return m.xpInLair !== undefined || m.legendaryActions?.usesInLair !== undefined || m.legendaryResistance?.usesInLair !== undefined;
+}
+
+/** An older block's "Lair Actions" heading or entry, which the stat block editor keeps as text (monsters/parse.ts). */
+const LAIR_ACTIONS = /^(?:\*\*)?Lair Actions\b/im;
+
+/**
+ * Whether a stat block has a lair: lair counts or XP (hasLairValues), or
+ * lair actions. A tracker row, an encounter's line and the Monsters
+ * filter's Has a lair all read it, so a block with lair actions alone has
+ * a lair on each.
+ */
+export function blockHasLair(m: StatBlockMonster): boolean {
+  return hasLairValues(m) || LAIR_ACTIONS.test(m.statBlock);
 }
 
 /** A token that points at a character, so HP and conditions follow the PC across scenes (design section 6). */

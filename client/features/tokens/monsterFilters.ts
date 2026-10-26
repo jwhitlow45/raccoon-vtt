@@ -2,7 +2,7 @@ import { CONDITION_KEYS, CR_VALUES, type ConditionKey, type MonsterSize } from "
 import type { StatBlockMonster } from "#shared/srd/monsters.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { SIZE_WORDS } from "#shared/statBlock.ts";
-import { hasLairValues } from "./factory.ts";
+import { blockHasLair } from "./factory.ts";
 
 /**
  * The monster browser's filters, modeled on D&D Beyond's monster listing
@@ -77,7 +77,7 @@ export type MonsterFilters = {
   alignments: Alignment[];
   /** Has legendary actions. */
   legendary: boolean;
-  /** Has lair values: lair XP or more legendary uses in its lair. */
+  /** Has a lair: lair XP, other legendary uses in its lair, or lair actions (factory.ts blockHasLair). */
   lair: boolean;
   movement: Movement[];
   senses: Sense[];
@@ -168,7 +168,7 @@ function readFacts(m: StatBlockMonster): MonsterFacts {
     sizes,
     alignment: (ALIGNMENTS as readonly string[]).includes(alignment) ? (alignment as Alignment) : null,
     legendary: m.legendaryActions !== undefined || /^### Legendary Actions$/m.test(m.statBlock),
-    lair: hasLairValues(m),
+    lair: blockHasLair(m),
     movement: new Set(MOVEMENTS.filter((kind) => (kind === "hover" ? speeds.hover === true : (speeds[kind] ?? 0) > 0))),
     senses: new Set(SENSES.filter((sense) => new RegExp(`\\b${sense}\\b`, "i").test(m.senses))),
     conditionImmunities: only(immune, CONDITION_KEYS),

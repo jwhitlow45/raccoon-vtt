@@ -22,7 +22,7 @@ import { viewOf } from "../monsters/draft.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import type { Point } from "../tokens/factory.ts";
 import { PLACE_TOOL_ID, setPending } from "../tokens/placement.ts";
-import { hasLairValues } from "../tokens/factory.ts";
+import { blockHasLair, hasLairValues } from "../tokens/factory.ts";
 import { useMonsterFilters } from "../tokens/filterState.ts";
 import { filterCount } from "../tokens/monsterFilters.ts";
 import { MonsterFilterBar } from "../tokens/MonsterFilters.tsx";
@@ -361,7 +361,8 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
   );
 }
 
-function MonsterLine(props: {
+/** A saved encounter's line: its monster, how many, Remove, and In its lair where its block has a lair or the line is already in it. */
+export function MonsterLine(props: {
   line: SavedEncounterMonster;
   view: StatBlockMonster | null;
   loading: boolean;
@@ -400,7 +401,10 @@ function MonsterLine(props: {
           Remove
         </Button>
       </div>
-      {view && hasLairValues(view) ? <Checkbox checked={line.inLair === true} onChange={props.onLair} label="In its lair" help="Uses the lair's legendary uses and XP." /> : null}
+      {/* A line's own choice joins its rows to a fight in their lair, so lair actions alone are worth it. One already in its lair keeps the box that takes it out. */}
+      {view && (blockHasLair(view) || line.inLair === true) ? (
+        <Checkbox checked={line.inLair === true} onChange={props.onLair} label="In its lair" help={hasLairValues(view) ? "Uses the lair's legendary uses and XP." : "Joins a fight with In lair on, a reminder that its lair acts too."} />
+      ) : null}
     </div>
   );
 }

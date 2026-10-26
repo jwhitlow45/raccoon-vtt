@@ -160,6 +160,7 @@ function MonsterDetail(props: {
   const [inLair, setInLair] = useState(false);
   // Only Place sends the choices, so a sheet's swipe springs back once any changed (docs/design-v1-sheet-swipe.md 4.5).
   useUnsavedSince({ count, typedHp, useTyped, hidden, inLair });
+  // Not blockHasLair: a token keeps only its counts and XP of the tick, so lair actions alone would reach no fight (factory.ts hasLairValues).
   const lair = hasLairValues(m);
   const srdImage = useRoomView((s) => (listed.source === "srd" ? s.view?.srdImages?.[listed.srd.srdId]?.image : undefined));
   const image = listed.source === "room" ? listed.monster.defaultImage : srdImage;

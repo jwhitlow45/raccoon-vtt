@@ -3,7 +3,6 @@ import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { hasLair, lairCounts, limitedUses, type LimitedUse, type RegenerationUse } from "#shared/dice/uses.ts";
 import type { Token } from "#shared/model.ts";
-import type { StatBlockMonster } from "#shared/srd/monsters.ts";
 import type { ActorTarget, EntryInput } from "#shared/protocol.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -12,7 +11,7 @@ import type { ReceiptTracker } from "../dice/useReceipt.ts";
 import { ownResultText } from "../dice/useRollToasts.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { joinEntry } from "../encounters/drop.ts";
-import { hasLairValues } from "../tokens/factory.ts";
+import { blockHasLair } from "../tokens/factory.ts";
 import { actorOf, actsNow, currentRecord, deathSaveWaits, holderKey, promptsOf, type ListRoll } from "./logic.ts";
 
 /*
@@ -165,7 +164,7 @@ export const WAITS_FOR_REGENERATION = "Waiting for Regeneration";
  * block loads, when the switch waits busy, and "failed" when the block did
  * not load, when the switch stays off beside the failure's reload: an
  * unread block never lets In lair go without the counts it would carry.
- * `has` is whether the block it read has a lair (blockHasLair).
+ * `has` is whether the block it read has a lair (factory.ts blockHasLair).
  */
 export function useLairCounts(target: ActorTarget | null): { state: JoinState; has: boolean; counts(inLair: boolean): { actionsMax: number; resistMax: number; xp: number } | undefined } {
   const creatures = useMemo(() => (target ? [target] : []), [target]);
@@ -176,17 +175,6 @@ export function useLairCounts(target: ActorTarget | null): { state: JoinState; h
     has: block !== null && blockHasLair(block),
     counts: (inLair) => (block && hasLair(block) ? lairCounts(block, inLair) : undefined),
   };
-}
-
-/** An older block's "Lair Actions" heading or entry, which the stat block editor keeps as text (monsters/parse.ts). */
-const LAIR_ACTIONS = /^(?:\*\*)?Lair Actions\b/im;
-
-/**
- * Whether a stat block has a lair: lair counts or XP, as the Monsters
- * filter reads them (tokens/factory.ts hasLairValues), or lair actions.
- */
-export function blockHasLair(view: StatBlockMonster): boolean {
-  return hasLairValues(view) || LAIR_ACTIONS.test(view.statBlock);
 }
 
 /**

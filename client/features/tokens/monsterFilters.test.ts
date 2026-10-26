@@ -226,6 +226,14 @@ describe("a room's own monsters", () => {
     assert.deepEqual(names({ alignments: ["neutral", "unaligned", "chaotic evil", "neutral evil"] }), ["Bog Brute"]);
     assert.deepEqual(names({ vulnerabilities: ["fire"] }), []);
   });
+
+  test("Has a lair takes a block with lair actions alone, as a heading's text or a named entry, and not one that only mentions them (FU32-LAIR-SURFACES)", () => {
+    const keeper = custom({ name: "Crypt Keeper", legendaryActions: [{ name: "", text: "Lair Actions" }, { name: "Grasping Dead", text: "Hands burst from the floor." }] });
+    const warden = custom({ name: "Bog Warden", traits: [{ name: "Lair Actions", text: "On initiative count 20, the bog rises." }] });
+    const lurker = custom({ name: "Cave Lurker", traits: [{ name: "Homebody", text: "It never leaves its lair, and it takes no lair actions." }] });
+    const lairs = [tyrant, keeper, warden, lurker, brute].filter(monsterMatcher("", { ...NO_FILTERS, lair: true })).map((m) => m.name);
+    assert.deepEqual(lairs, ["Marsh Tyrant", "Crypt Keeper", "Bog Warden"]);
+  });
 });
 
 describe("chips, counts and storage", () => {
