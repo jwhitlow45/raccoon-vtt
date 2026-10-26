@@ -1,4 +1,5 @@
 import { screenHeight } from "../features/device/layout.ts";
+import type { KeyboardView } from "../lib/keyboardInset.ts";
 import { theme } from "../lib/theme.ts";
 
 /**
@@ -14,6 +15,13 @@ import { theme } from "../lib/theme.ts";
  * next, so its body still reads as a list that scrolls. When the bars, the
  * safe areas and the reserve leave less than that, the sheet keeps its
  * minimum and the gap gives way.
+ *
+ * While the on-screen keyboard is open (lib/keyboardInset.ts) the sheet
+ * rides on it: its foot stands at the visible area's bottom where the
+ * keyboard reaches above the toolbar, and its top stays clear of the bars
+ * or, where the browser has panned the page up to show a field, of the
+ * visible area's top, the same gap or reserve below that. The 60% share
+ * stays the screen's, so a keyboard never makes a sheet taller.
  */
 
 export const SHEET_MIN_HEIGHT = 120;
@@ -32,11 +40,24 @@ export type SheetSpace = {
   insetBottom: number;
   /** What docks on the sheet's top edge, with its gap. */
   reserveTop?: number;
+  /** The on-screen keyboard's view, in the chrome's own pixels (sheetKeyboard). */
+  keyboard?: SheetKeyboard | null;
 };
+
+/** The keyboard's view (lib/keyboardInset.ts) in the chrome's own pixels: where the visible area starts, and how much of the layout's bottom it hides. */
+export type SheetKeyboard = { top: number; inset: number };
+
+/** The keyboard's view in a sheet's own pixels, at the interface size `zoom`. */
+export function sheetKeyboard(view: KeyboardView | null, zoom: number): SheetKeyboard | null {
+  return view ? { top: view.top / zoom, inset: view.inset / zoom } : null;
+}
 
 /** The pixels between the top bars and the toolbar left for the sheet once the gap or reserve above it is kept. Under SHEET_MIN_HEIGHT, the dock does not fit (3.2.1). */
 export function sheetRoom(space: SheetSpace): number {
-  return space.height - space.safeTop - space.safeBottom - space.insetTop - space.insetBottom - Math.max(SHEET_TOP_GAP, space.reserveTop ?? 0);
+  const kb = space.keyboard;
+  const above = Math.max(space.safeTop + space.insetTop, kb?.top ?? 0);
+  const below = Math.max(space.safeBottom + space.insetBottom, kb?.inset ?? 0);
+  return space.height - above - below - Math.max(SHEET_TOP_GAP, space.reserveTop ?? 0);
 }
 
 /** The sheet's height cap in pixels: the rule sheetMaxHeight writes as CSS. */
@@ -47,11 +68,27 @@ export function sheetCap(space: SheetSpace): number {
 /**
  * The bottom sheet's `maxHeight`. The safe areas stay CSS (`env()`), and
  * the share of the screen goes through screenHeight, which divides out the
- * interface size's zoom.
+ * interface size's zoom. With the keyboard open it is sheetRoom's rule,
+ * with the sheet's top and foot from sheetTop and sheetFoot.
  */
-export function sheetMaxHeight(inset: { top: number; bottom: number }, reserveTop = 0): string {
+export function sheetMaxHeight(inset: { top: number; bottom: number }, reserveTop = 0, keyboard: SheetKeyboard | null = null): string {
   const gap = Math.max(SHEET_TOP_GAP, reserveTop);
-  return `max(${SHEET_MIN_HEIGHT}px, min(${screenHeight(SHEET_SCREEN_SHARE)}, calc(100% - ${theme.safe.top} - ${theme.safe.bottom} - ${inset.top + inset.bottom + gap}px)))`;
+  const room = keyboard
+    ? `calc(100% - ${sheetTop(inset.top, keyboard)} - ${sheetFoot(inset.bottom, keyboard)} - ${gap}px)`
+    : `calc(100% - ${theme.safe.top} - ${theme.safe.bottom} - ${inset.top + inset.bottom + gap}px)`;
+  return `max(${SHEET_MIN_HEIGHT}px, min(${screenHeight(SHEET_SCREEN_SHARE)}, ${room}))`;
+}
+
+/** Where a sheet's foot stands above the layout's bottom: on the toolbar `bottom` px tall, or on the keyboard where that reaches higher. */
+export function sheetFoot(bottom: number, keyboard: SheetKeyboard | null): string {
+  const bar = `calc(${theme.safe.bottom} + ${bottom}px)`;
+  return keyboard ? `max(${bar}, ${keyboard.inset}px)` : bar;
+}
+
+/** Where a sheet on the right starts below the layout's top, and the line a bottom sheet keeps its gap under: the top bars `top` px tall, or the visible area's top where the page is panned past them. */
+export function sheetTop(top: number, keyboard: SheetKeyboard | null): string {
+  const bars = `calc(${theme.safe.top} + ${top}px)`;
+  return keyboard ? `max(${bars}, ${keyboard.top}px)` : bars;
 }
 
 /**
