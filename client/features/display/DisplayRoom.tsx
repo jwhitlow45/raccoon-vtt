@@ -235,6 +235,7 @@ function DisplayTable(props: { roomId: string }) {
             onOpenDetails={noop}
             controlledCamera={camera}
             ignoreFocus={mode !== "follow"}
+            view={viewChoice.shown}
           />
           <SceneLoadingOverlay insets={NO_INSETS} />
         </>

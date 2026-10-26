@@ -24,7 +24,8 @@
  * map builder. With `--view isometric`, also the switch, a turn, and a pan
  * with both drawing trees mounted. Isometric is out of reach until the
  * integration commit (client/features/view/store.ts isoReady), so the page
- * turns it on through the test flag Stage.tsx reads (ISO_TEST_FLAG).
+ * turns it on through the test flag the view choice reads
+ * (client/features/view/choice.ts ISO_TEST_FLAG).
  *
  * `--parity <dir>` saves the board's canvas for each scene at two cameras
  * instead of timing anything, and `--compare <dir> <dir>` says whether two
@@ -591,7 +592,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 
     if (view === "isometric") {
       await open("caps", 40);
-      // Stage.tsx's hook beside the test flag: a pick or a turn as the View menu will make them.
+      // The board's hook beside the test flag (relief/isoTest.ts): a pick or a turn as the View menu makes them.
       const hook = (call: "turn" | "pick", arg: unknown) =>
         page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => void> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
       add("turn, caps, 40 px", await throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));

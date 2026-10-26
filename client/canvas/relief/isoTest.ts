@@ -1,17 +1,17 @@
 import { useEffect } from "react";
-import type { Scene } from "#shared/model.ts";
-import { pickView, shownView, turnView, useStoredView, type ViewPick } from "../../features/view/store.ts";
-import type { Turn, View } from "../../lib/view.ts";
+import { ISO_TEST_FLAG } from "../../features/view/choice.ts";
+import { pickView, turnView, type ViewPick } from "../../features/view/store.ts";
+import type { Turn } from "../../lib/view.ts";
 
 /**
  * The isometric view stays unreachable until its choice ships
  * (features/view/store.ts isoReady, docs/design-v1-isometric-view.md 13).
- * Until then only tests and the bench reach it, by setting this global
- * before the page loads (Playwright's addInitScript). Nothing a user can
- * do sets it. With it set, the board shows the view the stored pick asks
- * for, and `__rvttIsoHook` picks and turns as the View menu will.
+ * Until then only tests and the bench reach it, by setting the test flag
+ * (features/view/choice.ts ISO_TEST_FLAG) before the page loads
+ * (Playwright's addInitScript), which the view choice reads (isoOffered).
+ * Nothing a user can do sets it. With it set, `__rvttIsoHook` picks and
+ * turns as the View menu does, for the bench, which presses no menu.
  */
-export const ISO_TEST_FLAG = "__rvttIsoTest";
 const HOOK = "__rvttIsoHook";
 
 type Hook = { pick(pick: ViewPick | "follow"): void; turn(turn: Turn): void };
@@ -20,10 +20,9 @@ function flagged(): boolean {
   return typeof globalThis !== "undefined" && (globalThis as Record<string, unknown>)[ISO_TEST_FLAG] === true;
 }
 
-/** The view the board shows under the test flag, or null without it, when the board shows Top-down as it always has. */
-export function useTestView(key: string, sceneId: string, suggested: Scene["suggestedView"]): View | null {
+/** Installs `__rvttIsoHook` while the test flag is set. */
+export function useIsoTestHook(key: string, sceneId: string): void {
   const on = flagged();
-  const stored = useStoredView(key);
   useEffect(() => {
     if (!on) return;
     const hook: Hook = {
@@ -36,6 +35,4 @@ export function useTestView(key: string, sceneId: string, suggested: Scene["sugg
       if (g[HOOK] === hook) delete g[HOOK];
     };
   }, [on, key, sceneId]);
-  if (!on) return null;
-  return shownView({ stored, sceneId, suggested, ready: true });
 }

@@ -15,6 +15,8 @@ import { panAnchor, requestPan, watchPans } from "../features/encounter/pan.ts";
 import { stageCameraSlot } from "../features/scenes/stageCamera.ts";
 import { CONTROLLERS, layersOf, type LayerProps } from "../features/layers.ts";
 import { displayViewKey, viewKey } from "../features/view/store.ts";
+import { viewGestureSlot } from "../features/view/choice.ts";
+import { useRoomViewChoice } from "../features/view/ViewMenu.tsx";
 import { LightPaneHost } from "../features/lights/LightPaneHost.tsx";
 import { PinPaneHost } from "../features/pins/PinPaneHost.tsx";
 import { TrapPaneHost } from "../features/traps/TrapPaneHost.tsx";
@@ -83,7 +85,7 @@ import { MapLayer } from "./layers/MapLayer.tsx";
 import { createEasedDrags, RemoteDragClock, RemoteDrags } from "./RemoteDrags.tsx";
 import { TreeShownContext } from "./relief/context.ts";
 import { IsoBoard } from "./relief/IsoBoard.tsx";
-import { useTestView } from "./relief/isoTest.ts";
+import { useIsoTestHook } from "./relief/isoTest.ts";
 import { placedTextBoxes } from "./textBoxes.ts";
 import { GroupActionBar, TokenActionBar } from "./TokenActionBar.tsx";
 import { TokenDecor, TokenInteractionContext, TokenNode, type IsoToken, type TokenInteraction } from "./TokenNode.tsx";
@@ -204,6 +206,8 @@ export function MapStage(props: {
    * DM's "look here" when `ignoreFocus` is off.
    */
   controlledCamera?: ((viewport: Size) => Camera) | null;
+  /** The view a table display shows, its own choice (features/display/DisplayRoom.tsx). The room's page leaves it out, and the board shows the room's view choice. */
+  view?: View;
   /** Leaves the DM's focus events unfollowed, for a display fitting the map. */
   ignoreFocus?: boolean;
 }) {
@@ -232,14 +236,16 @@ export function MapStage(props: {
   const tool = activeTool(toolId, role);
   const selecting = !tool.pointer;
   /*
-   * The view the board shows: Top-down, until the isometric view's choice
-   * ships (features/view/store.ts isoReady). Only a test or the bench
-   * reaches Isometric before then (relief/isoTest.ts). Its tree mounts the
-   * first time it shows and stays (ISO-D15).
+   * The view the board shows: the room's view choice (features/view), or a
+   * table display's own. It is Top-down until the isometric view ships
+   * (features/view/choice.ts isoOffered), which only a test or the bench
+   * reaches before then. Isometric's tree mounts the first time it shows
+   * and stays (ISO-D15).
    */
   const roomId = useRoomView((s) => s.roomId);
-  const testView = useTestView(props.controlledCamera ? displayViewKey(roomId) : viewKey(roomId), scene.id, scene.suggestedView);
-  const shown: View = testView ?? TOP_DOWN;
+  const roomChoice = useRoomViewChoice();
+  useIsoTestHook(props.controlledCamera ? displayViewKey(roomId) : viewKey(roomId), scene.id);
+  const shown: View = props.view ?? roomChoice.shown;
   const isoShown = shown.kind === "isometric";
   const shownRef = useRef(shown);
   shownRef.current = shown;
@@ -265,6 +271,12 @@ export function MapStage(props: {
    */
   const fittedRef = useRef<Fit | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // A new suggestion or a turn waits while this device drags a token (ISO-D3, features/view/choice.ts viewGestureSlot). Pinches and rulers join in ISO-4.
+  useLayoutEffect(() => {
+    const slot = scope.get(viewGestureSlot);
+    slot.setState({ active: draggingId !== null });
+  }, [scope, draggingId]);
+  useLayoutEffect(() => () => scope.get(viewGestureSlot).setState({ active: false }), [scope]);
   /** The tokens this device's drag carries, which draw their own decorations so they travel with them. */
   const [carried, setCarried] = useState<ReadonlySet<string>>(NOT_CARRIED);
   /** The camera a gesture asked for, shown on the next animation frame. */
