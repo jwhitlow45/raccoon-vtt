@@ -12,8 +12,7 @@ import { cachedCoverage, caughtTokens, contextFrom } from "./coverage.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
 import { areaLabelSpot, foggedCells, tokenBoxes, type Box } from "./labelSpot.ts";
 import { areaOutline, liveOrigin, outlineBottom, outlineTop, type Outline } from "./placement.ts";
-import { samplesNow, useAreaTool, useSelectionWatch } from "./store.ts";
-import { useAreaReminders } from "./useAreaReminders.ts";
+import { samplesNow, useAreaTool } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
 
 /**
@@ -28,10 +27,10 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  * dragged, here or on another device, counts at the cell it would drop on
  * (useLiveTokens.ts), so an aura and its rings follow it during the drag.
  *
- * It also toasts the reminders that an area hits a creature again
- * (useAreaReminders.ts), and counts the room's selection changes for the
- * area tool's From control (store.ts useSelectionWatch), since the board
- * is always on screen in a room.
+ * It only draws. The reminders that an area hits a creature again, and
+ * the count of selection changes for the area tool, run in the board's
+ * area controller (AreaController.ts), mounted once outside both drawing
+ * trees (docs/design-v1-isometric-view.md 5.1).
  */
 
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
@@ -40,9 +39,6 @@ const EMPTY_TILES: RoomState["fogTiles"] = {};
 
 export const TemplateLayer = memo(function TemplateLayer(props: LayerProps) {
   const { scene, scale, role, fog } = props;
-  // The board always draws this layer, so it carries the reminder toasts and the selection count too.
-  useAreaReminders();
-  useSelectionWatch();
   const templates = useRoomView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
   // Tokens being dragged count where they would drop, so an aura follows its token during the drag.
   const { tokens, moving } = useLiveTokens();

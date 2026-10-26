@@ -24,6 +24,11 @@ import { TetherLayer } from "./attach/TetherLayer.tsx";
 import { TrapLayer } from "./traps/TrapLayer.tsx";
 import { TrapAlerts } from "./traps/useTrapAlerts.ts";
 import { TeleportToasts } from "./movement/toasts.ts";
+import { PingController } from "./pings/PingController.ts";
+import { PinController } from "./pins/PinController.ts";
+import { RulerController } from "./measure/RulerController.ts";
+import { AreaController } from "./areas/AreaController.ts";
+import { TetherController } from "./attach/TetherController.ts";
 import { quietLazy } from "../lib/quietLazy.tsx";
 
 /* The DM's height marks and explored outline, loaded after the room opens (lib/quietLazy.tsx). */
@@ -58,11 +63,13 @@ const ExploredEdgeLayer = quietLazy<LayerProps>(() => import("./vision/ExploredE
  * A minimal renderer, in client/features/ping/PingLayer.tsx:
  *
  *   export function PingLayer(props: LayerProps) {
- *     const pings = useRoomView((s) => s.ephemeral.pings);
+ *     const pings = useTreeShownView((s) => s.ephemeral.pings);
  *     return <>{pings.map((p) => <Circle key={p.id} x={p.x} y={p.y} radius={12 / props.scale} stroke="#f7df00" />)}</>;
  *   }
  *
  * and here: `{ id: "pings", layer: "overlay", order: 20, iso: "off", Component: PingLayer },` in LAYERS.
+ * A renderer reads the room through useTreeShownView (canvas/relief/context.ts),
+ * which holds its last read while its drawing tree is hidden.
  *
  * The isometric view (docs/design-v1-isometric-view.md 5.1) draws the board
  * in a second tree, and `iso` says where each renderer goes there. A
@@ -136,15 +143,11 @@ export type ControllerDef = { id: string; Component: ComponentType<ControllerPro
 /** Every canvas renderer, one per line. */
 export const LAYERS: readonly LayerDef[] = [
   { id: "drawings", layer: "board", order: 20, iso: "ground", Component: DrawingLayer },
-  // Its reminder toasts run in the component, so it waits for its controller (ISO-3).
   { id: "templates", layer: "board", order: 30, iso: "off", Component: TemplateLayer },
   { id: "rangeRings", layer: "overlay", order: 6, iso: "ground", Component: RangeRingLayer },
   { id: "turnStart", layer: "overlay", order: 8, iso: "ground", Component: TurnStartLayer },
-  // It listens to the dragged node, once per tree.
   { id: "rulers", layer: "overlay", order: 10, iso: "off", Component: RulerLayer },
-  // Its sound, vibration and hold run in the component, so it waits for its controller (ISO-3).
   { id: "pings", layer: "overlay", order: 20, iso: "off", Component: PingLayer },
-  // Its frame clock runs in the component, so it waits for its controller (ISO-3).
   { id: "laser", layer: "overlay", order: 30, iso: "off", Component: LaserLayer },
   { id: "aoePreviews", layer: "overlay", order: 40, iso: "moving", Component: AreaPreviewLayer },
   { id: "builder", layer: "board", order: 10, iso: "ground", Component: BuilderLayer },
@@ -156,9 +159,7 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "exploredEdge", layer: "overlay", order: 2, iso: "ground", Component: ExploredEdgeLayer },
   { id: "movement", layer: "overlay", order: 9, iso: "moving", Component: MoveLayer },
   { id: "outlinerFlash", layer: "overlay", order: 95, iso: "moving", Component: FlashLayer },
-  // Its pane and tap effects run in the component, so it waits for ISO-3.
   { id: "pins", layer: "overlay", order: 15, iso: "off", Component: PinLayer },
-  // Its falling off reminder listens from the component, so it waits for its controller (ISO-3).
   { id: "tethers", layer: "board", order: 40, iso: "off", Component: TetherLayer },
   { id: "traps", layer: "board", order: 35, iso: "ground", Component: TrapLayer },
 ];
@@ -169,6 +170,11 @@ export const CONTROLLERS: readonly ControllerDef[] = [
   { id: "scene-thumbnails", Component: ThumbnailLayer },
   { id: "trap-alerts", Component: TrapAlerts },
   { id: "teleport-toasts", Component: TeleportToasts },
+  { id: "pings", Component: PingController },
+  { id: "pins", Component: PinController },
+  { id: "rulers", Component: RulerController },
+  { id: "areas", Component: AreaController },
+  { id: "tethers", Component: TetherController },
 ];
 
 export function layersOf(layer: LayerDef["layer"]): LayerDef[] {

@@ -4,10 +4,10 @@ import { theme } from "../../lib/theme.ts";
 import { useLowPower } from "../device/settings.ts";
 import { LASER_FADE_MS } from "../../state/ephemeral.ts";
 import type { LaserTrail } from "../../state/types.ts";
-import { useRoomView } from "../../state/view.ts";
+import { useTreeShownView } from "../../canvas/relief/context.ts";
 import type { LayerProps } from "../layers.ts";
 import { Pill } from "../measure/Pill.tsx";
-import { useFrameClock } from "./PingLayer.tsx";
+import { useFrameNow } from "./frameClock.ts";
 import { markOwner } from "./who.ts";
 
 /**
@@ -15,20 +15,22 @@ import { markOwner } from "./who.ts";
  * member's recent points as a glowing stroke in their color whose tail
  * fades over the store's fade time, with their name at the tip when it is
  * someone else's. Nothing is saved. The store drops faded points, and
- * this layer animates only while some trail still has points. In low power
- * (docs/design-v1-dm-tools.md 3.15) the trail does not fade: it draws whole
- * with no loop, and each point goes when the store drops it.
+ * this layer animates by the board's one frame clock (frameClock.ts),
+ * which runs in the ping controller only while some trail still has
+ * points. In low power (docs/design-v1-dm-tools.md 3.15) the trail does
+ * not fade: it draws whole with no loop, and each point goes when the
+ * store drops it.
  */
 
 const CORE_PX = 3;
 const GLOW_PX = 9;
 
 export const LaserLayer = memo(function LaserLayer(props: LayerProps) {
-  const lasers = useRoomView((s) => s.ephemeral.lasers);
-  const members = useRoomView((s) => s.view?.members);
+  const lasers = useTreeShownView((s) => s.ephemeral.lasers);
+  const members = useTreeShownView((s) => s.view?.members);
   const trails = Object.values(lasers).filter((t) => t.points.length > 0);
   const still = useLowPower();
-  const now = useFrameClock(trails.length > 0 && !still);
+  const now = useFrameNow(trails.length > 0 && !still);
   if (trails.length === 0) return null;
   return (
     <Group listening={false}>

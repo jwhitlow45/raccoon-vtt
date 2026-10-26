@@ -1,14 +1,12 @@
-import type Konva from "konva";
-import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useMemo } from "react";
 import { Circle, Group, Line } from "react-konva";
-import { useStore } from "zustand";
 import type { Drawing, RoomState, Token } from "#shared/model.ts";
 import { useDelayed } from "../../components/Loading.tsx";
 import { footprint, snapPosition } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
+import { useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import { useScoped } from "../../state/scope.ts";
 import type { DragPreview } from "../../state/types.ts";
-import { useRoomView } from "../../state/view.ts";
 import { turnMoverId } from "../attach/turns.ts";
 import type { LayerProps } from "../layers.ts";
 import { dropView, type DropView, type Role } from "../movement/drop.ts";
@@ -17,6 +15,7 @@ import { routeSlot, type DragRoute } from "../movement/store.ts";
 import { markOwner } from "../pings/who.ts";
 import { dragLabel, remoteReading, type DragRead, type SpeedLeft, type Speeds } from "./movement.ts";
 import { Pill, PillStack } from "./Pill.tsx";
+import { localMeasureSlot } from "./RulerController.ts";
 import { drawnPoints, formatFeet, keptStops, measureStops, type DistanceRules, type Point, type RulerStop } from "./ruler.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
 import { heldKey, legReading, walkShown, walkText, type WalkInput } from "./walkRuler.ts";
@@ -65,30 +64,31 @@ export function dragColor(left: SpeedLeft | null | undefined): string {
 type ReadDrag = (token: Token, to: Point, walk?: { corners: readonly Point[]; costFt?: number }) => DragRead;
 
 export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
-  const rulers = useRoomView((s) => s.ephemeral.rulers);
-  const drags = useRoomView((s) => s.ephemeral.drags);
-  const tokens = useRoomView((s) => s.view?.tokens ?? EMPTY_TOKENS);
-  const members = useRoomView((s) => s.view?.members);
-  const settings = useRoomView((s) => s.view?.meta.settings);
-  const youId = useRoomView((s) => s.you?.memberId ?? null);
-  const encounter = useRoomView((s) => s.view?.encounter);
-  const drawings = useRoomView((s) => s.view?.drawings ?? EMPTY_DRAWINGS);
-  const characters = useRoomView((s) => s.view?.characters);
-  const role = useRoomView((s) => s.you?.role ?? "player");
+  // Every read holds while this tree is hidden, so a ruler measured in the other view works for nothing here, its walk's search included.
+  const rulers = useTreeShownView((s) => s.ephemeral.rulers);
+  const drags = useTreeShownView((s) => s.ephemeral.drags);
+  const tokens = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
+  const members = useTreeShownView((s) => s.view?.members);
+  const settings = useTreeShownView((s) => s.view?.meta.settings);
+  const youId = useTreeShownView((s) => s.you?.memberId ?? null);
+  const encounter = useTreeShownView((s) => s.view?.encounter);
+  const drawings = useTreeShownView((s) => s.view?.drawings ?? EMPTY_DRAWINGS);
+  const characters = useTreeShownView((s) => s.view?.characters);
+  const role = useTreeShownView((s) => s.you?.role ?? "player");
   // Walking rulers search the room itself, so only they read the whole view.
-  const anyWalk = useRoomView((s) => Object.values(s.ephemeral.rulers).some((r) => r.walk) || Object.values(s.view?.drawings ?? {}).some((d) => d?.kind === "ruler" && d.walk === true));
-  const view = useRoomView((s) => (anyWalk ? s.view : null));
-  const groupRef = useRef<Konva.Group>(null);
-  const localDrag = useLocalDrag(groupRef);
+  const anyWalk = useTreeShownView((s) => Object.values(s.ephemeral.rulers).some((r) => r.walk) || Object.values(s.view?.drawings ?? {}).some((d) => d?.kind === "ruler" && d.walk === true));
+  const view = useTreeShownView((s) => (anyWalk ? s.view : null));
+  // This device's own drag, which the board's ruler controller hears from the stage on screen (RulerController.ts).
+  const localDrag = useTreeShownStore(useScoped(localMeasureSlot), (s) => s.drag);
   // Only this device's own drag reads the room, for where its token lands: by its holder while it sits on one every player sees.
-  const dragRoom = useRoomView((s) => (localDrag ? s.view : null));
+  const dragRoom = useTreeShownView((s) => (localDrag ? s.view : null));
   const dropRoom = useMemo(() => (dragRoom ? dropView(dragRoom, role) : undefined), [dragRoom, role]);
   const feetPerCell = settings?.feetPerCell ?? 5;
   const diagonal = settings?.diagonal ?? "five";
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
-  const route = useStore(useScoped(routeSlot), (s) => s.route);
+  const route = useTreeShownStore(useScoped(routeSlot), (s) => s.route);
   // The turn's walker: the active creature, or the controlled mount sharing its turn (docs/design-v1-attach.md 7.2).
-  const activeTokenId = useRoomView((s) => turnMoverId(s.view) ?? null);
+  const activeTokenId = useTreeShownView((s) => turnMoverId(s.view) ?? null);
   const read = useMemo<ReadDrag>(() => {
     return (token, to, walk) => {
       // Speeds are the actor's, which only the DM and the creature's owners receive.
@@ -96,12 +96,12 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
       return remoteReading({ token, to, encounter, activeTokenId, speeds, rules, role }, walk);
     };
   }, [encounter, activeTokenId, characters, rules, role]);
-  if (!settings) return <Group ref={groupRef} listening={false} />;
+  if (!settings) return null;
   const colorOf = (id: string) => members?.[id]?.color ?? theme.color.crest;
   const kept = Object.values(drawings).filter((d): d is Drawing => !!d && d.kind === "ruler" && d.sceneId === props.scene.id);
 
   return (
-    <Group ref={groupRef} listening={false}>
+    <Group listening={false}>
       {kept.map((d) => (
         <KeptRuler
           key={d.id}
@@ -360,31 +360,4 @@ function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined;
       {...(drag.ft !== undefined ? { costFt: drag.ft } : {})}
     />
   );
-}
-
-/**
- * This device's own token drag. Konva moves the dragged node without a
- * React render, and the canvas sends no local echo of drags, so this
- * listens to the stage's drag events, which bubble up from the token's
- * group (named "token", with the token's id).
- */
-function useLocalDrag(ref: RefObject<Konva.Group | null>): { tokenId: string; x: number; y: number } | null {
-  const [drag, setDrag] = useState<{ tokenId: string; x: number; y: number } | null>(null);
-  useEffect(() => {
-    const stage = ref.current?.getStage();
-    if (!stage) return;
-    const onMove = (e: Konva.KonvaEventObject<DragEvent>) => {
-      const node = e.target;
-      if (node.name() !== "token") return;
-      setDrag({ tokenId: node.id(), x: node.x(), y: node.y() });
-    };
-    const onEnd = () => setDrag(null);
-    stage.on("dragmove.rulerlayer", onMove);
-    stage.on("dragend.rulerlayer", onEnd);
-    return () => {
-      stage.off("dragmove.rulerlayer");
-      stage.off("dragend.rulerlayer");
-    };
-  }, [ref]);
-  return drag;
 }

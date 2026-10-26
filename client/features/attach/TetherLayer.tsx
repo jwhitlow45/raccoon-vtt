@@ -10,7 +10,6 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
 import { tethers } from "./groups.ts";
-import { useFallReminders } from "./useFallReminders.ts";
 
 const EMPTY: Record<string, Token> = {};
 
@@ -22,11 +21,11 @@ const EMPTY: Record<string, Token> = {};
  * device crosses into another cell (state/localDrags.ts), and never
  * animates.
  *
- * The board always holds this layer, so the DM's falling off reminder
- * (4.5) listens from here, as the area reminders do from theirs.
+ * The DM's falling off reminder (4.5) runs in the board's tether controller
+ * (TetherController.ts), mounted once outside both drawing trees
+ * (docs/design-v1-isometric-view.md 5.1).
  */
 export const TetherLayer = memo(function TetherLayer(props: LayerProps) {
-  useFallReminders();
   const tokens = useRoomView((s) => s.view?.tokens ?? EMPTY);
   const spots = useStore(useScoped(localDragSlot), (s) => s.spots);
   const lines = useMemo(() => tethers(tokens, props.scene.id, (t) => spots[t.id] ?? t), [tokens, props.scene.id, spots]);

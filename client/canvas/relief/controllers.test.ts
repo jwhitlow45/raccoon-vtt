@@ -48,6 +48,10 @@ const IDEMPOTENT: Record<string, string> = {
   useLiveTokens: "a timer on its own state",
   // It loads each texture once into a cache both trees share, and keeps what arrived in its own state.
   useTextures: "a shared cache read into its own state",
+  // Its timer only says that its own tree's search has run long, for that tree's "Finding the way…".
+  useDelayed: "a timer on its own state",
+  // It searches a walking ruler's walk in the board's shared work queue for its own state. A hidden tree holds the ruler it measures (useTreeShownView), so it asks for no new search there.
+  useWalkMeasure: "a search for its own state, on input a hidden tree holds",
 };
 
 /** The source of a function or const named `name` in `src`, up to its closing line, or null. */
@@ -116,18 +120,41 @@ describe("the board's controllers mount once", () => {
     }
   });
 
-  test("the scan follows hooks a layer imports: the trap alerts' toasts and sound, the teleport toasts and the laser's frame clock", () => {
-    assert.ok(effectsReached("features/pings/LaserLayer.tsx").some((t) => t.includes("useFrameClock")));
+  test("the scan follows hooks a layer imports: the trap alerts' toasts and sound, the teleport toasts, and each controller's effects", () => {
     assert.ok(effectsReached("features/traps/useTrapAlerts.ts").length > 0);
     assert.ok(effectsReached("features/movement/toasts.ts").length > 0);
-    for (const f of ["features/traps/TrapLayer.tsx", "features/movement/MoveLayer.tsx"]) assert.deepEqual(effectsReached(f), [], `${f} leaves its effects to a controller`);
+    // What each controller lifted out of its layer (ISO-3): the scan reaches it there, so it would reach it in a layer that took it back.
+    // Each is called from the controller itself, the component the board mounts.
+    const reaches = (file: string, controller: string, hook: string) => {
+      assert.ok(effectsReached(file).some((t) => t.includes(hook)), `${file} reaches ${hook}`);
+      assert.match(bodyOf(read(file), controller)!, new RegExp(`\\b${hook}\\(`), `${controller} runs ${hook}`);
+    };
+    reaches("features/pings/PingController.ts", "PingController", "useRunFrameClock");
+    reaches("features/pings/PingController.ts", "PingController", "useFeedback");
+    reaches("features/pings/PingController.ts", "PingController", "useHoldToPing");
+    reaches("features/pins/PinController.ts", "PinController", "useTapPin");
+    reaches("features/measure/RulerController.ts", "RulerController", "useLocalDrag");
+    reaches("features/areas/AreaController.ts", "AreaController", "useAreaReminders");
+    reaches("features/areas/AreaController.ts", "AreaController", "useSelectionWatch");
+    reaches("features/attach/TetherController.ts", "TetherController", "useFallReminders");
+    for (const f of [
+      "features/traps/TrapLayer.tsx",
+      "features/movement/MoveLayer.tsx",
+      "features/pings/PingLayer.tsx",
+      "features/pings/LaserLayer.tsx",
+      "features/pins/PinLayer.tsx",
+      "features/measure/RulerLayer.tsx",
+      "features/areas/TemplateLayer.tsx",
+      "features/attach/TetherLayer.tsx",
+    ])
+      assert.deepEqual(effectsReached(f), [], `${f} leaves its effects to a controller`);
   });
 
-  test("the camera stream and the thumbnails are controllers, never layers", () => {
+  test("the camera stream, the thumbnails and every effect a layer once ran are controllers, never layers", () => {
     const { layers, controllers } = registry();
     assert.deepEqual(
       controllers.map((c) => c.id),
-      ["dm-camera", "scene-thumbnails", "trap-alerts", "teleport-toasts"],
+      ["dm-camera", "scene-thumbnails", "trap-alerts", "teleport-toasts", "pings", "pins", "rulers", "areas", "tethers"],
     );
     for (const id of ["dm-camera", "scene-thumbnails"]) assert.ok(!layers.some((l) => l.id === id), `${id} drawn in a tree`);
     assert.doesNotMatch(read("features/dm/CameraLayer.tsx"), /getStage\(|react-konva/, "the camera controller reads the camera it is given, not a stage");

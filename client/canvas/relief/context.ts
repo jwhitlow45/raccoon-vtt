@@ -1,4 +1,6 @@
 import { createContext, useContext, useRef } from "react";
+import { useStore } from "zustand";
+import type { StoreApi } from "zustand/vanilla";
 import type { Turn } from "../../lib/view.ts";
 import { useRoomView, type RoomView } from "../../state/view.ts";
 import type { FogView } from "./fogView.ts";
@@ -54,4 +56,17 @@ export function useShownView<T>(shown: boolean, select: (s: RoomView) => T): T {
  */
 export function useTreeShownView<T>(select: (s: RoomView) => T): T {
   return useShownView(useTreeShown(), select);
+}
+
+/**
+ * A read of one of the room's other stores (a scoped slot's), held while
+ * the part's tree is hidden, as useTreeShownView holds the room's: the
+ * frame clock, a drag's spots, a tool's state.
+ */
+export function useTreeShownStore<S, T>(store: StoreApi<S>, select: (s: S) => T): T {
+  const shown = useTreeShown();
+  const last = useRef<{ value: T } | null>(null);
+  const value = useStore(store, (s) => (shown || !last.current ? select(s) : last.current.value));
+  last.current = { value };
+  return value;
 }
