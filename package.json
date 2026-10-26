@@ -26,7 +26,8 @@
     "db:down": "docker compose down",
     "db:psql": "docker compose exec postgres psql -U raccoon -d raccoon",
     "db:reset": "docker compose down -v && docker compose up -d postgres",
-    "admin": "node scripts/admin.ts"
+    "admin": "node scripts/admin.ts",
+    "selfhost": "node scripts/selfhost-compose.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.3",
