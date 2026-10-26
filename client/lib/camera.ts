@@ -1,13 +1,15 @@
-import type { ViewPoint } from "./view.ts";
+import type { ViewBox, ViewPoint } from "./view.ts";
 
 /**
  * Camera math for the map canvas.
  *
- * World units are grid cells (design section 5). The camera maps a world
- * point to a screen point as `screen = world * scale + (x, y)`, so `scale` is
- * screen pixels per cell and `(x, y)` is where world (0, 0) lands. That is
- * exactly a Konva stage's scale and position, so the stage takes the camera
- * as is.
+ * The camera maps a point in view space (lib/view.ts) to a screen point as
+ * `screen = view * scale + (x, y)`, so `scale` is screen pixels per view
+ * unit and `(x, y)` is where view (0, 0) lands. That is exactly a Konva
+ * stage's scale and position, so the stage takes the camera as is. In
+ * Top-down the view is the world, in grid cells (design section 5), and a
+ * world point reaches the camera only through `toView`, so no call site
+ * mistakes one space for the other (docs/design-v1-isometric-view.md 4.1).
  */
 export type Camera = { x: number; y: number; scale: number };
 export type Point = { x: number; y: number };
@@ -21,14 +23,6 @@ export const MAX_SCALE = 400;
 /** `min` is a scene's own floor (sceneMinScale), never below MIN_SCALE. */
 export function clampScale(scale: number, min: number = MIN_SCALE): number {
   return Math.min(MAX_SCALE, Math.max(min, scale));
-}
-
-export function worldToScreen(cam: Camera, p: Point): Point {
-  return { x: p.x * cam.scale + cam.x, y: p.y * cam.scale + cam.y };
-}
-
-export function screenToWorld(cam: Camera, p: Point): Point {
-  return { x: (p.x - cam.x) / cam.scale, y: (p.y - cam.y) / cam.scale };
 }
 
 export function viewToScreen(cam: Camera, p: ViewPoint): Point {
@@ -62,11 +56,10 @@ export function panBy(cam: Camera, dx: number, dy: number): Camera {
   return { x: cam.x + dx, y: cam.y + dy, scale: cam.scale };
 }
 
-/** Zooms by `factor`, keeping the world point under `anchor` (a screen point) where it is. */
+/** Zooms by `factor`, keeping the point under `anchor` (a screen point) where it is. */
 export function zoomAt(cam: Camera, anchor: Point, factor: number, minScale: number = MIN_SCALE): Camera {
   const scale = clampScale(cam.scale * factor, Math.min(minScale, cam.scale));
-  const world = screenToWorld(cam, anchor);
-  return { x: anchor.x - world.x * scale, y: anchor.y - world.y * scale, scale };
+  return cameraAt(anchor, screenToView(cam, anchor), scale);
 }
 
 /**
@@ -87,11 +80,12 @@ export type Insets = { top: number; right: number; bottom: number; left: number 
 export const NO_INSETS: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /**
- * The camera that shows all of `rect` (world units) centered in the part of
- * the viewport that `insets` leave clear. When even the smallest zoom
- * cannot fit it, its middle sits in the middle of that part.
+ * The camera that shows all of `rect` (a view box, lib/view.ts viewBox)
+ * centered in the part of the viewport that `insets` leave clear. When even
+ * the smallest zoom cannot fit it, its middle sits in the middle of that
+ * part.
  */
-export function fitRect(viewport: Size, rect: Rect, paddingPx = 24, insets: Insets = NO_INSETS): Camera {
+export function fitRect(viewport: Size, rect: ViewBox, paddingPx = 24, insets: Insets = NO_INSETS): Camera {
   const clearW = viewport.width - insets.left - insets.right;
   const clearH = viewport.height - insets.top - insets.bottom;
   const w = Math.max(1, clearW - paddingPx * 2);
@@ -104,27 +98,27 @@ export function fitRect(viewport: Size, rect: Rect, paddingPx = 24, insets: Inse
   };
 }
 
-/** Whether all of `rect` (world units) shows in the part of the viewport that `insets` leave clear. */
-export function rectClear(cam: Camera, rect: Rect, viewport: Size, insets: Insets): boolean {
-  const a = worldToScreen(cam, { x: rect.x, y: rect.y });
-  const b = worldToScreen(cam, { x: rect.x + rect.width, y: rect.y + rect.height });
+/** Whether all of `rect` (a view box) shows in the part of the viewport that `insets` leave clear. */
+export function rectClear(cam: Camera, rect: ViewBox, viewport: Size, insets: Insets): boolean {
+  const a = viewToScreen(cam, { x: rect.x, y: rect.y } as ViewPoint);
+  const b = viewToScreen(cam, { x: rect.x + rect.width, y: rect.y + rect.height } as ViewPoint);
   return a.x >= insets.left && a.y >= insets.top && b.x <= viewport.width - insets.right && b.y <= viewport.height - insets.bottom;
 }
 
-/** A scene's saved starting view: the world point at the viewport center, and a zoom. */
-export function cameraForView(viewport: Size, view: { x: number; y: number; zoom: number }): Camera;
-/** The camera that shows the view point `at` at the viewport's center, at a zoom. */
-export function cameraForView(viewport: Size, at: ViewPoint, zoom: number): Camera;
-export function cameraForView(viewport: Size, at: { x: number; y: number; zoom?: number }, zoom?: number): Camera {
-  const scale = clampScale(zoom ?? at.zoom ?? 1);
-  return { x: viewport.width / 2 - at.x * scale, y: viewport.height / 2 - at.y * scale, scale };
+/**
+ * A starting view, Follow me or Bring everyone here: the camera that shows
+ * the view point `at` at the viewport's center, at a zoom. Each device
+ * centers the world point in its own view (docs/design-v1-isometric-view.md 4.2).
+ */
+export function cameraForView(viewport: Size, at: ViewPoint, zoom: number): Camera {
+  return cameraAt({ x: viewport.width / 2, y: viewport.height / 2 }, at, clampScale(zoom));
 }
 
 /**
  * Pinch-zoom from a baseline taken when the second finger landed (or when the
  * gesture was last re-baselined). Computing from the baseline every time,
- * instead of applying small increments per event, keeps the world point that
- * was under the fingers' midpoint pinned to it with no drift, and folds the
+ * instead of applying small increments per event, keeps the point that was
+ * under the fingers' midpoint pinned to it with no drift, and folds the
  * two-finger pan into the same step.
  */
 export function pinchCamera(
@@ -134,8 +128,7 @@ export function pinchCamera(
 ): Camera {
   const ratio = base.dist > 0 ? current.dist / base.dist : 1;
   const scale = clampScale(base.cam.scale * ratio, Math.min(minScale, base.cam.scale));
-  const world = screenToWorld(base.cam, base.mid);
-  return { x: current.mid.x - world.x * scale, y: current.mid.y - world.y * scale, scale };
+  return cameraAt(current.mid, screenToView(base.cam, base.mid), scale);
 }
 
 /**
@@ -161,6 +154,11 @@ export function sceneMinScale(viewport: Size, bounds: { w: number; h: number }):
  * come toward the bound or stay, and never jumps to it
  * (docs/design-v1-bar-compact.md 4, review BC-OPUS-7). The edges are
  * compared on screen, so a pinch that changes the scale keeps the rule.
+ *
+ * The scene's bounds stand for its box on screen, which holds in Top-down
+ * only. Isometric keeps the ground under the clear area's middle on the
+ * scene instead, since its diamond's box has empty corners
+ * (docs/design-v1-isometric-view.md ISO-D14).
  */
 export function keepInView(cam: Camera, viewport: Size, bounds: { w: number; h: number }, insets: Insets = NO_INSETS, marginPx = 64, from?: Camera): Camera {
   const clampAxis = (pos: number, start: number, end: number, size: number, was: number | undefined, wasLength: number) => {
