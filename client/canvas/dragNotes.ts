@@ -1,5 +1,5 @@
 import type { RoomState } from "#shared/model.ts";
-import { withheldWhereItStands } from "#shared/project.ts";
+import { perPlayerScene, withheldFromViewer } from "#shared/project.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { OpAnswer } from "../state/types.ts";
 import { displayName, type ViewToken } from "../lib/scene.ts";
@@ -46,17 +46,24 @@ function onVisionScene(view: RoomState, token: ViewToken): boolean {
  * The tokens a player just dropped fully under the fog of a scene without
  * party vision, where their own view will lose them: not theirs and not
  * exempt, and withheld where they land by the rule the server projects with
- * (design 13.4), the fog players get. A move changes neither fog layer on
+ * (design 13.4), the fog this player gets. A move changes no fog layer on
  * such a scene, since only party vision explores, so the view the player
  * holds at the drop answers exactly. A vision scene is watchDrop's.
  * The DM sees through the fog, so nothing vanishes for a DM.
+ *
+ * On a per-player scene that fog is the player's own, which their copy
+ * holds as its fog (docs/design-v1-per-player-vision.md 6.6), not the fog
+ * every player shares: a creature dropped on ground only they remember
+ * stays on their map. A copy holds no holder list, so any member id reads
+ * the copy's own fog.
  */
 export function droppedIntoFog(input: { role: "dm" | "player"; view: RoomState; moves: readonly DroppedToken[] }): ViewToken[] {
+  const viewer = { memberId: "", role: "player" as const };
   return losable(input.role, input.moves)
     .filter((m) => {
       if (onVisionScene(input.view, m.token)) return false;
       const { squeeze: _squeeze, ...rest } = m.token;
-      return withheldWhereItStands(input.view, m.squeeze ? { ...rest, x: m.x, y: m.y, squeeze: true } : { ...rest, x: m.x, y: m.y });
+      return withheldFromViewer(input.view, viewer, m.squeeze ? { ...rest, x: m.x, y: m.y, squeeze: true } : { ...rest, x: m.x, y: m.y });
     })
     .map((m) => m.token);
 }
@@ -125,7 +132,8 @@ export function watchDrop(input: { role: "dm" | "player"; store: SettleStore; mo
     const now = input.store.getState().view;
     if (now === null || !stillOn(now)) return;
     const gone = watched.filter((m) => taken.get(m.token.id) === true && now.tokens[m.token.id] === undefined).map((m) => displayName(m.token));
-    const text = intoFogText(gone, true);
+    // On a per-player scene the creature left this player's own sight, which may still be another's (docs/design-v1-per-player-vision.md 11).
+    const text = intoFogText(gone, perPlayerScene(now.scenes[now.meta.playerSceneId ?? ""]) ? "yours" : "party");
     if (text) input.notify(text);
   }
   const settle = () => {
@@ -147,11 +155,15 @@ export function watchDrop(input: { role: "dm" | "player"; store: SettleStore; mo
 
 /**
  * The note for tokens that went where the player cannot see them on a
- * drop: into the fog, or on a vision scene out of the party's sight.
+ * drop: into the fog, or on a vision scene out of the party's sight, or on
+ * a per-player one out of this player's own.
  */
-export function intoFogText(names: readonly string[], vision = false): string | null {
+export function intoFogText(names: readonly string[], sight: "fog" | "party" | "yours" = "fog"): string | null {
   if (names.length === 0) return null;
-  if (vision) return names.length === 1 ? `${names[0]} is out of the party's sight now.` : `${names.length} creatures are out of the party's sight now.`;
+  if (sight !== "fog") {
+    const whose = sight === "yours" ? "your" : "the party's";
+    return names.length === 1 ? `${names[0]} is out of ${whose} sight now.` : `${names.length} creatures are out of ${whose} sight now.`;
+  }
   if (names.length === 1) return `${names[0]} is in the fog now, so you can no longer see it.`;
   return `${names.length} creatures are in the fog now, so you can no longer see them.`;
 }

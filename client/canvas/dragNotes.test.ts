@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState } from "#shared/model.ts";
-import { withheldWhereItStands } from "#shared/project.ts";
+import { holderTileKey } from "#shared/keys.ts";
+import { projectState, withheldWhereItStands } from "#shared/project.ts";
 import type { ClientOp, Op } from "#shared/protocol.ts";
-import { DM, P1, reveal, room, token } from "#shared/testutil.ts";
+import { rasterizeFogOps } from "#shared/rules/fog.ts";
+import { DM, P1, P2, reveal, room, token } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { createRoomStore } from "../state/store.ts";
 import { FakeClock, FakeOutbox } from "../state/testing.ts";
@@ -63,12 +65,32 @@ describe("a token a player drops into the fog", () => {
     assert.deepEqual(droppedIntoFog({ role: "player", view: state, moves: [{ token: gob, owns: false, x: 20, y: 20 }] }), []);
   });
 
+  test("on a per-player scene with fog alone, is judged by the player's own fog, so ground only they remember keeps it (docs/design-v1-per-player-vision.md 6.6)", () => {
+    const state = setup();
+    state.scenes.s1!.vision = { on: false, light: "dark", perPlayer: true };
+    state.holders.s1 = { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }] };
+    const own = Object.values(rasterizeFogOps({}, "s1", state.scenes.s1!.bounds, [{ id: "r", mode: "reveal", shape: { kind: "rect", x: 10, y: 0, w: 6, h: 6 } }]))[0]!;
+    state.exploredBy[holderTileKey("s1", "p1", own.tx, own.ty)] = { ...own, memberId: "p1" };
+    state.tokens.gob = token("gob", { x: 2, y: 2 });
+    const dropAt = (viewer: typeof P1, x: number) => {
+      const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
+      return droppedIntoFog({ role: "player", view, moves: [{ token: { ...view.tokens.gob!, aboveFog: false }, owns: false, x, y: 2 }] }).map((t) => t.id);
+    };
+    assert.deepEqual(dropAt(P1, 12), [], "on ground p1 alone remembers, p1 still sees it");
+    assert.deepEqual(dropAt(P1, 30), ["gob"]);
+    assert.deepEqual(dropAt(P2, 12), ["gob"], "p2 does not remember that ground");
+    assert.deepEqual(dropAt(P2, 3), [], "ground every player shares");
+  });
+
   test("the note names one creature or counts several", () => {
     assert.equal(intoFogText([]), null);
     assert.equal(intoFogText(["Goblin 2"]), "Goblin 2 is in the fog now, so you can no longer see it.");
     assert.equal(intoFogText(["Goblin 2", "Goblin 3"]), "2 creatures are in the fog now, so you can no longer see them.");
-    assert.equal(intoFogText(["Goblin 2"], true), "Goblin 2 is out of the party's sight now.");
-    assert.equal(intoFogText(["Goblin 2", "Goblin 3"], true), "2 creatures are out of the party's sight now.");
+    assert.equal(intoFogText(["Goblin 2"], "party"), "Goblin 2 is out of the party's sight now.");
+    assert.equal(intoFogText(["Goblin 2", "Goblin 3"], "party"), "2 creatures are out of the party's sight now.");
+    // On a per-player scene (docs/design-v1-per-player-vision.md 11).
+    assert.equal(intoFogText(["Goblin"], "yours"), "Goblin is out of your sight now.");
+    assert.equal(intoFogText(["Goblin", "Goblin 2", "Goblin 3"], "yours"), "3 creatures are out of your sight now.");
   });
 });
 
@@ -129,6 +151,28 @@ function darkTable() {
   };
   return { begin, deliver, dmFirst, rejoin, drop, notes, outbox, view: () => store.store.getState().view! };
 }
+
+describe("a creature a player drops on a per-player vision scene (docs/design-v1-per-player-vision.md 11)", () => {
+  test("is named out of their own sight, once the server took the move and no longer sends it", () => {
+    const state = room();
+    state.scenes.s1!.vision = { on: true, light: "dark", perPlayer: true };
+    state.tokens.gob = token("gob", { name: "Goblin", x: 5, y: 2 });
+    state.tokens.gob2 = token("gob2", { name: "Goblin", number: 2, x: 6, y: 2 });
+    let view: RoomState = state;
+    const listeners = new Set<() => void>();
+    const store = { getState: () => ({ view }), subscribe: (l: () => void) => (listeners.add(l), () => void listeners.delete(l)) };
+    const notes: string[] = [];
+    const moves = ["gob", "gob2"].map((id) => ({ token: { ...state.tokens[id]!, aboveFog: false }, owns: false, x: 30, y: 20 }));
+    const watch = watchDrop({ role: "player", store, moves, notify: (text) => notes.push(text) })!;
+    const op: ClientOp = { t: "token.moveMany", moves: [{ tokenId: "gob", x: 30, y: 20 }, { tokenId: "gob2", x: 30, y: 20 }] };
+    watch.sent(1);
+    const { gob: _a, gob2: _b, ...rest } = state.tokens;
+    view = { ...state, tokens: rest };
+    for (const l of listeners) l();
+    watch.answer(op, "taken");
+    assert.deepEqual(notes, ["2 creatures are out of your sight now."]);
+  });
+});
 
 describe("a creature a player drops on a vision scene", () => {
   test("is named once the server took the move and no longer sends it, when it lands out of the party's sight", () => {
