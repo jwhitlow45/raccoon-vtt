@@ -664,15 +664,18 @@ function RollCard(props: {
         position: "fixed",
         left: 0,
         right: 0,
-        bottom: chrome ? (props.stand === "options" ? chrome.bottom : chrome.toolbar) : `calc(${theme.safe.bottom} + ${theme.layout.toolbar}px)`,
+        // Cramped over the keyboard, whatever its stand, it stands on the visible area's foot (placedChrome's `bottom` then), over the toolbar where the page still shows it.
+        bottom: chrome ? (cramped > 0 || props.stand === "options" ? chrome.bottom : chrome.toolbar) : `calc(${theme.safe.bottom} + ${theme.layout.toolbar}px)`,
         zIndex: theme.z.overBars,
-        // At most 70% of the screen, and never past the top bars: standing on the options bar of a short phone, 70% reached above the screen and took the card's Later with it. What does not fit scrolls. Asked for where even the toolbar leaves too little, it may reach the screen's top.
+        // At most 70% of the screen, and never past the top bars: standing on the options bar of a short phone, 70% reached above the screen and took the card's Later with it. What does not fit scrolls. Asked for where even the toolbar leaves too little, it may reach the screen's top. Cramped, all of the visible area.
         maxHeight: !chrome
           ? `min(${screenHeight(70)}, calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${theme.layout.topBar + theme.layout.toolbar}px))`
-          : props.stand === "screen"
-            ? `calc(${screenHeight(100)} - ${chrome.safe.top + chrome.toolbar}px)`
-            : // 70% of the screen, or all it needs where its stand was chosen for having that room (PlayerRolls `tooShort`), so it never scrolls there.
-              `min(max(${screenHeight(70)}, ${props.whole}px), calc(${screenHeight(100)} - ${chrome.top + (props.stand === "options" ? chrome.bottom : chrome.toolbar)}px))`,
+          : cramped > 0
+            ? `calc(${screenHeight(100)} - ${chrome.top + chrome.bottom}px)`
+            : props.stand === "screen"
+              ? `calc(${screenHeight(100)} - ${chrome.safe.top + chrome.toolbar}px)`
+              : // 70% of the screen, or all it needs where its stand was chosen for having that room (PlayerRolls `tooShort`), so it never scrolls there.
+                `min(max(${screenHeight(70)}, ${props.whole}px), calc(${screenHeight(100)} - ${chrome.top + (props.stand === "options" ? chrome.bottom : chrome.toolbar)}px))`,
         overflowY: "auto",
         overscrollBehavior: "contain",
         display: "grid",

@@ -529,7 +529,12 @@ async function sheetLifted(view: View): Promise<void> {
   await hp.blur();
 }
 
-/** The roll card's Total and Send over the keyboard, on a roll the DM asks of Thorn. */
+/**
+ * The roll card's Total and Send over the keyboard, on a roll the DM asks
+ * of Thorn. Where the screen is too short for the card at the foot, as at
+ * 480 x 320 at 130%, it waits as "Roll asked", whose tap summons it onto
+ * the toolbar or the screen before Total takes focus.
+ */
 async function rollCard(view: View): Promise<void> {
   const where = `in the fight at ${viewName(view)}`;
   await setUp(pat, view);
@@ -537,8 +542,13 @@ async function rollCard(view: View): Promise<void> {
   await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn }] } });
   const card = pat.getByRole("dialog", { name: "The DM asks for a roll" });
   try {
-    await card.waitFor();
     const total = card.getByLabel("Total Thorn rolled");
+    const asked = pat.getByRole("button", { name: /^Roll asked/ }).first();
+    await waitFor(`the ask ${where}`, async () => ((await total.isVisible()) || (await asked.isVisible()) ? true : null));
+    if (!(await total.isVisible())) {
+      await asked.tap();
+      await total.waitFor();
+    }
     await total.tap();
     await overKeyboard(pat, view, { Total: total, Send: card.getByRole("button", { name: "Send", exact: true }) }, `the roll card ${where}`, async () => {
       assert.equal(await isFocused(total), true, `${where}: Total keeps focus`);
@@ -954,6 +964,17 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     if (view.height > view.width) test(`kb-16. in the fight at ${viewName(view)}, the roll card's Total and Send show whole over the keyboard`, () => rollCard(view));
     test(`kb-17. in the fight at ${viewName(view)}, the Area's Spell field in its row and the Spells popover show whole over the keyboard`, () => optionsInline(view));
     test(`kb-18. in the fight at ${viewName(view)}, the Spell field in the Shape popover shows whole over the keyboard, and a scroll of Pat's own there is kept`, () => optionsPopover(view));
+  }
+
+  /*
+   * The roll card with the page itself resized: upright over a 300 px keyboard, and at 480 x 320 at 130%, where the card
+   * waits as "Roll asked" and is summoned onto the screen before Total takes focus, leaving an 80 px page.
+   */
+  for (const view of [
+    { width: 320, height: 568, scale: 1.3, keyboard: 300, native: true },
+    { width: 480, height: 320, scale: 1.3, keyboard: 216, native: true },
+  ] satisfies View[]) {
+    test(`kb-16. in the fight at ${viewName(view)}, the roll card's Total and Send show whole over the keyboard`, () => rollCard(view));
   }
 
   test("kb-19. the raised sheets line up, nothing over 1 px, and the dock rode them on the tall phone", () => {
