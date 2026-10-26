@@ -153,7 +153,7 @@ function corners(stop: Pick<PathStop, "via">): Point[] {
  * corners, never from a total the viewer was not sent.
  */
 function legRead(token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceRules, counter: DiagonalCounter): LegCost {
-  return to.moved !== undefined || to.cost !== undefined ? legTaken(token, from, to, rules, counter) : legGeometry(token, from, to, rules, counter);
+  return to.moved !== undefined || to.cost !== undefined ? legTaken(SQUARES, token, from, to, rules, counter) : legGeometry(SQUARES, token, from, to, rules, counter);
 }
 
 /**

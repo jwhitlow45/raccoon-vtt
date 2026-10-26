@@ -5,6 +5,7 @@ import type { EdgeFeature, PathStop, RoomState, Token } from "../model.ts";
 import { projectState } from "../project.ts";
 import { P1, actor, effect, reveal, room, template, token } from "../testutil.ts";
 import { legGeometry, publicCounters } from "./path.ts";
+import { SQUARES } from "./grid.ts";
 import { findRoute } from "./walk.ts";
 import { creatureWay, groupWalkWorld, halvedAt, publicWorld, speedAreas, type PublicWorld, type WorldOptions } from "./walkWorld.ts";
 import { ownWalk } from "./movement.ts";
@@ -127,10 +128,10 @@ describe("the counters a route starts from (5.5, History)", () => {
   const stop = (x: number, y: number, more: Partial<PathStop> = {}): PathStop => ({ x, y, elevation: 0, ...more });
   test("only counted legs players who do not own the creature saw whole, read from their corners", () => {
     const stops = [stop(0, 0, { seen: true }), stop(1, 1, { seen: true, routeSeen: true, diag: [1, 0] }), stop(2, 2, { diag: [1, 0] }), stop(5, 2, { seen: true, routeSeen: true, via: [3, 3], diag: [1, 0] })];
-    assert.deepEqual(publicCounters(gob, stops, rules, true), { h: 1, v: 0 }, "the leg into the unseen stop and the one out of it do not count");
+    assert.deepEqual(publicCounters(SQUARES, gob, stops, rules, true), { h: 1, v: 0 }, "the leg into the unseen stop and the one out of it do not count");
     const owners = stops.map(({ seen: _seen, ...s }) => s);
-    assert.deepEqual(publicCounters(gob, owners, rules, false), { h: 3, v: 0 }, "an owner's copy marks the legs seen whole with routeSeen alone, the last one's two diagonals by its corner");
-    assert.deepEqual(legGeometry(gob, stop(2, 2), stop(5, 2, { via: [3, 3] }), rules, { h: 0, v: 0 }), { moved: 20, cost: 20, diag: [2, 0] }, "5 ft, then 10 ft and 5 ft past the corner");
+    assert.deepEqual(publicCounters(SQUARES, gob, owners, rules, false), { h: 3, v: 0 }, "an owner's copy marks the legs seen whole with routeSeen alone, the last one's two diagonals by its corner");
+    assert.deepEqual(legGeometry(SQUARES, gob, stop(2, 2), stop(5, 2, { via: [3, 3] }), rules, { h: 0, v: 0 }), { moved: 20, cost: 20, diag: [2, 0] }, "5 ft, then 10 ft and 5 ft past the corner");
   });
 });
 

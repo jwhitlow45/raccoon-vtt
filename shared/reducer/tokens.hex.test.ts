@@ -6,6 +6,8 @@ import { applyOp } from "../reducer.ts";
 import { occupiedHexes, placedOnHex, tokenRefHex, type PlacedToken } from "../rules/footprint.ts";
 import { rasterizeFogOps } from "../rules/fog.ts";
 import { gridOfShape, SQUARES } from "../rules/grid.ts";
+import { holderTileKey } from "../keys.ts";
+import { projectState } from "../project.ts";
 import { hexDistance, hexKey, hexSubcells, type Hex, type HexGrid } from "../rules/hex.ts";
 import { ownWalk } from "../rules/movement.ts";
 import { routeWalk } from "../rules/route.ts";
@@ -43,6 +45,7 @@ function fight(shape: GridShape, size: PlacedToken["size"], from: Hex, setup?: (
     g,
     move: (hex: Hex, extra: Partial<Extract<Op, { t: "token.move" }>> = {}) => run({ t: "token.move", tokenId: "ogre", ...at(g, state.tokens.ogre!.size, hex), ...extra }),
     stops: (): PathStop[] => state.tokens.ogre!.path!.stops,
+    state: () => state,
   };
 }
 
@@ -139,5 +142,61 @@ describe("on a per-player scene with fog, a leg's every spot stands on shared gr
     const open = fight("hexRows", "large", { col: 6, row: 6 }, (s) => sharedBut(s, g, null));
     open.move({ col: 8, row: 6 });
     assert.equal(open.stops()[1]!.routeSeen, true);
+  });
+});
+
+describe("a private leg joined once the path is full keeps its corners for a co-owner only over hexes their fog reveals (review HX2-ASTRA-01)", () => {
+  const g = gridOfShape("hexRows") as HexGrid;
+  const P1: Viewer = { memberId: "p1", role: "player" };
+  const P2: Viewer = { memberId: "p2", role: "player" };
+
+  /** A per-player hex rows scene with fog alone, p1 holding sight: the shared fog reveals every sub-cell but those of `hidden`, and p1's own explored layer those of `own`. */
+  function scene43(state: RoomState, hidden: Hex | null, own: Hex | null): void {
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } };
+    state.holders = { s1: { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }] } };
+    const hide = (hidden ? hexSubcells(g, hidden) : []).map(([sx, sy], i) => ({ id: `h${i}`, mode: "hide" as const, shape: { kind: "rect" as const, x: sx / 4, y: sy / 4, w: 0.25, h: 0.25 } }));
+    const all = [{ id: "all", mode: "reveal" as const, shape: { kind: "rect" as const, x: 0, y: 0, w: 30, h: 20 } }, ...hide];
+    for (const [key, tile] of Object.entries(rasterizeFogOps(state.fogTiles, "s1", state.scenes.s1.bounds, all))) {
+      if (tile === null) delete state.fogTiles[key];
+      else state.fogTiles[key] = tile;
+    }
+    if (own) {
+      const ops = hexSubcells(g, own).map(([sx, sy], i) => ({ id: `o${i}`, mode: "reveal" as const, shape: { kind: "rect" as const, x: sx / 4, y: sy / 4, w: 0.25, h: 0.25 } }));
+      for (const tile of Object.values(rasterizeFogOps({}, "s1", state.scenes.s1.bounds, ops))) {
+        if (tile) state.exploredBy[holderTileKey("s1", "p1", tile.tx, tile.ty)] = { ...tile, memberId: "p1" };
+      }
+    }
+    state.tokens.ogre = { ...state.tokens.ogre!, kind: "pc", ownerIds: ["p1", "p2"] };
+  }
+
+  /** A Medium both players own walked from 4,2 two rows down across 4,3, then 52 short moves more, so the path compacts and its first stop past the start holds 4,4 as a corner. */
+  function walked(hidden: Hex | null, own: Hex | null) {
+    const f = fight("hexRows", "medium", { col: 4, row: 2 }, (s) => scene43(s, hidden, own));
+    f.move({ col: 4, row: 4 });
+    for (let i = 0; i < 52; i++) f.move(i % 2 === 0 ? { col: 10, row: 10 } : { col: 11, row: 10 });
+    const stored = f.stops();
+    assert.equal(stored.length, 50);
+    assert.deepEqual(stored[1]!.via!.slice(0, 2), [at(g, "medium", { col: 4, row: 4 }).x, at(g, "medium", { col: 4, row: 4 }).y]);
+    const via = (viewer: Viewer) => projectState(f.state(), viewer, { sceneId: "s1" }).tokens.ogre!.path!.stops[1]!.via;
+    return { stored, via };
+  }
+
+  test("with every sub-cell of 4,3 under the shared fog, neither co-owner gets the joined leg's corners", () => {
+    const w = walked({ col: 4, row: 3 }, null);
+    assert.equal(w.stored[1]!.routeSeen, undefined);
+    assert.equal(w.via(P2), undefined);
+    assert.equal(w.via(P1), undefined);
+  });
+
+  test("the holder whose own explored layer reveals 4,3 keeps them, and the other co-owner still does not", () => {
+    const w = walked({ col: 4, row: 3 }, { col: 4, row: 3 });
+    assert.deepEqual(w.via(P1), w.stored[1]!.via);
+    assert.equal(w.via(P2), undefined);
+  });
+
+  test("with 4,3 revealed to everyone, every owner keeps them", () => {
+    const w = walked(null, null);
+    assert.deepEqual(w.via(P1), w.stored[1]!.via);
+    assert.deepEqual(w.via(P2), w.stored[1]!.via);
   });
 });

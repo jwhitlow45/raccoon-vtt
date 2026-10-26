@@ -1,9 +1,10 @@
 import type { Encounter, PathStop, Token, TokenPath, TurnStart } from "../model.ts";
 import { MAX_PATH_CORNERS, MAX_PATH_STOPS } from "../protocol.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
-import type { PlacedToken } from "./footprint.ts";
-import { legSteps, routeLattice, spotRect, straightCost, type LegCost, type SizedSpot } from "./route.ts";
-import { SQUARES } from "./grid.ts";
+import { occupiedHexes, type PlacedToken } from "./footprint.ts";
+import type { Grid } from "./grid.ts";
+import { hexSubcells, type HexGrid } from "./hex.ts";
+import { hexPiece, hexPieceSpots, legSteps, routeLattice, spotRect, standingAt, straightCost, type LegCost, type SizedSpot } from "./route.ts";
 
 /**
  * A creature's path on its turn (features section 4, design 6): the rules
@@ -108,9 +109,10 @@ export function withStop(path: TokenPath, stop: PathStop, now?: { w: number; h: 
 /**
  * What a path's joins and readers need since op version 13
  * (docs/design-v1-movement.md 6.2): the token as it stands now, whose size
- * a stop without a footprint was made at, and the room's distance rules.
+ * a stop without a footprint was made at, the room's distance rules, and
+ * the grid of the scene it walks.
  */
-export type Walked = { token: PlacedToken; rules: DistanceSettings };
+export type Walked = { token: PlacedToken; rules: DistanceSettings; grid: Grid };
 
 /**
  * A joined leg's accounting (6.2, "Joins"): `moved`, `cost` and `diag` are
@@ -122,13 +124,13 @@ export type Walked = { token: PlacedToken; rules: DistanceSettings };
 function joinWalked(stops: readonly PathStop[], i: number, joined: PathStop, walk: Walked): void {
   const corner = stops[i]!;
   const next = stops[i + 1]!;
-  const counter = pathCounters(walk.token, stops.slice(0, i), walk.rules);
-  const a = legTaken(walk.token, stops[i - 1]!, corner, walk.rules, counter);
+  const counter = pathCounters(walk.grid, walk.token, stops.slice(0, i), walk.rules);
+  const a = legTaken(walk.grid, walk.token, stops[i - 1]!, corner, walk.rules, counter);
   if (corner.uncounted !== true) {
     counter.h += a.diag[0];
     counter.v += a.diag[1];
   }
-  const b = legTaken(walk.token, corner, next, walk.rules, counter);
+  const b = legTaken(walk.grid, walk.token, corner, next, walk.rules, counter);
   const counted = [corner.uncounted !== true ? a : null, next.uncounted !== true ? b : null].filter((p): p is LegCost => p !== null);
   const parts = counted.length > 0 ? counted : [a, b];
   joined.moved = parts.reduce((n, p) => n + p.moved, 0);
@@ -160,18 +162,18 @@ function capCorners(stops: PathStop[]): void {
  * as before. A leg that holds only a `cost`, such as attach's mount legs,
  * keeps it beside its geometry's feet.
  */
-export function legTaken(token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
+export function legTaken(g: Grid, token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
   if (to.moved !== undefined) return { moved: to.moved, cost: to.cost ?? to.moved, diag: to.diag ?? [0, 0] };
-  const geometry = straightCost(SQUARES, token, from, to, rules, counter);
+  const geometry = straightCost(g, token, from, to, rules, counter);
   return to.cost !== undefined ? { ...geometry, cost: to.cost } : geometry;
 }
 
 /** The true 5-10-5 counters after these stops' counted legs: the sum of their diagonals, a leg that does not count taking none. */
-export function pathCounters(token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings): DiagonalCounter {
+export function pathCounters(g: Grid, token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings): DiagonalCounter {
   const counter = { h: 0, v: 0 };
   for (let i = 1; i < stops.length; i++) {
     if (stops[i]!.uncounted === true) continue;
-    const t = legTaken(token, stops[i - 1]!, stops[i]!, rules, counter);
+    const t = legTaken(g, token, stops[i - 1]!, stops[i]!, rules, counter);
     counter.h += t.diag[0];
     counter.v += t.diag[1];
   }
@@ -258,6 +260,13 @@ function plainStop(stop: PathStop, uncounted: boolean): PathStop {
 }
 
 /**
+ * The ground a viewer's fog reveals, as a private leg's check reads it:
+ * whether any part of a cell is revealed, and whether one fog sub-cell is,
+ * by its scene-wide raster index.
+ */
+export type Ground = { cell(x: number, y: number): boolean; sub(sx: number, sy: number): boolean };
+
+/**
  * Whether every spot of the leg ending at `to` lies on ground that `ground`
  * reveals (docs/design-v1-per-player-vision.md 6.5): each cell under the
  * creature's footprint, at the size the stop was made at, at every step of
@@ -270,18 +279,44 @@ function plainStop(stop: PathStop, uncounted: boolean): PathStop {
  * sizes, the finer of the two for a leg joined across a resize. The
  * token's size now would sample a Tiny creature's half-cell walk at whole
  * cells once it grew, and skip cells the walk crossed (review PV1-ASTRA-1).
+ *
+ * On hexes a cell is no measure: one holds parts of several hexes, so a
+ * hex wholly under the fog would read as revealed beside a revealed part of
+ * its neighbor (review HX2-ASTRA-01). There each spot is one a walk on
+ * hexes passes (route.ts hexPiece), and every hex of the footprint there
+ * must hold a revealed sub-cell, as shared ground reads a hex (project.ts
+ * `seenAtEvery`).
  */
-export function legOnGround(token: PlacedToken, from: PathStop, to: PathStop, ground: (x: number, y: number) => boolean): boolean {
+export function legOnGround(g: Grid, token: PlacedToken, from: PathStop, to: PathStop, ground: Ground): boolean {
+  if (g.shape === "hex") return hexLegOnGround(g, token, from, to, ground);
   const lattice = Math.min(routeLattice(sizedAt(token, from)), routeLattice(sizedAt(token, to)));
   const covered = (p: SizedSpot) => {
-    const r = spotRect(SQUARES, token, p);
-    for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) if (!ground(x, y)) return false;
+    const r = spotRect(g, token, p);
+    for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) if (!ground.cell(x, y)) return false;
     return true;
   };
   if (!covered(from)) return false;
   for (const [a, b] of legParts(from, to)) {
     const steps = legSteps(a, b, lattice);
     for (let k = 1; k <= steps.n; k++) if (!covered({ ...b, ...steps.at(k) })) return false;
+  }
+  return true;
+}
+
+/**
+ * `legOnGround` on hexes. A part joined across a resize is walked at both
+ * its ends' sizes, since which size crossed which hex is not stored, so
+ * its corners reach an owner only where either size would have stood on
+ * revealed ground.
+ */
+function hexLegOnGround(g: HexGrid, token: PlacedToken, from: PathStop, to: PathStop, ground: Ground): boolean {
+  const open = (t: PlacedToken) => occupiedHexes(g, t).every((h) => hexSubcells(g, h).some(([sx, sy]) => ground.sub(sx, sy)));
+  if (!open(standingAt(token, from))) return false;
+  for (const [a, b] of legParts(from, to)) {
+    const sizes = oneSize(a, b) ? [standingAt(token, b)] : [standingAt(token, a), standingAt(token, b)];
+    for (const walker of sizes) {
+      for (const p of hexPieceSpots(hexPiece(g, walker, a, b))) if (!open({ ...walker, x: p.x, y: p.y })) return false;
+    }
   }
   return true;
 }
@@ -301,11 +336,11 @@ function sizedAt(token: PlacedToken, stop: PathStop): PlacedToken {
  * leg only the owners saw. `stored` says the stops are the DM's, which
  * hold the marks of who saw what.
  */
-export function publicCounters(token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings, stored: boolean): DiagonalCounter {
+export function publicCounters(g: Grid, token: PlacedToken, stops: readonly PathStop[], rules: DistanceSettings, stored: boolean): DiagonalCounter {
   const counter = { h: 0, v: 0 };
   for (let i = 1; i < stops.length; i++) {
     if (stops[i]!.uncounted === true || !seenWhole(stops, i, stored)) continue;
-    const t = legGeometry(token, stops[i - 1]!, stops[i]!, rules, counter);
+    const t = legGeometry(g, token, stops[i - 1]!, stops[i]!, rules, counter);
     counter.h += t.diag[0];
     counter.v += t.diag[1];
   }
@@ -317,11 +352,11 @@ export function publicCounters(token: PlacedToken, stops: readonly PathStop[], r
  * players who do not own the creature read it (7.3): each straight part by
  * `straightCost`, the 5-10-5 count running on from `counter` (read only).
  */
-export function legGeometry(token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
+export function legGeometry(g: Grid, token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
   const running = { ...counter };
   let moved = 0;
   for (const [a, b] of legParts(from, to)) {
-    const t = straightCost(SQUARES, token, a, b, rules, running);
+    const t = straightCost(g, token, a, b, rules, running);
     moved += t.moved;
     running.h += t.diag[0];
     running.v += t.diag[1];

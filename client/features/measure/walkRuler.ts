@@ -5,6 +5,7 @@ import { applyOp } from "#shared/reducer.ts";
 import type { DiagonalCounter, DistanceSettings } from "#shared/rules/distance.ts";
 import { footprintSize } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { offKey, type Walker } from "#shared/rules/movement.ts";
 import { pathThisTurn, publicCounters } from "#shared/rules/path.ts";
 import { routeWalkers } from "#shared/rules/route.ts";
@@ -190,7 +191,7 @@ function searchFor(view: RoomState, at: Walked, walker: Token & Walker, input: W
  */
 function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, target: Point, budget: WorkBudget, progress: Progress): { found: Found; search: () => WalkSearch } | null {
   const kept = keptFor(view, walker.sceneId);
-  const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(walker, at.left, rulesOf(view), input.viewer.role === "dm"))}`;
+  const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(SQUARES, walker, at.left, rulesOf(view), input.viewer.role === "dm"))}`;
   const legKey = `${key}|${target.x},${target.y}`;
   const searchOf = () => searchFor(view, at, walker, input, key, budget);
   const known = kept.legs.get(legKey);

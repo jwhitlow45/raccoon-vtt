@@ -8,6 +8,7 @@ import { opSchema, type Op, type RestoreEntry } from "./protocol.ts";
 import { allKeys, applyChanges, areaSeenMark, changedSightKeys, dependents, diffProjection, heldOf, isPartyMember, ownsToken, perPlayerScene, projectEntity, projectState, rowSeenMark, seenMark, stableStringify, viewerSceneId, type HeldEntry, type ProjectedState, type SeenMark } from "./project.ts";
 import { applyOp, type ApplyResult } from "./reducer.ts";
 import { legOnGround, seenWhole } from "./rules/path.ts";
+import { SQUARES } from "./rules/grid.ts";
 import { DM, chance, entry, env, int, pick, rng, template, token } from "./testutil.ts";
 
 /**
@@ -137,7 +138,7 @@ function checkViews(where: string, state: RoomState, conns: readonly Connection[
         if (whole) return;
         assert.ok(owner, `${where}: ${id} gets the corners of a leg of ${tokenId} not every player saw whole`);
         if (perPlayerScene(scene) && scene?.fogEnabled) {
-          assert.ok(legOnGround(real, stored[i - 1]!, stored[i]!, (x, y) => !fogged(x, y)), `${where}: ${id} gets corners of ${tokenId} off ground they remember`);
+          assert.ok(legOnGround(SQUARES, real, stored[i - 1]!, stored[i]!, { cell: (x, y) => !fogged(x, y), sub: () => false }), `${where}: ${id} gets corners of ${tokenId} off ground they remember`);
         }
       });
     }

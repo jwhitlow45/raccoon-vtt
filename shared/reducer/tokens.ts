@@ -519,7 +519,7 @@ export function withPath(tx: Tx, before: Token, after: Token, judged: Judged, un
   // A row that marks time had its movement on its rider's turn, so its moves there are outside its turn (7.1).
   if (!mount && attaches(tx.env.opVersion) && marksTime(encounter, turn.entryId)) return withoutPath(after);
   // Since op version 13 every leg records what it took, and full paths join by those sums (walksRoutes).
-  const walked: Walked | undefined = walksRoutes(tx.env.opVersion) ? { token: after, rules: tx.state.meta.settings } : undefined;
+  const walked: Walked | undefined = walksRoutes(tx.env.opVersion) ? { token: after, rules: tx.state.meta.settings, grid: gridOfToken(tx.state, after) } : undefined;
   // A mount's path starts where it stood before its first move this turn, since the turn's start is its rider's.
   const first = !mount && turn.sceneId === before.sceneId ? [startStop(turn)] : [];
   let path: TokenPath = before.path?.turn === turn.seq ? before.path : { turn: turn.seq, stops: first };
@@ -606,7 +606,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   const rules = tx.state.meta.settings;
   const grid = gridOfToken(tx.state, after);
   const from = path.stops[path.stops.length - 1]!;
-  const counter = pathCounters(after, path.stops, rules);
+  const counter = pathCounters(grid, after, path.stops, rules);
   const walker = walkerFor(tx.state, before, seenNow(tx), { opVersion: tx.env.opVersion, to: after });
   let taken: LegCost;
   // The walk's trace (route.ts WalkTrace): its own, its route's or the straight leg's, or its holder's taking it along.

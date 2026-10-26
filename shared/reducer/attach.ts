@@ -6,6 +6,7 @@ import type { OpOf } from "../protocol.ts";
 import { attaches } from "../migrate.ts";
 import { getOffFits, isCreature, kindRefusal, landsAt, linkHolds, linkLimitRefusal, onHolder, withinReach, type LinkNames } from "../rules/attach.ts";
 import { footprintSize } from "../rules/footprint.ts";
+import { SQUARES } from "../rules/grid.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
 import { rowLeadsMounts, sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
@@ -189,7 +190,7 @@ function mountedInPlace(tx: Tx, seated: Token, cost: number): Token {
   if (!last || !sameSpot(last, seated)) return seated;
   // The stop where it sits, seen by whoever saw it get there (docs/design-v1-per-player-vision.md 6.5).
   const stop: PathStop = { x: seated.x, y: seated.y, elevation: seated.elevation, ...(last.seen ? { seen: true as const } : {}), ...(last.seenBy ? { seenBy: last.seenBy } : {}), moved: 0, cost };
-  return { ...seated, path: withStop(path, stop, footprintSize(seated), { token: seated, rules: tx.state.meta.settings }) };
+  return { ...seated, path: withStop(path, stop, footprintSize(seated), { token: seated, rules: tx.state.meta.settings, grid: SQUARES }) };
 }
 
 /**

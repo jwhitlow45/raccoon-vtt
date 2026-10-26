@@ -1107,10 +1107,11 @@ function ownersStopsCtx(ctx: Ctx, token: Token, stops: readonly PathStop[]): Pat
   const out = stopsForOwners(stops);
   const scene = ctx.state.scenes[token.sceneId];
   if (!perPlayerScene(scene) || !scene?.fogEnabled) return out;
-  const ground = (x: number, y: number) => !ctx.fogged(token.sceneId, x, y);
+  const grid = gridOfToken(ctx.state, token);
+  const ground = { cell: (x: number, y: number) => !ctx.fogged(token.sceneId, x, y), sub: (sx: number, sy: number) => !ctx.fogged.sub(token.sceneId, sx, sy) };
   for (const [i, stop] of out.entries()) {
     if (i === 0 || stop.via === undefined || seenWhole(stops, i, true)) continue;
-    if (!legOnGround(token, stops[i - 1]!, stops[i]!, ground)) delete stop.via;
+    if (!legOnGround(grid, token, stops[i - 1]!, stops[i]!, ground)) delete stop.via;
   }
   return out;
 }

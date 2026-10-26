@@ -7,6 +7,7 @@ import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { encodeHeights } from "../rules/heights.ts";
 import { pathCounters, stopsForNonOwners, stopsForOwners } from "../rules/path.ts";
+import { SQUARES } from "../rules/grid.ts";
 import { findRoute } from "../rules/walk.ts";
 import { publicWorld } from "../rules/walkWorld.ts";
 import { DM, P1, P2, actor, env, reveal, room, template, token, withoutWalked } from "../testutil.ts";
@@ -66,7 +67,7 @@ describe("what a leg takes (6.2)", () => {
       { moved: 5, cost: 5, diag: [1, 0] },
       { moved: 10, cost: 10, diag: [1, 0] },
     ]);
-    assert.deepEqual(pathCounters(f.state.tokens.wolf!, f.stops(), f.state.meta.settings), { h: 4, v: 0 });
+    assert.deepEqual(pathCounters(SQUARES, f.state.tokens.wolf!, f.stops(), f.state.meta.settings), { h: 4, v: 0 });
   });
 
   test("a routed leg records its corners, its feet and what terrain added, and a Swim Speed takes the swimming foot off", () => {
@@ -132,7 +133,7 @@ describe("what a leg takes (6.2)", () => {
     const before = pick(f.stops()[2]!);
     f.run({ t: "token.countLeg", tokenId: "wolf", counts: false }, P1);
     assert.deepEqual(pick(f.stops()[2]!), before);
-    assert.deepEqual(pathCounters(f.state.tokens.wolf!, f.stops(), f.state.meta.settings), { h: 1, v: 0 });
+    assert.deepEqual(pathCounters(SQUARES, f.state.tokens.wolf!, f.stops(), f.state.meta.settings), { h: 1, v: 0 });
   });
 });
 

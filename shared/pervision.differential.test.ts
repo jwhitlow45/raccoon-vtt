@@ -10,6 +10,7 @@ import { applyOp } from "./reducer.ts";
 import { visionRules } from "./ruleHooks.ts";
 import { rasterizeFogOps } from "./rules/fog.ts";
 import { publicCounters } from "./rules/path.ts";
+import { SQUARES } from "./rules/grid.ts";
 import { DM, P1, P2, apply, deepClone, env, member, reveal, room, token } from "./testutil.ts";
 
 /**
@@ -164,10 +165,10 @@ describe("an owner's route corners (6.5)", () => {
     ] as Op[]) {
       const hidden = apply(moved, op);
       const thorn = hidden.tokens.thorn!;
-      const server = publicCounters(thorn, stopsFor(hidden, DM), hidden.meta.settings, true);
+      const server = publicCounters(SQUARES, thorn, stopsFor(hidden, DM), hidden.meta.settings, true);
       assert.ok(server.h + server.v > 0, `${op.t}: the leg counted its diagonals`);
-      assert.deepEqual(publicCounters(thorn, stopsFor(hidden, P1), hidden.meta.settings, false), server, `${op.t}: the owner's device`);
-      assert.deepEqual(publicCounters(thorn, stopsFor(hidden, P3), hidden.meta.settings, false), server, `${op.t}: a non-owner's device`);
+      assert.deepEqual(publicCounters(SQUARES, thorn, stopsFor(hidden, P1), hidden.meta.settings, false), server, `${op.t}: the owner's device`);
+      assert.deepEqual(publicCounters(SQUARES, thorn, stopsFor(hidden, P3), hidden.meta.settings, false), server, `${op.t}: a non-owner's device`);
       assert.deepEqual(stopsFor(hidden, P1)[1]!.via, leg.via);
     }
   });

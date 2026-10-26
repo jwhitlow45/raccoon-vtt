@@ -195,7 +195,7 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
     creatures,
     areas,
     prone: publicKeys(state, token).has("prone"),
-    counter: publicCounters(token, stops, rules, viewer.role === "dm"),
+    counter: publicCounters(SQUARES, token, stops, rules, viewer.role === "dm"),
   };
   return { input, spaces, halfSpeed, areaCtx };
 }
