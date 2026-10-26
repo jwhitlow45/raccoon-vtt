@@ -50,9 +50,27 @@ function rectCorners(b: { x: number; y: number; width: number; height: number })
   ];
 }
 
-/** Whether a label stands upright for this viewer: by the stand rule over its measured flat box (5.2). */
+/**
+ * How far a label's ink reaches from its anchor, in ems of its size, as
+ * draw.ts drawLabel sets it: centered on a middle baseline with a halo 0.08
+ * em wide. Measured in Chrome with the bold board font (Inter): accented
+ * capitals reach 0.70 em above the anchor and descenders 0.535 below, and a
+ * letter's ink runs up to 0.035 em past its advance at either end, so the
+ * shared box's half height of 0.5 (shared/rules/labels.ts labelBox, which
+ * erase and the server read) is short of the ink both ways (ISO2-FV-7).
+ */
+export const LABEL_INK = { above: 0.8, below: 0.7, side: 0.04 } as const;
+
+/** The box a label's ink and halo can touch in cells: labelBox widened by LABEL_INK, for the stand rule. */
+export function labelInkBox(label: Pick<Label, "x" | "y" | "text" | "size">, measure: MeasureText): LabelBox {
+  const flat = labelBox(label, measure);
+  const k = label.size;
+  return { x0: flat.x0 - LABEL_INK.side * k, y0: label.y - LABEL_INK.above * k, x1: flat.x1 + LABEL_INK.side * k, y1: label.y + LABEL_INK.below * k };
+}
+
+/** Whether a label stands upright for this viewer: by the stand rule over every sub-cell its ink can touch in Top-down (5.2). */
 export function labelStands(fog: FogView, label: Pick<Label, "x" | "y" | "text" | "size">, measure: MeasureText): boolean {
-  return boxStands(fog, labelBox(label, measure));
+  return boxStands(fog, labelInkBox(label, measure));
 }
 
 /** A scene's labels split into those that stand and those that lie flat under the fog. */

@@ -21,14 +21,17 @@ type Rect = { x: number; y: number; w: number; h: number };
 /**
  * Whether a pill stands: by the box Top-down draws it in at this zoom,
  * anywhere its slide along the screen's edge can put it (pillPlace.ts
- * pillReach). A pointed pill slides only along its edge, which its reach
- * spans. A plain pill can slide anywhere the screen's edge pushes it, so
+ * pillReach), its outline included. A pointed pill slides only along its
+ * edge, which its reach spans. A plain pill can slide anywhere the screen's edge pushes it, so
  * it never stands over a player's fog: it fails closed.
  */
 export function pillStands(fog: FogView, pill: Omit<PillProps, "color">): boolean {
   if (fog.all) return true;
   if (!pill.above && !pill.below) return false;
-  return boxStands(fog, pillReach(pill));
+  // Its outline, 1.5 px wide, is centered on the box's edge.
+  const edge = 1 / pill.scale;
+  const r = pillReach(pill);
+  return boxStands(fog, { x0: r.x0 - edge, y0: r.y0 - edge, x1: r.x1 + edge, y1: r.y1 + edge });
 }
 
 /** Whether a box in cells stands: a badge's, a text drawing's. */

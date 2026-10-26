@@ -12,9 +12,11 @@ import { textCells } from "./geometry.ts";
 export type MeasureEm = (line: string) => number;
 
 /**
- * How far past a line's box its ink can reach, in ems: Konva sets each line
- * on its middle, and the board font's descenders and accented capitals
- * reach past the box's bottom and top. Generous, so the box fails closed.
+ * How far past a line's box its ink can reach, in ems. Konva sets each line
+ * on an alphabetic baseline below the line's middle, and in Chrome the bold
+ * board font's accented capitals reach 0.14 em over the line's box and its
+ * descenders 0.10 under it, and a letter's ink 0.035 em past its advance,
+ * the halo apart. Generous, so the box fails closed.
  */
 export const TEXT_INK_EM = 0.3;
 

@@ -110,7 +110,10 @@ export function ghostStands(fog: FogView, token: ViewToken, at: { x: number; y: 
  */
 export function ghostTagStands(fog: FogView, token: Pick<ViewToken, "size" | "w" | "h">, at: { x: number; y: number }, name: string, scale: number): boolean {
   if (fog.all) return true;
-  return boxStands(fog, pillReach(dragTagPill(token, at, name, scale)));
+  // Its outline, 1.5 px wide, is centered on the pill's edge, so half of it lies outside the box.
+  const edge = 1 / scale;
+  const r = pillReach(dragTagPill(token, at, name, scale));
+  return boxStands(fog, { x0: r.x0 - edge, y0: r.y0 - edge, x1: r.x1 + edge, y1: r.y1 + edge });
 }
 
 /** Which tokens stand as standees and which lie flat under the fog, for the board's two stages. */

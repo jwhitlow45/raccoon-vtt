@@ -6,7 +6,7 @@ import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { estimateText, labelBox } from "#shared/rules/labels.ts";
 import { FogView } from "../../canvas/relief/fogView.ts";
 import { isometric, toView, TOP_DOWN } from "../../lib/view.ts";
-import { labelShape, labelSplitter, splitLabels } from "./labelShape.ts";
+import { labelShape, labelSplitter, labelStands, splitLabels } from "./labelShape.ts";
 
 const label = { x: 5, y: 4, text: "Crypt", size: 1 };
 
@@ -62,6 +62,38 @@ describe("labelShape", () => {
     const all = encodeTile(new Uint8Array(TILE_BYTES).fill(0xff));
     const open = new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: all } }, "s1", { w: 16, h: 16 });
     assert.deepEqual(splitLabels(open, [label, far], estimateText).upright.length, 2);
+  });
+
+  test("security: a label whose descenders reach a fogged row just under its anchor, or whose accents reach one just over it, lies flat (ISO2-FV-7)", () => {
+    // Revealed: every sub-cell of cells 0 to 9 on rows 0 to 4. Row 5 is fogged.
+    const bits = new Uint8Array(TILE_BYTES);
+    for (let sy = 0; sy < 5 * FOG_SUBCELLS; sy++) {
+      for (let sx = 0; sx < 10 * FOG_SUBCELLS; sx++) {
+        const i = sy * TILE_SUB + sx;
+        bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+      }
+    }
+    const above = new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) } }, "s1", { w: 16, h: 16 });
+    // "jig" anchored at 4.4: its shared box ends at 4.9, inside the revealed rows, but its descenders and halo reach 5.1.
+    const low = { x: 5, y: 4.4, text: "jig", size: 1 };
+    const box = labelBox(low, estimateText);
+    assert.ok(box.y1 < 5, "the shared box alone would stand");
+    assert.equal(labelStands(above, low, estimateText), false);
+    assert.equal(labelStands(above, { ...low, y: 4.2 }, estimateText), true, "set higher, every sub-cell its ink touches is revealed");
+    // Column 10 is fogged: "Crypt" anchored at 8.4 has a box to 9.98, but a letter's ink and halo reach 10.02.
+    assert.equal(labelStands(above, { x: 8.4, y: 2, text: "Crypt", size: 1 }, estimateText), false);
+    assert.equal(labelStands(above, { x: 8.3, y: 2, text: "Crypt", size: 1 }, estimateText), true);
+    // Rows 5 to 9 revealed and row 4 fogged: "Åla" anchored at 5.6 has a box from 5.1, but its ring and halo reach 4.8.
+    const under = new Uint8Array(TILE_BYTES);
+    for (let sy = 5 * FOG_SUBCELLS; sy < 10 * FOG_SUBCELLS; sy++) {
+      for (let sx = 0; sx < 10 * FOG_SUBCELLS; sx++) {
+        const i = sy * TILE_SUB + sx;
+        under[i >> 3] = under[i >> 3]! | (1 << (i & 7));
+      }
+    }
+    const below = new FogView({ [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(under) } }, "s1", { w: 16, h: 16 });
+    assert.equal(labelStands(below, { x: 5, y: 5.6, text: "Åla", size: 1 }, estimateText), false);
+    assert.equal(labelStands(below, { x: 5, y: 5.9, text: "Åla", size: 1 }, estimateText), true);
   });
 
   test("security: labels split in the fallback font split again when Inter's wider widths arrive, with the labels and fog the same (ISO2-ASTRA-09)", () => {

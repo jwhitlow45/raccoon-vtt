@@ -4,7 +4,9 @@ import { FOG_SUBCELLS, type FogTile } from "#shared/model.ts";
 import { tileKey } from "#shared/keys.ts";
 import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { rng } from "#shared/testutil.ts";
-import { pillPlace, type PillProps } from "../features/measure/pillPlace.ts";
+import { pillPlace, pillReach, type PillProps } from "../features/measure/pillPlace.ts";
+import { dragTagPill } from "./dragTag.ts";
+import { ghostTagStands } from "./relief/stand.ts";
 import { textDrawingBox } from "../features/drawings/textBox.ts";
 import { textCells } from "../features/drawings/geometry.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
@@ -121,7 +123,9 @@ describe("the stand rule for the board's marks", () => {
             const vy = spec.y + (random() - 0.5) * 6;
             const view = { x0: vx - random() * 4, y0: vy - random() * 4, x1: vx + random() * 4, y1: vy + random() * 4 };
             const { box } = pillPlace(spec, k === 0 ? null : view);
-            assert.ok(oracleCovers(mask, box), `round ${round}: a name stood over fog`);
+            // Its outline, 1.5 px wide and centered on the edge, counts too.
+            const edge = 0.75 / scale;
+            assert.ok(oracleCovers(mask, { x0: box.x0 - edge, y0: box.y0 - edge, x1: box.x1 + edge, y1: box.y1 + edge }), `round ${round}: a name stood over fog`);
           }
         } else lay++;
       }
@@ -238,6 +242,24 @@ describe("the stand rule for the board's marks", () => {
       }
     }
     assert.ok(whole > 10 && clipped > 50, `${whole} whole and ${clipped} clipped`);
+  });
+
+  test("security: a pill whose outline alone reaches a fogged sub-cell lies flat: an area's name, and a drag ghost's tag (stand.ts)", () => {
+    // Revealed: columns 0 to 9 on rows 0 to 9. Column 10 is fogged.
+    const fog = fogOf([[0, 0, 10, 10]]);
+    const scale = 40;
+    const name = { scale, name: "Spike Growth", size: "map" as const, small: true, above: true };
+    // Slid so its box ends half a pixel short of column 10: the box clears, the outline's outer half does not.
+    const reach = pillReach({ ...name, x: 5, y: 5 });
+    const x = 5 + (10 - 0.5 / scale - reach.x1);
+    assert.ok(pillReach({ ...name, x, y: 5 }).x1 < 10);
+    assert.equal(pillStands(fog, { ...name, x, y: 5 }), false);
+    assert.equal(pillStands(fog, { ...name, x: x - 2 / scale, y: 5 }), true);
+    const ghost = { size: "medium" as const, w: 1, h: 1 };
+    const tag = pillReach(dragTagPill(ghost, { x: 5, y: 5 }, "Pat", scale));
+    const gx = 5 + (10 - 0.5 / scale - tag.x1);
+    assert.equal(ghostTagStands(fog, ghost, { x: gx, y: 5 }, "Pat", scale), false);
+    assert.equal(ghostTagStands(fog, ghost, { x: gx - 2 / scale, y: 5 }, "Pat", scale), true);
   });
 
   test("the DM, or a scene without fog, sees every mark whole", () => {
