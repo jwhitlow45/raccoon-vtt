@@ -1,9 +1,11 @@
 import { memo, useMemo } from "react";
-import { Shape } from "react-konva";
+import { Group, Shape } from "react-konva";
 import { FOG_SUBCELLS, type FogTile, type RoomState } from "#shared/model.ts";
 import { FogRaster } from "../lib/fogTiles.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomView } from "../state/view.ts";
+import { fogSeam } from "./fogSeam.ts";
+import { useIsoGround } from "./relief/context.ts";
 
 function hexToRgb(hex: string): [number, number, number] {
   const n = Number.parseInt(hex.replace("#", ""), 16);
@@ -76,6 +78,11 @@ class FogCanvas {
  * fainter still while lining up the grid, which needs the map's own lines
  * in view. `translucent` is only ever set for a DM, so nothing here can
  * thin a player's fog.
+ *
+ * The frame and the image meet at the scene's edge without leaving a
+ * partly covered pixel between them (fogSeam.ts). On Isometric's turned
+ * ground they overlap by a pixel there, so the DM's translucent fog draws
+ * as one image first (Konva's isolated group) and is tinted once.
  */
 export const FogShape = memo(function FogShape(props: {
   sceneId: string;
@@ -85,35 +92,40 @@ export const FogShape = memo(function FogShape(props: {
 }) {
   const { sceneId, bounds, tiles, translucent } = props;
   const aligning = useRoomView((s) => s.local.tool === "grid");
+  const isometric = useIsoGround() !== null;
   const canvas = useMemo(() => new FogCanvas(bounds), [sceneId, bounds.w, bounds.h]);
   const version = useMemo(() => canvas.update(tiles as Record<string, FogTile | undefined>, sceneId), [canvas, tiles, sceneId]);
 
   const w = canvas.canvas.width / FOG_SUBCELLS;
   const h = canvas.canvas.height / FOG_SUBCELLS;
   return (
-    <Shape
-      listening={false}
-      opacity={translucent ? (aligning ? 0.2 : 0.5) : 1}
-      perfectDrawEnabled={false}
-      // Not read by Konva: a changed value is what makes react-konva redraw the layer.
-      fogVersion={version}
-      sceneFunc={(ctx) => {
-        const native = ctx._context;
-        native.save();
-        native.fillStyle = theme.color.fog;
-        native.beginPath();
-        native.rect(-FRAME_CELLS, -FRAME_CELLS, w + FRAME_CELLS * 2, h + FRAME_CELLS * 2);
-        native.rect(0, 0, w, h);
-        native.fill("evenodd");
-        if (canvas.ok) {
-          native.imageSmoothingEnabled = false;
-          native.drawImage(canvas.canvas, 0, 0, w, h);
-        } else {
-          // No 2D context (out of memory): fog everything rather than show the map.
-          native.fillRect(0, 0, w, h);
-        }
-        native.restore();
-      }}
-    />
+    <Group listening={false} opacity={translucent ? (aligning ? 0.2 : 0.5) : 1} isolated={translucent && isometric}>
+      <Shape
+        listening={false}
+        perfectDrawEnabled={false}
+        // Not read by Konva: a changed value is what makes react-konva redraw the layer.
+        fogVersion={version}
+        // The isolated group's image covers what this says the shape paints.
+        selfRectFunc={() => ({ x: -FRAME_CELLS, y: -FRAME_CELLS, width: w + FRAME_CELLS * 2, height: h + FRAME_CELLS * 2 })}
+        sceneFunc={(ctx) => {
+          const native = ctx._context;
+          native.save();
+          native.fillStyle = theme.color.fog;
+          const { hole, image } = fogSeam(native.getTransform(), w, h);
+          native.beginPath();
+          native.rect(-FRAME_CELLS, -FRAME_CELLS, w + FRAME_CELLS * 2, h + FRAME_CELLS * 2);
+          native.rect(hole.x, hole.y, hole.w, hole.h);
+          native.fill("evenodd");
+          if (canvas.ok) {
+            native.imageSmoothingEnabled = false;
+            native.drawImage(canvas.canvas, image.x, image.y, image.w, image.h);
+          } else {
+            // No 2D context (out of memory): fog everything rather than show the map.
+            native.fillRect(image.x, image.y, image.w, image.h);
+          }
+          native.restore();
+        }}
+      />
+    </Group>
   );
 });
