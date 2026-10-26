@@ -6,7 +6,7 @@ import { theme } from "../lib/theme.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
 import { dangerLook } from "./looks.ts";
-import { GRABBER_ROOM, SheetGrabber } from "./SheetGrabber.tsx";
+import { SheetGrabber, useGrabberRoom } from "./SheetGrabber.tsx";
 
 /**
  * Where a header's back button leads. `label` is its accessible name,
@@ -110,6 +110,7 @@ export function SheetHeader(props: {
 }) {
   const { back, level = 2 } = props;
   const grab = grabProps(props.grab);
+  const room = useGrabberRoom();
   const Heading = level === 2 ? "h2" : "h3";
   const asking = !!back?.armed;
   const actions = asking ? null : props.actions;
@@ -141,8 +142,8 @@ export function SheetHeader(props: {
   );
   const padding = theme.space(actions ? 1 : 2);
   const divider = props.divider ? `${theme.line.border}px solid ${theme.color.border}` : undefined;
-  // A grab area's pill wants more room above the buttons than a row or a stacked header keeps, so it grows its top padding by the difference (SheetGrabber).
-  const lift = props.grab ? GRABBER_ROOM - ROW_TOP_SPACE : 0;
+  // A grab area's grabber wants more room above the buttons than a row or a stacked header keeps, so it grows its top padding by the difference, which the chosen design sets (SheetGrabber).
+  const lift = props.grab ? room - ROW_TOP_SPACE : 0;
   // Over the title's first 44 px, which it covers while it shows: on the title's line, after Back in one row.
   const fullScreen = props.fullScreen ? (
     <FullScreenButton
@@ -218,10 +219,10 @@ function grabProps(on: boolean | undefined): { attrs: Record<string, string>; st
   return on ? { attrs: { [GRAB_ATTR]: "" }, style: GRAB_STYLE } : { attrs: {}, style: null };
 }
 
-/** The stacked header's padding above and below, and its title's line: 6 + 44 + 22 + 6 = 78 px (sheetCap.ts SHEET_HEADER_STACKED), and 4 px more as a grab area, for its pill. */
+/** The stacked header's padding above and below, and its title's line: 6 + 44 + 22 + 6 = 78 px (sheetCap.ts SHEET_HEADER_STACKED), and more as a grab area, for its grabber: 4 px for the default. */
 const STACKED_PAD = 6;
 const STACKED_TITLE_LINE = 22;
-/** The room above a 56 px row's 44 px buttons, before a grab area grows it for its pill. */
+/** The room above a 56 px row's 44 px buttons, before a grab area grows it for its grabber. */
 const ROW_TOP_SPACE = (56 - theme.touch) / 2;
 /** A pane's frame pads its top by this much above its header (builder/labelPaneFrame.ts), and a pane's 48 px header row centers its 44 px buttons under that. */
 const PANE_FRAME_TOP = theme.space(1);
@@ -335,6 +336,7 @@ export function PaneHeader(props: {
 }) {
   const { handle, sticky, lines } = props;
   const grab = grabProps(props.grab);
+  const room = useGrabberRoom();
   const descriptionId = useId();
   const grip = handle?.grip.dots ? (
     <span aria-hidden {...{ [GRIP_ATTR]: "" }} style={{ flex: "none", width: 16, display: "grid", placeItems: "center", color: theme.color.textMuted }}>
@@ -373,12 +375,12 @@ export function PaneHeader(props: {
   const close = props.onClose ? <IconButton ref={props.closeRef} icon="close" label={props.closeLabel ?? "Close"} onClick={props.onClose} /> : null;
   /*
    * A grab area reaches up over the frame's top padding, taken back from
-   * its margin, so the pill drawn there is on the header and a drag that
+   * its margin, so the grabber drawn there is on the header and a drag that
    * starts on it moves the pane as one on the header does. A sticky header
-   * reaches up already. Either grows its top padding by what the pill
-   * needs beyond the room it had above its buttons (SheetGrabber).
+   * reaches up already. Either grows its top padding by what the chosen
+   * grabber needs beyond the room it had above its buttons (SheetGrabber).
    */
-  const lift = props.grab ? GRABBER_ROOM - PANE_TOP_SPACE : 0;
+  const lift = props.grab ? room - PANE_TOP_SPACE : 0;
   const reach: CSSProperties | null = props.grab && !sticky ? { position: "relative", marginTop: -PANE_FRAME_TOP, paddingTop: PANE_FRAME_TOP + lift, minHeight: 48 + PANE_FRAME_TOP + lift } : null;
   return (
     <div

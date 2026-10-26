@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { parseGrabber, type GrabberId } from "../../components/grabberDesigns.ts";
 import { setBoardInterfaceScale } from "../../lib/boardScale.ts";
 import { preferredMapVariant, readMapVariantSetting, type MapVariantSetting } from "../../lib/device.ts";
 import { formatKeyChanges, parseKeyChanges, type KeyChanges } from "../../state/keyBindings.ts";
@@ -72,7 +73,8 @@ function setting<T>(key: string, parse: (raw: string | null) => T, format: (valu
       apply(own);
     },
     subscribe,
-    use: () => useSyncExternalStore(subscribe, get),
+    // The same value for a render outside the browser, as a component's unit test makes: it reads the defaults.
+    use: () => useSyncExternalStore(subscribe, get, get),
   };
 }
 
@@ -231,3 +233,16 @@ const keyChangesSetting = setting<KeyChanges>("rvtt.keys", parseKeyChanges, form
 export const keyChanges = keyChangesSetting.get;
 export const setKeyChanges = keyChangesSetting.set;
 export const useKeyChanges = keyChangesSetting.use;
+
+// ---------------------------------------------------------------- sheet handle
+
+/**
+ * "Sheet handle" (docs/design-v1-sheet-swipe.md 4.8): the grabber a phone's
+ * sheets that swipe show, by id (components/grabberDesigns.ts), Ringed
+ * tail when unset or unknown. Every open sheet follows a change at once.
+ */
+const sheetHandleSetting = setting<GrabberId>("rvtt.sheetHandle", parseGrabber, (id) => id);
+
+export const sheetHandle = sheetHandleSetting.get;
+export const setSheetHandle = sheetHandleSetting.set;
+export const useSheetHandle = sheetHandleSetting.use;

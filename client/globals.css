@@ -455,12 +455,18 @@ summary::-webkit-details-marker {
   color: var(--rvtt-accent, #f7df00) !important;
 }
 
-/* Forced colors drop the sheet grabber's fill (components/SheetGrabber.tsx),
-   which would leave the pill unseen, so it takes the system's muted text
-   color there. */
+/* Forced colors would draw the sheet grabber (components/SheetGrabber.tsx)
+   and its preview in This device in the system's text color, as loud as the
+   words, and drop the held glow. So the grabber takes the system's muted
+   text color at rest and its highlight while a finger holds the sheet
+   (lib/sheetSwipe.ts HELD_ATTR). */
 @media (forced-colors: active) {
-  [data-sheet-grabber] {
+  [data-sheet-grabber],
+  [data-grabber-preview] {
     forced-color-adjust: none;
-    background: GrayText !important;
+    color: GrayText !important;
+  }
+  [data-sheet-held] [data-sheet-grabber] {
+    color: Highlight !important;
   }
 }

@@ -108,3 +108,32 @@ test("with storage blocked, moved keys last until the page closes", async () => 
   assert.deepEqual(s.keyChanges(), { "tool:fog": "x" });
   assert.equal(stored.has("rvtt.keys"), false);
 });
+
+/*
+ * The Sheet handle (docs/design-v1-sheet-swipe.md 4.8), kept on this
+ * device as its other choices are: the ringed tail until one is chosen, and
+ * again for a stored id this version does not know.
+ */
+
+test("the sheet handle is the ringed tail until chosen, a choice is kept, and an unknown stored one reads as the tail", async () => {
+  reset({ writes: true, reads: true });
+  const first = await loadPage();
+  assert.equal(first.sheetHandle(), "tail");
+  first.setSheetHandle("mask");
+  assert.equal(stored.get("rvtt.sheetHandle"), "mask");
+  assert.equal((await loadPage()).sheetHandle(), "mask");
+  for (const raw of ["blob", "", "Mask", "tail;"]) {
+    reset({ writes: true, reads: true });
+    stored.set("rvtt.sheetHandle", raw);
+    assert.equal((await loadPage()).sheetHandle(), "tail", raw);
+  }
+});
+
+test("with storage blocked, the sheet handle reads as the tail and a choice lasts until the page closes", async () => {
+  reset({ writes: false, reads: false });
+  const s = await loadPage();
+  assert.equal(s.sheetHandle(), "tail");
+  s.setSheetHandle("rune");
+  assert.equal(s.sheetHandle(), "rune");
+  assert.equal(stored.has("rvtt.sheetHandle"), false);
+});
