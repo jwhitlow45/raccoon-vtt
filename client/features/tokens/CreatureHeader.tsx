@@ -19,6 +19,9 @@ export type HeaderTag = { text: string; icon: IconName; title?: string; spoken?:
 /** A character's page's name, found by the focus that lands there. */
 export const CREATURE_HEADING = "[data-creature-heading]";
 
+/** The header's picture across. A footprint taller than it is wide draws it taller (ImagePreview). */
+const PICTURE_PX = 48;
+
 /** A creature's picture as its header draws it: the image or initials, in its shape, ringed in its disposition's color. */
 export type CreaturePicture = {
   image: ImageRef | null | undefined;
@@ -40,6 +43,10 @@ export type CreaturePicture = {
  * 20 px disk at its lower right, so the tie reads before the words (3.3).
  * The pictures are decoration: the name and the kind line say who it is,
  * and changing the picture is the Image group's.
+ *
+ * The name's first line stands at the picture's middle, as a row set at
+ * its start meets its parts' first lines, so the name reads beside the
+ * picture rather than along its top edge, and the lines under it follow.
  */
 export function CreatureHeader(props: {
   picture: CreaturePicture;
@@ -57,9 +64,9 @@ export function CreatureHeader(props: {
   const { picture, badge, line } = props;
   return (
     // The picture beside the name, then one column no wider than the panel, so a tag too long for it is cut rather than widening the column.
-    <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", columnGap: theme.space(3), alignItems: "start", paddingTop: theme.space(2), paddingBottom: theme.space(4) }}>
+    <div data-creature-header="" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", columnGap: theme.space(3), alignItems: "start", paddingTop: theme.space(2), paddingBottom: theme.space(4) }}>
       <span aria-hidden style={{ position: "relative", display: "flex" }}>
-        <ImagePreview image={picture.image} shape={picture.shape} aspect={picture.aspect} width={48} ring={picture.ring} initials={picture.initials} />
+        <ImagePreview image={picture.image} shape={picture.shape} aspect={picture.aspect} width={PICTURE_PX} ring={picture.ring} initials={picture.initials} />
         {badge ? (
           // Within the picture's box, so nothing runs past the panel's edge. A ring of the panel's own surface parts the badge from the picture under it.
           <span style={{ position: "absolute", right: 0, bottom: 0, display: "flex", borderRadius: theme.radius.round, outline: `${theme.line.strong}px solid ${theme.color.surface}` }}>
@@ -67,7 +74,7 @@ export function CreatureHeader(props: {
           </span>
         ) : null}
       </span>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1), paddingTop: Math.max(0, (PICTURE_PX / picture.aspect - theme.font.heading * theme.leading.tight) / 2) }}>
         <h3
           {...(props.focusable ? { tabIndex: -1, "data-creature-heading": "" } : {})}
           style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}
