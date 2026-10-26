@@ -95,10 +95,11 @@ export const suggestionHelp = (suggested: Scene["suggestedView"]): string => `Th
 export const SUGGESTED_VIEW = "Suggested view";
 export const SUGGESTED_VIEW_HELP = "Devices that follow the scene show this view.";
 
+/** The turn buttons' names are their words, and their descriptions say what turns (D-261026-11). */
 export const TURN_LEFT = "Turn left";
 export const TURN_RIGHT = "Turn right";
-export const TURN_LEFT_LABEL = "Turn the map left";
-export const TURN_RIGHT_LABEL = "Turn the map right";
+export const TURN_LEFT_DESCRIPTION = "Turn the map left";
+export const TURN_RIGHT_DESCRIPTION = "Turn the map right";
 
 /** Q or E while the board shows Top-down. */
 export const TURN_NEEDS_ISOMETRIC = "Turning needs the isometric view.";

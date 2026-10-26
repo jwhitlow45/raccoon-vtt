@@ -20,9 +20,9 @@ import {
   suggestionHelp,
   topDownTool,
   TURN_LEFT,
-  TURN_LEFT_LABEL,
+  TURN_LEFT_DESCRIPTION,
   TURN_RIGHT,
-  TURN_RIGHT_LABEL,
+  TURN_RIGHT_DESCRIPTION,
   VIEW_CHOICES,
   VIEW_GROUP,
   viewGestureSlot,
@@ -130,6 +130,8 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; keyOpen?: boolean
   const { choice } = props;
   const name = useId();
   const helpId = useId();
+  const leftId = useId();
+  const rightId = useId();
   const value = choiceOf(choice.stored.pick);
   const forced = menuLine(choice);
   const turns = choice.shown.kind === "isometric";
@@ -169,12 +171,18 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; keyOpen?: boolean
       {forced ? <Help>{forced}</Help> : null}
       {turns || (props.reserveTurns && !forced) ? (
         <div aria-hidden={turns ? undefined : true} inert={!turns} style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), visibility: turns ? undefined : "hidden" }}>
-          <Button size="sm" icon="turnLeft" aria-label={TURN_LEFT_LABEL} onClick={() => turn(-1)} style={TURN_BUTTON}>
+          <Button size="sm" icon="turnLeft" aria-describedby={leftId} onClick={() => turn(-1)} style={TURN_BUTTON}>
             {TURN_LEFT}
           </Button>
-          <Button size="sm" icon="turnRight" aria-label={TURN_RIGHT_LABEL} onClick={() => turn(1)} style={TURN_BUTTON}>
+          <Button size="sm" icon="turnRight" aria-describedby={rightId} onClick={() => turn(1)} style={TURN_BUTTON}>
             {TURN_RIGHT}
           </Button>
+          <span id={leftId} style={VISUALLY_HIDDEN}>
+            {TURN_LEFT_DESCRIPTION}
+          </span>
+          <span id={rightId} style={VISUALLY_HIDDEN}>
+            {TURN_RIGHT_DESCRIPTION}
+          </span>
         </div>
       ) : null}
       <ViewVoice />

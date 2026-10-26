@@ -3834,7 +3834,7 @@ export function isoChoiceTests(): void {
       await sweep.measure(page, "iso5-menu-top-down", menu);
       await shots.take(page, `alignment-iso5-menu-top-down-${atName(at)}`);
       await menu.getByRole("radio", { name: "Isometric" }).check();
-      await menu.getByRole("button", { name: "Turn the map right" }).waitFor();
+      await menu.getByRole("button", { name: "Turn right", exact: true }).waitFor();
       await sweep.measure(page, "iso5-menu-isometric", menu);
       await shots.take(page, `alignment-iso5-menu-isometric-${atName(at)}`);
       await close();

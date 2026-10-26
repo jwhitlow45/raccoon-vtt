@@ -11,6 +11,7 @@ import { Loading } from "../../components/Loading.tsx";
 import { choiceLook } from "../../components/looks.ts";
 import { Notice } from "../../components/Notice.tsx";
 import { useTooltip } from "../../components/Tooltip.tsx";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { api, ApiError, displayAssetUrl, type AssetVariant } from "../../lib/api.ts";
 import { fitRect, NO_INSETS, type Camera, type Rect, type Size } from "../../lib/camera.ts";
 import { TOP_DOWN, turned, viewBox } from "../../lib/view.ts";
@@ -31,7 +32,7 @@ import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "../hando
 import { nextPopup, pageName, showingKey } from "../handouts/handouts.ts";
 import { useXCard, XCardHost } from "../xcard/XCardHost.tsx";
 import { UI_SCALES, uiScaleLabel, useUiScale } from "../device/settings.ts";
-import { choiceOf, choiceWords, isoOffered, pickOf, suggestionHelp, TURN_LEFT, TURN_LEFT_LABEL, TURN_RIGHT, TURN_RIGHT_LABEL, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
+import { choiceOf, choiceWords, isoOffered, pickOf, suggestionHelp, TURN_LEFT, TURN_LEFT_DESCRIPTION, TURN_RIGHT, TURN_RIGHT_DESCRIPTION, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
 import { displayViewKey, pickView, turnView } from "../view/store.ts";
 import { useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
 import {
@@ -945,6 +946,8 @@ function DisplayMenu(props: {
 function DisplayView(props: { choice: ViewChoiceState; onTouch(): void }) {
   const { choice } = props;
   const helpId = useId();
+  const leftId = useId();
+  const rightId = useId();
   const value = choiceOf(choice.stored.pick);
   const turn = (by: 1 | -1) => {
     if (choice.shown.kind === "isometric" && choice.sceneId) turnView(choice.key, choice.sceneId, turned(choice.shown.turn, by));
@@ -976,12 +979,18 @@ function DisplayView(props: { choice: ViewChoiceState; onTouch(): void }) {
       </p>
       {choice.shown.kind === "isometric" ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-          <MenuButton role="menuitem" grow label={TURN_LEFT_LABEL} onClick={() => turn(-1)}>
+          <MenuButton role="menuitem" grow describedBy={leftId} onClick={() => turn(-1)}>
             {TURN_LEFT}
           </MenuButton>
-          <MenuButton role="menuitem" grow label={TURN_RIGHT_LABEL} onClick={() => turn(1)}>
+          <MenuButton role="menuitem" grow describedBy={rightId} onClick={() => turn(1)}>
             {TURN_RIGHT}
           </MenuButton>
+          <span id={leftId} style={VISUALLY_HIDDEN}>
+            {TURN_LEFT_DESCRIPTION}
+          </span>
+          <span id={rightId} style={VISUALLY_HIDDEN}>
+            {TURN_RIGHT_DESCRIPTION}
+          </span>
         </div>
       ) : null}
     </div>
@@ -1025,8 +1034,6 @@ function MenuButton(props: {
   grow?: boolean;
   /** The icon alone, at the TV's size, its words (`children`) its name and tooltip (docs/design-v1-icons.md 3.1 rule 1). */
   icon?: IconName;
-  /** A name that says more than its words, such as Turn left's "Turn the map left". */
-  label?: string;
   /** The id of a line that says what it means, such as Follow the scene's suggestion. */
   describedBy?: string;
   onClick(): void;
@@ -1040,7 +1047,7 @@ function MenuButton(props: {
       type="button"
       role={props.role}
       aria-checked={props.role === undefined || props.role === "menuitem" ? undefined : on}
-      aria-label={props.icon ? words : props.label}
+      aria-label={props.icon ? words : undefined}
       aria-describedby={props.describedBy}
       {...(props.icon ? tooltip.anchor() : null)}
       disabled={props.disabled}

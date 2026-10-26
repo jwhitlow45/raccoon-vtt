@@ -95,6 +95,17 @@ async function untilShown(page: Page, want: string): Promise<void> {
   }
 }
 
+/** The words the elements an element's aria-describedby names hold. */
+function description(el: Locator): Promise<string> {
+  return el.evaluate((node) => {
+    const el = node as unknown as { getAttribute(name: string): string | null; ownerDocument: { getElementById(id: string): { textContent: string | null } | null } };
+    return (el.getAttribute("aria-describedby") ?? "")
+      .split(/\s+/)
+      .map((id: string) => el.ownerDocument.getElementById(id)?.textContent ?? "")
+      .join(" ");
+  });
+}
+
 /** Keys go to the page, not to a tab or button that kept focus. */
 async function blur(page: Page): Promise<void> {
   await page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
@@ -217,7 +228,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     let menu = await openMenu(pat, true);
     await menu.getByRole("radio", { name: "Follow the scene", checked: true }).waitFor();
     await menu.getByText("This scene suggests Top-down.").waitFor();
-    assert.equal(await menu.getByRole("button", { name: "Turn the map right" }).count(), 0, "no turns in Top-down");
+    assert.equal(await menu.getByRole("button", { name: "Turn right", exact: true }).count(), 0, "no turns in Top-down");
     await shots.take(pat, "iso-pat-menu-top-down");
     await closeMenu(pat, true);
 
@@ -240,7 +251,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await suggest("Isometric");
     await untilShown(pat, "isometric 0");
     let menu = await openMenu(pat, true);
-    await menu.getByRole("button", { name: "Turn the map right" }).tap();
+    await menu.getByRole("button", { name: "Turn right", exact: true }).tap();
     await menu.locator("[data-rvtt-view-status]").filter({ hasText: "Turned right. The map's top edge faces down and to the right." }).waitFor({ state: "attached" });
     await closeMenu(pat, true);
     await untilShown(pat, "isometric 1");
@@ -257,7 +268,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await ops.send({ t: "room.setPlayerScene", sceneId: run.secondId });
     await untilShown(pat, "isometric 0");
     menu = await openMenu(pat, true);
-    await menu.getByRole("button", { name: "Turn the map left" }).tap();
+    await menu.getByRole("button", { name: "Turn left", exact: true }).tap();
     await closeMenu(pat, true);
     await untilShown(pat, "isometric 3");
     await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
@@ -311,7 +322,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     const menu = await openMenu(dm, false);
     await menu.getByRole("radio", { name: "Isometric", checked: true }).waitFor();
     await menu.getByText("The map builder works top-down. Isometric comes back when you switch tools.").waitFor();
-    assert.equal(await menu.getByRole("button", { name: "Turn the map right" }).count(), 0, "no turns while the builder shows Top-down");
+    assert.equal(await menu.getByRole("button", { name: "Turn right", exact: true }).count(), 0, "no turns while the builder shows Top-down");
     await shots.take(dm, "iso-dm-menu-builder");
     await closeMenu(dm, false);
     await dm.keyboard.press("e");
@@ -345,11 +356,18 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await waitFor("focus on Top-down", () => dm.evaluate(() => (globalThis as unknown as { document: { activeElement: { value?: string } | null } }).document.activeElement?.value === "topDown" || null));
     await dm.keyboard.press("ArrowDown");
     await untilShown(dm, "isometric 0");
-    await menu.getByRole("button", { name: "Turn the map left" }).waitFor();
+    await menu.getByRole("button", { name: "Turn left", exact: true }).waitFor();
     // The popover keeps the size it opened with, and kept the turns' room, so they show without a scroll.
-    for (const name of ["Turn the map left", "Turn the map right"]) assert.ok(await wholeInReach(menu.getByRole("button", { name })), `${name} shows whole`);
+    for (const name of ["Turn left", "Turn right"]) assert.ok(await wholeInReach(menu.getByRole("button", { name, exact: true })), `${name} shows whole`);
+    // Named by their words, with what turns in the description (D-261026-11).
+    for (const [name, says] of [
+      ["Turn left", "Turn the map left"],
+      ["Turn right", "Turn the map right"],
+    ] as const) {
+      assert.ok((await description(menu.getByRole("button", { name, exact: true }))).includes(says), `${name}'s description`);
+    }
     await dm.keyboard.press("Tab");
-    await waitFor("focus on Turn left", () => menu.getByRole("button", { name: "Turn the map left" }).evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement || null));
+    await waitFor("focus on Turn left", () => menu.getByRole("button", { name: "Turn left", exact: true }).evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement || null));
     await dm.keyboard.press("Enter");
     await untilShown(dm, "isometric 3");
     await shots.take(dm, "iso-dm-menu-isometric");
@@ -391,9 +409,9 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     const view = menu.getByRole("group", { name: "View" });
     await view.getByRole("menuitemradio", { name: "Follow the scene", checked: true }).waitFor();
     await menu.getByText("This scene suggests Top-down.").waitFor();
-    assert.equal(await menu.getByRole("menuitem", { name: "Turn the map right" }).count(), 0, "the display follows its Top-down scene");
+    assert.equal(await menu.getByRole("menuitem", { name: "Turn right", exact: true }).count(), 0, "the display follows its Top-down scene");
     await view.getByRole("menuitemradio", { name: "Isometric" }).click();
-    await menu.getByRole("menuitem", { name: "Turn the map right" }).click();
+    await menu.getByRole("menuitem", { name: "Turn right", exact: true }).click();
     await shots.take(tv, "iso-display-menu");
     assert.deepEqual(await stored(tv, `rvtt.displayView.${run.roomId}`), { v: 1, pick: "isometric", turns: { [run.sceneId]: 1 } });
     assert.deepEqual(await stored(tv, `rvtt.view.${run.roomId}`), { v: 1, pick: "isometric", turns: {} }, "the member's pick untouched");
@@ -418,7 +436,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         await tv.reload();
         await tv.locator(".konvajs-content").first().waitFor();
         menu = await openTvMenu();
-        await menu.getByRole("menuitem", { name: "Turn the map left" }).waitFor();
+        await menu.getByRole("menuitem", { name: "Turn left", exact: true }).waitFor();
         const at = `display ${size.width}x${size.height}${scale === 1 ? "" : "-130"}`;
         const found = alignmentLines(await measureAlignment(menu.getByRole("group", { name: "View" })), at);
         lines.push(...found);
