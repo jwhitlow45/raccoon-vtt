@@ -90,7 +90,7 @@ Every feature that reads the grid, from four read-only sweeps of the code and th
 - **Constants.** `HEX_S = 0.8660254037844386` (√3/2, the spacing of rows) and `HEX_R = 0.5773502691896258` (1/√3, center to corner), written as literals. In doubles `1.5 * HEX_R !== HEX_S`, so a corner computed from the hex above differs from the same corner computed from the hex below. One function, `cornerAt(g, index)`, gives every corner by its own index, rounded to the 1/64 lattice, for Large anchors, area origins and wall ends alike. Nothing derives a corner from a center.
 - **Keys.** A hex is `"col,row"`, offset coordinates, odd rows shifted half a cell right. The center of hex (c, r) is `(c + 0.5 + 0.5 * (r % 2), HEX_R + r * HEX_S)`. Distance, lines and rounding go through cube coordinates inside `hex.ts` and never reach stored data.
 - **The scene's hexes** lie wholly inside its rectangle. Bounds stay in cells (at most 200 by 200), so a 30 by 20 scene holds 30 hexes in even rows, 29 in odd rows and 22 rows, and a 200 by 200 one 230 rows.
-- **Which hex holds a point:** cube rounding, ties to the smaller row, then the smaller column. A fog sub-cell's center is an odd multiple of 1/8, so the upright sides of hex rows never split one, and the rounding settles the sloped sides the same way everywhere. A scene hex holds 12 to 16 sub-cells.
+- **Which hex holds a point:** the hex whose center is nearest, ties to the smaller row, then the smaller column. On hex columns the ties mirror: the smaller column, then the smaller row. A fog sub-cell's center is an odd multiple of 1/8, so the upright sides of hex rows never split one, and the rounding settles the sloped sides the same way everywhere. A scene hex holds 12 to 16 sub-cells.
 - **Exactness.** `hex.ts` uses only `+`, `-`, `*`, `/`, `Math.floor`, `Math.round`, `Math.abs`, min and max, and joins the test that bans `sqrt`, `hypot`, trigonometry and powers in what vision and segments import. The reducer reads it on replay, so every device must agree bit for bit.
 - **The map's origin** is reduced into the lattice's period at or after the image's top-left, never negative, so a hex scene never reads as an older import (`cameWithGrid`).
 
@@ -106,7 +106,7 @@ Every feature that reads the grid, from four read-only sweeps of the code and th
 
 - **Position.** A token's `x, y` stays the top-left of its size's box, whose center is the anchor. Drawing, hit areas, the action bar, drag frames, tethers and labels work unchanged. Only rules that read occupied cells branch on the grid.
 - **Anchors** for Tiny, Small, Medium and Huge are hex centers. For Large and Gargantuan they are corners (`cornerAt`), one lattice the same shape as the centers, so every size moves in the same six steps.
-- **Ties.** A snap ties to the smaller row, then the smaller column. A resize keeps the reference hex where it was: a Medium growing Large keeps its hex as the top one, and a Large shrinking Medium keeps its top hex.
+- **Ties.** A snap ties to the smaller row, then the smaller column, mirrored on hex columns (the smaller column, then the smaller row). Large and Gargantuan snap to the nearest corner as rounded onto the 1/64 lattice. A resize keeps the reference hex where it was: a Medium growing Large keeps its hex as the top one, and a Large shrinking Medium keeps its top hex.
 - **A leg's steps** are the hex steps between its start and end reference hexes, so a leg whose stops differ in size still counts.
 - **A custom size** reads as its size category (`sizeCategory`, longer side), anchored at the center of its stored box as drawn. The size picker offers categories only on a hex scene.
 - **Inside the scene.** Wherever a rule keeps a footprint inside the scene today (placement, a player's teleport, landings), its hexes must be the scene's hexes.
@@ -233,7 +233,7 @@ Rule functions take the grid as a required parameter. Their square path is today
 | A Universal VTT import in that room | a square scene, the summary says why | uvtt unit |
 | New Battle mat, Hex rows, 30 by 20 | 22 rows, 30 hexes in even rows and 29 in odd | hex unit, hex e2e |
 | The last row of a 200 by 200 hex rows scene | row 229 exists and takes a mark (H2) | map reducer unit |
-| A Medium token dropped between hexes | the nearest hex center, ties by row then column | hex unit, hex e2e |
+| A Medium token dropped between hexes | the nearest hex center, ties by row then column (by column then row on hex columns) | hex unit, hex e2e |
 | A Medium grows Large, then shrinks | its hex is the Large's top hex, and back | resize unit |
 | A party of four group-dragged | each lands on its own anchor | group unit |
 | A companion two hexes from its character | 10 ft, outside 5 ft reach | permissions unit |
@@ -380,3 +380,11 @@ Filled by each lane's docs commit, with every place the build went its own way.
 - **Companion reach** on hexes is read in `permissions.ts` by a small local footprint (`standsOn`) and hex steps with the room's rule for height. HX-2's footprint and distance rules should take it over. The one caller outside the owned files, `client/features/tokens/companions.ts`, passes the scene's grid.
 - **Left to HX-2**: the players' scene copy does not carry `gridShape` yet (`project.ts`), so until HX-2 a player's device draws a hex scene as squares. No UI makes a hex scene before HX-4.
 - **Square scenes stay byte for byte**: `shared/hex.golden.test.ts` pins, for random rooms and ops recorded before the run, every permission decision, state, answer, projection and undo.
+
+**HX-1, review round 1** (D-261026-8):
+
+- In H1 a hex scene holds no grid-keyed content at all, whatever its stamp: a restore and the import refuse painted ground and grid-line walls (square only in every phase), difficult ground (until H2), heights, stairs and Reveal room's cells (until H3), as well as free walls, traps, links and squeezes. Content stamped with the scene's own shape reads "difficult ground can't stand on this scene's hexes".
+- A hex scene's map origin is never negative: `scene.create`, `scene.setMap` and `scene.setGrid` refuse it ("On hexes the map's grid starts at or after the image's top-left corner."), and the import refuses a hex scene that reads as having come with its own square grid. A hex create with `gridFromFile` keeps the Grid row's words.
+- Large and Gargantuan snap to the nearest of seven candidate corners as rounded, so the anchor is the nearest one stored.
+- On hexes `inScene` takes only a hex's own key, so one hex has one key.
+- The golden test sends every fourth op as each player in turn, its fixture written again on the tree before hex grids.
