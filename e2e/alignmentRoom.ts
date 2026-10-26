@@ -3838,13 +3838,17 @@ export function isoChoiceTests(): void {
       const menu = page.getByRole("dialog", { name: "View" });
       // On the narrowest phones the View button folds into the room's menu as its View row (D-261026-12).
       const folded = (await page.getByRole("button", { name: /^View: / }).count()) === 0;
-      const open = async () => {
+      const open = async (shown: string) => {
         if (folded) {
           const roomMenu = await openDmPanel(page, "Menu");
           const row = roomMenu.getByRole("button", { name: /^View/ });
           // The menu's panel loads as it opens.
           await row.waitFor();
+          await row.scrollIntoViewIfNeeded();
           await sweep.measure(page, "iso5-menu-row", row);
+          // Its detail names the views too, each kept on one line (ISO5-OPUS-10).
+          await sweep.add(page, "iso5-menu-row", await viewNameWhole(row, sweep.at));
+          await shots.take(page, `alignment-iso5-menu-row-${shown}-${atName(at)}`);
           await row.click();
         } else await page.getByRole("button", { name: /^View: / }).click();
         await menu.waitFor();
@@ -3855,7 +3859,7 @@ export function isoChoiceTests(): void {
         if (folded) await closeSheets(page);
       };
       await isoTopBar(sweep, page, "iso5-top-bar");
-      await open();
+      await open("top-down");
       await sweep.measure(page, "iso5-menu-top-down", menu);
       await sweep.add(page, "iso5-menu-top-down", await viewNameWhole(menu, sweep.at));
       await shots.take(page, `alignment-iso5-menu-top-down-${atName(at)}`);
@@ -3866,7 +3870,7 @@ export function isoChoiceTests(): void {
       await close();
       await isoTopBar(sweep, page, "iso5-top-bar-isometric");
       await shots.take(page, `alignment-iso5-top-bar-isometric-${atName(at)}`);
-      await open();
+      await open("isometric");
       await menu.getByRole("radio", { name: "Follow the scene" }).check();
       await close();
       const scenes = await openDmPanel(page, "Scenes");

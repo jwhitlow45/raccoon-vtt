@@ -262,19 +262,21 @@ export function ViewSheetDialog(props: { choice: ViewChoiceState; opener?: RefOb
   );
 }
 
-/**
- * The help under Follow the scene (choice.ts suggestionHelp), the view's
- * name kept on one line: at 320 px and 130% "Top-down" broke at its hyphen.
- */
+/** The help under Follow the scene (choice.ts suggestionHelp). */
 export function SuggestionHelp(props: { suggested: Scene["suggestedView"] }) {
   return (
     <>
-      This scene suggests{" "}
-      <span data-view-name="" style={{ whiteSpace: "nowrap" }}>
-        {VIEW_NAMES[suggestedKind(props.suggested)]}
-      </span>
-      .
+      This scene suggests <ViewName kind={suggestedKind(props.suggested)} />.
     </>
+  );
+}
+
+/** A view's name in running words, kept on one line: at 320 px and 130% "Top-down" broke at its hyphen (ISO5-OPUS-5). */
+export function ViewName(props: { kind: ViewKind }) {
+  return (
+    <span data-view-name="" style={{ whiteSpace: "nowrap" }}>
+      {VIEW_NAMES[props.kind]}
+    </span>
   );
 }
 

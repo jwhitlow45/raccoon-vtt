@@ -10,8 +10,8 @@ import { useJobActive } from "../features/handouts/pdf/live.ts";
 import { joinLinkToShare } from "../features/dm/shareLink.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import { usePanelHeader, type PanelProps } from "../features/panels.ts";
-import { VIEW_NAMES, viewFoldSlot } from "../features/view/choice.ts";
-import { useRoomViewChoice, ViewSheetDialog } from "../features/view/ViewMenu.tsx";
+import { viewFoldSlot } from "../features/view/choice.ts";
+import { useRoomViewChoice, ViewName, ViewSheetDialog } from "../features/view/ViewMenu.tsx";
 import { api } from "../lib/api.ts";
 import { fullscreenSupported } from "../lib/fullscreen.ts";
 import { navigate } from "../lib/navigation.ts";
@@ -196,7 +196,11 @@ function ViewRow() {
       <MenuItem
         icon={choice.shown.kind === "isometric" ? "viewIsometric" : "viewTopDown"}
         title="View"
-        detail={`Showing ${VIEW_NAMES[choice.shown.kind]} on this device. Follow the scene, Top-down or Isometric, and turning the map.`}
+        detail={
+          <>
+            Showing <ViewName kind={choice.shown.kind} /> on this device. Follow the scene, <ViewName kind="topDown" /> or Isometric, and turning the map.
+          </>
+        }
         onClick={() => setOpen(true)}
       />
       {open ? <ViewSheetDialog choice={choice} onClose={() => setOpen(false)} /> : null}
@@ -212,7 +216,7 @@ function ViewRow() {
  * (features/panels.ts useSubpageFocus), and Leave room, which leaves, does
  * neither.
  */
-function MenuItem(props: { icon: IconName; title: string; detail: string; page?: Page; opener?: string; disabled?: boolean; onClick(): void }) {
+function MenuItem(props: { icon: IconName; title: string; detail: ReactNode; page?: Page; opener?: string; disabled?: boolean; onClick(): void }) {
   return (
     <Row
       // Before the words, so a list read by scanning is found by its icons (docs/design-v1-icons.md 10.2).
