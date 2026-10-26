@@ -644,11 +644,9 @@ function withheldFromPlayers(state: RoomState, fogged: FogReader, sight: (sceneI
  * Whether where a token stands keeps it from players who do not own it, by
  * the rule projections use: out of the party's sight on a vision scene,
  * fully under the merged fog elsewhere, unless it is a party member or
- * exempt. Its visibility and a blackout are the caller's to check. The
- * ephemeral channel asks it of a drag preview's spot, with the footprint its
- * own preview rule decides (docs/design-v1-maps-vision.md 4.1 and 4.3.5).
- * On a per-player scene it is the rule of what every viewer shares, the
- * shared sight and fog (docs/design-v1-per-player-vision.md decision 10).
+ * exempt. Its visibility and a blackout are the caller's to check. On a
+ * per-player scene it is the rule of what every viewer shares, the shared
+ * sight and fog (docs/design-v1-per-player-vision.md decision 10).
  */
 export function withheldWhereItStands(state: RoomState, token: Token): boolean {
   const shared = sharedOf(state);
@@ -659,7 +657,11 @@ export function withheldWhereItStands(state: RoomState, token: Token): boolean {
  * Whether where a token stands keeps it from one viewer, by their own
  * sight and fog (docs/design-v1-per-player-vision.md 6.2): the rule their
  * projection judges creatures by, which on a device is the copy's own, and
- * for a DM the union. Its visibility and a blackout are the caller's.
+ * for a DM the union. Its visibility and a blackout are the caller's. The
+ * ephemeral channel asks it of a drag preview's spot for each receiver,
+ * with the footprint its own preview rule decides
+ * (docs/design-v1-maps-vision.md 4.1 and 4.3.5, and 7.5 of the per-player
+ * design).
  */
 export function withheldFromViewer(state: RoomState, viewer: Viewer, token: Token): boolean {
   const own = viewer.role === "player" ? viewer.memberId : null;
