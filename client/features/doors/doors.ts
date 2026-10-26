@@ -4,6 +4,7 @@ import { reachesDoor } from "#shared/permissions.ts";
 import type { DoorRef, OpOf } from "#shared/protocol.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import { isCellFullyFogged } from "#shared/rules/fog.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Doors in play (docs/design-v1-maps-vision.md 4.1), as plain functions for
@@ -170,7 +171,7 @@ export function noteDoor(chunks: Readonly<Record<string, BuildChunk>>, sceneId: 
  * door there stays as hidden from the bar as it is from a tap.
  */
 export function doorsInReach(state: RoomState, token: Token, fog: Fog): DoorOnMap[] {
-  const fp = footprintRect(token);
+  const fp = footprintRect(SQUARES, token);
   const fpc = state.meta.settings.feetPerCell;
   // Reach is at least one cell, and 5 ft is more cells only where a cell is under 5 ft.
   const cells = Math.ceil(Math.max(5, fpc) / Math.max(fpc, 1e-9)) + 1;
@@ -192,7 +193,7 @@ export function doorOpener(state: RoomState, memberId: string | undefined, d: Pi
   let best: { token: Token; dist: number } | null = null;
   for (const token of Object.values(state.tokens)) {
     if (!token || token.sceneId !== sceneId || memberId === undefined || !owns(token) || !reachesDoor(state, token, d.ref, d.chunk)) continue;
-    const fp = footprintRect(token);
+    const fp = footprintRect(SQUARES, token);
     const dist = Math.hypot(d.mid.x - (fp.x + fp.w / 2), d.mid.y - (fp.y + fp.h / 2));
     if (!best || dist < best.dist || (dist === best.dist && token.id < best.token.id)) best = { token, dist };
   }

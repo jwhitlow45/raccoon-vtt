@@ -21,6 +21,7 @@ import {
   type SnapMode,
 } from "./placement.ts";
 import { placedAtPoint } from "./presets.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Which token a new area starts from, and what a tap picks, for the area
@@ -354,7 +355,7 @@ export function pickedPress(at: {
 }
 
 function centerOf(t: AreaToken): Point {
-  const r = footprintRect(t);
+  const r = footprintRect(SQUARES, t);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 

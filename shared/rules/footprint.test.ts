@@ -15,6 +15,7 @@ import {
   verticalExtentFt,
   type FootprintToken,
 } from "./footprint.ts";
+import { SQUARES } from "./grid.ts";
 
 function tok(over: Partial<FootprintToken> = {}): FootprintToken {
   return { size: "medium", x: 0, y: 0, elevation: 0, ...over };
@@ -32,16 +33,16 @@ describe("footprint", () => {
   });
 
   test("small and larger snap to whole cells, tiny to half cells", () => {
-    assert.deepEqual(footprintRect(tok({ x: 2.4, y: 3.6 })), { x: 2, y: 4, w: 1, h: 1 });
-    assert.deepEqual(footprintRect(tok({ size: "tiny", x: 2.3, y: 3.8 })), { x: 2.5, y: 4, w: 0.5, h: 0.5 });
-    assert.deepEqual(footprintRect(tok({ size: "large", x: 0.6, y: -0.2 })), { x: 1, y: 0, w: 2, h: 2 });
+    assert.deepEqual(footprintRect(SQUARES, tok({ x: 2.4, y: 3.6 })), { x: 2, y: 4, w: 1, h: 1 });
+    assert.deepEqual(footprintRect(SQUARES, tok({ size: "tiny", x: 2.3, y: 3.8 })), { x: 2.5, y: 4, w: 0.5, h: 0.5 });
+    assert.deepEqual(footprintRect(SQUARES, tok({ size: "large", x: 0.6, y: -0.2 })), { x: 1, y: 0, w: 2, h: 2 });
   });
 
   test("occupied cells are the whole cells the snapped footprint overlaps", () => {
-    assert.deepEqual(occupiedCells(tok({ x: 3, y: 4 })), [{ x: 3, y: 4 }]);
-    assert.deepEqual(occupiedRange(tok({ size: "large", x: 1, y: 1 })), { x0: 1, y0: 1, x1: 3, y1: 3 });
-    assert.equal(occupiedCells(tok({ size: "huge", x: 0, y: 0 })).length, 9);
-    assert.deepEqual(occupiedRange(tok({ size: "custom", w: 1.5, h: 1, x: 2, y: 2 })), { x0: 2, y0: 2, x1: 4, y1: 3 });
+    assert.deepEqual(occupiedCells(SQUARES, tok({ x: 3, y: 4 })), [{ x: 3, y: 4 }]);
+    assert.deepEqual(occupiedRange(SQUARES, tok({ size: "large", x: 1, y: 1 })), { x0: 1, y0: 1, x1: 3, y1: 3 });
+    assert.equal(occupiedCells(SQUARES, tok({ size: "huge", x: 0, y: 0 })).length, 9);
+    assert.deepEqual(occupiedRange(SQUARES, tok({ size: "custom", w: 1.5, h: 1, x: 2, y: 2 })), { x0: 2, y0: 2, x1: 4, y1: 3 });
   });
 
   test("a tiny creature occupies the one cell that contains it", () => {
@@ -52,7 +53,7 @@ describe("footprint", () => {
       [4.5, 4.5],
       [4.6, 4.4],
     ] as const) {
-      assert.deepEqual(occupiedCells(tok({ size: "tiny", x, y })), [{ x: 4, y: 4 }], `tiny at ${x},${y}`);
+      assert.deepEqual(occupiedCells(SQUARES, tok({ size: "tiny", x, y })), [{ x: 4, y: 4 }], `tiny at ${x},${y}`);
     }
   });
 
@@ -84,19 +85,19 @@ describe("squeezed footprints (docs/design-v1-maps-vision.md 4.1)", () => {
     assert.deepEqual(storedCenter(large), { x: 5.5, y: 4 });
     assert.deepEqual(squeezedRect(large), { x: 5, y: 3.5, w: 1, h: 1 });
     assert.ok(isSqueezed(large));
-    assert.deepEqual(footprintRect(large), { x: 5, y: 3.5, w: 1, h: 1 });
+    assert.deepEqual(footprintRect(SQUARES, large), { x: 5, y: 3.5, w: 1, h: 1 });
     // Unsqueezed, the same position snaps as before.
-    assert.deepEqual(footprintRect({ ...large, squeeze: undefined }), { x: 5, y: 3, w: 2, h: 2 });
+    assert.deepEqual(footprintRect(SQUARES, { ...large, squeeze: undefined }), { x: 5, y: 3, w: 2, h: 2 });
     // A flag on a token with no side to squeeze changes nothing.
-    assert.deepEqual(footprintRect(tok({ x: 2.4, y: 3, squeeze: true })), { x: 2, y: 3, w: 1, h: 1 });
+    assert.deepEqual(footprintRect(SQUARES, tok({ x: 2.4, y: 3, squeeze: true })), { x: 2, y: 3, w: 1, h: 1 });
   });
 
   test("a squeezed Large creature in a corridor stands in the corridor's cells only", () => {
     const large = tok({ size: "large", x: 4.5, y: 3.5, squeeze: true });
-    assert.deepEqual(occupiedRange(large), { x0: 5, y0: 4, x1: 6, y1: 5 });
-    assert.deepEqual(occupiedCells(large), [{ x: 5, y: 4 }]);
+    assert.deepEqual(occupiedRange(SQUARES, large), { x0: 5, y0: 4, x1: 6, y1: 5 });
+    assert.deepEqual(occupiedCells(SQUARES, large), [{ x: 5, y: 4 }]);
     const tall = tok({ size: "custom", w: 1, h: 3, x: 2, y: 0.5, squeeze: true });
-    assert.deepEqual(occupiedCells(tall), [
+    assert.deepEqual(occupiedCells(SQUARES, tall), [
       { x: 2, y: 1 },
       { x: 2, y: 2 },
     ]);
@@ -106,8 +107,8 @@ describe("squeezed footprints (docs/design-v1-maps-vision.md 4.1)", () => {
     const settings = { feetPerCell: 5, diagonal: "five" as const };
     const large = tok({ size: "large", x: 4.5, y: 3.5, squeeze: true });
     const east = tok({ x: 8, y: 4 });
-    assert.equal(boxDistanceFt(tokenCellBox(large, 5), tokenCellBox(east, 5), settings), 15);
-    assert.equal(boxDistanceFt(tokenCellBox({ ...large, squeeze: undefined }, 5), tokenCellBox(east, 5), settings), 10);
+    assert.equal(boxDistanceFt(tokenCellBox(SQUARES, large, 5), tokenCellBox(SQUARES, east, 5), settings), 15);
+    assert.equal(boxDistanceFt(tokenCellBox(SQUARES, { ...large, squeeze: undefined }, 5), tokenCellBox(SQUARES, east, 5), settings), 10);
   });
 
   test("a squeeze leaves the height as it was", () => {

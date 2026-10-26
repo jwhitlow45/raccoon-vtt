@@ -10,6 +10,7 @@ import type { Walker } from "./movement.ts";
 import { followerTrace } from "./route.ts";
 import type { WalkArea, WalkCreature, WalkInput } from "./walk.ts";
 import { sceneWalls } from "./walls.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * The public world a route is searched in (docs/design-v1-movement.md 5.5):
@@ -173,7 +174,7 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
     for (const other of [...shown.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
       if (other.id === token.id || (other.kind !== "pc" && other.kind !== "npc" && other.kind !== "monster")) continue;
       if (actorOf(state, other)?.life === "dead") continue;
-      const r = footprintRect(other);
+      const r = footprintRect(SQUARES, other);
       const { lo, hi } = verticalExtentFt(other, fpc);
       creatures.push({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h, lo, hi, way: creatureWay(token, other, publicKeys(state, other), blocks) });
       spaces.push({ id: other.id, x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h, lo, hi });

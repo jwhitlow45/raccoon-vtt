@@ -6,6 +6,7 @@ import type { Point } from "./geom.ts";
 import { footing, footprintGround, standing, type Standing } from "./heights.ts";
 import { APART, contact, CROSS, MOVEMENT, onSegment, orient } from "./segments.ts";
 import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * Walls, doors and ledges stopping moves (docs/design-v1-maps-vision.md
@@ -249,7 +250,7 @@ export function pinches(segs: readonly (readonly [number, number, number, number
  */
 function ledgeFloor(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, endElevation: number): number {
   if (scene.blockMovement !== true || !walls.hasRelief) return Infinity;
-  switch (token.footing ?? standing(token.elevation, walls.rangeGround(occupiedRange(token)))) {
+  switch (token.footing ?? standing(token.elevation, walls.rangeGround(occupiedRange(SQUARES, token)))) {
     case "ground":
       return -Infinity;
     case "flying":
@@ -410,14 +411,14 @@ export function offKey(token: MovingToken): string {
 export function onOffHolder(token: MovingToken, at: Point): boolean {
   const holder = token.offHolder;
   if (!holder) return false;
-  const a = footprintRect({ size: token.size, x: at.x, y: at.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) });
+  const a = footprintRect(SQUARES, { size: token.size, x: at.x, y: at.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) });
   const b = holderRect(holder);
   const EPS = 1e-9;
   return a.x < b.x + b.w - EPS && b.x < a.x + a.w - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS;
 }
 
 function holderRect(holder: OffHolder): { x: number; y: number; w: number; h: number } {
-  return footprintRect({ size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) });
+  return footprintRect(SQUARES, { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) });
 }
 
 declare const stepping: unique symbol;
@@ -970,7 +971,7 @@ export function lineClear(state: BuildState, token: MovingToken, to: Point, door
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
   const walls = sceneWalls(scene, state.buildChunks);
-  const r = footprintRect(token);
+  const r = footprintRect(SQUARES, token);
   const cx = r.x + r.w / 2;
   const cy = r.y + r.h / 2;
   const floor = ledgeFloor(walls, scene, token, token.elevation);

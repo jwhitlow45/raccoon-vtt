@@ -11,6 +11,7 @@ import { LEVEL_BANDS, TRAP_PRESET_IDS, trapPreset, type LevelBand } from "#share
 import type { AskFill } from "../rolls/logic.ts";
 import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { findDoor, segmentDistance, type Point } from "../doors/doors.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /*
  * The Trap tool's rules (docs/design-v1-traps.md 4.1 and 4.2), as plain
@@ -223,7 +224,7 @@ export function tokensOn(trap: Pick<Trap, "zone" | "sceneId">, view: Pick<RoomSt
   const out: string[] = [];
   for (const t of Object.values(view.tokens)) {
     if (!t || t.sceneId !== trap.sceneId || !trapCreature(view, t)) continue;
-    const f = footprintRect(t);
+    const f = footprintRect(SQUARES, t);
     if (zone.cells.some((r) => f.x < r.x + r.w && f.x + f.w > r.x && f.y < r.y + r.h && f.y + f.h > r.y)) out.push(t.id);
   }
   return out.sort();

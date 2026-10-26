@@ -58,6 +58,7 @@ import { autoWallBetween, paintedAt } from "./rules/autoWalls.ts";
 import { visionRules, type PartySight } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
 import { footprintRect, occupiedCells, occupiedRange, type CellRange } from "./rules/footprint.ts";
+import { sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
@@ -250,6 +251,12 @@ function viewerSightOf(state: RoomState, viewer: Viewer, sceneId: string): Party
   if (tiles !== undefined) return visionRules.sightFromTiles(tiles, sceneId);
   if (viewer.role === "dm" || !perPlayerScene(state.scenes[sceneId])) return visionRules.partySight(state, sceneId);
   return visionRules.holderSight(state, sceneId, holdsSight(state, sceneId, viewer.memberId) ? viewer.memberId : null);
+}
+
+/** The grid of the scene a token stands on, squares for a scene the state lacks. */
+export function gridOfToken(state: Pick<RoomState, "scenes">, token: Pick<Token, "sceneId">): Grid {
+  const scene = state.scenes[token.sceneId];
+  return scene ? sceneGrid(scene) : SQUARES;
 }
 
 /** Whether a scene has party vision on. */
@@ -637,7 +644,7 @@ function withheldFromPlayers(state: RoomState, fogged: FogReader, sight: (sceneI
   if (!visionOn(scene) && !scene.fogEnabled) return false;
   if (isAboveFog(token, isPartyMember(state, token)) || (revealedSeen && token.fogExemptAuto)) return false;
   if (visionOn(scene)) return !sight(scene.id).seesToken(token);
-  return occupiedCells(token).every((cell) => fogged(token.sceneId, cell.x, cell.y));
+  return occupiedCells(SQUARES, token).every((cell) => fogged(token.sceneId, cell.x, cell.y));
 }
 
 /**
@@ -726,7 +733,7 @@ export function seenAtEvery(state: RoomState, token: Token, spots: readonly { x:
   if (!spots.every((p) => !withheldFromPlayers(state, shared.fogged, shared.sight, placed(p), revealed))) return false;
   const scene = state.scenes[token.sceneId];
   if (!perPlayerScene(scene) || !scene?.fogEnabled) return true;
-  return spots.every((p) => occupiedCells(placed(p)).every((cell) => !shared.fogged(token.sceneId, cell.x, cell.y)));
+  return spots.every((p) => occupiedCells(SQUARES, placed(p)).every((cell) => !shared.fogged(token.sceneId, cell.x, cell.y)));
 }
 
 /** The same question for an initiative row, by the encounter projection's rule: not hidden, in the order players see, and its creature in sight. */
@@ -1119,7 +1126,7 @@ function projectDrawingCtx(ctx: Ctx, drawing: Drawing): Drawing | null {
     if (id === null) continue;
     const token = ctx.state.tokens[id];
     if (!token || !tokenVisibleTo(ctx, token)) return null;
-    const r = footprintRect(token);
+    const r = footprintRect(gridOfToken(ctx.state, token), token);
     points[2 * i] = r.x + r.w / 2;
     points[2 * i + 1] = r.y + r.h / 2;
   }
@@ -2995,7 +3002,7 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
   };
   for (const token of Object.values(state.tokens)) {
     if (!tiles.has(token.sceneId)) continue;
-    const cells = occupiedRange(token);
+    const cells = occupiedRange(SQUARES, token);
     const seen = sightRect(token);
     const r = { x0: Math.min(cells.x0, Math.floor(seen.x0)), y0: Math.min(cells.y0, Math.floor(seen.y0)), x1: Math.max(cells.x1, Math.ceil(seen.x1)), y1: Math.max(cells.y1, Math.ceil(seen.y1)) };
     if (!on(token.sceneId, r)) continue;

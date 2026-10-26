@@ -34,6 +34,7 @@ import {
   type VisionWorld,
 } from "./vision.ts";
 import { RAISED, sceneWalls, type WallSet } from "./walls.ts";
+import { SQUARES } from "./grid.ts";
 
 const world: VisionWorld = { walls: sceneWalls };
 
@@ -672,7 +673,7 @@ describe("the footprint predicate", () => {
     assert.equal(sight.seesToken(large), true, "full size it reaches into the room");
     assert.equal(sight.seesToken({ ...large, squeeze: true }), false, "squeezed it is in the corridor");
     assert.deepEqual(sightRect({ ...large, squeeze: true }), { x0: 5, y0: 4, x1: 6, y1: 5 });
-    const fr = footprintRect({ ...large, squeeze: true });
+    const fr = footprintRect(SQUARES, { ...large, squeeze: true });
     assert.deepEqual({ x0: fr.x, y0: fr.y, x1: fr.x + fr.w, y1: fr.y + fr.h }, sightRect({ ...large, squeeze: true }), "the same rectangle footprint.ts gives");
   });
 

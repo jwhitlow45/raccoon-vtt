@@ -1,5 +1,7 @@
-import { SIZE_CELLS, type Token } from "../model.ts";
+import { FOG_SUBCELLS, SIZE_CELLS, type Token } from "../model.ts";
 import type { Point, Rect } from "./geom.ts";
+import type { Grid } from "./grid.ts";
+import { footprintHexes, hexCenter, cornerAt, hexSubcells, referenceHex, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
 
 /**
  * Token footprints (design section 9.1).
@@ -11,6 +13,14 @@ import type { Point, Rect } from "./geom.ts";
  * A squeezed token (docs/design-v1-maps-vision.md section 4.1) is the
  * exception: every rule reads its squeezed footprint, centered on its stored
  * center and never snapped, while the map draws it full size.
+ *
+ * On a hex scene (docs/design-v1-hex-grids.md 4.2) a creature takes its
+ * size's hexes, a custom size by its category, around the anchor nearest
+ * the middle of its stored box: 1 hex up to Medium, 3 for Large, 7 for Huge
+ * and 12 for Gargantuan. Every function here whose answer depends on the
+ * grid takes it, so the typecheck lists every caller. The square path is
+ * the code from before hex grids. Squeezing on hexes is phase H2's: a hex
+ * scene holds no squeezed token in H1, so the hex path never reads one.
  *
  * Sight imports this file through heights.ts, so it keeps to the arithmetic
  * sight allows (section 4.3.4) and imports only types from geom.ts.
@@ -99,9 +109,17 @@ export function snapStep(token: PlacedToken): number {
 
 /**
  * The footprint rectangle every rule reads: the squeezed one while the token
- * squeezes, else the full one after snapping.
+ * squeezes, else the full one after snapping. On hexes it is the size's box
+ * around the anchor (4.2), where the map draws the token once it snaps, so
+ * its middle is the anchor and its side the size's: a custom size reads as
+ * its category.
  */
-export function footprintRect(token: PlacedToken): Rect {
+export function footprintRect(g: Grid, token: PlacedToken): Rect {
+  if (g.shape === "hex") {
+    const a = hexAnchor(g, token);
+    const side = SIZE_CELLS[sizeCategory(token)];
+    return { x: a.x - side / 2, y: a.y - side / 2, w: side, h: side };
+  }
   if (isSqueezed(token)) return squeezedRect(token);
   const { w, h } = footprintSize(token);
   const step = sizeStep(w, h);
@@ -122,16 +140,24 @@ function snap(v: number, step: number): number {
  * half cells and is half a cell wide, so it always lies inside exactly one
  * cell, the one it occupies. A squeezed footprint lies on cell boundaries
  * (a squeeze is accepted only there), so these are exactly its cells.
+ *
+ * On hexes no range of cells is a footprint, so this is the cells its
+ * hexes' fog sub-cells lie in: a bound for finding the tiles and chunks a
+ * creature touches. A rule that counts what a creature stands on reads
+ * `occupiedHexes`, and fog and sight read `footprintSubcells`.
  */
-export function occupiedRange(token: PlacedToken): CellRange {
-  const r = footprintRect(token);
+export function occupiedRange(g: Grid, token: PlacedToken): CellRange {
+  if (g.shape === "hex") return subcellRange(footprintSubcells(g, token));
+  const r = footprintRect(g, token);
   return rectRange(r.x, r.y, r.w, r.h);
 }
 
 /**
  * The cells an unsqueezed footprint of `w` by `h` cells (`footprintSize`)
  * overlaps at x, y: `occupiedRange` without a token to read, for a walk
- * that asks at every spot (docs/design-v1-traps.md 9).
+ * that asks at every spot (docs/design-v1-traps.md 9). Squares only: the
+ * walks that ask it (ground under a walk, traps) are square rules until
+ * hex grids' phases H2 and H3.
  */
 export function rangeAt(w: number, h: number, x: number, y: number): CellRange {
   return rangeAtInto({ x0: 0, y0: 0, x1: 0, y1: 0 }, w, h, x, y);
@@ -160,13 +186,75 @@ function rectRange(x: number, y: number, w: number, h: number): CellRange {
   };
 }
 
-export function occupiedCells(token: PlacedToken): Point[] {
-  const r = occupiedRange(token);
+/** The cells of `occupiedRange`: on squares the cells the footprint stands in, on hexes those its hexes reach into. */
+export function occupiedCells(g: Grid, token: PlacedToken): Point[] {
+  const r = occupiedRange(g, token);
   const cells: Point[] = [];
   for (let y = r.y0; y < r.y1; y++) {
     for (let x = r.x0; x < r.x1; x++) cells.push({ x, y });
   }
   return cells;
+}
+
+/*
+ * Hex footprints (docs/design-v1-hex-grids.md 4.2). The stored x, y stay
+ * the top-left of the size's box, so drawing, hit areas and labels work
+ * unchanged, and only the rules read the hexes.
+ */
+
+/** The anchor a creature stands on: the one nearest the middle of its stored box, for its size's category. */
+export function hexAnchor(g: HexGrid, token: PlacedToken): Point {
+  return snapAnchor(g, sizeCategory(token), storedCenter(token));
+}
+
+/** The hexes a creature stands on, its reference hex first (hex.ts footprintHexes). */
+export function occupiedHexes(g: HexGrid, token: PlacedToken): Hex[] {
+  return footprintHexes(g, sizeCategory(token), hexAnchor(g, token));
+}
+
+/** The hex a creature's steps count from (4.2): its own, a Huge one's center hex, a Large or Gargantuan one's top hex. */
+export function tokenRefHex(g: HexGrid, token: PlacedToken): Hex {
+  return referenceHex(g, sizeCategory(token), hexAnchor(g, token));
+}
+
+/** The anchor of a size whose reference hex is `ref`: the hex's center, or for Large and Gargantuan its second point. */
+export function anchorOfHex(g: HexGrid, size: SizeCategory, ref: Hex): Point {
+  return size === "large" || size === "gargantuan" ? cornerAt(g, { hex: ref, k: 1 }) : hexCenter(g, ref);
+}
+
+/**
+ * Where a creature's stored box goes for its anchor to stand on `ref` as
+ * its reference hex: the top-left of its box, whose middle is the anchor.
+ * A move, a resize and a walk's spots on hexes place a creature by it.
+ */
+export function placedOnHex(g: HexGrid, token: PlacedToken, ref: Hex): Point {
+  const a = anchorOfHex(g, sizeCategory(token), ref);
+  const { w, h } = footprintSize(token);
+  return { x: a.x - w / 2 + 0, y: a.y - h / 2 + 0 };
+}
+
+/**
+ * The fog sub-cells inside a creature's hexes (hex.ts hexSubcells), as
+ * `[sx, sy]` raster indices: what the fog and sight tests read on hexes
+ * (HX-D10). Each sub-cell belongs to one hex, so none repeats.
+ */
+export function footprintSubcells(g: HexGrid, token: PlacedToken): [number, number][] {
+  return occupiedHexes(g, token).flatMap((h) => hexSubcells(g, h));
+}
+
+/** The cells sub-cells lie in. A footprint always holds some, so the range is never empty. */
+function subcellRange(subs: readonly (readonly [number, number])[]): CellRange {
+  let sx0 = Infinity;
+  let sy0 = Infinity;
+  let sx1 = -Infinity;
+  let sy1 = -Infinity;
+  for (const [sx, sy] of subs) {
+    if (sx < sx0) sx0 = sx;
+    if (sx > sx1) sx1 = sx;
+    if (sy < sy0) sy0 = sy;
+    if (sy > sy1) sy1 = sy;
+  }
+  return { x0: Math.floor(sx0 / FOG_SUBCELLS), y0: Math.floor(sy0 / FOG_SUBCELLS), x1: Math.floor(sx1 / FOG_SUBCELLS) + 1, y1: Math.floor(sy1 / FOG_SUBCELLS) + 1 };
 }
 
 /** The six sizes the rules name, smallest first. */

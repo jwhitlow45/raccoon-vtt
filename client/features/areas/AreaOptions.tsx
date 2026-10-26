@@ -71,6 +71,7 @@ import {
   type AreaToolState,
 } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The area tool's options (docs/design-v1-tool-options.md 9.3): its line
@@ -459,7 +460,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
 
   let range: ReactNode = null;
   if (t && caster && !usesFrom(d.shape)) {
-    const ft = boxDistanceFt(tokenCellBox(caster, fpc), pointCellBox(t.origin, fpc), env.view.meta.settings);
+    const ft = boxDistanceFt(tokenCellBox(SQUARES, caster, fpc), pointCellBox(SQUARES, t.origin, fpc), env.view.meta.settings);
     const over = d.rangeFt !== undefined && ft > d.rangeFt;
     range = (
       <span style={{ color: over ? theme.color.warning : theme.color.textMuted }}>

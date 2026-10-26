@@ -9,6 +9,7 @@ import { footprintRect } from "./footprint.ts";
 import { groundAt } from "./heights.ts";
 import { describeMove, planMove } from "./moveLeg.ts";
 import { planTrapMove, type TrapRoom } from "./traps.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * planMove equals describeMove on random group moves with traps on the way
@@ -118,7 +119,7 @@ function standsOnTrap(state: RoomState, op: Op, planned: Op, trap: Trap, by: rea
   if (op.x !== named.x && op.y !== named.y) return null;
   return by.some((id) => {
     const t = state.tokens[id]!;
-    const r = footprintRect({ ...t, x: planned.x + t.x - named.x, y: planned.y + t.y - named.y, squeeze: undefined });
+    const r = footprintRect(SQUARES, { ...t, x: planned.x + t.x - named.x, y: planned.y + t.y - named.y, squeeze: undefined });
     return (trap.zone as { cells: { x: number; y: number; w: number; h: number }[] }).cells.some((c) => r.x < c.x + c.w && c.x < r.x + r.w && r.y < c.y + c.h && c.y < r.y + r.h);
   });
 }
@@ -139,7 +140,7 @@ function pitLanding(state: RoomState, op: Op, trap: Trap): { fell: { x: number; 
   const dy = Math.sign(op.y - named.y);
   const steps = Math.abs(op.x - named.x) + Math.abs(op.y - named.y);
   for (let k = 1; k <= steps; k++) {
-    const r = footprintRect({ ...named, x: named.x + k * dx, y: named.y + k * dy, squeeze: undefined });
+    const r = footprintRect(SQUARES, { ...named, x: named.x + k * dx, y: named.y + k * dy, squeeze: undefined });
     if (r.x >= c.x && r.y >= c.y && r.x + r.w <= c.x + c.w && r.y + r.h <= c.y + c.h) return { fell: { x: named.x + k * dx, y: named.y + k * dy } };
   }
   return { fell: null };

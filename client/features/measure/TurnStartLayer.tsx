@@ -15,6 +15,7 @@ import { speedsOf } from "../movement/preview.ts";
 import { halvedSpeeds, movementText, speedsLeft, trailSegments, turnTrail, type MovingToken, type TurnTrail } from "./movement.ts";
 import { Pill, pillPlace } from "./Pill.tsx";
 import type { DistanceRules } from "./ruler.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Where the active creature has been this turn (features sections 4 and
@@ -111,7 +112,7 @@ export const TurnStartLayer = memo(function TurnStartLayer(props: LayerProps) {
  */
 function markerPlace(input: { from: { x: number; y: number; w: number; h: number }; token: MovingToken & { name: string; number?: number }; value: string; scale: number }) {
   const { from, token, value, scale } = input;
-  const fp = footprintRect(token);
+  const fp = footprintRect(SQUARES, token);
   const sizes = boardSizes(scale);
   const nameHalf = Math.min(measureLabel(displayName(token), sizes.namePx) / 2 + 4, 120) / scale;
   const cx = fp.x + fp.w / 2;

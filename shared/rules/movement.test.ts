@@ -7,6 +7,7 @@ import { boxDistanceFt, tokenCellBox } from "./distance.ts";
 import { encodeHeights } from "./heights.ts";
 import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, ownWalk, previewSqueezed, resizeLegStop, resizeStands, squeezeFits, sweptTouches, walkEnd, type MovingToken } from "./movement.ts";
 import { sceneWalls } from "./walls.ts";
+import { SQUARES } from "./grid.ts";
 
 type Spec = {
   w?: number;
@@ -335,7 +336,7 @@ describe("squeezing (decided 2026-10-14, section 4.1)", () => {
     assert.deepEqual(creaturesInArea(cube, [inside], context), []);
     assert.deepEqual(creaturesInArea(cube, [{ ...inside, squeeze: undefined, x: 14, y: 4 }], context), ["big"]);
     const north = tok(corridor, { x: 14, y: 2 });
-    assert.equal(boxDistanceFt(tokenCellBox(inside, 5), tokenCellBox(north, 5), { feetPerCell: 5, diagonal: "five" }), 15);
+    assert.equal(boxDistanceFt(tokenCellBox(SQUARES, inside, 5), tokenCellBox(SQUARES, north, 5), { feetPerCell: 5, diagonal: "five" }), 15);
   });
 });
 

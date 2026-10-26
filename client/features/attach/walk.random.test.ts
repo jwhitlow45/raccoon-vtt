@@ -21,6 +21,7 @@ import { onTurn, world } from "../movement/testing.ts";
 import { tokenStop, type RulerStop } from "../measure/ruler.ts";
 import { measureWalk } from "../measure/walkRuler.ts";
 import { copyFor } from "./testing.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The planner's walks of attached tokens against the server (reviews
@@ -174,7 +175,7 @@ function plainLegStop(state: RoomState, tokenId: string, to: { x: number; y: num
 function walkFault(c: Case, tokenId: string, points: readonly RoutePoint[], reentered: () => void = () => {}): string | null {
   const token = c.state.tokens[tokenId]!;
   const walker = walkerFor(c.state, token, seenAll(c.state));
-  const holder = walker.offHolder ? footprintRect(walker.offHolder) : null;
+  const holder = walker.offHolder ? footprintRect(SQUARES, walker.offHolder) : null;
   const { offHolder: _holder, ...cleared } = walker;
   const wallsOnly: RoomState = { ...c.state, buildChunks: c.walls };
   let clear = false;
@@ -184,13 +185,13 @@ function walkFault(c: Case, tokenId: string, points: readonly RoutePoint[], reen
     const squeeze = i === 1 ? token.squeeze : undefined;
     if (legBlocker(wallsOnly, ownWalk({ ...token, attached: undefined, x: a.x, y: a.y, elevation: a.elevation, squeeze }), points[i]!) === "wall") return `piece ${i - 1} crosses a wall`;
     if (!holder) continue;
-    const on = overlaps(footprintRect({ ...token, x: a.x, y: a.y, squeeze: undefined }), holder);
+    const on = overlaps(footprintRect(SQUARES, { ...token, x: a.x, y: a.y, squeeze: undefined }), holder);
     back ||= clear && on;
     clear ||= !on;
     if (clear && legBlocker(c.state, { ...cleared, x: a.x, y: a.y, elevation: a.elevation, squeeze }, points[i]!) === "ledge") return `piece ${i - 1}, after the walk cleared its holder, crosses a ledge`;
   }
   const end = points[points.length - 1]!;
-  if (holder && (back || (clear && overlaps(footprintRect({ ...token, x: end.x, y: end.y, squeeze: undefined }), holder)))) reentered();
+  if (holder && (back || (clear && overlaps(footprintRect(SQUARES, { ...token, x: end.x, y: end.y, squeeze: undefined }), holder)))) reentered();
   return null;
 }
 
@@ -608,7 +609,7 @@ function towCase(r: () => number, relief = false): { state: RoomState; who: View
 
 /** A token's squares by cell key. */
 function footprintCells(t: Token): string[] {
-  const r = footprintRect(t);
+  const r = footprintRect(SQUARES, t);
   const out: string[] = [];
   for (let y = Math.floor(r.y); y < Math.ceil(r.y + r.h); y++) for (let x = Math.floor(r.x); x < Math.ceil(r.x + r.w); x++) out.push(`${x},${y}`);
   return out;

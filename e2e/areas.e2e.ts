@@ -9,6 +9,7 @@ import type { AreaTemplate, Token } from "../shared/model.ts";
 import { footprintRect } from "../shared/rules/footprint.ts";
 import { cubeCenter } from "../client/features/areas/placement.ts";
 import { ConsoleWatch, dragCells, OpSocket, openSideTab, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { SQUARES } from "../shared/rules/grid.ts";
 
 /**
  * The area tool's From control end to end
@@ -213,13 +214,13 @@ async function castFrom(page: Page, option: string): Promise<void> {
 }
 
 function center(id: string): { x: number; y: number } {
-  const r = footprintRect((dmSocket.state!.tokens[id] ?? patSocket.state!.tokens[id]) as Token);
+  const r = footprintRect(SQUARES, (dmSocket.state!.tokens[id] ?? patSocket.state!.tokens[id]) as Token);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
 /** Whether a point lies on a token's footprint edge: where a cone cast from it starts. */
 function onEdgeOf(id: string, p: { x: number; y: number }): boolean {
-  const r = footprintRect((dmSocket.state!.tokens[id] ?? patSocket.state!.tokens[id]) as Token);
+  const r = footprintRect(SQUARES, (dmSocket.state!.tokens[id] ?? patSocket.state!.tokens[id]) as Token);
   const inside = p.x >= r.x - 1e-6 && p.x <= r.x + r.w + 1e-6 && p.y >= r.y - 1e-6 && p.y <= r.y + r.h + 1e-6;
   return inside && [p.x - r.x, r.x + r.w - p.x, p.y - r.y, r.y + r.h - p.y].some((d) => Math.abs(d) < 1e-6);
 }

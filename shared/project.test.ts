@@ -35,6 +35,7 @@ import { visionRules, type PartySight, type VisionRules } from "./ruleHooks.ts";
 import { derivedId } from "./reducer/duplicate.ts";
 import { DM, P1, P2, actor, apply, chance, character, companionBlock, customMonster, member, deepClone, drawing, entry, env, imageRef, randomState, reveal, rng, room, srdImage, template, token } from "./testutil.ts";
 import { imageAssetId } from "./imageRef.ts";
+import { SQUARES } from "./rules/grid.ts";
 
 /** A table display's viewer: a player who owns nothing (docs/design-v1-dm-tools.md 3.1). */
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
@@ -245,7 +246,7 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
     // Spelled out rather than read from rules/fog.ts, so the oracle stands apart from the code: a party member or the DM's
     // exemption, never a creature revealed on its turn (`fogExemptAuto`), which follows the fog and sight (decided 2026-10-14).
     const member = isPartyMember(state, t) || t.fogExempt;
-    const fogged = sceneId !== null && !vision && state.scenes[sceneId]!.fogEnabled && !member && isTokenFullyFogged(fog, sceneId, t);
+    const fogged = sceneId !== null && !vision && state.scenes[sceneId]!.fogEnabled && !member && isTokenFullyFogged(SQUARES, fog, sceneId, t);
     assert.ok(!fogged, `${label}: token ${id} under fog leaked`);
     // On a vision scene a creature reaches players only in the party's sight, unless a party member or exempt.
     if (vision && !member) assert.ok(partySightOf(state, sceneId).seesToken(t), `${label}: token ${id} out of the party's sight leaked`);
@@ -305,7 +306,7 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
       if (id === null) continue;
       const seen = p.tokens[id];
       assert.ok(seen, `${label}: kept ruler ${d.id} on an unseen token leaked`);
-      const r = footprintRect(seen);
+      const r = footprintRect(SQUARES, seen);
       assert.deepEqual([d.points[2 * i], d.points[2 * i + 1]], [r.x + r.w / 2, r.y + r.h / 2], `${label}: kept ruler ${d.id} stop ${i} is not where ${id} stands now`);
     }
   }

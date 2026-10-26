@@ -13,6 +13,7 @@ import { groundUnder } from "./movement.ts";
 import { onTrace, routeLattice, routeStands, routeWalk, type RoutePiece, type RoutePoint, type RouteSpot, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
 import { sceneWalls } from "./walls.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * Triggers and traps (docs/design-v1-traps.md section 5): which creatures
@@ -645,7 +646,7 @@ function lightAt(walk: Walk, j: number): Light {
 /** The cells a walk's footprint covers at spot `j` (lightAt), written into `out` where it walks full size between its ends. */
 function cellsAt(walk: Walk, j: number, out: CellRange): CellRange {
   // Only a token squeezed where it stands walks squeezed anywhere between (route.ts onTrace).
-  if (j === 0 || j === walk.spots.length - 1 || (walk.token.squeeze === true && walk.squeezedAt(j))) return occupiedRange(lightAt(walk, j));
+  if (j === 0 || j === walk.spots.length - 1 || (walk.token.squeeze === true && walk.squeezedAt(j))) return occupiedRange(SQUARES, lightAt(walk, j));
   return rangeAtInto(out, walk.size.w, walk.size.h, walk.spots[j]!.x + walk.ox, walk.spots[j]!.y + walk.oy);
 }
 
@@ -688,7 +689,7 @@ function cmp(a: string, b: string): number {
 }
 
 function centerOf(at: Light): { x: number; y: number } {
-  const r = footprintRect(at);
+  const r = footprintRect(SQUARES, at);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
@@ -1174,7 +1175,7 @@ function opening(trap: Trap, before: RoomState, opens?: (trap: Trap) => boolean)
   const squares = new Set<string>();
   for (const r of trap.zone.cells) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) squares.add(`${x},${y}`);
   return (spot, walk) => {
-    const r = footprintRect({ ...walk.token, x: spot.x, y: spot.y, squeeze: spot.squeezed ? true : undefined });
+    const r = footprintRect(SQUARES, { ...walk.token, x: spot.x, y: spot.y, squeeze: spot.squeezed ? true : undefined });
     for (let y = Math.floor(r.y + 1e-9); y < Math.ceil(r.y + r.h - 1e-9); y++) for (let x = Math.floor(r.x + 1e-9); x < Math.ceil(r.x + r.w - 1e-9); x++) if (!squares.has(`${x},${y}`)) return false;
     return true;
   };
@@ -1391,7 +1392,7 @@ function hitsIn(trap: Trap, m: Moment, by: readonly string[]): string[] {
   for (const t of Object.values(m.before.tokens)) {
     if (t.sceneId !== trap.sceneId || !trapCreature(m.before, t)) continue;
     const walk = m.walks.get(t.id);
-    if (onRects(walk ? cellsAt(walk, spotIn(m, walk), scratch) : occupiedRange(t), rects, box)) out.push(t.id);
+    if (onRects(walk ? cellsAt(walk, spotIn(m, walk), scratch) : occupiedRange(SQUARES, t), rects, box)) out.push(t.id);
   }
   return out.sort(cmp);
 }
@@ -1446,7 +1447,7 @@ export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): 
   const onCells = (rects: readonly CellRect[]) => {
     const box = rectsBox(rects);
     const out: string[] = [];
-    for (const t of Object.values(moment.tokens)) if (isCreature(t) && onRects(occupiedRange(t), rects, box)) out.push(t.id);
+    for (const t of Object.values(moment.tokens)) if (isCreature(t) && onRects(occupiedRange(SQUARES, t), rects, box)) out.push(t.id);
     return out.sort(cmp);
   };
   const hits = rig.hits;
@@ -1473,7 +1474,7 @@ export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): 
 export function standsOn(state: RoomState, trap: Trap, token: Token, seen: (id: string) => boolean): boolean {
   const rects = zoneRects(trap.zone);
   if (!rects || !trap.rig) return false;
-  const r = occupiedRange(token);
+  const r = occupiedRange(SQUARES, token);
   let on = false;
   for (let y = r.y0; y < r.y1 && !on; y++) for (let x = r.x0; x < r.x1 && !on; x++) on = inRects(rects, x, y);
   if (!on) return false;

@@ -3,6 +3,7 @@ import type { CoverageResult } from "#shared/rules/aoe.ts";
 import { footprintRect, type FootprintToken } from "#shared/rules/footprint.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
 import type { Outline } from "./placement.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Konva pieces the template layer and the preview layer share. Nothing here
@@ -46,7 +47,7 @@ export function OutlineShape(props: { outline: Outline; color: string; widthPx: 
 
 /** A ring around a caught token's footprint. */
 export function TokenRing(props: { token: FootprintToken; color: string; scale: number; widthPx: number; gapPx: number }) {
-  const r = footprintRect(props.token);
+  const r = footprintRect(SQUARES, props.token);
   // A ring grows and shrinks with the token's own ring (lib/boardScale.ts).
   const k = boardSizes(props.scale).ringPx / 3;
   const gap = (props.gapPx * k) / props.scale;

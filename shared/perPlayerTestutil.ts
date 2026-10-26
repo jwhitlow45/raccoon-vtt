@@ -10,6 +10,7 @@ import { occupiedCells, type CellRange } from "./rules/footprint.ts";
 import { zoneRanges } from "./rules/traps.ts";
 import { NO_PARTY_SIGHT, sightFromTiles, sightRect } from "./rules/vision.ts";
 import { actor, chance, int, member, pick, randomOp, randomState, token } from "./testutil.ts";
+import { SQUARES } from "./rules/grid.ts";
 
 /**
  * Per-player vision's test world (docs/design-v1-per-player-vision.md
@@ -479,7 +480,7 @@ export function playerSees(state: RoomState, memberId: string, token: Token, cel
   if (!scene) return true;
   if (token.partyVision === true || playerOwned(state, token) || token.fogExempt) return true;
   if (scene.vision?.on === true) return cellsSee(cells, token);
-  if (scene.fogEnabled) return !occupiedCells(token).every((c) => fogged(c.x, c.y));
+  if (scene.fogEnabled) return !occupiedCells(SQUARES, token).every((c) => fogged(c.x, c.y));
   return true;
 }
 

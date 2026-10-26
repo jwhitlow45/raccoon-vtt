@@ -3,6 +3,7 @@ import { MAX_RULER_STOPS, type DrawingInput } from "#shared/protocol.ts";
 import { pathDistanceFt, pointCellBox, tokenCellBox, type CellBox } from "#shared/rules/distance.ts";
 import { footprintRect, type FootprintToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Ruler math and the ruler's gesture rules (design section 9.2), kept free of
@@ -45,7 +46,7 @@ export function freeStop(p: Point, ground?: GroundReader): RulerStop {
 }
 
 export function tokenStop(token: RulerToken): RulerStop {
-  const r = footprintRect(token);
+  const r = footprintRect(SQUARES, token);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2, tokenId: token.id };
 }
 
@@ -60,7 +61,7 @@ export function stopAt(world: Point, token: RulerToken | undefined, ground?: Gro
  */
 export function stopBox(stop: RulerStop, tokens: Readonly<Record<string, RulerToken | undefined>>, feetPerCell: number): CellBox {
   const token = stop.tokenId ? tokens[stop.tokenId] : undefined;
-  return token ? tokenCellBox(token, feetPerCell) : pointCellBox({ x: stop.x, y: stop.y, z: stop.z }, feetPerCell);
+  return token ? tokenCellBox(SQUARES, token, feetPerCell) : pointCellBox(SQUARES, { x: stop.x, y: stop.y, z: stop.z }, feetPerCell);
 }
 
 /**
@@ -121,8 +122,8 @@ export function drawnPoints(stops: readonly RulerStop[], tokens: Readonly<Record
   return stops.map((s, i) => {
     const token = tokenOf(s);
     if (!token || stops.length < 2) return centers[i]!;
-    if (i === 0) return rectExit(footprintRect(token), centers[1]!);
-    if (i === stops.length - 1) return rectExit(footprintRect(token), centers[i - 1]!);
+    if (i === 0) return rectExit(footprintRect(SQUARES, token), centers[1]!);
+    if (i === stops.length - 1) return rectExit(footprintRect(SQUARES, token), centers[i - 1]!);
     return centers[i]!;
   });
 }

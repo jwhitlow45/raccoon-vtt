@@ -3,6 +3,7 @@ import { footprintRect, occupiedRange, tokenHeightFt, verticalExtentFt, type Foo
 import { clamp, distToSegment, sdBox3, sdCorner2, yawVector, type Bounds, type Point, type Point3, type Rect } from "./geom.ts";
 import { AREAS, stepOffWalls } from "./segments.ts";
 import { cachedVisibility, crossingsAt, indexPolygon, insideCrossings, markPolygonCells, type Polygon, type PolygonIndex, type WallSet } from "./walls.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * Areas of effect (design section 9.3).
@@ -185,7 +186,7 @@ export function castFromToken(
   caster: FootprintToken,
   feetPerCell: number,
 ): { origin: { x: number; y: number; z: number }; faceOffset?: { u: number; v: number }; includeOrigin: boolean } {
-  const rect = footprintRect(caster);
+  const rect = footprintRect(SQUARES, caster);
   const height = tokenHeightFt(caster, feetPerCell);
   const center = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
   const includeOrigin = INCLUDE_ORIGIN[area.shape];
@@ -209,7 +210,7 @@ export function castFromToken(
 
 /** What an emanation that stays put keeps of the token it was cast from (`AreaTemplate.footprint`). */
 export function emanationFootprint(token: FootprintToken, feetPerCell: number): AreaFootprint {
-  const r = footprintRect(token);
+  const r = footprintRect(SQUARES, token);
   return { w: r.w, h: r.h, elevation: token.elevation, height: tokenHeightFt(token, feetPerCell) };
 }
 
@@ -530,7 +531,7 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
 
   let originToken: AreaToken | undefined = attached;
   if (!originToken && caster) {
-    const r = footprintRect(caster);
+    const r = footprintRect(SQUARES, caster);
     const E = 1e-6;
     if (origin.x >= r.x - E && origin.x <= r.x + r.w + E && origin.y >= r.y - E && origin.y <= r.y + r.h + E) originToken = caster;
   }
@@ -546,7 +547,7 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
   let probes: Probe[];
   let box: Rect | undefined;
   let top: Pick<ResolvedArea, "shade" | "outline" | "sliceZ"> | undefined;
-  const toward = originToken ? rectCenter(footprintRect(originToken)) : null;
+  const toward = originToken ? rectCenter(footprintRect(SQUARES, originToken)) : null;
 
   switch (template.shape) {
     case "sphere":
@@ -647,7 +648,7 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
 type EmanationBox = { rect: Rect; lo: number; hi: number };
 
 function tokenBox(token: AreaToken, fpc: number): EmanationBox {
-  return { rect: footprintRect(token), ...verticalExtentFt(token, fpc) };
+  return { rect: footprintRect(SQUARES, token), ...verticalExtentFt(token, fpc) };
 }
 
 function storedBox(footprint: AreaTemplate["footprint"], origin: { x: number; y: number }): EmanationBox | null {
@@ -868,7 +869,7 @@ export function computeCoverage(template: AreaTemplateInput, ctx: AreaContext): 
   const covered = new Uint8Array(s.nx * s.ny);
   const rule = ctx.settings.aoeCoverage;
   const excluded = !template.includeOrigin && area.originTokenId ? ctx.tokens?.[area.originTokenId] : undefined;
-  const ex = excluded ? occupiedRange(excluded) : null;
+  const ex = excluded ? occupiedRange(SQUARES, excluded) : null;
   const cells: CoveredCell[] = [];
   for (let j = s.gy; j < s.gy + s.ny; j++) {
     for (let i = s.gx; i < s.gx + s.nx; i++) {
@@ -912,7 +913,7 @@ export function creaturesInArea(template: AreaTemplateInput, tokens: Iterable<Ar
     const sliceZ = area.sliceZ;
     const zsAt: HeightsAt = sliceZ ? (x, y) => heightsThrough(lo / fpc, hi / fpc, sliceZ(x, y)) : () => [clamp(area.originZ, lo / fpc, hi / fpc)];
     if (aoeInclusion === "center") {
-      const r = footprintRect(t);
+      const r = footprintRect(SQUARES, t);
       const cx = r.x + r.w / 2;
       const cy = r.y + r.h / 2;
       if (zsAt(cx, cy).some((z) => s.pointInside(cx, cy, z))) caught.push(t.id);
@@ -944,7 +945,7 @@ function heightsThrough(lo: number, hi: number, axis: number): number[] {
 }
 
 function anyCellCovered(s: Sampler, t: AreaToken, zsAt: HeightsAt, rule: AoeCoverage): boolean {
-  const r = occupiedRange(t);
+  const r = occupiedRange(SQUARES, t);
   for (let j = r.y0; j < r.y1; j++) {
     for (let i = r.x0; i < r.x1; i++) {
       for (const z of zsAt(i + 0.5, j + 0.5)) {
@@ -958,8 +959,8 @@ function anyCellCovered(s: Sampler, t: AreaToken, zsAt: HeightsAt, rule: AoeCove
 
 /** More than half of the sample points inside the footprint itself are inside the area, each cell at its best height. */
 function majorityInside(s: Sampler, t: AreaToken, zsAt: HeightsAt): boolean {
-  const rect = footprintRect(t);
-  const range = occupiedRange(t);
+  const rect = footprintRect(SQUARES, t);
+  const range = occupiedRange(SQUARES, t);
   const n = s.n;
   let inside = 0;
   let total = 0;

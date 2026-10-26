@@ -1,5 +1,6 @@
 import { CHUNK_CELLS, HEIGHTS_CHARS, STAIRS_CHARS, type BuildChunk, type SceneId, type StairMark } from "../model.ts";
 import { occupiedRange, type CellRange, type PlacedToken } from "./footprint.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * Raised areas and stairs (docs/design-v1-maps-vision.md section 4.2): the
@@ -196,7 +197,7 @@ function groundOver(r: CellRange, heightsAt: (cx: number, cy: number) => Int16Ar
  * (footprint.ts `occupiedRange`, the squeezed footprint while it squeezes).
  */
 export function footprintGround(chunks: Chunks, token: PlacedToken & { sceneId: SceneId }): number {
-  return rangeGround(chunks, token.sceneId, occupiedRange(token));
+  return rangeGround(chunks, token.sceneId, occupiedRange(SQUARES, token));
 }
 
 /**

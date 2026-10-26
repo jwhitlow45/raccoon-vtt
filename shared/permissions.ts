@@ -9,11 +9,11 @@ import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
 import { movementRules, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
-import { axisSteps, boxDistanceFt, legFeet, tokenCellBox } from "./rules/distance.ts";
+import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
 import { checkSetReach, planMove } from "./rules/moveLeg.ts";
-import { footprintSize, sizeCategory } from "./rules/footprint.ts";
-import { isHex, sceneGrid, type Grid } from "./rules/grid.ts";
-import { footprintHexes, hexDistance, hexInScene, snapAnchor, type HexGrid } from "./rules/hex.ts";
+import { footprintSize, occupiedHexes, type FootprintToken } from "./rules/footprint.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
+import { hexInScene } from "./rules/hex.ts";
 import { groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkEnd, type Walker } from "./rules/movement.ts";
@@ -1907,7 +1907,7 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
 /** Whether a footprint at `at` lies inside the scene: its box on squares, and on hexes every hex it stands on (docs/design-v1-hex-grids.md 4.2). */
 function insideScene(scene: Scene, token: Pick<Token, "size" | "w" | "h">, at: Point): boolean {
   const grid = sceneGrid(scene);
-  if (isHex(grid)) return standsOn(grid, { ...token, x: at.x, y: at.y, elevation: 0 }).every((h) => hexInScene(grid, scene.bounds, h));
+  if (isHex(grid)) return occupiedHexes(grid, { ...token, x: at.x, y: at.y }).every((h) => hexInScene(grid, scene.bounds, h));
   const fp = footprintSize({ ...token, x: at.x, y: at.y });
   return at.x >= 0 && at.y >= 0 && at.x + fp.w <= scene.bounds.w && at.y + fp.h <= scene.bounds.h;
 }
@@ -2007,7 +2007,7 @@ function doorPlace(ref: DoorRef, chunk: BuildChunk): { cells: Point[]; mid: Poin
  */
 function reachFt(state: RoomState, token: Token, cell: Point, settings: RoomSettings): number {
   const z0 = Math.floor(groundAt(state.buildChunks, token.sceneId, cell.x, cell.y) / settings.feetPerCell);
-  return boxDistanceFt(tokenCellBox(token, settings.feetPerCell), { x0: cell.x, x1: cell.x + 1, y0: cell.y, y1: cell.y + 1, z0, z1: z0 + 1 }, settings);
+  return boxDistanceFt(tokenCellBox(SQUARES, token, settings.feetPerCell), { x0: cell.x, x1: cell.x + 1, y0: cell.y, y1: cell.y + 1, z0, z1: z0 + 1 }, settings);
 }
 
 /** The refusal of a player's delete of a character someone else also plays. */
@@ -2131,37 +2131,14 @@ export function companionReachFt(feetPerCell: number): number {
   return doorReachFt(feetPerCell);
 }
 
-/** Whether a footprint is within a companion's reach of its character's token, by the room's own distance rule and the scene's grid. */
-export function withinCompanionReach(settings: RoomSettings, grid: Grid, spot: Parameters<typeof tokenCellBox>[0], character: Parameters<typeof tokenCellBox>[0]): boolean {
-  if (isHex(grid)) return hexApartFt(grid, spot, character, settings) <= companionReachFt(settings.feetPerCell);
-  return boxDistanceFt(tokenCellBox(spot, settings.feetPerCell), tokenCellBox(character, settings.feetPerCell), settings) <= companionReachFt(settings.feetPerCell);
-}
-
 /**
- * The hexes a token stands on (docs/design-v1-hex-grids.md 4.2): its size's,
- * a custom size by its category, around the anchor nearest its box's
- * center. HX-2's footprint rules take over this reading.
+ * Whether a footprint is within a companion's reach of its character's
+ * token, by the room's own distance rule on the scene's grid: on hexes the
+ * fewest hex steps between the two footprints, with the room's rule only
+ * for height (rules/distance.ts, docs/design-v1-hex-grids.md 4.3).
  */
-function standsOn(grid: HexGrid, token: Parameters<typeof tokenCellBox>[0]) {
-  const box = footprintSize(token);
-  const size = sizeCategory(token);
-  return footprintHexes(grid, size, snapAnchor(grid, size, { x: token.x + box.w / 2, y: token.y + box.h / 2 }));
-}
-
-/**
- * Feet between two creatures on hexes (4.3): the fewest hex steps between
- * a hex of one and a hex of the other, and with height the room's rule
- * between those steps and the vertical ones, as a hex has no diagonal.
- */
-function hexApartFt(grid: HexGrid, a: Parameters<typeof tokenCellBox>[0], b: Parameters<typeof tokenCellBox>[0], settings: RoomSettings): number {
-  const of = standsOn(grid, a);
-  const to = standsOn(grid, b);
-  let steps = Infinity;
-  for (const h of of) for (const k of to) steps = Math.min(steps, hexDistance(grid, h, k));
-  const za = tokenCellBox(a, settings.feetPerCell);
-  const zb = tokenCellBox(b, settings.feetPerCell);
-  const ft = legFeet(steps, 0, axisSteps(za.z0, za.z1, zb.z0, zb.z1), settings.diagonal, settings.feetPerCell);
-  return settings.diagonal === "euclid" ? Math.round(ft) : ft;
+export function withinCompanionReach(settings: RoomSettings, grid: Grid, spot: FootprintToken, character: FootprintToken): boolean {
+  return boxDistanceFt(tokenCellBox(grid, spot, settings.feetPerCell), tokenCellBox(grid, character, settings.feetPerCell), settings) <= companionReachFt(settings.feetPerCell);
 }
 
 /**

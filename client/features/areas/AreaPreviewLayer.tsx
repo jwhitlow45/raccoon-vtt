@@ -15,6 +15,7 @@ import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
 import { areaGrips, areaOutline, draftTemplate, frameTemplate, handlePoint, liveOrigin, outlineTop, usesFrom } from "./placement.ts";
 import { canEdit, HANDLE_GAP_PX, samplesNow, useAreaTool } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Areas being aimed, on the overlay layer above the fog (design 13.3): this
@@ -107,9 +108,9 @@ function ActiveArea(props: {
   const caster = props.pointShape && props.casterId ? props.tokens[props.casterId] : undefined;
   let range: { from: { x: number; y: number }; ft: number } | null = null;
   if (caster) {
-    const r = footprintRect(caster);
+    const r = footprintRect(SQUARES, caster);
     const fpc = ctx.settings.feetPerCell;
-    range = { from: { x: r.x + r.w / 2, y: r.y + r.h / 2 }, ft: boxDistanceFt(tokenCellBox(caster, fpc), pointCellBox(t.origin, fpc), { feetPerCell: fpc, diagonal: props.diagonal }) };
+    range = { from: { x: r.x + r.w / 2, y: r.y + r.h / 2 }, ft: boxDistanceFt(tokenCellBox(SQUARES, caster, fpc), pointCellBox(SQUARES, t.origin, fpc), { feetPerCell: fpc, diagonal: props.diagonal }) };
   }
   return (
     <>

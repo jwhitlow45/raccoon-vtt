@@ -4,6 +4,7 @@ import { pointDistanceFt, tokenCellBox, boxDistanceFt, pointCellBox } from "#sha
 import type { FootprintToken } from "#shared/rules/footprint.ts";
 import { cellInRange, ringShape, ringsText } from "./rings.ts";
 import type { DistanceRules } from "./ruler.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 const five = { feetPerCell: 5, diagonal: "five" as const };
 const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" as const };
@@ -32,10 +33,10 @@ describe("range rings", () => {
     // The same reading as the ruler's: from the footprint's edge, so a Large creature's ring is wider.
     const large = tok({ size: "large" });
     for (const [x, y] of [[13, 10], [14, 10], [7, 7], [8, 15]] as const) {
-      const ruler = boxDistanceFt(tokenCellBox(large, 5), pointCellBox({ x, y }, 5), five);
+      const ruler = boxDistanceFt(tokenCellBox(SQUARES, large, 5), pointCellBox(SQUARES, { x, y }, 5), five);
       assert.equal(cellInRange(large, x, y, 15, five), ruler <= 15, `${x},${y}`);
     }
-    assert.equal(pointDistanceFt({ x: 10, y: 10 }, { x: 12, y: 10 }, five), 10);
+    assert.equal(pointDistanceFt(SQUARES, { x: 10, y: 10 }, { x: 12, y: 10 }, five), 10);
   });
 
   test("a flier's ring counts its height, and is gone when the ground is out of reach", () => {

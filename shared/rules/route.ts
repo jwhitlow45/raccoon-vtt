@@ -3,6 +3,7 @@ import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, rangeAtInto, snapStep, stopFootprint, type CellRange, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
+import { SQUARES } from "./grid.ts";
 import { footing, footprintGround, sceneGround } from "./heights.ts";
 import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear, walkEnds, walkFrom, walkOn, type MovingToken, type WalkEnd, type Walker, type Walking } from "./movement.ts";
 
@@ -292,7 +293,7 @@ function standingAt(token: PlacedToken, spot: SizedSpot): PlacedToken {
 
 /** The footprint a trail draws at a spot, in cells, at the size the creature had there. */
 export function spotRect(token: PlacedToken, spot: SizedSpot): Rect {
-  return footprintRect(standingAt(token, spot));
+  return footprintRect(SQUARES, standingAt(token, spot));
 }
 
 /**

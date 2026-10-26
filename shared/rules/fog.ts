@@ -1,6 +1,7 @@
 import { CHUNK_CELLS, FOG_SUBCELLS, type FogOp, type FogShape, type FogTile, type Label, type Token } from "../model.ts";
 import { tileKey } from "../keys.ts";
-import { occupiedCells, type CellRange, type PlacedToken } from "./footprint.ts";
+import { footprintSubcells, occupiedCells, type CellRange, type PlacedToken } from "./footprint.ts";
+import type { Grid } from "./grid.ts";
 import { labelBox } from "./labels.ts";
 
 /**
@@ -134,9 +135,26 @@ export function isCellFullyFogged(tiles: TileMap, sceneId: string, cell: Cell): 
   return true;
 }
 
-/** The section 13.4 test: every occupied cell of the token is fully fogged. */
-export function isTokenFullyFogged(tiles: TileMap, sceneId: string, token: PlacedToken): boolean {
-  return occupiedCells(token).every((cell) => isCellFullyFogged(tiles, sceneId, cell));
+/**
+ * The section 13.4 test: every occupied cell of the token is fully fogged.
+ * On hexes, every fog sub-cell inside its hexes (docs/design-v1-hex-grids.md
+ * HX-D10), so a hex half in a revealed cell shows the creature only when a
+ * revealed sub-cell lies inside one of its hexes.
+ */
+export function isTokenFullyFogged(g: Grid, tiles: TileMap, sceneId: string, token: PlacedToken): boolean {
+  if (g.shape === "hex") return footprintSubcells(g, token).every(([sx, sy]) => isSubcellFogged(tiles, sceneId, sx, sy));
+  return occupiedCells(g, token).every((cell) => isCellFullyFogged(tiles, sceneId, cell));
+}
+
+/** Whether one fog sub-cell, by its scene-wide raster index, is fogged. A missing or unreadable tile counts as fogged. */
+export function isSubcellFogged(tiles: TileMap, sceneId: string, sx: number, sy: number): boolean {
+  if (sx < 0 || sy < 0) return true;
+  const tx = Math.floor(sx / TILE_SUB);
+  const ty = Math.floor(sy / TILE_SUB);
+  const tile = tiles[tileKey(sceneId, tx, ty)];
+  if (!tile) return true;
+  const bits = decodeTile(tile.bits);
+  return !bits || !getBit(bits, sx - tx * TILE_SUB, sy - ty * TILE_SUB);
 }
 
 /**

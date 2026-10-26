@@ -34,6 +34,7 @@ import {
   template,
   token,
 } from "./testutil.ts";
+import { SQUARES } from "./rules/grid.ts";
 
 /** A room mid-session: a PC on a character, two goblins, an object, and fog on the player scene. */
 function setup() {
@@ -872,13 +873,13 @@ describe("fog", () => {
 
   test("publish rasterizes the draft into the tiles in order and empties it", () => {
     let state = apply(fresh(), { t: "fog.draft", sceneId: "s1", add: [rect("a", 10), { id: "b", mode: "hide", shape: { kind: "rect", x: 10, y: 10, w: 1, h: 2 } }] });
-    assert.ok(isTokenFullyFogged(state.fogTiles, "s1", token("t", { x: 11, y: 10 })));
+    assert.ok(isTokenFullyFogged(SQUARES, state.fogTiles, "s1", token("t", { x: 11, y: 10 })));
     const r = applyOp(state, { t: "fog.publish", sceneId: "s1" }, DM, env(2));
     assert.ok(r.ok && r.global);
     state = r.state;
     assert.equal(state.fogDrafts.s1, undefined);
-    assert.ok(!isTokenFullyFogged(state.fogTiles, "s1", token("t", { x: 11, y: 10 })));
-    assert.ok(isTokenFullyFogged(state.fogTiles, "s1", token("t", { x: 10, y: 10 })));
+    assert.ok(!isTokenFullyFogged(SQUARES, state.fogTiles, "s1", token("t", { x: 11, y: 10 })));
+    assert.ok(isTokenFullyFogged(SQUARES, state.fogTiles, "s1", token("t", { x: 10, y: 10 })));
     assert.equal(refused(state, { t: "fog.publish", sceneId: "s1" }).code, "invalid");
     const discard = apply(apply(state, { t: "fog.draft", sceneId: "s1", add: [rect("c", 30)] }), { t: "fog.discard", sceneId: "s1" });
     assert.equal(discard.fogDrafts.s1, undefined);
@@ -886,7 +887,7 @@ describe("fog", () => {
 
   test("live applies at once, and reset fills or empties the scene", () => {
     let state = apply(fresh(), { t: "fog.live", sceneId: "s1", ops: [rect("a", 20)] });
-    assert.ok(!isTokenFullyFogged(state.fogTiles, "s1", token("t", { x: 20, y: 10 })));
+    assert.ok(!isTokenFullyFogged(SQUARES, state.fogTiles, "s1", token("t", { x: 20, y: 10 })));
     const all = applyOp(state, { t: "fog.reset", sceneId: "s1", to: "revealed" }, DM, env(2));
     assert.ok(all.ok && all.global);
     assert.equal(Object.keys(all.state.fogTiles).length, 6);
@@ -1136,7 +1137,7 @@ describe("encounter", () => {
     let state = fresh();
     state.tokens.gob1!.visibility = "dm";
     state.tokens.gob1!.x = 30;
-    assert.ok(isTokenFullyFogged(state.fogTiles, "s1", state.tokens.gob1!));
+    assert.ok(isTokenFullyFogged(SQUARES, state.fogTiles, "s1", state.tokens.gob1!));
     state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "gob1", value: 20 }] });
     assert.equal(state.encounter!.entries[0]!.hidden, true);
     state = apply(state, { t: "encounter.next" }, DM, 2);

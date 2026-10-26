@@ -19,6 +19,7 @@ import {
 } from "./fog.ts";
 import { occupiedCells } from "./footprint.ts";
 import { boxTouchesCell, labelBox } from "./labels.ts";
+import { SQUARES } from "./grid.ts";
 
 const bounds = { w: 40, h: 40 };
 
@@ -222,20 +223,20 @@ describe("rasterization", () => {
 
 describe("footprints and withholding", () => {
   test("occupied cells snap to whole cells, and a Tiny creature takes the cell that contains it", () => {
-    assert.deepEqual(occupiedCells(token("t", { size: "medium", x: 2.4, y: 2.6 })), [{ x: 2, y: 3 }]);
-    assert.deepEqual(occupiedCells(token("t", { size: "large", x: 1, y: 1 })), [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 2 }]);
-    assert.deepEqual(occupiedCells(token("t", { size: "tiny", x: 2.3, y: 2.7 })), [{ x: 2, y: 2 }]);
-    assert.deepEqual(occupiedCells(token("t", { size: "tiny", x: 2.8, y: 2.9 })), [{ x: 3, y: 3 }]);
-    assert.equal(occupiedCells(token("t", { size: "custom", w: 1.5, h: 2, x: 0, y: 0 })).length, 4);
-    assert.equal(occupiedCells(token("t", { size: "gargantuan", x: 0, y: 0 })).length, 16);
+    assert.deepEqual(occupiedCells(SQUARES, token("t", { size: "medium", x: 2.4, y: 2.6 })), [{ x: 2, y: 3 }]);
+    assert.deepEqual(occupiedCells(SQUARES, token("t", { size: "large", x: 1, y: 1 })), [{ x: 1, y: 1 }, { x: 2, y: 1 }, { x: 1, y: 2 }, { x: 2, y: 2 }]);
+    assert.deepEqual(occupiedCells(SQUARES, token("t", { size: "tiny", x: 2.3, y: 2.7 })), [{ x: 2, y: 2 }]);
+    assert.deepEqual(occupiedCells(SQUARES, token("t", { size: "tiny", x: 2.8, y: 2.9 })), [{ x: 3, y: 3 }]);
+    assert.equal(occupiedCells(SQUARES, token("t", { size: "custom", w: 1.5, h: 2, x: 0, y: 0 })).length, 4);
+    assert.equal(occupiedCells(SQUARES, token("t", { size: "gargantuan", x: 0, y: 0 })).length, 16);
   });
 
   test("a token is withheld only when every occupied cell is fully fogged", () => {
     const tiles = apply({}, [{ id: "a", mode: "reveal", shape: { kind: "rect", x: 5, y: 5, w: 0.25, h: 0.25 } }]);
-    assert.ok(isTokenFullyFogged({}, "s1", token("t", { x: 5, y: 5 })));
-    assert.ok(!isTokenFullyFogged(tiles, "s1", token("t", { x: 5, y: 5 })));
-    assert.ok(!isTokenFullyFogged(tiles, "s1", token("t", { size: "large", x: 4, y: 4 })));
-    assert.ok(isTokenFullyFogged(tiles, "s1", token("t", { x: 6, y: 5 })));
+    assert.ok(isTokenFullyFogged(SQUARES, {}, "s1", token("t", { x: 5, y: 5 })));
+    assert.ok(!isTokenFullyFogged(SQUARES, tiles, "s1", token("t", { x: 5, y: 5 })));
+    assert.ok(!isTokenFullyFogged(SQUARES, tiles, "s1", token("t", { size: "large", x: 4, y: 4 })));
+    assert.ok(isTokenFullyFogged(SQUARES, tiles, "s1", token("t", { x: 6, y: 5 })));
     assert.ok(isCellFullyFogged({ "s1:0,0": { sceneId: "s1", tx: 0, ty: 0, rev: 0, bits: "corrupt" } }, "s1", { x: 0, y: 0 }));
   });
 

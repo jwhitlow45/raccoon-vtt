@@ -12,6 +12,7 @@ import { carriedIndex, holderOf, onHolder } from "../rules/attach.ts";
 import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
+import { SQUARES } from "../rules/grid.ts";
 
 // Fog (design 13.2).
 
@@ -466,7 +467,7 @@ export function standingOn(tx: Tx, sceneId: string, cells: ReadonlySet<string> |
     if (token.sceneId !== sceneId) continue;
     // What sits on its holder stands on the holder, not the floor, and moves only with it (docs/design-v1-attach.md 5.2).
     if (groups && token.attached && onHolder(token.attached.kind) && holderOf(tx.state.tokens, token)) continue;
-    if (cells && !occupiedCells(token).some((c) => cells.has(`${c.x},${c.y}`))) continue;
+    if (cells && !occupiedCells(SQUARES, token).some((c) => cells.has(`${c.x},${c.y}`))) continue;
     if (token.elevation === footprintGround(tx.state.buildChunks, token)) out.push(token);
   }
   return out;

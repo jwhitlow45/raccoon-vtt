@@ -47,6 +47,7 @@ import {
 } from "./store.ts";
 import { areaCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The area of effect tool (design section 9.3, features section 9).
@@ -105,7 +106,7 @@ function sceneToken(env: AreaEnv, id: string | null): AreaToken | undefined {
 }
 
 function centerOf(t: AreaToken): { x: number; y: number } {
-  const r = footprintRect(t);
+  const r = footprintRect(SQUARES, t);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 

@@ -1,6 +1,7 @@
 import { legFeet, stepsBetween, tokenCellBox, type CellBox } from "#shared/rules/distance.ts";
 import type { FootprintToken } from "#shared/rules/footprint.ts";
 import type { DistanceRules } from "./ruler.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Range rings around a token (features section 4), kept free of React and
@@ -31,7 +32,7 @@ export type RingShape = {
 };
 
 export function ringShape(token: FootprintToken, rangeFt: number, rules: DistanceRules, bounds: { w: number; h: number }): RingShape {
-  const box = tokenCellBox(token, rules.feetPerCell);
+  const box = tokenCellBox(SQUARES, token, rules.feetPerCell);
   const reach = Math.ceil(rangeFt / rules.feetPerCell) + 1;
   const x0 = Math.max(0, box.x0 - reach);
   const x1 = Math.min(bounds.w, box.x1 + reach);
@@ -90,7 +91,7 @@ export function ringShape(token: FootprintToken, rangeFt: number, rules: Distanc
 
 /** Whether the ground cell (x, y) is within range of the token: what a ring encloses. */
 export function cellInRange(token: FootprintToken, x: number, y: number, rangeFt: number, rules: DistanceRules): boolean {
-  return boxInRange(tokenCellBox(token, rules.feetPerCell), x, y, rangeFt, rules);
+  return boxInRange(tokenCellBox(SQUARES, token, rules.feetPerCell), x, y, rangeFt, rules);
 }
 
 function boxInRange(box: CellBox, x: number, y: number, rangeFt: number, rules: DistanceRules): boolean {

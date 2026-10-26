@@ -8,6 +8,7 @@ import { groundAt } from "../rules/heights.ts";
 import { planMove } from "../rules/moveLeg.ts";
 import { isPlainId, trapCreature, walkOp, zoneRanges } from "../rules/traps.ts";
 import type { Tx } from "./tx.ts";
+import { SQUARES } from "../rules/grid.ts";
 
 /** How near a creature must end its walk for the hint, in feet (docs/design-v1-traps.md 4.6). */
 export const NOTICE_FT = 10;
@@ -88,7 +89,7 @@ function passiveOf(state: RoomState, token: Token): number | null {
 function near(state: RoomState, token: Token, trap: Trap): boolean {
   const settings = state.meta.settings;
   const fpc = settings.feetPerCell > 0 ? settings.feetPerCell : 5;
-  const from = tokenCellBox(token, fpc);
+  const from = tokenCellBox(SQUARES, token, fpc);
   for (const r of zoneRanges(state, trap.sceneId, trap.zone)) {
     // A square farther across than 10 ft from the footprint is too far at any height, so only the near part of a big zone is read.
     const reach = Math.ceil(NOTICE_FT / fpc);

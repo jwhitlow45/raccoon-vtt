@@ -8,6 +8,7 @@ import { dismountCost } from "#shared/rules/dismount.ts";
 import { ownWalk, type Walker } from "#shared/rules/movement.ts";
 import { plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkTrace } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * How far a creature has moved this turn (features sections 4 and 10), kept
@@ -135,7 +136,7 @@ export function turnTrail(input: {
     diagonals.v += taken.diag[1];
   }
   const rects = stops.map((stop) => spotRect(token, stop));
-  return { spots, rects, legs, movedFt, usedFt, diagonals, from: rects[0]!, to: footprintRect(token) };
+  return { spots, rects, legs, movedFt, usedFt, diagonals, from: rects[0]!, to: footprintRect(SQUARES, token) };
 }
 
 /** A stop's corners as points. */

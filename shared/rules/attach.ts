@@ -7,6 +7,7 @@ import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
 import { walksOffFromGround } from "../migrate.ts";
 import type { Walker } from "./movement.ts";
+import { SQUARES } from "./grid.ts";
 
 /**
  * Attached tokens (docs/design-v1-attach.md): a rider on a mount, a
@@ -43,7 +44,7 @@ export function sizesLarger(holder: Pick<PlacedToken, "size" | "w" | "h">, carri
 
 /** The footprint links read: the full one, squeezed or not, so a mount squeezing through a corridor keeps its rider (5.1). */
 export function fullRect(token: PlacedToken): Rect {
-  return footprintRect({ size: token.size, x: token.x, y: token.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) });
+  return footprintRect(SQUARES, { size: token.size, x: token.x, y: token.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) });
 }
 
 const EPS = 1e-9;
@@ -70,7 +71,7 @@ export function attachReachFt(feetPerCell: number): number {
 /** The distance between two tokens' full footprints by the room's rule, elevation and height included. */
 export function attachDistanceFt(settings: DistanceSettings, a: FootprintToken, b: FootprintToken): number {
   const full = (t: FootprintToken): FootprintToken => ({ ...t, squeeze: undefined });
-  return boxDistanceFt(tokenCellBox(full(a), settings.feetPerCell), tokenCellBox(full(b), settings.feetPerCell), settings);
+  return boxDistanceFt(tokenCellBox(SQUARES, full(a), settings.feetPerCell), tokenCellBox(SQUARES, full(b), settings.feetPerCell), settings);
 }
 
 /** Whether two tokens are within reach of each other (attachReachFt). */

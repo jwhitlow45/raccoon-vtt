@@ -20,6 +20,7 @@ import {
 import { footprintRect, tokenHeightFt } from "#shared/rules/footprint.ts";
 import { clamp, yawVector, type Point, type Rect } from "#shared/rules/geom.ts";
 import { rangeGround } from "#shared/rules/heights.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * Placing and aiming areas of effect (design section 9.3), as pure functions
@@ -305,7 +306,7 @@ export function originFromToken(
   feetPerCell: number,
 ): { origin: Point3; faceOffset?: { u: number; v: number } } {
   const size = clampFeet(d.size);
-  if (d.shape === "cube") return cubeOrigin(edgeOrigin(footprintRect(token), d.yaw), token.elevation, size, d.faceU);
+  if (d.shape === "cube") return cubeOrigin(edgeOrigin(footprintRect(SQUARES, token), d.yaw), token.elevation, size, d.faceU);
   const o = castFromToken({ shape: d.shape, size, yaw: d.yaw, anchor: d.anchor }, token, feetPerCell).origin;
   return { origin: { x: o.x, y: o.y, z: Math.round(o.z) } };
 }
@@ -520,7 +521,7 @@ export function draftFromTemplate(t: AreaTemplate, id: string, tokens: AreaToken
   // left where it was cast, and copies from there: a caster that moved but
   // still covers the old origin would otherwise drag the copy along.
   const from = caster ? tokens[caster] : undefined;
-  if (t.shape === "emanation" && !t.footprint && from && insideRect(footprintRect(from), t.origin)) {
+  if (t.shape === "emanation" && !t.footprint && from && insideRect(footprintRect(SQUARES, from), t.origin)) {
     d.fromId = caster;
     d.casterId = caster;
     return d;
@@ -544,8 +545,8 @@ export function templatePivot(
   feetPerCell: number,
 ): { point: Point; onCaster: boolean } {
   const caster = t.casterId ? tokens[t.casterId] : undefined;
-  if (caster && isDirectional(t.shape) && onRectEdge(footprintRect(caster), t.origin)) {
-    const r = footprintRect(caster);
+  if (caster && isDirectional(t.shape) && onRectEdge(footprintRect(SQUARES, caster), t.origin)) {
+    const r = footprintRect(SQUARES, caster);
     return { point: { x: r.x + r.w / 2, y: r.y + r.h / 2 }, onCaster: true };
   }
   if (t.shape === "cube") return { point: cubeCenter(t, feetPerCell), onCaster: false };
@@ -586,7 +587,7 @@ export function rotatePatch(t: AreaTemplate, yaw: number, tokens: AreaTokens, fe
   const pivot = templatePivot(t, tokens, feetPerCell);
   const caster = t.casterId ? tokens[t.casterId] : undefined;
   if (pivot.onCaster && caster) {
-    const e = edgeOrigin(footprintRect(caster), next);
+    const e = edgeOrigin(footprintRect(SQUARES, caster), next);
     return { yaw: next, origin: { x: e.x, y: e.y, z: t.origin.z } };
   }
   if (t.shape === "cube") {
@@ -748,6 +749,6 @@ export function freePointHeight(chunks: Readonly<Record<string, BuildChunk>>, sc
 
 /** A token's center and middle height, for measuring from a caster. */
 export function tokenCenter(token: AreaToken, feetPerCell: number): Point3 {
-  const r = footprintRect(token);
+  const r = footprintRect(SQUARES, token);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2, z: token.elevation + tokenHeightFt(token, feetPerCell) / 2 };
 }
