@@ -234,7 +234,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - Players open and close unlocked doors that their own token can reach, with a tap on the door or "Open door" in the token's action bar. A locked door answers "It's locked."
 - The creature that opens a door, which sets off a trap on it: the token whose action bar opened it, else for a tap the token selected when the door was tapped (any on the scene for the DM, the player's own that reaches it for a player), else the player's nearest own token that reaches it. The DM with nothing selected opens it from afar and sets off nothing.
 - Walls block areas of effect. Walls, closed doors and pillars block sight.
-- In Isometric walls stand in stone, doors in wood and windows as panes. A tap on a door reaches it by its standing piece or by its line on the ground, and an open door lies flat.
+- In Isometric walls stand in stone, doors in wood and windows as panes. An automatic wall keeps the height of the room's other walls: beside raised ground only the part above it shows, and none stands beside ground as tall as a wall. A wall the DM draws stands on top of raised ground. A tap on a door reaches it by its standing piece or by its line on the ground, and an open door lies flat.
 
 ## Fog and vision
 

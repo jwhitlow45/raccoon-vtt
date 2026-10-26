@@ -162,7 +162,7 @@ In Isometric the board is two stages, one over the other:
 - **Pits.** A cell below 0 is an opening. Inside its diamond it draws its floor (the ground pixels copied down) and its far sides. Everything on a pit's cells, standees included, is clipped to the openings swept upward past the canvas top, so the near rim hides what is below it.
 - **Stairs** are columns, and their treads come up with their tops. Connected stair edges draw no face. Past the margin, a top whose source lies below the ground stage fills with the face tone until panned up.
 - **Wall segments** are the derived set's walls, doors and windows (`deriveWalls`, shared/rules/walls.ts:1110), so automatic walls stand and "no wall" marks do not. Its raised-edge and pillar segments are not walls. Free walls are split where they cross, keeping their door and window features.
-- **Runs.** Each segment is cut at sub-cell lines into quarter-cell runs. For a player, a run stands only where a fog sub-cell beside it, on either side, is revealed, since Top-down shows that half of the line there. A free-wall run inside one sub-cell stands by that sub-cell. Neighboring standing runs of one segment merge within each cell, so there is at most one piece per wall cell. A piece stands `WALL_RISE` = 0.5 cell high from the higher drawn ground beside it, walls in the stone texture tinted toward the wall color, a closed door's leaf in the wood texture, a window as a half-opaque pane. An open door lies flat. Locks and secret marks stay the DM's. Pillars follow the stand rule, in stone tinted toward the pillar swatch.
+- **Runs.** Each segment is cut at sub-cell lines into quarter-cell runs. For a player, a run stands only where a fog sub-cell beside it, on either side, is revealed, since Top-down shows that half of the line there. A free-wall run inside one sub-cell stands by that sub-cell. Neighboring standing runs of one segment merge within each cell, so there is at most one piece per wall cell. A piece stands `WALL_RISE` = 0.5 cell high from the higher drawn ground beside it. An automatic wall instead keeps its top `WALL_RISE` above the lower drawn ground (D-261026-27): it stands from the higher ground up to that top, and not at all beside ground that reaches it, where the raised ground's own side is the wall. So the walls around a room keep one height, and a wall the DM drew still stands on the higher ground. Walls stand in the stone texture tinted toward the wall color, a closed door's leaf in the wood texture, a window as a half-opaque pane. An open door lies flat. Locks and secret marks stay the DM's. Pillars follow the stand rule, in stone tinted toward the pillar swatch.
 - **Sight.** Sides and wall pieces keep the darkness the sight overlay gives their cell, cached per sight tile object.
 
 ### 5.6 Depth order
@@ -267,6 +267,8 @@ suggestedView?: "isometric";
 | A goblin in a pit | clipped at the near rim | depth unit |
 | Two free walls crossing in an X, and meeting in a T | split, ordered, any error within one cell | depth unit |
 | A ledge and a pillar in the derived set | no wall piece from either | wall unit |
+| An automatic wall beside a 15 ft column, beside 5 ft on 10 ft cells, and beside a 1 ft dais | nothing, nothing, and the part above the dais with its top level with the wall on flat ground beside it | wall unit |
+| A drawn wall on a column's edge, a door on a raised edge, an automatic wall beside a pit and around a sunken room | on the higher ground, `WALL_RISE` tall, as before | wall unit |
 | A high flier whose anchor lies below the canvas, wide art past the left or right edge | drawn | culling unit |
 | Two standees under one tap, then a tap again | front, then the one behind, then front | selection unit, iso e2e |
 | A player drags a token 4 cells | lands as the same move in Top-down, "20 ft" | iso e2e |
@@ -571,6 +573,12 @@ Isometric is in reach since this lane's integration commit, which turned `isoRea
 - **Alignment.** alignment-icons' iso5-a measures the top bar for the DM and Pat, the folded menu's View row, the View menu in both views and Suggested view, and iso.e2e.ts the display's rows and the sheet's No key row, at 1440 by 900, 390 by 844 and 320 by 568, at 100% and 130%, all within 1 px.
 - **The phone and memory checks.** No real phone was at hand for this lane either, so a pan on the typical scene at 40 px in both views waits for one. The choice adds no stage or canvas, so canvas memory is ISO-2's.
 - **Not yet, and older than this view.** At 320 by 568 and 130% the DM's "Players see black" chip pushes Undo, Redo and Fit past the bar's edge, with the View button folded or without it, as it did before Isometric. The shortcut sheet's table is wider than the sheet at that size, its Change buttons cut at the edge.
+
+### Automatic walls beside raised ground (D-261026-27)
+
+- **Drawing only.** The rules keep automatic walls on raised edges for sight and moves. Only `wallItems` changed: each `WallPiece` carries `auto` from `WallEdge.auto`, and an item carries its `rise`, which bounds, culling, silhouettes and drawing read. Doors are never automatic, so their tap and pill keep `WALL_RISE`.
+- **Pits.** Ground below 0 counts as 0 for an automatic wall's top, capped at the higher side. Read as the lower ground alone, a pit at a room's edge or a whole sunken room would lose its walls, a change nobody asked for.
+- **`groupWalls`** compares `auto` too, so a wall the DM draws over an automatic one rebuilds its bucket and stands on the higher ground at once.
 
 ## 15. Review dispositions
 
