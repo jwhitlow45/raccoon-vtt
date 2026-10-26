@@ -47,7 +47,7 @@ import {
   type Rect,
   type Size,
 } from "../lib/camera.ts";
-import { groundAtMiddle, TOP_DOWN, toView, toWorld, viewBox, type Live, type View, type ViewPoint } from "../lib/view.ts";
+import { TOP_DOWN, toView, toWorld, viewBox, type Live, type View, type ViewPoint } from "../lib/view.ts";
 import { ellipseBox } from "./relief/standee.ts";
 import { isAppleDevice } from "../lib/device.ts";
 import { fitTarget } from "../lib/fitTarget.ts";
@@ -77,7 +77,7 @@ import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
-import { boardPickFor, boardPickSlot, DrawnHeightsMemo, nudgeStep, pressAt, ringCenter, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { dragBound, dragGround, dragPlan } from "./isoDrag.ts";
@@ -158,9 +158,25 @@ function fitKey(size: Size, scene: Scene): string {
   return `${size.width}x${size.height}:${scene.bounds.w}x${scene.bounds.h}`;
 }
 
-function fitScene(size: Size, scene: Scene, insets: Insets, view: View, target: Rect | null = null, cover: Insets = NO_INSETS): Fit {
-  return { cam: fitRect(size, viewBox(view, target ?? sceneRect(scene)), 24, largerEach(insets, cover)), key: fitKey(size, scene), target, cover, zoom: uiScale() };
+/**
+ * `lift` gives the highest drawn ground inside a rectangle at a zoom, in
+ * cells (boardPick.ts liftIn), which raises the top of the box a fit
+ * frames in Isometric (docs/design-v1-isometric-view.md 4.2). Heights
+ * stand only from a zoom on (ISO-D12), so the box is fitted flat first,
+ * then again with the lift at the zoom that fit gives.
+ */
+function fitScene(size: Size, scene: Scene, insets: Insets, view: View, target: Rect | null = null, cover: Insets = NO_INSETS, lift: Lift = NO_LIFT): Fit {
+  const rect = target ?? sceneRect(scene);
+  const clear = largerEach(insets, cover);
+  let cam = fitRect(size, viewBox(view, rect), 24, clear);
+  const up = lift(rect, cam.scale);
+  if (up > 0) cam = fitRect(size, viewBox(view, rect, up), 24, clear);
+  return { cam, key: fitKey(size, scene), target, cover, zoom: uiScale() };
 }
+
+/** The highest drawn ground in a rectangle at a zoom, in cells. */
+type Lift = (rect: Rect, scale: number) => number;
+const NO_LIFT: Lift = () => 0;
 
 /**
  * The map canvas (design section 14.2): at most four Konva layers.
@@ -353,9 +369,9 @@ export function MapStage(props: {
     let next: Camera;
     if (scene.defaultView) {
       fittedRef.current = null;
-      next = cameraForView(size, toView(shownRef.current, scene.defaultView), scene.defaultView.zoom);
+      next = cameraForView(size, toView(shownRef.current, scene.defaultView, groundUnderRef.current(scene.defaultView, scene.defaultView.zoom)), scene.defaultView.zoom);
     } else {
-      fittedRef.current = fitScene(size, scene, insetsRef.current, shownRef.current);
+      fittedRef.current = fitScene(size, scene, insetsRef.current, shownRef.current, null, NO_INSETS, liftRef.current);
       next = fittedRef.current.cam;
     }
     camRef.current = next;
@@ -363,9 +379,11 @@ export function MapStage(props: {
   }, [size, scene]);
 
   /*
-   * A turn or a view switch keeps the world point at the canvas's middle
-   * still on screen, and the zoom (docs/design-v1-isometric-view.md 4.2),
-   * on this device only.
+   * A turn or a view switch, a tool's Top-down among them (6.4), keeps one
+   * world point still on screen, and the zoom (docs/design-v1-isometric-view.md
+   * 4.2), on this device only: the selected token's ring while it shows in
+   * the clear part of the canvas, else the ground a press at that part's
+   * middle meets. Each stands at its drawn height in each view.
    */
   const viewSeenRef = useRef(shown);
   useLayoutEffect(() => {
@@ -375,8 +393,12 @@ export function MapStage(props: {
     const c = pendingCamRef.current ?? camRef.current;
     const s = sizeRef.current;
     if (!c || !s) return;
-    const middle = groundAtMiddle({ camera: c, viewport: s, view: before });
-    const next = holdStill(c, toView(before, middle), toView(shown, middle));
+    const pickIn = (view: View) =>
+      boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view, camera: c, lowPower: lowPowerRef.current }, heightsMemoRef.current);
+    const was = pickIn(before);
+    const now = pickIn(shown);
+    const held = heldPoint(was, now, tokensByIdRef.current.get(store.getState().local.selectedId ?? ""), s, insetsRef.current);
+    const next = holdStill(c, toView(before, held.at, held.before), toView(shown, held.at, held.after));
     pendingCamRef.current = null;
     fittedRef.current = null;
     camRef.current = next;
@@ -449,8 +471,9 @@ export function MapStage(props: {
     const z = uiScale();
     if (fitKey(s, current) !== fitted.key || z !== fitted.zoom) settleRef.current = { until: now + SETTLE_MS, shows: barShowsRef.current() };
     const settle = settleRef.current && now <= settleRef.current.until ? settleRef.current : null;
-    const next = fitScene(s, current, bars, shownRef.current, fitted.target, settle ? barCoverRef.current(s, "fresh", settle.shows) : fitted.cover);
-    if (!settle && rectClear(c, viewBox(shownRef.current, fitted.target ?? sceneRect(current)), s, largerEach(bars, fitted.cover))) return;
+    const next = fitScene(s, current, bars, shownRef.current, fitted.target, settle ? barCoverRef.current(s, "fresh", settle.shows) : fitted.cover, liftRef.current);
+    const box = fitted.target ?? sceneRect(current);
+    if (!settle && rectClear(c, viewBox(shownRef.current, box, liftRef.current(box, c.scale)), s, largerEach(bars, fitted.cover))) return;
     fittedRef.current = next;
     if (sameCamera(next.cam, c)) return;
     // Seen at once, so a second measure in the same frame still finds the camera it fitted.
@@ -468,10 +491,18 @@ export function MapStage(props: {
     [scope],
   );
 
-  // How far out this scene zooms (camera.ts sceneMinScale), for the pinch and the wheel.
+  // How far out this scene zooms (camera.ts sceneMinScale), for the pinch and the wheel: by the box a fit frames, in Isometric the diamond's (4.2).
   useEffect(() => {
-    if (size) gestureRef.current.minScale = sceneMinScale(size, scene.bounds);
-  }, [size, scene.bounds]);
+    if (!size) return;
+    const rect = sceneRect(scene);
+    const boxAt = (lift: number) => {
+      const box = viewBox(shown, rect, lift);
+      return sceneMinScale(size, { w: box.width, h: box.height });
+    };
+    const flat = boxAt(0);
+    const up = liftRef.current(rect, flat);
+    gestureRef.current.minScale = up > 0 ? boxAt(up) : flat;
+  }, [size, scene, shown]);
 
   // The top bar's "Fit map" button (fitSlot.ts, lib/fitTarget.ts). Its fit
   // keeps clear of the bars and the token bar, and follows the bars like a
@@ -489,7 +520,7 @@ export function MapStage(props: {
         : [];
       const target = fitTarget({ bounds: current.bounds, revealed, own });
       const whole = target.width === current.bounds.w && target.height === current.bounds.h;
-      fittedRef.current = fitScene(s, current, insetsRef.current, shownRef.current, whole ? null : target, barCoverRef.current(s, "drawn"));
+      fittedRef.current = fitScene(s, current, insetsRef.current, shownRef.current, whole ? null : target, barCoverRef.current(s, "drawn"), liftRef.current);
       pendingCamRef.current = null;
       setCam(fittedRef.current.cam);
     };
@@ -519,7 +550,7 @@ export function MapStage(props: {
     focusRef.current = focus.id;
     if (ignoreFocus) return;
     pendingCamRef.current = null;
-    setCam(cameraForView(size, toView(shownRef.current, focus), focus.zoom));
+    setCam(cameraForView(size, toView(shownRef.current, focus, groundUnderRef.current(focus, focus.zoom)), focus.zoom));
   }, [focus, size, ignoreFocus]);
 
   // A table display's camera mode, after the scene's own first camera so it wins.
@@ -543,7 +574,7 @@ export function MapStage(props: {
     const s = sizeRef.current;
     const c = camRef.current;
     if (!s || !c || pendingCamRef.current) return;
-    const next = barShift(c, dy * uiScale(), s, sceneRef.current.bounds, largerEach(insetsRef.current, barCoverRef.current(s, "drawn")));
+    const next = barShift(c, dy * uiScale(), s, sceneRef.current.bounds, largerEach(insetsRef.current, barCoverRef.current(s, "drawn")), groundMapOf(shownRef.current));
     camRef.current = next;
     setCam(next);
   }, []);
@@ -557,7 +588,7 @@ export function MapStage(props: {
         if (!s || !c) return;
         pendingCamRef.current = null;
         const at = clearAnchor({ x: s.width * p.anchor.x, y: s.height * p.anchor.y }, s, insetsRef.current, barCoverRef.current(s, "opening"));
-        setCam(cameraAt(at, toView(shownRef.current, p), c.scale));
+        setCam(cameraAt(at, toView(shownRef.current, p, groundUnderRef.current(p, c.scale)), c.scale));
       }),
     [scope, scene.id],
   );
@@ -745,6 +776,12 @@ export function MapStage(props: {
   const pickOfRef = useRef<(c: Camera) => BoardPick>(null!);
   pickOfRef.current = (c) =>
     boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view: shownRef.current, camera: c, lowPower: lowPowerRef.current }, heightsMemoRef.current);
+  /** The highest drawn ground in a rectangle at a zoom, for a fit (fitScene). */
+  const liftRef = useRef<Lift>(NO_LIFT);
+  liftRef.current = (rect, scale) => liftIn(pickOfRef.current({ x: 0, y: 0, scale }).heights, rect);
+  /** The drawn ground under a world point at a zoom, in cells, where a world point with a zoom is centered (a starting view, Look here, a pan to a token: 4.2). */
+  const groundUnderRef = useRef<(p: Point, scale: number) => number>(() => 0);
+  groundUnderRef.current = (p, scale) => drawnAt(pickOfRef.current({ x: 0, y: 0, scale }), p);
   /** Walls, doors and ledges stopping a player's drag (features/movement/stageHooks.ts). */
   const dragStops = useDragStops(role);
   const dragStopsRef = useRef(dragStops);
@@ -903,7 +940,7 @@ export function MapStage(props: {
     const s = sizeRef.current;
     const strip = s && scope.get(barDockSlot).getState().bar?.mode === "span" ? barCoverRef.current(s, "drawn") : NO_INSETS;
     const from = pendingCamRef.current ?? camRef.current ?? undefined;
-    const next = s ? keepInView(wanted, s, sceneRef.current.bounds, largerEach(insetsRef.current, strip), 64, from) : wanted;
+    const next = s ? keepInView(wanted, s, sceneRef.current.bounds, largerEach(insetsRef.current, strip), 64, from, groundMapOf(shownRef.current)) : wanted;
     pendingCamRef.current = next;
     if (frameRef.current) return;
     frameRef.current = requestAnimationFrame(() => {

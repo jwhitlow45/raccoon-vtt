@@ -16,7 +16,7 @@ import {
 } from "./camera.ts";
 import { cameraAt, cameraOfStage, holdStill, screenToView, viewToScreen } from "./camera.ts";
 import { CameraGesture, LongPress } from "./gestures.ts";
-import { isometric, TOP_DOWN, toView, toWorld, turned, viewBox, type Turn } from "./view.ts";
+import { isometric, TOP_DOWN, toView, toWorld, turned, viewBox, type Turn, type ViewPoint } from "./view.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 
@@ -362,5 +362,48 @@ describe("long press", () => {
     t.fire();
     assert.equal(fired, 0);
     assert.equal(t.pending.size, 0);
+  });
+});
+
+describe("keep in view in Isometric (docs/design-v1-isometric-view.md ISO-D14)", () => {
+  const viewport = { width: 400, height: 800 };
+  const bounds = { w: 20, h: 30 };
+  const insets = { top: 60, right: 0, bottom: 140, left: 0 };
+  const middle = { x: 200, y: 60 + (800 - 60 - 140) / 2 };
+  const groundOf = (turn: Turn) => ({ toGround: (v: ViewPoint) => toWorld(isometric(turn), v), toView: (p: { x: number; y: number }) => toView(isometric(turn), p) });
+  const groundAt = (cam: Camera, turn: Turn) => toWorld(isometric(turn), screenToView(cam, middle));
+
+  test("a pan past the scene stops with the ground under the clear area's middle on its edge, at every turn", () => {
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      const far = { x: 5000, y: -3000, scale: 20 };
+      const kept = keepInView(far, viewport, bounds, insets, 64, undefined, groundOf(turn));
+      const at = groundAt(kept, turn);
+      assert.ok(at.x >= -1e-9 && at.x <= bounds.w + 1e-9 && at.y >= -1e-9 && at.y <= bounds.h + 1e-9, `turn ${turn}: ${JSON.stringify(at)}`);
+      assert.equal(kept.scale, 20);
+      // A camera whose middle is on the scene stays as it is.
+      const fine = cameraForView(viewport, toView(isometric(turn), { x: 10, y: 15 }), 20);
+      assert.equal(keepInView(fine, viewport, bounds, insets, 64, undefined, groundOf(turn)), fine);
+    }
+  });
+
+  test("a camera already past an edge may stay or come back, and never jumps to it", () => {
+    const turn: Turn = 1;
+    const ground = groundOf(turn);
+    // The middle's ground stands 3 cells past the west edge.
+    const shifted = cameraAt(middle, toView(isometric(turn), { x: -3, y: 15 }), 20);
+    const from = keepInView(shifted, viewport, bounds, insets, 64, undefined, ground);
+    assert.ok(Math.abs(groundAt(from, turn).x) < 1e-9, "without `from` it clamps to the edge");
+    assert.equal(keepInView(shifted, viewport, bounds, insets, 64, shifted, ground), shifted, "from where it stood, it may stay");
+    const further = { ...shifted, x: shifted.x + 40 };
+    const held = keepInView(further, viewport, bounds, insets, 64, shifted, ground);
+    assert.ok(groundAt(held, turn).x >= groundAt(shifted, turn).x - 1e-9, "never further out than it stood");
+  });
+
+  test("the token bar's shift is bounded the same way", () => {
+    const ground = groundOf(0);
+    const cam = cameraAt(middle, toView(isometric(0), { x: 1, y: 1 }), 20);
+    const moved = barShift(cam, 2000, viewport, bounds, insets, ground);
+    const at = toWorld(isometric(0), screenToView(moved, middle));
+    assert.ok(at.x >= -1e-9 && at.y >= -1e-9, JSON.stringify(at));
   });
 });

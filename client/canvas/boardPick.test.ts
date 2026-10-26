@@ -5,7 +5,8 @@ import { encodeHeights } from "#shared/rules/heights.ts";
 import { reveal, rng, room, scene } from "#shared/testutil.ts";
 import { screenToView, viewToScreen, type Camera } from "../lib/camera.ts";
 import { isometric, K, TOP_DOWN, toView, toWorld, type Turn } from "../lib/view.ts";
-import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, nudgeStep, pressAt, pressGap, ringCenter, screenAt, tokenBase, type BoardPick } from "./boardPick.ts";
+import { holdStill, NO_INSETS } from "../lib/camera.ts";
+import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, heldPoint, liftIn, nudgeStep, pressAt, pressGap, ringCenter, screenAt, tokenBase, type BoardPick } from "./boardPick.ts";
 
 /** One chunk of scene s1 with these cells raised or lowered, in feet. */
 function chunkWith(heights: Record<string, number>): BuildChunk {
@@ -138,6 +139,56 @@ describe("arrow keys move by the screen (docs/design-v1-isometric-view.md 6.5)",
     assert.deepEqual(nudgeStep(isometric(1), 1, 0), compass.north, "Right at turn 1 moves toward the edge facing down and to the right");
     assert.deepEqual(nudgeStep(TOP_DOWN, 0, -1), compass.north);
     assert.deepEqual(nudgeStep(TOP_DOWN, -1, 0), compass.west);
+  });
+});
+
+describe("a turn or a switch keeps one point still (docs/design-v1-isometric-view.md 4.2, 6.4)", () => {
+  const viewport = { width: 800, height: 600 };
+  const state = heightsRoom({ "6,6": 10, "7,6": 10, "6,7": 10, "7,7": 10 });
+  const pickAt = (camera: Camera, view = isometric(0) as ReturnType<typeof isometric>) => boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: true, view, camera, lowPower: false }, new DrawnHeightsMemo());
+
+  test("Q with the selected token on screen: its ring stays where it was, raised on its platform", () => {
+    const goblin = { size: "medium" as const, x: 6, y: 6, elevation: 10 };
+    const cam: Camera = { x: 300, y: 200, scale: 40 };
+    const was = pickAt(cam, isometric(0));
+    const now = pickAt(cam, isometric(3));
+    const held = heldPoint(was, now, goblin, viewport, NO_INSETS);
+    const next = holdStill(cam, toView(was.view, held.at, held.before), toView(now.view, held.at, held.after));
+    const before = ringCenter(was, goblin);
+    const after = ringCenter({ ...now, camera: next }, goblin);
+    assert.ok(Math.abs(before.x - after.x) < 1e-9 && Math.abs(before.y - after.y) < 1e-9, JSON.stringify([before, after]));
+  });
+
+  test("a switch to Top-down for a tool keeps the ground under the clear middle, a platform's top included", () => {
+    const insets = { top: 50, right: 0, bottom: 150, left: 0 };
+    const middle = { x: 400, y: 50 + (600 - 200) / 2 };
+    // The platform's top under the clear middle.
+    const cam0: Camera = { x: 0, y: 0, scale: 40 };
+    const top = screenAt(pickAt(cam0), { x: 7, y: 7 }, 2);
+    const cam: Camera = { x: middle.x - top.x, y: middle.y - top.y, scale: 40 };
+    const was = pickAt(cam);
+    const now = pickAt(cam, TOP_DOWN as never);
+    const held = heldPoint(was, now, undefined, viewport, insets);
+    assert.equal(held.before, 2, "the press met the platform's top");
+    assert.equal(held.after, 0);
+    const next = holdStill(cam, toView(was.view, held.at, held.before), toView(TOP_DOWN, held.at));
+    const shown = viewToScreen(next, toView(TOP_DOWN, held.at));
+    assert.ok(Math.abs(shown.x - middle.x) < 1e-3 && Math.abs(shown.y - middle.y) < 1e-3, JSON.stringify([shown, middle]));
+    assert.ok(Math.abs(held.at.x - 7) < 1e-5 && Math.abs(held.at.y - 7) < 1e-5, JSON.stringify(held.at));
+  });
+
+  test("a selected token off the clear part of the canvas gives way to the middle", () => {
+    const far = { size: "medium" as const, x: 1, y: 1, elevation: 0 };
+    const cam: Camera = { x: -2000, y: -2000, scale: 40 };
+    const held = heldPoint(pickAt(cam), pickAt(cam, isometric(1)), far, viewport, NO_INSETS);
+    assert.notDeepEqual(held.at, { x: 1.5, y: 1.5 });
+  });
+
+  test("a fit's lift is the highest drawn ground inside its rectangle", () => {
+    const heights = pickAt({ x: 0, y: 0, scale: 40 }).heights;
+    assert.equal(liftIn(heights, { x: 0, y: 0, width: 16, height: 16 }), 2);
+    assert.equal(liftIn(heights, { x: 0, y: 0, width: 5, height: 5 }), 0);
+    assert.equal(liftIn(heights, { x: 5.5, y: 5.5, width: 1, height: 1 }), 2);
   });
 });
 

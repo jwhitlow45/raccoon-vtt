@@ -1,9 +1,9 @@
 import { DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene } from "#shared/model.ts";
 import { occupiedRange, type FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
-import { cameraOfStage, screenToView, viewToScreen, type Camera, type Point } from "../lib/camera.ts";
+import { cameraOfStage, screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
 import { footprint } from "../lib/scene.ts";
-import { arrowStep, drawnBase, drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
+import { arrowStep, drawnBase, drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 
 /**
@@ -84,6 +84,26 @@ export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">,
 export function ringCenter(pick: Pick<BoardPick, "view" | "camera" | "src" | "feetPerCell">, token: FootprintToken): Point {
   const fp = footprint(token);
   return screenAt(pick, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, tokenBase(pick, token));
+}
+
+/** The highest drawn ground inside a world rectangle, in cells, at least 0: how far a fit raises its box's top (docs/design-v1-isometric-view.md 4.2). */
+export function liftIn(heights: DrawnHeights, rect: { x: number; y: number; width: number; height: number }): number {
+  if (heights.high <= 0) return 0;
+  const { w, h } = heights.bounds;
+  const x0 = Math.max(0, Math.floor(rect.x));
+  const y0 = Math.max(0, Math.floor(rect.y));
+  const x1 = Math.min(w, Math.ceil(rect.x + rect.width));
+  const y1 = Math.min(h, Math.ceil(rect.y + rect.height));
+  if (x0 === 0 && y0 === 0 && x1 === w && y1 === h) return heights.high;
+  let top = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) top = Math.max(top, heights.at(x, y));
+  return top;
+}
+
+/** How a view meets the ground at 0, for the camera's keep in view (lib/camera.ts keepInView): none in Top-down, whose rule reads the scene's box. */
+export function groundMapOf(view: View): GroundMap | undefined {
+  if (view.kind === "topDown") return undefined;
+  return { toGround: (v) => toWorld(view, v), toView: (p) => toView(view, p) };
 }
 
 const ARROW_OF: Readonly<Record<string, string>> = { "0,-1": "ArrowUp", "1,0": "ArrowRight", "0,1": "ArrowDown", "-1,0": "ArrowLeft" };
@@ -174,6 +194,25 @@ export class DrawnHeightsMemo {
     this.#last = next;
     return next;
   }
+}
+
+/**
+ * The world point a turn or a switch keeps still (4.2), with its drawn
+ * height in the view before and after: the selected token's ring while it
+ * shows in the clear part of the canvas, else where a press at that part's
+ * middle meets the drawn ground.
+ */
+export function heldPoint(was: BoardPick, now: BoardPick, selected: FootprintToken | undefined, viewport: Size, insets: Insets): { at: Point; before: number; after: number } {
+  const clear = { x0: insets.left, y0: insets.top, x1: viewport.width - insets.right, y1: viewport.height - insets.bottom };
+  if (selected) {
+    const ring = ringCenter(was, selected);
+    if (ring.x >= clear.x0 && ring.x <= clear.x1 && ring.y >= clear.y0 && ring.y <= clear.y1) {
+      const fp = footprint(selected);
+      return { at: { x: selected.x + fp.w / 2, y: selected.y + fp.h / 2 }, before: tokenBase(was, selected), after: tokenBase(now, selected) };
+    }
+  }
+  const press = pickWalk(was, { x: (clear.x0 + clear.x1) / 2, y: (clear.y0 + clear.y1) / 2 });
+  return { at: press.point, before: press.z, after: drawnAt(now, press.point) };
 }
 
 /**

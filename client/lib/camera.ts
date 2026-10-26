@@ -135,7 +135,9 @@ export function pinchCamera(
  * How far out a scene zooms (UP-20): until the whole scene fills half the
  * screen, and no further. Past that a small map shrank to a few pixels a
  * square, with nothing to tap and no way to tell where it went. A scene too
- * big to fit even at MIN_SCALE keeps MIN_SCALE.
+ * big to fit even at MIN_SCALE keeps MIN_SCALE. `bounds` is the size of
+ * the box the scene shows in, in view units: the scene itself in
+ * Top-down, the box a fit frames in Isometric (lib/view.ts viewBox).
  */
 export function sceneMinScale(viewport: Size, bounds: { w: number; h: number }): number {
   const fit = Math.min(viewport.width / Math.max(bounds.w, 1e-6), viewport.height / Math.max(bounds.h, 1e-6));
@@ -156,11 +158,12 @@ export function sceneMinScale(viewport: Size, bounds: { w: number; h: number }):
  * compared on screen, so a pinch that changes the scale keeps the rule.
  *
  * The scene's bounds stand for its box on screen, which holds in Top-down
- * only. Isometric keeps the ground under the clear area's middle on the
- * scene instead, since its diamond's box has empty corners
+ * only. Isometric (`ground`) keeps the ground under the clear area's
+ * middle on the scene instead, since its diamond's box has empty corners
  * (docs/design-v1-isometric-view.md ISO-D14).
  */
-export function keepInView(cam: Camera, viewport: Size, bounds: { w: number; h: number }, insets: Insets = NO_INSETS, marginPx = 64, from?: Camera): Camera {
+export function keepInView(cam: Camera, viewport: Size, bounds: { w: number; h: number }, insets: Insets = NO_INSETS, marginPx = 64, from?: Camera, ground?: GroundMap): Camera {
+  if (ground) return keepGroundInView(cam, viewport, bounds, insets, from, ground);
   const clampAxis = (pos: number, start: number, end: number, size: number, was: number | undefined, wasLength: number) => {
     const length = size * cam.scale;
     const margin = Math.min(marginPx, Math.max(0, end - start) / 2, length / 2);
@@ -175,6 +178,30 @@ export function keepInView(cam: Camera, viewport: Size, bounds: { w: number; h: 
 }
 
 /**
+ * How the isometric view meets the ground at height 0, for keepInView: the
+ * world point at a view point, and back (lib/view.ts toWorld and toView).
+ * Its height is 0, so no camera reads terrain.
+ */
+export type GroundMap = { toGround(v: ViewPoint): Point; toView(p: Point): ViewPoint };
+
+/**
+ * ISO-D14: the ground at 0 under the middle of the part of the viewport
+ * `insets` leave clear stays on the scene. Where `from`'s middle already
+ * stood past an edge, that edge gives way to it, so the camera may come
+ * back toward the scene or stay, and never jumps, as Top-down's rule does.
+ */
+function keepGroundInView(cam: Camera, viewport: Size, bounds: { w: number; h: number }, insets: Insets, from: Camera | undefined, ground: GroundMap): Camera {
+  const middle = { x: insets.left + (viewport.width - insets.left - insets.right) / 2, y: insets.top + (viewport.height - insets.top - insets.bottom) / 2 };
+  const at = ground.toGround(screenToView(cam, middle));
+  const was = from ? ground.toGround(screenToView(from, middle)) : null;
+  const clamp = (v: number, size: number, before: number | undefined) => Math.min(Math.max(size, before ?? size), Math.max(Math.min(0, before ?? 0), v));
+  const x = clamp(at.x, bounds.w, was?.x);
+  const y = clamp(at.y, bounds.h, was?.y);
+  if (x === at.x && y === at.y) return cam;
+  return cameraAt(middle, ground.toView({ x, y }), cam.scale);
+}
+
+/**
  * The camera after an upright phone's token bar moves the map to clear its
  * token (docs/design-v1-bar-compact.md 3.6, review BAR-ASTRA-07): `dy` in
  * the canvas's px, the move bounded as a pan from the camera as it stands
@@ -182,8 +209,8 @@ export function keepInView(cam: Camera, viewport: Size, bounds: { w: number; h: 
  * move never takes the map further out than a pan could, and a camera
  * already past the bound may come toward it but never go further past.
  */
-export function barShift(cam: Camera, dy: number, viewport: Size, bounds: { w: number; h: number }, insets: Insets): Camera {
-  return keepInView(panBy(cam, 0, dy), viewport, bounds, insets, 64, cam);
+export function barShift(cam: Camera, dy: number, viewport: Size, bounds: { w: number; h: number }, insets: Insets, ground?: GroundMap): Camera {
+  return keepInView(panBy(cam, 0, dy), viewport, bounds, insets, 64, cam, ground);
 }
 
 export function sameCamera(a: Camera, b: Camera): boolean {
