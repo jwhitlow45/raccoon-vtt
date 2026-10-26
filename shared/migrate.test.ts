@@ -1283,9 +1283,15 @@ describe("hex grids, phase H1: op version 24, snapshot version 25 (docs/design-v
       { t: "scene.create", scene: { id: "s9", name: "Mat", bounds: { w: 30, h: 20 }, gridShape: "hexRows" } },
       { t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } },
       { t: "room.update", settings: { newScenes: "hexColumns" } },
+      {
+        t: "template.create",
+        template: { id: "a1", sceneId: "s1", shape: "emanation", size: 10, origin: { x: 5, y: 5, z: 0 }, yaw: 0, footprint: { w: 2, h: 2, elevation: 0, height: 10, size: "large" }, includeOrigin: false, color: "#ff0000", ownerId: "dm1", visibility: "all" },
+      },
       { t: "log.chat", text: "hi" },
     ];
     for (const op of ops) assert.equal(runMigrations(op, 23, 24, opMigrations), op);
+    // Each is an op today's protocol takes.
+    for (const op of ops) assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
   });
 
   test("a version 24 op and a version 25 snapshot never migrate down", () => {
