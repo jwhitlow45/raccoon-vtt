@@ -1,7 +1,9 @@
 import { DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene } from "#shared/model.ts";
+import { occupiedRange, type FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { cameraOfStage, screenToView, viewToScreen, type Camera, type Point } from "../lib/camera.ts";
-import { drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
+import { footprint } from "../lib/scene.ts";
+import { drawnBase, drawnHeights, flatHeights, heightsStand, pickGround, pickWalk, TOP_DOWN, toView, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 
 /**
@@ -70,6 +72,18 @@ export function pressGap(pick: Pick<BoardPick, "view" | "camera" | "heights">, p
     const at = screenAt(pick, p, z ?? drawnAt(pick, p));
     return Math.hypot(at.x - press.screen.x, at.y - press.screen.y);
   };
+}
+
+/** A token's drawn base in cells (view.ts drawnBase): where its standee's ring stands. 0 in Top-down. */
+export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, token: FootprintToken): number {
+  if (pick.view.kind === "topDown" || !pick.src) return 0;
+  return drawnBase(pick.src, occupiedRange(token), token.elevation) / pick.feetPerCell;
+}
+
+/** Where a token's ring's center shows on screen: its footprint's middle at its drawn base. */
+export function ringCenter(pick: Pick<BoardPick, "view" | "camera" | "src" | "feetPerCell">, token: FootprintToken): Point {
+  const fp = footprint(token);
+  return screenAt(pick, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, tokenBase(pick, token));
 }
 
 /** The press's point in view space, for a test against a box that stands up, such as a label's (builder/labelShape.ts). */

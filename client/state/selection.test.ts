@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { appleKeys } from "../lib/device.ts";
-import { addsToSelection, addToSelection, barDismiss, dismissal, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
+import { addsToSelection, addToSelection, barDismiss, dismissal, doneSelecting, frontToBack, keepSelected, nextUnderTap, selectToken, setMultiSelect, showActions, tapToken } from "./selection.ts";
 import { INITIAL_LOCAL, type LocalUi } from "./types.ts";
 import { keepsOpening, type BarSubject } from "../canvas/barDock.ts";
 
@@ -248,3 +248,36 @@ describe("the viewer's opening of the bar (docs/design-v1-bar-compact.md 3.6, re
     }
   });
 });
+
+describe("a tap again in the isometric view (docs/design-v1-isometric-view.md 6.2)", () => {
+  test("two standees under one tap, then taps again: front, then the one behind, then front", () => {
+    const stack = ["front", "behind"];
+    let selected: string | null = null;
+    const seen: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      selected = nextUnderTap(stack, selected);
+      seen.push(selected!);
+    }
+    assert.deepEqual(seen, ["front", "behind", "front"]);
+  });
+
+  test("three deep it walks front to back and round again, and a tap where the selected one is not under the press takes the front one", () => {
+    const stack = ["a", "b", "c"];
+    assert.equal(nextUnderTap(stack, "a"), "b");
+    assert.equal(nextUnderTap(stack, "b"), "c");
+    assert.equal(nextUnderTap(stack, "c"), "a");
+    assert.equal(nextUnderTap(stack, "elsewhere"), "a");
+    assert.equal(nextUnderTap(stack, null), "a");
+    assert.equal(nextUnderTap(["alone"], "alone"), "alone", "a lone standee stays selected, as Top-down's tap");
+    assert.equal(nextUnderTap([], "a"), null);
+  });
+
+  test("what a press hits, front to back: the last drawn first", () => {
+    const drawn = ["far", "middle", "near", "beside"];
+    assert.deepEqual(
+      frontToBack(drawn, (id) => id !== "beside"),
+      ["near", "middle", "far"],
+    );
+  });
+});
+

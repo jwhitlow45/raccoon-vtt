@@ -5,7 +5,7 @@ import { encodeHeights } from "#shared/rules/heights.ts";
 import { reveal, rng, room, scene } from "#shared/testutil.ts";
 import { screenToView, viewToScreen, type Camera } from "../lib/camera.ts";
 import { isometric, K, TOP_DOWN, toView, toWorld, type Turn } from "../lib/view.ts";
-import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, pressAt, pressGap, screenAt, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, pressAt, pressGap, ringCenter, screenAt, tokenBase, type BoardPick } from "./boardPick.ts";
 
 /** One chunk of scene s1 with these cells raised or lowered, in feet. */
 function chunkWith(heights: Record<string, number>): BuildChunk {
@@ -58,6 +58,17 @@ describe("the board's pick (docs/design-v1-isometric-view.md 6.1)", () => {
     assert.ok(Math.abs(pressGap(pick, { world, screen: top })(handle) - 10) < 1e-6);
     // Read at 0 instead, the same handle would stand K·2 view units lower.
     assert.ok(Math.abs(pressGap(pick, { world, screen: top })(handle, 0) - Math.hypot(10, 2 * K * CAM.scale)) < 1e-6);
+  });
+
+  test("a token's ring stands at its drawn base: on a seen 10 ft platform at 10 ft, and in Top-down at its corner's cell", () => {
+    const state = heightsRoom({ "6,6": 10, "7,6": 10 });
+    const pick = pickFor(state, "dm", CAM);
+    const onTop = { size: "large" as const, x: 6, y: 5, elevation: 10 };
+    assert.equal(tokenBase(pick, onTop), 2);
+    assert.deepEqual(ringCenter(pick, onTop), screenAt(pick, { x: 7, y: 6 }, 2));
+    const flier = { size: "medium" as const, x: 2, y: 2, elevation: 20 };
+    assert.equal(tokenBase(pick, flier), 4);
+    assert.equal(tokenBase({ ...pick, view: TOP_DOWN }, flier), 0);
   });
 
   test("a cell off the scene and every cell in Top-down draw at 0", () => {

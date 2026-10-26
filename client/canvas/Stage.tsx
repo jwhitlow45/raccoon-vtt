@@ -53,7 +53,7 @@ import { isAppleDevice } from "../lib/device.ts";
 import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
 import { CameraGesture, distance, LongPress, mousePans, TAP_SLOP_PX } from "../lib/gestures.ts";
-import { groupFollowers, tokensInBox } from "../lib/group.ts";
+import { groupFollowers, tokensByCenter, tokensInBox } from "../lib/group.ts";
 import { displayName, drawsAboveFog, footprint, snapPosition, type ViewToken } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { BoardViewContext, boardViewsOf, useBoardPills } from "./boardView.ts";
@@ -70,14 +70,14 @@ import { stageMountKey, uiScale, useLowPower, useMapVariant, useUiScale } from "
 import { mapFocusSlot, spaceMovesMap } from "../pages/mapFocus.ts";
 import { localDragSlot } from "../state/localDrags.ts";
 import { useRoomScope } from "../state/scope.ts";
-import { addsToSelection, barDismiss } from "../state/selection.ts";
+import { addsToSelection, barDismiss, frontToBack, nextUnderTap } from "../state/selection.ts";
 import { stageKeysSlot } from "../state/shortcuts.ts";
 import { sheetOpen as sheetIsOpen, type Opening } from "../state/types.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
-import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, ringCenter, type BoardPick } from "./boardPick.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
@@ -254,6 +254,8 @@ export function MapStage(props: {
   const isoEverRef = useRef(false);
   if (isoShown) isoEverRef.current = true;
   const [isoStage, setIsoStage] = useState<Konva.Stage | null>(null);
+  const isoStageRef = useRef(isoStage);
+  isoStageRef.current = isoStage;
   /** Other members' drags, eased by one clock for both drawing trees. */
   const [eased] = useState(createEasedDrags);
 
@@ -1184,7 +1186,13 @@ export function MapStage(props: {
         // A cancelled press neither selects nor counts as a tap.
         const lifted = e.type !== "pointercancel";
         if (lifted && (box.moved || distance(box.start, p) > TAP_SLOP_PX)) {
-          const picked = tokensInBox(tokensByIdRef.current.values(), toWorld(TOP_DOWN, screenToView(c, box.start)), toWorld(TOP_DOWN, screenToView(c, p)));
+          // In Isometric a token is taken by where its ring's center shows, since its footprint is a diamond and its art stands up (6.2).
+          const pick = pickOfRef.current(c);
+          const tokensOnScene = tokensByIdRef.current.values();
+          const picked =
+            pick.view.kind === "isometric"
+              ? tokensByCenter(tokensOnScene, box.start, p, (t) => ringCenter(pick, t))
+              : tokensInBox(tokensOnScene, toWorld(TOP_DOWN, screenToView(c, box.start)), toWorld(TOP_DOWN, screenToView(c, p)));
           if (picked.length > 0) uiRef.current.selectMany(picked.map((t) => t.id));
         } else if (lifted && !held && !box.add) {
           // Multi-select's tap off hides the group's bar and keeps the group (state/selection.ts tapToken), and opens nothing, as before.
@@ -1266,6 +1274,32 @@ export function MapStage(props: {
     [actions, scene.id, clearSpots],
   );
 
+  /**
+   * A tap in Isometric on the selected standee, where others lie under the
+   * press too, takes the next one behind it (6.2, state/selection.ts
+   * nextUnderTap). Konva's hit canvas gives the front one, `front`. The
+   * stack is walked only when the selected standee is under the press, so
+   * any other tap costs nothing more than in Top-down.
+   */
+  const tappedAgain = useCallback(
+    (front: string): string => {
+      const stage = isoStageRef.current;
+      const p = stage?.getPointerPosition();
+      const selectedNow = store.getState().local.selectedId;
+      if (shownRef.current.kind !== "isometric" || !stage || !p || selectedNow === null) return front;
+      const relief = stage.getLayers()[0];
+      const under = (n: Konva.Node) => {
+        const r = n.getClientRect();
+        return p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height && (n as Konva.Group).find("Shape").some((shape) => (shape as Konva.Shape).intersects(p));
+      };
+      const selectedNode = relief?.findOne(`#${selectedNow}`);
+      if (!relief || !selectedNode || (selectedNow !== front && !under(selectedNode))) return front;
+      const stack = frontToBack(relief.find(".token"), under).map((n) => n.id());
+      return stack.includes(front) ? (nextUnderTap(stack, selectedNow) ?? front) : front;
+    },
+    [store],
+  );
+
   const interaction = useMemo<TokenInteraction>(() => {
     /** Puts every token of a drop back where it stood, and tells the room the drag ended without a move. */
     const putBack = (node: Konva.Node, token: ViewToken, followers: readonly { token: ViewToken; node: Konva.Node }[]) => {
@@ -1340,7 +1374,8 @@ export function MapStage(props: {
         if (typeof matchMedia === "function" && matchMedia("(hover: hover)").matches) setHoveredId(id);
       },
       select(id, add) {
-        if (!suppressSelectRef.current && !toolRef.current.pointer) onSelectRef.current(id, add);
+        if (suppressSelectRef.current || toolRef.current.pointer) return;
+        onSelectRef.current(add || multiRef.current ? id : tappedAgain(id), add);
       },
       menu(id) {
         // While selecting several, a click adds or removes, and the menu would undo it.
@@ -1425,7 +1460,7 @@ export function MapStage(props: {
         dragStopsRef.current.drop(leadNode, drag.lead, drag.named, (plan) => landDrop(node, token, followers, drag, plan));
       },
     };
-  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers]);
+  }, [actions, stopTokenDrag, setSpot, clearSpots, popovers, tappedAgain]);
 
   const memberMap = members ?? {};
   const below: ViewToken[] = [];

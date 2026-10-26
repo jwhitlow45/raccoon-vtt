@@ -85,3 +85,22 @@ export function tokensInBox<T extends Placed>(tokens: Iterable<T>, a: { x: numbe
   }
   return out;
 }
+
+/**
+ * The tokens whose ring's center shows inside a box dragged on the screen
+ * (docs/design-v1-isometric-view.md 6.2): in the isometric view a
+ * footprint is a diamond and its art stands up, so a box takes a token by
+ * the one point it stands on. `centerOf` gives that point on screen.
+ */
+export function tokensByCenter<T>(tokens: Iterable<T>, a: { x: number; y: number }, b: { x: number; y: number }, centerOf: (token: T) => { x: number; y: number }): T[] {
+  const x0 = Math.min(a.x, b.x);
+  const x1 = Math.max(a.x, b.x);
+  const y0 = Math.min(a.y, b.y);
+  const y1 = Math.max(a.y, b.y);
+  const out: T[] = [];
+  for (const t of tokens) {
+    const c = centerOf(t);
+    if (c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) out.push(t);
+  }
+  return out;
+}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema, MAX_MOVES } from "#shared/protocol.ts";
-import { groupDrop, groupFollowers, moveOps, tokensInBox } from "./group.ts";
+import { groupDrop, groupFollowers, moveOps, tokensByCenter, tokensInBox } from "./group.ts";
 
 const tok = (id: string, x: number, y: number, size: "tiny" | "medium" | "large" = "medium", locked = false) => ({ id, x, y, size, locked });
 
@@ -62,3 +62,19 @@ describe("moving a group", () => {
     assert.deepEqual(tokensInBox(tokens, { x: 0, y: 0 }, { x: 1, y: 1 }), []);
   });
 });
+
+describe("a box in the isometric view (docs/design-v1-isometric-view.md 6.2)", () => {
+  test("takes the tokens whose ring's center shows inside it on screen, whatever their footprints overlap", () => {
+    const tokens = [
+      { id: "in", c: { x: 50, y: 50 } },
+      { id: "edge", c: { x: 100, y: 20 } },
+      { id: "out", c: { x: 101, y: 50 } },
+      { id: "above", c: { x: 50, y: 9 } },
+    ];
+    assert.deepEqual(
+      tokensByCenter(tokens, { x: 100, y: 80 }, { x: 10, y: 10 }, (t) => t.c).map((t) => t.id),
+      ["in", "edge"],
+    );
+  });
+});
+

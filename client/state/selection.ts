@@ -41,6 +41,27 @@ export function tapToken(local: LocalUi, tokenId: string | null, add = false): L
 }
 
 /**
+ * A tap again in the isometric view (docs/design-v1-isometric-view.md
+ * 6.2): `stack` is every standee under the press, front to back. A tap
+ * that lands on the selected one, where others lie under the press too,
+ * selects the next one behind it, round to the front again, so a creature
+ * hidden behind another is reached with no hold. Any other tap takes the
+ * front one, as Top-down's tap does. Null for an empty stack.
+ */
+export function nextUnderTap(stack: readonly string[], selectedId: string | null): string | null {
+  if (stack.length === 0) return null;
+  const at = selectedId === null ? -1 : stack.indexOf(selectedId);
+  return at < 0 ? stack[0]! : stack[(at + 1) % stack.length]!;
+}
+
+/** The items a press hits, front to back, from a list in draw order (later draws over earlier). */
+export function frontToBack<T>(drawOrder: readonly T[], hit: (item: T) => boolean): T[] {
+  const out: T[] = [];
+  for (let i = drawOrder.length - 1; i >= 0; i--) if (hit(drawOrder[i]!)) out.push(drawOrder[i]!);
+  return out;
+}
+
+/**
  * Whether a click on a token, or a mouse drag on empty map, with these
  * keys held adds to the selection: Shift, or Ctrl as on Windows and Linux.
  * On a Mac, an iPad or an iPhone (`apple`) Ctrl with a click is a right
