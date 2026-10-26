@@ -1,0 +1,79 @@
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
+import type { GridShape, Token } from "../model.ts";
+import { int, rng, scene, token } from "../testutil.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex, type SizeCategory } from "./footprint.ts";
+import { gridOfShape } from "./grid.ts";
+import { hexInScene, hexKey, sameHex, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
+import { NO_ROOM_TO_GROW, RESIZE_KEEPS_PLACE, resizeRefusal, resizeSpot } from "./resize.ts";
+
+/**
+ * A resize on hexes keeps the reference hex where it was
+ * (docs/design-v1-hex-grids.md 4.2): a Medium growing Large keeps its hex
+ * as the top one, and a Large shrinking Medium keeps its top hex.
+ */
+
+function world(shape: GridShape, t: Token) {
+  return { scenes: { s1: scene("s1", { gridShape: shape, bounds: { w: 30, h: 20 } }) }, buildChunks: {}, tokens: { [t.id]: t } };
+}
+
+function on(g: HexGrid, size: SizeCategory, hex: Hex): Token {
+  return token("t", { size, ...placedOnHex(g, { size, x: 0, y: 0 }, hex) });
+}
+
+for (const shape of ["hexRows", "hexColumns"] as const) {
+  const g = gridOfShape(shape) as HexGrid;
+  describe(`${shape}: a resize keeps the reference hex`, () => {
+    test("a Medium grows Large with its hex as the top one, and shrinks back onto it, through each size", () => {
+      const r = rng(71);
+      for (let i = 0; i < 300; i++) {
+        const hex = { col: int(r, 3, 20), row: int(r, 3, 12) };
+        let t = on(g, "medium", hex);
+        for (const size of ["large", "huge", "gargantuan", "huge", "large", "medium", "tiny", "medium"] as const) {
+          const spot = resizeSpot(world(shape, t), t, { size }, { checked: true });
+          assert.ok(!("refused" in spot), `${size} at ${hexKey(hex)}`);
+          const next = { ...t, size, x: spot.x, y: spot.y };
+          assert.ok(sameHex(tokenRefHex(g, next), hex), `${size} keeps ${hexKey(hex)} as its reference`);
+          assert.equal(spot.shifted, false);
+          assert.equal(resizeRefusal(world(shape, t), t, { size, x: spot.x, y: spot.y }), null, "the server takes the spot");
+          t = next;
+        }
+      }
+    });
+
+    test("an owner's growth that would leave the scene takes another footprint covering the old hex, the DM's keeps the base", () => {
+      // The last row: a Large's two lower hexes would lie below the scene.
+      const span = sceneHexSpan(g, { w: 30, h: 20 });
+      const hex: Hex = shape === "hexRows" ? { col: 10, row: span.rows - 1 } : { col: span.cols - 1, row: 10 };
+      const t = on(g, "medium", hex);
+      const spot = resizeSpot(world(shape, t), t, { size: "large" }, { checked: true });
+      assert.ok(!("refused" in spot) && spot.shifted);
+      const grown = { ...t, size: "large" as const, x: spot.x, y: spot.y };
+      const hexes = occupiedHexes(g, grown);
+      assert.ok(hexes.some((h) => sameHex(h, hex)), "it covers the old hex");
+      assert.ok(hexes.every((h) => hexInScene(g, { w: 30, h: 20 }, h)), "inside the scene");
+      const dm = resizeSpot(world(shape, t), t, { size: "large" }, { checked: false });
+      assert.ok(!("refused" in dm) && sameHex(tokenRefHex(g, { ...t, size: "large", x: dm.x, y: dm.y }), hex));
+    });
+
+    test("a Gargantuan with no room anywhere is refused for an owner", () => {
+      const tiny = { ...world(shape, on(g, "medium", { col: 0, row: 0 })), scenes: { s1: scene("s1", { gridShape: shape, bounds: { w: 3, h: 3 } }) } };
+      const t = tiny.tokens.t!;
+      assert.deepEqual(resizeSpot(tiny, t, { size: "gargantuan" }, { checked: true }), { refused: NO_ROOM_TO_GROW });
+    });
+
+    test("the server takes a spot off its anchor that stands on a candidate's hexes, and refuses one that does not cover the creature", () => {
+      const hex = { col: 8, row: 8 };
+      const t = on(g, "medium", hex);
+      const base = placedOnHex(g, { size: "large", x: 0, y: 0 }, hex);
+      assert.equal(resizeRefusal(world(shape, t), t, { size: "large", x: base.x + 0.05, y: base.y - 0.05 }), null);
+      const far = placedOnHex(g, { size: "large", x: 0, y: 0 }, { col: 12, row: 8 });
+      assert.equal(resizeRefusal(world(shape, t), t, { size: "large", ...far }), RESIZE_KEEPS_PLACE);
+      // A shrink lands inside the old footprint only.
+      const large = on(g, "large", hex);
+      const out = placedOnHex(g, { size: "medium", x: 0, y: 0 }, { col: 2, row: 2 });
+      assert.equal(resizeRefusal(world(shape, large), large, { size: "medium", ...out }), RESIZE_KEEPS_PLACE);
+      for (const h of occupiedHexes(g, large)) assert.equal(resizeRefusal(world(shape, large), large, { size: "medium", ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, h) }), null);
+    });
+  });
+}

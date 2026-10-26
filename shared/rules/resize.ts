@@ -1,7 +1,9 @@
 import type { CreatureSize, Scene } from "../model.ts";
 import type { BuildState } from "../ruleHooks.ts";
-import { footprintSize, storedCenter, type PlacedToken } from "./footprint.ts";
+import { anchorOfHex, footprintSize, hexAnchor, occupiedHexes, placedOnHex, sizeCategory, storedCenter, tokenRefHex, type PlacedToken } from "./footprint.ts";
 import type { Point } from "./geom.ts";
+import { sceneGrid } from "./grid.ts";
+import { footprintHexes, hexDistance, hexInScene, hexKey, sameHex, type Hex, type HexGrid } from "./hex.ts";
 import { LEDGE_IN_THE_WAY, resizeLegStop, resizeStands, WALL_IN_THE_WAY, type MovingToken } from "./movement.ts";
 
 /**
@@ -23,6 +25,13 @@ import { LEDGE_IN_THE_WAY, resizeLegStop, resizeStands, WALL_IN_THE_WAY, type Mo
  * It reads the move rules directly, not through shared/ruleHooks.ts, whose
  * indirection serves the core built before those rules existed: the resize
  * came after them, and nothing swaps them out for it.
+ *
+ * On a hex scene (docs/design-v1-hex-grids.md 4.2) a resize keeps the
+ * reference hex where it was: a Medium growing Large keeps its hex as the
+ * top one, and a Large shrinking Medium keeps its top hex. That spot is the
+ * base, and an owner's growth that would leave the scene tries the other
+ * footprints covering the old one (`hexCandidates`). A hex scene has no
+ * walls until phase H2, so rule 5 reads nothing there.
  */
 
 export { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY };
@@ -62,7 +71,9 @@ export function sizeChange(token: PlacedToken, next: NextSize): SizeChange {
  * Each axis is decided on its own, which is the same as the nearest middle
  * by straight line.
  */
-export function resizeBase(token: PlacedToken, next: NextSize, scene: Pick<Scene, "bounds">): Point {
+export function resizeBase(token: PlacedToken, next: NextSize, scene: Pick<Scene, "bounds" | "gridShape">): Point {
+  const g = sceneGrid(scene);
+  if (g.shape === "hex") return placedOnHex(g, sized(next, 0, 0), tokenRefHex(g, token));
   const c = storedCenter(token);
   const { w, h } = footprintSize(sized(next, 0, 0));
   const step = stepFor(w, h);
@@ -89,11 +100,14 @@ export function resizeSpot(state: BuildState, token: MovingToken, next: NextSize
   const change = sizeChange(token, next);
   if (change === "same" || !scene) return { x: token.x, y: token.y, shifted: false };
   const candidates = resizeCandidates(token, next, scene);
-  const isCandidate = (p: Point) => candidates.some((q) => q.x === p.x && q.y === p.y);
+  const grid = sceneGrid(scene);
+  // On hexes a spot is a candidate by the hexes it stands on, wherever in its anchor's reach it was stored (4.2).
+  const isCandidate = (p: Point) => (grid.shape === "hex" ? hexSpotAllowed(grid, next, p, candidates) : candidates.some((q) => q.x === p.x && q.y === p.y));
   const remembered = change === "shrink" && opts.remembered && isCandidate(opts.remembered) ? { x: opts.remembered.x, y: opts.remembered.y } : undefined;
   const first = remembered ?? resizeBase(token, next, scene);
   if (!opts.checked) return { ...first, shifted: false };
-  const passes = (p: Point) => scene.blockMovement !== true || wallRefusal(state, token, sized(next, p.x, p.y), change) === null;
+  // A hex scene has no walls until phase H2.
+  const passes = (p: Point) => scene.blockMovement !== true || grid.shape === "hex" || wallRefusal(state, token, sized(next, p.x, p.y), change) === null;
   if (isCandidate(first) && passes(first)) return { ...first, shifted: false };
   for (const p of candidates) {
     if ((p.x !== first.x || p.y !== first.y) && passes(p)) return { x: p.x, y: p.y, shifted: true };
@@ -111,9 +125,11 @@ export function resizeSpot(state: BuildState, token: MovingToken, next: NextSize
  * shift, up before down and left before right, so no two spots tie.
  * Keeping its size, there are none: it keeps its place.
  */
-export function resizeCandidates(token: PlacedToken, next: NextSize, scene: Pick<Scene, "bounds">): Point[] {
+export function resizeCandidates(token: PlacedToken, next: NextSize, scene: Pick<Scene, "bounds" | "gridShape">): Point[] {
   const change = sizeChange(token, next);
   if (change === "same") return [];
+  const g = sceneGrid(scene);
+  if (g.shape === "hex") return hexCandidates(g, token, next, scene, change);
   const from = footprintSize(token);
   const { w, h } = footprintSize(sized(next, 0, 0));
   const step = stepFor(w, h);
@@ -158,8 +174,55 @@ export function resizeRefusal(state: BuildState, token: MovingToken, next: NextS
   if (change === "same") return next.x === token.x && next.y === token.y ? null : RESIZE_KEEPS_PLACE;
   const scene = state.scenes[token.sceneId];
   const to = sized(next, next.x, next.y);
-  if (!scene || !allowedSpot(token, to, scene, change)) return RESIZE_KEEPS_PLACE;
+  if (!scene) return RESIZE_KEEPS_PLACE;
+  const g = sceneGrid(scene);
+  if (g.shape === "hex") return hexSpotAllowed(g, next, next, hexCandidates(g, token, next, scene, change)) ? null : RESIZE_KEEPS_PLACE;
+  if (!allowedSpot(token, to, scene, change)) return RESIZE_KEEPS_PLACE;
   return scene.blockMovement === true ? wallRefusal(state, token, to, change) : null;
+}
+
+/*
+ * A hex resize's spots by rule 4 (4.2): a growth's footprints that cover
+ * every hex the creature stood on and lie inside the scene, a shrink's
+ * inside them, the one keeping the reference hex first, then by how far
+ * the new anchor is from the old one, ties to the smaller row, then the
+ * smaller column. Every footprint holds its reference hex and lies within
+ * 2 steps of it, so the references within 2 steps of the old one hold all
+ * the footprints that can cover it or lie inside it.
+ */
+function hexCandidates(g: HexGrid, token: PlacedToken, next: NextSize, scene: Pick<Scene, "bounds">, change: "grow" | "shrink"): Point[] {
+  const size = sizeCategory(sized(next, 0, 0));
+  const old = occupiedHexes(g, token);
+  const ref = tokenRefHex(g, token);
+  const from = hexAnchor(g, token);
+  const held = new Set(old.map(hexKey));
+  const fits = (r: Hex) => {
+    const hexes = footprintHexes(g, size, anchorOfHex(g, size, r));
+    if (change === "shrink") return hexes.every((h) => held.has(hexKey(h)));
+    const keys = new Set(hexes.map(hexKey));
+    return old.every((h) => keys.has(hexKey(h))) && hexes.every((h) => hexInScene(g, scene.bounds, h));
+  };
+  const refs: Hex[] = [];
+  for (let row = ref.row - 2; row <= ref.row + 2; row++) {
+    for (let col = ref.col - 2; col <= ref.col + 2; col++) {
+      const r = { col, row };
+      if (hexDistance(g, r, ref) <= 2 && fits(r)) refs.push(r);
+    }
+  }
+  const away = (r: Hex) => {
+    const a = anchorOfHex(g, size, r);
+    const dx = a.x - from.x;
+    const dy = a.y - from.y;
+    return dx * dx + dy * dy;
+  };
+  refs.sort((a, b) => (sameHex(a, ref) ? -1 : sameHex(b, ref) ? 1 : away(a) - away(b) || a.row - b.row || a.col - b.col));
+  return refs.map((r) => placedOnHex(g, sized(next, 0, 0), r));
+}
+
+/* Whether a spot sent with a new size stands on one of the candidates' footprints: its reference hex is theirs. */
+function hexSpotAllowed(g: HexGrid, next: NextSize, spot: Point, candidates: readonly Point[]): boolean {
+  const at = tokenRefHex(g, sized(next, spot.x, spot.y));
+  return candidates.some((p) => sameHex(tokenRefHex(g, sized(next, p.x, p.y)), at));
 }
 
 /* The new size's footprint at a spot, as the footprint rules read a token. */
