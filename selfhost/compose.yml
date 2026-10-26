@@ -20,8 +20,9 @@
 #     read-only, at the path where the server stack bind-mounts the file.
 #   - An optional `https` profile adds Caddy, which publishes ports 80 and
 #     443 and gets the certificate itself.
-#   - TRUST_CF_CONNECTING_IP can be set in .env, since an edit to this file
-#     would be lost at the next update.
+#   - TRUST_CF_CONNECTING_IP comes from .env and is 0 unless .env sets it,
+#     the app's own default. Most hosts are not behind Cloudflare, and
+#     trusting the header anywhere else lets a visitor pick an address.
 #
 # Without the profile nothing publishes a port, as in the server stack: your
 # own proxy or tunnel joins raccoon-edge and sends the site's hostname to
@@ -81,7 +82,7 @@ services:
       # header with the real client address, as Cloudflare does. Behind a
       # proxy that does not overwrite it, set it to 0 or configure the proxy
       # to (README, "Put HTTPS in front of it").
-      - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-1}
+      - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-0}
       # Every outbound call goes through squid, on the port that matches its
       # trust (design section 10.6). The app passes these to an explicit
       # undici ProxyAgent and never reads HTTPS_PROXY.
@@ -389,7 +390,7 @@ services:
   config-files:
     image: *postgres-image
     labels:
-      raccoon.config-sha256: "82e1fde18c6110726e9f827cc80fcce1b476cd4032384c4b4f1dcb73ac2d72cd"
+      raccoon.config-sha256: "3abe7c814c876b8d2a107d1da8e5e61613aac6958f297091e736ee9cb06d5aa2"
     command:
       - sh
       - -c
@@ -1379,9 +1380,9 @@ configs:
       # through and keeps the browser's Origin and Host headers.
       {$$SITE_ADDRESS} {
       	reverse_proxy raccoon:3000 {
-      		# Every per-address limit in the app keys on this header while
-      		# TRUST_CF_CONNECTING_IP is 1, the default. Overwriting it with the
-      		# address that connected means no client can make one up.
+      		# With TRUST_CF_CONNECTING_IP=1 in .env, every per-address limit
+      		# in the app keys on this header. Overwriting it with the address
+      		# that connected means no client can make one up.
       		header_up CF-Connecting-IP {remote_host}
       	}
       }

@@ -131,7 +131,7 @@ describe("the self-host compose file as compose reads it", { skip: haveCompose ?
     }
   });
 
-  test("keeps every setting of the server stack's services but the image and the config mounts", () => {
+  test("keeps every setting of the server stack's services but the image, the config mounts and the header trust", () => {
     const minor = minorOf(readSources().version);
     for (const [name, s] of Object.entries(server!.services)) {
       const h = selfhost!.services[name];
@@ -150,6 +150,14 @@ describe("the self-host compose file as compose reads it", { skip: haveCompose ?
           assert.deepEqual(rest, s.depends_on ?? {}, `${name}'s depends_on`);
           const copier = deps["config-files"];
           if (copier) assert.deepEqual({ condition: copier.condition, restart: copier.restart }, { condition: "service_completed_successfully", restart: true });
+          continue;
+        }
+        if (key === "environment" && name === "raccoon") {
+          // The server stack sits behind Cloudflare. A self-host stack trusts the header only when .env says so.
+          const { TRUST_CF_CONNECTING_IP: hostTrust, ...hostRest } = h.environment as Record<string, string>;
+          const { TRUST_CF_CONNECTING_IP: serverTrust, ...serverRest } = s.environment as Record<string, string>;
+          assert.deepEqual(hostRest, serverRest, "raccoon's environment");
+          assert.deepEqual([hostTrust, serverTrust], ["0", "1"], "TRUST_CF_CONNECTING_IP");
           continue;
         }
         assert.deepEqual(h[key], s[key], `${name}'s ${key}`);

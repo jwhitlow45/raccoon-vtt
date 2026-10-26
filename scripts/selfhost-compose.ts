@@ -137,8 +137,9 @@ const HEADER = `# Self-hosting raccoon-vtt with the published image (README.md,
 #     read-only, at the path where the server stack bind-mounts the file.
 #   - An optional \`https\` profile adds Caddy, which publishes ports 80 and
 #     443 and gets the certificate itself.
-#   - TRUST_CF_CONNECTING_IP can be set in .env, since an edit to this file
-#     would be lost at the next update.
+#   - TRUST_CF_CONNECTING_IP comes from .env and is 0 unless .env sets it,
+#     the app's own default. Most hosts are not behind Cloudflare, and
+#     trusting the header anywhere else lets a visitor pick an address.
 #
 # Without the profile nothing publishes a port, as in the server stack: your
 # own proxy or tunnel joins raccoon-edge and sends the site's hostname to
@@ -159,9 +160,9 @@ const CADDYFILE = `# The https profile's front end (selfhost/compose.yml). SITE_
 # through and keeps the browser's Origin and Host headers.
 {$SITE_ADDRESS} {
 \treverse_proxy raccoon:3000 {
-\t\t# Every per-address limit in the app keys on this header while
-\t\t# TRUST_CF_CONNECTING_IP is 1, the default. Overwriting it with the
-\t\t# address that connected means no client can make one up.
+\t\t# With TRUST_CF_CONNECTING_IP=1 in .env, every per-address limit
+\t\t# in the app keys on this header. Overwriting it with the address
+\t\t# that connected means no client can make one up.
 \t\theader_up CF-Connecting-IP {remote_host}
 \t}
 }
@@ -367,7 +368,7 @@ export function renderCompose(s: Sources): string {
 `,
       "raccoon's build",
     );
-    return replaceOnce(b, "      - TRUST_CF_CONNECTING_IP=1\n", "      - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-1}\n", "raccoon's TRUST_CF_CONNECTING_IP");
+    return replaceOnce(b, "      - TRUST_CF_CONNECTING_IP=1\n", "      - TRUST_CF_CONNECTING_IP=${TRUST_CF_CONNECTING_IP:-0}\n", "raccoon's TRUST_CF_CONNECTING_IP");
   });
 
   const dependsOnPostgres = "    depends_on:\n      postgres:\n        condition: service_healthy\n";
@@ -436,12 +437,15 @@ function envExtra(minor: string): string {
 # PUBLIC_ORIGIN.
 # SITE_ADDRESS=https://vtt.example.com
 
-# Optional. 1, the default, takes each visitor's address from the
-# CF-Connecting-IP header, which every per-address limit keys on. That is
-# right behind Cloudflare and behind the https profile's Caddy, which both
-# overwrite the header. Behind a proxy that passes it through, anyone could
-# make one up: set 0 there, unless the proxy can overwrite it (README.md,
-# "Put HTTPS in front of it").
+# Optional. Where each visitor's address comes from, which every
+# per-address limit keys on (joins, wrong passwords, room creation,
+# uploads, open sockets). Unset or 0, the address that connected, so behind
+# a front end every visitor counts as the front end's one address: safe, but
+# strict. 1 takes it from the CF-Connecting-IP header instead. Set 1 only
+# when every request reaches the app through something that overwrites that
+# header with the visitor's address: Cloudflare, or the https profile's
+# Caddy. Anywhere else, anyone could send the header and pick an address
+# (README.md, "Put HTTPS in front of it").
 # TRUST_CF_CONNECTING_IP=1
 `;
 }
