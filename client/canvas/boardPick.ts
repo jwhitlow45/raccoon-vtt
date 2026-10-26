@@ -2,9 +2,12 @@ import { DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene } from "#
 import { occupiedRange, type FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
-import { footprint } from "../lib/scene.ts";
+import { footprint, type ViewToken } from "../lib/scene.ts";
 import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
+import { FogView } from "./relief/fogView.ts";
+import { creatureStands } from "./relief/stand.ts";
+import { cappedBase } from "./relief/standee.ts";
 
 /**
  * What a press on the board means (docs/design-v1-isometric-view.md 6.1):
@@ -17,6 +20,8 @@ export type BoardPick = PickSource & {
   /** What the drawn heights read, in feet, for a standee's base (view.ts drawnBase). Null on flat ground. */
   src: DrawnSource | null;
   feetPerCell: number;
+  /** The canvas's height in px, which caps how far a standee's lift draws (relief/standee.ts cappedBase). */
+  canvasHeight: number;
 };
 
 /**
@@ -29,7 +34,7 @@ export const boardPickSlot = scopeSlot(() => ({ read: null as (() => BoardPick |
 
 /** Top-down's pick, with no heights: what a tool reads before the canvas has measured itself, and in tests. */
 export function flatPick(camera: Camera, bounds: { w: number; h: number } = { w: 0, h: 0 }, grid: Grid = sceneGrid({})): BoardPick {
-  return { camera, view: TOP_DOWN, grid, heights: flatHeights(bounds), src: null, feetPerCell: 5 };
+  return { camera, view: TOP_DOWN, grid, heights: flatHeights(bounds), src: null, feetPerCell: 5, canvasHeight: Infinity };
 }
 
 /** The board's pick in this Room, or Top-down's at the tool's camera. */
@@ -79,10 +84,29 @@ export function pressGap(pick: Pick<BoardPick, "view" | "camera" | "heights">, p
   };
 }
 
-/** A token's drawn base in cells (view.ts drawnBase): where its standee's ring stands. 0 in Top-down. */
-export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, token: FootprintToken): number {
+/**
+ * Where a token's ring draws, in cells of height: a standee's base as its
+ * standee draws it (view.ts drawnBase, its lift capped by
+ * relief/standee.ts cappedBase), or for a creature that lies flat under
+ * the fog (`stands` false, 5.2) the drawn ground under it, where the ground
+ * stage lays its picture. What stands by a ring reads this one: box select,
+ * the chrome over a token, a switch's held point and a drag's grab. The
+ * rules keep the logical base. 0 in Top-down.
+ */
+export function tokenBase(pick: Pick<BoardPick, "view" | "src" | "feetPerCell" | "camera" | "canvasHeight">, token: FootprintToken, stands = true): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  return drawnBase(pick.src, occupiedRange(token), token.elevation) / pick.feetPerCell;
+  const range = occupiedRange(token);
+  const ground = drawnFootprintGround(pick.src, range) / pick.feetPerCell;
+  if (!stands) return ground;
+  return cappedBase(drawnBase(pick.src, range, token.elevation) / pick.feetPerCell, ground, pick.camera.scale, pick.canvasHeight);
+}
+
+/** Which tokens stand as standees for this pick's viewer, by the stand rule (relief/stand.ts creatureStands) with one read of the fog for them all. */
+export function standsFor(pick: Pick<BoardPick, "src">, aboveFog: (t: ViewToken) => boolean): (t: ViewToken) => boolean {
+  const src = pick.src;
+  if (!src?.fog) return () => true;
+  const fog = new FogView(src.fog, src.sceneId, src.bounds);
+  return (t) => creatureStands(fog, t, aboveFog(t));
 }
 
 /** The highest drawn ground under a footprint, in cells (view.ts drawnFootprintGround): where a ghost of it stands. 0 in Top-down. */
@@ -91,10 +115,10 @@ export function groundUnder(pick: Pick<BoardPick, "view" | "src" | "feetPerCell"
   return drawnFootprintGround(pick.src, occupiedRange(token)) / pick.feetPerCell;
 }
 
-/** Where a token's ring's center shows on screen: its footprint's middle at its drawn base. */
-export function ringCenter(pick: Pick<BoardPick, "view" | "camera" | "src" | "feetPerCell">, token: FootprintToken): Point {
+/** Where a token's ring's center shows on screen: its footprint's middle where its ring draws (`tokenBase`). */
+export function ringCenter(pick: Pick<BoardPick, "view" | "camera" | "src" | "feetPerCell" | "canvasHeight">, token: FootprintToken, stands = true): Point {
   const fp = footprint(token);
-  return screenAt(pick, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, tokenBase(pick, token));
+  return screenAt(pick, { x: token.x + fp.w / 2, y: token.y + fp.h / 2 }, tokenBase(pick, token, stands));
 }
 
 /** The highest drawn ground inside a world rectangle, in cells, at least 0: how far a fit raises its box's top (docs/design-v1-isometric-view.md 4.2). */
@@ -150,16 +174,18 @@ export function boardPickFor(
     view: View;
     camera: Camera;
     lowPower: boolean;
+    /** The canvas's height in px, for the lift's cap: none when absent. */
+    canvasHeight?: number;
   },
   memo: DrawnHeightsMemo,
 ): BoardPick {
   const { scene, room, camera, view } = input;
   const grid = sceneGrid(scene);
-  if (view.kind === "topDown") return flatPick(camera, scene.bounds, grid);
+  if (view.kind === "topDown") return { ...flatPick(camera, scene.bounds, grid), canvasHeight: input.canvasHeight ?? Infinity };
   const feetPerCell = room?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell;
   const fog = input.role === "player" && input.fog ? (room?.fogTiles ?? NO_FOG) : null;
   const { src, heights } = memo.get({ chunks: room?.buildChunks ?? NO_CHUNKS, sceneId: scene.id, bounds: scene.bounds, fog, feetPerCell, scale: camera.scale, lowPower: input.lowPower });
-  return { camera, view, grid, heights, src, feetPerCell };
+  return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity };
 }
 
 const NO_FOG: RoomState["fogTiles"] = {};
@@ -213,13 +239,13 @@ export class DrawnHeightsMemo {
  * shows in the clear part of the canvas, else where a press at that part's
  * middle meets the drawn ground.
  */
-export function heldPoint(was: BoardPick, now: BoardPick, selected: FootprintToken | undefined, viewport: Size, insets: Insets): { at: Point; before: number; after: number } {
+export function heldPoint(was: BoardPick, now: BoardPick, selected: FootprintToken | undefined, viewport: Size, insets: Insets, stands = true): { at: Point; before: number; after: number } {
   const clear = { x0: insets.left, y0: insets.top, x1: viewport.width - insets.right, y1: viewport.height - insets.bottom };
   if (selected) {
-    const ring = ringCenter(was, selected);
+    const ring = ringCenter(was, selected, stands);
     if (ring.x >= clear.x0 && ring.x <= clear.x1 && ring.y >= clear.y0 && ring.y <= clear.y1) {
       const fp = footprint(selected);
-      return { at: { x: selected.x + fp.w / 2, y: selected.y + fp.h / 2 }, before: tokenBase(was, selected), after: tokenBase(now, selected) };
+      return { at: { x: selected.x + fp.w / 2, y: selected.y + fp.h / 2 }, before: tokenBase(was, selected, stands), after: tokenBase(now, selected, stands) };
     }
   }
   const press = pickWalk(was, { x: (clear.x0 + clear.x1) / 2, y: (clear.y0 + clear.y1) / 2 });

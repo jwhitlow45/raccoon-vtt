@@ -6,7 +6,10 @@ import { reveal, rng, room, scene } from "#shared/testutil.ts";
 import { screenToView, viewToScreen, type Camera } from "../lib/camera.ts";
 import { isometric, K, TOP_DOWN, toView, toWorld, type Turn } from "../lib/view.ts";
 import { holdStill, NO_INSETS } from "../lib/camera.ts";
-import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, heldPoint, liftIn, nudgeStep, pressAt, pressGap, ringCenter, screenAt, tokenBase, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, drawnAt, DrawnHeightsMemo, flatPick, heldPoint, liftIn, nudgeStep, pressAt, pressGap, ringCenter, screenAt, standsFor, tokenBase, type BoardPick } from "./boardPick.ts";
+import { token } from "#shared/testutil.ts";
+import type { ViewToken } from "../lib/scene.ts";
+import { standeeShape } from "./relief/standee.ts";
 
 /** One chunk of scene s1 with these cells raised or lowered, in feet. */
 function chunkWith(heights: Record<string, number>): BuildChunk {
@@ -142,6 +145,56 @@ describe("arrow keys move by the screen (docs/design-v1-isometric-view.md 6.5)",
     assert.deepEqual(nudgeStep(isometric(1), 1, 0), compass.north, "Right at turn 1 moves toward the edge facing down and to the right");
     assert.deepEqual(nudgeStep(TOP_DOWN, 0, -1), compass.north);
     assert.deepEqual(nudgeStep(TOP_DOWN, -1, 0), compass.west);
+  });
+});
+
+describe("a token's ring as the board draws it (ISO34-ASTRA-3, ASTRA-9)", () => {
+  test("a 100 ft flier's ring stands where its standee draws it, its lift capped at a canvas height, for box select, the chrome and a switch", () => {
+    const state = heightsRoom({});
+    const roc = token("roc", { x: 7, y: 7, elevation: 100 }) as ViewToken;
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      // The ring in the middle of an 800 by 600 canvas, where a switch holds it.
+      const middle = toView(isometric(turn), { x: 7.5, y: 7.5 }, standeeShape(turn, { x: 7, y: 7, w: 1, h: 1 }, 20, 0, 80, 600).drawnBase);
+      const cam: Camera = { x: 400 - middle.x * 80, y: 300 - middle.y * 80, scale: 80 };
+      const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: true, view: isometric(turn), camera: cam, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+      const shape = standeeShape(turn, { x: 7, y: 7, w: 1, h: 1 }, 20, 0, cam.scale, 600);
+      assert.ok(shape.capped);
+      assert.equal(tokenBase(pick, roc), shape.drawnBase);
+      const ring = ringCenter(pick, roc);
+      const drawn = viewToScreen(cam, { x: (shape.ring.x0 + shape.ring.x1) / 2, y: (shape.ring.y0 + shape.ring.y1) / 2 } as never);
+      assert.ok(Math.hypot(ring.x - drawn.x, ring.y - drawn.y) < 1e-6, `turn ${turn}`);
+      // A switch holds that ring still.
+      const now = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: true, view: isometric(((turn + 1) % 4) as Turn), camera: cam, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+      const held = heldPoint(pick, now, roc, { width: 800, height: 600 }, NO_INSETS);
+      const next = holdStill(cam, toView(pick.view, held.at, held.before), toView(now.view, held.at, held.after));
+      const after = ringCenter({ ...now, camera: next }, roc);
+      assert.ok(Math.hypot(after.x - ring.x, after.y - ring.y) < 1e-6, `turn ${turn}: held through the turn`);
+    }
+  });
+
+  test("a flier half revealed to a player lies flat under the fog, and its ring is taken where the ground stage lays it", () => {
+    const state = heightsRoom({});
+    reveal(state, "s1", { x: 0, y: 0, w: 6.5, h: 16 });
+    const bat = token("bat", { x: 6, y: 6, elevation: 20 }) as ViewToken;
+    const pick = pickFor(state, "player", CAM);
+    const stands = standsFor(pick, () => false);
+    assert.equal(stands(bat), false, "half of its footprint lies under the fog");
+    assert.equal(standsFor(pick, () => true)(bat), true, "a creature every player sees stands wherever it is");
+    const flat = ringCenter(pick, bat, stands(bat));
+    const ground = screenAt(pick, { x: 6.5, y: 6.5 }, 0);
+    assert.ok(Math.hypot(flat.x - ground.x, flat.y - ground.y) < 1e-9, "on the ground, not 20 ft up");
+    assert.ok(Math.abs(ringCenter(pick, bat).y - flat.y) > 100, "where a standee would stand is far from it");
+    // A switch holds the flat picture's ring, which shows in a small canvas where a standee's would not.
+    const viewport = { width: 200, height: 150 };
+    const at = toView(isometric(0), { x: 6.5, y: 6.5 }, 0);
+    const cam: Camera = { x: 60 - at.x * 40, y: 100 - at.y * 40, scale: 40 };
+    const was = pickFor(state, "player", cam);
+    const now = pickFor(state, "player", cam, 1);
+    const held = heldPoint(was, now, bat, viewport, NO_INSETS, false);
+    const next = holdStill(cam, toView(was.view, held.at, held.before), toView(now.view, held.at, held.after));
+    const before = ringCenter(was, bat, false);
+    const after = ringCenter({ ...now, camera: next }, bat, false);
+    assert.ok(Math.hypot(before.x - after.x, before.y - after.y) < 1e-9, JSON.stringify([before, after]));
   });
 });
 

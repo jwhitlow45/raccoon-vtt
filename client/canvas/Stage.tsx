@@ -78,8 +78,9 @@ import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/v
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
 import { footAnchor, headAnchor } from "./anchors.ts";
-import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, tokenBase, type BoardPick } from "./boardPick.ts";
+import { boardPickFor, boardPickSlot, drawnAt, DrawnHeightsMemo, groundMapOf, heldPoint, liftIn, nudgeStep, pressAt, ringCenter, standsFor, tokenBase, type BoardPick } from "./boardPick.ts";
 import { DRAG_GROUND, liftToDragLayer, returnHome, type Home } from "./dragLayer.ts";
+import { cappedBase } from "./relief/standee.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { dragBound, dragGround, dragPlan } from "./isoDrag.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
@@ -408,10 +409,11 @@ export function MapStage(props: {
     const s = sizeRef.current;
     if (!c || !s) return;
     const pickIn = (view: View) =>
-      boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view, camera: c, lowPower: lowPowerRef.current }, heightsMemoRef.current);
+      boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view, camera: c, lowPower: lowPowerRef.current, canvasHeight: s.height }, heightsMemoRef.current);
     const was = pickIn(before);
     const now = pickIn(shown);
-    const held = heldPoint(was, now, tokensByIdRef.current.get(store.getState().local.selectedId ?? ""), s, insetsRef.current);
+    const selected = tokensByIdRef.current.get(store.getState().local.selectedId ?? "");
+    const held = heldPoint(was, now, selected, s, insetsRef.current, !selected || standsFor(was, aboveFogRef.current)(selected));
     const next = holdStill(c, toView(before, held.at, held.before), toView(shown, held.at, held.after));
     pendingCamRef.current = null;
     fittedRef.current = null;
@@ -792,7 +794,9 @@ export function MapStage(props: {
   lowPowerRef.current = lowPower;
   const pickOfRef = useRef<(c: Camera) => BoardPick>(null!);
   pickOfRef.current = (c) =>
-    boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view: shownRef.current, camera: c, lowPower: lowPowerRef.current }, heightsMemoRef.current);
+    boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view: shownRef.current, camera: c, lowPower: lowPowerRef.current, canvasHeight: sizeRef.current?.height }, heightsMemoRef.current);
+  /** Whether a creature draws above the fog for this viewer (vision/drawsAboveFog), for the stand rule's reads outside the board (boardPick.ts standsFor). */
+  const aboveFogRef = useRef<(t: ViewToken) => boolean>(() => true);
   /** The highest drawn ground in a rectangle at a zoom, for a fit (fitScene). */
   const liftRef = useRef<Lift>(NO_LIFT);
   liftRef.current = (rect, scale) => liftIn(pickOfRef.current({ x: 0, y: 0, scale }).heights, rect);
@@ -1251,7 +1255,7 @@ export function MapStage(props: {
           const tokensOnScene = tokensByIdRef.current.values();
           const picked =
             pick.view.kind === "isometric"
-              ? tokensByCenter(tokensOnScene, box.start, p, (t) => ringCenter(pick, t))
+              ? tokensByCenter(tokensOnScene, box.start, p, ((stands) => (t: ViewToken) => ringCenter(pick, t, stands(t)))(standsFor(pick, aboveFogRef.current)))
               : tokensInBox(tokensOnScene, toWorld(TOP_DOWN, screenToView(c, box.start)), toWorld(TOP_DOWN, screenToView(c, p)));
           if (picked.length > 0) uiRef.current.selectMany(picked.map((t) => t.id));
         } else if (lifted && !held && !box.add) {
@@ -1387,8 +1391,9 @@ export function MapStage(props: {
       if (!c || !room || !stage) return [];
       const pick = pickOfRef.current(c);
       if (pick.view.kind !== "isometric" || !pick.src) return [];
-      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, feetPerCell: pick.feetPerCell, token: lead });
-      const start = { node: node.getAbsolutePosition(), ring: ringCenter(pick, lead) };
+      const plan = dragPlan({ room, role: linksRef.current.role, src: pick.src, feetPerCell: pick.feetPerCell, token: lead, drawn: (base, ground) => cappedBase(base, ground, pick.camera.scale, pick.canvasHeight) });
+      // The ring as it draws, its lift capped and flat when it lies under the fog, so the first move does not jump (ISO34-OPUS-10).
+      const start = { node: node.getAbsolutePosition(), ring: ringCenter(pick, lead, standsFor(pick, aboveFogRef.current)(lead)) };
       const rel = { x: pressed.x - lead.x, y: pressed.y - lead.y };
       node.dragBoundFunc((pos) => {
         const now = pickOfRef.current(currentCam() ?? c);
@@ -1618,11 +1623,14 @@ export function MapStage(props: {
 
   // What the isometric board reads beside what Top-down's tree does (relief/IsoBoard.tsx).
   const aboveFogOf = useCallback((t: ViewToken) => drawsAboveFog(t, role, members ?? {}, characters), [role, members, characters]);
+  aboveFogRef.current = aboveFogOf;
   const decorTokens = useMemo(() => tokens.filter((t) => !carried.has(t.id)), [tokens, carried]);
   const keepIds = useMemo(() => new Set([...selectedIds, ...(draggingId ? [draggingId] : [])]), [selectedIds, draggingId]);
   const live: Live | null = cam && size ? { camera: cam, viewport: size, view: shown } : null;
   // The view and drawn heights the chrome over the map stands by (boardPick.ts).
   const pick = cam ? pickOfRef.current(cam) : null;
+  // Whether the selected creature stands as a standee or lies flat under the fog, where the chrome over it hangs.
+  const selectedStands = !selected || !pick || standsFor(pick, aboveFogOf)(selected);
 
   return (
     <div ref={wrapRef} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1728,9 +1736,9 @@ export function MapStage(props: {
             <GroupActionBar
               tokens={group}
               movable={group.filter(canDrag).length}
-              anchor={inZoomed(worldAnchor(cam, selected, pick!), zoom)}
+              anchor={inZoomed(worldAnchor(cam, selected, pick!, selectedStands), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, worldAnchor(cam, selected, pick!), zoom, pick!)}
+              tokenHeight={tokenRise(cam, selected, worldAnchor(cam, selected, pick!, selectedStands), zoom, pick!, selectedStands)}
               onClose={() => ui.select(null)}
               onShift={shiftForBar}
             />
@@ -1739,9 +1747,9 @@ export function MapStage(props: {
               // Keyed by token, so an armed Delete or a half-typed HP entry never carries over to the next token tapped.
               key={selected.id}
               token={selected}
-              anchor={inZoomed(belowLabel(worldAnchor(cam, selected, pick!), shownText.get(selected.id)), zoom)}
+              anchor={inZoomed(belowLabel(worldAnchor(cam, selected, pick!, selectedStands), shownText.get(selected.id)), zoom)}
               viewport={sizeInZoomed(size, zoom)}
-              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected, pick!), shownText.get(selected.id)), zoom, pick!)}
+              tokenHeight={tokenRise(cam, selected, belowLabel(worldAnchor(cam, selected, pick!, selectedStands), shownText.get(selected.id)), zoom, pick!, selectedStands)}
               fullAccess={role === "dm" || ownsToken(selected)}
               onDetails={() => onOpenDetails(selected.id)}
               onShift={shiftForBar}
@@ -1793,13 +1801,13 @@ function belowLabel(anchor: Point, text: TokenText | undefined): Point {
  * The screen point under a token's bottom center, where its action bar
  * hangs: in Isometric, under its ring at its drawn base (design 5.4).
  */
-function worldAnchor(cam: Camera, token: ViewToken, pick: BoardPick): Point {
+function worldAnchor(cam: Camera, token: ViewToken, pick: BoardPick, stands: boolean): Point {
   const fp = footprint(token);
-  return footAnchor(cam, pick, { x: token.x, y: token.y, w: fp.w, h: fp.h }, tokenBase(pick, token));
+  return footAnchor(cam, pick, { x: token.x, y: token.y, w: fp.w, h: fp.h }, tokenBase(pick, token, stands));
 }
 
 /** How far a token's top stands above the point under its label, in the chrome's pixels (barDock.ts clearShift's `tokenHeight`): in Isometric, its standee's art box's top. */
-function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number, pick: BoardPick): number {
+function tokenRise(cam: Camera, token: ViewToken, anchor: Point, zoom: number, pick: BoardPick, stands: boolean): number {
   const fp = footprint(token);
-  return (anchor.y - headAnchor(cam, pick, { x: token.x, y: token.y, w: fp.w, h: fp.h }, tokenBase(pick, token)).y) / zoom;
+  return (anchor.y - headAnchor(cam, pick, { x: token.x, y: token.y, w: fp.w, h: fp.h }, tokenBase(pick, token, stands)).y) / zoom;
 }

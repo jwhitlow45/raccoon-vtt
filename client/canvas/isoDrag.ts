@@ -34,6 +34,8 @@ export type DragPlan = {
   own: DragRule;
   /** A seat on a holder every player sees: its drawn height, whether it holds with the token's corner at a spot, and the rule off it, from the holder's footing. */
   seat: { base: number; keptAt(at: Point): boolean; off: DragRule } | null;
+  /** The height a base over a drawn ground draws at, its lift capped (relief/standee.ts cappedBase): where the ray under the finger meets the ring. */
+  drawn(base: number, ground: number): number;
 };
 
 /** The drawn ground a drag reads. */
@@ -66,9 +68,14 @@ export function dragBound(input: { camera: Camera; view: View; ground: DragGroun
 
 /** Where a dragged token's corner goes and the height its ring stands at, for the ring's view point `v`. */
 export function dragLanding(view: View, ground: DragGround, plan: DragPlan, v: ViewPoint): Point & { z: number } {
-  const place = (z: number): Point & { z: number } => {
-    const c = toWorld(view, v, z);
+  const at = (z: number, ray: number): Point & { z: number } => {
+    const c = toWorld(view, v, ray);
     return { x: c.x - plan.w / 2, y: c.y - plan.h / 2, z };
+  };
+  // A base held above the ground meets the ray where its ring draws, lower than it stands where its lift is capped (ISO34-OPUS-10), and keeps its height.
+  const place = (z: number): Point & { z: number } => {
+    const first = at(z, plan.drawn(z, ground.footGround(ground.snap(at(z, z)))));
+    return at(z, plan.drawn(z, ground.footGround(ground.snap(first))));
   };
   if (plan.seat) {
     const seated = place(plan.seat.base);
@@ -151,14 +158,15 @@ function inScene(heights: DrawnHeights, x: number, y: number): boolean {
  * base in cells of drawn height (view.ts drawnBase). The seat is the
  * drop's own (drop.ts seenSeat), read from this viewer's copy.
  */
-export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource; feetPerCell: number; token: Placed & DropToken }): DragPlan {
+export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource; feetPerCell: number; token: Placed & DropToken; drawn?: DragPlan["drawn"] }): DragPlan {
   const { room, role, src, feetPerCell, token } = input;
+  const drawn = input.drawn ?? UNCAPPED;
   const size = footprint(token);
   const ruleOf = (t: Placed, base: number): DragRule => ruleFor(seenStanding(src, t), base);
   const ownBase = drawnBase(src, occupiedRange(token), token.elevation) / feetPerCell;
   const own = ruleOf(token, ownBase);
   const seat = seenSeat(dropView(room, role), token);
-  if (!seat) return { w: size.w, h: size.h, own, seat: null };
+  if (!seat) return { w: size.w, h: size.h, own, seat: null, drawn };
   const holder = seat.holder as Placed;
   return {
     w: size.w,
@@ -170,8 +178,11 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
       // Off a holder on the ground the token walks, off a flier it keeps its own height, off one inside the ground its own base.
       off: ruleFor(seenStanding(src, holder), ownBase),
     },
+    drawn,
   };
 }
+
+const UNCAPPED: DragPlan["drawn"] = (base) => base;
 
 function seenStanding(src: DrawnSource, t: Placed): Standing {
   return standing(t.elevation, seenFootprintGround(src, occupiedRange(t)));

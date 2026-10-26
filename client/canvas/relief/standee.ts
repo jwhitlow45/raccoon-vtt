@@ -62,10 +62,9 @@ export const ON_GROUND: Seat = { rise: 0, inset: 1 };
 export function standeeShape(turn: Turn, box: { x: number; y: number; w: number; h: number }, base: number, ground: number, scale: number, canvasHeight: number, seat: Seat = ON_GROUND): StandeeShape {
   const center = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
   const g = toView(isometric(turn), center, ground);
-  let lift = K * (base - ground);
-  const cap = (LIFT_CAP_CANVAS * canvasHeight) / Math.max(scale, 1e-9);
-  const capped = lift > cap;
-  if (capped) lift = cap;
+  const drawn = cappedBase(base, ground, scale, canvasHeight);
+  const capped = drawn !== base;
+  const lift = K * (drawn - ground);
   const at = { x: g.x, y: g.y - lift };
   const foot = at.y - seat.rise;
   const art = { x0: at.x - (box.w * seat.inset) / 2, x1: at.x + (box.w * seat.inset) / 2, y0: foot - box.h * seat.inset, y1: foot };
@@ -79,7 +78,19 @@ export function standeeShape(turn: Turn, box: { x: number; y: number; w: number;
     y0: frame.y0 - DECOR_REACH_PX.top * k,
     y1: Math.max(ring.y1, shadow?.y1 ?? -Infinity) + DECOR_REACH_PX.bottom * k,
   };
-  return { ground: g, base: at, art, frame, ring, shadow, bounds, capped, drawnBase: capped ? ground + lift / K : base };
+  return { ground: g, base: at, art, frame, ring, shadow, bounds, capped, drawnBase: drawn };
+}
+
+/**
+ * The base a standee draws at, in cells: its base, or lower where its lift
+ * over the drawn ground would rise past LIFT_CAP_CANVAS canvas heights on
+ * screen (5.4). Everything that stands by a ring reads this one: the
+ * drawing, box select, the chrome over it and a drag's grab
+ * (canvas/boardPick.ts tokenBase), while the rules keep the logical base.
+ */
+export function cappedBase(base: number, ground: number, scale: number, canvasHeight: number): number {
+  const cap = (LIFT_CAP_CANVAS * canvasHeight) / Math.max(scale, 1e-9);
+  return K * (base - ground) > cap ? ground + cap / K : base;
 }
 
 /**

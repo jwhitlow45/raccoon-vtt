@@ -8,6 +8,7 @@ import { screenToView, viewToScreen, type Camera } from "../lib/camera.ts";
 import { footprint, snapPosition } from "../lib/scene.ts";
 import { flatHeights, isometric, toView, type Turn, type ViewPoint } from "../lib/view.ts";
 import { boardPickFor, DrawnHeightsMemo, ringCenter, type BoardPick } from "./boardPick.ts";
+import { cappedBase, standeeShape } from "./relief/standee.ts";
 import { dragBound, dragGround, dragLanding, dragPlan, levelsOf, type DragPlan } from "./isoDrag.ts";
 
 const CAM: Camera = { x: 600, y: 80, scale: 40 };
@@ -43,6 +44,34 @@ describe("the isometric drag adapter (docs/design-v1-isometric-view.md 6.3)", ()
       const input = { camera: CAM, view: pick.view, ground: dragGround(pick.heights, t), plan: dragPlan({ room: state, role: "dm", src: pick.src!, feetPerCell: 5, token: t }), start: { node, ring }, rel: { x: 0, y: 0 } };
       const at = dragBound(input, node);
       assert.ok(Math.abs(at.x - node.x) < 1e-6 && Math.abs(at.y - node.y) < 1e-6, `turn ${turn}: ${JSON.stringify([at, node])}`);
+    }
+  });
+
+  test("a 100 ft flier whose lift is capped on screen: the first move leaves it where its ring draws, and a move keeps it at 100 ft under the finger, at every turn", () => {
+    const state = world({ blockMovement: false, tokens: [token("roc", { x: 7, y: 7, elevation: 100 })] });
+    const cam: Camera = { x: 600, y: 80, scale: 80 };
+    const t = state.tokens.roc! as Token;
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      const pick = boardPickFor({ room: state, scene: state.scenes.s1!, role: "dm", fog: true, view: isometric(turn), camera: cam, lowPower: false, canvasHeight: 600 }, new DrawnHeightsMemo());
+      // The ring where the standee draws it, its lift capped at one canvas height.
+      const shape = standeeShape(turn, { x: 7, y: 7, w: 1, h: 1 }, 20, 0, cam.scale, 600);
+      assert.ok(shape.capped, "the lift is capped");
+      const ring = ringCenter(pick, t);
+      const drawn = viewToScreen(cam, { x: (shape.ring.x0 + shape.ring.x1) / 2, y: (shape.ring.y0 + shape.ring.y1) / 2 } as ViewPoint);
+      assert.ok(Math.hypot(ring.x - drawn.x, ring.y - drawn.y) < 1e-6, `turn ${turn}: the ring as it draws`);
+      const node = viewToScreen(cam, toView(pick.view, { x: t.x, y: t.y }));
+      const plan = dragPlan({ room: state, role: "dm", src: pick.src!, feetPerCell: 5, token: t, drawn: (base, ground) => cappedBase(base, ground, cam.scale, 600) });
+      const input = { camera: cam, view: pick.view, ground: dragGround(pick.heights, t), plan, start: { node, ring }, rel: { x: 0, y: 0 } };
+      const still = dragBound(input, node);
+      assert.ok(Math.abs(still.x - node.x) < 1e-6 && Math.abs(still.y - node.y) < 1e-6, `turn ${turn}: no jump at the first move`);
+      // A finger moved two cells' width along the screen carries the ring with it, the roc at 100 ft.
+      const moved = { x: node.x + 2 * cam.scale, y: node.y };
+      const at = dragLanding(pick.view, input.ground, plan, screenToView(cam, { x: ring.x + 2 * cam.scale, y: ring.y }));
+      assert.equal(at.z, 20, `turn ${turn}: the roc keeps its height`);
+      const ringThen = viewToScreen(cam, toView(pick.view, { x: at.x + 0.5, y: at.y + 0.5 }, cappedBase(20, 0, cam.scale, 600)));
+      assert.ok(Math.hypot(ringThen.x - (ring.x + 2 * cam.scale), ringThen.y - ring.y) < 1e-6, `turn ${turn}: its ring under the finger`);
+      const bound = dragBound(input, moved);
+      assert.ok(Math.abs(bound.x - moved.x) < 1e-6 && Math.abs(bound.y - moved.y) < 1e-6, `turn ${turn}: the node follows the finger`);
     }
   });
 
