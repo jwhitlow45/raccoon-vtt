@@ -17,7 +17,9 @@ import {
   deathSaveResult,
   deathSaveWaits,
   deathSaveWords,
-  legendaryHead,
+  LEGENDARY_ACTIONS,
+  LEGENDARY_CARD_LINE,
+  LEGENDARY_RESISTANCE,
   legendaryLabel,
   legendaryOffText,
   legendaryOp,
@@ -33,6 +35,7 @@ import {
   rechargeRollOp,
   rechargeWords,
   regeneratedWords,
+  rowCount,
   regenerateOp,
   regenerationNote,
   regenerationWords,
@@ -191,7 +194,13 @@ describe("the list", () => {
         ["Wing Attack (2)", null],
       ],
     );
-    assert.equal(legendaryHead(la, "list"), "Legendary Actions 3 of 3");
+    // The title says the name alone, as its pips show the count (docs/design-v1-monster-uses.md 3.1, D-261026-6).
+    assert.equal(LEGENDARY_ACTIONS, "Legendary Actions");
+    assert.deepEqual(rowCount(la), { left: 3, max: 3 });
+    const resist = rows.find((r) => r.kind === "resist")!;
+    assert.equal(LEGENDARY_RESISTANCE, "Legendary Resistance");
+    assert.deepEqual(rowCount(resist), { left: 2, max: 3 });
+    assert.equal(rowCount(rows.find((r) => r.kind === "ability")!), null, "a recharge says its state, not a count");
     assert.equal(legendaryLabel(la.buttons[1]!, 3), "Use Fiery Rays, legendary action, 3 left");
   });
 
@@ -218,7 +227,8 @@ describe("the list", () => {
   test("the card lists no legendary action buttons, and says the pips come after other creatures' turns", () => {
     const la = legendaryRow(rowsOf("card", { ownTurn: true }));
     assert.deepEqual(la.buttons, []);
-    assert.equal(legendaryHead(la, "card"), "Legendary Actions 3 of 3, after other creatures' turns");
+    assert.deepEqual(rowCount(la), { left: 3, max: 3 });
+    assert.equal(LEGENDARY_CARD_LINE, "After other creatures' turns");
   });
 
   test("an ability's line and state: ready, used, a roll's result, an X/Day count", () => {
@@ -234,9 +244,12 @@ describe("the list", () => {
     assert.equal(abilityState(rolled), "Rolled 5: ready");
     const day = usesRows({ form: "list", uses: [dominate, phantasms], actor: { uses: { [dominate.key]: { kind: "day", name: "Dominate Mind", used: 1, max: 2 } } }, ownTurn: false, record: null });
     assert.deepEqual(
-      day.map((r) => (r.kind === "ability" ? `${abilityHead(r)} | ${abilityState(r)}` : r.kind)),
-      ["Dominate Mind, 2/Day, 1 left | null", "Phantasms, after a rest | Ready"],
+      day.map((r) => (r.kind === "ability" ? `${abilityHead(r)} | ${abilityState(r)} | ${JSON.stringify(rowCount(r))}` : r.kind)),
+      ['Dominate Mind, 2/Day | null | {"left":1,"max":2}', "Phantasms, after a rest | Ready | null"],
     );
+    // None left: no pip filled.
+    const none = usesRows({ form: "list", uses: [dominate], actor: { uses: { [dominate.key]: { kind: "day", name: "Dominate Mind", used: 2, max: 2 } } }, ownTurn: false, record: null });
+    assert.deepEqual(rowCount(none[0]!), { left: 0, max: 2 });
   });
 
   test("a recharge roll's words give way to the mark it no longer matches, in the list and on the card (CCB-ASTRA-01)", () => {

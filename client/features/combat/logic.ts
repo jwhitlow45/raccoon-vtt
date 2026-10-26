@@ -467,22 +467,32 @@ export function legendaryLabel(button: LegendaryButton, left: number): string {
   return `${what}${button.cost > 1 ? `, costs ${button.cost}` : ""}, ${left} left`;
 }
 
-/** "Legendary Actions 2 of 3", and on the card ", after other creatures' turns" (4.2). */
-export function legendaryHead(row: Extract<UseRow, { kind: "legendary" }>, form: UsesForm): string {
-  return `Legendary Actions ${row.left} of ${row.max}${form === "card" ? ", after other creatures' turns" : ""}`;
+/** The legendary rows' names on their title lines, whose pips show the counts (docs/design-v1-monster-uses.md 3.1, D-261026-6). */
+export const LEGENDARY_ACTIONS = "Legendary Actions";
+export const LEGENDARY_RESISTANCE = "Legendary Resistance";
+
+/** The card's line under Legendary Actions' title, which has no buttons there to say when they come (4.2). */
+export const LEGENDARY_CARD_LINE = "After other creatures' turns";
+
+/** What is left of a counted row, which its pips show: Legendary Actions, Legendary Resistance and an X/Day ability. Null for any other row. */
+export function rowCount(row: UseRow): { left: number; max: number } | null {
+  switch (row.kind) {
+    case "legendary":
+    case "resist":
+      return { left: row.left, max: row.max };
+    case "ability":
+      return row.use.kind === "day" ? { left: dayLeft(row.use, row.mark), max: row.use.max } : null;
+    default:
+      return null;
+  }
 }
 
-/** "Legendary Resistance 2 of 3", in the list and on the card alike (4.2, 5): its Use button's name says how many are left. */
-export function resistHead(row: Extract<UseRow, { kind: "resist" }>): string {
-  return `Legendary Resistance ${row.left} of ${row.max}`;
-}
-
-/** An ability's line: "Fire Breath, Recharge 5–6", "Phantasms, after a rest", "Dominate Mind, 2/Day, 2 left". */
+/** An ability's name on its title line: "Fire Breath, Recharge 5–6", "Phantasms, after a rest", "Dominate Mind, 2/Day", whose pips then count what is left. */
 export function abilityHead(row: Extract<UseRow, { kind: "ability" }>): string {
-  const { use, mark } = row;
+  const { use } = row;
   if (use.kind === "recharge") return `${use.name}, Recharge ${rechargeRange(use.min)}`;
   if (use.kind === "rest") return `${use.name}, after a rest`;
-  return `${use.name}, ${use.max}/Day, ${dayLeft(use, mark)} left`;
+  return `${use.name}, ${use.max}/Day`;
 }
 
 export function dayLeft(use: DayUse, mark: UseMark | undefined): number {

@@ -5,6 +5,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { ClassResource, PromptKey } from "#shared/model.ts";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
+import { CountPips, countWords, EndWords, NameLine, type Count } from "../../components/CountPips.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { GROUP_BOX, GROUP_FOLD } from "../../components/Panel.tsx";
 import { buttonLook } from "../../components/looks.ts";
@@ -31,7 +32,9 @@ import {
   currentRecord,
   dayLeft,
   holderKey,
-  legendaryHead,
+  LEGENDARY_ACTIONS,
+  LEGENDARY_CARD_LINE,
+  LEGENDARY_RESISTANCE,
   legendaryLabel,
   legendaryOffText,
   legendaryOp,
@@ -43,8 +46,8 @@ import {
   promptOp,
   rechargeRollOp,
   regenerationLine,
-  resistHead,
   resistOp,
+  rowCount,
   turnKey,
   usesPresence,
   usesRows,
@@ -108,9 +111,10 @@ export function CombatUses(props: UsesSlots & { target: ActorTarget; form: UsesF
   // Nothing to show draws nothing, not an empty box that would take a gap in the section around it.
   if (rows.length === 0 && !waits && resourceCount === 0) return null;
   return (
-    <div data-combat-uses={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+    // Its parts stand as far apart as its rows, as the class resource rows' do, so a companion's start one gap under the block's last row.
+    <div data-combat-uses={form} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(3) }}>
       {rows.length > 0 ? (
-        <ul aria-label={`${props.name}'s uses`} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
+        <ul aria-label={`${props.name}'s uses`} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(3) }}>
           {rows.map((row) => (
             <UseLine key={rowKey(row)} row={row} target={target} holder={holder} form={form} record={record?.id} turn={turn} encounter={encounter} actor={actor} onStatus={onStatus} />
           ))}
@@ -257,7 +261,11 @@ type LineProps = {
   onStatus(status: { text: string; refused: boolean } | null): void;
 };
 
-/** One row's line: its words, then its buttons on a line of their own under them. */
+/**
+ * One row: its title line, the name with its count's pips or its state at
+ * the right end (docs/design-v1-monster-uses.md 3.1), then its buttons on a
+ * line of their own under it.
+ */
 function UseLine(props: LineProps) {
   const { row, target, form } = props;
   const send = useUseSend(props.onStatus);
@@ -287,6 +295,8 @@ function UseLine(props: LineProps) {
   };
   let head: ReactNode;
   let state: string | null = null;
+  const count: Count | null = rowCount(row);
+  let note: string | null = null;
   const buttons: ReactNode[] = [];
   const add = (key: string, b: Omit<UseButtonProps, "busy"> & { op?: ClientOp | null }) => {
     const { op, ...rest } = b;
@@ -304,18 +314,23 @@ function UseLine(props: LineProps) {
     );
   };
   switch (row.kind) {
+    /*
+     * Restore is the hand correction now that the pips take no taps, so it stands on every count in the list, off
+     * while the count is full rather than gone, and the row never changes shape at its first use (D-261026-2).
+     */
     case "resist":
-      head = resistHead(row);
+      head = LEGENDARY_RESISTANCE;
       add("use", { text: "Use", label: `Use Legendary Resistance, ${row.left} left`, off: row.left === 0 ? "No Legendary Resistance left." : null, offId: `${id}-off`, op: resistOp(target), onOff: props.onStatus });
-      if (form === "list" && row.left < row.max) add("back", { text: "Restore", label: "Restore one Legendary Resistance", op: resistOp(target, true) });
+      if (form === "list") add("back", { text: "Restore", label: "Restore one Legendary Resistance", off: row.left >= row.max ? "Legendary Resistance is full." : null, offId: `${id}-full`, op: resistOp(target, true), onOff: props.onStatus });
       break;
     case "legendary":
-      head = legendaryHead(row, form);
+      head = LEGENDARY_ACTIONS;
+      if (form === "card") note = LEGENDARY_CARD_LINE;
       for (const [i, b] of row.buttons.entries()) {
         const off = legendaryOffText(b);
         add(`la${i}`, { text: legendaryText(b), label: legendaryLabel(b, row.left), off: off === null ? null : `${b.name || "A legendary action"}: ${off.toLowerCase()}.`, offId: `${id}-la${i}`, op: legendaryOp(target, b), onOff: props.onStatus });
       }
-      if (form === "list" && row.left < row.max) add("back", { text: "Restore", label: "Restore one legendary action", op: legendaryBackOp(target, row.buttons, props.actor) });
+      if (form === "list") add("back", { text: "Restore", label: "Restore one legendary action", off: row.left >= row.max ? "Legendary Actions are full." : null, offId: `${id}-full`, op: legendaryBackOp(target, row.buttons, props.actor), onOff: props.onStatus });
       break;
     case "ability": {
       head = abilityHead(row);
@@ -325,7 +340,7 @@ function UseLine(props: LineProps) {
         const left = dayLeft(use, mark);
         if (form === "card" && left === 0) break;
         add("use", { text: "Use", label: `Use ${use.name}, ${left} left`, off: left === 0 ? `No uses of ${use.name} left.` : null, offId: `${id}-off`, op: abilityOp(target, use), onOff: props.onStatus });
-        if (form === "list" && mark) add("back", { text: "Restore", label: `Restore one use of ${use.name}`, op: abilityOp(target, use, { back: true }) });
+        if (form === "list") add("back", { text: "Restore", label: `Restore one use of ${use.name}`, off: left >= use.max ? `${use.name} is full.` : null, offId: `${id}-full`, op: abilityOp(target, use, { back: true }), onOff: props.onStatus });
         break;
       }
       if (!mark) {
@@ -367,10 +382,8 @@ function UseLine(props: LineProps) {
   }
   return (
     <li ref={line} data-use-row={row.kind} data-use-key={rowKey(row)} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minHeight: theme.touch }}>
-      <div style={{ flex: "1 1 auto", minWidth: 0, fontSize: theme.font.body14, lineHeight: theme.leading.tight, overflowWrap: "anywhere" }}>
-        <span style={{ fontWeight: theme.weight.strong }}>{head}</span>
-        {state ? <span style={{ color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>{`, ${state}`}</span> : null}
-      </div>
+      <NameLine name={head} spoken={count ? countWords(count) : (state ?? undefined)} end={count ? <CountPips {...count} /> : state ? <EndWords>{state}</EndWords> : null} />
+      {note ? <div style={{ flex: "1 1 100%", fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.textMuted }}>{note}</div> : null}
       {/*
        * The buttons take a line of their own under the row's words, each growing to fill it, as a card's do. Beside
        * the words where they fit, a row's height would follow how many buttons it holds, so a full Legendary

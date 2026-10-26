@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import { LIMITS } from "#shared/limits.ts";
-import type { Character, ClassResource, RoomState, Viewer } from "#shared/model.ts";
+import type { DayUse, LegendaryUse, LimitedUse, RechargeUse } from "#shared/dice/uses.ts";
+import type { Actor, Character, ClassResource, RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { DM, P1, actor, character, room, token } from "#shared/testutil.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { UsesSection, NOTHING_TO_LIST } = await import("./UsesSection.tsx");
+const { CombatUses } = await import("./CombatUses.tsx");
 const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 
@@ -107,10 +109,10 @@ describe("Combat's Uses for a creature of its own", () => {
   test("the DM's pips stand under the list, each count's words over its pips", () => {
     const markup = of("dragon", DM);
     assert.match(markup, />Uses<\/h/);
-    assert.match(markup, /Legendary Actions 2 of 3/, "the list's row");
+    assert.match(markup, /Legendary Actions<span[^>]*>, 2 of 3 left</, "the list's row");
     assert.match(markup, /Legendary Actions used: 1 of 3/);
     assert.match(markup, /Legendary Resistances used today: 0 of 2/);
-    assert.ok(markup.indexOf("Legendary Actions 2 of 3") < markup.indexOf("Legendary Actions used: 1 of 3"), "the pips after the list");
+    assert.ok(markup.indexOf(", 2 of 3 left") < markup.indexOf("Legendary Actions used: 1 of 3"), "the pips after the list");
     assert.equal(buttons(markup).filter((b) => /aria-label="\d+ used"/.test(b)).length, 5, "a pip for each of 3 and 2");
     assert.ok(named(markup, "1 used")?.includes('aria-pressed="true"'));
     assert.ok(named(markup, "2 used")?.includes('aria-pressed="false"'));
@@ -119,11 +121,122 @@ describe("Combat's Uses for a creature of its own", () => {
 
   test("its player reads the list with no pips", () => {
     const markup = of("dragon", P1);
-    assert.match(markup, /Legendary Actions 2 of 3/);
+    assert.match(markup, /Legendary Actions<span[^>]*>, 2 of 3 left</);
     assert.doesNotMatch(markup, /Legendary Actions used/);
   });
 
   test("a creature with no use draws nothing", () => {
     assert.equal(of("goblin", DM), "");
+  });
+});
+
+/*
+ * A monster's rows (docs/design-v1-monster-uses.md 3): each title line with
+ * its count as pips at its right end, to read only, in place of "x of y",
+ * Restore always there and off while full, and the turn card's Legendary
+ * Actions line.
+ */
+describe("a monster's rows, its counts as pips", () => {
+  const lash: LegendaryUse = { kind: "legendary", key: "legendaryActions:lash", name: "Lash", section: "legendaryActions", cost: 1, once: false };
+  const drain: LegendaryUse = { kind: "legendary", key: "legendaryActions:psychic-drain", name: "Psychic Drain", section: "legendaryActions", cost: 2, once: false };
+  const dominate: DayUse = { kind: "day", key: "actions:dominate-mind", name: "Dominate Mind", section: "actions", max: 2, short: false };
+  const breath: RechargeUse = { kind: "recharge", key: "actions:fire-breath", name: "Fire Breath", section: "actions", min: 5 };
+  const block: LimitedUse[] = [lash, drain, dominate, breath];
+
+  function list(over: Partial<Actor>, opts: { form?: "card" | "list"; ownTurn?: boolean; viewer?: Viewer } = {}): string {
+    const state = room();
+    state.tokens.aboleth = token("aboleth", { name: "Aboleth", ownerIds: ["p1"], actor: { inline: actor(over) } });
+    return render(state, opts.viewer ?? DM, createElement(CombatUses, { target: { tokenId: "aboleth" }, form: opts.form ?? "list", uses: block, loading: false, failed: false, ownTurn: opts.ownTurn ?? false, name: "Aboleth" }));
+  }
+  const spent = { legendary: { actionsMax: 3, actionsUsed: 1, resistMax: 3, resistUsed: 1 }, uses: { [dominate.key]: { kind: "day" as const, name: "Dominate Mind", used: 1, max: 2 } } };
+  const full = { legendary: { actionsMax: 3, actionsUsed: 0, resistMax: 3, resistUsed: 0 } };
+
+  /** Each row's markup by its kind, in order. */
+  const rowsOf = (markup: string) => markup.split(/(?=<li data-use-row=)/).slice(1).map((html) => ({ kind: /^<li data-use-row="(\w+)"/.exec(html)![1]!, html: html.slice(0, html.indexOf("</li>")) }));
+  const row = (markup: string, kind: string, nth = 0) => rowsOf(markup).filter((r) => r.kind === kind)[nth]!.html;
+  const pips = (html: string) => ({ left: [...html.matchAll(/data-pip="left"/g)].length, spent: [...html.matchAll(/data-pip="spent"/g)].length });
+  const off = (markup: string, b: string | undefined) => {
+    const why = b && /aria-describedby="([^"]+)"/.exec(b)?.[1];
+    return why ? new RegExp(`<span id="${why}" hidden="">([^<]*)</span>`).exec(markup)?.[1] : undefined;
+  };
+
+  test("the Aboleth with a Resistance, a Lash and a Dominate Mind spent: its pips filled for what is left, no x of y", () => {
+    const markup = list(spent);
+    assert.deepEqual(pips(row(markup, "resist")), { left: 2, spent: 1 });
+    assert.deepEqual(pips(row(markup, "legendary")), { left: 2, spent: 1 });
+    assert.deepEqual(pips(row(markup, "ability", 0)), { left: 1, spent: 1 }, "Dominate Mind");
+    assert.match(row(markup, "resist"), />Legendary Resistance<span/);
+    assert.match(row(markup, "legendary"), />Legendary Actions<span/);
+    assert.match(row(markup, "ability", 0), />Dominate Mind, 2\/Day<span/);
+    assert.doesNotMatch(markup, />[^<]*\d of \d(?! left)[^<]*</, "no count in words on screen");
+    // The pips only show: no button among them, and hidden from a screen reader.
+    for (const part of markup.match(/<span data-use-pips=""[^>]*>.*?<\/span><\/div>/g) ?? []) {
+      assert.match(part, /^<span data-use-pips="" aria-hidden="true"/);
+      assert.doesNotMatch(part, /<button/);
+    }
+  });
+
+  test("a screen reader hears each count after its name, and a recharge its state", () => {
+    const markup = list({ ...spent, uses: { ...spent.uses, [breath.key]: { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 } } });
+    assert.match(row(markup, "legendary"), />Legendary Actions<span style="[^"]*">, 2 of 3 left<\/span><\/span>/);
+    assert.match(row(markup, "resist"), />Legendary Resistance<span style="[^"]*">, 2 of 3 left<\/span><\/span>/);
+    assert.match(row(markup, "ability", 0), />Dominate Mind, 2\/Day<span style="[^"]*">, 1 of 2 left<\/span><\/span>/);
+    const fire = row(markup, "ability", 1);
+    assert.match(fire, />Fire Breath, Recharge 5–6<span style="[^"]*">, Used<\/span><\/span><span data-use-pips="" aria-hidden="true"[^>]*>Used<\/span>/, "its state at the right end, as the pips stand");
+  });
+
+  test("a count of 6 shows 6 pips, as the Tarrasque's Legendary Resistance, and of 7 its words where they would stand", () => {
+    const six = row(list({ legendary: { actionsMax: 0, actionsUsed: 0, resistMax: 6, resistUsed: 1 } }), "resist");
+    assert.deepEqual(pips(six), { left: 5, spent: 1 });
+    assert.match(six, /, 5 of 6 left</);
+    const seven = row(list({ legendary: { actionsMax: 0, actionsUsed: 0, resistMax: 7, resistUsed: 1 } }), "resist");
+    assert.deepEqual(pips(seven), { left: 0, spent: 0 });
+    assert.match(seven, /<span data-use-pips="" aria-hidden="true"[^>]*>6 of 7<\/span>/);
+    assert.match(seven, /, 6 of 7 left</);
+  });
+
+  test("Restore stays on every count, off while it is full and saying why, so a row keeps its shape (D-261026-2)", () => {
+    const fullList = list(full);
+    const restores = (markup: string) => buttons(markup).filter((b) => /aria-label="Restore one /.test(b));
+    assert.deepEqual(
+      restores(fullList).map((b) => [/aria-label="([^"]+)"/.exec(b)![1], /aria-disabled="true"/.test(b), off(fullList, b)]),
+      [
+        ["Restore one Legendary Resistance", true, "Legendary Resistance is full."],
+        ["Restore one legendary action", true, "Legendary Actions are full."],
+        ["Restore one use of Dominate Mind", true, "Dominate Mind is full."],
+      ],
+    );
+    const spentList = list(spent);
+    assert.deepEqual(
+      restores(spentList).map((b) => /aria-disabled/.test(b)),
+      [false, false, false],
+    );
+  });
+
+  test("on its own turn its legendary actions are off and Restore still corrects the count", () => {
+    const markup = list(spent, { ownTurn: true });
+    assert.match(named(markup, "Use Lash, legendary action, 2 left")!, /aria-disabled="true"/);
+    assert.doesNotMatch(named(markup, "Restore one legendary action")!, /aria-disabled/);
+  });
+
+  test("the turn card: Legendary Actions' pips and when they come, no buttons for them, and no Restore", () => {
+    const markup = list(spent, { form: "card", ownTurn: true });
+    const la = row(markup, "legendary");
+    assert.deepEqual(pips(la), { left: 2, spent: 1 });
+    assert.match(la, />After other creatures&#x27; turns</);
+    assert.doesNotMatch(la, /<button/);
+    assert.doesNotMatch(markup, /aria-label="Restore /);
+  });
+
+  test("its rows and the parts of its box stand 12 px apart (docs/design-v1-monster-uses.md 3.1)", () => {
+    const markup = list(spent);
+    assert.match(markup, /^<div data-combat-uses="list" style="[^"]*gap:12px/);
+    assert.match(markup, /<ul aria-label="Aboleth&#x27;s uses" style="[^"]*gap:12px/);
+  });
+
+  test("a lent monster's player reads the same rows and pips", () => {
+    const markup = list(spent, { viewer: P1 });
+    assert.deepEqual(pips(row(markup, "resist")), { left: 2, spent: 1 });
+    assert.ok(named(markup, "Restore one Legendary Resistance"));
   });
 });
