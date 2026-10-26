@@ -213,15 +213,36 @@ async function moveTo(id: string, size: "tiny" | "medium" | "large", hex: Hex): 
   });
 }
 
-/** The Area tool's reading after a tap inside a placed area: its "In area" list. */
-async function areaReading(page: Page, world: { x: number; y: number }, title: string): Promise<string> {
+/**
+ * Where a ground point shows on the isometric board (iso.e2e.ts isoPoint at
+ * no height), or null until the board is up: through the ground group's
+ * transform on the listening relief stage.
+ */
+async function isoGroundPoint(page: Page, world: { x: number; y: number }): Promise<{ x: number; y: number } | null> {
+  return page.evaluate((p) => {
+    type Node = { getChildren(): Node[]; getAbsoluteTransform(): { point(p: { x: number; y: number }): { x: number; y: number } } };
+    type Stage = Node & { width(): number; listening(): boolean; getLayers(): Node[]; container(): { getBoundingClientRect(): { left: number; top: number } } };
+    const stage = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages.find((s) => s.width() > 0 && s.listening() && s.getLayers().length === 3);
+    const ground = stage?.getLayers()[0]?.getChildren()[0]?.getChildren()[0];
+    if (!stage || !ground) return null;
+    const at = ground.getAbsoluteTransform().point(p);
+    const box = stage.container().getBoundingClientRect();
+    return { x: box.left + at.x, y: box.top + at.y };
+  }, world);
+}
+
+/** The Area tool's reading after a tap inside a placed area, in Top-down or on the isometric board's ground: its "In area" list. */
+async function areaReading(page: Page, world: { x: number; y: number }, title: string, view: "follow" | "isometric" = "follow"): Promise<string> {
   await pickTool(page, "Area");
-  const p = await pagePoint(page, BOUNDS, world);
+  const p = view === "isometric" ? await waitFor("the isometric board", () => isoGroundPoint(page, world)) : await pagePoint(page, BOUNDS, world);
   await assertCanvasAt(page, p);
   if (page === dm) await page.mouse.click(p.x, p.y);
   else await page.touchscreen.tap(p.x, p.y);
-  const line = page.getByRole("toolbar", { name: "Area options" }).locator("[data-options-line]").first();
+  const toolbar = page.getByRole("toolbar", { name: "Area options" });
+  const line = toolbar.locator("[data-options-line]").first();
   await line.filter({ hasText: title }).waitFor();
+  // A tap that missed the area, or landed on a creature, starts a new one under the same title, with Place.
+  assert.equal(await toolbar.getByRole("button", { name: "Place", exact: true }).count(), 0, `the tap picked the placed ${title}, not a new one`);
   return (await line.textContent()) ?? "";
 }
 
@@ -558,7 +579,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await pickView(pat, "follow");
   });
 
-  test("HX-10. a fireball on a hex corner and Spirit Guardians on Thorn read the creatures the rules catch, for the DM and for Pat alike", async () => {
+  test("HX-10. a fireball on a hex corner and Spirit Guardians on Thorn read the creatures the rules catch, for the DM and for Pat alike, in Top-down and in Isometric", async () => {
     // Everyone in plain sight, so Pat's list is the whole list.
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { fogEnabled: false, vision: { on: false, light: "bright", perPlayer: false } } });
     await moveTo(run.goblin, "medium", { col: 10, row: 8 });
@@ -576,18 +597,26 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const guardians = names(run.guardians);
     assert.ok(fireball.includes("Goblin") && fireball.includes("Ogre") && !fireball.includes("Imp"), `the fireball catches ${fireball.join(", ")}`);
     assert.ok(guardians.includes("Imp") && !guardians.includes("Goblin"), `the guardians catch ${guardians.join(", ")}`);
-    // A tap inside each, off any creature: the fireball by its corner, the guardians two hexes east of Thorn.
-    const inFire = { x: corner.x, y: corner.y - 0.1 };
-    const inGuard = hexCenter(G, { col: 4, row: 11 });
+    // A tap inside each, off any creature: in Top-down the fireball by its corner and the guardians a hex north-east
+    // of Thorn. In Isometric the ogre's token stands over that corner, where a tap starts an area from the ogre, so
+    // there the fireball's tap goes three cells east of its corner and the guardians' two hexes south-west of Thorn.
+    const inFire = { follow: { x: corner.x, y: corner.y - 0.1 }, isometric: { x: corner.x + 3, y: corner.y - 0.3 } };
+    const inGuard = { follow: hexCenter(G, { col: 4, row: 11 }), isometric: hexCenter(G, { col: 2, row: 14 }) };
+    // Each page reads both in Top-down and on the isometric board's ground (D-261026-24).
     for (const page of [dm, pat]) {
-      for (const [where, want] of [[inFire, fireball], [inGuard, guardians]] as const) {
-        const reading = await areaReading(page, where, "In area");
-        assert.match(reading, new RegExp(`In area \\(${want.length}\\): `), `${page === dm ? "the DM" : "Pat"}: ${reading}`);
-        for (const name of want) assert.ok(reading.includes(name), `${page === dm ? "the DM" : "Pat"} reads ${name}: ${reading}`);
-        await page.keyboard.press("Escape");
+      const who = page === dm ? "the DM" : "Pat";
+      for (const view of ["follow", "isometric"] as const) {
+        await pickView(page, view);
+        for (const [where, want, title] of [[inFire[view], fireball, "20 ft Sphere"], [inGuard[view], guardians, "15 ft Emanation"]] as const) {
+          const reading = await areaReading(page, where, title, view);
+          assert.match(reading, new RegExp(`In area \\(${want.length}\\): `), `${who} in ${view}: ${reading}`);
+          for (const name of want) assert.ok(reading.includes(name), `${who} in ${view} reads ${name}: ${reading}`);
+          await page.keyboard.press("Escape");
+        }
+        await shots.take(page, `hex-${page === dm ? "dm" : "pat"}-area-catch${view === "isometric" ? "-isometric" : ""}`);
+        await pickTool(page, "Select");
       }
-      await shots.take(page, page === dm ? "hex-dm-area-catch" : "hex-pat-area-catch");
-      await pickTool(page, "Select");
+      await pickView(page, "follow");
     }
     await ops.send({ t: "template.delete", templateId: run.fireball });
     await ops.send({ t: "template.delete", templateId: run.guardians });
