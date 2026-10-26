@@ -18,14 +18,16 @@ export function wordsAt(view: Pick<RoomState, "buildChunks" | "fogTiles">, scene
  * raised or lowered ground, or a stair, under the tap, and any other tap
  * puts a readout away. The canvas calls it last, once no label or door
  * took the tap (canvas/emptyTap.ts). Returns whether it showed one.
+ * `screen` is the press, which a pin's marker is tested against, where it
+ * is not where `world` shows in Top-down (the isometric view).
  */
-export function tapGround(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point): boolean {
+export function tapGround(ctx: Pick<ToolContext, "getState" | "scene" | "camera" | "role" | "scope">, tool: string, world: Point, screen?: Point): boolean {
   const slot = ctx.scope.get(readoutSlot);
   const view = ctx.getState().view;
   const camera = ctx.camera();
   // A pin answers its own tap (features/pins/PinLayer.tsx), and a reading beside its popover would be two things floating at once.
   const cell = { x: Math.floor(world.x), y: Math.floor(world.y) };
-  const words = tool === "select" && view && !pinUnder(view, ctx.scene.id, camera, viewToScreen(camera, toView(TOP_DOWN, world))) ? wordsAt(view, ctx.scene, ctx.role, cell) : null;
+  const words = tool === "select" && view && !pinUnder(view, ctx.scene.id, camera, screen ?? viewToScreen(camera, toView(TOP_DOWN, world))) ? wordsAt(view, ctx.scene, ctx.role, cell) : null;
   if (!words) {
     closeReadout(slot);
     return false;

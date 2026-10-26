@@ -18,7 +18,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions } from "../../state/view.ts";
 import { requestPan } from "../encounter/pan.ts";
 import { CONFIRM_MS, commitDraft, paneEscape, panePlacement, paneSizes, SHEET_BELOW_PX, sheetPanAnchor, tapDelete, type LabelDraft } from "./labelEdit.ts";
-import { labelPaneFrame, labelScreenBox, PANE_HEIGHT_UNMEASURED } from "./labelPaneFrame.ts";
+import { labelPaneFrame, labelScreenBox, PANE_HEIGHT_UNMEASURED, type LabelLook } from "./labelPaneFrame.ts";
 import { PaneFooter } from "./PaneFooter.tsx";
 import { useBuilderStore } from "./store.ts";
 
@@ -32,7 +32,7 @@ import { useBuilderStore } from "./store.ts";
  * typed. Closing any other way (the close button, Escape, Back, a tap away
  * on the map) drops the draft, as Escape does in the room's other fields.
  */
-export default function LabelPane(props: { label: Label; camera: Camera; viewport: Size; insets: Insets; onClose(): void }) {
+export default function LabelPane(props: { label: Label; camera: Camera; look?: LabelLook; viewport: Size; insets: Insets; onClose(): void }) {
   const { label, camera } = props;
   const paneRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(props.onClose);
@@ -71,7 +71,7 @@ export default function LabelPane(props: { label: Label; camera: Camera; viewpor
 
   // A label being dragged in the builder takes its pane along.
   const moving = useStore(useBuilderStore(), (b) => b.labelMove);
-  const screenBox = labelScreenBox(moving?.id === label.id ? { ...label, x: moving.x, y: moving.y } : label, camera);
+  const screenBox = labelScreenBox(moving?.id === label.id ? { ...label, x: moving.x, y: moving.y } : label, camera, props.look);
   // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars, and a toast that shows meanwhile starts under its header (pages/RoomDock.tsx usePaneDock).
   // As a card it keeps left of the column's cards, or under the summary row it has the column show where the lane leaves it no room (labelEdit.ts panePlacement).
   const sheet = props.viewport.width < SHEET_BELOW_PX;

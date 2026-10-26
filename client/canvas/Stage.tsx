@@ -77,6 +77,7 @@ import { dockSlot, foldsUnderSheet, sideSheetRoom } from "../pages/fold.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { droppedIntoFog, intoFogText, refusedDragText, watchDrop } from "./dragNotes.ts";
 import { barChrome, barCover, barDockSlot, clearAnchor, DOCK_MIN_WIDTH, keepsOpening, largerEach, pastBars, restingBar, stripSqueezed, type BarSubject } from "./barDock.ts";
+import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, type BoardPick } from "./boardPick.ts";
 import { emptyTap, putAway } from "./emptyTap.ts";
 import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
@@ -727,6 +728,19 @@ export function MapStage(props: {
   ownsTokenRef.current = ownsToken;
   const fogRef = useRef({ on: fog, tiles: fogTiles });
   fogRef.current = { on: fog, tiles: fogTiles };
+  /**
+   * What a press on the board means at a camera (boardPick.ts): in
+   * Isometric its ray meets the drawn ground this viewer may see, a
+   * player's fog holding back every height under it, as the board draws
+   * them (relief/IsoBoard.tsx). Read as each press happens.
+   */
+  const heightsMemoRef = useRef<DrawnHeightsMemo>(null!);
+  heightsMemoRef.current ??= new DrawnHeightsMemo();
+  const lowPowerRef = useRef(lowPower);
+  lowPowerRef.current = lowPower;
+  const pickOfRef = useRef<(c: Camera) => BoardPick>(null!);
+  pickOfRef.current = (c) =>
+    boardPickFor({ room: store.getState().view, scene: sceneRef.current, role, fog: fogRef.current.on, view: shownRef.current, camera: c, lowPower: lowPowerRef.current }, heightsMemoRef.current);
   /** Walls, doors and ledges stopping a player's drag (features/movement/stageHooks.ts). */
   const dragStops = useDragStops(role);
   const dragStopsRef = useRef(dragStops);
@@ -784,6 +798,18 @@ export function MapStage(props: {
   );
   const toolContextRef = useRef(toolContext);
   toolContextRef.current = toolContext;
+  // The tools and the tap handlers outside the canvas read what a press means through this Room's scope.
+  useEffect(() => {
+    const slot = scope.get(boardPickSlot);
+    const read = () => {
+      const c = pendingCamRef.current ?? camRef.current;
+      return c ? pickOfRef.current(c) : null;
+    };
+    slot.read = read;
+    return () => {
+      if (slot.read === read) slot.read = null;
+    };
+  }, [scope]);
   /** The pointer that the active tool's one-finger gesture follows. */
   const toolPointerRef = useRef<number | null>(null);
 
@@ -971,7 +997,7 @@ export function MapStage(props: {
       return hit?.findAncestor(".token", true)?.id() ?? null;
     };
     const toolPointer = (e: PointerEvent, p: Point, c: Camera, tokenId: string | null): ToolPointer => ({
-      world: toWorld(TOP_DOWN, screenToView(c, p)),
+      world: pressAt(pickOfRef.current(c), p),
       screen: p,
       pointerId: e.pointerId,
       pointerType: e.pointerType,
@@ -1163,10 +1189,13 @@ export function MapStage(props: {
         } else if (lifted && !held && !box.add) {
           // Multi-select's tap off hides the group's bar and keeps the group (state/selection.ts tapToken), and opens nothing, as before.
           onSelectRef.current(null);
-          putAway(toolContextRef.current, toWorld(TOP_DOWN, screenToView(c, p)));
+          putAway(toolContextRef.current, pressAt(pickOfRef.current(c), p), { readout: true, screen: p });
         }
       }
-      if (tapOnEmpty) emptyTap(toolContextRef.current, toolRef.current.id, toWorld(TOP_DOWN, screenToView(c, local(e))), held, () => onSelectRef.current(null));
+      if (tapOnEmpty) {
+        const p = local(e);
+        emptyTap(toolContextRef.current, toolRef.current.id, pressAt(pickOfRef.current(c), p), held, () => onSelectRef.current(null), p);
+      }
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -1452,6 +1481,8 @@ export function MapStage(props: {
   const decorTokens = useMemo(() => tokens.filter((t) => !carried.has(t.id)), [tokens, carried]);
   const keepIds = useMemo(() => new Set([...selectedIds, ...(draggingId ? [draggingId] : [])]), [selectedIds, draggingId]);
   const live: Live | null = cam && size ? { camera: cam, viewport: size, view: shown } : null;
+  // The view and drawn heights the chrome over the map stands by (boardPick.ts).
+  const pick = cam ? pickOfRef.current(cam) : null;
 
   return (
     <div ref={wrapRef} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1579,7 +1610,7 @@ export function MapStage(props: {
               }}
             />
           ) : null}
-          {role === "dm" ? <LabelPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
+          {role === "dm" && pick ? <LabelPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} pick={pick} /> : null}
           {role === "dm" ? <LightPaneHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
           {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
           {role === "dm" ? <TrapPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}

@@ -26,18 +26,25 @@ import { TOP_DOWN, toView } from "../lib/view.ts";
  * (docs/design-v1-bar-dock.md section 3). A tap a label or a door takes
  * still puts a readout away, as every tap on the map does. Any tap but one
  * on a pin puts a pin's popover away too (putAway).
+ *
+ * In Isometric `world` is where the press's ray meets the drawn ground
+ * (lib/view.ts pickGround), and `screen` the press itself, which a label
+ * standing up, a door's standing piece and a pin's marker are tested
+ * against (docs/design-v1-isometric-view.md 6.2). Left out, it is where
+ * `world` shows in Top-down.
  */
-export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boolean, deselect: () => void): void {
+export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boolean, deselect: () => void, screen?: Point): void {
   if (held) return;
+  const at = screen ?? topDownScreen(ctx, world);
   // Who a door's pill opens it with, read before the tap lets the token go.
   const selected = ctx.getState().local.selectedId;
   deselect();
-  putAway(ctx, world, { readout: false });
-  if (tapMapLabel(ctx, tool, world) || tapDoor(ctx, tool, world, selected)) {
+  putAway(ctx, world, { readout: false, screen: at });
+  if (tapMapLabel(ctx, tool, world, at) || tapDoor(ctx, tool, world, selected, at)) {
     closeReadout(ctx.scope.get(readoutSlot));
     return;
   }
-  tapGround(ctx, tool, world);
+  tapGround(ctx, tool, world, at);
 }
 
 /**
@@ -46,10 +53,14 @@ export function emptyTap(ctx: ToolContext, tool: string, world: Point, held: boo
  * A pin's popover stays when a pin is under the tap: the pin layer answers
  * that tap itself (features/pins/PinLayer.tsx), and closing here would
  * close the popover the same tap opened. `readout` puts the height readout
- * away too, which emptyTap leaves to the steps that follow.
+ * away too, which emptyTap leaves to the steps that follow. `screen` is
+ * the press, as emptyTap takes it.
  */
-export function putAway(ctx: ToolContext, world: Point, options: { readout: boolean } = { readout: true }): void {
-  const camera = ctx.camera();
-  if (!pinUnder(ctx.getState().view, ctx.scene.id, camera, viewToScreen(camera, toView(TOP_DOWN, world)))) closePinPopover(ctx.scope);
+export function putAway(ctx: ToolContext, world: Point, options: { readout: boolean; screen?: Point } = { readout: true }): void {
+  if (!pinUnder(ctx.getState().view, ctx.scene.id, ctx.camera(), options.screen ?? topDownScreen(ctx, world))) closePinPopover(ctx.scope);
   if (options.readout) closeReadout(ctx.scope.get(readoutSlot));
+}
+
+function topDownScreen(ctx: Pick<ToolContext, "camera">, world: Point): Point {
+  return viewToScreen(ctx.camera(), toView(TOP_DOWN, world));
 }
