@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useStore } from "zustand";
 import { handoutPages } from "#shared/handouts.ts";
 import type { Handout } from "#shared/model.ts";
@@ -13,7 +13,7 @@ import { Notice } from "../../components/Notice.tsx";
 import { useTooltip } from "../../components/Tooltip.tsx";
 import { api, ApiError, displayAssetUrl, type AssetVariant } from "../../lib/api.ts";
 import { fitRect, NO_INSETS, type Camera, type Rect, type Size } from "../../lib/camera.ts";
-import { TOP_DOWN, viewBox } from "../../lib/view.ts";
+import { TOP_DOWN, turned, viewBox } from "../../lib/view.ts";
 import { BANNER_DELAY_MS, type ConnectionState } from "../../lib/connection.ts";
 import { revealedMask } from "../../lib/fogTiles.ts";
 import { exitFullscreen, fullscreenSupported, toggleFullscreen, useFullscreen } from "../../lib/fullscreen.ts";
@@ -31,6 +31,9 @@ import { closedSlot, closedStorageKey, closeHandout, loadClosed } from "../hando
 import { nextPopup, pageName, showingKey } from "../handouts/handouts.ts";
 import { useXCard, XCardHost } from "../xcard/XCardHost.tsx";
 import { UI_SCALES, uiScaleLabel, useUiScale } from "../device/settings.ts";
+import { choiceOf, choiceWords, isoOffered, pickOf, suggestionHelp, TURN_LEFT, TURN_LEFT_LABEL, TURN_RIGHT, TURN_RIGHT_LABEL, VIEW_CHOICES, VIEW_GROUP } from "../view/choice.ts";
+import { displayViewKey, pickView, turnView } from "../view/store.ts";
+import { useViewChoice, useViewVoice, ViewVoice, type ViewChoiceState } from "../view/ViewMenu.tsx";
 import {
   BAR_BUTTONS,
   barFirstFocus,
@@ -132,6 +135,10 @@ function DisplayTable(props: { roomId: string }) {
   const overlay: Overlay = xcard.showing ? "xcard" : handout.current ? "handout" : null;
   const menu = useMenu();
   const cursorHidden = useIdleCursor();
+  // The display's own pick, apart from a member's in the same browser (docs/design-v1-isometric-view.md ISO-D16).
+  const suggested = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.suggestedView : undefined));
+  const viewChoice = useViewChoice({ key: displayViewKey(props.roomId), sceneId, suggested });
+  useViewVoice(viewChoice);
 
   // A handout takes every tap and key, and its bar takes the menu's place, so a menu open when one comes up goes.
   const showing = handout.current ? showingKey(handout.current) : null;
@@ -259,11 +266,13 @@ function DisplayTable(props: { roomId: string }) {
         )
       ) : null}
       <XCardHost tapCloses card={xcard} />
+      {isoOffered ? <ViewVoice /> : null}
       {menu.open ? (
         <DisplayMenu
           roomId={props.roomId}
           menuRef={menu.ref}
           mode={mode}
+          view={viewChoice}
           showTurn={showTurn}
           onMode={(m) => {
             setMode(m);
@@ -811,10 +820,10 @@ function DisplayBanner(props: { state: ConnectionState }) {
 }
 
 /**
- * Follow the DM, Fit the map, whose turn it is, the text size, Full screen
- * and Leave. Big targets, readable from the couch, and reachable with a
- * remote's arrow keys. Leave signs the display out for good, so it asks for
- * a second press.
+ * Follow the DM, Fit the map, the view once Isometric is offered, whose
+ * turn it is, the text size, Full screen and Leave. Big targets, readable
+ * from the couch, and reachable with a remote's arrow keys. Leave signs
+ * the display out for good, so it asks for a second press.
  *
  * The text size is this device's interface size (features/device), which
  * the display has no This device page to set: a 1280 x 720 TV across a room
@@ -825,6 +834,7 @@ function DisplayMenu(props: {
   roomId: string;
   menuRef: RefObject<HTMLDivElement | null>;
   mode: DisplayMode;
+  view: ViewChoiceState;
   showTurn: boolean;
   onMode(mode: DisplayMode): void;
   onTurn(on: boolean): void;
@@ -862,6 +872,10 @@ function DisplayMenu(props: {
         transform: "translateX(-50%)",
         zIndex: 30,
         width: "min(560px, calc(100% - 32px))",
+        // The View rows made it taller than a small phone held upright at 130%, so past the screen it scrolls. Its padding and border stand outside the height.
+        maxHeight: `calc(100% - ${theme.safe.top} - ${theme.safe.bottom} - ${2 * (theme.space(6) + theme.space(3) + theme.line.border)}px)`,
+        overflowY: "auto",
+        overscrollBehavior: "contain",
         display: "grid",
         gap: theme.space(2),
         padding: theme.space(3),
@@ -879,6 +893,7 @@ function DisplayMenu(props: {
           Fit the map
         </MenuButton>
       </div>
+      {isoOffered ? <DisplayView choice={props.view} onTouch={props.onTouch} /> : null}
       <MenuButton role="menuitemcheckbox" checked={props.showTurn} onClick={() => props.onTurn(!props.showTurn)}>
         Show whose turn it is: {props.showTurn ? "on" : "off"}
       </MenuButton>
@@ -921,6 +936,58 @@ function DisplayMenu(props: {
   );
 }
 
+/**
+ * The View menu's rows at the TV's size (docs/design-v1-isometric-view.md
+ * 7): Follow the scene with the scene's suggestion under it, Top-down and
+ * Isometric, kept for this display apart from any member's pick in the
+ * same browser, then Turn left and Turn right while it shows Isometric.
+ */
+function DisplayView(props: { choice: ViewChoiceState; onTouch(): void }) {
+  const { choice } = props;
+  const helpId = useId();
+  const value = choiceOf(choice.stored.pick);
+  const turn = (by: 1 | -1) => {
+    if (choice.shown.kind === "isometric" && choice.sceneId) turnView(choice.key, choice.sceneId, turned(choice.shown.turn, by));
+    props.onTouch();
+  };
+  return (
+    <div role="group" aria-label={VIEW_GROUP} style={{ display: "grid", gap: theme.space(2) }}>
+      <span style={{ fontSize: TV_TEXT.small, fontWeight: theme.weight.bold }}>{VIEW_GROUP}</span>
+      {/* The three share a line where it holds them, and Follow the scene takes a line of its own where it does not. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+        {VIEW_CHOICES.map((c) => (
+          <MenuButton
+            key={c}
+            role="menuitemradio"
+            checked={c === value}
+            grow
+            describedBy={c === "follow" ? helpId : undefined}
+            onClick={() => {
+              pickView(choice.key, pickOf(c));
+              props.onTouch();
+            }}
+          >
+            {choiceWords(c)}
+          </MenuButton>
+        ))}
+      </div>
+      <p id={helpId} style={{ margin: 0, color: theme.color.textMuted, fontSize: TV_TEXT.small, lineHeight: theme.leading.body }}>
+        {suggestionHelp(choice.suggested)}
+      </p>
+      {choice.shown.kind === "isometric" ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
+          <MenuButton role="menuitem" grow label={TURN_LEFT_LABEL} onClick={() => turn(-1)}>
+            {TURN_LEFT}
+          </MenuButton>
+          <MenuButton role="menuitem" grow label={TURN_RIGHT_LABEL} onClick={() => turn(1)}>
+            {TURN_RIGHT}
+          </MenuButton>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** One row: the names, chips and badges on the map at 85% to 130%. */
 function TextSize(props: { onTouch(): void }) {
   const scale = useUiScale();
@@ -958,6 +1025,10 @@ function MenuButton(props: {
   grow?: boolean;
   /** The icon alone, at the TV's size, its words (`children`) its name and tooltip (docs/design-v1-icons.md 3.1 rule 1). */
   icon?: IconName;
+  /** A name that says more than its words, such as Turn left's "Turn the map left". */
+  label?: string;
+  /** The id of a line that says what it means, such as Follow the scene's suggestion. */
+  describedBy?: string;
   onClick(): void;
   children: ReactNode;
 }) {
@@ -969,7 +1040,8 @@ function MenuButton(props: {
       type="button"
       role={props.role}
       aria-checked={props.role === undefined || props.role === "menuitem" ? undefined : on}
-      aria-label={props.icon ? words : undefined}
+      aria-label={props.icon ? words : props.label}
+      aria-describedby={props.describedBy}
       {...(props.icon ? tooltip.anchor() : null)}
       disabled={props.disabled}
       onClick={props.onClick}
