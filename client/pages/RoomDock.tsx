@@ -4,9 +4,10 @@ import { Button } from "../components/Button.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { IconButton } from "../components/IconButton.tsx";
 import { useAlertsSummaryEntry } from "../components/sheetFocus.ts";
-import { SHEET_MAX_WIDTH } from "../components/sheetCap.ts";
+import { SHEET_MAX_WIDTH, sheetFoot, sheetKeyboard } from "../components/sheetCap.ts";
 import { chromeZoom, effectiveZoom, smallUi } from "../features/device/layout.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
+import { useKeyboardView } from "../lib/keyboardInset.ts";
 import { GRAB_ATTR, GRAB_STYLE, SWIPE_REST_EVENT, SWIPING_ATTR } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
@@ -61,7 +62,9 @@ export function useDockSummary(hides: SummaryHides = "sheet"): AlertsSummary | n
  * sheet at (components/sheetCap.ts SHEET_MAX_WIDTH), the same rule in CSS
  * as the sheet's, so the two never part. It rides the sheet's swipe (Sheet
  * `riders`): it moves with the sheet, and a drag on it moves the sheet,
- * while its buttons still take a tap.
+ * while its buttons still take a tap. While the on-screen keyboard lifts
+ * the sheet, it is lifted with it, from the same foot (sheetCap.ts
+ * sheetFoot).
  */
 export function DockRow(props: {
   ref?: Ref<HTMLDivElement>;
@@ -73,6 +76,7 @@ export function DockRow(props: {
   summaryRef: Ref<HTMLButtonElement>;
 }) {
   const bar = useStore(useScoped(dockSlot), (s) => s.bar);
+  const keyboard = sheetKeyboard(useKeyboardView(), props.zoom);
   const { summary, actions } = props;
   return (
     <div
@@ -87,7 +91,7 @@ export function DockRow(props: {
         right: `calc(${theme.safe.right} + ${theme.space(2)}px)`,
         maxWidth: `calc(${SHEET_MAX_WIDTH - 2 * theme.space(2)}px - ${theme.safe.left} - ${theme.safe.right})`,
         margin: "0 auto",
-        bottom: `calc(${theme.safe.bottom} + ${theme.layout.toolbar + props.sheetHeight}px)`,
+        bottom: `calc(${sheetFoot(theme.layout.toolbar, keyboard)} + ${props.sheetHeight}px)`,
         zIndex: theme.z.sheet,
         display: "flex",
         alignItems: "stretch",

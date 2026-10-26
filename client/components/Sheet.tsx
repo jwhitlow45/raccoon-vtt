@@ -2,10 +2,11 @@ import { useCallback, useRef, type CSSProperties, type ReactNode, type Ref, type
 import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { subpageBack, subpageKey, usePanelScroll, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
+import { useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { useSheetDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
-import { headerStacks, SHEET_MAX_WIDTH, sheetMaxHeight } from "./sheetCap.ts";
+import { headerStacks, SHEET_MAX_WIDTH, sheetFoot, sheetKeyboard, sheetMaxHeight, sheetTop } from "./sheetCap.ts";
 import { SheetHeader, type HeaderBack } from "./SheetHeader.tsx";
 
 /** Where a sheet stands (docs/design-v1-layout-hierarchy.md 4.2): at a phone's foot, on the right of one held sideways, or over the whole screen where that is too short. */
@@ -60,6 +61,13 @@ export type SheetMode = "bottom" | "side" | "full";
  * brings it back to its normal height. While a drag holds it above its
  * normal top it takes that shape beside the map, drawn over the bars and
  * clipped at the toolbar, so the drag lays out once.
+ *
+ * While the on-screen keyboard is open (lib/keyboardInset.ts) it rides on
+ * the keyboard in every mode: at the foot its bottom edge stands at the
+ * visible area's bottom with its height capped to fit there (sheetCap.ts),
+ * and on the right or over the whole screen it takes the visible area's
+ * height. The field with focus scrolls into view in its body, with its
+ * form, such as an amount's Spend and Cancel (useFieldInView).
  */
 export function Sheet(props: {
   ref?: Ref<HTMLElement>;
@@ -106,6 +114,8 @@ export function Sheet(props: {
 }) {
   const { mode, inset, subpage } = props;
   const zoom = useUiScale();
+  const view = useKeyboardView();
+  const keyboard = sheetKeyboard(view, zoom);
   const ownTitleRef = useRef<HTMLHeadingElement>(null);
   const titleRef = props.titleRef ?? ownTitleRef;
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -136,18 +146,20 @@ export function Sheet(props: {
   useSheetDialog(dialogRef, { shown, modal: mode === "full" || (filled && !swipe.rising), onCancel: props.onClose, hideFocus: props.hideFocus, modalFocus: filled ? titleRef : undefined });
   // After the dialog opens, since a closed dialog's body has no box to scroll.
   usePanelScroll(props.scrollKey ?? null, subpage ?? null, bodyRef, props.scrollSubject ?? null);
+  useFieldInView(bodyRef, view, theme.space(2));
   const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
   const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
   const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });
-  const insetTop = `calc(${theme.safe.top} + ${inset.top}px)`;
-  const insetBottom = `calc(${theme.safe.bottom} + ${inset.bottom}px)`;
+  const insetTop = sheetTop(inset.top, keyboard);
+  const insetBottom = sheetFoot(inset.bottom, keyboard);
   const wholeScreen: CSSProperties = {
     // Modal, in the browser's top layer: the whole screen, its content inside the safe areas on all four sides. No border: at the screen's edges it frames nothing, and the body is short enough here to want its 2 px.
     position: "fixed",
     border: "none",
-    inset: 0,
+    // With the keyboard open, the visible area: below where the page is panned out of view, above the keyboard.
+    inset: keyboard ? `${keyboard.top}px 0 ${keyboard.inset}px` : 0,
     width: "100%",
-    height: "100%",
+    height: keyboard ? "auto" : "100%",
     maxWidth: "none",
     maxHeight: "none",
     borderRadius: 0,
@@ -171,7 +183,7 @@ export function Sheet(props: {
           width: "auto",
           height: "auto",
           ...bottomWidth,
-          maxHeight: sheetMaxHeight(inset, props.reserveTop),
+          maxHeight: sheetMaxHeight(inset, props.reserveTop, keyboard),
           borderRadius: `${theme.radius.lg}px ${theme.radius.lg}px 0 0`,
           padding: `0 ${theme.safe.right} 0 ${theme.safe.left}`,
           zIndex: theme.z.sheet,
