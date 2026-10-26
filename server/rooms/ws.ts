@@ -30,6 +30,12 @@ import type { RoomManager } from "./manager.ts";
  * connection keeps the role `'player'` with the `display` flag. Every other
  * socket reads only the room cookie, where a display session is none.
  *
+ * `/ws?room=&as=<memberId>` is a DM's view as one player
+ * (docs/design-v1-per-player-vision.md 7.4): only a DM grant may open one,
+ * and only for a member of the room's roster who is a player, decided here
+ * as the display's is, so anything else is refused before the upgrade
+ * (review R2-SEC-1). It is read only, as a display is.
+ *
  * Message listeners are attached synchronously in the handler, because a
  * frame that arrives before a listener exists is lost: @fastify/websocket
  * hands over a socket that is already open. Frames that arrive while the
@@ -63,8 +69,8 @@ export const MAX_FRAME_BYTES = 64 * 1024;
  */
 export const DEFAULT_BUFFERED_LIMIT = 7 * 1024 * 1024;
 
-/** The grant a socket is bound to. A table display's has the role `'player'` and `display` set. */
-type SocketGrant = Omit<GrantContext, "role"> & { role: GrantContext["role"]; display: boolean };
+/** The grant a socket is bound to. A table display's has the role `'player'` and `display` set, and a DM's preview names the player it views as. */
+type SocketGrant = Omit<GrantContext, "role"> & { role: GrantContext["role"]; display: boolean; previewOf?: string };
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -108,6 +114,22 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
   app.decorateRequest("wsGrant", null);
   app.decorateRequest("wsIp", null);
 
+  /**
+   * Whether the room's roster holds a player with this id now. The room
+   * loads for it, as the socket's attach would, and one that cannot load
+   * gets the answer the attach would close with, before the upgrade.
+   */
+  const rosterPlayer = async (roomId: string, memberId: string): Promise<boolean | { status: number; error: ApiErrorCode }> => {
+    try {
+      const room = await manager.acquire(roomId);
+      return room.committed.state.members[memberId]?.kind === "player";
+    } catch (err) {
+      if (err instanceof TooBusyError) return { status: 503, error: "busy" };
+      if (err instanceof RoomNotFoundError) return { status: 404, error: "room_not_found" };
+      throw err;
+    }
+  };
+
   app.get(
     "/ws",
     {
@@ -121,6 +143,13 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
         if (query.as === "display") {
           const display = await app.auth.displayGrant(req, roomId);
           if (display) grant = { sessionId: display.sessionId, roomId, memberId: display.memberId, role: "player", display: true };
+        } else if (query.as !== undefined) {
+          const room = await app.auth.grant(req, reply, roomId);
+          if (room?.role === "dm" && typeof query.as === "string") {
+            const listed = await rosterPlayer(roomId, query.as);
+            if (typeof listed === "object") return reply.code(listed.status).send({ error: listed.error });
+            if (listed) grant = { ...room, display: false, previewOf: query.as };
+          }
         } else {
           const room = await app.auth.grant(req, reply, roomId);
           if (room) grant = { ...room, display: false };
@@ -173,8 +202,8 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
         const parsed = clientMessageSchema.safeParse(json);
         if (!parsed.success) {
           // An oversized or malformed ephemeral event is dropped like an over-budget frame. Anything else is a broken client.
-          // A table display sends none at all, so one from it closes it as a valid one would (dispatch below).
-          if (!conn.display && json !== null && typeof json === "object" && (json as { t?: unknown }).t === "eph") return;
+          // A table display and a preview send none at all, so one from them closes them as a valid one would (dispatch below).
+          if (!conn.display && conn.previewBy === null && json !== null && typeof json === "object" && (json as { t?: unknown }).t === "eph") return;
           conn.close(CLOSE.authFailure, "invalid message");
           return;
         }
@@ -182,9 +211,13 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
       };
 
       const dispatch = (room: RoomActor, msg: ClientMessage): void => {
-        // A table display sends nothing but `hello` and `ping`. Only a hostile client would.
+        // A table display and a preview send nothing but `hello` and `ping`. Only a hostile client would.
         if (conn.display && msg.t !== "hello" && msg.t !== "ping") {
           conn.close(CLOSE.authFailure, "a table display sends nothing");
+          return;
+        }
+        if (conn.previewBy !== null && msg.t !== "hello" && msg.t !== "ping") {
+          conn.close(CLOSE.authFailure, "a preview sends nothing");
           return;
         }
         switch (msg.t) {

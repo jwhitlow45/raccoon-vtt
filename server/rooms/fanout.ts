@@ -1,6 +1,6 @@
 import { chunkKey, doorChunk, keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
-import type { Label, RoomState, Stamp, Trap, Viewer } from "#shared/model.ts";
+import type { Label, LogEntry, RoomState, Stamp, Trap, Viewer } from "#shared/model.ts";
 import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, perPlayerScene, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import type { Change, RefusalCode } from "#shared/protocol.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
@@ -40,7 +40,19 @@ export type CommittedBatch = {
 
 function viewerClass(conn: Connection, state: RoomState): string {
   const scene = viewerSceneId(state, conn.viewer, { sceneId: conn.sceneId });
+  if (conn.previewBy !== null) return `preview|${conn.previewBy}|${conn.memberId}`;
   return conn.role === "dm" ? `dm|${conn.memberId}|${scene ?? ""}` : `player|${conn.memberId}`;
+}
+
+/**
+ * Whether a DM's view as a player leaves a line out
+ * (docs/design-v1-per-player-vision.md 7.4, decision 13): a whisper the
+ * DM is not party to, so the preview never shows whispers between
+ * players. Its snapshot, its events and the log pages asked for it
+ * (server/http/log.ts) all read this.
+ */
+export function previewOmits(line: Pick<LogEntry, "kind" | "from" | "to">, by: string): boolean {
+  return line.kind === "whisper" && line.from !== by && !(line.to?.includes(by) ?? false);
 }
 
 /**
@@ -174,6 +186,9 @@ class Projector {
       else if (kind === "fog") out.set(key, this.#shared(of.fog, key, own(key)));
       else if (FOG_KINDS.has(kind)) out.set(key, this.#shared(of.fog, key, () => this.#fogged(conn, of.fog, key)));
       else out.set(key, own(key)());
+    }
+    if (conn.previewBy !== null) {
+      for (const [key, value] of out) if (key.startsWith("log:") && value !== null && previewOmits(value as LogEntry, conn.previewBy)) out.set(key, null);
     }
     return out;
   }
@@ -326,7 +341,9 @@ export type Snapshot = { message: { t: "snapshot"; seq: number; state: unknown; 
  * longest pause a room load makes (docs/design-v1-maps-vision.md 4.3.6).
  */
 export function buildSnapshot(state: RoomState, seq: number, conn: Connection, watermark: number): Snapshot {
-  const projected = projectState(state, conn.viewer, { sceneId: conn.sceneId });
+  const viewed = projectState(state, conn.viewer, { sceneId: conn.sceneId });
+  const by = conn.previewBy;
+  const projected = by === null ? viewed : { ...viewed, log: viewed.log.filter((line) => !previewOmits(line, by)) };
   return {
     message: {
       t: "snapshot",

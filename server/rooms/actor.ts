@@ -494,7 +494,8 @@ export class RoomActor {
     const fresh = conn.helloCount === 0;
     conn.helloCount++;
     let stored = 0;
-    if (!this.#watermarks.has(key)) {
+    // A preview sends no ops, so it has no watermark to read (docs/design-v1-per-player-vision.md 7.4).
+    if (conn.previewBy === null && !this.#watermarks.has(key)) {
       try {
         stored = await readWatermark(this.#pool, this.roomId, { sessionId: conn.sessionId, clientId: msg.clientId });
       } catch (err) {
@@ -837,7 +838,8 @@ export class RoomActor {
       case "hello":
         return this.#processHello(cmd);
       case "snapshot":
-        if (!cmd.conn.closed && this.#clients.get(cmd.key) === cmd.conn) this.#snapshot(cmd.conn, cmd.key);
+        // A preview is never its client's current socket, and its key is its own (Connection.key).
+        if (!cmd.conn.closed && (cmd.conn.previewBy !== null || this.#clients.get(cmd.key) === cmd.conn)) this.#snapshot(cmd.conn, cmd.key);
         return;
       case "sys":
         return this.#processSys(cmd);
@@ -1264,6 +1266,10 @@ export class RoomActor {
   #processHello(cmd: Extract<Command, { t: "hello" }>): void {
     const conn = cmd.conn;
     if (conn.closed) return;
+    if (conn.previewBy !== null) {
+      this.#previewHello(conn, cmd);
+      return;
+    }
     const key = clientKey(conn.sessionId, cmd.clientId);
     const delayed = this.#delayed.get(key);
     if (delayed) {
@@ -1303,6 +1309,40 @@ export class RoomActor {
       return;
     }
     this.#snapshot(conn, key);
+  }
+
+  /**
+   * A DM's view as one player (docs/design-v1-per-player-vision.md 7.4):
+   * its snapshot through the snapshot budget like any other, under a key of
+   * its own (Connection.key), so it never becomes the current socket of its
+   * DM's client, never takes that client's acknowledgments or watermark,
+   * and never cancels that client's delayed snapshot (review R2-SEC-6).
+   */
+  #previewHello(conn: Connection, cmd: Extract<Command, { t: "hello" }>): void {
+    conn.clientId = cmd.clientId;
+    conn.held = null;
+    if (!this.#previewStands(conn, this.#staged.state)) return;
+    const key = conn.key!;
+    const delayed = this.#delayed.get(key);
+    if (delayed) {
+      delayed.cancel();
+      this.#delayed.delete(key);
+    }
+    if (cmd.fresh) {
+      const over = this.#budget.delay(this.#budget.keys(conn.sessionId, conn.ip, this.pinned)) > 0;
+      if (this.#budget.request(conn.sessionId, over)) {
+        this.closeSockets({ sessionIds: [conn.sessionId] }, CLOSE.abuse);
+        return;
+      }
+    }
+    this.#snapshot(conn, key);
+  }
+
+  /** Whether a preview's player is still a player on the roster. One who is not ends the preview: another player means a new socket. */
+  #previewStands(conn: Connection, state: RoomState): boolean {
+    if (conn.previewBy === null || state.members[conn.memberId]?.kind === "player") return true;
+    conn.close(CLOSE.authFailure, "the previewed player left");
+    return false;
   }
 
   #snapshot(conn: Connection, key: ClientKey): void {
@@ -1527,6 +1567,7 @@ export class RoomActor {
     );
     // A batch that re-projects everything can take away what a held drag or live ruler showed (docs/design-v1-per-player-vision.md 7.2).
     if (batch.global) rejudgePreviews(batch.state, this.#connections);
+    for (const conn of this.#connections) this.#previewStands(conn, batch.state);
     for (const s of batch.sys) s.resolve();
     for (const h of batch.hellos) {
       if (!h.conn.closed && this.#clients.get(h.key) === h.conn && h.conn.held === null) this.#snapshot(h.conn, h.key);
@@ -1615,10 +1656,14 @@ export class RoomActor {
 
   // Presence and grants.
 
-  /** Members with a socket open. A table display is no member, so it is never listed (docs/design-v1-dm-tools.md 3.1). */
+  /**
+   * Members with a socket open. A table display is no member, so it is never
+   * listed (docs/design-v1-dm-tools.md 3.1), and a DM's view as a player is
+   * no socket of that player's (docs/design-v1-per-player-vision.md 7.4).
+   */
   #online(): string[] {
     const ids = new Set<string>();
-    for (const conn of this.#connections) if (!conn.closed && !conn.display) ids.add(conn.memberId);
+    for (const conn of this.#connections) if (!conn.closed && !conn.display && conn.previewBy === null) ids.add(conn.memberId);
     return [...ids].sort();
   }
 
@@ -1659,6 +1704,11 @@ export class RoomActor {
       if (conn.closed) continue;
       if (!grant) {
         conn.close(CLOSE.grantRevoked);
+        continue;
+      }
+      // A preview stands only while its DM's grant does (docs/design-v1-per-player-vision.md 7.4).
+      if (conn.previewBy !== null) {
+        if (grant.memberId !== conn.previewBy || grant.role !== "dm") conn.close(CLOSE.grantRevoked);
         continue;
       }
       if (grant.memberId !== conn.memberId || grant.role !== conn.role) {

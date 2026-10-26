@@ -57,6 +57,16 @@ export class Connection {
    * says `'display'`.
    */
   readonly display: boolean;
+  /**
+   * The DM who opened this socket to view as a player
+   * (docs/design-v1-per-player-vision.md 7.4), or null. Its `memberId` is
+   * then the player's and its role `'player'`, so every projection and
+   * routing rule treats it as that player's socket. It sends nothing but
+   * `hello` and `ping`, never takes acknowledgments, is in no presence
+   * list, and every message it is sent leaves out whispers its DM is not
+   * party to.
+   */
+  readonly previewBy: string | null;
   memberId: string;
   role: Viewer["role"];
   clientId: string | null = null;
@@ -91,15 +101,16 @@ export class Connection {
 
   constructor(
     socket: WebSocket,
-    grant: { sessionId: string; roomId: string; memberId: string; role: Viewer["role"]; display?: boolean },
+    grant: { sessionId: string; roomId: string; memberId: string; role: Viewer["role"]; display?: boolean; previewOf?: string },
     ip: string,
     opts: ConnectionOptions = {},
   ) {
     this.socket = socket;
     this.sessionId = grant.sessionId;
     this.roomId = grant.roomId;
-    this.memberId = grant.memberId;
-    this.role = grant.role;
+    this.previewBy = grant.previewOf === undefined ? null : grant.memberId;
+    this.memberId = grant.previewOf ?? grant.memberId;
+    this.role = grant.previewOf === undefined ? grant.role : "player";
     this.display = grant.display === true;
     this.ip = ip;
     const now = opts.now ?? Date.now;
@@ -112,7 +123,14 @@ export class Connection {
     return { memberId: this.memberId, role: this.role };
   }
 
+  /**
+   * The client the socket speaks for, which acknowledgments and the
+   * watermark follow. A preview's is its own and names no client
+   * (R2-SEC-6): its DM's device may send the same `clientId` from the same
+   * session, and the preview must never take that device's answers.
+   */
   get key(): ClientKey | null {
+    if (this.previewBy !== null) return this.clientId === null ? null : `preview|${this.id}`;
     return this.clientId === null ? null : clientKey(this.sessionId, this.clientId);
   }
 
