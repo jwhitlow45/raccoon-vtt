@@ -287,7 +287,7 @@ export function spreadPositions(input: {
   occupied: Placed[];
 }): Point[] {
   const out = freeSpots(input);
-  const start = input.grid.shape === "hex" ? hexStart(input.grid, input).at : clampCorner(cornerFor(input.center, input.footprint), input.footprint, input.bounds);
+  const start = input.grid.shape === "hex" ? hexFallback(input.grid, input) : clampCorner(cornerFor(input.center, input.footprint), input.footprint, input.bounds);
   while (out.length < input.count) out.push(start);
   return out;
 }
@@ -351,6 +351,25 @@ function freeHexSpots(g: HexGrid, input: SpotSearch): Point[] {
     }
   }
   return out;
+}
+
+/**
+ * Where creatures stack when no free spot is near on a hex scene: the
+ * nearest spot to the tap whose hexes all lie inside the scene, as a
+ * square scene clamps its corner, since a clamped box can still snap onto
+ * a hex past the edge, which the server refuses for a player. Only a scene
+ * too small to hold the footprint falls back to the clamped spot.
+ */
+function hexFallback(g: HexGrid, input: Pick<SpotSearch, "center" | "footprint" | "bounds">): Point {
+  const { creature, ref, at } = hexStart(g, input);
+  const maxRing = Math.min(40, Math.ceil(Math.max(input.bounds.w, input.bounds.h)) + 1);
+  for (let ring = 0; ring <= maxRing; ring++) {
+    for (const h of hexRing(g, ref, ring)) {
+      const spot = placedOnHex(g, creature, h);
+      if (occupiedHexes(g, { ...creature, ...spot }).every((o) => hexInScene(g, input.bounds, o))) return spot;
+    }
+  }
+  return at;
 }
 
 /** Where a hex search starts: the reference hex under the tapped point, pulled inside the scene, and the box standing on it. */

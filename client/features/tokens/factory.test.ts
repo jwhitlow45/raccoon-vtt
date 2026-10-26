@@ -5,7 +5,7 @@ import type { Token } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
 import { occupiedHexes, placedOnHex, tokenRefHex } from "#shared/rules/footprint.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
-import { hexCenter, hexDistance, hexInScene, hexKey, type HexGrid } from "#shared/rules/hex.ts";
+import { hexCenter, hexDistance, hexInScene, hexKey, sceneHexes, type HexGrid } from "#shared/rules/hex.ts";
 import { clientOpSchema, MAX_LEGENDARY_USES, MAX_NAME, monsterInputSchema } from "#shared/protocol.ts";
 import type { SrdMonster } from "#shared/srd/monsters.ts";
 import { monsterView } from "#shared/statBlock.ts";
@@ -383,6 +383,13 @@ describe("placement on a hex scene (docs/design-v1-hex-grids.md 4.2)", () => {
       assert.deepEqual(spots[1], spots[0]);
       assert.deepEqual(spots[2], spots[0]);
       assert.ok(hexInScene(g, { w: 1.2, h: 1.2 }, hexesOf(spots[0]!, 1)[0]!));
+      // A full scene stacks the rest on a spot whose hexes all lie inside it, the server's test (HX3-ASTRA-02).
+      const full = { w: 6, h: 6 };
+      const occupied = occupiedBoxes(sceneHexes(g, full).map((h) => ({ sceneId: "s1", size: "medium" as const, ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, h) })), "s1");
+      for (const tap of [{ x: 6, y: 6 }, { x: 0, y: 0 }, { x: 6, y: 0 }, { x: 3, y: 6 }]) {
+        const [stacked] = spreadPositions({ grid: g, center: tap, footprint: { w: 1, h: 1 }, count: 1, bounds: full, occupied });
+        assert.ok(hexesOf(stacked!, 1).every((h) => hexInScene(g, full, h)), `${tap.x},${tap.y}: ${JSON.stringify(stacked)} inside`);
+      }
       // A tap well off the scene stacks on its nearest spot inside.
       const off = spreadPositions({ grid: g, center: { x: -4, y: -4 }, footprint: { w: 1, h: 1 }, count: 2, bounds: { w: 1.2, h: 1.2 }, occupied: [] });
       assert.deepEqual(off, [spots[0], spots[0]]);
