@@ -22,7 +22,7 @@ import { viewOf } from "../monsters/draft.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import type { Point } from "../tokens/factory.ts";
 import { PLACE_TOOL_ID, setPending } from "../tokens/placement.ts";
-import { blockHasLair, hasLairValues } from "../tokens/factory.ts";
+import { hasLairValues } from "../tokens/factory.ts";
 import { useMonsterFilters } from "../tokens/filterState.ts";
 import { filterCount } from "../tokens/monsterFilters.ts";
 import { MonsterFilterBar } from "../tokens/MonsterFilters.tsx";
@@ -361,7 +361,7 @@ function PlaceSection(props: { draft: Draft; srd: SrdList; close: PanelClose }) 
   );
 }
 
-/** A saved encounter's line: its monster, how many, Remove, and In its lair where its block has a lair or the line is already in it. */
+/** A saved encounter's line: its monster, how many, Remove, and In its lair where its block has lair counts or XP, or the line is already in it. */
 export function MonsterLine(props: {
   line: SavedEncounterMonster;
   view: StatBlockMonster | null;
@@ -401,9 +401,9 @@ export function MonsterLine(props: {
           Remove
         </Button>
       </div>
-      {/* A line's own choice joins its rows to a fight in their lair, so lair actions alone are worth it. One already in its lair keeps the box that takes it out. */}
-      {view && (blockHasLair(view) || line.inLair === true) ? (
-        <Checkbox checked={line.inLair === true} onChange={props.onLair} label="In its lair" help={hasLairValues(view) ? "Uses the lair's legendary uses and XP." : "Joins a fight with In lair on, a reminder that its lair acts too."} />
+      {/* As on the Monsters place card, not for lair actions alone: outside a drop into a running fight, the tick reaches a token's counts and XP and nothing else (factory.ts hasLairValues). One already in its lair keeps the box that takes it out. */}
+      {view && (hasLairValues(view) || line.inLair === true) ? (
+        <Checkbox checked={line.inLair === true} onChange={props.onLair} label="In its lair" help={hasLairValues(view) ? "Uses the lair's legendary uses and XP." : "Its stat block changes nothing in its lair."} />
       ) : null}
     </div>
   );

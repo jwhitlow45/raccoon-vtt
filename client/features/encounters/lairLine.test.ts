@@ -6,10 +6,11 @@ import { monsterView } from "#shared/statBlock.ts";
 import { customMonster } from "#shared/testutil.ts";
 
 /*
- * A saved encounter's line offers In its lair for every block with a lair
- * (tokens/factory.ts blockHasLair), lair actions alone included, since the
- * line's own choice joins its rows to a fight in their lair whatever the
- * counts say (drop.ts joinEntry). Its help says what the tick does.
+ * A saved encounter's line offers In its lair where its block has lair
+ * counts or XP (tokens/factory.ts hasLairValues), as the Monsters place card
+ * does, since outside a drop into a running fight the tick reaches a token's
+ * counts and XP and nothing else. A line already in its lair keeps the box,
+ * so it can be taken out (D-261026-19).
  */
 
 const { createElement } = await import("react");
@@ -26,13 +27,9 @@ function line(view: ReturnType<typeof monsterView>, inLair = false): string {
   return renderToStaticMarkup(createElement(MonsterLine, { line: saved, view, loading: false, room: true, maxCount: 20, onCount: () => {}, onLair: () => {}, onRemove: () => {} }));
 }
 
-describe("an encounter's line offers In its lair where its block has a lair (FU32-LAIR-SURFACES)", () => {
-  test("lair actions alone, as a heading's text or a named entry, offer it, and say it joins a fight in its lair", () => {
-    for (const view of [keeper, warden]) {
-      const html = line(view);
-      assert.ok(html.includes("In its lair"), `${view.name}: no In its lair`);
-      assert.ok(html.includes("Joins a fight with In lair on, a reminder that its lair acts too."), `${view.name}: the help`);
-    }
+describe("an encounter's line offers In its lair where its block has lair numbers, as the place card does (FU33-O1)", () => {
+  test("lair actions alone, as a heading's text or a named entry, offer none", () => {
+    for (const view of [keeper, warden]) assert.ok(!line(view).includes("In its lair"), `${view.name}: In its lair`);
   });
 
   test("lair counts or XP offer it with the lair's numbers in its help", () => {
@@ -41,8 +38,15 @@ describe("an encounter's line offers In its lair where its block has a lair (FU3
     assert.ok(html.includes("Uses the lair&#x27;s legendary uses and XP."));
   });
 
-  test("a block with no lair offers none, unless the line is already in its lair, which keeps the box that takes it out", () => {
+  test("a block with no lair offers none either", () => {
     assert.ok(!line(lurker).includes("In its lair"));
-    assert.ok(line(lurker, true).includes("In its lair"));
+  });
+
+  test("a line already in its lair keeps the box that takes it out, and says its block changes nothing there", () => {
+    for (const view of [keeper, warden, lurker]) {
+      const html = line(view, true);
+      assert.ok(html.includes("In its lair"), `${view.name}: no In its lair`);
+      assert.ok(html.includes("Its stat block changes nothing in its lair."), `${view.name}: the help`);
+    }
   });
 });
