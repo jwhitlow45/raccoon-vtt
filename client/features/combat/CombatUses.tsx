@@ -271,11 +271,12 @@ function UseLine(props: LineProps) {
   const id = useId();
   const line = useRef<HTMLLIElement>(null);
   /*
-   * A press often takes its own button away: Restore once the use is back, a recharge's Use as it turns into Roll
-   * recharge and Mark ready, a skipped prompt's row with its Reopen. Focus then falls to the page, and the next
-   * Escape closes the whole bar rather than the drawer, so it moves to the row's first button, or the list's. The
-   * last button can take the whole list with it, and the turn card or the drawer around it too, so the places it
-   * may move to are taken as the press finds them and read once the button has gone (D-261024-43).
+   * A press often takes its own button away: Restore of a mark the block no longer lists, a recharge's Use as it
+   * turns into Roll recharge and Mark ready, a skipped prompt's row with its Reopen. (A count's Restore stays, off
+   * once full.) Focus then falls to the page, and the next Escape closes the whole bar rather than the drawer, so
+   * it moves to the row's first button, or the list's. The last button can take the whole list with it, and the
+   * turn card or the drawer around it too, so the places it may move to are taken as the press finds them and read
+   * once the button has gone (D-261024-43).
    */
   const keepFocus = () => {
     const li = line.current;
