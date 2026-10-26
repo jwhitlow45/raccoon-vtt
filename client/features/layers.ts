@@ -1,3 +1,4 @@
+import type Konva from "konva";
 import type { ComponentType } from "react";
 import type { Scene } from "#shared/model.ts";
 import type { Box } from "../lib/boardText.ts";
@@ -123,9 +124,12 @@ export type LayerDef = {
  * What a controller reads: the layer props, and the camera, canvas and view
  * the board shows. A controller draws nothing and mounts once, outside both
  * drawing trees, whichever view shows (design 5.1, ISO-D15). It renders on
- * every camera change, as the board does.
+ * every camera change, as the board does. `stage` is the Konva stage on
+ * screen, Top-down's or the isometric board's main stage, for a controller
+ * that listens to the board's presses or drags: null until it mounts, and
+ * another stage after a switch, so a listener follows it.
  */
-export type ControllerProps = LayerProps & { live: Live };
+export type ControllerProps = LayerProps & { live: Live; stage: Konva.Stage | null };
 
 export type ControllerDef = { id: string; Component: ComponentType<ControllerProps> };
 

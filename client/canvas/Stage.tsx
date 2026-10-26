@@ -258,6 +258,12 @@ export function MapStage(props: {
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
+  // Top-down's stage as state too, so the controllers outside both trees attach to the stage on screen once it exists (features/layers.ts ControllerProps).
+  const [topStage, setTopStage] = useState<Konva.Stage | null>(null);
+  const topStageRef = useCallback((stage: Konva.Stage | null) => {
+    stageRef.current = stage;
+    setTopStage(stage);
+  }, []);
   const [size, setSize] = useState<Size | null>(null);
   const [cam, setCam] = useState<Camera | null>(null);
   const camRef = useRef<Camera | null>(null);
@@ -1453,7 +1459,7 @@ export function MapStage(props: {
         <>
           {/* Everything with effects mounts once, outside both drawing trees, whichever view shows (ISO-D15). */}
           {CONTROLLERS.map(({ id, Component }) => (
-            <Component key={id} {...layerProps} live={live} />
+            <Component key={id} {...layerProps} live={live} stage={isoShown ? isoStage : topStage} />
           ))}
           <RemoteDragClock eased={eased} />
           <TokenInteractionContext.Provider value={interaction}>
@@ -1463,7 +1469,7 @@ export function MapStage(props: {
                   <Frozen frozen={isoShown}>
                     <Stage
                       key={stageKey}
-                      ref={stageRef}
+                      ref={topStageRef}
                       width={isoShown ? 0 : size.width}
                       height={isoShown ? 0 : size.height}
                       // The memo stops camera renders, not its layers' own store subscriptions, so hidden it skips the draws they still ask for.
