@@ -14,6 +14,8 @@ export type IsoGround = {
   fog: FogView;
   /** Whether walls, columns and pits stand at this zoom. Below the threshold everything lies flat, as Top-down draws it. */
   heights: boolean;
+  /** The map labels that stand, by id, split once by the board so the ground's build and the overlay never both draw one, or neither. */
+  uprightLabels: ReadonlySet<string>;
 };
 
 export const IsoGroundContext = createContext<IsoGround | null>(null);

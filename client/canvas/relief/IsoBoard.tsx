@@ -1,13 +1,13 @@
 import type Konva from "konva";
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Ellipse, Group, Layer, Rect, Shape, Stage } from "react-konva";
-import { CHUNK_CELLS, DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene, type TerrainId } from "#shared/model.ts";
+import { CHUNK_CELLS, DEFAULT_SETTINGS, type BuildChunk, type Label, type RoomState, type Scene, type TerrainId } from "#shared/model.ts";
 import { onHolder } from "#shared/rules/attach.ts";
 import { occupiedRange } from "#shared/rules/footprint.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import type { TexturedTerrain } from "../../features/builder/geometry.ts";
 import { drawLabel, measureLabel } from "../../features/builder/draw.ts";
-import { splitLabels } from "../../features/builder/labelShape.ts";
+import { labelShape, splitLabels } from "../../features/builder/labelShape.ts";
 import { useTextures } from "../../features/builder/textures.ts";
 import { isoLayersOf, type LayerProps } from "../../features/layers.ts";
 import { SightOverlay } from "../../features/vision/SightOverlay.tsx";
@@ -265,7 +265,11 @@ function IsoBoardImpl(props: IsoBoardProps) {
     };
   }, [props.stageKey, onStage]);
 
-  const groundCtx: IsoGround = useMemo(() => ({ turn, fog, heights: stand }), [turn, fog, stand]);
+  // Map labels split once by the stand rule: those that stand draw in the overlay, and the build on the ground stage leaves them out by id.
+  const labels = useMemo(() => Object.values(allLabels ?? {}).filter((l): l is NonNullable<typeof l> => !!l && l.sceneId === scene.id), [allLabels, scene.id]);
+  const uprightLabels = useMemo(() => splitLabels(fog, labels, measureLabel).upright, [fog, labels]);
+  const uprightIds = useMemo(() => new Set(uprightLabels.map((l) => l.id)), [uprightLabels]);
+  const groundCtx: IsoGround = useMemo(() => ({ turn, fog, heights: stand, uprightLabels: uprightIds }), [turn, fog, stand, uprightIds]);
   const groups = groundGroups(turn);
   const width = hidden ? 0 : size.width;
   const height = hidden ? 0 : size.height;
@@ -292,9 +296,6 @@ function IsoBoardImpl(props: IsoBoardProps) {
     },
     [src, feet, fog, turn, cam.scale, size.height, store, chunks, scene.id, w, h, props.viewerFog, props.role],
   );
-
-  const labels = useMemo(() => Object.values(allLabels ?? {}).filter((l): l is NonNullable<typeof l> => !!l && l.sceneId === scene.id), [allLabels, scene.id]);
-  const uprightLabels = useMemo(() => splitLabels(fog, labels, measureLabel).upright, [fog, labels]);
 
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: hidden ? "none" : undefined }} aria-hidden={hidden || undefined}>
@@ -456,11 +457,12 @@ function Silhouette(props: { token: ViewToken; turn: Turn; standee: StandeeIn; s
 }
 
 /**
- * Map labels the stand rule stands up (labelShape.ts): each text block on
- * its anchor at the drawn ground under it, in view space. The rest lie flat
- * in the build on the ground stage, under the fog.
+ * Map labels the stand rule stands up: each text block in the box
+ * labelShape gives it (builder/labelShape.ts), on its anchor at the drawn
+ * ground under it, in view space, the same box a tap on it reads. The rest
+ * lie flat in the build on the ground stage, under the fog.
  */
-const UprightLabels = memo(function UprightLabels(props: { labels: readonly { x: number; y: number; text: string; size: number }[]; turn: Turn; ground: (x: number, y: number) => number }) {
+const UprightLabels = memo(function UprightLabels(props: { labels: readonly Pick<Label, "x" | "y" | "text" | "size">[]; turn: Turn; ground: (x: number, y: number) => number }) {
   const { labels, turn, ground } = props;
   if (labels.length === 0) return null;
   return (
@@ -470,9 +472,9 @@ const UprightLabels = memo(function UprightLabels(props: { labels: readonly { x:
       sceneFunc={(ctx) => {
         const view = isometric(turn);
         for (const l of labels) {
-          const at = toView(view, { x: l.x, y: l.y }, ground(l.x, l.y));
-          // drawLabel centers the text on its point: half the size up, so the block stands on its anchor.
-          drawLabel(ctx._context, { x: at.x, y: at.y - l.size / 2, text: l.text, size: l.size });
+          const { box } = labelShape(l, view, { measure: measureLabel, upright: true, ground: ground(l.x, l.y) });
+          // drawLabel centers the text on its point: the middle of the box.
+          drawLabel(ctx._context, { x: box.x + box.width / 2, y: box.y + box.height / 2, text: l.text, size: l.size });
         }
       }}
     />

@@ -12,7 +12,6 @@ import { parseCellKey, polygonCells, rectBetween } from "./cells.ts";
 import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, pillarPaths } from "./draw.ts";
 import { useIsoGround } from "../../canvas/relief/context.ts";
 import { boxStands } from "../../canvas/relief/stand.ts";
-import { splitLabels } from "./labelShape.ts";
 import { isSymbolTerrain, type TexturedTerrain } from "./geometry.ts";
 import { labelBox } from "#shared/rules/labels.ts";
 import { lightCaption, lightCaptionSpot, lightReach, lightSlot, tokenBodies } from "./lightTap.ts";
@@ -65,7 +64,7 @@ const BuildBoard = memo(function BuildBoard(props: {
   const stamps = useStampDrawing(sceneId, role);
   // On the isometric view's ground stage, what stands up there is left out here (docs/design-v1-isometric-view.md 5.3).
   const iso = useIsoGround();
-  const flatLabels = useMemo(() => (iso ? splitLabels(iso.fog, labels, measureLabel).flat : labels), [iso, labels]);
+  const flatLabels = useMemo(() => (iso ? labels.filter((l) => !iso.uprightLabels.has(l.id)) : labels), [iso, labels]);
   const standing = useMemo(() => {
     if (!iso?.heights) return undefined;
     const flat = paths.drawing.symbols.pillar.filter((c) => !boxStands(iso.fog, { x0: c.x, y0: c.y, x1: c.x + 1, y1: c.y + 1 }));

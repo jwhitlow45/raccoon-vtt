@@ -201,3 +201,15 @@ describe("both trees share one map image", () => {
     assert.match(read("canvas/relief/IsoBoard.tsx"), /<MapContent scene=\{scene\} variant=\{props\.variant\} report=\{!hidden\}/);
   });
 });
+
+describe("map labels in Isometric", () => {
+  test("the board splits them once, the ground's build leaves out what stands by id, and an upright one draws from labelShape's box", () => {
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    const builder = read("features/builder/BuilderLayer.tsx");
+    assert.equal(iso.match(/splitLabels\(/g)?.length, 1);
+    assert.doesNotMatch(builder, /splitLabels\(/);
+    assert.match(builder, /labels\.filter\(\(l\) => !iso\.uprightLabels\.has\(l\.id\)\)/);
+    assert.match(iso, /uprightLabels: uprightIds/);
+    assert.match(iso, /labelShape\(l, view, \{ measure: measureLabel, upright: true, ground: ground\(l\.x, l\.y\) \}\)/);
+  });
+});
