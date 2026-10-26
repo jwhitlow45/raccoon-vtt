@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
+import { realClock, type Clock } from "../../state/timing.ts";
 import { drawnToasts, heldToasts, type RoomUi } from "../../state/store.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
 import { crossWide, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
@@ -26,6 +27,50 @@ export function previewNotice(name: string | undefined): string {
 
 /** The parts of a store the preview reads. The live store and the fixture's both fit. */
 export type PreviewSource = Pick<StoreApi<RoomView>, "getState" | "subscribe">;
+
+/** How long the preview waits for the player's snapshot before it says it could not load (docs/design-v1-per-player-vision.md 7.4). */
+export const PREVIEW_LOAD_MS = 10_000;
+
+export type PreviewLoad = "loading" | "loaded" | "failed";
+
+/**
+ * Where a preview's wait stands (7.4): loading until the player's
+ * snapshot lands in its store, then loaded, and failed once its socket
+ * ended (refused, closed before it loaded, or turned away later) or
+ * PREVIEW_LOAD_MS passed with no snapshot. Failed is final: it stops the
+ * socket (`stop`), so a snapshot that comes late draws nothing. Each
+ * change is told to `onChange`, the first one at once when the store
+ * already says it.
+ */
+export function watchPreviewLoad(source: PreviewSource, options: { stop(): void; onChange(load: PreviewLoad): void; clock?: Clock }): { readonly load: PreviewLoad; dispose(): void } {
+  const clock = options.clock ?? realClock;
+  let load: PreviewLoad = "loading";
+  const set = (next: PreviewLoad) => {
+    if (load === next || load === "failed") return;
+    load = next;
+    if (next === "failed") options.stop();
+    options.onChange(next);
+  };
+  const read = () => {
+    const s = source.getState();
+    if (s.ended !== null) set("failed");
+    else if (s.view !== null) set("loaded");
+  };
+  const unsubscribe = source.subscribe(read);
+  const timer = clock.setTimeout(() => {
+    if (load === "loading") set("failed");
+  }, PREVIEW_LOAD_MS);
+  read();
+  return {
+    get load() {
+      return load;
+    },
+    dispose() {
+      unsubscribe();
+      clock.clearTimeout(timer);
+    },
+  };
+}
 
 export type Preview = {
   store: StoreApi<RoomView>;

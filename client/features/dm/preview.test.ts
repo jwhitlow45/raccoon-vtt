@@ -12,8 +12,9 @@ import { api } from "../../lib/api.ts";
 import { createRoomSocket, previewSocketUrl, type SocketLike } from "../../state/socket.ts";
 import { createRoomStore } from "../../state/store.ts";
 import { FakeClock } from "../../state/testing.ts";
+import type { Ended } from "../../state/types.ts";
 import { EMPTY_EPHEMERAL, INITIAL_LOCAL, type RoomView } from "../../state/types.ts";
-import { createPreview, previewNotice } from "./preview.ts";
+import { createPreview, previewNotice, PREVIEW_LOAD_MS, watchPreviewLoad, type PreviewLoad } from "./preview.ts";
 
 const { thorn, cave } = FIXTURE_IDS;
 
@@ -167,5 +168,61 @@ describe("view as a player (docs/design-v1-per-player-vision.md 7.4)", () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+
+  test("its wait: loaded when the snapshot lands, failed after 10 s without one or once its socket ends, and failed stays, stopping the socket (7.4)", () => {
+    const run = (steps: (src: ReturnType<typeof source>, clock: FakeClock) => void) => {
+      const src = source();
+      src.setState({ view: null });
+      const clock = new FakeClock();
+      const seen: PreviewLoad[] = [];
+      let stops = 0;
+      const wait = watchPreviewLoad(src, { clock, stop: () => stops++, onChange: (load) => seen.push(load) });
+      steps(src, clock);
+      const out = { seen, stops, load: wait.load };
+      wait.dispose();
+      return out;
+    };
+    const DENIED: Ended = { kind: "denied", code: 4003 };
+    // No snapshot: failed at 10 s, not a moment before, and the socket stopped once.
+    assert.deepEqual(
+      run((_src, clock) => {
+        clock.advance(PREVIEW_LOAD_MS - 1);
+      }),
+      { seen: [], stops: 0, load: "loading" },
+    );
+    assert.deepEqual(run((_src, clock) => clock.advance(PREVIEW_LOAD_MS)), { seen: ["failed"], stops: 1, load: "failed" });
+    // A snapshot just in time loads, and the timer then changes nothing.
+    assert.deepEqual(
+      run((src, clock) => {
+        clock.advance(PREVIEW_LOAD_MS - 1);
+        src.setState({ view: playerView() });
+        clock.advance(10_000);
+      }),
+      { seen: ["loaded"], stops: 0, load: "loaded" },
+    );
+    // A snapshot after the wait failed draws nothing.
+    assert.deepEqual(
+      run((src, clock) => {
+        clock.advance(PREVIEW_LOAD_MS);
+        src.setState({ view: playerView() });
+      }),
+      { seen: ["failed"], stops: 1, load: "failed" },
+    );
+    // A socket that ends, before or after its view, fails it.
+    assert.deepEqual(run((src) => src.setState({ ended: DENIED })), { seen: ["failed"], stops: 1, load: "failed" });
+    assert.deepEqual(
+      run((src) => {
+        src.setState({ view: playerView() });
+        src.setState({ ended: DENIED });
+      }),
+      { seen: ["loaded", "failed"], stops: 1, load: "failed" },
+    );
+    // A store that already holds the view is loaded at once.
+    const ready = source();
+    const seen: PreviewLoad[] = [];
+    const wait = watchPreviewLoad(ready, { clock: new FakeClock(), stop: () => {}, onChange: (load) => seen.push(load) });
+    assert.deepEqual([seen, wait.load], [["loaded"], "loaded"]);
+    wait.dispose();
   });
 });

@@ -1,8 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useStore } from "zustand";
 import { Button } from "../../components/Button.tsx";
-import { Loading } from "../../components/Loading.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { useModalDialog } from "../../lib/modalDialog.ts";
 import { useUiScale } from "../device/settings.ts";
@@ -13,15 +11,14 @@ import { createRoomStore, type RoomStore } from "../../state/store.ts";
 import { RoomProvider, useAssets, useRoomView } from "../../state/view.ts";
 import { SHORT_LANDSCAPE_MAX, useTopBars } from "../encounter/band.ts";
 import { useLayoutSize } from "../device/layout.ts";
-import { createPreview, type Preview } from "./preview.ts";
+import { createPreview, watchPreviewLoad, type Preview, type PreviewLoad } from "./preview.ts";
 import { PreviewContext, type PreviewNotice } from "./previewContext.ts";
+import { PreviewWait } from "./PreviewWait.tsx";
 
 const FLASH_MS = 2_000;
-/** How long the preview waits for the player's snapshot before it says it could not load (docs/design-v1-per-player-vision.md 7.4). */
-export const PREVIEW_LOAD_MS = 10_000;
 
-/** The preview's own socket and store, and the read-only room drawn from them. */
-type Live = { room: RoomStore; preview: Preview; stop(): void };
+/** The preview's own store, and the read-only room drawn from it. */
+type Live = { room: RoomStore; preview: Preview };
 
 /**
  * "View as a player": the whole Room page again, over the DM's, drawn from
@@ -53,7 +50,7 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
   const roomId = useRoomView((s) => s.roomId);
   const assets = useAssets();
   const [live, setLive] = useState<Live | null>(null);
-  const [late, setLate] = useState(false);
+  const [load, setLoad] = useState<PreviewLoad>("loading");
   const [flash, setFlash] = useState(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { memberId, name, onExit } = props;
@@ -97,16 +94,12 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
         flashTimer.current = setTimeout(() => setFlash(false), FLASH_MS);
       },
     });
-    // Until the snapshot lands the socket may retry nothing (state/socket.ts previewOf), so the wait ends here or in its close.
-    const wait = setTimeout(() => {
-      if (room.store.getState().view !== null) return;
-      setLate(true);
-      socket.dispose();
-    }, PREVIEW_LOAD_MS);
-    setLate(false);
-    setLive({ room, preview, stop: () => socket.dispose() });
+    // Until the snapshot lands the socket retries nothing (state/socket.ts previewOf), so the wait ends in its close or here.
+    setLoad("loading");
+    const wait = watchPreviewLoad(room.store, { stop: () => socket.dispose(), onChange: setLoad });
+    setLive({ room, preview });
     return () => {
-      clearTimeout(wait);
+      wait.dispose();
       preview.dispose();
       socket.dispose();
       room.dispose();
@@ -160,7 +153,15 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
         overflow: "hidden",
       }}
     >
-      {live ? <PreviewRoom live={live} late={late} name={name} context={context} assets={assets} /> : <PreviewWait name={name} failed={false} />}
+      {live && load === "loaded" ? (
+        <PreviewContext.Provider value={context}>
+          <RoomProvider store={live.preview.store} actions={live.preview.actions} ui={live.preview.ui} assets={assets}>
+            <Room />
+          </RoomProvider>
+        </PreviewContext.Provider>
+      ) : (
+        <PreviewWait name={name} failed={load === "failed"} zoom={zoom} />
+      )}
       <div aria-hidden style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", border: `4px solid ${theme.color.accentSoft}` }} />
       <div
         ref={noticeRef}
@@ -178,44 +179,5 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
       {slot ? createPortal(<div style={{ width: "100%", maxWidth: 520, pointerEvents: "auto", fontFamily: theme.font.body }}>{banner}</div>, slot) : null}
     </dialog>,
     document.body,
-  );
-}
-
-/**
- * The previewed page once the player's snapshot is in, and until then
- * what it waits on. A socket that ended (refused, closed before it loaded,
- * or turned away later) or a wait past PREVIEW_LOAD_MS says it could not
- * load, and nothing of the room is drawn.
- */
-function PreviewRoom(props: { live: Live; late: boolean; name: string; context: { memberId: string; name: string; notice?: PreviewNotice }; assets: ReturnType<typeof useAssets> }) {
-  const { live } = props;
-  const loaded = useStore(live.room.store, (s) => s.view !== null);
-  const ended = useStore(live.room.store, (s) => s.ended !== null);
-  const failed = ended || (props.late && !loaded);
-  useEffect(() => {
-    if (failed) live.stop();
-  }, [failed, live]);
-  if (failed || !loaded) return <PreviewWait name={props.name} failed={failed} />;
-  return (
-    <PreviewContext.Provider value={props.context}>
-      <RoomProvider store={live.preview.store} actions={live.preview.actions} ui={live.preview.ui} assets={props.assets}>
-        <Room />
-      </RoomProvider>
-    </PreviewContext.Provider>
-  );
-}
-
-/** "Loading what Ana sees…" after the shared delay, or that it could not load, centered over the stage, each a polite status. */
-function PreviewWait(props: { name: string; failed: boolean }) {
-  return (
-    <div data-preview-wait={props.failed ? "failed" : "loading"} style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", padding: theme.space(4), fontFamily: theme.font.body }}>
-      {props.failed ? (
-        <p role="status" style={{ margin: 0, maxWidth: 420, textAlign: "center", fontSize: theme.font.body14, lineHeight: theme.leading.body, color: theme.color.text, overflowWrap: "anywhere" }}>
-          Could not load what {props.name} sees. Close and try again.
-        </p>
-      ) : (
-        <Loading text={`Loading what ${props.name} sees…`} style={{ maxWidth: 420, overflowWrap: "anywhere" }} />
-      )}
-    </div>
   );
 }
