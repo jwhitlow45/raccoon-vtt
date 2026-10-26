@@ -1,0 +1,195 @@
+# Sets the Docker Hub repository's overview (its full description) from
+# selfhost/DOCKERHUB.md and its short description from
+# selfhost/DOCKERHUB-short.txt (README.md, "Releasing").
+#
+# It runs only by hand, from the Actions tab, on a release tag: the dockerhub
+# environment admits only v* tags, and waits for one approval. It sends the
+# two files as they are at that tag (README.md, "Releasing", says when). A
+# release never runs it, so a release keeps its one approval and its
+# concurrency group is never held waiting for this.
+#
+# It signs in with DOCKERHUB_USERNAME and DOCKERHUB_TOKEN, the secrets
+# image.yml pushes with. The token needs the Repo Read, Write, Delete
+# permission here, which changing a description takes (see below), more than
+# pushing needs.
+#
+# The same rules as image.yml: only actions/checkout, pinned by the same full
+# SHA, and no third-party action. The token reaches Docker Hub only in a
+# request body on curl's stdin, never on a command line or in a URL, and the
+# short-lived bearer token it is exchanged for only in the Authorization
+# header, also on stdin. Neither is written to a file. The bearer token is
+# masked in the log, and both are scrubbed from Docker Hub's error text.
+#
+# The overview writes the repository's address as {{REPOSITORY_URL}}, which
+# this job fills in from the run's own repository just before sending it.
+#
+# Docker Hub's API, as Docker documents it
+# (https://docs.docker.com/reference/api/hub/latest/):
+#
+#   - POST /v2/auth/token ("Create access token") takes {identifier, secret},
+#     a username and a personal access token, and answers {access_token}, a
+#     bearer token that expires in 10 minutes. The older login route is
+#     deprecated.
+#   - A repository's description is at most 100 characters and its full
+#     description at most 25,000 (the schema of "Create a new repository").
+#
+# Docker's reference does not list the update itself. This uses
+# PATCH /v2/repositories/{namespace}/{repository} with {full_description,
+# description}, the call the widely used peter-evans/dockerhub-description
+# action makes (src/dockerhub-helper.ts). That action asks for a token with
+# read, write and delete scope, and Docker's token reference
+# (https://docs.docker.com/security/access-tokens/reference/) puts
+# "manage your repositories" only under "Repo Read, Write, Delete". So
+# DOCKERHUB_TOKEN needs that permission: "Repo Read & Write", enough to
+# push, may be refused with 401 or 403.
+name: Docker Hub description
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One at a time, none cancelled.
+concurrency:
+  group: dockerhub-description
+  cancel-in-progress: false
+
+jobs:
+  description:
+    environment: dockerhub
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      # As image.yml names the image it pushes, without docker.io/.
+      REPOSITORY: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/raccoon-vtt
+    steps:
+      - name: The Docker Hub secrets are set
+        env:
+          HAVE_USERNAME: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+          HAVE_TOKEN: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        run: |
+          missing=""
+          [ "$HAVE_USERNAME" = true ] || missing="$missing DOCKERHUB_USERNAME"
+          [ "$HAVE_TOKEN" = true ] || missing="$missing DOCKERHUB_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::The dockerhub environment is missing the secrets:$missing."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The repository described is the one hosts pull
+        run: |
+          pulled=$(sed -n 's/^ *image: ${RACCOON_IMAGE:-\([^}]*\)}:.*/\1/p' selfhost/compose.yml)
+          if [ "$pulled" != "docker.io/$REPOSITORY" ]; then
+            echo "::error::selfhost/compose.yml pulls '$pulled', but this job would describe 'docker.io/$REPOSITORY'. Change IMAGE in scripts/selfhost-compose.ts, or the dockerhub environment's namespace."
+            exit 1
+          fi
+      # scripts/dockerhub-description.test.ts runs this step with stand-ins
+      # for curl and sleep.
+      - name: Set the description
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          # The overview's {{REPOSITORY_URL}}, so no file in the repository
+          # holds the account's name and the published links still work.
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # A value as one line of a workflow command: % and line breaks escaped, so text from Docker Hub cannot start a command of its own.
+          plain() { local s=${1//"%"/%25}; s=${s//$'\r'/%0D}; printf '%s' "${s//$'\n'/%0A}"; }
+          # What an answer from Docker Hub says, for an error line: its detail or message, else its start, with neither token in it.
+          said() {
+            local s
+            s=$(printf '%s' "$1" | jq -r '(.detail // .message // empty) | tostring' 2> /dev/null) || s=""
+            [ -n "$s" ] || s=$1
+            [ -z "${DOCKERHUB_TOKEN:-}" ] || s=${s//"$DOCKERHUB_TOKEN"/***}
+            [ -z "${access:-}" ] || s=${s//"$access"/***}
+            plain "${s:0:300}"
+          }
+          # curl's answer is the body, then a line with the HTTP status.
+          nl=$'\n'
+          status() { printf '%s' "${1##*"$nl"}"; }
+          body() { printf '%s' "${1%"$nl"*}"; }
+          # One request, with what the function named first prints as curl's stdin, into $answer. Tried up to
+          # three times while curl gets no answer or Docker Hub answers 408, 429 or 5xx, each try captured on its
+          # own: curl's --retry would join every try's body into one output. False when the last try got no answer.
+          request() {
+            local stdin=$1 try out
+            shift
+            for try in 1 2 3; do
+              if out=$("$stdin" | curl -sS --proto '=https' --max-time 30 --write-out '\n%{http_code}' "$@"); then
+                case $(status "$out") in
+                  408 | 429 | 5??) ;;
+                  *) answer=$out; return 0 ;;
+                esac
+              else
+                out=""
+              fi
+              [ "$try" = 3 ] || sleep $((try * 2))
+            done
+            answer=$out
+            [ -n "$out" ]
+          }
+
+          full=selfhost/DOCKERHUB.md
+          short=$(cat selfhost/DOCKERHUB-short.txt)
+          if [ -z "$short" ] || [ "${#short}" -gt 100 ] || [[ $short == *$'\n'* ]]; then
+            echo "::error::selfhost/DOCKERHUB-short.txt must be one line of 1 to 100 characters, Docker Hub's limit for a short description."
+            exit 1
+          fi
+          url=${REPOSITORY_URL:-}
+          if [[ $url != https://?*/?* || $url == *[[:space:]]* ]]; then
+            echo "::error::REPOSITORY_URL is '$(plain "$url")', not the repository's https address, which the overview's links need."
+            exit 1
+          fi
+          # A literal split and join, so nothing in the address is read as a pattern.
+          payload=$(jq -n --rawfile full "$full" --arg url "$url" --arg short "$short" \
+            '{full_description: ($full | split("{{REPOSITORY_URL}}") | join($url)), description: $short}')
+          if printf '%s' "$payload" | jq -e '.full_description | contains("{{")' > /dev/null; then
+            echo "::error::$full holds a placeholder other than {{REPOSITORY_URL}}, which would reach Docker Hub as it is."
+            exit 1
+          fi
+          size=$(printf '%s' "$payload" | jq '.full_description | utf8bytelength')
+          if [ "$size" -gt 25000 ]; then
+            echo "::error::$full is $size bytes with the repository's address in its links, and Docker Hub takes at most 25000 for a full description."
+            exit 1
+          fi
+
+          # The credentials as JSON from jq's environment, so the token is on no command line.
+          credentials() { jq -n '{identifier: env.DOCKERHUB_USERNAME, secret: env.DOCKERHUB_TOKEN}'; }
+          if ! request credentials --header 'Content-Type: application/json' --data-binary @- https://hub.docker.com/v2/auth/token; then
+            echo "::error::Could not reach Docker Hub to sign in."
+            exit 1
+          fi
+          case $(status "$answer") in
+            2??) ;;
+            *) echo "::error::Docker Hub refused to sign in with DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (HTTP $(plain "$(status "$answer")")): $(said "$(body "$answer")")"; exit 1 ;;
+          esac
+          access=$(body "$answer" | jq -r '.access_token // empty' 2> /dev/null) || access=""
+          if [ -z "$access" ]; then
+            echo "::error::Docker Hub's answer to signing in held no access token."
+            exit 1
+          fi
+          # GitHub masks the secrets it hands a step, but not a token made from one. The runner hides this line itself.
+          echo "::add-mask::$(plain "$access")"
+
+          # The header on stdin, so the bearer token is on no command line and in no file. The body is the
+          # overview, public text, so it can go on the command line, where every try reads it again.
+          authorization() { printf 'Authorization: Bearer %s\n' "$access"; }
+          if ! request authorization --request PATCH --header @- --header 'Content-Type: application/json' \
+            --data-binary "$payload" "https://hub.docker.com/v2/repositories/$REPOSITORY"; then
+            echo "::error::Could not reach Docker Hub to set the description of $(plain "$REPOSITORY")."
+            exit 1
+          fi
+          case $(status "$answer") in
+            2??) ;;
+            401 | 403) echo "::error::Docker Hub refused to set the description of $(plain "$REPOSITORY") (HTTP $(status "$answer")): $(said "$(body "$answer")"). DOCKERHUB_TOKEN needs the Repo Read, Write, Delete permission to change a repository's description."; exit 1 ;;
+            *) echo "::error::Docker Hub did not set the description of $(plain "$REPOSITORY") (HTTP $(plain "$(status "$answer")")): $(said "$(body "$answer")")"; exit 1 ;;
+          esac
+          # The answer is the repository as Docker Hub now holds it. A difference is worth a look, but the update itself was accepted.
+          if ! body "$answer" | jq -e --argjson sent "$payload" '.full_description == $sent.full_description and .description == $sent.description' > /dev/null 2>&1; then
+            echo "::warning::Docker Hub accepted the description of $(plain "$REPOSITORY"), but its answer does not show the text sent. Check the repository's page."
+          fi
+          echo "Set the description of $REPOSITORY: $size bytes from $full, and \"$short\"."

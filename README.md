@@ -714,12 +714,38 @@ slot, and a release waiting behind another is cancelled when a third
 arrives.
 
 The `dockerhub` environment, in the repository's settings, holds the
-secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
-token that can read and write), admits only `v*` tags and has a required
-reviewer. A `DOCKERHUB_NAMESPACE` variable there publishes under another
-namespace than the username. A push to a `ci/` branch that changes the
-image or `selfhost/`, and a run started by hand from the Actions tab, build
-and smoke-test without pushing.
+secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub personal
+access token, with the permission that
+[The Docker Hub overview](#the-docker-hub-overview) names), admits only
+`v*` tags and has a required reviewer. A `DOCKERHUB_NAMESPACE` variable
+there publishes under another namespace than the username. A push to a
+`ci/` branch that changes the image or `selfhost/`, and a run of Image
+started by hand from the Actions tab, build and smoke-test without pushing.
+
+### The Docker Hub overview
+
+The Docker Hub repository's overview comes from
+[`selfhost/DOCKERHUB.md`](selfhost/DOCKERHUB.md), and its short description
+from `selfhost/DOCKERHUB-short.txt`, which says the same as the
+Dockerfile's description label (a unit test checks that). A release does
+not send them. Send them by hand whenever either file changes:
+
+1. Release the change as usual, so a `vX.Y.Z` tag carries it.
+2. In the Actions tab, open Docker Hub description
+   ([`.github/workflows/dockerhub-description.yml`](.github/workflows/dockerhub-description.yml)),
+   choose Run workflow, and pick that tag under "Use workflow from".
+3. Approve the `dockerhub` environment on the run's page, once.
+
+It sends the two files as they are at that tag, with this repository's
+address filled into the overview's links. The environment refuses a run on
+a branch, so a fix to the overview reaches Docker Hub only once a release
+tag carries it.
+
+It signs in with the same `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as a
+release, so that token needs the Repo Read, Write, Delete permission.
+Pushing images needs only Read & Write, but changing a repository's
+description takes Read, Write, Delete. With less, Docker Hub may refuse the
+change, and the run's error names the permission.
 
 ## Admin commands
 

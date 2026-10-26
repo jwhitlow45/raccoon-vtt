@@ -43,6 +43,10 @@ on:
       - scripts/**
       - package.json
       - pnpm-lock.yaml
+      # The Docker Hub overview, which dockerhub-description.yml sends by
+      # hand, is not part of the image.
+      - "!selfhost/DOCKERHUB.md"
+      - "!selfhost/DOCKERHUB-short.txt"
   workflow_dispatch:
 
 permissions:
