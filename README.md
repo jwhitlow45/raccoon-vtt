@@ -536,8 +536,12 @@ explains each:
   `docker compose` command then includes it, `pull` and `down` too.
 - `RACCOON_VERSION`: the release to run. Unset, it is the minor release the
   file came with, such as `0.1`, so updates bring its newest patch.
-- `TRUST_CF_CONNECTING_IP`: leave it at 1 with Caddy or Cloudflare. Behind
-  a proxy that cannot overwrite the `CF-Connecting-IP` header, set it to 0
+- `TRUST_CF_CONNECTING_IP`: 0 unless you set it, unlike the server stack.
+  Set it to 1 only when every request reaches the app through something that
+  overwrites the `CF-Connecting-IP` header with the visitor's address:
+  Cloudflare, or the `https` profile's Caddy. Anywhere else, 1 would let
+  anyone pick their address and get around every per-address limit. At 0
+  those limits see the front end's one address, which is safe but strict
   (Client addresses and rate limits, in
   [Put HTTPS in front of it](#5-put-https-in-front-of-it)).
 
@@ -610,8 +614,7 @@ docker compose --profile restore run --rm restore sh /backup/backup.sh restore r
 ```
 
 On a new server, follow steps 1 to 3 above with the same `ROOM_SECRET_KEY`,
-then [Restore](#restore) from putting the copied backups onto the volume. A message from the backup script that names
-`-f docker-compose.server.yml` means the same command without it.
+then [Restore](#restore) from putting the copied backups onto the volume.
 
 ## Releasing
 
@@ -627,18 +630,22 @@ never from a laptop.
 
 The tag starts the Image workflow. It checks that the tag matches
 `package.json`, that the commit is on main and that CI passed on that exact
-commit. It builds both architectures and runs the smoke test: the amd64
-image comes up healthy with `selfhost/compose.yml`, and its mounted configs
-match `docker/` byte for byte. Then the publish waits for a reviewer to
-approve the `dockerhub` environment on the run's page. After the approval
-it pushes each architecture and tags `X.Y.Z`, `X.Y` and `latest`.
+commit, and builds the arm64 image on an arm64 runner. Then the publish
+job waits for a reviewer to approve the `dockerhub` environment on the
+run's page, once. After the approval it builds the amd64 image and runs
+the smoke test (`selfhost/smoke-test.sh`): the image comes up healthy with
+`selfhost/compose.yml`, and the files its services mount match `docker/`
+byte for byte. It then pushes amd64 and arm64 from the same build, checks
+that the amd64 image pushed is the one it tested, and only then tags
+`X.Y.Z`, `X.Y` and `latest`.
 
 The `dockerhub` environment, in the repository's settings, holds the
 secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
 token that can read and write), admits only `v*` tags and has a required
 reviewer. A `DOCKERHUB_NAMESPACE` variable there publishes under another
-namespace than the username. A run started by hand from the Actions tab
-builds and smoke-tests any branch, and never pushes.
+namespace than the username. A push to a `ci/` branch that changes the
+image or `selfhost/`, and a run started by hand from the Actions tab, build
+and smoke-test without pushing.
 
 ## Admin commands
 
