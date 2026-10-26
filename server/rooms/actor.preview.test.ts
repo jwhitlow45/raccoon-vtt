@@ -96,6 +96,31 @@ describe("a preview in the room actor", () => {
     await actor.shutdown({ code: 1012, snapshot: false });
   });
 
+  test("a socket's snapshot leaves it holding no other screen's preview, as its device drops them (review PV3-ASTRA-4)", async () => {
+    const { actor, dm, pip, session } = await table(new SnapshotBudget());
+    const device = socket(actor, { sessionId: session, memberId: dm.id, role: "dm" });
+    await actor.hello(device.conn, { clientId: "dev", resumeFrom: 1 });
+    const player = socket(actor, { sessionId: uuidv7(), memberId: pip.id, role: "player" });
+    await actor.hello(player.conn, { clientId: "pip", resumeFrom: 1 });
+    await settle();
+    const sceneId = actor.committed.state.meta.playerSceneId!;
+    actor.ephemeral(player.conn, { sceneId, e: { k: "ruler", id: "r1", points: [{ x: 1.5, y: 1.5 }] } });
+    assert.deepEqual([...device.conn.previewsHeld.keys()], [`${pip.id}|ruler:r1`], "the DM's device shows Pip's ruler");
+    // The DM's device asks for its scene again, misses the ruler's end while it waits, and says hello for a fresh snapshot.
+    device.sent.length = 0;
+    actor.scene(device.conn);
+    actor.ephemeral(player.conn, { sceneId, e: { k: "rulerEnd", id: "r1" } });
+    await actor.hello(device.conn, { clientId: "dev", resumeFrom: 1 });
+    await settle();
+    assert.ok(device.sent.some((m) => m.t === "snapshot"));
+    assert.ok(!device.sent.some((m) => m.t === "eph"), "the end passed it by");
+    assert.equal(device.conn.previewsHeld.size, 0, "nothing of the ruler stays held");
+    // Pip's next frame shows on it again.
+    actor.ephemeral(player.conn, { sceneId, e: { k: "ruler", id: "r1", points: [{ x: 2.5, y: 1.5 }] } });
+    assert.deepEqual([...device.conn.previewsHeld.keys()], [`${pip.id}|ruler:r1`]);
+    await actor.shutdown({ code: 1012, snapshot: false });
+  });
+
   test("a preview ends when its player leaves the roster, and every other socket stays", async () => {
     const { actor, dm, pip, session } = await table(new SnapshotBudget());
     const device = socket(actor, { sessionId: session, memberId: dm.id, role: "dm" });

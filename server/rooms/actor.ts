@@ -1357,6 +1357,10 @@ export class RoomActor {
     const snapshot = buildSnapshot(this.#committed.state, this.#committed.seq, conn, wm?.committed ?? 0);
     const bytes = conn.send(snapshot.message);
     conn.held = snapshot.held;
+    // A device that takes a snapshot drops every other screen's preview it showed (client/state/store.ts keepLocal), so
+    // the server counts it as holding none, and an end it missed while it resynced leaves nothing behind (review
+    // PV3-ASTRA-4).
+    conn.previewsHeld.clear();
     conn.helloPending = false;
     conn.helloAllowed = false;
     this.#budget.record(budgetKeys, bytes);
