@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { GridShape, PathStop, RoomState, Viewer } from "../model.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { placedOnHex, tokenRefHex, type PlacedToken } from "../rules/footprint.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex, type PlacedToken } from "../rules/footprint.ts";
 import { rasterizeFogOps } from "../rules/fog.ts";
 import { gridOfShape, SQUARES } from "../rules/grid.ts";
 import { hexDistance, hexKey, hexSubcells, type Hex, type HexGrid } from "../rules/hex.ts";
@@ -107,5 +107,37 @@ describe("a leg through one fogged hex (section 9)", () => {
     const f = fight("hexRows", "medium", { col: 4, row: 2 }, (s) => allBut(s, gridOfShape("hexRows") as HexGrid, { col: 8, row: 3 }));
     f.move({ col: 4, row: 4 });
     assert.equal(f.stops()[1]!.routeSeen, true);
+  });
+});
+
+describe("on a per-player scene with fog, a leg's every spot stands on shared ground (docs/design-v1-per-player-vision.md 6.5)", () => {
+  /** A per-player scene with fog alone, every sub-cell revealed in the shared fog but those of `hidden`. */
+  function sharedBut(state: RoomState, g: HexGrid, hidden: Hex | null): void {
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } };
+    state.holders = { s1: { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }] } };
+    const ops = [
+      { id: "all", mode: "reveal" as const, shape: { kind: "rect" as const, x: 0, y: 0, w: 30, h: 20 } },
+      ...(hidden ? hexSubcells(g, hidden) : []).map(([sx, sy], i) => ({ id: `h${i}`, mode: "hide" as const, shape: { kind: "rect" as const, x: sx / 4, y: sy / 4, w: 0.25, h: 0.25 } })),
+    ];
+    for (const [key, tile] of Object.entries(rasterizeFogOps(state.fogTiles, "s1", state.scenes.s1.bounds, ops))) {
+      if (tile === null) delete state.fogTiles[key];
+      else state.fogTiles[key] = tile;
+    }
+  }
+
+  test("a Large whose middle spot has one hex wholly under the shared fog is not routeSeen, though it is seen there", () => {
+    const g = gridOfShape("hexRows") as HexGrid;
+    const from = ownWalk({ ...token("o", { size: "large" }), ...placedOnHex(g, { size: "large", x: 0, y: 0 }, { col: 6, row: 6 }) });
+    const to = { ...from, ...placedOnHex(g, from, { col: 8, row: 6 }) };
+    const spots = routeWalk(g, [from, to], { buildChunks: {} });
+    assert.equal(spots.length, 3);
+    const ends = new Set([spots[0]!, spots[2]!].flatMap((p) => occupiedHexes(g, { size: "large", x: p.x, y: p.y }).map(hexKey)));
+    const hidden = occupiedHexes(g, { size: "large", x: spots[1]!.x, y: spots[1]!.y }).find((h) => !ends.has(hexKey(h)))!;
+    const f = fight("hexRows", "large", { col: 6, row: 6 }, (s) => sharedBut(s, g, hidden));
+    f.move({ col: 8, row: 6 });
+    assert.deepEqual([f.stops()[0]!.seen, f.stops()[1]!.seen, f.stops()[1]!.routeSeen], [true, true, undefined]);
+    const open = fight("hexRows", "large", { col: 6, row: 6 }, (s) => sharedBut(s, g, null));
+    open.move({ col: 8, row: 6 });
+    assert.equal(open.stops()[1]!.routeSeen, true);
   });
 });

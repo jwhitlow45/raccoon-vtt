@@ -57,7 +57,8 @@ import { isWritable } from "./writable.ts";
 import { autoWallBetween, paintedAt } from "./rules/autoWalls.ts";
 import { visionRules, type PartySight } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
-import { footprintRect, footprintSubcells, occupiedCells, occupiedRange, type CellRange } from "./rules/footprint.ts";
+import { footprintRect, footprintSubcells, occupiedCells, occupiedHexes, occupiedRange, type CellRange } from "./rules/footprint.ts";
+import { hexSubcells } from "./rules/hex.ts";
 import { sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
@@ -764,10 +765,12 @@ export function seenAtEvery(state: RoomState, token: Token, spots: readonly { x:
   if (!spots.every((p) => !withheldFromPlayers(state, shared.fogged, shared.sight, placed(p), revealed))) return false;
   const scene = state.scenes[token.sceneId];
   if (!perPlayerScene(scene) || !scene?.fogEnabled) return true;
-  // Every part of the footprint on shared ground: each cell on squares, each sub-cell of its hexes on hexes.
+  // Every cell of the footprint on shared ground, not wholly under the shared fog: on hexes every hex of it (HX-D10).
   const grid = sceneGrid(scene);
   const open = (t: Token) =>
-    grid.shape === "hex" ? footprintSubcells(grid, t).every(([sx, sy]) => !shared.fogged.sub(token.sceneId, sx, sy)) : occupiedCells(grid, t).every((cell) => !shared.fogged(token.sceneId, cell.x, cell.y));
+    grid.shape === "hex"
+      ? occupiedHexes(grid, t).every((h) => hexSubcells(grid, h).some(([sx, sy]) => !shared.fogged.sub(token.sceneId, sx, sy)))
+      : occupiedCells(grid, t).every((cell) => !shared.fogged(token.sceneId, cell.x, cell.y));
   return spots.every((p) => open(placed(p)));
 }
 
