@@ -271,7 +271,7 @@ jobs:
           source_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
           if [ "$(label org.opencontainers.image.revision)" != "$REVISION" ] || [ "$(label org.opencontainers.image.version)" != "$VERSION" ] \
             || [ "$(label org.opencontainers.image.source)" != "$source_url" ] || [ "$platforms" != "linux/amd64 linux/arm64" ]; then
-            echo "::error::$VERSION is already on Docker Hub, from revision '$(label org.opencontainers.image.revision)', not this run's $REVISION. A published version is never rebuilt or replaced: release a new one."
+            echo "::error::$VERSION is already on Docker Hub, and not as this run would push it: revision '$(label org.opencontainers.image.revision)' (this run's '$REVISION'), version '$(label org.opencontainers.image.version)' (this run's '$VERSION'), source '$(label org.opencontainers.image.source)' (this run's '$source_url'), platforms '$platforms' (this run's 'linux/amd64 linux/arm64'). A published version is never rebuilt or replaced: release a new one."
             exit 1
           fi
           index=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
