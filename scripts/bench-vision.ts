@@ -498,18 +498,56 @@ export function runBench(runs = 15): { rows: BenchRow[]; pieces: Record<string, 
 }
 
 /*
- * A free light every source sees: one in the gap west of the hall's
- * dividing wall, which lights both halves, moved a cell a run (decision 15
- * of the per-player design, 30 ms, as a source moved among lit lights).
- * The sources' own lights already light the hall bright where they see,
- * so it changes no level there: the union sweeps and lights it, and a
- * holder's raster finds its light rows unchanged where its sources see.
+ * The scene for a free light every source sees (decision 15 of the
+ * per-player design, 30 ms, as a source moved among lit lights). On the
+ * cap scene the characters' own lights and the free lights in the hall
+ * already light it wherever a source sees, so a light there changes no
+ * level and the row would time the union's sweep alone. Here the
+ * characters carry no light and the hall's free lights stand as far out
+ * on the other side of the scene's middle, so the scene keeps its 100,
+ * and the hall's light alone gives the hall its levels. A held source then
+ * sees the light's edge move in every holder's raster.
+ */
+export function lightScene(state: RoomState, perPlayer: boolean): RoomState {
+  const inHall = (x: number, y: number) => x >= 59 && x < 141 && y >= 59 && y < 141;
+  const tokens: Record<string, Token> = {};
+  for (const t of Object.values(state.tokens)) {
+    if (t.kind !== "pc") tokens[t.id] = t;
+    else {
+      const { light: _carried, ...rest } = t;
+      tokens[t.id] = rest;
+    }
+  }
+  const lights: Record<string, Light> = {};
+  for (const l of Object.values(state.lights)) lights[l.id] = inHall(l.x, l.y) ? { ...l, x: l.x < 100 ? l.x - 59 : l.x + 59 } : l;
+  const scene = state.scenes.bench!;
+  const { perPlayer: _was, ...vision } = scene.vision!;
+  return { ...state, tokens, lights, scenes: { bench: { ...scene, vision: perPlayer ? { ...vision, perPlayer: true } : vision } } };
+}
+
+/*
+ * The hall's light: in the gap west of the dividing wall, which lights
+ * both halves, in place of the first free light so the scene stays at its
+ * cap, then moved half a cell a run through eight spots, so no run repeats
+ * a state the cache still holds.
  */
 function hallLight(s: RoomState, run: number): RoomState {
   const lights = { ...s.lights };
-  if (!lights.hall) lights.hall = { id: "hall", rev: 0, sceneId: "bench", x: 64.5, y: 100.5, ...MAX_LIGHT, on: true, walls: true };
-  else lights.hall = { ...lights.hall, y: lights.hall.y + (run % 2 === 0 ? 1 : -1) };
+  if (!lights.hall) delete lights[Object.keys(lights).sort()[0]!];
+  lights.hall = { id: "hall", rev: 0, sceneId: "bench", x: 64.5, y: 98.5 + (run % 8) / 2, ...MAX_LIGHT, on: true, walls: true };
   return { ...s, lights };
+}
+
+/** Throws unless the hall's light moving changes some tile of the union and of every holder's raster, which the rows are there to time. */
+export function lightReachesEveryHolder(state: RoomState, holders: readonly string[]): void {
+  const a = hallLight(hallLight(state, 0), 1);
+  const b = hallLight(a, 2);
+  const changed = (before: ReadonlyMap<string, SightTile>, after: ReadonlyMap<string, SightTile>) =>
+    [...new Set([...before.keys(), ...after.keys()])].some((k) => JSON.stringify(before.get(k)) !== JSON.stringify(after.get(k)));
+  if (!changed(partySight(a, "bench", world).tiles, partySight(b, "bench", world).tiles)) throw new Error("the hall's light changes nothing the party sees");
+  for (const id of holders) {
+    if (!changed(holderSight(a, "bench", id, world).tiles, holderSight(b, "bench", id, world).tiles)) throw new Error(`the hall's light changes nothing ${id} sees`);
+  }
 }
 
 /** The per-player rows (docs/design-v1-per-player-vision.md 8.1), each against the whole-party row above it. */
@@ -528,11 +566,12 @@ function perPlayerRows(runs: number, rows: BenchRow[]): void {
     const dark = perPlayerRoom("dark", 6, shared);
     rows.push({ row: `One held source moved, bright scene${holders(6)}${also}`, where: "server", budget: 25, ms: timed(runs, bright.state, moveBy, everyRaster(bright.holders)) });
     rows.push({ row: `A held source and its light every source sees moved, dark scene${holders(6)}${also}`, where: "server", budget: 30, ms: timed(runs, dark.state, moveBy, everyRaster(dark.holders)) });
-    if (shared === 0) rows.push({ row: "A free light every source sees moved, dark scene", where: "server", budget: 30, ms: timed(runs, dark.state, hallLight, union) });
-    rows.push({ row: `A free light every source sees moved, dark scene${holders(6)}${also}`, where: "server", budget: 30, ms: timed(runs, dark.state, hallLight, everyRaster(dark.holders)) });
+    lightReachesEveryHolder(lightScene(dark.state, true), dark.holders);
+    if (shared === 0) rows.push({ row: "A free light every source sees moved, dark hall lit by it alone", where: "server", budget: 30, ms: timed(runs, lightScene(dark.state, false), hallLight, union) });
+    rows.push({ row: `A free light every source sees moved, dark hall lit by it alone${holders(6)}${also}`, where: "server", budget: 30, ms: timed(runs, lightScene(dark.state, true), hallLight, everyRaster(dark.holders)) });
   }
   const five = perPlayerRoom("dark", 5);
-  rows.push({ row: `A free light every source sees moved, dark scene${holders(5)}`, where: "server", budget: 30, ms: timed(runs, five.state, hallLight, everyRaster(five.holders)) });
+  rows.push({ row: `A free light every source sees moved, dark hall lit by it alone${holders(5)}`, where: "server", budget: 30, ms: timed(runs, lightScene(five.state, true), hallLight, everyRaster(five.holders)) });
 
   const bright = perPlayerRoom("bright");
   const dark = perPlayerRoom("dark");
