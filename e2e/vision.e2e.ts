@@ -1135,6 +1135,74 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     }
   });
 
+  test("pv4-4. in View as a player the Log's older pages ask as Pat, and are taken only when the answer says it was as Pat", async () => {
+    // The server's preview is PV3's, so the run answers the preview's socket with Pat's own view, and the log's older pages itself.
+    await ops.send({ t: "log.chat", text: "Before the archive" });
+    await waitFor("the line in Pat's log", () => playerSocket.state?.log.some((e) => e.text === "Before the archive") || null);
+    const last = framesFrom(0).reverse().find((f) => f.t === "snapshot") as { seq?: number; watermark?: number } | undefined;
+    assert.ok(last, "the player never got a snapshot");
+    // The watch keeps `you` from Pat's last snapshot, sent before the DM moved the players here.
+    const snapshot = JSON.stringify({ t: "snapshot", seq: last.seq, state: playerSocket.state, you: { ...playerSocket.you!, sceneId: run.sceneId }, watermark: last.watermark });
+    const asked: string[] = [];
+    let answer: { as?: string } = {};
+    const page = await dmContext.newPage();
+    dmConsole.attach(page);
+    await page.routeWebSocket(/[?&]as=(?!display)/, (ws) => {
+      ws.onMessage((m) => {
+        const msg = JSON.parse(typeof m === "string" ? m : m.toString("utf8")) as { t?: string; k?: number };
+        if (msg.t === "hello") ws.send(snapshot);
+        else if (msg.t === "ping") ws.send(JSON.stringify({ t: "pong", k: msg.k }));
+      });
+    });
+    await page.route(/\/api\/rooms\/[0-9A-Z]{8}\/log\?/, (route) => {
+      asked.push(route.request().url());
+      const entries = [{ id: "0:0", at: new Date().toISOString(), kind: "chat", from: run.patId, text: "From the archive" }];
+      void route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries, nextBefore: null, ...answer }) });
+    });
+    try {
+      await page.goto(`${server.origin}/r/${run.roomId}`);
+      await page.getByRole("status", { name: "Connected" }).first().waitFor();
+      await openSideTab(page, "DM");
+      const dmPanel = page.getByRole("tabpanel", { name: sideTabName("DM") });
+      await dmPanel.getByRole("combobox", { name: "View as a player" }).selectOption({ label: "Pat" });
+      await dmPanel.getByRole("button", { name: "View", exact: true }).click();
+      const preview = page.locator('dialog[aria-label="Viewing as Pat"]');
+      await preview.waitFor();
+      // Its tab row settles first: until it is measured, More holds every tab, and the Log it lists then is gone once it is.
+      await preview.getByRole("tab", { name: sideTabName("Log") }).waitFor();
+      await openSideTab(preview, "Log");
+      const log = preview.getByRole("tabpanel", { name: sideTabName("Log") });
+      await log.getByText("Before the archive").waitFor();
+      const older = log.getByRole("button", { name: "Show older", exact: true });
+      const refused = log.getByRole("alert").filter({ hasText: "Could not load older messages." });
+      const archived = log.getByText("From the archive");
+
+      // A page without the answer, as from a server that ignores `as`, and one answered as the DM, are both refused.
+      for (const [i, as] of [undefined, dmSocket.you!.memberId].entries()) {
+        answer = as === undefined ? {} : { as };
+        await older.click();
+        await waitFor(`older page ${i + 1} asked`, () => asked.length === i + 1 || null);
+        await refused.waitFor();
+        assert.equal(await archived.count(), 0, `a page answered ${as === undefined ? "with no one" : "as the DM"} was shown as Pat's`);
+      }
+      answer = { as: run.patId };
+      await older.click();
+      await archived.waitFor();
+      await log.getByText("This is the start of the log.").waitFor();
+      assert.equal(asked.length, 3);
+      for (const url of asked) {
+        const q = new URL(url).searchParams;
+        assert.equal(q.get("as"), run.patId, `the preview's older page asked as ${q.get("as")}: ${url}`);
+        assert.equal(q.get("sceneId"), null, `the preview's older page followed the DM's scene: ${url}`);
+      }
+      await shots.take(page, "vision-pv4-preview-older-log");
+      await preview.getByRole("button", { name: "Exit", exact: true }).click();
+      await preview.waitFor({ state: "detached" });
+    } finally {
+      await page.close();
+    }
+  });
+
   test("12. no page logged an error or a warning", () => {
     for (const c of [dmConsole, playerConsole]) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);
