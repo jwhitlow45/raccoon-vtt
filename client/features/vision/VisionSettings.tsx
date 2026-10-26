@@ -144,33 +144,36 @@ function SightRow(props: { scene: Scene; working: SightChoice | null }) {
   const choice = sightOf(scene);
   const help = SIGHT_CHOICES.find((c) => c.value === choice)?.help;
   return (
-    <SettingRow name="Sight" wide>
-      {(ids) => (
-        <div aria-busy={working !== null ? true : undefined} style={{ width: "100%", minWidth: 0 }}>
-          <Segmented<SightChoice>
-            labelledBy={ids.nameId}
-            value={choice}
-            options={SIGHT_CHOICES}
-            onChange={(next) => {
-              if (working !== null || next === choice) return;
-              actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { vision: sightPatch(scene, next === "player") } });
-            }}
-            description={
-              <span role="status">
-                {showWorking && working !== null ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
-                    <Spinner size={theme.icon.sm} />
-                    {sightWorkingText(working === "player")}
-                  </span>
-                ) : (
-                  help
-                )}
-              </span>
-            }
-          />
-        </div>
-      )}
-    </SettingRow>
+    // The row's box, which the alignment sweep measures (e2e/alignmentRoom.ts).
+    <div data-vision-sight>
+      <SettingRow name="Sight" wide>
+        {(ids) => (
+          <div aria-busy={working !== null ? true : undefined} style={{ width: "100%", minWidth: 0 }}>
+            <Segmented<SightChoice>
+              labelledBy={ids.nameId}
+              value={choice}
+              options={SIGHT_CHOICES}
+              onChange={(next) => {
+                if (working !== null || next === choice) return;
+                actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { vision: sightPatch(scene, next === "player") } });
+              }}
+              description={
+                <span role="status">
+                  {showWorking && working !== null ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
+                      <Spinner size={theme.icon.sm} />
+                      {sightWorkingText(working === "player")}
+                    </span>
+                  ) : (
+                    help
+                  )}
+                </span>
+              }
+            />
+          </div>
+        )}
+      </SettingRow>
+    </div>
   );
 }
 

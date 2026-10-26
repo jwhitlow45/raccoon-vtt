@@ -289,7 +289,8 @@ export class SocketWatch {
 
   async attach(context: BrowserContext, page: Page): Promise<void> {
     page.on("websocket", (ws) => {
-      if (!ws.url().includes("/ws?room=")) return;
+      // A DM's "View as a player" opens a socket of its own (`as=`, docs/design-v1-per-player-vision.md 7.4), which holds that player's view, not this page's.
+      if (!ws.url().includes("/ws?room=") || /[?&]as=(?!display)/.test(ws.url())) return;
       this.sockets++;
       ws.on("framereceived", ({ payload }) => this.receive(typeof payload === "string" ? payload : payload.toString("utf8")));
       ws.on("close", () => this.closes++);

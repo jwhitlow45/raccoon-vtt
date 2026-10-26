@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
@@ -345,6 +345,7 @@ async function dmPageFor(size: Size): Promise<Page> {
   dmContext = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, storageState: state });
   dmTouch = size.touch;
   dm = await dmContext.newPage();
+  await holdPreviews(dm);
   consoles.dm.attach(dm);
   dmSocket = new SocketWatch("dm");
   await dmSocket.attach(dmContext, dm);
@@ -833,6 +834,112 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
 
   if (headers.length === 0) await sweep.missing(page, "headers", "no header place was read");
   await sweep.add(page, "headers", headerLines(headers, `${sweep.at} headers`));
+}
+
+/** A panel by its title: the side panel's tab where the page has one, else the Panels sheet's. */
+async function openPanelOf(page: Page, title: string): Promise<Locator> {
+  const tabs = page.getByRole("tablist", { name: "Panels" });
+  if (await visible(tabs)) {
+    await openSideTab(page, title);
+    return page.getByRole("tabpanel", { name: sideTabName(title) });
+  }
+  const sheet = page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`);
+  if (await visible(sheet)) return sheet;
+  await closeSheets(page);
+  await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${title}`) }).click();
+  await sheet.waitFor();
+  return sheet;
+}
+
+/**
+ * pv4: per-player vision's Vision settings (docs/design-v1-per-player-vision.md
+ * 7.1 and 11): the Sight row, and who sees for themselves with Pat
+ * unticked, listed off, and asked about as the DM unticks him. The scene
+ * is made per player with vision and fog off, so nothing Pat sees
+ * changes, and whole party again after.
+ */
+async function visionScreens(sweep: Sweep, page: Page): Promise<void> {
+  const sceneId = run.sceneId;
+  const sight = (perPlayer: boolean) => ops.send({ t: "scene.update", sceneId, patch: { vision: { on: false, light: "bright", perPlayer } } });
+  await sight(true);
+  try {
+    await escapeAll(page);
+    const panel = await openPanelOf(page, "Scenes");
+    const row = panel.locator("[data-vision-sight]");
+    if (!(await showsWithin(row, 5_000))) {
+      await sweep.missing(page, "vision-sight", "the Scenes panel showed no Sight row");
+      return;
+    }
+    await row.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "vision-sight", row);
+    const list = panel.getByRole("group", { name: "Who sees for themselves" });
+    await list.scrollIntoViewIfNeeded();
+    await sweep.measure(page, "vision-holders", list);
+    await ops.send({ t: "vision.holders", sceneId, on: [run.patId] });
+    await ops.send({ t: "vision.holders", sceneId, on: [] });
+    const off = list.getByText("Pat sees only what creatures that share sight see here.");
+    if (await showsWithin(off, 5_000)) await sweep.measure(page, "vision-holders-off", list);
+    else await sweep.missing(page, "vision-holders-off", "Pat's entry turned off showed no line");
+    await ops.send({ t: "vision.holders", sceneId, on: [run.patId] });
+    const box = list.getByRole("checkbox", { name: "Pat" });
+    await waitFor("Pat ticked", async () => ((await box.isChecked()) ? true : null), 5_000);
+    await box.click();
+    const question = list.getByRole("group", { name: "Untick Pat?" });
+    if (await showsWithin(question, 3_000)) {
+      await question.scrollIntoViewIfNeeded();
+      await sweep.measure(page, "vision-untick", list);
+      await question.getByRole("button", { name: "Cancel", exact: true }).click();
+    } else await sweep.missing(page, "vision-untick", "an untick asked nothing");
+  } finally {
+    await sight(false);
+    await escapeAll(page);
+  }
+}
+
+/** The preview socket the DM page asked for last, held unanswered (previewWaitScreens). */
+let heldPreview: WebSocketRoute | null = null;
+
+/**
+ * Holds every preview socket (`as=`, not a display's) the page opens. Set
+ * as the page is made, before it loads the room: Playwright routes only
+ * the sockets of a document loaded after the route.
+ */
+async function holdPreviews(page: Page): Promise<void> {
+  await page.routeWebSocket(/[?&]as=(?!display)/, (ws) => {
+    heldPreview = ws;
+  });
+}
+
+/**
+ * pv4: View as a player's wait (docs/design-v1-per-player-vision.md 7.4
+ * and 11): its socket is held unanswered (holdPreviews), so "Loading
+ * what Pat sees…" stands, then closed, so it says it could not load.
+ */
+async function previewWaitScreens(sweep: Sweep, page: Page): Promise<void> {
+  heldPreview = null;
+  await escapeAll(page);
+  const panel = await openPanelOf(page, "DM");
+  const view = panel.getByRole("button", { name: "View", exact: true });
+  await view.scrollIntoViewIfNeeded();
+  await view.click();
+  const preview = page.locator('dialog[aria-label="Viewing as Pat"]');
+  await preview.waitFor();
+  try {
+    const loading = preview.locator('[data-preview-wait="loading"]');
+    if (await showsWithin(loading.getByRole("status"), 3_000)) await sweep.measure(page, "preview-loading", loading);
+    else await sweep.missing(page, "preview-loading", "the preview showed no loading line");
+    // Read through a cast: the route's handler sets it after the reset above, which the compiler cannot see.
+    const held = await waitFor("the preview's socket", () => heldPreview as WebSocketRoute | null, 5_000);
+    await held.close();
+    const failed = preview.locator('[data-preview-wait="failed"]');
+    if (await showsWithin(failed.getByRole("status"), 3_000)) await sweep.measure(page, "preview-failed", failed);
+    else await sweep.missing(page, "preview-failed", "a closed preview socket said nothing");
+  } finally {
+    await preview.getByRole("button", { name: "Exit", exact: true }).click();
+    await preview.waitFor({ state: "detached" });
+    await escapeAll(page);
+  }
 }
 
 /** Where the Adult Black Dragon stands while the dice screens measure it: a huge token's corner, its cells free of the traps and walls. */
@@ -2422,6 +2529,7 @@ export function alignmentFile(title: string, steps: () => void): void {
       dmContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
       patContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
       dm = await dmContext.newPage();
+      await holdPreviews(dm);
       pat = await patContext.newPage();
       consoles.dm.attach(dm);
       consoles.pat.attach(pat);
@@ -2789,6 +2897,8 @@ export function sizeTests(names: readonly string[]): void {
           await openAt(page, size, scale);
           await waitFor("the DM's snapshot", () => dmSocket.state);
           await dmScreens(sweep, page, size);
+          await visionScreens(sweep, page);
+          await previewWaitScreens(sweep, page);
           if (DICE_AT.has(size.name)) await dmDiceScreens(sweep, page);
           if (COMBAT_AT.has(size.name)) await combatScreens(sweep, page, size, scale);
           console.log(`${at}: measured ${[...sweep.seen].join(", ")}`);
