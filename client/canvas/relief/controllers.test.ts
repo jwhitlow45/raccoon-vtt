@@ -369,6 +369,13 @@ describe("the ground stage hides what Top-down hides (5.2, 12)", () => {
 });
 
 describe("the board's view (ISO-5's hooks)", () => {
+  test("the DM's Isometric dims standees by the same fog the DM's map draws, the party's explored ground with it (D-261026-18)", () => {
+    const stage = read("canvas/Stage.tsx");
+    assert.match(stage, /<FogShape sceneId=\{scene\.id\} bounds=\{scene\.bounds\} tiles=\{drawnFogTiles\}/, "Top-down's fog image");
+    assert.match(stage, /dmFog=\{role === "dm" && fog \? drawnFogTiles : null\}/, "the standees' dimming");
+    assert.match(bodyOf(read("canvas/relief/IsoBoard.tsx"), "IsoBoard")!, /dimmedForDm\(dmFog, t\)/);
+  });
+
   test("the test hook picks for the display by the view it is given, not by its camera, which comes later", () => {
     assert.match(read("canvas/Stage.tsx"), /useIsoTestHook\(props\.view !== undefined \? displayViewKey\(roomId\) : viewKey\(roomId\), scene\.id\);/);
   });

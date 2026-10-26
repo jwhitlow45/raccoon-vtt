@@ -10,7 +10,8 @@ import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { FogView, type CellBox } from "./fogView.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
-import { boxStands, creatureStands, ghostStands, ghostTagStands, lineStands, splitTokens, tokenBox, tokenBoxes } from "./stand.ts";
+import { boxStands, creatureStands, dimmedForDm, ghostStands, ghostTagStands, lineStands, splitTokens, tokenBox, tokenBoxes } from "./stand.ts";
+import { withExplored } from "../../features/vision/exploredFog.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
@@ -25,9 +26,9 @@ import { SQUARES } from "#shared/rules/grid.ts";
 type Scene = { id: string; bounds: { w: number; h: number }; tiles: Record<string, FogTile> };
 
 /** A random fogged scene: revealed rectangles, some sub-cell aligned and some ragged, and a few tiles left out or broken. */
-function randomScene(random: () => number): Scene {
-  const w = 4 + Math.floor(random() * 40);
-  const h = 4 + Math.floor(random() * 40);
+function randomScene(random: () => number, size?: { w: number; h: number }): Scene {
+  const w = size?.w ?? 4 + Math.floor(random() * 40);
+  const h = size?.h ?? 4 + Math.floor(random() * 40);
   const sw = w * FOG_SUBCELLS;
   const sh = h * FOG_SUBCELLS;
   const open = new Uint8Array(sw * sh);
@@ -397,6 +398,47 @@ describe("the stand rule", () => {
     assert.equal(boxStands(fog, { x0: 3, y0: 1, x1: 3, y1: 2 }), true, "a box with no width on the line counts the sub-cell its corner lies in, right of it");
     assert.equal(boxStands(fog, { x0: 2.75, y0: 1, x1: 2.75, y1: 2 }), false, "a box with no width at the fogged column's left edge");
     assert.equal(boxStands(fog, { x0: 3.5, y0: 1, x1: 3.5, y1: 2 }), true);
+  });
+
+  test("property: the DM's drawn fog, the DM's layer with the party's explored one beside it, reveals exactly what the fog image draws (D-261026-18)", () => {
+    const random = rng(26118);
+    for (let run = 0; run < 120; run++) {
+      const dm = randomScene(random);
+      const explored = randomScene(random, dm.bounds).tiles;
+      const drawn = withExplored(dm.tiles, random() < 0.1 ? {} : explored) as Record<string, FogTile>;
+      const fog = new FogView(drawn, dm.id, dm.bounds);
+      const mask = revealedMask(dm.bounds, dm.id, drawn);
+      for (let sy = 0; sy < mask.height; sy++) {
+        for (let sx = 0; sx < mask.width; sx++) assert.equal(fog.revealed(sx, sy), mask.revealed[sy * mask.width + sx] === 1, `run ${run} at ${sx},${sy}`);
+      }
+    }
+  });
+
+  test("on a per-player scene the DM's standee on ground only a player explored is not dimmed, and one on ground nobody revealed is (D-261026-18)", () => {
+    const id = "s1";
+    const bounds = { w: 8, h: 8 };
+    const reveal = (x0: number, y0: number, x1: number, y1: number): FogTile => {
+      const bits = new Uint8Array(TILE_BYTES);
+      for (let y = y0 * FOG_SUBCELLS; y < y1 * FOG_SUBCELLS; y++) {
+        for (let x = x0 * FOG_SUBCELLS; x < x1 * FOG_SUBCELLS; x++) {
+          const i = y * TILE_SUB + x;
+          bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+        }
+      }
+      return { sceneId: id, tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) };
+    };
+    // The DM revealed the room at the top left, and a player's light explored the corridor at the right, which the shared fog still hides.
+    const dmLayer = { [tileKey(id, 0, 0)]: reveal(0, 0, 3, 3) };
+    const explored = { [tileKey(id, 0, 0)]: reveal(5, 0, 8, 8) };
+    const drawn = new FogView(withExplored(dmLayer, explored), id, bounds);
+    const goblin = makeToken("g", { x: 6, y: 4 }) as ViewToken;
+    const imp = makeToken("i", { x: 1, y: 1 }) as ViewToken;
+    const ghoul = makeToken("h", { x: 3, y: 6 }) as ViewToken;
+    assert.equal(dimmedForDm(drawn, goblin), false, "on explored ground: bright, as the DM's map shows it");
+    assert.equal(dimmedForDm(drawn, imp), false, "on ground the DM revealed");
+    assert.equal(dimmedForDm(drawn, ghoul), true, "on ground nobody revealed: dimmed");
+    assert.equal(dimmedForDm(new FogView(dmLayer, id, bounds), goblin), true, "the shared fog alone would dim it");
+    assert.equal(dimmedForDm(null, ghoul), false, "a scene without fog dims nothing");
   });
 
   test("a tile filed under another tile's key reveals nothing", () => {

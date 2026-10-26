@@ -45,6 +45,17 @@ export function tokenBox(token: BoxToken, at: { x: number; y: number } = token):
   return { x0: Math.min(body.x0, rule.x0), y0: Math.min(body.y0, rule.y0), x1: Math.max(body.x1, rule.x1), y1: Math.max(body.y1, rule.y1) };
 }
 
+/**
+ * On the DM's device, whether a standee draws dimmed (5.4): no sub-cell
+ * under it is revealed in `fog`, the fog the DM's map draws, or never
+ * where the scene has no fog (null). That fog holds the party's explored
+ * ground on a per-player scene, so a creature on ground a player explored
+ * stays bright, as the DM's map shows that ground (D-261026-18).
+ */
+export function dimmedForDm(fog: FogView | null, token: BoxToken): boolean {
+  return fog !== null && !fog.boxAny(tokenBox(token));
+}
+
 /** Whether both of a token's boxes stand. */
 function tokenStands(fog: FogView, token: BoxToken, at: { x: number; y: number } = token): boolean {
   const [body, rule] = tokenBoxes(token, at);

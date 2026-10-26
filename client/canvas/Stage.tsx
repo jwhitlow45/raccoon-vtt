@@ -1703,7 +1703,7 @@ export function MapStage(props: {
                     sightMode={sightMode}
                     drawnFogTiles={drawnFogTiles}
                     viewerFog={role === "player" && fog ? fogTiles : null}
-                    playersFog={role === "dm" && fog ? fogTiles : null}
+                    dmFog={role === "dm" && fog ? drawnFogTiles : null}
                     tokens={tokens}
                     aboveFog={aboveFogOf}
                     renderToken={renderToken}

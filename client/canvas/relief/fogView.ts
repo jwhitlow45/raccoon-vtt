@@ -13,6 +13,23 @@ function bitsOf(tile: FogTile): Uint8Array | null {
   return bits;
 }
 
+/** Two layers' tiles at one place as one, kept for the life of the pair. */
+const unions = new WeakMap<FogTile, WeakMap<FogTile, Uint8Array | null>>();
+
+function unionOf(a: FogTile, b: FogTile): Uint8Array | null {
+  let byB = unions.get(a);
+  if (!byB) unions.set(a, (byB = new WeakMap()));
+  let bits = byB.get(b);
+  if (bits === undefined) {
+    const x = bitsOf(a);
+    const y = bitsOf(b);
+    // A layer that does not decode adds nothing, as the fog image skips it.
+    bits = x && y ? x.map((v, i) => v | y[i]!) : (x ?? y);
+    byB.set(b, bits);
+  }
+  return bits;
+}
+
 /** A box in cells, the far edges excluded. */
 export type CellBox = { x0: number; y0: number; x1: number; y1: number };
 
@@ -22,6 +39,12 @@ export type CellBox = { x0: number; y0: number; x1: number; y1: number };
  * on a scene without fog. Everything fails closed as the fog image does
  * (lib/fogTiles.ts): a sub-cell past the scene's edge, in a missing tile or
  * in one that does not decode counts as fogged.
+ *
+ * The DM's drawn fog holds the party's explored layer beside the DM's own,
+ * each tile under a key of its own (features/vision/exploredFog.ts
+ * withExplored), and the fog image draws their union. So a sub-cell either
+ * layer reveals is revealed here too, and the DM's Isometric dims a
+ * standee by the same ground the DM's map shows fogged (D-261026-18).
  */
 export class FogView {
   readonly tiles: Tiles | null;
@@ -39,12 +62,19 @@ export class FogView {
     return this.tiles === null;
   }
 
-  /** The bits of the tile at tx, ty, or null where the whole tile is fogged. */
+  /** The bits of the tile at tx, ty, both layers', or null where the whole tile is fogged. */
   private tileBits(tx: number, ty: number): Uint8Array | null {
-    const tile = this.tiles?.[tileKey(this.sceneId, tx, ty)];
+    const own = this.layerTile(tileKey(this.sceneId, tx, ty), tx, ty);
+    const explored = this.layerTile(`explored:${tileKey(this.sceneId, tx, ty)}`, tx, ty);
+    if (own && explored) return unionOf(own, explored);
+    const tile = own ?? explored;
+    return tile ? bitsOf(tile) : null;
+  }
+
+  private layerTile(key: string, tx: number, ty: number): FogTile | null {
+    const tile = this.tiles?.[key];
     // A tile filed under another tile's key would draw elsewhere in the fog image, so it reveals nothing here.
-    if (!tile || tile.sceneId !== this.sceneId || tile.tx !== tx || tile.ty !== ty) return null;
-    return bitsOf(tile);
+    return tile && tile.sceneId === this.sceneId && tile.tx === tx && tile.ty === ty ? tile : null;
   }
 
   /** Whether the sub-cell at sx, sy (FOG_SUBCELLS to a cell) is revealed. */

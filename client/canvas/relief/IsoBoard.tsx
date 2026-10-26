@@ -43,7 +43,7 @@ import type { StaticPiece, VBox } from "./pieces.ts";
 import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 import { FrameScheduler } from "./scheduler.ts";
 import { previewLanding, seenChunks } from "./seenChunks.ts";
-import { ghostStands, ghostTagStands, splitTokens, tokenBox } from "./stand.ts";
+import { dimmedForDm, ghostStands, ghostTagStands, splitTokens, tokenBox } from "./stand.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
@@ -80,8 +80,12 @@ export type IsoBoardProps = {
   drawnFogTiles: RoomState["fogTiles"];
   /** The fog the stand rule and the drawn heights read: a player's own on a scene with fog, else null for a viewer who sees all the ground. */
   viewerFog: RoomState["fogTiles"] | null;
-  /** The players' fog, for the DM's dimming of standees they cannot see (5.4), or null. */
-  playersFog: RoomState["fogTiles"] | null;
+  /**
+   * On the DM's device, the fog the DM's map draws (`drawnFogTiles`: the
+   * DM's own and, on a per-player scene, the party's explored ground), for
+   * dimming the standees on ground it shows fogged (5.4, D-261026-18), or null.
+   */
+  dmFog: RoomState["fogTiles"] | null;
   /** The scene's tokens in Top-down's draw order. */
   tokens: readonly ViewToken[];
   aboveFog: (t: ViewToken) => boolean;
@@ -135,7 +139,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const { w, h } = scene.bounds;
   const stand = heightsStand(cam.scale, props.lowPower);
   const fog = useMemo(() => new FogView(props.viewerFog, scene.id, { w, h }), [props.viewerFog, scene.id, w, h]);
-  const playersFog = useMemo(() => (props.playersFog ? new FogView(props.playersFog, scene.id, { w, h }) : null), [props.playersFog, scene.id, w, h]);
+  const dmFog = useMemo(() => (props.dmFog ? new FogView(props.dmFog, scene.id, { w, h }) : null), [props.dmFog, scene.id, w, h]);
   const src: DrawnSource = useMemo(() => ({ chunks, sceneId: scene.id, bounds: { w, h }, fog: props.viewerFog, stand }), [chunks, scene.id, w, h, props.viewerFog, stand]);
   const heights = useMemo(() => drawnHeights(src, feet), [src, feet]);
 
@@ -283,7 +287,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       if (item.kind !== "standee") continue;
       const s = byStandee.get(item.id)!;
       const t = byId.get(item.id)!;
-      const dim = props.role === "dm" && playersFog !== null && !playersFog.boxAny(tokenBox(t));
+      const dim = props.role === "dm" && dimmedForDm(dmFog, t);
       const spot = spots[item.id];
       const placed = spot ? movedIso(t, spot, { rise: s.rise, inset: s.inset }) : s;
       const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false, press: [] };
@@ -292,7 +296,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     }
     isoCache.current = next;
     return next;
-  }, [items, byStandee, byId, turn, props.role, playersFog, spots, movedIso]);
+  }, [items, byStandee, byId, turn, props.role, dmFog, spots, movedIso]);
   const silhouettes = useMemo(() => items.filter((i): i is Extract<Item, { kind: "standee" }> => i.kind === "standee" && i.silhouette), [items]);
 
   // The lift margin: the highest drawn lift in view, in steps, at most one canvas height.
