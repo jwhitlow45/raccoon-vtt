@@ -16,6 +16,7 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { GRABBER_ROOM, SheetGrabber } from "../../components/SheetGrabber.tsx";
 import { dockSummaryButton, RETURN_RANK, sheetFocusSlot, useAlertsSummary, useSheetReturnFocus } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
+import { useFieldInView, useKeyboardView } from "../../lib/keyboardInset.ts";
 import { displayName } from "../../lib/scene.ts";
 import { GRAB_ATTR, GRAB_STYLE, useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -444,6 +445,8 @@ function RollCard(props: {
   useBackClose(props.sheet && !props.hidden, props.onFold);
   // At the screen's foot a swipe down puts it off as Later does, with what was typed kept, so unsaved input never holds it (docs/design-v1-sheet-swipe.md section 3).
   useSheetSwipe(props.cardRef, { enabled: props.sheet && !props.hidden, onClose: props.onFold, item: props.request.id, clip: "screen", keeps: true });
+  // Room lifts `chrome` onto the on-screen keyboard (lib/keyboardInset.ts), so the card at the foot stands on it, and its total shows with Send.
+  useFieldInView(props.cardRef, useKeyboardView(), theme.space(2));
   /*
    * A roll that lands while the card shows, from its Roll or from the Dice
    * panel, is news to the player, so the card shows its result in place

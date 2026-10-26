@@ -80,6 +80,7 @@ import { useWakeLock } from "../lib/wakeLock.ts";
 import type { Insets } from "../lib/camera.ts";
 import { isCoarsePointer } from "../lib/device.ts";
 import { fullscreenSupported } from "../lib/fullscreen.ts";
+import { useFocusedFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
 import { sheetStepping } from "../lib/modalDialog.ts";
 import { roomPath } from "../lib/roomId.ts";
 import { sceneGate, selectionScene } from "../lib/scene.ts";
@@ -190,9 +191,18 @@ const NO_OPTIONS: OptionsBox = { row: 0, reserve: 0, controls: 0 };
  * an open line are passing overlays. Its controls move without the
  * element changing size, as a tool's state changes the row or the line,
  * so it measures again as they come and go.
+ *
+ * `lift` is how far the on-screen keyboard lifts the options above the
+ * toolbar, in screen px (Room `keyboardLift`). It is taken off, so the
+ * map's insets keep what the options take and the map never moves for a
+ * keyboard, and the row measures again as it changes, since the row moves
+ * without changing size.
  */
-function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>): [(el: HTMLElement | null) => (() => void) | undefined, OptionsBox] {
+function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>, lift: number): [(el: HTMLElement | null) => (() => void) | undefined, OptionsBox] {
   const [box, setBox] = useState<OptionsBox>(NO_OPTIONS);
+  const liftNow = useRef(lift);
+  liftNow.current = lift;
+  const measureNow = useRef<(() => void) | null>(null);
   const ref = useCallback(
     (el: HTMLElement | null) => {
       if (!el) return undefined;
@@ -206,7 +216,7 @@ function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>): [
       const measure = () => {
         const nav = toolbar.current;
         if (!nav) return;
-        const foot = nav.getBoundingClientRect().top;
+        const foot = nav.getBoundingClientRect().top - liftNow.current;
         const r = el.getBoundingClientRect();
         const atFoot = el.dataset.rvttArrangement === "stacked" || el.dataset.rvttArrangement === "floating";
         const row = atFoot && r.height > 0 ? Math.max(0, Math.round(foot - r.top)) : 0;
@@ -226,7 +236,9 @@ function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>): [
       watch();
       changes.observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-options-line", "data-options-reading", "hidden", "data-rvtt-arrangement"] });
       measure();
+      measureNow.current = measure;
       return () => {
+        measureNow.current = null;
         observer.disconnect();
         changes.disconnect();
         setBox(NO_OPTIONS);
@@ -235,6 +247,7 @@ function useOptionsBox(scale: number, toolbar: RefObject<HTMLElement | null>): [
     // The scale is read through the element's rectangle, but a change must measure again.
     [scale, toolbar],
   );
+  useLayoutEffect(() => measureNow.current?.(), [lift]);
   return [ref, box];
 }
 
@@ -312,9 +325,26 @@ function RoomPage() {
     },
     [toolbarMeasure],
   );
-  const [optionsRef, optionsBox] = useOptionsBox(zoom, toolbarEl);
+  /*
+   * The on-screen keyboard (lib/keyboardInset.ts), where it reaches above
+   * the toolbar: what stands on the toolbar stands on the keyboard instead,
+   * by this much more, in screen px. The tool's options, the token bar,
+   * the alerts, a roll card at the foot and a map pane all go up together,
+   * through `chrome` and the panes' insets. The toolbar itself stays under
+   * the keyboard, and the map's insets and size do not change.
+   */
+  const keyboard = useKeyboardView();
+  const keyboardLift = keyboard ? Math.max(0, keyboard.inset - toolbarExact) : 0;
+  const keyboardTop = keyboard?.top ?? 0;
+  useFocusedFieldInView(theme.space(2));
+  const [optionsRef, optionsBox] = useOptionsBox(zoom, toolbarEl, keyboardLift);
   const optionsBottom = optionsBox.row + optionsBox.reserve;
   const insets = useMemo<Insets>(() => ({ top: topBarHeight, right: 0, bottom: toolbarHeight + optionsBottom, left: 0 }), [topBarHeight, toolbarHeight, optionsBottom]);
+  // A map pane at the foot stands on the options as they stand over the keyboard, and keeps below the visible area's top.
+  const paneInsets = useMemo<Insets>(
+    () => (keyboard ? { ...insets, top: Math.max(insets.top, keyboardTop), bottom: insets.bottom + keyboardLift } : insets),
+    [insets, keyboard, keyboardTop, keyboardLift],
+  );
   const role = useRoomView((s) => s.you?.role ?? "player");
   usePreloadAndReopen(role);
   const ended = useRoomView((s) => s.ended);
@@ -721,16 +751,16 @@ function RoomPage() {
     () =>
       topBarExact > 0 && toolbarExact > 0
         ? {
-            top: topBarExact / zoom,
-            bottom: (toolbarExact + optionsBottom) / zoom,
-            controls: (toolbarExact + optionsBox.controls) / zoom,
-            toolbar: toolbarExact / zoom,
+            top: Math.max(topBarExact, keyboardTop) / zoom,
+            bottom: (toolbarExact + keyboardLift + optionsBottom) / zoom,
+            controls: (toolbarExact + keyboardLift + optionsBox.controls) / zoom,
+            toolbar: (toolbarExact + keyboardLift) / zoom,
             // Beside the side panel the map never touches the right edge, so its free area keeps no right inset.
             safe: { top: safe.top, right: sideShown ? 0 : safe.right, bottom: safe.bottom, left: safe.left },
             sheet: sheetRight,
           }
         : null,
-    [topBarExact, toolbarExact, optionsBottom, optionsBox.controls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown],
+    [topBarExact, toolbarExact, optionsBottom, optionsBox.controls, zoom, safe.top, safe.right, safe.bottom, safe.left, sheetRight, sideShown, keyboardLift, keyboardTop],
   );
   useLayoutEffect(() => {
     barDock.setState({ chrome });
@@ -927,7 +957,7 @@ function RoomPage() {
       <BarWidthProbe zoom={zoom} />
       {/* The map's chrome pads for the right safe area only where the map reaches that edge: not beside the side panel, which holds it (theme.safe.mapRight). */}
       <div style={{ position: "relative", flex: 1, minWidth: 0, ["--rvtt-map-safe-right" as string]: sideShown ? "0px" : theme.safe.right }}>
-        <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />
+        <MapArea gate={gate} role={role} actionBar={actionBar} insets={insets} paneInsets={paneInsets} onSelect={select} onOpenDetails={openDetails} tokenPanelShown={tokenPanelShown} onHideBar={hideBar} />
         {/* The map's focus target (mapFocus.ts): after the map, so its ring draws over it, and before the bars, so Tab from it goes on to them. Taps pass through it. Unlike other places focus lands, it keeps its ring under keys (data-rvtt-ring, globals.css). */}
         <div ref={mapFocusRef} tabIndex={-1} role="img" aria-label="Map" data-rvtt-ring="" style={MAP_FOCUS_STYLE} />
         <TopBar
@@ -1067,6 +1097,7 @@ function RoomPage() {
             overNotice={overNotice}
             popover={popoverInputs}
             toolbar={toolbarEl}
+            keyboardLift={keyboardLift / zoom}
           />
         ) : null}
         {/* The toolbar's fill and top edge, under the options, so a row in the toolbar's own row is never painted under them (10.1). */}
@@ -1229,6 +1260,7 @@ function MapArea(props: {
   role: "dm" | "player";
   actionBar: boolean;
   insets: Insets;
+  paneInsets: Insets;
   onSelect(id: string | null, add?: boolean): void;
   onOpenDetails(id: string): void;
   tokenPanelShown: boolean;
@@ -1244,6 +1276,7 @@ function MapArea(props: {
           role={role}
           actionBar={props.actionBar}
           insets={props.insets}
+          paneInsets={props.paneInsets}
           onSelect={props.onSelect}
           onOpenDetails={props.onOpenDetails}
           tokenPanelShown={props.tokenPanelShown}
@@ -2255,6 +2288,8 @@ function ToolOptions(props: {
   onShow(): void;
   popover: RefObject<PopoverInputs>;
   toolbar: RefObject<HTMLElement | null>;
+  /** How far the on-screen keyboard lifts the options above the toolbar, in their own px (Room `keyboardLift`). */
+  keyboardLift: number;
 }) {
   const Options = props.tool.Options;
   const own = useRef<HTMLDivElement | null>(null);
@@ -2326,14 +2361,15 @@ function ToolOptions(props: {
     // `line` is rebuilt each render from these numbers.
   }, [room, arrangement, inRow, line.left, line.maxWidth, line.lift, popoverInputs, toolbar, tucked, covered, onShow]);
   if (!Options) return null;
+  const { keyboardLift } = props;
   const place: CSSProperties = boxless
     ? // Tucked, or with no row, the options take no height: only the line, or the "options hidden" pill, stands above the toolbar (5.4, 6.6).
-      { left: 0, right: 0, bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`, height: 0, background: "transparent" }
+      { left: 0, right: 0, bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + keyboardLift}px)`, height: 0, background: "transparent" }
     : arrangement === "floating"
       ? {
           left: `calc(${theme.safe.left} + ${theme.space(2)}px)`,
           right: "auto",
-          bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + theme.layout.popover.gap}px)`,
+          bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + theme.layout.popover.gap + keyboardLift}px)`,
           maxWidth: FLOAT_MAX,
           padding: `${theme.space(1)}px ${theme.space(2)}px`,
           border: `${theme.line.border}px solid ${theme.color.border}`,
@@ -2344,7 +2380,7 @@ function ToolOptions(props: {
             left: `calc(${theme.safe.left} + ${props.edges.left}px)`,
             // Its own padding and border at the right take the 8 px before Panels, so its controls keep the room.
             right: `calc(${theme.safe.mapRight} + ${props.edges.right - theme.space(2) - theme.line.border}px)`,
-            bottom: `calc(${theme.safe.bottom} + ${lift}px)`,
+            bottom: `calc(${theme.safe.bottom} + ${lift + keyboardLift}px)`,
             padding: `${theme.space(1)}px ${theme.space(2)}px`,
             border: `${theme.line.border}px solid ${theme.color.border}`,
             borderRadius: theme.radius.md,
@@ -2354,7 +2390,7 @@ function ToolOptions(props: {
               // In the toolbar's row, over its backdrop, from 6 px after the last tool, its 1 px divider and 8 px padding before its first control.
               left: `calc(${theme.safe.left} + ${props.edges.left}px)`,
               right: `calc(${theme.safe.mapRight} + ${props.edges.right}px)`,
-              bottom: theme.safe.bottom,
+              bottom: `calc(${theme.safe.bottom} + ${keyboardLift}px)`,
               height: TOOLBAR,
               paddingLeft: theme.space(2),
               borderLeft: `${theme.line.border}px solid ${theme.color.border}`,
@@ -2363,7 +2399,7 @@ function ToolOptions(props: {
           : {
               left: 0,
               right: 0,
-              bottom: `calc(${theme.safe.bottom} + ${TOOLBAR}px)`,
+              bottom: `calc(${theme.safe.bottom} + ${TOOLBAR + keyboardLift}px)`,
               minHeight: theme.layout.options.row,
               padding: `${theme.space(1)}px calc(${theme.safe.mapRight} + ${theme.space(2)}px) ${theme.space(1)}px calc(${theme.safe.left} + ${theme.space(2)}px)`,
               borderTop: `${theme.line.border}px solid ${theme.color.border}`,

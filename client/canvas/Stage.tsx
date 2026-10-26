@@ -168,6 +168,8 @@ export function MapStage(props: {
   actionBar: boolean;
   /** Screen pixels the Room page's bars cover along each side, which a fitted scene keeps clear of. */
   insets?: Insets;
+  /** The same for the panes over the map, which stand on the on-screen keyboard while it is open (pages/Room.tsx `paneInsets`). The map's fit never takes it. */
+  paneInsets?: Insets;
   /** A tap on a token or on empty map. `add` adds the token to the selection or takes it out. */
   onSelect(tokenId: string | null, add?: boolean): void;
   onOpenDetails(tokenId: string): void;
@@ -187,6 +189,7 @@ export function MapStage(props: {
 }) {
   const { scene, fog, role, actionBar, onSelect, onOpenDetails } = props;
   const insets = props.insets ?? NO_INSETS;
+  const paneInsets = props.paneInsets ?? insets;
   const actions = useRoomActions();
   const ui = useRoomUi();
   const store = useRoomStore();
@@ -1445,10 +1448,10 @@ export function MapStage(props: {
               }}
             />
           ) : null}
-          {role === "dm" ? <LabelPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
-          {role === "dm" ? <LightPaneHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
-          {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
-          {role === "dm" ? <TrapPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
+          {role === "dm" ? <LabelPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
+          {role === "dm" ? <LightPaneHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
+          {role === "dm" ? <PinPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
+          {role === "dm" ? <TrapPaneHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(paneInsets, zoom)} /> : null}
           <DoorPillHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} />
           <ReadoutHost scene={scene} tool={tool.id} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} />
           {draggingId === null ? <StopNoteHost scene={scene} camera={cameraInZoomed(cam, zoom)} viewport={sizeInZoomed(size, zoom)} insets={insetsInZoomed(insets, zoom)} /> : null}
