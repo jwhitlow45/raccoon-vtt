@@ -65,10 +65,10 @@ export const MEASURES = [
 ] as const satisfies readonly { value: Measure; label: string; short: string }[];
 
 /** How the ruler measures, kept on this device. A ruler on the map measures again, and goes to players again when it is shared. */
-export function pickMeasure(scope: RoomScope, measure: Measure, storage?: () => Storage | undefined): void {
+export function pickMeasure(scope: RoomScope, measure: Measure): void {
   const tool = scope.get(rulerSlot);
   const walk = measure === "walking";
-  saveWalk(walk, storage);
+  saveWalk(walk);
   tool.store.setState({ walk });
   const ctx = tool.activeCtx;
   const current = tool.store.getState().ruler;
