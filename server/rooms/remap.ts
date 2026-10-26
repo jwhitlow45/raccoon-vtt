@@ -1,5 +1,5 @@
 import { uuidv7 } from "#shared/ids.ts";
-import { chunkKey, compareLogIds, tileKey } from "#shared/keys.ts";
+import { chunkKey, compareLogIds, holderTileKey, tileKey } from "#shared/keys.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
 import { cutLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
 import type {
@@ -324,6 +324,21 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     const sceneId = scenes.of(t.sceneId);
     out.exploredTiles[tileKey(sceneId, t.tx, t.ty)] = { ...t, sceneId };
   }
+  // Who sees for themselves on a per-player scene, and each one's own explored layer, follow their scene and their
+  // player (docs/design-v1-per-player-vision.md 6.3). An entry for a member who did not come through goes, and so does
+  // a layer whose entry is gone or off, which holds nothing any player reads.
+  for (const list of Object.values(state.holders ?? {})) {
+    if (!scenes.has(list.sceneId) || out.scenes[scenes.of(list.sceneId)]?.vision?.perPlayer !== true) continue;
+    const entries = list.entries.filter((e) => members.has(e.memberId)).map((e) => ({ ...e, memberId: members.of(e.memberId) }));
+    if (entries.length > 0) out.holders[scenes.of(list.sceneId)] = { ...list, sceneId: scenes.of(list.sceneId), entries };
+  }
+  for (const t of Object.values(state.exploredBy ?? {})) {
+    if (!scenes.has(t.sceneId) || !members.has(t.memberId)) continue;
+    const sceneId = scenes.of(t.sceneId);
+    const memberId = members.of(t.memberId);
+    if (!out.holders[sceneId]?.entries.some((e) => e.on && e.memberId === memberId)) continue;
+    out.exploredBy[holderTileKey(sceneId, memberId, t.tx, t.ty)] = { ...t, sceneId, memberId };
+  }
   for (const d of Object.values(state.fogDrafts)) {
     if (!scenes.has(d.sceneId)) continue;
     const sceneId = scenes.of(d.sceneId);
@@ -413,6 +428,8 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       // Without its seq the turn shares nothing with a mount either (docs/design-v1-attach.md 7.1).
       const { seq: _seq, mounts: _mounts, ...spot } = turnStart;
       next.turnStart = { ...spot, entryId: entries.of(turnStart.entryId), tokenId: tokens.of(turnStart.tokenId), sceneId: scenes.of(turnStart.sceneId) };
+      // Who saw the start, on a per-player scene, names players of the new roster only, so lists stay within it (review SEC-PV1-5).
+      if (turnStart.seenBy) next.turnStart.seenBy = memberList(turnStart.seenBy).sort();
     }
     return next;
   };
