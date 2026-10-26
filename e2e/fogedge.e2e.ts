@@ -16,15 +16,17 @@ import { ConsoleWatch, openSideTab, OpSocket, Shots, SocketWatch, startServer, w
  *
  * A white map reaches well past a small scene. Each viewer's board is put
  * at several zooms and offsets off the pixel grid, at device pixel ratios
- * 1, 2 and 3, in Top-down and in Isometric at each turn, and the page's
- * pixels are read across every edge of the scene. A player's fully fogged
- * scene is the fog's color right across the edge. The DM's translucent fog
- * is one even tint there, no brighter line and no darker one. Revealed
- * ground reaches the edge in its soft edge's tint with at most a device
- * pixel more fog, and the frame still fogs all of the map past it. The
- * DM's Party sight veil, drawn the same way under the fog
- * (features/vision/SightOverlay.tsx), is one even tint across the edge in
- * Top-down too.
+ * 1, 1.25, 2 and 3, in Top-down and in Isometric at each turn, and the
+ * page's pixels are read across every edge of the scene. A player's fully
+ * fogged scene is the fog's color right across the edge. The DM's
+ * translucent fog is one even tint there, no brighter line and no darker
+ * one. Revealed ground reaches the edge in its soft edge's tint with at
+ * most a device pixel more fog, and the frame still fogs all of the map
+ * past it. With some cells revealed among fogged ones, each sub-cell
+ * boundary inside the scene stays where the fog's own cells put it, so no
+ * pixel inside a fogged sub-cell shows the map. The DM's Party sight veil,
+ * drawn the same way under the fog (features/vision/SightOverlay.tsx), is
+ * one even tint across the edge in Top-down too.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus three, as
  * other files do, since the runs never overlap. The other environment
@@ -62,13 +64,14 @@ const CAMERAS = [
   { scale: 40.13, fx: 0.5, fy: 0.83 },
   { scale: 47.66, fx: 0.13, fy: 0.61 },
 ] as const;
-const RATIOS = [1, 2, 3] as const;
+/** 1.25 as a laptop's display scaling gives, where a CSS pixel is no whole number of the canvas's. */
+const RATIOS = [1, 1.25, 2, 3] as const;
 const ROLES = ["player", "dm"] as const;
 
 type Rgb = [number, number, number];
 type Role = (typeof ROLES)[number];
 type View = "topDown" | "isometric";
-type FogState = "fogged" | "revealed" | "veiled";
+type FogState = "fogged" | "revealed" | "split" | "veiled";
 
 let server: Server;
 let browser: Browser;
@@ -203,23 +206,49 @@ function toPage(p: Placement, x: number, y: number): { x: number; y: number } {
   return { x: p.left + a * x + c * y + e, y: p.top + b * x + d * y + f };
 }
 
-/** Each edge of the scene, from one corner to the next, and the way into the scene from it, in cells. */
-const EDGES = [
-  { name: "west", from: [0, 0], to: [0, BOUNDS.h], inward: [1, 0] },
-  { name: "east", from: [BOUNDS.w, 0], to: [BOUNDS.w, BOUNDS.h], inward: [-1, 0] },
-  { name: "north", from: [0, 0], to: [BOUNDS.w, 0], inward: [0, 1] },
-  { name: "south", from: [0, BOUNDS.h], to: [BOUNDS.w, BOUNDS.h], inward: [0, -1] },
+/** A line in cells, from one point to another, and the way across it that `d` counts. */
+type Line = { name: string; from: readonly [number, number]; to: readonly [number, number]; toward: readonly [number, number]; at: readonly number[] };
+
+/** Each edge of the scene, from one corner to the next, with the way into the scene. */
+const EDGES: readonly Line[] = [
+  { name: "west edge", from: [0, 0], to: [0, BOUNDS.h], toward: [1, 0], at: [0.3, 0.5, 0.7] },
+  { name: "east edge", from: [BOUNDS.w, 0], to: [BOUNDS.w, BOUNDS.h], toward: [-1, 0], at: [0.3, 0.5, 0.7] },
+  { name: "north edge", from: [0, 0], to: [BOUNDS.w, 0], toward: [0, 1], at: [0.3, 0.5, 0.7] },
+  { name: "south edge", from: [0, BOUNDS.h], to: [BOUNDS.w, BOUNDS.h], toward: [0, -1], at: [0.3, 0.5, 0.7] },
+];
+
+/** The cells FE-4 reveals: the first, fifth and last columns and the first and last rows, so fogged cells lie between them near the scene's every side. */
+const SPLIT = [
+  { x: 0, y: 0, w: 1, h: BOUNDS.h },
+  { x: 4, y: 0, w: 1, h: BOUNDS.h },
+  { x: 7, y: 0, w: 1, h: BOUNDS.h },
+  { x: 0, y: 0, w: BOUNDS.w, h: 1 },
+  { x: 0, y: 5, w: BOUNDS.w, h: 1 },
 ] as const;
+
+/** The lines inside the scene between SPLIT's revealed cells and fogged ones, with the way into the fog, away from the corners where they meet. */
+const BOUNDARIES: readonly Line[] = [
+  { name: "x = 1", from: [1, 1], to: [1, 5], toward: [1, 0], at: [0.3, 0.7] },
+  { name: "x = 4", from: [4, 1], to: [4, 5], toward: [-1, 0], at: [0.3, 0.7] },
+  { name: "x = 5", from: [5, 1], to: [5, 5], toward: [1, 0], at: [0.3, 0.7] },
+  { name: "x = 7", from: [7, 1], to: [7, 5], toward: [-1, 0], at: [0.3, 0.7] },
+  { name: "y = 1 west", from: [1, 1], to: [4, 1], toward: [0, 1], at: [0.5] },
+  { name: "y = 1 east", from: [5, 1], to: [7, 1], toward: [0, 1], at: [0.5] },
+  { name: "y = 5 west", from: [1, 5], to: [4, 5], toward: [0, -1], at: [0.5] },
+  { name: "y = 5 east", from: [5, 5], to: [7, 5], toward: [0, -1], at: [0.5] },
+];
 
 type Shot = { data: Buffer; width: number; height: number; x0: number; y0: number; ratio: number };
 
 /** The page's pixels over the whole scene and a margin, in device pixels. */
 async function grab(page: Page, placement: Placement, ratio: number): Promise<Shot> {
   const corners = [toPage(placement, 0, 0), toPage(placement, BOUNDS.w, 0), toPage(placement, 0, BOUNDS.h), toPage(placement, BOUNDS.w, BOUNDS.h)];
-  const x0 = Math.floor(Math.min(...corners.map((p) => p.x))) - 16;
-  const y0 = Math.floor(Math.min(...corners.map((p) => p.y))) - 16;
-  const x1 = Math.ceil(Math.max(...corners.map((p) => p.x))) + 16;
-  const y1 = Math.ceil(Math.max(...corners.map((p) => p.y))) + 16;
+  // The clip's corners on whole device pixels, so the shot's pixels are the page's own: 4 CSS px at a ratio of 1.25.
+  const step = [1, 2, 3, 4, 5, 6, 7, 8].find((k) => Number.isInteger(k * ratio)) ?? 1;
+  const x0 = Math.floor((Math.min(...corners.map((p) => p.x)) - 16) / step) * step;
+  const y0 = Math.floor((Math.min(...corners.map((p) => p.y)) - 16) / step) * step;
+  const x1 = Math.ceil((Math.max(...corners.map((p) => p.x)) + 16) / step) * step;
+  const y1 = Math.ceil((Math.max(...corners.map((p) => p.y)) + 16) / step) * step;
   const png = await page.screenshot({ clip: { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, scale: "device" });
   const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   return { data, width: info.width, height: info.height, x0, y0, ratio };
@@ -244,19 +273,21 @@ function through(alpha: number): Rgb {
   return over(WHITE, FOG, alpha);
 }
 
-/** Three places along each edge, in cells and on the page. */
-function samples(placement: Placement): { edge: (typeof EDGES)[number]; t: number; cell: { x: number; y: number }; page: { x: number; y: number } }[] {
-  return EDGES.flatMap((edge) =>
-    [0.3, 0.5, 0.7].map((t) => {
-      const cell = { x: edge.from[0] + (edge.to[0] - edge.from[0]) * t, y: edge.from[1] + (edge.to[1] - edge.from[1]) * t };
-      return { edge, t, cell, page: toPage(placement, cell.x, cell.y) };
+type Place = { line: Line; t: number; cell: { x: number; y: number }; page: { x: number; y: number } };
+
+/** The places along each line the pixels are read at, in cells and on the page. */
+function places(placement: Placement, lines: readonly Line[]): Place[] {
+  return lines.flatMap((line) =>
+    line.at.map((t) => {
+      const cell = { x: line.from[0] + (line.to[0] - line.from[0]) * t, y: line.from[1] + (line.to[1] - line.from[1]) * t };
+      return { line, t, cell, page: toPage(placement, cell.x, cell.y) };
     }),
   );
 }
 
 /** Fails when anything but the board's canvas lies over a place the pixels are read at, such as a bar or a panel. */
 async function assertOnCanvas(page: Page, placement: Placement, label: string): Promise<void> {
-  const points = samples(placement).map((s) => [s.page.x, s.page.y] as const);
+  const points = places(placement, [...EDGES, ...BOUNDARIES]).map((s) => [s.page.x, s.page.y] as const);
   const covered = await page.evaluate(
     (at) =>
       at
@@ -264,7 +295,50 @@ async function assertOnCanvas(page: Page, placement: Placement, label: string): 
         .filter(([, , tag]) => tag !== "CANVAS"),
     points,
   );
-  assert.deepEqual(covered, [], `${label}: something other than the board lies over the edge`);
+  assert.deepEqual(covered, [], `${label}: something other than the board lies over the places read`);
+}
+
+/**
+ * The page's pixels within 3 px along a line and 6 px across it at a place,
+ * each with `d`, how far its center lies across the line toward the line's
+ * `toward`, and `reach`, how far its square reaches either side of that.
+ */
+function pixelsAcross(shot: Shot, placement: Placement, place: Place): { ix: number; iy: number; d: number; reach: number; got: Rgb }[] {
+  const r = shot.ratio;
+  const dev = (p: { x: number; y: number }) => ({ x: (p.x - shot.x0) * r, y: (p.y - shot.y0) * r });
+  const { line, cell } = place;
+  const a = dev(toPage(placement, line.from[0], line.from[1]));
+  const b = dev(toPage(placement, line.to[0], line.to[1]));
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  const along = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+  const s = dev(place.page);
+  const ahead = dev(toPage(placement, cell.x + line.toward[0] * 0.01, cell.y + line.toward[1] * 0.01));
+  let n = { x: -along.y, y: along.x };
+  if (n.x * (ahead.x - s.x) + n.y * (ahead.y - s.y) < 0) n = { x: -n.x, y: -n.y };
+  const reach = (Math.abs(n.x) + Math.abs(n.y)) / 2;
+  const out: { ix: number; iy: number; d: number; reach: number; got: Rgb }[] = [];
+  for (let iy = Math.floor(s.y) - 8; iy <= Math.floor(s.y) + 8; iy++) {
+    for (let ix = Math.floor(s.x) - 8; ix <= Math.floor(s.x) + 8; ix++) {
+      if (ix < 0 || iy < 0 || ix >= shot.width || iy >= shot.height) continue;
+      const c = { x: ix + 0.5 - s.x, y: iy + 0.5 - s.y };
+      const d = c.x * n.x + c.y * n.y;
+      if (Math.abs(c.x * along.x + c.y * along.y) > 3 || Math.abs(d) > 6) continue;
+      out.push({ ix, iy, d, reach, got: pixel(shot, ix, iy) });
+    }
+  }
+  return out;
+}
+
+/** Keeps the worst pixel of one place, and a miss when it is off by more than TOLERANCE. */
+function verdict(state: FogState, label: string, place: Place, bad: { by: number; what: string }): void {
+  const key = `${state} ${label.split(",").slice(0, 3).join(",")}`;
+  worst.set(key, Math.max(worst.get(key) ?? 0, bad.by));
+  if (bad.by > TOLERANCE) misses.push(`${label}, ${place.line.name} at ${place.t}: ${bad.what}`);
+}
+
+/** How far short of `floor` a pixel falls on its darkest channel: lighter is fine. */
+function darkerThan(got: Rgb, floor: Rgb): number {
+  return Math.max(0, ...floor.map((v, i) => v - got[i]!));
 }
 
 /**
@@ -272,61 +346,64 @@ async function assertOnCanvas(page: Page, placement: Placement, label: string): 
  * a miss for each place whose worst pixel is off by more than TOLERANCE.
  * A pixel is judged by where its square lies: outside the scene, inside
  * it, or across the edge. Fogged or veiled, every pixel is the fog, over
- * the veil where there is one. Revealed, every
- * pixel reaching past the edge is the fog, so not a sliver of the map
- * there shows, and the inside past one pixel of the board's canvas is at
- * least as light as the revealed ground's soft edge.
+ * the veil where there is one. Revealed, every pixel reaching past the
+ * edge is the fog, so not a sliver of the map there shows, and the inside
+ * past one pixel of the board's canvas is at least as light as the
+ * revealed ground's soft edge.
  *
  * Where the page scales the canvas up, it blends each of the canvas's
  * pixels into the next, so a canvas pixel's width is kept clear on each
  * side of the edge before a pixel is judged as outside or inside.
  */
 function checkEdges(shot: Shot, placement: Placement, label: string, role: Role, state: FogState): void {
-  const r = shot.ratio;
-  const dev = (p: { x: number; y: number }) => ({ x: (p.x - shot.x0) * r, y: (p.y - shot.y0) * r });
   // Veiled, the DM's fog lies over Party sight's veil, which lies over the map.
   const fog = state === "veiled" ? over(over(WHITE, [0, 0, 0], VEIL), FOG, OPACITY[role]) : through(OPACITY[role]);
   const soft = through(OPACITY[role] * SOFT_EDGE);
   // The page's pixels to one of the canvas's, and how far the page's scaling spreads one.
-  const canvasPx = r / placement.canvasRatio;
+  const canvasPx = shot.ratio / placement.canvasRatio;
   const blur = canvasPx > 1 ? canvasPx : 0;
-  for (const { edge, t, cell, page } of samples(placement)) {
-    const a = dev(toPage(placement, edge.from[0], edge.from[1]));
-    const b = dev(toPage(placement, edge.to[0], edge.to[1]));
-    const len = Math.hypot(b.x - a.x, b.y - a.y);
-    const along = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
-    const s = dev(page);
-    const inPoint = dev(toPage(placement, cell.x + edge.inward[0] * 0.01, cell.y + edge.inward[1] * 0.01));
-    let n = { x: -along.y, y: along.x };
-    if (n.x * (inPoint.x - s.x) + n.y * (inPoint.y - s.y) < 0) n = { x: -n.x, y: -n.y };
-    // How far a pixel's square reaches along the normal either side of its center.
-    const reach = (Math.abs(n.x) + Math.abs(n.y)) / 2;
+  for (const place of places(placement, EDGES)) {
     let bad = { by: 0, what: "" };
-    for (let iy = Math.floor(s.y) - 8; iy <= Math.floor(s.y) + 8; iy++) {
-      for (let ix = Math.floor(s.x) - 8; ix <= Math.floor(s.x) + 8; ix++) {
-        if (ix < 0 || iy < 0 || ix >= shot.width || iy >= shot.height) continue;
-        const c = { x: ix + 0.5 - s.x, y: iy + 0.5 - s.y };
-        const d = c.x * n.x + c.y * n.y;
-        if (Math.abs(c.x * along.x + c.y * along.y) > 3 || Math.abs(d) > 6) continue;
-        const got = pixel(shot, ix, iy);
-        let by = 0;
-        let want = "";
-        // Shown one to one, a pixel any part of which lies past the edge is the fog, unless it also reaches a canvas pixel in, where Isometric's frame ends.
-        const outside = blur === 0 ? d - reach < 0 && d + reach <= canvasPx : d + reach <= -blur;
-        if (state !== "revealed" || outside) {
-          by = diff(got, fog);
-          want = fog.join(",");
-        } else if (d - reach >= canvasPx + blur) {
-          // Lighter is fine: the soft edge gives way to the clear map a quarter cell in.
-          by = Math.max(0, ...soft.map((v, i) => v - got[i]!));
-          want = `at least ${soft.join(",")}`;
-        }
-        if (by > bad.by) bad = { by, what: `pixel ${ix},${iy} (${d.toFixed(2)} px in) got ${got.join(",")} want ${want}` };
+    for (const { ix, iy, d, reach, got } of pixelsAcross(shot, placement, place)) {
+      let by = 0;
+      let want = "";
+      // Shown one to one, a pixel any part of which lies past the edge is the fog, unless it also reaches a canvas pixel in, where Isometric's frame ends.
+      const outside = blur === 0 ? d - reach < 0 && d + reach <= canvasPx : d + reach <= -blur;
+      if (state !== "revealed" || outside) {
+        by = diff(got, fog);
+        want = fog.join(",");
+      } else if (d - reach >= canvasPx + blur) {
+        // Lighter is fine: the soft edge gives way to the clear map a quarter cell in.
+        by = darkerThan(got, soft);
+        want = `at least ${soft.join(",")}`;
       }
+      if (by > bad.by) bad = { by, what: `pixel ${ix},${iy} (${d.toFixed(2)} px in) got ${got.join(",")} want ${want}` };
     }
-    const key = `${state} ${label.split(",").slice(0, 3).join(",")}`;
-    worst.set(key, Math.max(worst.get(key) ?? 0, bad.by));
-    if (bad.by > TOLERANCE) misses.push(`${label}, ${edge.name} edge at ${t}: ${bad.what}`);
+    verdict(state, label, place, bad);
+  }
+}
+
+/**
+ * Reads the pixels across each line between SPLIT's revealed cells and
+ * fogged ones. The fog image is drawn without smoothing, so a pixel shows
+ * the sub-cell its center lies in: every pixel whose center lies in a
+ * fogged sub-cell is the fog, and every one whose center lies in a
+ * revealed sub-cell is at least as light as the soft edge. A quarter of a
+ * canvas pixel is left either side of the line for rounding, and where the
+ * page scales the canvas up, a canvas pixel more for its blending.
+ */
+function checkBoundaries(shot: Shot, placement: Placement, label: string, role: Role): void {
+  const fog = through(OPACITY[role]);
+  const soft = through(OPACITY[role] * SOFT_EDGE);
+  const canvasPx = shot.ratio / placement.canvasRatio;
+  const margin = canvasPx / 4 + (canvasPx > 1 ? canvasPx : 0);
+  for (const place of places(placement, BOUNDARIES)) {
+    let bad = { by: 0, what: "" };
+    for (const { ix, iy, d, got } of pixelsAcross(shot, placement, place)) {
+      const by = d >= margin ? diff(got, fog) : d <= -margin ? darkerThan(got, soft) : 0;
+      if (by > bad.by) bad = { by, what: `pixel ${ix},${iy} (${d.toFixed(2)} px into the fog) got ${got.join(",")} want ${d > 0 ? fog.join(",") : `at least ${soft.join(",")}`}` };
+    }
+    verdict("split", label, place, bad);
   }
 }
 
@@ -344,7 +421,9 @@ async function sweep(state: FogState): Promise<void> {
             const label = `${role}, ${view}${view === "isometric" ? ` turn ${i}` : ""}, ratio ${ratio}, ${cam.scale} px a cell`;
             const placement = await placeBoard(page, cam);
             await assertOnCanvas(page, placement, label);
-            checkEdges(await grab(page, placement, ratio), placement, label, role, state);
+            const shot = await grab(page, placement, ratio);
+            if (state === "split") checkBoundaries(shot, placement, label, role);
+            else checkEdges(shot, placement, label, role, state);
             if (i === 0 && ratio === 2) await shots.take(page, `fogedge-${state}-${role}-${view}-ratio-2`);
           }
         }
@@ -456,7 +535,15 @@ describe("raccoon-vtt the fog's edge", { timeout: 600_000 }, () => {
     assert.deepEqual(misses, []);
   });
 
-  test("FE-4. party vision with the DM's Party sight on and the scene fogged again: the veil under the DM's fog is one even tint across the edge in Top-down", async () => {
+  test("FE-4. two columns and a row revealed among fogged cells: every pixel whose center lies in a fogged sub-cell is the fog, at every zoom, pan, ratio and view", async () => {
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: SPLIT.map((rect) => ({ id: randomUUID(), mode: "reveal", shape: { kind: "rect", ...rect } })) });
+    await sweep("split");
+    report("split");
+    assert.deepEqual(misses, []);
+  });
+
+  test("FE-5. party vision with the DM's Party sight on and the scene fogged again: the veil under the DM's fog is one even tint across the edge in Top-down", async () => {
     await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
     await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { vision: { on: true, light: "dark" } } });
     await sweepVeiled();
@@ -464,7 +551,7 @@ describe("raccoon-vtt the fog's edge", { timeout: 600_000 }, () => {
     assert.deepEqual(misses, []);
   });
 
-  test("FE-5. no page logged an error", () => {
+  test("FE-6. no page logged an error", () => {
     for (const c of consoles) assert.deepEqual(c.errors, [], `${c.label} logged errors`);
   });
 });

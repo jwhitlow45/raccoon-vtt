@@ -3,12 +3,17 @@ export type Affine = { a: number; b: number; c: number; d: number; e: number; f:
 
 export type Box = { x: number; y: number; w: number; h: number };
 
-/** Where the fog's two covers go, in the shape's own units (cells). */
+/**
+ * Where the fog's two covers meet, in the shape's own units (cells). The
+ * fog image itself always keeps the scene's own rectangle: drawn anywhere
+ * else, every sub-cell boundary inside it would move, and a pixel near one
+ * could show a revealed sub-cell where a fogged one lies.
+ */
 export type FogSeam = {
   /** The hole in the frame that fogs everything past the scene. */
   hole: Box;
-  /** Where the fog image is drawn. */
-  image: Box;
+  /** What of the image is drawn, where only part of it is: the hole itself, on whole pixels. */
+  clip: Box | null;
 };
 
 /** How far off a whole canvas pixel a corner may be taken as on it: float error, far less than a level of any pixel. */
@@ -26,26 +31,28 @@ const FLAT = 1e-9;
  * the map under them showed as a hairline at some zooms.
  *
  * Where the scene's edges run along the pixel grid, as in Top-down, both
- * covers meet on the nearest whole pixel inside the scene, so neither has
- * a partial pixel and the image is drawn less than a pixel narrower each
+ * covers meet on the nearest whole pixel inside the scene: the frame's
+ * hole shrinks to it and the image is clipped to it, so neither has a
+ * partial pixel there and less than a pixel of the image is cut off each
  * side. That leaves no overlap, so the DM's translucent fog stays one even
  * tint too. Elsewhere, as on Isometric's turned ground, the edges cross the
  * pixel grid at a slant: the frame's hole shrinks by one canvas pixel
- * across each edge, so the frame wholly covers every pixel the image only
- * partly covers. A translucent fog would tint that overlap twice, so there
- * it must go down as one image. A transform with no area, as a hidden
- * stage's can be, keeps the scene's own rectangle, since it draws nothing.
+ * across each edge, so the frame covers all but a sliver too small to
+ * change a level of every pixel the image only partly covers. A
+ * translucent fog would tint that overlap twice, so there it must go down
+ * as one image. A transform with no area, as a hidden stage's can be,
+ * keeps the scene's own rectangle, since it draws nothing.
  */
 export function fogSeam(t: Affine, w: number, h: number): FogSeam {
   const scene = { x: 0, y: 0, w, h };
   const det = t.a * t.d - t.b * t.c;
-  if (!Number.isFinite(det) || det === 0) return { hole: scene, image: scene };
+  if (!Number.isFinite(det) || det === 0) return { hole: scene, clip: null };
   const snapped = pixelBox(t, w, h);
-  if (snapped) return { hole: snapped, image: snapped };
+  if (snapped) return { hole: snapped, clip: snapped };
   // Across an edge where x is constant, one canvas pixel is this many cells: the length of x's gradient over the canvas.
   const dx = Math.hypot(t.c, t.d) / Math.abs(det);
   const dy = Math.hypot(t.a, t.b) / Math.abs(det);
-  return { hole: { x: dx, y: dy, w: Math.max(0, w - 2 * dx), h: Math.max(0, h - 2 * dy) }, image: scene };
+  return { hole: { x: dx, y: dy, w: Math.max(0, w - 2 * dx), h: Math.max(0, h - 2 * dy) }, clip: null };
 }
 
 /**

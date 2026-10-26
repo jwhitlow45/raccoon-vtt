@@ -111,17 +111,22 @@ export const FogShape = memo(function FogShape(props: {
           const native = ctx._context;
           native.save();
           native.fillStyle = theme.color.fog;
-          const { hole, image } = fogSeam(native.getTransform(), w, h);
+          const { hole, clip } = fogSeam(native.getTransform(), w, h);
           native.beginPath();
           native.rect(-FRAME_CELLS, -FRAME_CELLS, w + FRAME_CELLS * 2, h + FRAME_CELLS * 2);
           native.rect(hole.x, hole.y, hole.w, hole.h);
           native.fill("evenodd");
+          if (clip) {
+            native.beginPath();
+            native.rect(clip.x, clip.y, clip.w, clip.h);
+            native.clip();
+          }
           if (canvas.ok) {
             native.imageSmoothingEnabled = false;
-            native.drawImage(canvas.canvas, image.x, image.y, image.w, image.h);
+            native.drawImage(canvas.canvas, 0, 0, w, h);
           } else {
             // No 2D context (out of memory): fog everything rather than show the map.
-            native.fillRect(image.x, image.y, image.w, image.h);
+            native.fillRect(0, 0, w, h);
           }
           native.restore();
         }}

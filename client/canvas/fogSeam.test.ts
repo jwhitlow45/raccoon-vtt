@@ -49,7 +49,7 @@ function across(t: Affine, axis: "x" | "y", at: number, from: number): number {
 }
 
 describe("where the fog's frame and image meet (fogSeam.ts)", () => {
-  test("Top-down off the pixel grid: both covers meet on the whole pixels just inside the scene's edges", () => {
+  test("Top-down off the pixel grid: the frame's hole and the image's clip are the whole pixels just inside the scene's edges", () => {
     for (const ratio of [1, 2]) {
       for (const [scale, x, y] of [
         [23.37, 100.37, 50.13],
@@ -57,8 +57,8 @@ describe("where the fog's frame and image meet (fogSeam.ts)", () => {
         [47.66, 0.5, 0.83],
       ] as const) {
         const t = camera(ratio, scale, x, y);
-        const { hole, image } = fogSeam(t, 8, 6);
-        assert.deepEqual(hole, image, "the image fills the hole exactly, so nothing overlaps");
+        const { hole, clip } = fogSeam(t, 8, 6);
+        assert.deepEqual(clip, hole, "the image is cut to the hole exactly, so nothing overlaps");
         const [l, tp, r, b] = onCanvas(t, hole);
         const [sl, st, sr, sb] = onCanvas(t, { x: 0, y: 0, w: 8, h: 6 });
         for (const [v, what] of [
@@ -78,8 +78,9 @@ describe("where the fog's frame and image meet (fogSeam.ts)", () => {
 
   test("Top-down on the pixel grid already, or a hair off it from float error: the scene's own rectangle", () => {
     for (const t of [camera(2, 40, 100, 60), camera(1, 25, 10 + 1e-9, 20 - 1e-9)]) {
-      const { hole, image } = fogSeam(t, 8, 6);
-      for (const box of [hole, image]) {
+      const { hole, clip } = fogSeam(t, 8, 6);
+      assert.ok(clip);
+      for (const box of [hole, clip]) {
         near(box.x, 0, "x");
         near(box.y, 0, "y");
         near(box.w, 8, "w");
@@ -93,19 +94,19 @@ describe("where the fog's frame and image meet (fogSeam.ts)", () => {
       { a: -30.3, b: 0, c: 0, d: 30.3, e: 500.37, f: 20.71 },
       { a: 0, b: 30.3, c: -30.3, d: 0, e: 400.37, f: 20.71 },
     ]) {
-      const { hole, image } = fogSeam(t, 8, 6);
-      assert.deepEqual(hole, image);
+      const { hole, clip } = fogSeam(t, 8, 6);
+      assert.deepEqual(clip, hole);
       for (const v of onCanvas(t, hole)) near(v, Math.round(v), "corner on a whole pixel");
       assert.ok(hole.w > 8 - 2 / 30.3 && hole.w <= 8 && hole.h > 6 - 2 / 30.3 && hole.h <= 6, `shrunk by less than a pixel each side: ${JSON.stringify(hole)}`);
     }
   });
 
-  test("Isometric at every turn and pixel ratio: the image covers the scene, and the frame's hole is one canvas pixel in across each edge", () => {
+  test("Isometric at every turn and pixel ratio: the image is not clipped, and the frame's hole is one canvas pixel in across each edge", () => {
     for (const turn of [0, 1, 2, 3]) {
       for (const ratio of [1, 2]) {
         const t = ground(camera(ratio, 31.81, 300.37, 120.71), turn);
-        const { hole, image } = fogSeam(t, 8, 6);
-        assert.deepEqual(image, { x: 0, y: 0, w: 8, h: 6 });
+        const { hole, clip } = fogSeam(t, 8, 6);
+        assert.equal(clip, null);
         near(across(t, "x", hole.x, 0), 1, `turn ${turn} at ${ratio}: the west side`);
         near(across(t, "x", 8, hole.x + hole.w), 1, `turn ${turn} at ${ratio}: the east side`);
         near(across(t, "y", hole.y, 0), 1, `turn ${turn} at ${ratio}: the north side`);
@@ -114,16 +115,16 @@ describe("where the fog's frame and image meet (fogSeam.ts)", () => {
     }
   });
 
-  test("a scene narrower than a pixel leaves no hole and no image, so the frame fogs it all", () => {
-    const { hole, image } = fogSeam(camera(1, 0.05, 10.3, 10.3), 8, 6);
+  test("a scene narrower than a pixel leaves no hole and clips all of the image, so the frame fogs it all", () => {
+    const { hole, clip } = fogSeam(camera(1, 0.05, 10.3, 10.3), 8, 6);
     assert.equal(hole.w * hole.h, 0);
-    assert.equal(image.w * image.h, 0);
+    assert.ok(clip);
+    assert.equal(clip.w * clip.h, 0);
     const slanted = fogSeam(ground(camera(1, 0.05, 10.3, 10.3), 0), 8, 6);
     assert.equal(slanted.hole.w * slanted.hole.h, 0);
   });
 
   test("a transform with no area, as a hidden stage's, keeps the scene's rectangle", () => {
-    const scene = { x: 0, y: 0, w: 8, h: 6 };
-    assert.deepEqual(fogSeam({ a: 0, b: 0, c: 0, d: 0, e: 0, f: 0 }, 8, 6), { hole: scene, image: scene });
+    assert.deepEqual(fogSeam({ a: 0, b: 0, c: 0, d: 0, e: 0, f: 0 }, 8, 6), { hole: { x: 0, y: 0, w: 8, h: 6 }, clip: null });
   });
 });

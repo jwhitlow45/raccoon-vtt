@@ -124,19 +124,25 @@ export const SightOverlay = memo(function SightOverlay(props: { scene: Pick<Scen
       sceneFunc={(ctx) => {
         const g = ctx._context;
         g.save();
-        // The frame and the image meet on whole pixels where they can (canvas/fogSeam.ts), as the fog's do, so the veil leaves no lighter line at the scene's edge. On Isometric's slant they meet at the edge itself: an overlap would shade this translucent overlay twice there.
-        const box = pixelBox(g.getTransform(), w, h) ?? { x: 0, y: 0, w, h };
+        // The frame and the image meet on whole pixels where they can (canvas/fogSeam.ts), as the fog's do, so the veil leaves no lighter line at the scene's edge. The image keeps the scene's rectangle and is clipped there. On Isometric's slant they meet at the edge itself: an overlap would shade this translucent overlay twice there.
+        const box = pixelBox(g.getTransform(), w, h);
         // Past the scene's edge nothing is in sight, as fail-closed fog treats it.
         g.fillStyle = unseen;
         g.beginPath();
         g.rect(-FRAME_CELLS, -FRAME_CELLS, w + FRAME_CELLS * 2, h + FRAME_CELLS * 2);
-        g.rect(box.x, box.y, box.w, box.h);
+        if (box) g.rect(box.x, box.y, box.w, box.h);
+        else g.rect(0, 0, w, h);
         g.fill("evenodd");
+        if (box) {
+          g.beginPath();
+          g.rect(box.x, box.y, box.w, box.h);
+          g.clip();
+        }
         if (drawn.ok) {
           g.imageSmoothingEnabled = true;
-          g.drawImage(drawn.canvas, box.x, box.y, box.w, box.h);
+          g.drawImage(drawn.canvas, 0, 0, w, h);
         } else {
-          g.fillRect(box.x, box.y, box.w, box.h);
+          g.fillRect(0, 0, w, h);
         }
         g.restore();
       }}
