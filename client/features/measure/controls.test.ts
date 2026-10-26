@@ -8,7 +8,7 @@ const { MeasuringContext } = await import("../../components/measuring.ts");
 const { Segmented } = await import("../../components/Segmented.tsx");
 const { Swatches } = await import("../../components/Swatches.tsx");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
-const { ConfirmButton, OptButton, OptionsStrip, shortName, StableWords, ValueChip } = await import("./controls.tsx");
+const { ChoiceTiles, ConfirmButton, OptButton, OptionsStrip, shortName, StableWords, ValueChip } = await import("./controls.tsx");
 const { theme } = await import("../../lib/theme.ts");
 
 /*
@@ -61,6 +61,31 @@ describe("a compact choice's name (FU20B-OP-1)", () => {
     assert.equal(shortName({ value: "walking", label: "Walking", short: "Walk" }), "Walking", "Walk is part of Walking");
     assert.equal(shortName({ value: "a", label: "Clear fog" }), "Clear fog", "no short words, the option's own");
     assert.equal(shortName(undefined), undefined);
+  });
+});
+
+describe("a tile's name (7.2)", () => {
+  test("a tile with spoken words is named by them, or by its title where the title holds them, as a tile's shown words are (review FU33-O4)", () => {
+    const markup = html(
+      createElement(ChoiceTiles, {
+        label: "Mode",
+        value: "walls",
+        onChange: () => {},
+        options: [
+          { value: "walls", label: "Walls/doors", spoken: "Walls and doors" },
+          { value: "heights", label: "Heights/stairs", spoken: "Heights and stairs", title: "Heights and stairs (H)" },
+          { value: "ground", label: "Difficult", spoken: "Difficult ground", title: "Slows anyone crossing it" },
+          { value: "brush", label: "Brush", title: "Brush (B)" },
+        ],
+      }),
+    );
+    const names = [...markup.matchAll(/<input [^>]*>/g)].map(([input]) => [/value="([^"]*)"/.exec(input)?.[1], /aria-label="([^"]*)"/.exec(input)?.[1]]);
+    assert.deepEqual(names, [
+      ["walls", "Walls and doors"],
+      ["heights", "Heights and stairs (H)"],
+      ["ground", "Difficult ground"],
+      ["brush", "Brush (B)"],
+    ]);
   });
 });
 
