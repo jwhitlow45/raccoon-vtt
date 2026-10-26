@@ -19,6 +19,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [The map builder](#the-map-builder)
   - [Walls and doors](#walls-and-doors)
   - [Heights and stairs](#heights-and-stairs)
+  - [The isometric view](#the-isometric-view)
   - [Difficult ground](#difficult-ground)
   - [Light and party vision](#light-and-party-vision)
   - [Fog](#fog)
@@ -162,7 +163,7 @@ A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, f
 
 Below the scene list (**All scenes**) and **New scene**, the panel shows the settings of the scene on your screen, in these sections:
 
-- **This scene**: the **Scene name** (players see it), the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), the **Fog** switch, the **Starting view**, **Size in squares** and the **Background**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone.
+- **This scene**: the **Scene name** (players see it), the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), the **Fog** switch, the **Starting view**, the **Suggested view**, **Size in squares** and the **Background**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone. **Suggested view** is **Top-down** or **Isometric**: see [The isometric view](#the-isometric-view).
 - **Map phases**: other images of the same map. See [Map phases, imports and exports](#map-phases-imports-and-exports).
 - **Vision**: **Party vision** and **Light**. See [Light and party vision](#light-and-party-vision).
 - **Grid**: **Grid lines**, **Grid color**, **Opacity** and **Line width**, plus, on a map image, **Line up the grid** and **Or count the squares**.
@@ -319,6 +320,32 @@ Heights change play in several ways:
 - Rulers, distances and areas all count the height.
 
 You can paint heights over a map image too, so the cliff drawn in the art can become a real cliff.
+
+## The isometric view
+
+Heights are easier to read when you can see them. The isometric view tilts the map so that the ground runs away from you at an angle, and everything on it stands up: creatures become standees on their rings, walls rise in stone, doors in wood and windows as panes, and raised ground stands as blocks with the builder's textures while pits sink into the floor. A flier hangs at its height over a shadow on the ground beneath it. Nothing about the game changes. Distances, moves, areas and what each player can see are exactly what they are in the ordinary top-down view, so you and your players can each use whichever view suits you.
+
+![The isometric view: the hall's raised dais with Thorn and Bree on it, the stair down from it, a goblin by the pit in the floor, an imp flying 20 ft up over its shadow, and the View menu open beside Fit.](dm-guide/isometric-menu.webp)
+
+**Choosing a view.** Each device chooses for itself. Press the **View** button in the top bar, beside **Fit**. Its menu offers **Follow the scene**, **Top-down** and **Isometric**. A choice holds for the whole room, every scene, until you pick **Follow the scene** again, and it is kept on that device alone, so choosing Isometric on your laptop changes nothing on your players' phones. On the narrowest phones at a large interface size, the View button moves into **Menu** as a **View** row, so Undo and Redo keep their place in the bar.
+
+**Turning the map.** In Isometric, **Turn left** and **Turn right** in the same menu turn the map a quarter at a time, so a wall or a tall creature never hides what stands behind it for long. Each scene remembers its own turn. A creature hidden behind another can still be picked: tap the selected one again and the one behind it is selected instead.
+
+**Suggesting a view for a scene.** In the Scenes panel, under This scene, **Suggested view** sets the view that devices following the scene show. A cliff-side ambush might suggest Isometric, while a sprawling town map stays Top-down. Every device starts out following the scene, so a player who has never chosen sees what you suggest. A device that is in the middle of a drag, a pinch or a held ruler switches once the finger lifts, so the map never moves under anyone's hand.
+
+**Tools that work top-down.** Four of your tools need the flat map, so while you use them your device shows Top-down and says why, and Isometric comes back as soon as you pick another tool: the **Map builder** (`B`), **Fog** (`F`), **Line up grid** (`G`) and **Traps** (`X`). Everything else, from Select and the Ruler to Areas and Ping, works in either view.
+
+**Keys.** On a keyboard each key sits beside what it does:
+
+- `I` switches between Top-down and Isometric.
+- `Q` turns the map left, and `E` turns it right. In Top-down they say that turning needs the isometric view.
+- The arrow keys move the selection one square by the screen, whichever way the map is turned: Up moves it toward the map's edge that faces up and to the right.
+
+**What players see.** Isometric shows a player nothing more than Top-down does. Under the fog, nothing stands up: a creature, a wall or a label stands only where every bit of the ground under it is revealed to that player, and anything else lies flat under the fog as it always has. On your own device, a creature on ground your map shows as fogged draws dimmed, so you can tell at a glance what the players cannot see. On a scene where each player sees for themselves, ground the party has explored counts as revealed for this, just as your map draws it.
+
+![The same hall in Isometric, turned once, with the menu closed.](dm-guide/isometric.webp)
+
+The table display has the same View choice in its own menu, kept apart from anyone's choice in the same browser. With **Follow the DM** on, a display follows the part of the map your device shows in either view.
 
 ## Difficult ground
 
@@ -1285,7 +1312,7 @@ If your group plays around a table, a TV can show the players' view of the map, 
 
 ![Add a TV in the DM panel: the code to type on the TV, how long it lasts, and its QR code.](dm-guide/table-display.webp)
 
-The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). It shows no panels, chat or Initiative strip, unless you tap the display and turn on **Show whose turn it is**. To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. A room can have up to 4 displays.
+The display shows the players' scene the way the players see it: fog, party vision, tokens, shared areas, drawings, pings and rulers, and handouts shown to everyone. On a scene where each player sees for themselves, it shows only what the creatures that share sight with the party see (see [Sight for each player](#sight-for-each-player)). It shows no panels, chat or Initiative strip, unless you tap the display and turn on **Show whose turn it is**. To have the display show what your own screen shows, turn on **Show my view on the table display** in the DM panel, then tap the display and pick **Follow the DM**. The display's menu also has its own **View**, so the TV can show the map in Isometric while your screen stays Top-down, or the other way round (see [The isometric view](#the-isometric-view)). A room can have up to 4 displays.
 
 ## Room settings for fights and maps
 
@@ -1507,11 +1534,12 @@ These are the keys a DM uses most:
 - `/` searches the scene in the Outliner.
 - `Ctrl+Z` is Undo, and `Ctrl+Shift+Z` is Redo (Cmd in place of Ctrl on a Mac).
 - `0` fits the map to the screen, `+` zooms in and `-` zooms out. `S` hides or shows the side panel, and `O` switches to the other of two panels.
+- `I` switches between Top-down and Isometric, `Q` turns the isometric view left and `E` turns it right.
 - `W` turns full screen on or off, where the browser allows it.
 - Escape closes the newest pop-up, sheet or action bar.
 
 ![The shortcut list's Toolbar section: The tool's key, for the tool in use, shows its hidden options and goes to its next main choice, such as Area's next shape, and with Shift on a letter key goes back one.](dm-guide/shortcuts-toolbar.webp)
 
-These are the default keys. On any device with a keyboard, you can move a shortcut to another key from the shortcut list: press **Change** beside it, then press the new key. The change stays on that device, so your players keep their own keys, and **Reset all keys** at the bottom of the list brings the defaults back.
+These are the default keys. On any device with a keyboard, you can move a shortcut to another key from the shortcut list: press **Change** beside it, then press the new key. The change stays on that device, so your players keep their own keys, and **Reset all keys** at the bottom of the list brings the defaults back. If a new version of the app gives a shortcut a key you had already given to another one, yours stays where you put it, and the new shortcut shows **No key** until you give it one with **Change**, or press its **Reset** to take that key back.
 
 With a mouse, Shift or Ctrl and a click adds a token to the selection, and Shift or Ctrl and a drag on empty map draws a selection box. To move the map, drag with the right or middle button, or hold Space and drag.

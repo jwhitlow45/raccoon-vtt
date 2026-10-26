@@ -873,6 +873,19 @@ finds no stat block for a dragon turtle. A dragon turtle an old DM page
 places, saves in an encounter or gives an image is stored under the new id,
 so it has its stat block once the page reloads.
 
+The update that adds the isometric view (docs/design-v1-isometric-view.md)
+saves rooms at snapshot version 26 and stores changes at op version 25,
+which the builds before it cannot read: they answer "Something went wrong"
+for every room. Going back is the same restore: check out the commit you ran
+before (`git log` lists it), rebuild with
+`docker compose -f docker-compose.server.yml up -d --build`, then follow
+Restore under Backups with the backup taken just before the update. Every
+room loses what changed after that backup. Reload every page left open
+across the update, table displays included, since no version step makes an
+open page reload. Until it reloads, an old page has no View button, and an
+old table display drops what a DM in Isometric shows it, so Follow the DM
+stands still there.
+
 Compose rebuilds the image and replaces only the containers that changed. On
 the way down the app closes every WebSocket with code 1012, finishes each
 room's current write and saves a snapshot, so phones reconnect on their own

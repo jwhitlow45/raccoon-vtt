@@ -91,6 +91,19 @@ All of this is the DM's.
 - "Export as image" saves a scene's map as a PNG: the map image and the build, without tokens, drawings or fog. Pick 50, 70 or 100 pixels per square, the grid on or off, and the player view or the DM view. The file name carries the grid size, such as `crypt-30x20-70px.png` (with `-dm` added for the DM view), so other VTTs set the scale on import. A very large scene exports at fewer pixels per square, to stay within what an iPhone can draw, and says so. On an iPhone it saves through the share sheet.
 - Universal VTT import: a `.dd2vtt`, `.uvtt` or `.df2vtt` file from Dungeondraft, Dungeon Alchemist or DungeonFog brings the map image, grid, walls, doors, windows and lights at once. It shows what it found before it makes the scene and suggests the scene's light level. One undo takes it all back. A phone takes files up to 40 MB, so large maps import on a computer.
 
+### Isometric view
+
+Everyone, the DM and every player, picks how their own device shows the map.
+
+- The **View** button in the top bar, before Fit, shows a square grid in Top-down and a diamond in Isometric, turned with the view. It opens the View menu, a pop-up on a wide screen and a sheet on a phone: "Follow the scene", "Top-down" or "Isometric", then "Turn left" and "Turn right". In Top-down the turn buttons stay, disabled, with "Turning works in Isometric." under them. On the narrowest phones at a large Interface size the button folds into Menu as a **View** row that opens the same sheet, so Undo and Redo keep their place in the bar.
+- **Isometric** tilts the map and stands what is on it up: creatures as standees with a ring and a shadow on the ground under them, walls in stone, doors in wood, windows as panes, pillars, map labels, pins and the names of areas and traps. Raised ground stands as blocks with the builder's textures, lighter on the left and darker on the right, stairs as steps, and pits sink. A map image's raised ground takes its sides' tone from the art on top. **Turn left** and **Turn right** turn the map a quarter at a time, so a wall never hides the creature behind it for good.
+- The pick is this device's, for the whole room and every scene, until Follow the scene is picked again. Each scene keeps its own turn. A table display picks its own, apart from a member's pick in the same browser.
+- **Suggested view**, in a scene's This scene settings after Starting view, is the DM's: "Top-down" or "Isometric", with the help "Devices that follow the scene show this view." A device that follows the scene switches once a drag, a pinch or a held ruler in progress ends, so the map never moves under a finger.
+- Everything works in Isometric as in Top-down: select, drag (a creature climbs a platform and steps down into a pit under the finger), measure, ping, aim areas, open doors, read heights. A tap again on the selected standee picks the one behind it, and the arrow keys move tokens by the screen: Up goes toward the map's edge that faces up and to the right.
+- Four tools show Top-down while in use, and say so: the map builder, Fog, Line up grid and Traps ("The map builder works top-down. Isometric comes back when you switch tools."). Isometric comes back when another tool is picked.
+- Isometric keeps every secret Top-down keeps. On a player's device something stands up only where all the fog under it is revealed to them, and anything else lies flat under the same fog. On the DM's device a standee on ground the DM's map shows fogged draws dimmed.
+- A screen reader hears each change: "Isometric view.", "Top-down view.", "Following the scene: isometric." and which way the map's top edge faces after a turn.
+
 ## Building maps
 
 The Builder tool is the DM's. Its mode picker shows every mode as an even tile with its icon, and the mode chip in the options row shows the picked mode's icon beside its name where the row has room, or the icon alone where the row needs the room for the mode's own controls. A screen reader says Walls and doors and Heights and stairs for Walls/doors and Heights/stairs, on their tiles, the chip and a key's press. Its modes:
@@ -106,6 +119,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - **Lights**: a tap places a light (Candle, Torch, Lamp, Hooded Lantern, Light or Daylight), up to 100 a scene. Tap one to change its reach, turn it on or off, choose whether walls cast shadows from it, or delete it. Drag one to move it. Players see only the light it gives, never the light itself.
 - **Stamp** places pictures: 46 shipped top-down stamps (trees, stones, foliage, village pieces, furniture and rocks) or any token image in the room's library under the picker's Stamps tab, or the 131 props of its Starter tab: Warlock's Gauntlet ruins, wrecks, bones and trees, Poly Haven furniture and gear rendered from above, and Mark Gosbell's flat greyscale props. A starter prop is placed as a shipped stamp is, with nothing copied into the room. A stamp moves by dragging, turns and resizes by its handles, takes one of 8 tints, flips, comes to the front, duplicates, hides from players, or is deleted. Its tint, flip, front, duplicate, DM only, delete and Done sit in the builder's row, or behind ⋯ where the row has no room, on every screen.
 - The builder's bar has Undo and Redo buttons, the same undo as everywhere else. "Clear the build" in the scene's settings removes all of the build.
+- The builder works top-down: on a device showing Isometric it shows Top-down while open, centered where the selected token is, and Isometric comes back with the next tool.
 
 ## Tokens
 
@@ -195,6 +209,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - A flying token's shadow shows from 5 ft up and drifts down and away as it rises, further for a larger creature. For a player, ground still under the fog counts as level, so a shadow never shows a height the fog hides.
 - On raised ground from the builder, with "Walls and ledges block players' moves" on, a player's walking token crosses an edge only by a stair, while a flier above it passes. A creature sees over a ledge no higher than its eyes, and one in a pit cannot see out.
 - A token left inside the ground after a height change says so and offers "Stand on it".
+- In Isometric (Scenes and maps) raised ground stands up as blocks and pits sink, and a creature stands at its elevation: a flier over its shadow on the ground under it, joined by a thin stem, dashed where a very high flier is drawn lower to stay on screen.
 
 ## Measuring and movement
 
@@ -219,6 +234,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - Players open and close unlocked doors that their own token can reach, with a tap on the door or "Open door" in the token's action bar. A locked door answers "It's locked."
 - The creature that opens a door, which sets off a trap on it: the token whose action bar opened it, else for a tap the token selected when the door was tapped (any on the scene for the DM, the player's own that reaches it for a player), else the player's nearest own token that reaches it. The DM with nothing selected opens it from afar and sets off nothing.
 - Walls block areas of effect. Walls, closed doors and pillars block sight.
+- In Isometric walls stand in stone, doors in wood and windows as panes. A tap on a door reaches it by its standing piece or by its line on the ground, and an open door lies flat.
 
 ## Fog and vision
 
@@ -229,6 +245,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
 - Monsters and labels standing fully under the fog never reach players. Player characters always stay visible to the party.
 - A creature a player drags under the fog vanishes for them, with a note saying so.
 - "View as a player" shows the DM exactly what a chosen player sees, their own sight and map included, and no whispers between players.
+- In Isometric nothing stands up over a player's fog: something stands only where all the fog under it is revealed to that player, and lies flat under the fog otherwise. On a scene where each player sees for themselves, that is the player's own map. The DM's standees on ground the DM's map shows fogged, the party's explored ground counting as revealed, draw dimmed. The Fog tool shows Top-down while in use.
 - **Party vision.** The "Party vision" switch in a scene's Vision settings makes players see only what their characters see. The same settings set the light to Bright, Dim or Dark. Every player then sees what any party creature sees.
   - Walls, closed doors, secret doors not yet found, pillars, and raised ground above a creature's eyes block sight. Windows do not.
   - Darkvision, Blindsight and Truesight come from the creature's senses. Darkvision shows darkness in gray.
@@ -441,9 +458,9 @@ Show the players' view of the map on a TV at the table, with nothing else on scr
 - The display shows the players' scene as players see it: the map, the fog, party vision (on a scene where each player sees for themselves, only what creatures that share sight see), tokens, shared areas, drawings, pins (except those linked to a page not every player can read), and pings and rulers. It shows no bars, panels, chat or log, roll requests or Initiative strip, and the room sends it no log lines at all.
 - It also shows the pause screen during a blackout, handouts shown to everyone, the X-card, and "Waiting for the DM to choose a scene" when there is none.
 - A handout of several pages shows one page at a time, with its page number. The arrow and page keys step through it, and a tap shows Previous page, Next page and Close.
-- A tap, a click or any key shows a menu for 5 seconds: Follow the DM, Fit the map, "Show whose turn it is" (off at first), Text size (85% to 130% for the names, chips and badges on the map), Full screen, and Leave. The display remembers these choices. While the X-card or a one-page handout is open, a tap closes it instead.
+- A tap, a click or any key shows a menu for 5 seconds: Follow the DM, Fit the map, "Show whose turn it is" (off at first), Text size (85% to 130% for the names, chips and badges on the map), View (Follow the scene, Top-down or Isometric, and Turn left and Turn right in Isometric), Full screen, and Leave. The display remembers these choices, its view apart from a member's in the same browser. While the X-card or a one-page handout is open, a tap closes it instead.
 - Full screen works on the display as in the room: in Chrome and Edge, Escape still closes the menu or a handout, and holding Escape leaves full screen.
-- **Follow the DM** shows the part of the map a DM device shows, scaled to the TV. Turn on "Show my view on the table display" on that DM device. It follows only while the DM views the players' scene. Follow me, Bring everyone here and Look here move it too.
+- **Follow the DM** shows the part of the map a DM device shows, scaled to the TV, in whichever view the display shows. A DM in Isometric is followed by the ground under their view, raised ground included. Turn on "Show my view on the table display" on that DM device. It follows only while the DM views the players' scene. Follow me, Bring everyone here and Look here move it too.
 - **Fit the map** fits what players can see, the revealed ground and the party's tokens, and fits again when a reveal adds more.
 - A display can't move or change anything, and it is not on the player list. A room can have up to 4.
 - The DM devices list shows each display with Sign out. Changing the player password signs every display out. Leave, pressed twice on the display, signs it out for good. A display that has not connected for 30 days is signed out. A display shows one room: pairing it with another room, in another tab or window, signs it out of the first, which then says it now shows another room.
@@ -472,10 +489,11 @@ Menu, This device holds settings kept on this device alone:
 - **Roll animation**: your own rolls in the Dice panel throw dice that land on the result in about a second. On at first. Its help says so where Low power or the device keeps the dice from showing.
 - **Dice**: eight dice sets for your throws, Ivory (the default), Obsidian, Ruby, Sapphire, Emerald, Amethyst, Gold and Steel, each a d20 showing 20 in its colors and finish. The choice is kept on this device, and nobody else sees it. Off with the Roll animation switch.
 - "Show the shortcuts": the keys, and what a key or another mouse button does with a click, a drag or the wheel. With a keyboard, each single key can be changed there for this device.
+- The view this device shows the map in, Top-down or Isometric, is picked from the top bar's View button (Scenes and maps) and kept on this device for each room.
 
 ## Shortcuts
 
-`?` shows the list for your role, and so does Menu, This device, "Show the shortcuts". It lists the keys, then what a key or another mouse button does with a click, a drag or the wheel (on a device with a mouse or trackpad), then the keys that work inside one part of the room. A plain click, tap, drag or pinch is described with its feature above. The tables below list the default keys. On a device with a keyboard, Change in the list gives any single key of the Keys table another letter, digit or symbol, kept on that device alone, and Reset all keys brings the defaults back.
+`?` shows the list for your role, and so does Menu, This device, "Show the shortcuts". It lists the keys, then what a key or another mouse button does with a click, a drag or the wheel (on a device with a mouse or trackpad), then the keys that work inside one part of the room. A plain click, tap, drag or pinch is described with its feature above. The tables below list the default keys. On a device with a keyboard, Change in the list gives any single key of the Keys table another letter, digit or symbol, kept on that device alone, and Reset all keys brings the defaults back. A key you gave a shortcut stays yours when a new shortcut comes with that key as its default: the new one shows "No key" until you change it or press its Reset, which takes the key back and returns yours to its default.
 
 ### Keys
 

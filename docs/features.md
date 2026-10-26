@@ -142,6 +142,9 @@ Tiers:
   - Built in v1 wave 3. The builder's Stamp mode places pictures from a picker. It ships 46 stamps in the top-down look the project owner chose on 2026-10-14: Prime_8's trees and stones, Liosan's foliage and village elements, and Poly Haven furniture and rocks rendered from above, every author credited. There is no throne or altar.
   - The picker also offers any token image in the room's library, for anything the shipped set lacks. That is the design's recommendation, which the project owner approved on 2026-10-14.
   - A placed stamp turns, resizes, takes one of 8 tints, flips, comes to the front, duplicates, hides from players or is deleted. Players never receive a hidden stamp, or one fully under the fog.
+- An isometric view of the board, the project owner's request of 2026-10-26: "Also if possible adding an option for an isometric view of the board would be great wherever that fits in".
+  - Built in the isometric view run (docs/design-v1-isometric-view.md). Each device picks Follow the scene, Top-down or Isometric from the View button beside Fit, for the whole room, and the DM sets each scene's Suggested view. The view turns in quarter steps, with I, Q and E on a keyboard. Creatures stand up as standees, and raised ground, walls and doors stand with the builder's textures.
+  - It is a view, never a change to the map: rules, distances and what each player is sent stay as in Top-down, and nothing stands over a player's fog. The map builder, Fog, Line up grid and Traps show Top-down while in use.
 
 **Later**
 
@@ -684,7 +687,7 @@ Built in v1 wave 7 (docs/design-v1-dice.md), at the project owner's request of 2
 - **Full character sheet builder.** D&D Beyond does this well. Tokens link to it instead.
 - **D&D Beyond import.** Moved into the features on 2026-10-17 (section 15, stat blocks for player characters), best effort. There is no public API, so the server fetches only on a member's tap, only a character its owner made public, keeps no copy and reads no text, and an operator can turn the link import off.
 - **Macros, scripting and a plugin system.** Plugins are Foundry's biggest pain point. Features are built in instead.
-- **Hex and isometric grids.** Every rule in the app, from movement to areas of effect, is built on squares.
+- **Hex grids.** Every rule in the app, from movement to areas of effect, is built on squares.
 - **Native apps.** The installable web app covers phones and tablets.
 - **Non-SRD monsters and art** (Beholder, Mind Flayer and similar). The official sourcebooks are copyrighted and not openly licensed, so there is no legitimate source to ship them from. The project owner chose the custom monster editor (section 15) for monsters from books a group owns. Openly licensed third-party bestiaries (Tome of Beasts and similar) were offered and not chosen.
 
