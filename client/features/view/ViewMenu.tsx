@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { buttonLook } from "../../components/looks.ts";
 import { Help } from "../../components/Panel.tsx";
+import { SheetDialog } from "../tokens/SheetDialog.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { turned, type View, type ViewKind } from "../../lib/view.ts";
@@ -228,6 +229,19 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boo
       {reason ? <Help id={reasonId}>{reason}</Help> : null}
       <ViewVoice />
     </div>
+  );
+}
+
+/**
+ * The View menu as a bottom sheet, a centered card from 600 px up: the
+ * phone's View button opens it, and the room's menu's View row where the
+ * narrowest phone's bar folded the button away.
+ */
+export function ViewSheetDialog(props: { choice: ViewChoiceState; opener?: RefObject<HTMLElement | null>; onClose(): void }) {
+  return (
+    <SheetDialog title={VIEW_GROUP} opener={props.opener} onClose={props.onClose} width={theme.layout.dialog.sm}>
+      <ViewMenuBody choice={props.choice} />
+    </SheetDialog>
   );
 }
 

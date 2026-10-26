@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useStore } from "zustand";
 import { Button } from "../components/Button.tsx";
 import { Icon, type IconName } from "../components/Icon.tsx";
 import { Row } from "../components/Row.tsx";
@@ -9,11 +10,14 @@ import { useJobActive } from "../features/handouts/pdf/live.ts";
 import { joinLinkToShare } from "../features/dm/shareLink.ts";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import { usePanelHeader, type PanelProps } from "../features/panels.ts";
+import { VIEW_NAMES, viewFoldSlot } from "../features/view/choice.ts";
+import { useRoomViewChoice, ViewSheetDialog } from "../features/view/ViewMenu.tsx";
 import { api } from "../lib/api.ts";
 import { fullscreenSupported } from "../lib/fullscreen.ts";
 import { navigate } from "../lib/navigation.ts";
 import { formatRoomId } from "../lib/roomId.ts";
 import { theme } from "../lib/theme.ts";
+import { useScoped } from "../state/scope.ts";
 import { useRoomView } from "../state/view.ts";
 import AboutPanel from "./AboutPanel.tsx";
 import MembersPanel from "./MembersPanel.tsx";
@@ -82,6 +86,7 @@ export default function MenuPanel(props: PanelProps) {
           {copied ? (share.withPassword ? "Copied, with the password" : "Copied") : share.label}
         </Button>
       </div>
+      <ViewRow />
       <MenuItem icon="group" title="Members" detail={role === "dm" ? "Who is here, kicking, the player password and DM devices." : "Who is here and who is online."} page="members" onClick={() => setPage("members")} />
       {role === "dm" ? <MenuItem icon="settings" title="Room settings" detail="Movement, HP, combat, distance and backups." page="settings" onClick={() => setPage("settings")} /> : null}
       <MenuItem
@@ -170,6 +175,29 @@ function useDmPlayerLink(roomId: string, dm: boolean, shown: boolean): string | 
     };
   }, [roomId, dm, shown, accessVersion]);
   return link;
+}
+
+/**
+ * The View row, while the narrowest phone's top bar has folded its View
+ * button away (features/view/choice.ts viewFoldSlot, D-261026-12): it
+ * opens the same View sheet the button does, over the menu.
+ */
+function ViewRow() {
+  const folded = useStore(useScoped(viewFoldSlot), (s) => s.folded);
+  const choice = useRoomViewChoice();
+  const [open, setOpen] = useState(false);
+  if (!folded) return null;
+  return (
+    <>
+      <MenuItem
+        icon={choice.shown.kind === "isometric" ? "viewIsometric" : "viewTopDown"}
+        title="View"
+        detail={`Showing ${VIEW_NAMES[choice.shown.kind]} on this device. Follow the scene, Top-down or Isometric, and turning the map.`}
+        onClick={() => setOpen(true)}
+      />
+      {open ? <ViewSheetDialog choice={choice} onClose={() => setOpen(false)} /> : null}
+    </>
+  );
 }
 
 /**

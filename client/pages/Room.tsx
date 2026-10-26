@@ -75,7 +75,7 @@ import { popoverSlot } from "../components/popoverRules.ts";
 import { toolbarSlot, toolChanged, toolVoiceSlot, tuckEvent } from "../state/toolbar.ts";
 import { useDropHpDraftsOnSelect } from "../features/tokens/hpDraft.ts";
 import { useClearStatBlockOnSelect } from "../features/tokens/statBlockOpen.ts";
-import { isoOffered } from "../features/view/choice.ts";
+import { isoOffered, viewFoldSlot } from "../features/view/choice.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { useBackClose } from "../lib/backClose.ts";
 import { useWakeLock } from "../lib/wakeLock.ts";
@@ -1357,11 +1357,11 @@ function MapArea(props: {
  * a player's does, again until the layout is wider: on a 320 px phone at
  * 130% the whole chip pushed Fit off the screen. Once Isometric is offered
  * (features/view/choice.ts isoOffered), where a phone's row still
- * overflows, its gaps tighten from 6 px to 2, and then a DM's Redo leaves
- * it, each again until the layout is wider: with the View button there, a
- * 320 px phone at 130% had no room for Fit (Undo stays, and Draw's and the
- * builder's options keep a Redo). Until then the row gives way as it always
- * has. A DM's row from 900 px up
+ * overflows, its gaps tighten from 6 px to 2, and then the View button
+ * folds into the room's menu as its "View" row (D-261026-12), each again
+ * until the layout is wider: with the View button there, a 320 px phone at
+ * 130% had no room for Fit. Undo and Redo never leave (M2 below). Until
+ * Isometric is offered the row gives way as it always has. A DM's row from 900 px up
  * checks too, since Undo and Redo sit in it on every layout
  * (docs/design-v1-layout-hierarchy.md M2): there the strip stays, the chip
  * gives way to its dot first, then Full screen leaves the bar, then the
@@ -1407,9 +1407,12 @@ function TopBar(props: {
   // On a phone, the width at which the row still overflowed with the chip's dot: up to it, the gaps tighten.
   const [tightUpTo, setTightUpTo] = useState(0);
   const tight = isoOffered && props.compact && width <= tightUpTo;
-  // And the width at which a DM's row still overflowed with tight gaps: up to it, Redo leaves the bar.
-  const [redoOffUpTo, setRedoOffUpTo] = useState(0);
-  const redo = !(isoOffered && props.compact && role === "dm" && width <= redoOffUpTo);
+  // And the width at which the row still overflowed with tight gaps: up to it, the View button folds into the room's menu.
+  const [viewFoldUpTo, setViewFoldUpTo] = useState(0);
+  const viewFolded = isoOffered && props.compact && props.canFit && width <= viewFoldUpTo;
+  const fold = useScoped(viewFoldSlot);
+  useLayoutEffect(() => fold.setState({ folded: viewFolded }), [fold, viewFolded]);
+  useEffect(() => () => fold.setState({ folded: false }), [fold]);
   // From 900 px up, the width at which the row still overflowed with the chip's dot: up to it, the Phase menu leaves the bar.
   const [phaseOffUpTo, setPhaseOffUpTo] = useState(0);
   const phaseMenu = !props.compact && width > phaseOffUpTo;
@@ -1429,14 +1432,14 @@ function TopBar(props: {
     const tuck = last ? Math.max(0, -parseFloat(getComputedStyle(last).marginRight) || 0) : 0;
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     if (overflow <= 0) return;
-    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then on a phone the gaps' room and then Redo, then Full screen, which the Menu and a key still reach, then the Phase menu.
+    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu.
     if (measured) recordOverflow(layoutWidth(), overflow);
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
     else if (isoOffered && props.compact && !tight) setTightUpTo(layoutWidth());
-    else if (isoOffered && role === "dm" && props.compact && redo) setRedoOffUpTo(layoutWidth());
+    else if (isoOffered && props.compact && props.canFit && !viewFolded) setViewFoldUpTo(layoutWidth());
     else if (fullscreen) setFullscreenOffUpTo(layoutWidth());
     else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
-  }, [checks, measured, recordOverflow, role, dmDot, props.compact, tight, redo, fullscreen, phaseMenu]);
+  }, [checks, measured, recordOverflow, role, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
@@ -1501,11 +1504,12 @@ function TopBar(props: {
           </Chip>
         ) : null}
         <div style={{ flex: 1 }} />
-        {props.undo ? <UndoButtons redo={redo} /> : null}
+        {/* Once Isometric is offered, View or Fit always follows them on a scene, so they keep their whole width. */}
+        {props.undo ? <UndoButtons tuck={!(isoOffered && props.canFit)} /> : null}
         {phaseMenu ? <PhaseMenu /> : null}
         {props.placement === "bar" ? <InitiativeStrip placement="bar" notice={notice} stripRef={setStrip} /> : null}
         {props.canFit && role === "player" ? <FindButton openSheet={props.openSheet} /> : null}
-        {props.canFit && isoOffered ? <ViewButton onOpen={setViewOpen} /> : null}
+        {props.canFit && isoOffered ? <ViewButton onOpen={setViewOpen} folded={viewFolded} /> : null}
         {props.canFit ? <FitButton /> : null}
         {fullscreen ? <FullscreenButton /> : null}
       </div>

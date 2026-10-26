@@ -10,9 +10,8 @@ import { uiScale } from "../features/device/settings.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { findCamera, findRect, nextOwnToken, sheetCover, type OpenSheet } from "../features/find/findToken.ts";
 import { badgeText } from "../features/log/unread.ts";
-import { SheetDialog } from "../features/tokens/SheetDialog.tsx";
 import { VIEW_GROUP, VIEW_TIP, viewButtonLabel } from "../features/view/choice.ts";
-import { useRoomViewChoice, useViewVoice, ViewMenuBody, ViewVoice, type ViewChoiceState } from "../features/view/ViewMenu.tsx";
+import { useRoomViewChoice, useViewVoice, ViewMenuBody, ViewSheetDialog, ViewVoice, type ViewChoiceState } from "../features/view/ViewMenu.tsx";
 import { XCardButton } from "../features/xcard/XCardButton.tsx";
 import type { Turn } from "../lib/view.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
@@ -224,18 +223,19 @@ export function PauseScreen() {
  * The DM's Undo and Redo, one click or tap away in the top bar on every
  * layout (docs/design-v1-layout-hierarchy.md M2): Undo is used every
  * scene, and a DM with a mouse had only the DM panel's copy or Ctrl+Z.
- * Redo leaves (`redo` false) where a phone's row has no room even with the
- * chip as its dot, as on a 320 px phone at 130% with the View button.
+ * They tuck into the bar's padding as its last button would. `tuck` false
+ * keeps Redo whole where a button follows at a phone's tight gap, which
+ * overlapped its last 6 px.
  * They undo this member's own changes (design 7.7), and the server
  * answers an empty stack with a notice, so both stay enabled: knowing the
  * depth here would need a new field on the socket for each member.
  */
-export function UndoButtons(props: { redo?: boolean }) {
+export function UndoButtons(props: { tuck?: boolean }) {
   const actions = useRoomActions();
   return (
-    <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>
+    <span style={{ flex: "none", display: "flex", marginRight: props.tuck === false ? 0 : -theme.space(2) }}>
       <IconButton label="Undo" title="Undo your last change" draw="undo" onClick={() => actions.undo()} />
-      {props.redo === false ? null : <IconButton label="Redo" title="Redo what you undid" draw="redo" onClick={() => actions.redo()} />}
+      <IconButton label="Redo" title="Redo what you undid" draw="redo" onClick={() => actions.redo()} />
     </span>
   );
 }
@@ -304,12 +304,15 @@ function IconButton(props: {
  * up and a bottom sheet on a phone. `onOpen` hears whether the popover is
  * open, so the bar can stand over the notices while it is
  * (docs/design-v1-tool-options.md 7.6). It also says each change of the
- * view in the polite status, whatever made it.
+ * view in the polite status, whatever made it. `folded`, on the narrowest
+ * phones, leaves only the status, and the room's menu holds the View row
+ * (D-261026-12).
  */
-export function ViewButton(props: { onOpen?(open: boolean): void }) {
+export function ViewButton(props: { onOpen?(open: boolean): void; folded?: boolean }) {
   const choice = useRoomViewChoice();
   useViewVoice(choice);
   const wide = useLayoutSize().width >= theme.layout.wideMinWidth;
+  if (props.folded) return <ViewVoice />;
   // No tuck into the bar's padding, as the last button has: Fit always follows it, and a phone's 6 px gap would leave the two overlapping.
   return (
     <span style={{ flex: "none", display: "flex" }}>
@@ -370,9 +373,7 @@ function ViewSheet(props: { choice: ViewChoiceState }) {
         }}
       />
       {open ? (
-        <SheetDialog title={VIEW_GROUP} opener={opener} onClose={() => setOpen(false)} width={theme.layout.dialog.sm}>
-          <ViewMenuBody choice={props.choice} />
-        </SheetDialog>
+        <ViewSheetDialog choice={props.choice} opener={opener} onClose={() => setOpen(false)} />
       ) : (
         <ViewVoice />
       )}

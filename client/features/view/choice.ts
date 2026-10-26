@@ -188,6 +188,13 @@ export function sayView(scope: RoomScope, text: string): void {
 }
 
 /**
+ * Whether the narrowest phone's top bar folded its View button into the
+ * room's menu (pages/Room.tsx TopBar, D-261026-12), so the menu shows a
+ * "View" row that opens the same sheet (panels/MenuPanel.tsx).
+ */
+export const viewFoldSlot = scopeSlot<StoreApi<{ folded: boolean }>>(() => createStore(() => ({ folded: false })));
+
+/**
  * "View as a player" keeps a view of its own, never saved, as nothing in
  * it is (features/dm/PlayerPreview.tsx): the preview's Room page holds its
  * pick and turns here, in its own scope, and leaves the DM's pick, turns and

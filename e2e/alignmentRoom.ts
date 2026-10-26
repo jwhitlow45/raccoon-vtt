@@ -3792,15 +3792,22 @@ async function openDmPanel(page: Page, title: string): Promise<Locator> {
 async function isoTopBar(sweep: Sweep, page: Page, screen: string): Promise<void> {
   const view = page.getByRole("button", { name: /^View: / });
   const fit = page.getByRole("button", { name: "Fit the map to the screen" });
-  for (const [what, button] of [
-    ["View", view],
+  // Where the bar folded the View button into the room's menu, its other buttons stay whole, Undo and Redo always (D-261026-12).
+  const folded = (await view.count()) === 0;
+  const dm = (await page.getByRole("button", { name: "Undo", exact: true }).count()) > 0;
+  const whole: [string, Locator][] = [
     ["Fit", fit],
-  ] as const) {
+    ...(folded ? [] : [["View", view] as [string, Locator]]),
+    ...(dm ? (["Undo", "Redo"] as const).map((name): [string, Locator] => [name, page.getByRole("button", { name, exact: true })]) : []),
+  ];
+  for (const [what, button] of whole) {
     if (!(await wholeInReach(button))) sweep.lines.push(`${sweep.at} ${screen}: ${what} is not whole on the screen, or another control covers part of it`);
   }
-  await sweep.measure(page, screen, view);
-  const [a, b] = [await view.boundingBox(), await fit.boundingBox()];
-  if (a && b && Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) > LIMIT_PX) sweep.lines.push(`${sweep.at} ${screen}: View's middle ${a.y + a.height / 2} is off Fit's ${b.y + b.height / 2}`);
+  const lead = folded ? fit : view;
+  const beside = !folded ? fit : dm ? page.getByRole("button", { name: "Undo", exact: true }) : page.getByRole("button", { name: "Find my token" });
+  await sweep.measure(page, screen, lead);
+  const [a, b] = [await lead.boundingBox(), await beside.boundingBox()];
+  if (a && b && Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) > LIMIT_PX) sweep.lines.push(`${sweep.at} ${screen}: the bar's buttons are off one line, ${a.y + a.height / 2} and ${b.y + b.height / 2}`);
 }
 
 /** A line for each view name in the help that breaks over lines: "Top-down" broke at its hyphen at 320 px and 130% (ISO5-OPUS-5). */
@@ -3813,7 +3820,7 @@ async function viewNameWhole(root: Locator, at: string): Promise<string[]> {
 
 /** iso5-a, last in alignment-icons.e2e.ts. */
 export function isoChoiceTests(): void {
-  test(`iso5-a. the top bar with the View button, for the DM and for Pat, the View menu in Top-down and in Isometric, and Scene settings' Suggested view, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-isometric-view.md 8)`, async () => {
+  test(`iso5-a. the top bar with the View button, for the DM and for Pat, or the room menu's View row where the bar folds it, the View menu in Top-down and in Isometric, and Scene settings' Suggested view, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-isometric-view.md 8)`, async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     await pat.addInitScript(ISO_OFFER);
     const lines: string[] = [];
@@ -3829,13 +3836,23 @@ export function isoChoiceTests(): void {
       await openAt(page, at.size, at.scale);
       await waitFor("the DM's snapshot", () => dmSocket.state);
       const menu = page.getByRole("dialog", { name: "View" });
+      // On the narrowest phones the View button folds into the room's menu as its View row (D-261026-12).
+      const folded = (await page.getByRole("button", { name: /^View: / }).count()) === 0;
       const open = async () => {
-        await page.getByRole("button", { name: /^View: / }).click();
+        if (folded) {
+          const roomMenu = await openDmPanel(page, "Menu");
+          const row = roomMenu.getByRole("button", { name: /^View/ });
+          // The menu's panel loads as it opens.
+          await row.waitFor();
+          await sweep.measure(page, "iso5-menu-row", row);
+          await row.click();
+        } else await page.getByRole("button", { name: /^View: / }).click();
         await menu.waitFor();
       };
       const close = async () => {
         await page.keyboard.press("Escape");
         await menu.waitFor({ state: "detached" });
+        if (folded) await closeSheets(page);
       };
       await isoTopBar(sweep, page, "iso5-top-bar");
       await open();
