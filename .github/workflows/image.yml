@@ -129,7 +129,7 @@ jobs:
           REVISION: ${{ needs.check.outputs.sha }}
         run: |
           docker buildx build --platform linux/arm64 \
-            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" .
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
 
   # The smoke test of a run that does not publish. A tag run does the same
   # inside its publish job, on the image it then pushes.
@@ -150,7 +150,7 @@ jobs:
           REVISION: ${{ needs.check.outputs.sha }}
         run: |
           docker buildx build --platform linux/amd64 \
-            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --load --tag raccoon-vtt:smoke .
           docker image inspect raccoon-vtt:smoke --format '{{json .Config.Labels}}' | jq .
       - name: Smoke test
@@ -215,7 +215,7 @@ jobs:
       - name: Build for linux/amd64
         run: |
           docker buildx build --platform linux/amd64 \
-            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --load --tag raccoon-vtt:smoke --metadata-file "$RUNNER_TEMP/load.json" .
           config=$(jq -r '."containerimage.config.digest"' "$RUNNER_TEMP/load.json")
           manifest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/load.json")
@@ -243,7 +243,7 @@ jobs:
           trap 'docker logout docker.io' EXIT
           printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
           docker buildx build --platform linux/amd64,linux/arm64 \
-            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --provenance mode=max --sbom true \
             --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
             --metadata-file "$RUNNER_TEMP/push.json" .
