@@ -1,5 +1,6 @@
 import { LIMITS, litTokenLights } from "#shared/limits.ts";
 import type { LightLevel, MapPhase, RoomState, Scene, SceneVision } from "#shared/model.ts";
+import type { ClientOp, OpOf } from "#shared/protocol.ts";
 
 /**
  * The rules of a scene's Vision settings (docs/design-v1-maps-vision.md
@@ -26,6 +27,72 @@ export function visionPatch(scene: Pick<Scene, "vision">, on: boolean): SceneVis
 /** The `vision` patch that sets the light level, leaving party vision as it is. */
 export function lightPatch(scene: Pick<Scene, "vision">, light: LightLevel): SceneVision {
   return { on: scene.vision?.on === true, light };
+}
+
+/** A `vision` patch as the protocol takes it, which may name `perPlayer` (docs/design-v1-per-player-vision.md 6.7). */
+export type VisionPatch = NonNullable<OpOf<"scene.update">["patch"]["vision"]>;
+
+/**
+ * The `vision` patch of the Sight row (docs/design-v1-per-player-vision.md
+ * 7.1): Per player or Whole party, leaving party vision and the light as
+ * they are. The other two patches name no `perPlayer`, so the scene keeps
+ * what it has (the merge rule of 6.7).
+ */
+export function sightPatch(scene: Pick<Scene, "vision">, perPlayer: boolean): VisionPatch {
+  return { on: scene.vision?.on === true, light: lightOf(scene), perPlayer };
+}
+
+export type SightChoice = "party" | "player";
+
+/** The Sight row's choice for a scene: Per player while `perPlayer` is stored, whatever party vision says. */
+export function sightOf(scene: Pick<Scene, "vision">): SightChoice {
+  return scene.vision?.perPlayer === true ? "player" : "party";
+}
+
+/** Whether the Sight row shows: while party vision is on, or the scene is a per-player one (7.1). */
+export function sightShown(scene: Pick<Scene, "vision">): boolean {
+  return scene.vision?.on === true || scene.vision?.perPlayer === true;
+}
+
+export const SIGHT_CHOICES: readonly { value: SightChoice; label: string; help: string }[] = [
+  { value: "party", label: "Whole party", help: "Every player sees what any party creature sees, and the party shares one map." },
+  {
+    value: "player",
+    label: "Per player",
+    help: `Each player sees only what their own creatures see, and creatures that share sight with the party. Each player keeps their own map of where they have been. At most ${LIMITS.sightHoldersPerScene} players per scene.`,
+  },
+];
+
+/** The Party vision switch's help while it is on (7.1): on a per-player scene each player sees by their own creatures. */
+export function visionOnHelp(scene: Pick<Scene, "vision">): string {
+  return scene.vision?.perPlayer === true
+    ? "On: each player sees only what their own creatures see, by their senses and the light around them."
+    : "On: players see only what their characters see, by their own senses and the light around them.";
+}
+
+/**
+ * What a scene's Vision settings wait on (7.1): `vision`, a change the
+ * Party vision switch or the Light control sent, which make the switch
+ * busy as before, and `sight`, the last change of the Sight row or of who
+ * sees for themselves, which make the row and the list busy instead, and
+ * which way it goes. Each only for its own changes, so a tap on one never
+ * holds the other.
+ */
+export function visionPending(pending: readonly { op: ClientOp }[], sceneId: string): { vision: boolean; sight: SightChoice | null } {
+  let vision = false;
+  let sight: SightChoice | null = null;
+  for (const { op } of pending) {
+    if (op.t === "vision.holders" && op.sceneId === sceneId) sight = "player";
+    if (op.t !== "scene.update" || op.sceneId !== sceneId || op.patch.vision === undefined) continue;
+    if (op.patch.vision.perPlayer === undefined) vision = true;
+    else sight = op.patch.vision.perPlayer ? "player" : "party";
+  }
+  return { vision, sight };
+}
+
+/** The Sight row's working line, after about 200 ms (7.1): what the server is working out for the change on its way. */
+export function sightWorkingText(towardPerPlayer: boolean): string {
+  return towardPerPlayer ? "Working out what each player sees…" : "Working out what the party sees…";
 }
 
 /**

@@ -1,9 +1,10 @@
-import { useMemo } from "react";
-import type { LightLevel, Scene } from "#shared/model.ts";
+import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import type { LightLevel, RoomState, Scene } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { OpOf } from "#shared/protocol.ts";
 import { Button } from "../../components/Button.tsx";
-import { useDelayed } from "../../components/Loading.tsx";
+import { Checkbox } from "../../components/Checkbox.tsx";
+import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
@@ -12,9 +13,26 @@ import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { Select } from "../scenes/controls.tsx";
+import { HOLDERS_UNDER, holderRows, holdersAfter, lendsText, sharedOnlyText, unsharedMounts, untickQuestion } from "./holders.ts";
 import { lightText } from "./presets.ts";
 import { sensesShort } from "./senses.ts";
-import { carriedLightsNote, fogNote, LIGHT_LEVELS, lightOf, lightPatch, phaseWithLight, visionPatch } from "./settings.ts";
+import {
+  carriedLightsNote,
+  fogNote,
+  LIGHT_LEVELS,
+  lightOf,
+  lightPatch,
+  phaseWithLight,
+  SIGHT_CHOICES,
+  sightOf,
+  sightPatch,
+  sightShown,
+  sightWorkingText,
+  visionOnHelp,
+  visionPatch,
+  visionPending,
+  type SightChoice,
+} from "./settings.ts";
 import { noSightText } from "./sources.ts";
 import { usePartyReport } from "./usePartyReport.ts";
 
@@ -32,6 +50,11 @@ const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
  * Turning vision on makes the server work out what the party sees, which
  * can take a moment on a large scene, so the switch shows it is busy and
  * says so while the op is on its way.
+ *
+ * Under the switch, the Sight row makes the scene per player and back
+ * (docs/design-v1-per-player-vision.md 7.1), and on a per-player scene
+ * the list of who sees for themselves follows it. Each waits only on its
+ * own changes.
  */
 export function VisionSettings(props: { scene: Scene }) {
   const { scene } = props;
@@ -39,7 +62,9 @@ export function VisionSettings(props: { scene: Scene }) {
   const update = (patch: OpOf<"scene.update">["patch"]) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
   const on = scene.vision?.on === true;
   const light = lightOf(scene);
-  const working = useRoomView((s) => s.pending.some((p) => p.op.t === "scene.update" && p.op.sceneId === scene.id && p.op.patch.vision !== undefined));
+  const working = useRoomView((s) => visionPending(s.pending, scene.id).vision);
+  const sightWorking = useRoomView((s) => visionPending(s.pending, scene.id).sight);
+  const perPlayer = scene.vision?.perPlayer === true;
   const showWorking = useDelayed(working);
   const fog = fogNote(scene);
   const phases = scene.phases && scene.phases.length >= 2 ? scene.phases : null;
@@ -52,7 +77,7 @@ export function VisionSettings(props: { scene: Scene }) {
         label="Party vision"
         help={
           on
-            ? "On: players see only what their characters see, by their own senses and the light around them."
+            ? visionOnHelp(scene)
             : "Off: players see everything you reveal. Turn it on for dynamic lighting: players see what their characters see, and remember what they explored. It turns fog on too."
         }
         checked={on}
@@ -60,6 +85,8 @@ export function VisionSettings(props: { scene: Scene }) {
         onChange={(next) => update({ vision: visionPatch(scene, next) })}
       />
       {showWorking ? <Help>Working out what the party sees…</Help> : null}
+      {sightShown(scene) ? <SightRow scene={scene} working={sightWorking} /> : null}
+      {perPlayer ? <HolderList sceneId={scene.id} busy={sightWorking !== null} /> : null}
       {on ? fog.warning ? <Note>{fog.text}</Note> : <Help>{fog.text}</Help> : null}
       {on && !scene.fogEnabled ? (
         <div>
@@ -97,18 +124,207 @@ export function VisionSettings(props: { scene: Scene }) {
         </SettingRow>
       ) : null}
 
-      {on ? <Sources sceneId={scene.id} /> : null}
+      {on ? <Sources sceneId={scene.id} perPlayer={perPlayer} /> : null}
+      {perPlayer ? <MountNotes sceneId={scene.id} /> : null}
     </Section>
   );
 }
 
-/** The party creatures on the scene, what each sees and carries, and whether it lends sight. */
-function Sources(props: { sceneId: string }) {
+/**
+ * Sight: Whole party or Per player (7.1), a radio group named by the row
+ * and described by the chosen option's help. While its change or the
+ * list's is on the way it refuses another, and after the shared delay
+ * its help says what the server is working out, as a polite status, so
+ * focus stays on the option through it all.
+ */
+function SightRow(props: { scene: Scene; working: SightChoice | null }) {
+  const { scene, working } = props;
+  const actions = useRoomActions();
+  const showWorking = useDelayed(working !== null);
+  const choice = sightOf(scene);
+  const help = SIGHT_CHOICES.find((c) => c.value === choice)?.help;
+  return (
+    <SettingRow name="Sight" wide>
+      {(ids) => (
+        <div aria-busy={working !== null ? true : undefined} style={{ width: "100%", minWidth: 0 }}>
+          <Segmented<SightChoice>
+            labelledBy={ids.nameId}
+            value={choice}
+            options={SIGHT_CHOICES}
+            onChange={(next) => {
+              if (working !== null || next === choice) return;
+              actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { vision: sightPatch(scene, next === "player") } });
+            }}
+            description={
+              <span role="status">
+                {showWorking && working !== null ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
+                    <Spinner size={theme.icon.sm} />
+                    {sightWorkingText(working === "player")}
+                  </span>
+                ) : (
+                  help
+                )}
+              </span>
+            }
+          />
+        </div>
+      )}
+    </SettingRow>
+  );
+}
+
+/**
+ * Who sees for themselves (7.1): every player of the roster, ticked while
+ * they see and remember for themselves here. A seventh tick is refused on
+ * the device with the server's words, and an untick asks once, since that
+ * player forgets their map of the scene. Focus stays on the box through a
+ * change, its wait and the question, and the question gives it back.
+ */
+function HolderList(props: { sceneId: string; busy: boolean }) {
+  const { sceneId, busy } = props;
+  const actions = useRoomActions();
+  const members = useRoomView((s) => s.view?.members);
+  const holders = useRoomView((s) => s.view?.holders);
+  const rows = useMemo(() => holderRows({ members: members ?? {}, holders: holders ?? {} }, sceneId), [members, holders, sceneId]);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const [asking, setAsking] = useState<string | null>(null);
+  const boxes = useRef(new Map<string, HTMLInputElement>());
+  const nameId = useId();
+  const underId = useId();
+  const send = (on: string[]) => {
+    setRefusal(null);
+    actions.dispatch({ t: "vision.holders", sceneId, on });
+  };
+  const backTo = (memberId: string) => {
+    setAsking(null);
+    boxes.current.get(memberId)?.focus();
+  };
+  const change = (memberId: string, tick: boolean) => {
+    if (busy) return;
+    if (!tick) {
+      setRefusal(null);
+      setAsking(memberId);
+      return;
+    }
+    setAsking(null);
+    const next = holdersAfter(rows, memberId, true);
+    if ("refused" in next) setRefusal(next.refused);
+    else send(next.on);
+  };
+  return (
+    <div
+      role="group"
+      aria-labelledby={nameId}
+      aria-describedby={underId}
+      aria-busy={busy ? true : undefined}
+      style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0`, minWidth: 0 }}
+    >
+      <span id={nameId} style={{ fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight }}>
+        Who sees for themselves
+      </span>
+      <div style={{ display: "grid", minWidth: 0 }}>
+        {rows.map((row) => (
+          <div key={row.memberId} style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
+            <Checkbox
+              ref={(el) => {
+                if (el) boxes.current.set(row.memberId, el);
+                else boxes.current.delete(row.memberId);
+              }}
+              label={<span style={{ overflowWrap: "anywhere" }}>{row.name}</span>}
+              help={!row.on && row.listed ? sharedOnlyText(row.name) : undefined}
+              checked={row.on}
+              onChange={(tick) => change(row.memberId, tick)}
+            />
+            {asking === row.memberId ? (
+              <UntickQuestion
+                name={row.name}
+                busy={busy}
+                onCancel={() => backTo(row.memberId)}
+                onConfirm={() => {
+                  const next = holdersAfter(rows, row.memberId, false);
+                  if ("on" in next) send(next.on);
+                  backTo(row.memberId);
+                }}
+              />
+            ) : null}
+          </div>
+        ))}
+      </div>
+      <div role="status">{refusal ? <Note>{refusal}</Note> : null}</div>
+      <Help id={underId}>{HOLDERS_UNDER}</Help>
+    </div>
+  );
+}
+
+/** The question an untick asks, under its box, as a polite status. Escape answers no. While another change is on its way, Untick waits. */
+function UntickQuestion(props: { name: string; busy: boolean; onCancel(): void; onConfirm(): void }) {
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    props.onCancel();
+  };
+  return (
+    <div
+      role="group"
+      aria-label={`Untick ${props.name}?`}
+      onKeyDown={onKeyDown}
+      style={{
+        display: "grid",
+        gap: theme.space(2),
+        padding: theme.space(3),
+        marginBottom: theme.space(1),
+        borderRadius: theme.radius.md,
+        border: `${theme.line.border}px solid ${theme.color.border}`,
+        background: theme.color.bg,
+        minWidth: 0,
+      }}
+    >
+      <p role="status" style={{ margin: 0, fontSize: theme.font.body14, lineHeight: theme.leading.body, overflowWrap: "anywhere" }}>
+        {untickQuestion(props.name)}
+      </p>
+      <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
+        <Button size="sm" onClick={props.onCancel}>
+          Cancel
+        </Button>
+        <Button size="sm" variant="primary" busy={props.busy} onClick={props.onConfirm}>
+          Untick
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Riders whose controlled mount not every player sees, so they share no turn (7.1), each with what keeps it. */
+function MountNotes(props: { sceneId: string }) {
+  const view = useRoomView((s) => s.view);
+  const notes = useMemo(() => (view ? unsharedMounts(view, props.sceneId) : []), [view, props.sceneId]);
+  if (notes.length === 0) return null;
+  return (
+    <div style={{ display: "grid", gap: theme.space(1), paddingBottom: theme.space(2) }}>
+      {notes.map((text) => (
+        <Note key={text}>{text}</Note>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The party creatures on the scene, what each sees and carries, and whether it lends sight. On a per-player
+ * scene each lending row says to whom (7.1).
+ */
+function Sources(props: { sceneId: string; perPlayer: boolean }) {
   const report = usePartyReport(props.sceneId, true);
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const members = useRoomView((s) => (props.perPlayer ? s.view?.members : undefined));
+  const holders = useRoomView((s) => (props.perPlayer ? s.view?.holders : undefined));
+  const characters = useRoomView((s) => (props.perPlayer ? s.view?.characters : undefined));
+  // The DM's view holds every owner and the scene's list, all lendsText reads.
+  const owners = useMemo(() => (members ? ({ members, holders: holders ?? {}, characters: characters ?? {} } as unknown as RoomState) : null), [members, holders, characters]);
   const lending = report.rows.filter((r) => r.lends).length;
   return (
-    <SettingRow name="Who lends the party sight" wide>
+    <SettingRow name={props.perPlayer ? "Who lends sight" : "Who lends the party sight"} wide>
       <div style={{ display: "grid", gap: theme.space(2), width: "100%", minWidth: 0 }}>
         {report.rows.length === 0 ? (
           <Note>No party creature is on this scene. Players see only what they explored before.</Note>
@@ -131,7 +347,7 @@ function Sources(props: { sceneId: string }) {
                   Senses: {sensesShort(row.senses, feetPerCell)}. Light: {row.light ? lightText(row.light, feetPerCell) : "none"}.
                 </span>
                 <span style={{ color: row.lends ? theme.color.textMuted : theme.color.warning }}>
-                  {noSightText(row)}
+                  {row.lends && owners ? lendsText(owners, props.sceneId, row.token) : noSightText(row)}
                   {row.lends && row.blinded ? ". Blinded: Blindsight only" : ""}
                 </span>
               </li>
