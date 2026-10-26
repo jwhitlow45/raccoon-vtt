@@ -18,12 +18,14 @@ import type { VBox } from "./pieces.ts";
 /**
  * Where a token's decor lays out: a standee's frame, where its art stands,
  * with the ring under it, or for a creature lying flat a box its size on
- * its footprint's middle (relief/standee.ts, 5.2).
+ * its footprint's middle at the drawn ground under it (relief/standee.ts,
+ * 5.2).
  */
-export function decorPlace(view: View, t: ViewToken, standee: { frame: VBox; ring: VBox } | undefined): { x: number; y: number; ring?: VBox } {
+export function decorPlace(view: View, t: ViewToken, standee: { frame: VBox; ring: VBox } | undefined, ground = 0): { x: number; y: number; ring?: VBox } {
   if (standee) return { x: standee.frame.x0, y: standee.frame.y0, ring: standee.ring };
   const fp = footprint(t);
-  const c = toView(view, { x: t.x + fp.w / 2, y: t.y + fp.h / 2 });
+  // On the drawn ground under it (`ground`, cells), where the ground stage lays its picture.
+  const c = toView(view, { x: t.x + fp.w / 2, y: t.y + fp.h / 2 }, ground);
   return { x: c.x - fp.w / 2, y: c.y - fp.h / 2 };
 }
 

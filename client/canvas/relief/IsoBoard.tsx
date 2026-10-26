@@ -349,7 +349,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
     });
     return same ? prev : (framesRef.current = next);
   }, [standees]);
-  const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id)), [turn, frames]);
+  // A creature lying flat lays out on the drawn ground under it, where the ground stage copies its picture up a seen column.
+  const flatGround = useCallback((t: ViewToken) => drawnFootprintGround(src, occupiedRange(t)) / feet, [src, feet]);
+  const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id), flatGround(t)), [turn, frames, flatGround]);
   const viewPills = useMemo(() => props.text.pills.map((p) => viewPill(p, isometric(turn), groundAt)), [props.text.pills, turn, groundAt]);
   const labelInk = useMemo(
     () => labels.map((l) => mapLabelInk(l, isometric(turn), uprightIds.has(l.id), groundAt(l.x, l.y), measureLabel)),
@@ -437,7 +439,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
                 {items.map((item, i) =>
                   item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!, isoText.get(item.id)),
                 )}
-                {flat.map((t) => props.renderToken(t, PRESS_ONLY))}
+                {flat.map((t) => props.renderToken(t, pressOnly(turn, flatGround(t))))}
               </Group>
             </Group>
           </Layer>
@@ -488,7 +490,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
               props.decorTokens
                 .filter((t) => part !== "plate" || !!isoText.get(t.id)?.plate)
                 .flatMap((t) => {
-                  const at = decorAt(t, byStandee, view, cull, props.keepIds);
+                  const at = decorAt(t, byStandee, view, cull, props.keepIds, flatGround);
                   return at ? [props.renderDecor(t, part, at, isoText.get(t.id))] : [];
                 }),
             )}
@@ -502,7 +504,10 @@ function IsoBoardImpl(props: IsoBoardProps) {
 /** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
 type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox; ring: VBox };
 
-const PRESS_ONLY: IsoToken = { turn: 0, base: 0, ground: 0, drawn: 0, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true };
+/** A flat creature's press area on the relief, on the drawn ground under it (`ground`, cells). */
+function pressOnly(turn: Turn, ground: number): IsoToken {
+  return { turn, base: ground, ground, drawn: ground, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true };
+}
 
 /** One run of relief pieces, drawn by one shape that does not listen. */
 const ReliefRun = memo(function ReliefRun(props: { pieces: StaticPiece[]; dc: { readonly current: DrawContext | null } }) {
@@ -530,9 +535,10 @@ function decorAt(
   view: ReturnType<typeof isometric>,
   cull: VBox,
   keep: ReadonlySet<string>,
+  flatGround: (t: ViewToken) => number,
 ): { x: number; y: number } | null {
   const s = standees.get(t.id);
-  const at = decorPlace(view, t, s);
+  const at = decorPlace(view, t, s, s ? 0 : flatGround(t));
   if (s) return s.keep || meets(s.bounds, cull) ? at : null;
   // A creature lying flat draws its decor above the fog, as Top-down's decor already is (5.2): every token a player holds is partly in sight.
   const fp = footprint(t);

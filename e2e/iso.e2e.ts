@@ -1354,6 +1354,35 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     for (const k of crowd) await ops.send({ t: "token.delete", tokenId: k.id });
   });
 
+  test("ISO-47. a creature lying flat for Pat on a seen 10 ft top takes a press where its picture lies, up on the top", async () => {
+    await pat.bringToFront();
+    const lurker = randomUUID();
+    // A Large on the platform's corner, one sub-cell of its footprint hidden from the players: it lies flat for Pat.
+    await ops.send(tokenOp(lurker, { kind: "monster", name: "Lurker", x: 10, y: 4, size: "large", disposition: "hostile" }));
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 11.75, y: 5.75, w: 0.25, h: 0.25 } }] });
+    await waitFor("the lurker on Pat's page", () => (patSocket.state?.tokens[lurker] ? true : null));
+    await isoOn(pat, 0);
+    await pat.waitForTimeout(400);
+    const hitAt = async (z: number) => {
+      const at = await isoPoint(pat, { x: 10.5, y: 4.5 }, z);
+      return pat.evaluate(([at, id]) => {
+        type Node = { id(): string; getParent(): Node | null };
+        type Stage = { width(): number; listening(): boolean; getLayers(): unknown[]; container(): { getBoundingClientRect(): { left: number; top: number } }; getIntersection(p: { x: number; y: number }): Node | null };
+        const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+        const stage = konva.stages.find((s) => s.width() > 0 && s.listening() && s.getLayers().length === 3);
+        if (!stage) return false;
+        const box = stage.container().getBoundingClientRect();
+        for (let n = stage.getIntersection({ x: at.x - box.left, y: at.y - box.top }); n; n = n.getParent()) if (n.id() === id) return true;
+        return false;
+      }, [at, lurker] as const);
+    };
+    assert.equal(await hitAt(2), true, "a press on the picture up on the 10 ft top takes the lurker");
+    assert.equal(await hitAt(0), false, "where it would lie at 0 takes nothing of it");
+    await shots.take(pat, "iso-47-pat-flat-lurker-on-top");
+    await ops.send({ t: "token.delete", tokenId: lurker });
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 11.75, y: 5.75, w: 0.25, h: 0.25 } }] });
+  });
+
   test("ISO-12. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s page`);
   });

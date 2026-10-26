@@ -91,10 +91,12 @@ describe("token labels in Isometric lay out in view space (docs/design-v1-isomet
     assert.ok(!overlaps(box, px(sb.ring)), `the name ${JSON.stringify(box)} lies on b's ring ${JSON.stringify(px(sb.ring))}`);
   });
 
-  test("a creature lying flat lays its decor out on a box its size on its footprint's middle", () => {
+  test("a creature lying flat lays its decor out on a box its size on its footprint's middle, at the drawn ground under it", () => {
     const t = token("flat", { x: 3, y: 2, size: "large" }) as ViewToken;
     const c = toView(isometric(1), { x: 4, y: 3 });
     assert.deepEqual(decorPlace(isometric(1), t, undefined), { x: c.x - 1, y: c.y - 1 });
+    const up = toView(isometric(1), { x: 4, y: 3 }, 2);
+    assert.deepEqual(decorPlace(isometric(1), t, undefined, 2), { x: up.x - 1, y: up.y - 1 }, "up a seen 10 ft column, with its picture");
   });
 
   test("a map label that stands keeps its ink round the block on its anchor, one lying flat its ink box seen through the view", () => {

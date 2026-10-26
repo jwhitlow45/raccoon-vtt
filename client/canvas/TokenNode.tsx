@@ -1,6 +1,7 @@
 import type Konva from "konva";
 import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Arc, Circle, Ellipse, Group, Image as KImage, Line, Rect, Shape, Text } from "react-konva";
+import { liftInPlane } from "./isoPlace.ts";
 import type { Actor, Effect } from "#shared/model.ts";
 import { shownLife } from "#shared/rules/hp.ts";
 import { boardSizes } from "../lib/boardScale.ts";
@@ -156,7 +157,11 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
     >
       {iso ? (
         iso.pressOnly ? (
-          <FootprintPress w={fp.w} h={fp.h} />
+          // On the drawn ground under it, where the ground stage lays its picture (5.2).
+          <Group {...liftInPlane(iso.turn, iso.ground)}>
+            <FootprintPress w={fp.w} h={fp.h} />
+            {props.decor ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+          </Group>
         ) : (
           <Standee
             token={token}
@@ -188,7 +193,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
       ) : (
         <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} />
       )}
-      {props.decor && !(iso && !iso.pressOnly) ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
+      {props.decor && !iso ? <DecorParts token={token} effects={actor?.effects ?? []} scale={scale} text={props.text} lockMark={props.lockMark} part="all" /> : null}
     </Group>
   );
 });
