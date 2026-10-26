@@ -16,13 +16,13 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { GRABBER_ROOM, SheetGrabber } from "../../components/SheetGrabber.tsx";
 import { dockSummaryButton, RETURN_RANK, sheetFocusSlot, useAlertsSummary, useSheetReturnFocus } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
-import { useFieldInView, useKeyboardView } from "../../lib/keyboardInset.ts";
+import { useFieldInView, useKeyboardView, useTypingWithin } from "../../lib/keyboardInset.ts";
 import { displayName } from "../../lib/scene.ts";
 import { GRAB_ATTR, GRAB_STYLE, useSheetSwipe } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { revealAndFocus } from "../../lib/reveal.ts";
 import { useStore } from "zustand";
-import { barDockSlot, stripSqueezed, type CardAt } from "../../canvas/barDock.ts";
+import { barDockSlot, placedChrome, stripSqueezed, type CardAt } from "../../canvas/barDock.ts";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { useScoped } from "../../state/scope.ts";
 import { sheetOpen, type OpAnswer, type OpRefusal } from "../../state/types.ts";
@@ -200,15 +200,29 @@ export function PlayerRolls() {
   const measured = useCallback((next: FootNeed) => setNeed((n) => (n.whole === next.whole && n.least === next.least ? n : next)), []);
   const [summoned, setSummoned] = useState<string | null>(null);
   const atFoot = shown !== undefined && width < CARD_MIN_WIDTH;
+  /*
+   * Where it stands and whether it yields, from the chrome as it stands
+   * without the on-screen keyboard (barDock.ts Typing), and held as they
+   * were while someone types in the card: a keyboard that left the card
+   * too little room would fold it away with its Total in focus, and a page
+   * a browser shrinks for its keyboard would too (docs/design.md 14.4).
+   */
+  const typingHere = useTypingWithin(cardRef);
   const room = chrome ? size.height - chrome.top - chrome.bottom : Infinity;
   const tooShort = atFoot && room < need.whole;
   const onToolbar = tooShort && summoned === shown?.id;
   const squeezed = chrome !== null && stripSqueezed({ viewport: size, chrome, foot: footHeight, held: heldStrip });
-  const yieldsToBar = atFoot && (compactBar || (tooShort && !onToolbar) || squeezed);
   const toolbarRoom = chrome ? size.height - chrome.top - chrome.toolbar : Infinity;
   const screenRoom = chrome ? size.height - chrome.safe.top - chrome.toolbar : Infinity;
-  const stand: FootStand = !onToolbar ? "options" : toolbarRoom >= need.whole ? "toolbar" : "screen";
-  const stickyHeader = stand !== "screen" || screenRoom >= need.least;
+  const decided = {
+    yieldsToBar: atFoot && (compactBar || (tooShort && !onToolbar) || squeezed),
+    stand: (!onToolbar ? "options" : toolbarRoom >= need.whole ? "toolbar" : "screen") as FootStand,
+    sticky: !onToolbar || toolbarRoom >= need.whole || screenRoom >= need.least,
+  };
+  const kept = useRef(decided);
+  if (!typingHere) kept.current = decided;
+  const { yieldsToBar, stand } = kept.current;
+  const stickyHeader = kept.current.sticky;
   useLayoutEffect(() => {
     dockStore.setState({ footYields: yieldsToBar });
   }, [dockStore, yieldsToBar]);
@@ -245,7 +259,8 @@ export function PlayerRolls() {
   const foldedBySheet = covered && foldsUnderSheet;
   // A card already folded for the token bar or a short screen has its own summary row, so a popover leaves it as it is.
   const underPopover = atFoot && toolPopover && !foldedBySheet && !yieldsToBar;
-  const cardHidden = shown !== undefined && (foldedBySheet || underPopover);
+  // Never while someone types in it (typingHere above).
+  const cardHidden = shown !== undefined && !typingHere && (foldedBySheet || underPopover);
   // As the DM's cards do: the column sits above a phone's sheets in portrait, so everything folds into one summary
   // while one is open. A card folded under a sheet in landscape, or under a popover of the tool's options, takes the chips with it into the same summary.
   const underSheet = deskLayout({ width, height: size.height, wideMinWidth: theme.layout.wideMinWidth, sheetOpen: covered }).folded || cardHidden;
@@ -439,13 +454,15 @@ function RollCard(props: {
 }) {
   const { request } = props;
   const zoom = useUiScale();
-  // The toolbar and the active tool's options as Room measured them (canvas/barDock.ts Chrome), in the card's own pixels.
-  const chrome = useStore(useScoped(barDockSlot), (s) => s.chrome);
+  // The toolbar and the active tool's options as Room measured them (canvas/barDock.ts Chrome), in the card's own pixels, lifted onto the on-screen keyboard while someone types (placedChrome).
+  const measured = useStore(useScoped(barDockSlot), (s) => s.chrome);
+  const typing = useStore(useScoped(barDockSlot), (s) => s.typing);
+  const chrome = useMemo(() => (measured ? placedChrome(measured, typing) : null), [measured, typing]);
   // Only while it shows, so a card folded under a sheet, or one that arrived there, never takes Back from the sheet.
   useBackClose(props.sheet && !props.hidden, props.onFold);
   // At the screen's foot a swipe down puts it off as Later does, with what was typed kept, so unsaved input never holds it (docs/design-v1-sheet-swipe.md section 3).
   useSheetSwipe(props.cardRef, { enabled: props.sheet && !props.hidden, onClose: props.onFold, item: props.request.id, clip: "screen", keeps: true });
-  // Room lifts `chrome` onto the on-screen keyboard (lib/keyboardInset.ts), so the card at the foot stands on it, and its total shows with Send.
+  // At the foot it stands on the on-screen keyboard (placedChrome above), and its total shows with Send.
   useFieldInView(props.cardRef, useKeyboardView(), theme.space(2));
   /*
    * A roll that lands while the card shows, from its Roll or from the Dice

@@ -4,7 +4,7 @@ import { useStore } from "zustand";
 import type { Effect, LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
-import { askedAlerts, barDockSlot, CARD_MAX, columnFacts, columnRoom, columnTop, DOCK_MIN_WIDTH, EDGE, raisedRow, SHADOW_ROOM, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
+import { askedAlerts, barDockSlot, CARD_MAX, columnFacts, columnRoom, columnTop, DOCK_MIN_WIDTH, EDGE, placedChrome, raisedRow, SHADOW_ROOM, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
 import { useAlertsSummaryEntry } from "../../components/sheetFocus.ts";
 import { useBackClose } from "../../lib/backClose.ts";
@@ -583,6 +583,9 @@ function FightAlerts() {
   // ------------------------------------------------ the lane it shares with the token bar
   const dock = useScoped(barDockSlot);
   const chrome = useStore(dock, (s) => s.chrome);
+  // The column's foot ends over the on-screen keyboard while someone types (barDock.ts placedChrome). Its fold rules read the chrome alone.
+  const typing = useStore(dock, (s) => s.typing);
+  const placed = useMemo(() => (chrome ? placedChrome(chrome, typing) : null), [chrome, typing]);
   const lasting = useStore(dock, (s) => s.notices);
   const toastRow = useStore(dock, (s) => s.toastRow);
   const bar = useStore(dock, (s) => s.bar);
@@ -1025,8 +1028,8 @@ function FightAlerts() {
           ? undefined
           : stacked !== null
             ? stacked + EDGE
-            : chrome
-              ? Math.max(0, height - chrome.top - (asked === "column" ? chrome.toolbar : chrome.bottom) - push)
+            : placed
+              ? Math.max(0, height - placed.top - (asked === "column" ? placed.toolbar : placed.bottom) - push)
               : `calc(${screenHeight(100)} - ${theme.safe.top} - ${theme.safe.bottom} - ${top + theme.layout.toolbar + push}px)`,
         // Stacked over the bar, the foot keeps no shadow room: it would count as more to scroll to, and the bar sits 8 px below anyway.
         padding: `${EDGE}px ${rightPad} ${stacked !== null ? 0 : SHADOW_ROOM}px ${leftPad}`,
@@ -1039,13 +1042,13 @@ function FightAlerts() {
         gap: theme.space(2),
         pointerEvents: "none",
         // Over the screen: from the safe top to the toolbar, or to the screen's foot, edge to edge on an opaque fill, its body scrolling under its header.
-        ...(overlay && chrome
+        ...(overlay && placed
           ? {
               top: theme.safe.top,
               left: 0,
               right: 0,
               width: "auto",
-              height: `calc(${asked === "fullScreen" ? height : height - chrome.toolbar}px - ${theme.safe.top})`,
+              height: `calc(${asked === "fullScreen" ? height : height - placed.toolbar}px - ${theme.safe.top})`,
               maxHeight: undefined,
               padding: 0,
               overflowY: "hidden",

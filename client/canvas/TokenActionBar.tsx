@@ -65,6 +65,7 @@ import { REVIVE_NOTE, ReviveButton, offersRevive } from "../features/tokens/Revi
 import { barTokenIds, lastMoveSlot, offered, offersMarkUndo, offersUndo, undoOf } from "../features/tokens/undoMove.ts";
 import { VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { handFocusOn } from "../lib/handFocus.ts";
+import { bodyHoldsField, useTypingWithin } from "../lib/keyboardInset.ts";
 import type { Point, Size } from "../lib/camera.ts";
 import { TAP_SLOP_PX } from "../lib/gestures.ts";
 import { displayName, footprint, type ViewToken } from "../lib/scene.ts";
@@ -113,6 +114,7 @@ import {
   writeSize,
   writeSpot,
   type BarFacts,
+  type BarMode,
   type BarSize,
   type Box,
   type Corner,
@@ -1190,6 +1192,8 @@ function BarFrame(props: {
   const measured = useStore(dockStore, (s) => s.chrome);
   const lasting = useStore(dockStore, (s) => s.lasting);
   const chrome = useMemo(() => barChrome({ chrome: measured, lasting }), [measured, lasting]);
+  // While someone types with the on-screen keyboard up, the bar is placed over it (barDock.ts Typing).
+  const typing = useStore(dockStore, (s) => s.typing);
   // Beside a sideways sheet that leaves it too little room for its header, the window folds into the sheet's header (docs/design-v1-token-window.md 7.1).
   const folded = foldsUnderSheet({ ...layout, sheetOpen: anySheet, full, sideRoom: sideSheetRoom(props.viewport, chrome) });
   const spot = useStore(dockStore, (s) => s.spot);
@@ -1284,8 +1288,9 @@ function BarFrame(props: {
     const cut = scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop > 4;
     setClipped(cut);
     const header = content.querySelector<HTMLElement>(`[${STICKY_HEADER_ATTR}]`);
-    // The fade is the scroller's last child, a zero-height row whose one child is the drawn fade.
-    const fade = cut ? (scroller.lastElementChild?.firstElementChild as HTMLElement | null | undefined) : null;
+    // The fade is the scroller's last child where it draws, a zero-height row whose one child is the drawn fade.
+    const last = scroller.lastElementChild;
+    const fade = cut && last instanceof HTMLElement && last.hasAttribute(SCROLL_FADE_ATTR) ? (last.firstElementChild as HTMLElement | null) : null;
     const next = { top: header?.offsetHeight ?? 0, bottom: fade?.offsetHeight ?? 0 };
     setPad((prev) => (prev.top === next.top && prev.bottom === next.bottom ? prev : next));
   };
@@ -1299,12 +1304,28 @@ function BarFrame(props: {
     observer.observe(content);
     return () => observer.disconnect();
   }, []);
-  // The fade's height, once it shows.
-  useLayoutEffect(measure, [clipped]);
-
-  // Every mode places a bar, so a placement always comes back.
-  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, spot, height: barHeight, column, width, size, resizable: finePointer, heldMode, cardAt, state: restState, expandedHeight, restFoot })!;
+  // Every mode places a bar, so a placement always comes back. While someone types in it, it keeps its mode: a page a browser shrinks for its keyboard would turn it compact under the field (docs/design.md 14.4).
+  const typingHere = useTypingWithin(barRef);
+  const lastMode = useRef<BarMode | null>(null);
+  /*
+   * Where its body under the bars is too short for the field typed in and
+   * what goes with it, as a window on a phone held sideways at 130%, it
+   * takes the visible area from its top, over the bars, until the keyboard
+   * closes: never as focus moves on to Spend, which a tap would miss.
+   */
+  const [overBars, setOverBars] = useState(false);
+  const placed = placeBar({ layout, viewport: props.viewport, chrome, foot, spot, height: barHeight, column, width, size, resizable: finePointer, heldMode, cardAt, state: restState, expandedHeight, restFoot, typing, keepMode: typingHere ? lastMode.current : null, overBars: overBars && typing !== null })!;
+  lastMode.current = placed.mode;
   const { free, mode, resizable } = placed;
+  // Over the keyboard the room is the field's: no "Scroll for more" lies over it or what goes with it.
+  const fades = clipped && !(mode === "span" && restState === "rest") && !(typingHere && typing !== null);
+  // The fade's height, once it shows or goes.
+  useLayoutEffect(measure, [fades]);
+  useLayoutEffect(() => {
+    if (typing === null) setOverBars(false);
+    // Once the scroll padding has dropped the fade that went, as bodyHoldsField reads it.
+    else if (!overBars && !(pad.bottom > 0 && !fades) && scrollRef.current && bodyHoldsField(scrollRef.current, theme.space(2)) === false) setOverBars(true);
+  });
   // The strip and the expanded bar draw exactly their room, never their content's height (3.1).
   const drawnHeight = mode === "span" ? placed.hang.room : barHeight;
 
@@ -1708,7 +1729,7 @@ function BarFrame(props: {
         boxShadow: theme.shadow.pane,
         color: theme.color.text,
         fontSize: theme.font.body14,
-        zIndex: raised ? theme.z.popover : mode === "compact" ? theme.z.barOverlay : theme.z.pane,
+        zIndex: raised ? theme.z.popover : overBars && typing !== null ? theme.z.overBars : mode === "compact" ? theme.z.barOverlay : theme.z.pane,
       }}
     >
       <div
@@ -1744,7 +1765,7 @@ function BarFrame(props: {
             {props.children}
           </div>
         </FrameContext.Provider>
-        {clipped && !(mode === "span" && restState === "rest") ? <ScrollForMore /> : null}
+        {fades ? <ScrollForMore /> : null}
       </div>
       {resizable && !folded ? (
         <>
@@ -1850,12 +1871,15 @@ export const SCROLL_FOR_MORE_PX = theme.space(12);
  * box's top instead, for a stack of toasts that keeps its newest, at its
  * foot, in view and hides the older above (pages/Room.tsx Toasts).
  */
+/** Marks ScrollForMore's row, so a scroller can find its fade among its children. */
+const SCROLL_FADE_ATTR = "data-scroll-fade";
+
 export function ScrollForMore(props: { inset?: number; edge?: "top" | "foot" }) {
   // A sticky box keeps inside its scroller's padding: `inset` is that box's bottom padding, so the fade still lies on its foot.
   const inset = props.inset ?? 0;
   const top = props.edge === "top";
   return (
-    <div aria-hidden style={{ position: "sticky", ...(top ? { top: -inset } : { bottom: -inset }), width: "100%", height: 0, pointerEvents: "none" }}>
+    <div aria-hidden {...{ [SCROLL_FADE_ATTR]: "" }} style={{ position: "sticky", ...(top ? { top: -inset } : { bottom: -inset }), width: "100%", height: 0, pointerEvents: "none" }}>
       <div
         style={{
           position: "absolute",

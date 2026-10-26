@@ -61,6 +61,8 @@ import {
   overlapsLane,
   parseSpot,
   placeBar,
+  placedChrome,
+  type Typing,
   pastBars,
   raisedRow,
   askedAlerts,
@@ -1910,4 +1912,52 @@ describe("the strip's lane, its expanded bar, the clearing move and a card it fo
     assert.equal(toastsOverBars({ restFloor: null, top: 90 }), false, "no strip rests");
   });
 
+});
+
+describe("the bar while someone types with the keyboard up (docs/design.md 14.4)", () => {
+  /** A phone held sideways at 130%, 844 x 390 with its insets, laid out at 649 x 300. */
+  const sideways = { width: 649, height: 300 };
+  const chrome = { top: 52, bottom: 81, controls: 81, toolbar: 81, safe: { top: 0, right: 47, bottom: 21, left: 47 }, sheet: 0 };
+  /** An iPhone SE's 216 px number pad at 130%: 134 px show, and the toolbar's 81 px foot rises by 166 less 81. */
+  const typing: Typing = { top: 0, bottom: 134, lift: 216 / 1.3 - 81 };
+  const room = { layout: sideways, viewport: sideways, chrome, foot: 0, spot: DEFAULT_SPOT, height: 200, column: null };
+
+  test("no keyboard leaves the chrome as it is", () => {
+    assert.equal(placedChrome(chrome, null), chrome);
+  });
+
+  test("what stands on the toolbar rises onto the keyboard, and the top stays under the bars, or the visible area's top where Safari panned it lower", () => {
+    const placed = placedChrome(chrome, typing);
+    assert.equal(placed.top, 52);
+    assert.equal(placed.bottom, 81 + typing.lift);
+    assert.equal(placed.toolbar, 81 + typing.lift);
+    assert.equal(placed.controls, 81 + typing.lift);
+    assert.equal(placedChrome(chrome, { ...typing, top: 90 }).top, 90);
+  });
+
+  test("over the bars, the top is the visible area's, inside the safe area", () => {
+    assert.equal(placedChrome(chrome, typing, true).top, 0);
+    assert.equal(placedChrome({ ...chrome, safe: { ...chrome.safe, top: 20 } }, typing, true).top, 20);
+    assert.equal(placedChrome(chrome, { ...typing, top: 40 }, true).top, 40);
+  });
+
+  test("the mode comes from the chrome without the keyboard, so typing never turns the window compact, and its place from the chrome on the keyboard", () => {
+    const before = placeBar(room)!;
+    assert.equal(before.mode, "dock");
+    // The free area over the keyboard is far under the 148 px a window needs: the chrome alone decides.
+    assert.ok(freeArea(sideways, placedChrome(chrome, typing)).height < 148);
+    const over = placeBar({ ...room, typing })!;
+    assert.equal(over.mode, "dock");
+    assert.equal(over.free.top + over.free.height, sideways.height - 81 - typing.lift - EDGE, "the free area ends on the keyboard");
+  });
+
+  test("a mode kept while someone types in the bar wins over the free area's", () => {
+    assert.equal(placeBar({ ...room, typing, keepMode: "compact" })!.mode, "compact");
+    assert.equal(placeBar({ ...room, keepMode: null })!.mode, "dock");
+  });
+
+  test("a window whose field has no room under the bars is placed from the visible area's top", () => {
+    assert.equal(placeBar({ ...room, typing })!.free.top, 52 + EDGE);
+    assert.equal(placeBar({ ...room, typing, overBars: true })!.free.top, EDGE);
+  });
 });

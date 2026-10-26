@@ -104,6 +104,31 @@ export type Chrome = {
 
 export const NO_SIDES: Sides = { top: 0, right: 0, bottom: 0, left: 0 };
 
+/**
+ * The room while someone types with the on-screen keyboard up
+ * (lib/keyboardInset.ts), in the chrome's own pixels, which Room publishes
+ * beside its chrome: the visible area's top and bottom from the layout's
+ * top, and `lift`, how far what stands on the toolbar rises to stand on
+ * the keyboard. Placement reads it (placedChrome). A size decision reads
+ * the chrome alone, so typing never turns the bar compact, folds a roll
+ * card or hides what holds the field (docs/design.md 14.4).
+ */
+export type Typing = { top: number; bottom: number; lift: number };
+
+/**
+ * The chrome a surface is placed by while someone types: the bars down to
+ * the visible area's top, what stands on the toolbar lifted onto the
+ * keyboard. A surface whose field has too little room under the bars
+ * (`overBars`) takes the visible area from its top, inside the safe area,
+ * as a sheet does (components/Sheet.tsx).
+ */
+export function placedChrome(chrome: Chrome, typing: Typing | null, overBars = false): Chrome {
+  if (!typing) return chrome;
+  const lift = typing.lift;
+  const top = overBars ? Math.max(chrome.safe.top, typing.top) : Math.max(chrome.top, typing.top);
+  return { ...chrome, top, bottom: chrome.bottom + lift, controls: chrome.controls + lift, toolbar: chrome.toolbar + lift };
+}
+
 /** Until Room has measured: a 52 px top bar and a 60 px toolbar, no safe areas. */
 export const DEFAULT_CHROME: Chrome = { top: 52, bottom: 60, controls: 60, toolbar: 60, safe: NO_SIDES, sheet: 0 };
 
@@ -849,12 +874,21 @@ export function placeBar(input: {
   expandedHeight?: number | null;
   /** The foot the strip places by: `foot`, or 0 while a roll card at the foot yields to it (stripSqueezed). */
   restFoot?: number;
+  /** The room while someone types (Typing), which places the bar over the keyboard and decides nothing. */
+  typing?: Typing | null;
+  /** The mode the bar keeps while someone types in it, whatever the free area does (TokenActionBar.tsx). */
+  keepMode?: BarMode | null;
+  /** The field typed in has too little room under the bars, so the bar is placed over them (placedChrome). */
+  overBars?: boolean;
 }): { mode: BarMode; free: Box; hang: Hang; lane: Lane; resizable: boolean; room: Box } | null {
   const barWidth = input.width ?? BAR_WIDTH;
-  const free = freeArea(input.viewport, input.chrome, input.foot);
-  const mode = heldOrOpenMode({ layout: input.layout, free, foot: input.foot, cardAt: input.cardAt ?? null, heldMode: input.heldMode ?? null });
+  // The mode from the chrome alone, then the place from the chrome lifted onto the keyboard.
+  const decided = freeArea(input.viewport, input.chrome, input.foot);
+  const mode = input.keepMode ?? heldOrOpenMode({ layout: input.layout, free: decided, foot: input.foot, cardAt: input.cardAt ?? null, heldMode: input.heldMode ?? null });
+  const chrome = placedChrome(input.chrome, input.typing ?? null, input.overBars === true);
+  const free = freeArea(input.viewport, chrome, input.foot);
   if (mode === "span") {
-    const strip = input.restFoot === undefined ? free : freeArea(input.viewport, input.chrome, input.restFoot);
+    const strip = input.restFoot === undefined ? free : freeArea(input.viewport, chrome, input.restFoot);
     const state = input.state ?? "rest";
     const hang = restHang(strip, state, input.expandedHeight ?? null);
     const lane = state === "expanded" && input.expandedHeight != null ? expandedLane(input.column, strip) : restLane(input.column, hang.at - hang.room);
@@ -874,7 +908,7 @@ export function placeBar(input: {
   const cap = resizable && input.size?.h !== undefined ? Math.max(MIN_WINDOW_HEIGHT, input.size.h) : undefined;
   const content = cap === undefined ? input.height : Math.min(input.height, cap);
   const width = resizable ? Math.max(barWidth, input.size?.w ?? barWidth) : barWidth;
-  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, input.chrome, barWidth) : spotHang(input.spot, room, { width, height: content });
+  const hang = mode === "compact" ? compactHang(input.layout, input.viewport, chrome, barWidth) : spotHang(input.spot, room, { width, height: content });
   const capped = (h: Hang): Hang => (cap === undefined ? h : { ...h, room: Math.min(h.room, cap) });
   if (!input.column || !overlapsLane(hang, free)) return { mode, free, hang: capped(hang), lane: "none", resizable, room };
   const left = laneLeft(free) - reach.right;
@@ -1766,8 +1800,10 @@ export type HeaderSummary = { count: number; name: string; press(): void };
 export type BarFacts = { box: Box; mode: BarMode; lane: Lane; laneLeft: number; freeRight: number; rests?: boolean };
 
 type BarDockState = {
-  /** Room's chrome, measured. Null until it is. */
+  /** Room's chrome, measured. Null until it is. It never moves for the on-screen keyboard: `typing` says where things stand while it is up. */
   chrome: Chrome | null;
+  /** The room while someone types with the on-screen keyboard up, or null. */
+  typing: Typing | null;
   /** The bar while it shows, unfolded. */
   bar: BarFacts | null;
   /** The column's measures while it has cards to measure. */
@@ -1858,7 +1894,7 @@ type BarDockState = {
 export const barDockSlot = scopeSlot(() =>
   createStore<BarDockState>(() => {
     forgetLarger();
-    return { chrome: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false, toastRow: null };
+    return { chrome: null, typing: null, bar: null, column: null, notices: null, lasting: null, columnRollAsked: false, spot: readSpot(), defaultWidth: BAR_WIDTH, size: readSize(), finePointer: isFinePointer(), lastHeight: 200, focusFrame: false, expanded: false, expandedHeight: null, expandedFor: null, clearRequest: null, foot: 0, footYields: false, columnCramped: false, columnPaneRow: false, alertsOverlay: false, alertsClose: 0, alertsClosePanel: null, toolPopover: false, heldMode: null, cardAt: null, headerSummary: null, barOpen: false, toastRow: null };
   }),
 );
 
