@@ -23,6 +23,8 @@ import { useBoardFontEpoch } from "../boardFont.ts";
 import { FogShape } from "../FogShape.tsx";
 import { MapContent, useReadableMap, type DrawnMap } from "../layers/MapLayer.tsx";
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
+import { DragMarks } from "../DragMarks.tsx";
+import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
 import { IsoGroundContext, TreeShownContext, useShownView, type IsoGround } from "./context.ts";
@@ -286,6 +288,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
   );
   const movingCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "moving" }), [groundCtx]);
   const uprightCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "upright" }), [groundCtx]);
+  const dragged = useDraggedIds();
+  const dragIds = useMemo(() => [...dragged.remote, ...dragged.local], [dragged]);
   const groups = groundGroups(turn);
   const width = hidden ? 0 : size.width;
   const height = hidden ? 0 : size.height;
@@ -398,6 +402,8 @@ function IsoBoardImpl(props: IsoBoardProps) {
                 <Component key={id} {...props.layerProps} />
               ))}
             </IsoGroundContext.Provider>
+            {/* The rings, auras and tethers of every token being dragged, here or on another device (5.1). */}
+            <DragMarks tokenIds={dragIds} iso={uprightCtx} layer={props.layerProps} />
             {(["marks", "label", "plate"] as const).flatMap((part) =>
               props.decorTokens
                 .filter((t) => part !== "plate" || props.hasPlate(t))
