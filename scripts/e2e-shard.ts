@@ -236,6 +236,11 @@ async function main(): Promise<number> {
 
   const mine = shards[index - 1]!;
   console.log(`shard ${index} of ${count}: ${mine.files.join(", ") || "no files"} (about ${mine.seconds} s)`);
+  // A docs-only run's one shard is --only guide, so a shard that ran nothing there would end green with nothing checked.
+  if (mine.files.length === 0 && only !== null) {
+    console.error(`--only ${only.join(",")} leaves shard ${index} of ${count} no files to run, so the shard fails`);
+    return 2;
+  }
   if (mine.files.length === 0) return 0;
   if (!existsSync(path.join(ROOT, "dist/index.html"))) {
     console.error("dist/ is missing: run `pnpm build` first");
