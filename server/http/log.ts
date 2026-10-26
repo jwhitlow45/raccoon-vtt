@@ -6,6 +6,7 @@ import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { accessRoutes, type AuthKit, enforce, HttpError, requireGrant, roomParam } from "../auth/http.ts";
 import type { GrantContext } from "../auth/types.ts";
 import type { RoomActor } from "../rooms/actor.ts";
+import { previewOmits } from "../rooms/fanout.ts";
 import type { RoomManager } from "../rooms/manager.ts";
 import { readLogPage, type Pool } from "../rooms/persistence.ts";
 import { entriesBetween, exportFileName, renderLogExport, sessionsOf, validTimeZone } from "./logExport.ts";
@@ -18,11 +19,19 @@ import { entriesBetween, exportFileName, renderLogExport, sessionsOf, validTimeZ
  *
  * A DM may name the scene it is viewing, because the shared projection
  * scopes creature events to one scene. Players always get the player scene.
+ *
+ * A DM may also ask `as` a player of the roster, for View as a player
+ * (docs/design-v1-per-player-vision.md 7.4): the page is that player's,
+ * less every whisper the DM is not party to, as the preview's socket gets
+ * its log, and it names the player it was answered as (`as`), which the
+ * preview checks (D-261026-10). `as` from a player, or naming anyone but a
+ * player of the roster, is refused.
  */
 const Query = z.object({
   before: z.string().regex(/^\d{1,18}:\d{1,6}$/).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   sceneId: z.string().min(1).max(64).optional(),
+  as: z.string().min(1).max(64).optional(),
 });
 
 /*
@@ -182,10 +191,12 @@ export function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps: { ma
       const grant = await requireGrant(kit, req, reply, roomId);
       const query = Query.safeParse(req.query);
       if (!query.success) throw new HttpError(400, "invalid_query");
-      const { before, limit, sceneId } = query.data;
+      const { before, limit, sceneId, as } = query.data;
+      if (as !== undefined && grant.role !== "dm") throw new HttpError(403, "no_access");
       const actor = await deps.manager.acquire(roomId);
-      const scene = grant.role === "dm" ? (sceneId ?? actor.committed.state.meta.playerSceneId) : null;
-      const viewer = { memberId: grant.memberId, role: grant.role };
+      if (as !== undefined && actor.committed.state.members[as]?.kind !== "player") throw new HttpError(403, "no_access");
+      const scene = grant.role === "dm" && as === undefined ? (sceneId ?? actor.committed.state.meta.playerSceneId) : null;
+      const viewer: Viewer = as === undefined ? { memberId: grant.memberId, role: grant.role } : { memberId: as, role: "player" };
       const entries: LogEntry[] = [];
       let cursor = before ?? null;
       let hidden = 0;
@@ -194,13 +205,14 @@ export function registerLogRoutes(app: FastifyInstance, kit: AuthKit, deps: { ma
         const rows = await readLogPage(kit.pool, roomId, cursor, BATCH_ROWS);
         moreRows = rows.length === BATCH_ROWS;
         cursor = rows[rows.length - 1]?.id ?? cursor;
-        const shown = actor.projectLog(rows, viewer, scene);
+        const projected = actor.projectLog(rows, viewer, scene);
+        const shown = as === undefined ? projected : projected.filter((line) => !previewOmits(line, grant.memberId));
         hidden += rows.length - shown.length;
         entries.push(...shown);
       }
       const page = entries.slice(0, limit);
       const oldest = page[page.length - 1];
-      return { entries: page.reverse(), nextBefore: page.length === limit && oldest ? oldest.id : null };
+      return { entries: page.reverse(), nextBefore: page.length === limit && oldest ? oldest.id : null, ...(as !== undefined ? { as } : {}) };
     });
   });
 }
