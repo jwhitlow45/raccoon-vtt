@@ -741,6 +741,11 @@ function sameIds(a: string[] | undefined, b: string[] | undefined): boolean {
  * switching between whole party and per player, and any change of a holder
  * list, change whose sight and fog every player has, so they are global
  * too. A holder's layer is as the party's: only clearing it is.
+ *
+ * Hex grids (docs/design-v1-hex-grids.md HX-D21): a scene's grid shape
+ * decides which sub-cells every token stands on, so a switch can put a
+ * token under fog or out of sight without it moving. It is global too, and
+ * so is its undo or redo, which writes the scene the same way.
  */
 function isGlobalChange(kind: string, prev: unknown, next: unknown): boolean {
   switch (kind) {
@@ -773,7 +778,8 @@ function isGlobalChange(kind: string, prev: unknown, next: unknown): boolean {
         autoWallsOf(a) !== autoWallsOf(b) ||
         (a.vision?.on ?? false) !== (b.vision?.on ?? false) ||
         a.vision?.light !== b.vision?.light ||
-        (a.vision?.perPlayer === true) !== (b.vision?.perPlayer === true)
+        (a.vision?.perPlayer === true) !== (b.vision?.perPlayer === true) ||
+        a.gridShape !== b.gridShape
       );
     }
     case "token": {

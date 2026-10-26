@@ -1,11 +1,12 @@
 import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
 import { oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
 import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
-import type { AreaTemplate, CompanionBlock, Encounter, Handout, HandoutDoc, Pin, RoomState, Scene, Token } from "../model.ts";
+import type { AreaTemplate, BuildChunk, CompanionBlock, Encounter, FogDraft, Handout, HandoutDoc, Pin, RoomState, Scene, Token, Trap } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf, linkHolds } from "../rules/attach.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
+import { restoreRefusal, restoredHolds, sceneHolds } from "../rules/grid.ts";
 import { turnUnderWay } from "../rules/path.ts";
 import { ON_ITS_TURN_NOW, actsOnCharacterTurn, rowsForSharedCompanions, syncOwners } from "./companions.ts";
 import { rowLeadsMounts } from "./encounter.ts";
@@ -122,6 +123,7 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
   // A scene a restore takes away takes the party's explored layer with it, as bookkeeping (docs/design-v1-maps-vision.md
   // 4.3.3): it is no one's work, so it never counts as work that depends on the scene.
   for (const p of removed) if (p.kind === "scene" && !tx.state.scenes[p.id]) forgetExplored(tx, p.id);
+  shapesHold(tx, op, before);
   // Only a restore the server marked checks references. An older build
   // accepted restores that strand work, and refusing one of those on replay
   // would stop the room's load and leave it read-only.
@@ -131,6 +133,63 @@ export function restore(tx: Tx, op: OpOf<"sys.restore">): void {
   if (op.undid !== undefined) writeHpUndoLine(tx, op.undid);
   for (const sceneId of [...wallsMoved].sort()) {
     if (!scenesWritten.has(sceneId) && tx.state.scenes[sceneId]) tx.bumpWalls(sceneId);
+  }
+}
+
+/**
+ * The shape's invariant on a restore (docs/design-v1-hex-grids.md HX-D14),
+ * refused in the switch's words. Each value written onto a scene passes
+ * the stamp check, which runs only when the value holds grid-keyed
+ * content, and the phase check, which keeps from a hex scene what its
+ * phase leaves out (restoredHolds). A restore that changes a scene's
+ * shape, or brings a scene back, must leave that scene as a switch would:
+ * nothing on it of another shape, nothing the phase leaves out. So neither
+ * two DMs nor a long history brings square data onto hexes, hex data onto
+ * squares, or a later phase's things into an earlier one. Stored restores
+ * from before hex grids meet only square scenes, whose unstamped data
+ * passes both, so they replay as they applied.
+ */
+function shapesHold(tx: Tx, op: OpOf<"sys.restore">, before: ReadonlyMap<EntityKey, unknown>): void {
+  const reshaped = new Set<string>();
+  for (const entry of op.entries) {
+    const parsed = parseKey(entry.key);
+    if (!parsed || entry.value === null || entry.value === undefined) continue;
+    const value = tx.read(entry.key);
+    if (parsed.kind === "scene") {
+      const was = before.get(entry.key) as Scene | null | undefined;
+      if (!was || was.gridShape !== (value as Scene).gridShape) reshaped.add(parsed.id);
+      continue;
+    }
+    const placed = placedOn(parsed, value);
+    if (!placed) continue;
+    const scene = tx.state.scenes[placed.sceneId];
+    if (!scene) continue;
+    const found = restoredHolds(tx.state, placed.kind, placed.value, scene);
+    if (found) throw invalid(restoreRefusal(op.from, found, scene));
+  }
+  for (const sceneId of [...reshaped].sort()) {
+    const scene = tx.state.scenes[sceneId];
+    const found = scene ? sceneHolds(tx.state, scene) : null;
+    if (found && scene) throw invalid(restoreRefusal(op.from, found, scene));
+  }
+}
+
+/** A restored value the shape's checks read, with the scene it stands on. */
+function placedOn(
+  parsed: ParsedKey,
+  value: unknown,
+): { kind: "chunk"; value: BuildChunk; sceneId: string } | { kind: "fogDraft"; value: FogDraft; sceneId: string } | { kind: "trap"; value: Trap; sceneId: string } | { kind: "token"; value: Token; sceneId: string } | null {
+  switch (parsed.kind) {
+    case "chunk":
+      return { kind: "chunk", value: value as BuildChunk, sceneId: parsed.sceneId };
+    case "fogDraft":
+      return { kind: "fogDraft", value: value as FogDraft, sceneId: parsed.sceneId };
+    case "trap":
+      return { kind: "trap", value: value as Trap, sceneId: (value as Trap).sceneId };
+    case "token":
+      return { kind: "token", value: value as Token, sceneId: (value as Token).sceneId };
+    default:
+      return null;
   }
 }
 
