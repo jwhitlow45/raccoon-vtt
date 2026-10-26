@@ -262,13 +262,26 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
     assert.equal(await cut("Pat"), false, "the player's name is cut short");
     assert.match((await chipName("Pat").textContent()) ?? "", /Pat$/);
 
-    // A longer name the bar still fits whole once the room name gave way, not cut by a hair.
+    // A longer name the bar still fits whole once the room name gave way, not cut by a hair. Beside Find, View and Fit
+    // the chip's name has 128 px of a 390 px phone, and this one takes 125 (the View button, which gives way after the
+    // chip, took the room "Bartholomew Thistlewood" had).
+    const longer = "Bartholomew Stone";
     const cookie = (await playerContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     const own = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     try {
-      await own.send({ t: "member.update", memberId: run.patId, name: "Bartholomew Thistlewood" });
-      await chipName("Bartholomew Thistlewood").waitFor();
-      assert.equal(await cut("Bartholomew Thistlewood"), false, "a name that fits was cut short");
+      await own.send({ t: "member.update", memberId: run.patId, name: longer });
+      await chipName(longer).waitFor();
+      // The room the bar gives the name: its own box, and what the room name above its few letters and the spacer could still give.
+      // A bar that gains a button says so here, rather than as a name cut short.
+      const room = await chipName(longer).evaluate((el) => {
+        const row = el.closest("header > div")!;
+        const heading = row.querySelector("h1")!;
+        const spacer = [...row.children].find((c) => c.tagName === "DIV" && c.childElementCount === 0);
+        const share = Math.max(0, heading.getBoundingClientRect().width - 40) + (spacer?.getBoundingClientRect().width ?? 0);
+        return { needs: el.scrollWidth, has: el.clientWidth + share };
+      });
+      assert.ok(room.needs <= room.has, `the test's name needs ${room.needs} px and the bar has ${room.has} px for it`);
+      assert.equal(await cut(longer), false, "a name that fits was cut short");
       // One too long for the bar: the room name keeps its first few letters, and the chip gives way after it.
       const long = "Bartholomew Thistlewood of the Long Valley";
       await own.send({ t: "member.update", memberId: run.patId, name: long });
@@ -276,8 +289,9 @@ describe("raccoon-vtt older features on a wave 4 build", { timeout: 180_000 }, (
       const roomName = await player.getByRole("heading", { level: 1 }).boundingBox();
       assert.ok(roomName && roomName.width >= 39.5, `the room name is ${roomName?.width ?? 0} px wide`);
       await shots.take(player, "regress-room-name-floor");
-      await own.send({ t: "member.update", memberId: run.patId, name: "Pat" });
     } finally {
+      // Pat again whatever failed, so the steps after find her by name.
+      await own.send({ t: "member.update", memberId: run.patId, name: "Pat" }).catch(() => undefined);
       own.close();
     }
   });
