@@ -36,12 +36,14 @@ import { barControl, ConsoleWatch, OpSocket, pickTool, Shots, SocketWatch, start
  *   keyboard until it closes.
  * - Then in a fight, on Thorn's turn, the alerts fold into the dock on the
  *   sheet's top edge, which rides the raised sheet or joins its header.
- * - In the fight on the small phone at 130% and on a phone held sideways
- *   at 130%, each field over the keyboard with its buttons and the dock,
- *   whole and taking a tap: the Token sheet's, which takes the visible
- *   area's height sideways, the token bar's, a dialog's, the roll card's
- *   (upright), and the Area tool's Spell field in its row with the spells
- *   it finds, and in the Shape popover, where a scroll of Pat's own stays.
+ * - In the fight on the small phone at 130%, with the number pad and with
+ *   a 300 px keyboard, and on a phone held sideways at 130%, over the
+ *   visual viewport and with the page itself resized, each field over the
+ *   keyboard with its buttons and the dock, whole and taking a tap: the
+ *   Token sheet's, which takes the visible area's height sideways, the
+ *   token bar's, a dialog's, the roll card's (upright), and the Area tool's
+ *   Spell field in its row with the spells it finds, and in the Shape
+ *   popover, where a scroll of Pat's own stays.
  * The raised sheet's row, entry and dock are measured with the alignment
  * check at each size.
  *
@@ -82,19 +84,29 @@ const run = {
   goblin: randomUUID(),
 };
 
-type View = { width: number; height: number; scale: number; keyboard: number };
+/** A phone and its keyboard. `native` opens the keyboard as a browser that resizes the page itself does: the page is made shorter, not only the visual viewport. */
+type View = { width: number; height: number; scale: number; keyboard: number; native?: boolean };
 const VIEWS: View[] = [
   { width: 390, height: 844, scale: 1, keyboard: 300 },
   { width: 390, height: 844, scale: 1.3, keyboard: 300 },
   { width: 320, height: 568, scale: 1, keyboard: 216 },
   { width: 320, height: 568, scale: 1.3, keyboard: 216 },
 ];
-/** Where the reviews found the gaps: the smallest phone at 130% in a fight, and a phone held sideways at 130%, both with an iPhone SE's number pad. */
+/**
+ * Where the reviews found the gaps: the smallest phone at 130% in a fight,
+ * with an iPhone SE's number pad and with a 300 px keyboard, and a phone
+ * held sideways at 130% with the number pad, over the visual viewport and
+ * with the page resized.
+ */
 const LIFT: View[] = [
   { width: 320, height: 568, scale: 1.3, keyboard: 216 },
+  { width: 320, height: 568, scale: 1.3, keyboard: 300 },
   { width: 844, height: 390, scale: 1.3, keyboard: 216 },
+  { width: 844, height: 390, scale: 1.3, keyboard: 216, native: true },
 ];
-const viewName = (v: View) => `${v.width} x ${v.height} at ${Math.round(v.scale * 100)}%`;
+/** The keyboard a view's steps take unless they say otherwise: an iPhone's on a tall phone, an iPhone SE's number pad on a short or sideways one. */
+const usualKeyboard = (v: View) => (v.height >= 800 ? 300 : 216);
+const viewName = (v: View) => `${v.width} x ${v.height} at ${Math.round(v.scale * 100)}%${v.keyboard !== usualKeyboard(v) ? ` over a ${v.keyboard} px keyboard` : ""}${v.native ? " with the page resized" : ""}`;
 
 type Box = { top: number; bottom: number; left: number; right: number };
 /** The page-side shapes the fake viewport and the checks use, as e2e code has no DOM types. */
@@ -138,7 +150,15 @@ function actor(hp: number) {
   return { hp: { cur: hp, max: hp, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 1, passivePerception: 11, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
 }
 
+/** When Pat's page sent each request the server's per-session limit counts (server/auth/ratelimit.ts), for setUp's pace. */
+const patRequests: number[] = [];
+/** Under the server's 600 requests a minute per session, with room for what a step sends after its load. */
+const REQUESTS_PER_MINUTE = 400;
+
 async function setUp(page: Page, view: View): Promise<void> {
+  // This file loads Pat's room every few seconds, which can reach the server's limit and leave a load unconnected, so it waits until the last minute's requests leave room.
+  const recent = () => patRequests.filter((t) => t > Date.now() - 60_000).length;
+  while (recent() > REQUESTS_PER_MINUTE) await page.waitForTimeout(1_000);
   await patCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
   await page.setViewportSize({ width: view.width, height: view.height });
   await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
@@ -230,6 +250,8 @@ async function dockRides(page: Page, sheet: Locator, what: string): Promise<void
 
 /** A grey band where the keyboard would be, only for the screenshot, which shows the whole layout. */
 async function shotWithKeyboard(page: Page, name: string, height: number): Promise<void> {
+  // A page resized for the keyboard ends at its top: the shot shows the short page as it is.
+  if (pageResized) return shots.take(page, name);
   await page.evaluate((h) => {
     const d = (globalThis as unknown as { document: { createElement(t: string): { id: string; style: { cssText: string }; textContent: string }; body: { append(n: unknown): void } } }).document;
     const band = d.createElement("div");
@@ -338,18 +360,37 @@ const DOCK_PX = 48;
 const DOCK_GAP = 8;
 
 /**
+ * Opens a keyboard `height` px tall (the view's own unless given): the
+ * fake visual viewport shrinks, panned `pan` px down as Safari may, or
+ * for a `native` view the page itself is made shorter.
+ */
+async function openKeys(page: Page, view: View, height = view.keyboard, pan = 0): Promise<void> {
+  pageResized = view.native === true;
+  if (view.native) return page.setViewportSize({ width: view.width, height: view.height - height });
+  await keyboard(page, view.height - height, pan);
+}
+
+async function closeKeys(page: Page, view: View): Promise<void> {
+  pageResized = false;
+  if (view.native) return page.setViewportSize({ width: view.width, height: view.height });
+  await keyboard(page, null);
+}
+
+/** Whether openKeys made the page itself shorter, for the screenshots. */
+let pageResized = false;
+
+/**
  * The keyboard opens over a field that has focus, with the page panned
  * `pan` px down as Safari may: the controls and the dock show whole above
  * it (liftedWhole), then `seen` runs, and the keyboard closes.
  */
 async function overKeyboard(page: Page, view: View, controls: Record<string, Locator>, what: string, seen: () => Promise<void>, pan = 0): Promise<void> {
-  const layout = await page.evaluate(() => (globalThis as unknown as KeyboardWindow).innerHeight);
   try {
-    await keyboard(page, layout - view.keyboard, pan);
+    await openKeys(page, view, view.keyboard, pan);
     await liftedWhole(page, controls, what);
     await seen();
   } finally {
-    await keyboard(page, null);
+    await closeKeys(page, view);
   }
 }
 
@@ -445,11 +486,10 @@ async function sheetLifted(view: View): Promise<void> {
   await use.tap();
   const field = hands.getByRole("textbox", { name: "Lay on Hands to spend, up to 25" });
   await field.waitFor();
-  const layout = await pat.evaluate(() => (globalThis as unknown as KeyboardWindow).innerHeight);
   const normal = await box(sheet);
-  const seen = layout - view.keyboard;
+  const seen = view.height - view.keyboard;
   try {
-    await keyboard(pat, seen);
+    await openKeys(pat, view);
     await liftedWhole(pat, { field, Spend: hands.getByRole("button", { name: "Spend", exact: true }) }, `Lay on Hands ${where}`);
     const raised = await box(sheet);
     assert.ok(raised.bottom <= seen + 1, `${where}: the sheet's foot ${raised.bottom} is under the keyboard's top ${seen}`);
@@ -462,7 +502,7 @@ async function sheetLifted(view: View): Promise<void> {
     await measure(pat, hands, `Lay on Hands' row over the keyboard ${where}`, view.keyboard);
     await shotWithKeyboard(pat, `kb-sheet-lifted-${shotTag(view, "fight")}`, view.keyboard);
   } finally {
-    await keyboard(pat, null);
+    await closeKeys(pat, view);
   }
   await waitFor(`${where}: the sheet in its own shape again`, async () => {
     const back = await box(sheet);
@@ -479,7 +519,7 @@ async function sheetLifted(view: View): Promise<void> {
   await overKeyboard(pat, view, { "HP change": hp, Apply: form.getByRole("button", { name: "Apply", exact: true }) }, `HP change ${where}`, async () => {
     await shotWithKeyboard(pat, `kb-sheet-hp-lifted-${shotTag(view, "fight")}`, view.keyboard);
   });
-  if (!sideways) {
+  if (!sideways && view.keyboard < 300) {
     // A 300 px keyboard leaves the dock no room above the raised sheet under the turn band: its buttons join the header.
     const tall = { ...view, keyboard: 300 };
     await overKeyboard(pat, tall, { "HP change": hp, Apply: form.getByRole("button", { name: "Apply", exact: true }) }, `HP change over a 300 px keyboard ${where}`, async () => {
@@ -562,10 +602,9 @@ async function optionsPopover(view: View): Promise<void> {
   await popover.waitFor();
   const field = popover.getByRole("textbox", { name: "Spell" });
   await field.tap();
-  const layout = await pat.evaluate(() => (globalThis as unknown as KeyboardWindow).innerHeight);
   const scrollTop = () => popover.evaluate((el) => (el as unknown as { scrollTop: number }).scrollTop);
   try {
-    await keyboard(pat, layout - view.keyboard);
+    await openKeys(pat, view);
     await liftedWhole(pat, { Spell: field }, `the Spell field in the Shape popover ${where}`);
     const shown = await box(popover);
     const raised = await box(row.locator("[data-options-row]"));
@@ -579,7 +618,7 @@ async function optionsPopover(view: View): Promise<void> {
     await pat.mouse.wheel(0, -(kept + 50) * 2);
     await waitFor("the wheel's scroll", async () => ((await scrollTop()) === 0 ? true : null), 5_000).catch(async () => assert.fail(`${where}: the popover's scrollTop is ${await scrollTop()} after the wheel, from ${kept}`));
     // The suggestions bar over the keys goes: the keyboard is 40 px shorter, and the popover is placed again.
-    await keyboard(pat, layout - view.keyboard + 40);
+    await openKeys(pat, view, view.keyboard - 40);
     await waitFor("the popover placed on the lower row", async () => ((await box(popover)).bottom > shown.bottom + 20 ? true : null), 5_000);
     await pat.evaluate(() => {
       const frame = (globalThis as unknown as { requestAnimationFrame(f: () => void): void }).requestAnimationFrame;
@@ -587,14 +626,15 @@ async function optionsPopover(view: View): Promise<void> {
     });
     assert.equal(await scrollTop(), 0, `${where}: the popover keeps the place Pat scrolled to`);
   } finally {
-    await keyboard(pat, null);
+    await closeKeys(pat, view);
   }
   await pat.keyboard.press("Escape");
   await pickTool(pat, "Select");
 }
 
-/** The tag a screenshot names a view by, with what else holds it: `fight-844x390-130`. */
-const shotTag = (view: View, extra = "") => `${extra ? `${extra}-` : ""}${view.width}x${view.height}-${Math.round(view.scale * 100)}`;
+/** The tag a screenshot names a view by, with what else holds it: `fight-844x390-130`, `fight-320x568-130-kb300`, `fight-844x390-130-native`. */
+const shotTag = (view: View, extra = "") =>
+  `${extra ? `${extra}-` : ""}${view.width}x${view.height}-${Math.round(view.scale * 100)}${view.keyboard !== usualKeyboard(view) ? `-kb${view.keyboard}` : ""}${view.native ? "-native" : ""}`;
 
 /** Use… on Lay on Hands in the token bar's Uses drawer: the field and Spend over the keyboard, with the page panned `pan` px. */
 async function barUses(view: View, pan = 0, extra = ""): Promise<void> {
@@ -668,6 +708,10 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     await dmSocket.attach(dmContext, dm);
     await patSocket.attach(patContext, pat);
     patCdp = await patContext.newCDPSession(pat);
+    pat.on("request", (r) => {
+      const at = new URL(r.url());
+      if (at.origin === server.origin && (at.pathname.startsWith("/api/") || at.pathname.startsWith("/ws")) && !at.pathname.startsWith("/api/assets")) patRequests.push(Date.now());
+    });
   });
 
   after(async () => {
