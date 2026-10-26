@@ -9,7 +9,7 @@ import sharp from "sharp";
 import type { BuildChunk, EdgeFeature, RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
 import { isCellFullyFogged } from "#shared/rules/fog.ts";
-import { assertCanvasAt, ConsoleWatch, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Per-player vision (docs/design-v1-per-player-vision.md section 10, steps
@@ -66,6 +66,8 @@ const THORN_AT = { x: 3, y: 9 };
 const BREE_AT = { x: 12, y: 15 };
 const BREE_LATER = { x: 6, y: 13 };
 const GOBLIN_AT = { x: 7, y: 5 };
+/** Where the DM drags the goblin in pv-2b: still in Thorn's light, far from any wedge Bree later sees through the door. */
+const GOBLIN_LATER = { x: 7, y: 4 };
 const LABEL_AT = { x: 6.5, y: 3.5 };
 const LABEL_CELL = { x: 6, y: 3 };
 const DOOR_NORTH = { x: 3, y: 9 };
@@ -234,6 +236,9 @@ async function tapAway(page: Page, cell: { x: number; y: number }): Promise<void
   await tapCell(page, BOUNDS, cell);
   await page.getByRole("group", { name: /door$/ }).waitFor({ state: "detached" });
 }
+
+/** What reaches DMs only on a per-player scene (design section 9, rule 3): the holder list, the layers and every list of who saw. */
+const DM_ONLY = ['"holders:', '"exploredAny:', "exploredBy", "seenBy"];
 
 type Frame = { t?: string; state?: ProjectedState; changes?: Parameters<typeof applyChanges>[1]; you?: { memberId: string; role: string } };
 
@@ -432,6 +437,19 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     assert.equal(has.ground(sockets.ana.state, BREE_CORNER), false, "Bree's room is open on Ana's map");
   });
 
+  test("pv-2b. the DM drags the goblin within Thorn's light: Ana's page gets the drag, and pv-8 finds none of it on Ben's or the display's", async () => {
+    const from = sockets.ana.received.length;
+    await dragCells(dm, BOUNDS, GOBLIN_AT, GOBLIN_LATER);
+    await waitFor("the goblin moved in Ana's copy", () => {
+      const g = sockets.ana.state?.tokens[run.goblinId];
+      return g?.x === GOBLIN_LATER.x && g.y === GOBLIN_LATER.y ? true : null;
+    });
+    const dragFrames = sockets.ana.received.slice(from).filter((text) => text.includes('"t":"eph"') && text.includes(run.goblinId));
+    assert.ok(dragFrames.length > 0, "Ana's page got no frame of the goblin's drag, so the run never tested the drag's filter");
+    // The goblin stays in Thorn's light, so pv-3 to pv-7 meet it as before.
+    assert.equal(has.goblin(sockets.ben.state), false, "the goblin reached Ben by the drag");
+  });
+
   test("pv-3. Thorn opens a door on ground Ben never explored: open on Ana's map, not drawn on Ben's, and drawn open for Ben once Bree sees it", async () => {
     await tapDoor(ana);
     const closed = ana.getByRole("group", { name: "Closed door" });
@@ -560,19 +578,30 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     await shots.take(ana, "pervision-ana-pooled");
   });
 
-  test("pv-8. no frame Ben's page or the display received held the goblin while per player, or the label before the pool, and no page logged an error", () => {
+  test("pv-8. no frame Ben's page or the display received held or named the goblin, its row or a list or layer while per player, or the label before the pool, and no page logged an error", () => {
     for (const [who, watch, pooledAt] of [["Ben", sockets.ben, run.pooledAt.ben], ["the display", sockets.tv, run.pooledAt.tv]] as const) {
       assert.ok(pooledAt > 0, "pv-7 never ran");
       let perPlayer = 0;
       const broken = replay(watch, (state, index) => {
         if (has.perPlayer(state)) perPlayer++;
         if (has.perPlayer(state) && has.goblin(state)) return "the goblin, per player";
+        if (has.perPlayer(state) && state.encounter?.entries.some((e) => e.tokenId === run.goblinId)) return "the goblin's row, per player";
         if (index < pooledAt && has.label(state)) return "the label, before the pool";
         return null;
       });
       assert.deepEqual(broken, [], `${who}'s page`);
       // So the rule above judged copies of a per-player scene, not only whole-party ones.
       assert.ok(perPlayer > 5, `${who}'s page held a per-player scene after only ${perPlayer} frames`);
+      // Every frame as sent, of every kind, drag frames, rows and log lines included. Before the pool the goblin never
+      // reached this page, so not even a deletion may name it, and the label's words never did.
+      const named = watch.received.flatMap((text, index) => {
+        const found: string[] = [];
+        if (index < pooledAt && text.includes(run.goblinId)) found.push("the goblin's id");
+        if (index < pooledAt && text.includes(LABEL_TEXT)) found.push("the label's words");
+        for (const needle of DM_ONLY) if (text.includes(needle)) found.push(needle);
+        return found.length > 0 ? [`frame ${index} (${(JSON.parse(text) as Frame).t}): ${found.join(", ")}`] : [];
+      });
+      assert.deepEqual(named, [], `${who}'s page`);
     }
     for (const c of Object.values(consoles)) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);
