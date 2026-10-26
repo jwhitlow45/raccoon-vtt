@@ -12,10 +12,31 @@ import type { Turn } from "../../lib/view.ts";
  */
 const HOOK = "__rvttIsoHook";
 
-type Hook = { pick(pick: ViewPick | "follow"): void; turn(turn: Turn): void };
+export type Hook = { pick(pick: ViewPick | "follow"): void; turn(turn: Turn): void };
 
 function flagged(): boolean {
   return typeof globalThis !== "undefined" && (globalThis as Record<string, unknown>)[ISO_TEST_FLAG] === true;
+}
+
+/**
+ * Every mounted board's hook, the newest last. View as a player mounts a
+ * board over the DM's, which takes the hook while it stands. As it goes it
+ * hands the hook back to the board under it, which a plain delete took
+ * away for good (ISO5P2-FV-4).
+ */
+const installed: Hook[] = [];
+
+/** Sets `hook` as `__rvttIsoHook`, and returns what takes it away. */
+export function installHook(hook: Hook): () => void {
+  const g = globalThis as Record<string, unknown>;
+  installed.push(hook);
+  g[HOOK] = hook;
+  return () => {
+    installed.splice(installed.indexOf(hook), 1);
+    const top = installed.at(-1);
+    if (top) g[HOOK] = top;
+    else delete g[HOOK];
+  };
 }
 
 /** Installs `__rvttIsoHook` while the test flag is set. */
@@ -23,14 +44,9 @@ export function useIsoTestHook(key: string, sceneId: string): void {
   const on = flagged();
   useEffect(() => {
     if (!on) return;
-    const hook: Hook = {
+    return installHook({
       pick: (pick) => pickView(key, pick === "follow" ? null : pick),
       turn: (turn) => turnView(key, sceneId, turn),
-    };
-    const g = globalThis as Record<string, unknown>;
-    g[HOOK] = hook;
-    return () => {
-      if (g[HOOK] === hook) delete g[HOOK];
-    };
+    });
   }, [on, key, sceneId]);
 }
