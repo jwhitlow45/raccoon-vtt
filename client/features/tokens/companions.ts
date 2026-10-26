@@ -1,6 +1,7 @@
 import type { Actor, Character, CompanionTurn, CreatureSize, ImageRef, RoomState, Token } from "#shared/model.ts";
 import { companionLegBlocker, withinCompanionReach } from "#shared/permissions.ts";
 import type { ClientOp, TokenInput } from "#shared/protocol.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { rowCharacter } from "#shared/rules/initiative.ts";
 import { fitLine, type StatBlockMonster } from "#shared/srd/monsters.ts";
 import type { BlockLink } from "../monsters/statBlockLink.ts";
@@ -242,7 +243,7 @@ export function companionSpot(view: PlaceView, beside: Token, draft: Pick<TokenI
   });
   const accept = (p: Point) => {
     const placed = probe(p);
-    if (!withinCompanionReach(view.meta.settings, { ...placed, elevation: beside.elevation }, beside)) return false;
+    if (!withinCompanionReach(view.meta.settings, sceneGrid(scene), { ...placed, elevation: beside.elevation }, beside)) return false;
     return scene.blockMovement !== true || companionLegBlocker(view as RoomState, placed, beside) === null;
   };
   return firstFreeSpot({ center: { x: beside.x + near.w / 2, y: beside.y + near.h / 2 }, footprint: fp, bounds: scene.bounds, occupied: occupiedBoxes(Object.values(view.tokens), beside.sceneId), accept });

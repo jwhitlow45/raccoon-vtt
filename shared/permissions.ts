@@ -9,9 +9,11 @@ import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
 import { movementRules, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
-import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
+import { axisSteps, boxDistanceFt, legFeet, tokenCellBox } from "./rules/distance.ts";
 import { checkSetReach, planMove } from "./rules/moveLeg.ts";
-import { footprintSize } from "./rules/footprint.ts";
+import { footprintSize, sizeCategory } from "./rules/footprint.ts";
+import { isHex, sceneGrid, type Grid } from "./rules/grid.ts";
+import { footprintHexes, hexDistance, hexInScene, snapAnchor, type HexGrid } from "./rules/hex.ts";
 import { groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkEnd, type Walker } from "./rules/movement.ts";
@@ -180,6 +182,8 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
   const decision = actor.role === "dm" ? forDm(op, check) : forPlayer(op, check);
   // After the role's checks, so a player who names a hidden effect hears that it is not there, never what it holds.
   if (!decision.ok) return decision;
+  const hexed = hexPhaseFits(op, check);
+  if (!hexed.ok) return hexed;
   if (actor.role !== "dm" && setsSave(op)) return refuse("forbidden", SAVE_IS_DMS);
   const levels = levelsFit(op, check);
   if (!levels.ok) return levels;
@@ -191,6 +195,74 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
   if (!stamped.ok) return stamped;
   const prompted = promptFits(op, check);
   return prompted.ok ? expectFits(op, check) : prompted;
+}
+
+/**
+ * The refusals on a hex scene of what hexes do not have yet (docs/design-v1-hex-grids.md
+ * section 6, phase H1), in the words its limit lines show.
+ */
+export const ON_HEXES = {
+  build: "Walls, painted ground, heights and difficult ground need squares.",
+  traps: "Traps need squares.",
+  attach: "Riding and carrying need squares.",
+  walk: "Walking needs squares.",
+  squeeze: "Squeezing needs squares.",
+  roomFog: "Reveal room needs a room built on squares.",
+} as const;
+
+/**
+ * The server refuses on a hex scene every op whose rules are not hex yet
+ * (HX-D20): every build op that writes cell keys or walls, every trap made
+ * or changed, an attach, a move with a route or a squeeze (only
+ * `token.move` carries either), a token sent onto it with a link, and Reveal
+ * room's fog shapes. No such op was ever stored, so lifting a refusal in a
+ * later phase changes no replay. Lights, stamps, labels and Clear build
+ * stay, and so does every other fog shape. A restore keeps the same line in
+ * the reducer (shared/reducer/misc.ts), since two DMs can race a switch.
+ */
+function hexPhaseFits(op: Op, c: Check): Decision {
+  const hex = (sceneId: string | undefined) => {
+    const scene = sceneId === undefined ? undefined : c.state.scenes[sceneId];
+    return scene !== undefined && isHex(sceneGrid(scene));
+  };
+  const no = (words: string) => refuse("invalid", words);
+  switch (op.t) {
+    case "build.paint":
+    case "build.erase":
+    case "build.rect":
+    case "build.poly":
+    case "build.edge":
+    case "build.walls":
+    case "build.height":
+    case "build.stairs":
+    case "build.rough":
+      return hex(op.sceneId) ? no(ON_HEXES.build) : OK;
+    case "trap.create":
+      return hex(op.trap.sceneId) ? no(ON_HEXES.traps) : OK;
+    case "trap.update":
+      return hex(c.state.traps[op.trapId]?.sceneId) ? no(ON_HEXES.traps) : OK;
+    case "token.attach":
+      return hex(c.state.tokens[op.tokenId]?.sceneId) || hex(c.state.tokens[op.to]?.sceneId) ? no(ON_HEXES.attach) : OK;
+    case "token.move": {
+      if (!hex(c.state.tokens[op.tokenId]?.sceneId)) return OK;
+      if (op.route !== undefined) return no(ON_HEXES.walk);
+      return op.squeeze === true ? no(ON_HEXES.squeeze) : OK;
+    }
+    case "token.update": {
+      const token = c.state.tokens[op.tokenId];
+      const to = op.patch.sceneId;
+      if (!token || to === undefined || to === token.sceneId || !hex(to)) return OK;
+      // A holder takes what rides or is carried along to the other scene (reducer/tokens.ts carriedAlong).
+      const linked = token.attached !== undefined || Object.values(c.state.tokens).some((t) => t.attached?.to === token.id);
+      return linked ? no(ON_HEXES.attach) : OK;
+    }
+    case "fog.draft":
+      return hex(op.sceneId) && (op.add ?? []).some((f) => f.shape.kind === "cells") ? no(ON_HEXES.roomFog) : OK;
+    case "fog.live":
+      return hex(op.sceneId) && op.ops.some((f) => f.shape.kind === "cells") ? no(ON_HEXES.roomFog) : OK;
+    default:
+      return OK;
+  }
 }
 
 /** The refusal of a prompt whose turn record is not the creature's current one, or whose row and round no longer act (docs/design-v1-combat-controls.md 2.3). */
@@ -1832,8 +1904,11 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
   return blocker === null ? OK : refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
 }
 
-function insideScene(scene: Scene, token: Token, at: Point): boolean {
-  const fp = footprintSize(token);
+/** Whether a footprint at `at` lies inside the scene: its box on squares, and on hexes every hex it stands on (docs/design-v1-hex-grids.md 4.2). */
+function insideScene(scene: Scene, token: Pick<Token, "size" | "w" | "h">, at: Point): boolean {
+  const grid = sceneGrid(scene);
+  if (isHex(grid)) return standsOn(grid, { ...token, x: at.x, y: at.y, elevation: 0 }).every((h) => hexInScene(grid, scene.bounds, h));
+  const fp = footprintSize({ ...token, x: at.x, y: at.y });
   return at.x >= 0 && at.y >= 0 && at.x + fp.w <= scene.bounds.w && at.y + fp.h <= scene.bounds.h;
 }
 
@@ -2056,9 +2131,37 @@ export function companionReachFt(feetPerCell: number): number {
   return doorReachFt(feetPerCell);
 }
 
-/** Whether a footprint is within a companion's reach of its character's token, by the room's own distance rule. */
-export function withinCompanionReach(settings: RoomSettings, spot: Parameters<typeof tokenCellBox>[0], character: Parameters<typeof tokenCellBox>[0]): boolean {
+/** Whether a footprint is within a companion's reach of its character's token, by the room's own distance rule and the scene's grid. */
+export function withinCompanionReach(settings: RoomSettings, grid: Grid, spot: Parameters<typeof tokenCellBox>[0], character: Parameters<typeof tokenCellBox>[0]): boolean {
+  if (isHex(grid)) return hexApartFt(grid, spot, character, settings) <= companionReachFt(settings.feetPerCell);
   return boxDistanceFt(tokenCellBox(spot, settings.feetPerCell), tokenCellBox(character, settings.feetPerCell), settings) <= companionReachFt(settings.feetPerCell);
+}
+
+/**
+ * The hexes a token stands on (docs/design-v1-hex-grids.md 4.2): its size's,
+ * a custom size by its category, around the anchor nearest its box's
+ * center. HX-2's footprint rules take over this reading.
+ */
+function standsOn(grid: HexGrid, token: Parameters<typeof tokenCellBox>[0]) {
+  const box = footprintSize(token);
+  const size = sizeCategory(token);
+  return footprintHexes(grid, size, snapAnchor(grid, size, { x: token.x + box.w / 2, y: token.y + box.h / 2 }));
+}
+
+/**
+ * Feet between two creatures on hexes (4.3): the fewest hex steps between
+ * a hex of one and a hex of the other, and with height the room's rule
+ * between those steps and the vertical ones, as a hex has no diagonal.
+ */
+function hexApartFt(grid: HexGrid, a: Parameters<typeof tokenCellBox>[0], b: Parameters<typeof tokenCellBox>[0], settings: RoomSettings): number {
+  const of = standsOn(grid, a);
+  const to = standsOn(grid, b);
+  let steps = Infinity;
+  for (const h of of) for (const k of to) steps = Math.min(steps, hexDistance(grid, h, k));
+  const za = tokenCellBox(a, settings.feetPerCell);
+  const zb = tokenCellBox(b, settings.feetPerCell);
+  const ft = legFeet(steps, 0, axisSteps(za.z0, za.z1, zb.z0, zb.z1), settings.diagonal, settings.feetPerCell);
+  return settings.diagonal === "euclid" ? Math.round(ft) : ft;
 }
 
 /**
@@ -2126,15 +2229,14 @@ function companionCheck(c: Check, input: TokenInput, link: NonNullable<TokenInpu
   if (!ownsCharacter(c.actor, character)) return NOT_YOURS;
   const scene = c.state.scenes[input.sceneId];
   if (c.state.tokens[input.id] || !scene || input.sceneId !== viewerSceneId(c.state, c.actor, c.opts)) return GONE;
-  const fp = footprintSize(input);
-  if (input.x < 0 || input.y < 0 || input.x + fp.w > scene.bounds.w || input.y + fp.h > scene.bounds.h) return refuse("forbidden", "place it inside the map");
+  if (!insideScene(scene, input, input)) return refuse("forbidden", "place it inside the map");
   const settings = c.state.meta.settings;
   const placed = { ...input, elevation: input.elevation ?? 0 };
   const own = Object.values(c.state.tokens)
     .filter((t) => t.sceneId === input.sceneId && "ref" in t.actor && t.actor.ref === character.id)
     .sort((a, b) => (a.id < b.id ? -1 : 1));
   if (own.length === 0) return refuse("forbidden", companionWords.noToken(character.name));
-  const near = own.filter((t) => withinCompanionReach(settings, placed, t));
+  const near = own.filter((t) => withinCompanionReach(settings, sceneGrid(scene), placed, t));
   if (near.length === 0) return refuse("forbidden", companionWords.tooFar(character.name));
   if (scene.blockMovement === true) {
     const blockers = near.map((t) => companionLegBlocker(c.state, input, t));
@@ -2216,8 +2318,7 @@ function placeTokenCheck(c: Check, input: Extract<Op, { t: "token.create" }>["to
   if (special) return refuse("forbidden", "players place only a plain token of their own character");
   if (input.size !== character.size || input.w !== undefined || input.h !== undefined) return refuse("forbidden", "the token takes its character's size");
   if (input.ownerIds !== undefined && !sameMembers(input.ownerIds, character.ownerIds)) return refuse("forbidden", "the token belongs to whoever owns its character");
-  const fp = footprintSize(input);
-  if (input.x < 0 || input.y < 0 || input.x + fp.w > scene.bounds.w || input.y + fp.h > scene.bounds.h) return refuse("forbidden", "place it inside the map");
+  if (!insideScene(scene, input, input)) return refuse("forbidden", "place it inside the map");
   const placed = Object.values(c.state.tokens).some((t) => t.sceneId === input.sceneId && "ref" in t.actor && t.actor.ref === character.id);
   if (placed) return refuse("forbidden", "that character is on the map already");
   if (!tokenImagesUsable(c, input)) return GONE;
