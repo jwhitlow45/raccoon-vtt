@@ -583,7 +583,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     assert.equal((await stored(tv, `rvtt.view.${run.roomId}`) as { pick: string }).pick, "isometric", "the display's Top-down is its own");
 
     await tv.reload();
-    await tv.locator(".konvajs-content").first().waitFor();
+    await tv.locator(".konvajs-content").filter({ visible: true }).first().waitFor();
     menu = await openTvMenu();
     await menu.getByRole("group", { name: "View" }).getByRole("menuitemradio", { name: "Top-down", checked: true }).waitFor();
     await menu.getByRole("group", { name: "View" }).getByRole("menuitemradio", { name: "Isometric" }).click();
@@ -598,7 +598,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         await tv.setViewportSize(size);
         await tv.evaluate((s) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.displayUiScale", String(s)), scale);
         await tv.reload();
-        await tv.locator(".konvajs-content").first().waitFor();
+        await tv.locator(".konvajs-content").filter({ visible: true }).first().waitFor();
         menu = await openTvMenu();
         await menu.getByRole("menuitem", { name: "Turn left", exact: true }).waitFor();
         const at = `display ${size.width}x${size.height}${scale === 1 ? "" : "-130"}`;
