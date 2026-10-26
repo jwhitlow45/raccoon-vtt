@@ -26,7 +26,11 @@ Asking the owner is off, so each choice the decisions leave open is a guess at t
 
 1. **A cell is held when any of its sub-cells is revealed in the viewer's fog**, and an element is held when any cell it touches is held: a cell's terrain, height and marks, an edge by either cell beside it, a free wall by any cell its segment meets, a label or stamp by its box (today's rule). On hexes a cell's sub-cells are those inside the hex (HX-D10). Rejected: a sub-cell test per element (it leaks less inside an edge cell, but a free wall crossing a held cell could then be withheld and still stop a move there, which M4 must never allow).
 2. **Live where the viewer sees or the DM revealed.** An element is live when it touches a cell in the viewer's sight (vision on) or a cell the DM's fog layer reveals, remembered elsewhere. A DM's reveal means "show them this". Rejected: memory on DM-revealed ground (a reveal would need its own refresh, and fog-only scenes show revealed ground live by decision).
-3. **Doors follow memory too.** A door's state on remembered ground stays as last seen. This replaces "doors on explored ground show their live state" (addendum question 16) and D-261025-17's shared live doors, since D-261026-25 names doors. Rejected: live doors on remembered ground (a monster opening a door far off would show).
+3. **Doors follow memory too.** A door's state on remembered ground stays as last seen. This replaces "doors on explored ground show their live state" (addendum question 16) and D-261025-17's shared live doors, since D-261026-25 names doors. Rejected: live doors on remembered ground (a monster opening a door far off would show). Round 3 rejected per-player door memory for four failures, and this memory avoids each:
+   - Seeding disclosed unseen doors: nothing is seeded. An entry is written only for an element on ground its layer already remembers, as that layer showed it, so no layer holds a door it never saw.
+   - Route corners leaked private door knowledge: a holder's memory lies only on their own ground, and a corner reaches another player only where every spot is on shared ground (per-player 6.5), so no corner draws one holder's memory for another.
+   - Unbounded growth: memory holds only differences from the build, at most 64 KiB per layer and scene, and forgets its ground past that.
+   - Import breakage: memory is keyed and mapped like the explored layers (`remap.ts`), and one that cannot map goes with its layer, so its ground is forgotten too.
 4. **Labels and stamps follow memory, pins and found traps do not.** Labels and stamps are map furniture. Pins are notes the DM places for players, and found traps are players' own knowledge, so both keep today's rules. Rejected: memory for pins (page access already decides them).
 5. **One memory per explored layer.** The party's layer has one, and each sight holder's own layer has one (per-player scenes). A holder reads their own memory where their layer holds the ground, else the party's. Party memory refreshes under the shared sight, a holder's under their own sight. Rejected: per-player memory of party ground (each holder would keep a second copy of everything the party remembers).
 6. **Memory is a diff against the build now**, only where a layer last saw something else, so it is empty unless the DM edits remembered ground out of sight. Rejected: full chunk copies per layer (7 MB at the caps, past the room's 8 MiB).
@@ -37,7 +41,7 @@ Asking the owner is off, so each choice the decisions leave open is a guess at t
 11. **Remembered ground keeps the real walls for moves.** A drag across remembered ground out of sight can be refused by a change the party has not seen. Accepted as risk 1, since the creature walked into it. Rejected: moving by memory there (walking through a new portcullis).
 12. **Case 6 is sight, and the builder says so.** Ground seen empty stays empty while out of sight. On an open scene sight reaches everything, so what the DM builds in view shows as it is built. The builder warns on the players' scene, and Fog all now also forgets memory. Rejected: unpainted void blocking sight (changes sight's rules and blinds a battle mat).
 13. **Presets** are Explore (fog and party vision on), Reveal by hand (fog on, vision off) and Everything (both off). Light, Sight and the rest stay their own rows. Fog off with vision on reads Custom. Rejected: presets that also set light (a dungeon and a night street both explore).
-14. **The room default copies the preset only**, adjusted per kind: under Explore a map image or starter map starts on Reveal by hand and a blank mat on Everything, since sight with no walls reaches everywhere and a mat under party vision is black until a token stands on it. "Like <scene>" copies fog, party vision with its light and Sight, movement blocking and automatic walls. Rejected: blank mats on Explore (a new room's players would open on a black screen).
+14. **The room default copies the preset only**, adjusted per kind: under Explore a map image or starter map with no walls starts on Reveal by hand, since sight with no walls would show players all of the art. A blank mat starts on Explore: with no walls the party sees the whole open mat anyway, and a dungeon built on it later follows memory (case 6). The room's first Battle mat stays Everything, so players joining a new room see the mat, not fog. "Like <scene>" copies fog, party vision with its light and Sight, movement blocking and automatic walls. Rejected: blank mats on Everything (a dungeon built on a mat later would show whole), the first Battle mat on Explore (a new room's players would open on fog until a token of theirs stands there).
 15. **Copy onto other scenes copies what players see only**: Players see, Light and Sight. Rejected: copying automatic walls and movement (changes walls of built scenes).
 16. **The settings page folds on phones.** What players see opens, the other groups start folded on a phone and open on a wide screen, and each remembers per device. Rejected: a separate vision page (the addition rejects it).
 
@@ -174,23 +178,23 @@ A radio group named **Players see**:
 - **Reveal by hand**: "Players see what you reveal with the fog tool."
 - **Everything**: "Players see the whole scene."
 - **Custom**, shown in place of a ticked option when fog is off and vision on: "Custom: party vision is on and fog is off, so players see the whole map, dimmed outside what their characters see."
-- **Wall-less warning**, under Explore when the scene's walls block no sight (`sceneWalls(...).sightPotential === 0`): "This scene has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand." It shows in the new-scene form, in the scene's settings and in Move players.
+- **Wall-less warning**, under Explore on a scene with a map image whose walls block no sight (`sceneWalls(...).sightPotential === 0`): "This scene has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand." It shows in the new-scene form, in the scene's settings and in Move players.
 - **Where.** The new-scene form for Battle mat, Map image (starter maps included) and Builder, under Kind of scene. The Universal VTT dialog, in place of "Start under fog", keeping its Light row, whose help becomes "<the proposal's reason>". Duplicate keeps the original's settings, as today. The top of the scene's What players see group.
 - **Patches.** Explore sends `fogEnabled: true, vision: { on: true, light }`, Reveal by hand `fogEnabled: true, vision: { on: false, light }`, Everything `fogEnabled: false, vision: { on: false, light }`, in one `scene.update`. Light and Sight keep their values. The busy line is today's `sightWorkingText`.
 
 ### 8.2 The room default and Like
 
 - `RoomSettings.newScenePlayers?: "explore" | "reveal" | "all"`, read only by the new-scene form, as `newScenes` is (HX-D19): every `scene.create` carries its own fields, so replay never reads it. New rooms set `"explore"` (shared/initial.ts). Absent reads as today's per-kind defaults.
-- **Room settings** gain a group **New scenes** at its end with **Players see on new scenes**: Explore, Reveal by hand, Everything, and while unset "As before" ("Maps and the builder start under fog, battle mats without."). Help: "New scenes start on this. Under Explore a map image starts on Reveal by hand and a battle mat on Everything, since sight with no walls reaches everywhere."
+- **Room settings** gain a group **New scenes** at its end with **Players see on new scenes**: Explore, Reveal by hand, Everything, and while unset "As before" ("Maps and the builder start under fog, battle mats without."). Help: "New scenes start on this. Under Explore a map image with no walls starts on Reveal by hand, since party vision would show players all of it."
 
 | Default | Builder | Universal VTT | Map image, starter map | Blank mat |
 | --- | --- | --- | --- | --- |
-| Explore | Explore | Explore | Reveal by hand, warned | Everything |
+| Explore | Explore | Explore | Reveal by hand, warned | Explore |
 | Reveal by hand | Reveal by hand | Reveal by hand | Reveal by hand | Reveal by hand |
 | Everything | Everything | Everything | Everything | Everything |
 | unset (existing rooms) | Reveal by hand | Reveal by hand | Reveal by hand | Everything |
 
-- **Like <scene>**: a fourth option in the form's Players see, "Like Crypt", naming the DM's current scene, with help listing what it copies ("Explore, Dark, Per player, players' moves blocked, walls around floor only"). It copies `fogEnabled`, `vision` (`on`, `light`, `perPlayer`), `blockMovement` and `autoWalls`. The Universal VTT dialog keeps `autoWalls: "off"`, since the file brings its walls. A per-player copy starts with an empty holder list. The room's first Battle mat is Everything, as today.
+- **Like <scene>**: a fourth option in the form's Players see, "Like Crypt", naming the DM's current scene, with help listing what it copies ("Explore, Dark, Per player, players' moves blocked, walls around floor only"). It copies `fogEnabled`, `vision` (`on`, `light`, `perPlayer`), `blockMovement` and `autoWalls`. The Universal VTT dialog keeps `autoWalls: "off"`, since the file brings its walls. A per-player copy starts with an empty holder list. The room's first Battle mat is Everything in every room, as today, so players joining a new room see the mat.
 
 ### 8.3 Use these settings on other scenes
 
@@ -245,6 +249,8 @@ Each group header is a button with `aria-expanded`. On a phone (below `wideMinWi
 | Import, duplicate with Fog | Memory carried and mapped | remap and duplicate units |
 | A room from before this deploys | Never-seen build gone from players, explored shown as at deploy | migrate unit, e2e md-1 |
 | New Map image in a new room | Reveal by hand, Explore offered with the wall-less warning | client unit, e2e ss-1 |
+| New Battle mat in a new room | Explore, no warning, a dungeon built on it later follows memory | client unit, e2e ss-1 |
+| A new room's first Battle mat | Everything, so joining players see the mat | initial unit |
 | Like Crypt | Fog, vision, light, Sight, movement and walls copied | client unit, e2e ss-2 |
 | Use on 3 scenes, then Undo | All three change, one Undo reverts all three | e2e ss-3 |
 | An existing room | New scenes as before until the DM sets a default | client unit |
