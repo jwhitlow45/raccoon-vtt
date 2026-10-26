@@ -912,11 +912,43 @@ async function holdPreviews(page: Page): Promise<void> {
 }
 
 /**
+ * What is wrong with a preview wait's words at the interface size `scale`:
+ * they must draw at 14 px times it, since the preview's dialog zooms
+ * nothing and the wait zooms its words itself (review PV4-ASTRA-2), and
+ * keep inside their box and the window.
+ */
+async function previewWaitTextLines(words: Locator, scale: number, label: string): Promise<string[]> {
+  const got = await words.evaluate((el) => {
+    type El = {
+      currentCSSZoom?: number;
+      scrollWidth: number;
+      clientWidth: number;
+      getBoundingClientRect(): { left: number; right: number; top: number; bottom: number };
+      ownerDocument: { defaultView: { innerWidth: number; innerHeight: number; getComputedStyle(e: unknown): { fontSize: string } } };
+    };
+    const box = el as unknown as El;
+    const view = box.ownerDocument.defaultView;
+    const r = box.getBoundingClientRect();
+    return {
+      px: parseFloat(view.getComputedStyle(box).fontSize) * (box.currentCSSZoom ?? 1),
+      sideways: box.scrollWidth - box.clientWidth,
+      inside: r.left >= -0.5 && r.top >= -0.5 && r.right <= view.innerWidth + 0.5 && r.bottom <= view.innerHeight + 0.5,
+    };
+  });
+  const lines: string[] = [];
+  if (Math.abs(got.px - 14 * scale) > 0.5) lines.push(`${label}: its words draw at ${got.px.toFixed(1)} px, not ${(14 * scale).toFixed(1)}`);
+  if (got.sideways > 0) lines.push(`${label}: its words run ${got.sideways} px past their box`);
+  if (!got.inside) lines.push(`${label}: its words leave the window`);
+  return lines;
+}
+
+/**
  * pv4: View as a player's wait (docs/design-v1-per-player-vision.md 7.4
  * and 11): its socket is held unanswered (holdPreviews), so "Loading
  * what Pat sees…" stands, then closed, so it says it could not load.
+ * Each time its words' drawn size and fit are checked at `scale`.
  */
-async function previewWaitScreens(sweep: Sweep, page: Page): Promise<void> {
+async function previewWaitScreens(sweep: Sweep, page: Page, scale: number): Promise<void> {
   heldPreview = null;
   await escapeAll(page);
   const panel = await openPanelOf(page, "DM");
@@ -927,14 +959,21 @@ async function previewWaitScreens(sweep: Sweep, page: Page): Promise<void> {
   await preview.waitFor();
   try {
     const loading = preview.locator('[data-preview-wait="loading"]');
-    if (await showsWithin(loading.getByRole("status"), 3_000)) await sweep.measure(page, "preview-loading", loading);
-    else await sweep.missing(page, "preview-loading", "the preview showed no loading line");
+    // The status stays mounted, empty until the shared delay, so the wait is for its words.
+    const loadingWords = loading.getByRole("status").filter({ hasText: "Loading what Pat sees" });
+    if (await showsWithin(loadingWords, 3_000)) {
+      await sweep.measure(page, "preview-loading", loading);
+      await sweep.add(page, "preview-loading-words", await previewWaitTextLines(loadingWords, scale, `${sweep.at} preview-loading-words`));
+    } else await sweep.missing(page, "preview-loading", "the preview showed no loading line");
     // Read through a cast: the route's handler sets it after the reset above, which the compiler cannot see.
     const held = await waitFor("the preview's socket", () => heldPreview as WebSocketRoute | null, 5_000);
     await held.close();
     const failed = preview.locator('[data-preview-wait="failed"]');
-    if (await showsWithin(failed.getByRole("status"), 3_000)) await sweep.measure(page, "preview-failed", failed);
-    else await sweep.missing(page, "preview-failed", "a closed preview socket said nothing");
+    const failedWords = failed.getByRole("status").filter({ hasText: "Could not load what Pat sees" });
+    if (await showsWithin(failedWords, 3_000)) {
+      await sweep.measure(page, "preview-failed", failed);
+      await sweep.add(page, "preview-failed-words", await previewWaitTextLines(failedWords, scale, `${sweep.at} preview-failed-words`));
+    } else await sweep.missing(page, "preview-failed", "a closed preview socket said nothing");
   } finally {
     await preview.getByRole("button", { name: "Exit", exact: true }).click();
     await preview.waitFor({ state: "detached" });
@@ -2898,7 +2937,7 @@ export function sizeTests(names: readonly string[]): void {
           await waitFor("the DM's snapshot", () => dmSocket.state);
           await dmScreens(sweep, page, size);
           await visionScreens(sweep, page);
-          await previewWaitScreens(sweep, page);
+          await previewWaitScreens(sweep, page, scale);
           if (DICE_AT.has(size.name)) await dmDiceScreens(sweep, page);
           if (COMBAT_AT.has(size.name)) await combatScreens(sweep, page, size, scale);
           console.log(`${at}: measured ${[...sweep.seen].join(", ")}`);
