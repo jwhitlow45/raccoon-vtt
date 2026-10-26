@@ -1,24 +1,38 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useStore } from "zustand";
 import { Button } from "../../components/Button.tsx";
+import { Loading } from "../../components/Loading.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { useModalDialog } from "../../lib/modalDialog.ts";
 import { useUiScale } from "../device/settings.ts";
 import { theme } from "../../lib/theme.ts";
 import { Room } from "../../pages/Room.tsx";
-import { RoomProvider, useAssets, useRoomStore } from "../../state/view.ts";
+import { browserEnv, createRoomSocket, previewSocketUrl } from "../../state/socket.ts";
+import { createRoomStore, type RoomStore } from "../../state/store.ts";
+import { RoomProvider, useAssets, useRoomView } from "../../state/view.ts";
 import { SHORT_LANDSCAPE_MAX, useTopBars } from "../encounter/band.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { createPreview, type Preview } from "./preview.ts";
 import { PreviewContext, type PreviewNotice } from "./previewContext.ts";
 
 const FLASH_MS = 2_000;
+/** How long the preview waits for the player's snapshot before it says it could not load (docs/design-v1-per-player-vision.md 7.4). */
+export const PREVIEW_LOAD_MS = 10_000;
+
+/** The preview's own socket and store, and the read-only room drawn from them. */
+type Live = { room: RoomStore; preview: Preview; stop(): void };
 
 /**
  * "View as a player": the whole Room page again, over the DM's, drawn from
- * one player's projection of the DM's view (preview.ts) with every action
- * refused. It is the real page, top bar, toolbar and panels included, so
- * the DM sees exactly what that player sees, fog and all.
+ * that player's own projection, which a socket of its own asks the server
+ * for (docs/design-v1-per-player-vision.md 7.4, preview.ts), with every
+ * action refused. It is the real page, top bar, toolbar and panels
+ * included, so the DM sees exactly what that player sees, fog and all, on
+ * any scene, while the DM's own socket and tools stay as they are. Until
+ * the player's snapshot lands it says it is loading, after the shared
+ * delay, and after 10 s, or a socket that closed first, that it could not
+ * load, with Exit as the way out.
  *
  * The page always fills the viewport, so the banner floats over the map
  * just under the top bar, and a cream frame marks the whole screen as a
@@ -36,9 +50,10 @@ const FLASH_MS = 2_000;
  * the page's own notices and the column start below it.
  */
 export function PlayerPreview(props: { memberId: string; name: string; onExit(): void }) {
-  const source = useRoomStore();
+  const roomId = useRoomView((s) => s.roomId);
   const assets = useAssets();
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [live, setLive] = useState<Live | null>(null);
+  const [late, setLate] = useState(false);
   const [flash, setFlash] = useState(false);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { memberId, name, onExit } = props;
@@ -67,23 +82,38 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
   );
   const context = useMemo(() => ({ memberId, name, notice }), [memberId, name, notice]);
 
-  // Made in an effect, so a development double mount disposes the first one.
+  // Made in an effect, so a development double mount disposes the first one. Another player means a new socket, a new name does not.
+  const nameRef = useRef(name);
+  nameRef.current = name;
   useEffect(() => {
-    const p = createPreview(source, memberId, {
-      name,
+    const room = createRoomStore({ roomId, you: { memberId, role: "player" } });
+    const socket = createRoomSocket({ url: previewSocketUrl(roomId, memberId), room, env: browserEnv(), previewOf: memberId });
+    socket.start();
+    const preview = createPreview(room.store, memberId, {
+      name: nameRef.current,
       onRefuse: () => {
         setFlash(true);
         if (flashTimer.current) clearTimeout(flashTimer.current);
         flashTimer.current = setTimeout(() => setFlash(false), FLASH_MS);
       },
     });
-    setPreview(p);
+    // Until the snapshot lands the socket may retry nothing (state/socket.ts previewOf), so the wait ends here or in its close.
+    const wait = setTimeout(() => {
+      if (room.store.getState().view !== null) return;
+      setLate(true);
+      socket.dispose();
+    }, PREVIEW_LOAD_MS);
+    setLate(false);
+    setLive({ room, preview, stop: () => socket.dispose() });
     return () => {
-      p.dispose();
+      clearTimeout(wait);
+      preview.dispose();
+      socket.dispose();
+      room.dispose();
       if (flashTimer.current) clearTimeout(flashTimer.current);
-      setPreview(null);
+      setLive(null);
     };
-  }, [source, memberId, name]);
+  }, [roomId, memberId]);
 
   // A modal dialog (lib/modalDialog.ts), so the DM's own room behind it is inert and Escape leaves the preview.
   // It holds a whole Room page, whose chrome takes the interface size itself and whose map must not.
@@ -104,7 +134,7 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
         </Button>
       }
     >
-      <strong>Viewing as {name}.</strong> {flash ? <strong>Read-only: nothing you do here is saved.</strong> : "Nothing here is saved."}
+      <strong>Viewing as {name}.</strong> {flash ? <strong>Read-only: nothing you do here is saved.</strong> : "Nothing here is saved."} Whispers between players are not shown.
     </Notice>
   );
 
@@ -130,13 +160,7 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
         overflow: "hidden",
       }}
     >
-      {preview ? (
-        <PreviewContext.Provider value={context}>
-          <RoomProvider store={preview.store} actions={preview.actions} ui={preview.ui} assets={assets}>
-            <Room />
-          </RoomProvider>
-        </PreviewContext.Provider>
-      ) : null}
+      {live ? <PreviewRoom live={live} late={late} name={name} context={context} assets={assets} /> : <PreviewWait name={name} failed={false} />}
       <div aria-hidden style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", border: `4px solid ${theme.color.accentSoft}` }} />
       <div
         ref={noticeRef}
@@ -154,5 +178,44 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
       {slot ? createPortal(<div style={{ width: "100%", maxWidth: 520, pointerEvents: "auto", fontFamily: theme.font.body }}>{banner}</div>, slot) : null}
     </dialog>,
     document.body,
+  );
+}
+
+/**
+ * The previewed page once the player's snapshot is in, and until then
+ * what it waits on. A socket that ended (refused, closed before it loaded,
+ * or turned away later) or a wait past PREVIEW_LOAD_MS says it could not
+ * load, and nothing of the room is drawn.
+ */
+function PreviewRoom(props: { live: Live; late: boolean; name: string; context: { memberId: string; name: string; notice?: PreviewNotice }; assets: ReturnType<typeof useAssets> }) {
+  const { live } = props;
+  const loaded = useStore(live.room.store, (s) => s.view !== null);
+  const ended = useStore(live.room.store, (s) => s.ended !== null);
+  const failed = ended || (props.late && !loaded);
+  useEffect(() => {
+    if (failed) live.stop();
+  }, [failed, live]);
+  if (failed || !loaded) return <PreviewWait name={props.name} failed={failed} />;
+  return (
+    <PreviewContext.Provider value={props.context}>
+      <RoomProvider store={live.preview.store} actions={live.preview.actions} ui={live.preview.ui} assets={props.assets}>
+        <Room />
+      </RoomProvider>
+    </PreviewContext.Provider>
+  );
+}
+
+/** "Loading what Ana sees…" after the shared delay, or that it could not load, centered over the stage, each a polite status. */
+function PreviewWait(props: { name: string; failed: boolean }) {
+  return (
+    <div data-preview-wait={props.failed ? "failed" : "loading"} style={{ position: "fixed", inset: 0, display: "grid", placeItems: "center", padding: theme.space(4), fontFamily: theme.font.body }}>
+      {props.failed ? (
+        <p role="status" style={{ margin: 0, maxWidth: 420, textAlign: "center", fontSize: theme.font.body14, lineHeight: theme.leading.body, color: theme.color.text, overflowWrap: "anywhere" }}>
+          Could not load what {props.name} sees. Close and try again.
+        </p>
+      ) : (
+        <Loading text={`Loading what ${props.name} sees…`} style={{ maxWidth: 420, overflowWrap: "anywhere" }} />
+      )}
+    </div>
   );
 }

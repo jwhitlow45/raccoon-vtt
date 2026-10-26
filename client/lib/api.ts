@@ -458,11 +458,13 @@ export const api = {
   /** A public D&D Beyond character read by the server into a stat block's fill (docs/design-v1-pc-stats.md 6.3). The caller checks the fill. */
   ddbImport: (roomId: string, link: string, signal?: AbortSignal) => request<{ fill: unknown }>("POST", `${room(roomId)}/ddb-import`, { json: { link }, signal }),
 
-  getLog: (roomId: string, options: { before?: string; sceneId?: string | null; limit?: number } = {}) => {
+  /** `as`: a DM's preview of that player, whose pages the server projects for them (docs/design-v1-per-player-vision.md 7.4). */
+  getLog: (roomId: string, options: { before?: string; sceneId?: string | null; limit?: number; as?: string } = {}) => {
     const q = new URLSearchParams();
     if (options.before !== undefined) q.set("before", options.before);
     if (options.sceneId) q.set("sceneId", options.sceneId);
     if (options.limit !== undefined) q.set("limit", String(options.limit));
+    if (options.as !== undefined) q.set("as", options.as);
     const query = q.toString();
     return request<LogPage>("GET", `${room(roomId)}/log${query ? `?${query}` : ""}`);
   },

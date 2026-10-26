@@ -1,27 +1,27 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
-import type { RoomState } from "#shared/model.ts";
-import { projectState } from "#shared/project.ts";
-import { shareState } from "../../state/share.ts";
 import { drawnToasts, heldToasts, type RoomUi } from "../../state/store.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
-import { crossWide, EMPTY_EPHEMERAL, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
+import { crossWide, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
 import { panelById } from "../panels.ts";
 
 /**
  * "View as a player" (features section 13): the DM sees exactly what one
  * player sees, with fog and without hidden things.
  *
- * Nothing is asked of the server. The DM's own view already holds the whole
- * scene the DM is looking at, so the shared projection (shared/project.ts,
- * the same code the server runs before anything reaches a player) turns it
- * into that player's view. That only works when the DM is looking at the
- * players' scene: another scene's contents are not in the DM's view.
+ * The server projects it (docs/design-v1-per-player-vision.md 7.4): a
+ * preview socket asks for the room as that player (state/socket.ts
+ * previewOf), on whichever scene the DM is looking at, and the room store
+ * behind it holds that player's own projection, their own sight and map
+ * on a per-player scene included, which the DM's view cannot make, and no
+ * whisper between players. This file turns that store into a read-only
+ * room for the Room page: every action is refused on the device, and the
+ * socket sends nothing but its hello.
  */
-export function playerPreview(dmView: RoomState, dmSceneId: string | null, memberId: string): RoomState | null {
-  const playerScene = dmView.meta.playerSceneId;
-  if (playerScene !== null && playerScene !== dmSceneId) return null;
-  return projectState(dmView, { memberId, role: "player" }, { sceneId: null }) as unknown as RoomState;
+
+/** The notice of a refused action, where no banner says it (PlayerPreview's does). */
+export function previewNotice(name: string | undefined): string {
+  return `You are viewing as ${name ?? "a player"}. Nothing you do here is saved. Whispers between players are not shown.`;
 }
 
 /** The parts of a store the preview reads. The live store and the fixture's both fit. */
@@ -39,32 +39,32 @@ const SNAP_BACK_MS = 250;
 
 /**
  * A read-only room for the Room page to draw a player's view from. It
- * follows the DM's store, and every action is refused locally, so a tap in
- * the preview can never change the room or reach the server. `onRefuse`
- * lets the preview's own banner say so. Without it, a toast does.
+ * follows the preview socket's store (`source`), the player's own
+ * projection as the server sent it, and every action is refused locally,
+ * so a tap in the preview can never change the room or reach the server.
+ * `onRefuse` lets the preview's own banner say so. Without it, a toast
+ * does.
  */
 export function createPreview(source: PreviewSource, memberId: string, options: { name?: string; onRefuse?: () => void } = {}): Preview {
-  const notice = `You are viewing as ${options.name ?? "a player"}. Nothing you do here is saved.`;
+  const notice = previewNotice(options.name);
   let toastSeq = 0;
   let snapTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const derive = (src: RoomView, prevView: RoomState | null): Pick<RoomView, "view" | "sceneId" | "connection" | "online" | "roomId"> => {
-    const projected = src.view ? playerPreview(src.view, src.sceneId, memberId) : null;
-    return {
-      roomId: src.roomId,
-      view: projected ? shareState(prevView, projected) : null,
-      sceneId: src.view?.meta.playerSceneId ?? null,
-      connection: src.connection,
-      online: src.online,
-    };
-  };
+  // What the player's own room shows, as their socket holds it. The view keeps its identity until the server changes it.
+  const derive = (src: RoomView): Pick<RoomView, "view" | "sceneId" | "connection" | "online" | "roomId" | "ephemeral"> => ({
+    roomId: src.roomId,
+    view: src.view,
+    sceneId: src.sceneId,
+    connection: src.connection,
+    online: src.online,
+    ephemeral: src.ephemeral,
+  });
 
   const store = createStore<RoomView>()(() => ({
-    ...derive(source.getState(), null),
+    ...derive(source.getState()),
     you: { memberId, role: "player" },
     // A player never gets the signal.
     accessVersion: 0,
-    ephemeral: EMPTY_EPHEMERAL,
     busy: {},
     toasts: [],
     ended: null,
@@ -73,10 +73,10 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     pending: [],
   }));
 
-  const refresh = () => store.setState(derive(source.getState(), store.getState().view));
+  const refresh = () => store.setState(derive(source.getState()));
 
   const unsubscribe = source.subscribe((s, prev) => {
-    if (s.view !== prev.view || s.sceneId !== prev.sceneId || s.connection !== prev.connection || s.online !== prev.online) refresh();
+    if (s.view !== prev.view || s.sceneId !== prev.sceneId || s.connection !== prev.connection || s.online !== prev.online || s.ephemeral !== prev.ephemeral) refresh();
   });
 
   const refuse = () => {
@@ -126,7 +126,7 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
       const toasts = heldToasts(store.getState().toasts, id, held, Date.now());
       if (toasts !== store.getState().toasts) store.setState({ toasts: [...toasts] });
     },
-    // The preview has no socket, so no X-card ever reaches it.
+    // The preview's socket is read only, so its X-card is the DM's own room's to answer.
     dismissXcard: () => {},
   };
 

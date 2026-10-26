@@ -72,15 +72,15 @@ export function ViewControls() {
         />
       </Section>
       <Section label="Check their view">
-        <ViewAsPlayer members={members} onPlayerScene={onPlayerScene} playerSceneId={playerSceneId} />
+        <ViewAsPlayer members={members} />
         <PartySightToggle />
       </Section>
     </>
   );
 }
 
-function ViewAsPlayer(props: { members: Record<string, Member | undefined> | undefined; onPlayerScene: boolean; playerSceneId: string | null }) {
-  const actions = useRoomActions();
+/** View as a player (docs/design-v1-per-player-vision.md 7.4): the server's preview of that player, from whichever scene the DM is on, which stays the DM's. */
+function ViewAsPlayer(props: { members: Record<string, Member | undefined> | undefined }) {
   const selectId = useId();
   const players = useMemo(
     () =>
@@ -112,19 +112,13 @@ function ViewAsPlayer(props: { members: Record<string, Member | undefined> | und
           size="sm"
           disabled={!chosen}
           onClick={() => {
-            if (!chosen) return;
-            // The DM's view holds only the scene the DM is looking at, so go where the players are.
-            if (!props.onPlayerScene && props.playerSceneId) actions.switchScene(props.playerSceneId);
-            setPreviewing(chosen);
+            if (chosen) setPreviewing(chosen);
           }}
         >
           View
         </Button>
       </div>
-      <Help>
-        Shows exactly what that player sees, with fog and without hidden things. Nothing you do there is saved.
-        {!props.onPlayerScene ? " This also takes you to the players' scene." : ""}
-      </Help>
+      <Help>Shows exactly what that player sees, with fog and without hidden things. Nothing you do there is saved.</Help>
       {previewing ? <PlayerPreview memberId={previewing.id} name={previewing.name} onExit={exit} /> : null}
     </div>
   );

@@ -137,7 +137,8 @@ export default function LogPanel(_props: PanelProps) {
     if (!before) return;
     setPaging({ status: "loading", nextBefore: before });
     try {
-      const page = await api.getLog(roomId, { before, sceneId: you?.role === "dm" ? sceneId : null });
+      // In "view as a player" the older pages are that player's, as the preview's socket gives the rest (docs/design-v1-per-player-vision.md 7.4).
+      const page = await api.getLog(roomId, { before, sceneId: you?.role === "dm" ? sceneId : null, ...(preview ? { as: preview.memberId } : {}) });
       const el = scrollParent(listRef.current);
       if (el && page.entries.length > 0) keepOffset.current = { el, height: el.scrollHeight };
       setOlder((list) => mergeLog(page.entries, list));
