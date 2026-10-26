@@ -11,11 +11,12 @@ import { appendFileSync } from "node:fs";
  * Its run checks the typecheck, the unit tests, the build and
  * e2e/guide.e2e.ts, which draws the DM guide from docs/, and still ends
  * green, so the deploy gate takes it. Its code is then main's tip, which
- * reached main through a full run. An older commit of main may never have
- * had a full run of its own, as within a push of several. Every other run
- * checks everything, and so does any case this cannot read: a run started
- * by hand, a push to main, a branch behind main, a branch with nothing of
- * its own against main, or a git command that fails.
+ * had a full run, by the rule this relies on: main moves only to SHAs the
+ * deploy gate passed. An older commit of main may never have had a full
+ * run of its own, as within a push of several. Every other run checks
+ * everything, and so does any case this cannot read: a run started by
+ * hand, a push to main, a branch behind main, a branch with nothing of its
+ * own against main, or a git command that fails.
  *
  * It reads GITHUB_EVENT_NAME and GITHUB_REF, and needs origin/main and
  * the history back to the merge base, as a checkout with fetch-depth 0
