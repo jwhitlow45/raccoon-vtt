@@ -636,7 +636,6 @@ function IconGlyph(props: { iconKey: string; d: string; side: number; color: str
   );
 }
 
-/** Its own component, so only a selected token reads the accent. */
 /**
  * The hexes a selected token stands on, as its node draws them: the
  * outline in cells from the node's own corner, the token's stored x and y,
@@ -658,7 +657,8 @@ function useSelectedHexes(gridShape: GridShape | undefined, token: ViewToken, se
 /**
  * The selection's ring: on a hex scene the outline of the creature's hexes
  * (docs/design-v1-hex-grids.md 3), drawn on the ground in both views, the
- * same dash and accent as the ring a square scene draws.
+ * same stroke and accent as the ring a square scene draws. Its own
+ * component, so only a selected token reads the accent.
  */
 function SelectedOutline(props: { w: number; h: number; scale: number; hexes: SelectedHexes | null }) {
   const { accent } = useAccent();

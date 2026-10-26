@@ -98,7 +98,7 @@ export function hexRing(g: HexGrid, center: Hex, k: number): Hex[] {
 /**
  * The loop along the sides of `edge`'s hexes whose hex across is not
  * `inside`, each run in its hex's own clockwise turning and chained end to
- * start, its straight runs merged.
+ * start. Every corner of a hex tiling turns, so no two sides run on straight.
  */
 function outerLoop(g: HexGrid, edge: readonly Hex[], inside: (h: Hex) => boolean): number[] {
   const key = (p: { x: number; y: number }) => `${Math.round(p.x * 4096)},${Math.round(p.y * 4096)}`;
@@ -123,7 +123,7 @@ function outerLoop(g: HexGrid, edge: readonly Hex[], inside: (h: Hex) => boolean
     at = next.get(key(at));
     if (at && key(at) === key(loop[0]!)) break;
   }
-  return dropStraight(loop).flatMap((p) => [p.x, p.y]);
+  return loop.flatMap((p) => [p.x, p.y]);
 }
 
 /** A hex's six points from its center, clockwise on screen for both orientations. */
@@ -141,15 +141,6 @@ function hexPoints(g: HexGrid, h: Hex): { x: number; y: number }[] {
   // Swapping x and y mirrors the turning, so columns run the rows' points backward to stay clockwise.
   const pts = g.orient === "rows" ? rows : rows.map((p) => ({ x: p.y, y: p.x })).reverse();
   return pts.map((p) => ({ x: c.x + p.x, y: c.y + p.y }));
-}
-
-/** The loop without points that lie on a straight run, so a dashed outline's corners fall where the shape turns. */
-function dropStraight(loop: readonly { x: number; y: number }[]): { x: number; y: number }[] {
-  return loop.filter((p, i) => {
-    const a = loop[(i + loop.length - 1) % loop.length]!;
-    const b = loop[(i + 1) % loop.length]!;
-    return Math.abs((p.x - a.x) * (b.y - p.y) - (p.y - a.y) * (b.x - p.x)) > 1e-9;
-  });
 }
 
 /**
