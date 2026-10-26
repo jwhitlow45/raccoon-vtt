@@ -8,7 +8,7 @@ import { serverOnlyOpSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { visionRules } from "#shared/ruleHooks.ts";
 import { decodeTile, getBit, TILE_BYTES, TILE_CELLS } from "#shared/rules/fog.ts";
-import { clearVisionCache, seenFogBits, visionReport } from "#shared/rules/vision.ts";
+import { clearVisionCache, seenFogBits, visionCacheReport, visionReport } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { actor, apply, chance, character, env, int, member, pick, reveal, rng, room, scene, token } from "#shared/testutil.ts";
 import { SERVER_ACTOR } from "./actor.ts";
@@ -167,6 +167,15 @@ describe("the explore step on a per-player scene", () => {
       { memberId: "p1", on: true },
     ]);
     assert.ok(cellSet(after.exploredBy[holderTileKey("s1", "p1", 0, 0)], 4, 8));
+  });
+
+  test("with fog off the step writes nothing and still draws every holder's raster and the shared one, before the commit (review PV3-OPUS-4)", () => {
+    clearVisionCache();
+    const state = corridor();
+    state.scenes = { s1: { ...state.scenes.s1!, fogEnabled: false } };
+    assert.equal(exploreOp(state), null);
+    // p1's and p2's rasters and the shared sight's: three sets.
+    assert.equal(visionCacheReport().rasters, 3);
   });
 
   test("each fan-out finds the raster the step before it drew for its state before, so it draws none again (design 8.1)", () => {

@@ -56,17 +56,23 @@ function partyTiles(state: RoomState, sceneId: string, sight: ReadonlyMap<string
  * first: the reducer applies them before any layer, so a player who joins
  * ticked gets their layer's first tiles in the same op. Each holder's sight
  * is read here, before the commit, so the fan-out finds every holder's
- * raster drawn (design 8.1).
+ * raster drawn (design 8.1). With fog off too, though nothing is written
+ * then: the fan-out reads every raster all the same, and a creature's
+ * projection asks the point query of each holder's sight until its raster
+ * is drawn (review PV3-OPUS-4).
  */
 function perPlayerExplore(state: RoomState, scene: Scene): OpOf<"sys.explore"> | null {
   if (scene.vision?.on !== true) return null;
   const join = joinsOf(state, scene);
   const tiles: ExploredTiles = [];
   const members: { memberId: string; tiles: ExploredTiles }[] = [];
-  if (scene.fogEnabled) {
-    const shared = visionRules.holderSight(state, scene.id, null);
+  const shared = visionRules.holderSight(state, scene.id, null);
+  const holders = [...sightHolders(state, scene.id), ...join.flatMap((j) => (j.on ? [j.memberId] : []))];
+  if (!scene.fogEnabled) {
+    void shared.tiles;
+    for (const memberId of holders) void visionRules.holderSight(state, scene.id, memberId).tiles;
+  } else {
     tiles.push(...partyTiles(state, scene.id, shared.tiles));
-    const holders = [...sightHolders(state, scene.id), ...join.flatMap((j) => (j.on ? [j.memberId] : []))];
     for (const memberId of holders) {
       const own = visionRules.holderSight(state, scene.id, memberId);
       // A holder lent only what everyone is lent has nothing of their own to remember.
