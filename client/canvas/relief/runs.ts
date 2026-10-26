@@ -144,6 +144,30 @@ function cutsOf(s: Segment): number[] {
 }
 
 /**
+ * The stretches of a wall from `a` to `b` that stand for this viewer, as
+ * parameters along it, cut into runs as `wallPieces` cuts them and each
+ * judged by `runStands`: what a door's piece draws upright, so its tap and
+ * its pill stand where it does (doors/tap.ts, DoorPill.tsx).
+ */
+export function standingStretches(fog: FogView, a: { x: number; y: number }, b: { x: number; y: number }): [number, number][] {
+  if (fog.all) return [[0, 1]];
+  const ts = cutsOf({ id: "", kind: "wall", ax: a.x, ay: a.y, bx: b.x, by: b.y, grid: true, cuts: [] });
+  const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  const out: [number, number][] = [];
+  for (let i = 0; i + 1 < ts.length; i++) {
+    const t0 = ts[i]!;
+    const t1 = ts[i + 1]!;
+    const p = at(t0);
+    const q = at(t1);
+    if (!runStands(fog, p.x, p.y, q.x, q.y)) continue;
+    const last = out[out.length - 1];
+    if (last && Math.abs(last[1] - t0) < EPS) last[1] = t1;
+    else out.push([t0, t1]);
+  }
+  return out;
+}
+
+/**
  * Whether one run stands: on a sub-cell line, when the sub-cell either side
  * of it is revealed, and otherwise when the sub-cell it lies in is.
  */

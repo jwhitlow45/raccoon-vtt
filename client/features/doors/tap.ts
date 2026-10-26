@@ -2,6 +2,8 @@ import type { BuildChunk } from "#shared/model.ts";
 import type { Point } from "../../lib/camera.ts";
 import { K } from "../../lib/view.ts";
 import { WALL_RISE } from "../../canvas/relief/pieces.ts";
+import { FogView } from "../../canvas/relief/fogView.ts";
+import { standingStretches } from "../../canvas/relief/runs.ts";
 import { boardPickOf, drawnAt, screenAt, type BoardPick } from "../../canvas/boardPick.ts";
 import type { ToolContext } from "../tools.ts";
 import { doorSeen, doorsNear, doorUnder, segmentDistance, type DoorOnMap, type Fog } from "./doors.ts";
@@ -57,8 +59,8 @@ export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" |
  */
 export function isoDoorUnder(input: { chunks: Readonly<Record<string, BuildChunk>>; sceneId: string; fog: Fog; pick: BoardPick; world: Point; screen: Point }): DoorOnMap | null {
   const { pick, world, screen } = input;
-  // A view distance is never longer than the world distance it shows, and a press on a standing piece meets the ground behind it up to 2K·WALL_RISE further off.
-  const reach = DOOR_SLOP_PX / pick.camera.scale + 2 * K * WALL_RISE + 1;
+  // A view distance is never longer than the world distance it shows, and a press on a door drawn at one height meets ground at another up to 2K cells off per cell between them: a piece's top over the lowest ground at most.
+  const reach = DOOR_SLOP_PX / pick.camera.scale + 2 * K * (pick.heights.high - pick.heights.low + WALL_RISE) + 1;
   let best: DoorOnMap | null = null;
   let bestD = Infinity;
   for (const d of doorsNear(input.chunks, input.sceneId, { x0: world.x - reach, y0: world.y - reach, x1: world.x + reach, y1: world.y + reach })) {
@@ -71,15 +73,34 @@ export function isoDoorUnder(input: { chunks: Readonly<Record<string, BuildChunk
   return best;
 }
 
-/** How far a press is from a door on screen, in px: 0 on its standing piece. */
+/** How far a press is from a door on screen, in px: 0 on what stands of its piece. */
 export function doorGap(pick: BoardPick, d: Pick<DoorOnMap, "a" | "b" | "mid" | "door">, screen: Point): number {
   const ground = doorGround(pick, d);
   const a = screenAt(pick, d.a, ground);
   const b = screenAt(pick, d.b, ground);
-  const onLine = segmentDistance(screen, a, b);
-  // An open door lies flat, and below the stand threshold every wall does (ISO-D12).
-  if (d.door.state === "open" || pick.src?.stand !== true) return onLine;
-  return Math.min(onLine, sweepGap(screen, a, b, K * WALL_RISE * pick.camera.scale));
+  const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  let gap = segmentDistance(screen, a, b);
+  for (const [t0, t1] of doorPiece(pick, d)) gap = Math.min(gap, sweepGap(screen, at(t0), at(t1), K * WALL_RISE * pick.camera.scale));
+  return gap;
+}
+
+/**
+ * The stretches of a door's piece that stand for this viewer, as
+ * parameters from its a end to its b end, cut and judged as the relief
+ * cuts its walls (relief/runs.ts): none for an open door, which lies flat,
+ * or below the stand threshold, where every wall does (ISO-D12). A player
+ * who sees a door only through a far corner of a cell beside it sees its
+ * piece lie flat.
+ */
+export function doorPiece(pick: Pick<BoardPick, "src">, d: Pick<DoorOnMap, "a" | "b" | "door">): [number, number][] {
+  const src = pick.src;
+  if (d.door.state === "open" || !src || !src.stand) return [];
+  return standingStretches(new FogView(src.fog, src.sceneId, src.bounds), d.a, d.b);
+}
+
+/** Whether a door's piece stands at its middle, where its pill hangs over it (DoorPill.tsx). */
+export function doorPieceStands(pick: Pick<BoardPick, "src">, d: Pick<DoorOnMap, "a" | "b" | "door">): boolean {
+  return doorPiece(pick, d).some(([t0, t1]) => t0 <= 0.5 && t1 >= 0.5);
 }
 
 /** The higher drawn ground on either side of a door's middle, as its standing piece rises from (relief/runs.ts), in cells. */

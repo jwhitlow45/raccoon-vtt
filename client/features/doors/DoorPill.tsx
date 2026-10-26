@@ -8,7 +8,7 @@ import type { Camera, Insets, Size } from "../../lib/camera.ts";
 import { groundAnchor } from "../../canvas/anchors.ts";
 import type { BoardPick } from "../../canvas/boardPick.ts";
 import { WALL_RISE } from "../../canvas/relief/pieces.ts";
-import { doorGround } from "./tap.ts";
+import { doorGround, doorPieceStands } from "./tap.ts";
 import { theme } from "../../lib/theme.ts";
 import { localDragSlot } from "../../state/localDrags.ts";
 import { useScoped } from "../../state/scope.ts";
@@ -68,7 +68,7 @@ function Pill(props: { door: DoorOnMap; selected: string | undefined; scene: Sce
   const choices = doorActions(scene.id, door, role);
   const width = Math.min(role === "dm" ? 300 : 160, props.viewport.width - 16);
   // Over the top of a closed door's standing piece, or its line where it lies flat.
-  const rise = door.door.state !== "open" && props.pick.src?.stand === true ? WALL_RISE : 0;
+  const rise = doorPieceStands(props.pick, door) ? WALL_RISE : 0;
   const anchor = groundAnchor(props.camera, props.pick, door.mid, props.pick.view.kind === "isometric" ? doorGround(props.pick, door) + rise : 0);
   const place = cardPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: PILL_HEIGHT, gap: 14, prefer: "above" });
   const name = doorName(door, role);

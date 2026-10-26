@@ -6,9 +6,10 @@ import { boardPickFor, boardPickSlot, DrawnHeightsMemo, pressAt, screenAt, type 
 import { WALL_RISE } from "../../canvas/relief/pieces.ts";
 import { CLOSED, line, OPEN, raised, world } from "../movement/testing.ts";
 import { RoomScope } from "../../state/scope.ts";
+import { reveal } from "#shared/testutil.ts";
 import { segmentDistance } from "./doors.ts";
 import { doorPillSlot } from "./store.ts";
-import { DOOR_SLOP_PX, isoDoorUnder, sweepGap, tapDoor } from "./tap.ts";
+import { DOOR_SLOP_PX, doorPieceStands, isoDoorUnder, sweepGap, tapDoor } from "./tap.ts";
 
 const CAM = { x: 500, y: 100, scale: 40 };
 
@@ -50,6 +51,40 @@ describe("a door tapped in Isometric (docs/design-v1-isometric-view.md 6.2)", ()
     const ctx = { getState: () => ({ view: state }) as never, scene: state.scenes.s1!, camera: () => pick.camera, role: "dm" as const, scope };
     assert.equal(tapDoor(ctx, "select", world, null, top), true);
     assert.deepEqual(scope.get(doorPillSlot).getState().pill, { sceneId: "s1", ref: { edge: "6,5,w" } });
+  });
+
+  test("a press on a closed door's piece on the edge of a 50 ft platform reaches it at every turn, where its ray meets ground far past it", () => {
+    const state = world({ edges: { ...line("w", 6, 0, 30), "6,5,w": CLOSED }, heights: raised(0, 0, 6, 30, 50) });
+    let far = 0;
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      const pick = pickOf(state, turn);
+      const screen = screenAt(pick, { x: 6, y: 5.5 }, 10 + WALL_RISE / 2);
+      const world = pressAt(pick, screen);
+      far = Math.max(far, Math.hypot(world.x - 6, world.y - 5.5));
+      assert.deepEqual(isoDoorUnder({ chunks: state.buildChunks, sceneId: "s1", fog: null, pick, world, screen })?.ref, { edge: "6,5,w" }, `turn ${turn}`);
+    }
+    assert.ok(far > 12, `at some turn the press means ground well past the door, past any padding of its chunk (${far.toFixed(1)} cells)`);
+  });
+
+  test("for a player who sees a door only through the far side of a cell beside it, its piece lies flat: its tap is its line and its pill hangs low", () => {
+    const state = hall();
+    state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
+    const door = { a: { x: 6, y: 5 }, b: { x: 6, y: 6 }, mid: { x: 6, y: 5.5 }, door: CLOSED as never };
+    const playerPick = () => boardPickFor({ room: state, scene: state.scenes.s1!, role: "player", fog: true, view: isometric(0), camera: { ...CAM, scale: 80 }, lowPower: false }, new DrawnHeightsMemo());
+    // The east half of cell 6,5 only: the door is seen, but no sub-cell beside its line is.
+    reveal(state, "s1", { x: 6.5, y: 5, w: 0.5, h: 1 });
+    let pick = playerPick();
+    const top = screenAt(pick, door.mid, 2 + WALL_RISE * 0.9);
+    const onLine = screenAt(pick, door.mid, 2);
+    const under = (screen: { x: number; y: number }) => isoDoorUnder({ chunks: state.buildChunks, sceneId: "s1", fog: state.fogTiles, pick, world: pressAt(pick, screen), screen })?.ref ?? null;
+    assert.equal(doorPieceStands(pick, door), false);
+    assert.equal(under(top), null, "nothing stands there to tap");
+    assert.deepEqual(under(onLine), { edge: "6,5,w" });
+    // The sub-cells beside the line revealed: the piece stands, and its top takes the tap.
+    reveal(state, "s1", { x: 6, y: 5, w: 0.25, h: 1 });
+    pick = playerPick();
+    assert.equal(doorPieceStands(pick, door), true);
+    assert.deepEqual(under(screenAt(pick, door.mid, 2 + WALL_RISE * 0.9)), { edge: "6,5,w" });
   });
 
   test("an open door lies flat: only its line on the ground reaches it", () => {
