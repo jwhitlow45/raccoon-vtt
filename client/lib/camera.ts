@@ -1,3 +1,5 @@
+import type { ViewPoint } from "./view.ts";
+
 /**
  * Camera math for the map canvas.
  *
@@ -27,6 +29,33 @@ export function worldToScreen(cam: Camera, p: Point): Point {
 
 export function screenToWorld(cam: Camera, p: Point): Point {
   return { x: (p.x - cam.x) / cam.scale, y: (p.y - cam.y) / cam.scale };
+}
+
+export function viewToScreen(cam: Camera, p: ViewPoint): Point {
+  return { x: p.x * cam.scale + cam.x, y: p.y * cam.scale + cam.y };
+}
+
+export function screenToView(cam: Camera, p: Point): ViewPoint {
+  return { x: (p.x - cam.x) / cam.scale, y: (p.y - cam.y) / cam.scale } as ViewPoint;
+}
+
+/** The camera at `scale` that shows the view point `at` at the screen point `screen`. */
+export function cameraAt(screen: Point, at: ViewPoint, scale: number): Camera {
+  return { x: screen.x - at.x * scale, y: screen.y - at.y * scale, scale };
+}
+
+/**
+ * The camera after a turn or a view switch (docs/design-v1-isometric-view.md
+ * 4.2): panned so the world point that showed at `before` in the old view,
+ * at `after` in the new, stays where it was on screen. The scale stays.
+ */
+export function holdStill(cam: Camera, before: ViewPoint, after: ViewPoint): Camera {
+  return { x: cam.x + (before.x - after.x) * cam.scale, y: cam.y + (before.y - after.y) * cam.scale, scale: cam.scale };
+}
+
+/** The camera a Konva stage holds, for a layer that reads it where the stage stands. A stage not yet scaled reads as 1. */
+export function cameraOfStage(stage: { x(): number; y(): number; scaleX(): number }): Camera {
+  return { x: stage.x(), y: stage.y(), scale: stage.scaleX() || 1 };
 }
 
 export function panBy(cam: Camera, dx: number, dy: number): Camera {
@@ -83,9 +112,12 @@ export function rectClear(cam: Camera, rect: Rect, viewport: Size, insets: Inset
 }
 
 /** A scene's saved starting view: the world point at the viewport center, and a zoom. */
-export function cameraForView(viewport: Size, view: { x: number; y: number; zoom: number }): Camera {
-  const scale = clampScale(view.zoom);
-  return { x: viewport.width / 2 - view.x * scale, y: viewport.height / 2 - view.y * scale, scale };
+export function cameraForView(viewport: Size, view: { x: number; y: number; zoom: number }): Camera;
+/** The camera that shows the view point `at` at the viewport's center, at a zoom. */
+export function cameraForView(viewport: Size, at: ViewPoint, zoom: number): Camera;
+export function cameraForView(viewport: Size, at: { x: number; y: number; zoom?: number }, zoom?: number): Camera {
+  const scale = clampScale(zoom ?? at.zoom ?? 1);
+  return { x: viewport.width / 2 - at.x * scale, y: viewport.height / 2 - at.y * scale, scale };
 }
 
 /**

@@ -16,7 +16,9 @@ import {
   zoomAt,
   type Camera,
 } from "./camera.ts";
+import { cameraAt, cameraOfStage, holdStill, screenToView, viewToScreen } from "./camera.ts";
 import { CameraGesture, LongPress } from "./gestures.ts";
+import { isometric, toView, turned, viewBox, type Turn } from "./view.ts";
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 
@@ -93,6 +95,64 @@ describe("camera", () => {
     const under = screenToWorld(next, { x: 260, y: 180 });
     close(under.x, pinned.x);
     close(under.y, pinned.y);
+  });
+});
+
+describe("the camera in view space (docs/design-v1-isometric-view.md 4.1, 4.2)", () => {
+  const cam: Camera = { x: 100, y: 50, scale: 40 };
+
+  test("view and screen round trip", () => {
+    const s = viewToScreen(cam, toView(isometric(0), { x: 0, y: 0 }));
+    assert.deepEqual(s, { x: 100, y: 50 });
+    const v = screenToView(cam, { x: 321, y: -7 });
+    assert.deepEqual(viewToScreen(cam, v), { x: 321, y: -7 });
+  });
+
+  test("a camera at a point shows that point there", () => {
+    const at = toView(isometric(2), { x: 12, y: 7 }, 3);
+    const c = cameraAt({ x: 195, y: 400 }, at, 55);
+    assert.equal(c.scale, 55);
+    const s = viewToScreen(c, at);
+    close(s.x, 195);
+    close(s.y, 400);
+    assert.deepEqual(cameraForView({ width: 390, height: 800 }, at, 55), cameraAt({ x: 195, y: 400 }, at, 55));
+  });
+
+  test("a turn with the selected token on screen keeps it put at the same scale, through every turn and back", () => {
+    const token = { x: 14.5, y: 9.5 };
+    let turn: Turn = 0;
+    let c: Camera = cameraAt({ x: 200, y: 300 }, toView(isometric(turn), token), 48);
+    for (const by of [1, 1, 1, 1, -1, -1] as const) {
+      const next = turned(turn, by);
+      c = holdStill(c, toView(isometric(turn), token), toView(isometric(next), token));
+      turn = next;
+      const s = viewToScreen(c, toView(isometric(turn), token));
+      close(s.x, 200);
+      close(s.y, 300);
+      assert.equal(c.scale, 48);
+    }
+  });
+
+  test("Fit in Isometric frames the scene's whole diamond", () => {
+    const viewport = { width: 390, height: 844 };
+    for (const turn of [0, 1, 2, 3] as const) {
+      const view = isometric(turn);
+      const c = fitRect(viewport, viewBox(view, { x: 0, y: 0, width: 40, height: 25 }), 24);
+      for (const corner of [
+        { x: 0, y: 0 },
+        { x: 40, y: 0 },
+        { x: 0, y: 25 },
+        { x: 40, y: 25 },
+      ]) {
+        const s = viewToScreen(c, toView(view, corner));
+        assert.ok(s.x >= 24 - 1e-9 && s.x <= 390 - 24 + 1e-9 && s.y >= 24 - 1e-9 && s.y <= 844 - 24 + 1e-9, `turn ${turn} corner ${corner.x},${corner.y}`);
+      }
+    }
+  });
+
+  test("a stage's camera reads its position and scale, an unscaled stage as 1", () => {
+    assert.deepEqual(cameraOfStage({ x: () => 3, y: () => 4, scaleX: () => 20 }), { x: 3, y: 4, scale: 20 });
+    assert.deepEqual(cameraOfStage({ x: () => 3, y: () => 4, scaleX: () => 0 }), { x: 3, y: 4, scale: 1 });
   });
 });
 
