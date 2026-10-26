@@ -476,10 +476,10 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
 
   test("cu-b-2. on Thorn's turn the DM's phone takes Fiery Rays from the dragon's row, greyed after, and a Legendary Resistance", async () => {
     const group = await rowUses(phone, DRAGON);
-    await group.getByText("Legendary actions 3 of 3", { exact: true }).waitFor();
+    await group.getByText("Legendary Actions 3 of 3", { exact: true }).waitFor();
     await shots.take(phone, "cu-b-row-uses");
     await group.getByRole("button", { name: "Use Fiery Rays, legendary action, 3 left" }).click();
-    await group.getByText("Legendary actions 2 of 3", { exact: true }).waitFor();
+    await group.getByText("Legendary Actions 2 of 3", { exact: true }).waitFor();
     await waitFor("Fiery Rays marked until the dragon's turn", () => (dragon()?.uses?.["legendaryActions:fiery-rays"]?.kind === "turn" ? true : null));
     const rays = group.getByRole("button", { name: "Use Fiery Rays, legendary action, 2 left" });
     assert.equal(await rays.getAttribute("aria-disabled"), "true", "greyed until the start of its next turn");
@@ -494,11 +494,11 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
 
   test("cu-b-3. the phone's bar takes Pounce from its Uses drawer, and Pat's copy holds no count", async () => {
     const drawer = await barUses(phone);
-    await drawer.getByText("Legendary actions 2 of 3", { exact: true }).waitFor();
+    await drawer.getByText("Legendary Actions 2 of 3", { exact: true }).waitFor();
     await shots.take(phone, "cu-b-bar-drawer");
     await drawer.getByRole("button", { name: "Use Pounce, legendary action, 2 left" }).click();
     await waitFor("Pounce spent", () => (dragon()?.legendary?.actionsUsed === 2 ? true : null));
-    await drawer.getByText("Legendary actions 1 of 3", { exact: true }).waitFor();
+    await drawer.getByText("Legendary Actions 1 of 3", { exact: true }).waitFor();
     // What Pat's copy holds of the dragon: no counts, no marks, no record, and use lines by name alone (8).
     await waitFor("Pat reads the uses", () => (useLines(patSocket.state).length >= 3 ? true : null));
     const seen = actorOf(patSocket.state, run.dragon) as Partial<Actor> | undefined;
@@ -623,7 +623,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     await phoneCard.waitFor();
     const turn = alerts(desk, "turn");
     await turn.getByText(`${DRAGON}'s turn`, { exact: true }).waitFor();
-    await turn.getByText("Legendary actions 3 of 3, after other creatures' turns", { exact: true }).waitFor();
+    await turn.getByText("Legendary Actions 3 of 3, after other creatures' turns", { exact: true }).waitFor();
     await turn.getByText("Legendary Resistance 2 of 3", { exact: true }).waitFor();
     await alerts(phone, "turn").getByText(`${DRAGON}'s turn: 3 uses`, { exact: true }).waitFor();
     await shots.take(desk, "cu-b-dragon-turn-desk");
@@ -632,7 +632,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
     const group = await rowUses(phone, DRAGON);
     const rays = group.getByRole("button", { name: "Use Fiery Rays, legendary action, 3 left" });
     assert.equal(await rays.getAttribute("aria-disabled"), "true");
-    await group.getByText("Legendary actions 3 of 3", { exact: true }).waitFor();
+    await group.getByText("Legendary Actions 3 of 3", { exact: true }).waitFor();
     await closeSheets(phone);
 
     await deskCard.getByRole("button", { name: "Roll", exact: true }).click();
@@ -1227,7 +1227,7 @@ describe("raccoon-vtt: combat uses", { timeout: 900_000 }, () => {
       const max = dragon()!.legendary!.actionsMax;
       await uses.getByText(`Legendary Actions used: ${spent + 1} of ${max}`, { exact: true }).waitFor();
       const drawer = await barUses(desk);
-      await drawer.getByText(`Legendary actions ${max - spent - 1} of ${max}`, { exact: true }).waitFor();
+      await drawer.getByText(`Legendary Actions ${max - spent - 1} of ${max}`, { exact: true }).waitFor();
       await closeBar(desk);
       const row = await rowUses(desk, DRAGON);
       await row.getByText(`Legendary Actions used: ${spent + 1} of ${max}`, { exact: true }).waitFor();

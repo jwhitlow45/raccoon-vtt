@@ -191,7 +191,7 @@ describe("the list", () => {
         ["Wing Attack (2)", null],
       ],
     );
-    assert.equal(legendaryHead(la, "list"), "Legendary actions 3 of 3");
+    assert.equal(legendaryHead(la, "list"), "Legendary Actions 3 of 3");
     assert.equal(legendaryLabel(la.buttons[1]!, 3), "Use Fiery Rays, legendary action, 3 left");
   });
 
@@ -218,7 +218,7 @@ describe("the list", () => {
   test("the card lists no legendary action buttons, and says the pips come after other creatures' turns", () => {
     const la = legendaryRow(rowsOf("card", { ownTurn: true }));
     assert.deepEqual(la.buttons, []);
-    assert.equal(legendaryHead(la, "card"), "Legendary actions 3 of 3, after other creatures' turns");
+    assert.equal(legendaryHead(la, "card"), "Legendary Actions 3 of 3, after other creatures' turns");
   });
 
   test("an ability's line and state: ready, used, a roll's result, an X/Day count", () => {

@@ -467,9 +467,9 @@ export function legendaryLabel(button: LegendaryButton, left: number): string {
   return `${what}${button.cost > 1 ? `, costs ${button.cost}` : ""}, ${left} left`;
 }
 
-/** "Legendary actions 2 of 3", and on the card ", after other creatures' turns" (4.2). */
+/** "Legendary Actions 2 of 3", and on the card ", after other creatures' turns" (4.2). */
 export function legendaryHead(row: Extract<UseRow, { kind: "legendary" }>, form: UsesForm): string {
-  return `Legendary actions ${row.left} of ${row.max}${form === "card" ? ", after other creatures' turns" : ""}`;
+  return `Legendary Actions ${row.left} of ${row.max}${form === "card" ? ", after other creatures' turns" : ""}`;
 }
 
 /** "Legendary Resistance 2 of 3", in the list and on the card alike (4.2, 5): its Use button's name says how many are left. */

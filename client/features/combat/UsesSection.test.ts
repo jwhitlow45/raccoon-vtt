@@ -107,10 +107,10 @@ describe("Combat's Uses for a creature of its own", () => {
   test("the DM's pips stand under the list, each count's words over its pips", () => {
     const markup = of("dragon", DM);
     assert.match(markup, />Uses<\/h/);
-    assert.match(markup, /Legendary actions 2 of 3/, "the list's row");
+    assert.match(markup, /Legendary Actions 2 of 3/, "the list's row");
     assert.match(markup, /Legendary Actions used: 1 of 3/);
     assert.match(markup, /Legendary Resistances used today: 0 of 2/);
-    assert.ok(markup.indexOf("Legendary actions 2 of 3") < markup.indexOf("Legendary Actions used: 1 of 3"), "the pips after the list");
+    assert.ok(markup.indexOf("Legendary Actions 2 of 3") < markup.indexOf("Legendary Actions used: 1 of 3"), "the pips after the list");
     assert.equal(buttons(markup).filter((b) => /aria-label="\d+ used"/.test(b)).length, 5, "a pip for each of 3 and 2");
     assert.ok(named(markup, "1 used")?.includes('aria-pressed="true"'));
     assert.ok(named(markup, "2 used")?.includes('aria-pressed="false"'));
@@ -119,7 +119,7 @@ describe("Combat's Uses for a creature of its own", () => {
 
   test("its player reads the list with no pips", () => {
     const markup = of("dragon", P1);
-    assert.match(markup, /Legendary actions 2 of 3/);
+    assert.match(markup, /Legendary Actions 2 of 3/);
     assert.doesNotMatch(markup, /Legendary Actions used/);
   });
 
