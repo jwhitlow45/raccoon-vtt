@@ -1,5 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import type { Camera, Insets, Point, Size } from "../../lib/camera.ts";
+import { isCoarsePointer } from "../../lib/device.ts";
+import { typingNow } from "../../lib/keyboardField.ts";
 import { subscribeUiScale, uiScale, useUiScale } from "./settings.ts";
 
 /**
@@ -36,12 +38,44 @@ export function layoutWidth(): number {
   return typeof window === "undefined" ? 0 : window.innerWidth / uiScale();
 }
 
-/** The layout size, kept up to date through resizes and changes of the interface size. */
+/** The size the layout reads, and whether it is a taller one kept while the page is short for a keyboard (steadySize). */
+export type SteadySize = { size: Size; held: boolean };
+
+/**
+ * The size the layout keeps as the page measures `next`: `next`, except
+ * when the page has only grown shorter at the same width while a field
+ * that opens the on-screen keyboard has focus. A browser that shrinks the
+ * page for its keyboard, rather than only the visual viewport as iOS
+ * Safari and Android Chrome do, then leaves the room as it was: a phone
+ * whose page grew shorter than it is wide does not turn the room
+ * sideways, and no height rule (a sheet's mode, the dock, the bar's
+ * compact rule, a roll card's fit) flips while someone types (docs/
+ * design.md 14.4). What stands at the foot follows the keyboard by
+ * placement instead (lib/keyboardInset.ts).
+ *
+ * Once held, the size stays while the page stays short, whatever has
+ * focus, as the keyboard's view does: a tap on Spend takes focus from the
+ * field before the keyboard closes, and the room must not turn under the
+ * finger. It goes as the page grows back or changes width.
+ */
+export function steadySize(kept: SteadySize, next: Size, typing: boolean): SteadySize {
+  const shorter = next.width === kept.size.width && next.height < kept.size.height;
+  if (shorter && (typing || kept.held)) return kept.held ? kept : { size: kept.size, held: true };
+  const same = next.width === kept.size.width && next.height === kept.size.height;
+  return same && !kept.held ? kept : { size: same ? kept.size : next, held: false };
+}
+
+/** The layout size, kept up to date through resizes and changes of the interface size, and steady while someone types on a touch device (steadySize). */
 export function useLayoutSize(): Size {
   const scale = useUiScale();
-  const [size, setSize] = useState(() => layoutSize(window, scale));
+  const [steady, setSteady] = useState<SteadySize>(() => ({ size: layoutSize(window, scale), held: false }));
   useEffect(() => {
-    const read = () => setSize(layoutSize(window, uiScale()));
+    const read = () => {
+      const next = layoutSize(window, uiScale());
+      // A computer opens no on-screen keyboard: its window made shorter is the size to read, field in focus or not.
+      const typing = isCoarsePointer() && typingNow();
+      setSteady((kept) => steadySize(kept, next, typing));
+    };
     read();
     window.addEventListener("resize", read);
     const unsubscribe = subscribeUiScale(read);
@@ -50,7 +84,7 @@ export function useLayoutSize(): Size {
       unsubscribe();
     };
   }, []);
-  return size;
+  return steady.size;
 }
 
 /**

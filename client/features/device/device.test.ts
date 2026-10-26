@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { cameraForView, worldToScreen } from "../../lib/camera.ts";
 import { EPH_PER_SECOND } from "../../state/socket.ts";
-import { barInset, cameraInZoomed, chromeZoom, effectiveZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi, type ZoomedElement } from "./layout.ts";
+import { barInset, cameraInZoomed, chromeZoom, effectiveZoom, insetsInZoomed, inZoomed, layoutSize, sizeInZoomed, smallUi, steadySize, type SteadySize, type ZoomedElement } from "./layout.ts";
 import { ephRate, mapVariantFor, parseDiceSet, parseLowPower, parseRollAnimation, parseUiScale, pixelRatioFor, stageMountKey, UI_SCALES, uiScaleLabel } from "./settings.ts";
 
 describe("this device's settings", () => {
@@ -60,6 +60,25 @@ describe("interface size", () => {
     assert.ok(layoutSize({ innerWidth: 1000, innerHeight: 700 }, 1.3).width < 900);
     assert.equal(Math.round(layoutSize({ innerWidth: 1000, innerHeight: 700 }, 1.3).width), 769);
     assert.ok(layoutSize({ innerWidth: 800, innerHeight: 700 }, 0.85).width > 900, "85% can reach the side panel");
+  });
+
+  test("a page the keyboard shrinks keeps its size while someone types, until it grows back, so the room never turns sideways", () => {
+    const phone: SteadySize = { size: { width: 844, height: 390 }, held: false };
+    const portrait: SteadySize = { size: { width: 390, height: 844 }, held: false };
+    // 844 x 390 with a 216 px keyboard: a page that shrank would be 174 px tall. Typing, it keeps 390.
+    const typing = steadySize(phone, { width: 844, height: 174 }, true);
+    assert.deepEqual(typing, { size: { width: 844, height: 390 }, held: true });
+    // 390 x 844 with a 500 px keyboard: 344 px tall is shorter than wide, and the room stays upright.
+    assert.deepEqual(steadySize(portrait, { width: 390, height: 344 }, true).size, { width: 390, height: 844 });
+    // A tap on Spend takes focus from the field before the keyboard closes: still held.
+    assert.equal(steadySize(typing, { width: 844, height: 174 }, false), typing);
+    // The keyboard closes and the page grows back: the hold ends.
+    assert.deepEqual(steadySize(typing, { width: 844, height: 390 }, false), { size: { width: 844, height: 390 }, held: false });
+    // A turn of the phone is a new width, held or not.
+    assert.deepEqual(steadySize(typing, { width: 390, height: 600 }, true), { size: { width: 390, height: 600 }, held: false });
+    // With no field in focus, a shorter page is the size to read, such as a browser's bar coming back.
+    assert.deepEqual(steadySize(phone, { width: 844, height: 340 }, false), { size: { width: 844, height: 340 }, held: false });
+    assert.equal(steadySize(phone, { width: 844, height: 390 }, false), phone, "the same size keeps its identity");
   });
 
   test("100% zooms nothing, and only a smaller size asks fields to grow", () => {

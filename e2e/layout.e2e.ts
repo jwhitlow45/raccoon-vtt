@@ -1163,9 +1163,10 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
   });
 
   test("7. a change of mode saves no draft: a partial initiative and a partial Armor Class stay unsaved and in their fields, side to very short and back, and a fold closed over the kept draft saves it", async () => {
-    // 480 x 380 leaves a side sheet a body even with the turn band, and 480 x 260 does not, so a resize switches the mode with the band in place.
+    // 480 x 380 leaves a side sheet a body even with the turn band, and 470 x 260 does not, so a resize switches the mode with the band in place.
+    // The width changes too: a page only made shorter while a field has focus is the on-screen keyboard, which never changes the mode (features/device/layout.ts steadySize).
     const tall = { width: 480, height: 380 };
-    const short = { width: 480, height: 260 };
+    const short = { width: 470, height: 260 };
     const insets = { side: 47, bottom: 21 };
     const modal = async (title: string, want: boolean) =>
       waitFor(`${title} ${want ? "in the very short mode" : "beside the map"}`, async () => (((await sheet(phone, title).getAttribute("aria-modal")) === "true") === want ? true : null));
