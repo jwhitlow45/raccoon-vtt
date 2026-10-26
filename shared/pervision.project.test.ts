@@ -3,7 +3,7 @@ import { after, before, describe, test } from "node:test";
 import { holderTileKey, tileKey } from "./keys.ts";
 import type { ExploredTile, FogTile, RoomState, Viewer } from "./model.ts";
 import { cellVision } from "./perPlayerTestutil.ts";
-import { partySightOf, projectState, sharedGround, withheldFromViewer } from "./project.ts";
+import { partySightOf, presenceOf, projectState, sharedGround, withheldFromViewer } from "./project.ts";
 import { visionRules } from "./ruleHooks.ts";
 import { decodeTile, getBit, rasterizeFogOps } from "./rules/fog.ts";
 import { publicToken } from "./rules/walkWorld.ts";
@@ -89,6 +89,19 @@ describe("each holder's own memory (6.3, security rule 1)", () => {
     }
     const dm = view(s, DM);
     assert.deepEqual(Object.keys(dm.labels).sort(), ["nw", "se"]);
+  });
+
+  test("a holder's presence map is kept while its layers stand, and made again when one changes (PV1-O2)", () => {
+    const s = table();
+    const once = presenceOf(s, "p1", "s1");
+    assert.ok(once[tileKey("s1", 0, 0)], "p1's layer's tile is present");
+    assert.equal(presenceOf(s, "p1", "s1"), once, "a second label, stamp or pin reads the same map, not a copy of every tile");
+    assert.notEqual(presenceOf(s, "p2", "s1"), once);
+    const later = { ...s, exploredBy: { ...s.exploredBy, [holderTileKey("s1", "p1", 1, 1)]: holderTile("p1", { x: 20, y: 20, w: 2, h: 2 }) } };
+    const again = presenceOf(later, "p1", "s1");
+    assert.notEqual(again, once);
+    assert.ok(again[tileKey("s1", 1, 1)]);
+    assert.equal(presenceOf(s, "p3", "s1"), presenceOf(s, null, "s1"), "one who holds no sight reads the shared map");
   });
 
   test("two holders whose journal access differs keep their own pins on ground both remember", () => {

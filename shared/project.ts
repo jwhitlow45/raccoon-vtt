@@ -473,14 +473,29 @@ function anyFogTiles(state: RoomState): Record<string, FogTile> {
  * The presence map of one viewer's fog on a scene (anyFogTiles): on a
  * per-player scene a sight holder's holds their own layer's tiles too, so
  * a label on ground only their layer holds reaches them, and a player's
- * copy of the shared fog holds `fogAll`'s.
+ * copy of the shared fog holds `fogAll`'s. Exported for its test.
+ *
+ * A projection asks it once per label, stamp, pin and found trap, so a
+ * holder's map is kept per pair of maps it joins, which are replaced and
+ * never changed, as `anyFogTiles` keeps its own (review PV1-O2).
  */
-function presenceOf(state: RoomState, memberId: string | null, sceneId: string): Record<string, FogTile> {
+export function presenceOf(state: RoomState, memberId: string | null, sceneId: string): Record<string, FogTile> {
   const shared = anyFogTiles(state);
   if (memberId === null || !perPlayerScene(state.scenes[sceneId]) || !holdsSight(state, sceneId, memberId)) return shared;
   const own = holderLayer(state, sceneId, memberId);
-  if (Object.keys(own).length === 0) return shared;
-  return { ...own, ...shared };
+  // An op still writing into a layer (writable.ts) would change it under the kept map.
+  if (isWritable(state.fogTiles) || isWritable(state.exploredTiles ?? {}) || isWritable(state.exploredBy ?? {})) return joinedPresence(own, shared);
+  let byShared = holderPresence.get(own);
+  if (!byShared) holderPresence.set(own, (byShared = new WeakMap()));
+  let hit = byShared.get(shared);
+  if (!hit) byShared.set(shared, (hit = joinedPresence(own, shared)));
+  return hit;
+}
+
+const holderPresence = new WeakMap<object, WeakMap<object, Record<string, FogTile>>>();
+
+function joinedPresence(own: Record<string, FogTile>, shared: Record<string, FogTile>): Record<string, FogTile> {
+  return Object.keys(own).length === 0 ? shared : { ...own, ...shared };
 }
 
 /**
