@@ -371,7 +371,7 @@ function aimedBoxShape(c: Point3, f: AimFrame, hu: number, hw: number, hh: numbe
 }
 
 /** The convex hull of points, counterclockwise on a y-down map (Andrew's monotone chain). */
-function convexHull(points: Point[]): Point[] {
+export function convexHull(points: Point[]): Point[] {
   const sorted = [...points].sort((p, q) => p.x - q.x || p.y - q.y);
   if (sorted.length < 3) return sorted;
   const cross = (o: Point, p: Point, q: Point) => (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
