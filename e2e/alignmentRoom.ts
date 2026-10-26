@@ -9,7 +9,7 @@ import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { barControl, ConsoleWatch, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 
 /**
@@ -80,14 +80,20 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * a mouse context for the desktop, one at a time, beside Pat's touch
  * context, so no more than two contexts are open.
  *
+ * The isometric view's choice (docs/design-v1-isometric-view.md 8) is
+ * measured at follow-up batch 30's sizes: the top bar with the View button,
+ * the View menu in Top-down and in Isometric, and Scene settings'
+ * Suggested view.
+ *
  * The sweep runs as three files, each with its own server, browsers and
  * room, so the CI shards run them side by side: alignment.e2e.ts has the
  * drawn cases, the upright phones and the scrolling strip,
  * alignment-wide.e2e.ts the sideways phone, the tablet, the desktop and
  * 480 x 320, and alignment-icons.e2e.ts the second icon pass, follow-up
- * batch 30's roots, the app icon's places and follow-up batch 32's roots.
- * This module holds every step, from alignmentFile on, and each file lists
- * the ones it runs, so a step keeps its id whichever file runs it.
+ * batch 30's roots, the app icon's places, follow-up batch 32's roots and
+ * the view choice. This module holds every step, from alignmentFile on,
+ * and each file lists the ones it runs, so a step keeps its id whichever
+ * file runs it.
  *
  * Each file runs with `pnpm test:e2e` on E2E_PORT plus twenty-seven, one
  * file after another as the others. The other environment variables are
@@ -3748,5 +3754,107 @@ export function fu32Tests(): void {
       lines.push(...sweep.lines);
     }
     assert.deepEqual(lines, [], "the builder's row, picker or brush out of line");
+  });
+}
+
+/*
+ * The isometric view's choice (docs/design-v1-isometric-view.md 8): the
+ * top bar with the View button, the View menu in both views, and Scene
+ * settings' Suggested view, at FU30_AT's sizes. Isometric is out of reach
+ * until its lanes are in (client/features/view/store.ts isoReady), so the
+ * DM's page is opened as an end-to-end test may open it, with the flag that
+ * makes a page offer it (client/features/view/choice.ts isoOffered). The
+ * step runs last in its file, since the flag stays on the page.
+ */
+const ISO_OFFER = "globalThis.__rvttIsoTest = true;";
+
+/** A DM panel: its side panel tab from 900 px up, else its sheet from Panels. */
+async function openDmPanel(page: Page, title: string): Promise<Locator> {
+  const tabs = page.getByRole("tablist", { name: "Panels" });
+  if (await visible(tabs)) {
+    await openSideTab(page, title);
+    return page.getByRole("tabpanel", { name: sideTabName(title) });
+  }
+  const sheet = page.locator(`dialog[data-rvtt-sheet][aria-label="${title}"]`);
+  if (await visible(sheet)) return sheet;
+  await closeSheets(page);
+  await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+  await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: new RegExp(`^${title}`) }).click();
+  await sheet.waitFor();
+  return sheet;
+}
+
+/**
+ * A top bar's View button: whole on the screen with Fit beside it, its
+ * icon in its middle, and its middle on Fit's line. The bar's own row is
+ * not this step's: its connection dot and chip were never one height.
+ */
+async function isoTopBar(sweep: Sweep, page: Page, screen: string): Promise<void> {
+  const view = page.getByRole("button", { name: /^View: / });
+  const fit = page.getByRole("button", { name: "Fit the map to the screen" });
+  for (const [what, button] of [
+    ["View", view],
+    ["Fit", fit],
+  ] as const) {
+    if (!(await wholeInReach(button))) sweep.lines.push(`${sweep.at} ${screen}: ${what} is not whole on the screen, or another control covers part of it`);
+  }
+  await sweep.measure(page, screen, view);
+  const [a, b] = [await view.boundingBox(), await fit.boundingBox()];
+  if (a && b && Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) > LIMIT_PX) sweep.lines.push(`${sweep.at} ${screen}: View's middle ${a.y + a.height / 2} is off Fit's ${b.y + b.height / 2}`);
+}
+
+/** iso5-a, last in alignment-icons.e2e.ts. */
+export function isoChoiceTests(): void {
+  test(`iso5-a. the top bar with the View button, for the DM and for Pat, the View menu in Top-down and in Isometric, and Scene settings' Suggested view, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-isometric-view.md 8)`, async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    await pat.addInitScript(ISO_OFFER);
+    const lines: string[] = [];
+    for (const at of FU30_AT) {
+      const sweep = new Sweep(`iso5-${atName(at)}`);
+      pat.setDefaultTimeout(10_000);
+      await openAt(pat, at.size, at.scale);
+      await isoTopBar(sweep, pat, "iso5-pat-top-bar");
+      await pat.goto("about:blank");
+      const page = await dmPageFor(at.size);
+      page.setDefaultTimeout(10_000);
+      await page.addInitScript(ISO_OFFER);
+      await openAt(page, at.size, at.scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      const menu = page.getByRole("dialog", { name: "View" });
+      const open = async () => {
+        await page.getByRole("button", { name: /^View: / }).click();
+        await menu.waitFor();
+      };
+      const close = async () => {
+        await page.keyboard.press("Escape");
+        await menu.waitFor({ state: "detached" });
+      };
+      await isoTopBar(sweep, page, "iso5-top-bar");
+      await open();
+      await sweep.measure(page, "iso5-menu-top-down", menu);
+      await shots.take(page, `alignment-iso5-menu-top-down-${atName(at)}`);
+      await menu.getByRole("radio", { name: "Isometric" }).check();
+      await menu.getByRole("button", { name: "Turn the map right" }).waitFor();
+      await sweep.measure(page, "iso5-menu-isometric", menu);
+      await shots.take(page, `alignment-iso5-menu-isometric-${atName(at)}`);
+      await close();
+      await isoTopBar(sweep, page, "iso5-top-bar-isometric");
+      await shots.take(page, `alignment-iso5-top-bar-isometric-${atName(at)}`);
+      await open();
+      await menu.getByRole("radio", { name: "Follow the scene" }).check();
+      await close();
+      const scenes = await openDmPanel(page, "Scenes");
+      const row = scenes.getByRole("radiogroup", { name: "Suggested view" }).locator("xpath=../..");
+      await row.scrollIntoViewIfNeeded();
+      await sweep.measure(page, "iso5-suggested-view", row);
+      await shots.take(page, `alignment-iso5-suggested-view-${atName(at)}`);
+      await closeSheets(page);
+      await escapeAll(page);
+      console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+      lines.push(...sweep.lines);
+    }
+    assert.deepEqual(lines, [], "the view choice out of line");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
   });
 }
