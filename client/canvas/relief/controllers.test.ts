@@ -203,6 +203,13 @@ describe("a hidden drawing tree works for nothing each frame", () => {
     assert.match(read("canvas/relief/context.ts"), /useRoomView\(\(s\) => \(shown \|\| !last\.current \? select\(s\) : last\.current\.value\)\)/);
   });
 
+  test("the hidden isometric board builds no buckets, so a map changed in Top-down, whose tints go and come back, rebuilds nothing there until it shows (ISO2-OPUS-12)", () => {
+    const iso = read("canvas/relief/IsoBoard.tsx");
+    const synced = iso.slice(iso.indexOf("const synced = useMemo(() => {"), iso.indexOf("}, [", iso.indexOf("const synced = useMemo(() => {")) + 200);
+    assert.match(synced, /^const synced = useMemo\(\(\) => \{\n\s+if \(hidden\) return null;\n\s+relief\.sync\(/);
+    assert.match(synced, /\}, \[hidden, /);
+  });
+
   test("a renderer drawn in Isometric reads the build only while its tree shows, so a brush stroke rebuilds no paths or coverage in the hidden one", () => {
     const { layers, files } = registry();
     const sources = new Set([...layers.filter((l) => !l.iso.includes("off")).map((l) => files.get(l.component)!), "canvas/TokenShadow.tsx"]);

@@ -154,7 +154,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
   index.current ??= new ReliefIndex();
   const relief = index.current;
   const global = useMemo(() => ({ stand, feet, tints }), [stand, feet, tints]);
+  // Hidden, the board draws nothing. A map changed meanwhile takes its tints away and brings new ones, and each would rebuild every bucket here, so the buckets wait to be built once when the board shows (ISO2-OPUS-12).
   const synced = useMemo(() => {
+    if (hidden) return null;
     relief.sync({
       sceneId: scene.id,
       bounds: { w, h },
@@ -170,7 +172,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       },
     });
     return {};
-  }, [relief, scene.id, w, h, chunks, props.viewerFog, grouped, global, heights, fog, tints]);
+  }, [hidden, relief, scene.id, w, h, chunks, props.viewerFog, grouped, global, heights, fog, tints]);
 
   // Who stands and who lies flat, by the stand rule.
   const { standing, flat } = useMemo(() => splitTokens(fog, props.tokens, props.aboveFog), [fog, props.tokens, props.aboveFog]);
