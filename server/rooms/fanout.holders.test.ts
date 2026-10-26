@@ -12,10 +12,10 @@ import { buildSnapshot, publishBatch } from "./fanout.ts";
 
 /*
  * A per-player scene (docs/design-v1-per-player-vision.md 6.2): each sight
- * holder's own sight. Until the fan-out's projection classes are built
- * (section 6.9, lane PV3), no player's `ev` may carry what another player's
- * creatures see, so applying each socket's events to its snapshot must
- * still give that player's fresh projection.
+ * holder's own sight. The fan-out's projection classes (section 6.9) share
+ * a raster only between viewers with the same sources, so no player's `ev`
+ * carries what another player's creatures see, and applying each socket's
+ * events to its snapshot gives that player's fresh projection.
  */
 function twoRooms(): RoomState {
   const s = room();
