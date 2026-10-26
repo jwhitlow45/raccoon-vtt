@@ -178,20 +178,21 @@ function explored(sight: SightTile, held: FogTile | undefined): string | null {
 type Chain = WeakMap<object, Chain | string | null>;
 const ownAnswers: Chain = new WeakMap();
 
+function childOf(node: Chain, key: object): Chain {
+  let next = node.get(key) as Chain | undefined;
+  if (!next) node.set(key, (next = new WeakMap()));
+  return next;
+}
+
 /**
  * A holder's own tile with what they see joined in, less what the shared
  * sight sees there and the party's layer holds, since the party's layer
  * remembers those for every player. Null when there is nothing new.
  */
 function ownExplored(sight: SightTile, shared: SightTile | undefined, party: FogTile | undefined, held: FogTile | undefined): string | null {
-  const path: object[] = [sight, shared ?? NONE, party ?? NONE, held ?? NONE];
-  let node = ownAnswers;
-  for (const part of path.slice(0, -1)) {
-    let next = node.get(part) as Chain | undefined;
-    if (!next) node.set(part, (next = new WeakMap()));
-    node = next;
-  }
-  const last = path[path.length - 1]!;
+  // Every holder's every tile asks this after every batch, so the lookup builds no array.
+  const node = childOf(childOf(childOf(ownAnswers, sight), shared ?? NONE), party ?? NONE);
+  const last = held ?? NONE;
   const hit = node.get(last);
   if (hit !== undefined) return hit as string | null;
   const seen = seenFogBits(sight);
