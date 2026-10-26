@@ -11,7 +11,6 @@ import type { LayerProps } from "../layers.ts";
 import { BoardLabel } from "./boardText.tsx";
 import { holdLabel, type Point } from "./drop.ts";
 import { holdSlot, stopNoteSlot } from "./store.ts";
-import { useTeleportToasts } from "./toasts.ts";
 
 /**
  * Walls and ledges on the overlay layer (docs/design-v1-maps-vision.md
@@ -21,11 +20,10 @@ import { useTeleportToasts } from "./toasts.ts";
  * Both are of a token this member is moving, which they see, so they may
  * draw above the fog. Nothing here moves at rest.
  *
- * The board is always on screen in a room, so the DM's teleport toasts
- * (toasts.ts) run from here too.
+ * The DM's teleport toasts (toasts.ts) run as one of the board's
+ * controllers, mounted once whichever view shows.
  */
 export const MoveLayer = memo(function MoveLayer(props: LayerProps) {
-  useTeleportToasts(props.role);
   const hold = useStore(useScoped(holdSlot), (s) => s.hold);
   const note = useStore(useScoped(stopNoteSlot), (s) => s.note);
   const held = useRoomView((s) => (hold ? s.view?.tokens[hold.tokenId] : undefined));

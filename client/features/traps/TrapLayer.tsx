@@ -17,7 +17,6 @@ import { Pill } from "../measure/Pill.tsx";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
 import { boxCenter, trapNameShown, zoneBox, type SeenTrap } from "./rules.ts";
 import { trapSlot, type TrapDraft } from "./store.ts";
-import { useTrapAlerts } from "./useTrapAlerts.ts";
 
 const NO_TRAPS: Readonly<Record<string, Trap>> = {};
 const NO_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
@@ -45,7 +44,6 @@ const HATCH_PX = 7;
  */
 export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
   // Mounted with the board, which every room draws, as the falling reminder is (attach/TetherLayer.tsx).
-  useTrapAlerts();
   const traps = useRoomView((s) => s.view?.traps ?? NO_TRAPS);
   const chunks = useRoomView((s) => s.view?.buildChunks ?? NO_CHUNKS);
   const settings = useRoomView((s) => s.view?.meta.settings);

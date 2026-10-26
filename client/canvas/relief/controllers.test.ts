@@ -32,8 +32,75 @@ function registry(): { layers: Entry[]; controllers: { id: string; component: st
   return { layers, controllers, files };
 }
 
+/** What runs on its own: an effect, a frame loop, a store subscription or a timer. */
+const EFFECTS = /\buse(Layout)?Effect\(|requestAnimationFrame\(|\.subscribe\(|setInterval\(/;
+
+/**
+ * Hooks with effects that a layer may run in both trees, each with why a
+ * second run changes nothing. Anything else with effects keeps its layer
+ * "off" in Isometric until its effects move into a controller.
+ */
+const IDEMPOTENT: Record<string, string> = {
+  // Both trees publish the same pill, made from the room's data, under the same key, and the second publish finds it already there.
+  usePublishPills: "the same pills under the same key",
+  // Its timer only settles its own tree's "still moving" flag, which nothing outside that tree reads.
+  useLiveTokens: "a timer on its own state",
+  // It loads each texture once into a cache both trees share, and keeps what arrived in its own state.
+  useTextures: "a shared cache read into its own state",
+};
+
+/** The source of a function or const named `name` in `src`, up to its closing line, or null. */
+function bodyOf(src: string, name: string): string | null {
+  const m = new RegExp(`(?:function ${name}\\b|const ${name}\\b)`).exec(src);
+  if (!m) return null;
+  const ends = ["\n}\n", "\n});\n", "\n};\n"].map((e) => src.indexOf(e, m.index)).filter((i) => i >= 0);
+  return src.slice(m.index, ends.length > 0 ? Math.min(...ends) : undefined);
+}
+
+/** The relative imports of a file under client/: each imported name and the file it comes from. */
+function importsOf(file: string): Map<string, string> {
+  const src = read(file);
+  const out = new Map<string, string>();
+  for (const m of src.matchAll(/import \{([^}]+)\} from "(\.{1,2}\/[^"]+)";/g)) {
+    const target = join(dirname(file), m[2]!);
+    for (const raw of m[1]!.split(",")) {
+      const name = raw.trim().replace(/^type /, "").split(" as ")[0]!.trim();
+      if (name) out.set(name, target);
+    }
+  }
+  return out;
+}
+
+/**
+ * The effects a file's code runs: in its own source, and in every hook it
+ * calls that it imports from the app or defines itself, followed down
+ * through the hooks those call. Each finding names the path to it.
+ */
+function effectsReached(file: string): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const visit = (where: string, code: string, trail: string) => {
+    if (EFFECTS.test(code)) found.push(trail);
+    const imports = importsOf(where);
+    const own = read(where);
+    for (const m of code.matchAll(/\b(use[A-Z]\w*)\(/g)) {
+      const hook = m[1]!;
+      if (IDEMPOTENT[hook]) continue;
+      const from = imports.get(hook) ?? (bodyOf(own, hook) ? where : null);
+      if (!from) continue;
+      const key = `${from}#${hook}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const body = bodyOf(read(from), hook);
+      if (body) visit(from, body, `${trail} > ${hook} (${from})`);
+    }
+  };
+  visit(file, read(file), file);
+  return found;
+}
+
 describe("the board's controllers mount once", () => {
-  test("every layer names its isometric place, and every renderer with effects stays out of the isometric tree", () => {
+  test("every layer names its isometric place, and every renderer whose code reaches an effect stays out of the isometric tree", () => {
     const { layers, files } = registry();
     const src = read("features/layers.ts");
     const lines = src.slice(src.indexOf("export const LAYERS"), src.indexOf("export const CONTROLLERS")).match(/\{ id: "[^"]+", layer: /g) ?? [];
@@ -43,17 +110,23 @@ describe("the board's controllers mount once", () => {
       assert.match(l.iso, /^(ground|moving|upright|off)$/);
       const file = files.get(l.component);
       assert.ok(file, `${l.component} has a file`);
-      const body = read(file!);
-      const effects = /\buse(Layout)?Effect\(|requestAnimationFrame\(|\.subscribe\(/.test(body) || /use\w*Reminders?\(/.test(body);
-      if (effects) assert.equal(l.iso, "off", `${l.id} runs effects in its component (${file}), so it would run them in both trees`);
+      const reached = effectsReached(file!);
+      if (l.iso !== "off") assert.deepEqual(reached, [], `${l.id} reaches effects, which would run in both trees`);
     }
+  });
+
+  test("the scan follows hooks a layer imports: the trap alerts' toasts and sound, the teleport toasts and the laser's frame clock", () => {
+    assert.ok(effectsReached("features/pings/LaserLayer.tsx").some((t) => t.includes("useFrameClock")));
+    assert.ok(effectsReached("features/traps/useTrapAlerts.ts").length > 0);
+    assert.ok(effectsReached("features/movement/toasts.ts").length > 0);
+    for (const f of ["features/traps/TrapLayer.tsx", "features/movement/MoveLayer.tsx"]) assert.deepEqual(effectsReached(f), [], `${f} leaves its effects to a controller`);
   });
 
   test("the camera stream and the thumbnails are controllers, never layers", () => {
     const { layers, controllers } = registry();
     assert.deepEqual(
       controllers.map((c) => c.id),
-      ["dm-camera", "scene-thumbnails"],
+      ["dm-camera", "scene-thumbnails", "trap-alerts", "teleport-toasts"],
     );
     for (const id of ["dm-camera", "scene-thumbnails"]) assert.ok(!layers.some((l) => l.id === id), `${id} drawn in a tree`);
     assert.doesNotMatch(read("features/dm/CameraLayer.tsx"), /getStage\(|react-konva/, "the camera controller reads the camera it is given, not a stage");

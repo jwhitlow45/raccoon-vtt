@@ -32,3 +32,9 @@ export function useTeleportToasts(role: Role): void {
     for (const text of teleportToasts(fresh, view)) ui.notify(text, "info");
   }, [log, confirmedSeq, role, ui, store]);
 }
+
+/** The toasts as one of the board's controllers (features/layers.ts CONTROLLERS), mounted once outside both drawing trees, so each toasts once. */
+export function TeleportToasts(props: { role: Role }): null {
+  useTeleportToasts(props.role);
+  return null;
+}

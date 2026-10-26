@@ -21,6 +21,8 @@ import { FlashLayer } from "./outliner/FlashLayer.tsx";
 import { PinLayer } from "./pins/PinLayer.tsx";
 import { TetherLayer } from "./attach/TetherLayer.tsx";
 import { TrapLayer } from "./traps/TrapLayer.tsx";
+import { TrapAlerts } from "./traps/useTrapAlerts.ts";
+import { TeleportToasts } from "./movement/toasts.ts";
 import { quietLazy } from "../lib/quietLazy.tsx";
 
 /* The DM's height marks and explored outline, loaded after the room opens (lib/quietLazy.tsx). */
@@ -137,7 +139,8 @@ export const LAYERS: readonly LayerDef[] = [
   { id: "rulers", layer: "overlay", order: 10, iso: "off", Component: RulerLayer },
   // Its sound, vibration and hold run in the component, so it waits for its controller (ISO-3).
   { id: "pings", layer: "overlay", order: 20, iso: "off", Component: PingLayer },
-  { id: "laser", layer: "overlay", order: 30, iso: "moving", Component: LaserLayer },
+  // Its frame clock runs in the component, so it waits for its controller (ISO-3).
+  { id: "laser", layer: "overlay", order: 30, iso: "off", Component: LaserLayer },
   { id: "aoePreviews", layer: "overlay", order: 40, iso: "moving", Component: AreaPreviewLayer },
   { id: "builder", layer: "board", order: 10, iso: "ground", Component: BuilderLayer },
   { id: "lightReach", layer: "overlay", order: 45, iso: "off", Component: LightReachLayer },
@@ -159,6 +162,8 @@ export const LAYERS: readonly LayerDef[] = [
 export const CONTROLLERS: readonly ControllerDef[] = [
   { id: "dm-camera", Component: CameraController },
   { id: "scene-thumbnails", Component: ThumbnailLayer },
+  { id: "trap-alerts", Component: TrapAlerts },
+  { id: "teleport-toasts", Component: TeleportToasts },
 ];
 
 export function layersOf(layer: LayerDef["layer"]): LayerDef[] {
