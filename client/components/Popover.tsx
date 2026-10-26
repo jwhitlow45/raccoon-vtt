@@ -16,7 +16,7 @@ import {
 import { ScrollForMore } from "../canvas/TokenActionBar.tsx";
 import { subscribeUiScale, uiScale } from "../features/device/settings.ts";
 import { useBackClose } from "../lib/backClose.ts";
-import { keepFocusInView, readKeyboardView, visibleSpan } from "../lib/keyboardInset.ts";
+import { followField, readKeyboardView, subscribeKeyboard, visibleSpan } from "../lib/keyboardInset.ts";
 import { stopIndex, tabStops, type RadioMark } from "../lib/modalDialog.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
@@ -282,11 +282,21 @@ function OpenPopover(props: PopoverProps) {
   const dialog = handle.kind === "dialog";
   const titleId = useId();
   const [more, setMore] = useState(false);
+  /*
+   * Over the on-screen keyboard with less room than its title and one row
+   * (`minHeight`), as a tool's popover on a phone held sideways at 130%, it
+   * draws neither its title nor "Scroll for more", so a whole row shows
+   * and takes a tap. The title still names it.
+   */
+  const [tight, setTight] = useState(false);
+  const tightNow = useRef(false);
   const latest = useRef(props);
   latest.current = props;
   const frame = useRef<PlaceFrame | null>(null);
   const menuFocus = useRef<FocusInside | null>(null);
   const fitContent = useRef<FitContent | null>(null);
+  // The field inside it follows, until a scroll of the viewer's own (lib/keyboardInset.ts followField).
+  const follower = useRef<ReturnType<typeof followField> | null>(null);
   const context = useMemo<PopoverContextValue>(
     () => ({ handle, setInsideFocus: (focus) => void (menuFocus.current = focus), setFitContent: (fit) => void (fitContent.current = fit) }),
     [handle],
@@ -339,8 +349,13 @@ function OpenPopover(props: PopoverProps) {
       });
       Object.assign(box.style, { maxWidth: "", minWidth: "", left: `${at.left}px`, top: `${at.top}px`, width: `${at.width}px`, height: `${at.height}px` });
       box.scrollTop = scrolled;
-      // A field inside that the keyboard's coming made the box shorter under stays in view (lib/keyboardInset.ts).
-      if (visible) keepFocusInView(box, theme.space(2));
+      const short = visible !== null && at.height < (p.minHeight ?? 0);
+      if (short !== tightNow.current) {
+        tightNow.current = short;
+        setTight(short);
+      }
+      // A field inside that the keyboard's coming made the box shorter under stays in view, unless the viewer scrolled it away (lib/keyboardInset.ts).
+      if (visible) follower.current?.keep();
       updateMore();
     },
     [updateMore],
@@ -363,6 +378,13 @@ function OpenPopover(props: PopoverProps) {
 
   // A consumer's render may carry a new bound or rise region: placed again only if the frame changed.
   useLayoutEffect(() => place(false));
+  // Its content's height changed with the title, so it is placed again.
+  const tightOnce = useRef(tight);
+  useLayoutEffect(() => {
+    if (tightOnce.current === tight) return;
+    tightOnce.current = tight;
+    place(true);
+  }, [tight, place]);
 
   useEffect(() => {
     const h = latest.current.handle;
@@ -396,6 +418,13 @@ function OpenPopover(props: PopoverProps) {
       else focusAnchor(h.anchor.current, null);
     };
     const onMoved = () => place(false);
+    // The keyboard's view changes, on the visual viewport's resize and on a pan, once the store has it: placed a frame on, after the room has laid out for it.
+    let keyboardFrame = 0;
+    const onKeyboard = () => {
+      cancelAnimationFrame(keyboardFrame);
+      keyboardFrame = requestAnimationFrame(onMoved);
+    };
+    follower.current = followField(box, theme.space(2));
     const onScroll = (e: Event) => {
       if (e.target instanceof Node && box.contains(e.target)) return;
       place(false);
@@ -404,7 +433,7 @@ function OpenPopover(props: PopoverProps) {
     window.addEventListener("keydown", onKey, true);
     document.addEventListener("focusin", onFocusIn, true);
     window.addEventListener("resize", onMoved);
-    window.visualViewport?.addEventListener("resize", onMoved);
+    const unsubscribeKeyboard = subscribeKeyboard(onKeyboard);
     document.addEventListener("scroll", onScroll, true);
     const unsubscribeScale = subscribeUiScale(onMoved);
     const resized = new ResizeObserver(onMoved);
@@ -415,7 +444,10 @@ function OpenPopover(props: PopoverProps) {
       window.removeEventListener("keydown", onKey, true);
       document.removeEventListener("focusin", onFocusIn, true);
       window.removeEventListener("resize", onMoved);
-      window.visualViewport?.removeEventListener("resize", onMoved);
+      unsubscribeKeyboard();
+      cancelAnimationFrame(keyboardFrame);
+      follower.current?.stop();
+      follower.current = null;
       document.removeEventListener("scroll", onScroll, true);
       unsubscribeScale();
       resized.disconnect();
@@ -476,13 +508,13 @@ function OpenPopover(props: PopoverProps) {
         }}
       >
         {props.title ? (
-          // A menu is named by its own label, so its title is not read twice.
-          <div id={titleId} aria-hidden={dialog ? undefined : true} style={{ ...sectionLabelLook(), marginBottom: theme.space(2) }}>
+          // A menu is named by its own label, so its title is not read twice. Hidden while tight, it still names the dialog.
+          <div id={titleId} aria-hidden={dialog ? undefined : true} style={{ ...sectionLabelLook(), marginBottom: theme.space(2), ...(tight ? { display: "none" } : null) }}>
             {props.title}
           </div>
         ) : null}
         {props.children}
-        {more ? <ScrollForMore inset={POPOVER_PAD} /> : null}
+        {more && !tight ? <ScrollForMore inset={POPOVER_PAD} /> : null}
       </div>
     </PopoverContext.Provider>
   );

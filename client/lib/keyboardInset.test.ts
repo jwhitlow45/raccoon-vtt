@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, describe, test } from "node:test";
 import { SHEET_MIN_HEIGHT, sheetCap, sheetFoot, sheetKeyboard, sheetMaxHeight, sheetRoom, sheetTop } from "../components/sheetCap.ts";
-import { fieldScroll, keyboardView, keyboardViewNow, opensKeyboard, subscribeKeyboard, type FocusTarget, type ViewportSource } from "./keyboardInset.ts";
+import { fieldScroll, holdsField, keyboardView, keyboardViewNow, opensKeyboard, subscribeKeyboard, type FocusTarget, type ViewportSource } from "./keyboardInset.ts";
 
 /** A 390 x 844 phone, as the Room lays its sheet: the 52 px top bar and the 60 px toolbar, no safe areas. */
 const PHONE = { height: 844, safeTop: 0, safeBottom: 0, insetTop: 52, insetBottom: 60 };
@@ -26,9 +26,17 @@ describe("the keyboard's view, from the visual viewport", () => {
     assert.equal(keyboardView({ layoutHeight: 844, viewport: null, field: true }), null);
     assert.equal(keyboardView({ layoutHeight: 844, viewport: shown(544), field: false }), null);
     assert.equal(keyboardView({ layoutHeight: 844, viewport: shown(844), field: true }), null);
-    // Android Chrome resized the page itself (interactive-widget=resizes-content): the layout is as short as the visible area.
+    // A browser that resized the page itself: the layout is as short as the visible area.
     assert.equal(keyboardView({ layoutHeight: 544, viewport: shown(544), field: true }), null);
     assert.equal(keyboardView({ layoutHeight: 844, viewport: shown(843.5), field: true }), null, "half a pixel is rounding, not a keyboard");
+  });
+
+  test("whole px, so a pan by a fraction of a pixel is no change", () => {
+    assert.deepEqual(keyboardView({ layoutHeight: 844, viewport: shown(543.6, 120.4), field: true }), { top: 120, height: 544, inset: 180 });
+    assert.deepEqual(keyboardView({ layoutHeight: 844, viewport: shown(543.8, 120.1), field: true }), keyboardView({ layoutHeight: 844, viewport: shown(543.8, 119.9), field: true }));
+    // The edges round, so the three still add up to the layout's height.
+    const view = keyboardView({ layoutHeight: 844, viewport: shown(543.4, 119.6), field: true })!;
+    assert.equal(view.top + view.height + view.inset, 844);
   });
 
   test("a pinch zoom shrinks the visual viewport too, and is no keyboard", () => {
@@ -96,10 +104,21 @@ describe("the keyboard's view as the page hears it, with a fake visual viewport"
     viewport.dispatchEvent(new Event("scroll"));
     assert.deepEqual(keyboardViewNow(), { top: 120, height: 544, inset: 180 });
     assert.equal(heard, 2);
+    // A press on Spend takes focus from the field while the keyboard is still up: the view stays, so the sheet stays under the finger.
     doc.activeElement = { tagName: "BUTTON" };
     doc.dispatchEvent(new Event("focusout"));
-    assert.equal(keyboardViewNow(), null, "focus on a button: no keyboard, whatever the viewport says");
+    doc.dispatchEvent(new Event("focusin"));
+    assert.deepEqual(keyboardViewNow(), { top: 120, height: 544, inset: 180 }, "focus on a button with the keyboard up keeps the view");
+    assert.equal(heard, 2);
+    // The keyboard closes: the viewport grows back, and the view ends.
+    viewport.show(844);
+    assert.equal(keyboardViewNow(), null);
     assert.equal(heard, 3);
+    // With focus still on the button, a shrink starts nothing: a browser's bars, not a keyboard.
+    viewport.show(780);
+    assert.equal(keyboardViewNow(), null, "no view starts without a field");
+    assert.equal(heard, 3);
+    viewport.show(844);
     stop();
     doc.activeElement = field;
     viewport.show(400);
@@ -165,6 +184,24 @@ describe("the sheet's cap with the keyboard open (components/sheetCap.ts)", () =
       "max(120px, min(calc(60dvh / var(--rvtt-ui, 1)), calc(100% - max(calc(env(safe-area-inset-top, 0px) + 52px), 120px) - max(calc(env(safe-area-inset-bottom, 0px) + 60px), 180px) - 56px)))",
     );
     assert.match(sheetMaxHeight({ top: 52, bottom: 60 }, 8, keyboard), / - 24px\)\)\)$/, "a reserve under the gap keeps the gap");
+  });
+});
+
+describe("whether a body holds its focused field with what goes with it, for a sheet's taller shape", () => {
+  test("a body that shows the form, Spend and Cancel under the amount, with the margins, holds it", () => {
+    assert.equal(holdsField({ visible: 120, field: 40, group: 100, margin: 8 }), true);
+    assert.equal(holdsField({ visible: 116, field: 40, group: 100, margin: 8 }), true, "the margins on both sides, exactly");
+    assert.equal(holdsField({ visible: 115, field: 40, group: 100, margin: 8 }), false, "a pixel short: the buttons go under the keyboard");
+  });
+
+  test("a form more than three fields tall counts as the field alone, as fieldScroll does", () => {
+    assert.equal(holdsField({ visible: 60, field: 40, group: 400, margin: 8 }), true);
+    assert.equal(holdsField({ visible: 50, field: 40, group: 400, margin: 8 }), false);
+  });
+
+  test("a landscape sheet at 130% with a 216 px keyboard: what shows of the body is under the field and its buttons", () => {
+    // 390 px tall, the 216 px keyboard, and the side sheet's header leave 30 px of body, short of the amount's 44 px row and the buttons under it.
+    assert.equal(holdsField({ visible: 30, field: 44, group: 96, margin: 8 }), false);
   });
 });
 

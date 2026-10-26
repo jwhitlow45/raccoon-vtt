@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { effectiveZoom } from "../features/device/layout.ts";
 import { isCoarsePointer } from "./device.ts";
+import { opensKeyboard, type FocusTarget } from "./keyboardField.ts";
 
 /*
  * The on-screen keyboard's place, for what stands at the screen's foot
@@ -9,13 +10,20 @@ import { isCoarsePointer } from "./device.ts";
  * and only `window.visualViewport` shrinks, so a sheet fixed to the foot
  * stays under the keyboard with the field that opened it. Safari may also
  * pan the visible area down the page to show a field, which hides the top
- * instead. Android Chrome resizes the layout viewport itself, where
- * index.html asks it to (`interactive-widget=resizes-content`), and then
- * nothing is hidden and this reads no keyboard.
+ * instead. Android Chrome does the same, as index.html leaves it its
+ * default (`resizes-visual`). A browser that resizes the layout viewport
+ * hides nothing and reads no keyboard here, and features/device/layout.ts
+ * keeps the room's size steady through it.
  *
- * It counts only while a field that opens a keyboard has focus: a pinch
+ * A view starts only with focus in a field that opens a keyboard: a pinch
  * zoom shrinks the visual viewport too, and so can a browser's own bars
- * for a moment, and neither is a keyboard.
+ * for a moment, and neither is a keyboard. Once started it lasts while the
+ * visual viewport stays shrunk at scale 1, whatever has focus, and ends as
+ * the viewport grows back when the keyboard closes. A press on Spend takes
+ * focus from the field while the keyboard is still up, and a view that
+ * ended there dropped the sheet under the finger before the tap landed.
+ * Its numbers are whole px, so a pan of the page draws again only as it
+ * moves a whole pixel.
  */
 
 /** The parts of `window.visualViewport` this reads, so the rules can be tested without a browser. */
@@ -32,31 +40,24 @@ export type KeyboardView = { top: number; height: number; inset: number };
 /** Less than this is a rounding of the viewport's size, not a keyboard. */
 const NOISE = 1;
 
-/** The keyboard's view for a layout `layoutHeight` tall, or null where no keyboard hides any of it. */
+/**
+ * The keyboard's view for a layout `layoutHeight` tall, or null where no
+ * keyboard hides any of it. `field` is whether a view may start or go on:
+ * a field that opens a keyboard has focus, or a view is already open.
+ */
 export function keyboardView(input: { layoutHeight: number; viewport: ViewportSource | null; field: boolean }): KeyboardView | null {
   const v = input.viewport;
   if (!v || !input.field || Math.abs(v.scale - 1) > 0.01) return null;
   const top = Math.max(0, v.offsetTop);
   const inset = Math.max(0, input.layoutHeight - top - v.height);
   if (inset < NOISE && top < NOISE) return null;
-  return { top, height: v.height, inset };
+  // Round the edges, not each number, so top, height and inset still add up to the layout's height.
+  const edge = Math.round(top);
+  const foot = Math.round(top + v.height);
+  return { top: edge, height: foot - edge, inset: Math.max(0, Math.round(input.layoutHeight) - foot) };
 }
 
-/** The parts of an element that say whether focus on it opens the on-screen keyboard. */
-export type FocusTarget = { tagName: string; type?: string; readOnly?: boolean; disabled?: boolean; isContentEditable?: boolean; inputMode?: string };
-
-/** The input types that type text. Buttons, boxes, sliders and pickers open no keyboard. */
-const TYPED = new Set(["", "text", "search", "number", "email", "tel", "url", "password"]);
-
-/** Whether focus on `el` opens the on-screen keyboard: a text field, a text area, or editable text. */
-export function opensKeyboard(el: FocusTarget | null): boolean {
-  if (!el || el.inputMode === "none") return false;
-  if (el.isContentEditable === true) return true;
-  const tag = el.tagName.toLowerCase();
-  if (tag === "textarea") return el.readOnly !== true && el.disabled !== true;
-  if (tag !== "input") return false;
-  return TYPED.has((el.type ?? "").toLowerCase()) && el.readOnly !== true && el.disabled !== true;
-}
+export { opensKeyboard, type FocusTarget } from "./keyboardField.ts";
 
 const sameView = (a: KeyboardView | null, b: KeyboardView | null) => a === b || (a !== null && b !== null && a.top === b.top && a.height === b.height && a.inset === b.inset);
 
@@ -67,7 +68,8 @@ let detach: (() => void) | null = null;
 /** The keyboard's view read afresh from the page, for a surface that places itself on an event of its own, before the store may have heard it. */
 export function readKeyboardView(): KeyboardView | null {
   if (typeof window === "undefined") return null;
-  return keyboardView({ layoutHeight: window.innerHeight, viewport: window.visualViewport ?? null, field: opensKeyboard(document.activeElement as FocusTarget | null) });
+  const open = detach !== null && current !== null;
+  return keyboardView({ layoutHeight: window.innerHeight, viewport: window.visualViewport ?? null, field: open || opensKeyboard(document.activeElement as FocusTarget | null) });
 }
 
 function refresh(): void {
@@ -148,15 +150,15 @@ export function fieldScroll(input: { field: Span; group: Span; visible: Span; ma
 
 /**
  * Keeps the field focused inside `scroller` in view (fieldScroll): as it
- * takes focus, and again each time the keyboard's view changes (`view`),
- * after the surface has laid out for it, and after a resize of the page,
+ * takes focus, and again each time `layout` changes, what the surface
+ * lays out by (the keyboard's view, or more), after it has laid out, and after a resize of the page,
  * which is how Android Chrome makes room for its keyboard (index.html), so
  * there the view stays null. A touch drag or a wheel on the scroller is a
  * scroll on purpose, and stops it for that field until a field takes
  * focus again. `margin` is in the scroller's own px, as its interface size
  * draws them.
  */
-export function useFieldInView(scroller: RefObject<HTMLElement | null>, view: KeyboardView | null, margin: number): void {
+export function useFieldInView(scroller: RefObject<HTMLElement | null>, layout: unknown, margin: number): void {
   const following = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const el = scroller.current;
@@ -202,7 +204,7 @@ export function useFieldInView(scroller: RefObject<HTMLElement | null>, view: Ke
     const el = scroller.current;
     const field = following.current;
     if (el && field?.isConnected && el.contains(field)) keepInView(el, field, margin);
-  }, [scroller, view, margin]);
+  }, [scroller, layout, margin]);
 }
 
 /**
@@ -266,20 +268,108 @@ function scrollerOf(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
-/** keepInView for the field that has focus now, where it opens a keyboard and is inside `scroller`: for a surface that lays itself out on an event of its own, such as a popover placed again. */
-export function keepFocusInView(scroller: HTMLElement, margin: number): void {
+/**
+ * The follow state of useFieldInView for a surface that places itself on
+ * events of its own, such as a popover placed again: it follows the field
+ * that takes focus inside `scroller` until a touch drag or a wheel there
+ * scrolls on purpose, and `keep` keeps that field in view while it still
+ * has focus. `stop` takes its listeners off.
+ */
+export function followField(scroller: HTMLElement, margin: number): { keep(): void; stop(): void } {
+  let following: HTMLElement | null = null;
+  const onFocusIn = (e: FocusEvent) => {
+    following = e.target instanceof HTMLElement && e.target !== scroller && opensKeyboard(e.target) ? e.target : null;
+  };
+  const onUserScroll = () => {
+    following = null;
+  };
+  // A field with focus already, as a popover opens on its own field, is followed from the start.
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active !== scroller && scroller.contains(active) && opensKeyboard(active)) following = active;
+  scroller.addEventListener("focusin", onFocusIn);
+  scroller.addEventListener("touchmove", onUserScroll, { passive: true });
+  scroller.addEventListener("wheel", onUserScroll, { passive: true });
+  return {
+    keep() {
+      if (following?.isConnected && document.activeElement === following && scroller.contains(following)) keepInView(scroller, following, margin);
+    },
+    stop() {
+      scroller.removeEventListener("focusin", onFocusIn);
+      scroller.removeEventListener("touchmove", onUserScroll);
+      scroller.removeEventListener("wheel", onUserScroll);
+    },
+  };
+}
+
+/**
+ * Whether focus is in a field inside `ref` that opens the on-screen
+ * keyboard: a surface holding it freezes the choices that would hide it,
+ * fold it or turn it modal while someone types there (docs/design.md 14.4).
+ */
+export function useTypingWithin(ref: RefObject<HTMLElement | null>): boolean {
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    const read = () => {
+      const el = ref.current;
+      const active = document.activeElement;
+      setTyping(el !== null && active instanceof HTMLElement && el.contains(active) && opensKeyboard(active));
+    };
+    read();
+    document.addEventListener("focusin", read, true);
+    document.addEventListener("focusout", read, true);
+    return () => {
+      document.removeEventListener("focusin", read, true);
+      document.removeEventListener("focusout", read, true);
+    };
+  }, [ref]);
+  return typing;
+}
+
+/**
+ * Whether a body showing `visible` px holds a focused field and what goes
+ * with it (fieldScroll's group), `margin` clear above and below. A group
+ * more than three times the field's height is a long form, and the field
+ * alone must fit.
+ */
+export function holdsField(input: { visible: number; field: number; group: number; margin: number }): boolean {
+  const need = input.group <= 3 * input.field ? input.group : input.field;
+  return input.visible >= need + 2 * input.margin - 0.5;
+}
+
+/** holdsField for a scrolling body and the field focused in it, measured, in the body's own px at the interface size. Null when no keyboard field inside it has focus. */
+export function bodyHoldsField(body: HTMLElement, margin: number): boolean | null {
   const field = document.activeElement;
-  if (field instanceof HTMLElement && field !== scroller && scroller.contains(field) && opensKeyboard(field)) keepInView(scroller, field, margin);
+  if (!(field instanceof HTMLElement) || field === body || !body.contains(field) || !opensKeyboard(field)) return null;
+  const box = body.getBoundingClientRect();
+  const zoom = effectiveZoom(body, box.width);
+  const seen = scrollerSeen(body, box, zoom);
+  const form = field.closest("form");
+  const group = form && body.contains(form) ? form.getBoundingClientRect().height : field.getBoundingClientRect().height;
+  return holdsField({ visible: Math.max(0, seen.bottom - seen.top), field: field.getBoundingClientRect().height, group, margin: margin * zoom });
+}
+
+/**
+ * What of a scroller's box shows, in the page's px: inside the visual
+ * viewport, and inside its scroll padding, which a scroller with a sticky
+ * header or a fade at its foot sets to their heights (the token bar's), so
+ * a field kept in view is never kept under them. `zoom` is the scroller's
+ * interface size.
+ */
+function scrollerSeen(scroller: HTMLElement, box: DOMRect, zoom: number): Span {
+  const viewport = window.visualViewport;
+  // getBoundingClientRect is from the layout viewport's top, as the visual viewport's offsetTop is.
+  const seen = viewport ? { top: viewport.offsetTop, bottom: viewport.offsetTop + viewport.height } : { top: 0, bottom: window.innerHeight };
+  const style = getComputedStyle(scroller);
+  // "auto" is no padding.
+  const pad = (v: string) => (Number.parseFloat(v) || 0) * zoom;
+  return { top: Math.max(box.top + pad(style.scrollPaddingTop), seen.top), bottom: Math.min(box.bottom - pad(style.scrollPaddingBottom), seen.bottom) };
 }
 
 function keepInView(scroller: HTMLElement, field: HTMLElement, margin: number): void {
   const box = scroller.getBoundingClientRect();
   // The boxes are in the page's px, and scrollTop in the scroller's own, which the interface size zooms.
   const zoom = effectiveZoom(scroller, box.width);
-  const viewport = window.visualViewport;
-  // getBoundingClientRect is from the layout viewport's top, as the visual viewport's offsetTop is.
-  const seen = viewport ? { top: viewport.offsetTop, bottom: viewport.offsetTop + viewport.height } : { top: 0, bottom: window.innerHeight };
-  const visible = { top: Math.max(box.top, seen.top), bottom: Math.min(box.bottom, seen.bottom) };
+  const visible = scrollerSeen(scroller, box, zoom);
   if (visible.bottom <= visible.top) return;
   const form = field.closest("form");
   const group = form && scroller.contains(form) ? form.getBoundingClientRect() : field.getBoundingClientRect();
