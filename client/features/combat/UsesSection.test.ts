@@ -168,8 +168,14 @@ describe("a monster's rows, its counts as pips", () => {
     assert.match(row(markup, "ability", 0), />Dominate Mind, 2\/Day<\/span><span/);
     assert.doesNotMatch(markup, />[^<]*\d of \d(?! left)[^<]*</, "no count in words on screen");
     // The pips only show: no button among them, and hidden from a screen reader.
-    for (const part of markup.match(/<span data-use-pips=""[^>]*>.*?<\/span><\/div>/g) ?? []) {
-      assert.match(part, /^<span data-use-pips="" aria-hidden="true"/);
+    const parts = markup.match(/<(span|svg) data-use-pips=""[^>]*>.*?<\/\1><\/div>/g) ?? [];
+    assert.equal(parts.length, 4, "three counts and Fire Breath's state");
+    // Filled in the accent for each use left, a ring alone for each spent.
+    const circles = [...markup.matchAll(/<circle [^>]*>/g)].map((m) => m[0]);
+    assert.equal(circles.length, 8);
+    for (const c of circles) assert.match(c, c.includes('data-pip="left"') ? /fill:var\(--rvtt-accent/ : /fill:none/, c);
+    for (const part of parts) {
+      assert.match(part, /^<(span|svg) data-use-pips="" aria-hidden="true"/);
       assert.doesNotMatch(part, /<button/);
     }
   });

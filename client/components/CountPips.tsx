@@ -46,24 +46,36 @@ export function NameLine(props: { name: ReactNode; spoken?: string; end?: ReactN
   );
 }
 
+/** A pip's size, its ring and the room between two pips, in px. */
+const PIP = 14;
+const PIP_RING = theme.line.strong;
+const PIP_GAP = theme.space(1);
+
 /**
  * A count to read, never to tap: a pip for each use, filled for each one
  * left, from the left, as "2 of 3" left read before. Past PIPS_MOST its
  * words, "7 of 10", where the pips would stand. Hidden from a screen
- * reader, which hears `countWords` after the name instead.
+ * reader, which hears `countWords` after the name instead. One picture,
+ * as an icon is, so the row reads as its name beside a mark and not as a
+ * row of boxes.
  */
 export function CountPips(props: Count) {
   if (props.max > PIPS_MOST) return <EndWords>{`${props.left} of ${props.max}`}</EndWords>;
+  const width = props.max * PIP + (props.max - 1) * PIP_GAP;
   return (
-    <span data-use-pips="" aria-hidden="true" style={{ flex: "none", marginLeft: "auto", display: "flex", alignItems: "center", gap: theme.space(1) }}>
+    <svg data-use-pips="" aria-hidden="true" width={width} height={PIP} viewBox={`0 0 ${width} ${PIP}`} style={{ flex: "none", marginLeft: "auto", display: "block", overflow: "visible" }}>
       {Array.from({ length: props.max }, (_, i) => (
-        <span
+        <circle
           key={i}
           data-pip={i < props.left ? "left" : "spent"}
-          style={{ flex: "none", boxSizing: "border-box", width: 14, height: 14, borderRadius: theme.radius.round, border: `${theme.line.strong}px solid ${theme.color.accent}`, background: i < props.left ? theme.color.accent : "transparent" }}
+          cx={i * (PIP + PIP_GAP) + PIP / 2}
+          cy={PIP / 2}
+          r={(PIP - PIP_RING) / 2}
+          strokeWidth={PIP_RING}
+          style={{ stroke: theme.color.accent, fill: i < props.left ? theme.color.accent : "none" }}
         />
       ))}
-    </span>
+    </svg>
   );
 }
 

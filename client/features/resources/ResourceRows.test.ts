@@ -43,7 +43,7 @@ describe("a character's class resource rows", () => {
 
   test("each row reads its name, what is left of its most and its rest", () => {
     const markup = rows([rage, hands], "list");
-    assert.match(markup, />Rage<\/span><span style="[^"]*">, 2 of 3 left<\/span><\/span><span data-use-pips="" aria-hidden="true"/, "pips for a most of 6 or fewer");
+    assert.match(markup, />Rage<\/span><span style="[^"]*">, 2 of 3 left<\/span><\/span><svg data-use-pips="" aria-hidden="true"/, "pips for a most of 6 or fewer");
     assert.match(markup, /Lay on Hands<\/span> <span[^>]*>25 of 25<\/span>/, "its words beside the name past 6");
     assert.match(markup, />One back on a Short Rest, all on a Long Rest</);
     assert.match(markup, />Back on a Long Rest</);
