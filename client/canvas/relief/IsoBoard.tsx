@@ -32,7 +32,8 @@ import type { StaticPiece, VBox } from "./pieces.ts";
 import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 import { FrameScheduler } from "./scheduler.ts";
 import { ghostStands, ghostTagStands, splitTokens, tokenBox } from "./stand.ts";
-import { standeeShape } from "./standee.ts";
+import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
+import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
 
 /**
  * The isometric board (docs/design-v1-isometric-view.md 5.1): two stages,
@@ -167,15 +168,18 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const byId = useMemo(() => new Map(props.tokens.map((t) => [t.id, t])), [props.tokens]);
   const standees = useMemo(() => {
     const standingIds = new Set(standing.map((t) => t.id));
-    return standing.map((t): StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number } => {
+    const all = Object.fromEntries(props.tokens.map((t) => [t.id, t]));
+    return standing.map((t): Standing => {
       const fp = footprint(t);
       const range = occupiedRange(t);
       const base = drawnBase(src, range, t.elevation) / feet;
       const ground = drawnFootprintGround(src, range) / feet;
-      const shape = standeeShape(turn, { x: t.x, y: t.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
       const link = t.attached;
       const holder = link && onHolder(link.kind) && standingIds.has(link.to) ? link.to : null;
       const holderToken = holder ? byId.get(holder) : undefined;
+      // One seat, read by the drawing (TokenNode.tsx Standee) and by every box below, so they agree.
+      const seat: Seat = holderToken ? { rise: footprint(holderToken).h / 2, inset: drawsInset(all, t) ? COVER_INSET : 1 } : ON_GROUND;
+      const shape = standeeShape(turn, { x: t.x, y: t.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, seat);
       return {
         id: t.id,
         x: t.x + fp.w / 2,
@@ -185,14 +189,16 @@ function IsoBoardImpl(props: IsoBoardProps) {
         holder,
         bounds: shape.bounds,
         art: shape.art,
+        frame: shape.frame,
         keep: props.keepIds.has(t.id),
         ground,
         capped: shape.capped,
         drawn: shape.drawnBase,
-        rise: holderToken ? footprint(holderToken).h / 2 : 0,
+        rise: seat.rise,
+        inset: seat.inset,
       };
     });
-  }, [standing, src, feet, turn, cam.scale, size.height, props.keepIds, byId]);
+  }, [standing, src, feet, turn, cam.scale, size.height, props.keepIds, byId, props.tokens]);
 
   // The canvas's view box, grown and snapped in steps, so a pan lays out again only when it crosses a step.
   const step = CULL_STEP_PX / cam.scale;
@@ -218,7 +224,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const s = byStandee.get(item.id)!;
       const t = byId.get(item.id)!;
       const dim = props.role === "dm" && playersFog !== null && !playersFog.boxAny(tokenBox(t));
-      const fresh: IsoToken = { turn, base: s.base, ground: s.ground, drawn: s.drawn, capped: s.capped, rise: s.rise, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false };
+      const fresh: IsoToken = { turn, base: s.base, ground: s.ground, drawn: s.drawn, capped: s.capped, rise: s.rise, inset: s.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false };
       const old = isoCache.current.get(item.id);
       next.set(item.id, old && sameIso(old, fresh) ? old : fresh);
     }
@@ -271,7 +277,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const ground = drawnFootprintGround(src, range) / feet;
       if (ghostStands(fog, t, at)) {
         const shape = standeeShape(turn, { x: at.x, y: at.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height);
-        const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, pits: [], dim: false, pressOnly: false };
+        const standee: IsoToken = { turn, base, ground, drawn: shape.drawnBase, capped: shape.capped, rise: 0, inset: 1, pits: [], dim: false, pressOnly: false };
         // The tag stands over the art when the pill Top-down draws for it is clear too, and is left out otherwise.
         return { standee, clip: null, tag: ghostTagStands(fog, t, at, name, cam.scale) ? { x: (shape.art.x0 + shape.art.x1) / 2, y: shape.art.y0 } : null };
       }
@@ -376,7 +382,10 @@ function IsoBoardImpl(props: IsoBoardProps) {
   );
 }
 
-const PRESS_ONLY: IsoToken = { turn: 0, base: 0, ground: 0, drawn: 0, capped: false, rise: 0, pits: [], dim: false, pressOnly: true };
+/** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
+type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox };
+
+const PRESS_ONLY: IsoToken = { turn: 0, base: 0, ground: 0, drawn: 0, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true };
 
 /** One run of relief pieces, drawn by one shape that does not listen. */
 const ReliefRun = memo(function ReliefRun(props: { pieces: StaticPiece[]; dc: { readonly current: DrawContext | null } }) {
@@ -400,7 +409,7 @@ const ReliefRun = memo(function ReliefRun(props: { pieces: StaticPiece[]; dc: { 
  */
 function decorAt(
   t: ViewToken,
-  standees: readonly (StandeeIn & { ground: number })[],
+  standees: readonly Standing[],
   view: ReturnType<typeof isometric>,
   cull: VBox,
   keep: ReadonlySet<string>,
@@ -408,7 +417,7 @@ function decorAt(
   const s = standees.find((x) => x.id === t.id);
   if (s) {
     if (!s.keep && !meets(s.bounds, cull)) return null;
-    return { x: s.art.x0, y: s.art.y0 };
+    return { x: s.frame.x0, y: s.frame.y0 };
   }
   // A creature lying flat draws its decor above the fog, as Top-down's decor already is (5.2): every token a player holds is partly in sight.
   const fp = footprint(t);
@@ -473,6 +482,7 @@ function sameIso(a: IsoToken, b: IsoToken): boolean {
     a.ground === b.ground &&
     a.capped === b.capped &&
     a.rise === b.rise &&
+    a.inset === b.inset &&
     a.dim === b.dim &&
     a.pressOnly === b.pressOnly &&
     a.pits.length === b.pits.length &&

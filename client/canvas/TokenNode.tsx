@@ -57,6 +57,8 @@ export type IsoToken = {
   capped: boolean;
   /** How far up its holder it rides, in view units: half the holder's art height. */
   rise: number;
+  /** The share of its size its art draws at: COVER_INSET when it rides a holder it covers, else 1. */
+  inset: number;
   /** The pit cells it stands in, whose openings clip it (5.5). */
   pits: readonly { x: number; y: number }[];
   /** On the DM's device, a standee the players cannot see draws dimmed (5.4). */
@@ -156,7 +158,7 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
         iso.pressOnly ? (
           <FootprintPress w={fp.w} h={fp.h} />
         ) : (
-          <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} iso={iso} inset={props.inset === true} />
+          <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} iso={iso} />
         )
       ) : props.inset ? (
         <>
@@ -233,16 +235,15 @@ function clipToOpenings(ctx: Konva.Context, iso: IsoToken, at: { x: number; y: n
  * at the token's world x and y inside the ground group, so a drag reads
  * world cells as it does in Top-down.
  */
-function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; iso: IsoToken; inset: boolean }) {
+function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; iso: IsoToken }) {
   const { token, w, h, scale, iso } = props;
   // Drawn from the capped base the layout read, so the art is where it culls, decorates and casts silhouettes.
-  const parts = standeeParts(iso.turn, iso.drawn, iso.ground);
+  const parts = standeeParts(iso.turn, iso.drawn, iso.ground, { w, h }, iso);
   const upright = groundGroups(iso.turn).upright;
   const ringPx = boardSizes(scale).ringPx;
   const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
   const turnedBy = Number.isFinite(token.rotation) ? token.rotation : 0;
   const facing = (turnedBy * Math.PI) / 180;
-  const k = props.inset ? COVER_INSET : 1;
   return (
     <>
       {parts.shadow ? <Ellipse x={w / 2 + parts.shadow.x} y={h / 2 + parts.shadow.y} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.shadow} listening={false} /> : null}
@@ -262,8 +263,8 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
         {props.selected ? <SelectedOutline w={w} h={h} scale={scale} /> : null}
         <Group x={w / 2} y={h / 2} rotation={upright.rotation} scaleY={upright.scaleY}>
           {parts.stem > 0 ? <Line points={[0, 0, 0, parts.stem]} stroke={theme.relief.stem} strokeWidth={1} strokeScaleEnabled={false} dash={iso.capped ? [6 / scale, 4 / scale] : undefined} listening={false} /> : null}
-          <Group x={(-w * k) / 2} y={-h * k - iso.rise} scaleX={k} scaleY={k}>
-            <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * k} name={props.name} upright />
+          <Group x={parts.art.x} y={parts.art.y} scaleX={parts.art.scale} scaleY={parts.art.scale}>
+            <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * parts.art.scale} name={props.name} upright />
           </Group>
         </Group>
       </Group>
@@ -464,7 +465,7 @@ export const TokenGhost = memo(function TokenGhost(props: {
   if (props.iso) {
     return (
       <Group x={x} y={y} opacity={theme.relief.ghostOpacity} listening={false}>
-        <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={displayName(token)} active={false} selected={false} iso={props.iso} inset={false} />
+        <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={displayName(token)} active={false} selected={false} iso={props.iso} />
       </Group>
     );
   }

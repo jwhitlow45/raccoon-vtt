@@ -7,7 +7,8 @@ import { occupiedRange } from "#shared/rules/footprint.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { drawnBase, drawnFootprintGround, heightsStand, isometric, K, toView, type DrawnSource, type Turn } from "../../lib/view.ts";
 import { readFileSync } from "node:fs";
-import { ellipseBox, standeeParts, standeeShape } from "./standee.ts";
+import { COVER_INSET } from "../../features/attach/groups.ts";
+import { DECOR_REACH_PX, ellipseBox, standeeParts, standeeShape } from "./standee.ts";
 
 const FEET = 5;
 
@@ -94,7 +95,7 @@ describe("standees", () => {
       ] as const) {
         const box = { x: 3, y: 4, w: 2, h: 2 };
         const shape = standeeShape(turn, box, base, ground, 40, 800);
-        const parts = standeeParts(turn, shape.drawnBase, ground);
+        const parts = standeeParts(turn, shape.drawnBase, ground, box);
         const view = isometric(turn);
         const middle = { x: box.x + box.w / 2, y: box.y + box.h / 2 };
         // The ring's group and the shadow sit at these world shifts inside the ground group, whose own lift is 0.
@@ -113,10 +114,43 @@ describe("standees", () => {
     }
   });
 
+  test("a rider's art draws, culls and casts its silhouette from one box, up its holder and inset where it covers it", () => {
+    for (const turn of [0, 1, 2, 3] as Turn[]) {
+      for (const seat of [
+        { rise: 0, inset: 1 },
+        { rise: 0.5, inset: 1 },
+        { rise: 1, inset: COVER_INSET },
+      ]) {
+        const box = { x: 3, y: 4, w: 2, h: 2 };
+        const shape = standeeShape(turn, box, 2, 0, 40, 800, seat);
+        const parts = standeeParts(turn, shape.drawnBase, 0, box, seat);
+        const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+        // The drawing's art corner, from the ring's middle in the upright group, is the layout's art box.
+        assert.ok(near(shape.base.x + parts.art.x, shape.art.x0) && near(shape.base.y + parts.art.y, shape.art.y0), `art corner at ${JSON.stringify(seat)}`);
+        assert.ok(near(box.w * parts.art.scale, shape.art.x1 - shape.art.x0) && near(box.h * parts.art.scale, shape.art.y1 - shape.art.y0), "art size");
+        assert.ok(near(shape.art.y1, shape.base.y - seat.rise), "it stands up its holder");
+        // The decor's frame is the footprint's size, standing where the art stands, around it.
+        assert.ok(near(shape.frame.y1, shape.art.y1) && near(shape.frame.x1 - shape.frame.x0, box.w) && shape.frame.x0 <= shape.art.x0 && shape.frame.y0 <= shape.art.y0);
+        // Culling keeps all of it.
+        assert.ok(shape.bounds.y0 <= shape.frame.y0 - DECOR_REACH_PX.top / 40 + 1e-9, "its chips over the raised frame");
+        assert.ok(shape.bounds.x0 < shape.frame.x0 && shape.bounds.x1 > shape.frame.x1);
+      }
+    }
+  });
+
+  test("the board lays decor out on the frame and draws silhouettes from the seated art", () => {
+    const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
+    assert.match(board, /return \{ x: s\.frame\.x0, y: s\.frame\.y0 \};/);
+    assert.match(board, /standeeShape\(turn, \{ x: t\.x, y: t\.y, w: fp\.w, h: fp\.h \}, base, ground, cam\.scale, size\.height, seat\)/);
+    assert.match(board, /rise: seat\.rise,\n\s+inset: seat\.inset,/);
+    const node = readFileSync(new URL("../TokenNode.tsx", import.meta.url), "utf8");
+    assert.match(node, /standeeParts\(iso\.turn, iso\.drawn, iso\.ground, \{ w, h \}, iso\)/);
+  });
+
   test("the standee draws from the base the layout capped, never the logical one", () => {
     const node = readFileSync(new URL("../TokenNode.tsx", import.meta.url), "utf8");
     const standee = node.slice(node.indexOf("function Standee("), node.indexOf("\n}\n", node.indexOf("function Standee(")));
-    assert.match(standee, /standeeParts\(iso\.turn, iso\.drawn, iso\.ground\)/);
+    assert.match(standee, /standeeParts\(iso\.turn, iso\.drawn, iso\.ground,/);
     assert.doesNotMatch(standee, /iso\.base/);
     const board = readFileSync(new URL("./IsoBoard.tsx", import.meta.url), "utf8");
     assert.equal(board.match(/drawn: shape\.drawnBase/g)?.length, 2, "standees and ghosts both carry the capped base");
