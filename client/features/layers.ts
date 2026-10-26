@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { Scene } from "#shared/model.ts";
 import type { Box } from "../lib/boardText.ts";
+import type { Live } from "../lib/view.ts";
 import { AreaPreviewLayer } from "./areas/AreaPreviewLayer.tsx";
 import { TemplateLayer } from "./areas/TemplateLayer.tsx";
 import { DrawingLayer } from "./drawings/DrawingLayer.tsx";
@@ -13,7 +14,7 @@ import { BuilderLayer, LightReachLayer } from "./builder/BuilderLayer.tsx";
 import { StampHandles } from "./builder/stamps/StampHandles.tsx";
 import { FogLayer } from "./fog/FogLayer.tsx";
 import { GridLayer } from "./grid/GridLayer.tsx";
-import { CameraLayer } from "./dm/CameraLayer.tsx";
+import { CameraController } from "./dm/CameraLayer.tsx";
 import { ThumbnailLayer } from "./scenes/ThumbnailLayer.tsx";
 import { MoveLayer } from "./movement/MoveLayer.tsx";
 import { FlashLayer } from "./outliner/FlashLayer.tsx";
@@ -58,7 +59,14 @@ const ExploredEdgeLayer = quietLazy<LayerProps>(() => import("./vision/ExploredE
  *     return <>{pings.map((p) => <Circle key={p.id} x={p.x} y={p.y} radius={12 / props.scale} stroke="#f7df00" />)}</>;
  *   }
  *
- * and here: `{ id: "pings", layer: "overlay", order: 20, Component: PingLayer },` in LAYERS.
+ * and here: `{ id: "pings", layer: "overlay", order: 20, iso: "off", Component: PingLayer },` in LAYERS.
+ *
+ * The isometric view (docs/design-v1-isometric-view.md 5.1) draws the board
+ * in a second tree, and `iso` says where each renderer goes there. A
+ * renderer that runs effects (sounds, reminders, listeners, its own frame
+ * clock) must not draw in both trees, or its effects run twice once
+ * Isometric has shown. Such a renderer stays "off" until its effects move
+ * into a controller (CONTROLLERS, mounted once outside both trees).
  */
 
 export type LayerProps = {
@@ -84,40 +92,81 @@ export type LayerProps = {
   labelBoxes: readonly Box[];
 };
 
+/**
+ * Where a renderer draws in the isometric view:
+ *
+ * - `ground`: on the ground stage, under the fog where Top-down draws it
+ *   under the fog and over it where Top-down draws it over, lifted onto
+ *   raised ground with the tops that copy it. Nothing that moves each frame.
+ * - `moving`: on the overlay, on the ground plane, for marks that move
+ *   each frame (rulers, the laser, previews). Shows through the fog, as
+ *   Top-down's overlay does.
+ * - `upright`: on the overlay in view space, standing up.
+ * - `off`: not drawn in Isometric: its tool shows Top-down while in use, or
+ *   its effects have not moved into a controller yet.
+ */
+export type IsoPlace = "ground" | "moving" | "upright" | "off";
+
 export type LayerDef = {
   id: string;
   layer: "board" | "underDecor" | "overlay";
   /** Draw order within the layer, lowest first. */
   order: number;
+  iso: IsoPlace;
   Component: ComponentType<LayerProps>;
 };
 
+/**
+ * What a controller reads: the layer props, and the camera, canvas and view
+ * the board shows. A controller draws nothing and mounts once, outside both
+ * drawing trees, whichever view shows (design 5.1, ISO-D15). It renders on
+ * every camera change, as the board does.
+ */
+export type ControllerProps = LayerProps & { live: Live };
+
+export type ControllerDef = { id: string; Component: ComponentType<ControllerProps> };
+
 /** Every canvas renderer, one per line. */
 export const LAYERS: readonly LayerDef[] = [
-  { id: "drawings", layer: "board", order: 20, Component: DrawingLayer },
-  { id: "templates", layer: "board", order: 30, Component: TemplateLayer },
-  { id: "rangeRings", layer: "overlay", order: 6, Component: RangeRingLayer },
-  { id: "turnStart", layer: "overlay", order: 8, Component: TurnStartLayer },
-  { id: "rulers", layer: "overlay", order: 10, Component: RulerLayer },
-  { id: "pings", layer: "overlay", order: 20, Component: PingLayer },
-  { id: "laser", layer: "overlay", order: 30, Component: LaserLayer },
-  { id: "aoePreviews", layer: "overlay", order: 40, Component: AreaPreviewLayer },
-  { id: "builder", layer: "board", order: 10, Component: BuilderLayer },
-  { id: "lightReach", layer: "overlay", order: 45, Component: LightReachLayer },
-  { id: "stampHandles", layer: "overlay", order: 48, Component: StampHandles },
-  { id: "heightMarks", layer: "underDecor", order: 46, Component: HeightLayer },
-  { id: "fogDraft", layer: "overlay", order: 5, Component: FogLayer },
-  { id: "gridAlign", layer: "overlay", order: 90, Component: GridLayer },
-  { id: "dm-camera", layer: "overlay", order: 0, Component: CameraLayer },
-  { id: "scene-thumbnails", layer: "overlay", order: 1, Component: ThumbnailLayer },
-  { id: "exploredEdge", layer: "overlay", order: 2, Component: ExploredEdgeLayer },
-  { id: "movement", layer: "overlay", order: 9, Component: MoveLayer },
-  { id: "outlinerFlash", layer: "overlay", order: 95, Component: FlashLayer },
-  { id: "pins", layer: "overlay", order: 15, Component: PinLayer },
-  { id: "tethers", layer: "board", order: 40, Component: TetherLayer },
-  { id: "traps", layer: "board", order: 35, Component: TrapLayer },
+  { id: "drawings", layer: "board", order: 20, iso: "ground", Component: DrawingLayer },
+  // Its reminder toasts run in the component, so it waits for its controller (ISO-3).
+  { id: "templates", layer: "board", order: 30, iso: "off", Component: TemplateLayer },
+  { id: "rangeRings", layer: "overlay", order: 6, iso: "ground", Component: RangeRingLayer },
+  { id: "turnStart", layer: "overlay", order: 8, iso: "ground", Component: TurnStartLayer },
+  // It listens to the dragged node, once per tree.
+  { id: "rulers", layer: "overlay", order: 10, iso: "off", Component: RulerLayer },
+  // Its sound, vibration and hold run in the component, so it waits for its controller (ISO-3).
+  { id: "pings", layer: "overlay", order: 20, iso: "off", Component: PingLayer },
+  { id: "laser", layer: "overlay", order: 30, iso: "moving", Component: LaserLayer },
+  { id: "aoePreviews", layer: "overlay", order: 40, iso: "moving", Component: AreaPreviewLayer },
+  { id: "builder", layer: "board", order: 10, iso: "ground", Component: BuilderLayer },
+  { id: "lightReach", layer: "overlay", order: 45, iso: "off", Component: LightReachLayer },
+  { id: "stampHandles", layer: "overlay", order: 48, iso: "off", Component: StampHandles },
+  { id: "heightMarks", layer: "underDecor", order: 46, iso: "off", Component: HeightLayer },
+  { id: "fogDraft", layer: "overlay", order: 5, iso: "off", Component: FogLayer },
+  { id: "gridAlign", layer: "overlay", order: 90, iso: "off", Component: GridLayer },
+  { id: "exploredEdge", layer: "overlay", order: 2, iso: "ground", Component: ExploredEdgeLayer },
+  { id: "movement", layer: "overlay", order: 9, iso: "moving", Component: MoveLayer },
+  { id: "outlinerFlash", layer: "overlay", order: 95, iso: "moving", Component: FlashLayer },
+  // Its pane and tap effects run in the component, so it waits for ISO-3.
+  { id: "pins", layer: "overlay", order: 15, iso: "off", Component: PinLayer },
+  // Its falling off reminder listens from the component, so it waits for its controller (ISO-3).
+  { id: "tethers", layer: "board", order: 40, iso: "off", Component: TetherLayer },
+  { id: "traps", layer: "board", order: 35, iso: "ground", Component: TrapLayer },
+];
+
+/** Everything that runs effects for the board and draws nothing, mounted once outside both drawing trees. */
+export const CONTROLLERS: readonly ControllerDef[] = [
+  { id: "dm-camera", Component: CameraController },
+  { id: "scene-thumbnails", Component: ThumbnailLayer },
 ];
 
 export function layersOf(layer: LayerDef["layer"]): LayerDef[] {
   return LAYERS.filter((l) => l.layer === layer).sort((a, b) => a.order - b.order);
+}
+
+/** The renderers drawn in one place of the isometric view, in Top-down's layer order and then their own. */
+export function isoLayersOf(place: IsoPlace, layer?: LayerDef["layer"]): LayerDef[] {
+  const rank = { board: 0, underDecor: 1, overlay: 2 } as const;
+  return LAYERS.filter((l) => l.iso === place && (layer === undefined || l.layer === layer)).sort((a, b) => rank[a.layer] - rank[b.layer] || a.order - b.order);
 }

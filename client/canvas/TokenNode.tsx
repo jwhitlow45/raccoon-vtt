@@ -23,6 +23,7 @@ import { useTokenImage } from "./useImage.ts";
 import { isAssetImage } from "#shared/imageRef.ts";
 import { glyphColor, glyphSide, iconPath2D, imageFace, useIconGlyph } from "../features/images/icons.ts";
 import { COVER_INSET, pressBoxes, type CellBox } from "../features/attach/groups.ts";
+import { groundGroups, isometric, K, toView, turnAxes, type Turn } from "../lib/view.ts";
 
 /** How the canvas wants to hear about taps, menus, drags and the mouse over tokens. */
 export type TokenInteraction = {
@@ -37,6 +38,28 @@ export type TokenInteraction = {
 };
 
 export const TokenInteractionContext = createContext<TokenInteraction | null>(null);
+
+/**
+ * A token on the isometric view's relief (docs/design-v1-isometric-view.md
+ * 5.4): a standee, its art upright on its ring, or for a creature the stand
+ * rule lays flat (5.2), only an invisible press area on its footprint, its
+ * picture lying on the ground stage under the fog.
+ */
+export type IsoToken = {
+  turn: Turn;
+  /** Its drawn base and the drawn ground under its footprint, in cells (view.ts drawnBase). */
+  base: number;
+  ground: number;
+  /** The lift on screen was capped, so the stem shows a break (5.4). */
+  capped: boolean;
+  /** How far up its holder it rides, in view units: half the holder's art height. */
+  rise: number;
+  /** The pit cells it stands in, whose openings clip it (5.5). */
+  pits: readonly { x: number; y: number }[];
+  /** On the DM's device, a standee the players cannot see draws dimmed (5.4). */
+  dim: boolean;
+  pressOnly: boolean;
+};
 
 const APPLE = isAppleDevice();
 
@@ -79,8 +102,11 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
   decor: boolean;
   inset?: boolean;
   holes?: readonly CellBox[] | null;
+  /** On the isometric view's relief: a standee or a press area. Absent in Top-down and on the ground stage. */
+  iso?: IsoToken | null;
 }) {
   const { token, scale, selected, active, draggable, holes } = props;
+  const iso = props.iso ?? null;
   const interaction = useContext(TokenInteractionContext);
   const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
@@ -110,7 +136,8 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
       x={token.x}
       y={token.y}
       draggable={draggable}
-      opacity={token.visibility === "dm" ? 0.5 : 1}
+      opacity={iso?.dim ? theme.relief.hiddenOpacity : token.visibility === "dm" ? 0.5 : 1}
+      clipFunc={iso && iso.pits.length > 0 ? (ctx) => clipToOpenings(ctx, iso, token) : undefined}
       onPointerClick={(e) => interaction?.select(token.id, addsToSelection(e.evt, APPLE))}
       onMouseEnter={() => interaction?.hover(token.id)}
       onMouseLeave={() => interaction?.hover(null)}
@@ -122,7 +149,13 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
       onDragMove={(e) => interaction?.dragMove(e.target, token)}
       onDragEnd={(e) => interaction?.dragEnd(e.target, token)}
     >
-      {props.inset ? (
+      {iso ? (
+        iso.pressOnly ? (
+          <FootprintPress w={fp.w} h={fp.h} />
+        ) : (
+          <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={name} active={active} selected={selected} iso={iso} inset={props.inset === true} />
+        )
+      ) : props.inset ? (
         <>
           <Group x={(fp.w * (1 - COVER_INSET)) / 2} y={(fp.h * (1 - COVER_INSET)) / 2} scaleX={COVER_INSET} scaleY={COVER_INSET} listening={!holes}>
             <TokenFace token={token} actor={actor} w={fp.w} h={fp.h} scale={scale * COVER_INSET} name={name} active={active} selected={selected} />
@@ -143,6 +176,101 @@ export const TokenNode = memo(function TokenNode(props: DecorProps & {
     </Group>
   );
 });
+
+/** A flat creature's press area on the isometric relief: its footprint, on the hit canvas alone, over its picture on the ground stage below (5.2). */
+function FootprintPress(props: { w: number; h: number }) {
+  return (
+    <Shape
+      sceneFunc={() => {}}
+      hitFunc={(ctx, shape) => {
+        ctx.beginPath();
+        ctx.rect(0, 0, props.w, props.h);
+        ctx.fillStrokeShape(shape);
+      }}
+    />
+  );
+}
+
+/**
+ * Clips a standee in a pit to the openings of its pit cells swept up past
+ * the canvas's top, so the near rim hides what is below it (5.5). Drawn in
+ * view units: the clip undoes the ground's turn and squash, then restores
+ * the transform, so the path stays and Konva's own transform is untouched.
+ */
+function clipToOpenings(ctx: Konva.Context, iso: IsoToken, at: { x: number; y: number }): void {
+  const view = isometric(iso.turn);
+  const g = groundGroups(iso.turn);
+  ctx.save();
+  ctx.translate(-at.x, -at.y);
+  ctx.rotate((g.upright.rotation * Math.PI) / 180);
+  ctx.scale(1, g.upright.scaleY);
+  ctx.beginPath();
+  for (const cell of iso.pits) {
+    const corners = [toView(view, cell), toView(view, { x: cell.x + 1, y: cell.y }), toView(view, { x: cell.x + 1, y: cell.y + 1 }), toView(view, { x: cell.x, y: cell.y + 1 })];
+    const left = corners.reduce((a, b) => (b.x < a.x ? b : a));
+    const right = corners.reduce((a, b) => (b.x > a.x ? b : a));
+    const bottom = corners.reduce((a, b) => (b.y > a.y ? b : a));
+    const sky = Math.min(left.y, right.y) - 1e5;
+    ctx.moveTo(left.x, left.y);
+    ctx.lineTo(bottom.x, bottom.y);
+    ctx.lineTo(right.x, right.y);
+    ctx.lineTo(right.x, sky);
+    ctx.lineTo(left.x, sky);
+    ctx.closePath();
+  }
+  ctx.restore();
+}
+
+/**
+ * A standee (5.4): the token's art upright, never turned by its rotation,
+ * its bottom middle on the footprint's center at its base, on its ring, the
+ * footprint's ellipse at the base filled 25% black. A base above the drawn
+ * ground casts a shadow there, joined to the ring by a stem. A turned token
+ * shows a short tick on its ring toward its facing. The node itself stays
+ * at the token's world x and y inside the ground group, so a drag reads
+ * world cells as it does in Top-down.
+ */
+function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w: number; h: number; scale: number; name: string; active: boolean; selected: boolean; iso: IsoToken; inset: boolean }) {
+  const { token, w, h, scale, iso } = props;
+  const { c, s } = turnAxes(iso.turn);
+  // A lift of K * z view units up the screen is this shift in world cells inside the ground group.
+  const lift = (z: number) => ({ x: -2 * K * z * s, y: -2 * K * z * c });
+  const base = lift(iso.base);
+  const ground = lift(iso.ground);
+  const upright = groundGroups(iso.turn).upright;
+  const ringPx = boardSizes(scale).ringPx;
+  const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
+  const raised = iso.base > iso.ground;
+  const turnedBy = Number.isFinite(token.rotation) ? token.rotation : 0;
+  const facing = (turnedBy * Math.PI) / 180;
+  const k = props.inset ? COVER_INSET : 1;
+  return (
+    <>
+      {raised ? <Ellipse x={w / 2 + ground.x} y={h / 2 + ground.y} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.shadow} listening={false} /> : null}
+      <Group x={base.x} y={base.y}>
+        <Ellipse x={w / 2} y={h / 2} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.ring} stroke={ring} strokeWidth={ringPx} strokeScaleEnabled={false} />
+        {turnedBy !== 0 ? (
+          <Line
+            points={[w / 2 + (Math.sin(facing) * w) / 2, h / 2 - (Math.cos(facing) * h) / 2, w / 2 + Math.sin(facing) * (w / 2 + 0.18), h / 2 - Math.cos(facing) * (h / 2 + 0.18)]}
+            stroke={ring}
+            strokeWidth={Math.max(2, ringPx)}
+            strokeScaleEnabled={false}
+            lineCap="round"
+            listening={false}
+          />
+        ) : null}
+        {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
+        {props.selected ? <SelectedOutline w={w} h={h} scale={scale} /> : null}
+        <Group x={w / 2} y={h / 2} rotation={upright.rotation} scaleY={upright.scaleY}>
+          {raised ? <Line points={[0, 0, 0, K * (iso.base - iso.ground)]} stroke={theme.relief.stem} strokeWidth={1} strokeScaleEnabled={false} dash={iso.capped ? [6 / scale, 4 / scale] : undefined} listening={false} /> : null}
+          <Group x={(-w * k) / 2} y={-h * k - iso.rise} scaleX={k} scaleY={k}>
+            <TokenBody token={token} actor={props.actor} w={w} h={h} scale={scale * k} name={props.name} upright />
+          </Group>
+        </Group>
+      </Group>
+    </>
+  );
+}
 
 /** Where a carried token takes a press: the part of it that draws less its holders' middles (`holes`, groups.ts pressBoxes), drawn on the hit canvas alone. */
 function PressArea(props: { w: number; h: number; inset: boolean; holes: readonly CellBox[] }) {
@@ -185,12 +313,15 @@ export const TokenDecor = memo(function TokenDecor(props: DecorProps & {
   token: ViewToken;
   scale: number;
   part: "marks" | "label" | "plate";
+  /** Where its box's top left sits, when not at the token's own corner: the isometric view lays decor out on the standee's art box (5.4). */
+  atX?: number;
+  atY?: number;
 }) {
   const { token } = props;
   const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
   const effects = ("inline" in token.actor ? token.actor.inline.effects : character?.actor.effects) ?? NO_EFFECTS;
   return (
-    <Group x={token.x} y={token.y} opacity={token.visibility === "dm" ? 0.5 : 1} listening={false}>
+    <Group x={props.atX ?? token.x} y={props.atY ?? token.y} opacity={token.visibility === "dm" ? 0.5 : 1} listening={false}>
       <DecorParts {...props} effects={effects} />
     </Group>
   );
@@ -316,13 +447,43 @@ function HpBar(props: { box: { x0: number; y0: number; x1: number; y1: number };
  * at the preview point, ringed in the dragger's color. The token itself
  * stays where the server last put it until the drop commits.
  */
-export const TokenGhost = memo(function TokenGhost(props: { token: ViewToken; x: number; y: number; scale: number; color: string }) {
+export const TokenGhost = memo(function TokenGhost(props: {
+  token: ViewToken;
+  x: number;
+  y: number;
+  scale: number;
+  color: string;
+  /** In the isometric view's ground group: a standing ghost, or a flat one clipped to the revealed sub-cells of its box (`clip`, in cells). */
+  iso?: IsoToken | null;
+  clip?: readonly { x: number; y: number; w: number; h: number }[] | null;
+}) {
   const { token, x, y, scale, color } = props;
   const character = useRoomView((s) => ("ref" in token.actor ? s.view?.characters[token.actor.ref] : undefined));
   const actor: Partial<Actor> | undefined = "inline" in token.actor ? token.actor.inline : character?.actor;
   const fp = footprint(token);
+  const clip = props.clip;
+  if (props.iso) {
+    return (
+      <Group x={x} y={y} opacity={theme.relief.ghostOpacity} listening={false}>
+        <Standee token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={displayName(token)} active={false} selected={false} iso={props.iso} inset={false} />
+      </Group>
+    );
+  }
   return (
-    <Group x={x} y={y} opacity={0.6} listening={false}>
+    <Group
+      x={x}
+      y={y}
+      opacity={0.6}
+      listening={false}
+      clipFunc={
+        clip
+          ? (ctx) => {
+              ctx.beginPath();
+              for (const r of clip) ctx.rect(r.x - x, r.y - y, r.w, r.h);
+            }
+          : undefined
+      }
+    >
       <TokenShadow token={token} w={fp.w} h={fp.h} at={{ x, y }} />
       <TokenBody token={token} actor={actor} w={fp.w} h={fp.h} scale={scale} name={displayName(token)} />
       <Outline w={fp.w} h={fp.h} scale={scale} gapPx={3} color={color} widthPx={3} />
@@ -337,6 +498,8 @@ function TokenBody(props: {
   h: number;
   scale: number;
   name: string;
+  /** A standee's art, which its rotation never turns (ISO-D4): a turned figure reads as a fallen one. */
+  upright?: boolean;
 }) {
   const { token, actor, w, h, scale, name } = props;
   const assets = useAssets();
@@ -355,7 +518,7 @@ function TokenBody(props: {
   const ring = DISPOSITION_RING[token.disposition] ?? theme.color.neutral;
   const ringPx = boardSizes(scale).ringPx;
   return (
-    <Group x={w / 2} y={h / 2} rotation={Number.isFinite(token.rotation) ? token.rotation : 0}>
+    <Group x={w / 2} y={h / 2} rotation={props.upright || !Number.isFinite(token.rotation) ? 0 : token.rotation}>
       <Group
         clipFunc={(ctx) => {
           if (square) ctx.rect(-w / 2, -h / 2, w, h);

@@ -1,20 +1,19 @@
-import type Konva from "konva";
 import { useEffect, useRef } from "react";
-import { Group } from "react-konva";
-import type { LayerProps } from "../layers.ts";
+import type { ControllerProps } from "../layers.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { currentFocus, focusEvent, focusFromStage, publishFocus } from "./camera.ts";
 import { sendsView, useShowView, viewEvent } from "./tableDisplay.ts";
-import { liveOfStage, TOP_DOWN } from "../../lib/view.ts";
 
 /** At most this often while the DM pans with "Follow me" on: smooth enough to follow, light on the players' phones. */
 const FOLLOW_MS = 120;
 
 /**
- * Draws nothing. It sits in the canvas only because that is where the
- * camera is: the stage re-renders its layers on every camera change, and
- * this reads the stage's position then. On a DM's device it publishes the
+ * Draws nothing: a controller, mounted once outside both of the board's
+ * drawing trees (features/layers.ts CONTROLLERS), so one device sends one
+ * camera stream whichever view shows. The board renders it on every camera
+ * change, with the camera, canvas and view it shows (`live`), and it reads
+ * them then. On a DM's device it publishes the
  * camera for "Bring everyone here", and while "Follow me" is on it sends
  * the camera to the players, throttled, plus once more whenever someone
  * comes online, so a player who joins mid-scene catches up.
@@ -25,8 +24,10 @@ const FOLLOW_MS = 120;
  * rest. Only while this device views the players' scene, so a TV never
  * moves to a scene they cannot see.
  */
-export function CameraLayer(props: LayerProps) {
-  const groupRef = useRef<Konva.Group>(null);
+export function CameraController(props: ControllerProps) {
+  // The latest camera, for the timers that send it later.
+  const liveRef = useRef(props.live);
+  liveRef.current = props.live;
   const actions = useRoomActions();
   const scope = useRoomScope();
   const follow = useRoomView((s) => s.view?.meta.view.follow === true);
@@ -48,9 +49,7 @@ export function CameraLayer(props: LayerProps) {
   const lastViewRef = useRef("");
 
   const sendView = (again = false) => {
-    const stage = groupRef.current?.getStage();
-    if (!stage) return;
-    const e = viewEvent(liveOfStage(stage, TOP_DOWN));
+    const e = viewEvent(liveRef.current);
     const sent = `${e.x},${e.y},${e.w},${e.h}`;
     if (!again && sent === lastViewRef.current) return;
     lastViewRef.current = sent;
@@ -64,12 +63,10 @@ export function CameraLayer(props: LayerProps) {
     lastSentRef.current = performance.now();
   };
 
-  // Every render follows a camera or size change, so read the stage each time.
+  // Every render follows a camera or size change, so read the camera each time.
   useEffect(() => {
     if (!dm) return;
-    const stage = groupRef.current?.getStage();
-    if (!stage) return;
-    publishFocus(scope, { sceneId, ...focusFromStage(liveOfStage(stage, TOP_DOWN)) });
+    publishFocus(scope, { sceneId, ...focusFromStage(liveRef.current) });
     if (toDisplays) {
       const viewWait = FOLLOW_MS - (performance.now() - viewSentRef.current);
       if (viewWait <= 0) sendView();
@@ -103,7 +100,7 @@ export function CameraLayer(props: LayerProps) {
       clearTimeout(viewTimerRef.current);
       viewTimerRef.current = null;
     }
-    // `sendView` reads the stage when it runs, so it is not a dependency.
+    // `sendView` reads the camera when it runs, so it is not a dependency.
   }, [toDisplays, displays]);
 
   useEffect(
@@ -117,5 +114,5 @@ export function CameraLayer(props: LayerProps) {
     [scope, sceneId],
   );
 
-  return <Group ref={groupRef} listening={false} />;
+  return null;
 }

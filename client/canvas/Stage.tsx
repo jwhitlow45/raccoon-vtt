@@ -1,7 +1,7 @@
 import { applyPixelRatio } from "./konvaSetup.ts";
 import { popoverSlot } from "../components/popoverRules.ts";
 import type Konva from "konva";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Layer, Stage } from "react-konva";
 import { DEFAULT_SETTINGS, type RoomState, type Scene, type Token } from "#shared/model.ts";
 import { holderOf as linkedHolder, linkHolds } from "#shared/rules/attach.ts";
@@ -13,7 +13,8 @@ import { measureLabel as measureMapLabel } from "../features/builder/draw.ts";
 import { turnFocus, useFollowTurn } from "../features/encounter/followTurn.ts";
 import { panAnchor, requestPan, watchPans } from "../features/encounter/pan.ts";
 import { stageCameraSlot } from "../features/scenes/stageCamera.ts";
-import { layersOf, type LayerProps } from "../features/layers.ts";
+import { CONTROLLERS, layersOf, type LayerProps } from "../features/layers.ts";
+import { displayViewKey, viewKey } from "../features/view/store.ts";
 import { LightPaneHost } from "../features/lights/LightPaneHost.tsx";
 import { PinPaneHost } from "../features/pins/PinPaneHost.tsx";
 import { TrapPaneHost } from "../features/traps/TrapPaneHost.tsx";
@@ -26,6 +27,7 @@ import {
   barShift,
   cameraAt,
   cameraForView,
+  holdStill,
   fitRect,
   keepInView,
   NO_INSETS,
@@ -43,7 +45,7 @@ import {
   type Rect,
   type Size,
 } from "../lib/camera.ts";
-import { TOP_DOWN, toView, toWorld, viewBox } from "../lib/view.ts";
+import { groundAtMiddle, TOP_DOWN, toView, toWorld, viewBox, type Live, type View } from "../lib/view.ts";
 import { isAppleDevice } from "../lib/device.ts";
 import { fitTarget } from "../lib/fitTarget.ts";
 import { revealedMask } from "../lib/fogTiles.ts";
@@ -77,10 +79,12 @@ import { canDragToken, movesOthers } from "./dragRights.ts";
 import { fitSlot } from "./fitSlot.ts";
 import { FogShape } from "./FogShape.tsx";
 import { MapLayer } from "./layers/MapLayer.tsx";
-import { RemoteDrags } from "./RemoteDrags.tsx";
+import { createEasedDrags, RemoteDragClock, RemoteDrags } from "./RemoteDrags.tsx";
+import { IsoBoard } from "./relief/IsoBoard.tsx";
+import { useTestView } from "./relief/isoTest.ts";
 import { placedTextBoxes } from "./textBoxes.ts";
 import { GroupActionBar, TokenActionBar } from "./TokenActionBar.tsx";
-import { TokenDecor, TokenInteractionContext, TokenNode, type TokenInteraction } from "./TokenNode.tsx";
+import { TokenDecor, TokenInteractionContext, TokenNode, type IsoToken, type TokenInteraction } from "./TokenNode.tsx";
 
 const EMPTY_TOKENS: Record<string, Token> = {};
 /** How long after a new size the fitted map follows the measures of the new layout as they arrive. */
@@ -92,6 +96,18 @@ const APPLE = isAppleDevice();
 const BOARD_LAYERS = layersOf("board");
 const OVERLAY_LAYERS = layersOf("overlay");
 const UNDER_DECOR_LAYERS = layersOf("underDecor");
+
+/**
+ * Holds a drawing tree still while it is hidden, so a camera move renders
+ * only the tree on screen (docs/design-v1-isometric-view.md ISO-D15). Its
+ * last render, the one that hid it, sized its stage 0x0.
+ */
+const Frozen = memo(
+  function Frozen(props: { frozen: boolean; children: ReactNode }) {
+    return <>{props.children}</>;
+  },
+  (prev, next) => prev.frozen && next.frozen,
+);
 
 /** What a drag that starts on a token moves (docs/design-v1-attach.md 4.2). */
 type DragParts = {
@@ -135,8 +151,8 @@ function fitKey(size: Size, scene: Scene): string {
   return `${size.width}x${size.height}:${scene.bounds.w}x${scene.bounds.h}`;
 }
 
-function fitScene(size: Size, scene: Scene, insets: Insets, target: Rect | null = null, cover: Insets = NO_INSETS): Fit {
-  return { cam: fitRect(size, viewBox(TOP_DOWN, target ?? sceneRect(scene)), 24, largerEach(insets, cover)), key: fitKey(size, scene), target, cover, zoom: uiScale() };
+function fitScene(size: Size, scene: Scene, insets: Insets, view: View, target: Rect | null = null, cover: Insets = NO_INSETS): Fit {
+  return { cam: fitRect(size, viewBox(view, target ?? sceneRect(scene)), 24, largerEach(insets, cover)), key: fitKey(size, scene), target, cover, zoom: uiScale() };
 }
 
 /**
@@ -213,6 +229,23 @@ export function MapStage(props: {
   const focus = useRoomView((s) => s.ephemeral.focus);
   const tool = activeTool(toolId, role);
   const selecting = !tool.pointer;
+  /*
+   * The view the board shows: Top-down, until the isometric view's choice
+   * ships (features/view/store.ts isoReady). Only a test or the bench
+   * reaches Isometric before then (relief/isoTest.ts). Its tree mounts the
+   * first time it shows and stays (ISO-D15).
+   */
+  const roomId = useRoomView((s) => s.roomId);
+  const testView = useTestView(props.controlledCamera ? displayViewKey(roomId) : viewKey(roomId), scene.id, scene.suggestedView);
+  const shown: View = testView ?? TOP_DOWN;
+  const isoShown = shown.kind === "isometric";
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const isoEverRef = useRef(false);
+  if (isoShown) isoEverRef.current = true;
+  const [isoStage, setIsoStage] = useState<Konva.Stage | null>(null);
+  /** Other members' drags, eased by one clock for both drawing trees. */
+  const [eased] = useState(createEasedDrags);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -269,7 +302,7 @@ export function MapStage(props: {
     const read = () => {
       const c = pendingCamRef.current ?? camRef.current;
       const s = sizeRef.current;
-      return c && s ? { camera: { x: c.x, y: c.y, scale: c.scale }, viewport: { width: s.width, height: s.height }, view: TOP_DOWN } : null;
+      return c && s ? { camera: { x: c.x, y: c.y, scale: c.scale }, viewport: { width: s.width, height: s.height }, view: shownRef.current } : null;
     };
     slot.read = read;
     return () => {
@@ -294,14 +327,35 @@ export function MapStage(props: {
     let next: Camera;
     if (scene.defaultView) {
       fittedRef.current = null;
-      next = cameraForView(size, toView(TOP_DOWN, scene.defaultView), scene.defaultView.zoom);
+      next = cameraForView(size, toView(shownRef.current, scene.defaultView), scene.defaultView.zoom);
     } else {
-      fittedRef.current = fitScene(size, scene, insetsRef.current);
+      fittedRef.current = fitScene(size, scene, insetsRef.current, shownRef.current);
       next = fittedRef.current.cam;
     }
     camRef.current = next;
     setCam(next);
   }, [size, scene]);
+
+  /*
+   * A turn or a view switch keeps the world point at the canvas's middle
+   * still on screen, and the zoom (docs/design-v1-isometric-view.md 4.2),
+   * on this device only.
+   */
+  const viewSeenRef = useRef(shown);
+  useLayoutEffect(() => {
+    const before = viewSeenRef.current;
+    viewSeenRef.current = shown;
+    if (before === shown) return;
+    const c = pendingCamRef.current ?? camRef.current;
+    const s = sizeRef.current;
+    if (!c || !s) return;
+    const middle = groundAtMiddle({ camera: c, viewport: s, view: before });
+    const next = holdStill(c, toView(before, middle), toView(shown, middle));
+    pendingCamRef.current = null;
+    fittedRef.current = null;
+    camRef.current = next;
+    setCam(next);
+  }, [shown]);
 
   /*
    * What the token action bar covers of the map, in screen pixels
@@ -369,8 +423,8 @@ export function MapStage(props: {
     const z = uiScale();
     if (fitKey(s, current) !== fitted.key || z !== fitted.zoom) settleRef.current = { until: now + SETTLE_MS, shows: barShowsRef.current() };
     const settle = settleRef.current && now <= settleRef.current.until ? settleRef.current : null;
-    const next = fitScene(s, current, bars, fitted.target, settle ? barCoverRef.current(s, "fresh", settle.shows) : fitted.cover);
-    if (!settle && rectClear(c, viewBox(TOP_DOWN, fitted.target ?? sceneRect(current)), s, largerEach(bars, fitted.cover))) return;
+    const next = fitScene(s, current, bars, shownRef.current, fitted.target, settle ? barCoverRef.current(s, "fresh", settle.shows) : fitted.cover);
+    if (!settle && rectClear(c, viewBox(shownRef.current, fitted.target ?? sceneRect(current)), s, largerEach(bars, fitted.cover))) return;
     fittedRef.current = next;
     if (sameCamera(next.cam, c)) return;
     // Seen at once, so a second measure in the same frame still finds the camera it fitted.
@@ -409,7 +463,7 @@ export function MapStage(props: {
         : [];
       const target = fitTarget({ bounds: current.bounds, revealed, own });
       const whole = target.width === current.bounds.w && target.height === current.bounds.h;
-      fittedRef.current = fitScene(s, current, insetsRef.current, whole ? null : target, barCoverRef.current(s, "drawn"));
+      fittedRef.current = fitScene(s, current, insetsRef.current, shownRef.current, whole ? null : target, barCoverRef.current(s, "drawn"));
       pendingCamRef.current = null;
       setCam(fittedRef.current.cam);
     };
@@ -439,7 +493,7 @@ export function MapStage(props: {
     focusRef.current = focus.id;
     if (ignoreFocus) return;
     pendingCamRef.current = null;
-    setCam(cameraForView(size, toView(TOP_DOWN, focus), focus.zoom));
+    setCam(cameraForView(size, toView(shownRef.current, focus), focus.zoom));
   }, [focus, size, ignoreFocus]);
 
   // A table display's camera mode, after the scene's own first camera so it wins.
@@ -477,7 +531,7 @@ export function MapStage(props: {
         if (!s || !c) return;
         pendingCamRef.current = null;
         const at = clearAnchor({ x: s.width * p.anchor.x, y: s.height * p.anchor.y }, s, insetsRef.current, barCoverRef.current(s, "opening"));
-        setCam(cameraAt(at, toView(TOP_DOWN, p), c.scale));
+        setCam(cameraAt(at, toView(shownRef.current, p), c.scale));
       }),
     [scope, scene.id],
   );
@@ -880,7 +934,8 @@ export function MapStage(props: {
   const stageKey = `${stageMountKey(lowPower, zoom)}:${fontEpoch}`;
   applyPixelRatio(lowPower);
   useEffect(() => {
-    const stage = stageRef.current;
+    // The stage on screen takes the gestures: Top-down's, or the isometric board's main stage.
+    const stage = isoShown ? isoStage : stageRef.current;
     if (!stage) return;
     const el = stage.container();
     const gesture = gestureRef.current;
@@ -1124,7 +1179,7 @@ export function MapStage(props: {
     };
     // The listeners read the camera and the tool through refs, so they
     // attach once, when the stage first exists, and again to a remounted one.
-  }, [hasStage, stageKey, scheduleCam, stopTokenDrag, popovers]);
+  }, [hasStage, stageKey, scheduleCam, stopTokenDrag, popovers, isoShown, isoStage]);
 
   // Safari's own pinch-zoom of the page would fight the canvas pinch. The
   // Room page prevents it for the whole room (Room.tsx useNoPageZoom).
@@ -1246,7 +1301,7 @@ export function MapStage(props: {
         // A hover plate would travel with the drag and cover the squares it crosses.
         setHoveredId(null);
         // Dragging a selected token moves the rest of the selection with it, those this member may move, and everything each of them carries.
-        const stage = stageRef.current;
+        const stage = node.getStage() ?? stageRef.current;
         const parts = dragPartsRef.current(token, selectedIdsRef.current);
         const named = new Set(parts.named.map((t) => t.id));
         const followers: { token: ViewToken; node: Konva.Node }[] = [];
@@ -1328,7 +1383,7 @@ export function MapStage(props: {
   // The party stays above the sight overlay as it does above the fog, fog or no fog (docs/design-v1-maps-vision.md 4.3.7).
   for (const t of tokens) ((fog || sightMode !== null) && drawsAboveFog(t, role, memberMap, characters) ? above : below).push(t);
 
-  const renderToken = (t: ViewToken) => (
+  const renderToken = (t: ViewToken, iso: IsoToken | null = null) => (
     <TokenNode
       key={t.id}
       token={t}
@@ -1341,6 +1396,7 @@ export function MapStage(props: {
       draggable={selecting && canDrag(t)}
       inset={drawsInset(allTokens, t)}
       holes={holes.get(t.id) ?? null}
+      iso={iso}
     />
   );
   // Every chip and badge, then every label, then the plates, over all the tokens and the fog (TokenNode.tsx TokenDecor).
@@ -1370,52 +1426,97 @@ export function MapStage(props: {
   const boardView = useMemo(() => (cam && size ? boardViewsOf(cam, size, { top, right, bottom, left }) : null), [cam, size, top, right, bottom, left]);
   const overlay = fog || OVERLAY_LAYERS.length > 0 || UNDER_DECOR_LAYERS.length > 0;
 
+  // What the isometric board reads beside what Top-down's tree does (relief/IsoBoard.tsx).
+  const aboveFogOf = useCallback((t: ViewToken) => drawsAboveFog(t, role, members ?? {}, characters), [role, members, characters]);
+  const decorTokens = useMemo(() => tokens.filter((t) => !carried.has(t.id)), [tokens, carried]);
+  const keepIds = useMemo(() => new Set([...selectedIds, ...(draggingId ? [draggingId] : [])]), [selectedIds, draggingId]);
+  const live: Live | null = cam && size ? { camera: cam, viewport: size, view: shown } : null;
+
   return (
     <div ref={wrapRef} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-      {size && cam ? (
-        <TokenInteractionContext.Provider value={interaction}>
-          <BoardViewContext.Provider value={boardView}>
-            <Stage
-              key={stageKey}
-              ref={stageRef}
-              width={size.width}
-              height={size.height}
-              x={cam.x}
-              y={cam.y}
-              scaleX={cam.scale}
-              scaleY={cam.scale}
-              style={stageStyle}
-            >
-              <MapLayer scene={scene} variant={variant} />
-              {BOARD_LAYERS.length > 0 ? (
-                <Layer>
-                  {BOARD_LAYERS.map(({ id, Component }) => (
-                    <Component key={id} {...layerProps} />
-                  ))}
-                </Layer>
+      {size && cam && live ? (
+        <>
+          {/* Everything with effects mounts once, outside both drawing trees, whichever view shows (ISO-D15). */}
+          {CONTROLLERS.map(({ id, Component }) => (
+            <Component key={id} {...layerProps} live={live} />
+          ))}
+          <RemoteDragClock eased={eased} />
+          <TokenInteractionContext.Provider value={interaction}>
+            <BoardViewContext.Provider value={boardView}>
+              <Frozen frozen={isoShown}>
+                <Stage
+                  key={stageKey}
+                  ref={stageRef}
+                  width={isoShown ? 0 : size.width}
+                  height={isoShown ? 0 : size.height}
+                  x={cam.x}
+                  y={cam.y}
+                  scaleX={cam.scale}
+                  scaleY={cam.scale}
+                  style={stageStyle}
+                >
+                  <MapLayer scene={scene} variant={variant} />
+                  {BOARD_LAYERS.length > 0 ? (
+                    <Layer>
+                      {BOARD_LAYERS.map(({ id, Component }) => (
+                        <Component key={id} {...layerProps} />
+                      ))}
+                    </Layer>
+                  ) : null}
+                  <Layer>
+                    {below.map((t) => renderToken(t))}
+                    <RemoteDrags tokens={tokens} scale={cam.scale} youId={youId} draggingId={draggingId} eased={eased} />
+                    {overlay ? null : decor}
+                  </Layer>
+                  {overlay ? (
+                    <Layer>
+                      {sightMode ? <SightOverlay scene={scene} mode={sightMode} /> : null}
+                      {fog ? <FogShape sceneId={scene.id} bounds={scene.bounds} tiles={drawnFogTiles} translucent={role === "dm"} /> : null}
+                      {above.map((t) => renderToken(t))}
+                      {UNDER_DECOR_LAYERS.map(({ id, Component }) => (
+                        <Component key={id} {...layerProps} />
+                      ))}
+                      {decor}
+                      {OVERLAY_LAYERS.map(({ id, Component }) => (
+                        <Component key={id} {...layerProps} />
+                      ))}
+                    </Layer>
+                  ) : null}
+                </Stage>
+              </Frozen>
+              {isoEverRef.current ? (
+                <IsoBoard
+                  hidden={!isoShown}
+                  stageKey={stageKey}
+                  turn={shown.kind === "isometric" ? shown.turn : 0}
+                  cam={cam}
+                  size={size}
+                  scene={scene}
+                  role={role}
+                  fog={fog}
+                  sightMode={sightMode}
+                  drawnFogTiles={drawnFogTiles}
+                  viewerFog={role === "player" && fog ? fogTiles : null}
+                  playersFog={role === "dm" && fog ? fogTiles : null}
+                  tokens={tokens}
+                  aboveFog={aboveFogOf}
+                  renderToken={renderToken}
+                  renderDecor={(t, part, at) => <TokenDecor key={`${part}:${t.id}`} part={part} token={t} scale={cam.scale} text={boardText.get(t.id)} lockMark={lockShown(t)} atX={at.x} atY={at.y} />}
+                  decorTokens={decorTokens}
+                  hasPlate={(t) => !!boardText.get(t.id)?.plate}
+                  layerProps={layerProps}
+                  variant={variant}
+                  lowPower={lowPower}
+                  keepIds={keepIds}
+                  eased={eased}
+                  youId={youId}
+                  draggingId={draggingId}
+                  onStage={setIsoStage}
+                />
               ) : null}
-              <Layer>
-                {below.map(renderToken)}
-                <RemoteDrags tokens={tokens} scale={cam.scale} youId={youId} draggingId={draggingId} />
-                {overlay ? null : decor}
-              </Layer>
-              {overlay ? (
-                <Layer>
-                  {sightMode ? <SightOverlay scene={scene} mode={sightMode} /> : null}
-                  {fog ? <FogShape sceneId={scene.id} bounds={scene.bounds} tiles={drawnFogTiles} translucent={role === "dm"} /> : null}
-                  {above.map(renderToken)}
-                  {UNDER_DECOR_LAYERS.map(({ id, Component }) => (
-                    <Component key={id} {...layerProps} />
-                  ))}
-                  {decor}
-                  {OVERLAY_LAYERS.map(({ id, Component }) => (
-                    <Component key={id} {...layerProps} />
-                  ))}
-                </Layer>
-              ) : null}
-            </Stage>
-          </BoardViewContext.Provider>
-        </TokenInteractionContext.Provider>
+            </BoardViewContext.Provider>
+          </TokenInteractionContext.Provider>
+        </>
       ) : null}
       {cam && size ? (
         // The action bar and the panes over the map are chrome, and take the
