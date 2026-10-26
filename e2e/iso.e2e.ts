@@ -16,12 +16,10 @@ import { isometric, toWorld, type Turn, type ViewPoint } from "../client/lib/vie
  * the keys I, Q and E, and the table display's rows. A DM on a computer,
  * Pat on a phone and a TV.
  *
- * Isometric is out of reach until the lanes that draw it are in
- * (client/features/view/store.ts isoReady), so every page here but one
- * is opened as an end-to-end test may open it: with the flag that makes a
- * page offer it set before the app's first script
- * (client/features/view/choice.ts isoOffered). The one plain page checks
- * that nothing of it shows without the flag.
+ * Every page offers Isometric (client/features/view/store.ts isoReady).
+ * The DM's and Pat's pages also carry the test flag, which installs the
+ * hook the input cases pick and turn with (client/canvas/relief/isoTest.ts).
+ * A plain browser checks that the choice is there without it.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus five, as
  * size.e2e.ts does, since the runs never overlap. The other environment
@@ -36,8 +34,8 @@ const work = mkdtempSync(path.join(tmpdir(), "raccoon-e2e-iso-"));
 const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
-/** Set before the app's first script, as only a test sets it. */
-const OFFER = "globalThis.__rvttIsoTest = true;";
+/** Set before the app's first script, as only a test or the bench sets it: it installs the test hook (relief/isoTest.ts) and offers nothing. */
+const HOOK_FLAG = "globalThis.__rvttIsoTest = true;";
 
 let server: Server;
 let browser: Browser;
@@ -393,7 +391,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     patContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-    for (const c of [dmContext, patContext]) await c.addInitScript(OFFER);
+    for (const c of [dmContext, patContext]) await c.addInitScript(HOOK_FLAG);
     dm = await dmContext.newPage();
     pat = await patContext.newPage();
     consoles.dm.attach(dm);
@@ -421,7 +419,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     rmSync(work, { recursive: true, force: true });
   });
 
-  test("ISO-1. the DM's room with a second scene, Pat on a phone, and a page without the flag shows nothing of the choice", async () => {
+  test("ISO-1. the DM's room with a second scene, Pat on a phone, and a page without the test flag that offers the choice all the same", async () => {
     await dm.goto(`${server.origin}/`);
     await dm.getByLabel("Room name").fill(run.roomName);
     await dm.getByLabel("Your name").fill("Dana the DM");
@@ -445,7 +443,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await pat.locator(".konvajs-content").first().waitFor();
     await dm.locator(".konvajs-content").first().waitFor();
 
-    // The same DM in a browser no test flagged, as every device is until Isometric is ready.
+    // The same DM in a browser no test flagged, as every device is: the choice is there, with no flag (the integration commit).
     const plainContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, storageState: await dmContext.storageState() });
     try {
       const plain = await plainContext.newPage();
@@ -453,36 +451,28 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       plainConsole.attach(plain);
       await plain.goto(`${server.origin}/r/${run.roomId}`);
       await plain.getByRole("button", { name: "Fit the map to the screen" }).waitFor();
-      assert.equal(await viewButton(plain).count(), 0, "no View button");
+      assert.equal(await plain.evaluate(() => "__rvttIsoTest" in globalThis), false, "no flag on this page");
+      await viewButton(plain).waitFor();
+      assert.equal(await plain.evaluate(() => "__rvttIsoHook" in globalThis), false, "nor the test hook");
       await openSideTab(plain, "Scenes");
-      await plain.getByRole("tabpanel", { name: "Scenes" }).getByText("Starting view").waitFor();
-      assert.equal(await plain.getByRole("radiogroup", { name: "Suggested view" }).count(), 0, "no Suggested view");
+      await plain.getByRole("tabpanel", { name: "Scenes" }).getByRole("radiogroup", { name: "Suggested view" }).waitFor();
       await blur(plain);
-      await plain.keyboard.press("i");
-      await plain.keyboard.press("e");
-      await plain.waitForTimeout(300);
-      assert.equal(await stored(plain, `rvtt.view.${run.roomId}`), null, "I stored no pick");
-      assert.equal(await plain.locator("[data-toast]").filter({ hasText: /isometric|top-down/i }).count(), 0, "E said nothing");
       await plain.keyboard.press("?");
       const sheet = plain.getByRole("dialog", { name: /shortcuts/i });
       await sheet.waitFor();
-      assert.equal(await sheet.getByText("Switch between top-down and isometric").count(), 0, "the sheet has no I");
+      await sheet.getByText("Switch between top-down and isometric", { exact: true }).waitFor();
       await plain.keyboard.press("Escape");
       await sheet.waitFor({ state: "detached" });
 
-      // The narrowest phone with the blackout chip overflows its row, and gives way only as it always has: Redo stays, at the 6 px gap (ISO5-OPUS-1).
+      // The narrowest phone with the blackout chip overflows its row: the View button folds into the room's menu, and Redo stays in the bar (D-261026-12). The chip alone still pushes the bar's buttons past the edge at this size, as it did before Isometric.
       await plain.setViewportSize({ width: 320, height: 568 });
       await plain.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
       await reopenRoom(plain);
       await ops.send({ t: "view.blackout", blackout: true });
       try {
         await plain.getByText("Players see black").waitFor();
-        await plain.waitForTimeout(300);
+        await waitFor("the View button folded into the menu", async () => ((await viewButton(plain).count()) === 0 ? true : null));
         assert.equal(await plain.getByRole("button", { name: "Redo", exact: true }).count(), 1, "Redo stays in the bar");
-        const gap = await plain
-          .getByRole("button", { name: "Undo", exact: true })
-          .evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { columnGap: string } }).getComputedStyle((el as unknown as { closest(s: string): unknown }).closest("header > div")).columnGap);
-        assert.equal(gap, "6px", "the row keeps its gap");
         await shots.take(plain, "iso-plain-dm-320-130-blackout");
       } finally {
         await ops.send({ t: "view.blackout", blackout: false });
@@ -741,27 +731,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("ISO-8. the table display picks its own view, apart from a member's pick in the same browser, and its rows sit within 1 px at each size", async () => {
-    // A display no test flagged: its menu as it always was, no View rows, no height cap (ISO5-OPUS-6).
-    const plainTv = await browser.newContext({ viewport: { width: 320, height: 568 } });
-    try {
-      const page = await plainTv.newPage();
-      await pairDisplay(page);
-      const size = page.viewportSize()!;
-      await page.mouse.click(size.width / 2, size.height / 2);
-      const menu = page.getByRole("menu", { name: "Table display" });
-      await menu.waitFor();
-      assert.equal(await menu.getByRole("group", { name: "View" }).count(), 0, "no View rows");
-      const cap = await menu.evaluate((el) => {
-        const style = (globalThis as unknown as { getComputedStyle(e: unknown): { maxHeight: string; overflowY: string } }).getComputedStyle(el);
-        return `${style.maxHeight} ${style.overflowY}`;
-      });
-      assert.equal(cap, "none visible", "the menu's height as it always was");
-    } finally {
-      await plainTv.close();
-    }
-
     tvContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    await tvContext.addInitScript(OFFER);
     tv = await tvContext.newPage();
     consoles.tv.attach(tv);
     // A member's pick in this browser, which the display must not read.
@@ -839,7 +809,6 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   test("ISO-9. on the narrowest phone the room's menu holds View, and a widening that gives the bar its View button back closes the sheet for good", async () => {
     // As alignment-icons' iso5-a finds it: the DM at 320 x 568 and 130% folds the View button into the menu (D-261026-12).
     const phoneContext = await browser.newContext({ viewport: { width: 320, height: 568 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
-    await phoneContext.addInitScript(OFFER);
     try {
       const phone = await phoneContext.newPage();
       consoles.phone.attach(phone);
@@ -1394,7 +1363,6 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
 
   test("ISO-50. a key someone gave another shortcut before Q was Turn left's stays theirs: the sheet shows Turn left with no key, and its Reset takes Q back (D-261026-12)", async () => {
     const keysContext = await browser.newContext({ viewport: { width: 1280, height: 800 }, storageState: await dmContext.storageState() });
-    await keysContext.addInitScript(OFFER);
     try {
       const page = await keysContext.newPage();
       consoles.keys.attach(page);

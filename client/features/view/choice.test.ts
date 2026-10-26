@@ -23,30 +23,15 @@ import {
   wantedKind,
   type ViewState,
 } from "./choice.ts";
-import { FOLLOW_THE_SCENE, withPick } from "./store.ts";
-
-/** The module as a page loads it, with the globals set at that moment. */
-const loaded = (tag: string) => import(`./choice.ts?${tag}`) as Promise<typeof import("./choice.ts")>;
+import { FOLLOW_THE_SCENE, isoReady, withPick } from "./store.ts";
 
 const state = (over: Partial<ViewState> = {}): ViewState => ({ sceneId: "s1", shown: TOP_DOWN, pick: null, wanted: "topDown", forcedBy: null, ...over });
 
 describe("the view choice (docs/design-v1-isometric-view.md 7, 8)", () => {
-  test("Isometric is offered only once isoReady is on, or on a page a test opened with the flag", async () => {
-    assert.equal(isoOffered, false, "no page offers it yet");
-    (globalThis as Record<string, unknown>)[ISO_TEST_FLAG] = true;
-    try {
-      const flagged = await loaded("flagged");
-      assert.equal(flagged.isoOffered, true);
-    } finally {
-      delete (globalThis as Record<string, unknown>)[ISO_TEST_FLAG];
-    }
-    (globalThis as Record<string, unknown>)[ISO_TEST_FLAG] = "true";
-    try {
-      const loose = await loaded("loose");
-      assert.equal(loose.isoOffered, false, "only the value true");
-    } finally {
-      delete (globalThis as Record<string, unknown>)[ISO_TEST_FLAG];
-    }
+  test("Isometric is offered on every page now that isoReady is on, the test hook's flag or none", () => {
+    assert.equal(isoReady, true);
+    assert.equal(isoOffered, true);
+    assert.equal((globalThis as Record<string, unknown>)[ISO_TEST_FLAG], undefined, "no flag on this page");
   });
 
   test("the four tools that show Top-down while in use say so, each in its own words, and no other tool does", () => {

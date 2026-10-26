@@ -258,10 +258,9 @@ export function MapStage(props: {
   const selecting = !tool.pointer;
   /*
    * The view the board shows: the room's view choice (features/view), or a
-   * table display's own. It is Top-down until the isometric view ships
-   * (features/view/choice.ts isoOffered), which only a test or the bench
-   * reaches before then. Isometric's tree mounts the first time it shows
-   * and stays (ISO-D15).
+   * table display's own, Top-down unless this device picks Isometric or
+   * follows a scene that suggests it (features/view/store.ts shownView).
+   * Isometric's tree mounts the first time it shows and stays (ISO-D15).
    */
   const roomId = useRoomView((s) => s.roomId);
   const roomChoice = useRoomViewChoice();

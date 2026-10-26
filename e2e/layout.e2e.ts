@@ -1276,6 +1276,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     assert.equal(await topBar(desk).getByLabel("Map phase").count(), 0, "the Phase menu left the bar");
     // Full screen leaves before the Phase menu, and Menu, This device and W still reach it.
     assert.equal(await topBar(desk).getByRole("button", { name: "Full screen", exact: true }).count(), 0, "Full screen left the bar");
+    // Once Isometric is offered the gaps narrow next, and the View button keeps its place.
+    assert.equal(await topBar(desk).getByRole("button", { name: /^View: / }).count(), 1, "the View button stays");
     // Fit tucks into the bar's padding, so both stay inside the top bar's own box, short of the side panel.
     const bar = await box(topBar(desk));
     for (const target of [topBar(desk).getByRole("button", { name: "Fit the map to the screen" }), topBar(desk).getByRole("button", { name: /^Initiative, round/ })]) {

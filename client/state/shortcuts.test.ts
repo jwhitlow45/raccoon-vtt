@@ -493,6 +493,9 @@ describe("the shortcut table", () => {
       "tool:select",
       "tool:trap",
       "turn",
+      "turnLeft",
+      "turnRight",
+      "view",
       "zoomIn",
       "zoomOut",
     ]);
@@ -530,12 +533,6 @@ describe("the shortcut table", () => {
     assert.equal(sheetSections("dm", { mouse: true, android: false }, DEFAULT_KEYS)[0]!.rows.find((r) => r.id === "tool:fog")?.input, "F");
   });
 
-  test("while no page offers Isometric, I, Q, E and the standee's tap are in neither table, so the sheet and FEATURES.md leave them out", () => {
-    for (const s of VIEW_SHORTCUTS) assert.ok(!SHORTCUTS.includes(s), s.id);
-    for (const b of VIEW_BEHAVIORS) assert.ok(!BEHAVIORS.includes(b), b.id);
-    for (const k of ["i", "q", "e"]) assert.ok(!Object.values(DEFAULT_KEYS).includes(k), k);
-  });
-
   test("the sheet lists each role's keys from the table itself", () => {
     const dm = shortcutsFor("dm").map((s) => s.keys);
     const player = shortcutsFor("player").map((s) => s.keys);
@@ -571,11 +568,11 @@ describe("the sheet's rows beside the keys", () => {
     }
   });
 
-  test("it holds keys and key-plus-pointer combinations, never a plain click, tap or pinch, and a plain drag only where it does more than move one token", () => {
+  test("it holds keys and key-plus-pointer combinations, never a plain click or pinch, a plain tap only to pick the standee behind, and a plain drag only where it does more than move one token", () => {
     for (const b of BEHAVIORS) {
       if (b.surface !== undefined) assert.equal(b.device, "keys", `${b.id}: a surface lists only its keys`);
-      // The drags of attached tokens (docs/design-v1-attach.md 4.6), which move a group or a mount.
-      if (b.device === "pointer") assert.match(b.input, /^Drag .*(carries|carried|mount)/, b.id);
+      // The drags of attached tokens (docs/design-v1-attach.md 4.6), which move a group or a mount, and the tap again on a standee, which picks one no plain tap reaches (docs/design-v1-isometric-view.md 6.2).
+      if (b.device === "pointer") assert.match(b.input, /^(Drag .*(carries|carried|mount)|Tap a standee again$)/, b.id);
       if (b.device !== "mouse") continue;
       // A mouse row names a key, or a button other than the left one, or the trackpad's pinch, which arrives as Ctrl and the wheel.
       assert.match(b.input, /^(Shift|Ctrl|Space|Right-click|Drag with the right or middle button)/, b.id);
@@ -601,7 +598,7 @@ describe("the sheet's rows beside the keys", () => {
       assert.deepEqual(titles(role, ANDROID).slice(0, 3), ["Keys", POINTER_SECTION, "Android"], role);
       assert.deepEqual(titles(role, { mouse: true, android: true }).slice(0, 4), ["Keys", MOUSE_SECTION, POINTER_SECTION, "Android"], role);
     }
-    assert.deepEqual(inputs("player", IPHONE, POINTER_SECTION), ["Drag a token that carries others", "Drag the rider of a controlled mount", "Drag any other carried token"]);
+    assert.deepEqual(inputs("player", IPHONE, POINTER_SECTION), ["Drag a token that carries others", "Drag the rider of a controlled mount", "Drag any other carried token", "Tap a standee again"]);
     assert.deepEqual(inputs("player", DESKTOP, MOUSE_SECTION), [
       "Shift or Ctrl+click a token (Cmd on a Mac)",
       "Shift or Ctrl+drag on empty map (Cmd on a Mac)",

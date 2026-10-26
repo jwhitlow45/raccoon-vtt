@@ -4,15 +4,9 @@ import { RoomScope } from "./scope.ts";
 import type { RoomUi } from "./store.ts";
 import type { RoomView } from "./types.ts";
 
-/*
- * I, Q and E (docs/design-v1-isometric-view.md 6.5) as a page that offers
- * Isometric has them: the flag is set before the table loads, as the
- * end-to-end tests set it (features/view/choice.ts isoOffered). Its own
- * file, since a page reads the flag once, as it loads.
- */
-(globalThis as Record<string, unknown>).__rvttIsoTest = true;
+/* I, Q and E (docs/design-v1-isometric-view.md 6.5), on every page now that Isometric is offered. */
 const { BEHAVIORS, DEFAULT_KEYS, NO_KEY, sheetSections, SHORTCUTS, shortcutFor, shortcutKeys, VIEW_BEHAVIORS, VIEW_SHORTCUTS } = await import("./shortcuts.ts");
-const { ISO_TEST_FLAG, isoOffered, viewVoiceSlot } = await import("../features/view/choice.ts");
+const { isoOffered, viewVoiceSlot } = await import("../features/view/choice.ts");
 const { pickView, readView, viewKey, withPick } = await import("../features/view/store.ts");
 const { sameKey } = await import("./keyBindings.ts");
 
@@ -56,9 +50,8 @@ function page(input: { role?: "dm" | "player"; tool?: string; suggested?: "isome
   };
 }
 
-describe("I, Q and E once Isometric is offered (docs/design-v1-isometric-view.md 6.5)", () => {
+describe("I, Q and E (docs/design-v1-isometric-view.md 6.5)", () => {
   test("the table and the sheet hold them for everyone, with the standee's tap, on keys no other row has", () => {
-    assert.equal(ISO_TEST_FLAG, "__rvttIsoTest", "the flag this file sets");
     assert.equal(isoOffered, true);
     for (const row of VIEW_SHORTCUTS) assert.ok(SHORTCUTS.includes(row), row.id);
     assert.ok(BEHAVIORS.includes(VIEW_BEHAVIORS[0]!));

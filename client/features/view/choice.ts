@@ -11,18 +11,20 @@ import { FOLLOW_THE_SCENE, isoReady, type StoredView, type ViewPick } from "./st
  * is stored by store.ts. The components are ViewMenu.tsx's.
  */
 
-/** The global an end-to-end test sets before the app's first script runs, so the choice can be built and tested before Isometric is ready. */
+/**
+ * The global an end-to-end test or the bench sets before the app's first
+ * script runs, for the test hook that picks and turns without the menu
+ * (canvas/relief/isoTest.ts). It offers nothing: isoOffered follows
+ * isoReady alone.
+ */
 export const ISO_TEST_FLAG = "__rvttIsoTest";
 
 /**
  * Whether this page offers the isometric view at all: the View button and
- * its menu, a scene's Suggested view, the display's rows and the keys. Once
- * `isoReady` is on, everywhere. Until then only on a page an end-to-end test
- * opened with ISO_TEST_FLAG set (e2e/iso.e2e.ts), so a user sees nothing
- * new: no control, stored value or address sets it. Read once, as the page
- * loads.
+ * its menu, a scene's Suggested view, the display's rows and the keys.
+ * Everywhere while `isoReady` is on, and nowhere if it is ever turned off.
  */
-export const isoOffered: boolean = isoReady || (globalThis as Record<string, unknown>)[ISO_TEST_FLAG] === true;
+export const isoOffered: boolean = isoReady;
 
 /** What the menu's radio group holds: the pick, with Follow the scene for none. */
 export type ViewChoice = "follow" | ViewKind;

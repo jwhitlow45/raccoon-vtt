@@ -28,13 +28,15 @@ let reloads = 0;
 const reloaded = () => import(`./store.ts?reload=${++reloads}`) as Promise<typeof store>;
 
 describe("the view store (docs/design-v1-isometric-view.md 7)", () => {
-  test("any device after the deploy shows Top-down, whatever it stored or the scene suggests, while Isometric is out of reach", () => {
-    assert.equal(isoReady, false);
+  test("any device after the deploy shows Top-down: it follows the scene, and no scene suggests Isometric until the DM sets one", () => {
+    assert.equal(isoReady, true);
     assert.deepEqual(readView(viewKey("fresh")), FOLLOW_THE_SCENE);
+    assert.equal(shownView({ stored: readView(viewKey("fresh")), sceneId: "s1", suggested: undefined }), TOP_DOWN);
+    // isoReady is the one switch: set false, every device shows Top-down whatever it stored or the scene suggests.
     for (const pick of [null, "topDown", "isometric"] as const) {
       for (const suggested of [undefined, "isometric"] as const) {
         const s = withTurn(withPick(FOLLOW_THE_SCENE, pick), "s1", 2);
-        assert.equal(shownView({ stored: s, sceneId: "s1", suggested }), TOP_DOWN, `${pick} ${suggested}`);
+        assert.equal(shownView({ stored: s, sceneId: "s1", suggested, ready: false }), TOP_DOWN, `${pick} ${suggested}`);
       }
     }
   });

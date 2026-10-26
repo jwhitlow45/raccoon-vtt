@@ -4,13 +4,11 @@ import { pickView, turnView, type ViewPick } from "../../features/view/store.ts"
 import type { Turn } from "../../lib/view.ts";
 
 /**
- * The isometric view stays unreachable until its choice ships
- * (features/view/store.ts isoReady, docs/design-v1-isometric-view.md 13).
- * Until then only tests and the bench reach it, by setting the test flag
- * (features/view/choice.ts ISO_TEST_FLAG) before the page loads
- * (Playwright's addInitScript), which the view choice reads (isoOffered).
- * Nothing a user can do sets it. With it set, `__rvttIsoHook` picks and
- * turns as the View menu does, for the bench, which presses no menu.
+ * A way for tests and the bench to pick and turn without the View menu:
+ * with the test flag (features/view/choice.ts ISO_TEST_FLAG) set before
+ * the page loads (Playwright's addInitScript), `__rvttIsoHook` picks and
+ * turns as the menu does. Nothing a user can do sets it, and it offers
+ * nothing the menu does not (docs/design-v1-isometric-view.md 13).
  */
 const HOOK = "__rvttIsoHook";
 

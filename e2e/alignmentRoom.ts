@@ -3760,13 +3760,8 @@ export function fu32Tests(): void {
 /*
  * The isometric view's choice (docs/design-v1-isometric-view.md 8): the
  * top bar with the View button, the View menu in both views, and Scene
- * settings' Suggested view, at FU30_AT's sizes. Isometric is out of reach
- * until its lanes are in (client/features/view/store.ts isoReady), so the
- * DM's page is opened as an end-to-end test may open it, with the flag that
- * makes a page offer it (client/features/view/choice.ts isoOffered). The
- * step runs last in its file, since the flag stays on the page.
+ * settings' Suggested view, at FU30_AT's sizes.
  */
-const ISO_OFFER = "globalThis.__rvttIsoTest = true;";
 
 /** A DM panel: its side panel tab from 900 px up, else its sheet from Panels. */
 async function openDmPanel(page: Page, title: string): Promise<Locator> {
@@ -3822,7 +3817,6 @@ async function viewNameWhole(root: Locator, at: string): Promise<string[]> {
 export function isoChoiceTests(): void {
   test(`iso5-a. the top bar with the View button, for the DM and for Pat, or the room menu's View row where the bar folds it, the View menu in Top-down and in Isometric, and Scene settings' Suggested view, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-isometric-view.md 8)`, async () => {
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
-    await pat.addInitScript(ISO_OFFER);
     const lines: string[] = [];
     for (const at of FU30_AT) {
       const sweep = new Sweep(`iso5-${atName(at)}`);
@@ -3832,7 +3826,6 @@ export function isoChoiceTests(): void {
       await pat.goto("about:blank");
       const page = await dmPageFor(at.size);
       page.setDefaultTimeout(10_000);
-      await page.addInitScript(ISO_OFFER);
       await openAt(page, at.size, at.scale);
       await waitFor("the DM's snapshot", () => dmSocket.state);
       const menu = page.getByRole("dialog", { name: "View" });

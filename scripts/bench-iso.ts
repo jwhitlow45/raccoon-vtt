@@ -27,10 +27,9 @@
  * member, a count that must be none, the switch, a turn, and a pan with
  * both drawing trees mounted, and the brush stroke and the map image run
  * back in Top-down with the isometric tree mounted and hidden. `--only`
- * times just the rows named. Isometric is out of reach until the
- * integration commit (client/features/view/store.ts isoReady), so the page
- * turns it on through the test flag the view choice reads
- * (client/features/view/choice.ts ISO_TEST_FLAG).
+ * times just the rows named. The page stores Isometric as its pick before
+ * it loads, and sets the test flag (client/features/view/choice.ts
+ * ISO_TEST_FLAG) for the hook that turns without the menu.
  *
  * `--parity <dir>` saves the board's canvas for each scene at two cameras
  * instead of timing anything, and `--compare <dir> <dir>` says whether two
@@ -62,7 +61,7 @@ const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isM
 const CPU_SLOWDOWN = 4;
 const STEPS = 16;
 const ROUNDS = 3;
-/** The global the view choice reads to offer Isometric before isoReady (client/features/view/choice.ts), for tests and this bench only. */
+/** The global that installs the test hook, which picks and turns without the View menu (client/canvas/relief/isoTest.ts), for tests and this bench only. */
 const ISO_TEST_FLAG = "__rvttIsoTest";
 
 type View = "topDown" | "isometric";

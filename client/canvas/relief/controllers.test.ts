@@ -380,14 +380,15 @@ describe("the board's view (ISO-5's hooks)", () => {
     assert.match(read("canvas/Stage.tsx"), /useIsoTestHook\(props\.view !== undefined \? displayViewKey\(roomId\) : viewKey\(roomId\), scene\.id\);/);
   });
 
-  test("the board shows Top-down while Isometric is not offered, even with Isometric stored as this device's pick", async () => {
+  test("the board shows this device's pick now that Isometric is offered, and Top-down again if the switch is ever turned off", async () => {
     const { isoOffered } = await import("../../features/view/choice.ts");
     const { shownView, isoReady } = await import("../../features/view/store.ts");
-    const { TOP_DOWN } = await import("../../lib/view.ts");
-    assert.equal(isoReady, false);
-    assert.equal(isoOffered, false, "no page here sets the test flag");
+    const { TOP_DOWN, isometric } = await import("../../lib/view.ts");
+    assert.equal(isoReady, true);
+    assert.equal(isoOffered, true, "offered with no test flag");
     const stored = { pick: "isometric" as const, turns: [["s1", 2]] as const };
-    assert.equal(shownView({ stored, sceneId: "s1", suggested: "isometric", ready: isoOffered }), TOP_DOWN);
+    assert.deepEqual(shownView({ stored, sceneId: "s1", suggested: undefined, ready: isoOffered }), isometric(2));
+    assert.equal(shownView({ stored, sceneId: "s1", suggested: "isometric", ready: false }), TOP_DOWN);
     // The room's choice passes isoOffered as `ready`, and the board draws that choice.
     assert.match(bodyOf(read("features/view/ViewMenu.tsx"), "useViewChoice")!, /ready: isoOffered/);
     assert.match(read("canvas/Stage.tsx"), /const shown: View = props\.view \?\? roomChoice\.shown;/);

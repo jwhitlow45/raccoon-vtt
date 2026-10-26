@@ -11,11 +11,13 @@ import { isometric, TOP_DOWN, type Turn, type View, type ViewKind } from "../../
  */
 
 /**
- * Isometric stays out of reach until the lanes that draw it, take input in
- * it and offer it are in (section 13). Until then every device shows
- * Top-down, whatever it has stored or the scene suggests.
+ * Whether Isometric is in reach, on since the lanes that draw it, take
+ * input in it and offer it are in (section 13). Set false, every device
+ * shows Top-down again, whatever it has stored or the scene suggests, and
+ * the choice hides (features/view/choice.ts isoOffered): the one switch to
+ * take the view back out.
  */
-export const isoReady = false;
+export const isoReady = true;
 
 /** The user's pick, null to follow the scene. */
 export type ViewPick = ViewKind | null;

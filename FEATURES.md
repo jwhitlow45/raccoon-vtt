@@ -495,6 +495,8 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 | N | Next turn, or End turn on your own turn | DM, and players on their turn |
 | +, - | Zoom in, zoom out | everyone |
 | 0 | Fit the map | everyone |
+| I | Switch between top-down and isometric | everyone |
+| Q, E | Turn the isometric view left, right | everyone |
 | / | Search the scene in the outliner | DM |
 | S | Hide or show the side panel, on a screen 900 px or wider | everyone |
 | O | Go to the other panel, with two in the side panel | everyone |
@@ -519,11 +521,12 @@ On any device with a keyboard. They do nothing while you type in a field or a di
 
 On any device. A token that carries others, such as a rider's mount or a holder of a torch, drags as a group.
 
-| Drag | Does | Who |
+| Drag or tap | Does | Who |
 | --- | --- | --- |
 | Drag a token that carries others | Move it with what it carries, and what those carry. A press in its middle takes it, even on a small token it carries or one that token carries | everyone, with the Select tool |
 | Drag the rider of a controlled mount | Move the mount, the rider riding. So does a drag of a rider that covers its whole mount | everyone, with the Select tool |
 | Drag any other carried token | Move it alone, from nearer its holder's edge than its middle. Dropped on its holder, or within 5 ft of the creature dragging it, it stays attached, and anywhere else it comes loose | everyone, with the Select tool |
+| Tap a standee again | Pick the one behind it, in isometric | everyone |
 
 ### Android
 
