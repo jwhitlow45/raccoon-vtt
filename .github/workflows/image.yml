@@ -3,18 +3,18 @@
 # workflow is the only way the image is ever built for or pushed to Docker
 # Hub.
 #
-# A tag run checks the tag first: it is `v` plus package.json's version, on a
-# commit in main's history, and selfhost/ is what its generator makes. Then,
-# with no access to any secret, it builds the image on amd64 and brings it up
-# with selfhost/compose.yml (the smoke test), builds it on arm64, and checks
-# that ci.yml passed on the exact commit. Only then do the jobs that push
-# start. They run in the `dockerhub` environment, which holds the Docker Hub
-# secrets, admits only `v*` tags and waits for a reviewer's approval. Each
-# architecture builds on a native runner of its own and pushes by digest,
-# and the last job joins the two under the three tags.
+# Every run checks the version, builds the image natively on arm64, and
+# brings the amd64 image up with selfhost/compose.yml (selfhost/smoke-test.sh).
+# A tag run also checks that the tag is `v` plus package.json's version, on a
+# commit in main's history, and that ci.yml passed on that exact commit. Its
+# publish job then runs in the `dockerhub` environment, which holds the Docker
+# Hub secrets, admits only `v*` tags and waits for one approval. That job
+# builds amd64, smoke-tests it, and pushes amd64 and arm64 (emulated) from
+# the same builder and cache, so the amd64 image pushed is the one tested:
+# it checks that their config digests match before it tags anything.
 #
-# A manual run (workflow_dispatch) builds both architectures and runs the
-# smoke test. It never pushes.
+# A run on a ci/ branch that changes the image, and a run started by hand,
+# do the checks and the smoke test, and never push.
 #
 # Only actions/checkout, pinned as in ci.yml. Everything else is the docker
 # CLI and buildx in run steps, so no third-party action ever sees the token.
@@ -23,6 +23,18 @@ name: Image
 on:
   push:
     tags: ["v*"]
+    branches: ["ci/**"]
+    # Branch pushes only. A tag push always runs, since GitHub does not
+    # apply path filters to tags.
+    paths:
+      - Dockerfile
+      - selfhost/**
+      - docker/**
+      - docker-compose.server.yml
+      - .github/workflows/image.yml
+      - scripts/selfhost-compose.ts
+      - package.json
+      - pnpm-lock.yaml
   workflow_dispatch:
 
 permissions:
@@ -57,11 +69,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           filter: blob:none
-      - name: The tag, the version and main
+      - name: The version, and for a tag, the tag and main
         id: version
         env:
           EVENT: ${{ github.event_name }}
-          REF: ${{ github.ref }}
+          REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           version=$(jq -r .version package.json)
@@ -71,11 +83,7 @@ jobs:
           fi
           sha=$(git rev-parse HEAD)
           publish=false
-          if [ "$EVENT" = push ]; then
-            case $REF in
-              refs/tags/*) ;;
-              *) echo "::error::A push run must be for a tag, not $REF."; exit 1 ;;
-            esac
+          if [ "$EVENT" = push ] && [ "$REF_TYPE" = tag ]; then
             if [ "$REF_NAME" != "v$version" ]; then
               echo "::error::The tag is $REF_NAME, but package.json's version is $version. Tag the commit that sets it as v$version."
               exit 1
@@ -92,7 +100,7 @@ jobs:
             echo "sha=$sha"
             echo "publish=$publish"
           } >> "$GITHUB_OUTPUT"
-          echo "Version $version at $sha. Push: $publish."
+          echo "Version $version at $sha. Publish: $publish."
       # In the production image's own Node, so it needs no install: the
       # generator uses nothing but Node's built-in modules.
       - name: selfhost/ is what its generator makes
@@ -102,87 +110,9 @@ jobs:
             --volume "$PWD:/repo:ro" --workdir /repo "$node_image" \
             node scripts/selfhost-compose.ts --check
 
-  # The amd64 image, loaded into this runner's Docker and run the way a host
-  # runs it: selfhost/compose.yml with an .env made from selfhost/env.example,
-  # with the https profile.
-  smoke:
-    needs: check
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      SMOKE_DIR: ${{ github.workspace }}/../smoke
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Docker Engine 28 or later
-        run: |
-          server=$(docker version --format '{{.Server.Version}}')
-          echo "Docker Engine $server"
-          docker compose version
-          if [ "${server%%.*}" -lt 28 ]; then
-            echo "::error::This runner has Docker Engine $server. selfhost/compose.yml's internal networks set gateway_mode_ipv4: isolated, which needs Docker Engine 28 or later."
-            exit 1
-          fi
-      - name: A buildx builder
-        run: docker buildx create --name raccoon --driver docker-container --driver-opt "image=$BUILDKIT_IMAGE" --bootstrap --use
-      - name: Build for linux/amd64
-        env:
-          VERSION: ${{ needs.check.outputs.version }}
-          REVISION: ${{ needs.check.outputs.sha }}
-        run: |
-          docker buildx build --platform linux/amd64 \
-            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" \
-            --load --tag raccoon-vtt:smoke .
-          docker image inspect raccoon-vtt:smoke --format '{{json .Config.Labels}}' | jq .
-      # Throwaway values, made here and gone with the runner. The image is the
-      # one just loaded, and Caddy serves plain HTTP for a name that never
-      # resolves, so nothing asks a certificate authority for anything.
-      - name: Write the .env
-        run: |
-          mkdir -p "$SMOKE_DIR"
-          cp selfhost/compose.yml "$SMOKE_DIR/compose.yml"
-          umask 077
-          cp selfhost/env.example "$SMOKE_DIR/.env"
-          sed -i "s/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" "$SMOKE_DIR/.env"
-          sed -i "s|^ROOM_SECRET_KEY=$|ROOM_SECRET_KEY=$(openssl rand -base64 32)|" "$SMOKE_DIR/.env"
-          sed -i "s|^PUBLIC_ORIGIN=$|PUBLIC_ORIGIN=https://smoke.invalid|" "$SMOKE_DIR/.env"
-          printf '%s\n' RACCOON_IMAGE=raccoon-vtt RACCOON_VERSION=smoke COMPOSE_PROFILES=https SITE_ADDRESS=http://smoke.invalid >> "$SMOKE_DIR/.env"
-      - name: Bring the stack up
-        run: docker compose --file "$SMOKE_DIR/compose.yml" --project-name raccoon-smoke up --detach --wait --wait-timeout 300
-      - name: Check it
-        run: |
-          compose() { docker compose --file "$SMOKE_DIR/compose.yml" --project-name raccoon-smoke "$@"; }
-          echo "The app answers /healthz on raccoon-edge, where a front end reaches it:"
-          docker run --rm --network raccoon-edge --read-only --cap-drop ALL --security-opt no-new-privileges raccoon-vtt:smoke \
-            node -e "fetch('http://raccoon:3000/healthz').then(async (r) => { const body = await r.text(); console.log(r.status, body); process.exit(r.ok && JSON.parse(body).status === 'ok' ? 0 : 1) }).catch((e) => { console.error(e); process.exit(1) })"
-          echo "Caddy passes it through on port 80:"
-          curl -fsS --max-time 10 --retry 5 --retry-connrefused -H 'Host: smoke.invalid' http://127.0.0.1/healthz
-          echo
-          echo "The mounted configs are the sources, byte for byte:"
-          compose exec -T egress cat /etc/squid/squid.conf | cmp - docker/squid.conf
-          compose exec -T backup cat /backup/backup.sh | cmp - docker/backup.sh
-          compose --profile restore run --rm -T restore cat /backup/backup.sh | cmp - docker/backup.sh
-          echo "Same bytes."
-          echo "A backup runs:"
-          compose exec -T backup sh /backup/backup.sh once
-      # Both profiles named, so Caddy and any restore container are included
-      # whatever COMPOSE_PROFILES does beside a --profile flag.
-      - name: The stack's state and logs
-        if: failure()
-        run: |
-          docker compose --file "$SMOKE_DIR/compose.yml" --project-name raccoon-smoke --profile https --profile restore ps --all
-          docker compose --file "$SMOKE_DIR/compose.yml" --project-name raccoon-smoke --profile https --profile restore logs --no-color
-      - name: Remove the stack
-        if: always()
-        run: |
-          if [ -f "$SMOKE_DIR/.env" ]; then
-            docker compose --file "$SMOKE_DIR/compose.yml" --project-name raccoon-smoke --profile https --profile restore down --volumes --remove-orphans
-          fi
-          docker buildx rm raccoon || true
-
-  # The arm64 build on its own native runner, before anything is pushed, so a
-  # manual run covers both architectures. It keeps nothing.
+  # The arm64 build on a native runner, as a check before anything is
+  # pushed. It keeps nothing: the arm64 image that ships is built in the
+  # publish job, from the same cache as the amd64 one.
   build-arm64:
     needs: check
     runs-on: ubuntu-24.04-arm
@@ -201,9 +131,34 @@ jobs:
           docker buildx build --platform linux/arm64 \
             --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" .
 
+  # The smoke test of a run that does not publish. A tag run does the same
+  # inside its publish job, on the image it then pushes.
+  smoke:
+    needs: check
+    if: needs.check.outputs.publish != 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: A buildx builder
+        run: docker buildx create --name raccoon --driver docker-container --driver-opt "image=$BUILDKIT_IMAGE" --bootstrap --use
+      - name: Build for linux/amd64
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+          REVISION: ${{ needs.check.outputs.sha }}
+        run: |
+          docker buildx build --platform linux/amd64 \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" \
+            --load --tag raccoon-vtt:smoke .
+          docker image inspect raccoon-vtt:smoke --format '{{json .Config.Labels}}' | jq .
+      - name: Smoke test
+        run: sh selfhost/smoke-test.sh raccoon-vtt:smoke
+
   # Publishing follows the deploy rule: green CI on the exact commit.
   ci-green:
-    needs: [check, smoke, build-arm64]
+    needs: check
     if: needs.check.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -223,25 +178,17 @@ jobs:
           fi
           echo "ci.yml passed on $SHA."
 
-  # Each architecture again on its own runner, now pushed by digest only, with
-  # provenance and SBOM attestations. Nothing is tagged until the merge.
+  # The one job that sees the Docker Hub secrets, and the one approval.
   publish:
-    needs: [check, ci-green]
+    needs: [check, build-arm64, ci-green]
     if: needs.check.outputs.publish == 'true'
     environment: dockerhub
-    strategy:
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    # One output per architecture, since each leg of the matrix sets only its own.
-    outputs:
-      digest-amd64: ${{ steps.push.outputs.digest-amd64 }}
-      digest-arm64: ${{ steps.push.outputs.digest-arm64 }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      MINOR: ${{ needs.check.outputs.minor }}
+      REVISION: ${{ needs.check.outputs.sha }}
     steps:
       - name: The Docker Hub secrets are set
         env:
@@ -258,76 +205,67 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: A native runner
-        env:
-          ARCH: ${{ matrix.arch }}
-        run: |
-          arch=$(docker version --format '{{.Server.Arch}}')
-          if [ "$arch" != "$ARCH" ]; then
-            echo "::error::This runner's Docker is $arch, not $ARCH. The image is built natively, never under emulation."
-            exit 1
-          fi
+      # QEMU for arm64, from tonistiigi/binfmt qemu-v10.2.1 by digest. Only
+      # the production install runs emulated: the Dockerfile builds the
+      # client on the runner's own platform.
+      - name: arm64 emulation
+        run: docker run --privileged --rm tonistiigi/binfmt:qemu-v10.2.1@sha256:d3b963f787999e6c0219a48dba02978769286ff61a5f4d26245cb6a6e5567ea3 --install arm64
       - name: A buildx builder
         run: docker buildx create --name raccoon --driver docker-container --driver-opt "image=$BUILDKIT_IMAGE" --bootstrap --use
+      - name: Build for linux/amd64
+        run: |
+          docker buildx build --platform linux/amd64 \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" \
+            --load --tag raccoon-vtt:smoke --metadata-file "$RUNNER_TEMP/load.json" .
+          config=$(jq -r '."containerimage.config.digest"' "$RUNNER_TEMP/load.json")
+          manifest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/load.json")
+          # The daemon names an image by its config digest, or by its
+          # manifest's with the containerd image store.
+          loaded=$(docker image inspect raccoon-vtt:smoke --format '{{.Id}}')
+          if [ "$loaded" != "$config" ] && [ "$loaded" != "$manifest" ]; then
+            echo "::error::raccoon-vtt:smoke is $loaded, not the image just built (config $config, manifest $manifest)."
+            exit 1
+          fi
+          echo "TESTED_CONFIG=$config" >> "$GITHUB_ENV"
+          echo "Built linux/amd64 with config $config."
+      - name: Smoke test
+        run: sh selfhost/smoke-test.sh raccoon-vtt:smoke
       # The login lives inside this one step: the token reaches docker login
       # on stdin, never on a command line, and the trap logs out however the
-      # step ends.
-      - name: Build and push linux/${{ matrix.arch }} by digest
-        id: push
+      # step ends. Both architectures are pushed by digest first, and tagged
+      # only once the amd64 image is shown to be the one smoke-tested.
+      - name: Push, check and tag
         env:
           IMAGE: docker.io/${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/raccoon-vtt
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          ARCH: ${{ matrix.arch }}
-          VERSION: ${{ needs.check.outputs.version }}
-          REVISION: ${{ needs.check.outputs.sha }}
         run: |
           trap 'docker logout docker.io' EXIT
           printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
-          docker buildx build --platform "linux/$ARCH" \
+          docker buildx build --platform linux/amd64,linux/arm64 \
             --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" \
             --provenance mode=max --sbom true \
             --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
-            --metadata-file "$RUNNER_TEMP/metadata.json" .
-          digest=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")
-          echo "digest-$ARCH=$digest" >> "$GITHUB_OUTPUT"
-          echo "linux/$ARCH pushed as $digest."
+            --metadata-file "$RUNNER_TEMP/push.json" .
+          index=$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/push.json")
+          raw=$(docker buildx imagetools inspect --raw "$IMAGE@$index")
+          platform() { jq -r --arg arch "$1" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest' <<< "$raw"; }
+          amd64=$(platform amd64)
+          arm64=$(platform arm64)
+          if [ -z "$amd64" ] || [ -z "$arm64" ]; then
+            echo "::error::The pushed index $index lacks a platform: amd64 '$amd64', arm64 '$arm64'."
+            exit 1
+          fi
+          pushed=$(docker buildx imagetools inspect --raw "$IMAGE@$amd64" | jq -r .config.digest)
+          if [ "$pushed" != "$TESTED_CONFIG" ]; then
+            echo "::error::The pushed linux/amd64 image has config $pushed, but the smoke test ran $TESTED_CONFIG. Nothing was tagged."
+            exit 1
+          fi
+          echo "The pushed linux/amd64 image is the one smoke-tested ($pushed)."
+          docker buildx imagetools create \
+            --tag "$IMAGE:$VERSION" --tag "$IMAGE:$MINOR" --tag "$IMAGE:latest" \
+            "$IMAGE@$index"
+          echo "Tagged $VERSION, $MINOR and latest: index $index, linux/amd64 $amd64, linux/arm64 $arm64."
       - name: Remove the builder
         if: always()
         run: docker buildx rm raccoon || true
-
-  merge:
-    needs: [check, publish]
-    if: needs.check.outputs.publish == 'true'
-    environment: dockerhub
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Tag X.Y.Z, X.Y and latest
-        env:
-          IMAGE: docker.io/${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/raccoon-vtt
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          VERSION: ${{ needs.check.outputs.version }}
-          MINOR: ${{ needs.check.outputs.minor }}
-          AMD64: ${{ needs.publish.outputs.digest-amd64 }}
-          ARM64: ${{ needs.publish.outputs.digest-arm64 }}
-        run: |
-          for digest in "$AMD64" "$ARM64"; do
-            if ! printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
-              echo "::error::A push left no digest: '$digest'."
-              exit 1
-            fi
-          done
-          trap 'docker logout docker.io' EXIT
-          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
-          docker buildx imagetools create \
-            --tag "$IMAGE:$VERSION" --tag "$IMAGE:$MINOR" --tag "$IMAGE:latest" \
-            "$IMAGE@$AMD64" "$IMAGE@$ARM64"
-          platforms=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' \
-            | jq -r '[.manifests[].platform | select(.os == "linux") | "\(.os)/\(.architecture)"] | sort | unique | join(" ")')
-          if [ "$platforms" != "linux/amd64 linux/arm64" ]; then
-            echo "::error::$VERSION holds '$platforms', not linux/amd64 and linux/arm64."
-            exit 1
-          fi
-          echo "Tagged $VERSION, $MINOR and latest for $platforms."
