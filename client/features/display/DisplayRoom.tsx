@@ -873,10 +873,8 @@ function DisplayMenu(props: {
         transform: "translateX(-50%)",
         zIndex: 30,
         width: "min(560px, calc(100% - 32px))",
-        // The View rows made it taller than a small phone held upright at 130%, so past the screen it scrolls. Its padding and border stand outside the height.
-        maxHeight: `calc(100% - ${theme.safe.top} - ${theme.safe.bottom} - ${2 * (theme.space(6) + theme.space(3) + theme.line.border)}px)`,
-        overflowY: "auto",
-        overscrollBehavior: "contain",
+        // With the View rows it is taller than a small phone held upright at 130%, so past the screen it scrolls, as far from the top as from the foot. Every box is border-box (globals.css), so its padding and border are inside the height.
+        ...(isoOffered ? { maxHeight: `calc(100% - ${theme.safe.top} - ${theme.safe.bottom} - ${2 * theme.space(6)}px)`, overflowY: "auto" as const, overscrollBehavior: "contain" as const } : null),
         display: "grid",
         gap: theme.space(2),
         padding: theme.space(3),

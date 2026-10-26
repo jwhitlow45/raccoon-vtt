@@ -106,6 +106,16 @@ function description(el: Locator): Promise<string> {
   });
 }
 
+/** Pairs a display page with the room by a code from the DM. */
+async function pairDisplay(page: Page): Promise<void> {
+  const res = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/display/code`, { headers: { Origin: server.origin } });
+  assert.equal(res.status(), 201, await res.text());
+  await page.goto(`${server.origin}/display`);
+  await page.getByLabel("Code from the DM's screen").fill(((await res.json()) as { code: string }).code);
+  await page.getByRole("button", { name: "Connect" }).click();
+  await page.locator(".konvajs-content").first().waitFor();
+}
+
 /** Keys go to the page, not to a tab or button that kept focus. */
 async function blur(page: Page): Promise<void> {
   await page.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
@@ -232,6 +242,26 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       const sheet = plain.getByRole("dialog", { name: /shortcuts/i });
       await sheet.waitFor();
       assert.equal(await sheet.getByText("Switch between top-down and isometric").count(), 0, "the sheet has no I");
+      await plain.keyboard.press("Escape");
+      await sheet.waitFor({ state: "detached" });
+
+      // The narrowest phone with the blackout chip overflows its row, and gives way only as it always has: Redo stays, at the 6 px gap (ISO5-OPUS-1).
+      await plain.setViewportSize({ width: 320, height: 568 });
+      await plain.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
+      await reopenRoom(plain);
+      await ops.send({ t: "view.blackout", blackout: true });
+      try {
+        await plain.getByText("Players see black").waitFor();
+        await plain.waitForTimeout(300);
+        assert.equal(await plain.getByRole("button", { name: "Redo", exact: true }).count(), 1, "Redo stays in the bar");
+        const gap = await plain
+          .getByRole("button", { name: "Undo", exact: true })
+          .evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { columnGap: string } }).getComputedStyle((el as unknown as { closest(s: string): unknown }).closest("header > div")).columnGap);
+        assert.equal(gap, "6px", "the row keeps its gap");
+        await shots.take(plain, "iso-plain-dm-320-130-blackout");
+      } finally {
+        await ops.send({ t: "view.blackout", blackout: false });
+      }
       assert.deepEqual(plainConsole.errors, []);
     } finally {
       await plainContext.close();
@@ -438,6 +468,25 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
   });
 
   test("ISO-8. the table display picks its own view, apart from a member's pick in the same browser, and its rows sit within 1 px at each size", async () => {
+    // A display no test flagged: its menu as it always was, no View rows, no height cap (ISO5-OPUS-6).
+    const plainTv = await browser.newContext({ viewport: { width: 320, height: 568 } });
+    try {
+      const page = await plainTv.newPage();
+      await pairDisplay(page);
+      const size = page.viewportSize()!;
+      await page.mouse.click(size.width / 2, size.height / 2);
+      const menu = page.getByRole("menu", { name: "Table display" });
+      await menu.waitFor();
+      assert.equal(await menu.getByRole("group", { name: "View" }).count(), 0, "no View rows");
+      const cap = await menu.evaluate((el) => {
+        const style = (globalThis as unknown as { getComputedStyle(e: unknown): { maxHeight: string; overflowY: string } }).getComputedStyle(el);
+        return `${style.maxHeight} ${style.overflowY}`;
+      });
+      assert.equal(cap, "none visible", "the menu's height as it always was");
+    } finally {
+      await plainTv.close();
+    }
+
     tvContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     await tvContext.addInitScript(OFFER);
     tv = await tvContext.newPage();
@@ -445,12 +494,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     // A member's pick in this browser, which the display must not read.
     await tv.goto(`${server.origin}/`);
     await tv.evaluate((k) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem(k, '{"v":1,"pick":"isometric","turns":{}}'), `rvtt.view.${run.roomId}`);
-    const res = await dmContext.request.post(`${server.origin}/api/rooms/${run.roomId}/display/code`, { headers: { Origin: server.origin } });
-    assert.equal(res.status(), 201, await res.text());
-    await tv.goto(`${server.origin}/display`);
-    await tv.getByLabel("Code from the DM's screen").fill(((await res.json()) as { code: string }).code);
-    await tv.getByRole("button", { name: "Connect" }).click();
-    await tv.locator(".konvajs-content").first().waitFor();
+    await pairDisplay(tv);
 
     const openTvMenu = async () => {
       const size = tv.viewportSize()!;
@@ -508,6 +552,12 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         const frame = await menu.boundingBox();
         const last = await leave.boundingBox();
         assert.ok(frame && last && last.y + last.height <= frame.y + frame.height + 0.5, `${at}: Leave spills past the menu's frame: ${JSON.stringify([frame, last])}`);
+        // A menu held to the screen stands as far from the top as from the foot (ISO5-OPUS-3).
+        if (frame && (await menu.evaluate((el) => (el as unknown as { scrollHeight: number; clientHeight: number }).scrollHeight > (el as unknown as { clientHeight: number }).clientHeight + 1))) {
+          const top = frame.y;
+          const foot = size.height - frame.y - frame.height;
+          assert.ok(Math.abs(top - foot) <= 1, `${at}: the menu stands ${top} px from the top and ${foot} px from the foot`);
+        }
       }
     }
     assert.deepEqual(lines, [], "the display's View rows");

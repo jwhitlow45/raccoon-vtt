@@ -1355,11 +1355,13 @@ function MapArea(props: {
  * goes back to the band until the layout is wider than that. Where the row
  * still overflows without the strip, the DM's chip keeps only its dot, as
  * a player's does, again until the layout is wider: on a 320 px phone at
- * 130% the whole chip pushed Fit off the screen. Where a phone's row still
+ * 130% the whole chip pushed Fit off the screen. Once Isometric is offered
+ * (features/view/choice.ts isoOffered), where a phone's row still
  * overflows, its gaps tighten from 6 px to 2, and then a DM's Redo leaves
  * it, each again until the layout is wider: with the View button there, a
  * 320 px phone at 130% had no room for Fit (Undo stays, and Draw's and the
- * builder's options keep a Redo). A DM's row from 900 px up
+ * builder's options keep a Redo). Until then the row gives way as it always
+ * has. A DM's row from 900 px up
  * checks too, since Undo and Redo sit in it on every layout
  * (docs/design-v1-layout-hierarchy.md M2): there the strip stays, the chip
  * gives way to its dot first, then Full screen leaves the bar, then the
@@ -1404,10 +1406,10 @@ function TopBar(props: {
   const dmDot = role === "dm" && width <= dmDotUpTo;
   // On a phone, the width at which the row still overflowed with the chip's dot: up to it, the gaps tighten.
   const [tightUpTo, setTightUpTo] = useState(0);
-  const tight = props.compact && width <= tightUpTo;
+  const tight = isoOffered && props.compact && width <= tightUpTo;
   // And the width at which a DM's row still overflowed with tight gaps: up to it, Redo leaves the bar.
   const [redoOffUpTo, setRedoOffUpTo] = useState(0);
-  const redo = !(props.compact && role === "dm" && width <= redoOffUpTo);
+  const redo = !(isoOffered && props.compact && role === "dm" && width <= redoOffUpTo);
   // From 900 px up, the width at which the row still overflowed with the chip's dot: up to it, the Phase menu leaves the bar.
   const [phaseOffUpTo, setPhaseOffUpTo] = useState(0);
   const phaseMenu = !props.compact && width > phaseOffUpTo;
@@ -1430,8 +1432,8 @@ function TopBar(props: {
     // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then on a phone the gaps' room and then Redo, then Full screen, which the Menu and a key still reach, then the Phase menu.
     if (measured) recordOverflow(layoutWidth(), overflow);
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
-    else if (props.compact && !tight) setTightUpTo(layoutWidth());
-    else if (role === "dm" && props.compact && redo) setRedoOffUpTo(layoutWidth());
+    else if (isoOffered && props.compact && !tight) setTightUpTo(layoutWidth());
+    else if (isoOffered && role === "dm" && props.compact && redo) setRedoOffUpTo(layoutWidth());
     else if (fullscreen) setFullscreenOffUpTo(layoutWidth());
     else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
   }, [checks, measured, recordOverflow, role, dmDot, props.compact, tight, redo, fullscreen, phaseMenu]);
