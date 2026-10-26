@@ -10,11 +10,22 @@
  * side, as an area being aimed does. Hex lines on the board are the board's
  * own rows (HX-3).
  *
+ * Beside them, two rows review HX2-ASTRA-03 and 04 asked for: a 1,000 ft
+ * emanation, whose reach once walked every hex within its steps before
+ * the scene clipped it, and the spots of a 2,000-hex straight walk with an
+ * area sweep's samples along it, which once built the whole hex line again
+ * for every spot.
+ *
  *   node scripts/bench-grid.ts
  */
 import { DEFAULT_SETTINGS } from "../shared/model.ts";
 import { computeCoverage, PREVIEW_SAMPLES, type AreaContext, type AreaTemplateInput } from "../shared/rules/aoe.ts";
+import { placedOnHex } from "../shared/rules/footprint.ts";
 import { gridOfShape, SQUARES, type Grid } from "../shared/rules/grid.ts";
+import type { HexGrid } from "../shared/rules/hex.ts";
+import { ownWalk } from "../shared/rules/movement.ts";
+import { hexPiece, routeWalk } from "../shared/rules/route.ts";
+import { token } from "../shared/testutil.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
 import { capRoom } from "./bench-vision.ts";
 
@@ -56,6 +67,42 @@ function row(name: string, grid: Grid, walled: boolean, samples?: number): Row {
   return { row: name, ...stats(times.slice(1)), covered };
 }
 
+function timed(name: string, run: () => number): Row {
+  const times: number[] = [];
+  let covered = 0;
+  for (let i = 0; i < RUNS; i++) {
+    const t0 = performance.now();
+    covered = run();
+    times.push(performance.now() - t0);
+  }
+  return { row: name, ...stats(times.slice(1)), covered };
+}
+
+/** A 1,000 ft emanation around a Medium in the middle of a `w` by `h` hex rows scene, at `fpc` feet a cell. */
+function emanationRow(name: string, w: number, h: number, fpc: number): Row {
+  const g = gridOfShape("hexRows") as HexGrid;
+  const caster = token("c", { size: "medium", ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, { col: Math.floor(w / 2), row: Math.floor(h / 2) }) });
+  const ctx: AreaContext = { settings: { ...DEFAULT_SETTINGS, feetPerCell: fpc, aoeCoverage: "half", aoeInclusion: "anyCell" }, bounds: { w, h }, grid: g, walls: null, tokens: { c: caster } };
+  let rev = 0;
+  return timed(name, () => {
+    const aura: AreaTemplateInput = { id: "e", rev: ++rev, shape: "emanation", size: 1000, origin: { x: caster.x, y: caster.y, z: 0 }, yaw: 0, includeOrigin: true, attachedTo: "c", casterId: "c" };
+    return computeCoverage(aura, ctx).hexes?.length ?? 0;
+  });
+}
+
+/** A Medium's straight walk 2,000 hexes east on hex rows: its spots as the reducer reads a leg, then an area sweep's 600 samples, its cap, along it. */
+function walkRow(): Row {
+  const g = gridOfShape("hexRows") as HexGrid;
+  const start = ownWalk({ ...token("w", { size: "medium" }), ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, { col: 0, row: 4 }) });
+  const end = { ...start, ...placedOnHex(g, start, { col: 2000, row: 4 }) };
+  return timed("Hex rows, a 2,000-hex walk's spots and an area sweep along it", () => {
+    const spots = routeWalk(g, [start, end], { buildChunks: {} }).length;
+    const piece = hexPiece(g, start, start, end);
+    for (let k = 1; k < 600; k++) piece.at(k / 600);
+    return spots;
+  });
+}
+
 export function runGridBench(): Row[] {
   return [
     row("Squares, walled (9.3's worst case)", SQUARES, true),
@@ -63,14 +110,17 @@ export function runGridBench(): Row[] {
     row("Hex rows, open", gridOfShape("hexRows"), false),
     row("Hex columns, open", gridOfShape("hexColumns"), false),
     row("Hex rows, open, aiming (4 a side)", gridOfShape("hexRows"), false, PREVIEW_SAMPLES),
+    emanationRow("Hex rows, a 1,000 ft emanation, 200 by 200", 200, 200, 5),
+    emanationRow("Hex rows, a 1,000 ft emanation at 1 ft a cell, 20 by 20", 20, 20, 1),
+    walkRow(),
   ];
 }
 
 export function formatGridBench(rows: readonly Row[]): string {
   const lines = [
-    `Coverage of a 1,000 ft line at 37° on a 200 by 200 scene, ${RUNS - 1} timed runs, median / max ms, against 9.3's ${BUDGET_MS} ms on a phone.`,
+    `Coverage of a 1,000 ft line at 37° on a 200 by 200 scene, then the emanation and walk rows, ${RUNS - 1} timed runs, median / max ms, against 9.3's ${BUDGET_MS} ms on a phone.`,
     "",
-    "row | cells or hexes covered | ms (median / max)",
+    "row | cells, hexes or spots | ms (median / max)",
     "--- | --- | ---",
     ...rows.map((r) => `${r.row} | ${r.covered} | ${r.median.toFixed(2)} / ${r.max.toFixed(2)}`),
   ];
