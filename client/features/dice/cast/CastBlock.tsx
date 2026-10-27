@@ -14,6 +14,7 @@ import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "../../area
 import { presetDraft } from "../../areas/presets.ts";
 import { resolvedChoice, samplesNow, setDraft, startDraft, useAreaScope } from "../../areas/store.ts";
 import { useLiveTokens } from "../../areas/useLiveTokens.ts";
+import { useViewerFog } from "../../../canvas/viewerFog.ts";
 import { Note } from "../../tokens/ui.tsx";
 import type { DiceView } from "../creature.ts";
 import { actionFill, areaFill } from "../groupSave/fills.ts";
@@ -236,13 +237,15 @@ function SendStatus(props: { send: CastSend; again?: () => string | null; onClos
   );
 }
 
-/** The live tokens' coverage of an area, as its In area line reads it. */
+/** The live tokens' coverage of an area, as its In area line reads it: on a player's device by the walls they could know (areas/coverage.ts heldWalls). */
 function useAreaEntries(view: RoomState, areaId: string | undefined, sceneId: string | null) {
   const live = useLiveTokens();
+  const role = useRoomView((s) => s.you?.role ?? "player");
   const scene = sceneId ? view.scenes[sceneId] : undefined;
+  const fog = useViewerFog({ scene, role, fog: scene?.fogEnabled !== false });
   const template = areaId ? view.templates[areaId] : undefined;
   if (!template || !scene || template.sceneId !== scene.id) return null;
-  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samplesNow(live.moving));
+  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samplesNow(live.moving), fog);
   return inAreaEntries(caughtTokens(template, ctx, scene.id), live.tokens, view.characters);
 }
 

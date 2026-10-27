@@ -17,6 +17,7 @@ import { triggerSummary } from "./placement.ts";
 import { canEdit, deleteTemplate, openDamage, samplesNow, useAreaScope, useAreaTool } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
 import { useAreaAsk } from "../dice/cast/AreaAsk.tsx";
+import { useViewerFog } from "../../canvas/viewerFog.ts";
 
 /**
  * Every area on the scene and who is in it, kept live as tokens move. This
@@ -47,9 +48,11 @@ export default function AreasPanel(props: PanelProps) {
   const closeDamage = useCallback(() => area.store.setState({ damageId: null }), [area]);
   const groupStore = useGroupSaveStore();
   const group = useGroupSave((s) => (s.shownIn === "areas" ? s.page : null));
+  // A player's lists read only the walls they could know, as the board draws their areas (coverage.ts heldWalls). The DM's read every wall.
+  const fog = useViewerFog({ scene, role: you?.role ?? "player", fog: scene?.fogEnabled !== false });
   if (!view || !scene || !you) return null;
 
-  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samplesNow(live.moving));
+  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samplesNow(live.moving), fog);
   // The rows of an area's group save follow its caught creatures as they move, until the roll.
   const areaIds = (templateId: string) => {
     const t = templates[templateId];

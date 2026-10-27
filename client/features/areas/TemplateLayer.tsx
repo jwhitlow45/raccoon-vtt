@@ -11,6 +11,7 @@ import { pillStands } from "../../canvas/markStand.ts";
 import { measureLabel } from "../../canvas/measureText.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
+import { useViewerFog } from "../../canvas/viewerFog.ts";
 import { Pill, pillGeometry, pillReach } from "../measure/Pill.tsx";
 import { areaTitle } from "./labels.ts";
 import { cachedCoverage, caughtTokens, contextFrom } from "./coverage.ts";
@@ -82,7 +83,10 @@ export const TemplateLayer = memo(function TemplateLayer(props: LayerProps) {
  * "stored" reads where they stand, sampled finely, for the isometric
  * ground stage, which a drag must not redraw: there the dragged tokens'
  * own rings in still areas wait for the drop (`hide`), and their attached
- * areas move with the drag (canvas/DragMarks.tsx).
+ * areas move with the drag (canvas/DragMarks.tsx). On a player's device
+ * the context reads only the walls they could know (coverage.ts
+ * heldWalls), as an area being aimed does, so a placed area's shading and
+ * rings show nothing of a wall wholly under their fog.
  */
 export function useAreaParts(
   props: Pick<LayerProps, "scene" | "scale" | "role" | "fog">,
@@ -102,9 +106,10 @@ export function useAreaParts(
   const tokens = useMemo(() => (hide && hide.size > 0 ? withoutTokens(shown, hide) : shown), [shown, hide]);
   const buildChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
   const settings = useTreeShownView((s) => s.view?.meta.settings);
+  const viewer = useViewerFog(props);
   const ctx = useMemo(
-    () => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, samplesNow(moving)) : null),
-    [tokens, buildChunks, settings, scene, moving],
+    () => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, samplesNow(moving), viewer) : null),
+    [tokens, buildChunks, settings, scene, moving, viewer],
   );
   /*
    * Where the tokens and their names are on screen, and the other layers'
