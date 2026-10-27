@@ -2,9 +2,9 @@ import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { carriedGroup, carriedIndex, getOffSpot, holderOf, isCreature, overlaps } from "#shared/rules/attach.ts";
 import { verticalExtentFt } from "#shared/rules/footprint.ts";
-import { legStop } from "#shared/rules/movement.ts";
+import { landedElevation, legStop } from "#shared/rules/movement.ts";
 import { displayName } from "../../lib/scene.ts";
-import { dropView, landedElevation, walkerOf, walkersStop } from "../movement/drop.ts";
+import { dropView, walkerOf, walkersStop } from "../movement/drop.ts";
 import { detachAllowed, offersAttach, type AttachViewer, type RightsView } from "./rights.ts";
 import { walkersFor } from "./walk.ts";
 
@@ -83,7 +83,7 @@ export function holderAction(token: Token): { words: string; choice: "letGo" | "
  * for it and for each creature it drags, which follows that leg (4.2).
  * The server checks the same place but for the creatures, whose check would
  * tell a player where a hidden one stands. It lands as a walk off its
- * holder lands (drop.ts landedElevation off the holder): on the ground
+ * holder lands (rules/movement.ts landedElevation off the holder): on the ground
  * there off a holder on the ground, at its height off a flier, and its
  * reach is measured from there, as the server measures it. Null when there
  * is no such spot.

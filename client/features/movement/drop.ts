@@ -1,4 +1,4 @@
-import type { BuildChunk, RoomState, Scene, Token } from "#shared/model.ts";
+import type { RoomState, Scene, Token } from "#shared/model.ts";
 import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorRef, type OpOf } from "#shared/protocol.ts";
 import { SOMETHING_BLOCKS, stopWords, WALL_IN_THE_WAY } from "#shared/permissions.ts";
 import type { Blocker, BuildState, LegEnd } from "#shared/ruleHooks.ts";
@@ -6,8 +6,8 @@ import { holderOf, linkHolds, onHolder, publicMembers, walkerFor, type SeenByAll
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { deviceGround } from "#shared/rules/held.ts";
-import { footing, footprintGround } from "#shared/rules/heights.ts";
-import { groundUnder, landing, legStop, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
+import { footing } from "#shared/rules/heights.ts";
+import { groundUnder, landedElevation, landing, legStop, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { followerTrace, routeLattice, routePoints, routeStop, routeWalkers, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
@@ -58,36 +58,9 @@ export function rebased(tokens: Readonly<Record<string, DropToken | undefined>>,
   return { token: now, at: { x: at.x + now.x - token.x, y: at.y + now.y - token.y } };
 }
 
-/** The fields a landing's elevation reads: where the token stands and how high. */
-export type LandingToken = Omit<DropToken, "id" | "name" | "number">;
-
 /** How this viewer's drops are judged on this scene: walked, or placed where they land. */
 export function dropMode(role: Role, scene: Pick<Scene, "blockMovement"> | undefined): Exclude<DropMode, "teleport"> {
   return role === "player" && scene?.blockMovement === true ? "walk" : "free";
-}
-
-/**
- * The elevation a token lands at (section 4.2, "Landings write the
- * ground"): a token that stood on the ground takes the ground where it
- * lands, a flier keeps its height or rises to the ground there, whichever
- * is higher, and a token inside the ground keeps its elevation, since
- * nothing raises one on its own. The ground there is under the footprint
- * it lands with, the squeezed one where it squeezes.
- *
- * One that leaves its holder (`holder`, docs/design-v1-attach.md 4.3) is
- * judged from the holder, not from the ground under its seat, which
- * differs where the holder straddles two heights: off a holder on the
- * ground it lands on the ground there, off a flier it keeps its height or
- * rises to the ground, and off a holder inside the ground it keeps its
- * elevation. This is every landing's height, so a squeezed drop off a
- * holder lands on the ground under its squeezed footprint (review
- * AT-ASTRA-20).
- */
-export function landedElevation(chunks: Readonly<Record<string, BuildChunk>>, token: LandingToken, at: Point & { squeeze?: boolean }, holder?: LandingToken): number {
-  const before = footing(chunks, holder ?? token);
-  if (before === "inside") return token.elevation;
-  const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: at.squeeze === true ? true : undefined });
-  return before === "ground" ? there : Math.max(token.elevation, there);
 }
 
 /**

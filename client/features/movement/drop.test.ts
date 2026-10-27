@@ -6,11 +6,11 @@ import type { DiagonalRule, EdgeFeature, RoomState, TerrainId, Token } from "#sh
 import { snapStep } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { alongStraightLeg, plainLegCost, routeFeet, routePoints, routeStop, routeWalk, routeWalkers, walkTrace, type RoutePiece } from "#shared/rules/route.ts";
-import { legStop } from "#shared/rules/movement.ts";
+import { landedElevation, legStop } from "#shared/rules/movement.ts";
 import { findRoute, WalkWorld } from "#shared/rules/walk.ts";
 import { publicWorld } from "#shared/rules/walkWorld.ts";
 import { DM, P1, token } from "#shared/testutil.ts";
-import { cutForWalkers, dropMode, dropView, goesStraight, heldText, holdLabel, keyStep, landedElevation, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkerOf, walkersStop, type Found } from "./drop.ts";
+import { cutForWalkers, dropMode, dropView, goesStraight, heldText, holdLabel, keyStep, moveOpsOf, planGroup, planLands, planOne, planPress, planWalk, routeTarget, stopText, walkerOf, walkersStop, type Found } from "./drop.ts";
 import { dragReading, remoteReading } from "../measure/movement.ts";
 import { footprintSize } from "#shared/rules/footprint.ts";
 import { snapPosition } from "../../lib/scene.ts";

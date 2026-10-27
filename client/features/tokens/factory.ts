@@ -5,7 +5,7 @@ import type { Grid } from "#shared/rules/grid.ts";
 import { hexInScene, hexKey, referenceHex, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { monsterActor, type StatBlockMonster } from "#shared/srd/monsters.ts";
 import { footprint, hexRing } from "../../lib/scene.ts";
-import { landedElevation } from "../movement/drop.ts";
+import { landedElevation } from "#shared/rules/movement.ts";
 
 /**
  * Builds the `token.create` and `character.create` inputs for every way the
@@ -178,7 +178,7 @@ export function newCharacter(input: {
  * the copy.
  *
  * The copy lands where it goes as its original would if dropped there
- * (movement/drop.ts landedElevation): a copy of a creature on the ground
+ * (shared/rules/movement.ts landedElevation): a copy of a creature on the ground
  * stands on the ground there, the floor or a platform, a flier's copy flies
  * at its height or the ground there, whichever is higher, and a burrower's
  * keeps its depth.

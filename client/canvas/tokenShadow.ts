@@ -1,7 +1,7 @@
 import type { BuildChunk, SceneId } from "#shared/model.ts";
 import type { PlacedToken } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { landedElevation } from "../features/movement/drop.ts";
+import { landedElevation } from "#shared/rules/movement.ts";
 
 /**
  * The depth cue under a token off the ground (docs/design-v1-maps-vision.md
