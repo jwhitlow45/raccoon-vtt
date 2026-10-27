@@ -32,6 +32,18 @@ export const SIGHT = 4;
  */
 export const SIGHT_POTENTIAL = 8;
 
+/**
+ * A free wall of a player's held build (docs/design-v1-map-discovery.md
+ * 5.2): a piece the server cut, whose cut ends lie on a 1/10000 grid, off
+ * the lattice this file's exact arithmetic assumes. Pieces skip the
+ * counting pass and the exact split, and a plain pass splits them against
+ * the rest (splitSegments). Only a device holds them, for drawing and its
+ * own previews, and the server's exact walls decide every action.
+ */
+export const PIECE = 2;
+/** How far from a piece the per-cell index still files it: the band the exact wall lies within (walls.ts PIECE_BAND). */
+const PIECE_REACH = 2 / 10_000;
+
 /** Free wall coordinates are multiples of 1 / LATTICE cell (model.ts FREE_WALL_LATTICE). */
 export const LATTICE = 64;
 /** The largest coordinate a stored segment may have: a build edge sits at most at 1024 (walls.ts MAX_BUILD_COORD + 1). */
@@ -138,6 +150,7 @@ export type Candidates = {
    * 1 for a free wall, which may cross or touch anything. 0 for a grid
    * segment or a pillar side: those meet each other only at grid points or
    * not at all, so they are split only where a free wall meets them.
+   * PIECE for a piece of a player's held build, off the lattice.
    */
   readonly free: Uint8Array;
   readonly n: number;
@@ -237,7 +250,8 @@ function forEachPair(c: Candidates, visit: (i: number, j: number, boxes: boolean
     const y0 = lo[4 * i + 1]!;
     const x1 = lo[4 * i + 2]!;
     const y1 = lo[4 * i + 3]!;
-    if (x1 < fx0 || x0 > fx1 || y1 < fy0 || y0 > fy1) {
+    // A piece's ends lie off the lattice the counting sort files by, so the exact pass never meets it.
+    if (free[i] === PIECE || x1 < fx0 || x0 > fx1 || y1 < fy0 || y0 > fy1) {
       first[i] = 1;
       last[i] = 0;
       continue;
@@ -625,7 +639,86 @@ export function splitSegments(c: Candidates): Pieces {
 
   for (const list of members.values()) partitionLine(c, list, firstPoint, byPoint, P, emit);
 
-  return { xy: outXy.data.slice(0, outXy.length), tags: Uint8Array.from(outTags), n: outTags.length };
+  const split = { xy: outXy.data.slice(0, outXy.length), tags: Uint8Array.from(outTags), n: outTags.length };
+  return c.free.includes(PIECE) ? splitPieces(split, c) : split;
+}
+
+/*
+ * The plain pass for a held build's pieces (PIECE): the exact split above
+ * has left them whole, so each piece is cut, and so is everything it
+ * crosses, at their crossing, found by the exact predicate and placed by
+ * one division, in a pass bucketed by cell. Two segments that only touch
+ * stay whole, as a sweep handles a T. A device's area sweep alone reads
+ * the result, to draw coverage: no rule the server keeps reads it.
+ */
+function splitPieces(split: Pieces, c: Candidates): Pieces {
+  const xy: number[] = [];
+  const tags: number[] = [];
+  const isPiece: boolean[] = [];
+  for (let k = 0; k < split.n; k++) {
+    xy.push(split.xy[4 * k]!, split.xy[4 * k + 1]!, split.xy[4 * k + 2]!, split.xy[4 * k + 3]!);
+    tags.push(split.tags[k]!);
+    isPiece.push(false);
+  }
+  // splitSegments emits a lone segment whole and in order, so the pieces are among its output as they came. Mark them by position.
+  const pieceKeys = new Set<string>();
+  for (let k = 0; k < c.n; k++) if (c.free[k] === PIECE) pieceKeys.add(`${c.xy[4 * k]},${c.xy[4 * k + 1]},${c.xy[4 * k + 2]},${c.xy[4 * k + 3]},${c.tags[k]}`);
+  for (let k = 0; k < split.n; k++) if (pieceKeys.has(`${xy[4 * k]},${xy[4 * k + 1]},${xy[4 * k + 2]},${xy[4 * k + 3]},${tags[k]}`)) isPiece[k] = true;
+  const n = tags.length;
+  const cuts: number[][] = Array.from({ length: n }, () => []);
+  const index = new SegmentIndex(Float64Array.from(xy), Uint8Array.from(tags, () => 1));
+  for (let i = 0; i < n; i++) {
+    if (!isPiece[i]) continue;
+    const ax = xy[4 * i]!;
+    const ay = xy[4 * i + 1]!;
+    const bx = xy[4 * i + 2]!;
+    const by = xy[4 * i + 3]!;
+    index.query(Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by), 1, (j) => {
+      // Each pair once: a piece against every segment that is not a piece, and against each later piece.
+      if (j === i || (isPiece[j] && j < i)) return;
+      const cx = xy[4 * j]!;
+      const cy = xy[4 * j + 1]!;
+      const dx = xy[4 * j + 2]!;
+      const dy = xy[4 * j + 3]!;
+      if (contact(ax, ay, bx, by, cx, cy, dx, dy) !== CROSS) return;
+      const ex = bx - ax;
+      const ey = by - ay;
+      const fx = dx - cx;
+      const fy = dy - cy;
+      const t = ((cx - ax) * fy - (cy - ay) * fx) / (ex * fy - ey * fx);
+      const x = ax + t * ex;
+      const y = ay + t * ey;
+      cuts[i]!.push(x, y);
+      cuts[j]!.push(x, y);
+    });
+  }
+  const out = new Floats();
+  const outTags: number[] = [];
+  for (let k = 0; k < n; k++) {
+    const ax = xy[4 * k]!;
+    const ay = xy[4 * k + 1]!;
+    const bx = xy[4 * k + 2]!;
+    const by = xy[4 * k + 3]!;
+    const at = cuts[k]!;
+    const order = Array.from({ length: at.length / 2 }, (_, m) => m);
+    const ex = bx - ax;
+    const ey = by - ay;
+    order.sort((p, q) => (at[2 * p]! - ax) * ex + (at[2 * p + 1]! - ay) * ey - ((at[2 * q]! - ax) * ex + (at[2 * q + 1]! - ay) * ey));
+    let px = ax;
+    let py = ay;
+    for (const m of order) {
+      const x = at[2 * m]!;
+      const y = at[2 * m + 1]!;
+      if ((x === px && y === py) || (x === bx && y === by)) continue;
+      out.push4(px, py, x, y);
+      outTags.push(tags[k]!);
+      px = x;
+      py = y;
+    }
+    out.push4(px, py, bx, by);
+    outTags.push(tags[k]!);
+  }
+  return { xy: out.data.slice(0, out.length), tags: Uint8Array.from(outTags), n: outTags.length };
 }
 
 /*
@@ -834,11 +927,19 @@ export class SegmentIndex {
   readonly #stamp: Uint32Array;
   #query = 0;
 
-  constructor(xy: Float64Array, tags: Uint8Array) {
+  /**
+   * `free`, as Candidates has it, files a held build's pieces (PIECE) in
+   * every cell within PIECE_REACH of them too, so a query of a cell beside
+   * a rounded end still finds the piece (docs/design-v1-map-discovery.md
+   * 5.2). Without it every segment is filed by its own box.
+   */
+  constructor(xy: Float64Array, tags: Uint8Array, free?: Uint8Array) {
     this.xy = xy;
     this.tags = tags;
     const n = tags.length;
-    const box = boundsOf(xy);
+    const reach = (k: number) => (free?.[k] === PIECE ? PIECE_REACH : 0);
+    let box = boundsOf(xy);
+    if (box && free?.includes(PIECE)) box = { x0: box.x0 - PIECE_REACH, y0: box.y0 - PIECE_REACH, x1: box.x1 + PIECE_REACH, y1: box.y1 + PIECE_REACH };
     this.#gx = box ? Math.floor(box.x0) : 0;
     this.#gy = box ? Math.floor(box.y0) : 0;
     this.#w = box ? Math.floor(box.x1) - this.#gx + 1 : 0;
@@ -849,10 +950,11 @@ export class SegmentIndex {
       const ay = xy[4 * k + 1]!;
       const bx = xy[4 * k + 2]!;
       const by = xy[4 * k + 3]!;
-      const c0 = Math.floor(Math.min(ax, bx)) - this.#gx;
-      const c1 = Math.floor(Math.max(ax, bx)) - this.#gx;
-      const r0 = Math.floor(Math.min(ay, by)) - this.#gy;
-      const r1 = Math.floor(Math.max(ay, by)) - this.#gy;
+      const m = reach(k);
+      const c0 = Math.floor(Math.min(ax, bx) - m) - this.#gx;
+      const c1 = Math.floor(Math.max(ax, bx) + m) - this.#gx;
+      const r0 = Math.floor(Math.min(ay, by) - m) - this.#gy;
+      const r1 = Math.floor(Math.max(ay, by) + m) - this.#gy;
       for (let r = r0; r <= r1; r++) for (let col = c0; col <= c1; col++) fn(r * this.#w + col);
     };
     for (let k = 0; k < n; k++) each(k, (cell) => offsets[cell + 1]!++);

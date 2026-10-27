@@ -1,9 +1,10 @@
 import { LIMITS, type LimitCheck } from "../limits.ts";
-import { CHUNK_CELLS, MAX_FREE_WALL_CELLS, type AutoWalls, type BuildChunk, type EdgeFeature, type FreeWall, type RoomState, type Scene, type SceneId, type StairMark, type TerrainId, type WallFeature } from "../model.ts";
+import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, MAX_FREE_WALL_CELLS, UP_DIR_CHARS, type AutoWalls, type BuildChunk, type EdgeFeature, type FreeWall, type PlayerChunk, type RoomState, type Scene, type SceneId, type StairMark, type TerrainId, type WallFeature } from "../model.ts";
 import { autoWallBetween, autoWallsOf, paintedOf, type Painted } from "./autoWalls.ts";
 import type { Bounds, Point } from "./geom.ts";
 import type { DoorRef } from "../protocol.ts";
-import { chunkHeights, chunkMarks, compassOf, stairDirections, type Compass } from "./heights.ts";
+import { chunkHeights, chunkMarks, COMPASS, compassOf, stairDirections, type Compass } from "./heights.ts";
+import { sweptTouches } from "./movement.ts";
 import { isWritable } from "../writable.ts";
 import {
   AREAS,
@@ -13,6 +14,7 @@ import {
   MAX_COORD,
   MOVEMENT,
   piecesWith,
+  PIECE,
   SegmentIndex,
   SIGHT,
   SIGHT_POTENTIAL,
@@ -94,7 +96,20 @@ export type BuildIndex = {
   free: FreeWallRef[];
   ground?: Map<number, number>;
   marks?: Map<number, StairMark>;
+  /** A player's held build (docs/design-v1-map-discovery.md 5.2): what its chunks carry beside the build. Absent for a stored one. */
+  held?: HeldFacts;
 };
+
+/**
+ * What a player's chunks carry beside the build on a scene with fog on
+ * (docs/design-v1-map-discovery.md 5.2), which their device reads in place
+ * of deriving it from cells it may not hold: the cells they hold
+ * (`known`), the automatic walls on held edges (`auto`), by edge id, and
+ * each held stair's direction (`upDir`), by cell id, 1 + its index in
+ * COMPASS, 0 for a stair with none. A build whose chunks carry these holds
+ * nothing else: a position with no chunk is all unknown.
+ */
+export type HeldFacts = { known: Set<number>; auto: Set<number>; dirs: Map<number, number> };
 
 /*
  * Parses "x,y" (or "x,y,n" and "x,y,w" with `withSide`) into an id, or -1
@@ -140,6 +155,25 @@ export function sceneChunks(all: Readonly<Record<string, BuildChunk>>, sceneId: 
  * and is dropped, as malformed keys are, rather than trusted.
  */
 const MAX_FREE_LENGTH_SQUARED = (MAX_FREE_WALL_CELLS * LATTICE) * (MAX_FREE_WALL_CELLS * LATTICE);
+
+/**
+ * The piece path (docs/design-v1-map-discovery.md 5.2, ASTRA-10, LK-30): a
+ * free wall in a player's held chunk is a piece the server cut, whose cut
+ * ends lie on its 1/10000 grid rather than the lattice. Ends finite and
+ * inside the build's range, length above zero and at most 8 cells, all
+ * checked exactly with no slack, since a piece is at most 5.66 cells long.
+ */
+function validPiece(w: FreeWall | undefined): w is FreeWall {
+  if (!w || !Array.isArray(w.a) || !Array.isArray(w.b) || !w.f) return false;
+  const k = w.f.kind;
+  if (k !== "wall" && k !== "door" && k !== "window") return false;
+  const coords = [w.a[0], w.a[1], w.b[0], w.b[1]];
+  for (const v of coords) if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > MAX_COORD) return false;
+  const dx = coords[2]! - coords[0]!;
+  const dy = coords[3]! - coords[1]!;
+  const len2 = dx * dx + dy * dy;
+  return len2 > 0 && len2 <= MAX_FREE_WALL_CELLS * MAX_FREE_WALL_CELLS;
+}
 
 function validFreeWall(w: FreeWall | undefined): w is FreeWall {
   if (!w || !Array.isArray(w.a) || !Array.isArray(w.b) || !w.f) return false;
@@ -192,7 +226,10 @@ const NO_VALUES: CellValues = { ids: new Int32Array(0), values: new Int16Array(0
  * are parsed again. Parsing a full 200x200 build's keys was most of the
  * cost of deriving its walls.
  */
-type ParsedChunk = { cells: CellArrays; terrains: TerrainId[]; edges: [number, EdgeFeature][]; free: FreeWallRef[]; ground: CellValues; marks: CellValues; box: Box | null };
+type ParsedChunk = { cells: CellArrays; terrains: TerrainId[]; edges: [number, EdgeFeature][]; free: FreeWallRef[]; ground: CellValues; marks: CellValues; box: Box | null; held: ParsedHeld | null };
+
+/** A held chunk's own facts (HeldFacts): its known cells' ids, its automatic walls' edge ids, its stairs' directions. */
+type ParsedHeld = { known: number[]; auto: number[]; dirs: [number, number][] };
 
 /** The cells a build's parts reach, inclusive, an edge counting as the cell it belongs to. */
 type Box = { x0: number; y0: number; x1: number; y1: number };
@@ -214,10 +251,11 @@ function union(a: Box | null, b: Box | null): Box | null {
 }
 
 /** The box of a build's parts: every cell, edge, height and stair mark. */
-function extent(cells: readonly CellArrays[], edges: readonly (readonly (readonly [number, EdgeFeature])[])[], ground: readonly CellValues[], marks: readonly CellValues[]): Box | null {
+function extent(cells: readonly CellArrays[], edges: readonly (readonly (readonly [number, EdgeFeature])[])[], ground: readonly CellValues[], marks: readonly CellValues[], auto: Iterable<number> = []): Box | null {
   let box: Box | null = null;
   for (const { ids } of cells) for (let i = 0; i < ids.length; i++) box = grow(box, ids[i]!);
   for (const part of edges) for (const [id] of part) box = grow(box, (id - (id & 1)) / 2);
+  for (const id of auto) box = grow(box, (id - (id & 1)) / 2);
   for (const { ids } of ground) for (let i = 0; i < ids.length; i++) box = grow(box, ids[i]!);
   for (const { ids } of marks) for (let i = 0; i < ids.length; i++) box = grow(box, ids[i]!);
   return box;
@@ -254,6 +292,71 @@ function markCodes(marks: string | null): Uint8Array | null {
   return out;
 }
 
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** Base64 of exactly `bytes` bytes, as fog tiles are written (rules/fog.ts encodeTile), or null for anything else. */
+function decodeBits(text: unknown, chars: number, bytes: number): Uint8Array | null {
+  if (typeof text !== "string" || text.length !== chars) return null;
+  const out = new Uint8Array(bytes);
+  let o = 0;
+  for (let i = 0; i < chars; i += 4) {
+    let group = 0;
+    let pad = 0;
+    for (let j = 0; j < 4; j++) {
+      const c = text[i + j]!;
+      if (c === "=") {
+        pad++;
+        group *= 64;
+        continue;
+      }
+      const v = B64.indexOf(c);
+      if (v < 0 || pad > 0) return null;
+      group = group * 64 + v;
+    }
+    for (let b = 2; b >= pad; b--) {
+      if (o >= bytes) return null;
+      out[o++] = Math.floor(group / 256 ** b) % 256;
+    }
+  }
+  return o === bytes ? out : null;
+}
+
+const UP_DIRS = /^[nesw.]*$/;
+
+/**
+ * A player's chunk's own facts (HeldFacts), or null for a stored chunk,
+ * which carries none. A malformed field fails closed: `known` as nothing
+ * held, `auto` and `upDir` as none.
+ */
+function heldOf(chunk: BuildChunk): ParsedHeld | null {
+  const p = chunk as PlayerChunk;
+  if (p.known === undefined) return null;
+  const x0 = chunk.cx * CHUNK_CELLS;
+  const y0 = chunk.cy * CHUNK_CELLS;
+  if (!Number.isInteger(x0) || !Number.isInteger(y0) || x0 < 0 || y0 < 0 || x0 + CHUNK_CELLS - 1 > MAX_BUILD_COORD || y0 + CHUNK_CELLS - 1 > MAX_BUILD_COORD) return { known: [], auto: [], dirs: [] };
+  const cell = (k: number) => cellId(x0 + (k % CHUNK_CELLS), y0 + (k - (k % CHUNK_CELLS)) / CHUNK_CELLS);
+  const known: number[] = [];
+  const bits = decodeBits(p.known, KNOWN_CHARS, (CHUNK_CELLS * CHUNK_CELLS) / 8);
+  if (bits) for (let k = 0; k < CHUNK_CELLS * CHUNK_CELLS; k++) if ((bits[k >> 3]! >> (k & 7)) & 1) known.push(cell(k));
+  const auto: number[] = [];
+  const edges = p.auto === undefined ? null : decodeBits(p.auto, AUTO_CHARS, (2 * CHUNK_CELLS * CHUNK_CELLS) / 8);
+  if (edges) {
+    for (let bit = 0; bit < 2 * CHUNK_CELLS * CHUNK_CELLS; bit++) {
+      if (!((edges[bit >> 3]! >> (bit & 7)) & 1)) continue;
+      const k = bit >> 1;
+      auto.push(edgeId(x0 + (k % CHUNK_CELLS), y0 + (k - (k % CHUNK_CELLS)) / CHUNK_CELLS, (bit & 1) === 1 ? "w" : "n"));
+    }
+  }
+  const dirs: [number, number][] = [];
+  if (typeof p.upDir === "string" && p.upDir.length === UP_DIR_CHARS && UP_DIRS.test(p.upDir)) {
+    for (let k = 0; k < UP_DIR_CHARS; k++) {
+      const c = p.upDir[k]!;
+      if (c !== ".") dirs.push([cell(k), 1 + COMPASS.indexOf(c as Compass)]);
+    }
+  }
+  return { known, auto, dirs };
+}
+
 function parseChunk(chunk: BuildChunk): ParsedChunk {
   const hit = parsedChunks.get(chunk);
   if (hit) return hit;
@@ -270,12 +373,14 @@ function parseChunk(chunk: BuildChunk): ParsedChunk {
     const id = parseKey(key, true);
     if (id >= 0) edges.push([id, chunk.edges[key]!]);
   }
+  const held = heldOf(chunk);
   const free: FreeWallRef[] = [];
-  if (Array.isArray(chunk.walls)) for (const wall of chunk.walls) if (validFreeWall(wall)) free.push({ cx: chunk.cx, cy: chunk.cy, wall });
+  // A held chunk's free walls are the server's pieces, whose cut ends lie off the lattice, so they take the piece path.
+  if (Array.isArray(chunk.walls)) for (const wall of chunk.walls) if (held ? validPiece(wall) : validFreeWall(wall)) free.push({ cx: chunk.cx, cy: chunk.cy, wall });
   const cells = { ids: Int32Array.from(ids), codes: Uint8Array.from(terrains, terrainCode) };
   const ground = reliefOf(chunk, chunkHeights(chunk), 0);
   const marks = reliefOf(chunk, markCodes(chunkMarks(chunk)), DOT);
-  const parsed = { cells, terrains, edges, free: sortFree(free), ground, marks, box: extent([cells], [edges], [ground], [marks]) };
+  const parsed = { cells, terrains, edges, free: sortFree(free), ground, marks, box: extent([cells], [edges], [ground], [marks], held?.auto), held };
   parsedChunks.set(chunk, parsed);
   return parsed;
 }
@@ -298,6 +403,7 @@ export function indexBuild(chunks: Iterable<BuildChunk>): BuildIndex {
   const free: FreeWallRef[] = [];
   const ground = new Map<number, number>();
   const marks = new Map<number, StairMark>();
+  let held: HeldFacts | undefined;
   for (const chunk of chunks) {
     const parsed = parseChunk(chunk);
     for (let i = 0; i < parsed.cells.ids.length; i++) cells.set(parsed.cells.ids[i]!, parsed.terrains[i]!);
@@ -305,8 +411,14 @@ export function indexBuild(chunks: Iterable<BuildChunk>): BuildIndex {
     free.push(...parsed.free);
     for (let i = 0; i < parsed.ground.ids.length; i++) ground.set(parsed.ground.ids[i]!, parsed.ground.values[i]!);
     for (let i = 0; i < parsed.marks.ids.length; i++) marks.set(parsed.marks.ids[i]!, String.fromCharCode(parsed.marks.values[i]!) as StairMark);
+    if (parsed.held) {
+      held ??= { known: new Set(), auto: new Set(), dirs: new Map() };
+      for (const id of parsed.held.known) held.known.add(id);
+      for (const id of parsed.held.auto) held.auto.add(id);
+      for (const [id, d] of parsed.held.dirs) held.dirs.set(id, d);
+    }
   }
-  return { cells, edges, free: sortFree(free), ground, marks };
+  return { cells, edges, free: sortFree(free), ground, marks, ...(held ? { held } : {}) };
 }
 
 /*
@@ -326,6 +438,8 @@ type BuildSource = {
   ground: readonly CellValues[];
   marks: readonly CellValues[];
   box: Box | null;
+  /** A player's held build's facts, or null for a stored build, whose walls the scene's rule derives. */
+  held: HeldFacts | null;
 };
 
 function valuesOf<V>(map: ReadonlyMap<number, V> | undefined, code: (v: V) => number): CellValues[] {
@@ -352,16 +466,23 @@ function sourceOfIndex(build: BuildIndex): BuildSource {
   const edges = [[...build.edges]];
   const ground = valuesOf(build.ground, (v) => v);
   const marks = valuesOf(build.marks, (m) => m.charCodeAt(0));
-  return { cells, edges, free: build.free, ground, marks, box: extent(cells, edges, ground, marks) };
+  return { cells, edges, free: build.free, ground, marks, box: extent(cells, edges, ground, marks, build.held?.auto), held: build.held ?? null };
 }
 
 function sourceOfChunks(chunks: readonly BuildChunk[]): BuildSource {
   const parsed = [...chunks].sort(byPosition).map(parseChunk);
   const free: FreeWallRef[] = [];
   let box: Box | null = null;
+  let held: HeldFacts | null = null;
   for (const p of parsed) {
     for (const f of p.free) free.push(f);
     box = union(box, p.box);
+    if (p.held) {
+      held ??= { known: new Set(), auto: new Set(), dirs: new Map() };
+      for (const id of p.held.known) held.known.add(id);
+      for (const id of p.held.auto) held.auto.add(id);
+      for (const [id, d] of p.held.dirs) held.dirs.set(id, d);
+    }
   }
   const some = (v: CellValues) => v.ids.length > 0;
   return {
@@ -371,6 +492,7 @@ function sourceOfChunks(chunks: readonly BuildChunk[]): BuildSource {
     ground: parsed.map((p) => p.ground).filter(some),
     marks: parsed.map((p) => p.marks).filter(some),
     box,
+    held,
   };
 }
 
@@ -462,6 +584,8 @@ type EdgeGrid = {
   pillars: number[];
   /** Heights, stairs and raised edges, or null for a build with neither heights nor stairs. */
   relief: Relief | null;
+  /** Per cell index, 1 where a held build holds the cell. Null for a stored build, which holds every cell. */
+  known: Uint8Array | null;
 };
 
 /** Ground, stairs and raised edges, by the grid's cell index. */
@@ -474,7 +598,7 @@ type Relief = {
   westRaised: Uint8Array;
 };
 
-const EMPTY_GRID: EdgeGrid = { gx: 0, gy: 0, w: 0, h: 0, north: new Uint8Array(0), west: new Uint8Array(0), drawn: new Map(), pillars: [], relief: null };
+const EMPTY_GRID: EdgeGrid = { gx: 0, gy: 0, w: 0, h: 0, north: new Uint8Array(0), west: new Uint8Array(0), drawn: new Map(), pillars: [], relief: null, known: null };
 
 function edgeGrid(build: BuildSource, rule: AutoWalls, bounds: { w: number; h: number } | null): EdgeGrid {
   if (!build.box) return EMPTY_GRID;
@@ -507,7 +631,26 @@ function edgeGrid(build: BuildSource, rule: AutoWalls, bounds: { w: number; h: n
       }
     }
   }
-  if (rule !== "off") {
+  let known: Uint8Array | null = null;
+  if (build.held) {
+    // A held build's automatic walls are those the server sent for held edges, whatever the cells it holds would make (5.2).
+    for (const id of build.held.auto) {
+      const side = id & 1;
+      const cell = (id - side) / 2;
+      const x = cell % ROW;
+      const y = (cell - x) / ROW;
+      if (x < gx || y < gy || x >= gx + w || y >= gy + h) continue;
+      const grid = side === 1 ? west : north;
+      const k = at(cell);
+      if (grid[k] === 0) grid[k] = AUTO;
+    }
+    known = new Uint8Array(w * h);
+    for (const cell of build.held.known) {
+      const x = cell % ROW;
+      const y = (cell - x) / ROW;
+      if (x >= gx && y >= gy && x < gx + w && y < gy + h) known[at(cell)] = 1;
+    }
+  } else if (rule !== "off") {
     const table = ruleTable(rule);
     const painted = new Uint8Array(w * h);
     for (let k = 0; k < w * h; k++) painted[k] = classOfCode[terrain[k]!]!;
@@ -523,7 +666,7 @@ function edgeGrid(build: BuildSource, rule: AutoWalls, bounds: { w: number; h: n
   const pillars: number[] = [];
   const pillar = terrainCodes.get("pillar");
   if (pillar !== undefined) for (let k = 0; k < w * h; k++) if (terrain[k] === pillar) pillars.push(cellId(gx + (k % w), gy + Math.floor(k / w)));
-  const grid: EdgeGrid = { gx, gy, w, h, north, west, drawn, pillars, relief: null };
+  const grid: EdgeGrid = { gx, gy, w, h, north, west, drawn, pillars, relief: null, known };
   grid.relief = reliefOfGrid(grid, build, terrain, marks, bounds);
   return grid;
 }
@@ -550,22 +693,29 @@ function reliefOfGrid(g: EdgeGrid, build: BuildSource, terrain: Uint8Array, mark
       ground[((id - x) / ROW - gy) * w + (x - gx)] = values[i]!;
     }
   }
+  // A held build raises no edge beside a cell it does not hold: the ground there is unknown, not 0 (5.2).
+  const known = g.known;
   const inScene = (k: number) => {
+    if (known && known[k] !== 1) return false;
     if (!bounds) return true;
     const x = gx + (k % w);
     const y = gy + (k - (k % w)) / w;
     return x >= 0 && y >= 0 && x < bounds.w && y < bounds.h;
   };
-  const directions = stairDirections(
-    {
-      w,
-      h,
-      mark: (k) => (marks !== null && marks[k] !== 0 ? (String.fromCharCode(marks[k]!) as StairMark) : stairsCode !== undefined && terrain[k] === stairsCode ? "a" : "."),
-      ground: (k) => ground[k]!,
-      inScene,
-    },
-    stairList,
-  );
+  // A held build's stairs point where the server says (`upDir`), since the rule reads cells round them it may not hold.
+  const held = build.held;
+  const directions = held
+    ? Uint8Array.from({ length: w * h }, (_, k) => held.dirs.get(cellId(gx + (k % w), gy + (k - (k % w)) / w)) ?? 0)
+    : stairDirections(
+        {
+          w,
+          h,
+          mark: (k) => (marks !== null && marks[k] !== 0 ? (String.fromCharCode(marks[k]!) as StairMark) : stairsCode !== undefined && terrain[k] === stairsCode ? "a" : "."),
+          ground: (k) => ground[k]!,
+          inScene,
+        },
+        stairList,
+      );
   const stairs = new Uint8Array(w * h);
   const northLinked = new Uint8Array(w * h);
   const westLinked = new Uint8Array(w * h);
@@ -634,7 +784,8 @@ class CandidateList {
   #tops = new Int16Array(256);
   #origin = new Int32Array(256);
   #n = 0;
-  add(ax: number, ay: number, bx: number, by: number, tags: number, free: boolean, top = 0, origin = NO_ORIGIN): void {
+  /** `free` as segments.ts Candidates has it: 0 a grid segment, 1 a stored free wall, PIECE a held build's piece. */
+  add(ax: number, ay: number, bx: number, by: number, tags: number, free: number, top = 0, origin = NO_ORIGIN): void {
     if (this.#n === this.#tags.length) {
       const grow = <T extends Float64Array | Uint8Array | Int16Array | Int32Array>(a: T): T => {
         const b = new (a.constructor as new (n: number) => T)(a.length * 2);
@@ -653,7 +804,7 @@ class CandidateList {
     this.#xy[4 * k + 2] = bx;
     this.#xy[4 * k + 3] = by;
     this.#tags[k] = tags;
-    this.#free[k] = free ? 1 : 0;
+    this.#free[k] = free;
     this.#tops[k] = top;
     this.#origin[k] = origin;
   }
@@ -708,14 +859,14 @@ function gridCandidates(g: EdgeGrid, out: CandidateList): void {
   }
   const wall = tagsOf(AUTO_WALL);
   const emitRun = (run: number, ax: number, ay: number, bx: number, by: number) => {
-    if (run === WALL_RUN) out.add(ax, ay, bx, by, wall, false);
-    else out.add(ax, ay, bx, by, raisedTags((run - 2) % 2 === 1 ? LEDGED : CONNECTED), false, (run - 2 - ((run - 2) % 2)) / 2 - 32768);
+    if (run === WALL_RUN) out.add(ax, ay, bx, by, wall, 0);
+    else out.add(ax, ay, bx, by, raisedTags((run - 2) % 2 === 1 ? LEDGED : CONNECTED), 0, (run - 2 - ((run - 2) % 2)) / 2 - 32768);
   };
   const emitSingle = (k: number, side: 0 | 1, ax: number, ay: number, bx: number, by: number) => {
     const raised = relief ? (side === 0 ? relief.northRaised[k]! : relief.westRaised[k]!) : 0;
     const x = gx + (k % w);
     const y = gy + (k - (k % w)) / w;
-    out.add(ax, ay, bx, by, tagsOf(drawn.get(k * 2 + side)!) | raisedTags(raised), false, raised === 0 ? 0 : top(k, side === 0 ? k - w : k - 1), edgeId(x, y, side === 0 ? "n" : "w"));
+    out.add(ax, ay, bx, by, tagsOf(drawn.get(k * 2 + side)!) | raisedTags(raised), 0, raised === 0 ? 0 : top(k, side === 0 ? k - w : k - 1), edgeId(x, y, side === 0 ? "n" : "w"));
   };
   for (let j = 0; j < h; j++) {
     const y = gy + j;
@@ -766,10 +917,10 @@ function pillarCandidates(ids: readonly number[], out: CandidateList): void {
   for (const id of ids) {
     const x = id % ROW;
     const y = (id - x) / ROW;
-    out.add(x + lo, y + lo, x + hi, y + lo, PILLAR_TAGS, false);
-    out.add(x + hi, y + lo, x + hi, y + hi, PILLAR_TAGS, false);
-    out.add(x + hi, y + hi, x + lo, y + hi, PILLAR_TAGS, false);
-    out.add(x + lo, y + hi, x + lo, y + lo, PILLAR_TAGS, false);
+    out.add(x + lo, y + lo, x + hi, y + lo, PILLAR_TAGS, 0);
+    out.add(x + hi, y + lo, x + hi, y + hi, PILLAR_TAGS, 0);
+    out.add(x + hi, y + hi, x + lo, y + hi, PILLAR_TAGS, 0);
+    out.add(x + lo, y + hi, x + lo, y + lo, PILLAR_TAGS, 0);
   }
 }
 
@@ -876,7 +1027,7 @@ export class WallSet {
       const bx = s.xy[4 * k + 2]!;
       const by = s.xy[4 * k + 3]!;
       const tags = s.tags[k]!;
-      const free = s.free[k] === 1;
+      const free = s.free[k]!;
       const top = this.storedTops[k]!;
       const origin = this.#origin[k]!;
       const along = ax === bx && x0 < ax && ax < x1 ? "y" : ay === by && y0 < ay && ay < y1 ? "x" : null;
@@ -923,7 +1074,7 @@ export class WallSet {
     const out = new CandidateList();
     for (let k = 0; k < s.n; k++) {
       const parts = keep(s.xy[4 * k]!, s.xy[4 * k + 1]!, s.xy[4 * k + 2]!, s.xy[4 * k + 3]!);
-      for (let i = 0; i + 3 < parts.length; i += 4) out.add(parts[i]!, parts[i + 1]!, parts[i + 2]!, parts[i + 3]!, s.tags[k]!, s.free[k] === 1, this.storedTops[k]!, this.#origin[k]!);
+      for (let i = 0; i + 3 < parts.length; i += 4) out.add(parts[i]!, parts[i + 1]!, parts[i + 2]!, parts[i + 3]!, s.tags[k]!, s.free[k]!, this.storedTops[k]!, this.#origin[k]!);
     }
     return new WallSet(version, this.#grid, this.free, out.done(), this.bounds);
   }
@@ -944,7 +1095,7 @@ export class WallSet {
     if (this.count.over) {
       const s = this.stored;
       const keep: number[] = [];
-      for (let k = 0; k < s.n; k++) if (s.free[k] === 0) keep.push(k);
+      for (let k = 0; k < s.n; k++) if (s.free[k] !== 1) keep.push(k);
       const xy = new Float64Array(keep.length * 4);
       keep.forEach((k, m) => xy.set(s.xy.subarray(4 * k, 4 * k + 4), 4 * m));
       return (this.#pieces = { xy, tags: Uint8Array.from(keep, (k) => s.tags[k]!), n: keep.length });
@@ -972,7 +1123,7 @@ export class WallSet {
 
   /** The stored segments by cell, for tests of what touches what. */
   get storedIndex(): SegmentIndex {
-    return (this.#index ??= new SegmentIndex(this.stored.xy, this.stored.tags));
+    return (this.#index ??= new SegmentIndex(this.stored.xy, this.stored.tags, this.stored.free));
   }
 
   /** The wall, door or window stored segment `k` is on its own (a drawn edge or a free wall), or null for a run, a pillar side or a raised edge. */
@@ -1117,7 +1268,9 @@ function candidatesOf(build: BuildSource, grid: EdgeGrid): { stored: Candidates;
   const out = new CandidateList();
   gridCandidates(grid, out);
   pillarCandidates(grid.pillars, out);
-  build.free.forEach(({ wall }, i) => out.add(wall.a[0], wall.a[1], wall.b[0], wall.b[1], tagsOf(wall.f), true, 0, -2 - i));
+  // A held build's free walls are pieces, which the exact split and its count leave to a plain pass (segments.ts PIECE).
+  const kind = build.held ? PIECE : 1;
+  build.free.forEach(({ wall }, i) => out.add(wall.a[0], wall.a[1], wall.b[0], wall.b[1], tagsOf(wall.f), kind, 0, -2 - i));
   return out.done();
 }
 
@@ -1489,4 +1642,63 @@ export function floodRoom(
     visit(x, y - 1, edgeId(x, y, "n"));
   }
   return { cells, truncated };
+}
+
+// ---------------------------------------------------------------------------
+// The device's two tests of a piece (docs/design-v1-map-discovery.md 5.2)
+
+/**
+ * How far a piece may lie from the exact wall it was cut from: every point
+ * of the exact stretch lies within 2/10000 cell of the piece sent, since
+ * rounding moves each end at most 1/10000 cell per coordinate (decision 2).
+ */
+export const PIECE_BAND = 2 / 10_000;
+/** How far from its ends a piece's band surely holds the exact wall: twice the band, past the rounding at either end. */
+export const PIECE_END_MARGIN = 4 / 10_000;
+
+/**
+ * The preview test (ASTRA-30): whether a core of half sides (hx, hy) swept
+ * from P to Q comes within PIECE_BAND of the piece AB, its ends included.
+ * For what has no server check after it (area rays, caught lists, rings,
+ * walking rulers, a drag's drawn path, words shown before sending), so a
+ * T-junction on a tilted piece stays closed and a crossing that rounds to
+ * a corner touch still blocks. The core grows by the band on each side,
+ * which holds every point within the band of the exact sweep.
+ */
+export function pieceTouches(px: number, py: number, qx: number, qy: number, hx: number, hy: number, ax: number, ay: number, bx: number, by: number): boolean {
+  return sweptTouches(px, py, qx, qy, hx + PIECE_BAND, hy + PIECE_BAND, ax, ay, bx, by);
+}
+
+/**
+ * The gate test (ASTRA-34): whether the swept core crosses the piece's
+ * band clear through, more than PIECE_END_MARGIN from its ends, where the
+ * exact wall surely blocks: it meets both lines PIECE_BAND either side of
+ * the piece within that span. The exact wall runs the whole span inside
+ * the band, and a convex sweep meeting both of the band's sides there
+ * holds a segment from one to the other, which crosses it. For an action
+ * sent to the server, so the device never refuses, shortens or withholds
+ * what the exact walls allow: within the band it sends, and the server's
+ * landing decides. The offsets are rounded doubles, kept a hair outside
+ * the band, so rounding only makes the test pass more.
+ */
+export function pieceBlocks(px: number, py: number, qx: number, qy: number, hx: number, hy: number, ax: number, ay: number, bx: number, by: number): boolean {
+  const ex = bx - ax;
+  const ey = by - ay;
+  const len = Math.hypot(ex, ey);
+  if (!(len > 2 * PIECE_END_MARGIN)) return false;
+  const ux = ex / len;
+  const uy = ey / len;
+  const off = PIECE_BAND * (1 + 1e-9);
+  const sx = ax + ux * PIECE_END_MARGIN;
+  const sy = ay + uy * PIECE_END_MARGIN;
+  const tx = bx - ux * PIECE_END_MARGIN;
+  const ty = by - uy * PIECE_END_MARGIN;
+  const nx = -uy * off;
+  const ny = ux * off;
+  return sweptTouches(px, py, qx, qy, hx, hy, sx + nx, sy + ny, tx + nx, ty + ny) && sweptTouches(px, py, qx, qy, hx, hy, sx - nx, sy - ny, tx - nx, ty - ny);
+}
+
+/** Whether stored segment `k` of a set is a held build's piece, which the device tests by pieceTouches or pieceBlocks rather than exactly. */
+export function isPiece(walls: WallSet, k: number): boolean {
+  return walls.stored.free[k] === PIECE;
 }
