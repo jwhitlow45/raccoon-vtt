@@ -11,7 +11,7 @@ import { decodeTile, getBit } from "#shared/rules/fog.ts";
 import { DM, env, P1, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
 import { chunkCharge, MEMORY_CAP } from "./memorySize.ts";
-import { forgetAllOps, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
+import { forgetAllOps, layerKey, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 
 /**
  * The map step (docs/design-v1-map-discovery.md 5.3), batch by batch as the
@@ -149,6 +149,40 @@ describe("the map step", () => {
       const widened = batch(left, [{ t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,4"] }]).state;
       assert.equal(party(widened)?.edges?.["2,4,w"], "auto");
       assert.equal(edgeShown(widened, "2,4,w"), "auto");
+    });
+  });
+
+  test("a change of the automatic walls rule out of sight is remembered, with no memory before it (MD3-ASTRA-1)", () => {
+    withCellVision(() => {
+      const left = leftCrypt();
+      assert.equal(party(left), undefined, "nothing remembered yet");
+      assert.equal(edgeShown(left, "2,4,w"), "auto");
+      const off = batch(left, [{ t: "scene.update", sceneId: "s1", patch: { autoWalls: "off" } }]);
+      assert.equal(off.remember.length, 1, "a scene change alone runs the step");
+      assert.equal(party(off.state)?.edges?.["2,4,w"], "auto");
+      assert.equal(edgeShown(off.state, "2,4,w"), "auto", "their map keeps the wall they saw");
+      // The DM's build has none now.
+      assert.equal(projectState(off.state, DM, { sceneId: "s1" }).scenes.s1?.autoWalls, "off");
+      // The ask's estimate and the fail-closed forgetting read the change too.
+      const r = applyOp(left, { t: "scene.update", sceneId: "s1", patch: { autoWalls: "off" } }, DM, env(50));
+      assert.ok(r.ok);
+      assert.ok((memoryGrowth(left, r.state, r.touched).get(layerKey("s1", null)) ?? 0) > 0, "the estimate counts it");
+      assert.deepEqual(forgetAllOps({ before: left, after: r.state, touched: r.touched }).map((o) => o.sceneId), ["s1"]);
+    });
+  });
+
+  test("so is one on a played scene that is not the players' scene, where nobody looks", () => {
+    withCellVision(() => {
+      let s = crypt();
+      s.scenes.s2 = { ...s.scenes.s1!, id: "s2", name: "Cellar", order: 1 };
+      const cells: Record<string, "stone"> = {};
+      for (let y = 2; y < 6; y++) for (let x = 2; x < 6; x++) cells[`${x},${y}`] = "stone";
+      s.buildChunks = { ...s.buildChunks, [chunkKey("s2", 0, 0)]: { sceneId: "s2", cx: 0, cy: 0, rev: 1, cells, edges: {} } };
+      lift(s, "party", { x: 0, y: 0, w: 8, h: 8 }, "s2");
+      s.playedScenes = { ...s.playedScenes, s2: { sceneId: "s2", rev: 0 } };
+      s = batch(s, []).state;
+      const off = batch(s, [{ t: "scene.update", sceneId: "s2", patch: { autoWalls: "off" } }]).state;
+      assert.equal(off.memory?.[chunkKey("s2", 0, 0)]?.edges?.["2,3,w"], "auto");
     });
   });
 

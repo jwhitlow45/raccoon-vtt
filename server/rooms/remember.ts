@@ -87,7 +87,7 @@ export function mapStepOps(input: MapStepInput): OpOf<"sys.remember">[] {
     const touch = touched.get(sceneId) ?? NOTHING_TOUCHED;
     const doors = (input.doors ?? []).filter((d) => d.sceneId === sceneId);
     // Most batches move a creature: a scene they wrote nothing on, whose live ground cannot have grown, has nothing to do.
-    const quiet = touch.chunks.size === 0 && touch.marks.length === 0 && touch.memory.size === 0 && doors.length === 0;
+    const quiet = touch.chunks.size === 0 && !touch.scene && touch.marks.length === 0 && touch.memory.size === 0 && doors.length === 0;
     if (quiet && !input.everyLayer && (!memory.scenes.has(sceneId) || !liveMayGrow(input.before, input.after, sceneId))) continue;
     const op = sceneStep(input, scene, touch, doors, memory, memoryBefore);
     if (op) out.push(op);
@@ -153,14 +153,34 @@ function liveMayGrow(before: RoomState, after: RoomState, sceneId: string): bool
 // What the batch changed
 
 /** What the batch wrote on one scene: chunk positions, labels and stamps, and the layers whose memory it wrote. */
-type SceneTouch = { chunks: Set<string>; marks: { field: MarkField; id: string }[]; memory: Set<Layer> };
-const NOTHING_TOUCHED: SceneTouch = { chunks: new Set(), marks: [], memory: new Set() };
+/** `scene` when the op changed a field of the scene that players' chunks read (sceneShapeChanged). */
+type SceneTouch = { chunks: Set<string>; marks: { field: MarkField; id: string }[]; memory: Set<Layer>; scene: boolean };
+const NOTHING_TOUCHED: SceneTouch = { chunks: new Set(), marks: [], memory: new Set(), scene: false };
+
+/**
+ * Whether a scene changed a field players' chunks read beside the build
+ * (MD2's chunk memo keys the same): its bounds, its automatic walls rule,
+ * its grid shape, fog and vision. Such a change can change what every
+ * position shows, out of sight too, so the step reads every position.
+ */
+function sceneShapeChanged(was: Scene | undefined, now: Scene | undefined): boolean {
+  if (!was || !now) return false;
+  return (
+    was.bounds.w !== now.bounds.w ||
+    was.bounds.h !== now.bounds.h ||
+    autoWallsOf(was) !== autoWallsOf(now) ||
+    (was.gridShape ?? "squares") !== (now.gridShape ?? "squares") ||
+    was.fogEnabled !== now.fogEnabled ||
+    (was.vision?.on === true) !== (now.vision?.on === true) ||
+    (was.vision?.perPlayer === true) !== (now.vision?.perPlayer === true)
+  );
+}
 
 function touchedByScene(before: RoomState, after: RoomState, touched: readonly EntityKey[]): Map<string, SceneTouch> {
   const out = new Map<string, SceneTouch>();
   const of = (sceneId: string) => {
     let t = out.get(sceneId);
-    if (!t) out.set(sceneId, (t = { chunks: new Set(), marks: [], memory: new Set() }));
+    if (!t) out.set(sceneId, (t = { chunks: new Set(), marks: [], memory: new Set(), scene: false }));
     return t;
   };
   const marks = new Set<string>();
@@ -168,6 +188,9 @@ function touchedByScene(before: RoomState, after: RoomState, touched: readonly E
     const parsed = parseKey(key);
     if (!parsed) continue;
     if (parsed.kind === "chunk") of(parsed.sceneId).chunks.add(`${parsed.cx},${parsed.cy}`);
+    else if (parsed.kind === "scene") {
+      if (sceneShapeChanged(before.scenes[parsed.id], after.scenes[parsed.id])) of(parsed.id).scene = true;
+    }
     else if (parsed.kind === "memory") of(parsed.sceneId).memory.add(null);
     else if (parsed.kind === "memoryBy") of(parsed.sceneId).memory.add(parsed.memberId);
     else if (parsed.kind === "label" || parsed.kind === "stamp") marks.add(key);
@@ -230,7 +253,7 @@ function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: Sce
   const grid = sceneGrid(scene);
   const hex = isHex(grid);
   const positions = new Set<string>();
-  if (!was || autoWallsOf(was) !== autoWallsOf(scene) || was.bounds.w !== scene.bounds.w || was.bounds.h !== scene.bounds.h) {
+  if (!was || touch.scene || autoWallsOf(was) !== autoWallsOf(scene) || was.bounds.w !== scene.bounds.w || was.bounds.h !== scene.bounds.h) {
     for (const { cx, cy } of chunkPositions(scene)) positions.add(`${cx},${cy}`);
   }
   for (const at of touch.chunks) {
@@ -260,7 +283,7 @@ function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: Sce
       }
     }
   }
-  if (!hex && touch.chunks.size > 0) stairsChanged(out, before, after, scene);
+  if (!hex && (touch.chunks.size > 0 || touch.scene)) stairsChanged(out, before, after, scene);
   for (const { field, id } of touch.marks) {
     const b = shownMark(before, field, id, sceneId);
     const a = shownMark(after, field, id, sceneId);
@@ -856,7 +879,7 @@ export function memoryGrowth(before: RoomState, after: RoomState, touched: reado
   const byScene = touchedByScene(before, after, touched);
   for (const [sceneId, touch] of byScene) {
     const scene = after.scenes[sceneId];
-    if (!scene || !keepsMemory(scene) || (touch.chunks.size === 0 && touch.marks.length === 0)) continue;
+    if (!scene || !keepsMemory(scene) || (touch.chunks.size === 0 && !touch.scene && touch.marks.length === 0)) continue;
     const changed = changedOn(before, after, scene, touch);
     if (changed.cells.length + changed.walls.length + changed.marks.length === 0) continue;
     const grid = sceneGrid(scene);
