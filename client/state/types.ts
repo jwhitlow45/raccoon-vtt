@@ -540,7 +540,18 @@ export type RoomView = {
    * Undo move.
    */
   trapped?: readonly number[];
+  /**
+   * The DM's builder ops the server asked about before they push players'
+   * remembered map past its cap (docs/design-v1-map-discovery.md 5.3,
+   * FORGET_ASK), for the builder's forget question to answer once per
+   * gesture: each refused op with its undo group, and once the DM said
+   * yes, the `n`s it sent again with `forget`, until all are answered.
+   */
+  forgetAsk?: ForgetAsk | null;
 };
+
+/** One gesture's ops waiting on the forget question (RoomView.forgetAsk). */
+export type ForgetAsk = { asks: readonly { n: number; op: ClientOp; group?: string }[]; sending?: readonly number[] };
 
 /** How many refused op numbers RoomView.refused keeps. One `ev` rarely refuses more than a handful. */
 export const MAX_REFUSED = 20;

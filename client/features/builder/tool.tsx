@@ -29,6 +29,7 @@ import { tapFreeWall } from "./freeWallTap.ts";
 import { edgeAt, erasable, terrainAt } from "./query.ts";
 import { labelUnder, tapMapLabel } from "./labelTap.ts";
 import { builderSlot, resetGesture } from "./store.ts";
+import { gestureCells, partySeesAny } from "./inSight.ts";
 import { withStampMode } from "./stamps/pointer.ts";
 import { withHeightMode } from "./heights/pointer.ts";
 import { withLightMode } from "../lights/pointer.ts";
@@ -39,6 +40,19 @@ import { TOOL_ORDER } from "../toolbarOrder.ts";
 export const PAINT_FLUSH_MS = 150;
 /** A tap this close to the first corner closes a polygon: half a 44 px target. */
 const CLOSE_PX = 22;
+
+/**
+ * Marks the option bar's note while the party's sight meets a cell of the
+ * gesture in progress (inSight.ts), kept until the next press, so it stays
+ * in view after a stroke ends.
+ */
+function markSight(ctx: ToolContext): void {
+  const { store } = ctx.scope.get(builderSlot);
+  const s = store.getState();
+  if (s.inSight) return;
+  const view = ctx.getState().view;
+  if (view && partySeesAny(view, ctx.scene, gestureCells(s))) store.setState({ inSight: true });
+}
 
 function isTap(ctx: ToolContext, p: ToolPointer): boolean {
   const downAt = ctx.scope.get(builderSlot).gesture.downAt;
@@ -195,7 +209,7 @@ export const builderTool: ToolDef = {
       const { store: builderState, gesture } = ctx.scope.get(builderSlot);
       gesture.downAt = { screen: p.screen, world: p.world };
       const { mode, brush } = builderState.getState();
-      builderState.setState({ note: null });
+      builderState.setState({ note: null, inSight: false });
       if (mode === "paint" || mode === "erase") {
         endStroke(ctx, true);
         const seen = new Set<string>();
@@ -216,6 +230,7 @@ export const builderTool: ToolDef = {
         const hit = labelUnder(ctx, p.world);
         gesture.labelGrab = hit ? { id: hit.id, dx: p.world.x - hit.x, dy: p.world.y - hit.y } : null;
       }
+      markSight(ctx);
     },
     move(p, ctx) {
       const { store: builderState, gesture } = ctx.scope.get(builderSlot);
@@ -235,9 +250,12 @@ export const builderTool: ToolDef = {
         if (!label) return;
         builderState.setState({ labelMove: { id: label.id, x: p.world.x - grab.dx, y: p.world.y - grab.dy } });
       }
+      markSight(ctx);
     },
     up(p, ctx) {
       const { store: builderState, gesture } = ctx.scope.get(builderSlot);
+      // Before the gesture's cells are sent and cleared.
+      markSight(ctx);
       const s = builderState.getState();
       const tap = isTap(ctx, p);
       if (s.mode === "paint" || s.mode === "erase") {
@@ -270,6 +288,8 @@ export const builderTool: ToolDef = {
         } else if (tap) tapLabel(p, ctx);
         gesture.labelGrab = null;
       }
+      // A shape room's corner is added on the tap itself.
+      markSight(ctx);
       gesture.downAt = null;
     },
     cancel(ctx) {

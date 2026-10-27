@@ -5,6 +5,7 @@ import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, projectLogEntry, type ProjectedState } from "#shared/project.ts";
 import {
   clientOpSchema,
+  FORGET_ASK,
   type ClientMessage,
   type ClientOp,
   type EphEvent,
@@ -207,6 +208,13 @@ export type RoomUi = {
   holdToast(id: number, held: boolean): void;
   /** Hides the X-card with this id on this device (features/xcard). */
   dismissXcard(id: number): void;
+  /**
+   * The DM's answer to the forget question (RoomView.forgetAsk): yes sends
+   * each op again with `forget`, under its own undo group, and no lets
+   * them go, as refused, and takes back what the server took of their
+   * gestures.
+   */
+  answerForget(yes: boolean): void;
 };
 
 export type RoomStore = {
@@ -422,6 +430,13 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   const answerTimer = new Timer(clock);
   const sweepTimer = new Timer(clock);
   let toastSeq = 0;
+  /**
+   * The newest op the server took of each recent undo group, so a no to the
+   * forget question can take back the part of a gesture that went before
+   * the asked op: a big rectangle room goes as several bands, the first of
+   * which may fit (`answerForget`).
+   */
+  const takenInGroup = new Map<string, number>();
   let disposed = false;
 
   const get = () => store.getState();
@@ -621,9 +636,30 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     dismissXcard(id) {
       if ((get().xcardDismissed ?? 0) < id) store.setState({ xcardDismissed: id });
     },
+    answerForget(yes) {
+      const ask = get().forgetAsk;
+      if (!ask || ask.sending) return;
+      if (!yes) {
+        store.setState({ forgetAsk: null });
+        // The gesture stays unmade whole: its ops the server took are one undo step, taken back quietly.
+        const groups = new Set(ask.asks.flatMap((a) => (a.group !== undefined ? [a.group] : [])));
+        for (const group of groups) {
+          const n = takenInGroup.get(group);
+          if (n !== undefined) room.dispatch({ t: "undo", of: n }, { quiet: true });
+        }
+        return;
+      }
+      const sending: number[] = [];
+      for (const { op, group } of ask.asks) {
+        if (op.t === "undo" || op.t === "redo") continue;
+        const n = room.dispatch({ ...op, forget: true } as ClientOp, group !== undefined ? { group } : undefined);
+        if (n !== null) sending.push(n);
+      }
+      store.setState({ forgetAsk: sending.length > 0 ? { asks: ask.asks, sending } : null });
+    },
   };
 
-  return {
+  const room: RoomStore = {
     store,
     clientId,
     ui,
@@ -729,10 +765,19 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const renew = (text: string, tone: Toast["tone"]) => {
         toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone });
       };
+      // Builder ops the server asked about (FORGET_ASK), one question for all of them, and a question answered once its ops are.
+      const asks: { n: number; op: ClientOp; group?: string }[] = [];
+      let forgetAsk = s.forgetAsk ?? null;
+      if (forgetAsk?.sending && forgetAsk.sending.every((n) => settled.has(n) || !pending.some((p) => p.n === n))) forgetAsk = null;
       if (settled.size > 0) {
         const restored = new Map((msg.restored ?? []).map((r) => [r.n, r.what]));
         for (const n of msg.acks ?? []) {
           const sent = pending.find((p) => p.n === n);
+          if (sent?.group !== undefined) {
+            takenInGroup.delete(sent.group);
+            takenInGroup.set(sent.group, n);
+            if (takenInGroup.size > 32) takenInGroup.delete(takenInGroup.keys().next().value!);
+          }
           const op = sent?.op;
           if ((op?.t !== "undo" && op?.t !== "redo") || sent?.quiet) continue;
           const answer = undoAnswer(op.t, { what: restored.get(n) });
@@ -742,6 +787,16 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           const sent = pending.find((p) => p.n === r.n);
           const op = sent?.op;
           if (!op || sent.quiet) continue;
+          if (r.code === "forget" && (op.t === "undo" || op.t === "redo")) {
+            // The undo toast's confirm (docs/design-v1-map-discovery.md 5.3): a yes names the refused step's n, which the server checks still heads the stack.
+            const again = { ...op, forget: r.n };
+            toasts = withToast(toasts.filter((t) => t.text !== FORGET_ASK), { id: ++toastSeq, text: FORGET_ASK, tone: "info", action: { label: op.t === "undo" ? "Forget and undo" : "Forget and redo", run: () => void room.dispatch(again) } });
+            continue;
+          }
+          if (r.code === "forget") {
+            asks.push({ n: r.n, op, ...(sent.group !== undefined ? { group: sent.group } : {}) });
+            continue;
+          }
           if (op.t === "undo" || op.t === "redo") {
             const answer = undoAnswer(op.t, { refused: r.message });
             renew(answer.text, answer.tone);
@@ -772,7 +827,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         sceneId = confirmed.meta.playerSceneId;
         ephemeral = EMPTY_EPHEMERAL;
       }
-      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeral, sceneId });
+      if (asks.length > 0) forgetAsk = { asks: [...(forgetAsk && !forgetAsk.sending ? forgetAsk.asks : []), ...asks] };
+      commit({ confirmed, seq: msg.seq, pending, refused, trapped, toasts, ephemeral, sceneId, forgetAsk });
       const refusedNow = new Map((msg.rejects ?? []).map((r) => [r.n, { code: r.code, message: r.message, text: refusalText(r.code, r.message) }]));
       tell(
         s.pending.filter((p) => settled.has(p.n)),
@@ -859,4 +915,5 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       sweepTimer.clear();
     },
   };
+  return room;
 }

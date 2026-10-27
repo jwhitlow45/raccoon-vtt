@@ -13,6 +13,7 @@ import { lightModeHint, sceneHasLights } from "./lightTap.ts";
 import { BUILD_MODES, pickBuildMode, TERRAINS, useBuilderStore, type BuildMode, type EdgeKind } from "./store.ts";
 import { TERRAIN_SWATCHES } from "./textures.ts";
 import { closePolygon } from "./tool.tsx";
+import { BUILD_IN_SIGHT } from "./inSight.ts";
 import { useStampSlots } from "./stamps/StampOptions.tsx";
 import { useHeightHint, useHeightSlots } from "./heights/HeightOptions.tsx";
 import { LightChip } from "../lights/LightOptions.tsx";
@@ -90,6 +91,7 @@ export default function BuilderOptions() {
       labelSize: b.labelSize,
       poly: b.poly,
       note: b.note,
+      inSight: b.inSight,
     })),
   );
   const sceneId = useRoomView((v) => v.sceneId);
@@ -272,7 +274,7 @@ export default function BuilderOptions() {
 
   return (
     <div ref={row} style={{ display: "contents" }}>
-      <OptionsStrip tool="Map builder" task={corners || stamped} line={{ tone: s.note ? "warning" : "hint", content: s.note ?? hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain) }} slots={slots} />
+      <OptionsStrip tool="Map builder" task={corners || stamped} line={{ tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain)) }} slots={slots} />
       {s.mode === "stamp" ? stamps.picker : null}
     </div>
   );

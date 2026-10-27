@@ -173,6 +173,8 @@ export function createPreview(source: PreviewSource, memberId: string, options: 
     },
     // The preview's socket is read only, so its X-card is the DM's own room's to answer.
     dismissXcard: () => {},
+    // A preview sends nothing, so the server never asks it about forgetting.
+    answerForget: () => {},
   };
 
   /**

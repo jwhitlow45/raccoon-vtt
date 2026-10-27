@@ -7,6 +7,7 @@ import { browserEnv, createRoomSocket, roomSocketUrl } from "../state/socket.ts"
 import { createRoomStore, type RoomStore } from "../state/store.ts";
 import type { RoomActions, You } from "../state/types.ts";
 import { XCardHost } from "../features/xcard/XCardHost.tsx";
+import { ForgetQuestion } from "../features/builder/ForgetQuestion.tsx";
 import { Room } from "./Room.tsx";
 import { RoomTree } from "./RoomTree.tsx";
 
@@ -70,6 +71,7 @@ export default function LiveRoom(props: { roomId: string; me: Me }) {
     <RoomTree room={live.room} actions={live.actions}>
       <Room />
       <XCardHost />
+      <ForgetQuestion />
     </RoomTree>
   );
 }

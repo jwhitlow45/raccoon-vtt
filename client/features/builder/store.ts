@@ -36,6 +36,8 @@ export type BuilderState = {
   labelMove: { id: string; x: number; y: number } | null;
   /** A short note for the option bar, such as why a tap did nothing. */
   note: string | null;
+  /** The party's sight met a cell of the gesture since the last press, so the option bar says they see it as it is built (inSight.ts). */
+  inSight: boolean;
 };
 
 export const TERRAINS: readonly { value: TerrainId; label: string }[] = [
@@ -114,6 +116,7 @@ export const builderSlot = scopeSlot(
       run: [],
       labelMove: null,
       note: null,
+      inSight: false,
     })),
     gesture: { stroke: null, downAt: null, labelGrab: null } as BuilderGesture,
   }),
@@ -137,5 +140,5 @@ export function useBuilderStore(): StoreApi<BuilderState> {
 
 /** Ends whatever gesture was in progress, keeping the DM's choices. */
 export function resetGesture(store: StoreApi<BuilderState>): void {
-  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null });
+  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false });
 }

@@ -4,7 +4,7 @@ import type { RoomState, Viewer } from "#shared/model.ts";
 import { BLOCK_SAVES_TOO_FAST, checkLimits, LIMITS } from "#shared/limits.ts";
 import { LEDGE_IN_THE_WAY_BACK, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
-import type { ClientOp, ServerMessage } from "#shared/protocol.ts";
+import { FORGET_ASK, type ClientOp, type ServerMessage } from "#shared/protocol.ts";
 import { actor, character, companionBlock, DM, entry, P1, P2, room, template, token } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
@@ -1077,5 +1077,76 @@ describe("refusal toasts", () => {
 
     assert.equal(refusalText("quota", ""), "Not saved.");
     assert.equal(refusalText("invalid", "the token is gone."), "Not saved. The token is gone.");
+  });
+});
+
+describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
+  const paint = (x: number): ClientOp => ({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: [`${x},0`] });
+
+  test("a builder gesture asked about waits on one question, with no toast, and a yes sends its ops again with forget under their group", () => {
+    const s = setup(room());
+    s.connect();
+    const a = s.room.dispatch(paint(1), { group: "g1" })!;
+    const b = s.room.dispatch(paint(2), { group: "g1" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: a, code: "forget", message: FORGET_ASK }, { n: b, code: "forget", message: FORGET_ASK }] });
+    assert.deepEqual(s.state().forgetAsk?.asks.map((x) => x.n), [a, b]);
+    assert.ok(!s.state().toasts.some((t) => t.text.includes("forgotten")), "the question is not a toast");
+    s.outbox.sent = [];
+    s.room.ui.answerForget(true);
+    const again = s.room.store.getState().pending.slice(-2);
+    assert.deepEqual(again.map((p) => [p.op, p.group]), [[{ ...paint(1), forget: true }, "g1"], [{ ...paint(2), forget: true }, "g1"]]);
+    assert.deepEqual(s.state().forgetAsk?.sending, again.map((p) => p.n));
+    // A second yes while they are on their way sends nothing more.
+    s.room.ui.answerForget(true);
+    assert.equal(s.room.store.getState().pending.length, 2);
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: again.map((p) => p.n) });
+    assert.equal(s.state().forgetAsk, null);
+  });
+
+  test("no lets the gesture go, unmade", () => {
+    const s = setup(room());
+    s.connect();
+    const a = s.room.dispatch(paint(1))!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: a, code: "forget", message: FORGET_ASK }] });
+    s.room.ui.answerForget(false);
+    assert.equal(s.state().forgetAsk, null);
+    assert.equal(s.room.store.getState().pending.length, 0);
+  });
+
+  test("a no takes back, quietly, the part of the gesture the server took before the asked op: one undo of its step", () => {
+    const s = setup(room());
+    s.connect();
+    // A big rectangle room goes as bands: the first two fit, the third runs past the cap.
+    const a = s.room.dispatch(paint(1), { group: "g1" })!;
+    const b = s.room.dispatch(paint(2), { group: "g1" })!;
+    const c = s.room.dispatch(paint(3), { group: "g1" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: [a, b], rejects: [{ n: c, code: "forget", message: FORGET_ASK }] });
+    s.room.ui.answerForget(false);
+    assert.equal(s.state().forgetAsk, null);
+    const undo = s.room.store.getState().pending;
+    assert.deepEqual(undo.map((p) => [p.op, p.quiet]), [[{ t: "undo", of: b }, true]]);
+  });
+
+  test("a no with nothing of the gesture taken sends nothing", () => {
+    const s = setup(room());
+    s.connect();
+    const other = s.room.dispatch(paint(9), { group: "g0" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: [other] });
+    const a = s.room.dispatch(paint(1), { group: "g1" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: a, code: "forget", message: FORGET_ASK }] });
+    s.room.ui.answerForget(false);
+    assert.equal(s.room.store.getState().pending.length, 0, "another gesture's step was taken back");
+  });
+
+  test("an Undo asked about asks in its toast, whose yes names the refused undo's n", () => {
+    const s = setup(room());
+    s.connect();
+    const u = s.room.dispatch({ t: "undo" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: u, code: "forget", message: FORGET_ASK }] });
+    const toast = s.state().toasts.find((t) => t.text === FORGET_ASK);
+    assert.equal(toast?.action?.label, "Forget and undo");
+    assert.equal(s.state().forgetAsk ?? null, null);
+    toast!.action!.run();
+    assert.deepEqual(s.room.store.getState().pending.at(-1)?.op, { t: "undo", forget: u });
   });
 });
