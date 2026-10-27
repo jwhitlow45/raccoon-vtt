@@ -280,10 +280,16 @@ const memoryChunks = (layer: "party" | "holder") =>
     }
   });
 const sceneMark = z.strictObject({ sceneId: id, rev });
+/** A share mark, `party` once the scene folded (shared/model.ts ShareMark). */
+const shareMark = z.strictObject({ sceneId: id, rev, party: z.literal(true).optional() });
 /** The scenes' marks, each under its own scene's id. */
-const sceneMarks = z.record(z.string().min(1).max(120), sceneMark).superRefine((marks, ctx) => {
-  for (const [key, m] of Object.entries(marks)) if (key !== m.sceneId) ctx.addIssue({ code: "custom", path: [key], message: "a mark under another scene's id" });
-});
+function marksOf<T extends z.ZodType<{ sceneId: string }>>(mark: T) {
+  return z.record(z.string().min(1).max(120), mark).superRefine((marks, ctx) => {
+    for (const [key, m] of Object.entries(marks)) if (key !== (m as { sceneId: string }).sceneId) ctx.addIssue({ code: "custom", path: [key], message: "a mark under another scene's id" });
+  });
+}
+const sceneMarks = marksOf(sceneMark);
+const shareMarks = marksOf(shareMark);
 
 const feet = z.number().int().min(-100_000).max(100_000);
 
@@ -912,7 +918,7 @@ export const roomStateSchema = z.strictObject({
   memory: memoryChunks("party").default({}),
   memoryBy: memoryChunks("holder").default({}),
   playedScenes: sceneMarks.default({}),
-  memoryShared: sceneMarks.default({}),
+  memoryShared: shareMarks.default({}),
 });
 
 /**

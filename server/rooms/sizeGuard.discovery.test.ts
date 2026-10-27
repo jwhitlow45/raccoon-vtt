@@ -10,6 +10,8 @@ import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { DM, env, member, room, scene, token } from "#shared/testutil.ts";
 import { capRoom, perPlayerRoom } from "../../scripts/bench-vision.ts";
 import { MEMORY_CAP } from "./memorySize.ts";
+import { remapState } from "./remap.ts";
+import { parseRoomState } from "./stateSchema.ts";
 import {
   discoveryReserve,
   growthBound,
@@ -242,6 +244,37 @@ describe("the room-wide share (5.5, MD-O-14)", () => {
     assert.ok(folded.state.memoryShared?.s1, "the fold keeps the share mark");
     assert.equal(memoryReserves(folded.state).sharing, 2);
     assert.ok(memoryStateReserve(folded.state, 1_000) < memoryStateReserve(state, 1_000));
+  });
+
+  test("after a fold, a switch back to Per player takes the holders' whole caps while the party keeps its share, through a reload and an import (MD3-ASTRA-4)", () => {
+    const base = room();
+    base.scenes = { s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } }) };
+    const up = mapDiscoveryUpgrade(base);
+    assert.deepEqual(memoryReserves(up), { whole: 0, sharing: 3 }, "at the upgrade the party's layer and both players' share");
+    const vision = (perPlayer: boolean) => ({ t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dark", perPlayer } } }) as Op;
+    const folded = applyOp(up, vision(false), DM, env(2));
+    assert.ok(folded.ok);
+    assert.equal(folded.state.memoryShared?.s1?.party, true, "the fold keeps the party's share alone");
+    assert.deepEqual(memoryReserves(folded.state), { whole: 0, sharing: 1 });
+    const back = applyOp(folded.state, vision(true), DM, env(3));
+    assert.ok(back.ok);
+    assert.deepEqual(memoryReserves(back.state), { whole: 2 * MEMORY_CAP, sharing: 1 }, "the holders' layers take whole caps");
+    // Room for 1,000 bytes of memory: the switch back is refused in the DM's words, as it would be on a scene that never shared.
+    const limit = measuredStateBytes(folded.state) + exploredReserve(folded.state) + 1_000;
+    const answer = new SizeGuard({ stateLimit: limit }).check(back.state, ["s1"], growthBound(folded.state, back.state, back.touched), folded.state);
+    assert.equal(answer.ok ? "" : answer.message, PER_PLAYER_FULL);
+    // The mark is stored state: a reload and an import keep the distinction.
+    const stored = parseRoomState(JSON.parse(JSON.stringify(back.state)));
+    assert.ok(stored.ok);
+    assert.deepEqual(memoryReserves(stored.state), memoryReserves(back.state));
+    // The import makes every member a player until a DM claims it, so its roster has one more holder layer, at a whole cap too.
+    const imported = remapState(back.state, { assets: new Map() });
+    assert.equal(Object.values(imported.memoryShared ?? {})[0]?.party, true);
+    assert.deepEqual(memoryReserves(imported), { whole: 3 * MEMORY_CAP, sharing: 1 });
+    // Undoing the fold is a switch back too: the mark is bookkeeping no undo restores, so the holders' layers take whole caps.
+    const undone = applyOp(folded.state, { t: "sys.restore", entries: folded.inverse!, from: "undo" } as Op, DM, env(4));
+    assert.ok(undone.ok);
+    assert.deepEqual(memoryReserves(undone.state), { whole: 2 * MEMORY_CAP, sharing: 1 });
   });
 
   test("a whole cap where the scene does not share, and none where memory is not reserved", () => {

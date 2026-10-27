@@ -220,6 +220,10 @@ export function keepMemory(tx: Tx, before: RoomState): void {
       if (!keepsMemory(now)) {
         forgetSceneMemory(tx, id);
         if (tx.state.memoryShared?.[id]) tx.writeBookkeeping(keys.memoryShared(id), null);
+      } else if (was.vision?.perPlayer === true && now.vision?.perPlayer !== true) {
+        // A fold keeps the share for the party's layer alone (5.5): holders' layers a switch back brings take their whole caps.
+        const mark = tx.state.memoryShared?.[id];
+        if (mark && mark.party !== true) tx.writeBookkeeping(keys.memoryShared(id), { ...mark, party: true });
       }
     }
   }

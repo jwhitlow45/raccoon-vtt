@@ -32,6 +32,7 @@ import type {
   SavedEncounterMonster,
   Scene,
   SceneMark,
+  ShareMark,
   SrdImage,
   Stamp,
   Light,
@@ -742,7 +743,7 @@ function remapMemory(
   const memory: Record<string, MemoryChunk> = {};
   const memoryBy: Record<string, MemoryChunk> = {};
   const playedScenes: Record<string, SceneMark> = {};
-  const memoryShared: Record<string, SceneMark> = {};
+  const memoryShared: Record<string, ShareMark> = {};
   const rememberedOnly = { labels: new Map<string, string>(), stamps: new Map<string, string>() };
   const idOf = (field: "labels" | "stamps", old: string): string => {
     const live = field === "labels" ? (labels.has(old) ? labels.of(old) : undefined) : stampIds.get(old);

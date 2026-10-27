@@ -5,7 +5,7 @@ import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, exploringSceneId, LIMITS, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
 import type { RoomState, Scene, Viewer } from "#shared/model.ts";
 import { chunkPositions, perPlayerScene } from "#shared/project.ts";
-import { keepsMemory } from "#shared/reducer/memory.ts";
+import { keepsMemory, type Layer } from "#shared/reducer/memory.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { isWritable } from "#shared/writable.ts";
@@ -127,9 +127,9 @@ export class SizeGuard {
     return this.#share;
   }
 
-  /** A layer's cap on a scene now (memoryCapOf). */
-  memoryCap(state: RoomState, scene: Scene): number {
-    return memoryCapOf(state, scene, this.#share);
+  /** A layer's cap on a scene now (memoryCapOf), the party's when `layer` is null. */
+  memoryCap(state: RoomState, scene: Scene, layer: Layer = null): number {
+    return memoryCapOf(state, scene, this.#share, layer);
   }
 
   /** Whether the share fell since the map step last answered it, without answering. */
@@ -757,9 +757,15 @@ function memoryLayerCount(state: RoomState, scene: Scene): number {
   return 1 + (perPlayerScene(scene) ? rosterIds(state.members).players.length : 0);
 }
 
-/** Whether a reserved scene's memory shares the room's free space (`memoryShared`), rather than taking its whole cap. */
-function sharesRoom(state: RoomState, scene: Scene): boolean {
-  return state.memoryShared?.[scene.id] !== undefined;
+/**
+ * Whether a layer of a reserved scene shares the room's free space
+ * (`memoryShared`), rather than taking its whole cap: every layer, or the
+ * party's alone once the scene folded (ShareMark `party`), so holders'
+ * layers a switch back to Per player brings take their whole caps (5.5).
+ */
+function sharesRoom(state: RoomState, scene: Scene, holder = false): boolean {
+  const mark = state.memoryShared?.[scene.id];
+  return mark !== undefined && (!holder || mark.party !== true);
 }
 
 /** What players' memory reserves in the stored state: every whole cap, and how many layers share the rest. */
@@ -770,9 +776,11 @@ export function memoryReserves(state: RoomState, except?: ReadonlySet<string>): 
   let sharing = 0;
   for (const scene of Object.values(state.scenes)) {
     if (except?.has(scene.id) || !memoryReserved(state, scene)) continue;
-    const layers = memoryLayerCount(state, scene);
-    if (sharesRoom(state, scene)) sharing += layers;
-    else whole += layers * MEMORY_CAP;
+    const holders = memoryLayerCount(state, scene) - 1;
+    if (sharesRoom(state, scene)) sharing += 1;
+    else whole += MEMORY_CAP;
+    if (sharesRoom(state, scene, true)) sharing += holders;
+    else whole += holders * MEMORY_CAP;
   }
   return { whole, sharing };
 }
@@ -789,10 +797,10 @@ export function memoryShare(stateLimit: number, measured: number, explored: numb
   return Math.max(0, Math.min(MEMORY_CAP, Math.floor(free / reserves.sharing)));
 }
 
-/** A layer's cap on a scene: a whole cap, its share where it shares the room's space, or 0 where memory is not reserved, so the map step forgets it all. */
-export function memoryCapOf(state: RoomState, scene: Scene, share: number): number {
+/** A layer's cap on a scene, the party's when `layer` is null: a whole cap, its share where it shares the room's space, or 0 where memory is not reserved, so the map step forgets it all. */
+export function memoryCapOf(state: RoomState, scene: Scene, share: number, layer: Layer = null): number {
   if (!memoryReserved(state, scene)) return 0;
-  return sharesRoom(state, scene) ? share : MEMORY_CAP;
+  return sharesRoom(state, scene, layer !== null) ? share : MEMORY_CAP;
 }
 
 /**
@@ -879,8 +887,11 @@ function wallsExtra(state: RoomState, scene: Scene): number {
 export function discoveryReserve(state: RoomState, scene: Scene, share: number, withMemory = true): number {
   let bytes = 0;
   if (scene.fogEnabled) bytes += wallsExtra(state, scene) + positionsReserve(scene);
-  const cap = withMemory ? memoryCapOf(state, scene, share) : 0;
-  if (cap > 0) bytes += cap * (perPlayerScene(scene) ? 2 : 1);
+  // A copy reads the party's memory, and a holder's view their own as well.
+  if (withMemory && memoryReserved(state, scene)) {
+    const cap = (holder: boolean) => (sharesRoom(state, scene, holder) ? share : MEMORY_CAP);
+    bytes += cap(false) + (perPlayerScene(scene) ? cap(true) : 0);
+  }
   return bytes;
 }
 

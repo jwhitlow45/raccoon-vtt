@@ -54,7 +54,7 @@ export type MapStepInput = {
   touched: readonly EntityKey[];
   doors?: readonly DoorTouch[];
   /** A layer's cap on a scene in charged bytes (server/rooms/memorySize.ts): 64 KiB, its share of a full room, or 0 where memory is not reserved. */
-  cap: (scene: Scene) => number;
+  cap: (scene: Scene, layer: Layer) => number;
   /** Measure every layer against its cap, not only those the batch wrote: a share was lowered. */
   everyLayer?: boolean;
 };
@@ -688,7 +688,7 @@ function sceneStep(input: MapStepInput, scene: Scene, touch: SceneTouch, doors: 
     const chunks = chunksOf(step);
     if (chunks.length > 0) layers.push({ ...(layer === null ? {} : { memberId: layer }), chunks });
     if (input.everyLayer || chunks.length > 0 || touch.memory.has(layer)) {
-      const tiles = forgetting(after, step, input.cap(scene));
+      const tiles = forgetting(after, step, input.cap(scene, layer));
       if (tiles.length > 0) forget.push({ ...(layer === null ? {} : { memberId: layer }), tiles });
     }
   }

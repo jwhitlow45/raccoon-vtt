@@ -517,7 +517,8 @@ describe("the fold to Whole party (5.4)", () => {
     start.playedScenes = { s1: { sceneId: "s1", rev: 0 } };
     start.memoryShared = { s1: { sceneId: "s1", rev: 0 } };
     const next = fold(start);
-    assert.deepEqual([next.playedScenes, next.memoryShared], [start.playedScenes, start.memoryShared]);
+    // The share is the party's layer's alone from now on (5.5): a switch back takes the holders' whole caps.
+    assert.deepEqual([next.playedScenes, next.memoryShared], [start.playedScenes, { s1: { sceneId: "s1", rev: 1, party: true } }]);
   });
 
   test("a scene that was never per player has nothing to pool", () => {

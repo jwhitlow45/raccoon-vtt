@@ -1234,7 +1234,7 @@ export class RoomActor {
       const scene = after.scenes[sceneId]!;
       const total = (estimate.get(layer) ?? layerCharge(this.#staged.state, this.#staged.state.scenes[sceneId] ?? scene, member)) + bytes;
       next.set(layer, total);
-      if (total > this.#sizes.memoryCap(after, scene)) over = true;
+      if (total > this.#sizes.memoryCap(after, scene, member)) over = true;
     }
     return { over, commit: () => next.forEach((total, layer) => estimate.set(layer, total)) };
   }
@@ -1615,7 +1615,7 @@ export class RoomActor {
         after,
         touched: batch.touched,
         doors: batch.doors,
-        cap: (scene) => this.#sizes.memoryCap(after, scene),
+        cap: (scene, layer) => this.#sizes.memoryCap(after, scene, layer),
         everyLayer: lowered,
       });
       // Answered only once the step ran: a step that throws leaves the next batch's to measure every layer.

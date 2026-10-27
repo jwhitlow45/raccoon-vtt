@@ -198,11 +198,18 @@ export type RoomState = {
    * goes off or it is deleted, and never gains one again: a copy made by
    * Duplicate with Fog starts without one. A projection never holds it.
    */
-  memoryShared?: Record<SceneId, SceneMark>;
+  memoryShared?: Record<SceneId, ShareMark>;
 };
 
 /** A scene's mark in `playedScenes` or `memoryShared`. The mark is the entry: only its presence says anything. */
 export type SceneMark = { sceneId: SceneId; rev: number };
+
+/**
+ * A share mark (5.5). `party` once the scene folded to the whole party:
+ * only the party's layer shares from then on, so holders' layers a switch
+ * back to Per player brings take their whole caps.
+ */
+export type ShareMark = SceneMark & { party?: true };
 
 /**
  * One chunk of one layer's memory (docs/design-v1-map-discovery.md 5.3):
