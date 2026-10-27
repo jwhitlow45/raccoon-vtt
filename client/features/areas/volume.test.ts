@@ -751,6 +751,177 @@ describe("drawing between slices (review ISOA1-ASTRA-08)", () => {
   });
 });
 
+describe("a bucket's drawing for the board, band by band (review ISOA1-LAYOUT)", () => {
+  type Turn = (typeof TURNS)[number];
+  const pt = (x: number, y: number, z: number) => `${Math.round(x * 1e6)},${Math.round(y * 1e6)},${Math.round(z * 1e6)}`;
+  const segs = (q: Float64Array) => {
+    const out: string[] = [];
+    for (let i = 0; i + 5 < q.length; i += 6) {
+      const a = pt(q[i]!, q[i + 1]!, q[i + 2]!);
+      const b = pt(q[i + 3]!, q[i + 4]!, q[i + 5]!);
+      out.push(a < b ? `${a} ${b}` : `${b} ${a}`);
+    }
+    return out;
+  };
+  /** The signed area of a loop as it shows at a turn: by Green's theorem the sum of its faces' areas when it is their boundary. */
+  const shown = (turn: Turn, q: ArrayLike<number>) => {
+    const { c, s } = turnAxesOf(turn);
+    let a = 0;
+    const n = q.length / 3;
+    for (let k = 0; k < n; k++) {
+      const j = (k + 1) % n;
+      const u0 = c * q[3 * k]! - s * q[3 * k + 1]!;
+      const v0 = (s * q[3 * k]! + c * q[3 * k + 1]!) / 2 - 0.8660254037844386 * q[3 * k + 2]!;
+      const u1 = c * q[3 * j]! - s * q[3 * j + 1]!;
+      const v1 = (s * q[3 * j]! + c * q[3 * j + 1]!) / 2 - 0.8660254037844386 * q[3 * j + 2]!;
+      a += u0 * v1 - u1 * v0;
+    }
+    return a / 2;
+  };
+  const strokeOf = (l: VolumeLine) => (l.kind === "guide" ? (l.near ? "guide" : "guideHidden") : l.near ? "outline" : "hidden");
+
+  function scenes(rand: () => number, i: number): Volume {
+    const w = 24 + Math.floor(rand() * 24);
+    const h = 24 + Math.floor(rand() * 24);
+    const bounds = { w, h };
+    const walls = rand() < 0.5 ? randomWalls(rand, w, h) : null;
+    const ground = rand() < 0.6 ? randomGround(rand, w, h) : flatGround(w, h);
+    const tokens: Record<string, AreaToken> = {};
+    const t = randomTemplate(rand, w, h, tokens, i);
+    const area = resolveArea(t, ctxOf(bounds, walls, tokens));
+    assert.ok(area);
+    return buildVolume({ area, bounds, ground: ground.at, px: 12 + rand() * 60, coarse: rand() < 0.2 });
+  }
+
+  test("random solids: each band's loops bound its faces, and the strokes of every bucket are the whole volume's lines", () => {
+    const rand = mulberry32(61 + SEED);
+    let loops = 0;
+    for (let i = 0; i < 24 * FUZZ; i++) {
+      const vol = scenes(rand, i);
+      vol.ensureAll();
+      for (const turn of TURNS) {
+        const got: Record<string, string[]> = { outline: [], hidden: [], guide: [], guideHidden: [] };
+        for (const key of vol.keys) {
+          const d = vol.drawn(key, turn);
+          assert.ok(d, `#${i}: a cut bucket draws at once without a deadline`);
+          for (const band of d.bands) {
+            for (const part of [band.high, band.low]) {
+              for (const name of ["outline", "hidden", "guide", "guideHidden"] as const) got[name]!.push(...segs(part[name]));
+              for (const [wantNear, list] of [[true, part.near], [false, part.far]] as const) {
+                // The loops' area is their faces' area, band and part by band and part.
+                const sum = list.reduce((a, q) => a + shown(turn, q), 0);
+                loops += list.length;
+                const faces = vol.faces().filter((f) => f.bucket === vol.keys.indexOf(key) && bandOf(vol, f, turn) === band.band && (towardViewer(turn, f.nx, f.ny, f.nz) > 0) === wantNear && lowOf(vol, f) === (part === band.low));
+                const want = faces.reduce((a, f) => a + shown(turn, Float64Array.from([...f.v].flatMap((q) => vol.vertex(q)))), 0);
+                assert.ok(Math.abs(sum - want) < 1e-6 * (1 + Math.abs(want)), `#${i} turn ${turn} band ${band.band}: loops ${sum}, faces ${want}`);
+              }
+            }
+          }
+        }
+        const want: Record<string, string[]> = { outline: [], hidden: [], guide: [], guideHidden: [] };
+        for (const l of vol.lines(turn)) want[strokeOf(l)]!.push(...segs(Float64Array.of(l.ax, l.ay, l.az, l.bx, l.by, l.bz)));
+        for (const name of Object.keys(want)) assert.deepEqual(got[name]!.sort(), want[name]!.sort(), `#${i} turn ${turn} ${name}`);
+      }
+    }
+    assert.ok(loops > 200, `${loops} loops`);
+  });
+
+  /** A face's band at a turn, by its middle, as the board's turn reads it. */
+  function bandOf(vol: Volume, f: ReturnType<Volume["faces"]>[number], turn: Turn): number {
+    let x = 0;
+    let y = 0;
+    for (const q of f.v) {
+      x += vol.vertex(q)[0];
+      y += vol.vertex(q)[1];
+    }
+    return bandAt(turn, x / f.v.length, y / f.v.length);
+  }
+
+  function lowOf(vol: Volume, f: ReturnType<Volume["faces"]>[number]): boolean {
+    return Math.min(...[...f.v].map((q) => vol.vertex(q)[2])) < -1e-9;
+  }
+
+  test("inside a pit's opening a band draws apart, every point of it below the ground at 0, and above it nothing below", () => {
+    const bounds = { w: 30, h: 30 };
+    const ground = flatGround(30, 30);
+    for (let y = 10; y < 14; y++) for (let x = 10; x < 14; x++) ground.z[y * 30 + x] = -4;
+    // A 15 ft sphere at -5 ft: half in the pit, half over the ground beside it.
+    const area = resolveArea({ id: "s", rev: 1, shape: "sphere", size: 15, origin: { x: 12, y: 12, z: -5 }, yaw: 0, includeOrigin: true }, ctxOf(bounds, null));
+    assert.ok(area);
+    const vol = buildVolume({ area, bounds, ground: ground.at, px: 40 });
+    vol.ensureAll();
+    let low = 0;
+    let high = 0;
+    for (const turn of TURNS) {
+      for (const key of vol.keys) {
+        for (const band of vol.drawn(key, turn)!.bands) {
+          const zs = (part: typeof band.high) => [...part.far, ...part.near, part.outline, part.hidden, part.guide, part.guideHidden].flatMap((q) => [...q].filter((_, k) => k % 3 === 2));
+          for (const z of zs(band.low)) {
+            low++;
+            assert.ok(z <= 1e-9, `a point inside the opening at ${z}`);
+          }
+          for (const z of zs(band.high)) {
+            high++;
+            assert.ok(z >= -1e-9, `a point above the ground at ${z}`);
+          }
+        }
+      }
+    }
+    assert.ok(low > 100 && high > 100, `${low} inside, ${high} above`);
+  });
+
+  test("in slices: a call past its deadline does bounded work, and the drawing it ends with is the one made at once", () => {
+    const rand = mulberry32(67 + SEED);
+    for (let i = 0; i < 12 * FUZZ; i++) {
+      const state = rand() * 2 ** 31;
+      const a = scenes(mulberry32(state), i);
+      const b = scenes(mulberry32(state), i);
+      a.ensureAll();
+      b.ensureAll();
+      for (const turn of TURNS) {
+        for (const key of a.keys) {
+          let calls = 0;
+          let got: ReturnType<Volume["drawn"]> = null;
+          for (;;) {
+            const before = b.work;
+            got = b.drawn(key, turn, -Infinity);
+            assert.ok(b.work - before < 2500, `#${i}: one call charged ${b.work - before}`);
+            calls++;
+            if (got) break;
+          }
+          assert.deepEqual(got, a.drawn(key, turn), `#${i} turn ${turn} ${key}`);
+          assert.ok(calls >= 1);
+        }
+      }
+    }
+  });
+
+  test("a neighbor's cut ending makes a bucket's drawing again, now with the silhouette across their line", () => {
+    // A 40 ft sphere across the line between buckets 0,0 and 1,0.
+    const bounds = { w: 40, h: 40 };
+    const area = resolveArea({ id: "s", rev: 1, shape: "sphere", size: 20, origin: { x: 16, y: 8, z: 30 }, yaw: 0, includeOrigin: true }, ctxOf(bounds, null));
+    assert.ok(area);
+    const vol = buildVolume({ area, bounds, ground: () => 0, px: 40 });
+    const whole = buildVolume({ area, bounds, ground: () => 0, px: 40 });
+    whole.ensureAll();
+    assert.deepEqual(vol.keys.sort(), ["0,0", "1,0"]);
+    vol.ensure("0,0");
+    const early = vol.drawn("0,0", 0)!;
+    const epoch = vol.drawEpoch;
+    vol.ensure("1,0");
+    assert.ok(vol.drawEpoch > epoch);
+    assert.equal(vol.drawnNow("0,0", 0), null, "the drawing made before the neighbor was cut is dropped");
+    const late = vol.drawn("0,0", 0)!;
+    const outline = (d: typeof late) => d.bands.flatMap((band) => segs(band.high.outline));
+    const across = (list: string[]) => list.filter((q) => q.split(" ").every((p) => p.startsWith("16000000,")));
+    assert.equal(across(outline(early)).length, 0, "before its neighbor is cut, nothing on the line between them");
+    assert.ok(across(outline(late)).length > 0, "after, the silhouette where the sphere crosses it");
+    // Which of the two owns an edge on their line depends on the order they were cut, so the pair is compared whole.
+    const both = (v: Volume) => [...outline(v.drawn("0,0", 0)!), ...outline(v.drawn("1,0", 0)!)].sort();
+    assert.deepEqual(both(vol), both(whole));
+  });
+});
+
 describe("bounded work (design 6)", () => {
   /** The largest solids, the commonest auras in a dense dungeon, hex stacks, and the largest size at the finest grid on squares and both hex orientations, on scenes of 20 and 200 cells, with ground that steps every few cells. */
   const large = { w: 200, h: 200 };

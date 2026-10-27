@@ -361,14 +361,17 @@ function growScratch(n: number): void {
 /** A face cut by planes in their order, a cut at a time, so a face many planes cross is many steps: the pieces cutting every piece by each plane in turn makes. */
 function* cutEach(st: Store, face: Poly, planes: readonly Plane[], budget: Budget): Job<Poly[]> {
   const out: Poly[] = [];
-  const todo: { p: Poly; at: number }[] = [{ p: face, at: 0 }];
+  const todo: Poly[] = [face];
+  const todoAt: number[] = [0];
   while (todo.length > 0) {
-    const { p: start, at } = todo.pop()!;
-    let p = start;
-    for (let k = at; k < planes.length; k++) {
+    let p = todo.pop()!;
+    for (let k = todoAt.pop()!; k < planes.length; k++) {
       if (budget.spend(p.v.length)) yield;
       const [above, below] = splitPoly(st, p, planes[k]!);
-      if (above && below) todo.push({ p: below, at: k + 1 });
+      if (above && below) {
+        todo.push(below);
+        todoAt.push(k + 1);
+      }
       p = (above ?? below)!;
     }
     out.push(p);
@@ -826,8 +829,8 @@ class LineIndex {
     return work;
   }
 
-  /** The lines passing the tiles under a face's plan, in their order. */
-  *near(st: Store, f: Poly, budget: Budget): Job<Int32Array> {
+  /** The lines passing the tiles under a face's plan, in their order, put at the end of `out`. */
+  *near(st: Store, f: Poly, budget: Budget, out: NearLines): Job<void> {
     let x0 = Infinity;
     let y0 = Infinity;
     let x1 = -Infinity;
@@ -865,12 +868,31 @@ class LineIndex {
       }
     }
     // In their order by a walk of the marks between the first and the last, so no sort runs in one step.
-    const lines = new Int32Array(found);
-    for (let li = first, n = 0; li <= last; li++) {
-      if (this.#stamp[li] === mark) lines[n++] = li;
+    out.reserve(found);
+    for (let li = first; li <= last; li++) {
+      if (this.#stamp[li] === mark) out.pool[out.size++] = li;
       if (budget.spend(1 / 4)) yield;
     }
-    return lines;
+  }
+}
+
+/**
+ * The clip lines each piece of the shell reads, every face's in one pool,
+ * piece f's from `from[f]` up to `to[f]`: a mesh of a hundred thousand
+ * faces would otherwise make an array per face, and their collection
+ * shows as long slices (review ISOA1-GC).
+ */
+class NearLines {
+  pool = new Int32Array(4096);
+  size = 0;
+  readonly from: number[] = [];
+  readonly to: number[] = [];
+
+  reserve(n: number): void {
+    if (this.size + n <= this.pool.length) return;
+    const next = new Int32Array(2 ** Math.ceil(Math.log2(this.size + n)));
+    next.set(this.pool.subarray(0, this.size));
+    this.pool = next;
   }
 }
 
@@ -950,15 +972,16 @@ type Open = { from: number; to: number; out: number };
  * opposite to the shell's. A cap on a convex shell is a convex polygon. On
  * a hex stack it is cut into triangles.
  */
-function* capsOf(st: Store, pieces: readonly Poly[], kept: Uint8Array, near: readonly Int32Array[], lines: readonly Plane[], convex: boolean, budget: Budget): Job<{ caps: Poly[]; failed: number }> {
+function* capsOf(st: Store, pieces: readonly Poly[], kept: Uint8Array, near: NearLines, lines: readonly Plane[], convex: boolean, budget: Budget): Job<{ caps: Poly[]; failed: number }> {
   // Every piece lies on one side of each line, so a kept piece meets one that went only along a line: only edges with both ends on one are read. A line through a vertex passes the tiles of every piece the vertex is in, so each piece's own lines settle it. 0 not yet read, 1 on a line, 2 on none.
   const onLine = new Uint8Array(st.n);
-  const on = (i: number, cand: Int32Array) => {
+  const pool = near.pool;
+  const on = (i: number, f: number) => {
     let s = onLine[i]!;
     if (s === 0) {
       s = 2;
-      for (let q = 0; q < cand.length; q++) {
-        if (Math.abs(st.d(lines[cand[q]!]!, i)) <= ON) {
+      for (let q = near.from[f]!; q < near.to[f]!; q++) {
+        if (Math.abs(st.d(lines[pool[q]!]!, i)) <= ON) {
           s = 1;
           break;
         }
@@ -970,13 +993,13 @@ function* capsOf(st: Store, pieces: readonly Poly[], kept: Uint8Array, near: rea
   const owner = new Map<number, number>();
   for (let f = 0; f < pieces.length; f++) {
     const v = pieces[f]!.v;
-    const cand = near[f]!;
+    const count = near.to[f]! - near.from[f]!;
     for (let k = 0; k < v.length; k++) {
       const a = v[k]!;
       const b = v[(k + 1) % v.length]!;
-      if (on(a, cand) && on(b, cand)) owner.set(a * VMAX + b, f);
+      if (on(a, f) && on(b, f)) owner.set(a * VMAX + b, f);
       // Each vertex reads the piece's lines once.
-      if (budget.spend(1 + cand.length)) yield;
+      if (budget.spend(1 + count)) yield;
     }
   }
   // Each open edge with the lines that part its face from the one that went, and the side the solid was cut away on.
@@ -986,11 +1009,11 @@ function* capsOf(st: Store, pieces: readonly Poly[], kept: Uint8Array, near: rea
     if (!kept[f]) continue;
     const p = pieces[f]!;
     const v = p.v;
-    const cand = near[f]!;
+    const count = near.to[f]! - near.from[f]!;
     for (let k = 0; k < v.length; k++) {
       const a = v[k]!;
       const b = v[(k + 1) % v.length]!;
-      if (!on(a, cand) || !on(b, cand)) continue;
+      if (!on(a, f) || !on(b, f)) continue;
       const g = owner.get(b * VMAX + a);
       if (g === undefined) {
         failed++;
@@ -999,10 +1022,10 @@ function* capsOf(st: Store, pieces: readonly Poly[], kept: Uint8Array, near: rea
       if (kept[g]) continue;
       const mk = centroid(st, p.v);
       const md = centroid(st, pieces[g]!.v);
-      if (budget.spend(v.length + pieces[g]!.v.length + cand.length)) yield;
+      if (budget.spend(v.length + pieces[g]!.v.length + count)) yield;
       const lines_: { li: number; out: number }[] = [];
-      for (let q = 0; q < cand.length; q++) {
-        const li = cand[q]!;
+      for (let q = near.from[f]!; q < near.to[f]!; q++) {
+        const li = pool[q]!;
         const pl = lines[li]!;
         if (Math.abs(st.d(pl, a)) > ON || Math.abs(st.d(pl, b)) > ON) continue;
         const dk = pl.a * mk[0] + pl.b * mk[1] - pl.e;
@@ -1220,8 +1243,9 @@ export function linesNear(lines: readonly (readonly [number, number, number, num
   for (let li = 0; li < planes.length; li++) index.file(li);
   const st = storeOf(face.map(([x, y]) => [x, y, 0]));
   const poly: Poly = { v: face.map((_, i) => i), nx: 0, ny: 0, nz: 1, cap: false };
-  const { value, carried } = sliced((budget) => index.near(st, poly, budget));
-  return { lines: [...value], carried };
+  const out = new NearLines();
+  const { carried } = sliced((budget) => index.near(st, poly, budget, out));
+  return { lines: [...out.pool.subarray(0, out.size)], carried };
 }
 
 /**
@@ -1451,8 +1475,55 @@ type Bucket = {
   faces: number[];
   guides: Guide[];
   box: WorldBox | null;
-  turns: Map<Turn, { band: Int32Array; near: Uint8Array; guideBand: Int32Array; guideNear: Uint8Array }>;
+  turns: Map<Turn, TurnData>;
+  /** Its turns being made, in slices, and its drawings by turn, each dropped when a neighbor's cut ends, since its lines cross into it. */
+  turnJobs: Map<Turn, Job<TurnData>>;
+  draws: Map<Turn, BucketDraw>;
+  drawJobs: Map<Turn, Job<BucketDraw>>;
 };
+
+type TurnData = { band: Int32Array; near: Uint8Array; guideBand: Int32Array; guideNear: Uint8Array };
+
+/**
+ * What one band of a cut bucket draws at a turn (design 4.2 steps 7 and 8),
+ * in two parts: above the ground at 0, and inside a pit's opening, which
+ * the board clips as it clips a standee there (design 4.3).
+ */
+export type BandPart = {
+  /** Fill loops of its far faces and of its near faces, `[x, y, z, ...]` in world cells. */
+  far: Float64Array[];
+  near: Float64Array[];
+  /** Stroked segments, `[ax, ay, az, bx, by, bz, ...]`: the outline (silhouettes, near creases, cap rims, near ground rims), the hidden lines, and the guides near and far (design 5). */
+  outline: Float64Array;
+  hidden: Float64Array;
+  guide: Float64Array;
+  guideHidden: Float64Array;
+};
+
+export type BandDraw = {
+  band: number;
+  high: BandPart;
+  low: BandPart;
+  /** Its box in view units at the turn, for culling. */
+  box: { x0: number; y0: number; x1: number; y1: number };
+};
+
+/** A cut bucket's drawing at a turn, band by band, far to near. */
+export type BucketDraw = { bands: BandDraw[] };
+
+/** Work that never stops for a deadline: the synchronous paths and the tests. */
+const UNBOUNDED = new Budget();
+
+/** The drawing of a bucket the volume does not reach. */
+const NO_DRAW: BucketDraw = { bands: [] };
+
+/** Runs a job to its end with nothing to stop it. */
+function finish<T>(job: Job<T>): T {
+  for (;;) {
+    const r = job.next();
+    if (r.done) return r.value;
+  }
+}
 
 /** An area's mesh, its footprint, and its buckets, each cut the first time it is asked for. */
 export class Volume {
@@ -1464,6 +1535,8 @@ export class Volume {
   #job: Job | null;
   readonly #budget = new Budget();
   #footprint: Footprint | null = null;
+  #box: WorldBox | null = null;
+  #drawEpoch = 0;
   readonly #st = new Store();
   readonly #ground: (x: number, y: number) => number;
   readonly #bounds: { w: number; h: number };
@@ -1568,23 +1641,32 @@ export class Volume {
     for (const poly of area.polygons) yield* clip.add(poly, row0, rows, budget);
     // Each face cut by the lines near it in their order, a cut at a time, each piece keeping its face's lines for the caps.
     const pieces: Poly[] = [];
-    const near: Int32Array[] = [];
+    const near = new NearLines();
+    // The pieces still to cut and the line each starts at, one stack for every face.
+    const todo: Poly[] = [];
+    const todoAt: number[] = [];
     for (const face of shell.polys) {
-      const cand = yield* index.near(st, face, budget);
-      const todo: { p: Poly; at: number }[] = [{ p: face, at: 0 }];
+      const from = near.size;
+      yield* index.near(st, face, budget, near);
+      const to = near.size;
+      todo.push(face);
+      todoAt.push(from);
       while (todo.length > 0) {
-        const { p: start, at } = todo.pop()!;
-        let p = start;
-        for (let k = at; k < cand.length; k++) {
+        let p = todo.pop()!;
+        for (let k = todoAt.pop()!; k < to; k++) {
           if (budget.spend(p.v.length)) yield;
-          const [above, below] = splitPoly(st, p, lines[cand[k]!]!);
-          if (above && below) todo.push({ p: below, at: k + 1 });
+          const [above, below] = splitPoly(st, p, lines[near.pool[k]!]!);
+          if (above && below) {
+            todo.push(below);
+            todoAt.push(k + 1);
+          }
           p = (above ?? below)!;
         }
         pieces.push(p);
-        near.push(cand);
+        near.from.push(from);
+        near.to.push(to);
       }
-      if (budget.spend(face.v.length + cand.length)) yield;
+      if (budget.spend(face.v.length + to - from)) yield;
     }
     const kept = new Uint8Array(pieces.length);
     for (let i = 0; i < pieces.length; i++) {
@@ -1616,6 +1698,7 @@ export class Volume {
     }
     this.#footprint = yield* print.finish(budget);
     if (capped.length > 0) this.#groundPlanes = yield* groundPlanes(this.#ground, under, this.#bounds, budget);
+    this.#box = capped.length > 0 ? under : null;
 
     // 6. Each face cut by the bucket lines across it, x then y as every cut runs (a line a face's neighbor takes and it skips would part their shared edge differently), each piece filed where its middle reads.
     for (const f of capped) {
@@ -1642,9 +1725,20 @@ export class Volume {
     if (b === undefined) {
       b = this.#buckets.length;
       this.#byKey.set(key, b);
-      this.#buckets.push({ key, bx, by, pending: [], job: null, guidesPending: [], faces: [], guides: [], box: null, turns: new Map() });
+      this.#buckets.push({ key, bx, by, pending: [], job: null, guidesPending: [], faces: [], guides: [], box: null, turns: new Map(), turnJobs: new Map(), draws: new Map(), drawJobs: new Map() });
     }
     return this.#buckets[b]!;
+  }
+
+  /** The capped shell's box in the world before the ground cut, or null when the clip leaves nothing: which buckets the board may look at. */
+  get box(): WorldBox | null {
+    this.prepare();
+    return this.#box;
+  }
+
+  /** Counts each time a cut ends and drops its neighbors' drawings, so the board knows to ask for them again. */
+  get drawEpoch(): number {
+    return this.#drawEpoch;
   }
 
   /** The stand rule's footprint (design 4.2 step 9). */
@@ -1770,6 +1864,25 @@ export class Volume {
     b.guides = guides;
     b.guidesPending = [];
     b.pending = null;
+    // A neighbor's lines read the faces across its edges, which this cut has just linked: its drawings are made again.
+    for (const n of this.#around(b)) {
+      n.draws.clear();
+      n.drawJobs.clear();
+    }
+    this.#drawEpoch++;
+  }
+
+  /** The buckets made around one, the eight that can hold a face across one of its edges or corners. */
+  #around(b: Bucket): Bucket[] {
+    const out: Bucket[] = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const i = this.#byKey.get(`${b.bx + dx},${b.by + dy}`);
+        if (i !== undefined) out.push(this.#buckets[i]!);
+      }
+    }
+    return out;
   }
 
   /** Every bucket cut, for the tests and for a volume small enough to cut at once. */
@@ -1841,14 +1954,18 @@ export class Volume {
    * turn kept from before then would hide them for good (review
    * ISOA1-ASTRA-08).
    */
-  #turn(b: Bucket, turn: Turn) {
-    let t = b.turns.get(turn);
-    if (t) return t;
+  #turn(b: Bucket, turn: Turn): TurnData {
+    return b.turns.get(turn) ?? finish(this.#turnJob(b, turn, UNBOUNDED));
+  }
+
+  /** The turn of a bucket's faces and guides in slices, kept once made (review ISOA1-LAYOUT: the board's draw path reads turns only through this). */
+  *#turnJob(b: Bucket, turn: Turn, budget: Budget): Job<TurnData> {
     const band = new Int32Array(b.faces.length);
     const near = new Uint8Array(b.faces.length);
     const F = this.#faces;
     const p = this.#st.p;
-    b.faces.forEach((id, k) => {
+    for (let k = 0; k < b.faces.length; k++) {
+      const id = b.faces[k]!;
       let x = 0;
       let y = 0;
       const at = F.off[id]!;
@@ -1859,15 +1976,201 @@ export class Volume {
       }
       band[k] = bandAt(turn, x / (end - at), y / (end - at));
       near[k] = towardViewer(turn, F.normal[3 * id]!, F.normal[3 * id + 1]!, F.normal[3 * id + 2]!) > 0 ? 1 : 0;
-    });
+      if (budget.spend(end - at)) yield;
+    }
     const guideBand = new Int32Array(b.guides.length);
     const guideNear = new Uint8Array(b.guides.length);
     b.guides.forEach((g, k) => {
       guideBand[k] = bandAt(turn, (g.ax + g.bx) / 2, (g.ay + g.by) / 2);
       guideNear[k] = towardViewer(turn, g.nx, g.ny, 0) > 0 ? 1 : 0;
     });
-    b.turns.set(turn, (t = { band, near, guideBand, guideNear }));
+    if (budget.spend(b.guides.length)) yield;
+    // A read between the slices may have made it already: the first stays, so every reader sees the same arrays.
+    let t = b.turns.get(turn);
+    if (!t) b.turns.set(turn, (t = { band, near, guideBand, guideNear }));
     return t;
+  }
+
+  /**
+   * A cut bucket's drawing at a turn (design 4.2 steps 7 and 8): each
+   * band's fill loops and strokes. With a deadline it stops once past it
+   * and carries on at the next call, as a cut does, so the board's draw
+   * path does no unbounded work at layout (review ISOA1-LAYOUT). Null
+   * until done, and while the bucket is not cut. Kept per turn until a
+   * neighbor's cut ends, since its lines cross into that neighbor.
+   */
+  drawn(key: string, turn: Turn, deadline = Infinity): BucketDraw | null {
+    if (!this.prepare(deadline)) return null;
+    const bi = this.#byKey.get(key);
+    if (bi === undefined) return NO_DRAW;
+    const b = this.#buckets[bi]!;
+    if (b.pending) return null;
+    const have = b.draws.get(turn);
+    if (have) return have;
+    let job = b.drawJobs.get(turn);
+    if (!job) b.drawJobs.set(turn, (job = this.#drawJob(b, turn)));
+    this.#budget.deadline = deadline;
+    const r = job.next();
+    if (!r.done) return null;
+    b.drawJobs.delete(turn);
+    b.draws.set(turn, r.value);
+    return r.value;
+  }
+
+  /** A bucket's drawing kept from an earlier call, or null: never does any work. */
+  drawnNow(key: string, turn: Turn): BucketDraw | null {
+    if (this.#job) return null;
+    const bi = this.#byKey.get(key);
+    if (bi === undefined) return NO_DRAW;
+    return this.#buckets[bi]!.draws.get(turn) ?? null;
+  }
+
+  *#drawJob(b: Bucket, turn: Turn): Job<BucketDraw> {
+    const budget = this.#budget;
+    // The owner of an edge across a bucket line is read from the turn of the face beyond it, so those turns come first, in slices too.
+    if (!b.turns.has(turn)) yield* this.#turnJob(b, turn, budget);
+    for (const n of this.#around(b)) if (n.pending === null && !n.turns.has(turn)) yield* this.#turnJob(n, turn, budget);
+    const t = this.#turn(b, turn);
+    const F = this.#faces;
+    const p = this.#st.p;
+    // Under the ground at 0 lies only what is inside a pit's opening, and the ground's level cut at 0 parts every face there from what is above, so a face, line or guide is inside when its lowest point is under 0.
+    const lowAt = (z: number) => z < -EPS;
+    // The faces by band, near or far, and above the ground at 0 or inside a pit's opening.
+    const groups = new Map<number, number[]>();
+    for (let k = 0; k < b.faces.length; k++) {
+      const id = b.faces[k]!;
+      let bottom = Infinity;
+      for (let q = F.off[id]!; q < F.off[id + 1]!; q++) bottom = Math.min(bottom, p[3 * F.v[q]! + 2]!);
+      const g = 4 * t.band[k]! + 2 * t.near[k]! + (lowAt(bottom) ? 1 : 0);
+      const list = groups.get(g);
+      if (list) list.push(id);
+      else groups.set(g, [id]);
+      if (budget.spend(F.off[id + 1]! - F.off[id]!)) yield;
+    }
+    type Build = { far: Float64Array[]; near: Float64Array[]; outline: number[]; hidden: number[]; guide: number[]; guideHidden: number[] };
+    const bands = new Map<number, [Build, Build]>();
+    const partOf = (band: number, low: boolean): Build => {
+      let pair = bands.get(band);
+      if (!pair) {
+        const empty = (): Build => ({ far: [], near: [], outline: [], hidden: [], guide: [], guideHidden: [] });
+        bands.set(band, (pair = [empty(), empty()]));
+      }
+      return pair[low ? 1 : 0];
+    };
+    for (const [g, ids] of groups) {
+      const band = Math.floor(g / 4);
+      const r = g - 4 * band;
+      const part = partOf(band, (r & 1) === 1);
+      const loops = yield* this.#walk(ids, budget);
+      (r & 2 ? part.near : part.far).push(...loops);
+    }
+    // Each edge once, by the nearer band beside it, as `lines` reads it.
+    for (let k = 0; k < b.faces.length; k++) {
+      const id = b.faces[k]!;
+      const band = t.band[k]!;
+      const near = t.near[k] === 1;
+      const at = F.off[id]!;
+      const n = F.off[id + 1]! - at;
+      for (let e = 0; e < n; e++) {
+        const a = F.v[at + e]!;
+        const c = F.v[at + (e + 1 === n ? 0 : e + 1)]!;
+        const g = this.#cutNeighbor(F.nb[at + e]!);
+        let lineNear = near;
+        if (g < 0) {
+          if (!this.onGround(a, c)) continue;
+        } else {
+          const gBand = this.#faceBand(g, turn);
+          const owner = gBand > band || (gBand === band && g < id) ? g : id;
+          if (owner !== id) continue;
+          const gNear = this.#faceNear(g, turn);
+          lineNear = near || gNear;
+          const N = F.normal;
+          const silhouette = near !== gNear;
+          const cap = F.cap[id] !== F.cap[g];
+          const crease = N[3 * id]! * N[3 * g]! + N[3 * id + 1]! * N[3 * g + 1]! + N[3 * id + 2]! * N[3 * g + 2]! < CREASE_COS;
+          if (!silhouette && !cap && !crease) continue;
+        }
+        const part = partOf(band, lowAt(Math.min(p[3 * a + 2]!, p[3 * c + 2]!)));
+        (lineNear ? part.outline : part.hidden).push(p[3 * a]!, p[3 * a + 1]!, p[3 * a + 2]!, p[3 * c]!, p[3 * c + 1]!, p[3 * c + 2]!);
+      }
+      if (budget.spend(2 * n)) yield;
+    }
+    b.guides.forEach((g, k) => {
+      const part = partOf(t.guideBand[k]!, lowAt(Math.min(g.az, g.bz)));
+      (t.guideNear[k] === 1 ? part.guide : part.guideHidden).push(g.ax, g.ay, g.az, g.bx, g.by, g.bz);
+    });
+    if (budget.spend(b.guides.length)) yield;
+    const { c, s } = turnAxes(turn);
+    const out: BandDraw[] = [];
+    for (const [band, [high, low]] of bands) {
+      const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      const grow = (q: ArrayLike<number>) => {
+        for (let i = 0; i + 2 < q.length; i += 3) {
+          const u = c * q[i]! - s * q[i + 1]!;
+          const v = (s * q[i]! + c * q[i + 1]!) / 2 - K * q[i + 2]!;
+          if (u < box.x0) box.x0 = u;
+          if (u > box.x1) box.x1 = u;
+          if (v < box.y0) box.y0 = v;
+          if (v > box.y1) box.y1 = v;
+        }
+      };
+      const done = (q: Build): BandPart => {
+        for (const loop of q.far) grow(loop);
+        for (const loop of q.near) grow(loop);
+        grow(q.outline);
+        grow(q.hidden);
+        grow(q.guide);
+        grow(q.guideHidden);
+        return { far: q.far, near: q.near, outline: Float64Array.from(q.outline), hidden: Float64Array.from(q.hidden), guide: Float64Array.from(q.guide), guideHidden: Float64Array.from(q.guideHidden) };
+      };
+      out.push({ band, high: done(high), low: done(low), box });
+      if (budget.spend(1)) yield;
+    }
+    out.sort((x, y) => x.band - y.band);
+    return { bands: out };
+  }
+
+  /**
+   * The boundary loops of a set of faces, by a walk of the edges with one
+   * side in it (design 4.2 step 8), in slices. The set is its own, not the
+   * face table's marks, so a walk paused between slices never reads
+   * another's.
+   */
+  *#walk(ids: readonly number[], budget: Budget): Job<Float64Array[]> {
+    const F = this.#faces;
+    const inSet = new Set(ids);
+    const next = new Map<number, number[]>();
+    for (const id of ids) {
+      const at = F.off[id]!;
+      const n = F.off[id + 1]! - at;
+      for (let k = 0; k < n; k++) {
+        const g = F.nb[at + k]!;
+        if (g >= 0 && inSet.has(g)) continue;
+        const a = F.v[at + k]!;
+        const to = F.v[at + (k + 1 === n ? 0 : k + 1)]!;
+        const list = next.get(a);
+        if (list) list.push(to);
+        else next.set(a, [to]);
+      }
+      if (budget.spend(n)) yield;
+    }
+    const out: Float64Array[] = [];
+    const p = this.#st.p;
+    for (const [start, list] of next) {
+      while (list.length > 0) {
+        const pts: number[] = [p[3 * start]!, p[3 * start + 1]!, p[3 * start + 2]!];
+        let at = list.pop()!;
+        for (let guard = 0; at !== start && guard < 1e7; guard++) {
+          pts.push(p[3 * at]!, p[3 * at + 1]!, p[3 * at + 2]!);
+          const more = next.get(at);
+          if (!more || more.length === 0) break;
+          at = more.pop()!;
+        }
+        if (pts.length >= 9) out.push(Float64Array.from(pts));
+        if (budget.spend(pts.length / 3)) yield;
+      }
+    }
+    return out;
   }
 
   /**
