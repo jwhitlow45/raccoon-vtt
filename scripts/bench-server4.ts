@@ -26,6 +26,7 @@
  *   node scripts/bench-server4.ts            (a laptop: budgets over 1.5, the reference server's ratio on this bench)
  *   node scripts/bench-server4.ts --server   (the server box itself: budgets as they are)
  *   node scripts/bench-server4.ts --discovery   (map discovery's rows alone, with or without --server)
+ *   node scripts/bench-server4.ts --ask   (the builder's ask rows alone)
  *
  * Then the bright and dark scenes again per player
  * (docs/design-v1-per-player-vision.md 8.1), with the six players as the
@@ -50,7 +51,8 @@
 import { chunkKey, holderChunkKey, holderTileKey, tileKey, wallChunk } from "../shared/keys.ts";
 import { SNAPSHOT_VERSION } from "../shared/migrate.ts";
 import { DEFAULT_SETTINGS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type FreeWall, type Member, type MemoryChunk, type RoomState, type TerrainId, type Token } from "../shared/model.ts";
-import type { Op } from "../shared/protocol.ts";
+import { MAX_ASK_OPS, type Op } from "../shared/protocol.ts";
+import { uuidv7 } from "../shared/ids.ts";
 import { encodeTile, fullTileBits, TILE_SUB } from "../shared/rules/fog.ts";
 import { projectState } from "../shared/project.ts";
 import { visionRules, type PartySight } from "../shared/ruleHooks.ts";
@@ -765,6 +767,102 @@ async function runFragmented(rows: Row[]): Promise<void> {
   rows.push({ row: "Each player's first snapshot, 4,000 free walls at 5 pieces each", budget: 250, ms: stats(times.later), covers: "a player's snapshot of that scene" });
 }
 
+/*
+ * The builder's ask (docs/design-v1-map-discovery.md 5.3, MD4-ASTRA-7) on an
+ * empty 200 x 200 Explore scene the party never saw, where no op forgets
+ * anything and so every op of an ask is read: a gesture of 64 rectangles of
+ * 2,000 squares, the most four asks carry, and the 20 bands of a rectangle
+ * over the whole scene, in two. Each gesture's asks go back to back, as a
+ * device sends them, and each is timed twice: its longest synchronous turn,
+ * as the delay of a zero-delay timer kept running through it, which every
+ * other room on the server waits out, and its whole time to the answer.
+ */
+async function runAsk(rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const room = benchRoom("dark", 5);
+  const table = await sitDown({ ...room, buildChunks: {}, memory: {}, memoryBy: {}, playedScenes: { [SCENE]: { sceneId: SCENE, rev: 0 } }, memoryShared: {} });
+  const terrain = (r: number): TerrainId => (r % 2 === 0 ? "wood" : "stone");
+  const rect = (r: number, k: number): Op => ({ t: "build.rect", sceneId: SCENE, terrain: terrain(r), x: 0, y: (k % 20) * 10, w: 200, h: 10 });
+  const gestures = [
+    ["A gesture of 64 rectangles of 2,000 squares in 4 asks", 64],
+    ["A whole-scene rectangle's 20 bands in 2 asks", 20],
+  ] as const;
+  for (const [what, count] of gestures) {
+    const turns: number[] = [];
+    const totals: number[] = [];
+    for (let r = 0; r < RUNS + 2; r++) {
+      const ops = Array.from({ length: count }, (_, k) => rect(r, k));
+      const t = await askTimed(table, ops);
+      if (r < 2) continue;
+      turns.push(t.turn);
+      totals.push(t.total);
+    }
+    rows.push({ row: `${what}, its longest synchronous turn, empty Explore scene`, budget: 25, ms: stats(turns), covers: "the DM's build.ask parts: the event loop's delay while they are read, which every room waits out" });
+    rows.push({ row: `${what}, to its answer, empty Explore scene`, budget: 5_000, ms: stats(totals), covers: "the DM's build.ask parts from the first's arrival to the last's answer" });
+  }
+  // What an ask's turn is held to: a batch today with one such band, applied, remembered and sent.
+  const turns: number[] = [];
+  for (let r = 0; r < RUNS + 2; r++) {
+    const sampler = longestTurn();
+    await send(table, table.dm, rect(r, r));
+    const turn = sampler.stop();
+    if (r >= 2) turns.push(turn);
+  }
+  rows.push({ row: "One band of 2,000 squares sent as an op, its longest synchronous turn, empty Explore scene", budget: 25, ms: stats(turns), covers: "the DM's build.rect: a batch's turn, which an ask's turn matches" });
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+}
+
+/** The longest gap between a zero-delay timer's runs from now until `stop`, the longest turn anything held the event loop. */
+function longestTurn(): { stop: () => number } {
+  let turn = 0;
+  let done = false;
+  let last = performance.now();
+  const tick = () => {
+    const now = performance.now();
+    turn = Math.max(turn, now - last);
+    last = now;
+    if (!done) setTimeout(tick, 0);
+  };
+  setTimeout(tick, 0);
+  return {
+    stop: () => {
+      done = true;
+      return Math.max(turn, performance.now() - last);
+    },
+  };
+}
+
+/** Sends a gesture's asks from the DM back to back under a group of their own and times the longest synchronous turn and the whole time to the last one's answer. */
+async function askTimed(table: Table, ops: readonly Op[]): Promise<{ turn: number; total: number }> {
+  const conn = table.dm;
+  const group = uuidv7();
+  const parts: Op[] = [];
+  for (let k = 0; k < ops.length; k += MAX_ASK_OPS) parts.push({ t: "build.ask", sceneId: SCENE, ops: ops.slice(k, k + MAX_ASK_OPS) as never, part: parts.length, ...(k + MAX_ASK_OPS < ops.length ? { more: true as const } : {}) });
+  table.sent.sender = conn;
+  table.sent.senderText = "";
+  const sampler = longestTurn();
+  const t0 = performance.now();
+  let n = 0;
+  for (const part of parts) {
+    n = (table.n.get(conn) ?? 0) + 1;
+    table.n.set(conn, n);
+    await table.actor.op(conn, n, part, group);
+  }
+  const answered = () => {
+    if (!table.sent.senderText) return false;
+    const answer = JSON.parse(table.sent.senderText) as { t: string; acks?: number[]; rejects?: { n: number }[] };
+    return answer.t === "ev" && (answer.acks?.includes(n) === true || answer.rejects?.some((r) => r.n === n) === true);
+  };
+  for (let wait = 0; wait < 20_000 && !answered(); wait++) await new Promise((resolve) => setTimeout(resolve, 1));
+  const total = performance.now() - t0;
+  const turn = sampler.stop();
+  if (!answered()) throw new Error("the ask got no answer");
+  const answer = JSON.parse(table.sent.senderText) as { rejects?: { n: number; message: string }[] };
+  const refused = answer.rejects?.find((r) => r.n === n);
+  if (refused) throw new Error(`the ask was refused: ${refused.message}`);
+  return { turn, total };
+}
+
 export async function runServerBench(): Promise<Row[]> {
   const rows: Row[] = [];
   const untime = timeHolderSight();
@@ -796,6 +894,7 @@ export async function runDiscoveryBench(): Promise<Row[]> {
   await runDiscovery(false, rows);
   await runDiscovery(true, rows);
   await runFragmented(rows);
+  await runAsk(rows);
   return rows;
 }
 
@@ -817,5 +916,7 @@ export function formatServerBench(rows: Row[], onServer: boolean): string {
 
 const argv = process.argv;
 if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
-  console.log(formatServerBench(argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server")));
+  const rows: Row[] = [];
+  if (argv.includes("--ask")) await runAsk(rows);
+  console.log(formatServerBench(argv.includes("--ask") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server")));
 }
