@@ -198,6 +198,26 @@ describe("a group whose dragged creature an unseen wall stops (MD2-ASTRA-4)", ()
   });
 });
 
+describe("a group whose mover's own landing would squeeze (MD2-ASTRA-8, MD2-LK-9)", () => {
+  test("goes back to the last spot that mover stands whole, since a group carries no squeeze, and never refuses in place", () => {
+    // A Large Thorn at (6, 4) toward (12, 5), into a corridor one cell wide between walls at y = 5 and y = 6 from x = 10, and Bree clear.
+    const s = base();
+    s.tokens.thorn = { ...s.tokens.thorn!, size: "large", x: 6, y: 4 };
+    s.tokens.bree = token("bree", { kind: "pc", name: "Bree", disposition: "ally", ownerIds: ["p1"], x: 2, y: 9 });
+    for (let x = 10; x < 20; x++) {
+      edge(s, `${x},5,n`, WALL);
+      edge(s, `${x},6,n`, WALL);
+    }
+    const alone = touchLanding({ t: "token.move", tokenId: "thorn", x: 12, y: 5 }, P1, s, deps);
+    assert.deepEqual(alone?.op, { t: "token.move", tokenId: "thorn", x: 11.5, y: 4.5, squeeze: true }, "alone it lands squeezed");
+    const group: OpOf<"token.moveMany"> = { t: "token.moveMany", moves: [{ tokenId: "thorn", x: 12, y: 5 }, { tokenId: "bree", x: 6, y: 9 }] };
+    assert.equal(decide(group, s), SOMETHING_BLOCKS);
+    const landed = touchLanding(group, P1, s, deps);
+    assert.deepEqual(landed, { op: { t: "token.moveMany", moves: [{ tokenId: "thorn", x: 8, y: 4 }, { tokenId: "bree", x: 6, y: 9 }] }, words: SOMETHING_BLOCKS });
+    assert.equal(decide(landed!.op, s), "ok");
+  });
+});
+
 describe("the touch rule on hexes (MD2-ASTRA-1, MD2-LK-3)", () => {
   for (const gridShape of ["hexRows", "hexColumns"] as const) {
     /** Thorn at (2, 5) on a hex scene with fog on, a free wall all along x = 8, and ground revealed as asked. */

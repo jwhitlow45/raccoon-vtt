@@ -2081,7 +2081,8 @@ function cutMove(op: OpOf<"token.move">, token: Token, at: Point, piece: number,
   return out;
 }
 
-function moveLanding(c: Check, op: OpOf<"token.move">, takes: (o: Op) => boolean): TouchLanding | null {
+/* `squeeze: false` for a mover of a group, which carries no squeeze: the search then goes back to the last spot it takes unsqueezed. */
+function moveLanding(c: Check, op: OpOf<"token.move">, takes: (o: Op) => boolean, opts: { squeeze: boolean } = { squeeze: true }): TouchLanding | null {
   if (op.teleport !== undefined) return null;
   const on = walkingOn(c, op.tokenId, op);
   if (!on) return null;
@@ -2108,7 +2109,9 @@ function moveLanding(c: Check, op: OpOf<"token.move">, takes: (o: Op) => boolean
     const at = { x: land.x, y: land.y };
     const words = land.stopped ? walkWords(c, piece.from, piece.to, land.stopped.blocker) : SOMETHING_BLOCKS;
     const height = op.route ? (land.x === piece.to.x && land.y === piece.to.y ? piece.to.elevation : cutHeight(c, piece.from, at)) : land.stopped ? cutHeight(c, walker, at) : elevation;
-    for (const squeeze of land.squeeze && (j === 0 || !op.route) ? [true, false] : [false]) {
+    // Unsqueezed at a spot the walk reaches only squeezed is no landing for a mover that cannot squeeze: it goes back further.
+    const tries = land.squeeze ? (!opts.squeeze ? [] : j === 0 || !op.route ? [true, false] : [false]) : [false];
+    for (const squeeze of tries) {
       const cut = cutMove(op, token, at, j, height, squeeze);
       if (takes(cut)) return { op: cut, words };
     }
@@ -2158,7 +2161,9 @@ function lastTaken(n: number, taken: (k: number) => boolean): number | null {
  * a move the walls refuse alone, its own leg or a creature it drags, is cut
  * back to the last spot the check takes for it, and the group is then
  * checked whole. So a dragged follower's unseen wall never refuses the
- * group in place (MD2-ASTRA-4). Words are the first landed move's.
+ * group in place (MD2-ASTRA-4). A group carries no squeeze, so a mover
+ * whose own landing would squeeze goes back to the last spot it takes
+ * unsqueezed (MD2-ASTRA-8, MD2-LK-9). Words are the first landed move's.
  */
 function groupLanding(c: Check, op: OpOf<"token.moveMany">, takes: (o: Op) => boolean): TouchLanding | null {
   let words: string | null = null;
@@ -2166,8 +2171,8 @@ function groupLanding(c: Check, op: OpOf<"token.moveMany">, takes: (o: Op) => bo
     const single: OpOf<"token.move"> = { t: "token.move", ...move };
     const alone = canApply(single, c.actor, c.state, c.deps);
     if (alone.ok || !TOUCH_REFUSALS.has(alone.message)) return move;
-    const landed = moveLanding(c, single, takes);
-    if (!landed || landed.op.t !== "token.move" || landed.op.squeeze) return move;
+    const landed = moveLanding(c, single, takes, { squeeze: false });
+    if (!landed || landed.op.t !== "token.move") return move;
     words ??= landed.words;
     const { elevation: _elevation, ...rest } = move;
     return { ...rest, x: landed.op.x, y: landed.op.y, ...(landed.op.elevation !== undefined ? { elevation: landed.op.elevation } : {}) };
