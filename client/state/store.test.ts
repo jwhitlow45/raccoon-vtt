@@ -4,7 +4,7 @@ import type { RoomState, Viewer } from "#shared/model.ts";
 import { BLOCK_SAVES_TOO_FAST, checkLimits, LIMITS } from "#shared/limits.ts";
 import { LEDGE_IN_THE_WAY_BACK, WALL_IN_THE_WAY_BACK } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
-import { FORGET_ASK, type ClientOp, type ServerMessage } from "#shared/protocol.ts";
+import { FORGET_ASK, type ClientOp, type OpOf, type ServerMessage } from "#shared/protocol.ts";
 import { actor, character, companionBlock, DM, entry, P1, P2, room, template, token } from "#shared/testutil.ts";
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
@@ -1125,6 +1125,52 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     assert.equal(s.state().forgetAsk, null);
     const undo = s.room.store.getState().pending;
     assert.deepEqual(undo.map((p) => [p.op, p.quiet]), [[{ t: "undo", of: b }, true]]);
+  });
+
+  test("a gesture's refused ask and the bands refused with it make one question, whose yes sends only the bands again and whose no sends nothing", () => {
+    const s = setup(room());
+    s.connect();
+    const rect = (y: number): OpOf<"build.rect"> => ({ t: "build.rect", sceneId: "s1", terrain: "stone", x: 0, y, w: 80, h: 25 });
+    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)] }, { group: "g1" })!;
+    const a = s.room.dispatch(rect(0), { group: "g1" })!;
+    const b = s.room.dispatch(rect(25), { group: "g1" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [ask, a, b].map((n) => ({ n, code: "forget" as const, message: FORGET_ASK })) });
+    assert.deepEqual(s.state().forgetAsk?.asks.map((x) => x.n), [ask, a, b]);
+    s.room.ui.answerForget(true);
+    assert.deepEqual(s.state().pending.map((p) => [p.op.t, (p.op as { forget?: true }).forget, p.group]), [["build.rect", true, "g1"], ["build.rect", true, "g1"]]);
+    const no = setup(room());
+    no.connect();
+    const ask2 = no.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)] }, { group: "g2" })!;
+    const c = no.room.dispatch(rect(0), { group: "g2" })!;
+    no.room.applyEv({ t: "ev", seq: no.state().seq + 1, changes: [], rejects: [ask2, c].map((n) => ({ n, code: "forget" as const, message: FORGET_ASK })) });
+    no.room.ui.answerForget(false);
+    assert.equal(no.state().pending.length, 0, "nothing was taken, so nothing is taken back");
+  });
+
+  test("a taken ask is nothing a no takes back, and one refused for another reason says nothing of its own", () => {
+    const s = setup(room());
+    s.connect();
+    const paint = (x: number): OpOf<"build.paint"> => ({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: [`${x},0`] });
+    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)] }, { group: "g1" })!;
+    const a = s.room.dispatch(paint(1), { group: "g1" })!;
+    const b = s.room.dispatch(paint(2), { group: "g1" })!;
+    // The ask fits, but the room changed before the last band came: only it is asked about.
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: [ask, a], rejects: [{ n: b, code: "forget", message: FORGET_ASK }] });
+    s.room.ui.answerForget(false);
+    assert.deepEqual(s.state().pending.map((p) => p.op), [{ t: "undo", of: a }], "the band taken, not the ask");
+    // The ask taken and every band asked about after it: nothing of the gesture changed the build, so a no sends nothing.
+    const only = setup(room());
+    only.connect();
+    const ask2 = only.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)] }, { group: "g3" })!;
+    const c = only.room.dispatch(paint(1), { group: "g3" })!;
+    only.room.applyEv({ t: "ev", seq: only.state().seq + 1, changes: [], acks: [ask2], rejects: [{ n: c, code: "forget", message: FORGET_ASK }] });
+    only.room.ui.answerForget(false);
+    assert.equal(only.state().pending.length, 0);
+    const k = setup(room());
+    k.connect();
+    const refused = k.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)] }, { group: "g2" })!;
+    k.room.applyEv({ t: "ev", seq: k.state().seq + 1, changes: [], rejects: [{ n: refused, code: "invalid", message: "not on hexes" }] });
+    assert.equal(k.state().toasts.length, 0);
   });
 
   test("a no with nothing of the gesture taken sends nothing", () => {

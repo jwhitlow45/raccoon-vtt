@@ -439,8 +439,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   /**
    * The newest op the server took of each recent undo group, so a no to the
    * forget question can take back the part of a gesture that went before
-   * the asked op: a big rectangle room goes as several bands, the first of
-   * which may fit (`answerForget`).
+   * the asked op: a stroke sends as it goes, so its first ops may fit
+   * (`answerForget`). A gesture known whole asks first (builder/ask.ts), so
+   * none of it is taken before the question.
    */
   const takenInGroup = new Map<string, number>();
   let disposed = false;
@@ -671,7 +672,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       }
       const sending: number[] = [];
       for (const { op, group } of ask.asks) {
-        if (op.t === "undo" || op.t === "redo") continue;
+        // A gesture's ask was answered by the question itself: its ops go again with the yes.
+        if (op.t === "undo" || op.t === "redo" || op.t === "build.ask") continue;
         const n = room.dispatch({ ...op, forget: true } as ClientOp, group !== undefined ? { group } : undefined);
         if (n !== null) sending.push(n);
       }
@@ -795,7 +797,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         const restored = new Map((msg.restored ?? []).map((r) => [r.n, r.what]));
         for (const n of msg.acks ?? []) {
           const sent = pending.find((p) => p.n === n);
-          if (sent?.group !== undefined) {
+          // An ask the server took changed nothing, so a no has nothing of it to take back.
+          if (sent?.group !== undefined && sent.op.t !== "build.ask") {
             takenInGroup.delete(sent.group);
             takenInGroup.set(sent.group, n);
             if (takenInGroup.size > 32) takenInGroup.delete(takenInGroup.keys().next().value!);
@@ -819,6 +822,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
             asks.push({ n: r.n, op, ...(sent.group !== undefined ? { group: sent.group } : {}) });
             continue;
           }
+          // An ask refused for any other reason says nothing: the gesture's own ops, refused the same, say it.
+          if (op.t === "build.ask") continue;
           if (op.t === "undo" || op.t === "redo") {
             const answer = undoAnswer(op.t, { refused: r.message });
             renew(answer.text, answer.tone);

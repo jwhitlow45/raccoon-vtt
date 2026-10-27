@@ -1,4 +1,4 @@
-import { dispatchGesture } from "../../../state/actions.ts";
+import { dispatchBuild } from "../ask.ts";
 import type { ToolContext, ToolPointer, ToolPointerHandlers } from "../../tools.ts";
 import { strokeCells, strokeMaySend } from "../cells.ts";
 import { builderSlot } from "../store.ts";
@@ -89,7 +89,7 @@ export const heightPointer = {
     store.setState({ area: null });
     gesture.areaSceneId = null;
     if (!area || sceneId !== ctx.scene.id) return;
-    dispatchGesture(ctx.actions, paintCells(ctx.getState().view, sceneId, areaCells(area.a, p.world, ctx.scene.bounds), { ...s, paint: gesture.paint }));
+    dispatchBuild(ctx.actions, ctx.scene, paintCells(ctx.getState().view, sceneId, areaCells(area.a, p.world, ctx.scene.bounds), { ...s, paint: gesture.paint }));
   },
 
   /** A second finger landed or the tool changed. Cells a stroke already sent stay, and undo takes them back. The rest is dropped. */

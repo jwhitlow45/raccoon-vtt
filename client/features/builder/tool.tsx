@@ -7,6 +7,7 @@ import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { dispatchGesture } from "../../state/actions.ts";
+import { dispatchBuild } from "./ask.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import {
   edgeOps,
@@ -122,7 +123,7 @@ function sendRun(ctx: ToolContext, run: readonly string[]): void {
     const feature = runFeature(edge, edgeAt(view, ctx.scene.id, key), secretFound);
     if (feature !== undefined) edges.push({ key, feature });
   }
-  dispatchGesture(ctx.actions, edgeOps(ctx.scene.id, edges));
+  dispatchBuild(ctx.actions, ctx.scene, edgeOps(ctx.scene.id, edges));
 }
 
 function tapPoly(p: ToolPointer, ctx: ToolContext): void {
@@ -155,7 +156,7 @@ export function closePolygon(ctx: Pick<ToolContext, "scene" | "actions" | "scope
     ctx.scene.bounds,
   );
   builderState.setState({ poly: [], note: ops.length === 0 ? "That shape holds no whole square." : null });
-  dispatchGesture(ctx.actions, ops);
+  dispatchBuild(ctx.actions, ctx.scene, ops);
 }
 
 /** A tap on a label opens its edit pane (LabelPane.tsx), and a tap elsewhere places a new one. */
@@ -263,7 +264,7 @@ export const builderTool: ToolDef = {
       } else if ((s.mode === "rect" || s.mode === "eraseRect") && s.rect) {
         builderState.setState({ rect: null });
         const terrain = s.mode === "eraseRect" ? null : s.terrain;
-        dispatchGesture(ctx.actions, rectOps(ctx.scene.id, rectBetween(s.rect.a, p.world), terrain, ctx.scene.bounds));
+        dispatchBuild(ctx.actions, ctx.scene, rectOps(ctx.scene.id, rectBetween(s.rect.a, p.world), terrain, ctx.scene.bounds));
       } else if (s.mode === "poly" && tap) {
         tapPoly(p, ctx);
       } else if (s.mode === "edge") {
