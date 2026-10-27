@@ -1,7 +1,7 @@
 import { CHUNK_CELLS, FOG_SUBCELLS } from "#shared/model.ts";
 import { coverageCacheKey, eachHexPrism, MAX_SCENE_CELLS, resolveArea, type AreaContext, type AreaSolid, type AreaTemplateInput, type HexPrism, type ResolvedArea, type SolidBox } from "#shared/rules/aoe.ts";
 import type { Point3 } from "#shared/rules/geom.ts";
-import { cornerAt, hexAt, hexCenter, hexCorners, hexKey } from "#shared/rules/hex.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners } from "#shared/rules/hex.ts";
 import { crossingsAt, insideCrossings, type Polygon, type PolygonIndex } from "#shared/rules/walls.ts";
 import { K, turnAxes, type Turn } from "../../lib/view.ts";
 
@@ -467,12 +467,13 @@ function facing(st: Store, ids: number[], center: Point3, cap = false): Poly | n
 
 type Shell = { polys: Poly[]; guides: Guide[]; convex: boolean; segments: number };
 
-/** Adds a vertex, merging any made before at the very same point. */
-function merged(st: Store, seen: Map<string, number>, x: number, y: number, z: number): number {
-  const key = `${x},${y},${z}`;
-  let id = seen.get(key);
-  if (id === undefined) seen.set(key, (id = st.add(x, y, z)));
-  return id;
+/**
+ * A hex corner as one number: corners lie on the 1/64 cell lattice, well
+ * within a 200 cell scene. Numbers, not strings, so the maps of a stack
+ * of a hundred thousand prisms make no garbage per look and grow cheaply.
+ */
+function cornerKey(p: { x: number; y: number }): number {
+  return (Math.round(p.x * 64) + 8192) * 32768 + (Math.round(p.y * 64) + 8192);
 }
 
 /** A point of a box's frame: c + u e0 + v e1 + w e2. */
@@ -632,9 +633,10 @@ function* hexShell(st: Store, s: Extract<AreaSolid, { kind: "hexStack" }>, budge
   const g = s.reach.g;
   const prisms: HexPrism[] = [];
   const corners: { x: number; y: number }[][] = [];
-  const byHex = new Map<string, HexPrism>();
-  const cornerKey = (p: { x: number; y: number }) => `${p.x},${p.y}`;
-  const heights = new Map<string, number[]>();
+  // Hexes by column and row, as one number.
+  const hexNumber = (h: { col: number; row: number }) => (h.col + 1024) * 4096 + (h.row + 1024);
+  const byHex = new Map<number, HexPrism>();
+  const heights = new Map<number, number[]>();
   for (const p of eachHexPrism(s)) {
     // A visit reads its steps from every source hex, a prism its corners too.
     st.visits++;
@@ -643,7 +645,7 @@ function* hexShell(st: Store, s: Extract<AreaSolid, { kind: "hexStack" }>, budge
     const cs = hexCorners(g, p.hex).map((k) => cornerAt(g, k));
     prisms.push(p);
     corners.push(cs);
-    byHex.set(hexKey(p.hex), p);
+    byHex.set(hexNumber(p.hex), p);
     for (const c of cs) {
       const key = cornerKey(c);
       const list = heights.get(key);
@@ -655,8 +657,14 @@ function* hexShell(st: Store, s: Extract<AreaSolid, { kind: "hexStack" }>, budge
     list.sort((a, b) => a - b);
     if (budget.spend(list.length)) yield;
   }
-  const seen = new Map<string, number>();
-  const at = (c: { x: number; y: number }, z: number) => merged(st, seen, c.x, c.y, z);
+  // A vertex by its corner and its layer: elevations reach 100,000 ft, so at a foot a cell a layer lies within two million of 0.
+  const seen = new Map<number, number>();
+  const at = (c: { x: number; y: number }, z: number) => {
+    const key = cornerKey(c) * 4194304 + (z + 2097152);
+    let id = seen.get(key);
+    if (id === undefined) seen.set(key, (id = st.add(c.x, c.y, z)));
+    return id;
+  };
   const between = (c: { x: number; y: number }, z0: number, z1: number) => (heights.get(cornerKey(c)) ?? []).filter((z, i, all) => z > z0 && z < z1 && (i === 0 || all[i - 1] !== z));
   const polys: Poly[] = [];
   for (let i = 0; i < prisms.length; i++) {
@@ -672,7 +680,7 @@ function* hexShell(st: Store, s: Extract<AreaSolid, { kind: "hexStack" }>, budge
       const a = cs[k]!;
       const b = cs[(k + 1) % 6]!;
       // The hex across this side has its center at this one's mirrored through the side's midpoint, near enough with the corners rounded to the lattice.
-      const other = byHex.get(hexKey(hexAt(g, { x: a.x + b.x - middle.x, y: a.y + b.y - middle.y })));
+      const other = byHex.get(hexNumber(hexAt(g, { x: a.x + b.x - middle.x, y: a.y + b.y - middle.y })));
       const open: [number, number][] = [];
       if (!other || other.hi <= p.lo || other.lo >= p.hi) open.push([p.lo, p.hi]);
       else {
