@@ -245,7 +245,7 @@ describe("a walk stopped at its first step sends nothing (D-261027-05)", () => {
     assert.ok(!("intended" in plan), JSON.stringify(plan));
     const sent: ClientOp[] = [];
     const notes: unknown[] = [];
-    sendPlan(plan, { dispatch: (op) => (sent.push(op), 7), newId: () => "g", note: (n) => notes.push(n), shownNote: () => null, standing: () => null, notify: () => {}, showActions: () => {} });
+    sendPlan(plan, { dispatch: (op) => (sent.push(op), 7), newId: () => "g", note: (n) => notes.push(n), shownNote: () => null, standing: () => null, attempts: new Map(), notify: () => {}, showActions: () => {} });
     assert.deepEqual(sent, []);
     assert.equal((notes[0] as { n: number | null }).n, null);
   });

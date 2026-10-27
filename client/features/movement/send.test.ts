@@ -22,6 +22,7 @@ function deps(where: Record<string, { sceneId: string; x: number; y: number }> =
     note: (note) => notes.push(note),
     shownNote: () => notes.at(-1) ?? null,
     standing: (id) => where[id] ?? null,
+    attempts: new Map(),
     notify: (text) => toasts.push(text),
     showActions: (open) => bar.push(open),
   };
@@ -89,6 +90,31 @@ describe("sending a drop", () => {
     assert.equal(h.notes.at(-1)!.n, 41);
     h.answers[0]!("refused");
     assert.equal(h.notes.at(-1)!.n, null);
+  });
+
+  test("an older walk's blocked answer that a later walk overtook makes no note, even where the later one stands (MD4-ASTRA-3)", () => {
+    // Astra's case: walk 1 toward (9, 5), walk 2 toward (4, 6), one answer takes both and says only walk 1 was blocked.
+    const h = deps({ thorn: { sceneId: "s1", x: 4, y: 6 } });
+    sendPlan({ moves: [{ tokenId: "thorn", x: 9, y: 5 }], stop: null, held: [] }, h.d);
+    sendPlan({ moves: [{ tokenId: "thorn", x: 4, y: 6 }], stop: null, held: [] }, h.d);
+    h.answers[0]!("taken", undefined, undefined, undefined, true);
+    h.answers[1]!("taken");
+    assert.deepEqual(h.notes, []);
+    // Had the later walk been the blocked one, its note has its own number and spot.
+    const k = deps({ thorn: { sceneId: "s1", x: 4, y: 6 } });
+    sendPlan({ moves: [{ tokenId: "thorn", x: 9, y: 5 }], stop: null, held: [] }, k.d);
+    sendPlan({ moves: [{ tokenId: "thorn", x: 4, y: 7 }], stop: null, held: [] }, k.d);
+    k.answers[0]!("taken");
+    k.answers[1]!("taken", undefined, undefined, undefined, true);
+    assert.deepEqual(k.notes, [{ tokenId: "thorn", sceneId: "s1", blocker: "unknown", door: null, ghost: { x: 4, y: 7 }, aim: { x: 4, y: 7 }, at: { x: 4, y: 6 }, n: 42 }]);
+  });
+
+  test("a group's blocked answer that later walks overtook for all its tokens says nothing", () => {
+    const h = deps();
+    sendPlan({ moves: [{ tokenId: "a", x: 1, y: 1 }, { tokenId: "b", x: 2, y: 1 }], stop: null, held: [] }, h.d);
+    sendPlan({ moves: [{ tokenId: "a", x: 3, y: 1 }, { tokenId: "b", x: 4, y: 1 }], stop: null, held: [] }, h.d);
+    h.answers[0]!("taken", undefined, undefined, undefined, true);
+    assert.deepEqual(h.toasts, []);
   });
 
   test("an answer heard while the plan is still sending waits for the plan's own note", () => {

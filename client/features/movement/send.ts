@@ -12,8 +12,18 @@ export type SendDeps = {
   note(note: StopNote): void;
   /** The note shown now, which a walk's answer may change. */
   shownNote(): StopNote | null;
-  /** Where a token stands in this device's copy now, which holds the server's answer once a walk is answered. */
+  /**
+   * Where a token stands in the copy the server confirmed, which holds a
+   * walk's answer once it is answered. Never the predicted view, where a
+   * later walk still on its way may already stand.
+   */
   standing(tokenId: string): (Point & { sceneId: string }) | null;
+  /**
+   * The `n` of the newest walk this device sent of each token, kept by
+   * sendPlan for as long as these deps live, so an answer is heard only by
+   * the walk it answers and one overtaken by a later walk is dropped.
+   */
+  attempts: Map<string, number>;
   notify(text: string): void;
   /** Opens or closes the selection's action bar. The selection stays either way. */
   showActions(open: boolean): void;
@@ -41,6 +51,8 @@ export type SendDeps = {
  * ("Something blocks the way."), and its teleport takes that walk back. A
  * note the device already showed for the walk stays when the walk landed
  * where it said. A group's blocked move says only that some stopped short.
+ * An answer counts only for the newest walk of its token: one that a later
+ * walk overtook says nothing, since where it landed is no longer known.
  *
  * Returns the `n` of each op it sent, so the canvas knows how many answers
  * to wait for (canvas/dragNotes.ts watchDrop).
@@ -65,7 +77,9 @@ export function sendPlan(plan: DropPlan, deps: SendDeps): number[] {
       else run();
     };
     n = deps.dispatch(op, { ...(group !== undefined ? { group } : {}), onAnswer });
-    if (n !== null) sent.push(n);
+    if (n === null) continue;
+    sent.push(n);
+    for (const tokenId of movedBy(op)) deps.attempts.set(tokenId, n);
   }
   if (plan.stop) {
     // A walk stopped at its first step that sent nothing has no walk for its teleport to take back.
@@ -81,8 +95,18 @@ export function sendPlan(plan: DropPlan, deps: SendDeps): number[] {
   return sent;
 }
 
+/** The tokens a move op walks. */
+function movedBy(op: ClientOp): string[] {
+  if (op.t === "token.move") return [op.tokenId];
+  if (op.t === "token.moveMany") return op.moves.map((m) => m.tokenId);
+  return [];
+}
+
 /** A walk the server landed short of where this device let it go (`blocked`): its note, at the spot it landed. */
 function heardBlocked(op: ClientOp, n: number, deps: SendDeps): void {
+  // Overtaken by a later walk of the token, whose own answer says where it stands.
+  const current = movedBy(op).filter((tokenId) => deps.attempts.get(tokenId) === n);
+  if (current.length === 0) return;
   if (op.t === "token.moveMany") {
     deps.notify(GROUP_BLOCKED_TEXT);
     return;

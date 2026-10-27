@@ -360,6 +360,7 @@ export function dragStops(deps: DragDeps): DragStops {
     return walk;
   };
 
+  const attempts = new Map<string, number>();
   const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] =>
     sendPlan(plan, {
       dispatch: (op, opts) =>
@@ -374,9 +375,10 @@ export function dragStops(deps: DragDeps): DragStops {
       note: (note) => notes.setState({ note, busy: false }),
       shownNote: () => notes.getState().note,
       standing: (id) => {
-        const t = store.getState().view?.tokens[id];
+        const t = store.getState().confirmed?.tokens[id];
         return t ? { sceneId: t.sceneId, x: t.x, y: t.y } : null;
       },
+      attempts,
       notify: (text) => ui.notify(text),
       showActions: (open) => ui.showActions(open),
     });
