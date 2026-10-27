@@ -133,7 +133,8 @@ In Isometric the board is two stages, one over the other:
 | Relief tint and shadow (relief.ts) | off where columns stand, else ground stage |
 | Walls, doors, windows, pillars | standing (5.5), or flat under ISO-D12 |
 | Map labels, text drawings, area and trap pills and badges | upright by the stand rule, else flat on the ground stage |
-| Areas, traps, other drawings, range rings, tethers | ground stage, draping over columns, and moving marks while their token is dragged (5.1) |
+| Areas | the shading and outline on the ground stage as before, and each area standing as its real shape in the depth list by the stand rule (docs/design-v1-iso-area-shapes.md), flat until it stands. An area being aimed and a dragged token's aura stand whole in the drag layer |
+| Traps, other drawings, range rings, tethers | ground stage, draping over columns, and moving marks while their token is dragged (5.1) |
 | Sight with its memory, fog | ground stage. Tops copy them |
 | Turn start, explored outline | ground stage, above the fog |
 | Pings, hold ring, laser, area previews, outliner flash, rulers | moving: overlay ground shapes, rulers upright lines, at their drawn height. Pills upright |

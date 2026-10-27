@@ -912,6 +912,18 @@ An Emanation cast from a token with **Moves with token** on (the default) is att
 
 Every area is a shape in three dimensions, and every creature has a height that comes from its size. That means a 20 ft Fireball centered on the ground misses a Medium creature flying 25 ft up. The squares under the flier are still shaded, so trust the "In area" list, not the shading. To reach a flier, put the Sphere on its token, raise the **Elevation** before placing, or aim a Cone or Line upward. An area put down on a platform starts at the platform's height.
 
+### Areas in Isometric
+
+The [isometric view](#the-isometric-view) shows each area as the shape it really is. A Fireball rises from the floor as a ball, a Cone aimed upward climbs at its angle, Moonbeam stands as a tall column, and Spirit Guardians wraps its cleric and walks with them. Each shape is see-through, with a bright outline, so you can see at a glance what lies inside it. A bat flying inside a Fireball shows inside the ball, while one flying over it shows above. A shape also reaches down into a pit as far as it really goes. Every creature an area catches wears a ring in the area's color round its feet.
+
+![The sunken hall in Isometric, turned once: a Fireball round the imp flying 20 ft up, cut off by the hall's wall, Spirit Guardians round Bree and Thorn on the dais, and a Moonbeam standing in the pit beside the goblin.](dm-guide/isometric-areas.webp)
+
+The shapes show exactly what the rules measure. When the flat shading in Top-down covers a creature's square but the creature isn't in the "In area" list, turn to Isometric: you will usually see that it stands under the Cone or above the Sphere.
+
+Isometric never shows a player more than Top-down does. On a player's screen an area stands up only where every bit of the ground under it is revealed and in that player's sight right now. Over fog, or over ground the player only remembers, it lies flat as it does in Top-down. Your DM-only areas stand dimmed, with a dashed outline, and players never get them at all.
+
+When many areas fill the screen, the ones nearest the middle stand up first, and "Building area shapes" shows at the top of the map while the rest still lie flat. The same can happen the first time you turn the map to a new side. Once a side has been drawn, turning back to it is quick. While you aim an area with the Area tool, or drag a creature that carries an aura, the shape follows your finger in a simpler form and settles into place a moment after you let go.
+
 ### Reminders
 
 An area can remind you when a creature enters it, starts its turn in it, or ends its turn in it. Turn these on with **Enters**, **Starts turn** and **Ends turn** under **⋯**, **Reminders**, and add **Once a turn** for spells that affect a creature only once per turn. Spirit Guardians, Moonbeam, Web, Spike Growth and other spell presets turn on the right reminders for you.
