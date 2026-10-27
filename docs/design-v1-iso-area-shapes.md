@@ -205,6 +205,17 @@ Order: after the map discovery lanes, HX-3 (IsoBoard.tsx, stand.ts, the hex area
 
 Filled by ISOA-2's docs commit, with every place the build went its own way and the bench's rows.
 
+**ISOA-1, the solid** (`shared/rules/aoe.ts`, `client/features/areas/volume.ts`):
+
+- **The build in three steps.** `buildVolume` makes the mesh, clips it and caps it, the one slice that cannot stop part way. `prepare` reads the footprint, finds the ground's planes, and cuts each face by the bucket lines across it, filing each piece by its middle. `ensure` then cuts one bucket by the ground and the bands and links its edges. Both stop at a deadline and carry on at the next call. Each face takes every bucket line across it when it is filed, since a line one face took and its neighbor skipped would part their shared edge differently. So the ground cut (4.2 step 4) runs per bucket, after the filing, as the bands do.
+- **No lengthwise steps.** A segment runs the solid's whole length. The bucket, ground and band cuts already split every long face.
+- **The footprint** (step 9) is read from the plans of the faces that look up, as a span per row of sub-cells, not from faces' boxes. A face's box beside a diagonal wall would reach past it, and the faces that look up cover a closed solid's plan.
+- **Caps.** On a convex shell each cap is one polygon of the shell's own vertices. A hex stack's caps, which need not be convex, are cut into triangles. Where a sliver corner leaves two chain ends a hair apart, the upright edge joins each end to the nearest start.
+- **Pinches.** The clip can leave a sliver touching the rest of the mesh along an upright line. The edges there are used twice each way, and each pair links up.
+- **Hex ground** is cut by square cells. Hexes have no heights until H3, which will need hex step lines.
+- **The center rule off the scene.** On squares the center inclusion rule reads no scene bounds (`Sampler.pointInside`), so a creature whose center lies off the scene can be caught where no solid stands. The promise test skips creatures off the scene. Left as a follow-up.
+- **Bench** (`VOLUME_BENCH=1`, this machine with other work running, a slice here standing for the stand-in's 6 ms at a quarter of it): the 100-cell sphere, 63,229 faces, builds its first slice in 1.75 ms (median, 0.87 ms with no other garbage about), about 7 ms on the stand-in, over the 6 ms slice. The emanation's takes 1.30 ms and the cylinder's 0.19 ms. Later slices keep a 1.5 ms deadline but for one unit of work past it: prepare's p99 2.9 ms, a bucket's p99 1.6 to 1.7 ms, the largest unit about 0.8 ms.
+
 ## 12. Review dispositions
 
 ### Round 1 (astra and Fable)
