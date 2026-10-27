@@ -217,4 +217,11 @@ describe("the walls a player could know (coverage.ts heldWalls)", () => {
     const options = readFileSync(new URL("./AreaOptions.tsx", import.meta.url), "utf8");
     assert.match(options, /samplesNow\(props\.moving \|\| live\.moving\), fog\);/);
   });
+
+  test("placed areas, the moving auras they drive, and the Areas panel's and a cast block's lists read this viewer's fog too", () => {
+    const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.match(read("./TemplateLayer.tsx"), /contextFrom\(\{ tokens, buildChunks, settings \}, scene, samplesNow\(moving\), viewer\)/);
+    assert.match(read("./AreasPanel.tsx"), /samplesNow\(live\.moving\), fog\);/);
+    assert.match(read("../dice/cast/CastBlock.tsx"), /samplesNow\(live\.moving\), fog\);/);
+  });
 });
