@@ -2007,9 +2007,9 @@ export type TouchLanding = { op: Op; words: string };
 
 /**
  * The touch rule's landing (docs/design-v1-map-discovery.md 6, decision 11,
- * MD-R9-1): a player's op on a square scene with fog on that the real build
- * stops, landed instead of refused, so no spot can be probed for free by a
- * refusal in place. The server asks it of every player op before the
+ * MD-R9-1): a player's op on a scene with fog on, squares or hexes, that
+ * the real build stops, landed instead of refused, so no spot can be probed
+ * for free by a refusal in place. The server asks it of every player op before the
  * permission check (server/rooms/actor.ts) and on an answer stores and
  * applies its op, which `canApply` takes, and tells the sender the walk was
  * `blocked`. Null leaves the op to `canApply`: it passes, it is refused for

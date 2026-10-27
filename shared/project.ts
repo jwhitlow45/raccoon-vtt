@@ -1277,7 +1277,12 @@ export function projectChunkForPlayer(all: Readonly<Record<string, BuildChunk>>,
  */
 const playerChunks = new WeakMap<BuildChunk, { all: object; autoWalls: AutoWalls | undefined; out: BuildChunk | null }>();
 
-/** A chunk's fields for players (projectChunkForPlayer), held to every key of BuildChunk as SCENE_FOR_PLAYERS is. */
+/**
+ * A chunk's fields for players on a scene with fog off (projectChunkForPlayer),
+ * held to every key of BuildChunk as SCENE_FOR_PLAYERS is. With fog on a
+ * player's chunk is built from held ground instead, with fields of its own
+ * (playerChunk, PlayerChunkFields).
+ */
 export const CHUNK_FOR_PLAYERS = {
   sceneId: "copied",
   cx: "copied",
