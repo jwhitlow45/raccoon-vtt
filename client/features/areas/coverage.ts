@@ -13,6 +13,7 @@ import { FREE_WALL_LATTICE } from "#shared/model.ts";
 import { sceneWalls, type WallSet } from "#shared/rules/walls.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { HEX_R, hexCenter } from "#shared/rules/hex.ts";
+import { auraClip } from "../../canvas/markStand.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
 import { standingStretches } from "../../canvas/relief/runs.ts";
 import { displayName } from "../../lib/scene.ts";
@@ -132,14 +133,13 @@ export function coveredWindow(cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h" 
  * Where an area's shading may show when it draws above the fog, as an
  * aimed area does (AreaPreviewLayer.tsx): null where it shows whole, to a
  * viewer who sees all the ground or over a window wholly revealed, and
- * otherwise the revealed sub-cells of its window, as rectangles in cells.
- * The fog stays opaque, as over a placed area, which lies under it. The
- * rule is a moving aura's (canvas/markStand.ts auraClip).
+ * otherwise the revealed sub-cells of its window, as rectangles in cells:
+ * a moving aura's rule (canvas/markStand.ts auraClip). The fog stays
+ * opaque, as over a placed area, which lies under it.
  */
 export function shadingClip(fog: FogView, cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h" | "hexes">, g: Grid): { x: number; y: number; w: number; h: number }[] | null {
   const win = coveredWindow(cov, g);
-  const box = { x0: win.x0, y0: win.y0, x1: win.x0 + win.w, y1: win.y0 + win.h };
-  return fog.all || fog.boxClear(box) ? null : fog.revealedRects(box);
+  return auraClip(fog, { x0: win.x0, y0: win.y0, x1: win.x0 + win.w, y1: win.y0 + win.h });
 }
 
 export function cachedCoverage(t: AreaTemplateInput, ctx: AreaContext): CoverageResult {
