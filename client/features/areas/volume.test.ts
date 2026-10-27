@@ -633,38 +633,46 @@ describe("bounded work (design 6)", () => {
     { name: "dungeon, a sphere 100 cells round", t: sphere(500), ctx: ctxOf(bounds, dungeon) },
   ];
 
+  /** A build driven with a deadline already past at every call: how much the most work one call did, counted in the vertices it made, and the longest one took. */
+  const sliced = (area: ResolvedArea) => {
+    const started = performance.now();
+    const vol = buildVolume({ area, bounds, ground, px: 40 });
+    let most = 0;
+    let longest = 0;
+    let calls = 0;
+    const call = (step: () => boolean) => {
+      const before = vol.vertexCount;
+      const a = performance.now();
+      const done = step();
+      longest = Math.max(longest, performance.now() - a);
+      most = Math.max(most, vol.vertexCount - before);
+      calls++;
+      return done;
+    };
+    while (!call(() => vol.prepare(0)));
+    let bucketMost = 0;
+    for (const key of vol.keys) {
+      const start = vol.vertexCount;
+      while (!call(() => vol.ensure(key, 0)));
+      bucketMost = Math.max(bucketMost, vol.vertexCount - start);
+    }
+    return { vol, most, longest, calls, bucketMost, ms: performance.now() - started };
+  };
+
   test("every step of every build comes in slices, however big the solid or dense the walls", () => {
     for (const { name, t, ctx } of scenes) {
       const area = resolveArea(t, ctx);
       assert.ok(area, name);
-      // A deadline already past still moves the work on each call and stops it part way: timing alone cannot show that on a fast machine. A call's work is counted in the vertices it makes, and its time bounds the steps that make none.
-      const started = performance.now();
-      const vol = buildVolume({ area, bounds, ground, px: 40 });
-      let most = 0;
-      let longest = 0;
-      let calls = 0;
-      const call = (step: () => boolean) => {
-        const before = vol.vertexCount;
-        const a = performance.now();
-        const done = step();
-        longest = Math.max(longest, performance.now() - a);
-        most = Math.max(most, vol.vertexCount - before);
-        calls++;
-        return done;
-      };
-      while (!call(() => vol.prepare(0)));
-      let bucketMost = 0;
-      for (const key of vol.keys) {
-        const start = vol.vertexCount;
-        while (!call(() => vol.ensure(key, 0)));
-        bucketMost = Math.max(bucketMost, vol.vertexCount - start);
-      }
-      const ms = performance.now() - started;
+      // A deadline already past still moves the work on each call and stops it part way: timing alone cannot show that on a fast machine. The vertices a call makes bound its work, and its time bounds the steps that make none.
+      let run = sliced(area);
+      // A pause of the collector or a busy machine can stretch any one call, so a long call is tried twice more. A step with no stop in it is long every time.
+      for (let retry = 0; retry < 2 && run.longest >= 20; retry++) run = sliced(area);
+      const { vol, most, longest, calls, bucketMost, ms } = run;
       assert.equal(vol.failed, 0, name);
       assert.ok(calls > 2 * vol.keys.length, `${name}: ${calls} calls`);
       assert.ok(most <= 400, `${name}: ${most} vertices in one call, ${bucketMost} in the largest bucket`);
-      // Generous, so a collector's pause on a slow machine does not fail it. The budget is the bench's (VOLUME_BENCH=1 below).
-      assert.ok(longest < 50, `${name}: a call took ${longest} ms`);
+      // Generous, so a slow machine does not fail it. The budget is the bench's (VOLUME_BENCH=1 below).
+      assert.ok(longest < 20, `${name}: a call took ${longest} ms`);
       assert.ok(ms < 5000, `${name} took ${ms} ms`);
       if (t.id !== "sphere 500" || ctx.walls) continue;
       // Slicing changes nothing: the same mesh as a build in one go.
