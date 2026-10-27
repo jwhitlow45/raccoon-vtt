@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { EdgeFeature } from "#shared/model.ts";
 import { creaturesInArea, resolveArea, type AreaContext, type AreaTemplateInput, type AreaToken, type ResolvedArea } from "#shared/rules/aoe.ts";
-import { gridOfShape } from "#shared/rules/grid.ts";
+import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { hexAt, hexKey, type HexGrid } from "#shared/rules/hex.ts";
 import { deriveWalls, indexBuild, type WallSet } from "#shared/rules/walls.ts";
 import { bandAt, buildVolume, capLoops, everySubcell, segmentsAround, towardViewer, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
@@ -44,6 +44,7 @@ import {
 const FUZZ = Math.max(1, Number(process.env.VOLUME_FUZZ ?? 1));
 const SEED = Number(process.env.VOLUME_SEED ?? 0);
 const ROWS = gridOfShape("hexRows") as HexGrid;
+const COLUMNS = gridOfShape("hexColumns") as HexGrid;
 
 type Built = { area: ResolvedArea; vol: Volume; ground: Ground; bounds: { w: number; h: number }; px: number; coarse: boolean };
 
@@ -612,67 +613,76 @@ describe("the stand rule's footprint (design 4.2 step 9)", () => {
 });
 
 describe("bounded work (design 6)", () => {
-  /** The largest solids, the commonest auras in a dense dungeon, and a hex stack across the scene: 200 by 200 cells, ground that steps every few cells. */
-  const bounds = { w: 200, h: 200 };
+  /** The largest solids, the commonest auras in a dense dungeon, hex stacks, and the largest size at the finest grid on squares and both hex orientations, on scenes of 20 and 200 cells, with ground that steps every few cells. */
+  const large = { w: 200, h: 200 };
+  const small = { w: 20, h: 20 };
   const ground = (x: number, y: number) => (((x >> 3) + (y >> 3)) % 5 === 0 ? 2 : (x >> 4) % 3 === 0 && (y >> 4) % 2 === 0 ? -1 : 0);
   const dungeon = dungeonWalls(mulberry32(5), 200, 200);
   const around = wallsAround(mulberry32(9), 100.3, 99.6, 200, 200);
   const caster = { c: tok("c", { size: "medium", x: 100, y: 99, elevation: 0 }) };
-  const sphere = (size: number): AreaTemplateInput => ({ id: `sphere ${size}`, rev: 1, shape: "sphere", size, origin: { x: 100.3, y: 99.6, z: 0 }, yaw: 0, includeOrigin: true });
+  /** A foot a cell, the finest grid a room can set. */
+  const fine = (bounds: { w: number; h: number }, grid: Grid): AreaContext => ({ ...ctxOf(bounds, null, {}, grid), settings: { feetPerCell: 1, aoeCoverage: "half", aoeInclusion: "anyCell", diagonal: "five" } });
+  const sphere = (size: number, at = { x: 100.3, y: 99.6 }): AreaTemplateInput => ({ id: `sphere ${size}`, rev: 1, shape: "sphere", size, origin: { ...at, z: 0 }, yaw: 0, includeOrigin: true });
   const aura = (size: number): AreaTemplateInput => ({ id: `aura ${size}`, rev: 1, shape: "emanation", size, origin: { x: 0, y: 0, z: 0 }, yaw: 0, includeOrigin: false, attachedTo: "c" });
-  const scenes: { name: string; t: AreaTemplateInput; ctx: AreaContext }[] = [
-    { name: "open, a sphere 100 cells round", t: sphere(500), ctx: ctxOf(bounds, null) },
-    { name: "open, a cylinder 100 cells round", t: { id: "cylinder", rev: 1, shape: "cylinder", size: 500, height: 200, origin: { x: 100.3, y: 99.6, z: 0 }, yaw: 0, includeOrigin: true }, ctx: ctxOf(bounds, null) },
-    { name: "open, an emanation 99 cells out", t: { id: "emanation", rev: 1, shape: "emanation", size: 495, origin: { x: 100.5, y: 100.5, z: 0 }, yaw: 0, includeOrigin: false }, ctx: ctxOf(bounds, null) },
-    { name: "hex rows, a 500 ft point emanation", t: { id: "hex", rev: 1, shape: "emanation", size: 500, origin: { x: 100, y: 100, z: 0 }, yaw: 0, includeOrigin: true }, ctx: ctxOf(bounds, null, {}, ROWS) },
-    { name: "a sphere 10 cells round among 32 short free walls", t: sphere(50), ctx: ctxOf(bounds, around) },
-    { name: "dungeon, a 15 ft aura", t: aura(15), ctx: ctxOf(bounds, dungeon, caster) },
-    { name: "dungeon, a 30 ft aura", t: aura(30), ctx: ctxOf(bounds, dungeon, caster) },
-    { name: "dungeon, a 20 ft sphere", t: sphere(20), ctx: ctxOf(bounds, dungeon) },
-    { name: "dungeon, a 40 ft sphere", t: sphere(40), ctx: ctxOf(bounds, dungeon) },
-    { name: "dungeon, a sphere 100 cells round", t: sphere(500), ctx: ctxOf(bounds, dungeon) },
+  const point = (size: number, at: { x: number; y: number }): AreaTemplateInput => ({ id: `point ${size}`, rev: 1, shape: "emanation", size, origin: { ...at, z: 0 }, yaw: 0, includeOrigin: true });
+  const middle = { x: 100, y: 100 };
+  const corner = { x: 10, y: 10 };
+  const scenes: { name: string; t: AreaTemplateInput; ctx: AreaContext; bounds: { w: number; h: number } }[] = [
+    { name: "open, a sphere 100 cells round", t: sphere(500), ctx: ctxOf(large, null), bounds: large },
+    { name: "open, a cylinder 100 cells round", t: { id: "cylinder", rev: 1, shape: "cylinder", size: 500, height: 200, origin: { x: 100.3, y: 99.6, z: 0 }, yaw: 0, includeOrigin: true }, ctx: ctxOf(large, null), bounds: large },
+    { name: "open, an emanation 99 cells out", t: { id: "emanation", rev: 1, shape: "emanation", size: 495, origin: { x: 100.5, y: 100.5, z: 0 }, yaw: 0, includeOrigin: false }, ctx: ctxOf(large, null), bounds: large },
+    { name: "hex rows, a 500 ft point emanation", t: point(500, middle), ctx: ctxOf(large, null, {}, ROWS), bounds: large },
+    { name: "hex rows, a 500 ft point emanation on a 20 cell scene (review ISOA1-ASTRA-05)", t: point(500, corner), ctx: ctxOf(small, null, {}, ROWS), bounds: small },
+    { name: "a foot a cell, a cylinder 1,000 ft round (review ISOA1-ASTRA-06)", t: { id: "cylinder", rev: 1, shape: "cylinder", size: 1000, height: 20, origin: { x: 100, y: 100, z: 10 }, yaw: 0, includeOrigin: true }, ctx: fine(large, SQUARES), bounds: large },
+    { name: "a foot a cell, a sphere 1,000 ft round on a 20 cell scene", t: sphere(1000, corner), ctx: fine(small, SQUARES), bounds: small },
+    { name: "a foot a cell, a sphere 1,000 ft round", t: sphere(1000, middle), ctx: fine(large, SQUARES), bounds: large },
+    { name: "a foot a cell on hex rows, a 1,000 ft point emanation on a 20 cell scene", t: point(1000, corner), ctx: fine(small, ROWS), bounds: small },
+    { name: "a foot a cell on hex columns, a 1,000 ft point emanation on a 20 cell scene", t: point(1000, corner), ctx: fine(small, COLUMNS), bounds: small },
+    { name: "a foot a cell on hex rows, a 1,000 ft point emanation", t: point(1000, middle), ctx: fine(large, ROWS), bounds: large },
+    { name: "a foot a cell on hex columns, a 1,000 ft point emanation", t: point(1000, middle), ctx: fine(large, COLUMNS), bounds: large },
+    { name: "a sphere 10 cells round among 32 short free walls", t: sphere(50), ctx: ctxOf(large, around), bounds: large },
+    { name: "dungeon, a 15 ft aura", t: aura(15), ctx: ctxOf(large, dungeon, caster), bounds: large },
+    { name: "dungeon, a 30 ft aura", t: aura(30), ctx: ctxOf(large, dungeon, caster), bounds: large },
+    { name: "dungeon, a 20 ft sphere", t: sphere(20), ctx: ctxOf(large, dungeon), bounds: large },
+    { name: "dungeon, a 40 ft sphere", t: sphere(40), ctx: ctxOf(large, dungeon), bounds: large },
+    { name: "dungeon, a sphere 100 cells round", t: sphere(500), ctx: ctxOf(large, dungeon), bounds: large },
   ];
 
-  /** A build driven with a deadline already past at every call: how much the most work one call did, counted in the vertices it made, and the longest one took. */
-  const sliced = (area: ResolvedArea) => {
-    const started = performance.now();
-    const vol = buildVolume({ area, bounds, ground, px: 40 });
-    let most = 0;
-    let longest = 0;
-    let calls = 0;
-    const call = (step: () => boolean) => {
-      const before = vol.vertexCount;
-      const a = performance.now();
-      const done = step();
-      longest = Math.max(longest, performance.now() - a);
-      most = Math.max(most, vol.vertexCount - before);
-      calls++;
-      return done;
-    };
-    while (!call(() => vol.prepare(0)));
-    let bucketMost = 0;
-    for (const key of vol.keys) {
-      const start = vol.vertexCount;
-      while (!call(() => vol.ensure(key, 0)));
-      bucketMost = Math.max(bucketMost, vol.vertexCount - start);
-    }
-    return { vol, most, longest, calls, bucketMost, ms: performance.now() - started };
-  };
-
-  test("every step of every build comes in slices, however big the solid or dense the walls", () => {
-    for (const { name, t, ctx } of scenes) {
+  test("every step of every build comes in slices, however big the solid, fine the grid or dense the walls", () => {
+    for (const { name, t, ctx, bounds } of scenes) {
       const area = resolveArea(t, ctx);
       assert.ok(area, name);
-      // A deadline already past still moves the work on each call and stops it part way: timing alone cannot show that on a fast machine. The vertices a call makes bound its work, and its time bounds the steps that make none.
-      let run = sliced(area);
-      // A pause of the collector or a busy machine can stretch any one call, so a long call is tried twice more. A step with no stop in it is long every time.
-      for (let retry = 0; retry < 2 && run.longest >= 20; retry++) run = sliced(area);
-      const { vol, most, longest, calls, bucketMost, ms } = run;
+      // A deadline already past at every call: each call still moves the work on, and stops it after about CHECK units and one step, whatever the machine. Its work is counted three ways: the units the build charged, the vertices it made, and the ground it read.
+      let reads = 0;
+      const counted = (x: number, y: number) => {
+        reads++;
+        return ground(x, y);
+      };
+      const started = performance.now();
+      const vol = buildVolume({ area, bounds, ground: counted, px: 40 });
+      const most = { work: 0, vertices: 0, reads: 0 };
+      let calls = 0;
+      const call = (step: () => boolean) => {
+        const before = { work: vol.work, vertices: vol.vertexCount, reads };
+        const done = step();
+        most.work = Math.max(most.work, vol.work - before.work);
+        most.vertices = Math.max(most.vertices, vol.vertexCount - before.vertices);
+        most.reads = Math.max(most.reads, reads - before.reads);
+        calls++;
+        return done;
+      };
+      while (!call(() => vol.prepare(0)));
+      let bucketMost = 0;
+      for (const key of vol.keys) {
+        const start = vol.vertexCount;
+        while (!call(() => vol.ensure(key, 0)));
+        bucketMost = Math.max(bucketMost, vol.vertexCount - start);
+      }
+      const ms = performance.now() - started;
       assert.equal(vol.failed, 0, name);
       assert.ok(calls > 2 * vol.keys.length, `${name}: ${calls} calls`);
-      assert.ok(most <= 400, `${name}: ${most} vertices in one call, ${bucketMost} in the largest bucket`);
-      // Generous, so a slow machine does not fail it. The budget is the bench's (VOLUME_BENCH=1 below).
-      assert.ok(longest < 20, `${name}: a call took ${longest} ms`);
+      assert.ok(most.work <= 1024 && most.vertices <= 400 && most.reads <= 512, `${name}: at most ${JSON.stringify(most)} in one call`);
+      // Generous, so a slow machine does not fail it. The slices' time is the bench's (VOLUME_BENCH=1 below).
       assert.ok(ms < 5000, `${name} took ${ms} ms`);
       if (t.id !== "sphere 500" || ctx.walls) continue;
       // Slicing changes nothing: the same mesh as a build in one go.
@@ -692,7 +702,7 @@ describe("bounded work (design 6)", () => {
    */
   test("bench: the scenes above against the 6 ms slice", { skip: !process.env.VOLUME_BENCH }, () => {
     const p99 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length * 0.99)]!;
-    for (const { name, t, ctx } of scenes) {
+    for (const { name, t, ctx, bounds } of scenes) {
       const area = resolveArea(t, ctx);
       assert.ok(area);
       const first: number[] = [];
