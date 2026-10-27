@@ -179,10 +179,15 @@ describe("inverses", () => {
     });
   }
 
-  /** States compared without walls versions, which an undo moves forward rather than back. */
+  /**
+   * States compared without walls versions, which an undo moves forward
+   * rather than back, and without played marks, which stay while their
+   * scene does (docs/design-v1-map-discovery.md 5.5).
+   */
   function withoutWalls(state: RoomState): unknown {
     const scenes = Object.fromEntries(Object.entries(state.scenes).map(([id, { wallsVersion: _w, ...rest }]) => [id, rest]));
-    return comparable({ ...state, scenes } as unknown as RoomState);
+    const { playedScenes: _played, ...rest } = state;
+    return comparable({ ...rest, scenes } as unknown as RoomState);
   }
 
   test("an undone build edit moves the walls version on, so the next edit never reuses one", () => {

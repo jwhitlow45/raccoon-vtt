@@ -46,7 +46,9 @@ import {
   fogPublish,
   fogReset,
   foldSight,
+  keepMemory,
   sysExplore,
+  sysRemember,
   visionHolders,
 } from "./reducer/map.ts";
 import { buildHeight, buildRough, buildStairs } from "./reducer/heights.ts";
@@ -68,6 +70,7 @@ import { monsterCreate, monsterDelete, monsterSetSrdImage, monsterUpdate } from 
 import { companionBlockCreate, companionBlockDelete, companionBlockUpdate } from "./reducer/companionBlocks.ts";
 import { savedEncounterCreate, savedEncounterDelete, savedEncounterUpdate } from "./reducer/savedEncounters.ts";
 import {
+  markPlayed,
   memberUpdate,
   roomSetPlayerScene,
   roomUpdate,
@@ -155,6 +158,9 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
     dispatch(tx, moved);
     // A scene that stopped being per player pools its holders' maps (docs/design-v1-per-player-vision.md 6.3).
     foldSight(tx, state);
+    // What players remember follows the scene's settings, and a scene the players move to is marked played (docs/design-v1-map-discovery.md 5.4, 5.5).
+    keepMemory(tx, state);
+    markPlayed(tx, state);
     // Every op's dispatch ends with the links that no longer hold coming loose (docs/design-v1-attach.md 5.2).
     if (attaches(env.opVersion)) {
       linkPass(tx);
@@ -408,6 +414,8 @@ function dispatch(tx: Tx, op: Op): void {
       return restore(tx, op);
     case "sys.explore":
       return sysExplore(tx, op);
+    case "sys.remember":
+      return sysRemember(tx, op);
     case "vision.holders":
       return visionHolders(tx, op);
     case "token.updateMany":

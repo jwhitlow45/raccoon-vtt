@@ -1,5 +1,6 @@
 import { keys } from "../keys.ts";
-import type { Encounter, GridShape, MemberId, PathStop, RoomSettings, Scene, SceneVision, TurnStart } from "../model.ts";
+import { discoversMap } from "../migrate.ts";
+import type { Encounter, GridShape, MemberId, PathStop, RoomSettings, RoomState, Scene, SceneVision, TurnStart } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { HEX_ORIGIN, OWN_SQUARE_GRID, gridOfShape, hexOriginBefore, switchRefusal } from "../rules/grid.ts";
@@ -34,6 +35,23 @@ function storedShape(choice: "squares" | GridShape): GridShape | undefined {
 export function roomSetPlayerScene(tx: Tx, op: OpOf<"room.setPlayerScene">): void {
   tx.scene(op.sceneId);
   tx.write(keys.meta, { ...tx.state.meta, playerSceneId: op.sceneId });
+}
+
+/**
+ * The played mark (docs/design-v1-map-discovery.md 5.5), after every op's
+ * dispatch: an op that makes a scene the players' scene, by any route (a
+ * move of the players, a deletion that moves them, an undo of either),
+ * marks it, before anyone explores there and whatever its settings, so
+ * the size guard reserves players' memory on it from then on without
+ * reading what anyone explored. The mark is bookkeeping, outside the undo
+ * step, and stays while the scene exists. Ops stored before op version 26
+ * mark nothing (MD-R6-1).
+ */
+export function markPlayed(tx: Tx, before: RoomState): void {
+  if (!discoversMap(tx.env.opVersion)) return;
+  const id = tx.state.meta.playerSceneId;
+  if (id === null || id === before.meta.playerSceneId || !tx.state.scenes[id] || tx.state.playedScenes?.[id]) return;
+  tx.writeBookkeeping(keys.played(id), { sceneId: id, rev: 0 });
 }
 
 export function viewFollow(tx: Tx, op: OpOf<"view.follow">): void {

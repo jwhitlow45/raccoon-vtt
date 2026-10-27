@@ -4,6 +4,7 @@ import { gridOfScene, hash128, inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { footprintRect } from "../rules/footprint.ts";
 import { sortedById } from "./tokens.ts";
+import { copyMemory } from "./memory.ts";
 import { invalid, type Env, type Tx } from "./tx.ts";
 import { withoutTurnScoped } from "./uses.ts";
 
@@ -130,6 +131,10 @@ export function sceneDuplicate(tx: Tx, op: OpOf<"scene.duplicate">): void {
       if (s.exploredBy[holderTileKey(to, tile.memberId, tile.tx, tile.ty)]) throw invalid("a copied id is taken");
       tx.writeBookkeeping(keys.exploredBy(to, tile.memberId, tile.tx, tile.ty), { ...tile, sceneId: to });
     }
+    // And so does what each layer remembers (docs/design-v1-map-discovery.md 5.4), the same way, with the played mark
+    // that reserves room for it (5.5).
+    copyMemory(tx, original.id, to, copyId);
+    if (s.playedScenes?.[original.id]) tx.writeBookkeeping(keys.played(to), { sceneId: to, rev: 0 });
   }
 
   if (op.include.drawings) {

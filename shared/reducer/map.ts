@@ -7,12 +7,13 @@ import { allRevealedTiles, decodeTile, encodeTile, isEmptyBits, pointInPolygonFi
 import { occupiedCells } from "../rules/footprint.ts";
 import { footprintGround } from "../rules/heights.ts";
 import { boxTouchesCell, labelBox } from "../rules/labels.ts";
-import { attaches } from "../migrate.ts";
+import { attaches, discoversMap } from "../migrate.ts";
 import { carriedIndex, holderOf, onHolder } from "../rules/attach.ts";
 import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 import { SQUARES } from "../rules/grid.ts";
+import { forgetLayerMemory, forgetSceneMemory, forgetStamp, keepsMemory, memoryOwners, poolMemory, pruneUnheld, rememberLayer } from "./memory.ts";
 
 // Fog (design 13.2).
 
@@ -73,25 +74,38 @@ function forgetUnderHides(tx: Tx, scene: Scene, ops: FogOp[]): void {
       tx.writeBookkeeping(keys.exploredBy(scene.id, memberId, held.tx, held.ty), tile && { ...tile, memberId });
     }
   }
+  // What players remember goes where they no longer hold it (docs/design-v1-map-discovery.md 5.4).
+  pruneUnheld(tx, scene, null);
+  for (const memberId of memoryOwners(tx.state, scene.id)) pruneUnheld(tx, scene, memberId);
 }
 
-/** Takes away every explored tile of the scene, the holders' layers too, as bookkeeping: a reset to hidden, or the scene going. */
+/**
+ * Takes away every explored tile of the scene, the holders' layers too, and
+ * what every layer remembers (docs/design-v1-map-discovery.md 5.4), as
+ * bookkeeping: a reset to hidden, or the scene going.
+ */
 export function forgetExplored(tx: Tx, sceneId: string): void {
   for (const key of Object.keys(tx.state.exploredTiles).sort()) {
     const tile = tx.state.exploredTiles[key]!;
     if (tile.sceneId === sceneId) tx.writeBookkeeping(keys.explored(sceneId, tile.tx, tile.ty), null);
   }
   for (const memberId of layerOwners(tx.state, sceneId)) forgetHolder(tx, sceneId, memberId);
+  forgetSceneMemory(tx, sceneId);
 }
 
-/** Takes away one holder's layer of a scene, as bookkeeping: they no longer see for themselves there, or left the room. */
+/**
+ * Takes away one holder's layer of a scene, and their memory with it
+ * (docs/design-v1-map-discovery.md 5.4), as bookkeeping: they no longer see
+ * for themselves there, or left the room.
+ */
 export function forgetHolder(tx: Tx, sceneId: string, memberId: string): void {
   for (const tile of Object.values(layerOf(tx.state, sceneId, memberId))) tx.writeBookkeeping(keys.exploredBy(sceneId, memberId, tile.tx, tile.ty), null);
+  forgetLayerMemory(tx, sceneId, memberId);
 }
 
-/** The members with a layer on a scene, in id order. */
+/** The members with a layer or a memory of their own on a scene, in id order. */
 function layerOwners(state: RoomState, sceneId: string): string[] {
-  const out = new Set<string>();
+  const out = new Set<string>(memoryOwners(state, sceneId));
   for (const tile of Object.values(state.exploredBy ?? {})) if (tile.sceneId === sceneId) out.add(tile.memberId);
   return [...out].sort();
 }
@@ -129,6 +143,88 @@ export function sysExplore(tx: Tx, op: OpOf<"sys.explore">): void {
       const next = joinedBits(scene, t, held);
       if (next !== null) tx.write(keys.exploredBy(scene.id, m.memberId, t.tx, t.ty), { sceneId: scene.id, tx: t.tx, ty: t.ty, rev: held?.rev ?? 0, bits: next, memberId: m.memberId });
     }
+  }
+}
+
+/**
+ * What players remember (docs/design-v1-map-discovery.md 5.3), as the map
+ * step found it after a batch: each layer's chunks, the keys each drops and
+ * then the entries it sets, and the fog tiles a layer past its cap
+ * forgets. A forgotten tile keeps only the sub-cells of its `keep` the
+ * layer still held, so forgetting never shows a player anything, and then
+ * every entry of the layer whose element it no longer holds goes. Only a
+ * scene with fog and party vision on remembers, and a holder only while
+ * they see for themselves. All of it is bookkeeping, replayed as stored.
+ */
+export function sysRemember(tx: Tx, op: OpOf<"sys.remember">): void {
+  const scene = tx.scene(op.sceneId);
+  if (!keepsMemory(scene)) throw invalid("players remember a scene only while its fog and party vision are on");
+  for (const layer of op.layers) {
+    const owner = layer.memberId ?? null;
+    if (owner !== null) holderLayer(tx, scene, owner);
+    rememberLayer(tx, scene, owner, layer.chunks);
+  }
+  for (const f of op.forget ?? []) {
+    const owner = f.memberId ?? null;
+    if (owner !== null) holderLayer(tx, scene, owner);
+    for (const t of f.tiles) {
+      const key = owner === null ? keys.explored(scene.id, t.tx, t.ty) : keys.exploredBy(scene.id, owner, t.tx, t.ty);
+      const held: FogTile | undefined = owner === null ? tx.state.exploredTiles[tileKey(scene.id, t.tx, t.ty)] : tx.state.exploredBy?.[holderTileKey(scene.id, owner, t.tx, t.ty)];
+      if (!held) continue;
+      const was = decodeTile(held.bits);
+      const keep = t.keep === undefined ? null : decodeTile(t.keep);
+      const next = was && keep ? was.map((b, i) => b & keep[i]!) : null;
+      if (!next || isEmptyBits(next)) tx.writeBookkeeping(key, null);
+      else if (encodeTile(next) !== held.bits) tx.writeBookkeeping(key, { ...held, bits: encodeTile(next) });
+    }
+    pruneUnheld(tx, scene, owner);
+  }
+}
+
+/** Refuses a holder's layer of memory unless the scene is per player and they see for themselves there (6.1). */
+function holderLayer(tx: Tx, scene: Scene, memberId: string): void {
+  if (scene.vision?.perPlayer !== true) throw invalid("the scene's sight is the whole party's");
+  if (!seesForThemselves(tx.state, scene.id, memberId)) throw invalid("only a player who sees for themselves remembers for themselves");
+}
+
+/**
+ * Memory's bookkeeping after every op's dispatch and the fold
+ * (docs/design-v1-map-discovery.md 5.4), so an edit, an undo and a redo
+ * keep it alike: a scene that went loses its memory and its marks, one
+ * whose fog or party vision went off loses its memory and its share mark,
+ * and a grid shape switch, whose cell keys mean other cells now, drops the
+ * scene's memory and, while it remembers, the ground players explored
+ * there, since what they saw is no longer on the map and the build now
+ * would show in its place. A stamp made DM only drops from every memory,
+ * so its art stops reaching players. Only scenes and stamps the op wrote
+ * can have changed.
+ */
+export function keepMemory(tx: Tx, before: RoomState): void {
+  if (tx.state.scenes !== before.scenes) {
+    for (const id of Object.keys(before.scenes).sort()) {
+      const was = before.scenes[id]!;
+      const now = tx.state.scenes[id];
+      if (now === was) continue;
+      if (!now) {
+        forgetSceneMemory(tx, id);
+        if (tx.state.playedScenes?.[id]) tx.writeBookkeeping(keys.played(id), null);
+        if (tx.state.memoryShared?.[id]) tx.writeBookkeeping(keys.memoryShared(id), null);
+        continue;
+      }
+      if (!keepsMemory(now)) {
+        forgetSceneMemory(tx, id);
+        if (tx.state.memoryShared?.[id]) tx.writeBookkeeping(keys.memoryShared(id), null);
+      } else if (now.gridShape !== was.gridShape) {
+        forgetSceneMemory(tx, id);
+        if (discoversMap(tx.env.opVersion)) forgetExplored(tx, id);
+      }
+    }
+  }
+  if (tx.state.stamps === before.stamps) return;
+  for (const key of tx.touched()) {
+    if (!key.startsWith("stamp:")) continue;
+    const stamp = tx.state.stamps[key.slice("stamp:".length)];
+    if (stamp?.visibility === "dm") forgetStamp(tx, stamp.sceneId, stamp.id);
   }
 }
 
@@ -222,6 +318,8 @@ export function foldSight(tx: Tx, before: RoomState): void {
     const list = tx.state.holders?.[sceneId];
     const owners = layerOwners(tx.state, sceneId);
     if (!list && owners.length === 0) continue;
+    // Memory first, while the party's layer is still its own (docs/design-v1-map-discovery.md 5.4).
+    if (now) poolMemory(tx, now, inListOrder(list, owners));
     if (now) pool(tx, now, owners);
     for (const memberId of owners) forgetHolder(tx, sceneId, memberId);
     if (list) tx.writeBookkeeping(keys.holders(sceneId), null);
@@ -239,10 +337,16 @@ export function foldSight(tx: Tx, before: RoomState): void {
     if (!list.entries.some((e) => e.on && tx.state.members[e.memberId]?.kind !== "player")) continue;
     tx.writeBookkeeping(keys.holders(sceneId), { ...list, entries: list.entries.map((e) => (e.on && tx.state.members[e.memberId]?.kind !== "player" ? { memberId: e.memberId, on: false } : e)) });
   }
-  const scenes = new Set(Object.values(tx.state.exploredBy ?? {}).map((t) => t.sceneId));
+  const scenes = new Set([...Object.values(tx.state.exploredBy ?? {}), ...Object.values(tx.state.memoryBy ?? {})].map((t) => t.sceneId));
   for (const sceneId of [...scenes].sort()) {
     for (const memberId of layerOwners(tx.state, sceneId)) if (!seesForThemselves(tx.state, sceneId, memberId)) forgetHolder(tx, sceneId, memberId);
   }
+}
+
+/** The members with a layer, those on the holder list first in its order, then the rest in id order. */
+function inListOrder(list: SightHolders | undefined, owners: readonly string[]): string[] {
+  const listed = (list?.entries ?? []).map((e) => e.memberId).filter((m) => owners.includes(m));
+  return [...listed, ...owners.filter((m) => !listed.includes(m))];
 }
 
 /** Removes, as bookkeeping, every tile of the scene's layers, the party's and its holders', that lies past its bounds. */
