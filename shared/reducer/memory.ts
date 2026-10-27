@@ -1,4 +1,4 @@
-import { chunkKey, holderChunkKey, holderTileKey, keys, tileKey, wallChunk, type EntityKey } from "../keys.ts";
+import { chunkKey, holderChunkKey, holderTileKey, keys, parseKey, readEntity, tileKey, wallChunk, type EntityKey } from "../keys.ts";
 import { CHUNK_CELLS, FOG_SUBCELLS, type FogTile, type Label, type MemoryChunk, type MemoryEntries, type RememberedWall, type RoomState, type Scene, type Stamp } from "../model.ts";
 import { stableStringify, stampCells } from "../project.ts";
 import type { MemoryEntriesInput, MemoryKeysInput } from "../protocol.ts";
@@ -203,8 +203,8 @@ function holdsElement(state: RoomState, sceneId: string, held: Held, field: Excl
 /**
  * Drops, as bookkeeping, every entry of a layer's memory of a scene whose
  * element touches no cell the layer still holds, and takes the cells it no
- * longer holds off each free wall's versions (5.4): after a hide, and
- * after `sys.remember` forgets tiles. An element still held through
+ * longer holds off each free wall's versions (5.4): after a step's sets,
+ * and after the layer loses explored ground. An element still held through
  * another cell keeps its entry, so a hide over part of a room changes
  * nothing players see of the rest.
  */
@@ -234,6 +234,47 @@ export function pruneUnheld(tx: Tx, scene: Scene, layer: Layer): void {
     }
     if (changed) putChunk(tx, scene.id, layer, chunk.cx, chunk.cy, entries);
   }
+}
+
+/**
+ * Prunes every layer whose explored ground lost a sub-cell in the op, as
+ * bookkeeping (5.4). Every path that takes explored ground away comes
+ * through here, whatever it is: a hide, `sys.remember` forgetting tiles, a
+ * per-player scene shrinking or a scene turning per player, by an edit or
+ * a restore. So memory never outlives the ground it is on. A layer that
+ * only gained ground keeps all it remembers, and is not read.
+ */
+export function pruneLostGround(tx: Tx, before: RoomState): void {
+  if (tx.state.exploredTiles === before.exploredTiles && tx.state.exploredBy === before.exploredBy) return;
+  const lost = new Map<string, Set<Layer>>();
+  for (const key of tx.touched()) {
+    const parsed = parseKey(key);
+    if (parsed?.kind !== "explored" && parsed?.kind !== "exploredBy") continue;
+    const was = readEntity(before, key) as FogTile | null;
+    if (!was) continue;
+    const now = readEntity(tx.state, key) as FogTile | null;
+    if (now && !losesBits(was.bits, now.bits)) continue;
+    let layers = lost.get(parsed.sceneId);
+    if (!layers) lost.set(parsed.sceneId, (layers = new Set()));
+    layers.add(parsed.kind === "explored" ? null : parsed.memberId);
+  }
+  for (const sceneId of [...lost.keys()].sort()) {
+    const scene = tx.state.scenes[sceneId];
+    if (!scene) continue;
+    const layers = lost.get(sceneId)!;
+    const members = [...layers].filter((l): l is string => l !== null).sort();
+    for (const layer of [...(layers.has(null) ? [null] : []), ...members]) pruneUnheld(tx, scene, layer);
+  }
+}
+
+/** Whether a tile's bits lost any sub-cell the earlier bits held. */
+function losesBits(was: string, now: string): boolean {
+  if (was === now) return false;
+  const a = decodeTile(was);
+  const b = decodeTile(now);
+  if (!a) return false;
+  if (!b) return true;
+  return a.some((byte, i) => (byte & ~b[i]!) !== 0);
 }
 
 /** Drops every layer's entries for a stamp, as bookkeeping: it was made DM only, so its art stops reaching players (5.4). */

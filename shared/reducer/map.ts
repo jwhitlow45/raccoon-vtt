@@ -13,7 +13,7 @@ import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 import { SQUARES } from "../rules/grid.ts";
-import { forgetLayerMemory, forgetSceneMemory, forgetStamp, keepsMemory, memoryOwners, poolMemory, pruneUnheld, rememberLayer } from "./memory.ts";
+import { forgetLayerMemory, forgetSceneMemory, forgetStamp, keepsMemory, memoryOwners, poolMemory, pruneLostGround, rememberLayer } from "./memory.ts";
 
 // Fog (design 13.2).
 
@@ -52,7 +52,9 @@ function applyFogOps(tx: Tx, scene: Scene, ops: FogOp[]): void {
  * bookkeeping outside any undo step: undoing the hide brings back the DM's
  * fog and not what it cleared. Every sight holder's own layer forgets it
  * too (docs/design-v1-per-player-vision.md 6.3), whatever the scene's mode
- * now, so no layer kept since keeps ground the DM hid.
+ * now, so no layer kept since keeps ground the DM hid. What players
+ * remember there goes with it, in keepMemory's pass after the op
+ * (docs/design-v1-map-discovery.md 5.4).
  */
 function forgetUnderHides(tx: Tx, scene: Scene, ops: FogOp[]): void {
   const hides = ops.filter((o) => o.mode === "hide");
@@ -74,9 +76,6 @@ function forgetUnderHides(tx: Tx, scene: Scene, ops: FogOp[]): void {
       tx.writeBookkeeping(keys.exploredBy(scene.id, memberId, held.tx, held.ty), tile && { ...tile, memberId });
     }
   }
-  // What players remember goes where they no longer hold it (docs/design-v1-map-discovery.md 5.4).
-  pruneUnheld(tx, scene, null);
-  for (const memberId of memoryOwners(tx.state, scene.id)) pruneUnheld(tx, scene, memberId);
 }
 
 /**
@@ -152,7 +151,8 @@ export function sysExplore(tx: Tx, op: OpOf<"sys.explore">): void {
  * then the entries it sets, and the fog tiles a layer past its cap
  * forgets. A forgotten tile keeps only the sub-cells of its `keep` the
  * layer still held, so forgetting never shows a player anything, and then
- * every entry of the layer whose element it no longer holds goes. Only a
+ * every entry of the layer whose element it no longer holds goes, in
+ * keepMemory's pass after the op. Only a
  * scene with fog and party vision on remembers, and a holder only while
  * they see for themselves. All of it is bookkeeping, replayed as stored.
  */
@@ -177,7 +177,6 @@ export function sysRemember(tx: Tx, op: OpOf<"sys.remember">): void {
       if (!next || isEmptyBits(next)) tx.writeBookkeeping(key, null);
       else if (encodeTile(next) !== held.bits) tx.writeBookkeeping(key, { ...held, bits: encodeTile(next) });
     }
-    pruneUnheld(tx, scene, owner);
   }
 }
 
@@ -195,9 +194,10 @@ function holderLayer(tx: Tx, scene: Scene, memberId: string): void {
  * and a grid shape switch, whose cell keys mean other cells now, drops the
  * scene's memory and, while it remembers, the ground players explored
  * there, since what they saw is no longer on the map and the build now
- * would show in its place. A stamp made DM only drops from every memory,
- * so its art stops reaching players. Only scenes and stamps the op wrote
- * can have changed.
+ * would show in its place. Every layer that lost explored ground, by any
+ * path, drops what it no longer holds. A stamp made DM only drops from
+ * every memory, so its art stops reaching players. Only scenes, explored
+ * tiles and stamps the op wrote can have changed.
  */
 export function keepMemory(tx: Tx, before: RoomState): void {
   if (tx.state.scenes !== before.scenes) {
@@ -220,6 +220,7 @@ export function keepMemory(tx: Tx, before: RoomState): void {
       }
     }
   }
+  pruneLostGround(tx, before);
   if (tx.state.stamps === before.stamps) return;
   for (const key of tx.touched()) {
     if (!key.startsWith("stamp:")) continue;

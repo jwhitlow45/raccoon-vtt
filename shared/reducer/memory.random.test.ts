@@ -13,8 +13,8 @@ import { DM, chance, env, int, member, pick, rng, room, scene } from "../testuti
  * and 5.4, lane MD1) against a plain model: random runs of the map step's
  * `sys.remember` and its forgetting, explores, hides, Fog all, vision and
  * fog off and on, the switch to Per player and the fold back, picks of who
- * sees for themselves, a member's removal and undos of the DM's steps, on
- * one scene with three players.
+ * sees for themselves, the scene shrinking and growing, a member's removal
+ * and undos of the DM's steps, on one scene with three players.
  *
  * The model keeps each layer as a set of whole cells and each memory as a
  * map from an element to what that layer remembers, and applies each rule
@@ -226,11 +226,30 @@ const keeps = (state: RoomState) => state.scenes.s1!.fogEnabled && state.scenes.
 const perPlayer = (state: RoomState) => state.scenes.s1!.vision?.perPlayer === true;
 const onHolders = (state: RoomState) => (state.holders.s1?.entries ?? []).filter((e) => e.on && state.members[e.memberId]?.kind === "player").map((e) => e.memberId);
 
-/** What changes when an op moved the scene's settings, the holder list or the roster: the fold, the holders who stopped, and vision or fog off. */
+/** A side's tiles: a per-player scene keeps none of a layer's past them. */
+const tilesOn = (cells: number) => Math.max(1, Math.ceil(cells / 16));
+
+/**
+ * What changes when an op moved the scene's settings, the holder list or
+ * the roster: the fold, the holders who stopped, the tiles past the bounds
+ * of a scene that shrank or turned per player, and vision or fog off.
+ */
 function settle(model: Model, before: RoomState, after: RoomState): void {
   if (perPlayer(before) && !perPlayer(after)) fold(model, (before.holders.s1?.entries ?? []).map((e) => e.memberId));
   const on = new Set(perPlayer(after) ? onHolders(after) : []);
   for (const p of PLAYERS) if (!on.has(p)) forgetLayer(model, p);
+  const was = before.scenes.s1!.bounds;
+  const now = after.scenes.s1!.bounds;
+  if (perPlayer(after) && (!perPlayer(before) || tilesOn(now.w) < tilesOn(was.w) || tilesOn(now.h) < tilesOn(was.h))) {
+    for (const [name, held] of [...model.held]) {
+      for (const cell of [...held]) {
+        const [x, y] = cell.split(",").map(Number) as [number, number];
+        if (Math.floor(x / 16) >= tilesOn(now.w) || Math.floor(y / 16) >= tilesOn(now.h)) held.delete(cell);
+      }
+      if (held.size === 0) model.held.delete(name);
+      prune(model, name);
+    }
+  }
   if (!keeps(after)) for (const name of [...model.memory.keys()]) model.memory.delete(name);
 }
 
@@ -351,10 +370,12 @@ function run(seed: number, steps: number): void {
   });
   const model: Model = { held: new Map(), memory: new Map() };
   const undos: RestoreEntry[][] = [];
+  // Inside the scene's bounds now, which an explore must keep to and a hide only reaches.
   const rect = (most = 12) => {
-    const x = int(r, 0, SIZE - 1);
-    const y = int(r, 0, SIZE - 1);
-    return { x, y, w: Math.min(int(r, 1, most), SIZE - x), h: Math.min(int(r, 1, most), SIZE - y) };
+    const { w, h } = state.scenes.s1!.bounds;
+    const x = int(r, 0, w - 1);
+    const y = int(r, 0, h - 1);
+    return { x, y, w: Math.min(int(r, 1, most), w - x), h: Math.min(int(r, 1, most), h - y) };
   };
   for (let i = 0; i < steps; i++) {
     const before = state;
@@ -413,7 +434,12 @@ function run(seed: number, steps: number): void {
       const on = shuffled(r, PLAYERS).filter((p) => state.members[p] && chance(r, 0.6));
       op = { t: "vision.holders", sceneId: "s1", on };
       what = `holders ${on.join(",")}`;
-    } else if (roll < 81 && state.members.p3) {
+    } else if (roll < 84) {
+      // Shrinking or growing, across the line between tiles 0 and 1 or not, so a per-player scene forgets what lies past it.
+      const bounds = { w: pick(r, [SIZE, 24, 16, 12]), h: pick(r, [SIZE, 20, 16]) };
+      op = { t: "scene.update", sceneId: "s1", patch: { bounds } };
+      what = `bounds ${bounds.w}x${bounds.h}`;
+    } else if (roll < 85 && state.members.p3) {
       op = { t: "sys.memberRemove", memberId: "p3" };
       what = "remove p3";
     } else if (undos.length > 0) {

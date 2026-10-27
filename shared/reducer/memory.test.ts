@@ -256,6 +256,54 @@ describe("hides and Fog all (5.4)", () => {
   });
 });
 
+describe("explored ground lost by any path (5.4)", () => {
+  const bounds = (w: number): Op => ({ t: "scene.update", sceneId: "s1", patch: { bounds: { w, h: 30 } } });
+
+  test("a per-player scene shrinking drops every layer's memory past its bounds, and keeps an element still held through a cell inside", () => {
+    const start = perPlayer([
+      chunk("s1", 0, 0, { cells: { "1,1": "wood" } }),
+      chunk("s1", 1, 0, { cells: { "21,1": "stone" }, edges: { "16,1,w": { kind: "wall" } } }),
+      chunk("s1", 1, 0, { cells: { "30,10": "stone" } }, "p1"),
+      chunk("s1", 1, 0, { cells: { "31,13": null } }, "p2"),
+    ]);
+    // The party's ground runs from cell 12 to 23 across the line between tiles 0 and 1.
+    start.exploredTiles = tiles("s1", start.scenes.s1!.bounds, [{ x: 0, y: 0, w: 10, h: 5 }, { x: 12, y: 0, w: 12, h: 2 }]);
+    const r = applyOp(start, bounds(16), DM, env(1));
+    assert.ok(r.ok);
+    assert.deepEqual(Object.keys(r.state.exploredBy), []);
+    // The edge west of cell 16 stays with cell 15, inside.
+    assert.deepEqual(entriesOf(party(r.state, 1, 0)), { edges: { "16,1,w": { kind: "wall" } } });
+    assert.deepEqual(party(r.state), party(start));
+    assert.deepEqual(r.state.memoryBy, {});
+    assert.ok(!r.inverse!.some((e) => e.key.startsWith("memory")), "outside the undo step");
+    // Growing back by the undo brings back none of it.
+    const undone = apply(r.state, { t: "sys.restore", entries: r.inverse!, from: "undo" }, DM, 2);
+    assert.deepEqual([entriesOf(party(undone, 1, 0)), undone.memoryBy], [{ edges: { "16,1,w": { kind: "wall" } } }, {}]);
+  });
+
+  test("a whole-party scene keeps memory past its bounds with its tiles, until it turns per player", () => {
+    const start = remembered([chunk("s1", 0, 0, { cells: { "1,1": "wood" } }), chunk("s1", 1, 0, { cells: { "21,1": "stone" } })]);
+    const shrunk = apply(start, bounds(16));
+    assert.deepEqual(shrunk.memory, start.memory);
+    const split = apply(shrunk, { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dark", perPlayer: true } } }, DM, 2);
+    assert.deepEqual(Object.keys(split.memory!), [chunkKey("s1", 0, 0)]);
+  });
+
+  test("a restore that shrinks a per-player scene drops what lay past its new bounds", () => {
+    const start = perPlayer();
+    const small = apply(start, bounds(16));
+    const grow = applyOp(small, bounds(40), DM, env(2));
+    assert.ok(grow.ok);
+    const bits = Object.values(tiles("s1", { w: 40, h: 30 }, [{ x: 30, y: 10, w: 4, h: 2 }]))[0]!.bits;
+    let state = apply(grow.state, { t: "sys.explore", sceneId: "s1", tiles: [], members: [{ memberId: "p1", tiles: [{ tx: 1, ty: 0, bits }] }] }, SERVER, 3);
+    state = apply(state, rememberOp({ layers: [{ memberId: "p1", chunks: [{ cx: 1, cy: 0, set: { cells: { "30,10": "stone" } } }] }] }), SERVER, 4);
+    assert.ok(own(state, "p1", 1, 0));
+    const undone = apply(state, { t: "sys.restore", entries: grow.inverse!, from: "undo" }, DM, 5);
+    assert.equal(undone.scenes.s1!.bounds.w, 16);
+    assert.deepEqual(undone.memoryBy, {});
+  });
+});
+
 describe("a scene's settings (5.4)", () => {
   const memoryOf = (state: RoomState) => [Object.keys(state.memory ?? {}), Object.keys(state.memoryBy ?? {})];
   const start = () => {
