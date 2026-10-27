@@ -161,7 +161,7 @@ const byRow = (a: string, b: string) => {
   return ay - by || ax - bx;
 };
 
-/** The fold, plainly: the party's entry where it held the element, else the first holder's in list order that held it. */
+/** The fold, plainly: the party's entry or none where it held the element, else the first holder's in list order that held it, or none. */
 function fold(model: Model, order: readonly string[]): void {
   const party = model.memory.get("party") ?? new Map<Element, unknown>();
   const holders = order.filter((p) => model.held.has(p) || model.memory.has(p));
@@ -201,11 +201,12 @@ function fold(model: Model, order: readonly string[]): void {
   }
   for (const entries of byId.values()) {
     const entry = (name: string) => entries.find((e) => model.memory.get(name)?.has(e));
-    const holds = (name: string) => {
+    // Every cell any layer remembers it on: no label or stamp here is live, so that is all the ground it lies on.
+    const footprint = ["party", ...holders].flatMap((name) => {
       const e = entry(name);
-      return e !== undefined && reads(name, touches(fieldOf(e), keyOf(e), model.memory.get(name)!.get(e)));
-    };
-    const from = holds("party") ? "party" : holders.find(holds);
+      return e === undefined ? [] : touches(fieldOf(e), keyOf(e), model.memory.get(name)!.get(e));
+    });
+    const from = reads("party", footprint) ? "party" : holders.find((h) => reads(h, footprint));
     const e = from === undefined ? undefined : entry(from);
     if (e !== undefined) out.set(e, model.memory.get(from!)!.get(e));
   }

@@ -431,10 +431,24 @@ describe("the fold to Whole party (5.4)", () => {
   });
 
   test("a label pools by its id, in the chunk of the layer it reads from", () => {
-    const start = perPlayer([chunk("s1", 0, 0, { labels: { l9: label("l9", 1, 1) } }), chunk("s1", 1, 0, { labels: { l1: label("l1", 31, 10.5) } }, "p2")]);
+    // On row 12, which p2 holds and p1, first on the list, does not.
+    const start = perPlayer([chunk("s1", 0, 0, { labels: { l9: label("l9", 1, 1) } }), chunk("s1", 1, 0, { labels: { l1: label("l1", 31, 12.5) } }, "p2")]);
     const next = fold(start);
-    assert.deepEqual(entriesOf(party(next, 1, 0)), { labels: { l1: label("l1", 31, 10.5) } });
+    assert.deepEqual(entriesOf(party(next, 1, 0)), { labels: { l1: label("l1", 31, 12.5) } });
     assert.deepEqual(entriesOf(party(next)), { labels: { l9: label("l9", 1, 1) } });
+  });
+
+  test("keeps the party's absence of a deleted label or stamp on ground it held, where a holder remembered one", () => {
+    const start = perPlayer([
+      chunk("s1", 0, 0, { labels: { l9: label("l9", 3.5, 2.5) }, stamps: { st9: stamp("st9", 4.5, 3.5) } }, "p1"),
+      chunk("s1", 1, 0, { labels: { l8: label("l8", 31.5, 10.5) }, stamps: { st8: stamp("st8", 30.5, 11.5) } }, "p1"),
+    ]);
+    // p1 also explored cells 2 to 5 by 2 to 3, which the party holds too. Every one of these is deleted from the build.
+    for (const t of Object.values(tiles("s1", start.scenes.s1!.bounds, [{ x: 2, y: 2, w: 4, h: 2 }]))) start.exploredBy[holderTileKey("s1", "p1", t.tx, t.ty)] = { ...t, memberId: "p1" };
+    const next = apply(start, { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dark", perPlayer: false } } });
+    // The party saw that ground with nothing there, so it remembers nothing. On ground only p1 held, p1's entries stay.
+    assert.equal(party(next), undefined);
+    assert.deepEqual(entriesOf(party(next, 1, 0)), { labels: { l8: label("l8", 31.5, 10.5) }, stamps: { st8: stamp("st8", 30.5, 11.5) } });
   });
 
   test("keeps the scene's share mark and its played mark: the scene still remembers, now in one layer (ASTRA-22)", () => {

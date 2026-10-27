@@ -183,11 +183,11 @@ function cellsOf(field: CellField, key: string): string[] {
   return [`${x},${y}`, side === "n" ? `${x},${y - 1}` : `${x - 1},${y}`];
 }
 
-/** Every box a label or stamp element is judged by (5.3): the one the layer remembers and the one it has now. */
-function boxes(state: RoomState, sceneId: string, field: "labels" | "stamps", id: string, remembered: Label | Stamp | null): CellRange[] {
+/** Every box a label or stamp element is judged by (5.3): each one remembered and the one it has now. */
+function boxes(state: RoomState, sceneId: string, field: "labels" | "stamps", id: string, remembered: readonly (Label | Stamp | null)[]): CellRange[] {
   const out: CellRange[] = [];
   const live = field === "labels" ? state.labels[id] : state.stamps[id];
-  for (const value of [remembered, live]) {
+  for (const value of [...remembered, live]) {
     if (!value || value.sceneId !== sceneId) continue;
     out.push(field === "labels" ? labelCells(value as Label) : stampCells(value as Stamp));
   }
@@ -196,7 +196,7 @@ function boxes(state: RoomState, sceneId: string, field: "labels" | "stamps", id
 
 /** Whether a layer holds any cell an entry's element touches. */
 function holdsElement(state: RoomState, sceneId: string, held: Held, field: Exclude<EntryField, "walls">, key: string, value: unknown): boolean {
-  if (field === "labels" || field === "stamps") return boxes(state, sceneId, field, key, value as Label | Stamp | null).some((r) => held.range(r));
+  if (field === "labels" || field === "stamps") return boxes(state, sceneId, field, key, [value as Label | Stamp | null]).some((r) => held.range(r));
   return cellsOf(field, key).some((cell) => held.key(cell));
 }
 
@@ -399,7 +399,9 @@ function byRow(a: string, b: string): number {
  * party's, per element and a free wall per cell (5.4): an element that
  * touches a cell the party's layer held keeps the party's entry or none,
  * and any other takes the entry of the first holder in `order` whose own
- * layer holds it, or none, so each element reads as one layer saw it.
+ * layer holds it, or none, so each element reads as one layer saw it. A
+ * label or stamp lies in every box a layer remembers it in and its live
+ * one, so one deleted since is judged where each layer last saw it.
  * Called before the layers themselves pool, so "the party's layer" is the
  * party's alone. The holders' memory goes with their layers after.
  */
@@ -454,10 +456,10 @@ export function poolMemory(tx: Tx, scene: Scene, order: readonly string[]): void
     const ids = new Set<string>();
     for (const l of layers) for (const id of l.byId[field].keys()) ids.add(id);
     for (const id of [...ids].sort()) {
-      const from = reader((l) => {
-        const remembered = l.byId[field].get(id)?.[field]?.[id] ?? null;
-        return boxes(tx.state, scene.id, field, id, remembered).some((r) => l.held.range(r));
-      });
+      // Where the element lies is every box any layer remembers and the live one, found before the layer is chosen, so
+      // the party's absence of an element it holds the ground of still wins over a holder's entry.
+      const footprint = boxes(tx.state, scene.id, field, id, layers.map((l) => l.byId[field].get(id)?.[field]?.[id] ?? null));
+      const from = reader((l) => footprint.some((r) => l.held.range(r)));
       const chunk = from?.byId[field].get(id);
       if (chunk) put(`${chunk.cx},${chunk.cy}`, field, id, chunk[field]![id]);
     }
