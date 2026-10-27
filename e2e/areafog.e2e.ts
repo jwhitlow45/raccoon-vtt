@@ -13,12 +13,15 @@ import { ConsoleWatch, OpSocket, pagePoint, pickTool, Shots, sleep, SocketWatch,
  * An area being aimed over a player's fog (lane AF): the area tool's own
  * preview and the previews other members share draw above the fog, in
  * Top-down's overlay and in Isometric's drag layer, and their shading
- * shows only on ground the player's fog reveals. So a wall on fogged
- * ground changes none of the preview's pixels over the fog. Each check
- * reads the page's pixels at the middle of every fogged sub-cell the
- * sphere reaches, once with the wall and once without, and they must match.
- * On revealed ground the shading still shows. The DM's preview is cut by
- * the wall as before.
+ * shows only on ground the player's fog reveals. On a player's device it
+ * reads only the walls with a revealed sub-cell beside them, so a wall
+ * wholly under the fog changes none of the preview's pixels, wherever its
+ * origin lies: in the fog beside revealed ground, or across a fogged strip
+ * from revealed ground beyond it. Each check reads the page's pixels at the
+ * middle of sub-cells the sphere reaches, once with the wall and once
+ * without, and they must match, and over the fog this device's own
+ * preview leaves the fog's color but for its outline. On revealed ground
+ * the shading still shows. The DM's preview is cut by the wall as before.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus thirty-two,
  * as other files do, since the runs never overlap. The other environment
@@ -33,20 +36,49 @@ const work = mkdtempSync(path.join(tmpdir(), "raccoon-e2e-areafog-"));
 const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
+type Rgb = [number, number, number];
+
 /** Set before the app's first script: it installs the hook that picks and turns the view (relief/isoTest.ts). */
 const HOOK_FLAG = "globalThis.__rvttIsoTest = true;";
 
 const BOUNDS = { w: 16, h: 12 };
-/** Every column west of this one is revealed to the players, the rest is fogged. */
+/** Every column west of this one is revealed to the players, the rest is fogged, in the first layout. */
 const FOG_EDGE = 8;
 /** Fireball's 20 ft sphere, centered here: its east side reaches 4 cells into the fog. */
 const ORIGIN = { x: 6, y: 6 };
-/** The hidden wall: the west edge of column 9, all the way down, a cell east of the fog's edge. */
-const WALL_X = 9;
+
+type Rect = { x: number; y: number; w: number; h: number };
+/**
+ * Where the fog's revealed ground lies, where the sphere is aimed and how
+ * big, and the hidden wall, wholly under the fog: west edges of cells
+ * ("x,y") or one free wall.
+ */
+type Layout = { name: string; reveal: readonly Rect[]; origin: { x: number; y: number }; size: number; edges?: readonly string[]; free?: { id: string; a: [number, number]; b: [number, number] } };
+
+const column = (x: number, skip: readonly number[] = []) => Array.from({ length: BOUNDS.h }, (_, y) => y).filter((y) => !skip.includes(y)).map((y) => `${x},${y}`);
+
+/** The first layout: the fog's edge at x = 8, the origin west of it, the wall along x = 9, a cell into the fog. */
+const PAST_EDGE: Layout = { name: "past-edge", reveal: [{ x: 0, y: 0, w: FOG_EDGE, h: BOUNDS.h }], origin: ORIGIN, size: 20, edges: column(9) };
+/** The origin in the fog beside revealed ground, a wall with a doorway between them. */
+const ORIGIN_IN_FOG: Layout = { name: "origin-in-fog", reveal: [{ x: 0, y: 0, w: 8, h: BOUNDS.h }], origin: { x: 11, y: 6 }, size: 30, edges: column(10, [5, 6]) };
+/** A fogged strip from x = 5 to 9 between revealed ground, the wall in the strip. */
+const ACROSS_STRIP: Layout = {
+  name: "across-strip",
+  reveal: [
+    { x: 0, y: 0, w: 5, h: BOUNDS.h },
+    { x: 9, y: 0, w: 7, h: BOUNDS.h },
+  ],
+  origin: { x: 4, y: 6 },
+  size: 30,
+  edges: column(7),
+};
+/** Revealed to x = 7.5, inside a cell, and a free wall in that cell's fogged half. */
+const EDGE_IN_CELL: Layout = { name: "edge-in-cell", reveal: [{ x: 0, y: 0, w: 7.5, h: BOUNDS.h }], origin: { x: 10, y: 6 }, size: 30, free: { id: "aimfoghalf01", a: [7.75, 2], b: [7.75, 10] } };
 /** Per channel, between two draws of the same picture. */
 const TOLERANCE = 2;
+/** theme.color.fog, as a player sees it: opaque. */
+const FOG: Rgb = [13, 13, 18];
 
-type Rgb = [number, number, number];
 type View = "topDown" | "isometric";
 
 let server: Server;
@@ -61,7 +93,10 @@ const dmSocket = new SocketWatch("dm");
 const patSocket = new SocketWatch("pat");
 const consoles = { dm: new ConsoleWatch("dm"), pat: new ConsoleWatch("pat") };
 
-const run = { roomId: "", roomName: `E2E area over fog ${new Date().toISOString().slice(0, 19)}`, password: "", sceneId: "" };
+const run = { roomId: "", roomName: `E2E area over fog ${new Date().toISOString().slice(0, 19)}`, password: "", sceneId: "", goblin: randomUUID() };
+
+/** A goblin on revealed ground at 7, 1, where the doorway's light from the second layout's origin reaches no lower than y = 2.5. */
+const GOBLIN_AT = { x: 7, y: 1 };
 
 async function join(context: BrowserContext, name: string, color: string): Promise<void> {
   const headers = { Origin: server.origin, "content-type": "application/json" };
@@ -89,15 +124,32 @@ async function openRaw(cookie: string): Promise<WebSocket> {
   return ws;
 }
 
-/** The hidden wall in place or gone, once Pat's page holds the change. */
-async function setWall(on: boolean): Promise<void> {
-  const edges = Array.from({ length: BOUNDS.h }, (_, y) => ({ key: `${WALL_X},${y},w`, feature: on ? { kind: "wall" } : null }));
-  await ops.send({ t: "build.edge", sceneId: run.sceneId, edges });
+/** A layout's hidden wall in place or gone, once Pat's page holds the change. */
+async function setWall(on: boolean, layout: Layout = PAST_EDGE): Promise<void> {
+  const edges = (layout.edges ?? []).map((key) => ({ key: `${key},w`, feature: on ? { kind: "wall" } : null }));
+  if (edges.length > 0) await ops.send({ t: "build.edge", sceneId: run.sceneId, edges });
+  const free = layout.free;
+  if (free) await ops.send({ t: "build.walls", sceneId: run.sceneId, ...(on ? { put: [{ ...free, f: { kind: "wall" } }] } : { remove: [{ cx: 0, cy: 0, id: free.id }] }) });
   await waitFor(`the wall ${on ? "on" : "off"} on Pat's page`, () => {
     const chunk = Object.values(patSocket.state?.buildChunks ?? {}).find((c) => c.sceneId === run.sceneId && c.cx === 0 && c.cy === 0);
-    return Boolean(chunk?.edges[`${WALL_X},5,w`]) === on || null;
+    const has = edges.length > 0 ? Boolean(chunk?.edges[edges[0]!.key]) : Boolean(chunk?.walls?.some((w) => w.id === free?.id));
+    return has === on || null;
   });
   // The board redraws on the change, the preview's shading with it.
+  await sleep(500);
+}
+
+/** What the fog reveals now, as a layout's rectangles: AF-1 reveals the first layout's. */
+let revealed = JSON.stringify(PAST_EDGE.reveal);
+
+/** The fog as a layout reveals it, once Pat's page holds it. */
+async function setFog(layout: Layout): Promise<void> {
+  if (JSON.stringify(layout.reveal) === revealed) return;
+  revealed = JSON.stringify(layout.reveal);
+  const before = JSON.stringify(patSocket.state?.fogTiles);
+  const hide = { id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } };
+  await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [hide, ...layout.reveal.map((r) => ({ id: randomUUID(), mode: "reveal", shape: { kind: "rect", ...r } }))] });
+  await waitFor("the fog on Pat's page", () => JSON.stringify(patSocket.state?.fogTiles) !== before || null);
   await sleep(500);
 }
 
@@ -134,13 +186,14 @@ async function pressSlot(page: Page, id: string): Promise<void> {
   await more.waitFor({ state: "detached" });
 }
 
-/** Aims Fireball at ORIGIN with the area tool, a click where the DM's mouse or Pat's would go. */
-async function aim(page: Page): Promise<void> {
+/** Aims Fireball at a layout's origin with the area tool, a click where the DM's mouse or Pat's would go, and grows it to the layout's size. */
+async function aim(page: Page, layout: Layout = PAST_EDGE): Promise<void> {
   await pickTool(page, "Area");
   await spell(page, "fireball");
-  const p = await pagePoint(page, BOUNDS, ORIGIN);
+  const p = await pagePoint(page, BOUNDS, layout.origin);
   await page.mouse.click(p.x, p.y);
   await waitFor("the Place control", async () => (await options(page).locator('[data-rvtt-slot="place"]').count()) > 0 || null);
+  for (let ft = 20; ft < layout.size; ft += 5) await options(page).getByRole("button", { name: "More size" }).click();
   // The shading refines once the pointer rests.
   await sleep(500);
 }
@@ -194,7 +247,20 @@ function toPage(p: Placement, x: number, y: number): { x: number; y: number } {
 /** A place read, in cells, and where it lies on the page. */
 type Spot = { cell: { x: number; y: number }; page: { x: number; y: number } };
 
-/** The middle of every fogged sub-cell the sphere's box reaches, east of the fog's edge, that the board's canvas holds. */
+/** The middle of every sub-cell of a layout's sphere's box inside the scene that the board's canvas holds, fogged or not. */
+async function boxSpots(page: Page, at: Placement, layout: Layout): Promise<Spot[]> {
+  const r = layout.size / 5;
+  const spots: Spot[] = [];
+  for (let sy = Math.max(0, (layout.origin.y - r) * 4); sy < Math.min(BOUNDS.h, layout.origin.y + r) * 4; sy++) {
+    for (let sx = Math.max(0, (layout.origin.x - r) * 4); sx < Math.min(BOUNDS.w, layout.origin.x + r) * 4; sx++) {
+      const cell = { x: (sx + 0.5) / 4, y: (sy + 0.5) / 4 };
+      spots.push({ cell, page: toPage(at, cell.x, cell.y) });
+    }
+  }
+  return onCanvas(page, spots);
+}
+
+/** The middle of every fogged sub-cell the first layout's sphere's box reaches, east of the fog's edge, that the board's canvas holds. */
 async function foggedSpots(page: Page, at: Placement): Promise<Spot[]> {
   const spots: Spot[] = [];
   for (let sy = (ORIGIN.y - 4) * 4; sy < (ORIGIN.y + 4) * 4; sy++) {
@@ -233,17 +299,39 @@ function diff(a: Rgb, b: Rgb): number {
  * The paired check: the pixels over the fog with the wall and without it.
  * Returns the spots that differ by more than TOLERANCE, each named.
  */
-async function pairedDiff(page: Page, label: string): Promise<{ spots: number; misses: string[] }> {
+/** Whether a point in cells lies on ground a layout reveals. */
+function revealedIn(layout: Layout, p: { x: number; y: number }): boolean {
+  return layout.reveal.some((r) => p.x > r.x && p.x < r.x + r.w && p.y > r.y && p.y < r.y + r.h);
+}
+
+/**
+ * The paired check: the pixels with the wall and without it, and for this
+ * device's own preview, the fog's own color at every fogged spot clear of
+ * the outline and the origin's grip, which draw over the fog whole.
+ * Returns the spots that miss, each named.
+ */
+async function pairedDiff(page: Page, label: string, layout?: Layout, own = false): Promise<{ spots: number; misses: string[] }> {
   const at = await placement(page);
-  const spots = await foggedSpots(page, at);
-  await setWall(true);
+  const spots = layout ? await boxSpots(page, at, layout) : await foggedSpots(page, at);
+  await setWall(true, layout);
   assert.deepEqual(await placement(page), at, `${label}: the camera held still`);
   const walled = await read(page, spots);
   await shots.take(page, `areafog-${label}-wall`);
-  await setWall(false);
+  await setWall(false, layout);
   const open = await read(page, spots);
   await shots.take(page, `areafog-${label}-open`);
   const misses = spots.flatMap((s, i) => (diff(walled[i]!, open[i]!) > TOLERANCE ? [`${s.cell.x},${s.cell.y}: ${walled[i]!.join(",")} with the wall, ${open[i]!.join(",")} without`] : []));
+  if (own) {
+    const l = layout ?? PAST_EDGE;
+    const r = l.size / 5;
+    spots.forEach((s, i) => {
+      const d = Math.hypot(s.cell.x - l.origin.x, s.cell.y - l.origin.y);
+      if (revealedIn(l, s.cell) || Math.abs(d - r) < 0.35 || d < 0.35) return;
+      for (const [got, wall] of [[walled[i]!, "with"], [open[i]!, "without"]] as const) {
+        if (diff(got, FOG) > TOLERANCE) misses.push(`${s.cell.x},${s.cell.y} over the fog ${wall} the wall: ${got.join(",")}`);
+      }
+    });
+  }
   return { spots: spots.length, misses };
 }
 
@@ -257,10 +345,10 @@ async function revealedSpot(page: Page): Promise<Spot> {
 }
 
 /** Sends a shared Fireball from the DM every 400 ms until stopped, as a resting preview keeps itself alive. */
-function shareFromDm(): () => void {
+function shareFromDm(layout: Layout = PAST_EDGE): () => void {
   const id = randomUUID();
   const send = (e: Record<string, unknown>) => dmRaw.send(JSON.stringify({ t: "eph", sceneId: run.sceneId, e }));
-  const frame = () => send({ k: "aoe", id, shape: "sphere", origin: { ...ORIGIN, z: 0 }, yaw: 0, size: 20, shared: true });
+  const frame = () => send({ k: "aoe", id, shape: "sphere", origin: { ...layout.origin, z: 0 }, yaw: 0, size: layout.size, shared: true });
   frame();
   const timer = setInterval(frame, 400);
   return () => {
@@ -330,13 +418,13 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
     await viewAs(pat, "topDown");
   });
 
-  test("AF-2. Pat aims Fireball over the fog's edge in Top-down: its pixels over the fog are the same with the hidden wall and without it, and it shades revealed ground", async () => {
+  test("AF-2. Pat aims Fireball over the fog's edge in Top-down: over the fog it leaves the fog's color but for its outline, the same with the hidden wall and without it, and it shades revealed ground", async () => {
     const spot = await revealedSpot(pat);
     const [bare] = await read(pat, [spot]);
     await aim(pat);
     const [shaded] = await read(pat, [spot]);
     assert.ok(diff(bare!, shaded!) > 10, `the shading shows on revealed ground: ${bare!.join(",")} then ${shaded!.join(",")}`);
-    const { spots, misses } = await pairedDiff(pat, "pat-topdown");
+    const { spots, misses } = await pairedDiff(pat, "pat-topdown", undefined, true);
     assert.ok(spots > 100, `enough fogged spots read: ${spots}`);
     assert.deepEqual(misses, []);
   });
@@ -344,7 +432,7 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
   test("AF-3. the same in Isometric, at two turns", async () => {
     for (const turn of [0, 1]) {
       await viewAs(pat, "isometric", turn);
-      const { spots, misses } = await pairedDiff(pat, `pat-iso-turn-${turn}`);
+      const { spots, misses } = await pairedDiff(pat, `pat-iso-turn-${turn}`, undefined, true);
       assert.ok(spots > 100, `turn ${turn}: enough fogged spots read: ${spots}`);
       assert.deepEqual(misses, [], `turn ${turn}`);
     }
@@ -414,7 +502,80 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
     await viewAs(dm, "topDown");
   });
 
-  test("AF-6. no page logged an error", () => {
+  /**
+   * Pat's own preview of a layout in Top-down and Isometric, and the DM's
+   * shared one where asked: no pixel of the sphere's box changes with the
+   * hidden wall.
+   */
+  async function layoutCase(layout: Layout, shared: boolean): Promise<void> {
+    await setFog(layout);
+    await viewAs(pat, "topDown");
+    await aim(pat, layout);
+    for (const [view, turn] of [["topDown", 0], ["isometric", 0], ["isometric", 1]] as const) {
+      await viewAs(pat, view, turn);
+      const { spots, misses } = await pairedDiff(pat, `pat-${layout.name}-${view}-${turn}`, layout, true);
+      assert.ok(spots > 400, `${view} ${turn}: enough spots read: ${spots}`);
+      assert.deepEqual(misses, [], `${view} ${turn}`);
+    }
+    await viewAs(pat, "topDown");
+    await pressSlot(pat, "cancel");
+    if (!shared) return;
+    const stop = shareFromDm(layout);
+    try {
+      await sleep(1000);
+      for (const view of ["topDown", "isometric"] as const) {
+        await viewAs(pat, view);
+        const { spots, misses } = await pairedDiff(pat, `pat-${layout.name}-shared-${view}`, layout);
+        assert.ok(spots > 400, `shared, ${view}: enough spots read: ${spots}`);
+        assert.deepEqual(misses, [], `shared, ${view}`);
+      }
+    } finally {
+      stop();
+    }
+    await viewAs(pat, "topDown");
+  }
+
+  test("AF-6. Pat aims from the fog beside revealed ground, past a wall with a doorway: no pixel changes with the wall, in both views, and the DM's shared preview changes nothing either", async () => {
+    await layoutCase(ORIGIN_IN_FOG, true);
+  });
+
+  test("AF-7. there a goblin on revealed ground the wall would shade from the origin: Pat's In area line lists it with the wall and without it", async () => {
+    await ops.send({
+      t: "token.create",
+      token: {
+        id: run.goblin,
+        sceneId: run.sceneId,
+        size: "medium",
+        visibility: "all",
+        kind: "monster",
+        name: "Goblin",
+        ...GOBLIN_AT,
+        disposition: "hostile",
+        actor: { inline: { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 12, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" } },
+      },
+    });
+    await waitFor("the goblin on Pat's page", () => patSocket.state?.tokens[run.goblin] ?? null);
+    await viewAs(pat, "topDown");
+    await aim(pat, ORIGIN_IN_FOG);
+    const line = async () => (await options(pat).locator("[data-options-line]").first().textContent()) ?? "";
+    for (const on of [true, false]) {
+      await setWall(on, ORIGIN_IN_FOG);
+      assert.match(await line(), /In area \(1\): Goblin/, `the wall ${on ? "on" : "off"}`);
+    }
+    await shots.take(pat, "areafog-pat-goblin-listed");
+    await pressSlot(pat, "cancel");
+    await ops.send({ t: "token.delete", tokenId: run.goblin });
+  });
+
+  test("AF-8. Pat aims across a fogged strip at revealed ground beyond it, the wall in the strip: no pixel changes with the wall, in both views", async () => {
+    await layoutCase(ACROSS_STRIP, false);
+  });
+
+  test("AF-9. revealed to the middle of a cell, a wall in its fogged half: no pixel changes with the wall, in both views", async () => {
+    await layoutCase(EDGE_IN_CELL, false);
+  });
+
+  test("AF-10. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label} logged errors`);
   });
 });
