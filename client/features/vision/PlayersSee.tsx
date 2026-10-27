@@ -1,10 +1,11 @@
 import { useId, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import type { ScenePreset } from "#shared/model.ts";
+import type { Scene, ScenePreset } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Spinner } from "../../components/Loading.tsx";
-import { Note } from "../../components/Panel.tsx";
+import { Help, Note } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
-import { PLAYERS_SEE, PLAYERS_SEE_NAME } from "./playersSeeRules.ts";
+import { newScenePreset, stepsDown, type NewSceneKind } from "../scenes/create.ts";
+import { IMAGE_STEPS_DOWN, likeSummary, PLAYERS_SEE, PLAYERS_SEE_NAME, playersSeeOf, WALLLESS_TEXT } from "./playersSeeRules.ts";
 
 export type PlayersSeeValue = ScenePreset | "like";
 
@@ -118,6 +119,36 @@ export function PlayersSeeChoice(props: {
           {chosen >= 0 ? null : props.none}
         </span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Players see where a scene is made (8.1, 8.2): the new scene form under
+ * Kind of scene, and the Universal VTT dialog in place of its fog choice.
+ * It starts on the room's default for the kind, says so when a map image
+ * steps down from Explore, offers Like the scene on the DM's screen, and
+ * warns under Explore on a map with no walls, as the scene's settings do.
+ */
+export function NewScenePlayersSee(props: {
+  kind: NewSceneKind;
+  setting: ScenePreset | undefined;
+  value: PlayersSeeValue;
+  /** The scene on the DM's screen, which Like copies. */
+  like: Scene | undefined;
+  /** The new scene's map would have nothing that blocks sight. */
+  wallless: boolean;
+  disabled?: boolean;
+  onChange(value: PlayersSeeValue): void;
+}) {
+  const { kind, setting, value, like } = props;
+  const lands = value === "like" ? (like ? playersSeeOf(like) : newScenePreset(setting, kind)) : value;
+  const steppedDown = stepsDown(setting, kind) && value === newScenePreset(setting, kind);
+  return (
+    <div style={{ display: "grid", minWidth: 0 }}>
+      <PlayersSeeChoice value={value} like={like ? { name: like.name, summary: likeSummary(like) } : null} disabled={props.disabled} onChange={props.onChange} />
+      {steppedDown ? <Help style={{ marginTop: theme.space(1) }}>{IMAGE_STEPS_DOWN}</Help> : null}
+      <WarningStatus text={props.wallless && lands === "explore" ? WALLLESS_TEXT : null} />
     </div>
   );
 }

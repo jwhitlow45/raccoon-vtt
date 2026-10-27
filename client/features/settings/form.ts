@@ -1,11 +1,12 @@
 import { critRuleOf } from "#shared/dice/crit.ts";
-import type { AoeCoverage, AoeInclusion, CritRule, DiagonalRule, MemberId, MoveAnyToken, OrderReveal, RoomSettings, WhichPlayers } from "#shared/model.ts";
+import type { AoeCoverage, AoeInclusion, CritRule, DiagonalRule, MemberId, MoveAnyToken, OrderReveal, RoomSettings, ScenePreset, WhichPlayers } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { healRevivesDead } from "#shared/migrate.ts";
 import { playersTypeTotals } from "#shared/permissions.ts";
 import { orderRevealOf } from "#shared/rules/initiative.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
 import { TIMER_CHOICES } from "../encounter/timer.ts";
+import { IMAGE_STEPS_DOWN, PLAYERS_SEE } from "../vision/playersSeeRules.ts";
 
 /**
  * The room settings form (design section 6, RoomSettings), as data: which
@@ -30,7 +31,9 @@ export type SettingField =
   | { kind: "number"; key: "feetPerCell"; label: string; help: string; min: number; max: number }
   | { kind: "seconds"; key: "turnTimerSec"; label: string; help: string; options: { value: number; label: string }[] }
   | { kind: "movers"; key: "playersMoveAny"; label: string; help: string; options: Choice<MoveAnyMode>[] }
-  | { kind: "drawers"; key: "playersDraw"; label: string; help: string; options: Choice<MoveAnyMode>[] };
+  | { kind: "drawers"; key: "playersDraw"; label: string; help: string; options: Choice<MoveAnyMode>[] }
+  /** What players see on new scenes, with "As before" offered only while a room has never set it, since no op takes the setting away. */
+  | { kind: "newScenes"; key: "newScenePlayers"; label: string; help: string; options: Choice<ScenePreset>[]; before: Choice<"before"> };
 
 export type SettingGroup = { heading: string; fields: SettingField[] };
 
@@ -214,7 +217,30 @@ export const SETTING_GROUPS: SettingGroup[] = [
       },
     ],
   },
+  {
+    heading: "New scenes",
+    fields: [
+      {
+        kind: "newScenes",
+        key: "newScenePlayers",
+        label: "Players see on new scenes",
+        help: `New scenes start on this. ${IMAGE_STEPS_DOWN}`,
+        options: PLAYERS_SEE.map((p) => ({ value: p.value, label: p.label, help: p.help })),
+        before: { value: "before", label: "As before", help: "Maps and the builder start under fog, battle mats without." },
+      },
+    ],
+  },
 ];
+
+/** Players see on new scenes as the form shows it: the room's pick, or "As before" in a room from before the setting (docs/design-v1-map-discovery.md 8.2). */
+export function newScenesChoice(settings: Pick<RoomSettings, "newScenePlayers">): ScenePreset | "before" {
+  return settings.newScenePlayers ?? "before";
+}
+
+/** The options the New scenes group offers: "As before" only while it is still the room's, since picking another leaves it for good. */
+export function newScenesOptions(field: Extract<SettingField, { kind: "newScenes" }>, settings: Pick<RoomSettings, "newScenePlayers">): Choice<ScenePreset | "before">[] {
+  return settings.newScenePlayers === undefined ? [...field.options, field.before] : [...field.options];
+}
 
 /**
  * The three answers the DM picks from, for who can move any token and who

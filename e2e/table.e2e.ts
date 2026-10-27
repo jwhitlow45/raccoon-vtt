@@ -149,7 +149,7 @@ describe("raccoon-vtt table basics", { timeout: 120_000 }, () => {
     const file = path.join(work, "crypt.png");
     await makeCrypt(file);
     await openPanel(dm, "Scenes");
-    await dm.getByRole("radio", { name: "Map image" }).tap();
+    await dm.getByRole("radio", { name: "Map image", exact: true }).tap();
     await dm.locator('input[type="file"][accept="image/*"]').first().setInputFiles(file);
     await dm.getByRole("button", { name: "Upload and create" }).tap();
     const created = await waitFor("the map scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.map !== undefined), 30_000);

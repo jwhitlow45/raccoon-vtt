@@ -1,7 +1,8 @@
-import type { Scene, SceneMap } from "#shared/model.ts";
+import type { LightLevel, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
 import { MAX_NAME, MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { fitBounds, MAX_CELL_PX, MIN_CELL_PX } from "../grid/calibrate.ts";
 import { groundAtMiddle, type Live } from "../../lib/view.ts";
+import { lightOf } from "../vision/settings.ts";
 
 /**
  * Building the scene ops the Scenes panel sends (design sections 5, 6 and
@@ -119,6 +120,71 @@ export function mapScene(input: { id: string; name: string; asset: MapAsset }): 
     },
     hinted,
   };
+}
+
+/** What the new scene form and the Universal VTT dialog make. A starter map is a map image. */
+export type NewSceneKind = "mat" | "map" | "builder" | "uvtt";
+
+/**
+ * What players see on a new scene until the DM picks otherwise
+ * (docs/design-v1-map-discovery.md 8.2): the room's default, except that a
+ * map image or starter map steps down from Explore to Reveal by hand, since
+ * sight with no walls reaches all its art. A room that never set one keeps
+ * each kind's older start: maps and the builder under fog, mats without.
+ */
+export function newScenePreset(setting: ScenePreset | undefined, kind: NewSceneKind): ScenePreset {
+  if (setting === undefined) return kind === "mat" ? "all" : "reveal";
+  return setting === "explore" && kind === "map" ? "reveal" : setting;
+}
+
+/** Whether the room's default stepped down for this kind, which the form then says. */
+export function stepsDown(setting: ScenePreset | undefined, kind: NewSceneKind): boolean {
+  return setting === "explore" && newScenePreset(setting, kind) !== "explore";
+}
+
+/** The scene "Like <scene>" copies from, as much of it as the copy reads. */
+export type LikeSource = Pick<Scene, "fogEnabled" | "vision" | "blockMovement">;
+
+/** The DM's pick in the form: a preset, or Like the scene on the DM's screen. */
+export type NewScenePick = { preset: ScenePreset } | { like: LikeSource };
+
+/**
+ * What a scene is made with for the form's choice: Like reads the scene on
+ * screen as the scene is made, and the kind's start once that scene is gone.
+ */
+export function newScenePick(value: ScenePreset | "like", like: LikeSource | undefined, setting: ScenePreset | undefined, kind: NewSceneKind): NewScenePick {
+  if (value !== "like") return { preset: value };
+  return like ? { like } : { preset: newScenePreset(setting, kind) };
+}
+
+type PlayersSeeFields = Pick<SceneInput, "fogEnabled" | "vision" | "blockMovement">;
+
+/**
+ * The fields a new scene takes from Players see (8.1, 8.2). A preset sets
+ * fog and party vision. Like copies fog, party vision with its light and
+ * Sight, and whether walls stop players' moves, and leaves automatic walls
+ * to the kind of scene (D-261026-29), so a map image keeps "floor" and an
+ * import "off". `light` is the Universal VTT dialog's own pick, which
+ * stands over the copy's. The holder list is never copied: a scene starts
+ * with none, so a per-player copy starts empty.
+ */
+export function playersSeeFields(pick: NewScenePick, light?: LightLevel): PlayersSeeFields {
+  if ("like" in pick) {
+    const source = pick.like;
+    const fields: PlayersSeeFields = { fogEnabled: source.fogEnabled, blockMovement: source.blockMovement === true };
+    if (source.vision || light) fields.vision = { on: source.vision?.on === true, light: light ?? lightOf(source), ...(source.vision?.perPlayer ? { perPlayer: true as const } : {}) };
+    return fields;
+  }
+  const { preset } = pick;
+  if (preset === "explore") return { fogEnabled: true, vision: { on: true, light: light ?? "bright" } };
+  // Without a light to keep, Reveal by hand and Everything send no vision, as a new scene always did.
+  return { fogEnabled: preset === "reveal", ...(light ? { vision: { on: false, light } } : {}) };
+}
+
+/** A new scene with Players see applied over what its kind starts with. */
+export function withPlayersSee(scene: SceneInput, pick: NewScenePick, light?: LightLevel): SceneInput {
+  const { vision: _kind, ...rest } = scene;
+  return { ...rest, ...playersSeeFields(pick, light) };
 }
 
 /**

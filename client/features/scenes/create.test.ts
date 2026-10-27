@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { apply, room } from "#shared/testutil.ts";
-import { builderScene, fogsWithFirstMap, guessCellPx, mapScene, matScene, nameFromFile, replaceMap, sameArt, viewFromCamera } from "./create.ts";
+import { builderScene, fogsWithFirstMap, guessCellPx, mapScene, matScene, nameFromFile, newScenePick, newScenePreset, playersSeeFields, replaceMap, sameArt, stepsDown, viewFromCamera, withPlayersSee } from "./create.ts";
 import { TOP_DOWN } from "../../lib/view.ts";
 
 function valid(scene: unknown) {
@@ -95,5 +95,87 @@ describe("a scene's first map", () => {
     assert.equal(fogsWithFirstMap({ fogEnabled: false, map: {} }, false), false);
     assert.equal(fogsWithFirstMap({ fogEnabled: false }, true), false);
     assert.equal(fogsWithFirstMap({ fogEnabled: true }, false), false);
+  });
+});
+
+describe("what players see on a new scene (docs/design-v1-map-discovery.md 8.2)", () => {
+  const kinds = ["builder", "uvtt", "map", "mat"] as const;
+
+  test("each kind starts on the room's default, a map image steps down from Explore, and a room that never set one starts as before", () => {
+    // The design's table: a row per default, a column per kind.
+    const table = {
+      explore: ["explore", "explore", "reveal", "explore"],
+      reveal: ["reveal", "reveal", "reveal", "reveal"],
+      all: ["all", "all", "all", "all"],
+      unset: ["reveal", "reveal", "reveal", "all"],
+    } as const;
+    for (const [row, want] of Object.entries(table)) {
+      const setting = row === "unset" ? undefined : (row as "explore" | "reveal" | "all");
+      assert.deepEqual(
+        kinds.map((k) => newScenePreset(setting, k)),
+        [...want],
+        row,
+      );
+    }
+    assert.deepEqual(kinds.map((k) => stepsDown("explore", k)), [false, false, true, false]);
+    assert.equal(stepsDown(undefined, "map"), false);
+    assert.equal(stepsDown("reveal", "map"), false);
+  });
+
+  test("a preset sets fog and party vision on what each kind makes, and leaves its walls and movement", () => {
+    const mat = matScene({ id: "m", name: "Mat", w: 10, h: 10 });
+    const explore = withPlayersSee(mat, { preset: "explore" });
+    valid(explore);
+    assert.deepEqual([explore.fogEnabled, explore.vision], [true, { on: true, light: "bright" }]);
+    assert.equal(explore.blockMovement, true);
+    const state = apply(room(), { t: "scene.create", scene: explore });
+    assert.equal(state.scenes.m!.fogEnabled, true);
+    assert.equal(state.scenes.m!.vision?.on, true);
+    // Reveal by hand and Everything send no vision, as a new scene always did, and say the fog either way.
+    const { scene: map } = mapScene({ id: "s", name: "Cave", asset: { id: "a", width: 900, height: 600 } });
+    assert.deepEqual(withPlayersSee(map, { preset: "reveal" }), { ...map, fogEnabled: true });
+    assert.deepEqual(withPlayersSee(map, { preset: "all" }), { ...map, fogEnabled: false });
+    assert.equal(apply(room(), { t: "scene.create", scene: withPlayersSee(map, { preset: "all" }) }).scenes.s!.fogEnabled, false, "a map's own fog default is overridden");
+    // An import keeps its light, under any preset.
+    assert.deepEqual(playersSeeFields({ preset: "reveal" }, "dim"), { fogEnabled: true, vision: { on: false, light: "dim" } });
+    assert.deepEqual(playersSeeFields({ preset: "explore" }, "dark"), { fogEnabled: true, vision: { on: true, light: "dark" } });
+  });
+
+  test("Like copies fog, party vision with its light and Sight, and movement, and keeps the kind's automatic walls", () => {
+    const crypt = { fogEnabled: true, vision: { on: true, light: "dark" as const, perPlayer: true as const }, blockMovement: false };
+    const { scene: map } = mapScene({ id: "s", name: "Cave", asset: { id: "a", width: 900, height: 600 } });
+    const like = withPlayersSee(map, { like: crypt });
+    valid(like);
+    assert.deepEqual([like.fogEnabled, like.vision, like.blockMovement, like.autoWalls], [true, { on: true, light: "dark", perPlayer: true }, false, "floor"]);
+    const made = apply(room(), { t: "scene.create", scene: like });
+    assert.equal(made.scenes.s!.vision?.perPlayer, true);
+    assert.equal(made.holders.s, undefined, "a per-player copy starts with no holder list");
+    const builder = withPlayersSee(builderScene({ id: "b", name: "Crypt", w: 10, h: 10 }), { like: crypt });
+    assert.equal("autoWalls" in builder, false, "a builder keeps the rule of every painted cell");
+    // A scene from before vision copies as one with none, and a scene that stops no moves as one that stops none.
+    assert.deepEqual(playersSeeFields({ like: { fogEnabled: false } }), { fogEnabled: false, blockMovement: false });
+    // The import's own light pick stands over the copy's.
+    assert.deepEqual(playersSeeFields({ like: crypt }, "bright").vision, { on: true, light: "bright", perPlayer: true });
+    assert.deepEqual(playersSeeFields({ like: { fogEnabled: true } }, "dim").vision, { on: false, light: "dim" });
+  });
+
+  test("Like with the scene on screen gone makes the kind's start instead", () => {
+    const crypt = { fogEnabled: true, vision: { on: true, light: "dark" as const } };
+    assert.deepEqual(newScenePick("like", crypt, "explore", "map"), { like: crypt });
+    assert.deepEqual(newScenePick("like", undefined, "explore", "map"), { preset: "reveal" });
+    assert.deepEqual(newScenePick("all", crypt, "explore", "map"), { preset: "all" });
+  });
+});
+
+describe("a Universal VTT import's Players see", () => {
+  test("an import keeps its own walls rule, grid mark and light under a preset or Like", async () => {
+    const { importScene } = await import("../uvtt/batch.ts");
+    const map = { assetId: "a", widthPx: 500, heightPx: 400, cellPx: 50, originPx: { x: 0, y: 0 } };
+    const base = importScene({ frame: { shift: { x: 0, y: 0 }, image: { x: 0, y: 0 }, w: 10, h: 8 } }, map, { id: "u", name: "Keep", fog: true, light: "dim" });
+    const explore = withPlayersSee(base, { preset: "explore" }, "dim");
+    valid(explore);
+    assert.deepEqual([explore.fogEnabled, explore.vision, explore.autoWalls, explore.gridFromFile], [true, { on: true, light: "dim" }, "off", true]);
+    const like = withPlayersSee(base, { like: { fogEnabled: false, vision: { on: false, light: "dark" }, blockMovement: false } }, "dark");
+    assert.deepEqual([like.fogEnabled, like.vision, like.autoWalls, like.blockMovement], [false, { on: false, light: "dark" }, "off", false]);
   });
 });

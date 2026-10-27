@@ -21,8 +21,9 @@ import { loadedStarterWork } from "../starter/catalog.ts";
 import { answeredGrid, retainedGrid, starterMapScene, type StarterGrid } from "../starter/mapScene.ts";
 import { StarterDialog } from "../starter/StarterDialog.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
+import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { ColorInput, NumberInput } from "./controls.tsx";
-import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, type MapAsset } from "./create.ts";
+import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, newScenePick, newScenePreset, withPlayersSee, type MapAsset, type SceneInput } from "./create.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
 import type { PanelClose } from "../panels.ts";
 
@@ -52,6 +53,11 @@ const MAX_SCENES = 50;
  * or only a square's size, for opens on Line up grid, as an upload with
  * no size does.
  *
+ * Players see (docs/design-v1-map-discovery.md 8.1 and 8.2) starts on the
+ * room's default for the kind, or Like the scene on the DM's screen, and is
+ * applied to whatever the kind makes. It holds still during an upload, so
+ * the scene that upload makes is the one the DM chose.
+ *
  * The kind is a choice of native radios, and a tap on the chosen radio does
  * nothing, so the form folds with its own Cancel. During an upload that
  * Cancel stops the upload and keeps the form, so the DM can try again.
@@ -71,6 +77,10 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const [starter, setStarter] = useState(false);
   const starterButton = useRef<HTMLButtonElement>(null);
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
+  const current = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
+  /** The DM's own pick of Players see, null for the kind's start. */
+  const [seen, setSeen] = useState<PlayersSeeValue | null>(null);
   const [status, setStatus] = useState<{ busy: boolean; waiting: boolean; finding?: boolean; error: string | null }>({ busy: false, waiting: false, error: null });
   const abortRef = useRef<AbortController | null>(null);
   /** The search for the picked file's grid, running while the DM fills in the form and the file uploads. */
@@ -90,7 +100,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     [],
   );
   // Only Create sends it, so a sheet's swipe springs back once a name or a size is typed or a map picked (docs/design-v1-sheet-swipe.md 4.5).
-  useUnsavedSince({ name, w, h, background, file: file?.name ?? null });
+  useUnsavedSince({ name, w, h, background, file: file?.name ?? null, seen });
 
   const full = props.sceneCount >= MAX_SCENES;
   // A paste lands here while the Map image form is open, as a chosen file does: picked, and searched for its grid (docs/design-v1-paste.md 1.2).
@@ -103,6 +113,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     abortRef.current?.abort();
     stopSearch();
     setKind(k);
+    setSeen(null);
     setStatus({ busy: false, waiting: false, error: null });
     if (k === "builder") {
       setW(40);
@@ -123,6 +134,9 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     }
   };
 
+  /** Players see over what the kind starts with: the DM's pick, or the room's default for the kind. */
+  const seeing = (scene: SceneInput, k: Kind): SceneInput => withPlayersSee(scene, newScenePick(seen ?? newScenePreset(setting, k), current, setting, k));
+
   const open = (id: string, tool: string | null) => {
     actions.switchScene(id);
     setKind(null);
@@ -136,19 +150,21 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
 
   const createMat = () => {
     const id = actions.newId();
-    actions.dispatch({ t: "scene.create", scene: matScene({ id, name, w, h, background }) });
+    actions.dispatch({ t: "scene.create", scene: seeing(matScene({ id, name, w, h, background }), "mat") });
     open(id, null);
   };
 
   const createBuilder = () => {
     const id = actions.newId();
-    actions.dispatch({ t: "scene.create", scene: builderScene({ id, name, w, h }) });
+    actions.dispatch({ t: "scene.create", scene: seeing(builderScene({ id, name, w, h }), "builder") });
     open(id, "build");
   };
 
   const createFromAsset = (asset: MapAsset, fileName: string, wait: ImportWait = { answer: null, later: null }) => {
     const id = actions.newId();
-    const { scene, hinted } = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset });
+    const made = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset });
+    const { hinted } = made;
+    const scene = seeing(made.scene, "map");
     actions.dispatch({ t: "scene.create", scene });
     // The scene is made with the guess first, so undo takes a found grid
     // back to it in one step, and Use default puts it back.
@@ -173,7 +189,9 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     const running = gridStore.getState().finding;
     if (running) endFinding(gridStore, running.sceneId);
     const id = actions.newId();
-    const { scene, aligned } = starterMapScene({ id, name, asset: { id: row.id, width: row.width, height: row.height }, work: found.work, grid });
+    const made = starterMapScene({ id, name, asset: { id: row.id, width: row.width, height: row.height }, work: found.work, grid });
+    const { aligned } = made;
+    const scene = seeing(made.scene, "map");
     actions.dispatch({ t: "scene.create", scene });
     setStarter(false);
     open(id, aligned ? null : "grid");
@@ -273,6 +291,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
           }}
         >
           <Input aria-label="Scene name" placeholder={kind === "mat" ? "Battle mat" : kind === "builder" ? "Dungeon" : "Name from the file"} maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+          {/* A new map image has no walls yet, so Explore there is warned. */}
+          <NewScenePlayersSee kind={kind} setting={setting} value={seen ?? newScenePreset(setting, kind)} like={current} wallless={kind === "map"} disabled={status.busy} onChange={setSeen} />
           {kind === "map" ? (
             <>
               <label

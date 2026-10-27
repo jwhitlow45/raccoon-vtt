@@ -203,7 +203,7 @@ describe("raccoon-vtt smoke run", { timeout: 300_000 }, () => {
     const file = path.join(work, MAP.file);
     await makeMap(file);
     await openSideTab(dm, "Scenes");
-    await dm.getByRole("radio", { name: "Map image" }).click();
+    await dm.getByRole("radio", { name: "Map image", exact: true }).click();
     await dm.getByRole("button", { name: "Choose a map image" }).setInputFiles(file);
     await dm.getByRole("button", { name: "Upload and create" }).click();
     const created = await waitFor(

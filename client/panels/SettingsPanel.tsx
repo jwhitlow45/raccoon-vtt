@@ -1,5 +1,5 @@
 import { useId, useState, type FormEvent, type InputHTMLAttributes } from "react";
-import type { RoomSettings, WhichPlayers } from "#shared/model.ts";
+import type { RoomSettings, ScenePreset, WhichPlayers } from "#shared/model.ts";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
@@ -12,7 +12,22 @@ import { RadioGroup } from "../features/dm/controls.tsx";
 import type { PanelProps } from "../features/panels.ts";
 import { timerChoices } from "../features/encounter/timer.ts";
 import { ExportSection } from "../features/settings/ExportSection.tsx";
-import { choiceOf, drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, toggleOn, withMover, type MoveAnyMode, type SettingField } from "../features/settings/form.ts";
+import {
+  choiceOf,
+  drawersOf,
+  moveAnyFor,
+  moveAnyMode,
+  newScenesChoice,
+  newScenesOptions,
+  parseFeetPerCell,
+  parseRoomName,
+  SETTING_GROUPS,
+  settingsOp,
+  toggleOn,
+  withMover,
+  type MoveAnyMode,
+  type SettingField,
+} from "../features/settings/form.ts";
 import { useUnsavedInput } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../state/view.ts";
@@ -80,6 +95,20 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
       return <ChosenPlayers field={field} group="Players who can move any token" value={settings.playersMoveAny} onChange={(playersMoveAny) => onChange({ playersMoveAny })} />;
     case "drawers":
       return <ChosenPlayers field={field} group="Players who can draw" value={drawersOf(settings)} onChange={(playersDraw) => onChange({ playersDraw })} />;
+    case "newScenes":
+      return (
+        <div style={{ padding: `${theme.space(2)}px 0` }}>
+          <RadioGroup<ScenePreset | "before">
+            legend={field.label}
+            help={field.help}
+            value={newScenesChoice(settings)}
+            options={newScenesOptions(field, settings)}
+            onChange={(v) => {
+              if (v !== "before") onChange({ newScenePlayers: v });
+            }}
+          />
+        </div>
+      );
     case "choice":
       // Each key's options are typed to its own values, so the cast only widens for the shared component.
       return (

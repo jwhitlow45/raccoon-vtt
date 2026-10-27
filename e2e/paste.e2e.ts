@@ -260,7 +260,7 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
   test("pa-1. a map pasted into New scene's Map image is picked, named for the time, uploaded once, and its grid found", async () => {
     await openSideTab(dm, "Scenes");
     const scenes = dm.getByRole("tabpanel", { name: "Scenes" });
-    await scenes.getByRole("radio", { name: "Map image" }).click();
+    await scenes.getByRole("radio", { name: "Map image", exact: true }).click();
     assert.equal(await paste(dm, { files: [gridded] }), true, "the paste was not taken");
     const picked = scenes.getByText(PASTED);
     await picked.waitFor();
@@ -413,7 +413,7 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     await sheet.waitFor({ state: "detached" });
     const scenesPanel = dm.getByRole("tabpanel", { name: "Scenes" });
     await scenesPanel.getByText(PASTED).waitFor();
-    assert.equal(await scenesPanel.getByRole("radio", { name: "Map image" }).isChecked(), true);
+    assert.equal(await scenesPanel.getByRole("radio", { name: "Map image", exact: true }).isChecked(), true);
     await shots.take(dm, "paste-room-offer-new-scene");
     await scenesPanel.getByRole("button", { name: "Cancel", exact: true }).first().click();
     await blur(dm);
@@ -538,7 +538,7 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
     await pickTool(page, "Select");
     await openSideTab(page, "Scenes");
     const scenes = page.getByRole("tabpanel", { name: "Scenes" });
-    await scenes.getByRole("radio", { name: "Map image" }).click();
+    await scenes.getByRole("radio", { name: "Map image", exact: true }).click();
     await scenes.getByRole("button", { name: "Paste an image" }).first().waitFor();
     await page.waitForTimeout(300);
     assert.equal(await readsOf(page), 0, "read on opening an entry or switching tabs");
@@ -604,12 +604,12 @@ describe("raccoon-vtt paste run", { timeout: 300_000 }, () => {
 
     // New scene's Map image, left for Battle mat while its read waits: the answer picks nothing.
     await openSideTab(dm, "Scenes");
-    await scenes.getByRole("radio", { name: "Map image" }).click();
+    await scenes.getByRole("radio", { name: "Map image", exact: true }).click();
     await scenes.getByRole("button", { name: "Paste an image" }).first().click();
-    await scenes.getByRole("radio", { name: "Battle mat" }).click();
+    await scenes.getByRole("radio", { name: "Battle mat", exact: true }).click();
     await releaseRead(dm);
     await dm.waitForTimeout(800);
-    await scenes.getByRole("radio", { name: "Map image" }).click();
+    await scenes.getByRole("radio", { name: "Map image", exact: true }).click();
     await scenes.getByText("Choose a map image", { exact: true }).waitFor();
     assert.equal(await scenes.getByText(PASTED).count(), 0, "a read answered after leaving Map image picked a map");
     await scenes.getByRole("button", { name: "Cancel", exact: true }).first().click();

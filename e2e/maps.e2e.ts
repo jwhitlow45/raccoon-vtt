@@ -245,7 +245,10 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await dialog.getByText("11 × 9 squares, 500 × 400 pixels.").waitFor({ timeout: 30_000 });
     await dialog.getByText("27 walls (26 on the grid, 1 free), 1 door, 1 window, 1 light.").waitFor();
     assert.equal(await dialog.getByLabel("Scene name").inputValue(), UVTT.name);
-    assert.equal(await dialog.getByLabel("Start under fog").isChecked(), true);
+    // A new room starts new scenes on Explore. This run reveals by hand, as an import under fog did before Players see.
+    const playersSee = dialog.getByRole("radiogroup", { name: "Players see", exact: true });
+    assert.equal(await playersSee.getByRole("radio", { name: "Explore", exact: true }).isChecked(), true);
+    await playersSee.getByRole("radio", { name: "Reveal by hand", exact: true }).check();
     await shots.take(dm, "maps-uvtt-summary");
 
     const sceneIds = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
@@ -443,7 +446,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     const upload = async (file: string) => {
       const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
       await openSideTab(dm, "Scenes");
-      await dm.getByRole("radio", { name: "Map image" }).click();
+      await dm.getByRole("radio", { name: "Map image", exact: true }).click();
       await dm.getByRole("button", { name: "Choose a map image" }).setInputFiles(file);
       await dm.getByRole("button", { name: "Upload and create" }).click();
       const scene = await waitFor("the new map scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.map && !known.has(s.id)), 30_000);
@@ -551,7 +554,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await dm.getByRole("button", { name: "Select", exact: true }).click();
     await dm.getByRole("toolbar", { name: "Line up grid options" }).waitFor({ state: "detached" });
     await openSideTab(dm, "Scenes");
-    await dm.getByRole("radio", { name: "Map image" }).click();
+    await dm.getByRole("radio", { name: "Map image", exact: true }).click();
     await dm.getByRole("button", { name: "From starter packs" }).click();
     const dialog = dm.getByRole("dialog", { name: "Starter maps" });
     await chooseStarterWork(dialog, found, "browse", false);
@@ -611,7 +614,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
   async function makeMat(name: string): Promise<string> {
     const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
     await openSideTab(dm, "Scenes");
-    await dm.getByRole("radio", { name: "Battle mat" }).click();
+    await dm.getByRole("radio", { name: "Battle mat", exact: true }).click();
     await dm.getByPlaceholder("Battle mat").fill(name);
     await dm.getByRole("button", { name: "Create", exact: true }).click();
     const made = await waitFor(`the scene ${name}`, () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.name === name && !known.has(s.id)));

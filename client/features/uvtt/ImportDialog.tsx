@@ -12,7 +12,7 @@ import { theme } from "../../lib/theme.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { addPhase } from "../phases/rules.ts";
-import { nameFromFile } from "../scenes/create.ts";
+import { nameFromFile, newScenePick, newScenePreset, withPlayersSee } from "../scenes/create.ts";
 import { uploadErrorText, uploadMap } from "../scenes/upload.ts";
 import { importOps, importScene, placeMap, type SceneInput } from "./batch.ts";
 import { UvttWorker, type Progress } from "./client.ts";
@@ -35,7 +35,10 @@ import {
   type Contents,
 } from "./rules.ts";
 import { foundLine, imageNote, notes, sizeText } from "./summary.ts";
-import type { LightLevel } from "#shared/model.ts";
+import type { LightLevel, Scene, ScenePreset } from "#shared/model.ts";
+import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
+import { walllessFile } from "../vision/playersSeeRules.ts";
+import { lightOf } from "../vision/settings.ts";
 import { UvttLightChoice } from "../vision/UvttLightChoice.tsx";
 
 /**
@@ -44,6 +47,8 @@ import { UvttLightChoice } from "../vision/UvttLightChoice.tsx";
  * check it against the map, then the image upload and the ops, each step
  * saying what it is doing, and every path ending in the new scene or a
  * plain sentence. Opened from a scene's phases, it adds only the image.
+ * A new scene starts on what players see by the room's default, or Like
+ * the scene on the DM's screen (docs/design-v1-map-discovery.md 8.1).
  *
  * Once the walls are being sent, closing the dialog only hides it. The
  * ops go on, and the import still ends in the new scene or a toast.
@@ -85,7 +90,10 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
   const [name, setName] = useState(() => sceneNameOf(props.file));
   const [objects, setObjects] = useState(true);
   const [portals, setPortals] = useState<ImportOptions["portals"]>("window");
-  const [fog, setFog] = useState(true);
+  const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
+  const current = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
+  /** The DM's pick of Players see. Until there is one, the room's default for an import. */
+  const [seen, setSeen] = useState<PlayersSeeValue | null>(null);
   /** The DM's pick of the scene's light level. Until there is one, the file's proposal, else Bright. */
   const [light, setLight] = useState<LightLevel | null>(null);
   const [converting, setConverting] = useState(false);
@@ -242,7 +250,8 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
       const asset = await uploadImage(signal);
       const map = placeMap(plan, { assetId: asset.id, width: asset.width, height: asset.height, fileImageWidth: read.info.image.width });
       if (!map) throw new Error(GRID_PROBLEM);
-      const scene = importScene(plan, map, { id: actions.newId(), name, fog, light: light ?? read.info.light?.level ?? "bright" });
+      const level = light ?? read.info.light?.level ?? "bright";
+      const scene = withPlayersSee(importScene(plan, map, { id: actions.newId(), name, fog: true, light: level }), newScenePick(seen ?? newScenePreset(setting, "uvtt"), current, setting, "uvtt"), level);
       const ops = importOps(scene, plan, actions.newId);
       // One undo group, so one undo takes the whole scene back (design 7.7).
       const group = actions.newId();
@@ -330,8 +339,14 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
                   onObjects={setObjects}
                   portals={portals}
                   onPortals={setPortals}
-                  fog={fog}
-                  onFog={setFog}
+                  setting={setting}
+                  seen={seen ?? newScenePreset(setting, "uvtt")}
+                  like={current}
+                  onSeen={(v) => {
+                    setSeen(v);
+                    // Like brings the scene's light too, which the light row then shows and the DM can still change.
+                    if (v === "like" && current) setLight(lightOf(current));
+                  }}
                   light={light ?? read.info.light?.level ?? "bright"}
                   onLight={setLight}
                   disabled={busy}
@@ -462,8 +477,10 @@ function Options(props: {
   onObjects(v: boolean): void;
   portals: ImportOptions["portals"];
   onPortals(v: ImportOptions["portals"]): void;
-  fog: boolean;
-  onFog(v: boolean): void;
+  setting: ScenePreset | undefined;
+  seen: PlayersSeeValue;
+  like: Scene | undefined;
+  onSeen(v: PlayersSeeValue): void;
   light: LightLevel;
   onLight(v: LightLevel): void;
   disabled: boolean;
@@ -489,7 +506,15 @@ function Options(props: {
           />
         </div>
       ) : null}
-      <Checkbox label="Start under fog" checked={props.fog} disabled={props.disabled} onChange={props.onFog} />
+      <NewScenePlayersSee
+        kind="uvtt"
+        setting={props.setting}
+        value={props.seen}
+        like={props.like}
+        wallless={props.read.plan ? walllessFile([...props.read.plan.edges.map((e) => e.feature), ...props.read.plan.walls.map((w) => w.f)]) : false}
+        disabled={props.disabled}
+        onChange={props.onSeen}
+      />
       <UvttLightChoice value={props.light} proposal={props.read.info.light} disabled={props.disabled} onChange={props.onLight} />
     </div>
   );

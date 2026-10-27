@@ -2,14 +2,37 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_SETTINGS, type RoomSettings } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { allFields, choiceOf, drawersOf, moveAnyFor, moveAnyMode, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, settingsPatch, toggleOn, withMover } from "./form.ts";
+import { allFields, choiceOf, drawersOf, moveAnyFor, moveAnyMode, newScenesChoice, newScenesOptions, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, settingsPatch, toggleOn, withMover } from "./form.ts";
 
 describe("settings form", () => {
   test("lists every room setting exactly once", () => {
     const keys = allFields().map((f) => f.key).sort();
     // Settings a room may lack, which read as a default when absent, so DEFAULT_SETTINGS leaves them out.
-    const optional: (keyof RoomSettings)[] = ["playersDraw"];
+    const optional: (keyof RoomSettings)[] = ["playersDraw", "newScenePlayers"];
     assert.deepEqual(keys, [...(Object.keys(DEFAULT_SETTINGS) as (keyof RoomSettings)[]), ...optional].sort());
+  });
+
+  test("New scenes comes last, with Players see on new scenes, and As before only while a room never set it (docs/design-v1-map-discovery.md 8.2)", () => {
+    const group = SETTING_GROUPS.at(-1)!;
+    assert.equal(group.heading, "New scenes");
+    assert.deepEqual(group.fields.map((f) => f.key), ["newScenePlayers"]);
+    const field = group.fields[0]!;
+    assert.equal(field.kind, "newScenes");
+    if (field.kind !== "newScenes") return;
+    assert.equal(field.label, "Players see on new scenes");
+    assert.match(field.help, /^New scenes start on this\. Under Explore a map image with no walls starts on Reveal by hand/);
+    const older: RoomSettings = { ...DEFAULT_SETTINGS };
+    assert.equal(newScenesChoice(older), "before");
+    assert.deepEqual(newScenesOptions(field, older).map((o) => o.label), ["Explore", "Reveal by hand", "Everything", "As before"]);
+    assert.equal(newScenesOptions(field, older).at(-1)!.help, "Maps and the builder start under fog, battle mats without.");
+    const set: RoomSettings = { ...DEFAULT_SETTINGS, newScenePlayers: "explore" };
+    assert.equal(newScenesChoice(set), "explore");
+    assert.deepEqual(newScenesOptions(field, set).map((o) => o.value), ["explore", "reveal", "all"], "no op takes the setting away, so As before goes once it is set");
+    for (const option of field.options) {
+      const op = settingsOp(older, { newScenePlayers: option.value });
+      assert.ok(op && clientOpSchema.safeParse(op).success, option.value);
+    }
+    assert.equal(settingsOp(set, { newScenePlayers: "explore" }), null);
   });
 
   test("who can draw reads every player in a room from before it, and offers no one, every player or chosen ones", () => {

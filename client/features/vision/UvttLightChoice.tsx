@@ -9,8 +9,10 @@ import type { LightProposal } from "./uvttLight.ts";
 /**
  * The light level on a Universal VTT import's summary sheet
  * (docs/design-v1-maps-vision.md section 4.3.8): what the file proposes,
- * which the DM can change. It is the level party vision uses once the DM
- * turns vision on in the scene's settings.
+ * which the DM can change. It is the level party vision uses, at once
+ * under Explore, and its help is the proposal's reason alone, since Players
+ * see above it now says whether vision is on (docs/design-v1-map-discovery.md
+ * 8.1, MD-O-29).
  */
 export function UvttLightChoice(props: { value: LightLevel; proposal: LightProposal | null; disabled: boolean; onChange(level: LightLevel): void }) {
   const labelId = useId();
@@ -26,7 +28,7 @@ export function UvttLightChoice(props: { value: LightLevel; proposal: LightPropo
         disabled={props.disabled}
         onChange={props.onChange}
       />
-      <Help>{props.proposal ? `${props.proposal.why} ` : ""}Party vision stays off until you turn it on in the scene's settings.</Help>
+      {props.proposal ? <Help>{props.proposal.why}</Help> : null}
     </div>
   );
 }
