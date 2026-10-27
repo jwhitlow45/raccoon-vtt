@@ -13,8 +13,9 @@ import { DM, chance, env, int, member, pick, rng, room, scene } from "../testuti
  * and 5.4, lane MD1) against a plain model: random runs of the map step's
  * `sys.remember` and its forgetting, explores, hides, Fog all, vision and
  * fog off and on, the switch to Per player and the fold back, picks of who
- * sees for themselves, the scene shrinking and growing, a member's removal
- * and undos of the DM's steps, on one scene with three players.
+ * sees for themselves, the scene shrinking and growing, the DM moving,
+ * making and taking away labels and stamps, a member's removal and undos
+ * of the DM's steps, on one scene with three players.
  *
  * The model keeps each layer as a set of whole cells and each memory as a
  * map from an element to what that layer remembers, and applies each rule
@@ -39,8 +40,12 @@ const layerName = (l: Layer) => l ?? "party";
 type Element = string;
 const element = (cx: number, cy: number, field: string, key: string): Element => `${cx},${cy}|${field}|${key}`;
 
-/** The plain model: whole cells held per layer, and each layer's memory by element. */
-type Model = { held: Map<string, Set<string>>; memory: Map<string, Map<Element, unknown>> };
+/**
+ * The plain model: whole cells held per layer, each layer's memory by
+ * element, and the live labels and stamps, the DM's build that a label's
+ * or stamp's entry is judged by beside the box it remembers.
+ */
+type Model = { held: Map<string, Set<string>>; memory: Map<string, Map<Element, unknown>>; live: Pick<RoomState, "labels" | "stamps"> };
 
 const wallId = (cx: number, cy: number) => `wall${cx}${cy}aaaaaa`.slice(0, 12);
 /** The one free wall each chunk can remember, filed in that chunk by its midpoint. */
@@ -48,15 +53,26 @@ const wallOf = (cx: number, cy: number, kind: "wall" | "window") => ({ id: wallI
 const wallCells = (cx: number, cy: number) => Array.from({ length: 6 }, (_, i) => `${cx * 16 + 1 + i},${cy * 16 + 2}`);
 const label = (id: string, x: number, y: number): Label => ({ id, rev: 0, sceneId: "s1", x: x + 0.5, y: y + 0.5, text: "Hall", size: 1 });
 const stamp = (id: string, x: number, y: number): Stamp => ({ id, rev: 0, sceneId: "s1", art: { key: "oak-tree" }, x: x + 0.5, y: y + 0.5, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" });
+/** A stamp as a put names it, without the fields the reducer gives it. */
+const stampPut = (id: string, x: number, y: number) => {
+  const { rev: _r, sceneId: _s, ...input } = stamp(id, x, y);
+  return input;
+};
 
-/** The cells an element touches, worked out plainly: a label "Hall" at a cell's middle spans the cells beside it on its row, a stamp its cell. */
-function touches(field: string, key: string, value: unknown): string[] {
+/**
+ * The cells an element touches, worked out plainly: a label "Hall" at a
+ * cell's middle spans the cells beside it on its row, a stamp its cell,
+ * each where it is remembered and where it is live.
+ */
+function touches(field: string, key: string, value: unknown, live: Model["live"]): string[] {
   if (field === "labels" || field === "stamps") {
-    if (value === null) return [];
-    const v = value as { x: number; y: number };
-    const x = Math.floor(v.x);
-    const y = Math.floor(v.y);
-    return field === "labels" ? [`${x - 1},${y}`, `${x},${y}`, `${x + 1},${y}`] : [`${x},${y}`];
+    const now = field === "labels" ? live.labels[key] : live.stamps[key];
+    return [value, now ?? null].flatMap((v) => {
+      if (v === null) return [];
+      const x = Math.floor((v as { x: number }).x);
+      const y = Math.floor((v as { y: number }).y);
+      return field === "labels" ? [`${x - 1},${y}`, `${x},${y}`, `${x + 1},${y}`] : [`${x},${y}`];
+    });
   }
   if (field !== "edges") return [key];
   const [x, y, side] = key.split(",");
@@ -151,7 +167,7 @@ function prune(model: Model, name: string): void {
       const versions = (value as RememberedWall[]).map((v) => ({ ...v, cells: v.cells.filter((c) => held.has(c)) })).filter((v) => v.cells.length > 0);
       if (versions.length === 0) m.delete(e);
       else m.set(e, versions);
-    } else if (!touches(fieldOf(e), keyOf(e), value).some((c) => held.has(c))) m.delete(e);
+    } else if (!touches(fieldOf(e), keyOf(e), value, model.live).some((c) => held.has(c))) m.delete(e);
   }
 }
 
@@ -178,7 +194,7 @@ function fold(model: Model, order: readonly string[]): void {
       continue;
     }
     if (field === "walls") continue;
-    const cells = touches(field, keyOf(e), null);
+    const cells = touches(field, keyOf(e), null, model.live);
     const from = reads("party", cells) ? "party" : holders.find((h) => reads(h, cells));
     const value = from === undefined ? undefined : model.memory.get(from)?.get(e);
     if (value !== undefined) out.set(e, value);
@@ -201,10 +217,10 @@ function fold(model: Model, order: readonly string[]): void {
   }
   for (const entries of byId.values()) {
     const entry = (name: string) => entries.find((e) => model.memory.get(name)?.has(e));
-    // Every cell any layer remembers it on: no label or stamp here is live, so that is all the ground it lies on.
+    // Every cell any layer remembers it on, and where it is live.
     const footprint = ["party", ...holders].flatMap((name) => {
       const e = entry(name);
-      return e === undefined ? [] : touches(fieldOf(e), keyOf(e), model.memory.get(name)!.get(e));
+      return e === undefined ? [] : touches(fieldOf(e), keyOf(e), model.memory.get(name)!.get(e), model.live);
     });
     const from = reads("party", footprint) ? "party" : holders.find((h) => reads(h, footprint));
     const e = from === undefined ? undefined : entry(from);
@@ -278,13 +294,18 @@ function stepChunk(r: () => number, model: Model, name: string, cx: number, cy: 
       if (versions.length > 0) add("walls", wallId(cx, cy), versions);
     } else {
       const field = kind === 4 ? "labels" : "stamps";
-      const id = pick(r, field === "labels" ? ["la", "lb", "lc"] : ["sa", "sb"]);
+      const ids = field === "labels" ? ["la", "lb", "lc"] : ["sa", "sb"];
+      // Mostly one that is live, so absent-then entries meet the DM's moves.
+      const live = ids.filter((i) => (field === "labels" ? model.live.labels[i] : model.live.stamps[i]) !== undefined);
+      const id = live.length > 0 && chance(r, 0.7) ? pick(r, live) : pick(r, ids);
       // Each lies in one chunk of a layer: where it is already, or here.
       const at = labelsAt.get(`${name}|${field}|${id}`);
       if (at !== undefined && at !== `${cx},${cy}`) continue;
       const [x, y] = cellIn().split(",").map(Number) as [number, number];
+      // Absent then, as the step remembers one made out of sight, which only its live box can keep on the layer's ground.
+      if (live.includes(id) && chance(r, 0.6)) add(field, id, null);
       // A label keeps a cell either side of its anchor inside the chunk, so its box stays where the chunk can say.
-      add(field, id, field === "labels" ? label(id, Math.min(Math.max(x, cx * 16 + 1), cx * 16 + 14), y) : stamp(id, x, y));
+      else add(field, id, field === "labels" ? label(id, Math.min(Math.max(x, cx * 16 + 1), cx * 16 + 14), y) : stamp(id, x, y));
       labelsAt.set(`${name}|${field}|${id}`, `${cx},${cy}`);
     }
   }
@@ -346,7 +367,7 @@ function checkInvariants(state: RoomState, model: Model, where: string): void {
     const held = layers.get(name) ?? new Set();
     for (const [e, value] of m) {
       if (fieldOf(e) === "walls") for (const v of value as RememberedWall[]) assert.ok(v.cells.every((c) => held.has(c)), `${where}: M2 ${name} ${e}`);
-      else assert.ok(touches(fieldOf(e), keyOf(e), value).some((c) => held.has(c)), `${where}: M2 ${name} ${e}`);
+      else assert.ok(touches(fieldOf(e), keyOf(e), value, state).some((c) => held.has(c)), `${where}: M2 ${name} ${e}`);
     }
   }
   // M3
@@ -369,7 +390,7 @@ function run(seed: number, steps: number): void {
     // In an order of their own, so the list's order, which the fold reads, is not the members' ids.
     holders: split ? { s1: { sceneId: "s1", rev: 0, entries: shuffled(r, PLAYERS).map((memberId) => ({ memberId, on: true })) } } : {},
   });
-  const model: Model = { held: new Map(), memory: new Map() };
+  const model: Model = { held: new Map(), memory: new Map(), live: state };
   const undos: RestoreEntry[][] = [];
   // Inside the scene's bounds now, which an explore must keep to and a hide only reaches.
   const rect = (most = 12) => {
@@ -409,11 +430,38 @@ function run(seed: number, steps: number): void {
       if (chunks.length === 0 && !forget) continue;
       op = { t: "sys.remember", sceneId: "s1", layers: chunks.length > 0 ? [{ ...(who === null ? {} : { memberId: who }), chunks }] : [], ...(forget ? { forget } : {}) };
       what = `remember ${name}`;
-    } else if (roll < 70) {
+    } else if (roll < 62) {
       // Mostly small, so a hide often takes part of an element and leaves the rest.
       const box = rect(chance(r, 0.7) ? 3 : 12);
       op = { t: "fog.live", sceneId: "s1", ops: [{ id: `h${i}`, mode: "hide", shape: { kind: "rect", ...box } }] };
       what = `hide ${JSON.stringify(box)}`;
+    } else if (roll < 70) {
+      // The DM moves, makes or takes away a label or stamp, mostly onto ground some layer holds, now and then off it.
+      const ground = [...model.held.values()].flatMap((cells) => [...cells]);
+      const { w, h } = state.scenes.s1!.bounds;
+      let [x, y] = (ground.length > 0 && chance(r, 0.6) ? pick(r, ground) : `${int(r, 0, w - 1)},${int(r, 0, h - 1)}`).split(",").map(Number) as [number, number];
+      // Half the time one a layer remembers absent, moved off that layer's ground where a spot is found, so its entry must go.
+      const absent = [...model.memory].flatMap(([name, m]) => [...m].filter(([e, v]) => v === null && (fieldOf(e) === "labels" || fieldOf(e) === "stamps")).map(([e]) => ({ name, e })));
+      const target = absent.length > 0 && chance(r, 0.5) ? pick(r, absent) : null;
+      if (target) {
+        for (let tries = 0; tries < 20; tries++) {
+          const [tx, ty] = [int(r, 1, w - 2), int(r, 0, h - 1)];
+          if (touches(fieldOf(target.e), "", { x: tx, y: ty }, { labels: {}, stamps: {} }).every((c) => !model.held.get(target.name)?.has(c))) {
+            [x, y] = [tx, ty];
+            break;
+          }
+        }
+      }
+      const gone = !target && chance(r, 0.25);
+      if (target ? fieldOf(target.e) === "labels" : chance(r, 0.5)) {
+        const id = target ? keyOf(target.e) : pick(r, ["la", "lb", "lc"]);
+        op = { t: "build.label", sceneId: "s1", labelId: id, label: gone ? null : { x: x + 0.5, y: y + 0.5, text: "Hall", size: 1 } };
+        what = gone ? `label ${id} away` : `label ${id} to ${x},${y}`;
+      } else {
+        const id = target ? keyOf(target.e) : pick(r, ["sa", "sb"]);
+        op = gone ? { t: "build.stamps", sceneId: "s1", remove: [id] } : { t: "build.stamps", sceneId: "s1", put: [stampPut(id, x, y)] };
+        what = gone ? `stamp ${id} away` : `stamp ${id} to ${x},${y}`;
+      }
     } else if (roll < 71) {
       op = { t: "fog.reset", sceneId: "s1", to: "hidden" };
       what = "fog all";
@@ -454,6 +502,7 @@ function run(seed: number, steps: number): void {
       continue;
     }
     state = result.state;
+    model.live = state;
     if (op.t === "sys.remember") rememberInModel(model, op);
     else if (op.t === "fog.live") {
       const box = op.ops[0]!.shape as { x: number; y: number; w: number; h: number };
@@ -468,9 +517,11 @@ function run(seed: number, steps: number): void {
       model.memory.clear();
     }
     if (op.t !== "sys.explore" && op.t !== "sys.remember") settle(model, before, state);
+    // A label or stamp that moved or went may leave an entry on no ground its layer holds.
+    if (state.labels !== before.labels || state.stamps !== before.stamps) for (const name of [...model.memory.keys()]) prune(model, name);
     for (const [name, m] of [...model.memory]) if (m.size === 0) model.memory.delete(name);
     // Only the DM's own steps go on an undo stack: the server's ops never do.
-    if (result.inverse && (op.t === "scene.update" || op.t === "vision.holders" || op.t === "fog.live" || op.t === "fog.reset")) undos.push(result.inverse);
+    if (result.inverse && (op.t === "scene.update" || op.t === "vision.holders" || op.t === "fog.live" || op.t === "fog.reset" || op.t === "build.label" || op.t === "build.stamps")) undos.push(result.inverse);
     checkInvariants(state, model, `seed ${seed} step ${i} ${what}`);
   }
 }

@@ -13,7 +13,7 @@ import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 import { SQUARES } from "../rules/grid.ts";
-import { forgetLayerMemory, forgetSceneMemory, forgetStamp, keepsMemory, memoryOwners, poolMemory, pruneLostGround, rememberLayer } from "./memory.ts";
+import { forgetLayerMemory, forgetSceneMemory, forgetStamp, keepsMemory, memoryOwners, poolMemory, pruneLostGround, pruneMovedMarks, rememberLayer } from "./memory.ts";
 
 // Fog (design 13.2).
 
@@ -195,9 +195,11 @@ function holderLayer(tx: Tx, scene: Scene, memberId: string): void {
  * scene's memory and the ground players explored there, whatever its fog
  * and vision, since what they saw is no longer on the map and the build
  * now would show in its place, once vision is on. Every layer that lost
- * explored ground, by any path, drops what it no longer holds. A stamp
- * made DM only drops from every memory, so its art stops reaching players.
- * Only scenes, explored tiles and stamps the op wrote can have changed.
+ * explored ground, by any path, drops what it no longer holds, and so does
+ * every layer that remembers a label or stamp the op moved or took away.
+ * A stamp made DM only drops from every memory, so its art stops reaching
+ * players. Only scenes, explored tiles, labels and stamps the op wrote can
+ * have changed.
  */
 export function keepMemory(tx: Tx, before: RoomState): void {
   if (tx.state.scenes !== before.scenes) {
@@ -222,6 +224,7 @@ export function keepMemory(tx: Tx, before: RoomState): void {
     }
   }
   pruneLostGround(tx, before);
+  pruneMovedMarks(tx, before);
   if (tx.state.stamps === before.stamps) return;
   for (const key of tx.touched()) {
     if (!key.startsWith("stamp:")) continue;

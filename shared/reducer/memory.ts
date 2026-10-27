@@ -290,6 +290,45 @@ function layersWithMemory(state: RoomState): Set<string> {
   return out;
 }
 
+/**
+ * Prunes every layer that remembers a label or stamp the op moved or took
+ * away, as bookkeeping (5.4). An entry is judged by the box it remembers
+ * and the live one, so once the live box leaves the layer's ground, or
+ * goes, an entry may touch none of it: an absent-then entry has only the
+ * live box. A label or stamp made or left in place can only add ground.
+ */
+export function pruneMovedMarks(tx: Tx, before: RoomState): void {
+  if (tx.state.labels === before.labels && tx.state.stamps === before.stamps) return;
+  const remembering = layersWithMemory(tx.state);
+  if (remembering.size === 0) return;
+  const moved: { field: "labels" | "stamps"; id: string; sceneId: string }[] = [];
+  for (const key of tx.touched()) {
+    const field = key.startsWith("label:") ? "labels" : key.startsWith("stamp:") ? "stamps" : null;
+    if (field === null) continue;
+    const id = key.slice(key.indexOf(":") + 1);
+    const was = before[field][id];
+    if (!was) continue;
+    const now = tx.state[field][id];
+    if (now && now.sceneId === was.sceneId && stableStringify(boxOf(field, now)) === stableStringify(boxOf(field, was))) continue;
+    moved.push({ field, id, sceneId: was.sceneId });
+  }
+  const layers = new Map<string, Set<Layer>>();
+  for (const { field, id, sceneId } of moved) {
+    for (const layer of memoryLayers(tx.state, sceneId)) {
+      if (!remembering.has(layerId(sceneId, layer))) continue;
+      if (!layerChunks(tx.state, sceneId, layer).some((c) => c[field]?.[id] !== undefined)) continue;
+      let set = layers.get(sceneId);
+      if (!set) layers.set(sceneId, (set = new Set()));
+      set.add(layer);
+    }
+  }
+  pruneLayers(tx, layers);
+}
+
+function boxOf(field: "labels" | "stamps", value: Label | Stamp): CellRange {
+  return field === "labels" ? labelCells(value as Label) : stampCells(value as Stamp);
+}
+
 /** Whether a tile's bits lost any sub-cell the earlier bits held. */
 function losesBits(was: string, now: string): boolean {
   if (was === now) return false;

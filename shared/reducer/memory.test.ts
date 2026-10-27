@@ -308,6 +308,52 @@ describe("explored ground lost by any path (5.4)", () => {
   });
 });
 
+describe("a label or stamp the DM moves or takes away (5.4)", () => {
+  /** The party remembers l1 and st1 absent on ground it holds, where both now are, and l2 as it was there. */
+  const start = () => {
+    const state = remembered([chunk("s1", 0, 0, { labels: { l1: null, l2: label("l2", 5, 1) }, stamps: { st1: null } })]);
+    state.labels = { l1: label("l1", 2.5, 2), l2: label("l2", 5, 1) };
+    state.stamps = { st1: stamp("st1", 3.5, 3.5) };
+    return state;
+  };
+  /** A stamp as a put names it, without the fields the reducer gives it. */
+  const put = (id: string, x: number, y: number, overrides: Partial<Stamp> = {}) => {
+    const { rev: _r, sceneId: _s, ...input } = stamp(id, x, y, overrides);
+    return input;
+  };
+  const moveOff: Op[] = [
+    { t: "build.label", sceneId: "s1", labelId: "l1", label: { x: 30.5, y: 20, text: "Hall", size: 1 } },
+    { t: "build.stamps", sceneId: "s1", put: [put("st1", 30.5, 20.5)] },
+    { t: "build.label", sceneId: "s1", labelId: "l2", label: { x: 30.5, y: 22, text: "Hall", size: 1 } },
+  ];
+
+  test("an absent-then entry goes once the live one leaves the ground its layer holds, and a remembered one stays", () => {
+    let state = start();
+    for (const [i, op] of moveOff.entries()) state = apply(state, op, DM, i + 1);
+    // l2 is remembered where the party saw it, on its ground.
+    assert.deepEqual(entriesOf(party(state)), { labels: { l2: label("l2", 5, 1) } });
+  });
+
+  test("and goes when the live one is taken away", () => {
+    let state = apply(start(), { t: "build.label", sceneId: "s1", labelId: "l1", label: null });
+    state = apply(state, { t: "build.stamps", sceneId: "s1", remove: ["st1"] }, DM, 2);
+    assert.deepEqual(entriesOf(party(state)), { labels: { l2: label("l2", 5, 1) } });
+  });
+
+  test("a move that keeps the live one on held ground, or a change that keeps its box, keeps the entry", () => {
+    let state = apply(start(), { t: "build.label", sceneId: "s1", labelId: "l1", label: { x: 6.5, y: 3, text: "Hall", size: 1 } });
+    state = apply(state, { t: "build.stamps", sceneId: "s1", put: [put("st1", 3.5, 3.5, { tint: "#ff0000" })] }, DM, 2);
+    assert.deepEqual(party(state), party(start()));
+  });
+
+  test("a holder's layer is pruned the same way", () => {
+    const state = perPlayer([chunk("s1", 1, 0, { labels: { l1: null } }, "p1")]);
+    state.labels = { l1: label("l1", 31.5, 10.5) };
+    const next = apply(state, { t: "build.label", sceneId: "s1", labelId: "l1", label: null });
+    assert.equal(own(next, "p1", 1, 0), undefined);
+  });
+});
+
 describe("a scene's settings (5.4)", () => {
   const memoryOf = (state: RoomState) => [Object.keys(state.memory ?? {}), Object.keys(state.memoryBy ?? {})];
   const start = () => {
