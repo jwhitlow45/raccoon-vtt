@@ -31,11 +31,6 @@ import { chooseStarterWork, starterWork } from "./starterPick.ts";
  *   the players' scene, the reset of remembered maps and per-player maps
  *   joining, its ticks cleared after, then one Undo, named for Cave, puts
  *   all 3 back.
- * - ss-a: every new control measured with the alignment helper at
- *   1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%, in light and
- *   dark: the form's Players see, the Universal VTT dialog's, the scene's
- *   What players see with its fold open and a question asked, the copy
- *   sheet, and Room settings' New scenes.
  * - ss-4: a question builds its change as it is answered, so Light and a
  *   phase's light changed while it was open stay, and gives focus back to
  *   the control that asked last, or keeps it on the fold's header when the
@@ -44,6 +39,12 @@ import { chooseStarterWork, starterWork } from "./starterPick.ts";
  *   import is done, each held by the test: changed meanwhile, the new scene
  *   copies the change, and deleted, it starts on the room's choice and a
  *   toast says so.
+ * - ss-a, last on a DM session of its own: every new control measured
+ *   with the alignment helper at 1440 x 900, 390 x 844 and 320 x 568, at
+ *   100% and 130%, in light and dark: the form's Players see, the
+ *   Universal VTT dialog's, the scene's What players see with its fold
+ *   open and a question asked, the copy sheet, and Room settings' New
+ *   scenes.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus
  * thirty-eight. The other environment variables are the smoke run's
@@ -73,7 +74,7 @@ const dmSocket = new SocketWatch("dm");
 const consoles: ConsoleWatch[] = [];
 
 // The guide's pictures of scene setup come from this run, so the room has a name a table would give it.
-const run = { roomId: "", roomName: "The Sunken Keep", matId: "", arenaId: "", caveId: "", cryptId: "", sweptAt: 0 };
+const run = { roomId: "", roomName: "The Sunken Keep", matId: "", arenaId: "", caveId: "", cryptId: "", dmLink: "" };
 
 function scenes(state: RoomState | null): Scene[] {
   return Object.values(state?.scenes ?? {}).filter((s): s is Scene => s !== undefined);
@@ -272,6 +273,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     const match = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link);
     assert.ok(match, `DM link looks wrong: ${link}`);
     run.roomId = match[1]!.replace("-", "");
+    run.dmLink = link;
     await dm.getByLabel("I saved my DM link").check();
     await dm.getByRole("button", { name: "Continue to the room" }).click();
     await waitFor("the DM's snapshot", () => dmSocket.state);
@@ -506,111 +508,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
 
-  test("ss-a. every new control is centered within 1 px at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%, light and dark", async () => {
-    const lines: string[] = [];
-    const sizes = [
-      { name: "1440x900", width: 1440, height: 900, touch: false },
-      { name: "390x844", width: 390, height: 844, touch: true },
-      { name: "320x568", width: 320, height: 568, touch: true },
-    ];
-    const state = await dmContext.storageState();
-    const uvtt = await uvttFile();
-    for (const size of sizes) {
-      for (const scale of [1, 1.3]) {
-        for (const scheme of ["light", "dark"] as const) {
-          const screen = `${size.name}@${scale}-${scheme}`;
-          const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, colorScheme: scheme, storageState: state });
-          try {
-            const page = await context.newPage();
-            const watch = new ConsoleWatch(screen);
-            watch.attach(page);
-            consoles.push(watch);
-            await page.goto(`${server.origin}/`);
-            await page.evaluate((s) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(s)), scale);
-            await page.goto(`${server.origin}/r/${run.roomId}`);
-            await page.getByRole("status", { name: "Connected" }).first().waitFor();
-            const measure = async (name: string, root: Locator) => {
-              await root.first().scrollIntoViewIfNeeded();
-              const found = alignmentLines(await measureAlignment(root), `${screen} ${name}`);
-              if (found.length > 0) await shots.take(page, `ss-a-${screen}-${name}`);
-              lines.push(...found);
-            };
-            // The players' scene, Arena, with explored ground: What players see with the fold open and a question asked.
-            await view(run.arenaId, page);
-            const panel = await scenesPanel(page);
-            const what = section(panel, "What players see");
-            await playersSee(what).waitFor();
-            await what.getByRole("button", { name: "Fog and party vision", exact: true }).click();
-            await playersSee(what).getByRole("radio", { name: "Everything", exact: true }).click();
-            await what.getByRole("group", { name: "Change what players see?" }).waitFor();
-            await measure("what-players-see", what);
-            await page.keyboard.press("Escape");
-            // The new scene form's Players see on a map image, with Like.
-            const form = section(panel, "New scene");
-            await form.getByRole("radio", { name: "Map image", exact: true }).click();
-            await playersSee(form).getByRole("radio", { name: "Explore", exact: true }).check();
-            await measure("new-scene-players-see", playersSee(form).locator("xpath=../.."));
-            await form.getByRole("button", { name: "Cancel", exact: true }).click();
-            // The copy sheet.
-            await what.getByRole("button", { name: "Use these settings on other scenes…" }).click();
-            const sheet = page.getByRole("dialog", { name: "Use Arena's settings on…" });
-            await sheet.waitFor();
-            await sheet.getByRole("checkbox", { name: "Crypt", exact: true }).check();
-            await measure("copy-sheet", sheet);
-            await page.keyboard.press("Escape");
-            await sheet.waitFor({ state: "detached" });
-            // The Universal VTT dialog's Players see.
-            await (await scenesPanel(page)).getByLabel("From a Universal VTT file").setInputFiles(uvtt);
-            const dialog = page.getByRole("dialog", { name: "Import a Universal VTT map" });
-            await playersSee(dialog).waitFor({ timeout: 30_000 });
-            await measure("uvtt-players-see", playersSee(dialog).locator("xpath=../.."));
-            await page.keyboard.press("Escape");
-            await dialog.waitFor({ state: "detached" });
-            // Room settings' New scenes.
-            await reopenRoom(page);
-            await page.getByRole("status", { name: "Connected" }).first().waitFor();
-            const menu = await menuPanel(page);
-            await menu.getByRole("button", { name: /^Room settings/ }).click();
-            const newScenes = page.getByRole("group", { name: "Players see on new scenes" });
-            await newScenes.waitFor();
-            await newScenes.scrollIntoViewIfNeeded();
-            /*
-             * Every choice in Room settings is the same radio card group,
-             * whose name and help start at the cards' edge and whose options'
-             * words sit in by a card's border and padding, which the edge
-             * check reads as a step. That is the shared group's own look
-             * (features/dm/controls.tsx RadioGroup), so New scenes is held to
-             * Critical Hit damage's: only what it adds is a finding here.
-             */
-            // A finding with its screen, names and places left out: what kind of part is how far off.
-            const kind = (line: string) => line.replace(/^[^:]*: /, "").replace(/"[^"]*"/g, '""').replace(/ \([^)]*\)$/, "");
-            const crit = page.getByRole("group", { name: "Critical Hit damage" });
-            const known = new Set(alignmentLines(await measureAlignment(crit), "").map(kind).filter((l) => l.startsWith("edge ")));
-            const found = alignmentLines(await measureAlignment(newScenes.locator("xpath=ancestor::section[1]")), `${screen} room-new-scenes`);
-            const added = found.filter((l) => !known.has(kind(l)));
-            if (added.length > 0) await shots.take(page, `ss-a-${screen}-room-new-scenes`);
-            lines.push(...added);
-          } finally {
-            await context.close();
-          }
-        }
-      }
-    }
-    run.sweptAt = Date.now();
-    assert.deepEqual(lines, []);
-    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
-  });
-
   test("ss-4. a question builds its change as it is answered, keeping a light changed meanwhile, and gives focus back to the control that asked last", async () => {
-    /*
-     * ss-a's pages share the DM's session, and their loads spent its
-     * snapshot budget for the minute (server/rooms/budgets.ts). The scene
-     * switches here and in ss-5 wait it out, or the budget's abuse rule
-     * would close the DM's sockets. They also left the DM's page behind.
-     */
-    const rest = 61_000 - (Date.now() - run.sweptAt);
-    if (run.sweptAt > 0 && rest > 0) await dm.waitForTimeout(rest);
-    await dm.bringToFront();
     await view(run.arenaId);
     const panel = await scenesPanel(dm);
     const what = section(panel, "What players see");
@@ -688,6 +586,12 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await question.getByRole("button", { name: "Change", exact: true }).click();
     await waitFor("Arena on Everything", () => (seeOf(run.arenaId)?.fog === false ? true : null));
     assert.deepEqual(seeOf(run.arenaId), { fog: false, vision: false, light: "dark", perPlayer: false }, "the phase's light stays");
+
+    // Arena back as ss-a measures it: a mat on Explore and Dark, with explored ground.
+    await ops.send({ t: "scene.setMap", sceneId: run.arenaId, map: null });
+    await ops.send({ t: "scene.update", sceneId: run.arenaId, patch: { fogEnabled: true, vision: { on: true, light: "dark" } } });
+    await waitFor("Arena a mat on Explore", () => (sceneOf(run.arenaId)?.map === undefined && seeOf(run.arenaId)?.vision === true ? true : null));
+    await waitFor("the party's explored ground on Arena", () => explored(run.arenaId), 15_000);
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
 
@@ -780,7 +684,130 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     assert.deepEqual(seeOf(tunnel.id), { fog: true, vision: true, light: "dark", perPlayer: false }, "an import's start under the room's Explore");
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
+
+  test("ss-a. every new control is centered within 1 px at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%, light and dark", async () => {
+    const lines: string[] = [];
+    const sizes = [
+      { name: "1440x900", width: 1440, height: 900, touch: false },
+      { name: "390x844", width: 390, height: 844, touch: true },
+      { name: "320x568", width: 320, height: 568, touch: true },
+    ];
+    /*
+     * The sweep's pages sign in as the DM on sessions of their own, so
+     * their loads spend those sessions' snapshot budgets for the minute
+     * (server/rooms/budgets.ts), not the one ss-1 to ss-5 spent switching
+     * scenes. It runs last, so no test after it meets a budget it spent.
+     * Its twelve screens take turns on two sessions, which keeps each
+     * under the budget's count for the minute, so no load waits.
+     */
+    const sessions = [await signInAsDm(), await signInAsDm()];
+    let screens = 0;
+    const uvtt = await uvttFile();
+    for (const size of sizes) {
+      for (const scale of [1, 1.3]) {
+        for (const scheme of ["light", "dark"] as const) {
+          const screen = `${size.name}@${scale}-${scheme}`;
+          const state = sessions[screens++ % sessions.length];
+          const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, colorScheme: scheme, storageState: state });
+          try {
+            const page = await context.newPage();
+            const watch = new ConsoleWatch(screen);
+            watch.attach(page);
+            consoles.push(watch);
+            await page.goto(`${server.origin}/`);
+            await page.evaluate((s) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(s)), scale);
+            await page.goto(`${server.origin}/r/${run.roomId}`);
+            await page.getByRole("status", { name: "Connected" }).first().waitFor();
+            const measure = async (name: string, root: Locator) => {
+              await root.first().scrollIntoViewIfNeeded();
+              const found = alignmentLines(await measureAlignment(root), `${screen} ${name}`);
+              if (found.length > 0) await shots.take(page, `ss-a-${screen}-${name}`);
+              lines.push(...found);
+            };
+            // The players' scene, Arena, with explored ground: What players see with the fold open and a question asked.
+            await view(run.arenaId, page);
+            const panel = await scenesPanel(page);
+            const what = section(panel, "What players see");
+            await playersSee(what).waitFor();
+            await what.getByRole("button", { name: "Fog and party vision", exact: true }).click();
+            await playersSee(what).getByRole("radio", { name: "Everything", exact: true }).click();
+            await what.getByRole("group", { name: "Change what players see?" }).waitFor();
+            await measure("what-players-see", what);
+            await page.keyboard.press("Escape");
+            // The new scene form's Players see on a map image, with Like.
+            const form = section(panel, "New scene");
+            await form.getByRole("radio", { name: "Map image", exact: true }).click();
+            await playersSee(form).getByRole("radio", { name: "Explore", exact: true }).check();
+            await measure("new-scene-players-see", playersSee(form).locator("xpath=../.."));
+            await form.getByRole("button", { name: "Cancel", exact: true }).click();
+            // The copy sheet.
+            await what.getByRole("button", { name: "Use these settings on other scenes…" }).click();
+            const sheet = page.getByRole("dialog", { name: "Use Arena's settings on…" });
+            await sheet.waitFor();
+            await sheet.getByRole("checkbox", { name: "Crypt", exact: true }).check();
+            await measure("copy-sheet", sheet);
+            await page.keyboard.press("Escape");
+            await sheet.waitFor({ state: "detached" });
+            // The Universal VTT dialog's Players see.
+            await (await scenesPanel(page)).getByLabel("From a Universal VTT file").setInputFiles(uvtt);
+            const dialog = page.getByRole("dialog", { name: "Import a Universal VTT map" });
+            await playersSee(dialog).waitFor({ timeout: 30_000 });
+            await measure("uvtt-players-see", playersSee(dialog).locator("xpath=../.."));
+            await page.keyboard.press("Escape");
+            await dialog.waitFor({ state: "detached" });
+            // Room settings' New scenes.
+            await reopenRoom(page);
+            await page.getByRole("status", { name: "Connected" }).first().waitFor();
+            const menu = await menuPanel(page);
+            await menu.getByRole("button", { name: /^Room settings/ }).click();
+            const newScenes = page.getByRole("group", { name: "Players see on new scenes" });
+            await newScenes.waitFor();
+            await newScenes.scrollIntoViewIfNeeded();
+            /*
+             * Every choice in Room settings is the same radio card group,
+             * whose name and help start at the cards' edge and whose options'
+             * words sit in by a card's border and padding, which the edge
+             * check reads as a step. That is the shared group's own look
+             * (features/dm/controls.tsx RadioGroup), so New scenes is held to
+             * Critical Hit damage's: only what it adds is a finding here.
+             */
+            // A finding with its screen, names and places left out: what kind of part is how far off.
+            const kind = (line: string) => line.replace(/^[^:]*: /, "").replace(/"[^"]*"/g, '""').replace(/ \([^)]*\)$/, "");
+            const crit = page.getByRole("group", { name: "Critical Hit damage" });
+            const known = new Set(alignmentLines(await measureAlignment(crit), "").map(kind).filter((l) => l.startsWith("edge ")));
+            const found = alignmentLines(await measureAlignment(newScenes.locator("xpath=ancestor::section[1]")), `${screen} room-new-scenes`);
+            const added = found.filter((l) => !known.has(kind(l)));
+            if (added.length > 0) await shots.take(page, `ss-a-${screen}-room-new-scenes`);
+            lines.push(...added);
+          } finally {
+            await context.close();
+          }
+        }
+      }
+    }
+    assert.deepEqual(lines, []);
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
 });
+
+/** A new DM session, signed in by the DM link on a device of its own, as the storage state its pages start from. */
+async function signInAsDm(): Promise<Awaited<ReturnType<BrowserContext["storageState"]>>> {
+  const context = await browser.newContext({ viewport: WIDE });
+  try {
+    const page = await context.newPage();
+    const watch = new ConsoleWatch("DM sign-in");
+    // Signing in by the DM link first asks who this is, which the server answers with these two.
+    watch.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/, /status of 409 .*\/api\/rooms\/[0-9A-Z]{8}\/dm\)$/];
+    watch.attach(page);
+    consoles.push(watch);
+    await page.goto(run.dmLink);
+    await page.getByRole("button", { name: /Dana the DM/ }).click();
+    await page.getByRole("status", { name: "Connected" }).first().waitFor();
+    return await context.storageState();
+  } finally {
+    await context.close();
+  }
+}
 
 /** The Menu panel, as scenesPanel finds the Scenes panel. */
 async function menuPanel(page: Page): Promise<Locator> {
