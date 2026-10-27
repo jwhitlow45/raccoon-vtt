@@ -65,17 +65,15 @@ describe("an area's run of bands drawn as one", () => {
     drawVolume(g, [part(true), part(true)], [part(false)], [], { color: "#3fa7ff", dm: false, selected: false, preview: false }, 0, 0.5);
     assert.deepEqual(
       calls.map((c) => c.name),
-      ["fill", "fill", "stroke", "stroke", "stroke", "stroke"],
-      "one fill each for the far and near faces of the whole run, whatever bands it holds",
+      ["fill", "fill", "stroke", "stroke", "stroke"],
+      "one fill each for the far and near faces of the whole run, whatever bands it holds, and one dashed stroke for its hidden creases and far guides",
     );
-    const [far, near, hidden, guideHidden, outline, guide] = calls as [Call, Call, Call, Call, Call, Call];
+    const [far, near, hidden, outline, guide] = calls as [Call, Call, Call, Call, Call];
     assert.equal(far.alpha, theme.area.volumeFill);
     assert.equal(near.alpha, theme.area.volumeFill);
-    for (const h of [hidden, guideHidden]) {
-      assert.equal(h.alpha, theme.area.volumeHidden);
-      assert.equal(h.width, 0.5);
-      assert.deepEqual(h.dash, [2, 2], "4 4 screen pixels at half a view unit to a pixel");
-    }
+    assert.equal(hidden.alpha, theme.area.volumeHidden);
+    assert.equal(hidden.width, 0.5);
+    assert.deepEqual(hidden.dash, [2, 2], "4 4 screen pixels at half a view unit to a pixel");
     assert.equal(outline.alpha, theme.area.volumeLine);
     assert.equal(outline.width, 1, "2 screen pixels");
     assert.deepEqual(outline.dash, []);
@@ -86,7 +84,7 @@ describe("an area's run of bands drawn as one", () => {
     const run = (look: { dm: boolean; selected: boolean; preview: boolean }) => {
       const { g, calls } = canvas();
       drawVolume(g, [part(true)], [part(false)], [], { color: "#e5484d", ...look }, 0, 1);
-      return { fill: calls[0]!, outline: calls[4]! };
+      return { fill: calls[0]!, outline: calls[3]! };
     };
     const dm = run({ dm: true, selected: false, preview: false });
     assert.ok(Math.abs(dm.fill.alpha - theme.area.volumeFill * 0.6) < 1e-12);
@@ -110,8 +108,8 @@ describe("an area's run of bands drawn as one", () => {
       "the part above the ground fills unclipped first",
     );
     const inside = calls.filter((c) => c.clipped && c.name !== "clip");
-    assert.equal(inside.length, 6, "the pit's fills and strokes, each inside the clip");
-    assert.ok(calls.slice(clip + 7).every((c) => !c.clipped), "the clip ends before the outline above the ground");
+    assert.equal(inside.length, 5, "the pit's fills and strokes, each inside the clip");
+    assert.ok(calls.slice(clip + 6).every((c) => !c.clipped), "the clip ends before the outline above the ground");
     const bare = canvas();
     drawVolume(bare.g, [part(false)], [part(true)], [], { color: "#3fa7ff", dm: false, selected: false, preview: false }, 1, 1);
     assert.equal(bare.calls.length, 0, "nothing inside an opening shows without its clip");

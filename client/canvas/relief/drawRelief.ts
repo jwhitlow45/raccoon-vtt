@@ -378,13 +378,15 @@ export function drawVolume(g: CanvasRenderingContext2D, high: readonly BandPart[
     }
   };
   const strokes = (parts: readonly BandPart[]) => {
-    const stroke = (which: "hidden" | "guideHidden" | "outline" | "guide", alpha: number, widthPx: number, dash: readonly number[] | null) => {
+    const stroke = (which: readonly ("hidden" | "guideHidden" | "outline" | "guide")[], alpha: number, widthPx: number, dash: readonly number[] | null) => {
       g.beginPath();
       let any = false;
       for (const p of parts) {
-        if (p[which].length === 0) continue;
-        any = true;
-        addLines(g, p[which], c, s);
+        for (const w of which) {
+          if (p[w].length === 0) continue;
+          any = true;
+          addLines(g, p[w], c, s);
+        }
       }
       if (!any) return;
       g.globalAlpha = alpha * dim;
@@ -393,10 +395,10 @@ export function drawVolume(g: CanvasRenderingContext2D, high: readonly BandPart[
       g.lineCap = dash ? "butt" : "round";
       g.stroke();
     };
-    stroke("hidden", a.volumeHidden, a.thinWidthPx, a.hiddenDash);
-    stroke("guideHidden", a.volumeHidden, a.thinWidthPx, a.hiddenDash);
-    stroke("outline", a.volumeLine, look.selected ? a.selectedWidthPx : a.lineWidthPx, look.dm ? a.dmDash : look.preview ? a.previewDash : null);
-    stroke("guide", a.volumeGuide, a.thinWidthPx, null);
+    // Hidden creases and far guides look alike, so they take one dashed stroke.
+    stroke(["hidden", "guideHidden"], a.volumeHidden, a.thinWidthPx, a.hiddenDash);
+    stroke(["outline"], a.volumeLine, look.selected ? a.selectedWidthPx : a.lineWidthPx, look.dm ? a.dmDash : look.preview ? a.previewDash : null);
+    stroke(["guide"], a.volumeGuide, a.thinWidthPx, null);
   };
   fills(high);
   if (pits.length > 0 && low.some((p) => p.far.length + p.near.length + p.outline.length + p.hidden.length + p.guide.length + p.guideHidden.length > 0)) {
