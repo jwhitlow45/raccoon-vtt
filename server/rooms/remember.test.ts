@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { autoAt, chunksOf, edge, fogRoom, knownAt, lift, paint, stairs, wall, wallsOf } from "#shared/discoveryTestutil.ts";
 import { chunkKey, holderChunkKey, tileKey, type EntityKey } from "#shared/keys.ts";
-import type { Label, MemoryChunk, RoomState, Viewer } from "#shared/model.ts";
+import type { Label, MemoryChunk, RoomState, Stamp, Viewer } from "#shared/model.ts";
 import { withCellVision } from "#shared/perPlayerTestutil.ts";
 import { projectState } from "#shared/project.ts";
 import { serverOnlyOpSchema, type Op, type OpOf } from "#shared/protocol.ts";
@@ -192,6 +192,30 @@ describe("the map step", () => {
       const seen = batch(turned, [move(4, 20)]).state;
       assert.equal(upDir(seen, 3), "w");
       assert.equal(party(seen, 0, 1)?.upDir?.["3,20"], undefined);
+    });
+  });
+
+  test("a stamp the DM keeps to themselves out of sight is never remembered, alone or beside an edit the step remembers (MD3-LK-1)", () => {
+    withCellVision(() => {
+      const stamp = (overrides: Partial<Stamp> = {}): Stamp => ({ id: "st1", rev: 0, sceneId: "s1", art: { key: "oak-tree" }, x: 4, y: 4, w: 1, h: 1, rotation: 0, z: 0, visibility: "all", ...overrides });
+      let s = crypt();
+      s.stamps = { st1: stamp() };
+      s = batch(s, []).state;
+      s = batch(s, [move(7, 5)]).state;
+      s = batch(s, [move(30, 5)]).state;
+      assert.ok(projectState(s, P1, { sceneId: "s1" }).stamps.st1, "Ayla's copy shows the stamp she saw");
+      const hide: Op = { t: "build.stamps", sceneId: "s1", put: [stamp({ visibility: "dm" })] };
+      const alone = batch(s, [hide]);
+      assert.equal(alone.state.memory?.[chunkKey("s1", 0, 0)]?.stamps?.st1, undefined);
+      assert.equal(projectState(alone.state, P1, { sceneId: "s1" }).stamps.st1, undefined, "its art leaves their map");
+      const beside = batch(s, [hide, { t: "build.paint", sceneId: "s1", terrain: "wood", cells: ["4,4"] }]);
+      const memory = party(beside.state);
+      assert.equal(memory?.cells?.["4,4"], "stone", "the paint beside it is remembered");
+      assert.equal(memory?.stamps?.st1, undefined);
+      assert.equal(cellShown(beside.state, 4, 4), "stone");
+      // A stamp set DM-only and changed in the same breath is still never written back.
+      const changed = batch(s, [{ t: "build.stamps", sceneId: "s1", put: [stamp({ visibility: "dm", x: 5 })] }]);
+      assert.equal(party(changed.state)?.stamps?.st1, undefined);
     });
   });
 

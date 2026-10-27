@@ -206,6 +206,11 @@ function sameWall(a: FreeWall | null, b: FreeWall | null): boolean {
 }
 
 /** A label or stamp as players could see it, or null: one on another scene, or one the DM keeps to themselves. */
+function dmOnlyStamp(state: RoomState, id: string, sceneId: string): boolean {
+  const stamp = state.stamps[id];
+  return stamp !== undefined && stamp.sceneId === sceneId && stamp.visibility === "dm";
+}
+
 function shownMark(state: RoomState, field: MarkField, id: string, sceneId: string): Mark | null {
   const value = state[field][id];
   if (!value || value.sceneId !== sceneId) return null;
@@ -405,6 +410,8 @@ class LayerStep {
 
   /** Whether the layer's explored layer holds a tile at all, which forgetting it can take away. */
   readonly tiles: (tx: number, ty: number) => boolean;
+  /** Whether a stamp on the scene is one the DM keeps to themselves now, which no memory holds (5.4). */
+  readonly dmOnly: (id: string) => boolean;
 
   constructor(input: MapStepInput, scene: Scene, layer: Layer, ground: Ground, chunks: readonly MemoryChunk[], before: readonly MemoryChunk[]) {
     this.layer = layer;
@@ -415,6 +422,7 @@ class LayerStep {
     this.heldBefore = was ? layerHeld(input.before, was, layer) : null;
     this.ground = ground;
     this.tiles = layer === null ? (tx, ty) => input.after.exploredTiles[tileKey(scene.id, tx, ty)] !== undefined : (tx, ty) => input.after.exploredBy?.[holderTileKey(scene.id, layer, tx, ty)] !== undefined;
+    this.dmOnly = (id) => dmOnlyStamp(input.after, id, scene.id);
     const index = (list: readonly MemoryChunk[], at: Map<string, MemoryChunk>, marks: Map<string, string>) => {
       for (const chunk of list) {
         at.set(`${chunk.cx},${chunk.cy}`, chunk);
@@ -539,6 +547,8 @@ class LayerStep {
     const drop = () => {
       if (filed !== undefined) this.want(filed, e.field, e.id, { drop: true });
     };
+    // A stamp the DM keeps to themselves leaves every memory as the op's bookkeeping dropped it, and the step never writes it back.
+    if (e.field === "stamps" && this.dmOnly(e.id)) return drop();
     if (nowBox && this.ground.rangeLive(nowBox)) return drop();
     if (!prior && !changed) return;
     let shown = prior ? (prior.value as Mark | null) : e.was && this.heldBefore?.range(box(e.was)) ? e.was : null;
@@ -866,6 +876,7 @@ export function memoryGrowth(before: RoomState, after: RoomState, touched: reado
         if (cells.size > 0) put(`${e.cx},${e.cy}`, "walls", e.id, [{ wall: e.was, cells: [...cells] }]);
       }
       for (const e of changed.marks) {
+        if (e.field === "stamps" && dmOnlyStamp(after, e.id, sceneId)) continue;
         const boxes = [e.was, e.now].filter((v): v is Mark => v !== null).map((v) => (e.field === "labels" ? labelCells(v as Label) : stampCells(v as Stamp)));
         if (boxes.some((r) => held.range(r))) put(anchor(e.was ?? e.now!), e.field, e.id, e.was);
       }
