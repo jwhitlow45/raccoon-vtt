@@ -1413,7 +1413,8 @@ export class RoomActor {
     if (op.more) {
       if (this.#clients.has(key)) this.#asking.set(key, { ...chain, next: op.part + 1, at: this.#opts.now() });
     } else if (chain.over) {
-      this.#askRefused.set(key, group);
+      // Kept only while its socket stays, as a chain is (MD4-ASTRA-12).
+      if (this.#clients.has(key)) this.#askRefused.set(key, group);
       this.#refuse(key, wm, n, "forget", FORGET_ASK);
       return;
     }
@@ -1700,8 +1701,10 @@ export class RoomActor {
 
   #ensureBatch(): Batch {
     if (!this.#batch) {
+      // A batch begun while another commits, as an ask read in turns may begin one (MD4-ASTRA-10), starts where that one ends.
+      const after = this.#inFlight;
       this.#batch = {
-        before: this.#committed.state,
+        before: after?.state ?? this.#committed.state,
         ops: [],
         touched: [],
         global: false,
@@ -1718,8 +1721,8 @@ export class RoomActor {
         sys: [],
         receipts: [],
         timer: null,
-        state: this.#committed.state,
-        seq: this.#committed.seq,
+        state: after?.state ?? this.#committed.state,
+        seq: after?.seq ?? this.#committed.seq,
       };
     }
     return this.#batch;
@@ -1938,6 +1941,8 @@ export class RoomActor {
     this.#inFlight = null;
     this.#inFlightDone = null;
     this.#drain();
+    // A batch begun while it committed, outside the queue, which nothing could schedule then: an ask read meanwhile (MD4-ASTRA-10).
+    this.#scheduleCommit();
   }
 
   /** A batch that could not commit while the room was shutting down. Its clients still hold those ops and resend them. */

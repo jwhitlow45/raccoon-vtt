@@ -3309,6 +3309,14 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       actor.detach(f.conn);
       for (let i = 0; i < 200 && actor.askState.reading; i++) await new Promise((r) => setTimeout(r, 5));
       assert.equal(actor.askState.asking, 0, "a gone socket's part");
+      // Nor does a last part past the cap whose socket goes while it waits to be read (MD4-ASTRA-12).
+      const g = dmDevice(actor, dm);
+      await actor.hello(g.conn, { clientId: "g", resumeFrom: 1 });
+      await actor.op(g.conn, 1, ask(0, bands), "g8");
+      assert.equal(actor.askState.reading, true);
+      actor.detach(g.conn);
+      for (let i = 0; i < 200 && actor.askState.reading; i++) await new Promise((r) => setTimeout(r, 5));
+      assert.deepEqual(actor.askState, { asking: 0, refused: 0, reading: false }, "a gone socket's refused gesture");
       // The next op of another group ends a chain, and so does ASK_CHAIN_MS without its next part.
       const c = dmDevice(actor, dm);
       await actor.hello(c.conn, { clientId: "c", resumeFrom: 1 });
@@ -3329,6 +3337,55 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       await actor.op(c.conn, 4, ask(1, bands.slice(1)), "g6");
       assert.equal(await outcome(c.sent, 4), `invalid: ${ASK_LOST}`);
     } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("an ask whose reading meets an earlier batch's COMMIT in flight is answered once that commit ends, with no op after it (MD4-ASTRA-10)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, pcId } = discovery(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, bounds: { w: 200, h: 200 } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    // COMMIT waits on the gate while one is set.
+    let gate: Promise<void> | null = null;
+    let open: () => void = () => undefined;
+    const inner = db.pool();
+    const held =
+      (query: (sql: string, params?: unknown[]) => Promise<unknown>) =>
+      (sql: string, params?: unknown[]): Promise<unknown> =>
+        sql.trim() === "commit" && gate ? gate.then(() => query(sql, params)) : query(sql, params);
+    const pool = {
+      query: held((sql, params) => inner.query(sql, params as never[])),
+      connect: async () => {
+        const client = await inner.connect();
+        return { query: held((sql, params) => client.query(sql, params as never[])), release: () => client.release() };
+      },
+    } as unknown as Pool;
+    const actor = await RoomActor.load({ ...deps(db), pool });
+    assert.ok(actor);
+    try {
+      const table = dmDevice(actor, dm);
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      gate = new Promise((resolve) => (open = resolve));
+      // Ayla's step, which changes what the party sees, whose batch commits a millisecond on and waits at its COMMIT, then an ask read in turns meanwhile.
+      await actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 89, y: 50 }, "g1");
+      const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: 60 + k * 8, w: 200, h: 8 }));
+      await actor.op(table.conn, 2, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g2");
+      for (let i = 0; i < 100 && actor.askState.reading; i++) await new Promise((r) => setTimeout(r, 10));
+      open();
+      gate = null;
+      assert.equal(await outcome(table.sent, 1), "taken");
+      assert.equal(await outcome(table.sent, 2), "taken", "the ask's answer went with no op after it");
+      // Its batch began where the step's ends, so its answer carries nothing the step's already did, such as the sight it changed.
+      const asked = await answerTo(table.sent, 2);
+      const stepped = await answerTo(table.sent, 1);
+      assert.ok(asked !== "stuck" && stepped !== "stuck" && asked !== stepped);
+      assert.ok(stepped.changes.length > 0);
+      assert.deepEqual(asked.changes, [], "the ask's answer sent the step's changes again");
+    } finally {
+      open();
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });
     }
