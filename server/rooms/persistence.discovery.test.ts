@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { mapDiscoveryUpgrade, MAP_DISCOVERY_OP_VERSION, migrateOp, migrateSnapshot } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { rasterizeFogOps } from "#shared/rules/fog.ts";
 import { room, scene } from "#shared/testutil.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
@@ -56,6 +58,37 @@ async function load(snapshot: { state: unknown; version: number; seq?: number },
 
 const marks = (state: RoomState) => Object.fromEntries(Object.entries(state.playedScenes ?? {}).map(([id, m]) => [id, m.rev]));
 
+/**
+ * The room a plain replay makes, with nothing of loadRoom's own: the
+ * snapshot migrated, then each op migrated and applied at its stored
+ * version, as the fake pool hands them over. With `step`, the upgrade step
+ * runs where 5.5 puts it: just before the first op of the new version, or
+ * after the last.
+ */
+function replayed(snapshot: { state: unknown; version: number; seq?: number }, rows: Row[], step: boolean): RoomState {
+  const start = snapshot.seq ?? 0;
+  let state = migrateSnapshot(JSON.parse(JSON.stringify(snapshot.state)), snapshot.version);
+  let pending = step && snapshot.version < 27;
+  for (const [i, r] of rows.entries()) {
+    if (pending && r.version >= MAP_DISCOVERY_OP_VERSION) {
+      state = mapDiscoveryUpgrade(state);
+      pending = false;
+    }
+    const at = new Date(Date.UTC(2026, 9, 26, 20, 0, i)).toISOString();
+    const result = applyOp(state, migrateOp(r.op, r.version), { memberId: "dm1", role: "dm" }, { seq: start + i + 1, at, opVersion: r.version });
+    assert.ok(result.ok);
+    state = result.state;
+  }
+  return pending ? mapDiscoveryUpgrade(state) : state;
+}
+
+/** A room without the four collections map discovery adds. */
+const rest = (state: RoomState) => {
+  const { memory: _m, memoryBy: _b, playedScenes: _p, memoryShared: _s, ...others } = state;
+  return others;
+};
+const four = (state: RoomState) => [state.memory, state.memoryBy, state.playedScenes, state.memoryShared];
+
 describe("the map discovery upgrade step on load (ASTRA-31)", () => {
   test("an old snapshot and old ops only: the step runs after the last op, so the scene they made and played is marked", async () => {
     const state = await load({ state: before(), version: 26 }, OLD.map((op) => ({ op, version: 25 })));
@@ -89,6 +122,23 @@ describe("the map discovery upgrade step on load (ASTRA-31)", () => {
     assert.deepEqual(marks(first), { s1: 0, s2: 0 });
     assert.deepEqual(Object.keys(first.memoryShared ?? {}), ["s2"]);
     assert.deepEqual(again, first);
+  });
+
+  test("replays every stored room to the bytes a plain replay makes, the step adding only its four collections", async () => {
+    const { traps: _t, trapLog: _l, trapSeen: _s, ...v18 } = before();
+    const legacy = before();
+    legacy.scenes.s2 = scene("s2", { order: 1, fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } });
+    const cases: [string, { state: unknown; version: number }, Row[]][] = [
+      ["old ops only", { state: before(), version: 26 }, OLD.map((op) => ({ op, version: 25 }))],
+      ["old then new ops", { state: before(), version: 26 }, [...OLD.map((op) => ({ op, version: 25 })), ...NEW.map((op) => ({ op, version: 26 }))]],
+      ["no ops", { state: legacy, version: 26 }, []],
+      ["an older snapshot", { state: v18, version: 18 }, [...OLD.map((op) => ({ op, version: 18 })), ...NEW.map((op) => ({ op, version: 26 }))]],
+    ];
+    for (const [name, snapshot, rows] of cases) {
+      const state = await load(snapshot, rows);
+      assert.deepEqual(rest(state), rest(replayed(snapshot, rows, false)), `${name}: everything else as stored ops make it`);
+      assert.deepEqual(four(state), four(replayed(snapshot, rows, true)), `${name}: the four collections the step's`);
+    }
   });
 
   test("a room stored before map discovery from an older snapshot still meets the step at the boundary", async () => {
