@@ -16,6 +16,12 @@
  *   platforms 5 to 30 ft high over a fifth of it, 40 tokens, a group of 4
  *   and a horse with its rider.
  * - crowd: 60 by 60 with 500 tokens, a scene's most.
+ * - areas: the typical scene with four areas standing as their real shapes
+ *   around the camera (docs/design-v1-iso-area-shapes.md 6): a 20 ft sphere
+ *   10 ft up, a 30 ft cone aimed 40 degrees up, a 10 by 40 ft cylinder and a
+ *   15 ft emanation on a creature, and four fliers among them, 16 tokens.
+ * - cap: 200 areas, a scene's most, over an 80 by 80 scene.
+ * - giant: a 200 by 200 hex rows scene where a 500 ft emanation comes in.
  *
  * Rows: pan (the typical scene at 40 px, the caps at fit and at 40 px, the
  * crowd at 40 px), a local drag (each whole frame), the ringed and aura'd
@@ -26,7 +32,11 @@
  * ground stage's draws while the scout crosses cells, here and by another
  * member, a count that must be none, the switch, a turn, and a pan with
  * both drawing trees mounted, and the brush stroke and the map image run
- * back in Top-down with the isometric tree mounted and hidden. `--only`
+ * back in Top-down with the isometric tree mounted and hidden. On the area
+ * rooms: a pan and a drag among the four areas, a sphere aimed with the
+ * Area tool (each move, then each frame once the finger rests), each frame
+ * of a first view and a pan at the cap, a turn there, and each frame while
+ * the 500 ft emanation builds. `--only`
  * times just the rows named. The page stores Isometric as its pick before
  * it loads, and sets the test flag (client/features/view/choice.ts
  * ISO_TEST_FLAG) for the hook that turns without the menu.
@@ -55,7 +65,7 @@ import path from "node:path";
 import { chromium, type BrowserContext, type CDPSession, type Page } from "playwright-core";
 import sharp from "sharp";
 import WebSocket from "ws";
-import { ROOT, startServer } from "../e2e/harness.ts";
+import { pickOption, pickTool, ROOT, startServer } from "../e2e/harness.ts";
 
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true };
 const CPU_SLOWDOWN = 4;
@@ -114,7 +124,7 @@ function chunked<T>(list: readonly T[], size: number): T[][] {
 }
 
 /** What each scene holds: the ops that build it, the tokens the rows press, and where the camera stands for each zoom. */
-type Built = { ops: Op[]; scout?: string; scoutAt?: { x: number; y: number }; walker: string; group?: string[]; horse?: string; rider?: string; bounds: { w: number; h: number }; at40: { x: number; y: number } };
+type Built = { ops: Op[]; scout?: string; scoutAt?: { x: number; y: number }; walker: string; aura?: string; group?: string[]; horse?: string; rider?: string; bounds: { w: number; h: number }; at40: { x: number; y: number } };
 
 function typical(sceneId: string, dmId: string): Built {
   const ops: Op[] = [{ t: "scene.update", sceneId, patch: { bounds: { w: 40, h: 30 }, fogEnabled: true, autoWalls: "all" } }];
@@ -188,6 +198,50 @@ function crowd(sceneId: string): Built {
   for (let i = 0; i < 500; i++) tokens.push(token(sceneId, `Rat ${i + 1}`, 5 + (i % 25) * 2, 5 + Math.floor(i / 25) * 2.5 - ((i % 25) % 2) * 0.5));
   for (const t of tokens) ops.push({ t: "token.create", token: t });
   return { ops, walker: tokens[262]!.id as string, bounds: { w: 60, h: 60 }, at40: { x: 30, y: 30 } };
+}
+
+function template(sceneId: string, dmId: string, t: Op): Op {
+  return { t: "template.create", template: { id: benchId("area"), sceneId, yaw: 0, includeOrigin: true, color: "#3fa7ff", ownerId: dmId, visibility: "all", ...t } };
+}
+
+/** The typical scene with the four areas of the design's cost section round the camera, and four fliers among them. */
+function areas(sceneId: string, dmId: string): Built {
+  const base = typical(sceneId, dmId);
+  const ops = [...base.ops];
+  const guardian = token(sceneId, "Guardian", 18, 13, { kind: "npc", disposition: "ally" });
+  const fliers = [token(sceneId, "Bat 1", 20, 15, { elevation: 10 }), token(sceneId, "Bat 2", 21, 17, { elevation: 25 }), token(sceneId, "Bat 3", 17, 16, { elevation: 15 }), guardian];
+  for (const t of fliers) ops.push({ t: "token.create", token: t });
+  ops.push(template(sceneId, dmId, { shape: "sphere", size: 20, origin: { x: 20.5, y: 15.5, z: 10 } }));
+  ops.push(template(sceneId, dmId, { shape: "cone", size: 30, origin: { x: 17, y: 18, z: 0 }, yaw: 315, pitch: 40, color: "#e5484d" }));
+  ops.push(template(sceneId, dmId, { shape: "cylinder", size: 10, height: 40, origin: { x: 23.5, y: 13.5, z: 0 }, color: "#30a46c" }));
+  ops.push(template(sceneId, dmId, { shape: "emanation", size: 15, origin: { x: 18.5, y: 13.5, z: 0 }, attachedTo: guardian.id, includeOrigin: false, color: "#f38400" }));
+  return { ...base, ops, aura: guardian.id as string };
+}
+
+/** 200 areas, a scene's most, of every shape over an 80 by 80 scene. */
+function cap(sceneId: string, dmId: string): Built {
+  const ops: Op[] = [{ t: "scene.update", sceneId, patch: { bounds: { w: 80, h: 80 }, fogEnabled: false } }];
+  const shapes: Op[] = [
+    { shape: "sphere", size: 20 },
+    { shape: "cylinder", size: 10, height: 20 },
+    { shape: "cone", size: 30, pitch: 20 },
+    { shape: "cube", size: 15 },
+    { shape: "line", size: 60, width: 5, pitch: 10 },
+  ];
+  for (let i = 0; i < 200; i++) {
+    const x = 4 + (i % 20) * 3.6;
+    const y = 4 + Math.floor(i / 20) * 7.2;
+    ops.push(template(sceneId, dmId, { ...shapes[i % shapes.length]!, origin: { x, y, z: 5 * (i % 4) }, yaw: (i * 37) % 360, color: ["#3fa7ff", "#e5484d", "#30a46c", "#f38400"][i % 4] }));
+  }
+  const walker = token(sceneId, "Scout", 40, 40);
+  ops.push({ t: "token.create", token: walker });
+  return { ops, walker: walker.id as string, bounds: { w: 80, h: 80 }, at40: { x: 40, y: 40 } };
+}
+
+/** A 200 by 200 hex rows scene; the 500 ft emanation comes in by its row (GIANT_ROW). */
+function giant(sceneId: string): Built {
+  const walker = token(sceneId, "Scout", 100, 100);
+  return { ops: [{ t: "scene.update", sceneId, patch: { bounds: { w: 200, h: 200 }, fogEnabled: false, gridShape: "hexRows" } }, { t: "token.create", token: walker }], walker: walker.id as string, bounds: { w: 200, h: 200 }, at40: { x: 100, y: 100 } };
 }
 
 // ---------------------------------------------------------------- the page
@@ -510,10 +564,14 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
   try {
     await page.goto(`${server.origin}/`);
     const built: Record<string, { room: Room; scene: Built; dm: Socket }> = {};
+    // The rooms for areas come last, so the others keep their ids and the parity images of before still match.
     for (const [kind, make] of [
       ["typical", typical],
       ["caps", caps],
       ["crowd", crowd],
+      ["areas", areas],
+      ["cap", cap],
+      ["giant", giant],
     ] as const) {
       const room = await createRoom(page, `Bench iso ${kind} ${stamp}`);
       rooms.push(room);
@@ -667,11 +725,118 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       await add("local drag, whole frame, 500 tokens, 40 px", () => throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
     }
 
+    // Areas standing as their real shapes (docs/design-v1-iso-area-shapes.md 6).
+    {
+      const { scene } = built.areas!;
+      await open("areas", 40);
+      await add("pan, typical with four areas, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      await add("local drag of the Guardian with its aura, whole frame, typical with four areas, 40 px", () => throttled(() => rounds(() => touchDrag(page, cdp, scene.aura!, STEPS, { down: 0.9 }))));
+      if (!opts.only || opts.only.some((o) => AIM_MOVE_ROW.includes(o) || AIM_REST_ROW.includes(o))) {
+        const moves: number[] = [];
+        const rest: number[] = [];
+        await throttled(() =>
+          rounds(async () => {
+            const got = await aimSphere(page, cdp);
+            moves.push(...got.moves);
+            rest.push(...got.rest);
+            return got.moves;
+          }),
+        );
+        // The first round warms the engine up: its steps are left out, as `rounds` leaves them.
+        rows.push({ row: AIM_MOVE_ROW, view, ms: stats(moves.slice(moves.length / 4)) });
+        rows.push({ row: AIM_REST_ROW, view, ms: stats(rest.slice(rest.length / 4)) });
+      }
+    }
+    {
+      await open("cap", 12);
+      await add("pan, 200 areas, 12 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+      await open("cap", 40);
+      await add("pan, 200 areas, 40 px", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+    }
+    if (!opts.only || opts.only.some((o) => GIANT_ROW.includes(o))) {
+      const { dm } = built.giant!;
+      await open("giant", 40);
+      let made: Op | null = null;
+      const arrivals: number[] = [];
+      const frames = await throttled(() =>
+        rounds(async () => {
+          // A new one each round, so each builds from nothing.
+          if (made) await dm.op({ t: "template.delete", templateId: (made.template as { id: string }).id });
+          made = template(dm.sceneId, dm.memberId, { shape: "emanation", size: 500, origin: { x: 100.5, y: 100.5, z: 0 } });
+          // The frame it lands in holds the rules' coverage of 40,000 hexes, the same work in either view, so it is a row of its own.
+          arrivals.push(...(await timed(page, cdp, 1, () => dm.op(made!), 1)));
+          return timed(page, cdp, 90, async () => undefined, 1);
+        }),
+      );
+      rows.push({ row: GIANT_ARRIVAL_ROW, view, ms: stats(arrivals.slice(1)) });
+      rows.push({ row: GIANT_ROW, view, ms: stats(frames) });
+    }
+
     if (view === "isometric") {
+      // The cap's first view: the board shown from Top-down with its 200 areas in view, each frame while they stand, nearest the middle first.
+      const hook = (call: "turn" | "pick" | "layout", arg?: unknown) =>
+        page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => unknown> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
+      if (!opts.only || opts.only.some((o) => CAP_FIRST_ROW.includes(o) || CAP_TURN_ROW.includes(o) || CAP_FIRST_TURN_ROW.includes(o))) {
+        await open("cap", 12);
+        const first: number[] = [];
+        const stood: number[] = [];
+        for (let r = 0; r <= ROUNDS; r++) {
+          await hook("pick", "topDown");
+          await frames(page, 30);
+          // A reload empties every kept volume, so each round's first view builds them all.
+          await page.reload();
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          await hook("pick", "topDown");
+          await frames(page, 30);
+          const start = Date.now();
+          let at = 0;
+          const got = await throttled(async () => {
+            const f = await timed(page, cdp, 120, async (i) => {
+              if (i === 0) await hook("pick", "isometric");
+              else if (i >= 3 && at === 0 && (await stoodNow(page))) at = Date.now();
+            }, 1);
+            if (at === 0) at = await waitStood(page);
+            return f;
+          });
+          if (r > 0) first.push(...got);
+          if (r > 0) stood.push(at - start);
+        }
+        rows.push({ row: CAP_FIRST_ROW, view, ms: stats(first) });
+        rows.push({ row: CAP_STOOD_ROW, view, ms: stats(stood) });
+        // A turn's first visit: each frame while its bands are made, the areas flat until then (design 6).
+        const firstTurn: number[] = [];
+        const turnStood: number[] = [];
+        for (let r = 0; r <= ROUNDS; r++) {
+          await page.reload();
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          await hook("pick", "isometric");
+          await hook("turn", 0);
+          await frames(page, 4);
+          await waitStood(page);
+          const start = Date.now();
+          let at = 0;
+          const got = await throttled(async () => {
+            const f = await timed(page, cdp, 90, async (i) => {
+              if (i === 0) await hook("turn", 1);
+              else if (i >= 3 && at === 0 && (await stoodNow(page))) at = Date.now();
+            }, 1);
+            if (at === 0) at = await waitStood(page);
+            return f;
+          });
+          if (r > 0) firstTurn.push(...got);
+          if (r > 0) turnStood.push(at - start);
+        }
+        rows.push({ row: CAP_FIRST_TURN_ROW, view, ms: stats(firstTurn) });
+        rows.push({ row: CAP_FIRST_TURN_STOOD_ROW, view, ms: stats(turnStood) });
+        // Each turn's bands, once made, are kept: every turn visited and stood first, then the turns timed.
+        for (const t of [2, 3, 0] as const) {
+          await hook("turn", t);
+          await frames(page, 4);
+          await waitStood(page);
+        }
+        await add(CAP_TURN_ROW, () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
+      }
       await open("caps", 40);
-      // The board's hook beside the test flag (relief/isoTest.ts): a pick or a turn as the View menu makes them.
-      const hook = (call: "turn" | "pick", arg: unknown) =>
-        page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => void> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
       await add("turn, caps, 40 px", () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
       await add("switch, caps, 40 px, both trees mounted", () => throttled(() => rounds(() => timed(page, cdp, 2, async (i) => void (await hook("pick", i === 0 ? "topDown" : "isometric")), 4))));
       await add("pan, caps, 40 px, both trees mounted", () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
@@ -704,6 +869,62 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 }
 
 const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
+const AIM_MOVE_ROW = "a sphere aimed with the Area tool, each move, typical with four areas";
+const AIM_REST_ROW = "a sphere aimed with the Area tool, each frame once the finger rests, typical with four areas";
+const CAP_FIRST_ROW = "first view, 200 areas, 12 px, each frame";
+const CAP_FIRST_TURN_ROW = "a turn's first visit, 200 areas, 12 px, each frame while it stands";
+const CAP_TURN_ROW = "turn, 200 areas, 12 px, each turn visited before";
+/** Not a frame: how long until every area in view stands, reported beside the frames (the design's 7 s estimate). */
+const CAP_STOOD_ROW = "first view, 200 areas, 12 px, until every area stands (ms whole, not a frame)";
+const CAP_FIRST_TURN_STOOD_ROW = "a turn's first visit, 200 areas, 12 px, until every area stands (ms whole, not a frame)";
+/** Each frame while a 500 ft emanation of 142,000 faces builds in slices (review ISOA1-GC: its collector pauses). */
+const GIANT_ROW = "a 500 ft emanation coming in on hex rows, each frame while it builds, 40 px";
+const GIANT_ARRIVAL_ROW = "a 500 ft emanation coming in on hex rows, the frame it lands in, 40 px";
+
+/**
+ * A sphere aimed with the Area tool by touch: Sphere picked, a tap on open
+ * map places the draft, then a drag moves it, each move timed, and once it
+ * rests each frame while its fine shape stands, then Escape lets it go.
+ */
+async function aimSphere(page: Page, cdp: CDPSession): Promise<{ moves: number[]; rest: number[] }> {
+  await pickTool(page, "Area");
+  await pickOption(page, "Area", "Shape", "Sphere");
+  const box = await boardBox(page);
+  const at = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.3 };
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...at, id: 0 }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await frames(page, 8);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...at, id: 0 }] });
+  await frames(page, 2);
+  const moves = await timed(page, cdp, STEPS, (i) => cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: at.x + (i + 1) * 6, y: at.y + (i + 1) * 3, id: 0 }] }).then(() => {}));
+  // The finger rests: the preview refines (areas/store.ts REST_MS) and the fine shape stands in the depth list.
+  const rest = await timed(page, cdp, 30, async () => {}, 1);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await frames(page, 4);
+  await page.keyboard.press("Escape");
+  await frames(page, 8);
+  await pickTool(page, "Select");
+  await frames(page, 8);
+  return { moves, rest };
+}
+
+/** Waits until the isometric board says no area in view waits to stand (relief/isoTest.ts layout). */
+/** Whether the board on screen has areas standing and none waiting to. */
+function stoodNow(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const l = (globalThis as unknown as { __rvttIsoHook?: { layout?(): { waiting: boolean; standing: string[] } | null } }).__rvttIsoHook?.layout?.();
+    return !!l && !l.waiting && l.standing.length > 0;
+  });
+}
+
+/** Waits until the board's areas all stand, and says when. */
+async function waitStood(page: Page): Promise<number> {
+  for (const until = Date.now() + 60_000; Date.now() < until; ) {
+    if (await stoodNow(page)) return Date.now();
+    await page.waitForTimeout(50);
+  }
+  throw new Error("the areas never all stood");
+}
 /** In Isometric's pass it runs back in Top-down with the isometric tree mounted and hidden, whose side tints read the map (ISO2-OPUS-12). */
 const MAP_ROW = "a map image set and taken away from another device of the DM's, caps, 40 px";
 
@@ -755,7 +976,10 @@ async function select(page: Page, ids: readonly string[]): Promise<void> {
 /** Section 11's gates: every frame at most max(16 ms, 1.75 times Top-down's same frame), a turn at the caps at most 150 ms whole. */
 export function gate(row: string, iso: number, topDown: number | undefined): string {
   if (row.startsWith("turn")) return iso <= 150 ? "ok" : "OVER 150 ms";
+  if (row === CAP_STOOD_ROW || row === CAP_FIRST_TURN_STOOD_ROW) return "(reported, no gate)";
   if (row.startsWith("ground stage draws")) return iso === 0 ? "ok (none)" : `OVER: ${iso} ground draws`;
+  // A frame Top-down has no counterpart for, as the first view of the cap, gets the floor of the gate.
+  if (topDown === undefined && row.includes("each frame")) return iso <= 16 ? "ok (budget 16.0)" : "OVER (budget 16.0)";
   if (topDown === undefined) return "";
   const budget = Math.max(16, 1.75 * topDown);
   return iso <= budget ? `ok (budget ${budget.toFixed(1)})` : `OVER (budget ${budget.toFixed(1)})`;
