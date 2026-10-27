@@ -75,10 +75,15 @@ function refusalWords(a: CopyAnswer): string {
 }
 
 /** "Copied to 3 scenes." or "Copied to 2 of 3 scenes. Hall: <the refusal's words>" (8.3). */
+/** Every scene took the copy, so the sheet clears its ticks and Copy is not offered again for nothing. */
+export function copiedAll(answers: readonly CopyAnswer[]): boolean {
+  return answers.every((a) => a.answer === "taken");
+}
+
 export function copyResult(answers: readonly CopyAnswer[]): string {
   const taken = answers.filter((a) => a.answer === "taken").length;
   const total = answers.length;
-  if (taken === total) return total === 1 ? "Copied to 1 scene." : `Copied to ${total} scenes.`;
+  if (copiedAll(answers)) return total === 1 ? "Copied to 1 scene." : `Copied to ${total} scenes.`;
   const why = answers
     .filter((a) => a.answer !== "taken")
     .map((a) => `${a.name}: ${refusalWords(a)}`)

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { apply, room, scene } from "#shared/testutil.ts";
-import { copiesNothing, copyButtonText, copyLine, copyNotes, copyPatch, copyResult, copyTitle, MAPS_JOIN, MAPS_RESET, PLAYERS_HERE } from "./copyRules.ts";
+import { copiedAll, copiesNothing, copyButtonText, copyLine, copyNotes, copyPatch, copyResult, copyTitle, MAPS_JOIN, MAPS_RESET, PLAYERS_HERE } from "./copyRules.ts";
 import { playersSeeOf } from "./playersSeeRules.ts";
 
 /** "Use these settings on other scenes…" (docs/design-v1-map-discovery.md 8.3, decision 18). */
@@ -52,6 +52,10 @@ describe("using a scene's vision settings on others", () => {
     assert.equal(copyButtonText(3), "Copy to 3 scenes");
     assert.equal(copyResult([{ name: "A", answer: "taken" }, { name: "B", answer: "taken" }, { name: "C", answer: "taken" }]), "Copied to 3 scenes.");
     assert.equal(copyResult([{ name: "A", answer: "taken" }]), "Copied to 1 scene.");
+    // Only a full copy clears the ticks (MS1-F-8): a refusal keeps them, to try again.
+    assert.equal(copiedAll([{ name: "A", answer: "taken" }, { name: "B", answer: "taken" }]), true);
+    assert.equal(copiedAll([{ name: "A", answer: "taken" }, { name: "B", answer: "refused" }]), false);
+    assert.equal(copiedAll([{ name: "A", answer: "unknown" }]), false);
     const full = { message: "The room is too full to keep players' maps of this scene. Delete unused scenes to free space.", text: "Not saved. The room is too full…" };
     assert.equal(
       copyResult([{ name: "A", answer: "taken" }, { name: "Hall", answer: "refused", refusal: full }, { name: "C", answer: "taken" }]),

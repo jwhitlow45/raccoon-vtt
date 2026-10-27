@@ -8,7 +8,7 @@ import { theme } from "../../lib/theme.ts";
 import type { OpAnswer, OpRefusal } from "../../state/types.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { groupScenes } from "../scenes/folders.ts";
-import { COPY_HELP, COPY_UNDO, copiesNothing, copyButtonText, copyLine, copyPatch, copyResult, copyTitle, type CopyAnswer } from "./copyRules.ts";
+import { COPY_HELP, COPY_UNDO, copiedAll, copiesNothing, copyButtonText, copyLine, copyPatch, copyResult, copyTitle, type CopyAnswer } from "./copyRules.ts";
 
 /**
  * "Use these settings on other scenes…" at the end of What players see
@@ -44,7 +44,9 @@ export function CopySettingsButton(props: { scene: Scene }) {
  * so one undo puts every scene back, and waits for every answer, busy and
  * refusing a second tap, before it says how it went in a polite status.
  * A scene that already has the settings is counted with nothing sent.
- * Escape and Close answer no, and focus goes back to the button.
+ * Once every scene took it the ticks clear, and focus on Copy, which that
+ * leaves with nothing to do, moves to Close. Escape and Close answer no,
+ * and focus goes back to the button.
  */
 function CopySheet(props: { source: Scene; scenes: Scene[]; opener: RefObject<HTMLButtonElement | null>; onClose(): void }) {
   const { source, scenes } = props;
@@ -53,6 +55,8 @@ function CopySheet(props: { source: Scene; scenes: Scene[]; opener: RefObject<HT
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const copyButton = useRef<HTMLButtonElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
   const patch = copyPatch(source);
   const groups = groupScenes(scenes);
   const chosen = scenes.filter((s) => picked.has(s.id));
@@ -72,8 +76,12 @@ function CopySheet(props: { source: Scene; scenes: Scene[]; opener: RefObject<HT
     const settle = (i: number, answer: OpAnswer, refusal?: OpRefusal) => {
       answers[i] = { name: chosen[i]!.name, answer, ...(refusal ? { refusal } : {}) };
       if (--left > 0) return;
+      const all = answers as CopyAnswer[];
       setBusy(false);
-      setResult(copyResult(answers as CopyAnswer[]));
+      setResult(copyResult(all));
+      if (!copiedAll(all)) return;
+      setPicked(new Set());
+      if (document.activeElement === copyButton.current) closeButton.current?.focus();
     };
     setBusy(true);
     setResult(null);
@@ -96,10 +104,10 @@ function CopySheet(props: { source: Scene; scenes: Scene[]; opener: RefObject<HT
       footer={
         <>
           {/* Both grow to share the line they stand on (docs/design-v1-polish.md R6), so Copy wrapped under Close fills its line. */}
-          <Button onClick={props.onClose} style={{ flex: "1 1 auto" }}>
+          <Button ref={closeButton} onClick={props.onClose} style={{ flex: "1 1 auto" }}>
             Close
           </Button>
-          <Button variant="primary" busy={busy} disabled={!busy && chosen.length === 0} onClick={copy} style={{ flex: "1 1 auto" }}>
+          <Button ref={copyButton} variant="primary" busy={busy} disabled={!busy && chosen.length === 0} onClick={copy} style={{ flex: "1 1 auto" }}>
             {busy ? "Copying…" : copyButtonText(chosen.length)}
           </Button>
         </>
