@@ -3,7 +3,7 @@ import { axisSteps, hexSetSteps, legFeet } from "./distance.ts";
 import { footprintRect, hexAnchor, occupiedHexes, occupiedRange, sizeCategory, tokenHeightFt, verticalExtentFt, type FootprintToken } from "./footprint.ts";
 import { clamp, distToSegment, sdBox3, sdCorner2, yawVector, type Bounds, type Point, type Point3, type Rect } from "./geom.ts";
 import { SQUARES, type Grid } from "./grid.ts";
-import { cornerAt, footprintHexes, HEX_R, HEX_S, hexAt, hexCenter, hexCorners, hexInScene, hexKey, sceneHexes, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
+import { cornerAt, footprintHexes, HEX_R, HEX_S, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
 import { AREAS, stepOffWalls } from "./segments.ts";
 import { cachedVisibility, crossingsAt, indexPolygon, insideCrossings, markPolygonCells, type Polygon, type PolygonIndex, type WallSet } from "./walls.ts";
 
@@ -449,8 +449,8 @@ function coneSpan(u0: number, w: number, h0: number, s: number, c: number, L: nu
   const rLo = Math.min(r1, r2);
   const rHi = Math.max(r1, r2);
   if (A < 0) return meet(rLo, rHi);
-  // Both rays outlast the slab only within a hair of the apex, where they meet.
-  return meet(-Infinity, rLo) ?? meet(rHi, Infinity);
+  // A line steeper than the cone's slant passes both nappes, a ray on each. The cone's own is the one u grows along. The other meets the slab at most at the apex, so taking whichever comes first would return the apex alone on its own column.
+  return s > 0 ? meet(rHi, Infinity) : meet(-Infinity, rLo);
 }
 
 /** A box centered on c with half extents hu along `a`, hw along `n` and hh along `m`: a line aimed up or down. */
@@ -1318,7 +1318,21 @@ export type HexPrism = { hex: Hex; lo: number; hi: number };
  * the source's layers and every diagonal rule grows with them.
  */
 export function hexStackPrisms(stack: Extract<AreaSolid, { kind: "hexStack" }>): HexPrism[] {
+  const out: HexPrism[] = [];
+  for (const p of eachHexPrism(stack)) if (p) out.push(p);
+  return out;
+}
+
+/**
+ * The prisms of `hexStackPrisms` one at a time, for a caller that builds
+ * them in slices: the hexes ring by ring outward from the source, each
+ * ring one step farther, so a small stack costs its own hexes and not the
+ * scene's. Null now and then while it walks hexes off the scene, so the
+ * caller can look at the clock.
+ */
+export function* eachHexPrism(stack: Extract<AreaSolid, { kind: "hexStack" }>): Generator<HexPrism | null, void, void> {
   const { reach, bounds } = stack;
+  const g = reach.g;
   const layers = new Map<number, { lo: number; hi: number } | null>();
   const layersAt = (d: number) => {
     let run = layers.get(d);
@@ -1332,14 +1346,33 @@ export function hexStackPrisms(stack: Extract<AreaSolid, { kind: "hexStack" }>):
     layers.set(d, run);
     return run;
   };
-  const out: HexPrism[] = [];
-  for (const hex of sceneHexes(reach.g, bounds)) {
-    const d = hexSetSteps(reach.g, reach.from, [hex]);
-    if (d > reach.steps) continue;
-    const run = layersAt(d);
-    if (run) out.push({ hex, lo: run.lo, hi: run.hi });
+  const seen = new Set<string>();
+  let ring: Hex[] = [];
+  for (const h of reach.from) {
+    const key = hexKey(h);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ring.push(h);
   }
-  return out;
+  let walked = 0;
+  // A hex's ring is its fewest steps from the source, as `hexSetSteps` counts them. The runs shrink as the steps grow, so the first ring with none ends the stack.
+  for (let d = 0; d <= reach.steps && ring.length > 0; d++) {
+    const run = layersAt(d);
+    if (!run) return;
+    const next: Hex[] = [];
+    for (const hex of ring) {
+      if (hexInScene(g, bounds, hex)) yield { hex, lo: run.lo, hi: run.hi };
+      else if (++walked % 512 === 0) yield null;
+      if (d === reach.steps) continue;
+      for (const nb of hexNeighbors(g, hex)) {
+        const key = hexKey(nb);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        next.push(nb);
+      }
+    }
+    ring = next;
+  }
 }
 
 /**
