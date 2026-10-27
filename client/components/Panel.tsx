@@ -85,8 +85,12 @@ export function Section(props: {
    * folded, the section's content is not drawn. `summary` sits after the
    * disclosure, outside it, on the label's row, such as the owners' names.
    * `foldRef` is the disclosure button, for a caller that moves focus there.
+   * With `keep`, folded content stays mounted and hidden instead, in one
+   * column of its own, so work under way in it lasts through a fold: an
+   * upload a fold would otherwise abort, or counts typed and not applied
+   * (the scene settings' groups, docs/design-v1-map-discovery.md 8.4).
    */
-  fold?: { open: boolean; onToggle(): void; summary?: ReactNode; foldRef?: Ref<HTMLButtonElement> };
+  fold?: { open: boolean; onToggle(): void; summary?: ReactNode; foldRef?: Ref<HTMLButtonElement>; keep?: boolean };
   children: ReactNode;
   style?: CSSProperties;
 }) {
@@ -111,7 +115,13 @@ export function Section(props: {
         }}
       >
         <FoldLabel id={id} label={props.label} tone={props.tone} fold={fold} level={inGroup ? 4 : 3} />
-        {fold.open ? props.children : null}
+        {fold.keep ? (
+          <div hidden={!fold.open} style={{ display: fold.open ? "grid" : "none", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+            {props.children}
+          </div>
+        ) : fold.open ? (
+          props.children
+        ) : null}
       </section>
     );
   }
