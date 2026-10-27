@@ -70,7 +70,7 @@ type Patch = OpOf<"scene.update">["patch"];
  * the list of who sees for themselves follows it. Each waits only on its
  * own changes.
  */
-export function VisionSettings(props: { scene: Scene }) {
+export function VisionSettings(props: { scene: Scene; fold?: Parameters<typeof Section>[0]["fold"] }) {
   const { scene } = props;
   const actions = useRoomActions();
   const update = (patch: Patch) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
@@ -115,7 +115,7 @@ export function VisionSettings(props: { scene: Scene }) {
   );
 
   return (
-    <Section label="What players see">
+    <Section label="What players see" fold={props.fold}>
       <div onKeyDown={ask.asking?.change.where === "preset" ? ask.onKeyDown : undefined} style={{ display: "grid", minWidth: 0 }}>
         <PlayersSeeChoice
           value={choice === "custom" ? null : choice}

@@ -33,21 +33,24 @@ import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
 import { fogsWithFirstMap, replaceMap, sameArt, viewFromCamera } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
+import { SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
 import { currentStageCamera } from "./stageCamera.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
 import { layoutWidth } from "../device/layout.ts";
 import type { PanelClose } from "../panels.ts";
 
 /**
- * Settings of the scene the DM is looking at: name, map image,
- * starting view, the view it suggests once Isometric is offered
- * (features/view/choice.ts), size and background, then map phases and what
- * players see, fog with it (docs/design-v1-map-discovery.md 8.1), used in
- * play, above the grid, set up once (docs/design-v1-layout-hierarchy.md
- * M5), then movement, the build, export and deleting it. Every change is
- * one op, so it shows at once and undo covers it, and a setting that is on
- * or off is a Switch row named by the setting (docs/design-v1-visual.md
- * 3.7), never a button named by its state.
+ * Settings of the scene the DM is looking at, grouped by what each is for
+ * (docs/design-v1-map-discovery.md 8.4): the scene's name with no header,
+ * then What players see, everything that decides what reaches players
+ * (features/vision/VisionSettings.tsx), then Map image and grid, Walls and
+ * movement, and the scene's own size, background and views, then export
+ * and deleting it. Each group folds, setup groups starting folded on a
+ * phone (settingsFolds.ts), and stays mounted while folded, so an upload
+ * in it is never cut short. Every change is one op, so it shows at once
+ * and undo covers it, and a setting that is on or off is a Switch row
+ * named by the setting (docs/design-v1-visual.md 3.7), never a button
+ * named by its state.
  */
 export function SceneSettings(props: { scene: Scene; others: Scene[]; close: PanelClose }) {
   const { scene, others } = props;
@@ -55,6 +58,8 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
   const ui = useRoomUi();
   const scope = useRoomScope();
   const startFraming = useStartFraming();
+  const fold = useSceneFolds();
+  const group = (key: SceneGroup) => ({ ...fold(key), keep: true });
   const update = (patch: OpOf<"scene.update">["patch"]) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
   const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
   const deleteWhy = deleteBlocked(others, scene.id, playerSceneId);
@@ -73,9 +78,48 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
 
   return (
     <>
-      <Section label="This scene">
+      <Section>
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
+      </Section>
+
+      <VisionSettings scene={scene} fold={group("players")} />
+
+      <Section label={SCENE_GROUP_LABELS.map} fold={group("map")}>
         <MapImageRow scene={scene} close={props.close} />
+        <PhasesSection scene={scene} />
+        <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
+      </Section>
+
+      <Section label={SCENE_GROUP_LABELS.walls} fold={group("walls")}>
+        <BlockMovementSetting scene={scene} />
+        <SettingRow name="Automatic walls" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
+          <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
+        </SettingRow>
+        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
+          <Button
+            size="sm"
+            onClick={() => {
+              ui.setTool("build");
+              props.close({ placing: true });
+            }}
+          >
+            Open the builder
+          </Button>
+          <ConfirmButton label="Clear the build" confirm="Tap again to clear" title="Remove every floor, wall, door, height, stair, label, light and stamp" onConfirm={() => actions.dispatch({ t: "build.clear", sceneId: scene.id })} />
+        </div>
+      </Section>
+
+      <Section label={SCENE_GROUP_LABELS.scene} fold={group("scene")}>
+        <SettingRow name="Size in squares" wide>
+          <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+            <NumberInput label="Squares across" value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
+            <span aria-hidden>×</span>
+            <NumberInput label="Squares down" value={scene.bounds.h} min={1} max={MAX_SCENE_CELLS} onChange={(h) => update({ bounds: { ...scene.bounds, h } })} />
+          </div>
+        </SettingRow>
+        <SettingRow name="Background">
+          <ColorInput label="Background color" value={scene.background} onChange={(background) => update({ background })} />
+        </SettingRow>
         <SettingRow name="Starting view" help={scene.defaultView ? "The scene opens where you saved it." : "The scene opens fitted to the screen."} wide>
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
             <Button size="sm" onClick={saveView}>
@@ -89,42 +133,6 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
           </div>
         </SettingRow>
         {isoOffered ? <SuggestedView scene={scene} onChange={(suggestedView) => update({ suggestedView })} /> : null}
-        <SettingRow name="Size in squares" wide>
-          <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-            <NumberInput label="Squares across" value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
-            <span aria-hidden>×</span>
-            <NumberInput label="Squares down" value={scene.bounds.h} min={1} max={MAX_SCENE_CELLS} onChange={(h) => update({ bounds: { ...scene.bounds, h } })} />
-          </div>
-        </SettingRow>
-        <SettingRow name="Background">
-          <ColorInput label="Background color" value={scene.background} onChange={(background) => update({ background })} />
-        </SettingRow>
-      </Section>
-
-      <PhasesSection scene={scene} />
-
-      <VisionSettings scene={scene} />
-
-      <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
-
-      <BlockMovementSetting scene={scene} />
-
-      <Section label="Map builder">
-        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-          <Button
-            size="sm"
-            onClick={() => {
-              ui.setTool("build");
-              props.close({ placing: true });
-            }}
-          >
-            Open the builder
-          </Button>
-          <ConfirmButton label="Clear the build" confirm="Tap again to clear" title="Remove every floor, wall, door, height, stair, label, light and stamp" onConfirm={() => actions.dispatch({ t: "build.clear", sceneId: scene.id })} />
-        </div>
-        <SettingRow name="Automatic walls" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
-          <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
-        </SettingRow>
       </Section>
 
       <MapExport scene={scene} />
@@ -223,12 +231,12 @@ function NameField(props: { name: string; onSave(name: string): void }) {
   );
 }
 
-/** The grid lines' look, and for a map image, how its squares line up with the scene's. */
+/** The grid lines' look, and for a map image, how its squares line up with the scene's: the rest of Map image and grid. */
 function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; close: PanelClose }) {
   const { grid } = props.scene;
   const set = (patch: Partial<Scene["grid"]>) => props.onChange({ ...grid, ...patch });
   return (
-    <Section label="Grid">
+    <>
       <Switch
         label="Grid lines"
         help={props.scene.map ? "Hide them when the map has its own grid. Tokens and rulers still follow the squares." : undefined}
@@ -245,7 +253,7 @@ function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; c
         </>
       ) : null}
       {props.scene.map ? <MapGrid key={props.scene.id} scene={props.scene} map={props.scene.map} close={props.close} /> : null}
-    </Section>
+    </>
   );
 }
 
@@ -315,28 +323,31 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
       {map.originPx.x < 0 || map.originPx.y < 0 ? null : (
         <SettingRow name="Or count the squares" wide>
           <div style={{ display: "grid", gap: theme.space(1) }}>
+            {/* The counts keep their line together, so Apply wraps under them whole on a narrow phone, never beside one of them. */}
             <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-              <NumberInput
-                label="Squares across the image"
-                value={across}
-                min={1}
-                max={MAX_SCENE_CELLS}
-                onChange={(n) => {
-                  setAcross(n);
-                  setCountsEdited(true);
-                }}
-              />
-              <span aria-hidden>×</span>
-              <NumberInput
-                label="Squares down the image"
-                value={down}
-                min={1}
-                max={MAX_SCENE_CELLS}
-                onChange={(n) => {
-                  setDown(n);
-                  setCountsEdited(true);
-                }}
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+                <NumberInput
+                  label="Squares across the image"
+                  value={across}
+                  min={1}
+                  max={MAX_SCENE_CELLS}
+                  onChange={(n) => {
+                    setAcross(n);
+                    setCountsEdited(true);
+                  }}
+                />
+                <span aria-hidden>×</span>
+                <NumberInput
+                  label="Squares down the image"
+                  value={down}
+                  min={1}
+                  max={MAX_SCENE_CELLS}
+                  onChange={(n) => {
+                    setDown(n);
+                    setCountsEdited(true);
+                  }}
+                />
+              </div>
               <Button size="sm" onClick={applyCounts}>
                 Apply
               </Button>
@@ -356,9 +367,8 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
 }
 
 /**
- * The map image's row in "This scene": adding one to a scene without,
- * replacing it, or removing it. It follows the scene's name, since the
- * image decides what the scene is.
+ * The map image's row, first in Map image and grid: adding one to a scene
+ * without, replacing it, or removing it.
  *
  * On the scene the players are on, a new image shows on their screens the
  * moment it uploads, so the picker asks first (features 3: the DM prepares
@@ -525,27 +535,36 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
     />
   );
 
-  // The players' scene asks before the picker opens: the image is theirs to see the moment it uploads.
+  /*
+   * The players' scene asks before the picker opens: the image is theirs to
+   * see the moment it uploads. Cancel and Remove each stand on a line of
+   * their own under the ways to bring an image, apart from them, so neither
+   * wraps alone under them.
+   */
   const picker = (label: string) =>
     playersHere && !armed && !upload.busy ? (
-      <Row>
-        <Button ref={askRef} size="sm" onClick={() => setArmed(true)}>
-          {label}
-        </Button>
-        {map ? removeButton : null}
-      </Row>
+      <>
+        <Row>
+          <Button ref={askRef} size="sm" onClick={() => setArmed(true)}>
+            {label}
+          </Button>
+        </Row>
+        {map ? <Row>{removeButton}</Row> : null}
+      </>
     ) : (
       <>
         <Row>
           {filePicker(playersHere ? "Choose the image" : label)}
           <PasteButton paste={paste} />
-          {playersHere && !upload.busy ? (
+        </Row>
+        {playersHere && !upload.busy ? (
+          <Row>
             <Button size="sm" onClick={() => setArmed(false)}>
               Cancel
             </Button>
-          ) : null}
-          {map ? removeButton : null}
-        </Row>
+          </Row>
+        ) : null}
+        {map ? <Row>{removeButton}</Row> : null}
         {playersHere ? <Note id={warningId}>The players are on this scene. They see the new image as soon as it uploads.</Note> : null}
         {firstFog && playersHere ? <Checkbox label="Start it under fog, so they see only what you reveal" checked={fogIt} onChange={setFogIt} /> : null}
         {firstFog && !playersHere ? <Help>Fog turns on with the first map, as for a scene made from a map.</Help> : null}

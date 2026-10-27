@@ -5,7 +5,7 @@ import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
-import { Help, Section } from "../../components/Panel.tsx";
+import { Help } from "../../components/Panel.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { accessibleName } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
@@ -26,6 +26,10 @@ import { activePhaseId, addPhase, canAddPhase, movePhase, phasesOf, removeConfir
  *
  * Players get only the phase showing. Adding, renaming or reordering the
  * others changes nothing they receive, so none of it asks first.
+ *
+ * It sits in the Map image and grid group under the map image's row
+ * (docs/design-v1-map-discovery.md 8.4), a part of the group named as a
+ * setting is, with a heading a level under the group's.
  */
 export function PhasesSection(props: { scene: Scene }) {
   const { scene } = props;
@@ -80,7 +84,10 @@ export function PhasesSection(props: { scene: Scene }) {
 
   // One column that never grows past the panel: a phase name from a file can be 80 characters on one line.
   return (
-    <Section label="Map phases" style={{ gridTemplateColumns: "minmax(0, 1fr)", minWidth: 0 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2), minWidth: 0, padding: `${theme.space(2)}px 0` }}>
+      <h4 style={{ margin: 0, fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight }}>
+        Map phases
+      </h4>
       {phases.length > 1 ? (
         <div role="group" aria-label="Show a phase" style={{ display: "flex", alignItems: "center", gap: theme.space(1), flexWrap: "wrap" }}>
           {phases.map((phase) => {
@@ -141,7 +148,7 @@ export function PhasesSection(props: { scene: Scene }) {
       ) : null}
       <Loading text="Waiting for the server…" active={upload.waiting} />
       <ErrorText>{upload.error}</ErrorText>
-    </Section>
+    </div>
   );
 }
 
@@ -179,11 +186,14 @@ function PhaseRow(props: {
           {props.editing ? "Done" : "Edit"}
         </Button>
       </div>
+      {/* The name keeps its arrows on its line, and Remove takes a line of its own under them, so nothing wraps alone. */}
       {props.editing ? (
-        <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap", padding: `${theme.space(2)}px 0 0` }}>
-          <PhaseName name={phase.name} onSave={props.onRename} />
-          <Button size="sm" icon="arrowUp" iconOnly="always" aria-label={`Move ${phase.name} up`} disabled={props.first} onClick={() => props.onMove(-1)} />
-          <Button size="sm" icon="arrowDown" iconOnly="always" aria-label={`Move ${phase.name} down`} disabled={props.last} onClick={() => props.onMove(1)} />
+        <div style={{ display: "grid", gap: theme.space(2), justifyItems: "start", padding: `${theme.space(2)}px 0 0` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), width: "100%", minWidth: 0 }}>
+            <PhaseName name={phase.name} onSave={props.onRename} />
+            <Button size="sm" icon="arrowUp" iconOnly="always" aria-label={`Move ${phase.name} up`} disabled={props.first} onClick={() => props.onMove(-1)} />
+            <Button size="sm" icon="arrowDown" iconOnly="always" aria-label={`Move ${phase.name} down`} disabled={props.last} onClick={() => props.onMove(1)} />
+          </div>
           {props.canRemove ? (
             <ConfirmButton
               label="Remove"
@@ -227,7 +237,7 @@ function PhaseName(props: { name: string; onSave(name: string): void }) {
     }
   };
   return (
-    <div style={{ flex: "1 1 180px", minWidth: 0, display: "flex" }}>
+    <div style={{ flex: "1 1 0", minWidth: 0, display: "flex" }}>
       <Input
         aria-label="Phase name"
         value={text}
@@ -237,7 +247,7 @@ function PhaseName(props: { name: string; onSave(name: string): void }) {
         onKeyDown={(e) => {
           if (e.key === "Enter") save();
         }}
-        style={{ flex: 1, width: "100%" }}
+        style={{ flex: 1, width: "100%", minWidth: 0 }}
       />
     </div>
   );
