@@ -362,9 +362,21 @@ export function dragStops(deps: DragDeps): DragStops {
 
   const send = (plan: DropPlan, onAnswer?: (op: ClientOp, answer: OpAnswer) => void): number[] =>
     sendPlan(plan, {
-      dispatch: (op, opts) => actions.dispatch(op, onAnswer ? { ...opts, onAnswer: (answer) => onAnswer(op, answer) } : opts),
+      dispatch: (op, opts) =>
+        actions.dispatch(op, {
+          ...opts,
+          onAnswer: (answer, ...rest) => {
+            opts?.onAnswer?.(answer, ...rest);
+            onAnswer?.(op, answer);
+          },
+        }),
       newId: () => actions.newId(),
       note: (note) => notes.setState({ note, busy: false }),
+      shownNote: () => notes.getState().note,
+      standing: (id) => {
+        const t = store.getState().view?.tokens[id];
+        return t ? { sceneId: t.sceneId, x: t.x, y: t.y } : null;
+      },
       notify: (text) => ui.notify(text),
       showActions: (open) => ui.showActions(open),
     });

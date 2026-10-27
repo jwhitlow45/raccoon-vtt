@@ -1,8 +1,7 @@
 import { createStore } from "zustand/vanilla";
-import type { Blocker } from "#shared/ruleHooks.ts";
 import { scopeSlot } from "../../state/scope.ts";
 import type { DragRead } from "../measure/movement.ts";
-import type { Point } from "./drop.ts";
+import type { Point, StopBlocker } from "./drop.ts";
 import type { StopNote } from "./teleport.ts";
 
 /**
@@ -13,7 +12,7 @@ import type { StopNote } from "./teleport.ts";
  * marks a drag that found no way a creature it drags beside it can follow
  * (drop.ts holdLabel, docs/design-v1-attach.md 4.2).
  */
-export type Hold = { tokenId: string; at: Point; blocker: Blocker; noWay?: true };
+export type Hold = { tokenId: string; at: Point; blocker: StopBlocker; noWay?: true };
 
 export const holdSlot = scopeSlot(() => createStore<{ hold: Hold | null }>(() => ({ hold: null })));
 

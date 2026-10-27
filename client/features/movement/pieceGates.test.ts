@@ -202,7 +202,7 @@ describe("a walk stopped at its first step on a scene with fog on sends the move
     assert.deepEqual(plan.intended, { tokenId: "thorn", x: 5, y: 5 });
     const sent: ClientOp[] = [];
     const notes: unknown[] = [];
-    sendPlan(plan, { dispatch: (op) => (sent.push(op), 7), newId: () => "g", note: (n) => notes.push(n), notify: () => {}, showActions: () => {} });
+    sendPlan(plan, { dispatch: (op) => (sent.push(op), 7), newId: () => "g", note: (n) => notes.push(n), shownNote: () => null, standing: () => null, notify: () => {}, showActions: () => {} });
     assert.deepEqual(sent, [{ t: "token.move", tokenId: "thorn", x: 5, y: 5 }]);
     assert.equal((notes[0] as { n: number | null }).n, 7);
   });

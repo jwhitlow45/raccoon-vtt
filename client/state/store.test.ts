@@ -707,6 +707,20 @@ describe("reconnect", () => {
     ]);
   });
 
+  test("a walk the server landed short hears it was blocked, and no other op does (docs/design-v1-map-discovery.md 6)", () => {
+    const s = setup(room({ tokens: { g1: token("g1"), g2: token("g2") } }));
+    s.connect();
+    const heard: { answer: OpAnswer; blocked: true | undefined }[] = [];
+    const listen = { onAnswer: (answer: OpAnswer, _refusal?: OpRefusal, _cause?: UnknownCause, _stamped?: string, blocked?: true) => heard.push({ answer, blocked }) };
+    const a = s.room.dispatch(move("g1", 2, 2), listen)!;
+    const b = s.room.dispatch(move("g2", 3, 3), listen)!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: [a, b], blocked: [a] });
+    assert.deepEqual(heard, [
+      { answer: "taken", blocked: true },
+      { answer: "taken", blocked: undefined },
+    ]);
+  });
+
   test("an op too old to send is unknown to its sender", () => {
     const s = setup(room({ tokens: { g1: token("g1") } }));
     s.connect();

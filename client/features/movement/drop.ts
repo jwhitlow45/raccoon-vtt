@@ -1,9 +1,11 @@
 import type { BuildChunk, RoomState, Scene, Token } from "#shared/model.ts";
 import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorRef, type OpOf } from "#shared/protocol.ts";
-import type { Blocker, BuildState } from "#shared/ruleHooks.ts";
+import { SOMETHING_BLOCKS, stopWords, WALL_IN_THE_WAY } from "#shared/permissions.ts";
+import type { Blocker, BuildState, LegEnd } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, publicMembers, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { deviceGround } from "#shared/rules/held.ts";
 import { footing, footprintGround } from "#shared/rules/heights.ts";
 import { groundUnder, landing, legStop, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { followerTrace, routeLattice, routePoints, routeStop, routeWalkers, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
@@ -202,11 +204,20 @@ export function walkStart<T extends DropToken & Walker>(state: Pick<BuildState, 
 /** One token's landing, as a move op carries it. `elevation` only when the landing changes it, `squeeze` only when it squeezes, `route` only for a walk that is not the straight leg. */
 export type Landed = { tokenId: string; x: number; y: number; elevation?: number; squeeze?: true; route?: OpOf<"token.move">["route"] };
 
+/**
+ * What stopped a walk as a player hears of it: a wall or a ledge, or
+ * `unknown` where the stop is on ground they do not see live, which names
+ * no kind (docs/design-v1-map-discovery.md 6, the words): a remembered
+ * wall may be gone, and the real build may stop them where they hold
+ * nothing. "Teleport here" past it sends `teleport: "unknown"`.
+ */
+export type StopBlocker = Blocker | "unknown";
+
 /** A walk that a wall, a door or a ledge stopped short of where the player dropped the token. */
 export type Stop = {
   tokenId: string;
   sceneId: string;
-  blocker: Blocker;
+  blocker: StopBlocker;
   /** The door in the way, when the player sees a door there: a secret door not yet found is a wall to them. */
   door: DoorRef | null;
   /** Where the player dropped the token, snapped: the ghost, and where "Teleport here" goes. */
@@ -235,7 +246,7 @@ export type DropPlan = {
    */
   intended?: Landed;
   /** Tokens of a group drag left where they were, since a wall or a ledge stood in their way (section 4.1). */
-  held: { token: DropToken; blocker: Blocker }[];
+  held: { token: DropToken; blocker: StopBlocker }[];
   /** The lone walk turned too often for one move, so it landed partway (docs/design-v1-movement.md 5.2). */
   cut?: true;
 };
@@ -296,10 +307,28 @@ export function planOne(state: DropView, token: DropToken, raw: Point, mode: Exc
   const land = landing(state, walkerOf(state, token), { x: to.x, y: to.y, elevation }, mode);
   const at = { x: land.x, y: land.y, squeeze: land.squeeze };
   const moves = moved(token, at) ? [landed(state, token, at)] : [];
-  const stop: Stop | null = land.stopped
-    ? { tokenId: token.id, sceneId: token.sceneId, blocker: land.stopped.blocker, door: land.stopped.door, ghost: to, aim: { x: raw.x, y: raw.y }, at: { x: land.x, y: land.y } }
-    : null;
+  const named = land.stopped ? heardStop(state, walkerOf(state, token), { x: to.x, y: to.y, elevation }, land.stopped) : null;
+  const stop: Stop | null = named ? { tokenId: token.id, sceneId: token.sceneId, ...named, ghost: to, aim: { x: raw.x, y: raw.y }, at: { x: land.x, y: land.y } } : null;
   return { moves, stop, held: [], ...(stop && moves.length === 0 ? intendedMove(state, token, to) : {}) };
+}
+
+/**
+ * What a player's device says stopped its own walk to `to`
+ * (docs/design-v1-map-discovery.md 6, the words), by the rule the server
+ * words a stop by (permissions.ts stopWords) on the device's own live
+ * ground (rules/held.ts deviceGround): the kind only where every cell the
+ * stopping step touches is live to it, else `unknown`, with no door named.
+ * With fog off everything is live, so the stop is today's. The device's
+ * live ground holds no more than the server's, so where it names a kind
+ * the server would too, and where it cannot the server's answer settles it.
+ */
+export function heardStop(state: DropView, walker: Walker, to: LegEnd, stopped: { blocker: Blocker; door: DoorRef | null }): { blocker: StopBlocker; door: DoorRef | null } {
+  // With fog off the rule does not speak, as the server's does not (permissions.ts Check liveGround): today's kind.
+  const ground = state.scenes[walker.sceneId]?.fogEnabled === true ? deviceGround(state, walker.sceneId) : null;
+  if (!ground) return stopped;
+  const words = stopWords(state, ground, walker, to, stopped.blocker);
+  if (words === SOMETHING_BLOCKS) return { blocker: "unknown", door: null };
+  return { blocker: words === WALL_IN_THE_WAY ? "wall" : "ledge", door: words === WALL_IN_THE_WAY ? stopped.door : null };
 }
 
 /**
@@ -567,7 +596,8 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
     // Its leg and what it drags beside it, walked as the server walks them (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
     const walking = walkerOf(state, token);
     const end = { x: to.x, y: to.y, elevation };
-    const stopped = mode === "walk" ? (legStop(state, walking, end) ?? followersOf(state, walking, [from, end], walkersOf(token)).stop(1, end)) : null;
+    const own = mode === "walk" ? legStop(state, walking, end) : null;
+    const stopped = own ? heardStop(state, walking, end, own) : mode === "walk" ? followersOf(state, walking, [from, end], walkersOf(token)).stop(1, end) : null;
     if (stopped) held.push({ token, blocker: stopped.blocker });
     else moves.push(landed(state, token, { ...to, squeeze: false }));
   }
@@ -751,9 +781,9 @@ export function namedFollower(state: DropView, plan: DropPlan, found: Found): Dr
 }
 
 /** What the map says while a drag is held at a wall or a ledge, or where a creature it drags finds no way through with it. */
-export function holdLabel(blocker: Blocker, noWay = false): string {
+export function holdLabel(blocker: StopBlocker, noWay = false): string {
   if (noWay) return "No way through";
-  return blocker === "wall" ? "Wall in the way" : "Ledge in the way";
+  return blocker === "wall" ? "Wall in the way" : blocker === "ledge" ? "Ledge in the way" : "Something in the way";
 }
 
 /**
@@ -766,6 +796,7 @@ export function holdLabel(blocker: Blocker, noWay = false): string {
 export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "capped" | "follower">): string {
   if (stop.follower !== undefined) return `${stop.follower} can't follow through there.`;
   const far = stop.capped ? "Too far to work out a way around. " : "";
+  if (stop.blocker === "unknown") return `${far}${SOMETHING_BLOCKS}`;
   if (stop.door) return `${far}A door is in the way. Tap it to open.`;
   if (!stop.searched) return stop.blocker === "ledge" ? "Ledge in the way. Take the stairs." : "Stopped at a wall. Drop at the corner first, then go on.";
   if (stop.blocker === "ledge") return `${far}Ledge in the way. No stairs you have seen lead there.`;
@@ -773,10 +804,19 @@ export function stopText(stop: Pick<Stop, "blocker" | "door" | "searched" | "cap
 }
 
 /** The note for the tokens of a group drag that stayed where they were. */
-export function heldText(held: readonly { name: string; blocker: Blocker }[]): string | null {
+export function heldText(held: readonly { name: string; blocker: StopBlocker }[]): string | null {
   const first = held[0];
   if (!first) return null;
-  if (held.length === 1) return `${first.name} stayed where it was: a ${first.blocker} is in the way.`;
+  const unknown = held.some((h) => h.blocker === "unknown");
+  if (held.length === 1) return unknown ? `${first.name} stayed where it was: something blocks the way.` : `${first.name} stayed where it was: a ${first.blocker} is in the way.`;
+  if (unknown) return `${held.length} tokens stayed where they were: something blocks the way.`;
   const what = held.every((h) => h.blocker === "wall") ? "walls are" : held.every((h) => h.blocker === "ledge") ? "ledges are" : "walls or ledges are";
   return `${held.length} tokens stayed where they were: ${what} in the way.`;
 }
+
+/**
+ * The note after a group drag some of whose moves the real build stopped
+ * short (`blocked`, docs/design-v1-map-discovery.md 6): which ones, and by
+ * what, the server does not say.
+ */
+export const GROUP_BLOCKED_TEXT = "Some of them stopped short: something blocks the way.";

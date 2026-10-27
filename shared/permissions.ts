@@ -1959,19 +1959,28 @@ function stoppingStep(state: RoomState, walker: Walker, to: LegEnd): { from: Poi
  * one that meets nothing on its own, names none.
  */
 function walkWords(c: Check, walker: Walker, to: LegEnd, blocker: Blocker): string {
-  const ground = c.liveGround(walker.sceneId);
+  return stopWords(c.state, c.liveGround(walker.sceneId), walker, to, blocker);
+}
+
+/**
+ * `walkWords` on a given live ground: the server's for the sender, or a
+ * player's device's own (rules/held.ts deviceGround), which predicts the
+ * words of its own stops by the same rule (6, the words). Null ground
+ * gives today's words, named by `blocker`.
+ */
+export function stopWords(state: RoomState, ground: Ground | null, walker: Walker, to: LegEnd, blocker: Blocker): string {
   if (!ground) return blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY;
-  const step = stoppingStep(c.state, walker, to);
+  const step = stoppingStep(state, walker, to);
   if (!step) return SOMETHING_BLOCKS;
   const core = coreSize(walker);
   const p = storedCenter({ ...walker, x: step.from.x, y: step.from.y });
   const q = storedCenter({ ...walker, x: step.to.x, y: step.to.y });
   if (!sweepLive(ground, p.x, p.y, q.x, q.y, core.w / 2, core.h / 2)) return SOMETHING_BLOCKS;
-  const chunks = c.state.buildChunks;
+  const chunks = state.buildChunks;
   const at = step.from.x === walker.x && step.from.y === walker.y ? walker : walkOn(chunks, walkFrom(chunks, walker), step.from);
   const end = { x: step.to.x, y: step.to.y, elevation: to.elevation };
-  if (straightClear(c.state, at, end)) return SOMETHING_BLOCKS;
-  const stop = legStop(c.state, at, end);
+  if (straightClear(state, at, end)) return SOMETHING_BLOCKS;
+  const stop = legStop(state, at, end);
   return stop === null ? SOMETHING_BLOCKS : stop.blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY;
 }
 

@@ -142,10 +142,12 @@ export type UnknownCause = "snapshot" | "expired";
 
 /**
  * Told once what became of an op: its answer, the reason when refused, how
- * an `unknown` came about, and, when taken with a sync record that had no
- * `at`, the `at` the server wrote on it (docs/design-v1-resync.md 3.4).
+ * an `unknown` came about, when taken with a sync record that had no `at`,
+ * the `at` the server wrote on it (docs/design-v1-resync.md 3.4), and when
+ * taken as a walk the real build stopped short, `blocked`
+ * (docs/design-v1-map-discovery.md 6): it landed at its last clear spot.
  */
-export type OnAnswer = (answer: OpAnswer, refusal?: OpRefusal, unknown?: UnknownCause, stamped?: string) => void;
+export type OnAnswer = (answer: OpAnswer, refusal?: OpRefusal, unknown?: UnknownCause, stamped?: string, blocked?: true) => void;
 
 /**
  * Why the server refused an op, told with a `refused` answer, for a sender
