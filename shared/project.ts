@@ -1119,16 +1119,24 @@ function projectPathCtx(ctx: Ctx, token: Token, owner: boolean): TokenPath | nul
  * with fog, a leg not every player saw whole keeps its corners for an owner
  * only where every spot of it lies on ground that owner's own fog reveals
  * now (docs/design-v1-per-player-vision.md 6.5), so a co-owner's private
- * route never draws ground this one never saw. A leg every player saw
- * whole keeps them, so a later hide never takes corners every device
+ * route never draws ground this one never saw. On a scene that keeps
+ * memory that ground is the owner's live ground alone, their sight and the
+ * DM's reveals (docs/design-v1-map-discovery.md decision 12): corners on
+ * ground they only explored would draw the build as the mover's memory or
+ * private sight held it, which may differ from theirs. A leg every player
+ * saw whole keeps them, so a later hide never takes corners every device
  * already counts from (publicCounters). What each leg took stays.
  */
 function ownersStopsCtx(ctx: Ctx, token: Token, stops: readonly PathStop[]): PathStop[] {
   const out = stopsForOwners(stops);
   const scene = ctx.state.scenes[token.sceneId];
-  if (!perPlayerScene(scene) || !scene?.fogEnabled) return out;
+  if (!scene?.fogEnabled) return out;
+  const live = scene.vision?.on === true ? groundCtx(ctx, token.sceneId) : null;
+  if (!live && !perPlayerScene(scene)) return out;
   const grid = gridOfToken(ctx.state, token);
-  const ground = { cell: (x: number, y: number) => !ctx.fogged(token.sceneId, x, y), sub: (sx: number, sy: number) => !ctx.fogged.sub(token.sceneId, sx, sy) };
+  const ground = live
+    ? { cell: live.live, sub: live.subLive }
+    : { cell: (x: number, y: number) => !ctx.fogged(token.sceneId, x, y), sub: (sx: number, sy: number) => !ctx.fogged.sub(token.sceneId, sx, sy) };
   for (const [i, stop] of out.entries()) {
     if (i === 0 || stop.via === undefined || seenWhole(stops, i, true)) continue;
     if (!legOnGround(grid, token, stops[i - 1]!, stops[i]!, ground)) delete stop.via;
