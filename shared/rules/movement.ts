@@ -54,6 +54,35 @@ import { SQUARES } from "./grid.ts";
  */
 export type MovingToken = PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: Standing; offHolder?: OffHolder; groundStart?: true };
 
+/**
+ * The elevation a token lands at (docs/design-v1-maps-vision.md 4.2,
+ * "Landings write the ground"): a token that stood on the ground takes the
+ * ground where it lands, a flier keeps its height or rises to the ground
+ * there, whichever is higher, and a token inside the ground keeps its
+ * elevation, since nothing raises one on its own. The ground there is under
+ * the footprint it lands with, the squeezed one where it squeezes.
+ *
+ * One that leaves its holder (`holder`, docs/design-v1-attach.md 4.3) is
+ * judged from the holder, not from the ground under its seat, which
+ * differs where the holder straddles two heights: off a holder on the
+ * ground it lands on the ground there, off a flier it keeps its height or
+ * rises to the ground, and off a holder inside the ground it keeps its
+ * elevation. This is every landing's height, the device's and the
+ * server's, which sets it from the real build where a player's copy lacks
+ * the ground (docs/design-v1-map-discovery.md 6).
+ */
+export function landedElevation(
+  chunks: Parameters<typeof footprintGround>[0],
+  token: PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: Standing },
+  at: Point & { squeeze?: boolean },
+  holder?: PlacedToken & Pick<Token, "sceneId" | "elevation"> & { footing?: Standing },
+): number {
+  const before = footing(chunks, holder ?? token);
+  if (before === "inside") return token.elevation;
+  const there = footprintGround(chunks, { ...token, x: at.x, y: at.y, squeeze: at.squeeze === true ? true : undefined });
+  return before === "ground" ? there : Math.max(token.elevation, there);
+}
+
 /** The holder a walk off it leaves, where it stands. */
 export type OffHolder = PlacedToken;
 

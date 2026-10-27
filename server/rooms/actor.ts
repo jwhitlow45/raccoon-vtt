@@ -7,7 +7,9 @@ import { withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, type PermissionDeps } from "#shared/permissions.ts";
-import { projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
+import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
+import { landedElevation } from "#shared/rules/movement.ts";
+import { inSightOfNonOwners, projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
@@ -1042,6 +1044,8 @@ export class RoomActor {
       return;
     }
     op = withAssetSizes(op, facts);
+    // A player's copy may lack the ground their creature lands on (docs/design-v1-map-discovery.md 6), so the real build sets its height.
+    if (viewer.role === "player" && op.t === "token.move") op = landedMove(op, this.#staged.state);
     const deps = this.#permissionDeps(viewer, facts);
     let decision = canApply(op, viewer, this.#staged.state, deps);
     // The touch rule (docs/design-v1-map-discovery.md 6, MD-R9-1): a player's walk the real build stops lands at its last
@@ -1931,6 +1935,37 @@ function push<T>(map: Map<ClientKey, T[]>, key: ClientKey, value: T): void {
  * apply now and stop the room's next load, leaving it read-only. Checking
  * here refuses it while that refusal is still cheap.
  */
+/**
+ * A player's move on a scene with fog on, landed at the height the real
+ * build gives it (rules/movement.ts landedElevation), in place of the one
+ * their device worked out from the ground it holds: a walk up a stair onto
+ * a platform the party never saw, or a Teleport here onto one, lands on it,
+ * not inside it. A move that keeps its spot sets a height alone, so it goes
+ * as sent.
+ */
+function landedMove(op: OpOf<"token.move">, state: RoomState): OpOf<"token.move"> {
+  const token = state.tokens[op.tokenId];
+  if (!token || state.scenes[token.sceneId]?.fogEnabled !== true || (op.x === token.x && op.y === token.y)) return op;
+  const at = { x: op.x, y: op.y, squeeze: op.squeeze === true };
+  const elevation = seatedLanding(state, token, at) ?? landedElevation(state.buildChunks, token, at);
+  return op.elevation === elevation ? op : { ...op, elevation };
+}
+
+/**
+ * Where a creature seated on a holder every player sees lands, as a drop
+ * lands it (client drop.ts dropLanding): at the holder's height while the
+ * link still holds there, else off the holder. Null for any other token,
+ * which lands by its own footing. The seen test is the one the leg check
+ * walks it by (permissions.ts walkerFor's), so the height and the check agree.
+ */
+function seatedLanding(state: RoomState, token: Token, at: { x: number; y: number; squeeze: boolean }): number | null {
+  const link = token.attached;
+  const holder = link && onHolder(link.kind) ? (holderOf(state.tokens, token) as Token | undefined) : undefined;
+  if (!link || !holder || !inSightOfNonOwners(state, token, {}) || !inSightOfNonOwners(state, holder, {})) return null;
+  if (linkHolds(state.meta.settings, link.kind, { ...token, x: at.x, y: at.y, elevation: holder.elevation }, holder)) return holder.elevation;
+  return landedElevation(state.buildChunks, token, at, holder);
+}
+
 function checkServerOp(op: ServerOnlyOp): { ok: true; op: ServerOnlyOp } | { ok: false; message: string } {
   const parsed = serverOnlyOpSchema.safeParse(op);
   if (parsed.success) return { ok: true, op: parsed.data };

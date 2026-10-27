@@ -3302,6 +3302,140 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     );
   });
 
+  test("a player's walk up a stair onto a platform their copy does not hold lands at the platform's height, as does Teleport here (vision step 5)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    let { state, sceneId, pcId } = darkRoom(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, blockMovement: true, autoWalls: "off" };
+    const cells = (x0: number, y0: number, x1: number, y1: number) => Array.from({ length: (x1 - x0 + 1) * (y1 - y0 + 1) }, (_, i) => `${x0 + (i % (x1 - x0 + 1))},${y0 + Math.floor(i / (x1 - x0 + 1))}`);
+    const DM_VIEW = { memberId: dm.id, role: "dm" as const };
+    // A wall along column 9 splits the platform's top, as in the vision e2e.
+    const wall = Array.from({ length: 6 }, (_, i) => ({ key: `9,${12 + i},w`, feature: { kind: "wall" as const } }));
+    for (const op of [
+      { t: "build.edge", sceneId, edges: wall },
+      { t: "build.height", sceneId, cells: cells(6, 12, 11, 17), height: 10 },
+      { t: "build.stairs", sceneId, cells: ["5,14"], up: "a" },
+    ] as Op[]) {
+      const r = applyOp(state, op, DM_VIEW, { seq: 1, at: new Date().toISOString() });
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      state = r.state;
+    }
+    state.tokens[pcId] = { ...state.tokens[pcId]!, x: 5, y: 14, elevation: 0 };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, player, "player");
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      // The device holds no heights there, so it sends the walk at 0 ft.
+      await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 7, y: 14, elevation: 0 });
+      const walked = await answerTo(phone.sent, 1);
+      assert.ok(walked !== "stuck" && !walked.rejects?.length, JSON.stringify(walked !== "stuck" && walked.rejects));
+      assert.deepEqual([actor.committed.state.tokens[pcId]!.x, actor.committed.state.tokens[pcId]!.elevation], [7, 10], "on the platform, 10 ft up");
+      const stored = (db.storedRows as { op: Op }[]).map((r) => r.op).find((o) => o.t === "token.move") as OpOf<"token.move">;
+      assert.equal(stored.elevation, 10, "the move stored is the landed one");
+      // Down off the platform and back by Teleport here: it lands on the platform too.
+      await actor.op(phone.conn, 2, { t: "token.move", tokenId: pcId, x: 5, y: 14, elevation: 10 });
+      await answerTo(phone.sent, 2);
+      assert.equal(actor.committed.state.tokens[pcId]!.elevation, 0);
+      await actor.op(phone.conn, 3, { t: "token.move", tokenId: pcId, x: 8, y: 15, elevation: 0, teleport: "unknown" });
+      const teleported = await answerTo(phone.sent, 3);
+      assert.ok(teleported !== "stuck" && !teleported.rejects?.length, JSON.stringify(teleported !== "stuck" && teleported.rejects));
+      assert.equal(actor.committed.state.tokens[pcId]!.elevation, 10);
+      // Back to the stair, then a walk across the platform into the wall its copy does not hold: the touch rule lands it at the last clear spot, on the platform.
+      await actor.op(phone.conn, 4, { t: "token.move", tokenId: pcId, x: 5, y: 14, elevation: 10, teleport: "unknown" });
+      await answerTo(phone.sent, 4);
+      assert.equal(actor.committed.state.tokens[pcId]!.elevation, 0);
+      await actor.op(phone.conn, 5, { t: "token.move", tokenId: pcId, x: 11, y: 14, elevation: 0 });
+      const cut = await answerTo(phone.sent, 5);
+      assert.ok(cut !== "stuck" && !cut.rejects?.length, JSON.stringify(cut !== "stuck" && cut.rejects));
+      const { x, elevation } = actor.committed.state.tokens[pcId]!;
+      assert.deepEqual([x, elevation], [8, 10], "stopped by the wall, 10 ft up");
+      // A height set where it stands is no landing.
+      await actor.op(phone.conn, 6, { t: "token.move", tokenId: pcId, x: 8, y: 14, elevation: 20 });
+      await answerTo(phone.sent, 6);
+      assert.equal(actor.committed.state.tokens[pcId]!.elevation, 20);
+      // The DM's moves, and a player's where fog is off, whose copy holds the whole build, keep the height they send.
+      const table = connect(actor, dm);
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 8, y: 16, elevation: 25 });
+      await answerTo(table.sent, 1);
+      assert.equal(actor.committed.state.tokens[pcId]!.elevation, 25);
+      await actor.op(table.conn, 2, { t: "scene.update", sceneId, patch: { fogEnabled: false } });
+      await answerTo(table.sent, 2);
+      await actor.op(phone.conn, 7, { t: "token.move", tokenId: pcId, x: 7, y: 16, elevation: 30 });
+      const sent = await answerTo(phone.sent, 7);
+      assert.ok(sent !== "stuck" && !sent.rejects?.length, JSON.stringify(sent !== "stuck" && sent.rejects));
+      assert.equal(actor.committed.state.tokens[pcId]!.elevation, 30);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a creature a player rides off its mount onto a platform their copy does not hold lands on it", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    let { state, sceneId, pcId } = darkRoom(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, blockMovement: true, autoWalls: "off" };
+    const DM_VIEW = { memberId: dm.id, role: "dm" as const };
+    for (const op of [
+      { t: "build.height", sceneId, cells: ["7,14", "8,14"], height: 10 },
+      { t: "build.stairs", sceneId, cells: ["6,14"], up: "a" },
+    ] as Op[]) {
+      const r = applyOp(state, op, DM_VIEW, { seq: 1, at: new Date().toISOString() });
+      assert.ok(r.ok, r.ok ? "" : r.message);
+      state = r.state;
+    }
+    const ponyId = uuidv7();
+    state.tokens[ponyId] = testToken(ponyId, { sceneId, name: "Pony", disposition: "ally", x: 5, y: 14 });
+    state.tokens[pcId] = { ...state.tokens[pcId]!, x: 5, y: 14, elevation: 0, attached: { to: ponyId, kind: "ride" } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, player, "player");
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 7, y: 14, elevation: 0 });
+      const off = await answerTo(phone.sent, 1);
+      assert.ok(off !== "stuck" && !off.rejects?.length, JSON.stringify(off !== "stuck" && off.rejects));
+      const { x, elevation } = actor.committed.state.tokens[pcId]!;
+      assert.deepEqual([x, elevation], [7, 10]);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a creature a player moves on a mount that straddles a platform's edge keeps the mount's height", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    let { state, sceneId, pcId } = darkRoom(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, blockMovement: true, autoWalls: "off" };
+    const r = applyOp(state, { t: "build.height", sceneId, cells: ["6,13", "6,14", "7,13", "7,14"], height: 10 }, { memberId: dm.id, role: "dm" }, { seq: 1, at: new Date().toISOString() });
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    state = r.state;
+    // A large mount half on the platform stands on its top. Its rider sits at its height wherever it moves on it.
+    const ponyId = uuidv7();
+    state.tokens[ponyId] = testToken(ponyId, { sceneId, name: "Horse", size: "large", disposition: "ally", x: 5, y: 13, elevation: 10 });
+    state.tokens[pcId] = { ...state.tokens[pcId]!, x: 6, y: 13, elevation: 10, attached: { to: ponyId, kind: "ride" } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, player, "player");
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 5, y: 14, elevation: 0 });
+      const moved = await answerTo(phone.sent, 1);
+      assert.ok(moved !== "stuck" && !moved.rejects?.length, JSON.stringify(moved !== "stuck" && moved.rejects));
+      const { x, elevation, attached } = actor.committed.state.tokens[pcId]!;
+      assert.deepEqual([x, elevation, attached?.to], [5, 10, ponyId]);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
   test("a door a player touches shows as it is to everyone who shares that memory (MD-O-6)", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
