@@ -1131,7 +1131,7 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     const s = setup(room());
     s.connect();
     const rect = (y: number): OpOf<"build.rect"> => ({ t: "build.rect", sceneId: "s1", terrain: "stone", x: 0, y, w: 80, h: 25 });
-    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g1", holds: [rect(0), rect(25)] })!;
+    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g1", holds: () => [rect(0), rect(25)] })!;
     s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: ask, code: "forget", message: FORGET_ASK }] });
     assert.deepEqual(s.state().forgetAsk?.asks, [rect(0), rect(25)].map((op) => ({ n: ask, op, group: "g1" })));
     assert.equal(s.state().pending.length, 0, "no band went before the answer");
@@ -1139,7 +1139,7 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     assert.deepEqual(s.state().pending.map((p) => [p.op, p.group]), [[{ ...rect(0), forget: true }, "g1"], [{ ...rect(25), forget: true }, "g1"]]);
     const no = setup(room());
     no.connect();
-    const ask2 = no.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g2", holds: [rect(0), rect(25)] })!;
+    const ask2 = no.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g2", holds: () => [rect(0), rect(25)] })!;
     no.room.applyEv({ t: "ev", seq: no.state().seq + 1, changes: [], rejects: [{ n: ask2, code: "forget", message: FORGET_ASK }] });
     no.room.ui.answerForget(false);
     assert.equal(no.state().forgetAsk, null);

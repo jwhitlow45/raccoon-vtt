@@ -2,9 +2,18 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { serializedBytes } from "#shared/limits.ts";
 import { ASK_LOST, clientOpSchema, FORGET_ASK, MAX_ASK_BYTES, MAX_ASK_OPS, MAX_ASK_PARTS, MAX_BUILD_CELLS, type ClientOp } from "#shared/protocol.ts";
-import type { OnAnswer, OpRefusal } from "../../state/types.ts";
-import { askOps, BUILD_NOT_MADE, dispatchBuild, type BuildContext } from "./ask.ts";
+import { DM, room as testRoom } from "#shared/testutil.ts";
+import type { ServerMessage } from "#shared/protocol.ts";
+import { LocalServer } from "../../dev/localServer.ts";
+import { createRoomActions } from "../../state/actions.ts";
+import { RoomScope } from "../../state/scope.ts";
+import { createRoomStore, MAX_OP_AGE_MS } from "../../state/store.ts";
+import { FakeClock, FakeOutbox } from "../../state/testing.ts";
+import type { OnAnswer, OpRefusal, UnknownCause } from "../../state/types.ts";
+import type { ToolContext, ToolPointer } from "../tools.ts";
+import { askOps, BUILD_NOT_MADE, dispatchBuild, whileAsking, type BuildContext } from "./ask.ts";
 import { rectOps } from "./cells.ts";
+import { builderSlot } from "./store.ts";
 
 /*
  * A builder gesture of several ops asks before any applies
@@ -16,7 +25,7 @@ import { rectOps } from "./cells.ts";
 const explore = { id: "s1", fogEnabled: true, vision: { on: true, light: "dark" as const } };
 const bands = rectOps("s1", { x: 0, y: 0, w: 80, h: 64 }, "stone", { w: 80, h: 64 });
 
-type Sent = { n: number; op: ClientOp; group?: string; holds?: readonly ClientOp[]; onAnswer?: OnAnswer };
+type Sent = { n: number; op: ClientOp; group?: string; holds?: () => readonly ClientOp[]; onAnswer?: OnAnswer };
 
 /** A device's actions that record what goes out, a toast list, and the builder's count of gestures waiting on their asks. */
 function device(scene = explore) {
@@ -37,12 +46,12 @@ function device(scene = explore) {
     scene,
     waiting: (change) => void waits.push((waiting += change)),
   };
-  /** Answers every ask sent so far that has no answer yet. */
-  const answerAsks = (answer: Parameters<OnAnswer>[0], refusal?: (ask: Sent) => OpRefusal | undefined) => {
+  /** Answers every ask sent so far that has no answer yet, `unknown` with how it came about. */
+  const answerAsks = (answer: Parameters<OnAnswer>[0], refusal?: (ask: Sent) => OpRefusal | undefined, unknown?: UnknownCause) => {
     for (const s of sent.filter((s) => s.op.t === "build.ask" && s.onAnswer)) {
       const told = s.onAnswer!;
       delete s.onAnswer;
-      told(answer, refusal?.(s));
+      told(answer, refusal?.(s), unknown);
     }
   };
   return { sent, toasts, waits, ctx, answerAsks, kinds: () => sent.map((s) => s.op.t) };
@@ -57,8 +66,9 @@ describe("a builder gesture asks before it applies, and holds its ops until the 
     const d = device();
     dispatchBuild(d.ctx, bands);
     assert.deepEqual(d.kinds(), ["build.ask"], "no band before the answer");
-    const { onAnswer: _told, ...ask } = d.sent[0]!;
-    assert.deepEqual(ask, { n: 1, op: { t: "build.ask", sceneId: "s1", ops: bands, part: 0 }, group: "g1", holds: bands });
+    const { onAnswer: _told, holds, ...ask } = d.sent[0]!;
+    assert.deepEqual(ask, { n: 1, op: { t: "build.ask", sceneId: "s1", ops: bands, part: 0 }, group: "g1" });
+    assert.deepEqual(holds?.(), bands, "the ask holds the bands");
     assert.deepEqual(d.waits, [1], "the builder says it is checking");
     d.answerAsks("taken");
     assert.deepEqual(d.sent.slice(1).map((s) => [s.op, s.group]), bands.map((op) => [op, "g1"]));
@@ -91,7 +101,7 @@ describe("a builder gesture asks before it applies, and holds its ops until the 
     // The last ask's answer, a refusal with forget, lost to a dropped connection: the snapshot settles it unknown.
     const k = device();
     dispatchBuild(k.ctx, bands);
-    k.answerAsks("unknown");
+    k.answerAsks("unknown", undefined, "snapshot");
     assert.deepEqual(k.kinds(), ["build.ask", "build.ask"], "asked again, no band sent");
     k.answerAsks("refused", forget);
     assert.deepEqual(k.kinds(), ["build.ask", "build.ask"]);
@@ -102,7 +112,7 @@ describe("a builder gesture asks before it applies, and holds its ops until the 
     const d = device();
     dispatchBuild(d.ctx, bands);
     d.answerAsks("refused", () => lost);
-    d.answerAsks("unknown");
+    d.answerAsks("unknown", undefined, "snapshot");
     assert.deepEqual(d.kinds(), ["build.ask", "build.ask"]);
     assert.deepEqual(d.toasts, [BUILD_NOT_MADE]);
     assert.deepEqual(d.waits, [1, 0]);
@@ -112,6 +122,20 @@ describe("a builder gesture asks before it applies, and holds its ops until the 
     assert.deepEqual(k.kinds(), ["build.ask"]);
     assert.deepEqual(k.toasts, ["Only the DM builds."]);
     assert.deepEqual(k.waits, [1, 0]);
+  });
+
+  test("asks too old to send end the gesture with nothing sent and no word of their own, and only a lost connection or ASK_LOST asks again", () => {
+    const d = device();
+    dispatchBuild(d.ctx, bands);
+    d.answerAsks("unknown", undefined, "expired");
+    assert.deepEqual(d.kinds(), ["build.ask"]);
+    assert.deepEqual(d.toasts, [], "the store's toast counts it");
+    assert.deepEqual(d.waits, [1, 0]);
+    const k = device();
+    dispatchBuild(k.ctx, bands);
+    k.answerAsks("unknown");
+    assert.deepEqual(k.kinds(), ["build.ask"], "an unknown that says nothing of how is not asked again");
+    assert.deepEqual(k.toasts, [BUILD_NOT_MADE]);
   });
 
   test("a gesture of one op, and any gesture on a scene that keeps no memory, sends its ops at once with no ask", () => {
@@ -149,5 +173,139 @@ describe("a builder gesture asks before it applies, and holds its ops until the 
     const d = device();
     dispatchBuild(d.ctx, most);
     assert.ok(d.sent.every((s) => s.op.t === "build.paint"));
+  });
+});
+
+/** A DM's page on an Explore scene: its store, the room's actions, the builder's count of waiting gestures, and a server the page reaches through `deliver`. */
+function page() {
+  const state = testRoom();
+  state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true, vision: { on: true, light: "bright" }, bounds: { w: 80, h: 64 } };
+  const clock = new FakeClock();
+  const outbox = new FakeOutbox();
+  const server = new LocalServer(structuredClone(state), DM, "s1");
+  const room = createRoomStore({ roomId: "R1", you: DM, clock, random: () => 0.5, clientId: "c1" });
+  room.setOutbox(outbox);
+  const actions = createRoomActions(room, { sendEph: () => undefined, switchScene: () => undefined });
+  const counted = { waiting: 0 };
+  const ctx: BuildContext = { actions, ui: room.ui, scene: state.scenes.s1!, waiting: (change) => void (counted.waiting += change) };
+  const connect = () => {
+    const hello = room.prepareHello();
+    room.applySnapshot(server.hello({ resumeFrom: hello.resumeFrom, sceneId: "s1" }));
+  };
+  /** Every op the page sent goes to the server, and its answers come back, until the page sends nothing more. */
+  const deliver = () => {
+    for (let round = 0; round < 10; round++) {
+      const ops = outbox.sent.flatMap((m) => (m.t === "op" ? [{ n: m.n, op: m.op }] : []));
+      outbox.sent = [];
+      if (ops.length === 0) return;
+      for (const msg of server.batch(ops) as ServerMessage[]) {
+        if (msg.t === "ev") room.applyEv(msg);
+        else if (msg.t === "snapshot") room.applySnapshot(msg);
+      }
+    }
+  };
+  /** Ops the page sent so far, by kind. */
+  const sentKinds = () => outbox.sent.flatMap((m) => (m.t === "op" ? [(m.op as ClientOp).t] : []));
+  const cell = (key: string) => server.state.buildChunks["s1:0,0"]?.cells[key];
+  return { clock, outbox, server, room, actions, ctx, counted, connect, deliver, sentKinds, cell };
+}
+
+describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, D-261027-07)", () => {
+  // A rectangle of stone in two bands over (1, 1), and a paint of wood there after it.
+  const rect = rectOps("s1", { x: 0, y: 0, w: 80, h: 40 }, "stone", { w: 80, h: 64 });
+  const paint: ClientOp = { t: "build.paint", sceneId: "s1", terrain: "wood", cells: ["1,1"] };
+
+  test("offline, a paint after a waiting rectangle is refused at input, and back online the rectangle is built and nothing came before it", () => {
+    const p = page();
+    p.connect();
+    p.room.suspend();
+    p.outbox.open = false;
+    assert.equal(rect.length, 2);
+    dispatchBuild(p.ctx, rect);
+    assert.equal(p.actions.dispatch(paint), null, "the paint is refused while the rectangle waits");
+    assert.equal(p.counted.waiting, 1);
+    p.outbox.open = true;
+    p.connect();
+    p.deliver();
+    assert.equal(p.cell("1,1"), "stone");
+    assert.equal(p.counted.waiting, 0);
+    // Once it is answered, the builder takes edits again.
+    assert.notEqual(p.actions.dispatch(paint), null);
+    p.deliver();
+    assert.equal(p.cell("1,1"), "wood");
+  });
+
+  test("Undo while the gesture waits cancels it: nothing of it is sent, its answers are let go, and no undo goes", () => {
+    const p = page();
+    p.connect();
+    dispatchBuild(p.ctx, rect);
+    p.actions.undo();
+    assert.equal(p.counted.waiting, 0, "the line clears");
+    assert.deepEqual(p.sentKinds(), ["build.ask"], "no undo was sent");
+    p.deliver();
+    assert.equal(p.cell("1,1"), undefined, "no band went");
+    assert.equal(p.room.store.getState().forgetAsk ?? null, null);
+    // The next Undo is the room's again.
+    p.actions.undo();
+    assert.deepEqual(p.sentKinds(), ["undo"]);
+    // A cancelled gesture's ask refused with forget asks nothing: it holds no ops any more.
+    const k = page();
+    k.connect();
+    dispatchBuild(k.ctx, rect);
+    k.actions.undo();
+    const asked = k.outbox.sent.find((m) => m.t === "op")!;
+    assert.ok(asked.t === "op" && (asked.op as ClientOp).t === "build.ask");
+    k.room.applyEv({ t: "ev", seq: k.room.store.getState().seq + 1, changes: [], rejects: [{ n: asked.n, code: "forget", message: FORGET_ASK }] });
+    assert.equal(k.room.store.getState().forgetAsk ?? null, null, "a question about a cancelled gesture");
+  });
+
+  test("a press on the builder's map while a gesture waits starts nothing, and its move and lift do nothing", () => {
+    const scope = new RoomScope();
+    const calls: string[] = [];
+    const handlers = whileAsking({ down: () => void calls.push("down"), move: () => void calls.push("move"), up: () => void calls.push("up") });
+    const ctx = { scope } as unknown as ToolContext;
+    const at = {} as ToolPointer;
+    scope.get(builderSlot).store.setState({ asking: 1 });
+    handlers.down!(at, ctx);
+    handlers.move!(at, ctx);
+    scope.get(builderSlot).store.setState({ asking: 0 });
+    handlers.up!(at, ctx);
+    assert.deepEqual(calls, [], "the press made while waiting stays refused to its lift");
+    handlers.down!(at, ctx);
+    handlers.up!(at, ctx);
+    assert.deepEqual(calls, ["down", "up"]);
+  });
+});
+
+describe("an expired gesture stays expired (MD4-ASTRA-11)", () => {
+  test("a rectangle queued offline past MAX_OP_AGE_MS sends nothing after the reconnect, and the toast counts it as one edit", () => {
+    const p = page();
+    p.connect();
+    p.room.suspend();
+    p.outbox.open = false;
+    dispatchBuild(p.ctx, rectOps("s1", { x: 0, y: 0, w: 80, h: 64 }, "stone", { w: 80, h: 64 }));
+    p.clock.t += MAX_OP_AGE_MS + 1;
+    p.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { name: "Renamed" } });
+    p.outbox.open = true;
+    p.connect();
+    p.deliver();
+    assert.equal(p.cell("1,1"), undefined, "nothing of the rectangle applied");
+    assert.equal(p.server.state.scenes.s1?.name, "Renamed");
+    assert.equal(p.counted.waiting, 0);
+    assert.deepEqual(p.room.store.getState().toasts.map((t) => t.text), ["1 offline edit was too old to save."]);
+    // A gesture asked about in two parts is one edit too.
+    const k = page();
+    k.connect();
+    k.room.suspend();
+    k.outbox.open = false;
+    const paints = Array.from({ length: MAX_ASK_OPS + 1 }, (_, i): ClientOp => ({ t: "build.paint", sceneId: "s1", terrain: "wood", cells: [`${i},1`] }));
+    assert.equal(askOps("s1", paints).length, 2);
+    dispatchBuild(k.ctx, paints);
+    k.clock.t += MAX_OP_AGE_MS + 1;
+    k.outbox.open = true;
+    k.connect();
+    k.deliver();
+    assert.equal(k.cell("1,1"), undefined);
+    assert.deepEqual(k.room.store.getState().toasts.map((t) => t.text), ["1 offline edit was too old to save."]);
   });
 });

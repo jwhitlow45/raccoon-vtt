@@ -37,6 +37,12 @@ export type { PendingOp } from "./types.ts";
  * retries, and resending after a reconnect.
  */
 
+/** How many edits some pending ops are: one each, but a gesture's asks one together. */
+function editsIn(ops: readonly PendingOp[]): number {
+  const asked = new Set(ops.flatMap((p) => (p.op.t === "build.ask" ? [p.group ?? `#${p.n}`] : [])));
+  return ops.filter((p) => p.op.t !== "build.ask").length + asked.size;
+}
+
 /** An op that has had no answer this long is resent with everything after it (design 7.4). */
 export const OP_ANSWER_MS = 10_000;
 /** Pending ops older than this are dropped on reconnect: the server keeps watermarks much longer, but nobody wants a 12 hour old edit. */
@@ -138,10 +144,11 @@ export type DispatchOptions = {
   quiet?: boolean;
   /**
    * A gesture's last `build.ask`: the ops it holds on the device until it
-   * is answered (builder/ask.ts). Refused with `forget`, the forget
-   * question asks about these, and its yes sends them.
+   * is answered (builder/ask.ts), none once the gesture was cancelled.
+   * Refused with `forget`, the forget question asks about these, and its
+   * yes sends them.
    */
-  holds?: readonly ClientOp[];
+  holds?: () => readonly ClientOp[];
 };
 
 export type RoomStoreState = RoomView & {
@@ -726,7 +733,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const now = clock.now();
       const pending = get().pending;
       const fresh = pending.filter((p) => now - p.at <= MAX_OP_AGE_MS);
-      const dropped = pending.length - fresh.length;
+      // A gesture's asks are one edit, since the gesture's ops never left the device (builder/ask.ts).
+      const dropped = editsIn(pending.filter((p) => now - p.at > MAX_OP_AGE_MS));
       if (dropped > 0) {
         for (const p of pending) if (now - p.at > MAX_OP_AGE_MS) sentAt.delete(p.n);
         const lost = pending.filter((p) => !fresh.includes(p));
@@ -828,7 +836,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           if (r.code === "forget") {
             const group = sent.group !== undefined ? { group: sent.group } : {};
             // A gesture's ask stands for the ops it holds, which the question asks about and its yes sends.
-            if (op.t === "build.ask") for (const held of sent.holds ?? []) asks.push({ n: r.n, op: held, ...group });
+            if (op.t === "build.ask") for (const held of sent.holds?.() ?? []) asks.push({ n: r.n, op: held, ...group });
             else asks.push({ n: r.n, op, ...group });
             continue;
           }

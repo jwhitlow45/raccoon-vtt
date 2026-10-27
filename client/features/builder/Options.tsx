@@ -187,7 +187,7 @@ export default function BuilderOptions() {
         // The room's own control while it has corners. Before the first corner it does nothing yet, so it waits behind the mode and the terrain.
         priority: corners ? 1 : 2,
         control: (
-          <OptButton tone="primary" disabled={s.poly.length < 3} ends onClick={() => closePolygon({ scene, actions, ui, scope })}>
+          <OptButton tone="primary" disabled={s.poly.length < 3 || s.asking} ends onClick={() => closePolygon({ scene, actions, ui, scope })}>
             Close room
           </OptButton>
         ),
@@ -273,6 +273,8 @@ export default function BuilderOptions() {
         label="Clear build"
         confirm="Tap again to clear"
         title="Remove every floor, wall, door, height, stair, difficult ground mark, label, light and stamp on this scene"
+        // No builder edit goes while a gesture waits on its asks (ask.ts, D-261027-07).
+        disabled={s.asking}
         onConfirm={() => actions.dispatch({ t: "build.clear", sceneId })}
       />
     ),

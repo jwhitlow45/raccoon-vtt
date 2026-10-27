@@ -34,12 +34,20 @@ export function dispatchGesture(actions: Pick<RoomActions, "dispatch" | "newId">
   return sent;
 }
 
+/** A builder edit, which waits behind a gesture's asks (holdBuild). The asks themselves go. */
+function heldBack(op: ClientOp): boolean {
+  return op.t.startsWith("build.") && op.t !== "build.ask";
+}
+
 /** Room actions over a store and whatever carries its messages: the live socket, or the dev fixture's local server. */
 export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sendEph" | "switchScene">): RoomActions {
   /** Kinds already reported, so a broken preview sending 30 frames a second logs once. */
   const reported = new Set<string>();
+  /** What cancels each builder gesture waiting on its asks, oldest first (holdBuild). */
+  const waiting: (() => void)[] = [];
   const actions: RoomActions = {
-    dispatch: (op, opts) => room.dispatch(op, opts),
+    // No builder edit goes while a gesture waits on its asks, so none overtakes it (D-261027-07, MD4-ASTRA-9).
+    dispatch: (op, opts) => (waiting.length > 0 && heldBack(op) ? null : room.dispatch(op, opts)),
     sendEph(e, opts) {
       if (!validEph(e)) {
         if (!reported.has(e.k)) {
@@ -54,7 +62,19 @@ export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sen
       if (!opts?.localOnly) socket.sendEph(e);
     },
     switchScene: (sceneId) => socket.switchScene(sceneId),
-    undo: () => void room.dispatch({ t: "undo" }),
+    // Undo while a gesture waits takes back that gesture, which the server never saw, and sends no undo.
+    undo: () => {
+      const cancel = waiting.pop();
+      if (cancel) cancel();
+      else void room.dispatch({ t: "undo" });
+    },
+    holdBuild(cancel) {
+      waiting.push(cancel);
+      return () => {
+        const at = waiting.indexOf(cancel);
+        if (at >= 0) waiting.splice(at, 1);
+      };
+    },
     redo: () => void room.dispatch({ t: "redo" }),
     newId: () => uuidv7(),
     moveToken: (tokenId, x, y) => void room.dispatch({ t: "token.move", tokenId, x, y }),

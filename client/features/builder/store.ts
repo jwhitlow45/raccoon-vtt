@@ -99,6 +99,8 @@ export type BuilderGesture = {
   downAt: { screen: Point; world: Point } | null;
   /** The label a press landed on, and where on it, so a drag moves it without a jump. */
   labelGrab: { id: string; dx: number; dy: number } | null;
+  /** The press began while a gesture waited on its asks (ask.ts whileAsking), so its move and lift do nothing. */
+  asking: boolean;
 };
 
 /** One Room page's builder (client/state/scope.ts): its choices and gesture. */
@@ -121,7 +123,7 @@ export const builderSlot = scopeSlot(
       inSight: false,
       asking: 0,
     })),
-    gesture: { stroke: null, downAt: null, labelGrab: null } as BuilderGesture,
+    gesture: { stroke: null, downAt: null, labelGrab: null, asking: false } as BuilderGesture,
   }),
   (b) => {
     if (b.gesture.stroke) clearInterval(b.gesture.stroke.timer);

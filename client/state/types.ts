@@ -167,8 +167,8 @@ export type PendingOp = {
   onAnswer?: OnAnswer;
   /** No toast answers it: the caller says what became of it (DispatchOptions). */
   quiet?: true;
-  /** A gesture's last ask: the ops it holds until it is answered (DispatchOptions). */
-  holds?: readonly ClientOp[];
+  /** A gesture's last ask: the ops it holds until it is answered, none once the gesture was cancelled (DispatchOptions). */
+  holds?: () => readonly ClientOp[];
 };
 
 /**
@@ -571,7 +571,7 @@ export type RoomActions = {
    * undo takes the whole gesture back (design 7.7). `onAnswer` hears once
    * what became of it (OpAnswer).
    */
-  dispatch(op: ClientOp, opts?: { group?: string; onAnswer?: OnAnswer; quiet?: boolean; holds?: readonly ClientOp[] }): number | null;
+  dispatch(op: ClientOp, opts?: { group?: string; onAnswer?: OnAnswer; quiet?: boolean; holds?: () => readonly ClientOp[] }): number | null;
   /**
    * Sends an ephemeral event on the current scene, coalesced to one per
    * animation frame (design 7.6), and shows it locally as this member's own.
@@ -581,8 +581,17 @@ export type RoomActions = {
   sendEph(e: EphEvent, opts?: { localOnly?: boolean }): void;
   /** DM only: view another scene. The latest pick wins. */
   switchScene(sceneId: SceneId): void;
+  /** Sends an undo, or while a builder gesture waits on its asks, cancels the newest such gesture instead (holdBuild). */
   undo(): void;
   redo(): void;
+  /**
+   * A builder gesture waiting on its asks (builder/ask.ts, D-261027-07):
+   * until the returned release is called, builder edits dispatched here
+   * are refused at input (null), so none overtakes it, and Undo calls
+   * `cancel` instead of sending an undo. Absent where nothing waits, as on
+   * a preview.
+   */
+  holdBuild?(cancel: () => void): () => void;
   /** A UUIDv7 for a create op (design section 6). */
   newId(): string;
   moveToken(tokenId: string, x: number, y: number): void;

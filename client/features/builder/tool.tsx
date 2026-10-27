@@ -7,7 +7,7 @@ import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { dispatchGesture } from "../../state/actions.ts";
-import { buildContext, dispatchBuild } from "./ask.ts";
+import { buildContext, dispatchBuild, whileAsking } from "./ask.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import {
   edgeOps,
@@ -205,7 +205,7 @@ export const builderTool: ToolDef = {
     gesture.labelGrab = null;
     resetGesture(store);
   },
-  pointer: withLightMode(withStampMode(withHeightMode({
+  pointer: whileAsking(withLightMode(withStampMode(withHeightMode({
     down(p, ctx) {
       const { store: builderState, gesture } = ctx.scope.get(builderSlot);
       gesture.downAt = { screen: p.screen, world: p.world };
@@ -304,7 +304,7 @@ export const builderTool: ToolDef = {
       gesture.labelGrab = null;
       store.setState({ rect: null, run: [], labelMove: null });
     },
-  }))),
+  })))),
   Options: () => (
     <Suspense fallback={<Loading text="Loading the options…" />}>
       <Options />
