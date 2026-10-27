@@ -237,9 +237,12 @@ function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveL
   const byKey = (layer: Layer, all: boolean) => {
     if (!isHex(grid)) {
       const cell = square(layer, all);
+      // Read without splitting, since a projection asks this of every cell and edge it holds.
       return (key: string) => {
-        const [x, y] = key.split(",").map(Number) as [number, number];
-        return Number.isInteger(x) && Number.isInteger(y) && cell(x, y);
+        const comma = key.indexOf(",");
+        const x = Number(key.slice(0, comma));
+        const y = Number(key.slice(comma + 1));
+        return comma > 0 && Number.isInteger(x) && Number.isInteger(y) && cell(x, y);
       };
     }
     const hex = hexOf(layer, all);

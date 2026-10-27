@@ -1495,11 +1495,13 @@ export function playerChunk(state: RoomState, at: { sceneId: string; cx: number;
   const scene = state.scenes[at.sceneId];
   if (!scene || !scene.fogEnabled || !inPositions(scene, at.cx, at.cy)) return null;
   const own = view !== null && holdsOwnSight(state, scene.id, view) ? view : null;
+  const ground = groundOf(state, at.sceneId, own);
+  if (!ground) return null;
+  // A piece filed here lies on held cells within 4 cells of the position, its longest reach from its own midpoint.
+  if (!heldNear(ground, at.cx, at.cy, 4)) return null;
   const memo = memoKey(state, scene, own, at.cx, at.cy);
   const hit = memo === null ? undefined : recall(memo);
   if (hit !== undefined) return hit;
-  const ground = groundOf(state, at.sceneId, own);
-  if (!ground) return null;
   const out = chunkFor(state, scene, ground, at.cx, at.cy, piecesNear(state, scene, ground, at.cx, at.cy));
   if (memo !== null) keep(memo, out);
   return out;
@@ -1515,6 +1517,8 @@ export function heldChunks(state: RoomState, sceneId: string, view: FogClass): R
   if (!ground) return out;
   let filed: Map<string, FreeWall[]> | null = null;
   for (const { cx, cy } of chunkPositions(scene)) {
+    // Nothing held at a position or across its north and west sides, and no piece filed there: it holds nothing, without a key.
+    if (!heldNear(ground, cx, cy, 1) && !(filed ??= scenePieces(state, scene, ground, null)).has(`${cx},${cy}`)) continue;
     const memo = memoKey(state, scene, own, cx, cy);
     let chunk = memo === null ? undefined : recall(memo);
     if (chunk === undefined) {
@@ -1525,6 +1529,22 @@ export function heldChunks(state: RoomState, sceneId: string, view: FogClass): R
     if (chunk) out[chunkKey(sceneId, cx, cy)] = chunk;
   }
   return out;
+}
+
+/**
+ * Whether any cell of a position, or within `reach` cells west and north of
+ * it, `reach` east and south too past 1, is held: a position holds a cell,
+ * an edge or a piece only then. Always true on hexes, whose positions read
+ * the tiles their hexes' world box covers.
+ */
+function heldNear(ground: Ground, cx: number, cy: number, reach: number): boolean {
+  if (isHex(ground.grid)) return true;
+  const x0 = cx * CHUNK_CELLS - reach;
+  const y0 = cy * CHUNK_CELLS - reach;
+  const x1 = (cx + 1) * CHUNK_CELLS + (reach > 1 ? reach : 0);
+  const y1 = (cy + 1) * CHUNK_CELLS + (reach > 1 ? reach : 0);
+  for (let y = Math.max(0, y0); y < y1; y++) for (let x = Math.max(0, x0); x < x1; x++) if (ground.held(x, y)) return true;
+  return false;
 }
 
 /*
@@ -1617,11 +1637,12 @@ function chunkFor(state: RoomState, scene: Scene, ground: Ground, cx: number, cy
     const x = x0 + (k % CHUNK_CELLS);
     const y = y0 + Math.floor(k / CHUNK_CELLS);
     const key = `${x},${y}`;
-    if (!ground.keyHeld(key)) continue;
+    // On squares by coordinates, which saves reading the key back on every cell of every class.
+    if (hex ? !ground.keyHeld(key) : !ground.held(x, y)) continue;
     anyHeld = true;
     known[k >> 3] = known[k >> 3]! | (1 << (k & 7));
-    const live = ground.keyLive(key);
-    const own = ground.keyOwn(key);
+    const live = hex ? ground.keyLive(key) : ground.live(x, y);
+    const own = hex ? ground.keyOwn(key) : ground.own(x, y);
     const terrain = chosen<TerrainId | null>(live, own, mine?.cells, party?.cells, key, stored?.cells[key] ?? null);
     if (terrain !== null) cells[key] = terrain;
     heights[k] = chosen(live, own, mine?.heights, party?.heights, key, feet ? feet[k]! : 0);
@@ -1638,7 +1659,7 @@ function chunkFor(state: RoomState, scene: Scene, ground: Ground, cx: number, cy
   const auto = new Uint8Array((2 * CELLS_PER_CHUNK) / 8);
   let anyAuto = false;
   if (!hex) {
-    const rule = autoWallsOf(scene);
+    const shown = shownEdges(chunks, scene, cx, cy);
     for (let k = 0; k < CELLS_PER_CHUNK; k++) {
       const x = x0 + (k % CHUNK_CELLS);
       const y = y0 + Math.floor(k / CHUNK_CELLS);
@@ -1649,7 +1670,7 @@ function chunkFor(state: RoomState, scene: Scene, ground: Ground, cx: number, cy
         const key = `${x},${y},${side}`;
         const live = ground.live(x, y) || ground.live(ox, oy);
         const own = ground.own(x, y) || ground.own(ox, oy);
-        const value = chosen<EdgeFeature | "auto" | null>(live, own, mine?.edges, party?.edges, key, shownEdge(chunks, sceneId, rule, key));
+        const value = chosen<EdgeFeature | "auto" | null>(live, own, mine?.edges, party?.edges, key, shown[2 * k + (side === "w" ? 1 : 0)]!);
         if (value === null || (value !== "auto" && value.kind === "none")) continue;
         if (value === "auto") {
           const bit = 2 * k + (side === "w" ? 1 : 0);
@@ -1672,6 +1693,39 @@ function chunkFor(state: RoomState, scene: Scene, ground: Ground, cx: number, cy
   if (anyAuto) out.auto = encodeTile(auto);
   if (anyStair) out.upDir = upDir.join("");
   return out;
+}
+
+/*
+ * Every north and west edge of a position as players see it live, edge 2k
+ * north and 2k + 1 west of cell k: the same for every fog class, so a batch
+ * that projects a position for each class works it out once. Kept per
+ * chunk collection, which the reducer replaces and never changes, by the
+ * chunk objects the edges read (the position's own and those north and
+ * west, whose cells the automatic walls read) and the rule.
+ */
+const shownEdgeCache = new WeakMap<object, Map<string, { ids: string; values: ShownEdge[] }>>();
+
+function shownEdges(chunks: Readonly<Record<string, BuildChunk>>, scene: Scene, cx: number, cy: number): readonly ShownEdge[] {
+  const sceneId = scene.id;
+  const rule = autoWallsOf(scene);
+  const ids = `${rule}|${idOf(chunks[chunkKey(sceneId, cx, cy)])},${idOf(chunks[chunkKey(sceneId, cx - 1, cy)])},${idOf(chunks[chunkKey(sceneId, cx, cy - 1)])}`;
+  const writable = isWritable(chunks);
+  let byPosition = writable ? undefined : shownEdgeCache.get(chunks);
+  const at = `${sceneId}:${cx},${cy}`;
+  const hit = byPosition?.get(at);
+  if (hit && hit.ids === ids) return hit.values;
+  const values: ShownEdge[] = new Array(2 * CELLS_PER_CHUNK);
+  for (let k = 0; k < CELLS_PER_CHUNK; k++) {
+    const x = cx * CHUNK_CELLS + (k % CHUNK_CELLS);
+    const y = cy * CHUNK_CELLS + Math.floor(k / CHUNK_CELLS);
+    values[2 * k] = shownEdge(chunks, sceneId, rule, `${x},${y},n`);
+    values[2 * k + 1] = shownEdge(chunks, sceneId, rule, `${x},${y},w`);
+  }
+  if (!writable) {
+    if (!byPosition) shownEdgeCache.set(chunks, (byPosition = new Map()));
+    byPosition.set(at, { ids, values });
+  }
+  return values;
 }
 
 function sortedRecord<T>(record: Record<string, T>): Record<string, T> {
