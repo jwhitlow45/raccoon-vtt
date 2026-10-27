@@ -4,12 +4,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
+import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type ElementHandle, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 
 /**
@@ -83,7 +84,9 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * The isometric view's choice (docs/design-v1-isometric-view.md 8) is
  * measured at follow-up batch 30's sizes: the top bar with the View button,
  * the View menu in Top-down and in Isometric, and Scene settings'
- * Suggested view.
+ * Suggested view. So is the scene settings page with its groups folded and
+ * open (docs/design-v1-map-discovery.md 9), beside every other page with
+ * the shared radio cards: Room settings, This device and Show a handout.
  *
  * The sweep runs as three files, each with its own server, browsers and
  * room, so the CI shards run them side by side: alignment.e2e.ts has the
@@ -91,9 +94,9 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * alignment-wide.e2e.ts the sideways phone, the tablet, the desktop and
  * 480 x 320, and alignment-icons.e2e.ts the second icon pass, follow-up
  * batch 30's roots, the app icon's places, follow-up batch 32's roots,
- * This device's Sheet handle and the view choice. This module holds every
- * step, from alignmentFile on, and each file lists the ones it runs, so a
- * step keeps its id whichever file runs it.
+ * This device's Sheet handle, the scene settings page and the view choice.
+ * This module holds every step, from alignmentFile on, and each file lists
+ * the ones it runs, so a step keeps its id whichever file runs it.
  *
  * Each file runs with `pnpm test:e2e` on E2E_PORT plus twenty-seven, one
  * file after another as the others. The other environment variables are
@@ -858,18 +861,19 @@ async function openPanelOf(page: Page, title: string): Promise<Locator> {
   return sheet;
 }
 
-/** pv-a: the sizes where the sweep measures the whole Vision section on a per-player scene, as docs/design-v1-per-player-vision.md 11 asks. */
+/** pv-a: the sizes where the sweep measures the whole What players see section on a per-player scene, as docs/design-v1-per-player-vision.md 11 asks. */
 const VISION_SECTION_AT = new Set([...PHONE_ROOTS, "1440x900"]);
 
 /**
- * pv4: per-player vision's Vision settings (docs/design-v1-per-player-vision.md
- * 7.1 and 11): the Sight row, and who sees for themselves with Pat
- * unticked, listed off, and asked about as the DM unticks him. The scene
- * is made per player with vision and fog off, so nothing Pat sees
- * changes, and whole party again after. At VISION_SECTION_AT's sizes the
- * whole section is measured first with vision on (pv-a), so its fog line,
- * Turn fog on and the rows that lend sight to Pat show too: Pat's page is
- * closed by then, and the fold back to whole party empties the list.
+ * pv4: per-player vision's settings in What players see
+ * (docs/design-v1-per-player-vision.md 7.1 and 11): the Sight row, and who
+ * sees for themselves with Pat unticked, listed off, and asked about as the
+ * DM unticks him. The scene is made per player with vision and fog off, so
+ * nothing Pat sees changes, and whole party again after. At
+ * VISION_SECTION_AT's sizes the whole section is measured first with
+ * vision on (pv-a), so Custom with its fold open and the rows that lend
+ * sight to Pat show too: Pat's page is closed by then, and the fold back
+ * to whole party empties the list.
  */
 async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const sceneId = run.sceneId;
@@ -3798,6 +3802,148 @@ export function grabberTests(): void {
   });
 }
 
+/** The scene settings page's groups in order (client/features/scenes/settingsFolds.ts). */
+const SCENE_GROUP_NAMES = ["What players see", "Map image and grid", "Walls and movement", "Scene"] as const;
+
+/** The crypt of ms2-a: a map scene with a Day and a Night phase, made once for the run. */
+let cryptId: string | null = null;
+
+async function cryptScene(): Promise<string> {
+  if (cryptId) return cryptId;
+  const upload = async (rgb: [number, number, number]) => {
+    const data = await sharp({ create: { width: 500, height: 400, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer();
+    const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
+    assert.ok(res.ok(), `the upload answered ${res.status()}`);
+    return (await res.json()) as { id: string; width: number; height: number };
+  };
+  const day = await upload([90, 80, 70]);
+  const night = await upload([30, 34, 60]);
+  const id = randomUUID();
+  await ops.send({ t: "scene.create", scene: { id, name: "Crypt", bounds: { w: 10, h: 8 }, background: "#2b2b31", fogEnabled: true, autoWalls: "floor", blockMovement: true, vision: { on: false, light: "bright" } } });
+  await ops.send({ t: "scene.setMap", sceneId: id, map: { assetId: day.id, widthPx: day.width, heightPx: day.height, cellPx: 50, originPx: { x: 0, y: 0 } } });
+  await ops.send({
+    t: "scene.update",
+    sceneId: id,
+    patch: {
+      phases: [
+        { id: randomUUID(), name: "Day", assetId: day.id, widthPx: day.width, heightPx: day.height },
+        { id: randomUUID(), name: "Night", assetId: night.id, widthPx: night.width, heightPx: night.height, light: "dark" },
+      ],
+    },
+  });
+  cryptId = id;
+  return id;
+}
+
+/** Shows the DM a scene from its row in the Scenes panel, and waits for its settings. */
+async function viewScene(panel: Locator, sceneId: string): Promise<void> {
+  const name = dmSocket.state?.scenes[sceneId]?.name ?? "";
+  await panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first().click();
+  await waitFor(`the DM on ${name}`, () => dmSocket.you?.sceneId === sceneId || null);
+  const field = panel.getByRole("textbox", { name: "Scene name" }).last();
+  await waitFor(`${name}'s settings`, async () => ((await field.inputValue()) === name ? true : null));
+}
+
+/*
+ * ms2-a: the scene settings page (docs/design-v1-map-discovery.md 8.4 and
+ * 9), and every other page that shows the shared radio cards
+ * (features/dm/controls.tsx RadioGroup), at FU30_AT's sizes. The page on
+ * the players' scene as it opens, which starts the groups as 8.4 says,
+ * with every group folded and with every group open, its map image's
+ * question asked, then a map scene with two phases, one in edit. Then Room
+ * settings whole, This device's Map detail and the DM panel's Show a
+ * handout. Each size starts from no stored folds, as a device that never
+ * folded a group.
+ */
+export function sceneSettingsTests(): void {
+  test(`ms2-a. the scene settings page as it opens, every group folded and every group open, the map image's question, a map scene's phases with one in edit, Room settings, This device's Map detail and Show a handout, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-map-discovery.md 8.4 and 9)`, async () => {
+    const crypt = await cryptScene();
+    const lines: string[] = [];
+    for (const at of FU30_AT) {
+      const sweep = new Sweep(`ms2-${atName(at)}`);
+      const page = await dmPageFor(at.size);
+      page.setDefaultTimeout(10_000);
+      const forget = () => page.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
+      if (page.url().startsWith(server.origin)) await forget();
+      await openAt(page, at.size, at.scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      try {
+        const panel = await openDmPanel(page, "Scenes");
+        const name = panel.getByRole("textbox", { name: "Scene name" }).last();
+        await name.waitFor();
+        // What players see opens everywhere, the rest only from 900 px of layout, which 1440 at 130% still is.
+        const wide = at.size.width / at.scale >= 900;
+        for (const [i, group] of SCENE_GROUP_NAMES.entries()) {
+          const open = (await sceneGroupFold(panel, group).getAttribute("aria-expanded")) === "true";
+          if (open !== (i === 0 || wide)) sweep.lines.push(`${sweep.at} scene-settings: ${group} starts ${open ? "open" : "folded"}`);
+        }
+        await name.scrollIntoViewIfNeeded();
+        await sweep.measure(page, "scene-settings", panel);
+        await shots.take(page, `alignment-${sweep.at}-scene-settings`);
+        for (const group of SCENE_GROUP_NAMES) {
+          const fold = sceneGroupFold(panel, group);
+          if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
+        }
+        await sweep.measure(page, "scene-settings-folded", panel);
+        await shots.take(page, `alignment-${sweep.at}-scene-settings-folded`);
+        for (const group of SCENE_GROUP_NAMES) await openSceneGroup(panel, group);
+        await sweep.measure(page, "scene-settings-open", panel);
+        // The players are on this scene, so its map image asks first, with the first map's fog choice.
+        const map = sceneGroup(panel, "Map image and grid");
+        await map.getByRole("button", { name: "Add a map image" }).click();
+        await map.getByText(/^The players are on this scene\./).waitFor();
+        await map.scrollIntoViewIfNeeded();
+        await sweep.measure(page, "scene-map-image-ask", map);
+        await shots.take(page, `alignment-${sweep.at}-map-image-ask`);
+        await map.getByRole("button", { name: "Cancel", exact: true }).click();
+        // A map scene: its image, phases, grid and counts, then a phase in edit.
+        await viewScene(panel, crypt);
+        await sweep.measure(page, "scene-settings-map", panel);
+        await map.getByRole("button", { name: "Edit Night" }).click();
+        await map.getByRole("textbox", { name: "Phase name" }).scrollIntoViewIfNeeded();
+        await sweep.measure(page, "scene-map-phase-edit", map);
+        await shots.take(page, `alignment-${sweep.at}-map-phase-edit`);
+        await map.getByRole("button", { name: "Done", exact: true }).click();
+        await viewScene(panel, run.sceneId);
+        await closeSheets(page);
+
+        // The shared radio cards: Room settings whole, then This device's Map detail.
+        const menu = await openMenu(page);
+        // The page's header holds Back to Menu, outside a side panel's tab panel.
+        const back = page.getByRole("button", { name: /^Back to Menu/ });
+        if (await visible(back)) await back.click();
+        await menu.getByRole("button", { name: /^Room settings/ }).click();
+        await menu.getByRole("group", { name: "Critical Hit damage" }).waitFor();
+        await sweep.measure(page, "room-settings", menu);
+        await back.click();
+        await menu.getByRole("button", { name: /^This device/ }).click();
+        const detail = menu.locator("section").filter({ has: page.getByRole("heading", { name: "Map detail", exact: true }) }).last();
+        await detail.scrollIntoViewIfNeeded();
+        await sweep.measure(page, "this-device-map-detail", detail);
+        await back.click();
+        await closeSheets(page);
+        // The DM panel's handout form, whose Show to is the same cards.
+        const dmPanel = await openDmPanel(page, "DM");
+        const handout = dmPanel.getByRole("group", { name: "Show a handout" });
+        if (!(await visible(handout))) await dmPanel.getByRole("button", { name: "Show a handout" }).click();
+        await handout.getByRole("group", { name: "Show to" }).scrollIntoViewIfNeeded();
+        await sweep.measure(page, "show-a-handout", handout);
+        await shots.take(page, `alignment-${sweep.at}-show-a-handout`);
+        await handout.getByRole("button", { name: "Cancel", exact: true }).click();
+        await closeSheets(page);
+      } finally {
+        // The page's own scene goes with it: the next size opens the room anew on the players' scene.
+        await forget();
+        await escapeAll(page);
+      }
+      console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+      lines.push(...sweep.lines);
+    }
+    assert.deepEqual(lines, [], "the scene settings page or the radio cards out of line");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+  });
+}
+
 /**
  * A row's detail line as drawn: how many lines it wraps onto, whether its
  * box cuts its words, and its last word when that stands alone on the last
@@ -3945,6 +4091,8 @@ export function isoChoiceTests(): void {
       await menu.getByRole("radio", { name: "Follow the scene" }).check();
       await close();
       const scenes = await openDmPanel(page, "Scenes");
+      // A phone starts the Scene group folded (docs/design-v1-map-discovery.md 8.4).
+      await openSceneGroup(scenes, "Scene");
       const row = scenes.getByRole("radiogroup", { name: "Suggested view" }).locator("xpath=../..");
       await row.scrollIntoViewIfNeeded();
       await sweep.measure(page, "iso5-suggested-view", row);

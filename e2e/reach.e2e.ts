@@ -1,5 +1,5 @@
 import { after, before, describe, test } from "node:test";
-import { pagePoint, wholeInReach } from "./harness.ts";
+import { openSceneGroup, pagePoint, wholeInReach } from "./harness.ts";
 import {
   assertNothingOutOfReach,
   canvasAt,
@@ -92,7 +92,8 @@ describe("raccoon-vtt short-screen reach", { timeout: 1_800_000 }, () => {
           if (notice === "Starting view" && (await dm.getByRole("group", { name: "Starting view" }).count()) === 0) {
             await dm.locator('nav[aria-label="Tools"] button[title="Panels"]').click();
             await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Scenes", exact: true }).click();
-            await dm.locator('section[aria-label="Scenes"]').getByRole("button", { name: "Save current view" }).tap();
+            // A phone starts the Scene group folded (docs/design-v1-map-discovery.md 8.4).
+            await (await openSceneGroup(dm.locator('section[aria-label="Scenes"]'), "Scene")).getByRole("button", { name: "Save current view" }).tap();
             await dm.getByRole("group", { name: "Starting view" }).waitFor();
           }
           for (const fight of ["none", "fight"] as const) {

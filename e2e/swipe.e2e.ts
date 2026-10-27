@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { GRABBER_DESIGNS, grabberRoom, type GrabberId } from "../client/components/grabberDesigns.ts";
-import { barControl, ConsoleWatch, OpSocket, pagePoint, pickOption, pickTool, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, OpSocket, openSceneGroup, pagePoint, pickOption, pickTool, readCamera, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * Swipe a phone's bottom sheet down to close it, and the panel sheet up to
@@ -579,8 +579,10 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await sheet.getByRole("button", { name: "Close Initiative" }).click();
     await ops.send({ t: "encounter.end" });
 
-    // The Scenes panel's slider moves under a sideways drag.
+    // The Scenes panel's slider moves under a sideways drag. The grid's sliders and the scene's size sit in groups a phone starts folded.
     sheet = await openPanel(dm, "Scenes");
+    await openSceneGroup(sheet, "Map image and grid");
+    await openSceneGroup(sheet, "Scene");
     await steadyRect(sheet);
     const slider = sheet.locator('input[type="range"]').first();
     await slider.scrollIntoViewIfNeeded();

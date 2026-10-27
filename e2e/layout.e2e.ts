@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import sharp from "sharp";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, readCamera, Shots, sideTabName, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSceneGroup, openSideTab, OpSocket, pagePoint, pickTool, readCamera, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, Touches, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * Layout and hierarchy (docs/design-v1-layout-hierarchy.md section 10):
@@ -582,7 +582,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       // A notice that lasts spans the map or stands beside the lane, and the tool's controls stay in reach under it.
       await pickTool(phone, "Select");
       await openPanel(phone, "Scenes");
-      await sheet(phone, "Scenes").getByRole("button", { name: "Save current view" }).tap();
+      // A phone starts the Scene group folded (docs/design-v1-map-discovery.md 8.4).
+      await (await openSceneGroup(sheet(phone, "Scenes"), "Scene")).getByRole("button", { name: "Save current view" }).tap();
       const framing = phone.getByRole("group", { name: "Starting view" });
       await framing.waitFor();
       await pickTool(phone, "Area");
@@ -2205,8 +2206,12 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
    * - M4: the DM panel leads with Handouts, then Players' screens, Check
    *   their view, the player link and the table display. Away from the
    *   players' scene, its notice leads Players' screens.
-   * - M5: "Add a map image" sits in This scene, right after the name, and
-   *   Map phases and Vision come above Grid.
+   * - M5, regrouped by the map discovery work (ms2-1,
+   *   docs/design-v1-map-discovery.md 8.4): the scene's name with no
+   *   header, then What players see, Map image and grid with the map image
+   *   first and Map phases after it, Walls and movement and Scene, each a
+   *   fold that stays as the device left it, then Export as image and
+   *   Delete.
    * - M7: each other member's Manage opens their Kick and Remove, and
    *   another DM's Remove DM too.
    * - M8: Long rest for the party sits below the list of characters.
@@ -2440,31 +2445,52 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       await waitFor("the DM back on the players' scene", () => dmSocket.you?.sceneId === run.sceneId || null, 30_000);
     });
 
-    test("4. M5: the map image is a row of This scene right after the name, and Map phases and What players see come above Grid", async () => {
+    test("4. ms2-1: the scene's settings are its name with no header, then What players see, Map image and grid, Walls and movement and Scene, each a fold the device remembers, then Export as image and Delete", async () => {
       let panel = await sideTab(dm, "Scenes");
-      let thisScene = section(panel, "This scene");
-      const add = thisScene.getByRole("button", { name: "Add a map image" });
-      await add.waitFor();
-      await thisScene.getByText("No map image yet.", { exact: true }).waitFor();
-      const nameAt = await childIndex(thisScene, thisScene.getByRole("textbox", { name: "Scene name" }));
-      const imageAt = await childIndex(thisScene, add);
-      assert.equal(imageAt, nameAt + 1, "the map image comes right after the scene's name");
-      // Fog went to What players see, beside party vision (docs/design-v1-map-discovery.md 8.1).
-      assert.equal(await thisScene.getByRole("switch", { name: /^Fog/ }).count(), 0, "Fog is left in This scene");
+      const groups = ["What players see", "Map image and grid", "Walls and movement", "Scene"];
+      // docs/design-v1-map-discovery.md 8.4: the name first, in a section with no label, then the groups and the two sections after them.
+      const name = panel.getByRole("textbox", { name: "Scene name" }).last();
+      await name.waitFor();
+      assert.equal(await name.evaluate((el) => (el as unknown as El).closest("section")?.querySelectorAll("h2, h3, h4").length), 0, "the name has a label over it");
       let labels = await sectionLabels(panel);
-      assert.equal(labels.includes("Map image"), false, "a Map image section is left");
-      // Map phases shows once the scene has a map image.
-      assert.deepEqual(labels.slice(labels.indexOf("This scene")), ["This scene", "What players see", "Grid", "Movement", "Map builder", "Export as image", "Delete"]);
-      await thisScene.scrollIntoViewIfNeeded();
-      await shot(dm, "scenes-this-scene-no-map");
+      assert.deepEqual(labels.slice(labels.indexOf("New scene") + 1), [...groups, "Export as image", "Delete"]);
+      // On a computer every group starts open, each header a button saying so.
+      for (const group of groups) assert.equal(await sceneGroupFold(panel, group).getAttribute("aria-expanded"), "true", `${group} starts open`);
+      // The map image leads Map image and grid, the grid's look follows, and Fog sits with What players see.
+      let map = sceneGroup(panel, "Map image and grid");
+      const add = map.getByRole("button", { name: "Add a map image" });
+      await map.getByText("No map image yet.", { exact: true }).waitFor();
+      assert.ok((await box(add)).y < (await box(map.getByRole("switch", { name: "Grid lines" }))).y, "the map image comes before the grid");
+      assert.equal(await map.getByRole("switch", { name: /^Fog/ }).count(), 0, "Fog is left in Map image and grid");
+      const walls = sceneGroup(panel, "Walls and movement");
+      const order = [walls.getByRole("switch", { name: /^Walls and ledges block players' moves/ }), walls.getByRole("combobox", { name: "Automatic walls" }), walls.getByRole("button", { name: "Open the builder" }), walls.getByRole("button", { name: "Clear the build" })];
+      for (let i = 1; i < order.length; i++) assert.ok((await box(order[i - 1]!)).y <= (await box(order[i]!)).y, `Walls and movement in order at ${i}`);
+      const sceneOwn = sceneGroup(panel, "Scene");
+      for (const what of ["Squares across", "Background color"]) await sceneOwn.getByLabel(what).waitFor();
+      await sceneOwn.getByRole("button", { name: "Save current view" }).waitFor();
+      await map.scrollIntoViewIfNeeded();
+      await shot(dm, "scenes-settings-no-map");
+
+      // A group folded stays folded on this device after a reload, and opens again with a tap.
+      const fold = sceneGroupFold(panel, "Scene");
+      await fold.click();
+      assert.equal(await fold.getAttribute("aria-expanded"), "false");
+      assert.equal(await sceneOwn.getByRole("button", { name: "Save current view" }).isVisible(), false, "a folded group hides its settings");
+      await dm.reload();
+      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      panel = await sideTab(dm, "Scenes");
+      await waitFor("Scene folded after the reload", async () => ((await sceneGroupFold(panel, "Scene").getAttribute("aria-expanded")) === "false" ? true : null));
+      assert.equal(await sceneGroupFold(panel, "Map image and grid").getAttribute("aria-expanded"), "true");
+      await openSceneGroup(panel, "Scene");
+      map = sceneGroup(panel, "Map image and grid");
 
       // On the players' scene the picker comes after its warning, with the first map's fog choice, under the row as before.
-      await add.click();
-      const picker = thisScene.getByLabel("Choose the image");
+      await map.getByRole("button", { name: "Add a map image" }).click();
+      const picker = map.getByLabel("Choose the image");
       await picker.waitFor({ state: "attached" });
-      await thisScene.getByText(/^The players are on this scene\./).waitFor();
-      await thisScene.getByRole("checkbox", { name: /^Start it under fog/ }).waitFor();
-      await shot(thisScene, "scenes-map-image-asks-first");
+      await map.getByText(/^The players are on this scene\./).waitFor();
+      await map.getByRole("checkbox", { name: /^Start it under fog/ }).waitFor();
+      await shot(map, "scenes-map-image-asks-first");
       const image = path.join(work, "cave.png");
       await sharp({ create: { width: 500, height: 400, channels: 3, background: { r: 90, g: 80, b: 70 } } }).png().toFile(image);
       await picker.setInputFiles(image);
@@ -2473,15 +2499,20 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       await dm.getByRole("button", { name: "Select", exact: true }).click();
 
       panel = await sideTab(dm, "Scenes");
-      thisScene = section(panel, "This scene");
-      await thisScene.getByRole("button", { name: "Replace map image" }).waitFor();
-      await thisScene.getByRole("button", { name: "Remove map image" }).waitFor();
-      await thisScene.getByText("A 500 × 400 px image.", { exact: true }).waitFor();
-      assert.equal(await childIndex(thisScene, thisScene.getByRole("button", { name: "Replace map image" })), imageAt);
+      map = sceneGroup(panel, "Map image and grid");
+      const replace = map.getByRole("button", { name: "Replace map image" });
+      await replace.waitFor();
+      await map.getByRole("button", { name: "Remove map image" }).waitFor();
+      await map.getByText("A 500 × 400 px image.", { exact: true }).waitFor();
+      // Map phases shows once the scene has a map image, between the image and the grid, a part of the group and no section.
+      const phases = map.getByRole("heading", { name: "Map phases", exact: true });
+      assert.ok((await box(replace)).y < (await box(phases)).y && (await box(phases)).y < (await box(map.getByRole("switch", { name: "Grid lines" }))).y, "Map phases comes between the image and the grid");
       labels = await sectionLabels(panel);
-      assert.deepEqual(labels.slice(labels.indexOf("This scene")), ["This scene", "Map phases", "What players see", "Grid", "Movement", "Map builder", "Export as image", "Delete"]);
-      await thisScene.scrollIntoViewIfNeeded();
-      await shot(dm, "scenes-this-scene-with-map");
+      assert.deepEqual(labels.slice(labels.indexOf("New scene") + 1), [...groups, "Export as image", "Delete"]);
+      await map.scrollIntoViewIfNeeded();
+      await shot(dm, "scenes-settings-with-map");
+      // Step 8's phone page shares this device's storage, and opens on a phone's starts.
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sceneSettingsFolds"));
     });
 
     test("5. M7: Manage on a member's row opens their Kick and Remove, and another DM's Remove DM, each with its confirm, and closes them again", async () => {
@@ -2598,11 +2629,16 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       await sheet.getByRole("button", { name: "Close DM" }).click();
 
       sheet = await phoneSheet(phone, "Scenes");
-      const replace = section(sheet, "This scene").getByRole("button", { name: "Replace map image" });
+      // A phone starts every group but What players see folded (docs/design-v1-map-discovery.md 8.4).
+      for (const [group, open] of [["What players see", "true"], ["Map image and grid", "false"], ["Walls and movement", "false"], ["Scene", "false"]] as const) {
+        assert.equal(await sceneGroupFold(sheet, group).getAttribute("aria-expanded"), open, `${group} on a phone`);
+      }
+      await shot(phone, "phone-scenes-folded");
+      const replace = (await openSceneGroup(sheet, "Map image and grid")).getByRole("button", { name: "Replace map image" });
       await replace.scrollIntoViewIfNeeded();
       const r = await box(replace);
       assert.ok(r.height >= 44, `Replace map image is ${r.height} tall`);
-      await shot(phone, "phone-scenes-this-scene");
+      await shot(phone, "phone-scenes-map-image");
       await sheet.getByRole("button", { name: "Close Scenes" }).click();
 
       sheet = await phoneSheet(phone, "Party");

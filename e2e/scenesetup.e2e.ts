@@ -209,7 +209,8 @@ async function view(sceneId: string, page: Page = dm): Promise<void> {
   const panel = await scenesPanel(page);
   // The row's button is named by the scene's name, then its size and kind.
   await panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first().click();
-  const field = section(panel, "This scene").getByRole("textbox", { name: "Scene name" });
+  // The scene's name heads its settings with no section of its own, after New scene's (docs/design-v1-map-discovery.md 8.4).
+  const field = panel.getByRole("textbox", { name: "Scene name" }).last();
   await waitFor(`${name}'s settings`, async () => ((await field.inputValue()) === name ? true : null));
   if (page === dm) await waitFor(`the DM on ${name}`, () => dmSocket.you?.sceneId === sceneId || null);
 }
@@ -762,23 +763,8 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
             await menu.getByRole("button", { name: /^Room settings/ }).click();
             const newScenes = page.getByRole("group", { name: "Players see on new scenes" });
             await newScenes.waitFor();
-            await newScenes.scrollIntoViewIfNeeded();
-            /*
-             * Every choice in Room settings is the same radio card group,
-             * whose name and help start at the cards' edge and whose options'
-             * words sit in by a card's border and padding, which the edge
-             * check reads as a step. That is the shared group's own look
-             * (features/dm/controls.tsx RadioGroup), so New scenes is held to
-             * Critical Hit damage's: only what it adds is a finding here.
-             */
-            // A finding with its screen, names and places left out: what kind of part is how far off.
-            const kind = (line: string) => line.replace(/^[^:]*: /, "").replace(/"[^"]*"/g, '""').replace(/ \([^)]*\)$/, "");
-            const crit = page.getByRole("group", { name: "Critical Hit damage" });
-            const known = new Set(alignmentLines(await measureAlignment(crit), "").map(kind).filter((l) => l.startsWith("edge ")));
-            const found = alignmentLines(await measureAlignment(newScenes.locator("xpath=ancestor::section[1]")), `${screen} room-new-scenes`);
-            const added = found.filter((l) => !known.has(kind(l)));
-            if (added.length > 0) await shots.take(page, `ss-a-${screen}-room-new-scenes`);
-            lines.push(...added);
+            // Room settings' radio cards stand in one block under their name and help (features/dm/controls.tsx RadioGroup), so the whole group is held to the checks.
+            await measure("room-new-scenes", newScenes.locator("xpath=ancestor::section[1]"));
           } finally {
             await context.close();
           }

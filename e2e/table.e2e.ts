@@ -5,7 +5,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, dragWorld, pickOption, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSceneGroup, pickOption, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { imageAssetId } from "../shared/imageRef.ts";
 
 /**
@@ -177,6 +177,8 @@ describe("raccoon-vtt table basics", { timeout: 120_000 }, () => {
     assert.deepEqual({ cellPx: map.cellPx, originPx: map.originPx }, { cellPx: CRYPT.cellPx, originPx: CRYPT.origin });
 
     await openPanel(dm, "Scenes");
+    // A phone starts Map image and grid folded (docs/design-v1-map-discovery.md 8.4).
+    await openSceneGroup(dm.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]'), "Map image and grid");
     const across = dm.getByLabel("Squares across the image");
     const down = dm.getByLabel("Squares down the image");
     assert.deepEqual([await across.inputValue(), await down.inputValue()], [String(CRYPT.cols), String(CRYPT.rows)]);

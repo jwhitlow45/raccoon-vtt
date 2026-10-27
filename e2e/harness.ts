@@ -588,6 +588,28 @@ export async function openSideTab(page: Page | Locator, title: string): Promise<
   await page.getByRole("tabpanel", { name }).waitFor();
 }
 
+/** A group of the scene settings page, its header's fold (docs/design-v1-map-discovery.md 8.4): "What players see", "Map image and grid", "Walls and movement" or "Scene". */
+export function sceneGroupFold(panel: Locator, name: string): Locator {
+  return panel.getByRole("heading", { name, exact: true }).getByRole("button", { name, exact: true });
+}
+
+/** The section of a scene settings group, folded or open. */
+export function sceneGroup(panel: Locator, name: string): Locator {
+  return panel.getByRole("heading", { name, exact: true }).locator("xpath=ancestor::section[1]");
+}
+
+/**
+ * Opens a group of the scene settings page where it is folded, as a phone
+ * starts Map image and grid, Walls and movement and Scene, and returns its
+ * section. A group stays as it was left on that device.
+ */
+export async function openSceneGroup(panel: Locator, name: string): Promise<Locator> {
+  const fold = sceneGroupFold(panel, name);
+  await fold.waitFor();
+  if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+  return sceneGroup(panel, name);
+}
+
 /** The map stage's camera, read from Konva, which puts itself on the page as a global. */
 /**
  * Whether `target` shows whole and takes a tap as things stand, with
