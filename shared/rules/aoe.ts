@@ -3,7 +3,7 @@ import { axisSteps, hexSetSteps, legFeet } from "./distance.ts";
 import { footprintRect, hexAnchor, occupiedHexes, occupiedRange, sizeCategory, tokenHeightFt, verticalExtentFt, type FootprintToken } from "./footprint.ts";
 import { clamp, distToSegment, sdBox3, sdCorner2, yawVector, type Bounds, type Point, type Point3, type Rect } from "./geom.ts";
 import { SQUARES, type Grid } from "./grid.ts";
-import { cornerAt, footprintHexes, HEX_R, HEX_S, hexAt, hexCenter, hexCorners, hexInScene, hexKey, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
+import { cornerAt, footprintHexes, HEX_R, HEX_S, hexAt, hexCenter, hexCorners, hexInScene, hexKey, sceneHexes, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
 import { AREAS, stepOffWalls } from "./segments.ts";
 import { cachedVisibility, crossingsAt, indexPolygon, insideCrossings, markPolygonCells, type Polygon, type PolygonIndex, type WallSet } from "./walls.ts";
 
@@ -83,8 +83,47 @@ export type Shape3 = {
   bounds: Bounds;
 };
 
+/** The heights in cells, low then high, over a map point that lie inside a solid. */
+export type Span = readonly [number, number];
+
+/**
+ * A shape that stands in the air (docs/design-v1-iso-area-shapes.md 4.1):
+ * every area's shape is convex, so the heights inside it over a map point
+ * are one interval. Isometric reads it to stand the area at its real
+ * height, so it must hold exactly the heights `inside` holds.
+ */
+export type Solid3 = Shape3 & {
+  /** The interval over a map point, or null where the shape does not reach. */
+  span(x: number, y: number): Span | null;
+};
+
+/**
+ * A box in cells: its center, its three axes (unit, square to each other)
+ * and its half extents along them.
+ */
+export type SolidBox = { c: Point3; axes: readonly [Point3, Point3, Point3]; half: readonly [number, number, number] };
+
+/**
+ * An area's shape by its parameters in cells (design 4.1), so the
+ * isometric drawing builds the very solid the rules catch with. A cone's
+ * frame is the rules' own (`aimFrame`): `a` along its axis, `n` level and
+ * square to it, `m` square to both. Cubes and lines, level or aimed, are
+ * boxes. An emanation is its creature's box, axis-aligned, grown by its
+ * distance, a point emanation a box of no size. On hexes an emanation is
+ * the stack of hexes and layers its reach covers (`hexStackPrisms`).
+ */
+export type AreaSolid =
+  | { kind: "sphere"; c: Point3; r: number }
+  | { kind: "cylinder"; c: Point; r: number; z0: number; z1: number }
+  | { kind: "cone"; apex: Point3; a: Point3; n: Point3; m: Point3; L: number }
+  | ({ kind: "box" } & SolidBox)
+  | { kind: "rounded"; box: SolidBox; D: number }
+  | { kind: "hexStack"; reach: HexReach; bounds: { w: number; h: number } };
+
 export type ResolvedArea = {
-  shape: Shape3;
+  shape: Solid3;
+  /** The same shape by its parameters, for drawing it as it stands. */
+  solid: AreaSolid;
   /** Height in cells of the slice that shading uses, and the height creatures are measured against. */
   originZ: number;
   /** The token the area starts from: the attached token, or the caster when the origin is on it. */
@@ -244,9 +283,17 @@ export function emanationFootprint(g: Grid, token: FootprintToken, feetPerCell: 
   return g.shape === "hex" ? { ...kept, size: sizeCategory(token) } : kept;
 }
 
-function sphereShape(ox: number, oy: number, oz: number, r: number): Shape3 {
+function sphereShape(ox: number, oy: number, oz: number, r: number): Solid3 {
   const r2 = r * r;
   return {
+    span(x, y) {
+      const dx = x - ox;
+      const dy = y - oy;
+      const left = r2 - (dx * dx + dy * dy);
+      if (left < 0) return null;
+      const h = Math.sqrt(left);
+      return [oz - h, oz + h];
+    },
     inside(x, y, z) {
       const dx = x - ox;
       const dy = y - oy;
@@ -263,11 +310,16 @@ function sphereShape(ox: number, oy: number, oz: number, r: number): Shape3 {
   };
 }
 
-function cylinderShape(ox: number, oy: number, zLo: number, zHi: number, r: number): Shape3 {
+function cylinderShape(ox: number, oy: number, zLo: number, zHi: number, r: number): Solid3 {
   const r2 = r * r;
   const zc = (zLo + zHi) / 2;
   const hz = (zHi - zLo) / 2;
   return {
+    span(x, y) {
+      const dx = x - ox;
+      const dy = y - oy;
+      return dx * dx + dy * dy <= r2 ? [zLo, zHi] : null;
+    },
     inside(x, y, z) {
       const dx = x - ox;
       const dy = y - oy;
@@ -307,7 +359,7 @@ function aimFrame(yawDeg: number, pitchDeg: number): AimFrame {
  * A level cone's frame has `m` straight up, so it reads the point's height
  * offset unchanged.
  */
-function coneShape(ox: number, oy: number, oz: number, f: AimFrame, L: number): Shape3 {
+function coneShape(ox: number, oy: number, oz: number, f: AimFrame, L: number): Solid3 {
   const { a, n, m } = f;
   const half = L / 2;
   const tipX = ox + a.x * L;
@@ -315,17 +367,24 @@ function coneShape(ox: number, oy: number, oz: number, f: AimFrame, L: number): 
   // The base circle seen from above spans its radius times the axis's reach off each map axis.
   const ex = half * Math.sqrt(a.y * a.y + a.z * a.z);
   const ey = half * Math.sqrt(a.x * a.x + a.z * a.z);
+  const inside = (x: number, y: number, z: number) => {
+    const rx = x - ox;
+    const ry = y - oy;
+    const rz = z - oz;
+    const u = rx * a.x + ry * a.y + rz * a.z;
+    if (u < 0 || u > L) return false;
+    const w = rx * n.x + ry * n.y;
+    const h = rx * m.x + ry * m.y + rz * m.z;
+    return 4 * (w * w + h * h) <= u * u;
+  };
   return {
-    inside(x, y, z) {
+    span(x, y) {
       const rx = x - ox;
       const ry = y - oy;
-      const rz = z - oz;
-      const u = rx * a.x + ry * a.y + rz * a.z;
-      if (u < 0 || u > L) return false;
-      const w = rx * n.x + ry * n.y;
-      const h = rx * m.x + ry * m.y + rz * m.z;
-      return 4 * (w * w + h * h) <= u * u;
+      const t = coneSpan(rx * a.x + ry * a.y, rx * n.x + ry * n.y, rx * m.x + ry * m.y, a.z, m.z, L);
+      return t ? [oz + t[0], oz + t[1]] : null;
     },
+    inside,
     sd(x, y, z) {
       const rx = x - ox;
       const ry = y - oy;
@@ -346,8 +405,56 @@ function coneShape(ox: number, oy: number, oz: number, f: AimFrame, L: number): 
   };
 }
 
+/*
+ * The heights t above the apex over a map point that lie in a cone, where
+ * the point sits u0 along the axis, w across it and h0 up its frame at the
+ * apex's height, and the axis and the frame's `m` climb s and c a cell of
+ * height. Inside is 0 <= u <= L with 4(w² + h²) <= u², u = u0 + s t and
+ * h = h0 + c t: the first a slab in t, the second a quadratic whose roots
+ * bound where the vertical line crosses the double cone. Within the slab u
+ * is not negative, so only one nappe counts and the answer is one
+ * interval. Where the quadratic opens up the line passes both nappes, one
+ * ray on each, and the slab leaves only the cone's own.
+ */
+function coneSpan(u0: number, w: number, h0: number, s: number, c: number, L: number): Span | null {
+  let lo = -Infinity;
+  let hi = Infinity;
+  if (s === 0) {
+    if (u0 < 0 || u0 > L) return null;
+  } else {
+    const t0 = -u0 / s;
+    const t1 = (L - u0) / s;
+    lo = Math.min(t0, t1);
+    hi = Math.max(t0, t1);
+  }
+  const A = s * s - 4 * c * c;
+  const B = 2 * (u0 * s - 4 * h0 * c);
+  const C = u0 * u0 - 4 * h0 * h0 - 4 * w * w;
+  const meet = (a: number, b: number): Span | null => {
+    const l = Math.max(lo, a);
+    const r = Math.min(hi, b);
+    return l <= r ? [l, r] : null;
+  };
+  if (Math.abs(A) < 1e-12) {
+    // The vertical line runs along the cone's slant: the quadratic is a line.
+    if (Math.abs(B) < 1e-300) return C >= 0 ? meet(-Infinity, Infinity) : null;
+    return B > 0 ? meet(-C / B, Infinity) : meet(-Infinity, -C / B);
+  }
+  const disc = B * B - 4 * A * C;
+  if (disc < 0) return A > 0 ? meet(-Infinity, Infinity) : null;
+  // The stable pair of roots: no difference of near-equal numbers.
+  const q = -0.5 * (B + (B >= 0 ? 1 : -1) * Math.sqrt(disc));
+  const r1 = q === 0 ? 0 : q / A;
+  const r2 = q === 0 ? 0 : C / q;
+  const rLo = Math.min(r1, r2);
+  const rHi = Math.max(r1, r2);
+  if (A < 0) return meet(rLo, rHi);
+  // Both rays outlast the slab only within a hair of the apex, where they meet.
+  return meet(-Infinity, rLo) ?? meet(rHi, Infinity);
+}
+
 /** A box centered on c with half extents hu along `a`, hw along `n` and hh along `m`: a line aimed up or down. */
-function aimedBoxShape(c: Point3, f: AimFrame, hu: number, hw: number, hh: number): Shape3 {
+function aimedBoxShape(c: Point3, f: AimFrame, hu: number, hw: number, hh: number): Solid3 {
   const { a, n, m } = f;
   const ex = Math.abs(a.x) * hu + Math.abs(n.x) * hw + Math.abs(m.x) * hh;
   const ey = Math.abs(a.y) * hu + Math.abs(n.y) * hw + Math.abs(m.y) * hh;
@@ -358,6 +465,28 @@ function aimedBoxShape(c: Point3, f: AimFrame, hu: number, hw: number, hh: numbe
     return [rx * a.x + ry * a.y + rz * a.z, rx * n.x + ry * n.y, rx * m.x + ry * m.y + rz * m.z];
   };
   return {
+    span(x, y) {
+      const rx = x - c.x;
+      const ry = y - c.y;
+      let lo = -Infinity;
+      let hi = Infinity;
+      for (const [e, h] of [
+        [a, hu],
+        [n, hw],
+        [m, hh],
+      ] as const) {
+        const p = rx * e.x + ry * e.y;
+        if (e.z === 0) {
+          if (Math.abs(p) > h) return null;
+          continue;
+        }
+        const t0 = (-h - p) / e.z;
+        const t1 = (h - p) / e.z;
+        lo = Math.max(lo, Math.min(t0, t1));
+        hi = Math.min(hi, Math.max(t0, t1));
+      }
+      return lo <= hi ? [c.z + lo, c.z + hi] : null;
+    },
     inside(x, y, z) {
       const [u, w, h] = local(x, y, z);
       return Math.abs(u) <= hu && Math.abs(w) <= hw && Math.abs(h) <= hh;
@@ -445,10 +574,15 @@ function aimedTopView(hull: Point[], ox: number, oy: number, oz: number, f: AimF
 }
 
 /** A box centered on (cx, cy, cz) with half extents hu along (dx, dy), hw across it, and hz up. */
-function orientedBoxShape(cx: number, cy: number, cz: number, dx: number, dy: number, hu: number, hw: number, hz: number): Shape3 {
+function orientedBoxShape(cx: number, cy: number, cz: number, dx: number, dy: number, hu: number, hw: number, hz: number): Solid3 {
   const ex = Math.abs(dx) * hu + Math.abs(dy) * hw;
   const ey = Math.abs(dy) * hu + Math.abs(dx) * hw;
   return {
+    span(x, y) {
+      const rx = x - cx;
+      const ry = y - cy;
+      return Math.abs(rx * dx + ry * dy) <= hu && Math.abs(ry * dx - rx * dy) <= hw ? [cz - hz, cz + hz] : null;
+    },
     inside(x, y, z) {
       const rx = x - cx;
       const ry = y - cy;
@@ -464,7 +598,7 @@ function orientedBoxShape(cx: number, cy: number, cz: number, dx: number, dy: nu
 }
 
 /** Everything within D of the box [x0, x1] x [y0, y1] x [z0, z1]. */
-function emanationShape(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, D: number): Shape3 {
+function emanationShape(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, D: number): Solid3 {
   const cx = (x0 + x1) / 2;
   const cy = (y0 + y1) / 2;
   const cz = (z0 + z1) / 2;
@@ -473,6 +607,14 @@ function emanationShape(x0: number, y0: number, z0: number, x1: number, y1: numb
   const hz = (z1 - z0) / 2;
   const D2 = D * D;
   return {
+    span(x, y) {
+      const ex = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
+      const ey = y < y0 ? y0 - y : y > y1 ? y - y1 : 0;
+      const left = D2 - (ex * ex + ey * ey);
+      if (left < 0) return null;
+      const h = Math.sqrt(left);
+      return [z0 - h, z1 + h];
+    },
     inside(x, y, z) {
       const ex = x < x0 ? x0 - x : x > x1 ? x - x1 : 0;
       const ey = y < y0 ? y0 - y : y > y1 ? y - y1 : 0;
@@ -578,7 +720,8 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
   const size = sizeFt / fpc;
   const d = yawVector(template.yaw);
   const pitch = pitchOf(template);
-  let shape: Shape3;
+  let shape: Solid3;
+  let solid: AreaSolid;
   let originZ = oz;
   let probes: Probe[];
   let box: Rect | undefined;
@@ -589,17 +732,21 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
   switch (template.shape) {
     case "sphere":
       shape = sphereShape(ox, oy, oz, size);
+      solid = { kind: "sphere", c: { x: ox, y: oy, z: oz }, r: size };
       probes = [{ at: origin, prefer: toward }];
       break;
     case "cylinder": {
       const h = areaFt(template.height, DEFAULT_CYLINDER_HEIGHT_FT) / fpc;
-      shape = template.anchor === "top" ? cylinderShape(ox, oy, oz - h, oz, size) : cylinderShape(ox, oy, oz, oz + h, size);
+      const [z0, z1] = template.anchor === "top" ? [oz - h, oz] : [oz, oz + h];
+      shape = cylinderShape(ox, oy, z0, z1, size);
+      solid = { kind: "cylinder", c: { x: ox, y: oy }, r: size, z0, z1 };
       probes = [{ at: origin, prefer: toward }];
       break;
     }
     case "cone": {
       const f = aimFrame(template.yaw, pitch);
       shape = coneShape(ox, oy, oz, f, size);
+      solid = { kind: "cone", apex: { x: ox, y: oy, z: oz }, a: f.a, n: f.n, m: f.m, L: size };
       if (pitch !== 0) {
         const base = { x: ox + f.a.x * size, y: oy + f.a.y * size };
         const rim: Point[] = [{ x: ox, y: oy }];
@@ -622,18 +769,23 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
       // it from the face's center, so the face's center is that far back the other way.
       const fx = ox + d.y * u * size;
       const fy = oy - d.x * u * size;
-      shape = orientedBoxShape(fx + d.x * half, fy + d.y * half, oz - v * size, d.x, d.y, half, half, half);
+      const c = { x: fx + d.x * half, y: fy + d.y * half, z: oz - v * size };
+      shape = orientedBoxShape(c.x, c.y, c.z, d.x, d.y, half, half, half);
+      solid = { kind: "box", c, axes: levelAxes(d), half: [half, half, half] };
       probes = [{ at: origin, prefer: toward }];
       break;
     }
     case "line": {
       const halfWidth = areaFt(template.width, DEFAULT_LINE_WIDTH_FT) / fpc / 2;
       if (pitch === 0) {
-        shape = orientedBoxShape(ox + (d.x * size) / 2, oy + (d.y * size) / 2, oz, d.x, d.y, size / 2, halfWidth, halfWidth);
+        const c = { x: ox + (d.x * size) / 2, y: oy + (d.y * size) / 2, z: oz };
+        shape = orientedBoxShape(c.x, c.y, c.z, d.x, d.y, size / 2, halfWidth, halfWidth);
+        solid = { kind: "box", c, axes: levelAxes(d), half: [size / 2, halfWidth, halfWidth] };
       } else {
         const f = aimFrame(template.yaw, pitch);
         const c = { x: ox + (f.a.x * size) / 2, y: oy + (f.a.y * size) / 2, z: oz + (f.a.z * size) / 2 };
         shape = aimedBoxShape(c, f, size / 2, halfWidth, halfWidth);
+        solid = { kind: "box", c, axes: [f.a, f.n, f.m], half: [size / 2, halfWidth, halfWidth] };
         const corners: Point[] = [];
         for (const su of [-1, 1]) {
           for (const sw of [-1, 1]) {
@@ -662,6 +814,7 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
         reach = { g, from: src.hexes, steps: Math.floor(sizeFt / fpc + 1e-9), ft: sizeFt, z0, z1: Math.max(z0 + 1, Math.ceil(src.hi / fpc)), fpc, rule: ctx.settings.diagonal ?? "five" };
         // The continuous shape bounds what can be covered: every hex within its steps lies within that many cells and a hex of its box.
         shape = emanationShape(src.center.x - half, src.center.y - half, src.lo / fpc, src.center.x + half, src.center.y + half, src.hi / fpc, reach.steps + 1);
+        solid = { kind: "hexStack", reach, bounds: sceneBounds(ctx) };
         originZ = (src.lo + src.hi) / 2 / fpc;
         probes = src.hexes.map((h) => ({ at: hexCenter(g, h), prefer: src.center }));
         break;
@@ -674,6 +827,7 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
         const { rect: r, lo, hi } = around;
         box = r;
         shape = emanationShape(r.x, r.y, lo / fpc, r.x + r.w, r.y + r.h, hi / fpc, size);
+        solid = roundedBox(r.x, r.y, lo / fpc, r.x + r.w, r.y + r.h, hi / fpc, size);
         originZ = (lo + hi) / 2 / fpc;
         // The union of what the center and the four corners see (section 9.3).
         const c = rectCenter(r);
@@ -686,6 +840,7 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
         ];
       } else {
         shape = emanationShape(ox, oy, oz, ox, oy, oz, size);
+        solid = roundedBox(ox, oy, oz, ox, oy, oz, size);
         probes = [{ at: origin, prefer: null }];
       }
       break;
@@ -694,7 +849,23 @@ export function resolveArea(template: AreaTemplateInput, ctx: AreaContext): Reso
 
   const walls = ctx.walls;
   const polygons = walls && walls.blockers.length > 0 ? probes.map((p) => visibleFrom(walls, p, sceneBounds(ctx))) : [];
-  return { shape, originZ, originTokenId: originToken?.id, ...(box ? { box } : {}), ...(reach ? { reach } : {}), polygons, ...top };
+  return { shape, solid, originZ, originTokenId: originToken?.id, ...(box ? { box } : {}), ...(reach ? { reach } : {}), polygons, ...top };
+}
+
+/** The axes of a level box aimed along `d`: along it, across it as `orientedBoxShape` reads it, and up. */
+function levelAxes(d: Point): [Point3, Point3, Point3] {
+  return [
+    { x: d.x, y: d.y, z: 0 },
+    { x: -d.y, y: d.x, z: 0 },
+    { x: 0, y: 0, z: 1 },
+  ];
+}
+
+/** `emanationShape`'s box and distance as a solid. */
+function roundedBox(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, D: number): AreaSolid {
+  const c = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: (z0 + z1) / 2 };
+  const half: [number, number, number] = [(x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2];
+  return { kind: "rounded", box: { c, axes: levelAxes({ x: 1, y: 0 }), half }, D };
 }
 
 type EmanationBox = { rect: Rect; lo: number; hi: number };
@@ -748,6 +919,9 @@ const OUT = 0;
 const IN = 1;
 const CROSSED = 2;
 
+/** What sampling reads of a resolved area: the shape it samples, an aimed area's top view in shading, and what clips it. */
+type SampledArea = Pick<ResolvedArea, "polygons" | "reach"> & { shape: Shape3 };
+
 /*
  * Per-cell sample counts for one resolved area. The visibility polygons do
  * not depend on height, so one sampler serves the shading slice and every
@@ -770,7 +944,7 @@ class Sampler {
   /** Whether the center of the cell last passed to `evalCell` is inside. */
   center = false;
 
-  constructor(area: ResolvedArea, n: number, scene: { w: number; h: number }) {
+  constructor(area: SampledArea, n: number, scene: { w: number; h: number }) {
     this.shape = area.shape;
     this.n = n;
     this.total = n * n;
@@ -1133,6 +1307,41 @@ function withinReach(reach: HexReach, h: number, z0: number, z1: number): boolea
   return (reach.rule === "euclid" ? Math.round(ft) : ft) <= reach.ft;
 }
 
+/** One hex of a hex emanation's solid: from layer `lo` up to the top of layer `hi - 1`, in cells. */
+export type HexPrism = { hex: Hex; lo: number; hi: number };
+
+/**
+ * A hex emanation's solid (design 4.6): each hex of the scene its reach
+ * covers, from the lowest to the highest layer `withinReach` passes, so the
+ * drawn solid is exactly the hexes and layers it catches. The layers within
+ * reach of a hex are one run, since a layer's vertical steps grow away from
+ * the source's layers and every diagonal rule grows with them.
+ */
+export function hexStackPrisms(stack: Extract<AreaSolid, { kind: "hexStack" }>): HexPrism[] {
+  const { reach, bounds } = stack;
+  const layers = new Map<number, { lo: number; hi: number } | null>();
+  const layersAt = (d: number) => {
+    let run = layers.get(d);
+    if (run !== undefined) return run;
+    run = null;
+    // A layer more than its steps from the source's is out of reach on every diagonal rule.
+    for (let layer = reach.z0 - reach.steps; layer < reach.z1 + reach.steps; layer++) {
+      if (!withinReach(reach, d, layer, layer + 1)) continue;
+      run = run ? { lo: run.lo, hi: layer + 1 } : { lo: layer, hi: layer + 1 };
+    }
+    layers.set(d, run);
+    return run;
+  };
+  const out: HexPrism[] = [];
+  for (const hex of sceneHexes(reach.g, bounds)) {
+    const d = hexSetSteps(reach.g, reach.from, [hex]);
+    if (d > reach.steps) continue;
+    const run = layersAt(d);
+    if (run) out.push({ hex, lo: run.lo, hi: run.hi });
+  }
+  return out;
+}
+
 /**
  * Whether a point lies on any of these hexes, its outline included: on or
  * inside each side of one, the corners rounded as `hexEdgeOrigin` takes
@@ -1241,7 +1450,7 @@ function hexPattern(n: number): readonly Point[] {
  */
 class HexSampler {
   readonly g: HexGrid;
-  readonly area: ResolvedArea;
+  readonly area: SampledArea;
   readonly pattern: readonly Point[];
   readonly scene: { w: number; h: number };
   readonly crossings = new Map<number, Float64Array[]>();
@@ -1249,7 +1458,7 @@ class HexSampler {
   /** Whether the center of the hex last passed to `count` is inside. */
   center = false;
 
-  constructor(g: HexGrid, area: ResolvedArea, n: number, scene: { w: number; h: number }) {
+  constructor(g: HexGrid, area: SampledArea, n: number, scene: { w: number; h: number }) {
     this.g = g;
     this.area = area;
     this.pattern = hexPattern(n).map((p) => (g.orient === "rows" ? p : { x: p.y, y: p.x }));
