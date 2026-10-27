@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import { logsInIdOrder } from "#shared/logRings.ts";
-import { OP_VERSION, SNAPSHOT_VERSION, migrateOp, migrateSnapshot, opMigrations, type MigrationStep } from "#shared/migrate.ts";
+import { MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -54,6 +54,13 @@ type OpRow = { seq: string; at: Date; actor_member_id: string; actor_role: Viewe
  * checks it, so a rule that tightens later adapts older ops there (see
  * `opMigrations`) instead of stopping their rooms. `migrations` is only
  * for tests.
+ *
+ * A snapshot from before map discovery takes its upgrade step once, over
+ * the state recovered from everything stored before it
+ * (docs/design-v1-map-discovery.md 5.5, ASTRA-31): just before the first
+ * op of op version 26, or after the last op when none is that new. Older
+ * ops replay by their own rules first, so the scenes they made or moved
+ * the players to are marked by the step alone (MD-R6-1).
  */
 export async function loadRoom(
   pool: Pool,
@@ -86,6 +93,7 @@ export async function loadRoom(
   let seq = snapshotSeq;
   let replayFailed = false;
   let replayed = 0;
+  let upgrade = needsMapDiscoveryUpgrade(row.schema_version);
   const ops = await pool.query<OpRow>(
     "select seq, at, actor_member_id, actor_role, op, op_version from room_ops where room_id = $1 and seq > $2 order by seq",
     [roomId, snapshotSeq],
@@ -100,6 +108,10 @@ export async function loadRoom(
       if (!stored.ok) {
         reason = stored.reason;
       } else {
+        if (upgrade && r.op_version >= MAP_DISCOVERY_OP_VERSION) {
+          state = mapDiscoveryUpgrade(state);
+          upgrade = false;
+        }
         // The stored version goes in the envelope, so an older op keeps the rules it was applied under (shared/migrate.ts).
         const result = applyOp(state, stored.op, { memberId: r.actor_member_id, role: r.actor_role }, { seq: rowSeq, at: r.at.toISOString(), opVersion: r.op_version });
         if (!result.ok) reason = `op ${rowSeq} (${stored.op.t}) was refused on replay: ${result.message}`;
@@ -116,6 +128,7 @@ export async function loadRoom(
       break;
     }
   }
+  if (upgrade) state = mapDiscoveryUpgrade(state);
   return { state, seq, snapshotSeq, replayFailed, replayed, stateBytes: serializedBytes(state) };
 }
 
