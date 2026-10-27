@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { PathStop, RoomState, Token, Viewer } from "./model.ts";
-import { canApply, mayMoveToken } from "./permissions.ts";
+import { canApply, mayMoveToken, touchLanding } from "./permissions.ts";
 import { projectState } from "./project.ts";
 import type { Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
@@ -156,20 +156,25 @@ export type Step = { who: Viewer; op: Op | ((view: RoomState, state: RoomState) 
 export type OpPair = Omit<Pair, "drags"> & { steps: readonly Step[] };
 
 /**
- * How a step is checked and applied: by default as the server does,
- * permissions then the reducer. `mark` is what the server keeps beside the
- * room, such as whether a player's undo step is trapped
- * (docs/design-v1-traps.md 6.5), which must be the same in both rooms too.
+ * How a step is checked and applied: by default as the server does, the
+ * touch rule's landing, permissions, then the reducer. `mark` is what the
+ * server keeps or tells beside the room, such as whether a player's undo
+ * step is trapped (docs/design-v1-traps.md 6.5) or their walk was blocked,
+ * which must be the same in both rooms too.
  */
 export type Applier = (state: RoomState, op: Op, who: Viewer, seq: number) => { ok: true; state: RoomState; mark?: string } | { ok: false; code: string; message: string };
 
 const deps = { canUseAsset: () => true };
 
 export const serverApply: Applier = (state, op, who, seq) => {
-  const decision = canApply(op, who, state, deps);
+  // A player's walk the real build stops lands at its last clear spot, stored as made, and the sender hears it was blocked (docs/design-v1-map-discovery.md 6).
+  const landed = touchLanding(op, who, state, deps);
+  const sent = landed?.op ?? op;
+  const decision = canApply(sent, who, state, deps);
   if (!decision.ok) return decision;
-  const r = applyOp(state, op, who, env(seq));
-  return r.ok ? { ok: true, state: r.state, ...(r.trapped ? { mark: "trapped" } : {}) } : r;
+  const r = applyOp(state, sent, who, env(seq));
+  const marks = [...(r.ok && r.trapped ? ["trapped"] : []), ...(landed ? ["blocked"] : [])];
+  return r.ok ? { ok: true, state: r.state, ...(marks.length > 0 ? { mark: marks.join(" ") } : {}) } : r;
 };
 
 /**
