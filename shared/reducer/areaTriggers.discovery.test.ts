@@ -10,6 +10,7 @@ import { applyOp } from "../reducer.ts";
 import { visionRules } from "../ruleHooks.ts";
 import { sceneGrid } from "../rules/grid.ts";
 import { hexAt, hexCenter, hexKey, type HexGrid } from "../rules/hex.ts";
+import { convexLive, groundOf } from "../rules/held.ts";
 import { DM, P1, P2, entry, env, member, room, template, token } from "../testutil.ts";
 
 /**
@@ -191,5 +192,39 @@ describe("an area's reminder by the receiver's live ground (decision 13)", () =>
     };
     assert.ok(reads(turnEnd(make(false)).state));
     assert.equal(reads(turnEnd(make(true)).state), false);
+  });
+
+  test("an attached emanation whose stored origin lies far off the scene reads only the ground round its token (MD2-ASTRA-7)", () => {
+    for (const gridShape of [undefined, "hexRows", "hexColumns"] as const) {
+      const s = fight();
+      s.scenes.s1 = { ...s.scenes.s1!, bounds: { w: 40, h: 30 }, ...(gridShape ? { gridShape } : {}) };
+      s.tokens.cleric = token("cleric", { kind: "pc", name: "Cleric", disposition: "ally", ownerIds: ["p1"], x: 10, y: 5 });
+      s.templates.cloud = template("cloud", { shape: "emanation", size: 15, attachedTo: "cleric", casterId: "cleric", includeOrigin: false, spell: "Spirit Guardians", ownerId: "p1", triggers: ["turnEnd"], origin: { x: 400, y: 400, z: 0 } });
+      if (gridShape) liftAllBut(s, "dm", []);
+      else lift(s, "dm", { x: 0, y: 0, w: 40, h: 30 });
+      // The far rows toward the stored origin under fog: the area never reads them.
+      lift(s, "dm", { x: 0, y: 26, w: 40, h: 4 }, "s1", false);
+      assert.ok(reads(turnEnd(s).state), gridShape ?? "squares");
+    }
+  });
+
+  test("a hull reaching far off the scene costs no more than the scene, on squares and both hex orientations (MD2-ASTRA-7)", () => {
+    for (const gridShape of [undefined, "hexRows", "hexColumns"] as const) {
+      const s = fight();
+      s.scenes.s1 = { ...s.scenes.s1!, bounds: { w: 40, h: 30 }, ...(gridShape ? { gridShape } : {}) };
+      if (gridShape) liftAllBut(s, "dm", []);
+      else lift(s, "dm", { x: 0, y: 0, w: 40, h: 30 });
+      const ground = groundOf(s, "s1", null)!;
+      const into = { n: 0 };
+      assert.ok(convexLive(ground, [{ x: 10, y: 5 }, { x: 400, y: 400 }], into));
+      // The clipped box at most, on a half-cell grid for hexes.
+      assert.ok(into.n <= 83 * 63, `${gridShape ?? "squares"}: ${into.n} visited`);
+      const off = { n: 0 };
+      assert.ok(convexLive(ground, [{ x: 300, y: 300 }, { x: 400, y: 400 }], off));
+      assert.equal(off.n, 0, "a hull wholly off the scene visits nothing");
+      // Still conservative at the scene's edge: a hidden cell there the hull crosses says no.
+      lift(s, "dm", { x: 32, y: 28, w: 3, h: 2 }, "s1", false);
+      assert.equal(convexLive(groundOf(s, "s1", null)!, [{ x: 10, y: 5 }, { x: 400, y: 400 }]), false);
+    }
   });
 });

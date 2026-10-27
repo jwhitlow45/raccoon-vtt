@@ -1927,10 +1927,9 @@ function coverLive(g: Ground, token: FootprintToken & Point): boolean {
   }
   const { w, h } = footprintSize(token);
   const E = 1e-9;
-  for (let y = Math.floor(token.y + E); y < Math.ceil(token.y + h - E); y++) {
-    for (let x = Math.floor(token.x + E); x < Math.ceil(token.x + w - E); x++) {
-      if (x >= 0 && y >= 0 && x < g.bounds.w && y < g.bounds.h && !g.live(x, y)) return false;
-    }
+  // Only the cells inside the scene, so a footprint asked for far off it costs no more than the scene (MD2-ASTRA-7).
+  for (let y = Math.max(0, Math.floor(token.y + E)); y < Math.min(g.bounds.h, Math.ceil(token.y + h - E)); y++) {
+    for (let x = Math.max(0, Math.floor(token.x + E)); x < Math.min(g.bounds.w, Math.ceil(token.x + w - E)); x++) if (!g.live(x, y)) return false;
   }
   return true;
 }

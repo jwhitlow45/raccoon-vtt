@@ -307,32 +307,40 @@ function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveL
  * a closed convex polygon touches lies on live ground, a hair past
  * touching included, so rounding only ever answers no (decisions 11 and
  * 13). `hull` is in cells and in order round it (aoe.ts convexHull), and
- * may be a segment or a point. Cells off the scene hold nothing to hide.
+ * may be a segment or a point. Cells off the scene hold nothing to hide,
+ * so the search is clipped to the scene's box first: a hull reaching far
+ * past the scene, as from an area's origin stored anywhere, costs no more
+ * than the scene (MD2-ASTRA-7). `work`, for tests, counts the cells and
+ * grid points visited.
  */
-export function convexLive(ground: Ground, hull: readonly Point[]): boolean {
+export function convexLive(ground: Ground, hull: readonly Point[], work?: { n: number }): boolean {
   if (hull.length === 0) return true;
   const E = 1e-9;
   const xs = hull.map((p) => p.x);
   const ys = hull.map((p) => p.y);
-  const x0 = Math.min(...xs) - E;
-  const y0 = Math.min(...ys) - E;
-  const x1 = Math.max(...xs) + E;
-  const y1 = Math.max(...ys) + E;
+  // Every cell of the scene, hexes included (hex.ts hexInScene), lies inside its box.
+  const x0 = Math.max(Math.min(...xs) - E, -E);
+  const y0 = Math.max(Math.min(...ys) - E, -E);
+  const x1 = Math.min(Math.max(...xs) + E, ground.bounds.w + E);
+  const y1 = Math.min(Math.max(...ys) + E, ground.bounds.h + E);
+  if (x0 > x1 || y0 > y1) return true;
   if (!isHex(ground.grid)) {
     for (let y = Math.max(0, Math.floor(y0)); y <= Math.min(ground.bounds.h - 1, Math.floor(y1)); y++) {
       for (let x = Math.max(0, Math.floor(x0)); x <= Math.min(ground.bounds.w - 1, Math.floor(x1)); x++) {
+        if (work) work.n++;
         if (!ground.live(x, y) && convexMeet(hull, [{ x, y }, { x: x + 1, y }, { x: x + 1, y: y + 1 }, { x, y: y + 1 }], E)) return false;
       }
     }
     return true;
   }
-  // Every hex the box round the hull reaches: a point of the box lies within 0.36 cell of a point of a half-cell grid over it,
+  // Every hex the clipped box reaches: a point of the box lies within 0.36 cell of a point of a half-cell grid over it,
   // so the hex holding that grid point is its own or a neighbor (centers 1 apart, the next ring 1.73).
   const grid = ground.grid as HexGrid;
   const near = new Map<string, Hex>();
   const step = 0.5;
   for (let y = y0; y <= y1 + step; y += step) {
     for (let x = x0; x <= x1 + step; x += step) {
+      if (work) work.n++;
       const at = hexAt(grid, { x: Math.min(x, x1), y: Math.min(y, y1) });
       for (const hx of [at, ...hexNeighbors(grid, at)]) near.set(hexKey(hx), hx);
     }

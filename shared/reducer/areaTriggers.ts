@@ -196,11 +196,11 @@ function raysOnLiveGround(at: RoomState, template: AreaTemplate, there: Token): 
   const ctx = contextOf(at, template.sceneId);
   const area = ctx ? resolveArea(template, ctx) : null;
   const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
-  const probes: Point[] = [{ x: template.origin.x, y: template.origin.y }];
+  // An attached area starts from its token, wherever its stored origin lies (aoe.ts resolveArea), so that origin is no probe.
+  const probes: Point[] = attached ? [...corners(footprintRect(grid, attached)), ...(isHex(grid) ? hexOutline(grid, occupiedHexes(grid, attached)) : [])] : [{ x: template.origin.x, y: template.origin.y }];
   if (area?.box) probes.push(...corners(area.box));
-  if (attached) probes.push(...corners(footprintRect(grid, attached)), ...(isHex(grid) ? hexOutline(grid, occupiedHexes(grid, attached)) : []));
   // A point emanation on hexes looks from the center of the hex its origin is in.
-  if (isHex(grid)) probes.push(hexCenter(grid, hexAt(grid, template.origin)));
+  if (isHex(grid) && !attached && !area?.box && template.shape === "emanation") probes.push(hexCenter(grid, hexAt(grid, template.origin)));
   const starts = probes.flatMap((p) => corners({ x: p.x - PROBE_STEP, y: p.y - PROBE_STEP, w: 2 * PROBE_STEP, h: 2 * PROBE_STEP }));
   const r = occupiedRange(grid, there);
   const ends = isHex(grid) ? hexOutline(grid, occupiedHexes(grid, there)) : corners(inset({ x: r.x0, y: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 }, SAMPLE_INSET));
