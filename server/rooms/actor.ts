@@ -6,9 +6,9 @@ import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Token, Viewer } from "#shared/model.ts";
-import { canApply, type PermissionDeps } from "#shared/permissions.ts";
+import { canApply, doorReachPassed, touchLanding, type PermissionDeps } from "#shared/permissions.ts";
 import { projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
-import { clientOpSchema, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
+import { clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
@@ -46,6 +46,8 @@ import {
   type RoomInfo,
 } from "./persistence.ts";
 import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
+import { layerCharge } from "./memorySize.ts";
+import { forgetAllOps, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { keptFrom, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
@@ -181,6 +183,12 @@ type Batch = {
   trapped: Map<ClientKey, number[]>;
   /** Each client's ops that wrote a sync record without `at`, with the `at` written (docs/design-v1-resync.md 3.4). */
   stamped: Map<ClientKey, Stamped[]>;
+  /** Each player client's walks the real build stopped short, landed at their last clear spot (docs/design-v1-map-discovery.md 6). */
+  blocked: Map<ClientKey, number[]>;
+  /** The doors players' `door.set` touched, whose remembered states the map step drops (5.3, MD-O-6). */
+  doors: DoorTouch[];
+  /** The running estimate of each layer's memory through the batch, by layerKey (5.3, the ask): what it holds plus what each op could add. */
+  estimate: Map<string, number>;
   watermarks: Map<ClientKey, number>;
   hellos: Array<{ conn: Connection; key: ClientKey }>;
   sys: Array<{ resolve: () => void; reject: (err: Error) => void }>;
@@ -192,6 +200,18 @@ type Batch = {
 };
 
 type Reduced = { ok: true; inverse: RestoreEntry[] | null; trapped?: true; trapWrote?: ReadonlySet<string> } | { ok: false; code: RefusalCode; message: string };
+
+/**
+ * The DM's ops that ask before players' remembered map is forgotten
+ * (docs/design-v1-map-discovery.md 5.3): every op with a `forget` field,
+ * the builder's tools, Clear the build, a paste and a Universal VTT import.
+ * The DM's device sends a label or stamp edited from its panel with the
+ * yes already, so it forgets silently, as every other op does.
+ */
+const ASK_OPS = new Set<Op["t"]>(["build.paint", "build.erase", "build.rect", "build.poly", "build.edge", "build.label", "build.clear", "build.walls", "build.stamps", "build.height", "build.stairs", "build.rough"]);
+
+/** The refusal of a yes to forgetting that names a step no longer heading the stack (5.3). */
+export const FORGET_STALE = "That is no longer the step you were asked about. Try again.";
 
 /** A tagged op past admission (docs/design-v1-dice.md 1.2): whatever becomes of it from here writes its receipt. */
 type Admitted = { memberId: string; player: boolean; tag: string; part: number };
@@ -304,6 +324,8 @@ export class RoomActor {
    */
   #shownDisplays = new WeakSet<Connection>();
   #undo = new UndoStacks();
+  /** Each client's last Undo or Redo refused with FORGET_ASK, and the step it asked about (docs/design-v1-map-discovery.md 5.3). */
+  #forgetAsks = new Map<ClientKey, { n: number; step: UndoEntry }>();
   #sizes: SizeGuard;
   #roomRate: TokenBucket;
   /** Each member's budget of block saves (docs/design-v1-companion-stat-blocks.md 3.5), made at their first save. */
@@ -352,7 +374,7 @@ export class RoomActor {
     this.#snapshotSeq = loaded.snapshotSeq;
     this.#opsSinceSnapshot = loaded.seq - loaded.snapshotSeq;
     this.#sizes = new SizeGuard(this.#opts.sizeLimits);
-    this.#sizes.stateMeasured(measuredFromStored(loaded.stateBytes, loaded.state));
+    this.#sizes.stateMeasured(measuredFromStored(loaded.stateBytes, loaded.state), loaded.state);
     this.#roomRate = new TokenBucket(this.#opts.roomOpsPerSec, this.#opts.roomOpsPerSec * 2, this.#opts.now);
     this.#receipts = new ReceiptBook(this.#opts.now, this.#opts.receiptCaps);
     // Who admitted a stored receipt is read from the member's kind now, which the DM grants keep (reconcileKinds).
@@ -931,6 +953,8 @@ export class RoomActor {
         conn.send({ t: "retry", n, code: "busy" });
         return;
       }
+      // The DM's Undo and Redo ask before the step is popped, so a no leaves it where it was (5.3).
+      if (viewer.role === "dm" && next && !this.#forgetAnswered(key, wm, n, op, next, viewer)) return;
       step = op.t === "undo" ? this.#undo.popUndo(viewer.memberId) : this.#undo.popRedo(viewer.memberId);
       if (!step) {
         this.#refuse(key, wm, n, "invalid", `nothing to ${op.t}`);
@@ -1015,8 +1039,26 @@ export class RoomActor {
       return;
     }
     op = withAssetSizes(op, facts);
-    const decision = canApply(op, viewer, this.#staged.state, this.#permissionDeps(viewer, facts));
+    const deps = this.#permissionDeps(viewer, facts);
+    let decision = canApply(op, viewer, this.#staged.state, deps);
+    // The touch rule (docs/design-v1-map-discovery.md 6, MD-R9-1): a player's walk the real build stops lands at its last
+    // clear spot, stored as the move made, whatever the build their device holds let it send. Asked only after a refusal,
+    // since it runs the check itself. A redo stays refused: its step is gone, as for any refused redo.
+    let blocked = false;
+    if (!decision.ok && viewer.role === "player" && !restoredFrom) {
+      const landed = touchLanding(op, viewer, this.#staged.state, deps);
+      const again = landed ? canApply(landed.op, viewer, this.#staged.state, deps) : null;
+      if (landed && again?.ok) {
+        op = landed.op;
+        decision = again;
+        blocked = true;
+      }
+    }
     if (!decision.ok) {
+      // A door the player reached but that is gone or moved since they saw it refreshes for everyone who shares that memory (5.3, MD-O-6).
+      if (op.t === "door.set" && decision.code === "gone" && viewer.role === "player" && doorReachPassed(op, viewer, this.#staged.state, deps)) {
+        this.#ensureBatch().doors.push({ sceneId: op.sceneId, door: op.door, memberId: viewer.memberId });
+      }
       const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${decision.message}` : decision.message;
       this.#refuse(key, wm, n, decision.code, message, admitted);
       return;
@@ -1036,7 +1078,9 @@ export class RoomActor {
       op = checked.op;
     }
     const before = this.#staged.state;
-    const reduced = this.#reduce(op, viewer);
+    // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
+    const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
+    const reduced = this.#reduce(op, viewer, asks);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
       const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${reduced.message}` : reduced.message;
@@ -1046,6 +1090,9 @@ export class RoomActor {
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
+    if (blocked) push(batch.blocked, key, n);
+    // A door a player opened or closed, whether or not it changed, shows as it is to everyone who shares that memory (5.3, MD-O-6).
+    if (op.t === "door.set" && viewer.role === "player") batch.doors.push({ sceneId: op.sceneId, door: op.door, memberId: viewer.memberId });
     if (reduced.trapped && viewer.role === "player") push(batch.trapped, key, n);
     const stamped = stampedAt(op, this.#staged.state);
     if (stamped !== undefined) push(batch.stamped, key, { n, at: stamped });
@@ -1140,8 +1187,57 @@ export class RoomActor {
     this.#scheduleCommit();
   }
 
-  /** Steps 7 and 8: reduce on the staged state, then check the limits on what came out. */
-  #reduce(op: Op, viewer: Viewer): Reduced {
+  /**
+   * The ask before an Undo or a Redo of the DM's (docs/design-v1-map-discovery.md
+   * 5.3): a preflight of the step it would take, left on its stack. A step
+   * that would put a layer's estimate past its cap is refused with
+   * FORGET_ASK, and the yes names the refused op's `n`. A yes for a step
+   * that no longer heads the stack is refused as stale, so it never
+   * forgets for another step. True when the op goes on.
+   */
+  #forgetAnswered(key: ClientKey, wm: Watermark, n: number, op: Extract<Op, { t: "undo" | "redo" }>, step: UndoEntry, viewer: Viewer): boolean {
+    const asked = this.#forgetAsks.get(key);
+    if (op.forget !== undefined) {
+      if (asked && asked.n === op.forget && asked.step === step) {
+        this.#forgetAsks.delete(key);
+        return true;
+      }
+      this.#refuse(key, wm, n, "invalid", FORGET_STALE);
+      return false;
+    }
+    const checked = checkServerOp({ t: "sys.restore", entries: step.entries, from: op.t, deps: true });
+    if (!checked.ok) return true;
+    const result = applyOp(this.#staged.state, checked.op, viewer, { seq: this.#staged.seq + 1, at: new Date(this.#opts.now()).toISOString() });
+    // A step the restore refuses is refused with its own words once popped.
+    if (!result.ok || !this.#memoryEstimate(result.state, result.touched)?.over) return true;
+    this.#forgetAsks.set(key, { n, step });
+    this.#refuse(key, wm, n, "forget", FORGET_ASK);
+    return false;
+  }
+
+  /**
+   * Each layer's running estimate with what an op could add (5.3): its
+   * memory as the batch found it, charged, and every op's growth since.
+   * `over` when one would pass its cap. Null when the op adds nothing.
+   */
+  #memoryEstimate(after: RoomState, touched: readonly EntityKey[]): { over: boolean; commit: () => void } | null {
+    const growth = memoryGrowth(this.#staged.state, after, touched);
+    if (growth.size === 0) return null;
+    const estimate = this.#ensureBatch().estimate;
+    const next = new Map<string, number>();
+    let over = false;
+    for (const [layer, bytes] of growth) {
+      const [sceneId, member] = JSON.parse(layer) as [string, string | null];
+      const scene = after.scenes[sceneId]!;
+      const total = (estimate.get(layer) ?? layerCharge(this.#staged.state, this.#staged.state.scenes[sceneId] ?? scene, member)) + bytes;
+      next.set(layer, total);
+      if (total > this.#sizes.memoryCap(after, scene)) over = true;
+    }
+    return { over, commit: () => next.forEach((total, layer) => estimate.set(layer, total)) };
+  }
+
+  /** Steps 7 and 8: reduce on the staged state, then check the limits on what came out. `asks` refuses with FORGET_ASK an op that would pass a layer's cap. */
+  #reduce(op: Op, viewer: Viewer, asks = false): Reduced {
     const seq = this.#staged.seq + 1;
     const at = new Date(this.#opts.now()).toISOString();
     const result = applyOp(this.#staged.state, op, viewer, { seq, at });
@@ -1175,13 +1271,17 @@ export class RoomActor {
     }
     // Every scene the op wrote into, read from what it touched, so no op's growth escapes its scenes' bounds.
     const grown = [...new Set([...sceneIds, ...touchedScenes(this.#staged.state, measured.state, measured.touched), ...touchedScenes(this.#staged.state, result.state, result.touched)])];
-    const size = this.#sizes.check(measured.state, grown, growthBound(this.#staged.state, measured.state, measured.touched), this.#staged.state);
+    const size = this.#sizes.check(measured.state, grown, growthBound(this.#staged.state, measured.state, measured.touched), this.#staged.state, viewer.role);
     // The state limit is what refuses a block save here, since the projected scene leaves blocks out: it says what to do.
     if (!size.ok) return isBlockSave(op) ? { ...size, message: BLOCKS_ROOM_TOO_FULL } : size;
+    // Only the DM's ops grow players' memory by what they build: a player's door is touched, which drops its entries.
+    const memory = viewer.role === "dm" && viewer !== SERVER_ACTOR ? this.#memoryEstimate(result.state, result.touched) : null;
+    if (asks && memory?.over) return { ok: false, code: "forget", message: FORGET_ASK };
     // The room stored is the real one, larger only by what a public springing changed, which every viewer sees anyway: the
     // guard counts that too, so its bounds stay bounds of what is stored.
     if (measured !== result) this.#sizes.grew(growthBound(measured.state, result.state, [...new Set([...measured.touched, ...result.touched])]), grown);
     this.#staged = { state: result.state, seq };
+    memory?.commit();
     const batch = this.#ensureBatch();
     batch.ops.push({ seq, at, actor: viewer, op, log: result.log });
     batch.touched.push(...result.touched);
@@ -1419,6 +1519,9 @@ export class RoomActor {
         restored: new Map(),
         trapped: new Map(),
         stamped: new Map(),
+        blocked: new Map(),
+        doors: [],
+        estimate: new Map(),
         watermarks: new Map(),
         hellos: [],
         sys: [],
@@ -1452,7 +1555,7 @@ export class RoomActor {
     this.#batch = null;
     if (batch.timer) clearTimeout(batch.timer);
     batch.timer = null;
-    if (batch.ops.length > 0) this.#explore(batch);
+    if (batch.ops.length > 0 || batch.doors.length > 0) this.#explore(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
     this.#inFlight = batch;
@@ -1474,19 +1577,59 @@ export class RoomActor {
    * replay checks every stored op against it.
    */
   #explore(batch: Batch): void {
-    const state = this.#staged.state;
-    const op = exploreOp(state);
-    if (!op) return;
+    const op = batch.ops.length > 0 ? exploreOp(this.#staged.state) : null;
+    if (op) this.#appendServerOp(batch, op, "explore");
+    this.#remember(batch);
+  }
+
+  /**
+   * The map step (docs/design-v1-map-discovery.md 5.3), after the explore:
+   * what players remember of each scene's build, by one `sys.remember` per
+   * scene at the end of the same batch, so no frame ever holds an edit made
+   * out of their sight. Like the explore it is never refused and runs none
+   * of an op's checks: memory counts at its caps, which every check
+   * reserved, and the step keeps each layer within its cap by forgetting
+   * whole fog tiles. A share the size guard lowered since the last batch
+   * has every layer measured against it.
+   */
+  #remember(batch: Batch): void {
+    let ops: ReturnType<typeof mapStepOps>;
+    try {
+      const after = this.#staged.state;
+      ops = mapStepOps({
+        before: batch.before,
+        after,
+        touched: batch.touched,
+        doors: batch.doors,
+        cap: (scene) => this.#sizes.memoryCap(after, scene),
+        everyLayer: this.#sizes.takeShareLowered(),
+      });
+    } catch (err) {
+      // Fail closed (rule 9): the layers of the scenes the batch wrote on forget their ground rather than show the edit.
+      this.#log.error({ err, roomId: this.roomId }, "map step failed, forgetting the scenes it wrote on");
+      try {
+        ops = forgetAllOps({ before: batch.before, after: this.#staged.state, touched: batch.touched });
+      } catch (again) {
+        this.#log.error({ err: again, roomId: this.roomId }, "map step's forgetting failed");
+        return;
+      }
+    }
+    for (const op of ops) this.#appendServerOp(batch, op, "map step");
+  }
+
+  /** Appends a server-made op to the batch on the staged state, as stored and replayed, logging rather than refusing one that fails. */
+  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember">, what: string): void {
     const checked = checkServerOp(op);
     if (!checked.ok) {
-      this.#log.error({ roomId: this.roomId, message: checked.message }, "explore op does not validate");
+      this.#log.error({ roomId: this.roomId, message: checked.message }, `${what} op does not validate`);
       return;
     }
+    const state = this.#staged.state;
     const seq = this.#staged.seq + 1;
     const at = new Date(this.#opts.now()).toISOString();
     const result = applyOp(state, checked.op, SERVER_ACTOR, { seq, at });
     if (!result.ok) {
-      this.#log.error({ roomId: this.roomId, message: result.message }, "explore op refused");
+      this.#log.error({ roomId: this.roomId, message: result.message }, `${what} op refused`);
       return;
     }
     this.#sizes.grew(growthBound(state, result.state, result.touched), [op.sceneId]);
@@ -1565,6 +1708,7 @@ export class RoomActor {
         restored: batch.restored,
         trapped: batch.trapped,
         stamped: batch.stamped,
+        blocked: batch.blocked,
       },
       this.#connections,
       (key) => this.#clients.get(key),
@@ -1632,7 +1776,7 @@ export class RoomActor {
         const bytes = await writeSnapshot(this.#pool, this.roomId, seq, state);
         this.#snapshotSeq = seq;
         this.#opsSinceSnapshot = this.#committed.seq - seq;
-        this.#sizes.stateMeasured(measuredFromStored(bytes, state));
+        this.#sizes.stateMeasured(measuredFromStored(bytes, state), state);
         await this.#checkQuota();
       } catch (err) {
         this.#log.error({ err, roomId: this.roomId, seq }, "snapshot write failed");

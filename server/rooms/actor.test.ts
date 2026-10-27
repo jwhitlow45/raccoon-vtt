@@ -21,11 +21,13 @@ import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Actor, FreeWall, Member, RoomState, Trap } from "#shared/model.ts";
-import type { Op, ServerMessage } from "#shared/protocol.ts";
+import { FORGET_ASK, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
-import { RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
+import { FORGET_STALE, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
+import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
+import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
 import { roomExport, type RoomExport } from "./exportRoom.ts";
@@ -33,7 +35,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, growthBound, measuredStateBytes, memoryStateReserve, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
 
@@ -2984,6 +2986,231 @@ describe("a hidden line never changes whether a player's op passes (design 10.5,
         assert.equal(answers[1], answers[0], `${which} ${limit}`);
         assert.equal(answers[0] === "ok", limit === lo, `${which} ${limit}: ${answers[0]}`);
       }
+    }
+  });
+});
+
+describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)", () => {
+  /**
+   * A 100 x 60 dark scene with fog and party vision on and walls stopping
+   * moves, its party layer holding every cell from (0, 0) to (95, 47), and
+   * Ayla (the player's, darkvision 30 ft) at (90, 50), seeing 84..96 x
+   * 44..56. Cells (0..95, 0..43) are stone, out of her sight.
+   */
+  function discovery(dm: Member, player: Member, opts: { blinded?: boolean } = {}) {
+    const { state, sceneId, pcId, characterId, goblinId } = darkRoom(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, bounds: { w: 100, h: 60 }, blockMovement: true };
+    state.tokens[pcId] = { ...state.tokens[pcId]!, x: 90, y: 50 };
+    if (opts.blinded) state.characters[characterId] = testCharacter(characterId, { ownerIds: [player.id], actor: testActor({ senses: "Darkvision 30 ft.", effects: [{ id: "e1", key: "blinded", name: "Blinded" } as never] }) });
+    for (let ty = 0; ty < (opts.blinded ? 4 : 3); ty++) for (let tx = 0; tx < 6; tx++) state.exploredTiles[`${sceneId}:${tx},${ty}`] = { sceneId, tx, ty, rev: 0, bits: encodeTile(fullTileBits()) };
+    for (let cy = 0; cy < 3; cy++) {
+      for (let cx = 0; cx < 6; cx++) {
+        const cells: Record<string, "stone"> = {};
+        for (let y = cy * 16; y < Math.min(44, cy * 16 + 16); y++) for (let x = cx * 16; x < cx * 16 + 16; x++) cells[`${x},${y}`] = "stone";
+        state.buildChunks[chunkKey(sceneId, cx, cy)] = { sceneId, cx, cy, rev: 0, cells, edges: {} };
+      }
+    }
+    return { state, sceneId, pcId, goblinId };
+  }
+
+  test("an edit out of sight is remembered in its own batch, no frame the player gets holds it, and a replay rebuilds the memory", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId } = discovery(dm, player);
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const table = connect(actor, dm);
+      const phone = connect(actor, player, "player");
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      const mark = phone.sent.length;
+      await actor.op(table.conn, 1, { t: "build.paint", sceneId, terrain: "wood", cells: ["10,10"] });
+      assert.notEqual(await answerTo(table.sent, 1), "stuck");
+      const stored = (db.storedRows as { op: { t: string } }[]).map((r) => r.op.t);
+      assert.deepEqual(stored.slice(-3), ["build.paint", "sys.explore", "sys.remember"], "the step follows the edit and the explore in the same batch");
+      assert.equal(actor.committed.state.memory?.[chunkKey(sceneId, 0, 0)]?.cells?.["10,10"], "stone");
+      const frames = phone.sent.slice(mark).flatMap((m) => (m.t === "ev" ? m.changes : []));
+      assert.ok(!frames.some((c) => "value" in c && JSON.stringify(c.value).includes('"10,10":"wood"')), "no frame shows the wood");
+      assert.ok(!frames.some((c) => c.key.startsWith("memory")), "memory reaches no player");
+      const again = new FakeDb({ state, opRows: db.storedRows, dmGrants: [dm.id] });
+      const replayed = await RoomActor.load(deps(again));
+      assert.ok(replayed && !replayed.replayFailed);
+      assert.equal(JSON.stringify(replayed.committed.state.memory), JSON.stringify(actor.committed.state.memory));
+      again.freeze();
+      void replayed.shutdown({ code: 1012, snapshot: false });
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a walk the real build stops lands at its last clear spot, and the sender is told it was blocked (MD-R9-1)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, pcId } = discovery(dm, player);
+    // A wall just past her sight, on ground the party never held.
+    state.buildChunks[chunkKey(sceneId, 5, 3)] = { sceneId, cx: 5, cy: 3, rev: 0, cells: {}, edges: { "83,50,w": { kind: "wall" } } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, player, "player");
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(phone.conn, 1, { t: "token.move", tokenId: pcId, x: 80, y: 50 });
+      const answer = await answerTo(phone.sent, 1);
+      assert.ok(answer !== "stuck");
+      assert.ok(answer.acks?.includes(1) && !answer.rejects?.length, JSON.stringify(answer.rejects));
+      assert.deepEqual(answer.blocked, [1]);
+      const moved = actor.committed.state.tokens[pcId]!;
+      assert.deepEqual([moved.x, moved.y], [83, 50], "stored as the move made");
+      const stored = (db.storedRows as { op: { t: string; x?: number } }[]).find((r) => r.op.t === "token.move")!;
+      assert.equal(stored.op.x, 83);
+      // A walk nothing stops is not blocked.
+      await actor.op(phone.conn, 2, { t: "token.move", tokenId: pcId, x: 86, y: 50 });
+      const free = await answerTo(phone.sent, 2);
+      assert.ok(free !== "stuck" && free.blocked === undefined);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("the DM is asked before players' remembered map is forgotten, and a yes forgets whole tiles to stay within the cap", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId } = discovery(dm, player);
+    await withRoom(state, dm, async (actor, send) => {
+      // Rows of the ground repainted, at most 2,000 cells an op, until one would pass the cap.
+      const rects: Op[] = [0, 20, 40].map((y) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y, w: 96, h: y === 40 ? 4 : 20 }));
+      let asked: Op | null = null;
+      for (const rect of rects) {
+        const answer = await send(rect);
+        if (answer === null) continue;
+        assert.deepEqual(answer, { code: "forget", message: FORGET_ASK });
+        asked = rect;
+        break;
+      }
+      assert.ok(asked && asked !== rects[0], "the first rows fit, and a later one asks");
+      const y = (asked as { y: number }).y;
+      assert.equal(actor.committed.state.buildChunks[chunkKey(sceneId, 0, Math.floor(y / 16))]?.cells[`1,${y}`], "stone", "a no changes nothing");
+      assert.equal(await send({ ...asked, forget: true } as Op), null);
+      const now = actor.committed.state;
+      assert.equal(now.buildChunks[chunkKey(sceneId, 0, Math.floor(y / 16))]?.cells[`1,${y}`], "wood");
+      assert.ok(layerCharge(now, now.scenes[sceneId]!, null) <= MEMORY_CAP, "within the cap");
+      // The estimate counts every cell as new, so the yes may forget nothing: the step keeps what fits either way.
+      assert.ok(Object.keys(now.memory ?? {}).length > 0, "what fits is kept");
+      // Small edits after it ask nothing.
+      assert.equal(await send({ t: "build.paint", sceneId, terrain: "stone", cells: ["94,40"] }), null);
+    });
+  });
+
+  test("the DM's Undo asks before its step is popped, a yes names the undo it answers, and a stale yes is refused", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId } = discovery(dm, player);
+    await withRoom(state, dm, async (actor, send) => {
+      // Two bands of the ground fit the cap, and the second's undo, counted as if every cell it restores were new, would not.
+      const band = (y: number): Op => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y, w: 96, h: 20 });
+      assert.equal(await send(band(0)), null);
+      assert.equal(await send(band(20)), null);
+      const cell = () => actor.committed.state.buildChunks[chunkKey(sceneId, 0, 1)]?.cells["1,30"];
+      assert.equal(cell(), "wood");
+      assert.deepEqual(await send({ t: "undo" }), { code: "forget", message: FORGET_ASK });
+      assert.equal(cell(), "wood", "the step stays until yes");
+      // The undo just refused was the client's op 3.
+      assert.equal(await send({ t: "undo", forget: 3 }), null);
+      assert.equal(cell(), "stone");
+      // Another step on top makes an earlier yes stale.
+      assert.equal(await send(band(20)), null);
+      assert.deepEqual(await send({ t: "undo" }), { code: "forget", message: FORGET_ASK });
+      assert.equal(await send({ t: "build.paint", sceneId, terrain: "grass", cells: ["2,2"] }), null);
+      assert.deepEqual(await send({ t: "undo", forget: 6 }), { code: "invalid", message: FORGET_STALE });
+      assert.equal(cell(), "wood");
+    });
+  });
+
+  test("an op that lowers the room's share forgets whole tiles of every layer above it (5.5)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, goblinId } = discovery(dm, player);
+    // The scene shares the room's space, as it would after the upgrade, and the party remembers wood all over its west part.
+    state.playedScenes = { [sceneId]: { sceneId, rev: 0 } };
+    state.memoryShared = { [sceneId]: { sceneId, rev: 0 } };
+    state.memory = {};
+    for (let cx = 0; cx < 4; cx++) {
+      const cells: Record<string, "wood"> = {};
+      for (let k = 0; k < 120; k++) cells[`${cx * 16 + (k % 16)},${Math.floor(k / 16)}`] = "wood";
+      state.memory[chunkKey(sceneId, cx, 0)] = { sceneId, cx, cy: 0, rev: 0, cells };
+    }
+    const held = layerCharge(state, state.scenes[sceneId]!, null);
+    const base = measuredStateBytes(state) + exploredReserve(state);
+    const stateLimit = base + held + 2_000;
+    await withRoom(
+      state,
+      dm,
+      async (actor, send) => {
+        assert.ok(layerCharge(actor.committed.state, actor.committed.state.scenes[sceneId]!, null) === held, "it fits at load");
+        assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "n".repeat(Math.floor(held / 2)) } }), null);
+        const now = actor.committed.state;
+        const share = memoryShare(stateLimit, measuredStateBytes(now), exploredReserve(now), memoryReserves(now));
+        assert.ok(share < held, `the share fell to ${share}`);
+        const charge = layerCharge(now, now.scenes[sceneId]!, null);
+        assert.ok(charge <= share, `${charge} within ${share}`);
+        // Ayla's sight adds tiles at her corner, so the forgotten ground is read tile by tile, its memory gone with it.
+        const forgotten = [0, 1, 2, 3].filter((tx) => !now.exploredTiles[`${sceneId}:${tx},0`]);
+        assert.ok(forgotten.length > 0, "a whole tile was forgotten");
+        for (const tx of forgotten) assert.equal(now.memory?.[chunkKey(sceneId, tx, 0)], undefined, `tile ${tx},0 took its memory with it`);
+      },
+      { sizeLimits: { stateLimit } },
+    );
+  });
+
+  test("a remembered door the DM took away answers GONE once reached, and that touch drops it from their map (MD-O-6)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, pcId } = discovery(dm, player, { blinded: true });
+    // The party remembers a door at Ayla's side, and the DM took it away while she was blinded.
+    state.memory = { [chunkKey(sceneId, 5, 3)]: { sceneId, cx: 5, cy: 3, rev: 0, edges: { "91,50,w": { kind: "door", state: "closed", secret: false, discovered: false } } } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, player, "player");
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(phone.conn, 1, { t: "door.set", sceneId, door: { edge: "91,50,w" }, state: "open", by: pcId });
+      const answer = await answerTo(phone.sent, 1);
+      assert.ok(answer !== "stuck");
+      assert.equal(answer.rejects?.[0]?.code, "gone", JSON.stringify(answer.rejects));
+      assert.equal(actor.committed.state.memory?.[chunkKey(sceneId, 5, 3)]?.edges?.["91,50,w"], undefined, "the touch dropped the door they remembered");
+      assert.deepEqual((db.storedRows as { op: { t: string } }[]).map((r) => r.op.t).slice(-1), ["sys.remember"], "by the map step, stored");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a door a player touches shows as it is to everyone who shares that memory (MD-O-6)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, pcId } = discovery(dm, player, { blinded: true });
+    // The party remembers the door at Ayla's side open, and the DM closed it while she was blinded.
+    state.buildChunks[chunkKey(sceneId, 5, 3)] = { sceneId, cx: 5, cy: 3, rev: 0, cells: {}, edges: { "91,50,w": { kind: "door", state: "closed", secret: false, discovered: false } } };
+    state.memory = { [chunkKey(sceneId, 5, 3)]: { sceneId, cx: 5, cy: 3, rev: 0, edges: { "91,50,w": { kind: "door", state: "open", secret: false, discovered: false } } } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, player, "player");
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(phone.conn, 1, { t: "door.set", sceneId, door: { edge: "91,50,w" }, state: "closed", by: pcId });
+      const answer = await answerTo(phone.sent, 1);
+      assert.ok(answer !== "stuck" && !answer.rejects?.length, JSON.stringify(answer !== "stuck" && answer.rejects));
+      assert.equal(actor.committed.state.memory?.[chunkKey(sceneId, 5, 3)]?.edges?.["91,50,w"], undefined);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
     }
   });
 });

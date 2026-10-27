@@ -36,6 +36,8 @@ export type CommittedBatch = {
   trapped?: Map<ClientKey, number[]>;
   /** Each client's ops in the batch that wrote a sync record without `at`, with the `at` written. */
   stamped?: Map<ClientKey, Stamped[]>;
+  /** Each player client's walks the real build stopped short of where their device let them go, each landed at its last clear spot (docs/design-v1-map-discovery.md 6). */
+  blocked?: Map<ClientKey, number[]>;
 };
 
 function viewerClass(conn: Connection, state: RoomState): string {
@@ -315,8 +317,9 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     const restored = mine ? batch.restored.get(key) : undefined;
     const trapped = mine ? batch.trapped?.get(key) : undefined;
     const stamped = mine ? batch.stamped?.get(key) : undefined;
+    const blocked = mine ? batch.blocked?.get(key) : undefined;
     if (diff.changes.length === 0 && !acks?.length && !rejects?.length) continue;
-    const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[]; stamped?: Stamped[] } = {
+    const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[]; stamped?: Stamped[]; blocked?: number[] } = {
       t: "ev",
       seq: batch.seq,
       changes: diff.changes,
@@ -326,6 +329,7 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     if (restored?.length) msg.restored = restored;
     if (trapped?.length) msg.trapped = trapped;
     if (stamped?.length) msg.stamped = stamped;
+    if (blocked?.length) msg.blocked = blocked;
     conn.send(msg);
   }
 }
