@@ -8,6 +8,7 @@ import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply, doorReachPassed, touchLanding, type PermissionDeps } from "#shared/permissions.ts";
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
+import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
 import { inSightOfNonOwners, projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
@@ -1044,8 +1045,8 @@ export class RoomActor {
       return;
     }
     op = withAssetSizes(op, facts);
-    // A player's copy may lack the ground their creature lands on (docs/design-v1-map-discovery.md 6), so the real build sets its height.
-    if (viewer.role === "player" && op.t === "token.move") op = landedMove(op, this.#staged.state);
+    // A player's copy may lack the ground their creatures land on (docs/design-v1-map-discovery.md 6), so the real build sets their heights.
+    if (viewer.role === "player") op = landedOp(op, this.#staged.state);
     const deps = this.#permissionDeps(viewer, facts);
     let decision = canApply(op, viewer, this.#staged.state, deps);
     // The touch rule (docs/design-v1-map-discovery.md 6, MD-R9-1): a player's walk the real build stops lands at its last
@@ -1930,25 +1931,63 @@ function push<T>(map: Map<ClientKey, T[]>, key: ClientKey, value: T): void {
 }
 
 /**
- * Server-built ops skip `clientOpSchema`, but replay checks every stored op
- * against the protocol schema (design 16.2). One that does not match would
- * apply now and stop the room's next load, leaving it read-only. Checking
- * here refuses it while that refusal is still cheap.
+ * A player's op that puts creatures down on a scene with fog on, each at
+ * the height the real build gives it, in place of the one their device
+ * worked out from the ground it holds (MD3-D-14): a walk up a stair onto a
+ * platform the party never saw, a Teleport here or a group's drag onto one,
+ * a Get off beside it, or a token placed on it lands on it, not inside it.
+ * Every other op goes as sent.
  */
+function landedOp(op: Op, state: RoomState): Op {
+  switch (op.t) {
+    case "token.move":
+      return landedMove(op, state);
+    case "token.moveMany": {
+      const moves = op.moves.map((move) => landedMove(move, state));
+      return moves.every((move, i) => move === op.moves[i]) ? op : { ...op, moves };
+    }
+    case "token.detach":
+      return landedGetOff(op, state);
+    case "token.create":
+      return landedPlacement(op, state);
+    default:
+      return op;
+  }
+}
+
 /**
- * A player's move on a scene with fog on, landed at the height the real
- * build gives it (rules/movement.ts landedElevation), in place of the one
- * their device worked out from the ground it holds: a walk up a stair onto
- * a platform the party never saw, or a Teleport here onto one, lands on it,
- * not inside it. A move that keeps its spot sets a height alone, so it goes
- * as sent.
+ * One move landed as a drop lands it (rules/movement.ts landedElevation,
+ * client drop.ts dropLanding). A move that keeps its spot sets a height
+ * alone, so it goes as sent.
  */
-function landedMove(op: OpOf<"token.move">, state: RoomState): OpOf<"token.move"> {
-  const token = state.tokens[op.tokenId];
-  if (!token || state.scenes[token.sceneId]?.fogEnabled !== true || (op.x === token.x && op.y === token.y)) return op;
-  const at = { x: op.x, y: op.y, squeeze: op.squeeze === true };
+function landedMove<T extends { tokenId: string; x: number; y: number; elevation?: number; squeeze?: boolean }>(move: T, state: RoomState): T {
+  const token = state.tokens[move.tokenId];
+  if (!token || state.scenes[token.sceneId]?.fogEnabled !== true || (move.x === token.x && move.y === token.y)) return move;
+  const at = { x: move.x, y: move.y, squeeze: move.squeeze === true };
   const elevation = seatedLanding(state, token, at) ?? landedElevation(state.buildChunks, token, at);
+  return move.elevation === elevation ? move : { ...move, elevation };
+}
+
+/** A Get off with a place lands off its holder there, as the device lands it (client attach/detach.ts getOffPlace). */
+function landedGetOff(op: OpOf<"token.detach">, state: RoomState): OpOf<"token.detach"> {
+  const token = state.tokens[op.tokenId];
+  const holder = token ? (holderOf(state.tokens, token) as Token | undefined) : undefined;
+  if (op.x === undefined || op.y === undefined || !token || !holder || state.scenes[token.sceneId]?.fogEnabled !== true) return op;
+  const elevation = landedElevation(state.buildChunks, token, { x: op.x, y: op.y }, holder);
   return op.elevation === elevation ? op : { ...op, elevation };
+}
+
+/**
+ * A player's own token stands on the ground where they place it, as the
+ * device places it (client movement/ground.ts placeOnGround): a player's
+ * plain token never carries a height of its own. A companion takes its
+ * character's token's height, which reads no build, so it goes as sent.
+ */
+function landedPlacement(op: OpOf<"token.create">, state: RoomState): OpOf<"token.create"> {
+  const input = op.token;
+  if (input.companion || state.scenes[input.sceneId]?.fogEnabled !== true) return op;
+  const ground = footprintGround(state.buildChunks, { ...input, squeeze: undefined });
+  return (input.elevation ?? 0) === ground ? op : { ...op, token: { ...input, elevation: ground } };
 }
 
 /**
@@ -1966,6 +2005,12 @@ function seatedLanding(state: RoomState, token: Token, at: { x: number; y: numbe
   return landedElevation(state.buildChunks, token, at, holder);
 }
 
+/**
+ * Server-built ops skip `clientOpSchema`, but replay checks every stored op
+ * against the protocol schema (design 16.2). One that does not match would
+ * apply now and stop the room's next load, leaving it read-only. Checking
+ * here refuses it while that refusal is still cheap.
+ */
 function checkServerOp(op: ServerOnlyOp): { ok: true; op: ServerOnlyOp } | { ok: false; message: string } {
   const parsed = serverOnlyOpSchema.safeParse(op);
   if (parsed.success) return { ok: true, op: parsed.data };

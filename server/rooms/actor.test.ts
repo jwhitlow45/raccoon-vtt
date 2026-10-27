@@ -3405,6 +3405,73 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     }
   });
 
+  test("a player's group drag, Get off and own token placed onto a platform their copy does not hold land on it (MD3-D-14, MD3-ASTRA-5)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    /** The vision e2e's platform and stair, 10 ft up unless the case says, and Ayla's creatures where it puts them. */
+    const platform = (place: (state: RoomState, sceneId: string, pcId: string) => void, height = 10) => {
+      let { state, sceneId, pcId, characterId } = darkRoom(dm, player);
+      state.scenes[sceneId] = { ...state.scenes[sceneId]!, blockMovement: true, autoWalls: "off" };
+      const cells = Array.from({ length: 36 }, (_, i) => `${6 + (i % 6)},${12 + Math.floor(i / 6)}`);
+      for (const op of [
+        { t: "build.height", sceneId, cells, height },
+        { t: "build.stairs", sceneId, cells: ["5,14"], up: "a" },
+      ] as Op[]) {
+        const r = applyOp(state, op, { memberId: dm.id, role: "dm" }, { seq: 1, at: new Date().toISOString() });
+        assert.ok(r.ok, r.ok ? "" : r.message);
+        state = r.state;
+      }
+      place(state, sceneId, pcId);
+      return { state, sceneId, pcId, characterId };
+    };
+    const run = async (state: RoomState, op: Op, check: (after: RoomState) => void) => {
+      const db = new FakeDb({ state, dmGrants: [dm.id] });
+      const actor = await RoomActor.load(deps(db));
+      assert.ok(actor);
+      try {
+        const phone = connect(actor, player, "player");
+        await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+        // The device holds no heights there, so it sends 0 ft.
+        await actor.op(phone.conn, 1, op);
+        const answer = await answerTo(phone.sent, 1);
+        assert.ok(answer !== "stuck" && !answer.rejects?.length, `${op.t}: ${JSON.stringify(answer !== "stuck" && answer.rejects)}`);
+        check(actor.committed.state);
+      } finally {
+        db.freeze();
+        void actor.shutdown({ code: 1012, snapshot: false });
+      }
+    };
+    // Astra's case: the stair walk sent as a group with a second creature of hers.
+    const group = platform((state, sceneId, pcId) => {
+      state.tokens[pcId] = { ...state.tokens[pcId]!, x: 5, y: 14, elevation: 0 };
+      state.tokens.pet = testToken("pet", { sceneId, name: "Pip", disposition: "ally", ownerIds: [player.id], x: 4, y: 16 });
+    });
+    const moves = [
+      { tokenId: group.pcId, x: 7, y: 14, elevation: 0 },
+      { tokenId: "pet", x: 4, y: 15, elevation: 0 },
+    ];
+    await run(group.state, { t: "token.moveMany", moves }, (after) => {
+      assert.deepEqual([after.tokens[group.pcId]!.x, after.tokens[group.pcId]!.elevation], [7, 10], "on the platform, 10 ft up");
+      assert.equal(after.tokens.pet!.elevation, 0, "on the floor below");
+    });
+    // Off her pony on the stair, onto a platform 5 ft up beside it, within reach of the pony.
+    const getOff = platform((state, sceneId, pcId) => {
+      state.tokens.pony = testToken("pony", { sceneId, name: "Pony", disposition: "ally", x: 5, y: 14 });
+      state.tokens[pcId] = { ...state.tokens[pcId]!, x: 5, y: 14, elevation: 0, attached: { to: "pony", kind: "ride" } };
+    }, 5);
+    await run(getOff.state, { t: "token.detach", tokenId: getOff.pcId, x: 6, y: 14, elevation: 0 }, (after) => {
+      const { x, elevation, attached } = after.tokens[getOff.pcId]!;
+      assert.deepEqual([x, elevation, attached], [6, 5, undefined]);
+    });
+    // Her second character's token, placed on the platform.
+    const placed = platform((state) => {
+      state.meta = { ...state.meta, settings: { ...state.meta.settings, playersCreateCharacters: true } };
+      state.characters.bree = testCharacter("bree", { ownerIds: [player.id], name: "Bree" });
+    });
+    const token = { id: uuidv7(), sceneId: placed.sceneId, kind: "pc" as const, name: "Bree", size: "medium" as const, x: 8, y: 15, actor: { ref: "bree" } };
+    await run(placed.state, { t: "token.create", token }, (after) => assert.equal(after.tokens[token.id]!.elevation, 10));
+  });
+
   test("a creature a player rides off its mount onto a platform their copy does not hold lands on it", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
