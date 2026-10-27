@@ -562,6 +562,21 @@ describe("the stand rule's footprint (design 4.2 step 9)", () => {
     assert.ok(edged > 200, `${edged} volumes reach the scene's edge`);
   });
 
+  test("a solid cut at the scene's far edge, where the cut lands a hair past it, takes no sub-cell beyond", () => {
+    // A 20 ft aura round a Huge creature three cells from the edge at x = 30: the cut there lands at 30.000000000000004.
+    const tokens = { k: tok("k", { size: "huge", x: 25, y: 3, elevation: 10 }) };
+    const area = resolveArea({ id: "e", rev: 1, shape: "emanation", size: 20, origin: { x: 0, y: 0, z: 0 }, yaw: 0, includeOrigin: false, attachedTo: "k" }, ctxOf(bounds, null, tokens));
+    assert.ok(area);
+    const vol = buildVolume({ area, bounds, ground: () => 0, px: 40 });
+    let edge = 0;
+    everySubcell(vol.footprint, (sx) => {
+      assert.ok(sx < 120, `sub-cell column ${sx}`);
+      if (sx === 119) edge++;
+      return true;
+    });
+    assert.ok(edge > 0, "the aura reaches the edge");
+  });
+
   test("a sub-cell whose column hides the solid still counts: the plan is read before the ground cut", () => {
     const ground = flatGround(30, 30);
     for (let y = 14; y < 17; y++) for (let x = 14; x < 17; x++) ground.z[y * 30 + x] = 4;
