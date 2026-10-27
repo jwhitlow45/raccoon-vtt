@@ -173,10 +173,11 @@ export class SizeGuard {
    * memory where it does not fit says that (MEMORY_FULL,
    * docs/design-v1-map-discovery.md 5.5).
    *
-   * `role` is the sender's: a player's op is judged without what players'
-   * copies may hold beyond the DM's (discoveryReserve), as before map
-   * discovery, so a scene over its limit by those alone still takes their
-   * moves (5.5). A DM's growing edit there gets SCENE_MAPS_FULL.
+   * `role` is the sender's. Every op counts what players' copies may hold
+   * beyond the DM's (discoveryReserve), but a player's op on a scene that
+   * was over its limit with it before the op is judged without it, as
+   * before map discovery, so such a scene still takes their moves (5.5,
+   * D-261027-03). A DM's growing edit there gets SCENE_MAPS_FULL.
    */
   check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm"): LimitCheck {
     const answer = this.#check(next, sceneIds, growth, before, role);
@@ -243,20 +244,26 @@ export class SizeGuard {
     for (const scene of Object.values(next.scenes)) {
       const sight = sightReserve(scene) + perPlayerSceneReserve(next, scene);
       const explored = scene.id === exploring ? reserve : 0;
-      const maps = role === "player" ? 0 : discoveryReserve(next, scene, share, !unreserved?.has(scene.id));
+      const full = discoveryReserve(next, scene, share, !unreserved?.has(scene.id));
       const measure = scenes.get(scene.id);
       const added = touched.has(scene.id) ? growth : 0;
-      if (measure && SHELL_BYTES + room + measure.bytes + measure.growth + added + sight + explored + maps <= this.sceneLimit) {
-        if (added > 0) updates.push(() => (measure.growth += added));
+      const fits = (maps: number) => measure !== undefined && SHELL_BYTES + room + measure.bytes + measure.growth + added + sight + explored + maps <= this.sceneLimit;
+      // Players count what their copies may hold beyond the DM's too, except on a scene already over with it before
+      // the op, whose players' ops go on as before map discovery (5.5, D-261027-03). Read only when the reserve is in the way.
+      const lenient = () => role === "player" && full > 0 && before?.scenes[scene.id] !== undefined && neededBefore(before, scene.id, share, "dm") > this.sceneLimit;
+      const maps = fits(full) || !lenient() ? full : 0;
+      if (fits(maps)) {
+        if (added > 0) updates.push(() => (measure!.growth += added));
         continue;
       }
       const own = sceneOwnBytes(next, scene.id);
       const need = SHELL_BYTES + room + own + sight + explored + maps;
-      if (need > this.sceneLimit && (before === undefined ? touched.has(scene.id) || (newlyExploring && scene.id === exploring) : need > neededBefore(before, scene.id, share, role))) {
+      const judged = maps === full ? "dm" : "player";
+      if (need > this.sceneLimit && (before === undefined ? touched.has(scene.id) || (newlyExploring && scene.id === exploring) : need > neededBefore(before, scene.id, share, judged))) {
         const exploringHere = newlyExploring && scene.id === exploring && SHELL_BYTES + room + own + sight + maps <= this.sceneLimit;
         if (exploringHere) return { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE };
-        // Over only by what players' copies may hold beyond the DM's, which the DM can make room for.
-        return maps > 0 && need - maps <= this.sceneLimit ? { ok: false, code: "quota", message: SCENE_MAPS_FULL } : sceneFull(this.sceneLimit);
+        // Over only by what players' copies may hold beyond the DM's, which the DM can make room for. A player reads the plain words.
+        return role === "dm" && maps > 0 && need - maps <= this.sceneLimit ? { ok: false, code: "quota", message: SCENE_MAPS_FULL } : sceneFull(this.sceneLimit);
       }
       updates.push(() => scenes.set(scene.id, { bytes: own, growth: 0 }));
     }
@@ -786,14 +793,22 @@ export function memoryReserves(state: RoomState, except?: ReadonlySet<string>): 
 }
 
 /**
+ * What the room-wide share leaves of a full room's free space (D-261027-03):
+ * room for ops to grow before the guard's bound passes the limit, so a
+ * near-full room does not measure its whole state and lower the share on
+ * every op.
+ */
+export const SHARE_MARGIN = 64 * 1024;
+
+/**
  * The room-wide share (5.5, MD-O-14): the room's free space without the
- * shared reserves split equally over their layers, at most a whole cap,
- * so no room becomes full at deploy. A pure function of the exact measure
- * and the stored state, so a reload gives the same share.
+ * shared reserves and SHARE_MARGIN, split equally over their layers, at
+ * most a whole cap, so no room becomes full at deploy. A pure function of
+ * the exact measure and the stored state, so a reload gives the same share.
  */
 export function memoryShare(stateLimit: number, measured: number, explored: number, reserves: MemoryReserves): number {
   if (reserves.sharing === 0) return MEMORY_CAP;
-  const free = stateLimit - measured - explored - reserves.whole;
+  const free = stateLimit - measured - explored - reserves.whole - SHARE_MARGIN;
   return Math.max(0, Math.min(MEMORY_CAP, Math.floor(free / reserves.sharing)));
 }
 

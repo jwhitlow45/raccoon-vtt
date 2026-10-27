@@ -24,6 +24,7 @@ import {
   PER_PLAYER_FULL,
   projectedSceneBytes,
   SCENE_MAPS_FULL,
+  SHARE_MARGIN,
   SizeGuard,
 } from "./sizeGuard.ts";
 
@@ -192,7 +193,7 @@ function sharedRoom(spare: number): { state: RoomState; limit: number } {
     s2: scene("s2", { order: 1, fogEnabled: true, vision: { on: true, light: "dark" } }),
   };
   const state = mapDiscoveryUpgrade(base);
-  const limit = measuredStateBytes(state) + exploredReserve(state) + spare;
+  const limit = measuredStateBytes(state) + exploredReserve(state) + SHARE_MARGIN + spare;
   return { state, limit };
 }
 
@@ -204,34 +205,63 @@ describe("the room-wide share (5.5, MD-O-14)", () => {
     guard.stateMeasured(measuredStateBytes(state), state);
     assert.equal(guard.share, 25_000, "the free space split over both layers");
     assert.ok(guard.share < MEMORY_CAP);
-    const edit: Op = { t: "token.create", token: token("t1", { notes: "n".repeat(4_000) }) };
-    const r = applyOp(state, edit, DM, env(2));
-    assert.ok(r.ok);
-    assert.deepEqual(guard.check(r.state, ["s1"], growthBound(state, r.state, r.touched), state), { ok: true });
+    assert.ok(guard.takeShareLowered(), "the load's measure lowered it from a whole cap");
+    // Edits until they pass the margin the share leaves, when the guard measures the room.
+    let s = state;
+    for (let i = 0; i < 20 && guard.share === 25_000; i++) {
+      const r = applyOp(s, { t: "token.create", token: token(`t${i}`, { notes: "n".repeat(4_000) }) }, DM, env(2 + i));
+      assert.ok(r.ok);
+      assert.deepEqual(guard.check(r.state, ["s1"], growthBound(s, r.state, r.touched), s), { ok: true });
+      s = r.state;
+    }
     assert.ok(guard.share < 25_000, "an exact measure lowered the share");
     assert.ok(guard.takeShareLowered() && !guard.takeShareLowered(), "the actor is told once");
-    assert.ok(measuredStateBytes(r.state) + exploredReserve(r.state) + memoryStateReserve(r.state, guard.share) <= limit);
+    assert.ok(measuredStateBytes(s) + exploredReserve(s) + memoryStateReserve(s, guard.share) <= limit);
   });
 
   test("the share is a function of the stored state and its exact measure, so a reload gives the same", () => {
     const { state, limit } = sharedRoom(70_000);
     const running = new SizeGuard({ stateLimit: limit });
     running.stateMeasured(measuredStateBytes(state), state);
+    running.takeShareLowered();
     let s = state;
-    for (let i = 0; i < 5; i++) {
+    let lowered = 0;
+    for (let i = 0; i < 30; i++) {
       const r = applyOp(s, { t: "token.create", token: token(`t${i}`, { notes: "n".repeat(3_000) }) }, DM, env(2 + i));
       assert.ok(r.ok);
       assert.ok(running.check(r.state, ["s1"], growthBound(s, r.state, r.touched), s).ok);
       s = r.state;
+      // Only an op past the margin measures, and the share it sets is the exact one, never the guard's bound's.
+      if (running.takeShareLowered()) {
+        lowered++;
+        assert.equal(running.share, memoryShare(limit, measuredStateBytes(s), exploredReserve(s), memoryReserves(s)), `op ${i}: a share lowered only on an exact measure`);
+      }
     }
-    // The share takes the room's whole free space, so each growing op measures, and the share is the exact one, never the bound's.
-    assert.equal(running.share, memoryShare(limit, measuredStateBytes(s), exploredReserve(s), memoryReserves(s)), "a share lowered only on an exact measure");
+    assert.ok(lowered >= 1 && lowered <= 3, `${lowered} of 30 small ops lowered the share`);
     // A snapshot measures exactly, as a reload does from the stored bytes.
     running.stateMeasured(measuredFromStored(serializedBytes(s), s), s);
     const reloaded = new SizeGuard({ stateLimit: limit });
     reloaded.stateMeasured(measuredFromStored(serializedBytes(s), s), s);
     assert.equal(running.share, reloaded.share);
     assert.equal(running.share, memoryShare(limit, measuredStateBytes(s), exploredReserve(s), memoryReserves(s)));
+  });
+
+  test("small ops in a near-full room neither measure it whole nor lower the share, within the margin (D-261027-03)", () => {
+    const { state, limit } = sharedRoom(60_000);
+    const guard = new SizeGuard({ stateLimit: limit });
+    guard.stateMeasured(measuredStateBytes(state), state);
+    guard.takeShareLowered();
+    const share = guard.share;
+    assert.equal(share, 30_000);
+    let s = state;
+    for (let i = 0; i < 10; i++) {
+      const r = applyOp(s, { t: "token.create", token: token(`t${i}`, { notes: "n".repeat(3_000) }) }, DM, env(2 + i));
+      assert.ok(r.ok);
+      assert.deepEqual(guard.check(r.state, ["s1"], growthBound(s, r.state, r.touched), s), { ok: true });
+      s = r.state;
+    }
+    assert.equal(guard.share, share, "the share stands");
+    assert.equal(guard.takeShareLowered(), false, "and nothing was forgotten for it");
   });
 
   test("a marked per-player scene that folds keeps the party's share, and the room's measure falls", () => {
@@ -404,5 +434,19 @@ describe("the DM's words where players' maps do not fit (5.5)", () => {
     assert.ok(shrink.ok);
     assert.deepEqual(guard().check(shrink.state, ["bench"], growthBound(bench, shrink.state, shrink.touched), bench), { ok: true });
     assert.deepEqual(guard().check(grow.state, ["bench"], growthBound(bench, grow.state, grow.touched), bench, "player"), { ok: true });
+  });
+
+  test("on a scene within its limit with players' maps counted, a player's op that would pass it is refused in the plain words (D-261027-03)", () => {
+    const bench = stored(capRoom("dark").state, ["p1"]);
+    const P1: Viewer = { memberId: "p1", role: "player" };
+    // Room for the scene with what players' copies may hold, and a few bytes more, fewer than a drawing takes.
+    const sceneLimit = projectedSceneBytes(bench, "bench", MEMORY_CAP) + 40;
+    const op: Op = { t: "drawing.create", drawing: { id: "d1", sceneId: "bench", kind: "pen", points: [1, 1, 2, 2], color: "#ffffff", width: 2 } as never };
+    const r = applyOp(bench, op, P1, env(2));
+    assert.ok(r.ok);
+    const answer = new SizeGuard({ sceneLimit }).check(r.state, ["bench"], growthBound(bench, r.state, r.touched), bench, "player");
+    assert.deepEqual(answer, { ok: false, code: "quota", message: `this scene is at its ${Math.floor(sceneLimit / MIB)} MiB size limit` });
+    // Without the reserve it would have fit: players' copies could then pass 3 MiB by up to it.
+    assert.ok(projectedSceneBytes(r.state, "bench", MEMORY_CAP, "player") <= sceneLimit);
   });
 });

@@ -194,7 +194,7 @@ describe("wave 4 import limits (docs/design-v1-maps-vision.md 2.4)", () => {
     assert.doesNotThrow(() => assertWithinLimits(fits));
     // A player's first move there passes, and so does any op that leaves the scene as it is: what players' copies may hold
     // beyond the DM's (docs/design-v1-map-discovery.md 5.5) refuses only a DM's edit that grows it, as at the deploy.
-    assert.deepEqual(new SizeGuard().check(fits, ["s1"], 0, undefined, "player"), { ok: true }, "the scene the import keeps takes its first move");
+    assert.deepEqual(new SizeGuard().check(fits, ["s1"], 0, fits, "player"), { ok: true }, "the scene the import keeps takes its first move");
     assert.deepEqual(new SizeGuard().check(fits, ["s1"], 0, fits), { ok: true }, "and an op that does not grow it");
     // A byte more, and the stored room still fits, but the scene's exploration does not: the DM reads what to do.
     const exploring = sceneOf(sceneLimit - sightReserve - explored + 1);
