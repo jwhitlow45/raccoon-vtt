@@ -75,6 +75,61 @@ export function randomWalls(rand: () => number, w: number, h: number): WallSet {
   return deriveWalls(indexBuild([chunk]), `v${rand()}`);
 }
 
+/** Walls filed in the 16 by 16 chunks they lie in, as a built scene stores them. */
+function wallsOf(cells: readonly string[], edges: Record<string, EdgeFeature>, walls: readonly FreeWall[], version: string): WallSet {
+  const chunks = new Map<string, BuildChunk>();
+  const at = (x: number, y: number) => {
+    const cx = Math.floor(x / 16);
+    const cy = Math.floor(y / 16);
+    const key = `${cx},${cy}`;
+    let c = chunks.get(key);
+    if (!c) chunks.set(key, (c = { sceneId: "s", cx, cy, rev: 1, cells: {}, edges: {}, walls: [] }));
+    return c;
+  };
+  for (const k of cells) {
+    const [x, y] = k.split(",").map(Number);
+    at(x!, y!).cells[k] = "stone";
+  }
+  for (const [k, f] of Object.entries(edges)) {
+    const [x, y] = k.split(",").map(Number);
+    at(x!, y!).edges[k] = f;
+  }
+  for (const wall of walls) at((wall.a[0] + wall.b[0]) / 2, (wall.a[1] + wall.b[1]) / 2).walls!.push(wall);
+  return deriveWalls(indexBuild([...chunks.values()]), version);
+}
+
+/** A free wall from a point, its ends on the 1/64 cell lattice walls snap to. */
+function freeWall(n: number, ax: number, ay: number, len: number, t: number, w: number, h: number): FreeWall {
+  const snap = (v: number, max: number) => Math.round(Math.min(max - 0.5, Math.max(0.5, v)) * 64) / 64;
+  return { id: `wall${String(n).padStart(8, "0")}`, a: [snap(ax, w), snap(ay, h)], b: [snap(ax + len * Math.cos(t), w), snap(ay + len * Math.sin(t), h)], f: { kind: "wall" } };
+}
+
+/** A dense dungeon (review ISOA1-F-3): rooms, loose wall edges and short free walls strewn over the scene. */
+export function dungeonWalls(rand: () => number, w: number, h: number, rooms = 40, edgeCount = 200, free = 30): WallSet {
+  const cells: string[] = [];
+  for (let r = 0; r < rooms; r++) {
+    const rw = 4 + Math.floor(rand() * 10);
+    const rh = 4 + Math.floor(rand() * 10);
+    cells.push(...rect(Math.floor(rand() * (w - rw)), Math.floor(rand() * (h - rh)), rw, rh));
+  }
+  const edges: Record<string, EdgeFeature> = {};
+  for (let e = 0; e < edgeCount; e++) edges[`${Math.floor(rand() * w)},${Math.floor(rand() * h)},${rand() < 0.5 ? "n" : "w"}`] = { kind: "wall" };
+  const walls: FreeWall[] = [];
+  for (let f = 0; f < free; f++) walls.push(freeWall(f, 2 + rand() * (w - 4), 2 + rand() * (h - 4), 1 + rand() * 6, rand() * 2 * Math.PI, w, h));
+  return wallsOf([...new Set(cells)], edges, walls, `dungeon-${rand()}`);
+}
+
+/** Short free walls strewn round a point, as pillars and rubble round a caster (review ISOA1-ASTRA-01). */
+export function wallsAround(rand: () => number, cx: number, cy: number, w: number, h: number, count = 32): WallSet {
+  const walls: FreeWall[] = [];
+  for (let f = 0; f < count; f++) {
+    const t = (2 * Math.PI * f) / count;
+    const r = 3 + rand() * 9;
+    walls.push(freeWall(f, cx + r * Math.cos(t), cy + r * Math.sin(t), 0.5 + rand() * 1.5, rand() * 2 * Math.PI, w, h));
+  }
+  return wallsOf([], {}, walls, `around-${rand()}`);
+}
+
 /** Random platforms and pits, some at heights that are not whole cells. */
 export function randomGround(rand: () => number, w: number, h: number): Ground {
   const g = flatGround(w, h);

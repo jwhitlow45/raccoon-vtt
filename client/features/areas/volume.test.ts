@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { EdgeFeature } from "#shared/model.ts";
-import { creaturesInArea, resolveArea, type AreaTemplateInput, type AreaToken, type ResolvedArea } from "#shared/rules/aoe.ts";
+import { creaturesInArea, resolveArea, type AreaContext, type AreaTemplateInput, type AreaToken, type ResolvedArea } from "#shared/rules/aoe.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
 import { hexAt, hexKey, type HexGrid } from "#shared/rules/hex.ts";
 import { deriveWalls, indexBuild, type WallSet } from "#shared/rules/walls.ts";
-import { bandAt, buildVolume, everySubcell, segmentsAround, towardViewer, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
+import { bandAt, buildVolume, capLoops, everySubcell, segmentsAround, towardViewer, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
 import {
   assertBanded,
   assertClosed,
   assertLoops,
   chordTolerance,
   ctxOf,
+  dungeonWalls,
   faceIndex,
   flatGround,
   inClip,
@@ -27,6 +28,7 @@ import {
   truth,
   TURNS,
   turnAxesOf,
+  wallsAround,
   type Ground,
 } from "./volumeTesting.ts";
 
@@ -363,6 +365,29 @@ describe("near and far, edges and loops (design 4.2 steps 7 and 8)", () => {
   });
 });
 
+describe("caps at hair-thin corners and pinches (design 4.2 step 3)", () => {
+  // On the plane x = 0, where a point's place along the line is its y.
+  const at = (y: number, z: number) => [0, y, z] as const;
+  const plane = { a: 1, b: 0, e: 0 };
+  const sorted = (loops: number[][]) => loops.map((l) => [...l].sort((p, q) => p - q).join(",")).sort();
+
+  test("each chain's end joins the nearest start above or below it, not one a hair along the line", () => {
+    // Two caps side by side, the second starting 5e-8 cells past the first, given as their bottom and top chains with the upright edges to find.
+    const hair = 0.5e-7;
+    const points = [at(0, 0), at(1, 0), at(1, 1), at(0, 1), at(1 + hair, 0), at(2, 0), at(2, 1), at(1 + hair, 1)];
+    const loops = capLoops(points, [[0, 1], [2, 3], [4, 5], [6, 7]], plane);
+    assert.deepEqual(sorted(loops), ["0,1,2,3", "4,5,6,7"]);
+  });
+
+  test("where two caps touch at a corner, the walk keeps to the cap it came along", () => {
+    // Two squares meeting at point 2, the second's edge from the pinch listed before the first's.
+    const points = [at(0, 0), at(1, 0), at(1, 1), at(0, 1), at(2, 1), at(2, 2), at(1, 2)];
+    const edges: [number, number][] = [[0, 1], [1, 2], [2, 4], [4, 5], [5, 6], [6, 2], [2, 3], [3, 0]];
+    assert.deepEqual(sorted(capLoops(points, edges, plane)), ["0,1,2,3", "2,4,5,6"]);
+    assert.deepEqual(sorted(capLoops(points, [...edges].reverse(), plane)), ["0,1,2,3", "2,4,5,6"]);
+  });
+});
+
 describe("ground and pits (design 4.2 step 4, D-261026-30)", () => {
   const bounds = { w: 30, h: 30 };
 
@@ -515,6 +540,28 @@ describe("the stand rule's footprint (design 4.2 step 9)", () => {
     }
   });
 
+  test("random volumes clipped by the scene's edges and by walls: every sub-cell lies in the scene (review ISOA1-F-2)", () => {
+    const rand = mulberry32(7 + SEED);
+    let edged = 0;
+    for (let i = 0; i < 1500 * FUZZ; i++) {
+      const tokens: Record<string, AreaToken> = {};
+      const t = randomTemplate(rand, 30, 30, tokens, i);
+      // Anywhere, so the scene's edges cut it as often as not.
+      const at = { ...t, origin: { ...t.origin, x: -2 + rand() * 34, y: -2 + rand() * 34 } };
+      const area = resolveArea(at, ctxOf(bounds, i % 3 === 0 ? randomWalls(rand, 30, 30) : null, tokens));
+      if (!area) continue;
+      const vol = buildVolume({ area, bounds, ground: () => 0, px: 40 });
+      let touches = false;
+      everySubcell(vol.footprint, (sx, sy) => {
+        assert.ok(sx >= 0 && sy >= 0 && sx < 120 && sy < 120, `${t.shape} #${i}: sub-cell ${sx}, ${sy}`);
+        touches ||= sx === 0 || sy === 0 || sx === 119 || sy === 119;
+        return true;
+      });
+      if (touches) edged++;
+    }
+    assert.ok(edged > 200, `${edged} volumes reach the scene's edge`);
+  });
+
   test("a sub-cell whose column hides the solid still counts: the plan is read before the ground cut", () => {
     const ground = flatGround(30, 30);
     for (let y = 14; y < 17; y++) for (let x = 14; x < 17; x++) ground.z[y * 30 + x] = 4;
@@ -550,94 +597,104 @@ describe("the stand rule's footprint (design 4.2 step 9)", () => {
 });
 
 describe("bounded work (design 6)", () => {
-  /** The largest solids: 100 cells round, on a 200 by 200 scene, with ground that steps every few cells. */
+  /** The largest solids, the commonest auras in a dense dungeon, and a hex stack across the scene: 200 by 200 cells, ground that steps every few cells. */
   const bounds = { w: 200, h: 200 };
   const ground = (x: number, y: number) => (((x >> 3) + (y >> 3)) % 5 === 0 ? 2 : (x >> 4) % 3 === 0 && (y >> 4) % 2 === 0 ? -1 : 0);
-  const largest: AreaTemplateInput[] = [
-    { id: "sphere", rev: 1, shape: "sphere", size: 500, origin: { x: 100.3, y: 99.6, z: 0 }, yaw: 0, includeOrigin: true },
-    { id: "cylinder", rev: 1, shape: "cylinder", size: 500, height: 200, origin: { x: 100.3, y: 99.6, z: 0 }, yaw: 0, includeOrigin: true },
-    { id: "emanation", rev: 1, shape: "emanation", size: 495, origin: { x: 100.5, y: 100.5, z: 0 }, yaw: 0, includeOrigin: false },
+  const dungeon = dungeonWalls(mulberry32(5), 200, 200);
+  const around = wallsAround(mulberry32(9), 100.3, 99.6, 200, 200);
+  const caster = { c: tok("c", { size: "medium", x: 100, y: 99, elevation: 0 }) };
+  const sphere = (size: number): AreaTemplateInput => ({ id: `sphere ${size}`, rev: 1, shape: "sphere", size, origin: { x: 100.3, y: 99.6, z: 0 }, yaw: 0, includeOrigin: true });
+  const aura = (size: number): AreaTemplateInput => ({ id: `aura ${size}`, rev: 1, shape: "emanation", size, origin: { x: 0, y: 0, z: 0 }, yaw: 0, includeOrigin: false, attachedTo: "c" });
+  const scenes: { name: string; t: AreaTemplateInput; ctx: AreaContext }[] = [
+    { name: "open, a sphere 100 cells round", t: sphere(500), ctx: ctxOf(bounds, null) },
+    { name: "open, a cylinder 100 cells round", t: { id: "cylinder", rev: 1, shape: "cylinder", size: 500, height: 200, origin: { x: 100.3, y: 99.6, z: 0 }, yaw: 0, includeOrigin: true }, ctx: ctxOf(bounds, null) },
+    { name: "open, an emanation 99 cells out", t: { id: "emanation", rev: 1, shape: "emanation", size: 495, origin: { x: 100.5, y: 100.5, z: 0 }, yaw: 0, includeOrigin: false }, ctx: ctxOf(bounds, null) },
+    { name: "hex rows, a 500 ft point emanation", t: { id: "hex", rev: 1, shape: "emanation", size: 500, origin: { x: 100, y: 100, z: 0 }, yaw: 0, includeOrigin: true }, ctx: ctxOf(bounds, null, {}, ROWS) },
+    { name: "a sphere 10 cells round among 32 short free walls", t: sphere(50), ctx: ctxOf(bounds, around) },
+    { name: "dungeon, a 15 ft aura", t: aura(15), ctx: ctxOf(bounds, dungeon, caster) },
+    { name: "dungeon, a 30 ft aura", t: aura(30), ctx: ctxOf(bounds, dungeon, caster) },
+    { name: "dungeon, a 20 ft sphere", t: sphere(20), ctx: ctxOf(bounds, dungeon) },
+    { name: "dungeon, a 40 ft sphere", t: sphere(40), ctx: ctxOf(bounds, dungeon) },
+    { name: "dungeon, a sphere 100 cells round", t: sphere(500), ctx: ctxOf(bounds, dungeon) },
   ];
 
-  test("a solid 100 cells round builds and cuts every bucket, a slice at a time", () => {
-    for (const t of largest) {
-      const area = resolveArea(t, ctxOf(bounds, null));
-      assert.ok(area);
+  test("every step of every build comes in slices, however big the solid or dense the walls", () => {
+    for (const { name, t, ctx } of scenes) {
+      const area = resolveArea(t, ctx);
+      assert.ok(area, name);
+      // A deadline already past still moves the work on each call and stops it part way: timing alone cannot show that on a fast machine. A call's work is counted in the vertices it makes, and its time bounds the steps that make none.
       const started = performance.now();
       const vol = buildVolume({ area, bounds, ground, px: 40 });
-      while (!vol.prepare(performance.now() + 1.5));
-      for (const key of vol.keys) while (!vol.ensure(key, performance.now() + 1.5));
-      const ms = performance.now() - started;
-      assert.ok(vol.faceCount > 40000, `${t.id}: ${vol.faceCount} faces`);
-      // Generous, so a slow machine does not fail it. The budget is the bench's (VOLUME_BENCH=1 below).
-      assert.ok(ms < 5000, `${t.id} took ${ms} ms`);
-      // A deadline already past still moves the work on each call, and stops it part way: timing alone cannot show that on a fast machine. A call's work is counted in the vertices it makes.
-      const sliced = buildVolume({ area, bounds, ground, px: 40 });
       let most = 0;
+      let longest = 0;
+      let calls = 0;
+      const call = (step: () => boolean) => {
+        const before = vol.vertexCount;
+        const a = performance.now();
+        const done = step();
+        longest = Math.max(longest, performance.now() - a);
+        most = Math.max(most, vol.vertexCount - before);
+        calls++;
+        return done;
+      };
+      while (!call(() => vol.prepare(0)));
       let bucketMost = 0;
-      for (let done = false; !done; ) {
-        const before = sliced.vertexCount;
-        done = sliced.prepare(0);
-        most = Math.max(most, sliced.vertexCount - before);
+      for (const key of vol.keys) {
+        const start = vol.vertexCount;
+        while (!call(() => vol.ensure(key, 0)));
+        bucketMost = Math.max(bucketMost, vol.vertexCount - start);
       }
-      for (const key of sliced.keys) {
-        const start = sliced.vertexCount;
-        for (let done = false; !done; ) {
-          const before = sliced.vertexCount;
-          done = sliced.ensure(key, 0);
-          most = Math.max(most, sliced.vertexCount - before);
-        }
-        bucketMost = Math.max(bucketMost, sliced.vertexCount - start);
-      }
-      assert.ok(most <= 400 && bucketMost > 400, `${t.id}: ${most} vertices in a slice, ${bucketMost} in the largest bucket`);
-      assert.equal(sliced.faceCount, vol.faceCount);
+      const ms = performance.now() - started;
+      assert.equal(vol.failed, 0, name);
+      assert.ok(calls > 2 * vol.keys.length, `${name}: ${calls} calls`);
+      assert.ok(most <= 400, `${name}: ${most} vertices in one call, ${bucketMost} in the largest bucket`);
+      // Generous, so a collector's pause on a slow machine does not fail it. The budget is the bench's (VOLUME_BENCH=1 below).
+      assert.ok(longest < 50, `${name}: a call took ${longest} ms`);
+      assert.ok(ms < 5000, `${name} took ${ms} ms`);
+      if (t.id !== "sphere 500" || ctx.walls) continue;
+      // Slicing changes nothing: the same mesh as a build in one go.
+      const whole = buildVolume({ area, bounds, ground, px: 40 });
+      whole.ensureAll();
+      assert.ok(bucketMost > 400);
+      assert.equal(whole.faceCount, vol.faceCount);
+      assert.equal(whole.vertexCount, vol.vertexCount);
     }
   });
 
   /**
-   * The bench line (design 6): each slice against the 6 ms slice of the
+   * The bench rows (design 6): each slice against the 6 ms slice of the
    * phone stand-in, which runs at a quarter of this machine's speed or
-   * less, so a slice here gets 1.5 ms. The first slice, the mesh, its clip
-   * and its caps, cannot stop part way. Run it with VOLUME_BENCH=1.
+   * less, so a slice here gets 1.5 ms, and how far past it the longest
+   * runs. Run it with VOLUME_BENCH=1.
    */
-  test("bench: the largest solids against the 6 ms slice", { skip: !process.env.VOLUME_BENCH }, () => {
-    const med = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
+  test("bench: the scenes above against the 6 ms slice", { skip: !process.env.VOLUME_BENCH }, () => {
     const p99 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length * 0.99)]!;
-    for (const t of largest) {
-      const area = resolveArea(t, ctxOf(bounds, null));
+    for (const { name, t, ctx } of scenes) {
+      const area = resolveArea(t, ctx);
       assert.ok(area);
       const first: number[] = [];
-      const prepare: number[] = [];
-      const buckets: number[] = [];
+      const slices: number[] = [];
       let faces = 0;
+      let whole = 0;
       // The first builds are left out: they time the compiler warming up, which a session pays once.
-      for (let rep = -3; rep < 20; rep++) {
+      for (let rep = -2; rep < 8; rep++) {
         const t0 = performance.now();
         const vol = buildVolume({ area, bounds, ground, px: 40 });
-        if (rep < 0) {
-          vol.ensureAll();
-          continue;
-        }
-        first.push(performance.now() - t0);
-        for (;;) {
+        let k = 0;
+        const slice = (step: (deadline: number) => boolean) => {
           const a = performance.now();
-          const done = vol.prepare(a + 1.5);
-          prepare.push(performance.now() - a);
-          if (done) break;
-        }
-        for (const key of vol.keys) {
-          for (;;) {
-            const a = performance.now();
-            const done = vol.ensure(key, a + 1.5);
-            buckets.push(performance.now() - a);
-            if (done) break;
-          }
-        }
+          const done = step(a + 1.5);
+          if (rep >= 0) (k++ === 0 ? first : slices).push(performance.now() - a);
+          return done;
+        };
+        while (!slice((d) => vol.prepare(d)));
+        for (const key of vol.keys) while (!slice((d) => vol.ensure(key, d)));
+        if (rep >= 0) whole += performance.now() - t0;
         faces = vol.faceCount;
       }
-      console.log(
-        `${t.id} r 100: ${faces} faces; first slice median ${med(first).toFixed(2)} ms; prepare slices median ${med(prepare).toFixed(2)}, p99 ${p99(prepare).toFixed(2)}; bucket slices median ${med(buckets).toFixed(2)}, p99 ${p99(buckets).toFixed(2)}, max ${Math.max(...buckets).toFixed(2)}`,
-      );
+      const all = [...first, ...slices];
+      const max = Math.max(...all);
+      console.log(`${name}: ${faces} faces, built in ${(whole / 8).toFixed(1)} ms; first slice ${Math.max(...first).toFixed(2)} ms, slices p99 ${p99(all).toFixed(2)}, max ${max.toFixed(2)} (${(max - 1.5).toFixed(2)} past the deadline)`);
     }
   });
 });
