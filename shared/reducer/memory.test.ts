@@ -347,6 +347,17 @@ describe("a scene's settings (5.4)", () => {
     assert.deepEqual(old.state.exploredTiles, state.exploredTiles);
   });
 
+  test("a grid shape switch forgets the ground explored on a scene with vision off too, so turning it on shows none of it", () => {
+    const state = remembered();
+    state.scenes.s1 = { ...state.scenes.s1!, vision: { on: false, light: "dark" } };
+    const r = applyOp(state, { t: "scene.update", sceneId: "s1", patch: { gridShape: "hexRows" } }, DM, env(1));
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    assert.deepEqual([r.state.exploredTiles, r.state.exploredBy], [{}, {}]);
+    const old = applyOp(state, { t: "scene.update", sceneId: "s1", patch: { gridShape: "hexRows" } }, DM, { ...env(1), opVersion: 25 });
+    assert.ok(old.ok);
+    assert.deepEqual(old.state.exploredTiles, state.exploredTiles);
+  });
+
   test("a scene that goes takes its memory and both marks with it", () => {
     const state = start();
     state.meta.playerSceneId = "s2";

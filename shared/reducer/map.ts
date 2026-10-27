@@ -192,9 +192,9 @@ function holderLayer(tx: Tx, scene: Scene, memberId: string): void {
  * keep it alike: a scene that went loses its memory and its marks, one
  * whose fog or party vision went off loses its memory and its share mark,
  * and a grid shape switch, whose cell keys mean other cells now, drops the
- * scene's memory and, while it remembers, the ground players explored
- * there, since what they saw is no longer on the map and the build now
- * would show in its place. Every layer that lost explored ground, by any
+ * scene's memory and the ground players explored there, whatever its fog
+ * and vision, since what they saw is no longer on the map and the build
+ * now would show in its place, once vision is on. Every layer that lost explored ground, by any
  * path, drops what it no longer holds. A stamp made DM only drops from
  * every memory, so its art stops reaching players. Only scenes, explored
  * tiles and stamps the op wrote can have changed.
@@ -211,12 +211,13 @@ export function keepMemory(tx: Tx, before: RoomState): void {
         if (tx.state.memoryShared?.[id]) tx.writeBookkeeping(keys.memoryShared(id), null);
         continue;
       }
+      if (now.gridShape !== was.gridShape) {
+        forgetSceneMemory(tx, id);
+        if (discoversMap(tx.env.opVersion)) forgetExplored(tx, id);
+      }
       if (!keepsMemory(now)) {
         forgetSceneMemory(tx, id);
         if (tx.state.memoryShared?.[id]) tx.writeBookkeeping(keys.memoryShared(id), null);
-      } else if (now.gridShape !== was.gridShape) {
-        forgetSceneMemory(tx, id);
-        if (discoversMap(tx.env.opVersion)) forgetExplored(tx, id);
       }
     }
   }
