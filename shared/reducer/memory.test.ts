@@ -569,7 +569,7 @@ describe("what never reaches a projection (rule 3)", () => {
       const view = projectState(state, viewer, { sceneId: "s1" }) as Record<string, unknown>;
       for (const field of ["memory", "memoryBy", "playedScenes", "memoryShared"]) assert.equal(view[field], undefined, `${viewer.role} ${field}`);
       for (const key of [keys.memory("s1", 0, 0), keys.memoryBy("s1", "p1", 1, 0), keys.played("s1"), keys.memoryShared("s1")]) {
-        assert.equal(projectEntity(key, state, viewer, { sceneId: "s1" }) ?? null, null, `${viewer.role} ${key}`);
+        assert.equal(projectEntity(key, state, viewer, { sceneId: "s1" }), null, `${viewer.role} ${key}`);
       }
     }
   });

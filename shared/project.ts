@@ -2593,6 +2593,13 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     // A holder's layer reaches them only merged into their fog (projectFogCtx), and the DM only joined (exploredAny).
     case "exploredBy":
       return null;
+    // What players remember and the scenes' marks reach no viewer's projection, the DM's included: only the room export
+    // carries them (docs/design-v1-map-discovery.md 11, rule 3).
+    case "memory":
+    case "memoryBy":
+    case "played":
+    case "memoryShared":
+      return null;
     case "holders":
       return value ? projectHoldersCtx(ctx, value as SightHolders) : null;
     case "fogDraft":
