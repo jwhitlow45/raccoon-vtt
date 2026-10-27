@@ -670,6 +670,10 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     await checking.waitFor();
     await shots.take(dm, "mapdiscovery-dm-build-asking");
     assert.equal(floored(), whole, "a band went before the answer");
+    // While it waits, the builder takes no other edit (D-261027-07): an Erase tap on a corner the rectangle leaves does nothing.
+    await pickOption(dm, "Map builder", "Builder mode", "Erase");
+    await tapCell(dm, CAVERN.bounds, { x: 0, y: 63 });
+    await checking.waitFor();
     await dmContext.setOffline(false);
     await ask.waitFor({ timeout: 30_000 });
     await checking.waitFor({ state: "detached" });
@@ -677,6 +681,8 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     await ask.getByRole("button", { name: "Go ahead" }).click();
     await ask.waitFor({ state: "detached" });
     await waitFor("the whole rectangle erased", () => (floored() === whole - 76 * 57 ? true : null));
+    await settle("nothing after the rectangle");
+    assert.equal(sockets.dm.state?.buildChunks[`${run.cavern}:0,3`]?.cells["0,63"], "stone", "the tap made while the rectangle waited erased its corner");
     await pickOption(dm, "Map builder", "Builder mode", "Brush");
     await pickTool(dm, "Select");
   });
