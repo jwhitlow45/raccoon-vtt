@@ -236,6 +236,9 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
     }
     case "build.lights":
       return "changing lights";
+    // An ask applies nothing and goes on no stack: the gesture's own ops are its step.
+    case "build.ask":
+      return "asking before building";
     case "build.height":
       return op.height === 0 ? "clearing heights" : "painting heights";
     case "build.stairs":

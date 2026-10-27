@@ -358,6 +358,9 @@ function dispatch(tx: Tx, op: Op): void {
       return buildStairs(tx, op);
     case "build.rough":
       return buildRough(tx, op);
+    // An ask applies nothing: the server reads its ops on a copy (server/rooms/actor.ts), and a device's view leaves it out.
+    case "build.ask":
+      return;
     case "door.set":
       return doorSet(tx, op);
     case "trap.create":

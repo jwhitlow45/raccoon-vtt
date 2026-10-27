@@ -263,6 +263,7 @@ export function reads(op: Op, state: RoomState): Reads {
     case "build.lights":
     case "build.stairs":
     case "build.rough":
+    case "build.ask":
       return of([{ key: keys.scene(op.sceneId) }], [`scene:${op.sceneId}`]);
     // A height paint lifts the tokens standing there, so it reads the whole scene, as erase does.
     case "build.height":

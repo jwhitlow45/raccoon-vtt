@@ -1883,6 +1883,31 @@ const useKind = z.discriminatedUnion("kind", [
 
 const op = <T extends string, S extends z.ZodRawShape>(t: T, shape: S) => z.strictObject({ t: z.literal(t), ...shape });
 
+// The builder's ops a gesture of several may send, which a `build.ask` carries (docs/design-v1-map-discovery.md 5.3).
+const buildPaintOp = op("build.paint", { sceneId: id, terrain, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget });
+const buildEraseOp = op("build.erase", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget });
+const buildRectOp = op("build.rect", {
+    sceneId: id,
+    terrain: terrain.nullable(),
+    x: cellIndex,
+    y: cellIndex,
+    w: z.number().int().min(1).max(MAX_SCENE_CELLS),
+    h: z.number().int().min(1).max(MAX_SCENE_CELLS),
+    forget,
+  });
+const buildEdgeOp = op("build.edge", {
+    sceneId: id,
+    edges: z.array(z.strictObject({ key: edgeKey, feature: edgeFeature.nullable() })).min(1).max(MAX_BUILD_EDGES),
+    forget,
+  });
+const buildHeightOp = op("build.height", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), height: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT), forget });
+const buildStairsOp = op("build.stairs", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), up: stairDirection.nullable(), forget });
+const buildRoughOp = op("build.rough", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), on: z.boolean(), forget });
+
+/** The most ops one `build.ask` carries, and its bytes, so an ask with the frame round it fits a socket frame (server/rooms/ws.ts MAX_FRAME_BYTES). */
+export const MAX_ASK_OPS = 64;
+export const MAX_ASK_BYTES = 48 * 1024;
+
 /** Ops a client may send (design 8.1). */
 export const clientOps = [
   op("room.update", { name: name.optional(), settings: settingsPatch.optional() }),
@@ -2151,23 +2176,11 @@ export const clientOps = [
   op("fog.discard", { sceneId: id }),
   op("fog.live", { sceneId: id, ops: z.array(fogOp).min(1).max(MAX_FOG_DRAFT_OPS) }),
   op("fog.reset", { sceneId: id, to: z.enum(["hidden", "revealed"]) }),
-  op("build.paint", { sceneId: id, terrain, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget }),
-  op("build.erase", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget }),
-  op("build.rect", {
-    sceneId: id,
-    terrain: terrain.nullable(),
-    x: cellIndex,
-    y: cellIndex,
-    w: z.number().int().min(1).max(MAX_SCENE_CELLS),
-    h: z.number().int().min(1).max(MAX_SCENE_CELLS),
-    forget,
-  }),
+  buildPaintOp,
+  buildEraseOp,
+  buildRectOp,
   op("build.poly", { sceneId: id, terrain: terrain.nullable(), points: z.array(coord).min(6).max(MAX_POLY_VERTICES * 2), forget }),
-  op("build.edge", {
-    sceneId: id,
-    edges: z.array(z.strictObject({ key: edgeKey, feature: edgeFeature.nullable() })).min(1).max(MAX_BUILD_EDGES),
-    forget,
-  }),
+  buildEdgeOp,
   op("build.label", {
     sceneId: id,
     labelId: id,
@@ -2203,11 +2216,28 @@ export const clientOps = [
    * Paints cells' ground to a height in feet (section 4.2), 0 clearing it.
    * Tokens standing on the ground there rise or sink with it in the same op.
    */
-  op("build.height", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), height: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT), forget }),
+  buildHeightOp,
   /** Marks cells as stairs pointing up by the rule or one way, or clears the marks with null (section 4.2). */
-  op("build.stairs", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), up: stairDirection.nullable(), forget }),
+  buildStairsOp,
   /** Marks cells as difficult ground or clears the marks (docs/design-v1-movement.md 6.3). Terrain is untouched, and no wall moves. */
-  op("build.rough", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), on: z.boolean(), forget }),
+  buildRoughOp,
+  /**
+   * The DM's ask before a builder gesture of several ops applies any of
+   * them (docs/design-v1-map-discovery.md 5.3): the gesture's ops, which
+   * the server reads in turn as they would apply, without applying,
+   * storing or logging any, and refuses with `forget` where together they
+   * would push players' remembered map past its cap. Sent under the
+   * gesture's undo group ahead of its ops, so the forget question comes
+   * before the first of them, and the server then refuses the rest of the
+   * group with it unless they carry the yes. `more` while asks of a
+   * gesture too big for one frame are still to come: the asks of a group
+   * read on, and the last answers for all.
+   */
+  op("build.ask", {
+    sceneId: id,
+    ops: z.array(z.discriminatedUnion("t", [buildPaintOp, buildEraseOp, buildRectOp, buildEdgeOp, buildHeightOp, buildStairsOp, buildRoughOp])).min(1).max(MAX_ASK_OPS),
+    more: z.literal(true).optional(),
+  }).refine((o) => serializedBytes(o) <= MAX_ASK_BYTES, { message: `an ask is at most ${MAX_ASK_BYTES / 1024} KiB` }),
   /**
    * Opens, closes or locks one door (section 4.1), and for a secret door
    * marks it found or hidden again. A player may only open or close a door

@@ -255,6 +255,7 @@ function hexPhaseFits(op: Op, c: Check): Decision {
     case "build.height":
     case "build.stairs":
     case "build.rough":
+    case "build.ask":
       return hex(op.sceneId) ? no(ON_HEXES.build) : OK;
     case "trap.create":
       return hex(op.trap.sceneId) ? no(ON_HEXES.traps) : OK;
@@ -725,6 +726,7 @@ function forPlayer(op: Op, c: Check): Decision {
     case "build.height":
     case "build.stairs":
     case "build.rough":
+    case "build.ask":
     case "encounter.start":
     case "encounter.end":
     case "encounter.setValues":

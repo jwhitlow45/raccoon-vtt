@@ -332,6 +332,19 @@ export class RoomActor {
   #undo = new UndoStacks();
   /** Each client's last Undo or Redo refused with FORGET_ASK, and the step it asked about (docs/design-v1-map-discovery.md 5.3). */
   #forgetAsks = new Map<ClientKey, { n: number; step: UndoEntry }>();
+  /**
+   * Each client's gesture whose asks are still coming (`build.ask` with
+   * `more`): its undo group, the room as its ops so far would leave it, and
+   * each layer's estimate with their growth (#answerAsk).
+   */
+  #asking = new Map<ClientKey, { group: string; state: RoomState; totals: Map<string, number>; over: boolean }>();
+  /**
+   * Each client's undo group last refused with FORGET_ASK, whose later ops
+   * go unmade with it unless they carry the yes (5.3): a gesture is asked
+   * about once, and none of it applies before the answer. Cleared by the
+   * client's next op of another group.
+   */
+  #askRefused = new Map<ClientKey, string>();
   #sizes: SizeGuard;
   #roomRate: TokenBucket;
   /** Each member's budget of block saves (docs/design-v1-companion-stat-blocks.md 3.5), made at their first save. */
@@ -916,6 +929,19 @@ export class RoomActor {
     }
     // A page left open across the dragon turtle's rename still names the old id, which nothing would rename once stored.
     const clientOp = withTodaysSrdIds(parsed.data);
+    // The rest of a gesture the DM was asked about goes unmade with it, unless sent with the yes (5.3).
+    const refusedGroup = this.#askRefused.get(key);
+    if (refusedGroup !== undefined) {
+      if (cmd.group !== refusedGroup) this.#askRefused.delete(key);
+      else if ((ASK_OPS.has(clientOp.t) || clientOp.t === "build.ask") && (clientOp as { forget?: true }).forget !== true) {
+        this.#refuse(key, wm, n, "forget", FORGET_ASK);
+        return;
+      }
+    }
+    if (clientOp.t === "build.ask") {
+      this.#answerAsk(key, wm, n, clientOp, cmd.group, viewer);
+      return;
+    }
     let op: Op = clientOp;
     let restoredFrom: "undo" | "redo" | null = null;
     let step: UndoEntry | null = null;
@@ -1089,6 +1115,7 @@ export class RoomActor {
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
     const reduced = this.#reduce(op, viewer, asks);
+    if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
       const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${reduced.message}` : reduced.message;
@@ -1228,8 +1255,8 @@ export class RoomActor {
    * memory as the batch found it, charged, and every op's growth since.
    * `over` when one would pass its cap. Null when the op adds nothing.
    */
-  #memoryEstimate(after: RoomState, touched: readonly EntityKey[]): { over: boolean; commit: () => void } | null {
-    const growth = memoryGrowth(this.#staged.state, after, touched);
+  #memoryEstimate(after: RoomState, touched: readonly EntityKey[], from: { before: RoomState; totals: ReadonlyMap<string, number> } | null = null): { over: boolean; next: ReadonlyMap<string, number>; commit: () => void } | null {
+    const growth = memoryGrowth(from?.before ?? this.#staged.state, after, touched);
     if (growth.size === 0) return null;
     const estimate = this.#ensureBatch().estimate;
     const next = new Map<string, number>();
@@ -1237,11 +1264,61 @@ export class RoomActor {
     for (const [layer, bytes] of growth) {
       const [sceneId, member] = JSON.parse(layer) as [string, string | null];
       const scene = after.scenes[sceneId]!;
-      const total = (estimate.get(layer) ?? layerCharge(this.#staged.state, this.#staged.state.scenes[sceneId] ?? scene, member)) + bytes;
+      const total = (from?.totals.get(layer) ?? estimate.get(layer) ?? layerCharge(this.#staged.state, this.#staged.state.scenes[sceneId] ?? scene, member)) + bytes;
       next.set(layer, total);
       if (total > this.#sizes.memoryCap(after, scene, member)) over = true;
     }
-    return { over, commit: () => next.forEach((total, layer) => estimate.set(layer, total)) };
+    return { over, next, commit: () => next.forEach((total, layer) => estimate.set(layer, total)) };
+  }
+
+  /**
+   * A gesture's ask (`build.ask`, docs/design-v1-map-discovery.md 5.3): the
+   * ops of a DM's builder gesture, read in turn on a copy of the room as
+   * they would apply, each layer's estimate taking each one's growth, as
+   * #reduce reads one op. Nothing is applied, logged or stored. The asks of
+   * one undo group read on one copy, so a gesture past one frame asks in
+   * parts and its last ask answers: past a layer's cap it is refused with
+   * FORGET_ASK, and so is the rest of its group (#askRefused), else taken
+   * with no change. An op that would be refused for itself is left out, as
+   * it will be refused when it comes.
+   */
+  #answerAsk(key: ClientKey, wm: Watermark, n: number, op: OpOf<"build.ask">, group: string | undefined, viewer: Viewer): void {
+    if (viewer.role !== "dm" || viewer === SERVER_ACTOR) {
+      this.#refuse(key, wm, n, "forbidden", "only the DM builds");
+      return;
+    }
+    if (group === undefined) {
+      this.#refuse(key, wm, n, "invalid", "an ask goes with its gesture's undo group");
+      return;
+    }
+    const known = this.#asking.get(key);
+    const chain = known && known.group === group ? known : { group, state: this.#staged.state, totals: new Map<string, number>(), over: false };
+    const ctx = { seq: this.#staged.seq + 1, at: new Date(this.#opts.now()).toISOString() };
+    for (const inner of op.ops) {
+      if (chain.over) break;
+      if (inner.sceneId !== op.sceneId) continue;
+      const result = applyOp(chain.state, inner, viewer, ctx);
+      if (!result.ok) continue;
+      const memory = this.#memoryEstimate(result.state, result.touched, { before: chain.state, totals: chain.totals });
+      memory?.next.forEach((total, layer) => chain.totals.set(layer, total));
+      if (memory?.over) chain.over = true;
+      chain.state = result.state;
+    }
+    if (op.more) {
+      this.#asking.set(key, chain);
+    } else {
+      this.#asking.delete(key);
+      if (chain.over) {
+        this.#askRefused.set(key, group);
+        this.#refuse(key, wm, n, "forget", FORGET_ASK);
+        return;
+      }
+    }
+    wm.staged = n;
+    const batch = this.#ensureBatch();
+    push(batch.acks, key, n);
+    batch.watermarks.set(key, n);
+    this.#scheduleCommit();
   }
 
   /** Steps 7 and 8: reduce on the staged state, then check the limits on what came out. `asks` refuses with FORGET_ASK an op that would pass a layer's cap. */
