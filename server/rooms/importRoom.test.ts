@@ -16,6 +16,7 @@ import { apply, AT, room, scene, token, trap } from "#shared/testutil.ts";
 import { sightPieces, tooManySightPieces } from "#shared/visionLimits.ts";
 import { MANIFEST_VERSION, type ExportManifest, type ManifestAsset } from "./exportRoom.ts";
 import { assertWithinLimits, entryToFile, IMPORT_LIMITS, InflatedCounter } from "./importRoom.ts";
+import { MEMORY_CAP } from "./memorySize.ts";
 import { SizeGuard } from "./sizeGuard.ts";
 
 async function zipWith(name: string, data: Buffer): Promise<{ zip: yauzl.ZipFile; entry: yauzl.Entry }> {
@@ -216,7 +217,8 @@ describe("wave 4 import limits (docs/design-v1-maps-vision.md 2.4)", () => {
   test("a room whose player scene's explored layer could not grow to its full size is refused with the message for the DM", () => {
     const reserve = exploredReserve(roomOf(1_000_000));
     assert.ok(reserve > 100_000);
-    assert.doesNotThrow(() => assertWithinLimits(roomOf(LIMITS.stateBytes - reserve)));
+    // Players' memory of the scene is reserved at its cap beside it (docs/design-v1-map-discovery.md 5.5).
+    assert.doesNotThrow(() => assertWithinLimits(roomOf(LIMITS.stateBytes - reserve - MEMORY_CAP)));
     const tight = roomOf(LIMITS.stateBytes - reserve + 1);
     assert.throws(
       () => assertWithinLimits(tight),

@@ -10,7 +10,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE } from "#shared/limits.ts";
 import { ringed } from "#shared/logRings.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
-import { mapDiscoveryUpgrade, migrateSnapshot } from "#shared/migrate.ts";
+import { mapDiscoveryUpgrade, migrateSnapshot, needsMapDiscoveryUpgrade } from "#shared/migrate.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, type FoundWork, type StarterKind } from "#shared/starter.ts";
 import type { Member, RoomState } from "#shared/model.ts";
@@ -33,7 +33,7 @@ import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoo
 import type { RoomGateway } from "./gateway.ts";
 import { archiveLines } from "./persistence.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
-import { checkWholeScenes, measuredStateBytes } from "./sizeGuard.ts";
+import { checkWholeScenes, measuredStateBytes, MEMORY_FULL, memoryReserves } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
@@ -212,7 +212,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
     // The importer joins as one more member, so the limits are checked on the
     // room as it will be stored. A full roster plus the importer would make a
     // room that refuses every op, deletions included.
-    assertWithinLimits(finishState(mapDiscoveryUpgrade(parsed.state), dmMember, roomName));
+    assertWithinLimits(finishState(withDiscoveryUpgrade(parsed.state, header.data.schemaVersion), dmMember, roomName));
 
     let manifest: z.infer<typeof manifestSchema> = { formatVersion: 1, assets: [] };
     const manifestEntry = entries.get("assets.json");
@@ -242,9 +242,9 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // Members get their new ids first, because asset uploader rows are written during image processing.
       const memberIds = new Map(Object.keys(parsed.state.members).map((id) => [id, uuidv7()]));
       const assetIds = await importImages(deps, zip, entries, manifest, roomId, counter, memberIds);
-      // Every scene an import brings is marked played, as the upgrade step marks a stored room's, since the remap carries
-      // no marks and the room is stored at today's version, which loadRoom never upgrades (docs/design-v1-map-discovery.md 5.5).
-      const remapped = finishState(mapDiscoveryUpgrade(remapState(parsed.state, { assets: assetIds, memberIds })), dmMember, roomName);
+      // The remap carries the file's memory and marks under the new ids, and a file from before map discovery then takes
+      // the upgrade step, so every scene it brings is marked played (docs/design-v1-map-discovery.md 5.5).
+      const remapped = finishState(withDiscoveryUpgrade(remapState(parsed.state, { assets: assetIds, memberIds }), header.data.schemaVersion), dmMember, roomName);
       // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
       // the whole log, so Show older and a session's export reach every imported line.
       const state = { ...remapped, log: ringed(remapped.log, remapped.members) };
@@ -277,6 +277,18 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
   } finally {
     zip.close();
   }
+}
+
+/**
+ * A file's state with the map discovery upgrade step when the file is from
+ * before it (docs/design-v1-map-discovery.md 5.5), after its migration, as
+ * a stored room takes the step at load: the room is stored at today's
+ * version, which loadRoom never upgrades. A newer file holds its own memory
+ * and marks, which the remap carries, and the step would give a share mark
+ * back to a scene that lost it.
+ */
+export function withDiscoveryUpgrade(state: RoomState, schemaVersion: number): RoomState {
+  return needsMapDiscoveryUpgrade(schemaVersion) ? mapDiscoveryUpgrade(state) : state;
 }
 
 function parseJson(buffer: Buffer, name: string): unknown {
@@ -312,6 +324,8 @@ export function assertWithinLimits(state: RoomState): void {
   if (bytes > LIMITS.stateBytes) throw over("the room state is over 8 MiB");
   // The player scene's explored layer must be able to grow to its full size (docs/design-v1-maps-vision.md 2.4).
   if (bytes + exploredReserve(state) > LIMITS.stateBytes) throw over(NO_ROOM_TO_EXPLORE);
+  // And players' memory to its caps where a scene takes its whole cap: shares shrink to fit (docs/design-v1-map-discovery.md 5.5).
+  if (bytes + exploredReserve(state) + memoryReserves(state).whole > LIMITS.stateBytes) throw over(MEMORY_FULL);
   // Each scene as the ops on it will measure it, its sight and exploration reserved, so no imported scene refuses its first move.
   const scenes = checkWholeScenes(state);
   if (!scenes.ok) throw over(scenes.message);

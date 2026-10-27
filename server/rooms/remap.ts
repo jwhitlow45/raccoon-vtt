@@ -1,5 +1,5 @@
 import { uuidv7 } from "#shared/ids.ts";
-import { chunkKey, compareLogIds, holderTileKey, tileKey } from "#shared/keys.ts";
+import { chunkKey, compareLogIds, holderChunkKey, holderTileKey, tileKey } from "#shared/keys.ts";
 import { tilesAcross } from "#shared/rules/fog.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
 import { cutLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
@@ -20,14 +20,18 @@ import type {
   ImageRef,
   InitEntry,
   JournalPage,
+  Label,
   LineParts,
   LogEntry,
   LogEvent,
   Member,
+  MemoryChunk,
+  MemoryEntries,
   RoomState,
   SavedEncounter,
   SavedEncounterMonster,
   Scene,
+  SceneMark,
   SrdImage,
   Stamp,
   Light,
@@ -41,6 +45,7 @@ import type {
   TurnUses,
 } from "#shared/model.ts";
 import { normalizeCompanionState } from "#shared/reducer/companions.ts";
+import { keepsMemory } from "#shared/reducer/memory.ts";
 import { pausedAnchorForEntry } from "#shared/rules/durations.ts";
 import { linkOf, relinked } from "#shared/reducer/uses.ts";
 import { withPcActors, withShapeRules } from "#shared/rules/pcStats.ts";
@@ -347,6 +352,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (!out.holders[sceneId]?.entries.some((e) => e.on && e.memberId === memberId) || pastBounds(sceneId, t)) continue;
     out.exploredBy[holderTileKey(sceneId, memberId, t.tx, t.ty)] = { ...t, sceneId, memberId };
   }
+  remapMemory(state, out, { scenes, members, labels, stampIds, newId, tokenArt: (id) => asset(id, "token") });
   for (const d of Object.values(state.fogDrafts)) {
     if (!scenes.has(d.sceneId)) continue;
     const sceneId = scenes.of(d.sceneId);
@@ -698,6 +704,127 @@ function withPhaseImages(scene: Scene, phases: readonly MapPhase[], asset: (id: 
   if (!active || !phaseGrid) return rest;
   const next: Scene = { ...rest, phases: kept, phaseId: active.id, phaseGrid, map: active.id === scene.phaseId && scene.map ? scene.map : phaseMap(phaseGrid, active) };
   return active.id === scene.phaseId ? next : withPhaseLight(next, active);
+}
+
+/** The kinds of entry a chunk of memory holds (MemoryEntries). */
+const MEMORY_KINDS = ["cells", "edges", "walls", "heights", "up", "upDir", "rough", "labels", "stamps"] as const satisfies readonly (keyof MemoryEntries)[];
+
+/**
+ * Players' memory follows its scene and its layer
+ * (docs/design-v1-map-discovery.md 5.4): the party's on a scene that keeps
+ * memory, and a holder's only where their entry is on after the remap, as
+ * their explored layer, so it goes with that layer (ASTRA-5). A remembered
+ * label or stamp takes the new id of the live one, and one only memory
+ * names takes a fresh id, the same in every layer and chunk, so imported
+ * memory never names the old room's things. A remembered stamp's art
+ * follows its image as a live stamp's does, and the entry goes when the
+ * image did not come through or is not token art, or when the live stamp is
+ * the DM's alone, since memory would show its art to players. Free wall ids
+ * are only unique within their chunk, and stay. Both marks follow their
+ * scenes. A share mark stays only on a scene that keeps memory, the only
+ * kind the reducer leaves one on. The players' scene is marked played, as
+ * every op that makes a scene the players' scene marks it, so memory never
+ * grows on a scene the size guard does not reserve it on (5.5).
+ */
+function remapMemory(
+  state: RoomState,
+  out: RoomState,
+  ids: {
+    scenes: { has(id: string): boolean; of(id: string): string };
+    members: { has(id: string): boolean; of(id: string): string };
+    labels: { has(id: string): boolean; of(id: string): string };
+    stampIds: ReadonlyMap<string, string>;
+    newId: () => string;
+    tokenArt: (id: string) => string | undefined;
+  },
+): void {
+  const { scenes, members, labels, stampIds, newId, tokenArt } = ids;
+  const memory: Record<string, MemoryChunk> = {};
+  const memoryBy: Record<string, MemoryChunk> = {};
+  const playedScenes: Record<string, SceneMark> = {};
+  const memoryShared: Record<string, SceneMark> = {};
+  const rememberedOnly = { labels: new Map<string, string>(), stamps: new Map<string, string>() };
+  const idOf = (field: "labels" | "stamps", old: string): string => {
+    const live = field === "labels" ? (labels.has(old) ? labels.of(old) : undefined) : stampIds.get(old);
+    if (live !== undefined) return live;
+    let fresh = rememberedOnly[field].get(old);
+    if (fresh === undefined) rememberedOnly[field].set(old, (fresh = newId()));
+    return fresh;
+  };
+  const rememberedLabels = (record: Record<string, Label | null>, sceneId: string): Record<string, Label | null> => {
+    const next: Record<string, Label | null> = {};
+    for (const [old, value] of Object.entries(record)) {
+      const id = idOf("labels", old);
+      next[id] = value === null ? null : { ...value, id, sceneId };
+    }
+    return next;
+  };
+  const rememberedStamps = (record: Record<string, Stamp | null>, sceneId: string): Record<string, Stamp | null> => {
+    const next: Record<string, Stamp | null> = {};
+    for (const [old, value] of Object.entries(record)) {
+      const id = idOf("stamps", old);
+      if (value === null) {
+        next[id] = null;
+        continue;
+      }
+      if (out.stamps[id]?.visibility === "dm") continue;
+      let art = value.art;
+      if ("assetId" in art) {
+        const mapped = tokenArt(art.assetId);
+        if (mapped === undefined) continue;
+        art = { assetId: mapped };
+      }
+      next[id] = { ...value, id, sceneId, art };
+    }
+    return next;
+  };
+  // A chunk under its new scene and member, in the reducer's one stored form: a kind only while it names something, and no chunk when none is left.
+  const chunk = (c: MemoryChunk, sceneId: string, memberId: string | undefined): MemoryChunk | null => {
+    const next: MemoryChunk = { sceneId, cx: c.cx, cy: c.cy, rev: c.rev };
+    if (memberId !== undefined) next.memberId = memberId;
+    const entries: MemoryEntries = { ...c };
+    if (c.labels) entries.labels = rememberedLabels(c.labels, sceneId);
+    if (c.stamps) entries.stamps = rememberedStamps(c.stamps, sceneId);
+    let any = false;
+    for (const kind of MEMORY_KINDS) {
+      const record = entries[kind];
+      if (record === undefined || Object.keys(record).length === 0) continue;
+      (next as Record<string, unknown>)[kind] = record;
+      any = true;
+    }
+    return any ? next : null;
+  };
+  for (const c of Object.values(state.memory ?? {})) {
+    if (!scenes.has(c.sceneId)) continue;
+    const sceneId = scenes.of(c.sceneId);
+    if (!keepsMemory(out.scenes[sceneId])) continue;
+    const next = chunk(c, sceneId, undefined);
+    if (next) memory[chunkKey(sceneId, c.cx, c.cy)] = next;
+  }
+  for (const c of Object.values(state.memoryBy ?? {})) {
+    if (c.memberId === undefined || !scenes.has(c.sceneId) || !members.has(c.memberId)) continue;
+    const sceneId = scenes.of(c.sceneId);
+    const memberId = members.of(c.memberId);
+    if (!keepsMemory(out.scenes[sceneId]) || !out.holders[sceneId]?.entries.some((e) => e.on && e.memberId === memberId)) continue;
+    const next = chunk(c, sceneId, memberId);
+    if (next) memoryBy[holderChunkKey(sceneId, memberId, c.cx, c.cy)] = next;
+  }
+  for (const mark of Object.values(state.playedScenes ?? {})) {
+    if (!scenes.has(mark.sceneId)) continue;
+    const sceneId = scenes.of(mark.sceneId);
+    playedScenes[sceneId] = { ...mark, sceneId };
+  }
+  const players = out.meta.playerSceneId;
+  if (players !== null) playedScenes[players] ??= { sceneId: players, rev: 0 };
+  for (const mark of Object.values(state.memoryShared ?? {})) {
+    if (!scenes.has(mark.sceneId)) continue;
+    const sceneId = scenes.of(mark.sceneId);
+    if (keepsMemory(out.scenes[sceneId])) memoryShared[sceneId] = { ...mark, sceneId };
+  }
+  out.memory = memory;
+  out.memoryBy = memoryBy;
+  out.playedScenes = playedScenes;
+  out.memoryShared = memoryShared;
 }
 
 /** A shared line's part readers named after their new ids, each list keeping only members who came through. */

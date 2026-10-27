@@ -8,9 +8,9 @@ import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
 
 /**
  * A room import takes the map discovery upgrade step (docs/design-v1-map-discovery.md
- * 5.5): every scene it brings is marked played, and each with fog and party vision on
- * shares the room, whatever the file's version, since the room is stored at today's
- * version and loadRoom never upgrades it.
+ * 5.5) for a file from before it: every scene it brings is marked played, and each with
+ * fog and party vision on shares the room, since the room is stored at today's version
+ * and loadRoom never upgrades it. A file from today carries its own marks instead.
  */
 
 async function unzip(buffer: Buffer): Promise<Map<string, Buffer>> {
@@ -76,10 +76,20 @@ describe("a room import and the map discovery upgrade (5.5)", () => {
     assert.deepEqual([state.memory, state.memoryBy], [{}, {}]);
   });
 
-  test("a file from today: its scenes come back marked too, under their new ids", async () => {
-    const state = await imported(await exported(t.client()));
-    assert.deepEqual(Object.keys(state.playedScenes!).sort(), Object.keys(state.scenes).sort());
-    for (const [id, mark] of Object.entries(state.playedScenes!)) assert.deepEqual(mark, { sceneId: id, rev: 0 });
-    assert.deepEqual(Object.keys(state.memoryShared!), [crypt(state)]);
+  test("a file from today keeps its own marks under their new ids, and the step grants no share again (MD1-D-9)", async () => {
+    const file = await exported(t.client());
+    // The Crypt, added by hand, carries no mark: only the room's first mat, the players' scene, comes back marked.
+    const plain = await imported(file);
+    const mat = plain.meta.playerSceneId!;
+    assert.deepEqual(Object.keys(plain.playedScenes!), [mat]);
+    assert.deepEqual(plain.playedScenes![mat], { sceneId: mat, rev: 0 });
+    assert.deepEqual(plain.memoryShared, {});
+    // Its own marks on the Crypt come back under its new id.
+    const marked = await imported({
+      ...file,
+      state: { ...file.state, playedScenes: { ...file.state.playedScenes, [S3.id]: { sceneId: S3.id, rev: 0 } }, memoryShared: { [S3.id]: { sceneId: S3.id, rev: 0 } } },
+    });
+    assert.deepEqual(Object.keys(marked.playedScenes!).sort(), Object.keys(marked.scenes).sort());
+    assert.deepEqual(marked.memoryShared, { [crypt(marked)]: { sceneId: crypt(marked), rev: 0 } });
   });
 });
