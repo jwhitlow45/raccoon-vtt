@@ -7,7 +7,7 @@ import type { ClientOp } from "#shared/protocol.ts";
 import { member, room, scene } from "#shared/testutil.ts";
 
 /*
- * The Vision settings' per-player parts as the DM's panel draws them
+ * The per-player parts of What players see as the DM's panel draws them
  * (docs/design-v1-per-player-vision.md 7.1 and 11): the Sight row under
  * the switch, named and described, who sees for themselves, and both busy
  * while their change is on its way.
@@ -48,7 +48,7 @@ function named(html: string, at: RegExp, attr: "aria-labelledby" | "aria-describ
   return html.slice(start, html.indexOf("</", start)).replace(/<[^>]+>/g, "");
 }
 
-describe("the Vision settings on a per-player scene (7.1, 11)", () => {
+describe("What players see on a per-player scene (7.1, 11)", () => {
   test("the Sight row shows with vision off, a radio group named Sight and described by Per player's help, then who sees for themselves", () => {
     const html = render(table({ on: false, light: "dark", perPlayer: true }));
     const sight = /<div data-vision-sight[\s\S]*?(<div role="radiogroup"[^>]*>)/;

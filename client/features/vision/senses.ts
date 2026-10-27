@@ -4,7 +4,7 @@ import { senseFeetText } from "./reach.ts";
 /*
  * The senses that see (docs/design-v1-maps-vision.md section 4.3.2) are read
  * by the server's own rule in shared/rules/vision.ts, so the token panel and
- * the Vision settings word exactly the ranges the party's sight uses.
+ * a scene's What players see settings word exactly the ranges the party's sight uses.
  */
 export { parseSenses, type Senses } from "#shared/rules/vision.ts";
 
@@ -23,7 +23,7 @@ export function sensesLines(s: Senses, feetPerCell: number): string[] {
   return lines;
 }
 
-/** The senses in a few words, for a row in the Vision settings: "Darkvision 60 ft, Blindsight 10 ft". */
+/** The senses in a few words, for a row in a scene's What players see settings: "Darkvision 60 ft, Blindsight 10 ft". */
 export function sensesShort(s: Senses, feetPerCell: number): string {
   const parts: string[] = [];
   const ft = (feet: number) => senseFeetText(feet, feetPerCell);

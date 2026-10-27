@@ -6,7 +6,7 @@ import { carriedLightsNote, fogNote, lightOf, lightPatch, phaseWithLight, SIGHT_
 
 const phase = (id: string, patch: Partial<MapPhase> = {}): MapPhase => ({ id, name: id, assetId: `a-${id}`, widthPx: 800, heightPx: 600, ...patch });
 
-describe("a scene's Vision settings", () => {
+describe("a scene's What players see settings", () => {
   test("turning vision on or off keeps the light level, which starts Bright", () => {
     assert.equal(lightOf({}), "bright");
     assert.deepEqual(visionPatch({}, true), { on: true, light: "bright" });
