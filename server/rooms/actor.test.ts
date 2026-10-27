@@ -3222,6 +3222,34 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     return { conn, sent, sessionId };
   }
 
+  /** A pool over the fake database whose COMMIT waits from `hold` until `open`, as a slow database's would. */
+  function commitGate(db: FakeDb): { pool: Pool; hold: () => void; open: () => void } {
+    let gate: Promise<void> | null = null;
+    let release: () => void = () => undefined;
+    const inner = db.pool();
+    const held =
+      (query: (sql: string, params?: unknown[]) => Promise<unknown>) =>
+      (sql: string, params?: unknown[]): Promise<unknown> =>
+        sql.trim() === "commit" && gate ? gate.then(() => query(sql, params)) : query(sql, params);
+    const pool = {
+      query: held((sql, params) => inner.query(sql, params as never[])),
+      connect: async () => {
+        const client = await inner.connect();
+        return { query: held((sql, params) => client.query(sql, params as never[])), release: () => client.release() };
+      },
+    } as unknown as Pool;
+    return {
+      pool,
+      hold: () => {
+        gate = new Promise((resolve) => (release = resolve));
+      },
+      open: () => {
+        gate = null;
+        release();
+      },
+    };
+  }
+
   /** What became of op `n`: taken, or its refusal's code and words. */
   async function outcome(sent: ServerMessage[], n: number): Promise<string> {
     const answer = await answerTo(sent, n);
@@ -3348,34 +3376,19 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     const { state, sceneId, pcId } = discovery(dm, player);
     state.scenes[sceneId] = { ...state.scenes[sceneId]!, bounds: { w: 200, h: 200 } };
     const db = new FakeDb({ state, dmGrants: [dm.id] });
-    // COMMIT waits on the gate while one is set.
-    let gate: Promise<void> | null = null;
-    let open: () => void = () => undefined;
-    const inner = db.pool();
-    const held =
-      (query: (sql: string, params?: unknown[]) => Promise<unknown>) =>
-      (sql: string, params?: unknown[]): Promise<unknown> =>
-        sql.trim() === "commit" && gate ? gate.then(() => query(sql, params)) : query(sql, params);
-    const pool = {
-      query: held((sql, params) => inner.query(sql, params as never[])),
-      connect: async () => {
-        const client = await inner.connect();
-        return { query: held((sql, params) => client.query(sql, params as never[])), release: () => client.release() };
-      },
-    } as unknown as Pool;
+    const { pool, hold, open } = commitGate(db);
     const actor = await RoomActor.load({ ...deps(db), pool });
     assert.ok(actor);
     try {
       const table = dmDevice(actor, dm);
       await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      gate = new Promise((resolve) => (open = resolve));
+      hold();
       // Ayla's step, which changes what the party sees, whose batch commits a millisecond on and waits at its COMMIT, then an ask read in turns meanwhile.
       await actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 89, y: 50 }, "g1");
       const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: 60 + k * 8, w: 200, h: 8 }));
       await actor.op(table.conn, 2, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g2");
       for (let i = 0; i < 100 && actor.askState.reading; i++) await new Promise((r) => setTimeout(r, 10));
       open();
-      gate = null;
       assert.equal(await outcome(table.sent, 1), "taken");
       assert.equal(await outcome(table.sent, 2), "taken", "the ask's answer went with no op after it");
       // Its batch began where the step's ends, so its answer carries nothing the step's already did, such as the sight it changed.
@@ -3384,6 +3397,42 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       assert.ok(asked !== "stuck" && stepped !== "stuck" && asked !== stepped);
       assert.ok(stepped.changes.length > 0);
       assert.deepEqual(asked.changes, [], "the ask's answer sent the step's changes again");
+    } finally {
+      open();
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a batch an ask begins while the batch before it commits starts where that one ends, so the players remember the floor that one made (MD4-ENSURE-TEST)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, pcId } = discovery(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, bounds: { w: 200, h: 200 } };
+    // Ayla on the stone floor, the cell beside her in her sight.
+    state.tokens[pcId] = { ...state.tokens[pcId]!, x: 10, y: 10 };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const { pool, hold, open } = commitGate(db);
+    const actor = await RoomActor.load({ ...deps(db), pool });
+    assert.ok(actor);
+    try {
+      const table = dmDevice(actor, dm);
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      const remembered = () => actor.committed.state.memory?.[chunkKey(sceneId, 0, 0)]?.cells?.["11,10"] ?? null;
+      hold();
+      // The seen cell painted wood: its batch commits a millisecond on and waits at its COMMIT, while an ask reads and then begins the next batch.
+      await actor.op(table.conn, 1, { t: "build.paint", sceneId, terrain: "wood", cells: ["11,10"] }, "g1");
+      const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "dirt", x: 0, y: 60 + k * 8, w: 200, h: 8 }));
+      await actor.op(table.conn, 2, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g2");
+      for (let i = 0; i < 100 && actor.askState.reading; i++) await new Promise((r) => setTimeout(r, 10));
+      assert.equal(actor.askState.reading, false);
+      // Ayla walks off out of sight of the cell, and the cell is painted grass: both wait for the COMMIT, then join the ask's batch.
+      await actor.op(table.conn, 3, { t: "token.move", tokenId: pcId, x: 40, y: 10 }, "g3");
+      await actor.op(table.conn, 4, { t: "build.paint", sceneId, terrain: "grass", cells: ["11,10"] }, "g4");
+      open();
+      for (const n of [1, 2, 3, 4]) assert.equal(await outcome(table.sent, n), "taken", `op ${n}`);
+      assert.equal(actor.committed.state.buildChunks[chunkKey(sceneId, 0, 0)]?.cells["11,10"], "grass");
+      assert.equal(remembered(), "wood", "the players remember the wood they last saw");
     } finally {
       open();
       db.freeze();
