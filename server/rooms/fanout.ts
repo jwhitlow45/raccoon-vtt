@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
 import type { Label, LogEntry, RoomState, Stamp, Trap, Viewer } from "#shared/model.ts";
-import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, perPlayerScene, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
+import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import type { Change, RefusalCode } from "#shared/protocol.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
 import { labelCells, TILE_CELLS } from "#shared/rules/fog.ts";
@@ -159,7 +159,10 @@ type PlayerClasses = { scene: string; sight: string; fog: string };
  * which holds whether the door is a hidden secret one and where a free
  * door stands. Each is replaced and never changed, so an unchanged input
  * returns the same answer without testing a cell, and a changed one never
- * hits. The scene and blackout checks run before it.
+ * hits. The scene and blackout checks run before it. A label or stamp some
+ * layer's memory names also reads that memory, the class's sight and the
+ * remembered box (docs/design-v1-map-discovery.md decision 6), which the
+ * path does not hold, so it is projected afresh (MD2-O-1, MD2-LK-2).
  */
 type Memo = WeakMap<object, Memo | { value: unknown }>;
 const memo: Memo = new WeakMap();
@@ -252,6 +255,7 @@ class Projector {
     const scene = sceneId === null ? undefined : state.scenes[sceneId];
     if (!value || !scene || value.sceneId !== scene.id) return project();
     const kind = parseKey(key)?.kind;
+    if ((kind === "label" || kind === "stamp") && namedByMemory(state, scene.id, kind === "label" ? "labels" : "stamps", value.id)) return project();
     const path: object[] = [value, scene.fogEnabled ? FOG_ON : FOG_OFF];
     let ranges: CellRange[];
     if (kind === "label") ranges = [labelCells(value as Label)];
