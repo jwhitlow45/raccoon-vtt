@@ -18,6 +18,13 @@ export type RadioOption<V extends string> = { value: V; label: string; help?: st
  * explanation: the radio cards of Room settings (docs/design-v1-visual.md
  * 2.3). The chosen card takes the accent's outline and tint. A disabled
  * group keeps its shape with a quiet outline and dim text, never a fade.
+ *
+ * The cards stand in one block under the name and its help, as Players
+ * see's do (features/vision/PlayersSee.tsx): their fills start at the
+ * name's edge and their words sit in by a card's border and padding, the
+ * control's own inset. As rows of one column beside the name, the
+ * alignment sweep read that inset as words off the column's edge on every
+ * choice. The help describes the group.
  */
 export function RadioGroup<V extends string>(props: {
   legend: string;
@@ -28,51 +35,56 @@ export function RadioGroup<V extends string>(props: {
   onChange(value: V): void;
 }) {
   const name = useId();
+  const helpId = useId();
   const { disabled } = props;
   return (
-    <fieldset style={{ margin: 0, padding: 0, border: "none", minWidth: 0, display: "grid", gap: theme.space(1) }} disabled={disabled}>
+    <fieldset aria-describedby={props.help ? helpId : undefined} style={{ margin: 0, padding: 0, border: "none", minWidth: 0, display: "grid", gap: theme.space(1) }} disabled={disabled}>
       <legend style={{ padding: 0, fontSize: theme.font.input, fontWeight: theme.weight.strong, color: disabled ? theme.color.textDisabled : theme.color.text }}>
         {props.legend}
       </legend>
-      {props.help ? <Help>{props.help}</Help> : null}
-      {props.options.map((o) => {
-        const chosen = props.value === o.value;
-        const look: CSSProperties = disabled
-          ? { border: `${theme.line.border}px solid ${theme.color.border}`, background: "transparent", color: theme.color.textDisabled }
-          : chosen
-            ? { border: `${theme.line.border}px solid ${theme.color.accent}`, background: theme.color.accentTint, color: theme.color.text }
-            : { border: `${theme.line.border}px solid ${theme.color.border}`, background: "transparent", color: theme.color.text };
-        return (
-          <label
-            key={o.value}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: theme.space(3),
-              minHeight: theme.touch,
-              padding: `${theme.space(1)}px ${theme.space(2)}px`,
-              borderRadius: theme.radius.md,
-              cursor: disabled ? "default" : "pointer",
-              ...look,
-            }}
-          >
-            <input
-              type="radio"
-              name={name}
-              value={o.value}
-              checked={chosen}
-              onChange={() => props.onChange(o.value)}
-              style={{ width: 20, height: 20, margin: 0, flex: "none", accentColor: theme.color.accent }}
-            />
-            <span style={{ display: "grid", gap: theme.space(0.5) }}>
-              <span style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>{o.label}</span>
-              {o.help ? (
-                <span style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: disabled ? theme.color.textDisabled : theme.color.textMuted }}>{o.help}</span>
-              ) : null}
-            </span>
-          </label>
-        );
-      })}
+      <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
+        {props.help ? <Help id={helpId}>{props.help}</Help> : null}
+        <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
+          {props.options.map((o) => {
+            const chosen = props.value === o.value;
+            const look: CSSProperties = disabled
+              ? { border: `${theme.line.border}px solid ${theme.color.border}`, background: "transparent", color: theme.color.textDisabled }
+              : chosen
+                ? { border: `${theme.line.border}px solid ${theme.color.accent}`, background: theme.color.accentTint, color: theme.color.text }
+                : { border: `${theme.line.border}px solid ${theme.color.border}`, background: "transparent", color: theme.color.text };
+            return (
+              <label
+                key={o.value}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: theme.space(3),
+                  minHeight: theme.touch,
+                  padding: `${theme.space(1)}px ${theme.space(2)}px`,
+                  borderRadius: theme.radius.md,
+                  cursor: disabled ? "default" : "pointer",
+                  ...look,
+                }}
+              >
+                <input
+                  type="radio"
+                  name={name}
+                  value={o.value}
+                  checked={chosen}
+                  onChange={() => props.onChange(o.value)}
+                  style={{ width: 20, height: 20, margin: 0, flex: "none", accentColor: theme.color.accent }}
+                />
+                <span style={{ display: "grid", gap: theme.space(0.5) }}>
+                  <span style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>{o.label}</span>
+                  {o.help ? (
+                    <span style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: disabled ? theme.color.textDisabled : theme.color.textMuted }}>{o.help}</span>
+                  ) : null}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
     </fieldset>
   );
 }
