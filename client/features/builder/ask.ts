@@ -25,12 +25,14 @@ export type BuildContext = {
   scene: Pick<Scene, "id" | "fogEnabled" | "vision">;
   /** Told 1 as a gesture starts waiting on its asks and -1 as it stops, for the builder's line (BUILD_ASKING). */
   waiting?: (change: 1 | -1) => void;
+  /** Whether a gesture already waits on its asks, so no other may start (D-261027-07). */
+  asking?: () => boolean;
 };
 
 /** A tool's BuildContext, its waiting counted on this Room's builder (BuilderState.asking). */
 export function buildContext(ctx: Pick<ToolContext, "actions" | "ui" | "scene" | "scope">): BuildContext {
   const store = ctx.scope.get(builderSlot).store;
-  return { actions: ctx.actions, ui: ctx.ui, scene: ctx.scene, waiting: (change) => store.setState((s) => ({ asking: Math.max(0, s.asking + change) })) };
+  return { actions: ctx.actions, ui: ctx.ui, scene: ctx.scene, waiting: (change) => store.setState((s) => ({ asking: Math.max(0, s.asking + change) })), asking: () => store.getState().asking > 0 };
 }
 
 /**
@@ -58,6 +60,8 @@ export function buildContext(ctx: Pick<ToolContext, "actions" | "ui" | "scene" |
  * are each asked about by themselves.
  */
 export function dispatchBuild(ctx: BuildContext, ops: readonly ClientOp[]): void {
+  // A second gesture's hold would refuse the first one's ops when it settles, so none starts while one waits.
+  if (ctx.asking?.()) return;
   if (ops.length <= 1 || !keepsMemory(ctx.scene) || askOps(ctx.scene.id, ops).length === 0) {
     dispatchGesture(ctx.actions, ops);
     return;

@@ -187,7 +187,7 @@ function page() {
   room.setOutbox(outbox);
   const actions = createRoomActions(room, { sendEph: () => undefined, switchScene: () => undefined });
   const counted = { waiting: 0 };
-  const ctx: BuildContext = { actions, ui: room.ui, scene: state.scenes.s1!, waiting: (change) => void (counted.waiting += change) };
+  const ctx: BuildContext = { actions, ui: room.ui, scene: state.scenes.s1!, waiting: (change) => void (counted.waiting += change), asking: () => counted.waiting > 0 };
   const connect = () => {
     const hello = room.prepareHello();
     room.applySnapshot(server.hello({ resumeFrom: hello.resumeFrom, sceneId: "s1" }));
@@ -257,6 +257,17 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     assert.ok(asked.t === "op" && (asked.op as ClientOp).t === "build.ask");
     k.room.applyEv({ t: "ev", seq: k.room.store.getState().seq + 1, changes: [], rejects: [{ n: asked.n, code: "forget", message: FORGET_ASK }] });
     assert.equal(k.room.store.getState().forgetAsk ?? null, null, "a question about a cancelled gesture");
+  });
+
+  test("a second gesture while one waits sends nothing, and the first is built whole once answered", () => {
+    const p = page();
+    p.connect();
+    dispatchBuild(p.ctx, rect);
+    dispatchBuild(p.ctx, rectOps("s1", { x: 0, y: 0, w: 80, h: 40 }, "wood", { w: 80, h: 64 }));
+    assert.deepEqual(p.sentKinds(), ["build.ask"], "the second gesture asked nothing");
+    p.deliver();
+    assert.equal(p.cell("1,1"), "stone");
+    assert.equal(p.counted.waiting, 0);
   });
 
   test("Redo while the gesture waits sends nothing, so no step it would bring back lands before the gesture", () => {
