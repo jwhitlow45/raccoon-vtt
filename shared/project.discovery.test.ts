@@ -243,11 +243,37 @@ describe("free walls cut at held cells (decision 2)", () => {
       return JSON.stringify(projectState(state, P1, { sceneId: "s1" }).buildChunks);
     });
     for (const w of worlds) assert.equal(w, worlds[0]);
-    // A real end on a held cell's side that borders a cell not held is moved as a cut end is, and one between two held cells is not.
+    // Every end on a cell's side moves as a cut end does, between two held cells too (D-261026-29 item 16), and one inside a cell stays.
     const state = fogRoom();
     wall(state, "abcdefghijkl", [1.25, 1.5], [3, 1.5]);
     lift(state, "dm", { x: 0, y: 0, w: 5, h: 5 });
-    assert.deepEqual(pieces(state), [[1.25, 1.5, 3, 1.5, "wall"]]);
+    assert.deepEqual(pieces(state), [[1.25, 1.5, 3.0001, 1.5, "wall"]]);
+  });
+
+  test("a live wall that stops on the side of a remembered cell and one the DM ran on into it out of sight: the same bytes (Fable's sliver)", () => {
+    // Cells 0 to 3 of row 1 live, cell 4 only remembered, no creature to see it.
+    const world = (extended: boolean) => {
+      const s = fogRoom({ vision: true });
+      lift(s, "party", { x: 0, y: 0, w: 5, h: 3 });
+      lift(s, "dm", { x: 0, y: 0, w: 4, h: 3 });
+      if (!extended) wall(s, "abcdefghijkl", [1.5, 1.5], [4, 1.5]);
+      else {
+        wall(s, "abcdefghijkl", [1.5, 1.5], [4.5, 1.5]);
+        // The map step's version over cell (4, 1): the wall as it was, which touched that cell at a point only.
+        remember(s, null, 0, 0, { walls: { abcdefghijkl: [{ wall: { id: "abcdefghijkl", a: [1.5, 1.5], b: [4, 1.5], f: { kind: "wall" } }, cells: ["4,1"] }] } });
+      }
+      return s;
+    };
+    assert.deepEqual(wallsOf(world(true), P1), wallsOf(world(false), P1));
+    assert.deepEqual(pieces(world(false)), [[1.5, 1.5, 4.0001, 1.5, "wall"]]);
+  });
+
+  test("an end on the scene's own side keeps both coordinates where either would leave the scene", () => {
+    const state = fogRoom();
+    // Cut where it leaves the scene, at the corner of cells (47, 1) and (47, 2).
+    wall(state, "abcdefghijkl", [46.5, 1.5], [49.5, 2.5]);
+    lift(state, "dm", { x: 40, y: 0, w: 8, h: 5 });
+    assert.deepEqual(pieces(state), [[46.5, 1.5, 48, 2, "wall"]]);
   });
 
   test("astra's six-piece diagonal, and its pair split inside an unheld cell: every held piece in both, the same bytes", () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { edge, heights, lift, paint, remember, stairs, wall } from "./discoveryTestutil.ts";
+import { edge, fogRoom, heights, lift, paint, remember, stairs, wall } from "./discoveryTestutil.ts";
 import { keys, type EntityKey } from "./keys.ts";
 import { CHUNK_CELLS, type BuildChunk, type FreeWall, type Label, type PlayerChunk, type RememberedWall, type RoomState, type Scene, type TerrainId, type Viewer, type WallFeature } from "./model.ts";
 import { exploreFor, perPlayerOp, perPlayerState, playersOf, withCellVision } from "./perPlayerTestutil.ts";
@@ -9,10 +9,11 @@ import { opSchema, type Op } from "./protocol.ts";
 import { applyOp, type ApplyResult } from "./reducer.ts";
 import { labelCells } from "./rules/fog.ts";
 import { decodeHeights } from "./rules/heights.ts";
-import { fogClassOf, groundOf, type Ground } from "./rules/held.ts";
+import { sceneGrid } from "./rules/grid.ts";
+import { fogClassOf, groundOf, wallSpans, type Ground } from "./rules/held.ts";
 import { landing, ownWalk } from "./rules/movement.ts";
 import { linesPastStart } from "./logRings.ts";
-import { DM, chance, comparable, deepClone, env, int, pick, rng } from "./testutil.ts";
+import { DM, P1, chance, comparable, deepClone, env, int, pick, rng } from "./testutil.ts";
 
 /**
  * The property tests of map discovery (docs/design-v1-map-discovery.md
@@ -461,6 +462,60 @@ describe("map discovery over random rooms (MX1, MX3 to MX6)", () => {
       for (let seed = 1; seed <= 24; seed++) run(seed, 36, counts);
       assert.ok(counts.applied > 500 && counts.fogged > 400 && counts.walks > 20 && counts.twins > 10, JSON.stringify(counts));
     });
+  });
+});
+
+/**
+ * MX1's pairs at the side between live and remembered cells (D-261026-29
+ * item 16): a wall that stops on that side, and the same wall the DM ran
+ * on into the remembered cells out of sight, with the version the map
+ * step keeps there, give the player the same bytes. Random lines and
+ * lengths on the 1/64 lattice, across the side x = 6 or y = 6.
+ */
+describe("MX1's pairs where live ground meets remembered ground", () => {
+  test("a wall ending on the side and the same wall run on out of sight read the same", () => {
+    let compared = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = rng(seed * 6007);
+      const across = chance(r, 0.5);
+      // Along the side's normal it steps a whole cell or two, along the side by any lattice amount, so it meets the side on the lattice.
+      const m = int(r, 1, 3);
+      const du = int(r, 1, 2) * 64;
+      const dv = int(r, -96, 96);
+      const start = 6 * 64 - m * du;
+      const v0 = int(r, 2 * 64, 9 * 64);
+      const at = (k: number): [number, number] => {
+        const u = (start + k * du) / 64;
+        const v = (v0 + k * dv) / 64;
+        return across ? [u, v] : [v, u];
+      };
+      const world = (extended: boolean) => {
+        const s = fogRoom({ vision: true, bounds: { w: 16, h: 16 } });
+        lift(s, "party", { x: 0, y: 0, w: 16, h: 16 });
+        lift(s, "dm", across ? { x: 0, y: 0, w: 6, h: 16 } : { x: 0, y: 0, w: 16, h: 6 });
+        const old: FreeWall = { id: "abcdefghijkl", a: at(0), b: at(m), f: { kind: "wall" } };
+        if (!extended) wall(s, old.id, old.a, old.b);
+        else {
+          const ran = wall(s, old.id, old.a, at(m + int(r, 1, 2)));
+          // The map step's version over the remembered cells the new wall crosses: the wall as the party last saw it.
+          const cells = wallSpans(sceneGrid(s.scenes["s1"]!), ran).map((span) => span.cell).filter((key) => {
+            const [x, y] = key.split(",").map(Number) as [number, number];
+            return across ? x >= 6 : y >= 6;
+          });
+          if (cells.length > 0) {
+            const home = Object.values(s.buildChunks).find((c) => c.walls?.some((w) => w.id === old.id))!;
+            remember(s, null, home.cx, home.cy, { walls: { [old.id]: [{ wall: old, cells }] } });
+          }
+        }
+        return s;
+      };
+      const a = world(false);
+      const b = world(true);
+      if (a.buildChunks === undefined) continue;
+      assert.equal(stableStringify(projectState(b, P1, { sceneId: "s1" }).buildChunks), stableStringify(projectState(a, P1, { sceneId: "s1" }).buildChunks), `seed ${seed}: the wall from ${JSON.stringify(at(0))} tells its run on`);
+      compared++;
+    }
+    assert.ok(compared > 250, `only ${compared} pairs`);
   });
 });
 

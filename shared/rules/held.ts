@@ -485,7 +485,7 @@ export const SPLIT_CELLS = 4;
 export const PIECE_GRID = 10_000;
 
 /** An end along a line: the wall it was cut from and its parameter there. */
-type End = { ax: number; ay: number; ex: number; ey: number; t: Ratio; real: boolean };
+type End = { ax: number; ay: number; ex: number; ey: number; t: Ratio };
 
 function endX(e: End): Ratio {
   return { n: e.ax * e.t.d + e.t.n * e.ex, d: e.t.d };
@@ -506,13 +506,15 @@ function gcd(a: number, b: number): number {
  * Joins, splits and rounds the stretches the cut chose (decision 2, 5.2):
  * stretches on one line and of one kind that touch or overlap join into a
  * run, each run is split where it crosses the lines x = 4m, or y = 4m for
- * a run steeper than 45 degrees, and then every end that is not a stored
- * lattice end, and every stored end on a held cell's side that borders a
- * cell not held, moves away from the piece's other end: each coordinate to
- * the next multiple of 1/10000 cell strictly past it, within the scene, a
- * coordinate equal to the other end's staying. So the pieces depend only
- * on the stretches, whichever walls they came from, and no cut end can be
- * told from a real one at the edge of held ground.
+ * a run steeper than 45 degrees, and then every end on a cell's side or
+ * corner, cut or stored alike, moves away from the piece's other end: each
+ * coordinate to the next multiple of 1/10000 cell strictly past it, a
+ * coordinate equal to the other end's staying, and both staying where
+ * either would leave the scene (decision 2, D-261026-29 item 16). An end
+ * strictly inside a cell stays exact. So the pieces depend only on the
+ * stretches, whichever walls they came from, and no end on a side tells a
+ * wall that stops there from one that runs on, past held ground or into
+ * ground the player only remembers.
  */
 export function joinPieces(stretches: readonly CellPiece[], ground: Pick<Ground, "grid" | "bounds" | "keyHeld">): Piece[] {
   type Run = { lo: End; hi: End };
@@ -534,9 +536,8 @@ export function joinPieces(stretches: readonly CellPiece[], ground: Pick<Ground,
     const major = Math.abs(ux) >= Math.abs(uy) ? "x" : "y";
     let line = lines.get(key);
     if (!line) lines.set(key, (line = { major, runs: [] }));
-    const real = (t: Ratio) => t.n === 0 || t.n === t.d;
-    let lo: End = { ax, ay, ex, ey, t: s.t0, real: real(s.t0) };
-    let hi: End = { ax, ay, ex, ey, t: s.t1, real: real(s.t1) };
+    let lo: End = { ax, ay, ex, ey, t: s.t0 };
+    let hi: End = { ax, ay, ex, ey, t: s.t1 };
     const along = major === "x" ? endX : endY;
     if (less(along(hi), along(lo))) [lo, hi] = [hi, lo];
     line.runs.push({ lo, hi });
@@ -554,10 +555,8 @@ export function joinPieces(stretches: readonly CellPiece[], ground: Pick<Ground,
     for (const r of runs) {
       const last = joined[joined.length - 1];
       if (last && !less(along(last.hi), along(r.lo))) {
-        // Touching or overlapping: one run. An end shared by several stretches is real when any of them ends there for real.
+        // Touching or overlapping: one run.
         if (less(along(last.hi), along(r.hi))) last.hi = r.hi;
-        else if (same(along(last.hi), along(r.hi)) && r.hi.real) last.hi = r.hi;
-        if (same(along(last.lo), along(r.lo)) && r.lo.real) last.lo = r.lo;
         continue;
       }
       joined.push({ ...r });
@@ -582,7 +581,7 @@ function splitRun(lo: End, hi: End, major: "x" | "y"): [End, End][] {
     // The cut's parameter on the low end's wall: along that wall's major axis, a ratio of whole numbers again.
     const e = major === "x" ? lo.ex : lo.ey;
     const s = major === "x" ? lo.ax : lo.ay;
-    const cut: End = { ...lo, t: ratio(k * band - s, e), real: false };
+    const cut: End = { ...lo, t: ratio(k * band - s, e) };
     out.push([from, cut]);
     from = cut;
   }
@@ -596,27 +595,27 @@ function rounded(lo: End, hi: End, kind: PieceKind, ground: Pick<Ground, "grid" 
   const ly = endY(lo);
   const hx = endX(hi);
   const hy = endY(hi);
-  const moves = (e: End, x: Ratio, y: Ratio): boolean => {
-    if (!e.real) return true;
-    // A stored end on a held cell's side that borders a cell of the scene not held, the scene's own sides aside.
-    const cells = cellsAt(ground.grid, x.n / x.d, y.n / y.d).filter((key) => inSceneKey(ground, key));
-    return cells.some((key) => ground.keyHeld(key)) && cells.some((key) => !ground.keyHeld(key));
-  };
-  const coord = (v: Ratio, other: Ratio, move: boolean, side: number): number => {
-    if (!move || same(v, other)) return v.n / (v.d * LAT);
-    const up = less(other, v);
-    // In 1/10000 cells, exactly: v.n / (v.d * 64) * 10000.
+  // On a side or corner: the end touches two cells of the scene or more. A side of the scene itself touches one.
+  const onSide = (x: Ratio, y: Ratio): boolean => cellsAt(ground.grid, x.n / x.d, y.n / y.d).filter((key) => inSceneKey(ground, key)).length > 1;
+  const exact = (v: Ratio) => v.n / (v.d * LAT);
+  // The coordinate moved, in 1/10000 cells and exactly (v.n / (v.d * 64) * 10000), or null where it stays.
+  const step = (v: Ratio, other: Ratio): number | null => {
+    if (same(v, other)) return null;
     const n = v.n * PIECE_GRID;
     const d = v.d * LAT;
-    const step = up ? floorDiv(n, d) + 1 : -floorDiv(-n, d) - 1;
-    if (step < 0 || step > side * PIECE_GRID) return v.n / (v.d * LAT);
-    return step / PIECE_GRID;
+    return less(other, v) ? floorDiv(n, d) + 1 : -floorDiv(-n, d) - 1;
   };
-  const moveLo = moves(lo, lx, ly);
-  const moveHi = moves(hi, hx, hy);
   const { w, h } = ground.bounds;
-  const a: [number, number] = [coord(lx, hx, moveLo, w), coord(ly, hy, moveLo, h)];
-  const b: [number, number] = [coord(hx, lx, moveHi, w), coord(hy, ly, moveHi, h)];
+  const end = (x: Ratio, y: Ratio, ox: Ratio, oy: Ratio): [number, number] => {
+    if (!onSide(x, y)) return [exact(x), exact(y)];
+    const sx = step(x, ox);
+    const sy = step(y, oy);
+    const leaves = (s: number | null, side: number) => s !== null && (s < 0 || s > side * PIECE_GRID);
+    if (leaves(sx, w) || leaves(sy, h)) return [exact(x), exact(y)];
+    return [sx === null ? exact(x) : sx / PIECE_GRID, sy === null ? exact(y) : sy / PIECE_GRID];
+  };
+  const a = end(lx, ly, hx, hy);
+  const b = end(hx, hy, lx, ly);
   const [p, q] = a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]) ? [a, b] : [b, a];
   const mx = (p[0] + q[0]) / 2;
   const my = (p[1] + q[1]) / 2;
