@@ -10,8 +10,8 @@ import type { TexturedTerrain } from "../../features/builder/geometry.ts";
 import { drawLabel, measureLabel } from "../../features/builder/draw.ts";
 import { labelShape, labelSplitter } from "../../features/builder/labelShape.ts";
 import { useTextures } from "../../features/builder/textures.ts";
-import { aimedArea } from "../../features/areas/AreaPreviewLayer.tsx";
-import { caughtTokens, contextFrom } from "../../features/areas/coverage.ts";
+import { aimedArea, type AimedArea } from "../../features/areas/AreaPreviewLayer.tsx";
+import { caughtTokens, contextFrom, type AreaInputs, type DeviceAreaContext } from "../../features/areas/coverage.ts";
 import { zoomOctave } from "../../features/areas/volume.ts";
 import { useLiveGround } from "../../features/areas/liveGround.ts";
 import { samplesNow, useAreaScope } from "../../features/areas/store.ts";
@@ -292,18 +292,16 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const selectedArea = useTreeShownStore(areaStore, (s) => s.selectedId);
   const areaLive = useTreeShownStore(areaStore, (s) => s.live);
   const aimMoving = useTreeShownStore(areaStore, (s) => s.moving);
-  const liveTokens = useLiveTokens();
   const liveGround = useLiveGround(props.fog ? scene : undefined, props.role);
   const stillTokens = useMemo(() => (dragged.all.size > 0 ? withoutTokens(stored, dragged.all) : stored), [stored, dragged]);
   const stillCtx = useMemo(() => (settings ? contextFrom({ tokens: stillTokens, buildChunks: chunks, settings, live: liveGround }, scene, SAMPLES, fog) : null), [settings, stillTokens, chunks, liveGround, scene, fog]);
-  const aimCtx = useMemo(() => (settings ? contextFrom({ tokens: liveTokens.tokens, buildChunks: chunks, settings, live: liveGround }, scene, SAMPLES, fog) : null), [settings, liveTokens.tokens, chunks, liveGround, scene, fog]);
-  const aimed = useMemo(() => {
-    // While the finger moves it stands coarse in the drag layer instead (AreaPreviewLayer.tsx).
-    if (!settings || !aimCtx || samplesNow(aimMoving || liveTokens.moving) !== SAMPLES) return null;
-    return aimedArea({ tool: areaTool, draft, selectedId: selectedArea, live: areaLive, templates, sceneId: scene.id, tokens: liveTokens.tokens, grid: aimCtx.grid, feetPerCell: settings.feetPerCell, role: props.role, youId, casts: casts ?? {} });
-  }, [settings, aimCtx, aimMoving, liveTokens, areaTool, draft, selectedArea, areaLive, templates, scene.id, props.role, youId, casts]);
+  // The area the Area tool aims, from a probe mounted only while there can be one: it alone reads the live tokens, so a drag elsewhere renders no board.
+  const [aim, setAim] = useState<Aim | null>(null);
+  const aiming = areaTool === "area" && (!!draft || !!selectedArea);
+  const aimed = aiming ? (aim?.area ?? null) : null;
+  const aimedCtx = aiming ? (aim?.ctx ?? null) : null;
   const entries = useMemo((): VolumeEntry[] => {
-    if (!stand || !stillCtx || !aimCtx) return [];
+    if (!stand || !stillCtx) return [];
     const editing = areaLive ? selectedArea : null;
     const out: VolumeEntry[] = [];
     for (const t of Object.values(templates)) {
@@ -311,9 +309,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
       if (aimed && aimed.id === t.id) continue;
       out.push({ id: t.id, template: t, ctx: stillCtx, look: { color: t.color, dm: t.visibility === "dm" && props.role === "dm", selected: areaTool === "area" && selectedArea === t.id, preview: false } });
     }
-    if (aimed) out.push({ id: aimed.id, template: aimed.t, ctx: aimCtx, look: { color: aimed.color, dm: false, selected: true, preview: false } });
+    if (aimed && aimedCtx) out.push({ id: aimed.id, template: aimed.t, ctx: aimedCtx, look: { color: aimed.color, dm: false, selected: true, preview: false } });
     return out;
-  }, [stand, stillCtx, aimCtx, areaLive, selectedArea, templates, scene.id, dragged, aimed, props.role, areaTool]);
+  }, [stand, stillCtx, aimedCtx, areaLive, selectedArea, templates, scene.id, dragged, aimed, props.role, areaTool]);
   // Meshes are built for the zoom's octave (volume.ts zoomOctave), so a zoom within one changes nothing here.
   const octave = zoomOctave(cam.scale);
   const world = useMemo((): VolumeWorld => ({ heights, tiles: props.viewerFog, px: octave, fog, live: liveGround }), [heights, props.viewerFog, octave, fog, liveGround]);
@@ -357,10 +355,10 @@ function IsoBoardImpl(props: IsoBoardProps) {
 
   // Rings at the bases of the creatures that stand by the stand rule itself, in each area whose volume stands (D-261026-31).
   const rings = useMemo(() => {
-    if (!volumesNow || volumesNow.standing.size === 0 || !stillCtx || !aimCtx) return null;
+    if (!volumesNow || volumesNow.standing.size === 0) return null;
     const list = entries.filter((e) => volumesNow.standing.has(e.id)).map((e) => ({ id: e.id, color: e.look.color, caught: caughtTokens(e.template, e.ctx, scene.id) }));
     return ringsAtBase(list, byId, fog, grid);
-  }, [volumesNow, entries, stillCtx, aimCtx, scene.id, byId, fog, grid]);
+  }, [volumesNow, entries, scene.id, byId, fog, grid]);
   const isoAreas = useMemo((): IsoAreas => ({ ctx: stillCtx, ringsUp: rings?.pairs ?? new Set(), world: stand ? world : null }), [stillCtx, rings, stand, world]);
 
   // The box is made anew each render, so its numbers say when it changed.
@@ -627,6 +625,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
             )}
           </Layer>
         </Stage>
+        {aiming && settings && !hidden ? (
+          <AimProbe settings={settings} chunks={chunks} liveGround={liveGround} scene={scene} fog={fog} aimMoving={aimMoving} tool={areaTool} draft={draft} selectedId={selectedArea} live={areaLive} templates={templates} role={props.role} youId={youId} casts={casts} onAim={setAim} />
+        ) : null}
         {!hidden ? <Loading text="Building area shapes" active={volumesNow?.waiting === true} style={buildingStyle(props.insets)} /> : null}
       </IsoAreasContext.Provider>
       </TreeShownContext.Provider>
@@ -635,6 +636,46 @@ function IsoBoardImpl(props: IsoBoardProps) {
 }
 
 /** Where "Building area shapes" shows: at the top of the canvas, clear of the bar over it, taking no presses (docs/design-v1-iso-area-shapes.md 7). */
+/** The area the Area tool aims once the finger rests, and the context it reads. */
+type Aim = { area: AimedArea; ctx: DeviceAreaContext };
+
+type AimInput = Parameters<typeof aimedArea>[0];
+
+/**
+ * Reports the area the Area tool aims once the finger rests, with the live
+ * tokens it reads (useLiveTokens), or null. While the finger moves it
+ * stands coarse in the drag layer instead (AreaPreviewLayer.tsx).
+ */
+function AimProbe(props: {
+  settings: AreaInputs["settings"];
+  chunks: AreaInputs["buildChunks"];
+  liveGround: AreaInputs["live"];
+  scene: Parameters<typeof contextFrom>[1];
+  fog: FogView;
+  aimMoving: boolean;
+  tool: string;
+  draft: AimInput["draft"];
+  selectedId: string | null;
+  live: AimInput["live"];
+  templates: AimInput["templates"];
+  role: AimInput["role"];
+  youId: string;
+  casts: AimInput["casts"] | undefined;
+  onAim: (aim: Aim | null) => void;
+}) {
+  const { settings, chunks, liveGround, scene, fog, aimMoving, tool, draft, selectedId, live, templates, role, youId, casts, onAim } = props;
+  const { tokens, moving } = useLiveTokens();
+  const ctx = useMemo(() => contextFrom({ tokens, buildChunks: chunks, settings, live: liveGround }, scene, SAMPLES, fog), [tokens, chunks, settings, liveGround, scene, fog]);
+  const aim = useMemo((): Aim | null => {
+    if (samplesNow(aimMoving || moving) !== SAMPLES) return null;
+    const area = aimedArea({ tool, draft, selectedId, live, templates, sceneId: scene.id, tokens, grid: ctx.grid, feetPerCell: settings.feetPerCell, role, youId, casts: casts ?? {} });
+    return area ? { area, ctx } : null;
+  }, [aimMoving, moving, tokens, tool, draft, selectedId, live, templates, scene.id, ctx, settings.feetPerCell, role, youId, casts]);
+  useEffect(() => onAim(aim), [aim, onAim]);
+  useEffect(() => () => onAim(null), [onAim]);
+  return null;
+}
+
 function buildingStyle(insets: Insets | undefined): CSSProperties {
   return {
     position: "absolute",
