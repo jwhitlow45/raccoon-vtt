@@ -1775,7 +1775,13 @@ export class Volume {
     return pieces;
   }
 
-  /** A bucket's faces at a turn: each one's band and whether it faces the viewer. */
+  /**
+   * A bucket's faces and guides at a turn: each one's band and whether it
+   * faces the viewer. Only a cut bucket may be asked (`#ready` and
+   * `#cutNeighbor` see to it): its guides come in at the cut's end, so a
+   * turn kept from before then would hide them for good (review
+   * ISOA1-ASTRA-08).
+   */
   #turn(b: Bucket, turn: Turn) {
     let t = b.turns.get(turn);
     if (t) return t;
@@ -1803,6 +1809,17 @@ export class Volume {
     });
     b.turns.set(turn, (t = { band, near, guideBand, guideNear }));
     return t;
+  }
+
+  /**
+   * The face across an edge, or -1 while that face's bucket is still being
+   * cut. A cut links its faces to its neighbors' before it ends, so without
+   * this a draw between its slices would read it half built. With it, what
+   * a draw returns changes only when a bucket's cut ends. `loops` needs no
+   * such test: it reads only the faces it marked, all in cut buckets.
+   */
+  #cutNeighbor(g: number): number {
+    return g >= 0 && this.#buckets[this.#faces.bucket[g]!]!.pending === null ? g : -1;
   }
 
   #faceBand(id: number, turn: Turn): number {
@@ -1913,7 +1930,7 @@ export class Volume {
         for (let e = 0; e < n; e++) {
           const a = F.v[at + e]!;
           const c = F.v[at + (e + 1 === n ? 0 : e + 1)]!;
-          const g = F.nb[at + e]!;
+          const g = this.#cutNeighbor(F.nb[at + e]!);
           let kind: VolumeLine["kind"] | null = null;
           let lineNear = near;
           if (g < 0) {
@@ -1980,7 +1997,7 @@ export class Volume {
     return step(ay, by, mx, (j, k) => g(k, j));
   }
 
-  /** The finished faces of the cut buckets, as objects, for the tests. */
+  /** Every face made so far, by id, as objects, for the tests. A bucket still being cut has its faces here too. */
   faces(): VolumeFace[] {
     const F = this.#faces;
     const out: VolumeFace[] = [];

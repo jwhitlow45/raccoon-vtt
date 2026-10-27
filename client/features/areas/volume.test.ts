@@ -621,6 +621,136 @@ describe("the stand rule's footprint (design 4.2 step 9)", () => {
   });
 });
 
+describe("drawing between slices (review ISOA1-ASTRA-08)", () => {
+  type Turn = (typeof TURNS)[number];
+  const pt = (x: number, y: number, z: number) => `${Math.round(x * 1e6)},${Math.round(y * 1e6)},${Math.round(z * 1e6)}`;
+  const segment = (a: string, b: string) => (a < b ? `${a} ${b}` : `${b} ${a}`);
+  const lineKey = (l: VolumeLine) => `${l.kind} ${l.near ? "near" : "far"} ${segment(pt(l.ax, l.ay, l.az), pt(l.bx, l.by, l.bz))}`;
+  /** A loop as its edges, each from one point to the next, so a walk that starts elsewhere or splits a pinch the other way reads the same. */
+  const loopEdges = (loops: readonly Float64Array[]) =>
+    loops.flatMap((l) => {
+      const n = l.length / 3;
+      return Array.from({ length: n }, (_, k) => {
+        const j = (k + 1) % n;
+        return `${pt(l[3 * k]!, l[3 * k + 1]!, l[3 * k + 2]!)} > ${pt(l[3 * j]!, l[3 * j + 1]!, l[3 * j + 2]!)}`;
+      });
+    });
+
+  /** What one draw reads: points to a millionth of a cell, every list sorted, since faces and vertices are numbered in the order the buckets were cut. */
+  function draw(vol: Volume, turn: Turn, keys: readonly string[], range?: readonly [number, number]): string {
+    const { near, far } = vol.loops(turn, keys, range);
+    return JSON.stringify({ bands: vol.bands(turn, keys), lines: vol.lines(turn, keys, range).map(lineKey).sort(), near: loopEdges(near).sort(), far: loopEdges(far).sort() });
+  }
+
+  /** Everything the volume gives once every bucket is cut, every band of every turn alone and all together. */
+  function finished(vol: Volume): string[] {
+    vol.ensureAll();
+    const box = (b: ReturnType<Volume["boxOf"]>) => (b ? [b.x0, b.y0, b.z0, b.x1, b.y1, b.z1].map((v) => Math.round(v * 1e6)).join(",") : "none");
+    const out = [`${vol.faceCount} faces, ${vol.vertexCount} vertices`, vol.guides().map((g) => segment(pt(g.ax, g.ay, g.az), pt(g.bx, g.by, g.bz))).sort().join(" ")];
+    for (const key of vol.keys) out.push(`${key}: ${box(vol.boxOf(key))}`);
+    for (const turn of TURNS) {
+      out.push(draw(vol, turn, vol.keys));
+      for (const band of vol.bands(turn)) out.push(`${turn} ${band} ${draw(vol, turn, vol.keys, [band, band])}`);
+    }
+    return out;
+  }
+
+  test("a 40 ft sphere drawn bucket by bucket while the next is cut: every guide piece, near and far as built whole", () => {
+    // The reviewer's case: each cut bucket drawn between the slices of the next, which links its faces to theirs before its guides are in.
+    const bounds = { w: 40, h: 40 };
+    const area = resolveArea({ id: "s", rev: 1, shape: "sphere", size: 40, origin: { x: 16, y: 16, z: 50 }, yaw: 0, includeOrigin: true }, ctxOf(bounds, null));
+    assert.ok(area);
+    const make = () => buildVolume({ area, bounds, ground: () => 0, px: 40 });
+    const whole = make();
+    const want = finished(whole);
+    const vol = make();
+    while (!vol.prepare(0));
+    let k = 0;
+    for (const key of vol.keys) {
+      while (!vol.ensure(key, 0)) {
+        vol.lines(TURNS[k++ % TURNS.length]!, vol.keys.filter((q) => vol.ready(q)));
+      }
+    }
+    assert.ok(vol.keys.length >= 4 && k > 100);
+    const banded = (v: Volume) => v.bands(0).reduce((n, band) => n + v.lines(0, v.keys, [band, band]).filter((l) => l.kind === "guide").length, 0);
+    assert.equal(banded(vol), banded(whole));
+    assert.ok(banded(whole) > 100);
+    assert.deepEqual(finished(vol), want);
+  });
+
+  test("random solids and scenes, cut in random slices and orders and drawn between them: a draw changes only when a cut ends, and the end is as built whole", () => {
+    const rand = mulberry32(11 + SEED);
+    let beside = 0;
+    let repeats = 0;
+    const cases = 30 * FUZZ;
+    for (let i = 0; i < cases; i++) {
+      const w = 24 + Math.floor(rand() * 24);
+      const h = 24 + Math.floor(rand() * 24);
+      const bounds = { w, h };
+      const walls = rand() < 0.5 ? randomWalls(rand, w, h) : null;
+      const ground = rand() < 0.6 ? randomGround(rand, w, h) : flatGround(w, h);
+      const tokens: Record<string, AreaToken> = {};
+      // Spheres every other case, since only they carry guides, and each solid near a bucket corner, so it spans buckets that link to each other.
+      const t = randomTemplate(rand, w, h, tokens, i % 2 === 0 ? 0 : i >> 1);
+      const corner = (n: number) => 16 * Math.max(1, Math.floor((rand() * n) / 16)) + (rand() - 0.5) * 6;
+      t.origin = { ...t.origin, x: Math.min(w - 2, corner(w)), y: Math.min(h - 2, corner(h)) };
+      if (t.attachedTo) tokens[t.attachedTo] = { ...tokens[t.attachedTo]!, x: Math.floor(t.origin.x), y: Math.floor(t.origin.y) };
+      const area = resolveArea(t, ctxOf(bounds, walls, tokens));
+      assert.ok(area);
+      const input = { area, bounds, ground: ground.at, px: 12 + rand() * 60, coarse: rand() < 0.2, banded: rand() < 0.9 };
+      const label = `#${i} ${t.shape}`;
+      const whole = buildVolume(input);
+      const want = finished(whole);
+      // What a view asks again and again: every turn whole, by its middle band, and by its far half, and now and then one bucket.
+      const asks = TURNS.flatMap((turn) => {
+        const bands = whole.bands(turn);
+        const lo = bands[0] ?? 0;
+        const mid = bands[bands.length >> 1] ?? 0;
+        return [{ turn, range: undefined }, { turn, range: [mid, mid] as const }, { turn, range: [lo, mid] as const }];
+      });
+      const vol = buildVolume(input);
+      // A read in the middle of the build finishes it, as any read does.
+      while (!vol.prepare(0)) if (rand() < 0.01) vol.lines(TURNS[Math.floor(rand() * TURNS.length)]!);
+      const keys = vol.keys;
+      // Each draw by what it asked, since the cut buckets were last the same.
+      let cut = "";
+      const since = new Map<string, string>();
+      let current: string | null = null;
+      let inOne = false;
+      for (;;) {
+        const left = keys.filter((key) => !vol.ready(key));
+        if (left.length === 0) break;
+        // Mostly the bucket begun, sometimes another begun or new, as a view slices whichever buckets come into sight, and now and then one cut whole.
+        if (!current || vol.ready(current) || rand() < 0.15) {
+          current = left[Math.floor(rand() * left.length)]!;
+          inOne = rand() < 0.1;
+        }
+        vol.ensure(current, inOne ? Infinity : 0);
+        if (rand() < 0.5) continue;
+        const ready = keys.filter((key) => vol.ready(key));
+        if (ready.join() !== cut) {
+          cut = ready.join();
+          since.clear();
+        }
+        if (ready.length > 0 && ready.length < keys.length) beside++;
+        const { turn, range } = asks[Math.floor(rand() * asks.length)]!;
+        const asked = rand() < 0.2 ? [keys[Math.floor(rand() * keys.length)]!] : keys;
+        const ask = `${turn} ${asked.join()} ${range?.join() ?? "all"}`;
+        const got = draw(vol, turn, asked, range);
+        const before = since.get(ask);
+        if (before !== undefined) {
+          repeats++;
+          assert.equal(got, before, `${label}: ${ask} changed while no cut ended`);
+        }
+        since.set(ask, got);
+      }
+      assert.deepEqual(finished(vol), want, label);
+    }
+    // Most draws come beside a bucket still to cut, where a half-built neighbor could be read, and many repeat one made since the last cut ended.
+    assert.ok(beside > 10 * cases && repeats > 4 * cases, `${beside} draws beside an unfinished bucket, ${repeats} repeated`);
+  });
+});
+
 describe("bounded work (design 6)", () => {
   /** The largest solids, the commonest auras in a dense dungeon, hex stacks, and the largest size at the finest grid on squares and both hex orientations, on scenes of 20 and 200 cells, with ground that steps every few cells. */
   const large = { w: 200, h: 200 };
