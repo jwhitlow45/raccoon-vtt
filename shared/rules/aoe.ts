@@ -3,7 +3,7 @@ import { axisSteps, hexSetSteps, legFeet } from "./distance.ts";
 import { footprintRect, hexAnchor, occupiedHexes, occupiedRange, sizeCategory, tokenHeightFt, verticalExtentFt, type FootprintToken } from "./footprint.ts";
 import { clamp, distToSegment, sdBox3, sdCorner2, yawVector, type Bounds, type Point, type Point3, type Rect } from "./geom.ts";
 import { SQUARES, type Grid } from "./grid.ts";
-import { cornerAt, footprintHexes, HEX_R, HEX_S, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
+import { cornerAt, footprintHexes, HEX_R, HEX_S, hexAt, hexCenter, hexCorners, hexInScene, hexKey, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
 import { AREAS, stepOffWalls } from "./segments.ts";
 import { cachedVisibility, crossingsAt, indexPolygon, insideCrossings, markPolygonCells, type Polygon, type PolygonIndex, type WallSet } from "./walls.ts";
 
@@ -1325,53 +1325,69 @@ export function hexStackPrisms(stack: Extract<AreaSolid, { kind: "hexStack" }>):
 
 /**
  * The prisms of `hexStackPrisms` one at a time, for a caller that builds
- * them in slices: the hexes ring by ring outward from the source, each
- * ring one step farther, so a small stack costs its own hexes and not the
- * scene's. Null now and then while it walks hexes off the scene, so the
- * caller can look at the clock.
+ * them in slices: the scene's hexes within the reach's box, row by row,
+ * so a small stack costs the hexes near it, and a huge one on a small
+ * scene costs the scene's. Null for each hex visited that holds no prism,
+ * so the caller can count every visit.
  */
 export function* eachHexPrism(stack: Extract<AreaSolid, { kind: "hexStack" }>): Generator<HexPrism | null, void, void> {
   const { reach, bounds } = stack;
   const g = reach.g;
   const layers = new Map<number, { lo: number; hi: number } | null>();
+  const within = (d: number, layer: number) => withinReach(reach, d, layer, layer + 1);
   const layersAt = (d: number) => {
     let run = layers.get(d);
     if (run !== undefined) return run;
     run = null;
-    // A layer more than its steps from the source's is out of reach on every diagonal rule.
-    for (let layer = reach.z0 - reach.steps; layer < reach.z1 + reach.steps; layer++) {
-      if (!withinReach(reach, d, layer, layer + 1)) continue;
-      run = run ? { lo: run.lo, hi: layer + 1 } : { lo: layer, hi: layer + 1 };
+    // The layers in reach are one run round the source's own, since the steps up or down grow away from them under every diagonal rule, so its ends are found by halving. No layer more than its steps from the source's is in reach.
+    if (within(d, reach.z0)) {
+      let lo = reach.z0 - reach.steps;
+      let top = reach.z0;
+      while (lo < top) {
+        const m = Math.floor((lo + top) / 2);
+        if (within(d, m)) top = m;
+        else lo = m + 1;
+      }
+      let hi = reach.z1 - 1;
+      let bottom = reach.z1 + reach.steps - 1;
+      while (hi < bottom) {
+        const m = Math.ceil((hi + bottom) / 2);
+        if (within(d, m)) hi = m;
+        else bottom = m - 1;
+      }
+      run = { lo, hi: hi + 1 };
     }
     layers.set(d, run);
     return run;
   };
-  const seen = new Set<string>();
-  let ring: Hex[] = [];
+  // Every hex within the steps lies within that many cells of a source hex's center on each axis, a step being at most a cell, so the box of the sources grown by the steps holds them all.
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
   for (const h of reach.from) {
-    const key = hexKey(h);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    ring.push(h);
+    const c = hexCenter(g, h);
+    x0 = Math.min(x0, c.x);
+    y0 = Math.min(y0, c.y);
+    x1 = Math.max(x1, c.x);
+    y1 = Math.max(y1, c.y);
   }
-  let walked = 0;
-  // A hex's ring is its fewest steps from the source, as `hexSetSteps` counts them. The runs shrink as the steps grow, so the first ring with none ends the stack.
-  for (let d = 0; d <= reach.steps && ring.length > 0; d++) {
-    const run = layersAt(d);
-    if (!run) return;
-    const next: Hex[] = [];
-    for (const hex of ring) {
-      if (hexInScene(g, bounds, hex)) yield { hex, lo: run.lo, hi: run.hi };
-      else if (++walked % 512 === 0) yield null;
-      if (d === reach.steps) continue;
-      for (const nb of hexNeighbors(g, hex)) {
-        const key = hexKey(nb);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        next.push(nb);
+  const pad = reach.steps + 1;
+  if (x0 - pad > bounds.w || y0 - pad > bounds.h || x1 + pad < 0 || y1 + pad < 0) return;
+  // Columns run with x and rows with y on both orientations, so the hexes at the box's corners bound its columns and rows, a hex either way for the stagger.
+  const from = hexAt(g, { x: Math.max(0, x0 - pad), y: Math.max(0, y0 - pad) });
+  const to = hexAt(g, { x: Math.min(bounds.w, x1 + pad), y: Math.min(bounds.h, y1 + pad) });
+  for (let row = from.row - 1; row <= to.row + 1; row++) {
+    for (let col = from.col - 1; col <= to.col + 1; col++) {
+      const hex = { col, row };
+      if (!hexInScene(g, bounds, hex)) {
+        yield null;
+        continue;
       }
+      const d = hexSetSteps(g, reach.from, [hex]);
+      const run = d <= reach.steps ? layersAt(d) : null;
+      yield run ? { hex, lo: run.lo, hi: run.hi } : null;
     }
-    ring = next;
   }
 }
 
