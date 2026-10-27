@@ -14,6 +14,7 @@ import type { AoePreview } from "../../state/types.ts";
 import type { LayerProps } from "../layers.ts";
 import { formatFeet } from "../measure/ruler.ts";
 import { cachedCoverage, caughtTokens, contextFrom, shadingClip } from "./coverage.ts";
+import { useLiveGround } from "./liveGround.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
 import { Clipped } from "./TemplateLayer.tsx";
 import { areaGrips, areaOutline, draftTemplate, frameTemplate, handlePoint, liveOrigin, outlineTop, usesFrom } from "./placement.ts";
@@ -66,12 +67,13 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   const youId = useTreeShownView((s) => s.you?.memberId ?? "");
   const casts = useTreeShownView((s) => s.view?.casts ?? EMPTY_CASTS);
   const fog = useViewerFog(props);
+  const ground = useLiveGround(props.fog ? scene : undefined, role);
 
-  // On a player's device the walls are the ones they could know (coverage.ts heldWalls).
-  const fine = useMemo(() => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, undefined, fog) : null), [tokens, buildChunks, settings, scene, fog]);
+  // On a player's device the walls are the ones they could know (coverage.ts heldWalls), and the rings go only to creatures whose rays lie on their live ground (raysLive).
+  const fine = useMemo(() => (settings ? contextFrom({ tokens, buildChunks, settings, live: ground }, scene, undefined, fog) : null), [tokens, buildChunks, settings, scene, fog, ground]);
   const coarse = useMemo(
-    () => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, PREVIEW_SAMPLES, fog) : null),
-    [tokens, buildChunks, settings, scene, fog],
+    () => (settings ? contextFrom({ tokens, buildChunks, settings, live: ground }, scene, PREVIEW_SAMPLES, fog) : null),
+    [tokens, buildChunks, settings, scene, fog, ground],
   );
   if (!fine || !coarse || !settings) return null;
   const ctx = samplesNow(moving || dragged.moving) === PREVIEW_SAMPLES ? coarse : fine;

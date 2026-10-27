@@ -3,6 +3,7 @@ import {
   CoverageCache,
   coverageCacheKey,
   creaturesInArea,
+  resolveArea,
   SAMPLES,
   type AreaContext,
   type AreaTemplateInput,
@@ -10,6 +11,8 @@ import {
   type CoverageResult,
 } from "#shared/rules/aoe.ts";
 import { FREE_WALL_LATTICE } from "#shared/model.ts";
+import { convexLive, type Ground } from "#shared/rules/held.ts";
+import { rayHull } from "#shared/reducer/areaTriggers.ts";
 import { sceneWalls, type WallSet } from "#shared/rules/walls.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { HEX_R, hexCenter } from "#shared/rules/hex.ts";
@@ -45,17 +48,31 @@ import { displayName } from "../../lib/scene.ts";
  * their fog shapes nothing they see, wherever its origin lies. Its shading
  * and who it rings can then differ from the cast across fogged ground,
  * which the server decides with every wall.
+ *
+ * On a player's device a creature is in an area's caught list, and gets a
+ * target ring, only when every ray the area's inclusion reads to it lies
+ * on that device's live ground (`live`, docs/design-v1-map-discovery.md
+ * decision 13), the server's rule for the reminders and caught lines a
+ * player gets. The device's live ground is its sight with fog and party
+ * vision on, and its revealed fog with vision off (rules/held.ts
+ * deviceGround). It cannot tell ground the DM revealed from ground the
+ * party only explored, since its fog merges them, so on DM-revealed ground
+ * out of sight it can list fewer than the server's answer, which settles
+ * it (LK-35). A device still shades coverage by the walls it holds.
  */
 
-/** The parts of the view coverage reads, so a renderer can subscribe to just these. */
-export type AreaInputs = Pick<RoomState, "tokens" | "buildChunks"> & { settings: RoomState["meta"]["settings"] };
+/** The parts of the view coverage reads, so a renderer can subscribe to just these. `live` is a player's device's live ground (liveGround.ts), on a scene with fog on. */
+export type AreaInputs = Pick<RoomState, "tokens" | "buildChunks"> & { settings: RoomState["meta"]["settings"]; live?: Ground | null };
 
-export function areaContext(view: RoomState, scene: Scene, samples: number = SAMPLES): AreaContext {
+/** An area context on this device, with its live ground where a player's caught list reads it. */
+export type DeviceAreaContext = AreaContext & { live?: Ground };
+
+export function areaContext(view: RoomState, scene: Scene, samples: number = SAMPLES): DeviceAreaContext {
   return contextFrom({ tokens: view.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samples);
 }
 
 /** `fog` is the viewer's for an area being aimed (canvas/viewerFog.ts): its walls are then the ones that viewer could know. */
-export function contextFrom(inputs: AreaInputs, scene: Scene, samples: number = SAMPLES, fog?: FogView): AreaContext {
+export function contextFrom(inputs: AreaInputs, scene: Scene, samples: number = SAMPLES, fog?: FogView): DeviceAreaContext {
   const walls = sceneWalls(scene, inputs.buildChunks);
   return {
     settings: inputs.settings,
@@ -64,6 +81,7 @@ export function contextFrom(inputs: AreaInputs, scene: Scene, samples: number = 
     walls: fog ? heldWalls(walls, fog) : walls,
     tokens: inputs.tokens as Readonly<Record<string, AreaToken>>,
     samples,
+    ...(inputs.live ? { live: inputs.live } : {}),
   };
 }
 
@@ -150,23 +168,54 @@ const caught = new WeakMap<object, Map<string, string[]>>();
 const CAUGHT_PER_MAP = 64;
 const NOBODY: string[] = [];
 
-/** The tokens on `sceneId` a template catches, in the view's order. Cached until any token changes. */
-export function caughtTokens(t: AreaTemplateInput, ctx: AreaContext, sceneId: string): string[] {
+/** A serial per live ground, so a caught list is kept per ground: the device makes a new one whenever its fog or sight tiles change (liveGround.ts). */
+const grounds = new WeakMap<Ground, number>();
+let groundSerial = 0;
+
+function groundKey(live: Ground | undefined): string {
+  if (!live) return "";
+  let k = grounds.get(live);
+  if (k === undefined) grounds.set(live, (k = ++groundSerial));
+  return `live:${k}`;
+}
+
+/**
+ * The tokens on `sceneId` a template catches, in the view's order, and on
+ * a player's device only those whose rays lie on its live ground
+ * (`raysLive`). Cached until any token, or the live ground, changes.
+ */
+export function caughtTokens(t: AreaTemplateInput, ctx: DeviceAreaContext, sceneId: string): string[] {
   const tokens = ctx.tokens;
   if (!tokens) return NOBODY;
   let byKey = caught.get(tokens);
   if (!byKey) caught.set(tokens, (byKey = new Map()));
-  const key = `${sceneId}|${coverageCacheKey(t, ctx)}`;
+  const key = `${sceneId}|${groundKey(ctx.live)}|${coverageCacheKey(t, ctx)}`;
   const hit = byKey.get(key);
   if (hit) return hit;
   const onScene = Object.values(tokens).filter((tok): tok is AreaToken => !!tok && tok.sceneId === sceneId);
-  const ids = creaturesInArea({ ...t, sceneId }, onScene, ctx);
+  const live = ctx.live;
+  const all = creaturesInArea({ ...t, sceneId }, onScene, ctx);
+  const ids = live ? all.filter((id) => raysLive(t, tokens[id]!, ctx, live)) : all;
   byKey.set(key, ids);
   if (byKey.size > CAUGHT_PER_MAP) {
     const oldest = byKey.keys().next().value;
     if (oldest !== undefined) byKey.delete(oldest);
   }
   return ids;
+}
+
+/**
+ * Whether every ray an area's inclusion reads to a creature lies on a
+ * player's live ground (docs/design-v1-map-discovery.md decision 13), by
+ * the hull the server reads for the reminders that player gets
+ * (shared/reducer/areaTriggers.ts `rayHull`): every cell of the scene's
+ * grid it touches live. So a player's list never says an area reaches a
+ * creature through ground they do not see now, where a remembered wall
+ * may be gone or an unseen one stand.
+ */
+export function raysLive(t: AreaTemplateInput, creature: AreaToken, ctx: AreaContext, live: Ground): boolean {
+  const attached = t.attachedTo !== undefined ? ctx.tokens?.[t.attachedTo] : undefined;
+  return convexLive(live, rayHull(ctx.grid, t, resolveArea(t, ctx), attached, creature));
 }
 
 export type InAreaEntry = { id: string; name: string; ally: boolean; dead: boolean };

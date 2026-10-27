@@ -208,20 +208,20 @@ describe("the walls a player could know (coverage.ts heldWalls)", () => {
     assert.equal(heldWalls(walls, fogOf(state, "dm")), walls);
   });
 
-  test("the previews and the In area list read this viewer's fog, and both previews shade through the clip", () => {
+  test("the previews and the In area list read this viewer's fog and live ground, and both previews shade through the clip", () => {
     const preview = readFileSync(new URL("./AreaPreviewLayer.tsx", import.meta.url), "utf8");
-    assert.equal(preview.match(/contextFrom\(\{ tokens, buildChunks, settings \}, scene, (undefined|PREVIEW_SAMPLES), fog\)/g)?.length, 2);
+    assert.equal(preview.match(/contextFrom\(\{ tokens, buildChunks, settings, live: ground \}, scene, (undefined|PREVIEW_SAMPLES), fog\)/g)?.length, 2);
     // The only bare Shading is the one ShadingAboveFog wraps, which both previews draw.
     assert.equal(preview.match(/<Shading /g)?.length, 1);
     assert.equal(preview.match(/<ShadingAboveFog /g)?.length, 2);
     const options = readFileSync(new URL("./AreaOptions.tsx", import.meta.url), "utf8");
-    assert.match(options, /samplesNow\(props\.moving \|\| live\.moving\), fog\);/);
+    assert.match(options, /settings: env\.view\.meta\.settings, live: ground \}, env\.scene, samplesNow\(props\.moving \|\| live\.moving\), fog\);/);
   });
 
-  test("placed areas, the moving auras they drive, and the Areas panel's and a cast block's lists read this viewer's fog too", () => {
+  test("placed areas, the moving auras they drive, and the Areas panel's and a cast block's lists read this viewer's fog and live ground too", () => {
     const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
-    assert.match(read("./TemplateLayer.tsx"), /contextFrom\(\{ tokens, buildChunks, settings \}, scene, samplesNow\(moving\), viewer\)/);
-    assert.match(read("./AreasPanel.tsx"), /samplesNow\(live\.moving\), fog\);/);
-    assert.match(read("../dice/cast/CastBlock.tsx"), /samplesNow\(live\.moving\), fog\);/);
+    assert.match(read("./TemplateLayer.tsx"), /contextFrom\(\{ tokens, buildChunks, settings, live: ground \}, scene, samplesNow\(moving\), viewer\)/);
+    assert.match(read("./AreasPanel.tsx"), /settings: view\.meta\.settings, live: ground \}, scene, samplesNow\(live\.moving\), fog\);/);
+    assert.match(read("../dice/cast/CastBlock.tsx"), /settings: view\.meta\.settings, live: ground \}, scene, samplesNow\(live\.moving\), fog\);/);
   });
 });

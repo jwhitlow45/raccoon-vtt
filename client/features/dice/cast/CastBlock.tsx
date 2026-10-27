@@ -11,6 +11,7 @@ import { theme } from "../../../lib/theme.ts";
 import { useScoped } from "../../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "../../areas/coverage.ts";
+import { useLiveGround } from "../../areas/liveGround.ts";
 import { presetDraft } from "../../areas/presets.ts";
 import { resolvedChoice, samplesNow, setDraft, startDraft, useAreaScope } from "../../areas/store.ts";
 import { useLiveTokens } from "../../areas/useLiveTokens.ts";
@@ -243,9 +244,11 @@ function useAreaEntries(view: RoomState, areaId: string | undefined, sceneId: st
   const role = useRoomView((s) => s.you?.role ?? "player");
   const scene = sceneId ? view.scenes[sceneId] : undefined;
   const fog = useViewerFog({ scene, role, fog: scene?.fogEnabled !== false });
+  // A player's line names only creatures whose rays lie on their live ground (areas/coverage.ts raysLive).
+  const ground = useLiveGround(scene, role);
   const template = areaId ? view.templates[areaId] : undefined;
   if (!template || !scene || template.sceneId !== scene.id) return null;
-  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samplesNow(live.moving), fog);
+  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings, live: ground }, scene, samplesNow(live.moving), fog);
   return inAreaEntries(caughtTokens(template, ctx, scene.id), live.tokens, view.characters);
 }
 

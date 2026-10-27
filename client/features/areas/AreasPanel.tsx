@@ -12,6 +12,7 @@ import { GroupSave } from "../dice/groupSave/GroupSave.tsx";
 import { useGroupSave, useGroupSaveStore } from "../dice/groupSave/store.ts";
 import { pickTemplate } from "./AreaTool.tsx";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
+import { useLiveGround } from "./liveGround.ts";
 import { areaTitle } from "./labels.ts";
 import { triggerSummary } from "./placement.ts";
 import { canEdit, deleteTemplate, openDamage, samplesNow, useAreaScope, useAreaTool } from "./store.ts";
@@ -50,9 +51,11 @@ export default function AreasPanel(props: PanelProps) {
   const group = useGroupSave((s) => (s.shownIn === "areas" ? s.page : null));
   // A player's lists read only the walls they could know, as the board draws their areas (coverage.ts heldWalls). The DM's read every wall.
   const fog = useViewerFog({ scene, role: you?.role ?? "player", fog: scene?.fogEnabled !== false });
+  // And list only creatures whose rays lie on their live ground (coverage.ts raysLive).
+  const ground = useLiveGround(scene, you?.role ?? "player");
   if (!view || !scene || !you) return null;
 
-  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samplesNow(live.moving), fog);
+  const ctx = contextFrom({ tokens: live.tokens, buildChunks: view.buildChunks, settings: view.meta.settings, live: ground }, scene, samplesNow(live.moving), fog);
   // The rows of an area's group save follow its caught creatures as they move, until the roll.
   const areaIds = (templateId: string) => {
     const t = templates[templateId];

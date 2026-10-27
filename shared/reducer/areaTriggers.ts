@@ -2,17 +2,17 @@ import { attaches, discoversMap, logsByAudience, trapsGoOff, walksRoutes } from 
 import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token } from "../model.ts";
 import { areaSeenMark, gridOfScene, inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
-import { convexHull, creaturesInArea, resolveArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
+import { convexHull, creaturesInArea, resolveArea, type AreaContext, type AreaTemplateInput, type AreaToken, type ResolvedArea } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, type Hex, type HexGrid } from "../rules/hex.ts";
 import { hexPiece, pieceReach, placedOnTrace, routePoints, type HexPiece, type RoutePoint } from "../rules/route.ts";
-import { footprintRect, occupiedHexes, occupiedRange } from "../rules/footprint.ts";
+import { footprintRect, occupiedHexes, occupiedRange, type PlacedToken } from "../rules/footprint.ts";
 import type { Point, Rect } from "../rules/geom.ts";
 import { convexLive, fogClassOf, pendingGround } from "../rules/held.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
-import { isHex, sceneGrid } from "../rules/grid.ts";
+import { isHex, sceneGrid, type Grid } from "../rules/grid.ts";
 
 /**
  * Reminders that an area hits a creature again (features section 9): the
@@ -183,11 +183,12 @@ function byLiveGround(at: RoomState, seen: { seen?: true; seenBy?: string[] }, r
  * Each ends at a sample inside the cells or hexes the creature stands on.
  * So all of them lie in the hull of those starts grown by the step and the
  * creature's cells, and every cell of the scene's grid that hull touches
- * must be live (held.ts convexLive). So a player never learns that an area
- * reaches a creature through ground they do not see now, where a
- * remembered wall may be gone or an unseen one stand. The ground is the
- * pending one: what this op brought into sight is live though the explore
- * step after the batch has not yet written it (MD2-O-3).
+ * must be live (held.ts convexLive, the hull `rayHull`). So a player
+ * never learns that an area reaches a creature through ground they do not
+ * see now, where a remembered wall may be gone or an unseen one stand. The
+ * ground is the pending one: what this op brought into sight is live
+ * though the explore step after the batch has not yet written it
+ * (MD2-O-3).
  */
 function raysOnLiveGround(at: RoomState, template: AreaTemplate, there: Token): ((holder: string | null) => boolean) | null {
   const scene = at.scenes[template.sceneId];
@@ -196,15 +197,7 @@ function raysOnLiveGround(at: RoomState, template: AreaTemplate, there: Token): 
   const ctx = contextOf(at, template.sceneId);
   const area = ctx ? resolveArea(template, ctx) : null;
   const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
-  // An attached area starts from its token, wherever its stored origin lies (aoe.ts resolveArea), so that origin is no probe.
-  const probes: Point[] = attached ? [...corners(footprintRect(grid, attached)), ...(isHex(grid) ? hexOutline(grid, occupiedHexes(grid, attached)) : [])] : [{ x: template.origin.x, y: template.origin.y }];
-  if (area?.box) probes.push(...corners(area.box));
-  // A point emanation on hexes looks from the center of the hex its origin is in.
-  if (isHex(grid) && !attached && !area?.box && template.shape === "emanation") probes.push(hexCenter(grid, hexAt(grid, template.origin)));
-  const starts = probes.flatMap((p) => corners({ x: p.x - PROBE_STEP, y: p.y - PROBE_STEP, w: 2 * PROBE_STEP, h: 2 * PROBE_STEP }));
-  const r = occupiedRange(grid, there);
-  const ends = isHex(grid) ? hexOutline(grid, occupiedHexes(grid, there)) : corners(inset({ x: r.x0, y: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 }, SAMPLE_INSET));
-  const hull = convexHull([...starts, ...ends]);
+  const hull = rayHull(grid, template, area, attached, there);
   const answers = new Map<string | null, boolean>();
   return (member) => {
     const holder = member === null ? null : fogClassOf(at, template.sceneId, member);
@@ -214,6 +207,25 @@ function raysOnLiveGround(at: RoomState, template: AreaTemplate, there: Token): 
     }
     return answers.get(holder)!;
   };
+}
+
+/**
+ * The hull every ray an area's inclusion reads to a creature lies in
+ * (`raysOnLiveGround` says how), for the server's reminders and a player's
+ * device's caught lists and rings alike (client/features/areas/coverage.ts),
+ * so the two read one rule. `area` is the template resolved, `attached` the
+ * token it starts from, if any.
+ */
+export function rayHull(grid: Grid, template: Pick<AreaTemplateInput, "origin" | "shape">, area: ResolvedArea | null, attached: PlacedToken | undefined, there: PlacedToken): Point[] {
+  // An attached area starts from its token, wherever its stored origin lies (aoe.ts resolveArea), so that origin is no probe.
+  const probes: Point[] = attached ? [...corners(footprintRect(grid, attached)), ...(isHex(grid) ? hexOutline(grid, occupiedHexes(grid, attached)) : [])] : [{ x: template.origin.x, y: template.origin.y }];
+  if (area?.box) probes.push(...corners(area.box));
+  // A point emanation on hexes looks from the center of the hex its origin is in.
+  if (isHex(grid) && !attached && !area?.box && template.shape === "emanation") probes.push(hexCenter(grid, hexAt(grid, template.origin)));
+  const starts = probes.flatMap((p) => corners({ x: p.x - PROBE_STEP, y: p.y - PROBE_STEP, w: 2 * PROBE_STEP, h: 2 * PROBE_STEP }));
+  const r = occupiedRange(grid, there);
+  const ends = isHex(grid) ? hexOutline(grid, occupiedHexes(grid, there)) : corners(inset({ x: r.x0, y: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 }, SAMPLE_INSET));
+  return convexHull([...starts, ...ends]);
 }
 
 /** How far a probe moves off the walls at most, per axis (segments.ts STEPS), past a millionth's nudge. */

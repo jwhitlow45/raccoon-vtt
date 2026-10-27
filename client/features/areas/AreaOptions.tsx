@@ -33,6 +33,7 @@ import {
 import { POPOVER_MIN } from "../../pages/optionsLayout.ts";
 import { castFrom, choiceOf, draftCaster, fromOffers, idleHint, withoutDeparted, type AreaCreature } from "./caster.ts";
 import { caughtTokens, contextFrom, inAreaEntries, inAreaText } from "./coverage.ts";
+import { useLiveGround } from "./liveGround.ts";
 import { FromControl, NO_CREATURE } from "./FromControl.tsx";
 import { useAreaAsk } from "../dice/cast/AreaAsk.tsx";
 import { areaTitle, shapeName, SHAPES } from "./labels.ts";
@@ -139,7 +140,9 @@ function InArea(props: { env: AreaEnv; t: AreaTemplateInput; moving: boolean; ti
   const live = useLiveTokens();
   // A player's list reads the walls they could know, as the rings the preview draws do (coverage.ts heldWalls).
   const fog = useViewerFog({ scene: env.scene, role: env.role, fog: env.scene.fogEnabled !== false });
-  const ctx = contextFrom({ tokens: live.tokens, buildChunks: env.view.buildChunks, settings: env.view.meta.settings }, env.scene, samplesNow(props.moving || live.moving), fog);
+  // And it lists only creatures whose rays lie on their live ground (coverage.ts raysLive).
+  const ground = useLiveGround(env.scene, env.role);
+  const ctx = contextFrom({ tokens: live.tokens, buildChunks: env.view.buildChunks, settings: env.view.meta.settings, live: ground }, env.scene, samplesNow(props.moving || live.moving), fog);
   const ids = caughtTokens(t, ctx, env.scene.id);
   const entries = inAreaEntries(ids, live.tokens, env.view.characters);
   return (

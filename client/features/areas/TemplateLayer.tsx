@@ -15,6 +15,7 @@ import { useViewerFog } from "../../canvas/viewerFog.ts";
 import { Pill, pillGeometry, pillReach } from "../measure/Pill.tsx";
 import { areaTitle } from "./labels.ts";
 import { cachedCoverage, caughtTokens, contextFrom } from "./coverage.ts";
+import { useLiveGround } from "./liveGround.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
 import { areaLabelSpot, foggedCells, tokenBoxes, type Box } from "./labelSpot.ts";
 import { areaOutline, liveOrigin, outlineBottom, outlineTop, type Outline } from "./placement.ts";
@@ -107,9 +108,11 @@ export function useAreaParts(
   const buildChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
   const settings = useTreeShownView((s) => s.view?.meta.settings);
   const viewer = useViewerFog(props);
+  // A player's rings go only to creatures whose rays lie on their live ground (coverage.ts raysLive).
+  const ground = useLiveGround(fog ? scene : undefined, role);
   const ctx = useMemo(
-    () => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, samplesNow(moving), viewer) : null),
-    [tokens, buildChunks, settings, scene, moving, viewer],
+    () => (settings ? contextFrom({ tokens, buildChunks, settings, live: ground }, scene, samplesNow(moving), viewer) : null),
+    [tokens, buildChunks, settings, scene, moving, viewer, ground],
   );
   /*
    * Where the tokens and their names are on screen, and the other layers'
