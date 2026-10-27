@@ -4,10 +4,11 @@ import { autoAt, chunksOf, edge, fogRoom, knownAt, lift, paint, stairs, wall, wa
 import { chunkKey, holderChunkKey, tileKey, type EntityKey } from "#shared/keys.ts";
 import type { Label, MemoryChunk, PlayerChunk, RoomState, Stamp, Viewer } from "#shared/model.ts";
 import { withCellVision } from "#shared/perPlayerTestutil.ts";
-import { projectState } from "#shared/project.ts";
+import { projectState, shownUpDir } from "#shared/project.ts";
 import { serverOnlyOpSchema, type Op, type OpOf } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { decodeTile, getBit } from "#shared/rules/fog.ts";
+import { sceneWalls } from "#shared/rules/walls.ts";
 import { DM, env, P1, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
 import { chunkCharge, MEMORY_CAP } from "./memorySize.ts";
@@ -26,7 +27,7 @@ const SERVER: Viewer = { memberId: "server", role: "dm" };
 type Batch = { state: RoomState; remember: OpOf<"sys.remember">[] };
 
 /** One batch: the ops, the explore, the map step. */
-function batch(state: RoomState, ops: readonly (Op | { op: Op; by: Viewer })[], opts: { cap?: number; doors?: DoorTouch[] } = {}): Batch {
+function batch(state: RoomState, ops: readonly (Op | { op: Op; by: Viewer })[], opts: { cap?: number; capOf?: (layer: string | null) => number; doors?: DoorTouch[] } = {}): Batch {
   const before = state;
   let s = state;
   const touched: EntityKey[] = [];
@@ -40,7 +41,7 @@ function batch(state: RoomState, ops: readonly (Op | { op: Op; by: Viewer })[], 
   for (const o of ops) "op" in o ? run(o.op, o.by) : run(o, DM);
   const explore = exploreOp(s);
   if (explore) run(explore, SERVER);
-  const remember = mapStepOps({ before, after: s, touched, doors: opts.doors, cap: () => opts.cap ?? MEMORY_CAP });
+  const remember = mapStepOps({ before, after: s, touched, doors: opts.doors, cap: (_scene, layer) => opts.capOf?.(layer) ?? opts.cap ?? MEMORY_CAP });
   for (const op of remember) {
     assert.ok(serverOnlyOpSchema.safeParse(op).success, `the step's op validates: ${JSON.stringify(serverOnlyOpSchema.safeParse(op).error?.issues[0])}`);
     run(op, SERVER);
@@ -65,6 +66,17 @@ function party(state: RoomState, cx = 0, cy = 0): MemoryChunk | undefined {
 
 function cellShown(state: RoomState, x: number, y: number, viewer: Viewer = P1): string | undefined {
   return chunksOf(state, viewer)[`${Math.floor(x / 16)},${Math.floor(y / 16)}`]?.cells[`${x},${y}`];
+}
+
+/** A stair's direction on the viewer's map, "." for none. */
+function upDirShown(state: RoomState, x: number, y: number, viewer: Viewer = P1): string | undefined {
+  const chunk = chunksOf(state, viewer)[`${Math.floor(x / 16)},${Math.floor(y / 16)}`];
+  return chunk?.upDir?.[(y % 16) * 16 + (x % 16)] ?? ".";
+}
+
+/** A stair's direction in the build as it is. */
+function upDirLive(state: RoomState, x: number, y: number): string {
+  return shownUpDir(sceneWalls(state.scenes.s1!, state.buildChunks), x, y);
 }
 
 function edgeShown(state: RoomState, key: string, viewer: Viewer = P1): unknown {
@@ -131,6 +143,76 @@ describe("the map step", () => {
       assert.equal(party(stair.state, 1, 0)?.edges?.["16,4,w"], "auto");
       assert.equal(edgeShown(stair.state, "12,4,w"), "auto");
       assert.equal(edgeShown(stair.state, "16,4,w"), "auto");
+    });
+  });
+
+  test("a stair taken away out of sight, the scene's last, keeps the way it pointed on their map", () => {
+    withCellVision(() => {
+      const state = crypt();
+      state.tokens.ayla = { ...state.tokens.ayla!, x: 3, y: 7 };
+      let s = batch(state, [
+        { t: "build.height", sceneId: "s1", cells: ["5,5"], height: 10 },
+        { t: "build.stairs", sceneId: "s1", cells: ["5,6"], up: "a" },
+      ]).state;
+      const way = upDirShown(s, 5, 6);
+      assert.notEqual(way, ".");
+      s = batch(s, [move(30, 5)]).state;
+      const gone = batch(s, [{ t: "build.stairs", sceneId: "s1", cells: ["5,6"], up: null }]).state;
+      assert.equal(upDirLive(gone, 5, 6), ".");
+      assert.equal(party(gone)?.up?.["5,6"], "a");
+      assert.equal(party(gone)?.upDir?.["5,6"], way);
+      assert.equal(upDirShown(gone, 5, 6), way);
+    });
+  });
+
+  test("a Stairs cell painted before stair marks turns out of sight as they saw it", () => {
+    withCellVision(() => {
+      const state = crypt();
+      state.tokens.ayla = { ...state.tokens.ayla!, x: 3, y: 7 };
+      let s = batch(state, [
+        { t: "build.height", sceneId: "s1", cells: ["5,5"], height: 10 },
+        { t: "build.paint", sceneId: "s1", terrain: "stairs", cells: ["5,6"] },
+      ]).state;
+      const way = upDirShown(s, 5, 6);
+      assert.equal(way, "n");
+      s = batch(s, [move(30, 5)]).state;
+      const turned = batch(s, [{ t: "build.height", sceneId: "s1", cells: ["5,5"], height: 0 }, { t: "build.height", sceneId: "s1", cells: ["5,7"], height: 10 }]).state;
+      assert.notEqual(upDirLive(turned, 5, 6), way, "the build's stair turned");
+      assert.equal(party(turned)?.upDir?.["5,6"], way);
+      assert.equal(upDirShown(turned, 5, 6), way);
+    });
+  });
+
+  test("a scene narrowed out of sight keeps the way a stair at its old border pointed, with no memory before it", () => {
+    withCellVision(() => {
+      const state = fogRoom({ vision: true, bounds: { w: 24, h: 16 } });
+      state.tokens.ayla = token("ayla", { kind: "pc", ownerIds: ["p1"], x: 20, y: 5 });
+      let s = batch(state, [
+        { t: "build.height", sceneId: "s1", cells: ["23,5"], height: 10 },
+        { t: "build.stairs", sceneId: "s1", cells: ["22,5"], up: "a" },
+      ]).state;
+      assert.equal(upDirShown(s, 22, 5), "e");
+      s = batch(s, [move(2, 10)]).state;
+      assert.equal(party(s, 1, 0), undefined, "nothing remembered yet");
+      const narrow = batch(s, [{ t: "scene.update", sceneId: "s1", patch: { bounds: { w: 23, h: 16 } } }]);
+      assert.notEqual(upDirLive(narrow.state, 22, 5), "e", "past the border the platform no longer counts");
+      assert.equal(party(narrow.state, 1, 0)?.upDir?.["22,5"], "e");
+      assert.equal(upDirShown(narrow.state, 22, 5), "e");
+    });
+  });
+
+  test("a holder's layer is kept to its own cap, not the party's (MD3-ASTRA-4)", () => {
+    withCellVision(() => {
+      let s = crypt();
+      s.scenes.s1 = { ...s.scenes.s1!, vision: { on: true, light: "bright", perPlayer: true } };
+      s.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] } };
+      lift(s, { holder: "p1" }, { x: 2, y: 2, w: 3, h: 8 });
+      s.tokens.ayla = { ...s.tokens.ayla!, x: 30, y: 20 };
+      s = batch(s, [{ t: "build.paint", sceneId: "s1", terrain: "wood", cells: ["3,3"] }]).state;
+      // After a fold the party's share may be small while a holder keeps a whole cap.
+      const kept = batch(s, [{ t: "build.paint", sceneId: "s1", terrain: "wood", cells: ["3,4"] }], { capOf: (layer) => (layer === null ? 0 : MEMORY_CAP) });
+      assert.ok(kept.remember.every((op) => op.forget === undefined), JSON.stringify(kept.remember.map((op) => op.forget)));
+      assert.deepEqual(kept.state.memoryBy?.[holderChunkKey("s1", "p1", 0, 0)]?.cells, { "3,3": "stone", "3,4": "stone" });
     });
   });
 
@@ -302,6 +384,9 @@ describe("the map step", () => {
       const hide: Op = { t: "build.stamps", sceneId: "s1", put: [stamp({ visibility: "dm" })] };
       const alone = batch(s, [hide]);
       assert.equal(alone.state.memory?.[chunkKey("s1", 0, 0)]?.stamps?.st1, undefined);
+      const hidden = applyOp(s, hide, DM, env(60));
+      assert.ok(hidden.ok);
+      assert.equal(memoryGrowth(s, hidden.state, hidden.touched).get(layerKey("s1", null)) ?? 0, 0, "the ask's estimate counts nothing for it");
       assert.equal(projectState(alone.state, P1, { sceneId: "s1" }).stamps.st1, undefined, "its art leaves their map");
       const beside = batch(s, [hide, { t: "build.paint", sceneId: "s1", terrain: "wood", cells: ["4,4"] }]);
       const memory = party(beside.state);

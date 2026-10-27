@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { createInitialState } from "#shared/initial.ts";
-import { chunkKey } from "#shared/keys.ts";
+import { chunkKey, holderChunkKey, holderTileKey } from "#shared/keys.ts";
 import {
   BLOCK_SAVES_TOO_FAST,
   BLOCKS_AT_QUOTA,
@@ -37,7 +37,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, growthBound, measuredStateBytes, memoryReserves, memoryShare, memoryStateReserve, roomLevelBytes, SHARE_MARGIN, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
 
@@ -3299,6 +3299,38 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
         assert.ok(layerCharge(now, now.scenes[sceneId]!, null) <= share(now), "the next step measured every layer");
       },
       { sizeLimits: { stateLimit }, mapStep },
+    );
+  });
+
+  test("after a fold, a holder's layer is asked about and kept by its own whole cap, while the party's share is small (MD3-ASTRA-4)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId } = discovery(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, vision: { on: true, light: "dark", perPlayer: true } };
+    state.holders = { [sceneId]: { sceneId, rev: 0, entries: [{ memberId: player.id, on: true }] } };
+    state.playedScenes = { [sceneId]: { sceneId, rev: 0 } };
+    state.memoryShared = { [sceneId]: { sceneId, rev: 0, party: true } };
+    state.exploredBy = {};
+    for (const t of Object.values(state.exploredTiles)) state.exploredBy[holderTileKey(sceneId, player.id, t.tx, t.ty)] = { ...t, memberId: player.id };
+    // Ayla's own memory of the room, some 4 KB: well under a whole cap, far over the party's share.
+    const cells: Record<string, "wood"> = {};
+    for (let k = 0; k < 200; k++) cells[`${k % 16},${Math.floor(k / 16)}`] = "wood";
+    state.memoryBy = { [holderChunkKey(sceneId, player.id, 0, 0)]: { sceneId, cx: 0, cy: 0, rev: 0, memberId: player.id, cells } };
+    const held = layerCharge(state, state.scenes[sceneId]!, player.id);
+    const share = 500;
+    assert.ok(held > share && held < MEMORY_CAP, `held ${held}`);
+    const stateLimit = measuredStateBytes(state) + exploredReserve(state) + memoryReserves(state).whole + SHARE_MARGIN + share;
+    await withRoom(
+      state,
+      dm,
+      async (actor, send) => {
+        // On ground both layers hold and neither sees: the estimate asks of no layer, and the step forgets nothing of hers.
+        assert.equal(await send({ t: "build.paint", sceneId, terrain: "wood", cells: ["20,20"] }), null);
+        const now = actor.committed.state;
+        assert.equal(now.memoryBy?.[holderChunkKey(sceneId, player.id, 0, 0)]?.cells?.["3,3"], "wood");
+        assert.equal(now.memoryBy?.[holderChunkKey(sceneId, player.id, 1, 1)]?.cells?.["20,20"], "stone", "the edit is remembered in her layer");
+      },
+      { sizeLimits: { stateLimit } },
     );
   });
 

@@ -150,6 +150,11 @@ describe("players' memory through a room export and import", () => {
     }
     assert.ok(layerCharge(big, big.scenes[sceneId]!, null) > MEMORY_CAP);
     refused(big);
+    // A holder's own memory past its cap, the party's under it.
+    const mine: RoomState = { ...out, memoryBy: { ...out.memoryBy } };
+    for (const chunk of Object.values(big.memory!)) if (chunk.sceneId === sceneId) mine.memoryBy![holderChunkKey(sceneId, "m1", chunk.cx, chunk.cy)] = { ...chunk, memberId: "m1" };
+    assert.ok(layerCharge(mine, mine.scenes[sceneId]!, "m1") > MEMORY_CAP);
+    refused(mine);
     // Memory of a scene nobody played, where the room reserves none.
     const unplayed = Object.values(out.scenes).find((s) => out.playedScenes?.[s.id] === undefined && s.fogEnabled && s.vision?.on === true);
     assert.ok(unplayed, "the file has a scene with fog and party vision on that nobody played");

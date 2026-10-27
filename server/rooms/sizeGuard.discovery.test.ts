@@ -19,6 +19,7 @@ import {
   MEMORY_FULL,
   measuredFromStored,
   measuredStateBytes,
+  memoryCapOf,
   memoryReserves,
   memoryShare,
   memoryStateReserve,
@@ -342,6 +343,10 @@ describe("the room-wide share (5.5, MD-O-14)", () => {
     const back = applyOp(folded.state, vision(true), DM, env(3));
     assert.ok(back.ok);
     assert.deepEqual(memoryReserves(back.state), { whole: 2 * MEMORY_CAP, sharing: 1 }, "the holders' layers take whole caps");
+    // So does each holder's cap, and a holder's view of the scene counts its own layer whole beside the party's share.
+    const s1 = back.state.scenes.s1!;
+    assert.deepEqual([memoryCapOf(back.state, s1, 1_000), memoryCapOf(back.state, s1, 1_000, "h1")], [1_000, MEMORY_CAP]);
+    assert.equal(discoveryReserve(back.state, s1, 1_000) - discoveryReserve(back.state, s1, 1_000, false), 1_000 + MEMORY_CAP);
     // Room for 1,000 bytes of memory: the switch back is refused in the DM's words, as it would be on a scene that never shared.
     const limit = measuredStateBytes(folded.state) + exploredReserve(folded.state) + 1_000;
     const answer = new SizeGuard({ stateLimit: limit }).check(back.state, ["s1"], growthBound(folded.state, back.state, back.touched), folded.state);
