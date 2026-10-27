@@ -6,6 +6,7 @@ import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formul
 import { ICON_KEY_RE } from "./imageRef.ts";
 import { CLASS_IDS } from "./rules/classResources.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
+import { sceneHexSpan } from "./rules/hex.ts";
 import {
   ABILITY_KEYS,
   CHUNK_CELLS,
@@ -410,15 +411,17 @@ const freeWallId = z.string().regex(new RegExp(`^[A-Za-z0-9_-]{${FREE_WALL_ID_LE
 const chunkIndex = z.number().int().min(0).max(Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS));
 
 /**
- * The squared length is exact on the lattice: each difference is a whole
+ * A free wall's ends, as every wall is held to, a remembered one too. The
+ * squared length is exact on the lattice: each difference is a whole
  * number of 1/64 cells, so its square and the sum are exact in a double.
  */
-const freeWall = z
-  .strictObject({ id: freeWallId, a: latticePoint, b: latticePoint, f: wallFeature })
-  .refine((w) => w.a[0] !== w.b[0] || w.a[1] !== w.b[1], { message: "a wall needs two different ends" })
-  .refine((w) => (w.b[0] - w.a[0]) ** 2 + (w.b[1] - w.a[1]) ** 2 <= MAX_FREE_WALL_CELLS ** 2, {
-    message: `a free wall is at most ${MAX_FREE_WALL_CELLS} cells long`,
-  });
+const wallEnds = <T extends z.ZodType<{ a: readonly [number, number]; b: readonly [number, number] }>>(wall: T) =>
+  wall
+    .refine((w) => w.a[0] !== w.b[0] || w.a[1] !== w.b[1], { message: "a wall needs two different ends" })
+    .refine((w) => (w.b[0] - w.a[0]) ** 2 + (w.b[1] - w.a[1]) ** 2 <= MAX_FREE_WALL_CELLS ** 2, {
+      message: `a free wall is at most ${MAX_FREE_WALL_CELLS} cells long`,
+    });
+const freeWall = wallEnds(z.strictObject({ id: freeWallId, a: latticePoint, b: latticePoint, f: wallFeature }));
 
 /** A shipped stamp's key: a slug, never a path, drawn from /stamps/<key>.webp. */
 const stampKey = z.string().regex(/^[a-z0-9-]{1,40}$/, "not a stamp key");
@@ -1279,12 +1282,14 @@ const shownEdge = z.union([
   z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("wall") }), z.strictObject({ kind: z.literal("none") }), shownDoor, z.strictObject({ kind: z.literal("window") })]),
   z.literal("auto"),
 ]);
-const shownFreeWall = z.strictObject({
-  id: freeWallId,
-  a: latticePoint,
-  b: latticePoint,
-  f: z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("wall") }), shownDoor, z.strictObject({ kind: z.literal("window") })]),
-});
+const shownFreeWall = wallEnds(
+  z.strictObject({
+    id: freeWallId,
+    a: latticePoint,
+    b: latticePoint,
+    f: z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("wall") }), shownDoor, z.strictObject({ kind: z.literal("window") })]),
+  }),
+);
 /** The party's layer, and at most the design's most holders. */
 const LAYERS_MOST = 1 + MOST_SIGHT_HOLDERS;
 /**
@@ -1351,8 +1356,25 @@ const memoryKeys = z.strictObject({
   labels: z.array(id).min(1).max(MEMORY_MOST.many).optional(),
   stamps: z.array(id).min(1).max(MEMORY_MOST.many).optional(),
 });
-/** Every chunk position of the largest scene, one past its east and south sides included. */
-const CHUNK_POSITIONS = (Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS) + 1) ** 2;
+/**
+ * The most a chunk of memory's index goes, for `sys.remember` and the
+ * stored state alike. A hex scene numbers its hexes past its square
+ * bounds, 230 rows of them on a 200 cell scene of hex rows
+ * (`sceneHexSpan`), and its memory is filed by those keys, so the bound is
+ * the widest span of any grid, one past its east and south sides
+ * included, not the square cells `chunkIndex` counts.
+ */
+const MEMORY_CHUNK_MOST = Math.floor(
+  Math.max(
+    MAX_SCENE_CELLS,
+    ...(["rows", "columns"] as const).flatMap((orient) => Object.values(sceneHexSpan({ shape: "hex", orient }, { w: MAX_SCENE_CELLS, h: MAX_SCENE_CELLS }))),
+  ) / CHUNK_CELLS,
+);
+const memoryChunkIndex = z.number().int().min(0).max(MEMORY_CHUNK_MOST);
+/** Every chunk position memory can be filed at. */
+const MEMORY_POSITIONS = (MEMORY_CHUNK_MOST + 1) ** 2;
+/** Every fog tile of the largest scene, one past its east and south sides included: fog is a square raster on every grid. */
+const TILE_POSITIONS = (Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS) + 1) ** 2;
 /**
  * A DM's yes to "Players' remembered map here will be forgotten. Go ahead?"
  * on a builder op (5.3): resent with it, the op may push players' memory
@@ -2469,9 +2491,9 @@ export const serverOnlyOps = [
         z.strictObject({
           memberId: id.optional(),
           chunks: z
-            .array(z.strictObject({ cx: chunkIndex, cy: chunkIndex, drop: memoryKeys.optional(), set: memoryEntries.optional() }))
+            .array(z.strictObject({ cx: memoryChunkIndex, cy: memoryChunkIndex, drop: memoryKeys.optional(), set: memoryEntries.optional() }))
             .min(1)
-            .max(CHUNK_POSITIONS)
+            .max(MEMORY_POSITIONS)
             .refine((chunks) => new Set(chunks.map((c) => `${c.cx},${c.cy}`)).size === chunks.length, { message: "a chunk of memory appears twice" }),
         }),
       )
@@ -2484,7 +2506,7 @@ export const serverOnlyOps = [
           tiles: z
             .array(z.strictObject({ tx: chunkIndex, ty: chunkIndex, keep: tileBits.optional() }))
             .min(1)
-            .max(CHUNK_POSITIONS)
+            .max(TILE_POSITIONS)
             .refine((tiles) => new Set(tiles.map((t) => `${t.tx},${t.ty}`)).size === tiles.length, { message: "a tile is forgotten twice" }),
         }),
       )
@@ -2678,7 +2700,7 @@ export const mapSchemas = {
   tileBits,
 };
 /** Map discovery's shapes, so the stored-state schema checks a room's memory by the same bounds the step's ops are held to (docs/design-v1-map-discovery.md 5.3). */
-export const memorySchemas = { memoryEntries, scenePreset: z.enum(SCENE_PRESETS) };
+export const memorySchemas = { memoryEntries, chunkIndex: memoryChunkIndex, scenePreset: z.enum(SCENE_PRESETS) };
 export type MemoryEntriesInput = z.infer<typeof memoryEntries>;
 export type MemoryKeysInput = z.infer<typeof memoryKeys>;
 /** Wave 5's shapes, so the stored-state schema checks imports by the same bounds (docs/design-v1-dm-tools.md 2.5). */

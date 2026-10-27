@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
+import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "#shared/limits.ts";
 import { ATTACH_KINDS } from "#shared/rules/attach.ts";
 import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
@@ -260,13 +261,29 @@ const exploredTile = fogTile.extend({ memberId: id });
  */
 const memoryChunk = z.strictObject({
   sceneId: id,
-  cx: z.number().int().min(0).max(20),
-  cy: z.number().int().min(0).max(20),
+  cx: memorySchemas.chunkIndex,
+  cy: memorySchemas.chunkIndex,
   rev,
   memberId: id.optional(),
   ...memorySchemas.memoryEntries.shape,
 });
+/**
+ * A layer's chunks, each under the key the reducer files it by, so no
+ * stored chunk is one `layerChunks` never finds: the party's with no
+ * member, and a holder's naming theirs.
+ */
+const memoryChunks = (layer: "party" | "holder") =>
+  z.record(z.string().min(1).max(layer === "party" ? 120 : 140), memoryChunk).superRefine((chunks, ctx) => {
+    for (const [key, c] of Object.entries(chunks)) {
+      const want = layer === "party" ? (c.memberId === undefined ? chunkKey(c.sceneId, c.cx, c.cy) : null) : c.memberId === undefined ? null : holderChunkKey(c.sceneId, c.memberId, c.cx, c.cy);
+      if (key !== want) ctx.addIssue({ code: "custom", path: [key], message: layer === "party" ? "not the party's chunk filed by its scene and place" : "not a holder's chunk filed by its scene, member and place" });
+    }
+  });
 const sceneMark = z.strictObject({ sceneId: id, rev });
+/** The scenes' marks, each under its own scene's id. */
+const sceneMarks = z.record(z.string().min(1).max(120), sceneMark).superRefine((marks, ctx) => {
+  for (const [key, m] of Object.entries(marks)) if (key !== m.sceneId) ctx.addIssue({ code: "custom", path: [key], message: "a mark under another scene's id" });
+});
 
 const feet = z.number().int().min(-100_000).max(100_000);
 
@@ -892,10 +909,10 @@ export const roomStateSchema = z.strictObject({
   // Map discovery (docs/design-v1-map-discovery.md 5.3, 5.5). A backup from before it reaches this schema through the
   // snapshot migration, which adds them empty, and an import that carries none starts with none. A holder's chunk key
   // names its scene, member and place, longer than an id.
-  memory: record(memoryChunk).default({}),
-  memoryBy: z.record(z.string().min(1).max(140), memoryChunk).default({}),
-  playedScenes: record(sceneMark).default({}),
-  memoryShared: record(sceneMark).default({}),
+  memory: memoryChunks("party").default({}),
+  memoryBy: memoryChunks("holder").default({}),
+  playedScenes: sceneMarks.default({}),
+  memoryShared: sceneMarks.default({}),
 });
 
 /**

@@ -57,6 +57,10 @@ describe("sys.remember (5.3)", () => {
     assert.equal(ok({ edges: { "1,1,n": { kind: "door", state: "closed", secret: false, discovered: false } } }), true);
     assert.equal(ok({ walls: { abcdefghijkl: [{ wall: { ...WALL, f: { kind: "door", state: "locked", secret: false, discovered: false } }, cells: ["1,1"] }] } }), false);
     assert.equal(ok({ walls: { abcdefghijkl: [{ wall: { ...WALL, b: [3.001, 1] }, cells: ["1,1"] }] } }), false);
+    // As every free wall: two different ends, at most 8 cells apart.
+    assert.equal(ok({ walls: { abcdefghijkl: [{ wall: { ...WALL, b: WALL.a }, cells: ["1,1"] }] } }), false, "a wall of no length");
+    assert.equal(ok({ walls: { abcdefghijkl: [{ wall: { ...WALL, a: [0, 1], b: [8, 1] }, cells: ["1,1"] }] } }), true);
+    assert.equal(ok({ walls: { abcdefghijkl: [{ wall: { ...WALL, a: [0, 1], b: [8.015625, 1] }, cells: ["1,1"] }] } }), false, "a wall past 8 cells");
     assert.equal(ok({ walls: { abcdefghijkl: [{ wall: WALL, cells: ["1,1", "1,1"] }] } }), false, "a version lists each cell once");
     assert.equal(ok({ walls: { abcdefghijkl: [] } }), false, "a wall's entry has a version");
     assert.equal(ok({ stamps: { st1: { id: "st1", rev: 0, sceneId: "s1", art: { key: "oak-tree" }, x: 1, y: 1, w: 1, h: 1, rotation: 0, z: 0, visibility: "dm" } } }), false);
@@ -74,7 +78,11 @@ describe("sys.remember (5.3)", () => {
     assert.equal(opSchema.safeParse(remember({ forget: [{ tiles: [{ tx: 0, ty: 0 }, { tx: 0, ty: 0 }] }] })).success, false);
     assert.equal(opSchema.safeParse(remember({ forget: [{ tiles: [{ tx: 0, ty: 0 }] }, { tiles: [{ tx: 1, ty: 0 }] }] })).success, false);
     assert.equal(opSchema.safeParse(remember({})).success, false, "nothing remembered");
-    assert.equal(opSchema.safeParse(remember({ layers: [{ chunks: [{ cx: 13, cy: 0 }] }] })).success, false, "past the largest scene");
+    // A hex scene of the largest size files its memory up to chunk 14, past the square cells' 12 (sceneHexSpan).
+    assert.equal(opSchema.safeParse(remember({ layers: [{ chunks: [{ cx: 14, cy: 14, set: { cells: { "229,229": "stone" } } }] }] })).success, true);
+    assert.equal(opSchema.safeParse(remember({ layers: [{ chunks: [{ cx: 15, cy: 0, set: { cells: { "240,0": "stone" } } }] }] })).success, false, "past the largest scene");
+    // Fog is a square raster on every grid, so a forgotten tile is one of the square cells'.
+    assert.equal(opSchema.safeParse(remember({ forget: [{ tiles: [{ tx: 13, ty: 0 }] }] })).success, false);
   });
 });
 

@@ -75,6 +75,27 @@ describe("the stored-state schema and map discovery (lane MD1)", () => {
     assert.equal(bad((c) => (c.stamps = { st1: { ...remembering().memory!["s1:0,0"]!.stamps!.st1!, visibility: "dm" } })), false);
     assert.equal(bad((c) => (c.known = "A")), false);
     assert.equal(bad((c) => (c.cx = -1)), false);
+    assert.equal(bad((c) => (c.walls = { abcdefghijkl: [{ wall: { ...WALL, b: WALL.a }, cells: ["1,1"] }] })), false, "a wall of no length");
+  });
+
+  test("files each chunk under its own scene, place and member, and each mark under its scene", () => {
+    const ok = (change: (s: RoomState) => void) => {
+      const s = remembering();
+      change(s);
+      return parsed(s).ok;
+    };
+    const party = (s: RoomState) => s.memory!["s1:0,0"]!;
+    const own = (s: RoomState) => s.memoryBy!["s1:p1:0,0"]!;
+    assert.equal(ok((s) => (s.memory = { "s1:1,0": party(s) })), false, "another place's key");
+    assert.equal(ok((s) => (s.memory = { "s2:0,0": party(s) })), false, "another scene's key");
+    assert.equal(ok((s) => (party(s).memberId = "p1")), false, "the party's chunk names no member");
+    assert.equal(ok((s) => (s.memoryBy = { "s1:p2:0,0": own(s) })), false, "another member's key");
+    assert.equal(ok((s) => (s.memoryBy = { "s1:0,0": { ...own(s), memberId: undefined } })), false, "a holder's chunk names its member");
+    assert.equal(ok((s) => (s.playedScenes = { s2: { sceneId: "s1", rev: 0 } })), false);
+    assert.equal(ok((s) => (s.memoryShared = { s2: { sceneId: "s1", rev: 0 } })), false);
+    // Up to chunk 14, where a hex scene of the largest size files its memory.
+    assert.equal(ok((s) => (s.memory = { "s1:14,14": { ...party(s), cx: 14, cy: 14 } })), true);
+    assert.equal(ok((s) => (s.memory = { "s1:15,0": { ...party(s), cx: 15, cy: 0 } })), false);
   });
 
   test("a backup from before map discovery migrates in with none, and an import that names none starts with none", () => {
