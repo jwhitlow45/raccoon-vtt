@@ -4,8 +4,8 @@ import type { Blocker, BuildState, LegEnd } from "../ruleHooks.ts";
 import { canSqueeze, footprintRect, footprintSize, occupiedRange, snapStep, squeezedSize, storedCenter, type PlacedToken } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footing, footprintGround, standing, type Standing } from "./heights.ts";
-import { APART, contact, CROSS, MOVEMENT, onSegment, orient } from "./segments.ts";
-import { LEDGE, sceneWalls, type WallSet } from "./walls.ts";
+import { APART, contact, CROSS, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
+import { LEDGE, pieceBlocks, pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
 import { SQUARES } from "./grid.ts";
 
 /**
@@ -266,6 +266,65 @@ export function pinches(segs: readonly (readonly [number, number, number, number
 }
 
 // ---------------------------------------------------------------------------
+// The device's two tests of a held build's pieces
+
+/*
+ * A player's held build carries free walls as the server cut them, each
+ * end moved up to 1/10000 cell per coordinate, so no test of a piece can
+ * be exact (docs/design-v1-map-discovery.md 5.2, ASTRA-30, ASTRA-34). An
+ * action the device sends is gated by `pieceBlocks`, which stops it only
+ * where the exact wall surely does, so the device never refuses, shortens
+ * or withholds what the exact pieces it holds allow, and the server's
+ * landing settles the rest. What nothing checks after it (a walking
+ * ruler, a drag's held preview and the words it shows before the drop)
+ * reads `pieceTouches`, which stops anything within the band, so a
+ * T-junction on a tilted piece stays closed there. The gate is the rule
+ * for every build, since the server's holds no pieces and a check that
+ * forgets to choose then errs only toward sending. A preview asks for the
+ * other test by reading its build through `previewChunks`, which marks the
+ * chunk collection itself, since that is what every rule passes along.
+ */
+
+type PieceTest = "gate" | "preview";
+
+type Chunks = BuildState["buildChunks"];
+
+const previewBuilds = new WeakSet<object>();
+const previewCopies = new WeakMap<object, Chunks>();
+
+/** The chunks as a preview reads them: the same chunks, whose pieces every movement test then reads by `pieceTouches`. One per collection, so caches over it hold. */
+export function previewChunks(chunks: Chunks): Chunks {
+  if (previewBuilds.has(chunks)) return chunks;
+  let copy = previewCopies.get(chunks);
+  if (!copy) {
+    copy = { ...chunks };
+    previewBuilds.add(copy);
+    previewCopies.set(chunks, copy);
+  }
+  return copy;
+}
+
+/** Whether a build is read as a preview reads it (`previewChunks`). */
+export function isPreview(chunks: Chunks): boolean {
+  return previewBuilds.has(chunks);
+}
+
+function pieceTestOf(chunks: Chunks): PieceTest {
+  return previewBuilds.has(chunks) ? "preview" : "gate";
+}
+
+/** Whether the core of half sides (hx, hy) swept from P to Q meets stored segment `k`: exactly, or for a held build's piece by the device's test of it. */
+function meets(walls: WallSet, k: number, test: PieceTest, px: number, py: number, qx: number, qy: number, hx: number, hy: number): boolean {
+  const xy = walls.stored.xy;
+  const ax = xy[4 * k]!;
+  const ay = xy[4 * k + 1]!;
+  const bx = xy[4 * k + 2]!;
+  const by = xy[4 * k + 3]!;
+  if (walls.stored.free[k] !== PIECE) return sweptTouches(px, py, qx, qy, hx, hy, ax, ay, bx, by);
+  return test === "gate" ? pieceBlocks(px, py, qx, qy, hx, hy, ax, ay, bx, by) : pieceTouches(px, py, qx, qy, hx, hy, ax, ay, bx, by);
+}
+
+// ---------------------------------------------------------------------------
 // The movement set
 
 /**
@@ -303,12 +362,11 @@ let stampSerial = 0;
  * under the swept core. The row bounds are worked out with a margin, and the
  * exact test decides each segment.
  */
-function touching(walls: WallSet, px: number, py: number, qx: number, qy: number, hx: number, hy: number, floor: number): number[] {
+function touching(walls: WallSet, px: number, py: number, qx: number, qy: number, hx: number, hy: number, floor: number, test: PieceTest): number[] {
   const index = walls.storedIndex;
   let seen = stamps.get(walls);
   if (!seen) stamps.set(walls, (seen = new Uint32Array(walls.stored.n)));
   const stamp = ++stampSerial;
-  const xy = walls.stored.xy;
   const out: number[] = [];
   const mask = MOVEMENT | (floor === Infinity ? 0 : LEDGE);
   const EPS = 1e-7;
@@ -320,7 +378,7 @@ function touching(walls: WallSet, px: number, py: number, qx: number, qy: number
     if (seen[k] === stamp) return;
     seen[k] = stamp;
     if (!blocksMove(walls, k, floor)) return;
-    if (sweptTouches(px, py, qx, qy, hx, hy, xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!)) out.push(k);
+    if (meets(walls, k, test, px, py, qx, qy, hx, hy)) out.push(k);
   };
   for (let r = Math.floor(y0); r <= Math.floor(y1); r++) {
     // The centers whose core reaches this row, and so the row's span of x.
@@ -355,6 +413,7 @@ type Leg = {
   hx: number;
   hy: number;
   floor: number;
+  test: PieceTest;
 };
 
 /**
@@ -372,7 +431,7 @@ function partClear(leg: Leg, segs: readonly number[], atStart: ReadonlySet<numbe
     const ay = xy[4 * k + 1]!;
     const bx = xy[4 * k + 2]!;
     const by = xy[4 * k + 3]!;
-    if (!sweptTouches(sx, sy, ex, ey, leg.hx, leg.hy, ax, ay, bx, by)) continue;
+    if (!meets(leg.walls, k, leg.test, sx, sy, ex, ey, leg.hx, leg.hy)) continue;
     if (first && atStart.has(k)) {
       const side = orient(ax, ay, bx, by, leg.px, leg.py);
       const toward = orient(0, 0, bx - ax, by - ay, ex - sx, ey - sy);
@@ -396,10 +455,9 @@ function legClear(leg: Leg): boolean {
   if (px === qx && py === qy) return true;
   const point = hx === 0 && hy === 0;
   const pad = point ? 0 : 0.5;
-  const segs = touching(leg.walls, px, py, qx, qy, hx + pad, hy + pad, leg.floor);
+  const segs = touching(leg.walls, px, py, qx, qy, hx + pad, hy + pad, leg.floor, leg.test);
   if (segs.length === 0) return true;
-  const xy = leg.walls.stored.xy;
-  const atStart = new Set(segs.filter((k) => sweptTouches(px, py, px, py, hx, hy, xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!)));
+  const atStart = new Set(segs.filter((k) => meets(leg.walls, k, leg.test, px, py, px, py, hx, hy)));
   if (partClear(leg, segs, atStart, px, py, qx, qy, true)) return true;
   if (point) return false;
   const lastClear = SHIFTS.map(([dx, dy], j) => j === 0 || partClear(leg, segs, atStart, qx + dx, qy + dy, qx, qy, false));
@@ -423,11 +481,11 @@ function legClear(leg: Leg): boolean {
   return false;
 }
 
-function legOf(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, to: LegEnd): Leg {
+function legOf(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, to: LegEnd, test: PieceTest): Leg {
   const { w, h } = coreSize(token);
   const p = storedCenter(token);
   const q = storedCenter({ ...token, x: to.x, y: to.y });
-  return { walls, px: p.x, py: p.y, qx: q.x, qy: q.y, hx: w / 2, hy: h / 2, floor: ledgeFloor(walls, scene, token, to.elevation) };
+  return { walls, px: p.x, py: p.y, qx: q.x, qy: q.y, hx: w / 2, hy: h / 2, floor: ledgeFloor(walls, scene, token, to.elevation), test };
 }
 
 /** What a walk's tests read of the holder it walks off, for what is kept per walker (MovingToken). */
@@ -464,8 +522,6 @@ declare const stepping: unique symbol;
  * leg, follows from those.
  */
 export type Walking = Walker & { readonly [stepping]: true; readonly grounded: boolean };
-
-type Chunks = BuildState["buildChunks"];
 
 /**
  * The walk of `token` from where it stands: off its holder already where it
@@ -593,8 +649,8 @@ function wallsAt(walls: WallSet, token: MovingToken, at: Point): WallSet {
   return holder && onOffHolder(token, token) && onOffHolder(token, at) ? walls.withoutLedgesInside(holderRect(holder)) : walls;
 }
 
-function legFrom(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, to: LegEnd): Leg {
-  return legOf(wallsAt(walls, token, token), scene, token, to);
+function legFrom(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, to: LegEnd, test: PieceTest): Leg {
+  return legOf(wallsAt(walls, token, token), scene, token, to, test);
 }
 
 /** What stopped a leg, and the door it was when a door edge or free door stopped it first. */
@@ -611,7 +667,7 @@ export type LegStop = { blocker: Blocker; door: DoorRef | null };
 export function legStop(state: BuildState, token: Walker, to: LegEnd): LegStop | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
-  const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to);
+  const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
   if (legClear(leg)) return null;
   return firstStop(leg);
 }
@@ -625,13 +681,12 @@ export function legStop(state: BuildState, token: Walker, to: LegEnd): LegStop |
 export function straightClear(state: BuildState, token: Walker, to: LegEnd): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene) return true;
-  const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to);
+  const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
   const { px, py, qx, qy, hx, hy } = leg;
   if (px === qx && py === qy) return true;
-  const segs = touching(leg.walls, px, py, qx, qy, hx, hy, leg.floor);
+  const segs = touching(leg.walls, px, py, qx, qy, hx, hy, leg.floor, leg.test);
   if (segs.length === 0) return true;
-  const xy = leg.walls.stored.xy;
-  const atStart = new Set(segs.filter((k) => sweptTouches(px, py, px, py, hx, hy, xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!)));
+  const atStart = new Set(segs.filter((k) => meets(leg.walls, k, leg.test, px, py, px, py, hx, hy)));
   return partClear(leg, segs, atStart, px, py, qx, qy, true);
 }
 
@@ -657,6 +712,7 @@ export function stepTester(state: BuildState, token: Walker): StepTester | null 
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
   const walls = sceneWalls(scene, state.buildChunks);
+  const test = pieceTestOf(state.buildChunks);
   const floor = ledgeFloor(walls, scene, token, token.elevation);
   // A step from a spot on the holder the walk has not yet cleared leaves out its inner ledges (MovingToken).
   const inner = wallsAt(walls, token, token);
@@ -666,7 +722,6 @@ export function stepTester(state: BuildState, token: Walker): StepTester | null 
   const hx = core.w / 2;
   const hy = core.h / 2;
   const mask = MOVEMENT | (floor === Infinity ? 0 : LEDGE);
-  let xy = walls.stored.xy;
   const EPS = 1e-7;
   let px = 0;
   let py = 0;
@@ -675,13 +730,14 @@ export function stepTester(state: BuildState, token: Walker): StepTester | null 
   let hit = false;
   const visit = (k: number) => {
     if (hit || !blocksMove(set, k, floor)) return;
-    const ax = xy[4 * k]!;
-    const ay = xy[4 * k + 1]!;
-    const bx = xy[4 * k + 2]!;
-    const by = xy[4 * k + 3]!;
-    if (!sweptTouches(px, py, qx, qy, hx, hy, ax, ay, bx, by)) return;
+    if (!meets(set, k, test, px, py, qx, qy, hx, hy)) return;
     // partClear's first part: a segment the core touches where it starts may be left toward the start's side.
-    if (sweptTouches(px, py, px, py, hx, hy, ax, ay, bx, by)) {
+    if (meets(set, k, test, px, py, px, py, hx, hy)) {
+      const xy = set.stored.xy;
+      const ax = xy[4 * k]!;
+      const ay = xy[4 * k + 1]!;
+      const bx = xy[4 * k + 2]!;
+      const by = xy[4 * k + 3]!;
       const side = orient(ax, ay, bx, by, px, py);
       const toward = orient(0, 0, bx - ax, by - ay, qx - px, qy - py);
       if (toward !== 0 && (side === 0 || toward === side)) return;
@@ -698,7 +754,6 @@ export function stepTester(state: BuildState, token: Walker): StepTester | null 
       if (px === qx && py === qy) return true;
       hit = false;
       set = inner !== walls && onOffHolder(token, { x: ax, y: ay }) ? inner : walls;
-      xy = set.stored.xy;
       set.storedIndex.query(Math.min(px, qx) - hx - EPS, Math.min(py, qy) - hy - EPS, Math.max(px, qx) + hx + EPS, Math.max(py, qy) + hy + EPS, mask, visit);
       return !hit;
     },
@@ -722,8 +777,8 @@ export function legBlocker(state: BuildState, token: Walker, to: LegEnd): Blocke
 function firstStop(leg: Leg): LegStop {
   const { walls, px, py, qx, qy, hx, hy } = leg;
   const xy = walls.stored.xy;
-  const segs = touching(walls, px, py, qx, qy, hx, hy, leg.floor);
-  const atStart = new Set(segs.filter((k) => sweptTouches(px, py, px, py, hx, hy, xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!)));
+  const segs = touching(walls, px, py, qx, qy, hx, hy, leg.floor, leg.test);
+  const atStart = new Set(segs.filter((k) => meets(walls, k, leg.test, px, py, px, py, hx, hy)));
   let best = -1;
   let bestT = Infinity;
   const dx = qx - px;
@@ -773,10 +828,10 @@ function firstStop(leg: Leg): LegStop {
  * judged by: ledges count by where the token stands now (its own position
  * and elevation), as for the leg's start (section 4.2).
  */
-function coreTouchesAt(walls: WallSet, token: MovingToken, at: Point, floor: number): boolean {
+function coreTouchesAt(walls: WallSet, token: MovingToken, at: Point, floor: number, test: PieceTest): boolean {
   const c = storedCenter({ ...token, x: at.x, y: at.y });
   const { w, h } = coreSize(token);
-  return touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, floor).length > 0;
+  return touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, floor, test).length > 0;
 }
 
 /** Whether the walker's core, at the stored position its walk ends at, touches the movement set, so no leg may end there. */
@@ -785,7 +840,7 @@ export function coreBlocked(state: BuildState, end: WalkEnd): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
   const walls = sceneWalls(scene, state.buildChunks);
-  return coreTouchesAt(wallsAt(walls, token, at), token, at, ledgeFloor(walls, scene, token, token.elevation));
+  return coreTouchesAt(wallsAt(walls, token, at), token, at, ledgeFloor(walls, scene, token, token.elevation), pieceTestOf(state.buildChunks));
 }
 
 // ---------------------------------------------------------------------------
@@ -806,7 +861,7 @@ export function resizeStands(state: BuildState, token: MovingToken, to: PlacedTo
   const walls = sceneWalls(scene, state.buildChunks);
   const c = storedCenter(to);
   const { w, h } = coreSize(to);
-  return touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, ledgeFloor(walls, scene, token, token.elevation)).length === 0;
+  return touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, ledgeFloor(walls, scene, token, token.elevation), pieceTestOf(state.buildChunks)).length === 0;
 }
 
 /**
@@ -823,7 +878,7 @@ export function resizeLegStop(state: BuildState, token: MovingToken, to: PlacedT
   const p = storedCenter(token);
   const q = storedCenter(to);
   const { w, h } = coreSize(to);
-  const leg: Leg = { walls, px: p.x, py: p.y, qx: q.x, qy: q.y, hx: w / 2, hy: h / 2, floor: ledgeFloor(walls, scene, token, token.elevation) };
+  const leg: Leg = { walls, px: p.x, py: p.y, qx: q.x, qy: q.y, hx: w / 2, hy: h / 2, floor: ledgeFloor(walls, scene, token, token.elevation), test: pieceTestOf(state.buildChunks) };
   return legClear(leg) ? null : firstStop(leg).blocker;
 }
 
@@ -843,13 +898,14 @@ function squeezedThere(state: BuildState, token: Walker, at: Point, fit: boolean
   const all = sceneWalls(scene, state.buildChunks);
   const floor = ledgeFloor(all, scene, token, token.elevation);
   const walls = wallsAt(all, token, at);
-  if (coreTouchesAt(walls, token, at, floor)) return false;
+  if (coreTouchesAt(walls, token, at, floor, pieceTestOf(state.buildChunks))) return false;
   const c = storedCenter({ ...token, x: at.x, y: at.y });
   const { w, h } = footprintSize(token);
   const squeezed = squeezedSize(token);
   const sq = { x0: c.x - squeezed.w / 2, y0: c.y - squeezed.h / 2, x1: c.x + squeezed.w / 2, y1: c.y + squeezed.h / 2 };
   const xy = walls.stored.xy;
-  const segs = touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, floor).map((k) => [xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!] as const);
+  // The narrow space reads each piece as it is: gathered by the band, which takes in every one it can meet inside the footprint, then judged exactly.
+  const segs = touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, floor, "preview").map((k) => [xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!] as const);
   if (fit && segs.some((s) => crossesInterior(sq.x0, sq.y0, sq.x1, sq.y1, ...s))) return false;
   const core = coreSize(token);
   const coreBox = { x0: c.x - core.w / 2, y0: c.y - core.h / 2, x1: c.x + core.w / 2, y1: c.y + core.h / 2 };
@@ -923,10 +979,11 @@ export function landing(state: BuildState, token: Walker, to: LegEnd, mode: Drop
   const scene = state.scenes[token.sceneId];
   if (!scene) return { x: to.x, y: to.y, squeeze: false, stopped: null };
   const walls = sceneWalls(scene, state.buildChunks);
-  const legTo = (at: Point) => legFrom(walls, scene, token, { x: at.x, y: at.y, elevation: to.elevation });
+  const test = pieceTestOf(state.buildChunks);
+  const legTo = (at: Point) => legFrom(walls, scene, token, { x: at.x, y: at.y, elevation: to.elevation }, test);
   const floor = ledgeFloor(walls, scene, token, to.elevation);
   // A spot is judged as the straight leg's end (WalkEnd).
-  const fits = (at: Point) => !coreTouchesAt(wallsAt(walls, walkEnd(state, token, at).walker, at), token, at, floor);
+  const fits = (at: Point) => !coreTouchesAt(wallsAt(walls, walkEnd(state, token, at).walker, at), token, at, floor, test);
   const allowed = (at: Point) => mode === "teleport" || legClear(legTo(at));
   const squeeze = (at: Point) => squeezeFits(state, walkEnd(state, token, at));
   if (mode === "walk" ? allowed(to) : fits(to)) return { x: to.x, y: to.y, squeeze: squeeze(to), stopped: null };
@@ -1005,7 +1062,7 @@ export function lineClear(state: BuildState, token: MovingToken, to: Point, door
   const cy = r.y + r.h / 2;
   const floor = ledgeFloor(walls, scene, token, token.elevation);
   const xy = walls.stored.xy;
-  for (const k of touching(walls, cx, cy, to.x, to.y, 0, 0, floor)) {
+  for (const k of touching(walls, cx, cy, to.x, to.y, 0, 0, floor, pieceTestOf(state.buildChunks))) {
     const ref = walls.featureAt(k)?.ref;
     if (ref && sameDoor(ref, door)) continue;
     const ax = xy[4 * k]!;
