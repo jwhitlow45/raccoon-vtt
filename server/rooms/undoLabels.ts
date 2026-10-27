@@ -47,9 +47,15 @@ export function describeOp(op: ClientOp, before: RoomState, viewer?: Viewer, aft
         return op.patch.blockMovement ? `making walls and ledges block players' moves on ${scene(op.sceneId)}` : `letting players' moves pass walls and ledges on ${scene(op.sceneId)}`;
       }
       if (op.patch.vision !== undefined && Object.keys(op.patch).every((k) => k === "vision" || k === "fogEnabled")) {
-        // The Vision settings send one of the three at a time: party vision on or off, the light level, or the Sight row.
+        // The Vision settings send one of the four at a time: Players see, party vision on or off, the light level, or the Sight row.
         const was = before.scenes[op.sceneId]?.vision;
         const { on, light, perPlayer } = op.patch.vision;
+        // Players see sends fog and party vision together and names no Sight (docs/design-v1-map-discovery.md 8.1).
+        const shown = before.scenes[op.sceneId];
+        if (op.patch.fogEnabled !== undefined && perPlayer === undefined && shown) {
+          const to = playersSeeOf(op.patch.fogEnabled, on);
+          if (playersSeeOf(shown.fogEnabled, was?.on === true) !== to) return `setting Players see on ${scene(op.sceneId)} to ${PLAYERS_SEE_WORDS[to]}`;
+        }
         if (perPlayer !== undefined && (was?.perPlayer === true) !== perPlayer) {
           return perPlayer ? `making sight per player on ${scene(op.sceneId)}` : `making sight whole party on ${scene(op.sceneId)}`;
         }
@@ -492,6 +498,14 @@ export function describeTally(tally: Tally): string | undefined {
   // One creature is named by the op's own phrase, which knows its name.
   if (tally.verb === "effects") return tally.creatures.length > 1 ? effectsWords(tally, `${tally.creatures.length} creatures`) : undefined;
   return tally.tokenIds.length > 1 ? `${tally.verb} ${tally.tokenIds.length} tokens` : undefined;
+}
+
+/** Players see's words for each of its choices (client/features/vision/playersSeeRules.ts), for the server's labels. */
+const PLAYERS_SEE_WORDS = { explore: "Explore", reveal: "Reveal by hand", all: "Everything", custom: "Custom" } as const;
+
+function playersSeeOf(fogEnabled: boolean, visionOn: boolean): keyof typeof PLAYERS_SEE_WORDS {
+  if (fogEnabled) return visionOn ? "explore" : "reveal";
+  return visionOn ? "custom" : "all";
 }
 
 /** Names come from people, so a long one is cut to keep the toast to a line or two. */

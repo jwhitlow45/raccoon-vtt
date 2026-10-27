@@ -39,9 +39,10 @@ import { layoutWidth } from "../device/layout.ts";
 import type { PanelClose } from "../panels.ts";
 
 /**
- * Settings of the scene the DM is looking at: name, map image, fog,
+ * Settings of the scene the DM is looking at: name, map image,
  * starting view, the view it suggests once Isometric is offered
- * (features/view/choice.ts), size and background, then map phases and vision, used in
+ * (features/view/choice.ts), size and background, then map phases and what
+ * players see, fog with it (docs/design-v1-map-discovery.md 8.1), used in
  * play, above the grid, set up once (docs/design-v1-layout-hierarchy.md
  * M5), then movement, the build, export and deleting it. Every change is
  * one op, so it shows at once and undo covers it, and a setting that is on
@@ -75,12 +76,6 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
       <Section label="This scene">
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
         <MapImageRow scene={scene} close={props.close} />
-        <Switch
-          label="Fog"
-          help={scene.fogEnabled ? "Players see only what you reveal. Use the fog tool to reveal." : "Players see the whole scene."}
-          checked={scene.fogEnabled}
-          onChange={(fogEnabled) => update({ fogEnabled })}
-        />
         <SettingRow name="Starting view" help={scene.defaultView ? "The scene opens where you saved it." : "The scene opens fitted to the screen."} wide>
           <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
             <Button size="sm" onClick={saveView}>

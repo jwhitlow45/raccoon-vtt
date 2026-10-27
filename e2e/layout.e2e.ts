@@ -2440,7 +2440,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       await waitFor("the DM back on the players' scene", () => dmSocket.you?.sceneId === run.sceneId || null, 30_000);
     });
 
-    test("4. M5: the map image is a row of This scene right after the name, and Map phases and Vision come above Grid", async () => {
+    test("4. M5: the map image is a row of This scene right after the name, and Map phases and What players see come above Grid", async () => {
       let panel = await sideTab(dm, "Scenes");
       let thisScene = section(panel, "This scene");
       const add = thisScene.getByRole("button", { name: "Add a map image" });
@@ -2448,13 +2448,13 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       await thisScene.getByText("No map image yet.", { exact: true }).waitFor();
       const nameAt = await childIndex(thisScene, thisScene.getByRole("textbox", { name: "Scene name" }));
       const imageAt = await childIndex(thisScene, add);
-      const fogAt = await childIndex(thisScene, thisScene.getByRole("switch", { name: /^Fog/ }));
       assert.equal(imageAt, nameAt + 1, "the map image comes right after the scene's name");
-      assert.equal(fogAt, imageAt + 1, "Fog follows the map image");
+      // Fog went to What players see, beside party vision (docs/design-v1-map-discovery.md 8.1).
+      assert.equal(await thisScene.getByRole("switch", { name: /^Fog/ }).count(), 0, "Fog is left in This scene");
       let labels = await sectionLabels(panel);
       assert.equal(labels.includes("Map image"), false, "a Map image section is left");
       // Map phases shows once the scene has a map image.
-      assert.deepEqual(labels.slice(labels.indexOf("This scene")), ["This scene", "Vision", "Grid", "Movement", "Map builder", "Export as image", "Delete"]);
+      assert.deepEqual(labels.slice(labels.indexOf("This scene")), ["This scene", "What players see", "Grid", "Movement", "Map builder", "Export as image", "Delete"]);
       await thisScene.scrollIntoViewIfNeeded();
       await shot(dm, "scenes-this-scene-no-map");
 
@@ -2479,7 +2479,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       await thisScene.getByText("A 500 × 400 px image.", { exact: true }).waitFor();
       assert.equal(await childIndex(thisScene, thisScene.getByRole("button", { name: "Replace map image" })), imageAt);
       labels = await sectionLabels(panel);
-      assert.deepEqual(labels.slice(labels.indexOf("This scene")), ["This scene", "Map phases", "Vision", "Grid", "Movement", "Map builder", "Export as image", "Delete"]);
+      assert.deepEqual(labels.slice(labels.indexOf("This scene")), ["This scene", "Map phases", "What players see", "Grid", "Movement", "Map builder", "Export as image", "Delete"]);
       await thisScene.scrollIntoViewIfNeeded();
       await shot(dm, "scenes-this-scene-with-map");
     });

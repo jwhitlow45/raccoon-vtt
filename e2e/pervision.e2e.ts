@@ -255,11 +255,22 @@ function scenesPanel(): Locator {
   return dm.getByRole("tabpanel", { name: sideTabName("Scenes") });
 }
 
-/** Picks an option of the DM's Sight row, and waits for the DM's copy to say it. */
+/**
+ * Picks an option of the DM's Sight row, and waits for the DM's copy to say
+ * it. Whole party asks first while players hold maps of their own
+ * (docs/design-v1-map-discovery.md 8.1), and Change answers it.
+ */
 async function pickSight(choice: "Whole party" | "Per player"): Promise<void> {
   await openSideTab(dm, "Scenes");
-  await scenesPanel().getByRole("radiogroup", { name: "Sight" }).getByRole("radio", { name: choice }).check();
-  await waitFor(`the scene ${choice} in the DM's copy`, () => (has.perPlayer(sockets.dm.state) === (choice === "Per player") ? true : null));
+  await scenesPanel().getByRole("radiogroup", { name: "Sight" }).getByRole("radio", { name: choice }).click();
+  const asked = scenesPanel().getByRole("group", { name: "Change Sight?" });
+  const done = () => has.perPlayer(sockets.dm.state) === (choice === "Per player");
+  await waitFor(`the question or the scene ${choice}`, async () => (done() || (await asked.count()) > 0 ? true : null));
+  if (!done()) {
+    assert.equal((await asked.getByRole("status").innerText()).trim(), "Each player's own map joins the party's. Undo does not split them again.");
+    await asked.getByRole("button", { name: "Change", exact: true }).click();
+  }
+  await waitFor(`the scene ${choice} in the DM's copy`, () => (done() ? true : null));
 }
 
 /** Taps a door's south edge, just past the cell above it, as a finger reaching for the door would. */

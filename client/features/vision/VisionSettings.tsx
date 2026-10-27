@@ -1,11 +1,13 @@
-import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { LightLevel, Scene } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { OpOf } from "#shared/protocol.ts";
+import { sceneWalls } from "#shared/rules/walls.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { Help, Note, Section } from "../../components/Panel.tsx";
+import { RowChevron } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
@@ -14,6 +16,8 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { Select } from "../scenes/controls.tsx";
 import { HOLDERS_UNDER, holderRows, holdersAfter, lendsText, sharedOnlyText, unsharedMounts, untickQuestion } from "./holders.ts";
+import { AskFirst, PlayersSeeChoice, useAsk, WarningStatus } from "./PlayersSee.tsx";
+import { CUSTOM_TEXT, exploredHere, holdersExploredHere, leaveQuestion, playersSeeOf, presetPatch, sightQuestion, walllessImage, WALLLESS_TEXT, type PlayersSee } from "./playersSeeRules.ts";
 import { lightText } from "./presets.ts";
 import { sensesShort } from "./senses.ts";
 import {
@@ -41,17 +45,24 @@ const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
   ...LIGHT_LEVELS.map((l) => ({ value: l.value, label: l.label })),
 ];
 
+type Patch = OpOf<"scene.update">["patch"];
+
 /**
- * A scene's Vision settings, in its settings (docs/design-v1-maps-vision.md
- * section 4.3.1): party vision on or off, the light level, the light each
- * map phase brings, and every party creature on the scene with its senses,
+ * What players see of a scene, in its settings (docs/design-v1-map-discovery.md
+ * 8.1 and 8.4, docs/design-v1-maps-vision.md 4.3.1): Players see first,
+ * then the light level, the light each map phase brings, Sight, who sees
+ * for themselves, and every party creature on the scene with its senses,
  * its light and whether it lends sight, so the DM sees what owners set.
+ * The two switches a preset sets, Fog and Party vision, sit in a fold
+ * after them, open while they make Custom.
  *
+ * A change that leaves Explore where players explored, from the preset or
+ * the switches, asks first, since players' remembered map goes with it.
  * Turning vision on makes the server work out what the party sees, which
- * can take a moment on a large scene, so the switch shows it is busy and
+ * can take a moment on a large scene, so Players see shows it is busy and
  * says so while the op is on its way.
  *
- * Under the switch, the Sight row makes the scene per player and back
+ * The Sight row makes the scene per player and back
  * (docs/design-v1-per-player-vision.md 7.1), and on a per-player scene
  * the list of who sees for themselves follows it. Each waits only on its
  * own changes.
@@ -59,42 +70,58 @@ const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
 export function VisionSettings(props: { scene: Scene }) {
   const { scene } = props;
   const actions = useRoomActions();
-  const update = (patch: OpOf<"scene.update">["patch"]) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
+  const update = (patch: Patch) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
   const on = scene.vision?.on === true;
   const light = lightOf(scene);
   const working = useRoomView((s) => visionPending(s.pending, scene.id).vision);
   const sightWorking = useRoomView((s) => visionPending(s.pending, scene.id).sight);
   const perPlayer = scene.vision?.perPlayer === true;
   const showWorking = useDelayed(working);
-  const fog = fogNote(scene);
   const phases = scene.phases && scene.phases.length >= 2 ? scene.phases : null;
   const tokens = useRoomView((s) => (on && light !== "bright" ? s.view?.tokens : undefined));
   const unlit = useMemo(() => (tokens ? carriedLightsNote(tokens, scene.id, light) : null), [tokens, scene.id, light]);
+  const choice = playersSeeOf(scene);
+  const explored = useRoomView((s) => (s.view ? exploredHere(s.view, scene.id) : false));
+  // Only an Explore scene with a map image needs its walls counted, for the warning.
+  const chunks = useRoomView((s) => (choice === "explore" && scene.map ? s.view?.buildChunks : undefined));
+  const wallless = useMemo(() => (chunks ? walllessImage(scene, sceneWalls(scene, chunks).sightPotential) : false), [chunks, scene]);
+  const ask = useAsk<{ where: "preset" | "fold"; patch: Patch }>();
+  const fold = useFold(choice === "custom");
+
+  /** Sends a change of Players see or of its switches, asking first where it forgets what players remember. */
+  const change = (where: "preset" | "fold", to: PlayersSee, patch: Patch) => {
+    const question = leaveQuestion(choice, to, explored);
+    if (question) {
+      ask.ask(question, { where, patch });
+      return;
+    }
+    if (ask.asking) ask.cancel();
+    update(patch);
+  };
+  const confirm = () => {
+    const held = ask.answer();
+    if (held) update(held.patch);
+  };
+  const question = (where: "preset" | "fold") => (
+    <AskFirst question={ask.asking?.change.where === where ? ask.asking.text : null} label="Change what players see?" busy={working} onCancel={ask.cancel} onConfirm={confirm} />
+  );
 
   return (
-    <Section label="Vision">
-      <Switch
-        label="Party vision"
-        help={
-          on
-            ? visionOnHelp(scene)
-            : "Off: players see everything you reveal. Turn it on for dynamic lighting: players see what their characters see, and remember what they explored. It turns fog on too."
-        }
-        checked={on}
-        busy={showWorking}
-        onChange={(next) => update({ vision: visionPatch(scene, next) })}
-      />
-      {showWorking ? <Help>{sightWorkingText(perPlayer)}</Help> : null}
-      {sightShown(scene) ? <SightRow scene={scene} working={sightWorking} /> : null}
-      {perPlayer ? <HolderList sceneId={scene.id} busy={sightWorking !== null} /> : null}
-      {on ? fog.warning ? <Note>{fog.text}</Note> : <Help>{fog.text}</Help> : null}
-      {on && !scene.fogEnabled ? (
-        <div>
-          <Button size="sm" onClick={() => update({ fogEnabled: true })}>
-            Turn fog on
-          </Button>
-        </div>
-      ) : null}
+    <Section label="What players see">
+      <div onKeyDown={ask.asking?.change.where === "preset" ? ask.onKeyDown : undefined} style={{ display: "grid", minWidth: 0 }}>
+        <PlayersSeeChoice
+          value={choice === "custom" ? null : choice}
+          none={CUSTOM_TEXT}
+          busy={working}
+          working={showWorking ? sightWorkingText(perPlayer) : null}
+          onChange={(preset) => {
+            if (preset === "like" || preset === choice) return;
+            change("preset", preset, presetPatch(scene, preset));
+          }}
+        />
+        <WarningStatus text={wallless ? WALLLESS_TEXT : null} />
+        {question("preset")}
+      </div>
 
       <SettingRow name="Light" help={LIGHT_LEVELS.find((l) => l.value === light)?.note} wide>
         <Segmented<LightLevel> label="Light level" value={light} options={LIGHT_LEVELS} onChange={(level) => update({ vision: lightPatch(scene, level) })} />
@@ -124,9 +151,100 @@ export function VisionSettings(props: { scene: Scene }) {
         </SettingRow>
       ) : null}
 
+      {sightShown(scene) ? <SightRow scene={scene} working={sightWorking} /> : null}
+      {perPlayer ? <HolderList sceneId={scene.id} busy={sightWorking !== null} /> : null}
       {on ? <Sources sceneId={scene.id} perPlayer={perPlayer} /> : null}
       {perPlayer ? <MountNotes sceneId={scene.id} /> : null}
+
+      <Fold
+        label="Fog and party vision"
+        open={fold.open}
+        onToggle={() => {
+          if (ask.asking?.change.where === "fold") ask.cancel();
+          fold.toggle();
+        }}
+      >
+        <div onKeyDown={ask.asking?.change.where === "fold" ? ask.onKeyDown : undefined} style={{ display: "grid", minWidth: 0 }}>
+          <Switch
+            label="Fog"
+            help={scene.fogEnabled ? "Players see only what you reveal. Use the fog tool to reveal." : "Players see the whole scene."}
+            checked={scene.fogEnabled}
+            onChange={(fogEnabled) => change("fold", playersSeeOf({ fogEnabled, vision: scene.vision }), { fogEnabled })}
+          />
+          <Switch
+            label="Party vision"
+            help={
+              on
+                ? visionOnHelp(scene)
+                : "Off: players see everything you reveal. Turn it on for dynamic lighting: players see what their characters see, and remember what they explored. It turns fog on too."
+            }
+            checked={on}
+            busy={showWorking}
+            // The reducer turns fog on with party vision, unless the patch says otherwise.
+            onChange={(next) => change("fold", playersSeeOf({ fogEnabled: next || scene.fogEnabled, vision: { on: next, light } }), { vision: visionPatch(scene, next) })}
+          />
+          {on ? <FogLine scene={scene} /> : null}
+          {question("fold")}
+        </div>
+      </Fold>
     </Section>
+  );
+}
+
+/** What the switches say about the scene's fog while party vision is on, under them. */
+function FogLine(props: { scene: Scene }) {
+  const fog = fogNote(props.scene);
+  return fog.warning ? <Note style={{ paddingBottom: theme.space(2) }}>{fog.text}</Note> : <Help style={{ paddingBottom: theme.space(2) }}>{fog.text}</Help>;
+}
+
+/**
+ * The fold of Fog and Party vision (8.4): closed, since Players see sets
+ * both, and open while they make Custom, the one pair no preset names, so
+ * the DM sees which switch did it. The settings mount anew for each scene
+ * (ScenesPanel.tsx), so each scene starts the fold again.
+ */
+function useFold(custom: boolean): { open: boolean; toggle(): void } {
+  const [open, setOpen] = useState(custom);
+  useEffect(() => {
+    if (custom) setOpen(true);
+  }, [custom]);
+  return { open, toggle: () => setOpen((o) => !o) };
+}
+
+/** A disclosure named by its label alone, which takes focus as it folds so nothing under it keeps focus as it goes. */
+function Fold(props: { label: string; open: boolean; onToggle(): void; children: ReactNode }) {
+  return (
+    <div style={{ display: "grid", minWidth: 0 }}>
+      <button
+        type="button"
+        aria-expanded={props.open}
+        onClick={(e) => {
+          e.currentTarget.focus();
+          props.onToggle();
+        }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: theme.space(2),
+          width: "100%",
+          minHeight: theme.touch,
+          padding: 0,
+          background: "transparent",
+          border: "none",
+          color: theme.color.text,
+          fontFamily: theme.font.body,
+          fontSize: theme.font.input,
+          fontWeight: theme.weight.strong,
+          lineHeight: theme.leading.tight,
+          textAlign: "left",
+          cursor: "pointer",
+        }}
+      >
+        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{props.label}</span>
+        <RowChevron open={props.open} />
+      </button>
+      {props.open ? props.children : null}
+    </div>
   );
 }
 
@@ -135,7 +253,9 @@ export function VisionSettings(props: { scene: Scene }) {
  * and described by the chosen option's help. While its change or the
  * list's is on the way it refuses another, and after the shared delay
  * its help says what the server is working out, as a polite status, so
- * focus stays on the option through it all.
+ * focus stays on the option through it all. Whole party asks first while
+ * players hold maps of their own here, since they join the party's for
+ * good (docs/design-v1-map-discovery.md 8.1).
  */
 function SightRow(props: { scene: Scene; working: SightChoice | null }) {
   const { scene, working } = props;
@@ -143,9 +263,12 @@ function SightRow(props: { scene: Scene; working: SightChoice | null }) {
   const showWorking = useDelayed(working !== null);
   const choice = sightOf(scene);
   const help = SIGHT_CHOICES.find((c) => c.value === choice)?.help;
+  const holdersExplored = useRoomView((s) => (s.view ? holdersExploredHere(s.view, scene.id) : false));
+  const ask = useAsk<boolean>();
+  const send = (perPlayer: boolean) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { vision: sightPatch(scene, perPlayer) } });
   return (
     // The row's box, which the alignment sweep measures (e2e/alignmentRoom.ts).
-    <div data-vision-sight>
+    <div data-vision-sight onKeyDown={ask.asking ? ask.onKeyDown : undefined}>
       <SettingRow name="Sight" wide>
         {(ids) => (
           <div aria-busy={working !== null ? true : undefined} style={{ width: "100%", minWidth: 0 }}>
@@ -155,7 +278,9 @@ function SightRow(props: { scene: Scene; working: SightChoice | null }) {
               options={SIGHT_CHOICES}
               onChange={(next) => {
                 if (working !== null || next === choice) return;
-                actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { vision: sightPatch(scene, next === "player") } });
+                const question = sightQuestion(scene, next === "player", holdersExplored);
+                if (question) ask.ask(question, next === "player");
+                else send(next === "player");
               }}
               description={
                 <span role="status">
@@ -173,6 +298,16 @@ function SightRow(props: { scene: Scene; working: SightChoice | null }) {
           </div>
         )}
       </SettingRow>
+      <AskFirst
+        question={ask.asking?.text ?? null}
+        label="Change Sight?"
+        busy={working !== null}
+        onCancel={ask.cancel}
+        onConfirm={() => {
+          const perPlayer = ask.answer();
+          if (perPlayer !== null) send(perPlayer);
+        }}
+      />
     </div>
   );
 }
