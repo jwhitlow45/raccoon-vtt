@@ -175,6 +175,7 @@ export function AskFirst(props: { question: string | null; label: string; busy?:
     <div
       role={open ? "group" : undefined}
       aria-label={open ? props.label : undefined}
+      data-ask-first={open ? true : undefined}
       style={
         open
           ? {
@@ -209,14 +210,18 @@ export function AskFirst(props: { question: string | null; label: string; busy?:
 
 /**
  * A question's state for one place: what it asks, the change it holds, and
- * the element that had focus when it opened, which gets it back once
- * answered, as long as it is still on the page.
+ * the element that had focus when it last asked, which gets it back once
+ * answered, as long as it is still on the page. A second question takes
+ * the control that asked it, so focus goes back to the choice the DM made
+ * last, and `dismiss` closes a question without moving focus, for a
+ * change that goes at once or a fold that closes over it.
  */
 export function useAsk<T>(): {
   asking: { text: string; change: T } | null;
   ask(text: string, change: T): void;
   answer(): T | null;
   cancel(): void;
+  dismiss(): void;
   onKeyDown(e: KeyboardEvent<HTMLElement>): void;
 } {
   const [asking, setAsking] = useState<{ text: string; change: T } | null>(null);
@@ -233,7 +238,9 @@ export function useAsk<T>(): {
   return {
     asking,
     ask: (text, change) => {
-      if (!asking) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      // Focus on a question's own buttons is no control to go back to.
+      if (!active?.closest("[data-ask-first]")) opener.current = active;
       setAsking({ text, change });
     },
     answer: () => {
@@ -243,6 +250,10 @@ export function useAsk<T>(): {
       return change;
     },
     cancel,
+    dismiss: () => {
+      setAsking(null);
+      opener.current = null;
+    },
     onKeyDown: (e) => {
       if (!asking || e.key !== "Escape") return;
       e.preventDefault();

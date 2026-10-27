@@ -103,7 +103,7 @@ export function VisionSettings(props: { scene: Scene }) {
       ask.ask(question, { where, intent });
       return;
     }
-    if (ask.asking) ask.cancel();
+    if (ask.asking) ask.dismiss();
     send(intent);
   };
   const confirm = () => {
@@ -168,7 +168,8 @@ export function VisionSettings(props: { scene: Scene }) {
         label="Fog and party vision"
         open={fold.open}
         onToggle={() => {
-          if (ask.asking?.change.where === "fold") ask.cancel();
+          // Focus stays on the fold's header as the question goes with the fold.
+          if (ask.asking?.change.where === "fold") ask.dismiss();
           fold.toggle();
         }}
       >
@@ -228,8 +229,9 @@ function Fold(props: { label: string; open: boolean; onToggle(): void; children:
         type="button"
         aria-expanded={props.open}
         onClick={(e) => {
-          e.currentTarget.focus();
+          const header = e.currentTarget;
           props.onToggle();
+          header.focus();
         }}
         style={{
           display: "flex",
