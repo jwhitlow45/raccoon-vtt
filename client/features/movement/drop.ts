@@ -238,13 +238,6 @@ export type DropPlan = {
   moves: Landed[];
   /** The lone token's walk, stopped short. */
   stop: Stop | null;
-  /**
-   * The move the player asked for, where the lone walk is stopped at its
-   * very first step on a scene with fog on (docs/design-v1-map-discovery.md
-   * 5.2): sent in place of nothing, so the server's landing by the real
-   * build decides, as it does for every walk sent there (send.ts).
-   */
-  intended?: Landed;
   /** Tokens of a group drag left where they were, since a wall or a ledge stood in their way (section 4.1). */
   held: { token: DropToken; blocker: StopBlocker }[];
   /** The lone walk turned too often for one move, so it landed partway (docs/design-v1-movement.md 5.2). */
@@ -309,7 +302,7 @@ export function planOne(state: DropView, token: DropToken, raw: Point, mode: Exc
   const moves = moved(token, at) ? [landed(state, token, at)] : [];
   const named = land.stopped ? heardStop(state, walkerOf(state, token), { x: to.x, y: to.y, elevation }, land.stopped) : null;
   const stop: Stop | null = named ? { tokenId: token.id, sceneId: token.sceneId, ...named, ghost: to, aim: { x: raw.x, y: raw.y }, at: { x: land.x, y: land.y } } : null;
-  return { moves, stop, held: [], ...(stop && moves.length === 0 ? intendedMove(state, token, to) : {}) };
+  return { moves, stop, held: [] };
 }
 
 /**
@@ -330,18 +323,6 @@ export function heardStop(state: DropView, walker: Walker, to: LegEnd, stopped: 
   const words = stopWords(state, ground, walker, to, stopped.blocker);
   if (words === SOMETHING_BLOCKS) return { blocker: "unknown", door: null };
   return { blocker: words === WALL_IN_THE_WAY ? "wall" : "ledge", door: words === WALL_IN_THE_WAY ? stopped.door : null };
-}
-
-/**
- * The move a walk stopped at its first step asked for (DropPlan
- * `intended`): only on a scene with fog on, where a player's held build
- * may be cut pieces or remembered ground and the server lands a stopped
- * walk by the real build. With fog off the device holds the build itself,
- * so its stop is the server's and nothing is sent.
- */
-function intendedMove(state: DropView, token: DropToken, to: Point): Pick<DropPlan, "intended"> {
-  if (state.scenes[token.sceneId]?.fogEnabled !== true) return {};
-  return { intended: landed(state, token, { x: to.x, y: to.y, squeeze: false }) };
 }
 
 /** What a lone drag's route search answered for the drop's spot (routeDrag.ts): the straight leg, a route, or no route. */
@@ -749,7 +730,7 @@ export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, 
   const others = plan.moves.filter((m) => m !== move);
   const searched = plan.stop?.searched ? { searched: true as const, ...(plan.stop.capped ? { capped: true as const } : {}) } : {};
   const halted: Stop = { tokenId: lead.id, sceneId: lead.sceneId, blocker: stop.blocker, door: null, ghost: { x: move.x, y: move.y }, aim: { x: move.x, y: move.y }, at: { x: stop.at.x, y: stop.at.y }, ...searched };
-  if (stop.at.x === lead.x && stop.at.y === lead.y) return { ...plan, moves: others, stop: halted, ...(others.length === 0 && state.scenes[lead.sceneId]?.fogEnabled === true ? { intended: move } : {}) };
+  if (stop.at.x === lead.x && stop.at.y === lead.y) return { ...plan, moves: others, stop: halted };
   const cut = landed(state, lead, { x: stop.at.x, y: stop.at.y, squeeze: false });
   if (move.route && !stop.plain) cut.route = cutPieces(points, move.route, stop).map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
   return { ...plan, moves: [...others, cut], stop: halted };

@@ -30,11 +30,10 @@ export type SendDeps = {
  * (StopNote.tsx). So the drop closes the bar and keeps the selection: a tap
  * on the token opens the bar again, and the note steps aside for it.
  *
- * A lone walk stopped at its first step on a scene with fog on sends the
- * move the player asked for (DropPlan `intended`,
- * docs/design-v1-map-discovery.md 5.2): the server lands it by the real
- * build, at the start where the wall stands, so the device never withholds
- * a walk that only the pieces it holds seemed to stop.
+ * A walk stopped at its first step sends nothing (D-261027-05): the
+ * device's gate stops it only where the exact wall surely does
+ * (docs/design-v1-map-discovery.md 5.2), so the token never leaves its
+ * square and the note keeps the words the device worked out.
  *
  * The server lands a walk the real build stops short where the player's
  * device let it go, as into the dark, and says it was `blocked` (6): the
@@ -47,8 +46,7 @@ export type SendDeps = {
  * to wait for (canvas/dragNotes.ts watchDrop).
  */
 export function sendPlan(plan: DropPlan, deps: SendDeps): number[] {
-  const moves = plan.moves.length === 0 && plan.intended ? [plan.intended] : plan.moves;
-  const ops = moveOpsOf(moves);
+  const ops = moveOpsOf(plan.moves);
   // A lone op is one step anyway, so only a gesture of several ops takes a group (state/actions.ts dispatchGesture).
   const group = ops.length > 1 ? deps.newId() : undefined;
   const sent: number[] = [];
@@ -71,7 +69,7 @@ export function sendPlan(plan: DropPlan, deps: SendDeps): number[] {
   }
   if (plan.stop) {
     // A walk stopped at its first step that sent nothing has no walk for its teleport to take back.
-    const n = moves.length === 1 ? (sent[0] ?? null) : null;
+    const n = plan.moves.length === 1 ? (sent[0] ?? null) : null;
     deps.note({ ...plan.stop, n });
     deps.showActions(false);
   }

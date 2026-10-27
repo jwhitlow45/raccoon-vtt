@@ -85,8 +85,7 @@ describe("sending a drop", () => {
 
   test("a walk the server refused leaves its note no walk to take back", () => {
     const h = deps({ thorn: { sceneId: "s1", x: 5, y: 5 } });
-    sendPlan({ moves: [], stop: { ...stop, at: { x: 5, y: 5 } }, held: [], intended: { tokenId: "thorn", x: 9, y: 5 } }, h.d);
-    assert.deepEqual(h.sent, [{ t: "token.move", tokenId: "thorn", x: 9, y: 5 }]);
+    sendPlan({ moves: [{ tokenId: "thorn", x: 5, y: 5 }], stop, held: [] }, h.d);
     assert.equal(h.notes.at(-1)!.n, 41);
     h.answers[0]!("refused");
     assert.equal(h.notes.at(-1)!.n, null);

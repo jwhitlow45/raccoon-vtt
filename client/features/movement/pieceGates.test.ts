@@ -235,24 +235,28 @@ describe("every gate reads a piece within its band (MD4-ASTRA-1, MD4-LK-3)", () 
   });
 });
 
-describe("a walk stopped at its first step on a scene with fog on sends the move asked for (5.2)", () => {
-  test("the plan carries it, and sending it gives the note its walk to take back", () => {
+describe("a walk stopped at its first step sends nothing (D-261027-05)", () => {
+  test("the plan holds no move, so the token stays in its square and its note has no walk to take back", () => {
     // Fully conservative, the walk stops where it starts: what a stop at the start would be on any device.
     const { copy } = astra([hero(5, 6)]);
     const plan = planOne(dropView(conservative(copy), "player"), copy.tokens.thorn!, { x: 5.3, y: 5.2 }, "walk");
-    assert.deepEqual(plan.intended, { tokenId: "thorn", x: 5, y: 5 });
+    assert.deepEqual(plan.moves, []);
+    assert.equal(plan.stop?.blocker, "wall");
+    assert.ok(!("intended" in plan), JSON.stringify(plan));
     const sent: ClientOp[] = [];
     const notes: unknown[] = [];
     sendPlan(plan, { dispatch: (op) => (sent.push(op), 7), newId: () => "g", note: (n) => notes.push(n), shownNote: () => null, standing: () => null, notify: () => {}, showActions: () => {} });
-    assert.deepEqual(sent, [{ t: "token.move", tokenId: "thorn", x: 5, y: 5 }]);
-    assert.equal((notes[0] as { n: number | null }).n, 7);
+    assert.deepEqual(sent, []);
+    assert.equal((notes[0] as { n: number | null }).n, null);
   });
 
-  test("with fog off the device holds the build itself, so its stop sends nothing", () => {
+  test("an arrow press into the wall sends nothing either, on fog on and fog off alike", () => {
     const { copy } = astra([hero(5, 6)]);
-    const off = { ...conservative(copy), scenes: { ...copy.scenes, s1: { ...copy.scenes.s1!, fogEnabled: false } } };
-    const plan = planOne(dropView(off, "player"), copy.tokens.thorn!, { x: 5.3, y: 5.2 }, "walk");
-    assert.equal(plan.intended, undefined);
-    assert.equal(plan.moves.length, 0);
+    for (const fogEnabled of [true, false]) {
+      const view = { ...conservative(copy), scenes: { ...copy.scenes, s1: { ...copy.scenes.s1!, fogEnabled } } };
+      const plan = planOne(dropView(view, "player"), copy.tokens.thorn!, { x: 5.3, y: 5.2 }, "walk");
+      assert.deepEqual(plan.moves, [], `fog ${fogEnabled}`);
+      assert.ok(plan.stop, `fog ${fogEnabled}`);
+    }
   });
 });
