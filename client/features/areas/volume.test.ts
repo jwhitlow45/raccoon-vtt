@@ -5,7 +5,7 @@ import { creaturesInArea, resolveArea, type AreaContext, type AreaTemplateInput,
 import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { hexAt, hexKey, type HexGrid } from "#shared/rules/hex.ts";
 import { deriveWalls, indexBuild, type WallSet } from "#shared/rules/walls.ts";
-import { bandAt, buildVolume, capLoops, everySubcell, segmentsAround, towardViewer, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
+import { bandAt, buildVolume, capLoops, capTriangles, everySubcell, linesNear, segmentsAround, towardViewer, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
 import {
   assertBanded,
   assertClosed,
@@ -385,7 +385,7 @@ describe("caps at hair-thin corners and pinches (design 4.2 step 3)", () => {
     // Two caps side by side, the second starting 5e-8 cells past the first, given as their bottom and top chains with the upright edges to find.
     const hair = 0.5e-7;
     const points = [at(0, 0), at(1, 0), at(1, 1), at(0, 1), at(1 + hair, 0), at(2, 0), at(2, 1), at(1 + hair, 1)];
-    const loops = capLoops(points, [[0, 1], [2, 3], [4, 5], [6, 7]], plane);
+    const { loops } = capLoops(points, [[0, 1], [2, 3], [4, 5], [6, 7]], plane);
     assert.deepEqual(sorted(loops), ["0,1,2,3", "4,5,6,7"]);
   });
 
@@ -393,8 +393,8 @@ describe("caps at hair-thin corners and pinches (design 4.2 step 3)", () => {
     // Two squares meeting at point 2, the second's edge from the pinch listed before the first's.
     const points = [at(0, 0), at(1, 0), at(1, 1), at(0, 1), at(2, 1), at(2, 2), at(1, 2)];
     const edges: [number, number][] = [[0, 1], [1, 2], [2, 4], [4, 5], [5, 6], [6, 2], [2, 3], [3, 0]];
-    assert.deepEqual(sorted(capLoops(points, edges, plane)), ["0,1,2,3", "2,4,5,6"]);
-    assert.deepEqual(sorted(capLoops(points, [...edges].reverse(), plane)), ["0,1,2,3", "2,4,5,6"]);
+    assert.deepEqual(sorted(capLoops(points, edges, plane).loops), ["0,1,2,3", "2,4,5,6"]);
+    assert.deepEqual(sorted(capLoops(points, [...edges].reverse(), plane).loops), ["0,1,2,3", "2,4,5,6"]);
   });
 });
 
@@ -832,6 +832,34 @@ describe("bounded work (design 6)", () => {
       assert.equal(whole.faceCount, vol.faceCount);
       assert.equal(whole.vertexCount, vol.vertexCount);
     }
+  });
+
+  test("the loops the scenes keep short stop in slices too: the walk of a face's lines, the ear scan and the corner slots", () => {
+    // Each run with the deadline past and made long enough that, without its stop, a call would charge well past one look at the clock (every 128 units) before it stopped. The scenes never make these loops that long.
+    // A face's lines in order, by a walk of the marks from the first to the last it found: two lines pass it, and 1,998 filed elsewhere lie between them.
+    const lines: [number, number, number, number][] = [[0, 1, 40, 1]];
+    for (let k = 1; k < 1999; k++) lines.push([0, 20 + k / 1000, 40, 20 + k / 1000]);
+    lines.push([2, 0, 2, 40]);
+    const walk = linesNear(lines, [[0.5, 0.5], [3.5, 0.5], [3.5, 3.5], [0.5, 3.5]], { x0: 0, y0: 0, x1: 40, y1: 40 });
+    assert.deepEqual(walk.lines, [0, 1999]);
+    assert.ok(walk.carried < 128, `the line walk charged ${walk.carried} before it stopped`);
+    // A hex stack's cap cut into triangles: a convex loop of 300 corners on the plane x = 0, where every ear's scan reads every corner.
+    const n = 300;
+    const ring = Array.from({ length: n }, (_, k) => [0, 50 + 40 * Math.cos((2 * Math.PI * k) / n), 50 + 40 * Math.sin((2 * Math.PI * k) / n)] as const);
+    const ears = capTriangles(ring, { a: 1, b: 0, e: 0 });
+    assert.equal(ears.triangles.length, n - 2);
+    assert.ok(ears.carried < 128, `the ear scan charged ${ears.carried} before it stopped`);
+    // The corner pairing: 300 chains ending at one place along the line at 300 heights, so every end reads every start in its slot.
+    const points: (readonly [number, number, number])[] = [];
+    const edges: [number, number][] = [];
+    for (let k = 0; k < 300; k++) {
+      const i = points.length;
+      points.push([0, 0, 2 * k], [0, 1, 2 * k], [0, 1, 2 * k + 1], [0, 0, 2 * k + 1]);
+      edges.push([i, i + 1], [i + 2, i + 3]);
+    }
+    const slots = capLoops(points, edges, { a: 1, b: 0, e: 0 });
+    assert.ok(slots.loops.length > 0);
+    assert.ok(slots.carried < 128, `the corner pairing charged ${slots.carried} before it stopped`);
   });
 
   /**
