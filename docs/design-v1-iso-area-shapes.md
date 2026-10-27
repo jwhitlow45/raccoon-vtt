@@ -1,6 +1,6 @@
 # raccoon-vtt v1: areas as their real shapes in Isometric
 
-Status: draft 3, revised for design review rounds 1 and 2 (section 12), D-261026-30 and D-261026-31. Code is cited from main at `fbced312`. Nothing is built. It builds on the isometric view (docs/design-v1-isometric-view.md, "the iso design" below) and keeps every rule of it that this note does not name.
+Status: draft 3, revised for design review rounds 1 and 2 (section 12), D-261026-30 and D-261026-31. Code is cited from main at `fbced312`. ISOA-1, the solid, is built (section 11 says where it went its own way). ISOA-2, the board, is pending, so nothing draws a volume yet. It builds on the isometric view (docs/design-v1-isometric-view.md, "the iso design" below) and keeps every rule of it that this note does not name.
 
 ## 1. The owner's words
 
@@ -129,6 +129,20 @@ Draw-call medians from a throwaway prototype outside the repository (canvas 2D, 
 
 - **Why loops.** In the typical scene at 40 px, filled triangle by triangle, the fills alone cost 24 ms over the ground, against 9.5 ms as each band's loops. As one run each, fills and outlines cost 3 to 4 ms. The split does not change a frame's cost, since loops follow the run, not the faces.
 - **Per area,** in the prototype at 4x with string keys: a build (mesh, clip, caps, ground, split, edges) of 16 ms (a cylinder) to 41 ms (the sphere) and 75 ms beside a wall and a platform, 9 ms unsplit. A turn's bands take 3 to 12 ms. The lane keys vertices by number in typed arrays, and its bench reports the build.
+- **As built:** ISOA-1's bench (`VOLUME_BENCH=1` in volume.test.ts) on a laptop with other work running. A 1.5 ms slice here stands for the stand-in's 6 ms at a quarter of the speed, and "past" is the longest slice's overshoot of 1.5 ms. The dungeon is 200 by 200 cells with 40 rooms, 200 loose wall edges and 30 free walls.
+
+| Build | Faces | Built in, sliced | Slices p99 | Longest, past |
+|---|---|---|---|---|
+| open, sphere 100 cells round | 63,229 | 48.7 ms | 1.57 ms | 3.20 ms, 1.70 |
+| open, emanation 99 cells out | 61,885 | 44.3 ms | 1.78 ms | 2.72 ms, 1.22 |
+| hex rows, 500 ft point emanation | 142,419 | 435.9 ms | 5.44 ms | 9.32 ms, 7.82 |
+| sphere 10 cells round among 32 short free walls | 8,607 | 35.9 ms | 2.78 ms | 4.07 ms, 2.57 |
+| dungeon, 15 ft aura | 2,177 | 8.0 ms | 2.07 ms | 2.07 ms, 0.57 |
+| dungeon, 30 ft aura | 4,428 | 15.1 ms | 2.15 ms | 2.20 ms, 0.70 |
+| dungeon, 40 ft sphere | 3,265 | 7.3 ms | 1.61 ms | 1.61 ms, 0.11 |
+| dungeon, sphere 100 cells round | 92,574 | 248.4 ms | 3.27 ms | 7.52 ms, 6.02 |
+
+A step of the build between looks at the clock takes some tens of microseconds. The longer slices are the collector's pauses (scavenges of 2 to 8 ms while a mesh of a hundred thousand faces is alive), so they come with the largest meshes, a few slices in a few hundred.
 - **Lazy and sliced.** Only areas whose box meets the view, grown by a screen, are built, nearest the middle first, in slices of at most 6 ms an animation frame: the mesh, clip and caps, then the split and edges bucket by bucket. A turn bands the volumes in view in the same slices. A volume not yet built or banded lies flat. At the cap, about 60 areas fall in view at 12 px, so at the prototype's rates the last stands after about 7 s on the stand-in, the middle within a few frames. A pan's new areas stand a moment after they arrive flat, accepted. A turn's first visit at the cap shows up to about 60 volumes flat for up to about 2 s (3 to 12 ms each, in 6 ms slices) under the same indicator. That is a prototype estimate, pending ISOA-2's turn gate. Each turn's bands, once made, are kept, so a later visit to that turn stands at once.
 - **Kept, never per frame:** meshes by the key in 4.4, bands per turn, loops per run. A pan that crosses no 128 px step lays nothing out again. Nothing animates at rest.
 - **Gates,** in `TaskDuration` at 4x on scripts/bench-iso.ts, unchanged in kind (`gate`, bench-iso.ts:755-761): every frame at most max(16 ms, 1.75 times Top-down's same frame on the same scene), and a turn at the caps at most 150 ms whole. ISOA-2 adds the rows and measures them integrated: a pan of a typical scene with the four areas above, aiming a sphere (each move, and the frame at rest), a drag of a token with an aura, a turn and a first view at the 200-area cap. The prototype's numbers are estimates from a canvas harness, not that gate.
@@ -207,14 +221,16 @@ Filled by ISOA-2's docs commit, with every place the build went its own way and 
 
 **ISOA-1, the solid** (`shared/rules/aoe.ts`, `client/features/areas/volume.ts`):
 
-- **The build in three steps.** `buildVolume` makes the mesh, clips it and caps it, the one slice that cannot stop part way. `prepare` reads the footprint, finds the ground's planes, and cuts each face by the bucket lines across it, filing each piece by its middle. `ensure` then cuts one bucket by the ground and the bands and links its edges. Both stop at a deadline and carry on at the next call. Each face takes every bucket line across it when it is filed, since a line one face took and its neighbor skipped would part their shared edge differently. So the ground cut (4.2 step 4) runs per bucket, after the filing, as the bands do.
+- **The build in slices.** `buildVolume` builds nothing. `prepare` runs the first build whole: the mesh, its clip and caps, the footprint, the ground's planes, and each face cut by the bucket lines across it and filed by its middle. It is one generator that looks at the clock every so much work and stops once past its deadline, so no step is longer than tens of microseconds (review ISOA1-ASTRA-01). `ensure` then cuts one bucket by the ground and the bands and links its edges, in slices the same way. Each face takes every bucket line across it when it is filed, since a line one face took and its neighbor skipped would part their shared edge differently. So the ground cut (4.2 step 4) runs per bucket, after the filing, as the bands do.
+- **Walls by what meets a face** (review ISOA1-F-3). The clip lines are filed by the 4 by 4 cell tiles of the plan they pass, and each face is cut, one cut at a time, by the lines of its tiles in their global order. The visibility polygons are indexed by row, as `Sampler` reads them, so a piece's clip test costs the edges near its row, and the caps read only the lines near each piece.
+- **Hex stacks** walk out from the source a ring of hexes at a time (`eachHexPrism`), so a small aura costs its own hexes and not the scene's.
 - **No lengthwise steps.** A segment runs the solid's whole length. The bucket, ground and band cuts already split every long face.
-- **The footprint** (step 9) is read from the plans of the faces that look up, as a span per row of sub-cells, not from faces' boxes. A face's box beside a diagonal wall would reach past it, and the faces that look up cover a closed solid's plan.
+- **The footprint** (step 9) is read from the plans of the faces that look up, as a span per row of sub-cells, not from faces' boxes. A face's box beside a diagonal wall would reach past it, and the faces that look up cover a closed solid's plan. Sub-cells are read a hair inside each float and an edge's ends are taken as they are, so a cut that lands an ulp past the scene's edge or a wall takes no sub-cell beyond it (review ISOA1-F-2).
 - **Caps.** On a convex shell each cap is one polygon of the shell's own vertices. A hex stack's caps, which need not be convex, are cut into triangles. Where a sliver corner leaves two chain ends a hair apart, the upright edge joins each end to the nearest start.
 - **Pinches.** The clip can leave a sliver touching the rest of the mesh along an upright line. The edges there are used twice each way, and each pair links up.
 - **Hex ground** is cut by square cells. Hexes have no heights until H3, which will need hex step lines.
-- **The center rule off the scene.** On squares the center inclusion rule reads no scene bounds (`Sampler.pointInside`), so a creature whose center lies off the scene can be caught where no solid stands. The promise test skips creatures off the scene. Left as a follow-up.
-- **Bench** (`VOLUME_BENCH=1`, this machine with other work running, a slice here standing for the stand-in's 6 ms at a quarter of it): the 100-cell sphere, 63,229 faces, builds its first slice in 1.75 ms (median, 0.87 ms with no other garbage about), about 7 ms on the stand-in, over the 6 ms slice. The emanation's takes 1.30 ms and the cylinder's 0.19 ms. Later slices keep a 1.5 ms deadline but for one unit of work past it: prepare's p99 2.9 ms, a bucket's p99 1.6 to 1.7 ms, the largest unit about 0.8 ms.
+- **The center rule off the scene.** On squares the center inclusion rule reads no scene bounds (`Sampler.pointInside`), so a creature left off the scene when it shrank can be caught where no solid stands. The promise test holds for creatures on the scene, and one test keeps the exception (review ISOA1-ASTRA-03). The rules' fix is a follow-up.
+- **Bench:** the build rows are in section 6.
 
 ## 12. Review dispositions
 
