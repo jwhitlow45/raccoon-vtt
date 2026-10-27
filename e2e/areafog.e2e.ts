@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
 import WebSocket from "ws";
-import { ConsoleWatch, OpSocket, pagePoint, pickTool, Shots, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, Shots, sideTabName, sleep, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 
 /**
  * An area being aimed over a player's fog (lane AF): the area tool's own
@@ -93,7 +93,9 @@ const dmSocket = new SocketWatch("dm");
 const patSocket = new SocketWatch("pat");
 const consoles = { dm: new ConsoleWatch("dm"), pat: new ConsoleWatch("pat") };
 
-const run = { roomId: "", roomName: `E2E area over fog ${new Date().toISOString().slice(0, 19)}`, password: "", sceneId: "", goblin: randomUUID() };
+const run = { roomId: "", roomName: `E2E area over fog ${new Date().toISOString().slice(0, 19)}`, password: "", sceneId: "", goblin: randomUUID(), bree: randomUUID(), aura: randomUUID() };
+
+const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 12, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
 
 /** A goblin on revealed ground at 7, 1, where the doorway's light from the second layout's origin reaches no lower than y = 2.5. */
 const GOBLIN_AT = { x: 7, y: 1 };
@@ -196,6 +198,22 @@ async function aim(page: Page, layout: Layout = PAST_EDGE): Promise<void> {
   for (let ft = 20; ft < layout.size; ft += 5) await options(page).getByRole("button", { name: "More size" }).click();
   // The shading refines once the pointer rests.
   await sleep(500);
+}
+
+/** A standee's middle on the page, from Konva's own box of it on Isometric's main stage (as iso.e2e.ts finds one). */
+async function standeeAt(page: Page, tokenId: string): Promise<{ x: number; y: number }> {
+  const at = await page.evaluate((id) => {
+    type Stage = { width(): number; visible(): boolean; listening(): boolean; findOne(s: string): { getClientRect(): { x: number; y: number; width: number; height: number } } | undefined; container(): { getBoundingClientRect(): { left: number; top: number } } };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const main = konva.stages.find((s) => s.width() > 0 && s.visible() && s.listening());
+    const node = main?.findOne(`#${id}`);
+    if (!main || !node) return null;
+    const r = node.getClientRect();
+    const c = main.container().getBoundingClientRect();
+    return { x: c.left + r.x + r.width / 2, y: c.top + r.y + r.height / 2 };
+  }, tokenId);
+  assert.ok(at, `${tokenId} stands on the board`);
+  return at;
 }
 
 /** Picks Isometric at a turn through the test hook, as the View menu does, or Top-down. */
@@ -551,7 +569,7 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
         name: "Goblin",
         ...GOBLIN_AT,
         disposition: "hostile",
-        actor: { inline: { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 12, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" } },
+        actor: { inline: ACTOR },
       },
     });
     await waitFor("the goblin on Pat's page", () => patSocket.state?.tokens[run.goblin] ?? null);
@@ -575,7 +593,71 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
     await layoutCase(EDGE_IN_CELL, false);
   });
 
-  test("AF-10. no page logged an error", () => {
+  test("AF-10. Pat places Fireball from the fog beside revealed ground: no pixel of its box changes with the hidden wall, in Top-down and Isometric, and the Areas panel lists the goblin it catches either way", async () => {
+    await setFog(ORIGIN_IN_FOG);
+    await ops.send({ t: "token.create", token: { id: run.goblin, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", ...GOBLIN_AT, disposition: "hostile", actor: { inline: ACTOR } } });
+    await waitFor("the goblin on Pat's page", () => patSocket.state?.tokens[run.goblin] ?? null);
+    await viewAs(pat, "topDown");
+    await aim(pat, ORIGIN_IN_FOG);
+    const before = new Set(Object.keys(patSocket.state?.templates ?? {}));
+    await pressSlot(pat, "place");
+    const placed = await waitFor("the placed Fireball", () => Object.keys(patSocket.state?.templates ?? {}).find((k) => !before.has(k)) ?? null);
+    // Nothing picked, so only the placed area draws, under the fog.
+    await pressSlot(pat, "done");
+    await sleep(500);
+    for (const [view, turn] of [["topDown", 0], ["isometric", 0], ["isometric", 1]] as const) {
+      await viewAs(pat, view, turn);
+      const { spots, misses } = await pairedDiff(pat, `pat-placed-${view}-${turn}`, ORIGIN_IN_FOG);
+      assert.ok(spots > 400, `${view} ${turn}: enough spots read: ${spots}`);
+      assert.deepEqual(misses, [], `${view} ${turn}`);
+    }
+    await viewAs(pat, "topDown");
+    await openSideTab(pat, "Areas");
+    const panel = pat.getByRole("tabpanel", { name: sideTabName("Areas") });
+    for (const on of [true, false]) {
+      await setWall(on, ORIGIN_IN_FOG);
+      assert.match((await panel.textContent()) ?? "", /In area \(1\): Goblin/, `the wall ${on ? "on" : "off"}`);
+    }
+    await shots.take(pat, "areafog-pat-placed-panel");
+    await ops.send({ t: "template.delete", templateId: placed });
+    await ops.send({ t: "token.delete", tokenId: run.goblin });
+  });
+
+  test("AF-11. Pat drags Bree, whose 30 ft aura reaches across a fogged strip to revealed ground beyond it: while the drag holds, no pixel of its box changes with the wall in the strip, in Top-down and Isometric", async () => {
+    await setFog(ACROSS_STRIP);
+    await pickTool(pat, "Select");
+    const patId = patSocket.you!.memberId;
+    const dmId = dmSocket.you!.memberId;
+    await ops.send({ t: "token.create", token: { id: run.bree, sceneId: run.sceneId, kind: "monster", name: "Bree", size: "medium", x: 3, y: 5, disposition: "ally", visibility: "all", ownerIds: [patId], actor: { inline: ACTOR } } });
+    await ops.send({
+      t: "template.create",
+      template: { id: run.aura, sceneId: run.sceneId, shape: "emanation", size: 30, origin: { x: 3.5, y: 5.5, z: 0 }, yaw: 0, attachedTo: run.bree, includeOrigin: false, color: "#e5484d", ownerId: dmId, visibility: "all" },
+    });
+    await waitFor("Bree's aura on Pat's page", () => patSocket.state?.templates[run.aura] ?? null);
+    await sleep(500);
+    // The box the aura can reach while Bree moves a cell, and the strip's wall.
+    const box: Layout = { ...ACROSS_STRIP, name: "aura", origin: { x: 3.5, y: 6 }, size: 40 };
+    for (const [view, turn] of [["topDown", 0], ["isometric", 0]] as const) {
+      await viewAs(pat, view, turn);
+      const at = view === "topDown" ? await pagePoint(pat, BOUNDS, { x: 3.5, y: 5.5 }) : await standeeAt(pat, run.bree);
+      await pat.mouse.move(at.x, at.y);
+      await pat.mouse.down();
+      await pat.mouse.move(at.x, at.y + 10, { steps: 3 });
+      await pat.mouse.move(at.x, at.y + 30, { steps: 8 });
+      try {
+        await sleep(500);
+        const { spots, misses } = await pairedDiff(pat, `pat-aura-${view}-${turn}`, box);
+        assert.ok(spots > 400, `${view}: enough spots read: ${spots}`);
+        assert.deepEqual(misses, [], view);
+      } finally {
+        await pat.mouse.up();
+      }
+      await sleep(500);
+    }
+    await viewAs(pat, "topDown");
+  });
+
+  test("AF-12. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label} logged errors`);
   });
 });
