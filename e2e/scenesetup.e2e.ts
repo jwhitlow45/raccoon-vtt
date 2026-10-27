@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Route } from "playwright-core";
 import sharp from "sharp";
 import type { RoomState, Scene } from "#shared/model.ts";
 import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
  * Scene setup (docs/design-v1-map-discovery.md 8, lane MS1): what players
@@ -28,12 +29,21 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  *   Crypt's light to its light row.
  * - ss-3: Cave's settings used on 3 scenes in one step, the sheet naming
  *   the players' scene, the reset of remembered maps and per-player maps
- *   joining, then one Undo, named for Cave, puts all 3 back.
+ *   joining, its ticks cleared after, then one Undo, named for Cave, puts
+ *   all 3 back.
  * - ss-a: every new control measured with the alignment helper at
  *   1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%, in light and
  *   dark: the form's Players see, the Universal VTT dialog's, the scene's
  *   What players see with its fold open and a question asked, the copy
  *   sheet, and Room settings' New scenes.
+ * - ss-4: a question builds its change as it is answered, so Light and a
+ *   phase's light changed while it was open stay, and gives focus back to
+ *   the control that asked last, or keeps it on the fold's header when the
+ *   fold closes over it.
+ * - ss-5: Like reads its scene once a map upload, a starter copy or an
+ *   import is done, each held by the test: changed meanwhile, the new scene
+ *   copies the change, and deleted, it starts on the room's choice and a
+ *   toast says so.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus
  * thirty-eight. The other environment variables are the smoke run's
@@ -63,7 +73,7 @@ const dmSocket = new SocketWatch("dm");
 const consoles: ConsoleWatch[] = [];
 
 // The guide's pictures of scene setup come from this run, so the room has a name a table would give it.
-const run = { roomId: "", roomName: "The Sunken Keep", matId: "", arenaId: "", caveId: "", cryptId: "" };
+const run = { roomId: "", roomName: "The Sunken Keep", matId: "", arenaId: "", caveId: "", cryptId: "", sweptAt: 0 };
 
 function scenes(state: RoomState | null): Scene[] {
   return Object.values(state?.scenes ?? {}).filter((s): s is Scene => s !== undefined);
@@ -71,6 +81,52 @@ function scenes(state: RoomState | null): Scene[] {
 
 function sceneOf(id: string): Scene | undefined {
   return dmSocket.state?.scenes[id];
+}
+
+/** Whether focus is on the element. */
+function focused(target: Locator): Promise<boolean> {
+  return target.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement);
+}
+
+/** Whether the party explored ground on a scene the DM views. */
+function explored(sceneId: string): true | null {
+  return Object.values(dmSocket.state?.exploredTiles ?? {}).some((t) => t?.sceneId === sceneId) || null;
+}
+
+/** The DM's uploads of a map image, from the new scene form or an import. */
+const MAP_UPLOAD = /\/api\/rooms\/[^/]+\/assets\?kind=map/;
+/** The DM's copy of a starter work into the room. */
+const STARTER_COPY = /\/api\/rooms\/[^/]+\/assets\/starter$/;
+
+/**
+ * Presses `start`, holds the DM's request to `url` it sends, runs `step`
+ * while it waits, then lets it go on, so the room changes during an
+ * upload or a copy.
+ */
+async function whileHeld(url: RegExp, start: () => Promise<void>, step: () => Promise<void>): Promise<void> {
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  let reached!: () => void;
+  const held = new Promise<void>((resolve) => (reached = resolve));
+  let finished: Promise<void> = Promise.resolve();
+  const handler = (route: Route) => {
+    finished = (async () => {
+      reached();
+      await gate;
+      await route.continue();
+    })();
+    return finished;
+  };
+  await dm.route(url, handler);
+  try {
+    await start();
+    await held;
+    await step();
+  } finally {
+    open();
+    await finished;
+    await dm.unroute(url, handler);
+  }
 }
 
 /** A scene's two switches and its Sight, as the settings set them. */
@@ -434,6 +490,10 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     const cave = { fog: true, vision: false, light: "bright", perPlayer: false };
     await waitFor("all 3 copied", () => ([run.arenaId, run.cryptId, run.matId].every((id) => JSON.stringify(seeOf(id)) === JSON.stringify(cave)) ? true : null));
     assert.equal(sceneOf(run.cryptId)?.blockMovement, false, "movement stays as it was");
+    // A full copy clears the ticks, so Copy is not offered again for nothing, and focus left on it moves to Close.
+    for (const name of ["Arena", "Crypt", "Battle mat"]) assert.equal(await sheet.getByRole("checkbox", { name, exact: true }).isChecked(), false, name);
+    assert.equal(await copy.isDisabled(), true);
+    assert.equal(await focused(sheet.getByRole("button", { name: "Close", exact: true })), true, "focus moved to Close");
     await shots.take(dm, "ss-3-copied");
     await dm.keyboard.press("Escape");
     await sheet.waitFor({ state: "detached" });
@@ -536,7 +596,188 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
         }
       }
     }
+    run.sweptAt = Date.now();
     assert.deepEqual(lines, []);
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
+
+  test("ss-4. a question builds its change as it is answered, keeping a light changed meanwhile, and gives focus back to the control that asked last", async () => {
+    /*
+     * ss-a's pages share the DM's session, and their loads spent its
+     * snapshot budget for the minute (server/rooms/budgets.ts). The scene
+     * switches here and in ss-5 wait it out, or the budget's abuse rule
+     * would close the DM's sockets. They also left the DM's page behind.
+     */
+    const rest = 61_000 - (Date.now() - run.sweptAt);
+    if (run.sweptAt > 0 && rest > 0) await dm.waitForTimeout(rest);
+    await dm.bringToFront();
+    await view(run.arenaId);
+    const panel = await scenesPanel(dm);
+    const what = section(panel, "What players see");
+    const see = playersSee(what);
+    const question = what.getByRole("group", { name: "Change what players see?" });
+    const explore = see.getByRole("radio", { name: "Explore", exact: true });
+    const toExplore = async () => {
+      await explore.click();
+      await waitFor("Arena on Explore", () => (seeOf(run.arenaId)?.fog === true && seeOf(run.arenaId)?.vision === true ? true : null));
+      await waitFor("the party's explored ground on Arena", () => explored(run.arenaId), 15_000);
+    };
+    assert.deepEqual(seeOf(run.arenaId), { fog: true, vision: true, light: "dark", perPlayer: false });
+    await waitFor("the party's explored ground on Arena", () => explored(run.arenaId), 15_000);
+
+    // Explore and Dark, Reveal by hand asks, Light goes to Bright meanwhile, and Change keeps Bright (MS1-ASTRA-01).
+    await see.getByRole("radio", { name: "Reveal by hand", exact: true }).click();
+    await question.waitFor();
+    await what.getByRole("radiogroup", { name: "Light level" }).getByRole("radio", { name: "Bright", exact: true }).check();
+    await waitFor("Arena bright", () => (seeOf(run.arenaId)?.light === "bright" ? true : null));
+    assert.equal(await question.count(), 1, "the question is still open");
+    await question.scrollIntoViewIfNeeded();
+    await shots.take(dm, "ss-4-light-changed-asking");
+    await question.getByRole("button", { name: "Change", exact: true }).click();
+    await waitFor("Arena on Reveal by hand", () => (seeOf(run.arenaId)?.vision === false ? true : null));
+    assert.deepEqual(seeOf(run.arenaId), { fog: true, vision: false, light: "bright", perPlayer: false }, "the light changed while the question was open stays");
+    await toExplore();
+
+    // By keyboard: Reveal by hand asks, then Everything asks again, and Change gives focus back to Everything, the control that asked last (MS1-F-2).
+    await explore.focus();
+    await dm.keyboard.press("ArrowDown");
+    await question.waitFor();
+    assert.equal(await focused(see.getByRole("radio", { name: "Reveal by hand", exact: true })), true);
+    await dm.keyboard.press("ArrowDown");
+    const everything = see.getByRole("radio", { name: "Everything", exact: true });
+    await waitFor("focus on Everything", async () => (await focused(everything)) || null);
+    const change = question.getByRole("button", { name: "Change", exact: true });
+    for (let i = 0; i < 6 && !(await focused(change)); i++) await dm.keyboard.press("Tab");
+    assert.equal(await focused(change), true, "Tab reaches the question's Change");
+    await dm.keyboard.press("Enter");
+    await waitFor("Arena on Everything", () => (seeOf(run.arenaId)?.fog === false && seeOf(run.arenaId)?.vision === false ? true : null));
+    await question.waitFor({ state: "detached" });
+    await waitFor("focus back on Everything", async () => (await focused(everything)) || null);
+    await toExplore();
+
+    // By keyboard: Party vision off in the fold asks, and closing the fold over the question keeps focus on its header (MS1-F-1).
+    const fold = what.getByRole("button", { name: "Fog and party vision", exact: true });
+    if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+    const party = what.getByRole("switch", { name: "Party vision", exact: true });
+    await party.focus();
+    await dm.keyboard.press("Space");
+    await question.waitFor();
+    assert.equal(await focused(party), true, "focus stays on the switch through the question");
+    for (let i = 0; i < 6 && !(await focused(fold)); i++) await dm.keyboard.press("Shift+Tab");
+    assert.equal(await focused(fold), true, "Shift+Tab reaches the fold's header");
+    await dm.keyboard.press("Enter");
+    await question.waitFor({ state: "detached" });
+    assert.equal(await fold.getAttribute("aria-expanded"), "false");
+    assert.equal(await focused(fold), true, "focus stays on the fold's header");
+    await shots.take(dm, "ss-4-fold-closed-focus");
+    assert.equal(seeOf(run.arenaId)?.vision, true, "closing the fold answers no");
+
+    // A phase's light changed while the question is open stays too. Arena takes Cave's image as two phases.
+    const image = sceneOf(run.caveId)!.map!;
+    await ops.send({ t: "scene.setMap", sceneId: run.arenaId, map: image });
+    const phase = { assetId: image.assetId, widthPx: image.widthPx, heightPx: image.heightPx };
+    await ops.send({ t: "scene.update", sceneId: run.arenaId, patch: { phases: [{ id: randomUUID(), name: "Day", ...phase }, { id: randomUUID(), name: "Night", ...phase }] } });
+    await waitFor("Arena's two phases", () => (sceneOf(run.arenaId)?.phases?.length === 2 ? true : null));
+    await waitFor("the party's explored ground on Arena", () => explored(run.arenaId), 15_000);
+    assert.equal(seeOf(run.arenaId)?.light, "bright");
+    await see.getByRole("radio", { name: "Everything", exact: true }).click();
+    await question.waitFor();
+    // Day is the phase showing, so its light is the scene's at once.
+    await what.getByRole("combobox", { name: "Light with Day" }).selectOption({ label: "Dark" });
+    await waitFor("Arena dark from its phase", () => (seeOf(run.arenaId)?.light === "dark" ? true : null));
+    await question.getByRole("button", { name: "Change", exact: true }).click();
+    await waitFor("Arena on Everything", () => (seeOf(run.arenaId)?.fog === false ? true : null));
+    assert.deepEqual(seeOf(run.arenaId), { fog: false, vision: false, light: "dark", perPlayer: false }, "the phase's light stays");
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
+
+  test("ss-5. Like reads its scene once a map upload, a starter copy or an import is done: a change made meanwhile comes with it, and a scene deleted meanwhile leaves the room's choice, said in a toast", async () => {
+    /** A scene to be Like, made on Explore and Dark, whole party, moves not blocked. */
+    const source = async (name: string): Promise<string> => {
+      const id = randomUUID();
+      await ops.send({ t: "scene.create", scene: { id, name, bounds: { w: 12, h: 10 }, fogEnabled: true, vision: { on: true, light: "dark" }, blockMovement: false } });
+      await waitFor(`${name} in the DM's state`, () => sceneOf(id));
+      return id;
+    };
+    const changeIt = async (id: string) => {
+      await ops.send({ t: "scene.update", sceneId: id, patch: { vision: { on: true, light: "bright", perPlayer: true } } });
+      await ops.send({ t: "scene.update", sceneId: id, patch: { blockMovement: true } });
+      await waitFor("the change on the DM's device", () => (sceneOf(id)?.blockMovement === true && sceneOf(id)?.vision?.perPlayer === true ? true : null));
+    };
+    const deleteIt = async (id: string) => {
+      await ops.send({ t: "scene.delete", sceneId: id });
+      await waitFor("the scene gone from the DM's device", () => (sceneOf(id) === undefined ? true : null));
+    };
+    const made = async (known: Set<string>, what: string) => waitFor(what, () => scenes(dmSocket.state).find((s) => !known.has(s.id)), 30_000);
+    const gone = (name: string, preset: string) => dm.getByText(`${name} was deleted before the new scene was made, so the new scene starts on ${preset}.`, { exact: true }).first().waitFor();
+
+    /** A map image from the new scene form, Like `name`, with `step` run while it uploads. */
+    const upload = async (name: string, step: (id: string) => Promise<void>): Promise<Scene> => {
+      const id = await source(name);
+      await view(id);
+      const form = section(await scenesPanel(dm), "New scene");
+      await form.getByRole("radio", { name: "Map image", exact: true }).click();
+      await form.getByRole("textbox", { name: "Scene name" }).fill(`${name} copy`);
+      await playersSee(form).getByRole("radio", { name: `Like ${name}`, exact: true }).check();
+      await form.locator('input[type="file"][accept="image/*"]').first().setInputFiles(await mapFile(`${name.toLowerCase()}_10x8.png`));
+      const known = new Set(scenes(dmSocket.state).map((s) => s.id));
+      await whileHeld(MAP_UPLOAD, () => form.getByRole("button", { name: "Upload and create" }).click(), () => step(id));
+      return made(known, `the scene ${name} copy`);
+    };
+    const changed = await upload("Vault", changeIt);
+    assert.deepEqual(seeOf(changed.id), { fog: true, vision: true, light: "bright", perPlayer: true }, "an upload copies Vault as it is once done");
+    assert.equal(changed.blockMovement, true);
+    const fallback = await upload("Tomb", deleteIt);
+    await gone("Tomb", "Reveal by hand");
+    await shots.take(dm, "ss-5-like-gone-toast");
+    assert.deepEqual(seeOf(fallback.id), { fog: true, vision: false, light: "bright", perPlayer: false }, "a map image's start under the room's Explore");
+
+    /** A starter map, Like `name`, with `step` run while it is copied into the room. */
+    const work = starterWork("map", (w) => w.grid?.originPx !== undefined);
+    const starter = async (name: string, step: (id: string) => Promise<void>): Promise<Scene> => {
+      const id = await source(name);
+      await view(id);
+      const form = section(await scenesPanel(dm), "New scene");
+      await form.getByRole("radio", { name: "Map image", exact: true }).click();
+      await playersSee(form).getByRole("radio", { name: `Like ${name}`, exact: true }).check();
+      await form.getByRole("button", { name: "From starter packs" }).click();
+      const dialog = dm.getByRole("dialog", { name: "Starter maps" });
+      await chooseStarterWork(dialog, work, "browse", false);
+      const known = new Set(scenes(dmSocket.state).map((s) => s.id));
+      await whileHeld(STARTER_COPY, () => dialog.getByRole("button", { name: "Use", exact: true }).click(), () => step(id));
+      const scene = await made(known, "the starter map's scene");
+      await dialog.waitFor({ state: "detached" });
+      return scene;
+    };
+    const copied = await starter("Chapel", changeIt);
+    assert.deepEqual(seeOf(copied.id), { fog: true, vision: true, light: "bright", perPlayer: true }, "a starter copy copies Chapel as it is once done");
+    assert.equal(copied.blockMovement, true);
+    const plain = await starter("Shrine", deleteIt);
+    await gone("Shrine", "Reveal by hand");
+    assert.deepEqual(seeOf(plain.id), { fog: true, vision: false, light: "bright", perPlayer: false });
+
+    /** A Universal VTT import, Like `name`, with `step` run while its image uploads. */
+    const file = await uvttFile();
+    const imported = async (name: string, step: (id: string) => Promise<void>): Promise<Scene> => {
+      const id = await source(name);
+      await view(id);
+      await (await scenesPanel(dm)).getByLabel("From a Universal VTT file").setInputFiles(file);
+      const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map" });
+      const group = playersSee(dialog);
+      await group.waitFor({ timeout: 30_000 });
+      await group.getByRole("radio", { name: `Like ${name}`, exact: true }).check();
+      const known = new Set(scenes(dmSocket.state).map((s) => s.id));
+      await whileHeld(MAP_UPLOAD, () => dialog.getByRole("button", { name: "Create scene" }).click(), () => step(id));
+      await dialog.waitFor({ state: "detached", timeout: 60_000 });
+      return made(known, "the imported scene");
+    };
+    const barrow = await imported("Catacomb", changeIt);
+    // The dialog's light row took Catacomb's Dark when Like was picked, and stands over the copy's.
+    assert.deepEqual(seeOf(barrow.id), { fog: true, vision: true, light: "dark", perPlayer: true }, "an import copies Catacomb as it is once done");
+    assert.equal(barrow.blockMovement, true);
+    const tunnel = await imported("Sewer", deleteIt);
+    await gone("Sewer", "Explore");
+    assert.deepEqual(seeOf(tunnel.id), { fog: true, vision: true, light: "dark", perPlayer: false }, "an import's start under the room's Explore");
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
 });
