@@ -55,7 +55,7 @@ import { FrameScheduler } from "./scheduler.ts";
 import { previewLanding, seenChunks } from "./seenChunks.ts";
 import { dimmedForDm, ghostStands, ghostTagStands, ringsAtBase, splitTokens, tokenBox } from "./stand.ts";
 import { BoardVolumes, type VolumeEntry, type VolumeWorld } from "./volumes.ts";
-import { reportLayout } from "./isoTest.ts";
+import { useLayoutReport } from "./isoTest.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
@@ -133,6 +133,8 @@ const EMPTY_TOKENS: RoomState["tokens"] = {};
 const NO_RINGS: readonly string[] = [];
 /** The most an animation frame gives to standing areas as their real shapes (docs/design-v1-iso-area-shapes.md 6). */
 const VOLUME_SLICE_MS = 6;
+/** While areas still build, how often the ones done since come in. */
+const VOLUME_LAYOUT_MS = 250;
 const NO_SPOTS: Readonly<Record<string, { x: number; y: number }>> = {};
 const NO_TOKENS: readonly ViewToken[] = [];
 const ALL_TEXTURES: readonly TexturedTerrain[] = ["stone", "wood", "grass", "dirt", "cave", "water", "difficult", "rubble"];
@@ -330,16 +332,24 @@ function IsoBoardImpl(props: IsoBoardProps) {
   useEffect(() => {
     if (!volumesSynced || entries.length === 0) return;
     let frame = 0;
+    let changed = false;
+    let laidOut = performance.now();
     const tick = () => {
       const { turn: at, cull: box, world: w } = sliceView.current;
-      const deadline = performance.now() + VOLUME_SLICE_MS;
-      const { more, changed } = volumes.step(at, box, w, deadline);
-      if (changed) setVolumeTick((n) => n + 1);
-      if (more) frame = requestAnimationFrame(tick);
+      const start = performance.now();
+      const step = volumes.step(at, box, w, start + VOLUME_SLICE_MS);
+      changed ||= step.changed;
+      // A layout redraws the whole relief, so while areas keep standing one by one they come in together a few times a second, and at once when the last does.
+      if (changed && (!step.more || start - laidOut >= VOLUME_LAYOUT_MS)) {
+        changed = false;
+        laidOut = start;
+        setVolumeTick((n) => n + 1);
+      }
+      if (step.more) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [volumesSynced, entries.length, volumes, turn, cullKey, world, volumeTick]);
+  }, [volumesSynced, entries.length, volumes, turn, cullKey, world]);
   const volumesNow = useMemo(() => (volumesSynced ? volumes.now(turn, cull, world) : null), [volumesSynced, volumes, turn, cullKey, world, volumeTick]);
 
   // Rings at the bases of the creatures that stand by the stand rule itself, in each area whose volume stands (D-261026-31).
@@ -352,7 +362,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
 
   // The box is made anew each render, so its numbers say when it changed.
   const items = useMemo(() => relief.layout(turn, cull, standees, volumesNow?.pieces ?? []), [relief, synced, turn, cullKey, standees, volumesNow]);
-  reportLayout(items, volumesNow, rings?.byToken ?? null);
+  useLayoutReport()(items, volumesNow, rings?.byToken ?? null);
 
   // Looked up by id for each standee, silhouette and decor: a search of the list each time is quadratic at 500 tokens.
   const byStandee = useMemo(() => new Map(standees.map((s) => [s.id, s])), [standees]);

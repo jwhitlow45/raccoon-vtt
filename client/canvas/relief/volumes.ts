@@ -170,7 +170,10 @@ export class BoardVolumes {
   /**
    * Builds toward standing every area in view until `deadline` (a
    * `performance.now()` time), nearest the middle first: true when there
-   * is more to do. `changed` says something new can draw.
+   * is more to do. `changed` says what `now` gives has changed: an area
+   * whose every bucket in view is now drawn, or one decided flat. Work
+   * part of the way through an area changes nothing, so the board lays out
+   * again once an area, not once a bucket.
    */
   step(turn: Turn, view: VBox, world: VolumeWorld, deadline: number): { more: boolean; changed: boolean } {
     let changed = false;
@@ -181,18 +184,15 @@ export class BoardVolumes {
         const test = standOf(old, world.fog, world.live);
         if (test.result === null) {
           if (test.run(deadline) === null) return { more: true, changed };
-          changed = true;
+          if (!test.result) changed = true;
         }
       }
       const vol = slot.next!;
-      if (!vol.built) {
-        if (!vol.prepare(deadline)) return { more: true, changed };
-        changed = true;
-      }
+      if (!vol.built && !vol.prepare(deadline)) return { more: true, changed };
       const test = standOf(vol, world.fog, world.live);
       if (test.result === null) {
         if (test.run(deadline) === null) return { more: true, changed };
-        changed = true;
+        if (!test.result) changed = true;
       }
       if (!test.result) continue;
       const keys = viewKeys(vol, turn, view);
@@ -200,11 +200,13 @@ export class BoardVolumes {
         if (vol.ready(key)) continue;
         if (!vol.ensure(key, deadline)) return { more: true, changed };
       }
+      let drew = false;
       for (const key of keys) {
         if (vol.drawnNow(key, turn)) continue;
         if (!vol.drawn(key, turn, deadline)) return { more: true, changed };
-        changed = true;
+        drew = true;
       }
+      if (drew) changed = true;
     }
     return { more: false, changed };
   }
