@@ -180,6 +180,15 @@ describe("the mesh is closed and wound outward after every cut (design 4.2)", ()
       assert.ok(area?.solid.kind === "hexStack");
       checkMesh(build(area, bounds, flatGround(24, 24)), rand, `hex at the edge #${i}`, 60);
     }
+    // A foot a cell: a stack hundreds of layers tall, its vertices named by corner and layer.
+    for (const g of [ROWS, COLUMNS]) {
+      const bounds = { w: 24, h: 24 };
+      const c = tok("c", { size: "medium", x: 11, y: 11, elevation: 40 });
+      const ctx = { ...ctxOf(bounds, randomWalls(rand, 24, 24), { c }, g), settings: { feetPerCell: 1, aoeCoverage: "half" as const, aoeInclusion: "anyCell" as const, diagonal: "euclid" as const } };
+      const area = resolveArea({ id: "tall", rev: 1, shape: "emanation", size: 200, origin: { x: 0, y: 0, z: 0 }, yaw: 0, includeOrigin: true, attachedTo: "c" }, ctx);
+      assert.ok(area?.solid.kind === "hexStack");
+      checkMesh(build(area, bounds, flatGround(24, 24)), rand, `tall hex stack on ${g.orient}`, 60);
+    }
   });
 });
 
