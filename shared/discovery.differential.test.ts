@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { dragged, type Drag } from "./differential.ts";
 import { edge, lift, paint, remember, wall } from "./discoveryTestutil.ts";
-import { chunkKey, holderChunkKey, holderTileKey } from "./keys.ts";
+import { chunkKey, holderChunkKey, holderTileKey, keys } from "./keys.ts";
 import type { EdgeFeature, ExploredTile, PathStop, RoomState, Viewer } from "./model.ts";
 import { SOMETHING_BLOCKS, canApply, touchLanding, type PermissionDeps } from "./permissions.ts";
 import type { Op } from "./protocol.ts";
 import { cellVision } from "./perPlayerTestutil.ts";
-import { projectState } from "./project.ts";
+import { dependents, projectState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules } from "./ruleHooks.ts";
 import { rasterizeFogOps } from "./rules/fog.ts";
@@ -125,6 +125,27 @@ describe("route corners on a scene with memory (decision 12)", () => {
     assert.deepEqual(stopsOf(revealed, P2)[1]!.via, leg.via);
     assert.deepEqual(stopsOf(revealed, P1)[1]!.via, leg.via);
     assert.equal(stopsOf(revealed, P3)[1]?.via, undefined, "a player who does not own Thorn never gets corners");
+  });
+});
+
+describe("route corners follow the sight and ground they read (decision 12, 5.6)", () => {
+  test("sight or the party's ground changing away from the token brings it again, on per-player and whole-party scenes alike", () => {
+    const m = moved(base());
+    const whole = deepClone(m);
+    whole.scenes.s1 = { ...whole.scenes.s1!, vision: { on: true, light: "dark" } };
+    // Thorn stands in tile 0,0. Tile 1,0 is far from him, and his leg could cross it.
+    for (const [s, label] of [
+      [m, "per player"],
+      [whole, "whole party"],
+    ] as const) {
+      for (const key of [keys.sight("s1", 1, 0), keys.sightAll("s1", 1, 0), keys.explored("s1", 1, 0)]) {
+        assert.ok(dependents(s, [key]).includes(keys.token("thorn")), `${label}: ${key} brings Thorn's path again`);
+      }
+    }
+    // Fog on without vision reads no sight, so a sight write brings nothing.
+    const off = deepClone(whole);
+    off.scenes.s1 = { ...off.scenes.s1!, vision: { on: false, light: "dark" } };
+    assert.ok(!dependents(off, [keys.sight("s1", 1, 0)]).includes(keys.token("thorn")));
   });
 });
 

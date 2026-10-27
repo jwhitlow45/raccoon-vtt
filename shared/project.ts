@@ -2123,6 +2123,33 @@ function rememberedIn(all: Record<string, MemoryChunk> | undefined, at: string):
   return index.get(at);
 }
 
+/**
+ * Whether any layer's memory on a scene, the party's or a holder's, names
+ * a label or stamp. Only then does its projection read memory and sight
+ * (shownByMemory), so the fan-out keeps an answer across batches only
+ * where none does (server/rooms/fanout.ts, MD2-O-1).
+ */
+export function namedByMemory(state: RoomState, sceneId: string, field: "labels" | "stamps", id: string): boolean {
+  return [state.memory, state.memoryBy].some((all) => namesIn(all).has(`${sceneId}|${field}|${id}`));
+}
+
+const memoryNames = new WeakMap<object, Set<string>>();
+
+function namesIn(all: Record<string, MemoryChunk> | undefined): ReadonlySet<string> {
+  if (!all) return NO_NAMES;
+  let names = isWritable(all) ? undefined : memoryNames.get(all);
+  if (!names) {
+    names = new Set();
+    for (const chunk of Object.values(all)) {
+      for (const field of ["labels", "stamps"] as const) for (const id of Object.keys(chunk[field] ?? {})) names.add(`${chunk.sceneId}|${field}|${id}`);
+    }
+    if (!isWritable(all)) memoryNames.set(all, names);
+  }
+  return names;
+}
+
+const NO_NAMES: ReadonlySet<string> = new Set();
+
 /** What one layer remembers of a label or stamp by id: the value, null for one that was absent then, undefined for no entry. */
 function rememberedById(state: RoomState, sceneId: string, layer: FogClass, field: "labels" | "stamps", id: string): Label | Stamp | null | undefined {
   const byId = rememberedIn(layer === null ? state.memory : state.memoryBy, `${sceneId}|${layer ?? ""}|${field}`);
@@ -3628,8 +3655,10 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     if (!held) tiles.set(sceneId, (held = new Set()));
     held.add(`${tx},${ty}`);
   };
-  // An owner's route corners on a per-player scene read their own fog (projectPathCtx), so a layer they read re-projects
-  // their tokens with a path there: every owned one for the party's layer, a holder's own for theirs.
+  // An owner's route corners on a per-player scene read their own fog, and on any scene with fog and vision on their live
+  // ground along the whole leg (projectPathCtx, decision 12), so a layer or a sight they read re-projects their tokens with
+  // a path there: every owned one for the party's layer or any sight, a holder's own for theirs. A token's own tiles are
+  // not enough, since a leg runs far from where it stands (MD2-ASTRA-5).
   const cornered = new Set<string>();
   const cornersOn = (sceneId: string, memberId: string | null) => {
     const at = `${sceneId}:${memberId ?? ""}`;
@@ -3652,6 +3681,7 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
    * 5.6). Stubs count, so every position of the scene is a key.
    */
   const fogScene = (sceneId: string) => state.scenes[sceneId]?.fogEnabled === true;
+  const visionScene = (sceneId: string) => fogScene(sceneId) && state.scenes[sceneId]?.vision?.on === true;
   const aroundChunk = (sceneId: string, cx: number, cy: number) => {
     const scene = state.scenes[sceneId];
     if (!scene) return;
@@ -3695,10 +3725,8 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
       if (fogScene(parsed.sceneId)) aroundTile(parsed.sceneId, parsed.tx, parsed.ty);
       // Every player's fog reads the party's layer, and on a per-player scene so do the shared fog and every owner's
       // route corners (docs/design-v1-per-player-vision.md 7.5).
-      if (perPlayerScene(state.scenes[parsed.sceneId])) {
-        add(keys.fogAll(parsed.sceneId, parsed.tx, parsed.ty));
-        cornersOn(parsed.sceneId, null);
-      }
+      if (perPlayerScene(state.scenes[parsed.sceneId])) add(keys.fogAll(parsed.sceneId, parsed.tx, parsed.ty));
+      if (perPlayerScene(state.scenes[parsed.sceneId]) || visionScene(parsed.sceneId)) cornersOn(parsed.sceneId, null);
     } else if (parsed.kind === "exploredBy") {
       // A holder's layer reaches them merged into their fog, and the DM joined with the others' (7.5).
       add(keys.fog(parsed.sceneId, parsed.tx, parsed.ty));
@@ -3708,6 +3736,7 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
       if (fogScene(parsed.sceneId)) aroundTile(parsed.sceneId, parsed.tx, parsed.ty);
     } else if (parsed.kind === "sight" || parsed.kind === "sightAll") {
       onTile(parsed.sceneId, parsed.tx, parsed.ty);
+      if (visionScene(parsed.sceneId)) cornersOn(parsed.sceneId, null);
       // Sight decides live or remembered only where some memory has entries (MD-O-24).
       if (fogScene(parsed.sceneId) && hasMemory(state, parsed.sceneId)) aroundTile(parsed.sceneId, parsed.tx, parsed.ty);
     }
