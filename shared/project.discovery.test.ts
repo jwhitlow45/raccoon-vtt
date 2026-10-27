@@ -268,12 +268,21 @@ describe("free walls cut at held cells (decision 2)", () => {
     assert.deepEqual(pieces(world(false)), [[1.5, 1.5, 4.0001, 1.5, "wall"]]);
   });
 
-  test("an end on the scene's own side keeps both coordinates where either would leave the scene", () => {
-    const state = fogRoom();
-    // Cut where it leaves the scene, at the corner of cells (47, 1) and (47, 2).
-    wall(state, "abcdefghijkl", [46.5, 1.5], [49.5, 2.5]);
-    lift(state, "dm", { x: 40, y: 0, w: 8, h: 5 });
-    assert.deepEqual(pieces(state), [[46.5, 1.5, 48, 2, "wall"]]);
+  test("an end on the scene's own side: a wall that runs off the scene and one that stops there read the same, on the grid (LK-6, MD2-O-7)", () => {
+    const at = (b: [number, number]) => {
+      const state = fogRoom();
+      wall(state, "abcdefghijkl", [46.5, 1.5], b);
+      lift(state, "dm", { x: 40, y: 0, w: 8, h: 5 });
+      return pieces(state);
+    };
+    // Off the scene at the corner of cells (47, 1) and (47, 2), and on the side of (47, 1) alone.
+    assert.deepEqual(at([49.5, 2.5]), [[46.5, 1.5, 48, 2.0001, "wall"]]);
+    assert.deepEqual(at([48, 2]), at([49.5, 2.5]));
+    assert.deepEqual(at([49.5, 1.75]), [[46.5, 1.5, 48, 1.6251, "wall"]]);
+    assert.deepEqual(at([48, 1.625]), at([49.5, 1.75]));
+    // A crossing off the lattice clamps its whole coordinate to the side and rounds the other, never the exact ratio.
+    const [[, , x, y]] = at([49.5, 1.5 + 1 / 64]) as [[number, number, number, number, string]];
+    assert.deepEqual([x, y], [48, 1.5079]);
   });
 
   test("astra's six-piece diagonal, and its pair split inside an unheld cell: every held piece in both, the same bytes", () => {

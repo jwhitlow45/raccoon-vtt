@@ -485,7 +485,7 @@ export const SPLIT_CELLS = 4;
 export const PIECE_GRID = 10_000;
 
 /** An end along a line: the wall it was cut from and its parameter there. */
-type End = { ax: number; ay: number; ex: number; ey: number; t: Ratio };
+type End = { ax: number; ay: number; ex: number; ey: number; t: Ratio; stored: boolean };
 
 function endX(e: End): Ratio {
   return { n: e.ax * e.t.d + e.t.n * e.ex, d: e.t.d };
@@ -509,9 +509,10 @@ function gcd(a: number, b: number): number {
  * a run steeper than 45 degrees, and then every end on a cell's side or
  * corner, cut or stored alike, moves away from the piece's other end: each
  * coordinate to the next multiple of 1/10000 cell strictly past it, a
- * coordinate equal to the other end's staying, and both staying where
- * either would leave the scene (decision 2, D-261026-29 item 16). An end
- * strictly inside a cell stays exact. So the pieces depend only on the
+ * coordinate equal to the other end's staying and one that would leave
+ * the scene clamped to its side (decision 2, D-261026-29 item 16). A
+ * stored end strictly inside a cell stays exact, and a split inside a hex
+ * moves like a cut. So the pieces depend only on the
  * stretches, whichever walls they came from, and no end on a side tells a
  * wall that stops there from one that runs on, past held ground or into
  * ground the player only remembers.
@@ -536,8 +537,9 @@ export function joinPieces(stretches: readonly CellPiece[], ground: Pick<Ground,
     const major = Math.abs(ux) >= Math.abs(uy) ? "x" : "y";
     let line = lines.get(key);
     if (!line) lines.set(key, (line = { major, runs: [] }));
-    let lo: End = { ax, ay, ex, ey, t: s.t0 };
-    let hi: End = { ax, ay, ex, ey, t: s.t1 };
+    const stored = (t: Ratio) => t.n === 0 || t.n === t.d;
+    let lo: End = { ax, ay, ex, ey, t: s.t0, stored: stored(s.t0) };
+    let hi: End = { ax, ay, ex, ey, t: s.t1, stored: stored(s.t1) };
     const along = major === "x" ? endX : endY;
     if (less(along(hi), along(lo))) [lo, hi] = [hi, lo];
     line.runs.push({ lo, hi });
@@ -581,7 +583,7 @@ function splitRun(lo: End, hi: End, major: "x" | "y"): [End, End][] {
     // The cut's parameter on the low end's wall: along that wall's major axis, a ratio of whole numbers again.
     const e = major === "x" ? lo.ex : lo.ey;
     const s = major === "x" ? lo.ax : lo.ay;
-    const cut: End = { ...lo, t: ratio(k * band - s, e) };
+    const cut: End = { ...lo, t: ratio(k * band - s, e), stored: false };
     out.push([from, cut]);
     from = cut;
   }
@@ -595,8 +597,8 @@ function rounded(lo: End, hi: End, kind: PieceKind, ground: Pick<Ground, "grid" 
   const ly = endY(lo);
   const hx = endX(hi);
   const hy = endY(hi);
-  // On a side or corner: the end touches two cells of the scene or more. A side of the scene itself touches one.
-  const onSide = (x: Ratio, y: Ratio): boolean => cellsAt(ground.grid, x.n / x.d, y.n / y.d).filter((key) => inSceneKey(ground, key)).length > 1;
+  // A cut lies on a cell's side by construction, so only a stored end, a lattice point that cellsAt tests exactly, needs the test. Cells off the scene count, so the scene's own side moves too. A split inside a hex moves for the byte bound.
+  const moves = (e: End, x: Ratio, y: Ratio): boolean => !e.stored || cellsAt(ground.grid, x.n / x.d, y.n / y.d).length > 1;
   const exact = (v: Ratio) => v.n / (v.d * LAT);
   // The coordinate moved, in 1/10000 cells and exactly (v.n / (v.d * 64) * 10000), or null where it stays.
   const step = (v: Ratio, other: Ratio): number | null => {
@@ -606,29 +608,18 @@ function rounded(lo: End, hi: End, kind: PieceKind, ground: Pick<Ground, "grid" 
     return less(other, v) ? floorDiv(n, d) + 1 : -floorDiv(-n, d) - 1;
   };
   const { w, h } = ground.bounds;
-  const end = (x: Ratio, y: Ratio, ox: Ratio, oy: Ratio): [number, number] => {
-    if (!onSide(x, y)) return [exact(x), exact(y)];
-    const sx = step(x, ox);
-    const sy = step(y, oy);
-    const leaves = (s: number | null, side: number) => s !== null && (s < 0 || s > side * PIECE_GRID);
-    if (leaves(sx, w) || leaves(sy, h)) return [exact(x), exact(y)];
-    return [sx === null ? exact(x) : sx / PIECE_GRID, sy === null ? exact(y) : sy / PIECE_GRID];
+  // Only a coordinate exactly on the scene's side can step out of it, so the clamp keeps that whole number and the coordinate on the 1/10000 grid.
+  const coord = (v: Ratio, other: Ratio, side: number): number => {
+    const s = step(v, other);
+    return s === null ? exact(v) : Math.min(Math.max(s, 0), side * PIECE_GRID) / PIECE_GRID;
   };
-  const a = end(lx, ly, hx, hy);
-  const b = end(hx, hy, lx, ly);
+  const end = (e: End, x: Ratio, y: Ratio, ox: Ratio, oy: Ratio): [number, number] => (moves(e, x, y) ? [coord(x, ox, w), coord(y, oy, h)] : [exact(x), exact(y)]);
+  const a = end(lo, lx, ly, hx, hy);
+  const b = end(hi, hx, hy, lx, ly);
   const [p, q] = a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]) ? [a, b] : [b, a];
   const mx = (p[0] + q[0]) / 2;
   const my = (p[1] + q[1]) / 2;
   return { a: p, b: q, kind, cx: Math.floor(mx / CHUNK_CELLS), cy: Math.floor(my / CHUNK_CELLS) };
-}
-
-function inSceneKey(ground: Pick<Ground, "grid" | "bounds">, key: string): boolean {
-  if (isHex(ground.grid)) {
-    const hx = parseHexKey(key);
-    return hx !== null && hexInScene(ground.grid, ground.bounds, hx);
-  }
-  const [x, y] = key.split(",").map(Number) as [number, number];
-  return x >= 0 && y >= 0 && x < ground.bounds.w && y < ground.bounds.h;
 }
 
 /** A wall's lattice ends, for the cut. */
