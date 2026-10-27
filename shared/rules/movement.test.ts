@@ -5,8 +5,8 @@ import type { BuildState } from "../ruleHooks.ts";
 import { computeCoverage, creaturesInArea, defaultIncludeOrigin, type AreaTemplateInput } from "./aoe.ts";
 import { boxDistanceFt, tokenCellBox } from "./distance.ts";
 import { encodeHeights } from "./heights.ts";
-import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, ownWalk, previewSqueezed, resizeLegStop, resizeStands, squeezeFits, sweptTouches, walkEnd, type MovingToken } from "./movement.ts";
-import { sceneWalls } from "./walls.ts";
+import { coreBlocked, coreSize, crossesInterior, landing, legStop, lineClear, ownWalk, pinches, previewChunks, previewSqueezed, resizeLegStop, resizeStands, squeezeFits, stepTester, sweptTouches, walkEnd, type MovingToken } from "./movement.ts";
+import { PIECE_BAND, sceneWalls } from "./walls.ts";
 import { SQUARES } from "./grid.ts";
 
 type Spec = {
@@ -407,6 +407,21 @@ describe("a squeeze needs a real narrow space (the owner's rule after the build,
     assert.equal(squeezeFits(stub, walkEnd(stub, ownWalk(large(stub)), { x: 8.5, y: 4.5 })), false);
   });
 
+  test("a held piece pinches where its exact wall may: within its band of a side's span, and across the core only where it surely crosses (MD4-LK-3)", () => {
+    // Cross-sections x = c, judged along y: the full footprint from y = 0 to 2, the core from 0.5 to 1.5. A wall at y = 1.75 blocks the south side.
+    const full = { x0: 0, y0: 0, x1: 2, y1: 2 };
+    const core = { x0: 0.5, y0: 0.5, x1: 1.5, y1: 1.5 };
+    const sq = { x0: 0.5, y0: 0, x1: 1.5, y1: 2 };
+    const south = [0, 1.75, 2, 1.75] as const;
+    // A piece a hair inside the core's span, whose exact wall may lie on its edge: exactly it crosses the core and pinches nothing.
+    const hair = [0, 0.5 + PIECE_BAND / 4, 2, 0.5 + PIECE_BAND / 4] as const;
+    assert.equal(pinches([hair, south], full, core, sq, false, true), false);
+    assert.equal(pinches([hair, south], full, core, sq, false, true, [true, false]), true, "the gate finds the pinch the exact wall may make");
+    // Past the band inside the core it surely crosses it, and well clear of the north side's span it blocks nothing there.
+    const inside = [0, 0.5 + 2 * PIECE_BAND, 2, 0.5 + 2 * PIECE_BAND] as const;
+    assert.equal(pinches([inside, south], full, core, sq, false, true, [true, false]), false);
+  });
+
   test("a corridor's dead end and a room's corner", () => {
     const dead = world({ edges: { ...line("n", 5, 10, 25), ...line("n", 6, 10, 25), "10,5,w": { kind: "wall" } } });
     assert.equal(squeezeFits(dead, walkEnd(dead, ownWalk(large(dead)), { x: 9.5, y: 4.5 })), true, "against the dead end, the corridor's walls still pinch");
@@ -419,6 +434,58 @@ describe("a squeeze needs a real narrow space (the owner's rule after the build,
     const s = world(walkway);
     assert.equal(squeezeFits(s, walkEnd(s, ownWalk(large(s, { x: 5, y: 4.5, elevation: 10, squeeze: true })), { x: 9.5, y: 4.5 })), true);
     assert.equal(squeezeFits(s, walkEnd(s, ownWalk(large(s, { x: 5, y: 1, elevation: 30 })), { x: 9.5, y: 4.5 })), false);
+  });
+});
+
+describe("leaving a held piece one overlaps, read within what rounding moves it (MD4-ASTRA-1)", () => {
+  /** A player's held build of free walls: every chunk marked known all over, so its free walls are pieces. */
+  function held(walls: FreeWall[]): BuildState & { sceneId: string } {
+    const w = world({ walls });
+    const known = Buffer.from(new Uint8Array((CHUNK_CELLS * CHUNK_CELLS) / 8).fill(255)).toString("base64");
+    for (const c of Object.values(w.buildChunks)) Object.assign(c, { known });
+    return w;
+  }
+  const preview = (s: BuildState): BuildState => ({ ...s, buildChunks: previewChunks(s.buildChunks) });
+  const large = (s: { sceneId: string }, x: number, y: number) => ownWalk(tok(s, { size: "large", x, y }));
+
+  test("the side the start is on is known only as near the line as rounding can move it there, which grows along the piece", () => {
+    // A piece a cell long on y = 5, and a Large creature's middle 0.4 cell past its east end and 0.0003 south of its line,
+    // its core over the piece's end, where an exact wall the piece stands for, tilted by the rounding of its ends, can pass
+    // south of that middle.
+    const s = held([free("p1", 4, 5, 5, 5)]);
+    assert.equal(stepTester(s, large(s, 4.4, 4.0003))!.clear(4.4, 4.0003, 4.4, 3.0003), true, "north across its line, the gate lets it go");
+    assert.equal(stepTester(preview(s), large(s, 4.4, 4.0003))!.clear(4.4, 4.0003, 4.4, 3.0003), false, "a preview holds it");
+  });
+
+  test("a heading nearly along the piece is known only within its rounding too", () => {
+    // The middle 0.01 south of the line, surely south of it, and a part heading east a thousandth of a cell north per ten:
+    // the piece says it heads across, and an exact wall tilted the other way says it heads away.
+    const s = held([free("p1", 4, 5, 5, 5)]);
+    assert.equal(stepTester(s, large(s, 4.4, 4.01))!.clear(4.4, 4.01, 14.4, 4.009), true);
+    assert.equal(stepTester(preview(s), large(s, 4.4, 4.01))!.clear(4.4, 4.01, 14.4, 4.009), false);
+    // Heading surely across, nothing lets it go.
+    assert.equal(stepTester(s, large(s, 4.4, 4.01))!.clear(4.4, 4.01, 4.4, 3.01), false);
+    // Heading away by the piece, a preview holds it all the same, since an exact wall may say it heads across.
+    assert.equal(stepTester(preview(s), large(s, 4.4, 4.01))!.clear(4.4, 4.01, 14.4, 4.011), false);
+  });
+
+  test("the pieces of one wall leave together, and a door beside it, in its line, is a wall of its own", () => {
+    // A wall cut into two pieces at x = 4, then a closed door on to x = 5. The creature's middle is on their line at x = 2.5,
+    // its core touching only the first piece.
+    const wall = held([free("p1", 0, 5, 4, 5), free("p2", 4, 5, 4.5, 5), free("d1", 4.5, 5, 5.5, 5, closed)]);
+    const t = stepTester(wall, large(wall, 1.5, 4))!;
+    assert.equal(t.clear(1.5, 4, 2.5, 4), true, "along the wall, onto its second piece, as off one wall");
+    assert.equal(t.clear(1.5, 4, 3.5, 4), false, "into the door, which it did not touch where it started");
+    // Two doors end to end are two walls, whole, so the core over the first leaves only it.
+    const doors = held([free("d1", 0, 5, 3, 5, closed), free("d2", 3, 5, 6, 5, closed)]);
+    assert.equal(stepTester(doors, large(doors, 1, 4))!.clear(1, 4, 3, 4), false, "into the second door");
+  });
+
+  test("the gate finds the pinch a held piece a hair inside the core's edge may make, and a preview reads it as it is", () => {
+    // A corridor between y = 5 and y = 6, its north wall held 0.000075 inside the squeezed Large creature's core, within the band.
+    const s = held([free("n1", 10, 5.0157, 17, 5.0157), free("s1", 10, 6, 17, 6)]);
+    assert.equal(stepTester(s, large(s, 6, 4))!.pinched(13.5, 4.5), true);
+    assert.equal(stepTester(preview(s), large(s, 6, 4))!.pinched(13.5, 4.5), false);
   });
 });
 

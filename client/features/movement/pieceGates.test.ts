@@ -4,7 +4,7 @@ import { edge, fogRoom, lift, wall } from "#shared/discoveryTestutil.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { previewChunks } from "#shared/rules/movement.ts";
+import { legStop, ownWalk, previewChunks, squeezeFits, stepTester, walkEnd } from "#shared/rules/movement.ts";
 import { findRoute, WorkBudget } from "#shared/rules/walk.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { P1, token } from "#shared/testutil.ts";
@@ -191,6 +191,47 @@ describe("previews take the conservative test (5.2)", () => {
     assert.equal(previewView(view), previewView(view));
     assert.notEqual(previewView(view).buildChunks, view.buildChunks);
     assert.equal(planOne(previewView(view), copy.tokens.thorn!, { x: 5.3, y: 5.2 }, "walk").stop?.blocker, "wall");
+  });
+});
+
+describe("every gate reads a piece within its band (MD4-ASTRA-1, MD4-LK-3)", () => {
+  /** Astra's escape: wall (1, 1) to (7, 4), held as two pieces cut at x = 4 and rounded, and a Large creature at (2, 1) whose middle (3, 2) lies on the exact wall. */
+  function escape(): { state: RoomState; copy: RoomState } {
+    const state = fogRoom({ scene: { blockMovement: true } });
+    wall(state, "aaaaaaaaaaaa", [1, 1], [7, 4]);
+    lift(state, "dm", { x: 0, y: 0, w: 16, h: 12 });
+    state.tokens = { thorn: hero(2, 1, { size: "large" }) };
+    return { state, copy: projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState };
+  }
+
+  test("a creature overlapping a held wall leaves it every way the exact wall lets it, in a group and by the route search's step", () => {
+    const { state, copy } = escape();
+    assert.equal(Object.values(copy.buildChunks).flatMap((c) => c?.walls ?? []).length, 2, "the copy holds the wall as two pieces");
+    for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, -1]] as const) {
+      const to = { x: 2 + dx, y: 1 + dy, elevation: 0 };
+      assert.equal(legStop(state, ownWalk(state.tokens.thorn!), to), null, `the exact wall lets it go (${dx}, ${dy})`);
+      assert.deepEqual(planGroup(dropView(copy, "player"), [copy.tokens.thorn!], dx, dy, "walk").moves, [{ tokenId: "thorn", x: 2 + dx, y: 1 + dy }], `group (${dx}, ${dy})`);
+      assert.equal(stepTester(copy, ownWalk(copy.tokens.thorn!))!.clear(2, 1, 2 + dx, 1 + dy), true, `step (${dx}, ${dy})`);
+      // A preview, which nothing checks after, holds it there: the side its middle is on is not known within the band.
+      assert.equal(stepTester(conservative(copy), ownWalk(copy.tokens.thorn!))!.clear(2, 1, 2 + dx, 1 + dy), false, `preview (${dx}, ${dy})`);
+    }
+  });
+
+  test("a squeeze beside a tilted piece whose rounded end reaches a hair inside the squeezed footprint is allowed, as the exact wall allows it", () => {
+    // A corridor between y = 5 and y = 6: its south wall runs from (14, 6) east, and a tilted wall meets it there from (12, 8).
+    const state = fogRoom({ scene: { blockMovement: true } });
+    wall(state, "nnnnnnnnnnnn", [10, 5], [16, 5]);
+    wall(state, "mmmmmmmmmmmm", [16, 5], [20, 5]);
+    wall(state, "ssssssssssss", [12, 8], [14, 6]);
+    wall(state, "tttttttttttt", [14, 6], [20, 6]);
+    lift(state, "dm", { x: 0, y: 0, w: 32, h: 16 });
+    state.tokens = { thorn: hero(6, 4, { size: "large" }) };
+    const copy = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
+    const tilted = Object.values(copy.buildChunks).flatMap((c) => c?.walls ?? []).find((w) => w.a[1] > 8 && w.b[0] > 14);
+    assert.ok(tilted, "the tilted piece's end is pushed past (14, 6), into the squeezed footprint");
+    const at = { x: 13.5, y: 4.5 };
+    assert.equal(squeezeFits(state, walkEnd(state, ownWalk(state.tokens.thorn!), at)), true, "the exact walls allow the squeeze");
+    assert.equal(squeezeFits(copy, walkEnd(copy, ownWalk(copy.tokens.thorn!), at)), true, "and so does the gate");
   });
 });
 

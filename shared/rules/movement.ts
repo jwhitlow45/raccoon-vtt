@@ -5,7 +5,7 @@ import { canSqueeze, footprintRect, footprintSize, occupiedRange, snapStep, sque
 import type { Point } from "./geom.ts";
 import { footing, footprintGround, standing, type Standing } from "./heights.ts";
 import { APART, contact, CROSS, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
-import { LEDGE, pieceBlocks, pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
+import { LEDGE, PIECE_BAND, pieceBlocks, pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
 import { SQUARES } from "./grid.ts";
 
 /**
@@ -235,32 +235,36 @@ type Box = { x0: number; y0: number; x1: number; y1: number };
  * midpoints between them: what the three answers can change at. The core,
  * not `sq`, bounds the strips, so a drag preview a hair off a corridor's
  * middle is still pinched.
+ *
+ * `banded` marks the segments that are a held build's pieces read by the
+ * gate test (5.2, MD4-LK-3): each meets a span where it comes within its
+ * band of it, crosses the core's span only where it surely does
+ * (walls.ts pieceBlocks), and adds its marks shifted by the band either
+ * way, so the gate finds every pinch some exact wall the piece stands for
+ * makes. The others are judged exactly.
  */
-export function pinches(segs: readonly (readonly [number, number, number, number])[], full: Box, core: Box, sq: Box, alongX: boolean, alongY: boolean): boolean {
+export function pinches(segs: readonly (readonly [number, number, number, number])[], full: Box, core: Box, sq: Box, alongX: boolean, alongY: boolean, banded: readonly boolean[] = []): boolean {
+  const band = PIECE_BAND * (1 + 1e-9);
   const across = (vertical: boolean): boolean => {
     // `vertical`: cross-sections are lines x = c, judged along y.
     const [c0, c1] = vertical ? [sq.x0, sq.x1] : [sq.y0, sq.y1];
     const [f0, k0, k1, f1] = vertical ? [full.y0, core.y0, core.y1, full.y1] : [full.x0, core.x0, core.x1, full.x1];
     const marks = [c0, c1];
-    for (const [ax, ay, bx, by] of segs) {
+    segs.forEach(([ax, ay, bx, by], i) => {
       const [a, b, ua, ub] = vertical ? [ax, bx, ay, by] : [ay, by, ax, bx];
-      for (const v of [a, b]) if (v > c0 && v < c1) marks.push(v);
-      if (a !== b && ua !== ub) {
-        for (const u of [f0, k0, k1, f1]) {
-          const v = a + ((u - ua) * (b - a)) / (ub - ua);
-          if (v > c0 && v < c1) marks.push(v);
-        }
-      }
-    }
+      const found: number[] = [a, b];
+      if (a !== b && ua !== ub) for (const u of [f0, k0, k1, f1]) found.push(a + ((u - ua) * (b - a)) / (ub - ua));
+      for (const v of banded[i] ? found.flatMap((m) => [m - band, m, m + band]) : found) if (v > c0 && v < c1) marks.push(v);
+    });
     marks.sort((p, q) => p - q);
     const tries = [...marks];
     for (let i = 1; i < marks.length; i++) if (marks[i]! > marks[i - 1]!) tries.push((marks[i - 1]! + marks[i]!) / 2);
-    return tries.some(
-      (c) =>
-        segs.some((s) => meetsSpan(vertical, c, f0, true, k0, false, ...s)) &&
-        segs.some((s) => meetsSpan(vertical, c, k1, false, f1, true, ...s)) &&
-        !segs.some((s) => meetsSpan(vertical, c, k0, true, k1, true, ...s)),
-    );
+    // The span from `lo` to `hi` along the cross-section at `c`, as the ends of a segment.
+    const span = (c: number, lo: number, hi: number) => (vertical ? ([c, lo, c, hi] as const) : ([lo, c, hi, c] as const));
+    const blocked = (c: number, lo: number, loOpen: boolean, hi: number, hiOpen: boolean) =>
+      segs.some((s, i) => (banded[i] ? sweptTouches(...span(c, lo, hi), band, band, ...s) : meetsSpan(vertical, c, lo, loOpen, hi, hiOpen, ...s)));
+    const crossed = (c: number) => segs.some((s, i) => (banded[i] ? pieceBlocks(...span(c, k0, k1), 0, 0, ...s) : meetsSpan(vertical, c, k0, true, k1, true, ...s)));
+    return tries.some((c) => blocked(c, f0, true, k0, false) && blocked(c, k1, false, f1, true) && !crossed(c));
   };
   return (alongY && across(true)) || (alongX && across(false));
 }
@@ -425,21 +429,114 @@ type Leg = {
  * it. Moving along the line, or toward the far side, keeps it.
  */
 function partClear(leg: Leg, segs: readonly number[], atStart: ReadonlySet<number>, sx: number, sy: number, ex: number, ey: number, first: boolean): boolean {
-  const xy = leg.walls.stored.xy;
   for (const k of segs) {
-    const ax = xy[4 * k]!;
-    const ay = xy[4 * k + 1]!;
-    const bx = xy[4 * k + 2]!;
-    const by = xy[4 * k + 3]!;
     if (!meets(leg.walls, k, leg.test, sx, sy, ex, ey, leg.hx, leg.hy)) continue;
-    if (first && atStart.has(k)) {
-      const side = orient(ax, ay, bx, by, leg.px, leg.py);
-      const toward = orient(0, 0, bx - ax, by - ay, ex - sx, ey - sy);
-      if (toward !== 0 && (side === 0 || toward === side)) continue;
-    }
+    if (first && atStart.has(k) && leaves(leg.walls, k, leg.test, leg.px, leg.py, ex - sx, ey - sy)) continue;
     return false;
   }
   return true;
+}
+
+/** The segments of `segs` the core touches where the leg starts, the runs of held pieces they belong to included for the gate (`pieceRun`). */
+function startSet(leg: Leg, segs: readonly number[]): Set<number> {
+  const out = new Set(segs.filter((k) => meets(leg.walls, k, leg.test, leg.px, leg.py, leg.px, leg.py, leg.hx, leg.hy)));
+  if (leg.test === "gate") for (const k of [...out]) if (leg.walls.stored.free[k] === PIECE) for (const j of pieceRun(leg.walls, k)) out.add(j);
+  return out;
+}
+
+const pieceRuns = new WeakMap<WallSet, Map<number, readonly number[]>>();
+
+/**
+ * The pieces of a held build cut from one wall, by any of them: those end
+ * to end with it, as the cut leaves them, each within the band of the
+ * line of the one it follows and of the same tags and kind. The server
+ * holds that wall as one segment, so where the core touches any piece of
+ * it as a leg starts, the gate lets the leg leave every piece of it, as
+ * section 4.1 lets it leave the wall (MD4-ASTRA-1). Two walls drawn end to
+ * end in one line read as one, which only lets the device send more. A
+ * door never joins a run: players get doors whole, so a door is never a
+ * piece of the wall beside it, and a closed door blocks as a wall does.
+ */
+function pieceRun(walls: WallSet, k: number): readonly number[] {
+  let runs = pieceRuns.get(walls);
+  if (!runs) pieceRuns.set(walls, (runs = new Map()));
+  const known = runs.get(k);
+  if (known) return known;
+  const { xy, free, tags } = walls.stored;
+  const kind = (m: number) => walls.featureAt(m)?.feature.kind;
+  const run = [k];
+  const reach = 4 * PIECE_ROUNDING;
+  for (let i = 0; i < run.length; i++) {
+    const j = run[i]!;
+    const ax = xy[4 * j]!;
+    const ay = xy[4 * j + 1]!;
+    const bx = xy[4 * j + 2]!;
+    const by = xy[4 * j + 3]!;
+    // Within twice the band of j's line: the cross product against j's heading, squared, so nothing here needs a square root.
+    const len2 = (bx - ax) * (bx - ax) + (by - ay) * (by - ay);
+    const along = (x: number, y: number) => {
+      const cross = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+      return len2 > 0 && cross * cross <= reach * reach * len2;
+    };
+    const near = (x: number, y: number, ex: number, ey: number) => Math.abs(x - ex) <= reach && Math.abs(y - ey) <= reach;
+    for (const [ex, ey] of [
+      [ax, ay],
+      [bx, by],
+    ] as const) {
+      walls.storedIndex.query(ex - reach, ey - reach, ex + reach, ey + reach, MOVEMENT | LEDGE, (m) => {
+        if (run.includes(m) || free[m] !== PIECE || tags[m] !== tags[j] || kind(m) !== kind(j) || kind(m) === "door") return;
+        const [cx, cy, dx, dy] = [xy[4 * m]!, xy[4 * m + 1]!, xy[4 * m + 2]!, xy[4 * m + 3]!];
+        if ((near(cx, cy, ex, ey) || near(dx, dy, ex, ey)) && along(cx, cy) && along(dx, dy)) run.push(m);
+      });
+    }
+  }
+  for (const m of run) runs.set(m, run);
+  return run;
+}
+
+/**
+ * How far rounding moves each end of a held build's piece, per coordinate:
+ * half its band (walls.ts PIECE_BAND), written out since walls.ts loads
+ * after this module.
+ */
+const PIECE_ROUNDING = 1 / 10_000;
+
+/**
+ * Whether a part heading (mx, my) leaves segment `k`, which the core
+ * touches where the leg starts at P (section 4.1): it moves the center
+ * away from the segment's line toward the side P is on, or either way when
+ * P lies on the line. Exact for a stored segment. Each end of a held
+ * build's piece lies up to PIECE_ROUNDING per coordinate off its exact
+ * wall (5.2), so the side P is on and the way the part heads are known
+ * only within bounds worked out from that: the gate lets the part go
+ * where some exact wall the piece stands for would, and a preview only
+ * where every one would (MD4-ASTRA-1).
+ */
+function leaves(walls: WallSet, k: number, test: PieceTest, px: number, py: number, mx: number, my: number): boolean {
+  const xy = walls.stored.xy;
+  const ax = xy[4 * k]!;
+  const ay = xy[4 * k + 1]!;
+  const bx = xy[4 * k + 2]!;
+  const by = xy[4 * k + 3]!;
+  if (walls.stored.free[k] !== PIECE) {
+    const side = orient(ax, ay, bx, by, px, py);
+    const toward = orient(0, 0, bx - ax, by - ay, mx, my);
+    return toward !== 0 && (side === 0 || toward === side);
+  }
+  const dx = bx - ax;
+  const dy = by - ay;
+  // The exact wall's ends are A + a and B + b, each within PIECE_ROUNDING per coordinate, so its heading is off by up to twice that.
+  const side = dx * (py - ay) - dy * (px - ax);
+  const toward = dx * my - dy * mx;
+  const r = PIECE_ROUNDING * (1 + 1e-9);
+  const sideOff = r * (Math.abs(dx) + Math.abs(dy)) + 2 * r * (Math.abs(px - ax) + Math.abs(py - ay)) + 4 * r * r;
+  const towardOff = 2 * r * (Math.abs(mx) + Math.abs(my));
+  if (test === "gate") {
+    if (Math.abs(side) <= sideOff) return mx !== 0 || my !== 0;
+    return side > 0 ? toward + towardOff > 0 : toward - towardOff < 0;
+  }
+  if (Math.abs(toward) <= towardOff) return false;
+  return toward > 0 ? side >= sideOff : side <= -sideOff;
 }
 
 /**
@@ -457,7 +554,7 @@ function legClear(leg: Leg): boolean {
   const pad = point ? 0 : 0.5;
   const segs = touching(leg.walls, px, py, qx, qy, hx + pad, hy + pad, leg.floor, leg.test);
   if (segs.length === 0) return true;
-  const atStart = new Set(segs.filter((k) => meets(leg.walls, k, leg.test, px, py, px, py, hx, hy)));
+  const atStart = startSet(leg, segs);
   if (partClear(leg, segs, atStart, px, py, qx, qy, true)) return true;
   if (point) return false;
   const lastClear = SHIFTS.map(([dx, dy], j) => j === 0 || partClear(leg, segs, atStart, qx + dx, qy + dy, qx, qy, false));
@@ -686,7 +783,7 @@ export function straightClear(state: BuildState, token: Walker, to: LegEnd): boo
   if (px === qx && py === qy) return true;
   const segs = touching(leg.walls, px, py, qx, qy, hx, hy, leg.floor, leg.test);
   if (segs.length === 0) return true;
-  const atStart = new Set(segs.filter((k) => meets(leg.walls, k, leg.test, px, py, px, py, hx, hy)));
+  const atStart = startSet(leg, segs);
   return partClear(leg, segs, atStart, px, py, qx, qy, true);
 }
 
@@ -732,16 +829,8 @@ export function stepTester(state: BuildState, token: Walker): StepTester | null 
     if (hit || !blocksMove(set, k, floor)) return;
     if (!meets(set, k, test, px, py, qx, qy, hx, hy)) return;
     // partClear's first part: a segment the core touches where it starts may be left toward the start's side.
-    if (meets(set, k, test, px, py, px, py, hx, hy)) {
-      const xy = set.stored.xy;
-      const ax = xy[4 * k]!;
-      const ay = xy[4 * k + 1]!;
-      const bx = xy[4 * k + 2]!;
-      const by = xy[4 * k + 3]!;
-      const side = orient(ax, ay, bx, by, px, py);
-      const toward = orient(0, 0, bx - ax, by - ay, qx - px, qy - py);
-      if (toward !== 0 && (side === 0 || toward === side)) return;
-    }
+    const atStart = meets(set, k, test, px, py, px, py, hx, hy) || (test === "gate" && set.stored.free[k] === PIECE && pieceRun(set, k).some((j) => j !== k && meets(set, j, test, px, py, px, py, hx, hy)));
+    if (atStart && leaves(set, k, test, px, py, qx - px, qy - py)) return;
     hit = true;
   };
   return {
@@ -778,7 +867,7 @@ function firstStop(leg: Leg): LegStop {
   const { walls, px, py, qx, qy, hx, hy } = leg;
   const xy = walls.stored.xy;
   const segs = touching(walls, px, py, qx, qy, hx, hy, leg.floor, leg.test);
-  const atStart = new Set(segs.filter((k) => meets(walls, k, leg.test, px, py, px, py, hx, hy)));
+  const atStart = startSet(leg, segs);
   let best = -1;
   let bestT = Infinity;
   const dx = qx - px;
@@ -904,12 +993,19 @@ function squeezedThere(state: BuildState, token: Walker, at: Point, fit: boolean
   const squeezed = squeezedSize(token);
   const sq = { x0: c.x - squeezed.w / 2, y0: c.y - squeezed.h / 2, x1: c.x + squeezed.w / 2, y1: c.y + squeezed.h / 2 };
   const xy = walls.stored.xy;
-  // The narrow space reads each piece as it is: gathered by the band, which takes in every one it can meet inside the footprint, then judged exactly.
-  const segs = touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, floor, "preview").map((k) => [xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!] as const);
-  if (fit && segs.some((s) => crossesInterior(sq.x0, sq.y0, sq.x1, sq.y1, ...s))) return false;
+  const test = pieceTestOf(state.buildChunks);
+  // Gathered by the band, which takes in every piece that can meet the footprint, then judged by the build's test.
+  const near = touching(walls, c.x, c.y, c.x, c.y, w / 2, h / 2, floor, "preview");
+  const segs = near.map((k) => [xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!] as const);
+  const pieces = near.map((k) => walls.stored.free[k] === PIECE);
+  // For the gate a piece passes through the squeezed footprint only more than its band inside it (MD4-LK-3). A preview reads it as
+  // it is, so a corridor of free walls, whose pieces lie along the footprint's sides, still draws the squeeze the drop makes.
+  const inset = test === "gate" ? PIECE_BAND * (1 + 1e-9) : 0;
+  const through = (s: (typeof segs)[number], piece: boolean) => (piece ? crossesInterior(sq.x0 + inset, sq.y0 + inset, sq.x1 - inset, sq.y1 - inset, ...s) : crossesInterior(sq.x0, sq.y0, sq.x1, sq.y1, ...s));
+  if (fit && segs.some((s, i) => through(s, pieces[i]!))) return false;
   const core = coreSize(token);
   const coreBox = { x0: c.x - core.w / 2, y0: c.y - core.h / 2, x1: c.x + core.w / 2, y1: c.y + core.h / 2 };
-  return pinches(segs, { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, coreBox, sq, w >= 2, h >= 2);
+  return pinches(segs, { x0: at.x, y0: at.y, x1: at.x + w, y1: at.y + h }, coreBox, sq, w >= 2, h >= 2, test === "gate" ? pieces : []);
 }
 
 /**
