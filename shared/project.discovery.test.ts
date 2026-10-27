@@ -552,6 +552,54 @@ describe("memory in the projection (5.3, decision 6)", () => {
   });
 });
 
+/*
+ * The chunk memo keys every input a position reads (5.6, MD2-O-4,
+ * MD2-O-11): each case warms it with a projection, changes one input the
+ * position's own objects do not show, and asks again.
+ */
+describe("the players' chunk memo", () => {
+  test("a stair run's far end raised two chunks away turns a held stair's upDir", () => {
+    const state = fogRoom({ vision: true, bounds: { w: 64, h: 16 } });
+    const run: [number, number][] = [];
+    for (let x = 3; x < 40; x++) run.push([x, 3]);
+    stairs(state, run, "a");
+    lift(state, "party", { x: 0, y: 0, w: 8, h: 8 });
+    assert.equal(chunksOf(state, P1)["0,0"]!.upDir![3 * 16 + 3], ".");
+    heights(state, { x: 40, y: 3, w: 1, h: 1 }, 10);
+    assert.equal(chunksOf(state, P1)["0,0"]!.upDir![3 * 16 + 3], "e");
+  });
+
+  test("the scene's automatic walls rule changed: a held room's automatic walls go", () => {
+    const state = fogRoom();
+    paint(state, { x: 2, y: 2, w: 2, h: 2 });
+    lift(state, "party", { x: 0, y: 0, w: 8, h: 8 });
+    assert.ok(autoAt(chunksOf(state, P1)["0,0"], "2,2,w"));
+    state.scenes = { ...state.scenes, s1: { ...state.scenes.s1!, autoWalls: "off" } };
+    assert.ok(!autoAt(chunksOf(state, P1)["0,0"], "2,2,w"));
+  });
+
+  test("the Sight switch turned off: a remembered cell shows live", () => {
+    const state = fogRoom({ vision: true });
+    paint(state, { x: 3, y: 3, w: 1, h: 1 }, "stone");
+    lift(state, "party", { x: 0, y: 0, w: 8, h: 8 });
+    remember(state, null, 0, 0, { cells: { "3,3": "wood" } });
+    assert.equal(chunksOf(state, P1)["0,0"]!.cells["3,3"], "wood");
+    const { vision: _, ...off } = state.scenes.s1!;
+    state.scenes = { ...state.scenes, s1: off };
+    assert.equal(chunksOf(state, P1)["0,0"]!.cells["3,3"], "stone");
+  });
+
+  test("a build stroke replaces the scene object, and positions it never reached hand back the very same chunk", () => {
+    const state = fogRoom({ bounds: { w: 64, h: 16 } });
+    paint(state, { x: 40, y: 3, w: 1, h: 1 });
+    lift(state, "party", { x: 0, y: 0, w: 64, h: 16 });
+    const before = chunksOf(state, P1)["0,0"];
+    paint(state, { x: 41, y: 3, w: 1, h: 1 });
+    state.scenes = { ...state.scenes, s1: { ...state.scenes.s1!, wallsVersion: state.scenes.s1!.wallsVersion + 1 } };
+    assert.equal(chunksOf(state, P1)["0,0"], before);
+  });
+});
+
 describe("dependents of the held build (5.6)", () => {
   test("a wall added across a chunk border, its held piece filed west: the west position comes again", () => {
     const state = fogRoom();

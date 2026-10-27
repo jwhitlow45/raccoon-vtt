@@ -1550,12 +1550,16 @@ function heldNear(ground: Ground, cx: number, cy: number, reach: number): boolea
 /*
  * Players' chunks, kept by every object a position reads (5.6): the stored
  * chunks and both memories of its 3 x 3 neighborhood, the fog layers' tiles
- * there, the scene, and where memory is near, the class's sight, and for a
- * position with stairs the scene's stair map. Each is replaced and never
- * changed, so an unchanged position hands players the very same object,
- * which the fan-out need not hash again, and a changed input never hits.
- * Each position keeps its last two answers, for the committed state and a
- * staged one. Nothing is kept while an op is still writing the state.
+ * there, and where memory is near, the class's sight, and for a position
+ * with stairs the scene's stair map. Each is replaced and never changed, so
+ * an unchanged position hands players the very same object, which the
+ * fan-out need not hash again, and a changed input never hits. Of the scene
+ * the key holds only the fields a position reads (sceneFields), since every
+ * build stroke and door toggle replaces the scene object to bump its walls
+ * version (MD2-O-4). Each position keeps its last two answers, for the
+ * committed state and a staged one, in slots hung off the scene's bounds
+ * object, so a room's slots go when it unloads (MD2-O-5). Nothing is kept
+ * while an op is still writing the state.
  */
 const objectIds = new WeakMap<object, number>();
 let nextObjectId = 1;
@@ -1567,14 +1571,20 @@ function idOf(o: object | undefined | null): number {
   return id;
 }
 
-type Memo = { slot: string; key: string };
-const memos = new Map<string, { key: string; value: PlayerChunk | null }[]>();
+type Slots = Map<string, { key: string; value: PlayerChunk | null }[]>;
+type Memo = { slots: Slots; slot: string; key: string };
+const memos = new WeakMap<object, Slots>();
 const MEMO_SLOTS = 50_000;
+
+/** What a player's chunk reads of its scene: chunkFor, groundOf, the pieces' rounding and the stair map. */
+function sceneFields(scene: Scene): string {
+  return `${scene.id}|${scene.bounds.w}x${scene.bounds.h}|${autoWallsOf(scene)}|${scene.gridShape ?? ""}|${scene.fogEnabled}|${scene.vision?.on === true}`;
+}
 
 function memoKey(state: RoomState, scene: Scene, own: FogClass, cx: number, cy: number): Memo | null {
   if (isWritable(state.buildChunks) || isWritable(state.fogTiles) || isWritable(state.exploredTiles ?? {}) || isWritable(state.exploredBy ?? {}) || isWritable(state.memory ?? {}) || isWritable(state.memoryBy ?? {})) return null;
   const sceneId = scene.id;
-  const parts: number[] = [idOf(scene)];
+  const parts: (number | string)[] = [sceneFields(scene)];
   let remembered = false;
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -1594,18 +1604,21 @@ function memoKey(state: RoomState, scene: Scene, own: FogClass, cx: number, cy: 
   // A stair's direction reads the scene's whole stair map.
   const here = state.buildChunks[chunkKey(sceneId, cx, cy)];
   if (here && (chunkMarks(here) !== null || Object.values(here.cells).includes("stairs"))) parts.push(idOf(sceneWalls(scene, state.buildChunks)));
-  return { slot: `${sceneId}|${own ?? ""}|${cx},${cy}`, key: parts.join(",") };
+  let slots = memos.get(scene.bounds);
+  if (!slots) memos.set(scene.bounds, (slots = new Map()));
+  return { slots, slot: `${sceneId}|${own ?? ""}|${cx},${cy}`, key: parts.join(",") };
 }
 
 function recall(memo: Memo): PlayerChunk | null | undefined {
-  return memos.get(memo.slot)?.find((m) => m.key === memo.key)?.value;
+  return memo.slots.get(memo.slot)?.find((m) => m.key === memo.key)?.value;
 }
 
 function keep(memo: Memo, value: PlayerChunk | null): void {
-  const held = memos.get(memo.slot) ?? [];
-  memos.delete(memo.slot);
-  memos.set(memo.slot, [{ key: memo.key, value }, ...held.filter((m) => m.key !== memo.key)].slice(0, 2));
-  if (memos.size > MEMO_SLOTS) memos.delete(memos.keys().next().value!);
+  const { slots } = memo;
+  const held = slots.get(memo.slot) ?? [];
+  slots.delete(memo.slot);
+  slots.set(memo.slot, [{ key: memo.key, value }, ...held.filter((m) => m.key !== memo.key)].slice(0, 2));
+  if (slots.size > MEMO_SLOTS) slots.delete(slots.keys().next().value!);
 }
 
 const NO_WALLS: readonly FreeWall[] = [];

@@ -395,6 +395,7 @@ function run(seed: number, steps: number, counts: { applied: number; fogged: num
     recordHeld(after, ever);
     conns = connections(after, conns);
     const candidates = candidatesFor(before, after, result, conns);
+    let copy: RoomState | undefined;
     for (const c of conns) {
       const next = new Map<EntityKey, unknown>();
       for (const key of candidates) next.set(key, projectEntity(key, after, c.viewer, { sceneId: c.sceneId }));
@@ -403,6 +404,9 @@ function run(seed: number, steps: number, counts: { applied: number; fogged: num
       const fresh = projectState(after, c.viewer, { sceneId: c.sceneId });
       // MX3.
       if (stableStringify(applied) !== stableStringify(fresh)) assert.deepEqual(JSON.parse(JSON.stringify(applied)), JSON.parse(JSON.stringify(fresh)), `${where}: ${c.viewer.memberId}@${c.sceneId} misses a change`);
+      // The chunk memo against none: a copy of the room shares no object with it, so nothing it projects comes from the memo (MD2-O-11).
+      const cold = projectState((copy ??= deepClone(after)), c.viewer, { sceneId: c.sceneId });
+      if (stableStringify(cold) !== stableStringify(fresh)) assert.deepEqual(JSON.parse(JSON.stringify(fresh)), JSON.parse(JSON.stringify(cold)), `${where}: ${c.viewer.memberId}@${c.sceneId} gets a kept answer a fresh room does not give`);
       c.view = fresh;
       c.held = heldOf(fresh);
       if (c.viewer.role === "player") {
