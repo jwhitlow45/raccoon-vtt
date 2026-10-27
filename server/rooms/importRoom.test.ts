@@ -191,14 +191,17 @@ describe("wave 4 import limits (docs/design-v1-maps-vision.md 2.4)", () => {
     const fits = sceneOf(sceneLimit - sightReserve - explored);
     assert.ok(serializedBytes(fits) < LIMITS.stateBytes);
     assert.doesNotThrow(() => assertWithinLimits(fits));
-    assert.deepEqual(new SizeGuard().check(fits, ["s1"], 0), { ok: true }, "the scene the import keeps takes its first op");
+    // A player's first move there passes, and so does any op that leaves the scene as it is: what players' copies may hold
+    // beyond the DM's (docs/design-v1-map-discovery.md 5.5) refuses only a DM's edit that grows it, as at the deploy.
+    assert.deepEqual(new SizeGuard().check(fits, ["s1"], 0, undefined, "player"), { ok: true }, "the scene the import keeps takes its first move");
+    assert.deepEqual(new SizeGuard().check(fits, ["s1"], 0, fits), { ok: true }, "and an op that does not grow it");
     // A byte more, and the stored room still fits, but the scene's exploration does not: the DM reads what to do.
     const exploring = sceneOf(sceneLimit - sightReserve - explored + 1);
     assert.throws(
       () => assertWithinLimits(exploring),
       (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === NO_ROOM_TO_EXPLORE,
     );
-    assert.equal(new SizeGuard().check(exploring, ["s1"], 0).ok, false, "every op on it would be refused");
+    assert.equal(new SizeGuard().check(exploring, ["s1"], 0, undefined, "player").ok, false, "every op on it would be refused");
     // Past its sight's reserve too, the scene is simply full.
     const full = sceneOf(sceneLimit - sightReserve + 1);
     assert.throws(

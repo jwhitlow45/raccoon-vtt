@@ -9,7 +9,8 @@ import { visionRules } from "#shared/ruleHooks.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { actor, character, companionBlock, room, scene, template, token } from "#shared/testutil.ts";
 import { exploreOp } from "./explore.ts";
-import { checkWholeScenes, growthBound, measuredLog, SizeGuard } from "./sizeGuard.ts";
+import { MEMORY_CAP } from "./memorySize.ts";
+import { checkWholeScenes, discoveryReserve, growthBound, measuredLog, memoryStateReserve, SizeGuard } from "./sizeGuard.ts";
 
 const DM: Viewer = { memberId: "dm", role: "dm" };
 
@@ -69,7 +70,8 @@ describe("SizeGuard", () => {
     roomGuard.stateMeasured(roomBytes);
     assert.equal(roomGuard.check(reset.state, ["s1"], reset.growth).ok, false);
 
-    const sceneBytes = serializedBytes(projectState(before, DM, { sceneId: "s1" }));
+    // Players' copies of a scene with fog on may hold more than the DM's (docs/design-v1-map-discovery.md 5.5), which the fog reset leaves as it is.
+    const sceneBytes = serializedBytes(projectState(before, DM, { sceneId: "s1" })) + discoveryReserve(before, before.scenes.s1!, MEMORY_CAP);
     const sceneGuard = new SizeGuard({ sceneLimit: sceneBytes + 70_000 });
     assert.equal(sceneGuard.check(before, ["s1"], 0).ok, true);
     const scene = sceneGuard.check(reset.state, ["s1"], reset.growth);
@@ -124,7 +126,7 @@ describe("SizeGuard's wave 4 reserves (docs/design-v1-maps-vision.md 2.4)", () =
     for (const sceneId of ["0f8fad5b-d9cb-469f-a165-70867728950e", "梟".repeat(64), `"q\\u0001${"\u0007".repeat(40)}`]) {
       const state = bright(sceneId);
       const probe = { ...state, sight: {} } as unknown as RoomState;
-      const measured = serializedBytes(projectState(probe, DM, { sceneId }));
+      const measured = serializedBytes(projectState(probe, DM, { sceneId })) + discoveryReserve(state, state.scenes[sceneId]!, MEMORY_CAP);
       const reserve = 13 * 13 * sightEntryMaxBytes(sceneId);
       const explored = exploredReserve(state);
       const real = { ...visionRules };
@@ -141,7 +143,7 @@ describe("SizeGuard's wave 4 reserves (docs/design-v1-maps-vision.md 2.4)", () =
         Object.assign(visionRules, real);
       }
       // The real tiles, where the party sees everything, fit inside the reserve.
-      const withSight = serializedBytes(projectState(state, DM, { sceneId }));
+      const withSight = serializedBytes(projectState(state, DM, { sceneId })) + discoveryReserve(state, state.scenes[sceneId]!, MEMORY_CAP);
       assert.ok(withSight - measured <= reserve, `${withSight - measured} over ${reserve}`);
       assert.ok(Object.keys(projectState(state, P1, { sceneId }).sight).length > 0);
     }
@@ -150,7 +152,7 @@ describe("SizeGuard's wave 4 reserves (docs/design-v1-maps-vision.md 2.4)", () =
   test("a scene without vision reserves nothing for sight, and one that is not exploring nothing for its layer", () => {
     const state = bright("s9");
     state.scenes.s9 = { ...state.scenes.s9!, vision: { on: false, light: "bright" } };
-    const measured = serializedBytes(projectState(state, DM, { sceneId: "s9" }));
+    const measured = serializedBytes(projectState(state, DM, { sceneId: "s9" })) + discoveryReserve(state, state.scenes.s9!, MEMORY_CAP);
     assert.equal(new SizeGuard({ sceneLimit: measured }).check(state, ["s9"], 0).ok, true);
   });
 
@@ -158,7 +160,8 @@ describe("SizeGuard's wave 4 reserves (docs/design-v1-maps-vision.md 2.4)", () =
     const state = bright("s9");
     state.scenes.s8 = scene("s8", { bounds: { w: 200, h: 200 }, fogEnabled: true, vision: { on: true, light: "dark" } });
     const moved = { ...state, meta: { ...state.meta, playerSceneId: "s8" } };
-    const bytes = serializedBytes(moved);
+    // Players' memory of the scene they move to is reserved at its cap (docs/design-v1-map-discovery.md 5.5).
+    const bytes = serializedBytes(moved) + memoryStateReserve(moved);
     const fits = new SizeGuard({ stateLimit: bytes + exploredReserve(moved) });
     assert.equal(fits.check(moved, [], 0, state).ok, true);
     const tight = new SizeGuard({ stateLimit: bytes + exploredReserve(moved) - 1 });
@@ -166,7 +169,7 @@ describe("SizeGuard's wave 4 reserves (docs/design-v1-maps-vision.md 2.4)", () =
     // The same room for any other op is simply full.
     assert.match((tight.check(moved, [], 0, moved) as { message: string }).message, /^the room is full/);
     // The projected check of the scene that starts exploring runs too, though the op never named it.
-    const sceneBytes = serializedBytes(projectState({ ...moved, sight: {} } as unknown as RoomState, DM, { sceneId: "s8" }));
+    const sceneBytes = serializedBytes(projectState({ ...moved, sight: {} } as unknown as RoomState, DM, { sceneId: "s8" })) + discoveryReserve(moved, moved.scenes.s8!, MEMORY_CAP);
     const sightReserve = 13 * 13 * sightEntryMaxBytes("s8");
     const sceneTight = new SizeGuard({ sceneLimit: sceneBytes + sightReserve + exploredReserve(moved) - 1 });
     assert.deepEqual(sceneTight.check(moved, [], 0, state), { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE });

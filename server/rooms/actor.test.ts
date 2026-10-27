@@ -33,7 +33,7 @@ import { assertWithinLimits } from "./importRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { remapState } from "./remap.ts";
 import type { RoomGateway } from "./gateway.ts";
-import { checkWholeScenes, growthBound, measuredStateBytes, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
+import { checkWholeScenes, growthBound, measuredStateBytes, memoryStateReserve, roomLevelBytes, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { loadRoom, type Pool } from "./persistence.ts";
 import { SQUARES } from "../../shared/rules/grid.ts";
 
@@ -1952,8 +1952,9 @@ describe("the explored layer's reserve at a reduced room limit (docs/design-v1-m
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
     const { state, sceneId, otherSceneId, pcId, goblinId } = darkRoom(dm, player);
-    // Room for the player scene's whole layer and a few hundred bytes of play, and not for a second scene's layer.
-    const stateLimit = serializedBytes(state) + exploredReserve(state) + 600;
+    // Room for the player scene's whole layer and players' memory of it (docs/design-v1-map-discovery.md 5.5) and a few
+    // hundred bytes of play, and not for a second scene's layer.
+    const stateLimit = serializedBytes(state) + exploredReserve(state) + memoryStateReserve(state) + 600;
     assert.ok(exploredReserve({ ...state, meta: { ...state.meta, playerSceneId: otherSceneId } }) > 1_200);
     await withRoom(
       state,
@@ -1962,14 +1963,14 @@ describe("the explored layer's reserve at a reduced room limit (docs/design-v1-m
         const within = (when: string) => {
           const now = actor.committed.state;
           const bytes = serializedBytes(now);
-          assert.ok(bytes + exploredReserve(now) <= stateLimit, `${when}: ${bytes} + ${exploredReserve(now)} over ${stateLimit}`);
+          assert.ok(bytes + exploredReserve(now) + memoryStateReserve(now) <= stateLimit, `${when}: ${bytes} + ${exploredReserve(now)} over ${stateLimit}`);
         };
         assert.equal(await send({ t: "token.move", tokenId: pcId, x: 20, y: 2 }), null);
         within("after the first explore");
         // An op that fits the room but not the room and the reserve is refused as a full room.
         const big: Op = { t: "token.update", tokenId: goblinId, patch: { notes: "n".repeat(700) } };
         const alone = applyOp(actor.committed.state, big, { memberId: dm.id, role: "dm" }, { seq: 1_000, at: new Date().toISOString() });
-        assert.ok(alone.ok && serializedBytes(alone.state) <= stateLimit, "it fits without the reserve");
+        assert.ok(alone.ok && serializedBytes(alone.state) + memoryStateReserve(alone.state) <= stateLimit, "it fits without the reserve");
         assert.deepEqual(await send(big), { code: "quota", message: `the room is full: it is at its ${Math.floor(stateLimit / 1024 / 1024)} MiB size limit` });
 
         // Each hide where the party looks clears explored bits and the batch explores them again, so the tile's rev climbs by two.
@@ -1992,7 +1993,7 @@ describe("the explored layer's reserve at a reduced room limit (docs/design-v1-m
         const exported = JSON.parse(JSON.stringify(roomExport("TESTR00M", actor.committed.seq, actor.committed.state, [dm.id]))) as RoomExport;
         const imported = remapState(exported.state, { assets: new Map() });
         assert.equal(Object.keys(imported.exploredTiles).length, Object.keys(actor.committed.state.exploredTiles).length);
-        assert.ok(serializedBytes(imported) + exploredReserve(imported) <= stateLimit);
+        assert.ok(serializedBytes(imported) + exploredReserve(imported) + memoryStateReserve(imported) <= stateLimit);
 
         assert.deepEqual(await send({ t: "room.setPlayerScene", sceneId: otherSceneId }), { code: "quota", message: NO_ROOM_TO_EXPLORE });
         assert.equal(actor.committed.state.meta.playerSceneId, sceneId);
@@ -2019,7 +2020,7 @@ describe("explore's growth under a scene ID that JSON escapes (docs/design-v1-ma
       scenes: Object.fromEntries(Object.entries(room.state.scenes).map(([id, s]) => (id === room.sceneId ? [sceneId, { ...s, id: sceneId }] : [id, s]))),
       tokens: Object.fromEntries(Object.entries(room.state.tokens).map(([id, t]) => [id, t.sceneId === room.sceneId ? { ...t, sceneId } : t])),
     };
-    const stateLimit = serializedBytes(state) + exploredReserve(state) + 200;
+    const stateLimit = serializedBytes(state) + exploredReserve(state) + memoryStateReserve(state) + 200;
     await withRoom(
       state,
       dm,
@@ -2032,12 +2033,12 @@ describe("explore's growth under a scene ID that JSON escapes (docs/design-v1-ma
         // an unescaped key would leave out of the explored tile, so a guard counting it short would let this through unmeasured.
         const note = (n: number): Op => ({ t: "token.update", tokenId: room.goblinId, patch: { notes: "n".repeat(n) } });
         const room0 = actor.committed.state;
-        const spare = stateLimit - serializedBytes(room0) - exploredReserve(room0);
+        const spare = stateLimit - serializedBytes(room0) - exploredReserve(room0) - memoryStateReserve(room0);
         assert.ok(spare >= 0 && spare < 300, `${spare} bytes spare`);
         assert.deepEqual(await send(note(spare + 150)), { code: "quota", message: `the room is full: it is at its ${Math.floor(stateLimit / 1024 / 1024)} MiB size limit` });
         assert.equal(await send(note(Math.max(0, spare - 40))), null, "an edit that fits still passes");
         const now = actor.committed.state;
-        assert.ok(serializedBytes(now) + exploredReserve(now) <= stateLimit);
+        assert.ok(serializedBytes(now) + exploredReserve(now) + memoryStateReserve(now) <= stateLimit);
       },
       { sizeLimits: { stateLimit } },
     );

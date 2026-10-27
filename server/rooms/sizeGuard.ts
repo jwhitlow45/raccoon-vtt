@@ -1,13 +1,15 @@
-import { chunkKey, holderTileKey, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
+import { chunkKey, holderChunkKey, holderTileKey, parseKey, readEntity, tileKey, type EntityKey } from "#shared/keys.ts";
 import { lineAudience } from "#shared/logRings.ts";
-import { CHUNK_CELLS, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
+import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, UP_DIR_CHARS, type BuildChunk, type Encounter, type EncounterSnapshot, type LogEntry, type Token, type Trap } from "#shared/model.ts";
 import { trapOwnBytes } from "#shared/reducer/traps.ts";
 import { exploredReserve, exploringSceneId, LIMITS, MOST_SIGHT_HOLDERS, NO_ROOM_TO_EXPLORE, serializedBytes, utf8Bytes, type LimitCheck } from "#shared/limits.ts";
-import type { RoomState, Scene } from "#shared/model.ts";
-import { perPlayerScene } from "#shared/project.ts";
+import type { RoomState, Scene, Viewer } from "#shared/model.ts";
+import { chunkPositions, perPlayerScene } from "#shared/project.ts";
+import { keepsMemory } from "#shared/reducer/memory.ts";
 import { encodeTile, fullTileBits, tilesAcross } from "#shared/rules/fog.ts";
 import { sightEntryMaxBytes } from "#shared/rules/vision.ts";
 import { isWritable } from "#shared/writable.ts";
+import { keyBytes, MEMORY_CAP, wallLargestBytes } from "./memorySize.ts";
 
 /**
  * The byte limits of design 10.5 (8 MiB of serialized state, 3 MiB per
@@ -100,15 +102,46 @@ export class SizeGuard {
   #state: Measure | null = null;
   /** Each scene's own part (sceneOwnBytes), measured at the first check. */
   #scenes: Map<string, Measure> | null = null;
+  /**
+   * The room-wide share of players' memory (docs/design-v1-map-discovery.md
+   * 5.5), worked out at the last exact measure and never on the growth
+   * bound, so it is a function of the stored state and that measure alone.
+   */
+  #share = MEMORY_CAP;
+  /** The share fell since the actor last asked, so the map step measures every layer against it. */
+  #lowered = false;
 
   constructor(opts: { stateLimit?: number; sceneLimit?: number } = {}) {
     this.stateLimit = opts.stateLimit ?? LIMITS.stateBytes;
     this.sceneLimit = opts.sceneLimit ?? LIMITS.projectedSceneBytes;
   }
 
-  /** An exact measurement from outside, such as the snapshot just written. */
-  stateMeasured(bytes: number): void {
+  /** An exact measurement from outside, such as the snapshot just written, and with the state it measured, the share it gives. */
+  stateMeasured(bytes: number, state?: RoomState): void {
     this.#state = { bytes, growth: 0 };
+    if (state) this.#setShare(memoryShare(this.stateLimit, bytes, exploredReserve(state), memoryReserves(state)));
+  }
+
+  /** The room-wide share of players' memory now, in charged bytes per layer. */
+  get share(): number {
+    return this.#share;
+  }
+
+  /** A layer's cap on a scene now (memoryCapOf). */
+  memoryCap(state: RoomState, scene: Scene): number {
+    return memoryCapOf(state, scene, this.#share);
+  }
+
+  /** Whether the share fell since the last ask, which the map step answers by forgetting every layer above it. */
+  takeShareLowered(): boolean {
+    const lowered = this.#lowered;
+    this.#lowered = false;
+    return lowered;
+  }
+
+  #setShare(share: number): void {
+    if (share < this.#share) this.#lowered = true;
+    this.#share = share;
   }
 
   /**
@@ -131,34 +164,68 @@ export class SizeGuard {
    *
    * An op that makes a scene per player, whose refusal comes of the room
    * per-player sight needs there (docs/design-v1-per-player-vision.md 6.8),
-   * says so in the DM's words (PER_PLAYER_FULL).
+   * says so in the DM's words (PER_PLAYER_FULL). One that reserves players'
+   * memory where it does not fit says that (MEMORY_FULL,
+   * docs/design-v1-map-discovery.md 5.5).
+   *
+   * `role` is the sender's: a player's op is judged without what players'
+   * copies may hold beyond the DM's (discoveryReserve), as before map
+   * discovery, so a scene over its limit by those alone still takes their
+   * moves (5.5). A DM's growing edit there gets SCENE_MAPS_FULL.
    */
-  check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState): LimitCheck {
-    const answer = this.#check(next, sceneIds, growth, before);
+  check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState, role: Viewer["role"] = "dm"): LimitCheck {
+    const answer = this.#check(next, sceneIds, growth, before, role);
     if (answer.ok || before === undefined) return answer;
     const switched = Object.values(next.scenes).filter((scene) => perPlayerScene(scene) && !perPlayerScene(before.scenes[scene.id]));
-    if (switched.length === 0) return answer;
-    const plain = { ...next, scenes: { ...next.scenes } };
-    for (const scene of switched) {
-      const { perPlayer: _perPlayer, ...vision } = scene.vision!;
-      plain.scenes[scene.id] = { ...scene, vision };
+    if (switched.length > 0) {
+      const plain = { ...next, scenes: { ...next.scenes } };
+      for (const scene of switched) {
+        const { perPlayer: _perPlayer, ...vision } = scene.vision!;
+        plain.scenes[scene.id] = { ...scene, vision };
+      }
+      const fits = new SizeGuard({ stateLimit: this.stateLimit, sceneLimit: this.sceneLimit }).#check(plain, sceneIds, growth, before, role).ok;
+      if (fits) return { ok: false, code: "quota", message: PER_PLAYER_FULL };
     }
-    const fits = new SizeGuard({ stateLimit: this.stateLimit, sceneLimit: this.sceneLimit }).#check(plain, sceneIds, growth, before).ok;
-    return fits ? { ok: false, code: "quota", message: PER_PLAYER_FULL } : answer;
+    const reserving = new Set<string>();
+    for (const scene of Object.values(next.scenes)) {
+      if (!memoryReserved(next, scene)) continue;
+      const was = before.scenes[scene.id];
+      if (!was || !memoryReserved(before, was) || memoryLayerCount(next, scene) > memoryLayerCount(before, was)) reserving.add(scene.id);
+    }
+    // Moving players to a scene the room cannot explore names that remedy, which frees the memory reserve too, unless
+    // only the memory reserve grew, as on a move from a played scene to another the room explores at the same cost.
+    const memoryGrew = memoryStateReserve(next) > memoryStateReserve(before) && exploredReserve(next) <= exploredReserve(before);
+    if (answer.message === NO_ROOM_TO_EXPLORE && !memoryGrew) return answer;
+    if (reserving.size > 0) {
+      const without = new SizeGuard({ stateLimit: this.stateLimit, sceneLimit: this.sceneLimit }).#check(next, sceneIds, growth, before, role, reserving);
+      if (without.ok) return { ok: false, code: "quota", message: MEMORY_FULL };
+      // Moving players to a scene that needs both its memory and its exploring room names exploring's remedy, which frees both.
+      if (without.message === NO_ROOM_TO_EXPLORE) return without;
+    }
+    return answer;
   }
 
-  #check(next: RoomState, sceneIds: readonly string[], growth: number, before?: RoomState): LimitCheck {
+  /** The check itself. `unreserved` names scenes whose memory reserves it leaves out, to tell whether they alone refuse. */
+  #check(next: RoomState, sceneIds: readonly string[], growth: number, before: RoomState | undefined, role: Viewer["role"], unreserved?: ReadonlySet<string>): LimitCheck {
     const updates: Array<() => void> = [];
     const exploring = exploringSceneId(next);
     const newlyExploring = exploring !== null && before !== undefined && exploringSceneId(before) !== exploring;
     const reserve = exploredReserve(next);
+    const memory = memoryReserves(next, unreserved);
     const state = this.#state;
-    if (!state || state.bytes + state.growth + growth + reserve > this.stateLimit) {
+    let share = this.#share;
+    if (!state || state.bytes + state.growth + growth + reserve + memory.whole + memory.sharing * share > this.stateLimit) {
       const bytes = measuredStateBytes(next);
-      if (bytes + reserve > this.stateLimit) {
-        return newlyExploring && bytes <= this.stateLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : roomFull(this.stateLimit);
+      share = memoryShare(this.stateLimit, bytes, reserve, memory);
+      const held = memory.whole + memory.sharing * share;
+      if (bytes + reserve + held > this.stateLimit) {
+        return newlyExploring && bytes + held <= this.stateLimit ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : roomFull(this.stateLimit);
       }
-      updates.push(() => this.stateMeasured(bytes));
+      const exact = share;
+      updates.push(() => {
+        this.stateMeasured(bytes);
+        this.#setShare(exact);
+      });
     } else {
       updates.push(() => {
         state.growth += growth;
@@ -171,17 +238,20 @@ export class SizeGuard {
     for (const scene of Object.values(next.scenes)) {
       const sight = sightReserve(scene) + perPlayerSceneReserve(next, scene);
       const explored = scene.id === exploring ? reserve : 0;
+      const maps = role === "player" ? 0 : discoveryReserve(next, scene, share, !unreserved?.has(scene.id));
       const measure = scenes.get(scene.id);
       const added = touched.has(scene.id) ? growth : 0;
-      if (measure && SHELL_BYTES + room + measure.bytes + measure.growth + added + sight + explored <= this.sceneLimit) {
+      if (measure && SHELL_BYTES + room + measure.bytes + measure.growth + added + sight + explored + maps <= this.sceneLimit) {
         if (added > 0) updates.push(() => (measure.growth += added));
         continue;
       }
       const own = sceneOwnBytes(next, scene.id);
-      const need = SHELL_BYTES + room + own + sight + explored;
-      if (need > this.sceneLimit && (before === undefined ? touched.has(scene.id) || (newlyExploring && scene.id === exploring) : need > neededBefore(before, scene.id))) {
-        const exploringHere = newlyExploring && scene.id === exploring && SHELL_BYTES + room + own + sight <= this.sceneLimit;
-        return exploringHere ? { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE } : sceneFull(this.sceneLimit);
+      const need = SHELL_BYTES + room + own + sight + explored + maps;
+      if (need > this.sceneLimit && (before === undefined ? touched.has(scene.id) || (newlyExploring && scene.id === exploring) : need > neededBefore(before, scene.id, share, role))) {
+        const exploringHere = newlyExploring && scene.id === exploring && SHELL_BYTES + room + own + sight + maps <= this.sceneLimit;
+        if (exploringHere) return { ok: false, code: "quota", message: NO_ROOM_TO_EXPLORE };
+        // Over only by what players' copies may hold beyond the DM's, which the DM can make room for.
+        return maps > 0 && need - maps <= this.sceneLimit ? { ok: false, code: "quota", message: SCENE_MAPS_FULL } : sceneFull(this.sceneLimit);
       }
       updates.push(() => scenes.set(scene.id, { bytes: own, growth: 0 }));
     }
@@ -252,18 +322,21 @@ export function touchedScenes(before: RoomState, after: RoomState, touched: read
  * it adds to it. A scene the op made has none. Only asked of a scene over
  * its limit, which a room reaches rarely.
  */
-function neededBefore(before: RoomState, sceneId: string): number {
-  return before.scenes[sceneId] ? projectedSceneBytes(before, sceneId) : 0;
+function neededBefore(before: RoomState, sceneId: string, share: number, role: Viewer["role"]): number {
+  return before.scenes[sceneId] ? projectedSceneBytes(before, sceneId, share, role) : 0;
 }
 
 /**
  * A scene's whole measure (design 10.5): a DM's projection of it as the
- * checks count it, with every reserve, the room-level part included.
+ * checks count it, with every reserve, the room-level part included, and
+ * for a DM's op what players' copies may hold beyond it
+ * (docs/design-v1-map-discovery.md 5.5).
  */
-export function projectedSceneBytes(state: RoomState, sceneId: string): number {
+export function projectedSceneBytes(state: RoomState, sceneId: string, share: number = MEMORY_CAP, role: Viewer["role"] = "dm"): number {
   const scene = state.scenes[sceneId]!;
   const explored = exploringSceneId(state) === sceneId ? exploredReserve(state) : 0;
-  return SHELL_BYTES + roomLevelBytes(state) + sceneOwnBytes(state, sceneId) + sightReserve(scene) + perPlayerSceneReserve(state, scene) + explored;
+  const maps = role === "player" ? 0 : discoveryReserve(state, scene, share);
+  return SHELL_BYTES + roomLevelBytes(state) + sceneOwnBytes(state, sceneId) + sightReserve(scene) + perPlayerSceneReserve(state, scene) + explored + maps;
 }
 
 /** The most a vision scene's sight tiles can add to its projection, from its own key (section 4.3.4). */
@@ -648,6 +721,177 @@ function fogPastBounds(fogTiles: RoomState["fogTiles"], scene: Scene): number {
 }
 
 // ---------------------------------------------------------------------------
+// Map discovery's reserves (docs/design-v1-map-discovery.md 5.5)
+
+/**
+ * The refusal of an op that would reserve players' memory where the room
+ * has no room for it (5.5): Players see, a new Explore scene, Move players,
+ * the copy sheet and Duplicate with Fog.
+ */
+export const MEMORY_FULL = "The room is too full to keep players' maps of this scene. Delete unused scenes to free space.";
+
+/**
+ * The refusal of a DM's edit that grows a scene already past its limit
+ * only by what players' copies of it may hold (5.5): its walls cut into
+ * pieces, its chunk positions and players' memory of it.
+ */
+export const SCENE_MAPS_FULL = "This scene is too full for players' maps of it. Remove walls or stamps to make room.";
+
+/**
+ * Whether players' memory of a scene is reserved (5.5, rule 8): fog and
+ * party vision on, and the scene the players' scene or carrying the played
+ * mark. Read from the scene and the public marks alone, never from an
+ * explored layer or a memory.
+ */
+export function memoryReserved(state: RoomState, scene: Scene): boolean {
+  return keepsMemory(scene) && (state.playedScenes?.[scene.id] !== undefined || state.meta.playerSceneId === scene.id);
+}
+
+/** The layers a reserved scene's memory counts: the party's, and on a per-player scene one for each player on the roster, up to 6. */
+function memoryLayerCount(state: RoomState, scene: Scene): number {
+  return 1 + (perPlayerScene(scene) ? rosterIds(state.members).players.length : 0);
+}
+
+/** Whether a reserved scene's memory shares the room's free space (`memoryShared`), rather than taking its whole cap. */
+function sharesRoom(state: RoomState, scene: Scene): boolean {
+  return state.memoryShared?.[scene.id] !== undefined;
+}
+
+/** What players' memory reserves in the stored state: every whole cap, and how many layers share the rest. */
+export type MemoryReserves = { whole: number; sharing: number };
+
+export function memoryReserves(state: RoomState, except?: ReadonlySet<string>): MemoryReserves {
+  let whole = 0;
+  let sharing = 0;
+  for (const scene of Object.values(state.scenes)) {
+    if (except?.has(scene.id) || !memoryReserved(state, scene)) continue;
+    const layers = memoryLayerCount(state, scene);
+    if (sharesRoom(state, scene)) sharing += layers;
+    else whole += layers * MEMORY_CAP;
+  }
+  return { whole, sharing };
+}
+
+/**
+ * The room-wide share (5.5, MD-O-14): the room's free space without the
+ * shared reserves split equally over their layers, at most a whole cap,
+ * so no room becomes full at deploy. A pure function of the exact measure
+ * and the stored state, so a reload gives the same share.
+ */
+export function memoryShare(stateLimit: number, measured: number, explored: number, reserves: MemoryReserves): number {
+  if (reserves.sharing === 0) return MEMORY_CAP;
+  const free = stateLimit - measured - explored - reserves.whole;
+  return Math.max(0, Math.min(MEMORY_CAP, Math.floor(free / reserves.sharing)));
+}
+
+/** A layer's cap on a scene: a whole cap, its share where it shares the room's space, or 0 where memory is not reserved, so the map step forgets it all. */
+export function memoryCapOf(state: RoomState, scene: Scene, share: number): number {
+  if (!memoryReserved(state, scene)) return 0;
+  return sharesRoom(state, scene) ? share : MEMORY_CAP;
+}
+
+/**
+ * One chunk position of a player's copy at its widest beyond what the
+ * DM's chunk holds there (5.5): a stub's header and its empty records, the
+ * fields only a player's chunk carries at their longest, and `grid` on a
+ * hex scene, with its key and comma.
+ */
+const positionsKept = new WeakMap<Scene, number>();
+
+/** Every chunk position of a scene at its widest (positionBytes), one past its east and south sides included, kept per scene object. */
+function positionsReserve(scene: Scene): number {
+  let bytes = positionsKept.get(scene);
+  if (bytes === undefined) {
+    bytes = chunkPositions(scene).length * positionBytes(scene);
+    if (!isWritable(scene)) positionsKept.set(scene, bytes);
+  }
+  return bytes;
+}
+
+function positionBytes(scene: Scene): number {
+  const most = 99;
+  const stub: Record<string, unknown> = { sceneId: scene.id, cx: most, cy: most, rev: 0, cells: {}, edges: {}, walls: [], known: "x".repeat(KNOWN_CHARS), auto: "x".repeat(AUTO_CHARS), upDir: "x".repeat(UP_DIR_CHARS) };
+  if (scene.gridShape !== undefined) stub.grid = scene.gridShape;
+  return keyBytes(chunkKey(scene.id, most, most)) + serializedBytes(stub);
+}
+
+/*
+ * What each free wall can add beyond its stored bytes in a player's copy
+ * (memorySize.ts wallLargestBytes), kept per chunk object with the scene's
+ * shape, and summed per scene once per chunk collection, which the reducer
+ * replaces and never changes.
+ */
+const wallExtras = new WeakMap<BuildChunk, { sig: string; bytes: number }>();
+const sceneWallExtras = new WeakMap<object, WeakMap<Scene, number>>();
+
+function chunkWallExtra(scene: Scene, chunk: BuildChunk): number {
+  const sig = `${scene.bounds.w}x${scene.bounds.h}|${scene.gridShape ?? "squares"}`;
+  const hit = wallExtras.get(chunk);
+  if (hit && hit.sig === sig) return hit.bytes;
+  let bytes = 0;
+  for (const wall of chunk.walls ?? []) bytes += Math.max(0, wallLargestBytes(scene, wall) - serializedBytes(wall) - 1);
+  if (!isWritable(chunk)) wallExtras.set(chunk, { sig, bytes });
+  return bytes;
+}
+
+const chunksByScene = new WeakMap<object, Map<string, BuildChunk[]>>();
+
+function sceneChunks(all: RoomState["buildChunks"], sceneId: string): readonly BuildChunk[] {
+  let grouped = isWritable(all) ? undefined : chunksByScene.get(all);
+  if (!grouped) {
+    grouped = new Map();
+    for (const chunk of Object.values(all)) {
+      if (!chunk) continue;
+      let list = grouped.get(chunk.sceneId);
+      if (!list) grouped.set(chunk.sceneId, (list = []));
+      list.push(chunk);
+    }
+    if (!isWritable(all)) chunksByScene.set(all, grouped);
+  }
+  return grouped.get(sceneId) ?? [];
+}
+
+function wallsExtra(state: RoomState, scene: Scene): number {
+  let byScene = isWritable(state.buildChunks) ? undefined : sceneWallExtras.get(state.buildChunks);
+  const hit = byScene?.get(scene);
+  if (hit !== undefined) return hit;
+  let bytes = 0;
+  for (const chunk of sceneChunks(state.buildChunks, scene.id)) bytes += chunkWallExtra(scene, chunk);
+  if (!isWritable(state.buildChunks) && !isWritable(scene)) {
+    if (!byScene) sceneWallExtras.set(state.buildChunks, (byScene = new WeakMap()));
+    byScene.set(scene, bytes);
+  }
+  return bytes;
+}
+
+/**
+ * What players' copies of a scene may hold beyond the DM's (5.5), read
+ * from the scene, its walls and the public marks alone: on a scene with
+ * fog on, each free wall at its largest form and every chunk position at
+ * its widest, and where memory is reserved, the memory a copy reads at its
+ * cap, the party's and on a per-player scene a holder's own too.
+ */
+export function discoveryReserve(state: RoomState, scene: Scene, share: number, withMemory = true): number {
+  let bytes = 0;
+  if (scene.fogEnabled) bytes += wallsExtra(state, scene) + positionsReserve(scene);
+  const cap = withMemory ? memoryCapOf(state, scene, share) : 0;
+  if (cap > 0) bytes += cap * (perPlayerScene(scene) ? 2 : 1);
+  return bytes;
+}
+
+/** What players' memory reserves in the stored state at a share: every whole cap, and each sharing layer's share. */
+export function memoryStateReserve(state: RoomState, share: number = MEMORY_CAP): number {
+  const reserves = memoryReserves(state);
+  return reserves.whole + reserves.sharing * share;
+}
+
+/** The bytes the stored state's memory takes, which no measure counts: memory counts at its cap or its share instead (rule 8). */
+function memoryStoredBytes(state: RoomState): number {
+  const of = (collection: Record<string, unknown> | undefined) => (collection ? collectionBytes(collection) - 2 : 0);
+  return of(state.memory) + of(state.memoryBy);
+}
+
+// ---------------------------------------------------------------------------
 // The traps' reserves (docs/design-v1-traps.md 6.7, Appendix B)
 
 /** Per trap, the small fields the reducer writes and `noticedBy` (160), and its actions' and stop's slack (100). */
@@ -728,10 +972,14 @@ function trapsMeasure(state: RoomState): number {
  * traps by their measures and reserves. The log's lines only some viewers
  * or none read and the record of a turn's reminders (RoomState.reminded)
  * ride outside, under bounds of their own, so no player's op ever passes
- * or fails by what they cannot read.
+ * or fails by what they cannot read. So does players' memory, which the
+ * guard reserves at its caps and its share (docs/design-v1-map-discovery.md
+ * 5.5), whatever it holds.
  */
 export function measuredStateBytes(state: RoomState): number {
-  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined }) + trapsMeasure(state) - privateStateBytes(state) + perPlayerStoredReserve(state);
+  const memory = state.memory === undefined ? {} : { memory: {} };
+  const memoryBy = state.memoryBy === undefined ? {} : { memoryBy: {} };
+  return serializedBytes({ ...state, log: measuredLog(state.log), traps: {}, trapLog: [], trapSeen: [], reminded: undefined, ...memory, ...memoryBy }) + trapsMeasure(state) - privateStateBytes(state) + perPlayerStoredReserve(state);
 }
 
 /**
@@ -747,7 +995,7 @@ export function measuredFromStored(bytes: number, state: RoomState): number {
   const roomLog = measuredLog(state.log);
   // The record's field, `,"reminded":{…}`, is its object's bytes less the braces, and the comma before it.
   const reminded = state.reminded === undefined ? 0 : serializedBytes({ reminded: state.reminded }) - 1;
-  const outside = reminded + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state);
+  const outside = reminded + (roomLog === state.log ? 0 : collectionBytes(state.log) - collectionBytes(roomLog)) + privateStateBytes(state) - perPlayerStoredReserve(state) + memoryStoredBytes(state);
   if (Object.keys(traps).length === 0 && log.length === 0 && seen.length === 0) return bytes - outside;
   return bytes - outside - (collectionBytes(traps) - 2) - (collectionBytes(log) - 2) - (collectionBytes(seen) - 2) + trapsMeasure(state);
 }
@@ -885,6 +1133,8 @@ export function growthBound(before: RoomState, after: RoomState, touched: readon
     if ((parsed?.kind === "trapLog" || parsed?.kind === "trapSeen") && trapped) continue;
     // The log's lines only some viewers or none read ride outside the measures.
     if (parsed?.kind === "log" && lineAudience(next as LogEntry) !== "shared") continue;
+    // Players' memory counts at its caps and its share, which the reserves hold whatever it writes (docs/design-v1-map-discovery.md 5.5).
+    if (parsed?.kind === "memory" || parsed?.kind === "memoryBy") continue;
     const prev = readEntity(before, key);
     const added = prev === null || prev === undefined || sceneOf(prev) !== sceneOf(next);
     const size = (value: unknown) => (parsed?.kind === "trap" ? trapMeasure(value as Trap) + pitGrowth(value as Trap) : serializedBytes(value) - namesOf(parsed?.kind, value));
