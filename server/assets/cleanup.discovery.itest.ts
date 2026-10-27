@@ -77,7 +77,7 @@ describe("deleting an image only players remember (D-261026-34)", () => {
   });
   after(() => t.close());
 
-  type Remembering = { roomId: string; mat: string; sceneId: string; socket: Socket; dm: TestClient; player: string; image: string };
+  type Remembering = { roomId: string; mat: string; sceneId: string; socket: Socket; dm: TestClient; player: string; image: string; stamps: { party: string; own: string; shipped: string } };
 
   async function upload(dm: TestClient, roomId: string): Promise<string> {
     const bytes = await solid(64, 64, `#${randomBytes(3).toString("hex")}`).png().toBuffer();
@@ -113,7 +113,7 @@ describe("deleting an image only players remember (D-261026-34)", () => {
       ],
     });
     assert.deepEqual(rememberedArt(actor.committed.state, sceneId), { party: [image, "oak-tree"].sort(), [player]: [image] });
-    return { roomId, mat, sceneId, socket, dm, player, image };
+    return { roomId, mat, sceneId, socket, dm, player, image, stamps: { party, own, shipped } };
   }
 
   const inUse = async (dm: TestClient, roomId: string, id: string) => (await dm.get(`/api/rooms/${roomId}/assets`)).json<{ assets: Array<{ id: string; inUse?: boolean }> }>().assets.find((a) => a.id === id)?.inUse;
@@ -141,6 +141,25 @@ describe("deleting an image only players remember (D-261026-34)", () => {
     const loaded = await loadRoom(t.pool, roomId);
     assert.ok(loaded && !loaded.replayFailed);
     assert.deepEqual(rememberedArt(loaded.state, sceneId), { party: ["oak-tree"] });
+  });
+
+  test("a remembered stamp of it whose id now stands live with other art they never saw is remembered as absent, so that art never shows (MD3-ASTRA-3)", async () => {
+    const { roomId, sceneId, socket, dm, player, image, stamps } = await rememberingRoom();
+    // The DM gives the party's remembered stamp other art, out of everyone's sight: memory keeps the image.
+    const { rev: _rev, sceneId: _scene, ...put } = remembered(stamps.party, sceneId, { key: "barrel" });
+    assert.equal((await socket.apply({ t: "build.stamps", sceneId, put: [put] })).rejects, undefined);
+    const before = t.manager.get(roomId)!.committed.state;
+    assert.deepEqual(rememberedArt(before, sceneId), { party: [image, "oak-tree"].sort(), [player]: [image] }, "memory keeps what they saw");
+    const res = await dm.post(`/api/rooms/${roomId}/assets/delete`, { ids: [image] });
+    assert.equal(res.statusCode, 200, res.body);
+    const state = t.manager.get(roomId)!.committed.state;
+    const party = Object.values(state.memory ?? {}).find((c) => c.sceneId === sceneId)!;
+    assert.ok(Object.hasOwn(party.stamps ?? {}, stamps.party) && party.stamps![stamps.party] === null, "an absence, so the live barrel does not show");
+    assert.deepEqual(state.stamps[stamps.party]?.art, { key: "barrel" });
+    // The holder's stamp of it stands nowhere live, so it simply goes.
+    assert.deepEqual(rememberedArt(state, sceneId), { party: ["oak-tree"] });
+    assert.ok(!Object.values(state.memoryBy ?? {}).some((c) => c.stamps && Object.hasOwn(c.stamps, stamps.own)));
+    assert.equal(await rowExists(image), false);
   });
 
   test("a live use still refuses the delete, and players keep what they remember", async () => {

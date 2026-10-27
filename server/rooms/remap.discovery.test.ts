@@ -169,6 +169,22 @@ describe("an import of players' memory", () => {
     assert.equal(out.memory![chunkKey(scene("s3"), 0, 0)], undefined);
   });
 
+  test("a remembered stamp whose art did not come through, of a live stamp they never saw as it is, is remembered as absent, so the live art never shows (MD3-ASTRA-3)", () => {
+    const state = remembering();
+    state.stamps.T4 = stamp("T4", "s1", { key: "oak-tree" }, { x: 7.5 });
+    state.stamps.T5 = stamp("T5", "s1", { key: "barrel" }, { x: 8.5 });
+    const party = state.memory![chunkKey("s1", 0, 0)]!;
+    state.memory![chunkKey("s1", 0, 0)] = { ...party, stamps: { ...party.stamps, T4: stamp("T4", "s1", { assetId: "a-lost" }, { x: 7.5 }), T5: stamp("T5", "s1", { assetId: "a-map" }, { x: 8.5 }) } };
+    const { out, scene } = imported(state);
+    const stamps = out.memory![chunkKey(scene("s1"), 0, 0)]!.stamps!;
+    for (const old of ["T4", "T5"]) {
+      const live = Object.values(out.stamps).find((s) => s.x === state.stamps[old]!.x)!;
+      assert.ok(live, `${old} came through live`);
+      assert.ok(Object.hasOwn(stamps, live.id) && stamps[live.id] === null, `${old}: remembered as absent, not dropped`);
+    }
+    assert.ok(parseRoomState(out).ok, "the store takes it");
+  });
+
   test("keeps a holder's memory only where their entry is on, under their new id, and drops it with their layer otherwise", () => {
     const { out, scene, member } = imported(remembering());
     const s1 = scene("s1");

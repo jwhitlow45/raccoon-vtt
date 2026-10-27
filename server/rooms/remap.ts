@@ -767,11 +767,16 @@ function remapMemory(
         next[id] = null;
         continue;
       }
-      if (out.stamps[id]?.visibility === "dm") continue;
+      const live = out.stamps[id]?.sceneId === sceneId ? out.stamps[id] : undefined;
+      if (live?.visibility === "dm") continue;
       let art = value.art;
       if ("assetId" in art) {
         const mapped = tokenArt(art.assetId);
-        if (mapped === undefined) continue;
+        if (mapped === undefined) {
+          // Dropping the entry would show the live stamp, which they never saw: they remember none there instead.
+          if (live) next[id] = null;
+          continue;
+        }
         art = { assetId: mapped };
       }
       next[id] = { ...value, id, sceneId, art };

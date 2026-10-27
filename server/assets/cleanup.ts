@@ -249,9 +249,12 @@ async function forgetRememberedImages(deps: CleanupDeps, roomId: string, request
 type RememberOp = Extract<ServerOnlyOp, { t: "sys.remember" }>;
 
 /**
- * One `sys.remember` per scene that drops each remembered stamp whose art is
- * one of these images, from every layer that holds one: scenes in id order,
- * the party's layer before each holder's in id order, chunks in row order.
+ * One `sys.remember` per scene that takes each remembered stamp whose art is
+ * one of these images out of every layer that holds one: scenes in id
+ * order, the party's layer before each holder's in id order, chunks in row
+ * order. Where a live stamp of that id stands on the scene, which players
+ * never saw as it is, the entry becomes a remembered absence rather than
+ * going, since without it their map would show the live stamp (MD3-ASTRA-3).
  */
 export function forgetRememberedStamps(state: RoomState, ids: ReadonlySet<string>): RememberOp[] {
   const scenes = new Map<string, Map<string, RememberOp["layers"][number]>>();
@@ -266,7 +269,15 @@ export function forgetRememberedStamps(state: RoomState, ids: ReadonlySet<string
     const owner = chunk.memberId ?? "";
     let layer = layers.get(owner);
     if (!layer) layers.set(owner, (layer = { ...(chunk.memberId !== undefined ? { memberId: chunk.memberId } : {}), chunks: [] }));
-    layer.chunks.push({ cx: chunk.cx, cy: chunk.cy, drop: { stamps } });
+    const shown = (id: string) => state.stamps[id]?.sceneId === chunk.sceneId;
+    const drop = stamps.filter((id) => !shown(id));
+    const absent = stamps.filter(shown);
+    layer.chunks.push({
+      cx: chunk.cx,
+      cy: chunk.cy,
+      ...(drop.length > 0 ? { drop: { stamps: drop } } : {}),
+      ...(absent.length > 0 ? { set: { stamps: Object.fromEntries(absent.map((id) => [id, null])) } } : {}),
+    });
   };
   for (const chunk of Object.values(state.memory ?? {})) visit(chunk);
   for (const chunk of Object.values(state.memoryBy ?? {})) visit(chunk);
