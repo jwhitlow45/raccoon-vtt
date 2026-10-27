@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ISO_TEST_FLAG } from "../../features/view/choice.ts";
 import { pickView, turnView, type ViewPick } from "../../features/view/store.ts";
 import type { Turn } from "../../lib/view.ts";
@@ -55,18 +55,35 @@ export function installHook(hook: Hook): () => void {
   };
 }
 
-/** The layout the board on screen made last, while the test flag is set: a View as a player board over the DM's makes its own after. */
-let lastLayout: BoardLayout | null = null;
+/** Each mounted board's last layout, the newest board last: a View as a player board over the DM's is the one the hook reads while it stands, as it takes the hook. */
+const boards: { layout: BoardLayout | null }[] = [];
 
-/** Keeps the board's layout for the hook, with the test flag only: anything else costs nothing. */
-export function reportLayout(items: readonly Item[], volumes: VolumesNow | null, rings: ReadonlyMap<string, readonly string[]> | null): void {
-  if (!flagged()) return;
-  const order: BoardLayout["order"] = [];
-  for (const item of items) {
-    if (item.kind === "standee") order.push({ kind: "standee", id: item.id });
-    else for (const p of item.pieces) if (p.kind === "volume") order.push({ kind: "band", area: p.area, band: p.band });
-  }
-  lastLayout = { order, standing: [...(volumes?.standing ?? [])].sort(), waiting: volumes?.waiting ?? false, rings: Object.fromEntries([...(rings ?? [])].map(([id, colors]) => [id, [...colors]])) };
+/** What a board reports its layout through: with the test flag only, so anything else costs nothing. */
+export type LayoutReport = (items: readonly Item[], volumes: VolumesNow | null, rings: ReadonlyMap<string, readonly string[]> | null) => void;
+
+const NO_REPORT: LayoutReport = () => {};
+
+/** A board's place among the boards the hook reads, for as long as it is mounted. */
+export function useLayoutReport(): LayoutReport {
+  const on = flagged();
+  const slot = useRef<{ layout: BoardLayout | null } | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    const mine = (slot.current ??= { layout: null });
+    boards.push(mine);
+    return () => {
+      boards.splice(boards.indexOf(mine), 1);
+    };
+  }, [on]);
+  if (!on) return NO_REPORT;
+  return (items, volumes, rings) => {
+    const order: BoardLayout["order"] = [];
+    for (const item of items) {
+      if (item.kind === "standee") order.push({ kind: "standee", id: item.id });
+      else for (const p of item.pieces) if (p.kind === "volume") order.push({ kind: "band", area: p.area, band: p.band });
+    }
+    (slot.current ??= { layout: null }).layout = { order, standing: [...(volumes?.standing ?? [])].sort(), waiting: volumes?.waiting ?? false, rings: Object.fromEntries([...(rings ?? [])].map(([id, colors]) => [id, [...colors]])) };
+  };
 }
 
 /** Installs `__rvttIsoHook` while the test flag is set. */
@@ -77,7 +94,7 @@ export function useIsoTestHook(key: string, sceneId: string): void {
     return installHook({
       pick: (pick) => pickView(key, pick === "follow" ? null : pick),
       turn: (turn) => turnView(key, sceneId, turn),
-      layout: () => lastLayout,
+      layout: () => boards.at(-1)?.layout ?? null,
     });
   }, [on, key, sceneId]);
 }

@@ -20,6 +20,7 @@ export const VolumeShape = memo(function VolumeShape(props: { pieces: readonly V
   if (pieces.length === 0) return null;
   return (
     <Shape
+      name="areaVolume"
       listening={false}
       perfectDrawEnabled={false}
       sceneFunc={(ctx, shape) => {

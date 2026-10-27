@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
-import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { isometric, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
 
@@ -20,6 +20,11 @@ import { isometric, toWorld, type Turn, type ViewPoint } from "../client/lib/vie
  * The DM's and Pat's pages also carry the test flag, which installs the
  * hook the input cases pick and turn with (client/canvas/relief/isoTest.ts).
  * A plain browser checks that the choice is there without it.
+ *
+ * The ISOA steps are areas standing as their real shapes
+ * (docs/design-v1-iso-area-shapes.md 8, lane ISOA-2), read through the
+ * hook's layout of the board (relief/isoTest.ts): which areas stand, the
+ * order their bands and the standees draw in, and the rings at bases.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus five, as
  * size.e2e.ts does, since the runs never overlap. The other environment
@@ -278,6 +283,85 @@ async function standeeAt(page: Page, tokenId: string): Promise<{ x: number; y: n
   }, tokenId);
   assert.ok(at, `${tokenId} stands on the board`);
   return at;
+}
+
+
+// ---------------------------------------------------------------- areas standing as their real shapes (lane ISOA-2)
+
+/** The cavern: fog on and all of it revealed to Pat, Pat's Thorn in his Spirit Guardians, a bat in a 20 ft sphere 10 ft up, and a goblin under a cone aimed 40 degrees up. */
+const cavern = { sceneId: "", thorn: randomUUID(), bat: randomUUID(), archer: randomUUID(), goblin: randomUUID(), sphere: randomUUID(), guardians: randomUUID(), cone: randomUUID(), secret: randomUUID(), field: "" };
+const SPHERE = "#3fa7ff";
+const GUARDIANS = "#8e4ec6";
+const CONE = "#f38400";
+
+/** The board's depth list as the test hook gives it (relief/isoTest.ts BoardLayout). */
+type BoardLayout = { order: ({ kind: "standee"; id: string } | { kind: "band"; area: string; band: number })[]; standing: string[]; waiting: boolean; rings: Record<string, string[]> };
+
+function boardLayout(page: Page): Promise<BoardLayout | null> {
+  return page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { layout?(): unknown } }).__rvttIsoHook?.layout?.() ?? null) as Promise<BoardLayout | null>;
+}
+
+async function layoutWhen(page: Page, what: string, ok: (l: BoardLayout) => boolean, timeoutMs = 15_000): Promise<BoardLayout> {
+  let last: BoardLayout | null = null;
+  try {
+    return await waitFor(what, async () => ((last = await boardLayout(page)) && ok(last) ? last : null), timeoutMs);
+  } catch (err) {
+    throw new Error(`${(err as Error).message}: ${JSON.stringify(last)}`);
+  }
+}
+
+/** Whether a standee draws between an area's bands: some of them before it and some after. */
+function between(l: BoardLayout, area: string, id: string): boolean {
+  const at = l.order.findIndex((e) => e.kind === "standee" && e.id === id);
+  const bands = l.order.map((e, i) => (e.kind === "band" && e.area === area ? i : -1)).filter((i) => i >= 0);
+  return at >= 0 && bands.some((i) => i < at) && bands.some((i) => i > at);
+}
+
+/** The middles on the page of a standee's own ring and of the caught rings round it (TokenNode.tsx CaughtRing). */
+function ringMiddles(page: Page, tokenId: string): Promise<{ own: { x: number; y: number } | null; caught: { x: number; y: number }[] }> {
+  return page.evaluate((id) => {
+    type Node = { getClientRect(): { x: number; y: number; width: number; height: number }; find(s: string): Node[] };
+    type Stage = { width(): number; visible(): boolean; listening(): boolean; findOne(s: string): Node | undefined };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const main = konva.stages.find((s) => s.width() > 0 && s.visible() && s.listening());
+    const node = main?.findOne(`#${id}`);
+    const mid = (n: Node) => {
+      const r = n.getClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    };
+    const own = node?.find(".standeeRing")[0];
+    return { own: own ? mid(own) : null, caught: (node?.find(".caughtRing") ?? []).map(mid) };
+  }, tokenId);
+}
+
+/** The areas' volumes in the drag layer, each as the place among the layer's children of the part holding it, and the place of the group local drags move standees into. */
+function dragVolumes(page: Page): Promise<{ volumes: number[]; dragGround: number }> {
+  return page.evaluate(() => {
+    type Node = { getParent(): Node | null; name(): string; getChildren(): Node[]; find(s: string): Node[]; zIndex(): number };
+    type Stage = { width(): number; visible(): boolean; listening(): boolean; getLayers(): Node[] };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const main = konva.stages.find((s) => s.width() > 0 && s.visible() && s.listening());
+    const drag = main?.getLayers()[1];
+    if (!drag) return { volumes: [], dragGround: -1 };
+    const top = (n: Node) => {
+      let at = n;
+      while (at.getParent() && at.getParent() !== drag) at = at.getParent()!;
+      return at.zIndex();
+    };
+    const ground = drag.find(".dragGround")[0];
+    return { volumes: drag.find(".areaVolume").map(top), dragGround: ground ? top(ground) : -1 };
+  });
+}
+
+/** The caught rings Top-down's way, a stroked round rectangle in an area's color, on the isometric ground stage. */
+function groundRings(page: Page, color: string): Promise<number> {
+  return page.evaluate((c) => {
+    type Node = { stroke?: () => string | undefined; cornerRadius?: () => unknown };
+    type Stage = { width(): number; visible(): boolean; listening(): boolean; find(s: string): Node[] };
+    const konva = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva;
+    const ground = konva.stages.find((s) => s.width() > 0 && s.visible() && !s.listening());
+    return ground ? ground.find("Rect").filter((r) => r.stroke?.() === c).length : -1;
+  }, color);
 }
 
 /** The moving marks' room (lane ISO-3): a fogged hall with a goblin that wears an aura and a ring, and Pat's Bree with a ring of her own. */
@@ -1417,6 +1501,237 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     } finally {
       await keysContext.close();
     }
+  });
+
+  test("ISOA-1. a 20 ft sphere 10 ft up stands as a sphere on Pat's phone and the DM's screen, a bat inside it drawn between its far and near bands at turns 0 and 2, its ring round its feet within 1 px", async () => {
+    cavern.sceneId = randomUUID();
+    const dmId = dmSocket.you!.memberId;
+    const patId = patSocket.you!.memberId;
+    await ops.send({ t: "scene.create", scene: { id: cavern.sceneId, name: "The cavern", bounds: { w: 24, h: 20 }, fogEnabled: true } });
+    await ops.send({ t: "scene.update", sceneId: cavern.sceneId, patch: { suggestedView: "isometric", defaultView: { x: 12, y: 9, zoom: 40 } } });
+    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 0, y: 0, w: 24, h: 20 } }] });
+    const actor = { hp: { cur: 9, max: 9, temp: 0 }, life: "alive", ac: 13, speeds: { walk: 30, fly: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+    const make = (id: string, name: string, x: number, y: number, extra: Record<string, unknown> = {}) =>
+      ops.send({ t: "token.create", token: { id, sceneId: cavern.sceneId, kind: "monster", name, size: "medium", x, y, disposition: "hostile", visibility: "all", actor: { inline: actor }, ...extra } });
+    await make(cavern.thorn, "Thorn", 6, 10, { kind: "npc", disposition: "ally", ownerIds: [patId] });
+    await make(cavern.bat, "Bat", 12, 8, { elevation: 10 });
+    await make(cavern.archer, "Archer", 10, 14);
+    await make(cavern.goblin, "Goblin", 15, 14, { size: "small" });
+    const area = (id: string, color: string, t: Record<string, unknown>) => ops.send({ t: "template.create", template: { id, sceneId: cavern.sceneId, yaw: 0, includeOrigin: true, color, ownerId: dmId, visibility: "all", ...t } });
+    await area(cavern.sphere, SPHERE, { shape: "sphere", size: 20, origin: { x: 12.5, y: 8.5, z: 10 } });
+    await area(cavern.guardians, GUARDIANS, { shape: "emanation", size: 15, origin: { x: 6.5, y: 10.5, z: 0 }, attachedTo: cavern.thorn, includeOrigin: false });
+    await area(cavern.cone, CONE, { shape: "cone", size: 30, origin: { x: 11, y: 14.5, z: 3 }, pitch: 40, casterId: cavern.archer, includeOrigin: false });
+    await ops.send({ t: "room.setPlayerScene", sceneId: cavern.sceneId });
+    await waitFor("Pat on the cavern", () => (patSocket.state?.meta.playerSceneId === cavern.sceneId ? true : null));
+    await dm.bringToFront();
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^The cavern/ }).first().click();
+    await waitFor("the bat on the DM's board", () =>
+      dm.evaluate((id) => !!(globalThis as unknown as { Konva: { stages: { width(): number; findOne(s: string): unknown }[] } }).Konva.stages.find((s) => s.width() > 0 && s.findOne(`#${id}`)) || null, cavern.bat),
+    );
+    for (const [page, who] of [
+      [pat, "pat"],
+      [dm, "dm"],
+    ] as const) {
+      await page.bringToFront();
+      for (const turn of [0, 2] as const) {
+        await isoOn(page, turn);
+        const l = await layoutWhen(page, `${who}'s sphere at turn ${turn}`, (x) => x.standing.includes(cavern.sphere) && x.standing.includes(cavern.guardians) && between(x, cavern.sphere, cavern.bat));
+        assert.ok(l.rings[cavern.bat]?.includes(SPHERE), `${who} turn ${turn}: the bat's ring at its base`);
+        const rings = await waitFor(`${who}'s bat ring`, async () => {
+          const r = await ringMiddles(page, cavern.bat);
+          return r.own && r.caught.length > 0 ? r : null;
+        });
+        for (const c of rings.caught) assert.ok(Math.abs(c.x - rings.own!.x) <= 1 && Math.abs(c.y - rings.own!.y) <= 1, `${who} turn ${turn}: the caught ring's middle ${JSON.stringify(c)} against the standee's ${JSON.stringify(rings.own)}`);
+        await shots.take(page, `isoa-${who}-sphere-bat-turn${turn}`);
+      }
+    }
+  });
+
+  test("ISOA-2. Thorn's Spirit Guardians stand whole round him, and he wears no ring of his own aura", async () => {
+    for (const page of [pat, dm]) {
+      const l = await layoutWhen(page, "the guardians standing", (x) => x.standing.includes(cavern.guardians));
+      assert.ok(!(l.rings[cavern.thorn] ?? []).includes(GUARDIANS), "no ring on the caster");
+    }
+  });
+
+  test("ISOA-3. a 30 ft cone aimed 40 degrees up from the archer stands over the goblin under its far half, which it does not catch, at turns 0 and 1", async () => {
+    await dm.bringToFront();
+    for (const turn of [0, 1] as const) {
+      await isoOn(dm, turn);
+      const l = await layoutWhen(dm, `the cone at turn ${turn}`, (x) => x.standing.includes(cavern.cone));
+      assert.equal(l.rings[cavern.goblin], undefined, "the goblin is not caught");
+      await shots.take(dm, `isoa-dm-cone-up-turn${turn}`);
+    }
+    await isoOn(dm, 0);
+  });
+
+  test("ISOA-4. below 12 px a cell every area lies flat, the bat's ring on the ground stage", async () => {
+    await pat.bringToFront();
+    await ops.send({ t: "scene.update", sceneId: cavern.sceneId, patch: { defaultView: { x: 12, y: 9, zoom: 10 } } });
+    await reopenRoom(pat);
+    await isoOn(pat, 0);
+    await layoutWhen(pat, "nothing standing", (x) => x.standing.length === 0 && Object.keys(x.rings).length === 0);
+    await waitFor("the bat's ring on the ground", async () => ((await groundRings(pat, SPHERE)) >= 1 ? true : null));
+    await ops.send({ t: "scene.update", sceneId: cavern.sceneId, patch: { defaultView: { x: 12, y: 9, zoom: 40 } } });
+    await reopenRoom(pat);
+    await isoOn(pat, 0);
+    await layoutWhen(pat, "the sphere standing again", (x) => x.standing.includes(cavern.sphere));
+    assert.equal(await groundRings(pat, SPHERE), 0, "the bat's ring left the ground for its base");
+  });
+
+  test("ISOA-5. a sphere aimed with the Area tool stands coarse and whole in the drag layer while the mouse moves, then in the depth list once it rests", async () => {
+    await dm.bringToFront();
+    await pickTool(dm, "Area");
+    await pickOption(dm, "Area", "Shape", "Sphere");
+    const at = await isoPoint(dm, { x: 18.5, y: 4.5 }, 0);
+    await dm.mouse.click(at.x, at.y);
+    await layoutWhen(dm, "the draft standing at rest", (x) => x.order.some((e) => e.kind === "band" && e.area === "draft"));
+    await dm.mouse.move(at.x, at.y);
+    await dm.mouse.down();
+    try {
+      let seen = false;
+      for (let i = 1; i <= 12 && !seen; i++) {
+        await dm.mouse.move(at.x + i * 4, at.y + i * 2);
+        const v = await dragVolumes(dm);
+        const l = await boardLayout(dm);
+        if (v.volumes.length > 0 && !l?.order.some((e) => e.kind === "band" && e.area === "draft")) seen = true;
+      }
+      assert.ok(seen, "while it moves it stands in the drag layer, not the depth list");
+      await shots.take(dm, "isoa-dm-sphere-aimed-moving");
+      await layoutWhen(dm, "at rest, in the depth list", (x) => x.order.some((e) => e.kind === "band" && e.area === "draft"));
+      assert.equal((await dragVolumes(dm)).volumes.length, 0, "and no longer in the drag layer");
+    } finally {
+      await dm.mouse.up();
+    }
+    await dm.keyboard.press("Escape");
+    await pickTool(dm, "Select");
+    await layoutWhen(dm, "the draft gone", (x) => !x.order.some((e) => e.kind === "band" && e.area === "draft"));
+  });
+
+  test("ISOA-6. Thorn dragged here wears his aura in two passes: its bands behind him under his standee, the rest over it", async () => {
+    await dm.bringToFront();
+    const from = await standeeAt(dm, cavern.thorn);
+    await dm.mouse.move(from.x, from.y);
+    await dm.mouse.down();
+    await dm.mouse.move(from.x + 10, from.y + 4, { steps: 3 });
+    await dm.mouse.move(from.x + 50, from.y + 20, { steps: 10 });
+    try {
+      const v = await waitFor("the aura's volume in the drag layer, around the dragged standee", async () => {
+        const got = await dragVolumes(dm);
+        return got.dragGround >= 0 && got.volumes.some((z) => z < got.dragGround) && got.volumes.some((z) => z > got.dragGround) ? got : null;
+      });
+      assert.ok(v.volumes.length >= 2);
+      await shots.take(dm, "isoa-dm-thorn-dragged-aura");
+    } finally {
+      await dm.mouse.move(from.x, from.y, { steps: 5 });
+      await dm.mouse.up();
+    }
+    await waitFor("the aura back in the depth list", async () => ((await dragVolumes(dm)).volumes.length === 0 ? true : null));
+    await layoutWhen(dm, "the guardians standing again", (x) => x.standing.includes(cavern.guardians));
+  });
+
+  test("ISOA-7. a DM-only area stands on the DM's screen, dimmed and dashed, and Pat never gets it", async () => {
+    await ops.send({ t: "template.create", template: { id: cavern.secret, sceneId: cavern.sceneId, shape: "cube", size: 10, origin: { x: 18, y: 13, z: 0 }, yaw: 0, includeOrigin: true, color: SPHERE, ownerId: dmSocket.you!.memberId, visibility: "dm" } });
+    await layoutWhen(dm, "the DM's secret cube", (x) => x.standing.includes(cavern.secret));
+    await waitFor("the DM's snapshot holds it", () => (dmSocket.state?.templates[cavern.secret] ? true : null));
+    await pat.bringToFront();
+    await layoutWhen(pat, "Pat's board as before", (x) => x.standing.includes(cavern.sphere));
+    assert.equal(patSocket.state?.templates[cavern.secret], undefined, "Pat's device never received it");
+    assert.ok(!(await boardLayout(pat))!.standing.includes(cavern.secret));
+    await ops.send({ t: "template.delete", templateId: cavern.secret });
+  });
+
+  test("ISOA-8. security: one sub-cell fogged under the sphere's plan lays it flat on Pat's phone, the bat's ring back on the ground under the fog, and the DM's still stands", async () => {
+    await pat.bringToFront();
+    // A sub-cell inside the sphere's plan, clear of the bat.
+    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 14.25, y: 9.25, w: 0.25, h: 0.25 } }] });
+    await layoutWhen(pat, "Pat's sphere flat", (x) => !x.standing.includes(cavern.sphere) && x.standing.includes(cavern.guardians));
+    assert.equal((await boardLayout(pat))!.rings[cavern.bat], undefined);
+    await waitFor("the bat's ring on Pat's ground", async () => ((await groundRings(pat, SPHERE)) >= 1 ? true : null));
+    await shots.take(pat, "isoa-pat-sphere-touching-fog-flat");
+    await layoutWhen(dm, "the DM's sphere standing", (x) => x.standing.includes(cavern.sphere));
+  });
+
+  test("ISOA-9. security: View as Pat reads Pat's fog, so the DM's preview lies the sphere flat while the DM's own board stands it", async () => {
+    await dm.bringToFront();
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("DM") });
+    await panel.getByRole("combobox", { name: "View as a player" }).selectOption({ label: "Pat" });
+    await panel.getByRole("button", { name: "View", exact: true }).click();
+    const preview = dm.locator('dialog[aria-label="Viewing as Pat"]');
+    await preview.waitFor();
+    try {
+      const button = preview.getByRole("button", { name: /^View: / });
+      await waitFor("the preview's View button", async () => ((await button.getAttribute("aria-label")) ?? "").startsWith("View: "));
+      if ((await button.getAttribute("aria-label")) !== "View: Isometric") {
+        await button.click();
+        const menu = preview.getByRole("dialog", { name: "View" });
+        await menu.getByRole("radio", { name: "Isometric" }).check();
+        await button.click();
+        await menu.waitFor({ state: "detached" });
+      }
+      // The hook reads the board on top: the preview's.
+      await layoutWhen(dm, "the preview's sphere flat", (x) => !x.standing.includes(cavern.sphere) && x.standing.includes(cavern.guardians));
+      await shots.take(dm, "isoa-dm-view-as-pat-sphere-flat");
+    } finally {
+      await preview.getByRole("button", { name: "Exit", exact: true }).click();
+      await preview.waitFor({ state: "detached" });
+    }
+    await layoutWhen(dm, "the DM's own board standing it", (x) => x.standing.includes(cavern.sphere));
+    await ops.send({ t: "fog.live", sceneId: cavern.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 14.25, y: 9.25, w: 0.25, h: 0.25 } }] });
+    await layoutWhen(pat, "Pat's sphere standing again", (x) => x.standing.includes(cavern.sphere));
+  });
+
+  test("ISOA-10. sixty areas in view: the one nearest the middle stands first, and \"Building area shapes\" shows while any waits, clear of the bar and within 1 px", async () => {
+    cavern.field = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id: cavern.field, name: "The field", bounds: { w: 80, h: 80 }, fogEnabled: false } });
+    await ops.send({ t: "scene.update", sceneId: cavern.field, patch: { defaultView: { x: 40, y: 40, zoom: 12 } } });
+    const dmId = dmSocket.you!.memberId;
+    const ids: { id: string; d: number }[] = [];
+    for (let i = 0; i < 60; i++) {
+      const x = 12 + (i % 8) * 8;
+      const y = 14 + Math.floor(i / 8) * 7;
+      const id = randomUUID();
+      // How far its middle, 10 ft up, shows from the scene's starting middle, the cell 40, 40 on the ground, in view units at turn 0.
+      ids.push({ id, d: Math.hypot((x - y) / Math.SQRT2, (x + y - 80) / (2 * Math.SQRT2) - 0.866 * 2) });
+      await ops.send({ t: "template.create", template: { id, sceneId: cavern.field, shape: "sphere", size: 20, origin: { x, y, z: 10 }, yaw: 0, includeOrigin: true, color: SPHERE, ownerId: dmId, visibility: "all" } });
+    }
+    await dm.bringToFront();
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^The field/ }).first().click();
+    await isoOn(dm, 0);
+    // Slowed as a phone is, and reopened, so the areas build from nothing while the test watches.
+    const cdp = await dmContext.newCDPSession(dm);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 8 });
+    try {
+      await reopenRoom(dm);
+      // A reload opens the players' scene again.
+      await openSideTab(dm, "Scenes");
+      await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^The field/ }).first().click();
+      await isoOn(dm, 0);
+      // The field's areas only: until the field's board lays out, the cavern's may still be the last layout.
+      const fieldIds = new Set(ids.map((a) => a.id));
+      const first = await layoutWhen(dm, "the first area standing", (x) => x.standing.length > 0 && x.standing.every((id) => fieldIds.has(id)), 30_000);
+      const nearest = [...ids].sort((a, b) => a.d - b.d).slice(0, 8).map((a) => a.id);
+      const ranks = first.standing.map((id) => [...ids].sort((a, b) => a.d - b.d).findIndex((a) => a.id === id));
+      assert.ok(first.standing.every((id) => nearest.includes(id)), `the first to stand lie nearest the middle: ${first.standing.length} of them, ranked ${ranks.join(", ")} by nearness`);
+      const status = dm.getByRole("status").filter({ hasText: "Building area shapes" });
+      await status.waitFor({ timeout: 30_000 });
+      const lines = alignmentLines(await measureAlignment(status), "building");
+      assert.deepEqual(lines, []);
+      const box = await status.boundingBox();
+      const bar = await dm.getByRole("button", { name: /^View: / }).boundingBox();
+      assert.ok(box && bar && box.y >= bar.y + bar.height - 1, "below the bar");
+      await shots.take(dm, "isoa-dm-building-area-shapes");
+    } finally {
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+      await cdp.detach();
+    }
+    await layoutWhen(dm, "every area standing", (x) => !x.waiting && x.standing.length >= 40, 60_000);
+    await dm.getByRole("status").filter({ hasText: "Building area shapes" }).waitFor({ state: "detached" });
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^The cavern/ }).first().click();
   });
 
   test("ISO-12. no page logged an error", () => {
