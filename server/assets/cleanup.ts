@@ -5,9 +5,10 @@ import type pg from "pg";
 import { z } from "zod";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { LIMITS } from "#shared/limits.ts";
-import type { RoomState } from "#shared/model.ts";
+import type { MemoryChunk, RoomState } from "#shared/model.ts";
+import type { ServerOnlyOp } from "#shared/protocol.ts";
 import { referencedAssetIds } from "#shared/referencedAssets.ts";
-import type { Logger } from "../rooms/actor.ts";
+import { ActorClosedError, SysOpRefused, type Logger, type RoomActor } from "../rooms/actor.ts";
 import { TooBusyError } from "../rooms/errors.ts";
 import { RoomNotFoundError } from "../rooms/gateway.ts";
 import type { RoomManager } from "../rooms/manager.ts";
@@ -23,7 +24,10 @@ import { deleteUnreferencedFiles, purgeTrash, type FileKey } from "./store.ts";
  * its own, cleanup therefore deletes only what no picker can reach: scene
  * thumbnails a day after their scene stopped naming them, and files no row
  * names. The DM deletes the rest from the library, where the listing marks
- * each image the state does not use.
+ * each image the state uses outside players' memory. An image only the
+ * stamps players remember show is no use the DM can see or act on, so its
+ * delete goes through and drops those stamps from every memory first
+ * (decision D-261026-34, docs/design-v1-map-discovery.md 5.4).
  *
  * A row is deleted only inside one deletion step for its room
  * (RoomManager.deletionStep). On a loaded room the step runs on the actor's
@@ -75,6 +79,11 @@ function usedIds(state: RoomState): Set<string> {
   return out;
 }
 
+/** The image ids the state names outside players' memory, the party's and every holder's: the uses the DM sees. */
+function liveIds(state: RoomState): Set<string> {
+  return usedIds({ ...state, memory: {}, memoryBy: {} });
+}
+
 /**
  * The ids among `ids` that the stored snapshot of a room that is not loaded,
  * or any op stored after it, mentions anywhere. Each text is lowercased once
@@ -121,10 +130,11 @@ export async function recheckQuotaUnloaded(pool: pg.Pool, roomId: string, quotaB
  * from the room's quota (all its variants, the row's own count), and
  * `inUse`, read from the committed state of the room, which a DM asking for
  * its library has loaded anyway. Every kind is marked: the state names maps,
- * handouts and thumbnails as well as token art. When the state cannot be
- * known (the room cannot load now, or its replay failed and its state is
- * partial) the images carry no mark at all, so nothing is offered for
- * deletion on a guess.
+ * handouts and thumbnails as well as token art. A stamp players remember
+ * marks nothing, since its image can be deleted (deleteLibraryImages).
+ * When the state cannot be known (the room cannot load now, or its replay
+ * failed and its state is partial) the images carry no mark at all, so
+ * nothing is offered for deletion on a guess.
  */
 export async function withInUse(pool: pg.Pool, manager: RoomManager, roomId: string, assets: AssetView[]): Promise<AssetView[]> {
   const { rows } = await pool.query<{ id: string; bytes: string }>("select id::text as id, bytes from assets where room_id = $1", [roomId]);
@@ -142,7 +152,7 @@ export async function withInUse(pool: pg.Pool, manager: RoomManager, roomId: str
     if (err instanceof TooBusyError || err instanceof RoomNotFoundError) return sized;
     throw err;
   }
-  const used = usedIds(state);
+  const used = liveIds(state);
   return sized.map((a) => ({ ...a, inUse: used.has(a.id.toLowerCase()) }));
 }
 
@@ -154,12 +164,14 @@ export type LibraryDeletion =
 /**
  * Deletes images of the room that its state does not name, all or none: if
  * any of them is named when the step runs, nothing is deleted and the
- * answer lists the ones in use. Ids that are not this room's rows are
- * ignored. Files follow their rows into the trash when no other room names
- * them.
+ * answer lists the ones in use. The stamps players remember with these
+ * images are dropped first (forgetRememberedImages), so an image only they
+ * show is deleted. Ids that are not this room's rows are ignored. Files
+ * follow their rows into the trash when no other room names them.
  */
 export async function deleteLibraryImages(deps: CleanupDeps, roomId: string, requested: readonly string[]): Promise<LibraryDeletion> {
   const ids = [...new Set(requested.map((id) => id.toLowerCase()))].filter((id) => UUID.test(id));
+  await forgetRememberedImages(deps, roomId, ids);
   type Outcome = { result: LibraryDeletion; rows: DeletedRow[] };
   const remove = async (used: ReadonlySet<string>): Promise<Outcome> => {
     const inUse = ids.filter((id) => used.has(id));
@@ -185,6 +197,113 @@ export async function deleteLibraryImages(deps: CleanupDeps, roomId: string, req
   });
   if (outcome.rows.length > 0) await removeFiles(deps, roomId, outcome.rows);
   return outcome.result;
+}
+
+/**
+ * Drops from every memory of the room, the party's and each holder's, the
+ * stamps players remember with these images (decision D-261026-34), as a
+ * stamp made DM only drops from them (docs/design-v1-map-discovery.md 5.4):
+ * one `sys.remember` per scene through the room's actor, stored and
+ * replayed as any op, so a reload drops the same entries. Nothing drops
+ * while a live use names any of them, since the deletion step then refuses
+ * the whole delete and players keep what they remember.
+ *
+ * Only the actor writes memory, so a room that is not loaded is loaded,
+ * but only when its stored memory or a later `sys.remember` mentions one of
+ * the images, and a delete of anything else never loads it. Whatever stops
+ * the drop (the room cannot load, its replay failed, the actor refused the
+ * op or closed) leaves memory as it is. The deletion step's check counts
+ * memory as a use, so the delete is then refused as in use, as it is when
+ * a remembered stamp of the image is written again in between, rather than
+ * deleting art a player still sees.
+ */
+async function forgetRememberedImages(deps: CleanupDeps, roomId: string, requested: readonly string[]): Promise<void> {
+  if (requested.length === 0) return;
+  const { rows } = await deps.pool.query<{ id: string }>("select id::text as id from assets where room_id = $1 and id = any($2::uuid[])", [roomId, requested]);
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return;
+  let actor: RoomActor | null = deps.manager.get(roomId);
+  if (!actor) {
+    if ((await storedMemoryMentions(deps.pool, roomId, ids)).size === 0) return;
+    try {
+      actor = await deps.manager.acquire(roomId);
+    } catch (err) {
+      if (err instanceof TooBusyError || err instanceof RoomNotFoundError) return;
+      throw err;
+    }
+  }
+  if (actor.replayFailed) return;
+  const state = actor.committed.state;
+  const live = liveIds(state);
+  if (ids.some((id) => live.has(id))) return;
+  for (const op of forgetRememberedStamps(state, new Set(ids))) {
+    try {
+      await actor.sys(op);
+    } catch (err) {
+      if (err instanceof SysOpRefused || err instanceof ActorClosedError) return;
+      throw err;
+    }
+  }
+}
+
+type RememberOp = Extract<ServerOnlyOp, { t: "sys.remember" }>;
+
+/**
+ * One `sys.remember` per scene that drops each remembered stamp whose art is
+ * one of these images, from every layer that holds one: scenes in id order,
+ * the party's layer before each holder's in id order, chunks in row order.
+ */
+export function forgetRememberedStamps(state: RoomState, ids: ReadonlySet<string>): RememberOp[] {
+  const scenes = new Map<string, Map<string, RememberOp["layers"][number]>>();
+  const visit = (chunk: MemoryChunk) => {
+    const stamps = Object.entries(chunk.stamps ?? {})
+      .filter(([, stamp]) => stamp !== null && "assetId" in stamp.art && ids.has(stamp.art.assetId.toLowerCase()))
+      .map(([id]) => id)
+      .sort();
+    if (stamps.length === 0) return;
+    let layers = scenes.get(chunk.sceneId);
+    if (!layers) scenes.set(chunk.sceneId, (layers = new Map()));
+    const owner = chunk.memberId ?? "";
+    let layer = layers.get(owner);
+    if (!layer) layers.set(owner, (layer = { ...(chunk.memberId !== undefined ? { memberId: chunk.memberId } : {}), chunks: [] }));
+    layer.chunks.push({ cx: chunk.cx, cy: chunk.cy, drop: { stamps } });
+  };
+  for (const chunk of Object.values(state.memory ?? {})) visit(chunk);
+  for (const chunk of Object.values(state.memoryBy ?? {})) visit(chunk);
+  return [...scenes.keys()].sort().map((sceneId) => {
+    const layers = scenes.get(sceneId)!;
+    return {
+      t: "sys.remember",
+      sceneId,
+      layers: [...layers.keys()].sort().map((owner) => {
+        const layer = layers.get(owner)!;
+        return { ...layer, chunks: layer.chunks.sort((a, b) => a.cy - b.cy || a.cx - b.cx) };
+      }),
+    };
+  });
+}
+
+/**
+ * The ids among `ids` that a room's stored memory may name: its snapshot's
+ * `memory` and `memoryBy`, and any `sys.remember` stored after it, the only
+ * op that writes a stamp into memory (a fold or a copy only moves what
+ * memory holds already). Read as text, as textScanUsed reads, which can
+ * only find too much.
+ */
+async function storedMemoryMentions(pool: pg.Pool, roomId: string, ids: readonly string[]): Promise<Set<string>> {
+  const { rows } = await pool.query<{ id: string }>(
+    `with snap as (select seq, state from room_snapshots where room_id = $1),
+       texts as materialized (
+         select lower(coalesce(s.state->'memory', 'null'::jsonb)::text || coalesce(s.state->'memoryBy', 'null'::jsonb)::text) as body from snap s
+         union all
+         select lower(o.op::text) from room_ops o
+         where o.room_id = $1 and o.seq > coalesce((select seq from snap), -1) and o.op->>'t' = 'sys.remember'
+       )
+     select x.id::text as id from unnest($2::uuid[]) as x(id)
+     where exists (select 1 from texts t where strpos(t.body, x.id::text) > 0)`,
+    [roomId, [...ids]],
+  );
+  return new Set(rows.map((r) => r.id));
 }
 
 async function removeFiles(deps: CleanupDeps, roomId: string, rows: readonly DeletedRow[]): Promise<void> {
@@ -382,7 +501,9 @@ export type CleanupOptions = {
  * Answers `{deleted}` with the ids whose rows went, or 409 `asset_in_use`
  * with `inUse` when the state names any of them, in which case nothing is
  * deleted, or 409 `state_unknown` when the room's replay failed and its
- * state cannot say what is in use.
+ * state cannot say what is in use. A stamp players remember is dropped
+ * before the check, so only a use outside memory refuses an image, unless
+ * the drop could not run or memory took the image up again meanwhile.
  */
 export async function registerCleanup(app: FastifyInstance, opts: CleanupOptions = {}): Promise<CleanupJob> {
   const deps: CleanupDeps = {
