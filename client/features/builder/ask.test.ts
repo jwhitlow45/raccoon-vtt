@@ -259,6 +259,18 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     assert.equal(k.room.store.getState().forgetAsk ?? null, null, "a question about a cancelled gesture");
   });
 
+  test("Redo while the gesture waits sends nothing, so no step it would bring back lands before the gesture", () => {
+    const p = page();
+    p.connect();
+    dispatchBuild(p.ctx, rect);
+    p.actions.redo();
+    assert.deepEqual(p.sentKinds(), ["build.ask"], "no redo was sent");
+    p.deliver();
+    assert.equal(p.counted.waiting, 0);
+    p.actions.redo();
+    assert.equal(p.sentKinds().at(-1), "redo", "once the gesture is answered, Redo is the room's again");
+  });
+
   test("a press on the builder's map while a gesture waits starts nothing, and its move and lift do nothing", () => {
     const scope = new RoomScope();
     const calls: string[] = [];

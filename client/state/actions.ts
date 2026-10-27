@@ -75,7 +75,10 @@ export function createRoomActions(room: RoomStore, socket: Pick<RoomSocket, "sen
         if (at >= 0) waiting.splice(at, 1);
       };
     },
-    redo: () => void room.dispatch({ t: "redo" }),
+    // Redo while a gesture waits does nothing: the step it brings back may be a builder one, which would land before the gesture.
+    redo: () => {
+      if (waiting.length === 0) void room.dispatch({ t: "redo" });
+    },
     newId: () => uuidv7(),
     moveToken: (tokenId, x, y) => void room.dispatch({ t: "token.move", tokenId, x, y }),
     moveTokens(moves) {

@@ -583,13 +583,14 @@ export type RoomActions = {
   switchScene(sceneId: SceneId): void;
   /** Sends an undo, or while a builder gesture waits on its asks, cancels the newest such gesture instead (holdBuild). */
   undo(): void;
+  /** Sends a redo, or while a builder gesture waits on its asks, does nothing (holdBuild). */
   redo(): void;
   /**
    * A builder gesture waiting on its asks (builder/ask.ts, D-261027-07):
    * until the returned release is called, builder edits dispatched here
-   * are refused at input (null), so none overtakes it, and Undo calls
-   * `cancel` instead of sending an undo. Absent where nothing waits, as on
-   * a preview.
+   * are refused at input (null), so none overtakes it, Undo calls
+   * `cancel` instead of sending an undo, and Redo does nothing. Absent
+   * where nothing waits, as on a preview.
    */
   holdBuild?(cancel: () => void): () => void;
   /** A UUIDv7 for a create op (design section 6). */
