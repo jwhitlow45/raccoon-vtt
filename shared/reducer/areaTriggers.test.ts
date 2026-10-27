@@ -171,7 +171,8 @@ describe("area reminders", () => {
     state.templates.mb = template("mb", { shape: "cylinder", size: 5, height: 40, origin: { x: 8.5, y: 5.5, z: 0 }, spell: "Moonbeam", triggers: ["enter"] });
     fogged(state);
     const crossed = play(state, [move("g1", 2)]);
-    assert.deepEqual(crossed.reminders, [{ type: "area", templateId: "mb", tokenId: "g1", trigger: "enter", area: "Moonbeam" }], "not seen: it crossed in the dark");
+    // Not seen, it crossed in the dark, and the Moonbeam's rays to it run through fog, so the line is the DM's alone (docs/design-v1-map-discovery.md decision 13).
+    assert.deepEqual(crossed.reminders, [{ type: "area", templateId: "mb", tokenId: "g1", trigger: "enter", area: "Moonbeam", hidden: true }], "not seen: it crossed in the dark");
     assert.equal(projectState(crossed.state, P2, { sceneId: "s1" }).log.filter((e) => e.data?.type === "area").length, 0);
 
     // A monster cleric's aura sweeps over a goblin in the open from the dark, and stops in the open.

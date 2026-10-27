@@ -1,12 +1,15 @@
-import { attaches, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
+import { attaches, discoversMap, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token } from "../model.ts";
 import { areaSeenMark, gridOfScene, inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
-import { creaturesInArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
+import { convexHull, creaturesInArea, resolveArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
 import type { HexGrid } from "../rules/hex.ts";
 import { hexPiece, pieceReach, placedOnTrace, routePoints, type HexPiece, type RoutePoint } from "../rules/route.ts";
+import { footprintRect } from "../rules/footprint.ts";
+import type { Point, Rect } from "../rules/geom.ts";
+import { fogClassOf, groundOf, type Ground } from "../rules/held.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
 import { sceneGrid } from "../rules/grid.ts";
@@ -140,14 +143,116 @@ function remind(tx: Tx, template: AreaTemplate, token: Token, trigger: AreaTrigg
  * docs/design-v1-per-player-vision.md 6.5).
  */
 function marksOf(tx: Tx, template: AreaTemplate, there: Token, at: RoomState): { seen?: true; seenBy?: string[]; hidden?: true } {
+  const rays = discoversMap(tx.env.opVersion) ? raysOnLiveGround(at, template, there) : null;
   const perPlayer = areaSeenMark(at, template, there, tx.env);
   if (perPlayer) {
     const { hidden, ...seen } = perPlayer;
-    return { ...seen, ...(hidden ? { hidden } : {}) };
+    return { ...(rays ? byLiveGround(at, seen, rays) : seen), ...(hidden ? { hidden } : {}) };
   }
   const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
-  const hidden = template.visibility === "dm" || (attached !== undefined && !seenByNonOwners(at, attached, tx.env));
+  // On a whole-party scene every player reads the shared class's ground, so a ray off it keeps the line the DM's alone.
+  const hidden = template.visibility === "dm" || (attached !== undefined && !seenByNonOwners(at, attached, tx.env)) || (rays !== null && !rays(null));
   return { ...(seenByNonOwners(at, there, tx.env) ? { seen: true as const } : {}), ...(hidden ? { hidden: true as const } : {}) };
+}
+
+/**
+ * A per-player scene's witnesses kept only where the rays lie on each
+ * one's own live ground (decision 13): `seen` stays only when every
+ * player's does, and otherwise the players whose ground holds them, as a
+ * line only some read (docs/design-v1-per-player-vision.md 6.5).
+ */
+function byLiveGround(at: RoomState, seen: { seen?: true; seenBy?: string[] }, rays: (holder: string | null) => boolean): { seen?: true; seenBy?: string[] } {
+  const players = Object.values(at.members).flatMap((m) => (m.kind === "player" ? [m.id] : []));
+  const witnesses = seen.seen ? players : seen.seenBy;
+  if (witnesses === undefined) return seen;
+  const kept = witnesses.filter((id) => rays(id)).sort();
+  return seen.seen && rays(null) && kept.length === players.length ? { seen: true } : { seenBy: kept };
+}
+
+/**
+ * Whether every ray an area's inclusion test reads, from where it starts
+ * to the creature's footprint, lies on a player's live ground
+ * (docs/design-v1-map-discovery.md decision 13): their sight or the DM's
+ * reveals, or revealed ground on a scene with fog and no vision. Asked by
+ * fog class, a holder's own or null for the shared one, and null on a
+ * scene with fog off, where every ray does. The rays start at the area's
+ * origin, at the corners of the footprint an emanation surrounds, or
+ * anywhere on the token an attached area starts from, and each ends at a
+ * sample inside the creature's footprint, so all of them lie in the hull
+ * of those points and the samples' box: every cell that hull touches must
+ * be live. So
+ * a player never learns that an area reaches a creature through ground
+ * they do not see now, where a remembered wall may be gone or an unseen
+ * one stand.
+ */
+function raysOnLiveGround(at: RoomState, template: AreaTemplate, there: Token): ((holder: string | null) => boolean) | null {
+  const scene = at.scenes[template.sceneId];
+  if (!scene?.fogEnabled) return null;
+  const grid = sceneGrid(scene);
+  const ctx = contextOf(at, template.sceneId);
+  const area = ctx ? resolveArea(template, ctx) : null;
+  const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
+  // An emanation's probes step just inside the footprint it surrounds, and samples lie half a sample or more inside a cell (aoe.ts sampleCoord).
+  const starts = area?.box ? corners(inset(area.box, 1e-5)) : attached ? corners(footprintRect(grid, attached)) : [{ x: template.origin.x, y: template.origin.y }];
+  const hull = convexHull([...starts, ...corners(inset(footprintRect(grid, there), SAMPLE_INSET))]);
+  const answers = new Map<string | null, boolean>();
+  return (member) => {
+    const holder = member === null ? null : fogClassOf(at, template.sceneId, member);
+    if (!answers.has(holder)) {
+      const ground = groundOf(at, template.sceneId, holder);
+      answers.set(holder, ground !== null && hullLive(ground, hull));
+    }
+    return answers.get(holder)!;
+  };
+}
+
+/** How far inside a footprint every sample of it lies, at most: half a sample at the most samples a cell side takes (aoe.ts SAMPLES), and a margin. */
+const SAMPLE_INSET = 1 / 64;
+
+function inset(r: Rect, d: number): Rect {
+  const dx = Math.min(d, r.w / 2);
+  const dy = Math.min(d, r.h / 2);
+  return { x: r.x + dx, y: r.y + dy, w: r.w - 2 * dx, h: r.h - 2 * dy };
+}
+
+function corners(r: Rect): Point[] {
+  return [
+    { x: r.x, y: r.y },
+    { x: r.x + r.w, y: r.y },
+    { x: r.x, y: r.y + r.h },
+    { x: r.x + r.w, y: r.y + r.h },
+  ];
+}
+
+/* Whether every cell of the scene a closed convex polygon touches is live, a hair past touching included, so rounding only ever keeps a line back. */
+function hullLive(ground: Ground, hull: readonly Point[]): boolean {
+  if (hull.length === 0) return true;
+  const E = 1e-9;
+  const xs = hull.map((p) => p.x);
+  const ys = hull.map((p) => p.y);
+  const x0 = Math.max(0, Math.floor(Math.min(...xs) - E));
+  const y0 = Math.max(0, Math.floor(Math.min(...ys) - E));
+  const x1 = Math.min(ground.bounds.w - 1, Math.floor(Math.max(...xs) + E));
+  const y1 = Math.min(ground.bounds.h - 1, Math.floor(Math.max(...ys) + E));
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (!ground.live(x, y) && meetsCell(hull, x, y, E)) return false;
+  return true;
+}
+
+/* The separating axis test of a convex polygon (or a segment or a point) against the cell (x, y) grown by `e`. */
+function meetsCell(hull: readonly Point[], x: number, y: number, e: number): boolean {
+  const box = corners({ x: x - e, y: y - e, w: 1 + 2 * e, h: 1 + 2 * e });
+  const separated = (nx: number, ny: number) => {
+    const a = hull.map((p) => p.x * nx + p.y * ny);
+    const b = box.map((p) => p.x * nx + p.y * ny);
+    return Math.max(...a) < Math.min(...b) || Math.max(...b) < Math.min(...a);
+  };
+  if (separated(1, 0) || separated(0, 1)) return false;
+  for (let i = 0; i < hull.length && hull.length > 1; i++) {
+    const p = hull[i]!;
+    const q = hull[(i + 1) % hull.length]!;
+    if (separated(q.y - p.y, p.x - q.x)) return false;
+  }
+  return true;
 }
 
 /** The token whose turn is the encounter's active one, if it is a creature an area can hit. */
