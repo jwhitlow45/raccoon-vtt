@@ -322,18 +322,26 @@ function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: Sce
 
 const CELLS = CHUNK_CELLS * CHUNK_CELLS;
 
-/** Whether a position's north and west edges can read differently: its own chunk or those west and north of it were replaced, or the rule changed. */
+/**
+ * Whether a position's north and west edges can read differently: the cells
+ * or the stair marks of its own chunk or those west and north of it were
+ * replaced, its edges were, or the rule changed. A stair mark counts as a
+ * Stairs cell for automatic walls (rules/autoWalls.ts paintedCell), so a
+ * stair put or taken away moves them as paint does.
+ */
 function edgesMayDiffer(before: RoomState, after: RoomState, sceneId: string, cx: number, cy: number, ruleChanged: boolean): boolean {
   if (ruleChanged) return true;
   const here = (s: RoomState) => s.buildChunks[chunkKey(sceneId, cx, cy)];
   const b = here(before);
   const a = here(after);
-  if (b?.cells !== a?.cells || b?.edges !== a?.edges) return true;
+  if (b?.cells !== a?.cells || b?.up !== a?.up || b?.edges !== a?.edges) return true;
   for (const [dx, dy] of [
     [-1, 0],
     [0, -1],
   ] as const) {
-    if (before.buildChunks[chunkKey(sceneId, cx + dx, cy + dy)]?.cells !== after.buildChunks[chunkKey(sceneId, cx + dx, cy + dy)]?.cells) return true;
+    const nb = before.buildChunks[chunkKey(sceneId, cx + dx, cy + dy)];
+    const na = after.buildChunks[chunkKey(sceneId, cx + dx, cy + dy)];
+    if (nb?.cells !== na?.cells || nb?.up !== na?.up) return true;
   }
   return false;
 }

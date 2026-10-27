@@ -114,6 +114,26 @@ describe("the map step", () => {
     });
   });
 
+  test("a stair put out of sight keeps the automatic walls they saw beside it, in its chunk and across a chunk line", () => {
+    withCellVision(() => {
+      const state = fogRoom({ vision: true });
+      state.tokens.ayla = token("ayla", { kind: "pc", ownerIds: ["p1"], x: 14, y: 4 });
+      // Floor west of 12 and east of 16: from (14, 4) Ayla sees 11 to 17, so both automatic walls, on 12,4,w and on 16,4,w in the next chunk.
+      paint(state, { x: 8, y: 2, w: 4, h: 5 });
+      paint(state, { x: 16, y: 2, w: 4, h: 5 });
+      let s = batch(state, []).state;
+      s = batch(s, [move(40, 20)]).state;
+      assert.equal(edgeShown(s, "12,4,w"), "auto");
+      assert.equal(edgeShown(s, "16,4,w"), "auto");
+      // A stair counts as a Stairs cell, so neither edge has an automatic wall now.
+      const stair = batch(s, [{ t: "build.stairs", sceneId: "s1", cells: ["12,4", "15,4"], up: "e" }]);
+      assert.equal(party(stair.state)?.edges?.["12,4,w"], "auto");
+      assert.equal(party(stair.state, 1, 0)?.edges?.["16,4,w"], "auto");
+      assert.equal(edgeShown(stair.state, "12,4,w"), "auto");
+      assert.equal(edgeShown(stair.state, "16,4,w"), "auto");
+    });
+  });
+
   test("a door a monster opens far off stays shut on their maps", () => {
     withCellVision(() => {
       const left = leftCrypt();
