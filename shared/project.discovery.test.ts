@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { autoAt, chunksOf, edge, fogRoom, heights, knownAt, lift, paint, remember, stairs, wall, wallsOf } from "./discoveryTestutil.ts";
+import { autoAt, chunksOf, edge, fogRoom, heights, knownAt, lift, liftSubs, paint, remember, stairs, wall, wallsOf } from "./discoveryTestutil.ts";
 import { keys } from "./keys.ts";
 import type { FreeWall, Label, PlayerChunk, RoomState, Stamp } from "./model.ts";
 import { allKeys, dependents, heldChunks, pieceId, playerChunk, projectEntity, projectState, stableStringify } from "./project.ts";
-import { groundOf, PIECE_GRID } from "./rules/held.ts";
+import { groundOf, PIECE_GRID, wallSpans } from "./rules/held.ts";
+import { sceneGrid } from "./rules/grid.ts";
+import { hexSubcells, parseHexKey, type HexGrid } from "./rules/hex.ts";
 import { indexBuild, sceneWalls } from "./rules/walls.ts";
 import { DM, P1, P2, deepClone } from "./testutil.ts";
 
@@ -372,6 +374,29 @@ describe("free walls cut at held cells (decision 2)", () => {
     }
     // The wall on the scene's west side keeps its end there.
     assert.ok(all.some((w) => w.a[0] === 0 && w.a[1] === 7.5));
+  });
+});
+
+describe("free walls on hexes (5.5, ASTRA-29, ASTRA-33)", () => {
+  test("astra's hex wall, alternate hexes held, rows and columns, both selections: 9 held runs, 10 final pieces, within its bound of 11", () => {
+    for (const gridShape of ["hexRows", "hexColumns"] as const) {
+      for (const live of [true, false]) {
+        const state = fogRoom({ vision: !live, bounds: { w: 24, h: 24 }, scene: { gridShape } });
+        // Hex columns are hex rows mirrored across the diagonal (docs/design-v1-hex-grids.md 4.1), so the wall is too, and its split lines are x = 8 and 12.
+        const w = gridShape === "hexRows" ? wall(state, "abcdefghijkl", [5.1875, 5.375], [1.203125, 12.296875]) : wall(state, "abcdefghijkl", [5.375, 5.1875], [12.296875, 1.203125]);
+        const grid = sceneGrid(state.scenes.s1!) as HexGrid;
+        const crossed = wallSpans(grid, w).map((span) => span.cell);
+        assert.equal(new Set(crossed).size, 18, `${gridShape}: the wall crosses 18 hexes`);
+        // Every other hex the wall crosses, from its first: 9 runs, held in the DM's fog (live) or only explored (remembered).
+        const held = crossed.filter((_, i) => i % 2 === 0);
+        liftSubs(state, live ? "dm" : "party", held.flatMap((key) => hexSubcells(grid, parseHexKey(key)!)));
+        const all = pieces(state);
+        assert.equal(all.length, 10, `${gridShape}, ${live ? "live" : "remembered"}: a split line splits one run: ${JSON.stringify(all)}`);
+        assert.ok(all.length <= 11, "within the bound the size guard counts it at");
+        const major = gridShape === "hexRows" ? 1 : 0;
+        for (const p of all) assert.ok(Math.abs((p[major + 2] as number) - (p[major] as number)) <= 4 + 2e-4, "each piece spans at most 4 cells along its major axis");
+      }
+    }
   });
 });
 

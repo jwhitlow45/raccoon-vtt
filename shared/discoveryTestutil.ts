@@ -90,6 +90,13 @@ type Layer = "dm" | "party" | { holder: string };
 
 /** Sets the bits of one layer over a rectangle of cells: the DM's fog, the party's explored layer or a holder's. */
 export function lift(state: RoomState, layer: Layer, r: { x: number; y: number; w: number; h: number }, sceneId = "s1", on = true): void {
+  const subs: [number, number][] = [];
+  for (let sy = r.y * FOG_SUBCELLS; sy < (r.y + r.h) * FOG_SUBCELLS; sy++) for (let sx = r.x * FOG_SUBCELLS; sx < (r.x + r.w) * FOG_SUBCELLS; sx++) subs.push([sx, sy]);
+  liftSubs(state, layer, subs, sceneId, on);
+}
+
+/** Sets the bits of one layer at fog sub-cells, by their scene-wide raster index, as a hex's are (hex.ts hexSubcells). */
+export function liftSubs(state: RoomState, layer: Layer, subs: readonly (readonly [number, number])[], sceneId = "s1", on = true): void {
   const get = (tx: number, ty: number) => {
     if (layer === "dm") return state.fogTiles[tileKey(sceneId, tx, ty)];
     if (layer === "party") return state.exploredTiles[tileKey(sceneId, tx, ty)];
@@ -103,20 +110,18 @@ export function lift(state: RoomState, layer: Layer, r: { x: number; y: number; 
     else state.exploredBy = { ...state.exploredBy, [holderTileKey(sceneId, layer.holder, tx, ty)]: { ...tile, memberId: layer.holder } };
   };
   const tiles = new Map<string, Uint8Array>();
-  for (let sy = r.y * FOG_SUBCELLS; sy < (r.y + r.h) * FOG_SUBCELLS; sy++) {
-    for (let sx = r.x * FOG_SUBCELLS; sx < (r.x + r.w) * FOG_SUBCELLS; sx++) {
-      const tx = Math.floor(sx / TILE_SUB);
-      const ty = Math.floor(sy / TILE_SUB);
-      const at = `${tx},${ty}`;
-      let bits = tiles.get(at);
-      if (!bits) {
-        const t = get(tx, ty);
-        tiles.set(at, (bits = (t && decodeTile(t.bits)) || new Uint8Array(TILE_BYTES)));
-      }
-      const i = (sy - ty * TILE_SUB) * TILE_SUB + (sx - tx * TILE_SUB);
-      if (on) bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
-      else bits[i >> 3] = bits[i >> 3]! & ~(1 << (i & 7));
+  for (const [sx, sy] of subs) {
+    const tx = Math.floor(sx / TILE_SUB);
+    const ty = Math.floor(sy / TILE_SUB);
+    const at = `${tx},${ty}`;
+    let bits = tiles.get(at);
+    if (!bits) {
+      const t = get(tx, ty);
+      tiles.set(at, (bits = (t && decodeTile(t.bits)) || new Uint8Array(TILE_BYTES)));
     }
+    const i = (sy - ty * TILE_SUB) * TILE_SUB + (sx - tx * TILE_SUB);
+    if (on) bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+    else bits[i >> 3] = bits[i >> 3]! & ~(1 << (i & 7));
   }
   for (const [at, bits] of tiles) {
     const [tx, ty] = at.split(",").map(Number) as [number, number];
