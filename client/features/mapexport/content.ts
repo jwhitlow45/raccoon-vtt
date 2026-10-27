@@ -1,4 +1,4 @@
-import type { BuildChunk, FogTile, Label, RoomState, Scene, Stamp } from "#shared/model.ts";
+import { CHUNK_CELLS, type BuildChunk, type FogTile, type Label, type PlayerChunk, type RoomState, type Scene, type Stamp } from "#shared/model.ts";
 import { projectChunkForPlayer, stampCells } from "#shared/project.ts";
 import { decodeTile, encodeTile, isRangeFullyFogged, labelCells } from "#shared/rules/fog.ts";
 import { drawOrder } from "../builder/stamps/rules.ts";
@@ -8,15 +8,16 @@ import { drawOrder } from "../builder/stamps/rules.ts";
  * against the server's projection without a canvas.
  *
  * - The player view holds exactly what a player's client receives for the
- *   scene (design 7.3 and 13.4), drawn without the fog: an undiscovered
+ *   scene (design 7.3 and 13.4), drawn without the fog. With fog on that is
+ *   the server's to say (playerViewContent): players hold the build only
+ *   where they have seen it (docs/design-v1-map-discovery.md 5.1). With fog
+ *   off they receive the whole build, worked out here: an undiscovered
  *   secret door, on an edge or free, is the wall players see there, under
- *   the scene's automatic walls rule, a locked door is closed, and
- *   a label fully under enabled fog is left out, so a "Trap" in the dark
- *   stays secret. The fog is the one players get: the DM's layer and the
- *   party's explored layer merged (playerFog below). Lock marks and the "S" on
- *   secret doors are DM-only marks, which the drawing leaves out for the
- *   player role. Players already receive the whole map image and build, so
- *   nothing in this file reveals more than devtools would.
+ *   the scene's automatic walls rule, and a locked door is closed. The
+ *   fog-off rules below for labels and stamps under fog read the one
+ *   players get, the DM's layer and the party's explored layer merged
+ *   (playerFog below). Lock marks and the "S" on secret doors are DM-only
+ *   marks, which the drawing leaves out for the player role.
  * - The DM view holds everything, as the DM's board shows it.
  */
 
@@ -36,6 +37,71 @@ export type ExportContent = {
   /** Stamps the player view leaves out: DM only, or fully under the fog by the labels' rule. */
   hiddenStamps: number;
 };
+
+/** Whether an export's build comes from the server: the player view of a scene with fog on, which this device cannot work out (playerViewContent). */
+const knownCache = new Map<string, Uint8Array>();
+
+/** A chunk's `known` as its bytes. */
+function knownBytes(known: string): Uint8Array {
+  let bytes = knownCache.get(known);
+  if (!bytes) {
+    bytes = Uint8Array.from(atob(known), (c) => c.charCodeAt(0));
+    if (knownCache.size > 1024) knownCache.clear();
+    knownCache.set(known, bytes);
+  }
+  return bytes;
+}
+
+export function fromServer(view: ExportView, scene: Pick<Scene, "fogEnabled">): boolean {
+  return view === "player" && scene.fogEnabled === true;
+}
+
+/**
+ * The player view of a scene with fog on (docs/design-v1-map-discovery.md
+ * 4): the server's shared projection (lib/api.ts PlayerSceneView), as
+ * every player and display gets the scene, never-seen ground empty and
+ * explored ground as the party last saw it, drawn as it comes. The DM's
+ * copy says what was left out: its labels and stamps on the scene that the
+ * projection holds none of, and its secret doors not yet found on chunks
+ * the projection holds, which players see as walls.
+ */
+export function playerViewContent(players: { buildChunks: Readonly<Record<string, BuildChunk | undefined>>; labels: Readonly<Record<string, Label | undefined>>; stamps: Readonly<Record<string, Stamp | undefined>> }, dm: Pick<RoomState, "buildChunks" | "labels" | "stamps">, sceneId: string): ExportContent {
+  const onScene = <T extends { sceneId: string }>(all: Readonly<Record<string, T | undefined>>) => Object.values(all).filter((v): v is T => !!v && v.sceneId === sceneId);
+  const chunks = onScene(players.buildChunks);
+  const labels = onScene(players.labels);
+  const stamps = onScene(players.stamps).sort(drawOrder);
+  const held = new Map(chunks.map((c) => [`${c.cx},${c.cy}`, c]));
+  const known = (x: number, y: number) => {
+    const chunk = held.get(`${Math.floor(x / CHUNK_CELLS)},${Math.floor(y / CHUNK_CELLS)}`) as PlayerChunk | undefined;
+    if (!chunk?.known) return false;
+    const k = (y - chunk.cy * CHUNK_CELLS) * CHUNK_CELLS + (x - chunk.cx * CHUNK_CELLS);
+    return ((knownBytes(chunk.known)[k >> 3]! >> (k & 7)) & 1) === 1;
+  };
+  const hidden = (f: { kind: string; secret?: boolean; discovered?: boolean }) => f.kind === "door" && f.secret === true && !f.discovered;
+  let secretDoors = 0;
+  for (const chunk of onScene(dm.buildChunks)) {
+    // An edge door counts where players hold a cell beside it, as the wall they see. A free one goes as cut pieces, so it counts where they hold any of its chunk.
+    for (const [key, edge] of Object.entries(chunk.edges)) {
+      if (!hidden(edge)) continue;
+      const [xs, ys, side] = key.split(",");
+      const x = Number(xs);
+      const y = Number(ys);
+      if (known(x, y) || (side === "n" ? known(x, y - 1) : known(x - 1, y))) secretDoors++;
+    }
+    if (held.has(`${chunk.cx},${chunk.cy}`)) for (const wall of chunk.walls ?? []) if (hidden(wall.f)) secretDoors++;
+  }
+  const shownLabels = new Set(labels.map((l) => l.id));
+  const shownStamps = new Set(stamps.map((s) => s.id));
+  return {
+    role: "player",
+    chunks,
+    labels,
+    secretDoors,
+    hiddenLabels: onScene(dm.labels).filter((l) => !shownLabels.has(l.id)).length,
+    stamps,
+    hiddenStamps: onScene(dm.stamps).filter((s) => !shownStamps.has(s.id)).length,
+  };
+}
 
 export function exportContent(
   input: Pick<RoomState, "buildChunks" | "labels" | "fogTiles" | "stamps"> &

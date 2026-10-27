@@ -8,10 +8,11 @@ import { buttonLook } from "../../components/looks.ts";
 import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
+import { api } from "../../lib/api.ts";
 import { deviceMapVariant } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomStore, useRoomView } from "../../state/view.ts";
-import { exportContent, hasBuildOn, type ExportView } from "./content.ts";
+import { exportContent, fromServer, hasBuildOn, playerViewContent, type ExportContent, type ExportView } from "./content.ts";
 import { exportFileName } from "./fileName.ts";
 import { ExportError, loadMapImage, renderMapPng } from "./render.ts";
 import { prefersShare, shareFile } from "./save.ts";
@@ -26,13 +27,20 @@ import { DEFAULT_PX_PER_CELL, exportSize, exportWords, mapVariantFor, PX_PER_CEL
  * on a phone has no room for options.
  *
  * The image is made with the current build when "Make image" is tapped, and
- * a second tap saves it (save.ts says why). The grid is a checkbox, since
+ * a second tap saves it (save.ts says why). The player view of a scene
+ * with fog on is the server's to give (docs/design-v1-map-discovery.md 4):
+ * players hold the build only where they have seen it, as they last saw
+ * it, and this device holds the whole build and no memory, so "Make image"
+ * asks for it, busy until it comes. The grid is a checkbox, since
  * "Make image" reads it rather than it taking effect at once
  * (docs/design-v1-visual.md 3.7).
  */
 
 type Made = { file: File; url: string; width: number; height: number; pxPerCell: number; share: boolean; notes: string[] };
 type Status = { kind: "idle" } | { kind: "busy" } | { kind: "made"; made: Made } | { kind: "error"; message: string };
+
+/** When the server cannot say what players get of the scene. */
+export const PLAYER_VIEW_FAILED = "Could not get the players' view of this scene from the server. Check the connection, then try again.";
 
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
 const EMPTY_LABELS: RoomState["labels"] = {};
@@ -88,12 +96,26 @@ export function MapExport(props: { scene: Scene }) {
     const run = ++runRef.current;
     forget();
     setStatus({ kind: "busy" });
-    const room = store.getState().view;
+    const { view: room, roomId } = store.getState();
     if (!room) {
       setStatus({ kind: "error", message: "The room is not loaded yet." });
       return;
     }
-    const content = exportContent({ scene, buildChunks: room.buildChunks, labels: room.labels, fogTiles: room.fogTiles, exploredTiles: room.exploredTiles, stamps: room.stamps, view });
+    let content: ExportContent;
+    let drawn: Scene = scene;
+    if (fromServer(view, scene)) {
+      try {
+        const players = await api.getPlayerView(roomId, scene.id);
+        if (run !== runRef.current) return;
+        content = playerViewContent(players, room, scene.id);
+        // Drawn by the automatic walls rule of players' copy, "off" with fog on: their chunks carry the automatic walls they hold (docs/design-v1-map-discovery.md 5.2).
+        drawn = { ...scene, autoWalls: players.scene.autoWalls ?? "off" };
+      } catch {
+        if (run !== runRef.current) return;
+        setStatus({ kind: "error", message: PLAYER_VIEW_FAILED });
+        return;
+      }
+    } else content = exportContent({ scene, buildChunks: room.buildChunks, labels: room.labels, fogTiles: room.fogTiles, exploredTiles: room.exploredTiles, stamps: room.stamps, view });
     const notes: string[] = [];
     if (content.secretDoors > 0) notes.push(`${count(content.secretDoors, "secret door")} drawn as ${content.secretDoors === 1 ? "a wall" : "walls"}, as players see them.`);
     if (content.hiddenLabels > 0) notes.push(`${count(content.hiddenLabels, "label")} under the fog left out.`);
@@ -111,7 +133,7 @@ export function MapExport(props: { scene: Scene }) {
     }
 
     try {
-      const blob = await renderMapPng({ scene, size, content, grid, map, assets });
+      const blob = await renderMapPng({ scene: drawn, size, content, grid, map, assets });
       if (run !== runRef.current) return;
       const file = new File([blob], exportFileName(sceneGrid(scene), scene.name, scene.bounds, size.pxPerCell, view), { type: "image/png" });
       const url = URL.createObjectURL(file);

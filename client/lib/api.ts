@@ -1,5 +1,5 @@
 import { isApiErrorCode, type ApiErrorCode } from "#shared/apiErrors.ts";
-import type { AssetId, LogEntry, Member, MemberId } from "#shared/model.ts";
+import type { AssetId, BuildChunk, FogTile, Label, LogEntry, Member, MemberId, Scene, Stamp } from "#shared/model.ts";
 import type { AssetCredit, SearchResult, SearchSource } from "#shared/protocol.ts";
 
 /**
@@ -369,6 +369,16 @@ export type UploadOptions = RetryOptions & {
 
 const room = (roomId: string) => `/api/rooms/${encodeURIComponent(roomId)}`;
 
+/**
+ * A scene as every player and table display gets it, for the DM's map
+ * export (docs/design-v1-map-discovery.md 4, "Map export's player view"):
+ * the server's shared projection of its build, memory included, and the
+ * labels and stamps players get there, and the scene and fog as players'
+ * copy holds them (server/http/playerView.ts). The DM's own copy holds the
+ * whole build and no memory, so only the server can say this.
+ */
+export type PlayerSceneView = { scene: Scene; buildChunks: Record<string, BuildChunk>; labels: Record<string, Label>; stamps: Record<string, Stamp>; fogTiles: Record<string, FogTile> };
+
 export const api = {
   /** Public server settings: the Turnstile site key when Turnstile is on, and whether image search is. */
   getConfig: () => request<{ turnstileSiteKey: string | null; searchEnabled: boolean }>("GET", "/api/config"),
@@ -378,6 +388,9 @@ export const api = {
 
   /** The room's name only, for the join page. */
   getRoom: (roomId: string) => request<{ name: string }>("GET", room(roomId)),
+
+  /** The DM only: a scene as players get it (PlayerSceneView). */
+  getPlayerView: (roomId: string, sceneId: string, signal?: AbortSignal) => request<PlayerSceneView>("GET", `${room(roomId)}/scenes/${encodeURIComponent(sceneId)}/player-view`, { signal }),
 
   /** The caller's member and role. A 401, 403 or 404 means this device has no grant here. */
   getMe: (roomId: string) => request<Me>("GET", `${room(roomId)}/me`),

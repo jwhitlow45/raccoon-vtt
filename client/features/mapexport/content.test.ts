@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import type { StampInput } from "#shared/protocol.ts";
 import { decodeTile, rasterizeFogOps } from "#shared/rules/fog.ts";
 import { apply, P1, reveal, room, scene } from "#shared/testutil.ts";
-import { exportContent, hasBuildOn, playerFog, type ExportView } from "./content.ts";
+import { exportContent, fromServer, hasBuildOn, playerFog, playerViewContent, type ExportView } from "./content.ts";
 
 const SECRET = { kind: "door", state: "closed", secret: true, discovered: false } as const;
 const FOUND = { kind: "door", state: "locked", secret: true, discovered: true } as const;
@@ -212,5 +212,34 @@ describe("whether a scene has a build to export", () => {
     assert.equal(hasBuildOn("s2", state.buildChunks, state.labels), false);
     state = apply(state, { t: "build.stairs", sceneId: "s2", cells: ["1,1"], up: "a" });
     assert.equal(hasBuildOn("s2", state.buildChunks, state.labels), true);
+  });
+});
+
+describe("the player view of a scene with fog on comes from the server (docs/design-v1-map-discovery.md 4)", () => {
+  test("only that view asks: the DM view and a scene with fog off are this device's own", () => {
+    assert.equal(fromServer("player", { fogEnabled: true }), true);
+    assert.equal(fromServer("player", { fogEnabled: false }), false);
+    assert.equal(fromServer("dm", { fogEnabled: true }), false);
+  });
+
+  test("it draws the projection as it comes, never-seen ground empty, and counts what it left out from the DM's copy", () => {
+    const state = built(true);
+    // What the server sends: the shared projection of the scene, as every player gets it.
+    const players = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
+    const got = playerViewContent(players, state, "s1");
+    assert.equal(got.role, "player");
+    assert.deepEqual(
+      got.chunks.map((c) => `${c.cx},${c.cy}`).sort(),
+      Object.values(players.buildChunks)
+        .filter((c) => c?.sceneId === "s1")
+        .map((c) => `${c!.cx},${c!.cy}`)
+        .sort(),
+    );
+    // Nothing of the unrevealed east of the hall: the hidden door at 18,3 and the cells past x = 8 are not in it.
+    assert.ok(got.chunks.every((c) => !("18,3,w" in c.edges) && !("12,8" in c.cells)));
+    assert.deepEqual(got.labels.map((l) => l.id), ["hall"]);
+    assert.equal(got.hiddenLabels, 1);
+    // The hidden door players hold, on the revealed ground at 5,0, drawn as their wall. The one in the dark is not counted.
+    assert.equal(got.secretDoors, 1);
   });
 });
