@@ -1286,6 +1286,9 @@ export class RoomActor {
     batch.ops.push({ seq, at, actor: viewer, op, log: result.log });
     batch.touched.push(...result.touched);
     if (result.global) batch.global = true;
+    // An area's reminder is judged on the sight this op left, not cut to explored ground (pendingGround), so that sight
+    // is explored at once: a later op in the batch that looks away must not leave the line resting on ground never held.
+    if (result.log.some((e) => e.data?.type === "area")) this.#exploreNow(batch);
     this.lastOpAt = this.#opts.now();
     // Read only when the op goes on an undo stack: working it out hashes what the op touched.
     return {
@@ -1566,8 +1569,10 @@ export class RoomActor {
    * The explore step (docs/design-v1-maps-vision.md 4.3.3): what the party
    * now sees on the player scene that its explored layer lacks goes into
    * that layer, by one server-made op at the end of the same batch, so
-   * players never see sight outside the ground they have explored. Replay
-   * applies the stored bits and never computes sight.
+   * players never see sight outside the ground they have explored, and by
+   * one more right after any op that wrote an area's reminder, whose line
+   * rests on the sight of that moment (docs/design-v1-map-discovery.md
+   * decision 13). Replay applies the stored bits and never computes sight.
    *
    * It runs none of an op's checks. It only ever adds bits the party sees,
    * on tiles inside the scene, and never refuses: a refused explore would
@@ -1577,9 +1582,14 @@ export class RoomActor {
    * replay checks every stored op against it.
    */
   #explore(batch: Batch): void {
-    const op = batch.ops.length > 0 ? exploreOp(this.#staged.state) : null;
-    if (op) this.#appendServerOp(batch, op, "explore");
+    if (batch.ops.length > 0) this.#exploreNow(batch);
     this.#remember(batch);
+  }
+
+  /** The explore step on the staged state now, inside the batch: before its end where an op wrote an area's reminder. */
+  #exploreNow(batch: Batch): void {
+    const op = exploreOp(this.#staged.state);
+    if (op) this.#appendServerOp(batch, op, "explore");
   }
 
   /**

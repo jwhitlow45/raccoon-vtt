@@ -27,6 +27,7 @@ import { applyOp } from "#shared/reducer.ts";
 import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
 import { FORGET_STALE, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
+import { layerHeld } from "#shared/reducer/memory.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { SnapshotBudget } from "./budgets.ts";
 import { Connection } from "./connection.ts";
@@ -3165,6 +3166,38 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       },
       { sizeLimits: { stateLimit } },
     );
+  });
+
+  test("ground a reminder rests on is explored, though a later op in its batch looks away (MD2's review, pendingGround)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, pcId, goblinId } = darkRoom(dm, player);
+    // An area out past Ayla's darkvision from (2, 2), in a running turn, so a creature entering it is a reminder.
+    state.templates.sg = testTemplate("sg", { sceneId, shape: "sphere", size: 10, origin: { x: 14.5, y: 2.5, z: 0 }, spell: "Spirit Guardians", visibility: "all", ownerId: dm.id, triggers: ["enter"] });
+    state.encounter = { rev: 0, round: 1, activeEntryId: "e-gob", entries: [testEntry("e-gob", { tokenId: goblinId, value: 10 })] };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const base = deps(db);
+    const actor = await RoomActor.load({ ...base, options: { ...base.options, batchMs: 200 } });
+    assert.ok(actor);
+    try {
+      const table = connect(actor, dm);
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      // One batch: Ayla steps where she sees the area, the goblin walks into it, and she steps back.
+      void actor.op(table.conn, 1, { t: "token.move", tokenId: pcId, x: 10, y: 2 });
+      void actor.op(table.conn, 2, { t: "token.move", tokenId: goblinId, x: 14, y: 2 });
+      await actor.op(table.conn, 3, { t: "token.move", tokenId: pcId, x: 2, y: 2 });
+      const ev = await answerTo(table.sent, 3);
+      assert.ok(ev !== "stuck");
+      assert.deepEqual(ev.acks, [1, 2, 3], "the three ops went in one batch");
+      const now = actor.committed.state;
+      const line = now.log.find((e) => e.data?.type === "area");
+      assert.ok(line && line.data?.type === "area" && line.data.hidden !== true, "the reminder reaches players, judged on Ayla's sight then");
+      const held = layerHeld(now, now.scenes[sceneId]!, null);
+      assert.ok(held.key("14,2") && held.key("15,2"), "the ground under the reminder is explored, so players hold what it rests on");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
   });
 
   test("a remembered door the DM took away answers GONE once reached, and that touch drops it from their map (MD-O-6)", async () => {
