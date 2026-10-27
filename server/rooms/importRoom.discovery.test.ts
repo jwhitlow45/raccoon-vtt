@@ -3,12 +3,12 @@ import { describe, test } from "node:test";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import { MAP_DISCOVERY_SNAPSHOT_VERSION, migrateSnapshot } from "#shared/migrate.ts";
 import type { Label, RoomState, Stamp } from "#shared/model.ts";
-import { DM, room, scene } from "#shared/testutil.ts";
+import { DM, room, scene, token } from "#shared/testutil.ts";
 import { exportableState, roomExport, type RoomExport } from "./exportRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { assertWithinLimits, MEMORY_TOO_LARGE, withDiscoveryUpgrade } from "./importRoom.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
-import { MEMORY_FULL, measuredStateBytes, memoryReserves } from "./sizeGuard.ts";
+import { MEMORY_FULL, measuredStateBytes, memoryReserves, memoryShare, SHARE_MARGIN } from "./sizeGuard.ts";
 import { exploredReserve, LIMITS } from "#shared/limits.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -159,5 +159,31 @@ describe("players' memory through a room export and import", () => {
     const unplayed = Object.values(out.scenes).find((s) => out.playedScenes?.[s.id] === undefined && s.fogEnabled && s.vision?.on === true);
     assert.ok(unplayed, "the file has a scene with fog and party vision on that nobody played");
     refused({ ...out, memory: { ...out.memory, [chunkKey(unplayed.id, 0, 0)]: { sceneId: unplayed.id, cx: 0, cy: 0, rev: 0, cells: { "1,1": "stone" } } } });
+  });
+
+  test("in a near-full room each layer's memory is measured against the share the room gives it, not a whole cap (MD3-ASTRA-6)", () => {
+    const state = room({ scenes: { s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }) } });
+    state.playedScenes = { s1: { sceneId: "s1", rev: 0 } };
+    state.memoryShared = { s1: { sceneId: "s1", rev: 0 } };
+    const cells: Record<string, "stone"> = {};
+    for (let k = 0; k < 200; k++) cells[`${k % 16},${k >> 4}`] = "stone";
+    const remembered = { [chunkKey("s1", 0, 0)]: { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells } };
+    const small = { [chunkKey("s1", 0, 0)]: { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: { "1,1": "stone" as const } } };
+    state.memory = remembered;
+    // Four scenes of notes fill the room until the party's share is 1,000 bytes, a fifth of what it remembers.
+    const pads = [2, 3, 4, 5].map((i) => {
+      state.scenes[`s${i}`] = scene(`s${i}`, { order: i - 1 });
+      return (state.tokens[`pad${i}`] = token(`pad${i}`, { sceneId: `s${i}`, notes: "" }));
+    });
+    const reserves = memoryReserves(state);
+    const fill = LIMITS.stateBytes - exploredReserve(state) - reserves.whole - SHARE_MARGIN - 1_000 * reserves.sharing - measuredStateBytes(state);
+    for (const [i, pad] of pads.entries()) pad.notes = "x".repeat(Math.floor(fill / 4) + (i === 0 ? fill % 4 : 0));
+    assert.equal(memoryShare(LIMITS.stateBytes, measuredStateBytes(state), exploredReserve(state), memoryReserves(state)), 1_000);
+    assert.ok(layerCharge(state, state.scenes.s1!, null) > 1_000 && layerCharge(state, state.scenes.s1!, null) < MEMORY_CAP);
+    assert.throws(
+      () => assertWithinLimits(state),
+      (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === MEMORY_TOO_LARGE,
+    );
+    assert.doesNotThrow(() => assertWithinLimits({ ...state, memory: small }), "memory within the share fits");
   });
 });
