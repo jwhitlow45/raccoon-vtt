@@ -654,6 +654,30 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     await ask.waitFor({ state: "detached" });
     await waitFor("the cavern cleared", () => (built() ? null : true));
     await waitFor("whole tiles of the party's explored ground forgotten", () => (explored() < before ? true : null));
+
+    // The cavern floored and seen whole again. The same rectangle, drawn while the DM's device is offline, waits on its
+    // asks: the builder says it is checking and nothing of it is built. Back online, it asks, and Go ahead erases all of it.
+    for (let y = 0; y < CAVERN.bounds.h; y += 16) await ops.send({ t: "build.rect", sceneId: run.cavern, terrain: "stone", x: 0, y, w: CAVERN.bounds.w, h: 16, forget: true });
+    await playersTo(run.cavern);
+    await waitFor("the cavern explored again", () => (explored() >= before ? true : null));
+    await playersTo(run.halls);
+    await waitFor("the cavern floored again", () => (floored() === whole ? true : null));
+    await pickOption(dm, "Map builder", "Builder mode", "Erase area");
+    consoles.dm.expectSocketFailures = true;
+    await dmContext.setOffline(true);
+    await dragCells(dm, CAVERN.bounds, { x: 2, y: 6 }, { x: 77, y: 62 });
+    const checking = dm.locator("[data-build-asking]");
+    await checking.waitFor();
+    await shots.take(dm, "mapdiscovery-dm-build-asking");
+    assert.equal(floored(), whole, "a band went before the answer");
+    await dmContext.setOffline(false);
+    await ask.waitFor({ timeout: 30_000 });
+    await checking.waitFor({ state: "detached" });
+    consoles.dm.expectSocketFailures = false;
+    await ask.getByRole("button", { name: "Go ahead" }).click();
+    await ask.waitFor({ state: "detached" });
+    await waitFor("the whole rectangle erased", () => (floored() === whole - 76 * 57 ? true : null));
+    await pickOption(dm, "Map builder", "Builder mode", "Brush");
     await pickTool(dm, "Select");
   });
 
