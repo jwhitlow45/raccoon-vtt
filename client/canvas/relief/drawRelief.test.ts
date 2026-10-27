@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BandPart } from "../../features/areas/volume.ts";
 import { theme } from "../../lib/theme.ts";
-import { drawVolume } from "./drawRelief.ts";
+import type { VolumePiece } from "./buckets.ts";
+import { drawRun, drawVolume, type DrawContext } from "./drawRelief.ts";
 
 /*
  * How an area standing as its real shape draws (docs/design-v1-iso-area-shapes.md
@@ -11,11 +12,11 @@ import { drawVolume } from "./drawRelief.ts";
  * lies inside a pit's opening only inside the openings' clip.
  */
 
-type Call = { name: string; alpha: number; width: number; dash: number[]; clipped: boolean };
+type Call = { name: string; alpha: number; width: number; dash: number[]; clipped: boolean; color: string };
 
 function canvas(): { g: CanvasRenderingContext2D; calls: Call[] } {
   const calls: Call[] = [];
-  const state = { globalAlpha: 1, lineWidth: 1, dash: [] as number[], clips: 0 };
+  const state = { globalAlpha: 1, lineWidth: 1, dash: [] as number[], clips: 0, color: "" };
   const stack: (typeof state)[] = [];
   const g = {
     set globalAlpha(v: number) {
@@ -24,7 +25,9 @@ function canvas(): { g: CanvasRenderingContext2D; calls: Call[] } {
     set lineWidth(v: number) {
       state.lineWidth = v;
     },
-    set fillStyle(_: string) {},
+    set fillStyle(v: string) {
+      state.color = v;
+    },
     set strokeStyle(_: string) {},
     set lineJoin(_: string) {},
     set lineCap(_: string) {},
@@ -35,10 +38,11 @@ function canvas(): { g: CanvasRenderingContext2D; calls: Call[] } {
     restore: () => Object.assign(state, stack.pop()),
     clip: () => {
       state.clips++;
-      calls.push({ name: "clip", alpha: state.globalAlpha, width: state.lineWidth, dash: state.dash, clipped: true });
+      calls.push({ name: "clip", alpha: state.globalAlpha, width: state.lineWidth, dash: state.dash, clipped: true, color: state.color });
     },
-    fill: () => calls.push({ name: "fill", alpha: state.globalAlpha, width: state.lineWidth, dash: state.dash, clipped: state.clips > 0 }),
-    stroke: () => calls.push({ name: "stroke", alpha: state.globalAlpha, width: state.lineWidth, dash: state.dash, clipped: state.clips > 0 }),
+    fill: () => calls.push({ name: "fill", alpha: state.globalAlpha, width: state.lineWidth, dash: state.dash, clipped: state.clips > 0, color: state.color }),
+    stroke: () => calls.push({ name: "stroke", alpha: state.globalAlpha, width: state.lineWidth, dash: state.dash, clipped: state.clips > 0, color: state.color }),
+    setTransform: () => {},
     beginPath: () => {},
     closePath: () => {},
     moveTo: () => {},
@@ -111,5 +115,28 @@ describe("an area's run of bands drawn as one", () => {
     const bare = canvas();
     drawVolume(bare.g, [part(false)], [part(true)], [], { color: "#3fa7ff", dm: false, selected: false, preview: false }, 1, 1);
     assert.equal(bare.calls.length, 0, "nothing inside an opening shows without its clip");
+  });
+
+  test("bands of two areas in a row draw as one run each, the farther area first: their tints blend in either order (design 4.3)", () => {
+    const { g, calls } = canvas();
+    const piece = (area: string, color: string, band: number): VolumePiece => ({
+      kind: "volume",
+      id: `v${area}:${band}`,
+      area,
+      band,
+      key: band + 0.5,
+      draws: [{ band, high: part(true), low: part(false), box: { x0: 0, y0: 0, x1: 1, y1: 1 } }],
+      bounds: { x0: 0, y0: 0, x1: 1, y1: 1 },
+      look: { color, dm: false, selected: false, preview: false },
+      pits: [],
+    });
+    const dc: DrawContext = { turn: 0, camera: { x: 0, y: 0, scale: 1 } as DrawContext["camera"], pixelRatio: 1, ground: null, textures: {}, view: { x0: -10, y0: -10, x1: 10, y1: 10 } };
+    drawRun(g, [piece("a", "#aaaaaa", 3), piece("b", "#bbbbbb", 3), piece("a", "#aaaaaa", 4), piece("b", "#bbbbbb", 4), piece("a", "#aaaaaa", 5)], dc);
+    const fills = calls.filter((c) => c.name === "fill");
+    assert.deepEqual(
+      fills.map((c) => c.color),
+      ["#aaaaaa", "#aaaaaa", "#bbbbbb", "#bbbbbb"],
+      "a far and a near fill for each area, not for each band",
+    );
   });
 });

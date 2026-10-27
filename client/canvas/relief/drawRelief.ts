@@ -241,22 +241,31 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[
   for (let i = 0; i < pieces.length; i++) {
     const p = pieces[i]!;
     if (p.kind === "volume") {
-      // An area's bands with nothing between them draw as one: one fill for their far faces and one for their near ones (ISOA-D3).
+      // An area's bands with only other areas' bands between them draw as one: one fill for their far faces and one for their near ones (ISOA-D3).
+      // Two areas' tints blend in either order (design 4.3), so only a column, wall, pit or standee parts an area's run. At the cap that is a call an area, not one a band.
       let end = i + 1;
-      while (end < pieces.length && pieces[end]!.kind === "volume" && (pieces[end] as VolumePiece).area === p.area) end++;
-      const run = pieces.slice(i, end) as VolumePiece[];
-      i = end - 1;
-      if (!run.some((v) => meets(v.bounds, dc.view))) continue;
-      flush();
-      const high: BandPart[] = [];
-      const low: BandPart[] = [];
-      for (const v of run) {
-        for (const d of v.draws) {
-          high.push(d.high);
-          low.push(d.low);
-        }
+      while (end < pieces.length && pieces[end]!.kind === "volume") end++;
+      const byArea = new Map<string, VolumePiece[]>();
+      for (let k = i; k < end; k++) {
+        const v = pieces[k] as VolumePiece;
+        const list = byArea.get(v.area);
+        if (list) list.push(v);
+        else byArea.set(v.area, [v]);
       }
-      drawVolume(g, high, low, p.pits, p.look, dc.turn, 1 / dc.camera.scale);
+      i = end - 1;
+      flush();
+      for (const run of byArea.values()) {
+        if (!run.some((v) => meets(v.bounds, dc.view))) continue;
+        const high: BandPart[] = [];
+        const low: BandPart[] = [];
+        for (const v of run) {
+          for (const d of v.draws) {
+            high.push(d.high);
+            low.push(d.low);
+          }
+        }
+        drawVolume(g, high, low, run[0]!.pits, run[0]!.look, dc.turn, 1 / dc.camera.scale);
+      }
       continue;
     }
     if (!meets(boundsOf(p, dc.turn), dc.view)) continue;
