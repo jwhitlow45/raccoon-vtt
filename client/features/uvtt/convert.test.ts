@@ -48,7 +48,7 @@ function onLattice(v: number): boolean {
 function applied(plan: ImportPlan, sceneId = "imp"): { state: RoomState; ops: ClientOp[] } {
   const map = placeMap(plan, { assetId: "a1", width: plan.frame.w * 70, height: plan.frame.h * 70, fileImageWidth: plan.frame.w * 70 });
   assert.ok(map);
-  const scene = importScene(plan, map, { id: sceneId, name: "Import", fog: true });
+  const scene = importScene(plan, map, { id: sceneId, name: "Import" });
   let n = 0;
   const ops = importOps(scene, plan, () => `light-${++n}`);
   let state = room();

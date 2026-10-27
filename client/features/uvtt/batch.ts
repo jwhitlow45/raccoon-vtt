@@ -41,7 +41,7 @@ export function batchByBytes<T>(items: readonly T[], maxItems: number, maxBytes:
   return batches;
 }
 
-export type SceneChoices = { id: string; name: string; fog: boolean; light?: LightLevel };
+export type SceneChoices = { id: string; name: string; light?: LightLevel };
 
 /** The canonical map an upload answered with, and the file's own image width the grid was measured in. */
 export type UploadedMap = { assetId: string; width: number; height: number; fileImageWidth: number };
@@ -67,7 +67,9 @@ export function placeMap(plan: Pick<ImportPlan, "frame" | "pixelsPerGrid">, uplo
  * The new scene. It walls nothing by itself (`autoWalls: "off"`), since the
  * file brings its walls, and the reducer never infers the rule, so the op
  * says it. Its grid is the file's, exact, which the scene keeps a mark of
- * (`gridFromFile`) for Find the grid. Fog follows "Start under fog".
+ * (`gridFromFile`) for Find the grid. It starts under fog, and the
+ * dialog's Players see sets fog and party vision over that
+ * (scenes/create.ts `withPlayersSee`).
  */
 export function importScene(plan: Pick<ImportPlan, "frame">, map: SceneMap, choices: SceneChoices): SceneInput {
   return {
@@ -76,7 +78,7 @@ export function importScene(plan: Pick<ImportPlan, "frame">, map: SceneMap, choi
     bounds: { w: plan.frame.w, h: plan.frame.h },
     background: MAP_BACKGROUND,
     grid: DEFAULT_GRID,
-    fogEnabled: choices.fog,
+    fogEnabled: true,
     map,
     autoWalls: "off",
     gridFromFile: true,

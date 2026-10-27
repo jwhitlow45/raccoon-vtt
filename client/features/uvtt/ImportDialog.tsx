@@ -255,7 +255,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
       const level = light ?? read.info.light?.level ?? "bright";
       const { pick, gone } = pickNow(intent, store.getState().view, "uvtt");
       if (gone) ui.notify(gone);
-      const scene = withPlayersSee(importScene(plan, map, { id: actions.newId(), name, fog: true, light: level }), pick, level);
+      const scene = withPlayersSee(importScene(plan, map, { id: actions.newId(), name, light: level }), pick, level);
       const ops = importOps(scene, plan, actions.newId);
       // One undo group, so one undo takes the whole scene back (design 7.7).
       const group = actions.newId();

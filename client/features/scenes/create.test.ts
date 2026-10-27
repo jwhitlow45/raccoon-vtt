@@ -210,7 +210,7 @@ describe("a Universal VTT import's Players see", () => {
   test("an import keeps its own walls rule, grid mark and light under a preset or Like", async () => {
     const { importScene } = await import("../uvtt/batch.ts");
     const map = { assetId: "a", widthPx: 500, heightPx: 400, cellPx: 50, originPx: { x: 0, y: 0 } };
-    const base = importScene({ frame: { shift: { x: 0, y: 0 }, image: { x: 0, y: 0 }, w: 10, h: 8 } }, map, { id: "u", name: "Keep", fog: true, light: "dim" });
+    const base = importScene({ frame: { shift: { x: 0, y: 0 }, image: { x: 0, y: 0 }, w: 10, h: 8 } }, map, { id: "u", name: "Keep", light: "dim" });
     const explore = withPlayersSee(base, { preset: "explore" }, "dim");
     valid(explore);
     assert.deepEqual([explore.fogEnabled, explore.vision, explore.autoWalls, explore.gridFromFile], [true, { on: true, light: "dim" }, "off", true]);

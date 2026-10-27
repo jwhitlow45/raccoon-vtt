@@ -51,11 +51,11 @@ describe("the light a Universal VTT import proposes", () => {
     assert.ok(converted.ok);
     const map = placeMap(converted.plan, { assetId: "a1", width: 700, height: 700, fileImageWidth: 700 });
     assert.ok(map);
-    const scene = importScene(converted.plan, map, { id: "imp", name: "Night", fog: true, light: "dark" });
+    const scene = importScene(converted.plan, map, { id: "imp", name: "Night", light: "dark" });
     assert.deepEqual(scene.vision, { on: false, light: "dark" });
     const op = { t: "scene.create" as const, scene };
     assert.equal(clientOpSchema.safeParse(op).success, true);
     assert.deepEqual(apply(room(), op).scenes.imp?.vision, { on: false, light: "dark" });
-    assert.equal(importScene(converted.plan, map, { id: "imp", name: "Day", fog: true }).vision, undefined);
+    assert.equal(importScene(converted.plan, map, { id: "imp", name: "Day" }).vision, undefined);
   });
 });

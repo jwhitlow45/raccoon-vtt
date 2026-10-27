@@ -521,7 +521,7 @@ describe("where a scene came from", () => {
     const map = placeMap(plan, { assetId: "a1", width: 1400, height: 1000, fileImageWidth: 1400 });
     assert.ok(map);
     const scene = held([
-      { t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt", fog: true }) },
+      { t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt" }) },
       { t: "scene.update", sceneId: "made", patch: { autoWalls: "floor" } },
     ]);
     assert.equal(scene.gridFromFile, true);
@@ -536,11 +536,11 @@ describe("where a scene came from", () => {
     const plan = { frame: { shift: { x: 0, y: 0 }, image: { x: 0, y: 0 }, w: 20, h: 14 }, pixelsPerGrid: 70 };
     const map = placeMap(plan, { assetId: "a1", width: 1400, height: 1000, fileImageWidth: 1400 });
     assert.ok(map);
-    const before = held([{ t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt", fog: true }) }]);
+    const before = held([{ t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt" }) }]);
     // Other art, of another shape, with today's first guess, as Scene settings sends it.
     const next = { assetId: "a2", widthPx: 1400, heightPx: 1400, cellPx: 47, originPx: { x: 0, y: 0 } };
     const after = held([
-      { t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt", fog: true }) },
+      { t: "scene.create", scene: importScene(plan, map, { id: "made", name: "Crypt" }) },
       { t: "scene.setMap", sceneId: "made", map: next },
     ]);
     assert.equal(after.gridFromFile, true, "the imported walls stay, and so does the mark");

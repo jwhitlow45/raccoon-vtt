@@ -107,7 +107,7 @@ function importAndReconnect(refuse: boolean) {
   const map = placeMap(plan, { assetId: "map", width: 700, height: 560, fileImageWidth: 700 });
   assert.ok(map);
   let lightId = 0;
-  const ops: ClientOp[] = importOps(importScene(plan, map, { id: IMPORTED, name: "Crypt", fog: true }), plan, () => `light-${lightId++}`);
+  const ops: ClientOp[] = importOps(importScene(plan, map, { id: IMPORTED, name: "Crypt" }), plan, () => `light-${lightId++}`);
   const last = ops.at(-1);
   assert.equal(last?.t, "build.lights");
   if (refuse && last?.t === "build.lights") ops[ops.length - 1] = { ...last, put: last.put?.map((l) => ({ ...l, x: 40 })) };
