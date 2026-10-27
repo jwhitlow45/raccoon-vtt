@@ -43,6 +43,12 @@ export const OP_ANSWER_MS = 10_000;
 export const MAX_OP_AGE_MS = 12 * 60 * 60 * 1000;
 const MAX_TOASTS = 3;
 /**
+ * What the forget question says when the answer to its Go ahead was lost
+ * with the connection (RoomView.forgetAsk): the snapshot after holds what
+ * the server made of it, but not whether it refused.
+ */
+export const FORGET_UNSURE = "The connection dropped before the server answered. Check that the map shows your change, and make it again if not.";
+/**
  * How long a toast (`notify`) stays on screen. The height readout
  * (features/builder/heights) stays as long, so a note and a reading that
  * show together go together.
@@ -478,6 +484,20 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     }
   }
 
+  /**
+   * The forget question once its Go ahead's ops are settled by something
+   * other than their answers (RoomView.forgetAsk): a snapshot that covers
+   * them or their expiry. It closes, as an answer closes it, so Cancel and
+   * Close never stay dead, and says the outcome is not known when any of
+   * them was settled with its answer lost. Empty while it waits on any.
+   */
+  function askSettled(lost: readonly PendingOp[], pending: readonly PendingOp[]): Pick<RoomStoreState, "forgetAsk"> | Record<string, never> {
+    const sending = get().forgetAsk?.sending;
+    if (!sending || sending.some((n) => pending.some((p) => p.n === n))) return {};
+    if (sending.some((n) => lost.some((p) => p.n === n))) pushToast(FORGET_UNSURE, "info");
+    return { forgetAsk: null };
+  }
+
   function commit(patch: Partial<RoomStoreState>): void {
     const s = get();
     const next = {
@@ -700,8 +720,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const dropped = pending.length - fresh.length;
       if (dropped > 0) {
         for (const p of pending) if (now - p.at > MAX_OP_AGE_MS) sentAt.delete(p.n);
-        commit({ pending: fresh });
-        tell(pending.filter((p) => !fresh.includes(p)), () => "unknown", undefined, "expired");
+        const lost = pending.filter((p) => !fresh.includes(p));
+        commit({ pending: fresh, ...askSettled(lost, fresh) });
+        tell(lost, () => "unknown", undefined, "expired");
         pushToast(dropped === 1 ? "1 offline edit was too old to save." : `${dropped} offline edits were too old to save.`, "info");
       }
       return { clientId, resumeFrom: fresh[0]?.n ?? nextN };
@@ -740,6 +761,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         ephemeral,
         accessVersion,
         snapshots: (s.snapshots ?? 0) + 1,
+        ...askSettled(lost, pending),
       });
       // Told after the commit, so a sender that looks at the view finds this snapshot in it.
       tell(lost, () => "unknown", undefined, "snapshot");

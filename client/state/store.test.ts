@@ -9,7 +9,7 @@ import { actor, character, companionBlock, DM, entry, P1, P2, room, template, to
 import { LocalServer } from "../dev/localServer.ts";
 import { turnOp } from "../features/encounter/logic.ts";
 import { DRAG_END_HOLD_MS, PREVIEW_IDLE_MS } from "./ephemeral.ts";
-import { createRoomStore, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
+import { createRoomStore, FORGET_UNSURE, MAX_OP_AGE_MS, OP_ANSWER_MS, refusalText, replayPending, type RoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 import { INITIAL_LOCAL, panelView, sheetOpen, withoutBelow, withPanel, type LocalUi, type OpAnswer, type OpRefusal, type UnknownCause } from "./types.ts";
 
@@ -1136,6 +1136,54 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: a, code: "forget", message: FORGET_ASK }] });
     s.room.ui.answerForget(false);
     assert.equal(s.room.store.getState().pending.length, 0, "another gesture's step was taken back");
+  });
+
+  test("a reconnect whose snapshot covers the yes's ops closes the question and says the outcome is not known (MD4-ASTRA-2)", () => {
+    const s = setup(room());
+    s.connect();
+    // The server reads every op, though the answers here are the test's own: it refuses the first as a real server would.
+    const toServer = () => {
+      s.server.batch(s.outbox.sent.flatMap((m) => (m.t === "op" ? [{ n: m.n, op: m.op }] : [])));
+      s.outbox.sent = [];
+    };
+    const a = s.room.dispatch(paint(1), { group: "g1" })!;
+    toServer();
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: a, code: "forget", message: FORGET_ASK }] });
+    s.room.ui.answerForget(true);
+    assert.ok(s.state().forgetAsk?.sending, "Go ahead is on its way");
+    // The server takes the op sent again, but the socket dies before its answer comes back.
+    toServer();
+    s.room.suspend();
+    s.room.applySnapshot(s.server.hello({ resumeFrom: s.room.prepareHello().resumeFrom, sceneId: "s1" }));
+    assert.equal(s.state().pending.length, 0);
+    assert.equal(s.state().forgetAsk, null, "Cancel and Close are not left dead");
+    assert.ok(s.state().toasts.some((t) => t.text === FORGET_UNSURE));
+  });
+
+  test("a yes whose ops are still on their way after a snapshot keeps waiting for their answers", () => {
+    const s = setup(room());
+    s.connect();
+    const a = s.room.dispatch(paint(1), { group: "g1" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: a, code: "forget", message: FORGET_ASK }] });
+    s.room.ui.answerForget(true);
+    s.outbox.sent = [];
+    s.room.suspend();
+    s.room.applySnapshot(s.server.hello({ resumeFrom: s.room.prepareHello().resumeFrom, sceneId: "s1" }));
+    assert.ok(s.state().forgetAsk?.sending, "nothing settled them yet");
+    assert.ok(!s.state().toasts.some((t) => t.text === FORGET_UNSURE));
+  });
+
+  test("a yes whose ops grew too old to send closes the question and says so", () => {
+    const s = setup(room());
+    s.connect();
+    const a = s.room.dispatch(paint(1), { group: "g1" })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: a, code: "forget", message: FORGET_ASK }] });
+    s.room.suspend();
+    s.room.ui.answerForget(true);
+    s.clock.advance(MAX_OP_AGE_MS + 1);
+    s.room.prepareHello();
+    assert.equal(s.state().forgetAsk, null);
+    assert.ok(s.state().toasts.some((t) => t.text === FORGET_UNSURE));
   });
 
   test("an Undo asked about asks in its toast, whose yes names the refused undo's n", () => {
