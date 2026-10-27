@@ -369,7 +369,7 @@ Whenever one of these makes a walk cost more, the label on the drag says what it
 
 There are two ways to decide what your players see. With fog alone, you reveal the map by hand, and players see whatever you uncover. **Party vision** instead works out what the party can actually see, from each creature's senses, the walls and the light. Normally the party shares that sight: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. If you would rather each player see only through their own character's eyes, you can choose that too (see [Sight for each player](#sight-for-each-player)). You turn party vision on in the scene's **Vision** settings, which hold four things:
 
-- **Party vision**: when it is on, players see only what the party can see together. Ground the party has explored stays on the players' map, dimmed and without creatures, and ground nobody has seen stays fogged. Turning party vision on turns fog on too.
+- **Party vision**: when it is on, players see only what the party can see together. Ground the party has explored stays on the players' map, dimmed and without creatures, as the party last saw it, and ground nobody has seen stays fogged (see [What players' maps hold](#what-players-maps-hold)). Turning party vision on turns fog on too.
 - **Sight**: **Whole party**, the default, where the party shares one view and one map, or **Per player**, where each player sees and remembers for themselves.
 - **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on.
 - **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
@@ -417,7 +417,7 @@ Under the list, **Who lends sight** shows each creature with its senses and ligh
 
 **What players can still work out.** Per-player sight keeps creatures and ground private, but a few things stay shared, as they do on every scene. It's worth knowing them, so nothing surprises you:
 
-- **Doors are shared.** A door is open or closed for everyone at once. When Thorn opens a door, the change reaches every player's device, and any player whose map shows that doorway sees it swing open, even if none of their own creatures can see it. Secret doors work the same way: once you mark one found, every player who has explored that wall sees a door there.
+- **Doors open for everyone, but each player sees it happen only where they can look.** A door is open or closed for everyone at once, and it stops everyone's moves the same way. When Thorn opens a door, the players who can see it watch it swing open. Every other player's map keeps the door as they last saw it, or shows nothing there at all if they never explored that wall, until one of their creatures sees it. Secret doors work the same way: once you mark one found, a player sees a door there the next time their creatures look at that wall.
 - **Areas and light pass through doors**, as they always do. If an aura reaches through a doorway, or a torch shines through it, a player who can see the far side can tell that the door is open. So can a player who watches a party member walk through it.
 - **The room counts its changes.** When one player's creatures see new ground, the room records it as a change of its own. A player who watches the room's change numbers in the browser's developer tools could tell that someone's map just grew. It never says whose map, or where, and your own work out of the players' sight already gives the same small signal.
 - **The rules everyone shares use only what everyone can see.** A creature that only some players can see counts as unseen for the rules that must give every player the same answer. A horse you control that a character rides shares no turn with its rider unless every player can see it, a trap your monster sets off goes off without the players noticing, and the corners of its path stay hidden. When that matters, make the creature always visible, or mark it to share its sight. The Vision settings point it out for a mount.
@@ -426,7 +426,7 @@ Under the list, **Who lends sight** shows each creature with its senses and ligh
 
 ## Fog
 
-A map image or builder scene starts fully covered in fog. You see the fog as a translucent layer over the map, but players see nothing under it. Tokens, labels and stamps that stand fully under the fog never even reach their devices. The party's own characters are the exception: players always see those.
+A map image or builder scene starts fully covered in fog. You see the fog as a translucent layer over the map, but players see nothing under it. Tokens, labels and stamps that stand fully under the fog never even reach their devices, and neither does anything you built there: floors, walls, doors, heights or stairs. The party's own characters are the exception: players always see those.
 
 ![The Fog tool with a draft: dashed outlines of the squares about to be revealed, and Reveal to players in the options row.](dm-guide/fog.webp)
 
@@ -441,7 +441,29 @@ The draft lets you set up a reveal, check it, and show it all at once. If you wo
 
 **Builder room** fills everything joined to the room you tap, and only walls, windows and closed doors stop it. Close the doors between rooms first, or the reveal spills into the next room.
 
-**With party vision on**, the players' fog also remembers what the party has explored. **Add fog** makes the players forget the ground under its shape, the map the party shares and, on a scene where each player sees for themselves, every player's own map too. The one exception is ground their creatures can see right now, which they explore again at once. **Fog all** makes them forget the whole scene. Undo brings back your own fog edits, but never the memory they erased: if you undo a Fog all, the ground you had revealed is revealed again, but anything the party had only explored stays fogged until the party sees it again or you reveal it.
+**With party vision on**, the players' fog also remembers what the party has explored. **Add fog** makes the players forget the ground under its shape, the map the party shares and, on a scene where each player sees for themselves, every player's own map too. The one exception is ground their creatures can see right now, which they explore again at once. **Fog all** makes them forget the whole scene, and what their map remembered of it. Undo brings back your own fog edits, but never the memory they erased: if you undo a Fog all, the ground you had revealed is revealed again, but anything the party had only explored stays fogged until the party sees it again or you reveal it.
+
+### What players' maps hold
+
+On a scene with fog on, a player's device holds only the part of the map the party has discovered: the ground the party has seen, and the ground you have revealed. A room nobody has seen never reaches their devices at all, not its floor, its walls, its doors, its labels or its stamps, so even a player who opens the browser's developer tools finds nothing of it. A corridor that runs on into the dark simply ends where their map ends, with no wall drawn across it. The map image itself still reaches players whole, so on a scene drawn from a picture, the fog is what keeps the picture hidden.
+
+![Ben's phone in the Sunken halls: Bree's torch shows the hall and the start of the corridor, which runs on into the dark with no wall across it. The treasury south of the corridor is not on his map at all.](dm-guide/discovery-player.webp)
+
+**Explored ground shows as the party last saw it.** With party vision on, ground the party has explored but can't see right now stays on their map the way it looked when they last saw it. So if you add a wall, take a door away, or let a monster open a door while the party is elsewhere, their map keeps the old version, and they find the change when they come back and see it. The moment they look again, their map shows the place as it is now. On a scene with fog but no party vision, the ground you have revealed always shows as it is now.
+
+**Building where the party can see.** On ground the party can see, what you build shows on their map as you build it. Rooms you build around them show their outer walls straight away, and their insides stay empty on the players' map, because the party saw that ground empty, until someone looks in. While a stroke of the map builder touches ground the party can see, the builder's row says so: "The party can see where you are building, so they see it as you build. Build before moving players here, or tap Fog all when you finish."
+
+![The map builder on the Open mat, with Bree standing in bright light: a room just dragged out with Rectangle room, and the builder's row warning that the party can see where the DM is building.](dm-guide/builder-in-sight.webp)
+
+**Walking into the dark.** Players can still move their tokens onto ground they haven't seen, as they always could. If something stops a move there, the token stops at the last spot it could reach, and the note says only "Something blocks the way.", without saying what, since their map can't know. The same words come whenever the stop touches ground the player can't see right now: a wall in the dark, a closed door with unexplored ground behind it, or a wall the party only remembers, which may have changed. **Teleport here** still lands the token where it was dropped, and your log reads "Bree teleported past something they could not see." A wall the party remembers keeps stopping their moves even after you take it away, until they see that spot again. **Teleport here**, which tests no wall, gets past it too.
+
+**How much a map remembers.** Each player's map can keep only so much that changed out of their sight. When a change you make would run past that, the app asks first: "Players' remembered map here will be forgotten. Go ahead?" **Go ahead** makes the change, and the ground it runs past goes back under the fog for the players, as if they had never seen it. Undo doesn't bring that back. **Cancel** leaves the change unmade. Undo and Redo ask the same in their own message, with **Forget and undo** or **Forget and redo**.
+
+![The question before a change that would run past what the players' map can keep: "Players' remembered map here will be forgotten. Go ahead?", with Cancel and Go ahead.](dm-guide/forget-question.webp)
+
+**Deleting an image.** If you delete an image from the Library that no stamp on any map uses any more, but that players' maps still show from before, it disappears from their maps too.
+
+**Exporting what players see.** The player view of **Export as image** on a scene with fog on draws what the players' maps hold now, which the app asks the server for: only the ground they have discovered, as they remember it.
 
 ## Map phases, imports and exports
 
@@ -464,7 +486,7 @@ Press **Create scene** to make it, and keep the page open until the walls have b
 
 ![Export as image in the scene's settings: Pixels per square, Player view or DM view, and Grid.](dm-guide/export.webp)
 
-**Exporting a map.** **Export as image**, in the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Pick the **Pixels per square** (50, 70 or 100), the **Player view** or the **DM view**, and whether to include the **Grid**. The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later.
+**Exporting a map.** **Export as image**, in the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Pick the **Pixels per square** (50, 70 or 100), the **Player view** or the **DM view**, and whether to include the **Grid**. The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. On a scene with fog on, it draws only what the players' maps hold (see [What players' maps hold](#what-players-maps-hold)), and needs a connection to the server. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later.
 
 # Running fights
 
@@ -1001,7 +1023,7 @@ The label tells you a few more things:
 
 ### When walls stop a move
 
-Each scene has a setting, **Walls and ledges block players' moves**, under **Movement** in its settings, and it is on for every new scene. While it is on, a player's token can't pass through walls, closed doors, windows, pillars or ledges. It walks around them instead, and stops only when there is no way around that the party has seen. The token then holds at the last spot it could reach, and a note says why: "Stopped at a wall. There is no way around it that you have seen.", "Ledge in the way. No stairs you have seen lead there.", or, when the player can see a door in the way, "A door is in the way. Tap it to open."
+Each scene has a setting, **Walls and ledges block players' moves**, under **Movement** in its settings, and it is on for every new scene. While it is on, a player's token can't pass through walls, closed doors, windows, pillars or ledges. It walks around them instead, and stops only when there is no way around that the party has seen. The token then holds at the last spot it could reach, and a note says why: "Stopped at a wall. There is no way around it that you have seen.", "Ledge in the way. No stairs you have seen lead there.", or, when the player can see a door in the way and the ground behind it, "A door is in the way. Tap it to open." When the stop touches ground the player can't see right now, the note says only "Something blocks the way." (see [What players' maps hold](#what-players-maps-hold)).
 
 From that note the player can press **Teleport here** to land where they dropped, for Misty Step and the like. A teleport doesn't count against the creature's Speed, and you get a notice and a log line whenever someone uses it.
 
@@ -1395,7 +1417,7 @@ The party explores a crypt by torchlight, and the players should see only what t
 **Running it**
 
 1. **Move players** to the crypt. Use **View as a player** in the DM panel, or **Party sight**, to check what they see: the hall by torchlight, and darkness everywhere else.
-2. The players move and see more as they go, and ground they have explored stays on their map, dimmed. They can open the closed door themselves, by tapping it or with **Open door** in their token's action bar.
+2. The players move and see more as they go, and ground they have explored stays on their map, dimmed, as they last saw it. They can open the closed door themselves, by tapping it or with **Open door** in their token's action bar.
 3. The chamber door is locked. When Mara picks the lock, use **Select**, tap the door, and press **Unlock**, then **Open**.
 4. When a character lights a brazier, go to the builder's **Lights** mode, tap the brazier, and set it **Lit**. The chamber lights up for everyone who can see it.
 5. Someone searches the east wall and finds the secret door. Tap it with **Select** and press **Mark found**, and the players now see a door.
