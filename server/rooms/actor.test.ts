@@ -21,12 +21,13 @@ import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Actor, FreeWall, Member, RoomState, Trap } from "#shared/model.ts";
-import { FORGET_ASK, type Op, type ServerMessage } from "#shared/protocol.ts";
+import { FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
 import { FORGET_STALE, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
+import { mapStepOps } from "./remember.ts";
 import { layerHeld } from "#shared/reducer/memory.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import { SnapshotBudget } from "./budgets.ts";
@@ -3166,6 +3167,43 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       },
       { sizeLimits: { stateLimit } },
     );
+  });
+
+  test("a map step the schema or the reducer refuses fails closed for its own scene, and another scene's step stands (MD3-LK-2)", async () => {
+    for (const corrupt of ["reducer", "schema"] as const) {
+      const dm = member("DM", "dm");
+      const player = member("Ayla", "player");
+      const { state, sceneId } = discovery(dm, player);
+      const other = Object.keys(state.scenes).find((id) => id !== sceneId)!;
+      // The other scene played, explored and built, out of everyone's sight.
+      state.playedScenes = { ...state.playedScenes, [other]: { sceneId: other, rev: 0 } };
+      state.exploredTiles[`${other}:0,0`] = { sceneId: other, tx: 0, ty: 0, rev: 0, bits: encodeTile(fullTileBits()) };
+      state.buildChunks[chunkKey(other, 0, 0)] = { sceneId: other, cx: 0, cy: 0, rev: 0, cells: { "3,3": "stone" }, edges: {} };
+      // The players' scene's step made into one the reducer refuses (a cell outside its chunk) or the schema does (a position past the widest).
+      const broken = (op: OpOf<"sys.remember">): OpOf<"sys.remember"> =>
+        op.sceneId !== sceneId ? op : { ...op, layers: [{ chunks: [corrupt === "reducer" ? { cx: 0, cy: 0, set: { cells: { "40,40": "stone" } } } : { cx: 99, cy: 0, set: {} }] }] };
+      const db = new FakeDb({ state, dmGrants: [dm.id] });
+      const base = deps(db);
+      const actor = await RoomActor.load({ ...base, options: { ...base.options, batchMs: 200, mapStep: (input) => mapStepOps(input).map(broken) } });
+      assert.ok(actor);
+      try {
+        const table = connect(actor, dm);
+        await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+        void actor.op(table.conn, 1, { t: "build.paint", sceneId, terrain: "wood", cells: ["10,10"] });
+        await actor.op(table.conn, 2, { t: "build.paint", sceneId: other, terrain: "wood", cells: ["3,3"] });
+        const ev = await answerTo(table.sent, 2);
+        assert.ok(ev !== "stuck" && ev.acks?.includes(1) && ev.acks.includes(2), `${corrupt}: one batch`);
+        const now = actor.committed.state;
+        assert.equal(now.exploredTiles[`${sceneId}:0,0`], undefined, `${corrupt}: the scene's layer forgot what it does not see`);
+        assert.ok(Object.keys(now.exploredTiles).some((k) => k.startsWith(`${sceneId}:`)), `${corrupt}: and kept Ayla's sight`);
+        const shown = projectState(now, { memberId: player.id, role: "player" }, { sceneId }).buildChunks;
+        assert.ok(!JSON.stringify(shown).includes('"10,10":"wood"'), `${corrupt}: the edit out of sight shows to no one`);
+        assert.equal(now.memory?.[chunkKey(other, 0, 0)]?.cells?.["3,3"], "stone", `${corrupt}: the other scene's step stands`);
+      } finally {
+        db.freeze();
+        void actor.shutdown({ code: 1012, snapshot: false });
+      }
+    }
   });
 
   test("ground a reminder rests on is explored, though a later op in its batch looks away (MD2's review, pendingGround)", async () => {

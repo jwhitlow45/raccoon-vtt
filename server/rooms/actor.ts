@@ -47,7 +47,7 @@ import {
 } from "./persistence.ts";
 import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCaps } from "./receipts.ts";
 import { layerCharge } from "./memorySize.ts";
-import { forgetAllOps, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
+import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./sizeGuard.ts";
 import { keptFrom, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
@@ -86,6 +86,8 @@ export type ActorOptions = {
   draw: Draw;
   /** The receipt caps (docs/design-v1-dice.md 1.2), lowered only by tests that fill a room's day. */
   receiptCaps: Partial<ReceiptCaps>;
+  /** The map step (remember.ts), which only tests replace, to make its op one the schema or the reducer refuses. */
+  mapStep: typeof mapStepOps;
 };
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
@@ -103,6 +105,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   sizeLimits: {},
   draw: serverDraw,
   receiptCaps: {},
+  mapStep: mapStepOps,
 };
 
 export type ActorDeps = {
@@ -1606,7 +1609,7 @@ export class RoomActor {
     let ops: ReturnType<typeof mapStepOps>;
     try {
       const after = this.#staged.state;
-      ops = mapStepOps({
+      ops = this.#opts.mapStep({
         before: batch.before,
         after,
         touched: batch.touched,
@@ -1624,15 +1627,25 @@ export class RoomActor {
         return;
       }
     }
-    for (const op of ops) this.#appendServerOp(batch, op, "map step");
+    for (const op of ops) {
+      if (this.#appendServerOp(batch, op, "map step")) continue;
+      // A step the schema or the reducer refuses fails closed like a throw (rule 9), for its own scene alone: the
+      // other scenes' steps stand, and this one's layers forget all but their sight before anything is published.
+      const forget = forgetSceneOp(this.#staged.state, op.sceneId);
+      if (forget) this.#appendServerOp(batch, forget, "map step's forgetting");
+    }
   }
 
-  /** Appends a server-made op to the batch on the staged state, as stored and replayed, logging rather than refusing one that fails. */
-  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember">, what: string): void {
+  /**
+   * Appends a server-made op to the batch on the staged state, as stored and
+   * replayed, logging rather than refusing one that fails. False when it
+   * failed, so the map step can fail closed.
+   */
+  #appendServerOp(batch: Batch, op: OpOf<"sys.explore"> | OpOf<"sys.remember">, what: string): boolean {
     const checked = checkServerOp(op);
     if (!checked.ok) {
       this.#log.error({ roomId: this.roomId, message: checked.message }, `${what} op does not validate`);
-      return;
+      return false;
     }
     const state = this.#staged.state;
     const seq = this.#staged.seq + 1;
@@ -1640,13 +1653,14 @@ export class RoomActor {
     const result = applyOp(state, checked.op, SERVER_ACTOR, { seq, at });
     if (!result.ok) {
       this.#log.error({ roomId: this.roomId, message: result.message }, `${what} op refused`);
-      return;
+      return false;
     }
     this.#sizes.grew(growthBound(state, result.state, result.touched), [op.sceneId]);
     this.#staged = { state: result.state, seq };
     batch.ops.push({ seq, at, actor: SERVER_ACTOR, op: checked.op, log: result.log });
     batch.touched.push(...result.touched);
     if (result.global) batch.global = true;
+    return true;
   }
 
   async #runCommit(batch: Batch): Promise<void> {

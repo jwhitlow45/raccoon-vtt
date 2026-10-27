@@ -105,25 +105,31 @@ export function forgetAllOps(input: Pick<MapStepInput, "before" | "after" | "tou
   const out: OpOf<"sys.remember">[] = [];
   const touched = touchedByScene(input.before, input.after, input.touched);
   for (const sceneId of [...touched.keys()].sort()) {
-    const scene = input.after.scenes[sceneId];
-    if (!scene || !keepsMemory(scene)) continue;
-    const forget: NonNullable<OpOf<"sys.remember">["forget"]> = [];
-    for (const layer of layersOf(input.after, scene)) {
-      const sight = classSight(input.after, scene, layer);
-      const held = layer === null ? Object.values(input.after.exploredTiles) : Object.values(input.after.exploredBy ?? {}).filter((t) => t.memberId === layer);
-      const tiles = held
-        .filter((t) => t.sceneId === sceneId)
-        .sort((a, b) => a.ty - b.ty || a.tx - b.tx)
-        .map(({ tx, ty }) => {
-          const seen = sight?.tiles.get(`${tx},${ty}`);
-          const keep = seen ? seenFogBits(seen) : null;
-          return { tx, ty, ...(keep && keep.some((b) => b !== 0) ? { keep: encodeTile(keep) } : {}) };
-        });
-      if (tiles.length > 0) forget.push({ ...(layer === null ? {} : { memberId: layer }), tiles });
-    }
-    if (forget.length > 0) out.push({ t: "sys.remember", sceneId, layers: [], forget });
+    const op = forgetSceneOp(input.after, sceneId);
+    if (op) out.push(op);
   }
   return out;
+}
+
+/** The same for one scene, as for a step of it the schema or the reducer refused: every layer forgets all but its sight. */
+export function forgetSceneOp(state: RoomState, sceneId: string): OpOf<"sys.remember"> | null {
+  const scene = state.scenes[sceneId];
+  if (!scene || !keepsMemory(scene)) return null;
+  const forget: NonNullable<OpOf<"sys.remember">["forget"]> = [];
+  for (const layer of layersOf(state, scene)) {
+    const sight = classSight(state, scene, layer);
+    const held = layer === null ? Object.values(state.exploredTiles) : Object.values(state.exploredBy ?? {}).filter((t) => t.memberId === layer);
+    const tiles = held
+      .filter((t) => t.sceneId === sceneId)
+      .sort((a, b) => a.ty - b.ty || a.tx - b.tx)
+      .map(({ tx, ty }) => {
+        const seen = sight?.tiles.get(`${tx},${ty}`);
+        const keep = seen ? seenFogBits(seen) : null;
+        return { tx, ty, ...(keep && keep.some((b) => b !== 0) ? { keep: encodeTile(keep) } : {}) };
+      });
+    if (tiles.length > 0) forget.push({ ...(layer === null ? {} : { memberId: layer }), tiles });
+  }
+  return forget.length > 0 ? { t: "sys.remember", sceneId, layers: [], forget } : null;
 }
 
 /** Each layer's chunks of memory, by layerKey, in row order, and the scenes that have any, read once per step. */
