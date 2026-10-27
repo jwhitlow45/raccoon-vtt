@@ -299,16 +299,14 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     assert.equal(await dm.getByText("Those counts make squares that are not square", { exact: false }).count(), 0);
   });
 
-  test("4. the player moves to the imported scene and gets its image and walls, never its light", async () => {
+  test("4. the player moves to the imported scene and gets its image, but none of its walls before a reveal, and never its light", async () => {
     const loaded = imageLoaded(player, run.dayAssetId);
     await dm.getByRole("button", { name: `Move players to ${UVTT.name}` }).click();
     await waitFor("the player on the imported scene", () => playerSocket.state?.meta.playerSceneId === run.sceneId || null);
     await loaded;
-    const walls = await waitFor("the walls in the player's state", () => {
-      const w = wallsOf(playerSocket.state, run.sceneId);
-      return Object.keys(w.edges).length === 28 && w.free.length === 1 ? w : null;
-    });
-    assert.deepEqual(walls, wallsOf(dmSocket.state, run.sceneId), "players see the imported walls and doors as the DM does");
+    // A player holds the build only on ground they have seen (map discovery, decision 1), and this scene reveals by hand.
+    assert.deepEqual(wallsOf(playerSocket.state, run.sceneId), { edges: {}, free: [] }, "walls under fog reached the player");
+    assert.equal(playerSocket.everSaw('"4,1,n"'), false, "the door under fog reached the player");
     assert.equal(Object.keys(playerSocket.state?.lights ?? {}).length, 0);
     assert.equal(playerSocket.everSaw(run.lightId), false, "a light reached the player");
     assertNoDmFields(sceneOf(playerSocket.state, run.sceneId));
@@ -377,6 +375,15 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await dragWorld(dm, run.bounds, { x: 1, y: 1 }, { x: 5, y: 5 });
     await dm.getByRole("button", { name: /^Reveal to players \(1\)$/ }).click();
     await waitFor("the stamp in the player's state", () => playerSocket.state?.stamps[run.stampId]);
+    // The revealed cells bring the walls and the door beside them, as the DM has them, and nothing past them.
+    const held = await waitFor("the door in the player's state", () => {
+      const w = wallsOf(playerSocket.state, run.sceneId);
+      return w.edges["4,1,n"] ? w : null;
+    });
+    const all = wallsOf(dmSocket.state, run.sceneId);
+    for (const [key, value] of Object.entries(held.edges)) assert.deepEqual(value, all.edges[key], `the player's ${key} is not the DM's`);
+    assert.equal(held.edges["6,7,n"], undefined, "the window past the revealed cells reached the player");
+    assert.equal(held.edges["9,1,w"], undefined, "a wall past the revealed cells reached the player");
     await shots.take(player, "maps-player-stamp");
 
     // DM only takes it from the player, and its duplicate is DM only from the start.
