@@ -2,7 +2,7 @@ import { CHUNK_CELLS, FOG_SUBCELLS } from "#shared/model.ts";
 import { coverageCacheKey, eachHexPrism, MAX_SCENE_CELLS, resolveArea, type AreaContext, type AreaSolid, type AreaTemplateInput, type HexPrism, type ResolvedArea, type SolidBox } from "#shared/rules/aoe.ts";
 import type { Point3 } from "#shared/rules/geom.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, hexKey } from "#shared/rules/hex.ts";
-import { crossingsAt, indexPolygon, insideCrossings, type Polygon, type PolygonIndex } from "#shared/rules/walls.ts";
+import { crossingsAt, insideCrossings, type Polygon, type PolygonIndex } from "#shared/rules/walls.ts";
 import { K, turnAxes, type Turn } from "../../lib/view.ts";
 
 /**
@@ -60,7 +60,12 @@ const BAND = 6e5;
 /** Band indices run from -BAND_SPAN, more than the deepest a 200 cell scene reaches. */
 const BAND_SPAN = 4096;
 
-/** Work between looks at the clock, in rough units of a vertex touched: some tens of microseconds on a laptop, so a slice runs past its deadline by little more than the step it was in. */
+/**
+ * Work between looks at the clock, in rough units of a vertex touched or
+ * a cell read. Every loop of the build charges what it does, and no one
+ * charge is more than a few hundred units, so a slice runs past its
+ * deadline by at most about CHECK plus one step.
+ */
 const CHECK = 128;
 
 /** A build that stops once its budget's deadline has passed, and carries on when it is next asked. */
@@ -70,10 +75,13 @@ type Job<T = void> = Generator<void, T, void>;
 class Budget {
   /** A `performance.now()` time. */
   deadline = Infinity;
+  /** Every unit charged so far. */
+  total = 0;
   #n = 0;
 
   /** Counts `c` more work, true when the build should stop for now. */
   spend(c: number): boolean {
+    this.total += c;
     this.#n += c;
     if (this.#n < CHECK) return false;
     this.#n = 0;
@@ -348,16 +356,20 @@ function growScratch(n: number): void {
   SCRATCH.after = new Int8Array(size);
 }
 
-function cutAll(st: Store, polys: Poly[], planes: readonly Plane[]): Poly[] {
-  let out = polys;
-  for (const pl of planes) {
-    const next: Poly[] = [];
-    for (const p of out) {
-      const [a, b] = splitPoly(st, p, pl);
-      if (a) next.push(a);
-      if (b) next.push(b);
+/** A face cut by planes in their order, a cut at a time, so a face many planes cross is many steps: the pieces cutting every piece by each plane in turn makes. */
+function* cutEach(st: Store, face: Poly, planes: readonly Plane[], budget: Budget): Job<Poly[]> {
+  const out: Poly[] = [];
+  const todo: { p: Poly; at: number }[] = [{ p: face, at: 0 }];
+  while (todo.length > 0) {
+    const { p: start, at } = todo.pop()!;
+    let p = start;
+    for (let k = at; k < planes.length; k++) {
+      if (budget.spend(p.v.length)) yield;
+      const [above, below] = splitPoly(st, p, planes[k]!);
+      if (above && below) todo.push({ p: below, at: k + 1 });
+      p = (above ?? below)!;
     }
-    out = next;
+    out.push(p);
   }
   return out;
 }
@@ -622,7 +634,8 @@ function* hexShell(st: Store, s: Extract<AreaSolid, { kind: "hexStack" }>, budge
   const cornerKey = (p: { x: number; y: number }) => `${p.x},${p.y}`;
   const heights = new Map<string, number[]>();
   for (const p of eachHexPrism(s)) {
-    if (budget.spend(p ? 12 : 1)) yield;
+    // A visit reads its steps from every source hex, a prism its corners too.
+    if (budget.spend((p ? 12 : 1) + s.reach.from.length)) yield;
     if (!p) continue;
     const cs = hexCorners(g, p.hex).map((k) => cornerAt(g, k));
     prisms.push(p);
@@ -669,7 +682,7 @@ function* hexShell(st: Store, s: Extract<AreaSolid, { kind: "hexStack" }>, budge
         if (f) polys.push(f);
       }
     }
-    if (budget.spend(48)) yield;
+    if (budget.spend(96)) yield;
   }
   return { polys, guides: [], convex: false, segments: 6 };
 }
@@ -700,15 +713,13 @@ function* shellOf(st: Store, s: AreaSolid, n: number, budget: Budget): Job<Shell
       return yield* roundedShell(st, { c: s.c, axes: AXES, half: [0, 0, 0] }, s.r, n, budget);
     case "rounded":
       return yield* roundedShell(st, s.box, s.D, n, budget);
-    case "cylinder":
-      return cylinderShell(st, s, n);
-    case "cone":
-      return coneShell(st, s, n);
-    case "box":
-      return boxShell(st, s);
     case "hexStack":
       return yield* hexShell(st, s, budget);
   }
+  // A cylinder, a cone or a box: at most 64 faces round, one step.
+  const shell = s.kind === "cylinder" ? cylinderShell(st, s, n) : s.kind === "cone" ? coneShell(st, s, n) : boxShell(st, s);
+  if (budget.spend(4 * Math.max(1, n))) yield;
+  return shell;
 }
 
 const AXES: readonly [Point3, Point3, Point3] = [
@@ -751,7 +762,11 @@ const TILE_MARGIN = 1e-6;
 /**
  * The clip lines filed by the plan tiles they pass, so a face reads only
  * the lines near it, in their order: walls then cost by what meets the
- * face, not by every edge of every polygon.
+ * face, not by every edge of every polygon. Only the tiles over the scene
+ * (a tile past it each way) are filed, and only those a line passes are
+ * made, so a huge solid on a fine grid costs its lines and not its plan.
+ * A face's lines outside that region could part only pieces off the
+ * scene, which the clip drops.
  */
 class LineIndex {
   readonly #lines: readonly Plane[];
@@ -759,19 +774,16 @@ class LineIndex {
   readonly #y0: number;
   readonly #cols: number;
   readonly #rows: number;
-  readonly #tiles: number[][];
+  readonly #tiles = new Map<number, number[]>();
   readonly #stamp: Int32Array;
   #mark = 0;
-  /** The tile entries the last `near` read. */
-  cost = 0;
 
-  constructor(lines: readonly Plane[], plan: { x0: number; y0: number; x1: number; y1: number }) {
+  constructor(lines: readonly Plane[], region: { x0: number; y0: number; x1: number; y1: number }) {
     this.#lines = lines;
-    this.#x0 = Math.floor(plan.x0);
-    this.#y0 = Math.floor(plan.y0);
-    this.#cols = Math.max(1, Math.ceil((plan.x1 - this.#x0) / TILE));
-    this.#rows = Math.max(1, Math.ceil((plan.y1 - this.#y0) / TILE));
-    this.#tiles = Array.from({ length: this.#cols * this.#rows }, () => []);
+    this.#x0 = Math.floor(region.x0);
+    this.#y0 = Math.floor(region.y0);
+    this.#cols = Math.max(0, Math.ceil((region.x1 - this.#x0) / TILE));
+    this.#rows = Math.max(0, Math.ceil((region.y1 - this.#y0) / TILE));
     this.#stamp = new Int32Array(lines.length);
   }
 
@@ -783,6 +795,7 @@ class LineIndex {
     // Step along the axis the line runs nearer to, a tile at a time, and file it in the tiles it spans across.
     const alongX = Math.abs(pl.b) >= Math.abs(pl.a);
     const steps = alongX ? cols : rows;
+    let work = steps;
     for (let t = 0; t < steps; t++) {
       const u0 = (alongX ? this.#x0 : this.#y0) + t * TILE;
       const v0 = alongX ? (pl.e - pl.a * u0) / pl.b : (pl.e - pl.b * u0) / pl.a;
@@ -791,13 +804,19 @@ class LineIndex {
       const span = alongX ? rows : cols;
       const lo = Math.max(0, Math.floor((Math.min(v0, v1) - base) / TILE - TILE_MARGIN));
       const hi = Math.min(span - 1, Math.floor((Math.max(v0, v1) - base) / TILE + TILE_MARGIN));
-      for (let q = lo; q <= hi; q++) this.#tiles[alongX ? q * cols + t : t * cols + q]!.push(li);
+      for (let q = lo; q <= hi; q++) {
+        const key = alongX ? q * cols + t : t * cols + q;
+        const list = this.#tiles.get(key);
+        if (list) list.push(li);
+        else this.#tiles.set(key, [li]);
+        work++;
+      }
     }
-    return steps;
+    return work;
   }
 
   /** The lines passing the tiles under a face's plan, in their order. */
-  near(st: Store, f: Poly): Int32Array {
+  *near(st: Store, f: Poly, budget: Budget): Job<Int32Array> {
     let x0 = Infinity;
     let y0 = Infinity;
     let x1 = -Infinity;
@@ -810,25 +829,37 @@ class LineIndex {
       if (y < y0) y0 = y;
       if (y > y1) y1 = y;
     }
+    if (budget.spend(f.v.length)) yield;
     const c0 = Math.max(0, Math.floor((x0 - this.#x0) / TILE - TILE_MARGIN));
     const c1 = Math.min(this.#cols - 1, Math.floor((x1 - this.#x0) / TILE + TILE_MARGIN));
     const r0 = Math.max(0, Math.floor((y0 - this.#y0) / TILE - TILE_MARGIN));
     const r1 = Math.min(this.#rows - 1, Math.floor((y1 - this.#y0) / TILE + TILE_MARGIN));
     const mark = ++this.#mark;
-    const out: number[] = [];
-    this.cost = (r1 - r0 + 1) * (c1 - c0 + 1);
+    let first = Infinity;
+    let last = -Infinity;
+    let found = 0;
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
-        const tile = this.#tiles[r * this.#cols + c]!;
-        this.cost += tile.length;
-        for (const li of tile) {
-          if (this.#stamp[li] === mark) continue;
-          this.#stamp[li] = mark;
-          out.push(li);
+        const tile = this.#tiles.get(r * this.#cols + c);
+        if (tile) {
+          for (const li of tile) {
+            if (this.#stamp[li] === mark) continue;
+            this.#stamp[li] = mark;
+            found++;
+            if (li < first) first = li;
+            if (li > last) last = li;
+          }
         }
+        if (budget.spend(1 + (tile?.length ?? 0))) yield;
       }
     }
-    return Int32Array.from(out).sort();
+    // In their order by a walk of the marks between the first and the last, so no sort runs in one step.
+    const lines = new Int32Array(found);
+    for (let li = first, n = 0; li <= last; li++) {
+      if (this.#stamp[li] === mark) lines[n++] = li;
+      if (budget.spend(1 / 4)) yield;
+    }
+    return lines;
   }
 }
 
@@ -843,6 +874,8 @@ class ClipTest {
   readonly #h: number;
   readonly #walled: boolean;
   readonly #polys: PolygonIndex[] = [];
+  /** The row entries the last `inside` read. */
+  cost = 0;
 
   constructor(w: number, h: number, walled: boolean) {
     this.#w = w;
@@ -850,17 +883,45 @@ class ClipTest {
     this.#walled = walled;
   }
 
-  /** Indexes one polygon over the plan's rows, and says how much that took. */
-  add(poly: Polygon, row0: number, rows: number): number {
-    const index = indexPolygon(poly, row0, rows);
-    this.#polys.push(index);
-    return (poly.length >> 1) + index.edges.length;
+  /** Indexes one polygon over rows `row0` to `row0 + rows - 1`, as `indexPolygon` does, a few edges at a time. */
+  *add(poly: Polygon, row0: number, rows: number, budget: Budget): Job {
+    const n = poly.length >> 1;
+    const offsets = new Int32Array(rows + 1);
+    const rowSpan = (i: number): [number, number] => {
+      const yi = poly[2 * i + 1]!;
+      const yj = poly[2 * (i === 0 ? n - 1 : i - 1) + 1]!;
+      // A horizontal edge never crosses a horizontal line, so it needs no bucket.
+      if (yi === yj) return [1, 0];
+      return [Math.max(row0, Math.floor(Math.min(yi, yj))), Math.min(row0 + rows - 1, Math.floor(Math.max(yi, yj)))];
+    };
+    for (let i = 0; i < n; i++) {
+      const [lo, hi] = rowSpan(i);
+      for (let r = lo; r <= hi; r++) offsets[r - row0 + 1]!++;
+      if (budget.spend(1 + Math.max(0, hi - lo + 1))) yield;
+    }
+    for (let r = 0; r < rows; r++) {
+      offsets[r + 1]! += offsets[r]!;
+      if (budget.spend(1)) yield;
+    }
+    const edges = new Int32Array(offsets[rows]!);
+    const fill = offsets.slice(0, rows);
+    for (let i = 0; i < n; i++) {
+      const [lo, hi] = rowSpan(i);
+      for (let r = lo; r <= hi; r++) edges[fill[r - row0]!++] = i;
+      if (budget.spend(1 + Math.max(0, hi - lo + 1))) yield;
+    }
+    this.#polys.push({ poly, row0, rows, offsets, edges });
   }
 
   inside(x: number, y: number): boolean {
+    this.cost = 1;
     if (x < 0 || y < 0 || x > this.#w || y > this.#h) return false;
     if (!this.#walled) return true;
-    for (const p of this.#polys) if (insideCrossings(crossingsAt(p, y), x)) return true;
+    for (const p of this.#polys) {
+      const r = Math.floor(y) - p.row0;
+      this.cost += r >= 0 && r < p.rows ? 1 + p.offsets[r + 1]! - p.offsets[r]! : p.poly.length >> 1;
+      if (insideCrossings(crossingsAt(p, y), x)) return true;
+    }
     return false;
   }
 }
@@ -903,8 +964,9 @@ function* capsOf(st: Store, pieces: readonly Poly[], kept: Uint8Array, near: rea
       const a = v[k]!;
       const b = v[(k + 1) % v.length]!;
       if (on(a, cand) && on(b, cand)) owner.set(a * VMAX + b, f);
+      // Each vertex reads the piece's lines once.
+      if (budget.spend(1 + cand.length)) yield;
     }
-    if (budget.spend(v.length)) yield;
   }
   // Each open edge with the lines that part its face from the one that went, and the side the solid was cut away on.
   const open: { edge: Open; lines: { li: number; out: number }[] }[] = [];
@@ -926,6 +988,7 @@ function* capsOf(st: Store, pieces: readonly Poly[], kept: Uint8Array, near: rea
       if (kept[g]) continue;
       const mk = centroid(st, p.v);
       const md = centroid(st, pieces[g]!.v);
+      if (budget.spend(v.length + pieces[g]!.v.length + cand.length)) yield;
       const lines_: { li: number; out: number }[] = [];
       for (let q = 0; q < cand.length; q++) {
         const li = cand[q]!;
@@ -992,41 +1055,52 @@ function* loopsOnLine(st: Store, pl: Plane, edges: Open[], budget: Budget): Job<
     else outs.set(e.from, [e]);
     ins.set(e.to, (ins.get(e.to) ?? 0) + 1);
     if (!into.has(e.to)) into.set(e.to, e);
+    if (budget.spend(1)) yield;
   }
   const ends: number[] = [];
   const starts: number[] = [];
-  for (const v of new Set([...outs.keys(), ...ins.keys()])) {
+  const tally = (v: number) => {
     const o = outs.get(v)?.length ?? 0;
     const i = ins.get(v) ?? 0;
     for (let k = o; k < i; k++) ends.push(v);
     for (let k = i; k < o; k++) starts.push(v);
+  };
+  for (const v of outs.keys()) {
+    tally(v);
+    if (budget.spend(1)) yield;
   }
-  // The upright edges at the corners: each chain's end to the start straight above or below it, the nearest, since a sliver's two corners can lie a hair apart. The starts sorted by their place along the line, so each end reads only those within ON of its own.
-  const order = starts.map((v, k) => ({ k, t: unrolled(st, pl, v)[0] })).sort((x, y) => x.t - y.t);
-  const ts = Float64Array.from(order, (o) => o.t);
+  for (const v of ins.keys()) {
+    if (!outs.has(v)) tally(v);
+    if (budget.spend(1)) yield;
+  }
+  // The upright edges at the corners: each chain's end to the start straight above or below it, the nearest, since a sliver's two corners can lie a hair apart. The starts filed by their place along the line in slots ON wide, so each end reads only its own slot and the two beside it.
+  const slots = new Map<number, number[]>();
+  for (let k = 0; k < starts.length; k++) {
+    const slot = Math.floor(unrolled(st, pl, starts[k]!)[0] / ON);
+    const list = slots.get(slot);
+    if (list) list.push(k);
+    else slots.set(slot, [k]);
+    if (budget.spend(1)) yield;
+  }
   const paired = new Uint8Array(starts.length);
   for (const e of ends) {
     const ex = st.p[3 * e]!;
     const ey = st.p[3 * e + 1]!;
-    const te = unrolled(st, pl, e)[0];
-    let lo = 0;
-    let hi = ts.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (ts[mid]! < te - ON) lo = mid + 1;
-      else hi = mid;
-    }
+    const slot = Math.floor(unrolled(st, pl, e)[0] / ON);
     let best = -1;
     let gap = ON;
-    for (let q = lo; q < ts.length && ts[q]! <= te + ON; q++) {
-      const k = order[q]!.k;
-      if (paired[k]) continue;
-      const s = starts[k]!;
-      const d = Math.hypot(st.p[3 * s]! - ex, st.p[3 * s + 1]! - ey);
-      if (s === e || d > gap) continue;
-      best = k;
-      gap = d;
+    for (let q = slot - 1; q <= slot + 1; q++) {
+      for (const k of slots.get(q) ?? []) {
+        if (budget.spend(1)) yield;
+        if (paired[k]) continue;
+        const s = starts[k]!;
+        const d = Math.hypot(st.p[3 * s]! - ex, st.p[3 * s + 1]! - ey);
+        if (s === e || d > gap) continue;
+        best = k;
+        gap = d;
+      }
     }
+    if (budget.spend(1)) yield;
     if (best < 0) continue;
     paired[best] = 1;
     const s = starts[best]!;
@@ -1036,7 +1110,6 @@ function* loopsOnLine(st: Store, pl: Plane, edges: Open[], budget: Budget): Job<
     if (list) list.push(up);
     else outs.set(e, [up]);
   }
-  if (budget.spend(edges.length)) yield;
   const used = new Set<Open>();
   const loops: { v: number[]; out: number }[] = [];
   let failed = 0;
@@ -1052,6 +1125,7 @@ function* loopsOnLine(st: Store, pl: Plane, edges: Open[], budget: Budget): Job<
         break;
       }
       v.push(cur.to);
+      if (budget.spend(1)) yield;
       const next = (outs.get(cur.to) ?? []).filter((x) => !used.has(x));
       if (next.length === 0) break;
       const pick = next.length === 1 ? next[0]! : leftmost(st, pl, cur, next);
@@ -1127,12 +1201,14 @@ function* earClip(st: Store, pl: Plane, loop: number[], out: number, budget: Bud
   };
   const idx = loop.map((_, k) => k);
   const tris: number[][] = [];
+  if (budget.spend(2 * loop.length)) yield;
   while (idx.length > 3) {
     if (budget.spend(idx.length)) yield;
     let ear = -1;
     let best = -1;
     let bestCross = -Infinity;
     for (let k = 0; k < idx.length; k++) {
+      if (budget.spend(1)) yield;
       const a = idx[(k + idx.length - 1) % idx.length]!;
       const b = idx[k]!;
       const c = idx[(k + 1) % idx.length]!;
@@ -1142,7 +1218,13 @@ function* earClip(st: Store, pl: Plane, loop: number[], out: number, budget: Bud
         best = k;
       }
       if (cr <= 1e-12) continue;
-      if (idx.some((p) => p !== a && p !== b && p !== c && inTri(p, a, b, c))) continue;
+      let blocked = false;
+      for (let q = 0; q < idx.length && !blocked; q++) {
+        const p = idx[q]!;
+        blocked = p !== a && p !== b && p !== c && inTri(p, a, b, c);
+        if (budget.spend(1)) yield;
+      }
+      if (blocked) continue;
       ear = k;
       break;
     }
@@ -1293,12 +1375,8 @@ type Bucket = {
   bx: number;
   by: number;
   pending: Poly[] | null;
-  /**
-   * A cut in progress: the ground planes it takes, the faces still to cut
-   * with how far each has come (0 for the ground and the first band
-   * family, 1 for the second family), and the faces done.
-   */
-  work: { planes: Plane[]; queue: Poly[]; stage: number[]; done: Poly[] } | null;
+  /** Its cut, once begun and until done. */
+  job: Job | null;
   guidesPending: Guide[];
   faces: number[];
   guides: Guide[];
@@ -1343,6 +1421,11 @@ export class Volume {
     this.#job = this.#build(area, n);
   }
 
+  /** The units of work the build has charged so far, for the tests and the bench: a call with a deadline already past charges about CHECK and one step. */
+  get work(): number {
+    return this.#budget.total;
+  }
+
   /** Open edges the caps could not close: 0 but for a broken clip, which the tests hold. */
   get failed(): number {
     this.prepare();
@@ -1372,8 +1455,8 @@ export class Volume {
     // 1. The shell.
     const shell = yield* shellOf(st, area.solid, n, budget);
 
-    // 2. The clip: the scene's edges and every polygon edge, each a whole line, where it crosses the plan.
-    const plan = { ...st.plan };
+    // 2. The clip: the scene's edges and every polygon edge, each a whole line, where it crosses the plan over the scene. Pieces off the scene go, so lines past it would part nothing that stays.
+    const plan = { x0: Math.max(st.plan.x0, -TILE), y0: Math.max(st.plan.y0, -TILE), x1: Math.min(st.plan.x1, w + TILE), y1: Math.min(st.plan.y1, h + TILE) };
     const lines: Plane[] = [];
     const named = new Set<string>();
     const add = (ax: number, ay: number, bx: number, by: number) => {
@@ -1396,7 +1479,7 @@ export class Volume {
         const ay = poly[2 * i + 1]!;
         const bx = poly[2 * j]!;
         const by = poly[2 * j + 1]!;
-        if (budget.spend(1)) yield;
+        if (budget.spend(2)) yield;
         if (Math.max(ax, bx) < plan.x0 || Math.min(ax, bx) > plan.x1 || Math.max(ay, by) < plan.y0 || Math.min(ay, by) > plan.y1) continue;
         add(ax, ay, bx, by);
       }
@@ -1404,15 +1487,15 @@ export class Volume {
     const index = new LineIndex(lines, plan);
     for (let li = 0; li < lines.length; li++) if (budget.spend(index.file(li))) yield;
     const clip = new ClipTest(w, h, area.polygons.length > 0);
-    const row0 = Math.floor(plan.y0);
-    const rows = Math.max(1, Math.ceil(plan.y1) - row0 + 1);
-    for (const poly of area.polygons) if (budget.spend(clip.add(poly, row0, rows))) yield;
+    // The rows a kept piece's middle can read: those of the plan inside the scene.
+    const row0 = Math.max(0, Math.floor(plan.y0));
+    const rows = Math.max(1, Math.min(h, Math.ceil(plan.y1)) - row0 + 1);
+    for (const poly of area.polygons) yield* clip.add(poly, row0, rows, budget);
     // Each face cut by the lines near it in their order, a cut at a time, each piece keeping its face's lines for the caps.
     const pieces: Poly[] = [];
     const near: Int32Array[] = [];
     for (const face of shell.polys) {
-      const cand = index.near(st, face);
-      if (budget.spend(index.cost)) yield;
+      const cand = yield* index.near(st, face, budget);
       const todo: { p: Poly; at: number }[] = [{ p: face, at: 0 }];
       while (todo.length > 0) {
         const { p: start, at } = todo.pop()!;
@@ -1432,7 +1515,7 @@ export class Volume {
     for (let i = 0; i < pieces.length; i++) {
       const [x, y] = readPoint(st, pieces[i]!);
       kept[i] = clip.inside(x, y) ? 1 : 0;
-      if (budget.spend(8)) yield;
+      if (budget.spend(pieces[i]!.v.length + clip.cost)) yield;
     }
 
     // 3. Caps from the cut loops.
@@ -1447,12 +1530,14 @@ export class Volume {
     const guides = yield* clipGuides(shell.guides, lines, clip, budget);
 
     // 9. The footprint, read from the capped shell before the ground cut, and the plan the ground is read under.
-    const print = new FootprintBuilder();
+    const print = new FootprintBuilder(st.plan, w, h);
+    // Zeroing its sub-cells is a fraction of a nanosecond each.
+    if (budget.spend(1 + print.size / 1024)) yield;
     const under: WorldBox = { x0: Infinity, y0: Infinity, z0: Infinity, x1: -Infinity, y1: -Infinity, z1: -Infinity };
     for (const f of capped) {
-      const cost = print.add(st, f);
+      yield* print.add(st, f, budget);
       for (const i of f.v) growBox(under, st.p[3 * i]!, st.p[3 * i + 1]!, st.p[3 * i + 2]!);
-      if (budget.spend(cost + f.v.length)) yield;
+      if (budget.spend(f.v.length)) yield;
     }
     this.#footprint = yield* print.finish(budget);
     if (capped.length > 0) this.#groundPlanes = yield* groundPlanes(this.#ground, under, this.#bounds, budget);
@@ -1460,16 +1545,16 @@ export class Volume {
     // 6. Each face cut by the bucket lines across it, x then y as every cut runs (a line a face's neighbor takes and it skips would part their shared edge differently), each piece filed where its middle reads.
     for (const f of capped) {
       const b = planBox(st, [f]);
-      const bl = bucketLines(b.x0, b.y0, b.x1, b.y1);
-      for (const piece of bl.length > 0 ? cutAll(st, [f], bl) : [f]) {
+      for (const piece of yield* cutEach(st, f, bucketLines(b.x0, b.y0, b.x1, b.y1), budget)) {
         const [x, y] = readPoint(st, piece);
         this.#bucketAt(this.#bucketOf(x, y)).pending!.push(piece);
+        if (budget.spend(piece.v.length)) yield;
       }
-      if (budget.spend(f.v.length * (1 + bl.length))) yield;
     }
     for (const g of guides) {
       const bl = bucketLines(Math.min(g.ax, g.bx), Math.min(g.ay, g.by), Math.max(g.ax, g.bx), Math.max(g.ay, g.by));
       for (const piece of cutGuides([g], bl)) this.#bucketAt(this.#bucketOf((piece.ax + piece.bx) / 2, (piece.ay + piece.by) / 2)).guidesPending.push(piece);
+      if (budget.spend(1 + bl.length)) yield;
     }
   }
 
@@ -1482,7 +1567,7 @@ export class Volume {
     if (b === undefined) {
       b = this.#buckets.length;
       this.#byKey.set(key, b);
-      this.#buckets.push({ key, bx, by, pending: [], work: null, guidesPending: [], faces: [], guides: [], box: null, turns: new Map() });
+      this.#buckets.push({ key, bx, by, pending: [], job: null, guidesPending: [], faces: [], guides: [], box: null, turns: new Map() });
     }
     return this.#buckets[b]!;
   }
@@ -1532,49 +1617,50 @@ export class Volume {
     if (bi === undefined) return true;
     const b = this.#buckets[bi]!;
     if (!b.pending) return true;
+    b.job ??= this.#cut(b, bi);
+    this.#budget.deadline = deadline;
+    if (!b.job.next().done) return false;
+    b.job = null;
+    return true;
+  }
+
+  *#cut(b: Bucket, bi: number): Job {
     const st = this.#st;
-    if (!b.work) {
-      const range = planBox(st, b.pending);
-      const planes = this.#groundPlanes.filter((pl) => (pl.snap === 3 ? pl.e > range.z0 + EPS && pl.e < range.z1 - EPS : crossesBox(pl, range.x0, range.y0, range.x1, range.y1)));
-      b.work = { planes, queue: [...b.pending].reverse(), stage: b.pending.map(() => 0), done: [] };
-    }
-    const work = b.work;
+    const budget = this.#budget;
     const ground = this.#ground;
-    // A face at a time: its ground cut and its first band family, then each strip that makes by the second family, so no step is more than a strip's worth of cuts.
-    while (work.queue.length > 0) {
-      for (let k = 0; k < 4 && work.queue.length > 0; k++) {
-        const poly = work.queue.pop()!;
-        if (work.stage.pop() === 1) {
-          this.#bandFamily(poly, 1, work.done);
+    const pending = b.pending!;
+    const range: WorldBox = { x0: Infinity, y0: Infinity, z0: Infinity, x1: -Infinity, y1: -Infinity, z1: -Infinity };
+    for (const f of pending) {
+      for (const i of f.v) growBox(range, st.p[3 * i]!, st.p[3 * i + 1]!, st.p[3 * i + 2]!);
+      if (budget.spend(f.v.length)) yield;
+    }
+    const planes = this.#groundPlanes.filter((pl) => (pl.snap === 3 ? pl.e > range.z0 + EPS && pl.e < range.z1 - EPS : crossesBox(pl, range.x0, range.y0, range.x1, range.y1)));
+    if (budget.spend(this.#groundPlanes.length)) yield;
+    // A face at a time and a cut at a time: the ground's planes, the pieces at or below the ground dropped, then the first band family and each strip that makes by the second.
+    const done: Poly[] = [];
+    for (const face of pending) {
+      for (const p of yield* cutEach(st, face, planes, budget)) {
+        if (budget.spend(p.v.length)) yield;
+        if (onOrBelow(st, p, ground)) continue;
+        if (!this.banded) {
+          done.push(p);
           continue;
         }
-        for (const p of cutAll(st, [poly], work.planes)) {
-          if (onOrBelow(st, p, ground)) continue;
-          if (!this.banded) {
-            work.done.push(p);
-            continue;
-          }
-          const strips: Poly[] = [];
-          this.#bandFamily(p, 0, strips);
-          for (const strip of strips) {
-            work.queue.push(strip);
-            work.stage.push(1);
-          }
-        }
+        const strips: Poly[] = [];
+        yield* this.#bandFamily(p, 0, strips, budget);
+        for (const strip of strips) yield* this.#bandFamily(strip, 1, done, budget);
       }
-      if (performance.now() > deadline) return false;
     }
-    let guides = cutGuides(b.guidesPending, work.planes).filter((g) => (g.az + g.bz) / 2 > ground(Math.floor((g.ax + g.bx) / 2), Math.floor((g.ay + g.by) / 2)) + EPS);
+    let guides = cutGuides(b.guidesPending, planes).filter((g) => (g.az + g.bz) / 2 > ground(Math.floor((g.ax + g.bx) / 2), Math.floor((g.ay + g.by) / 2)) + EPS);
     if (this.banded) guides = guides.flatMap((g) => this.#bandGuide(g));
-    const polys = work.done;
-    b.pending = null;
-    b.work = null;
-    b.guidesPending = [];
-    b.guides = guides;
+    if (budget.spend(b.guidesPending.length * (1 + planes.length) + guides.length)) yield;
     const F = this.#faces;
-    for (const p of polys) b.faces.push(F.add(p, bi, b.faces.length));
+    for (const p of done) {
+      b.faces.push(F.add(p, bi, b.faces.length));
+      if (budget.spend(p.v.length)) yield;
+    }
     // Twins by their ends: within the bucket, and across a bucket line with the faces of buckets cut before.
-    const local = new EdgeTable(4 * polys.length);
+    const local = new EdgeTable(4 * done.length);
     for (const id of b.faces) {
       const at = F.off[id]!;
       const n = F.off[id + 1]! - at;
@@ -1591,9 +1677,24 @@ export class Volume {
         F.nb[at + k] = g;
         F.nb[F.off[g]! + twin - g * SLOTS] = id;
       }
+      if (budget.spend(2 * n)) yield;
     }
-    b.box = worldBox(st, F, b.faces, guides);
-    return true;
+    const box: WorldBox = { x0: Infinity, y0: Infinity, z0: Infinity, x1: -Infinity, y1: -Infinity, z1: -Infinity };
+    for (const id of b.faces) {
+      for (let q = F.off[id]!; q < F.off[id + 1]!; q++) {
+        const i = F.v[q]!;
+        growBox(box, st.p[3 * i]!, st.p[3 * i + 1]!, st.p[3 * i + 2]!);
+      }
+      if (budget.spend(F.off[id + 1]! - F.off[id]!)) yield;
+    }
+    for (const g of guides) {
+      growBox(box, g.ax, g.ay, g.az);
+      growBox(box, g.bx, g.by, g.bz);
+    }
+    b.box = b.faces.length === 0 && guides.length === 0 ? null : box;
+    b.guides = guides;
+    b.guidesPending = [];
+    b.pending = null;
   }
 
   /** Every bucket cut, for the tests and for a volume small enough to cut at once. */
@@ -1621,7 +1722,7 @@ export class Volume {
   }
 
   /** A face cut by every band plane of one family it crosses, lowest first (design 4.2 step 5). Each face takes the first family, then the second. */
-  #bandFamily(poly: Poly, family: 0 | 1, out: Poly[]): void {
+  *#bandFamily(poly: Poly, family: 0 | 1, out: Poly[], budget: Budget): Job {
     const p = this.#st.p;
     const b = family === 0 ? R : -R;
     let lo = Infinity;
@@ -1633,6 +1734,7 @@ export class Volume {
     }
     let rest: Poly | null = poly;
     for (let m = Math.floor(lo + EPS) + 1; m < hi - EPS && rest; m++) {
+      if (budget.spend(rest.v.length)) yield;
       const [above, below] = splitPoly(this.#st, rest, this.#bandPlane(family, m));
       if (below) out.push(below);
       rest = above;
@@ -1929,22 +2031,6 @@ function growBox(box: WorldBox, x: number, y: number, z: number): void {
   box.z1 = Math.max(box.z1, z);
 }
 
-function worldBox(st: Store, F: FaceTable, faces: readonly number[], guides: readonly Guide[]): WorldBox | null {
-  if (faces.length === 0 && guides.length === 0) return null;
-  const box: WorldBox = { x0: Infinity, y0: Infinity, z0: Infinity, x1: -Infinity, y1: -Infinity, z1: -Infinity };
-  for (const id of faces) {
-    for (let q = F.off[id]!; q < F.off[id + 1]!; q++) {
-      const i = F.v[q]!;
-      growBox(box, st.p[3 * i]!, st.p[3 * i + 1]!, st.p[3 * i + 2]!);
-    }
-  }
-  for (const g of guides) {
-    growBox(box, g.ax, g.ay, g.az);
-    growBox(box, g.bx, g.by, g.bz);
-  }
-  return box;
-}
-
 /** Guide pieces cut by vertical planes. */
 function cutGuides(guides: readonly Guide[], planes: readonly Plane[]): Guide[] {
   let out = [...guides];
@@ -1972,12 +2058,16 @@ function cutGuides(guides: readonly Guide[], planes: readonly Plane[]): Guide[] 
 }
 
 function* clipGuides(guides: readonly Guide[], lines: readonly Plane[], clip: ClipTest, budget: Budget): Job<Guide[]> {
-  let out = [...guides];
-  for (const pl of lines) {
-    out = cutGuides(out, [pl]);
-    if (budget.spend(out.length)) yield;
+  const out: Guide[] = [];
+  for (const g of guides) {
+    let pieces = [g];
+    for (const pl of lines) {
+      pieces = cutGuides(pieces, [pl]);
+      if (budget.spend(pieces.length)) yield;
+    }
+    for (const piece of pieces) if (clip.inside((piece.ax + piece.bx) / 2, (piece.ay + piece.by) / 2)) out.push(piece);
   }
-  return out.filter((g) => clip.inside((g.ax + g.bx) / 2, (g.ay + g.by) / 2));
+  return out;
 }
 
 /**
@@ -2025,17 +2115,31 @@ function* groundPlanes(ground: (x: number, y: number) => number, plan: WorldBox,
  * plan of its own, so a cap on a wall line takes no sub-cell past the wall.
  */
 class FootprintBuilder {
-  /** Each face's span per row as [row, from, to) triples. */
-  #spans = new Int32Array(3 * 1024);
-  #n = 0;
+  /** The sub-cells of the shell's plan inside the scene, where every capped face lies, one byte each. */
+  readonly #sx0: number;
+  readonly #sy0: number;
+  readonly #cols: number;
+  readonly #rows: number;
+  readonly #bits: Uint8Array;
   #lo = new Float64Array(64);
   #hi = new Float64Array(64);
-  #rowMin = Infinity;
-  #rowMax = -Infinity;
 
-  /** Reads one face, and says how much work that took. */
-  add(st: Store, f: Poly): number {
-    if (f.nz <= 1e-9) return 1;
+  constructor(plan: { x0: number; y0: number; x1: number; y1: number }, w: number, h: number) {
+    this.#sx0 = Math.max(0, subFloor(plan.x0));
+    this.#sy0 = Math.max(0, subFloor(plan.y0));
+    this.#cols = Math.max(0, Math.min(w * FOG_SUBCELLS, subCeil(plan.x1)) - this.#sx0);
+    this.#rows = Math.max(0, Math.min(h * FOG_SUBCELLS, subCeil(plan.y1)) - this.#sy0);
+    this.#bits = new Uint8Array(this.#cols * this.#rows);
+  }
+
+  /** The sub-cells it holds. */
+  get size(): number {
+    return this.#bits.length;
+  }
+
+  /** Reads one face, charging the rows and sub-cells it reads. */
+  *add(st: Store, f: Poly, budget: Budget): Job {
+    if (f.nz <= 1e-9) return;
     const k = FOG_SUBCELLS;
     const p = st.p;
     const v = f.v;
@@ -2056,7 +2160,8 @@ class FootprintBuilder {
     const hi = this.#hi;
     lo.fill(Infinity, 0, rows);
     hi.fill(-Infinity, 0, rows);
-    let work = rows;
+    // Filling is a few nanoseconds a row, an eighth of a unit.
+    if (budget.spend(rows / 8 + v.length)) yield;
     for (let e = 0; e < v.length; e++) {
       const a = v[e]!;
       const b = v[e + 1 === v.length ? 0 : e + 1]!;
@@ -2072,8 +2177,8 @@ class FootprintBuilder {
       const slope = by === ay ? 0 : (bx - ax) / (by - ay);
       const first = Math.max(0, subFloor(eLo) - r0);
       const last = Math.min(rows - 1, Math.max(first, subCeil(eHi) - 1 - r0));
-      work += last - first + 1;
       for (let r = first; r <= last; r++) {
+        if (budget.spend(1)) yield;
         // The edge's x where it crosses the row's top and bottom, clamped to its ends.
         const top = (r0 + r) / k;
         const bottom = top + 1 / k;
@@ -2085,72 +2190,38 @@ class FootprintBuilder {
         if (x2 > hi[r]!) hi[r] = x2;
       }
     }
+    const cols = this.#cols;
     for (let r = 0; r < rows; r++) {
-      if (lo[r]! > hi[r]!) continue;
-      if (3 * (this.#n + 1) > this.#spans.length) {
-        const next = new Int32Array(this.#spans.length * 2);
-        next.set(this.#spans);
-        this.#spans = next;
-      }
+      if (budget.spend(1)) yield;
+      const row = r0 + r - this.#sy0;
+      if (lo[r]! > hi[r]! || row < 0 || row >= this.#rows) continue;
       const a = subFloor(lo[r]!);
-      const n = this.#n++;
-      this.#spans[3 * n] = r0 + r;
-      this.#spans[3 * n + 1] = a;
-      this.#spans[3 * n + 2] = Math.max(a + 1, subCeil(hi[r]!));
-      this.#rowMin = Math.min(this.#rowMin, r0 + r);
-      this.#rowMax = Math.max(this.#rowMax, r0 + r);
+      const from = Math.max(a, this.#sx0) - this.#sx0;
+      const to = Math.min(Math.max(a + 1, subCeil(hi[r]!)), this.#sx0 + cols) - this.#sx0;
+      for (let c = from; c < to; c++) {
+        this.#bits[row * cols + c] = 1;
+        if (budget.spend(1 / 8)) yield;
+      }
     }
-    return work;
   }
 
-  /** The spans grouped by row, each row's sorted by start and merged. */
+  /** The marked sub-cells as runs, row by row. */
   *finish(budget: Budget): Job<Footprint> {
-    const n = this.#n;
-    const spans = this.#spans;
-    if (n === 0) return { runs: new Int32Array(0), count: 0 };
-    const rowMin = this.#rowMin;
-    const height = this.#rowMax - rowMin + 1;
-    const start = new Int32Array(height + 1);
-    for (let i = 0; i < n; i++) {
-      start[spans[3 * i]! - rowMin + 1]!++;
-      if (budget.spend(1)) yield;
-    }
-    for (let r = 0; r < height; r++) start[r + 1]! += start[r]!;
-    // Each span as one number, its start then its end, so a typed sort orders a row by start. Both lie within a few sub-cells of the scene.
-    const fill = start.slice(0, height);
-    const keyed = new Float64Array(n);
-    const BASE = 1 << 20;
-    for (let i = 0; i < n; i++) {
-      keyed[fill[spans[3 * i]! - rowMin]!++] = (spans[3 * i + 1]! + BASE) * 2 * BASE + (spans[3 * i + 2]! + BASE);
-      if (budget.spend(1)) yield;
-    }
     const runs: number[] = [];
     let count = 0;
-    for (let r = 0; r < height; r++) {
-      const row = keyed.subarray(start[r]!, start[r + 1]!).sort();
-      let cur0 = 0;
-      let cur1 = 0;
-      let open = false;
-      for (const key of row) {
-        const from = Math.floor(key / (2 * BASE)) - BASE;
-        const to = (key % (2 * BASE)) - BASE;
-        if (open && from <= cur1) {
-          if (to > cur1) cur1 = to;
-          continue;
+    const cols = this.#cols;
+    for (let r = 0; r < this.#rows; r++) {
+      let start = -1;
+      for (let c = 0; c <= cols; c++) {
+        const set = c < cols && this.#bits[r * cols + c] === 1;
+        if (set && start < 0) start = c;
+        else if (!set && start >= 0) {
+          runs.push(this.#sy0 + r, this.#sx0 + start, this.#sx0 + c);
+          count += c - start;
+          start = -1;
         }
-        if (open) {
-          runs.push(rowMin + r, cur0, cur1);
-          count += cur1 - cur0;
-        }
-        cur0 = from;
-        cur1 = to;
-        open = true;
+        if (budget.spend(1 / 8)) yield;
       }
-      if (open) {
-        runs.push(rowMin + r, cur0, cur1);
-        count += cur1 - cur0;
-      }
-      if (budget.spend(row.length * 4 + 1)) yield;
     }
     return { runs: Int32Array.from(runs), count };
   }
