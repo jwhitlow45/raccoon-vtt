@@ -155,7 +155,7 @@ Under **New scene**, pick the kind of scene you want:
 - **Builder**: an empty 40 × 30 scene that opens the map builder straight away.
 - **From a Universal VTT file**: see [Map phases, imports and exports](#map-phases-imports-and-exports).
 
-Under the name, **Players see** asks what the players get of the new scene: **Explore**, **Reveal by hand** or **Everything** (see [Light and party vision](#light-and-party-vision) for what each one means). It starts on your room's choice for new scenes, so most of the time you leave it as it is. The fourth option, **Like** followed by the name of the scene on your screen, copies that scene's setup instead: its fog, its party vision with the light and Sight, and whether walls stop players' moves. The line under it says what it will copy, such as "Explore, Dark, Per player, players' moves blocked". The new scene still gets the automatic walls that suit its kind, so a map image keeps walls around floor only, whatever the scene you copy uses.
+Under the name, **Players see** asks what the players get of the new scene: **Explore**, **Reveal by hand** or **Everything** (see [Light and party vision](#light-and-party-vision) for what each one means). It starts on your room's choice for new scenes, so most of the time you leave it as it is. The fourth option, **Like** followed by the name of the scene on your screen, copies that scene's setup instead: its fog, its party vision with the light and Sight, and whether walls stop players' moves. The line under it says what it will copy, such as "Explore, Dark, Per player, players' moves blocked". The new scene still gets the automatic walls that suit its kind, so a map image keeps walls around floor only, whatever the scene you copy uses. Like copies the scene as it is when the new one is made, after the upload, and if that scene is deleted while your map uploads, the new scene starts on your room's choice instead, and a message says so.
 
 A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, for example, and the scene comes out 30 by 20 squares. Without a size in the name, the app guesses about 30 squares along the image's long side and opens **Line up grid** so you can correct the guess.
 
@@ -377,7 +377,7 @@ Each scene decides what your players see of it with one choice, **Players see**,
 
 Normally the party shares its sight: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. If you would rather each player see only through their own character's eyes, you can choose that too (see [Sight for each player](#sight-for-each-player)). Under Players see, the same settings hold:
 
-- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only on Explore.
+- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on, so on Explore or Custom.
 - **Sight**: **Whole party**, the default, where the party shares one view and one map, or **Per player**, where each player sees and remembers for themselves.
 - **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 - **Fog and party vision**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
@@ -385,6 +385,8 @@ Normally the party shares its sight: every player sees everything any of the par
 **Leaving Explore.** On Explore, players keep a map of what they explored. If you switch a scene they have explored to Reveal by hand or Everything, or turn off fog or party vision in the fold, the app asks first: "Players will see the build as it is now on everything they explored. Undo does not bring back what they remembered." Press **Change** to go ahead, or **Cancel** (or Escape) to leave things as they are. Switching **Sight** from **Per player** back to **Whole party** asks the same way when players have maps of their own there, since each player's map then joins the party's for good.
 
 **A map image with no walls.** Party vision looks through walls the map doesn't have, so on a plain map image Explore would show players the whole picture the moment a character looks around. When you choose Explore on a map image with nothing yet that blocks sight, the settings warn you: "This map has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand." When you move the players to a scene with party vision, the app reminds you of the same thing if that scene is a map image, since it can't check another scene's walls from where you are.
+
+**A first map image.** When a scene on Everything gets its first map image, it moves to Reveal by hand, so players see only what you reveal of the new picture.
 
 Darkvision, Blindsight and Truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
 
@@ -409,7 +411,7 @@ You can still pick anything for one scene in the new scene form, including **Lik
 
 When you've set up one scene the way you like it, you can give other scenes the same setup in one step. At the end of What players see, press **Use these settings on other scenes…**. A sheet opens, titled for your scene ("Use Crypt's settings on…"), listing every other scene by folder. It copies **Players see**, **Light** and **Sight**. Movement and walls stay as they are on each scene.
 
-Each scene's line says what players see there now, and what the copy would do there: "The players are here. They see the change at once." on the players' scene, "Players' remembered maps here reset." where a scene leaves Explore, and "Each player's own map here joins the party's." where it leaves Per player. Tick the scenes you want, or press **Select all**, then **Copy to 3 scenes**. The sheet says "Copied to 3 scenes." when it's done, or which scenes refused and why. One **Undo** puts every scene's settings back, though not the maps players remembered.
+Each scene's line says what players see there now, and what the copy would do there: "The players are here. They see the change at once." on the players' scene, "Players' remembered maps here reset." where a scene leaves Explore, and "Each player's own map here joins the party's." where it leaves Per player. Tick the scenes you want, or press **Select all**, then **Copy to 3 scenes**. The sheet says "Copied to 3 scenes." when it's done and clears the ticks, or says which scenes refused and why. One **Undo** puts every scene's settings back, though not the maps players remembered.
 
 ![Use Cave's settings on…: Battle mat, Arena and Crypt ticked, each line saying what the copy does there, and Copy to 3 scenes.](dm-guide/copy-settings.webp)
 
