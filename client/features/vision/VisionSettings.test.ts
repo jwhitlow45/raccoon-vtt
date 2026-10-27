@@ -99,6 +99,7 @@ describe("What players see (docs/design-v1-map-discovery.md 8.1 and 8.4)", () =>
     assert.doesNotMatch(html, /Turn fog on/, "Explore turns fog on now");
     assert.doesNotMatch(html, /role="switch"/, "the fold of the two switches starts closed");
     assert.match(html, /<button type="button" aria-expanded="false"[^>]*>.*?Fog and party vision/);
+    assert.match(html, />Use these settings on other scenes…</);
   });
 
   test("fog off with party vision on is Custom: nothing chosen, its line describing the group, and the fold open on both switches", () => {

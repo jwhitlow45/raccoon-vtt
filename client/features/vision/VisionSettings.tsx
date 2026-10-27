@@ -15,6 +15,7 @@ import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { Select } from "../scenes/controls.tsx";
+import { CopySettingsButton } from "./CopySettings.tsx";
 import { HOLDERS_UNDER, holderRows, holdersAfter, lendsText, sharedOnlyText, unsharedMounts, untickQuestion } from "./holders.ts";
 import { AskFirst, PlayersSeeChoice, useAsk, WarningStatus } from "./PlayersSee.tsx";
 import { CUSTOM_TEXT, exploredHere, holdersExploredHere, leaveQuestion, playersSeeOf, presetPatch, sightQuestion, walllessImage, WALLLESS_TEXT, type PlayersSee } from "./playersSeeRules.ts";
@@ -54,7 +55,8 @@ type Patch = OpOf<"scene.update">["patch"];
  * for themselves, and every party creature on the scene with its senses,
  * its light and whether it lends sight, so the DM sees what owners set.
  * The two switches a preset sets, Fog and Party vision, sit in a fold
- * after them, open while they make Custom.
+ * after them, open while they make Custom, and the group ends with the
+ * copy onto other scenes.
  *
  * A change that leaves Explore where players explored, from the preset or
  * the switches, asks first, since players' remembered map goes with it.
@@ -187,6 +189,8 @@ export function VisionSettings(props: { scene: Scene }) {
           {question("fold")}
         </div>
       </Fold>
+
+      <CopySettingsButton scene={scene} />
     </Section>
   );
 }

@@ -421,7 +421,14 @@ export type Tally =
   | { verb: "renaming"; folder: string; to: string }
   | ({ verb: "erasing" } & Erased)
   /** A group's conditions over 100 creatures, sent in batches (docs/design-v1-dm-tools.md 3.5): creature keys and effect names. */
-  | { verb: "effects"; creatures: string[]; added: string[]; removed: string[] };
+  | { verb: "effects"; creatures: string[]; added: string[]; removed: string[] }
+  /**
+   * One scene's vision settings used on others (docs/design-v1-map-discovery.md
+   * 8.3): the settings every op sends, the scenes it went to by id with their
+   * names, and the scenes that could be the source by id with their names:
+   * those with the settings before the step, that the copy did not go to.
+   */
+  | { verb: "copying"; patch: string; to: Record<string, string>; sources: Record<string, string> };
 
 export function tallyOf(op: ClientOp, before?: RoomState, after?: RoomState): Tally | undefined {
   switch (op.t) {
@@ -444,6 +451,8 @@ export function tallyOf(op: ClientOp, before?: RoomState, after?: RoomState): Ta
     case "actor.effects":
       return effectsTally(op, before);
     case "scene.update": {
+      const copy = before ? copyTally(op, before) : undefined;
+      if (copy) return copy;
       // The Scenes panel renames a folder by moving each of its scenes to the new name (client/features/scenes/folders.ts).
       const from = before?.scenes[op.sceneId]?.folder;
       const to = op.patch.folder;
@@ -478,6 +487,13 @@ export function addTally(step: Tally | undefined, op: Tally | undefined): Tally 
       lights: step.lights + op.lights,
     };
   }
+  if (step.verb === "copying" || op.verb === "copying") {
+    if (step.verb !== "copying" || op.verb !== "copying" || step.patch !== op.patch) return undefined;
+    const to = { ...step.to, ...op.to };
+    // Every op sends the same settings, so a later op's possible sources differ only by the scenes the step already went to, which are none.
+    const sources = Object.fromEntries(Object.entries(step.sources).filter(([id]) => !(id in to)));
+    return { verb: "copying", patch: step.patch, to, sources };
+  }
   if (step.verb === "effects" || op.verb === "effects") {
     if (step.verb !== "effects" || op.verb !== "effects") return undefined;
     const union = (a: string[], b: string[]) => [...new Set([...a, ...b])];
@@ -495,6 +511,13 @@ export function addTally(step: Tally | undefined, op: Tally | undefined): Tally 
 export function describeTally(tally: Tally): string | undefined {
   if (tally.verb === "renaming") return `renaming ${the("folder", tally.folder)} to ${quoted(tally.to, "a new name")}`;
   if (tally.verb === "erasing") return erasingLabel(tally);
+  if (tally.verb === "copying") {
+    const names = Object.values(tally.to);
+    const where = names.length === 1 ? the("scene", names[0]) : `${names.length} scenes`;
+    const sources = Object.values(tally.sources);
+    // Only one scene can be the source to be named: others with the same settings leave it unsure which one it was.
+    return sources.length === 1 ? `using ${quoted(sources[0], "a scene")}'s vision settings on ${where}` : `copying vision settings to ${where}`;
+  }
   // One creature is named by the op's own phrase, which knows its name.
   if (tally.verb === "effects") return tally.creatures.length > 1 ? effectsWords(tally, `${tally.creatures.length} creatures`) : undefined;
   return tally.tokenIds.length > 1 ? `${tally.verb} ${tally.tokenIds.length} tokens` : undefined;
@@ -506,6 +529,27 @@ const PLAYERS_SEE_WORDS = { explore: "Explore", reveal: "Reveal by hand", all: "
 function playersSeeOf(fogEnabled: boolean, visionOn: boolean): keyof typeof PLAYERS_SEE_WORDS {
   if (fogEnabled) return visionOn ? "explore" : "reveal";
   return visionOn ? "custom" : "all";
+}
+
+/**
+ * A copy of one scene's vision settings is the only patch that names fog,
+ * party vision and Sight together, with nothing else (client/features/vision/copyRules.ts).
+ * The op does not say which scene it copies, so every other scene that has
+ * the settings before it is a possible source.
+ */
+function copyTally(op: OpOf<"scene.update">, before: RoomState): Tally | undefined {
+  const { patch } = op;
+  const vision = patch.vision;
+  if (patch.fogEnabled === undefined || vision?.perPlayer === undefined || Object.keys(patch).length !== 2) return undefined;
+  const target = before.scenes[op.sceneId];
+  if (!target) return undefined;
+  const sources: Record<string, string> = {};
+  for (const s of Object.values(before.scenes)) {
+    if (s.id === op.sceneId) continue;
+    const same = s.fogEnabled === patch.fogEnabled && (s.vision?.on === true) === vision.on && (s.vision?.light ?? "bright") === vision.light && (s.vision?.perPlayer === true) === vision.perPlayer;
+    if (same) sources[s.id] = s.name;
+  }
+  return { verb: "copying", patch: JSON.stringify([patch.fogEnabled, vision.on, vision.light, vision.perPlayer]), to: { [op.sceneId]: target.name }, sources };
 }
 
 /** Names come from people, so a long one is cut to keep the toast to a line or two. */
