@@ -1493,7 +1493,12 @@ export type BandPart = {
   /** Fill loops of its far faces and of its near faces, `[x, y, z, ...]` in world cells. */
   far: Float64Array[];
   near: Float64Array[];
-  /** Stroked segments, `[ax, ay, az, bx, by, bz, ...]`: the outline (silhouettes, near creases, cap rims, near ground rims), the hidden lines, and the guides near and far (design 5). */
+  /**
+   * Strokes as polylines, `[x, y, z, ...]` with a NaN between one line and
+   * the next, so a dash runs on along a chain of short edges: the outline
+   * (silhouettes, near creases, cap rims, near ground rims), the hidden
+   * lines, and the guides near and far (design 5).
+   */
   outline: Float64Array;
   hidden: Float64Array;
   guide: Float64Array;
@@ -1523,6 +1528,72 @@ function finish<T>(job: Job<T>): T {
     const r = job.next();
     if (r.done) return r.value;
   }
+}
+
+/**
+ * Edges `[a, b, ...]` by vertex id chained into polylines of points, a NaN
+ * between one and the next: each edge once, each line run on through
+ * every point where it meets one other edge only.
+ */
+function chained(pairs: readonly number[], p: Float64Array): Float64Array {
+  const at = new Map<number, number[]>();
+  const n = pairs.length >> 1;
+  for (let e = 0; e < n; e++) {
+    for (const v of [pairs[2 * e]!, pairs[2 * e + 1]!]) {
+      const list = at.get(v);
+      if (list) list.push(e);
+      else at.set(v, [e]);
+    }
+  }
+  const used = new Uint8Array(n);
+  const out: number[] = [];
+  const other = (e: number, v: number) => (pairs[2 * e] === v ? pairs[2 * e + 1]! : pairs[2 * e]!);
+  // From a vertex, the next unused edge when it is the only one left there, so a line stops where three meet.
+  const onward = (v: number): number => {
+    const list = at.get(v)!;
+    let found = -1;
+    for (const e of list) {
+      if (used[e]) continue;
+      if (found >= 0) return -1;
+      found = e;
+    }
+    return found;
+  };
+  for (let e0 = 0; e0 < n; e0++) {
+    if (used[e0]) continue;
+    used[e0] = 1;
+    const line = [pairs[2 * e0]!, pairs[2 * e0 + 1]!];
+    for (let v = line[line.length - 1]!, e = onward(v); e >= 0; e = onward(v)) {
+      used[e] = 1;
+      v = other(e, v);
+      line.push(v);
+    }
+    for (let v = line[0]!, e = onward(v); e >= 0; e = onward(v)) {
+      used[e] = 1;
+      v = other(e, v);
+      line.unshift(v);
+    }
+    if (out.length > 0) out.push(NaN, NaN, NaN);
+    for (const v of line) out.push(p[3 * v]!, p[3 * v + 1]!, p[3 * v + 2]!);
+  }
+  return Float64Array.from(out);
+}
+
+/** Segments `[ax, ay, az, bx, by, bz, ...]` chained as `chained` does, by their points: the guides, which carry no vertex ids. */
+function chainedPoints(segs: readonly number[]): Float64Array {
+  const ids = new Map<string, number>();
+  const pts: number[] = [];
+  const pairs: number[] = [];
+  for (let i = 0; i + 2 < segs.length; i += 3) {
+    const key = `${segs[i]},${segs[i + 1]},${segs[i + 2]}`;
+    let id = ids.get(key);
+    if (id === undefined) {
+      ids.set(key, (id = pts.length / 3));
+      pts.push(segs[i]!, segs[i + 1]!, segs[i + 2]!);
+    }
+    pairs.push(id);
+  }
+  return chained(pairs, Float64Array.from(pts));
 }
 
 /** An area's mesh, its footprint, and its buckets, each cut the first time it is asked for. */
@@ -1561,7 +1632,19 @@ export class Volume {
     this.#down0 = Math.max(1, Math.ceil(this.#bounds.h / CHUNK_CELLS));
     const n = segmentsAround(radiusOf(area.solid), input.px, input.coarse);
     this.segments = segmentsOf(area.solid, n);
+    // Before the build, a box sure to hold the solid: its plan's, as high and as low about its origin as the plan is wide.
+    const b = area.shape.bounds;
+    const reach = Math.max(b.x1 - b.x0, b.y1 - b.y0);
+    this.reach = { x0: b.x0, y0: b.y0, z0: area.originZ - reach, x1: b.x1, y1: b.y1, z1: area.originZ + reach };
     this.#job = this.#build(area, n);
+  }
+
+  /** A box sure to hold the solid, known before the build: which areas the board builds first, and which it waits on. */
+  readonly reach: WorldBox;
+
+  /** Whether the build up to the buckets is done (`prepare`), asked without doing any of it. */
+  get built(): boolean {
+    return this.#job === null;
   }
 
   /** The units of work the build has charged so far, for the tests and the bench: a call with a deadline already past charges about CHECK and one step. */
@@ -2047,6 +2130,7 @@ export class Volume {
       else groups.set(g, [id]);
       if (budget.spend(F.off[id + 1]! - F.off[id]!)) yield;
     }
+    // Strokes by their ends, vertex ids for the edges and points for the guides, chained into polylines at the end.
     type Build = { far: Float64Array[]; near: Float64Array[]; outline: number[]; hidden: number[]; guide: number[]; guideHidden: number[] };
     const bands = new Map<number, [Build, Build]>();
     const partOf = (band: number, low: boolean): Build => {
@@ -2091,7 +2175,7 @@ export class Volume {
           if (!silhouette && !cap && !crease) continue;
         }
         const part = partOf(band, lowAt(Math.min(p[3 * a + 2]!, p[3 * c + 2]!)));
-        (lineNear ? part.outline : part.hidden).push(p[3 * a]!, p[3 * a + 1]!, p[3 * a + 2]!, p[3 * c]!, p[3 * c + 1]!, p[3 * c + 2]!);
+        (lineNear ? part.outline : part.hidden).push(a, c);
       }
       if (budget.spend(2 * n)) yield;
     }
@@ -2106,6 +2190,7 @@ export class Volume {
       const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
       const grow = (q: ArrayLike<number>) => {
         for (let i = 0; i + 2 < q.length; i += 3) {
+          if (Number.isNaN(q[i]!)) continue;
           const u = c * q[i]! - s * q[i + 1]!;
           const v = (s * q[i]! + c * q[i + 1]!) / 2 - K * q[i + 2]!;
           if (u < box.x0) box.x0 = u;
@@ -2117,11 +2202,12 @@ export class Volume {
       const done = (q: Build): BandPart => {
         for (const loop of q.far) grow(loop);
         for (const loop of q.near) grow(loop);
-        grow(q.outline);
-        grow(q.hidden);
-        grow(q.guide);
-        grow(q.guideHidden);
-        return { far: q.far, near: q.near, outline: Float64Array.from(q.outline), hidden: Float64Array.from(q.hidden), guide: Float64Array.from(q.guide), guideHidden: Float64Array.from(q.guideHidden) };
+        const part: BandPart = { far: q.far, near: q.near, outline: chained(q.outline, p), hidden: chained(q.hidden, p), guide: chainedPoints(q.guide), guideHidden: chainedPoints(q.guideHidden) };
+        grow(part.outline);
+        grow(part.hidden);
+        grow(part.guide);
+        grow(part.guideHidden);
+        return part;
       };
       out.push({ band, high: done(high), low: done(low), box });
       if (budget.spend(1)) yield;

@@ -754,9 +754,11 @@ describe("drawing between slices (review ISOA1-ASTRA-08)", () => {
 describe("a bucket's drawing for the board, band by band (review ISOA1-LAYOUT)", () => {
   type Turn = (typeof TURNS)[number];
   const pt = (x: number, y: number, z: number) => `${Math.round(x * 1e6)},${Math.round(y * 1e6)},${Math.round(z * 1e6)}`;
+  /** A stroke's polylines as their segments, a NaN between one line and the next. */
   const segs = (q: Float64Array) => {
     const out: string[] = [];
-    for (let i = 0; i + 5 < q.length; i += 6) {
+    for (let i = 0; i + 5 < q.length; i += 3) {
+      if (Number.isNaN(q[i]!) || Number.isNaN(q[i + 3]!)) continue;
       const a = pt(q[i]!, q[i + 1]!, q[i + 2]!);
       const b = pt(q[i + 3]!, q[i + 4]!, q[i + 5]!);
       out.push(a < b ? `${a} ${b}` : `${b} ${a}`);
@@ -841,6 +843,28 @@ describe("a bucket's drawing for the board, band by band (review ISOA1-LAYOUT)",
     return Math.min(...[...f.v].map((q) => vol.vertex(q)[2])) < -1e-9;
   }
 
+  test("strokes chain into lines, so a dash runs on: a sphere's equator and silhouette are a few lines a band, not an edge each", () => {
+    const bounds = { w: 16, h: 16 };
+    const area = resolveArea({ id: "s", rev: 1, shape: "sphere", size: 20, origin: { x: 8, y: 8, z: 30 }, yaw: 0, includeOrigin: true }, ctxOf(bounds, null));
+    assert.ok(area);
+    const vol = buildVolume({ area, bounds, ground: () => 0, px: 40 });
+    vol.ensureAll();
+    assert.deepEqual(vol.keys, ["0,0"]);
+    const lines = (q: Float64Array) => (q.length === 0 ? 0 : 1 + [...q].filter((v, k) => k % 3 === 0 && Number.isNaN(v)).length);
+    for (const turn of TURNS) {
+      let segments = 0;
+      let count = 0;
+      for (const band of vol.drawn("0,0", turn)!.bands) {
+        const guides = lines(band.high.guide) + lines(band.high.guideHidden);
+        // The equator crosses a band in two arcs at most, each near on one side and far on the other.
+        assert.ok(guides <= 4, `turn ${turn} band ${band.band}: ${guides} guide lines`);
+        count += guides + lines(band.high.outline);
+        segments += segs(band.high.guide).length + segs(band.high.guideHidden).length + segs(band.high.outline).length;
+      }
+      assert.ok(segments > 60 && count * 4 < segments, `${count} lines of ${segments} segments`);
+    }
+  });
+
   test("inside a pit's opening a band draws apart, every point of it below the ground at 0, and above it nothing below", () => {
     const bounds = { w: 30, h: 30 };
     const ground = flatGround(30, 30);
@@ -855,7 +879,7 @@ describe("a bucket's drawing for the board, band by band (review ISOA1-LAYOUT)",
     for (const turn of TURNS) {
       for (const key of vol.keys) {
         for (const band of vol.drawn(key, turn)!.bands) {
-          const zs = (part: typeof band.high) => [...part.far, ...part.near, part.outline, part.hidden, part.guide, part.guideHidden].flatMap((q) => [...q].filter((_, k) => k % 3 === 2));
+          const zs = (part: typeof band.high) => [...part.far, ...part.near, part.outline, part.hidden, part.guide, part.guideHidden].flatMap((q) => [...q].filter((v, k) => k % 3 === 2 && !Number.isNaN(v)));
           for (const z of zs(band.low)) {
             low++;
             assert.ok(z <= 1e-9, `a point inside the opening at ${z}`);
