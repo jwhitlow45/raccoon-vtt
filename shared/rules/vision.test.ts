@@ -1149,6 +1149,19 @@ describe("what the vision cache keeps alive", () => {
     assert.equal(stale, 0, `${stale} rasters the cache dropped are still alive`);
     clearVisionCache();
   });
+
+  test("a holder's raster drawn for a computation found again by its inputs is kept, though its set holds newer ones", () => {
+    clearVisionCache();
+    // In the dark, q is lent a alone, and b's torch lights what a sees, so each spot of b's gives q's raster other tiles.
+    const room = visionRoom({ w: 40, h: 30, light: "dark", tokens: [pc("a", 5, 5, { ownerIds: ["q"] }), pc("b", 10, 5, { ownerIds: ["p5"], light: { bright: 20, dim: 20 } })] });
+    const tilesAt = (x: number) => holderSight({ ...room, tokens: { ...room.tokens, b: { ...room.tokens.b!, x } } }, "s1", "q", world).tiles;
+    // b steps off and back twice: the computation with b at 10 is still the scene's, and older than the set's other rasters.
+    for (const x of [10, 12, 10, 14]) void tilesAt(x);
+    const first = tilesAt(10);
+    assert.notEqual(first, tilesAt(14), "b's spot changes q's raster");
+    assert.equal(tilesAt(10), first, "read again, its raster is the one drawn, not drawn anew");
+    clearVisionCache();
+  });
 });
 
 // ---------------------------------------------------------------------------

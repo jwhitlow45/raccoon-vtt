@@ -2285,13 +2285,19 @@ function keepRaster(sceneId: string, raster: Raster): void {
   const list = rasters.get(raster.key) ?? [];
   rasters.delete(raster.key);
   /*
-   * A set keeps its newest computations' rasters, not the last drawn. The
-   * explore step draws a batch's new raster before the fan-out reads the
-   * state before it, so a raster drawn again for that older state must
-   * never push out the newer one, which the next batch reads as its state
-   * before. Kept by drawing order, one miss would repeat every batch.
+   * A set keeps the rasters of the computations the scene still holds
+   * first, then its newest, not the last drawn. The explore step draws a
+   * batch's new raster before the fan-out reads the state before it, so a
+   * raster drawn again for that older state must never push out the newer
+   * one, which the next batch reads as its state before. Kept by drawing
+   * order, one miss would repeat every batch. Kept by serial alone, a
+   * computation found again by its inputs, as a creature back where it
+   * stood, is older than the set's rasters, so its raster went as soon as
+   * it was drawn and every read drew it again.
    */
-  rasters.set(raster.key, [raster, ...list].sort((a, b) => b.serial - a.serial).slice(0, PER_SCENE));
+  const held = new Set((was?.entries ?? []).map((e) => e.serial));
+  const rank = (r: Raster) => (held.has(r.serial) ? 0 : 1);
+  rasters.set(raster.key, [raster, ...list].sort((a, b) => rank(a) - rank(b) || b.serial - a.serial).slice(0, PER_SCENE));
   while (rasters.size > RASTER_SETS_PER_SCENE) rasters.delete(rasters.keys().next().value!);
   keep(sceneId, { entries: was?.entries ?? [], rasters, bytes: 0 }, was);
 }
