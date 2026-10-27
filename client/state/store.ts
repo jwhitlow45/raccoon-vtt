@@ -37,6 +37,19 @@ export type { PendingOp } from "./types.ts";
  * retries, and resending after a reconnect.
  */
 
+/**
+ * Whether an op could land before a builder gesture waiting on its asks
+ * (MD4-ASTRA-9, MD4-ASTRA-13): a builder edit other than the asks, and an
+ * Undo or Redo of the top of the sender's stack, whose step may be a
+ * builder one, the forget toast's included. An undo aimed at one op (`of`,
+ * `log`) takes back only that op.
+ */
+function overtakes(op: ClientOp): boolean {
+  if (op.t === "undo") return op.of === undefined && op.log === undefined;
+  if (op.t === "redo") return true;
+  return op.t.startsWith("build.") && op.t !== "build.ask";
+}
+
 /** How many edits some pending ops are: one each, but a gesture's asks one together. */
 function editsIn(ops: readonly PendingOp[]): number {
   const asked = new Set(ops.flatMap((p) => (p.op.t === "build.ask" ? [p.group ?? `#${p.n}`] : [])));
@@ -246,6 +259,14 @@ export type RoomStore = {
 
   /** Queues an op, shows its predicted result at once, and sends it when the socket allows. Returns its `n`, or null when the op is malformed. */
   dispatch(op: ClientOp, opts?: DispatchOptions): number | null;
+  /**
+   * A builder gesture waiting on its asks (builder/ask.ts, D-261027-07):
+   * until the returned release is called, `dispatch` refuses every op that
+   * could land before it (`overtakes`), whoever sends it, so none does.
+   */
+  holdBuild(cancel: () => void): () => void;
+  /** Cancels the newest builder gesture waiting on its asks, as Undo does then. False when none waits. */
+  cancelHeld(): boolean;
   /** Shows one of this device's own ephemeral events, as if it had come back from the server. */
   recordLocalEph(e: EphEvent): void;
   pushToast(text: string, tone?: Toast["tone"]): void;
@@ -457,6 +478,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * none of it is taken before the question.
    */
   const takenInGroup = new Map<string, number>();
+  /** What cancels each builder gesture waiting on its asks, oldest first (holdBuild). */
+  const held: (() => void)[] = [];
   let disposed = false;
 
   const get = () => store.getState();
@@ -700,6 +723,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     ui,
 
     dispatch(op, opts) {
+      // Nothing that could land before a builder gesture waiting on its asks goes, whoever sends it (D-261027-07).
+      if (held.length > 0 && overtakes(op)) return null;
       const parsed = clientOpSchema.safeParse(op);
       if (!parsed.success) {
         console.error("raccoon: refusing to send a malformed op", op, parsed.error);
@@ -715,6 +740,20 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       commit({ pending: [...get().pending, pendingOp] });
       flush();
       return n;
+    },
+
+    holdBuild(cancel) {
+      held.push(cancel);
+      return () => {
+        const at = held.indexOf(cancel);
+        if (at >= 0) held.splice(at, 1);
+      };
+    },
+
+    cancelHeld() {
+      const cancel = held.pop();
+      cancel?.();
+      return cancel !== undefined;
     },
 
     recordLocalEph(e) {
@@ -830,7 +869,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           if (r.code === "forget" && (op.t === "undo" || op.t === "redo")) {
             // The undo toast's confirm (docs/design-v1-map-discovery.md 5.3): a yes names the refused step's n, which the server checks still heads the stack.
             const again = { ...op, forget: r.n };
-            toasts = withToast(toasts.filter((t) => t.text !== FORGET_ASK), { id: ++toastSeq, text: FORGET_ASK, tone: "info", action: { label: op.t === "undo" ? "Forget and undo" : "Forget and redo", run: () => void room.dispatch(again) } });
+            // Pressed while a builder gesture waits on its asks, it does nothing and the toast stays, as the store would refuse its step (`overtakes`).
+            const action = { label: op.t === "undo" ? "Forget and undo" : "Forget and redo", run: () => void room.dispatch(again), ready: () => held.length === 0 };
+            toasts = withToast(toasts.filter((t) => t.text !== FORGET_ASK), { id: ++toastSeq, text: FORGET_ASK, tone: "info", action });
             continue;
           }
           if (r.code === "forget") {

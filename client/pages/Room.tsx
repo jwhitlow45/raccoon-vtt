@@ -2180,6 +2180,7 @@ function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "r
           <Button
             size="sm"
             onClick={() => {
+              if (action.ready?.() === false) return;
               props.onDismiss();
               action.run();
             }}
@@ -2209,6 +2210,8 @@ function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "r
         <Button
           size="sm"
           onClick={() => {
+            // A button not ready, such as Forget and undo while a builder gesture waits, does nothing and keeps the toast.
+            if (action.ready?.() === false) return;
             props.onDismiss();
             action.run();
           }}

@@ -104,7 +104,8 @@ export type Toast = { id: number; text: string; tone: "error" | "info"; die?: To
  * runs `run` and dismisses the toast. A toast with one stays a while longer,
  * so there is time to reach it.
  */
-export type ToastAction = { label: string; run(): void };
+/** A toast's button. While `ready` answers false a press does nothing, and the toast stays for a later one. */
+export type ToastAction = { label: string; run(): void; ready?(): boolean };
 
 /**
  * The flat d20 that leads a toast of someone else's D20 Test
@@ -587,10 +588,11 @@ export type RoomActions = {
   redo(): void;
   /**
    * A builder gesture waiting on its asks (builder/ask.ts, D-261027-07):
-   * until the returned release is called, builder edits dispatched here
-   * are refused at input (null), so none overtakes it, Undo calls
-   * `cancel` instead of sending an undo, and Redo does nothing. Absent
-   * where nothing waits, as on a preview.
+   * until the returned release is called, the store refuses at input
+   * (null) every builder edit and every Undo or Redo of the stack's top,
+   * whoever sends it (store.ts `overtakes`), so none overtakes it. Undo
+   * calls `cancel` instead of sending an undo, and Redo does nothing.
+   * Absent where nothing waits, as on a preview.
    */
   holdBuild?(cancel: () => void): () => void;
   /** A UUIDv7 for a create op (design section 6). */

@@ -282,6 +282,40 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     assert.equal(p.sentKinds().at(-1), "redo", "once the gesture is answered, Redo is the room's again");
   });
 
+  test("the forget toast's Forget and undo and Forget and redo do nothing while the gesture waits, and the toast stays for a press once it is answered (MD4-ASTRA-13)", () => {
+    for (const t of ["undo", "redo"] as const) {
+      // An Undo or Redo the server asked about leaves its toast up, then a rectangle waits on its asks.
+      const p = page();
+      p.connect();
+      const n = p.room.dispatch({ t })!;
+      p.room.applyEv({ t: "ev", seq: p.room.store.getState().seq + 1, changes: [], rejects: [{ n, code: "forget", message: FORGET_ASK }] });
+      const toast = () => p.room.store.getState().toasts.find((x) => x.action !== undefined);
+      assert.equal(toast()?.action?.label, t === "undo" ? "Forget and undo" : "Forget and redo");
+      // The server hears the step too, so its numbers stay in step with the page's.
+      p.deliver();
+      dispatchBuild(p.ctx, rect);
+      // The toast's button is not ready, so a press does nothing and the toast stays (Room.tsx), and its step would be refused anyway.
+      assert.equal(toast()!.action!.ready?.(), false, `${t}: the button waits`);
+      toast()!.action!.run();
+      assert.deepEqual(p.sentKinds(), ["build.ask"], `${t}: nothing went before the bands`);
+      p.deliver();
+      assert.equal(p.cell("1,1"), "stone", `${t}: the rectangle went`);
+      assert.notEqual(toast()!.action!.ready?.(), false, `${t}: once the rectangle is answered, the button is ready`);
+      toast()!.action!.run();
+      assert.deepEqual(p.sentKinds(), [t]);
+    }
+  });
+
+  test("while a gesture waits, a step off the top of the stack from any sender is refused, and an undo aimed at one op goes", () => {
+    const p = page();
+    p.connect();
+    dispatchBuild(p.ctx, rect);
+    for (const op of [{ t: "undo" }, { t: "undo", forget: 3 }, { t: "redo" }, { t: "redo", forget: 3 }] as ClientOp[]) assert.equal(p.room.dispatch(op), null, JSON.stringify(op));
+    assert.notEqual(p.room.dispatch({ t: "undo", of: 1 }), null, "the token bar's Undo move and a stroke's quiet undo are aimed at one op");
+    assert.notEqual(p.room.dispatch({ t: "undo", log: "1:1" }), null, "an HP change taken back from its log line");
+    assert.deepEqual(p.sentKinds(), ["build.ask", "undo", "undo"]);
+  });
+
   test("a press on the builder's map while a gesture waits starts nothing, and its move and lift do nothing", () => {
     const scope = new RoomScope();
     const calls: string[] = [];
