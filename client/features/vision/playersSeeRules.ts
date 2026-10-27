@@ -1,32 +1,32 @@
 import { viewMapsOf } from "#shared/keys.ts";
 import type { LightLevel, RoomState, Scene, ScenePreset } from "#shared/model.ts";
+import { PLAYERS_SEE_WORDS, playersSeeOf, type PlayersSee } from "#shared/playersSee.ts";
 import { LIGHT_LEVELS, lightOf, SIGHT_CHOICES, sightOf } from "./settings.ts";
 
 /**
  * "Players see", one choice of what players get of a scene
  * (docs/design-v1-map-discovery.md 8.1), as plain functions for node
- * --test. Each preset is a pair of the scene's switches, so any scene reads
- * as one, or as Custom for the one pair no preset names: fog off with party
- * vision on.
+ * --test. Which choice a scene is on, and the choices' names, live in
+ * shared/playersSee.ts, which the server's undo names read too.
  */
 
-export type PlayersSee = ScenePreset | "custom";
+export { playersSeeOf, type PlayersSee };
 
 export type PresetChoice = { value: ScenePreset; label: string; help: string };
 
 export const PLAYERS_SEE: readonly PresetChoice[] = [
   {
     value: "explore",
-    label: "Explore",
+    label: PLAYERS_SEE_WORDS.explore,
     help: "Players see what their characters see. Ground they have not seen stays dark, walls and all, and what they explored stays as they last saw it.",
   },
-  { value: "reveal", label: "Reveal by hand", help: "Players see what you reveal with the fog tool." },
-  { value: "all", label: "Everything", help: "Players see the whole scene." },
+  { value: "reveal", label: PLAYERS_SEE_WORDS.reveal, help: "Players see what you reveal with the fog tool." },
+  { value: "all", label: PLAYERS_SEE_WORDS.all, help: "Players see the whole scene." },
 ];
 
 export const PLAYERS_SEE_NAME = "Players see";
 
-export const CUSTOM_TEXT = "Custom: party vision is on and fog is off, so players see the whole map, dimmed outside what their characters see.";
+export const CUSTOM_TEXT = `${PLAYERS_SEE_WORDS.custom}: party vision is on and fog is off, so players see the whole map, dimmed outside what their characters see.`;
 
 /** Under Explore on a scene whose map image has no wall that blocks sight (8.1). */
 export const WALLLESS_TEXT = "This map has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand.";
@@ -43,14 +43,8 @@ export const JOIN_MAPS_TEXT = "Each player's own map joins the party's. Undo doe
 /** The room default's help, and the new scene form's note when a map image steps down from it (8.2). */
 export const IMAGE_STEPS_DOWN = "Under Explore a map image with no walls starts on Reveal by hand, since party vision would show players all of it.";
 
-export function playersSeeOf(scene: Pick<Scene, "fogEnabled" | "vision">): PlayersSee {
-  const vision = scene.vision?.on === true;
-  if (scene.fogEnabled) return vision ? "explore" : "reveal";
-  return vision ? "custom" : "all";
-}
-
 export function playersSeeLabel(choice: PlayersSee): string {
-  return choice === "custom" ? "Custom" : PLAYERS_SEE.find((p) => p.value === choice)!.label;
+  return PLAYERS_SEE_WORDS[choice];
 }
 
 export type PresetPatch = { fogEnabled: boolean; vision: { on: boolean; light: LightLevel } };

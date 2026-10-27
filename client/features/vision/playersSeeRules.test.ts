@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { FogTile, RoomState, Scene } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
+import { PLAYERS_SEE_WORDS } from "#shared/playersSee.ts";
 import { apply, room, scene } from "#shared/testutil.ts";
 import {
   CUSTOM_TEXT,
@@ -35,6 +36,8 @@ describe("Players see's presets", () => {
     assert.deepEqual(PLAYERS_SEE.map((p) => p.label), ["Explore", "Reveal by hand", "Everything"]);
     assert.equal(playersSeeLabel("custom"), "Custom");
     assert.match(CUSTOM_TEXT, /^Custom: party vision is on and fog is off/);
+    // The server's undo names read the same words (shared/playersSee.ts).
+    assert.deepEqual(PLAYERS_SEE.map((p) => PLAYERS_SEE_WORDS[p.value]), ["Explore", "Reveal by hand", "Everything"]);
   });
 
   test("a preset is one scene.update of fog and party vision that keeps the light and Sight, and the scene then reads as it", () => {
