@@ -23,7 +23,7 @@ import { isoLayersOf, type LayerProps } from "../../features/layers.ts";
 import { SightOverlay } from "../../features/vision/SightOverlay.tsx";
 import type { SightMode } from "../../features/vision/sightMode.ts";
 import type { AssetVariant } from "../../lib/api.ts";
-import { screenToView, type Camera, type Size } from "../../lib/camera.ts";
+import { NO_INSETS, screenToView, type Camera, type Size } from "../../lib/camera.ts";
 import { DISPOSITION_RING } from "../../lib/tokenView.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
@@ -327,17 +327,20 @@ function IsoBoardImpl(props: IsoBoardProps) {
   }, [hidden, volumes, entries, world]);
   // Each frame's slice of building, and a render when something new can stand.
   const [volumeTick, setVolumeTick] = useState(0);
-  const sliceView = useRef({ turn, cull, world });
-  sliceView.current = { turn, cull, world };
+  // Areas build nearest the middle of what the viewer sees, past the panels over the board.
+  const clear = props.insets ?? NO_INSETS;
+  const middle = screenToView(cam, { x: (clear.left + size.width - clear.right) / 2, y: (clear.top + size.height - clear.bottom) / 2 });
+  const sliceView = useRef({ turn, cull, world, middle });
+  sliceView.current = { turn, cull, world, middle };
   useEffect(() => {
     if (!volumesSynced || entries.length === 0) return;
     let frame = 0;
     let changed = false;
     let laidOut = performance.now();
     const tick = () => {
-      const { turn: at, cull: box, world: w } = sliceView.current;
+      const { turn: at, cull: box, world: w, middle: mid } = sliceView.current;
       const start = performance.now();
-      const step = volumes.step(at, box, w, start + VOLUME_SLICE_MS);
+      const step = volumes.step(at, box, w, start + VOLUME_SLICE_MS, mid);
       changed ||= step.changed;
       // A layout redraws the whole relief, so while areas keep standing one by one they come in together a few times a second, and at once when the last does.
       if (changed && (!step.more || start - laidOut >= VOLUME_LAYOUT_MS)) {
@@ -636,7 +639,8 @@ function buildingStyle(insets: Insets | undefined): CSSProperties {
   return {
     position: "absolute",
     top: (insets?.top ?? 0) + theme.space(2),
-    left: "50%",
+    // In the middle of the part no panel covers.
+    left: `calc(50% + ${((insets?.left ?? 0) - (insets?.right ?? 0)) / 2}px)`,
     transform: "translateX(-50%)",
     padding: `${theme.space(1)}px ${theme.space(3)}px`,
     borderRadius: theme.radius.pill,

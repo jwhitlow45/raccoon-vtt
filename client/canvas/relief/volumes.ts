@@ -153,9 +153,8 @@ export class BoardVolumes {
     this.#slots = next;
   }
 
-  /** The slots by how near the view's middle their volumes lie. */
-  #byNearness(turn: Turn, view: VBox): Slot[] {
-    const mid = { x: (view.x0 + view.x1) / 2, y: (view.y0 + view.y1) / 2 };
+  /** The slots by how near `mid` (the view's middle unless given) their volumes lie, those meeting the view only. */
+  #byNearness(turn: Turn, view: VBox, mid: { x: number; y: number } = { x: (view.x0 + view.x1) / 2, y: (view.y0 + view.y1) / 2 }): Slot[] {
     const scored: { slot: Slot; d: number }[] = [];
     for (const slot of this.#slots.values()) {
       const vol = slot.next;
@@ -173,11 +172,12 @@ export class BoardVolumes {
    * is more to do. `changed` says what `now` gives has changed: an area
    * whose every bucket in view is now drawn, or one decided flat. Work
    * part of the way through an area changes nothing, so the board lays out
-   * again once an area, not once a bucket.
+   * again once an area, not once a bucket. `mid` is the middle of what the
+   * viewer sees, past any panel over the board, in view units.
    */
-  step(turn: Turn, view: VBox, world: VolumeWorld, deadline: number): { more: boolean; changed: boolean } {
+  step(turn: Turn, view: VBox, world: VolumeWorld, deadline: number, mid?: { x: number; y: number }): { more: boolean; changed: boolean } {
     let changed = false;
-    for (const slot of this.#byNearness(turn, view)) {
+    for (const slot of this.#byNearness(turn, view, mid)) {
       // A volume that stood is tested on the ground as it is now before the next one is built, so it can stand meanwhile.
       const old = slot.shown;
       if (old && old !== slot.next && old.built) {

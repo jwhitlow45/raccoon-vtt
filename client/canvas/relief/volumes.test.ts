@@ -94,6 +94,22 @@ describe("the board's areas standing as their real shapes", () => {
     assert.equal(first, "near");
   });
 
+  test("with a panel over part of the board, the area nearest the middle of what shows stands first", () => {
+    const v = new BoardVolumes();
+    const w = world();
+    const whole = { x0: -30, y0: 0, x1: 30, y1: 40 };
+    // The cell 40, 40 shows at view 0, 28.3: the middle left clear when a panel covers the board's top.
+    const shown = { x: 0, y: 40 / Math.SQRT2 };
+    v.sync([entry(sphere("far", 4, 4)), entry(sphere("near", 24, 24)), entry(sphere("edge", 40, 40))], w);
+    let first: string | null = null;
+    for (let i = 0; i < 100_000 && first === null; i++) {
+      v.step(0, whole, w, -Infinity, shown);
+      const now = v.now(0, whole, w);
+      if (now.standing.size > 0) first = [...now.standing][0]!;
+    }
+    assert.equal(first, "edge");
+  });
+
   test("security: a volume that stood keeps standing while its next one builds only while its own stand test passes on the viewer's ground as it is now", () => {
     const v = new BoardVolumes();
     const open = fogBut([]);
