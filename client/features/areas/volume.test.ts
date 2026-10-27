@@ -652,7 +652,7 @@ describe("bounded work (design 6)", () => {
     for (const { name, t, ctx, bounds } of scenes) {
       const area = resolveArea(t, ctx);
       assert.ok(area, name);
-      // A deadline already past at every call: each call still moves the work on, and stops it after about CHECK units and one step, whatever the machine. Its work is counted three ways: the units the build charged, the vertices it made, and the ground it read.
+      // A deadline already past at every call: each call still moves the work on, and stops it after about CHECK units and one step, whatever the machine. Its work is counted four ways: the units the build charged, and apart from them the vertices it made, the hexes it visited and the ground it read.
       let reads = 0;
       const counted = (x: number, y: number) => {
         reads++;
@@ -660,13 +660,14 @@ describe("bounded work (design 6)", () => {
       };
       const started = performance.now();
       const vol = buildVolume({ area, bounds, ground: counted, px: 40 });
-      const most = { work: 0, vertices: 0, reads: 0 };
+      const most = { work: 0, vertices: 0, visits: 0, reads: 0 };
       let calls = 0;
       const call = (step: () => boolean) => {
-        const before = { work: vol.work, vertices: vol.vertexCount, reads };
+        const before = { work: vol.work, vertices: vol.vertexCount, visits: vol.hexVisits, reads };
         const done = step();
         most.work = Math.max(most.work, vol.work - before.work);
         most.vertices = Math.max(most.vertices, vol.vertexCount - before.vertices);
+        most.visits = Math.max(most.visits, vol.hexVisits - before.visits);
         most.reads = Math.max(most.reads, reads - before.reads);
         calls++;
         return done;
@@ -681,7 +682,7 @@ describe("bounded work (design 6)", () => {
       const ms = performance.now() - started;
       assert.equal(vol.failed, 0, name);
       assert.ok(calls > 2 * vol.keys.length, `${name}: ${calls} calls`);
-      assert.ok(most.work <= 1024 && most.vertices <= 400 && most.reads <= 512, `${name}: at most ${JSON.stringify(most)} in one call`);
+      assert.ok(most.work <= 1024 && most.vertices <= 400 && most.visits <= 128 && most.reads <= 512, `${name}: at most ${JSON.stringify(most)} in one call`);
       // Generous, so a slow machine does not fail it. The slices' time is the bench's (VOLUME_BENCH=1 below).
       assert.ok(ms < 5000, `${name} took ${ms} ms`);
       if (t.id !== "sphere 500" || ctx.walls) continue;

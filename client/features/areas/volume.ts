@@ -196,6 +196,8 @@ class Store {
   readonly cuts = new Map<number, Map<number, number>>();
   /** The plan box of every vertex made, the shell's since every cut lies inside it. */
   readonly plan = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  /** Hexes a hex stack's walk has visited, counted apart from the budget for the tests. */
+  visits = 0;
 
   add(x: number, y: number, z: number): number {
     if (3 * (this.n + 1) > this.p.length) {
@@ -635,6 +637,7 @@ function* hexShell(st: Store, s: Extract<AreaSolid, { kind: "hexStack" }>, budge
   const heights = new Map<string, number[]>();
   for (const p of eachHexPrism(s)) {
     // A visit reads its steps from every source hex, a prism its corners too.
+    st.visits++;
     if (budget.spend((p ? 12 : 1) + s.reach.from.length)) yield;
     if (!p) continue;
     const cs = hexCorners(g, p.hex).map((k) => cornerAt(g, k));
@@ -1424,6 +1427,11 @@ export class Volume {
   /** The units of work the build has charged so far, for the tests and the bench: a call with a deadline already past charges about CHECK and one step. */
   get work(): number {
     return this.#budget.total;
+  }
+
+  /** Hexes the walk of a hex stack has visited, for the tests: counted apart from the budget, so a visit left uncharged still shows. */
+  get hexVisits(): number {
+    return this.#st.visits;
   }
 
   /** Open edges the caps could not close: 0 but for a broken clip, which the tests hold. */
