@@ -181,6 +181,8 @@ const run = {
   /** The combat screens' fight: its rows, Thorn's first. The second icon pass's fight takes the goblin and Wren too. */
   fight: { thorn: randomUUID(), dragon: randomUUID(), troll: randomUUID(), goblin: randomUUID(), wren: randomUUID() },
   traps: { pit: randomUUID(), needle: randomUUID(), door: randomUUID(), wire: randomUUID() },
+  /** The room's DM link, which newDmSession signs in by. */
+  dmLink: "",
 };
 
 function actor(over: Record<string, unknown> = {}) {
@@ -348,7 +350,7 @@ async function openAt(page: Page, size: Size, scale: number): Promise<void> {
 
 /** The DM's page in a context of the size's kind, replacing the other kind's, so only two contexts are ever open. */
 async function dmPageFor(size: Size): Promise<Page> {
-  if (dm && dmTouch === size.touch) return dm;
+  if (dm && !dm.isClosed() && dmTouch === size.touch) return dm;
   const state = await dmContext.storageState();
   await dmContext.close();
   dmContext = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, storageState: state });
@@ -359,6 +361,31 @@ async function dmPageFor(size: Size): Promise<Page> {
   dmSocket = new SocketWatch("dm");
   await dmSocket.attach(dmContext, dm);
   return dm;
+}
+
+/**
+ * Signs the DM in again by the DM link, on a session of its own, and moves
+ * the DM's pages and op socket to it. Each session has its own snapshot
+ * budget (design 10.4, twenty a minute), and a sweep that opens the DM's
+ * page at every size spends most of one, so each such sweep starts on a
+ * whole budget rather than wait out what the sweep before it spent.
+ */
+async function newDmSession(): Promise<void> {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  const watch = new ConsoleWatch("DM sign-in");
+  // Signing in by the DM link first asks who this is, which the server answers with these two.
+  watch.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/, /status of 409 .*\/api\/rooms\/[0-9A-Z]{8}\/dm\)$/];
+  watch.attach(page);
+  await page.goto(run.dmLink);
+  await page.getByRole("button", { name: /Dana the DM/ }).click();
+  await page.getByRole("status", { name: "Connected" }).first().waitFor();
+  assert.deepEqual(watch.errors, [], "the DM's sign-in logged errors");
+  await page.close();
+  ops.close();
+  ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: await cookieOf(context) });
+  await dmContext.close();
+  dmContext = context;
 }
 
 /** Every waiting springing settled and every trap armed again with its uses back, so each size starts from the same alerts. */
@@ -2828,6 +2855,7 @@ export function roomTest(): void {
     const match = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link);
     assert.ok(match, `DM link looks wrong: ${link}`);
     run.roomId = match[1]!.replace("-", "");
+    run.dmLink = link;
     await dm.getByLabel("I saved my DM link").check();
     await dm.getByRole("button", { name: "Continue to the room" }).click();
     await waitFor("the DM's snapshot", () => dmSocket.state);
@@ -3857,6 +3885,7 @@ async function viewScene(panel: Locator, sceneId: string): Promise<void> {
  */
 export function sceneSettingsTests(): void {
   test(`ms2-a. the scene settings page as it opens, every group folded and every group open, the map image's question, a map scene's phases with one in edit, Room settings, This device's Map detail and Show a handout, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-map-discovery.md 8.4 and 9)`, async () => {
+    await newDmSession();
     const crypt = await cryptScene();
     const lines: string[] = [];
     for (const at of FU30_AT) {
@@ -4040,6 +4069,7 @@ async function viewNameWhole(root: Locator, at: string): Promise<string[]> {
 /** iso5-a, last in alignment-icons.e2e.ts. */
 export function isoChoiceTests(): void {
   test(`iso5-a. the top bar with the View button, for the DM and for Pat, or the room menu's View row where the bar folds it, the View menu in Top-down and in Isometric, and Scene settings' Suggested view, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-isometric-view.md 8)`, async () => {
+    await newDmSession();
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const lines: string[] = [];
     for (const at of FU30_AT) {
@@ -4133,6 +4163,7 @@ async function dmOnScene(page: Page, sceneId: string): Promise<void> {
 
 export function md4Tests(): void {
   test(`md4-a. the Map builder's row with its note that the party sees where the DM builds, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-map-discovery.md 9)`, async () => {
+    await newDmSession();
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const cave = randomUUID();
     const scout = randomUUID();
@@ -4188,6 +4219,7 @@ export function md4Tests(): void {
   });
 
   test(`md4-b. the forget question, asked before Clear build clears a cavern the party saw past what players' remembered map can keep, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px, Escape answering no and the build left whole (docs/design-v1-map-discovery.md 9)`, async () => {
+    await newDmSession();
     if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
     const cavern = randomUUID();
     const scout = randomUUID();
