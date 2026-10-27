@@ -22,6 +22,7 @@ import { registerRoomRoutes } from "./http/rooms.ts";
 import { registerSecurity } from "./http/security.ts";
 import { registerStatic } from "./http/static.ts";
 import { registerXCardRoutes } from "./http/xcard.ts";
+import { registerPlayerViewRoutes } from "./http/playerView.ts";
 import { registerDdbImportRoutes, type DdbImportOptions } from "./http/ddbImport.ts";
 import { TooBusyError } from "./rooms/errors.ts";
 import { RoomNotFoundError, type RoomGateway } from "./rooms/gateway.ts";
@@ -126,6 +127,7 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   await registerLogRoutes(app, kit, { manager });
   await registerReceiptRoutes(app, kit, { manager });
   await registerXCardRoutes(app, kit, { manager });
+  await registerPlayerViewRoutes(app, kit, { manager });
   // On the strict egress port, whose squid list names D&D Beyond's character service alone (docs/design-v1-pc-stats.md 6.3).
   await registerDdbImportRoutes(app, { dispatcher: app.assets.egress.strict, ...ddb });
 
