@@ -5,14 +5,14 @@ import { MAX_NAME, type Op } from "../protocol.ts";
 import { convexHull, creaturesInArea, resolveArea, type AreaContext, type AreaToken } from "../rules/aoe.ts";
 import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
-import type { HexGrid } from "../rules/hex.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, type Hex, type HexGrid } from "../rules/hex.ts";
 import { hexPiece, pieceReach, placedOnTrace, routePoints, type HexPiece, type RoutePoint } from "../rules/route.ts";
-import { footprintRect } from "../rules/footprint.ts";
+import { footprintRect, occupiedHexes, occupiedRange } from "../rules/footprint.ts";
 import type { Point, Rect } from "../rules/geom.ts";
-import { fogClassOf, groundOf, type Ground } from "../rules/held.ts";
+import { convexLive, fogClassOf, pendingGround } from "../rules/held.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import type { Tx } from "./tx.ts";
-import { sceneGrid } from "../rules/grid.ts";
+import { isHex, sceneGrid } from "../rules/grid.ts";
 
 /**
  * Reminders that an area hits a creature again (features section 9): the
@@ -176,14 +176,18 @@ function byLiveGround(at: RoomState, seen: { seen?: true; seenBy?: string[] }, r
  * reveals, or revealed ground on a scene with fog and no vision. Asked by
  * fog class, a holder's own or null for the shared one, and null on a
  * scene with fog off, where every ray does. The rays start at the area's
- * origin, at the corners of the footprint an emanation surrounds, or
- * anywhere on the token an attached area starts from, and each ends at a
- * sample inside the creature's footprint, so all of them lie in the hull
- * of those points and the samples' box: every cell that hull touches must
- * be live. So
- * a player never learns that an area reaches a creature through ground
- * they do not see now, where a remembered wall may be gone or an unseen
- * one stand.
+ * probes (aoe.ts resolveArea): its origin, the corners and middle of the
+ * box an emanation surrounds, the centers of the hexes one surrounds, or
+ * where an attached area leaves its token, each moved off the walls by up
+ * to 1/64 cell per axis (segments.ts stepOffWalls) or nudged a millionth.
+ * Each ends at a sample inside the cells or hexes the creature stands on.
+ * So all of them lie in the hull of those starts grown by the step and the
+ * creature's cells, and every cell of the scene's grid that hull touches
+ * must be live (held.ts convexLive). So a player never learns that an area
+ * reaches a creature through ground they do not see now, where a
+ * remembered wall may be gone or an unseen one stand. The ground is the
+ * pending one: what this op brought into sight is live though the explore
+ * step after the batch has not yet written it (MD2-O-3).
  */
 function raysOnLiveGround(at: RoomState, template: AreaTemplate, there: Token): ((holder: string | null) => boolean) | null {
   const scene = at.scenes[template.sceneId];
@@ -192,21 +196,30 @@ function raysOnLiveGround(at: RoomState, template: AreaTemplate, there: Token): 
   const ctx = contextOf(at, template.sceneId);
   const area = ctx ? resolveArea(template, ctx) : null;
   const attached = template.attachedTo !== undefined ? at.tokens[template.attachedTo] : undefined;
-  // An emanation's probes step just inside the footprint it surrounds, and samples lie half a sample or more inside a cell (aoe.ts sampleCoord).
-  const starts = area?.box ? corners(inset(area.box, 1e-5)) : attached ? corners(footprintRect(grid, attached)) : [{ x: template.origin.x, y: template.origin.y }];
-  const hull = convexHull([...starts, ...corners(inset(footprintRect(grid, there), SAMPLE_INSET))]);
+  const probes: Point[] = [{ x: template.origin.x, y: template.origin.y }];
+  if (area?.box) probes.push(...corners(area.box));
+  if (attached) probes.push(...corners(footprintRect(grid, attached)), ...(isHex(grid) ? hexOutline(grid, occupiedHexes(grid, attached)) : []));
+  // A point emanation on hexes looks from the center of the hex its origin is in.
+  if (isHex(grid)) probes.push(hexCenter(grid, hexAt(grid, template.origin)));
+  const starts = probes.flatMap((p) => corners({ x: p.x - PROBE_STEP, y: p.y - PROBE_STEP, w: 2 * PROBE_STEP, h: 2 * PROBE_STEP }));
+  const r = occupiedRange(grid, there);
+  const ends = isHex(grid) ? hexOutline(grid, occupiedHexes(grid, there)) : corners(inset({ x: r.x0, y: r.y0, w: r.x1 - r.x0, h: r.y1 - r.y0 }, SAMPLE_INSET));
+  const hull = convexHull([...starts, ...ends]);
   const answers = new Map<string | null, boolean>();
   return (member) => {
     const holder = member === null ? null : fogClassOf(at, template.sceneId, member);
     if (!answers.has(holder)) {
-      const ground = groundOf(at, template.sceneId, holder);
-      answers.set(holder, ground !== null && hullLive(ground, hull));
+      const ground = pendingGround(at, template.sceneId, holder);
+      answers.set(holder, ground !== null && convexLive(ground, hull));
     }
     return answers.get(holder)!;
   };
 }
 
-/** How far inside a footprint every sample of it lies, at most: half a sample at the most samples a cell side takes (aoe.ts SAMPLES), and a margin. */
+/** How far a probe moves off the walls at most, per axis (segments.ts STEPS), past a millionth's nudge. */
+const PROBE_STEP = 1 / 64;
+
+/** How far inside the cells a creature stands on every sample of them lies, at least: half a sample at the most samples a cell side takes (aoe.ts SAMPLES), and a margin. */
 const SAMPLE_INSET = 1 / 64;
 
 function inset(r: Rect, d: number): Rect {
@@ -224,35 +237,8 @@ function corners(r: Rect): Point[] {
   ];
 }
 
-/* Whether every cell of the scene a closed convex polygon touches is live, a hair past touching included, so rounding only ever keeps a line back. */
-function hullLive(ground: Ground, hull: readonly Point[]): boolean {
-  if (hull.length === 0) return true;
-  const E = 1e-9;
-  const xs = hull.map((p) => p.x);
-  const ys = hull.map((p) => p.y);
-  const x0 = Math.max(0, Math.floor(Math.min(...xs) - E));
-  const y0 = Math.max(0, Math.floor(Math.min(...ys) - E));
-  const x1 = Math.min(ground.bounds.w - 1, Math.floor(Math.max(...xs) + E));
-  const y1 = Math.min(ground.bounds.h - 1, Math.floor(Math.max(...ys) + E));
-  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (!ground.live(x, y) && meetsCell(hull, x, y, E)) return false;
-  return true;
-}
-
-/* The separating axis test of a convex polygon (or a segment or a point) against the cell (x, y) grown by `e`. */
-function meetsCell(hull: readonly Point[], x: number, y: number, e: number): boolean {
-  const box = corners({ x: x - e, y: y - e, w: 1 + 2 * e, h: 1 + 2 * e });
-  const separated = (nx: number, ny: number) => {
-    const a = hull.map((p) => p.x * nx + p.y * ny);
-    const b = box.map((p) => p.x * nx + p.y * ny);
-    return Math.max(...a) < Math.min(...b) || Math.max(...b) < Math.min(...a);
-  };
-  if (separated(1, 0) || separated(0, 1)) return false;
-  for (let i = 0; i < hull.length && hull.length > 1; i++) {
-    const p = hull[i]!;
-    const q = hull[(i + 1) % hull.length]!;
-    if (separated(q.y - p.y, p.x - q.x)) return false;
-  }
-  return true;
+function hexOutline(grid: HexGrid, hexes: readonly Hex[]): Point[] {
+  return hexes.flatMap((h) => hexCorners(grid, h).map((c) => cornerAt(grid, c)));
 }
 
 /** The token whose turn is the encounter's active one, if it is a creature an area can hit. */

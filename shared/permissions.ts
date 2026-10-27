@@ -13,10 +13,11 @@ import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
 import { checkSetReach, planMove } from "./rules/moveLeg.ts";
 import { footprintRect, footprintSize, occupiedHexes, snapStep, storedCenter, type FootprintToken } from "./rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
-import { hexInScene } from "./rules/hex.ts";
+import { hexInScene, hexKey, hexNeighbors, type HexGrid } from "./rules/hex.ts";
 import { groundAt } from "./rules/heights.ts";
+import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
-import { fogClassOf, groundOf, type Ground } from "./rules/held.ts";
+import { convexLive, fogClassOf, groundOf, type Ground } from "./rules/held.ts";
 import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, coreSize, landing, lastClearSpot, legSpots, legStop, ownWalk, straightClear, walkEnd, walkFrom, walkOn, type Walker } from "./rules/movement.ts";
 import { legSteps, onRouteLattice, routeLattice, routePoints, routeStop, routeWalkers, type RoutePiece } from "./rules/route.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, resizeCandidates, resizeRefusal } from "./rules/resize.ts";
@@ -107,13 +108,14 @@ class Check {
   /**
    * The actor's live ground on a scene, where the touch rule speaks
    * (docs/design-v1-map-discovery.md 6, decision 11): a player's, on a
-   * square scene with fog on. Null where today's words stand: for the DM,
-   * with fog off, and on hexes, whose scenes have no walls yet.
+   * scene with fog on, squares and hexes alike (MD2-LK-3), each tested by
+   * its own cells. Null where today's words stand: for the DM, and with
+   * fog off, where nothing is withheld.
    */
   liveGround(sceneId: string): Ground | null {
     if (!this.grounds.has(sceneId)) {
       const scene = this.state.scenes[sceneId];
-      const speaks = this.actor.role === "player" && scene?.fogEnabled === true && !isHex(sceneGrid(scene));
+      const speaks = this.actor.role === "player" && scene?.fogEnabled === true;
       this.grounds.set(sceneId, speaks ? groundOf(this.state, sceneId, fogClassOf(this.state, sceneId, this.actor.memberId)) : null);
     }
     return this.grounds.get(sceneId)!;
@@ -1883,51 +1885,30 @@ export const SOMETHING_BLOCKS = "Something blocks the way.";
 export const SOMETHING_BLOCKS_BACK = "something blocks the way";
 
 /*
- * Whether the segment from P to Q meets the closed box, by clipping it to
- * each axis's slab.
- */
-function segmentMeetsBox(px: number, py: number, qx: number, qy: number, x0: number, y0: number, x1: number, y1: number): boolean {
-  let t0 = 0;
-  let t1 = 1;
-  for (const [p, d, lo, hi] of [
-    [px, qx - px, x0, x1],
-    [py, qy - py, y0, y1],
-  ] as const) {
-    if (d === 0) {
-      if (p < lo || p > hi) return false;
-      continue;
-    }
-    const a = (lo - p) / d;
-    const b = (hi - p) / d;
-    t0 = Math.max(t0, Math.min(a, b));
-    t1 = Math.min(t1, Math.max(a, b));
-    if (t0 > t1) return false;
-  }
-  return true;
-}
-
-/*
  * Whether every cell a closed box of half sides (hx, hy) touches, its
- * middle swept from P to Q, lies on live ground. Touching a cell's side or
- * corner counts, and a hair more than touching too, so rounding only ever
- * gives the generic words. Cells off the scene hold nothing to hide.
+ * middle swept from P to Q, lies on live ground, by the scene's own cells,
+ * squares or hexes (held.ts convexLive). Touching a cell's side or corner
+ * counts, and a hair more than touching too, so rounding only ever gives
+ * the generic words. Cells off the scene hold nothing to hide.
  */
 function sweepLive(g: Ground, px: number, py: number, qx: number, qy: number, hx: number, hy: number): boolean {
-  const E = 1e-9;
-  const x0 = Math.max(0, Math.floor(Math.min(px, qx) - hx - E));
-  const y0 = Math.max(0, Math.floor(Math.min(py, qy) - hy - E));
-  const x1 = Math.min(g.bounds.w - 1, Math.floor(Math.max(px, qx) + hx + E));
-  const y1 = Math.min(g.bounds.h - 1, Math.floor(Math.max(py, qy) + hy + E));
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      if (!g.live(x, y) && segmentMeetsBox(px, py, qx, qy, x - hx - E, y - hy - E, x + 1 + hx + E, y + 1 + hy + E)) return false;
-    }
-  }
-  return true;
+  const box = (x: number, y: number) => [
+    { x: x - hx, y: y - hy },
+    { x: x + hx, y: y - hy },
+    { x: x + hx, y: y + hy },
+    { x: x - hx, y: y + hy },
+  ];
+  return convexLive(g, convexHull([...box(px, py), ...box(qx, qy)]));
 }
 
 /** Whether a footprint standing where it stands, closed, so with the sides and corners of the cells beside it, lies on live ground: a stopping step's test. */
 function footprintLive(g: Ground, token: FootprintToken & Point): boolean {
+  if (isHex(g.grid)) {
+    // A hex's sides and corners touch only its neighbors.
+    const grid = g.grid as HexGrid;
+    const hexes = occupiedHexes(grid, token);
+    return [...hexes, ...hexes.flatMap((h) => hexNeighbors(grid, h))].every((h) => !hexInScene(grid, g.bounds, h) || g.keyLive(hexKey(h)));
+  }
   const { w, h } = footprintSize(token);
   const c = storedCenter(token);
   return sweepLive(g, c.x, c.y, c.x, c.y, w / 2, h / 2);
@@ -1936,9 +1917,14 @@ function footprintLive(g: Ground, token: FootprintToken & Point): boolean {
 /**
  * Whether every cell a footprint covers lies on live ground: where the
  * sender's device reads what the op meets as it is, so a refusal there
- * stays in place (6). The cells beside it count only for the words.
+ * stays in place (6). The cells beside it count only for the words. On
+ * hexes, the hexes it stands on (footprint.ts occupiedHexes).
  */
 function coverLive(g: Ground, token: FootprintToken & Point): boolean {
+  if (isHex(g.grid)) {
+    const grid = g.grid as HexGrid;
+    return occupiedHexes(grid, token).every((h) => !hexInScene(grid, g.bounds, h) || g.keyLive(hexKey(h)));
+  }
   const { w, h } = footprintSize(token);
   const E = 1e-9;
   for (let y = Math.floor(token.y + E); y < Math.ceil(token.y + h - E); y++) {

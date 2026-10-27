@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { edge, heights, lift, paint, remember, wall } from "./discoveryTestutil.ts";
+import { edge, heights, lift, liftAllBut, paint, remember, wall } from "./discoveryTestutil.ts";
 import { chunkKey } from "./keys.ts";
 import type { EdgeFeature, RoomState } from "./model.ts";
 import { cellVision } from "./perPlayerTestutil.ts";
@@ -18,6 +18,8 @@ import {
 import type { Op, OpOf } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules } from "./ruleHooks.ts";
+import { sceneGrid } from "./rules/grid.ts";
+import { hexAt, hexKey, type HexGrid } from "./rules/hex.ts";
 import { NO_ROOM_TO_GROW } from "./rules/resize.ts";
 import { DM, P1, actor, character, env, member, room, token } from "./testutil.ts";
 
@@ -164,6 +166,41 @@ describe("a walk the real build stops (the touch rule)", () => {
     const landed = touchLanding(group, P1, s, deps);
     assert.deepEqual(landed?.op, { t: "token.moveMany", moves: [{ tokenId: "thorn", x: 7, y: 5 }, { tokenId: "bree", x: 12, y: 6 }] });
   });
+});
+
+describe("the touch rule on hexes (MD2-ASTRA-1, MD2-LK-3)", () => {
+  for (const gridShape of ["hexRows", "hexColumns"] as const) {
+    /** Thorn at (2, 5) on a hex scene with fog on, a free wall all along x = 8, and ground revealed as asked. */
+    const hexRoom = (reveal: "none" | "all" | "allButStep", at = 8) => {
+      const s = base();
+      s.scenes.s1 = { ...s.scenes.s1!, gridShape };
+      s.exploredTiles = {};
+      s.buildChunks = {};
+      wall(s, "abcdefghijkl", [at, 0], [at, 8]);
+      wall(s, "bbcdefghijkl", [at, 8], [at, 16]);
+      if (reveal === "all") lift(s, "dm", { x: 0, y: 0, w: 24, h: 16 });
+      // Every square cell partly revealed, and only the hex the stopping step crosses the wall in under fog.
+      if (reveal === "allButStep") liftAllBut(s, "dm", [hexKey(hexAt(sceneGrid(s.scenes.s1) as HexGrid, { x: 8, y: 5.5 }))]);
+      return s;
+    };
+
+    test(`${gridShape}: a walk past an unseen wall lands at its last clear spot in the generic words, today's on revealed ground`, () => {
+      const dark = hexRoom("none");
+      assert.equal(decide(east, dark), SOMETHING_BLOCKS);
+      assert.deepEqual(touchLanding(east, P1, dark, deps), { op: { t: "token.move", tokenId: "thorn", x: 7, y: 5 }, words: SOMETHING_BLOCKS });
+      const lit = hexRoom("all");
+      assert.equal(decide(east, lit), WALL_IN_THE_WAY);
+      assert.deepEqual(touchLanding(east, P1, lit, deps), { op: { t: "token.move", tokenId: "thorn", x: 7, y: 5 }, words: WALL_IN_THE_WAY });
+    });
+
+    test(`${gridShape}: the stopping step crosses one unheld hex, every square cell round it partly revealed: no kind named, wherever in that hex the wall stands`, () => {
+      for (const at of [8, 8 + 1 / 64]) {
+        const s = hexRoom("allButStep", at);
+        assert.equal(decide(east, s), SOMETHING_BLOCKS);
+        assert.equal(touchLanding(east, P1, s, deps)?.words, SOMETHING_BLOCKS);
+      }
+    });
+  }
 });
 
 describe("a squeeze, a resize and a companion placement (6)", () => {

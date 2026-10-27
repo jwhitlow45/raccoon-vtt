@@ -3,6 +3,7 @@ import { CHUNK_CELLS, FOG_SUBCELLS, FREE_WALL_LATTICE, type FogTile, type FreeWa
 import { visionRules, type PartySight } from "../ruleHooks.ts";
 import { decodeTile, getBit, TILE_CELLS, TILE_SUB } from "./fog.ts";
 import type { CellRange } from "./footprint.ts";
+import type { Point } from "./geom.ts";
 import { isHex, sceneGrid, type Grid } from "./grid.ts";
 import { cornerAt, hexAt, hexCorners, hexInScene, hexKey, hexNeighbors, hexSubcells, parseHexKey, type Hex, type HexGrid } from "./hex.ts";
 import { seenFogBits } from "./vision.ts";
@@ -169,6 +170,22 @@ export function classSight(state: RoomState, scene: Scene, holder: string | null
  * for the shared class (fogClassOf).
  */
 export function groundOf(state: RoomState, sceneId: string, holder: string | null): Ground | null {
+  return groundWith(state, sceneId, holder, true);
+}
+
+/**
+ * The ground a ray test inside the reducer reads (decision 13, MD2-O-3):
+ * groundOf's, but live ground is the class's sight and the DM's reveals
+ * as they are, not cut to held ground. Ground an op brings into sight is
+ * not explored until the explore step that follows the batch, which writes
+ * exactly this sight into the class's layers, so the projections that read
+ * the line then hold it. Never for a projection.
+ */
+export function pendingGround(state: RoomState, sceneId: string, holder: string | null): Ground | null {
+  return groundWith(state, sceneId, holder, false);
+}
+
+function groundWith(state: RoomState, sceneId: string, holder: string | null, liveInsideHeld: boolean): Ground | null {
   const scene = state.scenes[sceneId];
   if (!scene) return null;
   const own = holder !== null && holdsOwnSight(state, sceneId, holder) ? holder : null;
@@ -189,7 +206,7 @@ export function groundOf(state: RoomState, sceneId: string, holder: string | nul
       return unionOf([dm, seen], (p) => (p === dm ? fogBits(p as FogTile) : sightBits(p as SightTile)));
     });
   }
-  return makeGround(scene, own, held, live, ownLayer);
+  return makeGround(scene, own, held, live, ownLayer, liveInsideHeld);
 }
 
 /**
@@ -210,7 +227,7 @@ export function deviceGround(view: RoomState & { sight?: Readonly<Record<string,
   return makeGround(scene, null, held, live, NONE);
 }
 
-function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveLayer: Layer, ownLayer: Layer): Ground {
+function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveLayer: Layer, ownLayer: Layer, liveInsideHeld = true): Ground {
   const grid = sceneGrid(scene);
   const { w, h } = scene.bounds;
   const fogged = scene.fogEnabled;
@@ -258,7 +275,7 @@ function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveL
   // Live ground is held ground: sight the explore step has not added to the explored layer yet holds nothing.
   const held = square(heldLayer, !fogged);
   const liveOnly = square(liveLayer, !fogged);
-  const live = (x: number, y: number) => liveOnly(x, y) && held(x, y);
+  const live = (x: number, y: number) => liveOnly(x, y) && (!liveInsideHeld || held(x, y));
   const own = square(ownLayer, false);
   const subHeld = sub(heldLayer);
   const subLiveOnly = sub(liveLayer);
@@ -272,17 +289,90 @@ function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveL
     remembers: fogged && scene.vision?.on === true,
     holder,
     subHeld,
-    subLive: (sx, sy) => subLiveOnly(sx, sy) && subHeld(sx, sy),
+    subLive: (sx, sy) => subLiveOnly(sx, sy) && (!liveInsideHeld || subHeld(sx, sy)),
     held,
     live,
     own: holder === null ? () => false : own,
     keyHeld,
-    keyLive: (key) => keyLiveOnly(key) && keyHeld(key),
+    keyLive: (key) => keyLiveOnly(key) && (!liveInsideHeld || keyHeld(key)),
     keyOwn: holder === null ? () => false : byKey(ownLayer, false),
     rangeHeld: range(held),
     rangeLive: range(live),
     rangeOwn: holder === null ? () => false : range(own),
   };
+}
+
+/**
+ * Whether every cell of the scene on its own grid, a square or a hex, that
+ * a closed convex polygon touches lies on live ground, a hair past
+ * touching included, so rounding only ever answers no (decisions 11 and
+ * 13). `hull` is in cells and in order round it (aoe.ts convexHull), and
+ * may be a segment or a point. Cells off the scene hold nothing to hide.
+ */
+export function convexLive(ground: Ground, hull: readonly Point[]): boolean {
+  if (hull.length === 0) return true;
+  const E = 1e-9;
+  const xs = hull.map((p) => p.x);
+  const ys = hull.map((p) => p.y);
+  const x0 = Math.min(...xs) - E;
+  const y0 = Math.min(...ys) - E;
+  const x1 = Math.max(...xs) + E;
+  const y1 = Math.max(...ys) + E;
+  if (!isHex(ground.grid)) {
+    for (let y = Math.max(0, Math.floor(y0)); y <= Math.min(ground.bounds.h - 1, Math.floor(y1)); y++) {
+      for (let x = Math.max(0, Math.floor(x0)); x <= Math.min(ground.bounds.w - 1, Math.floor(x1)); x++) {
+        if (!ground.live(x, y) && convexMeet(hull, [{ x, y }, { x: x + 1, y }, { x: x + 1, y: y + 1 }, { x, y: y + 1 }], E)) return false;
+      }
+    }
+    return true;
+  }
+  // Every hex the box round the hull reaches: a point of the box lies within 0.36 cell of a point of a half-cell grid over it,
+  // so the hex holding that grid point is its own or a neighbor (centers 1 apart, the next ring 1.73).
+  const grid = ground.grid as HexGrid;
+  const near = new Map<string, Hex>();
+  const step = 0.5;
+  for (let y = y0; y <= y1 + step; y += step) {
+    for (let x = x0; x <= x1 + step; x += step) {
+      const at = hexAt(grid, { x: Math.min(x, x1), y: Math.min(y, y1) });
+      for (const hx of [at, ...hexNeighbors(grid, at)]) near.set(hexKey(hx), hx);
+    }
+  }
+  for (const [key, hx] of near) {
+    if (!hexInScene(grid, ground.bounds, hx) || ground.keyLive(key)) continue;
+    if (convexMeet(hull, hexCorners(grid, hx).map((c) => cornerAt(grid, c)), E)) return false;
+  }
+  return true;
+}
+
+/* The separating axis test of two convex polygons in order (or a segment or a point), each grown by `e`. */
+function convexMeet(a: readonly Point[], b: readonly Point[], e: number): boolean {
+  const separated = (nx: number, ny: number) => {
+    const len = Math.hypot(nx, ny);
+    if (len === 0) return false;
+    let aLo = Infinity;
+    let aHi = -Infinity;
+    let bLo = Infinity;
+    let bHi = -Infinity;
+    for (const p of a) {
+      const v = (p.x * nx + p.y * ny) / len;
+      aLo = Math.min(aLo, v);
+      aHi = Math.max(aHi, v);
+    }
+    for (const p of b) {
+      const v = (p.x * nx + p.y * ny) / len;
+      bLo = Math.min(bLo, v);
+      bHi = Math.max(bHi, v);
+    }
+    return aHi + 2 * e < bLo || bHi + 2 * e < aLo;
+  };
+  for (const poly of [a, b]) {
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i]!;
+      const q = poly[(i + 1) % poly.length]!;
+      if (separated(q.y - p.y, p.x - q.x)) return false;
+    }
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------

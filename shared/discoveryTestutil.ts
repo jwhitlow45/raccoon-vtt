@@ -2,6 +2,8 @@ import { chunkKey, holderChunkKey, holderTileKey, tileKey, wallChunk } from "./k
 import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type FreeWall, type MemoryChunk, type MemoryEntries, type PlayerChunk, type RoomState, type Scene, type TerrainId, type Viewer, type WallFeature } from "./model.ts";
 import { projectState } from "./project.ts";
 import { decodeTile, encodeTile, TILE_BYTES, TILE_SUB } from "./rules/fog.ts";
+import { sceneGrid } from "./rules/grid.ts";
+import { hexSubcells, parseHexKey, type HexGrid } from "./rules/hex.ts";
 import { perPlayerOp, perPlayerState } from "./perPlayerTestutil.ts";
 import type { Op } from "./protocol.ts";
 import { chance, int, pick, room, scene } from "./testutil.ts";
@@ -95,6 +97,16 @@ export function lift(state: RoomState, layer: Layer, r: { x: number; y: number; 
   const subs: [number, number][] = [];
   for (let sy = r.y * FOG_SUBCELLS; sy < (r.y + r.h) * FOG_SUBCELLS; sy++) for (let sx = r.x * FOG_SUBCELLS; sx < (r.x + r.w) * FOG_SUBCELLS; sx++) subs.push([sx, sy]);
   liftSubs(state, layer, subs, sceneId, on);
+}
+
+/** Reveals the whole of a hex scene in one layer but the sub-cells of the hexes named, `"col,row"`, which stay under fog. */
+export function liftAllBut(state: RoomState, layer: Layer, hidden: readonly string[], sceneId = "s1"): void {
+  const scene = state.scenes[sceneId]!;
+  const grid = sceneGrid(scene) as HexGrid;
+  const out = new Set(hidden.flatMap((key) => hexSubcells(grid, parseHexKey(key)!).map(([sx, sy]) => `${sx},${sy}`)));
+  const subs: [number, number][] = [];
+  for (let sy = 0; sy < scene.bounds.h * FOG_SUBCELLS; sy++) for (let sx = 0; sx < scene.bounds.w * FOG_SUBCELLS; sx++) if (!out.has(`${sx},${sy}`)) subs.push([sx, sy]);
+  liftSubs(state, layer, subs, sceneId);
 }
 
 /** Sets the bits of one layer at fog sub-cells, by their scene-wide raster index, as a hex's are (hex.ts hexSubcells). */

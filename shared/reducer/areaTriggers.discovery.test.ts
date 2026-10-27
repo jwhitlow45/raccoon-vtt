@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { lift } from "../discoveryTestutil.ts";
+import { lift, liftAllBut, wall } from "../discoveryTestutil.ts";
 import { MAP_DISCOVERY_OP_VERSION } from "../migrate.ts";
 import type { LogEvent, RoomState } from "../model.ts";
 import { cellVision } from "../perPlayerTestutil.ts";
-import { projectState } from "../project.ts";
+import { projectState, stableStringify } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { visionRules } from "../ruleHooks.ts";
+import { sceneGrid } from "../rules/grid.ts";
+import { hexAt, hexCenter, hexKey, type HexGrid } from "../rules/hex.ts";
 import { DM, P1, P2, entry, env, member, room, template, token } from "../testutil.ts";
 
 /**
@@ -106,5 +108,88 @@ describe("an area's reminder by the receiver's live ground (decision 13)", () =>
     assert.equal(reads(state, P2), false, "p2 sees the goblin and the cloud, but not cells 10 and 11");
     const before = turnEnd(s, MAP_DISCOVERY_OP_VERSION - 1);
     assert.ok(reads(before.state, P2), "before map discovery the witness read it");
+  });
+
+  test("with vision on, ground the op brought into sight counts though the explore step has not yet added it (MD2-O-3)", () => {
+    const s = fight("dark");
+    // The party explored only up to x = 10, short of the scout's sight of cells 10 to 12, and the DM revealed cells 8 and 9.
+    lift(s, "party", { x: 0, y: 0, w: 10, h: 16 });
+    lift(s, "dm", { x: 8, y: 5, w: 2, h: 1 });
+    s.tokens.scout = token("scout", { kind: "pc", name: "Scout", disposition: "ally", ownerIds: ["p1"], x: 11, y: 5 });
+    const { reminder } = turnEnd(s);
+    assert.ok(reminder?.type === "area");
+    assert.equal(reminder.hidden, undefined, "the rays cross only ground in sight or revealed");
+    // Without the scout nothing sees cells 10 to 12, explored or not.
+    const { scout: _, ...rest } = s.tokens;
+    assert.equal((turnEnd({ ...s, tokens: rest }).reminder as { hidden?: true } | undefined)?.hidden, true);
+  });
+
+  for (const gridShape of ["hexRows", "hexColumns"] as const) {
+    test(`${gridShape}: a wall inside one unrevealed hex the rays cross, and no wall there: the same projection and the same reminder (MD2-ASTRA-3)`, () => {
+      const make = (at: { x: number; y: number }, withWall: boolean) => {
+        const s = fight();
+        s.scenes.s1 = { ...s.scenes.s1!, gridShape };
+        const grid = sceneGrid(s.scenes.s1) as HexGrid;
+        const hex = hexAt(grid, at);
+        // Every square cell round it is partly revealed, so only the hex itself says the ground is unheld.
+        liftAllBut(s, "dm", [hexKey(hex)]);
+        const c = hexCenter(grid, hex);
+        const lattice = (v: number) => Math.round(v * 64) / 64;
+        if (withWall) wall(s, "abcdefghijkl", [lattice(c.x), lattice(c.y - 0.25)], [lattice(c.x), lattice(c.y + 0.25)]);
+        return s;
+      };
+      // Astra's Cloudkill: the hex its origin stands in, and one the rays to the goblin cross.
+      for (const at of [{ x: 8.5, y: 5.5 }, { x: 10.5, y: 5.5 }]) {
+        const [a, b] = [make(at, true), make(at, false)];
+        assert.equal(stableStringify(projectState(a, P1, { sceneId: "s1" })), stableStringify(projectState(b, P1, { sceneId: "s1" })), "p1 cannot tell the rooms apart");
+        assert.equal(reads(turnEnd(a).state), false);
+        assert.equal(reads(turnEnd(b).state), false, `a hex at ${at.x}, ${at.y} under fog keeps the line the DM's`);
+      }
+      // Revealed whole, the line reaches players.
+      const open = fight();
+      open.scenes.s1 = { ...open.scenes.s1!, gridShape };
+      liftAllBut(open, "dm", []);
+      assert.ok(reads(turnEnd(open).state));
+    });
+  }
+
+  test("an emanation reads the cells beside the corners of the creature it surrounds, where a probe stepped off a wall would start (MD2-LK-5)", () => {
+    const make = (hidden: boolean) => {
+      const s = fight();
+      s.tokens.cleric = token("cleric", { kind: "pc", name: "Cleric", disposition: "ally", ownerIds: ["p1"], x: 10, y: 5 });
+      s.templates.cloud = template("cloud", { shape: "emanation", size: 15, attachedTo: "cleric", casterId: "cleric", includeOrigin: false, spell: "Spirit Guardians", ownerId: "p1", triggers: ["turnEnd"], origin: { x: 10.5, y: 5.5, z: 0 } });
+      lift(s, "dm", { x: 0, y: 0, w: 24, h: 16 });
+      // The cell off the cleric's north-west corner, which no ray to the goblin in the east crosses but a probe moved off a wall there may start in.
+      if (hidden) lift(s, "dm", { x: 9, y: 4, w: 1, h: 1 }, "s1", false);
+      return s;
+    };
+    assert.ok(reads(turnEnd(make(false)).state));
+    assert.equal(reads(turnEnd(make(true)).state), false);
+  });
+
+  test("an origin within 1/64 cell of a cell's side reads the cell past it, where a probe moved off a wall would start (MD2-LK-5)", () => {
+    const make = (hidden: boolean) => {
+      const s = fight();
+      s.templates.cloud = { ...s.templates.cloud!, origin: { x: 8.5, y: 5 + 1 / 128, z: 0 } };
+      lift(s, "dm", { x: 0, y: 0, w: 24, h: 16 });
+      if (hidden) lift(s, "dm", { x: 8, y: 4, w: 1, h: 1 }, "s1", false);
+      return s;
+    };
+    assert.ok(reads(turnEnd(make(false)).state));
+    assert.equal(reads(turnEnd(make(true)).state), false);
+  });
+
+  test("a Tiny goblin is judged by samples across the whole cell it stands in, so the rays to its far side count (MD2-LK-5)", () => {
+    const make = (hidden: boolean) => {
+      const s = fight();
+      s.tokens.g1 = { ...s.tokens.g1!, size: "tiny" };
+      s.templates.cloud = { ...s.templates.cloud!, origin: { x: 16.5, y: 0.5, z: 0 } };
+      lift(s, "dm", { x: 0, y: 0, w: 24, h: 16 });
+      // Only the rays to the east half of cell (12, 5), past the goblin's own half, cross cell (14, 4).
+      if (hidden) lift(s, "dm", { x: 14, y: 4, w: 1, h: 1 }, "s1", false);
+      return s;
+    };
+    assert.ok(reads(turnEnd(make(false)).state));
+    assert.equal(reads(turnEnd(make(true)).state), false);
   });
 });
