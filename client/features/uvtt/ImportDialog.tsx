@@ -12,7 +12,7 @@ import { theme } from "../../lib/theme.ts";
 import type { OpAnswer } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { addPhase } from "../phases/rules.ts";
-import { nameFromFile, newScenePick, newScenePreset, withPlayersSee } from "../scenes/create.ts";
+import { nameFromFile, newSceneIntent, newScenePreset, pickNow, withPlayersSee } from "../scenes/create.ts";
 import { uploadErrorText, uploadMap } from "../scenes/upload.ts";
 import { importOps, importScene, placeMap, type SceneInput } from "./batch.ts";
 import { UvttWorker, type Progress } from "./client.ts";
@@ -247,11 +247,15 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
     run(async (signal) => {
       const plan = read?.plan;
       if (!read || !plan) return;
+      // Like holds its scene by id through the upload, and reads it after (create.ts `pickNow`).
+      const intent = newSceneIntent(seen ?? newScenePreset(setting, "uvtt"), current);
       const asset = await uploadImage(signal);
       const map = placeMap(plan, { assetId: asset.id, width: asset.width, height: asset.height, fileImageWidth: read.info.image.width });
       if (!map) throw new Error(GRID_PROBLEM);
       const level = light ?? read.info.light?.level ?? "bright";
-      const scene = withPlayersSee(importScene(plan, map, { id: actions.newId(), name, fog: true, light: level }), newScenePick(seen ?? newScenePreset(setting, "uvtt"), current, setting, "uvtt"), level);
+      const { pick, gone } = pickNow(intent, store.getState().view, "uvtt");
+      if (gone) ui.notify(gone);
+      const scene = withPlayersSee(importScene(plan, map, { id: actions.newId(), name, fog: true, light: level }), pick, level);
       const ops = importOps(scene, plan, actions.newId);
       // One undo group, so one undo takes the whole scene back (design 7.7).
       const group = actions.newId();

@@ -9,7 +9,7 @@ import { Segmented } from "../../components/Segmented.tsx";
 import { api, type AssetRow } from "../../lib/api.ts";
 import { useUnsavedSince } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
-import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useAssets, useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, searchOnImport, type ImportSearch, type ImportWait } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { endFinding, useGridStore } from "../grid/store.ts";
@@ -23,7 +23,7 @@ import { StarterDialog } from "../starter/StarterDialog.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
 import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { ColorInput, NumberInput } from "./controls.tsx";
-import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, newScenePick, newScenePreset, withPlayersSee, type MapAsset, type SceneInput } from "./create.ts";
+import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, newSceneIntent, newScenePreset, pickNow, withPlayersSee, type MapAsset, type NewSceneIntent, type SceneInput } from "./create.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
 import type { PanelClose } from "../panels.ts";
 
@@ -56,7 +56,11 @@ const MAX_SCENES = 50;
  * Players see (docs/design-v1-map-discovery.md 8.1 and 8.2) starts on the
  * room's default for the kind, or Like the scene on the DM's screen, and is
  * applied to whatever the kind makes. It holds still during an upload, so
- * the scene that upload makes is the one the DM chose.
+ * the scene that upload makes is the one the DM chose. An upload or a
+ * starter copy holds the choice, Like by its scene's id, and reads that
+ * scene from the store once it is done, so what changed meanwhile comes
+ * with it, and a scene deleted meanwhile leaves the kind's start, said in
+ * a toast.
  *
  * The kind is a choice of native radios, and a tap on the chosen radio does
  * nothing, so the form folds with its own Cancel. During an upload that
@@ -66,6 +70,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const actions = useRoomActions();
   const ui = useRoomUi();
   const roomId = useRoomView((s) => s.roomId);
+  const store = useRoomStore();
   const [kind, setKind] = useState<Kind | null>(null);
   const [name, setName] = useState("");
   const [w, setW] = useState(30);
@@ -76,6 +81,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const [pasted, setPasted] = useState(false);
   const [starter, setStarter] = useState(false);
   const starterButton = useRef<HTMLButtonElement>(null);
+  /** The choice the starter dialog was opened with, which its copy makes the scene with. */
+  const starterIntent = useRef<NewSceneIntent>({ value: "reveal" });
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
   const current = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
@@ -134,8 +141,14 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     }
   };
 
-  /** Players see over what the kind starts with: the DM's pick, or the room's default for the kind. */
-  const seeing = (scene: SceneInput, k: Kind): SceneInput => withPlayersSee(scene, newScenePick(seen ?? newScenePreset(setting, k), current, setting, k));
+  /** The choice the form shows now: the DM's pick, or the room's default for the kind. */
+  const intentNow = (k: Kind): NewSceneIntent => newSceneIntent(seen ?? newScenePreset(setting, k), current);
+  /** Players see over what the kind starts with, from the room as it is now. */
+  const seeing = (scene: SceneInput, k: Kind, intent: NewSceneIntent): SceneInput => {
+    const { pick, gone } = pickNow(intent, store.getState().view, k);
+    if (gone) ui.notify(gone);
+    return withPlayersSee(scene, pick);
+  };
 
   const open = (id: string, tool: string | null) => {
     actions.switchScene(id);
@@ -150,21 +163,21 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
 
   const createMat = () => {
     const id = actions.newId();
-    actions.dispatch({ t: "scene.create", scene: seeing(matScene({ id, name, w, h, background }), "mat") });
+    actions.dispatch({ t: "scene.create", scene: seeing(matScene({ id, name, w, h, background }), "mat", intentNow("mat")) });
     open(id, null);
   };
 
   const createBuilder = () => {
     const id = actions.newId();
-    actions.dispatch({ t: "scene.create", scene: seeing(builderScene({ id, name, w, h }), "builder") });
+    actions.dispatch({ t: "scene.create", scene: seeing(builderScene({ id, name, w, h }), "builder", intentNow("builder")) });
     open(id, "build");
   };
 
-  const createFromAsset = (asset: MapAsset, fileName: string, wait: ImportWait = { answer: null, later: null }) => {
+  const createFromAsset = (asset: MapAsset, fileName: string, intent: NewSceneIntent, wait: ImportWait = { answer: null, later: null }) => {
     const id = actions.newId();
     const made = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset });
     const { hinted } = made;
-    const scene = seeing(made.scene, "map");
+    const scene = seeing(made.scene, "map", intent);
     actions.dispatch({ t: "scene.create", scene });
     // The scene is made with the guess first, so undo takes a found grid
     // back to it in one step, and Use default puts it back.
@@ -182,7 +195,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     open(id, hinted ? null : "grid");
   };
 
-  const createFromStarter = (row: AssetRow, found: FoundWork, grid: StarterGrid | null) => {
+  const createFromStarter = (row: AssetRow, found: FoundWork, grid: StarterGrid | null, intent: NewSceneIntent) => {
     // A starter map is never searched: its grid is the catalog's. A file picked before it is dropped, and so is its
     // search, whether it still runs here or was handed on to Line up grid after an upload (useLandLater).
     stopSearch();
@@ -191,7 +204,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     const id = actions.newId();
     const made = starterMapScene({ id, name, asset: { id: row.id, width: row.width, height: row.height }, work: found.work, grid });
     const { aligned } = made;
-    const scene = seeing(made.scene, "map");
+    const scene = seeing(made.scene, "map", intent);
     actions.dispatch({ t: "scene.create", scene });
     setStarter(false);
     open(id, aligned ? null : "grid");
@@ -200,8 +213,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   // A starter map already in the room starts on its catalog grid again, when the catalog is here and describes the room's file.
   const reuseMap = (row: AssetRow) => {
     const found = row.starter ? loadedStarterWork(row.starter) : null;
-    if (found) createFromStarter(row, found, retainedGrid(row, found.work));
-    else createFromAsset({ id: row.id, width: row.width, height: row.height }, "Map");
+    if (found) createFromStarter(row, found, retainedGrid(row, found.work), intentNow("map"));
+    else createFromAsset({ id: row.id, width: row.width, height: row.height }, "Map", intentNow("map"));
   };
 
   const pickFile = (next: File | null, fromPaste = false) => {
@@ -221,6 +234,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
 
   const upload = async () => {
     if (!file || status.busy) return;
+    const intent = intentNow("map");
     const abort = new AbortController();
     abortRef.current = abort;
     setStatus({ busy: true, waiting: false, error: null });
@@ -246,7 +260,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
         searchRef.current = null;
       }
       setStatus({ busy: false, waiting: false, error: null });
-      createFromAsset(asset, file.name, wait);
+      createFromAsset(asset, file.name, intent, wait);
     } catch (err) {
       if (abort.signal.aborted) return;
       setStatus({ busy: false, waiting: false, error: uploadErrorText(err) });
@@ -337,7 +351,15 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
               <ErrorText>{status.error}</ErrorText>
               <div style={{ display: "grid", gap: theme.space(1), justifyItems: "start" }}>
                 <Help>Or start from a map in the starter packs</Help>
-                <Button ref={starterButton} size="sm" disabled={status.busy} onClick={() => setStarter(true)}>
+                <Button
+                  ref={starterButton}
+                  size="sm"
+                  disabled={status.busy}
+                  onClick={() => {
+                    starterIntent.current = intentNow("map");
+                    setStarter(true);
+                  }}
+                >
                   From starter packs
                 </Button>
               </div>
@@ -348,7 +370,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                   kind="map"
                   hint="Openly licensed maps. Use copies the map into this room with its credit and makes the scene, on the map's own grid where it has one."
                   note={(found) => <FeetNote found={found} roomFeet={feetPerCell} />}
-                  onPicked={(row, found) => createFromStarter(row, found, answeredGrid(row))}
+                  onPicked={(row, found) => createFromStarter(row, found, answeredGrid(row), starterIntent.current)}
                   onClose={() => setStarter(false)}
                   opener={starterButton}
                 />

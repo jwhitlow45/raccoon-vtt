@@ -1,8 +1,26 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { apply, room } from "#shared/testutil.ts";
-import { builderScene, fogsWithFirstMap, guessCellPx, mapScene, matScene, nameFromFile, newScenePick, newScenePreset, playersSeeFields, replaceMap, sameArt, stepsDown, viewFromCamera, withPlayersSee } from "./create.ts";
+import { apply, room, scene } from "#shared/testutil.ts";
+import {
+  builderScene,
+  fogsWithFirstMap,
+  guessCellPx,
+  likeGoneText,
+  mapScene,
+  matScene,
+  nameFromFile,
+  newSceneIntent,
+  newScenePick,
+  newScenePreset,
+  pickNow,
+  playersSeeFields,
+  replaceMap,
+  sameArt,
+  stepsDown,
+  viewFromCamera,
+  withPlayersSee,
+} from "./create.ts";
 import { TOP_DOWN } from "../../lib/view.ts";
 
 function valid(scene: unknown) {
@@ -164,6 +182,27 @@ describe("what players see on a new scene (docs/design-v1-map-discovery.md 8.2)"
     assert.deepEqual(newScenePick("like", crypt, "explore", "map"), { like: crypt });
     assert.deepEqual(newScenePick("like", undefined, "explore", "map"), { preset: "reveal" });
     assert.deepEqual(newScenePick("all", crypt, "explore", "map"), { preset: "all" });
+  });
+
+  test("Like holds its scene by id through an upload, and reads it as the scene is made (MS1-ASTRA-02)", () => {
+    const crypt = scene("crypt", { name: "Crypt", fogEnabled: true, vision: { on: true, light: "dark" }, blockMovement: true });
+    const intent = newSceneIntent("like", crypt);
+    assert.deepEqual(intent, { value: "like", like: { id: "crypt", name: "Crypt" } });
+    assert.deepEqual(newSceneIntent("reveal", crypt), { value: "reveal" }, "a preset holds no scene");
+    assert.deepEqual(newSceneIntent("like", undefined), { value: "like" });
+    // Crypt changed while the map uploaded: the new scene copies it as it is now.
+    const changed = room({ scenes: { crypt: { ...crypt, fogEnabled: false, vision: { on: true, light: "bright", perPlayer: true }, blockMovement: false } } });
+    const now = pickNow(intent, changed, "map");
+    assert.equal(now.gone, null);
+    assert.deepEqual(playersSeeFields(now.pick), { fogEnabled: false, vision: { on: true, light: "bright", perPlayer: true }, blockMovement: false });
+    // Crypt deleted meanwhile: the kind's start under the room's choice as it is now, said in words.
+    const deleted = room({ scenes: {} });
+    deleted.meta = { ...deleted.meta, settings: { ...deleted.meta.settings, newScenePlayers: "explore" } };
+    assert.deepEqual(pickNow(intent, deleted, "map"), { pick: { preset: "reveal" }, gone: "Crypt was deleted before the new scene was made, so the new scene starts on Reveal by hand." });
+    assert.deepEqual(pickNow(intent, deleted, "uvtt").pick, { preset: "explore" });
+    assert.equal(likeGoneText("Crypt", "all"), "Crypt was deleted before the new scene was made, so the new scene starts on Everything.");
+    // A preset is never read again.
+    assert.deepEqual(pickNow({ value: "all" }, deleted, "map"), { pick: { preset: "all" }, gone: null });
   });
 });
 

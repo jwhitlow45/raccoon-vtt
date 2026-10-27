@@ -1,4 +1,5 @@
-import type { LightLevel, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
+import type { LightLevel, RoomState, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
+import { PLAYERS_SEE_WORDS } from "#shared/playersSee.ts";
 import { MAX_NAME, MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { fitBounds, MAX_CELL_PX, MIN_CELL_PX } from "../grid/calibrate.ts";
 import { groundAtMiddle, type Live } from "../../lib/view.ts";
@@ -149,12 +150,40 @@ export type LikeSource = Pick<Scene, "fogEnabled" | "vision" | "blockMovement">;
 export type NewScenePick = { preset: ScenePreset } | { like: LikeSource };
 
 /**
- * What a scene is made with for the form's choice: Like reads the scene on
- * screen as the scene is made, and the kind's start once that scene is gone.
+ * What a scene is made with for the form's choice: Like copies the scene
+ * it names, and the kind's start once that scene is gone.
  */
 export function newScenePick(value: ScenePreset | "like", like: LikeSource | undefined, setting: ScenePreset | undefined, kind: NewSceneKind): NewScenePick {
   if (value !== "like") return { preset: value };
   return like ? { like } : { preset: newScenePreset(setting, kind) };
+}
+
+/**
+ * The form's choice as the DM made it, held through an upload or a copy:
+ * the preset shown, or Like with the scene it named then. The scene itself
+ * is read only as the new one is made (`pickNow`).
+ */
+export type NewSceneIntent = { value: ScenePreset | "like"; like?: { id: string; name: string } };
+
+export function newSceneIntent(value: ScenePreset | "like", like: Pick<Scene, "id" | "name"> | undefined): NewSceneIntent {
+  return value === "like" && like ? { value, like: { id: like.id, name: like.name } } : { value };
+}
+
+/**
+ * The pick a scene is made with, from the room as it is when it is made,
+ * so a change to the Like scene while an upload ran comes with it. A Like
+ * scene deleted meanwhile leaves the kind's start, and `gone` says so.
+ */
+export function pickNow(intent: NewSceneIntent, room: Pick<RoomState, "scenes" | "meta"> | null | undefined, kind: NewSceneKind): { pick: NewScenePick; gone: string | null } {
+  const setting = room?.meta.settings.newScenePlayers;
+  const source = intent.like ? room?.scenes[intent.like.id] : undefined;
+  const pick = newScenePick(intent.value, source, setting, kind);
+  const gone = intent.value === "like" && intent.like && "preset" in pick ? likeGoneText(intent.like.name, pick.preset) : null;
+  return { pick, gone };
+}
+
+export function likeGoneText(name: string, preset: ScenePreset): string {
+  return `${name} was deleted before the new scene was made, so the new scene starts on ${PLAYERS_SEE_WORDS[preset]}.`;
 }
 
 type PlayersSeeFields = Pick<SceneInput, "fogEnabled" | "vision" | "blockMovement">;
