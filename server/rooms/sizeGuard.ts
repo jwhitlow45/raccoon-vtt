@@ -132,6 +132,11 @@ export class SizeGuard {
     return memoryCapOf(state, scene, this.#share);
   }
 
+  /** Whether the share fell since the map step last answered it, without answering. */
+  get shareLowered(): boolean {
+    return this.#lowered;
+  }
+
   /** Whether the share fell since the last ask, which the map step answers by forgetting every layer above it. */
   takeShareLowered(): boolean {
     const lowered = this.#lowered;

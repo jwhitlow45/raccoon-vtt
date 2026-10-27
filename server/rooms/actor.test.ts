@@ -3262,6 +3262,46 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     }
   });
 
+  test("a lowered share a failed step could not answer is answered by the next batch's step (MD3-D-8)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId, goblinId } = discovery(dm, player);
+    state.playedScenes = { [sceneId]: { sceneId, rev: 0 } };
+    state.memoryShared = { [sceneId]: { sceneId, rev: 0 } };
+    state.memory = {};
+    for (let cx = 0; cx < 4; cx++) {
+      const cells: Record<string, "wood"> = {};
+      for (let k = 0; k < 120; k++) cells[`${cx * 16 + (k % 16)},${Math.floor(k / 16)}`] = "wood";
+      state.memory[chunkKey(sceneId, cx, 0)] = { sceneId, cx, cy: 0, rev: 0, cells };
+    }
+    const held = layerCharge(state, state.scenes[sceneId]!, null);
+    const stateLimit = measuredStateBytes(state) + exploredReserve(state) + held + 2_000;
+    // The step throws the first time it is asked to measure every layer, as a bug would.
+    let failed = false;
+    const mapStep: typeof mapStepOps = (input) => {
+      if (input.everyLayer && !failed) {
+        failed = true;
+        throw new Error("a step that fails");
+      }
+      return mapStepOps(input);
+    };
+    await withRoom(
+      state,
+      dm,
+      async (actor, send) => {
+        assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "n".repeat(Math.floor(held / 2)) } }), null);
+        assert.ok(failed, "the step failed in the batch that lowered the share");
+        const share = (s: RoomState) => memoryShare(stateLimit, measuredStateBytes(s), exploredReserve(s), memoryReserves(s));
+        assert.ok(layerCharge(actor.committed.state, actor.committed.state.scenes[sceneId]!, null) > share(actor.committed.state), "nothing it wrote on, so nothing forgotten yet");
+        // An op that leaves the room's size as it was, so no measure lowers the share again.
+        assert.equal(await send({ t: "token.update", tokenId: goblinId, patch: { notes: "m".repeat(Math.floor(held / 2)) } }), null);
+        const now = actor.committed.state;
+        assert.ok(layerCharge(now, now.scenes[sceneId]!, null) <= share(now), "the next step measured every layer");
+      },
+      { sizeLimits: { stateLimit }, mapStep },
+    );
+  });
+
   test("a door a player touches shows as it is to everyone who shares that memory (MD-O-6)", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");

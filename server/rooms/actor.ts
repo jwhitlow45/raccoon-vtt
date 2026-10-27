@@ -1609,14 +1609,17 @@ export class RoomActor {
     let ops: ReturnType<typeof mapStepOps>;
     try {
       const after = this.#staged.state;
+      const lowered = this.#sizes.shareLowered;
       ops = this.#opts.mapStep({
         before: batch.before,
         after,
         touched: batch.touched,
         doors: batch.doors,
         cap: (scene) => this.#sizes.memoryCap(after, scene),
-        everyLayer: this.#sizes.takeShareLowered(),
+        everyLayer: lowered,
       });
+      // Answered only once the step ran: a step that throws leaves the next batch's to measure every layer.
+      if (lowered) this.#sizes.takeShareLowered();
     } catch (err) {
       // Fail closed (rule 9): the layers of the scenes the batch wrote on forget their ground rather than show the edit.
       this.#log.error({ err, roomId: this.roomId }, "map step failed, forgetting the scenes it wrote on");
