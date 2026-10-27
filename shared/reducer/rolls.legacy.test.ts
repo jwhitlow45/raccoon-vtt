@@ -41,18 +41,19 @@ const viewer = (step: Step): Viewer => (step.who === "dm" ? DM : P1);
  * A state as that build would have written it: without the collections added
  * since, while they are empty. The snapshot migration adds them empty (asks
  * for saves at version 16, traps and their logs at 19, sight holders and
- * their layers at 24), and nothing in this history fills them, so the
- * build's bytes are the rest.
+ * their layers at 24, memory and the scenes' marks at 27), and nothing in
+ * this history fills them, so the build's bytes are the rest.
  */
 function asThatBuild(state: RoomState): unknown {
-  const { casts, traps, trapLog, trapSeen, holders, exploredBy, ...rest } = state;
+  const { casts, traps, trapLog, trapSeen, holders, exploredBy, memory, memoryBy, playedScenes, memoryShared, ...rest } = state;
   const empty =
     Object.keys(casts ?? {}).length === 0 &&
     Object.keys(traps ?? {}).length === 0 &&
     (trapLog ?? []).length === 0 &&
     (trapSeen ?? []).length === 0 &&
     Object.keys(holders ?? {}).length === 0 &&
-    Object.keys(exploredBy ?? {}).length === 0;
+    Object.keys(exploredBy ?? {}).length === 0 &&
+    [memory, memoryBy, playedScenes, memoryShared].every((c) => Object.keys(c ?? {}).length === 0);
   return empty ? rest : state;
 }
 

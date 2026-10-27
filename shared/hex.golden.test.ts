@@ -34,9 +34,28 @@ const VIEWS: readonly [Viewer, string][] = [
   [P2, "s2"],
 ];
 
+/*
+ * Map discovery's collections hold nothing on these rooms, and so say
+ * nothing the build before held. The played marks a move of the players
+ * writes are bookkeeping no build before wrote, so they are left out with
+ * their keys (docs/design-v1-map-discovery.md 5.5).
+ */
+const DISCOVERY = ["memory", "memoryBy", "memoryShared"] as const;
+
+function stored(state: RoomState): string {
+  const room = { ...state } as Record<string, unknown>;
+  delete room.playedScenes;
+  for (const field of DISCOVERY) if (Object.keys((room[field] as object | undefined) ?? {}).length === 0) delete room[field];
+  return stableStringify(room);
+}
+
+function touchedBefore(touched: readonly string[]): string {
+  return touched.filter((key) => !key.startsWith("played:")).join(",");
+}
+
 function answer(result: ReturnType<typeof applyOp>): string[] {
   if (!result.ok) return [`refused ${result.code}: ${result.message}`];
-  const out = [hash128(stableStringify(result.state)), String(result.global), result.touched.join(",")];
+  const out = [hash128(stored(result.state)), String(result.global), touchedBefore(result.touched)];
   for (const line of result.log) out.push(`${line.id} ${lineAudience(line)}`);
   return out;
 }
@@ -44,7 +63,7 @@ function answer(result: ReturnType<typeof applyOp>): string[] {
 function run(seed: number): { input: string; output: string } {
   const r = rng(seed);
   let state: RoomState = randomState(r);
-  const inputs: string[] = [stableStringify(state)];
+  const inputs: string[] = [stored(state)];
   const outputs: string[] = [];
   for (let i = 0; i < OPS; i++) {
     // Every fourth op is a player's, the two taking turns.

@@ -1,4 +1,4 @@
-import type { RoomSettings, RoomState } from "./model.ts";
+import type { RoomSettings, RoomState, SceneMark } from "./model.ts";
 import type { Op } from "./protocol.ts";
 
 /**
@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 26;
-export const OP_VERSION = 25;
+export const SNAPSHOT_VERSION = 27;
+export const OP_VERSION = 26;
 
 export type MigrationStep = {
   from: number;
@@ -183,6 +183,21 @@ export const snapshotMigrations: MigrationStep[] = [
   // absence reads as Top-down, so a v25 room is a v26 room as it is. The number moves so that an older build, whose
   // strict state schema refuses the field, refuses a v26 snapshot instead of loading it.
   { from: 25, to: 26, apply: (state) => state },
+  // Map discovery (docs/design-v1-map-discovery.md 5.5): players' memory, each holder's, the played marks and the scenes
+  // whose memory shares the room's free space, four collections a v26 room lacks, start empty. The upgrade step
+  // (mapDiscoveryUpgrade) fills the marks, but only once replay has recovered every op stored before it, so it is no
+  // part of this step, which sees the snapshot alone (ASTRA-31). The number moves so that an older build, which would
+  // send players the whole build and drop what they remember, refuses a v27 snapshot.
+  {
+    from: 26,
+    to: 27,
+    apply: (state) => {
+      if (state === null || typeof state !== "object") return state;
+      const room = state as Record<string, unknown>;
+      if ("memory" in room && "memoryBy" in room && "playedScenes" in room && "memoryShared" in room) return state;
+      return { ...room, memory: room.memory ?? {}, memoryBy: room.memoryBy ?? {}, playedScenes: room.playedScenes ?? {}, memoryShared: room.memoryShared ?? {} };
+    },
+  },
 ];
 
 /**
@@ -720,6 +735,28 @@ export const opMigrations: MigrationStep[] = [
     to: 25,
     apply: (op) => op,
   },
+  {
+    // Map discovery (docs/design-v1-map-discovery.md 5.5): `sys.remember`
+    // is new, a builder op may carry `forget` and an undo or redo its
+    // seq, a move's `teleport` may be "unknown" and the room's settings
+    // `newScenePlayers`, all new, so no stored op changes shape and the
+    // step is the identity. From this version an op that makes a scene
+    // the players' scene marks it played (discoversMap). Older ops replay
+    // without the mark, and the upgrade step marks every scene there was
+    // instead (mapDiscoveryUpgrade, MD-R6-1).
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 26, and the shutdown writes version 27 snapshots
+    // (snapshotMigrations). Reload every page left open, table displays
+    // included: there is no client version check, and an old page would
+    // derive automatic walls the server now sends. Rollback: restore the
+    // backup taken before the deploy, as for any snapshot version bump. An
+    // older build refuses a version 27 snapshot and a version 26 op
+    // (runMigrations).
+    from: 25,
+    to: 26,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1130,6 +1167,57 @@ export function combatUses(opVersion: number | undefined): boolean {
  */
 export function takesBackTurnOnly(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 21);
+}
+
+/** The first snapshot and op versions of map discovery (docs/design-v1-map-discovery.md 5.5). */
+export const MAP_DISCOVERY_SNAPSHOT_VERSION = 27;
+export const MAP_DISCOVERY_OP_VERSION = 26;
+
+/**
+ * Whether the reducer writes what map discovery adds on its own
+ * (docs/design-v1-map-discovery.md 5.4 and 5.5): the played mark of an op
+ * that makes a scene the players' scene (a `room.setPlayerScene`, a
+ * deletion that moves the players, or an undo of either), and the
+ * explored ground a grid shape switch forgets on a scene with fog and
+ * party vision on. Ops stored before version 26 did neither and replay
+ * so, and the upgrade step marks every scene there was then (MD-R6-1).
+ * Live ops carry no stored version and take today's rule.
+ */
+export function discoversMap(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < MAP_DISCOVERY_OP_VERSION);
+}
+
+/** Whether a room loaded from a snapshot of this version still needs the map discovery upgrade step. */
+export function needsMapDiscoveryUpgrade(snapshotVersion: number): boolean {
+  return snapshotVersion < MAP_DISCOVERY_SNAPSHOT_VERSION;
+}
+
+/**
+ * The map discovery upgrade step (docs/design-v1-map-discovery.md 5.5,
+ * ASTRA-31), over the state recovered from everything stored before the
+ * upgrade: every scene there is gets the played mark, since which of them
+ * the party explored cannot be told without reading the layers (ASTRA-27),
+ * and every scene with fog and party vision on the mark that its memory
+ * shares the room's free space (`memoryShared`), so no room becomes full at
+ * deploy. The size guard works the shares out from those marks. It reads
+ * only the state, so a reload before the next snapshot runs it at the same
+ * point with the same result, and a snapshot written after it records the
+ * result, so a later load never runs it again.
+ *
+ * Loading a room runs it during replay just before the first op of op
+ * version 26, or after the last op when none is that new
+ * (server/rooms/persistence.ts). A room import of a file from before takes
+ * it after the file's migration.
+ */
+export function mapDiscoveryUpgrade(state: RoomState): RoomState {
+  const playedScenes: Record<string, SceneMark> = { ...state.playedScenes };
+  const memoryShared: Record<string, SceneMark> = { ...state.memoryShared };
+  for (const id of Object.keys(state.scenes).sort()) {
+    const scene = state.scenes[id]!;
+    playedScenes[id] ??= { sceneId: id, rev: 0 };
+    if (scene.fogEnabled && scene.vision?.on === true) memoryShared[id] ??= { sceneId: id, rev: 0 };
+  }
+  return { ...state, memory: state.memory ?? {}, memoryBy: state.memoryBy ?? {}, playedScenes, memoryShared };
 }
 
 /** Runs the steps that lead from `from` to `to`, in order, and refuses a version with no path. */

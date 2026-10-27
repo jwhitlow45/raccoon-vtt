@@ -340,6 +340,10 @@ export function room(overrides: Partial<RoomState> = {}): RoomState {
     traps: {},
     trapLog: [],
     trapSeen: [],
+    memory: {},
+    memoryBy: {},
+    playedScenes: {},
+    memoryShared: {},
     ...overrides,
   };
 }

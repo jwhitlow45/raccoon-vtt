@@ -9,8 +9,9 @@ import type { RestoreEntry } from "./protocol.ts";
  * 2.6 and 3.19), with the kind of asset that place takes: scene maps, map
  * phases and thumbnails, token images and other images, character
  * portraits, monsters', SRD monsters' and companion blocks' default
- * images, stamps from the library, and every page of a handout and of a
- * document in the DM's library. Shipped icons name no row.
+ * images, stamps from the library, the stamps players remember
+ * (docs/design-v1-map-discovery.md 5.4), and every page of a handout and
+ * of a document in the DM's library. Shipped icons name no row.
  *
  * Cleanup asks it which images a room still uses, and the permissions ask
  * it which images an undo would put back. Both must know every reference,
@@ -75,6 +76,13 @@ export function entityAssetRefs(key: EntityKey, value: unknown): AssetRef[] {
     case "handoutDoc":
       pages(v.pages);
       break;
+    // A stamp players remember still shows its art after the stamp changed or went, so cleanup keeps the image.
+    case "memory":
+    case "memoryBy":
+      for (const stamp of Object.values((v.stamps as Record<string, { art?: { assetId?: unknown } } | null> | undefined) ?? {})) {
+        if (typeof stamp?.art?.assetId === "string") out.push({ assetId: stamp.art.assetId, kind: "token" });
+      }
+      break;
     default:
       break;
   }
@@ -92,13 +100,15 @@ const IMAGE_COLLECTIONS = [
   ["handouts", "handout"],
   ["handoutDocs", "handoutDoc"],
   ["companionBlocks", "companionBlock"],
+  ["memory", "memory"],
+  ["memoryBy", "memoryBy"],
 ] as const satisfies readonly (readonly [keyof RoomState, string])[];
 
 /** Every asset id the state names, whatever kind its place takes. A thumbnail of a scene counts as used while the scene names it. */
 export function referencedAssetIds(state: RoomState): Set<string> {
   const ids = new Set<string>();
   for (const [collection, kind] of IMAGE_COLLECTIONS) {
-    for (const [id, value] of Object.entries(state[collection] as Record<string, unknown>)) {
+    for (const [id, value] of Object.entries((state[collection] ?? {}) as Record<string, unknown>)) {
       for (const ref of entityAssetRefs(`${kind}:${id}`, value)) ids.add(ref.assetId);
     }
   }

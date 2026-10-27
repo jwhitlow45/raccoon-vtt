@@ -34,6 +34,7 @@ import {
   fogOpSchema,
   handoutSchemas,
   mapSchemas,
+  memorySchemas,
   savedEncounterFieldsForImport,
   srdIdSchema,
   statBlockFieldsForImport,
@@ -97,6 +98,8 @@ const settings = z.strictObject({
   playersSeeOrder: z.enum(ORDER_REVEALS).default("all"),
   // Backups from before hex grids have none, which reads as squares (docs/design-v1-hex-grids.md HX-D19).
   newScenes: mapSchemas.gridShape.optional(),
+  // Backups from before map discovery have none, which reads as each kind's old default (docs/design-v1-map-discovery.md 8.2).
+  newScenePlayers: memorySchemas.scenePreset.optional(),
 });
 
 const meta = z.strictObject({
@@ -248,6 +251,22 @@ const sightHolders = z.strictObject({
     .refine((e) => e.filter((h) => h.on).length <= MOST_SIGHT_HOLDERS, { message: `at most ${MOST_SIGHT_HOLDERS} players see for themselves` }),
 });
 const exploredTile = fogTile.extend({ memberId: id });
+
+/**
+ * A chunk of one layer's memory (docs/design-v1-map-discovery.md 5.3), by
+ * the bounds the map step's `sys.remember` is held to. A stored chunk is
+ * never a player's, so the build chunk above, strict, refuses a player
+ * chunk's `known`, `auto` and `upDir`.
+ */
+const memoryChunk = z.strictObject({
+  sceneId: id,
+  cx: z.number().int().min(0).max(20),
+  cy: z.number().int().min(0).max(20),
+  rev,
+  memberId: id.optional(),
+  ...memorySchemas.memoryEntries.shape,
+});
+const sceneMark = z.strictObject({ sceneId: id, rev });
 
 const feet = z.number().int().min(-100_000).max(100_000);
 
@@ -670,7 +689,7 @@ const logEvent = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("encounter"), action: z.enum(["start", "end"]) }),
   z.strictObject({ type: z.literal("handout"), handoutId: id }),
   z.strictObject({ type: z.literal("member"), memberId: id, action: z.enum(["join", "kick", "dm", "undm", "remove"]) }),
-  z.strictObject({ type: z.literal("teleport"), tokenId: id, past: z.enum(["wall", "ledge"]) }),
+  z.strictObject({ type: z.literal("teleport"), tokenId: id, past: z.enum(["wall", "ledge", "unknown"]) }),
   z.strictObject({ type: z.literal("companion"), tokenId: id, characterId: id, memberId: id, name }),
   z.strictObject({ type: z.literal("characterDeleted"), characterId: id, memberId: id, name, tokens: count, companions: count, rows: count }),
   z.strictObject({
@@ -870,6 +889,13 @@ export const roomStateSchema = z.strictObject({
   trapSeen: z.array(trapLogEntry).max(LIMITS.trapSeenLines),
   // The record of the running turn's reminders, which an export may carry and the import leaves behind (remap.ts).
   reminded: reminded.optional(),
+  // Map discovery (docs/design-v1-map-discovery.md 5.3, 5.5). A backup from before it reaches this schema through the
+  // snapshot migration, which adds them empty, and an import that carries none starts with none. A holder's chunk key
+  // names its scene, member and place, longer than an id.
+  memory: record(memoryChunk).default({}),
+  memoryBy: z.record(z.string().min(1).max(140), memoryChunk).default({}),
+  playedScenes: record(sceneMark).default({}),
+  memoryShared: record(sceneMark).default({}),
 });
 
 /**

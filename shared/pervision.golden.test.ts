@@ -34,14 +34,24 @@ const VIEWS: readonly [Viewer, string][] = [
   [DISPLAY, "s1"],
 ];
 
-/* The collections per-player vision adds hold nothing on these rooms, and so say nothing the build before held. */
+/*
+ * The collections per-player vision and map discovery add hold nothing on
+ * these rooms, and so say nothing the build before held. The played marks
+ * a move of the players writes are bookkeeping no build before wrote, so
+ * they are left out with their keys (docs/design-v1-map-discovery.md 5.5).
+ */
 function stored(state: RoomState): string {
   const room = { ...state } as Record<string, unknown>;
-  for (const field of ["holders", "exploredBy"]) {
+  delete room.playedScenes;
+  for (const field of ["holders", "exploredBy", "memory", "memoryBy", "memoryShared"]) {
     const value = room[field];
     if (value !== undefined && Object.keys(value as object).length === 0) delete room[field];
   }
   return stableStringify(room);
+}
+
+function touchedBefore(touched: readonly string[]): string {
+  return touched.filter((key) => !key.startsWith("played:")).join(",");
 }
 
 function run(seed: number): { input: string; output: string } {
@@ -59,7 +69,7 @@ function run(seed: number): { input: string; output: string } {
       continue;
     }
     state = result.state;
-    outputs.push(hash128(stored(state)), String(result.global), result.touched.join(","));
+    outputs.push(hash128(stored(state)), String(result.global), touchedBefore(result.touched));
     for (const line of result.log) outputs.push(`${line.id} ${lineAudience(line)}`);
     for (const [viewer, sceneId] of VIEWS) outputs.push(hash128(stableStringify(projectState(state, viewer, { sceneId }))));
   }

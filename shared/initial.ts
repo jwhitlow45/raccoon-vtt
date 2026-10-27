@@ -7,13 +7,17 @@ import { DEFAULT_SETTINGS, type Member, type RoomState } from "./model.ts";
  *
  * The battle mat starts with fog off, because a blank mat has nothing to hide
  * (design section 13.2). Scenes with a map or a build start fogged instead.
+ * New scenes start on Explore (docs/design-v1-map-discovery.md 8.2), but
+ * this first mat stays on Everything, so players who join see a mat, not
+ * fog. It is the players' scene from the start, so it carries the played
+ * mark that a move of the players there would give it (5.5).
  */
 export function createInitialState(input: { roomName: string; dm: Member; now?: string }): RoomState {
   const sceneId = uuidv7();
   return {
     meta: {
       name: input.roomName,
-      settings: { ...DEFAULT_SETTINGS },
+      settings: { ...DEFAULT_SETTINGS, newScenePlayers: "explore" },
       playerSceneId: sceneId,
       view: { follow: false, blackout: false },
     },
@@ -62,5 +66,9 @@ export function createInitialState(input: { roomName: string; dm: Member; now?: 
     traps: {},
     trapLog: [],
     trapSeen: [],
+    memory: {},
+    memoryBy: {},
+    playedScenes: { [sceneId]: { sceneId, rev: 0 } },
+    memoryShared: {},
   };
 }

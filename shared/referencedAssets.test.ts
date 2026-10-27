@@ -28,6 +28,10 @@ function everyReference(): RoomState {
   state.handouts.h2 = { id: "h2", rev: 0, assetId: "page1", pages: [page("page1"), page("page2"), page("page1")], title: "Strange letter", to: "all", shownAt: "2026-10-14T00:00:00.000Z" };
   state.handoutDocs.d1 = { id: "d1", rev: 0, title: "Strange letter", pages: [page("docPage1"), page("docPage2")], createdAt: "2026-10-14T00:00:00.000Z" };
   state.companionBlocks.b1 = companionBlock("b1", "c1", { defaultImage: imageRef("blockImage") });
+  // Stamps players remember (docs/design-v1-map-discovery.md 5.4): the party's and a holder's, whatever the stamp is now.
+  const remembered = (id: string, assetId: string) => ({ ...state.stamps.st1!, id, art: { assetId } });
+  state.memory = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 0, stamps: { st1: remembered("st1", "rememberedStamp"), gone: null } } };
+  state.memoryBy = { "s1:p1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 0, memberId: "p1", stamps: { st3: remembered("st3", "holderStamp"), st4: { ...remembered("st4", "x"), art: { key: "oak-tree" } } } } };
   return state;
 }
 
@@ -49,7 +53,7 @@ describe("referencedAssetIds (docs/design-v1-dm-tools.md 3.19)", () => {
     const found = referencedAssetIds(state);
     // A field added to the model that names an asset shows here first, and fails until the walk knows it.
     assert.deepEqual([...found].sort(), [...namedAssets(state)].sort());
-    assert.deepEqual([...found].sort(), ["altImage", "blockImage", "docPage1", "docPage2", "handout", "map", "monsterImage", "page1", "page2", "phase", "portrait", "srdImage", "stampImage", "thumb", "tokenImage"]);
+    assert.deepEqual([...found].sort(), ["altImage", "blockImage", "docPage1", "docPage2", "handout", "holderStamp", "map", "monsterImage", "page1", "page2", "phase", "portrait", "rememberedStamp", "srdImage", "stampImage", "thumb", "tokenImage"]);
   });
 
   test("a restore adds only references the entity does not hold now, and never a thumbnail", () => {

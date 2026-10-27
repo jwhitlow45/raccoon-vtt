@@ -25,6 +25,11 @@ import {
   logsByAudience,
   combatUses,
   takesBackTurnOnly,
+  discoversMap,
+  mapDiscoveryUpgrade,
+  needsMapDiscoveryUpgrade,
+  MAP_DISCOVERY_OP_VERSION,
+  MAP_DISCOVERY_SNAPSHOT_VERSION,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -38,7 +43,7 @@ import { projectArchivedLog, projectState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
 import { CHANGED_SINCE, guardMatches } from "./reducer/misc.ts";
 import { guardHash } from "./reducer/tx.ts";
-import { AT, DM, P1, P2, actor, blockOf, character, companionBlock, comparable, entry, env, room, srdImage, template, token } from "./testutil.ts";
+import { AT, DM, FULL_TILE_BITS, P1, P2, actor, blockOf, character, companionBlock, comparable, entry, env, room, scene, srdImage, template, token } from "./testutil.ts";
 
 /** What the v1 reducer left: today's state without the spot each turn began on. */
 function v1Shape(state: RoomState): RoomState {
@@ -1303,9 +1308,11 @@ describe("hex grids, phase H1: op version 24, snapshot version 25 (docs/design-v
 });
 
 describe("the isometric view: op version 25, snapshot version 26 (docs/design-v1-isometric-view.md 7)", () => {
-  test("are the versions now", () => {
-    assert.equal(OP_VERSION, 25);
-    assert.equal(SNAPSHOT_VERSION, 26);
+  test("brought op version 25 and snapshot version 26", () => {
+    assert.ok(OP_VERSION >= 25);
+    assert.ok(SNAPSHOT_VERSION >= 26);
+    assert.ok(opMigrations.some((s) => s.from === 24 && s.to === 25));
+    assert.ok(snapshotMigrations.some((s) => s.from === 25 && s.to === 26));
   });
 
   test("the snapshot step is the identity, a scene's suggested view included", () => {
@@ -1329,5 +1336,98 @@ describe("the isometric view: op version 25, snapshot version 26 (docs/design-v1
   test("a version 25 op and a version 26 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 25, 24, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 26, 25, snapshotMigrations), /down/);
+  });
+});
+
+describe("map discovery: op version 26, snapshot version 27 (docs/design-v1-map-discovery.md 5.5)", () => {
+  test("are the versions now", () => {
+    assert.equal(OP_VERSION, 26);
+    assert.equal(SNAPSHOT_VERSION, 27);
+    assert.equal(MAP_DISCOVERY_OP_VERSION, 26);
+    assert.equal(MAP_DISCOVERY_SNAPSHOT_VERSION, 27);
+  });
+
+  test("a version 26 room gets empty memory and no marks, whatever its scenes, and nothing else about it changes", () => {
+    const explored = room({ scenes: { s1: { ...room().scenes.s1!, fogEnabled: true, vision: { on: true, light: "dark" } }, s2: room().scenes.s2! } });
+    const { memory: _m, memoryBy: _b, playedScenes: _p, memoryShared: _s, ...v26 } = explored;
+    const migrated = runMigrations(structuredClone(v26), 26, 27, snapshotMigrations) as RoomState;
+    // The marks wait for the upgrade step, which runs once replay has recovered every older op (ASTRA-31).
+    assert.deepEqual(migrated, { ...v26, memory: {}, memoryBy: {}, playedScenes: {}, memoryShared: {} });
+    assert.deepEqual(migrateSnapshot(structuredClone(v26), 26), migrated);
+  });
+
+  test("a room that has all four already is the very same room", () => {
+    const current = room();
+    assert.equal(runMigrations(current, 26, 27, snapshotMigrations), current);
+    assert.equal(migrateSnapshot(current, 26), current);
+    assert.equal(runMigrations(null, 26, 27, snapshotMigrations), null);
+  });
+
+  test("the op step is the identity, and each new field is an op today's protocol takes", () => {
+    const ops: unknown[] = [
+      { t: "room.setPlayerScene", sceneId: "s2" },
+      { t: "room.update", settings: { newScenePlayers: "explore" } },
+      { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,1"], forget: true },
+      { t: "token.move", tokenId: "t1", x: 2, y: 2, teleport: "unknown" },
+      { t: "sys.remember", sceneId: "s1", layers: [{ chunks: [{ cx: 0, cy: 0, set: { cells: { "1,1": null } } }] }] },
+      { t: "log.chat", text: "hi" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 25, 26, opMigrations), op);
+    for (const op of ops) assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
+  });
+
+  test("a version 26 op and a version 27 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 26, 25, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 27, 26, snapshotMigrations), /down/);
+  });
+
+  test("only ops of version 26 on, and live ones, write what map discovery adds (MD-R6-1)", () => {
+    assert.equal(discoversMap(undefined), true);
+    assert.equal(discoversMap(26), true);
+    assert.equal(discoversMap(25), false);
+    assert.equal(discoversMap(1), false);
+    assert.equal(needsMapDiscoveryUpgrade(26), true);
+    assert.equal(needsMapDiscoveryUpgrade(1), true);
+    assert.equal(needsMapDiscoveryUpgrade(27), false);
+  });
+});
+
+describe("the map discovery upgrade step (docs/design-v1-map-discovery.md 5.5, ASTRA-31)", () => {
+  const scenes = {
+    s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }),
+    s2: scene("s2", { order: 1, fogEnabled: true }),
+    s3: scene("s3", { order: 2, fogEnabled: false, vision: { on: true, light: "dim" } }),
+    s4: scene("s4", { order: 3, fogEnabled: true, vision: { on: true, light: "bright", perPlayer: true } }),
+    s5: scene("s5", { order: 4, fogEnabled: true, vision: { on: false, light: "dark", perPlayer: true } }),
+  };
+
+  test("marks every scene there is played, and every scene with fog and party vision on as sharing the room", () => {
+    const upgraded = mapDiscoveryUpgrade(room({ scenes }));
+    assert.deepEqual(Object.keys(upgraded.playedScenes!).sort(), ["s1", "s2", "s3", "s4", "s5"]);
+    for (const [id, mark] of Object.entries(upgraded.playedScenes!)) assert.deepEqual(mark, { sceneId: id, rev: 0 });
+    // A fog-only scene, a dimmed whole map and a per-player scene with sight off keep no memory, so share nothing.
+    assert.deepEqual(Object.keys(upgraded.memoryShared!).sort(), ["s1", "s4"]);
+    assert.deepEqual([upgraded.memory, upgraded.memoryBy], [{}, {}]);
+  });
+
+  test("reads the state alone, whatever anyone explored, and changes nothing else", () => {
+    const plain = room({ scenes });
+    const explored = room({ scenes, exploredTiles: { "s2:0,0": { sceneId: "s2", tx: 0, ty: 0, rev: 0, bits: FULL_TILE_BITS } } });
+    const a = mapDiscoveryUpgrade(plain);
+    const b = mapDiscoveryUpgrade(explored);
+    assert.deepEqual([a.playedScenes, a.memoryShared], [b.playedScenes, b.memoryShared], "no mark reads an explored layer");
+    const { playedScenes: _p, memoryShared: _s, ...rest } = a;
+    const { playedScenes: _p0, memoryShared: _s0, ...was } = plain;
+    assert.deepEqual(rest, was);
+    // Twice is once: the same state gives the same marks, so a reload before the next snapshot leaves what the first load did.
+    assert.deepEqual(mapDiscoveryUpgrade(a), a);
+  });
+
+  test("keeps marks a state already holds, and fills collections a state lacks", () => {
+    const { memory: _m, memoryBy: _b, playedScenes: _p, memoryShared: _s, ...bare } = room({ scenes: { s1: scenes.s1 } });
+    const upgraded = mapDiscoveryUpgrade(bare as RoomState);
+    assert.deepEqual([upgraded.memory, upgraded.memoryBy], [{}, {}]);
+    const kept = mapDiscoveryUpgrade(room({ scenes: { s1: scenes.s1 }, playedScenes: { s1: { sceneId: "s1", rev: 3 } } }));
+    assert.deepEqual(kept.playedScenes, { s1: { sceneId: "s1", rev: 3 } });
   });
 });
