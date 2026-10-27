@@ -10,7 +10,7 @@ import { uuidv7 } from "#shared/ids.ts";
 import { checkLimits, exploredReserve, LIMITS, NO_ROOM_TO_EXPLORE } from "#shared/limits.ts";
 import { ringed } from "#shared/logRings.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
-import { migrateSnapshot } from "#shared/migrate.ts";
+import { mapDiscoveryUpgrade, migrateSnapshot } from "#shared/migrate.ts";
 import { assetCreditSchema } from "#shared/protocol.ts";
 import { STARTER_KEY, type FoundWork, type StarterKind } from "#shared/starter.ts";
 import type { Member, RoomState } from "#shared/model.ts";
@@ -212,7 +212,7 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
     // The importer joins as one more member, so the limits are checked on the
     // room as it will be stored. A full roster plus the importer would make a
     // room that refuses every op, deletions included.
-    assertWithinLimits(finishState(parsed.state, dmMember, roomName));
+    assertWithinLimits(finishState(mapDiscoveryUpgrade(parsed.state), dmMember, roomName));
 
     let manifest: z.infer<typeof manifestSchema> = { formatVersion: 1, assets: [] };
     const manifestEntry = entries.get("assets.json");
@@ -242,7 +242,9 @@ export async function importRoom(deps: ImportDeps, zipPath: string, form: Import
       // Members get their new ids first, because asset uploader rows are written during image processing.
       const memberIds = new Map(Object.keys(parsed.state.members).map((id) => [id, uuidv7()]));
       const assetIds = await importImages(deps, zip, entries, manifest, roomId, counter, memberIds);
-      const remapped = finishState(remapState(parsed.state, { assets: assetIds, memberIds }), dmMember, roomName);
+      // Every scene an import brings is marked played, as the upgrade step marks a stored room's, since the remap carries
+      // no marks and the room is stored at today's version, which loadRoom never upgrades (docs/design-v1-map-discovery.md 5.5).
+      const remapped = finishState(mapDiscoveryUpgrade(remapState(parsed.state, { assets: assetIds, memberIds })), dmMember, roomName);
       // The log's rings hold here as in any room, each ring its own newest (shared/logRings.ts), and the archive takes
       // the whole log, so Show older and a session's export reach every imported line.
       const state = { ...remapped, log: ringed(remapped.log, remapped.members) };
