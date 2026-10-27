@@ -317,8 +317,29 @@ describe("door.set on a remembered door (6)", () => {
     const before = { id: "d1", a: [8, 5] as [number, number], b: [8, 6] as [number, number], f: { kind: "door" as const, state: "closed" as const, secret: false, discovered: false } };
     wall(s, "d1", [12, 9], [12, 10], before.f);
     const chunk = s.buildChunks[chunkKey("s1", 0, 0)]!;
-    remember(s, null, 0, 0, { walls: { d1: [{ wall: before, cells: ["7,5", "8,5"] }] } });
-    const op: Op = { t: "door.set", sceneId: "s1", door: { cx: chunk.cx, cy: chunk.cy, id: "d1" }, state: "open", by: "thorn" };
-    assert.doesNotThrow(() => decide(op, s));
+    // As the map step keeps it: the door where the party saw it, and absent from the cells it now crosses.
+    remember(s, null, 0, 0, { walls: { d1: [{ wall: before, cells: ["7,5", "8,5"] }, { wall: null, cells: ["11,9", "12,9"] }] } });
+    const op: OpOf<"door.set"> = { t: "door.set", sceneId: "s1", door: { cx: chunk.cx, cy: chunk.cy, id: "d1" }, state: "open", by: "thorn" };
+    assert.equal(decide(op, s), "that is not here");
+    assert.equal(doorReachPassed(op, P1, s, deps), true, "reach passed on the remembered door, so the touch is recorded");
+  });
+
+  test("a remembered door the DM hid again out of sight: gone after reach, the touch recorded, never opened (MD2-O-2)", () => {
+    const hidden = { kind: "door" as const, state: "closed" as const, secret: true, discovered: false };
+    // An edge door.
+    const s = doorRoom();
+    edge(s, "8,5,w", hidden);
+    assert.equal(decide(open, s), "that is not here");
+    assert.equal(doorReachPassed(open, P1, s, deps), true);
+    // A free door the party remembers found, hidden again where it stands.
+    const f = doorRoom();
+    remember(f, null, 0, 0, { edges: { "8,5,w": null } });
+    const found = { ...hidden, discovered: true };
+    const shown = wall(f, "d1", [8, 5], [8, 6], hidden);
+    const chunk = f.buildChunks[chunkKey("s1", 0, 0)]!;
+    remember(f, null, 0, 0, { walls: { d1: [{ wall: { ...shown, f: found }, cells: ["7,5", "8,5"] }] } });
+    const op: OpOf<"door.set"> = { t: "door.set", sceneId: "s1", door: { cx: chunk.cx, cy: chunk.cy, id: "d1" }, state: "open", by: "thorn" };
+    assert.equal(decide(op, f), "that is not here");
+    assert.equal(doorReachPassed(op, P1, f, deps), true);
   });
 });

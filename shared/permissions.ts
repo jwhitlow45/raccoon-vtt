@@ -2339,7 +2339,8 @@ function doorCheck(c: Check, op: OpOf<"door.set">): Decision {
   const { cx, cy } = doorChunk(op.door);
   const stored = c.state.buildChunks[chunkKey(op.sceneId, cx, cy)];
   const real = stored ? doorIn(stored, op.door) : null;
-  if (!stored || !real || !samePlace(shown, stored, op.door)) return GONE;
+  // A door the DM hid again since the sender saw it found is a wall to players, as their projection shows it once seen (MD2-O-2).
+  if (!stored || !real || (real.secret && !real.discovered) || !samePlace(shown, stored, op.door)) return GONE;
   // The lock is read from the stored door, since players get a locked door as closed.
   if (real.state === "locked") return refuse("forbidden", DOOR_LOCKED);
   return OK;
