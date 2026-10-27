@@ -1127,24 +1127,23 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     assert.deepEqual(undo.map((p) => [p.op, p.quiet]), [[{ t: "undo", of: b }, true]]);
   });
 
-  test("a gesture's refused ask and the bands refused with it make one question, whose yes sends only the bands again and whose no sends nothing", () => {
+  test("a gesture's ask refused with forget asks the question about the ops it holds, whose yes sends them with the yes and whose no sends nothing", () => {
     const s = setup(room());
     s.connect();
     const rect = (y: number): OpOf<"build.rect"> => ({ t: "build.rect", sceneId: "s1", terrain: "stone", x: 0, y, w: 80, h: 25 });
-    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g1" })!;
-    const a = s.room.dispatch(rect(0), { group: "g1" })!;
-    const b = s.room.dispatch(rect(25), { group: "g1" })!;
-    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [ask, a, b].map((n) => ({ n, code: "forget" as const, message: FORGET_ASK })) });
-    assert.deepEqual(s.state().forgetAsk?.asks.map((x) => x.n), [ask, a, b]);
+    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g1", holds: [rect(0), rect(25)] })!;
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: ask, code: "forget", message: FORGET_ASK }] });
+    assert.deepEqual(s.state().forgetAsk?.asks, [rect(0), rect(25)].map((op) => ({ n: ask, op, group: "g1" })));
+    assert.equal(s.state().pending.length, 0, "no band went before the answer");
     s.room.ui.answerForget(true);
-    assert.deepEqual(s.state().pending.map((p) => [p.op.t, (p.op as { forget?: true }).forget, p.group]), [["build.rect", true, "g1"], ["build.rect", true, "g1"]]);
+    assert.deepEqual(s.state().pending.map((p) => [p.op, p.group]), [[{ ...rect(0), forget: true }, "g1"], [{ ...rect(25), forget: true }, "g1"]]);
     const no = setup(room());
     no.connect();
-    const ask2 = no.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g2" })!;
-    const c = no.room.dispatch(rect(0), { group: "g2" })!;
-    no.room.applyEv({ t: "ev", seq: no.state().seq + 1, changes: [], rejects: [ask2, c].map((n) => ({ n, code: "forget" as const, message: FORGET_ASK })) });
+    const ask2 = no.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g2", holds: [rect(0), rect(25)] })!;
+    no.room.applyEv({ t: "ev", seq: no.state().seq + 1, changes: [], rejects: [{ n: ask2, code: "forget", message: FORGET_ASK }] });
     no.room.ui.answerForget(false);
-    assert.equal(no.state().pending.length, 0, "nothing was taken, so nothing is taken back");
+    assert.equal(no.state().forgetAsk, null);
+    assert.equal(no.state().pending.length, 0, "nothing was sent, so nothing is taken back");
   });
 
   test("a taken ask is nothing a no takes back, and one refused for another reason says nothing of its own", () => {

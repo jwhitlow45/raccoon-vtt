@@ -7,7 +7,7 @@ import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { dispatchGesture } from "../../state/actions.ts";
-import { dispatchBuild } from "./ask.ts";
+import { buildContext, dispatchBuild } from "./ask.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import {
   edgeOps,
@@ -123,7 +123,7 @@ function sendRun(ctx: ToolContext, run: readonly string[]): void {
     const feature = runFeature(edge, edgeAt(view, ctx.scene.id, key), secretFound);
     if (feature !== undefined) edges.push({ key, feature });
   }
-  dispatchBuild(ctx.actions, ctx.scene, edgeOps(ctx.scene.id, edges));
+  dispatchBuild(buildContext(ctx), edgeOps(ctx.scene.id, edges));
 }
 
 function tapPoly(p: ToolPointer, ctx: ToolContext): void {
@@ -145,7 +145,7 @@ function tapPoly(p: ToolPointer, ctx: ToolContext): void {
 }
 
 /** Sends the polygon room tapped so far. Exported for the option bar's Close button. */
-export function closePolygon(ctx: Pick<ToolContext, "scene" | "actions" | "scope">): void {
+export function closePolygon(ctx: Pick<ToolContext, "scene" | "actions" | "ui" | "scope">): void {
   const builderState = ctx.scope.get(builderSlot).store;
   const { poly, terrain } = builderState.getState();
   if (poly.length < 3) return;
@@ -156,7 +156,7 @@ export function closePolygon(ctx: Pick<ToolContext, "scene" | "actions" | "scope
     ctx.scene.bounds,
   );
   builderState.setState({ poly: [], note: ops.length === 0 ? "That shape holds no whole square." : null });
-  dispatchBuild(ctx.actions, ctx.scene, ops);
+  dispatchBuild(buildContext(ctx), ops);
 }
 
 /** A tap on a label opens its edit pane (LabelPane.tsx), and a tap elsewhere places a new one. */
@@ -264,7 +264,7 @@ export const builderTool: ToolDef = {
       } else if ((s.mode === "rect" || s.mode === "eraseRect") && s.rect) {
         builderState.setState({ rect: null });
         const terrain = s.mode === "eraseRect" ? null : s.terrain;
-        dispatchBuild(ctx.actions, ctx.scene, rectOps(ctx.scene.id, rectBetween(s.rect.a, p.world), terrain, ctx.scene.bounds));
+        dispatchBuild(buildContext(ctx), rectOps(ctx.scene.id, rectBetween(s.rect.a, p.world), terrain, ctx.scene.bounds));
       } else if (s.mode === "poly" && tap) {
         tapPoly(p, ctx);
       } else if (s.mode === "edge") {

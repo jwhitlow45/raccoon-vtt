@@ -136,6 +136,12 @@ export type DispatchOptions = {
    * been taken back.
    */
   quiet?: boolean;
+  /**
+   * A gesture's last `build.ask`: the ops it holds on the device until it
+   * is answered (builder/ask.ts). Refused with `forget`, the forget
+   * question asks about these, and its yes sends them.
+   */
+  holds?: readonly ClientOp[];
 };
 
 export type RoomStoreState = RoomView & {
@@ -698,6 +704,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       if (opts?.group !== undefined) pendingOp.group = opts.group;
       if (opts?.onAnswer !== undefined) pendingOp.onAnswer = opts.onAnswer;
       if (opts?.quiet === true) pendingOp.quiet = true;
+      if (opts?.holds !== undefined) pendingOp.holds = opts.holds;
       commit({ pending: [...get().pending, pendingOp] });
       flush();
       return n;
@@ -819,7 +826,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
             continue;
           }
           if (r.code === "forget") {
-            asks.push({ n: r.n, op, ...(sent.group !== undefined ? { group: sent.group } : {}) });
+            const group = sent.group !== undefined ? { group: sent.group } : {};
+            // A gesture's ask stands for the ops it holds, which the question asks about and its yes sends.
+            if (op.t === "build.ask") for (const held of sent.holds ?? []) asks.push({ n: r.n, op: held, ...group });
+            else asks.push({ n: r.n, op, ...group });
             continue;
           }
           // An ask refused for any other reason says nothing: the gesture's own ops, refused the same, say it.

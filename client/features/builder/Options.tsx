@@ -3,9 +3,10 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { TerrainId } from "#shared/model.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, Stepper, ValueChip, type Slot } from "../measure/controls.tsx";
 import { Icon } from "../../components/Icon.tsx";
+import { Spinner, useDelayed } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
 import { BRUSH_MAX, BRUSH_MIN } from "./cells.ts";
 import { LABEL_SIZES } from "./labelEdit.ts";
@@ -14,6 +15,7 @@ import { BUILD_MODES, pickBuildMode, TERRAINS, useBuilderStore, type BuildMode, 
 import { TERRAIN_SWATCHES } from "./textures.ts";
 import { closePolygon } from "./tool.tsx";
 import { BUILD_IN_SIGHT } from "./inSight.ts";
+import { BUILD_ASKING } from "./ask.ts";
 import { useStampSlots } from "./stamps/StampOptions.tsx";
 import { useHeightHint, useHeightSlots } from "./heights/HeightOptions.tsx";
 import { LightChip } from "../lights/LightOptions.tsx";
@@ -92,12 +94,16 @@ export default function BuilderOptions() {
       poly: b.poly,
       note: b.note,
       inSight: b.inSight,
+      asking: b.asking > 0,
     })),
   );
+  // A gesture waiting on its asks says so once the wait shows (Loading.tsx), so a quick answer never flashes it.
+  const asking = useDelayed(s.asking);
   const sceneId = useRoomView((v) => v.sceneId);
   const scene = useRoomView((v) => (v.sceneId ? v.view?.scenes[v.sceneId] : undefined));
   const hasLights = useRoomView((v) => (v.sceneId ? sceneHasLights(v.view?.lights, v.sceneId) : false));
   const actions = useRoomActions();
+  const ui = useRoomUi();
   const heightHint = useHeightHint(scene?.autoWalls, s.mode === "rough");
   const heightSlots = useHeightSlots(s.mode === "rough");
   // ⋯ in this row, where focus goes back from the stamp picker when the chooser waits behind it.
@@ -181,7 +187,7 @@ export default function BuilderOptions() {
         // The room's own control while it has corners. Before the first corner it does nothing yet, so it waits behind the mode and the terrain.
         priority: corners ? 1 : 2,
         control: (
-          <OptButton tone="primary" disabled={s.poly.length < 3} ends onClick={() => closePolygon({ scene, actions, scope })}>
+          <OptButton tone="primary" disabled={s.poly.length < 3} ends onClick={() => closePolygon({ scene, actions, ui, scope })}>
             Close room
           </OptButton>
         ),
@@ -274,8 +280,18 @@ export default function BuilderOptions() {
 
   return (
     <div ref={row} style={{ display: "contents" }}>
-      <OptionsStrip tool="Map builder" task={corners || stamped} line={{ tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain)) }} slots={slots} />
+      <OptionsStrip tool="Map builder" task={corners || stamped} line={asking ? { tone: "status", content: <Asking /> } : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain)) }} slots={slots} />
       {s.mode === "stamp" ? stamps.picker : null}
     </div>
+  );
+}
+
+/** The builder's line while a gesture's ops wait on the server's answer to its asks (ask.ts). */
+function Asking() {
+  return (
+    <span data-build-asking="" style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1.5) }}>
+      <Spinner size={14} />
+      {BUILD_ASKING}
+    </span>
   );
 }

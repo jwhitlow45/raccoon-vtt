@@ -167,6 +167,8 @@ export type PendingOp = {
   onAnswer?: OnAnswer;
   /** No toast answers it: the caller says what became of it (DispatchOptions). */
   quiet?: true;
+  /** A gesture's last ask: the ops it holds until it is answered (DispatchOptions). */
+  holds?: readonly ClientOp[];
 };
 
 /**
@@ -569,7 +571,7 @@ export type RoomActions = {
    * undo takes the whole gesture back (design 7.7). `onAnswer` hears once
    * what became of it (OpAnswer).
    */
-  dispatch(op: ClientOp, opts?: { group?: string; onAnswer?: OnAnswer; quiet?: boolean }): number | null;
+  dispatch(op: ClientOp, opts?: { group?: string; onAnswer?: OnAnswer; quiet?: boolean; holds?: readonly ClientOp[] }): number | null;
   /**
    * Sends an ephemeral event on the current scene, coalesced to one per
    * animation frame (design 7.6), and shows it locally as this member's own.

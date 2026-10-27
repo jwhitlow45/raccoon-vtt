@@ -38,6 +38,8 @@ export type BuilderState = {
   note: string | null;
   /** The party's sight met a cell of the gesture since the last press, so the option bar says they see it as it is built (inSight.ts). */
   inSight: boolean;
+  /** Gestures whose ops wait on the server's answer to their asks (ask.ts), which the option bar says. */
+  asking: number;
 };
 
 export const TERRAINS: readonly { value: TerrainId; label: string }[] = [
@@ -117,6 +119,7 @@ export const builderSlot = scopeSlot(
       labelMove: null,
       note: null,
       inSight: false,
+      asking: 0,
     })),
     gesture: { stroke: null, downAt: null, labelGrab: null } as BuilderGesture,
   }),
