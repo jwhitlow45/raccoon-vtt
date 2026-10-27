@@ -1285,15 +1285,26 @@ const shownFreeWall = z.strictObject({
   b: latticePoint,
   f: z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("wall") }), shownDoor, z.strictObject({ kind: z.literal("window") })]),
 });
-/** Most cells one free wall crosses, with room to spare: at most 8 cells long, it crosses at most 18 hexes (5.5). */
-const WALL_CELLS_MOST = 32;
+/** The party's layer, and at most the design's most holders. */
+const LAYERS_MOST = 1 + MOST_SIGHT_HOLDERS;
+/**
+ * The most bytes of entries one chunk of memory holds. The map step keeps
+ * each layer under its cap (5.5), and the fold pools at most LAYERS_MOST
+ * layers into the party's, each entry from one of them (5.4), so a chunk
+ * never holds more than that many caps. Each count in MEMORY_MOST is these
+ * bytes over the fewest an entry of its kind takes, so whatever a fold of
+ * layers under their caps leaves, the stored schema takes.
+ */
+const POOLED_BYTES = LAYERS_MOST * LIMITS.memoryBytesPerLayer;
 /** A free wall's version: the wall as the layer saw it on these cells, or null where it was absent, each cell once. */
 const rememberedWall = z.strictObject({
   wall: shownFreeWall.nullable(),
   cells: z
     .array(cellKey)
     .min(1)
-    .max(WALL_CELLS_MOST)
+    // A version's cells are bounded by bytes, not by one wall's crossing: the fold joins every layer's null versions
+    // of a wall into one, and a wall moved over a long history covers far more cells than it crosses (5.3).
+    .max(Math.ceil(POOLED_BYTES / '"0,0",'.length))
     .refine((cells) => new Set(cells).size === cells.length, { message: "a cell is listed twice" }),
 });
 const rememberedLabel = z.strictObject({ id, rev: z.number().int().min(0), sceneId: id, x: coord, y: coord, text: shortText, size: z.number().min(0.1).max(20) });
@@ -1304,15 +1315,23 @@ const stairDir = z.enum(["n", "e", "s", "w", "."]);
 const CHUNK_CELL_COUNT = CHUNK_CELLS * CHUNK_CELLS;
 /**
  * The most entries of one kind a chunk of memory can name: one per cell,
- * two edges per cell, and for walls, labels and stamps far more than a
- * layer's 64 KiB holds, so no stored step is ever refused on replay.
+ * two edges per cell, and for walls, labels and stamps, and a wall's
+ * versions, as many as POOLED_BYTES holds of the smallest, a label or
+ * stamp absent then (`"a":null,`) and a version absent on one cell. So no
+ * stored step is ever refused on replay, and no fold leaves a chunk the
+ * stored schema refuses.
  */
-const MEMORY_MOST = { cells: CHUNK_CELL_COUNT, edges: 2 * CHUNK_CELL_COUNT, many: 8_000 } as const;
+const MEMORY_MOST = {
+  cells: CHUNK_CELL_COUNT,
+  edges: 2 * CHUNK_CELL_COUNT,
+  many: Math.ceil(POOLED_BYTES / '"a":null,'.length),
+  versions: Math.ceil(POOLED_BYTES / '{"wall":null,"cells":["0,0"]},'.length),
+} as const;
 const bounded = <T extends z.ZodType>(record: T, most: number) => record.refine((r) => Object.keys(r as object).length <= most, { message: `at most ${most.toLocaleString("en-US")} entries` });
 const memoryEntries = z.strictObject({
   cells: bounded(z.record(cellKey, terrain.nullable()), MEMORY_MOST.cells).optional(),
   edges: bounded(z.record(edgeKey, shownEdge.nullable()), MEMORY_MOST.edges).optional(),
-  walls: bounded(z.record(freeWallId, z.array(rememberedWall).min(1).max(WALL_CELLS_MOST)), MEMORY_MOST.many).optional(),
+  walls: bounded(z.record(freeWallId, z.array(rememberedWall).min(1).max(MEMORY_MOST.versions)), MEMORY_MOST.many).optional(),
   heights: bounded(z.record(cellKey, z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT)), MEMORY_MOST.cells).optional(),
   up: bounded(z.record(cellKey, stairMark), MEMORY_MOST.cells).optional(),
   upDir: bounded(z.record(cellKey, stairDir), MEMORY_MOST.cells).optional(),
@@ -1334,8 +1353,6 @@ const memoryKeys = z.strictObject({
 });
 /** Every chunk position of the largest scene, one past its east and south sides included. */
 const CHUNK_POSITIONS = (Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS) + 1) ** 2;
-/** The party's layer, and at most the design's most holders. */
-const LAYERS_MOST = 1 + MOST_SIGHT_HOLDERS;
 /**
  * A DM's yes to "Players' remembered map here will be forgotten. Go ahead?"
  * on a builder op (5.3): resent with it, the op may push players' memory

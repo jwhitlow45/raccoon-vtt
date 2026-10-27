@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { chunkKey, holderChunkKey, holderTileKey } from "#shared/keys.ts";
+import { LIMITS, MOST_SIGHT_HOLDERS } from "#shared/limits.ts";
 import { migrateSnapshot } from "#shared/migrate.ts";
-import type { MemoryChunk, RoomState } from "#shared/model.ts";
-import { room, scene } from "#shared/testutil.ts";
+import type { FogTile, MemoryChunk, RememberedWall, RoomState } from "#shared/model.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { rasterizeFogOps } from "#shared/rules/fog.ts";
+import { DM, env, member, room, scene } from "#shared/testutil.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
@@ -81,5 +85,80 @@ describe("the stored-state schema and map discovery (lane MD1)", () => {
     const bare = parsed(v26);
     assert.ok(bare.ok && bare.state.playedScenes !== undefined);
     assert.deepEqual(bare.state.playedScenes, {});
+  });
+});
+
+describe("a fold of layers at their caps fits the stored schema (5.4, 5.5)", () => {
+  const HOLDERS = Array.from({ length: MOST_SIGHT_HOLDERS }, (_, i) => `p${i + 1}`);
+  const LAYERS = [null, ...HOLDERS];
+  const ROWS = 11;
+  const bytes = (value: unknown) => JSON.stringify(value).length;
+
+  /**
+   * A 200 by 200 per-player scene where the party and six holders each hold
+   * a band of 11 rows of their own and remember, in chunk 0,0, as many
+   * versions or walls as their cap holds, one cell each. `version(layer, i,
+   * cell)` makes each layer's i-th entry.
+   */
+  function full(entry: (layer: number, i: number, cell: string) => [string, RememberedWall]): RoomState {
+    const s1 = scene("s1", { bounds: { w: 200, h: 200 }, fogEnabled: true, vision: { on: true, light: "dark", perPlayer: true } });
+    const state = room({
+      members: Object.fromEntries([["dm1", member("dm1", "dm")], ...HOLDERS.map((p) => [p, member(p)])]),
+      scenes: { s1, s2: scene("s2", { order: 1 }) },
+      holders: { s1: { sceneId: "s1", rev: 0, entries: HOLDERS.map((memberId) => ({ memberId, on: true })) } },
+    });
+    LAYERS.forEach((layer, n) => {
+      const band = rasterizeFogOps({}, "s1", s1.bounds, [{ id: "r", mode: "reveal", shape: { kind: "rect", x: 0, y: n * ROWS, w: 200, h: ROWS } }]);
+      for (const t of Object.values(band) as FogTile[]) {
+        if (layer === null) state.exploredTiles[`s1:${t.tx},${t.ty}`] = t;
+        else state.exploredBy[holderTileKey("s1", layer, t.tx, t.ty)] = { ...t, memberId: layer };
+      }
+      // Filled while the layer's entries, as JSON, stay within its cap, counted as each entry adds to it.
+      const walls: Record<string, RememberedWall[]> = {};
+      let size = 2;
+      for (let i = 0; ; i++) {
+        const [id, version] = entry(n, i, `${i % 200},${n * ROWS + Math.floor(i / 200)}`);
+        const add = walls[id] ? 1 + bytes(version) : (size > 2 ? 1 : 0) + bytes(id) + 3 + bytes(version);
+        if (size + add > LIMITS.memoryBytesPerLayer) break;
+        (walls[id] ??= []).push(version);
+        size += add;
+      }
+      assert.equal(bytes(walls), size);
+      const chunk: MemoryChunk = { sceneId: "s1", cx: 0, cy: 0, rev: 0, walls, ...(layer === null ? {} : { memberId: layer }) };
+      if (layer === null) state.memory = { [chunkKey("s1", 0, 0)]: chunk };
+      else state.memoryBy![holderChunkKey("s1", layer, 0, 0)] = chunk;
+    });
+    return state;
+  }
+
+  function foldsToSchema(state: RoomState): MemoryChunk {
+    const before = parsed(state);
+    assert.ok(before.ok, before.ok ? "" : before.message);
+    const r = applyOp(state, { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dark", perPlayer: false } } }, DM, env(1));
+    assert.ok(r.ok);
+    const pooled = r.state.memory![chunkKey("s1", 0, 0)]!;
+    assert.ok(bytes(pooled.walls) <= LAYERS.length * LIMITS.memoryBytesPerLayer, "a pooled chunk holds at most every layer's cap");
+    const after = parsed(r.state);
+    assert.ok(after.ok, after.ok ? "" : after.message);
+    return pooled;
+  }
+
+  test("one wall's versions absent on a cell each join into one version over every layer's cells", () => {
+    const pooled = foldsToSchema(full((_n, _i, cell) => ["abcdefghijkl", { wall: null, cells: [cell] }]));
+    assert.equal(pooled.walls!.abcdefghijkl!.length, 1);
+    assert.ok(pooled.walls!.abcdefghijkl![0]!.cells.length > 7 * 2_000);
+  });
+
+  test("one wall's versions, each a wall of its own, stay one each", () => {
+    // Each version a different 2-cell wall in chunk 0,0, on the 1/64 lattice.
+    const wall = (k: number) => ({ id: "abcdefghijkl", a: [1 + (k % 384) / 64, 1 + Math.floor(k / 384) / 64] as [number, number], b: [3 + (k % 384) / 64, 1 + Math.floor(k / 384) / 64] as [number, number], f: { kind: "wall" as const } });
+    const pooled = foldsToSchema(full((n, i, cell) => ["abcdefghijkl", { wall: wall(n * 1_000 + i), cells: [cell] }]));
+    assert.ok(pooled.walls!.abcdefghijkl!.length > 7 * 500);
+  });
+
+  test("many walls, each absent on one cell, stay one entry each", () => {
+    const id = (n: number, i: number) => `w${n}${String(i).padStart(10, "0")}`;
+    const pooled = foldsToSchema(full((n, i, cell) => [id(n, i), { wall: null, cells: [cell] }]));
+    assert.ok(Object.keys(pooled.walls!).length > 7 * 1_300);
   });
 });
