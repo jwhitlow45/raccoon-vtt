@@ -318,3 +318,24 @@ export function discoveryOp(r: () => number, state: RoomState, who: Viewer): Op 
     }
   }
 }
+
+/**
+ * Astra's case (MD2-ASTRA-9), on a scene with fog on and vision off: cells
+ * 9 to 13 of every row of tile 0, 0 revealed, whose cell mask is sixteen
+ * characters "|", and cell 1, 16 so position 0, 0 still holds ground near
+ * it once they move. Stone on cell 9, 0.
+ */
+export function astraRegion(): RoomState {
+  const state = fogRoom();
+  paint(state, { x: 9, y: 0, w: 1, h: 1 }, "stone");
+  lift(state, "dm", { x: 9, y: 0, w: 5, h: 16 });
+  lift(state, "dm", { x: 1, y: 16, w: 1, h: 1 });
+  return state;
+}
+
+/** The same columns revealed one tile east instead, tile 0, 0 gone: what the position's tiles hold moves from the first to the second. */
+export function moveAstraRegion(state: RoomState): void {
+  const { "s1:0,0": _, ...rest } = state.fogTiles;
+  state.fogTiles = rest;
+  lift(state, "dm", { x: 25, y: 0, w: 5, h: 16 });
+}

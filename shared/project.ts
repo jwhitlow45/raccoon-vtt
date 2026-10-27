@@ -1582,6 +1582,17 @@ function idOf(o: object | undefined | null): number {
 }
 
 /*
+ * A key of several parts as text no other list of parts gives: an encoded
+ * array. Joined by a separator, a part whose text holds that separator, as
+ * a cell mask's characters or an id may, reads as two, and two different
+ * lists share one key (MD2-ASTRA-9). Every composite key the projection
+ * keeps answers under is made here.
+ */
+function partsKey(parts: readonly (string | number | boolean | null)[]): string {
+  return JSON.stringify(parts);
+}
+
+/*
  * A slot's answer, kept by two keys: `key`, every input object as above,
  * for the common hit, and `base` with `region`, every input but the fog
  * layers' tiles and the class's sight, which stand in by the cells of
@@ -1614,7 +1625,7 @@ const fieldsOfScene = new WeakMap<Scene, string>();
 function sceneFields(scene: Scene): string {
   let fields = fieldsOfScene.get(scene);
   if (fields === undefined) {
-    fields = `${scene.id}|${scene.bounds.w}x${scene.bounds.h}|${autoWallsOf(scene)}|${scene.gridShape ?? ""}|${scene.fogEnabled}|${scene.vision?.on === true}`;
+    fields = partsKey([scene.id, scene.bounds.w, scene.bounds.h, autoWallsOf(scene), scene.gridShape ?? null, scene.fogEnabled, scene.vision?.on === true]);
     if (!isWritable(scene)) fieldsOfScene.set(scene, fields);
   }
   return fields;
@@ -1627,23 +1638,31 @@ function sceneFields(scene: Scene): string {
  * it, so a fan-out keying every position near a move reads each entry for
  * up to nine of them.
  */
-const entryIds = { chunk: new WeakMap<object, Map<string, Map<number, number>>>(), tile: new WeakMap<object, Map<string, Map<number, number>>>() };
+type IdsByLayer = Map<string, Map<string | null, Map<number, number>>>;
+const entryIds = { chunk: new WeakMap<object, IdsByLayer>(), tile: new WeakMap<object, IdsByLayer>() };
+
+/** Columns from -1, as a position on the scene's side reads past it, up to this one: within them `(y + 1) * ID_ROW + (x + 1)` names one place. */
+const ID_ROW = 65536;
 
 function idAt(collection: Readonly<Record<string, object | undefined>> | undefined, kind: "chunk" | "tile", sceneId: string, holder: string | null, x: number, y: number): number {
   if (!collection) return 0;
-  let layers = entryIds[kind].get(collection);
-  if (!layers) entryIds[kind].set(collection, (layers = new Map()));
-  const layer = holder === null ? sceneId : `${sceneId}:${holder}`;
-  let ids = layers.get(layer);
-  if (!ids) layers.set(layer, (ids = new Map()));
-  // Coordinates from -1, as a position on the scene's side reads past it.
-  const at = (y + 1) * 65536 + (x + 1);
+  // Past the columns one number can name, read without keeping, so no two places share an id's slot.
+  if (!Number.isInteger(x) || !Number.isInteger(y) || x < -1 || x + 1 >= ID_ROW) return idOf(collection[entryKey(kind, sceneId, holder, x, y)]);
+  let byScene = entryIds[kind].get(collection);
+  if (!byScene) entryIds[kind].set(collection, (byScene = new Map()));
+  let byHolder = byScene.get(sceneId);
+  if (!byHolder) byScene.set(sceneId, (byHolder = new Map()));
+  let ids = byHolder.get(holder);
+  if (!ids) byHolder.set(holder, (ids = new Map()));
+  const at = (y + 1) * ID_ROW + (x + 1);
   let id = ids.get(at);
-  if (id === undefined) {
-    const key = kind === "chunk" ? (holder === null ? chunkKey(sceneId, x, y) : holderChunkKey(sceneId, holder, x, y)) : holder === null ? tileKey(sceneId, x, y) : holderTileKey(sceneId, holder, x, y);
-    ids.set(at, (id = idOf(collection[key])));
-  }
+  if (id === undefined) ids.set(at, (id = idOf(collection[entryKey(kind, sceneId, holder, x, y)])));
   return id;
+}
+
+function entryKey(kind: "chunk" | "tile", sceneId: string, holder: string | null, x: number, y: number): string {
+  if (kind === "chunk") return holder === null ? chunkKey(sceneId, x, y) : holderChunkKey(sceneId, holder, x, y);
+  return holder === null ? tileKey(sceneId, x, y) : holderTileKey(sceneId, holder, x, y);
 }
 
 function memoKey(state: RoomState, scene: Scene, own: FogClass, ground: Ground, cx: number, cy: number): Memo | null {
@@ -1664,7 +1683,7 @@ function memoKey(state: RoomState, scene: Scene, own: FogClass, ground: Ground, 
   // A stair's direction reads the scene's whole stair map.
   const here = state.buildChunks[chunkKey(sceneId, cx, cy)];
   if (here && hasStairs(here)) parts.push(idOf(sceneWalls(scene, state.buildChunks)));
-  const base = parts.join(",");
+  const base = partsKey(parts);
   for (const [x, y] of positionTiles(scene, cx, cy)) {
     parts.push(idAt(state.fogTiles, "tile", sceneId, null, x, y), idAt(state.exploredTiles, "tile", sceneId, null, x, y), own === null ? 0 : idAt(state.exploredBy, "tile", sceneId, own, x, y));
   }
@@ -1673,7 +1692,7 @@ function memoKey(state: RoomState, scene: Scene, own: FogClass, ground: Ground, 
   let slots = memos.get(scene.bounds);
   if (!slots) memos.set(scene.bounds, (slots = new Map()));
   let region: string | null | undefined;
-  return { slots, slot: `${sceneId}|${own ?? ""}|${cx},${cy}`, key: parts.join(","), base, region: () => (region === undefined ? (region = regionOf(ground, scene, cx, cy, remembered)) : region) };
+  return { slots, slot: partsKey([sceneId, own, cx, cy]), key: partsKey(parts), base, region: () => (region === undefined ? (region = regionOf(ground, scene, cx, cy, remembered)) : region) };
 }
 
 /*
@@ -1691,7 +1710,7 @@ function regionOf(ground: Ground, scene: Scene, cx: number, cy: number, remember
     parts.push(ground.cellsKey("held", tx, ty));
     if (remembered) parts.push(ground.cellsKey("live", tx, ty), ground.cellsKey("own", tx, ty));
   }
-  return parts.join("|");
+  return partsKey(parts);
 }
 
 function recall(memo: Memo): PlayerChunk | null | undefined {
@@ -1830,10 +1849,10 @@ const shownEdgeCache = new WeakMap<object, Map<string, { ids: string; values: Sh
 function shownEdges(chunks: Readonly<Record<string, BuildChunk>>, scene: Scene, cx: number, cy: number): readonly ShownEdge[] {
   const sceneId = scene.id;
   const rule = autoWallsOf(scene);
-  const ids = `${rule}|${idOf(chunks[chunkKey(sceneId, cx, cy)])},${idOf(chunks[chunkKey(sceneId, cx - 1, cy)])},${idOf(chunks[chunkKey(sceneId, cx, cy - 1)])}`;
+  const ids = partsKey([rule, idOf(chunks[chunkKey(sceneId, cx, cy)]), idOf(chunks[chunkKey(sceneId, cx - 1, cy)]), idOf(chunks[chunkKey(sceneId, cx, cy - 1)])]);
   const writable = isWritable(chunks);
   let byPosition = writable ? undefined : shownEdgeCache.get(chunks);
-  const at = `${sceneId}:${cx},${cy}`;
+  const at = partsKey([sceneId, cx, cy]);
   const hit = byPosition?.get(at);
   if (hit && hit.ids === ids) return hit.values;
   const values: ShownEdge[] = new Array(2 * CELLS_PER_CHUNK);
@@ -2026,7 +2045,7 @@ function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: 
  * collections hold many hundred chunks, so they are grouped once per
  * collection, which is replaced and never changed.
  */
-const chunksByPosition = new WeakMap<object, Map<string, Map<string, Map<string, (BuildChunk | MemoryChunk)[]>>>>();
+const chunksByPosition = new WeakMap<object, Map<string, Map<string | null, Map<string, (BuildChunk | MemoryChunk)[]>>>>();
 
 function chunksAt<T extends BuildChunk | MemoryChunk>(all: Readonly<Record<string, T>>, sceneId: string, layer: FogClass, positions: ReadonlySet<string>): readonly T[] {
   let byScene = isWritable(all) ? undefined : chunksByPosition.get(all);
@@ -2036,9 +2055,10 @@ function chunksAt<T extends BuildChunk | MemoryChunk>(all: Readonly<Record<strin
       if (!chunk) continue;
       let byLayer = byScene.get(chunk.sceneId);
       if (!byLayer) byScene.set(chunk.sceneId, (byLayer = new Map()));
-      const member = "memberId" in chunk ? (chunk.memberId ?? "") : "";
+      const member = "memberId" in chunk ? (chunk.memberId ?? null) : null;
       let byPosition = byLayer.get(member);
       if (!byPosition) byLayer.set(member, (byPosition = new Map()));
+      // Two numbers as text hold no comma of their own, so this names one position.
       const key = `${chunk.cx},${chunk.cy}`;
       let list = byPosition.get(key);
       if (!list) byPosition.set(key, (list = []));
@@ -2046,7 +2066,7 @@ function chunksAt<T extends BuildChunk | MemoryChunk>(all: Readonly<Record<strin
     }
     if (!isWritable(all)) chunksByPosition.set(all, byScene);
   }
-  const byPosition = byScene.get(sceneId)?.get(layer ?? "");
+  const byPosition = byScene.get(sceneId)?.get(layer);
   if (!byPosition) return [];
   return [...positions].flatMap((key) => (byPosition.get(key) ?? []) as T[]);
 }
@@ -2280,7 +2300,7 @@ function rememberedIn(all: Record<string, MemoryChunk> | undefined, at: string):
       for (const field of ["labels", "stamps"] as const) {
         const record = chunk[field];
         if (!record) continue;
-        const where = `${chunk.sceneId}|${chunk.memberId ?? ""}|${field}`;
+        const where = partsKey([chunk.sceneId, chunk.memberId ?? null, field]);
         let byId = index.get(where);
         if (!byId) index.set(where, (byId = new Map()));
         for (const [id, value] of Object.entries(record)) byId.set(id, value);
@@ -2298,7 +2318,7 @@ function rememberedIn(all: Record<string, MemoryChunk> | undefined, at: string):
  * where none does (server/rooms/fanout.ts, MD2-O-1).
  */
 export function namedByMemory(state: RoomState, sceneId: string, field: "labels" | "stamps", id: string): boolean {
-  return [state.memory, state.memoryBy].some((all) => namesIn(all).has(`${sceneId}|${field}|${id}`));
+  return [state.memory, state.memoryBy].some((all) => namesIn(all).has(partsKey([sceneId, field, id])));
 }
 
 const memoryNames = new WeakMap<object, Set<string>>();
@@ -2309,7 +2329,7 @@ function namesIn(all: Record<string, MemoryChunk> | undefined): ReadonlySet<stri
   if (!names) {
     names = new Set();
     for (const chunk of Object.values(all)) {
-      for (const field of ["labels", "stamps"] as const) for (const id of Object.keys(chunk[field] ?? {})) names.add(`${chunk.sceneId}|${field}|${id}`);
+      for (const field of ["labels", "stamps"] as const) for (const id of Object.keys(chunk[field] ?? {})) names.add(partsKey([chunk.sceneId, field, id]));
     }
     if (!isWritable(all)) memoryNames.set(all, names);
   }
@@ -2320,7 +2340,7 @@ const NO_NAMES: ReadonlySet<string> = new Set();
 
 /** What one layer remembers of a label or stamp by id: the value, null for one that was absent then, undefined for no entry. */
 function rememberedById(state: RoomState, sceneId: string, layer: FogClass, field: "labels" | "stamps", id: string): Label | Stamp | null | undefined {
-  const byId = rememberedIn(layer === null ? state.memory : state.memoryBy, `${sceneId}|${layer ?? ""}|${field}`);
+  const byId = rememberedIn(layer === null ? state.memory : state.memoryBy, partsKey([sceneId, layer, field]));
   return byId?.get(id);
 }
 

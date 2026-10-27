@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { autoAt, chunksOf, edge, fogRoom, heights, knownAt, lift, liftSubs, paint, remember, stairs, wall, wallsOf } from "./discoveryTestutil.ts";
+import { astraRegion, autoAt, chunksOf, edge, fogRoom, heights, knownAt, lift, liftSubs, moveAstraRegion, paint, remember, stairs, wall, wallsOf } from "./discoveryTestutil.ts";
 import { keys } from "./keys.ts";
 import type { FreeWall, Label, PlayerChunk, RoomState, Scene, Stamp } from "./model.ts";
-import { allKeys, dependents, heldChunks, pieceId, playerChunk, projectEntity, projectState, stableStringify } from "./project.ts";
+import { allKeys, dependents, heldChunks, namedByMemory, pieceId, playerChunk, projectEntity, projectState, stableStringify } from "./project.ts";
 import { encodeTile, fullTileBits } from "./rules/fog.ts";
 import { groundOf, PIECE_GRID, wallSpans } from "./rules/held.ts";
 import { sceneGrid } from "./rules/grid.ts";
@@ -712,6 +712,41 @@ describe("the players' chunk memo", () => {
     markFinished(scene);
   });
 
+  test("held masks whose characters read as the old separator, moved to the next tile: the chunk worked out again (MD2-ASTRA-9)", () => {
+    const state = astraRegion();
+    assert.equal(playerChunk(state, { sceneId: "s1", cx: 0, cy: 0 }, null)?.cells["9,0"], "stone");
+    moveAstraRegion(state);
+    const cold = heldChunks(deepClone(state), "s1", null)["s1:0,0"] ?? null;
+    assert.equal(stableStringify(playerChunk(state, { sceneId: "s1", cx: 0, cy: 0 }, null)), stableStringify(cold));
+    assert.equal(cold?.cells["9,0"], undefined, "cell 9,0 is no longer held");
+  });
+
+  test("a scene 4,097 tiles wide: the tile past the columns a ground keeps by number is read as itself", () => {
+    const state = fogRoom({ bounds: { w: 4097 * 16, h: 32 } });
+    lift(state, "dm", { x: 0, y: 16, w: 1, h: 1 });
+    const ground = groundOf(state, "s1", null)!;
+    assert.equal(ground.held(0, 16), true);
+    // Tile 4096, 0 once shared tile 0, 1's slot.
+    assert.equal(ground.held(4096 * 16, 0), false);
+  });
+
+  test("a scene 65,537 positions wide: the chunk past the columns a key keeps by number is read as itself", () => {
+    const state = fogRoom({ bounds: { w: 65537 * 16, h: 32 } });
+    const far = 65535 * 16;
+    lift(state, "dm", { x: 0, y: 0, w: 16, h: 32 });
+    lift(state, "dm", { x: far, y: 0, w: 32, h: 16 });
+    paint(state, { x: 3, y: 20, w: 1, h: 1 }, "wood");
+    const at = { sceneId: "s1", cx: 65535, cy: 0 };
+    // Position 0, 0 reads chunk 0, 1 first, whose number the chunk past position 65,535 once shared.
+    void playerChunk(state, { sceneId: "s1", cx: 0, cy: 0 }, null);
+    const before = playerChunk(state, at, null);
+    wall(state, "abcdefghijkl", [far + 15.25, 2.5], [far + 18.75, 2.5]);
+    void playerChunk(state, { sceneId: "s1", cx: 0, cy: 0 }, null);
+    const after = playerChunk(state, at, null);
+    assert.notEqual(stableStringify(after), stableStringify(before), "a wall stored in the chunk east of it gives the position a piece");
+    assert.equal(stableStringify(after), stableStringify(playerChunk(deepClone(state), at, null)), "as from a copy of the room, which no answer is kept for");
+  });
+
   test("a build stroke replaces the scene object, and positions it never reached hand back the very same chunk", () => {
     const state = fogRoom({ bounds: { w: 64, h: 16 } });
     paint(state, { x: 40, y: 3, w: 1, h: 1 });
@@ -720,6 +755,26 @@ describe("the players' chunk memo", () => {
     paint(state, { x: 41, y: 3, w: 1, h: 1 });
     state.scenes = { ...state.scenes, s1: { ...state.scenes.s1!, wallsVersion: state.scenes.s1!.wallsVersion + 1 } };
     assert.equal(chunksOf(state, P1)["0,0"], before);
+  });
+});
+
+describe("memory's indexes of labels and stamps, by ids that hold the old separator", () => {
+  test("a label another scene's memory names is not one this scene's memory names", () => {
+    const state = fogRoom({ vision: true });
+    remember(state, null, 0, 0, { labels: { a: { id: "a", rev: 0, sceneId: "s1|labels", x: 2.5, y: 2.5, text: "Old", size: 1 } } }, "s1|labels");
+    assert.equal(namedByMemory(state, "s1|labels", "labels", "a"), true);
+    assert.equal(namedByMemory(state, "s1", "labels", "labels|a"), false);
+  });
+
+  test("a holder reads only their own memory of a label, not another holder's on another scene", () => {
+    const state = fogRoom({ vision: true, perPlayer: true });
+    state.members["p1|x"] = { ...state.members.p1!, id: "p1|x" };
+    state.holders.s1 = { sceneId: "s1", rev: 0, entries: [{ memberId: "p1|x", on: true }] };
+    state.labels.L = { id: "L", rev: 1, sceneId: "s1", x: 2.5, y: 2.5, text: "New", size: 1 };
+    lift(state, { holder: "p1|x" }, { x: 0, y: 0, w: 8, h: 8 });
+    // Holder x's memory on the scene "s1|p1": joined as text, it once read as holder "p1|x"'s on s1.
+    remember(state, "x", 0, 0, { labels: { L: { ...state.labels.L, rev: 0, sceneId: "s1|p1", text: "Old" } } }, "s1|p1");
+    assert.equal(projectState(state, { memberId: "p1|x", role: "player" }, { sceneId: "s1" }).labels.L?.text, "New");
   });
 });
 

@@ -165,10 +165,15 @@ function maskText(mask: Uint8Array): string {
 /** A layer of the ground: the bits of each tile, looked up once per tile. */
 type Layer = (tx: number, ty: number) => Uint8Array | null;
 
+/** Tile columns one number names a tile in, `ty * TILE_ROW + tx`. */
+const TILE_ROW = 4096;
+
 function cached(read: Layer): Layer {
   const seen = new Map<number, Uint8Array | null>();
   return (tx, ty) => {
-    const at = ty * 4096 + tx;
+    // Past those columns, read without keeping, so no two tiles share a slot.
+    if (!Number.isInteger(tx) || !Number.isInteger(ty) || tx < 0 || tx >= TILE_ROW) return read(tx, ty);
+    const at = ty * TILE_ROW + tx;
     let bits = seen.get(at);
     if (bits === undefined) seen.set(at, (bits = read(tx, ty)));
     return bits;

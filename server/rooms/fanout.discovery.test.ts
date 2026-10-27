@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { discoveryOp, discoveryState, fogRoom, lift, remember, TERRAINS } from "#shared/discoveryTestutil.ts";
+import { astraRegion, discoveryOp, discoveryState, fogRoom, lift, moveAstraRegion, remember, TERRAINS } from "#shared/discoveryTestutil.ts";
 import { keys, type EntityKey } from "#shared/keys.ts";
 import { CHUNK_CELLS, type Label, type MemoryEntries, type RoomState, type Stamp, type Viewer } from "#shared/model.ts";
 import { applyChanges, projectState, stableStringify, type ProjectedState } from "#shared/project.ts";
@@ -160,6 +160,22 @@ describe("the fan-out over map discovery", () => {
       }
       assert.ok(counts.batches > 300 && counts.memory > 100 && counts.remembered > 200, JSON.stringify(counts));
     });
+  });
+});
+
+describe("a player's chunk through the fan-out", () => {
+  test("held masks whose characters read as the old separator, moved to the next tile: the socket drops the cell (MD2-ASTRA-9)", () => {
+    const s0 = astraRegion();
+    const all = [socket(s0, P1, "s1", 0), socket(s0, P2, "s1", 1)];
+    assert.equal(all[0]!.view.buildChunks["s1:0,0"]?.cells["9,0"], "stone");
+    const s1 = deepClone(s0);
+    // The same tile and chunk objects as before, as a batch that writes only the fog keeps them.
+    s1.buildChunks = s0.buildChunks;
+    s1.scenes = s0.scenes;
+    moveAstraRegion(s1);
+    // A DM's fog write is global (tx.ts isGlobalChange): every position goes again.
+    publish("moved", all, batchOf(1, s0, s1, [keys.fog("s1", 0, 0), keys.fog("s1", 1, 0)], true));
+    assert.equal(all[0]!.view.buildChunks["s1:0,0"]?.cells["9,0"], undefined);
   });
 });
 
