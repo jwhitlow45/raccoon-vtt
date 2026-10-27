@@ -1,7 +1,7 @@
 import { viewMapsOf } from "#shared/keys.ts";
 import type { LightLevel, RoomState, Scene, ScenePreset } from "#shared/model.ts";
 import { PLAYERS_SEE_WORDS, playersSeeOf, type PlayersSee } from "#shared/playersSee.ts";
-import { LIGHT_LEVELS, lightOf, SIGHT_CHOICES, sightOf } from "./settings.ts";
+import { LIGHT_LEVELS, lightOf, SIGHT_CHOICES, sightOf, visionPatch } from "./settings.ts";
 
 /**
  * "Players see", one choice of what players get of a scene
@@ -59,6 +59,31 @@ export function presetPatch(scene: Pick<Scene, "vision">, preset: ScenePreset): 
   if (preset === "explore") return { fogEnabled: true, vision: { on: true, light } };
   if (preset === "reveal") return { fogEnabled: true, vision: { on: false, light } };
   return { fogEnabled: false, vision: { on: false, light } };
+}
+
+/**
+ * A change of Players see or of one of its switches, as the DM asked for
+ * it. A question holds this, not a patch, and the patch is built only as
+ * the change goes (`intentPatch`), from the scene as it is then, so a light
+ * changed while the question was open stays.
+ */
+export type PlayersSeeIntent = { preset: ScenePreset } | { fog: boolean } | { partyVision: boolean };
+
+export type SwitchPatch = { fogEnabled?: boolean; vision?: { on: boolean; light: LightLevel } };
+
+/** Where a change leaves a scene. Party vision turns fog on with it, as the reducer does unless a patch says otherwise. */
+export function intentTo(scene: Pick<Scene, "fogEnabled" | "vision">, intent: PlayersSeeIntent): PlayersSee {
+  if ("preset" in intent) return intent.preset;
+  if ("fog" in intent) return playersSeeOf({ fogEnabled: intent.fog, vision: scene.vision });
+  return playersSeeOf({ fogEnabled: intent.partyVision || scene.fogEnabled, vision: { on: intent.partyVision, light: lightOf(scene) } });
+}
+
+/** The patch a change sends from the scene as it is now, or null when the scene is there already. */
+export function intentPatch(scene: Pick<Scene, "fogEnabled" | "vision">, intent: PlayersSeeIntent): SwitchPatch | null {
+  if (intentTo(scene, intent) === playersSeeOf(scene)) return null;
+  if ("preset" in intent) return presetPatch(scene, intent.preset);
+  if ("fog" in intent) return { fogEnabled: intent.fog };
+  return { vision: visionPatch(scene, intent.partyVision) };
 }
 
 /**

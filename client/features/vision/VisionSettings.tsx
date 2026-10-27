@@ -13,12 +13,12 @@ import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { Select } from "../scenes/controls.tsx";
 import { CopySettingsButton } from "./CopySettings.tsx";
 import { HOLDERS_UNDER, holderRows, holdersAfter, lendsText, sharedOnlyText, unsharedMounts, untickQuestion } from "./holders.ts";
 import { AskFirst, PlayersSeeChoice, useAsk, WarningStatus } from "./PlayersSee.tsx";
-import { CUSTOM_TEXT, exploredHere, holdersExploredHere, leaveQuestion, playersSeeOf, presetPatch, sightQuestion, walllessImage, WALLLESS_TEXT, type PlayersSee } from "./playersSeeRules.ts";
+import { CUSTOM_TEXT, exploredHere, holdersExploredHere, intentPatch, intentTo, leaveQuestion, playersSeeOf, sightQuestion, walllessImage, WALLLESS_TEXT, type PlayersSeeIntent } from "./playersSeeRules.ts";
 import { lightText } from "./presets.ts";
 import { sensesShort } from "./senses.ts";
 import {
@@ -34,7 +34,6 @@ import {
   sightShown,
   sightWorkingText,
   visionOnHelp,
-  visionPatch,
   visionPending,
   type SightChoice,
 } from "./settings.ts";
@@ -60,6 +59,8 @@ type Patch = OpOf<"scene.update">["patch"];
  *
  * A change that leaves Explore where players explored, from the preset or
  * the switches, asks first, since players' remembered map goes with it.
+ * The question holds what the DM chose, and its patch is built from the
+ * scene in the store as the DM answers, so the light can change meanwhile.
  * Turning vision on makes the server work out what the party sees, which
  * can take a moment on a large scene, so Players see shows it is busy and
  * says so while the op is on its way.
@@ -87,22 +88,27 @@ export function VisionSettings(props: { scene: Scene }) {
   // Only an Explore scene with a map image needs its walls counted, for the warning.
   const chunks = useRoomView((s) => (choice === "explore" && scene.map ? s.view?.buildChunks : undefined));
   const wallless = useMemo(() => (chunks ? walllessImage(scene, sceneWalls(scene, chunks).sightPotential) : false), [chunks, scene]);
-  const ask = useAsk<{ where: "preset" | "fold"; patch: Patch }>();
+  const store = useRoomStore();
+  const ask = useAsk<{ where: "preset" | "fold"; intent: PlayersSeeIntent }>();
   const fold = useFold(choice === "custom");
 
+  const send = (intent: PlayersSeeIntent) => {
+    const patch = intentPatch(store.getState().view?.scenes[scene.id] ?? scene, intent);
+    if (patch) update(patch);
+  };
   /** Sends a change of Players see or of its switches, asking first where it forgets what players remember. */
-  const change = (where: "preset" | "fold", to: PlayersSee, patch: Patch) => {
-    const question = leaveQuestion(choice, to, explored);
+  const change = (where: "preset" | "fold", intent: PlayersSeeIntent) => {
+    const question = leaveQuestion(choice, intentTo(scene, intent), explored);
     if (question) {
-      ask.ask(question, { where, patch });
+      ask.ask(question, { where, intent });
       return;
     }
     if (ask.asking) ask.cancel();
-    update(patch);
+    send(intent);
   };
   const confirm = () => {
     const held = ask.answer();
-    if (held) update(held.patch);
+    if (held) send(held.intent);
   };
   const question = (where: "preset" | "fold") => (
     <AskFirst question={ask.asking?.change.where === where ? ask.asking.text : null} label="Change what players see?" busy={working} onCancel={ask.cancel} onConfirm={confirm} />
@@ -118,7 +124,7 @@ export function VisionSettings(props: { scene: Scene }) {
           working={showWorking ? sightWorkingText(perPlayer) : null}
           onChange={(preset) => {
             if (preset === "like" || preset === choice) return;
-            change("preset", preset, presetPatch(scene, preset));
+            change("preset", { preset });
           }}
         />
         <WarningStatus text={wallless ? WALLLESS_TEXT : null} />
@@ -171,7 +177,7 @@ export function VisionSettings(props: { scene: Scene }) {
             label="Fog"
             help={scene.fogEnabled ? "Players see only what you reveal. Use the fog tool to reveal." : "Players see the whole scene."}
             checked={scene.fogEnabled}
-            onChange={(fogEnabled) => change("fold", playersSeeOf({ fogEnabled, vision: scene.vision }), { fogEnabled })}
+            onChange={(fog) => change("fold", { fog })}
           />
           <Switch
             label="Party vision"
@@ -182,8 +188,7 @@ export function VisionSettings(props: { scene: Scene }) {
             }
             checked={on}
             busy={showWorking}
-            // The reducer turns fog on with party vision, unless the patch says otherwise.
-            onChange={(next) => change("fold", playersSeeOf({ fogEnabled: next || scene.fogEnabled, vision: { on: next, light } }), { vision: visionPatch(scene, next) })}
+            onChange={(partyVision) => change("fold", { partyVision })}
           />
           {on ? <FogLine scene={scene} /> : null}
           {question("fold")}
@@ -268,8 +273,13 @@ function SightRow(props: { scene: Scene; working: SightChoice | null }) {
   const choice = sightOf(scene);
   const help = SIGHT_CHOICES.find((c) => c.value === choice)?.help;
   const holdersExplored = useRoomView((s) => (s.view ? holdersExploredHere(s.view, scene.id) : false));
+  const store = useRoomStore();
   const ask = useAsk<boolean>();
-  const send = (perPlayer: boolean) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { vision: sightPatch(scene, perPlayer) } });
+  // The patch carries party vision and the light as the store has them as it goes, which an open question may have outlived.
+  const send = (perPlayer: boolean) => {
+    const now = store.getState().view?.scenes[scene.id] ?? scene;
+    actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { vision: sightPatch(now, perPlayer) } });
+  };
   return (
     // The row's box, which the alignment sweep measures (e2e/alignmentRoom.ts).
     <div data-vision-sight onKeyDown={ask.asking ? ask.onKeyDown : undefined}>

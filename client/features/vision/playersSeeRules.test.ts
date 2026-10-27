@@ -3,11 +3,14 @@ import { describe, test } from "node:test";
 import type { FogTile, RoomState, Scene } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { PLAYERS_SEE_WORDS } from "#shared/playersSee.ts";
+import { withPhaseLight } from "#shared/reducer/phases.ts";
 import { apply, room, scene } from "#shared/testutil.ts";
 import {
   CUSTOM_TEXT,
   exploredHere,
   holdersExploredHere,
+  intentPatch,
+  intentTo,
   JOIN_MAPS_TEXT,
   LEAVE_EXPLORE_TEXT,
   leaveQuestion,
@@ -55,6 +58,39 @@ describe("Players see's presets", () => {
     }
     assert.deepEqual(presetPatch(scene("s1"), "explore"), { fogEnabled: true, vision: { on: true, light: "bright" } });
     assert.deepEqual(presetPatch(scene("s1"), "all"), { fogEnabled: false, vision: { on: false, light: "bright" } });
+  });
+});
+
+describe("a change built as it goes, from the scene as it is then (MS1-ASTRA-01)", () => {
+  const asked = scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } });
+
+  test("a preset asked on Explore and Dark keeps a light changed while its question was open, by Light or a phase's light", () => {
+    assert.equal(intentTo(asked, { preset: "reveal" }), "reveal");
+    assert.deepEqual(intentPatch(asked, { preset: "reveal" }), { fogEnabled: true, vision: { on: false, light: "dark" } });
+    const bright: Scene = { ...asked, vision: { on: true, light: "bright" } };
+    assert.deepEqual(intentPatch(bright, { preset: "reveal" }), { fogEnabled: true, vision: { on: false, light: "bright" } });
+    // Switching to a phase with a light, or setting the showing phase's, sets the scene's light.
+    const dim = withPhaseLight(asked, { light: "dim" });
+    assert.deepEqual(intentPatch(dim, { preset: "all" }), { fogEnabled: false, vision: { on: false, light: "dim" } });
+  });
+
+  test("the switches keep the light too, and party vision on turns fog on with it", () => {
+    const bright: Scene = { ...asked, vision: { on: true, light: "bright" } };
+    assert.equal(intentTo(asked, { partyVision: false }), "reveal");
+    assert.deepEqual(intentPatch(bright, { partyVision: false }), { vision: { on: false, light: "bright" } });
+    assert.equal(intentTo(asked, { fog: false }), "custom");
+    assert.deepEqual(intentPatch(bright, { fog: false }), { fogEnabled: false });
+    const everything = scene("s1", { fogEnabled: false, vision: { on: false, light: "dim" } });
+    assert.equal(intentTo(everything, { partyVision: true }), "explore", "the reducer turns fog on with party vision");
+    assert.deepEqual(intentPatch(everything, { partyVision: true }), { vision: { on: true, light: "dim" } });
+  });
+
+  test("a change the scene already made, here or on another device, sends nothing", () => {
+    const reveal: Scene = { ...asked, vision: { on: false, light: "dark" } };
+    assert.equal(intentPatch(reveal, { preset: "reveal" }), null);
+    assert.equal(intentPatch(reveal, { partyVision: false }), null);
+    assert.equal(intentPatch(scene("s1", { fogEnabled: false }), { fog: false }), null);
+    assert.notEqual(intentPatch(reveal, { preset: "explore" }), null);
   });
 });
 
