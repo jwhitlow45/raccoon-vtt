@@ -19,6 +19,7 @@ import {
   MAX_LIGHT_FT,
   MIN_HEIGHT_FT,
   ORDER_REVEALS,
+  SCENE_PRESETS,
   SKILL_KEYS,
   STAMP_MAX_CELLS,
   STAMP_MIN_CELLS,
@@ -357,6 +358,8 @@ const settingsPatch = z.strictObject({
   playersSeeOrder: z.enum(ORDER_REVEALS).optional(),
   /** The grid new scenes start with, "squares" clearing it (docs/design-v1-hex-grids.md HX-D19). Only the new scene form reads it. */
   newScenes: gridShapeChoice.optional(),
+  /** What players see on new scenes (docs/design-v1-map-discovery.md 8.2). Once set it stays set. Only the new scene form reads it. */
+  newScenePlayers: z.enum(SCENE_PRESETS).optional(),
 });
 
 const fogShape = z.discriminatedUnion("kind", [
@@ -1265,6 +1268,84 @@ const tileBits = z.string().regex(/^[A-Za-z0-9+/]{683}=$/, "not a tile of bits")
 /** An explored layer's new tiles in `sys.explore`: at most every tile of the largest scene. */
 const exploredTiles = z.array(z.strictObject({ tx: chunkIndex, ty: chunkIndex, bits: tileBits })).max((Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS) + 1) ** 2);
 
+// Memory (docs/design-v1-map-discovery.md 5.3): what a layer remembers, as players saw it.
+
+/** A door as players see it: never locked, and a secret one only once found. A hidden one reaches them as a wall. */
+const shownDoor = z
+  .strictObject({ kind: z.literal("door"), state: z.enum(["open", "closed"]), secret: z.boolean(), discovered: z.boolean() })
+  .refine((d) => !d.secret || d.discovered, { message: "a hidden secret door is remembered as the wall players see" });
+/** An edge as a layer saw it: a drawn feature as players see it, or "auto", an automatic wall there. */
+const shownEdge = z.union([
+  z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("wall") }), z.strictObject({ kind: z.literal("none") }), shownDoor, z.strictObject({ kind: z.literal("window") })]),
+  z.literal("auto"),
+]);
+const shownFreeWall = z.strictObject({
+  id: freeWallId,
+  a: latticePoint,
+  b: latticePoint,
+  f: z.discriminatedUnion("kind", [z.strictObject({ kind: z.literal("wall") }), shownDoor, z.strictObject({ kind: z.literal("window") })]),
+});
+/** Most cells one free wall crosses, with room to spare: at most 8 cells long, it crosses at most 18 hexes (5.5). */
+const WALL_CELLS_MOST = 32;
+/** A free wall's version: the wall as the layer saw it on these cells, or null where it was absent, each cell once. */
+const rememberedWall = z.strictObject({
+  wall: shownFreeWall.nullable(),
+  cells: z
+    .array(cellKey)
+    .min(1)
+    .max(WALL_CELLS_MOST)
+    .refine((cells) => new Set(cells).size === cells.length, { message: "a cell is listed twice" }),
+});
+const rememberedLabel = z.strictObject({ id, rev: z.number().int().min(0), sceneId: id, x: coord, y: coord, text: shortText, size: z.number().min(0.1).max(20) });
+/** A stamp as players saw it, so never a DM-only one. */
+const rememberedStamp = z.strictObject({ ...stampFields, rev: z.number().int().min(0), sceneId: id, visibility: z.literal("all") });
+const stairMark = z.enum([".", "a", "n", "e", "s", "w"]);
+const stairDir = z.enum(["n", "e", "s", "w", "."]);
+const CHUNK_CELL_COUNT = CHUNK_CELLS * CHUNK_CELLS;
+/**
+ * The most entries of one kind a chunk of memory can name: one per cell,
+ * two edges per cell, and for walls, labels and stamps far more than a
+ * layer's 64 KiB holds, so no stored step is ever refused on replay.
+ */
+const MEMORY_MOST = { cells: CHUNK_CELL_COUNT, edges: 2 * CHUNK_CELL_COUNT, many: 8_000 } as const;
+const bounded = <T extends z.ZodType>(record: T, most: number) => record.refine((r) => Object.keys(r as object).length <= most, { message: `at most ${most.toLocaleString("en-US")} entries` });
+const memoryEntries = z.strictObject({
+  cells: bounded(z.record(cellKey, terrain.nullable()), MEMORY_MOST.cells).optional(),
+  edges: bounded(z.record(edgeKey, shownEdge.nullable()), MEMORY_MOST.edges).optional(),
+  walls: bounded(z.record(freeWallId, z.array(rememberedWall).min(1).max(WALL_CELLS_MOST)), MEMORY_MOST.many).optional(),
+  heights: bounded(z.record(cellKey, z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT)), MEMORY_MOST.cells).optional(),
+  up: bounded(z.record(cellKey, stairMark), MEMORY_MOST.cells).optional(),
+  upDir: bounded(z.record(cellKey, stairDir), MEMORY_MOST.cells).optional(),
+  rough: bounded(z.record(cellKey, z.boolean()), MEMORY_MOST.cells).optional(),
+  labels: bounded(z.record(id, rememberedLabel.nullable()), MEMORY_MOST.many).optional(),
+  stamps: bounded(z.record(id, rememberedStamp.nullable()), MEMORY_MOST.many).optional(),
+});
+/** The keys of entries a step drops, by kind. */
+const memoryKeys = z.strictObject({
+  cells: z.array(cellKey).min(1).max(MEMORY_MOST.cells).optional(),
+  edges: z.array(edgeKey).min(1).max(MEMORY_MOST.edges).optional(),
+  walls: z.array(freeWallId).min(1).max(MEMORY_MOST.many).optional(),
+  heights: z.array(cellKey).min(1).max(MEMORY_MOST.cells).optional(),
+  up: z.array(cellKey).min(1).max(MEMORY_MOST.cells).optional(),
+  upDir: z.array(cellKey).min(1).max(MEMORY_MOST.cells).optional(),
+  rough: z.array(cellKey).min(1).max(MEMORY_MOST.cells).optional(),
+  labels: z.array(id).min(1).max(MEMORY_MOST.many).optional(),
+  stamps: z.array(id).min(1).max(MEMORY_MOST.many).optional(),
+});
+/** Every chunk position of the largest scene, one past its east and south sides included. */
+const CHUNK_POSITIONS = (Math.floor(MAX_SCENE_CELLS / CHUNK_CELLS) + 1) ** 2;
+/** The party's layer, and at most the design's most holders. */
+const LAYERS_MOST = 1 + MOST_SIGHT_HOLDERS;
+/**
+ * A DM's yes to "Players' remembered map here will be forgotten. Go ahead?"
+ * on a builder op (5.3): resent with it, the op may push players' memory
+ * past its cap, and the map step forgets whole fog tiles. The reducer
+ * ignores it, and the forgetting lands in the step's `sys.remember`.
+ */
+const forget = z.literal(true).optional();
+/** Each layer at most once: the party's has no member. */
+const onceEach = (layers: readonly { memberId?: string | undefined }[]) => new Set(layers.map((l) => l.memberId ?? "")).size === layers.length;
+
 /** A page's size bound: the map cap, so a later change to the handout pipeline needs no schema change. */
 export const MAX_HANDOUT_PAGE_PX = 8_192;
 const handoutPagePx = z.number().int().min(1).max(MAX_HANDOUT_PAGE_PX);
@@ -1864,8 +1945,10 @@ export const clientOps = [
    * and is refused unless the opening is one (section 4.1). `teleport` says
    * the move is a "Teleport here" past a wall or a ledge: it skips the wall
    * test, its leg on the turn's path does not count, and the DM's log says so.
+   * `unknown` is past something on ground the player does not hold, which
+   * names no kind (docs/design-v1-map-discovery.md 6).
    */
-  op("token.move", { ...moveFields, squeeze: z.literal(true).optional(), teleport: z.enum(["wall", "ledge"]).optional(), route: routeSchema.optional() })
+  op("token.move", { ...moveFields, squeeze: z.literal(true).optional(), teleport: z.enum(["wall", "ledge", "unknown"]).optional(), route: routeSchema.optional() })
     .refine((o) => o.route === undefined || o.teleport === undefined, { message: "a teleport walks no route" })
     .refine((o) => o.route === undefined || (o.route.at(-1)?.[0] === o.x && o.route.at(-1)?.[1] === o.y), { message: "a route ends where the move lands" }),
   op("token.moveMany", { moves: z.array(z.strictObject(moveFields)).min(1).max(MAX_MOVES) }),
@@ -2029,8 +2112,8 @@ export const clientOps = [
   op("fog.discard", { sceneId: id }),
   op("fog.live", { sceneId: id, ops: z.array(fogOp).min(1).max(MAX_FOG_DRAFT_OPS) }),
   op("fog.reset", { sceneId: id, to: z.enum(["hidden", "revealed"]) }),
-  op("build.paint", { sceneId: id, terrain, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS) }),
-  op("build.erase", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS) }),
+  op("build.paint", { sceneId: id, terrain, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget }),
+  op("build.erase", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), forget }),
   op("build.rect", {
     sceneId: id,
     terrain: terrain.nullable(),
@@ -2038,18 +2121,21 @@ export const clientOps = [
     y: cellIndex,
     w: z.number().int().min(1).max(MAX_SCENE_CELLS),
     h: z.number().int().min(1).max(MAX_SCENE_CELLS),
+    forget,
   }),
-  op("build.poly", { sceneId: id, terrain: terrain.nullable(), points: z.array(coord).min(6).max(MAX_POLY_VERTICES * 2) }),
+  op("build.poly", { sceneId: id, terrain: terrain.nullable(), points: z.array(coord).min(6).max(MAX_POLY_VERTICES * 2), forget }),
   op("build.edge", {
     sceneId: id,
     edges: z.array(z.strictObject({ key: edgeKey, feature: edgeFeature.nullable() })).min(1).max(MAX_BUILD_EDGES),
+    forget,
   }),
   op("build.label", {
     sceneId: id,
     labelId: id,
     label: z.strictObject({ x: coord, y: coord, text: shortText, size: z.number().min(0.1).max(20) }).nullable(),
+    forget,
   }),
-  op("build.clear", { sceneId: id }),
+  op("build.clear", { sceneId: id, forget }),
   /**
    * Free walls, named by the chunk that holds them and their id. A put lands
    * in its midpoint's chunk and replaces a wall of the same id there.
@@ -2059,12 +2145,14 @@ export const clientOps = [
     sceneId: id,
     put: z.array(freeWall).max(LIMITS.freeWallsPerOp).optional(),
     remove: z.array(z.strictObject({ cx: chunkIndex, cy: chunkIndex, id: freeWallId })).max(LIMITS.freeWallsPerOp).optional(),
+    forget,
   }).refine((o) => serializedBytes(o) <= LIMITS.freeWallsOpBytes, { message: `a free walls op is at most ${LIMITS.freeWallsOpBytes / 1024} KiB` }),
   /** Stamps on the board layer. A put replaces a stamp of the same id on the same scene. Removals apply first. */
   op("build.stamps", {
     sceneId: id,
     put: z.array(stampInput).max(LIMITS.stampsPerOp).optional(),
     remove: z.array(id).max(LIMITS.stampsPerOp).optional(),
+    forget,
   }),
   /** Light sources, DM only in every wave. A put replaces a light of the same id on the same scene. Removals apply first. */
   op("build.lights", {
@@ -2076,11 +2164,11 @@ export const clientOps = [
    * Paints cells' ground to a height in feet (section 4.2), 0 clearing it.
    * Tokens standing on the ground there rise or sink with it in the same op.
    */
-  op("build.height", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), height: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT) }),
+  op("build.height", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), height: z.number().int().min(MIN_HEIGHT_FT).max(MAX_HEIGHT_FT), forget }),
   /** Marks cells as stairs pointing up by the rule or one way, or clears the marks with null (section 4.2). */
-  op("build.stairs", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), up: stairDirection.nullable() }),
+  op("build.stairs", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), up: stairDirection.nullable(), forget }),
   /** Marks cells as difficult ground or clears the marks (docs/design-v1-movement.md 6.3). Terrain is untouched, and no wall moves. */
-  op("build.rough", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), on: z.boolean() }),
+  op("build.rough", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), on: z.boolean(), forget }),
   /**
    * Opens, closes or locks one door (section 4.1), and for a secret door
    * marks it found or hidden again. A player may only open or close a door
@@ -2253,8 +2341,16 @@ export const clientOps = [
      * and refuses it when the creature changed since.
      */
     log: logId.optional(),
+    /**
+     * The DM's yes to forgetting players' remembered map
+     * (docs/design-v1-map-discovery.md 5.3): the seq of the step the undo
+     * toast asked about. A step that no longer heads the stack is refused
+     * as stale, so a yes never forgets for another step.
+     */
+    forget: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
   }),
-  op("redo", {}),
+  /** `forget` as on `undo`. */
+  op("redo", { forget: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional() }),
 ] as const;
 
 /**
@@ -2339,6 +2435,47 @@ export const serverOnlyOps = [
       .refine((j) => new Set(j.map((e) => e.memberId)).size === j.length, { message: "a player joins twice" })
       .optional(),
   }).refine((o) => o.tiles.length > 0 || o.members !== undefined || o.join !== undefined, { message: "nothing explored" }),
+  /**
+   * What the map step found players remember of a scene's build after a
+   * batch (docs/design-v1-map-discovery.md 5.3), after its `sys.explore`:
+   * for each layer, the party's or a sight holder's, the chunks whose
+   * entries change, each with the keys it drops and then the entries it
+   * sets, and the fog tiles a layer past its cap forgets, each keeping
+   * only the sub-cells of `keep` (the layer's sight then). Forgetting a
+   * tile also drops every entry of that layer whose element it no longer
+   * holds. Replay applies it as stored and never computes sight.
+   */
+  op("sys.remember", {
+    sceneId: id,
+    layers: z
+      .array(
+        z.strictObject({
+          memberId: id.optional(),
+          chunks: z
+            .array(z.strictObject({ cx: chunkIndex, cy: chunkIndex, drop: memoryKeys.optional(), set: memoryEntries.optional() }))
+            .min(1)
+            .max(CHUNK_POSITIONS)
+            .refine((chunks) => new Set(chunks.map((c) => `${c.cx},${c.cy}`)).size === chunks.length, { message: "a chunk of memory appears twice" }),
+        }),
+      )
+      .max(LAYERS_MOST)
+      .refine(onceEach, { message: "a layer appears twice" }),
+    forget: z
+      .array(
+        z.strictObject({
+          memberId: id.optional(),
+          tiles: z
+            .array(z.strictObject({ tx: chunkIndex, ty: chunkIndex, keep: tileBits.optional() }))
+            .min(1)
+            .max(CHUNK_POSITIONS)
+            .refine((tiles) => new Set(tiles.map((t) => `${t.tx},${t.ty}`)).size === tiles.length, { message: "a tile is forgotten twice" }),
+        }),
+      )
+      .min(1)
+      .max(LAYERS_MOST)
+      .refine(onceEach, { message: "a layer forgets twice" })
+      .optional(),
+  }).refine((o) => o.layers.length > 0 || o.forget !== undefined, { message: "nothing remembered" }),
   /**
    * A dice op as the server resolved it (docs/design-v1-dice.md 4.1): the
    * client op as it arrived, its `batch` (16 characters of the SHA-256 of
@@ -2523,6 +2660,10 @@ export const mapSchemas = {
   sceneVision,
   tileBits,
 };
+/** Map discovery's shapes, so the stored-state schema checks a room's memory by the same bounds the step's ops are held to (docs/design-v1-map-discovery.md 5.3). */
+export const memorySchemas = { memoryEntries, scenePreset: z.enum(SCENE_PRESETS) };
+export type MemoryEntriesInput = z.infer<typeof memoryEntries>;
+export type MemoryKeysInput = z.infer<typeof memoryKeys>;
 /** Wave 5's shapes, so the stored-state schema checks imports by the same bounds (docs/design-v1-dm-tools.md 2.5). */
 export const dmToolSchemas = {
   imageRef,
@@ -2646,8 +2787,18 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>;
 
 // Server to client messages.
 
-export const refusalCodes = ["invalid", "forbidden", "gone", "quota"] as const;
+/**
+ * `forget` is the DM's alone (docs/design-v1-map-discovery.md 5.3): a
+ * builder op, or an Undo or Redo of one, that would push players'
+ * remembered map past its cap. The DM's device asks FORGET_ASK and sends
+ * it again with `forget` on a yes. No player's op is ever refused for
+ * memory, since that would tell them how much another layer holds.
+ */
+export const refusalCodes = ["invalid", "forbidden", "gone", "quota", "forget"] as const;
 export type RefusalCode = (typeof refusalCodes)[number];
+
+/** The question a `forget` refusal asks the DM (docs/design-v1-map-discovery.md 5.3). */
+export const FORGET_ASK = "Players' remembered map here will be forgotten. Go ahead?";
 
 export const changeSchema = z.union([
   z.strictObject({ key: z.string().min(1).max(200), value: z.unknown() }),
@@ -2681,6 +2832,12 @@ export const serverMessageSchema = z.discriminatedUnion("t", [
     trapped: z.array(z.number().int().min(1)).optional(),
     /** This client's ops in the batch that wrote a sync record without `at`, each with the `at` the server wrote, so a re-sync's Undo expects that very record (docs/design-v1-resync.md 3.4). */
     stamped: z.array(z.strictObject({ n: z.number().int().min(1), at: z.iso.datetime({ precision: 3 }) })).optional(),
+    /**
+     * This client's walks in the batch that the real build stopped short of
+     * where its held build let them go (docs/design-v1-map-discovery.md 6):
+     * each landed at its last clear spot. It names no kind of blocker.
+     */
+    blocked: z.array(z.number().int().min(1)).optional(),
   }),
   z.strictObject({ t: z.literal("retry"), n: z.number().int().min(1).optional(), code: z.enum(["busy", "gap"]) }),
   z.strictObject({ t: z.literal("eph"), from: id, e: ephEventSchema }),

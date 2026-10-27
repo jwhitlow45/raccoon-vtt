@@ -159,7 +159,117 @@ export type RoomState = {
    * and once a turn starts until its first reminder.
    */
   reminded?: Reminded;
+  /**
+   * DM only, and never projected under its own key: what the party's
+   * explored layer remembers of the build where it differs from the build
+   * now, keyed `"<sceneId>:<cx>,<cy>"` (docs/design-v1-map-discovery.md
+   * 5.3). Only the server writes it, by `sys.remember` after a batch, and
+   * hides, resets, forgetting, vision or fog off, the shape switch and a
+   * scene's deletion clear it, none with an undo. Every stored state holds
+   * it (the snapshot migration adds it empty). A projection never does, so
+   * a reader takes absent as empty.
+   */
+  memory?: Record<ChunkKey, MemoryChunk>;
+  /**
+   * DM only, as `memory`: each sight holder's own memory beside their own
+   * explored layer, keyed `"<sceneId>:<memberId>:<cx>,<cy>"` (5.3). It goes
+   * with their layer: unticking them, the fold and their removal clear it.
+   */
+  memoryBy?: Record<string, MemoryChunk>;
+  /**
+   * The scenes that have been the players' scene since the map discovery
+   * upgrade, and every scene that existed then (5.5). An op of op version
+   * 26 or later that makes a scene the players' scene marks it, and the
+   * mark stays while the scene exists. The size guard reserves players'
+   * memory on a marked scene with fog and party vision on, so whether
+   * memory is reserved never reads an explored layer. A projection never
+   * holds it, so a reader takes absent as empty.
+   */
+  playedScenes?: Record<SceneId, SceneMark>;
+  /**
+   * The scenes that had fog and party vision on at the map discovery
+   * upgrade (5.5): their memory reserves share the room's free space
+   * rather than each taking its full cap, so no room became full at
+   * deploy. A scene loses its mark when its fog or party vision goes off,
+   * and never gains one again. A projection never holds it.
+   */
+  memoryShared?: Record<SceneId, SceneMark>;
 };
+
+/** A scene's mark in `playedScenes` or `memoryShared`. The mark is the entry: only its presence says anything. */
+export type SceneMark = { sceneId: SceneId; rev: number };
+
+/**
+ * One chunk of one layer's memory (docs/design-v1-map-discovery.md 5.3):
+ * each element of the build as that layer last saw it, as players see it
+ * (flattened: a hidden secret door as the wall players take it for, a lock
+ * as closed), only where that differs from the build now. A `null` value
+ * is an element that was absent then. Cell keys are `"x,y"` and edge keys
+ * `"x,y,n"` or `"x,y,w"`, each in this chunk's cells as the build files
+ * them. Labels and stamps go by id, each in one chunk of its layer only.
+ * `memberId` is a holder's, absent on the party's memory.
+ */
+export type MemoryChunk = {
+  sceneId: SceneId;
+  cx: number;
+  cy: number;
+  rev: number;
+  memberId?: MemberId;
+} & MemoryEntries;
+
+/** The elements a chunk of memory can hold, by kind (MemoryChunk). */
+export type MemoryEntries = {
+  cells?: Record<string, TerrainId | null>;
+  /** `"auto"` is an automatic wall the layer saw, and `null` hides one, or a drawn feature, that came out of its sight. */
+  edges?: Record<string, EdgeFeature | "auto" | null>;
+  /** Free walls by their real id in this chunk: each version whole and flattened, with the cells it covers. */
+  walls?: Record<string, RememberedWall[]>;
+  heights?: Record<string, number>;
+  up?: Record<string, StairMark>;
+  upDir?: Record<string, StairDir>;
+  rough?: Record<string, boolean>;
+  labels?: Record<LabelId, Label | null>;
+  stamps?: Record<StampId, Stamp | null>;
+};
+
+/**
+ * One version of a free wall a layer remembers, on the cells it covers
+ * (docs/design-v1-map-discovery.md 5.3, free walls by cell): the wall as
+ * the layer saw it there, or `null` where it was absent then. A wall's
+ * versions cover cells apart, so each cell reads at most one.
+ */
+export type RememberedWall = { wall: FreeWall | null; cells: string[] };
+
+/** A stair cell's direction as players get it (5.2): up to the north, east, south or west, or "." for no stair. */
+export type StairDir = "n" | "e" | "s" | "w" | ".";
+
+/**
+ * What players see of a new scene (docs/design-v1-map-discovery.md 8.1):
+ * Explore (fog and party vision on), Reveal by hand (fog on, party vision
+ * off) and Everything (both off).
+ */
+export const SCENE_PRESETS = ["explore", "reveal", "all"] as const;
+export type ScenePreset = (typeof SCENE_PRESETS)[number];
+
+/**
+ * The fields only a player's copy of a chunk carries
+ * (docs/design-v1-map-discovery.md 5.2), which the stored-state schema
+ * refuses in a stored chunk: `known`, the 256 cells the player holds as
+ * base64 bits, `auto`, an automatic wall on each held north and west edge,
+ * and `upDir`, the direction of each held stair cell, present only where
+ * one is a stair.
+ */
+export type PlayerChunkFields = { known?: string; auto?: string; upDir?: string };
+
+/** A chunk as a player's device holds it on a scene with fog on. */
+export type PlayerChunk = BuildChunk & PlayerChunkFields;
+
+/** Characters of a player chunk's `known`: 256 bits in base64. */
+export const KNOWN_CHARS = 44;
+/** Characters of a player chunk's `auto`: 512 bits, a north and a west edge per cell, in base64. */
+export const AUTO_CHARS = 88;
+/** Characters of a player chunk's `upDir`: one StairDir per cell. */
+export const UP_DIR_CHARS = CHUNK_CELLS * CHUNK_CELLS;
 
 /**
  * A turn's reminders by audience, as the log keeps its rings: the lines
@@ -286,6 +396,14 @@ export type RoomSettings = {
    * never depends on it.
    */
   newScenes?: GridShape;
+  /**
+   * What players see on a new scene by default (docs/design-v1-map-discovery.md
+   * 8.2). New rooms start on Explore. Absent reads as each kind's default
+   * from before it, so a room from before keeps making scenes as it did
+   * until the DM picks one. Only the new scene form reads it: every
+   * `scene.create` carries its own fields, so replay never depends on it.
+   */
+  newScenePlayers?: ScenePreset;
 };
 
 /** The 2024 defaults. See design section 6 for what each one means. */
@@ -2378,9 +2496,11 @@ export type LogEvent =
   /**
    * A token moved with "Teleport here" past what stopped its walk (wave 4,
    * section 4.1). DM only: the DM's devices show it as a toast, and no player
-   * projection carries it, the token's owners included.
+   * projection carries it, the token's owners included. `unknown` is a
+   * stop by something on ground the player does not hold, which names no
+   * kind (docs/design-v1-map-discovery.md 6).
    */
-  | { type: "teleport"; tokenId: TokenId; past: "wall" | "ledge" }
+  | { type: "teleport"; tokenId: TokenId; past: "wall" | "ledge" | "unknown" }
   /**
    * A player added a companion beside their character
    * (docs/design-v1-combat-flow.md 3.6.3). DM only, as the teleport line

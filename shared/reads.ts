@@ -69,6 +69,7 @@ export function reads(op: Op, state: RoomState): Reads {
     case "sys.memberRemove":
     case "sys.restore":
     case "sys.explore":
+    case "sys.remember":
     // Who sees for themselves joins with each player's layer, which only the server holds (docs/design-v1-per-player-vision.md 6.1).
     case "vision.holders":
     // The server rolls (docs/design-v1-dice.md 4.5), so no client predicts a roll. It waits for the `ev`.

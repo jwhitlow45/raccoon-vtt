@@ -28,6 +28,15 @@ describe("roll lines (docs/design-v1-dm-tools.md 3.3)", () => {
   });
 });
 
+describe("teleport lines (docs/design-v1-maps-vision.md 4.1)", () => {
+  test("name what stopped the walk, or nothing past what the player could not see (docs/design-v1-map-discovery.md 6)", () => {
+    const names: LogNames = room({ tokens: { t1: token("t1", { name: "Thorn" }) } });
+    assert.equal(describeEvent({ type: "teleport", tokenId: "t1", past: "wall" }, names), "Thorn teleported past a wall.");
+    assert.equal(describeEvent({ type: "teleport", tokenId: "t1", past: "ledge" }, names), "Thorn teleported past a ledge.");
+    assert.equal(describeEvent({ type: "teleport", tokenId: "t1", past: "unknown" }, names), "Thorn teleported past something they could not see.");
+  });
+});
+
 describe("Show older beside the trap logs (client/panels/LogPanel.tsx)", () => {
   const line = (id: string, type: "chat" | "trap" | "trapSeen"): LogEntry =>
     type === "chat"

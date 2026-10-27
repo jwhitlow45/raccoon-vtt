@@ -229,6 +229,13 @@ export const LIMITS = {
    * one replaying (review PV1-ASTRA-4).
    */
   sightHoldersPerScene: 6,
+  /**
+   * One layer's memory of one scene (docs/design-v1-map-discovery.md 5.5):
+   * the party's, or a holder's own, in charged bytes. The size guard
+   * reserves each memory at this cap, or at its share of a full room,
+   * never at its size, and past it the map step forgets whole fog tiles.
+   */
+  memoryBytesPerLayer: 64 * 1024,
 
   // Wave 5 (docs/design-v1-dm-tools.md 2.4).
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { collectionOf, compareLogIds, doorChunk, keys, parseKey, readEntity, revOf, sightOf, writeEntity } from "./keys.ts";
+import type { RoomState } from "./model.ts";
 import { companionBlock, room, token } from "./testutil.ts";
 
 describe("keys", () => {
@@ -72,6 +73,35 @@ describe("keys", () => {
     assert.equal(collectionOf(keys.fog("s", 0, 0)), "fogTiles");
     assert.equal(collectionOf(keys.explored("s", 0, 0)), "exploredTiles");
     assert.equal(collectionOf(keys.sight("s", 0, 0)), null, "sight is derived, never a stored collection");
+  });
+
+  test("memory and the scenes' marks read and write by key (docs/design-v1-map-discovery.md 5.3, 5.5)", () => {
+    assert.deepEqual(parseKey(keys.memory("s1", 2, 3)), { kind: "memory", id: "s1:2,3", sceneId: "s1", cx: 2, cy: 3 });
+    assert.deepEqual(parseKey(keys.memoryBy("s1", "p1", 2, 3)), { kind: "memoryBy", id: "s1:p1:2,3", sceneId: "s1", memberId: "p1", cx: 2, cy: 3 });
+    assert.deepEqual(parseKey(keys.played("s1")), { kind: "played", id: "s1" });
+    assert.deepEqual(parseKey(keys.memoryShared("s1")), { kind: "memoryShared", id: "s1" });
+    assert.equal(parseKey("memory:s1"), null);
+    assert.equal(parseKey("memoryBy:s1:2,3"), null);
+    const party = { sceneId: "s1", cx: 2, cy: 3, rev: 0, cells: { "33,50": null } };
+    const own = { ...party, memberId: "p1" };
+    const mark = { sceneId: "s1", rev: 0 };
+    // A state from before them, or a projection, reads as holding none.
+    const { memory: _m, memoryBy: _b, playedScenes: _p, memoryShared: _s, ...without } = room();
+    for (const [key, value, collection] of [
+      [keys.memory("s1", 2, 3), party, "memory"],
+      [keys.memoryBy("s1", "p1", 2, 3), own, "memoryBy"],
+      [keys.played("s1"), mark, "playedScenes"],
+      [keys.memoryShared("s1"), mark, "memoryShared"],
+    ] as const) {
+      assert.equal(collectionOf(key), collection);
+      for (const state of [room(), without as RoomState]) {
+        const next = writeEntity(state, key, value);
+        assert.equal(readEntity(next, key), value);
+        assert.equal(readEntity(state, key), null);
+        assert.equal(readEntity(writeEntity(next, key, null), key), null);
+      }
+    }
+    assert.deepEqual(Object.keys(writeEntity(room(), keys.memoryBy("s1", "p1", 2, 3), own).memoryBy ?? {}), ["s1:p1:2,3"]);
   });
 
   test("sight lives only in a projected state, and writing a tile makes the state one", () => {

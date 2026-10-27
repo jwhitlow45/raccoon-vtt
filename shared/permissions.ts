@@ -562,6 +562,9 @@ function forDm(op: Op, c: Check): Decision {
     case "sys.explore":
       // The actor writes what the party explored after each batch (docs/design-v1-maps-vision.md 4.3.3).
       return refuse("forbidden", "the server records what the party explored");
+    case "sys.remember":
+      // So it writes what players remember (docs/design-v1-map-discovery.md 5.3).
+      return refuse("forbidden", "the server records what players remember");
     case "member.update":
       return op.memberId === c.actor.memberId ? OK : refuse("forbidden", "members edit only themselves");
     case "token.create":
@@ -712,6 +715,7 @@ function forPlayer(op: Op, c: Check): Decision {
     case "sys.memberSetKind":
     case "sys.memberRemove":
     case "sys.explore":
+    case "sys.remember":
     case "token.deleteMany":
     case "journal.create":
     case "journal.update":

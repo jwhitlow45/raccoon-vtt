@@ -8,8 +8,10 @@ import {
   type FogTile,
   type FreeWall,
   type LogEntry,
+  type MemoryChunk,
   type RoomMeta,
   type RoomState,
+  type SceneMark,
   type SightHolders,
   type SightTile,
 } from "./model.ts";
@@ -61,6 +63,12 @@ export type ParsedKey =
   | { kind: "exploredBy"; sceneId: string; memberId: string; tx: number; ty: number }
   | { kind: "holders"; sceneId: string }
   | { kind: "fogDraft"; sceneId: string }
+  /** `id` is the state map key, as for the kinds named by id, so code that files an entry by `id` files these right too. */
+  | { kind: "memory"; id: string; sceneId: string; cx: number; cy: number }
+  | { kind: "memoryBy"; id: string; sceneId: string; memberId: string; cx: number; cy: number }
+  /** A scene's mark, by the scene's id. */
+  | { kind: "played"; id: string }
+  | { kind: "memoryShared"; id: string }
   | { kind: "encounter" }
   | { kind: "encounterHistory" }
   | { kind: "meta" };
@@ -119,6 +127,14 @@ export const keys = {
   /** A per-player scene's sight holder list (RoomState.holders), the DM's. */
   holders: (sceneId: string): EntityKey => `holders:${sceneId}`,
   fogDraft: (sceneId: string): EntityKey => `fogDraft:${sceneId}`,
+  /** A chunk of the party's memory (RoomState.memory, docs/design-v1-map-discovery.md 5.3). No projection holds it. */
+  memory: (sceneId: string, cx: number, cy: number): EntityKey => `memory:${sceneId}:${cx},${cy}`,
+  /** A chunk of a holder's own memory (RoomState.memoryBy). No projection holds it. */
+  memoryBy: (sceneId: string, memberId: string, cx: number, cy: number): EntityKey => `memoryBy:${sceneId}:${memberId}:${cx},${cy}`,
+  /** A scene's played mark (RoomState.playedScenes, 5.5). */
+  played: (sceneId: string): EntityKey => `played:${sceneId}`,
+  /** A scene's mark that its memory takes a share of the room (RoomState.memoryShared, 5.5). */
+  memoryShared: (sceneId: string): EntityKey => `memoryShared:${sceneId}`,
   encounter: "encounter" as EntityKey,
   encounterHistory: "encounterHistory" as EntityKey,
   meta: "meta" as EntityKey,
@@ -168,6 +184,11 @@ export function tileKey(sceneId: string, tx: number, ty: number): string {
 /** The state map key of a tile of a holder's own explored layer (RoomState.exploredBy), `"<sceneId>:<memberId>:<tx>,<ty>"`. */
 export function holderTileKey(sceneId: string, memberId: string, tx: number, ty: number): string {
   return `${sceneId}:${memberId}:${tx},${ty}`;
+}
+
+/** The state map key of a chunk of a holder's own memory (RoomState.memoryBy), `"<sceneId>:<memberId>:<cx>,<cy>"`. */
+export function holderChunkKey(sceneId: string, memberId: string, cx: number, cy: number): string {
+  return `${sceneId}:${memberId}:${cx},${cy}`;
 }
 
 /**
@@ -231,6 +252,8 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "log":
     case "trapLog":
     case "trapSeen":
+    case "played":
+    case "memoryShared":
       return { kind, id: rest };
     case "fogDraft":
     case "holders":
@@ -241,6 +264,19 @@ export function parseKey(key: EntityKey): ParsedKey | null {
       const owner = sep > 0 ? rest.indexOf(":") : -1;
       if (!m || owner <= 0 || owner >= sep - 1) return null;
       return { kind, sceneId: rest.slice(0, owner), memberId: rest.slice(owner + 1, sep), tx: Number(m[1]), ty: Number(m[2]) };
+    }
+    case "memoryBy": {
+      const sep = rest.lastIndexOf(":");
+      const m = sep > 0 ? GRID_RE.exec(rest.slice(sep + 1)) : null;
+      const owner = sep > 0 ? rest.indexOf(":") : -1;
+      if (!m || owner <= 0 || owner >= sep - 1) return null;
+      return { kind, id: rest, sceneId: rest.slice(0, owner), memberId: rest.slice(owner + 1, sep), cx: Number(m[1]), cy: Number(m[2]) };
+    }
+    case "memory": {
+      const sep = rest.lastIndexOf(":");
+      const m = sep > 0 ? GRID_RE.exec(rest.slice(sep + 1)) : null;
+      if (!m) return null;
+      return { kind, id: rest, sceneId: rest.slice(0, sep), cx: Number(m[1]), cy: Number(m[2]) };
     }
     case "chunk":
     case "fog":
@@ -324,6 +360,14 @@ export function collectionOf(key: EntityKey): keyof RoomState | null {
       return "holders";
     case "fogDraft":
       return "fogDrafts";
+    case "memory":
+      return "memory";
+    case "memoryBy":
+      return "memoryBy";
+    case "played":
+      return "playedScenes";
+    case "memoryShared":
+      return "memoryShared";
     case "log":
       return "log";
     default:
@@ -403,6 +447,14 @@ export function readEntity(state: RoomState, key: EntityKey): unknown {
       return state.holders?.[parsed.sceneId] ?? null;
     case "fogDraft":
       return state.fogDrafts[parsed.sceneId] ?? null;
+    case "memory":
+      return state.memory?.[parsed.id] ?? null;
+    case "memoryBy":
+      return state.memoryBy?.[parsed.id] ?? null;
+    case "played":
+      return state.playedScenes?.[parsed.id] ?? null;
+    case "memoryShared":
+      return state.memoryShared?.[parsed.id] ?? null;
     case "encounter":
       return state.encounter;
     case "encounterHistory":
@@ -513,6 +565,14 @@ export function writeEntity(state: RoomState, key: EntityKey, value: unknown): R
       return withMap(state, "holders", withEntry(state.holders ?? {}, parsed.sceneId, value as SightHolders | null));
     case "fogDraft":
       return { ...state, fogDrafts: withEntry(state.fogDrafts, parsed.sceneId, value as FogDraft | null) };
+    case "memory":
+      return { ...state, memory: withEntry(state.memory ?? {}, parsed.id, value as MemoryChunk | null) };
+    case "memoryBy":
+      return { ...state, memoryBy: withEntry(state.memoryBy ?? {}, parsed.id, value as MemoryChunk | null) };
+    case "played":
+      return { ...state, playedScenes: withEntry(state.playedScenes ?? {}, parsed.id, value as SceneMark | null) };
+    case "memoryShared":
+      return { ...state, memoryShared: withEntry(state.memoryShared ?? {}, parsed.id, value as SceneMark | null) };
     case "log":
       return { ...state, log: withLine(state.log, parsed.id, value as LogEntry | null) };
     case "encounter":

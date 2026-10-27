@@ -5,7 +5,7 @@ import { canApply } from "#shared/permissions.ts";
 import { keys, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
-import { clientMessageSchema, clientOpSchema, type Change, type ClientMessage, type Op, type ServerMessage } from "#shared/protocol.ts";
+import { clientMessageSchema, clientOpSchema, type Change, type ClientMessage, type Op, type RefusalCode, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
 import { stampedAt } from "#shared/reducer/tokens.ts";
@@ -70,7 +70,7 @@ export class LocalServer {
   batch(ops: { n: number; op: unknown }[]): ServerMessage[] {
     const out: ServerMessage[] = [];
     const acks: number[] = [];
-    const rejects: { n: number; code: "invalid" | "forbidden" | "gone" | "quota"; message: string }[] = [];
+    const rejects: { n: number; code: RefusalCode; message: string }[] = [];
     const stamped: { n: number; at: string }[] = [];
     const touched: EntityKey[] = [];
     let global = false;

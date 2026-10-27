@@ -508,7 +508,9 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
       // Only the DM's log holds it (docs/design-v1-roll-options.md 6.1).
       return `${creatureName(names, data)} ended its turn ${effectName(data.key)}: a DC ${data.dc} ${ABILITY_NAMES[data.ability]} save ends it.`;
     case "teleport":
-      // Only the DM's log holds it (docs/design-v1-maps-vision.md 4.1).
+      // Only the DM's log holds it (docs/design-v1-maps-vision.md 4.1). A stop the player could not see names no kind
+      // (docs/design-v1-map-discovery.md 6).
+      if (data.past === "unknown") return `${creatureName(names, data)} teleported past something they could not see.`;
       return `${creatureName(names, data)} teleported past a ${data.past}.`;
     case "roll":
       return rollText(data, creatureName(names, data), dm);
