@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { edge, fogRoom, heights, lift, paint, remember, stairs, wall } from "./discoveryTestutil.ts";
+import { chunkOf, discoveryOp, discoveryState, fogRoom, lift, randomFeature, randomWallFeature, remember, TERRAINS, wall } from "./discoveryTestutil.ts";
 import { keys, type EntityKey } from "./keys.ts";
-import { CHUNK_CELLS, type BuildChunk, type FreeWall, type Label, type PlayerChunk, type RememberedWall, type RoomState, type Scene, type TerrainId, type Viewer, type WallFeature } from "./model.ts";
-import { exploreFor, perPlayerOp, perPlayerState, playersOf, withCellVision } from "./perPlayerTestutil.ts";
+import { CHUNK_CELLS, type FreeWall, type Label, type PlayerChunk, type RememberedWall, type RoomState, type Scene, type Viewer, type WallFeature } from "./model.ts";
+import { exploreFor, playersOf, withCellVision } from "./perPlayerTestutil.ts";
 import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, heldOf, projectChunkForPlayer, projectEntity, projectState, stableStringify, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
 import { opSchema, type Op } from "./protocol.ts";
 import { applyOp, type ApplyResult } from "./reducer.ts";
@@ -48,138 +48,6 @@ import { DM, P1, chance, comparable, deepClone, env, int, pick, rng } from "./te
  */
 
 const DISPLAY: Viewer = { memberId: "display:abcdefghijkl", role: "player" };
-const TERRAINS: TerrainId[] = ["stone", "wood", "grass"];
-
-/** A random build on a scene: rooms on and across chunk borders, their walls and doors, free walls, heights, stairs and rough ground. */
-function randomBuild(r: () => number, state: RoomState, sceneId: string): void {
-  const scene = state.scenes[sceneId]!;
-  const { w, h } = scene.bounds;
-  if (chance(r, 0.5)) scene.autoWalls = pick(r, ["floor", "off"] as const);
-  const at = (s: RoomState) => s;
-  for (let i = 0; i < int(r, 2, 6); i++) {
-    // Rooms often straddle the chunk line at 16, so a stub or a neighbor holds their far wall.
-    const x = chance(r, 0.5) ? CHUNK_CELLS - int(r, 1, 4) : int(r, 0, w - 4);
-    const y = chance(r, 0.5) ? CHUNK_CELLS - int(r, 1, 4) : int(r, 0, h - 4);
-    const rw = Math.min(int(r, 2, 7), w - x);
-    const rh = Math.min(int(r, 2, 7), h - y);
-    paintIn(at(state), sceneId, { x, y, w: rw, h: rh }, pick(r, TERRAINS));
-    for (let k = x; k < x + rw; k++) {
-      edgeIn(state, sceneId, `${k},${y},n`, randomFeature(r));
-      if (y + rh < h) edgeIn(state, sceneId, `${k},${y + rh},n`, randomFeature(r));
-    }
-    for (let k = y; k < y + rh; k++) {
-      edgeIn(state, sceneId, `${x},${k},w`, randomFeature(r));
-      if (x + rw < w) edgeIn(state, sceneId, `${x + rw},${k},w`, randomFeature(r));
-    }
-  }
-  for (let i = 0; i < int(r, 1, 8); i++) {
-    const ax = int(r, 0, (w - 1) * 64) / 64;
-    const ay = int(r, 0, (h - 1) * 64) / 64;
-    const len = int(r, 32, 7 * 64) / 64;
-    const angle = r() * 2 * Math.PI;
-    const bx = Math.min(w, Math.max(0, Math.round((ax + len * Math.cos(angle)) * 64) / 64));
-    const by = Math.min(h, Math.max(0, Math.round((ay + len * Math.sin(angle)) * 64) / 64));
-    if (bx === ax && by === ay) continue;
-    wall(state, `w${i}${int(r, 0, 1e6)}`.padEnd(12, "x").slice(0, 12), [ax, ay], [bx, by], randomWallFeature(r), sceneId);
-  }
-  if (sceneId === "s1") {
-    for (let i = 0; i < int(r, 0, 3); i++) heights(state, { x: int(r, 0, w - 3), y: int(r, 0, h - 3), w: int(r, 1, 3), h: int(r, 1, 3) }, pick(r, [5, 10, -5]));
-    if (chance(r, 0.5)) {
-      const x = int(r, 1, w - 6);
-      const y = int(r, 1, h - 2);
-      stairs(state, [0, 1, 2, 3].map((k): [number, number] => [x + k, y]), "a");
-    }
-  }
-}
-
-function randomFeature(r: () => number): BuildChunk["edges"][string] {
-  const roll = r();
-  if (roll < 0.6) return { kind: "wall" };
-  if (roll < 0.85) return { kind: "door", state: pick(r, ["open", "closed", "locked"] as const), secret: chance(r, 0.3), discovered: chance(r, 0.5) };
-  return { kind: "window" };
-}
-
-function randomWallFeature(r: () => number): WallFeature {
-  return randomFeature(r) as WallFeature;
-}
-
-/* The fixtures write scene s1 by default: these take the scene. */
-function paintIn(state: RoomState, sceneId: string, rect: { x: number; y: number; w: number; h: number }, terrain: TerrainId): void {
-  if (sceneId === "s1") paint(state, rect, terrain);
-  else for (let y = rect.y; y < rect.y + rect.h; y++) for (let x = rect.x; x < rect.x + rect.w; x++) chunkOf(state, sceneId, x, y).cells[`${x},${y}`] = terrain;
-}
-
-function edgeIn(state: RoomState, sceneId: string, key: string, feature: BuildChunk["edges"][string]): void {
-  if (sceneId === "s1") return edge(state, key, feature);
-  const [x, y] = key.split(",").map(Number) as [number, number];
-  chunkOf(state, sceneId, x, y).edges[key] = feature;
-}
-
-function chunkOf(state: RoomState, sceneId: string, x: number, y: number): BuildChunk {
-  const cx = Math.floor(x / CHUNK_CELLS);
-  const cy = Math.floor(y / CHUNK_CELLS);
-  const key = `${sceneId}:${cx},${cy}`;
-  const old = state.buildChunks[key];
-  const chunk: BuildChunk = old ? { ...old, cells: { ...old.cells }, edges: { ...old.edges } } : { sceneId, cx, cy, rev: 1, cells: {}, edges: {} };
-  state.buildChunks = { ...state.buildChunks, [key]: chunk };
-  return chunk;
-}
-
-/** A random room for map discovery: perPlayerState's, its scenes per player or whole party, fog on most often, walls stopping moves, and a build. */
-function discoveryState(r: () => number): RoomState {
-  const state = perPlayerState(r);
-  for (const scene of Object.values(state.scenes)) {
-    scene.fogEnabled = chance(r, 0.8);
-    scene.blockMovement = chance(r, 0.7);
-    if (scene.vision && chance(r, 0.4)) scene.vision = { on: scene.vision.on, light: scene.vision.light };
-    else if (!scene.vision && chance(r, 0.6)) scene.vision = { on: true, light: pick(r, ["bright", "dim", "dark"] as const) };
-    randomBuild(r, state, scene.id);
-  }
-  // Ground the DM revealed and the party explored, beside what perPlayerState left.
-  for (let i = 0; i < int(r, 0, 3); i++) lift(state, pick(r, ["dm", "party"] as const), { x: int(r, 0, 28), y: int(r, 0, 28), w: int(r, 1, 8), h: int(r, 1, 8) });
-  return state;
-}
-
-/**
- * A random op: perPlayerOp's, or by the DM a build edit on and across the
- * chunk lines at 16, in sight or out of it: free walls whose held pieces
- * are filed in a neighbor's position, border edges and cells, heights, and
- * labels moved.
- */
-function discoveryOp(r: () => number, state: RoomState, who: Viewer): Op {
-  if (who.role !== "dm" || chance(r, 0.6)) return perPlayerOp(r, state, who);
-  const sceneId = pick(r, ["s1", "s1", "s2"]);
-  const scene = state.scenes[sceneId];
-  if (!scene) return perPlayerOp(r, state, who);
-  const near = (n: number) => Math.min(n - 1, Math.max(0, CHUNK_CELLS + int(r, -3, 3)));
-  switch (int(r, 0, 5)) {
-    case 0:
-    case 1: {
-      // Across a chunk line, its midpoint on either side.
-      const vertical = chance(r, 0.5);
-      const at = int(r, 1, Math.min(scene.bounds.w, scene.bounds.h) - 2);
-      const a = CHUNK_CELLS * 64 - int(r, 8, 200);
-      const b = CHUNK_CELLS * 64 + int(r, 8, 200);
-      const off = int(r, -40, 40);
-      const p = (u: number, v: number): [number, number] => (vertical ? [Math.min(scene.bounds.w, u / 64), Math.min(scene.bounds.h, v)] : [Math.min(scene.bounds.w, v), Math.min(scene.bounds.h, u / 64)]);
-      const w: FreeWall = { id: `cw${int(r, 0, 1e6)}`.padEnd(12, "c").slice(0, 12), a: p(a, at + 0.25), b: p(b, at + 0.25 + off / 64), f: randomWallFeature(r) };
-      const existing = Object.values(state.buildChunks).flatMap((c) => (c.sceneId === sceneId ? (c.walls ?? []).map((x) => ({ cx: c.cx, cy: c.cy, id: x.id })) : []));
-      return chance(r, 0.25) && existing.length > 0 ? { t: "build.walls", sceneId, remove: [pick(r, existing)] } : { t: "build.walls", sceneId, put: [w] };
-    }
-    case 2:
-      return { t: "build.edge", sceneId, edges: [{ key: `${near(scene.bounds.w)},${int(r, 0, scene.bounds.h - 1)},${pick(r, ["n", "w"])}`, feature: chance(r, 0.2) ? null : randomFeature(r) }] };
-    case 3:
-      return { t: "build.paint", sceneId, terrain: pick(r, TERRAINS), cells: [`${near(scene.bounds.w)},${near(scene.bounds.h)}`, `${int(r, 0, scene.bounds.w - 1)},${int(r, 0, scene.bounds.h - 1)}`] };
-    case 4:
-      return { t: "build.height", sceneId, cells: [`${near(scene.bounds.w)},${int(r, 0, scene.bounds.h - 1)}`], height: pick(r, [0, 5, 10]) };
-    default: {
-      const ids = Object.values(state.labels).filter((l) => l.sceneId === sceneId).map((l) => l.id);
-      const id = ids.length > 0 && chance(r, 0.7) ? pick(r, ids) : `lb${int(r, 0, 1e6)}`;
-      return { t: "build.label", sceneId, labelId: id, label: chance(r, 0.85) ? { x: int(r, 0, scene.bounds.w - 1) + 0.5, y: int(r, 0, scene.bounds.h - 1) + 0.5, text: "Here", size: 1 } : null };
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
 // The oracle of held ground
 
