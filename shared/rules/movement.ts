@@ -921,7 +921,7 @@ export function landing(state: BuildState, token: Walker, to: LegEnd, mode: Drop
  * so a long leg costs a few leg tests. Every answer is a spot whose leg is
  * allowed, the start when none is.
  */
-function lastClearSpot(token: MovingToken, to: Point, allowed: (at: Point) => boolean): Point {
+export function lastClearSpot(token: MovingToken, to: Point, allowed: (at: Point) => boolean): Point {
   const spots = legSpots(token, to);
   let lo = 0;
   let hi = spots.length - 1;
@@ -941,7 +941,7 @@ function lastClearSpot(token: MovingToken, to: Point, allowed: (at: Point) => bo
 }
 
 /** The spots along a leg, as `lastClearSpot` steps them: the start first and `to` last. */
-function legSpots(token: MovingToken, to: Point): Point[] {
+export function legSpots(token: MovingToken, to: Point): Point[] {
   const step = snapStep(token);
   const dx = to.x - token.x;
   const dy = to.y - token.y;

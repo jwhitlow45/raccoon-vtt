@@ -7,18 +7,19 @@ import { hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, s
 import { CHARACTER_CHANGED, LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
-import { movementRules, type LegEnd } from "./ruleHooks.ts";
+import { movementRules, type Blocker, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
 import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
 import { checkSetReach, planMove } from "./rules/moveLeg.ts";
-import { footprintSize, occupiedHexes, type FootprintToken } from "./rules/footprint.ts";
+import { footprintRect, footprintSize, occupiedHexes, snapStep, storedCenter, type FootprintToken } from "./rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hexInScene } from "./rules/hex.ts";
 import { groundAt } from "./rules/heights.ts";
 import type { Point } from "./rules/geom.ts";
-import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, ownWalk, walkEnd, type Walker } from "./rules/movement.ts";
-import { onRouteLattice, routeBlocker, routePoints, routeWalkers, type RoutePiece } from "./rules/route.ts";
-import { NO_ROOM_TO_GROW, OWNER_SIZES, resizeRefusal } from "./rules/resize.ts";
+import { fogClassOf, groundOf, type Ground } from "./rules/held.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, coreSize, landing, lastClearSpot, legSpots, legStop, ownWalk, straightClear, walkEnd, walkFrom, walkOn, type Walker } from "./rules/movement.ts";
+import { legSteps, onRouteLattice, routeLattice, routePoints, routeStop, routeWalkers, type RoutePiece } from "./rules/route.ts";
+import { NO_ROOM_TO_GROW, OWNER_SIZES, resizeCandidates, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
 import { turnUnderWay } from "./rules/path.ts";
 import { entryMatchesAnchor } from "./rules/durations.ts";
@@ -85,6 +86,7 @@ class Check {
   readonly deps: PermissionDeps;
   readonly opts: ProjectOpts;
   private encounter: ProjectedEncounter | null | undefined;
+  private readonly grounds = new Map<string, Ground | null>();
 
   constructor(state: RoomState, actor: Viewer, deps: PermissionDeps) {
     this.state = state;
@@ -100,6 +102,21 @@ class Check {
   visibleToken(id: string): Token | undefined {
     const token = this.state.tokens[id];
     return token && this.visible(keys.token(id)) ? token : undefined;
+  }
+
+  /**
+   * The actor's live ground on a scene, where the touch rule speaks
+   * (docs/design-v1-map-discovery.md 6, decision 11): a player's, on a
+   * square scene with fog on. Null where today's words stand: for the DM,
+   * with fog off, and on hexes, whose scenes have no walls yet.
+   */
+  liveGround(sceneId: string): Ground | null {
+    if (!this.grounds.has(sceneId)) {
+      const scene = this.state.scenes[sceneId];
+      const speaks = this.actor.role === "player" && scene?.fogEnabled === true && !isHex(sceneGrid(scene));
+      this.grounds.set(sceneId, speaks ? groundOf(this.state, sceneId, fogClassOf(this.state, sceneId, this.actor.memberId)) : null);
+    }
+    return this.grounds.get(sceneId)!;
   }
 
   /** The encounter as the actor's projection holds it: null with no fight, and for a player behind a blackout. */
@@ -518,7 +535,11 @@ function squeezeFits(op: Op, c: Check): Decision {
   if (!token) return OK;
   const walker = walkerFor(c.state, token, seenAllIn(c), { to: op });
   const points = op.route ? routePoints(c.state.buildChunks, walker, op.route, op.elevation ?? token.elevation) : [];
-  return movementRules.squeezeFits(c.state, walkEnd(c.state, walker, { x: op.x, y: op.y }, points.slice(1, -1))) ? OK : refuse("invalid", NOT_A_SQUEEZE);
+  if (movementRules.squeezeFits(c.state, walkEnd(c.state, walker, { x: op.x, y: op.y }, points.slice(1, -1)))) return OK;
+  // The full footprint is the squeeze's stopping step (docs/design-v1-map-discovery.md 6).
+  const ground = c.liveGround(token.sceneId);
+  const { squeeze: _squeeze, ...full } = token;
+  return refuse("invalid", ground && !footprintLive(ground, { ...full, x: op.x, y: op.y }) ? SOMETHING_BLOCKS : NOT_A_SQUEEZE);
 }
 
 const LEVEL_DOES_NOT_FIT = refuse("invalid", `Exhaustion is level 1 to ${EXHAUSTION_MAX_LEVEL}`);
@@ -1515,7 +1536,7 @@ function draggedWalls(c: Check, op: Op): Decision {
     for (let i = 1; i < moved.route.length; i++) {
       // A creature a holder drags beside it walks as itself, since a drag is no seat: as the move's trace has it (route.ts followerTrace).
       const blocker = movementRules.legBlocker(c.state, moved.trace[i - 1]!, moved.route[i]!);
-      if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
+      if (blocker !== null) return refuse("forbidden", walkWords(c, moved.trace[i - 1]!, moved.route[i]!, blocker));
     }
   }
   return OK;
@@ -1806,7 +1827,7 @@ function restorePoseCheck(c: Check, tokenId: string, value: unknown, redo: boole
   if (current.size === "custom" || restored.size === "custom") return refuse("forbidden", OWNER_SIZES);
   if (withoutPose(restored, SIZE_FIELDS) !== withoutPose(current, SIZE_FIELDS)) return refuse("forbidden", "an undo of yours only moves or resizes tokens back");
   const refusal = resizeRefusal(c.state, current, restored);
-  return refusal === null ? OK : refuse("forbidden", refusal);
+  return refusal === null ? OK : refuse("forbidden", resizeWords(c, current, restored, refusal));
 }
 
 /**
@@ -1826,8 +1847,9 @@ function resizeCheck(c: Check, token: Token, patch: TokenPatch): Decision {
   if (token.locked) return refuse("forbidden", "that token is locked");
   const sizeAndPlace = Object.keys(patch).every((field) => field === "size" || field === "x" || field === "y");
   if (!sizeAndPlace || patch.size === undefined || patch.size === "custom" || token.size === "custom") return refuse("forbidden", OWNER_SIZES);
-  const refusal = resizeRefusal(c.state, token, { size: patch.size, x: patch.x ?? token.x, y: patch.y ?? token.y });
-  return refusal === null ? OK : refuse("forbidden", refusal);
+  const next = { size: patch.size, x: patch.x ?? token.x, y: patch.y ?? token.y };
+  const refusal = resizeRefusal(c.state, token, next);
+  return refusal === null ? OK : refuse("forbidden", resizeWords(c, token, next, refusal));
 }
 
 // What a player hears when a wall or a ledge stops a move, kept with the move rules since a resize says it too.
@@ -1844,8 +1866,374 @@ function restoreWords(d: Decision): Decision {
   if (d.message === WALL_IN_THE_WAY) return { ...d, message: WALL_IN_THE_WAY_BACK };
   if (d.message === LEDGE_IN_THE_WAY) return { ...d, message: LEDGE_IN_THE_WAY_BACK };
   if (d.message === NO_ROOM_TO_GROW) return { ...d, message: NO_ROOM_TO_GROW_BACK };
+  if (d.message === SOMETHING_BLOCKS) return { ...d, message: SOMETHING_BLOCKS_BACK };
   return d;
 }
+// ---------------------------------------------------------------------------
+// The touch rule (docs/design-v1-map-discovery.md 6, decision 11)
+
+/**
+ * What a player hears when what stopped them may lie on ground they do not
+ * see now: it names no kind, so a stop or refusal never tells them what
+ * stands where their sight and the DM's reveals never reached, or what
+ * changed on ground they only remember.
+ */
+export const SOMETHING_BLOCKS = "Something blocks the way.";
+/** The same, as a restore's refusal words it after its step's label. */
+export const SOMETHING_BLOCKS_BACK = "something blocks the way";
+
+/*
+ * Whether the segment from P to Q meets the closed box, by clipping it to
+ * each axis's slab.
+ */
+function segmentMeetsBox(px: number, py: number, qx: number, qy: number, x0: number, y0: number, x1: number, y1: number): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  for (const [p, d, lo, hi] of [
+    [px, qx - px, x0, x1],
+    [py, qy - py, y0, y1],
+  ] as const) {
+    if (d === 0) {
+      if (p < lo || p > hi) return false;
+      continue;
+    }
+    const a = (lo - p) / d;
+    const b = (hi - p) / d;
+    t0 = Math.max(t0, Math.min(a, b));
+    t1 = Math.min(t1, Math.max(a, b));
+    if (t0 > t1) return false;
+  }
+  return true;
+}
+
+/*
+ * Whether every cell a closed box of half sides (hx, hy) touches, its
+ * middle swept from P to Q, lies on live ground. Touching a cell's side or
+ * corner counts, and a hair more than touching too, so rounding only ever
+ * gives the generic words. Cells off the scene hold nothing to hide.
+ */
+function sweepLive(g: Ground, px: number, py: number, qx: number, qy: number, hx: number, hy: number): boolean {
+  const E = 1e-9;
+  const x0 = Math.max(0, Math.floor(Math.min(px, qx) - hx - E));
+  const y0 = Math.max(0, Math.floor(Math.min(py, qy) - hy - E));
+  const x1 = Math.min(g.bounds.w - 1, Math.floor(Math.max(px, qx) + hx + E));
+  const y1 = Math.min(g.bounds.h - 1, Math.floor(Math.max(py, qy) + hy + E));
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      if (!g.live(x, y) && segmentMeetsBox(px, py, qx, qy, x - hx - E, y - hy - E, x + 1 + hx + E, y + 1 + hy + E)) return false;
+    }
+  }
+  return true;
+}
+
+/** Whether a footprint standing where it stands, closed, so with the sides and corners of the cells beside it, lies on live ground: a stopping step's test. */
+function footprintLive(g: Ground, token: FootprintToken & Point): boolean {
+  const { w, h } = footprintSize(token);
+  const c = storedCenter(token);
+  return sweepLive(g, c.x, c.y, c.x, c.y, w / 2, h / 2);
+}
+
+/**
+ * Whether every cell a footprint covers lies on live ground: where the
+ * sender's device reads what the op meets as it is, so a refusal there
+ * stays in place (6). The cells beside it count only for the words.
+ */
+function coverLive(g: Ground, token: FootprintToken & Point): boolean {
+  const { w, h } = footprintSize(token);
+  const E = 1e-9;
+  for (let y = Math.floor(token.y + E); y < Math.ceil(token.y + h - E); y++) {
+    for (let x = Math.floor(token.x + E); x < Math.ceil(token.x + w - E); x++) {
+      if (x >= 0 && y >= 0 && x < g.bounds.w && y < g.bounds.h && !g.live(x, y)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * A stopped leg's stopping step (decision 11): from its last clear spot, by
+ * the rule a walk's landing finds it (movement.ts landing), to the next spot
+ * along the leg. Null when nothing stops the leg.
+ */
+function stoppingStep(state: RoomState, walker: Walker, to: LegEnd): { from: Point; to: Point } | null {
+  const allowed = (at: Point) => legStop(state, walker, { x: at.x, y: at.y, elevation: to.elevation }) === null;
+  if (allowed(to)) return null;
+  const from = lastClearSpot(walker, to, allowed);
+  const spots = legSpots(walker, to);
+  const i = spots.findIndex((s) => s.x === from.x && s.y === from.y);
+  return { from, to: spots[i + 1] ?? { x: to.x, y: to.y } };
+}
+
+/**
+ * The words of a stopped walk (decision 11): today's, naming what the
+ * straight step from the last clear spot meets, only where every cell the
+ * walker's core touches on that step lies on the sender's live ground.
+ * Anywhere else the generic words, remembered ground included, since a
+ * remembered wall may be gone and an unseen one may stand there. What the
+ * step meets lies inside the sweep just tested, so the kind it names is of
+ * something on live ground. A step that only a shifted path passes, or
+ * one that meets nothing on its own, names none.
+ */
+function walkWords(c: Check, walker: Walker, to: LegEnd, blocker: Blocker): string {
+  const ground = c.liveGround(walker.sceneId);
+  if (!ground) return blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY;
+  const step = stoppingStep(c.state, walker, to);
+  if (!step) return SOMETHING_BLOCKS;
+  const core = coreSize(walker);
+  const p = storedCenter({ ...walker, x: step.from.x, y: step.from.y });
+  const q = storedCenter({ ...walker, x: step.to.x, y: step.to.y });
+  if (!sweepLive(ground, p.x, p.y, q.x, q.y, core.w / 2, core.h / 2)) return SOMETHING_BLOCKS;
+  const chunks = c.state.buildChunks;
+  const at = step.from.x === walker.x && step.from.y === walker.y ? walker : walkOn(chunks, walkFrom(chunks, walker), step.from);
+  const end = { x: step.to.x, y: step.to.y, elevation: to.elevation };
+  if (straightClear(c.state, at, end)) return SOMETHING_BLOCKS;
+  const stop = legStop(c.state, at, end);
+  return stop === null ? SOMETHING_BLOCKS : stop.blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY;
+}
+
+/**
+ * A companion's placement refused in place (6): the step from its
+ * character's token in today's rule where its footprint lies on live
+ * ground, which the form predicts, else the generic words, since the
+ * touch rule lands it elsewhere when anything fits (touchLanding).
+ */
+function companionStopWords(c: Check, input: TokenInput, beside: Token, blocker: Blocker): string {
+  const ground = c.liveGround(input.sceneId);
+  if (!ground) return blocker === "ledge" ? LEDGE_IN_THE_WAY : WALL_IN_THE_WAY;
+  if (!coverLive(ground, inputAsToken(input))) return SOMETHING_BLOCKS;
+  const walker = ownWalk({ ...inputAsToken(input), x: beside.x, y: beside.y, elevation: beside.elevation });
+  return walkWords(c, walker, { x: input.x, y: input.y, elevation: input.elevation ?? beside.elevation }, blocker);
+}
+
+/** A resize refused by the walls (6): its new footprint is the stopping step, so off live ground it names no kind and no room. */
+function resizeWords(c: Check, token: Token, next: { size: Token["size"]; x: number; y: number; w?: number; h?: number }, refusal: string): string {
+  if (refusal !== WALL_IN_THE_WAY && refusal !== LEDGE_IN_THE_WAY && refusal !== NO_ROOM_TO_GROW) return refusal;
+  const ground = c.liveGround(token.sceneId);
+  if (!ground) return refusal;
+  const { squeeze: _squeeze, ...rest } = token;
+  return footprintLive(ground, { ...rest, size: next.size, x: next.x, y: next.y, ...(next.w !== undefined ? { w: next.w } : {}), ...(next.h !== undefined ? { h: next.h } : {}) }) ? refusal : SOMETHING_BLOCKS;
+}
+
+/** The refusals the touch rule may land instead (touchLanding). Any other refusal of the op stands. */
+const TOUCH_REFUSALS: ReadonlySet<string> = new Set([WALL_IN_THE_WAY, LEDGE_IN_THE_WAY, SOMETHING_BLOCKS, NOT_A_SQUEEZE, NO_ROOM_TO_GROW]);
+
+/** A player's op the touch rule lands, as the server stores it in place of the one sent, and the words of what stopped it. */
+export type TouchLanding = { op: Op; words: string };
+
+/**
+ * The touch rule's landing (docs/design-v1-map-discovery.md 6, decision 11,
+ * MD-R9-1): a player's op on a square scene with fog on that the real build
+ * stops, landed instead of refused, so no spot can be probed for free by a
+ * refusal in place. The server asks it of every player op before the
+ * permission check (server/rooms/actor.ts) and on an answer stores and
+ * applies its op, which `canApply` takes, and tells the sender the walk was
+ * `blocked`. Null leaves the op to `canApply`: it passes, it is refused for
+ * a reason the walls do not give, or nothing fits.
+ * - A walk, plain, routed, an arrow's step or a holder's with those it
+ *   drags, whatever the held build said, lands at its last clear spot by
+ *   `landing`'s rule, on the first piece the walls stop, its route kept up
+ *   to there. Where that spot is not one the check takes (a creature it
+ *   drags stopped, a squeeze), the walk is cut back further, to the last
+ *   spot along it that the check takes, the start at the least.
+ * - A squeeze the walk reaches but the spot does not take lands unsqueezed
+ *   there, unless the sender sees the whole footprint there, which their
+ *   device then predicts, so it is refused in place.
+ * - A group's stopped legs each land at their last clear spot.
+ * - A resize whose new footprint does not lie on live ground takes the
+ *   nearest spot its own search would try that fits.
+ * - A companion placed off live ground goes to the nearest spot the
+ *   placement takes.
+ * The words are the stopping step's (walkWords), or the generic words for
+ * a landing found by the check alone.
+ */
+export function touchLanding(op: Op, actor: Viewer, state: RoomState, deps: PermissionDeps): TouchLanding | null {
+  if (actor.role === "dm") return null;
+  const first = canApply(op, actor, state, deps);
+  if (first.ok || !TOUCH_REFUSALS.has(first.message)) return null;
+  const c = new Check(state, actor, deps);
+  const takes = (o: Op) => canApply(o, actor, state, deps).ok;
+  switch (op.t) {
+    case "token.move":
+      return moveLanding(c, op, takes);
+    case "token.moveMany":
+      return groupLanding(c, op, takes);
+    case "token.update":
+      return resizeLanding(c, op, takes);
+    case "token.create":
+      return companionLanding(c, op, takes);
+    default:
+      return null;
+  }
+}
+
+/** The token a touch landing moves, its scene's live ground, and its walker, where the rule lands its walks. */
+function walkingOn(c: Check, tokenId: string, to: Point): { token: Token; ground: Ground; walker: Token & Walker } | null {
+  const token = c.state.tokens[tokenId];
+  const scene = token ? c.state.scenes[token.sceneId] : undefined;
+  const ground = token ? c.liveGround(token.sceneId) : null;
+  if (!token || !scene || !ground || scene.blockMovement !== true) return null;
+  return { token, ground, walker: walkerFor(c.state, token, seenAllIn(c), { to }) };
+}
+
+/** The height a walk takes at a spot it is cut at: its own there (movement.ts walkOn), as a route's corner has it. */
+function cutHeight(c: Check, walking: Walker, at: Point): number {
+  const chunks = c.state.buildChunks;
+  return walkOn(chunks, walkFrom(chunks, walking), at).elevation;
+}
+
+/** A move cut to a spot: the route's pieces before `piece`, then one to the spot, and the spot's height where it is not the token's. */
+function cutMove(op: OpOf<"token.move">, token: Token, at: Point, piece: number, elevation: number, squeeze: boolean): OpOf<"token.move"> {
+  const { route, squeeze: _squeeze, elevation: _elevation, ...rest } = op;
+  const out: OpOf<"token.move"> = { ...rest, x: at.x, y: at.y };
+  if (elevation !== token.elevation) out.elevation = elevation;
+  if (squeeze) out.squeeze = true;
+  if (route) {
+    const start = piece === 0 ? { x: token.x, y: token.y } : { x: route[piece - 1]![0], y: route[piece - 1]![1] };
+    const kept = route.slice(0, piece);
+    const cut = start.x === at.x && start.y === at.y ? kept : [...kept, [at.x, at.y, route[piece]![2], route[piece]![3]] as [number, number, number, 0 | 1]];
+    if (cut.length > 0) out.route = cut;
+  }
+  return out;
+}
+
+function moveLanding(c: Check, op: OpOf<"token.move">, takes: (o: Op) => boolean): TouchLanding | null {
+  if (op.teleport !== undefined) return null;
+  const on = walkingOn(c, op.tokenId, op);
+  if (!on) return null;
+  const { token, ground, walker } = on;
+  const elevation = op.elevation ?? token.elevation;
+  if (op.squeeze) {
+    const { squeeze: _squeeze, ...plain } = op;
+    if (takes(plain)) {
+      const { squeeze: _s, ...full } = token;
+      return coverLive(ground, { ...full, x: op.x, y: op.y }) ? null : { op: plain, words: SOMETHING_BLOCKS };
+    }
+  }
+  // The walk's pieces, each from its walker where it starts: a plain move is one piece.
+  const pieces: { from: Walker; to: LegEnd }[] = [];
+  if (op.route) {
+    const walkers = routeWalkers(c.state.buildChunks, walker, op.route, elevation);
+    for (let i = 1; i < walkers.length; i++) pieces.push({ from: walkers[i - 1]!, to: { x: walkers[i]!.x, y: walkers[i]!.y, elevation: walkers[i]!.elevation } });
+  } else pieces.push({ from: walker, to: { x: op.x, y: op.y, elevation } });
+  const stopped = op.route ? routeStop(c.state, walker, op.route, elevation) : null;
+  const j = op.route ? (stopped?.piece ?? -1) : movementRules.legBlocker(c.state, walker, pieces[0]!.to) !== null ? 0 : -1;
+  if (j >= 0) {
+    const piece = pieces[j]!;
+    const land = landing(c.state, piece.from, piece.to, "walk");
+    const at = { x: land.x, y: land.y };
+    const words = land.stopped ? walkWords(c, piece.from, piece.to, land.stopped.blocker) : SOMETHING_BLOCKS;
+    const height = op.route ? (land.x === piece.to.x && land.y === piece.to.y ? piece.to.elevation : cutHeight(c, piece.from, at)) : land.stopped ? cutHeight(c, walker, at) : elevation;
+    for (const squeeze of land.squeeze && (j === 0 || !op.route) ? [true, false] : [false]) {
+      const cut = cutMove(op, token, at, j, height, squeeze);
+      if (takes(cut)) return { op: cut, words };
+    }
+  }
+  // Cut back along the whole walk to the last spot the check takes, by gallop and bisection as `landing` steps a leg.
+  const spots: { piece: number; at: Point; from: Walker }[] = [{ piece: 0, at: { x: token.x, y: token.y }, from: walker }];
+  for (const [i, piece] of pieces.entries()) {
+    if (op.route) {
+      const steps = legSteps(piece.from, piece.to, routeLattice(token));
+      for (let k = 1; k <= steps.n; k++) spots.push({ piece: i, at: steps.at(k), from: piece.from });
+    } else for (const at of legSpots(piece.from, piece.to).slice(1)) spots.push({ piece: i, at, from: piece.from });
+  }
+  const candidate = (k: number): OpOf<"token.move"> => {
+    const s = spots[k]!;
+    return cutMove(op, token, s.at, s.piece, cutHeight(c, s.from, s.at), false);
+  };
+  const last = lastTaken(spots.length - 1, (k) => takes(candidate(k)));
+  return last === null ? null : { op: candidate(last), words: SOMETHING_BLOCKS };
+}
+
+/*
+ * The last index in 0 to n - 1 whose candidate the check takes, assuming
+ * those it takes come first: gallop, then bisect, then step back from there
+ * should a later one still be refused. Null when none is taken.
+ */
+function lastTaken(n: number, taken: (k: number) => boolean): number | null {
+  if (n <= 0) return null;
+  let lo = -1;
+  let hi = n;
+  for (let probe = 0; probe < hi; probe = probe === 0 ? 1 : probe * 2) {
+    if (taken(probe)) lo = probe;
+    else {
+      hi = probe;
+      break;
+    }
+  }
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (taken(mid)) lo = mid;
+    else hi = mid;
+  }
+  return lo >= 0 ? lo : null;
+}
+
+function groupLanding(c: Check, op: OpOf<"token.moveMany">, takes: (o: Op) => boolean): TouchLanding | null {
+  let words: string | null = null;
+  const moves = op.moves.map((move) => {
+    const on = walkingOn(c, move.tokenId, move);
+    if (!on) return move;
+    const end = { x: move.x, y: move.y, elevation: move.elevation ?? on.token.elevation };
+    const blocker = movementRules.legBlocker(c.state, on.walker, end);
+    if (blocker === null) return move;
+    words ??= walkWords(c, on.walker, end, blocker);
+    const land = landing(c.state, on.walker, end, "walk");
+    const { elevation: _elevation, ...rest } = move;
+    const height = land.stopped ? cutHeight(c, on.walker, land) : end.elevation;
+    return { ...rest, x: land.x, y: land.y, ...(height !== on.token.elevation ? { elevation: height } : {}) };
+  });
+  if (words === null) return null;
+  const cut: OpOf<"token.moveMany"> = { ...op, moves };
+  return takes(cut) ? { op: cut, words } : null;
+}
+
+function resizeLanding(c: Check, op: OpOf<"token.update">, takes: (o: Op) => boolean): TouchLanding | null {
+  const size = op.patch.size;
+  const token = c.state.tokens[op.tokenId];
+  const ground = token ? c.liveGround(token.sceneId) : null;
+  if (size === undefined || !token || !ground) return null;
+  const x = op.patch.x ?? token.x;
+  const y = op.patch.y ?? token.y;
+  const { squeeze: _squeeze, ...rest } = token;
+  if (coverLive(ground, { ...rest, size, x, y })) return null;
+  // The spots a resize may take, in its own search's order (rules/resize.ts resizeCandidates): a half-cell shift is no spot of a size on whole cells.
+  const scene = c.state.scenes[token.sceneId]!;
+  for (const at of resizeCandidates(token, { size }, scene)) {
+    if (at.x === x && at.y === y) continue;
+    const shifted: OpOf<"token.update"> = { ...op, patch: { ...op.patch, x: at.x, y: at.y } };
+    if (takes(shifted)) return { op: shifted, words: SOMETHING_BLOCKS };
+  }
+  return null;
+}
+
+/** How far from the spot asked a companion's landing looks, in cells: past a Gargantuan creature's reach of its character. */
+const COMPANION_LANDING_REACH = 6;
+
+function companionLanding(c: Check, op: OpOf<"token.create">, takes: (o: Op) => boolean): TouchLanding | null {
+  const input = op.token;
+  const ground = input.companion ? c.liveGround(input.sceneId) : null;
+  if (!ground || coverLive(ground, inputAsToken(input))) return null;
+  const step = snapStep(inputAsToken(input));
+  const spots: Point[] = [];
+  const n = Math.round(COMPANION_LANDING_REACH / step);
+  for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) if (i !== 0 || j !== 0) spots.push({ x: input.x + i * step, y: input.y + j * step });
+  // Nearest first, then by row and column, so the landing never depends on the order anything was stored in.
+  spots.sort((a, b) => (a.x - input.x) ** 2 + (a.y - input.y) ** 2 - ((b.x - input.x) ** 2 + (b.y - input.y) ** 2) || a.y - b.y || a.x - b.x);
+  // Clear of the creatures the sender sees, as the form's spot finder keeps it (client/features/tokens/companions.ts), and never of one they do not.
+  const fp = footprintSize(inputAsToken(input));
+  const seen = Object.values(c.state.tokens).filter((t) => t.sceneId === input.sceneId && c.visibleToken(t.id) !== undefined);
+  const clear = (at: Point) =>
+    seen.every((t) => {
+      const o = footprintSize(t);
+      return at.x + fp.w <= t.x || t.x + o.w <= at.x || at.y + fp.h <= t.y || t.y + o.h <= at.y;
+    });
+  for (const at of spots) {
+    if (!clear(at)) continue;
+    const moved: OpOf<"token.create"> = { ...op, token: { ...input, x: at.x, y: at.y } };
+    if (takes(moved)) return { op: moved, words: SOMETHING_BLOCKS };
+  }
+  return null;
+}
+
 /** A teleport lands on the map, wherever the walls are (section 4.1). */
 export const TELEPORT_OFF_MAP = "a teleport lands inside the map";
 
@@ -1870,9 +2258,10 @@ function legCheck(c: Check, tokenId: string, to: Pick<Token, "x" | "y"> & { elev
   // A token rising or sinking where it stands crosses no edge.
   if (scene.blockMovement !== true || (end.x === token.x && end.y === token.y)) return OK;
   // Off a holder on the ground it walks on the ground, crossing only the holder's inner ledges, as its route and the drag's own check do (rules/attach.ts walkerFor).
-  const blocker = movementRules.legBlocker(c.state, walkerFor(c.state, token, seenAllIn(c)), end);
+  const walker = walkerFor(c.state, token, seenAllIn(c));
+  const blocker = movementRules.legBlocker(c.state, walker, end);
   if (blocker === null) return OK;
-  return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
+  return refuse("forbidden", walkWords(c, walker, end, blocker));
 }
 
 /**
@@ -1898,14 +2287,15 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
     const landing = last && end && end[0] === to.x && end[1] === to.y ? (to.elevation ?? at.elevation) : undefined;
     const walkers = routeWalkers(c.state.buildChunks, at, route, landing);
     // Each piece from where it starts, squeezed only where the walk starts: the client checks its routes by this same rule before it sends them.
-    const blocker = routeBlocker(c.state, at, route, walkers[walkers.length - 1]!.elevation, (state, from, to) => movementRules.legBlocker(state, from, to));
-    if (blocker !== null) return refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
+    const stop = routeStop(c.state, at, route, walkers[walkers.length - 1]!.elevation, (state, from, to) => movementRules.legBlocker(state, from, to));
+    if (stop !== null) return refuse("forbidden", walkWords(c, walkers[stop.piece]!, walkers[stop.piece + 1]!, stop.blocker));
     // The next route goes on from its end as the walk left it (movement.ts walkOn): off the holder for good once any stop was clear of it, squeezed no more.
     at = walkers[walkers.length - 1]!;
   }
   if (at.x === to.x && at.y === to.y) return OK;
-  const blocker = movementRules.legBlocker(c.state, at, { x: to.x, y: to.y, elevation: to.elevation ?? at.elevation });
-  return blocker === null ? OK : refuse("forbidden", blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY);
+  const end = { x: to.x, y: to.y, elevation: to.elevation ?? at.elevation };
+  const blocker = movementRules.legBlocker(c.state, at, end);
+  return blocker === null ? OK : refuse("forbidden", walkWords(c, at, end, blocker));
 }
 
 /** Whether a footprint at `at` lies inside the scene: its box on squares, and on hexes every hex it stands on (docs/design-v1-hex-grids.md 4.2). */
@@ -1936,27 +2326,93 @@ export function doorReachFt(feetPerCell: number): number {
  * only one their own projection shows as a door: anything else, a secret
  * door not yet found included, is not there. A locked door says so, and the
  * door must be within reach of a token of their own on the scene.
+ *
+ * On a scene with fog on the door is judged first as the player's copy
+ * shows it, memory's where they remember one (docs/design-v1-map-discovery.md
+ * 6), and reach from there, so while reach fails the answer is the one a
+ * real door there would give. Once reach passes, a door gone from the build
+ * or moved since they saw it is gone, without reading a stored wall that is
+ * no longer there (doorPlace). A door already as asked is taken, as any
+ * open of an open door is, so the sender then sees it as it is.
  */
 function doorCheck(c: Check, op: OpOf<"door.set">): Decision {
   if (op.state === "locked" || op.found !== undefined) return refuse("forbidden", DOOR_DM_ONLY);
-  const { cx, cy } = doorChunk(op.door);
-  const shown = projectEntity(keys.chunk(op.sceneId, cx, cy), c.state, c.actor, c.opts) as BuildChunk | null;
-  const stored = c.state.buildChunks[chunkKey(op.sceneId, cx, cy)];
-  if (!shown || !stored || !doorIn(shown, op.door)) return GONE;
+  const shown = shownDoorChunk(c, op);
+  if (!shown) return GONE;
   // Reach comes before the lock: a player learns a door is locked by trying it, so a door out of reach answers the same
   // whether it is locked or not, and no request can list the locks across the scene. An open names its opener, a token
   // of theirs that reaches the door (docs/design-v1-traps.md 5.3), and a close any token of theirs that does.
   if (op.state === "open") {
     const by = op.by !== undefined ? c.visibleToken(op.by) : null;
     if (!by || by.sceneId !== op.sceneId || !ownsToken(c.state, c.actor, by)) return refuse("invalid", CHOOSE_OPENER);
-    if (!reachesDoor(c.state, by, op.door, stored)) return refuse("forbidden", DOOR_TOO_FAR);
+    if (!reachesDoor(c.state, by, op.door, shown)) return refuse("forbidden", reachWords(c, [by], op.door, shown));
   } else {
-    const reached = Object.values(c.state.tokens).some((token) => token.sceneId === op.sceneId && ownsToken(c.state, c.actor, token) && reachesDoor(c.state, token, op.door, stored));
-    if (!reached) return refuse("forbidden", DOOR_TOO_FAR);
+    const own = Object.values(c.state.tokens).filter((token) => token.sceneId === op.sceneId && ownsToken(c.state, c.actor, token));
+    if (!own.some((token) => reachesDoor(c.state, token, op.door, shown))) return refuse("forbidden", reachWords(c, own, op.door, shown));
   }
+  const { cx, cy } = doorChunk(op.door);
+  const stored = c.state.buildChunks[chunkKey(op.sceneId, cx, cy)];
+  const real = stored ? doorIn(stored, op.door) : null;
+  if (!stored || !real || !samePlace(shown, stored, op.door)) return GONE;
   // The lock is read from the stored door, since players get a locked door as closed.
-  if (doorIn(stored, op.door)?.state === "locked") return refuse("forbidden", DOOR_LOCKED);
+  if (real.state === "locked") return refuse("forbidden", DOOR_LOCKED);
   return OK;
+}
+
+/** The chunk a player's copy holds the door in, when it shows a door there: memory's where they remember one. */
+function shownDoorChunk(c: Check, op: OpOf<"door.set">): BuildChunk | null {
+  const { cx, cy } = doorChunk(op.door);
+  const shown = projectEntity(keys.chunk(op.sceneId, cx, cy), c.state, c.actor, c.opts) as BuildChunk | null;
+  return shown && doorIn(shown, op.door) ? shown : null;
+}
+
+/**
+ * Whether a player's `door.set` reached the door their copy shows
+ * (docs/design-v1-map-discovery.md 5.3, doors touched): the server drops
+ * that door's memory in every layer the sender reads when the op is taken,
+ * or refused as gone once reach passed, so they then see it as it is.
+ */
+export function doorReachPassed(op: OpOf<"door.set">, actor: Viewer, state: RoomState, deps: PermissionDeps): boolean {
+  if (actor.role === "dm") return false;
+  const c = new Check(state, actor, deps);
+  const shown = shownDoorChunk(c, op);
+  if (!shown) return false;
+  if (op.state === "open") {
+    const by = op.by !== undefined ? c.visibleToken(op.by) : null;
+    return by !== null && by !== undefined && by.sceneId === op.sceneId && ownsToken(state, actor, by) && reachesDoor(state, by, op.door, shown);
+  }
+  return Object.values(state.tokens).some((token) => token.sceneId === op.sceneId && ownsToken(state, actor, token) && reachesDoor(state, token, op.door, shown));
+}
+
+/* Whether the stored door stands where the shown one does: an edge door always does, a free door by its ends. */
+function samePlace(shown: BuildChunk, stored: BuildChunk, ref: DoorRef): boolean {
+  if ("edge" in ref) return true;
+  const a = shown.walls?.find((w) => w.id === ref.id);
+  const b = stored.walls?.find((w) => w.id === ref.id);
+  return !!a && !!b && a.a[0] === b.a[0] && a.a[1] === b.a[1] && a.b[0] === b.b[0] && a.b[1] === b.b[1];
+}
+
+/**
+ * The words of a door out of reach (decision 11): too far, unless a token
+ * near enough has its line to the door stopped where that line, less its
+ * end at the door, touches ground off the sender's live ground. Then what
+ * stopped it may stand where they do not see, so it names nothing.
+ */
+function reachWords(c: Check, tokens: readonly Token[], ref: DoorRef, chunk: BuildChunk): string {
+  const ground = tokens[0] ? c.liveGround(tokens[0].sceneId) : null;
+  if (!ground) return DOOR_TOO_FAR;
+  const { cells, mid } = doorPlace(ref, chunk);
+  const settings = c.state.meta.settings;
+  const reach = doorReachFt(settings.feetPerCell);
+  for (const token of tokens) {
+    if (!cells.some((cell) => reachFt(c.state, token, cell, settings) <= reach)) continue;
+    const r = footprintRect(SQUARES, token);
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    const k = 1 - 1e-6;
+    if (!sweepLive(ground, cx, cy, cx + (mid.x - cx) * k, cy + (mid.y - cy) * k, 0, 0)) return SOMETHING_BLOCKS;
+  }
+  return DOOR_TOO_FAR;
 }
 
 /**
@@ -2221,7 +2677,7 @@ function companionCheck(c: Check, input: TokenInput, link: NonNullable<TokenInpu
   if (near.length === 0) return refuse("forbidden", companionWords.tooFar(character.name));
   if (scene.blockMovement === true) {
     const blockers = near.map((t) => companionLegBlocker(c.state, input, t));
-    if (!blockers.includes(null)) return refuse("forbidden", blockers[0] === "ledge" ? LEDGE_IN_THE_WAY : WALL_IN_THE_WAY);
+    if (!blockers.includes(null)) return refuse("forbidden", companionStopWords(c, input, near[0]!, blockers[0]!));
   }
   if (!("inline" in input.actor)) return refuse("forbidden", "a companion has stats of its own");
   const a = input.actor.inline;
