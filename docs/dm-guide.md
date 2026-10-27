@@ -161,17 +161,22 @@ A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, f
 
 ![A new Map image scene named Cave, with its file picked and Players see on Reveal by hand, before Upload and create.](dm-guide/scenes-new-map.webp)
 
-### This scene
+### A scene's settings
 
-Below the scene list (**All scenes**) and **New scene**, the panel shows the settings of the scene on your screen, in these sections:
+Below the scene list (**All scenes**) and **New scene**, the panel shows the settings of the scene on your screen. The **Scene name** comes first, and players can see it. Everything else sits in four groups, each holding the settings that do one job, so the ones you need are always together:
 
-- **This scene**: the **Scene name** (players see it), the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), the **Starting view**, the **Suggested view**, **Size in squares** and the **Background**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone. **Suggested view** is **Top-down** or **Isometric**: see [The isometric view](#the-isometric-view).
-- **Map phases**: other images of the same map. See [Map phases, imports and exports](#map-phases-imports-and-exports).
-- **What players see**: **Players see**, **Light** and **Sight**, the fog and party vision switches folded under them, and **Use these settings on other scenes…**. See [Light and party vision](#light-and-party-vision).
-- **Grid**: **Grid lines**, **Grid color**, **Opacity** and **Line width**, plus, on a map image, **Line up the grid** and **Or count the squares**.
-- **Movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player's token walks around walls, closed doors and ledges the party has seen, and stops only where there is no way around. Your own moves are never stopped. See [When walls stop a move](#when-walls-stop-a-move).
-- **Map builder**: **Open the builder**, **Clear the build** and **Automatic walls**.
-- At the end, **Export as image** and **Delete scene**.
+- **What players see**: **Players see**, **Light** and **Sight**, who lends the party sight, the fog and party vision switches folded under them, and **Use these settings on other scenes…**. Everything that decides what this scene shows your players is here. See [Light and party vision](#light-and-party-vision).
+- **Map image and grid**: the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), then its **Map phases** once the scene has an image (see [Map phases, imports and exports](#map-phases-imports-and-exports)), then the grid: **Grid lines**, **Grid color**, **Opacity** and **Line width**, plus, on a map image, **Line up the grid**, **Find the grid** and **Or count the squares**.
+- **Walls and movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player's token walks around walls, closed doors and ledges the party has seen, and stops only where there is no way around. Your own moves are never stopped. See [When walls stop a move](#when-walls-stop-a-move). Then **Automatic walls**, **Open the builder** and **Clear the build**.
+- **Scene**: **Size in squares**, the **Background**, the **Starting view** and the **Suggested view**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone. **Suggested view** is **Top-down** or **Isometric**: see [The isometric view](#the-isometric-view).
+
+At the end come **Export as image** and **Delete scene**.
+
+Tap a group's name to fold it away, and tap it again to open it. On a phone, only What players see starts open, so the settings you reach for during play sit right under the scene's name, and the setup groups wait until you need them. On a computer every group starts open. Each group then stays the way you left it on that device, on every scene and the next time you open the room. Folding a group never interrupts anything in it: an image still uploading carries on, and squares you typed but haven't applied are still there when you open it again.
+
+![The cavern's settings with every group folded: the scene's name, then What players see, Map image and grid, Walls and movement and Scene, with Export as image and Delete under them.](dm-guide/scene-settings-folded.webp)
+
+![The cavern's Map image and grid open: its map image with Replace map image and Paste an image, Remove map image on a line of its own, the Day and Night phases, and the grid's settings under them.](dm-guide/scene-settings-map.webp)
 
 Players can see a scene's name, so don't name a scene after a surprise. And if you replace the map image of the scene the players are on, they see the new image as soon as it uploads, so the app asks you to confirm first.
 
@@ -229,7 +234,7 @@ Many map images come with a grid already drawn on them. Lining up the grid makes
 
 ![Line up grid after an upload that found the map's grid: "Found a grid of 70 px squares.", the box on 3 by 3 of those squares, the grid drawn over the whole map, and Use default, Find the grid and Nudge in the options row.](dm-guide/grid-line-up.webp)
 
-1. Pick **Line up grid** in the toolbar (behind **Setup** on a phone), or press **Line up the grid** in the scene's **Grid** settings. When you create a map scene whose file name doesn't give its size, the tool opens on its own.
+1. Pick **Line up grid** in the toolbar (behind **Setup** on a phone), or press **Line up the grid** in the scene's **Map image and grid** settings. When you create a map scene whose file name doesn't give its size, the tool opens on its own.
 2. Drag a box over 3 by 3 squares of the art. To adjust it, drag inside the box to move it, or drag a corner to resize it. You can also tap elsewhere on the map to move the box to the squares you tapped. As you work, the app draws the grid the box would make across the whole map, so you can check that it lines up everywhere, not just inside the box.
 3. For the last pixel of accuracy, use **Nudge**. It moves the box, or makes its squares smaller or larger, one pixel at a time.
 4. Press **Apply**. The app saves the grid and confirms it with a message such as "Grid saved at 70 px per square."
@@ -238,12 +243,12 @@ Many map images come with a grid already drawn on them. Lining up the grid makes
 
 Two more options wait under **⋯**. **Resize scene** (on by default) makes Apply also resize the scene to the squares the map covers. **Grid lines** turns the app's own grid lines on or off. Turn them off for art that has a grid of its own. Tokens and rulers still follow the squares either way.
 
-**Counting the squares instead.** If the art's squares run all the way to the edges of the image, you can skip the box and simply type the count. In the scene's **Grid** settings, under **Or count the squares**, enter how many squares the image has across and down, then press **Apply**.
+**Counting the squares instead.** If the art's squares run all the way to the edges of the image, you can skip the box and simply type the count. In the scene's **Map image and grid** settings, under **Or count the squares**, enter how many squares the image has across and down, then press **Apply**.
 
 > [!NOTE]
 > When applying a grid also changes the scene's size, the app saves the two changes as separate undo steps. The first **Undo** takes back the resize, and a second one takes back the grid.
 
-Often you won't need the box at all. When a map's file name gives no size, the app looks for a grid drawn on the map while it uploads: if it's sure of what it found, the scene starts lined up, with **Use default** to go back to the first guess and the scene's earlier size, and if it's less sure, it only places the box on those squares for you to check and **Apply**. On a phone, a large map can take a little longer: the scene opens, and Line up grid says it's still looking until it has an answer. **Find the grid**, in the tool's options or the scene's **Grid** settings, looks again whenever you like, and one undo takes back a grid it applied. If you'd rather not wait for it, just carry on: pressing **Apply** or moving the box stops the search, so it never overwrites what you've done. And if the scene itself changes while it's looking, say someone sets its grid on another device, a grid it then finds isn't applied, and Line up grid tells you so. On a scene from a Universal VTT file, which came with an exact grid of its own, it only places the box, so you can compare the two before you **Apply**, and the same goes for a new image you give that scene.
+Often you won't need the box at all. When a map's file name gives no size, the app looks for a grid drawn on the map while it uploads: if it's sure of what it found, the scene starts lined up, with **Use default** to go back to the first guess and the scene's earlier size, and if it's less sure, it only places the box on those squares for you to check and **Apply**. On a phone, a large map can take a little longer: the scene opens, and Line up grid says it's still looking until it has an answer. **Find the grid**, in the tool's options or the scene's **Map image and grid** settings, looks again whenever you like, and one undo takes back a grid it applied. If you'd rather not wait for it, just carry on: pressing **Apply** or moving the box stops the search, so it never overwrites what you've done. And if the scene itself changes while it's looking, say someone sets its grid on another device, a grid it then finds isn't applied, and Line up grid tells you so. On a scene from a Universal VTT file, which came with an exact grid of its own, it only places the box, so you can compare the two before you **Apply**, and the same goes for a new image you give that scene.
 
 ## The map builder
 
@@ -251,7 +256,7 @@ The **Map builder** tool (`B`, behind **Setup** on a phone) lets you paint a map
 
 ![The map builder: a crypt of stone rooms with automatic walls, doors, pillars, lights and stamps, with the Builder mode chip in the options row.](dm-guide/builder.webp)
 
-Open the builder from the toolbar, or with **Open the builder** in the scene's settings. Then use **Builder mode** to choose what a tap or a drag does. Each mode has its own icon, on its tile in the picker, and on the Builder mode chip too where the row has room for it:
+Open the builder from the toolbar, or with **Open the builder** in the scene's **Walls and movement** settings. Then use **Builder mode** to choose what a tap or a drag does. Each mode has its own icon, on its tile in the picker, and on the Builder mode chip too where the row has room for it:
 
 - **Brush**: drag to paint. **Terrain** picks a floor (Stone, Wood, Grass, Dirt or Cave) or a terrain (Water, Difficult, Rubble, Pit, Pillar or Stairs), and **Brush size** sets the brush from 1 to 10 squares across, with − and +.
 - **Rectangle room**: drag from one corner of the room to the opposite one.
@@ -272,7 +277,7 @@ A scene can hold up to 100 lights, 500 stamps and 500 labels, and it can be at m
 
 ## Walls and doors
 
-**Automatic walls.** As you paint, walls go up on their own around what you have painted, so you rarely need to draw walls by hand. The scene's **Automatic walls** setting (in **Scenes**, under **Map builder**) decides where they go:
+**Automatic walls.** As you paint, walls go up on their own around what you have painted, so you rarely need to draw walls by hand. The scene's **Automatic walls** setting (in **Scenes**, under **Walls and movement**) decides where they go:
 
 - **Around every painted cell**: a wall wherever painted ground meets unpainted ground. This is the default for battle mats and builder scenes.
 - **Around floor only**: only floors (stone, wood, grass, dirt and cave) get walls. Use it when you paint water, rubble or pits over a map image and don't want them walled in. This is the default for map image scenes.
@@ -333,7 +338,7 @@ Heights are easier to read when you can see them. The isometric view tilts the m
 
 **Turning the map.** In Isometric, **Turn left** and **Turn right** in the same menu turn the map a quarter at a time, so a wall or a tall creature never hides what stands behind it for long. Each scene remembers its own turn. A creature hidden behind another can still be picked: tap the selected one again and the one behind it is selected instead.
 
-**Suggesting a view for a scene.** In the Scenes panel, under This scene, **Suggested view** sets the view that devices following the scene show. A cliff-side ambush might suggest Isometric, while a sprawling town map stays Top-down. Every device starts out following the scene, so a player who has never chosen sees what you suggest. A device that is in the middle of a drag, a pinch or a held ruler switches once the finger lifts, so the map never moves under anyone's hand.
+**Suggesting a view for a scene.** In the Scenes panel, in the scene's **Scene** settings, **Suggested view** sets the view that devices following the scene show. A cliff-side ambush might suggest Isometric, while a sprawling town map stays Top-down. Every device starts out following the scene, so a player who has never chosen sees what you suggest. A device that is in the middle of a drag, a pinch or a held ruler switches once the finger lifts, so the map never moves under anyone's hand.
 
 **Tools that work top-down.** Four of your tools need the flat map, so while you use them your device shows Top-down and says why, and Isometric comes back as soon as you pick another tool: the **Map builder** (`B`), **Fog** (`F`), **Line up grid** (`G`) and **Traps** (`X`). Everything else, from Select and the Ruler to Areas and Ping, works in either view.
 
@@ -1053,7 +1058,7 @@ The label tells you a few more things:
 
 ### When walls stop a move
 
-Each scene has a setting, **Walls and ledges block players' moves**, under **Movement** in its settings, and it is on for every new scene. While it is on, a player's token can't pass through walls, closed doors, windows, pillars or ledges. It walks around them instead, and stops only when there is no way around that the party has seen. The token then holds at the last spot it could reach, and a note says why: "Stopped at a wall. There is no way around it that you have seen.", "Ledge in the way. No stairs you have seen lead there.", or, when the player can see a door in the way, "A door is in the way. Tap it to open." A step straight into a wall from where the token stands sends nothing at all, so the token stays in its square. When what stopped the move is something the player can't see right now, the note says only "Something blocks the way." (see [What players' maps hold](#what-players-maps-hold)).
+Each scene has a setting, **Walls and ledges block players' moves**, under **Walls and movement** in its settings, and it is on for every new scene. While it is on, a player's token can't pass through walls, closed doors, windows, pillars or ledges. It walks around them instead, and stops only when there is no way around that the party has seen. The token then holds at the last spot it could reach, and a note says why: "Stopped at a wall. There is no way around it that you have seen.", "Ledge in the way. No stairs you have seen lead there.", or, when the player can see a door in the way, "A door is in the way. Tap it to open." A step straight into a wall from where the token stands sends nothing at all, so the token stays in its square. When what stopped the move is something the player can't see right now, the note says only "Something blocks the way." (see [What players' maps hold](#what-players-maps-hold)).
 
 From that note the player can press **Teleport here** to land where they dropped, for Misty Step and the like. A teleport doesn't count against the creature's Speed, and you get a notice and a log line whenever someone uses it.
 
@@ -1530,7 +1535,7 @@ The fight on the road is over, and the party heads for the crypt.
 
 1. **Prepare ahead.** In **Scenes**, tap the crypt's row. You see the crypt, while the players stay on the road. Build it, place monsters and set the fog while they play. The Outliner on the crypt reads as the players will see it once they arrive.
 2. **Move the players.** Press **Move players** on the crypt, and every player's view switches to it. Their tokens don't come along, though: they stay on the road. Place each character on the crypt with **Characters**, **Place a token**, or let the players place their own. Their HP and conditions come with them, since characters belong to the room. Delete the old tokens on the road when you're done there.
-3. **Bring them to the start.** **Save current view**, in the crypt's **This scene** settings, sets where the scene opens. Or frame the map yourself and use **Bring everyone here** in the DM panel.
+3. **Bring them to the start.** **Save current view**, in the **Scene** group of the crypt's settings, sets where the scene opens. Or frame the map yourself and use **Bring everyone here** in the DM panel.
 4. **Companions left behind.** Ivo's owl stayed on the road. Open the road scene, press `/`, and type "companion". Once Ivo's token is gone from the road, the owl's row reads "Away from Ivo". Delete its token there, and Ivo's player adds it again on the crypt with **Add a companion** and the Owl.
 5. **Monsters left behind** are their own copies, and they stay where they were. If you want a clean copy of a scene to come back to, duplicate it (from its **⋯**, **Duplicate…**) before a fight changes it.
 

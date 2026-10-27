@@ -464,6 +464,16 @@ The builders fill this in, lane by lane, with every place the build went its own
 - A full copy clears the sheet's ticks, and focus on Copy moves to Close.
 - A scene on Everything that gets its first map image still turns fog on, so it moves to Reveal by hand (D-261026-35).
 
+**MS2, the settings page.**
+- The four groups are `Section` folds (components/Panel.tsx) whose content stays mounted and hidden while folded (`fold.keep`), so an upload in Map image and grid, or counts typed and not applied, lasts through a fold. 8.4 does not say, and the token panel's folds unmount.
+- The folds live in client/features/scenes/settingsFolds.ts under `rvtt.sceneSettingsFolds`, resolved once per Room page from storage and the layout width then, as the token panel's are, so a tablet turned across 900 px never refolds. "Unreadable" is storage that is missing or throws, or a value that is no JSON object: every group opens. A missing key follows the starts.
+- Export as image and Delete stay plain sections, not folds: 8.4 folds groups 2 to 4 on a phone and lists 5 and 6 apart, and a fold over one button saves nothing. The name's section has no label, so only its line parts it from New scene.
+- Map phases is a part of Map image and grid under an h4 in a setting name's look, not a section, so no capitals label stands under the group's. Walls and movement holds the movement switch, Automatic walls, then Open the builder and Clear the build on one row.
+- Measuring the page found rows that wrapped one part alone, in sections no sweep had measured: the map image's Cancel and Remove map image, a phase's Remove in edit, and Apply beside the count of squares. Cancel and Remove map image now stand on lines of their own, a phase keeps its name and arrows on one line with Remove under them, and the two counts keep their line together.
+- The shared radio cards (features/dm/controls.tsx `RadioGroup`) stand in one block under their name and help, as Players see's do, and the help describes the group. Their look is unchanged. Before, every choice in Room settings, This device's Map images and Show a handout's Show to read the cards' words 9 px off the column's edge.
+- The roots of 9 are ms2-a in e2e/alignmentRoom.ts, run by alignment-icons.e2e.ts at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%: the page as it opens (asserting each group's start), every group folded, every group open, the players' scene's map image question, a map scene with two phases and one in edit, Room settings whole, This device's Map detail and Show a handout. e2e/harness.ts `openSceneGroup` opens a folded group for every file that reaches into one.
+- VisionSettings.tsx takes its section's fold from the page (one prop). The Fog and party vision fold inside it is MS1's and is not kept per device.
+
 ## 16. Review dispositions
 
 **Round 1**, all adopted, D-261026-29 settling the four owner questions and the movement rule.
