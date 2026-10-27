@@ -1,4 +1,4 @@
-import type { RoomSettings, RoomState, SceneMark } from "./model.ts";
+import type { RoomSettings, RoomState, SceneMark, ShareMark } from "./model.ts";
 import type { Op } from "./protocol.ts";
 
 /**
@@ -1199,7 +1199,10 @@ export function needsMapDiscoveryUpgrade(snapshotVersion: number): boolean {
  * the party explored cannot be told without reading the layers (ASTRA-27),
  * and every scene with fog and party vision on the mark that its memory
  * shares the room's free space (`memoryShared`), so no room becomes full at
- * deploy. The size guard works the shares out from those marks. It reads
+ * deploy. On a scene whole party then the mark is the party's alone, since
+ * only its layer exists at deploy: holders turned on later take whole caps,
+ * as after a fold (MD3-D-12). The size guard works the shares out from
+ * those marks. It reads
  * only the state, so a reload before the next snapshot runs it at the same
  * point with the same result, and a snapshot written after it records the
  * result, so a later load never runs it again.
@@ -1211,11 +1214,11 @@ export function needsMapDiscoveryUpgrade(snapshotVersion: number): boolean {
  */
 export function mapDiscoveryUpgrade(state: RoomState): RoomState {
   const playedScenes: Record<string, SceneMark> = { ...state.playedScenes };
-  const memoryShared: Record<string, SceneMark> = { ...state.memoryShared };
+  const memoryShared: Record<string, ShareMark> = { ...state.memoryShared };
   for (const id of Object.keys(state.scenes).sort()) {
     const scene = state.scenes[id]!;
     playedScenes[id] ??= { sceneId: id, rev: 0 };
-    if (scene.fogEnabled && scene.vision?.on === true) memoryShared[id] ??= { sceneId: id, rev: 0 };
+    if (scene.fogEnabled && scene.vision?.on === true) memoryShared[id] ??= { sceneId: id, rev: 0, ...(scene.vision.perPlayer === true ? {} : { party: true as const }) };
   }
   return { ...state, memory: state.memory ?? {}, memoryBy: state.memoryBy ?? {}, playedScenes, memoryShared };
 }

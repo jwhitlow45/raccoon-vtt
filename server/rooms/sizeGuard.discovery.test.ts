@@ -320,7 +320,9 @@ describe("the room-wide share (5.5, MD-O-14)", () => {
 
   test("a marked per-player scene that folds keeps the party's share, and the room's measure falls", () => {
     const { state } = sharedRoom(0);
+    // Per player at the upgrade, so every layer shares.
     state.scenes.s1 = { ...state.scenes.s1!, vision: { on: true, light: "dark", perPlayer: true } };
+    state.memoryShared = { ...state.memoryShared, s1: { sceneId: "s1", rev: 0 } };
     const before = memoryReserves(state);
     assert.equal(before.sharing, 1 + 2 + 1, "the party's and a layer for each of the two players, and the other scene's");
     const folded = applyOp(state, { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dark", perPlayer: false } } }, DM, env(2));
@@ -328,6 +330,21 @@ describe("the room-wide share (5.5, MD-O-14)", () => {
     assert.ok(folded.state.memoryShared?.s1, "the fold keeps the share mark");
     assert.equal(memoryReserves(folded.state).sharing, 2);
     assert.ok(memoryStateReserve(folded.state, 1_000) < memoryStateReserve(state, 1_000));
+  });
+
+  test("on a scene whole party at the upgrade, the first switch to Per player takes the holders' whole caps, and says PER_PLAYER_FULL where they do not fit (MD3-D-12)", () => {
+    const base = room();
+    base.scenes = { s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }) };
+    const up = mapDiscoveryUpgrade(base);
+    assert.deepEqual(up.memoryShared?.s1, { sceneId: "s1", rev: 0, party: true }, "only the party's layer existed at deploy");
+    assert.deepEqual(memoryReserves(up), { whole: 0, sharing: 1 });
+    const per = applyOp(up, { t: "scene.update", sceneId: "s1", patch: { vision: { on: true, light: "dark", perPlayer: true } } }, DM, env(2));
+    assert.ok(per.ok);
+    assert.deepEqual(memoryReserves(per.state), { whole: 2 * MEMORY_CAP, sharing: 1 });
+    // Opus's room: 1,000 bytes free beyond the margin.
+    const limit = measuredStateBytes(up) + exploredReserve(up) + SHARE_MARGIN + 1_000;
+    const answer = new SizeGuard({ stateLimit: limit }).check(per.state, ["s1"], growthBound(up, per.state, per.touched), up);
+    assert.equal(answer.ok ? "" : answer.message, PER_PLAYER_FULL);
   });
 
   test("after a fold, a switch back to Per player takes the holders' whole caps while the party keeps its share, through a reload and an import (MD3-ASTRA-4)", () => {
