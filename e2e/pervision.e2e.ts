@@ -75,6 +75,8 @@ const LABEL_AT = { x: 6.5, y: 3.5 };
 const LABEL_CELL = { x: 6, y: 3 };
 const DOOR_NORTH = { x: 3, y: 9 };
 const DOOR_SOUTH = { x: 3, y: 10 };
+/** A DM's line every page gets, sent after the door opens so a copy that holds it is past the opening. */
+const DOOR_MARK = "The door creaks";
 /** Ground only Bree ever sees, until Whole party pools the maps. */
 const BREE_CORNER = { x: 14, y: 18 };
 const LABEL_TEXT = "Old altar";
@@ -484,7 +486,7 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     assert.equal(has.goblin(sockets.ben.state), false, "the goblin reached Ben by the drag");
   });
 
-  test("pv-3. Thorn opens a door on ground Ben never explored: open on Ana's map, not drawn on Ben's, and drawn open for Ben once Bree sees it", async () => {
+  test("pv-3. Thorn opens a door on ground Ben never explored: open on Ana's map, not in Ben's copy at all, and open for Ben once Bree sees it", async () => {
     await tapDoor(ana);
     const closed = ana.getByRole("group", { name: "Closed door" });
     await closed.getByRole("button", { name: "Open" }).click();
@@ -493,8 +495,12 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     await shots.take(ana, "pervision-ana-door-open");
     await tapAway(ana, { x: 13, y: 3 });
 
-    // Doors are shared and live (D-261025-17): Ben's copy holds the open door, under his fog, so his map draws nothing there.
-    await waitFor("the open door in Ben's copy", () => ((doorIn(sockets.ben.state) as { state?: string } | undefined)?.state === "open" ? true : null));
+    // Players hold the build only where they have seen it (D-261026-25, docs/design-v1-map-discovery.md rule 1): Ben never
+    // explored the door's ground, so his copy holds no door there at all, open or shut. A line every page gets after the
+    // opening marks his copy as past it.
+    await ops.send({ t: "log.chat", text: DOOR_MARK });
+    await waitFor("the line after the opening in Ben's log", () => sockets.ben.state?.log.some((e) => e.text === DOOR_MARK) || null);
+    assert.equal(doorIn(sockets.ben.state), undefined, "Ben's copy holds the door on ground he never explored");
     assert.equal(has.ground(sockets.ben.state, DOOR_NORTH) || has.ground(sockets.ben.state, DOOR_SOUTH), false, "the door's ground is open on Ben's map");
     await tapDoor(ben);
     await ben.waitForTimeout(800);

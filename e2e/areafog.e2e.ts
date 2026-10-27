@@ -17,7 +17,11 @@ import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickTool, Shots, sideTa
  * reads only the walls with a revealed sub-cell beside them, so a wall
  * wholly under the fog changes none of the preview's pixels, wherever its
  * origin lies: in the fog beside revealed ground, or across a fogged strip
- * from revealed ground beyond it. Each check reads the page's pixels at the
+ * from revealed ground beyond it. A player's copy holds the build only on
+ * cells with a revealed sub-cell, and edges by either cell beside them
+ * (docs/design-v1-map-discovery.md decision 1), so each hidden wall stands
+ * a sub-cell or more past revealed ground that ends inside a cell: the
+ * device holds it, and no revealed sub-cell lies beside it. Each check reads the page's pixels at the
  * middle of sub-cells the sphere reaches, once with the wall and once
  * without, and they must match, and over the fog this device's own
  * preview leaves the fog's color but for its outline. On revealed ground
@@ -42,8 +46,8 @@ type Rgb = [number, number, number];
 const HOOK_FLAG = "globalThis.__rvttIsoTest = true;";
 
 const BOUNDS = { w: 16, h: 12 };
-/** Every column west of this one is revealed to the players, the rest is fogged, in the first layout. */
-const FOG_EDGE = 8;
+/** The first layout's revealed ground ends here, a sub-cell into column 8, so Pat's copy holds column 8 and the wall on its east side. */
+const FOG_EDGE = 8.25;
 /** Fireball's 20 ft sphere, centered here: its east side reaches 4 cells into the fog. */
 const ORIGIN = { x: 6, y: 6 };
 
@@ -57,15 +61,15 @@ type Layout = { name: string; reveal: readonly Rect[]; origin: { x: number; y: n
 
 const column = (x: number, skip: readonly number[] = []) => Array.from({ length: BOUNDS.h }, (_, y) => y).filter((y) => !skip.includes(y)).map((y) => `${x},${y}`);
 
-/** The first layout: the fog's edge at x = 8, the origin west of it, the wall along x = 9, a cell into the fog. */
+/** The first layout: the fog's edge at x = 8.25, the origin west of it, the wall along x = 9, three sub-cells into the fog. */
 const PAST_EDGE: Layout = { name: "past-edge", reveal: [{ x: 0, y: 0, w: FOG_EDGE, h: BOUNDS.h }], origin: ORIGIN, size: 20, edges: column(9) };
-/** The origin in the fog beside revealed ground, a wall with a doorway between them. */
-const ORIGIN_IN_FOG: Layout = { name: "origin-in-fog", reveal: [{ x: 0, y: 0, w: 8, h: BOUNDS.h }], origin: { x: 11, y: 6 }, size: 30, edges: column(10, [5, 6]) };
-/** A fogged strip from x = 5 to 9 between revealed ground, the wall in the strip. */
+/** The origin in the fog beside revealed ground, a wall with a doorway between them, three sub-cells past the fog's edge. */
+const ORIGIN_IN_FOG: Layout = { name: "origin-in-fog", reveal: [{ x: 0, y: 0, w: 9.25, h: BOUNDS.h }], origin: { x: 11, y: 6 }, size: 30, edges: column(10, [5, 6]) };
+/** A fogged strip from x = 6.25 to 9 between revealed ground, the wall in the strip. */
 const ACROSS_STRIP: Layout = {
   name: "across-strip",
   reveal: [
-    { x: 0, y: 0, w: 5, h: BOUNDS.h },
+    { x: 0, y: 0, w: 6.25, h: BOUNDS.h },
     { x: 9, y: 0, w: 7, h: BOUNDS.h },
   ],
   origin: { x: 4, y: 6 },
@@ -74,6 +78,14 @@ const ACROSS_STRIP: Layout = {
 };
 /** Revealed to x = 7.5, inside a cell, and a free wall in that cell's fogged half. */
 const EDGE_IN_CELL: Layout = { name: "edge-in-cell", reveal: [{ x: 0, y: 0, w: 7.5, h: BOUNDS.h }], origin: { x: 10, y: 6 }, size: 30, free: { id: "aimfoghalf01", a: [7.75, 2], b: [7.75, 10] } };
+/**
+ * The origin in the fogged part of column 7, whose first sub-cell is
+ * revealed, and a free wall in that fogged part between the origin and the
+ * goblin. Every ray to the goblin lies on cells Pat holds, so Pat's lists
+ * may name it (docs/design-v1-map-discovery.md decision 13), and the wall
+ * would take every one of those rays.
+ */
+const ORIGIN_IN_CELL: Layout = { name: "origin-in-cell", reveal: [{ x: 0, y: 0, w: 7.25, h: BOUNDS.h }], origin: { x: 7.5, y: 6.5 }, size: 30, free: { id: "aimfogcell01", a: [7.375, 2], b: [7.375, 10] } };
 /** Per channel, between two draws of the same picture. */
 const TOLERANCE = 2;
 /** theme.color.fog, as a player sees it: opaque. */
@@ -97,8 +109,8 @@ const run = { roomId: "", roomName: `E2E area over fog ${new Date().toISOString(
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 12, speeds: { walk: 30 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
 
-/** A goblin on revealed ground at 7, 1, where the doorway's light from the second layout's origin reaches no lower than y = 2.5. */
-const GOBLIN_AT = { x: 7, y: 1 };
+/** A goblin on revealed ground, inside ORIGIN_IN_CELL's sphere, west of its wall. */
+const GOBLIN_AT = { x: 5, y: 2 };
 
 async function join(context: BrowserContext, name: string, color: string): Promise<void> {
   const headers = { Origin: server.origin, "content-type": "application/json" };
@@ -134,7 +146,8 @@ async function setWall(on: boolean, layout: Layout = PAST_EDGE): Promise<void> {
   if (free) await ops.send({ t: "build.walls", sceneId: run.sceneId, ...(on ? { put: [{ ...free, f: { kind: "wall" } }] } : { remove: [{ cx: 0, cy: 0, id: free.id }] }) });
   await waitFor(`the wall ${on ? "on" : "off"} on Pat's page`, () => {
     const chunk = Object.values(patSocket.state?.buildChunks ?? {}).find((c) => c.sceneId === run.sceneId && c.cx === 0 && c.cy === 0);
-    const has = edges.length > 0 ? Boolean(chunk?.edges[edges[0]!.key]) : Boolean(chunk?.walls?.some((w) => w.id === free?.id));
+    // A free wall reaches a player as the pieces the server cut from it, each with an id of its own, so it is found by where it stands.
+    const has = edges.length > 0 ? Boolean(chunk?.edges[edges[0]!.key]) : Boolean(chunk?.walls?.some((w) => w.a[0] === free?.a[0] && w.b[0] === free?.b[0]));
     return has === on || null;
   });
   // The board redraws on the change, the preview's shading with it.
@@ -572,12 +585,13 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
         actor: { inline: ACTOR },
       },
     });
+    await setFog(ORIGIN_IN_CELL);
     await waitFor("the goblin on Pat's page", () => patSocket.state?.tokens[run.goblin] ?? null);
     await viewAs(pat, "topDown");
-    await aim(pat, ORIGIN_IN_FOG);
+    await aim(pat, ORIGIN_IN_CELL);
     const line = async () => (await options(pat).locator("[data-options-line]").first().textContent()) ?? "";
     for (const on of [true, false]) {
-      await setWall(on, ORIGIN_IN_FOG);
+      await setWall(on, ORIGIN_IN_CELL);
       assert.match(await line(), /In area \(1\): Goblin/, `the wall ${on ? "on" : "off"}`);
     }
     await shots.take(pat, "areafog-pat-goblin-listed");
@@ -594,11 +608,11 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
   });
 
   test("AF-10. Pat places Fireball from the fog beside revealed ground: no pixel of its box changes with the hidden wall, in Top-down and Isometric, and the Areas panel lists the goblin it catches either way", async () => {
-    await setFog(ORIGIN_IN_FOG);
+    await setFog(ORIGIN_IN_CELL);
     await ops.send({ t: "token.create", token: { id: run.goblin, sceneId: run.sceneId, size: "medium", visibility: "all", kind: "monster", name: "Goblin", ...GOBLIN_AT, disposition: "hostile", actor: { inline: ACTOR } } });
     await waitFor("the goblin on Pat's page", () => patSocket.state?.tokens[run.goblin] ?? null);
     await viewAs(pat, "topDown");
-    await aim(pat, ORIGIN_IN_FOG);
+    await aim(pat, ORIGIN_IN_CELL);
     const before = new Set(Object.keys(patSocket.state?.templates ?? {}));
     await pressSlot(pat, "place");
     const placed = await waitFor("the placed Fireball", () => Object.keys(patSocket.state?.templates ?? {}).find((k) => !before.has(k)) ?? null);
@@ -607,7 +621,7 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
     await sleep(500);
     for (const [view, turn] of [["topDown", 0], ["isometric", 0], ["isometric", 1]] as const) {
       await viewAs(pat, view, turn);
-      const { spots, misses } = await pairedDiff(pat, `pat-placed-${view}-${turn}`, ORIGIN_IN_FOG);
+      const { spots, misses } = await pairedDiff(pat, `pat-placed-${view}-${turn}`, ORIGIN_IN_CELL);
       assert.ok(spots > 400, `${view} ${turn}: enough spots read: ${spots}`);
       assert.deepEqual(misses, [], `${view} ${turn}`);
     }
@@ -615,7 +629,7 @@ describe("raccoon-vtt an area aimed over a player's fog", { timeout: 600_000 }, 
     await openSideTab(pat, "Areas");
     const panel = pat.getByRole("tabpanel", { name: sideTabName("Areas") });
     for (const on of [true, false]) {
-      await setWall(on, ORIGIN_IN_FOG);
+      await setWall(on, ORIGIN_IN_CELL);
       assert.match((await panel.textContent()) ?? "", /In area \(1\): Goblin/, `the wall ${on ? "on" : "off"}`);
     }
     await shots.take(pat, "areafog-pat-placed-panel");

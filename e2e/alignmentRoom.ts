@@ -9,7 +9,7 @@ import { ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { barControl, ConsoleWatch, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 
 /**
@@ -3957,5 +3957,135 @@ export function isoChoiceTests(): void {
     assert.deepEqual(lines, [], "the view choice out of line");
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
+  });
+}
+
+/*
+ * Map discovery's builder note and forget question
+ * (docs/design-v1-map-discovery.md 9): the Map builder's row with the note
+ * it shows while the party sees the cells being built, on a lit scene with
+ * fog and party vision on where Pat's scout stands, and the question a
+ * change asks before it runs past what players' remembered map keeps, at
+ * FU30_AT's sizes. The players and the DM go back to the room's scene
+ * after.
+ */
+const BUILD_IN_SIGHT = "The party can see where you are building, so they see it as you build. Build before moving players here, or tap Fog all when you finish.";
+
+/** Moves the DM's page to a scene from its Scenes panel, and waits for its copy to say so. */
+async function dmOnScene(page: Page, sceneId: string): Promise<void> {
+  if (dmSocket.you?.sceneId === sceneId) return;
+  const name = dmSocket.state?.scenes[sceneId]?.name ?? "";
+  assert.ok(name, `no scene ${sceneId} in the DM's copy`);
+  const panel = await openDmPanel(page, "Scenes");
+  await panel.getByRole("button", { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).first().click();
+  await waitFor(`the DM on ${name}`, () => dmSocket.you?.sceneId === sceneId || null, 30_000);
+  await closeSheets(page);
+  await escapeAll(page);
+}
+
+export function md4Tests(): void {
+  test(`md4-a. the Map builder's row with its note that the party sees where the DM builds, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-map-discovery.md 9)`, async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const cave = randomUUID();
+    const scout = randomUUID();
+    const lines: string[] = [];
+    let page: Page | null = null;
+    try {
+      await ops.send({ t: "scene.create", scene: { id: cave, name: "Lit cave", bounds: { w: 12, h: 8 }, fogEnabled: true, blockMovement: true, vision: { on: true, light: "bright" } } });
+      await ops.send({ t: "token.create", token: { id: scout, sceneId: cave, size: "medium", visibility: "all", kind: "pc", name: "Scout", x: 1, y: 4, disposition: "ally", ownerIds: [run.patId], actor: { inline: actor() } } });
+      await ops.send({ t: "room.setPlayerScene", sceneId: cave });
+      for (const [i, at] of FU30_AT.entries()) {
+        const sweep = new Sweep(`md4-${atName(at)}`);
+        page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await dmOnScene(page, cave);
+        await page.locator(".konvajs-content").first().waitFor();
+        await pickTool(page, "Map builder");
+        await pickOption(page, "Map builder", "Builder mode", "Brush");
+        // A stroke across open ground the scout sees, so the row says the party sees it. Each size paints a row of its own: a stroke over floor already painted builds nothing.
+        await dragCells(page, { w: 12, h: 8 }, { x: 5, y: i + 1 }, { x: 7, y: i + 1 });
+        const bar = page.getByRole("toolbar", { name: "Map builder options" });
+        if (await showsWithin(bar.getByText(BUILD_IN_SIGHT).first(), 5_000)) {
+          await sweep.measure(page, "md4-builder-note", bar);
+          await shots.take(page, `alignment-md4-builder-note-${atName(at)}`);
+          // Where the row cuts the note short, a tap opens it whole.
+          const cut = page.locator('[data-options-line="shown"] button[aria-expanded="false"]');
+          if ((await cut.count()) > 0) {
+            await cut.first().click();
+            const open = page.locator('[data-options-line="open"]');
+            await open.waitFor();
+            await sweep.measure(page, "md4-builder-note-open", open);
+            await shots.take(page, `alignment-md4-builder-note-open-${atName(at)}`);
+            await open.getByRole("button").first().click();
+          }
+        } else await sweep.missing(page, "md4-builder-note", "a stroke in the party's sight showed no note");
+        await pickTool(page, "Select");
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (page) await dmOnScene(page, run.sceneId).catch(() => {});
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId }).catch(() => {});
+      await ops.send({ t: "scene.delete", sceneId: cave }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "the builder's note out of line");
+  });
+
+  test(`md4-b. the forget question, asked before Clear build clears a cavern the party saw past what players' remembered map can keep, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px, Escape answering no and the build left whole (docs/design-v1-map-discovery.md 9)`, async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const cavern = randomUUID();
+    const scout = randomUUID();
+    const bounds = { w: 80, h: 64 };
+    const lines: string[] = [];
+    let page: Page | null = null;
+    try {
+      // Pat's scout sees the whole bright cavern, floored in stone, and the players leave it: clearing it asks the
+      // party's memory to keep 5,120 squares of floor at 16 bytes apiece, past its 64 KiB, in one op.
+      await ops.send({ t: "scene.create", scene: { id: cavern, name: "Great cavern", bounds, fogEnabled: true, blockMovement: true, vision: { on: true, light: "bright" } } });
+      for (let y = 0; y < bounds.h; y += 16) await ops.send({ t: "build.rect", sceneId: cavern, terrain: "stone", x: 0, y, w: bounds.w, h: 16 });
+      await ops.send({ t: "token.create", token: { id: scout, sceneId: cavern, size: "medium", visibility: "all", kind: "pc", name: "Scout", x: 40, y: 32, disposition: "ally", ownerIds: [run.patId], actor: { inline: actor() } } });
+      page = await dmPageFor(FU30_AT[0]!.size);
+      await openAt(page, FU30_AT[0]!.size, FU30_AT[0]!.scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      await dmOnScene(page, cavern);
+      await ops.send({ t: "room.setPlayerScene", sceneId: cavern });
+      const explored = () => Object.keys(dmSocket.state?.exploredTiles ?? {}).filter((k) => k.startsWith(`${cavern}:`)).length;
+      // 16-cell fog tiles, 5 across and 4 down.
+      await waitFor("the cavern explored", () => (explored() === 20 ? true : null), 30_000);
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+      const built = () => dmSocket.state?.buildChunks[`${cavern}:0,0`]?.cells["0,0"];
+      for (const at of FU30_AT) {
+        const sweep = new Sweep(`md4-${atName(at)}`);
+        page = await dmPageFor(at.size);
+        page.setDefaultTimeout(10_000);
+        await openAt(page, at.size, at.scale);
+        await waitFor("the DM's snapshot", () => dmSocket.state);
+        await dmOnScene(page, cavern);
+        await page.locator(".konvajs-content").first().waitFor();
+        await pickTool(page, "Map builder");
+        await page.getByRole("toolbar", { name: "Map builder options" }).getByRole("button", { name: "More options" }).click();
+        const more = page.getByRole("dialog", { name: "More Map builder options" });
+        await more.getByRole("button", { name: "Clear build", exact: true }).click();
+        await more.getByRole("button", { name: "Tap again to clear" }).click();
+        if (await more.isVisible()) await page.keyboard.press("Escape");
+        const ask = page.getByRole("dialog", { name: "Remembered map" });
+        if (await showsWithin(ask, 10_000)) {
+          await sweep.measure(page, "md4-forget-question", ask);
+          await shots.take(page, `alignment-md4-forget-question-${atName(at)}`);
+          await page.keyboard.press("Escape");
+          if (!(await ask.waitFor({ state: "detached", timeout: 3_000 }).then(() => true, () => false))) lines.push(`${sweep.at} md4-forget-question: Escape left it open`);
+          if (built() !== "stone") lines.push(`${sweep.at} md4-forget-question: Escape cleared the cavern`);
+        } else await sweep.missing(page, "md4-forget-question", "Clear build asked nothing");
+        await escapeAll(page);
+        await pickTool(page, "Select");
+        lines.push(...sweep.lines);
+      }
+    } finally {
+      if (page) await dmOnScene(page, run.sceneId).catch(() => {});
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId }).catch(() => {});
+      await ops.send({ t: "scene.delete", sceneId: cavern }).catch(() => {});
+    }
+    assert.deepEqual(lines, [], "the forget question out of line");
   });
 }
