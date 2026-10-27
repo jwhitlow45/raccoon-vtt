@@ -53,7 +53,7 @@ let sliceStart = -Infinity;
 let sliceEnd = -Infinity;
 
 /**
- * The end of this frame's slice. An aura dragged here renders twice, round
+ * The end of this frame's slice. An aura dragged here is drawn twice, round
  * its standee, and two areas can move at once: each taking a slice of its
  * own would cost a frame that many.
  */
@@ -76,13 +76,17 @@ function frameDeadline(): number {
 export function WholeVolume(props: { req: WholeRequest; id: string; look: VolumeLook; turn: Turn; world: VolumeWorld; side?: { key: number; part: "behind" | "front" } }) {
   const { req, id, look, turn, world, side } = props;
   const [, setTick] = useState(0);
-  const got = wholeVolume(req, id, look, turn, world, frameDeadline());
+  // A render reads what is built and gives it no slice. The frames between build it, and one render comes when it is done, so a drag crossing a cell costs no render a frame.
+  const got = wholeVolume(req, id, look, turn, world, -Infinity);
   const more = got.more;
   useEffect(() => {
     if (!more) return;
-    const frame = requestAnimationFrame(() => setTick((t) => t + 1));
+    let frame = requestAnimationFrame(function build() {
+      if (wholeVolume(req, id, look, turn, world, frameDeadline()).more) frame = requestAnimationFrame(build);
+      else setTick((t) => t + 1);
+    });
     return () => cancelAnimationFrame(frame);
-  });
+  }, [more, req, id, look, turn, world]);
   const pieces = got.pieces;
   const shown = useMemo(() => (pieces && side ? sideOf(pieces, side.key, side.part) : pieces), [pieces, side?.key, side?.part]);
   return shown ? <VolumeShape pieces={shown} turn={turn} /> : null;
