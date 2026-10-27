@@ -25,6 +25,7 @@
  *
  *   node scripts/bench-server4.ts            (a laptop: budgets over 1.5, the reference server's ratio on this bench)
  *   node scripts/bench-server4.ts --server   (the server box itself: budgets as they are)
+ *   node scripts/bench-server4.ts --discovery   (map discovery's rows alone, with or without --server)
  *
  * Then the bright and dark scenes again per player
  * (docs/design-v1-per-player-vision.md 8.1), with the six players as the
@@ -33,21 +34,32 @@
  * alone lights, and a routed walk across areas during a turn on each kind
  * of scene.
  *
+ * Then map discovery's rows (docs/design-v1-map-discovery.md 7), whole
+ * party and with the six holders, the scene played and explored: a build
+ * edit in sight and one on remembered ground, a stair edit whose run passes
+ * its direction chunks away, a move that explores a tile, a move and a
+ * global batch with every layer's memory at its cap, and that room's first
+ * snapshots. Then 4,000 free walls each cut into 5 pieces by the ground
+ * players hold, on a Reveal by hand scene: a global batch and the first
+ * snapshots.
+ *
  * The phone rows (the derive on a phone, applying sight tiles, the leg test
  * while dragging) run in a browser and are not here. A row over its budget
  * means a cap comes down (section 4.3.6), not that this file changes.
  */
-import { holderTileKey, tileKey } from "../shared/keys.ts";
+import { chunkKey, holderChunkKey, holderTileKey, tileKey, wallChunk } from "../shared/keys.ts";
 import { SNAPSHOT_VERSION } from "../shared/migrate.ts";
-import { DEFAULT_SETTINGS, type EdgeFeature, type Member, type RoomState, type Token } from "../shared/model.ts";
+import { DEFAULT_SETTINGS, FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type FreeWall, type Member, type MemoryChunk, type RoomState, type TerrainId, type Token } from "../shared/model.ts";
 import type { Op } from "../shared/protocol.ts";
-import { encodeTile } from "../shared/rules/fog.ts";
+import { encodeTile, fullTileBits, TILE_SUB } from "../shared/rules/fog.ts";
+import { projectState } from "../shared/project.ts";
 import { visionRules, type PartySight } from "../shared/ruleHooks.ts";
 import { clearVisionCache } from "../shared/rules/vision.ts";
 import { RoomActor, type ActorDeps } from "../server/rooms/actor.ts";
 import { SnapshotBudget } from "../server/rooms/budgets.ts";
 import { Connection } from "../server/rooms/connection.ts";
 import type { RoomGateway } from "../server/rooms/gateway.ts";
+import { chunkCharge, layerCharge, MEMORY_CAP } from "../server/rooms/memorySize.ts";
 import type { Pool } from "../server/rooms/persistence.ts";
 import { capRoom, lightReachesEveryHolder, lightScene } from "./bench-vision.ts";
 
@@ -600,6 +612,159 @@ async function runWalk(perPlayer: boolean, rows: Row[]): Promise<void> {
   await table.actor.shutdown({ code: 1012, snapshot: false });
 }
 
+/*
+ * Map discovery (docs/design-v1-map-discovery.md 7). The bench room with its
+ * scene played, every tile explored for the whole party (per player,
+ * perPlayerLayers' random half of each layer), and when `full` every
+ * layer's memory, the party's and each holder's, within one chunk of its
+ * 64 KiB cap, on chunks away from the hall the party sees.
+ */
+function remembering(perPlayer: boolean, full: boolean): RoomState {
+  const state: RoomState = { ...benchRoom("dark", 5, perPlayer), memory: {}, memoryBy: {}, playedScenes: { [SCENE]: { sceneId: SCENE, rev: 0 } }, memoryShared: {} };
+  if (!perPlayer) {
+    const bits = encodeTile(fullTileBits());
+    const explored: RoomState["exploredTiles"] = {};
+    for (let ty = 0; ty < 13; ty++) for (let tx = 0; tx < 13; tx++) explored[tileKey(SCENE, tx, ty)] = { sceneId: SCENE, tx, ty, rev: 0, bits };
+    state.exploredTiles = explored;
+  }
+  if (full) {
+    const scene = state.scenes[SCENE]!;
+    const layers = perPlayer ? [null, ...Array.from({ length: PLAYERS }, (_, i) => `p${i + 1}`)] : [null];
+    for (const layer of layers) {
+      let charge = 0;
+      fill: for (let cy = 0; cy < 13; cy++) {
+        for (let cx = 0; cx < 13; cx++) {
+          if (cx >= 3 && cx <= 9 && cy >= 4 && cy <= 8) continue;
+          const cells: Record<string, TerrainId> = {};
+          for (let k = 0; k < 256; k++) cells[`${cx * 16 + (k % 16)},${cy * 16 + (k >> 4)}`] = "wood";
+          const chunk: MemoryChunk = { sceneId: SCENE, cx, cy, rev: 0, cells, ...(layer === null ? {} : { memberId: layer }) };
+          const bytes = chunkCharge(scene, chunk);
+          if (charge + bytes > MEMORY_CAP) break fill;
+          charge += bytes;
+          if (layer === null) state.memory![chunkKey(SCENE, cx, cy)] = chunk;
+          else state.memoryBy![holderChunkKey(SCENE, layer, cx, cy)] = chunk;
+        }
+      }
+      const held = layerCharge(state, scene, layer);
+      if (held > MEMORY_CAP || held < MEMORY_CAP - 8_192) throw new Error(`layer ${layer ?? "party"} holds ${held} bytes of memory`);
+    }
+  }
+  return state;
+}
+
+/** Throws unless the party's explored layer, or each holder's, holds sub-cells of the tile. */
+function exploredAt(state: RoomState, tx: number, ty: number, perPlayer: boolean): boolean {
+  if (!perPlayer) return state.exploredTiles[tileKey(SCENE, tx, ty)] !== undefined;
+  return Array.from({ length: PLAYERS }, (_, i) => state.exploredBy[holderTileKey(SCENE, `p${i + 1}`, tx, ty)]).some((t) => t !== undefined);
+}
+
+async function runDiscovery(perPlayer: boolean, rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const where = perPlayer ? `dark scene, ${PER_PLAYER}` : "dark scene";
+  const table = await sitDown(remembering(perPlayer, false));
+  checkMode(table.actor.committed.state, perPlayer);
+  const state = () => table.actor.committed.state;
+  const memoryEntries = () => Object.values({ ...state().memory, ...state().memoryBy }).reduce((n, c) => n + Object.keys(c.cells ?? {}).length + Object.keys(c.upDir ?? {}).length, 0);
+
+  // A cell of the hall every source sees, and one far west on ground the party explored and does not see now.
+  const terrain = (r: number): TerrainId => (r % 2 === 0 ? "wood" : "stone");
+  const inSight = await timed((r) => send(table, table.dm, { t: "build.paint", sceneId: SCENE, terrain: terrain(r), cells: ["100,98"] }));
+  rows.push({ row: `A build edit in sight, ${where}`, budget: 25, ms: inSight.total, covers: "the DM's build.paint where the party looks: the map step finds nothing to remember" });
+  const before = memoryEntries();
+  const remembered = await timed((r) => send(table, table.dm, { t: "build.paint", sceneId: SCENE, terrain: terrain(r), cells: [`${8 + (r % 4)},20`] }));
+  if (memoryEntries() <= before) throw new Error("the edit on remembered ground was not remembered");
+  rows.push({ row: `A build edit on remembered ground, ${where}`, budget: 25, ms: remembered.total, covers: "the DM's build.paint out of sight: the map step's sys.remember in the same batch" });
+
+  // A run of 81 stairs along row 150, out of sight, whose east end's direction passes along the whole run, over 6 chunks.
+  // The scene is at the sight cap, which the run's edges count toward, so 20 free walls far from it make room first.
+  const spare = Object.values(state().buildChunks).flatMap((c) => (c.walls ?? []).filter((w) => w.a[1] < 60).map((w) => ({ cx: c.cx, cy: c.cy, id: w.id }))).slice(0, 20);
+  await send(table, table.dm, { t: "build.walls", sceneId: SCENE, remove: spare });
+  await send(table, table.dm, { t: "build.stairs", sceneId: SCENE, cells: Array.from({ length: 81 }, (_, i) => `${10 + i},150`), up: "a" });
+  const stairs = await timed((r) => send(table, table.dm, { t: "build.stairs", sceneId: SCENE, cells: ["90,150"], up: r % 2 === 0 ? "e" : "a" }));
+  rows.push({ row: `A stair edit felt chunks away, ${where}`, budget: 25, ms: stairs.total, covers: "the DM's build.stairs at a run's end: every chunk whose stair map changed is remembered and re-sent" });
+
+  // A tile hidden again, then a character set down in it: the move explores it.
+  const hide = (r: number): Op => ({ t: "fog.live", sceneId: SCENE, ops: [{ id: `hide${r}`, mode: "hide", shape: { kind: "rect", x: 176, y: 176, w: 16, h: 16 } }] });
+  const explore = await timed(async (r) => {
+    await jiggle(table);
+    await send(table, table.dm, hide(r));
+    if (exploredAt(state(), 11, 11, perPlayer)) throw new Error("the hide left the tile explored");
+    const t = await send(table, table.dm, { t: "token.move", tokenId: "pc11", x: 184, y: 184, teleport: "wall" });
+    if (!exploredAt(state(), 11, 11, perPlayer)) throw new Error("the move explored nothing");
+    return t;
+  });
+  rows.push({ row: `A move exploring a tile, ${where}`, budget: 25, ms: explore.total, covers: "the DM's token.move into a tile hidden again: the explore and the map step" });
+  rows.push({ row: `Sight fan-out for that move, ${where}`, budget: 10, ms: explore.fanout, covers: "commit to the last ev, 7 sockets" });
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+
+  // Every layer's memory at its cap.
+  clearVisionCache();
+  const times: SitDownTimes = { load: [], first: [], later: [] };
+  const full = await sitDown(remembering(perPlayer, true), times);
+  checkMode(full.actor.committed.state, perPlayer);
+  const fullState = () => full.actor.committed.state;
+  const move = await timed(async (r) => {
+    const t = pcs(fullState())[r % 12]!;
+    return send(full, owner(full, t), { t: "token.move", tokenId: t.id, x: t.x + (r % 24 < 12 ? 1 : -1), y: t.y });
+  });
+  rows.push({ row: `A move with every layer's memory full, ${where}`, budget: 25, ms: move.total, covers: "a player's token.move, with the leg test, explore, the map step and the fan-out (MD-O-21)" });
+  rows.push({ row: `Sight fan-out for that move, memory full, ${where}`, budget: 10, ms: move.fanout, covers: "commit to the last ev, 7 sockets" });
+  const levels = ["dim", "bright", "dark"] as const;
+  const global = await timed(async (r) => {
+    await jiggle(full);
+    return send(full, full.dm, { t: "scene.update", sceneId: SCENE, patch: { vision: { on: true, light: levels[r % 3]! } } });
+  });
+  rows.push({ row: `A global batch with every layer's memory full, ${where}`, budget: 250, ms: global.total, covers: "the DM's light level switch: every socket re-projected, memory merged" });
+  await full.actor.shutdown({ code: 1012, snapshot: false });
+  for (let r = 0; r < 4; r++) {
+    clearVisionCache();
+    const t = await sitDown(JSON.parse(JSON.stringify(remembering(perPlayer, true))) as RoomState, times);
+    await t.actor.shutdown({ code: 1012, snapshot: false });
+  }
+  rows.push({ row: `The first snapshot with memory full, ${where}`, budget: 250, ms: stats(times.first), covers: "the DM's snapshot after a load" });
+  rows.push({ row: `Each player's first snapshot with memory full, ${where}`, budget: 250, ms: stats(times.later), covers: "a player's snapshot: held chunks, stubs and memory merged" });
+}
+
+/*
+ * The worst fragmented free walls (ASTRA-12): the bench room on Reveal by
+ * hand, its free walls replaced by 4,000 walls along rows, each over 9
+ * cells, with every other column of the scene revealed, so each wall gives
+ * players 5 pieces. A fog write is a global batch.
+ */
+async function runFragmented(rows: Row[]): Promise<void> {
+  clearVisionCache();
+  const room = benchRoom("dark", 5);
+  room.scenes[SCENE] = { ...room.scenes[SCENE]!, vision: { on: false, light: "dark" } };
+  const chunks: Record<string, BuildChunk> = {};
+  for (const [key, c] of Object.entries(room.buildChunks)) chunks[key] = { ...c, walls: [] };
+  for (let k = 0; k < 4_000; k++) {
+    const y = 0.5 + (k % 200);
+    const x = 0.5 + 10 * Math.floor(k / 200);
+    const wall: FreeWall = { id: `f${String(k).padStart(11, "0")}`, a: [x, y], b: [x + 8, y], f: { kind: "wall" } };
+    const { cx, cy } = wallChunk(wall);
+    const key = chunkKey(SCENE, cx, cy);
+    const c = chunks[key] ?? { sceneId: SCENE, cx, cy, rev: 0, cells: {}, edges: {} };
+    chunks[key] = { ...c, walls: [...(c.walls ?? []), wall] };
+  }
+  room.buildChunks = chunks;
+  // Every other column revealed: fog bits by sub-cell, row by row, FOG_SUBCELLS to a cell and TILE_SUB to a tile's row.
+  const columns = new Uint8Array((TILE_SUB * TILE_SUB) / 8);
+  for (let sy = 0; sy < TILE_SUB; sy++) {
+    for (let sx = 0; sx < TILE_SUB; sx++) if (Math.floor(sx / FOG_SUBCELLS) % 2 === 0) columns[(sy * TILE_SUB + sx) >> 3]! |= 1 << ((sy * TILE_SUB + sx) & 7);
+  }
+  const bits = encodeTile(columns);
+  for (let ty = 0; ty < 13; ty++) for (let tx = 0; tx < 13; tx++) room.fogTiles[tileKey(SCENE, tx, ty)] = { sceneId: SCENE, tx, ty, rev: 0, bits };
+  const times: SitDownTimes = { load: [], first: [], later: [] };
+  const table = await sitDown({ ...room, memory: {}, memoryBy: {}, playedScenes: { [SCENE]: { sceneId: SCENE, rev: 0 } }, memoryShared: {} }, times);
+  const pieces = projectState(table.actor.committed.state, { memberId: "p1", role: "player" }, { sceneId: SCENE });
+  const cut = Object.values(pieces.buildChunks).reduce((n, c) => n + (c.walls?.length ?? 0), 0);
+  if (cut < 4_000 * 5) throw new Error(`players hold ${cut} pieces of the 4,000 walls`);
+  const global = await timed((r) => send(table, table.dm, { t: "fog.live", sceneId: SCENE, ops: [{ id: `r${r}`, mode: "reveal", shape: { kind: "rect", x: 1 + 2 * (r % 50), y: 199, w: 1, h: 1 } }] }));
+  rows.push({ row: "A global batch, 4,000 free walls at 5 pieces each, Reveal by hand", budget: 250, ms: global.total, covers: "the DM's fog.live: every position of every socket re-projected, each wall cut per held cell" });
+  await table.actor.shutdown({ code: 1012, snapshot: false });
+  rows.push({ row: "Each player's first snapshot, 4,000 free walls at 5 pieces each", budget: 250, ms: stats(times.later), covers: "a player's snapshot of that scene" });
+}
+
 export async function runServerBench(): Promise<Row[]> {
   const rows: Row[] = [];
   const untime = timeHolderSight();
@@ -618,9 +783,19 @@ export async function runServerBench(): Promise<Row[]> {
     await runFogOff("dark", rows);
     await runFreeLight(5, true, rows);
     await runWalk(true, rows);
+    rows.push(...(await runDiscoveryBench()));
   } finally {
     untime();
   }
+  return rows;
+}
+
+/** Map discovery's rows alone (`--discovery`). */
+export async function runDiscoveryBench(): Promise<Row[]> {
+  const rows: Row[] = [];
+  await runDiscovery(false, rows);
+  await runDiscovery(true, rows);
+  await runFragmented(rows);
   return rows;
 }
 
@@ -642,5 +817,5 @@ export function formatServerBench(rows: Row[], onServer: boolean): string {
 
 const argv = process.argv;
 if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
-  console.log(formatServerBench(await runServerBench(), argv.includes("--server")));
+  console.log(formatServerBench(argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server")));
 }
