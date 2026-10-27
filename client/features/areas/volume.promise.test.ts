@@ -157,7 +157,7 @@ function meshMeets(vol: Volume, at: (x: number, y: number) => number[], p: P, lo
 }
 
 describe("the owner's case: caught exactly when its cells lie inside the drawn solid (design 4.1)", () => {
-  test("squares: every shape, walls, platforms and pits, every coverage and inclusion rule", () => {
+  test("squares: creatures on the scene, every shape, walls, platforms and pits, every coverage and inclusion rule", () => {
     const rand = mulberry32(31 + SEED);
     let inside = 0;
     let missed = 0;
@@ -197,7 +197,7 @@ describe("the owner's case: caught exactly when its cells lie inside the drawn s
         let gTop = -Infinity;
         for (let y = r.y0; y < r.y1; y++) for (let x = r.x0; x < r.x1; x++) gTop = Math.max(gTop, ground.at(x, y));
         if (lo < gTop - 1e-9) continue;
-        // Tokens stand on the scene: off it, "center" reads a point no clip holds (aoe.ts pointInside), which the board never asks.
+        // The promise holds for creatures wholly on the scene. One off it, left there when the scene shrank, is the exception the next test keeps.
         if (r.x0 < 0 || r.y0 < 0 || r.x1 > w || r.y1 > h) continue;
         const clip = ringInClip(area, bounds, ring);
         const shape = prismInShape(area, ring, lo, hi, tol + 1e-7);
@@ -302,6 +302,24 @@ function nudgedCenter(g: HexGrid, h: Hex): P {
   const c = hexCenter(g, h);
   return { x: c.x + 0.0123, y: c.y + 0.0071 };
 }
+
+describe("the known exception: a creature off the scene (review ISOA1-ASTRA-03)", () => {
+  test("a scene shrunk under a token: the center rule still catches it, where no solid stands", () => {
+    // A 20 ft sphere at the scene's right edge, and a goblin left two cells past it when the scene shrank from 30 cells wide to 20.
+    const bounds = { w: 20, h: 20 };
+    const t: AreaTemplateInput = { id: "s", rev: 1, shape: "sphere", size: 20, origin: { x: 19, y: 10, z: 5 }, yaw: 0, includeOrigin: true };
+    const goblin = tok("g", { size: "small", x: 21, y: 10, elevation: 0 });
+    const base = ctxOf(bounds, null, { g: goblin });
+    const area = resolveArea(t, base);
+    assert.ok(area);
+    const vol = buildVolume({ area, bounds, ground: () => 0, px: 40 });
+    vol.ensureAll();
+    assert.ok(!meshMeets(vol, faceIndex(vol), { x: 21.5123, y: 10.5071 }, 0, 1, 0), "the solid stops at the scene's edge");
+    // The rules read no scene bounds for the center (aoe.ts Sampler.pointInside): a follow-up for the rules, not this drawing.
+    assert.equal(caughtUnder(t, goblin, base, "half", "center"), true);
+    assert.equal(caughtUnder(t, goblin, base, "half", "anyCell"), false);
+  });
+});
 
 describe("cases of the case table (design 8)", () => {
   test("a caster inside its own Spirit Guardians: the solid whole round it, and it is not caught", () => {
