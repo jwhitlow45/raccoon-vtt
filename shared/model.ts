@@ -178,20 +178,25 @@ export type RoomState = {
   memoryBy?: Record<string, MemoryChunk>;
   /**
    * The scenes that have been the players' scene since the map discovery
-   * upgrade, and every scene that existed then (5.5). An op of op version
-   * 26 or later that makes a scene the players' scene marks it, and the
-   * mark stays while the scene exists. The size guard reserves players'
-   * memory on a marked scene with fog and party vision on, so whether
-   * memory is reserved never reads an explored layer. A projection never
-   * holds it, so a reader takes absent as empty.
+   * upgrade, and every scene that existed then or came in a room import
+   * (5.5). An op of op version 26 or later that makes a scene the players'
+   * scene marks it, a new room's first mat is marked at its creation, and
+   * Duplicate with Fog marks the copy of a marked scene. The mark stays
+   * while the scene exists and goes with it: an undo of the deletion
+   * brings the scene back unmarked, with its explored layers gone too,
+   * until the players' scene is next moved there. The size guard reserves
+   * players' memory on a marked scene with fog and party vision on, so
+   * whether memory is reserved never reads an explored layer. A projection
+   * never holds it, so a reader takes absent as empty.
    */
   playedScenes?: Record<SceneId, SceneMark>;
   /**
    * The scenes that had fog and party vision on at the map discovery
-   * upgrade (5.5): their memory reserves share the room's free space
-   * rather than each taking its full cap, so no room became full at
-   * deploy. A scene loses its mark when its fog or party vision goes off,
-   * and never gains one again. A projection never holds it.
+   * upgrade or a room import (5.5): their memory reserves share the room's
+   * free space rather than each taking its full cap, so no room became
+   * full at deploy. A scene loses its mark when its fog or party vision
+   * goes off or it is deleted, and never gains one again: a copy made by
+   * Duplicate with Fog starts without one. A projection never holds it.
    */
   memoryShared?: Record<SceneId, SceneMark>;
 };

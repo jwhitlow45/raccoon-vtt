@@ -747,12 +747,12 @@ export const opMigrations: MigrationStep[] = [
     //
     // Deploy: back up the database just before. The first op after it is
     // stored at version 26, and the shutdown writes version 27 snapshots
-    // (snapshotMigrations). Reload every page left open, table displays
-    // included: there is no client version check, and an old page would
-    // derive automatic walls the server now sends. Rollback: restore the
-    // backup taken before the deploy, as for any snapshot version bump. An
-    // older build refuses a version 27 snapshot and a version 26 op
-    // (runMigrations).
+    // (snapshotMigrations). Once the player copies of the map ship (MD2),
+    // reload every page left open, table displays included: there is no
+    // client version check, and an old page would derive automatic walls
+    // the server then sends. Rollback: restore the backup taken before the
+    // deploy, as for any snapshot version bump. An older build refuses a
+    // version 27 snapshot and a version 26 op (runMigrations).
     from: 25,
     to: 26,
     apply: (op) => op,
