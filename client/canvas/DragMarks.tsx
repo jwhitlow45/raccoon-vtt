@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useContext, useMemo } from "react";
 import { Group } from "react-konva";
 import type { AreaTemplate, RoomState, Scene, Token } from "#shared/model.ts";
 import type { AreaContext, CoverageResult } from "#shared/rules/aoe.ts";
@@ -7,7 +7,7 @@ import { cachedCoverage, caughtTokens, coveredWindow } from "../features/areas/c
 import { ringReach } from "../features/areas/draw.tsx";
 import { areaOutline, type Outline } from "../features/areas/placement.ts";
 import { useLiveTokens } from "../features/areas/useLiveTokens.ts";
-import { CAUGHT_RING, Clipped, PlacedArea, useAreaParts } from "../features/areas/TemplateLayer.tsx";
+import { CAUGHT_RING, Clipped, IsoAreasContext, PlacedArea, useAreaParts } from "../features/areas/TemplateLayer.tsx";
 import { tethers } from "../features/attach/groups.ts";
 import { TetherLine, tetherPx } from "../features/attach/TetherLayer.tsx";
 import type { LayerProps } from "../features/layers.ts";
@@ -18,6 +18,9 @@ import { boxGround } from "./isoPlace.ts";
 import { auraClip, tetherShows } from "./markStand.ts";
 import { IsoGroundContext, useTreeShownView, type IsoGround } from "./relief/context.ts";
 import type { CellBox } from "./relief/fogView.ts";
+import { sortKey } from "./relief/pieces.ts";
+import { WholeVolume } from "./relief/VolumeShape.tsx";
+import { footprint } from "../lib/scene.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
@@ -94,9 +97,19 @@ export function movingAuraBox(a: AreaTemplate, ctx: AreaContext, scene: Pick<Sce
  * token ids: the overlay for other members' drags, and the drag layer for
  * this device's own, under the standees the drag moves there
  * (canvas/dragLayer.ts), so its frames redraw that layer alone.
+ *
+ * An aura whose volume stands (docs/design-v1-iso-area-shapes.md 4.5)
+ * stands with it, coarse, built again at each cell the drop crosses. Dragged
+ * here it draws in two passes around the dragged standee: `side` "behind",
+ * mounted under the standees, draws every flat mark and the bands behind
+ * the standee's natural key, and "front", mounted over them, the bands at
+ * or in front of it, so the creature reads inside its own aura. Another
+ * member's drag draws it whole on the overlay.
  */
-export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly string[]; iso: IsoGround; layer: LayerProps }) {
-  const { iso, layer } = props;
+export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly string[]; iso: IsoGround; layer: LayerProps; side?: "behind" | "front" }) {
+  const { iso, layer, side } = props;
+  const board = useContext(IsoAreasContext);
+  const world = board?.world ?? null;
   // In view space whatever place mounts it, so its lifts and pills stand from there.
   const upright = useMemo<IsoGround>(() => ({ ...iso, place: "upright" }), [iso]);
   const ids = useMemo(() => new Set(props.tokenIds), [props.tokenIds]);
@@ -120,6 +133,20 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
     const t = tokens[id];
     return t && t.sceneId === layer.scene.id ? [t] : [];
   });
+  const auraOf = (t: Token, a: AreaTemplate) => {
+    if (!world) return null;
+    // Its standee's natural key at the cell the drag would drop it on (buckets.ts).
+    const fp = footprint(t);
+    const split = side ? { key: sortKey(iso.turn, t.x + fp.w / 2, t.y + fp.h / 2), part: side } : undefined;
+    return <WholeVolume key={`v${a.id}`} req={{ template: a, ctx: areas.ctx, banded: side !== undefined }} id={`drag:${a.id}`} look={{ color: a.color, dm: a.visibility === "dm", selected: false, preview: false }} turn={iso.turn} world={world} {...(split ? { side: split } : {})} />;
+  };
+  if (side === "front") {
+    return (
+      <Group listening={false}>
+        {moving.flatMap((t) => Object.values(templates).filter((a): a is AreaTemplate => !!a && a.sceneId === layer.scene.id && a.attachedTo === t.id).map((a) => auraOf(t, a)))}
+      </Group>
+    );
+  }
   return (
     <IsoGroundContext.Provider value={upright}>
       <Group listening={false}>
@@ -144,6 +171,7 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
                   />
                 );
               })}
+              {attached.map((a) => auraOf(t, a))}
               {(t.rangeRings?.length ?? 0) > 0 ? (
                 <>
                   <Lift z={z}>

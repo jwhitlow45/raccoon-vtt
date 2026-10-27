@@ -239,6 +239,29 @@ export const theme = {
     ghostOpacity: 0.6,
     hiddenOpacity: 0.5,
   },
+  /**
+   * An area standing as its real shape in Isometric
+   * (docs/design-v1-iso-area-shapes.md 5): the area's own color at these
+   * strengths, each fill once on its far faces and once on its near ones,
+   * so what lies behind it takes about twice the tint of what lies inside.
+   * Widths and dashes are screen pixels.
+   */
+  area: {
+    volumeFill: 0.16,
+    volumeLine: 0.95,
+    volumeHidden: 0.55,
+    volumeGuide: 0.8,
+    /** Another member's preview, fainter, as Top-down draws it. */
+    previewFill: 0.1,
+    /** A DM-only area on the DM's device, as Top-down dims it. */
+    dmOpacity: 0.6,
+    lineWidthPx: 2,
+    selectedWidthPx: 2.5,
+    thinWidthPx: 1,
+    hiddenDash: [4, 4],
+    dmDash: [6, 4],
+    previewDash: [8, 5],
+  },
 } as const;
 
 /**

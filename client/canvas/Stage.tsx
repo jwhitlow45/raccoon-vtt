@@ -1722,6 +1722,7 @@ export function MapStage(props: {
                     draggingId={draggingId}
                     onStage={setIsoStage}
                     stageStyle={stageStyle}
+                    insets={insets}
                   />
                 ) : null}
               </SharedMapImage>

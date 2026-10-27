@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { BuildChunk } from "#shared/model.ts";
 import { depth, type Turn } from "../../lib/view.ts";
-import { groupWalls, meets, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
-import { boundsOf, facesOf, type PieceSource } from "./pieces.ts";
+import { resolveArea, type AreaTemplateInput } from "#shared/rules/aoe.ts";
+import { buildVolume } from "../../features/areas/volume.ts";
+import { ctxOf } from "../../features/areas/volumeTesting.ts";
+import { groupWalls, meets, ReliefIndex, stretches, type Item, type StandeeIn, type VolumePiece } from "./buckets.ts";
+import { boundsOf, facesOf, keyOf, sortKey, type PieceSource } from "./pieces.ts";
+import { bandPieces, pitsUnder, sideOf } from "./volumes.ts";
 import type { WallPiece } from "./runs.ts";
 import { standeeShape } from "./standee.ts";
 
@@ -274,5 +278,280 @@ describe("buckets", () => {
   test("meets is inclusive at the edges", () => {
     assert.ok(meets({ x0: 0, y0: 0, x1: 1, y1: 1 }, { x0: 1, y0: 1, x1: 2, y1: 2 }));
     assert.ok(!meets({ x0: 0, y0: 0, x1: 1, y1: 1 }, { x0: 1.01, y0: 0, x1: 2, y1: 1 }));
+  });
+});
+
+// ---------------------------------------------------------------- areas standing as their real shapes
+
+const TURNS: readonly Turn[] = [0, 1, 2, 3];
+const LOOK = { color: "#3fa7ff", dm: false, selected: false, preview: false };
+
+/** An area's bands at a turn, from its real volume over this drawn ground (in cells), as the board lays them out. */
+function bandsOf(t: Pick<AreaTemplateInput, "shape" | "size" | "origin"> & Partial<AreaTemplateInput>, ground: Record<string, number>, turn: Turn, id = "a"): VolumePiece[] {
+  const bounds = { w: 40, h: 40 };
+  const area = resolveArea({ id, rev: 1, yaw: 0, includeOrigin: true, ...t }, ctxOf(bounds, null));
+  assert.ok(area);
+  const at = (x: number, y: number) => ground[`${x},${y}`] ?? 0;
+  const vol = buildVolume({ area, bounds, ground: at, px: 40 });
+  vol.ensureAll();
+  for (const key of vol.keys) assert.ok(vol.drawn(key, turn));
+  return bandPieces(vol, turn, vol.keys, id, LOOK, pitsUnder(vol, { at }));
+}
+
+/** A band made up for a case: its key at its middle, over everything. */
+function band(area: string, b: number): VolumePiece {
+  return { kind: "volume", id: `v${area}:${b}`, area, band: b, key: b + 0.5, draws: [], bounds: EVERYTHING, look: LOOK, pits: [] };
+}
+
+type Entry = { kind: "standee"; id: string } | { kind: "band"; area: string; band: number } | { kind: "cell"; id: string; key: number };
+
+function entries(items: Item[], turn: Turn): Entry[] {
+  return items.flatMap((i): Entry[] =>
+    i.kind === "standee" ? [{ kind: "standee", id: i.id }] : i.pieces.map((p): Entry => (p.kind === "volume" ? { kind: "band", area: p.area, band: p.band } : { kind: "cell", id: p.id, key: keyOf(p, turn) })),
+  );
+}
+
+/** A standee's raise as the code computes it (buckets.ts placeStandees): its key raised to its own cells at or below its base, then to its holders'. */
+function raiseOf(s: StandeeIn, all: readonly StandeeIn[], ground: Record<string, number>, turn: Turn): number {
+  const own = (t: StandeeIn) => {
+    let key = sortKey(turn, t.x, t.y);
+    for (let y = t.range.y0; y < t.range.y1; y++) {
+      for (let x = t.range.x0; x < t.range.x1; x++) {
+        const z = ground[`${x},${y}`] ?? 0;
+        if (z !== 0 && z <= t.base) key = Math.max(key, sortKey(turn, x + 0.5, y + 0.5));
+      }
+    }
+    return key;
+  };
+  let key = own(s);
+  for (let at = s, guard = 0; at.holder && guard < 10; guard++) {
+    const holder = all.find((h) => h.id === at.holder);
+    if (!holder) break;
+    key = Math.max(key, own(holder));
+    at = holder;
+  }
+  return key - sortKey(turn, s.x, s.y);
+}
+
+/**
+ * The precedence rule (design 4.3), with every key worked out here: a band
+ * at its middle, band + 0.5, draws after the last placed standee whose
+ * natural key, its footprint's middle, is below it and before every one
+ * placed after that. And its error: a piece drawn before a band though
+ * nearer than it, a column or a standee, is nearer by at most the raise of
+ * the standee the band follows.
+ */
+function checkPrecedence(items: Item[], turn: Turn, standees: readonly StandeeIn[], ground: Record<string, number>, label: string): void {
+  const order = entries(items, turn);
+  const placed = order.flatMap((e) => (e.kind === "standee" ? [e.id] : []));
+  const byId = new Map(standees.map((s) => [s.id, s]));
+  const natural = (id: string) => sortKey(turn, byId.get(id)!.x, byId.get(id)!.y);
+  const at = (id: string) => order.findIndex((e) => e.kind === "standee" && e.id === id);
+  order.forEach((e, i) => {
+    if (e.kind !== "band") return;
+    const key = e.band + 0.5;
+    let last = -1;
+    placed.forEach((id, k) => {
+      if (natural(id) < key) last = k;
+    });
+    placed.forEach((id, k) => assert.ok(k <= last ? at(id) < i : at(id) > i, `${label}: band ${e.band} of ${e.area} ${k <= last ? "before" : "after"} ${id}`));
+    const raise = last >= 0 ? raiseOf(byId.get(placed[last]!)!, standees, ground, turn) : 0;
+    for (const before of order.slice(0, i)) {
+      const nearer = before.kind === "cell" ? before.key - key : before.kind === "standee" ? natural(before.id) - key : -1;
+      assert.ok(nearer <= raise + 1e-9, `${label}: ${before.kind === "band" ? "" : before.id} drawn before band ${e.band} though ${nearer} nearer, past the raise ${raise}`);
+    }
+  });
+}
+
+/** Standees on the scene in front of and behind a point at this turn, `d` cells along the way to the viewer. */
+function along(turn: Turn, x: number, y: number, d: number): { x: number; y: number } {
+  const dx = depth(turn, 1, 0);
+  const dy = depth(turn, 0, 1);
+  return { x: x + d * dx, y: y + d * dy };
+}
+
+describe("areas standing as their real shapes in the depth list (docs/design-v1-iso-area-shapes.md 4.3)", () => {
+  test("a 20 ft sphere 10 ft up: a flier inside between its far and near bands, one above, one in front after every band under its art, one behind before them, at each turn", () => {
+    const relief = index({});
+    for (const turn of TURNS) {
+      const sphere = { shape: "sphere" as const, size: 20, origin: { x: 20.5, y: 20.5, z: 10 } };
+      const pieces = bandsOf(sphere, {}, turn);
+      assert.ok(pieces.length >= 8, `turn ${turn}: ${pieces.length} bands`);
+      const front = along(turn, 20, 20, 7);
+      const behind = along(turn, 20, 20, -7);
+      const standees = [standee("inside", 20, 20, 2, 1, 1, {}, turn), standee("above", 20, 20, 12, 1, 1, {}, turn), standee("front", front.x, front.y, 2, 1, 1, {}, turn), standee("behind", behind.x, behind.y, 2, 1, 1, {}, turn)];
+      const items = relief.layout(turn, EVERYTHING, standees, pieces);
+      checkPrecedence(items, turn, standees, {}, `turn ${turn}`);
+      const order = entries(items, turn);
+      const at = (id: string) => order.findIndex((e) => e.kind === "standee" && e.id === id);
+      const bandAt = (p: VolumePiece) => order.findIndex((e) => e.kind === "band" && e.band === p.band);
+      const art = (id: string) => standees.find((s) => s.id === id)!.art;
+      const under = (id: string) => pieces.filter((p) => meets(p.bounds, art(id)));
+      // Inside: far bands under its art before it, near ones after.
+      assert.ok(under("inside").some((p) => bandAt(p) < at("inside")) && under("inside").some((p) => bandAt(p) > at("inside")), `turn ${turn}: inside`);
+      assert.ok(under("front").length > 0 && under("front").every((p) => bandAt(p) < at("front")), `turn ${turn}: in front`);
+      assert.ok(under("behind").length > 0 && under("behind").every((p) => bandAt(p) > at("behind")), `turn ${turn}: behind`);
+    }
+  });
+
+  test("a Gargantuan, a 6 by 6, a Tiny and a 1.5 by 1.5 flier over a 10 ft platform, in a sphere and just outside it: read by their natural keys, a tint on the platform within each one's raise", () => {
+    const ground: Record<string, number> = {};
+    for (let y = 12; y < 28; y++) for (let x = 12; x < 28; x++) ground[`${x},${y}`] = 2;
+    const relief = index(ground);
+    const sizes: [string, number][] = [
+      ["gargantuan", 4],
+      ["six", 6],
+      ["tiny", 0.5],
+      ["onehalf", 1.5],
+    ];
+    let cases = 0;
+    for (const turn of TURNS) {
+      const pieces = bandsOf({ shape: "sphere", size: 25, origin: { x: 20, y: 20, z: 25 } }, ground, turn);
+      for (const [name, w] of sizes) {
+        // Inside, then just outside on the near side.
+        for (const d of [0, 6 + w / 2]) {
+          const p = along(turn, 20 - w / 2, 20 - w / 2, d);
+          const s = standee(name, p.x, p.y, 5, w, w, {}, turn);
+          const items = relief.layout(turn, EVERYTHING, [s], pieces);
+          checkPrecedence(items, turn, [s], ground, `turn ${turn} ${name} at ${d}`);
+          cases++;
+        }
+      }
+    }
+    assert.equal(cases, 32);
+  });
+
+  test("astra's two fliers over a platform: A natural 14.142 raised to 16.263, B at 15.556, a band at 15.5 draws after A and so after B, which it tints, within A's raise", () => {
+    // At turn 0 a point's key is (x + y) / sqrt 2. A Gargantuan from 8, 8 has its middle at 10, 10 and its own far cell's middle at 11.5, 11.5, on a platform under it.
+    const ground: Record<string, number> = {};
+    for (let y = 8; y < 12; y++) for (let x = 8; x < 12; x++) ground[`${x},${y}`] = 2;
+    const relief = index(ground);
+    const a = standee("A", 8, 8, 3, 4, 4);
+    const b = standee("B", 4.5, 16.5, 0);
+    // A third standee far behind both, so "after the last" and "after the first" differ.
+    const x = standee("X", 2, 4, 0);
+    assert.equal(Math.round(sortKey(0, a.x, a.y) * 1e3) / 1e3, 14.142);
+    assert.equal(Math.round(sortKey(0, b.x, b.y) * 1e3) / 1e3, 15.556);
+    const items = relief.layout(0, EVERYTHING, [a, b, x], [band("v", 15)]);
+    const order = entries(items, 0).filter((e) => e.kind !== "cell");
+    assert.deepEqual(order, [{ kind: "standee", id: "X" }, { kind: "standee", id: "B" }, { kind: "standee", id: "A" }, { kind: "band", area: "v", band: 15 }]);
+    checkPrecedence(items, 0, [a, b, x], ground, "astra");
+    assert.ok(Math.abs(raiseOf(a, [a], ground, 0) - 2.121) < 1e-3);
+  });
+
+  test("a creature carried by a flying mount inside an aura: after its holder, and among the aura's bands by its own natural key, its raise from its holder's", () => {
+    for (const turn of TURNS) {
+      const pieces = bandsOf({ shape: "emanation", size: 15, origin: { x: 20, y: 20, z: 20 } }, {}, turn);
+      const mount = standee("mount", 19, 19, 4, 2, 2, {}, turn);
+      const rider = standee("rider", 19, 19, 4, 1, 1, { holder: "mount" }, turn);
+      const items = index({}).layout(turn, EVERYTHING, [rider, mount], pieces);
+      const order = entries(items, turn);
+      const at = (id: string) => order.findIndex((e) => e.kind === "standee" && e.id === id);
+      assert.ok(at("rider") > at("mount"), `turn ${turn}`);
+      checkPrecedence(items, turn, [rider, mount], {}, `turn ${turn}`);
+    }
+  });
+
+  test("a volume with no standee in its depth range is one run, and a flier inside it makes two", () => {
+    const runs = (items: Item[]) => {
+      let count = 0;
+      let open = false;
+      for (const item of items) {
+        if (item.kind === "standee") {
+          open = false;
+          continue;
+        }
+        for (const p of item.pieces) {
+          if (p.kind === "volume") {
+            if (!open) count++;
+            open = true;
+          } else open = false;
+        }
+      }
+      return count;
+    };
+    for (const turn of TURNS) {
+      const pieces = bandsOf({ shape: "sphere", size: 20, origin: { x: 20, y: 20, z: 10 } }, {}, turn);
+      const far = along(turn, 20, 20, -12);
+      assert.equal(runs(index({}).layout(turn, EVERYTHING, [standee("far", far.x, far.y, 0, 1, 1, {}, turn)], pieces)), 1, `turn ${turn}`);
+      assert.equal(runs(index({}).layout(turn, EVERYTHING, [standee("in", 19.5, 19.5, 2, 1, 1, {}, turn)], pieces)), 2, `turn ${turn}`);
+    }
+  });
+
+  test("two volumes interleave band by band, and ties draw a column, a pit, a wall, a volume, then a standee", () => {
+    for (const turn of TURNS) {
+      const a = bandsOf({ shape: "sphere", size: 20, origin: { x: 18, y: 18, z: 10 } }, {}, turn, "a");
+      const b = bandsOf({ shape: "cube", size: 20, origin: { x: 22, y: 22, z: 5 } }, {}, turn, "b");
+      const order = entries(index({}).layout(turn, EVERYTHING, [], [...b, ...a]), turn).flatMap((e) => (e.kind === "band" ? [e] : []));
+      for (let i = 1; i < order.length; i++) {
+        const [p, q] = [order[i - 1]!, order[i]!];
+        assert.ok(p.band < q.band || (p.band === q.band && p.area < q.area), `turn ${turn}: ${JSON.stringify(p)} then ${JSON.stringify(q)}`);
+      }
+      assert.ok(new Set(order.map((e) => e.area)).size === 2);
+    }
+    // At turn 0 a cell's middle and a band's can tie only by rounding, so the ties are made: a band at the column's key, and a standee whose natural key is the band's.
+    const relief = index({ "4,4": 1, "5,3": -1 }, [{ id: "free", kind: "wall", ax: 3.25, ay: 5.75, bx: 3.75, by: 5.25, cx: 3, cy: 5, beside: null, auto: false }]);
+    const key = sortKey(0, 4.5, 4.5);
+    const tied: VolumePiece = { ...band("v", 0), key };
+    // Its middle is half a cell in from its corner each way.
+    const s = standee("s", key * Math.SQRT2 - 11, 10, 0);
+    assert.equal(sortKey(0, s.x, s.y), key);
+    const names = entries(relief.layout(0, EVERYTHING, [s], [tied]), 0).map((e) => (e.kind === "band" ? "band" : e.id));
+    assert.deepEqual(names, ["c4,4", "c5,3", "wfree", "band", "s"]);
+  });
+
+  test("a standee inside a volume takes no silhouette from its bands, and one from a column drawn after it", () => {
+    const pieces = bandsOf({ shape: "sphere", size: 20, origin: { x: 20, y: 20, z: 10 } }, {}, 0);
+    const s = standee("in", 19.5, 19.5, 2);
+    const items = index({}).layout(0, EVERYTHING, [s], pieces);
+    const item = items.find((i) => i.kind === "standee");
+    assert.ok(item?.kind === "standee" && !item.silhouette);
+    assert.ok(entries(items, 0).findIndex((e) => e.kind === "band") < entries(items, 0).findIndex((e) => e.kind === "standee"));
+    const covered = index({ "21,21": 3 }).layout(0, EVERYTHING, [s], pieces).find((i) => i.kind === "standee");
+    assert.ok(covered?.kind === "standee" && covered.silhouette);
+  });
+
+  test("a 5 ft sphere at -10 ft over a 20 ft pit: its bands carry the pit's cells for their clip, inside the opening down to the floor, and a flier in the pit draws between them", () => {
+    const ground: Record<string, number> = {};
+    for (let y = 10; y < 14; y++) for (let x = 10; x < 14; x++) ground[`${x},${y}`] = -4;
+    const relief = index(ground);
+    for (const turn of TURNS) {
+      const pieces = bandsOf({ shape: "sphere", size: 5, origin: { x: 12, y: 12, z: -10 } }, ground, turn);
+      assert.ok(pieces.length >= 2);
+      for (const p of pieces) {
+        const pits = p.pits.map((c) => `${c.x},${c.y}`);
+        // The cells under its plan, every one a pit's.
+        assert.ok(["11,11", "12,11", "11,12", "12,12"].every((c) => pits.includes(c)) && pits.every((c) => ground[c] === -4), `turn ${turn}: ${pits}`);
+        for (const d of p.draws) assert.ok(d.high.far.length + d.high.near.length === 0, `turn ${turn}: all of it lies inside the opening`);
+      }
+      assert.ok(pieces.some((p) => p.draws.some((d) => d.low.near.length > 0)));
+      const flier = standee("flier", 11.5, 11.5, -2, 1, 1, {}, turn);
+      const items = relief.layout(turn, EVERYTHING, [flier], pieces);
+      const item = items.find((i) => i.kind === "standee");
+      assert.ok(item?.kind === "standee" && item.pits.length > 0, "the flier is clipped by the pit too");
+      checkPrecedence(items, turn, [flier], ground, `turn ${turn}`);
+      const order = entries(items, turn);
+      const at = order.findIndex((e) => e.kind === "standee");
+      assert.ok(order.slice(0, at).some((e) => e.kind === "band") && order.slice(at).some((e) => e.kind === "band"), `turn ${turn}: between its bands`);
+    }
+  });
+
+  test("bands with no box in view are left out, and the stretch a band draws in is found by halving", () => {
+    const far = { ...band("v", 3), bounds: { x0: 1e5, y0: 1e5, x1: 1e5 + 1, y1: 1e5 + 1 } };
+    assert.equal(entries(index({}).layout(0, { x0: 0, y0: 0, x1: 10, y1: 10 }, [], [far, band("v", 4)]), 0).length, 1);
+    // Natural keys in placed order: the last below 5 is the third, though the second is placed before it with a larger key.
+    const at = stretches([1, 9, 4, 7]);
+    assert.equal(at(0.5), 0);
+    assert.equal(at(1), 0, "a tie is not below");
+    assert.equal(at(2), 1);
+    assert.equal(at(5), 3);
+    assert.equal(at(8), 4);
+    assert.equal(at(10), 4);
+  });
+
+  test("an aura dragged here draws its bands behind its standee's key under it, and those at or in front of it over it", () => {
+    const pieces = [band("v", 1), band("v", 2), band("v", 3)];
+    assert.deepEqual(sideOf(pieces, 2.5, "behind").map((p) => p.band), [1]);
+    assert.deepEqual(sideOf(pieces, 2.5, "front").map((p) => p.band), [2, 3]);
   });
 });

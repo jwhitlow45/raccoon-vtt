@@ -1,6 +1,8 @@
 import { FOG_SUBCELLS } from "#shared/model.ts";
 import { footprintRect, footprintSubcells } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
+import type { Ground } from "#shared/rules/held.ts";
+import type { Footprint } from "../../features/areas/volume.ts";
 import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { pillReach } from "../../features/measure/pillPlace.ts";
 import { dragTagPill } from "../dragTag.ts";
@@ -250,4 +252,100 @@ function segmentGap(p: P, a: P, b: P): number {
   const len2 = dx * dx + dy * dy;
   const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
   return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+
+/** What the area stand rule reads of a player's live ground (rules/held.ts deviceGround). */
+export type LiveSub = Pick<Ground, "subLive">;
+
+/** Sub-cells read between looks at the clock. */
+const STAND_CHECK = 4096;
+
+/**
+ * Whether an area stands as its real shape for this viewer
+ * (docs/design-v1-iso-area-shapes.md 4.4 and 9, D-261027-06): on a
+ * player's device on a scene with fog, only when every fog sub-cell of its
+ * footprint, the wall-clipped plan before the ground cut (volume.ts), is
+ * revealed and on that player's live ground, in sight or revealed by the
+ * DM. Ground the player only remembers counts as not revealed, so an area
+ * over it lies flat under the fog as Top-down draws it. Everything stands
+ * for a viewer who sees all the ground. The test runs in slices: `run`
+ * says null while it has more to read, and the answer once it is done.
+ */
+export class VolumeStand {
+  readonly fog: FogView;
+  readonly live: LiveSub | null;
+  readonly #fp: Footprint;
+  #run = 0;
+  #sx = -1;
+  #result: boolean | null;
+
+  constructor(fog: FogView, live: LiveSub | null, fp: Footprint) {
+    this.fog = fog;
+    this.live = live;
+    this.#fp = fp;
+    this.#result = fog.all ? true : null;
+  }
+
+  /** The answer, or null while it is still being read. */
+  get result(): boolean | null {
+    return this.#result;
+  }
+
+  /** Reads on until `deadline` (a `performance.now()` time), and says the answer, or null if it stopped first. */
+  run(deadline = Infinity): boolean | null {
+    if (this.#result !== null) return this.#result;
+    const runs = this.#fp.runs;
+    const { fog, live } = this;
+    let read = 0;
+    for (; this.#run < runs.length; this.#run += 3, this.#sx = -1) {
+      const sy = runs[this.#run]!;
+      const end = runs[this.#run + 2]!;
+      for (let sx = this.#sx < 0 ? runs[this.#run + 1]! : this.#sx; sx < end; sx++) {
+        if (!fog.revealed(sx, sy) || (live !== null && !live.subLive(sx, sy))) return (this.#result = false);
+        if (++read % STAND_CHECK === 0 && performance.now() > deadline) {
+          this.#sx = sx + 1;
+          return null;
+        }
+      }
+    }
+    return (this.#result = true);
+  }
+}
+
+/** The stand rule for an area at once (`VolumeStand`), for the tests and for small footprints. */
+export function volumeStands(fog: FogView, live: LiveSub | null, fp: Footprint): boolean {
+  return new VolumeStand(fog, live, fp).run()!;
+}
+
+/**
+ * Which caught creatures' rings draw at their standee's base
+ * (docs/design-v1-iso-area-shapes.md 4.4, D-261026-31): each creature an
+ * area whose volume stands catches, when that creature stands by the
+ * stand rule itself, never by `drawsAboveFog` alone. Every other ring
+ * stays on the ground with its area or its flat creature, under the fog,
+ * as Top-down draws it. By creature, the colors of its rings in the order
+ * of the areas, and every area and creature pair as `area|creature`.
+ */
+export function ringsAtBase(areas: readonly { id: string; color: string; caught: readonly string[] }[], tokens: ReadonlyMap<string, ViewToken>, fog: FogView, g: Grid): { byToken: Map<string, string[]>; pairs: Set<string> } {
+  const byToken = new Map<string, string[]>();
+  const pairs = new Set<string>();
+  const stands = new Map<string, boolean>();
+  const standsByRule = (id: string) => {
+    let ok = stands.get(id);
+    if (ok === undefined) {
+      const t = tokens.get(id);
+      stands.set(id, (ok = t !== undefined && creatureStands(fog, g, t, false)));
+    }
+    return ok;
+  };
+  for (const a of areas) {
+    for (const id of a.caught) {
+      if (!standsByRule(id)) continue;
+      pairs.add(`${a.id}|${id}`);
+      const list = byToken.get(id);
+      if (list) list.push(a.color);
+      else byToken.set(id, [a.color]);
+    }
+  }
+  return { byToken, pairs };
 }

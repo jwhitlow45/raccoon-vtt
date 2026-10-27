@@ -1,6 +1,8 @@
 import { CHUNK_CELLS, type BuildChunk, type FogTile } from "#shared/model.ts";
 import type { CellRange } from "#shared/rules/footprint.ts";
 import type { Turn } from "../../lib/view.ts";
+import type { BandDraw } from "../../features/areas/volume.ts";
+import type { VolumeLook } from "./drawRelief.ts";
 import { boundsOf, cellPieces, keyOf, RANK, sortKey, wallItems, type CellPiece, type PieceSource, type StaticPiece, type VBox } from "./pieces.ts";
 import type { WallPiece } from "./runs.ts";
 
@@ -20,7 +22,20 @@ import type { WallPiece } from "./runs.ts";
  * or below its base, and before every one above it, so a Large's ring stays
  * whole on a platform and a token inside the ground is hidden by its cells.
  * A carried token draws after its holder. Ties draw columns, then pits,
- * then walls, then standees, then by id.
+ * then walls, then volumes, then standees, then by id.
+ *
+ * An area standing as its real shape (docs/design-v1-iso-area-shapes.md
+ * 4.3) comes in as depth bands one cell deep, each keyed at its middle. A
+ * band meets the statics by key. Against the standees it goes by their
+ * natural keys, their footprints' middles, never the keys the own-cells
+ * and holder rules raise them to: a band draws after the last placed
+ * standee whose natural key is below its own, and before every one placed
+ * after that. A natural key equal to the band's falls to the tie order,
+ * which draws the band first. So a band never draws before a standee it
+ * lies in front of, and a flier inside a sphere draws between its far
+ * bands and its near ones. The error is at most that standee's raise, a
+ * column, wall or standee nearer than the band taking its tint. Bands give
+ * no silhouettes, being see-through.
  */
 
 /** A standee as the layout reads it. */
@@ -43,9 +58,31 @@ export type StandeeIn = {
   keep?: boolean;
 };
 
+/** One depth band of an area standing as its real shape: what each bucket in view draws of it, and its box at this turn. */
+export type VolumePiece = {
+  kind: "volume";
+  /** `v<area>:<band>`, for the tie order. */
+  id: string;
+  area: string;
+  band: number;
+  /** Its key in the depth list: its middle (volume.ts bandKey). */
+  key: number;
+  draws: readonly BandDraw[];
+  bounds: VBox;
+  look: VolumeLook;
+  /** The pit cells under the area, whose openings clip what lies inside them (design 4.3, Pits). */
+  pits: readonly { x: number; y: number }[];
+};
+
+/** What a run draws: the relief's pieces and areas' bands. */
+export type DrawPiece = StaticPiece | VolumePiece;
+
+/** Between walls and standees in a tie (design 4.3). */
+const VOLUME_RANK = 2.5;
+
 /** One entry of the drawing order: a run of pieces drawn by one shape, or a standee. */
 export type Item =
-  | { kind: "run"; pieces: StaticPiece[] }
+  | { kind: "run"; pieces: DrawPiece[] }
   | {
       kind: "standee";
       id: string;
@@ -188,7 +225,7 @@ export class ReliefIndex {
    * buckets in view, merged in depth order, with the standees in view placed
    * among them, runs of pieces between standees grouped for one shape each.
    */
-  layout(turn: Turn, view: VBox, standees: readonly StandeeIn[]): Item[] {
+  layout(turn: Turn, view: VBox, standees: readonly StandeeIn[], volumes: readonly VolumePiece[] = []): Item[] {
     const lists = this.visible(turn, view);
     // A k-way merge of the sorted buckets, by a small heap of each list's next piece.
     type Next = { list: TurnData; i: number };
@@ -232,9 +269,14 @@ export class ReliefIndex {
     }
 
     const placed = this.#placeStandees(turn, view, standees);
-    const items: (Item & { bounds: VBox; art?: VBox; key: number })[] = [];
-    let run: StaticPiece[] = [];
-    let runBounds: VBox[] = [];
+    // The bands in view, far to near, each with the stretch between standees it draws in: after the last placed standee whose natural key is below its key.
+    const bands = volumes.filter((v) => meets(v.bounds, view)).sort((a, b) => (before(a.key, VOLUME_RANK, a.id, b.key, VOLUME_RANK, b.id) ? -1 : 1));
+    const stretchOf = stretches(placed.map((s) => sortKey(turn, s.standee.x, s.standee.y)));
+    let vi = 0;
+    // A null box gives no silhouette: a band's (design 4.3).
+    const items: (Item & { bounds: VBox | null; art?: VBox; key: number })[] = [];
+    let run: DrawPiece[] = [];
+    let runBounds: (VBox | null)[] = [];
     const flush = () => {
       if (run.length === 0) return;
       // A run keeps its pieces' bounds for the silhouettes below.
@@ -242,34 +284,46 @@ export class ReliefIndex {
       run = [];
       runBounds = [];
     };
+    /** The bands of stretch `j` that sort before a piece, or all of them left. */
+    const bandsBefore = (j: number, next?: { key: number; rank: number; id: string }) => {
+      while (vi < bands.length && stretchOf(bands[vi]!.key) === j && (!next || before(bands[vi]!.key, VOLUME_RANK, bands[vi]!.id, next.key, next.rank, next.id))) {
+        run.push(bands[vi]!);
+        runBounds.push(null);
+        vi++;
+      }
+    };
+    const pushStatic = (j: number, p: StaticPiece, key: number, bounds: VBox) => {
+      bandsBefore(j, { key, rank: RANK[p.kind], id: p.id });
+      run.push(p);
+      runBounds.push(bounds);
+    };
     let i = 0;
-    for (const s of placed) {
+    for (let j = 0; j < placed.length; j++) {
+      const s = placed[j]!;
       while (i < statics.length && before(statics[i]!.key, RANK[statics[i]!.p.kind], statics[i]!.p.id, s.key, RANK.standee, s.order)) {
-        run.push(statics[i]!.p);
-        runBounds.push(statics[i]!.bounds);
+        pushStatic(j, statics[i]!.p, statics[i]!.key, statics[i]!.bounds);
         i++;
       }
+      bandsBefore(j);
       flush();
       items.push({ kind: "standee", id: s.standee.id, silhouette: false, pits: s.pits, bounds: s.standee.bounds, art: s.standee.art, key: s.key });
       // Its own cells above its base draw over it, wherever they sorted.
-      for (const c of s.over) {
-        run.push(c);
-        runBounds.push(boundsOf(c, turn));
-      }
+      for (const c of s.over) pushStatic(j + 1, c, keyOf(c, turn), boundsOf(c, turn));
     }
     while (i < statics.length) {
-      run.push(statics[i]!.p);
-      runBounds.push(statics[i]!.bounds);
+      pushStatic(placed.length, statics[i]!.p, statics[i]!.key, statics[i]!.bounds);
       i++;
     }
+    bandsBefore(placed.length);
     flush();
 
-    // Silhouettes: a standee whose art meets anything drawn after it.
+    // Silhouettes: a standee whose art meets anything drawn after it but a band.
     for (let k = 0; k < items.length; k++) {
       const item = items[k]!;
       if (item.kind !== "standee") continue;
       for (let m = k + 1; m < items.length; m++) {
-        if (meets(item.art!, items[m]!.bounds)) {
+        const b = items[m]!.bounds;
+        if (b && meets(item.art!, b)) {
           item.silhouette = true;
           break;
         }
@@ -339,6 +393,31 @@ export class ReliefIndex {
     placed.sort((a, b) => (a.key !== b.key ? a.key - b.key : a.order < b.order ? -1 : a.order > b.order ? 1 : 0));
     return placed;
   }
+}
+
+/**
+ * For standees in placed order by their natural keys, which stretch
+ * between them a band at a key draws in: the count of standees up to and
+ * including the last whose natural key is below it (the precedence rule,
+ * design 4.3, a tie drawing the band first). The least natural key from
+ * each standee on rises with the place, so a halving finds that last one.
+ */
+export function stretches(natural: readonly number[]): (key: number) => number {
+  const n = natural.length;
+  const least = new Float64Array(n + 1);
+  least[n] = Infinity;
+  for (let i = n - 1; i >= 0; i--) least[i] = Math.min(natural[i]!, least[i + 1]!);
+  return (key) => {
+    // The first place whose least natural key from there on is not below the key: the last standee below it is just before.
+    let lo = 0;
+    let hi = n;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (least[mid]! < key) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
 }
 
 /**

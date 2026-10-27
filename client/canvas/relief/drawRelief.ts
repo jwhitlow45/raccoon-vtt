@@ -2,8 +2,9 @@ import type { TexturedTerrain } from "../../features/builder/geometry.ts";
 import { TERRAIN_COLORS, TERRAIN_SWATCHES, TEXTURE_CELLS } from "../../features/builder/textures.ts";
 import { viewToScreen, type Camera } from "../../lib/camera.ts";
 import { theme } from "../../lib/theme.ts";
-import { isometric, K, toView, type Turn, type ViewPoint } from "../../lib/view.ts";
-import { meets } from "./buckets.ts";
+import { isometric, K, toView, turnAxes, type Turn, type ViewPoint } from "../../lib/view.ts";
+import type { BandPart } from "../../features/areas/volume.ts";
+import { meets, type DrawPiece, type VolumePiece } from "./buckets.ts";
 import { patternOf } from "./looks.ts";
 import { boundsOf, facesOf, type CellPiece, type Face, type SideLook, type StaticPiece, type VBox, type WallItem } from "./pieces.ts";
 
@@ -14,7 +15,9 @@ import { boundsOf, facesOf, type CellPiece, type Face, type SideLook, type Stati
  * ground stage's pixels under the cell, copied up by the lift and clipped
  * to the lifted diamond, read only from the source box. Neighboring tops at
  * one lift share a clip and a copy. A pit draws its floor, the ground's
- * pixels copied down, and its far sides, inside its opening.
+ * pixels copied down, and its far sides, inside its opening. Consecutive
+ * bands of one area standing as its real shape draw as one
+ * (docs/design-v1-iso-area-shapes.md 4.3 and 5).
  */
 
 export type DrawContext = {
@@ -32,9 +35,14 @@ export type DrawContext = {
 type Pt = { x: number; y: number };
 
 /** Sets the context to draw in view units, the camera on top of the device pixels. */
-function viewSpace(g: CanvasRenderingContext2D, dc: DrawContext): void {
+function viewSpace(g: CanvasRenderingContext2D, dc: Pick<DrawContext, "camera" | "pixelRatio">): void {
   const k = dc.pixelRatio * dc.camera.scale;
   g.setTransform(k, 0, 0, k, dc.pixelRatio * dc.camera.x, dc.pixelRatio * dc.camera.y);
+}
+
+/** `viewSpace` for a shape drawn outside the relief's runs, from its own stage's camera: in view units whatever group holds it. */
+export function viewSpaceOf(g: CanvasRenderingContext2D, camera: Camera, pixelRatio: number): void {
+  viewSpace(g, { camera, pixelRatio });
 }
 
 /** A view point in device pixels. */
@@ -220,7 +228,7 @@ function drawWall(g: CanvasRenderingContext2D, w: WallItem, dc: DrawContext): vo
 }
 
 /** Draws one run of pieces, in the order given. */
-export function drawRun(g: CanvasRenderingContext2D, pieces: readonly StaticPiece[], dc: DrawContext): void {
+export function drawRun(g: CanvasRenderingContext2D, pieces: readonly DrawPiece[], dc: DrawContext): void {
   g.save();
   viewSpace(g, dc);
   let batch: CellPiece[] = [];
@@ -230,7 +238,27 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly StaticPiec
     outlineTops(g, batch, dc);
     batch = [];
   };
-  for (const p of pieces) {
+  for (let i = 0; i < pieces.length; i++) {
+    const p = pieces[i]!;
+    if (p.kind === "volume") {
+      // An area's bands with nothing between them draw as one: one fill for their far faces and one for their near ones (ISOA-D3).
+      let end = i + 1;
+      while (end < pieces.length && pieces[end]!.kind === "volume" && (pieces[end] as VolumePiece).area === p.area) end++;
+      const run = pieces.slice(i, end) as VolumePiece[];
+      i = end - 1;
+      if (!run.some((v) => meets(v.bounds, dc.view))) continue;
+      flush();
+      const high: BandPart[] = [];
+      const low: BandPart[] = [];
+      for (const v of run) {
+        for (const d of v.draws) {
+          high.push(d.high);
+          low.push(d.low);
+        }
+      }
+      drawVolume(g, high, low, p.pits, p.look, dc.turn, 1 / dc.camera.scale);
+      continue;
+    }
     if (!meets(boundsOf(p, dc.turn), dc.view)) continue;
     if (p.kind === "column") {
       // Sides of later columns at one lift never overlap earlier tops at that lift, so the tops can wait for one copy.
@@ -244,5 +272,131 @@ export function drawRun(g: CanvasRenderingContext2D, pieces: readonly StaticPiec
     else drawPit(g, p, dc);
   }
   flush();
+  g.restore();
+}
+
+/** How an area standing as its real shape draws (docs/design-v1-iso-area-shapes.md 5). */
+export type VolumeLook = {
+  color: string;
+  /** A DM-only area on the DM's device: all of it at 60%, its outline dashed 6 4. */
+  dm: boolean;
+  /** Selected with the Area tool, or being aimed: its outline 2.5 px. */
+  selected: boolean;
+  /** Another member's preview: its fill 10%, its outline dashed 8 5. */
+  preview: boolean;
+};
+
+type Pts = ArrayLike<number>;
+
+/** Adds closed loops `[x, y, z, ...]` in world cells to the path, in view units at a turn. */
+function addLoops(g: CanvasRenderingContext2D, loops: readonly Pts[], c: number, s: number): void {
+  for (const q of loops) {
+    g.moveTo(c * q[0]! - s * q[1]!, (s * q[0]! + c * q[1]!) / 2 - K * q[2]!);
+    for (let i = 3; i + 2 < q.length; i += 3) g.lineTo(c * q[i]! - s * q[i + 1]!, (s * q[i]! + c * q[i + 1]!) / 2 - K * q[i + 2]!);
+    g.closePath();
+  }
+}
+
+/** Adds polylines `[x, y, z, ...]`, a NaN between one and the next, to the path, in view units at a turn. */
+function addLines(g: CanvasRenderingContext2D, q: Pts, c: number, s: number): void {
+  let start = true;
+  for (let i = 0; i + 2 < q.length; i += 3) {
+    const x = q[i]!;
+    if (Number.isNaN(x)) {
+      start = true;
+      continue;
+    }
+    const u = c * x - s * q[i + 1]!;
+    const v = (s * x + c * q[i + 1]!) / 2 - K * q[i + 2]!;
+    if (start) g.moveTo(u, v);
+    else g.lineTo(u, v);
+    start = false;
+  }
+}
+
+/**
+ * Clips to the openings of pit cells swept up past the canvas's top, in
+ * view units, so the near rim hides what lies below it, as it hides a
+ * standee there (docs/design-v1-isometric-view.md 5.5).
+ */
+export function clipToPits(g: CanvasRenderingContext2D, pits: readonly { x: number; y: number }[], turn: Turn): void {
+  const view = isometric(turn);
+  g.beginPath();
+  for (const cell of pits) {
+    const corners = [toView(view, cell), toView(view, { x: cell.x + 1, y: cell.y }), toView(view, { x: cell.x + 1, y: cell.y + 1 }), toView(view, { x: cell.x, y: cell.y + 1 })];
+    const left = corners.reduce((a, b) => (b.x < a.x ? b : a));
+    const right = corners.reduce((a, b) => (b.x > a.x ? b : a));
+    const bottom = corners.reduce((a, b) => (b.y > a.y ? b : a));
+    const sky = Math.min(left.y, right.y) - 1e5;
+    g.moveTo(left.x, left.y);
+    g.lineTo(bottom.x, bottom.y);
+    g.lineTo(right.x, right.y);
+    g.lineTo(right.x, sky);
+    g.lineTo(left.x, sky);
+    g.closePath();
+  }
+  g.clip();
+}
+
+/**
+ * Draws bands of one area as one run (docs/design-v1-iso-area-shapes.md
+ * 4.3 and 5): its far loops filled, its near loops filled, its hidden
+ * lines, then its outline and guides, in view units with `unit` view
+ * units to a screen pixel. The parts inside a pit's opening draw clipped
+ * to the openings of `pits`.
+ */
+export function drawVolume(g: CanvasRenderingContext2D, high: readonly BandPart[], low: readonly BandPart[], pits: readonly { x: number; y: number }[], look: VolumeLook, turn: Turn, unit: number): void {
+  const { c, s } = turnAxes(turn);
+  const a = theme.area;
+  const dim = look.dm ? a.dmOpacity : 1;
+  const fill = (look.preview ? a.previewFill : a.volumeFill) * dim;
+  g.save();
+  g.fillStyle = look.color;
+  g.strokeStyle = look.color;
+  g.lineJoin = "round";
+  const fills = (parts: readonly BandPart[]) => {
+    for (const which of ["far", "near"] as const) {
+      g.beginPath();
+      let any = false;
+      for (const p of parts) {
+        if (p[which].length === 0) continue;
+        any = true;
+        addLoops(g, p[which], c, s);
+      }
+      if (!any) continue;
+      g.globalAlpha = fill;
+      g.fill();
+    }
+  };
+  const strokes = (parts: readonly BandPart[]) => {
+    const stroke = (which: "hidden" | "guideHidden" | "outline" | "guide", alpha: number, widthPx: number, dash: readonly number[] | null) => {
+      g.beginPath();
+      let any = false;
+      for (const p of parts) {
+        if (p[which].length === 0) continue;
+        any = true;
+        addLines(g, p[which], c, s);
+      }
+      if (!any) return;
+      g.globalAlpha = alpha * dim;
+      g.lineWidth = widthPx * unit;
+      g.setLineDash(dash ? dash.map((d) => d * unit) : []);
+      g.lineCap = dash ? "butt" : "round";
+      g.stroke();
+    };
+    stroke("hidden", a.volumeHidden, a.thinWidthPx, a.hiddenDash);
+    stroke("guideHidden", a.volumeHidden, a.thinWidthPx, a.hiddenDash);
+    stroke("outline", a.volumeLine, look.selected ? a.selectedWidthPx : a.lineWidthPx, look.dm ? a.dmDash : look.preview ? a.previewDash : null);
+    stroke("guide", a.volumeGuide, a.thinWidthPx, null);
+  };
+  fills(high);
+  if (pits.length > 0 && low.some((p) => p.far.length + p.near.length + p.outline.length + p.hidden.length + p.guide.length + p.guideHidden.length > 0)) {
+    g.save();
+    clipToPits(g, pits, turn);
+    fills(low);
+    strokes(low);
+    g.restore();
+  }
+  strokes(high);
   g.restore();
 }

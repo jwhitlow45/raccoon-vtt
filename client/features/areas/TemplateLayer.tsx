@@ -1,4 +1,4 @@
-import { memo, useMemo, type ReactNode } from "react";
+import { createContext, memo, useContext, useMemo, type ReactNode } from "react";
 import { Group } from "react-konva";
 import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
 import type { AreaContext } from "#shared/rules/aoe.ts";
@@ -11,10 +11,11 @@ import { pillStands } from "../../canvas/markStand.ts";
 import { measureLabel } from "../../canvas/measureText.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
+import type { VolumeWorld } from "../../canvas/relief/volumes.ts";
 import { useViewerFog } from "../../canvas/viewerFog.ts";
 import { Pill, pillGeometry, pillReach } from "../measure/Pill.tsx";
 import { areaTitle } from "./labels.ts";
-import { cachedCoverage, caughtTokens, contextFrom } from "./coverage.ts";
+import { cachedCoverage, caughtTokens, contextFrom, type DeviceAreaContext } from "./coverage.ts";
 import { useLiveGround } from "./liveGround.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
 import { areaLabelSpot, foggedCells, tokenBoxes, type Box } from "./labelSpot.ts";
@@ -39,6 +40,10 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  * (docs/design-v1-isometric-view.md 5.2 and 5.3). An area attached to a
  * token being dragged leaves the ground for the drag's moving marks until
  * the drop (canvas/DragMarks.tsx), so a drag never redraws the ground.
+ * Where the board stands an area as its real shape, the rings of the
+ * creatures it catches that stand by the stand rule leave the ground for
+ * their standees' bases (docs/design-v1-iso-area-shapes.md 4.4,
+ * relief/IsoBoard.tsx), and the rest stay here.
  *
  * It only draws. The reminders that an area hits a creature again, and
  * the count of selection changes for the area tool, run in the board's
@@ -48,6 +53,26 @@ import { useLiveTokens } from "./useLiveTokens.ts";
 
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
 const EMPTY_TOKENS: RoomState["tokens"] = {};
+
+/**
+ * What the isometric board read for the areas it stands as their real
+ * shapes (docs/design-v1-iso-area-shapes.md 4.4, relief/IsoBoard.tsx): the
+ * context its still areas read, which the ground stage's areas read too,
+ * so both find the same creatures caught, each area and creature pair
+ * whose ring draws at the creature's standee instead of on the ground, as
+ * `area|creature`, and what a volume drawn outside the depth list reads
+ * (relief/volumes.ts), null below the heights' threshold. Null in Top-down.
+ */
+export type IsoAreas = { ctx: DeviceAreaContext | null; ringsUp: ReadonlySet<string>; world: VolumeWorld | null };
+
+export const IsoAreasContext = createContext<IsoAreas | null>(null);
+
+const NO_RINGS: ReadonlySet<string> = new Set();
+
+/** The pairs whose ring the board draws at a standee's base, none in Top-down. */
+export function useRingsUp(): ReadonlySet<string> {
+  return useContext(IsoAreasContext)?.ringsUp ?? NO_RINGS;
+}
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
 const EMPTY_TILES: RoomState["fogTiles"] = {};
 
@@ -110,9 +135,12 @@ export function useAreaParts(
   const viewer = useViewerFog(props);
   // A player's rings go only to creatures whose rays lie on their live ground (coverage.ts raysLive).
   const ground = useLiveGround(fog ? scene : undefined, role);
+  // In Isometric the still areas read the board's own context, the one it stands their shapes by.
+  const board = useContext(IsoAreasContext);
+  const shared = which === "stored" && board ? board.ctx : null;
   const ctx = useMemo(
-    () => (settings ? contextFrom({ tokens, buildChunks, settings, live: ground }, scene, samplesNow(moving), viewer) : null),
-    [tokens, buildChunks, settings, scene, moving, viewer, ground],
+    () => shared ?? (settings ? contextFrom({ tokens, buildChunks, settings, live: ground }, scene, samplesNow(moving), viewer) : null),
+    [shared, tokens, buildChunks, settings, scene, moving, viewer, ground],
   );
   /*
    * Where the tokens and their names are on screen, and the other layers'
@@ -233,11 +261,14 @@ export const PlacedArea = memo(function PlacedArea(props: {
   // Token labels keep off the name (useBoardText.ts). Every place it draws in publishes the same pill under its one key.
   usePublishPills(`area:${t.id}`, useMemo(() => [spec], [spec]));
   const iso = useIsoGround();
+  // The rings the board draws at standees' bases are not drawn here too.
+  const up = useRingsUp();
+  const onGround = up.size === 0 ? caught : caught.filter((id) => !up.has(`${t.id}|${id}`));
   const shapes = (
     <>
       <StillShading cov={cov} grid={ctx.grid} color={t.color} opacity={0.26} />
       {outline ? <OutlineShape outline={outline} color={t.color} widthPx={2} dash={hidden ? [6, 4] : undefined} /> : null}
-      {caught.map((id) => {
+      {onGround.map((id) => {
         const token = ctx.tokens?.[id];
         return token ? <TokenRing key={id} token={token} grid={ctx.grid} color={t.color} scale={scale} {...CAUGHT_RING} /> : null;
       })}

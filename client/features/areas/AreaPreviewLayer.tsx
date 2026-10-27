@@ -1,13 +1,14 @@
-import { memo, useMemo } from "react";
+import { memo, useContext, useMemo } from "react";
 import { Circle, Group, Line } from "react-konva";
 import type { AreaTemplate, DiagonalRule, RoomState, Token } from "#shared/model.ts";
-import { PREVIEW_SAMPLES, type AreaContext, type AreaTemplateInput, type CoverageResult } from "#shared/rules/aoe.ts";
+import { PREVIEW_SAMPLES, resolveArea, type AreaContext, type AreaTemplateInput, type CoverageResult } from "#shared/rules/aoe.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 import { Lift, MarkPill } from "../../canvas/IsoParts.tsx";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
+import { UprightDash, WholeVolume } from "../../canvas/relief/VolumeShape.tsx";
 import { useViewerFog } from "../../canvas/viewerFog.ts";
 import { theme } from "../../lib/theme.ts";
 import type { AoePreview } from "../../state/types.ts";
@@ -16,9 +17,9 @@ import { formatFeet } from "../measure/ruler.ts";
 import { cachedCoverage, caughtTokens, contextFrom, shadingClip } from "./coverage.ts";
 import { useLiveGround } from "./liveGround.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
-import { Clipped } from "./TemplateLayer.tsx";
+import { Clipped, IsoAreasContext, useRingsUp } from "./TemplateLayer.tsx";
 import { areaGrips, areaOutline, draftTemplate, frameTemplate, handlePoint, liveOrigin, outlineTop, usesFrom } from "./placement.ts";
-import { canEdit, HANDLE_GAP_PX, samplesNow, useAreaScope } from "./store.ts";
+import { canEdit, HANDLE_GAP_PX, samplesNow, useAreaScope, type AreaToolState } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
 
 /**
@@ -35,7 +36,12 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  *
  * In Isometric an area being aimed draws in the drag layer on the ground,
  * lifted to the drawn height at its origin, its pills standing
- * (docs/design-v1-isometric-view.md 5.3).
+ * (docs/design-v1-isometric-view.md 5.3). Its real shape stands with it
+ * (docs/design-v1-iso-area-shapes.md 4.5): coarse and whole in the drag
+ * layer while the finger moves, and once it rests the board stands it in
+ * the depth list instead (relief/IsoBoard.tsx), with the rings of the
+ * creatures it catches at their bases. Other members' previews stand
+ * coarse and whole, never in the depth list. Each by the stand rule.
  *
  * Both views draw it above a player's fog. On a player's device it reads
  * only the walls they could know (coverage.ts heldWalls), and its shading
@@ -76,19 +82,10 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
     [tokens, buildChunks, settings, scene, fog, ground],
   );
   if (!fine || !coarse || !settings) return null;
-  const ctx = samplesNow(moving || dragged.moving) === PREVIEW_SAMPLES ? coarse : fine;
+  const aiming = samplesNow(moving || dragged.moving) === PREVIEW_SAMPLES;
+  const ctx = aiming ? coarse : fine;
 
-  let active: { t: AreaTemplateInput; color: string; shade: boolean; casterId?: string; pointShape: boolean; editable: boolean } | null = null;
-  if (tool === "area" && draft) {
-    const t = draftTemplate(ctx.grid, draft, tokens, settings.feetPerCell);
-    if (t) active = { t, color: draft.color, shade: true, casterId: draft.casterId, pointShape: !usesFrom(draft.shape), editable: true };
-  } else if (tool === "area" && selectedId) {
-    const placed = templates[selectedId];
-    if (placed && placed.sceneId === scene.id) {
-      const t = live ? ({ ...placed, ...live } as AreaTemplate) : placed;
-      active = { t, color: t.color, shade: !!live, pointShape: false, editable: canEdit({ role, youId, view: { casts } }, placed) };
-    }
-  }
+  const active = aimedArea({ tool, draft, selectedId, live, templates, sceneId: scene.id, tokens, grid: ctx.grid, feetPerCell: settings.feetPerCell, role, youId, casts });
 
   const remote = Object.entries(aoes).filter(([, a]) => !a.local);
   if (!active && remote.length === 0) return null;
@@ -96,12 +93,44 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   return (
     <Group listening={false}>
       {remote.map(([key, a]) => (
-        <RemotePreview key={key} preview={a} ctx={coarse} fog={fog} scale={scale} color={members?.[a.from]?.color ?? theme.color.crest} name={members?.[a.from]?.name} />
+        <RemotePreview key={key} preview={a} id={key} ctx={coarse} fog={fog} scale={scale} color={members?.[a.from]?.color ?? theme.color.crest} name={members?.[a.from]?.name} />
       ))}
-      {active ? <ActiveArea {...active} ctx={ctx} fog={fog} scale={scale} sceneId={scene.id} tokens={tokens} diagonal={settings.diagonal} /> : null}
+      {active ? <ActiveArea {...active} ctx={ctx} fog={fog} scale={scale} sceneId={scene.id} tokens={tokens} diagonal={settings.diagonal} aiming={aiming} /> : null}
     </Group>
   );
 });
+
+/** The area this device aims or edits with the Area tool: its draft, or the placed area it picked with any move or turn in progress. */
+export type AimedArea = { t: AreaTemplateInput; color: string; shade: boolean; casterId?: string; pointShape: boolean; editable: boolean; id: string };
+
+export function aimedArea(input: {
+  tool: string;
+  draft: AreaToolState["draft"];
+  selectedId: string | null;
+  live: AreaToolState["live"];
+  templates: RoomState["templates"];
+  sceneId: string;
+  tokens: Record<string, Token>;
+  grid: AreaContext["grid"];
+  feetPerCell: number;
+  role: "dm" | "player";
+  youId: string;
+  casts: RoomState["casts"];
+}): AimedArea | null {
+  const { tool, draft, selectedId, live } = input;
+  if (tool === "area" && draft) {
+    const t = draftTemplate(input.grid, draft, input.tokens, input.feetPerCell);
+    return t ? { t, color: draft.color, shade: true, casterId: draft.casterId, pointShape: !usesFrom(draft.shape), editable: true, id: "draft" } : null;
+  }
+  if (tool === "area" && selectedId) {
+    const placed = input.templates[selectedId];
+    if (placed && placed.sceneId === input.sceneId) {
+      const t = live ? ({ ...placed, ...live } as AreaTemplate) : placed;
+      return { t, color: t.color, shade: !!live, pointShape: false, editable: canEdit({ role: input.role, youId: input.youId, view: { casts: input.casts } }, placed), id: placed.id };
+    }
+  }
+  return null;
+}
 
 function ActiveArea(props: {
   t: AreaTemplateInput;
@@ -110,22 +139,29 @@ function ActiveArea(props: {
   casterId?: string;
   pointShape: boolean;
   editable: boolean;
+  id: string;
   ctx: AreaContext;
   fog: FogView;
   scale: number;
   sceneId: string;
   tokens: Record<string, Token>;
   diagonal: DiagonalRule;
+  aiming: boolean;
 }) {
   const { t, color, ctx, scale } = props;
   const outline = areaOutline(t, ctx);
-  const caught = caughtTokens(t, ctx, props.sceneId);
+  const iso = useIsoGround();
+  const board = useContext(IsoAreasContext);
+  // At rest its rings go to the bases of the creatures the board stands them at.
+  const up = useRingsUp();
+  const caught = caughtTokens(t, ctx, props.sceneId).filter((id) => !up.has(`${props.id}|${id}`));
   const o = liveOrigin(t, ctx);
   const grips = areaGrips(t.shape, props.editable);
   const handle = grips.handle ? handlePoint(t, ctx, HANDLE_GAP_PX / scale) : null;
   const caster = props.pointShape && props.casterId ? props.tokens[props.casterId] : undefined;
-  const iso = useIsoGround();
   const z = iso ? iso.ground(o.x, o.y) : 0;
+  // The origin's own height, which the grip on the drawn ground below it reaches up to.
+  const originZ = iso && grips.origin ? (resolveArea(t, ctx)?.originZ ?? z) : z;
   let range: { from: { x: number; y: number }; ft: number } | null = null;
   if (caster) {
     const r = footprintRect(ctx.grid, caster);
@@ -136,6 +172,10 @@ function ActiveArea(props: {
     <>
       <Lift z={z}>
         {props.shade ? <ShadingAboveFog cov={cachedCoverage(t, ctx)} grid={ctx.grid} fog={props.fog} color={color} opacity={0.3} /> : null}
+      </Lift>
+      {iso && board?.world && props.aiming ? <WholeVolume req={{ template: t, ctx, banded: false }} id={props.id} look={{ color, dm: false, selected: true, preview: false }} turn={iso.turn} world={board.world} /> : null}
+      {iso && originZ > z ? <UprightDash x={o.x} y={o.y} z0={z} z1={originZ} turn={iso.turn} color={color} /> : null}
+      <Lift z={z}>
         {outline ? <OutlineShape outline={outline} color={theme.color.textHalo} widthPx={5} opacity={0.5} /> : null}
         {outline ? <OutlineShape outline={outline} color={color} widthPx={2.5} /> : null}
         {caught.map((id) => {
@@ -157,11 +197,12 @@ function ActiveArea(props: {
   );
 }
 
-function RemotePreview(props: { preview: AoePreview; ctx: AreaContext; fog: FogView; scale: number; color: string; name?: string }) {
+function RemotePreview(props: { preview: AoePreview; id: string; ctx: AreaContext; fog: FogView; scale: number; color: string; name?: string }) {
   const { preview, ctx, scale, color } = props;
   const t = frameTemplate(preview);
   const outline = areaOutline(t, ctx);
   const iso = useIsoGround();
+  const board = useContext(IsoAreasContext);
   const o = liveOrigin(t, ctx);
   const z = iso ? iso.ground(o.x, o.y) : 0;
   return (
@@ -170,6 +211,7 @@ function RemotePreview(props: { preview: AoePreview; ctx: AreaContext; fog: FogV
         <ShadingAboveFog cov={cachedCoverage(t, ctx)} grid={ctx.grid} fog={props.fog} color={color} opacity={0.18} />
         {outline ? <OutlineShape outline={outline} color={color} widthPx={2} dash={[8, 5]} /> : null}
       </Lift>
+      {iso && board?.world ? <WholeVolume req={{ template: t, ctx, banded: false }} id={`preview:${props.id}`} look={{ color, dm: false, selected: false, preview: true }} turn={iso.turn} world={board.world} /> : null}
       {props.name && outline ? <MarkPill {...outlineTop(outline)} z={z} scale={scale} name={props.name} size="map" color={color} small above /> : null}
     </>
   );

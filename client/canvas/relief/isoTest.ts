@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { ISO_TEST_FLAG } from "../../features/view/choice.ts";
 import { pickView, turnView, type ViewPick } from "../../features/view/store.ts";
 import type { Turn } from "../../lib/view.ts";
+import type { Item } from "./buckets.ts";
+import type { VolumesNow } from "./volumes.ts";
 
 /**
  * A way for tests and the bench to pick and turn without the View menu:
@@ -12,7 +14,21 @@ import type { Turn } from "../../lib/view.ts";
  */
 const HOOK = "__rvttIsoHook";
 
-export type Hook = { pick(pick: ViewPick | "follow"): void; turn(turn: Turn): void };
+export type Hook = { pick(pick: ViewPick | "follow"): void; turn(turn: Turn): void; layout?(): BoardLayout | null };
+
+/**
+ * The isometric board's depth list as the tests read it
+ * (docs/design-v1-iso-area-shapes.md 8): its entries in drawing order, a
+ * standee by its token's id and an area's band by the area and the band,
+ * with the relief's own pieces left out, which areas stand now and
+ * whether one waits to, and the colors of the rings at each standee's base.
+ */
+export type BoardLayout = {
+  order: ({ kind: "standee"; id: string } | { kind: "band"; area: string; band: number })[];
+  standing: string[];
+  waiting: boolean;
+  rings: Record<string, string[]>;
+};
 
 function flagged(): boolean {
   return typeof globalThis !== "undefined" && (globalThis as Record<string, unknown>)[ISO_TEST_FLAG] === true;
@@ -39,6 +55,20 @@ export function installHook(hook: Hook): () => void {
   };
 }
 
+/** The layout the board on screen made last, while the test flag is set: a View as a player board over the DM's makes its own after. */
+let lastLayout: BoardLayout | null = null;
+
+/** Keeps the board's layout for the hook, with the test flag only: anything else costs nothing. */
+export function reportLayout(items: readonly Item[], volumes: VolumesNow | null, rings: ReadonlyMap<string, readonly string[]> | null): void {
+  if (!flagged()) return;
+  const order: BoardLayout["order"] = [];
+  for (const item of items) {
+    if (item.kind === "standee") order.push({ kind: "standee", id: item.id });
+    else for (const p of item.pieces) if (p.kind === "volume") order.push({ kind: "band", area: p.area, band: p.band });
+  }
+  lastLayout = { order, standing: [...(volumes?.standing ?? [])].sort(), waiting: volumes?.waiting ?? false, rings: Object.fromEntries([...(rings ?? [])].map(([id, colors]) => [id, [...colors]])) };
+}
+
 /** Installs `__rvttIsoHook` while the test flag is set. */
 export function useIsoTestHook(key: string, sceneId: string): void {
   const on = flagged();
@@ -47,6 +77,7 @@ export function useIsoTestHook(key: string, sceneId: string): void {
     return installHook({
       pick: (pick) => pickView(key, pick === "follow" ? null : pick),
       turn: (turn) => turnView(key, sceneId, turn),
+      layout: () => lastLayout,
     });
   }, [on, key, sceneId]);
 }

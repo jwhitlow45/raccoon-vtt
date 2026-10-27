@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { FOG_SUBCELLS, type FogTile, type Token } from "#shared/model.ts";
+import { FOG_SUBCELLS, type FogTile, type SightTile, type Token } from "#shared/model.ts";
 import { tileKey } from "#shared/keys.ts";
 import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
@@ -658,5 +658,201 @@ describe("the stand rule on a hex scene (hex grids 4.2, ISOREB-OPUS-01)", () => 
       const src = readFileSync(new URL(file, import.meta.url), "utf8");
       assert.doesNotMatch(src, /\bSQUARES\b/, `${file} reads every footprint on the scene's grid`);
     }
+  });
+});
+
+// ---------------------------------------------------------------- areas standing as their real shapes
+
+const { resolveArea } = await import("#shared/rules/aoe.ts");
+const { buildVolume } = await import("../../features/areas/volume.ts");
+const { ctxOf } = await import("../../features/areas/volumeTesting.ts");
+const { deviceGround } = await import("#shared/rules/held.ts");
+const { fogRoom, lift } = await import("#shared/discoveryTestutil.ts");
+const { ringsAtBase, VolumeStand, volumeStands } = await import("./stand.ts");
+const { wholeVolume } = await import("./volumes.ts");
+
+/** A player's fog over a 32 cell scene: these cell rectangles [x0, y0, x1, y1) revealed, and these sub-cells [sx, sy] fogged again. */
+function areaFog(rects: readonly (readonly [number, number, number, number])[], fogged: readonly (readonly [number, number])[] = []): { tiles: Record<string, FogTile>; view: FogView } {
+  const bounds = { w: 32, h: 32 };
+  const tiles: Record<string, FogTile> = {};
+  for (let ty = 0; ty * 16 < bounds.h; ty++) {
+    for (let tx = 0; tx * 16 < bounds.w; tx++) {
+      const bits = new Uint8Array(TILE_BYTES);
+      const set = (sx: number, sy: number, on: boolean) => {
+        if (sx < tx * TILE_SUB || sy < ty * TILE_SUB || sx >= (tx + 1) * TILE_SUB || sy >= (ty + 1) * TILE_SUB) return;
+        const i = (sy - ty * TILE_SUB) * TILE_SUB + (sx - tx * TILE_SUB);
+        bits[i >> 3] = on ? bits[i >> 3]! | (1 << (i & 7)) : bits[i >> 3]! & ~(1 << (i & 7));
+      };
+      for (const [x0, y0, x1, y1] of rects) for (let sy = y0 * FOG_SUBCELLS; sy < y1 * FOG_SUBCELLS; sy++) for (let sx = x0 * FOG_SUBCELLS; sx < x1 * FOG_SUBCELLS; sx++) set(sx, sy, true);
+      for (const [sx, sy] of fogged) set(sx, sy, false);
+      tiles[tileKey("s1", tx, ty)] = { sceneId: "s1", tx, ty, rev: 1, bits: encodeTile(bits) };
+    }
+  }
+  return { tiles, view: new FogView(tiles, "s1", bounds) };
+}
+
+/** A 20 ft sphere at 10, 10, 10 ft up, over this drawn ground. */
+function sphereAt(ground: (x: number, y: number) => number = () => 0, x = 10, y = 10) {
+  const bounds = { w: 32, h: 32 };
+  const area = resolveArea({ id: "s", rev: 1, shape: "sphere", size: 20, origin: { x, y, z: 10 }, yaw: 0, includeOrigin: true }, ctxOf(bounds, null));
+  assert.ok(area);
+  return buildVolume({ area, bounds, ground, px: 40 });
+}
+
+describe("an area stands as its real shape only over a player's live ground (docs/design-v1-iso-area-shapes.md 4.4 and 9, D-261027-06)", () => {
+  test("everything stands for a viewer who sees all the ground, and over wholly revealed live ground", () => {
+    const vol = sphereAt();
+    assert.ok(volumeStands(new FogView(null, "s1", { w: 32, h: 32 }), null, vol.footprint));
+    assert.ok(volumeStands(areaFog([[0, 0, 32, 32]]).view, null, vol.footprint));
+    assert.ok(vol.footprint.count > 500);
+  });
+
+  test("security: one fogged sub-cell under its plan lays it flat, wherever that is, under a column that hides the solid too", () => {
+    // A column 30 ft tall at 12, 10, inside the plan, hiding the sphere's part over it.
+    const column = (x: number, y: number) => (x === 12 && y === 10 ? 6 : 0);
+    const vol = sphereAt(column);
+    const runs = vol.footprint.runs;
+    let tried = 0;
+    for (let r = 0; r < runs.length; r += 3 * 3) {
+      for (const sx of [runs[r + 1]!, runs[r + 2]! - 1]) {
+        assert.equal(volumeStands(areaFog([[0, 0, 32, 32]], [[sx, runs[r]!]]).view, null, vol.footprint), false, `sub-cell ${sx}, ${runs[r]}`);
+        tried++;
+      }
+    }
+    assert.ok(tried > 10);
+    assert.equal(volumeStands(areaFog([[0, 0, 32, 32]], [[12 * 4 + 1, 10 * 4 + 2]]).view, null, vol.footprint), false, "under the column");
+    // One fogged just past its plan leaves it standing.
+    assert.ok(volumeStands(areaFog([[0, 0, 32, 32]], [[0, 0]]).view, null, vol.footprint));
+  });
+
+  /** A player's device on an Explore scene: the DM revealed `held`, and the party sees `seen` now, cell rectangles. */
+  function device(held: readonly [number, number, number, number][], seen: readonly [number, number, number, number][]) {
+    const state = fogRoom({ vision: true, bounds: { w: 32, h: 32 } });
+    for (const [x0, y0, x1, y1] of held) lift(state, "dm", { x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+    const sight: Record<string, SightTile> = {};
+    for (let ty = 0; ty < 2; ty++) {
+      for (let tx = 0; tx < 2; tx++) {
+        const packed = new Uint8Array((TILE_SUB * TILE_SUB) / 4);
+        for (const [x0, y0, x1, y1] of seen) {
+          for (let sy = Math.max(y0 * FOG_SUBCELLS, ty * TILE_SUB); sy < Math.min(y1 * FOG_SUBCELLS, (ty + 1) * TILE_SUB); sy++) {
+            for (let sx = Math.max(x0 * FOG_SUBCELLS, tx * TILE_SUB); sx < Math.min(x1 * FOG_SUBCELLS, (tx + 1) * TILE_SUB); sx++) {
+              const i = (sy - ty * TILE_SUB) * TILE_SUB + (sx - tx * TILE_SUB);
+              packed[i >> 2] = packed[i >> 2]! | (1 << ((i & 3) << 1));
+            }
+          }
+        }
+        sight[tileKey("s1", tx, ty)] = { b: Buffer.from(packed).toString("base64") };
+      }
+    }
+    const live = deviceGround({ ...state, sight } as never, "s1");
+    assert.ok(live);
+    return { fog: new FogView(state.fogTiles, "s1", { w: 32, h: 32 }), live };
+  }
+
+  test("security: over ground the player only remembers, revealed but out of sight, it lies flat; in sight it stands", () => {
+    const vol = sphereAt();
+    const remembered = device([[0, 0, 32, 32]], [[0, 0, 8, 32]]);
+    assert.equal(volumeStands(remembered.fog, remembered.live, vol.footprint), false);
+    const seen = device([[0, 0, 32, 32]], [[0, 0, 20, 20]]);
+    assert.equal(volumeStands(seen.fog, seen.live, vol.footprint), true);
+  });
+
+  test("security: the same rooms differing only in remembered ground give the same stand decision", () => {
+    const random = rng(71);
+    let stood = 0;
+    let flat = 0;
+    for (let i = 0; i < 60; i++) {
+      const r = () => Math.floor(random() * 24);
+      const seen: [number, number, number, number][] = Array.from({ length: 1 + Math.floor(random() * 2) }, () => {
+        const [x, y] = [r(), r()];
+        return [x, y, Math.min(32, x + 6 + r()), Math.min(32, y + 6 + r())];
+      });
+      // The seen ground is held in both rooms. Past it, one room remembers more than the other.
+      const more: [number, number, number, number] = [r(), r(), 32, 32];
+      const a = device(seen, seen);
+      const b = device([...seen, more], seen);
+      const vol = sphereAt(() => 0, 4 + random() * 24, 4 + random() * 24);
+      const sa = volumeStands(a.fog, a.live, vol.footprint);
+      assert.equal(volumeStands(b.fog, b.live, vol.footprint), sa, `#${i}`);
+      if (sa) stood++;
+      else flat++;
+    }
+    assert.ok(stood > 3 && flat > 3, `${stood} stood, ${flat} flat`);
+  });
+
+  test("the test runs in slices on a large footprint, and ends as it does at once", () => {
+    const bounds = { w: 32, h: 32 };
+    const area = resolveArea({ id: "s", rev: 1, shape: "sphere", size: 75, origin: { x: 16, y: 16, z: 0 }, yaw: 0, includeOrigin: true }, ctxOf(bounds, null));
+    assert.ok(area);
+    const vol = buildVolume({ area, bounds, ground: () => 0, px: 40 });
+    // The last sub-cell it reads, so a stop that lost its place would miss it.
+    const runs = vol.footprint.runs;
+    const last: [number, number] = [runs[runs.length - 1]! - 1, runs[runs.length - 3]!];
+    assert.ok(vol.footprint.count > 2 * 4096, `${vol.footprint.count} sub-cells`);
+    for (const [fog, want] of [
+      [areaFog([[0, 0, 32, 32]]).view, true],
+      [areaFog([[0, 0, 32, 32]], [last]).view, false],
+    ] as const) {
+      const test = new VolumeStand(fog, null, vol.footprint);
+      let calls = 0;
+      while (test.run(-Infinity) === null) calls++;
+      assert.equal(test.result, want);
+      assert.ok(calls >= 2, `${calls} slices`);
+    }
+  });
+
+  test("security: a moving aura entering fog is today's flat mark: its volume does not stand", () => {
+    const tokens = { t: { id: "t", sceneId: "s1", x: 6, y: 6, size: "medium", elevation: 0 } };
+    const bounds = { w: 32, h: 32 };
+    const aura = { id: "a", rev: 1, shape: "emanation" as const, size: 10, origin: { x: 6.5, y: 6.5, z: 0 }, yaw: 0, includeOrigin: false, attachedTo: "t" };
+    const ctx = ctxOf(bounds, null, tokens as never);
+    const look = { color: "#e5484d", dm: false, selected: false, preview: false };
+    const clear = areaFog([[0, 0, 32, 32]]);
+    const world = (fog: FogView, tiles: unknown) => ({ heights: { at: () => 0 }, tiles, px: 40, fog, live: null });
+    assert.ok(wholeVolume({ template: aura, ctx, banded: true }, "a", look, 0, world(clear.view, clear.tiles), Infinity).pieces?.length, "over revealed ground it stands");
+    const edge = areaFog([[0, 0, 32, 32]], [[4 * 4, 6 * 4]]);
+    assert.deepEqual(wholeVolume({ template: aura, ctx, banded: true }, "a", look, 0, world(edge.view, edge.tiles), Infinity), { pieces: null, more: false });
+  });
+});
+
+describe("a caught creature's ring at its standee's base (D-261026-31, design 4.4)", () => {
+  const grid = SQUARES;
+  const flier = (id: string, x: number, y: number) => makeToken(id, { kind: "monster", x, y, elevation: 20, sceneId: "s1" }) as ViewToken;
+
+  test("a standing flier's ring goes to its base, a flat creature's and every ring of an area lying flat stay on the ground", () => {
+    const fog = areaFog([[0, 0, 16, 32]]).view;
+    const tokens = new Map([
+      ["up", flier("up", 4, 4)],
+      ["fogged", flier("fogged", 20, 4)],
+    ]);
+    const { byToken, pairs } = ringsAtBase([{ id: "sphere", color: "#3fa7ff", caught: ["up", "fogged"] }], tokens, fog, grid);
+    assert.deepEqual([...byToken], [["up", ["#3fa7ff"]]]);
+    assert.deepEqual([...pairs], ["sphere|up"]);
+    // An area lying flat is not among those passed: none of its rings leave the ground.
+    assert.equal(ringsAtBase([], tokens, fog, grid).pairs.size, 0);
+  });
+
+  test("security: a flier partly over fog, standing only by drawsAboveFog, keeps its ring on the ground under the fog, as Top-down", () => {
+    // Its footprint crosses the fog's edge at x = 16.
+    const fog = areaFog([[0, 0, 16, 32]]).view;
+    const party = flier("party", 15.5, 4);
+    assert.ok(creatureStands(fog, grid, party, true), "a party member stands above the fog");
+    assert.equal(creatureStands(fog, grid, party, false), false);
+    const { pairs } = ringsAtBase([{ id: "sphere", color: "#3fa7ff", caught: ["party"] }], new Map([["party", party]]), fog, grid);
+    assert.equal(pairs.size, 0);
+  });
+
+  test("one creature in two standing areas wears both rings, in the areas' order", () => {
+    const fog = new FogView(null, "s1", { w: 32, h: 32 });
+    const { byToken } = ringsAtBase(
+      [
+        { id: "a", color: "#111111", caught: ["x"] },
+        { id: "b", color: "#222222", caught: ["x"] },
+      ],
+      new Map([["x", flier("x", 2, 2)]]),
+      fog,
+      grid,
+    );
+    assert.deepEqual(byToken.get("x"), ["#111111", "#222222"]);
   });
 });

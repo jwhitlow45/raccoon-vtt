@@ -1,7 +1,8 @@
 import type Konva from "konva";
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Ellipse, Group, Layer, Rect, Shape, Stage } from "react-konva";
-import { CHUNK_CELLS, DEFAULT_SETTINGS, type BuildChunk, type Label, type RoomState, type Scene, type TerrainId } from "#shared/model.ts";
+import { CHUNK_CELLS, DEFAULT_SETTINGS, type BuildChunk, type Label, type RoomState, type Scene, type TerrainId, type Token } from "#shared/model.ts";
+import { SAMPLES } from "#shared/rules/aoe.ts";
 import { onHolder } from "#shared/rules/attach.ts";
 import { occupiedRange } from "#shared/rules/footprint.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
@@ -9,6 +10,15 @@ import type { TexturedTerrain } from "../../features/builder/geometry.ts";
 import { drawLabel, measureLabel } from "../../features/builder/draw.ts";
 import { labelShape, labelSplitter } from "../../features/builder/labelShape.ts";
 import { useTextures } from "../../features/builder/textures.ts";
+import { aimedArea } from "../../features/areas/AreaPreviewLayer.tsx";
+import { caughtTokens, contextFrom } from "../../features/areas/coverage.ts";
+import { zoomOctave } from "../../features/areas/volume.ts";
+import { useLiveGround } from "../../features/areas/liveGround.ts";
+import { samplesNow, useAreaScope } from "../../features/areas/store.ts";
+import { IsoAreasContext, type IsoAreas } from "../../features/areas/TemplateLayer.tsx";
+import { useLiveTokens } from "../../features/areas/useLiveTokens.ts";
+import { Loading } from "../../components/Loading.tsx";
+import type { Insets } from "../../lib/camera.ts";
 import { isoLayersOf, type LayerProps } from "../../features/layers.ts";
 import { SightOverlay } from "../../features/vision/SightOverlay.tsx";
 import type { SightMode } from "../../features/vision/sightMode.ts";
@@ -34,16 +44,18 @@ import { decorPlace, mapLabelInk, viewPill } from "./isoText.ts";
 import { pressCells, type PressCell } from "../isoPlace.ts";
 import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
-import { groupWalls, meets, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
-import { IsoGroundContext, TreeShownContext, useShownView, type IsoGround } from "./context.ts";
+import { groupWalls, meets, ReliefIndex, type DrawPiece, type Item, type StandeeIn } from "./buckets.ts";
+import { IsoGroundContext, TreeShownContext, useShownView, useTreeShownStore, useTreeShownView, type IsoGround } from "./context.ts";
 import { drawRun, type DrawContext } from "./drawRelief.ts";
 import { FogView } from "./fogView.ts";
 import { cellLook, CellTints, imageReader } from "./looks.ts";
-import type { StaticPiece, VBox } from "./pieces.ts";
+import type { VBox } from "./pieces.ts";
 import { pillarPieces, wallPieces, type WallPiece } from "./runs.ts";
 import { FrameScheduler } from "./scheduler.ts";
 import { previewLanding, seenChunks } from "./seenChunks.ts";
-import { dimmedForDm, ghostStands, ghostTagStands, splitTokens, tokenBox } from "./stand.ts";
+import { dimmedForDm, ghostStands, ghostTagStands, ringsAtBase, splitTokens, tokenBox } from "./stand.ts";
+import { BoardVolumes, type VolumeEntry, type VolumeWorld } from "./volumes.ts";
+import { reportLayout } from "./isoTest.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
@@ -111,9 +123,16 @@ export type IsoBoardProps = {
   onStage: (stage: Konva.Stage | null) => void;
   /** Top-down's stage style, which the main stage takes too: no browser touch gestures, no text selection, the tool's cursor. */
   stageStyle: CSSProperties;
+  /** Where the bars cover the canvas, so the board's loading words show clear of them. */
+  insets?: Insets;
 };
 
 const EMPTY_CHUNKS: Record<string, BuildChunk> = {};
+const EMPTY_TEMPLATES: RoomState["templates"] = {};
+const EMPTY_TOKENS: RoomState["tokens"] = {};
+const NO_RINGS: readonly string[] = [];
+/** The most an animation frame gives to standing areas as their real shapes (docs/design-v1-iso-area-shapes.md 6). */
+const VOLUME_SLICE_MS = 6;
 const NO_SPOTS: Readonly<Record<string, { x: number; y: number }>> = {};
 const NO_TOKENS: readonly ViewToken[] = [];
 const ALL_TEXTURES: readonly TexturedTerrain[] = ["stone", "wood", "grass", "dirt", "cave", "water", "difficult", "rubble"];
@@ -127,7 +146,15 @@ const MARGIN_STEP_PX = 128;
 /** The culling box grows in steps of screen pixels, so a pan sorts the view again only when it crosses one. */
 const CULL_STEP_PX = 128;
 
-export const IsoBoard = memo(IsoBoardImpl, (prev, next) => prev.hidden && next.hidden);
+export const IsoBoard = memo(
+  // The board's own reads of the room's other stores hold while it is hidden, as its parts' do (context.ts TreeShownContext).
+  (props: IsoBoardProps) => (
+    <TreeShownContext.Provider value={!props.hidden}>
+      <IsoBoardImpl {...props} />
+    </TreeShownContext.Provider>
+  ),
+  (prev, next) => prev.hidden && next.hidden,
+);
 
 function IsoBoardImpl(props: IsoBoardProps) {
   const { scene, cam, size, turn, hidden } = props;
@@ -242,8 +269,90 @@ function IsoBoardImpl(props: IsoBoardProps) {
     y1: (Math.ceil(bottomRight.y / step) + 1) * step,
   };
   const cullKey = `${cull.x0},${cull.y0},${cull.x1},${cull.y1}`;
+
+  /*
+   * Areas standing as their real shapes (docs/design-v1-iso-area-shapes.md):
+   * the still areas the ground stage draws, read where their tokens stand
+   * and without those being dragged, as TemplateLayer reads them, and the
+   * area the Area tool aims once the finger rests. Each stands where heights
+   * stand, by the stand rule on this viewer's live ground (D-261027-06),
+   * built in slices nearest the middle first, and lies flat until then.
+   */
+  const templates = useTreeShownView((s) => s.view?.templates ?? EMPTY_TEMPLATES);
+  const stored = useTreeShownView((s) => s.view?.tokens ?? EMPTY_TOKENS);
+  const settings = useTreeShownView((s) => s.view?.meta.settings);
+  const casts = useTreeShownView((s) => s.view?.casts);
+  const youId = props.youId ?? "";
+  const dragged = useDraggedIds();
+  const areaTool = useTreeShownView((s) => s.local.tool);
+  const areaStore = useAreaScope().store;
+  const draft = useTreeShownStore(areaStore, (s) => s.draft);
+  const selectedArea = useTreeShownStore(areaStore, (s) => s.selectedId);
+  const areaLive = useTreeShownStore(areaStore, (s) => s.live);
+  const aimMoving = useTreeShownStore(areaStore, (s) => s.moving);
+  const liveTokens = useLiveTokens();
+  const liveGround = useLiveGround(props.fog ? scene : undefined, props.role);
+  const stillTokens = useMemo(() => (dragged.all.size > 0 ? withoutTokens(stored, dragged.all) : stored), [stored, dragged]);
+  const stillCtx = useMemo(() => (settings ? contextFrom({ tokens: stillTokens, buildChunks: chunks, settings, live: liveGround }, scene, SAMPLES, fog) : null), [settings, stillTokens, chunks, liveGround, scene, fog]);
+  const aimCtx = useMemo(() => (settings ? contextFrom({ tokens: liveTokens.tokens, buildChunks: chunks, settings, live: liveGround }, scene, SAMPLES, fog) : null), [settings, liveTokens.tokens, chunks, liveGround, scene, fog]);
+  const aimed = useMemo(() => {
+    // While the finger moves it stands coarse in the drag layer instead (AreaPreviewLayer.tsx).
+    if (!settings || !aimCtx || samplesNow(aimMoving || liveTokens.moving) !== SAMPLES) return null;
+    return aimedArea({ tool: areaTool, draft, selectedId: selectedArea, live: areaLive, templates, sceneId: scene.id, tokens: liveTokens.tokens, grid: aimCtx.grid, feetPerCell: settings.feetPerCell, role: props.role, youId, casts: casts ?? {} });
+  }, [settings, aimCtx, aimMoving, liveTokens, areaTool, draft, selectedArea, areaLive, templates, scene.id, props.role, youId, casts]);
+  const entries = useMemo((): VolumeEntry[] => {
+    if (!stand || !stillCtx || !aimCtx) return [];
+    const editing = areaLive ? selectedArea : null;
+    const out: VolumeEntry[] = [];
+    for (const t of Object.values(templates)) {
+      if (!t || t.sceneId !== scene.id || t.id === editing || (t.attachedTo !== undefined && dragged.all.has(t.attachedTo))) continue;
+      if (aimed && aimed.id === t.id) continue;
+      out.push({ id: t.id, template: t, ctx: stillCtx, look: { color: t.color, dm: t.visibility === "dm" && props.role === "dm", selected: areaTool === "area" && selectedArea === t.id, preview: false } });
+    }
+    if (aimed) out.push({ id: aimed.id, template: aimed.t, ctx: aimCtx, look: { color: aimed.color, dm: false, selected: true, preview: false } });
+    return out;
+  }, [stand, stillCtx, aimCtx, areaLive, selectedArea, templates, scene.id, dragged, aimed, props.role, areaTool]);
+  // Meshes are built for the zoom's octave (volume.ts zoomOctave), so a zoom within one changes nothing here.
+  const octave = zoomOctave(cam.scale);
+  const world = useMemo((): VolumeWorld => ({ heights, tiles: props.viewerFog, px: octave, fog, live: liveGround }), [heights, props.viewerFog, octave, fog, liveGround]);
+  const volumesRef = useRef<BoardVolumes>(null);
+  volumesRef.current ??= new BoardVolumes();
+  const volumes = volumesRef.current;
+  const volumesSynced = useMemo(() => {
+    if (hidden) return null;
+    volumes.sync(entries, world);
+    return {};
+  }, [hidden, volumes, entries, world]);
+  // Each frame's slice of building, and a render when something new can stand.
+  const [volumeTick, setVolumeTick] = useState(0);
+  const sliceView = useRef({ turn, cull, world });
+  sliceView.current = { turn, cull, world };
+  useEffect(() => {
+    if (!volumesSynced || entries.length === 0) return;
+    let frame = 0;
+    const tick = () => {
+      const { turn: at, cull: box, world: w } = sliceView.current;
+      const deadline = performance.now() + VOLUME_SLICE_MS;
+      const { more, changed } = volumes.step(at, box, w, deadline);
+      if (changed) setVolumeTick((n) => n + 1);
+      if (more) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [volumesSynced, entries.length, volumes, turn, cullKey, world, volumeTick]);
+  const volumesNow = useMemo(() => (volumesSynced ? volumes.now(turn, cull, world) : null), [volumesSynced, volumes, turn, cullKey, world, volumeTick]);
+
+  // Rings at the bases of the creatures that stand by the stand rule itself, in each area whose volume stands (D-261026-31).
+  const rings = useMemo(() => {
+    if (!volumesNow || volumesNow.standing.size === 0 || !stillCtx || !aimCtx) return null;
+    const list = entries.filter((e) => volumesNow.standing.has(e.id)).map((e) => ({ id: e.id, color: e.look.color, caught: caughtTokens(e.template, e.ctx, scene.id) }));
+    return ringsAtBase(list, byId, fog, grid);
+  }, [volumesNow, entries, stillCtx, aimCtx, scene.id, byId, fog, grid]);
+  const isoAreas = useMemo((): IsoAreas => ({ ctx: stillCtx, ringsUp: rings?.pairs ?? new Set(), world: stand ? world : null }), [stillCtx, rings, stand, world]);
+
   // The box is made anew each render, so its numbers say when it changed.
-  const items = useMemo(() => relief.layout(turn, cull, standees), [relief, synced, turn, cullKey, standees]);
+  const items = useMemo(() => relief.layout(turn, cull, standees, volumesNow?.pieces ?? []), [relief, synced, turn, cullKey, standees, volumesNow]);
+  reportLayout(items, volumesNow, rings?.byToken ?? null);
 
   // Looked up by id for each standee, silhouette and decor: a search of the list each time is quadratic at 500 tokens.
   const byStandee = useMemo(() => new Map(standees.map((s) => [s.id, s])), [standees]);
@@ -292,13 +401,13 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const dim = props.role === "dm" && dimmedForDm(dmFog, grid, t);
       const spot = spots[item.id];
       const placed = spot ? movedIso(t, spot, { rise: s.rise, inset: s.inset }) : s;
-      const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false, press: [] };
+      const fresh: IsoToken = { turn, base: placed.base, ground: placed.ground, drawn: placed.drawn, capped: placed.capped, rise: placed.rise, inset: placed.inset, pits: item.pits.map((p) => ({ x: p.x, y: p.y })), dim, pressOnly: false, press: [], rings: rings?.byToken.get(item.id) ?? NO_RINGS };
       const old = isoCache.current.get(item.id);
       next.set(item.id, old && sameIso(old, fresh) ? old : fresh);
     }
     isoCache.current = next;
     return next;
-  }, [items, byStandee, byId, turn, props.role, dmFog, grid, spots, movedIso]);
+  }, [items, byStandee, byId, turn, props.role, dmFog, grid, spots, movedIso, rings]);
   const silhouettes = useMemo(() => items.filter((i): i is Extract<Item, { kind: "standee" }> => i.kind === "standee" && i.silhouette), [items]);
 
   // The lift margin: the highest drawn lift in view, in steps, at most one canvas height.
@@ -377,7 +486,6 @@ function IsoBoardImpl(props: IsoBoardProps) {
   );
   const movingCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "moving" }), [groundCtx]);
   const uprightCtx: IsoGround = useMemo(() => ({ ...groundCtx, place: "upright" }), [groundCtx]);
-  const dragged = useDraggedIds();
   const groups = groundGroups(turn);
   const width = hidden ? 0 : size.width;
   const height = hidden ? 0 : size.height;
@@ -407,6 +515,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   return (
     <div style={{ position: "absolute", inset: 0, pointerEvents: hidden ? "none" : undefined }} aria-hidden={hidden || undefined}>
       <TreeShownContext.Provider value={!hidden}>
+      <IsoAreasContext.Provider value={isoAreas}>
         <Stage
           key={`ground:${props.stageKey}`}
           ref={groundStageRef}
@@ -465,10 +574,11 @@ function IsoBoardImpl(props: IsoBoardProps) {
                 <RemoteDrags tokens={props.tokens} scale={cam.scale} youId={props.youId} draggingId={props.draggingId} eased={props.eased} iso={ghostOf} part="ghost" />
               </Group>
             </Group>
-            <DragMarks tokenIds={dragged.local} iso={uprightCtx} layer={props.layerProps} />
+            <DragMarks tokenIds={dragged.local} iso={uprightCtx} layer={props.layerProps} side="behind" />
             <Group scaleY={groups.outer.scaleY}>
               <Group rotation={groups.inner.rotation} name={DRAG_GROUND} />
             </Group>
+            <DragMarks tokenIds={dragged.local} iso={uprightCtx} layer={props.layerProps} side="front" />
             <Group scaleY={groups.outer.scaleY} listening={false}>
               <Group rotation={groups.inner.rotation}>
                 <IsoGroundContext.Provider value={movingCtx}>
@@ -504,9 +614,34 @@ function IsoBoardImpl(props: IsoBoardProps) {
             )}
           </Layer>
         </Stage>
+        {!hidden ? <Loading text="Building area shapes" active={volumesNow?.waiting === true} style={buildingStyle(props.insets)} /> : null}
+      </IsoAreasContext.Provider>
       </TreeShownContext.Provider>
     </div>
   );
+}
+
+/** Where "Building area shapes" shows: at the top of the canvas, clear of the bar over it, taking no presses (docs/design-v1-iso-area-shapes.md 7). */
+function buildingStyle(insets: Insets | undefined): CSSProperties {
+  return {
+    position: "absolute",
+    top: (insets?.top ?? 0) + theme.space(2),
+    left: "50%",
+    transform: "translateX(-50%)",
+    padding: `${theme.space(1)}px ${theme.space(3)}px`,
+    borderRadius: theme.radius.pill,
+    background: theme.color.overlay,
+    color: theme.color.text,
+    pointerEvents: "none",
+    whiteSpace: "nowrap",
+    zIndex: 1,
+  };
+}
+
+function withoutTokens(tokens: Readonly<Record<string, Token | undefined>>, hide: ReadonlySet<string>): Record<string, Token> {
+  const out: Record<string, Token> = {};
+  for (const [id, t] of Object.entries(tokens)) if (t && !hide.has(id)) out[id] = t;
+  return out;
 }
 
 /** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
@@ -518,7 +653,7 @@ function pressOnly(turn: Turn, ground: number, press: readonly PressCell[]): Iso
 }
 
 /** One run of relief pieces, drawn by one shape that does not listen. */
-const ReliefRun = memo(function ReliefRun(props: { pieces: StaticPiece[]; dc: { readonly current: DrawContext | null } }) {
+const ReliefRun = memo(function ReliefRun(props: { pieces: DrawPiece[]; dc: { readonly current: DrawContext | null } }) {
   const { pieces, dc } = props;
   return (
     <Shape
@@ -620,6 +755,8 @@ function sameIso(a: IsoToken, b: IsoToken): boolean {
     a.press.length === b.press.length &&
     a.press.every((c, i) => { const d = b.press[i]!; return c.x === d.x && c.y === d.y && c.w === d.w && c.h === d.h && c.z === d.z; }) &&
     a.pits.length === b.pits.length &&
-    a.pits.every((p, i) => p.x === b.pits[i]!.x && p.y === b.pits[i]!.y)
+    a.pits.every((p, i) => p.x === b.pits[i]!.x && p.y === b.pits[i]!.y) &&
+    (a.rings ?? NO_RINGS).length === (b.rings ?? NO_RINGS).length &&
+    (a.rings ?? NO_RINGS).every((c, i) => c === b.rings![i])
   );
 }

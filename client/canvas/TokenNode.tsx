@@ -27,6 +27,7 @@ import { glyphColor, glyphSide, iconPath2D, imageFace, useIconGlyph } from "../f
 import { COVER_INSET, pressBoxes, type CellBox } from "../features/attach/groups.ts";
 import { groundGroups, isometric, toView, type Turn } from "../lib/view.ts";
 import { standeeParts } from "./relief/standee.ts";
+import { CAUGHT_RING } from "../features/areas/TemplateLayer.tsx";
 
 /** How the canvas wants to hear about taps, menus, drags and the mouse over tokens. */
 export type TokenInteraction = {
@@ -68,6 +69,12 @@ export type IsoToken = {
   pressOnly: boolean;
   /** A flat creature's press area, piece by piece on each cell's drawn ground (isoPlace.ts pressCells). Empty for a standee. */
   press: readonly PressCell[];
+  /**
+   * The colors of the rings of the areas standing as their real shapes that
+   * catch it, drawn round its ring at its base rather than on the ground
+   * (docs/design-v1-iso-area-shapes.md 4.4, D-261026-31). None by default.
+   */
+  rings?: readonly string[];
 };
 
 const APPLE = isAppleDevice();
@@ -274,7 +281,7 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
     <>
       {parts.shadow ? <Ellipse x={w / 2 + parts.shadow.x} y={h / 2 + parts.shadow.y} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.shadow} listening={false} /> : null}
       <Group x={parts.base.x} y={parts.base.y}>
-        <Ellipse x={w / 2} y={h / 2} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.ring} stroke={ring} strokeWidth={ringPx} strokeScaleEnabled={false} />
+        <Ellipse name="standeeRing" x={w / 2} y={h / 2} radiusX={w / 2} radiusY={h / 2} fill={theme.relief.ring} stroke={ring} strokeWidth={ringPx} strokeScaleEnabled={false} />
         {turnedBy !== 0 ? (
           <Line
             points={[w / 2 + (Math.sin(facing) * w) / 2, h / 2 - (Math.cos(facing) * h) / 2, w / 2 + Math.sin(facing) * (w / 2 + 0.18), h / 2 - Math.cos(facing) * (h / 2 + 0.18)]}
@@ -285,6 +292,7 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
             listening={false}
           />
         ) : null}
+        {iso.rings?.map((color, i) => <CaughtRing key={i} w={w} h={h} scale={scale} color={color} />)}
         {props.active ? <Outline w={w} h={h} scale={scale} gapPx={7} color={theme.color.accentSoft} widthPx={3} /> : null}
         {props.selected ? <SelectedOutline w={w} h={h} scale={scale} hexes={props.hexes} /> : null}
         <Group x={w / 2} y={h / 2} rotation={upright.rotation} scaleY={upright.scaleY}>
@@ -301,6 +309,19 @@ function Standee(props: { token: ViewToken; actor: Partial<Actor> | undefined; w
       </Group>
     </>
   );
+}
+
+/**
+ * A caught creature's ring at its standee's base: Top-down's ring round its
+ * footprint (areas/draw.tsx TokenRing, CAUGHT_RING's width and gap) as an
+ * ellipse round the standee's own ring, on the ground plane at its base.
+ */
+function CaughtRing(props: { w: number; h: number; scale: number; color: string }) {
+  const { w, h, scale } = props;
+  // A ring's screen sizes grow with the token's own ring, as Top-down's do (areas/draw.tsx).
+  const k = boardSizes(scale).ringPx / 3;
+  const gap = (CAUGHT_RING.gapPx * k) / scale;
+  return <Ellipse name="caughtRing" x={w / 2} y={h / 2} radiusX={w / 2 + gap} radiusY={h / 2 + gap} stroke={props.color} strokeWidth={CAUGHT_RING.widthPx * k} strokeScaleEnabled={false} listening={false} perfectDrawEnabled={false} />;
 }
 
 /** Where a carried token takes a press: the part of it that draws less its holders' middles (`holes`, groups.ts pressBoxes), drawn on the hit canvas alone. */
