@@ -44,8 +44,27 @@ export const VolumeShape = memo(function VolumeShape(props: { pieces: readonly V
   );
 });
 
-/** Time a render gives a volume drawn whole before it shows flat and carries on in the next frame. */
+/** Time a frame gives the volumes drawn whole, all of them together, before they show flat and carry on in the next frame. */
 const SLICE_MS = 4;
+/** Renders this long after a slice began start the next frame's. */
+const FRAME_MS = 16;
+
+let sliceStart = -Infinity;
+let sliceEnd = -Infinity;
+
+/**
+ * The end of this frame's slice. An aura dragged here renders twice, round
+ * its standee, and two areas can move at once: each taking a slice of its
+ * own would cost a frame that many.
+ */
+function frameDeadline(): number {
+  const now = performance.now();
+  if (now - sliceStart > FRAME_MS) {
+    sliceStart = now;
+    sliceEnd = now + SLICE_MS;
+  }
+  return sliceEnd;
+}
 
 /**
  * A coarse volume drawn whole outside the depth list (relief/volumes.ts
@@ -57,7 +76,7 @@ const SLICE_MS = 4;
 export function WholeVolume(props: { req: WholeRequest; id: string; look: VolumeLook; turn: Turn; world: VolumeWorld; side?: { key: number; part: "behind" | "front" } }) {
   const { req, id, look, turn, world, side } = props;
   const [, setTick] = useState(0);
-  const got = wholeVolume(req, id, look, turn, world, performance.now() + SLICE_MS);
+  const got = wholeVolume(req, id, look, turn, world, frameDeadline());
   const more = got.more;
   useEffect(() => {
     if (!more) return;
