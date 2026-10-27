@@ -12,7 +12,7 @@ import { api } from "../../lib/api.ts";
 import { deviceMapVariant } from "../../lib/device.ts";
 import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomStore, useRoomView } from "../../state/view.ts";
-import { exportContent, fromServer, hasBuildOn, playerViewContent, type ExportContent, type ExportView } from "./content.ts";
+import { contentEmpty, exportContent, fromServer, hasBuildOn, playerViewContent, type ExportContent, type ExportView } from "./content.ts";
 import { exportFileName } from "./fileName.ts";
 import { ExportError, loadMapImage, renderMapPng } from "./render.ts";
 import { prefersShare, shareFile } from "./save.ts";
@@ -41,6 +41,8 @@ type Status = { kind: "idle" } | { kind: "busy" } | { kind: "made"; made: Made }
 
 /** When the server cannot say what players get of the scene. */
 export const PLAYER_VIEW_FAILED = "Could not get the players' view of this scene from the server. Check the connection, then try again.";
+/** When the server says players hold nothing of a scene with no map image, so the image would be blank. */
+export const PLAYERS_HOLD_NOTHING = "Players have seen none of this scene's build yet, so their view has nothing to export.";
 
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
 const EMPTY_LABELS: RoomState["labels"] = {};
@@ -108,6 +110,10 @@ export function MapExport(props: { scene: Scene }) {
         const players = await api.getPlayerView(roomId, scene.id);
         if (run !== runRef.current) return;
         content = playerViewContent(players, room, scene.id);
+        if (!scene.map && contentEmpty(content)) {
+          setStatus({ kind: "error", message: PLAYERS_HOLD_NOTHING });
+          return;
+        }
         // Drawn by the automatic walls rule of players' copy, "off" with fog on: their chunks carry the automatic walls they hold (docs/design-v1-map-discovery.md 5.2).
         drawn = { ...scene, autoWalls: players.scene.autoWalls ?? "off" };
       } catch {
@@ -173,7 +179,8 @@ export function MapExport(props: { scene: Scene }) {
   }
 
   const busy = status.kind === "busy";
-  const empty = !scene.map && !hasBuild;
+  // The player view of a scene with fog on is judged by what the server gives, which this device's build does not show (MD4-ASTRA-4).
+  const empty = !scene.map && !hasBuild && !fromServer(view, scene);
   const made = status.kind === "made" ? status.made : null;
   return (
     <Section label="Export as image">

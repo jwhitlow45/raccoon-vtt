@@ -168,6 +168,19 @@ export function playerFog(fogTiles: RoomState["fogTiles"], exploredTiles: RoomSt
 }
 
 /**
+ * Whether an export holds nothing of the build to draw: no floor, edge,
+ * free wall, automatic wall, height, stair, difficult ground, label or
+ * stamp. The player view's comes from the server, so the DM's own build
+ * says nothing of it: players may remember ground the DM has since
+ * cleared (MD4-ASTRA-4).
+ */
+export function contentEmpty(content: Pick<ExportContent, "chunks" | "labels" | "stamps">): boolean {
+  const some = (c: BuildChunk & { auto?: string }) =>
+    Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0 || (c.walls?.length ?? 0) > 0 || c.auto !== undefined || c.heights !== undefined || c.up !== undefined || c.rough !== undefined;
+  return !content.chunks.some(some) && content.labels.length === 0 && content.stamps.length === 0;
+}
+
+/**
  * Whether a scene has anything of the build to export: floor, edges,
  * heights, stairs, difficult ground or labels. Heights and stairs draw on their own, over the
  * background (docs/design-v1-maps-vision.md 4.2), so a blank mat with only

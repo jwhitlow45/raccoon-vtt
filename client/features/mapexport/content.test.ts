@@ -5,7 +5,7 @@ import { projectState } from "#shared/project.ts";
 import type { StampInput } from "#shared/protocol.ts";
 import { decodeTile, rasterizeFogOps } from "#shared/rules/fog.ts";
 import { apply, P1, reveal, room, scene } from "#shared/testutil.ts";
-import { exportContent, fromServer, hasBuildOn, playerFog, playerViewContent, type ExportView } from "./content.ts";
+import { contentEmpty, exportContent, fromServer, hasBuildOn, playerFog, playerViewContent, type ExportView } from "./content.ts";
 
 const SECRET = { kind: "door", state: "closed", secret: true, discovered: false } as const;
 const FOUND = { kind: "door", state: "locked", secret: true, discovered: true } as const;
@@ -241,5 +241,21 @@ describe("the player view of a scene with fog on comes from the server (docs/des
     assert.equal(got.hiddenLabels, 1);
     // The hidden door players hold, on the revealed ground at 5,0, drawn as their wall. The one in the dark is not counted.
     assert.equal(got.secretDoors, 1);
+  });
+
+  test("its emptiness is judged by what the server gave, not the DM's build (MD4-ASTRA-4)", () => {
+    const state = built(true);
+    const players = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
+    // The DM cleared the build, but players still remember a stone cell: the image is not empty.
+    const cleared = { ...state, buildChunks: {}, labels: {}, stamps: {} };
+    assert.equal(hasBuildOn("s1", cleared.buildChunks, cleared.labels), false);
+    assert.equal(contentEmpty(playerViewContent(players, cleared, "s1")), false);
+    const nothing = { buildChunks: {}, labels: {}, stamps: {} };
+    assert.equal(contentEmpty(playerViewContent(nothing, cleared, "s1")), true);
+    // A free wall alone, or the automatic walls players hold alone, is something to draw.
+    const wallOnly: BuildChunk = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, walls: [{ id: "aaaaaaaaaaaa", a: [1, 1], b: [3, 1], f: { kind: "wall" } }] };
+    assert.equal(contentEmpty({ chunks: [wallOnly], labels: [], stamps: [] }), false);
+    assert.equal(contentEmpty({ chunks: [{ ...wallOnly, walls: [], auto: "AA==" } as BuildChunk], labels: [], stamps: [] }), false);
+    assert.equal(contentEmpty({ chunks: [], labels: [{ id: "l1", sceneId: "s1", x: 1, y: 1, text: "Hall", size: 1 } as Label], stamps: [] }), false, "a label alone");
   });
 });
