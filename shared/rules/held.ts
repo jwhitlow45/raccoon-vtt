@@ -451,6 +451,47 @@ export function convexLive(ground: Ground, hull: readonly Point[], work?: { n: n
   return true;
 }
 
+/**
+ * Whether the part of a blocker a walk met lies on live ground
+ * (D-261027-04): where it runs along a cell's side, one of the cells beside
+ * it is live, since a wall seen from one side is seen, and where it runs
+ * inside a cell, that cell is. A ledge (`both`) needs every cell beside
+ * it live, since its height is a fact of the ground on both sides. The
+ * part is cut at the grid lines, and each stretch is judged at its middle,
+ * which lies inside the cells the stretch lies in or on the line between
+ * them. On hexes, every hex it touches. Cells off the scene hold nothing
+ * to hide.
+ */
+export function partLive(ground: Ground, [ax, ay, bx, by]: readonly [number, number, number, number], both: boolean): boolean {
+  if (isHex(ground.grid)) return convexLive(ground, [{ x: ax, y: ay }, { x: bx, y: by }]);
+  const cuts = [0, 1];
+  for (const [a, b] of [
+    [ax, bx],
+    [ay, by],
+  ] as const) {
+    if (a === b) continue;
+    for (let v = Math.ceil(Math.min(a, b)); v <= Math.floor(Math.max(a, b)); v++) {
+      const t = (v - a) / (b - a);
+      if (t > 0 && t < 1) cuts.push(t);
+    }
+  }
+  cuts.sort((p, q) => p - q);
+  const beside = (v: number) => (Number.isInteger(v) ? [v - 1, v] : [Math.floor(v)]);
+  const liveAt = (x: number, y: number) => {
+    const cells = beside(x).flatMap((cx) => beside(y).map((cy) => [cx, cy] as const));
+    const on = cells.filter(([cx, cy]) => cx >= 0 && cy >= 0 && cx < ground.bounds.w && cy < ground.bounds.h);
+    const live = (c: readonly [number, number]) => ground.live(c[0], c[1]);
+    return on.length === 0 || (both ? on.every(live) : on.some(live));
+  };
+  if (ax === bx && ay === by) return liveAt(ax, ay);
+  for (let i = 1; i < cuts.length; i++) {
+    if (cuts[i]! === cuts[i - 1]!) continue;
+    const t = (cuts[i - 1]! + cuts[i]!) / 2;
+    if (!liveAt(ax + (bx - ax) * t, ay + (by - ay) * t)) return false;
+  }
+  return true;
+}
+
 /* The separating axis test of two convex polygons in order (or a segment or a point), each grown by `e`. */
 function convexMeet(a: readonly Point[], b: readonly Point[], e: number): boolean {
   const separated = (nx: number, ny: number) => {

@@ -315,12 +315,13 @@ export function planOne(state: DropView, token: DropToken, raw: Point, mode: Exc
 /**
  * What a player's device says stopped its own walk to `to`
  * (docs/design-v1-map-discovery.md 6, the words), by the rule the server
- * words a stop by (permissions.ts stopWords) on the device's own live
- * ground (rules/held.ts deviceGround): the kind only where every cell the
- * stopping step touches is live to it, else `unknown`, with no door named.
- * With fog off everything is live, so the stop is today's. The device's
- * live ground holds no more than the server's, so where it names a kind
- * the server would too, and where it cannot the server's answer settles it.
+ * words a stop by (permissions.ts stopWords) on the device's own held
+ * build and live ground (rules/held.ts deviceGround): the kind, and the
+ * door, only where the part of the blocker the walk met is live to it
+ * (D-261027-04), else `unknown`, with no door named. With fog off
+ * everything is live, so the stop is today's. The device's live ground
+ * holds no more than the server's, so where it names a kind the server
+ * would too, and where it cannot the server's answer settles it.
  */
 export function heardStop(state: DropView, walker: Walker, to: LegEnd, stopped: { blocker: Blocker; door: DoorRef | null }): { blocker: StopBlocker; door: DoorRef | null } {
   // With fog off the rule does not speak, as the server's does not (permissions.ts Check liveGround): today's kind.

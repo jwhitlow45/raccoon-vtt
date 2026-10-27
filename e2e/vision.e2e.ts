@@ -533,11 +533,11 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     run.thornMovedAt = playerSocket.received.length;
     await dragCells(player, BOUNDS, START, { x: 3, y: 12 });
     await thornAt({ x: 3, y: 9 });
-    // The step that stops reaches the square past the door, which no light shows the party, so the note names nothing
-    // (docs/design-v1-map-discovery.md decision 11). The door itself is in sight, and a tap on it still opens it.
-    await stopNote(SOMETHING_BLOCKS).waitFor();
+    // The door is in sight, on the side of the square Thorn stops in, so the note names it though no light shows the
+    // party the square past it (D-261027-04): the landing shows where the stop is, and the player sees the door.
+    await stopNote("A door is in the way. Tap it to open.").waitFor();
     await shots.take(player, "vision-player-stopped-at-door");
-    await closeNote(SOMETHING_BLOCKS);
+    await closeNote("A door is in the way. Tap it to open.");
 
     // The door's tap zone, just past Thorn's edge so the token does not take the tap.
     const p = await pagePoint(player, BOUNDS, { x: 3.5, y: 10.25 });
@@ -722,9 +722,9 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await bar.waitFor();
     await dragCells(player, BOUNDS, { x: 7, y: 14 }, { x: 10, y: 14 });
     await thornAt({ x: 8, y: 14, elevation: 10 });
-    // The platform's east half has no way up and no way round the wall that the party has seen. The step that stops
-    // reaches past the wall, where the party cannot see, so the note names nothing (decision 11).
-    const text = SOMETHING_BLOCKS;
+    // The platform's east half has no way up and no way round the wall that the party has seen. The wall stands on the
+    // side of the square Thorn stops in, which he sees, so the note names it (D-261027-04).
+    const text = "Stopped at a wall. There is no way around it that you have seen.";
     await stopNote(text).getByRole("button", { name: "Teleport here" }).waitFor();
     assert.equal(await bar.count(), 0, "the action bar came back over the stopped walk's note");
     await shots.take(player, "vision-player-stopped-at-wall");
@@ -740,9 +740,9 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     // The teleport takes the walk back with an undo of its own, which says nothing: the move did not go back.
     assert.equal(await player.getByText("Undid moving Thorn.").count(), 0);
 
-    await dm.getByText("Thorn teleported past something they could not see.").first().waitFor();
+    await dm.getByText("Thorn teleported past a wall.").first().waitFor();
     const line = (dmSocket.state?.log ?? []).find((e) => (e.data as { type?: string } | undefined)?.type === "teleport");
-    assert.deepEqual(line?.data, { type: "teleport", tokenId: run.thornId, past: "unknown" });
+    assert.deepEqual(line?.data, { type: "teleport", tokenId: run.thornId, past: "wall" });
     await viewSettles("the player's view past the wall");
     await shots.take(dm, "vision-dm-teleport-toast");
     await shots.take(player, "vision-player-teleported");

@@ -113,11 +113,15 @@ describe("a walk the real build stops (the touch rule)", () => {
     assert.equal(decide(east, s), WALL_IN_THE_WAY);
   });
 
-  test("a blocker just past a live cell's side names no kind: the step reaches the cell it stands in", () => {
+  test("a wall on a live cell's side names its kind, the cell past it unseen (D-261027-04), and one past it names none", () => {
     const s = base();
     lift(s, "dm", { x: 0, y: 3, w: 8, h: 5 });
     edge(s, "8,5,w", WALL);
-    assert.equal(decide(east, s), SOMETHING_BLOCKS, "cell (8, 5) is not live");
+    assert.equal(decide(east, s), WALL_IN_THE_WAY, "the wall stands on the side of live cell (7, 5), so the player sees it");
+    const door = base();
+    lift(door, "dm", { x: 0, y: 3, w: 8, h: 5 });
+    edge(door, "8,5,w", { kind: "door", state: "closed", secret: false, discovered: false });
+    assert.equal(decide(east, door), WALL_IN_THE_WAY, "a closed door the player sees is named too");
     const open = base();
     lift(open, "dm", { x: 0, y: 3, w: 8, h: 5 });
     // With nothing there the walk is not stopped at all, and a wall further on stops it with the same words.
@@ -243,11 +247,14 @@ describe("the touch rule on hexes (MD2-ASTRA-1, MD2-LK-3)", () => {
       assert.deepEqual(touchLanding(east, P1, lit, deps), { op: { t: "token.move", tokenId: "thorn", x: 7, y: 5 }, words: WALL_IN_THE_WAY });
     });
 
-    test(`${gridShape}: the stopping step crosses one unheld hex, every square cell round it partly revealed: no kind named, wherever in that hex the wall stands`, () => {
+    test(`${gridShape}: the stopping step crosses one unheld hex, every square cell round it partly revealed: no kind named where the wall it meets stands in that hex, its kind where it stands in a live one (D-261027-04)`, () => {
       for (const at of [8, 8 + 1 / 64]) {
         const s = hexRoom("allButStep", at);
-        assert.equal(decide(east, s), SOMETHING_BLOCKS);
-        assert.equal(touchLanding(east, P1, s, deps)?.words, SOMETHING_BLOCKS);
+        const grid = sceneGrid(s.scenes.s1!) as HexGrid;
+        const inHidden = hexKey(hexAt(grid, { x: at, y: 5.5 })) === hexKey(hexAt(grid, { x: 8, y: 5.5 }));
+        const words = inHidden ? SOMETHING_BLOCKS : WALL_IN_THE_WAY;
+        assert.equal(decide(east, s), words, `wall at x = ${at}`);
+        assert.equal(touchLanding(east, P1, s, deps)?.words, words, `wall at x = ${at}`);
       }
     });
   }

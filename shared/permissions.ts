@@ -17,8 +17,8 @@ import { hexInScene, hexKey, hexNeighbors, type HexGrid } from "./rules/hex.ts";
 import { groundAt } from "./rules/heights.ts";
 import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
-import { convexLive, fogClassOf, groundOf, type Ground } from "./rules/held.ts";
-import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, coreSize, landing, lastClearSpot, legSpots, legStop, ownWalk, straightClear, walkEnd, walkFrom, walkOn, type Walker } from "./rules/movement.ts";
+import { convexLive, fogClassOf, groundOf, partLive, type Ground } from "./rules/held.ts";
+import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, landing, lastClearSpot, legSpots, legStop, legStopPart, ownWalk, straightClear, walkEnd, walkFrom, walkOn, type Walker } from "./rules/movement.ts";
 import { legSteps, onRouteLattice, routeLattice, routePoints, routeStop, routeWalkers, type RoutePiece } from "./rules/route.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, resizeCandidates, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
@@ -1949,14 +1949,18 @@ function stoppingStep(state: RoomState, walker: Walker, to: LegEnd): { from: Poi
 }
 
 /**
- * The words of a stopped walk (decision 11): today's, naming what the
- * straight step from the last clear spot meets, only where every cell the
- * walker's core touches on that step lies on the sender's live ground.
- * Anywhere else the generic words, remembered ground included, since a
- * remembered wall may be gone and an unseen one may stand there. What the
- * step meets lies inside the sweep just tested, so the kind it names is of
- * something on live ground. A step that only a shifted path passes, or
- * one that meets nothing on its own, names none.
+ * The words of a stopped walk (decision 11, D-261027-04): today's, naming
+ * what the straight step from the last clear spot meets, only where the
+ * part of it the walker's core meets lies on the sender's live ground
+ * (held.ts partLive): a wall or a door beside a live cell or through one,
+ * a ledge only between two live cells. So a stop at a door the player sees
+ * names the door whatever lies unseen behind it: the landing shows where
+ * it is and the player sees it, so the words tell nothing new. Anywhere
+ * else the generic words, remembered ground included, since a remembered
+ * wall may be gone and an unseen one may stand there. A ledge needs both
+ * sides, since a raised edge beside an unseen cell tells that cell's
+ * height. A step that only a shifted path passes, or one that meets
+ * nothing on its own, names none.
  */
 function walkWords(c: Check, walker: Walker, to: LegEnd, blocker: Blocker): string {
   return stopWords(c.state, c.liveGround(walker.sceneId), walker, to, blocker);
@@ -1972,16 +1976,15 @@ export function stopWords(state: RoomState, ground: Ground | null, walker: Walke
   if (!ground) return blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY;
   const step = stoppingStep(state, walker, to);
   if (!step) return SOMETHING_BLOCKS;
-  const core = coreSize(walker);
-  const p = storedCenter({ ...walker, x: step.from.x, y: step.from.y });
-  const q = storedCenter({ ...walker, x: step.to.x, y: step.to.y });
-  if (!sweepLive(ground, p.x, p.y, q.x, q.y, core.w / 2, core.h / 2)) return SOMETHING_BLOCKS;
   const chunks = state.buildChunks;
   const at = step.from.x === walker.x && step.from.y === walker.y ? walker : walkOn(chunks, walkFrom(chunks, walker), step.from);
   const end = { x: step.to.x, y: step.to.y, elevation: to.elevation };
   if (straightClear(state, at, end)) return SOMETHING_BLOCKS;
-  const stop = legStop(state, at, end);
-  return stop === null ? SOMETHING_BLOCKS : stop.blocker === "wall" ? WALL_IN_THE_WAY : LEDGE_IN_THE_WAY;
+  const met = legStopPart(state, at, end);
+  if (!met?.part) return SOMETHING_BLOCKS;
+  const ledge = met.stop.blocker === "ledge";
+  if (!partLive(ground, met.part, ledge)) return SOMETHING_BLOCKS;
+  return ledge ? LEDGE_IN_THE_WAY : WALL_IN_THE_WAY;
 }
 
 /**

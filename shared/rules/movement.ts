@@ -864,6 +864,19 @@ export function legBlocker(state: BuildState, token: Walker, to: LegEnd): Blocke
  * it needs no exact arithmetic: the leg is already known to be stopped.
  */
 function firstStop(leg: Leg): LegStop {
+  return stopBy(leg.walls, firstMet(leg));
+}
+
+/** The stop a met segment names, a wall where none was found. */
+function stopBy(walls: WallSet, met: { k: number } | null): LegStop {
+  if (!met) return { blocker: "wall", door: null };
+  const wall = (walls.stored.tags[met.k]! & MOVEMENT) !== 0;
+  const feature = walls.featureAt(met.k);
+  return { blocker: wall ? "wall" : "ledge", door: wall && feature?.feature.kind === "door" ? feature.ref : null };
+}
+
+/** The segment `firstStop` names and when along the leg the core first meets it, or null when it finds none. */
+function firstMet(leg: Leg): { k: number; t: number } | null {
   const { walls, px, py, qx, qy, hx, hy } = leg;
   const xy = walls.stored.xy;
   const segs = touching(walls, px, py, qx, qy, hx, hy, leg.floor, leg.test);
@@ -903,10 +916,59 @@ function firstStop(leg: Leg): LegStop {
       }
     }
   }
-  if (best < 0) return { blocker: "wall", door: null };
-  const wall = (walls.stored.tags[best]! & MOVEMENT) !== 0;
-  const feature = walls.featureAt(best);
-  return { blocker: wall ? "wall" : "ledge", door: wall && feature?.feature.kind === "door" ? feature.ref : null };
+  return best < 0 ? null : { k: best, t: bestT };
+}
+
+/** A segment by its ends, in cells. */
+export type Part = readonly [number, number, number, number];
+
+/**
+ * What stops the token walking from where it stands to `to`, as `legStop`
+ * names it, with the part of that blocker the core meets first: the
+ * blocker clipped to the core where the straight path first reaches it, a
+ * hair past included, or the whole blocker where the clip finds none.
+ * Null when the leg is allowed. The words of a stop name a kind only where
+ * this part lies on the player's live ground (permissions.ts stopWords,
+ * D-261027-04), so they speak of the very blocker that stopped the walk.
+ */
+export function legStopPart(state: BuildState, token: Walker, to: LegEnd): { stop: LegStop; part: Part | null } | null {
+  const scene = state.scenes[token.sceneId];
+  if (!scene) return null;
+  const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
+  if (legClear(leg)) return null;
+  const met = firstMet(leg);
+  const stop = stopBy(leg.walls, met);
+  if (!met) return { stop, part: null };
+  const xy = leg.walls.stored.xy;
+  const seg: Part = [xy[4 * met.k]!, xy[4 * met.k + 1]!, xy[4 * met.k + 2]!, xy[4 * met.k + 3]!];
+  const cx = leg.px + (leg.qx - leg.px) * met.t;
+  const cy = leg.py + (leg.qy - leg.py) * met.t;
+  const E = 1e-6;
+  return { stop, part: clipToBox(seg, cx - leg.hx - E, cy - leg.hy - E, cx + leg.hx + E, cy + leg.hy + E) ?? seg };
+}
+
+/* A segment clipped to a closed box (Liang and Barsky), or null when it misses the box. */
+function clipToBox([ax, ay, bx, by]: Part, x0: number, y0: number, x1: number, y1: number): Part | null {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = bx - ax;
+  const dy = by - ay;
+  for (const [p, q] of [
+    [-dx, ax - x0],
+    [dx, x1 - ax],
+    [-dy, ay - y0],
+    [dy, y1 - ay],
+  ] as const) {
+    if (p === 0) {
+      if (q < 0) return null;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) t0 = Math.max(t0, r);
+    else t1 = Math.min(t1, r);
+    if (t0 > t1) return null;
+  }
+  return [ax + dx * t0, ay + dy * t0, ax + dx * t1, ay + dy * t1];
 }
 
 // ---------------------------------------------------------------------------
