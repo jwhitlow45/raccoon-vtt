@@ -26,14 +26,21 @@ export type SendDeps = {
  * (StopNote.tsx). So the drop closes the bar and keeps the selection: a tap
  * on the token opens the bar again, and the note steps aside for it.
  *
+ * A lone walk stopped at its first step on a scene with fog on sends the
+ * move the player asked for (DropPlan `intended`,
+ * docs/design-v1-map-discovery.md 5.2): the server lands it by the real
+ * build, at the start where the wall stands, so the device never withholds
+ * a walk that only the pieces it holds seemed to stop.
+ *
  * Returns the `n` of each op it sent, so the canvas knows how many answers
  * to wait for (canvas/dragNotes.ts watchDrop).
  */
 export function sendPlan(plan: DropPlan, deps: SendDeps): number[] {
-  const sent = dispatchGesture(deps, moveOpsOf(plan.moves));
+  const moves = plan.moves.length === 0 && plan.intended ? [plan.intended] : plan.moves;
+  const sent = dispatchGesture(deps, moveOpsOf(moves));
   if (plan.stop) {
-    // A walk stopped at its first step sent nothing, so its teleport has no walk to take back.
-    const n = plan.moves.length === 1 ? (sent[0] ?? null) : null;
+    // A walk stopped at its first step that sent nothing has no walk for its teleport to take back.
+    const n = moves.length === 1 ? (sent[0] ?? null) : null;
     deps.note({ ...plan.stop, n });
     deps.showActions(false);
   }

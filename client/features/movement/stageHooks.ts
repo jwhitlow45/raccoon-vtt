@@ -13,7 +13,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, routeLanding, routeTarget, sameCut, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, previewView, routeLanding, routeTarget, sameCut, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -144,6 +144,12 @@ export function dragStops(deps: DragDeps): DragStops {
   const { store, actions, ui, scope, role, work } = deps;
   /** The room as this viewer's drops read it, with who every player sees (drop.ts dropView). */
   const seenView = (view: RoomState | null | undefined): DropView | null => (view ? dropView(view, role) : null);
+  /**
+   * The room as the drag's picture reads it, its held preview and its line,
+   * which nothing checks after them (drop.ts previewView). The search, the
+   * drop and a press read `seenView`, as the gates they are.
+   */
+  const pictureView = (view: RoomState | null | undefined): DropView | null => (view ? previewView(dropView(view, role)) : null);
   const holds = scope.get(holdSlot);
   const notes = scope.get(stopNoteSlot);
   const routes = scope.get(routeSlot);
@@ -232,7 +238,7 @@ export function dragStops(deps: DragDeps): DragStops {
 
   /** The board's picture of the walk: the line, the label and, while a drop waits, the ghost's words. */
   const publish = (w: Walk) => {
-    const view = seenView(store.getState().view);
+    const view = pictureView(store.getState().view);
     const target = w.target;
     if (!view || !target || walk !== w) return;
     const answer = w.drag.answer;
@@ -320,7 +326,7 @@ export function dragStops(deps: DragDeps): DragStops {
 
   /** The preview again for the drag's answer now: held where its walk holds, and drawn. */
   const refresh = (w: Walk) => {
-    const now = seenView(store.getState().view);
+    const now = pictureView(store.getState().view);
     if (walk === w && !w.waiting && now && w.node && w.drawn && w.target) follow(now, w, w.node, w.drawn, w.target);
     publish(w);
   };
@@ -388,7 +394,7 @@ export function dragStops(deps: DragDeps): DragStops {
           w.drag.aim(target);
           if (moved) publish(w);
         }
-        follow(view, w, node, token, target);
+        follow(previewView(view), w, node, token, target);
       });
     },
     frameFields(tokenId) {

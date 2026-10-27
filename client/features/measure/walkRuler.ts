@@ -6,7 +6,7 @@ import type { DiagonalCounter, DistanceSettings } from "#shared/rules/distance.t
 import { footprintSize } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
-import { offKey, type Walker } from "#shared/rules/movement.ts";
+import { isPreview, offKey, previewChunks, type Walker } from "#shared/rules/movement.ts";
 import { pathThisTurn, publicCounters } from "#shared/rules/path.ts";
 import { routeWalkers } from "#shared/rules/route.ts";
 import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
@@ -296,7 +296,8 @@ export type WalkInput = { view: RoomState; sceneId: string; stops: readonly Rule
  * the bench. With neither, the walk is measured to the end.
  */
 export function measureWalk(input: WalkInput & { deadline?: number; budget?: WorkBudget }): WalkMeasure | null {
-  const { view, stops } = input;
+  const { stops } = input;
+  const view = rulerRoom(input.view);
   const budget = input.budget ?? (input.deadline !== undefined ? WorkBudget.until(input.deadline) : WorkBudget.all());
   const room = keptFor(view, input.sceneId);
   const memo = room.walks;
@@ -454,6 +455,22 @@ function stopLeft(sim: RoomState, id: string, left: PathStop[], drawn: PathStop)
   return at;
 }
 
+const rulerRooms = new WeakMap<RoomState, RoomState>();
+
+/**
+ * The room as a walking ruler reads it (docs/design-v1-map-discovery.md
+ * 5.2): a ruler sends nothing, so the pieces of a player's held build stop
+ * its walk anywhere within their band (movement.ts previewChunks), where
+ * a drag's drop reads them by the gate test. One per view, so what the
+ * ruler keeps by the room's identity still holds.
+ */
+function rulerRoom(view: RoomState): RoomState {
+  if (isPreview(view.buildChunks)) return view;
+  let out = rulerRooms.get(view);
+  if (!out) rulerRooms.set(view, (out = { ...view, buildChunks: previewChunks(view.buildChunks) }));
+  return out;
+}
+
 /** The ruler's actor and clock for the moves it simulates: no op is sent, so neither is anyone's. */
 const RULER_ACTOR = (role: WalkViewer["role"]): Viewer => ({ memberId: "ruler", role });
 const RULER_ENV = { seq: 1, at: "1970-01-01T00:00:00.000Z" };
@@ -487,7 +504,8 @@ function simulated(view: RoomState, sim: RoomState, role: WalkViewer["role"], wa
     const moved: Token = move ? { ...rest, x: move.x, y: move.y, elevation: move.elevation ?? walker.elevation, ...(move.squeeze ? { squeeze: true as const } : {}) } : walker;
     next = { ...sim, tokens: { ...sim.tokens, [walker.id]: moved } };
   }
-  const room = next;
+  // The reducer may hand back the build in a collection of its own, which the ruler reads as its preview still.
+  const room = rulerRoom(next);
   const drops = dropView(view, role);
   const moved = (id: string) => !samePose(room.tokens[id], view.tokens[id]);
   const seen: DropView = {

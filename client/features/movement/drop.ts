@@ -5,7 +5,7 @@ import { holderOf, linkHolds, onHolder, publicMembers, walkerFor, type SeenByAll
 import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { footing, footprintGround } from "#shared/rules/heights.ts";
-import { groundUnder, landing, legStop, ownWalk, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
+import { groundUnder, landing, legStop, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { followerTrace, routeLattice, routePoints, routeStop, routeWalkers, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import { LegCheck, type WalkRoute, type WalkWorld } from "#shared/rules/walk.ts";
@@ -120,6 +120,23 @@ export function dropView(view: RoomState, role: Role): DropView {
   });
 }
 
+const previewViews = new WeakMap<DropView, DropView>();
+
+/**
+ * The room as a drag's picture and a walking ruler read it
+ * (docs/design-v1-map-discovery.md 5.2): what nothing checks after, so the
+ * pieces of a player's held build stop anything within their band
+ * (movement.ts previewChunks), where a drop, a press and every other
+ * action this device sends read them by the gate test and let the
+ * server's landing decide. One per view, so what a drag keeps by the
+ * room's identity still holds.
+ */
+export function previewView(view: DropView): DropView {
+  let out = previewViews.get(view);
+  if (!out) previewViews.set(view, (out = { ...view, buildChunks: previewChunks(view.buildChunks) }));
+  return out;
+}
+
 /**
  * The elevation a drop lands a token at. One that sits on a holder
  * (docs/design-v1-attach.md 4.1 and 4.3) lands by the holder, not by the
@@ -210,6 +227,13 @@ export type DropPlan = {
   moves: Landed[];
   /** The lone token's walk, stopped short. */
   stop: Stop | null;
+  /**
+   * The move the player asked for, where the lone walk is stopped at its
+   * very first step on a scene with fog on (docs/design-v1-map-discovery.md
+   * 5.2): sent in place of nothing, so the server's landing by the real
+   * build decides, as it does for every walk sent there (send.ts).
+   */
+  intended?: Landed;
   /** Tokens of a group drag left where they were, since a wall or a ledge stood in their way (section 4.1). */
   held: { token: DropToken; blocker: Blocker }[];
   /** The lone walk turned too often for one move, so it landed partway (docs/design-v1-movement.md 5.2). */
@@ -275,7 +299,19 @@ export function planOne(state: DropView, token: DropToken, raw: Point, mode: Exc
   const stop: Stop | null = land.stopped
     ? { tokenId: token.id, sceneId: token.sceneId, blocker: land.stopped.blocker, door: land.stopped.door, ghost: to, aim: { x: raw.x, y: raw.y }, at: { x: land.x, y: land.y } }
     : null;
-  return { moves, stop, held: [] };
+  return { moves, stop, held: [], ...(stop && moves.length === 0 ? intendedMove(state, token, to) : {}) };
+}
+
+/**
+ * The move a walk stopped at its first step asked for (DropPlan
+ * `intended`): only on a scene with fog on, where a player's held build
+ * may be cut pieces or remembered ground and the server lands a stopped
+ * walk by the real build. With fog off the device holds the build itself,
+ * so its stop is the server's and nothing is sent.
+ */
+function intendedMove(state: DropView, token: DropToken, to: Point): Pick<DropPlan, "intended"> {
+  if (state.scenes[token.sceneId]?.fogEnabled !== true) return {};
+  return { intended: landed(state, token, { x: to.x, y: to.y, squeeze: false }) };
 }
 
 /** What a lone drag's route search answered for the drop's spot (routeDrag.ts): the straight leg, a route, or no route. */
@@ -682,7 +718,7 @@ export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, 
   const others = plan.moves.filter((m) => m !== move);
   const searched = plan.stop?.searched ? { searched: true as const, ...(plan.stop.capped ? { capped: true as const } : {}) } : {};
   const halted: Stop = { tokenId: lead.id, sceneId: lead.sceneId, blocker: stop.blocker, door: null, ghost: { x: move.x, y: move.y }, aim: { x: move.x, y: move.y }, at: { x: stop.at.x, y: stop.at.y }, ...searched };
-  if (stop.at.x === lead.x && stop.at.y === lead.y) return { ...plan, moves: others, stop: halted };
+  if (stop.at.x === lead.x && stop.at.y === lead.y) return { ...plan, moves: others, stop: halted, ...(others.length === 0 && state.scenes[lead.sceneId]?.fogEnabled === true ? { intended: move } : {}) };
   const cut = landed(state, lead, { x: stop.at.x, y: stop.at.y, squeeze: false });
   if (move.route && !stop.plain) cut.route = cutPieces(points, move.route, stop).map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
   return { ...plan, moves: [...others, cut], stop: halted };
