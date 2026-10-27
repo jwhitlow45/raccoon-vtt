@@ -248,12 +248,6 @@ function shownMark(state: RoomState, field: MarkField, id: string, sceneId: stri
   return value;
 }
 
-/**
- * The positions whose elements the batch may have changed (5.3): each
- * touched chunk with its east and south neighbors, whose west and north
- * edges read its cells, every position where an automatic wall's rule or
- * the bounds changed, and the stairs' positions where the stair map did.
- */
 /*
  * What changed, kept for the last few spans from each state: the estimate
  * reads an op's span from the batch's start, and a batch of one op gives
@@ -275,6 +269,14 @@ function changedOnce(before: RoomState, after: RoomState, scene: Scene, touch: S
   return changed;
 }
 
+/**
+ * What the batch changed that players see (5.3), read at the positions it
+ * may have changed: each touched chunk with its east and south neighbors,
+ * whose west and north edges read its cells and stair marks, every position
+ * of the scene where a field players' chunks read changed (the bounds, the
+ * automatic walls rule, the grid shape, fog, vision or per player), and
+ * the stairs' positions where the stair map did.
+ */
 function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: SceneTouch): Changed {
   const sceneId = scene.id;
   const was = before.scenes[sceneId];
@@ -391,8 +393,7 @@ function cellsChanged(out: Changed, sceneId: string, cx: number, cy: number, cb:
   }
 }
 
-/** Whether a chunk can hold a stair: a mark or stairs terrain. */
-/** Whether a chunk holds a stair, kept per chunk object, which the reducer replaces and never changes. */
+/** Whether a chunk holds a stair, a mark or Stairs terrain, kept per chunk object, which the reducer replaces and never changes. */
 const stairChunks = new WeakMap<BuildChunk, boolean>();
 
 function hasStairs(chunk: BuildChunk | undefined): boolean {

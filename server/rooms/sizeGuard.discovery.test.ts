@@ -186,7 +186,7 @@ describe("players' copies at the caps fit 3 MiB (5.5, LK-36, ASTRA-32)", () => {
     assert.ok(measure(cave) <= SCENE_LIMIT - 512 * 1024, `${(measure(cave) / MIB).toFixed(3)} MiB`);
   });
 
-  test("a player's real copy of the bench scene, explored in a checkerboard with its memory at the cap, fits the scene's measure (MD3-D-8)", () => {
+  test("a player's real copy of the bench scene, explored in a checkerboard with its memory at the cap, fits the scene's measure (MD3-D-11)", () => {
     const state = stored(capRoom("dark").state, ["p1"]);
     const scene = state.scenes.bench!;
     // Every other cell explored, so the copy cuts each free wall at every cell it crosses and every chunk shows.
