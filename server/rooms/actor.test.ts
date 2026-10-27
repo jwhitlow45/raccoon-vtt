@@ -3470,6 +3470,12 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     });
     const token = { id: uuidv7(), sceneId: placed.sceneId, kind: "pc" as const, name: "Bree", size: "medium" as const, x: 8, y: 15, actor: { ref: "bree" } };
     await run(placed.state, { t: "token.create", token }, (after) => assert.equal(after.tokens[token.id]!.elevation, 10));
+    // A companion takes its character's token's height, which reads no build: beside Ayla flying 20 ft up, it flies there too.
+    const flying = platform((state, _sceneId, pcId) => {
+      state.tokens[pcId] = { ...state.tokens[pcId]!, x: 2, y: 12, elevation: 20 };
+    });
+    const wolf = { id: uuidv7(), sceneId: flying.sceneId, kind: "npc" as const, name: "Wolf", size: "medium" as const, x: 3, y: 12, elevation: 20, layer: "token" as const, actor: { inline: testActor({ dmNotes: "" }) }, companion: { of: flying.characterId, turn: "shared" as const } };
+    await run(flying.state, { t: "token.create", token: wolf }, (after) => assert.equal(after.tokens[wolf.id]!.elevation, 20));
   });
 
   test("a creature a player rides off its mount onto a platform their copy does not hold lands on it", async () => {
