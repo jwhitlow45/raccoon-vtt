@@ -2153,19 +2153,24 @@ function lastTaken(n: number, taken: (k: number) => boolean): number | null {
   return lo >= 0 ? lo : null;
 }
 
+/*
+ * A group lands each named move by the single move's rule (moveLanding):
+ * a move the walls refuse alone, its own leg or a creature it drags, is cut
+ * back to the last spot the check takes for it, and the group is then
+ * checked whole. So a dragged follower's unseen wall never refuses the
+ * group in place (MD2-ASTRA-4). Words are the first landed move's.
+ */
 function groupLanding(c: Check, op: OpOf<"token.moveMany">, takes: (o: Op) => boolean): TouchLanding | null {
   let words: string | null = null;
   const moves = op.moves.map((move) => {
-    const on = walkingOn(c, move.tokenId, move);
-    if (!on) return move;
-    const end = { x: move.x, y: move.y, elevation: move.elevation ?? on.token.elevation };
-    const blocker = movementRules.legBlocker(c.state, on.walker, end);
-    if (blocker === null) return move;
-    words ??= walkWords(c, on.walker, end, blocker);
-    const land = landing(c.state, on.walker, end, "walk");
+    const single: OpOf<"token.move"> = { t: "token.move", ...move };
+    const alone = canApply(single, c.actor, c.state, c.deps);
+    if (alone.ok || !TOUCH_REFUSALS.has(alone.message)) return move;
+    const landed = moveLanding(c, single, takes);
+    if (!landed || landed.op.t !== "token.move" || landed.op.squeeze) return move;
+    words ??= landed.words;
     const { elevation: _elevation, ...rest } = move;
-    const height = land.stopped ? cutHeight(c, on.walker, land) : end.elevation;
-    return { ...rest, x: land.x, y: land.y, ...(height !== on.token.elevation ? { elevation: height } : {}) };
+    return { ...rest, x: landed.op.x, y: landed.op.y, ...(landed.op.elevation !== undefined ? { elevation: landed.op.elevation } : {}) };
   });
   if (words === null) return null;
   const cut: OpOf<"token.moveMany"> = { ...op, moves };

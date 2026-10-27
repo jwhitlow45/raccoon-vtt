@@ -168,6 +168,36 @@ describe("a walk the real build stops (the touch rule)", () => {
   });
 });
 
+describe("a group whose dragged creature an unseen wall stops (MD2-ASTRA-4)", () => {
+  /** Thorn at (2, 5) dragging a goblin at (2, 6), Bree at (2, 4) beside them, and a wall the party never saw on the goblin's row. */
+  const dragRoom = (wallAt: string) => {
+    const s = base();
+    s.tokens.gob = token("gob", { name: "Goblin", x: 2, y: 6, attached: { to: "thorn", kind: "drag" } });
+    s.tokens.bree = token("bree", { kind: "pc", name: "Bree", disposition: "ally", ownerIds: ["p1"], x: 2, y: 4 });
+    edge(s, wallAt, WALL);
+    return s;
+  };
+  const group: OpOf<"token.moveMany"> = { t: "token.moveMany", moves: [{ tokenId: "thorn", x: 12, y: 5 }, { tokenId: "bree", x: 12, y: 4 }] };
+
+  test("the group lands where Thorn's move alone would, Bree's leg as sent, and never refuses in place", () => {
+    const s = dragRoom("8,6,w");
+    assert.equal(decide(group, s), SOMETHING_BLOCKS);
+    const alone = touchLanding({ t: "token.move", tokenId: "thorn", x: 12, y: 5 }, P1, s, deps);
+    assert.deepEqual(alone?.op, { t: "token.move", tokenId: "thorn", x: 7, y: 5 });
+    const landed = touchLanding(group, P1, s, deps);
+    assert.deepEqual(landed, { op: { t: "token.moveMany", moves: [{ tokenId: "thorn", x: 7, y: 5 }, { tokenId: "bree", x: 12, y: 4 }] }, words: SOMETHING_BLOCKS });
+    assert.equal(decide(landed!.op, s), "ok");
+  });
+
+  test("paired with the wall a cell further on, out of sight too: the same words, each landed by its own wall", () => {
+    const [a, b] = [dragRoom("8,6,w"), dragRoom("9,6,w")];
+    const [la, lb] = [touchLanding(group, P1, a, deps), touchLanding(group, P1, b, deps)];
+    assert.ok(la && lb);
+    assert.equal(la.words, lb.words);
+    assert.equal(decide(group, a), decide(group, b));
+  });
+});
+
 describe("the touch rule on hexes (MD2-ASTRA-1, MD2-LK-3)", () => {
   for (const gridShape of ["hexRows", "hexColumns"] as const) {
     /** Thorn at (2, 5) on a hex scene with fog on, a free wall all along x = 8, and ground revealed as asked. */
