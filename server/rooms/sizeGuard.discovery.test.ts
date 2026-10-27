@@ -3,13 +3,14 @@ import { describe, test } from "node:test";
 import { holderTileKey, tileKey, wallChunk, chunkKey } from "#shared/keys.ts";
 import { exploredReserve, LIMITS, serializedBytes } from "#shared/limits.ts";
 import { mapDiscoveryUpgrade } from "#shared/migrate.ts";
-import type { BuildChunk, FreeWall, Member, RoomState, Viewer } from "#shared/model.ts";
+import { CHUNK_CELLS, FOG_SUBCELLS, type BuildChunk, type FreeWall, type Member, type MemoryChunk, type RoomState, type Viewer } from "#shared/model.ts";
+import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
+import { encodeTile, fullTileBits, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { DM, env, member, room, scene, token } from "#shared/testutil.ts";
 import { capRoom, perPlayerRoom } from "../../scripts/bench-vision.ts";
-import { MEMORY_CAP } from "./memorySize.ts";
+import { chunkCharge, layerCharge, MEMORY_CAP } from "./memorySize.ts";
 import { remapState } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
 import {
@@ -182,6 +183,58 @@ describe("players' copies at the caps fit 3 MiB (5.5, LK-36, ASTRA-32)", () => {
     const cave = withWalls(stored({ ...capRoom("dark").state, buildChunks: {} }, ["p1"]), "bench", walls);
     cave.scenes = { bench: { ...cave.scenes.bench!, autoWalls: "off" } };
     assert.ok(measure(cave) <= SCENE_LIMIT - 512 * 1024, `${(measure(cave) / MIB).toFixed(3)} MiB`);
+  });
+
+  test("a player's real copy of the bench scene, explored in a checkerboard with its memory at the cap, fits the scene's measure (MD3-D-8)", () => {
+    const state = stored(capRoom("dark").state, ["p1"]);
+    const scene = state.scenes.bench!;
+    // Every other cell explored, so the copy cuts each free wall at every cell it crosses and every chunk shows.
+    const bits = new Uint8Array(TILE_BYTES);
+    for (let sy = 0; sy < TILE_SUB; sy++) {
+      for (let sx = 0; sx < TILE_SUB; sx++) {
+        if ((Math.floor(sx / FOG_SUBCELLS) + Math.floor(sy / FOG_SUBCELLS)) % 2 !== 0) continue;
+        const i = sy * TILE_SUB + sx;
+        bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+      }
+    }
+    const tile = encodeTile(bits);
+    const across = Math.ceil(scene.bounds.w / CHUNK_CELLS);
+    const down = Math.ceil(scene.bounds.h / CHUNK_CELLS);
+    for (let ty = 0; ty < down; ty++) for (let tx = 0; tx < across; tx++) state.exploredTiles[tileKey("bench", tx, ty)] = { sceneId: "bench", tx, ty, rev: 0, bits: tile };
+    // The party's memory up to its cap: on each explored cell a door they saw on its north edge, and a free wall the DM has deleted since.
+    const door = { kind: "door" as const, state: "open" as const, secret: false, discovered: false };
+    const memory: Record<string, MemoryChunk> = {};
+    let total = 0;
+    let k = 0;
+    fill: for (let cy = 0; cy < down; cy++) {
+      for (let cx = 0; cx < across; cx++) {
+        const chunk: MemoryChunk = { sceneId: "bench", cx, cy, rev: 0, edges: {}, walls: {} };
+        for (let y = cy * CHUNK_CELLS; y < (cy + 1) * CHUNK_CELLS; y++) {
+          for (let x = cx * CHUNK_CELLS; x < (cx + 1) * CHUNK_CELLS; x++) {
+            if ((x + y) % 2 !== 0) continue;
+            const next: MemoryChunk = {
+              ...chunk,
+              edges: { ...chunk.edges, [`${x},${y},n`]: door },
+              walls: { ...chunk.walls, [`m${String(k).padStart(11, "0")}`]: [{ wall: { id: `m${String(k).padStart(11, "0")}`, a: [x + 0.1, y + 0.2], b: [x + 0.9, y + 0.8], f: { kind: "wall" } }, cells: [`${x},${y}`] }] },
+            };
+            if (total + chunkCharge(scene, next) > MEMORY_CAP) {
+              if (Object.keys(chunk.edges!).length > 0) memory[chunkKey("bench", cx, cy)] = chunk;
+              break fill;
+            }
+            Object.assign(chunk, { edges: next.edges, walls: next.walls });
+            k++;
+          }
+        }
+        memory[chunkKey("bench", cx, cy)] = { ...chunk };
+        total += chunkCharge(scene, memory[chunkKey("bench", cx, cy)]!);
+      }
+    }
+    state.memory = memory;
+    const charged = layerCharge(state, scene, null);
+    assert.ok(charged <= MEMORY_CAP && charged > MEMORY_CAP - 1_024, `memory charged ${charged}`);
+    const copy = serializedBytes(projectState(state, { memberId: "p1", role: "player" }, { sceneId: "bench" }));
+    const measured = projectedSceneBytes(state, "bench", MEMORY_CAP);
+    assert.ok(copy <= measured, `the copy ${copy} bytes, the measure ${measured}`);
   });
 });
 
