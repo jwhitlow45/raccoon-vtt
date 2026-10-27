@@ -439,6 +439,24 @@ describe("areas standing as their real shapes in the depth list (docs/design-v1-
     assert.ok(Math.abs(raiseOf(a, [a], ground, 0) - 2.121) < 1e-3);
   });
 
+  test("a Tiny on a 10 ft cell, natural 14.496 raised to 14.849 by that cell: a band at 14.5 draws after it, past its cell and B at 14.637, nearer within its raise of 0.354, where the closed formula would give below 0", () => {
+    // At turn 0 a point's key is (x + y) / sqrt 2. The Tiny's middle is 10.25, 10.25 and its cell's middle 10.5, 10.5.
+    const ground: Record<string, number> = { "10,10": 2 };
+    const relief = index(ground);
+    const tiny = standee("tiny", 10, 10, 2, 0.5, 0.5);
+    const b = standee("B", 3.6, 16.1, 0);
+    assert.equal(Math.round(sortKey(0, tiny.x, tiny.y) * 1e3) / 1e3, 14.496);
+    assert.equal(Math.round(sortKey(0, b.x, b.y) * 1e3) / 1e3, 14.637);
+    const items = relief.layout(0, EVERYTHING, [tiny, b], [band("v", 14)]);
+    const order = entries(items, 0);
+    const at = (want: (e: Entry) => boolean) => order.findIndex(want);
+    const bandAt = at((e) => e.kind === "band");
+    assert.ok(at((e) => e.kind === "standee" && e.id === "B") < bandAt && at((e) => e.kind === "standee" && e.id === "tiny") < bandAt, "after both");
+    assert.ok(at((e) => e.kind === "cell" && Math.abs(e.key - 21 / Math.SQRT2) < 1e-9) < bandAt, "after the Tiny's cell, nearer than the band by 0.349");
+    checkPrecedence(items, 0, [tiny, b], ground, "tiny");
+    assert.ok(Math.abs(raiseOf(tiny, [tiny], ground, 0) - 0.354) < 1e-3);
+  });
+
   test("a creature carried by a flying mount inside an aura: after its holder, and among the aura's bands by its own natural key, its raise from its holder's", () => {
     for (const turn of TURNS) {
       const pieces = bandsOf({ shape: "emanation", size: 15, origin: { x: 20, y: 20, z: 20 } }, {}, turn);
