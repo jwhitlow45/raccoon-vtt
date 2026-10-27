@@ -1173,81 +1173,6 @@ function* loopsOnLine(st: Store, pl: Plane, edges: Open[], budget: Budget): Job<
   return { loops, failed };
 }
 
-/** A budget that keeps its last charge, for `sliced`. */
-class WatchedBudget extends Budget {
-  last = 0;
-
-  spend(c: number): boolean {
-    this.last = c;
-    return super.spend(c);
-  }
-}
-
-/**
- * A job run to its end with its deadline already past at every call, and
- * the most work one call charged before the charge it stopped at. That
- * stays under CHECK while every loop stops when told, however long it
- * runs: for the tests of loops that random scenes never make long enough
- * to show a missing stop.
- */
-function sliced<T>(job: (budget: Budget) => Job<T>): { value: T; carried: number } {
-  const budget = new WatchedBudget();
-  budget.deadline = -Infinity;
-  const run = job(budget);
-  let carried = 0;
-  for (;;) {
-    const before = budget.total;
-    const step = run.next();
-    carried = Math.max(carried, budget.total - before - (step.done ? 0 : budget.last));
-    if (step.done) return { value: step.value, carried };
-  }
-}
-
-/** A store of these points, each its index's vertex, for the tests below. */
-function storeOf(points: readonly (readonly [number, number, number])[]): Store {
-  const st = new Store();
-  for (const [x, y, z] of points) st.add(x, y, z);
-  return st;
-}
-
-/**
- * The loops one vertical plane's open edges close into, by the walk the
- * caps take: for the tests of the corner pairing and the turn at a pinch,
- * which random scenes seldom reach. Points are `[x, y, z]` in cells and
- * edges `[from, to]` by point index, all on the side `out` of the plane.
- * `carried` is `sliced`'s, the walk run in slices.
- */
-export function capLoops(points: readonly (readonly [number, number, number])[], edges: readonly (readonly [number, number])[], plane: { a: number; b: number; e: number }, out = 1): { loops: number[][]; carried: number } {
-  const st = storeOf(points);
-  const pl: Plane = { id: 0, a: plane.a, b: plane.b, c: 0, e: plane.e, snap: 0 };
-  const { value, carried } = sliced((budget) => loopsOnLine(st, pl, edges.map(([from, to]) => ({ from, to, out })), budget));
-  return { loops: value.loops.map((l) => l.v), carried };
-}
-
-/** The triangles a cap loop on a vertical plane is cut into, as a hex stack's caps are, by point index, and `sliced`'s `carried`: for the tests. */
-export function capTriangles(points: readonly (readonly [number, number, number])[], plane: { a: number; b: number; e: number }, out = 1): { triangles: number[][]; carried: number } {
-  const st = storeOf(points);
-  const pl: Plane = { id: 0, a: plane.a, b: plane.b, c: 0, e: plane.e, snap: 0 };
-  const { value, carried } = sliced((budget) => earClip(st, pl, points.map((_, i) => i), out, budget));
-  return { triangles: value, carried };
-}
-
-/**
- * The clip lines a face reads, each `[ax, ay, bx, by]` through two plan
- * points, filed over `region`, by their index in order, and `sliced`'s
- * `carried`: for the tests. The face is a plan polygon.
- */
-export function linesNear(lines: readonly (readonly [number, number, number, number])[], face: readonly (readonly [number, number])[], region: { x0: number; y0: number; x1: number; y1: number }): { lines: number[]; carried: number } {
-  const planes = lines.map(([ax, ay, bx, by], i) => lineThrough(i, ax, ay, bx, by)!);
-  const index = new LineIndex(planes, region);
-  for (let li = 0; li < planes.length; li++) index.file(li);
-  const st = storeOf(face.map(([x, y]) => [x, y, 0]));
-  const poly: Poly = { v: face.map((_, i) => i), nx: 0, ny: 0, nz: 1, cap: false };
-  const out = new NearLines();
-  const { carried } = sliced((budget) => index.near(st, poly, budget, out));
-  return { lines: [...out.pool.subarray(0, out.size)], carried };
-}
-
 /**
  * Where a loop touches itself, the next edge that keeps the cap's inside
  * on its left as seen from outside: the first clockwise from the way back,
@@ -2772,3 +2697,13 @@ export class VolumeCache {
 export function volumeKey(req: Pick<VolumeRequest, "template" | "ctx" | "px" | "coarse" | "banded">): string {
   return `${coverageCacheKey(req.template, req.ctx)}|${zoomOctave(req.px)}|${req.coarse}|${req.banded ?? true}`;
 }
+
+/**
+ * The build's parts the tests drive one at a time (volumeTesting.ts): the
+ * loops random scenes seldom make long enough to show a missing stop. One
+ * export, so nothing else reaches past the volume (review ISOA1-F-9).
+ */
+export const volumeInternals = { Budget, Store, loopsOnLine, earClip, LineIndex, NearLines, lineThrough };
+export type VolumeJob<T> = Job<T>;
+export type VolumePlane = Plane;
+export type VolumePoly = Poly;

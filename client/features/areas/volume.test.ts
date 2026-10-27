@@ -5,8 +5,11 @@ import { creaturesInArea, resolveArea, type AreaContext, type AreaTemplateInput,
 import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { hexAt, hexKey, type HexGrid } from "#shared/rules/hex.ts";
 import { deriveWalls, indexBuild, type WallSet } from "#shared/rules/walls.ts";
-import { bandAt, buildVolume, capLoops, capTriangles, everySubcell, linesNear, segmentsAround, towardViewer, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
+import { bandAt, buildVolume, everySubcell, segmentsAround, towardViewer, VolumeCache, zoomOctave, type Volume, type VolumeLine } from "./volume.ts";
 import {
+  capLoops,
+  capTriangles,
+  linesNear,
   assertBanded,
   assertClosed,
   assertLoops,
