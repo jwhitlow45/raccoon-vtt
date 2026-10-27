@@ -246,18 +246,28 @@ export function pruneUnheld(tx: Tx, scene: Scene, layer: Layer): void {
  */
 export function pruneLostGround(tx: Tx, before: RoomState): void {
   if (tx.state.exploredTiles === before.exploredTiles && tx.state.exploredBy === before.exploredBy) return;
+  // A layer with no memory has nothing to prune, so its tiles are never decoded: most ops that explore touch no memory.
+  const remembering = layersWithMemory(tx.state);
+  if (remembering.size === 0) return;
   const lost = new Map<string, Set<Layer>>();
   for (const key of tx.touched()) {
     const parsed = parseKey(key);
     if (parsed?.kind !== "explored" && parsed?.kind !== "exploredBy") continue;
+    const layer = parsed.kind === "explored" ? null : parsed.memberId;
+    if (!remembering.has(layerId(parsed.sceneId, layer))) continue;
     const was = readEntity(before, key) as FogTile | null;
     if (!was) continue;
     const now = readEntity(tx.state, key) as FogTile | null;
     if (now && !losesBits(was.bits, now.bits)) continue;
     let layers = lost.get(parsed.sceneId);
     if (!layers) lost.set(parsed.sceneId, (layers = new Set()));
-    layers.add(parsed.kind === "explored" ? null : parsed.memberId);
+    layers.add(layer);
   }
+  pruneLayers(tx, lost);
+}
+
+/** Prunes each scene's layers named, a scene in id order and its party's layer before its holders' in id order. */
+function pruneLayers(tx: Tx, lost: ReadonlyMap<string, ReadonlySet<Layer>>): void {
   for (const sceneId of [...lost.keys()].sort()) {
     const scene = tx.state.scenes[sceneId];
     if (!scene) continue;
@@ -265,6 +275,19 @@ export function pruneLostGround(tx: Tx, before: RoomState): void {
     const members = [...layers].filter((l): l is string => l !== null).sort();
     for (const layer of [...(layers.has(null) ? [null] : []), ...members]) pruneUnheld(tx, scene, layer);
   }
+}
+
+/** One layer of one scene, as `layersWithMemory` names it. */
+function layerId(sceneId: string, layer: Layer): string {
+  return JSON.stringify([sceneId, layer]);
+}
+
+/** Every layer that holds a chunk of memory, by `layerId`. */
+function layersWithMemory(state: RoomState): Set<string> {
+  const out = new Set<string>();
+  for (const chunk of Object.values(state.memory ?? {})) out.add(layerId(chunk.sceneId, null));
+  for (const chunk of Object.values(state.memoryBy ?? {})) out.add(layerId(chunk.sceneId, chunk.memberId ?? null));
+  return out;
 }
 
 /** Whether a tile's bits lost any sub-cell the earlier bits held. */
