@@ -1,6 +1,8 @@
-import { chunkKey, compareLogIds, doorChunk, holderTileKey, keys, parseKey, readEntity, sightOf, tileKey, viewMapsOf, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
+import { chunkKey, compareLogIds, doorChunk, holderChunkKey, holderTileKey, keys, parseKey, readEntity, sightOf, tileKey, viewMapsOf, wallChunk, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
 import {
+  CHUNK_CELLS,
   FOG_SUBCELLS,
+  FREE_WALL_ID_LENGTH,
   type Actor,
   type AutoWalls,
   type AreaTemplate,
@@ -10,6 +12,7 @@ import {
   type DiceRoll,
   type CustomMonster,
   type Drawing,
+  type EdgeFeature,
   type Effect,
   type Encounter,
   type EncounterSnapshot,
@@ -28,7 +31,10 @@ import {
   type LogEntry,
   type LogEvent,
   type Member,
+  type MemoryChunk,
   type Pin,
+  type PlayerChunk,
+  type RememberedWall,
   type RollRequest,
   type RollTarget,
   type RoomMeta,
@@ -39,6 +45,9 @@ import {
   type SightTile,
   type SrdImage,
   type Stamp,
+  type StairDir,
+  type StairMark,
+  type TerrainId,
   type PathStop,
   type Token,
   type TokenPath,
@@ -54,17 +63,20 @@ import { revealSeenAnywhere } from "./migrate.ts";
 import type { Change } from "./protocol.ts";
 import type { Env } from "./reducer/tx.ts";
 import { isWritable } from "./writable.ts";
-import { autoWallBetween, paintedAt } from "./rules/autoWalls.ts";
+import { autoWallBetween, autoWallsOf, paintedAt } from "./rules/autoWalls.ts";
 import { visionRules, type PartySight } from "./ruleHooks.ts";
 import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCells, tilesAcross, TILE_CELLS } from "./rules/fog.ts";
 import { footprintRect, footprintSubcells, occupiedCells, occupiedHexes, occupiedRange, type CellRange } from "./rules/footprint.ts";
-import { hexSubcells } from "./rules/hex.ts";
-import { sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
+import { classSight, fogClassOf, groundOf, holdsOwnSight, joinPieces, wallLattice, wallSpans, type CellPiece, type Ground, type Piece, type PieceKind } from "./rules/held.ts";
+import { chunkHeights, chunkMarks, encodeHeights } from "./rules/heights.ts";
+import { hexCenter, hexSubcells, sceneHexSpan } from "./rules/hex.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneRanges } from "./rules/traps.ts";
 import { sightRect } from "./rules/vision.ts";
+import { sceneWalls, type WallSet } from "./rules/walls.ts";
 
 /**
  * Per-viewer projection (design section 7.3): the security boundary that
@@ -597,6 +609,8 @@ type Ctx = {
   fogged: FogReader;
   presence: (sceneId: string) => Record<string, FogTile>;
   sight: (sceneId: string) => PartySight;
+  /** The viewer's ground per scene (rules/held.ts), worked out when first asked (groundCtx). */
+  grounds: Map<string, Ground | null>;
 };
 
 function ctxOf(state: RoomState, viewer: Viewer, opts: ProjectOpts): Ctx {
@@ -610,6 +624,7 @@ function ctxOf(state: RoomState, viewer: Viewer, opts: ProjectOpts): Ctx {
     fogged: fogReader(state, own),
     presence: (sceneId) => presenceOf(state, own, sceneId),
     sight: sightReader((sceneId) => viewerSightOf(state, viewer, sceneId)),
+    grounds: new Map(),
   };
 }
 
@@ -1177,10 +1192,28 @@ function projectDrawingCtx(ctx: Ctx, drawing: Drawing): Drawing | null {
   return { ...drawing, points };
 }
 
-function projectChunkCtx(ctx: Ctx, chunk: BuildChunk): BuildChunk | null {
-  if (chunk.sceneId !== ctx.sceneId) return null;
-  if (ctx.viewer.role === "dm") return chunk;
-  return projectChunkForPlayer(ctx.state.buildChunks, chunk, ctx.state.scenes[chunk.sceneId]?.autoWalls);
+/**
+ * A chunk position of the viewer's scene. The DM gets the stored chunk. A
+ * player on a scene with fog on gets what their fog class holds there, a
+ * stub where no chunk is stored (playerChunk), and on a scene with fog off
+ * the whole build as before (projectChunkForPlayer).
+ */
+function projectChunkAtCtx(ctx: Ctx, sceneId: string, cx: number, cy: number): BuildChunk | null {
+  if (sceneId !== ctx.sceneId) return null;
+  const chunk = ctx.state.buildChunks[chunkKey(sceneId, cx, cy)];
+  if (ctx.viewer.role === "dm") return chunk ?? null;
+  const scene = ctx.state.scenes[sceneId];
+  if (scene?.fogEnabled) return playerChunk(ctx.state, { sceneId, cx, cy }, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId));
+  return chunk ? projectChunkForPlayer(ctx.state.buildChunks, chunk, scene?.autoWalls) : null;
+}
+
+/** The viewer's scene's chunks, by chunk key, as a snapshot holds them (projectChunkAtCtx). */
+function projectChunksCtx(ctx: Ctx): Record<string, BuildChunk> {
+  const sceneId = ctx.sceneId;
+  const scene = sceneId === null ? undefined : ctx.state.scenes[sceneId];
+  if (sceneId === null || !scene) return {};
+  if (ctx.viewer.role !== "dm" && scene.fogEnabled) return heldChunks(ctx.state, sceneId, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId));
+  return projectMap(ctx.state.buildChunks, (c) => projectChunkAtCtx(ctx, c.sceneId, c.cx, c.cy));
 }
 
 /** A door as players see it, when it is not a hidden secret one: a locked door arrives closed. */
@@ -1284,6 +1317,513 @@ function playerChunkOf(all: Readonly<Record<string, BuildChunk>>, chunk: BuildCh
   if (chunk.rough !== undefined) out.rough = chunk.rough;
   if (chunk.grid !== undefined) out.grid = chunk.grid;
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// The map as players discover it (docs/design-v1-map-discovery.md 5.1 and 5.2)
+
+/**
+ * A fog class (5.6): a sight holder's member id on a per-player scene, or
+ * null for every other player and table display. Every player of one class
+ * holds the same map, so a chunk is projected once per class.
+ */
+export type FogClass = string | null;
+
+/** How far a scene's cell data and free walls reach, in cells: its bounds, and on hexes its hex columns and rows. */
+function cellReach(scene: Pick<Scene, "bounds" | "gridShape">): { w: number; h: number } {
+  const grid = sceneGrid(scene);
+  if (!isHex(grid)) return scene.bounds;
+  const span = sceneHexSpan(grid, scene.bounds);
+  return { w: Math.max(scene.bounds.w, span.cols), h: Math.max(scene.bounds.h, span.rows) };
+}
+
+/**
+ * The chunk positions of a scene with fog on: every position its cells and
+ * free walls can be filed under, one past its east and south sides
+ * included (decision 14), in row order.
+ */
+export function chunkPositions(scene: Pick<Scene, "bounds" | "gridShape">): { cx: number; cy: number }[] {
+  const { w, h } = cellReach(scene);
+  const out: { cx: number; cy: number }[] = [];
+  for (let cy = 0; cy <= Math.floor(h / CHUNK_CELLS); cy++) for (let cx = 0; cx <= Math.floor(w / CHUNK_CELLS); cx++) out.push({ cx, cy });
+  return out;
+}
+
+/** Whether a chunk position is one of a scene's (chunkPositions). */
+export function inPositions(scene: Pick<Scene, "bounds" | "gridShape">, cx: number, cy: number): boolean {
+  const { w, h } = cellReach(scene);
+  return Number.isInteger(cx) && Number.isInteger(cy) && cx >= 0 && cy >= 0 && cx <= Math.floor(w / CHUNK_CELLS) && cy <= Math.floor(h / CHUNK_CELLS);
+}
+
+/**
+ * The fog tiles a position's chunk reads (5.6): the 3 x 3 tiles around it,
+ * which its cells, edges and the pieces filed there lie on, since fog tiles
+ * and chunks share their grid, and on hexes also every tile under the
+ * world box its hex keys cover, a tile past it each way (HX-D22).
+ */
+export function positionTiles(scene: Pick<Scene, "gridShape">, cx: number, cy: number): [number, number][] {
+  const out: [number, number][] = [];
+  const seen = new Set<string>();
+  const add = (tx: number, ty: number) => {
+    const at = `${tx},${ty}`;
+    if (tx < 0 || ty < 0 || seen.has(at)) return;
+    seen.add(at);
+    out.push([tx, ty]);
+  };
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) add(cx + dx, cy + dy);
+  const grid = sceneGrid(scene);
+  if (isHex(grid)) {
+    const corners = [
+      hexCenter(grid, { col: cx * CHUNK_CELLS, row: cy * CHUNK_CELLS }),
+      hexCenter(grid, { col: cx * CHUNK_CELLS + CHUNK_CELLS - 1, row: cy * CHUNK_CELLS + CHUNK_CELLS - 1 }),
+    ];
+    const x0 = Math.floor((Math.min(corners[0]!.x, corners[1]!.x) - 1) / CHUNK_CELLS) - 1;
+    const x1 = Math.floor((Math.max(corners[0]!.x, corners[1]!.x) + 1) / CHUNK_CELLS) + 1;
+    const y0 = Math.floor((Math.min(corners[0]!.y, corners[1]!.y) - 1) / CHUNK_CELLS) - 1;
+    const y1 = Math.floor((Math.max(corners[0]!.y, corners[1]!.y) + 1) / CHUNK_CELLS) + 1;
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) add(tx, ty);
+  }
+  return out;
+}
+
+/** The positions of a scene whose chunk reads a fog tile (positionTiles). */
+function positionsReading(scene: Pick<Scene, "bounds" | "gridShape">, tx: number, ty: number): { cx: number; cy: number }[] {
+  if (!isHex(sceneGrid(scene))) {
+    const out: { cx: number; cy: number }[] = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (inPositions(scene, tx + dx, ty + dy)) out.push({ cx: tx + dx, cy: ty + dy });
+    return out;
+  }
+  return chunkPositions(scene).filter(({ cx, cy }) => positionTiles(scene, cx, cy).some(([x, y]) => x === tx && y === ty));
+}
+
+/** What an edge is to players (5.2): a drawn wall, door or window as they see it, `"auto"` for an automatic wall, or null for nothing. */
+export type ShownEdge = WallFeature | "auto" | null;
+
+/**
+ * An edge of the build as players see it (5.2): a drawn feature with a
+ * hidden secret door as the wall players take it for and a lock as closed,
+ * an automatic wall by the scene's rule on the real cells either side, a
+ * hidden secret door where the rule walls the edge counting as that
+ * automatic wall (MD-O-1), and a drawn "none" as nothing. The map step on
+ * the server compares edges by this too, so memory and the projection read
+ * one value.
+ */
+export function shownEdge(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string, rule: AutoWalls, key: string): ShownEdge {
+  const [xs, ys, side] = key.split(",");
+  const x = Number(xs);
+  const y = Number(ys);
+  const chunk = chunks[chunkKey(sceneId, Math.floor(x / CHUNK_CELLS), Math.floor(y / CHUNK_CELLS))];
+  const drawn = chunk?.edges[key];
+  const automatic = () => autoWallBetween(rule, paintedAt(chunks, sceneId, x, y), side === "n" ? paintedAt(chunks, sceneId, x, y - 1) : paintedAt(chunks, sceneId, x - 1, y));
+  if (drawn === undefined) return automatic() ? "auto" : null;
+  if (drawn.kind === "none") return null;
+  if (drawn.kind !== "door") return drawn;
+  if (!hiddenDoor(drawn)) return unlocked(drawn);
+  return automatic() ? "auto" : { kind: "wall" };
+}
+
+/** A free wall as players see it (5.2): a hidden secret door as a wall, a lock as closed. */
+export function shownFreeWall(wall: FreeWall): FreeWall {
+  if (wall.f.kind !== "door") return wall;
+  return { ...wall, f: hiddenDoor(wall.f) ? { kind: "wall" } : unlocked(wall.f) };
+}
+
+/** Whether players see a free wall as a door, which reaches them whole (decision 2). */
+function visibleDoor(wall: FreeWall): boolean {
+  return wall.f.kind === "door" && !hiddenDoor(wall.f);
+}
+
+/**
+ * The stair direction players get for a cell (5.2): `n`, `e`, `s` or `w`
+ * for a stair the scene's stair map points, "." for any other cell. The
+ * map reads the real cells around each stair, so a player's device takes
+ * it from the server rather than from what it holds.
+ */
+export function shownUpDir(walls: WallSet, x: number, y: number): StairDir {
+  return walls.stairAt(x, y) ?? ".";
+}
+
+/** One layer's memory chunk at a position, the party's for a null layer. */
+function memoryAt(state: RoomState, sceneId: string, layer: FogClass, cx: number, cy: number): MemoryChunk | undefined {
+  return layer === null ? state.memory?.[chunkKey(sceneId, cx, cy)] : state.memoryBy?.[holderChunkKey(sceneId, layer, cx, cy)];
+}
+
+/**
+ * Which value a held element shows (decision 6, rule 2): live where it
+ * touches the viewer's live ground, else the entry of the memory it reads,
+ * their own where their own layer holds a cell it touches and the party's
+ * elsewhere, else live. A null entry is an element that was absent then.
+ */
+function chosen<T>(live: boolean, own: boolean, mine: Record<string, T> | undefined, party: Record<string, T> | undefined, key: string, now: T): T {
+  if (live) return now;
+  const from = own ? mine : party;
+  return from !== undefined && Object.hasOwn(from, key) ? from[key]! : now;
+}
+
+/**
+ * A player's chunk at a position of a scene with fog on
+ * (docs/design-v1-map-discovery.md 5.2), for a fog class: only what the
+ * class holds, each element live or remembered, with the fields only a
+ * player's chunk carries. Null where it holds no cell, wall or piece, and
+ * on a scene with fog off, whose chunks go as projectChunkForPlayer says.
+ *
+ * - Cells, heights, stair marks and difficult ground go by their cell,
+ *   edges by either cell beside them (decision 1), and every other cell
+ *   reads as empty, 0 and ".".
+ * - `known`: the held cells, bit k for the chunk's cell k in row order,
+ *   least significant bit first, packed and written as fog tiles are.
+ *   `auto`: bit 2k for cell k's north edge and 2k + 1 for its west edge,
+ *   where a held edge carries an automatic wall. `upDir`: one StairDir per
+ *   cell, present only where a held cell is a stair.
+ * - Free walls are cut at held cells and their cut ends rounded
+ *   (rules/held.ts joinPieces), each piece with an id made from its own
+ *   geometry (pieceId) and filed by its own midpoint. Only doors players
+ *   see stay whole, under their real id and chunk.
+ * - One constructor builds every position, a stored chunk's or a stub, its
+ *   cells and edges in sorted key order, so two positions that hold the
+ *   same are the same bytes on the socket, whatever order the DM drew in.
+ */
+export function playerChunk(state: RoomState, at: { sceneId: string; cx: number; cy: number }, view: FogClass): PlayerChunk | null {
+  const scene = state.scenes[at.sceneId];
+  if (!scene || !scene.fogEnabled || !inPositions(scene, at.cx, at.cy)) return null;
+  const own = view !== null && holdsOwnSight(state, scene.id, view) ? view : null;
+  const memo = memoKey(state, scene, own, at.cx, at.cy);
+  const hit = memo === null ? undefined : recall(memo);
+  if (hit !== undefined) return hit;
+  const ground = groundOf(state, at.sceneId, own);
+  if (!ground) return null;
+  const out = chunkFor(state, scene, ground, at.cx, at.cy, piecesNear(state, scene, ground, at.cx, at.cy));
+  if (memo !== null) keep(memo, out);
+  return out;
+}
+
+/** Every position's chunk of one scene with fog on for one class, by chunk key, as a snapshot holds them: the free walls cut once for the whole scene. */
+export function heldChunks(state: RoomState, sceneId: string, view: FogClass): Record<string, PlayerChunk> {
+  const scene = state.scenes[sceneId];
+  const out: Record<string, PlayerChunk> = {};
+  if (!scene || !scene.fogEnabled) return out;
+  const own = view !== null && holdsOwnSight(state, sceneId, view) ? view : null;
+  const ground = groundOf(state, sceneId, own);
+  if (!ground) return out;
+  let filed: Map<string, FreeWall[]> | null = null;
+  for (const { cx, cy } of chunkPositions(scene)) {
+    const memo = memoKey(state, scene, own, cx, cy);
+    let chunk = memo === null ? undefined : recall(memo);
+    if (chunk === undefined) {
+      filed ??= scenePieces(state, scene, ground, null);
+      chunk = chunkFor(state, scene, ground, cx, cy, filed.get(`${cx},${cy}`) ?? NO_WALLS);
+      if (memo !== null) keep(memo, chunk);
+    }
+    if (chunk) out[chunkKey(sceneId, cx, cy)] = chunk;
+  }
+  return out;
+}
+
+/*
+ * Players' chunks, kept by every object a position reads (5.6): the stored
+ * chunks and both memories of its 3 x 3 neighborhood, the fog layers' tiles
+ * there, the scene, and where memory is near, the class's sight, and for a
+ * position with stairs the scene's stair map. Each is replaced and never
+ * changed, so an unchanged position hands players the very same object,
+ * which the fan-out need not hash again, and a changed input never hits.
+ * Each position keeps its last two answers, for the committed state and a
+ * staged one. Nothing is kept while an op is still writing the state.
+ */
+const objectIds = new WeakMap<object, number>();
+let nextObjectId = 1;
+
+function idOf(o: object | undefined | null): number {
+  if (!o) return 0;
+  let id = objectIds.get(o);
+  if (id === undefined) objectIds.set(o, (id = nextObjectId++));
+  return id;
+}
+
+type Memo = { slot: string; key: string };
+const memos = new Map<string, { key: string; value: PlayerChunk | null }[]>();
+const MEMO_SLOTS = 50_000;
+
+function memoKey(state: RoomState, scene: Scene, own: FogClass, cx: number, cy: number): Memo | null {
+  if (isWritable(state.buildChunks) || isWritable(state.fogTiles) || isWritable(state.exploredTiles ?? {}) || isWritable(state.exploredBy ?? {}) || isWritable(state.memory ?? {}) || isWritable(state.memoryBy ?? {})) return null;
+  const sceneId = scene.id;
+  const parts: number[] = [idOf(scene)];
+  let remembered = false;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = cx + dx;
+      const y = cy + dy;
+      const party = state.memory?.[chunkKey(sceneId, x, y)];
+      const mine = own === null ? undefined : state.memoryBy?.[holderChunkKey(sceneId, own, x, y)];
+      if (party || mine) remembered = true;
+      parts.push(idOf(state.buildChunks[chunkKey(sceneId, x, y)]), idOf(party), idOf(mine));
+    }
+  }
+  for (const [x, y] of positionTiles(scene, cx, cy)) {
+    parts.push(idOf(state.fogTiles[tileKey(sceneId, x, y)]), idOf(state.exploredTiles?.[tileKey(sceneId, x, y)]), own === null ? 0 : idOf(state.exploredBy?.[holderTileKey(sceneId, own, x, y)]));
+  }
+  // Sight chooses live or remembered only where memory is.
+  if (remembered) parts.push(idOf(classSight(state, scene, own)));
+  // A stair's direction reads the scene's whole stair map.
+  const here = state.buildChunks[chunkKey(sceneId, cx, cy)];
+  if (here && (chunkMarks(here) !== null || Object.values(here.cells).includes("stairs"))) parts.push(idOf(sceneWalls(scene, state.buildChunks)));
+  return { slot: `${sceneId}|${own ?? ""}|${cx},${cy}`, key: parts.join(",") };
+}
+
+function recall(memo: Memo): PlayerChunk | null | undefined {
+  return memos.get(memo.slot)?.find((m) => m.key === memo.key)?.value;
+}
+
+function keep(memo: Memo, value: PlayerChunk | null): void {
+  const held = memos.get(memo.slot) ?? [];
+  memos.delete(memo.slot);
+  memos.set(memo.slot, [{ key: memo.key, value }, ...held.filter((m) => m.key !== memo.key)].slice(0, 2));
+  if (memos.size > MEMO_SLOTS) memos.delete(memos.keys().next().value!);
+}
+
+const NO_WALLS: readonly FreeWall[] = [];
+const CELLS_PER_CHUNK = CHUNK_CELLS * CHUNK_CELLS;
+const EMPTY_CHUNK: BuildChunk = { sceneId: "", cx: 0, cy: 0, rev: 0, cells: {}, edges: {} };
+
+function chunkFor(state: RoomState, scene: Scene, ground: Ground, cx: number, cy: number, walls: readonly FreeWall[]): PlayerChunk | null {
+  const sceneId = scene.id;
+  const hex = isHex(ground.grid);
+  const chunks = state.buildChunks;
+  const stored = chunks[chunkKey(sceneId, cx, cy)];
+  const mine = ground.remembers && ground.holder !== null ? memoryAt(state, sceneId, ground.holder, cx, cy) : undefined;
+  const party = ground.remembers ? memoryAt(state, sceneId, null, cx, cy) : undefined;
+  const x0 = cx * CHUNK_CELLS;
+  const y0 = cy * CHUNK_CELLS;
+  const known = new Uint8Array(CELLS_PER_CHUNK / 8);
+  const cells: Record<string, TerrainId> = {};
+  const feet = chunkHeights(stored ?? EMPTY_CHUNK);
+  const marks = stored ? chunkMarks(stored) : null;
+  const heights = new Int16Array(CELLS_PER_CHUNK);
+  const up = new Array<StairMark>(CELLS_PER_CHUNK).fill(".");
+  const rough = new Array<boolean>(CELLS_PER_CHUNK).fill(false);
+  const upDir = new Array<StairDir>(CELLS_PER_CHUNK).fill(".");
+  let anyHeld = false;
+  let anyStair = false;
+  // Stair directions read the scene's whole stair map, which hexes do not have yet.
+  const stairMap = hex ? null : sceneWalls(scene, chunks);
+  for (let k = 0; k < CELLS_PER_CHUNK; k++) {
+    const x = x0 + (k % CHUNK_CELLS);
+    const y = y0 + Math.floor(k / CHUNK_CELLS);
+    const key = `${x},${y}`;
+    if (!ground.keyHeld(key)) continue;
+    anyHeld = true;
+    known[k >> 3] = known[k >> 3]! | (1 << (k & 7));
+    const live = ground.keyLive(key);
+    const own = ground.keyOwn(key);
+    const terrain = chosen<TerrainId | null>(live, own, mine?.cells, party?.cells, key, stored?.cells[key] ?? null);
+    if (terrain !== null) cells[key] = terrain;
+    heights[k] = chosen(live, own, mine?.heights, party?.heights, key, feet ? feet[k]! : 0);
+    const mark = chosen<StairMark>(live, own, mine?.up, party?.up, key, marks ? (marks[k] as StairMark) : ".");
+    up[k] = mark;
+    rough[k] = chosen(live, own, mine?.rough, party?.rough, key, stored?.rough?.[k] === "d");
+    if (stairMap && (mark !== "." || terrain === "stairs")) {
+      anyStair = true;
+      upDir[k] = chosen(live, own, mine?.upDir, party?.upDir, key, shownUpDir(stairMap, x, y));
+    }
+  }
+  // Edges: held when either cell beside them is held, so the walls round a held room reach players from the chunk past it too.
+  const edges: Record<string, WallFeature> = {};
+  const auto = new Uint8Array((2 * CELLS_PER_CHUNK) / 8);
+  let anyAuto = false;
+  if (!hex) {
+    const rule = autoWallsOf(scene);
+    for (let k = 0; k < CELLS_PER_CHUNK; k++) {
+      const x = x0 + (k % CHUNK_CELLS);
+      const y = y0 + Math.floor(k / CHUNK_CELLS);
+      for (const side of ["n", "w"] as const) {
+        const ox = side === "n" ? x : x - 1;
+        const oy = side === "n" ? y - 1 : y;
+        if (!ground.held(x, y) && !ground.held(ox, oy)) continue;
+        const key = `${x},${y},${side}`;
+        const live = ground.live(x, y) || ground.live(ox, oy);
+        const own = ground.own(x, y) || ground.own(ox, oy);
+        const value = chosen<EdgeFeature | "auto" | null>(live, own, mine?.edges, party?.edges, key, shownEdge(chunks, sceneId, rule, key));
+        if (value === null || (value !== "auto" && value.kind === "none")) continue;
+        if (value === "auto") {
+          const bit = 2 * k + (side === "w" ? 1 : 0);
+          auto[bit >> 3] = auto[bit >> 3]! | (1 << (bit & 7));
+          anyAuto = true;
+        } else edges[key] = value;
+      }
+    }
+  }
+  // A held edge with nothing on it holds nothing, so a position past held ground goes only for a wall it carries.
+  if (!anyHeld && !anyAuto && Object.keys(edges).length === 0 && walls.length === 0) return null;
+  const out: PlayerChunk = { sceneId, cx, cy, rev: 0, cells: sortedRecord(cells), edges: sortedRecord(edges) };
+  if (walls.length > 0) out.walls = [...walls];
+  const heightsText = encodeHeights(heights);
+  if (heightsText !== undefined) out.heights = heightsText;
+  if (up.some((m) => m !== ".")) out.up = up.join("");
+  if (rough.some((r) => r)) out.rough = rough.map((r) => (r ? "d" : ".")).join("");
+  if (hex && scene.gridShape !== undefined) out.grid = scene.gridShape;
+  out.known = encodeTile(known);
+  if (anyAuto) out.auto = encodeTile(auto);
+  if (anyStair) out.upDir = upDir.join("");
+  return out;
+}
+
+function sortedRecord<T>(record: Record<string, T>): Record<string, T> {
+  const out: Record<string, T> = {};
+  for (const key of Object.keys(record).sort()) out[key] = record[key]!;
+  return out;
+}
+
+/** The free-wall id alphabet (model.ts FreeWall), which piece ids are written in. */
+const ID_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+
+/**
+ * A piece's id (decision 2): the first 12 symbols of the free-wall id
+ * alphabet from hash128 over its scene, its two ends as sent and its kind,
+ * each number as `String(n)`, with a counter for a collision in its
+ * position. Every input is public, so the id says nothing of the walls it
+ * was cut from.
+ */
+export function pieceId(sceneId: string, piece: Pick<Piece, "a" | "b" | "kind">, again = 0): string {
+  const text = `${sceneId}|${String(piece.a[0])},${String(piece.a[1])},${String(piece.b[0])},${String(piece.b[1])}|${piece.kind}${again > 0 ? `#${again}` : ""}`;
+  const hex = hash128(text);
+  let id = "";
+  for (let i = 0; i < FREE_WALL_ID_LENGTH; i++) {
+    // Six bits at a time from the front of the 128: three hex digits hold them.
+    const bit = i * 6;
+    const word = parseInt(hex.slice(bit >> 2, (bit >> 2) + 3), 16);
+    id += ID_CHARS[(word >> (6 - (bit & 3))) & 63]!;
+  }
+  return id;
+}
+
+/** The free walls players get at one position: cut from the stored and remembered walls of its 3 x 3 neighborhood, which every piece filed there comes from (5.2). */
+function piecesNear(state: RoomState, scene: Scene, ground: Ground, cx: number, cy: number): readonly FreeWall[] {
+  const near = new Set<string>();
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) near.add(`${cx + dx},${cy + dy}`);
+  return scenePieces(state, scene, ground, near).get(`${cx},${cy}`) ?? NO_WALLS;
+}
+
+/** One free wall as an element: its real chunk and id, its live value as players see it, and the versions each layer remembers. */
+type WallElement = { cx: number; cy: number; id: string; live: FreeWall | undefined; party?: readonly RememberedWall[]; mine?: readonly RememberedWall[] };
+
+/**
+ * The free walls players of one class get, filed by position (5.2): every
+ * wall of the given positions (all of the scene's when null), live and
+ * remembered, chosen per cell. A cell in sight or revealed by the DM takes
+ * the live value, any other held cell the version of the memory it reads
+ * that covers it, else the live value. The chosen stretches then join,
+ * split and round (joinPieces), and each piece gets its id. A door players
+ * see goes whole under its real id and chunk: live where any cell it holds
+ * is live, else as remembered.
+ */
+function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: ReadonlySet<string> | null): Map<string, FreeWall[]> {
+  const sceneId = scene.id;
+  const elements = new Map<string, WallElement>();
+  const element = (cx: number, cy: number, id: string): WallElement => {
+    const key = `${cx},${cy}:${id}`;
+    let e = elements.get(key);
+    if (!e) elements.set(key, (e = { cx, cy, id, live: undefined }));
+    return e;
+  };
+  const wanted = (cx: number, cy: number) => positions === null || positions.has(`${cx},${cy}`);
+  for (const chunk of sceneChunkList(state.buildChunks, sceneId)) {
+    if (!wanted(chunk.cx, chunk.cy)) continue;
+    for (const wall of chunk.walls ?? []) element(chunk.cx, chunk.cy, wall.id).live = shownFreeWall(wall);
+  }
+  if (ground.remembers) {
+    const layers: FogClass[] = ground.holder === null ? [null] : [null, ground.holder];
+    for (const layer of layers) {
+      for (const chunk of Object.values((layer === null ? state.memory : state.memoryBy) ?? {})) {
+        if (chunk.sceneId !== sceneId || (chunk.memberId ?? null) !== layer || !chunk.walls || !wanted(chunk.cx, chunk.cy)) continue;
+        for (const [id, versions] of Object.entries(chunk.walls)) {
+          const e = element(chunk.cx, chunk.cy, id);
+          if (layer === null) e.party = versions;
+          else e.mine = versions;
+        }
+      }
+    }
+  }
+  const stretches: CellPiece[] = [];
+  const doors: FreeWall[] = [];
+  for (const key of [...elements.keys()].sort()) {
+    const e = elements.get(key)!;
+    const cells = new Set<string>();
+    for (const wall of [e.live, ...(e.party ?? []).map((v) => v.wall), ...(e.mine ?? []).map((v) => v.wall)]) {
+      if (wall) for (const span of wallSpans(ground.grid, wall)) cells.add(span.cell);
+    }
+    let door: { wall: FreeWall; live: boolean } | null = null;
+    for (const cell of cells) {
+      if (!ground.keyHeld(cell)) continue;
+      const live = ground.keyLive(cell);
+      let wall: FreeWall | null | undefined = e.live;
+      if (!live) {
+        const version = (ground.keyOwn(cell) ? e.mine : e.party)?.find((v) => v.cells.includes(cell));
+        if (version) wall = version.wall;
+      }
+      if (!wall) continue;
+      const span = wallSpans(ground.grid, wall).find((s) => s.cell === cell);
+      if (!span) continue;
+      if (visibleDoor(wall)) {
+        if (door === null || (live && !door.live)) door = { wall, live };
+        continue;
+      }
+      const { a, b } = wallLattice(wall);
+      stretches.push({ a, b, t0: span.t0, t1: span.t1, kind: wall.f.kind === "window" ? "window" : "wall" });
+    }
+    if (door) doors.push(door.wall);
+  }
+  const filed = new Map<string, FreeWall[]>();
+  const file = (pos: string, wall: FreeWall) => {
+    let list = filed.get(pos);
+    if (!list) filed.set(pos, (list = []));
+    list.push(wall);
+  };
+  for (const wall of doors) {
+    const at = wallChunk(wall);
+    file(`${at.cx},${at.cy}`, wall);
+  }
+  for (const piece of joinPieces(stretches, ground)) file(`${piece.cx},${piece.cy}`, { id: "", a: piece.a, b: piece.b, f: { kind: piece.kind } });
+  for (const [pos, list] of filed) {
+    list.sort(byCoordinates);
+    // Ids taken in the position, doors' first: a piece that collides with one hashes again with a counter (MD-R4-1).
+    const taken = new Set(list.filter((w) => w.id !== "").map((w) => w.id));
+    const out: FreeWall[] = [];
+    let last: FreeWall | undefined;
+    for (const wall of list) {
+      if (wall.id !== "") {
+        out.push(wall);
+        continue;
+      }
+      // Equal pieces in one position are one piece.
+      if (last && last.a[0] === wall.a[0] && last.a[1] === wall.a[1] && last.b[0] === wall.b[0] && last.b[1] === wall.b[1] && last.f.kind === wall.f.kind) continue;
+      const piece = { a: wall.a, b: wall.b, kind: wall.f.kind as PieceKind };
+      let again = 0;
+      let id = pieceId(sceneId, piece);
+      while (taken.has(id)) id = pieceId(sceneId, piece, ++again);
+      taken.add(id);
+      last = { ...wall, id };
+      out.push(last);
+    }
+    filed.set(pos, out);
+  }
+  return filed;
+}
+
+/** A scene's stored chunks, grouped once per chunk collection, which is replaced and never changed. */
+const chunkLists = new WeakMap<object, Map<string, BuildChunk[]>>();
+
+function sceneChunkList(all: Readonly<Record<string, BuildChunk>>, sceneId: string): readonly BuildChunk[] {
+  let lists = isWritable(all) ? undefined : chunkLists.get(all);
+  if (!lists) {
+    lists = new Map();
+    for (const chunk of Object.values(all)) {
+      if (!chunk) continue;
+      let list = lists.get(chunk.sceneId);
+      if (!list) lists.set(chunk.sceneId, (list = []));
+      list.push(chunk);
+    }
+    if (!isWritable(all)) chunkLists.set(all, lists);
+  }
+  return lists.get(sceneId) ?? [];
 }
 
 /**
@@ -1422,14 +1962,128 @@ function projectFogDraftCtx(ctx: Ctx, draft: FogDraft): FogDraft | null {
   return draft.sceneId === ctx.sceneId ? draft : null;
 }
 
-/** A label fully under enabled fog is withheld from players like a token, so a "Trap" in the dark is not in the data at all. */
+/**
+ * A label fully under enabled fog is withheld from players like a token, so
+ * a "Trap" in the dark is not in the data at all. On a scene that keeps
+ * memory a label off the viewer's live ground shows as they last saw it
+ * (shownByMemory).
+ */
 function projectLabelCtx(ctx: Ctx, label: Label): Label | null {
   if (label.sceneId !== ctx.sceneId) return null;
   if (ctx.viewer.role === "dm") return label;
   const scene = ctx.state.scenes[label.sceneId];
   if (!scene || !scene.fogEnabled) return label;
-  const fogged = isRangeFullyFogged(ctx.presence(label.sceneId), label.sceneId, labelCells(label), (x, y) => ctx.fogged(label.sceneId, x, y));
-  return fogged ? null : label;
+  return shownByMemory(ctx, "labels", label.id, label);
+}
+
+/** The cells a label or stamp is judged by: its box (labelCells, stampCells). */
+function boxOf(field: "labels" | "stamps", value: Label | Stamp): CellRange {
+  return field === "labels" ? labelCells(value as Label) : stampCells(value as Stamp);
+}
+
+/**
+ * A label or stamp as a player of the viewer's class sees it on a scene
+ * with fog on (docs/design-v1-map-discovery.md 5.3, decision 5): live where
+ * its box touches their live ground, else as the memory it reads
+ * remembers it (decision 6), where their own layer holds a cell of a box
+ * their own and the party's elsewhere. A remembered absence hides it. A
+ * remembered one whose box touches live ground is gone from where they
+ * look, and one off held ground shows nothing. Without an entry it goes by
+ * today's rule: shown unless its box is fully under their fog. A stamp the
+ * DM keeps to themselves never shows, remembered or not.
+ */
+function shownByMemory<T extends Label | Stamp>(ctx: Ctx, field: "labels" | "stamps", id: string, live: T | null): T | null {
+  const sceneId = ctx.sceneId;
+  if (sceneId === null) return null;
+  const now = live && live.sceneId === sceneId ? live : null;
+  if (field === "stamps" && (now as Stamp | null)?.visibility === "dm") return null;
+  const held = (r: CellRange) => !isRangeFullyFogged(ctx.presence(sceneId), sceneId, r, (x, y) => ctx.fogged(sceneId, x, y));
+  const liveBox = now ? boxOf(field, now) : null;
+  const ground = groundCtx(ctx, sceneId);
+  if (!ground || !ground.remembers) return liveBox && held(liveBox) ? now : null;
+  if (liveBox && ground.rangeLive(liveBox)) return now;
+  const party = rememberedById(ctx.state, sceneId, null, field, id);
+  const mine = ground.holder === null ? undefined : rememberedById(ctx.state, sceneId, ground.holder, field, id);
+  const boxes = [now, party, mine].filter((v): v is T => v !== null && v !== undefined).map((v) => boxOf(field, v));
+  const entry = ground.holder !== null && boxes.some((r) => ground.rangeOwn(r)) ? mine : party;
+  if (entry === undefined) return liveBox && held(liveBox) ? now : null;
+  if (entry === null) return null;
+  const box = boxOf(field, entry);
+  if (ground.rangeLive(box) || !held(box)) return null;
+  return entry as T;
+}
+
+/** The viewer's ground on a scene (rules/held.ts), worked out once per projection. Null for the DM. */
+function groundCtx(ctx: Ctx, sceneId: string): Ground | null {
+  if (ctx.viewer.role === "dm") return null;
+  if (!ctx.grounds.has(sceneId)) ctx.grounds.set(sceneId, groundOf(ctx.state, sceneId, fogClassOf(ctx.state, sceneId, ctx.viewer.memberId)));
+  return ctx.grounds.get(sceneId)!;
+}
+
+/**
+ * Each layer's remembered labels and stamps by id, indexed once per memory
+ * collection, which is replaced and never changed: a label lies in one
+ * chunk of its layer only (shared/reducer/memory.ts).
+ */
+type ById = Map<string, Label | Stamp | null>;
+const rememberedIndex = new WeakMap<object, Map<string, ById>>();
+
+function rememberedIn(all: Record<string, MemoryChunk> | undefined, at: string): ById | undefined {
+  if (!all) return undefined;
+  let index = isWritable(all) ? undefined : rememberedIndex.get(all);
+  if (!index) {
+    index = new Map();
+    for (const chunk of Object.values(all)) {
+      for (const field of ["labels", "stamps"] as const) {
+        const record = chunk[field];
+        if (!record) continue;
+        const where = `${chunk.sceneId}|${chunk.memberId ?? ""}|${field}`;
+        let byId = index.get(where);
+        if (!byId) index.set(where, (byId = new Map()));
+        for (const [id, value] of Object.entries(record)) byId.set(id, value);
+      }
+    }
+    if (!isWritable(all)) rememberedIndex.set(all, index);
+  }
+  return index.get(at);
+}
+
+/** What one layer remembers of a label or stamp by id: the value, null for one that was absent then, undefined for no entry. */
+function rememberedById(state: RoomState, sceneId: string, layer: FogClass, field: "labels" | "stamps", id: string): Label | Stamp | null | undefined {
+  const byId = rememberedIn(layer === null ? state.memory : state.memoryBy, `${sceneId}|${layer ?? ""}|${field}`);
+  return byId?.get(id);
+}
+
+/** The ids of labels or stamps only memory names on a scene, which still reach players who remember them (5.3). */
+function rememberedOnly(state: RoomState, sceneId: string, field: "labels" | "stamps"): string[] {
+  const out = new Set<string>();
+  const live = field === "labels" ? state.labels : state.stamps;
+  for (const all of [state.memory, state.memoryBy]) {
+    for (const chunk of Object.values(all ?? {})) {
+      if (chunk.sceneId !== sceneId) continue;
+      for (const id of Object.keys(chunk[field] ?? {})) if (!Object.hasOwn(live, id)) out.add(id);
+    }
+  }
+  return [...out].sort();
+}
+
+/** A label or stamp by key for the viewer: the live one, or one only their memory holds. */
+function projectRememberedCtx(ctx: Ctx, field: "labels" | "stamps", id: string): Label | Stamp | null {
+  if (ctx.viewer.role === "dm" || ctx.sceneId === null) return null;
+  const scene = ctx.state.scenes[ctx.sceneId];
+  if (!scene || !scene.fogEnabled) return null;
+  return shownByMemory<Label | Stamp>(ctx, field, id, null);
+}
+
+/** The viewer's labels or stamps, as a snapshot holds them: the live ones and those only memory names. */
+function projectByMemoryCtx<T extends Label | Stamp>(ctx: Ctx, field: "labels" | "stamps", live: Record<string, T>, project: (value: T) => T | null): Record<string, T> {
+  const out = projectMap(live, project);
+  if (ctx.viewer.role === "dm" || ctx.sceneId === null) return out;
+  for (const id of rememberedOnly(ctx.state, ctx.sceneId, field)) {
+    const value = projectRememberedCtx(ctx, field, id);
+    if (value) out[id] = value as T;
+  }
+  return out;
 }
 
 /**
@@ -1459,8 +2113,7 @@ function projectStampCtx(ctx: Ctx, stamp: Stamp): Stamp | null {
   if (stamp.visibility === "dm") return null;
   const scene = ctx.state.scenes[stamp.sceneId];
   if (!scene || !scene.fogEnabled) return stamp;
-  const fogged = isRangeFullyFogged(ctx.presence(stamp.sceneId), stamp.sceneId, stampCells(stamp), (x, y) => ctx.fogged(stamp.sceneId, x, y));
-  return fogged ? null : stamp;
+  return shownByMemory(ctx, "stamps", stamp.id, stamp);
 }
 
 /**
@@ -1564,7 +2217,7 @@ export const SCENE_FOR_PLAYERS = {
   fogEnabled: "copied",
   wallsVersion: "zeroed",
   defaultView: "copied",
-  autoWalls: "copied",
+  autoWalls: "changed: \"off\" with fog on, since a player's chunks then carry the automatic walls they hold",
   folder: "dm: how the DM files scenes in the Scenes panel",
   thumb: "dm: the Scenes panel's picture, which a background render moves",
   phases: "dm: the map's other images and their names (On fire)",
@@ -1597,7 +2250,9 @@ function projectSceneCtx(ctx: Ctx, scene: Scene): Scene | null {
   };
   if (scene.map !== undefined) out.map = scene.map;
   if (scene.defaultView !== undefined) out.defaultView = scene.defaultView;
-  if (scene.autoWalls !== undefined) out.autoWalls = scene.autoWalls;
+  // With fog on a player's chunks carry the automatic walls they hold (`auto`), so their device derives none (docs/design-v1-map-discovery.md 5.2).
+  if (scene.fogEnabled) out.autoWalls = "off";
+  else if (scene.autoWalls !== undefined) out.autoWalls = scene.autoWalls;
   if (scene.blockMovement !== undefined) out.blockMovement = scene.blockMovement;
   if (scene.vision !== undefined) out.vision = scene.vision;
   if (scene.gridShape !== undefined) out.gridShape = scene.gridShape;
@@ -2577,7 +3232,7 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     case "drawing":
       return value ? projectDrawingCtx(ctx, value as Drawing) : null;
     case "chunk":
-      return value ? projectChunkCtx(ctx, value as BuildChunk) : null;
+      return projectChunkAtCtx(ctx, parsed.sceneId, parsed.cx, parsed.cy);
     case "fog":
       return projectFogCtx(ctx, parsed.sceneId, parsed.tx, parsed.ty);
     case "explored":
@@ -2605,7 +3260,7 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     case "fogDraft":
       return value ? projectFogDraftCtx(ctx, value as FogDraft) : null;
     case "label":
-      return value ? projectLabelCtx(ctx, value as Label) : null;
+      return value ? projectLabelCtx(ctx, value as Label) : projectRememberedCtx(ctx, "labels", parsed.id);
     case "scene":
       return value ? projectSceneCtx(ctx, value as Scene) : null;
     case "member":
@@ -2619,7 +3274,7 @@ function projectEntityCtx(ctx: Ctx, key: EntityKey): unknown {
     case "savedEncounter":
       return value ? projectSavedEncounterCtx(ctx, value as SavedEncounter) : null;
     case "stamp":
-      return value ? projectStampCtx(ctx, value as Stamp) : null;
+      return value ? projectStampCtx(ctx, value as Stamp) : projectRememberedCtx(ctx, "stamps", parsed.id);
     case "light":
       return value ? projectLightCtx(ctx, value as Light) : null;
     case "journal":
@@ -2667,8 +3322,8 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     meta: projectMetaCtx(ctx),
     members: projectMap(state.members, (m) => projectMemberCtx(ctx, m)),
     scenes: projectMap(state.scenes, (s) => projectSceneCtx(ctx, s)),
-    buildChunks: projectMap(state.buildChunks, (c) => projectChunkCtx(ctx, c)),
-    labels: projectMap(state.labels, (l) => projectLabelCtx(ctx, l)),
+    buildChunks: projectChunksCtx(ctx),
+    labels: projectByMemoryCtx(ctx, "labels", state.labels, (l) => projectLabelCtx(ctx, l)),
     fogTiles: projectFogTilesCtx(ctx),
     fogDrafts: projectMap(state.fogDrafts, (d) => projectFogDraftCtx(ctx, d)),
     tokens: projectMap(state.tokens, (t) => projectTokenCtx(ctx, t)),
@@ -2682,7 +3337,7 @@ export function projectState(state: RoomState, viewer: Viewer, opts: ProjectOpts
     monsters: projectMap(state.monsters, (m) => projectMonsterCtx(ctx, m)),
     srdImages: projectMap(state.srdImages, (e) => projectSrdImageCtx(ctx, e)),
     savedEncounters: projectMap(state.savedEncounters, (e) => projectSavedEncounterCtx(ctx, e)),
-    stamps: projectMap(state.stamps, (st) => projectStampCtx(ctx, st)),
+    stamps: projectByMemoryCtx(ctx, "stamps", state.stamps, (st) => projectStampCtx(ctx, st)),
     lights: projectMap(state.lights, (l) => projectLightCtx(ctx, l)),
     exploredTiles: projectMap(state.exploredTiles, (t) => projectExploredCtx(ctx, t)),
     journal: projectMap(state.journal, (page) => projectJournalCtx(ctx, page)),
@@ -2761,6 +3416,17 @@ export function allKeys(state: RoomState): EntityKey[] {
   for (const id of Object.keys(state.members)) out.push(keys.member(id));
   for (const id of Object.keys(state.scenes)) out.push(keys.scene(id));
   for (const c of Object.values(state.buildChunks)) out.push(keys.chunk(c.sceneId, c.cx, c.cy));
+  // On a scene with fog on every position may hold a stub (docs/design-v1-map-discovery.md 5.6), and memory can name labels and stamps the build no longer has.
+  const chunkKeys = new Set(Object.values(state.buildChunks).map((c) => keys.chunk(c.sceneId, c.cx, c.cy)));
+  for (const scene of Object.values(state.scenes)) {
+    if (!scene.fogEnabled) continue;
+    for (const { cx, cy } of chunkPositions(scene)) {
+      const key = keys.chunk(scene.id, cx, cy);
+      if (!chunkKeys.has(key)) out.push(key);
+    }
+    for (const id of rememberedOnly(state, scene.id, "labels")) out.push(keys.label(id));
+    for (const id of rememberedOnly(state, scene.id, "stamps")) out.push(keys.stamp(id));
+  }
   for (const id of Object.keys(state.labels)) out.push(keys.label(id));
   for (const t of Object.values(state.fogTiles)) out.push(keys.fog(t.sceneId, t.tx, t.ty));
   // A tile only the party explored is still a fog tile to players (projectFogCtx).
@@ -2903,10 +3569,34 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
   if (touched.includes(keys.encounter)) {
     for (const token of Object.values(state.tokens)) if (token.path) add(keys.token(token.id));
   }
+  /*
+   * On a scene with fog on a player's chunk at a position reads the stored
+   * and remembered chunks of its 8 neighbors, since a piece filed by its
+   * own midpoint lies up to 4 cells from the chunk its wall is stored in,
+   * and an edge reads the cells beside it (docs/design-v1-map-discovery.md
+   * 5.6). Stubs count, so every position of the scene is a key.
+   */
+  const fogScene = (sceneId: string) => state.scenes[sceneId]?.fogEnabled === true;
+  const aroundChunk = (sceneId: string, cx: number, cy: number) => {
+    const scene = state.scenes[sceneId];
+    if (!scene) return;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (inPositions(scene, cx + dx, cy + dy)) add(keys.chunk(sceneId, cx + dx, cy + dy));
+  };
+  // The positions whose chunk reads a fog tile (positionTiles).
+  const aroundTile = (sceneId: string, tx: number, ty: number) => {
+    const scene = state.scenes[sceneId];
+    if (scene) for (const { cx, cy } of positionsReading(scene, tx, ty)) add(keys.chunk(sceneId, cx, cy));
+  };
+  const stairScenes = new Set<string>();
   for (const key of touched) {
     const parsed = parseKey(key);
     if (!parsed) continue;
     if (parsed.kind === "chunk") {
+      if (fogScene(parsed.sceneId)) {
+        aroundChunk(parsed.sceneId, parsed.cx, parsed.cy);
+        stairScenes.add(parsed.sceneId);
+        continue;
+      }
       // A player's chunk reads the cells beside its north and west borders (projectChunkForPlayer).
       for (const [cx, cy] of [
         [parsed.cx + 1, parsed.cy],
@@ -2914,9 +3604,20 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
       ] as const) {
         if (state.buildChunks[chunkKey(parsed.sceneId, cx, cy)]) add(keys.chunk(parsed.sceneId, cx, cy));
       }
+    } else if (parsed.kind === "memory" || parsed.kind === "memoryBy") {
+      // What players remember shows in their chunks there and around, and in the labels and stamps it names (5.6).
+      aroundChunk(parsed.sceneId, parsed.cx, parsed.cy);
+      const chunk = readEntity(state, key) as MemoryChunk | null;
+      for (const id of Object.keys(chunk?.labels ?? {})) add(keys.label(id));
+      for (const id of Object.keys(chunk?.stamps ?? {})) add(keys.stamp(id));
+    } else if (parsed.kind === "scene") {
+      // A scene's size moves its positions and the side pieces round at.
+      const scene = state.scenes[parsed.id];
+      if (scene?.fogEnabled) for (const { cx, cy } of chunkPositions(scene)) add(keys.chunk(scene.id, cx, cy));
     } else if (parsed.kind === "explored") {
       add(keys.fog(parsed.sceneId, parsed.tx, parsed.ty));
       onTile(parsed.sceneId, parsed.tx, parsed.ty);
+      if (fogScene(parsed.sceneId)) aroundTile(parsed.sceneId, parsed.tx, parsed.ty);
       // Every player's fog reads the party's layer, and on a per-player scene so do the shared fog and every owner's
       // route corners (docs/design-v1-per-player-vision.md 7.5).
       if (perPlayerScene(state.scenes[parsed.sceneId])) {
@@ -2929,7 +3630,12 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
       add(keys.exploredAny(parsed.sceneId, parsed.tx, parsed.ty));
       onTile(parsed.sceneId, parsed.tx, parsed.ty);
       cornersOn(parsed.sceneId, parsed.memberId);
-    } else if (parsed.kind === "sight" || parsed.kind === "sightAll") onTile(parsed.sceneId, parsed.tx, parsed.ty);
+      if (fogScene(parsed.sceneId)) aroundTile(parsed.sceneId, parsed.tx, parsed.ty);
+    } else if (parsed.kind === "sight" || parsed.kind === "sightAll") {
+      onTile(parsed.sceneId, parsed.tx, parsed.ty);
+      // Sight decides live or remembered only where some memory has entries (MD-O-24).
+      if (fogScene(parsed.sceneId) && hasMemory(state, parsed.sceneId)) aroundTile(parsed.sceneId, parsed.tx, parsed.ty);
+    }
     else if (parsed.kind === "token") tokenIds.add(parsed.id);
     else if (parsed.kind === "character") characterIds.add(parsed.id);
     else if (parsed.kind === "handout") handoutIds.add(parsed.id);
@@ -2955,6 +3661,8 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     for (const pin of Object.values(state.pins)) if (pin.pageId !== undefined && pageIds.has(pin.pageId)) add(keys.pin(pin.id));
   }
   if (tiles.size > 0) tileDependents(state, tiles, add, tokenIds);
+  // A stair's direction reads the scene's whole stair map, so a build edit can turn a stair chunks away (ASTRA-4): every chunk with a stair goes again.
+  for (const sceneId of stairScenes) for (const key of stairChunkKeys(state, sceneId)) add(key);
   for (const token of Object.values(state.tokens)) {
     if ("ref" in token.actor && characterIds.has(token.actor.ref)) {
       add(keys.token(token.id));
@@ -3070,8 +3778,31 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
   }
   for (const label of Object.values(state.labels)) if (on(label.sceneId, labelCells(label))) add(keys.label(label.id));
   for (const stamp of Object.values(state.stamps)) if (on(stamp.sceneId, stampCells(stamp))) add(keys.stamp(stamp.id));
+  // A remembered label or stamp is judged by its remembered box too, wherever the live one stands (docs/design-v1-map-discovery.md 5.3).
+  for (const all of [state.memory, state.memoryBy]) {
+    for (const chunk of Object.values(all ?? {})) {
+      if (!tiles.has(chunk.sceneId)) continue;
+      for (const [id, label] of Object.entries(chunk.labels ?? {})) if (label && on(chunk.sceneId, labelCells(label))) add(keys.label(id));
+      for (const [id, stamp] of Object.entries(chunk.stamps ?? {})) if (stamp && on(chunk.sceneId, stampCells(stamp))) add(keys.stamp(id));
+    }
+  }
   for (const pin of Object.values(state.pins)) if (on(pin.sceneId, pinCells(pin))) add(keys.pin(pin.id));
   for (const trap of Object.values(state.traps ?? {})) if (zoneRanges(state, trap.sceneId, trap.zone).some((r) => on(trap.sceneId, r))) add(keys.trap(trap.id));
+}
+
+/** Whether any layer's memory of a scene has entries. */
+function hasMemory(state: RoomState, sceneId: string): boolean {
+  for (const all of [state.memory, state.memoryBy]) for (const chunk of Object.values(all ?? {})) if (chunk.sceneId === sceneId) return true;
+  return false;
+}
+
+/** The chunk keys of a scene whose chunk holds a stair: a mark or painted stairs. */
+function stairChunkKeys(state: RoomState, sceneId: string): EntityKey[] {
+  const out: EntityKey[] = [];
+  for (const chunk of sceneChunkList(state.buildChunks, sceneId)) {
+    if (chunkMarks(chunk) !== null || Object.values(chunk.cells).includes("stairs")) out.push(keys.chunk(sceneId, chunk.cx, chunk.cy));
+  }
+  return out;
 }
 
 /**

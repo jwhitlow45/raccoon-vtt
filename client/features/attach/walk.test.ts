@@ -849,6 +849,8 @@ describe("a walking ruler sees a party member its legs move where every player s
       });
       state.scenes.s1 = { ...state.scenes.s1!, fogEnabled: true };
       reveal(state, "s1", { x: 0, y: 0, w: 8, h: 12 });
+      // Players hold a wall only where they hold a cell beside it (docs/design-v1-map-discovery.md 5.2): the patch of ground about it is lifted too.
+      reveal(state, "s1", { x: 9, y: 2, w: 1, h: 2 });
       const spots = [{ x: 10, y: 5 }, { x: 10, y: 1 }];
       let room = state;
       const read: number[] = [];

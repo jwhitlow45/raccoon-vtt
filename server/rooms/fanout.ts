@@ -107,12 +107,12 @@ function hashOf(projected: unknown): string {
  * such as a light level switch, then costs one projection per class
  * (docs/design-v1-maps-vision.md 4.3.6), and each value is hashed once.
  *
- * - The scene a player is on: the map's chunks with their doors, the scene
- *   itself, the shared sight and fog (`sightAll`, `fogAll`), and the DM's
- *   kinds, which project to nothing for players.
+ * - The scene a player is on: the scene itself, the shared sight and fog
+ *   (`sightAll`, `fogAll`), and the DM's kinds, which project to nothing
+ *   for players.
  * - The sight they read: sight tiles, the same for every player who reads
  *   one raster, which viewers with the same sources share (6.1).
- * - The fog they read: fog tiles, labels, stamps and found traps, per
+ * - The fog they read: fog tiles, the map's chunks, labels, stamps and found traps, per
  *   member for sight holders, whose own layer is in their fog, and once
  *   for every other player and table display, whose fog is the DM's layer
  *   and the party's.
@@ -121,7 +121,7 @@ function hashOf(projected: unknown): string {
  * projected per member. On a whole-party scene each of the three is the
  * same for every player, as it always was.
  */
-const SCENE_KINDS = new Set(["chunk", "scene", "light", "explored", "fogDraft", "sightAll", "fogAll", "exploredAny", "exploredBy", "holders"]);
+const SCENE_KINDS = new Set(["scene", "light", "explored", "fogDraft", "sightAll", "fogAll", "exploredAny", "exploredBy", "holders"]);
 const FOG_KINDS = new Set(["fog", "label", "stamp", "trap"]);
 
 /**
@@ -207,7 +207,8 @@ class Projector {
       const kind = key.slice(0, key.indexOf(":"));
       if (SCENE_KINDS.has(kind)) out.set(key, this.#shared(of.scene, key, own(key)));
       else if (kind === "sight") out.set(key, this.#shared(of.sight, key, own(key)));
-      else if (kind === "fog") out.set(key, this.#shared(of.fog, key, own(key)));
+      // A chunk holds what its fog class holds (docs/design-v1-map-discovery.md 5.6), a holder's own sight and fog among them.
+      else if (kind === "fog" || kind === "chunk") out.set(key, this.#shared(of.fog, key, own(key)));
       else if (FOG_KINDS.has(kind)) out.set(key, this.#shared(of.fog, key, () => this.#fogged(conn, of.fog, key)));
       else out.set(key, own(key)());
     }

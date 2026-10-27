@@ -153,7 +153,9 @@ describe("exportContent", () => {
       const projected = projectState(state, P1, { sceneId: null });
       const player = content(state, "player");
       const byKey = (chunks: readonly BuildChunk[]) => Object.fromEntries(chunks.map((c) => [`${c.cx},${c.cy}`, c]));
-      assert.deepEqual(byKey(player.chunks), byKey(Object.values(projected.buildChunks)));
+      // With fog on a player's client holds only the ground they discovered (docs/design-v1-map-discovery.md 5.2), which the
+      // export's player view is to take from the server (section 4), so only the chunks of a scene without fog compare here.
+      if (!fogEnabled) assert.deepEqual(byKey(player.chunks), byKey(Object.values(projected.buildChunks)));
       assert.deepEqual(sortedLabels(player.labels), sortedLabels(Object.values(projected.labels)));
     }
   });

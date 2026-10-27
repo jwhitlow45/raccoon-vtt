@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { keys, readEntity } from "./keys.ts";
-import type { Drawing, Effect, FogTile, FreeWall, LogEvent, RoomState, Stamp, Token, Viewer } from "./model.ts";
+import type { Drawing, Effect, FogTile, FreeWall, LogEvent, PlayerChunk, RoomState, Stamp, Token, Viewer } from "./model.ts";
 import type { Op } from "./protocol.ts";
 import {
   allKeys,
@@ -343,7 +343,11 @@ function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, labe
         const y = Number(ys);
         const automatic = autoWallBetween(rule, painted(x, y), side === "n" ? painted(x, y - 1) : painted(x - 1, y));
         const shown: unknown = p.buildChunks[`${sceneId}:${c.cx},${c.cy}`]?.edges[key];
-        assert.deepEqual(shown, automatic ? undefined : { kind: "wall" }, `${label}: hidden door ${key} under "${rule}"`);
+        // With fog on players hold an edge only where they hold a cell beside it, and an automatic wall reaches them as one (docs/design-v1-map-discovery.md 5.2).
+        const sc: RoomState["scenes"][string] = state.scenes[sceneId]!;
+        const heldCell = (cx: number, cy: number): boolean => cx >= 0 && cy >= 0 && cx < sc.bounds.w && cy < sc.bounds.h && !isCellFullyFogged(fog, sceneId, { x: cx, y: cy });
+        const edgeHeld: boolean = !sc.fogEnabled || heldCell(x, y) || (side === "n" ? heldCell(x, y - 1) : heldCell(x - 1, y));
+        assert.deepEqual(shown, edgeHeld && !automatic ? { kind: "wall" } : undefined, `${label}: hidden door ${key} under "${rule}"`);
       }
     }
   }
@@ -1167,6 +1171,8 @@ describe("specific rules", () => {
     const hidden = { kind: "door", state: "closed", secret: true, discovered: false } as const;
     const locked = { kind: "door", state: "locked", secret: false, discovered: false } as const;
     let state = setup();
+    // The hall is all held, so every edge of it reaches players (docs/design-v1-map-discovery.md 5.2).
+    reveal(state, "s1", { x: 0, y: 0, w: 16, h: 16 });
     // A hall 2..9 by 2..5 with a drawn wall run across it at x = 6.
     state = apply(state, { t: "build.rect", sceneId: "s1", terrain: "stone", x: 2, y: 2, w: 8, h: 4 });
     state = apply(state, { t: "build.edge", sceneId: "s1", edges: [{ key: "6,2,w", feature: { kind: "wall" } }, { key: "6,4,w", feature: { kind: "wall" } }] });
@@ -1188,17 +1194,23 @@ describe("specific rules", () => {
     // Placing a hidden door on an automatic wall changes no chunk a player receives.
     const onlyAuto = apply(state, { t: "build.edge", sceneId: "s1", edges: [{ key: "4,2,n", feature: hidden }] });
     assert.equal(stableStringify(projectState(onlyAuto, P1, { sceneId: "s1" }).buildChunks), stableStringify(projectState(state, P1, { sceneId: "s1" }).buildChunks));
-    // A chunk that holds nothing but such a door is withheld, like a chunk with nothing in it.
-    const border = apply(apply(setup(), { t: "build.rect", sceneId: "s1", terrain: "stone", x: 2, y: 14, w: 3, h: 2 }), {
-      t: "build.edge",
-      sceneId: "s1",
-      edges: [{ key: "3,16,n", feature: hidden }],
-    });
+    // The chunk past a room's south side carries its automatic walls (docs/design-v1-map-discovery.md decision 14), and a
+    // door hidden on one of them reads as that wall: the chunk is the same bytes with the door or without it.
+    const held = () => {
+      const s = setup();
+      reveal(s, "s1", { x: 0, y: 0, w: 16, h: 20 });
+      return s;
+    };
+    const room2 = apply(held(), { t: "build.rect", sceneId: "s1", terrain: "stone", x: 2, y: 14, w: 3, h: 2 });
+    const border = apply(room2, { t: "build.edge", sceneId: "s1", edges: [{ key: "3,16,n", feature: hidden }] });
     assert.ok(border.buildChunks["s1:0,1"]);
-    assert.equal(projectState(border, P1, { sceneId: "s1" }).buildChunks["s1:0,1"], undefined);
+    const past = projectState(border, P1, { sceneId: "s1" }).buildChunks["s1:0,1"] as PlayerChunk | undefined;
+    assert.deepEqual(past, projectState(room2, P1, { sceneId: "s1" }).buildChunks["s1:0,1"]);
+    assert.deepEqual(past?.edges, {});
+    assert.ok(past?.auto);
     // Floor painted in the chunk above, across the border, makes the door a wall between two floors. That
     // changes the chunk below for players though the op never touched it, so the fan-out re-projects it.
-    const below = apply(setup(), { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["3,16"] });
+    const below = apply(held(), { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["3,16"] });
     const door = apply(below, { t: "build.edge", sceneId: "s1", edges: [{ key: "3,16,n", feature: hidden }] });
     assert.deepEqual(projectState(door, P1, { sceneId: "s1" }).buildChunks["s1:0,1"]!.edges, {});
     const r = applyOp(door, { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["3,15"] }, DM, env(50));

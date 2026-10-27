@@ -205,10 +205,18 @@ describe("wave 4 fields", () => {
     const heights = encodeTile(new Uint8Array(TILE_BYTES).fill(10));
     const up = ".".repeat(255) + "n";
     state.buildChunks[chunkKey("s1", 1, 1)] = { sceneId: "s1", cx: 1, cy: 1, rev: 3, cells: {}, edges: {}, heights, up };
+    // Players hold the build only where their fog is lifted (docs/design-v1-map-discovery.md 5.2).
+    state.scenes.s1!.bounds = { w: 40, h: 40 };
+    reveal(state, "s1", { x: 16, y: 16, w: 16, h: 16 });
     const p = projectState(state, P1, { sceneId: "s1" });
     assert.equal(p.scenes.s1!.blockMovement, true);
     assert.deepEqual(p.scenes.s1!.vision, { on: true, light: "dark" });
-    assert.deepEqual(p.buildChunks[chunkKey("s1", 1, 1)], { sceneId: "s1", cx: 1, cy: 1, rev: 0, cells: {}, edges: {}, heights, up });
+    const known = encodeTile(new Uint8Array(32).fill(255));
+    // The stair mark paints its cell, so the scene's rule walls its north and west edges: bits 510 and 511.
+    const edges = new Uint8Array(64);
+    edges[63] = 0xc0;
+    const auto = encodeTile(edges);
+    assert.deepEqual(p.buildChunks[chunkKey("s1", 1, 1)], { sceneId: "s1", cx: 1, cy: 1, rev: 0, cells: {}, edges: {}, heights, up, known, auto, upDir: up });
   });
 
   test("a hidden secret door beside a stair mark projects by the one painted predicate, as the walls read it", () => {

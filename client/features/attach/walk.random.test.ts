@@ -444,8 +444,21 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   // more than the DM's drag, and not for a lamp the mover carries, whose area goes where the mover goes however hidden
   // (review AT-O-37).
   const ruler = measureWalk({ view: startCopy, sceneId: "s1", stops, viewer: { role: c.who.role }, everything: dm });
+  // A player's copy holds the build only where their fog is lifted (docs/design-v1-map-discovery.md 5.2): past it a drag
+  // lands at the real ground's height, which the copy the ruler started on cannot know. So a player's ruler is held to its
+  // drags where every cell about its walk is held.
+  const seen = playersSeeGround(startCopy, "s1");
+  const xs = stops.map((s) => s.x);
+  const ys = stops.map((s) => s.y);
+  let onHeld = !fog;
+  if (fog) {
+    onHeld = true;
+    for (let y = Math.max(0, Math.floor(Math.min(...ys)) - 3); y <= Math.floor(Math.max(...ys)) + 3 && onHeld; y++) {
+      for (let x = Math.max(0, Math.floor(Math.min(...xs)) - 3); x <= Math.floor(Math.max(...xs)) + 3 && onHeld; x++) if (x < c.state.scenes.s1!.bounds.w && y < c.state.scenes.s1!.bounds.h && !seen(x, y)) onHeld = false;
+    }
+  }
   if (revealed) n.revealed++;
-  else if (!dm || !fog || (!carriedGroup(c.state.tokens, c.mover).some((id) => isPartyMember(c.state, c.state.tokens[id]!)) && (!lampOn || lampOn === drawn.mover))) {
+  else if ((!dm && onHeld) || (dm && (!fog || (!carriedGroup(c.state.tokens, c.mover).some((id) => isPartyMember(c.state, c.state.tokens[id]!)) && (!lampOn || lampOn === drawn.mover))))) {
     assert.deepEqual(ruler?.legs.map((leg) => leg.ft), read, `seed ${seed} (${c.who.memberId}'s ruler for ${c.mover} through ${JSON.stringify(stops.slice(1))})`);
     n.compared++;
     if (dm && fog && lampOn === drawn.mover) n.dmFogLit++;
@@ -457,9 +470,11 @@ function rulerSeed(seed: number, opts: { lamps: boolean | "towed"; drags: boolea
   if (lampOn !== undefined && lampOn === towed) n.trailing++;
   if (partyTowed) n.partyTowed++;
   if (Object.values(c.state.tokens).some((t) => t?.attached?.kind === "drag" && t.attached.to === c.mover)) n.towed++;
-  // Shared, the DM's ruler reads on the DM's room what it reads on a player's copy that shows the creature where it starts (review AT-SOL-5).
+  // Shared, the DM's ruler reads on the DM's room what it reads on a player's copy that shows the creature where it starts
+  // (review AT-SOL-5). Under the fog a ruler reads its own device's build, which on a player's copy is only the ground they
+  // hold (docs/design-v1-map-discovery.md 6, Rulers), so the two are compared only where the copy holds the whole build.
   const copy = copyFor(c.state, P1);
-  if (!dm || !copy.tokens[c.mover]) return;
+  if (!dm || !copy.tokens[c.mover] || fog) return;
   const theirs = measureWalk({ view: copy, sceneId: "s1", stops, viewer: { role: "player" }, everything: false });
   const ours = measureWalk({ view: c.state, sceneId: "s1", stops, viewer: { role: "dm" }, everything: false });
   assert.deepEqual(theirs?.legs.map((leg) => leg.ft), ours?.legs.map((leg) => leg.ft), `seed ${seed} (the shared ruler for ${c.mover} through ${JSON.stringify(stops.slice(1))})`);
@@ -480,16 +495,18 @@ describe("a walking ruler reads each leg as the drag it stands for (reviews AT-A
     // took it for hidden in the fog, where players always see a party member (review AT-SOL-7).
     const n = noRulers();
     for (let seed = 1; seed <= 300; seed++) rulerSeed(seed, { lamps: false, drags: true, carts: false, party: "always", fog: true }, n);
-    assert.ok(n.partyTowed > 60 && n.compared > 40 && n.shared > 40, JSON.stringify(n));
+    assert.ok(n.partyTowed > 60 && n.compared > 40, JSON.stringify(n));
   });
 
   test("two walks a wider sweep found read the same shared on the DM's room as on a player's copy: a creature dragged in the fog, and one a leg drags into it", () => {
     // Seed 138: Bree drags a kobold the fog hides where the ruler starts, which a player's copy never holds, so no leg of the
     // shared ruler sees it, on either device. Seed 1162: the horse's first leg drags its goblin into the fog, so neither
     // device's next leg is cut where the goblin would be stopped.
+    // Both walk under the fog, where since map discovery a shared ruler reads each device's own build, the ground a player
+    // holds on theirs (docs/design-v1-map-discovery.md 6, Rulers), so the two are no longer held to one answer.
     const n = noRulers();
     for (const seed of [138, 1162]) rulerSeed(seed, { lamps: seed % 3 !== 0, drags: seed % 5 !== 0, carts: seed % 8 > 4 }, n);
-    assert.equal(n.shared, 2, JSON.stringify(n));
+    assert.deepEqual([n.fogged, n.shared], [2, 0], JSON.stringify(n));
   });
 
   test("the walk of seed 5678 as review round 10 drew it, whose route the search found and the drop refused, reads as its drags", () => {

@@ -90,10 +90,14 @@ function fullTrap(): Required<Trap> {
 
 describe("what a player's copy takes of each field", () => {
   test("a scene, as SCENE_FOR_PLAYERS says, for a player and a table display", () => {
-    const scene = fullScene();
+    // With fog on a player's chunks carry the automatic walls they hold, so the copy's rule reads "off" (docs/design-v1-map-discovery.md 5.2).
+    const scene = { ...fullScene(), fogEnabled: true };
     const state = room({ scenes: { s1: scene, s2: room().scenes.s2! } });
     for (const viewer of PLAYERS) holds(SCENE_FOR_PLAYERS, scene, projectEntity(keys.scene("s1"), state, viewer, { sceneId: "s1" }) as object);
     assert.equal(projectEntity(keys.scene("s1"), state, DM, { sceneId: "s1" }), scene, "the DM gets it whole");
+    // With fog off players derive the walls of the whole build themselves, by the scene's own rule.
+    const open = room({ scenes: { s1: fullScene(), s2: room().scenes.s2! } });
+    for (const viewer of PLAYERS) assert.equal((projectEntity(keys.scene("s1"), open, viewer, { sceneId: "s1" }) as Scene).autoWalls, "floor");
   });
 
   test("a chunk, as CHUNK_FOR_PLAYERS says", () => {
