@@ -134,6 +134,23 @@ describe("the map step", () => {
     });
   });
 
+  test("on a hex scene an edit out of sight is remembered by hex, and the build shows once they see it again", () => {
+    withCellVision(() => {
+      const state = fogRoom({ vision: true, scene: { gridShape: "hexRows" } });
+      state.tokens.ayla = token("ayla", { kind: "pc", ownerIds: ["p1"], x: 5, y: 5 });
+      let s = batch(state, [{ t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["4,5", "5,5", "6,5"] }]).state;
+      assert.equal(cellShown(s, 5, 5), "stone");
+      s = batch(s, [move(30, 5)]).state;
+      const edited = batch(s, [{ t: "build.paint", sceneId: "s1", terrain: "wood", cells: ["5,5", "30,20"] }]);
+      assert.equal(edited.remember.length, 1);
+      assert.deepEqual(party(edited.state)?.cells, { "5,5": "stone" }, "the hex they saw, and nothing of one they never did");
+      assert.equal(cellShown(edited.state, 5, 5), "stone");
+      const back = batch(edited.state, [move(5, 5)]);
+      assert.equal(cellShown(back.state, 5, 5), "wood");
+      assert.equal(party(back.state)?.cells?.["5,5"], undefined);
+    });
+  });
+
   test("a door a monster opens far off stays shut on their maps", () => {
     withCellVision(() => {
       const left = leftCrypt();
