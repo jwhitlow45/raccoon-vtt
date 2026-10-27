@@ -1,17 +1,21 @@
 import { memo, useMemo } from "react";
 import { Circle, Group, Line } from "react-konva";
 import type { AreaTemplate, DiagonalRule, RoomState, Token } from "#shared/model.ts";
-import { PREVIEW_SAMPLES, type AreaContext, type AreaTemplateInput } from "#shared/rules/aoe.ts";
+import { PREVIEW_SAMPLES, type AreaContext, type AreaTemplateInput, type CoverageResult } from "#shared/rules/aoe.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 import { Lift, MarkPill } from "../../canvas/IsoParts.tsx";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
+import type { FogView } from "../../canvas/relief/fogView.ts";
+import { useViewerFog } from "../../canvas/viewerFog.ts";
 import { theme } from "../../lib/theme.ts";
 import type { AoePreview } from "../../state/types.ts";
 import type { LayerProps } from "../layers.ts";
 import { formatFeet } from "../measure/ruler.ts";
-import { cachedCoverage, caughtTokens, contextFrom } from "./coverage.ts";
+import { cachedCoverage, caughtTokens, contextFrom, shadingClip } from "./coverage.ts";
 import { OutlineShape, Shading, TokenRing } from "./draw.tsx";
+import { Clipped } from "./TemplateLayer.tsx";
 import { areaGrips, areaOutline, draftTemplate, frameTemplate, handlePoint, liveOrigin, outlineTop, usesFrom } from "./placement.ts";
 import { canEdit, HANDLE_GAP_PX, samplesNow, useAreaScope } from "./store.ts";
 import { useLiveTokens } from "./useLiveTokens.ts";
@@ -31,6 +35,11 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  * In Isometric an area being aimed draws in the drag layer on the ground,
  * lifted to the drawn height at its origin, its pills standing
  * (docs/design-v1-isometric-view.md 5.3).
+ *
+ * Both views draw it above a player's fog, and its shading is cut by every
+ * wall this device holds, those under the fog too, so the shading shows
+ * only on the sub-cells the player's fog reveals (coverage.ts
+ * shadingClip). Its outline and grips read no wall and draw whole.
  */
 
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
@@ -56,6 +65,7 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   const role = useTreeShownView((s) => s.you?.role ?? "player");
   const youId = useTreeShownView((s) => s.you?.memberId ?? "");
   const casts = useTreeShownView((s) => s.view?.casts ?? EMPTY_CASTS);
+  const fog = useViewerFog(props);
 
   const fine = useMemo(() => (settings ? contextFrom({ tokens, buildChunks, settings }, scene) : null), [tokens, buildChunks, settings, scene]);
   const coarse = useMemo(
@@ -83,9 +93,9 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   return (
     <Group listening={false}>
       {remote.map(([key, a]) => (
-        <RemotePreview key={key} preview={a} ctx={coarse} scale={scale} color={members?.[a.from]?.color ?? theme.color.crest} name={members?.[a.from]?.name} />
+        <RemotePreview key={key} preview={a} ctx={coarse} fog={fog} scale={scale} color={members?.[a.from]?.color ?? theme.color.crest} name={members?.[a.from]?.name} />
       ))}
-      {active ? <ActiveArea {...active} ctx={ctx} scale={scale} sceneId={scene.id} tokens={tokens} diagonal={settings.diagonal} /> : null}
+      {active ? <ActiveArea {...active} ctx={ctx} fog={fog} scale={scale} sceneId={scene.id} tokens={tokens} diagonal={settings.diagonal} /> : null}
     </Group>
   );
 });
@@ -98,6 +108,7 @@ function ActiveArea(props: {
   pointShape: boolean;
   editable: boolean;
   ctx: AreaContext;
+  fog: FogView;
   scale: number;
   sceneId: string;
   tokens: Record<string, Token>;
@@ -121,7 +132,7 @@ function ActiveArea(props: {
   return (
     <>
       <Lift z={z}>
-        {props.shade ? <Shading cov={cachedCoverage(t, ctx)} grid={ctx.grid} color={color} opacity={0.3} /> : null}
+        {props.shade ? <ShadingAboveFog cov={cachedCoverage(t, ctx)} grid={ctx.grid} fog={props.fog} color={color} opacity={0.3} /> : null}
         {outline ? <OutlineShape outline={outline} color={theme.color.textHalo} widthPx={5} opacity={0.5} /> : null}
         {outline ? <OutlineShape outline={outline} color={color} widthPx={2.5} /> : null}
         {caught.map((id) => {
@@ -143,7 +154,7 @@ function ActiveArea(props: {
   );
 }
 
-function RemotePreview(props: { preview: AoePreview; ctx: AreaContext; scale: number; color: string; name?: string }) {
+function RemotePreview(props: { preview: AoePreview; ctx: AreaContext; fog: FogView; scale: number; color: string; name?: string }) {
   const { preview, ctx, scale, color } = props;
   const t = frameTemplate(preview);
   const outline = areaOutline(t, ctx);
@@ -153,10 +164,17 @@ function RemotePreview(props: { preview: AoePreview; ctx: AreaContext; scale: nu
   return (
     <>
       <Lift z={z}>
-        <Shading cov={cachedCoverage(t, ctx)} grid={ctx.grid} color={color} opacity={0.18} />
+        <ShadingAboveFog cov={cachedCoverage(t, ctx)} grid={ctx.grid} fog={props.fog} color={color} opacity={0.18} />
         {outline ? <OutlineShape outline={outline} color={color} widthPx={2} dash={[8, 5]} /> : null}
       </Lift>
       {props.name && outline ? <MarkPill {...outlineTop(outline)} z={z} scale={scale} name={props.name} size="map" color={color} small above /> : null}
     </>
   );
+}
+
+/** An aimed area's shading, shown only on the sub-cells this viewer's fog reveals. */
+function ShadingAboveFog(props: { cov: CoverageResult; grid: Grid; fog: FogView; color: string; opacity: number }) {
+  const clip = shadingClip(props.fog, props.cov, props.grid);
+  const shading = <Shading cov={props.cov} grid={props.grid} color={props.color} opacity={props.opacity} />;
+  return clip ? <Clipped rects={clip}>{shading}</Clipped> : shading;
 }
