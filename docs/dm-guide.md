@@ -150,22 +150,24 @@ Moving the players moves their view, not their tokens. Once they arrive, place t
 
 Under **New scene**, pick the kind of scene you want:
 
-- **Battle mat**: a blank grid with a background color. Set **Squares across** and **Squares down** (30 × 20 by default, up to 200 each). Fog starts off.
-- **Map image**: pick an image (JPEG, PNG, WebP, GIF or AVIF, up to 32 MB) and press **Upload and create**. If you leave the name blank, the scene takes its name from the file. Fog starts on, and the scene is sized to the whole squares the image covers. To reuse an image already in the room, choose it under **Or use a map already in this room** instead, or press **From starter packs** to start from one of the maps that come with the app (see [Starter art](#starter-art)).
-- **Builder**: an empty 40 × 30 scene that opens the map builder straight away. Fog starts on.
+- **Battle mat**: a blank grid with a background color. Set **Squares across** and **Squares down** (30 × 20 by default, up to 200 each).
+- **Map image**: pick an image (JPEG, PNG, WebP, GIF or AVIF, up to 32 MB) and press **Upload and create**. If you leave the name blank, the scene takes its name from the file. The scene is sized to the whole squares the image covers. To reuse an image already in the room, choose it under **Or use a map already in this room** instead, or press **From starter packs** to start from one of the maps that come with the app (see [Starter art](#starter-art)).
+- **Builder**: an empty 40 × 30 scene that opens the map builder straight away.
 - **From a Universal VTT file**: see [Map phases, imports and exports](#map-phases-imports-and-exports).
+
+Under the name, **Players see** asks what the players get of the new scene: **Explore**, **Reveal by hand** or **Everything** (see [Light and party vision](#light-and-party-vision) for what each one means). It starts on your room's choice for new scenes, so most of the time you leave it as it is. The fourth option, **Like** followed by the name of the scene on your screen, copies that scene's setup instead: its fog, its party vision with the light and Sight, and whether walls stop players' moves. The line under it says what it will copy, such as "Explore, Dark, Per player, players' moves blocked". The new scene still gets the automatic walls that suit its kind, so a map image keeps walls around floor only, whatever the scene you copy uses.
 
 A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, for example, and the scene comes out 30 by 20 squares. Without a size in the name, the app guesses about 30 squares along the image's long side and opens **Line up grid** so you can correct the guess.
 
-![A new Map image scene with its file picked, before Upload and create.](dm-guide/scenes-new-map.webp)
+![A new Map image scene named Cave, with its file picked and Players see on Reveal by hand, before Upload and create.](dm-guide/scenes-new-map.webp)
 
 ### This scene
 
 Below the scene list (**All scenes**) and **New scene**, the panel shows the settings of the scene on your screen, in these sections:
 
-- **This scene**: the **Scene name** (players see it), the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), the **Fog** switch, the **Starting view**, the **Suggested view**, **Size in squares** and the **Background**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone. **Suggested view** is **Top-down** or **Isometric**: see [The isometric view](#the-isometric-view).
+- **This scene**: the **Scene name** (players see it), the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), the **Starting view**, the **Suggested view**, **Size in squares** and the **Background**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone. **Suggested view** is **Top-down** or **Isometric**: see [The isometric view](#the-isometric-view).
 - **Map phases**: other images of the same map. See [Map phases, imports and exports](#map-phases-imports-and-exports).
-- **Vision**: **Party vision** and **Light**. See [Light and party vision](#light-and-party-vision).
+- **What players see**: **Players see**, **Light** and **Sight**, the fog and party vision switches folded under them, and **Use these settings on other scenes…**. See [Light and party vision](#light-and-party-vision).
 - **Grid**: **Grid lines**, **Grid color**, **Opacity** and **Line width**, plus, on a map image, **Line up the grid** and **Or count the squares**.
 - **Movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player's token walks around walls, closed doors and ledges the party has seen, and stops only where there is no way around. Your own moves are never stopped. See [When walls stop a move](#when-walls-stop-a-move).
 - **Map builder**: **Open the builder**, **Clear the build** and **Automatic walls**.
@@ -367,12 +369,22 @@ Whenever one of these makes a walk cost more, the label on the drag says what it
 
 ## Light and party vision
 
-There are two ways to decide what your players see. With fog alone, you reveal the map by hand, and players see whatever you uncover. **Party vision** instead works out what the party can actually see, from each creature's senses, the walls and the light. Normally the party shares that sight: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. If you would rather each player see only through their own character's eyes, you can choose that too (see [Sight for each player](#sight-for-each-player)). You turn party vision on in the scene's **Vision** settings, which hold four things:
+Each scene decides what your players see of it with one choice, **Players see**, at the top of the scene's **What players see** settings:
 
-- **Party vision**: when it is on, players see only what the party can see together. Ground the party has explored stays on the players' map, dimmed and without creatures, as the party last saw it, and ground nobody has seen stays fogged (see [What players' maps hold](#what-players-maps-hold)). Turning party vision on turns fog on too.
+- **Explore**: players see what their characters see. Ground they have not seen stays dark, walls and all, and what they explored stays as they last saw it (see [What players' maps hold](#what-players-maps-hold)). This is **party vision**: the app works out what the party can actually see, from each creature's senses, the walls and the light.
+- **Reveal by hand**: players see what you reveal with the fog tool, and nothing else. See [Fog](#fog).
+- **Everything**: players see the whole scene, with no fog at all.
+
+Normally the party shares its sight: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. If you would rather each player see only through their own character's eyes, you can choose that too (see [Sight for each player](#sight-for-each-player)). Under Players see, the same settings hold:
+
+- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only on Explore.
 - **Sight**: **Whole party**, the default, where the party shares one view and one map, or **Per player**, where each player sees and remembers for themselves.
-- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on.
 - **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
+- **Fog and party vision**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
+
+**Leaving Explore.** On Explore, players keep a map of what they explored. If you switch a scene they have explored to Reveal by hand or Everything, or turn off fog or party vision in the fold, the app asks first: "Players will see the build as it is now on everything they explored. Undo does not bring back what they remembered." Press **Change** to go ahead, or **Cancel** (or Escape) to leave things as they are. Switching **Sight** from **Per player** back to **Whole party** asks the same way when players have maps of their own there, since each player's map then joins the party's for good.
+
+**A map image with no walls.** Party vision looks through walls the map doesn't have, so on a plain map image Explore would show players the whole picture the moment a character looks around. When you choose Explore on a map image with nothing yet that blocks sight, the settings warn you: "This map has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand." When you move the players to a scene with party vision, the app reminds you of the same thing if that scene is a map image, since it can't check another scene's walls from where you are.
 
 Darkvision, Blindsight and Truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
 
@@ -383,17 +395,33 @@ Darkvision, Blindsight and Truesight come from each creature's senses (from its 
 
 To check what your players see, use **View as a player** or **Party sight** in the [DM panel](#dm-panel). Your own map always stays fully lit, so you never lose track of anything in the dark.
 
-![The Vision settings of the crypt: Party vision on, Light set to Dark, and the party creatures who lend their sight.](dm-guide/vision-settings.webp)
+![What players see for the arena: Players see on Explore, Light set to Dark, Sight on Whole party, the lantern bearer lending the party its sight, the Fog and party vision fold closed, and Use these settings on other scenes.](dm-guide/vision-settings.webp)
+
+### What players see on new scenes
+
+Your room has a choice of its own for new scenes, so you don't have to set up each one. In the Menu, open **Room settings** and find **New scenes** at the end: **Players see on new scenes** is **Explore**, **Reveal by hand** or **Everything**, and every new scene starts on it. A new room starts on Explore. A room from before this setting shows **As before** until you pick one, which keeps the old starts: maps and builder scenes under fog, battle mats without. Once you pick, As before goes away.
+
+Two exceptions keep things sensible. A map image or a starter map starts on Reveal by hand even when the room says Explore, because a fresh image has no walls yet, and the form says so. And the battle mat a new room comes with starts on Everything, so players who join see the mat rather than darkness.
+
+You can still pick anything for one scene in the new scene form, including **Like** the scene on your screen.
+
+### Using one scene's settings on others
+
+When you've set up one scene the way you like it, you can give other scenes the same setup in one step. At the end of What players see, press **Use these settings on other scenes…**. A sheet opens, titled for your scene ("Use Crypt's settings on…"), listing every other scene by folder. It copies **Players see**, **Light** and **Sight**. Movement and walls stay as they are on each scene.
+
+Each scene's line says what players see there now, and what the copy would do there: "The players are here. They see the change at once." on the players' scene, "Players' remembered maps here reset." where a scene leaves Explore, and "Each player's own map here joins the party's." where it leaves Per player. Tick the scenes you want, or press **Select all**, then **Copy to 3 scenes**. The sheet says "Copied to 3 scenes." when it's done, or which scenes refused and why. One **Undo** puts every scene's settings back, though not the maps players remembered.
+
+![Use Cave's settings on…: Battle mat, Arena and Crypt ticked, each line saying what the copy does there, and Copy to 3 scenes.](dm-guide/copy-settings.webp)
 
 ### Sight for each player
 
-With **Sight** set to **Whole party**, the party shares its eyes and its map. Some tables want more mystery than that: the rogue who slips ahead should be the only one who sees the guard post, and it's up to her player what to tell the others. For that, set **Sight** to **Per player**. The row sits right under **Party vision** and shows whenever party vision is on.
+With **Sight** set to **Whole party**, the party shares its eyes and its map. Some tables want more mystery than that: the rogue who slips ahead should be the only one who sees the guard post, and it's up to her player what to tell the others. For that, set **Sight** to **Per player**. The row sits under **Light** and shows whenever party vision is on.
 
 On a per-player scene, each player sees what their own creatures see: their character, its companions, and any creature you've given them to play. On top of that, every player sees through the creatures you've marked **Shares sight with the party**, such as a hireling carrying a lantern. Everything else stays dark for them, even where another player's character is looking. The party's own characters are still visible to everyone, so nobody loses track of their friends. But a goblin standing in Thorn's torchlight shows up only for Thorn's player, and so does its row in the Initiative order. While it acts, the other players see "Another creature's turn".
 
 A creature that shares sight sees by any light, as every creature does, a character's torch included. So if your lantern-carrying hireling stands in the same hall as Thorn, it sees the goblin in Thorn's torchlight too, and so does every player. Keep such a creature somewhere of its own when you want each player's view to stay their own.
 
-![Sight set to Per player in the chapel ruins' Vision settings: Ana and Ben ticked under Who sees for themselves and Cy not, the line on each player's map, and Thorn lending his sight to Ana. On the map, the goblin and the Old altar lie in Thorn's torchlight, and Pip holds a candle in the west room.](dm-guide/vision-per-player.webp)
+![Sight set to Per player in the chapel ruins' What players see settings: Ana and Ben ticked under Who sees for themselves and Cy not, and Thorn lending his sight to Ana. On the map, the goblin and the Old altar lie in Thorn's torchlight, and Pip holds a candle in the west room.](dm-guide/vision-per-player.webp)
 
 **Each player keeps their own map.** The ground a player's creatures have seen stays on that player's map, dimmed, just as explored ground does for the whole party, and ground seen by a creature that shares sight goes on everyone's map. So when Thorn explores the chapel, the ground stays unexplored on Bree's player's map, and a label or pin you put there reaches only the players whose maps show it. Your fog tools still work on everyone's map at once: a reveal shows ground to every player, **Add fog** makes every player forget the ground under it, and **Fog all** wipes every player's memory of the scene.
 
@@ -420,7 +448,7 @@ Under the list, **Who lends sight** shows each creature with its senses and ligh
 - **Doors open for everyone, but each player sees it happen only where they can look.** A door is open or closed for everyone at once, and it stops everyone's moves the same way. When Thorn opens a door, the players who can see it watch it swing open. Every other player's map keeps the door as they last saw it, or shows nothing there at all if they never explored that wall, until one of their creatures sees it. Secret doors work the same way: once you mark one found, a player sees a door there the next time their creatures look at that wall.
 - **Areas and light pass through doors**, as they always do. If an aura reaches through a doorway, or a torch shines through it, a player who can see the far side can tell that the door is open. So can a player who watches a party member walk through it.
 - **The room counts its changes.** When one player's creatures see new ground, the room records it as a change of its own. A player who watches the room's change numbers in the browser's developer tools could tell that someone's map just grew. It never says whose map, or where, and your own work out of the players' sight already gives the same small signal.
-- **The rules everyone shares use only what everyone can see.** A creature that only some players can see counts as unseen for the rules that must give every player the same answer. A horse you control that a character rides shares no turn with its rider unless every player can see it, a trap your monster sets off goes off without the players noticing, and the corners of its path stay hidden. When that matters, make the creature always visible, or mark it to share its sight. The Vision settings point it out for a mount.
+- **The rules everyone shares use only what everyone can see.** A creature that only some players can see counts as unseen for the rules that must give every player the same answer. A horse you control that a character rides shares no turn with its rider unless every player can see it, a trap your monster sets off goes off without the players noticing, and the corners of its path stay hidden. When that matters, make the creature always visible, or mark it to share its sight. What players see points it out for a mount.
 - **Paths follow each player's own map.** When a player drags their own token, the path finds its way over the ground that player remembers, and past creatures only they can see. Other players see the corners of that path only where they know the ground too. A trap it sets off goes off for everyone, as it does whenever a party member walks into one.
 - **Places go by who came first.** Who holds the 6 places depends on the order in which players first owned a creature that could see on the scene, and then on your ticks, never on what anyone has explored. A player who doesn't get a place learns only that the places are taken.
 
@@ -473,14 +501,14 @@ On a scene with fog on, a player's device holds only the part of the map the par
 2. Once there are two or more phases, a row of chips switches between them with one tap. On a computer, the **Phase** menu in the top bar does the same.
 3. **Edit** lets you rename a phase, move it in the list, or remove it.
 
-A phase can also set the scene's light. Under **Vision**, **Light with each map phase** picks Bright, Dim, Dark or **Leave the light** for each phase, so switching to Night can make the scene dark. It won't turn party vision on by itself, though, and light matters only while party vision is on.
+A phase can also set the scene's light. Under **What players see**, **Light with each map phase** picks Bright, Dim, Dark or **Leave the light** for each phase, so switching to Night can make the scene dark. It won't turn party vision on by itself, though, and light matters only while party vision is on.
 
 **Universal VTT files.** If you make maps in Dungeondraft, Dungeon Alchemist or DungeonFog, you can bring in a whole map, walls, doors and lights included. Choose **From a Universal VTT file** under New scene and pick a `.dd2vtt`, `.uvtt` or `.df2vtt` file. The app reads the file and shows you what it found ("412 walls (380 on the grid, 32 free), 14 doors, 3 windows, 9 lights") before it makes anything. Then choose:
 
 - **Objects block sight and movement** (offered when the file has objects).
 - **Portals that don't block light import as** **Windows** or **Open doors**.
-- **Start under fog**.
-- **Light, for party vision**: the app suggests Bright, Dim or Dark from the file. Party vision itself stays off until you turn it on.
+- **Players see**: **Explore**, **Reveal by hand**, **Everything** or **Like** the scene on your screen, starting on your room's choice for new scenes. An imported map brings its walls, so Explore works on it from the start.
+- **Light, for party vision**: the app suggests Bright, Dim or Dark from the file and says why. Like sets it to the copied scene's light, and you can still change it.
 
 Press **Create scene** to make it, and keep the page open until the walls have been added. One undo takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls. A phone can only take files up to 40 MB, so import large maps on a computer.
 
@@ -1346,6 +1374,7 @@ Open the Menu, then **Room settings** (DM only). Each switch takes effect at onc
 - **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use Initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Initiative order players see** (**Player characters, the rest on their turn** in a new room), **Critical Hit damage** (**Roll the dice twice**) and **Turn timer** (Off).
 - **Grid and distance**: **Feet per square** (5) and **Diagonal moves**, which can be **Every square is 5 ft** (the 2024 rule, and the default), **Alternate 5 ft and 10 ft**, or **True distance**.
 - **Areas of effect**: **Which squares an area covers** (**At least half the square**, the 2024 rule) and **Which creatures an area catches** (**Any square the creature is in**).
+- **New scenes**: **Players see on new scenes** (**Explore** in a new room). See [What players see on new scenes](#what-players-see-on-new-scenes).
 
 A few of these deserve a closer look.
 
@@ -1408,7 +1437,7 @@ The party explores a crypt by torchlight, and the players should see only what t
 5. Pick **Secret door** and **Hidden**, tap an edge of the chamber's east wall, and build a small room behind it.
 6. In **Lights**, pick **Torch** and tap the hall. Place two more torches in the chamber to serve as braziers, then tap each one, rename it "Brazier" and set it **Out**. Put a **Candle** in the hidden room.
 7. With **Stamp**, place a table, barrels and a chest. Set the chest to **DM only** until the party finds it.
-8. In the scene's **Vision** settings, turn on **Party vision** and set **Light** to **Dark**.
+8. In the scene's **What players see** settings, check that **Players see** is on **Explore**, where a new room starts builder scenes, and set **Light** to **Dark**.
 9. Place the party in the hall. Thorn has Darkvision out to 60 ft from his senses. To give Mara a torch, tap her token, press **Light**, and pick **Torch**.
 10. Place skeletons in the chamber. Under party vision they appear to players only when a character can see them, so they don't need to be hidden.
 
