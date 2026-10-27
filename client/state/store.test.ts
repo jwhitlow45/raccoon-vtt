@@ -1131,7 +1131,7 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     const s = setup(room());
     s.connect();
     const rect = (y: number): OpOf<"build.rect"> => ({ t: "build.rect", sceneId: "s1", terrain: "stone", x: 0, y, w: 80, h: 25 });
-    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)] }, { group: "g1" })!;
+    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g1" })!;
     const a = s.room.dispatch(rect(0), { group: "g1" })!;
     const b = s.room.dispatch(rect(25), { group: "g1" })!;
     s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [ask, a, b].map((n) => ({ n, code: "forget" as const, message: FORGET_ASK })) });
@@ -1140,7 +1140,7 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     assert.deepEqual(s.state().pending.map((p) => [p.op.t, (p.op as { forget?: true }).forget, p.group]), [["build.rect", true, "g1"], ["build.rect", true, "g1"]]);
     const no = setup(room());
     no.connect();
-    const ask2 = no.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)] }, { group: "g2" })!;
+    const ask2 = no.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [rect(0), rect(25)], part: 0 }, { group: "g2" })!;
     const c = no.room.dispatch(rect(0), { group: "g2" })!;
     no.room.applyEv({ t: "ev", seq: no.state().seq + 1, changes: [], rejects: [ask2, c].map((n) => ({ n, code: "forget" as const, message: FORGET_ASK })) });
     no.room.ui.answerForget(false);
@@ -1151,7 +1151,7 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     const s = setup(room());
     s.connect();
     const paint = (x: number): OpOf<"build.paint"> => ({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: [`${x},0`] });
-    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)] }, { group: "g1" })!;
+    const ask = s.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)], part: 0 }, { group: "g1" })!;
     const a = s.room.dispatch(paint(1), { group: "g1" })!;
     const b = s.room.dispatch(paint(2), { group: "g1" })!;
     // The ask fits, but the room changed before the last band came: only it is asked about.
@@ -1161,14 +1161,14 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     // The ask taken and every band asked about after it: nothing of the gesture changed the build, so a no sends nothing.
     const only = setup(room());
     only.connect();
-    const ask2 = only.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)] }, { group: "g3" })!;
+    const ask2 = only.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)], part: 0 }, { group: "g3" })!;
     const c = only.room.dispatch(paint(1), { group: "g3" })!;
     only.room.applyEv({ t: "ev", seq: only.state().seq + 1, changes: [], acks: [ask2], rejects: [{ n: c, code: "forget", message: FORGET_ASK }] });
     only.room.ui.answerForget(false);
     assert.equal(only.state().pending.length, 0);
     const k = setup(room());
     k.connect();
-    const refused = k.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)] }, { group: "g2" })!;
+    const refused = k.room.dispatch({ t: "build.ask", sceneId: "s1", ops: [paint(1), paint(2)], part: 0 }, { group: "g2" })!;
     k.room.applyEv({ t: "ev", seq: k.state().seq + 1, changes: [], rejects: [{ n: refused, code: "invalid", message: "not on hexes" }] });
     assert.equal(k.state().toasts.length, 0);
   });

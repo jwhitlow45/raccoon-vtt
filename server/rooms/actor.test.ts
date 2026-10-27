@@ -21,11 +21,11 @@ import { sceneWalls, splitCheck, splitRefusal } from "#shared/rules/walls.ts";
 import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import { MOVE_PLAYERS_FIRST } from "#shared/permissions.ts";
 import type { Actor, FreeWall, Member, RoomState, Trap } from "#shared/model.ts";
-import { FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
+import { ASK_LOST, FORGET_ASK, type Op, type OpOf, type ServerMessage } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor as testActor, character as testCharacter, companionBlock as testBlock, entry as testEntry, template as testTemplate, token as testToken } from "#shared/testutil.ts";
-import { FORGET_STALE, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
+import { ASK_CHAIN_MS, FORGET_STALE, RoomActor, RoomReplayFailed, SysOpRefused, type ActorDeps } from "./actor.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
 import { mapStepOps } from "./remember.ts";
 import { layerHeld } from "#shared/reducer/memory.ts";
@@ -3121,7 +3121,7 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       // A gesture that fits: its ask is taken and changes nothing, and its ops apply.
       const small: OpOf<"build.paint">[] = [{ t: "build.paint", sceneId, terrain: "grass", cells: ["2,2"] }, { t: "build.paint", sceneId, terrain: "grass", cells: ["3,2"] }];
       const before = actor.committed.state;
-      await actor.op(table.conn, 1, { t: "build.ask", sceneId, ops: small }, "g0");
+      await actor.op(table.conn, 1, { t: "build.ask", sceneId, ops: small, part: 0 }, "g0");
       const taken = await answerTo(table.sent, 1);
       assert.ok(taken !== "stuck" && taken.acks?.includes(1) && taken.changes.length === 0, JSON.stringify(taken));
       assert.equal(actor.committed.state.buildChunks, before.buildChunks, "the ask applied nothing");
@@ -3132,7 +3132,7 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       const bands: OpOf<"build.rect">[] = [0, 20, 40].map((y) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y, w: 96, h: y === 40 ? 4 : 20 }));
       const cell = (y: number) => actor.committed.state.buildChunks[chunkKey(sceneId, 0, Math.floor(y / 16))]?.cells[`1,${y}`];
       // Sent as a device sends them, one after another without waiting: the ask, then its bands, all under the gesture's group.
-      await actor.op(table.conn, 4, { t: "build.ask", sceneId, ops: bands }, "g1");
+      await actor.op(table.conn, 4, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g1");
       for (const [i, band] of bands.entries()) await actor.op(table.conn, 5 + i, band, "g1");
       for (let n = 4; n <= 7; n++) {
         const answer = await answerTo(table.sent, n);
@@ -3168,14 +3168,14 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
       const bands: OpOf<"build.rect">[] = [0, 20, 40].map((y) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y, w: 96, h: y === 40 ? 4 : 20 }));
       // Each part alone fits, and the parts together do not.
-      await actor.op(table.conn, 1, { t: "build.ask", sceneId, ops: bands.slice(0, 1), more: true }, "g1");
-      await actor.op(table.conn, 2, { t: "build.ask", sceneId, ops: bands.slice(1) }, "g1");
+      await actor.op(table.conn, 1, { t: "build.ask", sceneId, ops: bands.slice(0, 1), part: 0, more: true }, "g1");
+      await actor.op(table.conn, 2, { t: "build.ask", sceneId, ops: bands.slice(1), part: 1 }, "g1");
       const first = await answerTo(table.sent, 1);
       assert.ok(first !== "stuck" && first.acks?.includes(1), "a part with more to come is taken");
       const last = await answerTo(table.sent, 2);
       assert.ok(last !== "stuck");
       assert.deepEqual(last.rejects?.find((r) => r.n === 2)?.code, "forget");
-      await actor.op(phone.conn, 1, { t: "build.ask", sceneId, ops: bands.slice(0, 1) }, "p1");
+      await actor.op(phone.conn, 1, { t: "build.ask", sceneId, ops: bands.slice(0, 1), part: 0 }, "p1");
       const theirs = await answerTo(phone.sent, 1);
       assert.ok(theirs !== "stuck");
       assert.equal(theirs.rejects?.find((r) => r.n === 1)?.code, "forbidden");
@@ -3207,6 +3207,171 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       const alone = await answerTo(table.sent, 5);
       assert.ok(alone !== "stuck" && alone.acks?.includes(5), JSON.stringify(alone));
       assert.equal(actor.committed.state.buildChunks[chunkKey(sceneId, 0, 2)]?.cells["1,41"], "wood");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  /** A DM's device on a socket of its own, under a session that outlives the room's restart. */
+  function dmDevice(actor: RoomActor, dm: Member, sessionId = uuidv7()): { conn: Connection; sent: ServerMessage[]; sessionId: string } {
+    const sent: ServerMessage[] = [];
+    const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close: () => undefined, terminate: () => undefined };
+    const conn = new Connection(socket as never, { sessionId, roomId: ROOM, memberId: dm.id, role: "dm" }, "203.0.113.9");
+    actor.attach(conn);
+    return { conn, sent, sessionId };
+  }
+
+  /** What became of op `n`: taken, or its refusal's code and words. */
+  async function outcome(sent: ServerMessage[], n: number): Promise<string> {
+    const answer = await answerTo(sent, n);
+    if (answer === "stuck") return "stuck";
+    const refused = answer.rejects?.find((r) => r.n === n);
+    return refused ? `${refused.code}: ${refused.message}` : "taken";
+  }
+
+  test("a later part of an ask that finds no earlier part is refused as lost, never read as a first: after a restart, after a refusal of the client's, and out of turn (MD4-ASTRA-5)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId } = discovery(dm, player);
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const bands: OpOf<"build.rect">[] = [0, 20, 40].map((y) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y, w: 96, h: y === 40 ? 4 : 20 }));
+    const ask = (part: number, ops: OpOf<"build.rect">[], more = false): Op => ({ t: "build.ask", sceneId, ops, part, ...(more ? { more: true as const } : {}) });
+    const lost = `invalid: ${ASK_LOST}`;
+    const first = await RoomActor.load(deps(db));
+    assert.ok(first);
+    const a = dmDevice(first, dm);
+    await first.hello(a.conn, { clientId: "c1", resumeFrom: 1 });
+    await first.op(a.conn, 1, ask(0, bands.slice(0, 1), true), "g1");
+    assert.equal(await outcome(a.sent, 1), "taken");
+    // The room restarts: its chains lived only in memory.
+    await first.shutdown({ code: 1012, snapshot: false });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const b = dmDevice(actor, dm, a.sessionId);
+      // The fake database keeps no watermarks, so the device's numbers start again on the new room.
+      await actor.hello(b.conn, { clientId: "c1", resumeFrom: 1 });
+      await actor.op(b.conn, 1, ask(1, bands.slice(1)), "g1");
+      assert.equal(await outcome(b.sent, 1), lost, "the rest of the gesture after a restart");
+      // Asked again from the start under a group of its own, the parts read on and the last answers for the whole.
+      await actor.op(b.conn, 2, ask(0, bands.slice(0, 1), true), "g2");
+      await actor.op(b.conn, 3, ask(1, bands.slice(1)), "g2");
+      assert.deepEqual([await outcome(b.sent, 2), await outcome(b.sent, 3)], ["taken", `forget: ${FORGET_ASK}`]);
+      // A refusal of any of the client's ops ends its chain.
+      await actor.op(b.conn, 4, ask(0, bands.slice(0, 1), true), "g3");
+      await actor.op(b.conn, 5, { t: "build.paint", sceneId: uuidv7(), terrain: "wood", cells: ["1,1"] }, "g3");
+      await actor.op(b.conn, 6, ask(1, bands.slice(1)), "g3");
+      assert.deepEqual([await outcome(b.sent, 4), (await outcome(b.sent, 5)) !== "taken", await outcome(b.sent, 6)], ["taken", true, lost]);
+      // A part out of turn.
+      await actor.op(b.conn, 7, ask(0, bands.slice(0, 1), true), "g4");
+      await actor.op(b.conn, 8, ask(2, bands.slice(1)), "g4");
+      assert.equal(await outcome(b.sent, 8), lost);
+      assert.equal(actor.committed.state.buildChunks[chunkKey(sceneId, 0, 0)]?.cells["1,1"], "stone", "no ask built anything");
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("no gesture's asks outlive it: two devices gone mid-gesture leave nothing, nor does another group's op or a chain left waiting (MD4-ASTRA-6, MD4-LK-6)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId } = discovery(dm, player);
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    let now = Date.now();
+    const base = deps(db);
+    const actor = await RoomActor.load({ ...base, options: { ...base.options, now: () => now } });
+    assert.ok(actor);
+    try {
+      const bands: OpOf<"build.rect">[] = [0, 20, 40].map((y) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y, w: 96, h: y === 40 ? 4 : 20 }));
+      const ask = (part: number, ops: OpOf<"build.rect">[], more = false): Op => ({ t: "build.ask", sceneId, ops, part, ...(more ? { more: true as const } : {}) });
+      const a = dmDevice(actor, dm);
+      const b = dmDevice(actor, dm);
+      await actor.hello(a.conn, { clientId: "a", resumeFrom: 1 });
+      await actor.hello(b.conn, { clientId: "b", resumeFrom: 1 });
+      const e = dmDevice(actor, dm);
+      await actor.hello(e.conn, { clientId: "e", resumeFrom: 1 });
+      // Two devices' gestures left mid-way, and a third device's gesture refused.
+      await actor.op(a.conn, 1, ask(0, bands.slice(0, 1), true), "g1");
+      await actor.op(b.conn, 1, ask(0, bands.slice(0, 1), true), "g2");
+      await actor.op(e.conn, 1, ask(0, bands.slice(0, 2), true), "g3");
+      await actor.op(e.conn, 2, ask(1, bands.slice(2)), "g3");
+      assert.deepEqual([await outcome(a.sent, 1), await outcome(b.sent, 1), await outcome(e.sent, 2)], ["taken", "taken", `forget: ${FORGET_ASK}`]);
+      assert.deepEqual(actor.askState, { asking: 2, refused: 1, reading: false });
+      for (const gone of [a, b, e]) actor.detach(gone.conn);
+      assert.deepEqual(actor.askState, { asking: 0, refused: 0, reading: false }, "nothing left of any");
+      // A part read from a turn of its own, whose socket goes while it waits there, keeps no chain either.
+      const f = dmDevice(actor, dm);
+      await actor.hello(f.conn, { clientId: "f", resumeFrom: 1 });
+      await actor.op(f.conn, 1, ask(0, bands.slice(0, 1), true), "g7");
+      assert.equal(actor.askState.reading, true, "the arrival's turn reads none of it");
+      actor.detach(f.conn);
+      for (let i = 0; i < 200 && actor.askState.reading; i++) await new Promise((r) => setTimeout(r, 5));
+      assert.equal(actor.askState.asking, 0, "a gone socket's part");
+      // The next op of another group ends a chain, and so does ASK_CHAIN_MS without its next part.
+      const c = dmDevice(actor, dm);
+      await actor.hello(c.conn, { clientId: "c", resumeFrom: 1 });
+      await actor.op(c.conn, 1, ask(0, bands.slice(0, 1), true), "g4");
+      await outcome(c.sent, 1);
+      assert.equal(actor.askState.asking, 1);
+      await actor.op(c.conn, 2, { t: "build.paint", sceneId, terrain: "grass", cells: ["2,2"] }, "g5");
+      await outcome(c.sent, 2);
+      assert.equal(actor.askState.asking, 0, "another group's op");
+      await actor.op(c.conn, 3, ask(0, bands.slice(0, 1), true), "g6");
+      await outcome(c.sent, 3);
+      now += ASK_CHAIN_MS + 1;
+      const d = dmDevice(actor, dm);
+      await actor.hello(d.conn, { clientId: "d", resumeFrom: 1 });
+      await actor.op(d.conn, 1, { t: "build.paint", sceneId, terrain: "grass", cells: ["3,2"] });
+      await outcome(d.sent, 1);
+      assert.equal(actor.askState.asking, 0, "a chain left waiting, ended by anyone's next op");
+      await actor.op(c.conn, 4, ask(1, bands.slice(1)), "g6");
+      assert.equal(await outcome(c.sent, 4), `invalid: ${ASK_LOST}`);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("an ask reads in turns that let the event loop go, its sender's later ops wait behind it, and it costs an op of rate for each op it reads (MD4-ASTRA-7)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    const { state, sceneId } = discovery(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, bounds: { w: 200, h: 200 } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const table = dmDevice(actor, dm);
+      await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
+      // 16 bands of 1,600 squares on ground the party never held, so every one is read through.
+      const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: 60 + k * 8, w: 200, h: 8 }));
+      let longest = 0;
+      let done = false;
+      let last = performance.now();
+      const tick = () => {
+        const at = performance.now();
+        longest = Math.max(longest, at - last);
+        last = at;
+        if (!done) setTimeout(tick, 0);
+      };
+      setTimeout(tick, 0);
+      last = performance.now();
+      await actor.op(table.conn, 1, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g1");
+      assert.equal(actor.askState.reading, true, "still reading after its first turn");
+      await actor.op(table.conn, 2, { t: "build.paint", sceneId, terrain: "grass", cells: ["2,2"] }, "g2");
+      const asked = await answerTo(table.sent, 1);
+      const painted = await answerTo(table.sent, 2);
+      done = true;
+      assert.ok(asked !== "stuck" && painted !== "stuck");
+      assert.ok(asked.acks?.includes(1), "the bands fit");
+      assert.ok(table.sent.indexOf(asked) <= table.sent.indexOf(painted) && (asked !== painted || asked.acks!.indexOf(1) < asked.acks!.indexOf(2)), "the paint was answered after the ask");
+      assert.ok(longest < 150, `the longest turn took ${longest.toFixed(0)} ms`);
+      // A socket that spent most of its burst is told busy for an ask of 16, though one op would go.
+      table.conn.opRate.allow(50);
+      await actor.op(table.conn, 3, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g3");
+      assert.deepEqual(table.sent.at(-1), { t: "retry", n: 3, code: "busy" });
     } finally {
       db.freeze();
       void actor.shutdown({ code: 1012, snapshot: false });

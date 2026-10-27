@@ -148,14 +148,14 @@ export class OpRate {
     return false;
   }
 
-  /** Whether this op may be processed now. */
-  allow(): boolean {
-    return this.#bucket.take(1);
+  /** Whether this op may be processed now, at `n` ops' cost: a builder's ask costs one for each op it reads. */
+  allow(n = 1): boolean {
+    return this.#bucket.take(n);
   }
 
-  /** Whether `allow()` would say yes now, without spending anything. */
-  wouldAllow(): boolean {
-    return this.#bucket.tokens >= 1;
+  /** Whether `allow(n)` would say yes now, without spending anything. */
+  wouldAllow(n = 1): boolean {
+    return this.#bucket.tokens >= n;
   }
 }
 

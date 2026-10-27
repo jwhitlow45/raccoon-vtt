@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { serializedBytes } from "#shared/limits.ts";
-import { clientOpSchema, MAX_ASK_BYTES, MAX_ASK_OPS, MAX_BUILD_CELLS, type ClientOp } from "#shared/protocol.ts";
+import { clientOpSchema, MAX_ASK_BYTES, MAX_ASK_OPS, MAX_ASK_PARTS, MAX_BUILD_CELLS, type ClientOp } from "#shared/protocol.ts";
 import { askOps, dispatchBuild } from "./ask.ts";
 import { rectOps } from "./cells.ts";
 
@@ -30,7 +30,7 @@ describe("a builder gesture asks before it applies", () => {
     assert.ok(bands.length > 1, "the rectangle goes as bands");
     const r = recorder();
     const sent = dispatchBuild(r.actions, explore, bands);
-    assert.deepEqual(r.sent[0], { op: { t: "build.ask", sceneId: "s1", ops: bands }, group: "g1" });
+    assert.deepEqual(r.sent[0], { op: { t: "build.ask", sceneId: "s1", ops: bands, part: 0 }, group: "g1" });
     assert.deepEqual(r.sent.slice(1), bands.map((op) => ({ op, group: "g1" })));
     assert.deepEqual(sent, bands.map((_, i) => i + 2), "the bands' numbers, not the ask's");
   });
@@ -48,7 +48,7 @@ describe("a builder gesture asks before it applies", () => {
     }
   });
 
-  test("asks carry the gesture's own builder ops on the scene, without a yes, and split past an ask's ops or bytes, all but the last saying more", () => {
+  test("asks carry the gesture's own builder ops on the scene, without a yes, split past an ask's ops or bytes, numbered, all but the last saying more", () => {
     const paint = (k: number): ClientOp => ({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: Array.from({ length: MAX_BUILD_CELLS }, (_, i) => `${i % 100},${k * 20 + Math.floor(i / 100)}`), forget: true });
     const ops = [paint(0), paint(1), paint(2), paint(3), { t: "build.label", sceneId: "s1", labelId: "l1", label: null } as ClientOp];
     const asks = askOps("s1", ops);
@@ -56,11 +56,16 @@ describe("a builder gesture asks before it applies", () => {
     assert.deepEqual(asks.flatMap((a) => a.ops).map((o) => ("cells" in o ? o.cells[0] : null)), [0, 1, 2, 3].map((k) => `0,${k * 20}`), "every paint, in order, and no label");
     assert.ok(asks.flatMap((a) => a.ops).every((o) => !("forget" in o)));
     assert.deepEqual(asks.map((a) => a.more === true), [...asks.slice(1).map(() => true), false]);
+    assert.deepEqual(asks.map((a) => a.part), asks.map((_, i) => i));
     assert.ok(asks.every((a) => serializedBytes(a) <= MAX_ASK_BYTES && a.ops.length <= MAX_ASK_OPS));
     assert.ok(asks.every((a) => clientOpSchema.safeParse(a).success), "each ask is an op the server takes");
-    assert.equal(clientOpSchema.safeParse({ t: "build.ask", sceneId: "s1", ops: [ops[4]] }).success, false, "an ask carries builder ops only");
+    assert.equal(clientOpSchema.safeParse({ t: "build.ask", sceneId: "s1", ops: [ops[4]], part: 0 }).success, false, "an ask carries builder ops only");
     const many = Array.from({ length: MAX_ASK_OPS + 1 }, (_, k): ClientOp => ({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: [`${k},0`] }));
     assert.deepEqual(askOps("s1", many).map((a) => a.ops.length), [MAX_ASK_OPS, 1]);
     assert.deepEqual(askOps("s2", many), [], "ops on another scene are not this ask's");
+    // Past the parts one gesture may ask in, it asks none, and goes as a stroke does.
+    const most = Array.from({ length: MAX_ASK_OPS * MAX_ASK_PARTS + 1 }, (_, k): ClientOp => ({ t: "build.paint", sceneId: "s1", terrain: "stone", cells: [`${k % 200},${Math.floor(k / 200)}`] }));
+    assert.deepEqual(askOps("s1", most), []);
+    assert.equal(askOps("s1", most.slice(1)).length, MAX_ASK_PARTS);
   });
 });

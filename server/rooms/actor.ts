@@ -11,7 +11,7 @@ import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
 import { inSightOfNonOwners, projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
-import { clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
+import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
@@ -157,6 +157,27 @@ export class ActorClosedError extends Error {
 }
 
 type Watermark = { sessionId: string; clientId: string; staged: number; committed: number };
+
+/**
+ * A client's gesture whose asks are still coming (#answerAsk): its undo
+ * group, the part it waits for next, when its last part came, the room as
+ * its ops so far would leave it, and each layer's estimate with their
+ * growth.
+ */
+type AskChain = { group: string; next: number; at: number; state: RoomState; totals: Map<string, number>; over: boolean };
+
+/** An ask being read (#readAsk): the op and where its sender stands, its chain, the next of its ops to read, and the context they read in. */
+type AskRead = { key: ClientKey; wm: Watermark; n: number; op: OpOf<"build.ask">; group: string; viewer: Viewer; chain: AskChain; next: number; ctx: { seq: number; at: string } };
+
+/** How long a gesture's asks wait for their next part before the server lets them go (MD4-ASTRA-6): the device sends every part at once. */
+export const ASK_CHAIN_MS = 30_000;
+
+/**
+ * How long one turn of reading an ask runs before it lets the event loop
+ * go, past the op it is reading (MD4-ASTRA-7). One op takes about as long
+ * as a batch holding that op alone.
+ */
+const ASK_TURN_MS = 8;
 
 /**
  * An asset lookup that has started and whose op has not been processed yet
@@ -334,17 +355,25 @@ export class RoomActor {
   #forgetAsks = new Map<ClientKey, { n: number; step: UndoEntry }>();
   /**
    * Each client's gesture whose asks are still coming (`build.ask` with
-   * `more`): its undo group, the room as its ops so far would leave it, and
-   * each layer's estimate with their growth (#answerAsk).
+   * `more`, AskChain). A chain ends at its last part, at the client's next
+   * op of another group, at any refusal of the client's ops, when its
+   * socket goes, and ASK_CHAIN_MS after its last part, so no abandoned
+   * gesture keeps a copy of the room (MD4-ASTRA-6). A part that finds no
+   * chain is refused with ASK_LOST, never read as a first part.
    */
-  #asking = new Map<ClientKey, { group: string; state: RoomState; totals: Map<string, number>; over: boolean }>();
+  #asking = new Map<ClientKey, AskChain>();
   /**
    * Each client's undo group last refused with FORGET_ASK, whose later ops
    * go unmade with it unless they carry the yes (5.3): a gesture is asked
    * about once, and none of it applies before the answer. Cleared by the
-   * client's next op of another group.
+   * client's next op of another group and when its socket goes.
    */
   #askRefused = new Map<ClientKey, string>();
+  /**
+   * The ask being read over several turns (#readAsk). The room's queue
+   * waits on it as on a step, so its sender's later ops stay behind it.
+   */
+  #reading: AskRead | null = null;
   #sizes: SizeGuard;
   #roomRate: TokenBucket;
   /** Each member's budget of block saves (docs/design-v1-companion-stat-blocks.md 3.5), made at their first save. */
@@ -460,13 +489,19 @@ export class RoomActor {
       this.#batch === null &&
       this.#inFlight === null &&
       this.#snapshotting === null &&
-      this.#stepRunning === null
+      this.#stepRunning === null &&
+      this.#reading === null
     );
   }
 
   /** How many deleted asset ids the barrier keeps for outstanding lookups, for its tests. */
   get deletionRecordSize(): number {
     return this.#deleted.size;
+  }
+
+  /** How many clients' gestures still ask or were refused, and whether an ask is being read, for its tests (MD4-ASTRA-6). */
+  get askState(): { asking: number; refused: number; reading: boolean } {
+    return { asking: this.#asking.size, refused: this.#askRefused.size, reading: this.#reading !== null };
   }
 
   // Connections.
@@ -483,6 +518,9 @@ export class RoomActor {
     const key = conn.key;
     if (key !== null) {
       if (this.#clients.get(key) === conn) this.#clients.delete(key);
+      // A gesture's asks die with the socket that sent them: the device asks again on its next one (MD4-ASTRA-6).
+      this.#asking.delete(key);
+      this.#askRefused.delete(key);
       const delayed = this.#delayed.get(key);
       if (delayed && delayed.conn === conn) {
         delayed.cancel();
@@ -825,6 +863,8 @@ export class RoomActor {
       if (this.#snapshotTimer) clearTimeout(this.#snapshotTimer);
       for (const d of this.#delayed.values()) d.cancel();
       this.#delayed.clear();
+      // An ask being read goes unanswered, as queued work does: its client asks again after it reconnects.
+      this.#reading = null;
       for (const conn of this.#connections) conn.close(opts.code);
       const queued = this.#queue;
       this.#queue = [];
@@ -860,7 +900,7 @@ export class RoomActor {
     if (this.#draining || this.#closed) return;
     this.#draining = true;
     try {
-      while (this.#inFlight === null && this.#stepRunning === null && !this.#closed) {
+      while (this.#inFlight === null && this.#stepRunning === null && this.#reading === null && !this.#closed) {
         const cmd = this.#queue.shift();
         if (!cmd) break;
         this.#handle(cmd);
@@ -929,6 +969,7 @@ export class RoomActor {
     }
     // A page left open across the dragon turtle's rename still names the old id, which nothing would rename once stored.
     const clientOp = withTodaysSrdIds(parsed.data);
+    this.#endAsks(key, cmd.group);
     // The rest of a gesture the DM was asked about goes unmade with it, unless sent with the yes (5.3).
     const refusedGroup = this.#askRefused.get(key);
     if (refusedGroup !== undefined) {
@@ -939,6 +980,16 @@ export class RoomActor {
       }
     }
     if (clientOp.t === "build.ask") {
+      // An ask reads each op it carries as the op would apply, so it costs the sender's rate and the room's one op apiece (MD4-ASTRA-7).
+      const more = clientOp.ops.length - 1;
+      if (more > 0 && (!conn.opRate.wouldAllow(more) || this.#roomRate.tokens < more)) {
+        conn.send({ t: "retry", n, code: "busy" });
+        return;
+      }
+      if (more > 0) {
+        conn.opRate.allow(more);
+        this.#roomRate.take(more);
+      }
       this.#answerAsk(key, wm, n, clientOp, cmd.group, viewer);
       return;
     }
@@ -1189,6 +1240,8 @@ export class RoomActor {
    * the same words, so the same tag sent again is refused again.
    */
   #refuse(key: ClientKey, wm: Watermark, n: number, code: RefusalCode, message: string, admitted: Admitted | null = null): void {
+    // Any refusal ends the client's gesture still asking: a later part then finds no chain and is refused, so none is read on a guess.
+    this.#asking.delete(key);
     wm.staged = n;
     const batch = this.#ensureBatch();
     const words = message.slice(0, 200);
@@ -1272,15 +1325,27 @@ export class RoomActor {
   }
 
   /**
+   * Ends a client's ask state that its next op leaves behind (MD4-ASTRA-6):
+   * a chain of another undo group, and every chain past ASK_CHAIN_MS.
+   */
+  #endAsks(key: ClientKey, group: string | undefined): void {
+    const now = this.#opts.now();
+    for (const [k, chain] of this.#asking) if ((k === key && chain.group !== group) || now - chain.at > ASK_CHAIN_MS) this.#asking.delete(k);
+  }
+
+  /**
    * A gesture's ask (`build.ask`, docs/design-v1-map-discovery.md 5.3): the
    * ops of a DM's builder gesture, read in turn on a copy of the room as
    * they would apply, each layer's estimate taking each one's growth, as
    * #reduce reads one op. Nothing is applied, logged or stored. The asks of
-   * one undo group read on one copy, so a gesture past one frame asks in
-   * parts and its last ask answers: past a layer's cap it is refused with
-   * FORGET_ASK, and so is the rest of its group (#askRefused), else taken
-   * with no change. An op that would be refused for itself is left out, as
-   * it will be refused when it comes.
+   * one undo group read on one copy, part after part, so a gesture past one
+   * ask asks in parts and its last ask answers: past a layer's cap it is
+   * refused with FORGET_ASK, and so is the rest of its group (#askRefused),
+   * else taken with no change. An op that would be refused for itself is
+   * left out, as it will be refused when it comes. A part after the first
+   * whose chain is gone, after a restart or any of the ends #asking names,
+   * is refused with ASK_LOST, and the device asks again from the start
+   * (MD4-ASTRA-5). The reading yields every ASK_TURN_MS (#readAsk).
    */
   #answerAsk(key: ClientKey, wm: Watermark, n: number, op: OpOf<"build.ask">, group: string | undefined, viewer: Viewer): void {
     if (viewer.role !== "dm" || viewer === SERVER_ACTOR) {
@@ -1292,27 +1357,65 @@ export class RoomActor {
       return;
     }
     const known = this.#asking.get(key);
-    const chain = known && known.group === group ? known : { group, state: this.#staged.state, totals: new Map<string, number>(), over: false };
-    const ctx = { seq: this.#staged.seq + 1, at: new Date(this.#opts.now()).toISOString() };
-    for (const inner of op.ops) {
-      if (chain.over) break;
-      if (inner.sceneId !== op.sceneId) continue;
-      const result = applyOp(chain.state, inner, viewer, ctx);
-      if (!result.ok) continue;
-      const memory = this.#memoryEstimate(result.state, result.touched, { before: chain.state, totals: chain.totals });
-      memory?.next.forEach((total, layer) => chain.totals.set(layer, total));
-      if (memory?.over) chain.over = true;
-      chain.state = result.state;
+    this.#asking.delete(key);
+    let chain: AskChain;
+    if (op.part === 0) chain = { group, next: 0, at: this.#opts.now(), state: this.#staged.state, totals: new Map<string, number>(), over: false };
+    else if (known && known.group === group && known.next === op.part) chain = known;
+    else {
+      this.#refuse(key, wm, n, "invalid", ASK_LOST);
+      return;
     }
-    if (op.more) {
-      this.#asking.set(key, chain);
-    } else {
-      this.#asking.delete(key);
-      if (chain.over) {
-        this.#askRefused.set(key, group);
-        this.#refuse(key, wm, n, "forget", FORGET_ASK);
-        return;
+    // Read from a turn of its own, so no turn holds the end of what came before, such as an earlier part's answer, and an op of this one.
+    const read: AskRead = { key, wm, n, op, group, viewer, chain, next: 0, ctx: { seq: this.#staged.seq + 1, at: new Date(this.#opts.now()).toISOString() } };
+    this.#reading = read;
+    setImmediate(() => this.#readOn(read));
+  }
+
+  /**
+   * Reads an ask's ops for one turn: at least one, and on while the turn
+   * is under ASK_TURN_MS (MD4-ASTRA-7). True once all are read or the
+   * gesture is past a cap. A turn takes as long as its longest op, about a
+   * batch's time with that op alone.
+   */
+  #readAsk(read: AskRead): boolean {
+    const { op, chain } = read;
+    const until = performance.now() + ASK_TURN_MS;
+    while (read.next < op.ops.length && !chain.over) {
+      const inner = op.ops[read.next++]!;
+      if (inner.sceneId !== op.sceneId) continue;
+      const result = applyOp(chain.state, inner, read.viewer, read.ctx);
+      if (result.ok) {
+        const memory = this.#memoryEstimate(result.state, result.touched, { before: chain.state, totals: chain.totals });
+        memory?.next.forEach((total, layer) => chain.totals.set(layer, total));
+        if (memory?.over) chain.over = true;
+        chain.state = result.state;
       }
+      if (performance.now() >= until) break;
+    }
+    return read.next >= op.ops.length || chain.over;
+  }
+
+  /** The next turn of an ask being read, and its answer once read, after which the queue goes on. */
+  #readOn(read: AskRead): void {
+    if (this.#reading !== read || this.#closed) return;
+    if (!this.#readAsk(read)) {
+      setImmediate(() => this.#readOn(read));
+      return;
+    }
+    this.#reading = null;
+    this.#finishAsk(read);
+    this.#drain();
+  }
+
+  /** An ask read whole: a part with more to come keeps its chain while its socket stays, and the last answers for the gesture. */
+  #finishAsk(read: AskRead): void {
+    const { key, wm, n, op, group, chain } = read;
+    if (op.more) {
+      if (this.#clients.has(key)) this.#asking.set(key, { ...chain, next: op.part + 1, at: this.#opts.now() });
+    } else if (chain.over) {
+      this.#askRefused.set(key, group);
+      this.#refuse(key, wm, n, "forget", FORGET_ASK);
+      return;
     }
     wm.staged = n;
     const batch = this.#ensureBatch();

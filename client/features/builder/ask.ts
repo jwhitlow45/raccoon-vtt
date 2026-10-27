@@ -1,6 +1,6 @@
 import { serializedBytes } from "#shared/limits.ts";
 import type { Scene } from "#shared/model.ts";
-import { MAX_ASK_BYTES, MAX_ASK_OPS, type ClientOp, type OpOf } from "#shared/protocol.ts";
+import { MAX_ASK_BYTES, MAX_ASK_OPS, MAX_ASK_PARTS, type ClientOp, type OpOf } from "#shared/protocol.ts";
 import { keepsMemory } from "#shared/reducer/memory.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
@@ -34,8 +34,10 @@ export function dispatchBuild(actions: Pick<RoomActions, "dispatch" | "newId">, 
 
 /**
  * A gesture's asks: its builder ops on the scene in order, without a yes,
- * packed into asks of at most MAX_ASK_OPS ops and MAX_ASK_BYTES, all but
- * the last marked `more`, so the server answers once for the whole.
+ * packed into asks of at most MAX_ASK_OPS ops and MAX_ASK_BYTES, numbered
+ * by `part`, all but the last marked `more`, so the server answers once
+ * for the whole. A gesture past MAX_ASK_PARTS asks gets none, and goes as
+ * a stroke goes.
  */
 export function askOps(sceneId: string, ops: readonly ClientOp[]): OpOf<"build.ask">[] {
   const parts: Askable[][] = [];
@@ -43,8 +45,9 @@ export function askOps(sceneId: string, ops: readonly ClientOp[]): OpOf<"build.a
     if (!ASKABLE.has(op.t) || (op as { sceneId?: string }).sceneId !== sceneId) continue;
     const { forget: _yes, ...asked } = op as Askable;
     const part = parts.at(-1);
-    if (part && part.length < MAX_ASK_OPS && serializedBytes({ t: "build.ask", sceneId, ops: [...part, asked], more: true }) <= MAX_ASK_BYTES) part.push(asked);
+    if (part && part.length < MAX_ASK_OPS && serializedBytes({ t: "build.ask", sceneId, ops: [...part, asked], part: MAX_ASK_PARTS - 1, more: true }) <= MAX_ASK_BYTES) part.push(asked);
     else parts.push([asked]);
   }
-  return parts.map((part, i) => ({ t: "build.ask", sceneId, ops: part, ...(i < parts.length - 1 ? { more: true as const } : {}) }));
+  if (parts.length > MAX_ASK_PARTS) return [];
+  return parts.map((part, i) => ({ t: "build.ask", sceneId, ops: part, part: i, ...(i < parts.length - 1 ? { more: true as const } : {}) }));
 }

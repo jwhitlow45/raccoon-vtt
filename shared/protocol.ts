@@ -1904,9 +1904,23 @@ const buildHeightOp = op("build.height", { sceneId: id, cells: z.array(cellKey).
 const buildStairsOp = op("build.stairs", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), up: stairDirection.nullable(), forget });
 const buildRoughOp = op("build.rough", { sceneId: id, cells: z.array(cellKey).min(1).max(MAX_BUILD_CELLS), on: z.boolean(), forget });
 
-/** The most ops one `build.ask` carries, and its bytes, so an ask with the frame round it fits a socket frame (server/rooms/ws.ts MAX_FRAME_BYTES). */
-export const MAX_ASK_OPS = 64;
+/**
+ * The most ops one `build.ask` carries, and its bytes, so an ask with the
+ * frame round it fits a socket frame (server/rooms/ws.ts MAX_FRAME_BYTES).
+ * The server charges an ask one op of the sender's rate for each op it
+ * carries (MD4-ASTRA-7), so an ask must fit a socket's burst of 60 with
+ * room for the gesture's own ops after it.
+ */
+export const MAX_ASK_OPS = 16;
 export const MAX_ASK_BYTES = 48 * 1024;
+/** The most asks one gesture sends: a whole 200 x 200 scene goes as 20 bands of 2,000 squares, two asks. */
+export const MAX_ASK_PARTS = 16;
+/**
+ * The server's refusal of an ask whose earlier asks it no longer holds
+ * (`invalid`, MD4-ASTRA-5): it restarted, or the chain was dropped. The
+ * device asks the whole gesture again once.
+ */
+export const ASK_LOST = "the server lost this change's earlier asks";
 
 /** Ops a client may send (design 8.1). */
 export const clientOps = [
@@ -2230,12 +2244,16 @@ export const clientOps = [
    * gesture's undo group ahead of its ops, so the forget question comes
    * before the first of them, and the server then refuses the rest of the
    * group with it unless they carry the yes. `more` while asks of a
-   * gesture too big for one frame are still to come: the asks of a group
-   * read on, and the last answers for all.
+   * gesture too big for one ask are still to come, and `part` the ask's
+   * place among them from 0: the asks of a group read on, and the last
+   * answers for all. A part after the first that finds no earlier part is
+   * refused with ASK_LOST. The device holds the gesture's ops until the
+   * last ask answers (client/features/builder/ask.ts).
    */
   op("build.ask", {
     sceneId: id,
     ops: z.array(z.discriminatedUnion("t", [buildPaintOp, buildEraseOp, buildRectOp, buildEdgeOp, buildHeightOp, buildStairsOp, buildRoughOp])).min(1).max(MAX_ASK_OPS),
+    part: z.number().int().min(0).max(MAX_ASK_PARTS - 1),
     more: z.literal(true).optional(),
   }).refine((o) => serializedBytes(o) <= MAX_ASK_BYTES, { message: `an ask is at most ${MAX_ASK_BYTES / 1024} KiB` }),
   /**
