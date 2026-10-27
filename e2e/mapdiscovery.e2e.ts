@@ -113,6 +113,9 @@ const MAT = {
  */
 const CAVERN = { bounds: { w: 80, h: 64 }, breeAt: { x: 40, y: 32 } };
 
+/** Closet, 8 by 6 squares, bright, fog and party vision on: a room of 3 by 2 squares walled all round by its floor's edges, Bree in its west corner. */
+const CLOSET = { bounds: { w: 8, h: 6 }, room: { x: 2, y: 2, w: 3, h: 2 }, breeAt: { x: 2, y: 2 }, westWall: "2,2,w" };
+
 const run = {
   roomId: "",
   /** Shown in the guide's pictures, so it reads as a table's room would. */
@@ -123,7 +126,8 @@ const run = {
   mat: randomUUID(),
   cavern: randomUUID(),
   benId: "",
-  bree: { halls: randomUUID(), reveal: randomUUID(), mat: randomUUID(), cavern: randomUUID() },
+  closet: randomUUID(),
+  bree: { halls: randomUUID(), reveal: randomUUID(), mat: randomUUID(), cavern: randomUUID(), closet: randomUUID() },
   moleId: randomUUID(),
   labelId: randomUUID(),
   stampId: randomUUID(),
@@ -260,6 +264,45 @@ async function clearBuild(page: Page): Promise<void> {
   await more.getByRole("button", { name: "Clear build", exact: true }).click();
   await more.getByRole("button", { name: "Tap again to clear" }).click();
   if (await more.isVisible()) await page.keyboard.press("Escape");
+}
+
+/**
+ * Starts recording where a token's node stands on a page's board, every
+ * frame it draws while the node is not being dragged, until `stoodAt`
+ * reads them back: a move the page predicts shows there before the
+ * server's answer, though no copy of the state holds it.
+ */
+async function watchStanding(page: Page, tokenId: string): Promise<void> {
+  await page.evaluate((id) => {
+    type Node = { x(): number; y(): number; isDragging(): boolean };
+    type Stage = { findOne(selector: string): Node | undefined };
+    const g = globalThis as unknown as { Konva: { stages: Stage[] }; requestAnimationFrame(f: () => void): number; __mdStood?: { at: [number, number][]; on: boolean } };
+    const log: { at: [number, number][]; on: boolean } = { at: [], on: true };
+    g.__mdStood = log;
+    const tick = () => {
+      if (!log.on) return;
+      const node = g.Konva.stages.map((st) => st.findOne(`#${id}`)).find((n) => n !== undefined);
+      if (node && !node.isDragging()) log.at.push([node.x(), node.y()]);
+      g.requestAnimationFrame(tick);
+    };
+    tick();
+  }, tokenId);
+}
+
+async function stoodAt(page: Page): Promise<[number, number][]> {
+  return page.evaluate(() => {
+    const g = globalThis as unknown as { __mdStood?: { at: [number, number][]; on: boolean } };
+    if (g.__mdStood) g.__mdStood.on = false;
+    return g.__mdStood?.at ?? [];
+  });
+}
+
+/** Whether any `ev` a page received from frame `from` on answered an op the page sent. */
+function answeredOps(watch: SocketWatch, from: number): boolean {
+  return watch.received.slice(from).some((text) => {
+    const frame = JSON.parse(text) as { t?: string; acks?: number[]; rejects?: unknown[] };
+    return frame.t === "ev" && ((frame.acks?.length ?? 0) > 0 || (frame.rejects?.length ?? 0) > 0);
+  });
 }
 
 function stopNote(text: string): Locator {
@@ -484,6 +527,45 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     await shots.take(ben, "mapdiscovery-ben-hall-seen-again");
   });
 
+  test("md-4b. a one-cell drag and an arrow press into a wall Bree sees send nothing: she never leaves her square, and the note names the wall (D-261027-05)", async () => {
+    await ops.send({ t: "scene.create", scene: { id: run.closet, name: "Closet", bounds: CLOSET.bounds, fogEnabled: true, autoWalls: "all", blockMovement: true, vision: { on: true, light: "bright" } } });
+    await ops.send({ t: "build.rect", sceneId: run.closet, terrain: "stone", ...CLOSET.room });
+    await ops.send(pc(run.bree.closet, run.closet, "Bree", CLOSET.breeAt));
+    await playersTo(run.closet);
+    try {
+      await waitFor("the closet's west wall on Ben's map", () => autoAt(chunkOf(sockets.ben.state, run.closet, CLOSET.breeAt.x, CLOSET.breeAt.y), CLOSET.westWall) || null);
+      await ben.locator(".konvajs-content").first().waitFor();
+      const at = CLOSET.breeAt;
+      const from = sockets.ben.received.length;
+      // A phone's usual flow: tap the token, then drag it. The closet is walled all round, so no way leads past its west wall:
+      // the drag stops at its very first step, and its note wins over the token's action bar, the selection kept.
+      await watchStanding(ben, run.bree.closet);
+      await tapCell(ben, CLOSET.bounds, at);
+      await ben.getByRole("dialog", { name: "Bree actions" }).waitFor();
+      await dragCells(ben, CLOSET.bounds, at, { x: at.x - 1, y: at.y });
+      await stopNote("Stopped at a wall.").waitFor();
+      await shots.take(ben, "mapdiscovery-ben-first-step-wall");
+      await closeNote("Stopped at a wall.");
+      // Bree is still selected. An arrow key steps her one square, never round a wall.
+      await ben.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+      await ben.keyboard.press("ArrowLeft");
+      await stopNote("Stopped at a wall.").waitFor();
+      await ben.waitForTimeout(500);
+      const stood = await stoodAt(ben);
+      assert.ok(stood.length > 10, `${stood.length} frames read`);
+      // The drop puts the node back where the plan lands it, a frame or so after the finger lifts. From then on it stands in its square.
+      const back = stood.findIndex(([x, y]) => x === at.x && y === at.y);
+      assert.ok(back >= 0, "Bree's node never stood in her square");
+      const away = stood.slice(back).filter(([x, y]) => x !== at.x || y !== at.y);
+      assert.deepEqual(away, [], "a frame showed Bree off her square after the drop");
+      assert.equal(answeredOps(sockets.ben, from), false, "Ben's page sent a move");
+      await standsAt(run.bree.closet, "Bree", at);
+      await closeNote("Stopped at a wall.");
+    } finally {
+      await playersTo(run.halls);
+    }
+  });
+
   test("md-5. a drag into the dark with a wall there lands at its last clear spot with the generic words, Teleport here sends unknown, and Mole, who sees nothing, is stopped by the real walls", async () => {
     await ops.send({ t: "build.edge", sceneId: run.halls, edges: [{ key: HALLS.darkWall, feature: { kind: "wall" } }] });
     await settle("the dark wall built");
@@ -543,9 +625,22 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     const explored = () => Object.keys(sockets.dm.state?.exploredTiles ?? {}).filter((k) => k.startsWith(`${run.cavern}:`)).length;
     const before = await waitFor("the cavern's explored tiles in the DM's copy", () => explored() || null);
     const built = () => sockets.dm.state?.buildChunks[`${run.cavern}:0,0`]?.cells["0,0"];
+    const floored = () => Object.values(sockets.dm.state?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === run.cavern ? Object.values(c.cells).filter((t) => t === "stone").length : 0), 0);
+    const whole = CAVERN.bounds.w * CAVERN.bounds.h;
+    assert.equal(floored(), whole);
     await pickTool(dm, "Map builder");
-    await clearBuild(dm);
     const ask = dm.getByRole("dialog", { name: "Remembered map" });
+    // A rectangle of 76 by 57 squares, 4,332 floors past the cap's 4,096, goes as three bands of at most 2,000 squares
+    // and asks before the first (builder's item 10). It starts below the top rows, where the log's toasts cover the map.
+    await pickOption(dm, "Map builder", "Builder mode", "Erase area");
+    await dragCells(dm, CAVERN.bounds, { x: 2, y: 6 }, { x: 77, y: 62 });
+    await ask.waitFor();
+    await ask.getByRole("button", { name: "Cancel" }).click();
+    await ask.waitFor({ state: "detached" });
+    await settle("the rectangle left unmade");
+    assert.equal(floored(), whole, "Cancel left a band of the rectangle erased");
+    await pickOption(dm, "Map builder", "Builder mode", "Brush");
+    await clearBuild(dm);
     await ask.waitFor();
     await shots.take(dm, "mapdiscovery-dm-forget-question");
     // Cancel leaves the cavern as it was, and the same Clear build asks again.
