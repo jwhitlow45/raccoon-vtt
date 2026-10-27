@@ -9,10 +9,12 @@ import {
   type AreaToken,
   type CoverageResult,
 } from "#shared/rules/aoe.ts";
-import { sceneWalls } from "#shared/rules/walls.ts";
+import { FREE_WALL_LATTICE } from "#shared/model.ts";
+import { sceneWalls, type WallSet } from "#shared/rules/walls.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { HEX_R, hexCenter } from "#shared/rules/hex.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
+import { standingStretches } from "../../canvas/relief/runs.ts";
 import { displayName } from "../../lib/scene.ts";
 
 /**
@@ -36,6 +38,12 @@ import { displayName } from "../../lib/scene.ts";
  * graded per hex and an emanation counts steps (docs/design-v1-hex-grids.md
  * HX-D11), and the board shades the result's `hexes`: one source of
  * truth, the very hexes the server reads for who an area catches.
+ *
+ * An area being aimed on a player's device, on a scene with fog, reads only
+ * the walls that player could know (`heldWalls`), so a wall wholly under
+ * their fog shapes nothing they see, wherever its origin lies. Its shading
+ * and who it rings can then differ from the cast across fogged ground,
+ * which the server decides with every wall.
  */
 
 /** The parts of the view coverage reads, so a renderer can subscribe to just these. */
@@ -45,18 +53,54 @@ export function areaContext(view: RoomState, scene: Scene, samples: number = SAM
   return contextFrom({ tokens: view.tokens, buildChunks: view.buildChunks, settings: view.meta.settings }, scene, samples);
 }
 
-export function contextFrom(inputs: AreaInputs, scene: Scene, samples: number = SAMPLES): AreaContext {
+/** `fog` is the viewer's for an area being aimed (canvas/viewerFog.ts): its walls are then the ones that viewer could know. */
+export function contextFrom(inputs: AreaInputs, scene: Scene, samples: number = SAMPLES, fog?: FogView): AreaContext {
+  const walls = sceneWalls(scene, inputs.buildChunks);
   return {
     settings: inputs.settings,
     bounds: scene.bounds,
     grid: sceneGrid(scene),
-    walls: sceneWalls(scene, inputs.buildChunks),
+    walls: fog ? heldWalls(walls, fog) : walls,
     tokens: inputs.tokens as Readonly<Record<string, AreaToken>>,
     samples,
   };
 }
 
 const coverage = new CoverageCache(256);
+
+/** Each wall set as each fog reads it, kept while both are: the store replaces the fog's tiles on every change. */
+const held = new WeakMap<WallSet, WeakMap<object, WallSet>>();
+let heldSets = 0;
+
+/**
+ * The walls a viewer could know: each wall, door, window, pillar side and
+ * ledge cut to the stretches with a revealed sub-cell beside them, as
+ * Isometric stands a player's walls (relief/runs.ts standingStretches).
+ * A cut end inside a sub-cell, on a slanted wall, goes to the nearest
+ * point of the 1/64 lattice, as the wall split needs (rules/segments.ts),
+ * which moves it less than a pixel. The set itself for a viewer who sees
+ * all the ground.
+ */
+export function heldWalls(walls: WallSet, fog: FogView): WallSet {
+  if (fog.all || !fog.tiles) return walls;
+  let byFog = held.get(walls);
+  if (!byFog) held.set(walls, (byFog = new WeakMap()));
+  let set = byFog.get(fog.tiles);
+  if (!set) {
+    const lattice = (v: number) => Math.round(v * FREE_WALL_LATTICE) / FREE_WALL_LATTICE;
+    set = walls.cutTo(`${walls.version}|held:${++heldSets}`, (ax, ay, bx, by) => {
+      const parts: number[] = [];
+      for (const [t0, t1] of standingStretches(fog, { x: ax, y: ay }, { x: bx, y: by })) {
+        const p = t0 === 0 ? [ax, ay] : [lattice(ax + (bx - ax) * t0), lattice(ay + (by - ay) * t0)];
+        const q = t1 === 1 ? [bx, by] : [lattice(ax + (bx - ax) * t1), lattice(ay + (by - ay) * t1)];
+        if (p[0] !== q[0] || p[1] !== q[1]) parts.push(p[0]!, p[1]!, q[0]!, q[1]!);
+      }
+      return parts;
+    });
+    byFog.set(fog.tiles, set);
+  }
+  return set;
+}
 
 /**
  * The window of cells a result's shading lies in: on squares the window
@@ -89,9 +133,8 @@ export function coveredWindow(cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h" 
  * aimed area does (AreaPreviewLayer.tsx): null where it shows whole, to a
  * viewer who sees all the ground or over a window wholly revealed, and
  * otherwise the revealed sub-cells of its window, as rectangles in cells.
- * The shading is cut by every wall this device holds, those under a
- * player's fog included, so over a fogged sub-cell its edge would draw
- * them. The rule is a moving aura's (canvas/markStand.ts auraClip).
+ * The fog stays opaque, as over a placed area, which lies under it. The
+ * rule is a moving aura's (canvas/markStand.ts auraClip).
  */
 export function shadingClip(fog: FogView, cov: Pick<CoverageResult, "x0" | "y0" | "w" | "h" | "hexes">, g: Grid): { x: number; y: number; w: number; h: number }[] | null {
   const win = coveredWindow(cov, g);

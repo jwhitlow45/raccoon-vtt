@@ -908,6 +908,26 @@ export class WallSet {
     return set;
   }
 
+  /**
+   * The set with each stored segment cut to the parts `keep` returns for
+   * it, flat `[ax, ay, bx, by, ...]`, every end on the 1/64 lattice so the
+   * split stays exact: the walls as a viewer who knows only some of them
+   * reads them, such as a player's aimed area on a fogged scene
+   * (client/features/areas/coverage.ts). Each part keeps its segment's
+   * tags, top and feature. Only the stored segments are cut: the grid's
+   * edges, ground and stairs read as before. `version` names the new set
+   * in every cache key over it.
+   */
+  cutTo(version: string, keep: (ax: number, ay: number, bx: number, by: number) => readonly number[]): WallSet {
+    const s = this.stored;
+    const out = new CandidateList();
+    for (let k = 0; k < s.n; k++) {
+      const parts = keep(s.xy[4 * k]!, s.xy[4 * k + 1]!, s.xy[4 * k + 2]!, s.xy[4 * k + 3]!);
+      for (let i = 0; i + 3 < parts.length; i += 4) out.add(parts[i]!, parts[i + 1]!, parts[i + 2]!, parts[i + 3]!, s.tags[k]!, s.free[k] === 1, this.storedTops[k]!, this.#origin[k]!);
+    }
+    return new WallSet(version, this.#grid, this.free, out.done(), this.bounds);
+  }
+
   /** Every effective grid edge, sorted, for drawing. */
   get edges(): readonly WallEdge[] {
     return (this.#edges ??= edgesOfGrid(this.#grid));

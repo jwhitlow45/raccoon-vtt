@@ -36,10 +36,10 @@ import { useLiveTokens } from "./useLiveTokens.ts";
  * lifted to the drawn height at its origin, its pills standing
  * (docs/design-v1-isometric-view.md 5.3).
  *
- * Both views draw it above a player's fog, and its shading is cut by every
- * wall this device holds, those under the fog too, so the shading shows
- * only on the sub-cells the player's fog reveals (coverage.ts
- * shadingClip). Its outline and grips read no wall and draw whole.
+ * Both views draw it above a player's fog. On a player's device it reads
+ * only the walls they could know (coverage.ts heldWalls), and its shading
+ * shows only on the sub-cells their fog reveals (coverage.ts shadingClip).
+ * Its outline and grips read no wall and draw whole.
  */
 
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
@@ -67,10 +67,11 @@ export const AreaPreviewLayer = memo(function AreaPreviewLayer(props: LayerProps
   const casts = useTreeShownView((s) => s.view?.casts ?? EMPTY_CASTS);
   const fog = useViewerFog(props);
 
-  const fine = useMemo(() => (settings ? contextFrom({ tokens, buildChunks, settings }, scene) : null), [tokens, buildChunks, settings, scene]);
+  // On a player's device the walls are the ones they could know (coverage.ts heldWalls).
+  const fine = useMemo(() => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, undefined, fog) : null), [tokens, buildChunks, settings, scene, fog]);
   const coarse = useMemo(
-    () => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, PREVIEW_SAMPLES) : null),
-    [tokens, buildChunks, settings, scene],
+    () => (settings ? contextFrom({ tokens, buildChunks, settings }, scene, PREVIEW_SAMPLES, fog) : null),
+    [tokens, buildChunks, settings, scene, fog],
   );
   if (!fine || !coarse || !settings) return null;
   const ctx = samplesNow(moving || dragged.moving) === PREVIEW_SAMPLES ? coarse : fine;

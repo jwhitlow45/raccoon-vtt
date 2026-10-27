@@ -4,6 +4,7 @@ import type { AreaShape, AreaSlows, AreaTemplate, AreaTrigger } from "#shared/mo
 import { AREA_MAX_FT, AREA_MIN_FT, canPitch, emanationFootprint, MAX_PITCH, pitchOf, type AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { boxDistanceFt, pointCellBox, tokenCellBox } from "#shared/rules/distance.ts";
 import { displayName } from "../../lib/scene.ts";
+import { useViewerFog } from "../../canvas/viewerFog.ts";
 import { Icon, type IconName } from "../../components/Icon.tsx";
 import { Popover, usePopover } from "../../components/Popover.tsx";
 import { dismissedBy } from "../../components/popoverRules.ts";
@@ -136,7 +137,9 @@ function InArea(props: { env: AreaEnv; t: AreaTemplateInput; moving: boolean; ti
   const { env, t } = props;
   // Tokens other members are dragging count where they would drop.
   const live = useLiveTokens();
-  const ctx = contextFrom({ tokens: live.tokens, buildChunks: env.view.buildChunks, settings: env.view.meta.settings }, env.scene, samplesNow(props.moving || live.moving));
+  // A player's list reads the walls they could know, as the rings the preview draws do (coverage.ts heldWalls).
+  const fog = useViewerFog({ scene: env.scene, role: env.role, fog: env.scene.fogEnabled !== false });
+  const ctx = contextFrom({ tokens: live.tokens, buildChunks: env.view.buildChunks, settings: env.view.meta.settings }, env.scene, samplesNow(props.moving || live.moving), fog);
   const ids = caughtTokens(t, ctx, env.scene.id);
   const entries = inAreaEntries(ids, live.tokens, env.view.characters);
   return (
