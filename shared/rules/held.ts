@@ -1,8 +1,8 @@
 import { holderTileKey, tileKey } from "../keys.ts";
 import { CHUNK_CELLS, FOG_SUBCELLS, FREE_WALL_LATTICE, type FogTile, type FreeWall, type RoomState, type Scene, type SightTile } from "../model.ts";
-import { visionRules, type PartySight } from "../ruleHooks.ts";
+import { visionRules, type PartySight, type SightProbe } from "../ruleHooks.ts";
 import { decodeTile, getBit, TILE_CELLS, TILE_SUB } from "./fog.ts";
-import type { CellRange } from "./footprint.ts";
+import { placedOnHex, type CellRange } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid, type Grid } from "./grid.ts";
 import { cornerAt, hexAt, hexCorners, hexInScene, hexKey, hexNeighbors, hexSubcells, parseHexKey, type Hex, type HexGrid } from "./hex.ts";
@@ -220,6 +220,7 @@ function groundWith(state: RoomState, sceneId: string, holder: string | null, li
   });
   const ownLayer: Layer = own === null ? NONE : cached((tx, ty) => fogBits(state.exploredBy?.[holderTileKey(sceneId, own, tx, ty)]));
   let live: Layer;
+  let asked: PointLive | undefined;
   const remembers = scene.fogEnabled && scene.vision?.on === true;
   if (!remembers) live = held;
   else {
@@ -229,8 +230,29 @@ function groundWith(state: RoomState, sceneId: string, holder: string | null, li
       const seen = sight?.tiles.get(`${tx},${ty}`);
       return unionOf([dm, seen], (p) => (p === dm ? fogBits(p as FogTile) : sightBits(p as SightTile)));
     });
+    /*
+     * A ray test runs at each moment of a sweep or a routed walk, on states
+     * whose holders' rasters no projection reads. Asked of the point query,
+     * a cell's sight costs its own sub-cells, not every holder's raster
+     * drawn at every moment.
+     */
+    if (!liveInsideHeld) asked = { dm: cached((tx, ty) => fogBits(state.fogTiles[tileKey(sceneId, tx, ty)])), sight };
   }
-  return makeGround(scene, own, held, live, ownLayer, liveInsideHeld);
+  return makeGround(scene, own, held, live, ownLayer, liveInsideHeld, asked);
+}
+
+/**
+ * Live cells asked of the sight's point query (PartySight.seesToken),
+ * beside the DM's reveals, in place of the live layer's tiles. The answers
+ * are the layer's: a cell or a hex is live where any of its sub-cells is,
+ * and the point query reads the very sub-cells the sight's tiles hold.
+ * Single sub-cells still read the tiles.
+ */
+type PointLive = { dm: Layer; sight: PartySight | null };
+
+/** The point query's probe of one hex: a Medium creature standing on it, which stands on that hex alone. */
+function hexProbe(grid: HexGrid, hx: Hex): SightProbe {
+  return { size: "medium", ...placedOnHex(grid, { size: "medium", x: 0, y: 0 }, hx) };
 }
 
 /**
@@ -251,7 +273,7 @@ export function deviceGround(view: RoomState & { sight?: Readonly<Record<string,
   return makeGround(scene, null, held, live, NONE);
 }
 
-function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveLayer: Layer, ownLayer: Layer, liveInsideHeld = true): Ground {
+function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveLayer: Layer, ownLayer: Layer, liveInsideHeld = true, asked?: PointLive): Ground {
   const grid = sceneGrid(scene);
   const { w, h } = scene.bounds;
   const fogged = scene.fogEnabled;
@@ -275,9 +297,8 @@ function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveL
     const test = sub(layer);
     return (hx: Hex) => hexInScene(grid as HexGrid, scene.bounds, hx) && (all || hexSubcells(grid as HexGrid, hx).some(([sx, sy]) => test(sx, sy)));
   };
-  const byKey = (layer: Layer, all: boolean) => {
+  const keyed = (cell: (x: number, y: number) => boolean, hex: (hx: Hex) => boolean) => {
     if (!isHex(grid)) {
-      const cell = square(layer, all);
       // Read without splitting, since a projection asks this of every cell and edge it holds.
       return (key: string) => {
         const comma = key.indexOf(",");
@@ -286,25 +307,35 @@ function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveL
         return comma > 0 && Number.isInteger(x) && Number.isInteger(y) && cell(x, y);
       };
     }
-    const hex = hexOf(layer, all);
     return (key: string) => {
       const hx = parseHexKey(key);
       return hx !== null && hex(hx);
     };
   };
+  const byKey = (layer: Layer, all: boolean) => keyed(square(layer, all), hexOf(layer, all));
   const range = (cell: (x: number, y: number) => boolean) => (r: CellRange) => {
     for (let y = Math.max(0, r.y0); y < Math.min(h, r.y1); y++) for (let x = Math.max(0, r.x0); x < Math.min(w, r.x1); x++) if (cell(x, y)) return true;
     return false;
   };
+  // Asked only where fog is on (groundWith), so no cell is live for want of fog.
+  const askedSquare = ({ dm, sight }: PointLive) => {
+    const dmCell = square(dm, false);
+    // The point query reads only sub-cells on the scene, so a cell off it is never seen.
+    return (x: number, y: number) => dmCell(x, y) || (sight !== null && sight.seesToken({ size: "medium", x, y }, grid));
+  };
+  const askedHex = ({ dm, sight }: PointLive) => {
+    const dmHex = hexOf(dm, false);
+    return (hx: Hex) => dmHex(hx) || (sight !== null && hexInScene(grid as HexGrid, scene.bounds, hx) && sight.seesToken(hexProbe(grid as HexGrid, hx), grid));
+  };
   // Live ground is held ground: sight the explore step has not added to the explored layer yet holds nothing.
   const held = square(heldLayer, !fogged);
-  const liveOnly = square(liveLayer, !fogged);
+  const liveOnly = asked ? askedSquare(asked) : square(liveLayer, !fogged);
   const live = (x: number, y: number) => liveOnly(x, y) && (!liveInsideHeld || held(x, y));
   const own = square(ownLayer, false);
   const subHeld = sub(heldLayer);
   const subLiveOnly = sub(liveLayer);
   const keyHeld = byKey(heldLayer, !fogged);
-  const keyLiveOnly = byKey(liveLayer, !fogged);
+  const keyLiveOnly = asked ? keyed(liveOnly, askedHex(asked)) : byKey(liveLayer, !fogged);
   const layerOf = { held: heldLayer, live: liveLayer, own: ownLayer };
   const cellsKey = (layer: "held" | "live" | "own", tx: number, ty: number): string => {
     if (!fogged) return "all";

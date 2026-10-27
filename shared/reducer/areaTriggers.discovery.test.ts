@@ -2,15 +2,16 @@ import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { lift, liftAllBut, wall } from "../discoveryTestutil.ts";
 import { MAP_DISCOVERY_OP_VERSION } from "../migrate.ts";
-import type { LogEvent, RoomState } from "../model.ts";
+import { FOG_SUBCELLS, type LogEvent, type RoomState } from "../model.ts";
 import { cellVision } from "../perPlayerTestutil.ts";
 import { projectState, stableStringify } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { visionRules } from "../ruleHooks.ts";
-import { sceneGrid } from "../rules/grid.ts";
-import { hexAt, hexCenter, hexKey, type HexGrid } from "../rules/hex.ts";
-import { convexLive, groundOf } from "../rules/held.ts";
+import { isHex, sceneGrid } from "../rules/grid.ts";
+import { hexAt, hexCenter, hexInScene, hexKey, hexNeighbors, hexSubcells, parseHexKey, sceneHexes, type HexGrid } from "../rules/hex.ts";
+import { convexLive, groundOf, pendingGround } from "../rules/held.ts";
+import { clearVisionCache, visionCacheReport } from "../rules/vision.ts";
 import { DM, P1, P2, entry, env, member, room, template, token } from "../testutil.ts";
 
 /**
@@ -227,4 +228,70 @@ describe("an area's reminder by the receiver's live ground (decision 13)", () =>
       assert.equal(convexLive(groundOf(s, "s1", null)!, [{ x: 10, y: 5 }, { x: 400, y: 400 }]), false);
     }
   });
+});
+
+describe("the ray test's live ground asked of the point query", () => {
+  /*
+   * Real sight, not the stub: a moment of a walk asks each holder's sight
+   * cell by cell, and the answers must be the ones its tiles give, which
+   * only a projection draws.
+   */
+  function lit(gridShape?: "hexRows" | "hexColumns"): RoomState {
+    const s = fight("dark");
+    s.scenes.s1 = { ...s.scenes.s1!, ...(gridShape ? { gridShape } : {}), vision: { on: true, light: "dark", perPlayer: true } };
+    s.holders.s1 = { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }, { memberId: "p2", on: true }] };
+    s.tokens.scout = token("scout", { kind: "pc", name: "Scout", disposition: "ally", ownerIds: ["p1"], x: 11, y: 5, light: { bright: 10, dim: 5 } });
+    // In the scene's south-east corner, so hexes lit there reach past its sides.
+    s.tokens.bree = token("bree", { kind: "pc", name: "Bree", disposition: "ally", ownerIds: ["p2"], x: 38, y: 28, light: { bright: 10, dim: 5 } });
+    s.tokens.owl = token("owl", { name: "Owl", disposition: "ally", partyVision: true, x: 3, y: 12, light: { bright: 5, dim: 5 } });
+    // Dark ground the DM revealed, and lit ground beside the scout.
+    lift(s, "dm", { x: 4, y: 2, w: 4, h: 4 });
+    lift(s, "dm", { x: 10, y: 4, w: 2, h: 1 });
+    return s;
+  }
+
+  for (const gridShape of [undefined, "hexRows", "hexColumns"] as const) {
+    test(`${gridShape ?? "squares"}: every class's live cells are its sight tiles' and the DM's reveals', and asking them draws no raster`, () => {
+      const stub = { ...visionRules };
+      Object.assign(visionRules, real);
+      try {
+        clearVisionCache();
+        const at = lit(gridShape);
+        const scene = at.scenes.s1!;
+        const grid = sceneGrid(scene);
+        // Hexes just past the scene's sides too, some of whose sub-cells lie on it.
+        const cells = isHex(grid)
+          ? [...new Set(sceneHexes(grid, scene.bounds).flatMap((hx) => [hx, ...hexNeighbors(grid, hx)]).map(hexKey))]
+          : Array.from({ length: scene.bounds.w * scene.bounds.h }, (_, i) => `${i % scene.bounds.w},${Math.floor(i / scene.bounds.w)}`);
+        const subsOf = (key: string): [number, number][] => {
+          if (isHex(grid)) {
+            const hx = parseHexKey(key)!;
+            return hexInScene(grid, scene.bounds, hx) ? hexSubcells(grid, hx) : [];
+          }
+          const [x, y] = key.split(",").map(Number) as [number, number];
+          return Array.from({ length: FOG_SUBCELLS * FOG_SUBCELLS }, (_, i) => [x * FOG_SUBCELLS + (i % FOG_SUBCELLS), y * FOG_SUBCELLS + Math.floor(i / FOG_SUBCELLS)]);
+        };
+        const revealed = groundOf(at, "s1", null)!;
+        const grounds = [null, "p1", "p2"].map((holder) => pendingGround(at, "s1", holder)!);
+        const asked = grounds.map((g) => cells.map((key) => g.keyLive(key)));
+        assert.equal(visionCacheReport().rasters, 0, "a cell's sight asked of the point query draws no raster");
+        let bySight = 0;
+        let byDm = 0;
+        for (const [i, g] of grounds.entries()) {
+          for (const [j, key] of cells.entries()) {
+            // Sub-cells read the tiles, each holder's raster drawn.
+            assert.equal(asked[i]![j], subsOf(key).some(([sx, sy]) => g.subLive(sx, sy)), `class ${i}, ${key}`);
+            if (asked[i]![j]) revealed.keyHeld(key) ? byDm++ : bySight++;
+          }
+        }
+        assert.ok(visionCacheReport().rasters > 0, "the tiles read after drew the rasters");
+        assert.ok(bySight > 60 && byDm > 30, `${bySight} cells live by sight alone, ${byDm} the DM revealed`);
+        // The DM's dark corner, which no light reaches, is live by their reveal alone.
+        const corner = isHex(grid) ? hexKey(hexAt(grid, { x: 4.5, y: 2.5 })) : "4,2";
+        assert.deepEqual(grounds.map((g) => g.keyLive(corner)), [true, true, true]);
+      } finally {
+        Object.assign(visionRules, stub);
+      }
+    });
+  }
 });
