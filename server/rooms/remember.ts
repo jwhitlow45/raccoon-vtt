@@ -234,12 +234,13 @@ function sameWall(a: FreeWall | null, b: FreeWall | null): boolean {
   return a === b || stableStringify(a) === stableStringify(b);
 }
 
-/** A label or stamp as players could see it, or null: one on another scene, or one the DM keeps to themselves. */
+/** Whether a stamp on the scene is one the DM keeps to themselves, which no memory holds (5.4). */
 function dmOnlyStamp(state: RoomState, id: string, sceneId: string): boolean {
   const stamp = state.stamps[id];
   return stamp !== undefined && stamp.sceneId === sceneId && stamp.visibility === "dm";
 }
 
+/** A label or stamp as players could see it, or null: one on another scene, or one the DM keeps to themselves. */
 function shownMark(state: RoomState, field: MarkField, id: string, sceneId: string): Mark | null {
   const value = state[field][id];
   if (!value || value.sceneId !== sceneId) return null;
@@ -253,6 +254,27 @@ function shownMark(state: RoomState, field: MarkField, id: string, sceneId: stri
  * edges read its cells, every position where an automatic wall's rule or
  * the bounds changed, and the stairs' positions where the stair map did.
  */
+/*
+ * What changed, kept for the last few spans from each state: the estimate
+ * reads an op's span from the batch's start, and a batch of one op gives
+ * the step the same span, whose explore changes no build, scene, label or
+ * stamp, so the step reuses the estimate's answer.
+ */
+const changes = new WeakMap<RoomState, { after: readonly unknown[]; sig: string; changed: Changed }[]>();
+
+function changedOnce(before: RoomState, after: RoomState, scene: Scene, touch: SceneTouch): Changed {
+  const deps = [after.buildChunks, after.scenes, after.labels, after.stamps];
+  const sig = JSON.stringify([scene.id, [...touch.chunks].sort(), touch.scene, touch.marks.map((m) => `${m.field}|${m.id}`).sort()]);
+  let kept = changes.get(before);
+  if (!kept) changes.set(before, (kept = []));
+  const hit = kept.find((k) => k.sig === sig && k.after.every((d, i) => d === deps[i]));
+  if (hit) return hit.changed;
+  const changed = changedOn(before, after, scene, touch);
+  kept.push({ after: deps, sig, changed });
+  if (kept.length > 4) kept.shift();
+  return changed;
+}
+
 function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: SceneTouch): Changed {
   const sceneId = scene.id;
   const was = before.scenes[sceneId];
@@ -362,8 +384,14 @@ function cellsChanged(out: Changed, sceneId: string, cx: number, cy: number, cb:
 }
 
 /** Whether a chunk can hold a stair: a mark or stairs terrain. */
+/** Whether a chunk holds a stair, kept per chunk object, which the reducer replaces and never changes. */
+const stairChunks = new WeakMap<BuildChunk, boolean>();
+
 function hasStairs(chunk: BuildChunk | undefined): boolean {
-  return chunk !== undefined && (chunkMarks(chunk) !== null || Object.values(chunk.cells).includes("stairs"));
+  if (chunk === undefined) return false;
+  let has = stairChunks.get(chunk);
+  if (has === undefined) stairChunks.set(chunk, (has = chunkMarks(chunk) !== null || Object.values(chunk.cells).includes("stairs")));
+  return has;
 }
 
 /**
@@ -373,13 +401,17 @@ function hasStairs(chunk: BuildChunk | undefined): boolean {
  */
 function stairsChanged(out: Changed, before: RoomState, after: RoomState, scene: Scene): void {
   const was = before.scenes[scene.id];
+  // Only the scene's own positions, read before deriving either stair map: most scenes hold no stair at all.
+  const positions = new Set<string>();
+  for (const s of was ? [was, scene] : [scene]) {
+    for (const { cx, cy } of chunkPositions(s)) {
+      if (hasStairs(before.buildChunks[chunkKey(scene.id, cx, cy)]) || hasStairs(after.buildChunks[chunkKey(scene.id, cx, cy)])) positions.add(`${cx},${cy}`);
+    }
+  }
+  if (positions.size === 0) return;
   const mapB: WallSet | null = was ? sceneWalls(was, before.buildChunks) : null;
   const mapA = sceneWalls(scene, after.buildChunks);
   if (mapB === mapA) return;
-  const positions = new Set<string>();
-  for (const all of [before.buildChunks, after.buildChunks]) {
-    for (const chunk of Object.values(all)) if (chunk && chunk.sceneId === scene.id && hasStairs(chunk)) positions.add(`${chunk.cx},${chunk.cy}`);
-  }
   for (const at of [...positions].sort(byRow)) {
     const [cx, cy] = at.split(",").map(Number) as [number, number];
     const cb = before.buildChunks[chunkKey(scene.id, cx, cy)];
@@ -622,7 +654,7 @@ function layersOf(state: RoomState, scene: Scene): Layer[] {
 
 function sceneStep(input: MapStepInput, scene: Scene, touch: SceneTouch, doors: readonly DoorTouch[], memory: MemoryIndex, memoryBefore: MemoryIndex): OpOf<"sys.remember"> | null {
   const { after } = input;
-  const changed = changedOn(input.before, after, scene, touch);
+  const changed = changedOnce(input.before, after, scene, touch);
   const layers: OpOf<"sys.remember">["layers"] = [];
   const forget: NonNullable<OpOf<"sys.remember">["forget"]> = [];
   for (const layer of layersOf(after, scene)) {
@@ -886,7 +918,7 @@ export function memoryGrowth(before: RoomState, after: RoomState, touched: reado
   for (const [sceneId, touch] of byScene) {
     const scene = after.scenes[sceneId];
     if (!scene || !keepsMemory(scene) || (touch.chunks.size === 0 && !touch.scene && touch.marks.length === 0)) continue;
-    const changed = changedOn(before, after, scene, touch);
+    const changed = changedOnce(before, after, scene, touch);
     if (changed.cells.length + changed.walls.length + changed.marks.length === 0) continue;
     const grid = sceneGrid(scene);
     for (const layer of layersOf(after, scene)) {
