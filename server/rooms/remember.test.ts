@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { autoAt, chunksOf, edge, fogRoom, knownAt, lift, paint, stairs, wall, wallsOf } from "#shared/discoveryTestutil.ts";
 import { chunkKey, holderChunkKey, tileKey, type EntityKey } from "#shared/keys.ts";
-import type { Label, MemoryChunk, RoomState, Stamp, Viewer } from "#shared/model.ts";
+import type { Label, MemoryChunk, PlayerChunk, RoomState, Stamp, Viewer } from "#shared/model.ts";
 import { withCellVision } from "#shared/perPlayerTestutil.ts";
 import { projectState } from "#shared/project.ts";
 import { serverOnlyOpSchema, type Op, type OpOf } from "#shared/protocol.ts";
@@ -220,6 +220,30 @@ describe("the map step", () => {
       s = batch(s, []).state;
       const off = batch(s, [{ t: "scene.update", sceneId: "s2", patch: { autoWalls: "off" } }]).state;
       assert.equal(off.memory?.[chunkKey("s2", 0, 0)]?.edges?.["2,3,w"], "auto");
+    });
+  });
+
+  test("a room erased out of sight under one rule shows no outline once the rule changes (MD3-D-1)", () => {
+    withCellVision(() => {
+      let s = crypt();
+      // The party explored the cellar, all stone, with the rule off, and is back on s1.
+      s.scenes.s2 = { ...s.scenes.s1!, id: "s2", name: "Cellar", order: 1, autoWalls: "off" };
+      const cells: Record<string, "stone"> = {};
+      for (let y = 2; y < 8; y++) for (let x = 2; x < 8; x++) cells[`${x},${y}`] = "stone";
+      s.buildChunks = { ...s.buildChunks, [chunkKey("s2", 0, 0)]: { sceneId: "s2", cx: 0, cy: 0, rev: 1, cells, edges: {} } };
+      lift(s, "party", { x: 0, y: 0, w: 10, h: 10 }, "s2");
+      s.playedScenes = { ...s.playedScenes, s2: { sceneId: "s2", rev: 0 } };
+      s = batch(s, []).state;
+      s = batch(s, [{ t: "build.erase", sceneId: "s2", cells: ["4,4", "5,4", "4,5", "5,5"] }]).state;
+      const all = batch(s, [{ t: "scene.update", sceneId: "s2", patch: { autoWalls: "all" } }]).state;
+      const memory = all.memory?.[chunkKey("s2", 0, 0)];
+      assert.equal(memory?.cells?.["4,4"], "stone");
+      for (const key of ["4,4,w", "4,4,n", "6,4,w", "4,6,n"]) assert.equal(memory?.edges?.[key], null, `${key} remembered without a wall`);
+      // Back in the cellar, out of sight of the hole, their map shows the stone floor they saw and no outline.
+      const there = { ...all, meta: { ...all.meta, playerSceneId: "s2" } };
+      const chunk = projectState(there, P1, { sceneId: "s2" }).buildChunks[chunkKey("s2", 0, 0)] as PlayerChunk | undefined;
+      assert.equal(chunk?.cells["4,4"], "stone");
+      for (const key of ["4,4,w", "4,4,n", "6,4,w", "4,6,n"]) assert.ok(!autoAt(chunk, key) && chunk?.edges[key] === undefined, `${key} shows no wall`);
     });
   });
 
