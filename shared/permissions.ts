@@ -2217,13 +2217,26 @@ function companionLanding(c: Check, op: OpOf<"token.create">, takes: (o: Op) => 
       const o = footprintSize(t);
       return at.x + fp.w <= t.x || t.x + o.w <= at.x || at.y + fp.h <= t.y || t.y + o.h <= at.y;
     });
+  // Only spots within the companion's reach of a token of its character can be taken, so the check runs on those alone,
+  // and on at most COMPANION_LANDING_TRIES of them, so one crafted op costs a bounded number of checks (MD2-O-12).
+  const settings = c.state.meta.settings;
+  const scene = c.state.scenes[input.sceneId];
+  const ref = input.companion?.of;
+  const own = Object.values(c.state.tokens).filter((t) => t.sceneId === input.sceneId && "ref" in t.actor && t.actor.ref === ref);
+  let tries = 0;
   for (const at of spots) {
-    if (!clear(at)) continue;
+    if (!clear(at) || !scene) continue;
+    const placed = { ...input, x: at.x, y: at.y, elevation: input.elevation ?? 0 };
+    if (!own.some((t) => withinCompanionReach(settings, sceneGrid(scene), placed, t))) continue;
+    if (++tries > COMPANION_LANDING_TRIES) break;
     const moved: OpOf<"token.create"> = { ...op, token: { ...input, x: at.x, y: at.y } };
     if (takes(moved)) return { op: moved, words: SOMETHING_BLOCKS };
   }
   return null;
 }
+
+/** The most spots a companion's landing asks the check of: every spot within a Gargantuan character's reach on a half-cell grid, and to spare. */
+const COMPANION_LANDING_TRIES = 160;
 
 /** A teleport lands on the map, wherever the walls are (section 4.1). */
 export const TELEPORT_OFF_MAP = "a teleport lands inside the map";
