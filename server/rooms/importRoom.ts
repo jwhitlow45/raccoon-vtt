@@ -33,7 +33,8 @@ import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoo
 import type { RoomGateway } from "./gateway.ts";
 import { archiveLines } from "./persistence.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
-import { checkWholeScenes, measuredStateBytes, MEMORY_FULL, memoryReserves } from "./sizeGuard.ts";
+import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
+import { checkWholeScenes, measuredStateBytes, MEMORY_FULL, memoryCapOf, memoryReserves } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
@@ -299,6 +300,9 @@ function parseJson(buffer: Buffer, name: string): unknown {
   }
 }
 
+/** The refusal of a file whose players' memory of a scene is larger than the room keeps it (docs/design-v1-map-discovery.md 5.5). */
+export const MEMORY_TOO_LARGE = "Players' remembered map of a scene in this file is larger than a room keeps.";
+
 /** The room limits of design 10.5 over the whole imported state. */
 export function assertWithinLimits(state: RoomState): void {
   const over = (reason: string) => new HttpError(413, "over_room_limits", { extra: { reason } });
@@ -326,6 +330,15 @@ export function assertWithinLimits(state: RoomState): void {
   if (bytes + exploredReserve(state) > LIMITS.stateBytes) throw over(NO_ROOM_TO_EXPLORE);
   // And players' memory to its caps where a scene takes its whole cap: shares shrink to fit (docs/design-v1-map-discovery.md 5.5).
   if (bytes + exploredReserve(state) + memoryReserves(state).whole > LIMITS.stateBytes) throw over(MEMORY_FULL);
+  // No measure reads memory, which counts at its caps, so each layer the file holds must lie within its cap (MD3-D-4).
+  const layers = new Set<string>();
+  for (const c of Object.values(state.memory ?? {})) layers.add(JSON.stringify([c.sceneId, null]));
+  for (const c of Object.values(state.memoryBy ?? {})) layers.add(JSON.stringify([c.sceneId, c.memberId ?? null]));
+  for (const key of [...layers].sort()) {
+    const [sceneId, layer] = JSON.parse(key) as [string, string | null];
+    const scene = state.scenes[sceneId];
+    if (!scene || layerCharge(state, scene, layer) > memoryCapOf(state, scene, MEMORY_CAP, layer)) throw over(MEMORY_TOO_LARGE);
+  }
   // Each scene as the ops on it will measure it, its sight and exploration reserved, so no imported scene refuses its first move.
   const scenes = checkWholeScenes(state);
   if (!scenes.ok) throw over(scenes.message);
