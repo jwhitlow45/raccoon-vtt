@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { autoAt, chunksOf, edge, fogRoom, heights, knownAt, lift, liftSubs, paint, remember, stairs, wall, wallsOf } from "./discoveryTestutil.ts";
 import { keys } from "./keys.ts";
-import type { FreeWall, Label, PlayerChunk, RoomState, Stamp } from "./model.ts";
+import type { FreeWall, Label, PlayerChunk, RoomState, Scene, Stamp } from "./model.ts";
 import { allKeys, dependents, heldChunks, pieceId, playerChunk, projectEntity, projectState, stableStringify } from "./project.ts";
+import { encodeTile, fullTileBits } from "./rules/fog.ts";
 import { groundOf, PIECE_GRID, wallSpans } from "./rules/held.ts";
 import { sceneGrid } from "./rules/grid.ts";
 import { hexSubcells, parseHexKey, type HexGrid } from "./rules/hex.ts";
 import { indexBuild, sceneWalls } from "./rules/walls.ts";
 import { DM, P1, P2, deepClone } from "./testutil.ts";
+import { markFinished, markWritable } from "./writable.ts";
 
 /*
  * The map as players discover it (docs/design-v1-map-discovery.md 5.1 and
@@ -564,9 +566,9 @@ describe("memory in the projection (5.3, decision 6)", () => {
  * reads) does (the performance pass).
  */
 describe("one position's pieces and the whole scene's", () => {
-  const same = (state: RoomState, cx: number, cy: number) => {
-    const one = playerChunk(state, { sceneId: "s1", cx, cy }, null);
-    const all = heldChunks(JSON.parse(JSON.stringify(state)) as RoomState, "s1", null)[`s1:${cx},${cy}`] ?? null;
+  const same = (state: RoomState, cx: number, cy: number, view: string | null = null) => {
+    const one = playerChunk(state, { sceneId: "s1", cx, cy }, view);
+    const all = heldChunks(JSON.parse(JSON.stringify(state)) as RoomState, "s1", view)[`s1:${cx},${cy}`] ?? null;
     assert.equal(stableStringify(one), stableStringify(all));
     return one;
   };
@@ -591,6 +593,21 @@ describe("one position's pieces and the whole scene's", () => {
     remember(state, null, 1, 0, { walls: { [live.id]: [{ wall: { ...live, a: [8, 5], b: [8, 6] }, cells: ["7,5", "8,5"] }] } });
     assert.equal(same(state, 0, 0)?.walls?.some((w) => w.id === live.id) ?? false, false, "the live door wins where it is live");
     assert.ok(same(state, 1, 0)?.walls?.some((w) => w.id === live.id));
+  });
+
+  test("a wall a holder remembers in their own layer, beside the party's memory of it", () => {
+    const state = fogRoom({ vision: true, perPlayer: true });
+    state.holders.s1 = { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] };
+    lift(state, "party", { x: 0, y: 0, w: 48, h: 32 });
+    lift(state, { holder: "p1" }, { x: 0, y: 0, w: 16, h: 16 });
+    lift(state, "dm", { x: 20, y: 0, w: 10, h: 32 });
+    // Stored in position 1,0 and seen there now; p1 remembers it at x = 8 and the party at x = 9, both in position 0,0.
+    const live = wall(state, "abcdefghijkl", [24, 5], [24, 6]);
+    remember(state, "p1", 1, 0, { walls: { [live.id]: [{ wall: { ...live, a: [8, 5], b: [8, 6] }, cells: ["7,5", "8,5"] }] } });
+    remember(state, null, 1, 0, { walls: { [live.id]: [{ wall: { ...live, a: [9, 5], b: [9, 6] }, cells: ["8,5", "9,5"] }] } });
+    const xs = (same(state, 0, 0, "p1")?.walls ?? []).map((w) => Math.round(w.a[0]));
+    assert.ok(xs.includes(8) && !xs.includes(9), `p1 reads their own memory where their own layer holds the cells: ${xs.join(" ")}`);
+    assert.ok((same(state, 0, 0, null)?.walls ?? []).some((w) => Math.round(w.a[0]) === 9), "the shared class reads the party's");
   });
 });
 
@@ -648,6 +665,51 @@ describe("the players' chunk memo", () => {
     // The party's tile written again as the reducer writes it: a new object, and every cell held as it was.
     liftSubs(state, "party", [[1, 1]]);
     assert.equal(chunksOf(state, P1)["0,0"], before);
+  });
+
+  test("a chunk read again between two other answers: the very same chunk, as the slot keeps the answers read last", () => {
+    const state = fogRoom();
+    paint(state, { x: 3, y: 3, w: 2, h: 2 });
+    lift(state, "party", { x: 0, y: 0, w: 8, h: 8 });
+    const first = chunksOf(state, P1)["0,0"];
+    // One more cell held, then the same cells again on fresh tile objects, as a step off and back writes them.
+    for (const x of [8, 9]) {
+      lift(state, "party", { x, y: 0, w: 1, h: 1 });
+      assert.notEqual(chunksOf(state, P1)["0,0"], first, `cell ${x},0 held too`);
+      lift(state, "party", { x, y: 0, w: 1, h: 1 }, "s1", false);
+      assert.equal(chunksOf(state, P1)["0,0"], first, `back from cell ${x},0`);
+    }
+  });
+
+  test("two scenes' chunks at the same position, one changed: the other's key is its own", () => {
+    const state = fogRoom();
+    state.scenes.s2 = { ...state.scenes.s1!, id: "s2" };
+    paint(state, { x: 3, y: 3, w: 1, h: 1 }, "stone");
+    state.buildChunks = { ...state.buildChunks, "s2:0,0": { sceneId: "s2", cx: 0, cy: 0, rev: 1, cells: { "3,3": "wood" }, edges: {} } };
+    lift(state, "dm", { x: 0, y: 0, w: 8, h: 8 });
+    lift(state, "dm", { x: 0, y: 0, w: 8, h: 8 }, "s2");
+    const cell = (sceneId: string) => playerChunk(state, { sceneId, cx: 0, cy: 0 }, null)?.cells["3,3"];
+    assert.deepEqual([cell("s1"), cell("s2")], ["stone", "wood"]);
+    state.buildChunks = { ...state.buildChunks, "s2:0,0": { sceneId: "s2", cx: 0, cy: 0, rev: 2, cells: { "3,3": "grass" }, edges: {} } };
+    assert.deepEqual([cell("s1"), cell("s2")], ["stone", "grass"]);
+  });
+
+  test("a class's ground and a scene's fields while an op still writes them: read as they are now", () => {
+    const state = fogRoom();
+    paint(state, { x: 2, y: 2, w: 2, h: 2 });
+    lift(state, "party", { x: 0, y: 0, w: 8, h: 8 });
+    markWritable(state.fogTiles);
+    assert.equal(groundOf(state, "s1", null)!.held(20, 20), false);
+    // A transaction writes into the collection it copied.
+    state.fogTiles["s1:1,1"] = { sceneId: "s1", tx: 1, ty: 1, rev: 1, bits: encodeTile(fullTileBits()) };
+    assert.equal(groundOf(state, "s1", null)!.held(20, 20), true, "the tile written since is read");
+    markFinished(state.fogTiles);
+    const scene: Scene = (state.scenes.s1 = { ...state.scenes.s1!, autoWalls: "all" });
+    markWritable(scene);
+    assert.ok(autoAt(playerChunk(state, { sceneId: "s1", cx: 0, cy: 0 }, null) ?? undefined, "2,2,w"));
+    scene.autoWalls = "off";
+    assert.ok(!autoAt(playerChunk(state, { sceneId: "s1", cx: 0, cy: 0 }, null) ?? undefined, "2,2,w"), "the rule written since is read");
+    markFinished(scene);
   });
 
   test("a build stroke replaces the scene object, and positions it never reached hand back the very same chunk", () => {

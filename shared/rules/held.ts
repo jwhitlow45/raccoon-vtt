@@ -1,6 +1,7 @@
 import { holderTileKey, tileKey } from "../keys.ts";
 import { CHUNK_CELLS, FOG_SUBCELLS, FREE_WALL_LATTICE, type FogTile, type FreeWall, type RoomState, type Scene, type SightTile } from "../model.ts";
 import { visionRules, type PartySight, type SightProbe } from "../ruleHooks.ts";
+import { isWritable } from "../writable.ts";
 import { decodeTile, getBit, TILE_CELLS, TILE_SUB } from "./fog.ts";
 import { placedOnHex, type CellRange } from "./footprint.ts";
 import type { Point } from "./geom.ts";
@@ -194,7 +195,37 @@ export function classSight(state: RoomState, scene: Scene, holder: string | null
  * for the shared class (fogClassOf).
  */
 export function groundOf(state: RoomState, sceneId: string, holder: string | null): Ground | null {
-  return groundWith(state, sceneId, holder, true);
+  const scene = state.scenes[sceneId];
+  if (!scene) return null;
+  const own = ownClass(state, sceneId, holder);
+  const sight = remembers(scene) ? classSight(state, scene, own) : null;
+  const { fogTiles, exploredTiles, exploredBy } = state;
+  if (isWritable(scene) || isWritable(fogTiles) || isWritable(exploredTiles) || isWritable(exploredBy)) return groundWith(state, scene, own, sight, true);
+  let byClass = grounds.get(scene);
+  if (!byClass) grounds.set(scene, (byClass = new Map()));
+  const kept = byClass.get(own);
+  if (kept && kept.fogTiles === fogTiles && kept.exploredTiles === exploredTiles && kept.exploredBy === exploredBy && kept.sight === sight) return kept.ground;
+  const ground = groundWith(state, scene, own, sight, true);
+  byClass.set(own, { fogTiles, exploredTiles, exploredBy, sight, ground });
+  return ground;
+}
+
+/*
+ * Each class's last ground on a scene, by the scene object and every other
+ * input it reads: the fog layers and the class's sight. A fan-out asks it
+ * for each position a class may hold, which would otherwise read the tiles
+ * again for every one. Nothing is kept while an op may still write any of
+ * them (writable.ts).
+ */
+type KeptGround = { fogTiles: object; exploredTiles: object | undefined; exploredBy: object | undefined; sight: PartySight | null; ground: Ground };
+const grounds = new WeakMap<Scene, Map<string | null, KeptGround>>();
+
+function ownClass(state: RoomState, sceneId: string, holder: string | null): string | null {
+  return holder !== null && holdsOwnSight(state, sceneId, holder) ? holder : null;
+}
+
+function remembers(scene: Scene): boolean {
+  return scene.fogEnabled && scene.vision?.on === true;
 }
 
 /**
@@ -206,27 +237,28 @@ export function groundOf(state: RoomState, sceneId: string, holder: string | nul
  * the line then hold it. Never for a projection.
  */
 export function pendingGround(state: RoomState, sceneId: string, holder: string | null): Ground | null {
-  return groundWith(state, sceneId, holder, false);
-}
-
-function groundWith(state: RoomState, sceneId: string, holder: string | null, liveInsideHeld: boolean): Ground | null {
   const scene = state.scenes[sceneId];
   if (!scene) return null;
-  const own = holder !== null && holdsOwnSight(state, sceneId, holder) ? holder : null;
+  const own = ownClass(state, sceneId, holder);
+  return groundWith(state, scene, own, remembers(scene) ? classSight(state, scene, own) : null, false);
+}
+
+/** `sight` is the class's (classSight) where the scene remembers, else null. The layers read the collections the state holds now, so a ground kept by them never reads one set on the state later. */
+function groundWith(state: RoomState, scene: Scene, own: string | null, sight: PartySight | null, liveInsideHeld: boolean): Ground {
+  const sceneId = scene.id;
+  const { fogTiles, exploredTiles, exploredBy } = state;
   const held: Layer = cached((tx, ty) => {
     const key = tileKey(sceneId, tx, ty);
-    const parts = [state.fogTiles[key], state.exploredTiles?.[key], own === null ? undefined : state.exploredBy?.[holderTileKey(sceneId, own, tx, ty)]];
+    const parts = [fogTiles[key], exploredTiles?.[key], own === null ? undefined : exploredBy?.[holderTileKey(sceneId, own, tx, ty)]];
     return unionOf(parts, (p) => fogBits(p as FogTile));
   });
-  const ownLayer: Layer = own === null ? NONE : cached((tx, ty) => fogBits(state.exploredBy?.[holderTileKey(sceneId, own, tx, ty)]));
+  const ownLayer: Layer = own === null ? NONE : cached((tx, ty) => fogBits(exploredBy?.[holderTileKey(sceneId, own, tx, ty)]));
   let live: Layer;
   let asked: PointLive | undefined;
-  const remembers = scene.fogEnabled && scene.vision?.on === true;
-  if (!remembers) live = held;
+  if (!remembers(scene)) live = held;
   else {
-    const sight = classSight(state, scene, own);
     live = cached((tx, ty) => {
-      const dm = state.fogTiles[tileKey(sceneId, tx, ty)];
+      const dm = fogTiles[tileKey(sceneId, tx, ty)];
       const seen = sight?.tiles.get(`${tx},${ty}`);
       return unionOf([dm, seen], (p) => (p === dm ? fogBits(p as FogTile) : sightBits(p as SightTile)));
     });
@@ -236,7 +268,7 @@ function groundWith(state: RoomState, sceneId: string, holder: string | null, li
      * a cell's sight costs its own sub-cells, not every holder's raster
      * drawn at every moment.
      */
-    if (!liveInsideHeld) asked = { dm: cached((tx, ty) => fogBits(state.fogTiles[tileKey(sceneId, tx, ty)])), sight };
+    if (!liveInsideHeld) asked = { dm: cached((tx, ty) => fogBits(fogTiles[tileKey(sceneId, tx, ty)])), sight };
   }
   return makeGround(scene, own, held, live, ownLayer, liveInsideHeld, asked);
 }

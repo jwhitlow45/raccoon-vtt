@@ -1376,6 +1376,12 @@ export function inPositions(scene: Pick<Scene, "bounds" | "gridShape">, cx: numb
  */
 export function positionTiles(scene: Pick<Scene, "gridShape">, cx: number, cy: number): [number, number][] {
   const out: [number, number][] = [];
+  const grid = sceneGrid(scene);
+  // Every key of every position asks this: on squares the 3 x 3 alone, which never repeats a tile.
+  if (!isHex(grid)) {
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (cx + dx >= 0 && cy + dy >= 0) out.push([cx + dx, cy + dy]);
+    return out;
+  }
   const seen = new Set<string>();
   const add = (tx: number, ty: number) => {
     const at = `${tx},${ty}`;
@@ -1384,8 +1390,7 @@ export function positionTiles(scene: Pick<Scene, "gridShape">, cx: number, cy: n
     out.push([tx, ty]);
   };
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) add(cx + dx, cy + dy);
-  const grid = sceneGrid(scene);
-  if (isHex(grid)) {
+  {
     const corners = [
       hexCenter(grid, { col: cx * CHUNK_CELLS, row: cy * CHUNK_CELLS }),
       hexCenter(grid, { col: cx * CHUNK_CELLS + CHUNK_CELLS - 1, row: cy * CHUNK_CELLS + CHUNK_CELLS - 1 }),
@@ -1561,10 +1566,10 @@ function heldNear(ground: Ground, cx: number, cy: number, reach: number): boolea
  * fan-out need not hash again, and a changed input never hits. Of the scene
  * the key holds only the fields a position reads (sceneFields), since every
  * build stroke and door toggle replaces the scene object to bump its walls
- * version (MD2-O-4). Each position keeps its last two answers, for the
- * committed state and a staged one, in slots hung off the scene's bounds
- * object, so a room's slots go when it unloads (MD2-O-5). Nothing is kept
- * while an op is still writing the state.
+ * version (MD2-O-4). Each position keeps the two answers read last, for
+ * the committed state and a staged one (used), in slots hung off the
+ * scene's bounds object, so a room's slots go when it unloads (MD2-O-5).
+ * Nothing is kept while an op is still writing the state.
  */
 const objectIds = new WeakMap<object, number>();
 let nextObjectId = 1;
@@ -1603,9 +1608,42 @@ function hasStairs(chunk: BuildChunk): boolean {
   return has;
 }
 
-/** What a player's chunk reads of its scene: chunkFor, groundOf, the pieces' rounding and the stair map. */
+/** What a player's chunk reads of its scene: chunkFor, groundOf, the pieces' rounding and the stair map. Kept per scene object, which is replaced and never changed. */
+const fieldsOfScene = new WeakMap<Scene, string>();
+
 function sceneFields(scene: Scene): string {
-  return `${scene.id}|${scene.bounds.w}x${scene.bounds.h}|${autoWallsOf(scene)}|${scene.gridShape ?? ""}|${scene.fogEnabled}|${scene.vision?.on === true}`;
+  let fields = fieldsOfScene.get(scene);
+  if (fields === undefined) {
+    fields = `${scene.id}|${scene.bounds.w}x${scene.bounds.h}|${autoWallsOf(scene)}|${scene.gridShape ?? ""}|${scene.fogEnabled}|${scene.vision?.on === true}`;
+    if (!isWritable(scene)) fieldsOfScene.set(scene, fields);
+  }
+  return fields;
+}
+
+/*
+ * The ids of a finished collection's entries (idOf) at chunk or tile
+ * coordinates of one scene and layer, kept per collection, which is never
+ * written again (writable.ts). Each position's key reads the 3 x 3 around
+ * it, so a fan-out keying every position near a move reads each entry for
+ * up to nine of them.
+ */
+const entryIds = { chunk: new WeakMap<object, Map<string, Map<number, number>>>(), tile: new WeakMap<object, Map<string, Map<number, number>>>() };
+
+function idAt(collection: Readonly<Record<string, object | undefined>> | undefined, kind: "chunk" | "tile", sceneId: string, holder: string | null, x: number, y: number): number {
+  if (!collection) return 0;
+  let layers = entryIds[kind].get(collection);
+  if (!layers) entryIds[kind].set(collection, (layers = new Map()));
+  const layer = holder === null ? sceneId : `${sceneId}:${holder}`;
+  let ids = layers.get(layer);
+  if (!ids) layers.set(layer, (ids = new Map()));
+  // Coordinates from -1, as a position on the scene's side reads past it.
+  const at = (y + 1) * 65536 + (x + 1);
+  let id = ids.get(at);
+  if (id === undefined) {
+    const key = kind === "chunk" ? (holder === null ? chunkKey(sceneId, x, y) : holderChunkKey(sceneId, holder, x, y)) : holder === null ? tileKey(sceneId, x, y) : holderTileKey(sceneId, holder, x, y);
+    ids.set(at, (id = idOf(collection[key])));
+  }
+  return id;
 }
 
 function memoKey(state: RoomState, scene: Scene, own: FogClass, ground: Ground, cx: number, cy: number): Memo | null {
@@ -1617,10 +1655,10 @@ function memoKey(state: RoomState, scene: Scene, own: FogClass, ground: Ground, 
     for (let dx = -1; dx <= 1; dx++) {
       const x = cx + dx;
       const y = cy + dy;
-      const party = state.memory?.[chunkKey(sceneId, x, y)];
-      const mine = own === null ? undefined : state.memoryBy?.[holderChunkKey(sceneId, own, x, y)];
-      if (party || mine) remembered = true;
-      parts.push(idOf(state.buildChunks[chunkKey(sceneId, x, y)]), idOf(party), idOf(mine));
+      const party = idAt(state.memory, "chunk", sceneId, null, x, y);
+      const mine = own === null ? 0 : idAt(state.memoryBy, "chunk", sceneId, own, x, y);
+      if (party !== 0 || mine !== 0) remembered = true;
+      parts.push(idAt(state.buildChunks, "chunk", sceneId, null, x, y), party, mine);
     }
   }
   // A stair's direction reads the scene's whole stair map.
@@ -1628,7 +1666,7 @@ function memoKey(state: RoomState, scene: Scene, own: FogClass, ground: Ground, 
   if (here && hasStairs(here)) parts.push(idOf(sceneWalls(scene, state.buildChunks)));
   const base = parts.join(",");
   for (const [x, y] of positionTiles(scene, cx, cy)) {
-    parts.push(idOf(state.fogTiles[tileKey(sceneId, x, y)]), idOf(state.exploredTiles?.[tileKey(sceneId, x, y)]), own === null ? 0 : idOf(state.exploredBy?.[holderTileKey(sceneId, own, x, y)]));
+    parts.push(idAt(state.fogTiles, "tile", sceneId, null, x, y), idAt(state.exploredTiles, "tile", sceneId, null, x, y), own === null ? 0 : idAt(state.exploredBy, "tile", sceneId, own, x, y));
   }
   // Sight chooses live or remembered only where memory is.
   if (remembered) parts.push(idOf(classSight(state, scene, own)));
@@ -1660,14 +1698,28 @@ function recall(memo: Memo): PlayerChunk | null | undefined {
   const held = memo.slots.get(memo.slot);
   if (!held) return undefined;
   const hit = held.find((m) => m.key === memo.key);
-  if (hit) return hit.value;
+  if (hit) return used(held, hit).value;
   if (!held.some((m) => m.base === memo.base && m.region !== null)) return undefined;
   const region = memo.region();
   const same = region === null ? undefined : held.find((m) => m.base === memo.base && m.region === region);
   if (!same) return undefined;
   // The same answer by what the position reads: kept under this state's objects too, for the next ask.
   same.key = memo.key;
-  return same.value;
+  return used(held, same).value;
+}
+
+/*
+ * The answer just read goes first, so a slot keeps the two answers read
+ * last, not the two worked out last. A creature that steps off and comes
+ * back, as each move of a turn does, reads one answer again between new
+ * ones: kept by when they were worked out, it went every other step.
+ */
+function used(held: Kept[], kept: Kept): Kept {
+  if (held[0] !== kept) {
+    held.splice(held.indexOf(kept), 1);
+    held.unshift(kept);
+  }
+  return kept;
 }
 
 function keep(memo: Memo, value: PlayerChunk | null): void {
@@ -1877,14 +1929,15 @@ function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: 
     return e;
   };
   const wanted = (cx: number, cy: number) => positions === null || positions.has(`${cx},${cy}`);
-  for (const chunk of sceneChunkList(state.buildChunks, sceneId)) {
+  for (const chunk of positions === null ? sceneChunkList(state.buildChunks, sceneId) : chunksAt(state.buildChunks, sceneId, null, positions)) {
     if (!wanted(chunk.cx, chunk.cy)) continue;
     for (const wall of chunk.walls ?? []) element(chunk.cx, chunk.cy, wall.id).live = shownFreeWall(wall);
   }
   if (ground.remembers) {
     const layers: FogClass[] = ground.holder === null ? [null] : [null, ground.holder];
     for (const layer of layers) {
-      for (const chunk of Object.values((layer === null ? state.memory : state.memoryBy) ?? {})) {
+      const all = (layer === null ? state.memory : state.memoryBy) ?? {};
+      for (const chunk of positions === null ? Object.values(all) : chunksAt(all, sceneId, layer, positions)) {
         if (chunk.sceneId !== sceneId || (chunk.memberId ?? null) !== layer || !chunk.walls || !wanted(chunk.cx, chunk.cy)) continue;
         for (const [id, versions] of Object.entries(chunk.walls)) {
           const e = element(chunk.cx, chunk.cy, id);
@@ -1963,6 +2016,39 @@ function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: 
     filed.set(pos, out);
   }
   return filed;
+}
+
+/*
+ * The chunks of a collection, stored or remembered, of one scene and layer
+ * (a chunk's memberId, none for the party's and the stored ones) that
+ * stand at the positions given, by where each chunk says it stands. One
+ * position's pieces read its 3 x 3, and with every layer's memory full the
+ * collections hold many hundred chunks, so they are grouped once per
+ * collection, which is replaced and never changed.
+ */
+const chunksByPosition = new WeakMap<object, Map<string, Map<string, Map<string, (BuildChunk | MemoryChunk)[]>>>>();
+
+function chunksAt<T extends BuildChunk | MemoryChunk>(all: Readonly<Record<string, T>>, sceneId: string, layer: FogClass, positions: ReadonlySet<string>): readonly T[] {
+  let byScene = isWritable(all) ? undefined : chunksByPosition.get(all);
+  if (!byScene) {
+    byScene = new Map();
+    for (const chunk of Object.values(all)) {
+      if (!chunk) continue;
+      let byLayer = byScene.get(chunk.sceneId);
+      if (!byLayer) byScene.set(chunk.sceneId, (byLayer = new Map()));
+      const member = "memberId" in chunk ? (chunk.memberId ?? "") : "";
+      let byPosition = byLayer.get(member);
+      if (!byPosition) byLayer.set(member, (byPosition = new Map()));
+      const key = `${chunk.cx},${chunk.cy}`;
+      let list = byPosition.get(key);
+      if (!list) byPosition.set(key, (list = []));
+      list.push(chunk);
+    }
+    if (!isWritable(all)) chunksByPosition.set(all, byScene);
+  }
+  const byPosition = byScene.get(sceneId)?.get(layer ?? "");
+  if (!byPosition) return [];
+  return [...positions].flatMap((key) => (byPosition.get(key) ?? []) as T[]);
 }
 
 /** A scene's stored chunks, grouped once per chunk collection, which is replaced and never changed. */
