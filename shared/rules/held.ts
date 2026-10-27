@@ -54,6 +54,13 @@ export type Ground = {
   keyHeld(key: string): boolean;
   keyLive(key: string): boolean;
   keyOwn(key: string): boolean;
+  /**
+   * A tile's cells in one layer as a short text, one bit a cell, the same
+   * for tiles whose cells are the same whatever their sub-cells: `live` is
+   * the class's sight and the DM's reveals before they are cut to held
+   * ground. For keys of what a square position reads (project.ts memoKey).
+   */
+  cellsKey(layer: "held" | "live" | "own", tx: number, ty: number): string;
   /** Any square cell of a range, as labels and stamps are judged on every grid. */
   rangeHeld(r: CellRange): boolean;
   rangeLive(r: CellRange): boolean;
@@ -135,6 +142,23 @@ function cellMask(bits: Uint8Array): Uint8Array {
   }
   masks.set(bits, mask);
   return mask;
+}
+
+const maskTexts = new WeakMap<Uint8Array, string>();
+
+/** A cell mask as text, 16 bits a character, kept per mask. */
+function maskText(mask: Uint8Array): string {
+  let text = maskTexts.get(mask);
+  if (text === undefined) {
+    const codes: number[] = [];
+    for (let i = 0; i < mask.length; i += 16) {
+      let code = 0;
+      for (let j = 0; j < 16; j++) code = (code << 1) | (mask[i + j] ?? 0);
+      codes.push(code);
+    }
+    maskTexts.set(mask, (text = String.fromCharCode(...codes)));
+  }
+  return text;
 }
 
 /** A layer of the ground: the bits of each tile, looked up once per tile. */
@@ -281,6 +305,12 @@ function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveL
   const subLiveOnly = sub(liveLayer);
   const keyHeld = byKey(heldLayer, !fogged);
   const keyLiveOnly = byKey(liveLayer, !fogged);
+  const layerOf = { held: heldLayer, live: liveLayer, own: ownLayer };
+  const cellsKey = (layer: "held" | "live" | "own", tx: number, ty: number): string => {
+    if (!fogged) return "all";
+    const bits = layerOf[layer](tx, ty);
+    return bits === null ? "" : maskText(cellMask(bits));
+  };
   return {
     sceneId: scene.id,
     grid,
@@ -296,6 +326,7 @@ function makeGround(scene: Scene, holder: string | null, heldLayer: Layer, liveL
     keyHeld,
     keyLive: (key) => keyLiveOnly(key) && (!liveInsideHeld || keyHeld(key)),
     keyOwn: holder === null ? () => false : byKey(ownLayer, false),
+    cellsKey,
     rangeHeld: range(held),
     rangeLive: range(live),
     rangeOwn: holder === null ? () => false : range(own),

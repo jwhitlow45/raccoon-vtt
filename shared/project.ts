@@ -1504,7 +1504,7 @@ export function playerChunk(state: RoomState, at: { sceneId: string; cx: number;
   if (!ground) return null;
   // A piece filed here lies on held cells within 4 cells of the position, its longest reach from its own midpoint.
   if (!heldNear(ground, at.cx, at.cy, 4)) return null;
-  const memo = memoKey(state, scene, own, at.cx, at.cy);
+  const memo = memoKey(state, scene, own, ground, at.cx, at.cy);
   const hit = memo === null ? undefined : recall(memo);
   if (hit !== undefined) return hit;
   const out = chunkFor(state, scene, ground, at.cx, at.cy, piecesNear(state, scene, ground, at.cx, at.cy));
@@ -1524,7 +1524,7 @@ export function heldChunks(state: RoomState, sceneId: string, view: FogClass): R
   for (const { cx, cy } of chunkPositions(scene)) {
     // Nothing held at a position or across its north and west sides, and no piece filed there: it holds nothing, without a key.
     if (!heldNear(ground, cx, cy, 1) && !(filed ??= scenePieces(state, scene, ground, null)).has(`${cx},${cy}`)) continue;
-    const memo = memoKey(state, scene, own, cx, cy);
+    const memo = memoKey(state, scene, own, ground, cx, cy);
     let chunk = memo === null ? undefined : recall(memo);
     if (chunk === undefined) {
       filed ??= scenePieces(state, scene, ground, null);
@@ -1576,17 +1576,39 @@ function idOf(o: object | undefined | null): number {
   return id;
 }
 
-type Slots = Map<string, { key: string; value: PlayerChunk | null }[]>;
-type Memo = { slots: Slots; slot: string; key: string };
+/*
+ * A slot's answer, kept by two keys: `key`, every input object as above,
+ * for the common hit, and `base` with `region`, every input but the fog
+ * layers' tiles and the class's sight, which stand in by the cells of
+ * those tiles each layer holds (regionOf). A move that explores sub-cells
+ * of cells already held, or sees ground where no memory is, replaces the
+ * tile objects, so the first key misses, but the position reads nothing
+ * new and the second finds the same answer (the performance pass).
+ */
+type Kept = { key: string; base: string; region: string | null; value: PlayerChunk | null };
+type Slots = Map<string, Kept[]>;
+type Memo = { slots: Slots; slot: string; key: string; base: string; region: () => string | null };
 const memos = new WeakMap<object, Slots>();
 const MEMO_SLOTS = 50_000;
+
+/* Whether a chunk holds a stair, a mark or painted stairs: kept per chunk object, which is replaced and never changed, since every key asks it. */
+const stairChunks = new WeakMap<BuildChunk, boolean>();
+
+function hasStairs(chunk: BuildChunk): boolean {
+  let has = stairChunks.get(chunk);
+  if (has === undefined) {
+    has = chunkMarks(chunk) !== null || Object.values(chunk.cells).includes("stairs");
+    if (!isWritable(chunk)) stairChunks.set(chunk, has);
+  }
+  return has;
+}
 
 /** What a player's chunk reads of its scene: chunkFor, groundOf, the pieces' rounding and the stair map. */
 function sceneFields(scene: Scene): string {
   return `${scene.id}|${scene.bounds.w}x${scene.bounds.h}|${autoWallsOf(scene)}|${scene.gridShape ?? ""}|${scene.fogEnabled}|${scene.vision?.on === true}`;
 }
 
-function memoKey(state: RoomState, scene: Scene, own: FogClass, cx: number, cy: number): Memo | null {
+function memoKey(state: RoomState, scene: Scene, own: FogClass, ground: Ground, cx: number, cy: number): Memo | null {
   if (isWritable(state.buildChunks) || isWritable(state.fogTiles) || isWritable(state.exploredTiles ?? {}) || isWritable(state.exploredBy ?? {}) || isWritable(state.memory ?? {}) || isWritable(state.memoryBy ?? {})) return null;
   const sceneId = scene.id;
   const parts: (number | string)[] = [sceneFields(scene)];
@@ -1601,28 +1623,58 @@ function memoKey(state: RoomState, scene: Scene, own: FogClass, cx: number, cy: 
       parts.push(idOf(state.buildChunks[chunkKey(sceneId, x, y)]), idOf(party), idOf(mine));
     }
   }
+  // A stair's direction reads the scene's whole stair map.
+  const here = state.buildChunks[chunkKey(sceneId, cx, cy)];
+  if (here && hasStairs(here)) parts.push(idOf(sceneWalls(scene, state.buildChunks)));
+  const base = parts.join(",");
   for (const [x, y] of positionTiles(scene, cx, cy)) {
     parts.push(idOf(state.fogTiles[tileKey(sceneId, x, y)]), idOf(state.exploredTiles?.[tileKey(sceneId, x, y)]), own === null ? 0 : idOf(state.exploredBy?.[holderTileKey(sceneId, own, x, y)]));
   }
   // Sight chooses live or remembered only where memory is.
   if (remembered) parts.push(idOf(classSight(state, scene, own)));
-  // A stair's direction reads the scene's whole stair map.
-  const here = state.buildChunks[chunkKey(sceneId, cx, cy)];
-  if (here && (chunkMarks(here) !== null || Object.values(here.cells).includes("stairs"))) parts.push(idOf(sceneWalls(scene, state.buildChunks)));
   let slots = memos.get(scene.bounds);
   if (!slots) memos.set(scene.bounds, (slots = new Map()));
-  return { slots, slot: `${sceneId}|${own ?? ""}|${cx},${cy}`, key: parts.join(",") };
+  let region: string | null | undefined;
+  return { slots, slot: `${sceneId}|${own ?? ""}|${cx},${cy}`, key: parts.join(","), base, region: () => (region === undefined ? (region = regionOf(ground, scene, cx, cy, remembered)) : region) };
+}
+
+/*
+ * The cells of the position's tiles each fog layer holds: held, and with
+ * memory near live and own too, one bit a cell (Ground.cellsKey). The
+ * cells a square position reads, its own and those a piece filed there or
+ * an edge reads within 5 cells of it, lie in those tiles, and the
+ * projection reads ground by whole cells. Null on hexes, whose hexes are
+ * held by the sub-cells inside them: those keep the tile objects' key alone.
+ */
+function regionOf(ground: Ground, scene: Scene, cx: number, cy: number, remembered: boolean): string | null {
+  if (isHex(ground.grid)) return null;
+  const parts: string[] = [];
+  for (const [tx, ty] of positionTiles(scene, cx, cy)) {
+    parts.push(ground.cellsKey("held", tx, ty));
+    if (remembered) parts.push(ground.cellsKey("live", tx, ty), ground.cellsKey("own", tx, ty));
+  }
+  return parts.join("|");
 }
 
 function recall(memo: Memo): PlayerChunk | null | undefined {
-  return memo.slots.get(memo.slot)?.find((m) => m.key === memo.key)?.value;
+  const held = memo.slots.get(memo.slot);
+  if (!held) return undefined;
+  const hit = held.find((m) => m.key === memo.key);
+  if (hit) return hit.value;
+  if (!held.some((m) => m.base === memo.base && m.region !== null)) return undefined;
+  const region = memo.region();
+  const same = region === null ? undefined : held.find((m) => m.base === memo.base && m.region === region);
+  if (!same) return undefined;
+  // The same answer by what the position reads: kept under this state's objects too, for the next ask.
+  same.key = memo.key;
+  return same.value;
 }
 
 function keep(memo: Memo, value: PlayerChunk | null): void {
   const { slots } = memo;
   const held = slots.get(memo.slot) ?? [];
   slots.delete(memo.slot);
-  slots.set(memo.slot, [{ key: memo.key, value }, ...held.filter((m) => m.key !== memo.key)].slice(0, 2));
+  slots.set(memo.slot, [{ key: memo.key, base: memo.base, region: memo.region(), value }, ...held.filter((m) => m.key !== memo.key)].slice(0, 2));
   if (slots.size > MEMO_SLOTS) slots.delete(slots.keys().next().value!);
 }
 
@@ -1779,8 +1831,17 @@ export function pieceId(sceneId: string, piece: Pick<Piece, "a" | "b" | "kind">,
 function piecesNear(state: RoomState, scene: Scene, ground: Ground, cx: number, cy: number): readonly FreeWall[] {
   const near = new Set<string>();
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) near.add(`${cx + dx},${cy + dy}`);
-  return scenePieces(state, scene, ground, near).get(`${cx},${cy}`) ?? NO_WALLS;
+  return scenePieces(state, scene, ground, near, { cx, cy }).get(`${cx},${cy}`) ?? NO_WALLS;
 }
+
+/*
+ * How far past a position's sides the cells lie whose stretches can make a
+ * piece filed there: a piece lies in one 4-cell band of its run and no
+ * steeper than 45 degrees to it, so within 2 cells of its own midpoint,
+ * which lies in the position, and a cell more is margin. A visible door
+ * reads every cell of its element, wherever it stands.
+ */
+const FILED_REACH = 3;
 
 /** One free wall as an element: its real chunk and id, its live value as players see it, and the versions each layer remembers. */
 type WallElement = { cx: number; cy: number; id: string; live: FreeWall | undefined; party?: readonly RememberedWall[]; mine?: readonly RememberedWall[] };
@@ -1795,8 +1856,19 @@ type WallElement = { cx: number; cy: number; id: string; live: FreeWall | undefi
  * see goes whole under its real id and chunk: live where any cell it holds
  * is live, else as remembered.
  */
-function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: ReadonlySet<string> | null): Map<string, FreeWall[]> {
+function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: ReadonlySet<string> | null, only?: { cx: number; cy: number }): Map<string, FreeWall[]> {
   const sceneId = scene.id;
+  // For one position on squares, only the cells whose stretches can be filed there (FILED_REACH), and only its pieces get ids.
+  const focus = only && !isHex(ground.grid) ? { x0: only.cx * CHUNK_CELLS - FILED_REACH, y0: only.cy * CHUNK_CELLS - FILED_REACH, x1: (only.cx + 1) * CHUNK_CELLS + FILED_REACH, y1: (only.cy + 1) * CHUNK_CELLS + FILED_REACH } : null;
+  const inFocus = (cell: string) => {
+    if (!focus) return true;
+    const comma = cell.indexOf(",");
+    const x = Number(cell.slice(0, comma));
+    const y = Number(cell.slice(comma + 1));
+    return x + 1 >= focus.x0 && x <= focus.x1 && y + 1 >= focus.y0 && y <= focus.y1;
+  };
+  const near = (w: FreeWall | null | undefined) =>
+    !focus || !w || (Math.max(w.a[0], w.b[0]) >= focus.x0 && Math.min(w.a[0], w.b[0]) <= focus.x1 && Math.max(w.a[1], w.b[1]) >= focus.y0 && Math.min(w.a[1], w.b[1]) <= focus.y1);
   const elements = new Map<string, WallElement>();
   const element = (cx: number, cy: number, id: string): WallElement => {
     const key = `${cx},${cy}:${id}`;
@@ -1826,12 +1898,16 @@ function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: 
   const doors: FreeWall[] = [];
   for (const key of [...elements.keys()].sort()) {
     const e = elements.get(key)!;
+    const candidates = [e.live, ...(e.party ?? []).map((v) => v.wall), ...(e.mine ?? []).map((v) => v.wall)];
+    const anyDoor = candidates.some((w) => w && visibleDoor(w));
+    if (!anyDoor && !candidates.some(near)) continue;
     const cells = new Set<string>();
-    for (const wall of [e.live, ...(e.party ?? []).map((v) => v.wall), ...(e.mine ?? []).map((v) => v.wall)]) {
+    for (const wall of candidates) {
       if (wall) for (const span of wallSpans(ground.grid, wall)) cells.add(span.cell);
     }
     let door: { wall: FreeWall; live: boolean } | null = null;
     for (const cell of cells) {
+      if (!anyDoor && !inFocus(cell)) continue;
       if (!ground.keyHeld(cell)) continue;
       const live = ground.keyLive(cell);
       let wall: FreeWall | null | undefined = e.live;
@@ -1857,11 +1933,12 @@ function scenePieces(state: RoomState, scene: Scene, ground: Ground, positions: 
     if (!list) filed.set(pos, (list = []));
     list.push(wall);
   };
+  const filedHere = (cx: number, cy: number) => !only || (cx === only.cx && cy === only.cy);
   for (const wall of doors) {
     const at = wallChunk(wall);
-    file(`${at.cx},${at.cy}`, wall);
+    if (filedHere(at.cx, at.cy)) file(`${at.cx},${at.cy}`, wall);
   }
-  for (const piece of joinPieces(stretches, ground)) file(`${piece.cx},${piece.cy}`, { id: "", a: piece.a, b: piece.b, f: { kind: piece.kind } });
+  for (const piece of joinPieces(stretches, ground)) if (filedHere(piece.cx, piece.cy)) file(`${piece.cx},${piece.cy}`, { id: "", a: piece.a, b: piece.b, f: { kind: piece.kind } });
   for (const [pos, list] of filed) {
     list.sort(byCoordinates);
     // Ids taken in the position, doors' first: a piece that collides with one hashes again with a counter (MD-R4-1).
@@ -3909,7 +3986,7 @@ function hasMemory(state: RoomState, sceneId: string): boolean {
 function stairChunkKeys(state: RoomState, sceneId: string): EntityKey[] {
   const out: EntityKey[] = [];
   for (const chunk of sceneChunkList(state.buildChunks, sceneId)) {
-    if (chunkMarks(chunk) !== null || Object.values(chunk.cells).includes("stairs")) out.push(keys.chunk(sceneId, chunk.cx, chunk.cy));
+    if (hasStairs(chunk)) out.push(keys.chunk(sceneId, chunk.cx, chunk.cy));
   }
   return out;
 }

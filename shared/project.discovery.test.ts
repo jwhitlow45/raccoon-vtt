@@ -557,6 +557,43 @@ describe("memory in the projection (5.3, decision 6)", () => {
  * MD2-O-11): each case warms it with a projection, changes one input the
  * position's own objects do not show, and asks again.
  */
+/*
+ * One position's cut (piecesNear, what the fan-out asks for a key) reads
+ * only the cells whose stretches can be filed there, and gives each piece
+ * there the bytes the whole scene's cut (heldChunks, what a snapshot
+ * reads) does (the performance pass).
+ */
+describe("one position's pieces and the whole scene's", () => {
+  const same = (state: RoomState, cx: number, cy: number) => {
+    const one = playerChunk(state, { sceneId: "s1", cx, cy }, null);
+    const all = heldChunks(JSON.parse(JSON.stringify(state)) as RoomState, "s1", null)[`s1:${cx},${cy}`] ?? null;
+    assert.equal(stableStringify(one), stableStringify(all));
+    return one;
+  };
+
+  test("a piece filed at a position that reaches nearly 2 cells past its side", () => {
+    const state = fogRoom({ bounds: { w: 48, h: 48 } });
+    lift(state, "dm", { x: 0, y: 0, w: 48, h: 48 });
+    // At 45 degrees in the band x = 12 to 16, its middle at y = 15.9375 in position 0,0, its end at y = 17.9375.
+    wall(state, "abcdefghijkl", [12, 13.9375], [16, 17.9375]);
+    const here = same(state, 0, 0);
+    assert.ok(here?.walls?.some((w) => Math.max(w.a[1], w.b[1]) > 17.9), JSON.stringify(here?.walls));
+    same(state, 0, 1);
+  });
+
+  test("a door whose live place a position's cut would skip, and whose remembered place lies there", () => {
+    const state = fogRoom({ vision: true, bounds: { w: 48, h: 32 } });
+    lift(state, "party", { x: 0, y: 0, w: 48, h: 32 });
+    lift(state, "dm", { x: 20, y: 0, w: 10, h: 32 });
+    const closed = { kind: "door" as const, state: "closed" as const, secret: false, discovered: false };
+    // Stored in position 1,0 and seen there now; the party remembers it at x = 8, in position 0,0.
+    const live = wall(state, "abcdefghijkl", [24, 5], [24, 6], closed);
+    remember(state, null, 1, 0, { walls: { [live.id]: [{ wall: { ...live, a: [8, 5], b: [8, 6] }, cells: ["7,5", "8,5"] }] } });
+    assert.equal(same(state, 0, 0)?.walls?.some((w) => w.id === live.id) ?? false, false, "the live door wins where it is live");
+    assert.ok(same(state, 1, 0)?.walls?.some((w) => w.id === live.id));
+  });
+});
+
 describe("the players' chunk memo", () => {
   test("a stair run's far end raised two chunks away turns a held stair's upDir", () => {
     const state = fogRoom({ vision: true, bounds: { w: 64, h: 16 } });
@@ -587,6 +624,30 @@ describe("the players' chunk memo", () => {
     const { vision: _, ...off } = state.scenes.s1!;
     state.scenes = { ...state.scenes, s1: off };
     assert.equal(chunksOf(state, P1)["0,0"]!.cells["3,3"], "stone");
+  });
+
+  test("a holder's own layer reaching a cell the party already holds: the cell reads their own memory now", () => {
+    const state = fogRoom({ vision: true, perPlayer: true });
+    state.holders.s1 = { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] };
+    paint(state, { x: 3, y: 3, w: 1, h: 1 }, "stone");
+    lift(state, "party", { x: 0, y: 0, w: 8, h: 8 });
+    lift(state, { holder: "p1" }, { x: 6, y: 6, w: 1, h: 1 });
+    remember(state, null, 0, 0, { cells: { "3,3": "wood" } });
+    remember(state, "p1", 0, 0, { cells: { "3,3": "grass" } });
+    assert.equal(chunksOf(state, P1)["0,0"]!.cells["3,3"], "wood");
+    // Held already by the party's layer, so only the own bits of the cell change.
+    lift(state, { holder: "p1" }, { x: 3, y: 3, w: 1, h: 1 });
+    assert.equal(chunksOf(state, P1)["0,0"]!.cells["3,3"], "grass");
+  });
+
+  test("fresh tile objects over cells that are held as before: the very same chunk", () => {
+    const state = fogRoom();
+    paint(state, { x: 3, y: 3, w: 2, h: 2 });
+    lift(state, "party", { x: 0, y: 0, w: 8, h: 8 });
+    const before = chunksOf(state, P1)["0,0"];
+    // The party's tile written again as the reducer writes it: a new object, and every cell held as it was.
+    liftSubs(state, "party", [[1, 1]]);
+    assert.equal(chunksOf(state, P1)["0,0"], before);
   });
 
   test("a build stroke replaces the scene object, and positions it never reached hand back the very same chunk", () => {
