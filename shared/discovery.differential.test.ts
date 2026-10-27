@@ -128,6 +128,19 @@ describe("route corners on a scene with memory (decision 12)", () => {
   });
 });
 
+describe("route corners on a leg every player saw whole (decision 12)", () => {
+  test("keep their corners for every owner after the DM hides the ground again", () => {
+    const s = base();
+    reveal(s, "s1", ALL);
+    const m = moved(s);
+    const leg = stopsOf(m, DM)[1]!;
+    assert.ok(leg.via && leg.via.length > 0 && leg.routeSeen === true, "the leg was seen whole");
+    // The DM's reveal taken back: p1 and p2 explored the ground but see none of it in the dark.
+    lift(m, "dm", ALL, "s1", false);
+    for (const owner of [P1, P2]) assert.deepEqual(stopsOf(m, owner)[1]!.via, leg.via, `${owner.memberId} keeps the corners every device already counts from`);
+  });
+});
+
 describe("route corners follow the sight and ground they read (decision 12, 5.6)", () => {
   test("sight or the party's ground changing away from the token brings it again, on per-player and whole-party scenes alike", () => {
     const m = moved(base());
