@@ -11,7 +11,7 @@ import type { BuilderState } from "./store.ts";
  * players hold ground they see live, so what the DM builds in view shows
  * to them as it is built.
  */
-export const BUILD_IN_SIGHT = "The party can see where you are building, so they see it as you build. Build before moving players here, or tap Fog all when you finish.";
+export const BUILD_IN_SIGHT = "The party can see where you are building, so they see it as you build. Build before players come here, or tap Fog all when done.";
 
 /** The cells a builder gesture in progress touches: a stroke's unsent cells, a rectangle, a wall run's cells either side, a shape room's corners' box and a label dragged. */
 export function gestureCells(s: Pick<BuilderState, "unsent" | "rect" | "run" | "poly" | "labelMove">): string[] {

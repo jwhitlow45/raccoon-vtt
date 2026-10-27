@@ -3969,7 +3969,7 @@ export function isoChoiceTests(): void {
  * FU30_AT's sizes. The players and the DM go back to the room's scene
  * after.
  */
-const BUILD_IN_SIGHT = "The party can see where you are building, so they see it as you build. Build before moving players here, or tap Fog all when you finish.";
+const BUILD_IN_SIGHT = "The party can see where you are building, so they see it as you build. Build before players come here, or tap Fog all when done.";
 
 /** Moves the DM's page to a scene from its Scenes panel, and waits for its copy to say so. */
 async function dmOnScene(page: Page, sceneId: string): Promise<void> {
@@ -4017,6 +4017,13 @@ export function md4Tests(): void {
             const open = page.locator('[data-options-line="open"]');
             await open.waitFor();
             await sweep.measure(page, "md4-builder-note-open", open);
+            // Opened, the whole note shows: its last words are not left below a scroll (MD4-LK-4).
+            const clipped = await open.first().evaluate((el) => {
+              // The words scroll inside the line's button, in its first span (measure/controls.tsx OptionsLine).
+              const text = el.querySelector("button > span");
+              return text ? text.scrollHeight - text.clientHeight : 0;
+            });
+            if (clipped > 1) lines.push(`${atName(at)} md4-builder-note-open: the note's end is cut off by ${clipped} px`);
             await shots.take(page, `alignment-md4-builder-note-open-${atName(at)}`);
             await open.getByRole("button").first().click();
           }

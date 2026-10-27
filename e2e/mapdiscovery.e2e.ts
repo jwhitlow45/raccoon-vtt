@@ -167,7 +167,7 @@ function actor() {
 
 const TORCH = { bright: 20, dim: 20 };
 /** The builder's note while the party's sight meets a cell being built (design section 9). */
-const BUILD_IN_SIGHT = "The party can see where you are building, so they see it as you build. Build before moving players here, or tap Fog all when you finish.";
+const BUILD_IN_SIGHT = "The party can see where you are building, so they see it as you build. Build before players come here, or tap Fog all when done.";
 
 /** One of Ben's characters on a scene, with a torch unless `dark`. */
 function pc(id: string, sceneId: string, name: string, at: Cell, dark = false) {
