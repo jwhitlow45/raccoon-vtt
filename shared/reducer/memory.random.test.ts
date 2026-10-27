@@ -495,6 +495,6 @@ function orBits(state: RoomState, who: Layer, t: { tx: number; ty: number; bits:
 
 describe("players' memory as a state machine against a plain model (lane MD1)", () => {
   test("random runs keep M1 to M5 after every step", () => {
-    for (let seed = 1; seed <= 120; seed++) run(seed, 80);
+    for (let seed = 1; seed <= 200; seed++) run(seed, 80);
   });
 });

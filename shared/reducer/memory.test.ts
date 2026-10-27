@@ -253,6 +253,10 @@ describe("hides and Fog all (5.4)", () => {
     // Undo puts the DM's fog back, never what players remembered.
     const undone = apply(r.state, { t: "sys.restore", entries: r.inverse!, from: "undo" }, DM, 2);
     assert.deepEqual([undone.memory, undone.memoryBy], [{}, {}]);
+    // The memory goes with the scene's layers whatever ground it is on, a layer with no tile left included.
+    const bare = remembered([chunk("s1", 0, 0, { cells: { "1,1": null } })]);
+    bare.exploredTiles = {};
+    assert.deepEqual(apply(bare, { t: "fog.reset", sceneId: "s1", to: "hidden" }).memory, {});
   });
 });
 
