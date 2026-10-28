@@ -17,8 +17,8 @@ import {
 import type { PartySight, SightProbe } from "../ruleHooks.ts";
 import { footprintSize, footprintSubcells, isSqueezed, squeezedRect, storedCenter, tokenHeightFt } from "./footprint.ts";
 import type { Bounds } from "./geom.ts";
-import type { Grid } from "./grid.ts";
-import type { HexGrid } from "./hex.ts";
+import { gridOfShape, isHex, type Grid } from "./grid.ts";
+import { hexAt, type HexGrid } from "./hex.ts";
 import { footprintGround, groundAt, standing } from "./heights.ts";
 import { boundsOf, clipToBox, contact, CROSS, crossingsAt, indexPolygon, onSegment, orient, SIGHT, stepOffWalls, TOUCH, type Polygon, type SegmentIndex } from "./segments.ts";
 import type { SightSet, WallSet } from "./walls.ts";
@@ -1398,9 +1398,15 @@ function planLights(state: RoomState, scene: Scene, tokens: readonly Token[], wa
     const inputKey = `${x},${y},${bright},${dim},${shadows ? `${eye!.key},${at ? `${at.x},${at.y}` : "-"}` : "open"}`;
     out.push({ key, inputKey, eye, at, litBox, sweepBox, walls: shadows, rb, rd });
   };
+  // A light stands 5 ft over the ground of the square under it, or on hexes of the hex that holds it (H3).
+  const grid = gridOfShape(scene.gridShape);
+  const under = (x: number, y: number) => {
+    const h = isHex(grid) ? hexAt(grid, { x, y }) : { col: Math.floor(x), row: Math.floor(y) };
+    return groundAt(state.buildChunks, scene.id, h.col, h.row);
+  };
   for (const light of Object.values(state.lights)) {
     if (!light || light.sceneId !== scene.id || light.on !== true) continue;
-    plan(`l:${light.id}`, light.x, light.y, light.bright, light.dim, light.walls !== false, groundAt(state.buildChunks, scene.id, Math.floor(light.x), Math.floor(light.y)) + 5);
+    plan(`l:${light.id}`, light.x, light.y, light.bright, light.dim, light.walls !== false, under(light.x, light.y) + 5);
   }
   for (const token of carriedLights(state, tokens)) {
     const c = storedCenter(token);

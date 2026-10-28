@@ -3,7 +3,7 @@ import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Tok
 import type { TrapInput } from "#shared/protocol.ts";
 import { footprintRect, hexAnchor, occupiedHexes, placedOnHex, tokenRefHex, type PlacedToken } from "#shared/rules/footprint.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, hexInScene, hexLine, hexNeighbors, sceneHexSpan, HEX_R, type Hex, type HexGrid } from "#shared/rules/hex.ts";
-import { rangeGround } from "#shared/rules/heights.ts";
+import { groundAt, rangeGround } from "#shared/rules/heights.ts";
 import { inRects, pitFloorOf, rectHexes, trapCreature, wireHexes } from "#shared/rules/traps.ts";
 import { ABILITY_NAMES, choiceText } from "#shared/rules/skills.ts";
 import { damageTypeName } from "#shared/rules/damage.ts";
@@ -534,13 +534,14 @@ export function newTrapInput(input: { grid: Grid; id: string; sceneId: string; s
     if ("cells" in zone) hits = { cells: zone.cells.map((r) => ({ ...r })) };
     else if ("wire" in zone) hits = { cells: [isHex(grid) ? wireKeys(grid, zone.wire) : wireCells(zone.wire)] };
   } else if (typeof preset.hits === "object") {
-    const ground = rangeGround(input.chunks, input.sceneId, { x0: Math.floor(center.x), y0: Math.floor(center.y), x1: Math.floor(center.x) + 1, y1: Math.floor(center.y) + 1 });
+    // The ground of the hex or square under the zone's middle (H3 on hexes).
+    const under = isHex(grid) ? hexAt(grid, center) : { col: Math.floor(center.x), row: Math.floor(center.y) };
+    const ground = groundAt(input.chunks, input.sceneId, under.col, under.row);
     hits = { area: { shape: "cone", size: preset.hits.cone, origin: { x: center.x, y: center.y, z: ground }, yaw: 0, includeOrigin: false } };
   }
   const { on, ...rest } = preset.rig;
   const rig: TrapRig = { ...rest, on: squares ? (on.length > 0 ? on : ["enter"]) : [], hits };
-  // A pit needs heights, which hex scenes get later (shared/permissions.ts ON_HEXES.pit), so a preset's pit falls away there.
-  if (squares && !isHex(grid) && preset.pitDepth !== undefined) rig.pit = { floor: pitFloor(zoneGround(input.chunks, input.sceneId, zone.cells), preset.pitDepth) };
+  if (squares && preset.pitDepth !== undefined) rig.pit = { floor: pitFloor(zoneGround(input.chunks, input.sceneId, zone.cells), preset.pitDepth) };
   return { ...base, name: preset.name, rig };
 }
 

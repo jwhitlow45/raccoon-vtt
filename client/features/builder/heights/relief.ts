@@ -1,5 +1,7 @@
 import { CHUNK_CELLS, type BuildChunk } from "#shared/model.ts";
-import { chunkHeights, chunkMarks, type Compass } from "#shared/rules/heights.ts";
+import { isHex, type Grid } from "#shared/rules/grid.ts";
+import { chunkHeights, chunkMarks, facingsOf, oppositeFacing, stepper, type Compass, type Facing } from "#shared/rules/heights.ts";
+import { cornerAt, hexCenter, hexCorners, hexInScene, type HexGrid } from "#shared/rules/hex.ts";
 import { mergeRects, wallRuns } from "../geometry.ts";
 
 /**
@@ -22,7 +24,7 @@ type Bounds = { w: number; h: number };
 
 /** What the relief reads of the derived walls (shared/rules/walls.ts `WallSet`), so stairs point the way movement reads them. */
 export type ReliefSource = {
-  stairAt(x: number, y: number): Compass | null | undefined;
+  stairAt(x: number, y: number): Facing | null | undefined;
 };
 
 /** Lightening or darkening per 5 ft of height, and the most either goes. */
@@ -104,8 +106,8 @@ export function shadowLength(difference: number): number {
 }
 
 /** Whether a stair direction runs across a horizontal edge (north or south) or a vertical one (east or west). */
-const ACROSS_ROW = (d: Compass | null | undefined) => d === "n" || d === "s";
-const ACROSS_COLUMN = (d: Compass | null | undefined) => d === "e" || d === "w";
+const ACROSS_ROW = (d: Facing | null | undefined) => d === "n" || d === "s";
+const ACROSS_COLUMN = (d: Facing | null | undefined) => d === "e" || d === "w";
 
 /**
  * The relief's paths for a scene's chunks. `bounds` limits it to the scene,
@@ -113,7 +115,8 @@ const ACROSS_COLUMN = (d: Compass | null | undefined) => d === "e" || d === "w";
  * down sides, as walls.ts connects them) draws no rim or line, so the top
  * of a stair does not look like a cliff.
  */
-export function reliefPaths<P extends Sink>(chunks: readonly BuildChunk[], walls: ReliefSource, bounds: Bounds | null, make: () => P): ReliefPaths<P> {
+export function reliefPaths<P extends Sink>(chunks: readonly BuildChunk[], walls: ReliefSource, bounds: Bounds | null, make: () => P, grid: Grid = { shape: "squares" }): ReliefPaths<P> {
+  if (isHex(grid)) return hexReliefPaths(chunks, walls, bounds, make, grid);
   const shadows = Array.from({ length: SHADOW_BANDS }, make);
   const out: ReliefPaths<P> = { tints: [], shadows, rims: make(), ledges: make() };
   const g = groundOf(chunks, bounds);
@@ -179,11 +182,99 @@ export function reliefPaths<P extends Sink>(chunks: readonly BuildChunk[], walls
   return out;
 }
 
+/**
+ * The relief on a hex scene (docs/design-v1-hex-grids.md H3), lit from the
+ * top left as on squares: each level's hexes washed, a shadow falling from
+ * each raised side that faces away from the light onto the lower hex
+ * beyond it, and the sides between two heights drawn as a pale rim where
+ * the higher hex faces the light and a dark line where it faces away. A
+ * side a directed stair runs through draws neither.
+ */
+function hexReliefPaths<P extends Sink>(chunks: readonly BuildChunk[], walls: ReliefSource, bounds: Bounds | null, make: () => P, g: HexGrid): ReliefPaths<P> {
+  const shadows = Array.from({ length: SHADOW_BANDS }, make);
+  const out: ReliefPaths<P> = { tints: [], shadows, rims: make(), ledges: make() };
+  const inside = (x: number, y: number) => x >= 0 && y >= 0 && (!bounds || hexInScene(g, bounds, { col: x, row: y }));
+  const ground = new Map<string, number>();
+  const levels = new Map<number, { x: number; y: number }[]>();
+  for (const chunk of chunks) {
+    const heights = chunkHeights(chunk);
+    if (!heights) continue;
+    for (let k = 0; k < heights.length; k++) {
+      const v = heights[k]!;
+      if (v === 0) continue;
+      const x = chunk.cx * CHUNK_CELLS + (k % CHUNK_CELLS);
+      const y = chunk.cy * CHUNK_CELLS + Math.floor(k / CHUNK_CELLS);
+      if (!inside(x, y)) continue;
+      ground.set(`${x},${y}`, v);
+      let list = levels.get(v);
+      if (!list) levels.set(v, (list = []));
+      list.push({ x, y });
+    }
+  }
+  if (ground.size === 0) return out;
+  const corners = (x: number, y: number) => hexCorners(g, { col: x, row: y }).map((c) => cornerAt(g, c));
+  for (const [level, hexes] of [...levels].sort((a, b) => a[0] - b[0])) {
+    const path = make();
+    for (const h of hexes) {
+      corners(h.x, h.y).forEach((p, k) => (k === 0 ? path.moveTo(p.x, p.y) : path.lineTo(p.x, p.y)));
+      path.closePath();
+    }
+    out.tints.push({ color: tintOf(level), path });
+  }
+  const step = stepper(g);
+  const at = (x: number, y: number) => ground.get(`${x},${y}`) ?? 0;
+  const linked = (x: number, y: number, d: number) => {
+    const f = walls.stairAt(x, y);
+    const i = f == null ? -1 : facingsOf(g).indexOf(f);
+    return i === d || i === oppositeFacing(g, d);
+  };
+  // Every hex with ground and each of its neighbors: a side between two heights has at least one of them raised or lowered.
+  const seen = new Set<string>();
+  for (const key of ground.keys()) {
+    const [x, y] = key.split(",").map(Number) as [number, number];
+    for (let d = 0; d < 6; d++) {
+      const [nx, ny] = step(x, y, d);
+      if (!inside(nx, ny)) continue;
+      const pair = d < 3 ? `${x},${y},${d}` : `${nx},${ny},${d - 3}`;
+      if (seen.has(pair)) continue;
+      seen.add(pair);
+      const here = at(x, y);
+      const there = at(nx, ny);
+      if (here === there) continue;
+      const c = hexCenter(g, { col: x, row: y });
+      const n = hexCenter(g, { col: nx, row: ny });
+      const cs = corners(x, y);
+      const a = cs[(d + 1) % 6]!;
+      const b = cs[(d + 2) % 6]!;
+      // From the higher hex toward the lower: down and to the right faces away from the light.
+      const ux = here > there ? n.x - c.x : c.x - n.x;
+      const uy = here > there ? n.y - c.y : c.y - n.y;
+      const away = ux + uy > 0;
+      if (away) {
+        for (let band = 1; band <= SHADOW_BANDS; band++) {
+          const e = (shadowLength(Math.abs(here - there)) * band) / SHADOW_BANDS;
+          const path = shadows[SHADOW_BANDS - band]!;
+          path.moveTo(a.x, a.y);
+          path.lineTo(b.x, b.y);
+          path.lineTo(b.x + ux * e, b.y + uy * e);
+          path.lineTo(a.x + ux * e, a.y + uy * e);
+          path.closePath();
+        }
+      }
+      if (linked(x, y, d) || linked(nx, ny, oppositeFacing(g, d))) continue;
+      const line = away ? out.ledges : out.rims;
+      line.moveTo(a.x, a.y);
+      line.lineTo(b.x, b.y);
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Stairs
 
 /** A stair cell: where it is, which way it points up (null when the rule cannot settle it), and whether floor is painted under it. */
-export type StairCell = { x: number; y: number; dir: Compass | null; floor: boolean };
+export type StairCell = { x: number; y: number; dir: Facing | null; floor: boolean };
 
 /**
  * Every stair of a scene: cells of Stairs terrain and cells with a stair
@@ -251,21 +342,51 @@ function turn(dir: Compass, u: number, v: number): [number, number] {
   }
 }
 
-/** The paths for a set of stairs, in world cells. */
-export function stairPaths<P extends Sink>(stairs: readonly StairCell[], make: () => P): StairPaths<P> {
+/** How wide a hex stair's symbol is: the square one scaled to sit inside the hexagon, whose flats are a cell apart. */
+const HEX_SYMBOL = 0.68;
+
+/**
+ * Where a hex stair's symbol points (H3): its hex's center and the step
+ * toward the neighbor its facing names, a cell long, so the square
+ * symbol's north turns onto it, never mirrored.
+ */
+function hexFrame(g: HexGrid, s: StairCell): { c: { x: number; y: number }; up: { x: number; y: number } | null } {
+  const c = hexCenter(g, { col: s.x, row: s.y });
+  const i = s.dir === null ? -1 : facingsOf(g).indexOf(s.dir);
+  if (i < 0) return { c, up: null };
+  const [nx, ny] = stepper(g)(s.x, s.y, i);
+  const n = hexCenter(g, { col: nx, row: ny });
+  return { c, up: { x: n.x - c.x, y: n.y - c.y } };
+}
+
+/** The paths for a set of stairs, in world cells: on hexes each drawn in its hexagon, turned to its facing. */
+export function stairPaths<P extends Sink>(stairs: readonly StairCell[], make: () => P, grid: Grid = { shape: "squares" }): StairPaths<P> {
   const out: StairPaths<P> = { treads: Array.from({ length: TREADS }, make), risers: make(), chevrons: make(), steps: make() };
+  const hex = isHex(grid) ? grid : null;
   const depth = (1 - 2 * INSET) / TREADS;
   for (const s of stairs) {
-    if (s.dir === null) {
+    const frame = hex ? hexFrame(hex, s) : null;
+    if (s.dir === null || (frame && !frame.up)) {
       for (let k = 0; k < TREADS; k++) {
+        if (frame) {
+          const y = frame.c.y + (-0.3 + k * 0.15) * HEX_SYMBOL;
+          out.steps.moveTo(frame.c.x - 0.36 * HEX_SYMBOL, y);
+          out.steps.lineTo(frame.c.x + 0.36 * HEX_SYMBOL, y);
+          continue;
+        }
         const y = s.y + 0.2 + k * 0.15;
         out.steps.moveTo(s.x + 0.14, y);
         out.steps.lineTo(s.x + 0.86, y);
       }
       continue;
     }
-    const dir = s.dir;
-    const at = (u: number, v: number) => {
+    const dir = s.dir as Compass;
+    const at = (u: number, v: number): readonly [number, number] => {
+      if (frame?.up) {
+        // Across is the up step turned a quarter clockwise, as the square symbol's east is its north turned.
+        const { c, up } = frame;
+        return [c.x + (-up.y * (u - 0.5) + up.x * (0.5 - v)) * HEX_SYMBOL, c.y + (up.x * (u - 0.5) + up.y * (0.5 - v)) * HEX_SYMBOL] as const;
+      }
       const [px, py] = turn(dir, u, v);
       return [s.x + px, s.y + py] as const;
     };

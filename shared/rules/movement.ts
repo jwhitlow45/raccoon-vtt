@@ -1,7 +1,7 @@
 import type { Scene, Token } from "../model.ts";
 import type { DoorRef } from "../protocol.ts";
 import type { Blocker, BuildState, LegEnd } from "../ruleHooks.ts";
-import { anchorOfHex, canSqueeze, footprintRect, footprintSize, hexSqueezedSize, isSqueezed, occupiedRange, sizeCategory, snapStep, squeezedSize, storedCenter, type PlacedToken, type SizeCategory } from "./footprint.ts";
+import { anchorOfHex, canSqueeze, footprintRect, footprintSize, hexSqueezedSize, isSqueezed, occupiedHexes, occupiedRange, sizeCategory, snapStep, squeezedSize, storedCenter, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footing, footprintGround, standing, type Standing } from "./heights.ts";
 import { APART, contact, CROSS, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
@@ -343,7 +343,10 @@ function meets(walls: WallSet, k: number, test: PieceTest, px: number, py: numbe
  */
 function ledgeFloor(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: MovingToken, endElevation: number): number {
   if (scene.blockMovement !== true || !walls.hasRelief) return Infinity;
-  switch (token.footing ?? standing(token.elevation, walls.rangeGround(occupiedRange(SQUARES, token)))) {
+  // On hexes a footprint stands on its hexes' ground (H3).
+  const g = walls.grid;
+  const ground = isHex(g) ? Math.max(...occupiedHexes(g, token).map((h) => walls.groundAt(h.col, h.row))) : walls.rangeGround(occupiedRange(SQUARES, token));
+  switch (token.footing ?? standing(token.elevation, ground)) {
     case "ground":
       return -Infinity;
     case "flying":
@@ -768,7 +771,7 @@ export type LegStop = { blocker: Blocker; door: DoorRef | null };
 export function legStop(state: BuildState, token: Walker, to: LegEnd): LegStop | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
-  const hex = hexWallsOf(state, token);
+  const hex = hexWallsOf(state, token, to.elevation);
   if (hex) return hexLegStopOf(hex, token, to);
   const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
   if (legClear(leg)) return null;
@@ -784,7 +787,7 @@ export function legStop(state: BuildState, token: Walker, to: LegEnd): LegStop |
 export function straightClear(state: BuildState, token: Walker, to: LegEnd): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene) return true;
-  const hex = hexWallsOf(state, token);
+  const hex = hexWallsOf(state, token, to.elevation);
   if (hex) return hexLegStopOf(hex, token, to) === null;
   const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
   const { px, py, qx, qy, hx, hy } = leg;
@@ -942,7 +945,7 @@ export type Part = readonly [number, number, number, number];
 export function legStopPart(state: BuildState, token: Walker, to: LegEnd): { stop: LegStop; part: Part | null } | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
-  const hex = hexWallsOf(state, token);
+  const hex = hexWallsOf(state, token, to.elevation);
   if (hex) return hexLegStopPart(hex, token, to);
   const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
   if (legClear(leg)) return null;
@@ -1163,7 +1166,7 @@ export type DropMode = "walk" | "free" | "teleport";
 export function landing(state: BuildState, token: Walker, to: LegEnd, mode: DropMode): Landing {
   const scene = state.scenes[token.sceneId];
   if (!scene) return { x: to.x, y: to.y, squeeze: false, stopped: null };
-  const hex = hexWallsOf(state, token);
+  const hex = hexWallsOf(state, token, to.elevation);
   if (hex) return hexLanding(hex, token, to, mode);
   const walls = sceneWalls(scene, state.buildChunks);
   const test = pieceTestOf(state.buildChunks);
@@ -1374,26 +1377,37 @@ export function hexDirection(g: HexGrid, from: Hex, to: Hex): number {
   return hexNeighbors(g, from).findIndex((n) => n.col === to.col && n.row === to.row);
 }
 
-/** What the hex tests read of a scene: its grid, bounds and movement set, and the build's test of held pieces. */
-export type HexWalls = { g: HexGrid; bounds: { w: number; h: number }; walls: WallSet; test: PieceTest };
+/**
+ * What the hex tests read of a scene: its grid, bounds and movement set,
+ * the build's test of held pieces, and the lowest top of a ledge that
+ * stops the walker (`ledgeFloor`, Infinity where none does).
+ */
+export type HexWalls = { g: HexGrid; bounds: { w: number; h: number }; walls: WallSet; test: PieceTest; floor: number };
 
-/** The hex tests' view of the walker's scene, or null when it is not a hex scene. */
-export function hexWallsOf(state: BuildState, token: Pick<Token, "sceneId">): HexWalls | null {
+/**
+ * The hex tests' view of the walker's scene, or null when it is not a hex
+ * scene. Ledges stop it by how it stands where it starts and, flying, by
+ * the lower of its start and `endElevation`, as a leg on squares reads
+ * them (`legFrom`).
+ */
+export function hexWallsOf(state: BuildState, token: MovingToken, endElevation = token.elevation): HexWalls | null {
   const scene = state.scenes[token.sceneId];
   const g = scene ? sceneGrid(scene) : SQUARES;
   if (!scene || !isHex(g)) return null;
-  return { g, bounds: scene.bounds, walls: sceneWalls(scene, state.buildChunks), test: pieceTestOf(state.buildChunks) };
+  const walls = sceneWalls(scene, state.buildChunks);
+  return { g, bounds: scene.bounds, walls, test: pieceTestOf(state.buildChunks), floor: ledgeFloor(walls, scene, token, endElevation) };
 }
 
 /**
  * The movement walls the segment from hex `h`'s center to its neighbor's
- * in direction `d` meets, touching included. On hexes no ledge stands
- * until phase H3, so only walls, closed doors and windows count.
+ * in direction `d` meets, touching included, and from phase H3 the ledges
+ * above the walker's floor: a raised side between the two hexes is one
+ * the step crosses at its middle, and touches no other.
  */
 export function hexEdgeMeets(t: HexWalls, h: Hex, d: number): number[] {
   const a = hexCenter(t.g, h);
   const b = hexCenter(t.g, hexNeighbors(t.g, h)[d]!);
-  return touching(t.walls, a.x, a.y, b.x, b.y, 0, 0, Infinity, t.test);
+  return touching(t.walls, a.x, a.y, b.x, b.y, 0, 0, t.floor, t.test);
 }
 
 /**

@@ -1,7 +1,9 @@
 import { chunkKey } from "../keys.ts";
 import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type RoomState, type SceneId, type Trap } from "../model.ts";
 import { isWritable } from "../writable.ts";
-import { chunkMarks, groundAt } from "./heights.ts";
+import { chunkHeights, chunkMarks, encodeHeights, groundAt, stepper } from "./heights.ts";
+import { gridOfShape, isHex } from "./grid.ts";
+import { hexInScene, type HexGrid } from "./hex.ts";
 
 /*
  * The pit border counted ahead (docs/design-v1-traps.md 6.7). A pit's walls
@@ -24,6 +26,14 @@ import { chunkMarks, groundAt } from "./heights.ts";
  * where an opened pit's ledge running straight through could cut a run in
  * two. Any opened layout then splits into no more pieces, and no more pairs
  * with free walls, than this reading has.
+ *
+ * On a hex scene (H3) no grid line runs raised sides together: each is a
+ * piece of its own, raised wherever the two hexes' ground differs, and a
+ * stair's direction only says whether it is a ledge, which no count reads.
+ * So the reading raises every side an opened layout could: each pit hex
+ * is given ground unlike that of every neighbor outside its set of pits,
+ * and unlike that of each neighbor of its set whose ground differs from its
+ * own now. Sides only get added, and a count only grows with them.
  */
 
 /** The pit traps of a scene, in id order so every server counts them alike. */
@@ -89,6 +99,14 @@ function countedChunks(state: Counted, sceneId: SceneId): Readonly<Record<string
   const last = lastRead.get(sceneId);
   if (last && last.bounds === scene.bounds && sameList(last.traps, traps) && sameList(last.chunks, own)) return { ...state.buildChunks, ...last.out };
 
+  const grid = gridOfShape(scene.gridShape);
+  if (isHex(grid)) {
+    const out = hexCounted(state, sceneId, grid, traps, scene.bounds);
+    lastRead.delete(sceneId);
+    lastRead.set(sceneId, { traps, chunks: own, bounds: scene.bounds, out });
+    if (lastRead.size > MAX_KEPT) lastRead.delete(lastRead.keys().next().value!);
+    return { ...state.buildChunks, ...out };
+  }
   const { w, h } = scene.bounds;
   const inScene = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h;
   // Each pit square's set of pits.
@@ -167,6 +185,73 @@ function countedChunks(state: Counted, sceneId: SceneId): Readonly<Record<string
   lastRead.set(sceneId, { traps, chunks: own, bounds: scene.bounds, out });
   if (lastRead.size > MAX_KEPT) lastRead.delete(lastRead.keys().next().value!);
   return { ...state.buildChunks, ...out };
+}
+
+/** A hex scene's chunks under its pits with the ground the count reads (the file's note): every side an opened layout could raise, raised. */
+function hexCounted(state: Counted, sceneId: SceneId, g: HexGrid, traps: readonly Trap[], bounds: { w: number; h: number }): Record<string, BuildChunk> {
+  const sets = new Map<string, string>();
+  for (const trap of traps) {
+    if (!("cells" in trap.zone)) continue;
+    const mine = new Set<string>();
+    for (const r of trap.zone.cells) {
+      for (let y = r.y; y < r.y + r.h; y++) {
+        for (let x = r.x; x < r.x + r.w; x++) {
+          const at = `${x},${y}`;
+          if (mine.has(at) || !hexInScene(g, bounds, { col: x, row: y })) continue;
+          mine.add(at);
+          const set = sets.get(at);
+          sets.set(at, set === undefined ? trap.id : `${set} ${trap.id}`);
+        }
+      }
+    }
+  }
+  const step = stepper(g);
+  const ground = (x: number, y: number) => groundAt(state.buildChunks, sceneId, x, y);
+  const given = new Map<string, number>();
+  for (const at of [...sets.keys()].sort(byKey)) {
+    const [x, y] = cellOf(at);
+    const set = sets.get(at)!;
+    const own = ground(x, y);
+    const unlike = new Set<number>();
+    for (let d = 0; d < 6; d++) {
+      const [nx, ny] = step(x, y, d);
+      if (!hexInScene(g, bounds, { col: nx, row: ny })) continue;
+      const next = `${nx},${ny}`;
+      const theirs = sets.get(next);
+      if (theirs === undefined) unlike.add(ground(nx, ny));
+      else if (given.has(next) && (theirs !== set || ground(nx, ny) !== own)) unlike.add(given.get(next)!);
+    }
+    let v = own;
+    while (unlike.has(v)) v++;
+    given.set(at, v);
+  }
+  const out: Record<string, BuildChunk> = {};
+  const feet = new Map<string, Int16Array>();
+  for (const [at, v] of given) {
+    const [x, y] = cellOf(at);
+    const cx = Math.floor(x / CHUNK_CELLS);
+    const cy = Math.floor(y / CHUNK_CELLS);
+    const key = chunkKey(sceneId, cx, cy);
+    let heights = feet.get(key);
+    if (!heights) {
+      const stored = state.buildChunks[key];
+      feet.set(key, (heights = stored ? Int16Array.from(chunkHeights(stored) ?? new Int16Array(CHUNK_CELLS * CHUNK_CELLS)) : new Int16Array(CHUNK_CELLS * CHUNK_CELLS)));
+      out[key] = stored ?? { sceneId, cx, cy, rev: 0, cells: {}, edges: {}, grid: g.orient === "rows" ? "hexRows" : "hexColumns" };
+    }
+    heights[(y - cy * CHUNK_CELLS) * CHUNK_CELLS + (x - cx * CHUNK_CELLS)] = v;
+  }
+  for (const [key, heights] of feet) {
+    const encoded = encodeHeights(heights);
+    const { heights: _heights, ...rest } = out[key]!;
+    out[key] = encoded === undefined ? rest : { ...rest, heights: encoded };
+  }
+  return out;
+}
+
+function byKey(a: string, b: string): number {
+  const [ax, ay] = cellOf(a);
+  const [bx, by] = cellOf(b);
+  return ay - by || ax - bx;
 }
 
 /** The scene's stair cells, by terrain or by mark, as `x,y`. */

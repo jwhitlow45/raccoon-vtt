@@ -4,7 +4,8 @@ import { canSqueeze, footprintSize, hexSqueezedSize, sizeCategory, tokenHeightFt
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid } from "./grid.ts";
 import { hexCenter, hexDistance, hexInScene, hexNeighbors, hexSubcells, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
-import { footing, type Standing } from "./heights.ts";
+import { footing, hexesGround, type Standing } from "./heights.ts";
+import { legFeet } from "./distance.ts";
 import {
   hexEdgeState,
   hexEndStand,
@@ -38,8 +39,11 @@ import { LegCheck, MAX_SETTLED, WalkSearch, WalkWorld, WorkBudget, worldUnits, t
  * the square search's rules give (docs/design-v1-movement.md 4.1): ground
  * difficult or under a slowing area newly entered, another creature's
  * space where heights overlap, a squeezed step (HX-D17), crawling and
- * dragging. Hex scenes hold no heights, painted ground or water until H3,
- * so a walk keeps its elevation and nothing swims.
+ * dragging, times the step's length with its rise by the room's rule, as
+ * the square search counts a climb (from H3, a walker standing on the
+ * ground of the hexes it takes). Ledges stop steps by the walker's floor
+ * (movement.ts hexWallsOf). Hex scenes hold no painted ground or water,
+ * so nothing swims.
  * Where walls stop moves, each creature it drags beside it takes every
  * step with it by the same rule, so a found way is one they all fit
  * through (docs/design-v1-attach.md 4.2).
@@ -86,6 +90,8 @@ export class HexWalkWorld {
   readonly #edges: Uint8Array;
   readonly #flags: Uint8Array;
   readonly #fit: Uint8Array;
+  /** A walker's ground per node, worked out when first asked. */
+  readonly #ground: Float64Array;
   readonly #byHex = new Map<number, number[]>();
   /** The scene's walls for the narrow space test, which a squeeze needs even where they stop no moves. */
   readonly #narrowWalls: HexWalls | null;
@@ -100,7 +106,8 @@ export class HexWalkWorld {
     if (!isHex(g)) throw new Error("a hex walk on a square scene");
     this.g = g;
     this.#bounds = scene.bounds;
-    this.#narrowWalls = hexWallsOf(build, token);
+    const walking = walkFrom(build.buildChunks, token);
+    this.#narrowWalls = hexWallsOf(build, walking);
     this.walls = scene.blockMovement === true ? this.#narrowWalls : null;
     // Only where walls stop moves, as the server tests them there alone (permissions.ts draggedWalls).
     this.#towed = this.walls ? (input.towed ?? []).map((t) => ({ walker: t, dx: t.x - token.x, dy: t.y - token.y })) : [];
@@ -113,7 +120,6 @@ export class HexWalkWorld {
     this.small = canSqueeze(token) ? hexSqueezedSize(this.full) : null;
     this.start = hexStartStand(g, token);
     this.startNode = this.nodeOf(this.start);
-    const walking = walkFrom(build.buildChunks, token);
     this.mode = footing(build.buildChunks, walking);
     this.elevation = walking.elevation;
     this.height = tokenHeightFt(token, input.rules.feetPerCell);
@@ -121,6 +127,7 @@ export class HexWalkWorld {
     this.#edges = new Uint8Array(hexes * 6);
     this.#flags = new Uint8Array(hexes);
     this.#fit = new Uint8Array(hexes * 2);
+    this.#ground = new Float64Array(this.mode === "ground" ? hexes * 2 : 0).fill(NaN);
     if (this.mode === "ground") this.#markGround(scene.id);
     if (this.mode !== "inside") {
       for (const [n, c] of input.creatures.entries()) {
@@ -327,7 +334,7 @@ export class HexWalkWorld {
     }
     if (ground < 1) {
       for (const h of entered) {
-        for (const c of this.#creaturesOn(h)) if (c.way !== "free" && this.#overlaps(c)) ground = 1;
+        for (const c of this.#creaturesOn(h)) if (c.way !== "free" && this.#overlaps(c, this.elevationOf(b))) ground = 1;
       }
     }
     if (ground < 1 && b.squeezed) ground = 1;
@@ -339,14 +346,34 @@ export class HexWalkWorld {
     return list ? list.map((n) => this.input.creatures[n]!) : [];
   }
 
-  #overlaps(c: { lo: number; hi: number }): boolean {
-    return c.lo < this.elevation + this.height && this.elevation < c.hi;
+  #overlaps(c: { lo: number; hi: number }, elevation: number): boolean {
+    return c.lo < elevation + this.height && elevation < c.hi;
+  }
+
+  /** The elevation at a stand: the ground under its hexes for a walker, the start's height for any other (walk.ts elevationAt). */
+  elevationOf(s: HexStand): number {
+    if (this.mode !== "ground") return this.elevation;
+    const n = this.nodeOf(s);
+    const known = n >= 0 ? this.#ground[n]! : NaN;
+    if (!Number.isNaN(known)) return known;
+    const ground = hexesGround(this.input.build.buildChunks, this.input.token.sceneId, hexStandHexes(this.g, s));
+    if (n >= 0) this.#ground[n] = ground;
+    return ground;
+  }
+
+  /** A step's length in hexes with its rise from `a` to `b` by the room's rule, 1 on level ground (route.ts hexRouteFeet counts the same). */
+  stepLength(a: HexStand, b: HexStand): number {
+    const dz = this.elevationOf(b) - this.elevationOf(a);
+    if (dz === 0) return 1;
+    const { feetPerCell, diagonal } = this.input.rules;
+    return legFeet(1, 0, Math.abs(dz) / feetPerCell, diagonal, feetPerCell, { h: 0, v: 0 }) / feetPerCell;
   }
 
   /** Whether a walk may end at a stand but never go on from it: over a creature it cannot pass whose height it shares. */
   endOnly(s: HexStand): boolean {
     if (this.mode === "inside") return false;
-    return hexStandHexes(this.g, s).some((h) => this.#creaturesOn(h).some((c) => c.way === "blocked" && this.#overlaps(c)));
+    const elevation = this.elevationOf(s);
+    return hexStandHexes(this.g, s).some((h) => this.#creaturesOn(h).some((c) => c.way === "blocked" && this.#overlaps(c, elevation)));
   }
 
   /** The first creature dragged beside the walker that a walk along `points` leaves behind, piece by piece, or null when all of them follow it. */
@@ -409,7 +436,7 @@ export class HexWalkWorld {
       const end = this.standOf(nodes[j]!);
       const at = this.place(end);
       pieces.push([at.x, at.y, this.#pieceExtra(via, extras, i, j), 0]);
-      points.push({ x: at.x, y: at.y, elevation: this.elevation });
+      points.push({ x: at.x, y: at.y, elevation: this.elevationOf(end) });
       i = j;
     }
     return { pieces, points };
@@ -439,10 +466,13 @@ export class HexWalkWorld {
     const line = leg.line;
     charge(line.length);
     let from: HexStand = { size: leg.walk, ref: line[0]!, squeezed: leg.squeezed };
+    // A piece counts its rise whole (route.ts hexRouteFeet), which is each step's only where every step rises alike, as the square pieces split.
+    const rise = line.length > 1 ? this.elevationOf({ size: leg.walk, ref: line[1]!, squeezed: leg.squeezed }) - this.elevationOf(from) : 0;
     for (let k = 1; k < line.length; k++) {
       const to: HexStand = { size: leg.walk, ref: line[k]!, squeezed: leg.squeezed };
       const d = hexNeighbors(this.g, from.ref).findIndex((n) => n.col === to.ref.col && n.row === to.ref.row);
       if (d < 0 || !this.stepOk(from, to, d, k === 1)) return false;
+      if (this.elevationOf(to) - this.elevationOf(from) !== rise) return false;
       if (this.extraOf(from, to) !== Math.max(0, extra)) return false;
       if (k < line.length - 1 && this.endOnly(to)) return false;
       from = to;
@@ -601,7 +631,7 @@ export class HexWalkSearch {
       if (b < 0 || this.#done[b] === 1 || !world.stepOk(A, B, d, first)) continue;
       const extra = world.extraOf(A, B);
       const heading = this.#heading[a]!;
-      this.#relax(a, b, this.#cost[a]! + 1 + extra, this.#corners[a]! + (heading >= 0 && heading !== d ? 1 : 0), d, d, extra);
+      this.#relax(a, b, this.#cost[a]! + (1 + extra) * world.stepLength(A, B), this.#corners[a]! + (heading >= 0 && heading !== d ? 1 : 0), d, d, extra);
     }
     if (world.small) {
       const B = hexRestand(world.input.token, A, !A.squeezed);
@@ -719,6 +749,7 @@ export class HexLegCheck {
     }
     const extras: number[] = [0];
     let inside = true;
+    let rise: number | null = null;
     for (let k = 1; k < nodes.length; k++) {
       const a = nodes[k - 1]!;
       const b = nodes[k]!;
@@ -731,6 +762,10 @@ export class HexLegCheck {
       const extra = world.extraOf(a, b);
       extras.push(extra);
       if (extra !== 0) this.#open = false;
+      // The straight leg counts only the rise between its ends (walk.ts LegCheck), a walk each piece's, so only ground rising evenly is open.
+      const dz = world.elevationOf(b) - world.elevationOf(a);
+      if (rise !== null && dz !== rise) this.#open = false;
+      rise = dz;
       if (k < nodes.length - 1 && world.endOnly(b)) this.#open = false;
     }
     if (!inside) this.#open = false;

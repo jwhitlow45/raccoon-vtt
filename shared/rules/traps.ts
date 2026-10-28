@@ -983,6 +983,8 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
   const floorAt = (j: number, r: CellRange): boolean => {
     if (walk.carriedOn) return false;
     if (holder && insideHolder(walk.grid, lightAt(walk, j), holder)) return false;
+    // On hexes a footprint is its hexes, whose ground no range of cells reads (H3).
+    if (isHex(walk.grid)) return standing(walk.elevation(j), footprintGround(before.buildChunks, lightAt(walk, j))) === "ground";
     return standing(walk.elevation(j), cache.ground(r)) === "ground";
   };
   const marks = new Int32Array(traps.length);
@@ -1353,7 +1355,8 @@ function stopAt(walks: Walks, group: Group, t: Progress, before: RoomState, seen
  * The squares a stopping trap's pit opens on (5.7), when it opens: a pit on
  * squares not yet at its floor, which `opens`, the action's own test, says
  * the caps let open. A spot lies over it when every square its footprint
- * covers, squeezed where it squeezes, is one of them.
+ * covers, squeezed where it squeezes, is one of them, and on a hex scene
+ * every hex (H3).
  */
 function opening(trap: Trap, before: RoomState, opens?: (trap: Trap) => boolean): ((spot: RouteSpot, walk: Walk) => boolean) | null {
   const pit = trap.rig?.pit;
@@ -1362,9 +1365,12 @@ function opening(trap: Trap, before: RoomState, opens?: (trap: Trap) => boolean)
   if (opens && !opens(trap)) return null;
   const squares = new Set<string>();
   for (const r of trap.zone.cells) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) squares.add(`${x},${y}`);
+  const g = gridOfScene(before, trap.sceneId);
   return (spot, walk) => {
-    // Pits stay square until heights reach hexes (permissions.ts ON_HEXES.pit).
-    const r = footprintRect(SQUARES, { ...walk.token, x: spot.x, y: spot.y, squeeze: spot.squeezed ? true : undefined });
+    const { squeeze: _squeeze, ...token } = walk.token;
+    const at: PlacedToken = { ...token, x: spot.x, y: spot.y, ...(spot.squeezed ? { squeeze: true } : {}) };
+    if (isHex(g)) return occupiedHexes(g, at).every((h) => squares.has(hexKey(h)));
+    const r = footprintRect(SQUARES, at);
     for (let y = Math.floor(r.y + 1e-9); y < Math.ceil(r.y + r.h - 1e-9); y++) for (let x = Math.floor(r.x + 1e-9); x < Math.ceil(r.x + r.w - 1e-9); x++) if (!squares.has(`${x},${y}`)) return false;
     return true;
   };

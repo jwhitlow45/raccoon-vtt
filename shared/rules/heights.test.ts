@@ -17,6 +17,7 @@ import {
   standing,
   type StairGrid,
 } from "./heights.ts";
+import { SQUARES } from "./grid.ts";
 
 /** A chunk at (cx, cy) of scene "s" with heights and marks given per cell as "x,y". */
 function reliefChunk(heights: Record<string, number>, marks: Record<string, StairMark> = {}, at = { cx: 0, cy: 0 }): BuildChunk {
@@ -110,6 +111,8 @@ function stairs(rows: string[], marks: Record<string, StairMark>, ground: Record
   const w = rows[0]!.length;
   const at = (k: number) => `${k % w},${Math.floor(k / w)}`;
   const g: StairGrid = {
+    x0: 0,
+    y0: 0,
     w,
     h,
     mark: (k) => marks[at(k)] ?? ".",
@@ -122,7 +125,7 @@ function stairs(rows: string[], marks: Record<string, StairMark>, ground: Record
       return y * w + x;
     })
     .sort((a, b) => a - b);
-  const dir = stairDirections(g, list);
+  const dir = stairDirections(SQUARES, g, list);
   return Object.fromEntries(list.map((k) => [at(k), compassOf(dir[k]!) ?? "?"]));
 }
 
@@ -169,13 +172,13 @@ describe("stair directions", () => {
     for (let y = 1; y < 5; y++) for (let x = 0; x < 7; x++) if ((x * 7 + y * 3) % 4 !== 0) marks[`${x},${y}`] = "a";
     marks["6,4"] = "w";
     const w = 7;
-    const g: StairGrid = { w, h: 5, mark: (k) => marks[`${k % w},${Math.floor(k / w)}`] ?? ".", ground: (k) => (k < w ? 15 : 0), inScene: () => true };
+    const g: StairGrid = { x0: 0, y0: 0, w, h: 5, mark: (k) => marks[`${k % w},${Math.floor(k / w)}`] ?? ".", ground: (k) => (k < w ? 15 : 0), inScene: () => true };
     const list = Object.keys(marks).map((key) => {
       const [x, y] = key.split(",").map(Number) as [number, number];
       return y * w + x;
     });
-    const sorted = stairDirections(g, [...list].sort((a, b) => a - b));
-    const reversed = stairDirections(g, [...list].sort((a, b) => b - a));
+    const sorted = stairDirections(SQUARES, g, [...list].sort((a, b) => a - b));
+    const reversed = stairDirections(SQUARES, g, [...list].sort((a, b) => b - a));
     assert.deepEqual(Array.from(reversed), Array.from(sorted));
     assert.ok(list.some((k) => sorted[k] !== 0) && list.some((k) => sorted[k] === 0));
   });

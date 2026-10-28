@@ -156,9 +156,9 @@ describe("the drag label on hexes", () => {
 });
 
 describe("a new trap on hexes", () => {
-  test("a Hidden Pit starts without its pit, since a pit needs heights, and a wire's hexes to draw start round its hexes", () => {
+  test("from H3 a Hidden Pit starts with its pit on hexes as on squares, and a wire's hexes to draw start round its hexes", () => {
     const pit = newTrapInput({ grid: ROWS, id: "t", sceneId: "s1", start: "hidden-pit", band: "1-4", zone: { cells: [{ x: 3, y: 3, w: 2, h: 2 }] }, chunks: {} });
-    assert.equal(pit.rig.pit, undefined);
+    assert.ok(pit.rig.pit, "a pit on hexes");
     const squares = newTrapInput({ grid: { shape: "squares" }, id: "t", sceneId: "s1", start: "hidden-pit", band: "1-4", zone: { cells: [{ x: 3, y: 3, w: 2, h: 2 }] }, chunks: {} });
     assert.ok(squares.rig.pit, "a pit on squares");
   });

@@ -138,14 +138,12 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     assert.equal(refusal(switched, redo(undone.inverse)), "Can't redo that: difficult ground on squares can't stand on this scene's hexes.");
   });
 
-  test("in H3 a value stamped with the hex scene's own shape is refused too, for every grid-keyed kind but difficult ground, Reveal room's cells and traps without a pit (D-261026-8)", () => {
+  test("in H3 a value stamped with the hex scene's own shape is refused too, for painted ground and walls on grid lines, while difficult ground, heights, stairs, Reveal room's cells and traps with pits restore (D-261026-8)", () => {
     const hex = twoDms({ scenes: { ...room().scenes, s1: { ...room().scenes.s1!, gridShape: "hexRows" } } });
     const key = "chunk:s1:0,0";
     const kinds: [object, string][] = [
       [{ cells: { "1,1": "stone" } }, "painted ground"],
       [{ edges: { "1,1,n": { kind: "wall" } } }, "walls and doors"],
-      [{ heights: "A".repeat(683) + "=" }, "heights"],
-      [{ up: ".".repeat(256) }, "stairs"],
     ];
     for (const [content, words] of kinds) {
       const value = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, ...content, grid: "hexRows" };
@@ -153,14 +151,18 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     }
     const rough = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, rough: "d".padEnd(256, "."), grid: "hexRows" };
     assert.equal(run(hex, redo([{ key, value: rough, expectRev: null }])).state.buildChunks[chunkKey("s1", 0, 0)]?.rough, rough.rough);
+    const raised = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, heights: "A".repeat(683) + "=", up: "3".padEnd(256, "."), grid: "hexRows" };
+    assert.equal(run(hex, redo([{ key, value: raised, expectRev: null }])).state.buildChunks[chunkKey("s1", 0, 0)]?.up, raised.up, "heights and stairs of its own shape (HX-8)");
+    assert.equal(refusal(hex, redo([{ key, value: { ...raised, grid: "hexColumns" }, expectRev: null }])), "Can't redo that: heights and stairs on hex columns can't stand on this scene's hex rows.");
     const draft = { sceneId: "s1", rev: 0, grid: "hexRows", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
     const restored = run(hex, undo([{ key: "fogDraft:s1", value: draft, expectRev: null }])).state.fogDrafts.s1;
     assert.deepEqual([restored?.grid, restored?.ops], [draft.grid, draft.ops]);
     assert.equal(refusal(hex, undo([{ key: "fogDraft:s1", value: { ...draft, grid: "hexColumns" }, expectRev: null }])), "Can't undo that: Reveal room in its fog draft on hex columns can't stand on this scene's hex rows.");
-    // A trap of the scene's own shape restores from H2, but not one with a pit, which needs heights.
+    // A trap of the scene's own shape restores from H2, and from H3 one with a pit too.
     const stamped = { ...trap("t1"), grid: "hexRows" };
     assert.equal(run(hex, undo([{ key: "trap:t1", value: stamped, expectRev: null }])).state.traps.t1?.grid, "hexRows");
     const pit = { ...stamped, rig: { ...stamped.rig!, pit: { floor: -10 } } };
-    assert.equal(refusal(hex, undo([{ key: "trap:t1", value: pit, expectRev: null }])), "Can't undo that: a trap can't stand on this scene's hexes.");
+    assert.deepEqual(run(hex, undo([{ key: "trap:t1", value: pit, expectRev: null }])).state.traps.t1?.rig?.pit, { floor: -10 });
+    assert.equal(refusal(hex, undo([{ key: "trap:t1", value: { ...pit, grid: "hexColumns" }, expectRev: null }])), "Can't undo that: a trap on hex columns can't stand on this scene's hex rows.");
   });
 });

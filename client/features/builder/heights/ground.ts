@@ -1,6 +1,9 @@
 import type { BuildChunk, RoomState, Scene } from "#shared/model.ts";
-import { isCellFullyFogged } from "#shared/rules/fog.ts";
-import { groundAt, type Compass } from "#shared/rules/heights.ts";
+import { isCellFullyFogged, isSubcellFogged } from "#shared/rules/fog.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { facingsOf, groundAt, type Compass, type Facing } from "#shared/rules/heights.ts";
+import { hexInScene, hexSubcells } from "#shared/rules/hex.ts";
+import { hexFacingName } from "./facings.ts";
 import type { Insets, Point, Size } from "../../../lib/camera.ts";
 import { cardPlace } from "../../movement/anchor.ts";
 import { regionText } from "./regions.ts";
@@ -23,6 +26,8 @@ export type GroundSource = {
   chunks: Readonly<Record<string, BuildChunk>>;
   sceneId: string;
   bounds: { w: number; h: number };
+  /** The scene's grid: on hexes a cell is a hex, named by its key (docs/design-v1-hex-grids.md H3). */
+  grid?: Grid;
   /** The merged fog a player's view holds on a scene with fog on, or null where the viewer sees all the ground: the DM, or a scene without fog. */
   fog: RoomState["fogTiles"] | null;
 };
@@ -34,6 +39,15 @@ export type GroundSource = {
  * party explored, which the merged fog shows.
  */
 export function seenGround(src: GroundSource, cell: Cell): number | null {
+  const g = src.grid ?? SQUARES;
+  if (isHex(g)) {
+    // A hex is seen where any sub-cell inside it is, as a creature on it is (HX-D10).
+    const hex = { col: cell.x, row: cell.y };
+    if (!hexInScene(g, src.bounds, hex)) return null;
+    const fog = src.fog;
+    if (fog && hexSubcells(g, hex).every(([sx, sy]) => isSubcellFogged(fog, src.sceneId, sx, sy))) return null;
+    return groundAt(src.chunks, src.sceneId, cell.x, cell.y);
+  }
   // A height left outside a shrunk scene raises nothing (walls.ts reliefOfGrid), so it reads as no ground at all.
   if (cell.x < 0 || cell.y < 0 || cell.x >= src.bounds.w || cell.y >= src.bounds.h) return null;
   if (src.fog && isCellFullyFogged(src.fog, src.sceneId, cell)) return null;
@@ -43,11 +57,11 @@ export function seenGround(src: GroundSource, cell: Cell): number | null {
 /** What `seenGround` reads from this viewer's own view: a player is held to the fog on a scene with fog on, as a door tap is (features/doors/tap.ts). */
 export function groundSource(
   view: Pick<RoomState, "buildChunks" | "fogTiles">,
-  scene: Pick<Scene, "id" | "bounds" | "fogEnabled">,
+  scene: Pick<Scene, "id" | "bounds" | "fogEnabled" | "gridShape">,
   role: "dm" | "player",
 ): GroundSource {
   const fogged = role === "player" && scene.fogEnabled !== false;
-  return { chunks: view.buildChunks, sceneId: scene.id, bounds: scene.bounds, fog: fogged ? view.fogTiles : null };
+  return { chunks: view.buildChunks, sceneId: scene.id, bounds: scene.bounds, grid: sceneGrid(scene), fog: fogged ? view.fogTiles : null };
 }
 
 /** How the readout names a cell: the pill's text, the status line's words, and the pill's outline. */
@@ -66,7 +80,7 @@ const COMPASS_NAME: Readonly<Record<Compass, string>> = { n: "north", e: "east",
  * with none, undefined for no stair. Every stair takes the light outline,
  * a stair in a pit included, since it is the way up.
  */
-export function readoutOf(ground: number, stair: Compass | null | undefined): ReadoutWords | null {
+export function readoutOf(ground: number, stair: Facing | null | undefined, grid: Grid = SQUARES): ReadoutWords | null {
   const height = ground === 0 ? null : regionText(ground);
   const heightWords = ground > 0 ? `${ground} ft up` : `${-ground} ft down`;
   if (stair === undefined) {
@@ -75,15 +89,15 @@ export function readoutOf(ground: number, stair: Compass | null | undefined): Re
   }
   const parts = ["Stairs"];
   if (height !== null) parts.push(heightWords);
-  if (stair !== null) parts.push(`up to the ${COMPASS_NAME[stair]}`);
+  if (stair !== null) parts.push(`up to the ${isHex(grid) ? hexFacingName(grid.orient, facingsOf(grid).indexOf(stair)) : COMPASS_NAME[stair as Compass]}`);
   return { pill: height === null ? "Stairs" : `Stairs · ${height}`, spoken: `${parts.join(", ")}.`, edge: "raised" };
 }
 
 /** What the readout reads at a cell, held to what this viewer may see, or null when it says nothing there. */
-export function cellReadout(src: GroundSource, walls: { stairAt(x: number, y: number): Compass | null | undefined }, cell: Cell): ReadoutWords | null {
+export function cellReadout(src: GroundSource, walls: { stairAt(x: number, y: number): Facing | null | undefined }, cell: Cell): ReadoutWords | null {
   const ground = seenGround(src, cell);
   if (ground === null) return null;
-  return readoutOf(ground, walls.stairAt(cell.x, cell.y));
+  return readoutOf(ground, walls.stairAt(cell.x, cell.y), src.grid);
 }
 
 /** The pill's pointer, in pixels: its height and width at the base, and the pill's corner radius, which the pointer keeps clear of. */

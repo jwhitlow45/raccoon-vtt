@@ -3,10 +3,11 @@ import { AUTO_CHARS, CHUNK_CELLS, KNOWN_CHARS, MAX_FREE_WALL_CELLS, UP_DIR_CHARS
 import { autoWallBetween, autoWallsOf, paintedOf, type Painted } from "./autoWalls.ts";
 import type { Bounds, Point } from "./geom.ts";
 import type { DoorRef } from "../protocol.ts";
-import { chunkHeights, chunkMarks, COMPASS, compassOf, stairDirections, type Compass } from "./heights.ts";
+import { chunkHeights, chunkMarks, COMPASS, facingOf, facingsOf, oppositeFacing, stairDirections, stepper, type Facing } from "./heights.ts";
 import { sweptTouches } from "./movement.ts";
 import { isWritable } from "../writable.ts";
-import { hexAt, hexCenter, hexInScene, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
+import { gridOfShape, isHex, SQUARES, type Grid } from "./grid.ts";
 import {
   APART,
   AREAS,
@@ -324,7 +325,7 @@ function decodeBits(text: unknown, chars: number, bytes: number): Uint8Array | n
   return o === bytes ? out : null;
 }
 
-const UP_DIRS = /^[nesw.]*$/;
+const UP_DIRS = /^[nesw0-5.]*$/;
 
 /**
  * A player's chunk's own facts (HeldFacts), or null for a stored chunk,
@@ -354,7 +355,8 @@ function heldOf(chunk: BuildChunk): ParsedHeld | null {
   if (typeof p.upDir === "string" && p.upDir.length === UP_DIR_CHARS && UP_DIRS.test(p.upDir)) {
     for (let k = 0; k < UP_DIR_CHARS; k++) {
       const c = p.upDir[k]!;
-      if (c !== ".") dirs.push([cell(k), 1 + COMPASS.indexOf(c as Compass)]);
+      // A compass letter on squares, a side from 0 to 5 on hexes: the set reads each code by its own grid (`stairAt`).
+      if (c !== ".") dirs.push([cell(k), 1 + (c >= "0" && c <= "5" ? c.charCodeAt(0) - 48 : COMPASS.indexOf(c as (typeof COMPASS)[number]))]);
     }
   }
   return { known, auto, dirs };
@@ -574,6 +576,8 @@ const LEDGED = 2;
  * sort and no object per edge on the way.
  */
 type EdgeGrid = {
+  /** The scene's grid: on hexes the cells below are hex keys, and only heights and stairs raise anything. */
+  grid: Grid;
   gx: number;
   gy: number;
   w: number;
@@ -596,15 +600,17 @@ type Relief = {
   ground: Int16Array;
   /** 0 not a stair, else 1 + its direction code from heights.ts `stairDirections` (so 1 is a stair with no direction). */
   stairs: Uint8Array;
-  /** Per cell, its north and west edge: 0 not raised, CONNECTED or LEDGED. */
+  /** Per cell, its north and west edge: 0 not raised, CONNECTED or LEDGED. Empty on hexes. */
   northRaised: Uint8Array;
   westRaised: Uint8Array;
+  /** On hexes, per hex index * 3 + d, its side toward facing d of 0, 1 and 2 (east, south-east and south-west on hex rows): 0, CONNECTED or LEDGED. Each side once. */
+  sides: Uint8Array | null;
 };
 
-const EMPTY_GRID: EdgeGrid = { gx: 0, gy: 0, w: 0, h: 0, north: new Uint8Array(0), west: new Uint8Array(0), drawn: new Map(), pillars: [], relief: null, known: null };
+const EMPTY_GRID: EdgeGrid = { grid: SQUARES, gx: 0, gy: 0, w: 0, h: 0, north: new Uint8Array(0), west: new Uint8Array(0), drawn: new Map(), pillars: [], relief: null, known: null };
 
-function edgeGrid(build: BuildSource, rule: AutoWalls, bounds: { w: number; h: number } | null): EdgeGrid {
-  if (!build.box) return EMPTY_GRID;
+function edgeGrid(build: BuildSource, rule: AutoWalls, bounds: { w: number; h: number } | null, grid: Grid = SQUARES): EdgeGrid {
+  if (!build.box) return grid === SQUARES ? EMPTY_GRID : { ...EMPTY_GRID, grid };
   const gx = build.box.x0 - 1;
   const gy = build.box.y0 - 1;
   const w = build.box.x1 - build.box.x0 + 3;
@@ -653,7 +659,8 @@ function edgeGrid(build: BuildSource, rule: AutoWalls, bounds: { w: number; h: n
       const y = (cell - x) / ROW;
       if (x >= gx && y >= gy && x < gx + w && y < gy + h) known[at(cell)] = 1;
     }
-  } else if (rule !== "off") {
+  } else if (rule !== "off" && !isHex(grid)) {
+    // A hex scene has no grid-line walls, automatic ones included (docs/design-v1-hex-grids.md HX-D7).
     const table = ruleTable(rule);
     const painted = new Uint8Array(w * h);
     for (let k = 0; k < w * h; k++) painted[k] = classOfCode[terrain[k]!]!;
@@ -669,9 +676,9 @@ function edgeGrid(build: BuildSource, rule: AutoWalls, bounds: { w: number; h: n
   const pillars: number[] = [];
   const pillar = terrainCodes.get("pillar");
   if (pillar !== undefined) for (let k = 0; k < w * h; k++) if (terrain[k] === pillar) pillars.push(cellId(gx + (k % w), gy + Math.floor(k / w)));
-  const grid: EdgeGrid = { gx, gy, w, h, north, west, drawn, pillars, relief: null, known };
-  grid.relief = reliefOfGrid(grid, build, terrain, marks, bounds);
-  return grid;
+  const out: EdgeGrid = { grid, gx, gy, w, h, north, west, drawn, pillars, relief: null, known };
+  out.relief = reliefOfGrid(out, build, terrain, marks, bounds);
+  return out;
 }
 
 /*
@@ -684,6 +691,7 @@ function edgeGrid(build: BuildSource, rule: AutoWalls, bounds: { w: number; h: n
  */
 function reliefOfGrid(g: EdgeGrid, build: BuildSource, terrain: Uint8Array, marks: Uint8Array | null, bounds: { w: number; h: number } | null): Relief | null {
   const { gx, gy, w, h } = g;
+  const hex = isHex(g.grid) ? g.grid : null;
   const stairsCode = terrainCodes.get("stairs");
   const stairList: number[] = [];
   for (let k = 0; k < w * h; k++) if ((marks !== null && marks[k] !== 0) || (stairsCode !== undefined && terrain[k] === stairsCode)) stairList.push(k);
@@ -703,6 +711,7 @@ function reliefOfGrid(g: EdgeGrid, build: BuildSource, terrain: Uint8Array, mark
     if (!bounds) return true;
     const x = gx + (k % w);
     const y = gy + (k - (k % w)) / w;
+    if (hex) return hexInScene(hex, bounds, { col: x, row: y });
     return x >= 0 && y >= 0 && x < bounds.w && y < bounds.h;
   };
   // A held build's stairs point where the server says (`upDir`), since the rule reads cells round them it may not hold.
@@ -710,7 +719,10 @@ function reliefOfGrid(g: EdgeGrid, build: BuildSource, terrain: Uint8Array, mark
   const directions = held
     ? Uint8Array.from({ length: w * h }, (_, k) => held.dirs.get(cellId(gx + (k % w), gy + (k - (k % w)) / w)) ?? 0)
     : stairDirections(
+        g.grid,
         {
+          x0: gx,
+          y0: gy,
           w,
           h,
           mark: (k) => (marks !== null && marks[k] !== 0 ? (String.fromCharCode(marks[k]!) as StairMark) : stairsCode !== undefined && terrain[k] === stairsCode ? "a" : "."),
@@ -720,11 +732,15 @@ function reliefOfGrid(g: EdgeGrid, build: BuildSource, terrain: Uint8Array, mark
         stairList,
       );
   const stairs = new Uint8Array(w * h);
+  if (hex) {
+    for (const k of stairList) stairs[k] = 1 + directions[k]!;
+    return { ground, stairs, northRaised: new Uint8Array(0), westRaised: new Uint8Array(0), sides: hexSides(hex, g, ground, stairs, inScene) };
+  }
   const northLinked = new Uint8Array(w * h);
   const westLinked = new Uint8Array(w * h);
   for (const k of stairList) {
     stairs[k] = 1 + directions[k]!;
-    const dir = compassOf(directions[k]!);
+    const dir = facingOf(SQUARES, directions[k]!);
     // The padding keeps a stair's south and east neighbors inside the grid.
     if (dir === "n" || dir === "s") northLinked[k] = northLinked[k + w] = 1;
     else if (dir === "e" || dir === "w") westLinked[k] = westLinked[k + 1] = 1;
@@ -740,7 +756,48 @@ function reliefOfGrid(g: EdgeGrid, build: BuildSource, terrain: Uint8Array, mark
       if (ground[k] !== ground[k - 1] && inScene(k) && inScene(k - 1)) westRaised[k] = westLinked[k] === 1 ? CONNECTED : LEDGED;
     }
   }
-  return { ground, stairs, northRaised, westRaised };
+  return { ground, stairs, northRaised, westRaised, sides: null };
+}
+
+/*
+ * The raised sides of a hex window (H3): between two hexes of the scene
+ * whose ground differs, as on squares, read once each, from the hex whose
+ * facing 0, 1 or 2 reaches the other. A directed stair connects its up
+ * side and its down side, the one straight across, whatever the heights,
+ * and the rest are ledges. The padding of one key all round holds every
+ * neighbor of a hex inside the box.
+ */
+function hexSides(hex: HexGrid, g: EdgeGrid, ground: Int16Array, stairs: Uint8Array, inScene: (k: number) => boolean): Uint8Array {
+  const { gx, gy, w, h } = g;
+  const step = stepper(hex);
+  const sides = new Uint8Array(w * h * 3);
+  // A stair's code is 1 + 1 + its facing, 1 alone for one with no direction.
+  const links = (k: number, d: number) => {
+    const code = stairs[k]!;
+    if (code < 2) return false;
+    const f = code - 2;
+    return f === d || f === oppositeFacing(hex, d);
+  };
+  for (let k = 0; k < w * h; k++) {
+    const x = gx + (k % w);
+    const y = gy + (k - (k % w)) / w;
+    for (let d = 0; d < 3; d++) {
+      const [nx, ny] = step(x, y, d);
+      const i = nx - gx;
+      const j = ny - gy;
+      if (i < 0 || j < 0 || i >= w || j >= h) continue;
+      const n = j * w + i;
+      if (ground[k] === ground[n] || !inScene(k) || !inScene(n)) continue;
+      sides[k * 3 + d] = links(k, d) || links(n, oppositeFacing(hex, d)) ? CONNECTED : LEDGED;
+    }
+  }
+  return sides;
+}
+
+/** The side of hex (x, y) toward facing `d`, as its two corners on the 1/64 lattice (hex.ts cornerAt): between its corners d + 1 and d + 2. */
+function hexSideEnds(g: HexGrid, x: number, y: number, d: number): [Point, Point] {
+  const corners = hexCorners(g, { col: x, row: y });
+  return [cornerAt(g, corners[(d + 1) % 6]!), cornerAt(g, corners[(d + 2) % 6]!)];
 }
 
 /** The grid's edges as a sorted list for drawing: north edges by row, then west edges by row. */
@@ -847,6 +904,24 @@ function raisedTags(raised: number): number {
  */
 function gridCandidates(g: EdgeGrid, out: CandidateList): void {
   const { gx, gy, w, h, north, west, drawn, relief } = g;
+  if (isHex(g.grid)) {
+    // Hex sides meet only at their corners, so each raised one is a segment of its own, and no grid line runs them together.
+    const sides = relief?.sides;
+    if (!relief || !sides) return;
+    const step = stepper(g.grid);
+    for (let k = 0; k < w * h; k++) {
+      for (let d = 0; d < 3; d++) {
+        const raised = sides[k * 3 + d]!;
+        if (raised === 0) continue;
+        const x = gx + (k % w);
+        const y = gy + (k - (k % w)) / w;
+        const [nx, ny] = step(x, y, d);
+        const [a, b] = hexSideEnds(g.grid, x, y, d);
+        out.add(a.x, a.y, b.x, b.y, raisedTags(raised), 0, Math.max(relief.ground[k]!, relief.ground[(ny - gy) * w + (nx - gx)]!));
+      }
+    }
+    return;
+  }
   const top = (k: number, other: number) => (relief ? Math.max(relief.ground[k]!, relief.ground[other]!) : 0);
   const hRun = new Int32Array(w * h);
   const vRun = new Int32Array(w * h);
@@ -1165,14 +1240,19 @@ export class WallSet {
     return top === -Infinity ? 0 : top;
   }
 
-  /** Which way the stair in a cell points up, null for a stair with no direction, undefined for a cell that is not a stair. */
-  stairAt(x: number, y: number): Compass | null | undefined {
+  /** Which way the stair in a cell (a hex on hexes, by its key) points up, null for a stair with no direction, undefined for a cell that is not a stair. */
+  stairAt(x: number, y: number): Facing | null | undefined {
     const g = this.#grid;
     const i = x - g.gx;
     const j = y - g.gy;
     if (!g.relief || i < 0 || j < 0 || i >= g.w || j >= g.h) return undefined;
     const code = g.relief.stairs[j * g.w + i]!;
-    return code === 0 ? undefined : compassOf(code - 1);
+    return code === 0 ? undefined : facingOf(g.grid, code - 1);
+  }
+
+  /** The grid its cells are keyed by: hex keys on a hex scene. */
+  get grid(): Grid {
+    return this.#grid.grid;
   }
 
   /** Whether the build has any height or stair, so the movement test can skip the ground. */
@@ -1245,7 +1325,32 @@ export class WallSet {
     const p = this.pieces;
     const g = this.#grid;
     const tops = new Int16Array(p.n);
-    if (g.relief) {
+    if (g.relief && isHex(g.grid)) {
+      const hex = g.grid;
+      const ground = g.relief.ground;
+      const at = (h: Hex) => {
+        const i = h.col - g.gx;
+        const j = h.row - g.gy;
+        return i < 0 || j < 0 || i >= g.w || j >= g.h ? 0 : ground[j * g.w + i]!;
+      };
+      for (let k = 0; k < p.n; k++) {
+        if (!(p.tags[k]! & RAISED)) continue;
+        // A piece of a hex side: its middle lies on the side, between the two hexes whose centers are nearest it.
+        const m = { x: (p.xy[4 * k]! + p.xy[4 * k + 2]!) / 2, y: (p.xy[4 * k + 1]! + p.xy[4 * k + 3]!) / 2 };
+        const a = hexAt(hex, m);
+        let b = a;
+        let best = Infinity;
+        for (const n of hexNeighbors(hex, a)) {
+          const c = hexCenter(hex, n);
+          const d = (c.x - m.x) * (c.x - m.x) + (c.y - m.y) * (c.y - m.y);
+          if (d < best) {
+            best = d;
+            b = n;
+          }
+        }
+        tops[k] = Math.max(at(a), at(b));
+      }
+    } else if (g.relief) {
       const ground = g.relief.ground;
       for (let k = 0; k < p.n; k++) {
         if (!(p.tags[k]! & RAISED)) continue;
@@ -1283,12 +1388,12 @@ function candidatesOf(build: BuildSource, grid: EdgeGrid): { stored: Candidates;
  * the set, so give a new one for different walls. `sceneWalls` does.
  * Without bounds every cell counts as in the scene for raised edges.
  */
-export function deriveWalls(build: BuildIndex, version: string | number, opts: { rule?: AutoWalls; bounds?: { w: number; h: number } } = {}): WallSet {
+export function deriveWalls(build: BuildIndex, version: string | number, opts: { rule?: AutoWalls; bounds?: { w: number; h: number }; grid?: Grid } = {}): WallSet {
   return deriveFrom(sourceOfIndex(build), version, opts);
 }
 
-function deriveFrom(build: BuildSource, version: string | number, opts: { rule?: AutoWalls; bounds?: { w: number; h: number } }): WallSet {
-  const grid = edgeGrid(build, opts.rule ?? "all", opts.bounds ?? null);
+function deriveFrom(build: BuildSource, version: string | number, opts: { rule?: AutoWalls; bounds?: { w: number; h: number }; grid?: Grid }): WallSet {
+  const grid = edgeGrid(build, opts.rule ?? "all", opts.bounds ?? null, opts.grid ?? SQUARES);
   return new WallSet(version, grid, build.free, candidatesOf(build, grid), opts.bounds ?? null);
 }
 
@@ -1312,7 +1417,7 @@ export function countChunksSplit(chunks: Iterable<BuildChunk>, rule: AutoWalls):
  * and optimistic views). Scene ids are chosen by clients, so two rooms can
  * share one, which costs a miss and never a wrong answer.
  */
-type CacheEntry = { chunks: readonly BuildChunk[]; rule: AutoWalls; w: number; h: number; walls: WallSet };
+type CacheEntry = { chunks: readonly BuildChunk[]; rule: AutoWalls; grid: Grid; w: number; h: number; walls: WallSet };
 const sceneCache = new Map<string, CacheEntry[]>();
 const SCENES_KEPT = 64;
 const SETS_PER_SCENE = 2;
@@ -1347,22 +1452,23 @@ function sameItems(a: readonly BuildChunk[], b: readonly BuildChunk[]): boolean 
 }
 
 /** The derived walls of a scene, from the state's chunk collection. */
-export function sceneWalls(scene: Pick<Scene, "id" | "autoWalls" | "bounds">, buildChunks: Readonly<Record<string, BuildChunk>>): WallSet {
+export function sceneWalls(scene: Pick<Scene, "id" | "autoWalls" | "bounds" | "gridShape">, buildChunks: Readonly<Record<string, BuildChunk>>): WallSet {
   const chunks = chunksOf(buildChunks, scene.id);
   const rule = autoWallsOf(scene);
+  const grid = gridOfShape(scene.gridShape);
   const { w, h } = scene.bounds;
   const entries = sceneCache.get(scene.id) ?? [];
   sceneCache.delete(scene.id);
   let hit: CacheEntry | undefined;
   for (let i = 0; i < entries.length; i++) {
     const e = entries[i]!;
-    if (e.rule === rule && e.w === w && e.h === h && sameItems(e.chunks, chunks)) {
+    if (e.rule === rule && e.grid === grid && e.w === w && e.h === h && sameItems(e.chunks, chunks)) {
       hit = e;
       entries.splice(i, 1);
       break;
     }
   }
-  hit ??= { chunks, rule, w, h, walls: deriveFrom(sourceOfChunks(chunks), ++serial, { rule, bounds: { w, h } }) };
+  hit ??= { chunks, rule, grid, w, h, walls: deriveFrom(sourceOfChunks(chunks), ++serial, { rule, bounds: { w, h }, grid }) };
   sceneCache.set(scene.id, [hit, ...entries].slice(0, SETS_PER_SCENE));
   if (sceneCache.size > SCENES_KEPT) {
     const oldest = sceneCache.keys().next().value;

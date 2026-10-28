@@ -2,7 +2,9 @@ import { cellIndex, decodeHeights, decodeRough, decodeStairs, encodeHeights, enc
 import { chunkKey } from "../keys.ts";
 import { CHUNK_CELLS, type BuildChunk, type Scene, type StairMark } from "../model.ts";
 import type { OpOf } from "../protocol.ts";
-import { emptyChunk, inBounds, landOnGround, parseCell, standingOn, withHeightFields, withRough, writeChunk } from "./map.ts";
+import { emptyChunk, inBounds, landOnGround, parseCell, stampedOn, standingOn, withHeightFields, withRough, writeChunk } from "./map.ts";
+import { isHex, sceneGrid } from "../rules/grid.ts";
+import { facingsOf, type Facing } from "../rules/heights.ts";
 import { invalid, type Tx } from "./tx.ts";
 
 /**
@@ -77,7 +79,7 @@ const paintHeight =
  */
 export function heightsPainted(chunks: Readonly<Record<string, BuildChunk>>, scene: Scene, op: OpOf<"build.height">): Record<string, BuildChunk> {
   const out = { ...chunks };
-  for (const next of editedChunks(chunks, scene, op.cells.map(parseCell), paintHeight(op.height))) out[chunkKey(next.sceneId, next.cx, next.cy)] = next;
+  for (const next of editedChunks(chunks, scene, op.cells.map(parseCell), paintHeight(op.height))) out[chunkKey(next.sceneId, next.cx, next.cy)] = stampedOn(scene, next);
   return out;
 }
 
@@ -85,6 +87,11 @@ export function heightsPainted(chunks: Readonly<Record<string, BuildChunk>>, sce
 export function buildStairs(tx: Tx, op: OpOf<"build.stairs">): void {
   const scene = tx.scene(op.sceneId);
   const mark: StairMark = op.up ?? ".";
+  // Each grid keeps its own facings (docs/design-v1-hex-grids.md H3), so a chunk never holds a mark its scene cannot read.
+  const g = sceneGrid(scene);
+  if (mark !== "." && mark !== "a" && !facingsOf(g).includes(mark as Facing)) {
+    throw invalid(isHex(g) ? "a stair on hexes faces a side from 0 to 5" : "a stair on squares faces north, east, south or west");
+  }
   editChunks(tx, scene, op.cells.map(parseCell), (chunk, here) => {
     const marks = decodeStairs(chunk.up);
     for (const c of here) marks[cellIndex(chunk, c.x, c.y)] = mark;

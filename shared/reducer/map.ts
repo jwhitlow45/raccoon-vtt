@@ -4,7 +4,7 @@ import { CHUNK_CELLS, type BuildChunk, type ExploredTile, type FogDraft, type Fo
 import { MOST_SIGHT_HOLDERS, SIGHT_HOLDERS_FULL } from "../limits.ts";
 import { MAX_BUILD_CELLS, MAX_FOG_DRAFT_OPS, type OpOf } from "../protocol.ts";
 import { allRevealedTiles, decodeTile, encodeTile, isEmptyBits, pointInPolygonFixed, rasterizeFogOps, tilesAcross } from "../rules/fog.ts";
-import { occupiedCells } from "../rules/footprint.ts";
+import { occupiedCells, occupiedHexes } from "../rules/footprint.ts";
 import { footprintGround } from "../rules/heights.ts";
 import { boxTouchesCell, labelBox } from "../rules/labels.ts";
 import { attaches, discoversMap } from "../migrate.ts";
@@ -597,10 +597,18 @@ export function standingOn(tx: Tx, sceneId: string, cells: ReadonlySet<string> |
     if (token.sceneId !== sceneId) continue;
     // What sits on its holder stands on the holder, not the floor, and moves only with it (docs/design-v1-attach.md 5.2).
     if (groups && token.attached && onHolder(token.attached.kind) && holderOf(tx.state.tokens, token)) continue;
-    if (cells && !occupiedCells(SQUARES, token).some((c) => cells.has(`${c.x},${c.y}`))) continue;
+    if (cells && !standsOnCells(tx, token, cells)) continue;
     if (token.elevation === footprintGround(tx.state.buildChunks, token)) out.push(token);
   }
   return out;
+}
+
+/** Whether a token stands on any of these cell keys: its squares, or on a hex scene its hexes (H3). */
+function standsOnCells(tx: Tx, token: Token, cells: ReadonlySet<string>): boolean {
+  const scene = tx.state.scenes[token.sceneId];
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  if (isHex(g)) return occupiedHexes(g, token).some((h) => cells.has(hexKey(h)));
+  return occupiedCells(SQUARES, token).some((c) => cells.has(`${c.x},${c.y}`));
 }
 
 /**
@@ -809,7 +817,11 @@ function boxTouchesHex(g: HexGrid, box: { x0: number; y0: number; x1: number; y1
  * are, so their stored form never changes.
  */
 function stamped(tx: Tx, chunk: BuildChunk): BuildChunk {
-  const scene = tx.state.scenes[chunk.sceneId];
+  return stampedOn(tx.state.scenes[chunk.sceneId], chunk);
+}
+
+/** A chunk with its scene's stamp while it holds grid-keyed content on a hex scene, and none otherwise (HX-D14), for a chunk worked out but not written too. */
+export function stampedOn(scene: Pick<Scene, "gridShape"> | undefined, chunk: BuildChunk): BuildChunk {
   const g = scene ? sceneGrid(scene) : SQUARES;
   if (!isHex(g)) return chunk;
   const keyed = Object.keys(chunk.cells).length > 0 || Object.keys(chunk.edges).length > 0 || chunk.heights !== undefined || chunk.up !== undefined || chunk.rough !== undefined;

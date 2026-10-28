@@ -763,7 +763,7 @@ function liveValue(state: RoomState, scene: Scene, field: CellField, key: string
     case "rough":
       return chunk?.rough?.[k] === "d";
     case "upDir":
-      return isHex(sceneGrid(scene)) ? "." : shownUpDir(sceneWalls(scene, state.buildChunks), x, y);
+      return shownUpDir(sceneWalls(scene, state.buildChunks), x, y);
   }
 }
 

@@ -147,7 +147,7 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
     assert.deepEqual(restoredHolds(state, "chunk", chunk({ rough: ROUGH }), rows), { held: [{ what: "rough", count: 1 }], from: "squares" });
     assert.equal(restoredHolds(state, "chunk", chunk({ rough: ROUGH }), squares), null);
     assert.equal(restoredHolds(state, "chunk", chunk({ rough: ROUGH, grid: "hexRows" }), rows), null, "a matching stamp passes this check, and difficult ground meets H2's");
-    assert.deepEqual(restoredHolds(state, "chunk", chunk({ heights: "A".repeat(683) + "=", grid: "hexRows" }), rows)?.from, "hexRows", "and heights meet the phase's");
+    assert.equal(restoredHolds(state, "chunk", chunk({ heights: "A".repeat(683) + "=", grid: "hexRows" }), rows), null, "and from H3 heights meet the phase's too");
     assert.deepEqual(restoredHolds(state, "chunk", chunk({ rough: ROUGH, grid: "hexRows" }), columns), { held: [{ what: "rough", count: 1 }], from: "hexRows" });
     assert.deepEqual(restoredHolds(state, "chunk", chunk({ cells: { "0,0": "stone" }, grid: "hexColumns" }), squares)?.from, "hexColumns");
     const cells: FogDraft = { sceneId: "s1", rev: 1, ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
@@ -172,12 +172,13 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
     assert.equal(restoredHolds(room(), "token", token("g", { size: "large", squeeze: true }), rows), null);
   });
 
-  test("the phase check: from H2 a hex scene takes attach links and traps of its shape, but no pit", () => {
+  test("the phase check: from H2 a hex scene takes attach links and traps of its shape, and from H3 their pits", () => {
     const state = room({ tokens: { horse: token("horse", { size: "large" }), bree: token("bree", { attached: { to: "horse", kind: "ride" } }) } });
     assert.equal(restoredHolds(state, "trap", trap("t1", { grid: "hexRows" }), rows), null, "a trap of the scene's shape");
     const pit = trap("t1", { grid: "hexRows" });
     pit.rig = { ...pit.rig!, pit: { floor: -10 } };
-    assert.deepEqual(restoredHolds(state, "trap", pit, rows), { held: [{ what: "trap", count: 1 }], from: "hexRows" }, "a pit");
+    assert.equal(restoredHolds(state, "trap", pit, rows), null, "a pit");
+    assert.ok(restoredHolds(state, "trap", pit, columns), "a pit of hex rows on hex columns, by its stamp");
     assert.ok(restoredHolds(state, "trap", trap("t1", { grid: "hexRows" }), columns), "a trap of hex rows on hex columns, by its stamp");
     assert.equal(restoredHolds(state, "token", state.tokens.bree!, rows), null, "a rider");
     assert.equal(restoredHolds(state, "token", state.tokens.horse!, rows), null, "what something rides");
@@ -186,14 +187,12 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
     assert.equal(restoredHolds(state, "token", state.tokens.bree!, squares), null);
   });
 
-  test("the phase check: in H3 a hex scene takes no grid-keyed content but difficult ground and Reveal room's cells, whatever its stamp (D-261026-8)", () => {
+  test("the phase check: in H3 a hex scene takes no grid-keyed content but difficult ground, heights, stairs and Reveal room's cells, whatever its stamp (D-261026-8)", () => {
     const state = room();
     const kinds: [Partial<BuildChunk>, string][] = [
       [{ cells: { "1,1": "stone" } }, "ground"],
       [{ edges: { "1,1,n": { kind: "wall" } } }, "walls"],
       [{ edges: { "1,1,n": { kind: "none" } } }, "walls"],
-      [{ heights: "A".repeat(683) + "=" }, "heights"],
-      [{ up: ".".repeat(256) }, "stairs"],
     ];
     for (const [s, shape] of [
       [rows, "hexRows"],
@@ -203,6 +202,7 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
         assert.deepEqual(restoredHolds(state, "chunk", chunk({ ...content, grid: shape }), s), { held: [{ what, count: 1 }], from: shape }, `${what} on ${shape}`);
       }
       assert.equal(restoredHolds(state, "chunk", chunk({ rough: ROUGH, walls: [WALL], grid: shape }), s), null, `difficult ground and free walls on ${shape}`);
+      assert.equal(restoredHolds(state, "chunk", chunk({ heights: "A".repeat(683) + "=", up: "3".padEnd(256, "."), grid: shape }), s), null, `heights and stairs on ${shape} (HX-8)`);
       const cells: FogDraft = { sceneId: "s1", rev: 1, grid: shape, ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
       assert.equal(restoredHolds(state, "fogDraft", cells, s), null, `Reveal room's cells of its own stamp on ${shape}`);
       const other = shape === "hexRows" ? "hexColumns" : "hexRows";
@@ -217,8 +217,8 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
     assert.equal(restoreRefusal("undo", found, rows), "Can't undo that: difficult ground on squares can't stand on this scene's hexes.");
     const turned = restoredHolds(room(), "chunk", chunk({ rough: ROUGH, grid: "hexRows" }), columns)!;
     assert.equal(restoreRefusal("redo", turned, columns), "Can't redo that: difficult ground on hex rows can't stand on this scene's hex columns.");
-    const own = restoredHolds(room(), "chunk", chunk({ up: ".".repeat(256), grid: "hexRows" }), rows)!;
-    assert.equal(restoreRefusal("undo", own, rows), "Can't undo that: stairs can't stand on this scene's hexes.");
+    const own = restoredHolds(room(), "chunk", chunk({ cells: { "1,1": "stone" }, grid: "hexRows" }), rows)!;
+    assert.equal(restoreRefusal("undo", own, rows), "Can't undo that: painted ground can't stand on this scene's hexes.");
   });
 
   test("a whole scene: nothing on a square room, and the first thing out of place on a hex one", () => {

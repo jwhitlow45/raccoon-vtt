@@ -49,8 +49,8 @@ describe("H1's refusals on a hex scene", () => {
   ];
 
   test("every build op that writes cell keys or walls, and only on hexes", () => {
-    // H2 takes Wall lines, Erase and Difficult ground on hexes (HX-D9).
-    const lifted = new Set(["build.walls", "build.erase", "build.rough"]);
+    // H2 takes Wall lines, Erase and Difficult ground on hexes (HX-D9), and H3 heights and stairs (HX-8).
+    const lifted = new Set(["build.walls", "build.erase", "build.rough", "build.height", "build.stairs"]);
     for (const op of buildOps("s1")) {
       const words = op.t === "build.edge" ? ON_HEXES.edges : ON_HEXES.build;
       assert.equal(decide(op), lifted.has(op.t) ? "ok" : `invalid: ${words}`, op.t);
@@ -58,12 +58,14 @@ describe("H1's refusals on a hex scene", () => {
     for (const op of buildOps("s2")) assert.equal(decide(op), "ok", `${op.t} on squares`);
   });
 
-  test("H2: a builder ask on hexes goes only with Erase and Difficult ground in it", () => {
+  test("H3: a builder ask on hexes goes with Erase, Difficult ground, heights and stairs in it, and never painted ground", () => {
     const ask = (ops: Op[]): Op => ({ t: "build.ask", sceneId: "s1", ops, part: 0 }) as Op;
     const erase: Op = { t: "build.erase", sceneId: "s1", cells: ["1,1"] };
     const rough: Op = { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true };
     assert.equal(decide(ask([erase, rough])), "ok");
-    assert.equal(decide(ask([erase, { t: "build.height", sceneId: "s1", cells: ["1,1"], height: 10 }])), `invalid: ${ON_HEXES.build}`);
+    assert.equal(decide(ask([erase, { t: "build.height", sceneId: "s1", cells: ["1,1"], height: 10 }, { t: "build.stairs", sceneId: "s1", cells: ["2,1"], up: "3" }])), "ok");
+    assert.equal(decide(ask([erase, { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["1,1"] }])), `invalid: ${ON_HEXES.build}`);
+    assert.equal(ON_HEXES.build, "Painted ground needs squares.");
     assert.equal(decide(ask([rough, { t: "build.edge", sceneId: "s1", edges: [{ key: "1,1,n", feature: { kind: "wall" } }] }])), `invalid: ${ON_HEXES.edges}`);
     assert.equal(decide({ ...ask([{ t: "build.paint", sceneId: "s2", terrain: "stone", cells: ["1,1"] }]), sceneId: "s2" } as Op), "ok", "on squares");
   });
@@ -77,16 +79,15 @@ describe("H1's refusals on a hex scene", () => {
     for (const op of ops) assert.equal(decide(op), "ok", op.t);
   });
 
-  test("from H2, traps made or changed go, but a pit, made or added, is refused (section 9)", () => {
+  test("from H2 traps made or changed go, and from H3 a pit made or added too (HX-8)", () => {
     const { rev: _rev, state: _state, rig, ...rest } = trap("t1");
     assert.equal(decide({ t: "trap.create", trap: { ...rest, rig: rig! } }), "ok");
-    assert.equal(decide({ t: "trap.create", trap: { ...rest, rig: { ...rig!, pit: { floor: -10 } } } }), `invalid: ${ON_HEXES.pit}`);
-    assert.equal(ON_HEXES.pit, "A pit needs heights, which hex scenes get later.");
+    assert.equal(decide({ t: "trap.create", trap: { ...rest, rig: { ...rig!, pit: { floor: -10 } } } }), "ok");
     assert.equal(decide({ t: "trap.create", trap: { ...rest, sceneId: "s2", rig: { ...rig!, pit: { floor: -10 } } } }), "ok", "a pit on squares");
     const held = hexRoom();
     held.traps.t1 = trap("t1", { grid: "hexRows" });
     assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { name: "Spikes" } }, held), "ok");
-    assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { rig: { pit: { floor: -10 } } } }, held), `invalid: ${ON_HEXES.pit}`);
+    assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { rig: { pit: { floor: -10 } } } }, held), "ok");
     assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { rig: { pit: null } } }, held), "ok", "taking a pit away");
   });
 

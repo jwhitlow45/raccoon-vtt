@@ -118,11 +118,11 @@ function draftKeyed(draft: FogDraft): boolean {
 }
 
 /**
- * The grid-keyed content phase H2 lets a hex scene hold (section 6):
- * difficult ground, by hex under hex keys. Painted ground and grid-line
- * walls stay square in every phase, and heights and stairs wait for H3.
+ * The chunks' grid-keyed content a hex scene may hold (section 6), by hex
+ * under hex keys: difficult ground from H2, and heights and stairs from
+ * H3. Painted ground and grid-line walls stay square in every phase.
  */
-const H2_KEYED: ReadonlySet<ShapeHolding> = new Set<ShapeHolding>(["rough"]);
+const HEX_KEYED: ReadonlySet<ShapeHolding> = new Set<ShapeHolding>(["rough", "heights", "stairs"]);
 
 function tally(found: ShapeHolding[]): ShapeHeld[] {
   return HOLDING_ORDER.filter((what) => found.includes(what)).map((what) => ({ what, count: found.filter((f) => f === what).length }));
@@ -174,13 +174,13 @@ function dedupe(held: ShapeHeld[]): ShapeHeld[] {
  *   shape. A value with none, such as a draft of rects or a chunk of free
  *   walls only, means the same on every grid and is never compared.
  * - The phase check, on everything written onto a hex scene, whatever its
- *   stamp (D-261026-8). In H3 a hex scene holds difficult ground and
- *   Reveal room's cells of its own shape and no other grid-keyed content:
- *   painted ground and grid-line walls never (they stay square in every
- *   phase), heights and stairs not yet. Free walls, squeezed creatures,
- *   attach links and traps but pits stand on hexes from H2. A hand-made
- *   backup could stamp any of the rest with the scene's own shape, and
- *   this phase has no hex rules to read them by.
+ *   stamp (D-261026-8). In H3 a hex scene holds difficult ground, heights,
+ *   stairs and Reveal room's cells of its own shape and no other
+ *   grid-keyed content: painted ground and grid-line walls never (they
+ *   stay square in every phase). Free walls, squeezed creatures, attach
+ *   links and traps stand on hexes from H2, and pits from H3. A hand-made
+ *   backup could stamp the rest with the scene's own shape, and no phase
+ *   has hex rules to read them by.
  *
  * `from` is the shape the value's data stands on, for the words: its stamp.
  */
@@ -200,7 +200,7 @@ export function restoredHolds(
     const stamped = stamp(keyed, chunk.grid);
     if (stamped) return stamped;
     if (!isHex(g)) return null;
-    const held = keyed.filter((what) => !H2_KEYED.has(what));
+    const held = keyed.filter((what) => !HEX_KEYED.has(what));
     return held.length > 0 ? { held: dedupe(tally(held)), from: stampShape(chunk.grid) } : null;
   }
   if (kind === "fogDraft") {
@@ -210,8 +210,8 @@ export function restoredHolds(
   }
   if (kind === "trap") {
     const trap = value as Trap;
-    // From H2 a hex scene holds traps of its own shape, but no pit, which opens by writing heights (H3).
-    return stamp(["trap"], trap.grid) ?? (isHex(g) && trap.rig?.pit !== undefined ? { held: [{ what: "trap", count: 1 }], from: stampShape(trap.grid) } : null);
+    // A hex scene holds traps of its own shape from H2, and from H3 their pits, which open by writing heights of its hexes.
+    return stamp(["trap"], trap.grid);
   }
   // A token's squeeze and its links stand on hexes from H2, read by the hex rules of squeezing and attaching.
   return null;

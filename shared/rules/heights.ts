@@ -1,6 +1,8 @@
-import { CHUNK_CELLS, HEIGHTS_CHARS, STAIRS_CHARS, type BuildChunk, type SceneId, type StairMark } from "../model.ts";
-import { occupiedRange, type CellRange, type PlacedToken } from "./footprint.ts";
-import { SQUARES } from "./grid.ts";
+import { CHUNK_CELLS, HEIGHTS_CHARS, STAIRS_CHARS, type BuildChunk, type GridShape, type HexFacing, type SceneId, type StairMark } from "../model.ts";
+import { isWritable } from "../writable.ts";
+import { occupiedHexes, occupiedRange, type CellRange, type PlacedToken } from "./footprint.ts";
+import { gridOfShape, isHex, SQUARES, type Grid } from "./grid.ts";
+import { hexNeighbors, type Hex } from "./hex.ts";
 
 /**
  * Raised areas and stairs (docs/design-v1-maps-vision.md section 4.2): the
@@ -13,8 +15,10 @@ import { SQUARES } from "./grid.ts";
  * segments.test.ts).
  */
 
-/** The four ways a stair can point up. */
+/** The four ways a stair can point up on squares. */
 export type Compass = "n" | "e" | "s" | "w";
+/** The way a stair points up on either grid: a compass point on squares, one of six sides on hexes (model.ts HexFacing). */
+export type Facing = Compass | HexFacing;
 
 // ---------------------------------------------------------------------------
 // The stored heights string
@@ -96,7 +100,8 @@ export function chunkHeights(chunk: BuildChunk): Int16Array | null {
   return hit;
 }
 
-const MARKS = /^[.aensw]*$/;
+// Either shape's facings: a chunk's stamp says which, and the stored-state schema holds each chunk to its own.
+const MARKS = /^[.aensw0-5]*$/;
 
 /**
  * A chunk's stair marks, one per cell row-major, or null when it has none
@@ -194,10 +199,52 @@ function groundOver(r: CellRange, heightsAt: (cx: number, cy: number) => Int16Ar
 
 /**
  * A footprint's ground: the highest ground under the cells it stands in
- * (footprint.ts `occupiedRange`, the squeezed footprint while it squeezes).
+ * (footprint.ts `occupiedRange`, the squeezed footprint while it squeezes),
+ * or on a hex scene under its hexes (`occupiedHexes`).
  */
 export function footprintGround(chunks: Chunks, token: PlacedToken & { sceneId: SceneId }): number {
-  return rangeGround(chunks, token.sceneId, occupiedRange(SQUARES, token));
+  const g = heightsGrid(chunks, token.sceneId);
+  return isHex(g) ? hexesGround(chunks, token.sceneId, occupiedHexes(g, token)) : rangeGround(chunks, token.sceneId, occupiedRange(SQUARES, token));
+}
+
+/** The highest ground over some hexes, by their keys: 0 for none, as for a footprint off every painted hex. */
+export function hexesGround(chunks: Chunks, sceneId: SceneId, hexes: readonly Hex[]): number {
+  let top = -Infinity;
+  for (const h of hexes) top = Math.max(top, groundAt(chunks, sceneId, h.col, h.row));
+  return top === -Infinity ? 0 : top;
+}
+
+const gridCache = new WeakMap<object, Map<SceneId, Grid>>();
+
+/**
+ * The grid a scene's heights and stair marks are keyed by, read from its
+ * chunks' stamps (docs/design-v1-hex-grids.md HX-D14): every chunk of a
+ * hex scene holding grid-keyed content carries its shape, and a scene
+ * holds no cell data of another shape (the reducer, a restore and the
+ * import all keep to it). So the stamp is the grid its keys mean, which
+ * lets every reader of a footprint's ground follow the scene's grid with
+ * the chunks it already holds. Squares when no chunk of the scene carries
+ * a stamp, and a hex scene with no stamped chunk has no ground to read.
+ */
+export function heightsGrid(chunks: Chunks, sceneId: SceneId): Grid {
+  // A transaction's chunks may still change under it (writable.ts), so only a finished set keeps its answers.
+  const cached = isWritable(chunks) ? null : (gridCache.get(chunks) ?? null);
+  const hit = cached?.get(sceneId);
+  if (hit) return hit;
+  let shape: GridShape | undefined;
+  const prefix = `${sceneId}:`;
+  for (const key in chunks) {
+    if (!key.startsWith(prefix)) continue;
+    shape = chunks[key]!.grid;
+    if (shape !== undefined) break;
+  }
+  const g = gridOfShape(shape);
+  if (!isWritable(chunks)) {
+    let scenes = cached;
+    if (!scenes) gridCache.set(chunks, (scenes = new Map()));
+    scenes.set(sceneId, g);
+  }
+  return g;
 }
 
 /**
@@ -223,17 +270,57 @@ export function footing(chunks: Chunks, token: PlacedToken & { sceneId: SceneId;
 // Stair directions
 
 export const COMPASS: readonly Compass[] = ["n", "e", "s", "w"];
+/** A hex stair's six facings, in hexNeighbors' order (model.ts HexFacing). */
+export const HEX_FACINGS: readonly HexFacing[] = ["0", "1", "2", "3", "4", "5"];
 /** Each compass point as a step on the y-down grid. */
 export const STEP: Readonly<Record<Compass, readonly [number, number]>> = { n: [0, -1], e: [1, 0], s: [0, 1], w: [-1, 0] };
-const OPPOSITE: Readonly<Record<Compass, Compass>> = { n: "s", e: "w", s: "n", w: "e" };
+
+/** The ways a stair can point on a grid, a direction code (`stairDirections`) being 1 + an index in it. */
+export function facingsOf(g: Grid): readonly Facing[] {
+  return isHex(g) ? HEX_FACINGS : COMPASS;
+}
+
+/** The facing straight across from facing `d`: the stair's down side when `d` is its up side. */
+export function oppositeFacing(g: Grid, d: number): number {
+  const n = facingsOf(g).length;
+  return (d + n / 2) % n;
+}
 
 /**
- * What working out stair directions reads, over a window of cells: each
- * cell's mark (`StairMark`, or "." for a cell that is not a stair, and "a"
- * for a Stairs terrain cell without a mark), its ground, and whether it lies
- * inside the scene. Cells outside the window lie outside the scene.
+ * The neighbor of the cell or hex keyed (x, y) toward facing `d`, by key:
+ * a compass step on squares, and on hexes the neighbor `hexNeighbors`
+ * gives in that place, whose offset turns on the row's parity on hex rows
+ * and the column's on hex columns.
+ */
+export function stepper(g: Grid): (x: number, y: number, d: number) => readonly [number, number] {
+  if (!isHex(g)) {
+    return (x, y, d) => {
+      const [dx, dy] = STEP[COMPASS[d]!];
+      return [x + dx, y + dy];
+    };
+  }
+  const offsets = [0, 1].map((p) => {
+    const base: Hex = g.orient === "rows" ? { col: 0, row: p } : { col: p, row: 0 };
+    return hexNeighbors(g, base).map((n) => [n.col - base.col, n.row - base.row] as const);
+  });
+  return (x, y, d) => {
+    const v = g.orient === "rows" ? y : x;
+    const [dx, dy] = offsets[v - 2 * Math.floor(v / 2)]![d]!;
+    return [x + dx, y + dy];
+  };
+}
+
+/**
+ * What working out stair directions reads, over a window of cells keyed
+ * from (x0, y0), w by h: each cell's mark (`StairMark`, or "." for a cell
+ * that is not a stair, and "a" for a Stairs terrain cell without a mark),
+ * its ground, and whether it lies inside the scene. Cells outside the
+ * window lie outside the scene. On hexes the window runs over hex keys,
+ * and its origin fixes each row's parity.
  */
 export type StairGrid = {
+  x0: number;
+  y0: number;
   w: number;
   h: number;
   mark(k: number): StairMark;
@@ -243,12 +330,16 @@ export type StairGrid = {
 
 /**
  * Which way each stair cell of a window points up (section 4.2): its
- * explicit direction, else its one orthogonal neighbor in the scene with
- * higher ground, if exactly one, else, repeating until nothing changes, the
+ * explicit direction, else its one neighbor in the scene with higher
+ * ground, if exactly one, else, repeating until nothing changes, the
  * direction of the adjacent directed stairs that lie straight up or down
  * their own line, when they all agree. So a run of stairs passes its
  * direction down to the cells below it, and a stair between two runs
- * pointing different ways has none.
+ * pointing different ways has none. On squares a cell's neighbors are its
+ * four orthogonal ones, and on hexes the six beside its sides, so a hex
+ * stair reads its own facings ("0" to "5") as a square stair reads its
+ * compass marks. A mark of the other grid's facings is bad data and reads
+ * as "a".
  *
  * Every repeat decides from the directions settled before it, so the
  * answer does not depend on the order cells are visited in, and each cell is
@@ -256,30 +347,34 @@ export type StairGrid = {
  * linear in the number of stairs.
  *
  * Returns, per cell index, 0 for a cell that is not a stair or has no
- * direction, else 1 + the index of its direction in COMPASS.
+ * direction, else 1 + the index of its direction in `facingsOf(grid)`.
  */
-export function stairDirections(g: StairGrid, stairs: readonly number[]): Uint8Array {
+export function stairDirections(grid: Grid, g: StairGrid, stairs: readonly number[]): Uint8Array {
+  const facings = facingsOf(grid);
+  const sides = facings.length;
+  const step = stepper(grid);
   const dir = new Uint8Array(g.w * g.h);
-  const neighbor = (k: number, d: Compass): number => {
-    const x = (k % g.w) + STEP[d][0];
-    const y = (k - (k % g.w)) / g.w + STEP[d][1];
-    return x < 0 || y < 0 || x >= g.w || y >= g.h ? -1 : y * g.w + x;
+  const neighbor = (k: number, d: number): number => {
+    const [x, y] = step(g.x0 + (k % g.w), g.y0 + (k - (k % g.w)) / g.w, d);
+    const i = x - g.x0;
+    const j = y - g.y0;
+    return i < 0 || j < 0 || i >= g.w || j >= g.h ? -1 : j * g.w + i;
   };
   const stairAt = (k: number) => k >= 0 && g.mark(k) !== ".";
   let settled: number[] = [];
   for (const k of stairs) {
-    const mark = g.mark(k);
-    if (mark === "n" || mark === "e" || mark === "s" || mark === "w") {
-      dir[k] = 1 + COMPASS.indexOf(mark);
+    const own = facings.indexOf(g.mark(k) as Facing);
+    if (own >= 0) {
+      dir[k] = 1 + own;
       settled.push(k);
       continue;
     }
-    const own = g.ground(k);
+    const ground = g.ground(k);
     let up = -1;
     let higher = 0;
-    for (let d = 0; d < 4; d++) {
-      const j = neighbor(k, COMPASS[d]!);
-      if (j < 0 || !g.inScene(j) || !(g.ground(j) > own)) continue;
+    for (let d = 0; d < sides; d++) {
+      const j = neighbor(k, d);
+      if (j < 0 || !g.inScene(j) || !(g.ground(j) > ground)) continue;
       higher++;
       up = d;
     }
@@ -292,7 +387,7 @@ export function stairDirections(g: StairGrid, stairs: readonly number[]): Uint8A
   while (settled.length > 0) {
     const candidates: number[] = [];
     for (const k of settled) {
-      for (const d of COMPASS) {
+      for (let d = 0; d < sides; d++) {
         const j = neighbor(k, d);
         if (stairAt(j) && dir[j] === 0 && tried[j] !== 1) {
           tried[j] = 1;
@@ -305,12 +400,12 @@ export function stairDirections(g: StairGrid, stairs: readonly number[]): Uint8A
       tried[k] = 0;
       let found = 0;
       let conflict = false;
-      for (const d of COMPASS) {
+      for (let d = 0; d < sides; d++) {
         const j = neighbor(k, d);
         if (j < 0 || dir[j] === 0) continue;
-        const theirs = COMPASS[dir[j]! - 1]!;
+        const theirs = dir[j]! - 1;
         // The neighbor lies on its own line through this cell only when it points toward or away from it.
-        if (theirs !== d && theirs !== OPPOSITE[d]) continue;
+        if (theirs !== d && theirs !== oppositeFacing(grid, d)) continue;
         if (found === 0) found = dir[j]!;
         else if (found !== dir[j]) conflict = true;
       }
@@ -322,7 +417,12 @@ export function stairDirections(g: StairGrid, stairs: readonly number[]): Uint8A
   return dir;
 }
 
-/** The compass point a direction code from `stairDirections` names, or null for 0. */
+/** The facing a direction code from `stairDirections` names on a grid, or null for 0. */
+export function facingOf(g: Grid, code: number): Facing | null {
+  return code === 0 ? null : facingsOf(g)[code - 1]!;
+}
+
+/** The compass point a square direction code from `stairDirections` names, or null for 0. */
 export function compassOf(code: number): Compass | null {
   return code === 0 ? null : COMPASS[code - 1]!;
 }

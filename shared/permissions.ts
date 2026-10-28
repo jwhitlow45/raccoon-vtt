@@ -241,24 +241,26 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
  * section 6, phase H1), in the words its limit lines show.
  */
 export const ON_HEXES = {
-  build: "Painted ground and heights need squares.",
+  build: "Painted ground needs squares.",
   edges: "On hexes walls are wall lines.",
-  pit: "A pit needs heights, which hex scenes get later.",
 } as const;
 
 /**
  * The server refuses on a hex scene every op whose rules are not hex yet
- * (HX-D20): every build op that paints ground, heights or stairs, or puts
- * walls on grid lines, and a trap's pit made or changed. No such op was
- * ever stored, so lifting a refusal in a later phase changes no replay.
- * Lights, stamps, labels, Clear build and every fog shape stay. From H2 so
- * do free walls, Erase and difficult ground, routes and squeezes, whose
- * stops on hexes are anchors (`onHexStop`), attaching and a token sent onto
- * a hex scene with its links, and traps but their pits, and from H3 Reveal
- * room's fog shapes of hex keys (docs/design-v1-hex-grids.md section 6). A
+ * (HX-D20): every build op that paints ground or puts walls on grid lines.
+ * No such op was ever stored, so lifting a refusal in a later phase changes
+ * no replay. Lights, stamps, labels, Clear build and every fog shape stay.
+ * From H2 so do free walls, Erase and difficult ground, routes and
+ * squeezes, whose stops on hexes are anchors (`onHexStop`), attaching and a
+ * token sent onto a hex scene with its links, and traps, and from H3
+ * Reveal room's fog shapes of hex keys, heights, stairs and pits
+ * (docs/design-v1-hex-grids.md section 6). A
  * restore keeps the same line in the reducer (shared/reducer/misc.ts),
  * since two DMs can race a switch.
  */
+/** The build ops a builder ask may carry on a hex scene: those `hexPhaseFits` takes there. */
+const HEX_ASKS: ReadonlySet<string> = new Set(["build.erase", "build.rough", "build.height", "build.stairs"]);
+
 function hexPhaseFits(op: Op, c: Check): Decision {
   const hex = (sceneId: string | undefined) => {
     const scene = sceneId === undefined ? undefined : c.state.scenes[sceneId];
@@ -266,28 +268,23 @@ function hexPhaseFits(op: Op, c: Check): Decision {
   };
   const no = (words: string) => refuse("invalid", words);
   switch (op.t) {
-    // Phase H2 builds on hexes with Wall lines (free walls), Erase and Difficult ground by hex keys (HX-D9).
+    // Phase H2 builds on hexes with Wall lines (free walls), Erase and Difficult ground by hex keys (HX-D9), and H3 with heights and stairs.
     case "build.walls":
     case "build.erase":
     case "build.rough":
+    case "build.height":
+    case "build.stairs":
       return OK;
     case "build.edge":
       return hex(op.sceneId) ? no(ON_HEXES.edges) : OK;
     case "build.paint":
     case "build.rect":
     case "build.poly":
-    case "build.height":
-    case "build.stairs":
       return hex(op.sceneId) ? no(ON_HEXES.build) : OK;
     case "build.ask":
       if (!hex(op.sceneId)) return OK;
       if (op.ops.some((o) => o.t === "build.edge")) return no(ON_HEXES.edges);
-      return op.ops.every((o) => o.t === "build.erase" || o.t === "build.rough") ? OK : no(ON_HEXES.build);
-    // Traps work on hexes from H2 but pits, which open by writing ground heights (reducer/traps.ts openPit).
-    case "trap.create":
-      return hex(op.trap.sceneId) && op.trap.rig.pit !== undefined ? no(ON_HEXES.pit) : OK;
-    case "trap.update":
-      return hex(c.state.traps[op.trapId]?.sceneId) && op.patch.rig?.pit != null ? no(ON_HEXES.pit) : OK;
+      return op.ops.every((o) => HEX_ASKS.has(o.t)) ? OK : no(ON_HEXES.build);
     default:
       return OK;
   }

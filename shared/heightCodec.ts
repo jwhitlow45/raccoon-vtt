@@ -30,7 +30,8 @@ export function encodeHeights(heights: Int16Array): string | undefined {
 /** Each cell's stair mark, all "." when the chunk has none. */
 export function decodeStairs(text: string | undefined): StairMark[] {
   if (text === undefined || text.length !== CELLS) return Array.from({ length: CELLS }, () => ".");
-  return Array.from(text, (c) => (c === "a" || c === "n" || c === "e" || c === "s" || c === "w" ? c : "."));
+  // A hex stair's facings are digits (model.ts HexFacing), which a square scene's chunks never hold.
+  return Array.from(text, (c) => (c === "a" || c === "n" || c === "e" || c === "s" || c === "w" || (c >= "0" && c <= "5") ? (c as StairMark) : "."));
 }
 
 /** The stored form of the marks, or undefined when no cell is a stair. */

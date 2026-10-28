@@ -6,7 +6,6 @@ import { MAX_NAME, TRAP_SOUNDS, type TrapPatch } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, choiceText, SKILLS } from "#shared/rules/skills.ts";
 import { pitOpen, trapCreature, zoneHexes } from "#shared/rules/traps.ts";
-import { ON_HEXES } from "#shared/permissions.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -291,12 +290,12 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
           <Switch label="Stops the creature where it goes off" help="A silent trap should not stop the creature: its player would notice." checked={rig.stops} onChange={(stops) => setRig({ stops })} />
           <Switch label="Marks itself found when players see it go off" checked={rig.foundOnSpring} onChange={(foundOnSpring) => setRig({ foundOnSpring })} />
           {squares ? (
-            // An opened pit cannot be undone, so its switch stays disabled with the line that says where its floor is. A hex scene has no heights to open one in yet (H3).
+            // An opened pit cannot be undone, so its switch stays disabled with the line that says where its floor is.
             <Switch
               label="Opens a pit"
-              help={isHex(grid) ? ON_HEXES.pit : opened && rig.pit ? openedLine(rig.pit) : undefined}
+              help={opened && rig.pit ? openedLine(rig.pit) : undefined}
               checked={rig.pit !== undefined}
-              disabled={opened || isHex(grid)}
+              disabled={opened}
               onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })}
             />
           ) : null}

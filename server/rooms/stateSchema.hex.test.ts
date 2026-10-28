@@ -46,7 +46,7 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     }
   });
 
-  test("in H3 a hex scene holds no grid-keyed content but its own difficult ground, Reveal room cells and traps without a pit, whatever its stamp (D-261026-8)", () => {
+  test("in H3 a hex scene holds no grid-keyed content but its own difficult ground, heights, stairs, Reveal room cells and traps with pits, whatever its stamp (D-261026-8)", () => {
     const rough = hexRoom();
     rough.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, rough: ROUGH, grid: "hexRows" };
     const loaded = parseRoomState(rough);
@@ -54,8 +54,6 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     const kinds: [Partial<BuildChunk>, RegExp][] = [
       [{ cells: { "1,1": "stone" } }, /painted ground/],
       [{ edges: { "1,1,n": { kind: "wall" } } }, /walls and doors/],
-      [{ heights: "A".repeat(683) + "=" }, /heights/],
-      [{ up: ".".repeat(256) }, /stairs/],
     ];
     for (const [content, words] of kinds) {
       const s = hexRoom();
@@ -71,11 +69,18 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     assert.ok(roomFog.ok, roomFog.ok ? "" : roomFog.message);
     drafted.fogDrafts.s1 = { ...drafted.fogDrafts.s1, grid: "hexColumns" };
     assert.equal((parseRoomState(drafted) as { message: string }).message, "scenes.s1: Reveal room in its fog draft on hex columns can't stand on this scene's hex rows");
-    // A trap with a pit, which needs heights (H3).
-    const trapped = hexRoom();
-    trapped.traps.t1 = trap("t1", { grid: "hexRows" });
-    trapped.traps.t1.rig = { ...trapped.traps.t1.rig!, pit: { floor: -10 } };
-    assert.equal((parseRoomState(trapped) as { message: string }).message, "scenes.s1: a trap can't stand on this scene's hexes");
+    // From H3 heights, stairs and a pit of the scene's own shape load, and another shape's are refused (HX-8).
+    const raised = hexRoom();
+    raised.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: "A".repeat(683) + "=", up: "2".padEnd(256, "."), grid: "hexRows" };
+    raised.traps.t1 = trap("t1", { grid: "hexRows" });
+    raised.traps.t1.rig = { ...raised.traps.t1.rig!, pit: { floor: -10 } };
+    const own = parseRoomState(raised);
+    assert.ok(own.ok, own.ok ? "" : own.message);
+    raised.buildChunks[chunkKey("s1", 0, 0)] = { ...raised.buildChunks[chunkKey("s1", 0, 0)]!, grid: "hexColumns" };
+    assert.equal((parseRoomState(raised) as { message: string }).message, "scenes.s1: heights and stairs on hex columns can't stand on this scene's hex rows");
+    const turned = hexRoom();
+    turned.traps.t1 = { ...raised.traps.t1, grid: "hexColumns" };
+    assert.equal((parseRoomState(turned) as { message: string }).message, "scenes.s1: a trap on hex columns can't stand on this scene's hex rows");
   });
 
   test("a chunk's stair marks face by its stamp: compass letters on squares, six sides from 0 to 5 on hexes (HX-8)", () => {

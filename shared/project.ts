@@ -69,7 +69,7 @@ import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCe
 import { footprintRect, footprintSubcells, occupiedCells, occupiedHexes, occupiedRange, type CellRange } from "./rules/footprint.ts";
 import { classSight, fogClassOf, groundOf, holdsOwnSight, joinPieces, wallLattice, wallSpans, type CellPiece, type Ground, type Piece, type PieceKind } from "./rules/held.ts";
 import { chunkHeights, chunkMarks, encodeHeights } from "./rules/heights.ts";
-import { hexAt, hexCenter, hexKey, hexSubcells, sceneHexSpan, type HexGrid } from "./rules/hex.ts";
+import { HEX_R, hexAt, hexCenter, hexKey, hexSubcells, sceneHexSpan, type HexGrid } from "./rules/hex.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
@@ -1811,8 +1811,8 @@ function chunkFor(state: RoomState, scene: Scene, ground: Ground, cx: number, cy
   const upDir = new Array<StairDir>(CELLS_PER_CHUNK).fill(".");
   let anyHeld = false;
   let anyStair = false;
-  // Stair directions read the scene's whole stair map, which hexes do not have yet.
-  const stairMap = hex ? null : sceneWalls(scene, chunks);
+  // Stair directions read the scene's whole stair map, by hex keys on a hex scene (H3).
+  const stairMap = sceneWalls(scene, chunks);
   for (let k = 0; k < CELLS_PER_CHUNK; k++) {
     const x = x0 + (k % CHUNK_CELLS);
     const y = y0 + Math.floor(k / CHUNK_CELLS);
@@ -4143,6 +4143,10 @@ function wallDependents(state: RoomState, chunks: readonly { sceneId: string; cx
     let list = boxes.get(sceneId);
     if (!list) boxes.set(sceneId, (list = []));
     list.push({ x0: (cx - 1) * CHUNK_CELLS, y0: (cy - 1) * CHUNK_CELLS, x1: (cx + 2) * CHUNK_CELLS, y1: (cy + 2) * CHUNK_CELLS });
+    // On hexes the chunk's heights and stairs raise the sides of its hexes, whose world box lies elsewhere than its free walls' world chunk (HX-D22).
+    const g = gridOfScene(state, sceneId);
+    const held = state.buildChunks[chunkKey(sceneId, cx, cy)];
+    if (isHex(g) && (held?.heights !== undefined || held?.up !== undefined)) list.push(hexChunkBox(g, cx, cy, CHUNK_CELLS));
   }
   for (const token of Object.values(state.tokens)) {
     const list = boxes.get(token.sceneId);
@@ -4152,6 +4156,15 @@ function wallDependents(state: RoomState, chunks: readonly { sceneId: string; cx
     add(keys.token(token.id));
     tokenIds.add(token.id);
   }
+}
+
+/** The world box of a hex chunk's hexes, grown `margin` cells each way: from its first and last keys' centers, which the odd rows' or columns' shift stays inside. */
+function hexChunkBox(g: HexGrid, cx: number, cy: number, margin: number): CellRange {
+  const a = hexCenter(g, { col: cx * CHUNK_CELLS, row: cy * CHUNK_CELLS });
+  const b = hexCenter(g, { col: (cx + 1) * CHUNK_CELLS - 1, row: (cy + 1) * CHUNK_CELLS - 1 });
+  // A hexagon reaches HEX_R past its center at its points and half a cell at its flat sides.
+  const reach = margin + HEX_R;
+  return { x0: Math.min(a.x, b.x) - reach, y0: Math.min(a.y, b.y) - reach, x1: Math.max(a.x, b.x) + reach, y1: Math.max(a.y, b.y) + reach };
 }
 
 /** Whether any layer's memory of a scene has entries. */
