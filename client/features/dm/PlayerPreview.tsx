@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { useStore } from "zustand";
 import { Button } from "../../components/Button.tsx";
 import { Notice } from "../../components/Notice.tsx";
 import { useModalDialog } from "../../lib/modalDialog.ts";
@@ -8,17 +9,33 @@ import { theme } from "../../lib/theme.ts";
 import { Room } from "../../pages/Room.tsx";
 import { browserEnv, createRoomSocket, previewSocketUrl } from "../../state/socket.ts";
 import { createRoomStore, type RoomStore } from "../../state/store.ts";
+import { useScoped } from "../../state/scope.ts";
 import { RoomProvider, useAssets, useRoomView } from "../../state/view.ts";
 import { SHORT_LANDSCAPE_MAX, useTopBars } from "../encounter/band.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { createPreview, watchPreviewLoad, type Preview, type PreviewLoad } from "./preview.ts";
 import { PreviewContext, type PreviewNotice } from "./previewContext.ts";
 import { PreviewWait } from "./PreviewWait.tsx";
+import { viewAsSlot } from "./viewAs.tsx";
 
 const FLASH_MS = 2_000;
 
 /** The preview's own store, and the read-only room drawn from it. */
 type Live = { room: RoomStore; preview: Preview };
+
+/**
+ * The DM's one preview, wherever it was opened from (viewAs.tsx): the DM
+ * panel's picker, a token's bar or its panel. The Room page mounts it for
+ * the DM only. It reads the player's name from the room as it changes.
+ */
+export function ViewAsHost() {
+  const viewAs = useScoped(viewAsSlot);
+  const target = useStore(viewAs.store, (s) => s.target);
+  const liveName = useRoomView((s) => (target ? s.view?.members[target.memberId]?.name : undefined));
+  const returnFocus = useMemo(() => ({ current: target?.returnFocus ?? null }), [target]);
+  if (!target) return null;
+  return <PlayerPreview memberId={target.memberId} name={liveName ?? target.name} onExit={viewAs.exit} returnFocus={returnFocus} />;
+}
 
 /**
  * "View as a player": the whole Room page again, over the DM's, drawn from
@@ -46,7 +63,13 @@ type Live = { room: RoomStore; preview: Preview };
  * frame) or wants it spanning, it sits centered under the top bars, and
  * the page's own notices and the column start below it.
  */
-export function PlayerPreview(props: { memberId: string; name: string; onExit(): void }) {
+export function PlayerPreview(props: {
+  memberId: string;
+  name: string;
+  onExit(): void;
+  /** Where focus goes on Exit: the control that opened it (viewAs.tsx), which may not be what held focus as it opened. */
+  returnFocus?: RefObject<HTMLElement | null>;
+}) {
   const roomId = useRoomView((s) => s.roomId);
   const assets = useAssets();
   const [live, setLive] = useState<Live | null>(null);
@@ -111,7 +134,7 @@ export function PlayerPreview(props: { memberId: string; name: string; onExit():
   // A modal dialog (lib/modalDialog.ts), so the DM's own room behind it is inert and Escape leaves the preview.
   // It holds a whole Room page, whose chrome takes the interface size itself and whose map must not.
   const dialog = useRef<HTMLDialogElement>(null);
-  useModalDialog(dialog, { onClose: onExit, zoom: false });
+  useModalDialog(dialog, { onClose: onExit, returnFocus: props.returnFocus, zoom: false });
   const zoom = useUiScale();
   // One line on a short screen, as the room's own lasting notices (components/Notice.tsx).
   const compact = useLayoutSize().height < SHORT_LANDSCAPE_MAX;

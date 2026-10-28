@@ -92,6 +92,7 @@ import { RoomScope, RoomScopeProvider, scopeSlot, useRoomScope, useScoped } from
 import { toastsLeft } from "../state/store.ts";
 import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
+import { ViewAsHost } from "../features/dm/PlayerPreview.tsx";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
 import { RoomPasteHost } from "../features/images/RoomPaste.tsx";
 import { ShortcutSheetHost } from "../features/device/ShortcutSheet.tsx";
@@ -1188,6 +1189,8 @@ function RoomPage() {
       ) : null}
       <FoldStatus folded={folded || underPane || columnSummary} />
       <HandoutPopup />
+      {/* The DM's one View as a player, from whichever entry opened it. A preview's own page reads as a player and has none. */}
+      {role === "dm" && !preview ? <ViewAsHost /> : null}
       <ShortcutSheetHost role={role} />
       <RoomPasteHost />
     </div>

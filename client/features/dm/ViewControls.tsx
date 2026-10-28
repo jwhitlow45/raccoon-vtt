@@ -6,10 +6,10 @@ import { Notice } from "../../components/Notice.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { theme } from "../../lib/theme.ts";
-import { useRoomScope } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { currentFocus, focusEvent, subscribeFocus } from "./camera.ts";
-import { PlayerPreview } from "./PlayerPreview.tsx";
+import { viewAsSlot } from "./viewAs.tsx";
 import { PartySightToggle } from "../vision/PartySightToggle.tsx";
 
 /**
@@ -79,7 +79,10 @@ export function ViewControls() {
   );
 }
 
-/** View as a player (docs/design-v1-per-player-vision.md 7.4): the server's preview of that player, from whichever scene the DM is on, which stays the DM's. */
+/**
+ * View as a player (docs/design-v1-per-player-vision.md 7.4): the server's preview of that player, from whichever scene the DM is on, which stays the DM's.
+ * The general entry, for a player with no token on the scene. A token's bar and panel open the same one preview (viewAs.tsx).
+ */
 function ViewAsPlayer(props: { members: Record<string, Member | undefined> | undefined }) {
   const selectId = useId();
   const players = useMemo(
@@ -90,8 +93,7 @@ function ViewAsPlayer(props: { members: Record<string, Member | undefined> | und
     [props.members],
   );
   const [picked, setPicked] = useState<string | null>(null);
-  const [previewing, setPreviewing] = useState<Member | null>(null);
-  const exit = useCallback(() => setPreviewing(null), []);
+  const viewAs = useScoped(viewAsSlot);
   const chosen = players.find((p) => p.id === picked) ?? players[0];
 
   if (players.length === 0) return <Help>View as a player: no players have joined yet.</Help>;
@@ -111,15 +113,14 @@ function ViewAsPlayer(props: { members: Record<string, Member | undefined> | und
         <Button
           size="sm"
           disabled={!chosen}
-          onClick={() => {
-            if (chosen) setPreviewing(chosen);
+          onClick={(e) => {
+            if (chosen) viewAs.open({ memberId: chosen.id, name: chosen.name, returnFocus: e.currentTarget });
           }}
         >
           View
         </Button>
       </div>
       <Help>Shows exactly what that player sees, with fog and without hidden things. Nothing you do there is saved.</Help>
-      {previewing ? <PlayerPreview memberId={previewing.id} name={previewing.name} onExit={exit} /> : null}
     </div>
   );
 }
