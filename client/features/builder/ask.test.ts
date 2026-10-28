@@ -306,6 +306,25 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     }
   });
 
+  test("Go ahead on a stroke's forget question while a gesture waits sends nothing and keeps the question for a press once it is answered (MD4-LK-7)", () => {
+    const p = page();
+    p.connect();
+    const n = p.room.dispatch({ t: "build.paint", sceneId: "s1", terrain: "wood", cells: ["3,3"] }, { group: "g1" })!;
+    p.room.applyEv({ t: "ev", seq: p.room.store.getState().seq + 1, changes: [], rejects: [{ n, code: "forget", message: FORGET_ASK }] });
+    // The server hears the stroke too, so its numbers stay in step with the page's.
+    p.deliver();
+    dispatchBuild(p.ctx, rect);
+    p.room.ui.answerForget(true);
+    assert.deepEqual(p.sentKinds(), ["build.ask"], "nothing went before the bands");
+    const waiting = p.room.store.getState().forgetAsk;
+    assert.ok(waiting && waiting.asks.length === 1 && waiting.sending === undefined, "the question stays for another press");
+    p.deliver();
+    assert.equal(p.cell("1,1"), "stone", "the rectangle went");
+    p.room.ui.answerForget(true);
+    assert.deepEqual(p.sentKinds(), ["build.paint"]);
+    assert.ok(p.room.store.getState().forgetAsk?.sending, "Go ahead is on its way");
+  });
+
   test("while a gesture waits, a step off the top of the stack from any sender is refused, and an undo aimed at one op goes", () => {
     const p = page();
     p.connect();

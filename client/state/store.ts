@@ -244,7 +244,8 @@ export type RoomUi = {
    * The DM's answer to the forget question (RoomView.forgetAsk): yes sends
    * each op again with `forget`, under its own undo group, and no lets
    * them go, as refused, and takes back what the server took of their
-   * gestures.
+   * gestures. A yes while a builder gesture waits on its asks does nothing,
+   * and the question stays.
    */
   answerForget(yes: boolean): void;
 };
@@ -700,6 +701,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     answerForget(yes) {
       const ask = get().forgetAsk;
       if (!ask || ask.sending) return;
+      // A yes sends again what `dispatch` refuses while a builder gesture waits on its asks (`overtakes`): the question stays for a press once it is answered, as the forget toast's button does (MD4-LK-7).
+      if (yes && held.length > 0) return;
       if (!yes) {
         store.setState({ forgetAsk: null });
         // The gesture stays unmade whole: its ops the server took are one undo step, taken back quietly.
