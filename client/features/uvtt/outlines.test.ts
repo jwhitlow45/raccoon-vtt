@@ -46,6 +46,12 @@ describe("doors drawn as outlines", () => {
     assert.deepEqual(doorsOf(outline(10, 5, midpoint)).length, 4);
   });
 
+  test("two outlines whose ends touch, a double door, keep both leaves, each on the other's line (FU34-ASTRA-04)", () => {
+    const two = [...outline(10, 5), ...outline(10, 6)];
+    assert.deepEqual(doorsOf(two), [two[2], two[6]]);
+    assert.deepEqual(doorsOf(outline(10, 6)), [outline(10, 6)[2]]);
+  });
+
   test("a straight double door stays two doors, even in Arkenforge's form", () => {
     const portals = [arkenforge(p(4, 8), p(5, 8)), arkenforge(p(5, 8), p(6, 8.002)), ...outline()];
     assert.deepEqual(doorsOf(portals), [portals[0], portals[1], portals[4]]);

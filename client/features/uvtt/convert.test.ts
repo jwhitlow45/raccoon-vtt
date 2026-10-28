@@ -254,6 +254,11 @@ describe("portals", () => {
     assert.equal(outline.summary.doors, 1);
     assert.deepEqual(edgeMap(outline)["10,5,w"], DOOR);
     assert.equal(outline.walls.length, 0);
+    // A second outline one square along the leaf, touching the first: a double door, two doors (FU34-ASTRA-04).
+    const below = portals.map((d) => ({ ...d, a: p(d.a.x, d.a.y + 1), b: p(d.b.x, d.b.y + 1) }));
+    const double = plan({ walls: [[p(10, 2), p(10, 5)], [p(10, 7), p(10, 9)]], portals: [...portals, ...below] });
+    assert.equal(double.summary.doors, 2);
+    assert.deepEqual([edgeMap(double)["10,5,w"], edgeMap(double)["10,6,w"]], [DOOR, DOOR]);
   });
 
   test("real doors joined around a corner, positioned at their midpoints, all import", () => {

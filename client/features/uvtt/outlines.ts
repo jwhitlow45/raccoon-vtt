@@ -9,14 +9,16 @@ import type { Point, UvttPortal } from "./schema.ts";
  * Dungeon Alchemist files also join real doors end to end, around a room's
  * corner and in long runs of windows, so the shape alone cannot tell an
  * outline from doors. Only a file in Arkenforge's form has its turning
- * groups collapsed, each to its longest portal, which is the leaf.
+ * groups collapsed, each to the portals on the line of its longest, the
+ * leaf. Two outlines whose ends touch, a double door, are one group, and
+ * both leaves lie on that line, so both stay.
  */
 
 /** Ends this close are one point, and a `position` this close to the midpoint is at it, in squares. */
 const JOIN_SQUARES = 0.01;
 /**
  * How far off the line of a group's longest portal an end may lie while
- * the group still runs straight, in squares. Dungeon Alchemist's rotation
+ * its portal is still on that line, in squares. Dungeon Alchemist's rotation
  * noise is thousandths of a square, and the nearest side of a door's
  * outline in Arkenforge's own sample map is 0.14 off its wall.
  */
@@ -70,12 +72,16 @@ function joinedGroups(portals: readonly UvttPortal[]): number[][] {
   return [...groups.values()];
 }
 
-/** Whether every end in the group lies on the line of `leaf`, so the group is a straight run such as a double door. */
-function straight(group: readonly UvttPortal[], leaf: UvttPortal): boolean {
+/**
+ * Whether both ends of `d` lie on the line of `leaf`. A straight run such
+ * as a straight double door is all on it, so it keeps every portal, and an
+ * outline's three sides each have an end off it.
+ */
+function onLine(d: UvttPortal, leaf: UvttPortal): boolean {
   const len = length(leaf);
   if (len === 0) return true;
   const off = (q: Point) => Math.abs((leaf.b.x - leaf.a.x) * (q.y - leaf.a.y) - (leaf.b.y - leaf.a.y) * (q.x - leaf.a.x)) / len;
-  return group.every((d) => off(d.a) <= LINE_SQUARES && off(d.b) <= LINE_SQUARES);
+  return off(d.a) <= LINE_SQUARES && off(d.b) <= LINE_SQUARES;
 }
 
 /** The portals that are doors and windows, in the file's order: in Arkenforge's form, each outline's leaf in place of the outline. */
@@ -84,11 +90,9 @@ export function doorsOf(portals: readonly UvttPortal[]): UvttPortal[] {
   const dropped = new Set<number>();
   for (const indexes of joinedGroups(portals)) {
     if (indexes.length < 2) continue;
-    const group = indexes.map((i) => portals[i]!);
     let leaf = indexes[0]!;
     for (const i of indexes) if (length(portals[i]!) > length(portals[leaf]!)) leaf = i;
-    if (straight(group, portals[leaf]!)) continue;
-    for (const i of indexes) if (i !== leaf) dropped.add(i);
+    for (const i of indexes) if (!onLine(portals[i]!, portals[leaf]!)) dropped.add(i);
   }
   return portals.filter((_, i) => !dropped.has(i));
 }
