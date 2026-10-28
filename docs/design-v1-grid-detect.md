@@ -144,9 +144,9 @@ About 500 lines of new code and tests beyond the detector: one build lane and on
 
 ## 10. Hex grids (H3)
 
-Status: proposed, with a measured prototype, `client/features/grid/detectHex.ts` and its tests, which the app does not call yet. The wiring in 10.7 waits for this section's review. Phase H3 of docs/design-v1-hex-grids.md asked for "a hex detector for Find the grid, measured on the evaluation's code-drawn hexes and its three real hex maps before it may apply anything". The project owner added: "The grid detection in particular should automatically detect square or hex so the user does not have to pick which one".
+Status: proposed, with a measured prototype, `client/features/grid/detectHex.ts` and its tests, which the app does not call yet. Revised for review round 1 (HX9A-ASTRA-01 to 03, HX9A-OPUS-01 to 05). The wiring in 10.7 waits for this section's review. Phase H3 of docs/design-v1-hex-grids.md asked for "a hex detector for Find the grid, measured on the evaluation's code-drawn hexes and its three real hex maps before it may apply anything". The project owner added: "The grid detection in particular should automatically detect square or hex so the user does not have to pick which one".
 
-Short answer: hexes are found as surely as squares, and never mistaken for them. On 92 code-drawn hex maps it finds 91, to 0.04% in size and half a pixel in place. On 128 runs over square grids, triangle grids, turned hexes and art without a grid it answers no grid every time. On real maps it finds the 4 regular hex grids it can see and refuses the 2 drawn out of shape. All three looks (squares, hex rows, hex columns) take about half a second on a 4096 px map on this Mac (an M5 Pro), in the Worker that already runs.
+Short answer: hexes are found as surely as squares, and a square grid is never read as hexes. On 92 code-drawn hex maps it finds 91, to 0.04% in size and a quarter pixel in place. Over square grids, triangle grids, turned hexes, hexes 1.1% or more out of shape and art without a grid it answers no grid every time. Hex tiles under a square grid are hexes to it, so when both shapes are found the surer is only offered. On real maps it finds the 4 regular hex grids it can see, refuses the 2 drawn out of shape, and finds no hexes on 13 real square-grid exports. All three looks (squares, hex rows, hex columns) take about 0.6 s on a 4096 px map on this Mac (an M5 Pro), in the Worker that already runs.
 
 ### 10.1 The method
 
@@ -154,16 +154,16 @@ Short answer: hexes are found as surely as squares, and never mistaken for them.
 
 1. **Three families of sides.** Each family lies on parallel lines half a cell apart, and each line is drawn for a third of its length: a side, then two thirds through hexes. The upright sides are found with section 2's thin-line filter across x. The sloped sides, 30 degrees off level, with the same filter across y, reaching 1 / cos 30 farther since a sloped line is that much thicker down than across.
 2. **Three profiles.** The upright responses summed by x, and the sloped ones by the distance along each family's normal, each response shared between the two nearest bins so a line keeps its place to a fraction of a pixel. Sides of the other two families smear across a whole period and add only an even floor.
-3. **Period and phase**, as section 2 fits an axis, for each profile. The three periods must agree within 1%, and the three phases must meet on one lattice: the upright sides' phase is the difference of the sloped ones', within 1.5 px. On small hexes the line's reach shrinks with the period, so lines half a cell apart stay apart, and the shortest periods nearly as strong as the strongest are always tried, since every multiple of a period peaks as high.
-4. **Which lattice holds the centers.** Where the three families cross are hex centers and both kinds of corner, three lattices a corner's distance apart. Each predicts different sides, and every predicted side is looked at in the image, less the same line a quarter cell inward. The lattice whose sides are drawn wins. Its sides must be at least twice as strong as the best other lattice's (`broken` 0.5 or more), or the lines run on through the hexes and are not hexes.
-5. **Turned grids.** The upright sides must sit in the same place in the top and bottom halves, within 3 px across the map, as section 2's lines must. Only the upright family is measured: a picture resized a hair out of proportion leans the sloped lines but not the upright ones.
-6. **A second look at half size**, only when the first finds nothing. Lines wider than the filter's reach (about 6 px at most sizes) show only as two edges, and at half size they fit inside it. Pixel limits tighten by half so the second look is no looser.
+3. **Period and phase**, as section 2 fits an axis, for each profile. The three periods must agree within 1%. The three families' lines nearest the image's middle, each placed by its own period, must meet at one point: the upright line's place is the difference of the sloped ones', within 1.5 px or 5% of the period, whichever is larger. Measured at the middle, a slight difference in period cannot add up to a miss there. On small hexes the line's reach shrinks with the period, so lines half a cell apart stay apart, and the shortest periods nearly as strong as the strongest are always tried, since every multiple of a period peaks as high.
+4. **Which lattice holds the centers.** Where the three families cross are hex centers and both kinds of corner, three lattices a corner's distance apart. Each predicts different sides, and every predicted side is looked at in the image, less the same line a quarter cell inward. The lattice whose sides are drawn wins. Its sides must be at least twice as strong as the best other lattice's (`broken` 0.5 or more), or the lines run on through the hexes and are not hexes. The confidence is the profiles' confidence times how cleanly the sides break, from 0 at `broken` 0.5 to 1 at 0.8, and a find under 0.3 after that is refused. Every fit that passed the profiles is looked at, and the surest after the look is kept. The center is the hex center nearest the image's middle, which on staggered rows may be in the row above or below the nearest row.
+5. **Turned grids and hexes out of shape**, from how each family's lines lean: each line found in both the top and bottom halves of the image is compared with itself, its move along the normal over how far apart its two parts lie down the image, measured from where its responses lie. A turn leans the upright sides, so they must move under 3 px across the map, as section 2's lines must. Hexes stretched or squeezed across or down leave the upright sides upright and lean both sloped families the same way, by cos 30 times the stretch, where a turn leans them opposite ways. So half the sum of the two sloped leans, over cos 30, is the stretch whatever the turn, and 1% or more is refused. The profiles' periods cannot tell this: a leaning line moves along its normal as it crosses the map, and its period over the whole map depends on the map's shape.
+6. **A second look at half size**, only when the first found nothing and saw no grid turned or out of shape. Lines wider than about 6 px, twice the filter's 3 px reach on maps up to 4096 px, have their middle no darker than the pixels the filter compares it with, and show only as two edges. At half size they fit inside it. The limits in pixels (the meeting point, the turn, the even spacing's 1 px floor) halve, so the second look is no looser in the image's pixels.
 
 ### 10.2 Accuracy
 
 Right means the cell within 1% and the center (and the box's middle) within 1 px of a drawn hex center. Confidence tiers are section 3's: 0.6 and over high, 0.3 to 0.6 medium, under 0.3 no grid.
 
-**Code-drawn maps (156 maps, 220 runs).** `synthetic.ts` now draws hex grids as the app lays them, either orientation, any cell and center, line weight, gray, floor only and turn. Maps of 760 to 2000 px, hexes of 14 to 300 px, half of them fractional. A map with hexes is asked for its own orientation, and a map without is asked both ways.
+**Code-drawn maps (192 maps, 280 runs).** `synthetic.ts` draws hex grids as the app lays them, either orientation, any cell and center, line weight, gray, floor only and turn. Maps of 760 to 2000 px, hexes of 14 to 300 px, half of them fractional. Out-of-shape maps are drawn taller or shorter and resized to the map's height. A map with hexes is asked for its own orientation, and a map without is asked both ways.
 
 | Maps | Runs | Right | No grid | Missed | Wrong |
 | --- | --- | --- | --- | --- | --- |
@@ -174,104 +174,134 @@ Right means the cell within 1% and the center (and the box's middle) within 1 px
 | Hexes as JPEG at quality 15 to 92, half resized to 0.6 to 0.9 | 20 | 20 | | | |
 | Hexes turned 0.05 to 0.1 degrees (lines within 3 px) | 8 | 8 | | | |
 | The older hex art in `synthetic.ts` | 4 | 4 | | | |
+| Hexes 0.3 to 0.9% out of shape (found is right) | 12 | 12 | | | |
 | No hexes: hexes turned 0.5 to 20 degrees | 24 | | 24 | | |
-| No hexes: square grids, plain, JPEG, over tiles | 60 | | 60 | | |
+| No hexes: hexes 1.1 to 5% out of shape | 24 | | 24 | | |
+| No hexes: square grids, plain, JPEG, over square tiles | 60 | | 60 | | |
 | No hexes: art without a grid (noise, gradient, JPEG blocks, planks, bricks, checkers, tiles, rooms) | 32 | | 32 | | |
 | No hexes: triangle grids, lines in the hexes' three directions | 12 | | 12 | | |
-| **All** | **220** | **91** | **128** | **1** | **0** |
+| Square grids over a floor of hex tiles (the tiles are hexes) | 24 | | 15 | | 9 |
+| **All** | **280** | **103** | **167** | **1** | **9** |
 
-Of the 91 right, the cell is off by 0.0013% at the median and 0.039% at worst, the center by 0.04 px and 0.49 px. The miss is 75 px hexes over 49 px square tiles, whose seams cross the hex lines in two directions. No run found the wrong orientation. Section 2's `detectGrid` found no squares on the 92 hex maps but 4 of the 12 over square tiles, where it found the tiles (section 5).
+Of the 91 right on regular hexes, the cell is off by 0.0013% at the median and 0.039% at worst, the center by 0.03 px and 0.23 px. The miss is 75 px hexes over 49 px square tiles. No run found the wrong orientation. The 9 wrong are hex tiles found as hexes under a square grid, on 9 of 12 such maps, at 0.62 to 0.89: they are drawn hexes, and 10.6 says what keeps them from replacing the squares.
 
-**Real maps (7), openly licensed, for evaluation only and not committed.** No openly licensed raster battle map with a regular hex grid turned up, so these are diagrams, wargame maps and a game screenshot. Truth was measured on each map at the hex nearest the middle, and the found grid was drawn over the whole map and checked by eye at its far corners.
+**The shape picked** (`pickShape`, 10.6) over the same maps, from all three looks on each:
+
+| Kind | Maps | Right shape | No grid | Other shape | Contested |
+| --- | --- | --- | --- | --- | --- |
+| Regular hexes, all kinds above | 92 | 91 | 1 | | 4 |
+| Hexes 0.3 to 0.9% out of shape | 12 | 12 | | | |
+| Square grids, plain, JPEG, over square tiles | 30 | 29 | 1 | | |
+| Square grids over hex tiles | 12 | 9 | | 3 | 8 |
+| No grid: turned hexes, hexes 1.1% or more out of shape, triangle grids | 30 | 30 | | | |
+| No grid: art (squares found on 2 tile floors, section 5) | 16 | 14 | | 2 | |
+
+Of the 3 square maps over hex tiles that went to hexes, 2 are contested, so they are only offered. In the third the square finder missed the squares, and the tiles alone would apply as hexes at 0.62.
+
+**Real maps.** Section 3's 30 real maps were kept outside the repository on an earlier machine and are not on this Mac, so they could not be run again. Seven openly licensed hex maps were found for this section, for evaluation only and not committed. No openly licensed raster battle map with a regular hex grid turned up, so these are diagrams, wargame maps and a game screenshot. The truth is measured at the found hex from pairs of opposite sides, and the found grid was drawn over each whole map and checked by eye at its far corners.
 
 | Map | License | Hexes | Answer |
 | --- | --- | --- | --- |
-| Sechseckraster (Wikimedia Commons) | public domain | columns, 178 px, labels | right: 0.2%, 0.2 px, confidence 0.67 |
-| Cosim amphibious (Commons, SVG drawn at 1750 px) | CC BY-SA 4.0 | columns, 204 px, island and counters | right: 0.4%, 0.7 px, 0.87 |
-| Battle of the Trebia (Commons, SVG drawn at 2081 px) | GPL | rows, 176 px, 5 px lines under a battle map | right on the second look: 0.1%, 0.4 px, 0.79 |
-| A4 hex page (Commons, SVG drawn at 1624 px) | CC0 | rows, 95 px, blank | right: 0.07%, 0.5 px, 0.88 |
+| Sechseckraster (Wikimedia Commons) | public domain | columns, 178 px, labels | right: 0.2%, 0.04 px, confidence 0.67 |
+| Cosim amphibious (Commons, SVG drawn at 1750 px) | CC BY-SA 4.0 | columns, 204 px, island and counters | right: 0.4%, 0.05 px, 0.87 |
+| Battle of the Trebia (Commons, SVG drawn at 2081 px) | GPL | rows, 176 px, 5 px lines under a battle map | right on the second look: 0.1%, 0.45 px, 0.79 |
+| A4 hex page (Commons, SVG drawn at 1624 px) | CC0 | rows, 95 px, blank | right: 0.07%, 0.02 px, 0.88 |
 | Hex Grid Movement (Commons) | CC BY-SA 4.0 | columns drawn 3.6% too wide | no grid, as it should |
 | Battle for Wesnoth screenshot (Commons) | GPL | columns 15% too tall, the game's own shape | no grid, as it should |
 | Hex grid for roleplaying maps (Openclipart) | public domain | columns, 24 px, lines only in the alpha channel | missed: the finders read gray and ignore alpha. Drawn on white, right |
 
-`detectGrid` answers no grid on all seven. Each map turned a quarter turn, which swaps rows and columns, gives the same answers in the other orientation. Sources, licenses and each truth are in this stage's report.
+`detectGrid` answers no grid on all seven, and the shape picked is the right hexes on the four found. Each map turned a quarter turn, which swaps rows and columns, gives the same answers in the other orientation.
+
+As the real false-positive test against squares, all three looks ran on the 13 real Universal VTT exports kept for the importer's tests (Dungeondraft, Dungeon Alchemist and Arkenforge), each decoded at most 4096 px as the Worker does, its square size stated in the file:
+
+| Maps | Runs | Hexes found | Squares at the stated size | Squares at another size | No squares |
+| --- | --- | --- | --- | --- | --- |
+| Universal VTT exports, 256 to 6956 px | 26 hex, 13 square | 0 | 5 (confidence 0.38 to 1.00) | 0 | 8 |
+
+Whether the 8 without squares have a grid drawn in the image was not checked: many exports carry the grid in the file and not in the picture.
 
 ### 10.3 Cost
 
-On this Mac (M5 Pro), one core, Node, a JPEG at quality 85 of a map with 70 px hex rows, median of five runs. Hex columns there find nothing, so that column includes the second look.
+On this Mac (M5 Pro), one core, Node, a JPEG at quality 85 of a map with 70 px hex rows, the median of seven runs taken in turn with the round-1 build, since other lanes loaded the machine. Hex columns there find nothing, so that column includes the second look.
 
 | Side | Hex rows, found | Hex columns, no grid | Squares | All three |
 | --- | --- | --- | --- | --- |
-| 1000 | 27 ms | 26 ms | 13 ms | 66 ms |
-| 2000 | 64 ms | 75 ms | 55 ms | 194 ms |
-| 4096 | 181 ms | 215 ms | 128 ms | 524 ms |
-| 8000 | 393 ms | 510 ms | 252 ms | 1155 ms |
+| 1000 | 32 ms | 33 ms | 14 ms | 79 ms |
+| 2000 | 85 ms | 101 ms | 53 ms | 239 ms |
+| 4096 | 228 ms | 275 ms | 126 ms | 629 ms |
+| 8000 | 480 ms | 621 ms | 249 ms | 1350 ms |
 
-The finder keeps one gray copy of the image (12.6 MB at 4096 by 3072) and a quarter of that for the second look. Its profiles are under a megabyte. The Worker decodes at most 4096 px, so 8000 is never searched in the app. A browser Worker was not measured: section 4 found Chrome's Worker as fast as Node for the same kind of loops. Phones, two to four times slower, take one to two seconds for all three, within Find the grid's 30 s and past the import's 2 s wait, which the late answer of section 6.1 already handles.
+Confirming every passing fit and measuring where lines lie down the map cost about a quarter more than round 1's build. On the 13 real exports all three looks took 13 ms (256 px) to 1.07 s (3840 by 2640, busy art). The finder keeps one gray copy of the image (12.6 MB at 4096 by 3072) and a quarter of that for the second look. Its profiles are under 2 MB. The Worker decodes at most 4096 px, so 8000 is never searched in the app. A browser Worker was not measured: section 4 found Chrome's Worker as fast as Node for the same kind of loops. Phones, two to four times slower, take 1.3 to 2.5 s for all three, within Find the grid's 30 s and past the import's 2 s wait, which the late answer of section 6.1 already handles.
 
 ### 10.4 What fools it
 
-- **Hexes drawn out of shape**, stretched or squeezed by 1% or more, answer no grid. The app's hexes are regular, and a regular grid over them misses the lines by several pixels across a map. Both such real maps did so.
+- **Hex tiles under another grid** are hexes to it, as square tiles are squares to section 2 (10.6).
+- **Hexes drawn out of shape**, stretched or squeezed by 1% or more, answer no grid: 24 of 24 from 1.1 to 5%, and 12 of 12 from 0.3 to 0.9% found. The app's hexes are regular, and a regular grid over hexes 1% out of shape misses their lines by pixels across a map. Both such real maps did so.
 - **A grid only in the alpha channel** (a transparent overlay) is invisible to both finders. Flattening on white before searching would find it, follow-up HEX-ALPHA, for squares and hexes alike.
-- **Hexes over square tiles** of a similar size can fail the meeting check (one of 12). Lines too faint, or only on a few hexes under busy art, answer no grid rather than a guess. A floor of hexagonal tiles is a hex grid to it, as square tiles are squares to section 2.
+- **Hexes over square tiles** of a similar size can fail the meeting check (one of 12). Lines too faint, or only on a few hexes under busy art, answer no grid rather than a guess.
 - **Small hexes**: under 12 px, or the long side over 200, are not looked for, as the scene limit says.
 - **How much of the map the sides cover** is reported, not checked: a grid on the floors of a few rooms is still the grid.
 
 ### 10.5 What applies and what is offered
 
-Section 3's tiers, unchanged: a high-confidence find applies as one undo step with Line up grid open on it and Use default beside Apply, a medium one only places the box, and under 0.3 is no grid. No run of the evaluation was wrong at any confidence, so hexes earn the same trust as squares, not less. The real maps found came at 0.67 to 0.88.
+Section 3's tiers: a high-confidence find applies as one undo step with Line up grid open on it and Use default beside Apply, a medium one only places the box, and under 0.3 is no grid. Two changes for shapes: a find of another shape than the scene's switches the shape only when it is high, the switch is allowed and the find is not contested (10.6), and a contested find is only offered, at any confidence. No run of the evaluation found hexes where none are drawn, so a lone hex find earns the same trust as squares. The real maps found came at 0.67 to 0.88.
 
 ### 10.6 The guard between squares and hexes
 
-- **Squares are never hexes.** A square grid has no sloped sides, so its sloped profiles hold no lines at its size. Lines in all three of a hex grid's directions that run on through the hexes, a triangle grid, fail step 4: every lattice sees the same lines. Crossings of a triangle grid line up in the other orientation's directions, and the sloped filter's longer reach keeps them from passing as sides. Tested on 60 square-grid runs, 12 triangle-grid runs, the unit tests and the real maps.
+- **Squares are never hexes.** A square grid has no sloped sides, so its sloped profiles hold no lines at its size. Lines in all three of a hex grid's directions that run on through the hexes, a triangle grid, fail step 4: every lattice sees the same lines. Crossings of a triangle grid line up in the other orientation's directions, and the sloped filter's longer reach keeps them from passing as sides. Tested on 60 square-grid runs, 26 runs on real Universal VTT exports, 12 triangle-grid runs, the unit tests and the real hex maps.
 - **Hexes are never squares.** `detectGrid` needs lines that run the map's length at one size across and down, which hexes do not draw. It found squares on no hex grid, only on square tiles under one.
-- **Both found**: hexes win. The hex finder made no false find in any test. The square finder's known false find is square tiles, which lie under hex grids too.
+- **Both shapes found**, as on a floor of tiles under another grid: the surer wins (`pickShape`), and the find is contested. A contested find never applies and never switches the scene's shape, at any confidence: Line up grid places the box on the scene's own shape's find when there is one, and the line names both. Hexes do not simply win: on squares over hex tiles the squares were the surer on 9 of 12. A sure winner over a doubtful other is not safe either: hex tiles beat a square grid at 0.69 against 0.57.
 
 ### 10.7 The wiring the build will do
 
-1. **One search, three looks.** `searchRun.ts` runs `detectGrid`, then `detectHex` for rows and for columns, on the same pixels, and the answer carries all three. `pickShape` takes the found shape: hexes over squares, and of two hex finds the more confident.
-2. **A hex calibration from a find.** `calibrationFromHexFind` turns the center into the scene's origin, reduced into the lattice's period at or after the image's top-left (section 4.1 of the hex note), folding only within `FOUND_SNAP`, as `calibrationFromFind` keeps a square find's measured origin. `foundGrid` scales the cell, center and box by the canonical size over the decoded one.
-3. **New scenes.** A map picked, uploaded or put in place of a scene's art is searched whatever the room's shape (`searchOnImport` loses its `hex` flag). A sure find sets the new scene's shape with its grid, so a hex map in a square room starts on hexes and a square map in a hex room on squares. A doubtful find of another shape changes nothing and says so. A name's size still wins by not searching, except on a hex scene, where names are not read (D-261028-05).
-4. **Find the grid on any scene.** On in Line up grid and in Map image and grid on hex scenes too. A sure find of the scene's shape applies, and of another shape switches the scene's shape with the grid, one undo step, when `switchRefusal` allows it. Use default puts back the shape too. A refused switch, or a doubtful find of another shape, only says what was found.
+1. **One search, three looks.** `searchRun.ts` runs `detectGrid`, then `detectHex` for rows and for columns, on the same pixels, and the answer carries all three. `pickShape` (written, in `detectHex.ts`) takes the shape: the surest find, contested when another shape was found too.
+2. **A hex calibration from a find.** `calibrationFromHexFind` turns the center into the scene's origin as HX-4's `hexCalibration` does (calibrate.ts): the first row at or after the image's top-left, modulo the row spacing (cos 30 cells), the row's parity carried into the other coordinate as half a cell, so Apply and the box agree. It folds only within `FOUND_SNAP`, as `calibrationFromFind` keeps a square find's measured origin, never the box's 5% `ORIGIN_SNAP`. `foundGrid` scales the cell, center and box by the canonical size over the decoded one.
+3. **New scenes.** A map picked, uploaded or put in place of a scene's art is searched whatever the room's shape (`searchOnImport` loses its `hex` flag). A sure, uncontested find sets the new scene's shape with its grid, so a hex map in a square room starts on hexes and a square map in a hex room on squares. A doubtful or contested find of another shape changes nothing and says so. A name's size still wins by not searching, except on a hex scene, where names are not read (D-261028-05).
+4. **Find the grid on any scene.** On in Line up grid and in Map image and grid on hex scenes too. A sure find of the scene's shape applies, and a sure, uncontested find of another shape switches the scene's shape with the grid, one undo step, when `switchRefusal` allows it. Use default puts back the shape too. A refused switch, a doubtful find of another shape or a contested find only says what was found.
 5. **The late answer** of section 6.1 lands only on a scene with the same image, grid and shape as when the search began. `outcome.ts`'s rule that drops every find on a hex scene goes.
-6. **Words.** HX-4's "Find the grid finds square grids only. Line up the hexes with the box." (`HEX_LIMITS.findGrid`) goes, and Options gives hexes their own lines (10.9).
+6. **Words.** HX-4's "Find the grid finds square grids only. Line up the hexes with the box." (`HEX_LIMITS.findGrid`) goes, and Options gives hexes their own lines (10.8).
 
 | Part | Files | Size |
 | --- | --- | --- |
-| The finder, its tests, hex maps drawn by code | `grid/detectHex.ts`, `detectHex.test.ts`, `synthetic.ts` | written, about 1,000 lines |
+| The finder, the shape pick, their tests, hex maps drawn by code | `grid/detectHex.ts`, `detectHex.test.ts`, `synthetic.ts` | written, about 1,300 lines |
 | Shared helpers: the profile and fit code the two finders repeat | `grid/detect.ts`, `grid/profile.ts` | a refactor, about 200 lines moved |
-| Three looks, the shape picked, the hex calibration | `searchRun.ts`, `findGrid.ts`, `calibrate.ts` and tests | about 150 lines |
-| New scene, a new image, Find the grid, the shape switch | `NewScene.tsx`, `SceneSettings.tsx`, `outcome.ts`, `Options.tsx`, `words.ts` | about 150 lines and tests |
+| Three looks, the hex calibration | `searchRun.ts`, `findGrid.ts`, `calibrate.ts` and tests | about 150 lines |
+| New scene, a new image, Find the grid, the shape switch | `NewScene.tsx`, `SceneSettings.tsx`, `outcome.ts`, `Options.tsx`, `words.ts` | about 170 lines and tests |
 | e2e: a code-drawn hex map through New scene in a square room, and Find the grid on a hex scene | `e2e/hex.e2e.ts` | about 80 lines |
 
 One build lane, after LP23-B's fixes to `client/features/grid/` land.
 
 ### 10.8 UI checklist
 
-- **Loading:** unchanged. The same "Looking for a grid…" with the shared indicator, one search, now about twice as long.
+- **Loading:** unchanged. The same "Looking for a grid…" with the shared indicator, one search, now about five times as long as a square search alone.
 - **Keys and focus:** Find the grid keeps its place and focus on hex scenes. A shape switched by a find moves focus nowhere, and the Grid shape radios show the new choice.
 - **Screen readers:** the found line is the options line's live status, as for squares, and names the shape.
 - **Large interface sizes:** the longest new line wraps in the options strip at 130% on a 320 px phone, as section 6.1's lines do.
-- **The exact words:** "Found a grid of 70.4 px hexes." / "Found hex columns of 70.4 px. The grid is hex columns now." / "These lines may be the map's hexes: 70.4 px. Check the box, then Apply." / "These lines may be hex columns of 70.4 px. Change Grid shape to use them." / "Found hex rows of 70.4 px, but " followed by the switch's refusal / "No grid found. Drag a box over 3 hexes across instead." The Map image help on hexes becomes the squares' line without its file-name sentence: "A grid drawn on the map is looked for, and you check it or line up the hexes next."
+- **The exact words:** "Found a grid of 70.4 px hexes." / "Found hex columns of 70.4 px. The grid is hex columns now." / "These lines may be the map's hexes: 70.4 px. Check the box, then Apply." / "These lines may be hex columns of 70.4 px. Change Grid shape to use them." / "The map shows squares of 70 px and hexes of 52 px. Check the box, then Apply." / "Found hex rows of 70.4 px, but " followed by the switch's refusal / "No grid found. Drag a box over 3 hexes across instead." The Map image help on hexes becomes the squares' line without its file-name sentence: "A grid drawn on the map is looked for, and you check it or line up the hexes next."
 
 ### 10.9 Cases
 
 | Case | Expected | Test |
 | --- | --- | --- |
 | Hex rows or columns, any cell and center | found, 0.5% and 0.5 px | `detectHex.test.ts` |
-| The box | 3 by 2.89 cells (2.89 by 3), its middle on the hex nearest the map's middle | `detectHex.test.ts` |
+| The box | 3 by 2.89 cells (2.89 by 3), its middle on the hex nearest the map's middle, in the next row when nearer | `detectHex.test.ts` |
 | RGBA, light lines, faint lines, floors only, 16 to 150 px hexes | found | `detectHex.test.ts` |
 | Lines 7 and 9 px wide | found on the second look | `detectHex.test.ts` |
-| The other orientation, squares, triangle grids, art, turned 0.35 and 2 degrees, out of shape by 5% | no grid, with its reason | `detectHex.test.ts` |
+| A find whose sides barely break at the corners | refused under 0.3, then found on the second look | `detectHex.test.ts` |
+| Several fits pass | the surest after the look along the lines | `detectHex.test.ts` |
+| Hexes 1.1% out of shape, and 0.9%, at 60, 100 and 150 px, both orientations | no grid, and found | `detectHex.test.ts` |
+| The other orientation, squares, triangle grids, art, turned 0.35 and 2 degrees, a thick grid turned 0.3 degrees, resized 5% out of proportion | no grid, with its reason | `detectHex.test.ts` |
 | A hex grid to `detectGrid` | no grid | `detectHex.test.ts` |
+| Squares over hex tiles | squares picked, contested | `detectHex.test.ts` |
 | Hexes found on a new map in a square room | the scene starts on hexes with the grid, one undo step | build: `findGrid.test.ts`, `hex.e2e.ts` |
+| A contested find | the box offered, nothing applied, the shape unchanged | build: `outcome.test.ts` |
 | Find the grid finds hexes on a square scene with painted ground | the shape stays, the line says why | build: `outcome.test.ts` |
 | Use default after a shape switch | shape and grid back | build: `outcome.test.ts` |
 | A late hex answer on a scene whose shape changed | dropped | build: `outcome.test.ts` |
 
 ### 10.10 Decisions
 
-Guessed where the owner's words do not settle it, logged as D-261028-30 to D-261028-39: three looks on every search (30), a find of another shape sets a new scene's shape (31), switches an existing scene's shape only when sure and allowed (32), hexes beat squares when both are found (33), section 3's tiers unchanged (34), out-of-shape hexes refused (35), the second look at half size (36), the measured center kept with only `FOUND_SNAP` (37), names still win on square scenes (38), and transparent overlays left to a follow-up (39).
+Guessed where the owner's words do not settle it, logged as D-261028-30 to D-261028-39: three looks on every search (30), a find of another shape sets a new scene's shape (31), switches an existing scene's shape only when sure and allowed (32), the surer shape wins and two shapes found only offer (33, amended in round 1: hexes no longer always win), section 3's tiers unchanged (34), hexes 1% or more out of shape refused, judged by lean (35, amended), the second look at half size (36), the measured center kept with only `FOUND_SNAP`, reduced as `hexCalibration` reduces (37, amended), names still win on square scenes (38), and transparent overlays left to a follow-up (39).
 
 ### 10.11 As built
 
