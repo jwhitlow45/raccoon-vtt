@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react";
 import { Circle, Group, Line } from "react-konva";
 import type { Drawing, RoomState, Token } from "#shared/model.ts";
-import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useDelayed } from "../../components/Loading.tsx";
 import { footprint, snapPosition } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
@@ -96,7 +96,6 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   // The scene's grid: on hexes a ruler counts hex steps, and a walking ruler steps from hex to hex.
   const gridShape = props.scene.gridShape;
   const grid = useMemo(() => sceneGrid({ gridShape }), [gridShape]);
-  const hex = isHex(grid);
   const route = useTreeShownStore(useScoped(routeSlot), (s) => s.route);
   // The turn's walker: the active creature, or the controlled mount sharing its turn (docs/design-v1-attach.md 7.2).
   const activeTokenId = useTreeShownView((s) => turnMoverId(s.view) ?? null);
@@ -123,11 +122,11 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
           scale={props.scale}
           color={members?.[d.ownerId]?.color ?? d.style.stroke}
           owner={markOwner({ from: d.ownerId, local: d.ownerId === youId }, members)}
-          walk={d.walk && view && !hex ? { view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && d.visibility === "dm" } : undefined}
+          walk={d.walk && view ? { view, sceneId: props.scene.id, viewer: { role }, everything: role === "dm" && d.visibility === "dm" } : undefined}
         />
       ))}
       {Object.entries(rulers).map(([key, r]) =>
-        r.walk && view && !hex ? (
+        r.walk && view ? (
           // Only the DM's own ruler, before it is shared, may read what players cannot see (docs/design-v1-movement.md 3.3).
           <WalkRuler
             key={key}
