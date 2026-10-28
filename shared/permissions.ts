@@ -242,21 +242,22 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
 export const ON_HEXES = {
   build: "Painted ground and heights need squares.",
   edges: "On hexes walls are wall lines.",
-  traps: "Traps need squares.",
+  pit: "A pit needs heights, which hex scenes get later.",
   roomFog: "Reveal room needs a room built on squares.",
 } as const;
 
 /**
  * The server refuses on a hex scene every op whose rules are not hex yet
  * (HX-D20): every build op that paints ground, heights or stairs, or puts
- * walls on grid lines, every trap made or changed, and Reveal room's fog
+ * walls on grid lines, a trap's pit made or changed, and Reveal room's fog
  * shapes. No such op was ever stored, so lifting a refusal in a later phase
  * changes no replay. Lights, stamps, labels and Clear build stay, and so
  * does every other fog shape. From H2 so do free walls, Erase and difficult
  * ground, routes and squeezes, whose stops on hexes are anchors
- * (`onHexStop`), and attaching and a token sent onto a hex scene with its
- * links (docs/design-v1-hex-grids.md section 6). A restore keeps the same line in
- * the reducer (shared/reducer/misc.ts), since two DMs can race a switch.
+ * (`onHexStop`), attaching and a token sent onto a hex scene with its
+ * links, and traps but their pits (docs/design-v1-hex-grids.md section 6).
+ * A restore keeps the same line in the reducer (shared/reducer/misc.ts),
+ * since two DMs can race a switch.
  */
 function hexPhaseFits(op: Op, c: Check): Decision {
   const hex = (sceneId: string | undefined) => {
@@ -282,10 +283,11 @@ function hexPhaseFits(op: Op, c: Check): Decision {
       if (!hex(op.sceneId)) return OK;
       if (op.ops.some((o) => o.t === "build.edge")) return no(ON_HEXES.edges);
       return op.ops.every((o) => o.t === "build.erase" || o.t === "build.rough") ? OK : no(ON_HEXES.build);
+    // Traps work on hexes from H2 but pits, which open by writing ground heights (reducer/traps.ts openPit).
     case "trap.create":
-      return hex(op.trap.sceneId) ? no(ON_HEXES.traps) : OK;
+      return hex(op.trap.sceneId) && op.trap.rig.pit !== undefined ? no(ON_HEXES.pit) : OK;
     case "trap.update":
-      return hex(c.state.traps[op.trapId]?.sceneId) ? no(ON_HEXES.traps) : OK;
+      return hex(c.state.traps[op.trapId]?.sceneId) && op.patch.rig?.pit != null ? no(ON_HEXES.pit) : OK;
     case "fog.draft":
       return hex(op.sceneId) && (op.add ?? []).some((f) => f.shape.kind === "cells") ? no(ON_HEXES.roomFog) : OK;
     case "fog.live":

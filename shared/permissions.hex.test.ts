@@ -77,13 +77,17 @@ describe("H1's refusals on a hex scene", () => {
     for (const op of ops) assert.equal(decide(op), "ok", op.t);
   });
 
-  test("traps, made or changed", () => {
+  test("from H2, traps made or changed go, but a pit, made or added, is refused (section 9)", () => {
     const { rev: _rev, state: _state, rig, ...rest } = trap("t1");
-    assert.equal(decide({ t: "trap.create", trap: { ...rest, rig: rig! } }), `invalid: ${ON_HEXES.traps}`);
-    assert.equal(decide({ t: "trap.create", trap: { ...rest, sceneId: "s2", rig: rig! } }), "ok");
+    assert.equal(decide({ t: "trap.create", trap: { ...rest, rig: rig! } }), "ok");
+    assert.equal(decide({ t: "trap.create", trap: { ...rest, rig: { ...rig!, pit: { floor: -10 } } } }), `invalid: ${ON_HEXES.pit}`);
+    assert.equal(ON_HEXES.pit, "A pit needs heights, which hex scenes get later.");
+    assert.equal(decide({ t: "trap.create", trap: { ...rest, sceneId: "s2", rig: { ...rig!, pit: { floor: -10 } } } }), "ok", "a pit on squares");
     const held = hexRoom();
-    held.traps.t1 = trap("t1");
-    assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { name: "Spikes" } }, held), `invalid: ${ON_HEXES.traps}`);
+    held.traps.t1 = trap("t1", { grid: "hexRows" });
+    assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { name: "Spikes" } }, held), "ok");
+    assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { rig: { pit: { floor: -10 } } } }, held), `invalid: ${ON_HEXES.pit}`);
+    assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { rig: { pit: null } } }, held), "ok", "taking a pit away");
   });
 
   test("from H2 an attach, a plain move, a route and a squeeze go by the hex rules (HX-5, HX-7)", () => {
