@@ -556,18 +556,34 @@ async function holdPing(page: Page, cdp: CDPSession): Promise<void> {
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 }
 
+/**
+ * Reloads the page and waits past the room's own loads after it: the
+ * panels and the icon index it preloads 2 s in (RoomChrome.tsx
+ * PRELOAD_DELAY_MS), whose frames would otherwise land among a build's.
+ */
+async function reloaded(page: Page): Promise<void> {
+  await page.reload();
+  await page.getByRole("status", { name: "Connected" }).first().waitFor();
+  await page.waitForTimeout(3000);
+  await page.waitForLoadState("networkidle");
+}
+
+/** A session flag the bench sets for a first view's reload, which the view's init script then leaves as picked. */
+const KEEP_PICK = "rvtt.bench.keepPick";
+
 async function openView(context: BrowserContext, page: Page, view: View, roomId: string): Promise<void> {
   if (view === "isometric") {
     await context.addInitScript(
-      ({ flag, key }) => {
+      ({ flag, key, keep }) => {
         (globalThis as unknown as Record<string, boolean>)[flag] = true;
         try {
-          localStorage.setItem(key, JSON.stringify({ v: 1, pick: "isometric", turns: [] }));
+          // A reload for a first view keeps the pick of Top-down, so the board first shows, and builds, when the row picks it.
+          if (sessionStorage.getItem(keep) !== "1") localStorage.setItem(key, JSON.stringify({ v: 1, pick: "isometric", turns: [] }));
         } catch {
           // No storage: the bench has nothing to time then.
         }
       },
-      { flag: ISO_TEST_FLAG, key: `rvtt.view.${roomId}` },
+      { flag: ISO_TEST_FLAG, key: `rvtt.view.${roomId}`, keep: KEEP_PICK },
     );
   }
   await page.goto(`${new URL(page.url()).origin}/r/${roomId}`);
@@ -824,10 +840,12 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         for (let r = 0; r <= ROUNDS; r++) {
           await hook("pick", "topDown");
           await frames(page, 30);
-          // A reload empties every kept volume, so each round's first view builds them all.
-          await page.reload();
-          await page.getByRole("status", { name: "Connected" }).first().waitFor();
-          await hook("pick", "topDown");
+          // A reload empties every kept volume, so each round's first view builds them all. It opens in Top-down, or the board would show and build them before the row picks it.
+          await page.evaluate((keep) => sessionStorage.setItem(keep, "1"), KEEP_PICK);
+          await reloaded(page);
+          await page.evaluate((keep) => sessionStorage.removeItem(keep), KEEP_PICK);
+          const before = await volumesNow(page);
+          if (before !== null) throw new Error("the first view's board was mounted before it was picked");
           await frames(page, 30);
           const got = await throttled(() => timedUntil(page, cdp, () => hook("pick", "isometric").then(() => {}), () => stoodNow(page)));
           if (r > 0) first.push(...got.frames);
@@ -839,8 +857,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         const firstTurn: number[] = [];
         const turnStood: number[] = [];
         for (let r = 0; r <= ROUNDS; r++) {
-          await page.reload();
-          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          await reloaded(page);
           await hook("pick", "isometric");
           await hook("turn", 0);
           await frames(page, 4);
