@@ -826,6 +826,42 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     assert.deepEqual(lines, []);
   });
 
+  test("fl2-c. the light row's reason shows only while the pick is the proposal, and a file chosen after a failure starts from its own proposal", async () => {
+    const file = path.join(work, "Lamplit_vault.dd2vtt");
+    const dark = "This map brings 3 lights. The scene starts dark with party vision on, so they light it for the party.";
+    const why = "The map's own lights light it for the party.";
+    await openSideTab(dm, "Scenes");
+    await dm.getByLabel("From a Universal VTT file", { exact: true }).setInputFiles(file);
+    const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map" });
+    await dialog.getByText(dark, { exact: true }).waitFor({ timeout: 30_000 });
+    await dialog.getByText(why, { exact: true }).waitFor();
+    // FL-OPUS-02: kept lit, the row no longer says the map's lights light it.
+    await dialog.getByRole("button", { name: "Keep it lit", exact: true }).click();
+    await dialog.getByRole("button", { name: "Start it dark", exact: true }).waitFor();
+    assert.equal(await dialog.getByRole("radio", { name: "Bright", exact: true }).isChecked(), true);
+    assert.equal(await dialog.getByText(why, { exact: true }).count(), 0, "the light row still gives the proposal's reason");
+
+    // FL-OPUS-01: the upload fails, and the same lamplit file chosen again starts dark, not on the pick made for the one that failed.
+    const upload = /\/api\/rooms\/[0-9A-Z]{8}\/assets\?kind=map/;
+    // Chrome logs the refused upload.
+    dmConsole.allow = [/status of 413 /];
+    await dm.route(upload, (route) => route.fulfill({ status: 413, json: { error: "too_large" } }));
+    try {
+      await dialog.getByRole("button", { name: "Create scene" }).click();
+      await dialog.getByText("That image is too large. Maps can be up to 32 MB.", { exact: true }).waitFor({ timeout: 30_000 });
+    } finally {
+      await dm.unroute(upload);
+      dmConsole.allow = [];
+    }
+    await dialog.getByLabel("Choose another file", { exact: true }).setInputFiles(file);
+    await dialog.getByText(dark, { exact: true }).waitFor({ timeout: 30_000 });
+    assert.equal(await dialog.getByRole("radio", { name: "Dark", exact: true }).isChecked(), true);
+    assert.equal(await dialog.getByRole("radiogroup", { name: "Players see", exact: true }).getByRole("radio", { name: "Explore", exact: true }).isChecked(), true);
+    await dialog.getByText(why, { exact: true }).waitFor();
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await dialog.waitFor({ state: "detached" });
+  });
+
   test("sd-c. the last scene's Delete row is disabled", async () => {
     // The players' scene cannot be deleted while they are on it, so they move to the DM's scene, which is left at the end.
     const kept = sceneOf(dmSocket.state, dmSocket.you!.sceneId!)!;
