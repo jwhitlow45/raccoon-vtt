@@ -546,8 +546,8 @@ async function sheetLifted(view: View): Promise<void> {
  * 480 x 320 at 130%, it waits as "Roll asked", whose tap summons it onto
  * the toolbar or the screen before Total takes focus.
  */
-async function rollCard(view: View): Promise<void> {
-  const where = `in the fight at ${viewName(view)}`;
+async function rollCard(view: View, fight = true): Promise<void> {
+  const where = `${fight ? "in the fight " : ""}at ${viewName(view)}`;
   await setUp(pat, view);
   const id = randomUUID();
   await ops.send({ t: "roll.ask", request: { id, test: { kind: "save", choices: [{ ability: "dex" }] }, dc: 14, dcShown: true, resultShown: true, targets: [{ characterId: run.thorn }] } });
@@ -555,7 +555,15 @@ async function rollCard(view: View): Promise<void> {
   try {
     const total = card.getByLabel("Total Thorn rolled");
     const asked = pat.getByRole("button", { name: /^Roll asked/ }).first();
-    await waitFor(`the ask ${where}`, async () => ((await total.isVisible()) || (await asked.isVisible()) ? true : null));
+    // In a fight sideways the column shows the card for a frame or two before it folds it into "Roll asked" for want of
+    // room, so the ask is read once what shows has held still for half a second, never from that flash.
+    let shown = "";
+    let since = Date.now();
+    await waitFor(`the ask ${where}, settled`, async () => {
+      const now = `${await total.isVisible()} ${await asked.isVisible()}`;
+      if (now !== shown) [shown, since] = [now, Date.now()];
+      return now !== "false false" && Date.now() - since >= 500 ? true : null;
+    });
     if (!(await total.isVisible())) {
       await asked.tap();
       await total.waitFor();
@@ -564,7 +572,7 @@ async function rollCard(view: View): Promise<void> {
     await overKeyboard(pat, view, { Total: total, Send: card.getByRole("button", { name: "Send", exact: true }) }, `the roll card ${where}`, async () => {
       assert.equal(await isFocused(total), true, `${where}: Total keeps focus`);
       await measure(pat, card, `the roll card over the keyboard ${where}`, view.keyboard);
-      await shotWithKeyboard(pat, `kb-roll-card-${shotTag(view, "fight")}`, view.keyboard);
+      await shotWithKeyboard(pat, `kb-roll-card-${shotTag(view, fight ? "fight" : "")}`, view.keyboard);
     });
   } finally {
     await ops.send({ t: "roll.close", rollIds: [id] });
@@ -952,6 +960,13 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     await waitFor("Lay on Hands full again", () => (usedOf("loh") === 0 ? true : null));
   });
 
+  /*
+   * Sideways over the visual viewport, as iOS Safari's keyboard is, before any fight: the ask opens the alerts over the
+   * whole screen, which must stop at the keyboard's top for Total to scroll into view (LP23-A-KBD-1). In the fight the
+   * card folds into "Roll asked" first and opens where the toolbar's lift already stops it.
+   */
+  test("kb-16. at 844 x 390 at 100%, the roll card's Total and Send show whole over the keyboard in the alerts over the whole screen", () => rollCard({ width: 844, height: 390, scale: 1, keyboard: 216 }, false));
+
   test("kb-11. Thorn's turn in a fight: the alerts fold into the dock on a phone's sheet", async () => {
     await ops.send({
       t: "encounter.start",
@@ -988,14 +1003,11 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
 
   /*
    * The roll card with the page itself resized: upright over a 300 px keyboard, and at 480 x 320 at 130%, where the card
-   * waits as "Roll asked" and is summoned onto the screen before Total takes focus, leaving an 80 px page. And sideways
-   * over the visual viewport, as iOS Safari's keyboard is, where the alerts take the whole screen and must stop at the
-   * keyboard's top for Total to scroll into view (LP23-A-KBD-1).
+   * waits as "Roll asked" and is summoned onto the screen before Total takes focus, leaving an 80 px page.
    */
   for (const view of [
     { width: 320, height: 568, scale: 1.3, keyboard: 300, native: true },
     { width: 480, height: 320, scale: 1.3, keyboard: 216, native: true },
-    { width: 844, height: 390, scale: 1, keyboard: 216 },
   ] satisfies View[]) {
     test(`kb-16. in the fight at ${viewName(view)}, the roll card's Total and Send show whole over the keyboard`, () => rollCard(view));
   }
