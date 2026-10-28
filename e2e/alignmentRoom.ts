@@ -11,6 +11,7 @@ import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 
 /**
@@ -151,6 +152,8 @@ let dmTouch = true;
 let ops: OpSocket;
 let patOps: OpSocket;
 let dmSocket = new SocketWatch("dm");
+/** Every DM page's watch on the session newDmSession signed in last, its sign-in page's first (withinSnapshotBudget). */
+let dmWatches: SocketWatch[] = [];
 const consoles = { dm: new ConsoleWatch("dm"), pat: new ConsoleWatch("pat") };
 
 const run = {
@@ -360,6 +363,7 @@ async function dmPageFor(size: Size): Promise<Page> {
   consoles.dm.attach(dm);
   dmSocket = new SocketWatch("dm");
   await dmSocket.attach(dmContext, dm);
+  dmWatches.push(dmSocket);
   return dm;
 }
 
@@ -373,6 +377,9 @@ async function dmPageFor(size: Size): Promise<Page> {
 async function newDmSession(): Promise<void> {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
+  const signIn = new SocketWatch("DM sign-in");
+  await signIn.attach(context, page);
+  dmWatches = [signIn];
   const watch = new ConsoleWatch("DM sign-in");
   // Signing in by the DM link first asks who this is, which the server answers with these two.
   watch.allow = [/status of 403 .*\/api\/rooms\/[0-9A-Z]{8}\/me\)$/, /status of 409 .*\/api\/rooms\/[0-9A-Z]{8}\/dm\)$/];
@@ -386,6 +393,21 @@ async function newDmSession(): Promise<void> {
   ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: await cookieOf(context) });
   await dmContext.close();
   dmContext = context;
+}
+
+/**
+ * A sweep that opens the DM's page at every size on one session spends
+ * that session's snapshots: the sign-in page's, the op socket's one and
+ * each DM page's since (newDmSession). One more than the budget's twenty a
+ * minute waits out its window (design 10.4), so each such sweep checks it
+ * stayed within one budget, and a step added to it fails here rather than
+ * as a minute's delay (MDJ-F-1).
+ */
+function withinSnapshotBudget(sweep: string): void {
+  const spent = 1 + dmWatches.reduce((n, w) => n + w.snapshotBytes.length, 0);
+  const most = DEFAULT_SNAPSHOT_BUDGET.sessionCount;
+  console.log(`${sweep}: ${spent} DM snapshots on its session`);
+  assert.ok(spent <= most, `${sweep} spent ${spent} DM snapshots on one session, past the ${most} a minute it gets without waiting`);
 }
 
 /** Every waiting springing settled and every trap armed again with its uses back, so each size starts from the same alerts. */
@@ -3970,6 +3992,7 @@ export function sceneSettingsTests(): void {
     }
     assert.deepEqual(lines, [], "the scene settings page or the radio cards out of line");
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    withinSnapshotBudget("ms2-a");
   });
 }
 
@@ -4135,6 +4158,7 @@ export function isoChoiceTests(): void {
     assert.deepEqual(lines, [], "the view choice out of line");
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     assert.deepEqual(consoles.pat.errors, [], "Pat's page logged errors");
+    withinSnapshotBudget("iso5-a");
   });
 }
 
@@ -4216,6 +4240,7 @@ export function md4Tests(): void {
       await ops.send({ t: "scene.delete", sceneId: cave }).catch(() => {});
     }
     assert.deepEqual(lines, [], "the builder's note out of line");
+    withinSnapshotBudget("md4-a");
   });
 
   test(`md4-b. the forget question, asked before Clear build clears a cavern the party saw past what players' remembered map can keep, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px, Escape answering no and the build left whole (docs/design-v1-map-discovery.md 9)`, async () => {
@@ -4274,5 +4299,6 @@ export function md4Tests(): void {
       await ops.send({ t: "scene.delete", sceneId: cavern }).catch(() => {});
     }
     assert.deepEqual(lines, [], "the forget question out of line");
+    withinSnapshotBudget("md4-b");
   });
 }
