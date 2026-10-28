@@ -1205,6 +1205,33 @@ describe("the forget question (docs/design-v1-map-discovery.md 5.3)", () => {
     assert.ok(s.state().toasts.some((t) => t.text === FORGET_UNSURE));
   });
 
+  test("a reconnect that settles one of the yes's ops with its answer lost while another waits says the outcome is not known once the last is answered (MD4-ASTRA-8)", () => {
+    const s = setup(room());
+    s.connect();
+    const a = s.room.dispatch(paint(1), { group: "g1" })!;
+    const b = s.room.dispatch(paint(2), { group: "g1" })!;
+    // The server reads both, though the answers here are the test's own: it refuses them as a real server would.
+    s.server.batch(s.outbox.sent.flatMap((m) => (m.t === "op" ? [{ n: m.n, op: m.op }] : [])));
+    s.outbox.sent = [];
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], rejects: [{ n: a, code: "forget", message: FORGET_ASK }, { n: b, code: "forget", message: FORGET_ASK }] });
+    s.room.ui.answerForget(true);
+    const sending = s.state().forgetAsk!.sending!;
+    assert.equal(sending.length, 2);
+    // The server takes the first op sent again, and the socket dies before the second leaves or the first's answer comes back.
+    const first = s.outbox.sent.find((m) => m.t === "op" && m.n === sending[0]);
+    assert.ok(first?.t === "op");
+    s.server.batch([{ n: first.n, op: first.op }]);
+    s.outbox.sent = [];
+    s.room.suspend();
+    s.room.applySnapshot(s.server.hello({ resumeFrom: s.room.prepareHello().resumeFrom, sceneId: "s1" }));
+    assert.deepEqual(s.state().pending.map((p) => p.n), [sending[1]]);
+    assert.ok(s.state().forgetAsk?.sending, "still waiting on the second");
+    assert.ok(!s.state().toasts.some((t) => t.text === FORGET_UNSURE), "not yet");
+    s.room.applyEv({ t: "ev", seq: s.state().seq + 1, changes: [], acks: [sending[1]!] });
+    assert.equal(s.state().forgetAsk, null);
+    assert.ok(s.state().toasts.some((t) => t.text === FORGET_UNSURE), "the first's answer was lost");
+  });
+
   test("a yes whose ops are still on their way after a snapshot keeps waiting for their answers", () => {
     const s = setup(room());
     s.connect();

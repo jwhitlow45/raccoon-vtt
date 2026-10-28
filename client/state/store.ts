@@ -526,12 +526,16 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * other than their answers (RoomView.forgetAsk): a snapshot that covers
    * them or their expiry. It closes, as an answer closes it, so Cancel and
    * Close never stay dead, and says the outcome is not known when any of
-   * them was settled with its answer lost. Empty while it waits on any.
+   * them was settled with its answer lost. While it waits on any, it only
+   * marks a lost answer, so the close says so whenever it comes.
    */
   function askSettled(lost: readonly PendingOp[], pending: readonly PendingOp[]): Pick<RoomStoreState, "forgetAsk"> | Record<string, never> {
-    const sending = get().forgetAsk?.sending;
-    if (!sending || sending.some((n) => pending.some((p) => p.n === n))) return {};
-    if (sending.some((n) => lost.some((p) => p.n === n))) pushToast(FORGET_UNSURE, "info");
+    const ask = get().forgetAsk;
+    const sending = ask?.sending;
+    if (!ask || !sending) return {};
+    const unsure = ask.unsure === true || sending.some((n) => lost.some((p) => p.n === n));
+    if (sending.some((n) => pending.some((p) => p.n === n))) return unsure && !ask.unsure ? { forgetAsk: { ...ask, unsure: true } } : {};
+    if (unsure) pushToast(FORGET_UNSURE, "info");
     return { forgetAsk: null };
   }
 
@@ -846,7 +850,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // Builder ops the server asked about (FORGET_ASK), one question for all of them, and a question answered once its ops are.
       const asks: { n: number; op: ClientOp; group?: string }[] = [];
       let forgetAsk = s.forgetAsk ?? null;
-      if (forgetAsk?.sending && forgetAsk.sending.every((n) => settled.has(n) || !pending.some((p) => p.n === n))) forgetAsk = null;
+      if (forgetAsk?.sending && forgetAsk.sending.every((n) => settled.has(n) || !pending.some((p) => p.n === n))) {
+        if (forgetAsk.unsure) toast(FORGET_UNSURE, "info");
+        forgetAsk = null;
+      }
       if (settled.size > 0) {
         const restored = new Map((msg.restored ?? []).map((r) => [r.n, r.what]));
         for (const n of msg.acks ?? []) {

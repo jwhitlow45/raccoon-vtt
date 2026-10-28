@@ -553,8 +553,13 @@ export type RoomView = {
   forgetAsk?: ForgetAsk | null;
 };
 
-/** One gesture's ops waiting on the forget question (RoomView.forgetAsk). */
-export type ForgetAsk = { asks: readonly { n: number; op: ClientOp; group?: string }[]; sending?: readonly number[] };
+/**
+ * One gesture's ops waiting on the forget question (RoomView.forgetAsk).
+ * `unsure` marks a yes one of whose ops was settled with its answer lost
+ * while others still waited, so the question says the outcome is not known
+ * whenever it closes (MD4-ASTRA-8).
+ */
+export type ForgetAsk = { asks: readonly { n: number; op: ClientOp; group?: string }[]; sending?: readonly number[]; unsure?: true };
 
 /** How many refused op numbers RoomView.refused keeps. One `ev` rarely refuses more than a handful. */
 export const MAX_REFUSED = 20;
