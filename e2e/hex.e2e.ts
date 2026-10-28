@@ -1017,15 +1017,13 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   test("dp-2a. Grid shape, Kind of scene, the new scene form's Grid and Room settings' Grid on new scenes stand one per row at full width at 320 x 568 and 130%, else share one row, Hex columns wrapping between its words at 390 x 844 and 130%, with no option under 44 px, no sideways scroll, and within 1 px at each size (docs/design-v1-design-pass.md 4.2)", async () => {
     const wrong: string[] = [];
     const off: string[] = [];
-    let phoneContext: BrowserContext | null = null;
+    let phone: Awaited<ReturnType<typeof dmPhone>> | null = null;
     try {
       for (const size of SIZES) {
         let page = dm;
         if (size.touch) {
-          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
-          const pages = phoneContext.pages();
-          page = pages[0] ?? (await phoneContext.newPage());
-          if (pages.length === 0) consoles.phone.attach(page);
+          phone ??= await dmPhone(size);
+          page = phone.page;
         }
         for (const scale of SCALES) {
           const at = `${size.name} at ${scale * 100}%`;
@@ -1065,7 +1063,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
         }
       }
     } finally {
-      await phoneContext?.close();
+      await phone?.context.close();
     }
     assert.deepEqual(wrong, []);
     assert.deepEqual(off, [], "out of line by more than 1 px");
