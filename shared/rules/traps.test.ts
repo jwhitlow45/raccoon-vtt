@@ -142,7 +142,7 @@ describe("trip wires", () => {
 
   test("the cells a wire passes over, which the fog rule reads", () => {
     assert.deepEqual(wireCells({ a: [3, 4], b: [3, 6] }).map((c) => `${c.x},${c.y}`).sort(), ["2,3", "2,4", "2,5", "2,6", "3,3", "3,4", "3,5", "3,6"]);
-    assert.deepEqual(zoneRanges({ buildChunks: {} }, "s1", { door: { edge: "4,2,w" } }), [{ x0: 4, y0: 2, x1: 5, y1: 3 }, { x0: 3, y0: 2, x1: 4, y1: 3 }]);
+    assert.deepEqual(zoneRanges({ buildChunks: {}, scenes: {} }, "s1", { door: { edge: "4,2,w" } }), [{ x0: 4, y0: 2, x1: 5, y1: 3 }, { x0: 3, y0: 2, x1: 4, y1: 3 }]);
     assert.ok(wireCells({ a: [0, 0], b: [5.5, 15] }).some((c) => c.x === 4 && c.y === 10), "a cell it cuts a corner of (review TR-ASTRA-04)");
   });
 

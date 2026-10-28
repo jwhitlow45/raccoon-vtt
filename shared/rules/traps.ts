@@ -1,4 +1,4 @@
-import { CHUNK_CELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapDoorRef, type TrapHow, type TrapRig, type TrapZone, type Viewer } from "../model.ts";
+import { CHUNK_CELLS, FOG_SUBCELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapDoorRef, type TrapHow, type TrapRig, type TrapZone, type Viewer } from "../model.ts";
 import { chunkKey, wallMidpoint } from "../keys.ts";
 import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
@@ -6,14 +6,15 @@ import { stopsOnTrap } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
 import { creaturesInArea, type AreaToken } from "./aoe.ts";
 import { holderOf, insideHolder, onHolder, walkerFor } from "./attach.ts";
-import { footprintRect, footprintSize, isSqueezed, occupiedRange, rangeAtInto, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
+import { footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, rangeAtInto, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
 import { footing, footprintGround, groundAt, sceneGround, standing } from "./heights.ts";
 import { planMove, type MovedToken } from "./moveLeg.ts";
 import { groundUnder } from "./movement.ts";
 import { onTrace, routeLattice, routeStands, routeWalk, type RoutePiece, type RoutePoint, type RouteSpot, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
 import { sceneWalls } from "./walls.ts";
-import { SQUARES } from "./grid.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
+import { cornerAt, hexAt, hexCorners, hexKey, hexNeighbors, hexSubcells, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
 
 /**
  * Triggers and traps (docs/design-v1-traps.md section 5): which creatures
@@ -51,7 +52,7 @@ export function zoneRects(zone: TrapZone): readonly CellRect[] | null {
   return "cells" in zone ? zone.cells : null;
 }
 
-/** Whether a cell is one of the rectangles'. */
+/** Whether a cell is one of the rectangles', or on hexes a hex whose key is (`x` its column, `y` its row). */
 export function inRects(rects: readonly CellRect[], x: number, y: number): boolean {
   return rects.some((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
 }
@@ -81,9 +82,14 @@ export function wireLength(wire: { a: readonly [number, number]; b: readonly [nu
  * The cells the fog rule reads for a zone (6.4): its squares, the cells a
  * wire passes over, a door's two cells. Each is a range of one or more
  * whole cells. A free door names its chunk's wall, so a door that is gone
- * has no cells.
+ * has no cells. On a hex scene each of the zone's hexes (zoneHexes) gives
+ * the cells its fog sub-cells lie in, which find the tiles a reprojection
+ * reads (project.ts tileDependents). Whether the zone is under the fog reads
+ * the sub-cells themselves (zoneFogged).
  */
-export function zoneRanges(state: Pick<RoomState, "buildChunks">, sceneId: string, zone: TrapZone): CellRange[] {
+export function zoneRanges(state: Pick<RoomState, "buildChunks" | "scenes">, sceneId: string, zone: TrapZone): CellRange[] {
+  const g = gridOfScene(state, sceneId);
+  if (isHex(g)) return zoneHexes(g, state, sceneId, zone).map((h) => subcellCells(hexSubcells(g, h)));
   if ("cells" in zone) return zone.cells.map((r) => ({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }));
   if ("wire" in zone) return wireCells(zone.wire).map(({ x, y }) => ({ x0: x, y0: y, x1: x + 1, y1: y + 1 }));
   return doorCells(state, sceneId, zone.door).map(({ x, y }) => ({ x0: x, y0: y, x1: x + 1, y1: y + 1 }));
@@ -92,16 +98,18 @@ export function zoneRanges(state: Pick<RoomState, "buildChunks">, sceneId: strin
 /**
  * The cells a wire passes over: every cell whose closed square its segment
  * meets, so a point of it on a grid line belongs to the cells on both
- * sides, and a corner to all four. Exact: a wire's ends lie on the
- * half-cell lattice, so in half cells every test is on integers. A cell
- * meets the segment when their boxes overlap and the segment's line does
- * not leave all four of its corners strictly on one side.
+ * sides, and a corner to all four. Exact: a wire's ends lie on the 1/64
+ * lattice (half cells on squares), so in 64ths every test is on integers
+ * well inside a double's exact range. A cell meets the segment when their
+ * boxes overlap and the segment's line does not leave all four of its
+ * corners strictly on one side.
  */
 export function wireCells(wire: { a: readonly [number, number]; b: readonly [number, number] }): { x: number; y: number }[] {
-  const ax = wire.a[0] * 2;
-  const ay = wire.a[1] * 2;
-  const dx = wire.b[0] * 2 - ax;
-  const dy = wire.b[1] * 2 - ay;
+  const L = WIRE_LATTICE;
+  const ax = Math.round(wire.a[0] * L);
+  const ay = Math.round(wire.a[1] * L);
+  const dx = Math.round(wire.b[0] * L) - ax;
+  const dy = Math.round(wire.b[1] * L) - ay;
   const side = (px: number, py: number) => Math.sign(dx * (py - ay) - dy * (px - ax));
   const out: { x: number; y: number }[] = [];
   const x0 = Math.max(0, Math.ceil(Math.min(wire.a[0], wire.b[0])) - 1);
@@ -110,11 +118,138 @@ export function wireCells(wire: { a: readonly [number, number]; b: readonly [num
   const y1 = Math.floor(Math.max(wire.a[1], wire.b[1]));
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
-      const sides = side(2 * x, 2 * y) + side(2 * x + 2, 2 * y) + side(2 * x, 2 * y + 2) + side(2 * x + 2, 2 * y + 2);
+      const sides = side(L * x, L * y) + side(L * x + L, L * y) + side(L * x, L * y + L) + side(L * x + L, L * y + L);
       if (sides !== 4 && sides !== -4) out.push({ x, y });
     }
   }
   return out;
+}
+
+/** A wire's ends are multiples of 1 / 64 cell, the free walls' lattice (protocol.ts trapWire): half cells on squares. */
+const WIRE_LATTICE = 64;
+
+// ---------------------------------------------------------------------------
+// Zones on hexes (docs/design-v1-hex-grids.md phase H2)
+
+/**
+ * A zone's hexes on a hex scene: the hexes its rectangles of keys name (`x`
+ * a column, `y` a row), the hexes a wire meets, or the hexes beside a free
+ * door. Each once, in the order found.
+ */
+export function zoneHexes(g: HexGrid, state: Pick<RoomState, "buildChunks">, sceneId: string, zone: TrapZone): Hex[] {
+  if ("cells" in zone) return rectHexes(zone.cells);
+  if ("wire" in zone) return wireHexes(g, zone.wire);
+  return doorHexes(g, state, sceneId, zone.door);
+}
+
+/** The hexes rectangles of keys name, a hex two share once. */
+export function rectHexes(rects: readonly CellRect[]): Hex[] {
+  const seen = new Set<string>();
+  const out: Hex[] = [];
+  for (const r of rects) {
+    for (let row = r.y; row < r.y + r.h; row++) {
+      for (let col = r.x; col < r.x + r.w; col++) {
+        const key = `${col},${row}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ col, row });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The hexes a wire meets: every hex whose closed outline, its corners as
+ * rounded onto the 1/64 lattice (hex.ts cornerAt), the wire touches or
+ * lies inside. Neighbors share their rounded corners, so the outlines tile
+ * the plane and the test is exact (segments.ts orient and contact). The
+ * hexes a segment meets are connected, so the search grows from the hex
+ * holding its first end and that hex's neighbors.
+ */
+export function wireHexes(g: HexGrid, wire: { a: readonly [number, number]; b: readonly [number, number] }): Hex[] {
+  const [ax, ay] = wire.a;
+  const [bx, by] = wire.b;
+  const meets = (h: Hex): boolean => {
+    const corners = hexCorners(g, h).map((c) => cornerAt(g, c));
+    let turn = 0;
+    let inside = true;
+    for (let i = 0; i < corners.length; i++) {
+      const p = corners[i]!;
+      const q = corners[(i + 1) % corners.length]!;
+      if (contact(ax, ay, bx, by, p.x, p.y, q.x, q.y) !== APART) return true;
+      const o = orient(p.x, p.y, q.x, q.y, ax, ay);
+      if (o === 0 || (turn !== 0 && o !== turn)) inside = false;
+      turn = o;
+    }
+    return inside;
+  };
+  const start = hexAt(g, { x: ax, y: ay });
+  const seen = new Set<string>();
+  const out: Hex[] = [];
+  const queue: Hex[] = [start, ...hexNeighbors(g, start)];
+  for (const h of queue) seen.add(hexKey(h));
+  for (let i = 0; i < queue.length; i++) {
+    const h = queue[i]!;
+    if (!meets(h)) continue;
+    out.push(h);
+    for (const n of hexNeighbors(g, h)) {
+      const key = hexKey(n);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      queue.push(n);
+    }
+  }
+  return out;
+}
+
+/**
+ * The hexes beside a free door on a hex scene, one on each side of its
+ * middle (permissions.ts doorPlace), or none for a door that is gone. A
+ * hex scene has no grid edges, so an edge door names nothing there.
+ */
+function doorHexes(g: HexGrid, state: Pick<RoomState, "buildChunks">, sceneId: string, ref: TrapDoorRef): Hex[] {
+  if ("edge" in ref) return [];
+  const beside = doorSides(state, sceneId, ref);
+  if (!beside) return [];
+  const a = hexAt(g, beside[0]);
+  const b = hexAt(g, beside[1]);
+  return a.col === b.col && a.row === b.row ? [a] : [a, b];
+}
+
+/** The cells some fog sub-cells lie in. A hex always holds some, so the range is never empty. */
+function subcellCells(subs: readonly (readonly [number, number])[]): CellRange {
+  let sx0 = Infinity;
+  let sy0 = Infinity;
+  let sx1 = -Infinity;
+  let sy1 = -Infinity;
+  for (const [sx, sy] of subs) {
+    sx0 = Math.min(sx0, sx);
+    sy0 = Math.min(sy0, sy);
+    sx1 = Math.max(sx1, sx);
+    sy1 = Math.max(sy1, sy);
+  }
+  return { x0: Math.floor(sx0 / FOG_SUBCELLS), y0: Math.floor(sy0 / FOG_SUBCELLS), x1: Math.floor(sx1 / FOG_SUBCELLS) + 1, y1: Math.floor(sy1 / FOG_SUBCELLS) + 1 };
+}
+
+/**
+ * Whether a zone lies wholly under the fog (6.4), the rule a player's copy
+ * of a found trap reads (project.ts projectTrapCtx). On squares every range
+ * of zoneRanges is fogged. On hexes every fog sub-cell inside each of its
+ * hexes is (docs/design-v1-hex-grids.md H2), so ground revealed beside a
+ * hex, even in a cell the hex shares, never shows the trap. A zone with no
+ * hexes, a door that is gone, counts as fogged, as on squares.
+ */
+export function zoneFogged(
+  state: Pick<RoomState, "buildChunks" | "scenes">,
+  sceneId: string,
+  zone: TrapZone,
+  rangeFogged: (r: CellRange) => boolean,
+  subFogged: (sx: number, sy: number) => boolean,
+): boolean {
+  const g = gridOfScene(state, sceneId);
+  if (!isHex(g)) return zoneRanges(state, sceneId, zone).every(rangeFogged);
+  return zoneHexes(g, state, sceneId, zone).every((h) => hexSubcells(g, h).every(([sx, sy]) => subFogged(sx, sy)));
 }
 
 /** Where a pit's squares go when it opens (5.7): its stored floor, at least the height rules' lowest. */
@@ -137,16 +272,23 @@ export function doorCells(state: Pick<RoomState, "buildChunks">, sceneId: string
     const y = Number(ys);
     return side === "n" ? [{ x, y }, { x, y: y - 1 }] : [{ x, y }, { x: x - 1, y }];
   }
+  const beside = doorSides(state, sceneId, ref);
+  if (!beside) return [];
+  const a = { x: Math.floor(beside[0].x), y: Math.floor(beside[0].y) };
+  const b = { x: Math.floor(beside[1].x), y: Math.floor(beside[1].y) };
+  return a.x === b.x && a.y === b.y ? [a] : [a, b];
+}
+
+/** The two points a 256th of a cell off a free door's middle, one on each side of it, or null for a door that is gone. */
+function doorSides(state: Pick<RoomState, "buildChunks">, sceneId: string, ref: { cx: number; cy: number; id: string }): [{ x: number; y: number }, { x: number; y: number }] | null {
   const wall = state.buildChunks[chunkKey(sceneId, ref.cx, ref.cy)]?.walls?.find((w) => w.id === ref.id);
-  if (!wall) return [];
+  if (!wall) return null;
   const [mx, my] = wallMidpoint(wall);
   const nx = -(wall.b[1] - wall.a[1]);
   const ny = wall.b[0] - wall.a[0];
   const scale = Math.max(Math.abs(nx), Math.abs(ny)) * 256;
-  const cell = (sign: number) => ({ x: Math.floor(mx + (sign * nx) / scale), y: Math.floor(my + (sign * ny) / scale) });
-  const a = cell(1);
-  const b = cell(-1);
-  return a.x === b.x && a.y === b.y ? [a] : [a, b];
+  const side = (sign: number) => ({ x: mx + (sign * nx) / scale, y: my + (sign * ny) / scale });
+  return [side(1), side(-1)];
 }
 
 /** Whether a door zone's door is still there, on the grid or free. */
@@ -244,13 +386,26 @@ export function trapIndex(state: Pick<TrapRoom, "traps" | "scenes">, sceneId: st
   if (cached) return cached;
   const armed = armedTraps(traps, sceneId);
   const scene = state.scenes[sceneId];
-  const index = armed.length === 0 || !scene ? EMPTY_INDEX : buildIndex(armed, scene.bounds);
+  const index = armed.length === 0 || !scene ? EMPTY_INDEX : buildIndex(armed, keySpan(sceneGrid(scene), scene.bounds));
   if (!isWritable(traps)) {
     let byScene = indexes.get(traps);
     if (!byScene) indexes.set(traps, (byScene = new Map()));
     byScene.set(sceneId, index);
   }
   return index;
+}
+
+/**
+ * The keys a scene's squares run over: its cells, or on hexes the columns
+ * and rows its hex keys take (hex.ts sceneHexSpan), so the index reads a
+ * hex by its key as it reads a square (docs/design-v1-hex-grids.md H2).
+ * A scene's grid cannot change while it holds a trap (grid.ts switchHolds),
+ * so the index kept for its traps keeps its grid too.
+ */
+function keySpan(g: Grid, bounds: { w: number; h: number }): { w: number; h: number } {
+  if (!isHex(g)) return bounds;
+  const span = sceneHexSpan(g, bounds);
+  return { w: span.cols, h: span.rows };
 }
 
 function buildIndex(traps: readonly Trap[], bounds: { w: number; h: number }): TrapIndex {
@@ -393,6 +548,8 @@ type Walk = {
   squeezedAt: (j: number) => boolean;
   /** Its full footprint's size in cells (footprintSize). */
   size: { w: number; h: number };
+  /** The scene's grid, which the footprint at each spot is read on. */
+  grid: Grid;
   /** Its elevation at each spot, worked out only where a trap needs it. */
   elevation: (j: number) => number;
 };
@@ -490,6 +647,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
   const byId = new Map<string, Walk>();
   const groups = new Map<string, Group>();
   const build = { buildChunks: before.buildChunks };
+  const grid = entries.length > 0 ? gridOfScene(before, entries[0]!.from.sceneId) : SQUARES;
   for (const [named, members] of byGroup(entries)) {
     const head = members[0]!;
     if (head.how !== "walk" && head.how !== "teleport") continue;
@@ -497,7 +655,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
     const cache = new Map<number, readonly WalkSpot[]>();
     const base = (s: number): readonly WalkSpot[] => {
       let hit = cache.get(s);
-      if (!hit) cache.set(s, (hit = head.how === "teleport" ? twoSpots(head.route) : routeWalk(SQUARES, head.trace, build, s)));
+      if (!hit) cache.set(s, (hit = head.how === "teleport" ? twoSpots(head.route) : routeWalk(grid, head.trace, build, s)));
       return hit;
     };
     // The public members: every member seen by all. One under a holder players cannot see walks as itself (listed reveal 2).
@@ -524,7 +682,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
         carriedOn: linkSeen && kind !== undefined && onHolder(kind),
         ...(holder ? { holder } : {}),
         // A member on a route of its own is a creature its holder drags beside it, which walks as itself (moveLeg.ts stoppedAtWalls).
-        spots: shared ? base(mine) : e.how === "teleport" ? twoSpots(e.route) : routeWalk(SQUARES, e.trace, build, mine),
+        spots: shared ? base(mine) : e.how === "teleport" ? twoSpots(e.route) : routeWalk(grid, e.trace, build, mine),
         ox: shared ? ox : 0,
         oy: shared ? oy : 0,
         step: mine,
@@ -532,6 +690,7 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
         squeezeAtEnd: e === head && squeeze,
         squeezedAt: () => false,
         size: footprintSize(token),
+        grid,
         elevation: () => 0,
       };
       walk.squeezedAt = squeezeRule(walk, endsAs(op, token, e === head && squeeze));
@@ -643,10 +802,10 @@ function lightAt(walk: Walk, j: number): Light {
   return out;
 }
 
-/** The cells a walk's footprint covers at spot `j` (lightAt), written into `out` where it walks full size between its ends. */
+/** The cells a walk's footprint covers at spot `j` (lightAt), written into `out` where it walks full size between its ends. On hexes, the cells its hexes' sub-cells lie in. */
 function cellsAt(walk: Walk, j: number, out: CellRange): CellRange {
   // Only a token squeezed where it stands walks squeezed anywhere between (route.ts onTrace).
-  if (j === 0 || j === walk.spots.length - 1 || (walk.token.squeeze === true && walk.squeezedAt(j))) return occupiedRange(SQUARES, lightAt(walk, j));
+  if (isHex(walk.grid) || j === 0 || j === walk.spots.length - 1 || (walk.token.squeeze === true && walk.squeezedAt(j))) return occupiedRange(walk.grid, lightAt(walk, j));
   return rangeAtInto(out, walk.size.w, walk.size.h, walk.spots[j]!.x + walk.ox, walk.spots[j]!.y + walk.oy);
 }
 
@@ -688,8 +847,9 @@ function cmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-function centerOf(at: Light): { x: number; y: number } {
-  const r = footprintRect(SQUARES, at);
+/** A footprint's middle, where a wire is crossed from: on hexes its anchor (footprint.ts footprintRect). */
+function centerOf(g: Grid, at: Light): { x: number; y: number } {
+  const r = footprintRect(g, at);
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
@@ -813,7 +973,7 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
   const rangeOf = (j: number): CellRange => cellsAt(walk, j, scratch);
   const floorAt = (j: number, r: CellRange): boolean => {
     if (walk.carriedOn) return false;
-    if (holder && insideHolder(gridOfScene(before, walk.token.sceneId), lightAt(walk, j), holder)) return false;
+    if (holder && insideHolder(walk.grid, lightAt(walk, j), holder)) return false;
     return standing(walk.elevation(j), cache.ground(r)) === "ground";
   };
   const marks = new Int32Array(traps.length);
@@ -848,25 +1008,32 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
     reading.unions.set(key, out);
     return out;
   };
+  // The distinct square sets under a footprint, gathered one key at a time: one under a creature of a square or less, a few under a larger one.
+  let first = 0;
+  let more: number[] | null = null;
+  const gather = (id: number) => {
+    if (id === 0 || id === first) return;
+    if (first === 0) first = id;
+    else if (!more) {
+      // One buffer for every spot, which only this call reads.
+      more = buffer;
+      more.length = 0;
+      more.push(id);
+    } else if (!more.includes(id)) more.push(id);
+  };
   /** What a footprint over these cells reads, on the floor and off it, and whether the floor rule tells them apart. */
   const mixOf = (x0: number, y0: number, x1: number, y1: number): Mix => {
     const sq = squares!;
-    // The distinct square sets under the footprint: one under a creature of a square or less, a few under a larger one.
-    let first = 0;
-    let more: number[] | null = null;
+    first = 0;
+    more = null;
     for (let y = y0; y < y1; y++) {
-      for (let x = x0; x < x1; x = sq.runEnd[y * sq.w + x]!) {
-        const id = sq.cells[y * sq.w + x]!;
-        if (id === 0 || id === first) continue;
-        if (first === 0) first = id;
-        else if (!more) {
-          // One buffer for every spot, which only this call reads.
-          more = buffer;
-          more.length = 0;
-          more.push(id);
-        } else if (!more.includes(id)) more.push(id);
-      }
+      for (let x = x0; x < x1; x = sq.runEnd[y * sq.w + x]!) gather(sq.cells[y * sq.w + x]!);
     }
+    return mixOfSets(first, more);
+  };
+  /** The mix of the sets a footprint gathered. */
+  const mixOfSets = (first: number, more: number[] | null): Mix => {
+    const sq = squares!;
     const a = setReading(reading, sq, first);
     if (!more) return a;
     let needs = a.needs;
@@ -880,8 +1047,20 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
   let lx1 = -1;
   let ly1 = -1;
   let lastMix: Mix | null = null;
+  /** On hexes a footprint reads each of its hexes by its key, at most 12 (docs/design-v1-hex-grids.md H2). */
+  const onHexes = (j: number): readonly number[] => {
+    const sq = squares!;
+    const light = lightAt(walk, j);
+    first = 0;
+    more = null;
+    for (const h of occupiedHexes(walk.grid as HexGrid, light)) if (h.col >= 0 && h.row >= 0 && h.col < sq.w && h.row < sq.h) gather(sq.cells[h.row * sq.w + h.col]!);
+    if (first === 0) return NONE;
+    const mix = mixOfSets(first, more);
+    return mix.needs && floorAt(j, occupiedRange(walk.grid, light)) ? mix.floor : mix.off;
+  };
   const onAt = (j: number): readonly number[] => {
     if (!squares) return NONE;
+    if (isHex(walk.grid)) return onHexes(j);
     const r = rangeOf(j);
     const x0 = Math.max(0, r.x0);
     const y0 = Math.max(0, r.y0);
@@ -932,8 +1111,8 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
       }
     }
     if (wires.length > 0) {
-      const a = centerOf(lightAt(walk, j - 1));
-      const b = centerOf(lightAt(walk, j));
+      const a = centerOf(walk.grid, lightAt(walk, j - 1));
+      const b = centerOf(walk.grid, lightAt(walk, j));
       for (const wire of wires) {
         if (Math.max(a.x, b.x) < wire.x0 || Math.min(a.x, b.x) > wire.x1 || Math.max(a.y, b.y) < wire.y0 || Math.min(a.y, b.y) > wire.y1) continue;
         const { a: wa, b: wb } = (traps[wire.i]!.zone as { wire: { a: [number, number]; b: [number, number] } }).wire;
@@ -1175,6 +1354,7 @@ function opening(trap: Trap, before: RoomState, opens?: (trap: Trap) => boolean)
   const squares = new Set<string>();
   for (const r of trap.zone.cells) for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) squares.add(`${x},${y}`);
   return (spot, walk) => {
+    // Pits stay square until heights reach hexes (permissions.ts ON_HEXES.pit).
     const r = footprintRect(SQUARES, { ...walk.token, x: spot.x, y: spot.y, squeeze: spot.squeezed ? true : undefined });
     for (let y = Math.floor(r.y + 1e-9); y < Math.ceil(r.y + r.h - 1e-9); y++) for (let x = Math.floor(r.x + 1e-9); x < Math.ceil(r.x + r.w - 1e-9); x++) if (!squares.has(`${x},${y}`)) return false;
     return true;
@@ -1386,15 +1566,22 @@ function hitsIn(trap: Trap, m: Moment, by: readonly string[]): string[] {
     });
   }
   if (!rects) return trapHits(trap, roomAt(m), by);
+  const g = gridOfScene(m.before, trap.sceneId);
   const box = rectsBox(rects);
   const scratch: CellRange = { x0: 0, y0: 0, x1: 0, y1: 0 };
   const out: string[] = [];
   for (const t of Object.values(m.before.tokens)) {
     if (t.sceneId !== trap.sceneId || !trapCreature(m.before, t)) continue;
     const walk = m.walks.get(t.id);
-    if (onRects(walk ? cellsAt(walk, spotIn(m, walk), scratch) : occupiedRange(SQUARES, t), rects, box)) out.push(t.id);
+    const on = isHex(g) ? hexesOnRects(g, walk ? lightAt(walk, spotIn(m, walk)) : t, rects) : onRects(walk ? cellsAt(walk, spotIn(m, walk), scratch) : occupiedRange(g, t), rects, box);
+    if (on) out.push(t.id);
   }
   return out.sort(cmp);
+}
+
+/** Whether any hex a footprint stands on is a key of the rectangles (docs/design-v1-hex-grids.md H2). */
+function hexesOnRects(g: HexGrid, at: PlacedToken, rects: readonly CellRect[]): boolean {
+  return occupiedHexes(g, at).some((h) => inRects(rects, h.col, h.row));
 }
 
 /** The box around some rectangles of cells. */
@@ -1444,10 +1631,11 @@ export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): 
   if (!rig) return [];
   const isCreature = (t: Token | undefined): t is Token => t !== undefined && t.sceneId === trap.sceneId && trapCreature(moment, t);
   const named = () => by.filter((id) => isCreature(moment.tokens[id]));
+  const g = gridOfScene(moment, trap.sceneId);
   const onCells = (rects: readonly CellRect[]) => {
     const box = rectsBox(rects);
     const out: string[] = [];
-    for (const t of Object.values(moment.tokens)) if (isCreature(t) && onRects(occupiedRange(SQUARES, t), rects, box)) out.push(t.id);
+    for (const t of Object.values(moment.tokens)) if (isCreature(t) && (isHex(g) ? hexesOnRects(g, t, rects) : onRects(occupiedRange(g, t), rects, box))) out.push(t.id);
     return out.sort(cmp);
   };
   const hits = rig.hits;
@@ -1463,7 +1651,7 @@ export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): 
     .filter(isCreature)
     .sort((a, b) => cmp(a.id, b.id));
   const template = { id: `trap:${trap.id}`, rev: 0, sceneId: trap.sceneId, ...hits.area };
-  const ctx = { settings: moment.meta.settings, bounds: scene.bounds, grid: SQUARES, walls: sceneWalls(scene, moment.buildChunks), tokens: moment.tokens as Readonly<Record<string, AreaToken>> };
+  const ctx = { settings: moment.meta.settings, bounds: scene.bounds, grid: g, walls: sceneWalls(scene, moment.buildChunks), tokens: moment.tokens as Readonly<Record<string, AreaToken>> };
   return creaturesInArea(template, creatures, ctx).sort(cmp);
 }
 
@@ -1474,9 +1662,13 @@ export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): 
 export function standsOn(state: RoomState, trap: Trap, token: Token, seen: (id: string) => boolean): boolean {
   const rects = zoneRects(trap.zone);
   if (!rects || !trap.rig) return false;
-  const r = occupiedRange(SQUARES, token);
+  const g = gridOfScene(state, trap.sceneId);
   let on = false;
-  for (let y = r.y0; y < r.y1 && !on; y++) for (let x = r.x0; x < r.x1 && !on; x++) on = inRects(rects, x, y);
+  if (isHex(g)) on = hexesOnRects(g, token, rects);
+  else {
+    const r = occupiedRange(g, token);
+    for (let y = r.y0; y < r.y1 && !on; y++) for (let x = r.x0; x < r.x1 && !on; x++) on = inRects(rects, x, y);
+  }
   if (!on) return false;
   if (!trap.rig.floor) return true;
   return onFloor(state, token, carriedSeen(state, token, seen));

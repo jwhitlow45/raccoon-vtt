@@ -6,9 +6,11 @@ import type { Op } from "../protocol.ts";
 import { boxDistanceFt, tokenCellBox } from "../rules/distance.ts";
 import { groundAt } from "../rules/heights.ts";
 import { planMove } from "../rules/moveLeg.ts";
-import { isPlainId, trapCreature, walkOp, zoneRanges } from "../rules/traps.ts";
+import { isPlainId, trapCreature, walkOp, zoneHexes, zoneRanges } from "../rules/traps.ts";
 import type { Tx } from "./tx.ts";
-import { SQUARES } from "../rules/grid.ts";
+import { isHex, sceneGrid, SQUARES } from "../rules/grid.ts";
+import { placedOnHex } from "../rules/footprint.ts";
+import type { HexGrid } from "../rules/hex.ts";
 
 /** How near a creature must end its walk for the hint, in feet (docs/design-v1-traps.md 4.6). */
 export const NOTICE_FT = 10;
@@ -85,10 +87,13 @@ function passiveOf(state: RoomState, token: Token): number | null {
   return typeof actor?.passivePerception === "number" ? actor.passivePerception : null;
 }
 
-/** Within 10 ft of the zone's nearest square, each square on its own ground, by the room's diagonal rule. */
+/** Within 10 ft of the zone's nearest square, each square on its own ground, by the room's diagonal rule. On hexes, of its nearest hex by hex steps. */
 function near(state: RoomState, token: Token, trap: Trap): boolean {
   const settings = state.meta.settings;
   const fpc = settings.feetPerCell > 0 ? settings.feetPerCell : 5;
+  const scene = state.scenes[trap.sceneId];
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  if (isHex(g)) return nearHexes(state, token, trap, g, fpc);
   const from = tokenCellBox(SQUARES, token, fpc);
   for (const r of zoneRanges(state, trap.sceneId, trap.zone)) {
     // A square farther across than 10 ft from the footprint is too far at any height, so only the near part of a big zone is read.
@@ -107,17 +112,37 @@ function near(state: RoomState, token: Token, trap: Trap): boolean {
   return false;
 }
 
+/**
+ * Within 10 ft of the zone's nearest hex on a hex scene, by the room's rule
+ * between the creature's hexes and that hex on its own ground
+ * (docs/design-v1-hex-grids.md H2).
+ */
+function nearHexes(state: RoomState, token: Token, trap: Trap, g: HexGrid, fpc: number): boolean {
+  const settings = state.meta.settings;
+  const from = tokenCellBox(g, token, fpc);
+  for (const h of zoneHexes(g, state, trap.sceneId, trap.zone)) {
+    const ground = groundAt(state.buildChunks, trap.sceneId, h.col, h.row);
+    const box = tokenCellBox(g, { size: "medium", ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, h), elevation: ground }, fpc);
+    if (boxDistanceFt(from, box, settings) <= NOTICE_FT) return true;
+  }
+  return false;
+}
+
 /** Whether players can see any square of a trap's zone now: in the party's sight on a vision scene, not fully fogged on a scene with fog. */
 function zoneSeen(state: RoomState, sceneId: string): (trap: Trap) => boolean {
   const scene = state.scenes[sceneId];
   if (!scene) return () => false;
+  const g = sceneGrid(scene);
   if (scene.vision?.on === true) {
     // The DM's own hint, so on a per-player scene it reads what any player's creatures see (docs/design-v1-per-player-vision.md decision 14).
     const sight = unionSightOf(state, sceneId);
+    // On hexes a hex of the zone is seen as a Medium creature on it would be, by its sub-cells.
+    if (isHex(g)) return (trap) => zoneHexes(g, state, sceneId, trap.zone).some((h) => sight.seesToken({ size: "medium", ...placedOnHex(g, { size: "medium", x: 0, y: 0 }, h) }, g));
     return (trap) => zoneRanges(state, sceneId, trap.zone).some((r) => anyCell(r, (x, y) => sight.seesToken({ size: "medium", x, y }, SQUARES)));
   }
   if (!scene.fogEnabled) return () => true;
-  // The union too: ground any holder remembers (review PV1-O11).
+  // The union too: ground any holder remembers (review PV1-O11). On hexes it reads the cells each hex's sub-cells lie in, so ground
+  // seen beside a hex in a cell they share counts: the hint is the DM's alone, and a hint a little early tells no player anything.
   const sees = groundAnyPlayerSees(state, sceneId);
   return (trap) => zoneRanges(state, sceneId, trap.zone).some((r) => anyCell(r, sees));
 }
