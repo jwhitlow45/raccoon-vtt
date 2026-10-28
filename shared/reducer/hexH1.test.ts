@@ -28,9 +28,16 @@ import { DM, P1, room, scene, template, token } from "../testutil.ts";
  * creatures of every size, plain and group moves, a resize each way, a
  * sphere on a hex corner, Spirit Guardians attached and a stationary
  * emanation moved across an odd row, a fight's turns, fog revealed live
- * and by a draft, lights, stamps, labels and Clear build, a map lined up,
- * a switch to hex columns and its undo, a duplicate, a creature sent from a
- * square scene and that move undone, and the way back to squares.
+ * and by a draft, and a torch. Party vision then comes on in the dark:
+ * Ayla, the player's creature, sees by the torch alone, then by
+ * darkvision 60 ft, a lantern lights the Giant out past both, the torch
+ * goes out, and the scene is per player for one step (with no sight
+ * holder yet, so the player sees only the shared sight) and whole party
+ * again. The Dragon stays out of every light and her senses throughout.
+ * With vision still on come stamps, labels and Clear build, which puts
+ * the lights out, a map lined up, a switch to hex columns and its undo, a
+ * duplicate, a creature sent from a square scene and that move undone,
+ * and the way back to squares.
  *
  * HEX_H1=write records the file again from `script()`: only on the build
  * that adds an op H1 accepts, never to make a later phase pass.
@@ -98,6 +105,12 @@ function script(): { who: Step["who"]; op: Op | ((prev: { inverse: unknown }) =>
     { who: "dm", op: { t: "fog.draft", sceneId: "hex", add: [{ id: "f3", mode: "reveal", shape: { kind: "all" } }] } },
     { who: "dm", op: { t: "fog.discard", sceneId: "hex" } },
     { who: "dm", op: { t: "build.lights", sceneId: "hex", put: [{ id: "torch", x: 6, y: 4, bright: 20, dim: 20, on: true, walls: true }] } },
+    { who: "dm", op: { t: "scene.update", sceneId: "hex", patch: { vision: { on: true, light: "dark" } } } },
+    { who: "dm", op: { t: "token.update", tokenId: "ayla", patch: { actor: { senses: "darkvision 60 ft" } } } },
+    { who: "dm", op: { t: "build.lights", sceneId: "hex", put: [{ id: "lantern", x: 20.5, y: 9.25, bright: 5, dim: 5, on: true, walls: true }] } },
+    { who: "dm", op: { t: "build.lights", sceneId: "hex", put: [{ id: "torch", x: 6, y: 4, bright: 20, dim: 20, on: false, walls: true }] } },
+    { who: "dm", op: { t: "scene.update", sceneId: "hex", patch: { vision: { on: true, light: "dark", perPlayer: true } } } },
+    { who: "dm", op: { t: "scene.update", sceneId: "hex", patch: { vision: { on: true, light: "dark", perPlayer: false } } } },
     { who: "dm", op: { t: "build.stamps", sceneId: "hex", put: [{ id: "tree", art: { key: "oak-tree" }, x: 12.5, y: 12.5, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" }] } },
     { who: "dm", op: { t: "build.label", sceneId: "hex", labelId: "sign", label: { x: 15, y: 2, text: "Camp", size: 1 } } },
     { who: "dm", op: { t: "scene.setMap", sceneId: "hex", map: { assetId: "art", widthPx: 2100, heightPx: 1400, cellPx: 70, originPx: { x: 0, y: 0 } } } },
@@ -151,6 +164,32 @@ describe("phase H1's ops on hex scenes (docs/design-v1-hex-grids.md section 6)",
       assert.deepEqual(hashes(r.state, r.log), { after: step.after, seen: step.seen }, `step ${i} ${step.op.t}`);
       state = r.state;
     }
+  });
+
+  test("party vision on hexes shows the player what Ayla sees by light and darkvision, and withholds the rest, each change a view of its own", () => {
+    const fixture = JSON.parse(readFileSync(FIXTURE, "utf8")) as Fixture;
+    const on = fixture.steps.findIndex((s) => s.op.t === "scene.update" && s.op.patch.vision?.on === true);
+    assert.ok(on > 0, "a step turns party vision on");
+    let state = fixture.state;
+    const seen: string[][] = [];
+    for (const [i, step] of fixture.steps.entries()) {
+      const r = applyOp(state, step.op, viewer(step.who), envelope(i));
+      assert.ok(r.ok);
+      state = r.state;
+      const view = projectState(state, P1, { sceneId: "hex" });
+      seen.push(Object.values(view.tokens).flatMap((t) => (t.sceneId === "hex" && t.id !== "ayla" ? [t.id] : [])).sort());
+    }
+    // Vision on by the torch, darkvision, the lantern, the torch out, per player, and whole party again.
+    assert.deepEqual(seen.slice(on, on + 6), [
+      ["goblin", "imp", "ogre"],
+      ["goblin", "imp", "ogre"],
+      ["giant", "goblin", "imp", "ogre"],
+      ["giant", "goblin", "imp", "ogre"],
+      [],
+      ["giant", "goblin", "imp", "ogre"],
+    ]);
+    for (let i = on; i < on + 5; i++) assert.notEqual(fixture.steps[i]!.seen, fixture.steps[i - 1]!.seen, `step ${i} ${fixture.steps[i]!.op.t} changes the player's view`);
+    assert.equal(fixture.steps[on + 5]!.seen, fixture.steps[on + 3]!.seen, "whole party again is the view before per player");
   });
 
   test("the file covers the ops H1 accepts on hexes, a stored undo among them, and reaches hex rows, hex columns and back", () => {
