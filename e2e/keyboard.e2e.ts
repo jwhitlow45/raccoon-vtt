@@ -544,7 +544,9 @@ async function sheetLifted(view: View): Promise<void> {
  * The roll card's Total and Send over the keyboard, on a roll the DM asks
  * of Thorn. Where the screen is too short for the card at the foot, as at
  * 480 x 320 at 130%, it waits as "Roll asked", whose tap summons it onto
- * the toolbar or the screen before Total takes focus.
+ * the toolbar or the screen before Total takes focus. `fight` says whether
+ * kb-11's fight is on, which only names the step and its picture: the
+ * steps after kb-11 run in the fight, and one before it runs outside it.
  */
 async function rollCard(view: View, fight = true): Promise<void> {
   const where = `${fight ? "in the fight " : ""}at ${viewName(view)}`;
