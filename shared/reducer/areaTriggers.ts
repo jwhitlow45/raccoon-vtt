@@ -356,13 +356,33 @@ function walkOf(before: RoomState, after: RoomState, op: Op, opVersion: number |
 }
 
 /** A route's sweep never takes more than this: every half square of 300 squares of reach, and one more a piece for rounding (section 10). */
-const MAX_ROUTE_SWEEP = 664;
+export const MAX_ROUTE_SWEEP = 664;
+
+/**
+ * How many points each piece of a route's sweep takes, the last its end:
+ * `ceil(reach / 0.5)`, at least one, the straight leg's density. A player's
+ * route under fog counts no climbs toward its cap (MD2-O-13), so steep
+ * pieces can want more than MAX_ROUTE_SWEEP in all. Then every piece takes
+ * one first and the rest of the cap is shared in proportion to what each
+ * wanted past that, so no piece of an accepted route goes unchecked, where
+ * sampling in order until the cap ran out skipped every piece after the
+ * steep ones.
+ */
+export function routeSweepPlan(points: readonly RoutePoint[], feetPerCell: number): number[] {
+  const wanted: number[] = [];
+  for (let i = 1; i < points.length; i++) wanted.push(Math.max(1, Math.ceil(pieceReach(points[i - 1]!, points[i]!, feetPerCell) / SWEEP_STEP)));
+  const total = wanted.reduce((sum, n) => sum + n, 0);
+  if (total <= MAX_ROUTE_SWEEP) return wanted;
+  const left = Math.max(0, MAX_ROUTE_SWEEP - wanted.length);
+  const extra = total - wanted.length;
+  return wanted.map((n) => 1 + Math.floor(((n - 1) * left) / extra));
+}
 
 /**
  * The room along a routed walk, piece by piece at the straight leg's own
- * density (`ceil(reach / 0.5)` samples a piece, elevation interpolated
- * between its ends), so a route never skips an area a straight leg of its
- * length would catch, ending with `after` itself. Only ops before version
+ * density (`routeSweepPlan`, elevation interpolated between its ends), so
+ * a route never skips an area a straight leg of its length would catch,
+ * ending with `after` itself. Only ops before version
  * 14 take it, and they replay with the footprint the move left: later ones
  * sweep their walks in `alongGroups`.
  */
@@ -371,11 +391,12 @@ function alongWalkBeforeV14(after: RoomState, walk: Walked): RoomState[] {
   const token = after.tokens[walk.tokenId]!;
   const out: RoomState[] = [];
   const { points } = walk;
-  for (let i = 1; i < points.length && out.length < MAX_ROUTE_SWEEP; i++) {
+  const plan = routeSweepPlan(points, fpc);
+  for (let i = 1; i < points.length; i++) {
     const a = points[i - 1]!;
     const b = points[i]!;
-    const n = Math.max(1, Math.ceil(pieceReach(a, b, fpc) / SWEEP_STEP));
-    for (let k = 1; k <= n && out.length < MAX_ROUTE_SWEEP; k++) {
+    const n = plan[i - 1]!;
+    for (let k = 1; k <= n; k++) {
       if (i === points.length - 1 && k === n) break;
       const f = k / n;
       const placed = { ...after.tokens, [token.id]: { ...token, x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f), elevation: lerp(a.elevation, b.elevation, f) } };
@@ -442,9 +463,10 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
   const out: RoomState[] = [];
   if (routed) {
     const lead = named[0]!.route;
-    for (let i = 1; i < lead.length && out.length < MAX_ROUTE_SWEEP; i++) {
-      const n = Math.max(1, Math.ceil(pieceReach(lead[i - 1]!, lead[i]!, fpc) / SWEEP_STEP));
-      for (let k = 1; k <= n && out.length < MAX_ROUTE_SWEEP; k++) {
+    const plan = routeSweepPlan(lead, fpc);
+    for (let i = 1; i < lead.length; i++) {
+      const n = plan[i - 1]!;
+      for (let k = 1; k <= n; k++) {
         if (i === lead.length - 1 && k === n) break;
         out.push(place(i, k / n));
       }

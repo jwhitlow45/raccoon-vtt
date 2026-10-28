@@ -13,6 +13,7 @@ import { publicWorld } from "../rules/walkWorld.ts";
 import { DM, P1, P2, actor, env, reveal, room, template, token, withoutWalked } from "../testutil.ts";
 import type { Env } from "./tx.ts";
 import { ownWalk } from "../rules/movement.ts";
+import { MAX_ROUTE_SWEEP, routeSweepPlan } from "./areaTriggers.ts";
 
 /**
  * Moves walking their routes (docs/design-v1-movement.md 6.2 and 7): what
@@ -262,6 +263,26 @@ describe("area reminders along a route (7.2)", () => {
     assert.equal(bent.length, 1);
     const straight = sweep([{ t: "token.move", tokenId: "gob", x: 8, y: 6 }], undefined, cube(5.5, 6.5));
     assert.equal(straight.length, 0, "the straight leg from 2,2 passes it by");
+  });
+
+  test("steep climbs a fog route's cap never counts still leave every later piece swept, within the sweep's cap (FU34-ASTRA-01)", () => {
+    // Heights that rise 200 ft and fall to -100 ft at each square from 3 to 8, then a sphere on flat ground past them.
+    const steep = (climbs: boolean) => (s: RoomState) => {
+      const feet = new Array<number>(256).fill(0);
+      if (climbs) for (let x = 3; x <= 8; x++) feet[2 * 16 + x] = x % 2 === 1 ? 200 : -100;
+      s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(feet) };
+      s.templates.c1 = template("c1", { shape: "sphere", size: 5, origin: { x: 11.5, y: 2.5, z: 0 }, spell: "Grease", triggers: ["enter"] });
+    };
+    const route = Array.from({ length: 12 }, (_, i): [number, number, number, 0 | 1] => [3 + i, 2, 0, 0]);
+    const east: Op = { t: "token.move", tokenId: "gob", x: 14, y: 2, route };
+    assert.equal(sweep([east], undefined, steep(false)).length, 1, "on flat ground the sphere is entered");
+    assert.equal(sweep([east], undefined, steep(true)).length, 1, "past the climbs it still is");
+    const points = [{ x: 2, y: 2, elevation: 0 }, ...route.map(([x, y], i) => ({ x, y, elevation: i < 6 ? (i % 2 === 0 ? 200 : -100) : 0 }))];
+    const plan = routeSweepPlan(points, 5);
+    assert.ok(plan.reduce((sum, n) => sum + n, 0) <= MAX_ROUTE_SWEEP, "the sweep keeps its cap");
+    assert.ok(plan.every((n) => n >= 1), "every piece is checked");
+    const flat = points.map((p) => ({ ...p, elevation: 0 }));
+    assert.deepEqual(routeSweepPlan(flat, 5), flat.slice(1).map(() => 2), "a route inside the cap samples as before");
   });
 });
 
