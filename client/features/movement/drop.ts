@@ -77,8 +77,8 @@ export type DropState = BuildState & {
   seen?: SeenByAll;
 };
 
-/** A room as this viewer's drops read it: with who every player sees (attach/walk.ts seenIn, the path's `seen` marks). */
-export type DropView = RoomState & { seen: SeenByAll };
+/** A room as this viewer's drops read it: with who every player sees (attach/walk.ts seenIn, the path's `seen` marks), and the viewer's role, which the reach cap reads. */
+export type DropView = RoomState & { seen: SeenByAll; role: Role };
 
 const dropViews = new WeakMap<RoomState, Partial<Record<Role, DropView>>>();
 
@@ -88,6 +88,7 @@ export function dropView(view: RoomState, role: Role): DropView {
   if (!byRole) dropViews.set(view, (byRole = {}));
   return (byRole[role] ??= {
     ...view,
+    role,
     seen: (t) => {
       const token = view.tokens[t.id];
       return token !== undefined && publicToken(view, token, { role });
@@ -359,7 +360,7 @@ export function cutRoute(state: DropView, token: DropToken, pieces: readonly Rou
  * once.
  */
 export function routeLanding(state: DropView, token: DropToken, target: Point & { squeeze?: boolean }, pieces: readonly RoutePiece[], feetPerCell: number): Landing | null {
-  const key = `${token.sceneId},${token.size},${token.w},${token.h},${token.x},${token.y},${token.elevation},${token.squeeze === true},${target.x},${target.y},${target.squeeze === true},${feetPerCell},${holderKey(state, token)},${membersKey(state, token)}`;
+  const key = `${token.sceneId},${token.size},${token.w},${token.h},${token.x},${token.y},${token.elevation},${token.squeeze === true},${target.x},${target.y},${target.squeeze === true},${feetPerCell},${state.role},${holderKey(state, token)},${membersKey(state, token)}`;
   const known = landings.get(pieces);
   if (known && known.key === key && known.chunks === state.buildChunks && known.scene === state.scenes[token.sceneId]) return known.landing;
   const landing = landingOf(state, token, target, pieces, feetPerCell);
@@ -431,7 +432,7 @@ function landingOf(state: DropView, token: DropToken, target: Point & { squeeze?
   // A squeeze at the walk's end is judged as the end of the walk, as the server judges it (permissions.ts squeezeFits).
   if (at.squeeze && !squeezeFits(state, walkEnd(state, walking, at, points.slice(1, -1)))) return null;
   // The cap reads what the token takes along too, each on its own ground, as the server's does (moveLeg.ts checkSetReach).
-  return checkSetReach(state, token, trace, state.seen, feetPerCell) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
+  return checkSetReach(state, token, trace, state.seen, feetPerCell, state.role) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
 }
 
 /**

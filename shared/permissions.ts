@@ -462,7 +462,8 @@ export const ROUTE_TOO_LONG = `a route reaches at most ${MAX_ROUTE_REACH} square
  * piece's change of elevation by the walk's own rule (route.ts
  * `routePoints`), and each piece's reach the largest over the token and the
  * group's public members it takes along (moveLeg.ts checkSetReach, review
- * R7-OPUS-1). The DM's routes are checked this far and no further.
+ * R7-OPUS-1), with no climbs for a player on a scene with fog on. The DM's
+ * routes are checked this far and no further.
  */
 function routeFits(op: Op, c: Check): Decision {
   if (op.t !== "token.move" || !op.route) return OK;
@@ -478,7 +479,7 @@ function routeFits(op: Op, c: Check): Decision {
   }
   const seen = seenAllIn(c);
   const trace = routeWalkers(c.state.buildChunks, walkerFor(c.state, token, seen, { to: op }), op.route, op.elevation ?? token.elevation);
-  return checkSetReach(c.state, token, trace, seen, c.state.meta.settings.feetPerCell) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
+  return checkSetReach(c.state, token, trace, seen, c.state.meta.settings.feetPerCell, c.actor.role) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
 }
 
 /** The refusal of a player's op that names an effect's save or its occurrence (docs/design-v1-roll-options.md 6.1). */

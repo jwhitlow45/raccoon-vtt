@@ -203,9 +203,13 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
  * holder some player cannot see is not among them (L3-SOL-39), so no hidden
  * path decides the cap. The server's check (permissions.ts routeFits) and
  * the client's, of a route before it sends it (drop.ts landingOf), are this
- * one rule.
+ * one rule. A player's route on a scene with fog on counts no climbs or
+ * falls (MD2-O-13): the trace reads the real ground's heights, so counting
+ * them would refuse a route in place by the heights of ground the player
+ * never touched. The cap only bounds the work a route costs, and its
+ * squares across the ground do that alone.
  */
-export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "sceneId" | "x" | "y" | "elevation">, trace: WalkTrace, seen: SeenByAll, feetPerCell: number): number {
+export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "sceneId" | "x" | "y" | "elevation">, trace: WalkTrace, seen: SeenByAll, feetPerCell: number, role: Viewer["role"]): number {
   const route = trace.map(({ x, y, elevation }) => ({ x, y, elevation }));
   const lead: MovedToken = { tokenId: token.id, from: poseOf(token), to: { sceneId: token.sceneId, ...route[route.length - 1]! }, route, trace, how: "walk", pass: "public" };
   const walks = [lead];
@@ -218,8 +222,10 @@ export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "scen
     walked.set(id, moved);
     walks.push(moved);
   }
+  // Infinite feet per square make every rise no reach.
+  const perSquare = role === "player" && before.scenes[token.sceneId]?.fogEnabled === true ? Infinity : feetPerCell;
   let reach = 0;
-  for (let i = 1; i < route.length; i++) reach += Math.max(...walks.map((w) => pieceReach(w.route[i - 1]!, w.route[i]!, feetPerCell)));
+  for (let i = 1; i < route.length; i++) reach += Math.max(...walks.map((w) => pieceReach(w.route[i - 1]!, w.route[i]!, perSquare)));
   return reach;
 }
 

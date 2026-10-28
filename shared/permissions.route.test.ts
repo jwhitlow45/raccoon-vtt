@@ -92,6 +92,21 @@ describe("the 300-square cap reads the public members a walk takes along (sectio
     }
   });
 
+  test("a player's route on a scene with fog on counts no climbs, so heights they never touched refuse nothing (MD2-O-13)", () => {
+    // Thorn's own row rises and falls as the goblin's does, on ground no player has seen.
+    const climbing = (fog: boolean): RoomState => {
+      const state = dragging();
+      const feet = new Array<number>(CHUNK_CELLS * CHUNK_CELLS).fill(0);
+      for (let x = 3; x <= 8; x++) feet[2 * CHUNK_CELLS + x] = x % 2 === 1 ? 200 : -100;
+      state.buildChunks[chunkKey("s1", 0, 0)]!.heights = encodeHeights(feet);
+      state.scenes.s1!.fogEnabled = fog;
+      return state;
+    };
+    assert.equal(decide(east(8), P1, climbing(true)), "ok");
+    assert.equal(decide(east(8), DM, climbing(true)), `invalid: ${ROUTE_TOO_LONG}`, "the DM's cap still counts them");
+    assert.equal(decide(east(8), P1, climbing(false)), `invalid: ${ROUTE_TOO_LONG}`, "with fog off nothing is withheld");
+  });
+
   test("a creature no player sees, or one on a holder no player sees, never decides the cap (L3-SOL-39)", () => {
     for (const who of [DM, P1]) {
       assert.equal(decide(east(8), who, dragging({}, { visibility: "dm" })), "ok", "a hidden goblin");

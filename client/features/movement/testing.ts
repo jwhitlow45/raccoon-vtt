@@ -53,6 +53,7 @@ export function world(spec: Spec): RoomState {
 export function seenRoom(state: RoomState, role: Role = "player"): DropView {
   return {
     ...state,
+    role,
     seen: (t) => {
       const token = state.tokens[t.id];
       return token !== undefined && publicToken(state, token, { role });

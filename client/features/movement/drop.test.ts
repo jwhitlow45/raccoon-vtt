@@ -343,6 +343,19 @@ describe("a lone drop walks its route (docs/design-v1-movement.md 3.1)", () => {
     assert.deepEqual(drop({ visibility: "dm" }), { route: east, refused: null });
   });
 
+  test("a player's route on a scene with fog on counts no climbs, as the server's cap does (MD2-O-13)", () => {
+    // Thorn's own row rises to 200 ft and falls to -100 ft a square: 340 squares counted with its climbs.
+    const heights: Record<string, number> = {};
+    for (let x = 3; x <= 8; x++) heights[`${x},2`] = x % 2 === 1 ? 200 : -100;
+    const east = [3, 4, 5, 6, 7, 8].map((x): [number, number, number, 0 | 1] => [x, 2, 0, 0]);
+    const state = world({ blockMovement: false, heights, tokens: [thorn({ x: 2, y: 2 })] });
+    state.scenes.s1!.fogEnabled = true;
+    const route = (role: "dm" | "player") => planWalk(seenRoom(state, role), state.tokens.thorn!, { x: 8, y: 2 }, "free", { kind: "route", route: { pieces: east } }, 5).moves[0]!.route;
+    assert.deepEqual(route("player"), east);
+    assert.equal(route("dm"), undefined, "the DM's cap counts them");
+    assert.ok(canApply({ t: "token.move", tokenId: "thorn", x: 8, y: 2, route: east }, P1, state, { canUseAsset: () => true }).ok);
+  });
+
   test("an arrow key steps one square, stops at a wall as before, never goes round it, and counts the square's terrain", () => {
     const state = divided();
     const press = (from: { x: number; y: number }, to: { x: number; y: number }, cells: Record<string, "rubble"> = {}) => {

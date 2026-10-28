@@ -510,6 +510,7 @@ function simulated(view: RoomState, sim: RoomState, role: WalkViewer["role"], wa
   const moved = (id: string) => !samePose(room.tokens[id], view.tokens[id]);
   const seen: DropView = {
     ...room,
+    role,
     seen: (t) => {
       const token = room.tokens[t.id];
       return token !== undefined && !unseen?.has(t.id) && (moved(t.id) ? seenWhereMoved(room, token) : drops.seen(t));
