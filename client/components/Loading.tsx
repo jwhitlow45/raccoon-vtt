@@ -12,18 +12,23 @@ import { theme } from "../lib/theme.ts";
 
 export const SHOW_DELAY_MS = 200;
 
-/** True once `active` has stayed true for `ms`. False again the moment it ends. */
+/**
+ * True once `active` has stayed true for `ms`. False again the moment it ends.
+ * No delay means true from the first render: a caller passes 0 when it has
+ * already waited the shared delay itself, so a timer would only add a frame
+ * with nothing on screen.
+ */
 export function useDelayed(active: boolean, ms: number = SHOW_DELAY_MS): boolean {
   const [due, setDue] = useState(false);
   useEffect(() => {
-    if (!active) {
+    if (!active || ms <= 0) {
       setDue(false);
       return;
     }
     const timer = setTimeout(() => setDue(true), ms);
     return () => clearTimeout(timer);
   }, [active, ms]);
-  return active && due;
+  return active && (ms <= 0 || due);
 }
 
 /**
@@ -56,11 +61,39 @@ export function Spinner(props: { size?: number; label?: string }) {
  * It is a status, so its words are read out as they change. `live` false
  * draws the same line without that, for a line that changes too often to
  * hear, such as a count of pages, whose owner says its start and its end
- * in a status line of its own.
+ * in a status line of its own, or for a line that sits inside a live region
+ * its owner already keeps mounted.
+ *
+ * `small` is the same wait at a help line's size, for a wait inside help or
+ * an options line (docs/design-v1-design-pass.md 4.4). It is a `span`, so it
+ * fits inside the `p` or `span` that holds it, where a `div` would not.
  */
-export function Loading(props: { text: string; detail?: string | null; active?: boolean; delay?: number; live?: boolean; style?: CSSProperties }) {
+export function Loading(props: { text: string; detail?: string | null; active?: boolean; delay?: number; live?: boolean; small?: boolean; style?: CSSProperties }) {
   const shown = useDelayed(props.active ?? true, props.delay);
   if (!shown) return null;
+  if (props.small) {
+    return (
+      <span
+        role={props.live === false ? undefined : "status"}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: theme.space(1),
+          minWidth: 0,
+          color: theme.color.textMuted,
+          fontSize: theme.font.small,
+          lineHeight: theme.leading.body,
+          ...props.style,
+        }}
+      >
+        <Spinner size={theme.icon.sm} />
+        <span style={{ minWidth: 0 }}>
+          {props.text}
+          {props.detail ? <span style={{ display: "block" }}>{props.detail}</span> : null}
+        </span>
+      </span>
+    );
+  }
   return (
     <div
       role={props.live === false ? undefined : "status"}
