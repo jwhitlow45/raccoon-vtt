@@ -106,7 +106,8 @@ function runReports(runId: string): Reported[] {
   const { jobs } = JSON.parse(gh(["run", "view", runId, "--json", "jobs"])) as { jobs: { databaseId: number; name: string; conclusion: string }[] };
   const shards = jobs.filter((j) => /^e2e(?: \(\d+\)|-macos)$/.test(j.name) && j.conclusion !== "skipped");
   if (shards.length === 0) throw new Error(`run ${runId} has no e2e jobs`);
-  return shards.flatMap((j) => readReport(gh(["api", `repos/{owner}/{repo}/actions/jobs/${j.databaseId}/logs`])));
+  // A job's log holds the test reporter's colors, which gh prints only when asked to.
+  return shards.flatMap((j) => readReport(gh(["api", "--allow-escape-sequences", `repos/{owner}/{repo}/actions/jobs/${j.databaseId}/logs`])));
 }
 
 function main(argv: readonly string[]): number {
