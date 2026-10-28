@@ -175,9 +175,16 @@ export function playerFog(fogTiles: RoomState["fogTiles"], exploredTiles: RoomSt
  * cleared (MD4-ASTRA-4).
  */
 export function contentEmpty(content: Pick<ExportContent, "chunks" | "labels" | "stamps">): boolean {
-  const some = (c: BuildChunk & { auto?: string }) =>
-    Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0 || (c.walls?.length ?? 0) > 0 || c.auto !== undefined || c.heights !== undefined || c.up !== undefined || c.rough !== undefined;
-  return !content.chunks.some(some) && content.labels.length === 0 && content.stamps.length === 0;
+  return !content.chunks.some(chunkDraws) && content.labels.length === 0 && content.stamps.length === 0;
+}
+
+/**
+ * Whether a chunk holds anything the drawing draws, the DM's or a player's
+ * (whose `auto` marks automatic walls). Both emptiness tests read it, so
+ * what counts cannot drift between them (LP23-OPUS-3).
+ */
+function chunkDraws(c: BuildChunk & { auto?: string }): boolean {
+  return Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0 || (c.walls?.length ?? 0) > 0 || c.auto !== undefined || c.heights !== undefined || c.up !== undefined || c.rough !== undefined;
 }
 
 /**
@@ -190,10 +197,6 @@ export function contentEmpty(content: Pick<ExportContent, "chunks" | "labels" | 
  * drawn, so they do not count.
  */
 export function hasBuildOn(sceneId: string, chunks: RoomState["buildChunks"], labels: RoomState["labels"], stamps: RoomState["stamps"]): boolean {
-  const some = (c: BuildChunk | undefined) =>
-    !!c &&
-    c.sceneId === sceneId &&
-    (Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0 || (c.walls?.length ?? 0) > 0 || c.heights !== undefined || c.up !== undefined || c.rough !== undefined);
   const onScene = (item: { sceneId: string } | undefined) => item?.sceneId === sceneId;
-  return Object.values(chunks).some(some) || Object.values(labels).some(onScene) || Object.values(stamps).some(onScene);
+  return Object.values(chunks).some((c) => c !== undefined && onScene(c) && chunkDraws(c)) || Object.values(labels).some(onScene) || Object.values(stamps).some(onScene);
 }
