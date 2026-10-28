@@ -588,11 +588,12 @@ describe("one position's pieces and the whole scene's", () => {
     lift(state, "party", { x: 0, y: 0, w: 48, h: 32 });
     lift(state, "dm", { x: 20, y: 0, w: 10, h: 32 });
     const closed = { kind: "door" as const, state: "closed" as const, secret: false, discovered: false };
-    // Stored in position 1,0 and seen there now; the party remembers it at x = 8, in position 0,0.
+    // Stored in position 1,0 and seen there now; the party remembers it at x = 8, in position 0,0, whose memory chunk files it by that midpoint as the reducer does.
     const live = wall(state, "abcdefghijkl", [24, 5], [24, 6], closed);
-    remember(state, null, 1, 0, { walls: { [live.id]: [{ wall: { ...live, a: [8, 5], b: [8, 6] }, cells: ["7,5", "8,5"] }] } });
-    assert.equal(same(state, 0, 0)?.walls?.some((w) => w.id === live.id) ?? false, false, "the live door wins where it is live");
-    assert.ok(same(state, 1, 0)?.walls?.some((w) => w.id === live.id));
+    remember(state, null, 0, 0, { walls: { [live.id]: [{ wall: { ...live, a: [8, 5], b: [8, 6] }, cells: ["7,5", "8,5"] }] } });
+    const xs = (cx: number) => (same(state, cx, 0)?.walls ?? []).filter((w) => w.id === live.id).map((w) => w.a[0]);
+    assert.deepEqual(xs(0), [8], "position 0,0 holds the door where the party remembers it");
+    assert.deepEqual(xs(1), [24], "position 1,0 holds it live");
   });
 
   test("a wall a holder remembers in their own layer, beside the party's memory of it", () => {
@@ -601,10 +602,10 @@ describe("one position's pieces and the whole scene's", () => {
     lift(state, "party", { x: 0, y: 0, w: 48, h: 32 });
     lift(state, { holder: "p1" }, { x: 0, y: 0, w: 16, h: 16 });
     lift(state, "dm", { x: 20, y: 0, w: 10, h: 32 });
-    // Stored in position 1,0 and seen there now; p1 remembers it at x = 8 and the party at x = 9, both in position 0,0.
+    // Stored in position 1,0 and seen there now; p1 remembers it at x = 8 and the party at x = 9, both in position 0,0, filed there by their midpoints.
     const live = wall(state, "abcdefghijkl", [24, 5], [24, 6]);
-    remember(state, "p1", 1, 0, { walls: { [live.id]: [{ wall: { ...live, a: [8, 5], b: [8, 6] }, cells: ["7,5", "8,5"] }] } });
-    remember(state, null, 1, 0, { walls: { [live.id]: [{ wall: { ...live, a: [9, 5], b: [9, 6] }, cells: ["8,5", "9,5"] }] } });
+    remember(state, "p1", 0, 0, { walls: { [live.id]: [{ wall: { ...live, a: [8, 5], b: [8, 6] }, cells: ["7,5", "8,5"] }] } });
+    remember(state, null, 0, 0, { walls: { [live.id]: [{ wall: { ...live, a: [9, 5], b: [9, 6] }, cells: ["8,5", "9,5"] }] } });
     const xs = (same(state, 0, 0, "p1")?.walls ?? []).map((w) => Math.round(w.a[0]));
     assert.ok(xs.includes(8) && !xs.includes(9), `p1 reads their own memory where their own layer holds the cells: ${xs.join(" ")}`);
     assert.ok((same(state, 0, 0, null)?.walls ?? []).some((w) => Math.round(w.a[0]) === 9), "the shared class reads the party's");
