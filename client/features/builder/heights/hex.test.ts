@@ -4,7 +4,7 @@ import type { RoomState, StairDirection } from "#shared/model.ts";
 import { opSchema, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { gridOfShape } from "#shared/rules/grid.ts";
-import { cornerAt, hexCenter, hexCorners, hexKey, hexNeighbors, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { cornerAt, hexCenter, hexCorners, hexKey, hexNeighbors, sceneHexSpan, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { DM, env, room, scene } from "#shared/testutil.ts";
 import { HEX_LIMITS } from "../../grid/words.ts";
@@ -120,9 +120,12 @@ for (const g of [gridOfShape("hexRows") as HexGrid, gridOfShape("hexColumns") as
     });
 
     test("a region's number goes on a hex center, and touching hexes across any side are one region", () => {
-      const s = painted(g, [[H, 10], [hexNeighbors(g, H)[1]!, 10], [{ col: 12, row: 3 }, 10]]);
+      // A hook: down from a hex, along the row below, and up again to a hex its own row does not reach (mirrored on columns).
+      const m = (h: Hex): Hex => (g.orient === "rows" ? h : { col: h.row, row: h.col });
+      const hook = [m({ col: 4, row: 6 }), m({ col: 4, row: 7 }), m({ col: 5, row: 7 }), m({ col: 6, row: 7 }), m({ col: 7, row: 6 })];
+      const s = painted(g, [...hook.map((h) => [h, 10] as [Hex, number]), [{ col: 12, row: 3 }, 10]]);
       const regions = heightRegions(chunksOf(s), s.scenes.s1!.bounds, g);
-      assert.deepEqual(regions.map((r) => r.size), [2, 1]);
+      assert.deepEqual(regions.map((r) => r.size), [5, 1]);
       const spot = regions[1]!.spots[0]!;
       const center = hexCenter(g, { col: 12, row: 3 });
       assert.deepEqual([spot.x, spot.y], [center.x, center.y]);
@@ -131,6 +134,11 @@ for (const g of [gridOfShape("hexRows") as HexGrid, gridOfShape("hexColumns") as
     test("the readout names a hex stair's facing, and reads a hex's ground by its key", () => {
       const s = painted(g, [[H, 10]]);
       assert.equal(seenGround({ chunks: s.buildChunks, sceneId: "s1", bounds: s.scenes.s1!.bounds, grid: g, fog: null }, { x: 6, y: 6 }), 10);
+      // The scene's last hex lies past its square bounds, and reads all the same.
+      const span = sceneHexSpan(g, { w: 20, h: 14 });
+      const last: Hex = g.orient === "rows" ? { col: 3, row: span.rows - 1 } : { col: span.cols - 1, row: 3 };
+      const far = painted(g, [[last, 15]]);
+      assert.equal(seenGround({ chunks: far.buildChunks, sceneId: "s1", bounds: far.scenes.s1!.bounds, grid: g, fog: null }, { x: last.col, y: last.row }), 15);
       assert.equal(readoutOf(5, "1", g)?.spoken, "Stairs, 5 ft up, up to the south-east.");
       assert.equal(readoutOf(0, "2", g)?.spoken, `Stairs, up to the ${g.orient === "rows" ? "south-west" : "north-east"}.`);
     });
