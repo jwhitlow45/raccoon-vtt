@@ -966,7 +966,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
     await bar.locator("[data-options-line]").filter({ hasText: "Drag a box over 3 hexes across. Fine-tune it by its corners." }).waitFor();
     await bar.getByText("50 px per hex", { exact: true }).filter({ visible: true }).first().waitFor();
-    assert.equal(await bar.getByRole("button", { name: "Look for a grid drawn on the map and line up with it" }).isDisabled(), false);
+    assert.equal(await bar.getByRole("button", { name: "Find the grid", exact: true }).isDisabled(), false);
     await bar.getByRole("button", { name: /^Nudge/ }).first().click();
     const larger = dm.getByRole("button", { name: "Make the hexes larger" });
     for (let i = 0; i < 3; i++) await larger.click();
@@ -1879,6 +1879,9 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
   test("hx9c-1. a code-drawn hex map through New scene in a square room starts on hex rows with its grid, one undo step, and Use default puts back squares and the guess", async () => {
     await openAt(dm, SIZES[0], 1);
+    // The sizes and reloads before leave the op socket from the first test without answers, so a new one sends from here.
+    ops.close();
+    ops = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie: (await dmContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ") });
     await ops.send({ t: "room.update", settings: { newScenes: "squares" } });
     await waitFor("a square room", () => (dmSocket.state && dmSocket.state.meta.settings.newScenes === undefined) || null);
     const file = await hx9cMap("Hex fen", "rows", 64, 31);
@@ -1919,7 +1922,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await dm.getByRole("button", { name: "Undo", exact: true }).click();
     await waitFor("one undo back to hex rows and the guess", () => hx9cGuess(run.camp, "hexRows", 50));
     // From the options strip: the button keeps focus through the search and the switch.
-    const find = bar.getByRole("button", { name: "Look for a grid drawn on the map and line up with it" });
+    const find = bar.getByRole("button", { name: "Find the grid", exact: true });
     await find.focus();
     await find.press("Enter");
     await waitFor("the camp on hex columns again", () => hx9cOnHexes(run.camp, "columns", 56), 15_000);
@@ -1967,6 +1970,14 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           await bar.locator("[data-options-line]").filter({ hasText: "Remove them to change the grid." }).first().waitFor({ timeout: 15_000 });
           off.push(...alignmentLines(await measureAlignment(bar), `Line up grid's options with a refused switch at ${at}`));
           await shots.take(page, `hx9c-refused-line-${size.name}-${scale * 100}`);
+          // Cut short, the line opens on a tap and wraps, as section 6.1's lines do.
+          const cut = bar.locator('[data-options-line="shown"] button[aria-expanded="false"]');
+          if ((await cut.count()) > 0) {
+            await cut.first().click();
+            await bar.locator('[data-options-line="open"]').waitFor();
+            off.push(...alignmentLines(await measureAlignment(bar), `Line up grid's options with the refused switch's line open at ${at}`));
+            await shots.take(page, `hx9c-refused-line-open-${size.name}-${scale * 100}`);
+          }
           await pickTool(page, "Select");
         }
       }
