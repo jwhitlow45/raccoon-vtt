@@ -174,13 +174,13 @@ function dedupe(held: ShapeHeld[]): ShapeHeld[] {
  *   shape. A value with none, such as a draft of rects or a chunk of free
  *   walls only, means the same on every grid and is never compared.
  * - The phase check, on everything written onto a hex scene, whatever its
- *   stamp (D-261026-8). In H2 a hex scene holds difficult ground of its own
- *   shape and no other grid-keyed content: painted ground and grid-line
- *   walls never (they stay square in every phase), heights, stairs and
- *   Reveal room's cells until H3. Free walls, squeezed creatures, attach
- *   links and traps but pits stand on hexes from H2. A hand-made backup could stamp any
- *   of the rest with the scene's own shape, and this phase has no hex rules
- *   to read them by.
+ *   stamp (D-261026-8). In H3 a hex scene holds difficult ground and
+ *   Reveal room's cells of its own shape and no other grid-keyed content:
+ *   painted ground and grid-line walls never (they stay square in every
+ *   phase), heights and stairs not yet. Free walls, squeezed creatures,
+ *   attach links and traps but pits stand on hexes from H2. A hand-made
+ *   backup could stamp any of the rest with the scene's own shape, and
+ *   this phase has no hex rules to read them by.
  *
  * `from` is the shape the value's data stands on, for the words: its stamp.
  */
@@ -205,8 +205,8 @@ export function restoredHolds(
   }
   if (kind === "fogDraft") {
     const draft = value as FogDraft;
-    const keyed: ShapeHolding[] = draftKeyed(draft) ? ["roomFog"] : [];
-    return stamp(keyed, draft.grid) ?? (isHex(g) && keyed.length > 0 ? { held: tally(keyed), from: stampShape(draft.grid) } : null);
+    // From H3 Reveal room's hex keys stand on the hex shape they were stamped with, so the stamp check is the whole test.
+    return stamp(draftKeyed(draft) ? ["roomFog"] : [], draft.grid);
   }
   if (kind === "trap") {
     const trap = value as Trap;

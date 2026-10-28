@@ -1393,9 +1393,9 @@ describe("map discovery: op version 26, snapshot version 27 (docs/design-v1-map-
 });
 
 describe("hex grids, phase H2: op version 27, snapshot version 28 (docs/design-v1-hex-grids.md section 7)", () => {
-  test("are the versions now", () => {
-    assert.equal(OP_VERSION, 27);
-    assert.equal(SNAPSHOT_VERSION, 28);
+  test("brought op version 27 and snapshot version 28", () => {
+    assert.ok(OP_VERSION >= 27);
+    assert.ok(SNAPSHOT_VERSION >= 28);
     assert.ok(opMigrations.some((s) => s.from === 26 && s.to === 27));
     assert.ok(snapshotMigrations.some((s) => s.from === 27 && s.to === 28));
   });
@@ -1427,6 +1427,41 @@ describe("hex grids, phase H2: op version 27, snapshot version 28 (docs/design-v
   test("a version 27 op and a version 28 snapshot never migrate down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 27, 26, opMigrations), /down/);
     assert.throws(() => runMigrations(room(), 28, 27, snapshotMigrations), /down/);
+  });
+});
+
+describe("hex grids, phase H3: op version 28, snapshot version 29 (docs/design-v1-hex-grids.md section 7)", () => {
+  test("are the versions now", () => {
+    assert.equal(OP_VERSION, 28);
+    assert.equal(SNAPSHOT_VERSION, 29);
+    assert.ok(opMigrations.some((s) => s.from === 27 && s.to === 28));
+    assert.ok(snapshotMigrations.some((s) => s.from === 28 && s.to === 29));
+  });
+
+  test("the snapshot step is the identity, a hex scene's stamped Reveal room draft included", () => {
+    const plain = room();
+    assert.equal(runMigrations(plain, 28, 29, snapshotMigrations), plain);
+    assert.equal(migrateSnapshot(plain, 28), plain);
+    const hex = room({
+      scenes: { s1: { ...room().scenes.s1!, gridShape: "hexColumns" }, s2: room().scenes.s2! },
+      fogDrafts: { s1: { sceneId: "s1", rev: 0, grid: "hexColumns", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["3,21", "4,21"] } }] } },
+    });
+    assert.equal(runMigrations(hex, 28, 29, snapshotMigrations), hex);
+  });
+
+  test("the op step is the identity, and each op H3 takes on hexes is one today's protocol takes", () => {
+    const ops: unknown[] = [
+      { t: "fog.draft", sceneId: "s1", add: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["3,21", "4,21"] } }] },
+      { t: "fog.live", sceneId: "s1", ops: [{ id: "f2", mode: "reveal", shape: { kind: "cells", cells: ["29,229"] } }] },
+      { t: "log.chat", text: "hi" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 27, 28, opMigrations), op);
+    for (const op of ops) assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
+  });
+
+  test("a version 28 op and a version 29 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 28, 27, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 29, 28, snapshotMigrations), /down/);
   });
 });
 

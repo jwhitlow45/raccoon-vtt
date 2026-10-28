@@ -46,7 +46,7 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     }
   });
 
-  test("in H2 a hex scene holds no grid-keyed content but its own difficult ground, whatever its stamp (D-261026-8)", () => {
+  test("in H3 a hex scene holds no grid-keyed content but its own difficult ground, Reveal room cells and traps without a pit, whatever its stamp (D-261026-8)", () => {
     const rough = hexRoom();
     rough.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, rough: ROUGH, grid: "hexRows" };
     const loaded = parseRoomState(rough);
@@ -67,7 +67,10 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     }
     const drafted = hexRoom();
     drafted.fogDrafts.s1 = { sceneId: "s1", rev: 1, grid: "hexRows", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
-    assert.equal((parseRoomState(drafted) as { message: string }).message, "scenes.s1: Reveal room in its fog draft can't stand on this scene's hexes");
+    const roomFog = parseRoomState(drafted);
+    assert.ok(roomFog.ok, roomFog.ok ? "" : roomFog.message);
+    drafted.fogDrafts.s1 = { ...drafted.fogDrafts.s1, grid: "hexColumns" };
+    assert.equal((parseRoomState(drafted) as { message: string }).message, "scenes.s1: Reveal room in its fog draft on hex columns can't stand on this scene's hex rows");
     // A trap with a pit, which needs heights (H3).
     const trapped = hexRoom();
     trapped.traps.t1 = trap("t1", { grid: "hexRows" });

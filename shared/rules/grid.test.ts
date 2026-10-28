@@ -186,7 +186,7 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
     assert.equal(restoredHolds(state, "token", state.tokens.bree!, squares), null);
   });
 
-  test("the phase check: in H2 a hex scene takes no grid-keyed content but difficult ground, whatever its stamp (D-261026-8)", () => {
+  test("the phase check: in H3 a hex scene takes no grid-keyed content but difficult ground and Reveal room's cells, whatever its stamp (D-261026-8)", () => {
     const state = room();
     const kinds: [Partial<BuildChunk>, string][] = [
       [{ cells: { "1,1": "stone" } }, "ground"],
@@ -204,7 +204,9 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
       }
       assert.equal(restoredHolds(state, "chunk", chunk({ rough: ROUGH, walls: [WALL], grid: shape }), s), null, `difficult ground and free walls on ${shape}`);
       const cells: FogDraft = { sceneId: "s1", rev: 1, grid: shape, ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
-      assert.deepEqual(restoredHolds(state, "fogDraft", cells, s), { held: [{ what: "roomFog", count: 1 }], from: shape });
+      assert.equal(restoredHolds(state, "fogDraft", cells, s), null, `Reveal room's cells of its own stamp on ${shape}`);
+      const other = shape === "hexRows" ? "hexColumns" : "hexRows";
+      assert.deepEqual(restoredHolds(state, "fogDraft", { ...cells, grid: other }, s), { held: [{ what: "roomFog", count: 1 }], from: other }, `stamped ${other} on ${shape}`);
     }
     const both = chunk({ cells: { "1,1": "stone" }, rough: ROUGH, walls: [WALL], grid: "hexRows" });
     assert.equal(heldList(restoredHolds(state, "chunk", both, rows)!.held), "painted ground", "only what the phase leaves out");

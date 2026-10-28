@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 28;
-export const OP_VERSION = 27;
+export const SNAPSHOT_VERSION = 29;
+export const OP_VERSION = 28;
 
 export type MigrationStep = {
   from: number;
@@ -203,6 +203,11 @@ export const snapshotMigrations: MigrationStep[] = [
   // room already has, so a v27 room is a v28 room as it is. The number moves so that an H1 build, which would read a
   // hex scene's walls, difficult ground and traps by squares, refuses a v28 snapshot instead of loading it.
   { from: 27, to: 28, apply: (state) => state },
+  // Hex grids, phase H3 (docs/design-v1-hex-grids.md section 7): a hex scene's fog draft may now hold Reveal room's
+  // shapes of hex keys with the draft's stamp, and later in the phase heights, stairs and pits under hex keys, all in
+  // fields a v28 room already has, so a v28 room is a v29 room as it is. The number moves so that an H2 build, which
+  // would read a hex scene's Reveal room keys as squares, refuses a v29 snapshot instead of loading it.
+  { from: 28, to: 29, apply: (state) => state },
 ];
 
 /**
@@ -782,6 +787,28 @@ export const opMigrations: MigrationStep[] = [
     // version 27 op (runMigrations).
     from: 26,
     to: 27,
+    apply: (op) => op,
+  },
+  {
+    // Hex grids, phase H3 (docs/design-v1-hex-grids.md section 7): on a
+    // hex scene the server now takes Reveal room's fog shapes of hex keys
+    // (`fog.draft` and `fog.live` with a `cells` shape), and later in the
+    // phase heights, stairs and pits under hex keys. Every one of these
+    // fields is one an older op could carry, so no stored op changes shape
+    // and the step is the identity. No op stored before this version met
+    // one of them on a hex scene, since H1 and H2 refused each there
+    // (HX-D20).
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 28, and the shutdown writes version 29 snapshots
+    // (snapshotMigrations). Reload every page left open, table displays
+    // included: there is no client version check, and an old page would
+    // read a hex scene's Reveal room keys by squares. Rollback: restore the
+    // backup taken before the deploy, as for any snapshot version bump. An
+    // older build refuses a version 29 snapshot and a version 28 op
+    // (runMigrations).
+    from: 27,
+    to: 28,
     apply: (op) => op,
   },
 ];
