@@ -46,11 +46,14 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     }
   });
 
-  test("in H1 a hex scene holds no grid-keyed content, whatever its stamp (D-261026-8)", () => {
+  test("in H2 a hex scene holds no grid-keyed content but its own difficult ground, whatever its stamp (D-261026-8)", () => {
+    const rough = hexRoom();
+    rough.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, rough: ROUGH, grid: "hexRows" };
+    const loaded = parseRoomState(rough);
+    assert.ok(loaded.ok, loaded.ok ? "" : loaded.message);
     const kinds: [Partial<BuildChunk>, RegExp][] = [
       [{ cells: { "1,1": "stone" } }, /painted ground/],
       [{ edges: { "1,1,n": { kind: "wall" } } }, /walls and doors/],
-      [{ rough: ROUGH }, /difficult ground/],
       [{ heights: "A".repeat(683) + "=" }, /heights/],
       [{ up: ".".repeat(256) }, /stairs/],
     ];
@@ -78,6 +81,13 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
   });
 
+  test("in H2 an import with free walls on a hex scene loads: they are in world units", () => {
+    const walled = hexRoom();
+    walled.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, walls: [{ id: "w00000000001", a: [1, 1], b: [3, 1], f: { kind: "wall" } }] };
+    const parsed = parseRoomState(walled);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
   test("an import with square cell data on a hex scene is refused, naming it", () => {
     const s = hexRoom();
     s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, rough: ROUGH };
@@ -92,13 +102,10 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     assert.equal(parseRoomState(s).ok, false);
   });
 
-  test("an import with what H1 leaves off hexes is refused: a trap, a free wall, a rider", () => {
+  test("an import with what H1 leaves off hexes is refused: a trap, a rider", () => {
     const withTrap = hexRoom();
     withTrap.traps.t1 = trap("t1", { grid: "hexRows" });
     assert.match((parseRoomState(withTrap) as { message: string }).message, /a trap/);
-    const walled = hexRoom();
-    walled.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, walls: [{ id: "w00000000001", a: [1, 1], b: [3, 1], f: { kind: "wall" } }] };
-    assert.match((parseRoomState(walled) as { message: string }).message, /walls and doors/);
     const ridden = hexRoom();
     ridden.tokens = { horse: token("horse", { size: "large" }), bree: token("bree", { attached: { to: "horse", kind: "ride" } }) };
     assert.match((parseRoomState(ridden) as { message: string }).message, /attached creature/);
