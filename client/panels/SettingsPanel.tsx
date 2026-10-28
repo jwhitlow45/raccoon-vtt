@@ -204,7 +204,8 @@ function SavedSetting(props: {
               aria-labelledby={ids.nameId}
               aria-describedby={[ids.helpId, props.error ? errorId : undefined].filter(Boolean).join(" ") || undefined}
               error={props.error !== null}
-              style={props.wide ? { flex: 1, minWidth: 0 } : { width: NUMBER_FIELD_WIDTH, textAlign: "right" }}
+              // A wide field has no width of its own, only its share of the row: a text field's own width, about 20 characters, set the row's least width and pushed Room settings sideways on a 320 px phone at 130%.
+              style={props.wide ? { flex: 1, minWidth: 0, width: 0 } : { width: NUMBER_FIELD_WIDTH, textAlign: "right" }}
             />
             <Button type="submit" size="sm" disabled={!props.dirty}>
               Save
