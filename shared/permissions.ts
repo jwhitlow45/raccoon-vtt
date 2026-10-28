@@ -23,6 +23,7 @@ import {
   WALL_IN_THE_WAY,
   hexLegSpots,
   hexStandAt,
+  hexStartStand,
   hexStandHexes,
   hexStandPlace,
   landing,
@@ -2309,16 +2310,17 @@ export const TELEPORT_OFF_MAP = "a teleport lands inside the map";
  * a secret door not yet found as a wall, so the server and a phone dragging
  * the token always agree.
  */
-function legCheck(c: Check, tokenId: string, to: Pick<Token, "x" | "y"> & { elevation?: number }, teleport: boolean): Decision {
+function legCheck(c: Check, tokenId: string, to: StoredEnd, teleport: boolean): Decision {
   const token = c.state.tokens[tokenId];
   const scene = token ? c.state.scenes[token.sceneId] : undefined;
   if (!token || !scene) return OK;
-  const end: LegEnd = { x: to.x, y: to.y, elevation: to.elevation ?? token.elevation };
+  const end = legEndOf(scene, to, token.elevation);
   if (teleport) return insideScene(scene, token, end) ? OK : refuse("forbidden", TELEPORT_OFF_MAP);
-  // A token rising or sinking where it stands crosses no edge.
-  if (scene.blockMovement !== true || (end.x === token.x && end.y === token.y)) return OK;
+  if (scene.blockMovement !== true) return OK;
   // Off a holder on the ground it walks on the ground, crossing only the holder's inner ledges, as its route and the drag's own check do (rules/attach.ts walkerFor).
   const walker = walkerFor(c.state, token, seenAllIn(c));
+  // A token rising or sinking where it stands crosses no edge.
+  if (end.x === token.x && end.y === token.y && !squeezeChangesInPlace(scene, walker, end)) return OK;
   const blocker = movementRules.legBlocker(c.state, walker, end);
   if (blocker === null) return OK;
   return refuse("forbidden", walkWords(c, walker, end, blocker));
@@ -2334,7 +2336,7 @@ function legCheck(c: Check, tokenId: string, to: Pick<Token, "x" | "y"> & { elev
  * the redo puts the token, the last stretch is a straight leg, as a redo
  * of plain moves is.
  */
-function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RoutePiece[])[], to: Pick<Token, "x" | "y"> & { elevation?: number }): Decision {
+function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RoutePiece[])[], to: StoredEnd): Decision {
   const token = c.state.tokens[tokenId];
   const scene = token ? c.state.scenes[token.sceneId] : undefined;
   if (!token || !scene || scene.blockMovement !== true) return OK;
@@ -2352,10 +2354,37 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
     // The next route goes on from its end as the walk left it (movement.ts walkOn): off the holder for good once any stop was clear of it, squeezed no more.
     at = walkers[walkers.length - 1]!;
   }
-  if (at.x === to.x && at.y === to.y) return OK;
-  const end = { x: to.x, y: to.y, elevation: to.elevation ?? at.elevation };
+  const end = legEndOf(scene, to, at.elevation);
+  if (at.x === to.x && at.y === to.y && !squeezeChangesInPlace(scene, at, end)) return OK;
   const blocker = movementRules.legBlocker(c.state, at, end);
   return blocker === null ? OK : refuse("forbidden", walkWords(c, at, end, blocker));
+}
+
+/** Where a move, an attach or a restore puts a token, with the squeeze it stores there (absent for none). */
+type StoredEnd = Pick<Token, "x" | "y"> & { elevation?: number; squeeze?: boolean };
+
+/**
+ * A leg's end as the token is stored there. On hexes it carries the stored
+ * squeeze (LegEnd), so the leg's end stands on the hexes the token will
+ * take: a group's mover, a seat, a getting off and a restore without the
+ * flag stand full size wherever they lie (review H2-OPUS-05). On squares
+ * the core decides where a creature stands, so the end is as before.
+ */
+function legEndOf(scene: Scene, to: StoredEnd, elevation: number): LegEnd {
+  const end: LegEnd = { x: to.x, y: to.y, elevation: to.elevation ?? elevation };
+  if (isHex(sceneGrid(scene))) end.squeeze = to.squeeze === true;
+  return end;
+}
+
+/**
+ * Whether a move to the walker's own spot takes or leaves a squeeze there
+ * on hexes, which changes the hexes it stands on, so the leg is judged:
+ * standing up where the full footprint does not fit is stopped. On squares
+ * a squeeze never changes the core the move rules read.
+ */
+function squeezeChangesInPlace(scene: Scene, walker: Walker, end: LegEnd): boolean {
+  const g = sceneGrid(scene);
+  return isHex(g) && hexStartStand(g, walker).squeezed !== hexStandAt(g, walker, end, end.squeeze === true).squeezed;
 }
 
 /** The refusal of a walk on hexes whose end is not the stand its squeeze names (`hexStopAgrees`). */
@@ -2364,11 +2393,11 @@ export const HEX_STOP_OFF = "a walk on hexes ends on its own hexes, or squeezed 
 /**
  * A player's walk on a hex scene that stops moves ends where its squeeze
  * says it stands: on an anchor of the creature's size without `squeeze`,
- * of the size one smaller with it. The walk's legs read their stops by
- * where they stand (movement.ts HexStand), so a walk that ended on a
- * squeeze's anchor unsqueezed would be judged squeezed and then stored
- * full size across the walls that made it squeeze. A rise in place moves
- * nothing, and a teleport walks no leg.
+ * of the size one smaller with it. A route's stops read their squeeze by
+ * where they stand (movement.ts HexStand), so this keeps a walk's op in
+ * the shape its route and the drag that sent it have. The walls themselves
+ * are met by the stored squeeze (`legEndOf`), a squeeze taken or left in
+ * place included. A teleport walks no leg.
  */
 function hexStopAgrees(c: Check, op: OpOf<"token.move">): Decision {
   const token = c.state.tokens[op.tokenId];

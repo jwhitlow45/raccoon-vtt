@@ -1511,13 +1511,13 @@ export function hexLegStand(leg: HexLeg, k: number): HexStand {
   return { size: leg.walk, ref: leg.line[k]!, squeezed: leg.squeezed };
 }
 
-/** The hex leg of a walker from where it stands to `to`. */
-function walkerHexLeg(g: HexGrid, token: MovingToken, to: Point): HexLeg {
-  return hexLegOf(g, hexStartStand(g, token), hexEndStand(g, token, to));
+/** The hex leg of a walker from where it stands to `to`, which stands squeezed as its `squeeze` says, or where it lies when that is not given (LegEnd). */
+function walkerHexLeg(g: HexGrid, token: MovingToken, to: Point & { squeeze?: boolean }): HexLeg {
+  return hexLegOf(g, hexStartStand(g, token), to.squeeze === undefined ? hexEndStand(g, token, to) : hexStandAt(g, token, to, to.squeeze));
 }
 
 /** `legStop` on hexes. */
-function hexLegStopOf(t: HexWalls, token: MovingToken, to: Point): LegStop | null {
+function hexLegStopOf(t: HexWalls, token: MovingToken, to: Point & { squeeze?: boolean }): LegStop | null {
   const stop = hexLegStop(t, walkerHexLeg(t.g, token, to));
   return stop ? stopBy(t.walls, { k: stop.k }) : null;
 }
@@ -1589,7 +1589,7 @@ export function hexLegSpots(g: HexGrid, token: MovingToken, to: Point): { at: Po
 }
 
 /** `legStopPart` on hexes: the wall that stopped the leg, clipped to the box of the stand where the stopped step starts, a hair past. */
-function hexLegStopPart(t: HexWalls, token: MovingToken, to: Point): { stop: LegStop; part: Part | null } | null {
+function hexLegStopPart(t: HexWalls, token: MovingToken, to: Point & { squeeze?: boolean }): { stop: LegStop; part: Part | null } | null {
   const leg = walkerHexLeg(t.g, token, to);
   const met = hexLegStop(t, leg);
   if (!met) return null;

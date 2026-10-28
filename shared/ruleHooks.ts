@@ -22,8 +22,13 @@ import { sceneWalls } from "./rules/walls.ts";
  * objects and putting the originals back when done.
  */
 
-/** Where a leg ends: the spot a move gives the token, its elevation included. */
-export type LegEnd = { x: number; y: number; elevation: number };
+/**
+ * Where a leg ends: the spot a move gives the token, its elevation included.
+ * On hexes `squeeze` is the squeeze the move stores there, so the leg's end
+ * stands as the token will. Without it the end stands squeezed where it lies
+ * on a squeeze's anchors, as a route's stops do.
+ */
+export type LegEnd = { x: number; y: number; elevation: number; squeeze?: boolean };
 
 /** What stops a leg: a wall (doors, windows and pillars included) or a ledge between two heights. */
 export type Blocker = "wall" | "ledge";

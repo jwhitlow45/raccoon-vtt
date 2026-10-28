@@ -554,7 +554,8 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
     const from = { x: token.x, y: token.y, elevation: token.elevation };
     // Its leg and what it drags beside it, walked as the server walks them (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
     const walking = walkerOf(state, token);
-    const end = { x: to.x, y: to.y, elevation };
+    // A group move stores no squeeze, so on hexes its leg ends full size wherever it lies (LegEnd), as the server judges it.
+    const end = { x: to.x, y: to.y, elevation, ...(isHex(g) ? { squeeze: false } : {}) };
     const own = mode === "walk" ? legStop(state, walking, end) : null;
     const stopped = own ? heardStop(state, walking, end, own) : mode === "walk" ? followersOf(state, walking, [from, end], walkersOf(token)).stop(1, end) : null;
     if (stopped) held.push({ token, blocker: stopped.blocker });
