@@ -465,7 +465,7 @@ The builders fill this in, lane by lane, with every place the build went its own
 - The copy sends nothing to a scene that already has the settings and counts it copied. Its ops do not name their source, so the undo step is named from the scenes that had the copied settings before it and are none of its targets: "using Crypt's vision settings on 3 scenes" when that is one scene, "copying vision settings to 3 scenes" when it could be several. Players see's own change is named "setting Players see on the scene Crypt to Explore". The sheet's footer buttons share their line (polish R6).
 - The rules sit in playersSeeRules.ts and copyRules.ts beside PlayersSee.tsx and CopySettings.tsx, so no two files differ only by case. Which choice a scene is on and the choices' names sit in shared/playersSee.ts, which the server's undo names read too.
 - A full copy clears the sheet's ticks, and focus on Copy moves to Close.
-- A scene on Everything that gets its first map image still turns fog on, so it moves to Reveal by hand (D-261026-35).
+- A scene on Everything with nothing built that gets its first map image still turns fog on, so it moves to Reveal by hand (D-261026-35, `fogsWithFirstMap`). A scene with a build keeps its setting, and on the players' scene the DM can untick "Start it under fog, so they see only what you reveal" to keep Everything (MS1-ASTRA-03).
 
 **MS2, the settings page.**
 - The four groups are `Section` folds (components/Panel.tsx) whose content stays mounted and hidden while folded (`fold.keep`), so an upload in Map image and grid, or counts typed and not applied, lasts through a fold. 8.4 does not say, and the token panel's folds unmount.

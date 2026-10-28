@@ -391,7 +391,7 @@ Normally the party shares its sight: every player sees everything any of the par
 
 **A map image with no walls.** Party vision looks through walls the map doesn't have, so on a plain map image Explore would show players the whole picture the moment a character looks around. When you choose Explore on a map image with nothing yet that blocks sight, the settings warn you: "This map has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand." When you move the players to a scene with party vision, the app reminds you of the same thing if that scene is a map image, since it can't check another scene's walls from where you are.
 
-**A first map image.** When a scene on Everything gets its first map image, it moves to Reveal by hand, so players see only what you reveal of the new picture.
+**A first map image.** When a scene on Everything with nothing built on it yet gets its first map image, it moves to Reveal by hand, so players see only what you reveal of the new picture. A scene you have already built on keeps its setting. On the scene the players are on, you choose as you pick the image: untick **Start it under fog, so they see only what you reveal** to keep it on Everything.
 
 Darkvision, Blindsight and Truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
 
