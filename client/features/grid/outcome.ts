@@ -172,8 +172,9 @@ function otherShape(input: Parameters<typeof showOutcome>[0] & { found: FoundGri
     input.store.setState({ found: note, box });
     return note;
   }
-  // The scene keeps its shape, so the box stays one of its cells, or one is placed for the line to stand by.
-  const own = input.store.getState().box ?? boxAround(scene.map, input.at, grid);
+  // The scene keeps its shape, so the box stays the one the tool holds for it, or one of its cells is placed for the line to stand by.
+  const held = input.store.getState();
+  const own = held.sceneId === scene.id && held.box ? held.box : boxAround(scene.map, input.at, grid);
   const note: FoundNote = {
     sceneId: scene.id,
     outcome: "offered",

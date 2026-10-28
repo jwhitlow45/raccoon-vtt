@@ -1078,6 +1078,16 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
     assert.equal(lineOf(live), "These lines may be the map's hexes: 60.2 px. Check the box, then Apply.");
   });
 
+  test("an import's doubtful find of another shape places the box on the new scene, never the last scene's box", () => {
+    const live = liveRoom();
+    const elsewhere = { x: 5000, y: 5000, size: 300 };
+    live.store.setState({ sceneId: "s0", box: elsewhere });
+    showOutcome({ actions: live.actions, store: live.store, scene: live.scene(), found: { tier: "medium", cal: HEX_CAL, shape: "hexRows" }, fit: true, at: { x: 700, y: 500 }, fallback: { cellPx: 47, originPx: { x: 0, y: 0 } } });
+    assert.deepEqual(live.sent, []);
+    assert.deepEqual(live.store.getState().box, boxAround(MAP, { x: 700, y: 500 }), "a box of the new scene's squares at the map's middle");
+    assert.equal(live.store.getState().found?.box, live.store.getState().box, "which the line stands by");
+  });
+
   test("a hex find whose lean could not be measured, held to medium, is only offered on its own shape too", async () => {
     const live = liveRoom();
     live.elsewhere({ ...SCENE, gridShape: "hexRows" });
