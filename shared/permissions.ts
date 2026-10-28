@@ -18,7 +18,26 @@ import { groundAt } from "./rules/heights.ts";
 import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
 import { convexLive, fogClassOf, groundOf, partLive, type Ground } from "./rules/held.ts";
-import { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY, landing, lastClearSpot, legSpots, legStop, legStopPart, ownWalk, straightClear, walkEnd, walkFrom, walkOn, type Walker } from "./rules/movement.ts";
+import {
+  LEDGE_IN_THE_WAY,
+  WALL_IN_THE_WAY,
+  hexLegSpots,
+  hexStandAt,
+  hexStandHexes,
+  hexStandPlace,
+  landing,
+  lastClearSpot,
+  legSpots,
+  legStop,
+  legStopPart,
+  onSqueezedLattice,
+  ownWalk,
+  straightClear,
+  walkEnd,
+  walkFrom,
+  walkOn,
+  type Walker,
+} from "./rules/movement.ts";
 import { legSteps, onRouteLattice, routeLattice, routePoints, routeStop, routeWalkers, type RoutePiece } from "./rules/route.ts";
 import { NO_ROOM_TO_GROW, OWNER_SIZES, resizeCandidates, resizeRefusal } from "./rules/resize.ts";
 import { turnMovedOn } from "./rules/initiative.ts";
@@ -225,20 +244,18 @@ export const ON_HEXES = {
   edges: "On hexes walls are wall lines.",
   traps: "Traps need squares.",
   attach: "Riding and carrying need squares.",
-  walk: "Walking needs squares.",
-  squeeze: "Squeezing needs squares.",
   roomFog: "Reveal room needs a room built on squares.",
 } as const;
 
 /**
  * The server refuses on a hex scene every op whose rules are not hex yet
  * (HX-D20): every build op that paints ground, heights or stairs, or puts
- * walls on grid lines, every trap made or changed, an attach, a move with
- * a route or a squeeze (only `token.move` carries either), a token sent
+ * walls on grid lines, every trap made or changed, an attach, a token sent
  * onto it with a link, and Reveal room's fog shapes. No such op was ever
  * stored, so lifting a refusal in a later phase changes no replay. Lights,
  * stamps, labels and Clear build stay, and so does every other fog shape.
- * From H2 so do free walls, Erase and difficult ground. A restore keeps the same line in
+ * From H2 so do free walls, Erase and difficult ground, and routes and
+ * squeezes, whose stops on hexes are anchors (`onHexStop`). A restore keeps the same line in
  * the reducer (shared/reducer/misc.ts), since two DMs can race a switch.
  */
 function hexPhaseFits(op: Op, c: Check): Decision {
@@ -271,11 +288,6 @@ function hexPhaseFits(op: Op, c: Check): Decision {
       return hex(c.state.traps[op.trapId]?.sceneId) ? no(ON_HEXES.traps) : OK;
     case "token.attach":
       return hex(c.state.tokens[op.tokenId]?.sceneId) || hex(c.state.tokens[op.to]?.sceneId) ? no(ON_HEXES.attach) : OK;
-    case "token.move": {
-      if (!hex(c.state.tokens[op.tokenId]?.sceneId)) return OK;
-      if (op.route !== undefined) return no(ON_HEXES.walk);
-      return op.squeeze === true ? no(ON_HEXES.squeeze) : OK;
-    }
     case "token.update": {
       const token = c.state.tokens[op.tokenId];
       const to = op.patch.sceneId;
@@ -462,6 +474,8 @@ function stampFits(op: Op, c: Check): Decision {
 /** The refusals of a route whose shape no walk has (docs/design-v1-movement.md 7.1), whoever sends it. */
 export const ROUTE_OFF_LATTICE = "a route steps by half squares from where the token stands, inside the scene";
 export const ROUTE_TOO_LONG = `a route reaches at most ${MAX_ROUTE_REACH} squares`;
+/** On a hex scene a route's stops are anchors (docs/design-v1-hex-grids.md 4.2, HX-D17). */
+export const ROUTE_OFF_HEXES = "a route steps from hex to hex, each stop on its own hexes or a squeeze's, inside the scene";
 
 /**
  * A move's route, for every role (7.1): each point on the half-square
@@ -479,15 +493,32 @@ function routeFits(op: Op, c: Check): Decision {
   const scene = token ? c.state.scenes[token.sceneId] : undefined;
   if (!token || !scene) return OK;
   const fp = footprintSize(token);
+  const grid = sceneGrid(scene);
   let prev: Point = { x: token.x, y: token.y };
   for (const [x, y] of op.route) {
-    const inside = x >= 0 && y >= 0 && x + fp.w <= scene.bounds.w + 1e-9 && y + fp.h <= scene.bounds.h + 1e-9;
-    if (!onRouteLattice(token, { x, y }) || !inside || (x === prev.x && y === prev.y)) return refuse("invalid", ROUTE_OFF_LATTICE);
+    if (isHex(grid)) {
+      if (!onHexStop(grid, scene, token, { x, y }) || (x === prev.x && y === prev.y)) return refuse("invalid", ROUTE_OFF_HEXES);
+    } else {
+      const inside = x >= 0 && y >= 0 && x + fp.w <= scene.bounds.w + 1e-9 && y + fp.h <= scene.bounds.h + 1e-9;
+      if (!onRouteLattice(token, { x, y }) || !inside || (x === prev.x && y === prev.y)) return refuse("invalid", ROUTE_OFF_LATTICE);
+    }
     prev = { x, y };
   }
   const seen = seenAllIn(c);
   const trace = routeWalkers(c.state.buildChunks, walkerFor(c.state, token, seen, { to: op }), op.route, op.elevation ?? token.elevation);
   return checkSetReach(c.state, token, trace, seen, c.state.meta.settings.feetPerCell, c.actor.role) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
+}
+
+/**
+ * Whether a stop of a route on hexes stands on an anchor: the box's middle
+ * on its size's anchor or, for a creature that squeezes, the smaller
+ * size's, a hair of rounding allowed, with every hex it takes inside the
+ * scene. So a piece's stand is never in doubt (movement.ts HexStand).
+ */
+function onHexStop(g: HexGrid, scene: Scene, token: Token, at: Point): boolean {
+  const stand = hexStandAt(g, token, at, onSqueezedLattice(g, token, at));
+  const placed = hexStandPlace(g, token, stand);
+  return Math.abs(placed.x - at.x) < 1e-6 && Math.abs(placed.y - at.y) < 1e-6 && hexStandHexes(g, stand).every((h) => hexInScene(g, scene.bounds, h));
 }
 
 /** The refusal of a player's op that names an effect's save or its occurrence (docs/design-v1-roll-options.md 6.1). */
@@ -842,6 +873,8 @@ function forPlayer(op: Op, c: Check): Decision {
       if (!d.ok) return d;
       const own = !op.route ? legCheck(c, op.tokenId, op, op.teleport !== undefined) : routeFits(op, c);
       if (!own.ok) return own;
+      const stops = hexStopAgrees(c, op);
+      if (!stops.ok) return stops;
       // A route of no walk's shape is refused as such before its pieces meet the walls.
       const walked = op.route ? routeCheck(c, op.tokenId, [op.route], op) : OK;
       return walked.ok ? draggedWalls(c, op) : walked;
@@ -2139,16 +2172,20 @@ function moveLanding(c: Check, op: OpOf<"token.move">, takes: (o: Op) => boolean
     }
   }
   // Cut back along the whole walk to the last spot the check takes, by gallop and bisection as `landing` steps a leg.
-  const spots: { piece: number; at: Point; from: Walker }[] = [{ piece: 0, at: { x: token.x, y: token.y }, from: walker }];
+  const spots: { piece: number; at: Point; from: Walker; squeeze?: boolean }[] = [{ piece: 0, at: { x: token.x, y: token.y }, from: walker }];
+  const hexGrid = sceneGrid(c.state.scenes[token.sceneId]!);
   for (const [i, piece] of pieces.entries()) {
-    if (op.route) {
+    if (isHex(hexGrid)) {
+      // On hexes each spot is a stand of the leg's hex line, squeezed where the leg walks squeezed (movement.ts hexLegSpots).
+      for (const spot of hexLegSpots(hexGrid, piece.from, piece.to).slice(1)) spots.push({ piece: i, at: spot.at, from: piece.from, squeeze: spot.squeeze });
+    } else if (op.route) {
       const steps = legSteps(piece.from, piece.to, routeLattice(token));
       for (let k = 1; k <= steps.n; k++) spots.push({ piece: i, at: steps.at(k), from: piece.from });
     } else for (const at of legSpots(piece.from, piece.to).slice(1)) spots.push({ piece: i, at, from: piece.from });
   }
   const candidate = (k: number): OpOf<"token.move"> => {
     const s = spots[k]!;
-    return cutMove(op, token, s.at, s.piece, cutHeight(c, s.from, s.at), false);
+    return cutMove(op, token, s.at, s.piece, cutHeight(c, s.from, s.at), s.squeeze === true);
   };
   const last = lastTaken(spots.length - 1, (k) => takes(candidate(k)));
   return last === null ? null : { op: candidate(last), words: SOMETHING_BLOCKS };
@@ -2327,6 +2364,28 @@ function routeCheck(c: Check, tokenId: string, routes: readonly (readonly RouteP
   const end = { x: to.x, y: to.y, elevation: to.elevation ?? at.elevation };
   const blocker = movementRules.legBlocker(c.state, at, end);
   return blocker === null ? OK : refuse("forbidden", walkWords(c, at, end, blocker));
+}
+
+/** The refusal of a walk on hexes whose end is not the stand its squeeze names (`hexStopAgrees`). */
+export const HEX_STOP_OFF = "a walk on hexes ends on its own hexes, or squeezed on a squeeze's";
+
+/**
+ * A player's walk on a hex scene that stops moves ends where its squeeze
+ * says it stands: on an anchor of the creature's size without `squeeze`,
+ * of the size one smaller with it. The walk's legs read their stops by
+ * where they stand (movement.ts HexStand), so a walk that ended on a
+ * squeeze's anchor unsqueezed would be judged squeezed and then stored
+ * full size across the walls that made it squeeze. A rise in place moves
+ * nothing, and a teleport walks no leg.
+ */
+function hexStopAgrees(c: Check, op: OpOf<"token.move">): Decision {
+  const token = c.state.tokens[op.tokenId];
+  const scene = token ? c.state.scenes[token.sceneId] : undefined;
+  if (!token || !scene || scene.blockMovement !== true || op.teleport !== undefined) return OK;
+  const g = sceneGrid(scene);
+  if (!isHex(g) || (op.x === token.x && op.y === token.y)) return OK;
+  const placed = hexStandPlace(g, token, hexStandAt(g, token, op, op.squeeze === true));
+  return Math.abs(placed.x - op.x) < 1e-6 && Math.abs(placed.y - op.y) < 1e-6 ? OK : refuse("invalid", HEX_STOP_OFF);
 }
 
 /** Whether a footprint at `at` lies inside the scene: its box on squares, and on hexes every hex it stands on (docs/design-v1-hex-grids.md 4.2). */

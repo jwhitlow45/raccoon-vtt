@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Scene } from "./model.ts";
-import { ON_HEXES, canApply, companionWords, reachesDoor, withinCompanionReach, type PermissionDeps } from "./permissions.ts";
+import { NOT_A_SQUEEZE, ON_HEXES, canApply, companionWords, reachesDoor, withinCompanionReach, type PermissionDeps } from "./permissions.ts";
 import { opSchema, type Op, type TokenInput } from "./protocol.ts";
 import { SQUARES, type Grid } from "./rules/grid.ts";
 import { hexCenter, type Hex, type HexGrid } from "./rules/hex.ts";
@@ -86,22 +86,23 @@ describe("H1's refusals on a hex scene", () => {
     assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { name: "Spikes" } }, held), `invalid: ${ON_HEXES.traps}`);
   });
 
-  test("an attach, and a move with a route or a squeeze, while a plain move goes", () => {
+  test("an attach, while a plain move, a route and a squeeze go by H2's rules (HX-5)", () => {
     const state = hexRoom();
     state.tokens = { horse: token("horse", { size: "large", ...onHex({ col: 4, row: 4 }, 2) }), bree: token("bree", { kind: "pc", ...onHex({ col: 8, row: 4 }) }) };
     assert.equal(decide({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", ...onHex({ col: 4, row: 4 }), elevation: 0 }, state), `invalid: ${ON_HEXES.attach}`);
     const to = onHex({ col: 10, row: 4 });
-    assert.equal(decide({ t: "token.move", tokenId: "bree", ...to, route: [[to.x, to.y, 0, 0]] }, state), `invalid: ${ON_HEXES.walk}`);
-    assert.equal(decide({ t: "token.move", tokenId: "horse", ...onHex({ col: 6, row: 6 }, 2), squeeze: true }, state), `invalid: ${ON_HEXES.squeeze}`);
+    assert.equal(decide({ t: "token.move", tokenId: "bree", ...to, route: [[to.x, to.y, 0, 0]] }, state), "ok");
+    // Squeezing is judged by the narrow space test on hexes (HX-D17): open ground is none.
+    assert.equal(decide({ t: "token.move", tokenId: "horse", ...onHex({ col: 6, row: 6 }, 2), squeeze: true }, state), `invalid: ${NOT_A_SQUEEZE}`);
     assert.equal(decide({ t: "token.move", tokenId: "bree", ...to }, state), "ok");
   });
 
-  test("a player's own walk on hexes hears the same words", () => {
+  test("a player's own route on hexes goes from H2 (HX-5)", () => {
     const state = hexRoom();
     state.characters.bree = character("bree", { ownerIds: ["p1"] });
     state.tokens.bt = token("bt", { kind: "pc", actor: { ref: "bree" }, ownerIds: ["p1"], ...onHex({ col: 3, row: 3 }) });
     const to = onHex({ col: 4, row: 3 });
-    assert.equal(decide({ t: "token.move", tokenId: "bt", ...to, route: [[to.x, to.y, 0, 0]] }, state, P1), `invalid: ${ON_HEXES.walk}`);
+    assert.equal(decide({ t: "token.move", tokenId: "bt", ...to, route: [[to.x, to.y, 0, 0]] }, state, P1), "ok");
   });
 
   test("a holder with a rider, or the rider, sent onto a hex scene, while a token alone goes", () => {

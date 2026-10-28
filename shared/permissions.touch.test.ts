@@ -19,7 +19,7 @@ import type { Op, OpOf } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules } from "./ruleHooks.ts";
 import { sceneGrid } from "./rules/grid.ts";
-import { hexAt, hexKey, type HexGrid } from "./rules/hex.ts";
+import { hexAt, hexCenter, hexKey, type HexGrid } from "./rules/hex.ts";
 import { NO_ROOM_TO_GROW } from "./rules/resize.ts";
 import { DM, P1, actor, character, env, member, room, token } from "./testutil.ts";
 
@@ -239,12 +239,26 @@ describe("the touch rule on hexes (MD2-ASTRA-1, MD2-LK-3)", () => {
     };
 
     test(`${gridShape}: a walk past an unseen wall lands at its last clear spot in the generic words, today's on revealed ground`, () => {
+      // From H2 the last clear spot is the hex line's last hex before the wall (docs/design-v1-hex-grids.md HX-D8).
+      const lastHex = (s: RoomState, op: Op | undefined) => {
+        assert.ok(op && op.t === "token.move");
+        const grid = sceneGrid(s.scenes.s1!) as HexGrid;
+        const mid = { x: op.x + 0.5, y: op.y + 0.5 };
+        const c = hexCenter(grid, hexAt(grid, mid));
+        assert.ok(Math.abs(c.x - mid.x) < 1e-9 && Math.abs(c.y - mid.y) < 1e-9, "on a hex's center");
+        assert.ok(mid.x < 8 && 8 - mid.x <= 1 + 1e-9, "the last hex before the wall");
+        assert.equal(decide(op, s), "ok");
+      };
       const dark = hexRoom("none");
       assert.equal(decide(east, dark), SOMETHING_BLOCKS);
-      assert.deepEqual(touchLanding(east, P1, dark, deps), { op: { t: "token.move", tokenId: "thorn", x: 7, y: 5 }, words: SOMETHING_BLOCKS });
+      const inDark = touchLanding(east, P1, dark, deps);
+      assert.equal(inDark?.words, SOMETHING_BLOCKS);
+      lastHex(dark, inDark?.op);
       const lit = hexRoom("all");
       assert.equal(decide(east, lit), WALL_IN_THE_WAY);
-      assert.deepEqual(touchLanding(east, P1, lit, deps), { op: { t: "token.move", tokenId: "thorn", x: 7, y: 5 }, words: WALL_IN_THE_WAY });
+      const inLight = touchLanding(east, P1, lit, deps);
+      assert.equal(inLight?.words, WALL_IN_THE_WAY);
+      lastHex(lit, inLight?.op);
     });
 
     test(`${gridShape}: the stopping step crosses one unheld hex, every square cell round it partly revealed: no kind named where the wall it meets stands in that hex, its kind where it stands in a live one (D-261027-04)`, () => {
