@@ -7,8 +7,8 @@ import { crossWide, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, wi
 import { panelById } from "../panels.ts";
 
 /**
- * "View as a player" (features section 13): the DM sees exactly what one
- * player sees, with fog and without hidden things.
+ * "View as a player" (features section 13): the DM sees what one player
+ * can see, with fog, and nothing that player may not see.
  *
  * The server projects it (docs/design-v1-per-player-vision.md 7.4): a
  * preview socket asks for the room as that player (state/socket.ts

@@ -42,11 +42,12 @@ export function ViewAsHost() {
  * that player's own projection, which a socket of its own asks the server
  * for (docs/design-v1-per-player-vision.md 7.4, preview.ts), with every
  * action refused. It is the real page, top bar, toolbar and panels
- * included, so the DM sees exactly what that player sees, fog and all, on
- * any scene, while the DM's own socket and tools stay as they are. Until
- * the player's snapshot lands it says it is loading, after the shared
- * delay, and after 10 s, or a socket that closed first, that it could not
- * load, with Exit as the way out.
+ * included, so the DM sees what that player can see on any scene, fog
+ * and all, and nothing more. It keeps its own framing, so it is not a
+ * mirror of the player's screen. The DM's own socket and tools stay as
+ * they are. Until the player's snapshot lands it says it is loading,
+ * after the shared delay, and after 10 s, or a socket that closed first,
+ * that it could not load, with Exit as the way out.
  *
  * The page always fills the viewport, so the banner floats over the map
  * just under the top bar, and a cream frame marks the whole screen as a
