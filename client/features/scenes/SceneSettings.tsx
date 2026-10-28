@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { AutoWalls, Scene } from "#shared/model.ts";
 import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
-import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { gridOfShape, isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
@@ -24,7 +24,7 @@ import { showOutcome } from "../grid/outcome.ts";
 import { shapeChanged, useGridStore } from "../grid/store.ts";
 import { useFindGrid, useLandLater } from "../grid/useFindGrid.ts";
 import { shapeRefusal, ShapeRow } from "../grid/ShapeRow.tsx";
-import { HEX_LIMITS, SHAPE_HELP, sceneCellWord, shapeChoice, sizeWords, type ShapeChoice } from "../grid/words.ts";
+import { HEX_LIMITS, SHAPE_HELP, sceneCellWord, shapeChoice, sizeWords, storedShape, type ShapeChoice } from "../grid/words.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { MapExport } from "../mapexport/MapExport.tsx";
 import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
@@ -291,7 +291,7 @@ function GridShape(props: { scene: Scene; close: PanelClose }) {
       onChange={(gridShape) => {
         if (refused[gridShape] !== undefined) return;
         // A square grid searched for or found stands for nothing on hexes, nor a hex box on squares.
-        shapeChanged(gridStore, scene.id);
+        shapeChanged(gridStore, scene.id, scene.map ? { map: scene.map, from: sceneGrid(scene), to: gridOfShape(storedShape(gridShape)) } : undefined);
         actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { gridShape } });
         if (scene.map) {
           ui.setTool("grid");

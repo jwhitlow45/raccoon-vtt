@@ -1,7 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { isHex, type Grid } from "#shared/rules/grid.ts";
-import { calibrationFromBox, type CalBox, type Calibration, type Corner, type Point } from "./calibrate.ts";
+import { boxAt, boxSides, calibrationFromBox, canonicalToWorld, type CalBox, type Calibration, type Corner, type Point } from "./calibrate.ts";
 
 /**
  * The alignment box while the grid tool is active. It lives outside the
@@ -90,13 +90,21 @@ export function endFinding(store: StoreApi<GridToolState>, sceneId: string): voi
 
 /**
  * The scene's Grid shape changed on this device: a search still running
- * for it ends, and its note and the tool's box go, since both measured the
- * cells of the shape before. The tool opens on a box over the new cells.
+ * for it ends, and its note goes, since it measured the cells of the shape
+ * before. The tool's box moves to the new cells at the same spot. Line up
+ * grid already open is not opened again (Stage runs `activate` only on a
+ * change of tool, scene or role), so with no box it would lose Apply,
+ * Nudge and Find until the DM drew one.
  */
-export function shapeChanged(store: StoreApi<GridToolState>, sceneId: string): void {
+export function shapeChanged(store: StoreApi<GridToolState>, sceneId: string, shape?: { map: Calibration; from: Grid; to: Grid }): void {
   endFinding(store, sceneId);
-  const { found, sceneId: open } = store.getState();
-  store.setState({ ...(found?.sceneId === sceneId ? { found: null } : {}), ...(open === sceneId ? { box: null, drag: null } : {}) });
+  const { found, box, sceneId: open } = store.getState();
+  let next: CalBox | null = null;
+  if (box && shape) {
+    const { w, h } = boxSides(box, shape.from);
+    next = boxAt(shape.map, shape.to, canonicalToWorld(shape.map, { x: box.x + w / 2, y: box.y + h / 2 }));
+  }
+  store.setState({ ...(found?.sceneId === sceneId ? { found: null } : {}), ...(open === sceneId ? { box: next, drag: null } : {}) });
 }
 
 /** How close, in screen pixels, a finger must land to grab a corner: half a 44 px target. */

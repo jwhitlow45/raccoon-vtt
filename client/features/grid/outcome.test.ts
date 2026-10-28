@@ -7,8 +7,8 @@ import { apply, room as roomState } from "#shared/testutil.ts";
 import { mapScene } from "../scenes/create.ts";
 import { importScene, placeMap } from "../uvtt/batch.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
-import { gridOfShape, SQUARES } from "#shared/rules/grid.ts";
-import { calibrationFromBox, nudgeBox, sameCalibration } from "./calibrate.ts";
+import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { boxAt, boxSides, calibrationFromBox, canonicalToWorld, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
 import { cameWithGrid, IMPORT_WAIT_MS, importSearch, importSearchFrom, replacementFound, type ImportWait, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, gridOps, landSearch, middleOf, showOutcome } from "./outcome.ts";
 import { boxCalibration, endFinding, noteFor, shapeChanged, type GridToolState } from "./store.ts";
@@ -605,6 +605,21 @@ describe("a switch to hexes", () => {
       assert.equal(live.store.getState().found?.cal, undefined, where);
       if (where === "elsewhere") assert.equal(live.store.getState().found?.outcome, "changed");
       assert.equal(live.store.getState().finding, null, where);
+    }
+  });
+
+  test("Line up grid already open keeps a box through a switch, over the new cells at the same spot, each way", () => {
+    const HEX_COLUMNS = gridOfShape("hexColumns");
+    for (const [from, to] of [[SQUARES, HEX_ROWS], [HEX_ROWS, SQUARES], [HEX_ROWS, HEX_COLUMNS]] as const) {
+      const store = createStore<GridToolState>(() => ({ box: null, drag: null, fitScene: true, sceneId: "s1", found: null, finding: null }));
+      const before = boxAt(MAP, from, { x: 12.2, y: 8.7 });
+      store.setState({ box: before });
+      shapeChanged(store, "s1", { map: MAP, from, to });
+      const after = store.getState().box;
+      assert.ok(after, "Apply, Nudge and Find stay, since the open tool is not opened again");
+      const mid = (b: CalBox, g: Grid) => ({ x: b.x + boxSides(b, g).w / 2, y: b.y + boxSides(b, g).h / 2 });
+      assert.deepEqual(boxAt(MAP, to, canonicalToWorld(MAP, mid(after, to))), after, "a box of the new cells, as a tap there would make");
+      assert.ok(Math.hypot(mid(after, to).x - mid(before, from).x, mid(after, to).y - mid(before, from).y) <= MAP.cellPx, "where the old one was, within a cell");
     }
   });
 });
