@@ -635,7 +635,6 @@ function IsoBoardImpl(props: IsoBoardProps) {
   );
 }
 
-/** Where "Building area shapes" shows: at the top of the canvas, clear of the bar over it, taking no presses (docs/design-v1-iso-area-shapes.md 7). */
 /** The area the Area tool aims once the finger rests, and the context it reads. */
 type Aim = { area: AimedArea; ctx: DeviceAreaContext };
 
@@ -676,6 +675,7 @@ function AimProbe(props: {
   return null;
 }
 
+/** Where "Building area shapes" shows: at the top of the canvas, clear of the bar over it, taking no presses (docs/design-v1-iso-area-shapes.md 7). */
 function buildingStyle(insets: Insets | undefined): CSSProperties {
   return {
     position: "absolute",
