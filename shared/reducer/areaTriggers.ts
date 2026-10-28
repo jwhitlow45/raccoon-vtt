@@ -443,11 +443,12 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
   const fpc = after.meta.settings.feetPerCell;
   const { named, all } = moved.walks;
   const gridOf = (walk: MovedToken) => gridOfScene(after, walk.to.sceneId);
-  // A straight leg's hex line, built once a walk and read at its walker's size where the leg starts.
+  // A straight leg's hex line, built once a walk, squeezed along it where the walk squeezes (HX-D17) and ending as the token is stored.
   const pieces = new Map<MovedToken, HexPiece>();
   const pieceOf = (g: HexGrid, walk: MovedToken): HexPiece => {
     let piece = pieces.get(walk);
-    if (!piece) pieces.set(walk, (piece = hexPiece(g, walk.trace[0] ?? after.tokens[walk.tokenId]!, walk.route[0]!, walk.route[walk.route.length - 1]!)));
+    const token = after.tokens[walk.tokenId];
+    if (!piece) pieces.set(walk, (piece = hexPiece(g, walk.trace[0] ?? token!, walk.route[0]!, walk.route[walk.route.length - 1]!, token ? isSqueezed(token) : undefined)));
     return piece;
   };
   // A routed walk's pieces on hexes, each its own hex line (route.ts hexPiece), built once a piece.
@@ -467,14 +468,16 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
     if (!routed && g.shape === "hex") {
       const a = points[0]!;
       const b = points[points.length - 1]!;
-      return { spot: { ...pieceOf(g, walk).at(f), elevation: lerp(a.elevation, b.elevation, f) }, piece: 0, end: f >= 1 };
+      const hp = pieceOf(g, walk);
+      return { spot: { ...hp.at(f), elevation: lerp(a.elevation, b.elevation, f) }, piece: 0, end: f >= 1, squeezed: hp.squeezedAt(f) };
     }
     if (routed && g.shape === "hex" && piece < points.length) {
-      // Each piece on its own hex line, squeezed where the walk squeezes along it (HX-D17), as the walk's spots read it.
+      // Each piece on its own hex line, squeezed where the walk squeezes along it (HX-D17), as the walk's spots read it: a
+      // stop between two pieces by where it stands, the last as the token is stored (review H2-ASTRA-03).
       const hp = routedPieceOf(g, walk, piece);
       const a = points[piece - 1]!;
       const b = points[piece]!;
-      return { spot: { ...hp.at(f), elevation: lerp(a.elevation, b.elevation, f) }, piece: piece - 1, end: f >= 1, ...(f < 1 ? { squeezed: hp.squeezedAt(f) } : {}) };
+      return { spot: { ...hp.at(f), elevation: lerp(a.elevation, b.elevation, f) }, piece: piece - 1, end: f >= 1, squeezed: hp.squeezedAt(f) };
     }
     if (!routed) return { spot: lerpPoint(points[0]!, points[points.length - 1]!, f), piece: 0, end: f >= 1 };
     if (piece >= points.length) return { spot: points[points.length - 1]!, piece: points.length - 2, end: true };

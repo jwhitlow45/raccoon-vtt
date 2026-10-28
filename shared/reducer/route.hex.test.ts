@@ -4,9 +4,9 @@ import type { Op } from "../protocol.ts";
 import type { LogEntry, PathStop, RoomState, Viewer } from "../model.ts";
 import { applyOp } from "../reducer.ts";
 import { placedOnHex } from "../rules/footprint.ts";
-import type { Hex } from "../rules/hex.ts";
+import { hexCenter, hexNeighbors, type Hex } from "../rules/hex.ts";
 import { findRouteOn } from "../rules/hexWalk.ts";
-import { hexStandPlace, ownWalk } from "../rules/movement.ts";
+import { hexStandAt, hexStandPlace, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "../rules/hexWalls.testkit.ts";
 import { DM, env, template } from "../testutil.ts";
 
@@ -84,6 +84,34 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       const out = placedOnHex(g, s.tokens.ogre!, at(16, 6));
       const { log } = run(s, { t: "token.move", tokenId: "ogre", ...out, route: routeTo(s, out) });
       assert.ok(log.some((e) => e.data?.type === "area"), "the walk entered the grease on its way");
+    });
+
+    test("an area beside a squeezed stop of the route, across the corridor's wall, never meets it there (review H2-ASTRA-03)", () => {
+      const s = fight();
+      const out = placedOnHex(g, s.tokens.ogre!, at(16, 6));
+      const route = routeTo(s, out);
+      const squeezedStops = route.slice(0, -1).filter(([x, y]) => onSqueezedLattice(g, s.tokens.ogre!, { x, y }));
+      assert.ok(squeezedStops.length > 0, "the route stops inside the corridor");
+      for (const [x, y] of squeezedStops) {
+        const ref = hexStandAt(g, s.tokens.ogre!, { x, y }, true).ref;
+        for (const d of [1, 2, 4, 5]) {
+          const beside = hexNeighbors(g, ref)[d]!;
+          const c = hexCenter(g, beside);
+          s.templates[`b${beside.col}-${beside.row}`] = template(`b${beside.col}-${beside.row}`, { shape: "sphere", size: 1, origin: { x: c.x, y: c.y, z: 0 }, spell: "Grease", triggers: ["enter"] });
+        }
+      }
+      const { log } = run(s, { t: "token.move", tokenId: "ogre", ...out, route });
+      assert.equal(log.filter((e) => e.data?.type === "area").length, 0, "squeezed onto one hex at each of its stops");
+    });
+
+    test("a straight walk into the corridor squeezes along its hex line, beside an area it never meets", () => {
+      const s = fight();
+      s.tokens.ogre = onHex(g, "ogre", "large", at(5, 6), { name: "Ogre" });
+      const c = hexCenter(g, at(8, 7));
+      s.templates.grease = template("grease", { shape: "sphere", size: 1, origin: { x: c.x, y: c.y, z: 0 }, spell: "Grease", triggers: ["enter"] });
+      const inside = hexStandPlace(g, s.tokens.ogre, { size: "medium", ref: at(10, 6), squeezed: true });
+      const { log } = run(s, { t: "token.move", tokenId: "ogre", ...inside, squeeze: true });
+      assert.equal(log.filter((e) => e.data?.type === "area").length, 0);
     });
 
     test("an area in the rock beside the corridor never meets the creature squeezed along it", () => {
