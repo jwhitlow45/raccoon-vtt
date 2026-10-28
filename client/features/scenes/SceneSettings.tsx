@@ -603,9 +603,13 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
 
   /*
    * The players' scene asks before the picker opens: the image is theirs to
-   * see the moment it uploads. Cancel and Remove each stand on a line of
-   * their own under the ways to bring an image, apart from them, so neither
-   * wraps alone under them.
+   * see the moment it uploads. Asked, the sentence leads and the first
+   * map's fog choice follows it, so the question reads before its answers,
+   * as the forget question and Leave Explore's do. Cancel takes a line of
+   * its own under the ways to bring an image: on a narrow phone at a large
+   * size those two already take two lines, and Cancel beside them would
+   * wrap alone. Remove map image comes last, on its own line, since it
+   * answers nothing: it acts on the image the scene has now.
    */
   const picker = (label: string) =>
     playersHere && !armed && !upload.busy ? (
@@ -619,6 +623,8 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
       </>
     ) : (
       <>
+        {playersHere ? <Note id={warningId}>The players are on this scene. They see the new image as soon as it uploads.</Note> : null}
+        {firstFog && playersHere ? <Checkbox label="Start it under fog, so they see only what you reveal" checked={fogIt} onChange={setFogIt} /> : null}
         <Row>
           {filePicker(playersHere ? "Choose the image" : label)}
           <PasteButton paste={paste} />
@@ -631,13 +637,11 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
           </Row>
         ) : null}
         {map ? <Row>{removeButton}</Row> : null}
-        {playersHere ? <Note id={warningId}>The players are on this scene. They see the new image as soon as it uploads.</Note> : null}
-        {firstFog && playersHere ? <Checkbox label="Start it under fog, so they see only what you reveal" checked={fogIt} onChange={setFogIt} /> : null}
         {firstFog && !playersHere ? <Help>Fog turns on with the first map, as for a scene made from a map.</Help> : null}
       </>
     );
 
-  // Its buttons, the warning, the fog choice and the status stack under the name, as the section they came from did.
+  // The warning, the fog choice, its buttons and the status stack under the name, as the section they came from did.
   return (
     <SettingRow name="Map image" help={map ? `A ${map.widthPx} × ${map.heightPx} px image.` : "No map image yet."} wide>
       <div ref={rowRef} style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(2) }}>
