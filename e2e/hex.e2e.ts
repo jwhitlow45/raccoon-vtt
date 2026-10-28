@@ -9,7 +9,9 @@ import sharp from "sharp";
 import { FOG_SUBCELLS, type AreaTemplate, type Token } from "../shared/model.ts";
 import { creaturesInArea } from "../shared/rules/aoe.ts";
 import { footprintSubcells, occupiedHexes, placedOnHex, tokenRefHex } from "../shared/rules/footprint.ts";
-import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexNeighbors, hexSubcells, type Hex, type HexGrid } from "../shared/rules/hex.ts";
+import { isSubcellFogged } from "../shared/rules/fog.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexKey, hexNeighbors, hexSubcells, sceneHexes, type Hex, type HexGrid } from "../shared/rules/hex.ts";
+import { hexCellsOutline } from "../client/features/fog/shapes.ts";
 import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
 import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
@@ -33,6 +35,10 @@ import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
  * Remove and undo, difficult ground by hexes, Erase by hexes, a player's
  * creature opening a free door from a hex beside it, and those screens'
  * alignment. Lane HX-7's steps (HX7-) ride, carry and trap on hexes.
+ * Lane HX-9b's steps (HX9b-) reveal rooms on hex scenes: a room of hexes
+ * closed by free walls and a door, revealed through the Fog tool's Builder
+ * room and shown to Pat, the door open and shut, a room on hex columns,
+ * and the Fog tool's options measured.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus 31. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -105,6 +111,12 @@ const run = {
   pony: randomUUID(),
   kip: randomUUID(),
   trapId: "",
+  /** Lane HX-9b's hex scenes (HX9b-): a walled room on hex rows and one on hex columns. */
+  cellar: randomUUID(),
+  ossuary: randomUUID(),
+  cellarGob: randomUUID(),
+  cellarFar: randomUUID(),
+  cellarDoor: "hx9bdoor0001",
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -1501,6 +1513,164 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           await shots.take(page, `hx7-attach-list-${size.name}-${scale * 100}`);
           await page.keyboard.press("Escape");
           await page.keyboard.press("Escape");
+        }
+      }
+    } finally {
+      await phoneContext?.close();
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  /** HX-9b's helpers: a hex and its six neighbors, the free walls along their outline, and the Fog tool's bar. */
+  const fogBar = (page: Page) => page.getByRole("toolbar", { name: "Fog options" });
+  const ROOM_LINE = "Tap a room closed in by wall lines.";
+  const sevenOf = (g: HexGrid, middle: Hex) => [middle, ...hexNeighbors(g, middle)].map(hexKey).sort();
+  function ringWalls(g: HexGrid, keys: string[], door: string | null): { id: string; a: [number, number]; b: [number, number]; f: { kind: "wall" } | { kind: "door"; state: "closed"; secret: false; discovered: false } }[] {
+    const outline = hexCellsOutline(g, keys);
+    const out = [];
+    for (let i = 0; i < outline.length; i += 4) {
+      const id = i === 0 && door ? door : randomUUID().replace(/-/g, "").slice(0, 12);
+      const f = i === 0 && door ? ({ kind: "door", state: "closed", secret: false, discovered: false } as const) : ({ kind: "wall" } as const);
+      out.push({ id, a: [outline[i]!, outline[i + 1]!] as [number, number], b: [outline[i + 2]!, outline[i + 3]!] as [number, number], f });
+    }
+    return out;
+  }
+  const draftCells = (sceneId: string) => (dmSocket.state?.fogDrafts[sceneId]?.ops ?? []).flatMap((o) => (o.shape.kind === "cells" ? o.shape.cells : []));
+  async function tapRoom(sceneId: string, g: HexGrid, hex: Hex, want: number): Promise<string[]> {
+    await tapAt(dm, hexCenter(g, hex));
+    return waitFor(`a draft of ${want} hexes`, () => (draftCells(sceneId).length === want ? draftCells(sceneId).slice().sort() : null));
+  }
+  const cellarRoom = sevenOf(G, { col: 6, row: 6 });
+
+  test("HX9b-1. Builder room on a hex scene drafts the hexes its free walls and closed door close in, stamped hex rows and outlined, and Pat then sees the goblin in the room and not the one outside", async () => {
+    await ops.send({ t: "scene.create", scene: { id: run.cellar, name: "Cellar", bounds: BOUNDS, gridShape: "hexRows" } });
+    await waitFor("the cellar in the DM's state", () => dmSocket.state?.scenes[run.cellar] ?? null);
+    await ops.send({ t: "scene.update", sceneId: run.cellar, patch: { fogEnabled: true } });
+    await ops.send({ t: "build.walls", sceneId: run.cellar, put: ringWalls(G, cellarRoom, run.cellarDoor) });
+    for (const [id, name, hex] of [
+      [run.cellarGob, "Cellar goblin", { col: 6, row: 6 }],
+      [run.cellarFar, "Far goblin", { col: 12, row: 12 }],
+    ] as const) {
+      const c = creature(id, name, "medium", hex);
+      await ops.send({ ...c, token: { ...c.token, sceneId: run.cellar } });
+    }
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.cellar });
+    await dm.bringToFront();
+    await dm.setViewportSize({ width: 1440, height: 900 });
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.cellar);
+    await dm.keyboard.press("Escape");
+    // The DM's copy holds the chunks of the scene they view.
+    await waitFor("the cellar's walls in the DM's state", () => (Object.values(dmSocket.state?.buildChunks ?? {}).flatMap((c) => (c?.sceneId === run.cellar ? (c.walls ?? []) : [])).length === 18 ? true : null));
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await pickTool(dm, "Fog");
+    await pickOption(dm, "Fog", "Shape", "Builder room");
+    await fogBar(dm).locator("[data-options-line]").filter({ hasText: ROOM_LINE }).waitFor();
+
+    const cells = await tapRoom(run.cellar, G, { col: 5, row: 6 }, 7);
+    assert.deepEqual(cells, cellarRoom);
+    assert.equal(dmSocket.state!.fogDrafts[run.cellar]?.grid, "hexRows", "the draft carries the scene's shape");
+    assert.equal(dmSocket.state!.fogDrafts[run.cellar]?.ops.length, 1, "one tap, one edit");
+    await shots.take(dm, "hx9b-room-draft");
+
+    await fogBar(dm).getByRole("button", { name: "Reveal to players (1)" }).click();
+    await waitFor("the draft published", () => (dmSocket.state?.fogDrafts[run.cellar] === undefined ? true : null));
+    for (const k of cellarRoom) {
+      const [col, row] = k.split(",").map(Number) as [number, number];
+      for (const [sx, sy] of hexSubcells(G, { col, row })) assert.equal(isSubcellFogged(dmSocket.state!.fogTiles, run.cellar, sx, sy), false, `hex ${k} revealed by its sub-cells`);
+    }
+    await pat.bringToFront();
+    await waitFor("the cellar goblin in Pat's copy", () => (patSocket.state?.tokens[run.cellarGob] ? true : null));
+    assert.equal(patSocket.state?.tokens[run.cellarFar], undefined, "the goblin outside stays under fog");
+    await pat.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await shots.take(pat, "hx9b-pat-room");
+    await dm.bringToFront();
+  });
+
+  test("HX9b-2. with the door open the flood runs through it to the map's edge, and shut again it stops at the room", async () => {
+    const door = Object.values(dmSocket.state!.buildChunks)
+      .flatMap((c) => (c?.sceneId === run.cellar ? (c.walls ?? []).map((w) => ({ w, cx: c.cx, cy: c.cy })) : []))
+      .find(({ w }) => w.id === run.cellarDoor)!;
+    assert.ok(door, "the cellar's door");
+    const setDoor = async (state: "open" | "closed") => {
+      await ops.send({ t: "door.set", sceneId: run.cellar, door: { cx: door.cx, cy: door.cy, id: run.cellarDoor }, state });
+      await waitFor(`the door ${state}`, () => (Object.values(dmSocket.state?.buildChunks ?? {}).some((c) => c?.walls?.some((w) => w.id === run.cellarDoor && w.f.kind === "door" && w.f.state === state)) ? true : null));
+    };
+    const discard = async () => {
+      await ops.send({ t: "fog.discard", sceneId: run.cellar });
+      await waitFor("the draft discarded", () => (dmSocket.state?.fogDrafts[run.cellar] === undefined ? true : null));
+    };
+    await setDoor("open");
+    const all = sceneHexes(G, BOUNDS).map(hexKey).sort();
+    assert.deepEqual(await tapRoom(run.cellar, G, { col: 6, row: 5 }, all.length), all, "every hex of the scene, to its edge");
+    await shots.take(dm, "hx9b-door-open");
+    await discard();
+    await setDoor("closed");
+    assert.deepEqual(await tapRoom(run.cellar, G, { col: 6, row: 5 }, 7), cellarRoom);
+    await discard();
+    const outside = await tapRoom(run.cellar, G, { col: 2, row: 2 }, all.length - 7);
+    assert.ok(!outside.some((k) => cellarRoom.includes(k)), "outside, the rest of the scene and none of the room");
+    await discard();
+    await tapAt(dm, { x: BOUNDS.w - 0.1, y: hexCenter(G, { col: 0, row: 1 }).y });
+    await fogBar(dm).locator("[data-options-line]").filter({ hasText: "Tap a whole hex inside the map." }).waitFor();
+    assert.equal(dmSocket.state?.fogDrafts[run.cellar], undefined, "the half hex past an odd row's end drafts nothing");
+  });
+
+  test("HX9b-3. on hex columns Builder room drafts the column room's hexes, stamped hex columns, and publishing reveals them by their sub-cells", async () => {
+    const C: HexGrid = { shape: "hex", orient: "columns" };
+    const ossuaryRoom = sevenOf(C, { col: 8, row: 6 });
+    await ops.send({ t: "scene.create", scene: { id: run.ossuary, name: "Ossuary", bounds: BOUNDS, gridShape: "hexColumns" } });
+    await waitFor("the ossuary in the DM's state", () => dmSocket.state?.scenes[run.ossuary] ?? null);
+    await ops.send({ t: "scene.update", sceneId: run.ossuary, patch: { fogEnabled: true } });
+    await ops.send({ t: "build.walls", sceneId: run.ossuary, put: ringWalls(C, ossuaryRoom, null) });
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.ossuary);
+    await dm.keyboard.press("Escape");
+    await waitFor("the ossuary's walls", () => (Object.values(dmSocket.state?.buildChunks ?? {}).flatMap((c) => (c?.sceneId === run.ossuary ? (c.walls ?? []) : [])).length === 18 ? true : null));
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await pickTool(dm, "Fog");
+    await pickOption(dm, "Fog", "Shape", "Builder room");
+    assert.deepEqual(await tapRoom(run.ossuary, C, { col: 8, row: 7 }, 7), ossuaryRoom);
+    assert.equal(dmSocket.state!.fogDrafts[run.ossuary]?.grid, "hexColumns");
+    await shots.take(dm, "hx9b-ossuary-draft");
+    await fogBar(dm).getByRole("button", { name: "Reveal to players (1)" }).click();
+    await waitFor("the ossuary's draft published", () => (dmSocket.state?.fogDrafts[run.ossuary] === undefined ? true : null));
+    const tiles = dmSocket.state!.fogTiles;
+    for (const k of ossuaryRoom) {
+      const [col, row] = k.split(",").map(Number) as [number, number];
+      for (const [sx, sy] of hexSubcells(C, { col, row })) assert.equal(isSubcellFogged(tiles, run.ossuary, sx, sy), false, `hex ${k} revealed`);
+    }
+    for (const n of hexNeighbors(C, { col: 8, row: 4 })) {
+      if (ossuaryRoom.includes(hexKey(n))) continue;
+      for (const [sx, sy] of hexSubcells(C, n)) assert.equal(isSubcellFogged(tiles, run.ossuary, sx, sy), true, `hex ${hexKey(n)} outside stays fogged`);
+    }
+  });
+
+  test("HX9b-4. the Fog tool's options with Builder room picked on a hex scene sit within 1 px at each size", async () => {
+    const off: string[] = [];
+    let phoneContext: BrowserContext | null = null;
+    try {
+      for (const size of SIZES) {
+        let page = dm;
+        if (size.touch) {
+          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+          const pages = phoneContext.pages();
+          page = pages[0] ?? (await phoneContext.newPage());
+          if (pages.length === 0) consoles.phone.attach(page);
+        }
+        for (const scale of SCALES) {
+          const at = `${size.name} at ${scale * 100}%`;
+          await openAt(page, size, scale);
+          const panel = await openScenes(page);
+          await viewScene(page, panel, run.cellar);
+          await page.keyboard.press("Escape");
+          await pickTool(page, "Fog");
+          await pickOption(page, "Fog", "Shape", "Builder room");
+          const bar = fogBar(page);
+          await bar.locator("[data-options-line]").filter({ hasText: ROOM_LINE }).waitFor();
+          off.push(...alignmentLines(await measureAlignment(bar), `the Fog tool's Builder room on hexes at ${at}`));
+          await shots.take(page, `hx9b-fog-bar-${size.name}-${scale * 100}`);
+          await pickTool(page, "Select");
         }
       }
     } finally {
