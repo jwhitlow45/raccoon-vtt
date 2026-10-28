@@ -231,6 +231,8 @@ Proposed, the scene name first with no header:
 
 Each group header is a button with `aria-expanded`. On a phone (below `wideMinWidth`) groups 2 to 4 start folded, on a wide screen all open, and each remembers per device in `localStorage` (try/catch, open when unreadable).
 
+Changed by docs/design-v1-design-pass.md 4.1: the name sits under "This scene", the groups are the panel kit's `Group` rows with icons and folded summaries, group 4 is named "Size and view" (its stored key stays `scene`), and the Fog and party vision fold is a `Section` fold, chevron first.
+
 ## 9. UI checklist
 
 - **Words** exactly as in 5.3, 6 and 8, and the builder's note on the players' scene while the party's sight meets a cell being built: "The party can see where you are building, so they see it as you build. Build before players come here, or tap Fog all when done."

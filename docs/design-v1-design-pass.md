@@ -290,3 +290,13 @@ Asking the project owner was off. Each choice below is the guess the owner would
 ## 9. As built
 
 Filled in by each lane's docs commit: every place the build went its own way, and lane 4's H2 and H3 findings.
+
+### Lane 1, scene settings
+
+- **The group header.** The fold's button is a two-column grid as 4.1 says, set at its start, with the name's line padded to 48 px (14.4 px above and below), so a wrapped summary adds its own line under a name that stands where a one-line header puts it (D-261028-82). The chevron and the icon sit in a column as tall as the name's line, so they stand by the name's first line on one line or two (review P3, D-261028-83). The name and the summary now set their line heights, 1.2 and 1.4, where the name took the browser's normal before. A group with no chevron and no icon has no lead column, so no empty gap. The summary's `width` is its 4em floor, as its `minWidth` was, so what it asks of the header's row stays the floor: with its whole words asked, Thorn's Stat block wrapped its action under its name on a computer.
+- **Every group wraps the same way**, those without an icon included (the trap pane's), where today they gave their summary no floor (D-261028-84).
+- **`sceneGroupSummary(scene, group)`** takes no room settings: no summary reads one. A hex scene's size counts the whole hexes its bounds hold, "40 × 34 hexes" for 40 × 30 steps on hex rows (D-261028-80). Map image and grid gives a pixel size only with a map image (D-261028-81). Fog and party vision's summary is `fogFoldSummary` in the same file (D-261028-85).
+- **The page draws its four groups itself.** VisionSettings.tsx draws What players see's content, and SceneSettings.tsx wraps it in its `Group` as it does the other three, so the page's groups come from one place.
+- **Sight's status** is `SightStatus`, exported for its markup test.
+- **Tests outside the named ranges.** e2e/alignmentRoom.ts `groupHeaderLines` (the icon pass's token panel check) gains one rule: a summary never wraps under its name there, which holds dp-1a's "token panel's groups on one line at every size" (D-261028-86). layout.e2e.ts's second label assertion in ms2-1 and its header comment, and scenesetup.e2e.ts's `section`, which finds a group too. hex.e2e.ts's four lookups of "Scene" are lane 2's, so hex fails on this lane alone until lane 2's edit lands.
+- **Pictures.** The guide's pictures of the scene settings page and What players see are retaken once the lanes merge (section 5), so their alt text still describes today's pictures.
