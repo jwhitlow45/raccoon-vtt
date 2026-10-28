@@ -22,7 +22,6 @@ import {
   OptSwatches,
   PickCloses,
   Stepper,
-  StripText,
   useOpenInSlot,
   usePopoverFrame,
   useSlotPlace,
@@ -100,8 +99,6 @@ function snapsFor(env: Pick<AreaEnv, "scene">): readonly { value: SnapMode; labe
   return isHex(grid) ? SNAPS.map((s) => (s.value === "45" ? { ...s, label: wideSnapLabel(grid) } : s)) : SNAPS;
 }
 
-/** What an area's Movement inside says on a hex scene, where movement is counted on squares until hex grids' phase H2. */
-export const COUNTED_ON_SQUARES = "Counted on squares only.";
 
 const SHAPE_GLYPHS: Record<AreaShape, IconName> = {
   cone: "areaCone",
@@ -391,13 +388,11 @@ const SLOWS: readonly { value: SlowsChoice; label: string }[] = [
  * kind keeps it, so a player whose copy hides the caster cannot clear it
  * by picking another kind.
  */
-function slowSlots(props: { value: AreaSlows | undefined; caster: boolean; hex: boolean; onChange(next: AreaSlows | null): void }): Slot[] {
+function slowSlots(props: { value: AreaSlows | undefined; caster: boolean; onChange(next: AreaSlows | null): void }): Slot[] {
   const v = props.value;
   const kind = (next: SlowsChoice) => props.onChange(next === "normal" ? null : { kind: next, ...(v?.foes ? { foes: true as const } : {}) });
   return [
     more("slows", <OptSegmented label="Movement inside" value={v?.kind ?? "normal"} options={SLOWS} onChange={kind} />),
-    // The choice is kept with the area, and a walk on hexes reads none of it yet (hex grids, section 6).
-    ...(props.hex ? [more("slowsHex", <StripText>{COUNTED_ON_SQUARES}</StripText>)] : []),
     ...(v && props.caster
       ? [
           more(
@@ -599,7 +594,7 @@ function DraftOptions(props: { env: AreaEnv; st: AreaToolState; draft: AreaDraft
           </OptButton>,
         ),
         ...triggerSlots({ value: d.triggers, once: d.oncePerTurn, onChange: (triggers) => set({ triggers }), onOnce: (oncePerTurn) => set({ oncePerTurn }) }),
-        ...slowSlots({ value: d.slows, caster: !!casterId, hex: isHex(sceneGrid(env.scene)), onChange: (slows) => setDraft(env, withSlows(d, slows)) }),
+        ...slowSlots({ value: d.slows, caster: !!casterId, onChange: (slows) => setDraft(env, withSlows(d, slows)) }),
         more("color", <OptSwatches label="Color" value={d.color} options={MEMBER_COLORS} onChange={(color) => set({ color })} />),
         env.role === "dm" &&
           more(
@@ -797,7 +792,7 @@ function SelectedOptions(props: { env: AreaEnv; st: AreaToolState; template: Are
               onOnce: (once) => update({ oncePerTurn: once ? true : null }),
             })
           : []),
-        ...(editable ? slowSlots({ value: t.slows, caster: t.casterId !== undefined, hex: isHex(sceneGrid(env.scene)), onChange: (slows) => update({ slows }) }) : []),
+        ...(editable ? slowSlots({ value: t.slows, caster: t.casterId !== undefined, onChange: (slows) => update({ slows }) }) : []),
         editable && more("color", <OptSwatches label="Color" value={t.color} options={MEMBER_COLORS} onChange={(color) => update({ color })} />),
       ]}
     />
