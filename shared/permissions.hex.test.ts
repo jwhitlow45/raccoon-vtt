@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Scene } from "./model.ts";
-import { ON_HEXES, canApply, companionWords, withinCompanionReach, type PermissionDeps } from "./permissions.ts";
+import { ON_HEXES, canApply, companionWords, reachesDoor, withinCompanionReach, type PermissionDeps } from "./permissions.ts";
 import { opSchema, type Op, type TokenInput } from "./protocol.ts";
 import { SQUARES, type Grid } from "./rules/grid.ts";
 import { hexCenter, type Hex, type HexGrid } from "./rules/hex.ts";
@@ -49,8 +49,23 @@ describe("H1's refusals on a hex scene", () => {
   ];
 
   test("every build op that writes cell keys or walls, and only on hexes", () => {
-    for (const op of buildOps("s1")) assert.equal(decide(op), `invalid: ${ON_HEXES.build}`, op.t);
+    // H2 takes Wall lines, Erase and Difficult ground on hexes (HX-D9).
+    const lifted = new Set(["build.walls", "build.erase", "build.rough"]);
+    for (const op of buildOps("s1")) {
+      const words = op.t === "build.edge" ? ON_HEXES.edges : ON_HEXES.build;
+      assert.equal(decide(op), lifted.has(op.t) ? "ok" : `invalid: ${words}`, op.t);
+    }
     for (const op of buildOps("s2")) assert.equal(decide(op), "ok", `${op.t} on squares`);
+  });
+
+  test("H2: a builder ask on hexes goes only with Erase and Difficult ground in it", () => {
+    const ask = (ops: Op[]): Op => ({ t: "build.ask", sceneId: "s1", ops, part: 0 }) as Op;
+    const erase: Op = { t: "build.erase", sceneId: "s1", cells: ["1,1"] };
+    const rough: Op = { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true };
+    assert.equal(decide(ask([erase, rough])), "ok");
+    assert.equal(decide(ask([erase, { t: "build.height", sceneId: "s1", cells: ["1,1"], height: 10 }])), `invalid: ${ON_HEXES.build}`);
+    assert.equal(decide(ask([rough, { t: "build.edge", sceneId: "s1", edges: [{ key: "1,1,n", feature: { kind: "wall" } }] }])), `invalid: ${ON_HEXES.edges}`);
+    assert.equal(decide({ ...ask([{ t: "build.paint", sceneId: "s2", terrain: "stone", cells: ["1,1"] }]), sceneId: "s2" } as Op), "ok", "on squares");
   });
 
   test("lights, stamps, labels and Clear build stay", () => {
@@ -194,5 +209,25 @@ describe("a player's token inside a hex scene (section 4.2)", () => {
     assert.equal(decide({ t: "token.create", token: { id: "g1", sceneId: "s1", kind: "monster", name: "Goblin", size: "medium", ...past, actor: { inline: actor() } } }, state), "ok");
     state.tokens.g1 = token("g1", { sceneId: "s1", x: 2, y: 2 });
     assert.equal(decide({ t: "token.move", tokenId: "g1", ...past }, state), "ok");
+  });
+});
+
+describe("H2: a free door's reach from the hexes beside it", () => {
+  // A door along the upright side between hexes 4,0 and 5,0 on hex rows.
+  const door = { id: "d00000000001", a: [5, 0] as [number, number], b: [5, 1] as [number, number], f: { kind: "door" as const, state: "closed" as const, secret: false, discovered: false } };
+  const chunk = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, walls: [door] };
+  const ref = { cx: 0, cy: 0, id: door.id };
+  const state = (at: Hex) => ({ ...hexRoom(), buildChunks: { "s1:0,0": chunk }, tokens: { t: token("t", onHex(at)) } }) as RoomState;
+
+  test("a creature on the hex next to one beside the door reaches it, 5 ft away", () => {
+    assert.equal(reachesDoor(state({ col: 3, row: 0 }), state({ col: 3, row: 0 }).tokens.t!, ref, chunk), true);
+    assert.equal(reachesDoor(state({ col: 6, row: 0 }), state({ col: 6, row: 0 }).tokens.t!, ref, chunk), true, "and from the other side");
+    assert.equal(reachesDoor(state({ col: 4, row: 1 }), state({ col: 4, row: 1 }).tokens.t!, ref, chunk), true, "the odd row below touches both");
+  });
+
+  test("two hex steps away it does not, though the squares under it lie one square from the door's", () => {
+    // Hex 2,1's box covers squares 2 and 3 of rows 0 and 1, one square from square 4,0, but hex 2,1 is two steps from hex 4,0.
+    assert.equal(reachesDoor(state({ col: 2, row: 1 }), state({ col: 2, row: 1 }).tokens.t!, ref, chunk), false);
+    assert.equal(reachesDoor(state({ col: 2, row: 0 }), state({ col: 2, row: 0 }).tokens.t!, ref, chunk), false);
   });
 });

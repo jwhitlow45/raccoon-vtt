@@ -9,11 +9,11 @@ import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
 import { movementRules, type Blocker, type LegEnd } from "./ruleHooks.ts";
 import { carriedIndex, holderOf, isCreature, landsAt, linkHolds, onHolder, walkerFor, withinReach } from "./rules/attach.ts";
-import { boxDistanceFt, tokenCellBox } from "./rules/distance.ts";
+import { boxDistanceFt, pointCellBox, tokenCellBox } from "./rules/distance.ts";
 import { checkSetReach, planMove } from "./rules/moveLeg.ts";
 import { footprintRect, footprintSize, occupiedHexes, snapStep, storedCenter, type FootprintToken } from "./rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
-import { hexInScene, hexKey, hexNeighbors, type HexGrid } from "./rules/hex.ts";
+import { hexAt, hexInScene, hexKey, hexNeighbors, type HexGrid } from "./rules/hex.ts";
 import { groundAt } from "./rules/heights.ts";
 import { convexHull } from "./rules/aoe.ts";
 import type { Point } from "./rules/geom.ts";
@@ -221,7 +221,8 @@ export function canApply(op: Op, actor: Viewer, state: RoomState, deps: Permissi
  * section 6, phase H1), in the words its limit lines show.
  */
 export const ON_HEXES = {
-  build: "Walls, painted ground, heights and difficult ground need squares.",
+  build: "Painted ground and heights need squares.",
+  edges: "On hexes walls are wall lines.",
   traps: "Traps need squares.",
   attach: "Riding and carrying need squares.",
   walk: "Walking needs squares.",
@@ -231,12 +232,13 @@ export const ON_HEXES = {
 
 /**
  * The server refuses on a hex scene every op whose rules are not hex yet
- * (HX-D20): every build op that writes cell keys or walls, every trap made
- * or changed, an attach, a move with a route or a squeeze (only
- * `token.move` carries either), a token sent onto it with a link, and Reveal
- * room's fog shapes. No such op was ever stored, so lifting a refusal in a
- * later phase changes no replay. Lights, stamps, labels and Clear build
- * stay, and so does every other fog shape. A restore keeps the same line in
+ * (HX-D20): every build op that paints ground, heights or stairs, or puts
+ * walls on grid lines, every trap made or changed, an attach, a move with
+ * a route or a squeeze (only `token.move` carries either), a token sent
+ * onto it with a link, and Reveal room's fog shapes. No such op was ever
+ * stored, so lifting a refusal in a later phase changes no replay. Lights,
+ * stamps, labels and Clear build stay, and so does every other fog shape.
+ * From H2 so do free walls, Erase and difficult ground. A restore keeps the same line in
  * the reducer (shared/reducer/misc.ts), since two DMs can race a switch.
  */
 function hexPhaseFits(op: Op, c: Check): Decision {
@@ -246,17 +248,23 @@ function hexPhaseFits(op: Op, c: Check): Decision {
   };
   const no = (words: string) => refuse("invalid", words);
   switch (op.t) {
-    case "build.paint":
+    // Phase H2 builds on hexes with Wall lines (free walls), Erase and Difficult ground by hex keys (HX-D9).
+    case "build.walls":
     case "build.erase":
+    case "build.rough":
+      return OK;
+    case "build.edge":
+      return hex(op.sceneId) ? no(ON_HEXES.edges) : OK;
+    case "build.paint":
     case "build.rect":
     case "build.poly":
-    case "build.edge":
-    case "build.walls":
     case "build.height":
     case "build.stairs":
-    case "build.rough":
-    case "build.ask":
       return hex(op.sceneId) ? no(ON_HEXES.build) : OK;
+    case "build.ask":
+      if (!hex(op.sceneId)) return OK;
+      if (op.ops.some((o) => o.t === "build.edge")) return no(ON_HEXES.edges);
+      return op.ops.every((o) => o.t === "build.erase" || o.t === "build.rough") ? OK : no(ON_HEXES.build);
     case "trap.create":
       return hex(op.trap.sceneId) ? no(ON_HEXES.traps) : OK;
     case "trap.update":
@@ -2425,12 +2433,13 @@ function samePlace(shown: BuildChunk, stored: BuildChunk, ref: DoorRef): boolean
 function reachWords(c: Check, tokens: readonly Token[], ref: DoorRef, chunk: BuildChunk): string {
   const ground = tokens[0] ? c.liveGround(tokens[0].sceneId) : null;
   if (!ground) return DOOR_TOO_FAR;
-  const { cells, mid } = doorPlace(ref, chunk);
+  const g = doorGrid(c.state, tokens[0]!.sceneId);
+  const { cells, mid } = doorPlace(ref, chunk, g);
   const settings = c.state.meta.settings;
   const reach = doorReachFt(settings.feetPerCell);
   for (const token of tokens) {
-    if (!cells.some((cell) => reachFt(c.state, token, cell, settings) <= reach)) continue;
-    const r = footprintRect(SQUARES, token);
+    if (!cells.some((cell) => reachFt(c.state, g, token, cell, settings) <= reach)) continue;
+    const r = footprintRect(g, token);
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
     const k = 1 - 1e-6;
@@ -2448,10 +2457,17 @@ function reachWords(c: Check, tokens: readonly Token[], ref: DoorRef, chunk: Bui
  * bar offers a door exactly when the server would open it.
  */
 export function reachesDoor(state: RoomState, token: Token, ref: DoorRef, chunk: BuildChunk): boolean {
-  const { cells, mid } = doorPlace(ref, chunk);
+  const g = doorGrid(state, token.sceneId);
+  const { cells, mid } = doorPlace(ref, chunk, g);
   const settings = state.meta.settings;
   const reach = doorReachFt(settings.feetPerCell);
-  return cells.some((cell) => reachFt(state, token, cell, settings) <= reach) && movementRules.lineClear(state, token, mid, ref);
+  return cells.some((cell) => reachFt(state, g, token, cell, settings) <= reach) && movementRules.lineClear(state, token, mid, ref);
+}
+
+/** The grid a door's reach is read on: its scene's. */
+function doorGrid(state: RoomState, sceneId: string): Grid {
+  const scene = state.scenes[sceneId];
+  return scene ? sceneGrid(scene) : SQUARES;
 }
 
 /** The door a chunk holds under this name, or null when it holds none there. */
@@ -2465,9 +2481,13 @@ function doorIn(chunk: BuildChunk, ref: DoorRef): Extract<BuildChunk["edges"][st
  * A free door's are the cells just off its midpoint on each side, a step
  * of at most 1/256 cell along its normal: a midpoint of lattice ends is a
  * multiple of 1/128, so the step crosses a grid line only when the
- * midpoint lies on one, and then each side is its own cell.
+ * midpoint lies on one, and then each side is its own cell. On a hex
+ * scene the points themselves come back, each standing for the hex that
+ * holds it (docs/design-v1-hex-grids.md section 6, H2): a hex's side is
+ * no grid line, so the step finds the hexes on each side of a door drawn
+ * along one, and a door through a hex reads that hex from both sides.
  */
-function doorPlace(ref: DoorRef, chunk: BuildChunk): { cells: Point[]; mid: Point } {
+function doorPlace(ref: DoorRef, chunk: BuildChunk, g: Grid): { cells: Point[]; mid: Point } {
   if ("edge" in ref) {
     const [xs, ys, side] = ref.edge.split(",");
     const x = Number(xs);
@@ -2479,7 +2499,12 @@ function doorPlace(ref: DoorRef, chunk: BuildChunk): { cells: Point[]; mid: Poin
   const nx = -(wall.b[1] - wall.a[1]);
   const ny = wall.b[0] - wall.a[0];
   const scale = Math.max(Math.abs(nx), Math.abs(ny)) * 256;
-  const cell = (sign: number): Point => ({ x: Math.floor(mx + (sign * nx) / scale), y: Math.floor(my + (sign * ny) / scale) });
+  const side = (sign: number): Point => ({ x: mx + (sign * nx) / scale, y: my + (sign * ny) / scale });
+  if (isHex(g)) return { cells: [side(1), side(-1)], mid: { x: mx, y: my } };
+  const cell = (sign: number): Point => {
+    const p = side(sign);
+    return { x: Math.floor(p.x), y: Math.floor(p.y) };
+  };
   return { cells: [cell(1), cell(-1)], mid: { x: mx, y: my } };
 }
 
@@ -2487,9 +2512,16 @@ function doorPlace(ref: DoorRef, chunk: BuildChunk): { cells: Point[]; mid: Poin
  * From a token to a cell beside the door, by the room's rule as its ruler
  * measures, in three dimensions (decided 2026-10-14): the token's
  * footprint and height, and the layer of the cell at the ground there. So
- * a token flying 30 ft up does not reach a door on the ground.
+ * a token flying 30 ft up does not reach a door on the ground. On hexes
+ * `cell` is a point beside the door, read as the hex that holds it, its
+ * ground by that hex's key, and the steps between hexes.
  */
-function reachFt(state: RoomState, token: Token, cell: Point, settings: RoomSettings): number {
+function reachFt(state: RoomState, g: Grid, token: Token, cell: Point, settings: RoomSettings): number {
+  if (isHex(g)) {
+    const hex = hexAt(g, cell);
+    const ground = groundAt(state.buildChunks, token.sceneId, hex.col, hex.row);
+    return boxDistanceFt(tokenCellBox(g, token, settings.feetPerCell), pointCellBox(g, { x: cell.x, y: cell.y, z: ground }, settings.feetPerCell), settings);
+  }
   const z0 = Math.floor(groundAt(state.buildChunks, token.sceneId, cell.x, cell.y) / settings.feetPerCell);
   return boxDistanceFt(tokenCellBox(SQUARES, token, settings.feetPerCell), { x0: cell.x, x1: cell.x + 1, y0: cell.y, y1: cell.y + 1, z0, z1: z0 + 1 }, settings);
 }

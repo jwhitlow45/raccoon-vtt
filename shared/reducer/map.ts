@@ -12,7 +12,8 @@ import { carriedIndex, holderOf, onHolder } from "../rules/attach.ts";
 import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
-import { SQUARES } from "../rules/grid.ts";
+import { SQUARES, isHex, sceneGrid, shapeOfGrid } from "../rules/grid.ts";
+import { HEX_R, HEX_S, hexAt, hexCenter, hexInScene, hexKey, type HexGrid } from "../rules/hex.ts";
 import { forgetLayerMemory, forgetSceneMemory, forgetStamp, keepsMemory, memoryOwners, poolMemory, pruneLostGround, pruneMovedMarks, rememberLayer } from "./memory.ts";
 
 // Fog (design 13.2).
@@ -455,7 +456,14 @@ export function parseCell(key: string): Cell {
   return { x: Number(xs), y: Number(ys) };
 }
 
+/**
+ * Whether a cell of a cell key lies in the scene (docs/design-v1-hex-grids.md
+ * 4.3): a square inside the bounds, or on a hex scene, where a key names a
+ * hex by its column and row, a hex wholly inside the scene's rectangle.
+ */
 export function inBounds(scene: Scene, cell: Cell): boolean {
+  const g = sceneGrid(scene);
+  if (isHex(g)) return hexInScene(g, scene.bounds, { col: cell.x, row: cell.y });
   return cell.x >= 0 && cell.y >= 0 && cell.x < scene.bounds.w && cell.y < scene.bounds.h;
 }
 
@@ -514,6 +522,12 @@ type ChunkChange = { cx: number; cy: number; cells: Cell[]; edges: string[] };
  * remove it.
  */
 function setCells(tx: Tx, scene: Scene, cells: Cell[], terrain: TerrainId | null): void {
+  const g = sceneGrid(scene);
+  // Painted ground stays square (HX-D9), and the server refuses a paint on hexes before it gets here (shared/permissions.ts).
+  if (isHex(g) && terrain === null) {
+    eraseHexes(tx, scene, g, cells);
+    return;
+  }
   const byChunk = new Map<string, ChunkChange>();
   const group = (x: number, y: number): ChunkChange => {
     const cx = Math.floor(x / CHUNK_CELLS);
@@ -689,8 +703,121 @@ function eraseLabels(tx: Tx, sceneId: string, cells: Cell[]): void {
   for (const id of erased.sort()) tx.remove(keys.label(id));
 }
 
-/** Writes a chunk, or removes it when nothing is left in it: no floor, edges, free walls, heights or stairs. */
-export function writeChunk(tx: Tx, chunk: BuildChunk): void {
+/**
+ * Erase on a hex scene (HX-D9), each key a hex: everything in the hexes, as
+ * on squares. Their difficult ground marks go from their chunks of 16 by 16
+ * hexes by key. A free wall lives in the world chunk of its midpoint, not
+ * a hex's chunk, so the world chunks each hex covers are read for the free
+ * walls whose midpoint lies in an erased hex, and so are the stamps and
+ * lights whose center does and the labels whose text touches one. Hexes
+ * hold no painted ground, edges or heights in H2, so no token's ground
+ * changes.
+ */
+function eraseHexes(tx: Tx, scene: Scene, g: HexGrid, cells: readonly Cell[]): void {
+  const erased = new Set<string>();
+  const byChunk = new Map<string, { cx: number; cy: number; cells: Cell[] }>();
+  const worldChunks = new Map<string, { cx: number; cy: number }>();
+  for (const cell of cells) {
+    if (!inBounds(scene, cell)) throw invalid("cell outside the scene");
+    const id = hexKey({ col: cell.x, row: cell.y });
+    if (erased.has(id)) continue;
+    erased.add(id);
+    const cx = Math.floor(cell.x / CHUNK_CELLS);
+    const cy = Math.floor(cell.y / CHUNK_CELLS);
+    const key = chunkKey(scene.id, cx, cy);
+    let group = byChunk.get(key);
+    if (!group) byChunk.set(key, (group = { cx, cy, cells: [] }));
+    group.cells.push(cell);
+    const box = hexBox(g, cell);
+    for (let wy = Math.floor(box.y0 / CHUNK_CELLS); wy <= Math.floor(box.y1 / CHUNK_CELLS); wy++) {
+      for (let wx = Math.floor(box.x0 / CHUNK_CELLS); wx <= Math.floor(box.x1 / CHUNK_CELLS); wx++) worldChunks.set(chunkKey(scene.id, wx, wy), { cx: wx, cy: wy });
+    }
+  }
+  const inErased = (x: number, y: number) => erased.has(hexKey(hexAt(g, { x, y })));
+  const touched = new Set([...byChunk.keys(), ...worldChunks.keys()]);
+  for (const key of [...touched].sort()) {
+    const stored = tx.state.buildChunks[key];
+    const group = byChunk.get(key);
+    if (!stored) continue;
+    let next = stored;
+    if (group) {
+      const nextCells = { ...stored.cells };
+      for (const c of group.cells) delete nextCells[`${c.x},${c.y}`];
+      next = withoutHeights({ ...stored, cells: nextCells }, group.cells);
+    }
+    if (worldChunks.has(key) && stored.walls) next = withWalls(next, stored.walls.filter((w) => !inErased(...wallMidpoint(w))));
+    if (!sameChunk(stored, next)) writeChunk(tx, next);
+  }
+  for (const stamp of sortedById(Object.values(tx.state.stamps))) {
+    if (stamp.sceneId === scene.id && inErased(stamp.x, stamp.y)) tx.remove(keys.stamp(stamp.id));
+  }
+  for (const light of sortedById(Object.values(tx.state.lights))) {
+    if (light.sceneId === scene.id && inErased(light.x, light.y)) tx.remove(keys.light(light.id));
+  }
+  const hexes = [...byChunk.values()].flatMap((group) => group.cells);
+  const labels: string[] = [];
+  for (const [id, label] of Object.entries(tx.state.labels)) {
+    if (label.sceneId !== scene.id) continue;
+    const box = labelBox(label);
+    if (hexes.some((h) => boxTouchesHex(g, box, h))) labels.push(id);
+  }
+  for (const id of labels.sort()) tx.remove(keys.label(id));
+}
+
+/** Whether an erase left a chunk as it was. It only takes things away, so a count says whether it took any. */
+function sameChunk(a: BuildChunk, b: BuildChunk): boolean {
+  return a.rough === b.rough && a.heights === b.heights && a.up === b.up && (a.walls?.length ?? 0) === (b.walls?.length ?? 0) && Object.keys(a.cells).length === Object.keys(b.cells).length;
+}
+
+/** A hex's box in world cells, a key's column and row: its center less and plus half its width and its corner's reach, mirrored on hex columns. */
+function hexBox(g: HexGrid, cell: Cell): { x0: number; y0: number; x1: number; y1: number } {
+  const c = hexCenter(g, { col: cell.x, row: cell.y });
+  const hx = g.orient === "rows" ? 0.5 : HEX_R;
+  const hy = g.orient === "rows" ? HEX_R : 0.5;
+  return { x0: c.x - hx, y0: c.y - hy, x1: c.x + hx, y1: c.y + hy };
+}
+
+/**
+ * Whether a label's box overlaps a hex, by the separating axis test: the
+ * hex is the meeting of three bands half a cell either side of its center,
+ * across its flat sides, and the box's own two axes are the hex's box. Only
+ * `+`, `-`, `*` and comparisons, so every device agrees on replay.
+ */
+function boxTouchesHex(g: HexGrid, box: { x0: number; y0: number; x1: number; y1: number }, cell: Cell): boolean {
+  const h = hexBox(g, cell);
+  if (!(box.x0 < h.x1 && box.x1 > h.x0 && box.y0 < h.y1 && box.y1 > h.y0)) return false;
+  const c = hexCenter(g, { col: cell.x, row: cell.y });
+  // On hex rows the flat sides face east and west and the two sloped pairs face 60 degrees from them. Hex columns swap x and y.
+  const [ax, ay, bx, by] = g.orient === "rows" ? [box.x0 - c.x, box.y0 - c.y, box.x1 - c.x, box.y1 - c.y] : [box.y0 - c.y, box.x0 - c.x, box.y1 - c.y, box.x1 - c.x];
+  for (const sign of [1, -1]) {
+    // The normal (1/2, sign * HEX_S): a band from -1/2 to 1/2 across the hex.
+    const s = sign * HEX_S;
+    const p = [ax * 0.5 + ay * s, bx * 0.5 + ay * s, ax * 0.5 + by * s, bx * 0.5 + by * s];
+    if (Math.min(...p) >= 0.5 || Math.max(...p) <= -0.5) return false;
+  }
+  return true;
+}
+
+/**
+ * The hex shape a chunk's grid-keyed content stands on (HX-D14): a chunk
+ * of a hex scene that holds cells, edges, heights, stairs or difficult
+ * ground carries its scene's shape, and one left with none of them, or
+ * free walls only, carries none. A square scene's chunks are left as they
+ * are, so their stored form never changes.
+ */
+function stamped(tx: Tx, chunk: BuildChunk): BuildChunk {
+  const scene = tx.state.scenes[chunk.sceneId];
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  if (!isHex(g)) return chunk;
+  const keyed = Object.keys(chunk.cells).length > 0 || Object.keys(chunk.edges).length > 0 || chunk.heights !== undefined || chunk.up !== undefined || chunk.rough !== undefined;
+  const { grid: _grid, ...rest } = chunk;
+  const shape = shapeOfGrid(g);
+  return keyed && shape !== undefined ? { ...rest, grid: shape } : rest;
+}
+
+/** Writes a chunk, or removes it when nothing is left in it: no floor, edges, free walls, heights or stairs. On a hex scene it carries the stamp of its content (`stamped`). */
+export function writeChunk(tx: Tx, written: BuildChunk): void {
+  const chunk = stamped(tx, written);
   const empty =
     Object.keys(chunk.cells).length === 0 &&
     Object.keys(chunk.edges).length === 0 &&
