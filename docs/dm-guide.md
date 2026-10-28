@@ -272,9 +272,9 @@ Most tables play on squares, and a new room does too. If your maps are drawn on 
 
 **Choosing a shape.** There are three places, from the widest to the narrowest:
 
-- **Grid on new scenes**, in **Menu**, **Room settings**, **Grid and distance**, is the shape a new Battle mat or Map image starts with. It is **Squares** in every room until you change it, so nothing changes for a table that never touches it. Set it once if you prefer hexes, and you won't have to change each new scene.
+- **Grid on new scenes**, in **Menu**, **Room settings**, **Grid and distance**, is the shape a new Battle mat or Map image starts with. It is **Squares** in every room until you change it, so nothing changes for a table that never touches it. Set it once if you prefer hexes, and you won't have to change each new scene. It looks and works just like a scene's own Grid shape.
 - The **Grid** row in **New scene** changes the shape for the one scene you are making.
-- **Grid shape**, in a scene's **Map image and grid** settings, changes a scene that already exists. A map scene that changes shape opens **Line up grid**, because the art's cells are another shape now.
+- **Grid shape**, in a scene's **Map image and grid** settings, changes a scene that already exists. A map scene that changes shape opens **Line up grid**, because the art's cells are another shape now. On a small phone with a large interface size, the three shapes stand one under another instead of sharing a row, so each name stays whole.
 
 Scenes you made before hex grids came to the app stay squares, and a duplicate keeps the shape of the scene it copies.
 
