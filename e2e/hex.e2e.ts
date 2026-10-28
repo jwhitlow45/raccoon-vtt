@@ -27,7 +27,11 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * steps (HX4-) then make hex scenes through the settings: the room's New
  * scenes grid, the new scene form, a scene's Grid shape and its refusal,
  * Line up grid's box on a hex map, no "square" on a hex scene's screens,
- * and those screens' alignment.
+ * and those screens' alignment. Lane HX-6's steps (HX6-) build a hex
+ * scene of its own: Wall lines tapped and dragged, a free door's states,
+ * Remove and undo, difficult ground by hexes, Erase by hexes, a player's
+ * creature opening a free door from a hex beside it, and those screens'
+ * alignment.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus 31. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -87,6 +91,10 @@ const run = {
   /** The battle mat HX4-1 makes through the new scene form, on the room's hex rows. */
   camp: "",
   moor: randomUUID(),
+  /** Lane HX-6's hex scene (HX6-): Wall lines, difficult ground and a free door. */
+  hall: randomUUID(),
+  ash: randomUUID(),
+  hallDoor: "hx6door00001",
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -1066,6 +1074,181 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
       await phone?.context.close();
     }
     assert.deepEqual(wrong, []);
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  /** HX-6's helpers: the builder's bar, a tap on the board, and the hall's free walls in the DM's state. */
+  const buildBar = (page: Page) => page.getByRole("toolbar", { name: "Map builder options" });
+  async function tapAt(page: Page, world: { x: number; y: number }): Promise<void> {
+    const p = await pagePoint(page, BOUNDS, world);
+    await assertCanvasAt(page, p);
+    await page.mouse.click(p.x, p.y);
+  }
+  function hallWalls(): { id: string; a: [number, number]; b: [number, number]; f: { kind: string; state?: string } }[] {
+    return Object.values(dmSocket.state?.buildChunks ?? {}).flatMap((c) => (c && c.sceneId === run.hall ? (c.walls ?? []) : []));
+  }
+  const corner = (col: number, row: number, k: 0 | 1) => cornerAt(G, { hex: { col, row }, k });
+  const same = (p: readonly [number, number], q: { x: number; y: number }) => Math.abs(p[0] - q.x) < 1e-9 && Math.abs(p[1] - q.y) < 1e-9;
+  const joins = (w: { a: [number, number]; b: [number, number] }, p: { x: number; y: number }, q: { x: number; y: number }) => (same(w.a, p) && same(w.b, q)) || (same(w.a, q) && same(w.b, p));
+
+  test("HX6-1. on a hex scene Walls and doors draws Wall lines: taps snap to hex corners and Done puts free walls down, split past 8 cells, and a drag puts a door down straight", async () => {
+    await ops.send({ t: "scene.create", scene: { id: run.hall, name: "Hall", bounds: BOUNDS, gridShape: "hexRows" } });
+    await waitFor("the hall in the DM's state", () => dmSocket.state?.scenes[run.hall] ?? null);
+    await dm.setViewportSize({ width: 1440, height: 900 });
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.hall);
+    await dm.keyboard.press("Escape");
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await pickTool(dm, "Map builder");
+    await pickOption(dm, "Map builder", "Builder mode", "Walls and doors");
+    const bar = buildBar(dm);
+    await bar.locator("[data-options-line]").filter({ hasText: "Tap points for a wall line, then Done, or drag for a straight wall." }).waitFor();
+    assert.equal(await bar.getByRole("button", { name: "Snap to hex corners" }).getAttribute("aria-pressed"), "true", "Snap to hex corners is on");
+
+    // Each tap a little off its corner: 10 cells along row 4's north points, then down to row 8's.
+    const a = corner(4, 4, 0);
+    const b = corner(14, 4, 0);
+    const c = corner(14, 8, 0);
+    for (const p of [a, b, c]) await tapAt(dm, { x: p.x + 0.12, y: p.y + 0.06 });
+    await bar.getByRole("button", { name: "Done", exact: true }).click();
+    await waitFor("the wall line's three free walls", () => (hallWalls().length === 3 ? true : null));
+    const walls = hallWalls();
+    const mid = walls.find((w) => joins(w, a, { x: (a.x + b.x) / 2, y: a.y }));
+    assert.ok(mid, `the 10 cell run splits in two at its middle: ${JSON.stringify(walls)}`);
+    assert.ok(walls.some((w) => joins(w, { x: (a.x + b.x) / 2, y: a.y }, b)));
+    assert.ok(walls.some((w) => joins(w, b, c)), "the run down from the corner");
+    assert.ok(walls.every((w) => w.f.kind === "wall"));
+    assert.equal(Object.values(dmSocket.state!.buildChunks).some((ch) => ch?.sceneId === run.hall && ch.grid !== undefined), false, "free walls carry no stamp");
+
+    await pickOption(dm, "Map builder", "Edge", "Door");
+    const p = corner(10, 10, 1);
+    const q = corner(11, 10, 1);
+    await holdDrag(dm, { x: p.x + 0.1, y: p.y - 0.05 }, { x: q.x - 0.1, y: q.y + 0.05 });
+    await dm.mouse.up();
+    await waitFor("the dragged door", () => (hallWalls().some((w) => w.f.kind === "door" && joins(w, p, q)) ? true : null));
+    await shots.take(dm, "hx6-wall-lines");
+  });
+
+  test("HX6-2. a tap on a free door steps it open, Remove takes a wall off, and Undo puts it back", async () => {
+    const p = corner(10, 10, 1);
+    const q = corner(11, 10, 1);
+    await tapAt(dm, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+    await waitFor("the door open", () => (hallWalls().some((w) => joins(w, p, q) && w.f.state === "open") ? true : null));
+    await pickOption(dm, "Map builder", "Edge", "Remove");
+    await buildBar(dm).locator("[data-options-line]").filter({ hasText: "Tap a wall, door or window to remove it." }).waitFor();
+    const b = corner(14, 4, 0);
+    const c = corner(14, 8, 0);
+    await tapAt(dm, { x: b.x + 0.04, y: (b.y + c.y) / 2 });
+    await waitFor("the wall down taken off", () => (hallWalls().some((w) => joins(w, b, c)) ? null : true));
+    await buildBar(dm).getByRole("button", { name: "Undo your last change" }).click();
+    await waitFor("the wall down back", () => (hallWalls().some((w) => joins(w, b, c)) ? true : null));
+  });
+
+  test("HX6-3. Difficult ground marks hexes under hex keys in a stamped chunk, and Erase takes them by hexes, with the door whose middle lies in an erased hex", async () => {
+    await pickOption(dm, "Map builder", "Builder mode", "Difficult ground");
+    const rough = (col: number, row: number) => {
+      const ch = dmSocket.state?.buildChunks[`${run.hall}:${Math.floor(col / 16)},${Math.floor(row / 16)}`];
+      return ch?.rough?.[(row % 16) * 16 + (col % 16)] === "d";
+    };
+    await tapAt(dm, hexCenter(G, { col: 12, row: 14 }));
+    await waitFor("hex 12,14 marked", () => (rough(12, 14) ? true : null));
+    assert.equal(dmSocket.state!.buildChunks[`${run.hall}:0,0`]?.grid, "hexRows", "its chunk carries the shape");
+    await holdDrag(dm, hexCenter(G, { col: 2, row: 14 }), hexCenter(G, { col: 6, row: 14 }));
+    await dm.mouse.up();
+    await waitFor("hexes 2 to 6 of row 14 marked", () => ([2, 3, 4, 5, 6].every((c) => rough(c, 14)) ? true : null));
+    assert.equal(rough(2, 13) || rough(2, 15), false, "and no hex of the rows beside");
+    await shots.take(dm, "hx6-difficult-ground");
+
+    await pickOption(dm, "Map builder", "Builder mode", "Erase");
+    await buildBar(dm).locator("[data-options-line]").filter({ hasText: "Drag to erase walls, doors, windows, difficult ground, labels, stamps and lights." }).waitFor();
+    await tapAt(dm, hexCenter(G, { col: 4, row: 14 }));
+    await waitFor("hex 4,14 erased", () => (!rough(4, 14) && rough(3, 14) && rough(5, 14) ? true : null));
+    const p = corner(10, 10, 1);
+    const q = corner(11, 10, 1);
+    const doorHex = hexAt(G, { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+    await tapAt(dm, hexCenter(G, doorHex));
+    await waitFor("the door erased with its hex", () => (hallWalls().some((w) => w.f.kind === "door") ? null : true));
+  });
+
+  test("HX6-4. Pat's creature on the hex next to one beside a free door opens it, and from two hexes off it is too far", async () => {
+    // Along the west side of hex 5,12, between it and hex 4,12.
+    const sides = hexCorners(G, { col: 5, row: 12 }).map((k) => cornerAt(G, k));
+    const lat = (v: number) => Math.round(v * 64) / 64;
+    const door = { id: run.hallDoor, a: [lat(sides[4]!.x), lat(sides[4]!.y)] as [number, number], b: [lat(sides[5]!.x), lat(sides[5]!.y)] as [number, number], f: { kind: "door" as const, state: "closed" as const, secret: false, discovered: false } };
+    await ops.send({ t: "build.walls", sceneId: run.hall, put: [door] });
+    const ash = creature(run.ash, "Ash", "medium", { col: 3, row: 12 }, { kind: "pc", disposition: "ally", ownerIds: [run.patId] });
+    await ops.send({ ...ash, token: { ...ash.token, sceneId: run.hall } });
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.hall });
+    await pat.bringToFront();
+    await waitFor("the hall's door in Pat's copy", () => (Object.values(patSocket.state?.buildChunks ?? {}).some((c) => c?.sceneId === run.hall && c.walls?.some((w) => w.id === run.hallDoor)) ? true : null));
+    await pat.getByRole("button", { name: "Fit the map to the screen" }).click();
+    const doorMid = { x: (door.a[0] + door.b[0]) / 2, y: (door.a[1] + door.b[1]) / 2 };
+    const open = async () => {
+      await tapAt(pat, doorMid);
+      const pill = pat.getByRole("group", { name: "Closed door" });
+      await pill.getByRole("button", { name: "Open" }).click();
+    };
+    const doorState = () => Object.values(dmSocket.state?.buildChunks ?? {}).flatMap((c) => (c?.sceneId === run.hall ? (c.walls ?? []) : [])).find((w) => w.id === run.hallDoor)?.f;
+    await open();
+    await waitFor("the door open, from one hex off", () => (doorState()?.kind === "door" && (doorState() as { state: string }).state === "open" ? true : null));
+    await shots.take(pat, "hx6-pat-door-open");
+
+    await ops.send({ t: "door.set", sceneId: run.hall, door: { cx: Math.floor(doorMid.x / 16), cy: Math.floor(doorMid.y / 16), id: run.hallDoor }, state: "closed" });
+    await ops.send({ t: "token.update", tokenId: run.ash, patch: placedOnHex(G, { size: "medium", x: 0, y: 0 }, { col: 2, row: 12 }) });
+    await waitFor("the door shut and Ash two hexes off in Pat's copy", () => {
+      const t = patSocket.state?.tokens[run.ash];
+      const shut = Object.values(patSocket.state?.buildChunks ?? {}).some((c) => c?.walls?.some((w) => w.id === run.hallDoor && w.f.kind === "door" && w.f.state === "closed"));
+      return t && tokenRefHex(G, t).col === 2 && shut ? true : null;
+    });
+    await open();
+    await pat.getByText("Too far from the door.").first().waitFor();
+    assert.equal((doorState() as { state: string }).state, "closed");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await dm.bringToFront();
+  });
+
+  test("HX6-5. the builder's Wall lines with a line begun, Difficult ground's hex brush and Erase sit within 1 px at each size", async () => {
+    const off: string[] = [];
+    let phoneContext: BrowserContext | null = null;
+    try {
+      for (const size of SIZES) {
+        let page = dm;
+        if (size.touch) {
+          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+          const pages = phoneContext.pages();
+          page = pages[0] ?? (await phoneContext.newPage());
+          if (pages.length === 0) consoles.phone.attach(page);
+        }
+        for (const scale of SCALES) {
+          const at = `${size.name} at ${scale * 100}%`;
+          await openAt(page, size, scale);
+          const panel = await openScenes(page);
+          await viewScene(page, panel, run.hall);
+          await page.keyboard.press("Escape");
+          await pickTool(page, "Map builder");
+          const bar = buildBar(page);
+          await pickOption(page, "Map builder", "Builder mode", "Walls and doors");
+          await pickOption(page, "Map builder", "Edge", "Wall");
+          await page.getByRole("button", { name: "Fit the map to the screen" }).click();
+          await tapAt(page, corner(15, 10, 0));
+          await bar.getByRole("button", { name: "Done", exact: true }).waitFor();
+          off.push(...alignmentLines(await measureAlignment(bar), `Wall lines with a line begun at ${at}`));
+          await shots.take(page, `hx6-wall-line-bar-${size.name}-${scale * 100}`);
+          // A new mode drops the line begun.
+          await pickOption(page, "Map builder", "Builder mode", "Difficult ground");
+          await bar.locator("[data-options-line]").first().waitFor();
+          off.push(...alignmentLines(await measureAlignment(bar), `Difficult ground on hexes at ${at}`));
+          await shots.take(page, `hx6-rough-bar-${size.name}-${scale * 100}`);
+          await pickOption(page, "Map builder", "Builder mode", "Erase");
+          await bar.locator("[data-options-line]").filter({ hasText: "Drag to erase walls" }).waitFor();
+          off.push(...alignmentLines(await measureAlignment(bar), `Erase on hexes at ${at}`));
+          await shots.take(page, `hx6-erase-bar-${size.name}-${scale * 100}`);
+          await pickTool(page, "Select");
+        }
+      }
+    } finally {
+      await phoneContext?.close();
+    }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
