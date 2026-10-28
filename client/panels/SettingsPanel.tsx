@@ -9,7 +9,8 @@ import { Help, Section } from "../components/Panel.tsx";
 import { RadioCards } from "../components/RadioCards.tsx";
 import { SettingRow } from "../components/SettingRow.tsx";
 import { Switch } from "../components/Switch.tsx";
-import { roomHasHexes, type ShapeChoice } from "../features/grid/words.ts";
+import { ShapeRow } from "../features/grid/ShapeRow.tsx";
+import { roomHasHexes } from "../features/grid/words.ts";
 import type { PanelProps } from "../features/panels.ts";
 import { timerChoices } from "../features/encounter/timer.ts";
 import { ExportSection } from "../features/settings/ExportSection.tsx";
@@ -114,17 +115,8 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
         </div>
       );
     case "gridShape":
-      return (
-        <div style={{ padding: `${theme.space(2)}px 0` }}>
-          <RadioCards<ShapeChoice>
-            legend={field.label}
-            help={field.help}
-            value={newScenesShape(settings)}
-            options={field.options}
-            onChange={(v) => onChange({ newScenes: v } as Partial<RoomSettings>)}
-          />
-        </div>
-      );
+      // The scene's own Grid shape choice, so one choice has one look (docs/design-v1-design-pass.md 4.2). A room refuses no shape.
+      return <ShapeRow name={field.label} help={field.help} value={newScenesShape(settings)} onChange={(v) => onChange({ newScenes: v } as Partial<RoomSettings>)} />;
     case "choice":
       // Each key's options are typed to its own values, so the cast only widens for the shared component.
       return (

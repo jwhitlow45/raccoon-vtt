@@ -329,7 +329,7 @@ async function openRoomSettings(page: Page): Promise<Locator> {
   const back = page.getByRole("button", { name: /^Back to Menu/ });
   if ((await back.count()) > 0 && (await back.first().isVisible())) await back.first().click();
   await menu.getByRole("button", { name: /^Room settings/ }).click();
-  await menu.getByRole("group", { name: "Grid on new scenes" }).waitFor();
+  await menu.getByRole("radiogroup", { name: "Grid on new scenes" }).waitFor();
   return menu;
 }
 
@@ -371,6 +371,88 @@ async function viewScene(page: Page, panel: Locator, sceneId: string): Promise<v
 async function describedBy(target: Locator): Promise<string[]> {
   const ids = ((await target.getAttribute("aria-describedby")) ?? "").split(" ").filter(Boolean);
   return Promise.all(ids.map(async (id) => (await target.page().locator(`[id="${id}"]`).count()) > 0 ? target.page().locator(`[id="${id}"]`).innerText() : `missing ${id}`));
+}
+
+/**
+ * What is wrong with a choice of three even options that wrap
+ * (docs/design-v1-design-pass.md 4.2), as lines: `stack` wants one option
+ * per row at the group's full width, else all three on one row. Every
+ * option is 44 px or more each way, no word breaks across lines, and
+ * `wraps` names an option whose words take two lines, broken between them.
+ */
+async function threeLines(group: Locator, stack: boolean, screen: string, wraps: string | null = null): Promise<string[]> {
+  const got = await group.evaluate((node) => {
+    // The e2e files build without the DOM's types, so the few used here are named by hand.
+    type Rect = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+    type Text = { nodeType: number; textContent: string | null };
+    type Elem = { getBoundingClientRect(): Rect; querySelectorAll(s: string): ArrayLike<Elem>; childNodes: ArrayLike<Text> };
+    type Range = { selectNodeContents(n: unknown): void; setStart(n: unknown, at: number): void; setEnd(n: unknown, at: number): void; getClientRects(): ArrayLike<Rect> };
+    const doc = (globalThis as unknown as { document: { createRange(): Range } }).document;
+    const el = node as unknown as Elem;
+    const box = el.getBoundingClientRect();
+    const lineTops = (range: Range) => new Set(Array.from(range.getClientRects()).filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+    const options = Array.from(el.querySelectorAll("label")).map((label) => {
+      const r = label.getBoundingClientRect();
+      const text = Array.from(label.childNodes).find((n) => n.nodeType === 3);
+      const words = text?.textContent ?? "";
+      const range = doc.createRange();
+      let lines = 0;
+      const split: string[] = [];
+      if (text) {
+        range.selectNodeContents(text);
+        lines = lineTops(range);
+        let at = 0;
+        for (const word of words.split(" ")) {
+          range.setStart(text, at);
+          range.setEnd(text, at + word.length);
+          if (lineTops(range) > 1) split.push(word);
+          at += word.length + 1;
+        }
+      }
+      return { text: words, l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height, lines, split };
+    });
+    return { l: box.left, r: box.right, options };
+  });
+  const out: string[] = [];
+  const say = (line: string) => out.push(`${screen}: ${line}`);
+  if (got.options.length !== 3) say(`${got.options.length} options`);
+  got.options.forEach((o, i) => {
+    if (o.w < 44 || o.h < 44) say(`${o.text} is ${o.w.toFixed(1)} x ${o.h.toFixed(1)}`);
+    if (o.split.length > 0) say(`${o.text} breaks inside ${o.split.join(", ")}`);
+    const before = got.options[i - 1];
+    if (stack) {
+      if (Math.abs(o.l - got.l) > 1 || Math.abs(o.r - got.r) > 1) say(`${o.text} spans ${o.l.toFixed(1)} to ${o.r.toFixed(1)}, not the row's ${got.l.toFixed(1)} to ${got.r.toFixed(1)}`);
+      if (before && o.t < before.b - 1) say(`${o.text} is not under ${before.text}`);
+    } else if (before && (Math.abs(o.t - before.t) > 1 || o.l < before.r - 1)) say(`${o.text} is not beside ${before.text}`);
+  });
+  if (wraps) {
+    const o = got.options.find((x) => x.text === wraps);
+    if (o?.lines !== 2) say(`${wraps} takes ${o?.lines ?? 0} lines, not 2`);
+  }
+  return out;
+}
+
+/** Whether the page, or the scroller that holds `inside`, scrolls sideways. */
+async function sideways(inside: Locator, screen: string): Promise<string[]> {
+  const wide = await inside.evaluate((node) => {
+    type Elem = { scrollWidth: number; clientWidth: number; parentElement: Elem | null; tagName: string; textContent: string | null; getBoundingClientRect(): { left: number; right: number }; querySelectorAll(s: string): ArrayLike<Elem> };
+    const page = globalThis as unknown as { document: { documentElement: Elem }; getComputedStyle(el: Elem): { overflowX: string } };
+    const out: string[] = [];
+    const root = page.document.documentElement;
+    if (root.scrollWidth > root.clientWidth + 1) out.push(`the page is ${root.scrollWidth} px wide in ${root.clientWidth}`);
+    for (let at: Elem | null = node as unknown as Elem; at; at = at.parentElement) {
+      const { overflowX } = page.getComputedStyle(at);
+      if ((overflowX === "auto" || overflowX === "scroll") && at.scrollWidth > at.clientWidth + 1) {
+        // The innermost element that runs past the scroller's right edge, so a failure names what is too wide.
+        const edge = at.getBoundingClientRect().right;
+        const past = Array.from(at.querySelectorAll("*")).filter((e) => e.getBoundingClientRect().right > edge + 1);
+        const last = past[past.length - 1];
+        out.push(`a scroller is ${at.scrollWidth} px wide in ${at.clientWidth}${last ? `, past its edge: ${last.tagName} "${(last.textContent ?? "").slice(0, 40)}"` : ""}`);
+      }
+    }
+    return out;
+  });
+  return wide.map((line) => `${screen}: ${line}`);
 }
 
 /** H1's limit lines, which say what a hex scene leaves to squares (section 6's table). */
@@ -766,8 +848,10 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   test("HX4-1. Room settings start new scenes on hex rows, and the new scene form shows it: a battle mat and a map image on hex rows, a builder scene and starter maps on squares", async () => {
     await dm.bringToFront();
     const menu = await openRoomSettings(dm);
-    const start = menu.getByRole("group", { name: "Grid on new scenes" });
-    await start.getByText(NEW_SCENES_HELP, { exact: true }).waitFor();
+    // The scene's own Grid shape choice, described by the setting's help (docs/design-v1-design-pass.md 4.2).
+    const start = menu.getByRole("radiogroup", { name: "Grid on new scenes" });
+    await menu.getByText(NEW_SCENES_HELP, { exact: true }).waitFor();
+    assert.deepEqual(await describedBy(start), [NEW_SCENES_HELP]);
     assert.equal(await start.getByRole("radio", { name: "Squares" }).isChecked(), true, "the room holds a hex scene, so it names hexes, but new scenes still start on squares");
     assert.equal(dmSocket.state?.meta.settings.newScenes, undefined);
     await start.getByRole("radio", { name: "Hex rows" }).check();
@@ -888,7 +972,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           const at = `${size.name} at ${scale * 100}%`;
           await openAt(page, size, scale);
           const menu = await openRoomSettings(page);
-          await menu.getByRole("group", { name: "Grid on new scenes" }).scrollIntoViewIfNeeded();
+          await menu.getByRole("radiogroup", { name: "Grid on new scenes" }).scrollIntoViewIfNeeded();
           off.push(...alignmentLines(await measureAlignment(menu), `Room settings at ${at}`));
           await shots.take(page, `hx4-room-settings-${size.name}-${scale * 100}`);
           await page.keyboard.press("Escape");
@@ -927,6 +1011,63 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     } finally {
       await phone?.context.close();
     }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  test("dp-2a. Grid shape, Kind of scene, the new scene form's Grid and Room settings' Grid on new scenes stand one per row at full width at 320 x 568 and 130%, else share one row, Hex columns wrapping between its words at 390 x 844 and 130%, with no option under 44 px, no sideways scroll, and within 1 px at each size (docs/design-v1-design-pass.md 4.2)", async () => {
+    const wrong: string[] = [];
+    const off: string[] = [];
+    let phoneContext: BrowserContext | null = null;
+    try {
+      for (const size of SIZES) {
+        let page = dm;
+        if (size.touch) {
+          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+          const pages = phoneContext.pages();
+          page = pages[0] ?? (await phoneContext.newPage());
+          if (pages.length === 0) consoles.phone.attach(page);
+        }
+        for (const scale of SCALES) {
+          const at = `${size.name} at ${scale * 100}%`;
+          // Measured at 320 x 568 and 130%, each row is under 220 px: 213 in a scene's settings, 187 in the new scene form.
+          const stack = size.name === "320x568" && scale === 1.3;
+          await openAt(page, size, scale);
+
+          const menu = await openRoomSettings(page);
+          const start = menu.getByRole("radiogroup", { name: "Grid on new scenes" });
+          await start.scrollIntoViewIfNeeded();
+          wrong.push(...(await threeLines(start, stack, `Grid on new scenes at ${at}`)), ...(await sideways(start, `Room settings at ${at}`)));
+          off.push(...alignmentLines(await measureAlignment(start.locator("xpath=..")), `Grid on new scenes at ${at}`));
+          await shots.take(page, `dp-2a-room-settings-${size.name}-${scale * 100}`);
+          await page.keyboard.press("Escape");
+
+          const panel = await openScenes(page);
+          await viewScene(page, panel, run.camp);
+          await openSceneGroup(panel, "Map image and grid");
+          const shape = panel.getByRole("radiogroup", { name: "Grid shape", exact: true });
+          await shape.scrollIntoViewIfNeeded();
+          wrong.push(...(await threeLines(shape, stack, `Grid shape at ${at}`, size.name === "390x844" && scale === 1.3 ? "Hex columns" : null)), ...(await sideways(shape, `a scene's settings at ${at}`)));
+          off.push(...alignmentLines(await measureAlignment(shape.locator("xpath=..")), `Grid shape at ${at}`));
+          await shots.take(page, `dp-2a-grid-shape-${size.name}-${scale * 100}`);
+
+          const kinds = panel.getByRole("radiogroup", { name: "Kind of scene", exact: true });
+          await kinds.scrollIntoViewIfNeeded();
+          wrong.push(...(await threeLines(kinds, stack, `Kind of scene at ${at}`)));
+          off.push(...alignmentLines(await measureAlignment(kinds.locator("xpath=..")), `Kind of scene at ${at}`));
+          await kinds.getByRole("radio", { name: "Battle mat", exact: true }).click();
+          const grid = panel.getByRole("radiogroup", { name: "Grid", exact: true });
+          await grid.scrollIntoViewIfNeeded();
+          wrong.push(...(await threeLines(grid, stack, `the new scene form's Grid at ${at}`)), ...(await sideways(grid, `the new scene form at ${at}`)));
+          off.push(...alignmentLines(await measureAlignment(grid.locator("xpath=..")), `the new scene form's Grid at ${at}`));
+          await shots.take(page, `dp-2a-new-scene-${size.name}-${scale * 100}`);
+          await panel.getByRole("button", { name: "Cancel", exact: true }).first().click();
+          await page.keyboard.press("Escape");
+        }
+      }
+    } finally {
+      await phoneContext?.close();
+    }
+    assert.deepEqual(wrong, []);
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
