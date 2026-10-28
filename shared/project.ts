@@ -74,7 +74,7 @@ import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
-import { zoneRanges } from "./rules/traps.ts";
+import { zoneFogged, zoneRanges } from "./rules/traps.ts";
 import { clipFootprint, seesCreature, sightClipOf, sightRect } from "./rules/vision.ts";
 import type { SegmentIndex } from "./rules/segments.ts";
 import { sceneWalls, type WallSet } from "./rules/walls.ts";
@@ -2469,7 +2469,8 @@ function projectTrapCtx(ctx: Ctx, trap: Trap): ProjectedTrap | null {
   if (scene?.fogEnabled) {
     const fogs = ctx.presence(trap.sceneId);
     const fogged = (r: CellRange) => isRangeFullyFogged(fogs, trap.sceneId, r, (x, y) => ctx.fogged(trap.sceneId, x, y));
-    if (zoneRanges(ctx.state, trap.sceneId, zone).every(fogged)) return null;
+    // On hexes by the sub-cells inside its hexes, so ground revealed beside them never shows it (docs/design-v1-hex-grids.md H2).
+    if (zoneFogged(ctx.state, trap.sceneId, zone, fogged, (sx, sy) => ctx.fogged.sub(trap.sceneId, sx, sy))) return null;
   }
   let out = playerTraps.get(trap);
   if (!out) {
