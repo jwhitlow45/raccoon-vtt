@@ -8,7 +8,7 @@ import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { ctxOf } from "../../features/areas/volumeTesting.ts";
 import { FogView } from "./fogView.ts";
 import type { LiveSub } from "./stand.ts";
-import { BoardVolumes, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
+import { BoardVolumes, viewBoxOf, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
 
 /*
  * The board's areas standing as their real shapes
@@ -179,6 +179,26 @@ describe("the board's areas standing as their real shapes", () => {
     assert.equal(shows(v.now(0, VIEW, w2)), " waiting");
     asTheBoard(v, w2);
     assert.equal(shows(v.now(0, VIEW, w2)), "a");
+  });
+
+  test("a tall cylinder or a steep line seen only at its top builds and says it waits before its first build (review ISOA2-ASTRA-01)", () => {
+    const at = { x: 24.5, y: 24.5, z: 0 };
+    const tall: AreaTemplateInput[] = [
+      { id: "pillar", rev: 1, shape: "cylinder", size: 5, height: 100, origin: at, yaw: 0, includeOrigin: true },
+      { id: "beam", rev: 1, shape: "line", size: 100, width: 5, pitch: 90, origin: at, yaw: 0, includeOrigin: true },
+    ];
+    for (const t of tall) {
+      const v = new BoardVolumes();
+      const w = world();
+      v.sync([entry(t)], w);
+      // A view of its top 15 ft alone, 85 ft over the ground.
+      const top = viewBoxOf({ x0: 23.5, y0: 23.5, z0: 17, x1: 25.5, y1: 25.5, z1: 20 }, 0);
+      assert.equal(shows(v.now(0, top, w)), " waiting", t.shape);
+      let steps = 0;
+      while (v.step(0, top, w, -Infinity).more) steps++;
+      assert.ok(steps > 0, `${t.shape} built`);
+      assert.equal(shows(v.now(0, top, w)), t.id, t.shape);
+    }
   });
 
   test("a turn's drawing is made once: a later visit to that turn stands at once", () => {

@@ -716,6 +716,35 @@ function radiusOf(s: AreaSolid): number {
   }
 }
 
+/** How low and high a solid's mesh reaches, in cells, from its parameters: every vertex of its shell lies on or inside the solid. */
+function heightsOf(s: AreaSolid): { z0: number; z1: number } {
+  switch (s.kind) {
+    case "sphere":
+      return { z0: s.c.z - s.r, z1: s.c.z + s.r };
+    case "cylinder":
+      return { z0: Math.min(s.z0, s.z1), z1: Math.max(s.z0, s.z1) };
+    case "cone": {
+      // The rim is a circle of radius L / 2 square to the axis, so it rises and falls about the base's middle by that much times its tilt from level.
+      const base = s.apex.z + s.a.z * s.L;
+      const rim = (s.L / 2) * Math.hypot(s.n.z, s.m.z);
+      return { z0: Math.min(s.apex.z, base - rim), z1: Math.max(s.apex.z, base + rim) };
+    }
+    case "box":
+      return boxHeights(s, 0);
+    case "rounded":
+      return boxHeights(s.box, s.D);
+    case "hexStack":
+      // No layer more than the reach's steps from the source's is in reach (eachHexPrism).
+      return { z0: s.reach.z0 - s.reach.steps, z1: s.reach.z1 + s.reach.steps };
+  }
+}
+
+function boxHeights(b: SolidBox, grow: number): { z0: number; z1: number } {
+  const [e0, e1, e2] = b.axes;
+  const half = Math.abs(e0.z) * b.half[0] + Math.abs(e1.z) * b.half[1] + Math.abs(e2.z) * b.half[2] + grow;
+  return { z0: b.c.z - half, z1: b.c.z + half };
+}
+
 /** The segments around a solid's mesh: none on a box, six on a hex stack's prisms. */
 function segmentsOf(s: AreaSolid, n: number): number {
   return s.kind === "box" ? 0 : s.kind === "hexStack" ? 6 : n;
@@ -1557,10 +1586,10 @@ export class Volume {
     this.#down0 = Math.max(1, Math.ceil(this.#bounds.h / CHUNK_CELLS));
     const n = segmentsAround(radiusOf(area.solid), input.px, input.coarse);
     this.segments = segmentsOf(area.solid, n);
-    // Before the build, a box sure to hold the solid: its plan's, as high and as low about its origin as the plan is wide.
+    // Before the build, a box sure to hold the solid: its plan's, and the heights its own parameters reach, as a tall pillar or a line aimed up reaches far past its width.
     const b = area.shape.bounds;
-    const reach = Math.max(b.x1 - b.x0, b.y1 - b.y0);
-    this.reach = { x0: b.x0, y0: b.y0, z0: area.originZ - reach, x1: b.x1, y1: b.y1, z1: area.originZ + reach };
+    const z = heightsOf(area.solid);
+    this.reach = { x0: b.x0, y0: b.y0, z0: z.z0, x1: b.x1, y1: b.y1, z1: z.z1 };
     this.#job = this.#build(area, n);
   }
 

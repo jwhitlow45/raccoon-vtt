@@ -529,6 +529,34 @@ describe("the cache (design 4.4)", () => {
   });
 });
 
+describe("the reach a volume says before it builds (review ISOA2-ASTRA-01)", () => {
+  test("holds its built box for every shape, tall cylinders, steep lines and a raised hex emanation among them", () => {
+    const rand = mulberry32(9 + SEED);
+    const bounds = { w: 40, h: 40 };
+    const tokens: Record<string, AreaToken> = { c: tok("c", { size: "large", x: 20, y: 20, elevation: 40 }) };
+    const at = { x: 20.5, y: 20.5, z: 0 };
+    const tall: { t: AreaTemplateInput; grid?: Grid }[] = [
+      { t: { id: "pillar", rev: 1, shape: "cylinder", size: 5, height: 100, origin: at, yaw: 0, includeOrigin: true } },
+      { t: { id: "up", rev: 1, shape: "line", size: 100, width: 5, pitch: 90, origin: at, yaw: 0, includeOrigin: true } },
+      { t: { id: "down", rev: 1, shape: "line", size: 100, width: 5, pitch: -75, origin: { ...at, z: 20 }, yaw: 30, includeOrigin: true } },
+      { t: { id: "cone", rev: 1, shape: "cone", size: 60, pitch: 80, origin: at, yaw: 0, includeOrigin: true } },
+      { t: { id: "cube", rev: 1, shape: "cube", size: 10, pitch: 45, origin: at, yaw: 45, includeOrigin: true } },
+      { t: { id: "hex", rev: 1, shape: "emanation", size: 15, origin: at, yaw: 0, includeOrigin: true, attachedTo: "c" }, grid: ROWS },
+    ];
+    const random: { t: AreaTemplateInput; grid?: Grid }[] = Array.from({ length: 60 * FUZZ }, (_, i) => ({ t: randomTemplate(rand, 40, 40, tokens, i) }));
+    for (const { t, grid } of [...tall, ...random]) {
+      const area = resolveArea(t, ctxOf(bounds, null, tokens, grid));
+      assert.ok(area, t.id);
+      const vol = buildVolume({ area, bounds, ground: () => 0, px: 32 });
+      const { reach } = vol;
+      const box = vol.box;
+      if (!box) continue;
+      const within = (lo: number, hi: number, a: number, b: number) => lo <= a + 1e-9 && b <= hi + 1e-9;
+      assert.ok(within(reach.x0, reach.x1, box.x0, box.x1) && within(reach.y0, reach.y1, box.y0, box.y1) && within(reach.z0, reach.z1, box.z0, box.z1), `${t.id} ${t.shape}: reach ${JSON.stringify(reach)} holds ${JSON.stringify(box)}`);
+    }
+  });
+});
+
 describe("the stand rule's footprint (design 4.2 step 9)", () => {
   const bounds = { w: 30, h: 30 };
 
