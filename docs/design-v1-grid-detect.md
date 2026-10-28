@@ -144,7 +144,7 @@ About 500 lines of new code and tests beyond the detector: one build lane and on
 
 ## 10. Hex grids (H3)
 
-Status: proposed, with a measured prototype, `client/features/grid/detectHex.ts` and its tests, which the app does not call yet. Revised for review round 1 (HX9A-ASTRA-01 to 03, HX9A-OPUS-01 to 05). The wiring in 10.7 waits for this section's review. Phase H3 of docs/design-v1-hex-grids.md asked for "a hex detector for Find the grid, measured on the evaluation's code-drawn hexes and its three real hex maps before it may apply anything". The project owner added: "The grid detection in particular should automatically detect square or hex so the user does not have to pick which one".
+Status: proposed, with a measured prototype, `client/features/grid/detectHex.ts` and its tests, which the app does not call yet. Revised for review rounds 1 and 2 (HX9A-ASTRA-01 to 03, HX9A-OPUS-01 to 06). The wiring in 10.7 waits for this section's review. Phase H3 of docs/design-v1-hex-grids.md asked for "a hex detector for Find the grid, measured on the evaluation's code-drawn hexes and its three real hex maps before it may apply anything". The project owner added: "The grid detection in particular should automatically detect square or hex so the user does not have to pick which one".
 
 Short answer: hexes are found as surely as squares, and a square grid is never read as hexes. On 92 code-drawn hex maps it finds 91, to 0.04% in size and a quarter pixel in place. Over square grids, triangle grids, turned hexes, hexes 1.1% or more out of shape and art without a grid it answers no grid every time. Hex tiles under a square grid are hexes to it, so when both shapes are found the surer is only offered. On real maps it finds the 4 regular hex grids it can see, refuses the 2 drawn out of shape, and finds no hexes on 13 real square-grid exports. All three looks (squares, hex rows, hex columns) take about 0.6 s on a 4096 px map on this Mac (an M5 Pro), in the Worker that already runs.
 
@@ -241,10 +241,11 @@ Confirming every passing fit and measuring where lines lie down the map cost abo
 - **Hexes over square tiles** of a similar size can fail the meeting check (one of 12). Lines too faint, or only on a few hexes under busy art, answer no grid rather than a guess.
 - **Small hexes**: under 12 px, or the long side over 200, are not looked for, as the scene limit says.
 - **How much of the map the sides cover** is reported, not checked: a grid on the floors of a few rooms is still the grid.
+- **Large hexes on a small map, or on a few rooms**, can show fewer than 4 lines of a family in both halves of the image, so that family's lean, and with it the turn or the shape, cannot be measured. Before round 2, hexes 1.1% out of shape passed so at 0.92 (150 px on 760 by 600). Such a find is held to medium (0.5 at most, `checked` false): offered, never applied. In the evaluation 5 of the 8 grids on the floors of rooms only (129 to 166 px hexes) are held so, and no other find.
 
 ### 10.5 What applies and what is offered
 
-Section 3's tiers: a high-confidence find applies as one undo step with Line up grid open on it and Use default beside Apply, a medium one only places the box, and under 0.3 is no grid. Two changes for shapes: a find of another shape than the scene's switches the shape only when it is high, the switch is allowed and the find is not contested (10.6), and a contested find is only offered, at any confidence. No run of the evaluation found hexes where none are drawn, so a lone hex find earns the same trust as squares. The real maps found came at 0.67 to 0.88.
+Section 3's tiers: a high-confidence find applies as one undo step with Line up grid open on it and Use default beside Apply, a medium one only places the box, and under 0.3 is no grid. Two changes for shapes: a find of another shape than the scene's switches the shape only when it is high, the switch is allowed and the find is not contested (10.6), and a contested find is only offered, at any confidence. A hex find whose turn or shape could not be measured (10.4) is at most medium, so it too is only offered and never switches the shape. No run of the evaluation found hexes where none are drawn, so a lone hex find earns the same trust as squares. The real maps found came at 0.67 to 0.88.
 
 ### 10.6 The guard between squares and hexes
 
@@ -289,7 +290,8 @@ One build lane, after LP23-B's fixes to `client/features/grid/` land.
 | Lines 7 and 9 px wide | found on the second look | `detectHex.test.ts` |
 | A find whose sides barely break at the corners | refused under 0.3, then found on the second look | `detectHex.test.ts` |
 | Several fits pass | the surest after the look along the lines | `detectHex.test.ts` |
-| Hexes 1.1% out of shape, and 0.9%, at 60, 100 and 150 px, both orientations | no grid, and found | `detectHex.test.ts` |
+| Hexes 1.1% out of shape, and 0.9%, at 60 and 100 px on 760 by 600 and 150 px on 1200 by 900, both orientations | no grid, and found | `detectHex.test.ts` |
+| 150 px hexes on 760 by 600, regular and 1.1% out of shape, both orientations: too few lines to measure the lean | found, held to medium, `checked` false | `detectHex.test.ts` |
 | The other orientation, squares, triangle grids, art, turned 0.35 and 2 degrees, a thick grid turned 0.3 degrees, resized 5% out of proportion | no grid, with its reason | `detectHex.test.ts` |
 | A hex grid to `detectGrid` | no grid | `detectHex.test.ts` |
 | Squares over hex tiles | squares picked, contested | `detectHex.test.ts` |

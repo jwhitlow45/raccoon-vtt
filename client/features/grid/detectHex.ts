@@ -74,6 +74,13 @@ export type HexFound = {
   broken: number;
   /** The share of the hexes' sides that show: how much of the map the grid covers. Reported, not a check: a grid on the floors of a few rooms is still the grid. */
   coverage: number;
+  /**
+   * Whether every family's lean could be measured, so the turn and the
+   * shape were checked. When a family shows too few lines in both halves
+   * of the image (large hexes on a small map), they were not, and the
+   * confidence is held to `UNCHECKED_MAX`: offered, never applied.
+   */
+  checked: boolean;
   families: [HexFamily, HexFamily, HexFamily];
 };
 
@@ -122,6 +129,12 @@ const SAME_SIZE = 0.01;
  * shape misses their lines by pixels across a map.
  */
 const MAX_STRETCH = 0.01;
+/**
+ * The most confidence a find gets when its turn or its shape could not be
+ * measured: medium, under findGrid.ts's HIGH_CONFIDENCE (0.6), so it is
+ * only offered. Hexes 1.1% out of shape passed as 0.92 so before.
+ */
+export const UNCHECKED_MAX = 0.5;
 /**
  * How far the three families' lines nearest the image's middle may miss
  * one crossing point, px, or this share of the period if larger. Measured
@@ -778,8 +791,10 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
   const coverage = best.values.filter((v) => v > threshold).length / best.values.length;
   // Sides that barely break at the corners lower the confidence, which
   // may fall under the cutoff here, after the profiles passed it.
-  const confidence = fit.score * clamp01((broken - MIN_BROKEN) / 0.3);
-  if (confidence < MIN_CONFIDENCE) return "low confidence";
+  const checked = upLean !== null && aLean !== null && bLean !== null;
+  const measured = fit.score * clamp01((broken - MIN_BROKEN) / 0.3);
+  if (measured < MIN_CONFIDENCE) return "low confidence";
+  const confidence = checked ? measured : Math.min(measured, UNCHECKED_MAX);
   const center = nearestCenter(best.center, cell, { x: f.W / 2, y: f.H / 2 });
   return {
     found: true,
@@ -791,6 +806,7 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
     polarity: fit.polarity,
     broken,
     coverage,
+    checked,
     families: fit.fams,
   };
 }

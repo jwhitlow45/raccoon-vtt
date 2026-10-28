@@ -3,7 +3,8 @@ import { describe, test } from "node:test";
 import type { HexOrient } from "#shared/rules/hex.ts";
 import { boxSides, HEX_BOX_DEPTH } from "./calibrate.ts";
 import { detectGrid, MIN_CONFIDENCE, type GridDetection, type Pixels } from "./detect.ts";
-import { detectHex, pickShape, type HexDetection } from "./detectHex.ts";
+import { detectHex, pickShape, UNCHECKED_MAX, type HexDetection } from "./detectHex.ts";
+import { HIGH_CONFIDENCE } from "./findGrid.ts";
 import { drawMap, toRgba, type SynthHexGrid, type SynthMap } from "./synthetic.ts";
 
 // Every map here is drawn by code (synthetic.ts). The wider evaluation,
@@ -219,6 +220,18 @@ describe("finding a map's drawn hex grid", () => {
           if (Math.abs(k - 1) > 0.01) assert.equal(!r.found && r.failed, "hexes out of shape", label);
           else assert.ok(r.found, label);
         }
+      }
+    }
+  });
+
+  test("large hexes on a small map, too few lines to measure their lean, are only offered: 1.1% out of shape at 150 px on 760 by 600", () => {
+    assert.ok(UNCHECKED_MAX < HIGH_CONFIDENCE);
+    for (const orient of ["rows", "columns"] as const) {
+      for (const k of [1.011, 1]) {
+        const drawn = drawMap(map({ height: Math.round(H * k), hexGrid: hexes(orient, 150, { x: 380, y: 300 }) }));
+        const r = detectHex(k === 1 ? drawn : stretched(drawn, k), { orient });
+        assert.ok(r.found, `${orient}, ${k}: the hexes are there to offer`);
+        assert.ok(!r.checked && r.confidence <= UNCHECKED_MAX, `${orient}, ${k}: offered at ${r.confidence.toFixed(2)}, never applied`);
       }
     }
   });
