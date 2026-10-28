@@ -170,8 +170,9 @@ export class BoardVolumes {
    * Builds toward standing every area in view until `deadline` (a
    * `performance.now()` time), nearest the middle first: true when there
    * is more to do. `changed` says what `now` gives has changed: an area
-   * whose every bucket in view is now drawn, or one decided flat. Work
-   * part of the way through an area changes nothing, so the board lays out
+   * whose every bucket in view is now drawn, or whose stand test passes
+   * with them drawn, one decided flat, or one whose old volume's test
+   * passes so it stands again while the next builds. Work part of the way through an area changes nothing, so the board lays out
    * again once an area, not once a bucket. `mid` is the middle of what the
    * viewer sees, past any panel over the board, in view units.
    */
@@ -184,15 +185,19 @@ export class BoardVolumes {
         const test = standOf(old, world.fog, world.live);
         if (test.result === null) {
           if (test.run(deadline) === null) return { more: true, changed };
-          if (!test.result) changed = true;
+          // Either answer can change what shows: the old volume decided flat, or standing again while the next builds.
+          if (!test.result || slot.turns.has(turn)) changed = true;
         }
       }
       const vol = slot.next!;
       if (!vol.built && !vol.prepare(deadline)) return { more: true, changed };
       const test = standOf(vol, world.fog, world.live);
+      // A test that passes changes what shows once every bucket in view is drawn, which they may be already: a sight change keeps the volume and its drawings.
+      let passed = false;
       if (test.result === null) {
         if (test.run(deadline) === null) return { more: true, changed };
         if (!test.result) changed = true;
+        passed = test.result === true;
       }
       if (!test.result) continue;
       const keys = viewKeys(vol, turn, view);
@@ -206,7 +211,7 @@ export class BoardVolumes {
         if (!vol.drawn(key, turn, deadline)) return { more: true, changed };
         drew = true;
       }
-      if (drew) changed = true;
+      if (drew || passed) changed = true;
     }
     return { more: false, changed };
   }

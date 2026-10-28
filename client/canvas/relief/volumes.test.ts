@@ -7,7 +7,8 @@ import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { ctxOf } from "../../features/areas/volumeTesting.ts";
 import { FogView } from "./fogView.ts";
-import { BoardVolumes, type VolumeEntry, type VolumeWorld } from "./volumes.ts";
+import type { LiveSub } from "./stand.ts";
+import { BoardVolumes, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
 
 /*
  * The board's areas standing as their real shapes
@@ -48,8 +49,30 @@ function fogBut(fogged: readonly (readonly [number, number])[]): { tiles: Record
 
 const flat = { at: () => 0 };
 
-function world(fog: FogView = new FogView(null, "s1", BOUNDS), tiles: unknown = null): VolumeWorld {
-  return { heights: flat, tiles, px: 32, fog, live: null };
+function world(fog: FogView = new FogView(null, "s1", BOUNDS), tiles: unknown = null, live: LiveSub | null = null): VolumeWorld {
+  return { heights: flat, tiles, px: 32, fog, live };
+}
+
+/** What the board shows of `now`: the areas standing, and whether "Building area shapes" shows. */
+function shows(n: VolumesNow): string {
+  return `${[...n.standing].sort().join(",")}${n.waiting ? " waiting" : ""}`;
+}
+
+/**
+ * Steps as the board does until nothing is left, each with a deadline
+ * already past, holding that a step which changes what `now` gives says
+ * so: the board lays out again only then (IsoBoard's slice loop).
+ */
+function asTheBoard(v: BoardVolumes, w: VolumeWorld, view = VIEW, turn: 0 | 1 | 2 | 3 = 0): void {
+  let shown = shows(v.now(turn, view, w));
+  for (let i = 0; i < 100_000; i++) {
+    const step = v.step(turn, view, w, -Infinity);
+    const now = shows(v.now(turn, view, w));
+    assert.ok(now === shown || step.changed, `step ${i} took the board from "${shown}" to "${now}" without saying it changed`);
+    shown = now;
+    if (!step.more) return;
+  }
+  assert.fail("never settled");
 }
 
 /** Steps until nothing is left, each with a deadline already past, and how many it took. */
@@ -132,6 +155,30 @@ describe("the board's areas standing as their real shapes", () => {
     settle(v, w2);
     assert.equal(v.now(0, VIEW, w2).pieces.length, 0);
     assert.ok(!v.now(0, VIEW, w2).waiting, "decided flat, nothing waits");
+  });
+
+  test("a stand test that ends on a large footprint says what stands has changed, for the volume shown and the one before it (review ISOA2-ASTRA-02)", () => {
+    // A 60 ft sphere covers about 7,400 sub-cells, past what a render tests at once.
+    const big = entry(sphere("a", 24, 24, 60));
+    const open = fogBut([]);
+    const v = new BoardVolumes();
+    const w0 = world(open.view, open.tiles, { subLive: () => true });
+    v.sync([big], w0);
+    settle(v, w0);
+    assert.ok(v.now(0, VIEW, w0).standing.has("a"));
+    // The viewer's sight moves within ground they already see: new live ground, the same volume and drawings.
+    const w1 = world(open.view, open.tiles, { subLive: () => true });
+    v.sync([big], w1);
+    assert.equal(shows(v.now(0, VIEW, w1)), " waiting", "flat while its test is read");
+    asTheBoard(v, w1);
+    assert.equal(shows(v.now(0, VIEW, w1)), "a");
+    // New fog tiles with nothing new fogged: a new volume builds, and the one shown stands once its own test passes.
+    const same = fogBut([[0, 0]]);
+    const w2 = world(same.view, same.tiles, w1.live);
+    v.sync([big], w2);
+    assert.equal(shows(v.now(0, VIEW, w2)), " waiting");
+    asTheBoard(v, w2);
+    assert.equal(shows(v.now(0, VIEW, w2)), "a");
   });
 
   test("a turn's drawing is made once: a later visit to that turn stands at once", () => {
