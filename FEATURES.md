@@ -286,7 +286,7 @@ The Builder tool is the DM's. Its mode picker shows every mode as an even tile w
   - "Who sees for themselves" lists the room's players. Up to 6 a scene see for themselves: a player joins, ticked, the first time they own a creature that sees there, while fewer than 6 are. The DM ticks and unticks them, and an untick asks first, since that player forgets their map of the scene. Places stay until the DM changes them. Players not ticked, and the table display, see only what creatures that share sight see.
   - "Who lends sight" says whose sight each creature adds to: "Lends its sight to Ana", or "to every player" for one that shares sight.
   - The DM's reveals, hides and Fog all apply to every player's map. Switching to Whole party pools every player's map into the party's, and it stays pooled when the scene goes back to Per player. A map phase or a light change keeps the choice.
-  - A door is open or closed for everyone at once. A door a party member opens or closes shows its new state to every player who remembers it. A door the DM changes shows the change on a player's map only once one of their creatures sees the door. A player's map shows no door they never explored.
+  - A door is open or closed for everyone at once. A door a party member opens or closes shows its new state on that player's map and on the party's shared map. Another player who sees for themselves, where their own map remembers the door, keeps its old state until one of their creatures sees it. A door the DM changes shows the change on a player's map only once one of their creatures sees the door. A player's map shows no door they never explored.
 
 ## Areas of effect
 
