@@ -384,6 +384,8 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     for (const [key, value] of Object.entries(held.edges)) assert.deepEqual(value, all.edges[key], `the player's ${key} is not the DM's`);
     assert.equal(held.edges["6,7,n"], undefined, "the window past the revealed cells reached the player");
     assert.equal(held.edges["9,1,w"], undefined, "a wall past the revealed cells reached the player");
+    // The fixture's one free wall, (2, 5) to (4, 6), lies in row 5 and meets the revealed cells only at a point, which holds no cell of it.
+    assert.equal(held.free.length, 0, "a free wall past the revealed cells reached the player");
     await shots.take(player, "maps-player-stamp");
 
     // DM only takes it from the player, and its duplicate is DM only from the start.
