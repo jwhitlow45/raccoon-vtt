@@ -3475,7 +3475,9 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       assert.ok(table.sent.indexOf(asked) <= table.sent.indexOf(painted) && (asked !== painted || asked.acks!.indexOf(1) < asked.acks!.indexOf(2)), "the paint was answered after the ask");
       assert.ok(longest < 150, `the longest turn took ${longest.toFixed(0)} ms`);
       // A socket that spent most of its burst is told busy for an ask of 16, though one op would go.
-      table.conn.opRate.allow(50);
+      // Spent down to a fixed level, since how much refilled while the ask was read depends on the machine's load.
+      while (table.conn.opRate.wouldAllow(11)) table.conn.opRate.allow();
+      assert.ok(table.conn.opRate.wouldAllow(1) && !table.conn.opRate.wouldAllow(16));
       await actor.op(table.conn, 3, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g3");
       assert.deepEqual(table.sent.at(-1), { t: "retry", n: 3, code: "busy" });
     } finally {
