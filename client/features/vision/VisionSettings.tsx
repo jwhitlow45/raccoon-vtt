@@ -5,7 +5,7 @@ import type { OpOf } from "#shared/protocol.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
-import { Spinner, useDelayed } from "../../components/Loading.tsx";
+import { Loading, useDelayed } from "../../components/Loading.tsx";
 import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
@@ -265,18 +265,7 @@ function SightRow(props: { scene: Scene; working: SightChoice | null }) {
                 if (question) ask.ask(question, next === "player");
                 else send(next === "player");
               }}
-              description={
-                <span role="status">
-                  {showWorking && working !== null ? (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1) }}>
-                      <Spinner size={theme.icon.sm} />
-                      {sightWorkingText(working === "player")}
-                    </span>
-                  ) : (
-                    help
-                  )}
-                </span>
-              }
+              description={<SightStatus help={help} working={showWorking && working !== null ? sightWorkingText(working === "player") : null} />}
             />
           </div>
         )}
@@ -293,6 +282,18 @@ function SightRow(props: { scene: Scene; working: SightChoice | null }) {
       />
     </div>
   );
+}
+
+/**
+ * Sight's help, or once a change has waited the shared delay, what the
+ * server is working out, as the small loading line
+ * (docs/design-v1-design-pass.md 4.4). Its status stays mounted through
+ * both, so a screen reader hears the change, and the line inside says
+ * nothing of its own. It sits in the Segmented's description, a `p`, so
+ * everything in it is a `span`.
+ */
+export function SightStatus(props: { help: string | undefined; working: string | null }) {
+  return <span role="status">{props.working !== null ? <Loading small live={false} delay={0} text={props.working} /> : props.help}</span>;
 }
 
 /**

@@ -16,7 +16,9 @@ import { member, room, scene } from "#shared/testutil.ts";
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../state/view.ts");
-const { VisionSettings } = await import("./VisionSettings.tsx");
+const { SightStatus, VisionSettings } = await import("./VisionSettings.tsx");
+const { Segmented } = await import("../../components/Segmented.tsx");
+const { SIGHT_CHOICES } = await import("./settings.ts");
 
 function table(vision: Scene["vision"], fogEnabled = true): RoomState {
   const s = room({ members: { dm1: member("dm1", "dm"), ana: { ...member("ana"), name: "Ana" }, gus: { ...member("gus"), name: "Gus" } } });
@@ -139,5 +141,26 @@ describe("What players see (docs/design-v1-map-discovery.md 8.1 and 8.4)", () =>
   test("a Players see change on its way makes the group busy", () => {
     const html = render(table({ on: true, light: "dark" }), [{ op: { t: "scene.update", sceneId: "s1", patch: { fogEnabled: true, vision: { on: false, light: "dark" } } } }]);
     assert.match(html, /<div role="radiogroup"[^>]*aria-busy="true"/);
+  });
+});
+
+describe("Sight's working line (docs/design-v1-design-pass.md 4.4)", () => {
+  function sight(working: string | null): string {
+    return renderToStaticMarkup(
+      createElement(Segmented, { label: "Sight", value: "party", options: SIGHT_CHOICES, onChange: () => {}, description: createElement(SightStatus, { help: "The party shares one map.", working }) }),
+    );
+  }
+
+  test("the description's p holds the mounted status span, with the small loading line inside it, and no div", () => {
+    const html = sight("Working out what each player sees…");
+    const help = /<p id="[^"]+"[^>]*>([\s\S]*?)<\/p>/.exec(html)?.[1] ?? "";
+    assert.match(help, /^<span role="status"><span style="display:inline-flex[^"]*font-size:13px[^"]*"><svg[^>]*width="16"[^>]*>[\s\S]*?<\/svg><span[^>]*>Working out what each player sees…<\/span><\/span><\/span>$/);
+    assert.equal((help.match(/role=/g) ?? []).length, 1, "one live region, the mounted status: the line inside says nothing of its own");
+    assert.doesNotMatch(help, /<div/);
+  });
+
+  test("with nothing on its way the same status holds the chosen option's help", () => {
+    const help = /<p id="[^"]+"[^>]*>([\s\S]*?)<\/p>/.exec(sight(null))?.[1];
+    assert.equal(help, '<span role="status">The party shares one map.</span>');
   });
 });
