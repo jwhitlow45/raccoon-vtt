@@ -14,6 +14,8 @@ import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexKey, hexNeighbo
 import { hexCellsOutline } from "../client/features/fog/shapes.ts";
 import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
+import { calibrationFromHexFind } from "../client/features/grid/calibrate.ts";
+import { drawMap } from "../client/features/grid/synthetic.ts";
 import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
@@ -902,7 +904,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.equal(await grid.getByRole("radio", { name: "Hex rows" }).isChecked(), true, "a map image starts on the room's hex rows");
     await panel.getByText(HEX_LIMITS.starter, { exact: true }).waitFor();
     // A file name's size counts squares, so the hex help promises no scale from it (D-261028-05).
-    await panel.getByText("Line up the hexes next.", { exact: true }).waitFor();
+    await panel.getByText("A grid drawn on the map is looked for, and you check it or line up the hexes next.", { exact: true }).waitFor();
     await panel.getByRole("radio", { name: "Battle mat", exact: true }).click();
     assert.equal(await grid.getByRole("radio", { name: "Hex rows" }).isChecked(), true, "a battle mat starts on the room's hex rows");
     // The form's and, below it, the hex scene on screen's.
@@ -947,7 +949,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await waitFor("the camp back on hex rows", () => dmSocket.state?.scenes[run.camp]?.gridShape === "hexRows" || null);
   });
 
-  test("HX4-3. Line up grid on a hex map: a box over 7 hexes, px per hex, no search for square grids, and Apply stores the hexes' size", async () => {
+  test("HX4-3. Line up grid on a hex map: a box over 7 hexes, px per hex, Find the grid on, and Apply stores the hexes' size", async () => {
     const data = await sharp({ create: { width: 600, height: 400, channels: 3, background: { r: 80, g: 90, b: 70 } } }).png().toBuffer();
     const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
     assert.ok(res.ok(), `the upload answered ${res.status()}`);
@@ -957,15 +959,14 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const panel = await openScenes(dm);
     const map = await openSceneGroup(panel, "Map image and grid");
     const find = map.getByRole("button", { name: "Find the grid", exact: true });
-    assert.equal(await find.isDisabled(), true, "Find the grid finds square grids only");
-    assert.deepEqual(await describedBy(find), [HEX_LIMITS.findGrid]);
+    assert.equal(await find.isDisabled(), false, "Find the grid looks for hexes too (HX-9c)");
     await map.getByText(HEX_LIMITS.counting, { exact: true }).waitFor();
     assert.equal(await map.getByText("Or count the squares").count(), 0);
     await map.getByRole("button", { name: "Line up the grid", exact: true }).click();
     const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
     await bar.locator("[data-options-line]").filter({ hasText: "Drag a box over 3 hexes across. Fine-tune it by its corners." }).waitFor();
     await bar.getByText("50 px per hex", { exact: true }).filter({ visible: true }).first().waitFor();
-    assert.equal(await bar.getByRole("button", { name: HEX_LIMITS.findGrid }).isDisabled(), true);
+    assert.equal(await bar.getByRole("button", { name: "Look for a grid drawn on the map and line up with it" }).isDisabled(), false);
     await bar.getByRole("button", { name: /^Nudge/ }).first().click();
     const larger = dm.getByRole("button", { name: "Make the hexes larger" });
     for (let i = 0; i < 3; i++) await larger.click();
@@ -1833,6 +1834,139 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           off.push(...alignmentLines(await measureAlignment(bar), `Stairs on hexes at ${at}`));
           await shots.take(page, `hx8-stairs-bar-${size.name}-${scale * 100}`);
           await pickOption(page, "Map builder", "Paint", "Paint a height");
+          await pickTool(page, "Select");
+        }
+      }
+    } finally {
+      await phoneContext?.close();
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  /*
+   * HX-9c: the grid finder looks for squares and hexes on every search
+   * (docs/design-v1-grid-detect.md 10.7). Every map here is drawn by code
+   * (client/features/grid/synthetic.ts): noise with hexes of a known size
+   * and center, written as a PNG whose name gives no size.
+   */
+  const hx9cMap = async (name: string, orient: "rows" | "columns", cellPx: number, seed: number) => {
+    const file = path.join(work, `${name}.png`);
+    const px = drawMap({ width: 1400, height: 1000, seed, art: [{ kind: "noise", scale: 60, amp: 60 }], noise: 4, hexGrid: { orient, cellPx, center: { x: 30, y: 40 }, width: 2, opacity: 0.6 } });
+    await sharp(Buffer.from(px.data), { raw: { width: px.width, height: px.height, channels: 1 } }).png().toFile(file);
+    return file;
+  };
+  /** A drawn map already uploaded, put on a scene with today's first guess. */
+  const hx9cPut = async (sceneId: string, file: string) => {
+    const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data: await sharp(file).toBuffer() });
+    assert.ok(res.ok(), `the upload answered ${res.status()}`);
+    const art = (await res.json()) as { id: string; width: number; height: number };
+    await ops.send({ t: "scene.setMap", sceneId, map: { assetId: art.id, widthPx: art.width, heightPx: art.height, cellPx: 50, originPx: { x: 0, y: 0 } } });
+    await waitFor("the drawn map on the scene", () => dmSocket.state?.scenes[sceneId]?.map?.assetId === art.id || null);
+  };
+  /** Whether a scene's grid is the drawn hexes': the size to a twentieth of a pixel, the origin to half a pixel. */
+  const hx9cOnHexes = (sceneId: string, orient: "rows" | "columns", cellPx: number) => {
+    const scene = dmSocket.state?.scenes[sceneId];
+    const want = calibrationFromHexFind({ cellPx, center: { x: 30, y: 40 }, orient });
+    const map = scene?.map;
+    const shape = orient === "rows" ? "hexRows" : "hexColumns";
+    return !!map && scene.gridShape === shape && Math.abs(map.cellPx - cellPx) < 0.05 && Math.abs(map.originPx.x - want.originPx.x) < 0.5 && Math.abs(map.originPx.y - want.originPx.y) < 0.5 ? map : null;
+  };
+  const hx9cPx = (v: number) => String(Math.round(v * 10) / 10);
+  const hx9cGuess = (sceneId: string, shape: string | undefined, cellPx: number) => {
+    const scene = dmSocket.state?.scenes[sceneId];
+    return scene?.gridShape === shape && Math.abs((scene?.map?.cellPx ?? 0) - cellPx) < 1e-6 && scene?.map?.originPx.x === 0 && scene.map.originPx.y === 0 ? true : null;
+  };
+
+  test("hx9c-1. a code-drawn hex map through New scene in a square room starts on hex rows with its grid, one undo step, and Use default puts back squares and the guess", async () => {
+    await openAt(dm, SIZES[0], 1);
+    await ops.send({ t: "room.update", settings: { newScenes: "squares" } });
+    await waitFor("a square room", () => (dmSocket.state && dmSocket.state.meta.settings.newScenes === undefined) || null);
+    const file = await hx9cMap("Hex fen", "rows", 64, 31);
+    const panel = await openScenes(dm);
+    const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    await panel.getByRole("radio", { name: "Map image", exact: true }).click();
+    assert.equal(await panel.getByRole("radiogroup", { name: "Grid", exact: true }).getByRole("radio", { name: "Squares" }).isChecked(), true, "the form starts on the room's squares");
+    await panel.getByText("A name like", { exact: false }).first().waitFor();
+    await panel.getByRole("button", { name: "Choose a map image" }).setInputFiles(file);
+    await panel.getByRole("button", { name: "Upload and create" }).click();
+    const made = await waitFor("the new map scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((sc) => sc?.map && !known.has(sc.id)), 30_000);
+    const map = await waitFor("the scene on the drawn hex rows", () => hx9cOnHexes(made.id, "rows", 64), 15_000);
+    const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
+    await bar.locator("[data-options-line]").filter({ hasText: `Found hex rows of ${hx9cPx(map.cellPx)} px. The grid is hex rows now.` }).first().waitFor();
+    await shots.take(dm, "hx9c-new-scene-hex-rows");
+    // Use default puts back the form's squares and the first guess, 47 px for a 1400 by 1000 image.
+    await bar.getByRole("button", { name: "Use default", exact: true }).click();
+    await waitFor("squares and the guess back", () => hx9cGuess(made.id, undefined, 47));
+    // Undo takes Use default back, then the find, each in one step.
+    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await waitFor("the found hexes again", () => hx9cOnHexes(made.id, "rows", 64));
+    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await waitFor("one undo back to squares and the guess", () => hx9cGuess(made.id, undefined, 47));
+    await pickTool(dm, "Select");
+  });
+
+  test("hx9c-2. Find the grid on a hex rows scene finds drawn hex columns and switches the scene to them in one undo step, focus staying on Find the grid", async () => {
+    await hx9cPut(run.camp, await hx9cMap("Hex columns", "columns", 56, 32));
+    assert.equal(dmSocket.state?.scenes[run.camp]?.gridShape, "hexRows");
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.camp);
+    const group = await openSceneGroup(panel, "Map image and grid");
+    await group.getByRole("button", { name: "Find the grid", exact: true }).click();
+    const map = await waitFor("the camp on the drawn hex columns", () => hx9cOnHexes(run.camp, "columns", 56), 15_000);
+    const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
+    await bar.locator("[data-options-line]").filter({ hasText: `Found hex columns of ${hx9cPx(map.cellPx)} px. The grid is hex columns now.` }).first().waitFor();
+    await shots.take(dm, "hx9c-find-switches-to-hex-columns");
+    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await waitFor("one undo back to hex rows and the guess", () => hx9cGuess(run.camp, "hexRows", 50));
+    // From the options strip: the button keeps focus through the search and the switch.
+    const find = bar.getByRole("button", { name: "Look for a grid drawn on the map and line up with it" });
+    await find.focus();
+    await find.press("Enter");
+    await waitFor("the camp on hex columns again", () => hx9cOnHexes(run.camp, "columns", 56), 15_000);
+    await bar.locator("[data-options-line]").filter({ hasText: "The grid is hex columns now." }).first().waitFor();
+    assert.equal(await find.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "focus stays on Find the grid");
+    await pickTool(dm, "Select");
+  });
+
+  test("hx9c-3. hexes found on a square scene with painted ground leave its shape, and the line says why", async () => {
+    await hx9cPut(run.moor, await hx9cMap("Hex moor", "rows", 64, 33));
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.moor);
+    const group = await openSceneGroup(panel, "Map image and grid");
+    await group.getByRole("button", { name: "Find the grid", exact: true }).click();
+    const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
+    const line = bar.locator("[data-options-line]").filter({ hasText: "but this scene has painted ground on its squares, which can't stand on hexes. Remove them to change the grid." }).first();
+    await line.waitFor({ timeout: 15_000 });
+    assert.match(await line.innerText(), /^Found hex rows of 6[34](\.\d)? px, but this scene has painted ground/);
+    assert.equal(dmSocket.state?.scenes[run.moor]?.gridShape, undefined, "the shape stays");
+    assert.equal(dmSocket.state?.scenes[run.moor]?.map?.cellPx, 50, "the grid stays");
+    await shots.take(dm, "hx9c-find-refused-switch");
+    await pickTool(dm, "Select");
+  });
+
+  test("hx9c-4. Line up grid's options strip with the longest new line, a refused switch, sits within 1 px at each size", async () => {
+    const off: string[] = [];
+    let phoneContext: BrowserContext | null = null;
+    try {
+      for (const size of SIZES) {
+        let page = dm;
+        if (size.touch) {
+          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+          const pages = phoneContext.pages();
+          page = pages[0] ?? (await phoneContext.newPage());
+          if (pages.length === 0) consoles.phone.attach(page);
+        }
+        for (const scale of SCALES) {
+          const at = `${size.name} at ${scale * 100}%`;
+          await openAt(page, size, scale);
+          const panel = await openScenes(page);
+          await viewScene(page, panel, run.moor);
+          const group = await openSceneGroup(panel, "Map image and grid");
+          await group.getByRole("button", { name: "Find the grid", exact: true }).click();
+          const bar = page.getByRole("toolbar", { name: "Line up grid options" });
+          await bar.locator("[data-options-line]").filter({ hasText: "Remove them to change the grid." }).first().waitFor({ timeout: 15_000 });
+          off.push(...alignmentLines(await measureAlignment(bar), `Line up grid's options with a refused switch at ${at}`));
+          await shots.take(page, `hx9c-refused-line-${size.name}-${scale * 100}`);
           await pickTool(page, "Select");
         }
       }
