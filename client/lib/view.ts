@@ -2,7 +2,7 @@ import { CHUNK_CELLS } from "#shared/model.ts";
 import type { CellRange } from "#shared/rules/footprint.ts";
 import { isCellFullyFogged } from "#shared/rules/fog.ts";
 import { isHex, type Grid } from "#shared/rules/grid.ts";
-import { chunkHeights } from "#shared/rules/heights.ts";
+import { chunkHeights, heightsGrid } from "#shared/rules/heights.ts";
 import { seenGround, type Cell, type GroundSource } from "../features/builder/heights/ground.ts";
 import { cameraOfStage, screenToView, type Camera, type Insets, type Point, type Rect, type Size } from "./camera.ts";
 
@@ -195,12 +195,23 @@ export type DrawnSource = GroundSource & { stand: boolean };
  * real heights.
  */
 export function drawnGround(src: DrawnSource, cell: Cell): number {
-  if (!src.stand) return 0;
+  if (!src.stand || flatOnHexes(src)) return 0;
   return seenGround(src, cell) ?? 0;
+}
+
+/**
+ * Whether the scene's heights are keyed by hexes (heights.ts heightsGrid),
+ * which this view's square cells cannot read: there it draws the ground
+ * flat, each creature standing at its elevation over it, until raised hexes
+ * stand in the isometric view (docs/design-v1-hex-grids.md H3, As built).
+ */
+function flatOnHexes(src: Pick<DrawnSource, "chunks" | "sceneId">): boolean {
+  return isHex(heightsGrid(src.chunks, src.sceneId));
 }
 
 /** The highest seen ground in feet under a footprint's cells (footprint.ts occupiedRange), a cell this viewer has not seen counting 0. */
 export function seenFootprintGround(src: GroundSource, range: CellRange): number {
+  if (flatOnHexes(src)) return 0;
   return highestOver(range, (cell) => seenGround(src, cell) ?? 0);
 }
 
@@ -245,7 +256,7 @@ export function flatHeights(bounds: { w: number; h: number }): DrawnHeights {
 
 /** The drawn heights of a viewer's scene, read once per pick or per change of the ground. */
 export function drawnHeights(src: DrawnSource, feetPerCell: number): DrawnHeights {
-  if (!src.stand) return flatHeights(src.bounds);
+  if (!src.stand || flatOnHexes(src)) return flatHeights(src.bounds);
   let low = 0;
   let high = 0;
   const prefix = `${src.sceneId}:`;

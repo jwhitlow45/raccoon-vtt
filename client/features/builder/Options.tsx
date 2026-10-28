@@ -2,7 +2,7 @@ import { useCallback, useRef } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { TerrainId } from "#shared/model.ts";
-import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { cellWord, isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, Stepper, ValueChip, type Slot } from "../measure/controls.tsx";
@@ -20,7 +20,7 @@ import { heightSlot, type HeightShape, type RoughChoice } from "./heights/store.
 import { BUILD_IN_SIGHT } from "./inSight.ts";
 import { BUILD_ASKING } from "./ask.ts";
 import { useStampSlots } from "./stamps/StampOptions.tsx";
-import { useHeightHint, useHeightSlots } from "./heights/HeightOptions.tsx";
+import { HEX_SHAPES, useHeightHint, useHeightSlots } from "./heights/HeightOptions.tsx";
 import { LightChip } from "../lights/LightOptions.tsx";
 import { HEX_LIMITS } from "../grid/words.ts";
 
@@ -46,17 +46,10 @@ const HEX_EDGE_HINTS: Record<EdgeKind, string> = {
   clear: "Tap a wall, door or window to remove it.",
 };
 const HEX_HINTS = {
-  erase: "Drag to erase walls, doors, windows, difficult ground, labels, stamps and lights.",
+  erase: "Drag to erase walls, doors, windows, heights, stairs, difficult ground, labels, stamps and lights.",
   eraseRect: "Drag from corner to corner to erase everything inside.",
 } as const;
 
-/** Difficult ground's brush on a hex scene, in hexes: 1, then the hexes within one and two steps. */
-const HEX_SHAPES: readonly { value: HeightShape; label: string; title: string }[] = [
-  { value: 1, label: "1", title: "Brush, one hex" },
-  { value: 2, label: "2", title: "Brush, a hex and the six around it" },
-  { value: 3, label: "3", title: "Brush, two hexes out" },
-  { value: "area", label: "Area", title: "Drag from corner to corner" },
-];
 
 const HINTS: Record<Exclude<BuildMode, "edge" | "light" | "height" | "rough">, string> = {
   paint: "Drag to paint. Two fingers or a right-drag move the map.",
@@ -81,12 +74,12 @@ const EDGE_HINTS: Record<EdgeKind, string> = {
 const TERRAIN_COST = "Difficult and Rubble cost double to walk through. Water costs double without a swim speed.";
 
 /**
- * The modes a hex scene cannot use (section 6, H2): painted ground stays
- * square, and heights wait for H3. Walls and doors, Erase, Erase area and
- * Difficult ground build by hexes, and lights, stamps and labels keep
- * their own hints.
+ * The modes a hex scene cannot use (section 6): painted ground stays
+ * square. Walls and doors, Erase, Erase area, Difficult ground and from H3
+ * Height mode build by hexes, and lights, stamps and labels keep their own
+ * hints.
  */
-const HEX_LEFT_OUT: ReadonlySet<BuildMode> = new Set<BuildMode>(["paint", "rect", "poly", "height"]);
+const HEX_LEFT_OUT: ReadonlySet<BuildMode> = new Set<BuildMode>(["paint", "rect", "poly"]);
 
 /** The line a hex scene shows for a mode it leaves out, or null where the mode keeps its own hint. */
 export function hexBuilderLine(mode: BuildMode, g: Grid): string | null {
@@ -161,8 +154,9 @@ export default function BuilderOptions() {
   const hasLights = useRoomView((v) => (v.sceneId ? sceneHasLights(v.view?.lights, v.sceneId) : false));
   const actions = useRoomActions();
   const ui = useRoomUi();
-  const heightHint = useHeightHint(scene?.autoWalls, s.mode === "rough");
-  const heightSlots = useHeightSlots(s.mode === "rough");
+  const sceneShape = scene ? sceneGrid(scene) : SQUARES;
+  const heightHint = useHeightHint(scene?.autoWalls, s.mode === "rough", sceneShape);
+  const heightSlots = useHeightSlots(s.mode === "rough", sceneShape);
   // ⋯ in this row, where focus goes back from the stamp picker when the chooser waits behind it.
   const row = useRef<HTMLDivElement>(null);
   const more = useCallback(() => row.current?.closest('[role="toolbar"]')?.querySelector<HTMLElement>("[data-rvtt-more] button") ?? null, []);
@@ -343,7 +337,7 @@ export default function BuilderOptions() {
       },
     );
   }
-  if (s.mode === "height" && !hex) slots.push(...heightSlots);
+  if (s.mode === "height") slots.push(...heightSlots);
   if (s.mode === "rough") slots.push(...(hex ? hexRoughSlots : heightSlots));
   if (s.mode === "label") {
     slots.push(

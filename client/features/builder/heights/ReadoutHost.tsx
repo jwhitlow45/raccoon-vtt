@@ -1,3 +1,5 @@
+import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { hexCenter } from "#shared/rules/hex.ts";
 import { useEffect, useMemo } from "react";
 import { useStore } from "zustand";
 import type { BuildChunk, FogTile, Scene } from "#shared/model.ts";
@@ -85,17 +87,18 @@ export function ReadoutHost(props: { scene: Scene; tool: string; camera: Camera;
         {spoken}
       </div>
       {open && readout ? (
-        <ReadoutPill words={words} cell={readout.cell} camera={props.camera} viewport={props.viewport} insets={props.insets} pick={props.pick} />
+        <ReadoutPill words={words} cell={readout.cell} grid={sceneGrid(scene)} camera={props.camera} viewport={props.viewport} insets={props.insets} pick={props.pick} />
       ) : null}
     </>
   );
 }
 
 /** The pill points at its cell's middle, on the cell's top as the isometric view raises it (docs/design-v1-isometric-view.md 5.3). */
-function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number }; camera: Camera; viewport: Size; insets: Insets; pick: BoardPick }) {
-  const { words } = props;
+function ReadoutPill(props: { words: ReadoutWords; cell: { x: number; y: number }; grid: Grid; camera: Camera; viewport: Size; insets: Insets; pick: BoardPick }) {
+  const { words, grid } = props;
   const width = Math.ceil(measurePill(words.pill, FONT_PX, theme.font.body)) + 2 * PAD_PX;
-  const middle = { x: props.cell.x + 0.5, y: props.cell.y + 0.5 };
+  // A hex's middle is its center, its cell being its key.
+  const middle = isHex(grid) ? hexCenter(grid, { col: props.cell.x, row: props.cell.y }) : { x: props.cell.x + 0.5, y: props.cell.y + 0.5 };
   const anchor = groundAnchor(props.camera, props.pick, middle, drawnAt(props.pick, middle));
   const place = readoutPlace({ anchor, viewport: props.viewport, insets: props.insets, width, height: BODY_HEIGHT });
   if (!place) return null;

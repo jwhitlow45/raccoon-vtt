@@ -8,7 +8,10 @@ import type { ToolContext, ToolPointer, ToolPointerHandlers } from "../tools.ts"
 import { buildContext, dispatchBuild } from "./ask.ts";
 import { strokeMaySend, type Point } from "./cells.ts";
 import { tapFreeWall } from "./freeWallTap.ts";
-import { heightSlot } from "./heights/store.ts";
+import type { ClientOp } from "#shared/protocol.ts";
+import { stairChoiceOn } from "./heights/facings.ts";
+import { paintCells } from "./heights/ops.ts";
+import { heightSlot, type HeightState } from "./heights/store.ts";
 import { hexEraseOps, hexesInRect, hexRoughOps, hexSightCells, hexStroke, lineFeature, wallLineOps, wallPoint } from "./hexBuild.ts";
 import { partySeesAny } from "./inSight.ts";
 import { builderSlot, type BuildMode } from "./store.ts";
@@ -18,8 +21,8 @@ const FLUSH_MS = 150;
 /** A tap this close to a Wall line's first point closes it, as a shape room's corner does: half a 44 px target. */
 const CLOSE_PX = 22;
 
-/** The builder's modes a hex scene works by hexes (HX-D9). Lights, stamps and labels keep their own handlers, and the rest only show the limit. */
-const HEX_MODES: ReadonlySet<BuildMode> = new Set<BuildMode>(["edge", "erase", "eraseRect", "rough"]);
+/** The builder's modes a hex scene works by hexes (HX-D9), Height mode from H3. Lights, stamps and labels keep their own handlers, and the rest only show the limit. */
+const HEX_MODES: ReadonlySet<BuildMode> = new Set<BuildMode>(["edge", "erase", "eraseRect", "rough", "height"]);
 
 function hexMode(ctx: ToolContext): { g: HexGrid; mode: BuildMode } | null {
   const g = sceneGrid(ctx.scene);
@@ -34,6 +37,20 @@ function roughChoice(ctx: ToolContext): { size: number | "area"; on: boolean } {
   return { size: h.shape, on: h.rough !== "clear" };
 }
 
+/** Height mode's brush and what it paints, its stairs choice kept to the scene's facings (heights/HeightOptions.tsx stairChoiceOn). */
+function heightChoice(ctx: ToolContext, g: HexGrid): Pick<HeightState, "paint" | "height" | "stairs" | "shape"> {
+  const h = ctx.scope.get(heightSlot).store.getState();
+  return { paint: h.paint, height: h.height, stairs: stairChoiceOn(g, h.stairs), shape: h.shape };
+}
+
+/** The ops for a gesture's hexes in the mode it was made in. */
+function hexOps(ctx: ToolContext, g: HexGrid, mode: BuildMode, sceneId: string, keys: readonly string[]): ClientOp[] {
+  const view = ctx.getState().view;
+  if (mode === "rough") return hexRoughOps(view, sceneId, keys, roughChoice(ctx).on);
+  if (mode === "height") return paintCells(view, sceneId, keys, heightChoice(ctx, g));
+  return hexEraseOps(view, g, sceneId, keys);
+}
+
 /** Sends a stroke's unsent hexes to the scene it began on, a finger's after a moment unless it has ended. */
 function flush(ctx: ToolContext, g: HexGrid, done: boolean): void {
   const { store, gesture } = ctx.scope.get(builderSlot);
@@ -43,9 +60,7 @@ function flush(ctx: ToolContext, g: HexGrid, done: boolean): void {
   if (!done && !strokeMaySend(stroke.touch, stroke.startedAt, performance.now())) return;
   store.setState({ unsent: [] });
   if (ctx.scene.id !== stroke.sceneId) return;
-  const view = ctx.getState().view;
-  const ops = s.mode === "rough" ? hexRoughOps(view, stroke.sceneId, s.unsent, roughChoice(ctx).on) : hexEraseOps(view, g, stroke.sceneId, s.unsent);
-  for (const op of ops) ctx.actions.dispatch(op, { group: stroke.group });
+  for (const op of hexOps(ctx, g, s.mode, stroke.sceneId, s.unsent)) ctx.actions.dispatch(op, { group: stroke.group });
 }
 
 function endStroke(ctx: ToolContext, g: HexGrid | null, send: boolean): void {
@@ -113,7 +128,7 @@ function down(p: ToolPointer, ctx: ToolContext, g: HexGrid, mode: BuildMode): vo
   store.setState({ note: null, inSight: false });
   endStroke(ctx, g, true);
   const sceneId = ctx.scene.id;
-  const brush = mode === "rough" ? roughChoice(ctx).size : mode === "erase" ? store.getState().brush : "area";
+  const brush = mode === "rough" ? roughChoice(ctx).size : mode === "height" ? heightChoice(ctx, g).shape : mode === "erase" ? store.getState().brush : "area";
   if (mode === "edge" || brush === "area") {
     gesture.hex = { kind: "drag", sceneId, down: { screen: p.screen, world: p.world } };
     if (brush === "area" && mode !== "edge") store.setState({ rect: { a: p.world, b: p.world } });
@@ -140,7 +155,7 @@ function move(p: ToolPointer, ctx: ToolContext, g: HexGrid): void {
   const hex = gesture.hex;
   const s = store.getState();
   if (hex?.kind === "stroke") {
-    const brush = s.mode === "rough" ? roughChoice(ctx).size : s.brush;
+    const brush = s.mode === "rough" ? roughChoice(ctx).size : s.mode === "height" ? heightChoice(ctx, g).shape : s.brush;
     if (brush === "area") return;
     const added = hexStroke(g, hex.last, p.world, brush, ctx.scene.bounds, hex.seen);
     hex.last = p.world;
@@ -171,8 +186,7 @@ function up(p: ToolPointer, ctx: ToolContext, g: HexGrid): void {
     store.setState({ rect: null });
     const keys = hexesInRect(g, s.rect.a, p.world, ctx.scene.bounds);
     markSight(ctx, g, keys);
-    const view = ctx.getState().view;
-    dispatchBuild(buildContext(ctx), s.mode === "rough" ? hexRoughOps(view, ctx.scene.id, keys, roughChoice(ctx).on) : hexEraseOps(view, g, ctx.scene.id, keys));
+    dispatchBuild(buildContext(ctx), hexOps(ctx, g, s.mode, ctx.scene.id, keys));
     return;
   }
   store.setState({ lineDrag: null });

@@ -230,7 +230,8 @@ export function buildPaths(
   const drawing = buildDrawing(chunks);
   const build = indexBuild(chunks);
   // Derived under the scene's rule and within its bounds, so the board draws exactly the walls that block and stairs point as movement reads them.
-  const derived = deriveWalls(build, "board", { rule: scene.autoWalls ?? "all", bounds: scene.bounds });
+  const hexes = gridOfShape(scene.gridShape);
+  const derived = deriveWalls(build, "board", { rule: scene.autoWalls ?? "all", bounds: scene.bounds, grid: hexes });
   const edges = derived.edges;
   const isFloor = (x: number, y: number) => x >= 0 && y >= 0 && build.cells.has(cellId(x, y));
   const dm = role === "dm";
@@ -253,15 +254,14 @@ export function buildPaths(
   const stairList = stairCells(chunks, derived);
   const stairs = makePath();
   for (const c of stairList) if (c.floor) stairs.rect(c.x + 0.08, c.y + 0.08, 0.84, 0.84);
-  const floorStairs = stairPaths(stairList.filter((c) => c.floor), makePath);
-  const artStairs = stairPaths(stairList.filter((c) => !c.floor), makePath);
-  const relief = reliefPaths(chunks, derived, scene.bounds ?? null, makePath);
+  const floorStairs = stairPaths(stairList.filter((c) => c.floor), makePath, hexes);
+  const artStairs = stairPaths(stairList.filter((c) => !c.floor), makePath, hexes);
+  const relief = reliefPaths(chunks, derived, scene.bounds ?? null, makePath, hexes);
   const rough = makePath();
   let roughBox: BoardPaths["roughBox"] = null;
   const grow = (x0: number, y0: number, x1: number, y1: number) => {
     roughBox = roughBox ? { x0: Math.min(roughBox.x0, x0), y0: Math.min(roughBox.y0, y0), x1: Math.max(roughBox.x1, x1), y1: Math.max(roughBox.y1, y1) } : { x0, y0, x1, y1 };
   };
-  const hexes = gridOfShape(scene.gridShape);
   for (const chunk of chunks) {
     if (chunk.rough === undefined) continue;
     const marks = decodeRough(chunk.rough);

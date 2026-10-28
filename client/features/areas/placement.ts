@@ -20,9 +20,9 @@ import {
 } from "#shared/rules/aoe.ts";
 import { footprintRect, hexAnchor, occupiedHexes, sizeCategory, tokenHeightFt } from "#shared/rules/footprint.ts";
 import { clamp, yawVector, type Point, type Rect } from "#shared/rules/geom.ts";
-import { rangeGround } from "#shared/rules/heights.ts";
-import type { Grid } from "#shared/rules/grid.ts";
-import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexKey, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { heightsGrid, hexesGround, rangeGround } from "#shared/rules/heights.ts";
+import { isHex, type Grid } from "#shared/rules/grid.ts";
+import { cornerAt, HEX_R, hexAt, hexCenter, hexCorners, hexDistance, hexKey, hexNeighbors, snapAnchor, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { hexBallOutline } from "../../lib/scene.ts";
 
 /**
@@ -833,6 +833,16 @@ export function pointHeight(token: AreaToken | undefined): number {
  * under it, so a fireball dropped on a platform's rim sits on the platform.
  */
 export function pointGround(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string, p: Point): number {
+  const g = heightsGrid(chunks, sceneId);
+  if (isHex(g)) {
+    // On hexes the hexes it touches: the one holding it, and at a corner the three meeting there, a corner lying HEX_R from each center.
+    const at = hexAt(g, p);
+    const near = [at, ...hexNeighbors(g, at)].filter((h) => {
+      const c = hexCenter(g, h);
+      return (c.x - p.x) * (c.x - p.x) + (c.y - p.y) * (c.y - p.y) <= (HEX_R + 0.02) * (HEX_R + 0.02);
+    });
+    return hexesGround(chunks, sceneId, near.length > 0 ? near : [at]);
+  }
   return rangeGround(chunks, sceneId, { x0: Math.ceil(p.x) - 1, y0: Math.ceil(p.y) - 1, x1: Math.floor(p.x) + 1, y1: Math.floor(p.y) + 1 });
 }
 

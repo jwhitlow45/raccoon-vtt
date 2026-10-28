@@ -3,6 +3,8 @@ import { Shape } from "react-konva";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { BuildChunk } from "#shared/model.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { hexCenter, hexInScene } from "#shared/rules/hex.ts";
 import { deriveWalls, indexBuild } from "#shared/rules/walls.ts";
 import { useBoardView } from "../../../canvas/boardView.ts";
 import { measurePill } from "../../../canvas/measureText.ts";
@@ -61,11 +63,14 @@ function HeightMarks(props: LayerProps) {
   const chunks = useMemo(() => Object.values(allChunks).filter((c): c is BuildChunk => !!c && c.sceneId === scene.id), [allChunks, scene.id]);
   const { w, h } = scene.bounds;
   // The largest regions get numbers, and the smallest of those place theirs first, since they have the fewest spots to choose from.
-  const regions = useMemo(() => heightRegions(chunks, { w, h }).slice(0, MAX_NUMBERS).reverse(), [chunks, w, h]);
+  const grid = sceneGrid(scene);
+  const regions = useMemo(() => heightRegions(chunks, { w, h }, grid).slice(0, MAX_NUMBERS).reverse(), [chunks, w, h, grid]);
+  // Each "?" at its stair's middle: a square's, or on hexes its hex's center.
   const unsettled = useMemo(() => {
-    const walls = deriveWalls(indexBuild(chunks), "heights", { rule: scene.autoWalls ?? "all", bounds: { w, h } });
-    return stairCells(chunks, walls).filter((c) => c.dir === null && c.x < w && c.y < h);
-  }, [chunks, scene.autoWalls, w, h]);
+    const walls = deriveWalls(indexBuild(chunks), "heights", { rule: scene.autoWalls ?? "all", bounds: { w, h }, grid });
+    const open = stairCells(chunks, walls).filter((c) => c.dir === null && (isHex(grid) ? hexInScene(grid, { w, h }, { col: c.x, row: c.y }) : c.x < w && c.y < h));
+    return open.map((c) => (isHex(grid) ? hexCenter(grid, { col: c.x, row: c.y }) : { x: c.x + 0.5, y: c.y + 0.5 }));
+  }, [chunks, scene.autoWalls, w, h, grid]);
   const { pill, markPx } = heightTextSizes(scale);
   // Placed once per zoom, interface size and set of names, not on every draw, since a pan changes none of them (LayerProps `labelBoxes`).
   const pills = useMemo(() => placeHeightPills(regions, labelBoxes, scale, pill, measureBoardPill), [regions, labelBoxes, scale, pill.fontPx]);
@@ -83,7 +88,7 @@ function HeightMarks(props: LayerProps) {
           perfectDrawEnabled={false}
           sceneFunc={(ctx) => {
             const g = ctx._context;
-            if (scale >= MARK_MIN_SCALE) for (const c of unsettled) drawMark(g, "?", c.x + 0.5, c.y + 0.5, scale, markPx, theme.color.accentSoft);
+            if (scale >= MARK_MIN_SCALE) for (const c of unsettled) drawMark(g, "?", c.x, c.y, scale, markPx, theme.color.accentSoft);
             drawPills(g, pills, scale, view);
           }}
         />

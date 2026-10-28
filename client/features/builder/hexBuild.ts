@@ -1,3 +1,5 @@
+import { stairMarkAt } from "#shared/heightCodec.ts";
+import { groundAt } from "#shared/rules/heights.ts";
 import { decodeRough } from "#shared/heightCodec.ts";
 import { cellOf, chunkKey, wallMidpoint } from "#shared/keys.ts";
 import { CHUNK_CELLS, FREE_WALL_ID_LENGTH, FREE_WALL_LATTICE, MAX_FREE_WALL_CELLS, type RoomState, type WallFeature } from "#shared/model.ts";
@@ -201,7 +203,7 @@ export function hexRoughOps(view: RoomState | null, sceneId: string, keys: reado
 
 /**
  * Whether erasing a hex would take anything, as the reducer reads it
- * (shared/reducer/map.ts eraseHexes): its difficult ground, a free wall
+ * (shared/reducer/map.ts eraseHexes): its height, stair mark or difficult ground, a free wall
  * whose midpoint, or a stamp or light whose center, lies in it, or a label
  * whose box meets its box. The label test is the hex's box, a little
  * generous at its corners: an erase sent for nothing changes nothing.
@@ -220,6 +222,8 @@ export function hexErasable(view: RoomState | null, g: HexGrid, sceneId: string)
   return (key) => {
     if (held.has(key) || hexRoughAt(chunks, sceneId, key)) return true;
     const h = parseHexKey(key);
+    // From H3 a hex's height and stair mark go with it too (reducer/map.ts withoutHeights).
+    if (h && (groundAt(chunks, sceneId, h.col, h.row) !== 0 || stairMarkAt(chunks, sceneId, h.col, h.row) !== ".")) return true;
     if (!h || boxes.length === 0) return false;
     const c = hexCenter(g, h);
     return boxes.some((box) => box.x0 < c.x + 0.6 && box.x1 > c.x - 0.6 && box.y0 < c.y + 0.6 && box.y1 > c.y - 0.6);

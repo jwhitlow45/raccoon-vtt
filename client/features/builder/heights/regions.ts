@@ -1,5 +1,7 @@
 import { CHUNK_CELLS, type BuildChunk } from "#shared/model.ts";
-import { chunkHeights } from "#shared/rules/heights.ts";
+import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { chunkHeights, facingsOf, stepper } from "#shared/rules/heights.ts";
+import { hexCenter, hexInScene, sceneHexSpan } from "#shared/rules/hex.ts";
 
 /**
  * The regions Height mode names (docs/design-v1-maps-vision.md section
@@ -25,13 +27,29 @@ export type HeightRegion = {
 const SPOTS = 24;
 
 /**
- * Every region of the scene's painted heights, the largest first, then by
- * position. Cells touch along a side, not at a corner. Heights left outside
- * a shrunk scene are not regions.
+ * The scene's height regions, the largest first. On a hex scene the cells
+ * are hexes by key, touching across their six sides, and a spot is a hex's
+ * center (docs/design-v1-hex-grids.md H3).
  */
-export function heightRegions(chunks: readonly BuildChunk[], bounds: { w: number; h: number }): HeightRegion[] {
+export function heightRegions(chunks: readonly BuildChunk[], bounds: { w: number; h: number }, grid: Grid = SQUARES): HeightRegion[] {
+  const hex = isHex(grid) ? grid : null;
+  // The key space: the scene's cells, or the columns and rows its hex keys run over.
+  const { cols: W, rows: H } = hex ? sceneHexSpan(hex, bounds) : { cols: bounds.w, rows: bounds.h };
+  const inside = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H && (!hex || hexInScene(hex, bounds, { col: x, row: y }));
+  const step = stepper(grid);
+  const sides = facingsOf(grid).length;
+  const id = (x: number, y: number) => y * W + x;
+  const around = (c: number): number[] => {
+    const x = c % W;
+    const y = (c - x) / W;
+    const out: number[] = [];
+    for (let d = 0; d < sides; d++) {
+      const [nx, ny] = step(x, y, d);
+      out.push(inside(nx, ny) ? id(nx, ny) : -1);
+    }
+    return out;
+  };
   const ground = new Map<number, number>();
-  const id = (x: number, y: number) => y * bounds.w + x;
   for (const chunk of chunks) {
     const heights = chunkHeights(chunk);
     if (!heights) continue;
@@ -40,7 +58,7 @@ export function heightRegions(chunks: readonly BuildChunk[], bounds: { w: number
       if (v === 0) continue;
       const x = chunk.cx * CHUNK_CELLS + (k % CHUNK_CELLS);
       const y = chunk.cy * CHUNK_CELLS + Math.floor(k / CHUNK_CELLS);
-      if (x < 0 || y < 0 || x >= bounds.w || y >= bounds.h) continue;
+      if (!inside(x, y)) continue;
       ground.set(id(x, y), v);
     }
   }
@@ -52,18 +70,8 @@ export function heightRegions(chunks: readonly BuildChunk[], bounds: { w: number
     const cells: number[] = [start];
     done.add(start);
     for (let i = 0; i < cells.length; i++) {
-      const c = cells[i]!;
-      const x = c % bounds.w;
-      const y = (c - x) / bounds.w;
-      for (const [nx, ny] of [
-        [x + 1, y],
-        [x - 1, y],
-        [x, y + 1],
-        [x, y - 1],
-      ] as const) {
-        if (nx < 0 || ny < 0 || nx >= bounds.w || ny >= bounds.h) continue;
-        const n = id(nx, ny);
-        if (done.has(n) || ground.get(n) !== level) continue;
+      for (const n of around(cells[i]!)) {
+        if (n < 0 || done.has(n) || ground.get(n) !== level) continue;
         done.add(n);
         cells.push(n);
       }
@@ -73,49 +81,42 @@ export function heightRegions(chunks: readonly BuildChunk[], bounds: { w: number
     const depth = new Map<number, number>();
     const queue: number[] = [];
     for (const c of cells) {
-      const x = c % bounds.w;
-      const y = (c - x) / bounds.w;
-      const edge = [
-        [x + 1, y],
-        [x - 1, y],
-        [x, y + 1],
-        [x, y - 1],
-      ].some(([nx, ny]) => nx! < 0 || ny! < 0 || nx! >= bounds.w || ny! >= bounds.h || !inRegion.has(id(nx!, ny!)));
-      if (edge) {
+      if (around(c).some((n) => n < 0 || !inRegion.has(n))) {
         depth.set(c, 0);
         queue.push(c);
       }
     }
     for (let i = 0; i < queue.length; i++) {
       const c = queue[i]!;
-      const x = c % bounds.w;
-      const y = (c - x) / bounds.w;
-      for (const n of [c + 1, c - 1, c + bounds.w, c - bounds.w]) {
-        const nx = n % bounds.w;
-        if (Math.abs(nx - x) + Math.abs((n - nx) / bounds.w - y) !== 1 || !inRegion.has(n) || depth.has(n)) continue;
+      for (const n of around(c)) {
+        if (n < 0 || !inRegion.has(n) || depth.has(n)) continue;
         depth.set(n, depth.get(c)! + 1);
         queue.push(n);
       }
     }
+    const middle = (c: number) => {
+      const x = c % W;
+      const y = (c - x) / W;
+      return hex ? hexCenter(hex, { col: x, row: y }) : { x: x + 0.5, y: y + 0.5 };
+    };
     let sx = 0;
     let sy = 0;
     for (const c of cells) {
-      sx += c % bounds.w;
-      sy += Math.floor(c / bounds.w);
+      const m = middle(c);
+      sx += m.x;
+      sy += m.y;
     }
     const mx = sx / cells.length;
     const my = sy / cells.length;
     const far = (c: number) => {
-      const x = c % bounds.w;
-      const y = (c - x) / bounds.w;
-      return (x - mx) * (x - mx) + (y - my) * (y - my);
+      const m = middle(c);
+      return (m.x - mx) * (m.x - mx) + (m.y - my) * (m.y - my);
     };
     const ranked = [...cells].sort((a, b) => depth.get(b)! - depth.get(a)! || far(a) - far(b) || a - b);
     // Spots at least two cells apart, so a fallback is somewhere else on the region, not beside the spot that was covered.
     const spots: { x: number; y: number }[] = [];
     for (const c of ranked) {
-      const x = c % bounds.w + 0.5;
-      const y = Math.floor(c / bounds.w) + 0.5;
+      const { x, y } = middle(c);
       if (spots.some((p) => Math.max(Math.abs(p.x - x), Math.abs(p.y - y)) < 2)) continue;
       spots.push({ x, y });
       if (spots.length === SPOTS) break;

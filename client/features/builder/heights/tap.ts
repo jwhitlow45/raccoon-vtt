@@ -1,4 +1,6 @@
 import type { RoomState, Scene } from "#shared/model.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { hexAt } from "#shared/rules/hex.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
 import { viewToScreen, type Point } from "../../../lib/camera.ts";
 import { TOP_DOWN, toView } from "../../../lib/view.ts";
@@ -26,7 +28,10 @@ export function tapGround(ctx: Pick<ToolContext, "getState" | "scene" | "camera"
   const slot = ctx.scope.get(readoutSlot);
   const view = ctx.getState().view;
   // A pin answers its own tap (features/pins/PinController.ts), where it stands in the view shown, and a reading beside its popover would be two things floating at once.
-  const cell = { x: Math.floor(world.x), y: Math.floor(world.y) };
+  // The square under the tap, or on a hex scene the hex that holds it, by its key.
+  const g = sceneGrid(ctx.scene);
+  const hex = isHex(g) ? hexAt(g, world) : null;
+  const cell = hex ? { x: hex.col, y: hex.row } : { x: Math.floor(world.x), y: Math.floor(world.y) };
   const words = tool === "select" && view && !pinUnderPress(ctx, view, world, screen) ? wordsAt(view, ctx.scene, ctx.role, cell) : null;
   if (!words) {
     closeReadout(slot);

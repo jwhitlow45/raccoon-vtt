@@ -9,17 +9,17 @@ const { brushWords, hexBuilderLine } = await import("./Options.tsx");
 
 const hexRows = { shape: "hex", orient: "rows" } as const;
 const hexColumns = { shape: "hex", orient: "columns" } as const;
-const left = ["paint", "rect", "poly", "height"] satisfies BuildMode[];
-const kept = ["light", "stamp", "label", "edge", "erase", "eraseRect", "rough"] satisfies BuildMode[];
+const left = ["paint", "rect", "poly"] satisfies BuildMode[];
+const kept = ["light", "stamp", "label", "edge", "erase", "eraseRect", "rough", "height"] satisfies BuildMode[];
 
-describe("the builder's line on a hex scene (H2)", () => {
+describe("the builder's line on a hex scene (H3)", () => {
   test("says what the builder does on hexes and what needs squares", () => {
-    assert.equal(HEX_LIMITS.builder, "On hexes the builder draws wall lines, marks difficult ground, and places lights, stamps and labels. Painted ground and heights need squares.");
+    assert.equal(HEX_LIMITS.builder, "On hexes the builder draws wall lines, paints heights and stairs, marks difficult ground, and places lights, stamps and labels. Painted ground needs squares.");
   });
   test("every mode a hex scene cannot use says the builder limit", () => {
     for (const g of [hexRows, hexColumns]) for (const m of left) assert.equal(hexBuilderLine(m, g), HEX_LIMITS.builder, m);
   });
-  test("lights, stamps and labels keep their own hints, and Walls and doors, Erase, Erase area and Difficult ground build by hexes", () => {
+  test("lights, stamps and labels keep their own hints, and Walls and doors, Erase, Erase area, Difficult ground and Height mode build by hexes", () => {
     for (const m of kept) assert.equal(hexBuilderLine(m, hexRows), null, m);
   });
   test("a square scene never shows the limit", () => {
