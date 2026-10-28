@@ -20,6 +20,7 @@ import { useFightJoin } from "../features/combat/state.ts";
 import { SrdLoadFailed } from "../features/monsters/SrdLoadFailed.tsx";
 import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
+import { ViewAsButton } from "../features/dm/viewAs.tsx";
 import { useSend } from "../features/encounter/hooks.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
 import { AltImagesRow } from "../features/tokens/AltImages.tsx";
@@ -513,10 +514,15 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
           {/* What it rides or carries, each a tap away, so a phone reaches a rider that hides its mount (docs/design-v1-attach.md 4.4). */}
           <GroupLine token={token} />
 
-          {/* Stat block and Details both open the panel, so they sit with the summary they expand. */}
+          {/*
+            Stat block and Details both open the panel, so they sit with the summary they expand. The DM's View as a player
+            looks too, so it joins them, and on an upright phone's resting strip it waits in the expanded bar with the DM's
+            other buttons that the strip leaves out (D-261027-09).
+          */}
           <div role="group" aria-label="Read more" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
             {statBlock ? <BarButton onClick={() => openStatBlock(scope, ui, token.id)}>Stat block</BarButton> : null}
             {inStrip("details") ? null : <BarButton onClick={props.onDetails}>Details</BarButton>}
+            <ViewAsButton token={token} />
           </div>
 
           {access.canEditToken("elevation") ? (

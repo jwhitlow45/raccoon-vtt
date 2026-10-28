@@ -21,6 +21,7 @@ import { QuickStartLink } from "../features/guide/GuideLink.tsx";
 import { DotLabel } from "../components/Row.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
+import { ViewAsButton, ViewAsEye } from "../features/dm/viewAs.tsx";
 import { usePanelHere, type PanelProps } from "../features/panels.ts";
 import { ImageField } from "../features/images/ImageField.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
@@ -358,7 +359,13 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
       // Focus lands here once a press selected another token and the panel remounted for it, as Duplicate's does.
       focusable
       tags={tags}
-      afterTags={<SteerControl token={token} />}
+      afterTags={
+        <>
+          <SteerControl token={token} />
+          {/* One tap from the header, folded groups or not (D-261027-09). Nothing for a token no player owns. */}
+          <ViewAsButton token={token} style={{ justifySelf: "start" }} />
+        </>
+      }
     >
       {props.children}
     </CreatureHeader>
@@ -718,18 +725,23 @@ function Owners(props: { token: Token; update(patch: TokenPatch): void; group: {
     <Group label="Owners" icon="group" {...props.group} summary={everyone.length > 0 ? everyone.join(", ") : "None"}>
       <Note>Owners can move it and edit what their role allows.</Note>
       <div style={{ display: "grid" }}>
+        {/* Each player's eye shows what that player sees, owner or not, so the DM can check who sees this token at all. */}
         {list.map((m) => (
-          <Checkbox
-            key={m.id}
-            checked={owners.includes(m.id)}
-            onChange={(on) => update({ ownerIds: on ? [...owners, m.id] : owners.filter((id) => id !== m.id) })}
-            label={
-              <DotLabel color={m.color}>
-                {m.name}
-                {m.kind === "dm" ? <span style={{ color: theme.color.textMuted }}>(DM)</span> : null}
-              </DotLabel>
-            }
-          />
+          <div key={m.id} style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
+            <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+              <Checkbox
+                checked={owners.includes(m.id)}
+                onChange={(on) => update({ ownerIds: on ? [...owners, m.id] : owners.filter((id) => id !== m.id) })}
+                label={
+                  <DotLabel color={m.color}>
+                    {m.name}
+                    {m.kind === "dm" ? <span style={{ color: theme.color.textMuted }}>(DM)</span> : null}
+                  </DotLabel>
+                }
+              />
+            </div>
+            {m.kind === "player" ? <ViewAsEye player={m} /> : null}
+          </div>
         ))}
       </div>
       {through.length > 0 ? (
