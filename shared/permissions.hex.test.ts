@@ -86,10 +86,10 @@ describe("H1's refusals on a hex scene", () => {
     assert.equal(decide({ t: "trap.update", trapId: "t1", patch: { name: "Spikes" } }, held), `invalid: ${ON_HEXES.traps}`);
   });
 
-  test("an attach, while a plain move, a route and a squeeze go by H2's rules (HX-5)", () => {
+  test("from H2 an attach, a plain move, a route and a squeeze go by the hex rules (HX-5, HX-7)", () => {
     const state = hexRoom();
     state.tokens = { horse: token("horse", { size: "large", ...onHex({ col: 4, row: 4 }, 2) }), bree: token("bree", { kind: "pc", ...onHex({ col: 8, row: 4 }) }) };
-    assert.equal(decide({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", ...onHex({ col: 4, row: 4 }), elevation: 0 }, state), `invalid: ${ON_HEXES.attach}`);
+    assert.equal(decide({ t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", ...onHex({ col: 4, row: 4 }), elevation: 0 }, state), "ok");
     const to = onHex({ col: 10, row: 4 });
     assert.equal(decide({ t: "token.move", tokenId: "bree", ...to, route: [[to.x, to.y, 0, 0]] }, state), "ok");
     // Squeezing is judged by the narrow space test on hexes (HX-D17): open ground is none.
@@ -105,15 +105,15 @@ describe("H1's refusals on a hex scene", () => {
     assert.equal(decide({ t: "token.move", tokenId: "bt", ...to, route: [[to.x, to.y, 0, 0]] }, state, P1), "ok");
   });
 
-  test("a holder with a rider, or the rider, sent onto a hex scene, while a token alone goes", () => {
+  test("from H2, a holder with a rider, or the rider, sent onto a hex scene goes, as a token alone does", () => {
     const state = room({ scenes: { s1: scene("s1"), s2: scene("s2", { order: 1, gridShape: "hexColumns" }) } });
     state.tokens = {
       horse: token("horse", { size: "large", x: 4, y: 4 }),
       bree: token("bree", { kind: "pc", x: 4, y: 4, attached: { to: "horse", kind: "ride" } }),
       gob: token("gob", { x: 9, y: 9 }),
     };
-    assert.equal(decide({ t: "token.update", tokenId: "horse", patch: { sceneId: "s2" } }, state), `invalid: ${ON_HEXES.attach}`);
-    assert.equal(decide({ t: "token.update", tokenId: "bree", patch: { sceneId: "s2" } }, state), `invalid: ${ON_HEXES.attach}`);
+    assert.equal(decide({ t: "token.update", tokenId: "horse", patch: { sceneId: "s2" } }, state), "ok");
+    assert.equal(decide({ t: "token.update", tokenId: "bree", patch: { sceneId: "s2" } }, state), "ok");
     assert.equal(decide({ t: "token.update", tokenId: "gob", patch: { sceneId: "s2" } }, state), "ok");
     const squares = room({ tokens: state.tokens });
     assert.equal(decide({ t: "token.update", tokenId: "horse", patch: { sceneId: "s2" } }, squares), "ok", "onto squares");

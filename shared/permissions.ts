@@ -243,19 +243,19 @@ export const ON_HEXES = {
   build: "Painted ground and heights need squares.",
   edges: "On hexes walls are wall lines.",
   traps: "Traps need squares.",
-  attach: "Riding and carrying need squares.",
   roomFog: "Reveal room needs a room built on squares.",
 } as const;
 
 /**
  * The server refuses on a hex scene every op whose rules are not hex yet
  * (HX-D20): every build op that paints ground, heights or stairs, or puts
- * walls on grid lines, every trap made or changed, an attach, a token sent
- * onto it with a link, and Reveal room's fog shapes. No such op was ever
- * stored, so lifting a refusal in a later phase changes no replay. Lights,
- * stamps, labels and Clear build stay, and so does every other fog shape.
- * From H2 so do free walls, Erase and difficult ground, and routes and
- * squeezes, whose stops on hexes are anchors (`onHexStop`). A restore keeps the same line in
+ * walls on grid lines, every trap made or changed, and Reveal room's fog
+ * shapes. No such op was ever stored, so lifting a refusal in a later phase
+ * changes no replay. Lights, stamps, labels and Clear build stay, and so
+ * does every other fog shape. From H2 so do free walls, Erase and difficult
+ * ground, routes and squeezes, whose stops on hexes are anchors
+ * (`onHexStop`), and attaching and a token sent onto a hex scene with its
+ * links (docs/design-v1-hex-grids.md section 6). A restore keeps the same line in
  * the reducer (shared/reducer/misc.ts), since two DMs can race a switch.
  */
 function hexPhaseFits(op: Op, c: Check): Decision {
@@ -286,16 +286,6 @@ function hexPhaseFits(op: Op, c: Check): Decision {
       return hex(op.trap.sceneId) ? no(ON_HEXES.traps) : OK;
     case "trap.update":
       return hex(c.state.traps[op.trapId]?.sceneId) ? no(ON_HEXES.traps) : OK;
-    case "token.attach":
-      return hex(c.state.tokens[op.tokenId]?.sceneId) || hex(c.state.tokens[op.to]?.sceneId) ? no(ON_HEXES.attach) : OK;
-    case "token.update": {
-      const token = c.state.tokens[op.tokenId];
-      const to = op.patch.sceneId;
-      if (!token || to === undefined || to === token.sceneId || !hex(to)) return OK;
-      // A holder takes what rides or is carried along to the other scene (reducer/tokens.ts carriedAlong).
-      const linked = token.attached !== undefined || Object.values(c.state.tokens).some((t) => t.attached?.to === token.id);
-      return linked ? no(ON_HEXES.attach) : OK;
-    }
     case "fog.draft":
       return hex(op.sceneId) && (op.add ?? []).some((f) => f.shape.kind === "cells") ? no(ON_HEXES.roomFog) : OK;
     case "fog.live":
