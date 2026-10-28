@@ -3855,7 +3855,8 @@ function perPlayerKeys(state: RoomState): EntityKey[] {
  * tokens with a path when the encounter changed, and log entries that name
  * any of them. On wave 4 scenes, the fog tile an explored write changes and
  * what stands on a tile where exploring or the party's sight changed
- * (tileDependents).
+ * (tileDependents). On hex scenes, the tokens around a written chunk
+ * (wallDependents).
  */
 export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] {
   const seen = new Set(touched);
@@ -3917,10 +3918,12 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     if (scene) for (const { cx, cy } of positionsReading(scene, tx, ty)) add(keys.chunk(sceneId, cx, cy));
   };
   const stairScenes = new Set<string>();
+  const wallChunks: { sceneId: string; cx: number; cy: number }[] = [];
   for (const key of touched) {
     const parsed = parseKey(key);
     if (!parsed) continue;
     if (parsed.kind === "chunk") {
+      if (isHex(gridOfScene(state, parsed.sceneId))) wallChunks.push(parsed);
       if (fogScene(parsed.sceneId)) {
         aroundChunk(parsed.sceneId, parsed.cx, parsed.cy);
         stairScenes.add(parsed.sceneId);
@@ -3989,6 +3992,7 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
     for (const pin of Object.values(state.pins)) if (pin.pageId !== undefined && pageIds.has(pin.pageId)) add(keys.pin(pin.id));
   }
   if (tiles.size > 0) tileDependents(state, tiles, add, tokenIds);
+  if (wallChunks.length > 0) wallDependents(state, wallChunks, add, tokenIds);
   // A stair's direction reads the scene's whole stair map, so a build edit can turn a stair chunks away (ASTRA-4): every chunk with a stair goes again.
   for (const sceneId of stairScenes) for (const key of stairChunkKeys(state, sceneId)) add(key);
   for (const token of Object.values(state.tokens)) {
@@ -4116,6 +4120,34 @@ function tileDependents(state: RoomState, tiles: ReadonlyMap<string, ReadonlySet
   }
   for (const pin of Object.values(state.pins)) if (on(pin.sceneId, pinCells(pin))) add(keys.pin(pin.id));
   for (const trap of Object.values(state.traps ?? {})) if (zoneRanges(state, trap.sceneId, trap.zone).some((r) => on(trap.sceneId, r))) add(keys.trap(trap.id));
+}
+
+/**
+ * The tokens a wall change on a hex scene can show or withhold without
+ * moving them (docs/design-v1-hex-grids.md HX-D22). The wall clip
+ * (HX-D10) reads the sight walls through a creature's hexes, so this adds
+ * every token whose footprint box meets a written chunk or one of its 8
+ * neighbors, whatever vision and fog do. Every op that changes walls writes the chunks they are
+ * stored in, a restore too. Eight neighbors suffice, since a free wall
+ * reaches at most 4 cells past its chunk and a footprint is at most 4 cells
+ * across. A written chunk is no global change: a Wall line stroke would
+ * project the whole room again.
+ */
+function wallDependents(state: RoomState, chunks: readonly { sceneId: string; cx: number; cy: number }[], add: (key: EntityKey) => void, tokenIds: Set<string>): void {
+  const boxes = new Map<string, CellRange[]>();
+  for (const { sceneId, cx, cy } of chunks) {
+    let list = boxes.get(sceneId);
+    if (!list) boxes.set(sceneId, (list = []));
+    list.push({ x0: (cx - 1) * CHUNK_CELLS, y0: (cy - 1) * CHUNK_CELLS, x1: (cx + 2) * CHUNK_CELLS, y1: (cy + 2) * CHUNK_CELLS });
+  }
+  for (const token of Object.values(state.tokens)) {
+    const list = boxes.get(token.sceneId);
+    if (!list) continue;
+    const r = footprintRect(gridOfToken(state, token), token);
+    if (!list.some((b) => r.x <= b.x1 && r.x + r.w >= b.x0 && r.y <= b.y1 && r.y + r.h >= b.y0)) continue;
+    add(keys.token(token.id));
+    tokenIds.add(token.id);
+  }
 }
 
 /** Whether any layer's memory of a scene has entries. */

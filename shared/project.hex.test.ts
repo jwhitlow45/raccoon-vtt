@@ -244,3 +244,29 @@ describe("the wall clip under fog (HX-D10)", () => {
     assert.equal(seenAtEvery(walled, ogre, spot, {}), false, "but the cut hex's ground lies behind the wall");
   });
 });
+
+describe("a wall change on a hex scene reprojects the tokens around it (HX-D22)", () => {
+  test("a door's chunk write adds every token whose footprint box meets that chunk or its 8 neighbors, and none on squares", () => {
+    const state = room({ scenes: { s1: scene("s1", { gridShape: "hexRows", bounds: { w: 80, h: 80 } }), s2: scene("s2", { order: 1 }) } });
+    const door = free(20.5, 20, 20.5, 22, { kind: "door", state: "open", secret: false, discovered: false });
+    addWalls(state, [door]);
+    state.tokens.near = token("near", { x: 20, y: 20.4 });
+    state.tokens.edge = token("edge", { size: "large", x: 46.6, y: 46.6 });
+    state.tokens.far = token("far", { x: 50, y: 20 });
+    state.tokens.other = token("other", { sceneId: "s2", x: 20, y: 20 });
+    const { cx, cy } = wallChunk(door);
+    assert.deepEqual([cx, cy], [1, 1]);
+    const { state: after } = run(state, { t: "door.set", sceneId: "s1", door: { cx, cy, id: door.id }, state: "closed" });
+    const touched = [keys.chunk("s1", cx, cy)];
+    for (const s of [state, after]) {
+      const deps = dependents(s, touched);
+      assert.ok(deps.includes(keys.token("near")), "the token beside the door");
+      assert.ok(deps.includes(keys.token("edge")), "a token whose box reaches into a neighbor chunk");
+      assert.ok(!deps.includes(keys.token("far")), "not one two chunks away");
+      assert.ok(!deps.includes(keys.token("other")), "nor one on another scene");
+    }
+    const squares: RoomState = { ...state, scenes: { ...state.scenes, s1: { ...state.scenes.s1!, gridShape: undefined } } };
+    delete squares.scenes.s1!.gridShape;
+    assert.ok(!dependents(squares, touched).includes(keys.token("near")), "squares read no wall clip");
+  });
+});
