@@ -20,7 +20,7 @@ export const MAX_POLYLINES = 20_000;
 export const MAX_POINTS = 200_000;
 export const MAX_PORTALS = 2_000;
 export const MAX_FILE_LIGHTS = 500;
-/** How far outside its map a file may put geometry, in squares. Past that the file is broken. */
+/** How far outside its map a file may put geometry, in squares. A wall or door past that means the file is broken, and a light past it is left out. */
 export const SLACK_SQUARES = 1;
 
 /** What the server keeps as a map's full size, and the most it takes in one upload (server/assets/kinds.ts). */

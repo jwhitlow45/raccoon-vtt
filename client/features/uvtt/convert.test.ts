@@ -319,10 +319,19 @@ describe("lights", () => {
     assert.ok(Math.abs(light.x - 2.3456) <= 1 / 128 && Math.abs(light.y - 4.7891) <= 1 / 128);
   });
 
+  test("a light far outside the map is left out, and the summary counts it with the lights left out", () => {
+    const far = plan({ size: p(8, 8), lights: [{ at: p(4, 4), range: 5 }, { at: p(-2, -2), range: 5 }] });
+    assert.equal(far.lights.length, 1);
+    assert.equal(far.summary.lightsLeftOut, 1);
+    assert.equal(far.summary.lightsFarOutside, 1);
+    assert.equal(far.summary.clipped, 0);
+  });
+
   test("past 100 lights, the 100 with the largest range stay and the summary counts the rest", () => {
     const many = plan({ size: p(50, 50), lights: Array.from({ length: 120 }, (_, i) => ({ at: p(1 + (i % 40), 1 + Math.floor(i / 40) * 10), range: i + 1 })) });
     assert.equal(many.lights.length, 100);
     assert.equal(many.summary.lightsLeftOut, 20);
+    assert.equal(many.summary.lightsFarOutside, 0);
     assert.ok(many.lights.every((l) => l.bright >= 21 * 2.5));
     const { state } = applied(many);
     assert.equal(Object.values(state.lights).filter((l) => l.sceneId === "imp").length, 100);

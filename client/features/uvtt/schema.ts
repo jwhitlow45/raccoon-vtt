@@ -27,6 +27,8 @@ export type UvttMap = {
   objects: Point[][];
   portals: UvttPortal[];
   lights: UvttLight[];
+  /** Lights the file put far outside its map, left out of `lights` (readUvtt). */
+  lightsFarOutside: number;
   /** Whether the image is lit already, and its ambient light, for the scene's proposed light level (vision/uvttLight.ts). */
   environment?: UvttEnvironment | null;
   /** The map image, base64, still undecoded. */
@@ -136,11 +138,16 @@ export function readUvtt(raw: unknown, options: { geometry?: boolean } = {}): Re
       position: p.position ? { x: p.position.x, y: p.position.y } : null,
     })),
     lights: (f.lights ?? []).map((l) => ({ at: { x: l.position.x, y: l.position.y }, range: l.range, color: l.color ?? null, shadows: l.shadows ?? true })),
+    lightsFarOutside: 0,
     environment: environmentOf(f.environment),
     image: f.image,
   };
-  if (options.geometry !== false && !withinMap(map)) return { ok: false, error: "This file has walls, doors or lights far outside its map." };
-  return { ok: true, map };
+  if (options.geometry === false) return { ok: true, map };
+  const inside = insideMap(map);
+  if (!wallsWithin(map, inside)) return { ok: false, error: "This file has walls or doors far outside its map." };
+  // A wall or door that far out means the file is broken. A stray light does not, and Dungeondraft has written one at (-2, -2), so it is left out and the summary says so.
+  const lights = map.lights.filter((l) => inside(l.at));
+  return { ok: true, map: { ...map, lights, lightsFarOutside: map.lights.length - lights.length } };
 }
 
 /** The file's `environment`, or null when it has none the import can read. */
@@ -150,17 +157,20 @@ function environmentOf(raw: unknown): UvttEnvironment | null {
   return { baked: baked === true, ambient: typeof ambient === "string" && ambient.length <= 32 ? ambient : null };
 }
 
-/** Every coordinate within SLACK_SQUARES of the map's own rectangle. */
-function withinMap(map: UvttMap): boolean {
+/** Whether a point lies within SLACK_SQUARES of the map's own rectangle. */
+function insideMap(map: UvttMap): (p: Point) => boolean {
   const x0 = map.origin.x - SLACK_SQUARES;
   const y0 = map.origin.y - SLACK_SQUARES;
   const x1 = map.origin.x + map.size.x + SLACK_SQUARES;
   const y1 = map.origin.y + map.size.y + SLACK_SQUARES;
-  const inside = (p: Point) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+  return (p) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+}
+
+/** Every wall, object and portal point inside the map's slack. */
+function wallsWithin(map: UvttMap, inside: (p: Point) => boolean): boolean {
   for (const list of [map.walls, map.objects]) {
     for (const line of list) for (const p of line) if (!inside(p)) return false;
   }
   for (const p of map.portals) if (!inside(p.a) || !inside(p.b)) return false;
-  for (const l of map.lights) if (!inside(l.at)) return false;
   return true;
 }

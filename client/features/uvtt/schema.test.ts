@@ -124,15 +124,27 @@ describe("reading a Universal VTT file", () => {
     if (!tooBright.ok) assert.match(tooBright.error, /501 lights/);
   });
 
-  test("every coordinate must lie within one square of the map", () => {
+  test("walls and doors must lie within one square of the map", () => {
     const inSlack = uvttFile({ origin: { x: 2, y: 2 }, size: { x: 10, y: 10 }, walls: [[{ x: 1, y: 1 }, { x: 13, y: 13 }]] });
     assert.ok(readUvtt(inSlack).ok);
-    for (const p of [{ x: 0.99, y: 5 }, { x: 5, y: 13.01 }]) {
-      const out = readUvtt(uvttFile({ origin: { x: 2, y: 2 }, size: { x: 10, y: 10 }, lights: [{ at: p, range: 1 }] }));
-      assert.equal(out.ok, false);
-    }
+    const wall = readUvtt(uvttFile({ origin: { x: 2, y: 2 }, size: { x: 10, y: 10 }, walls: [[{ x: 5, y: 5 }, { x: 0.99, y: 5 }]] }));
+    assert.deepEqual(wall, { ok: false, error: "This file has walls or doors far outside its map." });
     const far = readUvtt(uvttFile({ portals: [{ a: { x: 1, y: 1 }, b: { x: 1e9, y: 1 } }] }));
     assert.equal(far.ok, false);
+  });
+
+  test("a light past that is left out and counted, and the rest of the map still reads", () => {
+    const inside = { at: { x: 6, y: 6 }, range: 2 };
+    for (const p of [{ x: 0.99, y: 5 }, { x: 5, y: 13.01 }, { x: -2, y: -2 }]) {
+      const out = readUvtt(uvttFile({ origin: { x: 2, y: 2 }, size: { x: 10, y: 10 }, lights: [{ at: p, range: 1 }, inside] }));
+      assert.ok(out.ok, JSON.stringify(p));
+      assert.deepEqual(out.map.lights.map((l) => l.at), [inside.at]);
+      assert.equal(out.map.lightsFarOutside, 1);
+    }
+    const slack = readUvtt(uvttFile({ origin: { x: 2, y: 2 }, size: { x: 10, y: 10 }, lights: [{ at: { x: 1, y: 13 }, range: 1 }] }));
+    assert.ok(slack.ok);
+    assert.equal(slack.map.lights.length, 1);
+    assert.equal(slack.map.lightsFarOutside, 0);
   });
 
   test("JSON's 1e999 is infinity, which no coordinate may be", () => {

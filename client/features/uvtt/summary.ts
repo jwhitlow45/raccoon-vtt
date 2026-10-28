@@ -24,7 +24,9 @@ export function notes(s: Summary): string[] {
   const out: string[] = [];
   if (s.welded > 0) out.push(`Joined ${n(s.welded, "wall end", "wall ends")} that nearly met, so no gap is left between them.`);
   if (s.clipped > 0) out.push(`Cut back ${n(s.clipped, "wall, door or light", "walls, doors and lights")} that ran past the map's edge.`);
-  if (s.lightsLeftOut > 0) out.push(`Left out the ${n(s.lightsLeftOut, "smallest light", "smallest lights")}: a scene holds ${LIMITS.lightsPerScene}.`);
+  const overCap = s.lightsLeftOut - s.lightsFarOutside;
+  if (overCap > 0) out.push(`Left out the ${n(overCap, "smallest light", "smallest lights")}: a scene holds ${LIMITS.lightsPerScene}.`);
+  if (s.lightsFarOutside > 0) out.push(`Left out ${n(s.lightsFarOutside, "light that", "lights that")} sat far outside the map.`);
   if (s.lightsMoved > 0) out.push(`Moved ${n(s.lightsMoved, "light", "lights")} a little off the wall ${s.lightsMoved === 1 ? "it sat" : "they sat"} on.`);
   if (s.tolerance > SIMPLIFY_STEPS[0]) out.push(`Smoothed curved walls more than usual to fit a scene's ${count(LIMITS.freeWallsPerScene)} free walls.`);
   return out;

@@ -26,7 +26,7 @@ describe("what the worker checks, by what the import makes", () => {
 
   test("walls far outside the map refuse a new scene, not a phase", () => {
     const file = uvttFile({ size: p(10, 10), walls: [[p(0, 0), p(40, 0)]], lights: [{ at: p(-30, 2), range: 4 }] });
-    assert.deepEqual(checkFile(file, "scene"), { ok: false, error: "This file has walls, doors or lights far outside its map." });
+    assert.deepEqual(checkFile(file, "scene"), { ok: false, error: "This file has walls or doors far outside its map." });
     assert.equal(checkFile(file, "phase").ok, true);
   });
 

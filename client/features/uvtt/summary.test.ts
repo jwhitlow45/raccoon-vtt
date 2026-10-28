@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import type { Summary } from "./convert.ts";
 import { foundLine, imageNote, notes, sizeText } from "./summary.ts";
 
-const NONE: Summary = { gridWalls: 0, freeWalls: 0, doors: 0, windows: 0, lights: 0, lightsLeftOut: 0, lightsMoved: 0, welded: 0, clipped: 0, tolerance: 0.05 };
+const NONE: Summary = { gridWalls: 0, freeWalls: 0, doors: 0, windows: 0, lights: 0, lightsLeftOut: 0, lightsFarOutside: 0, lightsMoved: 0, welded: 0, clipped: 0, tolerance: 0.05 };
 
 describe("the summary sheet", () => {
   test("says what the file holds, as the design words it", () => {
@@ -18,6 +18,14 @@ describe("the summary sheet", () => {
     assert.equal(all.length, 5);
     assert.match(all[0]!, /^Joined 12 wall ends/);
     assert.match(all[2]!, /20 smallest lights: a scene holds 100/);
+  });
+
+  test("says which lights were left out for sitting far outside the map, apart from those over a scene's 100", () => {
+    assert.deepEqual(notes({ ...NONE, lightsLeftOut: 1, lightsFarOutside: 1 }), ["Left out 1 light that sat far outside the map."]);
+    assert.deepEqual(notes({ ...NONE, lightsLeftOut: 23, lightsFarOutside: 3 }), [
+      "Left out the 20 smallest lights: a scene holds 100.",
+      "Left out 3 lights that sat far outside the map.",
+    ]);
   });
 
   test("says an image is drawn down only when it is over 8,192 px, and encoded again when only its file is too big", () => {

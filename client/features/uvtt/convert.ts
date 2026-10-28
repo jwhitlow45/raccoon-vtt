@@ -64,8 +64,10 @@ export type Summary = {
   doors: number;
   windows: number;
   lights: number;
-  /** Over the 100 a scene holds, the smallest by range. */
+  /** Over the 100 a scene holds, the smallest by range, and those far outside the map. */
   lightsLeftOut: number;
+  /** Of `lightsLeftOut`, those the file put far outside its map (schema.ts), so the summary gives each its reason. */
+  lightsFarOutside: number;
   lightsMoved: number;
   /** Wall ends joined within a tenth of a square. */
   welded: number;
@@ -294,7 +296,8 @@ export function convertUvtt(map: UvttMap, options: ImportOptions, deps: { newWal
         doors,
         windows,
         lights: placed.lights.length,
-        lightsLeftOut: placed.leftOut,
+        lightsLeftOut: placed.leftOut + map.lightsFarOutside,
+        lightsFarOutside: map.lightsFarOutside,
         lightsMoved: placed.moved,
         welded: walls.welded,
         clipped: walls.clipped + placed.outside,
