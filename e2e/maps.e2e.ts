@@ -497,7 +497,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await waitFor("one undo back to the guess", () => gridIs(keep, GUESS) || null);
 
     // A map without a grid keeps the guess, and Line up grid asks for a box as before. The Scenes
-    // panel's Find the grid, in its Grid settings, answers in Line up grid too.
+    // panel's Find the grid, in its Map image and grid settings, answers in Line up grid too.
     const field = await upload(plain);
     await dm.getByText("Drag a box over 3 by 3 squares of the art").first().waitFor();
     assert.ok(gridIs(field, GUESS), "a map without a grid keeps the first guess");

@@ -167,7 +167,7 @@ function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold:
           type="button"
           aria-expanded={fold.open}
           onClick={(e) => {
-            // Focus first, so a field being typed in blurs and commits before the fold unmounts it, even when the press moved no focus (an assistive technology's click, or Safari, whose buttons take no focus on a click).
+            // Focus first, so a field being typed in blurs and commits before the fold hides or unmounts it, even when the press moved no focus (an assistive technology's click, or Safari, whose buttons take no focus on a click).
             e.currentTarget.focus();
             fold.onToggle();
           }}
@@ -281,7 +281,7 @@ export function Group(props: {
               aria-describedby={summary ? summaryId : undefined}
               aria-expanded={open}
               onClick={(e) => {
-                // As FoldLabel: focus first, so a field being typed in commits before the fold unmounts it.
+                // As FoldLabel: focus first, so a field being typed in commits before the fold hides or unmounts it.
                 e.currentTarget.focus();
                 props.onToggle?.();
               }}

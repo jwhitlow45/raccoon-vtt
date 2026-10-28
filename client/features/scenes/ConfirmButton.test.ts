@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 /*
- * This scene's "Delete scene" turns unavailable on the players' scene
- * (LP9-PLAY-2): off, but still focusable, so a button that turns off while
- * it has focus keeps it, with the line that says why as its description.
+ * The scene's Delete group's "Delete scene" turns unavailable on the
+ * players' scene (LP9-PLAY-2): off, but still focusable, so a button that
+ * turns off while it has focus keeps it, with the line that says why as its
+ * description.
  */
 
 const { createElement } = await import("react");
