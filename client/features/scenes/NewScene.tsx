@@ -69,8 +69,9 @@ const MAX_SCENES = 50;
  * New scenes shape for a Battle mat or a Map image and on Squares for a
  * Builder scene, and changes the shape for this one scene. A starter map
  * starts on squares, its art's own grid, unless the DM picks a hex shape
- * here, and then opens Line up grid. A map image for hexes is not searched
- * for a grid, which finds squares only.
+ * here, and then opens Line up grid. A map image is searched for squares
+ * and hexes whatever the Grid row says, and a sure find of one shape alone
+ * starts the scene on that shape (docs/design-v1-grid-detect.md 10.7).
  *
  * The kind is a choice of native radios, and a tap on the chosen radio does
  * nothing, so the form folds with its own Cancel. During an upload that
@@ -206,16 +207,19 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     // back to it in one step, and Use default puts it back.
     const map = scene.map!;
     const fallback = { cellPx: map.cellPx, originPx: map.originPx };
-    const found = importFound(wait.answer, hinted, map);
+    // A name's size wins only on squares: on hexes names are not read (D-261028-05).
+    const named = hinted && shape === undefined;
+    const found = importFound(wait.answer, named, map, shape);
+    const later = wait.later && !named ? wait.later : null;
     if (found) {
       const at = { x: map.widthPx / 2, y: map.heightPx / 2 };
       showOutcome({ actions, store: gridStore, scene: { id, bounds: scene.bounds, gridShape: shape, map }, found, fit: true, at, fallback });
-    } else if (wait.later && !hinted) {
+    } else if (later) {
       // A phone's search of the copy that outlived the wait goes on, and Line up grid shows it.
-      landLater({ sceneId: id, start: { id, bounds: scene.bounds, gridShape: shape, map }, search: wait.later, fallback });
+      landLater({ sceneId: id, start: { id, bounds: scene.bounds, gridShape: shape, map }, search: later, fallback });
     } else wait.later?.cancel();
     // A scale from the file name is usually right. A guess never is.
-    open(id, hinted ? null : "grid");
+    open(id, hinted && !found && !later ? null : "grid");
   };
 
   const createFromStarter = (row: AssetRow, found: FoundWork, grid: StarterGrid | null, intent: NewSceneIntent, gridShape: ShapeChoice | undefined) => {
@@ -245,7 +249,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     setPasted(fromPaste);
     setStatus({ busy: false, waiting: false, error: null });
     stopSearch();
-    if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name), hex: hexFor("map") })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
+    if (next && searchOnImport({ source: "image", named: !hexFor("map") && nameGivesSize(next.name) })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
   };
 
   // The room's "Use the pasted image" hands its picture here: Map image opens with it picked, and the grid search starts (docs/design-v1-paste.md 4).
@@ -272,7 +276,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
       // gets a short wait, or one starts now: for a name whose counts the
       // server refused, or an upload tried again after a cancel.
       let wait: ImportWait | undefined;
-      if (asset.cellPx !== undefined || gridShape !== "squares") stopSearch();
+      if (asset.cellPx !== undefined && gridShape === "squares") stopSearch();
       else {
         if (searchRef.current?.file !== file) searchRef.current = { file, search: importSearch(file, thisDevice()) };
         setStatus({ busy: true, waiting: false, finding: true, error: null });
@@ -379,7 +383,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
               <PasteStatus paste={paste} />
               {hexFor("map") ? (
                 // No file-name scale here: the server reads a name's size as square cells, which hex art named by its hexes never matches (D-261028-05).
-                <Help>Line up the hexes next.</Help>
+                <Help>A grid drawn on the map is looked for, and you check it or line up the hexes next.</Help>
               ) : (
                 <Help>
                   A name like <code>crypt_30x20.jpg</code> sets the scale for 30 by 20 squares. Otherwise a grid drawn on the map is looked for, and you check it or line up the grid next.

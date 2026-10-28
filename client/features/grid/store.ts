@@ -1,6 +1,8 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
-import { isHex, type Grid } from "#shared/rules/grid.ts";
+import type { GridShape } from "#shared/model.ts";
+import { shapeOfGrid, type Grid } from "#shared/rules/grid.ts";
+import type { MapShape } from "./detectHex.ts";
 import { boxAt, boxSides, calibrationFromBox, canonicalToWorld, type CalBox, type Calibration, type Corner, type Point } from "./calibrate.ts";
 
 /**
@@ -32,10 +34,25 @@ export type FoundNote = {
   fallback?: Fallback;
   /** An offer on a scene that came with its own grid, from a Universal VTT file. */
   ownGrid?: true;
+  /** The shape the note's box and grid are cells of, as a scene stores it: absent for squares. */
+  shape?: GridShape;
+  /** The find set the scene's shape with its grid (docs/design-v1-grid-detect.md 10.7). */
+  switched?: true;
+  /** Squares and hexes were both found: the shape not offered and its size, which the line names too. */
+  contested?: { shape: MapShape; cellPx: number };
+  /**
+   * A find of another shape than the scene's, only offered: its grid and
+   * its box, which Grid shape changed to it brings (`shapeChanged`), and
+   * when a switch was refused, why. The note's own box stays the scene's.
+   */
+  other?: { shape: MapShape; cal: Calibration; box: CalBox; refusal?: string };
 };
 
-/** What Use default puts back: the grid an import started with, and the size the scene had then. */
-export type Fallback = Calibration & { bounds: { w: number; h: number } };
+/**
+ * What Use default puts back: the grid an import started with, the size
+ * the scene had then, and when the find switched its shape, that shape.
+ */
+export type Fallback = Calibration & { bounds: { w: number; h: number }; shape?: MapShape };
 
 export type GridToolState = {
   /** In canonical pixels of the map. Null when the scene has no map. */
@@ -55,13 +72,14 @@ export type GridToolState = {
 };
 
 /**
- * A search's note for a scene on grid `g`, or null. Searches find square
- * grids only, so on hexes a note left from before Grid shape switched, on
- * this device or another, measured cells the scene no longer has. Only
- * the note that the scene changed, which measured nothing, still holds.
+ * A search's note for a scene on grid `g`, or null. A note's box and grid
+ * are cells of the shape the scene had when it was left, so after Grid
+ * shape switched, on this device or another, it stands for cells the
+ * scene no longer has. Only the note that the scene changed, which
+ * measured nothing, still holds.
  */
 export function noteFor(found: FoundNote | null, sceneId: string, g: Grid): FoundNote | null {
-  return found?.sceneId === sceneId && (!isHex(g) || found.outcome === "changed") ? found : null;
+  return found?.sceneId === sceneId && (found.outcome === "changed" || found.shape === shapeOfGrid(g)) ? found : null;
 }
 
 /**
@@ -95,10 +113,19 @@ export function endFinding(store: StoreApi<GridToolState>, sceneId: string): voi
  * grid already open is not opened again (Stage runs `activate` only on a
  * change of tool, scene or role), so with no box it would lose Apply,
  * Nudge and Find until the DM drew one.
+ *
+ * A find of the new shape that was only offered ("Change Grid shape to
+ * use them") becomes the offer on it: its box and its grid, for Apply.
  */
 export function shapeChanged(store: StoreApi<GridToolState>, sceneId: string, shape?: { map: Calibration; from: Grid; to: Grid }): void {
   endFinding(store, sceneId);
   const { found, box, sceneId: open } = store.getState();
+  const other = found?.sceneId === sceneId && shape ? found.other : undefined;
+  if (other && shape && (shapeOfGrid(shape.to) ?? "squares") === other.shape) {
+    const to = shapeOfGrid(shape.to);
+    store.setState({ found: { sceneId, outcome: "offered", cellPx: other.cal.cellPx, box: other.box, cal: other.cal, ...(to ? { shape: to } : {}) }, ...(open === sceneId ? { box: other.box, drag: null } : {}) });
+    return;
+  }
   let next: CalBox | null = null;
   if (box && shape) {
     const { w, h } = boxSides(box, shape.from);

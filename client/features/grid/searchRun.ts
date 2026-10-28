@@ -1,4 +1,5 @@
 import { detectGrid, type Pixels } from "./detect.ts";
+import { detectHex } from "./detectHex.ts";
 import type { SearchAnswer, SearchRequest } from "./findGrid.ts";
 
 /**
@@ -7,6 +8,11 @@ import type { SearchAnswer, SearchRequest } from "./findGrid.ts";
  * their own: the picked file, or the first of the server's addresses that
  * answers, decoded and searched. Any failure answers as an error, and the
  * page goes on as if no grid were drawn.
+ *
+ * Every search looks for squares, hex rows and hex columns on the same
+ * pixels, whatever the scene's shape (docs/design-v1-grid-detect.md
+ * 10.7), so the DM never has to say which the map is. The page picks the
+ * shape from the three (outcome.ts).
  */
 
 export type SearchDeps = {
@@ -28,7 +34,9 @@ export async function runSearch(request: SearchRequest, deps: SearchDeps): Promi
   try {
     const blob = "file" in request ? request.file : await fetchFirst(request.urls, deps.fetch);
     const px = await deps.pixels(blob);
-    return { t: "done", result: detectGrid(px), width: px.width, height: px.height };
+    const result = detectGrid(px);
+    const hex = { rows: detectHex(px, { orient: "rows" }), columns: detectHex(px, { orient: "columns" }) };
+    return { t: "done", result, hex, width: px.width, height: px.height };
   } catch {
     return { t: "error" };
   }

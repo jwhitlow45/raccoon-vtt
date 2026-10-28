@@ -3,7 +3,9 @@ import { describe, test } from "node:test";
 import sharp from "sharp";
 import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
 import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
-import { cameWithGrid, decodeSize, headerSize, importSearch, importSearchFrom, findFound, foundGrid, importFound, nameGivesSize, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import { calibrationFromHexFind } from "./calibrate.ts";
+import type { HexDetection } from "./detectHex.ts";
+import { cameWithGrid, decodeSize, headerSize, importSearch, importSearchFrom, findFound, foundGrid, importFound, nameGivesSize, pickedGrid, replacementFound, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { rng } from "./synthetic.ts";
 
 const AXIS = { found: 20, expected: 20, from: 0, to: 0, snr: 50, between: 0, parity: 1, rms: 0.1, continuity: 1, restart: 0, coverage: 1, drift: 0 } as const;
@@ -112,8 +114,6 @@ describe("what a found grid becomes", () => {
     assert.equal(searchOnImport({ source: "image", named: false }), true);
     assert.equal(searchOnImport({ source: "image", named: true }), false);
     assert.equal(searchOnImport({ source: "uvtt", named: false }), false);
-    // The detector finds squares only, so a map for a hex scene goes to Line up grid (docs/design-v1-hex-grids.md section 6).
-    assert.equal(searchOnImport({ source: "image", named: false, hex: true }), false);
   });
 
   test("a scene that came with its own grid, from a Universal VTT file, is only offered a find, however sure", () => {
@@ -367,5 +367,70 @@ describe("where an import searches a picked map", () => {
     await settled();
     assert.deepEqual(await search.afterUpload(["/m"], 2000), { answer: null, later: null });
     assert.equal(made, 0);
+  });
+});
+
+const FAMILY = { period: 30, phase: 0, found: 20, expected: 20, snr: 50, between: 0, rms: 0.1 };
+
+function hexFind(orient: "rows" | "columns", cellPx: number, center: { x: number; y: number }, confidence: number): HexDetection {
+  return { found: true, orient, cellPx, center, box: { x: 0, y: 0, size: 3 * cellPx }, confidence, polarity: "dark", broken: 0.9, coverage: 1, checked: true, families: [FAMILY, FAMILY, FAMILY] };
+}
+
+const NO_HEX: HexDetection = { found: false, reason: "none" };
+const NO_SQUARES: GridDetection = { found: false, reason: "none" };
+
+function looked(squares: GridDetection, rows: HexDetection, columns: HexDetection, width = 1000, height = 800): SearchDone {
+  return { t: "done", result: squares, hex: { rows, columns }, width, height };
+}
+
+describe("the shape a search picks (docs/design-v1-grid-detect.md 10.5 to 10.7)", () => {
+  const map = { widthPx: 1000, heightPx: 800 };
+
+  test("hexes found alone are the scene's grid, scaled to the map's pixels, whatever the scene's shape", () => {
+    // Decoded at half the map's size: the cell and the center double.
+    const answer = looked(NO_SQUARES, hexFind("rows", 30.1, { x: 250.2, y: 199.6 }, 0.9), NO_HEX, 500, 400);
+    for (const shape of [undefined, "hexRows", "hexColumns"] as const) {
+      const found = pickedGrid(answer, map, shape);
+      assert.equal(found?.shape, "hexRows", String(shape));
+      assert.equal(found?.tier, "high");
+      assert.deepEqual(found?.cal, calibrationFromHexFind({ cellPx: 60.2, center: { x: 500.4, y: 399.2 }, orient: "rows" }));
+      assert.equal(found?.contested, undefined);
+    }
+    assert.equal(pickedGrid(looked(NO_SQUARES, NO_HEX, hexFind("columns", 50, { x: 500, y: 400 }, 0.45)), map, undefined)?.tier, "medium");
+    assert.equal(pickedGrid(looked(NO_SQUARES, NO_HEX, hexFind("columns", 50, { x: 500, y: 400 }, 0.45)), map, undefined)?.shape, "hexColumns");
+  });
+
+  test("squares found alone are squares, as they always were, on a hex scene too", () => {
+    const answer = looked(detection(50, { x: 10, y: 20 }, 0.9), NO_HEX, NO_HEX);
+    assert.deepEqual(pickedGrid(answer, map, "hexRows"), { tier: "high", cal: { cellPx: 50, originPx: { x: 10, y: 20 } } });
+    assert.deepEqual(pickedGrid(done(detection(50, { x: 10, y: 20 }, 0.9), 1000, 800), map, undefined), { tier: "high", cal: { cellPx: 50, originPx: { x: 10, y: 20 } } }, "an answer that looked for squares alone");
+    assert.equal(pickedGrid(looked(NO_SQUARES, NO_HEX, NO_HEX), map, undefined), null);
+  });
+
+  test("two shapes found are only offered, on the scene's own shape when it is one of them, the other named", () => {
+    const answer = looked(detection(70, { x: 10, y: 20 }, 0.7), hexFind("rows", 52, { x: 500, y: 400 }, 0.8), NO_HEX);
+    // A square scene: its own squares are offered, though the hexes were surer.
+    assert.deepEqual(pickedGrid(answer, map, undefined), { tier: "medium", cal: { cellPx: 70, originPx: { x: 10, y: 20 } }, contested: { shape: "hexRows", cellPx: 52 } });
+    const onRows = pickedGrid(answer, map, "hexRows");
+    assert.equal(onRows?.shape, "hexRows");
+    assert.equal(onRows?.tier, "medium");
+    assert.deepEqual(onRows?.contested, { shape: "squares", cellPx: 70 });
+    // Neither is the scene's: the surer, still only offered.
+    const onColumns = pickedGrid(answer, map, "hexColumns");
+    assert.equal(onColumns?.shape, "hexRows");
+    assert.equal(onColumns?.tier, "medium");
+    assert.deepEqual(onColumns?.contested, { shape: "squares", cellPx: 70 });
+  });
+
+  test("a copy whose shape differs from the map's offers no hexes either", () => {
+    assert.equal(pickedGrid(looked(NO_SQUARES, hexFind("rows", 50, { x: 0, y: 0 }, 0.9), NO_HEX, 800, 1000), map, undefined), null);
+  });
+
+  test("an import and new art take the shape found, a file name's size winning only on squares", () => {
+    const answer = looked(NO_SQUARES, hexFind("columns", 50, { x: 500, y: 400 }, 0.9), NO_HEX);
+    assert.equal(importFound(answer, false, map)?.shape, "hexColumns");
+    assert.equal(importFound(answer, true, map), null, "named");
+    const scene = { gridShape: "hexRows" as const, map: { originPx: { x: 0, y: 0 } } };
+    assert.equal(replacementFound(answer, false, map, scene).found?.shape, "hexColumns");
   });
 });

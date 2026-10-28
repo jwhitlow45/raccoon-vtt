@@ -48,7 +48,6 @@ export const HEX_LIMITS = {
   builder: "On hexes the builder draws wall lines, paints heights and stairs, marks difficult ground, and places lights, stamps and labels. Painted ground needs squares.",
   sizes: "On hexes a creature takes its size's hexes: Large 3, Huge 7, Gargantuan 12.",
   counting: "Counting works on squares. Use the box.",
-  findGrid: "Find the grid finds square grids only. Line up the hexes with the box.",
   starter: "Starter maps are drawn on squares.",
   uvtt: "Universal VTT files make square scenes.",
 } as const;

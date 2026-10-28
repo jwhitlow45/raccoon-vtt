@@ -8,9 +8,10 @@ import { mapScene } from "../scenes/create.ts";
 import { importScene, placeMap } from "../uvtt/batch.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
 import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { boxAt, boxSides, calibrationFromBox, canonicalToWorld, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
+import { boxAt, boxSides, calibrationFromBox, calibrationFromHexFind, canonicalToWorld, fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
 import { cameWithGrid, IMPORT_WAIT_MS, importSearch, importSearchFrom, replacementFound, type ImportWait, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
-import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, gridOps, landSearch, middleOf, showOutcome } from "./outcome.ts";
+import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, foundLine, gridOps, landSearch, middleOf, showOutcome } from "./outcome.ts";
+import type { HexDetection } from "./detectHex.ts";
 import { boxCalibration, endFinding, noteFor, shapeChanged, type GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
 
@@ -253,6 +254,10 @@ function liveRoom() {
       sent.push({ op, group: opts?.group });
       if (op.t === "scene.setGrid") scene = { ...scene, map: { ...scene.map, cellPx: op.cellPx, originPx: op.originPx } };
       else if (op.t === "scene.update" && op.patch.bounds) scene = { ...scene, bounds: op.patch.bounds };
+      else if (op.t === "scene.update" && op.patch.gridShape) {
+        const { gridShape: _, ...rest } = scene;
+        scene = op.patch.gridShape === "squares" ? rest : { ...rest, gridShape: op.patch.gridShape };
+      }
       return sent.length;
     },
     newId: () => `g${++ids}`,
@@ -496,7 +501,7 @@ describe("a search the DM works around", () => {
 });
 
 /*
- * Searches find square grids only (docs/design-v1-hex-grids.md), so one
+ * A search measured the scene's cells as they were when it began, so one
  * begun on squares never lands on the scene once it is on hexes, whether
  * Grid shape changed on this device or another, and a square grid found
  * before the switch stands for nothing after it.
@@ -565,23 +570,6 @@ describe("a switch to hexes", () => {
     shapeChanged(other.store, "s2");
     assert.deepEqual(other.store.getState().found?.cal, measured);
     assert.ok(other.store.getState().box);
-  });
-
-  test("a found grid shown on a hex scene changes nothing: an upload's answer in time, or Find the grid's", async () => {
-    const hex = { ...SCENE, gridShape: "hexRows" as const };
-    const { sent, actions, store } = room();
-    const box = { x: 0, y: 0, size: 210 };
-    store.setState({ box });
-    const guess = { cellPx: 47, originPx: { x: 0, y: 0 } };
-    assert.equal(showOutcome({ actions, store, scene: hex, found: { tier: "high", cal: FOUND }, fit: true, at: { x: 700, y: 500 }, fallback: guess }), null);
-    assert.deepEqual(sent, []);
-    assert.equal(store.getState().found, null);
-    assert.equal(store.getState().box, box);
-    let made = 0;
-    void findOnScene({ actions, store, sceneId: "s1", scene: () => hex, urls: ["/m"], makeWorker: () => (made++, new CountingWorker()), timers: fakeTimers() });
-    await settled();
-    assert.equal(made, 0, "a hex scene is never searched");
-    assert.equal(store.getState().finding, null);
   });
 
   test("an upload's search of the copy that lands after a switch to hex rows, here or elsewhere, applies nothing", async () => {
@@ -951,5 +939,264 @@ describe("an import's search, and the phone copy's that lands after the scene op
       assert.equal(timers.pending(), 0, `${label}: no timer left`);
       for (const w of workers) assert.equal(w.terminated, 1, `${label}: the Worker ended once`);
     }
+  });
+});
+
+const FAMILY = { period: 30, phase: 0, found: 20, expected: 20, snr: 50, between: 0, rms: 0.1 };
+/** Hex rows of 30.1 px decoded at half the map's size: 60.2 px hexes on the map, a center at (500.4, 399.2). */
+const HEX_ROWS_FOUND: HexDetection = { found: true, orient: "rows", cellPx: 30.1, center: { x: 250.2, y: 199.6 }, box: { x: 0, y: 0, size: 90.3 }, confidence: 0.9, polarity: "dark", broken: 0.9, coverage: 1, checked: true, families: [FAMILY, FAMILY, FAMILY] };
+const HEX_CAL = calibrationFromHexFind({ cellPx: 60.2, center: { x: 500.4, y: 399.2 }, orient: "rows" });
+const NO_HEX: HexDetection = { found: false, reason: "none" };
+type GridShapeOrSquares = "squares" | "hexRows" | "hexColumns";
+const NO_SQUARES = { found: false, reason: "none" } as const;
+const answerOf = (squares: GridDetection, rows: HexDetection): SearchAnswer => ({ t: "done", result: squares, hex: { rows, columns: NO_HEX }, width: 700, height: 500 });
+const HEXES_SURE = answerOf(NO_SQUARES, HEX_ROWS_FOUND);
+const HEXES_DOUBTFUL = answerOf(NO_SQUARES, { ...HEX_ROWS_FOUND, confidence: 0.5 });
+const BOTH = answerOf(DETECTED, { ...HEX_ROWS_FOUND, confidence: 0.97, cellPx: 26 });
+
+/** Find the grid on the live scene, answered with `answer`. */
+async function findWith(live: ReturnType<typeof liveRoom>, answer: SearchAnswer, refusal?: (scene: GridScene, to: Grid) => string | null) {
+  const worker = new AnsweringWorker();
+  const running = findOnScene({ actions: live.actions, store: live.store, sceneId: "s1", scene: live.scene, urls: ["/m"], makeWorker: () => worker, ...(refusal ? { refusal } : {}) });
+  worker.answer(answer);
+  await running;
+  return live.store.getState().found;
+}
+
+/** The options line for the scene as it is now, as Options.tsx reads it. */
+function lineOf(live: ReturnType<typeof liveRoom>): string | undefined {
+  const g = gridOfShape(live.scene().gridShape);
+  const note = noteFor(live.store.getState().found, "s1", g);
+  return note && note.box === live.store.getState().box ? foundLine(note, g).content : undefined;
+}
+
+describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)", () => {
+  const HEX_ROWS = gridOfShape("hexRows");
+
+  test("hexes found on a new map in a square room start the scene on hexes with the grid, one undo step, and Use default puts back both", () => {
+    const live = liveRoom();
+    const guess = { cellPx: 47, originPx: { x: 0, y: 0 } };
+    const found = { tier: "high" as const, cal: HEX_CAL, shape: "hexRows" as const };
+    showOutcome({ actions: live.actions, store: live.store, scene: live.scene(), found, fit: true, at: { x: 700, y: 500 }, fallback: guess });
+    assert.deepEqual(
+      live.sent.map((s) => s.op),
+      [
+        { t: "scene.update", sceneId: "s1", patch: { gridShape: "hexRows" } },
+        { t: "scene.setGrid", sceneId: "s1", cellPx: HEX_CAL.cellPx, originPx: HEX_CAL.originPx },
+        { t: "scene.update", sceneId: "s1", patch: { bounds: fitBounds({ ...MAP, ...HEX_CAL }) } },
+      ],
+    );
+    assert.ok(live.sent.every((s) => s.group === live.sent[0]!.group), "one undo step");
+    assert.equal(live.scene().gridShape, "hexRows");
+    const note = live.store.getState().found;
+    assert.equal(note?.switched, true);
+    assert.deepEqual(live.store.getState().box, boxAround(HEX_CAL, { x: 700, y: 500 }, HEX_ROWS), "the box on the hexes found");
+    assert.equal(lineOf(live), "Found hex rows of 60.2 px. The grid is hex rows now.");
+    assert.deepEqual(boxCalibration(live.store.getState().box!, note!, "s1", HEX_ROWS), HEX_CAL, "Apply takes the find as measured");
+    // Use default.
+    assert.deepEqual(note?.fallback, { ...guess, bounds: SCENE.bounds, shape: "squares" });
+    const back = fallbackOps(live.scene(), note!.fallback!);
+    assert.deepEqual(back, [
+      { t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } },
+      { t: "scene.setGrid", sceneId: "s1", ...guess },
+      { t: "scene.update", sceneId: "s1", patch: { bounds: SCENE.bounds } },
+    ]);
+    for (const op of back) live.actions.dispatch(op);
+    assert.equal(live.scene().gridShape, undefined, "shape back");
+    assert.ok(sameCalibration(live.scene().map, guess), "grid back");
+  });
+
+  test("Find the grid on a hex scene applies a sure find of its own hexes, and a square scene's sure squares switch a hex scene back", async () => {
+    const live = liveRoom();
+    live.elsewhere({ ...SCENE, gridShape: "hexRows" });
+    await findWith(live, HEXES_SURE);
+    assert.deepEqual(live.sent[0]?.op, { t: "scene.setGrid", sceneId: "s1", cellPx: HEX_CAL.cellPx, originPx: HEX_CAL.originPx });
+    assert.ok(live.sent.every((s) => s.op.t !== "scene.update" || !s.op.patch.gridShape), "no switch");
+    assert.equal(lineOf(live), "Found a grid of 60.2 px hexes.");
+    assert.equal(live.store.getState().found?.fallback, undefined, "Undo puts it back");
+    const squares = liveRoom();
+    squares.elsewhere({ ...SCENE, gridShape: "hexColumns" });
+    await findWith(squares, SURE);
+    assert.deepEqual(squares.sent[0]?.op, { t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } });
+    assert.equal(squares.scene().gridShape, undefined);
+    assert.equal(lineOf(squares), "Found squares of 70 px. The grid is squares now.");
+  });
+
+  test("a contested find only places the box on the scene's own shape, nothing applied and the shape unchanged, and the line names both", async () => {
+    const live = liveRoom();
+    await findWith(live, BOTH);
+    assert.deepEqual(live.sent, []);
+    assert.equal(live.scene().gridShape, undefined);
+    assert.equal(live.store.getState().found?.outcome, "offered");
+    assert.deepEqual(live.store.getState().box, { x: 580, y: 385, size: 210 }, "the box on the squares found");
+    assert.equal(lineOf(live), "The map shows squares of 70 px and hexes of 52 px. Check the box, then Apply.");
+    // On a scene of neither shape, the surer is offered as another shape.
+    const columns = liveRoom();
+    columns.elsewhere({ ...SCENE, gridShape: "hexColumns" });
+    await findWith(columns, BOTH);
+    assert.deepEqual(columns.sent, []);
+    assert.equal(lineOf(columns), "The map shows hex rows of 52 px and squares of 70 px. Change Grid shape to use them.");
+  });
+
+  test("a contested find of another shape sends nothing at any confidence", () => {
+    const live = liveRoom();
+    const found = { tier: "high" as const, cal: HEX_CAL, shape: "hexRows" as const, contested: { shape: "squares" as const, cellPx: 70 } };
+    showOutcome({ actions: live.actions, store: live.store, scene: live.scene(), found, fit: true, at: { x: 700, y: 500 } });
+    assert.deepEqual(live.sent, []);
+    assert.equal(live.store.getState().found?.outcome, "offered");
+  });
+
+  test("hexes found on a square scene with painted ground: the shape stays, and the line says why", async () => {
+    const live = liveRoom();
+    const why = "This scene has painted ground on its squares, which can't stand on hexes. Remove them to change the grid.";
+    const asked: Grid[] = [];
+    await findWith(live, HEXES_SURE, (_scene, to) => (asked.push(to), why));
+    assert.deepEqual(asked, [HEX_ROWS], "the switch is asked for the shape found");
+    assert.deepEqual(live.sent, []);
+    assert.equal(live.scene().gridShape, undefined);
+    assert.equal(lineOf(live), "Found hex rows of 60.2 px, but this scene has painted ground on its squares, which can't stand on hexes. Remove them to change the grid.");
+    // A Universal VTT scene keeps its file's squares, whatever the room says.
+    const uvtt = liveRoom();
+    uvtt.elsewhere({ ...SCENE, gridFromFile: true });
+    await findWith(uvtt, HEXES_SURE, () => null);
+    assert.deepEqual(uvtt.sent, []);
+    assert.equal(lineOf(uvtt), "Found hex rows of 60.2 px, but this scene came with its own square grid from its file.");
+  });
+
+  test("a doubtful find of another shape changes nothing and says so, and Grid shape changed to it brings its box and grid", async () => {
+    const live = liveRoom();
+    live.store.setState({ sceneId: "s1" });
+    await findWith(live, HEXES_DOUBTFUL);
+    assert.deepEqual(live.sent, []);
+    assert.equal(lineOf(live), "These lines may be hex rows of 60.2 px. Change Grid shape to use them.");
+    shapeChanged(live.store, "s1", { map: MAP, from: SQUARES, to: HEX_ROWS });
+    live.elsewhere({ ...live.scene(), gridShape: "hexRows" });
+    const { box, found } = live.store.getState();
+    assert.ok(box);
+    assert.deepEqual(boxCalibration(box, found, "s1", HEX_ROWS), HEX_CAL, "Apply takes the find");
+    assert.deepEqual(box, boxAround(HEX_CAL, { x: 700, y: 500 }, HEX_ROWS));
+    assert.equal(lineOf(live), "These lines may be the map's hexes: 60.2 px. Check the box, then Apply.");
+  });
+
+  test("a hex find whose lean could not be measured, held to medium, is only offered on its own shape too", async () => {
+    const live = liveRoom();
+    live.elsewhere({ ...SCENE, gridShape: "hexRows" });
+    await findWith(live, answerOf(NO_SQUARES, { ...HEX_ROWS_FOUND, confidence: 0.5, checked: false }));
+    assert.deepEqual(live.sent, []);
+    assert.equal(lineOf(live), "These lines may be the map's hexes: 60.2 px. Check the box, then Apply.");
+  });
+
+  test("a late hex answer on a scene whose shape changed is dropped, and the line says the scene changed", async () => {
+    const live = liveRoom();
+    live.elsewhere({ ...SCENE, gridShape: "hexRows" });
+    const worker = new AnsweringWorker();
+    const running = findOnScene({ actions: live.actions, store: live.store, sceneId: "s1", scene: live.scene, urls: ["/m"], makeWorker: () => worker });
+    live.elsewhere({ ...live.scene(), gridShape: "hexColumns" });
+    worker.answer(HEXES_SURE);
+    await running;
+    assert.deepEqual(live.sent, []);
+    assert.equal(live.store.getState().found?.outcome, "changed");
+    assert.equal(lineOf(live), "The scene changed, so the grid found was not applied.");
+  });
+
+  /**
+   * Random runs of Find the grid on scenes of every shape: answers of
+   * squares, hex rows, both, doubtful hexes and none, answers from ended
+   * searches, Grid shape changed here or on another device, and the
+   * scene's content refusing a switch or not. Invariants, after every event:
+   * - `finding` is set exactly while a search runs.
+   * - Only an answer that lands while its search runs, on a scene unchanged
+   *   since it began, sends anything, and then one undo group.
+   * - The shape changes only by a sure find of another shape found alone
+   *   on a scene that may switch, its first op, with the grid in its group.
+   *   A contested, doubtful or refused find sends nothing.
+   * - A note the options line reads stands for cells of the scene's shape now.
+   */
+  test("random finds, shape changes here and elsewhere, refusals and late answers keep every invariant", async () => {
+    const next = rng(20261028);
+    const kinds = ["find", "squares", "hexes", "both", "doubtful", "nothing", "late", "shapeHere", "shapeElsewhere", "refuse"] as const;
+    const shapes = [undefined, "hexRows", "hexColumns"] as const;
+    const pick = <T>(list: readonly T[]): T => list[Math.floor(next() * list.length)]!;
+    const answers = { squares: SURE, hexes: HEXES_SURE, both: BOTH, doubtful: HEXES_DOUBTFUL, nothing: NOTHING };
+    for (let run = 0; run < 400; run++) {
+      const live = liveRoom();
+      live.elsewhere({ ...SCENE, ...(pick(shapes) ? { gridShape: pick(["hexRows", "hexColumns"] as const) } : {}) });
+      live.store.setState({ sceneId: "s1" });
+      const timers = fakeTimers();
+      let refused = false;
+      const ended: AnsweringWorker[] = [];
+      let running: { worker: AnsweringWorker; stale: boolean } | null = null;
+      const end = () => {
+        if (running) ended.push(running.worker);
+        running = null;
+      };
+      const events: string[] = [];
+      const steps = 1 + Math.floor(next() * 10);
+      for (let step = 0; step < steps; step++) {
+        const kind = pick(kinds);
+        events.push(kind);
+        const label = `run ${run}: ${events.join(", ")}`;
+        const sentBefore = live.sent.length;
+        const shapeBefore = live.scene().gridShape;
+        let expect: { sends: false } | { sends: true; to: GridShapeOrSquares | null } = { sends: false };
+        if (kind === "find") {
+          const worker = new AnsweringWorker();
+          void findOnScene({ actions: live.actions, store: live.store, sceneId: "s1", scene: live.scene, urls: ["/m"], makeWorker: () => worker, timers, refusal: () => (refused ? "Remove them to change the grid." : null) });
+          if (!running) running = { worker, stale: false };
+        } else if (kind in answers) {
+          if (running) {
+            const own = shapeBefore ?? "squares";
+            running.worker.answer(answers[kind as keyof typeof answers]);
+            if (!running.stale && (kind === "squares" || kind === "hexes")) {
+              const found = kind === "squares" ? "squares" : "hexRows";
+              if (found === own) expect = { sends: true, to: null };
+              else if (!refused) expect = { sends: true, to: found };
+            }
+            end();
+          }
+        } else if (kind === "late") {
+          if (ended.length) pick(ended).answer(pick([SURE, HEXES_SURE, BOTH]));
+        } else if (kind === "shapeHere" || kind === "shapeElsewhere") {
+          const s = live.scene();
+          const to = pick(shapes.filter((x) => x !== s.gridShape));
+          if (kind === "shapeHere") {
+            shapeChanged(live.store, "s1", { map: s.map, from: gridOfShape(s.gridShape), to: gridOfShape(to) });
+            end();
+          } else if (running) running.stale = true;
+          const { gridShape: _, ...rest } = s;
+          live.elsewhere(to ? { ...rest, gridShape: to } : rest);
+        } else refused = !refused;
+        await settled();
+
+        const after = live.store.getState();
+        assert.equal(after.finding !== null, running !== null, `${label}: finding is set exactly while a search runs`);
+        const sent = live.sent.slice(sentBefore);
+        if (!expect.sends) {
+          assert.equal(sent.length, 0, `${label}: nothing sent`);
+          if (kind !== "shapeHere" && kind !== "shapeElsewhere") assert.equal(live.scene().gridShape, shapeBefore, `${label}: the shape stays`);
+        } else {
+          // Nothing at all when the scene holds that grid already.
+          assert.ok(sent.every((x) => x.group === sent[0]!.group), `${label}: one undo group`);
+          const switches = sent.filter((x) => x.op.t === "scene.update" && x.op.patch.gridShape !== undefined);
+          if (expect.to === null) assert.equal(switches.length, 0, `${label}: no switch`);
+          else {
+            assert.equal(switches.length, 1, `${label}: one switch`);
+            assert.equal(sent[0], switches[0], `${label}: the switch goes first`);
+            assert.equal(live.scene().gridShape ?? "squares", expect.to, `${label}: the shape found`);
+          }
+        }
+        const g = gridOfShape(live.scene().gridShape);
+        const note = noteFor(after.found, "s1", g);
+        if (note && note.outcome !== "changed") assert.equal(note.shape, live.scene().gridShape, `${label}: the note is of the scene's cells`);
+      }
+    }
+  });
+
+  test("no grid on a hex scene says to line up the hexes", async () => {
+    const live = liveRoom();
+    live.elsewhere({ ...SCENE, gridShape: "hexRows" });
+    live.store.setState({ box: { x: 0, y: 0, size: 210 } });
+    await findWith(live, answerOf(NO_SQUARES, NO_HEX));
+    assert.equal(lineOf(live), "No grid found. Drag a box over 3 hexes across instead.");
   });
 });

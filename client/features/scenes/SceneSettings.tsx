@@ -22,7 +22,7 @@ import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from 
 import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound, searchOnImport, type ImportWait } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { shapeChanged, useGridStore } from "../grid/store.ts";
-import { useFindGrid, useLandLater } from "../grid/useFindGrid.ts";
+import { useFindGrid, useLandLater, useSwitchRefusal } from "../grid/useFindGrid.ts";
 import { shapeRefusal, ShapeRow } from "../grid/ShapeRow.tsx";
 import { HEX_LIMITS, SHAPE_HELP, sceneCellWord, shapeChoice, sizeWords, storedShape, type ShapeChoice } from "../grid/words.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
@@ -318,7 +318,6 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
   const ui = useRoomUi();
   const findGrid = useFindGrid();
   const hex = isHex(sceneGrid(scene));
-  const findOffId = useId();
   const squares = imageSquares(map);
   const [across, setAcross] = useState(squares.across);
   const [down, setDown] = useState(squares.down);
@@ -360,9 +359,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
           {/* The search's progress and its answer show in Line up grid, which opens over the map it looks at. */}
           <Button
             size="sm"
-            title={hex ? HEX_LIMITS.findGrid : "Look for a grid drawn on the map and line up with it"}
-            disabled={hex}
-            aria-describedby={hex ? findOffId : undefined}
+            title="Look for a grid drawn on the map and line up with it"
             onClick={() => {
               findGrid(scene.id);
               ui.setTool("grid");
@@ -373,12 +370,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
           </Button>
         </div>
       </SettingRow>
-      {hex ? (
-        <>
-          <Help id={findOffId}>{HEX_LIMITS.findGrid}</Help>
-          <Help>{HEX_LIMITS.counting}</Help>
-        </>
-      ) : null}
+      {hex ? <Help>{HEX_LIMITS.counting}</Help> : null}
       {/* Counting assumes squares that start at the image's corner. A grid whose first line sits before the image
           only comes from a Universal VTT file, and counting would slide the image half a square under its walls. */}
       {hex || map.originPx.x < 0 || map.originPx.y < 0 ? null : (
@@ -469,6 +461,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
   const room = useRoomStore();
   const assets = useAssets();
   const landLater = useLandLater();
+  const refusal = useSwitchRefusal();
   const phaseCount = scene.phases?.length ?? 0;
   /*
    * A key paste lands here only with focus in the row, and on the players'
@@ -499,12 +492,13 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
     // the old art at another size, which keeps the scene's grid, scaled.
     const device = thisDevice();
     const hex = isHex(sceneGrid(scene));
-    let search = searchOnImport({ source: "image", named: nameGivesSize(file.name), hex }) ? importSearch(file, device) : null;
+    // Squares and hexes are both looked for. A name's size wins only on squares: on hexes names are not read (D-261028-05).
+    let search = searchOnImport({ source: "image", named: !hex && nameGivesSize(file.name) }) ? importSearch(file, device) : null;
     abort.signal.addEventListener("abort", () => search?.cancel());
     try {
       const asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
       let wait: ImportWait = { answer: null, later: null };
-      if ((!map || !sameArt(map, asset)) && asset.cellPx === undefined && !hex) {
+      if ((!map || !sameArt(map, asset)) && (asset.cellPx === undefined || hex)) {
         search ??= importSearch(file, device);
         setUpload({ busy: true, waiting: false, finding: true, error: null });
         wait = await search.afterUpload(copyUrls(device, (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);
@@ -516,7 +510,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
       setUpload({ busy: false, waiting: false, error: null });
       setArmed(false);
       const next = replaceMap(map, asset);
-      const { found, ownGrid } = replacementFound(wait.answer, asset.cellPx !== undefined, next, scene);
+      const { found, ownGrid } = replacementFound(wait.answer, asset.cellPx !== undefined && !hex, next, scene);
       // Fog first, so players on this scene never see the map before it.
       if (firstFog && (!playersHere || fogIt)) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { fogEnabled: true } });
       actions.dispatch({ t: "scene.setMap", sceneId: scene.id, map: next });
@@ -527,7 +521,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
       // scene fits it now, or the grid tool comes up to find the scale
       // (and fits the scene when applied).
       const fallback = { cellPx: next.cellPx, originPx: next.originPx };
-      if (!map && asset.cellPx !== undefined && next.cellPx === asset.cellPx) {
+      if (!map && asset.cellPx !== undefined && next.cellPx === asset.cellPx && !found && !wait.later) {
         const bounds = fitBounds(next);
         if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
       } else if (!map || found || wait.later) {
@@ -536,7 +530,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
         const landing = { id: scene.id, bounds: scene.bounds, gridShape, map: next };
         if (found) {
           const at = { x: next.widthPx / 2, y: next.heightPx / 2 };
-          showOutcome({ actions, store: gridStore, scene: landing, found, fit: true, at, fallback, ownGrid });
+          showOutcome({ actions, store: gridStore, scene: landing, found, fit: true, at, fallback, ownGrid, refusal: (to) => refusal(landing, to) });
         } else if (wait.later) landLater({ sceneId: scene.id, start: landing, search: wait.later, fallback, ownGrid });
         ui.setTool("grid");
         props.close({ placing: true });

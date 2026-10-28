@@ -1,16 +1,16 @@
 import { useState } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
-import { cellWord, isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { cellWord, gridOfShape, isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { theme } from "../../lib/theme.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, OptionsStrip, StripText, ValueChip } from "../measure/controls.tsx";
 import { fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
-import { applyGrid, boxAround, fallbackOps, middleOf } from "./outcome.ts";
+import { applyGrid, boxAround, fallbackOps, foundLine, middleOf } from "./outcome.ts";
 import { boxCalibration, endFinding, noteFor, useGridStore, type Fallback } from "./store.ts";
 import { useFindGrid } from "./useFindGrid.ts";
-import { HEX_LIMITS } from "./words.ts";
+import { storedShape } from "./words.ts";
 
 /** One canonical pixel per nudge: on the largest maps a thirtieth of a square or less. */
 const STEP = 1;
@@ -26,8 +26,10 @@ const STEP = 1;
  * button alone did not.
  *
  * On a hex scene (docs/design-v1-hex-grids.md HX-D12) the box holds 7
- * hexes, the words say hexes, and Find the grid is off with its reason,
- * since it finds square grids only until a later phase.
+ * hexes and the words say hexes. Find the grid looks for squares and
+ * hexes on any scene, and a sure find of another shape switches the
+ * scene's shape with its grid (docs/design-v1-grid-detect.md 10.7), which
+ * Use default after an import puts back.
  */
 export default function GridOptions() {
   const sceneId = useRoomView((s) => s.sceneId);
@@ -70,30 +72,20 @@ export default function GridOptions() {
     setApplied(box);
   };
 
-  /** Back to the grid and the size the scene had before an import applied a found grid, as one undo step. */
+  /** Back to the grid, the size and the shape the scene had before an import applied a found grid, as one undo step. */
   const putBack = (fallback: Fallback) => {
-    dispatchGesture(actions, fallbackOps({ id: sceneId, bounds: scene.bounds, map }, fallback));
-    gridState.setState({ found: null, box: boxAround(fallback, middleOf(box, map)) });
+    dispatchGesture(actions, fallbackOps({ id: sceneId, bounds: scene.bounds, gridShape: scene.gridShape, map }, fallback));
+    const back = fallback.shape === undefined ? grid : gridOfShape(storedShape(fallback.shape));
+    gridState.setState({ found: null, box: boxAround(fallback, middleOf(box, map, grid), back) });
   };
 
   const line = searching
     ? { tone: "status" as const, content: "Looking for a grid…" }
-    : note?.outcome === "applied"
-      ? { tone: "status" as const, content: `Found a grid of ${formatFound(note.cellPx)} px squares.` }
-      : note?.outcome === "offered"
-        ? {
-            tone: "hint" as const,
-            content: note.ownGrid
-              ? `This scene came with its own grid. The lines found make ${formatFound(note.cellPx)} px squares: check the box, then Apply.`
-              : `These lines may be the map's grid: ${formatFound(note.cellPx)} px squares. Check the box, then Apply.`,
-          }
-        : note?.outcome === "none"
-          ? { tone: "status" as const, content: "No grid found. Drag a box over 3 by 3 squares instead." }
-          : note?.outcome === "changed"
-            ? { tone: "status" as const, content: "The scene changed, so the grid found was not applied." }
-            : saved
-              ? { tone: "status" as const, content: `Grid saved at ${formatPx(cal.cellPx)} px per ${cell}.` }
-              : { tone: "hint" as const, content: hex ? HEX_HINT : "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
+    : note
+      ? foundLine(note, grid)
+      : saved
+        ? { tone: "status" as const, content: `Grid saved at ${formatPx(cal.cellPx)} px per ${cell}.` }
+        : { tone: "hint" as const, content: hex ? HEX_HINT : "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
   const fallback = note?.outcome === "applied" ? note.fallback : undefined;
 
   return (
@@ -124,7 +116,7 @@ export default function GridOptions() {
           id: "find",
           priority: 3,
           control: (
-            <OptButton label={hex ? HEX_LIMITS.findGrid : "Look for a grid drawn on the map and line up with it"} disabled={hex} onClick={() => findGrid(sceneId)}>
+            <OptButton label="Look for a grid drawn on the map and line up with it" onClick={() => findGrid(sceneId)}>
               {searching ? "Finding…" : "Find the grid"}
             </OptButton>
           ),
@@ -195,11 +187,6 @@ function GridLinesToggle(props: { scene: Scene }) {
 
 /** Line up grid's hint on a hex scene (section 8). */
 const HEX_HINT = "Drag a box over 3 hexes across. Fine-tune it by its corners.";
-
-/** A found square's size in a sentence, to a tenth of a pixel: "70.4", or "70" for 69.998. */
-function formatFound(v: number): string {
-  return String(Math.round(v * 10) / 10);
-}
 
 function formatPx(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(2);

@@ -1,18 +1,22 @@
 import type { Scene, SceneMap } from "#shared/model.ts";
-import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { gridOfShape, isHex, OWN_SQUARE_GRID, sceneGrid, shapeOfGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { StoreApi } from "zustand/vanilla";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
-import { boxAtCell, canonicalToWorld, fitBounds, sameCalibration, type CalBox, type Calibration, type Point } from "./calibrate.ts";
-import { cameWithGrid, findFound, foundGrid, searchGrid, within, type FoundGrid, type GridSearch, type SearchWorker, type Timers } from "./findGrid.ts";
+import { boxAt, boxAtCell, boxSides, canonicalToWorld, fitBounds, sameCalibration, type CalBox, type Calibration, type Point } from "./calibrate.ts";
+import type { MapShape } from "./detectHex.ts";
+import { cameWithGrid, findFound, pickedGrid, searchGrid, within, type FoundGrid, type GridSearch, type SearchWorker, type Timers } from "./findGrid.ts";
 import { endFinding, type Fallback, type FoundNote, type GridToolState } from "./store.ts";
 
 /**
  * What a search for a map's drawn grid does to the scene and the grid
- * tool (docs/design-v1-grid-detect.md section 6). A grid found with high
- * confidence is applied, a doubtful one is only offered by the box, and
- * no grid is said. Import and Find the grid share it.
+ * tool (docs/design-v1-grid-detect.md sections 6 and 10.5 to 10.7). A
+ * grid found with high confidence is applied, a doubtful one is only
+ * offered by the box, and no grid is said. A sure find of another shape
+ * than the scene's, found alone, switches the scene to it with the grid
+ * when the scene can switch, and is otherwise only said. Import and Find
+ * the grid share it.
  */
 
 export type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile" | "gridShape"> & { map: SceneMap };
@@ -56,19 +60,28 @@ export function applyGrid(input: {
  * The ops Use default sends, as one undo step: the grid the import started
  * with, and the size the scene had then. The size is put back as it was,
  * not fitted to that grid: a battle mat that took its first image, or a
- * scene that took new art, had a size of its own.
+ * scene that took new art, had a size of its own. A find that switched
+ * the scene's shape has its shape put back first, so the grid lands on
+ * cells of that shape.
  */
 export function fallbackOps(scene: GridScene, fallback: Fallback): ClientOp[] {
-  const ops = gridOps(scene, fallback, false);
+  const ops: ClientOp[] = [];
+  if (fallback.shape !== undefined && fallback.shape !== mapShape(sceneGrid(scene))) ops.push({ t: "scene.update", sceneId: scene.id, patch: { gridShape: fallback.shape } });
+  ops.push(...gridOps(scene, fallback, false));
   const { bounds } = fallback;
   if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) ops.push({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
   return ops;
 }
 
-/** The box over the 3 by 3 squares of `cal` nearest a point of the map, in canonical pixels. */
-export function boxAround(cal: Calibration, at: Point): CalBox {
+/** The box over the 3 by 3 squares of `cal` nearest a point of the map, or on hexes the 7 hexes, in canonical pixels. */
+export function boxAround(cal: Calibration, at: Point, g: Grid = SQUARES): CalBox {
   const cell = canonicalToWorld(cal, at);
-  return boxAtCell(cal, Math.floor(cell.x) - 1, Math.floor(cell.y) - 1);
+  return isHex(g) ? boxAt(cal, g, cell) : boxAtCell(cal, Math.floor(cell.x) - 1, Math.floor(cell.y) - 1);
+}
+
+/** A grid's shape as a find names it. */
+export function mapShape(g: Grid): MapShape {
+  return shapeOfGrid(g) ?? "squares";
 }
 
 /**
@@ -77,8 +90,9 @@ export function boxAround(cal: Calibration, at: Point): CalBox {
  * its box on the view, which after a scene switch can still be the last
  * scene's, far off this image.
  */
-export function middleOf(box: CalBox | null, map: SceneMap): Point {
-  const middle = box && { x: box.x + box.size / 2, y: box.y + box.size / 2 };
+export function middleOf(box: CalBox | null, map: SceneMap, g: Grid = SQUARES): Point {
+  const sides = box && boxSides(box, g);
+  const middle = box && sides && { x: box.x + sides.w / 2, y: box.y + sides.h / 2 };
   const onImage = middle && middle.x >= 0 && middle.y >= 0 && middle.x <= map.widthPx && middle.y <= map.heightPx;
   return onImage ? middle : { x: map.widthPx / 2, y: map.heightPx / 2 };
 }
@@ -88,6 +102,11 @@ export function middleOf(box: CalBox | null, map: SceneMap): Point {
  * one undo step. The note and the box go to the grid tool's store, which
  * the tool reads when it opens and the options line reads while the box
  * stays where the search left it.
+ *
+ * A find of another shape than the scene's switches the scene to it, in
+ * the same undo step, only when it is sure, found alone (not contested)
+ * and the switch is allowed. Otherwise nothing is sent and the line says
+ * what was found, keeping the find for Grid shape to bring.
  */
 export function showOutcome(input: {
   actions: Gesture;
@@ -101,18 +120,22 @@ export function showOutcome(input: {
   fallback?: Calibration;
   /** The scene came with its own grid (findGrid.ts `cameWithGrid`), which an offer says. */
   ownGrid?: boolean;
+  /** Why the scene cannot change to a shape, as the room holds it now (shared/rules/grid.ts `switchRefusal`). Absent: nothing holds it, as on a scene just made. */
+  refusal?: (to: Grid) => string | null;
 }): FoundNote | null {
   const { scene, found } = input;
-  // A search finds square grids only. One that ends on a scene now on hexes measured cells it no longer has.
-  if (isHex(sceneGrid(scene))) return null;
+  const grid = sceneGrid(scene);
+  const shape = scene.gridShape ? { shape: scene.gridShape } : {};
   if (!found) {
     const box = input.store.getState().box;
-    const note: FoundNote = { sceneId: scene.id, outcome: "none", cellPx: 0, box };
+    const note: FoundNote = { sceneId: scene.id, outcome: "none", cellPx: 0, box, ...shape };
     input.store.setState({ found: note });
     return note;
   }
+  const to = gridOfShape(found.shape);
+  if (mapShape(to) !== mapShape(grid)) return otherShape({ ...input, found, grid, to });
   if (found.tier === "high") dispatchGesture(input.actions, gridOps(scene, found.cal, input.fit));
-  const box = boxAround(found.cal, input.at);
+  const box = boxAround(found.cal, input.at, grid);
   const note: FoundNote = {
     sceneId: scene.id,
     outcome: found.tier === "high" ? "applied" : "offered",
@@ -121,8 +144,46 @@ export function showOutcome(input: {
     cal: found.cal,
     ...(found.tier === "high" && input.fallback ? { fallback: { ...input.fallback, bounds: scene.bounds } } : {}),
     ...(found.tier !== "high" && input.ownGrid ? { ownGrid: true as const } : {}),
+    ...shape,
+    ...(found.contested ? { contested: found.contested } : {}),
   };
   input.store.setState({ found: note, box });
+  return note;
+}
+
+/** A find of shape `to` on a scene of `grid`: switched to when sure, alone and allowed, else only said. */
+function otherShape(input: Parameters<typeof showOutcome>[0] & { found: FoundGrid; grid: Grid; to: Grid }): FoundNote {
+  const { scene, found, grid, to } = input;
+  const refusal = input.ownGrid && !isHex(grid) ? OWN_SQUARE_GRID : (input.refusal?.(to) ?? null);
+  const box = boxAround(found.cal, input.at, to);
+  if (found.tier === "high" && !found.contested && refusal === null) {
+    const ops: ClientOp[] = [{ t: "scene.update", sceneId: scene.id, patch: { gridShape: mapShape(to) } }, ...gridOps({ ...scene, gridShape: shapeOfGrid(to) }, found.cal, input.fit)];
+    dispatchGesture(input.actions, ops);
+    const note: FoundNote = {
+      sceneId: scene.id,
+      outcome: "applied",
+      cellPx: found.cal.cellPx,
+      box,
+      cal: found.cal,
+      switched: true,
+      ...(found.shape ? { shape: found.shape } : {}),
+      ...(input.fallback ? { fallback: { ...input.fallback, bounds: scene.bounds, shape: mapShape(grid) } } : {}),
+    };
+    input.store.setState({ found: note, box });
+    return note;
+  }
+  // The scene keeps its shape, so the box stays one of its cells, or one is placed for the line to stand by.
+  const own = input.store.getState().box ?? boxAround(scene.map, input.at, grid);
+  const note: FoundNote = {
+    sceneId: scene.id,
+    outcome: "offered",
+    cellPx: found.cal.cellPx,
+    box: own,
+    ...(scene.gridShape ? { shape: scene.gridShape } : {}),
+    ...(found.contested ? { contested: found.contested } : {}),
+    other: { shape: mapShape(to), cal: found.cal, box, ...(refusal !== null ? { refusal } : {}) },
+  };
+  input.store.setState({ found: note, box: own });
   return note;
 }
 
@@ -141,9 +202,10 @@ function unchangedSince(start: GridScene, now: GridScene): boolean {
 export const FIND_TIMEOUT_MS = 30_000;
 
 /**
- * Find the grid, on the scene's current map at any time: the phone-sized
- * copy first, which is at most the size the Worker decodes anyway. A
- * second press while one runs does nothing. It lands as `landSearch` says.
+ * Find the grid, on the scene's current map at any time, whatever its
+ * shape: the phone-sized copy first, which is at most the size the Worker
+ * decodes anyway. A second press while one runs does nothing. It lands as
+ * `landSearch` says.
  */
 export async function findOnScene(input: {
   actions: Gesture;
@@ -153,10 +215,10 @@ export async function findOnScene(input: {
   urls: string[];
   makeWorker?: () => SearchWorker;
   timers?: Timers;
+  refusal?: (scene: GridScene, to: Grid) => string | null;
 }): Promise<void> {
   const start = input.scene();
-  // Find the grid is off on hexes (settings and the tool), and this holds to it whatever asks.
-  if (!start || isHex(sceneGrid(start)) || input.store.getState().finding) return;
+  if (!start || input.store.getState().finding) return;
   const search = searchGrid({ urls: input.urls }, input.makeWorker);
   await landSearch({ ...input, start, search, ms: FIND_TIMEOUT_MS });
 }
@@ -191,6 +253,8 @@ export async function landSearch(input: {
   fallback?: Calibration;
   /** The scene came with its own grid, when its image before says so and this one cannot (findGrid.ts `replacementFound`). */
   ownGrid?: boolean;
+  /** Why the scene, as it is when the answer lands, cannot change to a shape (`showOutcome`'s). */
+  refusal?: (scene: GridScene, to: Grid) => string | null;
 }): Promise<void> {
   const { store } = input;
   store.getState().finding?.cancel();
@@ -205,18 +269,71 @@ export async function landSearch(input: {
   if (!unchangedSince(input.start, scene)) {
     // Said, or the DM would see "Looking for a grid…" give way to nothing. A search that found no grid on the
     // image before says nothing of this one, so it leaves the line as it was.
-    if (answer && foundGrid(answer.result, answer, input.start.map)) store.setState({ found: { sceneId: scene.id, outcome: "changed", cellPx: 0, box: state.box } });
+    if (answer && pickedGrid(answer, input.start.map, input.start.gridShape)) store.setState({ found: { sceneId: scene.id, outcome: "changed", cellPx: 0, box: state.box } });
     return;
   }
   const ownGrid = input.ownGrid ?? cameWithGrid(scene);
+  const { refusal } = input;
   showOutcome({
     actions: input.actions,
     store,
     scene,
-    found: findFound(answer ? foundGrid(answer.result, answer, scene.map) : null, ownGrid),
+    found: findFound(answer ? pickedGrid(answer, scene.map, scene.gridShape) : null, ownGrid),
     fit: input.fit ?? state.fitScene,
-    at: middleOf(state.box, scene.map),
+    at: middleOf(state.box, scene.map, sceneGrid(scene)),
     ownGrid,
     ...(input.fallback ? { fallback: input.fallback } : {}),
+    ...(refusal ? { refusal: (to: Grid) => refusal(scene, to) } : {}),
   });
+}
+
+/** A shape in a found line's words: "squares", "hex rows" or "hex columns", or "hexes" when named beside squares. */
+function shapeWords(shape: MapShape, beside?: MapShape): string {
+  if (shape === "squares") return "squares";
+  if (beside === "squares") return "hexes";
+  return shape === "hexRows" ? "hex rows" : "hex columns";
+}
+
+/** A found cell's size in a sentence, to a tenth of a pixel: "70.4", or "70" for 69.998. */
+export function formatFound(v: number): string {
+  return String(Math.round(v * 10) / 10);
+}
+
+/**
+ * What Line up grid's options line says of a search's note on a scene of
+ * grid `g` (docs/design-v1-grid-detect.md 6.1 and 10.8). Only a note that
+ * stands for this scene's cells reaches it (store.ts `noteFor`).
+ */
+export function foundLine(note: FoundNote, g: Grid): { tone: "status" | "hint"; content: string } {
+  const n = formatFound(note.cellPx);
+  const hex = isHex(g);
+  const status = (content: string) => ({ tone: "status" as const, content });
+  const hint = (content: string) => ({ tone: "hint" as const, content });
+  switch (note.outcome) {
+    case "applied": {
+      if (!note.switched) return status(`Found a grid of ${n} px ${hex ? "hexes" : "squares"}.`);
+      const words = shapeWords(mapShape(g));
+      return status(`Found ${words} of ${n} px. The grid is ${words} now.`);
+    }
+    case "offered": {
+      const offered = note.other?.shape ?? mapShape(g);
+      const { contested } = note;
+      // Another shape than the scene's is named in full, so "hexes" never stands for the orientation the scene is not on.
+      const both = contested && `The map shows ${shapeWords(offered, note.other ? undefined : contested.shape)} of ${n} px and ${shapeWords(contested.shape, offered)} of ${formatFound(contested.cellPx)} px.`;
+      if (note.other) {
+        const words = shapeWords(note.other.shape);
+        if (both) return hint(`${both} Change Grid shape to use them.`);
+        const { refusal } = note.other;
+        if (refusal) return hint(`Found ${words} of ${n} px, but ${refusal.charAt(0).toLowerCase()}${refusal.slice(1)}`);
+        return hint(`These lines may be ${words} of ${n} px. Change Grid shape to use them.`);
+      }
+      if (both) return hint(`${both} Check the box, then Apply.`);
+      if (note.ownGrid) return hint(`This scene came with its own grid. The lines found make ${n} px squares: check the box, then Apply.`);
+      return hint(hex ? `These lines may be the map's hexes: ${n} px. Check the box, then Apply.` : `These lines may be the map's grid: ${n} px squares. Check the box, then Apply.`);
+    }
+    case "none":
+      return status(hex ? "No grid found. Drag a box over 3 hexes across instead." : "No grid found. Drag a box over 3 by 3 squares instead.");
+    case "changed":
+      return status("The scene changed, so the grid found was not applied.");
+  }
 }

@@ -1,8 +1,9 @@
-import type { Scene } from "#shared/model.ts";
+import type { GridShape, Scene } from "#shared/model.ts";
 import { sniffImage } from "../uvtt/image.ts";
 import type { Device } from "../uvtt/limits.ts";
 import type { GridDetection } from "./detect.ts";
-import { calibrationFromFind, type Calibration, type Point } from "./calibrate.ts";
+import { pickShape, type HexDetection, type HexFound, type MapShape } from "./detectHex.ts";
+import { calibrationFromFind, calibrationFromHexFind, type Calibration, type Point } from "./calibrate.ts";
 
 /**
  * Finding a map's drawn grid from the page (docs/design-v1-grid-detect.md
@@ -17,7 +18,13 @@ export const DECODE_MAX_SIDE = 4096;
 /** How long an import waits for a search still running once its upload is done, ms. */
 export const IMPORT_WAIT_MS = 2000;
 
-export type FoundGrid = { tier: "high" | "medium"; cal: Calibration };
+/**
+ * A grid found on a map: applied when `tier` is high, else only offered.
+ * `shape` is the shape its lines make, as a scene stores it, absent for
+ * squares. `contested` names the other shape found on the same map, which
+ * makes even a sure find only an offer (docs/design-v1-grid-detect.md 10.6).
+ */
+export type FoundGrid = { tier: "high" | "medium"; cal: Calibration; shape?: GridShape; contested?: { shape: MapShape; cellPx: number } };
 
 /**
  * The size the Worker asks the browser to decode a file at, or null to
@@ -55,29 +62,73 @@ export function foundGrid(result: GridDetection, decoded: { width: number; heigh
   return { tier: result.confidence >= HIGH_CONFIDENCE ? "high" : "medium", cal };
 }
 
+/** A hex find in the map's canonical pixels, or null, scaled and checked as `foundGrid` scales a square one. */
+function foundHexGrid(result: HexFound, decoded: { width: number; height: number }, canonical: { widthPx: number; heightPx: number }): FoundGrid | null {
+  const kx = canonical.widthPx / decoded.width;
+  const ky = canonical.heightPx / decoded.height;
+  if (!(kx > 0 && ky > 0) || Math.abs(kx - ky) / kx > 0.01) return null;
+  const cal = calibrationFromHexFind({ cellPx: result.cellPx * kx, center: { x: result.center.x * kx, y: result.center.y * ky }, orient: result.orient });
+  return { tier: result.confidence >= HIGH_CONFIDENCE ? "high" : "medium", cal, shape: result.orient === "rows" ? "hexRows" : "hexColumns" };
+}
+
 /** A search's answer when the Worker read the image. */
 export type SearchDone = Extract<SearchAnswer, { t: "done" }>;
 
+const NO_HEXES: HexDetection = { found: false, reason: "none" };
+
 /**
- * The grid an import applies or offers. A size from the file name wins:
- * a map the server sized by its name takes no found grid, even one the
- * search had already answered with.
+ * The grid a search's answer gives a scene of `shape` (absent for
+ * squares), in the map's canonical pixels, or null: the surest of the
+ * three looks (detectHex.ts `pickShape`), whatever shape the scene is.
+ * When two shapes were found, the find is only offered, and on the
+ * scene's own shape when that is one of them, since the map holds both
+ * and either may be tiles under the other. Whether a find of another
+ * shape may switch the scene is the landing's to say (outcome.ts).
  */
-export function importFound(answer: SearchDone | null, named: boolean, map: { widthPx: number; heightPx: number }): FoundGrid | null {
-  return answer && !named ? foundGrid(answer.result, answer, map) : null;
+export function pickedGrid(answer: SearchDone, canonical: { widthPx: number; heightPx: number }, shape: GridShape | undefined): FoundGrid | null {
+  const looks = { squares: answer.result, hexRows: answer.hex?.rows ?? NO_HEXES, hexColumns: answer.hex?.columns ?? NO_HEXES };
+  const pick = pickShape(looks.squares, looks.hexRows, looks.hexColumns);
+  if (!pick) return null;
+  const own: MapShape = shape ?? "squares";
+  const offered: MapShape = pick.contested && looks[own].found ? own : pick.shape;
+  const at = (s: MapShape): FoundGrid | null => {
+    const look = looks[s];
+    if (!look.found) return null;
+    return "orient" in look ? foundHexGrid(look, answer, canonical) : foundGrid(look, answer, canonical);
+  };
+  const found = at(offered);
+  if (!found || !pick.contested) return found;
+  const others = (["squares", "hexRows", "hexColumns"] as const).filter((s) => s !== offered && looks[s].found);
+  others.sort((a, b) => confidenceOf(looks[b]) - confidenceOf(looks[a]));
+  const other = others[0]!;
+  const otherFound = at(other);
+  return { ...found, tier: "medium", ...(otherFound ? { contested: { shape: other, cellPx: otherFound.cal.cellPx } } : {}) };
+}
+
+function confidenceOf(d: GridDetection | HexDetection): number {
+  return d.found ? d.confidence : 0;
 }
 
 /**
- * Whether a new map's grid is looked for while it uploads. A size from
- * the file name wins, so a file that names one is not searched. A
- * Universal VTT file states its grid, so it is never searched on import.
- * Find the grid, which the DM asks for, runs whatever the scene came from.
- * A map for a hex scene is not searched either: the detector finds square
- * grids only until a later phase of hex grids (docs/design-v1-hex-grids.md
- * section 6, H1), so Line up grid opens on it instead.
+ * The grid an import applies or offers, on a new scene of `shape`. A size
+ * from the file name wins: a map the server sized by its name takes no
+ * found grid, even one the search had already answered with.
  */
-export function searchOnImport(input: { source: "image" | "uvtt"; named: boolean; hex?: boolean }): boolean {
-  return input.source === "image" && !input.named && input.hex !== true;
+export function importFound(answer: SearchDone | null, named: boolean, map: { widthPx: number; heightPx: number }, shape?: GridShape): FoundGrid | null {
+  return answer && !named ? pickedGrid(answer, map, shape) : null;
+}
+
+/**
+ * Whether a new map's grid is looked for while it uploads, whatever the
+ * room's shape, since squares and hexes are both looked for. A size from
+ * the file name wins, so a file that names one is not searched. The
+ * caller says `named` only on squares: on hexes names are not read
+ * (D-261028-05). A Universal VTT file states its grid, so it is never
+ * searched on import. Find the grid, which the DM asks for, runs whatever
+ * the scene came from.
+ */
+export function searchOnImport(input: { source: "image" | "uvtt"; named: boolean }): boolean {
+  return input.source === "image" && !input.named;
 }
 
 /**
@@ -110,10 +161,10 @@ export function replacementFound(
   answer: SearchDone | null,
   named: boolean,
   next: { widthPx: number; heightPx: number },
-  scene: Pick<Scene, "gridFromFile"> & { map?: { originPx: Point } },
+  scene: Pick<Scene, "gridFromFile" | "gridShape"> & { map?: { originPx: Point } },
 ): { found: FoundGrid | null; ownGrid: boolean } {
   const ownGrid = cameWithGrid({ gridFromFile: scene.gridFromFile, map: scene.map ?? { originPx: { x: 0, y: 0 } } });
-  return { found: findFound(importFound(answer, named, next), ownGrid), ownGrid };
+  return { found: findFound(importFound(answer, named, next, scene.gridShape), ownGrid), ownGrid };
 }
 
 /**
@@ -132,8 +183,13 @@ export function nameGivesSize(fileName: string): boolean {
 
 /** What the page sends the Worker: the picked file, or the addresses of a map already uploaded, the first that answers taken. */
 export type SearchRequest = { file: Blob } | { urls: string[] };
-/** What the Worker answers: a detection with the size it decoded at, or that it could not read the image. */
-export type SearchAnswer = { t: "done"; result: GridDetection; width: number; height: number } | { t: "error" };
+/**
+ * What the Worker answers: the square finder's detection (`result`) and
+ * the hex finder's both ways, with the size it decoded at, or that it
+ * could not read the image. An answer without `hex` looked for squares
+ * alone, and reads as no hexes found.
+ */
+export type SearchAnswer = { t: "done"; result: GridDetection; hex?: { rows: HexDetection; columns: HexDetection }; width: number; height: number } | { t: "error" };
 
 /** The Worker as the search uses it, so the tests can stand in for it. */
 export type SearchWorker = {
