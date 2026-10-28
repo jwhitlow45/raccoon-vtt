@@ -1,24 +1,26 @@
 import type { Point, UvttPortal } from "./schema.ts";
 
 /**
- * Arkenforge draws each door as its outline: four portals joined end to
- * end, the leaf on the wall line and three short sides off it, and it
- * writes each portal's size in `position`, where Dungeondraft and Dungeon
- * Alchemist write its midpoint. Taken as they stand, the four portals are
- * four doors, three of them slivers off the wall. Real Dungeondraft and
- * Dungeon Alchemist files also join real doors end to end, around a room's
- * corner and in long runs of windows, so the shape alone cannot tell an
- * outline from doors. Only a file in Arkenforge's form has its turning
- * groups collapsed, each to the portals on the line of its longest, the
- * leaf. Two outlines whose ends touch, a double door, are one group, and
- * both leaves lie on that line, so both stay.
+ * Arkenforge draws each door as its outline: four portals one after another
+ * in the file, each starting where the one before it ends, the leaf on the
+ * wall line and three short sides off it, and it writes each portal's size
+ * in `position`, where Dungeondraft and Dungeon Alchemist write its
+ * midpoint. Taken as they stand, the four portals are four doors, three of
+ * them slivers off the wall. Real Dungeondraft and Dungeon Alchemist files
+ * also join real doors end to end, around a room's corner and in long runs
+ * of windows, so the shape alone cannot tell an outline from doors. Only a
+ * file in Arkenforge's form has its turning chains collapsed, each to its
+ * longest portal, which is the leaf. Chains follow the file's order, not
+ * every end that touches, so two outlines that touch, at any angle, stay
+ * two doors. An outline written out of order is no chain, and its portals
+ * stay doors: extra doors the DM can erase, never a lost one.
  */
 
 /** Ends this close are one point, and a `position` this close to the midpoint is at it, in squares. */
 const JOIN_SQUARES = 0.01;
 /**
- * How far off the line of a group's longest portal an end may lie while
- * its portal is still on that line, in squares. Dungeon Alchemist's rotation
+ * How far off the line of a chain's longest portal an end may lie while
+ * the chain still runs straight, in squares. Dungeon Alchemist's rotation
  * noise is thousandths of a square, and the nearest side of a door's
  * outline in Arkenforge's own sample map is 0.14 off its wall.
  */
@@ -34,7 +36,7 @@ function length(d: UvttPortal): number {
 
 /**
  * Whether the file writes `position` as Arkenforge does. Decided for the
- * whole file, not per group or per portal: what `position` holds is the
+ * whole file, not per chain or per portal: what `position` holds is the
  * exporter's choice, and one exporter writes a whole file, so the file's
  * every portal is evidence. It takes every portal to have a `position` off
  * its midpoint. A file that leaves `position` out, or one portal anywhere
@@ -47,52 +49,35 @@ function arkenforgeForm(portals: readonly UvttPortal[]): boolean {
   return portals.every((d) => d.position !== null && !near(d.position, { x: (d.a.x + d.b.x) / 2, y: (d.a.y + d.b.y) / 2 }, JOIN_SQUARES));
 }
 
-/** Portals joined end to end, as lists of indexes into `portals`. Pairwise: at the file's cap of 2,000 portals that takes about 10 ms, in the worker. */
-function joinedGroups(portals: readonly UvttPortal[]): number[][] {
-  const parent = portals.map((_, i) => i);
-  const root = (i: number): number => {
-    while (parent[i] !== i) i = parent[i] = parent[parent[i]!]!;
-    return i;
-  };
-  for (let i = 0; i < portals.length; i++) {
-    const d = portals[i]!;
-    for (let j = i + 1; j < portals.length; j++) {
-      const e = portals[j]!;
-      const joined = near(d.a, e.a, JOIN_SQUARES) || near(d.a, e.b, JOIN_SQUARES) || near(d.b, e.a, JOIN_SQUARES) || near(d.b, e.b, JOIN_SQUARES);
-      if (joined) parent[root(i)] = root(j);
-    }
-  }
-  const groups = new Map<number, number[]>();
-  portals.forEach((_, i) => {
-    const r = root(i);
-    const group = groups.get(r);
-    if (group) group.push(i);
-    else groups.set(r, [i]);
+/** Runs of consecutive portals, each starting where the one before it ends, as lists of indexes into `portals`. A portal in no run is a run of its own. */
+function chains(portals: readonly UvttPortal[]): number[][] {
+  const out: number[][] = [];
+  portals.forEach((d, i) => {
+    const run = out[out.length - 1];
+    if (run && near(portals[i - 1]!.b, d.a, JOIN_SQUARES)) run.push(i);
+    else out.push([i]);
   });
-  return [...groups.values()];
+  return out;
 }
 
-/**
- * Whether both ends of `d` lie on the line of `leaf`. A straight run such
- * as a straight double door is all on it, so it keeps every portal, and an
- * outline's three sides each have an end off it.
- */
-function onLine(d: UvttPortal, leaf: UvttPortal): boolean {
+/** Whether every end in the chain lies on the line of `leaf`, so the chain is a straight run such as a double door. */
+function straight(chain: readonly UvttPortal[], leaf: UvttPortal): boolean {
   const len = length(leaf);
   if (len === 0) return true;
   const off = (q: Point) => Math.abs((leaf.b.x - leaf.a.x) * (q.y - leaf.a.y) - (leaf.b.y - leaf.a.y) * (q.x - leaf.a.x)) / len;
-  return off(d.a) <= LINE_SQUARES && off(d.b) <= LINE_SQUARES;
+  return chain.every((d) => off(d.a) <= LINE_SQUARES && off(d.b) <= LINE_SQUARES);
 }
 
 /** The portals that are doors and windows, in the file's order: in Arkenforge's form, each outline's leaf in place of the outline. */
 export function doorsOf(portals: readonly UvttPortal[]): UvttPortal[] {
   if (!arkenforgeForm(portals)) return [...portals];
   const dropped = new Set<number>();
-  for (const indexes of joinedGroups(portals)) {
+  for (const indexes of chains(portals)) {
     if (indexes.length < 2) continue;
     let leaf = indexes[0]!;
     for (const i of indexes) if (length(portals[i]!) > length(portals[leaf]!)) leaf = i;
-    for (const i of indexes) if (!onLine(portals[i]!, portals[leaf]!)) dropped.add(i);
+    if (straight(indexes.map((i) => portals[i]!), portals[leaf]!)) continue;
+    for (const i of indexes) if (i !== leaf) dropped.add(i);
   }
   return portals.filter((_, i) => !dropped.has(i));
 }
