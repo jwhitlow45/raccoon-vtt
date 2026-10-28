@@ -614,7 +614,9 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   if (carried) {
     // Carried, its feet are its holder's walk offset by its place, and it took nothing off its own speed: no cost, no corners (M13).
     trace = carried.trace;
-    taken = routeFeet(carried.route, carried.route.slice(1).map(() => ({ extra: 0, swim: 0 as const })), rules, counter, { swimSpeed: false, step: snapStep(before) });
+    const still = carried.route.slice(1).map(() => ({ extra: 0, swim: 0 as const }));
+    // On hexes they are the hex steps it was taken, as its holder's own walk counts them.
+    taken = grid.shape === "hex" ? hexRouteFeet(grid, walker, carried.route, isSqueezed(after), still, rules, counter, { swimSpeed: false }) : routeFeet(carried.route, still, rules, counter, { swimSpeed: false, step: snapStep(before) });
   } else if (route) {
     trace = routeWalkers(tx.state.buildChunks, walker, route, after.elevation);
     const swimSpeed = (speedsOf(tx.state, before)?.swim ?? 0) > 0;

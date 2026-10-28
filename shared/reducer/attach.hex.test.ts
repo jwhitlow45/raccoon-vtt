@@ -5,8 +5,8 @@ import { opSchema, type Op } from "../protocol.ts";
 import { canApply } from "../permissions.ts";
 import { applyOp } from "../reducer.ts";
 import { getOffSpot, seatSpot } from "../rules/attach.ts";
-import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
-import { hexKey, type Hex, type HexGrid } from "../rules/hex.ts";
+import { occupiedHexes, placedOnHex, tokenRefHex } from "../rules/footprint.ts";
+import { hexDistance, hexKey, type Hex, type HexGrid } from "../rules/hex.ts";
 import { DM, P1, character, env, room, scene, token } from "../testutil.ts";
 
 /**
@@ -104,5 +104,22 @@ describe("attaching on a hex scene", () => {
     state = run(state, { t: "token.detach", tokenId: "bree", ...spot, elevation: 0 });
     assert.equal(state.tokens.bree?.attached, undefined);
     assert.ok(!hexesOf(state.tokens.horse).includes(hexesOf(state.tokens.bree)[0]!));
+  });
+});
+
+describe("a carried leg on a hex scene", () => {
+  test("on Bree's turn her leg on the horse's move counts the hex steps she was carried", () => {
+    let state = stable();
+    const seat = seatSpot(ROWS, state.tokens.bree!, state.tokens.horse!)!;
+    state = run(state, { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", ...seat, elevation: 0 });
+    state = run(state, { t: "encounter.start", entries: [{ id: "e1", tokenId: "bree", value: 15 }, { id: "e2", tokenId: "gob", value: 5 }] });
+    state = run(state, { t: "encounter.next" });
+    const from = tokenRefHex(ROWS, state.tokens.bree!);
+    // Straight down 8 rows is 8 hex steps, where the squares' count of the same leg reads 7 cells.
+    state = run(state, { t: "token.move", tokenId: "horse", ...placedOnHex(ROWS, state.tokens.horse!, { col: 6, row: 14 }) });
+    const leg = state.tokens.bree!.path!.stops.at(-1)!;
+    assert.equal(leg.carried, true);
+    assert.equal(hexDistance(ROWS, from, tokenRefHex(ROWS, state.tokens.bree!)), 8);
+    assert.equal(leg.moved, 40);
   });
 });
