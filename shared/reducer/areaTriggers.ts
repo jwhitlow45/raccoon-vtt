@@ -7,7 +7,7 @@ import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, type Hex, type HexGrid } from "../rules/hex.ts";
 import { hexPiece, pieceReach, placedOnTrace, routePoints, type HexPiece, type RoutePoint } from "../rules/route.ts";
-import { footprintRect, occupiedHexes, occupiedRange, type PlacedToken } from "../rules/footprint.ts";
+import { footprintRect, isSqueezed, occupiedHexes, occupiedRange, type PlacedToken } from "../rules/footprint.ts";
 import type { Point, Rect } from "../rules/geom.ts";
 import { convexLive, fogClassOf, pendingGround } from "../rules/held.ts";
 import { sceneWalls } from "../rules/walls.ts";
@@ -450,14 +450,31 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
     if (!piece) pieces.set(walk, (piece = hexPiece(g, walk.trace[0] ?? after.tokens[walk.tokenId]!, walk.route[0]!, walk.route[walk.route.length - 1]!)));
     return piece;
   };
-  // The spot at progress `f` along piece `piece` (1 the first) of a walk, with which of its trace's walkers stands there.
-  const at = (walk: MovedToken, piece: number, f: number): { spot: RoutePoint; piece: number; end: boolean } => {
+  // A routed walk's pieces on hexes, each its own hex line (route.ts hexPiece), built once a piece.
+  const routedPieces = new Map<MovedToken, HexPiece[]>();
+  const routedPieceOf = (g: HexGrid, walk: MovedToken, piece: number): HexPiece => {
+    let known = routedPieces.get(walk);
+    if (!known) routedPieces.set(walk, (known = []));
+    const points = walk.route;
+    const last = piece === points.length - 1;
+    const token = after.tokens[walk.tokenId];
+    return (known[piece] ??= hexPiece(g, walk.trace[piece - 1] ?? token!, points[piece - 1]!, points[piece]!, last && token ? isSqueezed(token) : undefined));
+  };
+  // The spot at progress `f` along piece `piece` (1 the first) of a walk, with which of its trace's walkers stands there, and on hexes whether it squeezes there.
+  const at = (walk: MovedToken, piece: number, f: number): { spot: RoutePoint; piece: number; end: boolean; squeezed?: boolean } => {
     const points = walk.route;
     const g = gridOf(walk);
     if (!routed && g.shape === "hex") {
       const a = points[0]!;
       const b = points[points.length - 1]!;
       return { spot: { ...pieceOf(g, walk).at(f), elevation: lerp(a.elevation, b.elevation, f) }, piece: 0, end: f >= 1 };
+    }
+    if (routed && g.shape === "hex" && piece < points.length) {
+      // Each piece on its own hex line, squeezed where the walk squeezes along it (HX-D17), as the walk's spots read it.
+      const hp = routedPieceOf(g, walk, piece);
+      const a = points[piece - 1]!;
+      const b = points[piece]!;
+      return { spot: { ...hp.at(f), elevation: lerp(a.elevation, b.elevation, f) }, piece: piece - 1, end: f >= 1, ...(f < 1 ? { squeezed: hp.squeezedAt(f) } : {}) };
     }
     if (!routed) return { spot: lerpPoint(points[0]!, points[points.length - 1]!, f), piece: 0, end: f >= 1 };
     if (piece >= points.length) return { spot: points[points.length - 1]!, piece: points.length - 2, end: true };
@@ -469,7 +486,12 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
       const token = after.tokens[walk.tokenId];
       if (!token || walk.from.sceneId !== walk.to.sceneId) continue;
       const p = at(walk, piece, f);
-      placed[token.id] = placedOnTrace(walk.trace, p.piece, p.end, token, p.spot);
+      const spot = placedOnTrace(walk.trace, p.piece, p.end, token, p.spot);
+      if (p.squeezed === undefined) placed[token.id] = spot;
+      else {
+        const { squeeze: _squeeze, ...rest } = spot;
+        placed[token.id] = p.squeezed ? { ...rest, squeeze: true } : rest;
+      }
     }
     return { ...after, tokens: placed };
   };

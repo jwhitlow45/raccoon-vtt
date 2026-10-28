@@ -79,7 +79,8 @@ for (const [name, g] of GRIDS) {
         const line = hexLine(g, a, tokenRefHex(g, end));
         const n = Math.max(1, line.length - 1);
         assert.equal(spots.length, n + 1);
-        assert.deepEqual(spots[0], { x: start.x, y: start.y, elevation: 10, progress: [0, 0, n] });
+        // Each spot says whether the walk squeezes there (HX-D17), the walk's last but by the move, which this walk does not.
+        assert.deepEqual(spots[0], { x: start.x, y: start.y, elevation: 10, progress: [0, 0, n], squeezed: false });
         for (let k = 1; k <= n; k++) {
           const s = spots[k]!;
           assert.deepEqual(s.progress, [0, k, n]);

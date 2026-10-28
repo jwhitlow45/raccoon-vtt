@@ -402,9 +402,12 @@ function cellReader(cache: Map<string, Uint8Array | null>, bitsAt: (sceneId: str
  * holds their own fog, so it is the ground that player remembers
  * (docs/design-v1-per-player-vision.md 6.3).
  */
-export function playersSeeGround(state: RoomState, sceneId: string): (x: number, y: number) => boolean {
+/** Ground by cells, and by fog sub-cells (`sub`), which a hex scene reads its hexes by (docs/design-v1-hex-grids.md HX-D10). */
+export type GroundReader = ((x: number, y: number) => boolean) & { sub(sx: number, sy: number): boolean };
+
+export function playersSeeGround(state: RoomState, sceneId: string): GroundReader {
   const fogged = fogReader(state);
-  return (x, y) => !fogged(sceneId, x, y);
+  return Object.assign((x: number, y: number) => !fogged(sceneId, x, y), { sub: (sx: number, sy: number) => !fogged.sub(sceneId, sx, sy) });
 }
 
 /**
@@ -437,9 +440,9 @@ export function groundAnyPlayerSees(state: RoomState, sceneId: string): (x: numb
  * the DM's and party's layers alone, on every device, for shared and kept
  * walking rulers and anything else every device must read alike.
  */
-export function sharedGround(state: RoomState, sceneId: string): (x: number, y: number) => boolean {
+export function sharedGround(state: RoomState, sceneId: string): GroundReader {
   const fogged = sharedFogReader(state);
-  return (x, y) => !fogged(sceneId, x, y);
+  return Object.assign((x: number, y: number) => !fogged(sceneId, x, y), { sub: (sx: number, sy: number) => !fogged.sub(sceneId, sx, sy) });
 }
 
 /**

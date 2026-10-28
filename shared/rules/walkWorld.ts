@@ -3,14 +3,15 @@ import { inSightOfNonOwners, isPartyMember, perPlayerScene, playersSeeGround, pr
 import { computeCoverage, creaturesInArea, type AreaContext, type AreaToken } from "./aoe.ts";
 import { carriedGroup, dragExtra, onHolder, publicMembers } from "./attach.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
-import { footprintRect, sizeCategory, sizeSteps, verticalExtentFt } from "./footprint.ts";
+import { footprintRect, occupiedHexes, sizeCategory, sizeSteps, verticalExtentFt } from "./footprint.ts";
 import { INCAPACITATING_KEYS } from "./hp.ts";
 import { publicCounters } from "./path.ts";
 import type { Walker } from "./movement.ts";
 import { followerTrace } from "./route.ts";
 import type { WalkArea, WalkCreature, WalkInput } from "./walk.ts";
 import { sceneWalls } from "./walls.ts";
-import { SQUARES } from "./grid.ts";
+import { isHex, sceneGrid, SQUARES } from "./grid.ts";
+import { hexKey } from "./hex.ts";
 
 /**
  * The public world a route is searched in (docs/design-v1-movement.md 5.5):
@@ -168,15 +169,17 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
   const publicGround = !everything && (opts.seenGround === true || viewer.role === "player" || isPartyMember(state, token));
   const ground = publicGround && scene && scene.fogEnabled !== false ? (opts.sharedGround === true ? sharedGround : playersSeeGround)(state, scene.id) : null;
   const fpc = rules.feetPerCell;
+  const grid = scene ? sceneGrid(scene) : SQUARES;
   const creatures: WalkCreature[] = [];
   const spaces: WalkSpace[] = [];
   if (opts.creatures !== false) {
     for (const other of [...shown.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
       if (other.id === token.id || (other.kind !== "pc" && other.kind !== "npc" && other.kind !== "monster")) continue;
       if (actorOf(state, other)?.life === "dead") continue;
-      const r = footprintRect(SQUARES, other);
+      const r = footprintRect(grid, other);
       const { lo, hi } = verticalExtentFt(other, fpc);
-      creatures.push({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h, lo, hi, way: creatureWay(token, other, publicKeys(state, other), blocks) });
+      const way = creatureWay(token, other, publicKeys(state, other), blocks);
+      creatures.push({ x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h, lo, hi, way, ...(isHex(grid) ? { hexes: occupiedHexes(grid, other).map(hexKey) } : {}) });
       spaces.push({ id: other.id, x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h, lo, hi });
     }
   }
@@ -185,17 +188,22 @@ export function publicWorld(state: RoomState, token: Token & Walker, viewer: Wal
   const halfSpeed: AreaTemplate[] = [];
   for (const { template, kind } of slowingAreas(state, token, shown, rigid, everything)) {
     if (kind === "halfSpeed") halfSpeed.push(template);
-    else areas.push({ extra: kind === "quarter" ? 3 : 1, cells: computeCoverage(template, areaCtx).cells });
+    else {
+      const covered = computeCoverage(template, areaCtx);
+      // On hexes an area covers hexes (docs/design-v1-hex-grids.md HX-D11), each as its column and row.
+      areas.push({ extra: kind === "quarter" ? 3 : 1, cells: isHex(grid) ? (covered.hexes ?? []).map((h) => ({ x: h.col, y: h.row })) : covered.cells });
+    }
   }
   const input: WalkInput = {
     build: { scenes: state.scenes, buildChunks: state.buildChunks },
     token,
     rules,
     seen: ground ? (x, y) => ground(x, y) : null,
+    ...(isHex(grid) ? { seenSub: ground ? (sx: number, sy: number) => ground.sub(sx, sy) : null } : {}),
     creatures,
     areas,
     prone: publicKeys(state, token).has("prone"),
-    counter: publicCounters(SQUARES, token, stops, rules, viewer.role === "dm"),
+    counter: publicCounters(grid, token, stops, rules, viewer.role === "dm"),
   };
   return { input, spaces, halfSpeed, areaCtx };
 }
@@ -273,8 +281,8 @@ function areaContext(state: RoomState, token: Token, shown: ReadonlyMap<string, 
   return {
     settings: state.meta.settings,
     bounds: scene?.bounds ?? { w: 0, h: 0 },
-    // Areas that slow a walk are square until hex grids' phase H2, which refuses routes on hexes.
-    grid: SQUARES,
+    // On hexes an area covers hexes and a creature stands on its hexes (docs/design-v1-hex-grids.md HX-D11).
+    grid: scene ? sceneGrid(scene) : SQUARES,
     walls: scene ? sceneWalls(scene, asPlayers ? playersChunks(state, scene.id) : state.buildChunks) : null,
     tokens: Object.fromEntries([...shown].map(([id, t]) => [id, t as AreaToken])),
   };

@@ -44,9 +44,11 @@ export type WalkCreature = {
    * end but never goes on from.
    */
   way: "free" | "difficult" | "blocked";
+  /** On a hex scene, the hexes it stands on, as `"col,row"` keys (docs/design-v1-hex-grids.md 4.2). */
+  hexes?: readonly string[];
 };
 
-/** Ground squares an area covers that cost to walk: 1 extra foot (difficult terrain) or 3 (Plant Growth's 4 ft per foot). */
+/** Ground squares an area covers that cost to walk: 1 extra foot (difficult terrain) or 3 (Plant Growth's 4 ft per foot). On a hex scene the hexes it covers, `x` the column and `y` the row. */
 export type WalkArea = { extra: 1 | 3; cells: readonly Point[] };
 
 export type WalkInput = {
@@ -56,6 +58,8 @@ export type WalkInput = {
   rules: DistanceSettings;
   /** The ground the search may read, as squares players have seen, or null for all of it. Terrain and marks count only there. */
   seen: ((x: number, y: number) => boolean) | null;
+  /** The same ground by fog sub-cells, which a hex scene reads its hexes by: a hex is seen where any of its sub-cells is (hexWalk.ts). */
+  seenSub?: ((sx: number, sy: number) => boolean) | null;
   creatures: readonly WalkCreature[];
   areas: readonly WalkArea[];
   /** Crawling: the mover is Prone as players see it, and every step costs 1 extra foot. */

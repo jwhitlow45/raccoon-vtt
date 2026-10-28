@@ -7,7 +7,7 @@ import { LIMITS, serializedBytes } from "../limits.ts";
 import { applyHpSet, type ActorEvent } from "../rules/hp.ts";
 import { footprintSize, isSqueezed, snapStep, stopFootprint } from "../rules/footprint.ts";
 import { pathCounters, pathThisTurn, reshapeLeg, sameSpot, turnUnderWay, withStop, type Walked } from "../rules/path.ts";
-import { onTrace, routeFeet, routePoints, routeWalk, routeWalkBeforeV14, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
+import { hexRouteFeet, onTrace, routeFeet, routePoints, routeWalk, routeWalkBeforeV14, routeWalkers, straightCost, type LegCost, type RoutePiece, type RoutePoint, type WalkTrace } from "../rules/route.ts";
 import { planMove, type MovedToken } from "../rules/moveLeg.ts";
 import { holderOf, linkHolds, walkerFor } from "../rules/attach.ts";
 import { dismountSplit } from "../rules/dismount.ts";
@@ -618,7 +618,9 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   } else if (route) {
     trace = routeWalkers(tx.state.buildChunks, walker, route, after.elevation);
     const swimSpeed = (speedsOf(tx.state, before)?.swim ?? 0) > 0;
-    taken = routeFeet(pointsOf(trace), route.map(([, , extra, swim]) => ({ extra, swim })), rules, counter, { swimSpeed, step: snapStep(before) });
+    const extras = route.map(([, , extra, swim]) => ({ extra, swim }));
+    // On hexes a piece's feet are its hex steps (docs/design-v1-hex-grids.md 4.3), its stops read as the walk stands there.
+    taken = grid.shape === "hex" ? hexRouteFeet(grid, walker, pointsOf(trace), isSqueezed(after), extras, rules, counter, { swimSpeed }) : routeFeet(pointsOf(trace), extras, rules, counter, { swimSpeed, step: snapStep(before) });
   } else {
     trace = routeWalkers(tx.state.buildChunks, walker, [[after.x, after.y, 0, 0]], after.elevation);
     // From where the walk starts, on the ground under its footprint off a holder on the ground, as a route's first piece does (movement.ts walkFrom).
@@ -631,7 +633,7 @@ function walkedStop(tx: Tx, path: TokenPath, stop: PathStop, before: Token, afte
   // Each spot with the footprint the walk's trace has there, squeezed where it ends as it will be (route.ts onTrace). Ops
   // before version 14 read the full footprint between its ends, squeezed only where it starts.
   const spots = attaches(tx.env.opVersion)
-    ? routeWalk(grid, trace, judged.before).map((p) => ({ ...p, squeezed: isSqueezed(onTrace(trace, p.progress[0], p.progress[1] === p.progress[2] && p.progress[2] > 0, after)) }))
+    ? routeWalk(grid, trace, judged.before, undefined, { endSqueezed: isSqueezed(after) }).map((p) => ({ ...p, squeezed: p.squeezed ?? isSqueezed(onTrace(trace, p.progress[0], p.progress[1] === p.progress[2] && p.progress[2] > 0, after)) }))
     : routeWalkBeforeV14(walk, walker, judged.before).map((p, i, all) => ({ ...p, squeezed: i === all.length - 1 ? isSqueezed(after) : i === 0 && isSqueezed(before) }));
   if (seenAtEvery(judged.before, after, spots, tx.env) && seenAtEvery(judged.after(), after, spots, tx.env)) out.routeSeen = true;
   return out;

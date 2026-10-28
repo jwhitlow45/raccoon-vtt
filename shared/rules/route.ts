@@ -6,7 +6,31 @@ import type { Point, Rect } from "./geom.ts";
 import { SQUARES, type Grid } from "./grid.ts";
 import { hexDistance, hexLine, type HexGrid } from "./hex.ts";
 import { footing, footprintGround, sceneGround } from "./heights.ts";
-import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear, walkEnds, walkFrom, walkOn, type MovingToken, type WalkEnd, type Walker, type Walking } from "./movement.ts";
+import {
+  coreBlocked,
+  groundUnder,
+  hexEndStand,
+  hexFitWall,
+  hexLegOf,
+  hexLegStand,
+  hexNarrow,
+  hexStandAt,
+  hexStandPlace,
+  hexStartStand,
+  hexWallsOf,
+  legStop,
+  ownWalk,
+  squeezeFits,
+  straightClear,
+  walkEnds,
+  walkFrom,
+  walkOn,
+  type HexStand,
+  type MovingToken,
+  type WalkEnd,
+  type Walker,
+  type Walking,
+} from "./movement.ts";
 
 /**
  * A move's route, what it costs and the spots it passes
@@ -22,9 +46,9 @@ import { coreBlocked, groundUnder, legStop, ownWalk, squeezeFits, straightClear,
  * On a hex scene (docs/design-v1-hex-grids.md 4.2 to 4.4) a leg is
  * straight from its start's reference hex to its end's: its feet are the
  * hex steps between them, and its spots stand on the hex line between them.
- * Routes, blocking and squeezing on hexes are phase H2's, and the server
- * refuses a routed or squeezed move on a hex scene until then, so the
- * route, lattice and stand rules here stay square.
+ * A route's pieces end on anchors, of the creature's size or, where it
+ * squeezes, of the size one smaller (movement.ts HexStand), and a piece
+ * between a full stand and a squeezed one walks squeezed (HX-D17).
  */
 
 /** One piece as `token.move` carries it: where it ends, the public extra feet each foot costs, and whether one of them is the swimming foot. */
@@ -152,7 +176,8 @@ export function routeStop<T extends Walker>(state: BuildState, token: T, route: 
     if (blocker === null) continue;
     const start = walkers[0]!;
     const end = walkers[walkers.length - 1]!;
-    if (!start.offHolder && alongStraightLeg(start, route) && legBlocker(state, start, { x: end.x, y: end.y, elevation: end.elevation }) === null) return null;
+    // On hexes a straight walk's pieces are its own leg's hex line, so a stopped piece is a stopped leg.
+    if (!hexWallsOf(state, start) && !start.offHolder && alongStraightLeg(start, route) && legBlocker(state, start, { x: end.x, y: end.y, elevation: end.elevation }) === null) return null;
     return { piece: i - 1, blocker };
   }
   return null;
@@ -286,6 +311,42 @@ function multiplier(piece: { extra: number; swim: 0 | 1 } | undefined, swimSpeed
 }
 
 /**
+ * `routeFeet` on hexes (4.3): each piece's hex steps between its ends'
+ * reference hexes (movement.ts HexStand), with its change of elevation by
+ * the room's rule, times the piece's multiplier. `points` are the walk's
+ * start, where `start` stands, and each piece's end. The start squeezes
+ * by the walker's flag, the walk's last stop as the move leaves it
+ * (`endSqueezed`), and every stop between by where it stands. Every hex
+ * step is a whole step, so nothing rounds but true distance, once for the
+ * walk.
+ */
+export function hexRouteFeet(
+  g: HexGrid,
+  start: PlacedToken,
+  points: readonly RoutePoint[],
+  endSqueezed: boolean,
+  pieces: readonly { extra: number; swim: 0 | 1 }[],
+  rules: DistanceSettings,
+  counter: DiagonalCounter,
+  opts: { swimSpeed: boolean },
+): LegCost {
+  const running = { ...counter };
+  let moved = 0;
+  let cost = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const from = i === 1 ? hexStartStand(g, start) : hexEndStand(g, start, a);
+    const to = i === points.length - 1 ? hexStandAt(g, start, b, endSqueezed) : hexEndStand(g, start, b);
+    const ft = legFeet(hexDistance(g, from.ref, to.ref), 0, Math.abs(b.elevation - a.elevation) / rules.feetPerCell, rules.diagonal, rules.feetPerCell, running);
+    moved += ft;
+    cost += ft * multiplier(pieces[i - 1], opts.swimSpeed);
+  }
+  if (rules.diagonal === "euclid") return { moved: Math.round(moved), cost: Math.round(cost), diag: [0, 0] };
+  return { moved, cost, diag: rules.diagonal === "fiveTen" ? [running.h - counter.h, running.v - counter.v] : [0, 0] };
+}
+
+/**
  * A spot with the footprint the creature had there, squeeze and all, where
  * that differs from the token's footprint now (PathStop.footprint).
  * Without it, the spot is read with the token's footprint now.
@@ -384,8 +445,8 @@ function latticePiece(dx: number, dy: number, step: number): boolean {
   return Math.abs(dx) < SLACK || Math.abs(dy) < SLACK || Math.abs(Math.abs(dx) - Math.abs(dy)) < SLACK;
 }
 
-/** A spot of a walk without what standing there needs: where the footprint is, how high, and how far along. */
-export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress">;
+/** A spot of a walk without what standing there needs: where the footprint is, how high, and how far along, and on hexes whether the walk squeezes there. */
+export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress"> & { squeezed?: boolean };
 
 /**
  * The positions the footprint passes along a walk, the start first (6.1,
@@ -401,60 +462,77 @@ export type WalkSpot = Pick<RouteSpot, "x" | "y" | "elevation" | "progress">;
  * so its anchor stands on that hex (footprint.ts placedOnHex) and the last
  * where the piece ends. So every reader of a walk's spots, `routeSeen`,
  * the area sweep and the drag preview's, reads the same hexes. `step`
- * means nothing there.
+ * means nothing there. Each spot there says whether the walk squeezes at
+ * it (`squeezed`), but the walk's last, whose squeeze is the move's
+ * (`endSqueezed`, else where it stands).
  */
-export function routeWalk(g: Grid, trace: WalkTrace, build: Pick<BuildState, "buildChunks">, step?: number): WalkSpot[] {
+export function routeWalk(g: Grid, trace: WalkTrace, build: Pick<BuildState, "buildChunks">, step?: number, opts: { endSqueezed?: boolean } = {}): WalkSpot[] {
   const first = trace[0];
   if (!first) return [];
-  if (g.shape === "hex") return hexWalkSpots(g, trace, build);
+  if (g.shape === "hex") return hexWalkSpots(g, trace, build, opts.endSqueezed);
   return walkSpots(trace, first, build, step, (piece) => trace[piece]!);
 }
 
 /**
  * A piece of a walk on hexes (4.4): the hex line from its start's reference
- * hex to its end's at the walker's size, built once, so a long piece costs
- * one line however many spots are read from it. `steps` is the line's hex
- * steps. `at(f)` is the spot at fraction `f`: on the line's hex at that
- * fraction of its steps, rounded, the creature's box placed so its anchor
- * stands there (footprint.ts placedOnHex), or where the piece ends at its
- * end. Its elevation is the caller's. The area sweep samples a piece by it
- * at its own density, and `routeWalk` and a private leg's ground check at
- * each hex.
+ * hex to its end's, built once, so a long piece costs one line however
+ * many spots are read from it. `steps` is the line's hex steps. `at(f)` is
+ * the spot at fraction `f`: on the line's hex at that fraction of its
+ * steps, rounded, the creature's box placed so its anchor stands there at
+ * the size the piece walks at (movement.ts hexLegOf), or where the piece
+ * ends at its end, and `squeezedAt(f)` whether the walk squeezes there.
+ * Its elevation is the caller's. A piece's start squeezes by the walker's
+ * flag where the walker stands there, else by where it is, and its end by
+ * `endSqueezed` when the caller knows it, else by where it is. The area
+ * sweep samples a piece by it at its own density, and `routeWalk` and a
+ * private leg's ground check at each hex.
  */
-export type HexPiece = { steps: number; at(f: number): Point };
+export type HexPiece = { steps: number; at(f: number): Point; squeezedAt(f: number): boolean };
 
-export function hexPiece(g: HexGrid, walker: PlacedToken, a: Point, b: Point): HexPiece {
-  const line = hexLine(g, tokenRefHex(g, { ...walker, x: a.x, y: a.y }), tokenRefHex(g, { ...walker, x: b.x, y: b.y }));
-  const last = line.length - 1;
+export function hexPiece(g: HexGrid, walker: PlacedToken, a: Point, b: Point, endSqueezed?: boolean): HexPiece {
+  const from = a.x === walker.x && a.y === walker.y ? hexStartStand(g, walker) : hexEndStand(g, walker, a);
+  const to = endSqueezed === undefined ? hexEndStand(g, walker, b) : hexStandAt(g, walker, b, endSqueezed);
+  const leg = hexLegOf(g, from, to);
+  const last = leg.line.length - 1;
   return {
     steps: last,
-    at: (f) => (f >= 1 ? { x: b.x, y: b.y } : f <= 0 ? { x: a.x, y: a.y } : placedOnHex(g, walker, line[Math.round(f * last)]!)),
+    at: (f) => (f >= 1 ? { x: b.x, y: b.y } : f <= 0 ? { x: a.x, y: a.y } : hexStandPlace(g, walker, hexLegStand(leg, Math.round(f * last)))),
+    squeezedAt: (f) => (f >= 1 ? to.squeezed : f <= 0 ? from.squeezed : leg.squeezed),
   };
 }
 
 /** The spots a piece on hexes passes after its start, one a hex and at least one, so a piece within one hex still ends where it ends. */
 export function hexPieceSpots(piece: HexPiece): Point[] {
+  return hexPieceFractions(piece).map((f) => piece.at(f));
+}
+
+function hexPieceFractions(piece: HexPiece): number[] {
   const n = Math.max(1, piece.steps);
-  const out: Point[] = [];
-  for (let k = 1; k <= n; k++) out.push(piece.at(k / n));
+  const out: number[] = [];
+  for (let k = 1; k <= n; k++) out.push(k / n);
   return out;
 }
 
-function hexWalkSpots(g: HexGrid, trace: WalkTrace, build: Pick<BuildState, "buildChunks">): WalkSpot[] {
+function hexWalkSpots(g: HexGrid, trace: WalkTrace, build: Pick<BuildState, "buildChunks">, endSqueezed?: boolean): WalkSpot[] {
   const first = trace[0]!;
   const grounded = walkFrom(build.buildChunks, first).grounded;
-  const pieces = trace.slice(1).map((b, i) => hexPieceSpots(hexPiece(g, trace[i]!, trace[i]!, b)));
-  const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, pieces[0]?.length ?? 0] }];
+  const pieces = trace.slice(1).map((b, i) => hexPiece(g, trace[i]!, trace[i]!, b, i === trace.length - 2 ? endSqueezed : undefined));
+  const fractions = pieces.map(hexPieceFractions);
+  const spots: WalkSpot[] = [{ x: first.x, y: first.y, elevation: first.elevation, progress: [0, 0, fractions[0]?.length ?? 0], squeezed: pieces[0]?.squeezedAt(0) ?? false }];
   for (let i = 1; i < trace.length; i++) {
     const a = trace[i - 1]!;
     const b = trace[i]!;
     const piece = pieces[i - 1]!;
-    const n = piece.length;
+    const fs = fractions[i - 1]!;
+    const n = fs.length;
     for (let k = 1; k <= n; k++) {
       const end = k === n;
-      const { x, y } = piece[k - 1]!;
+      const { x, y } = piece.at(fs[k - 1]!);
       const elevation = end ? b.elevation : grounded ? groundUnder(build.buildChunks, a, { x, y }) : a.elevation + ((b.elevation - a.elevation) * k) / n;
-      spots.push({ x, y, elevation, progress: [i - 1, k, n] });
+      const spot: WalkSpot = { x, y, elevation, progress: [i - 1, k, n] };
+      // The walk's last spot squeezes as the move leaves the creature, which the reader knows.
+      if (!(end && i === trace.length - 1)) spot.squeezed = piece.squeezedAt(fs[k - 1]!);
+      spots.push(spot);
     }
   }
   return spots;
@@ -534,8 +612,9 @@ export function routeSpots(build: BuildState, route: readonly RoutePoint[], toke
  */
 export function routeStands(build: BuildState, route: readonly RoutePoint[], token: Walker, step?: number, opts: { squeeze?: boolean } = {}, spots?: readonly WalkSpot[]): { walk: readonly WalkSpot[]; trace: WalkTrace; spot: (s: number) => RouteSpot } {
   // The walker where each piece starts, as the walk carries it (`WalkTrace`): ledges, the squeeze and the leg test count from here.
-  // Routes are square until hex grids' phase H2, which refuses them on hexes.
   const trace = walkTrace(build.buildChunks, token, route);
+  const hex = hexWallsOf(build, token);
+  if (hex) return hexStands(build, hex, route, token, trace, opts, spots);
   const walk = spots ?? routeWalk(SQUARES, trace, build, step);
   const lattice = step ?? routeLattice(token);
   const grid = snapStep(token);
@@ -571,6 +650,44 @@ export function routeStands(build: BuildState, route: readonly RoutePoint[], tok
       !coreBlocked(build, spotEnd()) &&
       (!blocks || ((piece.exact || end) && sweepClear()) || legStop(build, at, { x: w.x, y: w.y, elevation: w.elevation }) === null);
     return (known[s] = { ...w, squeezed, stand });
+  };
+  return { walk, trace, spot };
+}
+
+/**
+ * `routeStands` on hexes: a spot is a stand where the creature's hexes
+ * there fit (movement.ts HX-D8), squeezed only where that is a real
+ * narrow space, and the walk cut there is allowed. A spot lies on its
+ * piece's hex line, so the cut is allowed for free wherever the whole
+ * piece's leg is, which every piece of a checked route's is.
+ */
+function hexStands(
+  build: BuildState,
+  t: NonNullable<ReturnType<typeof hexWallsOf>>,
+  route: readonly RoutePoint[],
+  token: Walker,
+  trace: WalkTrace,
+  opts: { squeeze?: boolean },
+  spots?: readonly WalkSpot[],
+): { walk: readonly WalkSpot[]; trace: WalkTrace; spot: (s: number) => RouteSpot } {
+  const walk = spots ?? routeWalk(t.g, trace, build, undefined, opts.squeeze !== undefined ? { endSqueezed: opts.squeeze } : {});
+  const blocks = build.scenes[token.sceneId]?.blockMovement === true;
+  const clear: (boolean | undefined)[] = [];
+  const known: RouteSpot[] = [];
+  const spot = (s: number): RouteSpot => {
+    const hit = known[s];
+    if (hit) return hit;
+    const w = walk[s]!;
+    if (s === 0) return (known[0] = { x: w.x, y: w.y, elevation: w.elevation, progress: w.progress, squeezed: isSqueezed(token), stand: true });
+    const [i, k, n] = w.progress;
+    const last = k === n && i === route.length - 2;
+    const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : (w.squeezed ?? false);
+    const stand: HexStand = hexStandAt(t.g, token, w, squeezed);
+    const fits = squeezed ? hexNarrow(t, token, stand) : hexFitWall(t, stand) < 0;
+    const b = route[i + 1]!;
+    const pieceClear = () => (clear[i] ??= legStop(build, trace[i]!, { x: b.x, y: b.y, elevation: b.elevation }) === null);
+    const ok = fits && (!blocks || pieceClear() || legStop(build, trace[i]!, { x: w.x, y: w.y, elevation: w.elevation }) === null);
+    return (known[s] = { x: w.x, y: w.y, elevation: w.elevation, progress: w.progress, squeezed, stand: ok });
   };
   return { walk, trace, spot };
 }
