@@ -10,6 +10,7 @@ import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { turned, type View, type ViewKind } from "../../lib/view.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
+import { keySuffix, useKeyHint } from "../../state/shortcuts.ts";
 import { useRoomView } from "../../state/view.ts";
 import {
   choiceOf,
@@ -182,6 +183,8 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boo
   const reasonId = useId();
   const reason = props.steadyTurns ? turnsReason(choice) : null;
   const described = (id: string) => (reason ? `${id} ${reasonId}` : id);
+  const leftKey = useKeyHint("turnLeft");
+  const rightKey = useKeyHint("turnRight");
   return (
     <div data-view-menu="" style={{ display: "grid", gap: theme.space(3), minWidth: 0 }}>
       <div ref={group} role="radiogroup" aria-label={VIEW_GROUP} style={{ display: "grid", gap: theme.space(0.5), minWidth: 0 }}>
@@ -214,11 +217,18 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boo
       {forced && !props.steadyTurns ? <Help>{forced}</Help> : null}
       {turns || props.steadyTurns ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2) }}>
-          <Button size="sm" icon="turnLeft" disabled={!turns} aria-describedby={described(leftId)} onClick={() => choice.turn(-1)} style={TURN_BUTTON}>
-            {TURN_LEFT}
+          {/* The key after the words, on a device with a keyboard, inside one span so the button's gap never parts them. */}
+          <Button size="sm" icon="turnLeft" disabled={!turns} aria-describedby={described(leftId)} aria-keyshortcuts={leftKey?.aria} onClick={() => choice.turn(-1)} style={TURN_BUTTON}>
+            <span>
+              {TURN_LEFT}
+              <span aria-hidden>{keySuffix(leftKey)}</span>
+            </span>
           </Button>
-          <Button size="sm" icon="turnRight" disabled={!turns} aria-describedby={described(rightId)} onClick={() => choice.turn(1)} style={TURN_BUTTON}>
-            {TURN_RIGHT}
+          <Button size="sm" icon="turnRight" disabled={!turns} aria-describedby={described(rightId)} aria-keyshortcuts={rightKey?.aria} onClick={() => choice.turn(1)} style={TURN_BUTTON}>
+            <span>
+              {TURN_RIGHT}
+              <span aria-hidden>{keySuffix(rightKey)}</span>
+            </span>
           </Button>
           <span id={leftId} style={VISUALLY_HIDDEN}>
             {TURN_LEFT_DESCRIPTION}

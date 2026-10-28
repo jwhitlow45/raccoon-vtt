@@ -51,6 +51,8 @@ export type MenuItem = {
   disabled?: boolean;
   /** Muted words at a row's end, such as "on top". Hidden from screen readers, since its description says it. */
   note?: string;
+  /** The shortcut it does, from state/shortcuts.ts useKeyHint: `title` its hover title with the key, "Fog (F)", and `aria` its `aria-keyshortcuts`. */
+  keys?: { title: string; aria: string };
 };
 
 export type MenuSection = {
@@ -173,6 +175,8 @@ export function Menu(props: {
         aria-checked={it.kind === "action" ? undefined : checked}
         aria-disabled={disabled || undefined}
         aria-describedby={described}
+        aria-keyshortcuts={it.keys?.aria}
+        title={it.keys?.title}
         tabIndex={-1}
         onClick={() => pick(it.id)}
         style={tiles ? { ...TILE, ...look } : { ...ROW, ...look, ...(disabled ? { cursor: "default" } : null) }}

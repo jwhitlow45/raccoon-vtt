@@ -7,6 +7,7 @@ import type { HexGrid } from "#shared/rules/hex.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
 import { popoverSlot } from "../components/popoverRules.ts";
 import { keyChanges, useKeyChanges } from "../features/device/settings.ts";
+import { usePreview } from "../features/dm/previewContext.ts";
 import { ownsEntry, sortedEntries, turnOp, turnStatus } from "../features/encounter/logic.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
@@ -14,7 +15,7 @@ import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
 import { cycleStep, type ToolCycle } from "../features/toolChoices.ts";
 import { isoOffered, kindSaid, otherViewPress, sayView, topDownTool, turnRefused } from "../features/view/choice.ts";
 import { pickView, readView, shownView, turnView, viewKey } from "../features/view/store.ts";
-import { noteKeyboard } from "../lib/device.ts";
+import { hasKeyboard, noteKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
 import { turned } from "../lib/view.ts";
@@ -23,7 +24,7 @@ import { scopeSlot, type RoomScope } from "./scope.ts";
 import { sayTool, tuckEvent } from "./toolbar.ts";
 import type { RoomUi } from "./store.ts";
 import type { RoomActions, RoomView } from "./types.ts";
-import { useRoomActions, useRoomStore, useRoomUi } from "./view.ts";
+import { useRoomActions, useRoomRoleIfAny, useRoomStore, useRoomUi } from "./view.ts";
 
 /**
  * The room's keyboard shortcuts (features 13, docs/design-v1-dm-tools.md
@@ -603,6 +604,84 @@ export function useShortcutKeys(): KeyMap {
 export function keyText(id: string, keys: KeyMap = shortcutKeys()): string {
   const key = keys[id];
   return key === undefined ? (SHORTCUTS.find((s) => s.id === id)?.keys ?? "") : keyLabel(key);
+}
+
+/**
+ * A control's key (D-261028-09): `text` as the sheet writes it, for the
+ * control's tooltip ("Fog (F)") or its words ("Turn left (Q)"), and `aria`
+ * for its `aria-keyshortcuts`, in that attribute's own key names. Every
+ * control that does what a shortcut does takes its key from here, so none
+ * writes a key of its own that could drift from the sheet.
+ */
+export type KeyHint = { text: string; aria: string };
+
+/** The fixed rows' keys in `aria-keyshortcuts` names, one entry per key the sheet lists, so `part` can pick one. */
+const FIXED_ARIA: Readonly<Record<string, readonly string[]>> = {
+  undo: ["Control+Z Meta+Z"],
+  redo: ["Control+Shift+Z Meta+Shift+Z"],
+  elevation: ["PageUp", "PageDown"],
+  delete: ["Delete", "Backspace"],
+};
+
+/** A single key's `aria-keyshortcuts` name. The attribute joins keys with `+` and lists shortcuts with spaces, so those two have names. */
+function ariaKey(key: string): string {
+  if (key === "+") return "Plus";
+  if (key === " ") return "Space";
+  return keyLabel(key);
+}
+
+/**
+ * The key of shortcut `id` for a control, or null where pressing it would
+ * do nothing for this role or no key is set: a shortcut the role lacks, a
+ * row the table does not hold now (the view's keys while Isometric is not
+ * offered), or a key this device moved away (keyBindings.ts UNBOUND).
+ * `part` picks one key of a fixed row that lists two, as Elevation's
+ * Page Up for its Up 5 feet.
+ */
+export function keyHint(id: string, role: "dm" | "player", keys: KeyMap = shortcutKeys(), part?: number): KeyHint | null {
+  const row = SHORTCUTS.find((s) => s.id === id);
+  if (!row || !row.roles.includes(role)) return null;
+  if (row.key !== undefined) {
+    const key = keys[id];
+    return key ? { text: keyLabel(key), aria: ariaKey(key) } : null;
+  }
+  const aria = FIXED_ARIA[id];
+  if (!aria) return null;
+  if (part === undefined) return { text: row.keys, aria: aria.join(" ") };
+  const text = row.keys.split(", ")[part];
+  const one = aria[part];
+  return text !== undefined && one !== undefined ? { text, aria: one } : null;
+}
+
+/** What follows a control's name for its key, " (F)", or nothing without one: drawn after words that already name the action, hidden from screen readers, which hear `aria-keyshortcuts`. */
+export function keySuffix(hint: KeyHint | null): string {
+  return hint ? ` (${hint.text})` : "";
+}
+
+/** A control's name with its key, "Fog (F)", or the name alone without one. */
+export function withKey(name: string, hint: KeyHint | null): string {
+  return name + keySuffix(hint);
+}
+
+/**
+ * keyHint for the controls on this page, following the sheet's changes, for
+ * a component that draws several, such as the toolbar. None where no key
+ * can be pressed: on a touch screen that has shown no keyboard
+ * (lib/device.ts hasKeyboard), in "view as a player", which answers no key
+ * but Escape, on a table display, which has no shortcuts, and outside a
+ * room.
+ */
+export function useKeyHints(): (id: string, part?: number) => KeyHint | null {
+  const keys = useShortcutKeys();
+  const room = useRoomRoleIfAny();
+  const preview = usePreview() !== null;
+  const role = room && !room.display && !preview && hasKeyboard() ? room.role : null;
+  return (id, part) => (role ? keyHint(id, role, keys, part) : null);
+}
+
+/** keyHint for one control on this page (useKeyHints). */
+export function useKeyHint(id: string, part?: number): KeyHint | null {
+  return useKeyHints()(id, part);
 }
 
 // ------------------------------------------------------------ the rest of the sheet

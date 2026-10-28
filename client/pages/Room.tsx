@@ -90,7 +90,7 @@ import { theme } from "../lib/theme.ts";
 import { PanelBody, RoomLoadNotice } from "../panels/Panels.tsx";
 import { RoomScope, RoomScopeProvider, scopeSlot, useRoomScope, useScoped } from "../state/scope.ts";
 import { toastsLeft } from "../state/store.ts";
-import { keyText, sidePanelKeysSlot, splitKeysSlot, useShortcutKeys, useShortcuts } from "../state/shortcuts.ts";
+import { sidePanelKeysSlot, splitKeysSlot, useKeyHint, useKeyHints, useShortcuts, withKey, type KeyHint } from "../state/shortcuts.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ViewAsHost } from "../features/dm/PlayerPreview.tsx";
 import { usePasteRouter } from "../features/images/pasteRouter.ts";
@@ -2640,16 +2640,21 @@ function Toolbar(props: {
   const size: ButtonSize = inRow ? { fixed: props.named ? TOOL_BUTTON_NAMED : TOOL_BUTTON_ICON } : wide ? "floating" : "shared";
   const line = (key: keyof typeof TOOLBAR_LINES) => `${ids}-${key}`;
   const frame = useMemo(() => toolbarPopoverFrame(props.popover, props.toolbar), [props.popover, props.toolbar]);
-  // Each tool's key in its tooltip, as this device has it (the shortcut sheet may have changed it).
-  const keys = useShortcutKeys();
-  // None where the tool has no key: none in the table, or its default taken by another tool's change (keyBindings.ts UNBOUND).
-  const hint = (t: ToolDef) => (keys[`tool:${t.id}`] ? keyText(`tool:${t.id}`, keys) : undefined);
+  // Each tool's key in its tooltip, as this device has it (the shortcut sheet may have changed it). None where the tool has no key: none in the table, or its default taken by another tool's change (keyBindings.ts UNBOUND).
+  const hints = useKeyHints();
+  const hint = (t: ToolDef) => hints(`tool:${t.id}`);
+  const panelsKey = useKeyHint("sidePanel");
 
+  const tileKeys = (t: ToolDef) => {
+    const keys = hint(t);
+    return keys ? { keys: { title: withKey(t.label, keys), aria: keys.aria } } : null;
+  };
   const tile = (t: ToolDef): MenuItem => ({
     id: t.id,
     title: t.label,
     checked: t.id === props.tool,
     glyph: <ToolIcon tool={t} />,
+    ...tileKeys(t),
     ...(t.id === props.tool && t.id !== "select" ? { description: tucked ? TOOLBAR_LINES.tileHidden : TOOLBAR_LINES.tileShown } : {}),
   });
   const content = (t: ToolDef) => (props.named ? <Stacked icon={<ToolIcon tool={t} />} text={t.shortLabel ?? t.label} /> : <ToolIcon tool={t} />);
@@ -2666,7 +2671,7 @@ function Toolbar(props: {
         {i === divider ? <ToolbarDivider wide={wide && !inRow} /> : null}
         <ToolButton
           label={t.label}
-          hint={hint(t)}
+          keys={hint(t)}
           active={active}
           onClick={() => props.onPress(t.id)}
           popup={opensMenu ? all : undefined}
@@ -2758,7 +2763,7 @@ function Toolbar(props: {
       {wide ? (
         props.sideHidden ? (
           <div style={{ flex: "none", display: "flex", alignItems: "center", height: "100%" }}>
-            <ToolButton ref={props.panelsRef} label="Panels" active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly alone={!props.named} size={inRow ? size : "floating"}>
+            <ToolButton ref={props.panelsRef} label="Panels" keys={panelsKey} active={false} expanded={false} controls={props.sidePanelId} onClick={props.onShowSide} floating iconOnly alone={!props.named} size={inRow ? size : "floating"}>
               {props.named ? <Stacked icon={panelsIcon} text="Panels" /> : panelsIcon}
               <Badge count={props.unread} corner label={props.unreadLabel} />
             </ToolButton>
@@ -2886,8 +2891,8 @@ function sizeStyle(size: ButtonSize | undefined): CSSProperties {
 function ToolButton(props: {
   ref?: Ref<HTMLButtonElement>;
   label: string;
-  /** Its key, which the tooltip adds to its name: "Fog (F)". */
-  hint?: string;
+  /** Its key (state/shortcuts.ts useKeyHint), which the tooltip adds to its name, "Fog (F)", and `aria-keyshortcuts` holds. */
+  keys?: KeyHint | null;
   /**
    * Its icon stands alone, with no name under it (a mouse's toolbar), so
    * its name shows as the shared tooltip on hover, keyboard focus and a
@@ -2923,7 +2928,7 @@ function ToolButton(props: {
     [outer, anchorRef],
   );
   const expanded = popup ? undefined : props.expanded;
-  const name = props.hint ? `${props.label} (${props.hint})` : props.label;
+  const name = withKey(props.label, props.keys ?? null);
   const tooltip = useTooltip(name, { describes: addsWords(name, props.label) });
   return (
     <>
@@ -2937,6 +2942,7 @@ function ToolButton(props: {
         {...(popup ? { "aria-expanded": popup.anchorProps["aria-expanded"] } : null)}
         aria-controls={popup?.open ? popup.anchorProps["aria-controls"] : props.controls}
         aria-label={props.iconOnly ? props.label : undefined}
+        aria-keyshortcuts={props.keys?.aria}
         title={props.alone ? undefined : name}
         {...(props.alone ? tooltip.anchor({ "aria-describedby": props.describedBy }) : { "aria-describedby": props.describedBy })}
         onClick={popup ? popup.anchorProps.onClick : props.onClick}

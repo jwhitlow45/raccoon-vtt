@@ -11,7 +11,7 @@ import { enterFullscreen, exitFullscreen, fullscreenSupported, useFullscreen } f
 import { theme } from "../../lib/theme.ts";
 import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { keyText, setShortcutSheet, useShortcutKeys } from "../../state/shortcuts.ts";
+import { keySuffix, keyText, setShortcutSheet, useKeyHint, useShortcutKeys } from "../../state/shortcuts.ts";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
 import { diceLoader } from "../dice/throw/hooks.ts";
@@ -74,6 +74,7 @@ export default function ThisDevice() {
   const fullscreen = useFullscreen();
   // The keys the help below names, as this device has them.
   const keys = useShortcutKeys();
+  const sheetKey = useKeyHint("sheet");
   const handle = useSheetHandle();
   const handleHelp = useId();
   return (
@@ -141,8 +142,11 @@ export default function ThisDevice() {
       </Section>
       <Section label="Shortcuts">
         <Help>{shortcutsHelp(keys)}</Help>
-        <Button size="sm" onClick={() => setShortcutSheet(scope, true)} style={{ justifySelf: "start" }}>
-          Show the shortcuts
+        <Button size="sm" aria-keyshortcuts={sheetKey?.aria} onClick={() => setShortcutSheet(scope, true)} style={{ justifySelf: "start" }}>
+          <span>
+            Show the shortcuts
+            <span aria-hidden>{keySuffix(sheetKey)}</span>
+          </span>
         </Button>
       </Section>
       <Section label="Sheet handle">

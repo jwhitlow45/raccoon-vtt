@@ -1,4 +1,4 @@
-import { createContext, createElement, useContext, type ReactNode } from "react";
+import { createContext, createElement, useCallback, useContext, useSyncExternalStore, type ReactNode } from "react";
 import { useStore } from "zustand";
 import type { StoreApi } from "zustand/vanilla";
 import { assetUrl, type AssetVariant } from "../lib/api.ts";
@@ -69,6 +69,20 @@ function useRoomContext(): RoomContextValue {
  */
 export function useRoomView<T>(selector: (s: RoomView) => T): T {
   return useStore(useRoomContext().store, selector);
+}
+
+/**
+ * The viewer's role, and whether the room is a table display's, for a
+ * control that also draws outside a room, as a unit test renders it: null
+ * there, where useRoomView would throw.
+ */
+export function useRoomRoleIfAny(): { role: "dm" | "player"; display: boolean } | null {
+  const ctx = useContext(RoomContext);
+  const store = ctx?.store ?? null;
+  const subscribe = useCallback((listener: () => void) => (store ? store.subscribe(listener) : () => {}), [store]);
+  const read = () => (store ? (store.getState().you?.role ?? "player") : null);
+  const role = useSyncExternalStore(subscribe, read, read);
+  return ctx && role ? { role, display: ctx.display } : null;
 }
 
 /** The store itself, for code outside render that reads the latest state, such as a tool's pointer handler. */

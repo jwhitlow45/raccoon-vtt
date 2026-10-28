@@ -25,6 +25,7 @@ import { APP_TITLE, roomTitle } from "../lib/title.ts";
 import { useAccent } from "../state/accent.ts";
 import { barDismiss, dismissal } from "../state/selection.ts";
 import { useScoped } from "../state/scope.ts";
+import { useKeyHint, withKey, type KeyHint } from "../state/shortcuts.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 
 /*
@@ -232,10 +233,12 @@ export function PauseScreen() {
  */
 export function UndoButtons(props: { tuck?: boolean }) {
   const actions = useRoomActions();
+  const undoKey = useKeyHint("undo");
+  const redoKey = useKeyHint("redo");
   return (
     <span style={{ flex: "none", display: "flex", marginRight: props.tuck === false ? 0 : -theme.space(2) }}>
-      <IconButton label="Undo" title="Undo your last change" draw="undo" onClick={() => actions.undo()} />
-      <IconButton label="Redo" title="Redo what you undid" draw="redo" onClick={() => actions.redo()} />
+      <IconButton label="Undo" title="Undo your last change" keys={undoKey} draw="undo" onClick={() => actions.undo()} />
+      <IconButton label="Redo" title="Redo what you undid" keys={redoKey} draw="redo" onClick={() => actions.redo()} />
     </span>
   );
 }
@@ -250,6 +253,8 @@ export function UndoButtons(props: { tuck?: boolean }) {
 function IconButton(props: {
   label: string;
   title: string;
+  /** The key of the shortcut it does (state/shortcuts.ts useKeyHint): in its tooltip and `aria-keyshortcuts`, never its name. */
+  keys?: KeyHint | null;
   draw: IconName | { path: string };
   onClick(e: { detail: number }): void;
   /** On the icon, such as the View button's flip to the view's turn. */
@@ -258,12 +263,14 @@ function IconButton(props: {
   anchor?: Pick<ButtonHTMLAttributes<HTMLButtonElement>, "aria-haspopup" | "aria-expanded" | "aria-controls" | "onKeyDown"> & { ref?(el: HTMLElement | null): void };
 }) {
   // The name on hover, keyboard focus and a long press, never the native title (docs/design-v1-icons.md 3.2).
-  const tooltip = useTooltip(props.title, { describes: addsWords(props.title, props.label) });
+  const tip = withKey(props.title, props.keys ?? null);
+  const tooltip = useTooltip(tip, { describes: addsWords(tip, props.label) });
   return (
     <>
       <button
         type="button"
         aria-label={props.label}
+        aria-keyshortcuts={props.keys?.aria}
         {...props.anchor}
         {...tooltip.anchor()}
         onClick={props.onClick}
@@ -326,10 +333,12 @@ const ISO_FLIP: Readonly<Record<Turn, CSSProperties | undefined>> = { 0: undefin
 
 function ViewIconButton(props: { choice: ViewChoiceState; onClick(e: { detail: number }): void; anchor?: Parameters<typeof IconButton>[0]["anchor"] }) {
   const { shown } = props.choice;
+  const keys = useKeyHint("view");
   return (
     <IconButton
       label={viewButtonLabel(shown)}
       title={VIEW_TIP}
+      keys={keys}
       draw={shown.kind === "isometric" ? "viewIsometric" : "viewTopDown"}
       iconStyle={shown.kind === "isometric" ? ISO_FLIP[shown.turn] : undefined}
       onClick={props.onClick}
@@ -393,11 +402,13 @@ function viewportBound(): Rect {
  */
 export function FitButton() {
   const slot = useScoped(fitSlot);
+  const keys = useKeyHint("fit");
   return (
     <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>
       <IconButton
         label="Fit the map to the screen"
         title="Fit the map to the screen"
+        keys={keys}
         draw={{ path: "M4 4h6v2H6v4H4zm10 0h6v6h-2V6h-4zM4 14h2v4h4v2H4zm14 0h2v6h-6v-2h4z" }}
         onClick={() => slot.fit?.()}
       />
@@ -414,9 +425,10 @@ export function FitButton() {
 export function FullscreenButton() {
   const on = useFullscreen();
   const label = on ? "Leave full screen" : "Full screen";
+  const keys = useKeyHint("fullscreen");
   return (
     <span style={{ flex: "none", display: "flex", marginRight: -theme.space(2) }}>
-      <IconButton label={label} title={label} draw={on ? "leaveFullScreen" : "fullScreen"} onClick={() => void toggleFullscreen()} />
+      <IconButton label={label} title={label} keys={keys} draw={on ? "leaveFullScreen" : "fullScreen"} onClick={() => void toggleFullscreen()} />
     </span>
   );
 }

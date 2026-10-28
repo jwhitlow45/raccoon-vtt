@@ -6,11 +6,12 @@ import { useTooltip } from "../components/Tooltip.tsx";
 import { PRESSED } from "../components/looks.ts";
 import { Menu, type MenuItem, type MenuSection } from "../components/Menu.tsx";
 import { Popover, usePopover, type Rect } from "../components/Popover.tsx";
-import { HideButton } from "../components/SheetHeader.tsx";
+import { IconButton } from "../components/IconButton.tsx";
 import { panelSections, type PanelDef } from "../features/panels.ts";
 import { tabKeyIndex, VISUALLY_HIDDEN } from "../lib/a11y.ts";
 import { isCoarsePointer } from "../lib/device.ts";
 import { theme } from "../lib/theme.ts";
+import { useKeyHint, withKey } from "../state/shortcuts.ts";
 import { Badge } from "./RoomChrome.tsx";
 import { fitTabs, GROUP_GAP, nameCut, TAB_GAP, headerNamesOpen, tabLook as pickLook, widthsFor, type TabFit, type TabLook, type TabWidths } from "./tabFit.ts";
 
@@ -164,6 +165,7 @@ export function SideTabs(props: {
   const focusMore = useRef(false);
 
   const menu = usePopover({ kind: "menu", fallbackFocus: () => tabRef.current });
+  const hideKey = useKeyHint("sidePanel");
 
   /*
    * Measures and fits. Widths come from bounding boxes in the same zoomed
@@ -418,7 +420,15 @@ export function SideTabs(props: {
         <Popover handle={menu} side="below" bound={() => innerBox(listRef.current?.closest("aside") ?? document.body, latest.current.zoom)}>
           <Menu label="More panels" sections={sections} onPick={pick} data={{ "data-tabs-menu": "" }} />
         </Popover>
-        <HideButton label="Hide panels" onClick={props.onHide} style={{ flex: "none" }} />
+        {/* SheetHeader.tsx HideButton's look, with S in its tooltip. */}
+        <IconButton
+          icon="collapsePanel"
+          label="Hide panels"
+          title={hideKey ? withKey("Hide panels", hideKey) : undefined}
+          aria-keyshortcuts={hideKey?.aria}
+          onClick={props.onHide}
+          style={{ flex: "none" }}
+        />
         {/* More's description, outside it so it is no part of its name or its text, and hidden, as only a screen reader reads it. */}
         {description ? (
           <span id={describedId} hidden>
