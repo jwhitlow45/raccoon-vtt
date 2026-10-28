@@ -61,6 +61,24 @@ describe("reading a Universal VTT file", () => {
     assert.deepEqual(read.map.origin, { x: 0, y: 0 });
   });
 
+  test("a Dungeon Alchemist beta file, with `version` for `format` and colors written as RGBA, reads with its lights uncolored", () => {
+    const file = uvttFile({ lights: [{ at: { x: 5, y: 5 }, range: 5 }, { at: { x: 6, y: 6 }, range: 5, color: "ffc0ffee" }] });
+    delete file.format;
+    file.version = "0.2";
+    (file.lights as Record<string, unknown>[])[0]!.color = "ffRGBA(0.750, 0.750, 0.750, 0.750)";
+    const result = readUvtt(file);
+    assert.ok(result.ok, result.ok ? "" : result.error);
+    assert.deepEqual(
+      result.map.lights.map((l) => l.color),
+      [null, "ffc0ffee"],
+    );
+    // A color is only a hint for the light, so one too long or not a string reads as none.
+    (file.lights as Record<string, unknown>[])[1]!.color = 7;
+    const odd = readUvtt(file);
+    assert.ok(odd.ok);
+    assert.equal(odd.map.lights[1]!.color, null);
+  });
+
   test("anything that is not the format says so plainly", () => {
     for (const raw of [null, 3, "text", [], {}, { image: "abc" }, { resolution: {}, image: "abc" }, { ...uvttFile(), resolution: { map_size: { x: 0, y: 5 }, pixels_per_grid: 70 } }]) {
       const result = readUvtt(raw);

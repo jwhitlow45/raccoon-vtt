@@ -63,7 +63,8 @@ const fileSchema = z.object({
       z.object({
         position: point,
         range: num.nonnegative(),
-        color: z.string().max(32).nullish(),
+        // Only a hint, so a color the import cannot use reads as none. Dungeon Alchemist's beta writes "ffRGBA(0.750, 0.750, 0.750, 0.750)", past the bound.
+        color: z.string().max(32).nullish().catch(null),
         shadows: z.boolean().nullish(),
       }),
     )
