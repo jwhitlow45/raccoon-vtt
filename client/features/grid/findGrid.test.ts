@@ -112,6 +112,8 @@ describe("what a found grid becomes", () => {
     assert.equal(searchOnImport({ source: "image", named: false }), true);
     assert.equal(searchOnImport({ source: "image", named: true }), false);
     assert.equal(searchOnImport({ source: "uvtt", named: false }), false);
+    // The detector finds squares only, so a map for a hex scene goes to Line up grid (docs/design-v1-hex-grids.md section 6).
+    assert.equal(searchOnImport({ source: "image", named: false, hex: true }), false);
   });
 
   test("a scene that came with its own grid, from a Universal VTT file, is only offered a find, however sure", () => {

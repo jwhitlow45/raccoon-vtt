@@ -72,9 +72,12 @@ export function importFound(answer: SearchDone | null, named: boolean, map: { wi
  * the file name wins, so a file that names one is not searched. A
  * Universal VTT file states its grid, so it is never searched on import.
  * Find the grid, which the DM asks for, runs whatever the scene came from.
+ * A map for a hex scene is not searched either: the detector finds square
+ * grids only until a later phase of hex grids (docs/design-v1-hex-grids.md
+ * section 6, H1), so Line up grid opens on it instead.
  */
-export function searchOnImport(input: { source: "image" | "uvtt"; named: boolean }): boolean {
-  return input.source === "image" && !input.named;
+export function searchOnImport(input: { source: "image" | "uvtt"; named: boolean; hex?: boolean }): boolean {
+  return input.source === "image" && !input.named && input.hex !== true;
 }
 
 /**

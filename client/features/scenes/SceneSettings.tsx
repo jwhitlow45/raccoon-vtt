@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { AutoWalls, Scene } from "#shared/model.ts";
 import { MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { autoWallsOf } from "#shared/rules/autoWalls.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { useExpansionFocus } from "../../components/expansionFocus.ts";
@@ -22,6 +23,8 @@ import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound
 import { showOutcome } from "../grid/outcome.ts";
 import { useGridStore } from "../grid/store.ts";
 import { useFindGrid, useLandLater } from "../grid/useFindGrid.ts";
+import { shapeRefusal, ShapeRow } from "../grid/ShapeRow.tsx";
+import { HEX_LIMITS, SHAPE_HELP, sceneCellWord, shapeChoice, sizeWords, type ShapeChoice } from "../grid/words.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { MapExport } from "../mapexport/MapExport.tsx";
 import { BlockMovementSetting } from "../movement/SceneSetting.tsx";
@@ -64,6 +67,8 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
   const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
   const deleteWhy = deleteBlocked(others, scene.id, playerSceneId);
   const deleteHelp = useId();
+  const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
+  const size = sizeWords(sceneGrid(scene), scene.bounds, feetPerCell);
 
   const saveView = () => {
     // A phone's sheet hides most of the map, so the DM frames the view with the sheet closed (FrameView.tsx).
@@ -110,11 +115,11 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
       </Section>
 
       <Section label={SCENE_GROUP_LABELS.scene} fold={group("scene")}>
-        <SettingRow name="Size in squares" wide>
+        <SettingRow name={size.name} help={size.holds ?? undefined} wide>
           <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
-            <NumberInput label="Squares across" value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
+            <NumberInput label={size.across} value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
             <span aria-hidden>×</span>
-            <NumberInput label="Squares down" value={scene.bounds.h} min={1} max={MAX_SCENE_CELLS} onChange={(h) => update({ bounds: { ...scene.bounds, h } })} />
+            <NumberInput label={size.down} value={scene.bounds.h} min={1} max={MAX_SCENE_CELLS} onChange={(h) => update({ bounds: { ...scene.bounds, h } })} />
           </div>
         </SettingRow>
         <SettingRow name="Background">
@@ -239,7 +244,7 @@ function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; c
     <>
       <Switch
         label="Grid lines"
-        help={props.scene.map ? "Hide them when the map has its own grid. Tokens and rulers still follow the squares." : undefined}
+        help={props.scene.map ? `Hide them when the map has its own grid. Tokens and rulers still follow the ${sceneCellWord(props.scene, true)}.` : undefined}
         checked={grid.show}
         onChange={(show) => set({ show })}
       />
@@ -252,8 +257,45 @@ function GridStyle(props: { scene: Scene; onChange(grid: Scene["grid"]): void; c
           <Slider label="Line width" value={grid.lineWidth} min={0.5} max={4} step={0.5} format={(v) => `${v} px`} onChange={(lineWidth) => set({ lineWidth })} />
         </>
       ) : null}
+      <GridShape scene={props.scene} close={props.close} />
       {props.scene.map ? <MapGrid key={props.scene.id} scene={props.scene} map={props.scene.map} close={props.close} /> : null}
     </>
+  );
+}
+
+/**
+ * The scene's grid shape (docs/design-v1-hex-grids.md section 8), beside
+ * Line up the grid. A shape the scene's content cannot stand on is off,
+ * with the reducer's own words for why (shared/rules/grid.ts
+ * `switchRefusal`), and so is every hex shape for a scene that came with
+ * its own square grid. A map scene keeps its scale and origin and opens
+ * Line up grid, since its art's cells are another shape now (HX-D14).
+ */
+function GridShape(props: { scene: Scene; close: PanelClose }) {
+  const { scene } = props;
+  const actions = useRoomActions();
+  const ui = useRoomUi();
+  const refusal = (c: ShapeChoice) => (s: { view: Parameters<typeof shapeRefusal>[0] | null }) => (s.view ? shapeRefusal(s.view, scene, c) : null);
+  const squares = useRoomView(refusal("squares"));
+  const rows = useRoomView(refusal("hexRows"));
+  const columns = useRoomView(refusal("hexColumns"));
+  const refused: Partial<Record<ShapeChoice, string>> = {};
+  for (const [c, why] of [["squares", squares], ["hexRows", rows], ["hexColumns", columns]] as const) if (why !== null) refused[c] = why;
+  return (
+    <ShapeRow
+      name="Grid shape"
+      help={SHAPE_HELP}
+      value={shapeChoice(scene.gridShape)}
+      refused={refused}
+      onChange={(gridShape) => {
+        if (refused[gridShape] !== undefined) return;
+        actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { gridShape } });
+        if (scene.map) {
+          ui.setTool("grid");
+          props.close({ placing: true });
+        }
+      }}
+    />
   );
 }
 
@@ -266,6 +308,8 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
   const actions = useRoomActions();
   const ui = useRoomUi();
   const findGrid = useFindGrid();
+  const hex = isHex(sceneGrid(scene));
+  const findOffId = useId();
   const squares = imageSquares(map);
   const [across, setAcross] = useState(squares.across);
   const [down, setDown] = useState(squares.down);
@@ -291,7 +335,7 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
     <>
       <SettingRow
         name="Map grid"
-        help={`${formatPx(map.cellPx)} px per square, first line at ${formatPx(map.originPx.x)}, ${formatPx(map.originPx.y)} of a ${map.widthPx} × ${map.heightPx} image.`}
+        help={`${formatPx(map.cellPx)} px per ${sceneCellWord(scene)}, first line at ${formatPx(map.originPx.x)}, ${formatPx(map.originPx.y)} of a ${map.widthPx} × ${map.heightPx} image.`}
         wide
       >
         <div style={{ display: "flex", gap: theme.space(2), flexWrap: "wrap" }}>
@@ -307,7 +351,9 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
           {/* The search's progress and its answer show in Line up grid, which opens over the map it looks at. */}
           <Button
             size="sm"
-            title="Look for a grid drawn on the map and line up with it"
+            title={hex ? HEX_LIMITS.findGrid : "Look for a grid drawn on the map and line up with it"}
+            disabled={hex}
+            aria-describedby={hex ? findOffId : undefined}
             onClick={() => {
               findGrid(scene.id);
               ui.setTool("grid");
@@ -318,9 +364,15 @@ function MapGrid(props: { scene: Scene; map: NonNullable<Scene["map"]>; close: P
           </Button>
         </div>
       </SettingRow>
+      {hex ? (
+        <>
+          <Help id={findOffId}>{HEX_LIMITS.findGrid}</Help>
+          <Help>{HEX_LIMITS.counting}</Help>
+        </>
+      ) : null}
       {/* Counting assumes squares that start at the image's corner. A grid whose first line sits before the image
           only comes from a Universal VTT file, and counting would slide the image half a square under its walls. */}
-      {map.originPx.x < 0 || map.originPx.y < 0 ? null : (
+      {hex || map.originPx.x < 0 || map.originPx.y < 0 ? null : (
         <SettingRow name="Or count the squares" wide>
           <div style={{ display: "grid", gap: theme.space(1) }}>
             {/* The counts keep their line together, so Apply wraps under them whole on a narrow phone, never beside one of them. */}
@@ -436,12 +488,13 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
     // map scene's is (NewScene.tsx). Only the upload tells whether it is
     // the old art at another size, which keeps the scene's grid, scaled.
     const device = thisDevice();
-    let search = searchOnImport({ source: "image", named: nameGivesSize(file.name) }) ? importSearch(file, device) : null;
+    const hex = isHex(sceneGrid(scene));
+    let search = searchOnImport({ source: "image", named: nameGivesSize(file.name), hex }) ? importSearch(file, device) : null;
     abort.signal.addEventListener("abort", () => search?.cancel());
     try {
       const asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
       let wait: ImportWait = { answer: null, later: null };
-      if ((!map || !sameArt(map, asset)) && asset.cellPx === undefined) {
+      if ((!map || !sameArt(map, asset)) && asset.cellPx === undefined && !hex) {
         search ??= importSearch(file, device);
         setUpload({ busy: true, waiting: false, finding: true, error: null });
         wait = await search.afterUpload(copyUrls(device, (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);

@@ -68,6 +68,8 @@ export function Segmented<T extends string | number>(props: {
    * their meaning for a screen reader too (docs/design-v1-look-pass-2.md 2.7).
    */
   description?: ReactNode;
+  /** Ids of lines placed elsewhere that also describe the group, such as a setting row's help and why a choice is off. */
+  describedBy?: string;
   style?: CSSProperties;
 }) {
   const name = useId();
@@ -80,7 +82,7 @@ export function Segmented<T extends string | number>(props: {
       role="radiogroup"
       aria-label={props.labelledBy ? undefined : props.label}
       aria-labelledby={props.labelledBy}
-      aria-describedby={described ? descriptionId : undefined}
+      aria-describedby={[described ? descriptionId : null, props.describedBy || null].filter(Boolean).join(" ") || undefined}
       aria-disabled={props.disabled ? true : undefined}
       className={props.even ? (props.options.length === 6 ? "rvtt-even-choices rvtt-even-six" : "rvtt-even-choices") : undefined}
       style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...(props.even || described ? null : props.style) }}
