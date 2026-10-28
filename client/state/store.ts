@@ -87,14 +87,16 @@ export const ACTION_TOAST_MS = 12_000;
  * A toast not drawn yet has its whole time left, and one shown whole has
  * what it had left as it stopped (`pausedAt`). Neither `runs`, so neither
  * gets a timer, and neither runs out unseen (docs/design-v1-bar-compact.md
- * 3.5, review BC-OPUS-35).
+ * 3.5, review BC-OPUS-35). Nor does one whose button waits on a builder
+ * gesture's asks, until the hold's end gives it back the time it ran
+ * (waitedToasts, MD4-ASTRA-14).
  */
 export function toastsLeft(toasts: readonly Toast[], now: number): { id: number; ms: number; runs: boolean }[] {
   return toasts.map((t) => {
     const whole = t.action ? ACTION_TOAST_MS : TOAST_MS;
     if (t.shownAt === undefined) return { id: t.id, ms: whole, runs: false };
     const at = t.pausedAt ?? now;
-    return { id: t.id, ms: Math.max(0, t.shownAt + whole - at), runs: t.pausedAt === undefined };
+    return { id: t.id, ms: Math.max(0, t.shownAt + whole - at), runs: t.pausedAt === undefined && t.action?.ready?.() !== false };
   });
 }
 
@@ -117,6 +119,24 @@ export function heldToasts(toasts: readonly Toast[], id: number, held: boolean, 
   const { pausedAt, ...rest } = toast;
   const next: Toast = held ? { ...toast, pausedAt: now } : { ...rest, shownAt: toast.shownAt + (now - (pausedAt ?? now)) };
   return toasts.map((t, i) => (i === at ? next : t));
+}
+
+/**
+ * The toasts after a builder hold that stood from `from` until `now`
+ * (holdBuild): each drawn toast whose button waits on the hold (`ready`)
+ * gets back the time it ran during the hold, so it runs on from what it
+ * had left (MD4-ASTRA-14). A long or offline wait for a gesture's asks
+ * then never takes it away before the DM can press it. The time a toast
+ * was held whole already counts for nothing. The same array when nothing
+ * changes.
+ */
+export function waitedToasts(toasts: readonly Toast[], from: number, now: number): readonly Toast[] {
+  const ran = (t: Toast) => (t.action?.ready && t.shownAt !== undefined ? Math.max(0, (t.pausedAt ?? now) - Math.max(from, t.shownAt)) : 0);
+  if (!toasts.some((t) => ran(t) > 0)) return toasts;
+  return toasts.map((t) => {
+    const ms = ran(t);
+    return ms > 0 ? { ...t, shownAt: t.shownAt! + ms } : t;
+  });
 }
 
 /**
@@ -479,8 +499,15 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * none of it is taken before the question.
    */
   const takenInGroup = new Map<string, number>();
-  /** What cancels each builder gesture waiting on its asks, oldest first (holdBuild). */
+  /** What cancels each builder gesture waiting on its asks, oldest first (holdBuild), and since when one has waited. */
   const held: (() => void)[] = [];
+  let heldSince = 0;
+  const holdEnded = () => {
+    if (held.length > 0) return;
+    // A fresh array even when no time moved, so the toast layer arms the timers it held back (toastsLeft).
+    const toasts = waitedToasts(get().toasts, heldSince, Date.now());
+    if (toasts.some((t) => t.action?.ready)) store.setState({ toasts: [...toasts] });
+  };
   let disposed = false;
 
   const get = () => store.getState();
@@ -750,16 +777,21 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     },
 
     holdBuild(cancel) {
+      // Toast times are wall-clock times (toastsDrawn), so the hold's is too.
+      if (held.length === 0) heldSince = Date.now();
       held.push(cancel);
       return () => {
         const at = held.indexOf(cancel);
-        if (at >= 0) held.splice(at, 1);
+        if (at < 0) return;
+        held.splice(at, 1);
+        holdEnded();
       };
     },
 
     cancelHeld() {
       const cancel = held.pop();
       cancel?.();
+      holdEnded();
       return cancel !== undefined;
     },
 

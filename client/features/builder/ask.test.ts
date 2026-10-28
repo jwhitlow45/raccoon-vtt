@@ -7,7 +7,7 @@ import type { ServerMessage } from "#shared/protocol.ts";
 import { LocalServer } from "../../dev/localServer.ts";
 import { createRoomActions } from "../../state/actions.ts";
 import { RoomScope } from "../../state/scope.ts";
-import { createRoomStore, MAX_OP_AGE_MS } from "../../state/store.ts";
+import { ACTION_TOAST_MS, createRoomStore, MAX_OP_AGE_MS, toastsLeft } from "../../state/store.ts";
 import { FakeClock, FakeOutbox } from "../../state/testing.ts";
 import type { OnAnswer, OpRefusal, UnknownCause } from "../../state/types.ts";
 import type { ToolContext, ToolPointer } from "../tools.ts";
@@ -323,6 +323,28 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     p.room.ui.answerForget(true);
     assert.deepEqual(p.sentKinds(), ["build.paint"]);
     assert.ok(p.room.store.getState().forgetAsk?.sending, "Go ahead is on its way");
+  });
+
+  test("the forget toast's time stops while its button waits on a gesture, and runs on from what it had left once the gesture is answered (MD4-ASTRA-14)", (t) => {
+    let now = 1_000_000;
+    t.mock.method(Date, "now", () => now);
+    const p = page();
+    p.connect();
+    const n = p.room.dispatch({ t: "undo" })!;
+    p.room.applyEv({ t: "ev", seq: p.room.store.getState().seq + 1, changes: [], rejects: [{ n, code: "forget", message: FORGET_ASK }] });
+    p.deliver();
+    const toast = () => p.room.store.getState().toasts.find((x) => x.text === FORGET_ASK)!;
+    const left = () => toastsLeft(p.room.store.getState().toasts, now).find((x) => x.id === toast().id)!.ms;
+    p.room.ui.toastsDrawn([toast().id]);
+    now += 5_000;
+    dispatchBuild(p.ctx, rect);
+    // A long or offline wait for the bands' answers, past the toast's whole time.
+    now += 30_000;
+    const running = () => toastsLeft(p.room.store.getState().toasts, now).find((x) => x.id === toast().id)!.runs;
+    assert.equal(running(), false, "no timer takes it while it waits");
+    p.deliver();
+    assert.equal(left(), ACTION_TOAST_MS - 5_000, "the 7 s it had left as the gesture began");
+    assert.equal(running(), true);
   });
 
   test("while a gesture waits, a step off the top of the stack from any sender is refused, and an undo aimed at one op goes", () => {
