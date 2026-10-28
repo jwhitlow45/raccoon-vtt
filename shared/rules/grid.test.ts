@@ -172,9 +172,13 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
     assert.equal(restoredHolds(room(), "token", token("g", { size: "large", squeeze: true }), rows), null);
   });
 
-  test("the phase check: in H1 a hex scene takes no trap, and from H2 it takes attach links", () => {
+  test("the phase check: from H2 a hex scene takes attach links and traps of its shape, but no pit", () => {
     const state = room({ tokens: { horse: token("horse", { size: "large" }), bree: token("bree", { attached: { to: "horse", kind: "ride" } }) } });
-    assert.deepEqual(restoredHolds(state, "trap", trap("t1", { grid: "hexRows" }), rows), { held: [{ what: "trap", count: 1 }], from: "hexRows" });
+    assert.equal(restoredHolds(state, "trap", trap("t1", { grid: "hexRows" }), rows), null, "a trap of the scene's shape");
+    const pit = trap("t1", { grid: "hexRows" });
+    pit.rig = { ...pit.rig!, pit: { floor: -10 } };
+    assert.deepEqual(restoredHolds(state, "trap", pit, rows), { held: [{ what: "trap", count: 1 }], from: "hexRows" }, "a pit");
+    assert.ok(restoredHolds(state, "trap", trap("t1", { grid: "hexRows" }), columns), "a trap of hex rows on hex columns, by its stamp");
     assert.equal(restoredHolds(state, "token", state.tokens.bree!, rows), null, "a rider");
     assert.equal(restoredHolds(state, "token", state.tokens.horse!, rows), null, "what something rides");
     assert.equal(restoredHolds(state, "token", state.tokens.bree!, columns), null, "on hex columns");

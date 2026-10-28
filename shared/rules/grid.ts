@@ -177,8 +177,8 @@ function dedupe(held: ShapeHeld[]): ShapeHeld[] {
  *   stamp (D-261026-8). In H2 a hex scene holds difficult ground of its own
  *   shape and no other grid-keyed content: painted ground and grid-line
  *   walls never (they stay square in every phase), heights, stairs and
- *   Reveal room's cells until H3. Free walls, squeezed creatures and
- *   attach links stand on hexes from H2. A hand-made backup could stamp any
+ *   Reveal room's cells until H3. Free walls, squeezed creatures, attach
+ *   links and traps but pits stand on hexes from H2. A hand-made backup could stamp any
  *   of the rest with the scene's own shape, and this phase has no hex rules
  *   to read them by.
  *
@@ -210,7 +210,8 @@ export function restoredHolds(
   }
   if (kind === "trap") {
     const trap = value as Trap;
-    return stamp(["trap"], trap.grid) ?? (isHex(g) ? { held: [{ what: "trap", count: 1 }], from: stampShape(trap.grid) } : null);
+    // From H2 a hex scene holds traps of its own shape, but no pit, which opens by writing heights (H3).
+    return stamp(["trap"], trap.grid) ?? (isHex(g) && trap.rig?.pit !== undefined ? { held: [{ what: "trap", count: 1 }], from: stampShape(trap.grid) } : null);
   }
   // A token's squeeze and its links stand on hexes from H2, read by the hex rules of squeezing and attaching.
   return null;

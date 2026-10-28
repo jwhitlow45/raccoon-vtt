@@ -155,7 +155,10 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     assert.equal(run(hex, redo([{ key, value: rough, expectRev: null }])).state.buildChunks[chunkKey("s1", 0, 0)]?.rough, rough.rough);
     const draft = { sceneId: "s1", rev: 0, grid: "hexRows", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
     assert.equal(refusal(hex, undo([{ key: "fogDraft:s1", value: draft, expectRev: null }])), "Can't undo that: Reveal room in its fog draft can't stand on this scene's hexes.");
+    // A trap of the scene's own shape restores from H2, but not one with a pit, which needs heights.
     const stamped = { ...trap("t1"), grid: "hexRows" };
-    assert.equal(refusal(hex, undo([{ key: "trap:t1", value: stamped, expectRev: null }])), "Can't undo that: a trap can't stand on this scene's hexes.");
+    assert.equal(run(hex, undo([{ key: "trap:t1", value: stamped, expectRev: null }])).state.traps.t1?.grid, "hexRows");
+    const pit = { ...stamped, rig: { ...stamped.rig!, pit: { floor: -10 } } };
+    assert.equal(refusal(hex, undo([{ key: "trap:t1", value: pit, expectRev: null }])), "Can't undo that: a trap can't stand on this scene's hexes.");
   });
 });
