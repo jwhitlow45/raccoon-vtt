@@ -339,6 +339,7 @@ Each group header is a button with `aria-expanded`. On a phone (below `wideMinWi
 4. **Per player.** `ownExplored` never adds party-held sub-cells to a holder's layer, so on party ground a holder's map returns to the party's memory once their own creature looks away. A shared walking ruler can walk differently on their device there.
 5. **Own acts are public.** A party member, always shown, seen walking through a door others remember shut shows it open (beside per-player risks 4 and 6). Light reads real doors, so a torch through a door opened out of sight still lights what the party sees. Areas follow the receiver rule, the DM's included, so what a DM's area catches reaches a player only on their live ground.
 6. **A door a player touches** refreshes for everyone who shares that memory.
+7. **Op counts** (MD3-LK-3). Every `ev` carries the room's op sequence, so a player sees how many ops went by between two of theirs, hidden ones included. A DM edit out of sight on ground some layer remembers adds the map step's `sys.remember` to its batch, and one on ground nobody saw adds none, so in a quiet moment the count can tell which. Accepted: the count already shows every hidden DM op, the bit says only that the edit lay somewhere players have been, never where or what, and hiding it would take a stored, replayed step on every DM batch on a scene that remembers.
 
 ## 13. Lane plan
 
