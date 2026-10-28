@@ -36,7 +36,7 @@
 import type { HexOrient } from "#shared/rules/hex.ts";
 import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
 import { boxSides, type CalBox } from "./calibrate.ts";
-import { defaultStep, lineReach, MIN_CONFIDENCE, type Pixels } from "./detect.ts";
+import { defaultStep, lineReach, MIN_CONFIDENCE, type GridDetection, type Pixels } from "./detect.ts";
 
 type Point = { x: number; y: number };
 type Polarity = "dark" | "light";
@@ -94,6 +94,8 @@ export type HexDetectOptions = {
   orient: HexOrient;
   /** Every `step`th row feeds the profiles. */
   step?: number;
+  /** Each fit looked at along its lines and how it fared, for the tests and the evaluation script. */
+  onCandidate?: (c: { cellPx: number; confidence: number; failed: string | null }) => void;
 };
 
 /** The smallest hex this looks for, px across the flats. The upright sides of one hex are a cell apart and must clear the line filter. */
@@ -107,12 +109,24 @@ const MIN_SNR = 5;
 const MIN_FOUND = 0.6;
 const HALF = 0.6;
 /**
- * The three families' periods may differ by this fraction. A picture
- * resized in proportion differs by far less. Hexes drawn 1% out of shape
- * already leave a regular grid a few pixels off the lines across a map.
+ * The three families' periods may differ by this fraction: lines of
+ * three sizes are not one grid of hexes. Hexes out of shape are judged
+ * by how their sides lean (MAX_STRETCH), which a profile's period only
+ * blurs: a sloped line that leans moves along its normal as it crosses
+ * the map, and its period over the whole map depends on the map's shape.
  */
 const SAME_SIZE = 0.01;
-/** How far the three phases may miss one lattice, px, or this share of the period if larger. */
+/**
+ * Hexes stretched or squeezed this much, across or down, answer no grid.
+ * The app's hexes are regular, and a regular grid over hexes 1% out of
+ * shape misses their lines by pixels across a map.
+ */
+const MAX_STRETCH = 0.01;
+/**
+ * How far the three families' lines nearest the image's middle may miss
+ * one crossing point, px, or this share of the period if larger. Measured
+ * at the middle, so a slight difference in period cannot add up to a miss.
+ */
 const MEET_PX = 1.5;
 const MEET_SHARE = 0.05;
 const MAX_DRIFT_PX = 3;
@@ -129,9 +143,17 @@ const MIN_BROKEN = 0.5;
  * over a line's width around each position, by the width's reach.
  * `offset` turns a bin into a distance along the family's normal, px.
  */
-type Profile = { q: Float64Array; samples: number; offset: number; sums: Map<number, Float64Array> };
-/** One polarity's three profiles, and the upright sides' profile of each half of the image, top and bottom. */
-type Profiles = { full: Profile[]; top: Profile; bottom: Profile };
+type Profile = {
+  q: Float64Array;
+  samples: number;
+  offset: number;
+  sums: Map<number, Float64Array>;
+  /** The responses as summed, and each times its row's y: where down the frame a line's response lies. */
+  raw: Float64Array;
+  ys?: Float64Array;
+};
+/** One polarity's three profiles, over the whole image and over its top and bottom halves. */
+type Profiles = { full: Profile[]; top: Profile[]; bottom: Profile[] };
 /** Gray levels on hex rows, and how many of the image's pixels one of its pixels spans. */
 type Frame = { L: Uint8Array; W: number; H: number; d: number; dv: number; step: number; k: number };
 type Fit = { fams: [HexFamily, HexFamily, HexFamily]; polarity: Polarity; failed: string | null; score: number };
@@ -147,7 +169,7 @@ export function detectHex(px: Pixels, options: HexDetectOptions): HexDetection {
   const H = rows ? px.height : px.width;
   if (!holdsHexes(W, H)) return { found: false, reason: "small" };
   const L = grayFrame(px, rows);
-  const full = search(L, W, H, options.step, 1);
+  const full = search(L, W, H, options.step, 1, options.onCandidate);
   if (full.found) return placed(full, 1, options.orient);
   // Lines wider than the line filter's reach show only as their two
   // edges. Half the size, they fit inside it. A quarter of the work again,
@@ -155,7 +177,9 @@ export function detectHex(px: Pixels, options: HexDetectOptions): HexDetection {
   const w = Math.floor(W / 2);
   const h = Math.floor(H / 2);
   if (!holdsHexes(w, h)) return full;
-  const half = search(halved(L, W, w, h), w, h, undefined, 2);
+  // A grid seen whole but turned or out of shape is not given a second, coarser chance.
+  if (full.failed === "lines turned" || full.failed === "hexes out of shape") return full;
+  const half = search(halved(L, W, w, h), w, h, undefined, 2, options.onCandidate);
   return half.found ? placed(half, 2, options.orient) : full;
 }
 
@@ -189,7 +213,7 @@ function placed(found: HexFound, k: number, orient: HexOrient): HexFound {
  * pixels, or why none. Limits in pixels are the image's, so on a frame `k`
  * times smaller they are `k` times tighter.
  */
-function search(L: Uint8Array, W: number, H: number, stepOption: number | undefined, k: number): HexDetection {
+function search(L: Uint8Array, W: number, H: number, stepOption: number | undefined, k: number, onCandidate: HexDetectOptions["onCandidate"]): HexDetection {
   const minC = Math.max(MIN_HEX_CELL_PX, Math.max(W, H) / MAX_CELLS);
   const maxC = Math.min(W, H) / 3;
   const d = lineReach(W, H);
@@ -201,12 +225,13 @@ function search(L: Uint8Array, W: number, H: number, stepOption: number | undefi
   const minP = minC / 2;
   const maxP = maxC / 2;
 
+  const middle = { x: W / 2, y: H / 2 };
   const pool: Fit[] = [];
   let nearest: Fit | null = null;
   let any = false;
   const tryAt = (p: number, pol: Polarity): Fit | null => {
     if (p < minP || p > maxP) return null;
-    const fit = fitAt(all[pol].full, p, d, pol, k);
+    const fit = fitAt(all[pol].full, p, d, pol, k, middle);
     if (!fit) return null;
     any = true;
     if (fit.failed === null && fit.score >= MIN_CONFIDENCE) pool.push(fit);
@@ -224,12 +249,21 @@ function search(L: Uint8Array, W: number, H: number, stepOption: number | undefi
       }
     }
   }
-  pool.sort((a, b) => b.score - a.score);
+  // Every fit that passed is looked at along its lines, since the look
+  // lowers the confidence by how cleanly the sides break at the corners:
+  // the surest before it need not be the surest after.
+  let best: HexFound | null = null;
+  let seenWhole: string | null = null;
   for (const fit of pool) {
     const found = confirm(frame, all[fit.polarity], fit);
-    if (typeof found !== "string") return found;
-    if (!nearest || closeness(fit) > closeness(nearest)) nearest = { ...fit, failed: found };
+    if (found === "lines turned" || found === "hexes out of shape") seenWhole ??= found;
+    onCandidate?.(typeof found === "string" ? { cellPx: 2 * fit.fams[0].period * k, confidence: 0, failed: found } : { cellPx: found.cellPx * k, confidence: found.confidence, failed: null });
+    if (typeof found !== "string") {
+      if (!best || found.confidence > best.confidence) best = found;
+    } else if (!nearest || closeness(fit) > closeness(nearest)) nearest = { ...fit, failed: found };
   }
+  if (best) return best;
+  if (seenWhole) return { found: false, reason: "weak", failed: seenWhole };
   if (!any) return { found: false, reason: "none" };
   const shown = nearest as Fit | null;
   return { found: false, reason: "weak", ...(shown ? { failed: shown.failed ?? "low confidence" } : {}) };
@@ -259,7 +293,10 @@ function grayFrame(px: Pixels, rows: boolean): Uint8Array {
 function profilesOf(f: Frame): Record<Polarity, Profiles> {
   const { L, W, H, d, dv, step } = f;
   const n1 = Math.ceil(0.5 * W + HEX_S * H) + 3;
-  const sums = () => ({ up: [new Float64Array(W), new Float64Array(W)], a: new Float64Array(n1), b: new Float64Array(n1) });
+  const half = () => [new Float64Array(W), new Float64Array(n1), new Float64Array(n1)] as const;
+  const sums = () => [half(), half()] as const;
+  const downs = () => [[new Float64Array(n1), new Float64Array(n1)], [new Float64Array(n1), new Float64Array(n1)]] as const;
+  const ys = { dark: downs(), light: downs() };
   const raw = { dark: sums(), light: sums() };
   const add = (bins: Float64Array, u: number, v: number) => {
     const b = Math.floor(u);
@@ -276,35 +313,42 @@ function profilesOf(f: Frame): Record<Polarity, Profiles> {
       const c = L[row + x]!;
       const a = L[row + x - d]! - c;
       const b = L[row + x + d]! - c;
-      if (a > 0 && b > 0) raw.dark.up[lower]![x]! += Math.min(a, b, CAP);
-      else if (a < 0 && b < 0) raw.light.up[lower]![x]! += Math.min(-a, -b, CAP);
+      if (a > 0 && b > 0) raw.dark[lower][0][x]! += Math.min(a, b, CAP);
+      else if (a < 0 && b < 0) raw.light[lower][0][x]! += Math.min(-a, -b, CAP);
       const e = L[row + x - up]! - c;
       const g = L[row + x + up]! - c;
       let v = 0;
-      let to = raw.dark;
+      let pol: Polarity = "dark";
       if (e > 0 && g > 0) v = Math.min(e, g, CAP);
       else if (e < 0 && g < 0) {
         v = Math.min(-e, -g, CAP);
-        to = raw.light;
+        pol = "light";
       }
       if (v === 0) continue;
       const hx = 0.5 * (x + 0.5);
-      add(to.a, sy - hx + 0.5 * W, v);
-      add(to.b, sy + hx, v);
+      const to = raw[pol][lower];
+      const down = ys[pol][lower];
+      add(to[1], sy - hx + 0.5 * W, v);
+      add(to[2], sy + hx, v);
+      add(down[0], sy - hx + 0.5 * W, v * (y + 0.5));
+      add(down[1], sy + hx, v * (y + 0.5));
     }
   }
   const rowsSampled = Math.ceil((H - 2 * dv) / step);
   // A sloped line's bin takes two pixels a row, from the rows its chord crosses.
   const sloped = (2 * Math.min(H, W / (2 * HEX_S))) / step;
-  const build = (r: ReturnType<typeof sums>): Profiles => {
-    const [top, bottom] = r.up as [Float64Array, Float64Array];
+  const samples = [rowsSampled, sloped, sloped];
+  const offsets = [0.5, -0.5 * W, 0];
+  const build = ([top, bottom]: ReturnType<typeof sums>, [topYs, bottomYs]: ReturnType<typeof downs>): Profiles => {
+    const each = (k: number, bins: Float64Array, share: number) => prepare(bins, d, samples[k]! * share, offsets[k]!);
+    const withYs = (prof: Profile, k: number, down: readonly Float64Array[]) => (k === 0 ? prof : { ...prof, ys: down[k - 1]! });
     return {
-      full: [prepare(top.map((v, i) => v + bottom[i]!), d, rowsSampled, 0.5), prepare(r.a, d, sloped, -0.5 * W), prepare(r.b, d, sloped, 0)],
-      top: prepare(top, d, rowsSampled / 2, 0.5),
-      bottom: prepare(bottom, d, rowsSampled / 2, 0.5),
+      full: [0, 1, 2].map((k) => each(k, top[k]!.map((v, i) => v + bottom[k]![i]!), 1)),
+      top: [0, 1, 2].map((k) => withYs(each(k, top[k]!, 0.5), k, topYs)),
+      bottom: [0, 1, 2].map((k) => withYs(each(k, bottom[k]!, 0.5), k, bottomYs)),
     };
   };
-  return { dark: build(raw.dark), light: build(raw.light) };
+  return { dark: build(raw.dark, ys.dark), light: build(raw.light, ys.light) };
 }
 
 /** A profile with its slow changes taken out and kept above zero (the square finder's `prepare`). */
@@ -320,7 +364,7 @@ function prepare(raw: Float64Array, d: number, samples: number, offset: number):
     const v = raw[i]! - (prefix[hi]! - prefix[lo]!) / (hi - lo);
     q[i] = v > 0 ? v : 0;
   }
-  return { q, samples, offset, sums: new Map() };
+  return { q, samples, offset, sums: new Map(), raw };
 }
 
 /** The profile summed over `w` bins either side of each position: a line's strength wherever it is centered. */
@@ -572,11 +616,12 @@ function fitFamily(prof: Profile, p0: number, reach: number): HexFamily | null {
   };
 }
 
-function familyFailure(f: HexFamily): string | null {
+/** Why one family fails, by the square finder's pass marks. `k` is how many image pixels a frame pixel spans. */
+function familyFailure(f: HexFamily, k: number): string | null {
   if (f.snr < MIN_SNR) return "lines too faint";
   if (f.found / f.expected < MIN_FOUND) return "too many lines missing";
   if (f.between >= HALF) return "lines between the lines";
-  if (f.rms > Math.max(1, 0.03 * f.period)) return "lines not evenly spaced";
+  if (f.rms > Math.max(1 / k, 0.03 * f.period)) return "lines not evenly spaced";
   return null;
 }
 
@@ -600,8 +645,17 @@ function confidenceOf(fams: HexFamily[]): number {
   );
 }
 
+/** Where each family's line nearest a point falls, along the family's normal, by its own period. */
+function linesNear(fams: [HexFamily, HexFamily, HexFamily], at: Point): [number, number, number] {
+  const [up, a, b] = fams;
+  const near = (f: HexFamily, u: number) => f.phase + f.period * Math.round((u - f.phase) / f.period);
+  const x0 = near(up, at.x);
+  const u1 = near(a, HEX_S * at.y - 0.5 * x0);
+  return [x0, u1, near(b, u1 + x0)];
+}
+
 /** The three families fitted at one period, and whether they make one hex lattice. */
-function fitAt(full: Profile[], p: number, d: number, polarity: Polarity, k: number): Fit | null {
+function fitAt(full: Profile[], p: number, d: number, polarity: Polarity, k: number, middle: Point): Fit | null {
   const fams = full.map((prof) => fitFamily(prof, p, d));
   if (fams.some((f) => f === null)) return null;
   const [up, a, b] = fams as [HexFamily, HexFamily, HexFamily];
@@ -610,8 +664,9 @@ function fitAt(full: Profile[], p: number, d: number, polarity: Polarity, k: num
   // The upright sides sit at x, and the sloped ones at y cos 30 -/+ x / 2:
   // the second less the first is x again. Lines that do not agree so do
   // not cross at the corners of one set of hexes.
-  const meet = Math.abs(wrap(b.phase - a.phase - up.phase, mean)) <= Math.max(MEET_PX / k, MEET_SHARE * mean);
-  const failed = !same ? "sides of different sizes" : !meet ? "sides do not meet as hexes" : (familyFailure(up) ?? familyFailure(a) ?? familyFailure(b));
+  const [x0, u1, u2] = linesNear([up, a, b], middle);
+  const meet = Math.abs(wrap(u2 - u1 - x0, mean)) <= Math.max(MEET_PX / k, MEET_SHARE * mean);
+  const failed = !same ? "sides of different sizes" : !meet ? "sides do not meet as hexes" : (familyFailure(up, k) ?? familyFailure(a, k) ?? familyFailure(b, k));
   return { fams: [up, a, b], polarity, failed, score: failed ? 0 : confidenceOf([up, a, b]) };
 }
 
@@ -619,26 +674,72 @@ function closeness(f: Fit): number {
   return Math.min(...f.fams.map((x) => x.snr)) * Math.min(...f.fams.map((x) => x.found / x.expected));
 }
 
-/** How far one family's lines move from one half of the image to the other, across the whole image, px. */
-function driftOf(first: Profile, second: Profile, fam: HexFamily, reach: number): number | null {
+/**
+ * How much one family's lines lean: for each line found in both the top
+ * and the bottom half of the image, how far it moves along the family's
+ * normal from one half to the other, over how far apart its two parts lie
+ * down the image, px per px. The median over lines. Each line is compared
+ * with itself, so an error in the fitted period cannot pass for a lean.
+ * A sloped line's parts lie where its responses do, measured: a line is
+ * drawn a third of its length, and where its sides fall in each half is
+ * the art's, not the geometry's. Upright lines run the frame's height, so
+ * their parts are half of it apart. Null when fewer than MIN_LINES lines
+ * say.
+ */
+function leanOf(first: Profile, second: Profile, fam: HexFamily, reach: number, H: number): number | null {
   const d = reachFor(fam.period, reach);
-  const shift = (half: Profile) => {
+  const r = Math.max(1, Math.min(2 * d, Math.floor(0.15 * fam.period)));
+  const phase = fam.phase - first.offset;
+  const lines = (half: Profile) => {
     const s = summed(half, d);
-    const phase = fam.phase - half.offset;
-    const r = Math.max(1, Math.min(2 * d, Math.floor(0.15 * fam.period)));
     const noise = noiseOf(half, s, phase, fam.period, r + d + 1, d);
-    if (!noise) return null;
-    const offsets: number[] = [];
+    const at = new Map<number, { c: number; y: number | null }>();
+    if (!noise) return at;
     for (let k = Math.ceil((d - phase) / fam.period); phase + k * fam.period < s.length - d; k++) {
-      const x = phase + k * fam.period;
-      const peak = peakNear(s, x, r);
-      if (peak.v - noise.mu >= LINE_SIGMA * noise.sigma) offsets.push(centroid(half.q, peak.at, d) - x);
+      const peak = peakNear(s, phase + k * fam.period, r);
+      if (peak.v - noise.mu < LINE_SIGMA * noise.sigma) continue;
+      const y = half.ys ? downOf(half.raw, half.ys, peak.at, d) : null;
+      at.set(k, { c: centroid(half.q, peak.at, d), y });
     }
-    return offsets.length >= MIN_LINES ? median(offsets) : null;
+    return at;
   };
-  const a = shift(first);
-  const b = shift(second);
-  return a === null || b === null ? null : 2 * Math.abs(b - a);
+  const top = lines(first);
+  const bottom = lines(second);
+  const leans: number[] = [];
+  for (const [k, above] of top) {
+    const below = bottom.get(k);
+    if (!below) continue;
+    const apart = above.y === null || below.y === null ? H / 2 : below.y - above.y;
+    // A line that barely reaches one half cannot say how it leans.
+    if (apart >= 0.1 * H) leans.push((below.c - above.c) / apart);
+  }
+  return leans.length >= MIN_LINES ? median(leans) : null;
+}
+
+/**
+ * Where down the frame a line's responses lie, from the responses and
+ * the responses times their rows' y: their mean over the line's width,
+ * less the art's, which the bins either side of the line give.
+ */
+function downOf(raw: Float64Array, ys: Float64Array, at: number, d: number): number | null {
+  let w = 0;
+  let wy = 0;
+  let bw = 0;
+  let by = 0;
+  let side = 0;
+  for (let i = Math.max(0, at - 3 * d); i <= Math.min(raw.length - 1, at + 3 * d); i++) {
+    if (Math.abs(i - at) <= d) {
+      w += raw[i]!;
+      wy += ys[i]!;
+    } else if (Math.abs(i - at) > d + 1) {
+      bw += raw[i]!;
+      by += ys[i]!;
+      side++;
+    }
+  }
+  const scale = side > 0 ? (2 * d + 1) / side : 0;
+  const lineW = w - bw * scale;
+  return lineW > 0 ? (wy - by * scale) / lineW : null;
 }
 
 /**
@@ -650,18 +751,21 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
   const [up, a, b] = fit.fams;
   const p = (up.period + a.period + b.period) / 3;
   const cell = 2 * p;
-  // A turn moves every family's lines, the upright ones by as much as any.
-  // The sloped ones also lean when the picture was resized a hair out of
-  // proportion, which the size check allows, so only the upright sides
-  // are measured for a turn.
-  const drift = driftOf(prof.top, prof.bottom, up, f.d);
-  if (drift !== null && drift > Math.max(MAX_DRIFT_PX / f.k, MAX_DRIFT_SHARE * cell)) return "lines turned";
+  // How each family's lines lean, px along the normal per px down. A turn
+  // by an angle leans the upright sides by that angle, and the two sloped
+  // families by twice it, opposite ways. Hexes stretched or squeezed,
+  // across or down, leave the upright sides upright and lean both sloped
+  // families the same way, by cos 30 times the stretch: half their sum,
+  // over cos 30, is the stretch, whatever the turn.
+  const upLean = leanOf(prof.top[0]!, prof.bottom[0]!, up, f.d, f.H);
+  if (upLean !== null && Math.abs(upLean) * f.H > Math.max(MAX_DRIFT_PX / f.k, MAX_DRIFT_SHARE * cell)) return "lines turned";
+  const aLean = leanOf(prof.top[1]!, prof.bottom[1]!, a, f.d, f.H);
+  const bLean = leanOf(prof.top[2]!, prof.bottom[2]!, b, f.d, f.H);
+  if (aLean !== null && bLean !== null && Math.abs(aLean + bLean) / (2 * HEX_S) >= MAX_STRETCH) return "hexes out of shape";
   // A point where all three families cross, near the middle: x from the
   // upright sides and from the sloped ones' difference, y cos 30 from the
   // sloped ones' mean.
-  const x0 = up.phase + p * Math.round((f.W / 2 - up.phase) / p);
-  const u1 = a.phase + p * Math.round((HEX_S * (f.H / 2) - 0.5 * x0 - a.phase) / p);
-  const u2 = b.phase + p * Math.round((u1 + x0 - b.phase) / p);
+  const [x0, u1, u2] = linesNear(fit.fams, { x: f.W / 2, y: f.H / 2 });
   const cross = { x: (x0 + u2 - u1) / 2, y: (u1 + u2) / (2 * HEX_S) };
   const corner = HEX_R * cell;
   const looks = [0, 1, 2].map((m) => sidesOf(f, { x: cross.x, y: cross.y + m * corner }, cell, fit.polarity));
@@ -672,6 +776,10 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
   if (broken < MIN_BROKEN) return "lines run on through the hexes";
   const threshold = Math.max(0.5, 0.3 * quantile(best.values, 0.9));
   const coverage = best.values.filter((v) => v > threshold).length / best.values.length;
+  // Sides that barely break at the corners lower the confidence, which
+  // may fall under the cutoff here, after the profiles passed it.
+  const confidence = fit.score * clamp01((broken - MIN_BROKEN) / 0.3);
+  if (confidence < MIN_CONFIDENCE) return "low confidence";
   const center = nearestCenter(best.center, cell, { x: f.W / 2, y: f.H / 2 });
   return {
     found: true,
@@ -679,7 +787,7 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
     cellPx: cell,
     center,
     box: boxOf(center, cell, "rows"),
-    confidence: fit.score * clamp01((broken - MIN_BROKEN) / 0.3),
+    confidence,
     polarity: fit.polarity,
     broken,
     coverage,
@@ -687,13 +795,27 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
   };
 }
 
-/** The hex center nearest `to`, on the lattice of hex rows with a center at `c`. */
+/**
+ * The hex center nearest `to`, on the lattice of hex rows with a center
+ * at `c`. Rows are staggered, so the nearest center may be in the row
+ * above or below the nearest row: all three are compared.
+ */
 function nearestCenter(c: Point, cell: number, to: Point): Point {
   const rowPx = HEX_S * cell;
-  const j = Math.round((to.y - c.y) / rowPx);
-  const shift = mod(j, 2) * (cell / 2);
-  const i = Math.round((to.x - c.x - shift) / cell);
-  return { x: c.x + shift + i * cell, y: c.y + j * rowPx };
+  const row = Math.round((to.y - c.y) / rowPx);
+  let best = c;
+  let far = Infinity;
+  for (let j = row - 1; j <= row + 1; j++) {
+    const shift = mod(j, 2) * (cell / 2);
+    const i = Math.round((to.x - c.x - shift) / cell);
+    const at = { x: c.x + shift + i * cell, y: c.y + j * rowPx };
+    const dist = Math.hypot(at.x - to.x, at.y - to.y);
+    if (dist < far) {
+      far = dist;
+      best = at;
+    }
+  }
+  return best;
 }
 
 /** HX-D12's box around a hex center: its middle is the center, and it holds that hex and its six neighbors. */
@@ -776,4 +898,38 @@ function sidesOf(f: Frame, c: Point, cell: number, pol: Polarity): { mean: numbe
   }
   const mean = values.length ? values.reduce((s, v) => s + v, 0) / values.length : 0;
   return { mean, values, center: c };
+}
+
+export type MapShape = "squares" | "hexRows" | "hexColumns";
+
+export type ShapeFind = {
+  shape: MapShape;
+  confidence: number;
+  /**
+   * Another shape was found too, such as squares drawn over a floor of
+   * hex tiles, or hexes over square tiles. The map holds both, so the find
+   * is only offered: it never applies or switches the scene's shape by
+   * itself, however sure. In the evaluation a find of tiles beat the drawn
+   * grid's at 0.69 against 0.57, so a sure winner over a doubtful other
+   * is no safer.
+   */
+  contested: boolean;
+};
+
+/**
+ * Which shape a map's drawn grid is, from the square finder and the hex
+ * finder run both ways on the same pixels (docs/design-v1-grid-detect.md
+ * section 10.7), so the DM never picks it. The most confident find wins.
+ * Neither finder has the last word: each reads the other's tiles as a
+ * grid. Null when nothing was found.
+ */
+export function pickShape(squares: GridDetection, rows: HexDetection, columns: HexDetection): ShapeFind | null {
+  const finds: { shape: MapShape; confidence: number }[] = [];
+  if (squares.found) finds.push({ shape: "squares", confidence: squares.confidence });
+  if (rows.found) finds.push({ shape: "hexRows", confidence: rows.confidence });
+  if (columns.found) finds.push({ shape: "hexColumns", confidence: columns.confidence });
+  if (finds.length === 0) return null;
+  finds.sort((a, b) => b.confidence - a.confidence);
+  const [best, next] = finds as [(typeof finds)[number], ...(typeof finds)];
+  return { ...best, contested: next !== undefined };
 }

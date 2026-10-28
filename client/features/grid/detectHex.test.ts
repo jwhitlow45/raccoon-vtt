@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { HexOrient } from "#shared/rules/hex.ts";
 import { boxSides, HEX_BOX_DEPTH } from "./calibrate.ts";
-import { detectGrid, type Pixels } from "./detect.ts";
-import { detectHex, type HexDetection } from "./detectHex.ts";
+import { detectGrid, MIN_CONFIDENCE, type GridDetection, type Pixels } from "./detect.ts";
+import { detectHex, pickShape, type HexDetection } from "./detectHex.ts";
 import { drawMap, toRgba, type SynthHexGrid, type SynthMap } from "./synthetic.ts";
 
 // Every map here is drawn by code (synthetic.ts). The wider evaluation,
@@ -63,16 +63,17 @@ function stretched(px: Pixels, k: number): Pixels {
 /**
  * Lines in the three directions of a hex grid's sides, running on through
  * every hex: a triangle grid. `shift` moves the last family's lines along
- * its normal, so the three no longer cross at common points.
+ * its normal, so the three no longer cross at common points. `strength`
+ * is how much a line darkens what is under it.
  */
-function triangles(px: Pixels, cell: number, shift = 0, orient: HexOrient = "rows"): Pixels {
+function triangles(px: Pixels, cell: number, shift = 0, orient: HexOrient = "rows", strength = 0.5): Pixels {
   const p = cell / 2;
   const out = new Uint8Array(px.data);
   for (let y = 0; y < px.height; y++) {
     for (let x = 0; x < px.width; x++) {
       const [a, b] = orient === "rows" ? [x + 0.5, y + 0.5] : [y + 0.5, x + 0.5];
       const near = Math.min(...[a, -0.5 * a + S * b, 0.5 * a + S * b + shift].map((u) => Math.abs(u - p * Math.round(u / p))));
-      const cover = Math.min(1, Math.max(0, 1.25 - near)) * 0.5;
+      const cover = Math.min(1, Math.max(0, 1.25 - near)) * strength;
       out[y * px.width + x] = Math.round(out[y * px.width + x]! * (1 - cover));
     }
   }
@@ -207,6 +208,53 @@ describe("finding a map's drawn hex grid", () => {
     assert.equal(!r.found && r.failed, "sides of different sizes");
   });
 
+  test("hexes 1.1% out of shape answer no grid and 0.9% are found, at every hex size and both orientations", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      for (const [cell, width, height] of [[60, W, H], [100, W, H], [150, 1200, 900]] as const) {
+        // Squeezed and stretched down the map, which is across the hex rows and along the hex columns.
+        for (const k of [1.011, 0.989, 1.009, 0.991]) {
+          const drawn = drawMap(map({ width, height: Math.round(height * k), hexGrid: hexes(orient, cell, { x: width / 2, y: height / 2 }) }));
+          const r = detectHex(stretched(drawn, k), { orient });
+          const label = `${orient}, ${cell} px, ${k}: ${r.found ? `found at ${r.confidence.toFixed(2)}` : r.failed}`;
+          if (Math.abs(k - 1) > 0.01) assert.equal(!r.found && r.failed, "hexes out of shape", label);
+          else assert.ok(r.found, label);
+        }
+      }
+    }
+  });
+
+  test("a find whose sides barely break at the corners is refused under the cutoff, and looked for again at half size", () => {
+    const g = hexes("rows", 60, { x: 0, y: 0 }, { opacity: 0.5 });
+    for (const strength of [0.25, 0.27]) {
+      const seen: { confidence: number; failed: string | null }[] = [];
+      const r = detectHex(triangles(drawMap(map({ hexGrid: g })), 60, 0, "rows", strength), { orient: "rows", onCandidate: (c) => seen.push(c) });
+      assertHexes(r, g);
+      assert.ok(r.found && r.confidence >= MIN_CONFIDENCE, `${strength}: never a find under the cutoff`);
+      for (const c of seen) assert.ok(c.failed !== null || c.confidence >= MIN_CONFIDENCE);
+      if (strength === 0.27) {
+        assert.ok(seen.some((c) => c.failed === "low confidence"), "the first look's finds fall under the cutoff");
+        assert.ok(r.found && r.confidence >= 0.6, "the second look finds the hexes cleanly");
+      }
+    }
+  });
+
+  test("of several finds, the surest after the look along the lines", () => {
+    const seen: { confidence: number; failed: string | null }[] = [];
+    const r = detectHex(drawMap(map({ hexGrid: hexes("rows", 90, { x: 3, y: 5 }, { width: 2 }) })), { orient: "rows", onCandidate: (c) => seen.push(c) });
+    const finds = seen.filter((c) => c.failed === null).map((c) => c.confidence);
+    assert.ok(finds.length >= 2 && new Set(finds).size >= 2, "the pool holds finds of different confidence");
+    assert.ok(r.found && r.confidence === Math.max(...finds));
+  });
+
+  test("the center found is the hex center nearest the map's middle, which may be in the next row", () => {
+    const g = hexes("rows", 60, { x: 20, y: 20 });
+    const r = detectHex(drawMap(map({ hexGrid: g })), { orient: "rows" });
+    assert.ok(r.found);
+    let nearest = Infinity;
+    for (let j = -2; j < 14; j++) for (let i = -2; i < 16; i++) nearest = Math.min(nearest, Math.hypot(20 + (i + (j % 2) / 2) * 60 - W / 2, 20 + j * S * 60 - H / 2));
+    assert.ok(Math.abs(Math.hypot(r.center.x - W / 2, r.center.y - H / 2) - nearest) < 0.5, `${JSON.stringify(r.center)} is not the nearest, ${nearest.toFixed(2)} px from the middle`);
+  });
+
   test("no hexes on art without them", () => {
     const arts: Partial<SynthMap>[] = [
       {},
@@ -226,9 +274,37 @@ describe("finding a map's drawn hex grid", () => {
     assert.equal(!r.found && r.failed, "lines turned");
   });
 
+  test("a thick grid turned a third of a degree is refused on the second look too, by the same 3 px across the map", () => {
+    const r = detectHex(drawMap(map({ hexGrid: hexes("rows", 70, { x: 9, y: 4 }, { width: 8, opacity: 0.6, rotate: 0.3 }) })), { orient: "rows" });
+    assertNone(r);
+  });
+
   test("hexes turned a hair, their lines within 3 px across the map, are found", () => {
     const g = hexes("rows", 60, { x: 380, y: 300 }, { rotate: 0.2 });
     assertHexes(detectHex(drawMap(map({ hexGrid: g })), { orient: "rows" }), g);
+  });
+
+  test("squares drawn over a floor of hex tiles are squares: both finders see a grid, the surer wins and is only offered", () => {
+    const px = drawMap(map({ art: [...ART, { kind: "hex", size: 30, depth: 60, width: 1.5 }], grid: { cellPx: 70, origin: { x: 10, y: 20 }, opacity: 0.6 } }));
+    const squares = detectGrid(px);
+    const rows = detectHex(px, { orient: "rows" });
+    const columns = detectHex(px, { orient: "columns" });
+    assert.ok(squares.found && Math.abs(squares.cellPx - 70) < 0.5, "the drawn squares");
+    assert.ok(rows.found && Math.abs(rows.cellPx - 30 * Math.sqrt(3)) < 0.5, "the hex tiles read as hexes");
+    assert.ok(squares.found && rows.found && squares.confidence > rows.confidence);
+    assert.deepEqual(pickShape(squares, rows, columns), { shape: "squares", confidence: squares.confidence, contested: true });
+  });
+
+  test("the shape picked: the surest find, contested whenever another shape was found too", () => {
+    const none: GridDetection = { found: false, reason: "none" };
+    const noHex: HexDetection = { found: false, reason: "none" };
+    const sq = (confidence: number) => ({ ...(detectGrid(drawMap(map({ grid: { cellPx: 50, origin: { x: 0, y: 0 } } }))) as Extract<GridDetection, { found: true }>), confidence });
+    const hx = (confidence: number) => ({ ...(detectHex(drawMap(map({ hexGrid: hexes("rows", 50, { x: 0, y: 0 }) })), { orient: "rows" }) as Extract<HexDetection, { found: true }>), confidence });
+    assert.equal(pickShape(none, noHex, noHex), null);
+    assert.deepEqual(pickShape(none, hx(0.9), noHex), { shape: "hexRows", confidence: 0.9, contested: false });
+    assert.deepEqual(pickShape(sq(0.7), noHex, noHex), { shape: "squares", confidence: 0.7, contested: false });
+    assert.deepEqual(pickShape(sq(0.7), noHex, hx(0.8)), { shape: "hexColumns", confidence: 0.8, contested: true });
+    assert.deepEqual(pickShape(sq(0.9), hx(0.4), noHex), { shape: "squares", confidence: 0.9, contested: true });
   });
 
   test("an image too small for hexes", () => {
