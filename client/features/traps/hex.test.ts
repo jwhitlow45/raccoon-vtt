@@ -56,6 +56,23 @@ describe("drawing a zone of hexes", () => {
     }
   });
 
+  test("on a scene too narrow for a preset's size, a tap gives up the keys off the scene instead", () => {
+    // A 2 by 4 scene on hex rows: row 1 holds one hex, so a Hidden Pit's 2 by 2 cannot fit by moving back. Turned on hex columns.
+    const cases: [HexGrid, { w: number; h: number }][] = [
+      [ROWS, { w: 2, h: 4 }],
+      [COLUMNS, { w: 4, h: 2 }],
+    ];
+    for (const [g, bounds] of cases) {
+      for (const at of [{ x: 0.5, y: 0.5 }, { x: 1.5, y: 1.5 }, { x: 0.2, y: 3.8 }, { x: 3.8, y: 0.2 }]) {
+        const rect = tapRect(g, at, "hidden-pit", "1-4", bounds);
+        const keys: Hex[] = [];
+        for (let row = rect.y; row < rect.y + rect.h; row++) for (let col = rect.x; col < rect.x + rect.w; col++) keys.push({ col, row });
+        assert.ok(keys.length > 0 && keys.every((h) => hexInScene(g, bounds, h)), `${g.orient} at ${JSON.stringify(at)}: ${JSON.stringify(rect)}`);
+      }
+    }
+    assert.deepEqual(tapRect(ROWS, { x: 0.5, y: 0.5 }, "hidden-pit", "1-4", { w: 2, h: 4 }), { x: 0, y: 0, w: 1, h: 2 });
+  });
+
   test("a tap places one hex, or a preset's own size, on the hex tapped", () => {
     const at = { x: 5.4, y: 5.4 };
     const h = hexAt(ROWS, at);

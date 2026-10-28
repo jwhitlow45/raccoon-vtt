@@ -94,23 +94,31 @@ export function tapRect(g: Grid, at: Point, start: string, band: LevelBand, boun
  * A rectangle of hex keys kept to the scene's hexes, as the server asks
  * (reducer/traps.ts trapProblem). A short line's last key lies inside the
  * span of keys but off the scene (hex.ts hexInScene): the last column's
- * on hex rows, the last row's on hex columns. While the rectangle holds
- * one, a drag's gives up that column or row, and a tap's, keeping its
- * size, moves back one, as a single line's does too.
+ * on hex rows, the last row's on hex columns. A tap's keeps its size by
+ * moving back where that fits it. Otherwise the rectangle gives up its
+ * last column on hex rows, or its last row on hex columns, while it holds
+ * such a key, and a single key moves back, or to the line before where it cannot.
  */
 function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, shrink: boolean): CellRect {
   const off = (q: CellRect) => {
     for (let row = q.y; row < q.y + q.h; row++) for (let col = q.x; col < q.x + q.w; col++) if (!hexInScene(g, bounds, { col, row })) return true;
     return false;
   };
+  const rows = g.orient === "rows";
+  const along = (q: CellRect) => (rows ? q.x : q.y);
+  const back = (q: CellRect): CellRect => (rows ? { ...q, x: q.x - 1 } : { ...q, y: q.y - 1 });
+  if (!shrink) {
+    for (let q = r; ; q = back(q)) {
+      if (!off(q)) return q;
+      if (along(q) === 0) break;
+    }
+  }
   let out = r;
   while (off(out)) {
-    if (g.orient === "rows") {
-      if (shrink && out.w > 1) out = { ...out, w: out.w - 1 };
-      else if (out.x > 0) out = { ...out, x: out.x - 1 };
-      else break;
-    } else if (shrink && out.h > 1) out = { ...out, h: out.h - 1 };
-    else if (out.y > 0) out = { ...out, y: out.y - 1 };
+    if (rows ? out.w > 1 : out.h > 1) out = rows ? { ...out, w: out.w - 1 } : { ...out, h: out.h - 1 };
+    else if (along(out) > 0) out = back(out);
+    // A line with no hex at all, on a scene under two hexes across, gives way to the line before it.
+    else if (rows ? out.y > 0 : out.x > 0) out = rows ? { ...out, y: out.y - 1 } : { ...out, x: out.x - 1 };
     else break;
   }
   return out;
