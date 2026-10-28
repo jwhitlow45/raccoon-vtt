@@ -124,7 +124,8 @@ export type IconName =
   | "viewTopDown"
   | "viewIsometric"
   | "turnLeft"
-  | "turnRight";
+  | "turnRight"
+  | "viewAs";
 
 /**
  * The meanings drawn with Lucide's path data, by the Lucide icon each
@@ -137,6 +138,7 @@ export const LUCIDE: Partial<Record<IconName, LucideIcon>> = {
   again: "repeat",
   hidden: "eye-off",
   shown: "eye",
+  viewAs: "scan-eye",
   speed: "footprints",
   group: "users",
   delete: "trash-2",
@@ -432,7 +434,10 @@ const SHAPES: Record<IconName, ReactNode> = {
   // Lucide focus: look at a thing on the map, such as an area's Show. Never Shown, which says players see it.
   focus: (
     <g {...STROKE}>
-      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
       <circle cx="12" cy="12" r="3" />
     </g>
   ),
@@ -628,6 +633,14 @@ const SHAPES: Record<IconName, ReactNode> = {
     <g {...STROKE}>
       <path d="M5 10a7 7 0 0 1 14 0M15.5 9.5 19 11l1.5-3.5" />
       <path d="M12 14l7 3.5-7 3.5-7-3.5z" />
+    </g>
+  ),
+  // Lucide scan-eye: the DM looks through a player's eyes (View as a player). Never the plain eye, which means players see a thing.
+  viewAs: (
+    <g {...STROKE}>
+      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
+      <circle cx="12" cy="12" r="1" />
+      <path d="M18.944 12.33a1 1 0 0 0 0-.66 7.5 7.5 0 0 0-13.888 0 1 1 0 0 0 0 .66 7.5 7.5 0 0 0 13.888 0" />
     </g>
   ),
 };
