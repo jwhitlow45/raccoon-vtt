@@ -70,7 +70,9 @@ The screen has three main parts: the **map** in the middle, the **toolbar** unde
 
 Above the tabs sits the party bar, which shows your players' characters with their HP. Press **Party** to fold it down to a single line: the characters' names and HP in a strip that scrolls sideways when they don't all fit, followed by **Ask** for [asking the party for a roll](#asking-for-rolls).
 
-**On a phone**, press **Panels** in the toolbar to see the list of panels. Each one opens as a sheet that slides up from the bottom, and you swipe the sheet down to close it. On a tablet held upright, the sheet keeps to the width of a dialog and sits in the middle of the screen. To save room, your setup tools (Add token, Pin, Trap, Map builder and Line up grid) are tucked behind **Setup** in the toolbar.
+**On a phone**, press **Panels** in the toolbar to see the list of panels. Each one opens as a sheet that slides up from the bottom. The short handle at the top of the sheet shows that it moves with your finger, and it lights up in your color while you hold it. Swipe the sheet down to close it, from its header at any time or from anywhere on it once it is scrolled to the top. Swipe it up from its header to give it the whole screen, and a short swipe down brings it back to its usual height. A sheet that holds something you have typed and not yet sent or saved, such as a chat message, springs back instead of closing, so a stray swipe never loses your words. You can choose how the handle looks, from a raccoon's ringed tail to a plain pill, under **Sheet handle** in **This device**. On a tablet held upright, the sheet keeps to the width of a dialog and sits in the middle of the screen. To save room, your setup tools (Add token, Pin, Trap, Map builder and Line up grid) are tucked behind **Setup** in the toolbar.
+
+When you type on a phone, whatever you are typing in rises to sit just above the on-screen keyboard, with the buttons that go with it, so the HP entry keeps its **Apply** in view and a sheet's field never hides behind the keys. Everything goes back where it was once the keyboard closes.
 
 ![The DM's panel list on a phone, grouped under In play and Prepare, each panel led by its icon.](dm-guide/screen-phone.webp)
 
@@ -81,9 +83,9 @@ Above the tabs sits the party bar, which shows your players' characters with the
 
 When you pick a tool, its options appear in a row just above the toolbar, and anything that doesn't fit in the row waits behind **⋯** (More options). If the row is in your way, tap the tool you are using again to hide its options. The tool stays in use, and another tap brings the options back.
 
-**The top bar** holds **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`), the two curved arrows (with Cmd in place of Ctrl on a Mac), which take back your own changes one at a time and put them back again. Beside them, **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
+**The top bar** holds **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`), the two curved arrows (with Cmd in place of Ctrl on a Mac), which take back your own changes one at a time and put them back again. Beside them, **View** chooses whether your device shows the map from straight above or tilted, in the [isometric view](#the-isometric-view), and **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
 
-**The Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**.
+**The Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**. When the top bar is too crowded for the View button, it waits here as a **View** row instead.
 
 These are the panels a DM uses most for maps and fights:
 
@@ -123,7 +125,8 @@ The most important rule at any table is that everyone has fun, you included. The
 None of the parts below is needed to run a good session. Each one is there for the day you want it, if that day comes.
 
 - **The map builder.** A map image is all you need. Build a map when you want walls, doors and heights that the app knows about, so they can block movement and sight.
-- **Party vision and light.** Fog that you reveal by hand works perfectly well on its own. Party vision goes a step further: the app works out everything the party's creatures can see, by their senses and the light, and shows that shared view to every player. It needs walls to block that sight, so it pairs with a built or imported map.
+- **Party vision and light.** Fog that you reveal by hand works perfectly well on its own. Party vision goes a step further: the app works out everything the party's creatures can see, by their senses and the light, and shows that shared view to every player. It needs walls to block that sight, so it pairs with a built or imported map. Sight for each player goes one step further again, for a table that enjoys keeping secrets from one another, and most tables never need it.
+- **The isometric view and hex grids.** The flat map from above is all you need, on squares. Isometric is there for the maps where height matters, and hexes for the maps drawn on them.
 - **Encounters.** Placing monsters straight from the Monsters panel works fine. Encounters let you prepare fights ahead of time and check them against the XP budget.
 - **Roll requests, the group save and roll options.** Your players can roll their own dice and tell you the total.
 - **Uses and class resources.** You can count a dragon's Legendary Actions or a barbarian's Rage on paper, as you always have. The cards that come up at the start of a turn only ask: nothing happens unless someone answers them.
@@ -156,11 +159,17 @@ Under **New scene**, pick the kind of scene you want:
 - **Builder**: an empty 40 × 30 scene that opens the map builder straight away.
 - **From a Universal VTT file**: see [Map phases, imports and exports](#map-phases-imports-and-exports).
 
+A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, for example, and the scene comes out 30 by 20 squares. Without a size in the name, the app guesses about 30 squares along the image's long side and opens **Line up grid** so you can correct the guess.
+
 Every kind but the Universal VTT file has a **Grid** row: **Squares**, **Hex rows** or **Hex columns**. A Battle mat or a Map image starts on your room's choice (see [Hex grids](#hex-grids)), and the row changes it for the one scene you are making. A Builder scene and a starter map start on squares whatever the room says, because the builder's tools and the starter art are drawn on squares. You can still pick hexes for them in the row. A Builder scene then shows what the builder can't do on hexes yet, and a starter map drops its measured square grid and opens **Line up grid**. A Universal VTT file always makes a square scene, and its summary says so when your room starts new scenes on hexes.
 
-Under the name, **Players see** asks what the players get of the new scene: **Explore**, **Reveal by hand** or **Everything** (see [Light and party vision](#light-and-party-vision) for what each one means). It starts on your room's choice for new scenes, so most of the time you leave it as it is. The fourth option, **Like** followed by the name of the scene on your screen, copies that scene's setup instead: its fog, its party vision with the light and Sight, and whether walls stop players' moves. The line under it says what it will copy, such as "Explore, Dark, Per player, players' moves blocked". The new scene still gets the automatic walls that suit its kind, so a map image keeps walls around floor only, whatever the scene you copy uses. Like copies the scene as it is when the new one is made, after the upload, and if that scene is deleted while your map uploads, the new scene starts on your room's choice instead, and a message says so.
+### What players see on new scenes
 
-A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, for example, and the scene comes out 30 by 20 squares. Without a size in the name, the app guesses about 30 squares along the image's long side and opens **Line up grid** so you can correct the guess.
+Every new scene has to start somewhere: under fog for the party to explore, under fog for you to reveal by hand, or in plain view. Your room makes that choice for you, so you don't have to set up each scene. In the Menu, open **Room settings** and find **New scenes** at the end. **Players see on new scenes** is **Explore**, **Reveal by hand** or **Everything** (see [Light and party vision](#light-and-party-vision) for what each one means), and a new room starts on Explore. A room made before this setting existed shows **As before** until you pick one, which keeps the old starts: maps and builder scenes under fog, battle mats without. Once you pick, As before goes away.
+
+Two exceptions keep things sensible. A map image or a starter map starts on Reveal by hand even when the room says Explore, because a fresh image has no walls yet, and party vision would show the players the whole picture at once. The form tells you why. And the battle mat a new room comes with starts on Everything, so players who join see the mat rather than darkness.
+
+For one scene, the new scene form has its own **Players see** row under the name. It starts on the room's choice, so most of the time you leave it alone, but you can pick any of the three. The fourth option, **Like** followed by the name of the scene on your screen, copies that scene's setup instead: its fog, its party vision with the light and Sight, and whether walls stop players' moves. The line under it says what it will copy, such as "Explore, Dark, Per player, players' moves blocked". So when the party goes down a stair to the next level of the same dark dungeon, make the new level with the first one on your screen, pick **Like**, and it starts exactly as dark. The new scene still gets the automatic walls that suit its kind, so a map image keeps walls around floor only, whatever the scene you copy uses. Like copies the scene as it is when the new one is made, after the upload. If that scene is deleted while your map uploads, the new scene starts on your room's choice instead, and a message says so.
 
 ![A new Map image scene named Cave, with its file picked and Players see on Reveal by hand, before Upload and create.](dm-guide/scenes-new-map.webp)
 
@@ -376,9 +385,9 @@ Heights are easier to read when you can see them. The isometric view tilts the m
 
 **Suggesting a view for a scene.** In the Scenes panel, in the scene's **Scene** settings, **Suggested view** sets the view that devices following the scene show. A cliff-side ambush might suggest Isometric, while a sprawling town map stays Top-down. Every device starts out following the scene, so a player who has never chosen sees what you suggest. A device that is in the middle of a drag, a pinch or a held ruler switches once the finger lifts, so the map never moves under anyone's hand.
 
-**Tools that work top-down.** Four of your tools need the flat map, so while you use them your device shows Top-down and says why, and Isometric comes back as soon as you pick another tool: the **Map builder** (`B`), **Fog** (`F`), **Line up grid** (`G`) and **Traps** (`X`). Everything else, from Select and the Ruler to Areas and Ping, works in either view.
+**Tools that work top-down.** Four of your tools need the flat map, so while you use them your device shows Top-down and says why, and Isometric comes back as soon as you pick another tool: the **Map builder** (`B`), **Fog** (`F`), **Line up grid** (`G`) and **Trap** (`X`). Everything else, from Select and the Ruler to Areas and Ping, works in either view.
 
-**Keys.** On a keyboard each key sits beside what it does:
+**Keys.** With a keyboard, the view has keys of its own:
 
 - `I` switches between Top-down and Isometric.
 - `Q` turns the map left, and `E` turns it right. In Top-down they say that turning needs the isometric view.
@@ -412,41 +421,35 @@ Whenever one of these makes a walk cost more, the label on the drag says what it
 
 Each scene decides what your players see of it with one choice, **Players see**, at the top of the scene's **What players see** settings:
 
-- **Explore**: players see what their characters see. Ground they have not seen stays dark, walls and all, and what they explored stays as they last saw it (see [What players' maps hold](#what-players-maps-hold)). This is **party vision**: the app works out what the party can actually see, from each creature's senses, the walls and the light.
+- **Explore**: players see what their characters see. Ground they have not seen stays dark, walls and all, and what they explored stays on their map as they last saw it (see [What players' maps hold](#what-players-maps-hold)). This is **party vision**: the app works out what the party can actually see, from each creature's senses, the walls and the light.
 - **Reveal by hand**: players see what you reveal with the fog tool, and nothing else. See [Fog](#fog).
 - **Everything**: players see the whole scene, with no fog at all.
 
-Normally the party shares its sight: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. If you would rather each player see only through their own character's eyes, you can choose that too (see [Sight for each player](#sight-for-each-player)). Under Players see, the same settings hold:
+A new scene starts on your room's choice, or on the one you pick as you make it (see [What players see on new scenes](#what-players-see-on-new-scenes)).
 
-- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on, so on Explore or Custom.
-- **Sight**: **Whole party**, the default, where the party shares one view and one map, or **Per player**, where each player sees and remembers for themselves.
+Under Players see sit the settings that fine-tune it:
+
+- **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on, so on Explore or Custom. On a map with phases, **Light with each map phase** under it lets each phase set the light, so switching to Night can make the scene dark (see [Map phases, imports and exports](#map-phases-imports-and-exports)).
+- **Sight**: **Whole party**, the default, or **Per player**. Normally the party shares its sight and its map: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. Per player lets each player see only through their own creatures' eyes and those of any creature that shares sight with the party, and remember only where those creatures have been (see [Sight for each player](#sight-for-each-player)).
 - **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 - **Fog and party vision**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
 
-**Leaving Explore.** On Explore, players keep a map of what they explored. If you switch a scene they have explored to Reveal by hand or Everything, or turn off fog or party vision in the fold, the app asks first: "Players will see the build as it is now on everything they explored. Undo does not bring back what they remembered." Press **Change** to go ahead, or **Cancel** (or Escape) to leave things as they are. Switching **Sight** from **Per player** back to **Whole party** asks the same way when players have maps of their own there, since each player's map then joins the party's for good.
+![What players see for the arena: Players see on Explore, Light set to Dark, Sight on Whole party, the lantern bearer lending the party its sight, the Fog and party vision fold closed, and Use these settings on other scenes.](dm-guide/vision-settings.webp)
 
-**A map image with no walls.** Party vision looks through walls the map doesn't have, so on a plain map image Explore would show players the whole picture the moment a character looks around. When you choose Explore on a map image with nothing yet that blocks sight, the settings warn you: "This map has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand." When you move the players to a scene with party vision, the app reminds you of the same thing if that scene is a map image, since it can't check another scene's walls from where you are.
-
-**A first map image.** When a scene on Everything with nothing built on it yet gets its first map image, it moves to Reveal by hand, so players see only what you reveal of the new picture. A scene you have already built on keeps its setting. On the scene the players are on, you choose as you pick the image: untick **Start it under fog, so they see only what you reveal** to keep it on Everything.
-
-Darkvision, Blindsight and Truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
+**Senses.** Darkvision, Blindsight and Truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
 
 **Lights** come from two places, the builder and tokens:
 
 - In the builder's **Lights** mode, pick a light under **Light to place** and tap the map. Each light gives Bright Light out to one distance and Dim Light beyond it: a Candle is bright for 5 ft and dim to 10 ft, a Torch 20 ft and dim to 40, a Lamp 15 and 45, a Hooded Lantern 30 and 60, the Light cantrip 20 and 40, and the Daylight spell 60 and 120. Tap a placed light to change its reach, turn it **Lit** or **Out**, choose whether **Walls cast shadows**, give it a name, or delete it. Drag it to move it. Players see the light it gives, but never the light itself.
 - A token can carry a light, which you set with **Light** in its action bar or **Sight** in its panel: a Candle, Torch, Lamp, Hooded Lantern, Light, or a Custom one. A scene lights up to 20 token lights.
 
-To check what your players see, use **View as a player** or **Party sight** in the [DM panel](#dm-panel). Your own map always stays fully lit, so you never lose track of anything in the dark.
+**Checking what players see.** Your own map always stays fully lit, so you never lose track of anything in the dark. To see the scene as one player sees it, use [View as a player](#view-as-a-player). On a scene with party vision, **Party sight** in the DM panel shades what the party can't see on your own map instead, so you can keep working while you check.
 
-![What players see for the arena: Players see on Explore, Light set to Dark, Sight on Whole party, the lantern bearer lending the party its sight, the Fog and party vision fold closed, and Use these settings on other scenes.](dm-guide/vision-settings.webp)
+The app speaks up in three cases where a change to what players see could surprise you:
 
-### What players see on new scenes
-
-Your room has a choice of its own for new scenes, so you don't have to set up each one. In the Menu, open **Room settings** and find **New scenes** at the end: **Players see on new scenes** is **Explore**, **Reveal by hand** or **Everything**, and every new scene starts on it. A new room starts on Explore. A room from before this setting shows **As before** until you pick one, which keeps the old starts: maps and builder scenes under fog, battle mats without. Once you pick, As before goes away.
-
-Two exceptions keep things sensible. A map image or a starter map starts on Reveal by hand even when the room says Explore, because a fresh image has no walls yet, and the form says so. And the battle mat a new room comes with starts on Everything, so players who join see the mat rather than darkness.
-
-You can still pick anything for one scene in the new scene form, including **Like** the scene on your screen.
+- **Leaving Explore.** On Explore, players keep a map of what they explored. If you switch a scene they have explored to Reveal by hand or Everything, or turn off fog or party vision in the fold, the app asks first: "Players will see the build as it is now on everything they explored. Undo does not bring back what they remembered." Press **Change** to go ahead, or **Cancel** (or Escape) to leave things as they are. Switching **Sight** from **Per player** back to **Whole party** asks the same way when players have maps of their own there, since each player's map then joins the party's for good.
+- **A map image with no walls.** Party vision looks through walls the map doesn't have, so on a plain map image Explore would show players the whole picture the moment a character looks around. When you choose Explore on a map image with nothing yet that blocks sight, the settings warn you: "This map has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand." When you move the players to a scene with party vision, the app reminds you of the same thing if that scene is a map image, since it can't check another scene's walls from where you are.
+- **A first map image.** When a scene on Everything with nothing built on it yet gets its first map image, it moves to Reveal by hand, so players see only what you reveal of the new picture. A scene you have already built on keeps its setting. On the scene the players are on, you choose as you pick the image: untick **Start it under fog, so they see only what you reveal** to keep it on Everything.
 
 ### Using one scene's settings on others
 
@@ -482,7 +485,7 @@ Under the list, **Who lends sight** shows each creature with its senses and ligh
 
 **Changing your mind.** A new Sight setting takes effect at once, even in the middle of a fight. Switching to **Whole party** pools every player's map into the party's shared map, and it stays pooled: if you switch back to **Per player** later, each player starts from that pooled map. Switching the map to another phase, such as from Day to Night, or changing the light leaves Sight as it is.
 
-**Checking what each player sees.** Use **View as a player** in the [DM panel](#dm-panel), or tap a player's token and press **View as Ana** in its action bar or at the top of its Token panel. It shows you exactly what one player sees, their own sight and map included. It never shows whispers between players, so you can look in without reading notes they passed each other. **Party sight** still shades what no player can see on your own map.
+**Checking what each player sees.** [View as a player](#view-as-a-player) shows you the scene as one player sees it, their own sight and map included, so it's the quickest way to check that a secret stays with the player who found it. The fastest way in is the player's own token: tap it and press **View as Ana**. **Party sight** still shades what no player can see on your own map.
 
 **The table display** shows what a player without a place sees: only what the creatures that share sight see, on the map the whole party shares. If you want the TV to show more of a per-player scene, mark a creature that's with the party, such as a torch-bearing hireling, to share its sight.
 
@@ -493,11 +496,11 @@ Under the list, **Who lends sight** shows each creature with its senses and ligh
 - **The room counts its changes.** When one player's creatures see new ground, the room records it as a change of its own. A player who watches the room's change numbers in the browser's developer tools could tell that someone's map just grew. It never says whose map, or where, and your own work out of the players' sight already gives the same small signal.
 - **The rules everyone shares use only what everyone can see.** A creature that only some players can see counts as unseen for the rules that must give every player the same answer. A horse you control that a character rides shares no turn with its rider unless every player can see it, a trap your monster sets off goes off without the players noticing, and the corners of its path stay hidden. When that matters, make the creature always visible, or mark it to share its sight. What players see points it out for a mount.
 - **Paths follow each player's own map.** When a player drags their own token, the path finds its way over the ground that player remembers, and past creatures only they can see. Other players see the corners of that path only where they know the ground too. A trap it sets off goes off for everyone, as it does whenever a party member walks into one.
-- **Places go by who came first.** Who holds the 6 places depends on the order in which players first owned a creature that could see on the scene, and then on your ticks, never on what anyone has explored. A player who doesn't get a place learns only that the places are taken.
+- **Places go by who came first.** As **Who sees for themselves** describes, the 6 places go by the order in which players first owned a creature that could see there, and then by your ticks, never by what anyone has explored. A player who doesn't get a place learns only that the places are taken.
 
 ## Fog
 
-A map image or builder scene starts fully covered in fog. You see the fog as a translucent layer over the map, but players see nothing under it. Tokens, labels and stamps that stand fully under the fog never even reach their devices, and neither does anything you built there: floors, walls, doors, heights or stairs. The party's own characters are the exception: players always see those.
+A scene with fog on, which means one on Explore or Reveal by hand, starts fully covered. You see the fog as a translucent layer over the map, but players see nothing under it. Tokens, labels and stamps that stand fully under the fog never even reach their devices, and neither does anything you built there: floors, walls, doors, heights or stairs. The party's own characters are the exception: players always see those.
 
 ![The Fog tool with a draft: dashed outlines of the squares about to be revealed, and Reveal to players in the options row.](dm-guide/fog.webp)
 
@@ -528,7 +531,9 @@ On a scene with fog on, a player's device holds only the part of the map the par
 
 **Walking into the dark.** Players can still move their tokens onto ground they haven't seen, as they always could. If something stops a move there, the token stops at the last spot it could reach, and the note says only "Something blocks the way.", without saying what, since their map can't know. The note names what stopped the move only when the player can see it right now. A wall or a closed door right beside a square they can see is named, even with unexplored ground behind it, so a door in Bree's torchlight still says "A door is in the way. Tap it to open." A ledge is named only when they can see the ground on both sides of it, since its height says something about the far side. A wall in the dark, or a wall the party only remembers, which may have changed, gets the plain words. **Teleport here** still lands the token where it was dropped, and when nothing was named your log reads "Bree teleported past something they could not see." A wall the party remembers keeps stopping their moves even after you take it away, a one-square step into it as much as a longer drag, until they see that spot again. **Teleport here**, which tests no wall, gets past it too.
 
-**How much a map remembers.** Each player's map can keep only so much that changed out of their sight. When a change you make would run past that, the app asks first: "Players' remembered map here will be forgotten. Go ahead?" **Go ahead** makes the change, and the ground it runs past goes back under the fog for the players, as if they had never seen it. Undo doesn't bring that back. **Cancel** leaves the change unmade. A big rectangle room or shape is asked about as a whole before any of it is built, so **Cancel** leaves none of it behind. While the app checks, the builder's line says *Checking players' remembered map…*, and the change shows once the answer is in. The builder takes no other change until then: **Undo** drops the change being checked, and **Redo** does nothing, nor do **Forget and undo** and **Forget and redo**, whose message stays until the check is done. A brush stroke is built as you paint, so the question comes at the point where it would run past, and **Cancel** stops it there. If the connection drops while your **Go ahead** is on its way, the app tells you to check the map, since it can't know whether the change was made. Undo and Redo ask the same in their own message, with **Forget and undo** or **Forget and redo**.
+**How much a map remembers.** A player's map keeps a copy only of what has changed out of their sight since they saw it, but it can hold only so much. When a change you make would run past that, the app asks first: "Players' remembered map here will be forgotten. Go ahead?" **Go ahead** makes the change, and the ground it runs past goes back under the fog for the players, as if they had never seen it. Undo doesn't bring that back. **Cancel** leaves the change unmade. Undo and Redo ask the same in their own message, with **Forget and undo** or **Forget and redo**.
+
+In the map builder, a rectangle room or a shape is asked about as a whole before any of it is built, so **Cancel** leaves none of it behind. A brush stroke is built as you paint, so the question comes at the point where it would run past, and **Cancel** stops the stroke there. While the app checks, the builder's line says *Checking players' remembered map…*, and the change shows once the answer is in. Until then the builder takes no other change: **Undo** drops the change being checked, while **Redo**, **Forget and undo** and **Forget and redo** do nothing, and their message stays until the check is done. If the connection drops while your **Go ahead** is on its way, the app tells you to check the map, since it can't know whether the change was made.
 
 ![The question before a change that would run past what the players' map can keep: "Players' remembered map here will be forgotten. Go ahead?", with Cancel and Go ahead.](dm-guide/forget-question.webp)
 
@@ -546,18 +551,18 @@ On a scene with fog on, a player's device holds only the part of the map the par
 
 A phase can also set the scene's light. Under **What players see**, **Light with each map phase** picks Bright, Dim, Dark or **Leave the light** for each phase, so switching to Night can make the scene dark. It won't turn party vision on by itself, though, and light matters only while party vision is on.
 
-**Universal VTT files.** If you make maps in Dungeondraft, Dungeon Alchemist or DungeonFog, you can bring in a whole map, walls, doors and lights included. Choose **From a Universal VTT file** under New scene and pick a `.dd2vtt`, `.uvtt` or `.df2vtt` file. The app reads the file and shows you what it found ("412 walls (380 on the grid, 32 free), 14 doors, 3 windows, 9 lights") before it makes anything. Then choose:
+**Universal VTT files.** If you make maps in Dungeondraft, Dungeon Alchemist, Arkenforge or DungeonFog, you can bring in a whole map, walls, doors and lights included. Choose **From a Universal VTT file** under New scene and pick a `.dd2vtt`, `.uvtt` or `.df2vtt` file. The app reads the file and shows you what it found ("412 walls (380 on the grid, 32 free), 14 doors, 3 windows, 9 lights") before it makes anything. Then choose:
 
 - **Objects block sight and movement** (offered when the file has objects).
 - **Portals that don't block light import as** **Windows** or **Open doors**.
 - **Players see**: **Explore**, **Reveal by hand**, **Everything** or **Like** the scene on your screen, starting on your room's choice for new scenes. An imported map brings its walls, so Explore works on it from the start.
 - **Light, for party vision**: the app suggests Bright, Dim or Dark from the file and says why. Like sets it to the copied scene's light, and you can still change it.
 
-Press **Create scene** to make it, and keep the page open until the walls have been added. One undo takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls. A phone can only take files up to 40 MB, so import large maps on a computer.
+Press **Create scene** to make it, and keep the page open until the walls have been added. One undo takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls, and it is always on squares (see [Hex grids](#hex-grids)). Arkenforge draws each door as an outline, and the app brings it in as the one door on the wall. A light placed far outside the map is left out, and the summary says so, so the rest of the map still comes in. A phone can only take files up to 40 MB, so import large maps on a computer.
 
 ![Export as image in the scene's settings: Pixels per square, Player view or DM view, and Grid.](dm-guide/export.webp)
 
-**Exporting a map.** **Export as image**, in the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Pick the **Pixels per square** (50, 70 or 100), the **Player view** or the **DM view**, and whether to include the **Grid**. The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. On a scene with fog on, it draws only what the players' maps hold (see [What players' maps hold](#what-players-maps-hold)), and needs a connection to the server. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later.
+**Exporting a map.** **Export as image**, in the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Pick the **Pixels per square** (50, 70 or 100, and **Pixels per hex** on a hex scene), the **Player view** or the **DM view**, and whether to include the **Grid** (**Hex lines** on a hex scene). The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. On a scene with fog on, it draws only what the players' maps hold (see [What players' maps hold](#what-players-maps-hold)), and needs a connection to the server. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later.
 
 # Running fights
 
@@ -629,7 +634,7 @@ The fight's alert cards and the app's toasts stay above the strip and leave a ba
 The whole bar, as the window on a wider screen or the expanded bar on a phone, holds, from top to bottom:
 
 - The token's AC, HP, Speed (after the footprints) and **PP** (Passive Perception), as the Token panel shows them, then its **HP entry**. For a monster or NPC, you also see its six saving throws and its resistances, immunities and vulnerabilities. Where the bar is short, **More stats** holds the rest.
-- **Stat block**, which opens the creature's full stat block in the Token panel, and **Details**, which opens the Token panel. On a token a player owns, **View as Ana** sits beside them (see [View as a player](#dm-panel)).
+- **Stat block**, which opens the creature's full stat block in the Token panel, and **Details**, which opens the Token panel. On a token a player owns, **View as Ana** sits beside them (see [View as a player](#view-as-a-player)).
 - **Elevation**, with **−5** (or Page Down) and **+5** (or Page Up).
 - **Doesn't count**, on a line of its own once the creature whose turn it is has moved (see [Measuring and movement](#measuring-and-movement)). Players also get **Undo move** there, and **Open door** or **Close door** when their token stands by a door.
 - **Conditions**, **Hidden** (an eye struck through, which hides the token from players), **Multi-select**, **Roll** (the creature's roll options in the Dice panel), **Uses** (after a lightning bolt), **Light** and **Attach** (see [Mounts, familiars and dragging](#mounts-familiars-and-dragging)). **Uses** appears only for a creature with something to spend, such as Legendary Actions, a breath weapon that recharges or a character's Rage (see [Uses and Legendary Actions](#uses-and-legendary-actions)). **Light** appears on a scene with party vision, or while the token carries a light. Conditions and Uses open their lists inside the bar, just above these buttons, and a second tap closes them.
@@ -638,9 +643,9 @@ The whole bar, as the window on a wider screen or the expanded bar on a phone, h
 
 With a mouse, Hidden, Locked and Duplicate show only their icons, to keep the bar small. Hover over one, or reach it with Tab, and its name appears. On a touch screen they keep their words, since there is no hover to show them.
 
-A few keys work on the selected tokens: `H` hides or shows them, `L` locks them, and Delete removes them (Ctrl+Z brings them back). The arrow keys move the selection one square at a time.
+A few keys work on the selected tokens: `H` hides or shows them, `L` locks them, and Delete removes them (Ctrl+Z brings them back). The arrow keys move the selection one square at a time, or one hex on a hex scene.
 
-**The Token panel** starts with the token's picture and name, and a line that says what it is and how big: "Monster, CR 1/4 · Small (5 ft)", say, or "Companion of Bree" for a companion, whose picture also wears a small portrait of its character. Press "Companion of Bree" to open Bree's page in **Characters**. Under that line, tags tell you at a glance when the token is **Hidden** (after an eye struck through), **Locked** (after a padlock) or has its **Name hidden**, and when it rides, carries or drags another. Under them sit its quick numbers, the ones you reach for most in a fight: AC, Speed, **PP** (Passive Perception), **Init** (its Initiative bonus), its elevation, and a link to its sheet. A monster or NPC's stat block comes next. Folded, its row names the block, such as "Wolf, CR 1/4".
+**The Token panel** starts with the token's picture and name, and a line that says what it is and how big: "Monster, CR 1/4 · Small (5 ft)", say, or "Companion of Bree" for a companion, whose picture also wears a small portrait of its character. Press "Companion of Bree" to open Bree's page in **Characters**. A creature a player owns also has its **View as Ana** button there (see [View as a player](#view-as-a-player)). Under that line, tags tell you at a glance when the token is **Hidden** (after an eye struck through), **Locked** (after a padlock) or has its **Name hidden**, and when it rides, carries or drags another. Under them sit its quick numbers, the ones you reach for most in a fight: AC, Speed, **PP** (Passive Perception), **Init** (its Initiative bonus), its elevation, and a link to its sheet. A monster or NPC's stat block comes next. Folded, its row names the block, such as "Wolf, CR 1/4".
 
 The rest of the panel is sorted into groups by what you use them for, each led by a small picture of its own, such as crossed swords for Combat. Each group folds as one, so you can keep open only what matters right now:
 
@@ -793,7 +798,9 @@ The room setting **Initiative order players see** (in Room settings, under Comba
 - **Player characters and allies, the rest on their turn**: the same, except that every creature with the Ally ring shows from the start.
 - **Everyone**: the whole order from the start. Rooms made before the setting existed keep this one.
 
-A few more details follow from this. A creature added mid-fight waits for its own turn, and a dead one that "Skip defeated creatures" passes over never shows at all. If you press **Previous** back past a creature's first turn, it leaves the players' order again. A row you hide with **Row hidden from players** stays out whichever choice you pick. In your own tracker, each row the players don't see yet is tagged **Secret until its turn**, beside an eye struck through, the same mark the app uses everywhere for what players can't see, and **View as a player** in the DM panel shows you the order as they see it. Players never see who comes next, so the turn strip can't give a creature away.
+A few more details follow from this. A creature added mid-fight waits for its own turn, and a dead one that "Skip defeated creatures" passes over never shows at all. If you press **Previous** back past a creature's first turn, it leaves the players' order again. A row you hide with **Row hidden from players** stays out whichever choice you pick. In your own tracker, each row the players don't see yet is tagged **Secret until its turn**, beside an eye struck through, the same mark the app uses everywhere for what players can't see, and [View as a player](#view-as-a-player) shows you the order as they see it. Players never see who comes next, so the turn strip can't give a creature away.
+
+On a scene where each player sees for themselves, the order also follows each player's own sight. A monster that only Thorn can see shows in his player's order alone, and while it acts the other players read "Another creature's turn" (see [Sight for each player](#sight-for-each-player)).
 
 ### Ending it
 
@@ -1305,13 +1312,23 @@ The **DM** panel holds the tools that act on your players' screens.
   - **Follow me**: the players' maps follow yours as you pan and zoom, until you turn it off.
   - **Bring everyone here**: moves every player's map to what you see right now, once.
   - **Black out players' screens**: players see only black and "The DM has paused the game." Use it for a break, or to set up a reveal out of sight. While it is on, your top bar reads "Players see black".
-- **Check their view**: pick a player under **View as a player** and press **View** to see exactly what they see, fog and party vision included, without anything hidden. It shows the players' scene, whichever scene you are on, and on a scene where each player sees for themselves it shows that player's own sight and map. It says it is loading what they see until it arrives, and it never shows whispers between players. Nothing you do there is saved, and **Exit** or Escape brings you back. On a scene with party vision, **Party sight** shades what the party can't see on your own map instead.
-
-  You don't have to come to the DM panel to look. Tap a creature a player owns, whether it's their character, a creature you lent them or their companion, and its action bar has **View as Ana**, with an eye in a frame, right beside **Stat block** and **Details**. On a phone, scroll or expand the bar to reach it. The same button sits at the top of the creature's Token panel, under its name, so you never have to open a group to reach it. When several players own the creature, the button reads **View as a player** and opens a short list of them to choose from. In the Token panel's **Owners** group, each player has the same eye beside their name, so you can see what any player sees of this creature, owner or not. Monsters and NPCs that no player owns don't have the button, and your players never see any of it. When you press **Exit**, you're back on the button you pressed. The picker here stays for a player who has no token on the scene.
+- **Check their view**: **View as a player** and **Party sight**, described just below.
 - **Player link**: **Show the player link** shows the link and its QR code, for players at the table to scan.
 - **Table display**: see [The table display](#the-table-display).
 
 Follow me and Bring everyone here move the players only while you are looking at the players' scene, and the panel tells you when you aren't.
+
+### View as a player
+
+Sooner or later you'll want to know exactly what a player can see: whether the fog really hides the vault, whether Mara's torch reaches the goblin, or what Ben can see of a scene where each player sees for themselves. **View as a player** shows you the scene as that player sees it, fog, party vision and their own map included, and nothing they can't see. It is drawn on your own device and isn't a mirror of their phone: the preview keeps its own framing of the map and its own panels, so it shows what they can see, not where they are looking right now. It always shows the players' scene, whichever scene you are on, so you can check on the table while you prepare the next map.
+
+There are two ways in. The quickest is a creature the player owns: their character, a creature you lent them, or their companion. Tap it, and its action bar has **View as Ana**, with an eye in a frame, right beside **Stat block** and **Details** (on a phone, scroll or expand the bar to reach it). The same button sits at the top of the creature's Token panel, under its name. When several players own the creature, the button reads **View as a player** and opens a short list of them to choose from. In the Token panel's **Owners** group, each player has the same eye beside their name, so you can see what any player can see of this creature, owner or not. Monsters and NPCs that no player owns don't have the button, and your players never see any of it.
+
+The other way is the DM panel's **Check their view**, for a player who has no token on the scene: pick them under **View as a player** and press **View**.
+
+While you look, a line at the top reads "Viewing as Ana. Nothing here is saved. Whispers between players are not shown." Until their view arrives, it says it is loading. The whispers players send each other stay private, so you can look in without reading the notes they passed. **Exit**, or Escape, brings you back to the button you pressed.
+
+**Party sight**, under View as a player in the DM panel, does something different. On a scene with party vision it shades what the party can't see on your own map, so you keep working with everything in view and still know at a glance what lies in the dark for them.
 
 ## Characters and their stat blocks
 
@@ -1502,7 +1519,7 @@ The party explores a crypt by torchlight, and the players should see only what t
 
 **Running it**
 
-1. **Move players** to the crypt. Use **View as a player** in the DM panel, or **Party sight**, to check what they see: the hall by torchlight, and darkness everywhere else.
+1. **Move players** to the crypt. To check what they see, tap Mara's token and press **View as** followed by her player's name to see the scene as her player sees it, or turn on **Party sight** in the DM panel: the hall by torchlight, and darkness everywhere else.
 2. The players move and see more as they go, and ground they have explored stays on their map, dimmed, as they last saw it. They can open the closed door themselves, by tapping it or with **Open door** in their token's action bar.
 3. The chamber door is locked. When Mara picks the lock, use **Select**, tap the door, and press **Unlock**, then **Open**.
 4. When a character lights a brazier, go to the builder's **Lights** mode, tap the brazier, and set it **Lit**. The chamber lights up for everyone who can see it.
@@ -1638,7 +1655,7 @@ These are the keys a DM uses most:
 - Press a tool's key again while you are using it to move to the next option of its main choice: the next shape for Area, the next drawing tool for Draw, Straight or Walking for the Ruler, Clear fog or Add fog for Fog, the next mode for the Map builder, the next blank token for Add token, and the next zone for Trap. With Shift, a letter key goes back one instead. If the tool's options are hidden, the same press shows them. When the tool has no choice to move at that moment, the press only shows its options: Area while you have a placed area picked, for example. While you drag, or while a change would lose something you started, such as a shape with corners, unfinished text or an area from a spell, the key leaves the choice alone. Select, Ping, Pin and Line up grid have no such choice, so a second press of their key only shows their options.
 - `N` moves to the next turn, and starts the fight if it hasn't started yet.
 - `H` hides or shows the selected tokens, `L` locks them, and Delete deletes them.
-- The arrow keys move the selection a square. Page Up raises it 5 ft, and Page Down lowers it 5 ft.
+- The arrow keys move the selection a square, or a hex on a hex scene. Page Up raises it 5 ft, and Page Down lowers it 5 ft.
 - `/` searches the scene in the Outliner.
 - `Ctrl+Z` is Undo, and `Ctrl+Shift+Z` is Redo (Cmd in place of Ctrl on a Mac).
 - `0` fits the map to the screen, `+` zooms in and `-` zooms out. `S` hides or shows the side panel, and `O` switches to the other of two panels.
