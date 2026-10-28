@@ -186,9 +186,9 @@ At the end come **Export as image** and **Delete scene**.
 
 Tap a group's name to fold it away, and tap it again to open it. A folded group tells you what it holds at the end of its row, so you can read a scene at a glance without opening anything: What players see shows its choice and the light, such as "Explore · Dark", Map image and grid whether the scene has an image and what grid it uses, Walls and movement whether walls block players' moves, and Size and view the scene's size. On a narrow phone with a large interface size, that line moves under the group's name. On a phone, only What players see starts open, so the settings you reach for during play sit right under the scene's name, and the setup groups wait until you need them. On a computer every group starts open. Each group then stays the way you left it on that device, on every scene and the next time you open the room. Folding a group never interrupts anything in it: an image still uploading carries on, and squares you typed but haven't applied are still there when you open it again.
 
-![The cavern's settings with every group folded: the scene's name, then What players see, Map image and grid, Walls and movement and Scene, with Export as image and Delete under them.](dm-guide/scene-settings-folded.webp)
+![The forest road's settings with every group folded: under This scene, the scene's name, then What players see, Map image and grid, Walls and movement and Size and view, each with its icon and its summary, such as "30 × 20 squares", and Export as image and Delete under them.](dm-guide/scene-settings-folded.webp)
 
-![The cavern's Map image and grid open: its map image with Replace map image and Paste an image, Remove map image on a line of its own, the Day and Night phases, and the grid's settings under them.](dm-guide/scene-settings-map.webp)
+![The forest road's Map image and grid open: its map image with Replace map image and Paste an image, Remove map image on a line of its own, the Day phase showing now, and the grid's settings under them.](dm-guide/scene-settings-map.webp)
 
 Players can see a scene's name, so don't name a scene after a surprise. And if you replace the map image of the scene the players are on, they see the new image as soon as it uploads, so the app asks you to confirm first.
 
@@ -292,6 +292,8 @@ A scene won't change shape while it holds something that can't stand on the othe
 **What waits for squares.** Hex grids are coming in three steps, and this first one is for running a fight on a hex map. Until the next steps arrive, a hex scene says so in plain words wherever you would reach for these, and the app refuses them there: walls and doors, the **Walking** ruler and routes around things, squeezing through a narrow space, difficult ground, riding and carrying, traps, heights, stairs and pits, **Reveal room**, and **Find the grid**. In the builder, a hex scene gets lights, stamps and labels. A few things stay square for good: painted ground and rooms, pillars, automatic walls, **Or count the squares**, the Universal VTT import and the `WxH` file name of an export. If a map needs those, make it on squares.
 
 **Lining up a hex map.** The box in **Line up grid** is made for hexes. Drag a box over 3 hexes across, which holds 7 hexes, and fine-tune it by its corners. The box keeps the shape of 7 hexes as you drag, resize or nudge it. The app draws the hexes it would make across the whole map, so you can check that they line up everywhere. The option reads **px per hex**. **Or count the squares** gives way to a line saying counting works on squares, so use the box. **Find the grid** is off too: it finds square grids only, so a map for a hex scene is never searched for a grid when you pick it, upload it or put it in place of the scene's art.
+
+![Line up grid on a hex map: a forest drawn with hex lines, the app's own hexes drawn over the whole map, the box on 3 hexes across with a handle at each corner, and "Drag a box over 3 hexes across. Fine-tune it by its corners." with 70 px per hex in the options row.](dm-guide/hex-line-up.webp)
 
 **The size of a hex scene.** In a hex scene's **Size and view** settings, **Size in 5 ft steps** takes **Across** and **Down**, and a line under them says how many hexes that holds, such as 30 hexes across and 22 rows down.
 
@@ -434,7 +436,7 @@ Under Players see sit the settings that fine-tune it:
 - **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 - **Fog and party vision**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. While it is folded, it tells you how both stand, such as "Fog on · Party vision on". You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
 
-![What players see for the arena: Players see on Explore, Light set to Dark, Sight on Whole party, the lantern bearer lending the party its sight, the Fog and party vision fold closed, and Use these settings on other scenes.](dm-guide/vision-settings.webp)
+![What players see for the crypt: the group's name with its icon, Players see on Explore, Light set to Dark, Sight on Whole party, and Thorn first among the party's creatures that lend it their sight.](dm-guide/vision-settings.webp)
 
 **Senses.** Darkvision, Blindsight and Truesight come from each creature's senses (from its stat block, or from **Senses** in its Stats). Darkvision shows darkness in shades of gray.
 
@@ -457,7 +459,7 @@ When you've set up one scene the way you like it, you can give other scenes the 
 
 Each scene's line says what players see there now, and what the copy would do there: "The players are here. They see the change at once." on the players' scene, "Players' remembered maps here reset." where a scene leaves Explore, and "Each player's own map here joins the party's." where it leaves Per player. Tick the scenes you want, or press **Select all**, then **Copy to 3 scenes**. The sheet says "Copied to 3 scenes." when it's done and clears the ticks, or says which scenes refused and why. One **Undo** puts every scene's settings back, though not the maps players remembered.
 
-![Use Cave's settings on…: Battle mat, Arena and Crypt ticked, each line saying what the copy does there, and Copy to 3 scenes.](dm-guide/copy-settings.webp)
+![Use Forest road's settings on…: Battle mat, Crypt and Watchtower ticked, each line saying what players see there now, the Crypt's line adding that the players are there and see the change at once, and Copy to 3 scenes at the foot.](dm-guide/copy-settings.webp)
 
 ### Sight for each player
 
@@ -1323,6 +1325,8 @@ Follow me and Bring everyone here move the players only while you are looking at
 Sooner or later you'll want to know exactly what a player can see: whether the fog really hides the vault, whether Mara's torch reaches the goblin, or what Ben can see of a scene where each player sees for themselves. **View as a player** shows you the scene as that player sees it, fog, party vision and their own map included, and nothing they can't see. It is drawn on your own device and isn't a mirror of their phone: the preview keeps its own framing of the map and its own panels, so it shows what they can see, not where they are looking right now. It always shows the players' scene, whichever scene you are on, so you can check on the table while you prepare the next map.
 
 There are two ways in. The quickest is a creature the player owns: their character, a creature you lent them, or their companion. Tap it, and its action bar has **View as Ana**, with an eye in a frame, right beside **Stat block** and **Details** (on a phone, scroll or expand the bar to reach it). The same button sits at the top of the creature's Token panel, under its name. When several players own the creature, the button reads **View as a player** and opens a short list of them to choose from. In the Token panel's **Owners** group, each player has the same eye beside their name, so you can see what any player can see of this creature, owner or not. Monsters and NPCs that no player owns don't have the button, and your players never see any of it.
+
+![Thorn's Token panel: under his name and "Level 5 character · Medium (5 ft)", the View as Pat button with its eye, then his quick numbers and his stat block.](dm-guide/token-view-as.webp)
 
 The other way is the DM panel's **Check their view**, for a player who has no token on the scene: pick them under **View as a player** and press **View**.
 
