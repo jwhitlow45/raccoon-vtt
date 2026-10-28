@@ -74,11 +74,18 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     assert.equal(refusal(switched, undo(deleted.inverse)), "Can't undo that: a trap on squares can't stand on this scene's hexes.");
   });
 
-  test("the last free wall deleted, the empty scene switched to hexes, the delete undone: refused by the phase check", () => {
+  test("H2: the last free wall deleted, the empty scene switched to hexes, the delete undone: accepted, a free wall stands on any grid", () => {
     const walled = run(twoDms(), { t: "build.walls", sceneId: "s1", put: [wall] }).state;
     const removed = run(walled, { t: "build.walls", sceneId: "s1", remove: [{ cx: 0, cy: 0, id: wall.id }] });
     const switched = run(removed.state, toHex(), B).state;
-    assert.equal(refusal(switched, undo(removed.inverse)), "Can't undo that: walls and doors on squares can't stand on this scene's hexes.");
+    assert.deepEqual(run(switched, undo(removed.inverse)).state.buildChunks[chunkKey("s1", 0, 0)]?.walls, [wall]);
+  });
+
+  test("H2: a Wall line undone after a rows-to-columns switch is accepted", () => {
+    const rows = twoDms({ scenes: { ...room().scenes, s1: { ...room().scenes.s1!, gridShape: "hexRows" } } });
+    const drawn = run(rows, { t: "build.walls", sceneId: "s1", put: [wall] });
+    const switched = run(drawn.state, { t: "scene.update", sceneId: "s1", patch: { gridShape: "hexColumns" } }, B).state;
+    assert.equal(run(switched, undo(drawn.inverse)).state.buildChunks[chunkKey("s1", 0, 0)], undefined);
   });
 
   test("a rider's undone dismount on a scene switched since is refused", () => {
@@ -88,11 +95,11 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     assert.equal(refusal(switched, undo(off.inverse)), "Can't undo that: an attached creature on squares can't stand on this scene's hexes.");
   });
 
-  test("a squeezed token restored onto a hex scene is refused", () => {
+  test("H2: a squeezed token restored onto a hex scene is accepted, as squeezing works on hexes", () => {
     const hex = twoDms({ scenes: { ...room().scenes, s1: { ...room().scenes.s1!, gridShape: "hexColumns" } }, tokens: { ogre: token("ogre", { size: "large" }) } });
     const moved = run(hex, { t: "token.update", tokenId: "ogre", patch: { x: 6 } });
     const squeezed: RestoreEntry[] = moved.inverse.map((e) => (e.key === "token:ogre" ? { ...e, value: { ...(e.value as object), squeeze: true } } : e));
-    assert.equal(refusal(moved.state, undo(squeezed)), "Can't undo that: a squeezing creature on squares can't stand on this scene's hexes.");
+    assert.equal(run(moved.state, undo(squeezed)).state.tokens.ogre?.squeeze, true);
   });
 
   test("H1 fog drafts on a hex scene: a draft, its publish and its discard, each undone and redone", () => {
@@ -129,13 +136,12 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     assert.equal(refusal(switched, redo(undone.inverse)), "Can't redo that: difficult ground on squares can't stand on this scene's hexes.");
   });
 
-  test("in H1 a value stamped with the hex scene's own shape is refused too, for every grid-keyed kind (D-261026-8)", () => {
+  test("in H2 a value stamped with the hex scene's own shape is refused too, for every grid-keyed kind but difficult ground (D-261026-8)", () => {
     const hex = twoDms({ scenes: { ...room().scenes, s1: { ...room().scenes.s1!, gridShape: "hexRows" } } });
     const key = "chunk:s1:0,0";
     const kinds: [object, string][] = [
       [{ cells: { "1,1": "stone" } }, "painted ground"],
       [{ edges: { "1,1,n": { kind: "wall" } } }, "walls and doors"],
-      [{ rough: "d".padEnd(256, ".") }, "difficult ground"],
       [{ heights: "A".repeat(683) + "=" }, "heights"],
       [{ up: ".".repeat(256) }, "stairs"],
     ];
@@ -143,6 +149,8 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
       const value = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, ...content, grid: "hexRows" };
       assert.equal(refusal(hex, redo([{ key, value, expectRev: null }])), `Can't redo that: ${words} can't stand on this scene's hexes.`);
     }
+    const rough = { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, rough: "d".padEnd(256, "."), grid: "hexRows" };
+    assert.equal(run(hex, redo([{ key, value: rough, expectRev: null }])).state.buildChunks[chunkKey("s1", 0, 0)]?.rough, rough.rough);
     const draft = { sceneId: "s1", rev: 0, grid: "hexRows", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
     assert.equal(refusal(hex, undo([{ key: "fogDraft:s1", value: draft, expectRev: null }])), "Can't undo that: Reveal room in its fog draft can't stand on this scene's hexes.");
     const stamped = { ...trap("t1"), grid: "hexRows" };

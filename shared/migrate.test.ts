@@ -1340,9 +1340,9 @@ describe("the isometric view: op version 25, snapshot version 26 (docs/design-v1
 });
 
 describe("map discovery: op version 26, snapshot version 27 (docs/design-v1-map-discovery.md 5.5)", () => {
-  test("are the versions now", () => {
-    assert.equal(OP_VERSION, 26);
-    assert.equal(SNAPSHOT_VERSION, 27);
+  test("brought op version 26 and snapshot version 27", () => {
+    assert.ok(OP_VERSION >= 26);
+    assert.ok(SNAPSHOT_VERSION >= 27);
     assert.equal(MAP_DISCOVERY_OP_VERSION, 26);
     assert.equal(MAP_DISCOVERY_SNAPSHOT_VERSION, 27);
   });
@@ -1389,6 +1389,44 @@ describe("map discovery: op version 26, snapshot version 27 (docs/design-v1-map-
     assert.equal(needsMapDiscoveryUpgrade(26), true);
     assert.equal(needsMapDiscoveryUpgrade(1), true);
     assert.equal(needsMapDiscoveryUpgrade(27), false);
+  });
+});
+
+describe("hex grids, phase H2: op version 27, snapshot version 28 (docs/design-v1-hex-grids.md section 7)", () => {
+  test("are the versions now", () => {
+    assert.equal(OP_VERSION, 27);
+    assert.equal(SNAPSHOT_VERSION, 28);
+    assert.ok(opMigrations.some((s) => s.from === 26 && s.to === 27));
+    assert.ok(snapshotMigrations.some((s) => s.from === 27 && s.to === 28));
+  });
+
+  test("the snapshot step is the identity, a hex scene's free walls and stamped difficult ground included", () => {
+    const plain = room();
+    assert.equal(runMigrations(plain, 27, 28, snapshotMigrations), plain);
+    assert.equal(migrateSnapshot(plain, 27), plain);
+    const hex = room({
+      scenes: { s1: { ...room().scenes.s1!, gridShape: "hexRows" }, s2: room().scenes.s2! },
+      buildChunks: {
+        "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, walls: [{ id: "abcdefghijkl", a: [1, 0.578125], b: [2, 0.578125], f: { kind: "wall" } }], rough: "d".padEnd(256, "."), grid: "hexRows" },
+      },
+    });
+    assert.equal(runMigrations(hex, 27, 28, snapshotMigrations), hex);
+  });
+
+  test("the op step is the identity, and each op H2 takes on hexes is one today's protocol takes", () => {
+    const ops: unknown[] = [
+      { t: "build.walls", sceneId: "s1", put: [{ id: "abcdefghijkl", a: [1, 0.578125], b: [2, 0.578125], f: { kind: "wall" } }] },
+      { t: "build.erase", sceneId: "s1", cells: ["3,21"] },
+      { t: "build.rough", sceneId: "s1", cells: ["29,229"], on: true },
+      { t: "log.chat", text: "hi" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 26, 27, opMigrations), op);
+    for (const op of ops) assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
+  });
+
+  test("a version 27 op and a version 28 snapshot never migrate down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 27, 26, opMigrations), /down/);
+    assert.throws(() => runMigrations(room(), 28, 27, snapshotMigrations), /down/);
   });
 });
 

@@ -1,5 +1,5 @@
 import type { BuildChunk, FogDraft, GridShape, RoomState, Scene, Token, Trap } from "../model.ts";
-import { hexInScene, hexKey, parseHexKey, type HexGrid } from "./hex.ts";
+import { hexInScene, hexKey, parseHexKey, sceneHexSpan, type HexGrid } from "./hex.ts";
 
 /**
  * A scene's grid (docs/design-v1-hex-grids.md section 7). Rule functions
@@ -55,6 +55,20 @@ export function inScene(g: Grid, bounds: { w: number; h: number }, key: string):
 }
 
 /**
+ * The highest index a cell key takes on either axis, on any grid, on a
+ * scene of at most `side` cells a side (section 4.3): 229 for the largest
+ * scene of 200, the last row of hex rows and the last column of hex
+ * columns, where squares stop at 199. A function of the side rather than a
+ * constant, so shared/protocol.ts can pass its MAX_SCENE_CELLS without this
+ * file importing it back.
+ */
+export function cellIndexMost(side: number): number {
+  const bounds = { w: side, h: side };
+  const spans = (["rows", "columns"] as const).flatMap((orient) => Object.values(sceneHexSpan({ shape: "hex", orient }, bounds)));
+  return Math.max(side, ...spans) - 1;
+}
+
+/**
  * Whether a scene came with its own grid, exact, from a Universal VTT file
  * (HX-D13): the import's mark, or for an import from before the mark a
  * first grid line before the image. Its walls stand in that file's
@@ -104,13 +118,11 @@ function draftKeyed(draft: FogDraft): boolean {
 }
 
 /**
- * A chunk's free walls. A hex scene cannot hold them in this phase
- * (section 6, H1), nor traps, attach links or squeezed tokens. H2 lifts
- * walls, links, squeezing and traps other than pits.
+ * The grid-keyed content phase H2 lets a hex scene hold (section 6):
+ * difficult ground, by hex under hex keys. Painted ground and grid-line
+ * walls stay square in every phase, and heights and stairs wait for H3.
  */
-function phaseWalls(chunk: BuildChunk): boolean {
-  return chunk.walls !== undefined && chunk.walls.length > 0;
-}
+const H2_KEYED: ReadonlySet<ShapeHolding> = new Set<ShapeHolding>(["rough"]);
 
 function holdsSomeone(state: Pick<RoomState, "tokens">, token: Token): boolean {
   return Object.values(state.tokens).some((t) => t.attached?.to === token.id);
@@ -131,8 +143,8 @@ function sceneTokens(state: Holds, sceneId: string): Token[] {
  * data at all, since all of it is of the scene's shape now (painted ground,
  * walls and "no wall" marks on the grid lines, heights, stairs, difficult
  * ground, traps, Reveal room's fog shapes and squeezed tokens), and onto
- * hexes, what this phase leaves out (free walls and attach links). Nothing
- * when the shape stays.
+ * hexes, what this phase leaves out (attach links). Free walls are in world
+ * units and stand on every shape from H2. Nothing when the shape stays.
  */
 export function switchHolds(state: Holds, scene: Pick<Scene, "id" | "gridShape">, to: Grid): ShapeHeld[] {
   if (shapeName(sceneGrid(scene)) === shapeName(to)) return [];
@@ -140,7 +152,6 @@ export function switchHolds(state: Holds, scene: Pick<Scene, "id" | "gridShape">
   for (const chunk of Object.values(state.buildChunks)) {
     if (chunk.sceneId !== scene.id) continue;
     found.push(...chunkKeyed(chunk));
-    if (isHex(to) && phaseWalls(chunk)) found.push("walls");
   }
   for (const trap of Object.values(state.traps ?? {})) if (trap.sceneId === scene.id) found.push("trap");
   const draft = state.fogDrafts[scene.id];
@@ -167,17 +178,16 @@ function dedupe(held: ShapeHeld[]): ShapeHeld[] {
  *   shape. A value with none, such as a draft of rects or a chunk of free
  *   walls only, means the same on every grid and is never compared.
  * - The phase check, on everything written onto a hex scene, whatever its
- *   stamp (D-261026-8). In H1 a hex scene holds no grid-keyed content at
- *   all: painted ground and grid-line walls never (they stay square in
- *   every phase), difficult ground until H2, heights and stairs until H3,
- *   Reveal room's cells until H3. Nor free walls, traps, attach links or
- *   squeezed tokens, which H2 lifts (traps but pits). A hand-made backup
- *   could stamp any of these with the scene's own shape, and this phase
- *   has no hex rules to read them by.
+ *   stamp (D-261026-8). In H2 a hex scene holds difficult ground of its own
+ *   shape and no other grid-keyed content: painted ground and grid-line
+ *   walls never (they stay square in every phase), heights, stairs and
+ *   Reveal room's cells until H3. Free walls and squeezed creatures stand
+ *   on hexes from H2. A hand-made backup could stamp any of the rest with
+ *   the scene's own shape, and this phase has no hex rules to read them by.
  *
  * `from` is the shape the value's data stands on, for the words: its stamp,
- * or squares for what carries none (free walls, links, squeezes), the only
- * shape that holds those in H1.
+ * or squares for what carries none (links), the only shape that holds
+ * those in H1.
  */
 export function restoredHolds(
   state: Holds,
@@ -195,8 +205,8 @@ export function restoredHolds(
     const stamped = stamp(keyed, chunk.grid);
     if (stamped) return stamped;
     if (!isHex(g)) return null;
-    const held: ShapeHolding[] = phaseWalls(chunk) ? [...keyed, "walls"] : keyed;
-    return held.length > 0 ? { held: dedupe(tally(held)), from: keyed.length > 0 ? stampShape(chunk.grid) : "squares" } : null;
+    const held = keyed.filter((what) => !H2_KEYED.has(what));
+    return held.length > 0 ? { held: dedupe(tally(held)), from: stampShape(chunk.grid) } : null;
   }
   if (kind === "fogDraft") {
     const draft = value as FogDraft;
@@ -210,7 +220,6 @@ export function restoredHolds(
   const token = value as Token;
   if (!isHex(g)) return null;
   const found: ShapeHolding[] = [];
-  if (token.squeeze === true) found.push("squeeze");
   if (token.attached !== undefined || holdsSomeone(state, token)) found.push("link");
   return found.length > 0 ? { held: tally(found), from: "squares" } : null;
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { chunkKey } from "../keys.ts";
 import type { RoomState, Viewer } from "../model.ts";
 import { opSchema, type Op, type RestoreEntry, type TrapInput } from "../protocol.ts";
 import { applyOp, type ApplyResult } from "../reducer.ts";
@@ -142,9 +143,14 @@ describe("the shape switch (HX-D14)", () => {
     }
   });
 
-  test("in H1, a free wall, an attach link or a squeezed token keeps a scene off hexes too", () => {
+  test("in H2, free walls go along onto hexes", () => {
     const walled = run(room(), { t: "build.walls", sceneId: "s1", put: [wall] }).state;
-    assert.equal(refusal(walled, toHex()), "This scene has walls and doors on its squares, which can't stand on hexes. Remove them to change the grid.");
+    const switched = run(walled, toHex()).state;
+    assert.equal(switched.scenes.s1!.gridShape, "hexRows");
+    assert.equal(switched.buildChunks[chunkKey("s1", 0, 0)]?.walls?.length, 1);
+  });
+
+  test("in H1, an attach link or a squeezed token keeps a scene off hexes too", () => {
     const ridden = room({ tokens: { horse: token("horse", { size: "large", x: 4, y: 4 }), bree: token("bree", { x: 4, y: 4, attached: { to: "horse", kind: "ride" } }) } });
     assert.equal(refusal(ridden, toHex()), "This scene has an attached creature on its squares, which can't stand on hexes. Remove them to change the grid.");
     const squeezed = room({ tokens: { ogre: token("ogre", { size: "large", squeeze: true }) } });
