@@ -30,8 +30,9 @@ import { LEDGE_IN_THE_WAY, resizeLegStop, resizeStands, WALL_IN_THE_WAY, type Mo
  * reference hex where it was: a Medium growing Large keeps its hex as the
  * top one, and a Large shrinking Medium keeps its top hex. That spot is the
  * base, and an owner's growth that would leave the scene tries the other
- * footprints covering the old one (`hexCandidates`). A hex scene has no
- * walls until phase H2, so rule 5 reads nothing there.
+ * footprints covering the old one (`hexCandidates`). Rule 5 reads a hex
+ * scene's walls by the hex rules (HX-D8): the new footprint fits between
+ * them, and a leg from the reference hex now to the new one meets none.
  */
 
 export { LEDGE_IN_THE_WAY, WALL_IN_THE_WAY };
@@ -110,8 +111,7 @@ export function resizeSpot(state: BuildState, token: MovingToken, next: NextSize
   const remembered = change === "shrink" && opts.remembered && isCandidate(opts.remembered) ? { x: opts.remembered.x, y: opts.remembered.y } : undefined;
   const first = remembered ?? resizeBase(token, next, scene);
   if (!opts.checked) return { ...first, shifted: false };
-  // A hex scene has no walls until phase H2.
-  const passes = (p: Point) => scene.blockMovement !== true || grid.shape === "hex" || wallRefusal(state, token, sized(next, p.x, p.y), change) === null;
+  const passes = (p: Point) => scene.blockMovement !== true || wallRefusal(state, token, sized(next, p.x, p.y), change) === null;
   if (isCandidate(first) && passes(first)) return { ...first, shifted: false };
   for (const p of candidates) {
     if ((p.x !== first.x || p.y !== first.y) && passes(p)) return { x: p.x, y: p.y, shifted: true };
@@ -180,8 +180,8 @@ export function resizeRefusal(state: BuildState, token: MovingToken, next: NextS
   const to = sized(next, next.x, next.y);
   if (!scene) return RESIZE_KEEPS_PLACE;
   const g = sceneGrid(scene);
-  if (g.shape === "hex") return hexSpotAllowed(g, next, next, hexCandidates(g, token, next, scene, change)) ? null : RESIZE_KEEPS_PLACE;
-  if (!allowedSpot(token, to, scene, change)) return RESIZE_KEEPS_PLACE;
+  const allowed = g.shape === "hex" ? hexSpotAllowed(g, next, next, hexCandidates(g, token, next, scene, change)) : allowedSpot(token, to, scene, change);
+  if (!allowed) return RESIZE_KEEPS_PLACE;
   return scene.blockMovement === true ? wallRefusal(state, token, to, change) : null;
 }
 

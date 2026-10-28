@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState, Token, WallFeature } from "../model.ts";
-import { hexStandSize, occupiedHexes, placedOnHex } from "./footprint.ts";
+import { hexStandSize, occupiedHexes, placedOnHex, tokenRefHex } from "./footprint.ts";
 import { hexCenter, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
 import {
   coreBlocked,
@@ -17,8 +17,10 @@ import {
   ownWalk,
   squeezeFits,
   walkEnd,
+  WALL_IN_THE_WAY,
   type HexStand,
 } from "./movement.ts";
+import { NO_ROOM_TO_GROW, resizeRefusal, resizeSpot } from "./resize.ts";
 import { COLUMNS, freeWall, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWalls.testkit.ts";
 
 /**
@@ -123,6 +125,51 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       // A walk that ends there is stopped, from either side.
       const away = onHex(g, "big", "large", { col: 2, row: 6 });
       assert.equal(legTo(s, away, ref)?.blocker, "wall");
+    });
+  });
+
+  describe(`${name}: a resize on a scene that stops moves reads the walls by the hex rules (HX-D8)`, () => {
+    const sameHex = (a: Hex, b: Hex) => a.col === b.col && a.row === b.row;
+    const sideOf = (a: Hex, b: Hex) => hexNeighbors(g, a).findIndex((n) => sameHex(n, b));
+
+    test("a Medium growing Large with a wall across the footprint that keeps its hex takes another that fits, the base spot refused", () => {
+      const ref: Hex = { col: 8, row: 6 };
+      const t = onHex(g, "m", "medium", ref);
+      const base = onHex(g, "b", "large", ref);
+      const [, below] = occupiedHexes(g, base);
+      const s = hexWallRoom(shape, 20, 14, [sideWall(g, ref, sideOf(ref, below!))]);
+      assert.equal(resizeRefusal(s, t, { size: "large", x: base.x, y: base.y }), NO_ROOM_TO_GROW, "the wall splits the base footprint");
+      const spot = resizeSpot(s, t, { size: "large" }, { checked: true });
+      assert.ok(!("refused" in spot) && spot.shifted, `another footprint: ${JSON.stringify(spot)}`);
+      assert.equal(resizeRefusal(s, t, { size: "large", x: spot.x, y: spot.y }), null, "the server takes the spot it moved to");
+      const grown = occupiedHexes(g, { size: "large", x: spot.x, y: spot.y });
+      assert.ok(grown.some((h) => sameHex(h, ref)), "it still covers the old hex");
+      assert.equal(grown.some((h) => sameHex(h, below!)), false, "and stays off the wall's far side");
+      assert.deepEqual(resizeSpot(hexWallRoom(shape, 20, 14, []), t, { size: "large" }, { checked: true }), { x: base.x, y: base.y, shifted: false }, "with no wall it keeps the base");
+    });
+
+    test("a Medium walled in on every side has no room to grow, and the DM's unchecked resize is never stopped", () => {
+      const ref: Hex = { col: 8, row: 6 };
+      const t = onHex(g, "m", "medium", ref);
+      const s = hexWallRoom(shape, 20, 14, [0, 1, 2, 3, 4, 5].map((d) => sideWall(g, ref, d)));
+      assert.deepEqual(resizeSpot(s, t, { size: "large" }, { checked: true }), { refused: NO_ROOM_TO_GROW });
+      const base = onHex(g, "b", "large", ref);
+      assert.deepEqual(resizeSpot(s, t, { size: "large" }, { checked: false }), { x: base.x, y: base.y, shifted: false });
+    });
+
+    test("a Large shrinking Medium onto a hex across a wall from its own is stopped, onto its own hex it goes", () => {
+      const ref: Hex = { col: 8, row: 6 };
+      const t = onHex(g, "big", "large", ref);
+      const [, other] = occupiedHexes(g, t);
+      // A wall put down through the creature after it stood there, between its reference hex and another of its hexes.
+      const s = hexWallRoom(shape, 20, 14, [sideWall(g, ref, sideOf(ref, other!))]);
+      const across = placedOnHex(g, { size: "medium", x: 0, y: 0 }, other!);
+      assert.equal(resizeRefusal(s, t, { size: "medium", ...across }), WALL_IN_THE_WAY);
+      const own = placedOnHex(g, { size: "medium", x: 0, y: 0 }, ref);
+      assert.equal(resizeRefusal(s, t, { size: "medium", ...own }), null);
+      const spot = resizeSpot(s, t, { size: "medium" }, { checked: true, remembered: across });
+      assert.ok(!("refused" in spot));
+      assert.deepEqual(tokenRefHex(g, { size: "medium", x: spot.x, y: spot.y }), ref, "the remembered spot across the wall gives way to its own hex");
     });
   });
 
