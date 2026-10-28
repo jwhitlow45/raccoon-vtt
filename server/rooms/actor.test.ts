@@ -3917,6 +3917,36 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     }
   });
 
+  test("a rider gets off a mount that straddles a 5 ft step onto the low ground beside it and lands on that ground, judged by the mount's footing (MD3-ASTRA-7)", async () => {
+    const dm = member("DM", "dm");
+    const player = member("Ayla", "player");
+    let { state, sceneId, pcId } = darkRoom(dm, player);
+    state.scenes[sceneId] = { ...state.scenes[sceneId]!, blockMovement: true, autoWalls: "off" };
+    const r = applyOp(state, { t: "build.height", sceneId, cells: ["6,13", "6,14"], height: 5 }, { memberId: dm.id, role: "dm" }, { seq: 1, at: new Date().toISOString() });
+    assert.ok(r.ok, r.ok ? "" : r.message);
+    state = r.state;
+    // A large horse half on the step stands at 5 ft, on the ground. Its rider sits over the low half at the horse's height.
+    const horseId = uuidv7();
+    state.tokens[horseId] = testToken(horseId, { sceneId, name: "Horse", size: "large", disposition: "ally", x: 5, y: 13, elevation: 5 });
+    state.tokens[pcId] = { ...state.tokens[pcId]!, x: 5, y: 13, elevation: 5, attached: { to: horseId, kind: "ride" } };
+    const db = new FakeDb({ state, dmGrants: [dm.id] });
+    const actor = await RoomActor.load(deps(db));
+    assert.ok(actor);
+    try {
+      const phone = connect(actor, player, "player");
+      await actor.hello(phone.conn, { clientId: "c2", resumeFrom: 1 });
+      await actor.op(phone.conn, 1, { t: "token.detach", tokenId: pcId, x: 4, y: 13, elevation: 5 });
+      const off = await answerTo(phone.sent, 1);
+      assert.ok(off !== "stuck" && !off.rejects?.length, JSON.stringify(off !== "stuck" && off.rejects));
+      const { x, elevation, attached } = actor.committed.state.tokens[pcId]!;
+      // Judged by her own footing, 5 ft over low ground, she would keep 5 ft.
+      assert.deepEqual([x, elevation, attached], [4, 0, undefined]);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
   test("a door a player touches shows as it is to everyone who shares that memory (MD-O-6)", async () => {
     const dm = member("DM", "dm");
     const player = member("Ayla", "player");
