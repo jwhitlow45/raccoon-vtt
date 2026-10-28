@@ -337,7 +337,13 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     const left = () => toastsLeft(p.room.store.getState().toasts, now).find((x) => x.id === toast().id)!.ms;
     p.room.ui.toastsDrawn([toast().id]);
     now += 5_000;
+    // Undo with no gesture waiting gives the toast no time back.
+    assert.equal(p.room.cancelHeld(), false);
+    assert.equal(left(), ACTION_TOAST_MS - 5_000, "Undo with nothing waiting restarts nothing");
+    const before = p.room.store.getState().toasts;
     dispatchBuild(p.ctx, rect);
+    // The toast layer arms timers only when the toasts change, so the hold must change them to drop the one it armed.
+    assert.notEqual(p.room.store.getState().toasts, before, "the hold publishes the toasts again");
     // A long or offline wait for the bands' answers, past the toast's whole time.
     now += 30_000;
     const running = () => toastsLeft(p.room.store.getState().toasts, now).find((x) => x.id === toast().id)!.runs;

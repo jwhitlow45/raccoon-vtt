@@ -778,8 +778,11 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     holdBuild(cancel) {
       // Toast times are wall-clock times (toastsDrawn), so the hold's is too.
-      if (held.length === 0) heldSince = Date.now();
+      const first = held.length === 0;
+      if (first) heldSince = Date.now();
       held.push(cancel);
+      // A fresh array, so the toast layer drops the timer it armed before the hold for a toast whose button now waits (toastsLeft).
+      if (first && get().toasts.some((t) => t.action?.ready)) store.setState({ toasts: [...get().toasts] });
       return () => {
         const at = held.indexOf(cancel);
         if (at < 0) return;
@@ -790,9 +793,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     cancelHeld() {
       const cancel = held.pop();
-      cancel?.();
+      if (cancel === undefined) return false;
+      cancel();
       holdEnded();
-      return cancel !== undefined;
+      return true;
     },
 
     recordLocalEph(e) {
