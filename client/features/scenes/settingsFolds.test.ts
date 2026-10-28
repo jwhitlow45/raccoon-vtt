@@ -166,7 +166,8 @@ describe("the page as it draws its groups (8.4)", () => {
   /** Each group header's name and whether it says it is open, and the plain section labels, in the page's order. */
   function headings(html: string): string[] {
     return [...html.matchAll(/<h3[^>]*>(?:<button[^>]*aria-expanded="(true|false)"[^>]*>)?([\s\S]*?)<\/h3>/g)].map((m) => {
-      const name = m[2]!.replace(/<[^>]+>/g, "");
+      // A folded group's summary sits in its button beside the name (components/Panel.tsx), and is no part of it.
+      const name = m[2]!.replace(/<span id="[^"]+-summary"[^>]*>[^<]*<\/span>/, "").replace(/<[^>]+>/g, "");
       return m[1] ? `${name} ${m[1] === "true" ? "open" : "folded"}` : name;
     });
   }
@@ -191,6 +192,13 @@ describe("the page as it draws its groups (8.4)", () => {
     // A folded body keeps its grid: the hidden attribute alone hides it (globals.css).
     assert.deepEqual(bodies, ["shown grid", "hidden grid", "hidden grid", "hidden grid"]);
     assert.deepEqual(headings(page(ALL_OPEN)).slice(0, 4), ["What players see open", "Map image and grid open", "Walls and movement open", "Scene open"]);
+  });
+
+  test("a folded group says what it holds beside its name, with its icon, and an open one says nothing (docs/design-v1-design-pass.md 4.1)", () => {
+    const html = page(PHONE);
+    const summaries = [...html.matchAll(/<span id="([^"]+)-summary"[^>]*>([^<]*)<\/span>/g)].map((m) => m[2]);
+    assert.deepEqual(summaries, ["No map image · Squares", "Walls do not block moves", "40 × 30 squares"]);
+    assert.equal((html.match(/data-group-icon=""/g) ?? []).length, 4, "each group's icon");
   });
 
   test("a group stays as the device left it", () => {

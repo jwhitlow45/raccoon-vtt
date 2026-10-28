@@ -184,9 +184,9 @@ async function scenesPanel(page: Page): Promise<Locator> {
   return sheet;
 }
 
-/** A panel's section by its label: the nearest section around the heading, since a sheet is a section around them all. */
+/** A panel's section or group by its label: the nearest around the heading, since a sheet is a section around them all, and a group is no section (components/Panel.tsx). */
 function section(panel: Locator, label: string): Locator {
-  return panel.getByRole("heading", { name: label, exact: true }).locator("xpath=ancestor::section[1]");
+  return panel.getByRole("heading", { name: label, exact: true }).locator("xpath=ancestor::*[self::section or @data-panel-group][1]");
 }
 
 function playersSee(within: Locator): Locator {

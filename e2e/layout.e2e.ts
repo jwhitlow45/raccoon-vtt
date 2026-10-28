@@ -2295,12 +2295,22 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
     return sheet;
   }
 
-  /** Each section's label in a panel, in order: the first heading that belongs to the section itself. */
+  /**
+   * Each section's and group's label in a panel, in order: the first heading that belongs to the part itself.
+   * A group is no section (components/Panel.tsx), and its heading holds its summary while folded, so a group gives its name alone.
+   */
   function sectionLabels(panel: Locator): Promise<string[]> {
-    return panel.evaluate((root) =>
-      Array.from((root as unknown as El).querySelectorAll("section"))
-        .map((section) => Array.from(section.querySelectorAll("h2, h3, h4")).find((h) => h.closest("section") === section)?.textContent?.trim() ?? "")
-        .filter((label) => label !== ""),
+    const PART = "section, [data-panel-group]";
+    return panel.evaluate(
+      (root, part) =>
+        Array.from((root as unknown as El).querySelectorAll(part))
+          .map((section) => {
+            const heading = Array.from(section.querySelectorAll("h2, h3, h4")).find((h) => h.closest(part) === section);
+            const name = heading?.querySelectorAll("[data-group-fold] span[id], span[id]")[0];
+            return (name ?? heading)?.textContent?.trim() ?? "";
+          })
+          .filter((label) => label !== ""),
+      PART,
     );
   }
 

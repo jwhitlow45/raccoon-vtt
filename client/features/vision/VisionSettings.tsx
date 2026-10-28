@@ -6,7 +6,7 @@ import { sceneWalls } from "#shared/rules/walls.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Spinner, useDelayed } from "../../components/Loading.tsx";
-import { Help, Note, Section } from "../../components/Panel.tsx";
+import { Help, Note } from "../../components/Panel.tsx";
 import { RowChevron } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
@@ -48,8 +48,9 @@ const PHASE_LIGHTS: readonly { value: LightLevel | "keep"; label: string }[] = [
 type Patch = OpOf<"scene.update">["patch"];
 
 /**
- * What players see of a scene, in its settings (docs/design-v1-map-discovery.md
- * 8.1 and 8.4, docs/design-v1-maps-vision.md 4.3.1): Players see first,
+ * What players see of a scene, the first group of its settings
+ * (docs/design-v1-map-discovery.md 8.1 and 8.4, docs/design-v1-maps-vision.md
+ * 4.3.1), whose `Group` the settings page draws: Players see first,
  * then the light level, the light each map phase brings, Sight, who sees
  * for themselves, and every party creature on the scene with its senses,
  * its light and whether it lends sight, so the DM sees what owners set.
@@ -70,7 +71,7 @@ type Patch = OpOf<"scene.update">["patch"];
  * the list of who sees for themselves follows it. Each waits only on its
  * own changes.
  */
-export function VisionSettings(props: { scene: Scene; fold?: Parameters<typeof Section>[0]["fold"] }) {
+export function VisionSettings(props: { scene: Scene }) {
   const { scene } = props;
   const actions = useRoomActions();
   const update = (patch: Patch) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
@@ -115,7 +116,7 @@ export function VisionSettings(props: { scene: Scene; fold?: Parameters<typeof S
   );
 
   return (
-    <Section label="What players see" fold={props.fold}>
+    <>
       <div onKeyDown={ask.asking?.change.where === "preset" ? ask.onKeyDown : undefined} style={{ display: "grid", minWidth: 0 }}>
         <PlayersSeeChoice
           value={choice === "custom" ? null : choice}
@@ -197,7 +198,7 @@ export function VisionSettings(props: { scene: Scene; fold?: Parameters<typeof S
       </Fold>
 
       <CopySettingsButton scene={scene} />
-    </Section>
+    </>
   );
 }
 

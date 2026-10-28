@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { IconName } from "../../components/Icon.tsx";
 import { theme } from "../../lib/theme.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { layoutWidth } from "../device/layout.ts";
@@ -21,6 +22,14 @@ export const SCENE_GROUP_LABELS: Readonly<Record<SceneGroup, string>> = {
   map: "Map image and grid",
   walls: "Walls and movement",
   scene: "Scene",
+};
+
+/** Each group's icon, after its chevron (docs/design-v1-design-pass.md 4.1). */
+export const SCENE_GROUP_ICONS: Readonly<Record<SceneGroup, IconName>> = {
+  players: "shown",
+  map: "image",
+  walls: "walls",
+  scene: "scenes",
 };
 
 export type SceneFolds = Readonly<Record<SceneGroup, boolean>>;
@@ -125,7 +134,7 @@ function deviceStorage(): WriteStorage | null {
 /** Per Room page (state/scope.ts): the Scenes sheet and the side panel's tab draw in separate trees, and both read this. */
 export const sceneFoldsSlot = scopeSlot(() => createSceneFolds(deviceStorage()));
 
-/** A group's fold for a `Section`, kept up to date with every tap. */
+/** A group's fold for its `Group`, kept up to date with every tap. */
 export function useSceneFolds(): (group: SceneGroup) => { open: boolean; onToggle(): void } {
   const store = useScoped(sceneFoldsSlot);
   const read = () => store.get(layoutWidth());

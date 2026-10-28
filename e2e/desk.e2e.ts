@@ -337,7 +337,8 @@ describe("raccoon-vtt: keys and focus for a DM at a computer", { timeout: 300_00
 
   test("8. a part that opens in place takes focus, and its Cancel gives focus back to its button (LPD-DESK-7)", async () => {
     const panel = dm.getByRole("tabpanel");
-    const section = (heading: string) => panel.locator("section").filter({ has: dm.getByRole("heading", { name: heading, exact: true }) }).last();
+    // A scene settings group is no section (components/Panel.tsx `GROUP_BOX`).
+    const section = (heading: string) => panel.locator("section, [data-panel-group]").filter({ has: dm.getByRole("heading", { name: heading, exact: true }) }).last();
 
     // Menu's X-card opens at its words, never at the X that sends it.
     await openSideTab(dm, "Menu");

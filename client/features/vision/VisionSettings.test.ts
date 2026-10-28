@@ -89,7 +89,7 @@ describe("What players see (docs/design-v1-map-discovery.md 8.1 and 8.4)", () =>
 
   test("Players see heads the group, a radio group named by it and described by the chosen option's help", () => {
     const html = render(table({ on: true, light: "dark" }));
-    assert.match(html, /<h3[^>]*>What players see<\/h3>/);
+    assert.doesNotMatch(html, /What players see/, "the settings page draws the group around it (features/scenes/SceneSettings.tsx)");
     assert.equal(named(html, group, "aria-labelledby"), "Players see");
     assert.match(named(html, group, "aria-describedby"), /^Players see what their characters see\./);
     assert.match(html, /<input type="radio"[^>]*checked=""[^>]*value="explore"/);

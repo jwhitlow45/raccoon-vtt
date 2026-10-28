@@ -593,9 +593,9 @@ export function sceneGroupFold(panel: Locator, name: string): Locator {
   return panel.getByRole("heading", { name, exact: true }).getByRole("button", { name, exact: true });
 }
 
-/** The section of a scene settings group, folded or open. */
+/** The box of a scene settings group, folded or open: a `Group`, which is no section (components/Panel.tsx `GROUP_BOX`). */
 export function sceneGroup(panel: Locator, name: string): Locator {
-  return panel.getByRole("heading", { name, exact: true }).locator("xpath=ancestor::section[1]");
+  return sceneGroupFold(panel, name).locator("xpath=ancestor::*[@data-panel-group][1]");
 }
 
 /**

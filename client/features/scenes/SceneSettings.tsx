@@ -9,7 +9,7 @@ import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { ErrorText, FieldRow, Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { buttonLook } from "../../components/looks.ts";
-import { Help, Note, Section } from "../../components/Panel.tsx";
+import { Group, Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
@@ -36,7 +36,8 @@ import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
 import { fogsWithFirstMap, replaceMap, sameArt, viewFromCamera } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
-import { SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
+import { sceneGroupSummary } from "./sceneSummary.ts";
+import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
 import { currentStageCamera } from "./stageCamera.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
 import { layoutWidth } from "../device/layout.ts";
@@ -48,9 +49,10 @@ import type { PanelClose } from "../panels.ts";
  * then What players see, everything that decides what reaches players
  * (features/vision/VisionSettings.tsx), then Map image and grid, Walls and
  * movement, and the scene's own size, background and views, then export
- * and deleting it. Each group folds, setup groups starting folded on a
- * phone (settingsFolds.ts), and stays mounted while folded, so an upload
- * in it is never cut short. Every change is one op, so it shows at once
+ * and deleting it. Each group folds as the panel kit's `Group`, with its
+ * icon and, folded, what it holds (sceneSummary.ts), setup groups starting
+ * folded on a phone (settingsFolds.ts), and stays mounted while folded, so
+ * an upload in it is never cut short. Every change is one op, so it shows at once
  * and undo covers it, and a setting that is on or off is a Switch row
  * named by the setting (docs/design-v1-visual.md 3.7), never a button
  * named by its state.
@@ -62,7 +64,8 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
   const scope = useRoomScope();
   const startFraming = useStartFraming();
   const fold = useSceneFolds();
-  const group = (key: SceneGroup) => ({ ...fold(key), keep: true });
+  // As the token panel's and the character page's groups (docs/design-v1-design-pass.md 4.1), kept mounted while folded so an upload in one is never cut short.
+  const group = (key: SceneGroup) => ({ label: SCENE_GROUP_LABELS[key], icon: SCENE_GROUP_ICONS[key], ...fold(key), keep: true, summary: sceneGroupSummary(scene, key) });
   const update = (patch: OpOf<"scene.update">["patch"]) => actions.dispatch({ t: "scene.update", sceneId: scene.id, patch });
   const playerSceneId = useRoomView((s) => s.view?.meta.playerSceneId ?? null);
   const deleteWhy = deleteBlocked(others, scene.id, playerSceneId);
@@ -87,15 +90,17 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
       </Section>
 
-      <VisionSettings scene={scene} fold={group("players")} />
+      <Group {...group("players")}>
+        <VisionSettings scene={scene} />
+      </Group>
 
-      <Section label={SCENE_GROUP_LABELS.map} fold={group("map")}>
+      <Group {...group("map")}>
         <MapImageRow scene={scene} close={props.close} />
         <PhasesSection scene={scene} />
         <GridStyle scene={scene} onChange={(grid) => update({ grid })} close={props.close} />
-      </Section>
+      </Group>
 
-      <Section label={SCENE_GROUP_LABELS.walls} fold={group("walls")}>
+      <Group {...group("walls")}>
         <BlockMovementSetting scene={scene} />
         <SettingRow name="Automatic walls" help={AUTO_WALLS_NOTE[autoWallsOf(scene)]} wide>
           <Select<AutoWalls> label="Automatic walls" value={autoWallsOf(scene)} options={AUTO_WALLS} onChange={(autoWalls) => update({ autoWalls })} />
@@ -112,9 +117,9 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
           </Button>
           <ConfirmButton label="Clear the build" confirm="Tap again to clear" title="Remove every floor, wall, door, height, stair, label, light and stamp" onConfirm={() => actions.dispatch({ t: "build.clear", sceneId: scene.id })} />
         </div>
-      </Section>
+      </Group>
 
-      <Section label={SCENE_GROUP_LABELS.scene} fold={group("scene")}>
+      <Group {...group("scene")}>
         <SettingRow name={size.name} help={size.holds ?? undefined} wide>
           <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
             <NumberInput label={size.across} value={scene.bounds.w} min={1} max={MAX_SCENE_CELLS} onChange={(w) => update({ bounds: { ...scene.bounds, w } })} />
@@ -138,7 +143,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
           </div>
         </SettingRow>
         {isoOffered ? <SuggestedView scene={scene} onChange={(suggestedView) => update({ suggestedView })} /> : null}
-      </Section>
+      </Group>
 
       <MapExport scene={scene} />
 
