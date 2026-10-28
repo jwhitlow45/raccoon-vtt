@@ -18,6 +18,7 @@ const { Row } = await import("./Row.tsx");
 const { SettingRow } = await import("./SettingRow.tsx");
 const { RadioCards } = await import("./RadioCards.tsx");
 const { PlayersSeeChoice } = await import("../features/vision/PlayersSee.tsx");
+const { ShapeRow } = await import("../features/grid/ShapeRow.tsx");
 
 const html = renderToStaticMarkup;
 
@@ -266,6 +267,18 @@ describe("three even choices that wrap (docs/design-v1-design-pass.md 4.2)", () 
     assert.equal(classOf({ even: true, wrap: true, options: four }), "rvtt-even-choices");
     const six = [...four, { value: "y", label: "Y" }, { value: "z", label: "Z" }];
     assert.equal(classOf({ even: true, wrap: true, options: six }), "rvtt-even-choices rvtt-even-six");
+  });
+
+  test("Grid shape is three even options that wrap, each label wrapping between its words", () => {
+    const markup = html(createElement(ShapeRow, { name: "Grid shape", help: "Help.", value: "squares", onChange() {} }));
+    assert.match(markup, /role="radiogroup"[^>]* class="rvtt-even-choices rvtt-even-three"/);
+    const labels = [...markup.matchAll(/<label class="rvtt-choice" style="([^"]+)"/g)].map((m) => m[1]!);
+    assert.equal(labels.length, 3);
+    for (const style of labels) {
+      assert.match(style, /flex:1 1 0/);
+      assert.match(style, /white-space:normal/);
+      assert.match(style, new RegExp(`min-height:${theme.touch}px`));
+    }
   });
 
   test("their rule stands them one per row under 220 px of their container, above the two by two rule's reach", () => {

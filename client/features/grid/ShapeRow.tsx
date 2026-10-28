@@ -9,8 +9,9 @@ import { SHAPE_CHOICES, storedShape, type ShapeChoice } from "./words.ts";
 
 /**
  * A grid shape choice (docs/design-v1-hex-grids.md section 8): Squares,
- * Hex rows and Hex columns as one radio group, which wraps onto two lines
- * on a narrow phone at a large size rather than cut a word. A choice the
+ * Hex rows and Hex columns as one radio group sharing one row evenly, a
+ * label wrapping between its words, and one per row where a third of the
+ * row cannot hold a word (docs/design-v1-design-pass.md 4.2). A choice the
  * scene cannot take is off, and the reason shows under the group and
  * describes it, so focus stays on the chosen radio and a screen reader
  * hears why. `refused` holds each choice's reason, `note` a line about
@@ -37,6 +38,8 @@ export function ShapeRow(props: {
             describedBy={[ids.helpId, reasons.length > 0 ? reasonId : null, props.note ? noteId : null].filter(Boolean).join(" ")}
             value={props.value}
             disabled={props.disabled}
+            even
+            wrap
             options={SHAPE_CHOICES.map((c) => ({ ...c, disabled: props.refused?.[c.value] !== undefined && c.value !== props.value }))}
             onChange={props.onChange}
           />

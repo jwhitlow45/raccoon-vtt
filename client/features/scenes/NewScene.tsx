@@ -310,6 +310,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
       <Segmented<Kind>
         label="Kind of scene"
         value={kind}
+        even
+        wrap
         onChange={pick}
         options={[
           { value: "mat", label: "Battle mat" },
