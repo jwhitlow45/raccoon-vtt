@@ -368,11 +368,12 @@ async function dmPageFor(size: Size): Promise<Page> {
 }
 
 /**
- * Signs the DM in again by the DM link, on a session of its own, and moves
- * the DM's pages and op socket to it. Each session has its own snapshot
- * budget (design 10.4, twenty a minute), and a sweep that opens the DM's
- * page at every size spends most of one, so each such sweep starts on a
- * whole budget rather than wait out what the sweep before it spent.
+ * Signs the DM in again by the DM link, on a session of its own, moves the
+ * op socket to it and closes the DM's page, which dmPageFor opens again on
+ * the new session. Each session has its own snapshot budget (design 10.4,
+ * twenty a minute), and a sweep that opens the DM's page at every size
+ * spends most of one, so each such sweep starts on a whole budget rather
+ * than wait out what the sweep before it spent.
  */
 async function newDmSession(): Promise<void> {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
