@@ -1,6 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
-import type { Grid } from "#shared/rules/grid.ts";
+import { isHex, type Grid } from "#shared/rules/grid.ts";
 import { calibrationFromBox, type CalBox, type Calibration, type Corner, type Point } from "./calibrate.ts";
 
 /**
@@ -55,13 +55,24 @@ export type GridToolState = {
 };
 
 /**
+ * A search's note for a scene on grid `g`, or null. Searches find square
+ * grids only, so on hexes a note left from before Grid shape switched, on
+ * this device or another, measured cells the scene no longer has. Only
+ * the note that the scene changed, which measured nothing, still holds.
+ */
+export function noteFor(found: FoundNote | null, sceneId: string, g: Grid): FoundNote | null {
+  return found?.sceneId === sceneId && (!isHex(g) || found.outcome === "changed") ? found : null;
+}
+
+/**
  * The grid the box stands for. A box a search left on this scene stands for
  * the grid it measured, so Apply, the drawn lines and the size read that,
  * not `calibrationFromBox`, whose snap for a hand-drawn box would move a
  * measured origin off its lines. Once the box moves, it is the DM's own.
  */
 export function boxCalibration(box: CalBox, found: FoundNote | null, sceneId: string, g: Grid): Calibration {
-  return found?.sceneId === sceneId && found.box === box && found.cal ? found.cal : calibrationFromBox(box, g);
+  const note = noteFor(found, sceneId, g);
+  return note?.box === box && note.cal ? note.cal : calibrationFromBox(box, g);
 }
 
 /**
@@ -75,6 +86,17 @@ export function endFinding(store: StoreApi<GridToolState>, sceneId: string): voi
   if (!finding || finding.sceneId !== sceneId) return;
   finding.cancel();
   store.setState({ finding: null });
+}
+
+/**
+ * The scene's Grid shape changed on this device: a search still running
+ * for it ends, and its note and the tool's box go, since both measured the
+ * cells of the shape before. The tool opens on a box over the new cells.
+ */
+export function shapeChanged(store: StoreApi<GridToolState>, sceneId: string): void {
+  endFinding(store, sceneId);
+  const { found, sceneId: open } = store.getState();
+  store.setState({ ...(found?.sceneId === sceneId ? { found: null } : {}), ...(open === sceneId ? { box: null, drag: null } : {}) });
 }
 
 /** How close, in screen pixels, a finger must land to grab a corner: half a 44 px target. */

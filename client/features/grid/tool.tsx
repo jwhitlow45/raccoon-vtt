@@ -8,7 +8,7 @@ import { currentStageCamera } from "../scenes/stageCamera.ts";
 import type { ToolContext, ToolDef } from "../tools.ts";
 import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { boxAt, boxCorner, boxFromDrag, canonicalToWorld, insideBox, nudgeBox, resizeBox, worldToCanonical, type CalBox, type Corner } from "./calibrate.ts";
-import { endFinding, gridSlot, HANDLE_HIT_PX } from "./store.ts";
+import { endFinding, gridSlot, HANDLE_HIT_PX, noteFor } from "./store.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
 /** A drag shorter than this, in screen pixels, is a tap. */
@@ -67,9 +67,9 @@ export const gridTool: ToolDef = {
   order: TOOL_ORDER.grid,
   cursor: "crosshair",
   activate(ctx) {
-    // A grid just found for this scene (outcome.ts) brings its own box.
+    // A grid just found for this scene (outcome.ts) brings its own box, on squares, where it was found.
     const { found } = ctx.scope.get(gridSlot).getState();
-    const box = found?.sceneId === ctx.scene.id && found.box ? found.box : centeredBox(ctx);
+    const box = noteFor(found, ctx.scene.id, sceneGrid(ctx.scene))?.box ?? centeredBox(ctx);
     ctx.scope.get(gridSlot).setState({ box, drag: null, sceneId: ctx.scene.id });
   },
   deactivate(ctx) {

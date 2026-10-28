@@ -7,14 +7,14 @@ import { apply, room as roomState } from "#shared/testutil.ts";
 import { mapScene } from "../scenes/create.ts";
 import { importScene, placeMap } from "../uvtt/batch.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { gridOfShape, SQUARES } from "#shared/rules/grid.ts";
 import { calibrationFromBox, nudgeBox, sameCalibration } from "./calibrate.ts";
 import { cameWithGrid, IMPORT_WAIT_MS, importSearch, importSearchFrom, replacementFound, type ImportWait, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, gridOps, landSearch, middleOf, showOutcome } from "./outcome.ts";
-import { boxCalibration, endFinding, type GridToolState } from "./store.ts";
+import { boxCalibration, endFinding, noteFor, shapeChanged, type GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
 
-type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile"> & { map: SceneMap };
+type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile" | "gridShape"> & { map: SceneMap };
 
 // A 1400 x 1000 map made with today's first guess: 47 px squares from the corner.
 const MAP: SceneMap = { assetId: "a1", widthPx: 1400, heightPx: 1000, cellPx: 47, originPx: { x: 0, y: 0 } };
@@ -241,7 +241,7 @@ class CountingWorker extends AnsweringWorker {
   }
 }
 
-type LiveScene = typeof SCENE;
+type LiveScene = GridScene;
 
 /** A scene the ops sent change, as the room would, and the tool's store. */
 function liveRoom() {
@@ -491,6 +491,120 @@ describe("a search the DM works around", () => {
         workers.every((w) => w.terminated === 1),
         `run ${run}: every Worker ended once`,
       );
+    }
+  });
+});
+
+/*
+ * Searches find square grids only (docs/design-v1-hex-grids.md), so one
+ * begun on squares never lands on the scene once it is on hexes, whether
+ * Grid shape changed on this device or another, and a square grid found
+ * before the switch stands for nothing after it.
+ */
+describe("a switch to hexes", () => {
+  const HEX_ROWS = gridOfShape("hexRows");
+
+  test("a square search still running when Grid shape here switches to hex rows ends at once and applies nothing", async () => {
+    const live = liveRoom();
+    const worker = new CountingWorker();
+    const running = findOnScene({ actions: live.actions, store: live.store, sceneId: "s1", scene: live.scene, urls: ["/m"], makeWorker: () => worker });
+    live.store.setState({ sceneId: "s1", box: { x: 0, y: 0, size: 210 } });
+    // What scene settings' Grid shape does, then the room's copy of the scene it sent.
+    shapeChanged(live.store, "s1");
+    live.elsewhere({ ...live.scene(), gridShape: "hexRows" });
+    assert.equal(live.store.getState().finding, null, "the search ended with the switch");
+    assert.equal(worker.terminated, 1);
+    worker.answer(SURE);
+    await running;
+    assert.deepEqual(live.sent, []);
+    assert.equal(live.store.getState().found, null);
+    assert.equal(live.store.getState().box, null, "the square box went, so the tool opens on a box over hexes");
+  });
+
+  test("a square search still running when another device switches the scene to hex rows applies nothing", async () => {
+    for (const answer of [SURE, DOUBTFUL]) {
+      const live = liveRoom();
+      const worker = new CountingWorker();
+      const running = findOnScene({ actions: live.actions, store: live.store, sceneId: "s1", scene: live.scene, urls: ["/m"], makeWorker: () => worker });
+      const box = { x: 0, y: 0, size: 210 };
+      live.store.setState({ box });
+      live.elsewhere({ ...live.scene(), gridShape: "hexRows" });
+      const before = live.scene();
+      worker.answer(answer);
+      await running;
+      assert.deepEqual(live.sent, []);
+      assert.equal(live.scene(), before);
+      assert.equal(live.store.getState().box, box, "the box stays where it was");
+      assert.equal(live.store.getState().found?.outcome, "changed", "the line says the scene changed, and keeps no square grid");
+      assert.equal(noteFor(live.store.getState().found, "s1", HEX_ROWS)?.outcome, "changed", "which the hexes' options line still says");
+      assert.equal(live.store.getState().finding, null);
+    }
+  });
+
+  test("a square grid found before the switch is not reused after it, from this device or another", () => {
+    const measured = { cellPx: 140, originPx: { x: 6, y: 6 } };
+    const offered = () => {
+      const r = room();
+      showOutcome({ actions: r.actions, store: r.store, scene: SCENE, found: { tier: "medium", cal: measured }, fit: true, at: { x: 700, y: 500 } });
+      r.store.setState({ sceneId: "s1" });
+      return r;
+    };
+    // Another device's switch: the note stays in this one's store, but stands for nothing on hexes.
+    const remote = offered();
+    const { found, box } = remote.store.getState();
+    assert.ok(box);
+    assert.deepEqual(boxCalibration(box, found, "s1", SQUARES), measured);
+    assert.deepEqual(boxCalibration(box, found, "s1", HEX_ROWS), calibrationFromBox(box, HEX_ROWS));
+    // This device's: the note and its box go.
+    const local = offered();
+    shapeChanged(local.store, "s1");
+    assert.equal(local.store.getState().found, null);
+    assert.equal(local.store.getState().box, null);
+    // Another scene's note and box are not this switch's.
+    const other = offered();
+    shapeChanged(other.store, "s2");
+    assert.deepEqual(other.store.getState().found?.cal, measured);
+    assert.ok(other.store.getState().box);
+  });
+
+  test("a found grid shown on a hex scene changes nothing: an upload's answer in time, or Find the grid's", async () => {
+    const hex = { ...SCENE, gridShape: "hexRows" as const };
+    const { sent, actions, store } = room();
+    const box = { x: 0, y: 0, size: 210 };
+    store.setState({ box });
+    const guess = { cellPx: 47, originPx: { x: 0, y: 0 } };
+    assert.equal(showOutcome({ actions, store, scene: hex, found: { tier: "high", cal: FOUND }, fit: true, at: { x: 700, y: 500 }, fallback: guess }), null);
+    assert.deepEqual(sent, []);
+    assert.equal(store.getState().found, null);
+    assert.equal(store.getState().box, box);
+    let made = 0;
+    void findOnScene({ actions, store, sceneId: "s1", scene: () => hex, urls: ["/m"], makeWorker: () => (made++, new CountingWorker()), timers: fakeTimers() });
+    await settled();
+    assert.equal(made, 0, "a hex scene is never searched");
+    assert.equal(store.getState().finding, null);
+  });
+
+  test("an upload's search of the copy that lands after a switch to hex rows, here or elsewhere, applies nothing", async () => {
+    for (const where of ["here", "elsewhere"] as const) {
+      const live = liveRoom();
+      const timers = fakeTimers();
+      const worker = new CountingWorker();
+      const search = importSearch(new Blob(["x"]), "phone", { makeWorker: () => worker, timers, size: async () => null });
+      const waiting = search.afterUpload(["/m/mobile"], IMPORT_WAIT_MS);
+      await settled();
+      timers.fire();
+      const { later } = await waiting;
+      assert.ok(later);
+      const guess = { cellPx: 47, originPx: { x: 0, y: 0 } };
+      const landing = landSearch({ actions: live.actions, store: live.store, sceneId: "s1", start: live.scene(), scene: live.scene, search: later, ms: FIND_TIMEOUT_MS, timers, fit: true, fallback: guess });
+      if (where === "here") shapeChanged(live.store, "s1");
+      live.elsewhere({ ...live.scene(), gridShape: "hexRows" });
+      worker.answer(SURE);
+      await landing;
+      assert.deepEqual(live.sent, [], where);
+      assert.equal(live.store.getState().found?.cal, undefined, where);
+      if (where === "elsewhere") assert.equal(live.store.getState().found?.outcome, "changed");
+      assert.equal(live.store.getState().finding, null, where);
     }
   });
 });

@@ -17,11 +17,11 @@ import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import type { ViewKind } from "../../lib/view.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useAssets, useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useAssets, useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
 import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound, searchOnImport, type ImportWait } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
-import { useGridStore } from "../grid/store.ts";
+import { shapeChanged, useGridStore } from "../grid/store.ts";
 import { useFindGrid, useLandLater } from "../grid/useFindGrid.ts";
 import { shapeRefusal, ShapeRow } from "../grid/ShapeRow.tsx";
 import { HEX_LIMITS, SHAPE_HELP, sceneCellWord, shapeChoice, sizeWords, type ShapeChoice } from "../grid/words.ts";
@@ -275,6 +275,7 @@ function GridShape(props: { scene: Scene; close: PanelClose }) {
   const { scene } = props;
   const actions = useRoomActions();
   const ui = useRoomUi();
+  const gridStore = useGridStore();
   const refusal = (c: ShapeChoice) => (s: { view: Parameters<typeof shapeRefusal>[0] | null }) => (s.view ? shapeRefusal(s.view, scene, c) : null);
   const squares = useRoomView(refusal("squares"));
   const rows = useRoomView(refusal("hexRows"));
@@ -289,6 +290,8 @@ function GridShape(props: { scene: Scene; close: PanelClose }) {
       refused={refused}
       onChange={(gridShape) => {
         if (refused[gridShape] !== undefined) return;
+        // A square grid searched for or found stands for nothing on hexes, nor a hex box on squares.
+        shapeChanged(gridStore, scene.id);
         actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { gridShape } });
         if (scene.map) {
           ui.setTool("grid");
@@ -457,6 +460,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
   const gridStore = useGridStore();
+  const room = useRoomStore();
   const assets = useAssets();
   const landLater = useLandLater();
   const phaseCount = scene.phases?.length ?? 0;
@@ -521,10 +525,13 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
         const bounds = fitBounds(next);
         if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
       } else if (!map || found || wait.later) {
+        // The shape the room holds now, not as the upload began: Grid shape may have changed meanwhile, here or on another device.
+        const gridShape = room.getState().view?.scenes[scene.id]?.gridShape;
+        const landing = { id: scene.id, bounds: scene.bounds, gridShape, map: next };
         if (found) {
           const at = { x: next.widthPx / 2, y: next.heightPx / 2 };
-          showOutcome({ actions, store: gridStore, scene: { id: scene.id, bounds: scene.bounds, map: next }, found, fit: true, at, fallback, ownGrid });
-        } else if (wait.later) landLater({ sceneId: scene.id, start: { id: scene.id, bounds: scene.bounds, map: next }, search: wait.later, fallback, ownGrid });
+          showOutcome({ actions, store: gridStore, scene: landing, found, fit: true, at, fallback, ownGrid });
+        } else if (wait.later) landLater({ sceneId: scene.id, start: landing, search: wait.later, fallback, ownGrid });
         ui.setTool("grid");
         props.close({ placing: true });
       }

@@ -1,4 +1,5 @@
 import type { Scene, SceneMap } from "#shared/model.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import type { StoreApi } from "zustand/vanilla";
 import { dispatchGesture } from "../../state/actions.ts";
@@ -14,7 +15,7 @@ import { endFinding, type Fallback, type FoundNote, type GridToolState } from ".
  * no grid is said. Import and Find the grid share it.
  */
 
-export type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile"> & { map: SceneMap };
+export type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile" | "gridShape"> & { map: SceneMap };
 type Gesture = Pick<RoomActions, "dispatch" | "newId">;
 
 /**
@@ -102,6 +103,8 @@ export function showOutcome(input: {
   ownGrid?: boolean;
 }): FoundNote | null {
   const { scene, found } = input;
+  // A search finds square grids only. One that ends on a scene now on hexes measured cells it no longer has.
+  if (isHex(sceneGrid(scene))) return null;
   if (!found) {
     const box = input.store.getState().box;
     const note: FoundNote = { sceneId: scene.id, outcome: "none", cellPx: 0, box };
@@ -123,9 +126,15 @@ export function showOutcome(input: {
   return note;
 }
 
-/** Whether a scene shows the image it did at `start`, with the same grid and size. */
+/** Whether a scene shows the image it did at `start`, with the same grid, grid shape and size. */
 function unchangedSince(start: GridScene, now: GridScene): boolean {
-  return now.map.assetId === start.map.assetId && sameCalibration(now.map, start.map) && now.bounds.w === start.bounds.w && now.bounds.h === start.bounds.h;
+  return (
+    now.map.assetId === start.map.assetId &&
+    sameCalibration(now.map, start.map) &&
+    sceneGrid(now) === sceneGrid(start) &&
+    now.bounds.w === start.bounds.w &&
+    now.bounds.h === start.bounds.h
+  );
 }
 
 /** How long Find the grid waits for the map to download, decode and be searched, ms. Past it, no grid is found. */
@@ -146,7 +155,8 @@ export async function findOnScene(input: {
   timers?: Timers;
 }): Promise<void> {
   const start = input.scene();
-  if (!start || input.store.getState().finding) return;
+  // Find the grid is off on hexes (settings and the tool), and this holds to it whatever asks.
+  if (!start || isHex(sceneGrid(start)) || input.store.getState().finding) return;
   const search = searchGrid({ urls: input.urls }, input.makeWorker);
   await landSearch({ ...input, start, search, ms: FIND_TIMEOUT_MS });
 }

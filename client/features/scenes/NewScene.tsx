@@ -197,7 +197,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
 
   const createFromAsset = (asset: MapAsset, fileName: string, intent: NewSceneIntent, gridShape: ShapeChoice, wait: ImportWait = { answer: null, later: null }) => {
     const id = actions.newId();
-    const made = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset, gridShape: storedShape(gridShape) });
+    const shape = storedShape(gridShape);
+    const made = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset, gridShape: shape });
     const { hinted } = made;
     const scene = seeing(made.scene, "map", intent);
     actions.dispatch({ t: "scene.create", scene });
@@ -208,10 +209,10 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     const found = importFound(wait.answer, hinted, map);
     if (found) {
       const at = { x: map.widthPx / 2, y: map.heightPx / 2 };
-      showOutcome({ actions, store: gridStore, scene: { id, bounds: scene.bounds, map }, found, fit: true, at, fallback });
+      showOutcome({ actions, store: gridStore, scene: { id, bounds: scene.bounds, gridShape: shape, map }, found, fit: true, at, fallback });
     } else if (wait.later && !hinted) {
       // A phone's search of the copy that outlived the wait goes on, and Line up grid shows it.
-      landLater({ sceneId: id, start: { id, bounds: scene.bounds, map }, search: wait.later, fallback });
+      landLater({ sceneId: id, start: { id, bounds: scene.bounds, gridShape: shape, map }, search: wait.later, fallback });
     } else wait.later?.cancel();
     // A scale from the file name is usually right. A guess never is.
     open(id, hinted ? null : "grid");

@@ -8,7 +8,7 @@ import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, OptionsStrip, StripText, ValueChip } from "../measure/controls.tsx";
 import { fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
 import { applyGrid, boxAround, fallbackOps, middleOf } from "./outcome.ts";
-import { boxCalibration, endFinding, useGridStore, type Fallback } from "./store.ts";
+import { boxCalibration, endFinding, noteFor, useGridStore, type Fallback } from "./store.ts";
 import { useFindGrid } from "./useFindGrid.ts";
 import { HEX_LIMITS } from "./words.ts";
 
@@ -62,7 +62,8 @@ export default function GridOptions() {
   const saved = applied === box && !changed && !resize;
   const searching = finding?.sceneId === sceneId;
   // A search's note stands while the box is where the search left it.
-  const note = found?.sceneId === sceneId && found.box === box ? found : null;
+  const left = noteFor(found, sceneId, grid);
+  const note = left?.box === box ? left : null;
 
   const apply = () => {
     applyGrid({ actions, store: gridState, sceneId, cal: changed ? cal : null, bounds: resize ? bounds : null });
