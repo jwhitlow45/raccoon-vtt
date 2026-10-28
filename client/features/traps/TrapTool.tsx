@@ -1,7 +1,7 @@
 import { useStore } from "zustand";
 import { LIMITS } from "#shared/limits.ts";
 import type { Scene, Trap, TrapAction, TrapZone } from "#shared/model.ts";
-import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { cellWord, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { LEVEL_BANDS, trapPreset, type LevelBand } from "#shared/srd/traps.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
@@ -10,38 +10,39 @@ import { lightAt, LIGHT_REACH_PX } from "../builder/lightTap.ts";
 import { sceneStamps, stampAt } from "../builder/stamps/rules.ts";
 import { doorUnder, sameDoor } from "../doors/doors.ts";
 import { DOOR_SLOP_PX } from "../doors/tap.ts";
-import { HEX_LIMITS } from "../grid/words.ts";
 import { ChoiceRows, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChip } from "../measure/controls.tsx";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { trapCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 import { TRAP_ICON_BOX, TRAP_ICON_PATH } from "./icon.ts";
 import { BAND_NAMES, newTrapInput, rectBetween, START_ALARM, START_BLANK, startChoices, startKind, tapRect, trapAt, wireBetween, wireEnd, withRect, type ZoneKind } from "./rules.ts";
-import { pickZone, trapSlot, ZONE_KINDS, type TrapDraft, type TrapPicking } from "./store.ts";
+import { pickZone, trapSlot, zoneKinds, type TrapDraft, type TrapPicking } from "./store.ts";
 
 /**
  * The Trap tool (docs/design-v1-traps.md 4.1), the DM's: draw a new trap's
  * squares, drag its trip wire or tap the door it guards, and tap a trap to
  * open its pane. While the pane asks for something on the map (squares to
  * add, the squares it hits, a door, light, creature or stamp it sets), the
- * next tap or drag picks it.
+ * next tap or drag picks it. On a hex scene it draws hexes and snaps a
+ * wire's ends to hex corners (rules.ts), and its words say "hexes".
  */
-
-/** Why the Trap tool has nothing to place, or null where it works: zones are squares until a later phase of hex grids. */
-export function trapToolOff(scene: Pick<Scene, "gridShape"> | undefined): string | null {
-  return scene !== undefined && isHex(sceneGrid(scene)) ? HEX_LIMITS.trap : null;
-}
 
 function sceneTraps(ctx: ToolContext): Trap[] {
   const traps = ctx.getState().view?.traps ?? {};
   return Object.values(traps).filter((t) => t.sceneId === ctx.scene.id);
 }
 
-const ZONE_HINTS: Record<ZoneKind, string> = {
-  squares: "Drag across the squares of a new trap, or tap to place it at its own size.",
-  wire: "Drag from one end of the trip wire to the other.",
-  door: "Tap a door to trap it.",
-};
+/** What the options line says for each kind of zone, in the scene's cell word. */
+export function zoneHint(g: Grid, kind: ZoneKind): string {
+  switch (kind) {
+    case "squares":
+      return `Drag across the ${cellWord(g, true)} of a new trap, or tap to place it at its own size.`;
+    case "wire":
+      return "Drag from one end of the trip wire to the other.";
+    case "door":
+      return "Tap a door to trap it.";
+  }
+}
 
 function trapName(ctx: ToolContext, id: string): string {
   return ctx.getState().view?.traps[id]?.name ?? "the trap";
@@ -50,21 +51,22 @@ function trapName(ctx: ToolContext, id: string): string {
 /** The zone a finished gesture drew, or null with the reason told. A tap places a new trap's squares at its start's size, and adds one square to a trap's own. */
 function drawnZone(ctx: ToolContext, kind: ZoneKind, p: ToolPointer, draft: TrapDraft | null, moved: boolean, startWorld: { x: number; y: number }, fresh = false): TrapZone | null {
   const bounds = ctx.scene.bounds;
+  const g = sceneGrid(ctx.scene);
   if (kind === "squares") {
     if (draft && "rect" in draft) return { cells: [draft.rect] };
     const { start, band } = ctx.scope.get(trapSlot).store.getState();
-    return { cells: [fresh ? tapRect(startWorld, start, band, bounds) : rectBetween(startWorld, startWorld, bounds)] };
+    return { cells: [fresh ? tapRect(g, startWorld, start, band, bounds) : rectBetween(g, startWorld, startWorld, bounds)] };
   }
   if (kind === "wire") {
     if (draft && "wire" in draft) return { wire: draft.wire };
-    ctx.ui.notify(moved ? "A trip wire is at least half a square long." : ZONE_HINTS.wire, "info");
+    ctx.ui.notify(moved ? `A trip wire is at least half a ${cellWord(g)} long.` : zoneHint(g, "wire"), "info");
     return null;
   }
   if (moved) return null;
   const view = ctx.getState().view;
   const door = view ? doorUnder({ chunks: view.buildChunks, sceneId: ctx.scene.id, at: p.world, slop: DOOR_SLOP_PX / ctx.camera().scale, fog: null }) : null;
   if (!door) {
-    ctx.ui.notify(ZONE_HINTS.door, "info");
+    ctx.ui.notify(zoneHint(g, "door"), "info");
     return null;
   }
   return { door: door.ref };
@@ -80,7 +82,7 @@ function create(ctx: ToolContext, zone: TrapZone): void {
   }
   const { start, band } = tool.getState();
   const id = ctx.actions.newId();
-  const trap = newTrapInput({ id, sceneId: ctx.scene.id, start, band, zone, chunks: view.buildChunks });
+  const trap = newTrapInput({ grid: sceneGrid(ctx.scene), id, sceneId: ctx.scene.id, start, band, zone, chunks: view.buildChunks });
   if (ctx.actions.dispatch({ t: "trap.create", trap }) === null) return;
   tool.setState({ paneId: id });
 }
@@ -91,15 +93,16 @@ function pickSquares(ctx: ToolContext, picking: TrapPicking, zone: TrapZone | nu
   const tool = ctx.scope.get(trapSlot).store;
   if (!trap?.rig || !zone || !("cells" in zone)) return;
   const rect = zone.cells[0]!;
+  const g = sceneGrid(ctx.scene);
   if (picking.what === "squares") {
     if (!("cells" in trap.zone)) return;
-    const next = withRect(trap.zone.cells, rect);
+    const next = withRect(g, trap.zone.cells, rect);
     if (!next.ok) ctx.ui.notify(next.why, "error");
     else ctx.actions.dispatch({ t: "trap.update", trapId: trap.id, patch: { zone: { cells: next.rects } } });
     return;
   }
   const had = !picking.fresh && typeof trap.rig.hits === "object" && "cells" in trap.rig.hits ? trap.rig.hits.cells : [];
-  const next = withRect(had, rect);
+  const next = withRect(g, had, rect);
   if (!next.ok) {
     ctx.ui.notify(next.why, "error");
     return;
@@ -148,11 +151,10 @@ function sameTarget(a: TrapAction, b: TrapAction): boolean {
 }
 
 function onDown(p: ToolPointer, ctx: ToolContext): void {
-  if (trapToolOff(ctx.scene)) return;
   const slot = ctx.scope.get(trapSlot);
   const st = slot.store.getState();
   const view = ctx.getState().view;
-  const hit = st.picking || !view ? null : trapAt(sceneTraps(ctx), view.buildChunks, p.world, DOOR_SLOP_PX / ctx.camera().scale);
+  const hit = st.picking || !view ? null : trapAt(sceneGrid(ctx.scene), sceneTraps(ctx), view.buildChunks, p.world, DOOR_SLOP_PX / ctx.camera().scale);
   slot.gesture = { start: p.screen, world: p.world, hit: hit?.id ?? null, moved: false };
 }
 
@@ -163,7 +165,6 @@ function drawing(st: { kind: ZoneKind; picking: TrapPicking | null }): "squares"
 }
 
 function onMove(p: ToolPointer, ctx: ToolContext): void {
-  if (trapToolOff(ctx.scene)) return;
   const slot = ctx.scope.get(trapSlot);
   const g = slot.gesture;
   if (!g) return;
@@ -171,16 +172,16 @@ function onMove(p: ToolPointer, ctx: ToolContext): void {
   g.moved = true;
   const st = slot.store.getState();
   const bounds = ctx.scene.bounds;
+  const grid = sceneGrid(ctx.scene);
   const what = drawing(st);
-  if (what === "squares") slot.store.setState({ draft: { rect: rectBetween(g.world, p.world, bounds) } });
+  if (what === "squares") slot.store.setState({ draft: { rect: rectBetween(grid, g.world, p.world, bounds) } });
   else if (what === "wire") {
-    const wire = wireBetween(wireEnd(g.world, bounds), p.world, bounds);
+    const wire = wireBetween(grid, wireEnd(grid, g.world, bounds), p.world, bounds);
     slot.store.setState({ draft: wire ? { wire } : null });
   }
 }
 
 function onUp(p: ToolPointer, ctx: ToolContext): void {
-  if (trapToolOff(ctx.scene)) return;
   const slot = ctx.scope.get(trapSlot);
   const g = slot.gesture;
   slot.gesture = null;
@@ -209,11 +210,19 @@ function onUp(p: ToolPointer, ctx: ToolContext): void {
   if (zone) create(ctx, zone);
 }
 
-const PICK_LINES: Record<TrapPicking["what"], (name: string) => string> = {
-  squares: (name) => `Drag across squares to add to ${name}, or tap one square.`,
-  hits: (name) => `Drag across the squares ${name} hits, or tap one square.`,
-  action: (name) => `Tap a door, a light, a hidden creature or a hidden stamp for ${name} to set.`,
-};
+/** What the options line asks for while the pane picks on the map, in the scene's cell word. */
+export function pickLine(g: Grid, what: TrapPicking["what"], name: string): string {
+  const one = cellWord(g);
+  const many = cellWord(g, true);
+  switch (what) {
+    case "squares":
+      return `Drag across ${many} to add to ${name}, or tap one ${one}.`;
+    case "hits":
+      return `Drag across the ${many} ${name} hits, or tap one ${one}.`;
+    case "action":
+      return `Tap a door, a light, a hidden creature or a hidden stamp for ${name} to set.`;
+  }
+}
 
 /**
  * The Trap tool's options (4.1): what a new trap starts from and the
@@ -229,16 +238,15 @@ function TrapOptions() {
   const picking = useStore(store, (s) => s.picking);
   const editing = useStore(store, (s) => s.paneId !== null);
   const pickName = useRoomView((s) => (picking ? (s.view?.traps[picking.trapId]?.name ?? null) : null));
-  const off = useRoomView((s) => trapToolOff(s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
-
-  if (off !== null) return <OptionsStrip tool="Trap" line={{ tone: "hint", content: off }} slots={[]} />;
+  const shape = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId]?.gridShape : undefined));
+  const g = sceneGrid({ gridShape: shape });
 
   if (picking) {
     return (
       <OptionsStrip
         tool="Trap"
         task
-        line={{ tone: "reading", content: PICK_LINES[picking.what](pickName ?? "the trap") }}
+        line={{ tone: "reading", content: pickLine(g, picking.what, pickName ?? "the trap") }}
         slots={[
           {
             id: "done",
@@ -260,7 +268,7 @@ function TrapOptions() {
   return (
     <OptionsStrip
       tool="Trap"
-      line={{ tone: "hint", content: `${ZONE_HINTS[kind]} Tap a trap to edit it.` }}
+      line={{ tone: "hint", content: `${zoneHint(g, kind)} Tap a trap to edit it.` }}
       slots={[
         {
           id: "start",
@@ -294,7 +302,7 @@ function TrapOptions() {
             </ValueChip>
           ),
         },
-        { id: "kind", priority: 1, compact: true, control: <OptSegmented<ZoneKind> label="Zone" value={kind} options={ZONE_KINDS} onChange={(next) => pickZone(scope, next)} /> },
+        { id: "kind", priority: 1, compact: true, control: <OptSegmented<ZoneKind> label="Zone" value={kind} options={zoneKinds(g)} onChange={(next) => pickZone(scope, next)} /> },
       ]}
     />
   );

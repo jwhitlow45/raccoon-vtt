@@ -3,6 +3,10 @@ import { memo, useMemo, type ReactNode } from "react";
 import { Circle, Ellipse, Group, Line, Path, Rect, Shape } from "react-konva";
 import type { BuildChunk, CellRect, RoomSettings, Scene, Trap, TrapRig } from "#shared/model.ts";
 import type { AreaTemplateInput } from "#shared/rules/aoe.ts";
+import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import type { HexGrid } from "#shared/rules/hex.ts";
+import { rectHexes } from "#shared/rules/traps.ts";
+import { hexOutline } from "../../lib/scene.ts";
 import { usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
 import { MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere, viewPointOf } from "../../canvas/isoPlace.ts";
@@ -66,13 +70,14 @@ export const TrapLayer = memo(function TrapLayer(props: LayerProps) {
     [traps, props.scene.id],
   );
   const open = dm && tool === "trap" && paneId ? traps[paneId] : undefined;
+  const grid = useMemo(() => sceneGrid(props.scene), [props.scene.gridShape]);
   return (
     <Group listening={false}>
       {list.map((t) => (
-        <TrapMark key={t.id} trap={t} chunks={chunks} scale={props.scale} dm={dm} iso={iso} />
+        <TrapMark key={t.id} trap={t} chunks={chunks} scale={props.scale} dm={dm} iso={iso} grid={grid} />
       ))}
-      {ground && open?.rig && settings ? <TrapHits trap={open} rig={open.rig} chunks={chunks} scene={props.scene} settings={settings} /> : null}
-      {ground && dm && draft ? <Draft draft={draft} scale={props.scale} /> : null}
+      {ground && open?.rig && settings ? <TrapHits trap={open} rig={open.rig} chunks={chunks} scene={props.scene} settings={settings} grid={grid} /> : null}
+      {ground && dm && draft ? <Draft draft={draft} scale={props.scale} grid={grid} /> : null}
     </Group>
   );
 });
@@ -98,11 +103,16 @@ function lookOf(trap: SeenTrap, dm: boolean): Look {
  * (canvas/boardView.ts), which keeps token labels off every place the view
  * can slide it to (canvas/useBoardText.ts pillObstacles).
  */
-export function trapNamePill(trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean): PillSpec | null {
+export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, scale: number, dm: boolean): PillSpec | null {
   if (!trapNameShown(scale)) return null;
   const zone = trap.zone;
   const words = !dm && (trap as SeenTrap).disarmed ? "Disarmed" : undefined;
   const pill = { name: trap.name, value: words, size: "map" as const, small: true, maxLines: 1 as const };
+  if ("cells" in zone && isHex(g)) {
+    // Over the top of its hexes' box, at its middle.
+    const box = zoneBox(g, trap, chunks)!;
+    return { ...pill, x: (box.x0 + box.x1) / 2, y: box.y0, above: true };
+  }
   if ("cells" in zone) {
     const top = zone.cells.reduce((a, r) => (r.y < a.y || (r.y === a.y && r.x < a.x) ? r : a));
     return { ...pill, x: top.x + top.w / 2, y: top.y, above: true };
@@ -113,22 +123,22 @@ export function trapNamePill(trap: Trap, chunks: Readonly<Record<string, BuildCh
 
 const NO_PILLS: readonly PillSpec[] = [];
 
-const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null }) {
-  const { trap, scale, dm } = props;
+const TrapMark = memo(function TrapMark(props: { trap: Trap; chunks: Readonly<Record<string, BuildChunk>>; scale: number; dm: boolean; iso: IsoGround | null; grid: Grid }) {
+  const { trap, scale, dm, grid } = props;
   const seen = trap as SeenTrap;
   const look = lookOf(seen, dm);
   const zone = trap.zone;
   const s = 1 / scale;
-  const name = trapNamePill(trap, props.chunks, scale, dm);
+  const name = trapNamePill(grid, trap, props.chunks, scale, dm);
   const nameKey = name ? JSON.stringify(name) : "";
   // Keyed on what the name says and where, so a pinch that keeps it shown publishes nothing new.
   usePublishPills(`trap:${trap.id}`, useMemo(() => (name ? [name] : NO_PILLS), [nameKey]));
   let badge: { x: number; y: number } | null = null;
   let body: ReactNode = null;
   if ("cells" in zone) {
-    const box = zoneBox(trap, props.chunks)!;
+    const box = zoneBox(grid, trap, props.chunks)!;
     badge = { x: box.x0 + (BADGE_PX / 2 + 2) * s, y: box.y0 + (BADGE_PX / 2 + 2) * s };
-    body = <Squares rects={zone.cells} look={look} />;
+    body = isHex(grid) ? <Hexes grid={grid} rects={zone.cells} look={look} /> : <Squares rects={zone.cells} look={look} />;
   } else if ("wire" in zone) {
     const { a, b } = zone.wire;
     badge = { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
@@ -208,6 +218,74 @@ function Squares(props: { rects: readonly CellRect[]; look: Look; faint?: boolea
   );
 }
 
+/**
+ * A zone's hexes on a hex scene (docs/design-v1-hex-grids.md H2): each
+ * rectangle of keys filled and hatched inside its hexes' outline, and the
+ * outline drawn, as squares are. A rectangle of hex keys is one joined
+ * piece, so each has one outline.
+ */
+function Hexes(props: { grid: HexGrid; rects: readonly CellRect[]; look: Look; faint?: boolean }) {
+  const { grid, rects, look } = props;
+  const loops = useMemo(() => rects.map((r) => hexOutline(grid, rectHexes([r]))), [grid, rects]);
+  return (
+    <>
+      {look.fill > 0 || look.hatch > 0 ? (
+        <Shape
+          listening={false}
+          perfectDrawEnabled={false}
+          sceneFunc={(ctx: Konva.Context, shape: Konva.Shape) => {
+            const px = 1 / (shape.getAbsoluteScale().x || 1);
+            const alpha = shape.getAbsoluteOpacity();
+            for (const loop of loops) {
+              if (loop.length < 6) continue;
+              let x0 = Infinity;
+              let y0 = Infinity;
+              let x1 = -Infinity;
+              let y1 = -Infinity;
+              ctx.save();
+              ctx.beginPath();
+              for (let i = 0; i < loop.length; i += 2) {
+                const x = loop[i]!;
+                const y = loop[i + 1]!;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+                x0 = Math.min(x0, x);
+                y0 = Math.min(y0, y);
+                x1 = Math.max(x1, x);
+                y1 = Math.max(y1, y);
+              }
+              ctx.closePath();
+              ctx.clip();
+              if (look.fill > 0) {
+                ctx.globalAlpha = look.fill * alpha;
+                ctx.fillStyle = look.color;
+                ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+              }
+              if (look.hatch > 0) {
+                ctx.globalAlpha = look.hatch * alpha;
+                ctx.strokeStyle = look.color;
+                ctx.lineWidth = 1.5 * px;
+                const step = HATCH_PX * px;
+                const h = y1 - y0;
+                ctx.beginPath();
+                for (let d = -h; d < x1 - x0; d += step) {
+                  ctx.moveTo(x0 + d, y1);
+                  ctx.lineTo(x0 + d + h, y0);
+                }
+                ctx.stroke();
+              }
+              ctx.restore();
+            }
+          }}
+        />
+      ) : null}
+      {loops.map((points, i) => (
+        <Line key={i} points={points} closed stroke={look.color} strokeWidth={look.width} strokeScaleEnabled={false} dash={look.dash} listening={false} perfectDrawEnabled={false} opacity={props.faint ? 0.6 : 1} />
+      ))}
+    </>
+  );
+}
+
 /** The wolf trap in a disc, of one size on screen, with an eye beside it once players found the trap. */
 function Badge(props: { x: number; y: number; scale: number; look: Look; found: boolean }) {
   const s = 1 / props.scale;
@@ -230,7 +308,7 @@ function Badge(props: { x: number; y: number; scale: number; look: Look; found: 
 }
 
 /** What the open trap hits, drawn faintly (4.1): its drawn squares, or its area. Its own squares and the creature that set it off need nothing more. */
-function TrapHits(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<string, BuildChunk>>; scene: Scene; settings: RoomSettings }) {
+function TrapHits(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<string, BuildChunk>>; scene: Scene; settings: RoomSettings; grid: Grid }) {
   const { rig } = props;
   const outline = useMemo(() => {
     if (typeof rig.hits !== "object" || !("area" in rig.hits)) return null;
@@ -238,9 +316,12 @@ function TrapHits(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<str
     return areaOutline({ ...rig.hits.area, sceneId: props.scene.id } as unknown as AreaTemplateInput, ctx);
   }, [rig.hits, props.chunks, props.settings, props.scene]);
   if (typeof rig.hits !== "object") return null;
-  if ("cells" in rig.hits) return <Squares rects={rig.hits.cells} look={{ color: theme.color.danger, fill: 0.1, hatch: 0, dash: [4, 4], width: 1 }} faint />;
+  if ("cells" in rig.hits) {
+    const look = { color: theme.color.danger, fill: 0.1, hatch: 0, dash: [4, 4], width: 1 };
+    return isHex(props.grid) ? <Hexes grid={props.grid} rects={rig.hits.cells} look={look} faint /> : <Squares rects={rig.hits.cells} look={look} faint />;
+  }
   if (!outline) return null;
-  const box = zoneBox(props.trap, props.chunks);
+  const box = zoneBox(props.grid, props.trap, props.chunks);
   const from = box ? boxCenter(box) : null;
   const o = rig.hits.area.origin;
   return (
@@ -251,10 +332,11 @@ function TrapHits(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<str
   );
 }
 
-/** The zone being drawn with the Trap tool. */
-function Draft(props: { draft: TrapDraft; scale: number }) {
-  const { draft } = props;
+/** The zone being drawn with the Trap tool: on hexes the hexes of its keys. */
+function Draft(props: { draft: TrapDraft; scale: number; grid: Grid }) {
+  const { draft, grid } = props;
   const s = 1 / props.scale;
+  if ("rect" in draft && isHex(grid)) return <Hexes grid={grid} rects={[draft.rect]} look={{ color: theme.color.danger, fill: 0.25, hatch: 0, dash: [6, 4], width: 2 }} />;
   if ("rect" in draft) {
     const r = draft.rect;
     return <Rect x={r.x} y={r.y} width={r.w} height={r.h} fill={theme.color.danger} opacity={0.25} stroke={theme.color.danger} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 4]} listening={false} />;

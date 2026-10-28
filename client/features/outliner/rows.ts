@@ -1,6 +1,6 @@
 import { type AreaTemplate, type BuildChunk, type Drawing, type FreeWall, type RoomState, type Token, type Trap, type Viewer } from "#shared/model.ts";
 import { keys } from "#shared/keys.ts";
-import { projectEntity, projectState, stampCells } from "#shared/project.ts";
+import { gridOfScene, projectEntity, projectState, stampCells } from "#shared/project.ts";
 import { labelBox } from "#shared/rules/labels.ts";
 import type { Rect } from "../../lib/camera.ts";
 import { displayName, footprint } from "../../lib/scene.ts";
@@ -219,7 +219,7 @@ export function outlineRows(view: RoomState, sceneId: string): OutlineRow[] {
 
   for (const t of Object.values(view.traps ?? {})) {
     if (!t || t.sceneId !== sceneId) continue;
-    const box = zoneBox(t, view.buildChunks);
+    const box = zoneBox(gridOfScene(view, sceneId), t, view.buildChunks);
     const doorGone = "door" in t.zone && box === null;
     // Found is the party's (docs/design-v1-traps.md 4.5): a found trap reaches players by its name and place, unless the fog covers it.
     const mark = !t.found ? "Hidden" : seen.traps[t.id] ? "Found" : "Found, under fog";

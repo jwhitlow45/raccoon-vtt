@@ -7,7 +7,8 @@ import { accessOf, DRAW_MODES, drawSlot, pickDrawMode } from "./drawings/store.t
 import { fogSlot, FOG_MODES, pickFogMode } from "./fog/store.ts";
 import { MEASURES, pickMeasure, rulerSlot } from "./measure/rulerStore.ts";
 import { BLANK_KINDS, placementSlot, setPending } from "./tokens/placement.ts";
-import { pickZone, trapSlot, ZONE_KINDS } from "./traps/store.ts";
+import { pickZone, trapSlot, ZONE_KINDS, zoneKinds } from "./traps/store.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 
 /**
  * Each tool's main choice, which a second press of the tool's key moves
@@ -169,7 +170,7 @@ export const trapCycle: ToolCycle = {
   now(env) {
     const st = env.scope.get(trapSlot).store.getState();
     if (st.picking || st.paneId !== null) return null;
-    return { options: ZONE_KINDS, value: st.kind };
+    return { options: zoneKinds(sceneGrid(shownScene(env.getState()) ?? {})), value: st.kind };
   },
   pick(env, value) {
     const kind = known(ZONE_KINDS, value);

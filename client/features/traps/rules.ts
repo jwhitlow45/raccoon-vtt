@@ -1,9 +1,10 @@
 import { LIMITS } from "#shared/limits.ts";
 import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
 import type { TrapInput } from "#shared/protocol.ts";
-import { footprintRect } from "#shared/rules/footprint.ts";
+import { footprintRect, hexAnchor, occupiedHexes, placedOnHex, tokenRefHex, type PlacedToken } from "#shared/rules/footprint.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexLine, hexNeighbors, sceneHexSpan, HEX_R, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { rangeGround } from "#shared/rules/heights.ts";
-import { pitFloorOf, trapCreature } from "#shared/rules/traps.ts";
+import { inRects, pitFloorOf, rectHexes, trapCreature, wireHexes } from "#shared/rules/traps.ts";
 import { ABILITY_NAMES, choiceText } from "#shared/rules/skills.ts";
 import { damageTypeName } from "#shared/rules/damage.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
@@ -11,13 +12,18 @@ import { LEVEL_BANDS, TRAP_PRESET_IDS, trapPreset, type LevelBand } from "#share
 import type { AskFill } from "../rolls/logic.ts";
 import { DECOR_MIN_PX } from "../../lib/tokenView.ts";
 import { findDoor, segmentDistance, type Point } from "../doors/doors.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { cellWord, isHex, type Grid } from "#shared/rules/grid.ts";
 
 /*
  * The Trap tool's rules (docs/design-v1-traps.md 4.1 and 4.2), as plain
  * functions for node --test: snapping the zone being drawn, finding the
  * trap under a tap, a new trap from Blank, Alarm or an SRD preset, the
  * pane's one-line summaries, and what Ask to search and Ask to disarm fill.
+ *
+ * On a hex scene (docs/design-v1-hex-grids.md phase H2) a zone's
+ * rectangles are of hex keys, a column and a row, drawn from the hex under
+ * each end of the drag, and a wire's ends snap to hex corners, which lie on
+ * the 1/64 lattice the server keeps them on.
  */
 
 export type ZoneKind = "squares" | "wire" | "door";
@@ -58,12 +64,11 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
  * cells and kept on the scene. A side stops at 20 cells, counted from the
  * cell the drag began on, so the rectangle never jumps away from it.
  */
-export function rectBetween(a: Point, b: Point, bounds: Bounds): CellRect {
+export function rectBetween(g: Grid, a: Point, b: Point, bounds: Bounds): CellRect {
   const side = LIMITS.trapRectSide;
-  const ax = clamp(Math.floor(a.x), 0, bounds.w - 1);
-  const ay = clamp(Math.floor(a.y), 0, bounds.h - 1);
-  const bx = clamp(Math.floor(b.x), 0, bounds.w - 1);
-  const by = clamp(Math.floor(b.y), 0, bounds.h - 1);
+  const keys = keySpan(g, bounds);
+  const [ax, ay] = keyAt(g, a, keys);
+  const [bx, by] = keyAt(g, b, keys);
   const w = Math.min(Math.abs(bx - ax) + 1, side);
   const h = Math.min(Math.abs(by - ay) + 1, side);
   return { x: bx < ax ? ax - w + 1 : ax, y: by < ay ? ay - h + 1 : ay, w, h };
@@ -74,11 +79,27 @@ export function rectBetween(a: Point, b: Point, bounds: Bounds): CellRect {
  * preset on squares (a Hidden Pit's 2 x 2), else one square, its corner on
  * the tapped square and kept inside the scene.
  */
-export function tapRect(at: Point, start: string, band: LevelBand, bounds: Bounds): CellRect {
+export function tapRect(g: Grid, at: Point, start: string, band: LevelBand, bounds: Bounds): CellRect {
   const zone = trapPreset(start, band)?.zone;
-  const w = Math.min(zone?.kind === "squares" ? zone.w : 1, bounds.w);
-  const h = Math.min(zone?.kind === "squares" ? zone.h : 1, bounds.h);
-  return { x: clamp(Math.floor(at.x), 0, bounds.w - w), y: clamp(Math.floor(at.y), 0, bounds.h - h), w, h };
+  const keys = keySpan(g, bounds);
+  const w = Math.min(zone?.kind === "squares" ? zone.w : 1, keys.w);
+  const h = Math.min(zone?.kind === "squares" ? zone.h : 1, keys.h);
+  const [x, y] = keyAt(g, at, keys);
+  return { x: clamp(x, 0, keys.w - w), y: clamp(y, 0, keys.h - h), w, h };
+}
+
+/** The keys a scene's cells run over: its cells, or on hexes the columns and rows of its hex keys (hex.ts sceneHexSpan). */
+function keySpan(g: Grid, bounds: Bounds): Bounds {
+  if (!isHex(g)) return bounds;
+  const span = sceneHexSpan(g, bounds);
+  return { w: span.cols, h: span.rows };
+}
+
+/** The key of the cell or hex under a point, kept within the scene's keys. */
+function keyAt(g: Grid, p: Point, keys: Bounds): [number, number] {
+  if (!isHex(g)) return [clamp(Math.floor(p.x), 0, keys.w - 1), clamp(Math.floor(p.y), 0, keys.h - 1)];
+  const h = hexAt(g, p);
+  return [clamp(h.col, 0, keys.w - 1), clamp(h.row, 0, keys.h - 1)];
 }
 
 /** Whether a point is a wire's end: a cell corner or an edge midpoint, never a cell's center. */
@@ -86,10 +107,11 @@ function wireSpot(x: number, y: number): boolean {
   return Number.isInteger(x * 2) && Number.isInteger(y * 2) && (Number.isInteger(x) || Number.isInteger(y));
 }
 
-/** The wire end nearest a point: a cell corner or an edge midpoint, on the scene. */
-export function wireEnd(p: Point, bounds: Bounds): [number, number] {
+/** The wire end nearest a point: a cell corner or an edge midpoint, on the scene. On hexes, the nearest hex corner on the scene. */
+export function wireEnd(g: Grid, p: Point, bounds: Bounds): [number, number] {
   const x = clamp(p.x, 0, bounds.w);
   const y = clamp(p.y, 0, bounds.h);
+  if (isHex(g)) return nearestCorner(g, { x, y }, bounds, () => true) ?? [x, y];
   const candidates: [number, number][] = [
     [Math.round(x), Math.round(y)],
     [Math.round(x), Math.min(bounds.h, Math.floor(y) + 0.5)],
@@ -114,12 +136,16 @@ const wireLength = (a: readonly [number, number], b: readonly [number, number]) 
  * than half a cell. One drawn past 20 cells stops at the end nearest the
  * 20-cell mark along the drag that keeps it within 20.
  */
-export function wireBetween(a: [number, number], to: Point, bounds: Bounds): { a: [number, number]; b: [number, number] } | null {
-  let b = wireEnd(to, bounds);
+export function wireBetween(g: Grid, a: [number, number], to: Point, bounds: Bounds): { a: [number, number]; b: [number, number] } | null {
+  let b = wireEnd(g, to, bounds);
   const max = LIMITS.trapWireMax;
   if (wireLength(a, b) > max) {
     const len = Math.hypot(to.x - a[0], to.y - a[1]);
     const target = { x: a[0] + ((to.x - a[0]) * max) / len, y: a[1] + ((to.y - a[1]) * max) / len };
+    if (isHex(g)) {
+      const end = nearestCorner(g, target, bounds, (c) => wireLength(a, c) <= max);
+      return end && wireLength(a, end) >= LIMITS.trapWireMin ? { a, b: end } : null;
+    }
     let best: [number, number] | null = null;
     let bestD = Infinity;
     for (let dy = -2; dy <= 2; dy++) {
@@ -139,6 +165,30 @@ export function wireBetween(a: [number, number], to: Point, bounds: Bounds): { a
   return wireLength(a, b) < LIMITS.trapWireMin ? null : { a, b };
 }
 
+/**
+ * The hex corner on the scene nearest a point that `keep` takes, among the
+ * corners of the hex holding it and its six neighbors, or null for none.
+ * Corners come from hex.ts cornerAt, on the 1/64 lattice.
+ */
+function nearestCorner(g: HexGrid, p: Point, bounds: Bounds, keep: (c: [number, number]) => boolean): [number, number] | null {
+  const h = hexAt(g, p);
+  let best: [number, number] | null = null;
+  let bestD = Infinity;
+  for (const near of [h, ...hexNeighbors(g, h)]) {
+    for (const corner of hexCorners(g, near)) {
+      const c = cornerAt(g, corner);
+      const end: [number, number] = [c.x, c.y];
+      if (c.x < 0 || c.y < 0 || c.x > bounds.w || c.y > bounds.h || !keep(end)) continue;
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d < bestD - 1e-9) {
+        best = end;
+        bestD = d;
+      }
+    }
+  }
+  return best;
+}
+
 /** Cells the rectangles cover, a cell two share counted once. */
 export function rectsCells(rects: readonly CellRect[]): number {
   const seen = new Set<string>();
@@ -146,11 +196,12 @@ export function rectsCells(rects: readonly CellRect[]): number {
   return seen.size;
 }
 
-/** The rectangles with one more added, or why it does not fit: at most 8 rectangles and 400 cells. */
-export function withRect(rects: readonly CellRect[], rect: CellRect): { ok: true; rects: CellRect[] } | { ok: false; why: string } {
-  if (rects.length >= LIMITS.trapRects) return { ok: false, why: `A trap holds at most ${LIMITS.trapRects} rectangles of squares.` };
+/** The rectangles with one more added, or why it does not fit: at most 8 rectangles and 400 cells, in the scene's cell word. */
+export function withRect(g: Grid, rects: readonly CellRect[], rect: CellRect): { ok: true; rects: CellRect[] } | { ok: false; why: string } {
+  const word = cellWord(g, true);
+  if (rects.length >= LIMITS.trapRects) return { ok: false, why: `A trap holds at most ${LIMITS.trapRects} rectangles of ${word}.` };
   const next = [...rects, rect];
-  if (rectsCells(next) > LIMITS.trapCells) return { ok: false, why: `A trap's squares are at most ${LIMITS.trapCells} cells.` };
+  if (rectsCells(next) > LIMITS.trapCells) return { ok: false, why: `A trap's ${word} are at most ${LIMITS.trapCells} ${isHex(g) ? "hexes" : "cells"}.` };
   return { ok: true, rects: next };
 }
 
@@ -158,9 +209,10 @@ export function withRect(rects: readonly CellRect[], rect: CellRect): { ok: true
 
 export type Box = { x0: number; y0: number; x1: number; y1: number };
 
-/** A trap's zone on the map in cells, or null for a door trap whose door is gone. */
-export function zoneBox(trap: Pick<Trap, "zone" | "sceneId">, chunks: Readonly<Record<string, BuildChunk>>): Box | null {
+/** A trap's zone on the map in cells, or null for a door trap whose door is gone. On hexes, the box round its hexes. */
+export function zoneBox(g: Grid, trap: Pick<Trap, "zone" | "sceneId">, chunks: Readonly<Record<string, BuildChunk>>): Box | null {
   const zone = trap.zone;
+  if ("cells" in zone && isHex(g)) return hexesBox(g, rectHexes(zone.cells));
   if ("cells" in zone) {
     let box: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
     for (const r of zone.cells) box = { x0: Math.min(box.x0, r.x), y0: Math.min(box.y0, r.y), x1: Math.max(box.x1, r.x + r.w), y1: Math.max(box.y1, r.y + r.h) };
@@ -174,6 +226,17 @@ export function zoneBox(trap: Pick<Trap, "zone" | "sceneId">, chunks: Readonly<R
   return door ? { x0: Math.min(door.a.x, door.b.x), y0: Math.min(door.a.y, door.b.y), x1: Math.max(door.a.x, door.b.x), y1: Math.max(door.a.y, door.b.y) } : null;
 }
 
+/** The box round some hexes: each a cell across its flat sides and HEX_R from its center to a point. */
+export function hexesBox(g: HexGrid, hexes: readonly Hex[]): Box {
+  const half = g.orient === "rows" ? { x: 0.5, y: HEX_R } : { x: HEX_R, y: 0.5 };
+  let box: Box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const h of hexes) {
+    const c = hexCenter(g, h);
+    box = { x0: Math.min(box.x0, c.x - half.x), y0: Math.min(box.y0, c.y - half.y), x1: Math.max(box.x1, c.x + half.x), y1: Math.max(box.y1, c.y + half.y) };
+  }
+  return box;
+}
+
 export function boxCenter(box: Box): Point {
   return { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 };
 }
@@ -183,11 +246,11 @@ export function boxCenter(box: Box): Point {
  * door lies within `slop` cells of it. Of several, the nearest, then the
  * last made (the higher id), which draws on top.
  */
-export function trapAt<T extends Pick<Trap, "id" | "zone" | "sceneId">>(traps: readonly T[], chunks: Readonly<Record<string, BuildChunk>>, p: Point, slop: number): T | null {
+export function trapAt<T extends Pick<Trap, "id" | "zone" | "sceneId">>(g: Grid, traps: readonly T[], chunks: Readonly<Record<string, BuildChunk>>, p: Point, slop: number): T | null {
   let best: T | null = null;
   let bestD = Infinity;
   for (const trap of traps) {
-    const d = trapDistance(trap, chunks, p);
+    const d = trapDistance(g, trap, chunks, p);
     if (d > slop) continue;
     if (d < bestD || (d === bestD && best !== null && trap.id > best.id)) {
       best = trap;
@@ -197,8 +260,12 @@ export function trapAt<T extends Pick<Trap, "id" | "zone" | "sceneId">>(traps: r
   return best;
 }
 
-function trapDistance(trap: Pick<Trap, "zone" | "sceneId">, chunks: Readonly<Record<string, BuildChunk>>, p: Point): number {
+function trapDistance(g: Grid, trap: Pick<Trap, "zone" | "sceneId">, chunks: Readonly<Record<string, BuildChunk>>, p: Point): number {
   const zone = trap.zone;
+  if ("cells" in zone && isHex(g)) {
+    const h = hexAt(g, p);
+    return inRects(zone.cells, h.col, h.row) ? 0 : Infinity;
+  }
   if ("cells" in zone) return zone.cells.some((r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h) ? 0 : Infinity;
   if ("wire" in zone) return segmentDistance(p, { x: zone.wire.a[0], y: zone.wire.a[1] }, { x: zone.wire.b[0], y: zone.wire.b[1] });
   const door = findDoor(chunks, trap.sceneId, zone.door);
@@ -218,13 +285,17 @@ export function pitFloor(ground: number, depth: number): number {
 }
 
 /** The creatures on a trap's squares now, for Set it off with none selected: never an object or the dead (6.2). A wire or a door has none standing on it. */
-export function tokensOn(trap: Pick<Trap, "zone" | "sceneId">, view: Pick<RoomState, "characters"> & { tokens: Readonly<Record<string, Token | undefined>> }): string[] {
+export function tokensOn(g: Grid, trap: Pick<Trap, "zone" | "sceneId">, view: Pick<RoomState, "characters"> & { tokens: Readonly<Record<string, Token | undefined>> }): string[] {
   const zone = trap.zone;
   if (!("cells" in zone)) return [];
   const out: string[] = [];
   for (const t of Object.values(view.tokens)) {
     if (!t || t.sceneId !== trap.sceneId || !trapCreature(view, t)) continue;
-    const f = footprintRect(SQUARES, t);
+    if (isHex(g)) {
+      if (occupiedHexes(g, t).some((h) => inRects(zone.cells, h.col, h.row))) out.push(t.id);
+      continue;
+    }
+    const f = footprintRect(g, t);
     if (zone.cells.some((r) => f.x < r.x + r.w && f.x + f.w > r.x && f.y < r.y + r.h && f.y + f.h > r.y)) out.push(t.id);
   }
   return out.sort();
@@ -284,8 +355,10 @@ function samples(points: readonly Point[]): Point[] {
  * left corners along the walk, the start first. A door trap goes off when
  * the door opens, never on a walk.
  */
-export function crossedTraps<T extends Pick<Trap, "id" | "zone">>(traps: readonly T[], fp: { w: number; h: number }, points: readonly Point[]): T[] {
+export function crossedTraps<T extends Pick<Trap, "id" | "zone">>(g: Grid, traps: readonly T[], fp: { w: number; h: number }, points: readonly Point[]): T[] {
   if (traps.length === 0 || points.length < 2) return [];
+  // A box reads as its size by its longer side on hexes (footprint.ts sizeCategory), as every rule reads a custom size there.
+  if (isHex(g)) return crossedOnHexes(g, traps, { size: "custom", w: fp.w, h: fp.h, x: 0, y: 0 }, points);
   const at = samples(points);
   let x0 = Infinity;
   let y0 = Infinity;
@@ -322,6 +395,44 @@ export function crossedTraps<T extends Pick<Trap, "id" | "zone">>(traps: readonl
   return hits.sort((m, n) => m.at - n.at || (m.trap.id < n.trap.id ? -1 : 1)).map((h) => h.trap);
 }
 
+/**
+ * crossedTraps on hexes, read as the server walks a leg there
+ * (shared/rules/route.ts routeWalk): a spot a hex along the hex line
+ * between each piece's reference hexes, the leg's last as it lands. A
+ * zone's rectangles are of hex keys, met where any hex of the footprint is
+ * one, and a wire is crossed by the line between two spots' anchors.
+ */
+function crossedOnHexes<T extends Pick<Trap, "id" | "zone">>(g: HexGrid, traps: readonly T[], token: PlacedToken, points: readonly Point[]): T[] {
+  const spots: Point[] = [points[0]!];
+  for (let i = 1; i < points.length; i++) {
+    const from = tokenRefHex(g, { ...token, ...points[i - 1]! });
+    const to = tokenRefHex(g, { ...token, ...points[i]! });
+    const line = hexLine(g, from, to);
+    for (let k = 1; k < line.length; k++) spots.push(k === line.length - 1 && i === points.length - 1 ? points[i]! : placedOnHex(g, token, line[k]!));
+    if (line.length === 1 && i === points.length - 1) spots.push(points[i]!);
+  }
+  const hits: { trap: T; at: number }[] = [];
+  for (const trap of traps) {
+    const zone = trap.zone;
+    if ("cells" in zone) {
+      const j = spots.findIndex((p, i) => i > 0 && occupiedHexes(g, { ...token, ...p }).some((h) => inRects(zone.cells, h.col, h.row)));
+      if (j > 0) hits.push({ trap, at: j });
+    } else if ("wire" in zone) {
+      const { a, b } = zone.wire;
+      for (let j = 1; j < spots.length; j++) {
+        const p = hexAnchor(g, { ...token, ...spots[j - 1]! });
+        const q = hexAnchor(g, { ...token, ...spots[j]! });
+        if (side(a[0], a[1], b[0], b[1], p.x, p.y) === 0) continue;
+        if (segmentsMeet(p, q, a, b)) {
+          hits.push({ trap, at: j });
+          break;
+        }
+      }
+    }
+  }
+  return hits.sort((m, n) => m.at - n.at || (m.trap.id < n.trap.id ? -1 : 1)).map((h) => h.trap);
+}
+
 /** "Crosses Hidden Pit", "Crosses Hidden Pit and Falling Net", "Crosses Hidden Pit and 2 more". */
 export function crossesText(names: readonly string[]): string | null {
   if (names.length === 0) return null;
@@ -346,6 +457,16 @@ function alarmRig(squares: boolean): TrapRig {
   return { ...blankRig(squares), resets: "nextTurn", stops: false, foundOnSpring: false };
 }
 
+/** The keys of the hexes a wire meets, as one rectangle of at most 20 a side: a preset's hexes to draw start there. */
+function wireKeys(g: HexGrid, wire: { a: [number, number]; b: [number, number] }): CellRect {
+  const hexes = wireHexes(g, wire);
+  const x0 = Math.max(0, Math.min(...hexes.map((h) => h.col)));
+  const y0 = Math.max(0, Math.min(...hexes.map((h) => h.row)));
+  const x1 = Math.max(...hexes.map((h) => h.col)) + 1;
+  const y1 = Math.max(...hexes.map((h) => h.row)) + 1;
+  return { x: x0, y: y0, w: Math.max(1, Math.min(x1 - x0, LIMITS.trapRectSide)), h: Math.max(1, Math.min(y1 - y0, LIMITS.trapRectSide)) };
+}
+
 /** The cells a wire's box covers, at least one: a preset's squares to draw start there. */
 function wireCells(wire: { a: [number, number]; b: [number, number] }): CellRect {
   const x0 = Math.floor(Math.min(wire.a[0], wire.b[0]));
@@ -363,26 +484,27 @@ function wireCells(wire: { a: [number, number]; b: [number, number] }): CellRect
  * squares, and its cone at the zone's middle, aimed east, for the DM to
  * place.
  */
-export function newTrapInput(input: { id: string; sceneId: string; start: string; band: LevelBand; zone: TrapZone; chunks: Readonly<Record<string, BuildChunk>> }): TrapInput {
-  const { zone } = input;
+export function newTrapInput(input: { grid: Grid; id: string; sceneId: string; start: string; band: LevelBand; zone: TrapZone; chunks: Readonly<Record<string, BuildChunk>> }): TrapInput {
+  const { zone, grid } = input;
   const squares = "cells" in zone;
   const base = { id: input.id, sceneId: input.sceneId, zone };
   if (input.start === START_ALARM) return { ...base, name: "Alarm", rig: alarmRig(squares) };
   const preset = trapPreset(input.start, input.band);
   if (!preset) return { ...base, name: "Trap", rig: blankRig(squares) };
-  const box = zoneBox({ zone, sceneId: input.sceneId }, input.chunks);
+  const box = zoneBox(grid, { zone, sceneId: input.sceneId }, input.chunks);
   const center = box ? boxCenter(box) : { x: 0, y: 0 };
   let hits: TrapRig["hits"] = "trigger";
   if (preset.hits === "draw") {
     if ("cells" in zone) hits = { cells: zone.cells.map((r) => ({ ...r })) };
-    else if ("wire" in zone) hits = { cells: [wireCells(zone.wire)] };
+    else if ("wire" in zone) hits = { cells: [isHex(grid) ? wireKeys(grid, zone.wire) : wireCells(zone.wire)] };
   } else if (typeof preset.hits === "object") {
     const ground = rangeGround(input.chunks, input.sceneId, { x0: Math.floor(center.x), y0: Math.floor(center.y), x1: Math.floor(center.x) + 1, y1: Math.floor(center.y) + 1 });
     hits = { area: { shape: "cone", size: preset.hits.cone, origin: { x: center.x, y: center.y, z: ground }, yaw: 0, includeOrigin: false } };
   }
   const { on, ...rest } = preset.rig;
   const rig: TrapRig = { ...rest, on: squares ? (on.length > 0 ? on : ["enter"]) : [], hits };
-  if (squares && preset.pitDepth !== undefined) rig.pit = { floor: pitFloor(zoneGround(input.chunks, input.sceneId, zone.cells), preset.pitDepth) };
+  // A pit needs heights, which hex scenes get later (shared/permissions.ts ON_HEXES.pit), so a preset's pit falls away there.
+  if (squares && !isHex(grid) && preset.pitDepth !== undefined) rig.pit = { floor: pitFloor(zoneGround(input.chunks, input.sceneId, zone.cells), preset.pitDepth) };
   return { ...base, name: preset.name, rig };
 }
 
@@ -453,10 +575,10 @@ export function openedLine(pit: { floor: number }): string {
   return `Opened: its floor is at ${floor < 0 ? `\u2212${-floor}` : floor} ft.`;
 }
 
-export function hitsSummary(rig: TrapRig): string {
+export function hitsSummary(g: Grid, rig: TrapRig): string {
   if (rig.hits === "trigger") return "The creature that set it off";
   if (rig.hits === "zone") return "Everyone on the trap";
-  if ("cells" in rig.hits) return `Everyone in ${rectsCells(rig.hits.cells)} drawn ${rectsCells(rig.hits.cells) === 1 ? "square" : "squares"}`;
+  if ("cells" in rig.hits) return `Everyone in ${rectsCells(rig.hits.cells)} drawn ${cellWord(g, rectsCells(rig.hits.cells) !== 1)}`;
   return `Everyone in a ${rig.hits.area.size} ft ${rig.hits.area.shape}`;
 }
 

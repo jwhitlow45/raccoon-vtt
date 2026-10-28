@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Token, Trap } from "#shared/model.ts";
 import type { Point } from "../../lib/camera.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { footprint } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -20,13 +21,14 @@ const NO_TRAPS: Readonly<Record<string, Trap>> = {};
 export function useTrapCrossing(token: Token, path: readonly Point[]): StackPill | null {
   const traps = useRoomView((s) => s.view?.traps ?? NO_TRAPS);
   const role = useRoomView((s) => s.you?.role ?? "player");
+  const shape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
   const fp = footprint(token);
   const key = path.map((p) => `${p.x},${p.y}`).join(" ");
   const text = useMemo(() => {
     const live = Object.values(traps).filter((t) => t.sceneId === token.sceneId && warnsOf(t, role));
-    return crossesText(crossedTraps(live, fp, path).map((t) => t.name));
+    return crossesText(crossedTraps(sceneGrid({ gridShape: shape }), live, fp, path).map((t) => t.name));
     // The path is read by its points, which a drag's every frame rebuilds as a new array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [traps, role, token.sceneId, fp.w, fp.h, key]);
+  }, [traps, role, token.sceneId, fp.w, fp.h, shape, key]);
   return text ? { value: text, size: "screen", color: theme.color.warning, small: true } : null;
 }

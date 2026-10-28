@@ -13,6 +13,7 @@ import { PANE_HEIGHT_UNMEASURED } from "../builder/labelPaneFrame.ts";
 import { PaneFailedFrame, PaneLoadingFrame } from "../builder/PaneFrames.tsx";
 import { trapScreenBox } from "./paneBox.ts";
 import { trapSlot } from "./store.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 
 const TrapPane = retryableLazy(() => import("./TrapPane.tsx"), { roles: ["dm"] });
 
@@ -43,7 +44,7 @@ export function TrapPaneHost(props: { scene: Scene; tool: string; camera: Camera
   if (!open || !trap) return null;
   const close = () => store.setState({ paneId: null });
   // While the pane's code downloads, and if it fails to, the shared notices take the box the pane will appear in.
-  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: trapScreenBox(trap, chunks, props.camera), height: PANE_HEIGHT_UNMEASURED, lane });
+  const place = panePlacement({ viewport: props.viewport, insets: props.insets, box: trapScreenBox(sceneGrid(props.scene), trap, chunks, props.camera), height: PANE_HEIGHT_UNMEASURED, lane });
   return (
     <LoadBoundary
       fallback={(f) => (

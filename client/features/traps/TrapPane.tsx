@@ -1,11 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LIMITS } from "#shared/limits.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, MIN_HEIGHT_FT, type AbilityKey, type BuildChunk, type ConditionKey, type SkillKey, type Trap, type TrapAction, type TrapCheck, type TrapRig, type TrapSound } from "#shared/model.ts";
 import { MAX_NAME, TRAP_SOUNDS, type TrapPatch } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, choiceText, SKILLS } from "#shared/rules/skills.ts";
-import { pitOpen, trapCreature } from "#shared/rules/traps.ts";
+import { pitOpen, trapCreature, zoneHexes } from "#shared/rules/traps.ts";
+import { ON_HEXES } from "#shared/permissions.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
@@ -85,6 +86,8 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
   // While the map picks something for the trap, Back and Escape belong to that pick, which its Done ends.
   useBackClose(!hidden, () => closeRef.current());
   const chunks = useRoomView((s) => s.view?.buildChunks ?? NO_CHUNKS);
+  const shape = useRoomView((s) => s.view?.scenes[trap.sceneId]?.gridShape);
+  const grid = sceneGrid({ gridShape: shape });
 
   useEffect(() => {
     if (hidden) return;
@@ -114,7 +117,7 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
     return () => observer.disconnect();
   }, []);
 
-  const box = trapScreenBox(trap, chunks, camera);
+  const box = trapScreenBox(grid, trap, chunks, camera);
   // As a bottom sheet it folds the alerts column, so its header and Close stay in reach, and their summary row docks on its top edge in room kept free under the top bars, and a toast that shows meanwhile starts under its header (pages/RoomDock.tsx usePaneDock).
   // As a card it keeps left of the column's cards, or under the summary row it has the column show where the lane leaves it no room (labelEdit.ts panePlacement).
   const sheet = props.viewport.width < SHEET_BELOW_PX;
@@ -132,7 +135,7 @@ export default function TrapPane(props: { trap: Trap; hidden: boolean; camera: C
     if (place.kind !== "sheet" || height === null || hidden || pannedFor.current === trap.id) return;
     pannedFor.current = trap.id;
     const anchor = sheetPanAnchor({ viewport: props.viewport, insets, sheetHeight: height, box });
-    const world = zoneBox(trap, chunks);
+    const world = zoneBox(grid, trap, chunks);
     if (anchor && world) requestPan(scope, { sceneId: trap.sceneId, ...boxCenter(world), anchor });
   });
 
@@ -163,6 +166,8 @@ type Part = "name" | "when" | "after" | "hits" | "save" | "read" | "also" | "fin
 function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
   const { trap } = props;
   const rig = trap.rig;
+  const shape = useRoomView((s) => s.view?.scenes[trap.sceneId]?.gridShape);
+  const grid = sceneGrid({ gridShape: shape });
   const actions = useRoomActions();
   const scope = useRoomScope();
   const room = useRoomStore();
@@ -212,7 +217,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
       const t = view.tokens[id];
       return t?.sceneId === trap.sceneId && trapCreature(view, t);
     });
-    const ids = chosen.length > 0 ? chosen : tokensOn(trap, view);
+    const ids = chosen.length > 0 ? chosen : tokensOn(grid, trap, view);
     actions.dispatch({ t: "trap.spring", trapId: trap.id, tokenIds: ids.slice(0, LIMITS.trapSpringTokens) });
   };
 
@@ -251,7 +256,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
                     checked={on}
                     // The last way it goes off keeps its tick and its place in the focus order, with the reason (docs/design-v1-look-pass-2.md 2.7).
                     aria-disabled={last}
-                    help={last ? "A trap on squares goes off at least one way." : undefined}
+                    help={last ? `A trap on ${cellWord(grid, true)} goes off at least one way.` : undefined}
                     onChange={(next) => setRig({ on: TRIGGER_ORDER.filter((o) => (o === t ? next : rig.on.includes(o))) })}
                   />
                 );
@@ -263,7 +268,7 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
           {squares ? (
             <div>
               <Button size="sm" icon="plus" onClick={() => pick("squares")}>
-                Add squares
+                Add {cellWord(grid, true)}
               </Button>
             </div>
           ) : null}
@@ -286,8 +291,14 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
           <Switch label="Stops the creature where it goes off" help="A silent trap should not stop the creature: its player would notice." checked={rig.stops} onChange={(stops) => setRig({ stops })} />
           <Switch label="Marks itself found when players see it go off" checked={rig.foundOnSpring} onChange={(foundOnSpring) => setRig({ foundOnSpring })} />
           {squares ? (
-            // An opened pit cannot be undone, so its switch stays disabled with the line that says where its floor is.
-            <Switch label="Opens a pit" help={opened && rig.pit ? openedLine(rig.pit) : undefined} checked={rig.pit !== undefined} disabled={opened} onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })} />
+            // An opened pit cannot be undone, so its switch stays disabled with the line that says where its floor is. A hex scene has no heights to open one in yet (H3).
+            <Switch
+              label="Opens a pit"
+              help={isHex(grid) ? ON_HEXES.pit : opened && rig.pit ? openedLine(rig.pit) : undefined}
+              checked={rig.pit !== undefined}
+              disabled={opened || isHex(grid)}
+              onChange={(on) => setRig({ pit: on ? { floor: pitFloor(ground, 10) } : null })}
+            />
           ) : null}
           {squares && pitDepth !== null ? (
             <PartRow>
@@ -299,8 +310,8 @@ function TrapEditor(props: { trap: Trap; sheet: boolean; onClose(): void }) {
           ) : null}
         </Group>
 
-        <Group label="Hits" summary={hitsSummary(rig)} holds="rows" {...fold("hits")}>
-          <HitsChoice trap={trap} rig={rig} chunks={chunks} setRig={setRig} pick={pick} />
+        <Group label="Hits" summary={hitsSummary(grid, rig)} holds="rows" {...fold("hits")}>
+          <HitsChoice trap={trap} rig={rig} chunks={chunks} grid={grid} setRig={setRig} pick={pick} />
         </Group>
 
         <Group label="Save and damage" summary={saveSummary(rig)} holds="rows" {...fold("save")}>
@@ -569,8 +580,8 @@ function hitsKind(hits: TrapRig["hits"]): HitsKind {
  * "Place the area" saves one, the choice held here until then. The map's
  * pick and the area tool start from the buttons that follow the choice.
  */
-function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<string, BuildChunk>>; setRig(patch: RigPatch): void; pick(what: "hits", fresh?: boolean): void }) {
-  const { trap, rig, chunks } = props;
+function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<string, BuildChunk>>; grid: Grid; setRig(patch: RigPatch): void; pick(what: "hits", fresh?: boolean): void }) {
+  const { trap, rig, chunks, grid } = props;
   const scope = useRoomScope();
   const ui = useRoomUi();
   const view = useRoomView((s) => s.view);
@@ -580,13 +591,13 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
   useEffect(() => setHeld(null), [kind]);
   const shown = held ?? kind;
   const squares = "cells" in trap.zone;
-  const box = zoneBox(trap, chunks);
+  const box = zoneBox(grid, trap, chunks);
   const center = box ? boxCenter(box) : { x: 0, y: 0 };
   const choose = (next: HitsKind) => {
     if (next === kind) return setHeld(null);
     if (next === "trigger" || next === "zone") return props.setRig({ hits: next });
     if (next === "cells") {
-      const own = "cells" in trap.zone ? trap.zone.cells : box ? [{ x: Math.floor(box.x0), y: Math.floor(box.y0), w: Math.max(1, Math.min(LIMITS.trapRectSide, Math.ceil(box.x1) - Math.floor(box.x0))), h: Math.max(1, Math.min(LIMITS.trapRectSide, Math.ceil(box.y1) - Math.floor(box.y0))) }] : [];
+      const own = "cells" in trap.zone ? trap.zone.cells : isHex(grid) ? hexKeysAround(zoneHexes(grid, { buildChunks: chunks }, trap.sceneId, trap.zone)) : box ? [{ x: Math.floor(box.x0), y: Math.floor(box.y0), w: Math.max(1, Math.min(LIMITS.trapRectSide, Math.ceil(box.x1) - Math.floor(box.x0))), h: Math.max(1, Math.min(LIMITS.trapRectSide, Math.ceil(box.y1) - Math.floor(box.y0))) }] : [];
       if (own.length > 0) return props.setRig({ hits: { cells: own.map((r) => ({ ...r })) } });
     }
     setHeld(next);
@@ -598,15 +609,14 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
     const id = `trap-area-${trap.id}`;
     const area = typeof rig.hits === "object" && "area" in rig.hits ? rig.hits.area : null;
     const draft = area
-      ? // Traps are square only until hex grids' phase H2, so a trap's area copies on squares.
-        draftFromTemplate(SQUARES, { ...area, id, rev: 0, sceneId: trap.sceneId, color: theme.color.danger, visibility: "dm", ownerId: "" }, id, view.tokens, fpc)
+      ? draftFromTemplate(grid, { ...area, id, rev: 0, sceneId: trap.sceneId, color: theme.color.danger, visibility: "dm", ownerId: "" }, id, view.tokens, fpc)
       : { ...newDraft(id, "cone", theme.color.danger), point: { x: center.x, y: center.y, z: zoneGroundAt(chunks, trap.sceneId, center) } };
     aimTrapArea(scope, ui, trap.id, draft);
   };
   const options: RowOption<HitsKind>[] = [
     { value: "trigger", label: "The creature that set it off" },
     ...(squares ? [{ value: "zone" as const, label: "Everyone on the trap" }] : []),
-    { value: "cells", label: "Everyone in these squares" },
+    { value: "cells", label: `Everyone in these ${cellWord(grid, true)}` },
     { value: "area", label: "Everyone in an area" },
   ];
   return (
@@ -619,8 +629,8 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
             Draw them again
           </Button>
           {/* Named apart from Goes off when's Add squares, which grows the trap itself. */}
-          <Button size="sm" icon="plus" aria-label="Add squares it hits" onClick={() => props.pick("hits")}>
-            Add squares
+          <Button size="sm" icon="plus" aria-label={`Add ${cellWord(grid, true)} it hits`} onClick={() => props.pick("hits")}>
+            Add {cellWord(grid, true)}
           </Button>
         </PartRow>
       ) : null}
@@ -631,6 +641,16 @@ function HitsChoice(props: { trap: Trap; rig: TrapRig; chunks: Readonly<Record<s
       ) : null}
     </>
   );
+}
+
+/** The keys round some hexes as one rectangle of at most 20 a side, or none: a wire's or a door's hexes to draw hits from. */
+function hexKeysAround(hexes: readonly { col: number; row: number }[]): { x: number; y: number; w: number; h: number }[] {
+  if (hexes.length === 0) return [];
+  const x0 = Math.max(0, Math.min(...hexes.map((h) => h.col)));
+  const y0 = Math.max(0, Math.min(...hexes.map((h) => h.row)));
+  const w = Math.max(...hexes.map((h) => h.col)) + 1 - x0;
+  const h = Math.max(...hexes.map((h) => h.row)) + 1 - y0;
+  return [{ x: x0, y: y0, w: Math.max(1, Math.min(LIMITS.trapRectSide, w)), h: Math.max(1, Math.min(LIMITS.trapRectSide, h)) }];
 }
 
 /** The ground at a point, for a new area's height. */

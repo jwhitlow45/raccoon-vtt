@@ -23,6 +23,7 @@ import {
   type Room,
   type Side,
 } from "./boardText.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /** Every character is half an em wide, so 12 px text is 6 px a character. */
 const measure = (text: string, px: number) => [...text].length * px * 0.5;
@@ -194,7 +195,7 @@ describe("label placement", () => {
     const { pillObstacles } = await import("../canvas/useBoardText.ts");
     // A trap two rows under a creature: its name over its top edge stands where the creature's HP line would hang ("Pois30/30arts").
     const trap = { id: "darts", rev: 1, sceneId: "s", name: "Poison darts", zone: { cells: [{ x: 1, y: 4, w: 3, h: 2 }] }, state: "armed", found: false } as Trap;
-    const spec = trapNamePill(trap, {}, 40, true);
+    const spec = trapNamePill(SQUARES, trap, {}, 40, true);
     assert.ok(spec, "the name shows at 40 px a square");
     const pill = pillObstacles([spec], 40);
     const { inputs, obstacles } = board(40, [{ id: "goblin", x: 2, y: 2, name: "Goblin", hp: "30/30" }]);
@@ -204,10 +205,10 @@ describe("label placement", () => {
     assert.ok(placed.lines.length > 0, "the label still shows");
     assert.ok(!overlaps(placed.box, pill[0]!.box), "the label moved off the trap's name");
     // A wire or a door names its trap under its badge, the box published as drawn there.
-    const wire = trapNamePill({ ...trap, zone: { wire: { a: [1, 4], b: [3, 4] } } } as Trap, {}, 40, true)!;
+    const wire = trapNamePill(SQUARES, { ...trap, zone: { wire: { a: [1, 4], b: [3, 4] } } } as Trap, {}, 40, true)!;
     assert.equal(wire.below, true);
     assert.ok(pillObstacles([wire], 40)[0]!.box.y0 > 4 * 40, "the wire's name hangs under its badge");
-    assert.equal(trapNamePill(trap, {}, 10, true), null, "no name where a creature's name gives way");
+    assert.equal(trapNamePill(SQUARES, trap, {}, 10, true), null, "no name where a creature's name gives way");
   });
 
   test("the acting creature places first, and moves to its side rather than cover a body", () => {
