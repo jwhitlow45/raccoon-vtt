@@ -13,6 +13,7 @@ import {
   newSceneIntent,
   newScenePick,
   newScenePreset,
+  newSceneShape,
   pickNow,
   playersSeeFields,
   replaceMap,
@@ -216,5 +217,28 @@ describe("a Universal VTT import's Players see", () => {
     assert.deepEqual([explore.fogEnabled, explore.vision, explore.autoWalls, explore.gridFromFile], [true, { on: true, light: "dim" }, "off", true]);
     const like = withPlayersSee(base, { like: { fogEnabled: false, vision: { on: false, light: "dark" }, blockMovement: false } }, "dark");
     assert.deepEqual([like.fogEnabled, like.vision, like.autoWalls, like.blockMovement], [false, { on: false, light: "dark" }, "off", false]);
+  });
+});
+
+describe("the grid a new scene starts on (docs/design-v1-hex-grids.md HX-D19)", () => {
+  test("a battle mat and a map image take the room's shape, a builder scene, a starter map and an import stay squares", () => {
+    assert.equal(newSceneShape("hexRows", "mat"), "hexRows");
+    assert.equal(newSceneShape("hexColumns", "map"), "hexColumns");
+    assert.equal(newSceneShape("hexRows", "builder"), undefined);
+    assert.equal(newSceneShape("hexRows", "starter"), undefined);
+    assert.equal(newSceneShape("hexRows", "uvtt"), undefined);
+    assert.equal(newSceneShape(undefined, "mat"), undefined);
+  });
+
+  test("each kind sends the shape it is made on, and a square scene's op is as it was", () => {
+    const mat = matScene({ id: "m", name: "", w: 30, h: 20, gridShape: "hexRows" });
+    assert.equal(mat.gridShape, "hexRows");
+    valid(mat);
+    assert.equal(builderScene({ id: "b", name: "", w: 40, h: 30, gridShape: "hexColumns" }).gridShape, "hexColumns");
+    const map = mapScene({ id: "p", name: "", asset: { id: "a", width: 2100, height: 1400 }, gridShape: "hexRows" }).scene;
+    assert.equal(map.gridShape, "hexRows");
+    valid(map);
+    assert.equal("gridShape" in matScene({ id: "m", name: "", w: 30, h: 20 }), false);
+    assert.equal("gridShape" in mapScene({ id: "p", name: "", asset: { id: "a", width: 2100, height: 1400 } }).scene, false);
   });
 });

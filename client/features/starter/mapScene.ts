@@ -1,3 +1,4 @@
+import type { GridShape } from "#shared/model.ts";
 import type { StarterWork } from "#shared/starter.ts";
 import { calibrationFromFind, fitBounds, MAX_CELL_PX, MIN_CELL_PX } from "../grid/calibrate.ts";
 import { DEFAULT_GRID, mapScene, type MapAsset, type SceneInput } from "../scenes/create.ts";
@@ -70,14 +71,17 @@ export function starterMapScene(input: {
   asset: MapAsset;
   work: Pick<StarterWork, "name" | "grid" | "gridColor">;
   grid: StarterGrid | null;
+  /** A starter map made on hexes (docs/design-v1-hex-grids.md HX-D19): its art is drawn on squares, so the scene opens Line up grid rather than take the measured square grid. */
+  gridShape?: GridShape;
 }): StarterMapScene {
-  const { asset, work, grid } = input;
+  const { asset, work } = input;
+  const grid = input.gridShape ? null : input.grid;
   const cellPx = grid ? grid.cellPx : NaN;
   const sized = Number.isFinite(cellPx) && cellPx >= MIN_CELL_PX && cellPx <= MAX_CELL_PX;
   const origin = sized ? grid?.originPx : undefined;
   const aligned = origin !== undefined;
   const name = input.name.trim() || work.name;
-  const { scene } = mapScene({ id: input.id, name, asset: sized ? { ...asset, cellPx } : { id: asset.id, width: asset.width, height: asset.height } });
+  const { scene } = mapScene({ id: input.id, name, asset: sized ? { ...asset, cellPx } : { id: asset.id, width: asset.width, height: asset.height }, ...(input.gridShape ? { gridShape: input.gridShape } : null) });
   const map = origin && scene.map ? { ...scene.map, ...calibrationFromFind({ cellPx, originPx: origin }) } : scene.map;
   const color = work.gridColor && HEX_COLOR.test(work.gridColor) ? work.gridColor.toLowerCase() : null;
   return {

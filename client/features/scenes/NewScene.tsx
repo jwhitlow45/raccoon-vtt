@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MAX_SCENE_CELLS } from "#shared/protocol.ts";
+import { gridOfShape } from "#shared/rules/grid.ts";
 import type { FoundWork } from "#shared/starter.ts";
 import { Button } from "../../components/Button.tsx";
 import { ErrorText, Input } from "../../components/Field.tsx";
@@ -14,6 +15,8 @@ import { copyUrls, importFound, importSearch, IMPORT_WAIT_MS, nameGivesSize, sea
 import { showOutcome } from "../grid/outcome.ts";
 import { endFinding, useGridStore } from "../grid/store.ts";
 import { useLandLater } from "../grid/useFindGrid.ts";
+import { ShapeRow } from "../grid/ShapeRow.tsx";
+import { HEX_LIMITS, shapeChoice, sizeWords, storedShape, type ShapeChoice } from "../grid/words.ts";
 import { apartFromStarter } from "../images/library.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
@@ -23,7 +26,7 @@ import { StarterDialog } from "../starter/StarterDialog.tsx";
 import { thisDevice } from "../uvtt/limits.ts";
 import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { ColorInput, NumberInput } from "./controls.tsx";
-import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, newSceneIntent, newScenePreset, pickNow, withPlayersSee, type MapAsset, type NewSceneIntent, type SceneInput } from "./create.ts";
+import { builderScene, MAT_BACKGROUND, mapScene, matScene, nameFromFile, newSceneIntent, newScenePreset, newSceneShape, pickNow, withPlayersSee, type MapAsset, type NewSceneIntent, type SceneInput } from "./create.ts";
 import { uploadErrorText, uploadMap } from "./upload.ts";
 import type { PanelClose } from "../panels.ts";
 
@@ -62,6 +65,13 @@ const MAX_SCENES = 50;
  * with it, and a scene deleted meanwhile leaves the kind's start, said in
  * a toast.
  *
+ * The Grid row (docs/design-v1-hex-grids.md HX-D19) starts on the room's
+ * New scenes shape for a Battle mat or a Map image and on Squares for a
+ * Builder scene, and changes the shape for this one scene. A starter map
+ * starts on squares, its art's own grid, unless the DM picks a hex shape
+ * here, and then opens Line up grid. A map image for hexes is not searched
+ * for a grid, which finds squares only.
+ *
  * The kind is a choice of native radios, and a tap on the chosen radio does
  * nothing, so the form folds with its own Cancel. During an upload that
  * Cancel stops the upload and keeps the form, so the DM can try again.
@@ -83,8 +93,13 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const starterButton = useRef<HTMLButtonElement>(null);
   /** The choice the starter dialog was opened with, which its copy makes the scene with. */
   const starterIntent = useRef<NewSceneIntent>({ value: "reveal" });
+  /** The grid the starter dialog was opened with, as its intent is held. */
+  const starterShapeRef = useRef<ShapeChoice | undefined>(undefined);
   const feetPerCell = useRoomView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
+  const shapeSetting = useRoomView((s) => s.view?.meta.settings.newScenes);
+  /** The DM's own pick of the grid, null for the kind's start. */
+  const [shapePick, setShapePick] = useState<ShapeChoice | null>(null);
   const current = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
   /** The DM's own pick of Players see, null for the kind's start. */
   const [seen, setSeen] = useState<PlayersSeeValue | null>(null);
@@ -107,7 +122,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     [],
   );
   // Only Create sends it, so a sheet's swipe springs back once a name or a size is typed or a map picked (docs/design-v1-sheet-swipe.md 4.5).
-  useUnsavedSince({ name, w, h, background, file: file?.name ?? null, seen });
+  useUnsavedSince({ name, w, h, background, file: file?.name ?? null, seen, shapePick });
 
   const full = props.sceneCount >= MAX_SCENES;
   // A paste lands here while the Map image form is open, as a chosen file does: picked, and searched for its grid (docs/design-v1-paste.md 1.2).
@@ -121,6 +136,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     stopSearch();
     setKind(k);
     setSeen(null);
+    setShapePick(null);
     setStatus({ busy: false, waiting: false, error: null });
     if (k === "builder") {
       setW(40);
@@ -140,6 +156,12 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
       setFile(null);
     }
   };
+
+  /** The grid the form shows for a kind: the DM's pick, or the kind's start. */
+  const shapeFor = (k: Kind): ShapeChoice => shapePick ?? shapeChoice(newSceneShape(shapeSetting, k));
+  /** A starter map keeps its art's squares unless the DM picked a hex shape here. */
+  const starterShape = () => (shapePick === null ? undefined : storedShape(shapePick));
+  const hexFor = (k: Kind) => shapeFor(k) !== "squares";
 
   /** The choice the form shows now: the DM's pick, or the room's default for the kind. */
   const intentNow = (k: Kind): NewSceneIntent => newSceneIntent(seen ?? newScenePreset(setting, k), current);
@@ -163,19 +185,19 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
 
   const createMat = () => {
     const id = actions.newId();
-    actions.dispatch({ t: "scene.create", scene: seeing(matScene({ id, name, w, h, background }), "mat", intentNow("mat")) });
+    actions.dispatch({ t: "scene.create", scene: seeing(matScene({ id, name, w, h, background, gridShape: storedShape(shapeFor("mat")) }), "mat", intentNow("mat")) });
     open(id, null);
   };
 
   const createBuilder = () => {
     const id = actions.newId();
-    actions.dispatch({ t: "scene.create", scene: seeing(builderScene({ id, name, w, h }), "builder", intentNow("builder")) });
+    actions.dispatch({ t: "scene.create", scene: seeing(builderScene({ id, name, w, h, gridShape: storedShape(shapeFor("builder")) }), "builder", intentNow("builder")) });
     open(id, "build");
   };
 
-  const createFromAsset = (asset: MapAsset, fileName: string, intent: NewSceneIntent, wait: ImportWait = { answer: null, later: null }) => {
+  const createFromAsset = (asset: MapAsset, fileName: string, intent: NewSceneIntent, gridShape: ShapeChoice, wait: ImportWait = { answer: null, later: null }) => {
     const id = actions.newId();
-    const made = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset });
+    const made = mapScene({ id, name: name.trim() || nameFromFile(fileName), asset, gridShape: storedShape(gridShape) });
     const { hinted } = made;
     const scene = seeing(made.scene, "map", intent);
     actions.dispatch({ t: "scene.create", scene });
@@ -195,14 +217,14 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     open(id, hinted ? null : "grid");
   };
 
-  const createFromStarter = (row: AssetRow, found: FoundWork, grid: StarterGrid | null, intent: NewSceneIntent) => {
+  const createFromStarter = (row: AssetRow, found: FoundWork, grid: StarterGrid | null, intent: NewSceneIntent, gridShape: ShapeChoice | undefined) => {
     // A starter map is never searched: its grid is the catalog's. A file picked before it is dropped, and so is its
     // search, whether it still runs here or was handed on to Line up grid after an upload (useLandLater).
     stopSearch();
     const running = gridStore.getState().finding;
     if (running) endFinding(gridStore, running.sceneId);
     const id = actions.newId();
-    const made = starterMapScene({ id, name, asset: { id: row.id, width: row.width, height: row.height }, work: found.work, grid });
+    const made = starterMapScene({ id, name, asset: { id: row.id, width: row.width, height: row.height }, work: found.work, grid, ...(gridShape && gridShape !== "squares" ? { gridShape } : null) });
     const { aligned } = made;
     const scene = seeing(made.scene, "map", intent);
     actions.dispatch({ t: "scene.create", scene });
@@ -213,8 +235,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   // A starter map already in the room starts on its catalog grid again, when the catalog is here and describes the room's file.
   const reuseMap = (row: AssetRow) => {
     const found = row.starter ? loadedStarterWork(row.starter) : null;
-    if (found) createFromStarter(row, found, retainedGrid(row, found.work), intentNow("map"));
-    else createFromAsset({ id: row.id, width: row.width, height: row.height }, "Map", intentNow("map"));
+    if (found) createFromStarter(row, found, retainedGrid(row, found.work), intentNow("map"), starterShape());
+    else createFromAsset({ id: row.id, width: row.width, height: row.height }, "Map", intentNow("map"), shapeFor("map"));
   };
 
   const pickFile = (next: File | null, fromPaste = false) => {
@@ -222,7 +244,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
     setPasted(fromPaste);
     setStatus({ busy: false, waiting: false, error: null });
     stopSearch();
-    if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name) })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
+    if (next && searchOnImport({ source: "image", named: nameGivesSize(next.name), hex: hexFor("map") })) searchRef.current = { file: next, search: importSearch(next, thisDevice()) };
   };
 
   // The room's "Use the pasted image" hands its picture here: Map image opens with it picked, and the grid search starts (docs/design-v1-paste.md 4).
@@ -235,6 +257,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   const upload = async () => {
     if (!file || status.busy) return;
     const intent = intentNow("map");
+    const gridShape = shapeFor("map");
     const abort = new AbortController();
     abortRef.current = abort;
     setStatus({ busy: true, waiting: false, error: null });
@@ -248,7 +271,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
       // gets a short wait, or one starts now: for a name whose counts the
       // server refused, or an upload tried again after a cancel.
       let wait: ImportWait | undefined;
-      if (asset.cellPx !== undefined) stopSearch();
+      if (asset.cellPx !== undefined || gridShape !== "squares") stopSearch();
       else {
         if (searchRef.current?.file !== file) searchRef.current = { file, search: importSearch(file, thisDevice()) };
         setStatus({ busy: true, waiting: false, finding: true, error: null });
@@ -260,7 +283,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
         searchRef.current = null;
       }
       setStatus({ busy: false, waiting: false, error: null });
-      createFromAsset(asset, file.name, intent, wait);
+      createFromAsset(asset, file.name, intent, gridShape, wait);
     } catch (err) {
       if (abort.signal.aborted) return;
       setStatus({ busy: false, waiting: false, error: uploadErrorText(err) });
@@ -270,6 +293,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
   };
 
   if (full) return <Help>A room holds at most {MAX_SCENES} scenes. Delete one to add another.</Help>;
+  const size = sizeWords(gridOfShape(kind ? storedShape(shapeFor(kind)) : undefined), { w, h }, feetPerCell);
 
   const actionsRow = (main: ReactNode) => (
     <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
@@ -307,6 +331,17 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
           <Input aria-label="Scene name" placeholder={kind === "mat" ? "Battle mat" : kind === "builder" ? "Dungeon" : "Name from the file"} maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
           {/* A new map image has no walls yet, so Explore there is warned. */}
           <NewScenePlayersSee kind={kind} setting={setting} value={seen ?? newScenePreset(setting, kind)} like={current} wallless={kind === "map"} disabled={status.busy} onChange={setSeen} />
+          <ShapeRow
+            name="Grid"
+            value={shapeFor(kind)}
+            disabled={status.busy}
+            note={kind === "builder" && hexFor(kind) ? HEX_LIMITS.builder : kind === "map" && shapePick === null && hexFor(kind) ? HEX_LIMITS.starter : undefined}
+            onChange={(next) => {
+              setShapePick(next);
+              // A search started at the pick looks for squares, which a map for hexes never takes.
+              if (kind === "map" && next !== "squares") stopSearch();
+            }}
+          />
           {kind === "map" ? (
             <>
               <label
@@ -339,9 +374,15 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                 <PasteButton paste={paste} />
               </div>
               <PasteStatus paste={paste} />
-              <Help>
-                A name like <code>crypt_30x20.jpg</code> sets the scale for 30 by 20 squares. Otherwise a grid drawn on the map is looked for, and you check it or line up the grid next.
-              </Help>
+              {hexFor("map") ? (
+                <Help>
+                  A name like <code>crypt_30x20.jpg</code> sets the scale for 30 hexes across. Otherwise you line up the hexes next.
+                </Help>
+              ) : (
+                <Help>
+                  A name like <code>crypt_30x20.jpg</code> sets the scale for 30 by 20 squares. Otherwise a grid drawn on the map is looked for, and you check it or line up the grid next.
+                </Help>
+              )}
               {actionsRow(
                 <Button size="sm" variant="primary" busy={status.busy} disabled={!file} onClick={() => void upload()}>
                   {status.finding ? "Looking for a grid…" : status.busy ? "Uploading…" : "Upload and create"}
@@ -357,6 +398,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                   disabled={status.busy}
                   onClick={() => {
                     starterIntent.current = intentNow("map");
+                    starterShapeRef.current = starterShape();
                     setStarter(true);
                   }}
                 >
@@ -370,7 +412,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
                   kind="map"
                   hint="Openly licensed maps. Use copies the map into this room with its credit and makes the scene, on the map's own grid where it has one."
                   note={(found) => <FeetNote found={found} roomFeet={feetPerCell} />}
-                  onPicked={(row, found) => createFromStarter(row, found, answeredGrid(row), starterIntent.current)}
+                  onPicked={(row, found) => createFromStarter(row, found, answeredGrid(row), starterIntent.current, starterShapeRef.current)}
                   onClose={() => setStarter(false)}
                   opener={starterButton}
                 />
@@ -380,12 +422,16 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
           ) : (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), flexWrap: "wrap" }}>
-                <span style={{ fontSize: theme.font.body14 }}>Squares</span>
-                <NumberInput label="Squares across" value={w} min={1} max={MAX_SCENE_CELLS} onChange={setW} />
-                <span aria-hidden>×</span>
-                <NumberInput label="Squares down" value={h} min={1} max={MAX_SCENE_CELLS} onChange={setH} />
+                <span style={{ fontSize: theme.font.body14 }}>{size.holds === null ? "Squares" : size.name}</span>
+                {/* The two sizes keep their line together, so a longer name above them on hexes never leaves Down alone. */}
+                <div style={{ display: "flex", alignItems: "center", gap: theme.space(2) }}>
+                  <NumberInput label={size.across} value={w} min={1} max={MAX_SCENE_CELLS} onChange={setW} />
+                  <span aria-hidden>×</span>
+                  <NumberInput label={size.down} value={h} min={1} max={MAX_SCENE_CELLS} onChange={setH} />
+                </div>
                 {kind === "mat" ? <ColorInput label="Background color" value={background} onChange={setBackground} /> : null}
               </div>
+              {size.holds !== null ? <Help>{size.holds}</Help> : null}
               {actionsRow(
                 <Button size="sm" variant="primary" onClick={kind === "mat" ? createMat : createBuilder}>
                   Create

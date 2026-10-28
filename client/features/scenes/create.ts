@@ -1,4 +1,4 @@
-import type { LightLevel, RoomState, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
+import type { GridShape, LightLevel, RoomState, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
 import { PLAYERS_SEE_WORDS } from "#shared/playersSee.ts";
 import { MAX_NAME, MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
 import { fitBounds, MAX_CELL_PX, MIN_CELL_PX } from "../grid/calibrate.ts";
@@ -45,10 +45,27 @@ export function nameFromFile(fileName: string): string {
  */
 export const BLOCKS_MOVES = { blockMovement: true } as const;
 
+/** A scene's shape as `scene.create` takes it: squares send none, so a square scene's op is as it was before hex grids. */
+function shaped(gridShape: GridShape | undefined): { gridShape?: GridShape } {
+  return gridShape ? { gridShape } : {};
+}
+
+/**
+ * The grid a new scene of a kind starts on (docs/design-v1-hex-grids.md
+ * HX-D19): a Battle mat or a Map image on the room's New scenes setting,
+ * a Builder scene, a starter map and a Universal VTT import on squares,
+ * since the builder's core tools, the starter art and the file's walls are
+ * square. Only the form reads the setting, so replay never does.
+ */
+export function newSceneShape(setting: GridShape | undefined, kind: NewSceneKind | "starter"): GridShape | undefined {
+  return kind === "mat" || kind === "map" ? setting : undefined;
+}
+
 /** A blank battle mat: a background color and the app's grid, with fog off since there is nothing to hide. */
-export function matScene(input: { id: string; name: string; w: number; h: number; background?: string }): SceneInput {
+export function matScene(input: { id: string; name: string; w: number; h: number; background?: string; gridShape?: GridShape }): SceneInput {
   return {
     id: input.id,
+    ...shaped(input.gridShape),
     name: cleanName(input.name, "Battle mat"),
     bounds: { w: clampCells(input.w), h: clampCells(input.h) },
     background: input.background ?? MAT_BACKGROUND,
@@ -59,9 +76,10 @@ export function matScene(input: { id: string; name: string; w: number; h: number
 }
 
 /** A scene for the map builder. Fog starts on: a dungeon has rooms to reveal (design 13.2). */
-export function builderScene(input: { id: string; name: string; w: number; h: number }): SceneInput {
+export function builderScene(input: { id: string; name: string; w: number; h: number; gridShape?: GridShape }): SceneInput {
   return {
     id: input.id,
+    ...shaped(input.gridShape),
     name: cleanName(input.name, "Dungeon"),
     bounds: { w: clampCells(input.w), h: clampCells(input.h) },
     background: BUILDER_BACKGROUND,
@@ -106,11 +124,12 @@ export function initialMap(asset: MapAsset): { map: SceneMap; hinted: boolean } 
  * section 2.1). The reducer never infers the rule, so this op says it. A
  * blank mat or a builder scene says nothing and keeps the older rule.
  */
-export function mapScene(input: { id: string; name: string; asset: MapAsset }): { scene: SceneInput; hinted: boolean } {
+export function mapScene(input: { id: string; name: string; asset: MapAsset; gridShape?: GridShape }): { scene: SceneInput; hinted: boolean } {
   const { map, hinted } = initialMap(input.asset);
   return {
     scene: {
       id: input.id,
+      ...shaped(input.gridShape),
       name: cleanName(input.name, "Map"),
       bounds: fitBounds(map),
       background: MAP_BACKGROUND,

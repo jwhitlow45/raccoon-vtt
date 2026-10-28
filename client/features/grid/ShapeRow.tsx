@@ -18,7 +18,7 @@ import { SHAPE_CHOICES, storedShape, type ShapeChoice } from "./words.ts";
  */
 export function ShapeRow(props: {
   name: string;
-  help: string;
+  help?: string;
   value: ShapeChoice;
   refused?: Partial<Record<ShapeChoice, string>>;
   note?: ReactNode;

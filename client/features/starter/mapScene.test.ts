@@ -121,4 +121,13 @@ describe("the grid a starter map's scene starts on", () => {
     assert.equal(retainedGrid({ width: 4096 }, inked), null);
     assert.equal(retainedGrid({ width: 4096, sha256: SHA }, { ...inked, grid: undefined }), null);
   });
+
+  test("made on hexes, takes no measured square grid and opens Line up grid (docs/design-v1-hex-grids.md HX-D19)", () => {
+    const made = starterMapScene({ id: "s1", name: "", asset: ROW, work: inked, grid: measured, gridShape: "hexRows" });
+    assert.equal(made.aligned, false);
+    assert.equal(made.scene.gridShape, "hexRows");
+    assert.deepEqual(made.scene.map?.originPx, { x: 0, y: 0 });
+    assert.notEqual(made.scene.map?.cellPx, 70);
+    assert.equal(made.scene.grid?.color, "#1a1a1a", "the paper's color still draws the hexes");
+  });
 });
