@@ -543,9 +543,9 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
 
   test("9. the column stays below a lasting notice as the turn band comes and goes, which moves the notice (LPD-DMPHONE-9)", async () => {
     await setUp({ width: 390, height: 844, scale: 1 });
-    // Framing a starting view from a phone shows the "Starting view" bar under the top bar, a notice that lasts. A phone starts the Scene group folded.
+    // Framing a starting view from a phone shows the "Starting view" bar under the top bar, a notice that lasts. A phone starts the Size and view group folded.
     const scenes = await openPanel(dm, "Scenes");
-    await (await openSceneGroup(scenes, "Scene")).getByRole("button", { name: "Save current view" }).tap();
+    await (await openSceneGroup(scenes, "Size and view")).getByRole("button", { name: "Save current view" }).tap();
     const framing = dm.getByRole("group", { name: "Starting view" });
     await framing.waitFor();
     await hurtHag();
@@ -572,7 +572,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     const label = "480 x 320 at 130% under the Starting view notice";
     await setUp({ width: 480, height: 320, scale: 1.3, side: 47, bottom: 21 });
     const scenes = await openPanel(dm, "Scenes");
-    await (await openSceneGroup(scenes, "Scene")).getByRole("button", { name: "Save current view" }).tap();
+    await (await openSceneGroup(scenes, "Size and view")).getByRole("button", { name: "Save current view" }).tap();
     const framing = dm.getByRole("group", { name: "Starting view" });
     await framing.waitFor();
     // Two checks, so the alerts stay open once one is answered.

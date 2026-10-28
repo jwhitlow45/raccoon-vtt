@@ -582,8 +582,8 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
       // A notice that lasts spans the map or stands beside the lane, and the tool's controls stay in reach under it.
       await pickTool(phone, "Select");
       await openPanel(phone, "Scenes");
-      // A phone starts the Scene group folded (docs/design-v1-map-discovery.md 8.4).
-      await (await openSceneGroup(sheet(phone, "Scenes"), "Scene")).getByRole("button", { name: "Save current view" }).tap();
+      // A phone starts the Size and view group folded (docs/design-v1-map-discovery.md 8.4).
+      await (await openSceneGroup(sheet(phone, "Scenes"), "Size and view")).getByRole("button", { name: "Save current view" }).tap();
       const framing = phone.getByRole("group", { name: "Starting view" });
       await framing.waitFor();
       await pickTool(phone, "Area");
@@ -2207,11 +2207,11 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
    *   their view, the player link and the table display. Away from the
    *   players' scene, its notice leads Players' screens.
    * - M5, regrouped by the map discovery work (ms2-1,
-   *   docs/design-v1-map-discovery.md 8.4): the scene's name with no
-   *   header, then What players see, Map image and grid with the map image
-   *   first and Map phases after it, Walls and movement and Scene, each a
-   *   fold that stays as the device left it, then Export as image and
-   *   Delete.
+   *   docs/design-v1-map-discovery.md 8.4, docs/design-v1-design-pass.md
+   *   4.1): the scene's name under This scene, then What players see, Map
+   *   image and grid with the map image first and Map phases after it,
+   *   Walls and movement and Size and view, each a fold that stays as the
+   *   device left it, then Export as image and Delete.
    * - M7: each other member's Manage opens their Kick and Remove, and
    *   another DM's Remove DM too.
    * - M8: Long rest for the party sits below the list of characters.
@@ -2296,14 +2296,16 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
   }
 
   /**
-   * Each section's and group's label in a panel, in order: the first heading that belongs to the part itself.
-   * A group is no section (components/Panel.tsx), and its heading holds its summary while folded, so a group gives its name alone.
+   * Each section's and group's label in a panel, in order: the first heading that belongs to the part itself, for the panel's
+   * own parts, not one inside a group (Fog and party vision). A group is no section (components/Panel.tsx), and its heading
+   * holds its summary while folded, so a group gives its name alone.
    */
   function sectionLabels(panel: Locator): Promise<string[]> {
     const PART = "section, [data-panel-group]";
     return panel.evaluate(
       (root, part) =>
         Array.from((root as unknown as El).querySelectorAll(part))
+          .filter((section) => section.parentElement?.closest(part) === (root as unknown as El).closest(part))
           .map((section) => {
             const heading = Array.from(section.querySelectorAll("h2, h3, h4")).find((h) => h.closest(part) === section);
             const name = heading?.querySelectorAll("[data-group-fold] span[id], span[id]")[0];
@@ -2455,15 +2457,15 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       await waitFor("the DM back on the players' scene", () => dmSocket.you?.sceneId === run.sceneId || null, 30_000);
     });
 
-    test("4. ms2-1: the scene's settings are its name with no header, then What players see, Map image and grid, Walls and movement and Scene, each a fold the device remembers, then Export as image and Delete", async () => {
+    test("4. ms2-1: the scene's settings are its name under This scene, then What players see, Map image and grid, Walls and movement and Size and view, each a fold the device remembers, then Export as image and Delete", async () => {
       let panel = await sideTab(dm, "Scenes");
-      const groups = ["What players see", "Map image and grid", "Walls and movement", "Scene"];
-      // docs/design-v1-map-discovery.md 8.4: the name first, in a section with no label, then the groups and the two sections after them.
+      const groups = ["What players see", "Map image and grid", "Walls and movement", "Size and view"];
+      // docs/design-v1-map-discovery.md 8.4 and docs/design-v1-design-pass.md 4.1: the name first, under This scene, then the groups and the two sections after them.
       const name = panel.getByRole("textbox", { name: "Scene name" }).last();
       await name.waitFor();
-      assert.equal(await name.evaluate((el) => (el as unknown as El).closest("section")?.querySelectorAll("h2, h3, h4").length), 0, "the name has a label over it");
+      assert.equal(await name.evaluate((el) => (el as unknown as El).closest("section")?.querySelectorAll("h2, h3, h4")[0]?.textContent), "This scene", "the name is under its own label, apart from New scene");
       let labels = await sectionLabels(panel);
-      assert.deepEqual(labels.slice(labels.indexOf("New scene") + 1), [...groups, "Export as image", "Delete"]);
+      assert.deepEqual(labels.slice(labels.indexOf("New scene") + 1), ["This scene", ...groups, "Export as image", "Delete"]);
       // On a computer every group starts open, each header a button saying so.
       for (const group of groups) assert.equal(await sceneGroupFold(panel, group).getAttribute("aria-expanded"), "true", `${group} starts open`);
       // The map image leads Map image and grid, the grid's look follows, and Fog sits with What players see.
@@ -2475,23 +2477,23 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       const walls = sceneGroup(panel, "Walls and movement");
       const order = [walls.getByRole("switch", { name: /^Walls and ledges block players' moves/ }), walls.getByRole("combobox", { name: "Automatic walls" }), walls.getByRole("button", { name: "Open the builder" }), walls.getByRole("button", { name: "Clear the build" })];
       for (let i = 1; i < order.length; i++) assert.ok((await box(order[i - 1]!)).y <= (await box(order[i]!)).y, `Walls and movement in order at ${i}`);
-      const sceneOwn = sceneGroup(panel, "Scene");
+      const sceneOwn = sceneGroup(panel, "Size and view");
       for (const what of ["Squares across", "Background color"]) await sceneOwn.getByLabel(what).waitFor();
       await sceneOwn.getByRole("button", { name: "Save current view" }).waitFor();
       await map.scrollIntoViewIfNeeded();
       await shot(dm, "scenes-settings-no-map");
 
       // A group folded stays folded on this device after a reload, and opens again with a tap.
-      const fold = sceneGroupFold(panel, "Scene");
+      const fold = sceneGroupFold(panel, "Size and view");
       await fold.click();
       assert.equal(await fold.getAttribute("aria-expanded"), "false");
       assert.equal(await sceneOwn.getByRole("button", { name: "Save current view" }).isVisible(), false, "a folded group hides its settings");
       await dm.reload();
       await dm.getByRole("status", { name: "Connected" }).first().waitFor();
       panel = await sideTab(dm, "Scenes");
-      await waitFor("Scene folded after the reload", async () => ((await sceneGroupFold(panel, "Scene").getAttribute("aria-expanded")) === "false" ? true : null));
+      await waitFor("Size and view folded after the reload", async () => ((await sceneGroupFold(panel, "Size and view").getAttribute("aria-expanded")) === "false" ? true : null));
       assert.equal(await sceneGroupFold(panel, "Map image and grid").getAttribute("aria-expanded"), "true");
-      await openSceneGroup(panel, "Scene");
+      await openSceneGroup(panel, "Size and view");
       map = sceneGroup(panel, "Map image and grid");
 
       // On the players' scene the picker comes after its warning, with the first map's fog choice, under the row as before.
@@ -2518,7 +2520,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
       const phases = map.getByRole("heading", { name: "Map phases", exact: true });
       assert.ok((await box(replace)).y < (await box(phases)).y && (await box(phases)).y < (await box(map.getByRole("switch", { name: "Grid lines" }))).y, "Map phases comes between the image and the grid");
       labels = await sectionLabels(panel);
-      assert.deepEqual(labels.slice(labels.indexOf("New scene") + 1), [...groups, "Export as image", "Delete"]);
+      assert.deepEqual(labels.slice(labels.indexOf("New scene") + 1), ["This scene", ...groups, "Export as image", "Delete"]);
       await map.scrollIntoViewIfNeeded();
       await shot(dm, "scenes-settings-with-map");
       // Step 8's phone page shares this device's storage, and opens on a phone's starts.
@@ -2640,7 +2642,7 @@ describe("raccoon-vtt: the moves in the DM panel, Scenes, Members, Characters an
 
       sheet = await phoneSheet(phone, "Scenes");
       // A phone starts every group but What players see folded (docs/design-v1-map-discovery.md 8.4).
-      for (const [group, open] of [["What players see", "true"], ["Map image and grid", "false"], ["Walls and movement", "false"], ["Scene", "false"]] as const) {
+      for (const [group, open] of [["What players see", "true"], ["Map image and grid", "false"], ["Walls and movement", "false"], ["Size and view", "false"]] as const) {
         assert.equal(await sceneGroupFold(sheet, group).getAttribute("aria-expanded"), open, `${group} on a phone`);
       }
       await shot(phone, "phone-scenes-folded");

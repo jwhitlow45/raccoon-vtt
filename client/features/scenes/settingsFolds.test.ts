@@ -43,13 +43,19 @@ const PHONE: SceneFolds = { players: true, map: false, walls: false, scene: fals
 const ALL_OPEN: SceneFolds = { players: true, map: true, walls: true, scene: true };
 
 describe("the scene settings page's groups (8.4)", () => {
-  test("What players see, Map image and grid, Walls and movement, then Scene", () => {
+  test("What players see, Map image and grid, Walls and movement, then Size and view, still stored under scene", () => {
     assert.deepEqual(SCENE_GROUPS, ["players", "map", "walls", "scene"]);
     assert.deepEqual(
       SCENE_GROUPS.map((g) => SCENE_GROUP_LABELS[g]),
-      ["What players see", "Map image and grid", "Walls and movement", "Scene"],
+      ["What players see", "Map image and grid", "Walls and movement", "Size and view"],
     );
     assert.equal(SCENE_FOLDS_KEY, "rvtt.sceneSettingsFolds");
+  });
+
+  test("a device that folded the group when it was named Scene opens Size and view folded (docs/design-v1-design-pass.md 4.1)", () => {
+    const before = storage(JSON.stringify({ scene: false }));
+    assert.equal(resolveSceneFolds(before, 1440).scene, false);
+    assert.equal(SCENE_GROUP_LABELS.scene, "Size and view");
   });
 
   test("below 900 px only What players see starts open, from 900 px every group does", () => {
@@ -172,11 +178,11 @@ describe("the page as it draws its groups (8.4)", () => {
     });
   }
 
-  test("the name with no header, the four groups as folds, then Export as image and Delete", () => {
+  test("the name under This scene, the four groups as folds, then Export as image and Delete", () => {
     const html = page(PHONE);
-    assert.deepEqual(headings(html), ["What players see open", "Map image and grid folded", "Walls and movement folded", "Scene folded", "Export as image", "Delete"]);
-    assert.ok(html.indexOf("Scene name") < html.indexOf("What players see"), "the name comes first");
-    assert.equal(/This scene|>Grid<|>Movement<|>Map builder</.test(html), false, "no section of the old page is left");
+    assert.deepEqual(headings(html), ["This scene", "What players see open", "Map image and grid folded", "Walls and movement folded", "Size and view folded", "Export as image", "Delete"]);
+    assert.ok(html.indexOf("This scene") < html.indexOf("Scene name") && html.indexOf("Scene name") < html.indexOf("What players see"), "the name comes first, under its label");
+    assert.equal(/>Grid<|>Movement<|>Map builder</.test(html), false, "no section of the old page is left");
   });
 
   test("a folded group keeps its settings drawn but hidden, and an open one shows them, each in its group", () => {
@@ -186,12 +192,12 @@ describe("the page as it draws its groups (8.4)", () => {
     assert.ok(at("Map image and grid") < at("Add a map image") && at("Add a map image") < at("Grid lines") && at("Grid lines") < at("Walls and movement"));
     // Walls and movement: the movement switch, automatic walls, then the builder's buttons.
     assert.ok(at("Walls and movement") < at("Walls and ledges block players") && at("Walls and ledges block players") < at("Automatic walls") && at("Automatic walls") < at("Open the builder") && at("Open the builder") < at("Clear the build"));
-    // Scene: size, background, then the starting view.
+    // Size and view: size, background, then the starting view.
     assert.ok(at("Clear the build") < at("Size in squares") && at("Size in squares") < at("Background") && at("Background") < at("Starting view") && at("Starting view") < at("Export as image"));
     const bodies = [...html.matchAll(/<div (hidden="")? ?style="display:(grid|none);grid-template-columns:minmax\(0, 1fr\)/g)].map((m) => `${m[1] ? "hidden" : "shown"} ${m[2]}`);
     // A folded body keeps its grid: the hidden attribute alone hides it (globals.css).
     assert.deepEqual(bodies, ["shown grid", "hidden grid", "hidden grid", "hidden grid"]);
-    assert.deepEqual(headings(page(ALL_OPEN)).slice(0, 4), ["What players see open", "Map image and grid open", "Walls and movement open", "Scene open"]);
+    assert.deepEqual(headings(page(ALL_OPEN)).slice(1, 5), ["What players see open", "Map image and grid open", "Walls and movement open", "Size and view open"]);
   });
 
   test("a folded group says what it holds beside its name, with its icon, and an open one says nothing (docs/design-v1-design-pass.md 4.1)", () => {
@@ -203,6 +209,6 @@ describe("the page as it draws its groups (8.4)", () => {
 
   test("a group stays as the device left it", () => {
     const html = page({ players: false, map: true, walls: false, scene: true });
-    assert.deepEqual(headings(html).slice(0, 4), ["What players see folded", "Map image and grid open", "Walls and movement folded", "Scene open"]);
+    assert.deepEqual(headings(html).slice(1, 5), ["What players see folded", "Map image and grid open", "Walls and movement folded", "Size and view open"]);
   });
 });

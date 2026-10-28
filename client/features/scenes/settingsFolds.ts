@@ -21,7 +21,8 @@ export const SCENE_GROUP_LABELS: Readonly<Record<SceneGroup, string>> = {
   players: "What players see",
   map: "Map image and grid",
   walls: "Walls and movement",
-  scene: "Scene",
+  // Named for what it holds, so it never echoes the "This scene" label over the page (D-261028-07). Its key stays, so a device's folds carry over.
+  scene: "Size and view",
 };
 
 /** Each group's icon, after its chevron (docs/design-v1-design-pass.md 4.1). */

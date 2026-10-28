@@ -3854,7 +3854,7 @@ export function grabberTests(): void {
 }
 
 /** The scene settings page's groups in order (client/features/scenes/settingsFolds.ts). */
-const SCENE_GROUP_NAMES = ["What players see", "Map image and grid", "Walls and movement", "Scene"] as const;
+const SCENE_GROUP_NAMES = ["What players see", "Map image and grid", "Walls and movement", "Size and view"] as const;
 
 /** The crypt of ms2-a: a map scene with a Day and a Night phase, made once for the run. */
 let cryptId: string | null = null;
@@ -4033,7 +4033,7 @@ export function sceneSettingsTests(): void {
         const map = sceneGroup(panel, "Map image and grid");
         await map.getByRole("radiogroup", { name: "Grid shape", exact: true }).scrollIntoViewIfNeeded();
         await sweep.measure(page, "scene-settings-hex", map);
-        await sweep.measure(page, "scene-size-hex", sceneGroup(panel, "Scene"));
+        await sweep.measure(page, "scene-size-hex", sceneGroup(panel, "Size and view"));
         await shots.take(page, `alignment-${sweep.at}-scene-settings-hex`);
         await closeSheets(page);
         const menu = await openMenu(page);
@@ -4209,8 +4209,8 @@ export function isoChoiceTests(): void {
       await menu.getByRole("radio", { name: "Follow the scene" }).check();
       await close();
       const scenes = await openDmPanel(page, "Scenes");
-      // A phone starts the Scene group folded (docs/design-v1-map-discovery.md 8.4).
-      await openSceneGroup(scenes, "Scene");
+      // A phone starts the Size and view group folded (docs/design-v1-map-discovery.md 8.4).
+      await openSceneGroup(scenes, "Size and view");
       const row = scenes.getByRole("radiogroup", { name: "Suggested view" }).locator("xpath=../..");
       await row.scrollIntoViewIfNeeded();
       await sweep.measure(page, "iso5-suggested-view", row);

@@ -45,10 +45,11 @@ import type { PanelClose } from "../panels.ts";
 
 /**
  * Settings of the scene the DM is looking at, grouped by what each is for
- * (docs/design-v1-map-discovery.md 8.4): the scene's name with no header,
- * then What players see, everything that decides what reaches players
+ * (docs/design-v1-map-discovery.md 8.4): the scene's name under "This
+ * scene", apart from New scene above it (docs/design-v1-design-pass.md
+ * 4.1), then What players see, everything that decides what reaches players
  * (features/vision/VisionSettings.tsx), then Map image and grid, Walls and
- * movement, and the scene's own size, background and views, then export
+ * movement, and Size and view: the scene's size, background and views, then export
  * and deleting it. Each group folds as the panel kit's `Group`, with its
  * icon and, folded, what it holds (sceneSummary.ts), setup groups starting
  * folded on a phone (settingsFolds.ts), and stays mounted while folded, so
@@ -86,7 +87,7 @@ export function SceneSettings(props: { scene: Scene; others: Scene[]; close: Pan
 
   return (
     <>
-      <Section>
+      <Section label="This scene">
         <NameField key={scene.id} name={scene.name} onSave={(name) => update({ name })} />
       </Section>
 

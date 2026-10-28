@@ -582,7 +582,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     // The Scenes panel's slider moves under a sideways drag. The grid's sliders and the scene's size sit in groups a phone starts folded.
     sheet = await openPanel(dm, "Scenes");
     await openSceneGroup(sheet, "Map image and grid");
-    await openSceneGroup(sheet, "Scene");
+    await openSceneGroup(sheet, "Size and view");
     await steadyRect(sheet);
     const slider = sheet.locator('input[type="range"]').first();
     await slider.scrollIntoViewIfNeeded();
