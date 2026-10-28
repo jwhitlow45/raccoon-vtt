@@ -911,7 +911,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await openSceneGroup(panel, "Map image and grid");
     await shape.getByRole("radio", { name: "Hex columns" }).check();
     await waitFor("the camp on hex columns", () => dmSocket.state?.scenes[run.camp]?.gridShape === "hexColumns" || null);
-    await openSceneGroup(panel, "Scene");
+    await openSceneGroup(panel, "Size and view");
     await panel.getByText("Holds 34 columns across and 20 hexes down.", { exact: true }).waitFor();
     await shape.getByRole("radio", { name: "Hex rows" }).check();
     await waitFor("the camp back on hex rows", () => dmSocket.state?.scenes[run.camp]?.gridShape === "hexRows" || null);
@@ -951,7 +951,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   test("HX4-4. no square on a hex scene's screens, the DM's settings or Pat's board, but the Squares choices", async () => {
     const panel = await openScenes(dm);
     await openSceneGroup(panel, "Map image and grid");
-    await openSceneGroup(panel, "Scene");
+    await openSceneGroup(panel, "Size and view");
     assert.deepEqual(await squareWords(dm), [], "the DM's screen");
     await pat.bringToFront();
     assert.deepEqual(await squareWords(pat), [], "Pat's screen");
@@ -980,11 +980,11 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           const panel = await openScenes(page);
           await viewScene(page, panel, run.camp);
           await openSceneGroup(panel, "Map image and grid");
-          await openSceneGroup(panel, "Scene");
+          await openSceneGroup(panel, "Size and view");
           await panel.getByRole("radiogroup", { name: "Grid shape", exact: true }).scrollIntoViewIfNeeded();
           // The groups this lane changed. The scene list above them is not this lane's.
           off.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Map image and grid")), `a hex scene's Map image and grid at ${at}`));
-          off.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Scene")), `a hex scene's Scene group at ${at}`));
+          off.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Size and view")), `a hex scene's Size and view group at ${at}`));
           await shots.take(page, `hx4-scene-settings-${size.name}-${scale * 100}`);
           await panel.getByRole("radio", { name: "Builder", exact: true }).click();
           const grid = panel.getByRole("radiogroup", { name: "Grid", exact: true });
