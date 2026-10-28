@@ -8,7 +8,11 @@ import { useAccent } from "../../state/accent.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
-import { parseCellKey, polygonCells, rectBetween } from "./cells.ts";
+import { parseCellKey, polygonCells, rectBetween, type Point } from "./cells.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import type { HexGrid } from "#shared/rules/hex.ts";
+import { hexesInRect, hexOutline } from "./hexBuild.ts";
+import { heightSlot } from "./heights/store.ts";
 import { buildPaths, CAPTION_PX, drawBuild, drawLabel, drawLightReach, drawSuns, measureLabel, pillarPaths } from "./draw.ts";
 import { useIsoGround, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boxStands } from "../../canvas/relief/stand.ts";
@@ -32,7 +36,7 @@ import { TERRAIN_COLORS, useTextures } from "./textures.ts";
 export function BuilderLayer(props: LayerProps) {
   return (
     <>
-      <BuildBoard sceneId={props.scene.id} grid={props.scene.grid} autoWalls={props.scene.autoWalls} bounds={props.scene.bounds} role={props.role} scale={props.scale} />
+      <BuildBoard sceneId={props.scene.id} grid={props.scene.grid} autoWalls={props.scene.autoWalls} bounds={props.scene.bounds} gridShape={props.scene.gridShape} role={props.role} scale={props.scale} />
       {props.role === "dm" ? <LightMarks sceneId={props.scene.id} scale={props.scale} /> : null}
       {props.role === "dm" ? <BuildPreview scene={props.scene} scale={props.scale} /> : null}
       {props.role === "dm" ? <LabelMarks /> : null}
@@ -50,17 +54,18 @@ const BuildBoard = memo(function BuildBoard(props: {
   grid: Scene["grid"];
   autoWalls: Scene["autoWalls"];
   bounds: Scene["bounds"];
+  gridShape: Scene["gridShape"];
   role: "dm" | "player";
   scale: number;
 }) {
-  const { sceneId, grid, autoWalls, role, scale } = props;
+  const { sceneId, grid, autoWalls, role, scale, gridShape } = props;
   const { w, h } = props.bounds;
   // The build's paths are the costliest part of a build edit, so the tree not on screen keeps its last read.
   const allChunks = useTreeShownView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
   const allLabels = useTreeShownView((s) => s.view?.labels ?? EMPTY_LABELS);
   const chunks = useMemo(() => Object.values(allChunks).filter((c): c is BuildChunk => !!c && c.sceneId === sceneId), [allChunks, sceneId]);
   const labels = useMemo(() => Object.values(allLabels).filter((l): l is Label => !!l && l.sceneId === sceneId), [allLabels, sceneId]);
-  const paths = useMemo(() => buildPaths(chunks, role, { autoWalls, bounds: { w, h } }), [chunks, role, autoWalls, w, h]);
+  const paths = useMemo(() => buildPaths(chunks, role, { autoWalls, bounds: { w, h }, gridShape }), [chunks, role, autoWalls, w, h, gridShape]);
   const textures = useTextures(paths.floors.map(([t]) => t));
   const stamps = useStampDrawing(sceneId, role);
   // On the isometric view's ground stage, what stands up there is left out here (docs/design-v1-isometric-view.md 5.3).
@@ -134,8 +139,91 @@ export function LightReachLayer(props: LayerProps) {
   );
 }
 
-/** The DM's gesture in progress: cells not sent yet, the rectangle or polygon being drawn, a wall run. */
+/** The DM's gesture in progress: cells not sent yet, the rectangle or polygon being drawn, a wall run. A hex scene's go to HexPreview. */
 function BuildPreview(props: { scene: Scene; scale: number }) {
+  const g = sceneGrid(props.scene);
+  return isHex(g) ? <HexPreview scene={props.scene} scale={props.scale} g={g} /> : <SquarePreview scene={props.scene} scale={props.scale} />;
+}
+
+/**
+ * A hex scene's gesture in progress (HX-D7, HX-D9): the hexes a stroke has
+ * not sent yet, the hexes inside a dragged area, and a Wall line's points
+ * with the run to where the next one would land, or a straight one being
+ * dragged.
+ */
+function HexPreview(props: { scene: Scene; scale: number; g: HexGrid }) {
+  const { scene, scale, g } = props;
+  const active = useRoomView((s) => s.local.tool === "build");
+  const { unsent, rect, mode, line, lineScene, lineAt, lineDrag } = useStore(
+    useBuilderStore(),
+    useShallow((b) => ({ unsent: b.unsent, rect: b.rect, mode: b.mode, line: b.line, lineScene: b.lineScene, lineAt: b.lineAt, lineDrag: b.lineDrag })),
+  );
+  const clearing = useStore(useScoped(heightSlot).store, (h) => h.rough === "clear");
+  const inRect = useMemo(() => (rect ? hexesInRect(g, rect.a, rect.b, scene.bounds) : []), [g, rect, scene.bounds]);
+  const { accent } = useAccent();
+  if (!active) return null;
+  const fill = mode === "rough" && !clearing ? TERRAIN_COLORS.difficult : ERASE_FILL;
+  const hexes = unsent.length > 0 ? unsent : inRect;
+  const points = lineScene === scene.id ? line : [];
+  const last = points[points.length - 1];
+  const r = rect ? rectBetween(rect.a, rect.b) : null;
+  const dot = (p: Point, i: number, big: boolean) => (
+    <Circle key={i} x={p.x} y={p.y} radius={(big ? 11 : 5) / scale} fill={big ? theme.color.accentSoft : accent} stroke="#000000" strokeWidth={1} strokeScaleEnabled={false} listening={false} />
+  );
+  return (
+    <>
+      {hexes.length > 0 ? (
+        <Shape
+          listening={false}
+          perfectDrawEnabled={false}
+          sceneFunc={(ctx) => {
+            const c = ctx._context;
+            c.save();
+            c.globalAlpha = 0.7;
+            c.fillStyle = fill;
+            c.beginPath();
+            for (const key of hexes) {
+              const corners = hexOutline(g, key);
+              corners.forEach((p, i) => (i === 0 ? c.moveTo(p.x, p.y) : c.lineTo(p.x, p.y)));
+              c.closePath();
+            }
+            c.fill();
+            c.restore();
+          }}
+        />
+      ) : null}
+      {r && rect ? (
+        <Rect
+          x={Math.min(rect.a.x, rect.b.x)}
+          y={Math.min(rect.a.y, rect.b.y)}
+          width={Math.abs(rect.b.x - rect.a.x)}
+          height={Math.abs(rect.b.y - rect.a.y)}
+          stroke={mode === "rough" && !clearing ? accent : theme.color.danger}
+          strokeWidth={2}
+          strokeScaleEnabled={false}
+          dash={[6, 4]}
+          listening={false}
+        />
+      ) : null}
+      {points.length > 0 ? (
+        <>
+          <Line points={points.flatMap((p) => [p.x, p.y])} stroke={accent} strokeWidth={4} strokeScaleEnabled={false} lineCap="round" lineJoin="round" listening={false} />
+          {last && lineAt ? <Line points={[last.x, last.y, lineAt.x, lineAt.y]} stroke={accent} strokeWidth={2} strokeScaleEnabled={false} dash={[6, 4]} listening={false} /> : null}
+          {points.map((p, i) => dot(p, i, i === 0 && points.length >= 3))}
+        </>
+      ) : null}
+      {lineDrag ? (
+        <>
+          <Line points={[lineDrag.a.x, lineDrag.a.y, lineDrag.b.x, lineDrag.b.y]} stroke={accent} strokeWidth={4} strokeScaleEnabled={false} lineCap="round" listening={false} />
+          {dot(lineDrag.a, 0, false)}
+          {dot(lineDrag.b, 1, false)}
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function SquarePreview(props: { scene: Scene; scale: number }) {
   const { scene, scale } = props;
   const active = useRoomView((s) => s.local.tool === "build");
   const { unsent, rect, poly, run, mode, terrain } = useStore(

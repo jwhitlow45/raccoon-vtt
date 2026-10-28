@@ -17,6 +17,7 @@ import { cardPlace } from "../movement/anchor.ts";
 import { ownsToken } from "../tokens/access.ts";
 import { doorActions, doorName, pillOpener, seenDoor, type DoorOnMap } from "./doors.ts";
 import { doorPillSlot } from "./store.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 
 const EMPTY_CHUNKS: Readonly<Record<string, BuildChunk>> = {};
 const EMPTY_FOG: Readonly<Record<string, FogTile>> = {};
@@ -44,7 +45,7 @@ export function DoorPillHost(props: { scene: Scene; tool: string; camera: Camera
   const fogTiles = useRoomView((s) => s.view?.fogTiles ?? EMPTY_FOG);
   // The fog a player's tap is held to (tap.ts), so a pill goes once the DM's fog covers its door again.
   const fog = role === "player" && props.scene.fogEnabled !== false ? fogTiles : null;
-  const door = useMemo(() => (pill && pill.sceneId === props.scene.id ? seenDoor(chunks, pill.sceneId, pill.ref, fog) : null), [pill, chunks, fog, props.scene.id]);
+  const door = useMemo(() => (pill && pill.sceneId === props.scene.id ? seenDoor(chunks, pill.sceneId, pill.ref, fog, sceneGrid(props.scene)) : null), [pill, chunks, fog, props.scene]);
   const open = door !== null && props.tool === "select" && !tokenSelected;
   useEffect(() => {
     if (pill && !open) slot.setState({ pill: null });

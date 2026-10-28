@@ -3,8 +3,9 @@ import { chunkKey, doorChunk } from "#shared/keys.ts";
 import { reachesDoor } from "#shared/permissions.ts";
 import type { DoorRef, OpOf } from "#shared/protocol.ts";
 import { footprintRect } from "#shared/rules/footprint.ts";
-import { isCellFullyFogged } from "#shared/rules/fog.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { isCellFullyFogged, isSubcellFogged } from "#shared/rules/fog.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { hexAt, hexSubcells, type HexGrid } from "#shared/rules/hex.ts";
 
 /**
  * Doors in play (docs/design-v1-maps-vision.md 4.1), as plain functions for
@@ -69,7 +70,7 @@ export function segmentDistance(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
-/** The cells on each side of a door's middle: what fog hides of it. */
+/** The cells on each side of a door's middle: what fog hides of it. On hexes see `hexSideSeen`. */
 function sideCells(d: DoorOnMap): Point[] {
   if ("edge" in d.ref) {
     const vertical = d.a.x === d.b.x;
@@ -91,8 +92,23 @@ export type Fog = Readonly<Record<string, FogTile>> | null;
  * the token bar alike, so a token standing on ground the party never saw
  * finds no door there.
  */
-export function doorSeen(d: DoorOnMap, sceneId: string, fog: Fog): boolean {
+export function doorSeen(d: DoorOnMap, sceneId: string, fog: Fog, grid: Grid = SQUARES): boolean {
+  if (fog !== null && isHex(grid)) return hexSideSeen(d, sceneId, fog, grid);
   return fog === null || sideCells(d).some((cell) => !isCellFullyFogged(fog, sceneId, cell));
+}
+
+/**
+ * Whether a free door on a hex scene shows: one of the two hexes beside it
+ * holds a fog sub-cell out of the fog (docs/design-v1-hex-grids.md phase
+ * H2), the hexes the server reads its reach from (shared/permissions.ts
+ * doorPlace), each found from the point a step of 1/256 cell off the door's
+ * middle along its normal.
+ */
+function hexSideSeen(d: DoorOnMap, sceneId: string, fog: NonNullable<Fog>, g: HexGrid): boolean {
+  const nx = -(d.b.y - d.a.y);
+  const ny = d.b.x - d.a.x;
+  const scale = Math.max(Math.abs(nx), Math.abs(ny)) * 256;
+  return [1, -1].some((s) => hexSubcells(g, hexAt(g, { x: d.mid.x + (s * nx) / scale, y: d.mid.y + (s * ny) / scale })).some(([sx, sy]) => !isSubcellFogged(fog, sceneId, sx, sy)));
 }
 
 /**
@@ -106,6 +122,7 @@ export function doorUnder(input: {
   at: Point;
   slop: number;
   fog: Fog;
+  grid?: Grid;
 }): DoorOnMap | null {
   const { at, slop } = input;
   let best: DoorOnMap | null = null;
@@ -113,7 +130,7 @@ export function doorUnder(input: {
   for (const d of doorsNear(input.chunks, input.sceneId, { x0: at.x - slop, y0: at.y - slop, x1: at.x + slop, y1: at.y + slop })) {
     const dist = segmentDistance(at, d.a, d.b);
     if (dist > slop || dist >= bestD) continue;
-    if (!doorSeen(d, input.sceneId, input.fog)) continue;
+    if (!doorSeen(d, input.sceneId, input.fog, input.grid)) continue;
     best = d;
     bestD = dist;
   }
@@ -145,9 +162,9 @@ export function findDoor(chunks: Readonly<Record<string, BuildChunk>>, sceneId: 
  * so it goes when the door does and when the DM's fog covers it again, as a
  * tap there would find no door (`doorUnder`).
  */
-export function seenDoor(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string, ref: DoorRef, fog: Fog): DoorOnMap | null {
+export function seenDoor(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string, ref: DoorRef, fog: Fog, grid: Grid = SQUARES): DoorOnMap | null {
   const d = findDoor(chunks, sceneId, ref);
-  return d !== null && doorSeen(d, sceneId, fog) ? d : null;
+  return d !== null && doorSeen(d, sceneId, fog, grid) ? d : null;
 }
 
 /**
@@ -156,10 +173,10 @@ export function seenDoor(chunks: Readonly<Record<string, BuildChunk>>, sceneId: 
  * takes no tap and is offered on no bar, so naming it would send the player
  * looking for a door they cannot open, and would say what the fog hides.
  */
-export function noteDoor(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string, ref: DoorRef | null, fog: Fog): DoorRef | null {
+export function noteDoor(chunks: Readonly<Record<string, BuildChunk>>, sceneId: string, ref: DoorRef | null, fog: Fog, grid: Grid = SQUARES): DoorRef | null {
   if (ref === null) return null;
   const d = findDoor(chunks, sceneId, ref);
-  return d !== null && doorSeen(d, sceneId, fog) ? ref : null;
+  return d !== null && doorSeen(d, sceneId, fog, grid) ? ref : null;
 }
 
 /**
@@ -171,6 +188,8 @@ export function noteDoor(chunks: Readonly<Record<string, BuildChunk>>, sceneId: 
  * door there stays as hidden from the bar as it is from a tap.
  */
 export function doorsInReach(state: RoomState, token: Token, fog: Fog): DoorOnMap[] {
+  const scene = state.scenes[token.sceneId];
+  const grid = scene ? sceneGrid(scene) : SQUARES;
   const fp = footprintRect(SQUARES, token);
   const fpc = state.meta.settings.feetPerCell;
   // Reach is at least one cell, and 5 ft is more cells only where a cell is under 5 ft.
@@ -178,7 +197,7 @@ export function doorsInReach(state: RoomState, token: Token, fog: Fog): DoorOnMa
   const box = { x0: fp.x - cells, y0: fp.y - cells, x1: fp.x + fp.w + cells, y1: fp.y + fp.h + cells };
   const center = { x: fp.x + fp.w / 2, y: fp.y + fp.h / 2 };
   return doorsNear(state.buildChunks, token.sceneId, box)
-    .filter((d) => doorSeen(d, token.sceneId, fog) && reachesDoor(state, token, d.ref, d.chunk))
+    .filter((d) => doorSeen(d, token.sceneId, fog, grid) && reachesDoor(state, token, d.ref, d.chunk))
     .map((d) => ({ d, dist: Math.hypot(d.mid.x - center.x, d.mid.y - center.y) }))
     .sort((p, q) => p.dist - q.dist)
     .map((p) => p.d);

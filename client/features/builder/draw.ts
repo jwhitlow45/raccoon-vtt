@@ -1,5 +1,7 @@
 import { decodeRough } from "#shared/heightCodec.ts";
-import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type EdgeFeature, type FreeWall, type Label, type Light, type Scene, type WallFeature } from "#shared/model.ts";
+import { CHUNK_CELLS, type AutoWalls, type BuildChunk, type EdgeFeature, type FreeWall, type GridShape, type Label, type Light, type Scene, type WallFeature } from "#shared/model.ts";
+import { gridOfShape, isHex } from "#shared/rules/grid.ts";
+import { cornerAt, hexCorners, hexInScene } from "#shared/rules/hex.ts";
 import { cellId, deriveWalls, indexBuild, type WallEdge } from "#shared/rules/walls.ts";
 import { theme } from "../../lib/theme.ts";
 import { buildDrawing, swingSide, wallRuns, type BuildDrawing, type CellRect, type TexturedTerrain } from "./geometry.ts";
@@ -204,8 +206,13 @@ export function pillarPaths<P extends PathSink>(cells: Iterable<{ x: number; y: 
   return { pillars, pillarShine };
 }
 
-/** What the paths read of the scene: its automatic walls rule (absent for "all") and its size, which stairs and raised edges stop at. */
-export type BuildPathScene = { autoWalls?: AutoWalls; bounds?: { w: number; h: number } };
+/**
+ * What the paths read of the scene: its automatic walls rule (absent for
+ * "all"), its size, which stairs and raised edges stop at, and its grid
+ * shape, absent for squares, by which difficult ground marks read their
+ * keys as hexes (docs/design-v1-hex-grids.md 4.3).
+ */
+export type BuildPathScene = { autoWalls?: AutoWalls; bounds?: { w: number; h: number }; gridShape?: GridShape };
 
 /**
  * The paths for a scene's chunks, with the automatic walls of the scene's
@@ -251,6 +258,10 @@ export function buildPaths(
   const relief = reliefPaths(chunks, derived, scene.bounds ?? null, makePath);
   const rough = makePath();
   let roughBox: BoardPaths["roughBox"] = null;
+  const grow = (x0: number, y0: number, x1: number, y1: number) => {
+    roughBox = roughBox ? { x0: Math.min(roughBox.x0, x0), y0: Math.min(roughBox.y0, y0), x1: Math.max(roughBox.x1, x1), y1: Math.max(roughBox.y1, y1) } : { x0, y0, x1, y1 };
+  };
+  const hexes = gridOfShape(scene.gridShape);
   for (const chunk of chunks) {
     if (chunk.rough === undefined) continue;
     const marks = decodeRough(chunk.rough);
@@ -258,9 +269,19 @@ export function buildPaths(
       if (!marks[i]) continue;
       const x = chunk.cx * CHUNK_CELLS + (i % CHUNK_CELLS);
       const y = chunk.cy * CHUNK_CELLS + Math.floor(i / CHUNK_CELLS);
+      if (isHex(hexes)) {
+        // A mark under a hex key is that hex: its outline, by the corners every hex around it shares.
+        const hex = { col: x, row: y };
+        if (scene.bounds && !hexInScene(hexes, scene.bounds, hex)) continue;
+        const corners = hexCorners(hexes, hex).map((c) => cornerAt(hexes, c));
+        corners.forEach((p, k) => (k === 0 ? rough.moveTo(p.x, p.y) : rough.lineTo(p.x, p.y)));
+        rough.closePath();
+        grow(Math.min(...corners.map((p) => p.x)), Math.min(...corners.map((p) => p.y)), Math.max(...corners.map((p) => p.x)), Math.max(...corners.map((p) => p.y)));
+        continue;
+      }
       if (scene.bounds && (x >= scene.bounds.w || y >= scene.bounds.h)) continue;
       rough.rect(x, y, 1, 1);
-      roughBox = roughBox ? { x0: Math.min(roughBox.x0, x), y0: Math.min(roughBox.y0, y), x1: Math.max(roughBox.x1, x + 1), y1: Math.max(roughBox.y1, y + 1) } : { x0: x, y0: y, x1: x + 1, y1: y + 1 };
+      grow(x, y, x + 1, y + 1);
     }
   }
 

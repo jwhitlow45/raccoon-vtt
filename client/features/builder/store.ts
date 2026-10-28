@@ -38,6 +38,15 @@ export type BuilderState = {
   note: string | null;
   /** The party's sight met a cell of the gesture since the last press, so the option bar says they see it as it is built (inSight.ts). */
   inSight: boolean;
+  /** On a hex scene, whether a Wall line's points snap to hex corners, else to the 1/64 lattice (docs/design-v1-hex-grids.md HX-D7). */
+  snapCorners: boolean;
+  /** A Wall line's points tapped so far on a hex scene, sent as free walls on Done, and the scene it is drawn on. */
+  line: readonly Point[];
+  lineScene: string | null;
+  /** Where a Wall line's next point would land, under a mouse's hover after the last point. */
+  lineAt: Point | null;
+  /** A straight Wall line being dragged, its ends snapped as they will be sent. */
+  lineDrag: { a: Point; b: Point } | null;
   /** Gestures whose ops wait on the server's answer to their asks (ask.ts), which the option bar says. */
   asking: number;
 };
@@ -78,9 +87,9 @@ export const BUILD_MODES: readonly { value: BuildMode; label: string; spoken?: s
   { value: "stamp", label: "Stamp", short: "Stamp", icon: "stamp" },
 ];
 
-/** A new mode, which drops a shape room's corners, a rectangle's start, a wall run and the note. A selected stamp stays selected. */
+/** A new mode, which drops a shape room's corners, a rectangle's start, a wall run, a Wall line and the note. A selected stamp stays selected. */
 export function pickBuildMode(scope: RoomScope, mode: BuildMode): void {
-  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], note: null });
+  scope.get(builderSlot).store.setState({ mode, poly: [], rect: null, run: [], line: [], lineScene: null, lineAt: null, lineDrag: null, note: null });
 }
 
 /** A gesture's bookkeeping that the canvas never draws. */
@@ -101,7 +110,14 @@ export type BuilderGesture = {
   labelGrab: { id: string; dx: number; dy: number } | null;
   /** The press began while a gesture waited on its asks (ask.ts whileAsking), so its move and lift do nothing. */
   asking: boolean;
+  /** A stroke or a drag of the builder's hex gestures (hexPointer.ts): Erase, Difficult ground and Wall lines. */
+  hex: HexGesture | null;
 };
+
+/** A hex gesture in progress: a brush stroke as `stroke` has it, or a drag from where it began. */
+export type HexGesture =
+  | { kind: "stroke"; sceneId: string; seen: Set<string>; last: Point; group: string; timer: ReturnType<typeof setInterval>; touch: boolean; startedAt: number }
+  | { kind: "drag"; sceneId: string; down: { screen: Point; world: Point } };
 
 /** One Room page's builder (client/state/scope.ts): its choices and gesture. */
 export const builderSlot = scopeSlot(
@@ -122,12 +138,19 @@ export const builderSlot = scopeSlot(
       note: null,
       inSight: false,
       asking: 0,
+      snapCorners: true,
+      line: [],
+      lineScene: null,
+      lineAt: null,
+      lineDrag: null,
     })),
-    gesture: { stroke: null, downAt: null, labelGrab: null, asking: false } as BuilderGesture,
+    gesture: { stroke: null, downAt: null, labelGrab: null, asking: false, hex: null } as BuilderGesture,
   }),
   (b) => {
     if (b.gesture.stroke) clearInterval(b.gesture.stroke.timer);
     b.gesture.stroke = null;
+    if (b.gesture.hex?.kind === "stroke") clearInterval(b.gesture.hex.timer);
+    b.gesture.hex = null;
   },
 );
 
@@ -145,5 +168,5 @@ export function useBuilderStore(): StoreApi<BuilderState> {
 
 /** Ends whatever gesture was in progress, keeping the DM's choices. */
 export function resetGesture(store: StoreApi<BuilderState>): void {
-  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false });
+  store.setState({ unsent: [], rect: null, poly: [], run: [], labelMove: null, note: null, inSight: false, line: [], lineScene: null, lineAt: null, lineDrag: null });
 }

@@ -8,6 +8,7 @@ import { boardPickOf, drawnAt, screenAt, type BoardPick } from "../../canvas/boa
 import type { ToolContext } from "../tools.ts";
 import { doorSeen, doorsNear, doorUnder, segmentDistance, type DoorOnMap, type Fog } from "./doors.ts";
 import { doorPillSlot } from "./store.ts";
+import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
 /** Half a 44 px touch target (design.md 14.4), as the builder reaches a free wall. */
 export const DOOR_SLOP_PX = 22;
@@ -38,8 +39,8 @@ export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" |
     tool !== "select" || !view
       ? null
       : pick.view.kind === "isometric" && screen
-        ? isoDoorUnder({ chunks: view.buildChunks, sceneId: ctx.scene.id, fog, pick, world, screen })
-        : doorUnder({ chunks: view.buildChunks, sceneId: ctx.scene.id, at: world, slop: DOOR_SLOP_PX / ctx.camera().scale, fog });
+        ? isoDoorUnder({ chunks: view.buildChunks, sceneId: ctx.scene.id, fog, pick, world, screen, grid: sceneGrid(ctx.scene) })
+        : doorUnder({ chunks: view.buildChunks, sceneId: ctx.scene.id, at: world, slop: DOOR_SLOP_PX / ctx.camera().scale, fog, grid: sceneGrid(ctx.scene) });
   if (hit) {
     // The token selected when the door was tapped is who opens it (docs/design-v1-traps.md 5.3), though the tap let it go.
     pill.setState({ pill: { sceneId: ctx.scene.id, ref: hit.ref, ...(selected !== null ? { selected } : {}) } });
@@ -57,7 +58,7 @@ export function tapDoor(ctx: Pick<ToolContext, "getState" | "scene" | "camera" |
  * higher ground beside it (relief/runs.ts). Among the doors the viewer can
  * see, as in Top-down.
  */
-export function isoDoorUnder(input: { chunks: Readonly<Record<string, BuildChunk>>; sceneId: string; fog: Fog; pick: BoardPick; world: Point; screen: Point }): DoorOnMap | null {
+export function isoDoorUnder(input: { chunks: Readonly<Record<string, BuildChunk>>; sceneId: string; fog: Fog; pick: BoardPick; world: Point; screen: Point; grid?: Grid }): DoorOnMap | null {
   const { pick, world, screen } = input;
   // A view distance is never longer than the world distance it shows, and a press on a door drawn at one height meets ground at another up to 2K cells off per cell between them: a piece's top over the lowest ground at most.
   const reach = DOOR_SLOP_PX / pick.camera.scale + 2 * K * (pick.heights.high - pick.heights.low + WALL_RISE) + 1;
@@ -66,7 +67,7 @@ export function isoDoorUnder(input: { chunks: Readonly<Record<string, BuildChunk
   for (const d of doorsNear(input.chunks, input.sceneId, { x0: world.x - reach, y0: world.y - reach, x1: world.x + reach, y1: world.y + reach })) {
     const dist = doorGap(pick, d, screen);
     if (dist > DOOR_SLOP_PX || dist >= bestD) continue;
-    if (!doorSeen(d, input.sceneId, input.fog)) continue;
+    if (!doorSeen(d, input.sceneId, input.fog, input.grid)) continue;
     best = d;
     bestD = dist;
   }

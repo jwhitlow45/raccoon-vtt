@@ -105,7 +105,7 @@ export function traceGrid(scene: Pick<RenderInput["scene"], "bounds" | "gridShap
 
 export async function renderMapPng(input: RenderInput): Promise<Blob> {
   const { scene, size, content, grid, map } = input;
-  const paths = buildPaths(content.chunks, content.role, { autoWalls: scene.autoWalls, bounds: scene.bounds });
+  const paths = buildPaths(content.chunks, content.role, { autoWalls: scene.autoWalls, bounds: scene.bounds, gridShape: scene.gridShape });
   const textures = await loadTextures(paths.floors.map(([t]) => t));
   const assets = input.assets ?? { url: assetUrl };
   const stampUrlOf = (art: Parameters<typeof stampUrl>[0]) => stampUrl(art, assets);

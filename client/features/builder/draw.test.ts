@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import type { BuildChunk, FreeWall, TerrainId } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { buildPaths, drawBuild, freeFrame, type PathSink } from "./draw.ts";
+import { cornerAt, hexCorners, type HexGrid } from "#shared/rules/hex.ts";
 
 /** Records what a path is given, in place of a Path2D, which Node lacks. */
 class Recorder implements PathSink {
@@ -252,6 +253,20 @@ describe("difficult ground (docs/design-v1-movement.md 3.4)", () => {
       assert.deepEqual(p.roughBox, { x0: 0, y0: 0, x1: 2, y1: 2 });
     }
     assert.equal(paths(chunk({})).roughBox, null);
+  });
+
+  test("on a hex scene each mark under a hex key is that hex's outline, by its corners, and a key past the scene's hexes draws nothing (H2)", () => {
+    // Hex 0,0 and hex 1,1 of hex rows, and on a scene 2 cells wide row 1 holds only hex 0.
+    const c: BuildChunk = { ...chunk({}), rough: "d" + ".".repeat(16) + "d" + ".".repeat(238), grid: "hexRows" };
+    const rows: HexGrid = { shape: "hex", orient: "rows" };
+    const outline = (h: { col: number; row: number }) => hexCorners(rows, h).map((k) => cornerAt(rows, k));
+    const p = buildPaths([c], "player", { gridShape: "hexRows", bounds: { w: 30, h: 20 } }, () => new Recorder());
+    const want = [outline({ col: 0, row: 0 }), outline({ col: 1, row: 1 })].flatMap((corners) => [...corners.map((q, i) => [i === 0 ? "M" : "L", q.x, q.y]), ["Z"]]);
+    assert.deepEqual((p.rough as Recorder).ops, want);
+    const all = [...outline({ col: 0, row: 0 }), ...outline({ col: 1, row: 1 })];
+    assert.deepEqual(p.roughBox, { x0: Math.min(...all.map((q) => q.x)), y0: Math.min(...all.map((q) => q.y)), x1: Math.max(...all.map((q) => q.x)), y1: Math.max(...all.map((q) => q.y)) });
+    const narrow = buildPaths([c], "player", { gridShape: "hexRows", bounds: { w: 2, h: 20 } }, () => new Recorder());
+    assert.equal((narrow.rough as Recorder).ops.filter((o) => o[0] === "M").length, 1);
   });
 });
 

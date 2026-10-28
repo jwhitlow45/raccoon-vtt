@@ -34,6 +34,7 @@ import { gestureCells, partySeesAny } from "./inSight.ts";
 import { withStampMode } from "./stamps/pointer.ts";
 import { withHeightMode } from "./heights/pointer.ts";
 import { withLightMode } from "../lights/pointer.ts";
+import { cancelHexGesture, withHexBuild } from "./hexPointer.ts";
 import { builderCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
@@ -201,11 +202,13 @@ export const builderTool: ToolDef = {
   deactivate(ctx) {
     const { store, gesture } = ctx.scope.get(builderSlot);
     endStroke(ctx, false);
+    cancelHexGesture(ctx);
     gesture.downAt = null;
     gesture.labelGrab = null;
     resetGesture(store);
   },
-  pointer: whileAsking(withLightMode(withStampMode(withHeightMode({
+  // On a hex scene Walls and doors, Erase, Erase area and Difficult ground build by hexes and Wall lines (hexPointer.ts).
+  pointer: whileAsking(withLightMode(withStampMode(withHexBuild(withHeightMode({
     down(p, ctx) {
       const { store: builderState, gesture } = ctx.scope.get(builderSlot);
       gesture.downAt = { screen: p.screen, world: p.world };
@@ -304,7 +307,7 @@ export const builderTool: ToolDef = {
       gesture.labelGrab = null;
       store.setState({ rect: null, run: [], labelMove: null });
     },
-  })))),
+  }))))),
   Options: () => (
     <Suspense fallback={<Loading text="Loading the options…" />}>
       <Options />

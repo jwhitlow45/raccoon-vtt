@@ -1,3 +1,4 @@
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { sceneChunks } from "#shared/rules/walls.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { ToolContext, ToolPointer } from "../tools.ts";
@@ -19,7 +20,9 @@ const FREE_WALL_REACH_PX = 22;
  * only: free walls come from an import, and the DM fixes one with edge
  * walls, the eraser and the door states. A tap goes to the free wall only
  * when it is at least as close as the nearest grid edge the tap would
- * change, so building beside an imported wall keeps working.
+ * change, so building beside an imported wall keeps working. A hex scene
+ * has no grid edges, and its walls are all free walls (Wall lines,
+ * docs/design-v1-hex-grids.md HX-D7), so there the free wall takes the tap.
  */
 export function tapFreeWall(p: ToolPointer, ctx: ToolContext): boolean {
   const builderState = ctx.scope.get(builderSlot).store;
@@ -31,7 +34,7 @@ export function tapFreeWall(p: ToolPointer, ctx: ToolContext): boolean {
   const reach = FREE_WALL_REACH_PX / ctx.camera().scale;
   const hit = nearestFreeWall(chunks, p.world, reach, edge === "door" ? (w) => w.f.kind === "door" : undefined);
   if (!hit) return false;
-  const gridKey = nearestEdge(p.world, ctx.scene.bounds);
+  const gridKey = isHex(sceneGrid(ctx.scene)) ? null : nearestEdge(p.world, ctx.scene.bounds);
   if (gridKey !== null && edgeDistance(gridKey, p.world) < hit.distance) {
     // A Remove tap on a grid edge with nothing on it would do nothing, so the free wall takes it.
     if (edge === "door" || edgeAt(view, sceneId, gridKey) !== undefined) return false;

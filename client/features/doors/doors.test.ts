@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import type { EdgeFeature, FogTile, FreeWall, Token } from "#shared/model.ts";
 import { token } from "#shared/testutil.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
+import { hexSubcells, type HexGrid } from "#shared/rules/hex.ts";
 import { encodeTileFrom } from "../../lib/fogTiles.ts";
 import { planOne, stopText } from "../movement/drop.ts";
 import { CLOSED, line, OPEN, seenRoom, thorn, world } from "../movement/testing.ts";
@@ -171,5 +172,28 @@ describe("the note after a walk stopped at a door", () => {
     assert.equal(text({ "s1:0,0": { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTileFrom((sx) => sx < 6 * 4) } }), "A door is in the way. Tap it to open.");
     assert.equal(text({}), "Stopped at a wall. Drop at the corner first, then go on.");
     assert.equal(noteDoor(state.buildChunks, "s1", null, null), null);
+  });
+});
+
+describe("a free door on a hex scene shows by the hexes beside it (docs/design-v1-hex-grids.md H2)", () => {
+  const rows: HexGrid = { shape: "hex", orient: "rows" };
+  // Along the upright side between hexes 4,1 and 5,1, inside square 5,1, which holds both points beside its middle.
+  const door: FreeWall = { id: "abcdefghijkl", a: [5.5, 1.25], b: [5.5, 1.75], f: { kind: "door", state: "closed", secret: false, discovered: false } };
+  const chunks = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {}, walls: [door] } };
+  const ref = { cx: 0, cy: 0, id: door.id };
+  // Only the part of hex 5,1 east of square 5,1.
+  const lower = new Set(hexSubcells(rows, { col: 5, row: 1 }).filter(([sx]) => sx >= 24).map(([sx, sy]) => `${sx},${sy}`));
+  const fog: Record<string, FogTile> = { "s1:0,0": { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTileFrom((sx, sy) => lower.has(`${sx},${sy}`)) } };
+
+  test("a hex beside it with a sub-cell out of the fog shows it, though the squares beside it are fogged", () => {
+    assert.ok(lower.size > 0);
+    assert.equal(seenDoor(chunks, "s1", ref, fog)?.ref, undefined, "read by squares it stays hidden");
+    assert.deepEqual(seenDoor(chunks, "s1", ref, fog, rows)?.ref, ref);
+    assert.deepEqual(doorUnder({ chunks, sceneId: "s1", at: { x: 5.55, y: 1.5 }, slop: 0.3, fog, grid: rows })?.ref, ref);
+    assert.deepEqual(noteDoor(chunks, "s1", ref, fog, rows), ref);
+  });
+
+  test("with both hexes beside it under the fog it stays hidden", () => {
+    assert.equal(seenDoor(chunks, "s1", ref, {}, rows), null);
   });
 });

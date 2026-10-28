@@ -3,7 +3,7 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { TerrainId } from "#shared/model.ts";
 import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
-import { useRoomScope } from "../../state/scope.ts";
+import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, Stepper, ValueChip, type Slot } from "../measure/controls.tsx";
 import { Icon } from "../../components/Icon.tsx";
@@ -15,6 +15,8 @@ import { lightModeHint, sceneHasLights } from "./lightTap.ts";
 import { BUILD_MODES, pickBuildMode, TERRAINS, useBuilderStore, type BuildMode, type EdgeKind } from "./store.ts";
 import { TERRAIN_SWATCHES } from "./textures.ts";
 import { closePolygon } from "./tool.tsx";
+import { finishWallLine } from "./hexPointer.ts";
+import { heightSlot, type HeightShape, type RoughChoice } from "./heights/store.ts";
 import { BUILD_IN_SIGHT } from "./inSight.ts";
 import { BUILD_ASKING } from "./ask.ts";
 import { useStampSlots } from "./stamps/StampOptions.tsx";
@@ -29,6 +31,31 @@ const EDGES: readonly { value: EdgeKind; label: string }[] = [
   { value: "window", label: "Window" },
   { value: "none", label: "No wall" },
   { value: "clear", label: "Remove" },
+];
+
+/** Walls and doors on a hex scene (HX-D7): each choice draws Wall lines, and there are no grid edges for No wall to take a wall off. */
+const HEX_EDGES: readonly { value: EdgeKind; label: string }[] = EDGES.filter((e) => e.value !== "none");
+
+/** What a gesture does on a hex scene, for the modes it builds by hexes (HX-D9). */
+const HEX_EDGE_HINTS: Record<EdgeKind, string> = {
+  wall: "Tap points for a wall line, then Done, or drag for a straight wall.",
+  door: "Tap points for a door, then Done, or drag for one. Tap a door to open, lock or close it.",
+  secret: "Tap points for a secret door, then Done, or drag for one.",
+  window: "Tap points for a window, then Done, or drag for one.",
+  none: "Tap points for a wall line, then Done, or drag for a straight wall.",
+  clear: "Tap a wall, door or window to remove it.",
+};
+const HEX_HINTS = {
+  erase: "Drag to erase walls, doors, windows, difficult ground, labels, stamps and lights.",
+  eraseRect: "Drag from corner to corner to erase everything inside.",
+} as const;
+
+/** Difficult ground's brush on a hex scene, in hexes: 1, then the hexes within one and two steps. */
+const HEX_SHAPES: readonly { value: HeightShape; label: string; title: string }[] = [
+  { value: 1, label: "1", title: "Brush, one hex" },
+  { value: 2, label: "2", title: "Brush, a hex and the six around it" },
+  { value: 3, label: "3", title: "Brush, two hexes out" },
+  { value: "area", label: "Area", title: "Drag from corner to corner" },
 ];
 
 const HINTS: Record<Exclude<BuildMode, "edge" | "light" | "height" | "rough">, string> = {
@@ -53,8 +80,13 @@ const EDGE_HINTS: Record<EdgeKind, string> = {
 /** What painting a terrain does to a walk (docs/design-v1-movement.md 3.4), for the hint of a mode that paints it. */
 const TERRAIN_COST = "Difficult and Rubble cost double to walk through. Water costs double without a swim speed.";
 
-/** The modes a hex scene cannot use until a later phase: lights, stamps and labels keep their own hints (H1, section 6). */
-const HEX_LEFT_OUT: ReadonlySet<BuildMode> = new Set<BuildMode>(["paint", "rect", "poly", "erase", "eraseRect", "edge", "height", "rough"]);
+/**
+ * The modes a hex scene cannot use (section 6, H2): painted ground stays
+ * square, and heights wait for H3. Walls and doors, Erase, Erase area and
+ * Difficult ground build by hexes, and lights, stamps and labels keep
+ * their own hints.
+ */
+const HEX_LEFT_OUT: ReadonlySet<BuildMode> = new Set<BuildMode>(["paint", "rect", "poly", "height"]);
 
 /** The line a hex scene shows for a mode it leaves out, or null where the mode keeps its own hint. */
 export function hexBuilderLine(mode: BuildMode, g: Grid): string | null {
@@ -69,6 +101,11 @@ export function brushWords(n: number, g: Grid): string {
 function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId, g: Grid): string {
   const limit = hexBuilderLine(mode, g);
   if (limit !== null) return limit;
+  if (isHex(g) && mode === "edge") {
+    if (edge === "secret") return `${HEX_EDGE_HINTS.secret} ${secretFound ? "Players see a door." : "Players see a wall."}`;
+    return HEX_EDGE_HINTS[edge];
+  }
+  if (isHex(g) && (mode === "erase" || mode === "eraseRect")) return HEX_HINTS[mode];
   if (mode === "light") return lightModeHint(hasLights);
   if (mode === "height" || mode === "rough") return heightHint;
   const costs = terrain === "difficult" || terrain === "rubble" || terrain === "water";
@@ -109,6 +146,9 @@ export default function BuilderOptions() {
       labelText: b.labelText,
       labelSize: b.labelSize,
       poly: b.poly,
+      line: b.line,
+      lineScene: b.lineScene,
+      snapCorners: b.snapCorners,
       note: b.note,
       inSight: b.inSight,
       asking: b.asking > 0,
@@ -127,11 +167,14 @@ export default function BuilderOptions() {
   const row = useRef<HTMLDivElement>(null);
   const more = useCallback(() => row.current?.closest('[role="toolbar"]')?.querySelector<HTMLElement>("[data-rvtt-more] button") ?? null, []);
   const stamps = useStampSlots({ more });
+  const hexRoughSlots = useHexRoughSlots();
   if (!sceneId || !scene) return null;
 
   const grid = sceneGrid(scene);
+  const hex = isHex(grid);
   const set = builderState.setState;
-  const corners = s.mode === "poly" && s.poly.length > 0;
+  const lining = hex && s.mode === "edge" && s.lineScene === sceneId && s.line.length > 0;
+  const corners = (s.mode === "poly" && s.poly.length > 0) || lining;
   const stamped = s.mode === "stamp" && stamps.selected;
   // A task's controls lead, and the builder's standing settings drop by 3 (9, "The task rule").
   const drop = corners || stamped ? 3 : 0;
@@ -231,16 +274,55 @@ export default function BuilderOptions() {
     );
   }
   if (s.mode === "edge") {
+    const edges = hex ? HEX_EDGES : EDGES;
+    // On hexes No wall has nothing to take away, and a line drawn under it is a wall.
+    const edge = hex && s.edge === "none" ? "wall" : s.edge;
     slots.push(
       {
         id: "edge",
-        priority: 1,
+        priority: lining ? 4 : 1,
         control: (
-          <ValueChip label="Edge" kind="choice" value={s.edge} options={EDGES.map((e) => ({ key: e.value, words: e.label }))}>
+          <ValueChip label="Edge" kind="choice" value={edge} options={edges.map((e) => ({ key: e.value, words: e.label }))}>
             <PickCloses>
-              <ChoiceRows<EdgeKind> label="Edge" value={s.edge} options={EDGES} onChange={(edge) => set({ edge, note: null })} />
+              <ChoiceRows<EdgeKind> label="Edge" value={edge} options={edges} onChange={(edge) => set({ edge, note: null })} />
             </PickCloses>
           </ValueChip>
+        ),
+      },
+      hex && {
+        id: "snapCorners",
+        priority: lining ? 5 : 2,
+        control: (
+          <OptButton label="Snap to hex corners" pressed={s.snapCorners} onClick={() => set({ snapCorners: !s.snapCorners })}>
+            Snap
+          </OptButton>
+        ),
+      },
+      lining && {
+        id: "lineDone",
+        priority: 1,
+        control: (
+          <OptButton tone="primary" disabled={s.line.length < 2 || s.asking} ends onClick={() => finishWallLine({ scene, actions, ui, scope })}>
+            Done
+          </OptButton>
+        ),
+      },
+      lining && {
+        id: "undoPoint",
+        priority: 2,
+        control: (
+          <OptButton icon="undo" onClick={() => set(s.line.length > 1 ? { line: s.line.slice(0, -1) } : { line: [], lineScene: null, lineAt: null })}>
+            Undo point
+          </OptButton>
+        ),
+      },
+      lining && {
+        id: "lineCancel",
+        priority: 2,
+        control: (
+          <OptButton ends onClick={() => set({ line: [], lineScene: null, lineAt: null })}>
+            Cancel
+          </OptButton>
         ),
       },
       s.edge === "secret" && {
@@ -261,7 +343,8 @@ export default function BuilderOptions() {
       },
     );
   }
-  if (s.mode === "height" || s.mode === "rough") slots.push(...heightSlots);
+  if (s.mode === "height" && !hex) slots.push(...heightSlots);
+  if (s.mode === "rough") slots.push(...(hex ? hexRoughSlots : heightSlots));
   if (s.mode === "label") {
     slots.push(
       { id: "labelText", priority: 1, flex: theme.layout.options.field, control: <OptInput label="Label text" placeholder="Label text" maxLength={80} width={160} value={s.labelText} onChange={(labelText) => set({ labelText })} /> },
@@ -304,6 +387,36 @@ export default function BuilderOptions() {
       {s.mode === "stamp" ? stamps.picker : null}
     </div>
   );
+}
+
+/**
+ * Difficult ground mode's slots on a hex scene: Mark or Clear, and the
+ * brush in hexes, on the same choices as on squares (heights/store.ts), so
+ * a DM's pick carries between scenes. Height mode's own slots name squares.
+ */
+function useHexRoughSlots(): Slot[] {
+  const { store } = useScoped(heightSlot);
+  const h = useStore(store, useShallow((v) => ({ rough: v.rough, shape: v.shape })));
+  const set = store.setState;
+  return [
+    {
+      id: "rough",
+      priority: 1,
+      compact: true,
+      control: (
+        <OptSegmented<RoughChoice>
+          label="Difficult ground"
+          value={h.rough}
+          onChange={(rough) => set({ rough })}
+          options={[
+            { value: "mark", label: "Mark", title: "Mark difficult ground" },
+            { value: "clear", label: "Clear", title: "Clear difficult ground" },
+          ]}
+        />
+      ),
+    },
+    { id: "heightBrush", priority: 3, compact: true, control: <OptSegmented<HeightShape> label="Brush" value={h.shape} onChange={(shape) => set({ shape })} options={HEX_SHAPES} /> },
+  ];
 }
 
 /** The builder's line while a gesture's ops wait on the server's answer to its asks (ask.ts). */
