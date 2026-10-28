@@ -34,7 +34,7 @@ import {
   type Answers,
   type Contents,
 } from "./rules.ts";
-import { foundLine, imageNote, notes, sizeText } from "./summary.ts";
+import { foundLine, imageNote, notes, shapeNote, sizeText } from "./summary.ts";
 import type { LightLevel, Scene, ScenePreset } from "#shared/model.ts";
 import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { walllessFile } from "../vision/playersSeeRules.ts";
@@ -91,6 +91,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
   const [objects, setObjects] = useState(true);
   const [portals, setPortals] = useState<ImportOptions["portals"]>("window");
   const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
+  const shape = useRoomView((s) => shapeNote(s.view?.meta.settings.newScenes));
   const current = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
   /** The DM's pick of Players see. Until there is one, the room's default for an import. */
   const [seen, setSeen] = useState<PlayersSeeValue | null>(null);
@@ -332,6 +333,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
           <Summary
             read={read}
             phase={phase}
+            shape={shape}
             name={name}
             onName={setName}
             disabled={busy}
@@ -430,6 +432,8 @@ function CreateProgress(props: { step: Step }) {
 function Summary(props: {
   read: Read;
   phase: boolean;
+  /** Why the scene is made on squares, in a room whose new scenes start on hexes. */
+  shape: string | null;
   name: string;
   onName(name: string): void;
   disabled: boolean;
@@ -453,6 +457,7 @@ function Summary(props: {
         {count(read.info.image.width)} × {count(read.info.image.height)} pixels
         {imageNote(read.info.image, read.info.resize)}.
       </p>
+      {props.shape && !props.phase ? <Help>{props.shape}</Help> : null}
       {props.phase ? (
         <Help>Only the image is added. The scene keeps its own walls, doors and lights, and its grid lines up with the new image.</Help>
       ) : plan ? (

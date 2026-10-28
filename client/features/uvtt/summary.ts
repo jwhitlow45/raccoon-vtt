@@ -1,4 +1,6 @@
 import { LIMITS } from "#shared/limits.ts";
+import type { GridShape } from "#shared/model.ts";
+import { HEX_LIMITS } from "../grid/words.ts";
 import { MAX_MAP_SIDE, MAX_MAP_UPLOAD_BYTES, SIMPLIFY_STEPS, count } from "./limits.ts";
 import type { Summary } from "./convert.ts";
 
@@ -48,4 +50,13 @@ export function imageNote(image: { width: number; height: number }, resize: bool
 export function sizeText(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${Math.round(bytes / (1024 * 1024))} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * Why the import makes squares in a room whose new scenes start on hexes
+ * (docs/design-v1-hex-grids.md HX-D13): the file's walls stand in its own
+ * square grid. Nothing in a room on squares, where there is nothing to say.
+ */
+export function shapeNote(newScenes: GridShape | undefined): string | null {
+  return newScenes === undefined ? null : HEX_LIMITS.uvtt;
 }

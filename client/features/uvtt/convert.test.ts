@@ -45,13 +45,13 @@ function onLattice(v: number): boolean {
 }
 
 /** Sends every op of the plan through the client schema and the reducer, as a DM, into a fresh room. */
-function applied(plan: ImportPlan, sceneId = "imp"): { state: RoomState; ops: ClientOp[] } {
+function applied(plan: ImportPlan, sceneId = "imp", start: RoomState = room()): { state: RoomState; ops: ClientOp[] } {
   const map = placeMap(plan, { assetId: "a1", width: plan.frame.w * 70, height: plan.frame.h * 70, fileImageWidth: plan.frame.w * 70 });
   assert.ok(map);
   const scene = importScene(plan, map, { id: sceneId, name: "Import" });
   let n = 0;
   const ops = importOps(scene, plan, () => `light-${++n}`);
-  let state = room();
+  let state = start;
   let seq = 1;
   for (const op of ops) {
     const parsed = clientOpSchema.safeParse(op);
@@ -97,6 +97,15 @@ describe("where the file lands in the scene", () => {
 });
 
 describe("walls on the grid become edges", () => {
+  test("a room whose new scenes start on hexes still imports a square scene, walls and all (docs/design-v1-hex-grids.md HX-D13)", () => {
+    const border = plan({ size: p(20, 20), walls: [[p(0, 0), p(20, 0), p(20, 20), p(0, 20), p(0, 0)]] });
+    const hexRoom = room();
+    hexRoom.meta.settings = { ...hexRoom.meta.settings, newScenes: "hexRows" };
+    const { state } = applied(border, "imp", hexRoom);
+    assert.equal(state.scenes.imp!.gridShape, undefined);
+    assert.equal(Object.values(state.buildChunks).filter((c) => c.sceneId === "imp").reduce((n, c) => n + Object.keys(c.edges).length, 0), 80);
+  });
+
   test("all four borders, east and south included", () => {
     const border = plan({ size: p(20, 20), walls: [[p(0, 0), p(20, 0), p(20, 20), p(0, 20), p(0, 0)]] });
     const edges = edgeMap(border);

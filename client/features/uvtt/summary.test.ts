@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { Summary } from "./convert.ts";
-import { foundLine, imageNote, notes, sizeText } from "./summary.ts";
+import { foundLine, imageNote, notes, shapeNote, sizeText } from "./summary.ts";
 
 const NONE: Summary = { gridWalls: 0, freeWalls: 0, doors: 0, windows: 0, lights: 0, lightsLeftOut: 0, lightsFarOutside: 0, lightsMoved: 0, welded: 0, clipped: 0, tolerance: 0.05 };
 
@@ -37,5 +37,11 @@ describe("the summary sheet", () => {
   test("sizes read in KB and MB", () => {
     assert.equal(sizeText(800 * 1024), "800 KB");
     assert.equal(sizeText(24 * 1024 * 1024), "24 MB");
+  });
+
+  test("a room whose new scenes start on hexes is told the import makes squares, a square room nothing", () => {
+    assert.equal(shapeNote("hexRows"), "Universal VTT files make square scenes.");
+    assert.equal(shapeNote("hexColumns"), "Universal VTT files make square scenes.");
+    assert.equal(shapeNote(undefined), null);
   });
 });
