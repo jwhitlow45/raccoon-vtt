@@ -1,93 +1,14 @@
-import { useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "../../components/Button.tsx";
 import { buttonLook } from "../../components/looks.ts";
-import { Help } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 
 /**
  * Small form pieces the DM tools, settings and members panels share. Every
  * control is at least 44 px tall and works by tap alone (design 14.4).
- * Sections, help lines and notices come from the shared kit
- * (components/Panel.tsx, Notice.tsx).
+ * Sections, help lines, notices and the radio cards come from the shared
+ * kit (components/Panel.tsx, Notice.tsx, RadioCards.tsx).
  */
-
-export type RadioOption<V extends string> = { value: V; label: string; help?: string };
-
-/**
- * One choice of a few, each option a full-width card with its own
- * explanation: the radio cards of Room settings (docs/design-v1-visual.md
- * 2.3). The chosen card takes the accent's outline and tint. A disabled
- * group keeps its shape with a quiet outline and dim text, never a fade.
- *
- * The cards stand in one block under the name and its help, as Players
- * see's do (features/vision/PlayersSee.tsx): their fills start at the
- * name's edge and their words sit in by a card's border and padding, the
- * control's own inset. As rows of one column beside the name, the
- * alignment sweep read that inset as words off the column's edge on every
- * choice. The help describes the group.
- */
-export function RadioGroup<V extends string>(props: {
-  legend: string;
-  help?: ReactNode;
-  value: V;
-  options: RadioOption<V>[];
-  disabled?: boolean;
-  onChange(value: V): void;
-}) {
-  const name = useId();
-  const helpId = useId();
-  const { disabled } = props;
-  return (
-    <fieldset aria-describedby={props.help ? helpId : undefined} style={{ margin: 0, padding: 0, border: "none", minWidth: 0, display: "grid", gap: theme.space(1) }} disabled={disabled}>
-      <legend style={{ padding: 0, fontSize: theme.font.input, fontWeight: theme.weight.strong, color: disabled ? theme.color.textDisabled : theme.color.text }}>
-        {props.legend}
-      </legend>
-      <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
-        {props.help ? <Help id={helpId}>{props.help}</Help> : null}
-        <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
-          {props.options.map((o) => {
-            const chosen = props.value === o.value;
-            const look: CSSProperties = disabled
-              ? { border: `${theme.line.border}px solid ${theme.color.border}`, background: "transparent", color: theme.color.textDisabled }
-              : chosen
-                ? { border: `${theme.line.border}px solid ${theme.color.accent}`, background: theme.color.accentTint, color: theme.color.text }
-                : { border: `${theme.line.border}px solid ${theme.color.border}`, background: "transparent", color: theme.color.text };
-            return (
-              <label
-                key={o.value}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: theme.space(3),
-                  minHeight: theme.touch,
-                  padding: `${theme.space(1)}px ${theme.space(2)}px`,
-                  borderRadius: theme.radius.md,
-                  cursor: disabled ? "default" : "pointer",
-                  ...look,
-                }}
-              >
-                <input
-                  type="radio"
-                  name={name}
-                  value={o.value}
-                  checked={chosen}
-                  onChange={() => props.onChange(o.value)}
-                  style={{ width: 20, height: 20, margin: 0, flex: "none", accentColor: theme.color.accent }}
-                />
-                <span style={{ display: "grid", gap: theme.space(0.5) }}>
-                  <span style={{ fontSize: theme.font.body14, fontWeight: theme.weight.strong }}>{o.label}</span>
-                  {o.help ? (
-                    <span style={{ fontSize: theme.font.small, lineHeight: theme.leading.body, color: disabled ? theme.color.textDisabled : theme.color.textMuted }}>{o.help}</span>
-                  ) : null}
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      </div>
-    </fieldset>
-  );
-}
 
 /**
  * An action that needs a second, deliberate tap: the first shows what will

@@ -3,6 +3,7 @@ import { Button } from "../../components/Button.tsx";
 import { Select } from "../../components/Field.tsx";
 import { GRABBER_DESIGNS, GRABBER_TOP, grabberDesign, parseGrabber, type GrabberId } from "../../components/grabberDesigns.ts";
 import { Help, Section } from "../../components/Panel.tsx";
+import { RadioCards } from "../../components/RadioCards.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { GrabberDrawing } from "../../components/SheetGrabber.tsx";
 import { Switch } from "../../components/Switch.tsx";
@@ -11,7 +12,6 @@ import { theme } from "../../lib/theme.ts";
 import { UNBOUND, type KeyMap } from "../../state/keyBindings.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { keyText, setShortcutSheet, useShortcutKeys } from "../../state/shortcuts.ts";
-import { RadioGroup } from "../dm/controls.tsx";
 import { setSoundOn, useSoundOn } from "../encounter/alerts.ts";
 import { setSoundEnabled, usePingSound } from "../pings/feedback.ts";
 import { diceLoader } from "../dice/throw/hooks.ts";
@@ -102,7 +102,7 @@ export default function ThisDevice() {
         />
       </Section>
       <Section label="Map detail">
-        <RadioGroup
+        <RadioCards
           legend="Map images"
           help={lowPower ? "Low power loads the phone size on every device." : undefined}
           value={lowPower ? "mobile" : variant}

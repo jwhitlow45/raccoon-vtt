@@ -8,13 +8,14 @@ import { useExpansionFocus } from "../../components/expansionFocus.ts";
 import { ErrorText, Field } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Help, Section } from "../../components/Panel.tsx";
+import { RadioCards } from "../../components/RadioCards.tsx";
 import { DotLabel, Row, RowList } from "../../components/Row.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { api, ApiError, type AssetRow } from "../../lib/api.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
-import { FileButton, RadioGroup } from "../dm/controls.tsx";
+import { FileButton } from "../dm/controls.tsx";
 import { honorsImageOrientation } from "../images/orientation.ts";
 import { PasteButton, PasteStatus, usePasteTarget } from "../images/PasteImage.tsx";
 import { useEntryBusy, useHandoff } from "../images/roomPaste.ts";
@@ -479,7 +480,7 @@ function ShowHandout(props: {
         {status ? <Loading text={status} /> : null}
       </div>
       <Field label="Title" value={title} maxLength={TITLE_FIELD_MAX} onChange={(e) => draftStore.setState(withTypedTitle(draftStore.getState(), e.target.value))} placeholder="The old map" />
-      <RadioGroup<"all" | "some">
+      <RadioCards<"all" | "some">
         legend="Show to"
         value={audience}
         options={[

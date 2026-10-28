@@ -6,9 +6,9 @@ import { Empty } from "../components/Empty.tsx";
 import { Input, NUMBER_FIELD_WIDTH } from "../components/Field.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { Help, Section } from "../components/Panel.tsx";
+import { RadioCards } from "../components/RadioCards.tsx";
 import { SettingRow } from "../components/SettingRow.tsx";
 import { Switch } from "../components/Switch.tsx";
-import { RadioGroup } from "../features/dm/controls.tsx";
 import { roomHasHexes, type ShapeChoice } from "../features/grid/words.ts";
 import type { PanelProps } from "../features/panels.ts";
 import { timerChoices } from "../features/encounter/timer.ts";
@@ -86,7 +86,7 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
       // Rooms from before the timer have no value, which is off.
       return (
         <div style={{ padding: `${theme.space(2)}px 0` }}>
-          <RadioGroup<string>
+          <RadioCards<string>
             legend={field.label}
             help={field.help}
             value={String(settings[field.key] ?? 0)}
@@ -102,7 +102,7 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
     case "newScenes":
       return (
         <div style={{ padding: `${theme.space(2)}px 0` }}>
-          <RadioGroup<ScenePreset | "before">
+          <RadioCards<ScenePreset | "before">
             legend={field.label}
             help={field.help}
             value={newScenesChoice(settings)}
@@ -116,7 +116,7 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
     case "gridShape":
       return (
         <div style={{ padding: `${theme.space(2)}px 0` }}>
-          <RadioGroup<ShapeChoice>
+          <RadioCards<ShapeChoice>
             legend={field.label}
             help={field.help}
             value={newScenesShape(settings)}
@@ -129,7 +129,7 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
       // Each key's options are typed to its own values, so the cast only widens for the shared component.
       return (
         <div style={{ padding: `${theme.space(2)}px 0` }}>
-          <RadioGroup<string>
+          <RadioCards<string>
             legend={field.label}
             help={field.help}
             value={choiceOf(settings, field.key)}
@@ -156,7 +156,7 @@ function ChosenPlayers(props: { field: Extract<SettingField, { kind: "movers" | 
   const chosen = Array.isArray(value) ? value : null;
   return (
     <div style={{ display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0` }}>
-      <RadioGroup<MoveAnyMode>
+      <RadioCards<MoveAnyMode>
         legend={field.label}
         help={field.help}
         value={moveAnyMode(value)}

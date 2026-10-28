@@ -15,6 +15,8 @@ const { Chip } = await import("./Chip.tsx");
 const { Field, Input, Select } = await import("./Field.tsx");
 const { Row } = await import("./Row.tsx");
 const { SettingRow } = await import("./SettingRow.tsx");
+const { RadioCards } = await import("./RadioCards.tsx");
+const { PlayersSeeChoice } = await import("../features/vision/PlayersSee.tsx");
 
 const html = renderToStaticMarkup;
 
@@ -244,6 +246,79 @@ describe("tones", () => {
   test("the highlight notice's focus ring reads on cream, where the accent would not", () => {
     assert.ok(contrast(NOTICE_TONES.highlight.focus!, NOTICE_TONES.highlight.fill) >= 3);
     assert.ok(contrast(theme.color.crest, NOTICE_TONES.highlight.fill) < 3);
+  });
+});
+
+describe("radio cards (docs/design-v1-design-pass.md 4.2)", () => {
+  const OPTIONS = [
+    { value: "phone", label: "Phone size", help: "Loads faster and needs less memory." },
+    { value: "full", label: "Full size", help: "Sharper on a large screen." },
+  ];
+  const cards = (extra: Record<string, unknown> = {}) => html(createElement(RadioCards<string>, { legend: "Map images", value: "full", options: OPTIONS, onChange() {}, ...extra }));
+  /** The text of the element with an id, in some markup. */
+  const textOf = (markup: string, id: string | undefined) => (id ? new RegExp(`id="${id}"[^>]*>([^<]*)<`).exec(markup)?.[1] : undefined);
+
+  test("one radio per option sharing one name, each named by its label alone and described by its help", () => {
+    const markup = cards();
+    const inputs = radios(markup);
+    assert.equal(inputs.length, 2);
+    assert.equal(new Set(inputs.map((i) => /name="([^"]+)"/.exec(i)?.[1])).size, 1);
+    inputs.forEach((input, i) => {
+      assert.equal(textOf(markup, /aria-labelledby="([^"]+)"/.exec(input)?.[1]), OPTIONS[i]!.label);
+      assert.equal(textOf(markup, /aria-describedby="([^"]+)"/.exec(input)?.[1]), OPTIONS[i]!.help);
+    });
+    assert.match(inputs[1]!, / checked=""/);
+  });
+
+  test("a fieldset under its legend, described by its help and then the chosen card's help", () => {
+    const markup = cards({ help: "For this device only." });
+    assert.match(markup, /^<fieldset aria-describedby="([^"]+)"/);
+    assert.match(markup, /<legend[^>]*>Map images<\/legend>/);
+    const ids = /^<fieldset aria-describedby="([^"]+)"/.exec(markup)![1]!.split(" ");
+    assert.deepEqual(ids.map((id) => textOf(markup, id)), ["For this device only.", "Sharper on a large screen."]);
+    assert.doesNotMatch(markup, /role="status"/, "no status line unless asked");
+  });
+
+  test("a disabled group keeps its shape with dim words, never a fade, and every radio is off", () => {
+    const markup = cards({ disabled: true });
+    assert.match(markup, /^<fieldset[^>]* disabled=""/);
+    assert.ok(radios(markup).every((i) => / disabled=""/.test(i)));
+    assert.match(markup, new RegExp(`<legend[^>]*color:${escape(theme.color.textDisabled)}`));
+    assert.doesNotMatch(markup, new RegExp(escape(theme.color.accentTint)), "the chosen card wears no accent while off");
+    assert.doesNotMatch(markup, /opacity/);
+  });
+
+  test("Players see: a radio group under its name, its Like card fourth, described by the chosen help", () => {
+    const like = { name: "Crypt", summary: "Explore, Dark, Per player" };
+    const markup = html(createElement(PlayersSeeChoice, { value: "like", like, onChange() {} }));
+    const group = /<div role="radiogroup" aria-labelledby="([^"]+)" aria-describedby="([^"]+)"/.exec(markup);
+    assert.ok(group, "a named, described radio group");
+    assert.equal(textOf(markup, group[1]), "Players see");
+    assert.equal(textOf(markup, group[2]), like.summary);
+    const inputs = radios(markup);
+    assert.equal(inputs.length, 4);
+    assert.equal(textOf(markup, /aria-labelledby="([^"]+)"/.exec(inputs[3]!)?.[1]), "Like Crypt");
+    assert.match(inputs[3]!, / checked=""/);
+    assert.doesNotMatch(markup, /<fieldset/);
+  });
+
+  test("Players see's status line is mounted while empty, and says the work in hand with the small wait, no div inside", () => {
+    const quiet = html(createElement(PlayersSeeChoice, { value: "explore", onChange() {} }));
+    assert.match(quiet, /<div role="status" style="display:grid;min-width:0">/, "mounted, taking no room");
+    const working = html(createElement(PlayersSeeChoice, { value: "explore", busy: true, working: "Working out who sees what…", onChange() {} }));
+    assert.match(working, /<div role="radiogroup"[^>]* aria-busy="true"/);
+    const status = /<div role="status"[^>]*>(.*)<\/div>/.exec(working)?.[1] ?? "";
+    assert.match(status, /^<span style="[^"]*display:inline-flex[^"]*"><svg[^>]*width="16"/, "the small wait, saying nothing of its own inside the status");
+    assert.ok(status.includes("Working out who sees what…"));
+    assert.doesNotMatch(status, /<div|role=/);
+  });
+
+  test("with nothing chosen the group is described by the none line, in the warning tone", () => {
+    const markup = html(createElement(PlayersSeeChoice, { value: null, none: "Custom: this scene's own settings.", onChange() {} }));
+    const id = /<div role="radiogroup"[^>]* aria-describedby="([^"]+)"/.exec(markup)?.[1];
+    assert.equal(textOf(markup, id), "Custom: this scene&#x27;s own settings.");
+    assert.match(markup, new RegExp(`id="${id}" style="[^"]*color:${escape(theme.color.warning)}`));
+    assert.equal(radios(markup).filter((i) => / checked=""/.test(i)).length, 0);
   });
 });
 
