@@ -88,11 +88,13 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     assert.equal(run(switched, undo(drawn.inverse)).state.buildChunks[chunkKey("s1", 0, 0)], undefined);
   });
 
-  test("a rider's undone dismount on a scene switched since is refused", () => {
+  test("H2: a rider's undone dismount on a scene switched since is accepted, as links work on hexes", () => {
     const ridden = twoDms({ tokens: { horse: token("horse", { size: "large", x: 4, y: 4 }), bree: token("bree", { kind: "pc", x: 4, y: 4, attached: { to: "horse", kind: "ride" } }) } });
     const off = run(ridden, { t: "token.detach", tokenId: "bree", x: 6, y: 5 });
     const switched = run(off.state, toHex(), B).state;
-    assert.equal(refusal(switched, undo(off.inverse)), "Can't undo that: an attached creature on squares can't stand on this scene's hexes.");
+    // Accepted: the rider is back where it sat, and its link holds or comes off by the hexes as any link does (reducer/attach.ts linkPass).
+    const undone = run(switched, undo(off.inverse)).state.tokens.bree;
+    assert.deepEqual([undone?.x, undone?.y], [4, 4]);
   });
 
   test("H2: a squeezed token restored onto a hex scene is accepted, as squeezing works on hexes", () => {

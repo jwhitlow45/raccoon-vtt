@@ -104,11 +104,12 @@ describe("what keeps a scene from a shape (HX-D14)", () => {
     assert.equal(switchHolds(hex, hex.scenes.s1!, COLUMNS).length, 0, "rows to columns too");
   });
 
-  test("onto hexes, in H1, attach links block, and only onto hexes", () => {
+  test("from H2, attach links move to any shape, as their tokens do", () => {
     const state = room({ tokens: { horse: token("horse", { size: "large" }), bree: token("bree", { attached: { to: "horse", kind: "ride" } }) } });
-    assert.equal(heldList(switchHolds(state, state.scenes.s1!, ROWS)), "an attached creature");
+    assert.equal(switchHolds(state, state.scenes.s1!, ROWS).length, 0, "onto hexes");
     const hex = { ...state, scenes: { ...state.scenes, s1: scene("s1", { gridShape: "hexRows" }) } } as RoomState;
-    assert.equal(switchHolds(hex, hex.scenes.s1!, SQUARES).length, 0, "squares hold them");
+    assert.equal(switchHolds(hex, hex.scenes.s1!, SQUARES).length, 0, "back onto squares");
+    assert.equal(switchHolds(hex, hex.scenes.s1!, COLUMNS).length, 0, "rows to columns");
   });
 
   test("a fog draft of world shapes moves to any shape", () => {
@@ -171,11 +172,12 @@ describe("what a restored value brings (HX-D14's two checks)", () => {
     assert.equal(restoredHolds(room(), "token", token("g", { size: "large", squeeze: true }), rows), null);
   });
 
-  test("the phase check: in H1 a hex scene takes no trap or attach link", () => {
+  test("the phase check: in H1 a hex scene takes no trap, and from H2 it takes attach links", () => {
     const state = room({ tokens: { horse: token("horse", { size: "large" }), bree: token("bree", { attached: { to: "horse", kind: "ride" } }) } });
     assert.deepEqual(restoredHolds(state, "trap", trap("t1", { grid: "hexRows" }), rows), { held: [{ what: "trap", count: 1 }], from: "hexRows" });
-    assert.ok(restoredHolds(state, "token", state.tokens.bree!, rows), "a rider");
-    assert.ok(restoredHolds(state, "token", state.tokens.horse!, rows), "what something rides");
+    assert.equal(restoredHolds(state, "token", state.tokens.bree!, rows), null, "a rider");
+    assert.equal(restoredHolds(state, "token", state.tokens.horse!, rows), null, "what something rides");
+    assert.equal(restoredHolds(state, "token", state.tokens.bree!, columns), null, "on hex columns");
     assert.equal(restoredHolds(state, "token", token("g"), rows), null);
     assert.equal(restoredHolds(state, "token", state.tokens.bree!, squares), null);
   });

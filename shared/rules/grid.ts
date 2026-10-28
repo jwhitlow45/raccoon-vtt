@@ -124,10 +124,6 @@ function draftKeyed(draft: FogDraft): boolean {
  */
 const H2_KEYED: ReadonlySet<ShapeHolding> = new Set<ShapeHolding>(["rough"]);
 
-function holdsSomeone(state: Pick<RoomState, "tokens">, token: Token): boolean {
-  return Object.values(state.tokens).some((t) => t.attached?.to === token.id);
-}
-
 function tally(found: ShapeHolding[]): ShapeHeld[] {
   return HOLDING_ORDER.filter((what) => found.includes(what)).map((what) => ({ what, count: found.filter((f) => f === what).length }));
 }
@@ -142,9 +138,10 @@ function sceneTokens(state: Holds, sceneId: string): Token[] {
  * What a scene holds that a switch to `to` cannot keep (HX-D14): any cell
  * data at all, since all of it is of the scene's shape now (painted ground,
  * walls and "no wall" marks on the grid lines, heights, stairs, difficult
- * ground, traps, Reveal room's fog shapes and squeezed tokens), and onto
- * hexes, what this phase leaves out (attach links). Free walls are in world
- * units and stand on every shape from H2. Nothing when the shape stays.
+ * ground, traps, Reveal room's fog shapes and squeezed tokens). Free walls
+ * are in world units and stand on every shape from H2, and so do attach
+ * links, whose tokens every rule reads at their nearest anchors. Nothing
+ * when the shape stays.
  */
 export function switchHolds(state: Holds, scene: Pick<Scene, "id" | "gridShape">, to: Grid): ShapeHeld[] {
   if (shapeName(sceneGrid(scene)) === shapeName(to)) return [];
@@ -158,7 +155,6 @@ export function switchHolds(state: Holds, scene: Pick<Scene, "id" | "gridShape">
   if (draft && draftKeyed(draft)) found.push("roomFog");
   for (const token of sceneTokens(state, scene.id)) {
     if (token.squeeze === true) found.push("squeeze");
-    if (isHex(to) && token.attached !== undefined) found.push("link");
   }
   return dedupe(tally(found));
 }
@@ -181,13 +177,12 @@ function dedupe(held: ShapeHeld[]): ShapeHeld[] {
  *   stamp (D-261026-8). In H2 a hex scene holds difficult ground of its own
  *   shape and no other grid-keyed content: painted ground and grid-line
  *   walls never (they stay square in every phase), heights, stairs and
- *   Reveal room's cells until H3. Free walls and squeezed creatures stand
- *   on hexes from H2. A hand-made backup could stamp any of the rest with
- *   the scene's own shape, and this phase has no hex rules to read them by.
+ *   Reveal room's cells until H3. Free walls, squeezed creatures and
+ *   attach links stand on hexes from H2. A hand-made backup could stamp any
+ *   of the rest with the scene's own shape, and this phase has no hex rules
+ *   to read them by.
  *
- * `from` is the shape the value's data stands on, for the words: its stamp,
- * or squares for what carries none (links), the only shape that holds
- * those in H1.
+ * `from` is the shape the value's data stands on, for the words: its stamp.
  */
 export function restoredHolds(
   state: Holds,
@@ -217,11 +212,8 @@ export function restoredHolds(
     const trap = value as Trap;
     return stamp(["trap"], trap.grid) ?? (isHex(g) ? { held: [{ what: "trap", count: 1 }], from: stampShape(trap.grid) } : null);
   }
-  const token = value as Token;
-  if (!isHex(g)) return null;
-  const found: ShapeHolding[] = [];
-  if (token.attached !== undefined || holdsSomeone(state, token)) found.push("link");
-  return found.length > 0 ? { held: tally(found), from: "squares" } : null;
+  // A token's squeeze and its links stand on hexes from H2, read by the hex rules of squeezing and attaching.
+  return null;
 }
 
 /**

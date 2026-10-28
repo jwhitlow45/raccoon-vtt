@@ -150,9 +150,9 @@ describe("the shape switch (HX-D14)", () => {
     assert.equal(switched.buildChunks[chunkKey("s1", 0, 0)]?.walls?.length, 1);
   });
 
-  test("in H1, an attach link or a squeezed token keeps a scene off hexes too", () => {
+  test("from H2 an attach link moves onto hexes with its tokens, and a squeezed token keeps a scene off them", () => {
     const ridden = room({ tokens: { horse: token("horse", { size: "large", x: 4, y: 4 }), bree: token("bree", { x: 4, y: 4, attached: { to: "horse", kind: "ride" } }) } });
-    assert.equal(refusal(ridden, toHex()), "This scene has an attached creature on its squares, which can't stand on hexes. Remove them to change the grid.");
+    assert.equal(run(ridden, toHex()).state.tokens.bree?.attached?.to, "horse");
     const squeezed = room({ tokens: { ogre: token("ogre", { size: "large", squeeze: true }) } });
     assert.match(refusal(squeezed, toHex()), /a squeezing creature/);
   });
