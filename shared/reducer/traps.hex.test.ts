@@ -154,6 +154,22 @@ describe("a squeezed walk on a hex scene", () => {
     return run(state, { t: "token.move", tokenId: "ogre", ...to, route: route.pieces.map(([x, y, extra, swim]) => [x, y, extra, swim]) });
   }
 
+  test("a move that stores no squeeze, ending on a squeezed size's anchor, walks full size and meets a plate under its full footprint", () => {
+    // On open ground a Large ogre from 2,5 to a Medium anchor: the move leaves it unsqueezed, so every spot of its walk is too.
+    const end = { x: 8.5, y: 4.773502691896258 };
+    const open = () => {
+      const s = room({ scenes: { s1: scene("s1", { gridShape: "hexRows", bounds: { w: 22, h: 16 } }) } });
+      s.tokens.ogre = onHex(ROWS, "ogre", "large", { col: 2, row: 5 }, { name: "Ogre" });
+      return run(s, { t: "trap.create", trap: input("plate", { zone: { cells: [{ x: 7, y: 7, w: 1, h: 1 }] }, rig: { ...trapOf("x").rig!, stops: false } }) });
+    };
+    const many = run(open(), { t: "token.moveMany", moves: [{ tokenId: "ogre", ...end }] });
+    assert.equal(many.tokens.ogre?.squeeze, undefined);
+    assert.equal(many.traps.plate?.state, "sprung", "a group move");
+    const one = run(open(), { t: "token.move", tokenId: "ogre", ...end });
+    assert.equal(one.tokens.ogre?.squeeze, undefined);
+    assert.equal(one.traps.plate?.state, "sprung", "a move of its own");
+  });
+
   test("the ogre squeezed along the corridor sets off a plate in the corridor and none in the rock beside it", () => {
     assert.equal(walkThrough(corridor({ col: 9, row: 6 })).traps.plate?.state, "sprung", "in the corridor");
     for (let col = 7; col <= 11; col++) assert.equal(walkThrough(corridor({ col, row: 7 })).traps.plate?.state, "armed", `beside it at ${col},7`);

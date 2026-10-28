@@ -652,17 +652,19 @@ function walksOf(op: Op, before: RoomState, entries: readonly MovedToken[], seen
     const head = members[0]!;
     if (head.how !== "walk" && head.how !== "teleport") continue;
     const headToken = before.tokens[head.tokenId]!;
+    const squeeze = op.t === "token.move" && op.tokenId === head.tokenId && op.squeeze === true;
+    // The head's walk on hexes ends squeezed as the move leaves it, so its spots squeeze as the stored move does (squeezeRule).
+    const ending = { endSqueezed: isSqueezed(endsAs(op, headToken, squeeze)) };
     const cache = new Map<number, readonly WalkSpot[]>();
     const base = (s: number): readonly WalkSpot[] => {
       let hit = cache.get(s);
-      if (!hit) cache.set(s, (hit = head.how === "teleport" ? twoSpots(head.route) : routeWalk(grid, head.trace, build, s)));
+      if (!hit) cache.set(s, (hit = head.how === "teleport" ? twoSpots(head.route) : routeWalk(grid, head.trace, build, s, ending)));
       return hit;
     };
     // The public members: every member seen by all. One under a holder players cannot see walks as itself (listed reveal 2).
     const step = Math.min(1, ...members.filter((e) => seen(e.tokenId)).map((e) => routeLattice(before.tokens[e.tokenId]!)));
     const group: Group = { named, head, base, step };
     groups.set(named, group);
-    const squeeze = op.t === "token.move" && op.tokenId === head.tokenId && op.squeeze === true;
     for (const e of members) {
       const token = before.tokens[e.tokenId]!;
       const holder = e.carriedBy !== undefined ? byId.get(e.carriedBy) : undefined;
