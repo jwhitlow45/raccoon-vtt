@@ -2,7 +2,7 @@ import { LIMITS } from "#shared/limits.ts";
 import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
 import type { TrapInput } from "#shared/protocol.ts";
 import { footprintRect, hexAnchor, occupiedHexes, placedOnHex, tokenRefHex, type PlacedToken } from "#shared/rules/footprint.ts";
-import { cornerAt, hexAt, hexCenter, hexCorners, hexLine, hexNeighbors, sceneHexSpan, HEX_R, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexInScene, hexLine, hexNeighbors, sceneHexSpan, HEX_R, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { rangeGround } from "#shared/rules/heights.ts";
 import { inRects, pitFloorOf, rectHexes, trapCreature, wireHexes } from "#shared/rules/traps.ts";
 import { ABILITY_NAMES, choiceText } from "#shared/rules/skills.ts";
@@ -71,7 +71,8 @@ export function rectBetween(g: Grid, a: Point, b: Point, bounds: Bounds): CellRe
   const [bx, by] = keyAt(g, b, keys);
   const w = Math.min(Math.abs(bx - ax) + 1, side);
   const h = Math.min(Math.abs(by - ay) + 1, side);
-  return { x: bx < ax ? ax - w + 1 : ax, y: by < ay ? ay - h + 1 : ay, w, h };
+  const rect = { x: bx < ax ? ax - w + 1 : ax, y: by < ay ? ay - h + 1 : ay, w, h };
+  return isHex(g) ? onSceneHexes(g, rect, bounds, true) : rect;
 }
 
 /**
@@ -85,7 +86,34 @@ export function tapRect(g: Grid, at: Point, start: string, band: LevelBand, boun
   const w = Math.min(zone?.kind === "squares" ? zone.w : 1, keys.w);
   const h = Math.min(zone?.kind === "squares" ? zone.h : 1, keys.h);
   const [x, y] = keyAt(g, at, keys);
-  return { x: clamp(x, 0, keys.w - w), y: clamp(y, 0, keys.h - h), w, h };
+  const rect = { x: clamp(x, 0, keys.w - w), y: clamp(y, 0, keys.h - h), w, h };
+  return isHex(g) ? onSceneHexes(g, rect, bounds, false) : rect;
+}
+
+/**
+ * A rectangle of hex keys kept to the scene's hexes, as the server asks
+ * (reducer/traps.ts trapProblem). A short line's last key lies inside the
+ * span of keys but off the scene (hex.ts hexInScene): the last column's
+ * on hex rows, the last row's on hex columns. While the rectangle holds
+ * one, a drag's gives up that column or row, and a tap's, keeping its
+ * size, moves back one, as a single line's does too.
+ */
+function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, shrink: boolean): CellRect {
+  const off = (q: CellRect) => {
+    for (let row = q.y; row < q.y + q.h; row++) for (let col = q.x; col < q.x + q.w; col++) if (!hexInScene(g, bounds, { col, row })) return true;
+    return false;
+  };
+  let out = r;
+  while (off(out)) {
+    if (g.orient === "rows") {
+      if (shrink && out.w > 1) out = { ...out, w: out.w - 1 };
+      else if (out.x > 0) out = { ...out, x: out.x - 1 };
+      else break;
+    } else if (shrink && out.h > 1) out = { ...out, h: out.h - 1 };
+    else if (out.y > 0) out = { ...out, y: out.y - 1 };
+    else break;
+  }
+  return out;
 }
 
 /** The keys a scene's cells run over: its cells, or on hexes the columns and rows of its hex keys (hex.ts sceneHexSpan). */

@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 import { LIMITS } from "#shared/limits.ts";
 import type { CellRect, Token, Trap, TrapRig } from "#shared/model.ts";
 import { occupiedHexes, placedOnHex } from "#shared/rules/footprint.ts";
-import { cornerAt, hexAt, hexCorners, hexKey, hexLine, sceneHexSpan, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { cornerAt, hexAt, hexCorners, hexInScene, hexKey, hexLine, sceneHexSpan, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { planTrapMove, type TrapRoom } from "#shared/rules/traps.ts";
 import { DM, int, rng, room, scene, token } from "#shared/testutil.ts";
 import { crossedTraps, newTrapInput, rectBetween, START_BLANK, tapRect, tokensOn, trapAt, wireBetween, wireEnd, zoneBox, hitsSummary } from "./rules.ts";
@@ -37,6 +37,23 @@ describe("drawing a zone of hexes", () => {
     }
     // A 30 by 20 scene on hex rows has 22 rows: a tap below the last row's center draws on row 21, past where its cells stop.
     assert.equal(rectBetween(ROWS, { x: 5, y: 19.9 }, { x: 5, y: 19.9 }, BOUNDS).y, 21);
+  });
+
+  test("a drag or a tap at the scene's edge keeps every hex of its rectangle on the scene, as the server asks", () => {
+    const r = rng(17);
+    const offScene = (g: HexGrid, rect: CellRect) => {
+      for (let row = rect.y; row < rect.y + rect.h; row++) for (let col = rect.x; col < rect.x + rect.w; col++) if (!hexInScene(g, BOUNDS, { col, row })) return `${col},${row}`;
+      return null;
+    };
+    for (let i = 0; i < 300; i++) {
+      const g = GRIDS[i % 2]!;
+      const a = { x: r() * 32 - 1, y: r() * 22 - 1 };
+      const b = { x: r() * 32 - 1, y: r() * 22 - 1 };
+      for (const rect of [rectBetween(g, a, b, BOUNDS), tapRect(g, a, START_BLANK, "1-4", BOUNDS), tapRect(g, a, "hidden-pit", "1-4", BOUNDS)]) {
+        assert.equal(offScene(g, rect), null, `${g.orient}: ${JSON.stringify(rect)}`);
+        assert.ok(rect.w >= 1 && rect.h >= 1);
+      }
+    }
   });
 
   test("a tap places one hex, or a preset's own size, on the hex tapped", () => {
