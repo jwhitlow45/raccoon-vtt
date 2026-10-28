@@ -40,6 +40,7 @@ import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.t
 import { walllessFile } from "../vision/playersSeeRules.ts";
 import { lightOf } from "../vision/settings.ts";
 import { UvttLightChoice } from "../vision/UvttLightChoice.tsx";
+import { lightsLead, startingLight } from "../vision/uvttLight.ts";
 
 /**
  * The Universal VTT import's dialog (docs/design-v1-maps-vision.md section
@@ -48,7 +49,9 @@ import { UvttLightChoice } from "../vision/UvttLightChoice.tsx";
  * saying what it is doing, and every path ending in the new scene or a
  * plain sentence. Opened from a scene's phases, it adds only the image.
  * A new scene starts on what players see by the room's default, or Like
- * the scene on the DM's screen (docs/design-v1-map-discovery.md 8.1).
+ * the scene on the DM's screen (docs/design-v1-map-discovery.md 8.1). A
+ * map that brings its own lights starts dark under party vision instead,
+ * and the summary leads by saying so (D-261028-08).
  *
  * Once the walls are being sent, closing the dialog only hides it. The
  * ops go on, and the import still ends in the new scene or a toast.
@@ -93,7 +96,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
   const setting = useRoomView((s) => s.view?.meta.settings.newScenePlayers);
   const shape = useRoomView((s) => shapeNote(s.view?.meta.settings.newScenes));
   const current = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
-  /** The DM's pick of Players see. Until there is one, the room's default for an import. */
+  /** The DM's pick of Players see. Until there is one, Explore for a map that brings lights, else the room's default for an import. */
   const [seen, setSeen] = useState<PlayersSeeValue | null>(null);
   /** The DM's pick of the scene's light level. Until there is one, the file's proposal, else Bright. */
   const [light, setLight] = useState<LightLevel | null>(null);
@@ -167,6 +170,10 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
 
   const busy = step.k === "image" || step.k === "upload" || step.k === "walls" || step.k === "checking";
   const phase = props.target.kind === "phase";
+  const roomDefault = newScenePreset(setting, "uvtt");
+  const start = startingLight(read?.info.light ?? null, roomDefault);
+  const picked = { seen: seen ?? start.seen, light: light ?? start.light };
+  const lead = phase ? null : lightsLead(read?.info.light ?? null, picked, roomDefault);
 
   const pickAnother = (next: File) => {
     abortRef.current?.abort();
@@ -249,11 +256,11 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
       const plan = read?.plan;
       if (!read || !plan) return;
       // Like holds its scene by id through the upload, and reads it after (create.ts `pickNow`).
-      const intent = newSceneIntent(seen ?? newScenePreset(setting, "uvtt"), current);
+      const intent = newSceneIntent(picked.seen, current);
       const asset = await uploadImage(signal);
       const map = placeMap(plan, { assetId: asset.id, width: asset.width, height: asset.height, fileImageWidth: read.info.image.width });
       if (!map) throw new Error(GRID_PROBLEM);
-      const level = light ?? read.info.light?.level ?? "bright";
+      const level = picked.light;
       const { pick, gone } = pickNow(intent, store.getState().view, "uvtt");
       if (gone) ui.notify(gone);
       const scene = withPlayersSee(importScene(plan, map, { id: actions.newId(), name, light: level }), pick, level);
@@ -337,6 +344,19 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
             name={name}
             onName={setName}
             disabled={busy}
+            lead={
+              lead ? (
+                <LightsLead
+                  text={lead.text}
+                  action={lead.action}
+                  disabled={busy}
+                  onPick={() => {
+                    setSeen(lead.to.seen);
+                    setLight(lead.to.light);
+                  }}
+                />
+              ) : null
+            }
             options={
               phase ? null : (
                 <Options
@@ -346,14 +366,14 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
                   portals={portals}
                   onPortals={setPortals}
                   setting={setting}
-                  seen={seen ?? newScenePreset(setting, "uvtt")}
+                  seen={picked.seen}
                   like={current}
                   onSeen={(v) => {
                     setSeen(v);
                     // Like brings the scene's light too, which the light row then shows and the DM can still change.
                     if (v === "like" && current) setLight(lightOf(current));
                   }}
-                  light={light ?? read.info.light?.level ?? "bright"}
+                  light={picked.light}
                   onLight={setLight}
                   disabled={busy}
                 />
@@ -437,6 +457,8 @@ function Summary(props: {
   name: string;
   onName(name: string): void;
   disabled: boolean;
+  /** The line for a map that brings its own lights, which leads the summary. */
+  lead: ReactNode;
   options: ReactNode;
   problem: string | null;
   converting: boolean;
@@ -446,6 +468,7 @@ function Summary(props: {
   const frame = plan?.frame;
   return (
     <div style={{ display: "grid", gap: theme.space(3) }}>
+      {props.lead}
       <img
         src={read.preview}
         alt="The map's image"
@@ -476,6 +499,24 @@ function Summary(props: {
           {props.problem}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The summary's first line for a map that brings its own lights
+ * (D-261028-08), with its one-tap choice beside it. The sentence is a
+ * polite live region, so a screen reader hears where a tap left the scene.
+ */
+function LightsLead(props: { text: string; action: string; disabled: boolean; onPick(): void }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
+      <p aria-live="polite" style={{ flex: "1 1 16em", minWidth: 0, margin: 0, lineHeight: theme.leading.body }}>
+        {props.text}
+      </p>
+      <Button disabled={props.disabled} onClick={props.onPick}>
+        {props.action}
+      </Button>
     </div>
   );
 }

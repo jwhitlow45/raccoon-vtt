@@ -107,7 +107,8 @@ async function read(file: File, device: Device, target: ReadTarget, options: Imp
       resize: plan.kind === "resize",
       hasObjects: map.objects.length > 0,
       lightPortals: map.portals.filter((p) => !p.closed).length,
-      light: proposedLight(map.environment),
+      // The lights the scene would keep, so a phase, which takes none, proposes by the file's environment alone.
+      light: proposedLight(map.environment, converted.plan?.lights.length ?? 0),
     },
     plan: converted.plan,
     problem: converted.problem,
