@@ -29,6 +29,29 @@ export type SynthGrid = {
   rotate?: number;
 };
 
+/**
+ * A hex grid drawn over the art, laid as the app lays its hexes
+ * (docs/design-v1-hex-grids.md section 4.1): on hex rows the tops are
+ * pointed and a row runs straight across, and hex columns are the same
+ * with x and y swapped.
+ */
+export type SynthHexGrid = {
+  orient: "rows" | "columns";
+  /** The distance between neighboring hex centers, across the flats: the app's cell, px. */
+  cellPx: number;
+  /** One hex's center, px. */
+  center: { x: number; y: number };
+  /** Line width, px. */
+  width?: number;
+  /** The lines' gray level and how much they cover what is under them. */
+  gray?: number;
+  opacity?: number;
+  /** Lines only where the art is floor. */
+  floorOnly?: boolean;
+  /** Degrees, about the image's center. */
+  rotate?: number;
+};
+
 export type Art =
   | { kind: "noise"; scale: number; amp: number }
   | { kind: "gradient"; from: number; to: number }
@@ -47,6 +70,7 @@ export type SynthMap = {
   base?: number;
   art: Art[];
   grid?: SynthGrid;
+  hexGrid?: SynthHexGrid;
   /** Gaussian noise per pixel, gray levels. */
   noise?: number;
   /** A random offset per 8 by 8 block, like JPEG's blocking at a low quality, gray levels. */
@@ -227,6 +251,11 @@ export function drawMap(spec: SynthMap): Pixels {
           v = v * (1 - a) + (g.gray ?? 0) * a;
         }
       }
+      const hg = spec.hexGrid;
+      if (hg && (!hg.floorOnly || floor)) {
+        const a = (hg.opacity ?? 0.5) * coverage(hexLineDistance(cx, cy, hg, W, H), hg.width ?? 1.5);
+        v = v * (1 - a) + (hg.gray ?? 0) * a;
+      }
       out[y * W + x] = Math.max(0, Math.min(255, Math.round(v)));
     }
   }
@@ -263,6 +292,36 @@ function hexEdgeDistance(x: number, y: number, size: number): number {
     }
   }
   return best === Infinity ? 0 : best;
+}
+
+/**
+ * Distance from a pixel to the nearest side of a drawn hex grid. The hex
+ * holding a point is the one whose center is nearest by the hex's own
+ * measure, the largest of its three distances along the sides' normals,
+ * and the side is half a cell out from its center along one of them.
+ */
+function hexLineDistance(x: number, y: number, g: SynthHexGrid, W: number, H: number): number {
+  const turn = ((g.rotate ?? 0) * Math.PI) / 180;
+  const dx = x - W / 2;
+  const dy = y - H / 2;
+  const tx = W / 2 + dx * Math.cos(turn) + dy * Math.sin(turn) - g.center.x;
+  const ty = H / 2 - dx * Math.sin(turn) + dy * Math.cos(turn) - g.center.y;
+  const [u, v] = g.orient === "rows" ? [tx, ty] : [ty, tx];
+  const c = g.cellPx;
+  const rowStep = (c * Math.sqrt(3)) / 2;
+  const row = Math.round(v / rowStep);
+  let nearest = Infinity;
+  for (let j = row - 1; j <= row + 1; j++) {
+    const shift = j % 2 ? c / 2 : 0;
+    const col = Math.round((u - shift) / c);
+    for (let i = col - 1; i <= col + 1; i++) {
+      const px = u - (shift + i * c);
+      const py = v - j * rowStep;
+      const along = (Math.sqrt(3) / 2) * py;
+      nearest = Math.min(nearest, Math.max(Math.abs(px), Math.abs(0.5 * px + along), Math.abs(-0.5 * px + along)));
+    }
+  }
+  return c / 2 - nearest;
 }
 
 /** The same image as RGBA, as a canvas's `getImageData` hands it over. */

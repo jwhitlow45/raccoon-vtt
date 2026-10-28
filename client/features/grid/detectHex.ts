@@ -1,0 +1,779 @@
+/**
+ * Finding a hex grid drawn on a map image (docs/design-v1-grid-detect.md,
+ * Hex grids). The square finder's method, turned to hexes: a drawn hex
+ * grid is thin lines in three directions, each family of sides on lines
+ * half a cell apart, each line drawn for one third of its length.
+ *
+ * The work is done on hex rows, pointed tops. Hex columns are the same
+ * picture with x and y swapped, so their image is read transposed.
+ *
+ * 1. The thin-line filter of the square finder, across x for the upright
+ *    sides and across y for the two sloped ones (a side 30 degrees off
+ *    level is nearly level, and the filter reaches far enough to clear it).
+ * 2. Three profiles, each the responses summed along one family's lines:
+ *    by x for the upright sides, and by the distance along each sloped
+ *    family's normal for the others, shared between the two nearest bins
+ *    so a line keeps its place to a fraction of a pixel.
+ * 3. A period and phase for each profile, as the square finder fits an
+ *    axis. All three must be the same, half a cell, and their phases must
+ *    meet at the corners and centers of one hex lattice: the phase of the
+ *    upright sides is the difference of the sloped ones'.
+ * 4. Those meeting points are hex centers and both kinds of corner, three
+ *    lattices each a corner's distance from the next. Which is which
+ *    shows along the lines: the sides are drawn between corners and
+ *    nothing runs through a center. Each side of the hexes each choice
+ *    predicts is looked at, and the choice whose sides are drawn wins.
+ *    Lines that run on through the other two (a triangle grid, a square
+ *    grid, ruled hatching) are not hexes, and that is the guard against
+ *    squares.
+ * 5. The upright sides must sit in the same place in the top and bottom
+ *    halves of the image, or the grid is turned, which the app cannot
+ *    follow. A map with no grid found gets a second look at half size,
+ *    where lines too wide for the filter fit inside it.
+ *
+ * Pure and synchronous, like `detectGrid`, with the same input.
+ */
+import type { HexOrient } from "#shared/rules/hex.ts";
+import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
+import { boxSides, type CalBox } from "./calibrate.ts";
+import { defaultStep, lineReach, MIN_CONFIDENCE, type Pixels } from "./detect.ts";
+
+type Point = { x: number; y: number };
+type Polarity = "dark" | "light";
+
+/** One family of hex sides: the upright ones, then the two sloped ones. */
+export type HexFamily = {
+  /** The distance between this family's lines, along their normal, px. Half a cell. */
+  period: number;
+  /** Where the lines fall along the normal, in [0, period). */
+  phase: number;
+  /** Lines found, and the lines the fit predicts from the first found to the last. */
+  found: number;
+  expected: number;
+  /** Median line strength over the profile's noise between lines. */
+  snr: number;
+  /** Strength halfway or a third of the way between lines, against the lines beside them. */
+  between: number;
+  /** Root mean square distance of the lines found from the fitted ones, px. */
+  rms: number;
+};
+
+export type HexFound = {
+  found: true;
+  orient: HexOrient;
+  /** The distance between neighboring hex centers across the flats: the app's cell, px. */
+  cellPx: number;
+  /** The hex center nearest the image's middle, px. */
+  center: Point;
+  /** Line up grid's box on that hex and its six neighbors (HX-D12): 3 by 2.89 cells on hex rows, 2.89 by 3 on columns. */
+  box: CalBox;
+  /** 0 to 1, as the square finder's. */
+  confidence: number;
+  polarity: Polarity;
+  /** The sides' strength against the same lines through the hexes: 1 for drawn hexes, 0 for lines that run on. */
+  broken: number;
+  /** The share of the hexes' sides that show: how much of the map the grid covers. Reported, not a check: a grid on the floors of a few rooms is still the grid. */
+  coverage: number;
+  families: [HexFamily, HexFamily, HexFamily];
+};
+
+export type HexNoGridReason =
+  /** Too small to hold a hex grid this can see. */
+  | "small"
+  /** No repeating lines in the three directions at all. */
+  | "none"
+  /** The nearest fit failed a check. `failed` says which. */
+  | "weak";
+
+export type HexNoGrid = { found: false; reason: HexNoGridReason; failed?: string };
+
+export type HexDetection = HexFound | HexNoGrid;
+
+export type HexDetectOptions = {
+  /** The scene's hexes: rows (pointed tops) or columns (flat tops). */
+  orient: HexOrient;
+  /** Every `step`th row feeds the profiles. */
+  step?: number;
+};
+
+/** The smallest hex this looks for, px across the flats. The upright sides of one hex are a cell apart and must clear the line filter. */
+export const MIN_HEX_CELL_PX = 12;
+/** The app's largest scene side in cells: a finer grid could not be a scene. */
+const MAX_CELLS = 200;
+const MIN_LINES = 4;
+const CAP = 64;
+const LINE_SIGMA = 4;
+const MIN_SNR = 5;
+const MIN_FOUND = 0.6;
+const HALF = 0.6;
+/**
+ * The three families' periods may differ by this fraction. A picture
+ * resized in proportion differs by far less. Hexes drawn 1% out of shape
+ * already leave a regular grid a few pixels off the lines across a map.
+ */
+const SAME_SIZE = 0.01;
+/** How far the three phases may miss one lattice, px, or this share of the period if larger. */
+const MEET_PX = 1.5;
+const MEET_SHARE = 0.05;
+const MAX_DRIFT_PX = 3;
+const MAX_DRIFT_SHARE = 0.01;
+/**
+ * The drawn sides against the lines' other two thirds. Under 0.5 the
+ * lines run on through the hexes, a pattern of three line directions
+ * that is not hexes.
+ */
+const MIN_BROKEN = 0.5;
+
+/**
+ * `q` is the detrended profile's positive part. `sums` holds it summed
+ * over a line's width around each position, by the width's reach.
+ * `offset` turns a bin into a distance along the family's normal, px.
+ */
+type Profile = { q: Float64Array; samples: number; offset: number; sums: Map<number, Float64Array> };
+/** One polarity's three profiles, and the upright sides' profile of each half of the image, top and bottom. */
+type Profiles = { full: Profile[]; top: Profile; bottom: Profile };
+/** Gray levels on hex rows, and how many of the image's pixels one of its pixels spans. */
+type Frame = { L: Uint8Array; W: number; H: number; d: number; dv: number; step: number; k: number };
+type Fit = { fams: [HexFamily, HexFamily, HexFamily]; polarity: Polarity; failed: string | null; score: number };
+
+/**
+ * The hex grid drawn on a map, or why none was found, for the scene's
+ * orientation. A grid of the other orientation, or of squares, answers no
+ * grid: its sides do not run in these three directions.
+ */
+export function detectHex(px: Pixels, options: HexDetectOptions): HexDetection {
+  const rows = options.orient === "rows";
+  const W = rows ? px.width : px.height;
+  const H = rows ? px.height : px.width;
+  if (!holdsHexes(W, H)) return { found: false, reason: "small" };
+  const L = grayFrame(px, rows);
+  const full = search(L, W, H, options.step, 1);
+  if (full.found) return placed(full, 1, options.orient);
+  // Lines wider than the line filter's reach show only as their two
+  // edges. Half the size, they fit inside it. A quarter of the work again,
+  // and only when the first look found nothing.
+  const w = Math.floor(W / 2);
+  const h = Math.floor(H / 2);
+  if (!holdsHexes(w, h)) return full;
+  const half = search(halved(L, W, w, h), w, h, undefined, 2);
+  return half.found ? placed(half, 2, options.orient) : full;
+}
+
+function holdsHexes(W: number, H: number): boolean {
+  return Math.min(W, H) >= 64 && Math.min(W, H) / 3 >= Math.max(MIN_HEX_CELL_PX, Math.max(W, H) / MAX_CELLS);
+}
+
+/** Gray levels at half size, each pixel the mean of four. */
+function halved(L: Uint8Array, W: number, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = 2 * y * W + 2 * x;
+      out[y * w + x] = (L[i]! + L[i + 1]! + L[i + W]! + L[i + W + 1]! + 2) >> 2;
+    }
+  }
+  return out;
+}
+
+/** A find on the frame, read `k` times larger and turned back to the image's own x and y. */
+function placed(found: HexFound, k: number, orient: HexOrient): HexFound {
+  const c = { x: found.center.x * k, y: found.center.y * k };
+  const center = orient === "rows" ? c : { x: c.y, y: c.x };
+  const cellPx = found.cellPx * k;
+  const families = found.families.map((f) => ({ ...f, period: f.period * k, phase: f.phase * k, rms: f.rms * k })) as HexFound["families"];
+  return { ...found, orient, cellPx, center, box: boxOf(center, cellPx, orient), families };
+}
+
+/**
+ * One look at a frame of gray levels, hex rows: the find in the frame's
+ * pixels, or why none. Limits in pixels are the image's, so on a frame `k`
+ * times smaller they are `k` times tighter.
+ */
+function search(L: Uint8Array, W: number, H: number, stepOption: number | undefined, k: number): HexDetection {
+  const minC = Math.max(MIN_HEX_CELL_PX, Math.max(W, H) / MAX_CELLS);
+  const maxC = Math.min(W, H) / 3;
+  const d = lineReach(W, H);
+  // A side 30 degrees off level is 1 / cos 30 thicker down than across.
+  const dv = Math.ceil(d / HEX_S);
+  const step = Math.max(1, Math.floor(stepOption ?? defaultStep(W, H)));
+  const frame: Frame = { L, W, H, d, dv, step, k };
+  const all = profilesOf(frame);
+  const minP = minC / 2;
+  const maxP = maxC / 2;
+
+  const pool: Fit[] = [];
+  let nearest: Fit | null = null;
+  let any = false;
+  const tryAt = (p: number, pol: Polarity): Fit | null => {
+    if (p < minP || p > maxP) return null;
+    const fit = fitAt(all[pol].full, p, d, pol, k);
+    if (!fit) return null;
+    any = true;
+    if (fit.failed === null && fit.score >= MIN_CONFIDENCE) pool.push(fit);
+    else if (!nearest || closeness(fit) > closeness(nearest)) nearest = fit;
+    return fit;
+  };
+  for (const pol of ["dark", "light"] as const) {
+    const tried: number[] = [];
+    for (const prof of all[pol].full) {
+      for (const p of candidatePeriods(prof.q, minP, maxP, 6)) {
+        if (tried.some((t) => Math.abs(t - p) / p < 0.01)) continue;
+        tried.push(p);
+        const fit = tryAt(p, pol);
+        if (fit?.failed === "lines between the lines") for (const parts of [2, 3]) tryAt(fit.fams[0].period / parts, pol);
+      }
+    }
+  }
+  pool.sort((a, b) => b.score - a.score);
+  for (const fit of pool) {
+    const found = confirm(frame, all[fit.polarity], fit);
+    if (typeof found !== "string") return found;
+    if (!nearest || closeness(fit) > closeness(nearest)) nearest = { ...fit, failed: found };
+  }
+  if (!any) return { found: false, reason: "none" };
+  const shown = nearest as Fit | null;
+  return { found: false, reason: "weak", ...(shown ? { failed: shown.failed ?? "low confidence" } : {}) };
+}
+
+/** The image's gray levels, transposed for hex columns so the rest reads hex rows. */
+function grayFrame(px: Pixels, rows: boolean): Uint8Array {
+  const { width, height, data, channels: ch } = px;
+  const out = new Uint8Array(width * height);
+  for (let y = 0, i = 0; y < height; y++) {
+    for (let x = 0; x < width; x++, i++) {
+      const p = i * ch;
+      // Rec. 601 weights in fixed point, as the square finder reads them.
+      const v = ch === 1 ? data[i]! : (77 * data[p]! + 150 * data[p + 1]! + 29 * data[p + 2]!) >> 8;
+      out[rows ? i : x * height + y] = v;
+    }
+  }
+  return out;
+}
+
+/**
+ * The thin-line responses summed into each family's profile. Sloped
+ * sides are binned by their distance along the family's normal, which
+ * falls between whole pixels, so each response is shared between the two
+ * bins either side and a line's centroid stays where it is.
+ */
+function profilesOf(f: Frame): Record<Polarity, Profiles> {
+  const { L, W, H, d, dv, step } = f;
+  const n1 = Math.ceil(0.5 * W + HEX_S * H) + 3;
+  const sums = () => ({ up: [new Float64Array(W), new Float64Array(W)], a: new Float64Array(n1), b: new Float64Array(n1) });
+  const raw = { dark: sums(), light: sums() };
+  const add = (bins: Float64Array, u: number, v: number) => {
+    const b = Math.floor(u);
+    const t = u - b;
+    bins[b]! += v * (1 - t);
+    bins[b + 1]! += v * t;
+  };
+  const up = dv * W;
+  for (let y = dv; y < H - dv; y += step) {
+    const row = y * W;
+    const lower = y < H / 2 ? 0 : 1;
+    const sy = HEX_S * (y + 0.5);
+    for (let x = d; x < W - d; x++) {
+      const c = L[row + x]!;
+      const a = L[row + x - d]! - c;
+      const b = L[row + x + d]! - c;
+      if (a > 0 && b > 0) raw.dark.up[lower]![x]! += Math.min(a, b, CAP);
+      else if (a < 0 && b < 0) raw.light.up[lower]![x]! += Math.min(-a, -b, CAP);
+      const e = L[row + x - up]! - c;
+      const g = L[row + x + up]! - c;
+      let v = 0;
+      let to = raw.dark;
+      if (e > 0 && g > 0) v = Math.min(e, g, CAP);
+      else if (e < 0 && g < 0) {
+        v = Math.min(-e, -g, CAP);
+        to = raw.light;
+      }
+      if (v === 0) continue;
+      const hx = 0.5 * (x + 0.5);
+      add(to.a, sy - hx + 0.5 * W, v);
+      add(to.b, sy + hx, v);
+    }
+  }
+  const rowsSampled = Math.ceil((H - 2 * dv) / step);
+  // A sloped line's bin takes two pixels a row, from the rows its chord crosses.
+  const sloped = (2 * Math.min(H, W / (2 * HEX_S))) / step;
+  const build = (r: ReturnType<typeof sums>): Profiles => {
+    const [top, bottom] = r.up as [Float64Array, Float64Array];
+    return {
+      full: [prepare(top.map((v, i) => v + bottom[i]!), d, rowsSampled, 0.5), prepare(r.a, d, sloped, -0.5 * W), prepare(r.b, d, sloped, 0)],
+      top: prepare(top, d, rowsSampled / 2, 0.5),
+      bottom: prepare(bottom, d, rowsSampled / 2, 0.5),
+    };
+  };
+  return { dark: build(raw.dark), light: build(raw.light) };
+}
+
+/** A profile with its slow changes taken out and kept above zero (the square finder's `prepare`). */
+function prepare(raw: Float64Array, d: number, samples: number, offset: number): Profile {
+  const n = raw.length;
+  const m = 3 * d;
+  const prefix = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i]! + raw[i]!;
+  const q = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - m);
+    const hi = Math.min(n, i + m + 1);
+    const v = raw[i]! - (prefix[hi]! - prefix[lo]!) / (hi - lo);
+    q[i] = v > 0 ? v : 0;
+  }
+  return { q, samples, offset, sums: new Map() };
+}
+
+/** The profile summed over `w` bins either side of each position: a line's strength wherever it is centered. */
+function summed(prof: Profile, w: number): Float64Array {
+  const cached = prof.sums.get(w);
+  if (cached) return cached;
+  const { q } = prof;
+  const n = q.length;
+  const s = new Float64Array(n);
+  let run = 0;
+  for (let i = 0; i < Math.min(n, w); i++) run += q[i]!;
+  for (let i = 0; i < n; i++) {
+    if (i + w < n) run += q[i + w]!;
+    if (i - w - 1 >= 0) run -= q[i - w - 1]!;
+    s[i] = run;
+  }
+  prof.sums.set(w, s);
+  return s;
+}
+
+/**
+ * How far a line's response is looked for around it, by the period. The
+ * profiles of hexes hold a line every half cell, so on small hexes the
+ * line filter's reach would run one line into the next and leave no
+ * space between them to measure the noise in.
+ */
+function reachFor(period: number, d: number): number {
+  return Math.min(d, Math.max(1, Math.floor(period / 6)));
+}
+
+/** Periods where the profile's autocorrelation peaks, strongest first. */
+function candidatePeriods(q: Float64Array, minP: number, maxP: number, keep: number): number[] {
+  const n = q.length;
+  const lo = Math.max(1, Math.floor(minP) - 1);
+  const hi = Math.min(n - 2, Math.ceil(maxP) + 1);
+  if (hi - lo < 2) return [];
+  const ac = new Float64Array(hi + 2);
+  for (let lag = lo; lag <= hi + 1; lag++) {
+    let sum = 0;
+    for (let i = 0, j = lag; j < n; i++, j++) sum += q[i]! * q[j]!;
+    ac[lag] = sum / (n - lag);
+  }
+  const peaks: { p: number; v: number }[] = [];
+  for (let lag = lo + 1; lag <= hi; lag++) {
+    const a = ac[lag - 1]!;
+    const b = ac[lag]!;
+    const c = ac[lag + 1]!;
+    if (b <= 0 || b < a || b < c) continue;
+    const curve = a - 2 * b + c;
+    const shift = curve < 0 ? (0.5 * (a - c)) / curve : 0;
+    const p = lag + Math.max(-0.5, Math.min(0.5, shift));
+    if (p >= minP && p <= maxP) peaks.push({ p, v: b });
+  }
+  peaks.sort((x, y) => y.v - x.v);
+  // Every whole multiple of a period peaks about as high as the period
+  // itself, so the strongest few can all be multiples. The shortest peaks
+  // nearly as strong are kept too: the hexes' own size is among them.
+  const top = peaks[0]?.v ?? 0;
+  const shortest = peaks.filter((x) => x.v >= 0.5 * top).sort((x, y) => x.p - y.p).slice(0, 4);
+  return [...new Set([...shortest, ...peaks.slice(0, keep)])].map((x) => x.p);
+}
+
+function fourier(q: Float64Array, p: number): { mag: number; arg: number } {
+  const w = (2 * Math.PI) / p;
+  const cr = Math.cos(w);
+  const ci = -Math.sin(w);
+  let zr = 1;
+  let zi = 0;
+  let re = 0;
+  let im = 0;
+  for (let i = 0; i < q.length; i++) {
+    const v = q[i]!;
+    if (v !== 0) {
+      re += v * zr;
+      im += v * zi;
+    }
+    const t = zr * cr - zi * ci;
+    zi = zr * ci + zi * cr;
+    zr = t;
+  }
+  return { mag: Math.hypot(re, im), arg: Math.atan2(im, re) };
+}
+
+function quantile(values: ArrayLike<number>, q: number): number {
+  if (values.length === 0) return 0;
+  const sorted = Float64Array.from(values).sort();
+  if (q === 0.5 && sorted.length % 2 === 0) return (sorted[sorted.length / 2 - 1]! + sorted[sorted.length / 2]!) / 2;
+  return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!;
+}
+
+const median = (values: ArrayLike<number>) => quantile(values, 0.5);
+
+function mod(v: number, m: number): number {
+  return ((v % m) + m) % m;
+}
+
+/** The signed distance from `v` to the nearest multiple of `m`. */
+function wrap(v: number, m: number): number {
+  return v - m * Math.round(v / m);
+}
+
+function peakNear(s: Float64Array, x: number, r: number): { at: number; v: number } {
+  const lo = Math.max(0, Math.round(x - r));
+  const hi = Math.min(s.length - 1, Math.round(x + r));
+  let at = lo;
+  let v = -Infinity;
+  for (let i = lo; i <= hi; i++) {
+    if (s[i]! > v) {
+      v = s[i]!;
+      at = i;
+    }
+  }
+  return { at, v };
+}
+
+/** A line's center: the centroid of the response's run around its strongest point (the square finder's `center`). */
+function centroid(q: Float64Array, around: number, d: number): number {
+  const lo = Math.max(0, around - d);
+  const hi = Math.min(q.length - 1, around + d);
+  let top = around;
+  for (let i = lo; i <= hi; i++) if (q[i]! > q[top]!) top = i;
+  const floor = q[top]! / 3;
+  let a = top;
+  let b = top;
+  while (a > lo && q[a - 1]! > floor && q[a - 1]! <= q[a]! * 1.05) a--;
+  while (b < hi && q[b + 1]! > floor && q[b + 1]! <= q[b]! * 1.05) b++;
+  let w = 0;
+  let wx = 0;
+  for (let i = a; i <= b; i++) {
+    w += q[i]!;
+    wx += q[i]! * i;
+  }
+  return w > 0 ? wx / w : top;
+}
+
+/** Theil-Sen, then least squares on the lines within a few median deviations of it. */
+function lineFit(points: { k: number; c: number }[]): { period: number; phase: number; rms: number } {
+  const slopes: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) slopes.push((points[j]!.c - points[i]!.c) / (points[j]!.k - points[i]!.k));
+  }
+  const rough = median(slopes);
+  const base = median(points.map((p) => p.c - rough * p.k));
+  const residual = points.map((p) => Math.abs(p.c - base - rough * p.k));
+  const limit = Math.max(1, 3 * 1.4826 * median(residual));
+  const kept = points.filter((_, i) => residual[i]! <= limit);
+  const use = kept.length >= MIN_LINES ? kept : points;
+  const n = use.length;
+  let mk = 0;
+  let mx = 0;
+  for (const p of use) {
+    mk += p.k / n;
+    mx += p.c / n;
+  }
+  let skk = 0;
+  let skx = 0;
+  for (const p of use) {
+    skk += (p.k - mk) ** 2;
+    skx += (p.k - mk) * (p.c - mx);
+  }
+  const period = skk > 0 ? skx / skk : 0;
+  const phase = mx - period * mk;
+  let ss = 0;
+  for (const p of use) ss += (p.c - phase - period * p.k) ** 2;
+  return { period, phase, rms: Math.sqrt(ss / Math.max(1, n)) };
+}
+
+function noiseOf(prof: Profile, s: Float64Array, phase: number, period: number, keep: number, d: number): { mu: number; sigma: number } | null {
+  const off: number[] = [];
+  for (let i = d; i < s.length - d; i++) {
+    const t = mod(i - phase, period);
+    if (Math.min(t, period - t) >= keep) off.push(s[i]!);
+  }
+  if (off.length < 8) return null;
+  const mu = median(off);
+  const sigma = Math.max(1.4826 * median(off.map((v) => Math.abs(v - mu))), 0.05 * prof.samples);
+  return { mu, sigma };
+}
+
+/** One family's lines near period `p0`, as the square finder fits an axis, or null when no line pattern is there. */
+function fitFamily(prof: Profile, p0: number, reach: number): HexFamily | null {
+  const { q } = prof;
+  const d = reachFor(p0, reach);
+  const s = summed(prof, d);
+  const n = q.length;
+  const span = Math.max(1, 0.006 * p0);
+  const stride = Math.max(1e-4, (p0 * p0) / n / 4);
+  let best = { p: p0, mag: -1, arg: 0 };
+  for (let p = Math.max(2, p0 - span); p <= p0 + span; p += stride) {
+    const f = fourier(q, p);
+    if (f.mag > best.mag) best = { p, mag: f.mag, arg: f.arg };
+  }
+  if (best.mag <= 0) return null;
+  let period = best.p;
+  let phase = mod((-best.arg / (2 * Math.PI)) * period, period);
+  const r = Math.max(1, Math.min(2 * d, Math.floor(0.15 * period)));
+  let found: { k: number; c: number }[] = [];
+  let strengths: { k: number; v: number }[] = [];
+  let sigma = 0;
+  let mu = 0;
+  let rms = 0;
+  for (let round = 0; round < 3; round++) {
+    const k0 = Math.ceil((d - phase) / period);
+    const k1 = Math.floor((n - 1 - d - phase) / period);
+    if (k1 - k0 + 1 < MIN_LINES) return null;
+    const noise = noiseOf(prof, s, phase, period, r + d + 1, d);
+    if (!noise) return null;
+    ({ mu, sigma } = noise);
+    strengths = [];
+    found = [];
+    for (let k = k0; k <= k1; k++) {
+      const peak = peakNear(s, phase + k * period, r);
+      const v = peak.v - mu;
+      strengths.push({ k, v });
+      if (v >= LINE_SIGMA * sigma) found.push({ k, c: centroid(q, peak.at, d) });
+    }
+    if (found.length < MIN_LINES) return null;
+    const fit = lineFit(found);
+    if (!(fit.period > 2)) return null;
+    period = fit.period;
+    phase = mod(fit.phase, period);
+    rms = fit.rms;
+  }
+  const first = found[0]!.k;
+  const last = found[found.length - 1]!.k;
+  const inSpan = strengths.filter((x) => x.k >= first && x.k <= last);
+  const strength = new Map(inSpan.map((x) => [x.k, Math.max(0, x.v)]));
+  let between = 0;
+  for (const parts of [2, 3]) {
+    if (parts === 3 && period / 3 < 2 * (r + d)) continue;
+    for (let j = 1; j < parts; j++) {
+      const ratios: number[] = [];
+      for (const x of inSpan) {
+        const beside = (strength.get(x.k)! + (strength.get(x.k + 1) ?? 0)) / 2;
+        if (!strength.has(x.k + 1) || beside < LINE_SIGMA * sigma) continue;
+        ratios.push(Math.max(0, peakNear(s, phase + (x.k + j / parts) * period, r).v - mu) / beside);
+      }
+      if (ratios.length > 0) between = Math.max(between, quantile(ratios, 0.25));
+    }
+  }
+  return {
+    period,
+    phase: mod(phase + prof.offset, period),
+    found: found.length,
+    expected: last - first + 1,
+    snr: Math.min(1000, median(inSpan.map((x) => x.v)) / sigma),
+    between,
+    rms,
+  };
+}
+
+function familyFailure(f: HexFamily): string | null {
+  if (f.snr < MIN_SNR) return "lines too faint";
+  if (f.found / f.expected < MIN_FOUND) return "too many lines missing";
+  if (f.between >= HALF) return "lines between the lines";
+  if (f.rms > Math.max(1, 0.03 * f.period)) return "lines not evenly spaced";
+  return null;
+}
+
+function clamp01(v: number): number {
+  return Math.min(1, Math.max(0, v));
+}
+
+/** The square finder's confidence (`confidenceOf`), over the three families: the weakest family decides. */
+function confidenceOf(fams: HexFamily[]): number {
+  const snr = Math.min(...fams.map((f) => f.snr));
+  const share = Math.min(...fams.map((f) => f.found / f.expected));
+  const between = Math.max(...fams.map((f) => f.between));
+  const rms = Math.max(...fams.map((f) => f.rms / f.period));
+  const lines = Math.min(...fams.map((f) => f.found));
+  return (
+    clamp01((snr - MIN_SNR / 2) / 10) *
+    clamp01((share - MIN_FOUND / 2) / (1 - MIN_FOUND / 2)) *
+    clamp01((HALF - between) / (HALF - 0.2)) *
+    clamp01(1 - rms / 0.03) *
+    clamp01(lines / 8)
+  );
+}
+
+/** The three families fitted at one period, and whether they make one hex lattice. */
+function fitAt(full: Profile[], p: number, d: number, polarity: Polarity, k: number): Fit | null {
+  const fams = full.map((prof) => fitFamily(prof, p, d));
+  if (fams.some((f) => f === null)) return null;
+  const [up, a, b] = fams as [HexFamily, HexFamily, HexFamily];
+  const mean = (up.period + a.period + b.period) / 3;
+  const same = Math.max(up.period, a.period, b.period) - Math.min(up.period, a.period, b.period) <= SAME_SIZE * mean;
+  // The upright sides sit at x, and the sloped ones at y cos 30 -/+ x / 2:
+  // the second less the first is x again. Lines that do not agree so do
+  // not cross at the corners of one set of hexes.
+  const meet = Math.abs(wrap(b.phase - a.phase - up.phase, mean)) <= Math.max(MEET_PX / k, MEET_SHARE * mean);
+  const failed = !same ? "sides of different sizes" : !meet ? "sides do not meet as hexes" : (familyFailure(up) ?? familyFailure(a) ?? familyFailure(b));
+  return { fams: [up, a, b], polarity, failed, score: failed ? 0 : confidenceOf([up, a, b]) };
+}
+
+function closeness(f: Fit): number {
+  return Math.min(...f.fams.map((x) => x.snr)) * Math.min(...f.fams.map((x) => x.found / x.expected));
+}
+
+/** How far one family's lines move from one half of the image to the other, across the whole image, px. */
+function driftOf(first: Profile, second: Profile, fam: HexFamily, reach: number): number | null {
+  const d = reachFor(fam.period, reach);
+  const shift = (half: Profile) => {
+    const s = summed(half, d);
+    const phase = fam.phase - half.offset;
+    const r = Math.max(1, Math.min(2 * d, Math.floor(0.15 * fam.period)));
+    const noise = noiseOf(half, s, phase, fam.period, r + d + 1, d);
+    if (!noise) return null;
+    const offsets: number[] = [];
+    for (let k = Math.ceil((d - phase) / fam.period); phase + k * fam.period < s.length - d; k++) {
+      const x = phase + k * fam.period;
+      const peak = peakNear(s, x, r);
+      if (peak.v - noise.mu >= LINE_SIGMA * noise.sigma) offsets.push(centroid(half.q, peak.at, d) - x);
+    }
+    return offsets.length >= MIN_LINES ? median(offsets) : null;
+  };
+  const a = shift(first);
+  const b = shift(second);
+  return a === null || b === null ? null : 2 * Math.abs(b - a);
+}
+
+/**
+ * A fit that passed, looked at along its lines: which of the three
+ * lattices its phases allow holds the hex centers, and whether its sides
+ * are drawn as hexes' are.
+ */
+function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
+  const [up, a, b] = fit.fams;
+  const p = (up.period + a.period + b.period) / 3;
+  const cell = 2 * p;
+  // A turn moves every family's lines, the upright ones by as much as any.
+  // The sloped ones also lean when the picture was resized a hair out of
+  // proportion, which the size check allows, so only the upright sides
+  // are measured for a turn.
+  const drift = driftOf(prof.top, prof.bottom, up, f.d);
+  if (drift !== null && drift > Math.max(MAX_DRIFT_PX / f.k, MAX_DRIFT_SHARE * cell)) return "lines turned";
+  // A point where all three families cross, near the middle: x from the
+  // upright sides and from the sloped ones' difference, y cos 30 from the
+  // sloped ones' mean.
+  const x0 = up.phase + p * Math.round((f.W / 2 - up.phase) / p);
+  const u1 = a.phase + p * Math.round((HEX_S * (f.H / 2) - 0.5 * x0 - a.phase) / p);
+  const u2 = b.phase + p * Math.round((u1 + x0 - b.phase) / p);
+  const cross = { x: (x0 + u2 - u1) / 2, y: (u1 + u2) / (2 * HEX_S) };
+  const corner = HEX_R * cell;
+  const looks = [0, 1, 2].map((m) => sidesOf(f, { x: cross.x, y: cross.y + m * corner }, cell, fit.polarity));
+  const best = looks.reduce((x, y) => (y.mean > x.mean ? y : x));
+  const others = looks.filter((l) => l !== best).map((l) => l.mean);
+  if (best.values.length === 0 || !(best.mean > 0)) return "no sides drawn";
+  const broken = clamp01(1 - Math.max(0, ...others) / best.mean);
+  if (broken < MIN_BROKEN) return "lines run on through the hexes";
+  const threshold = Math.max(0.5, 0.3 * quantile(best.values, 0.9));
+  const coverage = best.values.filter((v) => v > threshold).length / best.values.length;
+  const center = nearestCenter(best.center, cell, { x: f.W / 2, y: f.H / 2 });
+  return {
+    found: true,
+    orient: "rows",
+    cellPx: cell,
+    center,
+    box: boxOf(center, cell, "rows"),
+    confidence: fit.score * clamp01((broken - MIN_BROKEN) / 0.3),
+    polarity: fit.polarity,
+    broken,
+    coverage,
+    families: fit.fams,
+  };
+}
+
+/** The hex center nearest `to`, on the lattice of hex rows with a center at `c`. */
+function nearestCenter(c: Point, cell: number, to: Point): Point {
+  const rowPx = HEX_S * cell;
+  const j = Math.round((to.y - c.y) / rowPx);
+  const shift = mod(j, 2) * (cell / 2);
+  const i = Math.round((to.x - c.x - shift) / cell);
+  return { x: c.x + shift + i * cell, y: c.y + j * rowPx };
+}
+
+/** HX-D12's box around a hex center: its middle is the center, and it holds that hex and its six neighbors. */
+function boxOf(center: Point, cell: number, orient: HexOrient): CalBox {
+  const size = 3 * cell;
+  const { w, h } = boxSides({ x: 0, y: 0, size }, { shape: "hex", orient });
+  return { x: center.x - w / 2, y: center.y - h / 2, size };
+}
+
+/** At most this many hexes are looked at, spread over the map. */
+const MAX_HEXES = 3000;
+
+/**
+ * Each side of the hexes centered on `c`'s lattice, its middle 60%: the
+ * line response along it less the response along the parallel line a
+ * quarter of a cell in, toward the hex's center, where no side is drawn.
+ * Each hex owns its upright right side and its two lower sloped sides,
+ * so every side is looked at once.
+ */
+function sidesOf(f: Frame, c: Point, cell: number, pol: Polarity): { mean: number; values: number[]; center: Point } {
+  const { L, W, H, d, dv } = f;
+  const rowPx = HEX_S * cell;
+  const corner = HEX_R * cell;
+  const ridgeX = (x: number, y: number) => {
+    const i = y * W + x;
+    const v = L[i]!;
+    const a = L[i - d]! - v;
+    const b = L[i + d]! - v;
+    return pol === "dark" ? (a > 0 && b > 0 ? Math.min(a, b, CAP) : 0) : a < 0 && b < 0 ? Math.min(-a, -b, CAP) : 0;
+  };
+  const ridgeY = (x: number, y: number) => {
+    const i = y * W + x;
+    const v = L[i]!;
+    const a = L[i - dv * W]! - v;
+    const b = L[i + dv * W]! - v;
+    return pol === "dark" ? (a > 0 && b > 0 ? Math.min(a, b, CAP) : 0) : a < 0 && b < 0 ? Math.min(-a, -b, CAP) : 0;
+  };
+  const inside = (x: number, y: number) => x >= d + 1 && x < W - d - 1 && y >= dv + 1 && y < H - dv - 1;
+  // A line may fall between pixels: the strongest response a pixel either side of it.
+  const nearX = (x: number, y: number) => Math.max(ridgeX(x - 1, y), ridgeX(x, y), ridgeX(x + 1, y));
+  const nearY = (x: number, y: number) => Math.max(ridgeY(x, y - 1), ridgeY(x, y), ridgeY(x, y + 1));
+  const samples = Math.max(3, Math.min(12, Math.round(0.6 * corner)));
+  const inward = cell / 4;
+  const side = (from: Point, to: Point, normal: Point, upright: boolean): number | null => {
+    let on = 0;
+    let off = 0;
+    for (let k = 0; k < samples; k++) {
+      const t = 0.2 + (0.6 * (k + 0.5)) / samples;
+      const x = from.x + (to.x - from.x) * t;
+      const y = from.y + (to.y - from.y) * t;
+      const xi = Math.floor(x);
+      const yi = Math.floor(y);
+      const xo = Math.floor(x - normal.x * inward);
+      const yo = Math.floor(y - normal.y * inward);
+      if (!inside(xi, yi) || !inside(xo, yo)) return null;
+      on += upright ? nearX(xi, yi) : nearY(xi, yi);
+      off += upright ? nearX(xo, yo) : nearY(xo, yo);
+    }
+    return (on - off) / samples;
+  };
+  const j0 = Math.floor(-c.y / rowPx) - 1;
+  const j1 = Math.ceil((H - c.y) / rowPx) + 1;
+  const i0 = Math.floor(-c.x / cell) - 2;
+  const i1 = Math.ceil((W - c.x) / cell) + 1;
+  const thin = Math.max(1, Math.ceil(Math.sqrt(((j1 - j0) * (i1 - i0)) / MAX_HEXES)));
+  const values: number[] = [];
+  for (let j = j0; j <= j1; j += thin) {
+    const shift = mod(j, 2) * (cell / 2);
+    for (let i = i0; i <= i1; i += thin) {
+      const cx = c.x + shift + i * cell;
+      const cy = c.y + j * rowPx;
+      const right = cx + cell / 2;
+      const sides = [
+        side({ x: right, y: cy - corner / 2 }, { x: right, y: cy + corner / 2 }, { x: 1, y: 0 }, true),
+        side({ x: right, y: cy + corner / 2 }, { x: cx, y: cy + corner }, { x: 0.5, y: HEX_S }, false),
+        side({ x: cx, y: cy + corner }, { x: cx - cell / 2, y: cy + corner / 2 }, { x: -0.5, y: HEX_S }, false),
+      ];
+      for (const v of sides) if (v !== null) values.push(v);
+    }
+  }
+  const mean = values.length ? values.reduce((s, v) => s + v, 0) / values.length : 0;
+  return { mean, values, center: c };
+}
