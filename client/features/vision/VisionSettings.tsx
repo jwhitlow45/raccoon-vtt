@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { LightLevel, Scene } from "#shared/model.ts";
 import { LIMITS } from "#shared/limits.ts";
 import type { OpOf } from "#shared/protocol.ts";
@@ -6,8 +6,7 @@ import { sceneWalls } from "#shared/rules/walls.ts";
 import { Button } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Spinner, useDelayed } from "../../components/Loading.tsx";
-import { Help, Note } from "../../components/Panel.tsx";
-import { RowChevron } from "../../components/Row.tsx";
+import { Help, Note, Section } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
 import { SettingRow } from "../../components/SettingRow.tsx";
 import { Switch } from "../../components/Switch.tsx";
@@ -15,6 +14,7 @@ import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { Select } from "../scenes/controls.tsx";
+import { fogFoldSummary } from "../scenes/sceneSummary.ts";
 import { CopySettingsButton } from "./CopySettings.tsx";
 import { HOLDERS_UNDER, holderRows, holdersAfter, lendsText, sharedOnlyText, unsharedMounts, untickQuestion } from "./holders.ts";
 import { AskFirst, PlayersSeeChoice, useAsk, WarningStatus } from "./PlayersSee.tsx";
@@ -165,13 +165,17 @@ export function VisionSettings(props: { scene: Scene }) {
       {on ? <Sources sceneId={scene.id} perPlayer={perPlayer} /> : null}
       {perPlayer ? <MountNotes sceneId={scene.id} /> : null}
 
-      <Fold
+      {/* A part of the group that folds, so a Section's fold: chevron first, its capitals label a level under the group's (docs/design-v1-design-pass.md 4.1). */}
+      <Section
         label="Fog and party vision"
-        open={fold.open}
-        onToggle={() => {
-          // Focus stays on the fold's header as the question goes with the fold.
-          if (ask.asking?.change.where === "fold") ask.dismiss();
-          fold.toggle();
+        fold={{
+          open: fold.open,
+          onToggle: () => {
+            // Focus stays on the fold's header, which the Section gives it first, as the question goes with the fold.
+            if (ask.asking?.change.where === "fold") ask.dismiss();
+            fold.toggle();
+          },
+          summary: fold.open ? undefined : <span style={{ color: theme.color.textMuted, fontSize: theme.font.small }}>{fogFoldSummary(scene)}</span>,
         }}
       >
         <div onKeyDown={ask.asking?.change.where === "fold" ? ask.onKeyDown : undefined} style={{ display: "grid", minWidth: 0 }}>
@@ -195,7 +199,7 @@ export function VisionSettings(props: { scene: Scene }) {
           {on ? <FogLine scene={scene} /> : null}
           {question("fold")}
         </div>
-      </Fold>
+      </Section>
 
       <CopySettingsButton scene={scene} />
     </>
@@ -220,44 +224,6 @@ function useFold(custom: boolean): { open: boolean; toggle(): void } {
     if (custom) setOpen(true);
   }, [custom]);
   return { open, toggle: () => setOpen((o) => !o) };
-}
-
-/** A disclosure named by its label alone, which takes focus as it folds so nothing under it keeps focus as it goes. */
-function Fold(props: { label: string; open: boolean; onToggle(): void; children: ReactNode }) {
-  return (
-    <div style={{ display: "grid", minWidth: 0 }}>
-      <button
-        type="button"
-        aria-expanded={props.open}
-        onClick={(e) => {
-          const header = e.currentTarget;
-          props.onToggle();
-          header.focus();
-        }}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: theme.space(2),
-          width: "100%",
-          minHeight: theme.touch,
-          padding: 0,
-          background: "transparent",
-          border: "none",
-          color: theme.color.text,
-          fontFamily: theme.font.body,
-          fontSize: theme.font.input,
-          fontWeight: theme.weight.strong,
-          lineHeight: theme.leading.tight,
-          textAlign: "left",
-          cursor: "pointer",
-        }}
-      >
-        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{props.label}</span>
-        <RowChevron open={props.open} />
-      </button>
-      {props.open ? props.children : null}
-    </div>
-  );
 }
 
 /**

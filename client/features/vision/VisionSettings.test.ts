@@ -112,6 +112,15 @@ describe("What players see (docs/design-v1-map-discovery.md 8.1 and 8.4)", () =>
     assert.ok(html.indexOf(">Fog<") > html.indexOf("Fog and party vision"), "the Fog switch sits in the fold, moved from This scene");
   });
 
+  test("Fog and party vision folds as a Section: its label in a heading, chevron first, and folded, both switches' state beside it (docs/design-v1-design-pass.md 4.1)", () => {
+    const html = render(table({ on: true, light: "dark" }));
+    assert.match(html, /<h[34][^>]*><button type="button" aria-expanded="false"[^>]*><svg[^>]*>[\s\S]*?<\/svg>Fog and party vision<\/button><\/h[34]>/, "the chevron, then the label");
+    assert.match(html, /Fog and party vision<\/button><\/h[34]><span[^>]*>Fog on · Party vision on<\/span>/, "the summary after the heading, outside its button");
+    const custom = render(table({ on: true, light: "dark" }, false));
+    assert.match(custom, /<button type="button" aria-expanded="true"[^>]*><svg[^>]*>[\s\S]*?<\/svg>Fog and party vision/);
+    assert.doesNotMatch(custom, /Party vision on</, "open, no summary");
+  });
+
   test("Explore on a map image with nothing that blocks sight warns, and a wall on it ends the warning", () => {
     const view = table({ on: true, light: "dark" });
     view.scenes.s1 = { ...view.scenes.s1!, map: MAP };
