@@ -188,7 +188,8 @@ describe("the page as it draws its groups (8.4)", () => {
     // Scene: size, background, then the starting view.
     assert.ok(at("Clear the build") < at("Size in squares") && at("Size in squares") < at("Background") && at("Background") < at("Starting view") && at("Starting view") < at("Export as image"));
     const bodies = [...html.matchAll(/<div (hidden="")? ?style="display:(grid|none);grid-template-columns:minmax\(0, 1fr\)/g)].map((m) => `${m[1] ? "hidden" : "shown"} ${m[2]}`);
-    assert.deepEqual(bodies, ["shown grid", "hidden none", "hidden none", "hidden none"]);
+    // A folded body keeps its grid: the hidden attribute alone hides it (globals.css).
+    assert.deepEqual(bodies, ["shown grid", "hidden grid", "hidden grid", "hidden grid"]);
     assert.deepEqual(headings(page(ALL_OPEN)).slice(0, 4), ["What players see open", "Map image and grid open", "Walls and movement open", "Scene open"]);
   });
 

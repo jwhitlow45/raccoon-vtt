@@ -116,7 +116,7 @@ export function Section(props: {
       >
         <FoldLabel id={id} label={props.label} tone={props.tone} fold={fold} level={inGroup ? 4 : 3} />
         {fold.keep ? (
-          <div hidden={!fold.open} style={{ display: fold.open ? "grid" : "none", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
+          <div hidden={!fold.open} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(2) }}>
             {props.children}
           </div>
         ) : fold.open ? (
