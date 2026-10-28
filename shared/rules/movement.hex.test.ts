@@ -86,6 +86,31 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       assert.equal(legTo(s, t, step(step(from, 0), 0)), null, "off it and on");
     });
 
+    test("every hex of a footprint steps: one straddling a wall cannot drag its far hexes across it", () => {
+      const ref: Hex = { col: 6, row: 6 };
+      const t = onHex(g, "big", "large", ref);
+      const [, se, sw] = occupiedHexes(g, t);
+      // The wall between its two lower hexes, which the hex trailing a step along it crosses.
+      const d = hexNeighbors(g, sw!).findIndex((n) => n.col === se!.col && n.row === se!.row);
+      const s = hexWallRoom(shape, 20, 14, [sideWall(g, sw!, d)]);
+      assert.equal(legTo(s, t, step(ref, d))?.blocker, "wall");
+      assert.equal(legTo(s, t, step(ref, (d + 3) % 6))?.blocker, "wall", "nor the leading one the other way");
+    });
+
+    test("the footprint fits at every step of a leg: a wall along a side no hex's step crosses still stops a walk past it", () => {
+      const ref: Hex = { col: 6, row: 6 };
+      const t = onHex(g, "big", "large", ref);
+      const [top, se] = occupiedHexes(g, t);
+      // Halfway along the leg, a wall on the side between its top hex and the one below, along the leg's run.
+      const mid = step(step(ref, ALONG), ALONG);
+      const d = hexNeighbors(g, top!).findIndex((n) => n.col === se!.col && n.row === se!.row);
+      const s = hexWallRoom(shape, 20, 14, [sideWall(g, mid, d)]);
+      const far = step(step(mid, ALONG), ALONG);
+      assert.equal(legTo(s, t, far)?.blocker, "wall");
+      const after = onHex(g, "big", "large", step(mid, ALONG));
+      assert.equal(legTo(s, after, far), null, "past it the walk goes on");
+    });
+
     test("a Large footprint stands only where no wall meets the line between two of its hexes", () => {
       const ref: Hex = { col: 6, row: 6 };
       const t = onHex(g, "big", "large", ref);

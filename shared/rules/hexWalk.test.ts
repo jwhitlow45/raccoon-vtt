@@ -4,10 +4,10 @@ import { chunkKey } from "../keys.ts";
 import { CHUNK_CELLS, type RoomState, type Token } from "../model.ts";
 import { int, pick, rng, template } from "../testutil.ts";
 import { placedOnHex } from "./footprint.ts";
-import { hexDistance, hexNeighbors, sceneHexes, type Hex, type HexGrid } from "./hex.ts";
+import { hexDistance, hexNeighbors, sceneHexes, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
 import { findRouteOn, HexWalkSearch, HexWalkWorld } from "./hexWalk.ts";
 import { hexRestand, hexStandPlace, legStop, onSqueezedLattice, ownWalk, type HexStand } from "./movement.ts";
-import { hexRouteFeet, routePoints, routeStop } from "./route.ts";
+import { hexRouteFeet, routePoints, routeSpots, routeStop } from "./route.ts";
 import type { WalkCreature, WalkInput, WalkRoute } from "./walk.ts";
 import { publicWorld } from "./walkWorld.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWalls.testkit.ts";
@@ -104,6 +104,32 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       assert.ok(cost >= plain + 7 * 5, `${cost} pays for the squeeze`);
     });
 
+    test("the walk's spots through the corridor stand squeezed inside it and full outside, each one a place it may stop", () => {
+      const W = 22;
+      const H = 16;
+      const solid = (h: Hex) => {
+        const along = g.orient === "rows" ? h.col : h.row;
+        const across = g.orient === "rows" ? h.row : h.col;
+        return along >= 6 && along <= 12 && across !== 6;
+      };
+      const s = room(W, H, wallsRound(g, bounds(W, H), solid));
+      const t = onHex(g, "big", "large", at(2, 5));
+      const route = findRouteOn(inputOf(s, t), placedOnHex(g, t, at(16, 6)));
+      assert.ok(route && route !== "none");
+      const spots = routeSpots(s, routePoints(s.buildChunks, ownWalk(t), route.pieces, 0), ownWalk(t), undefined, { squeeze: false });
+      const inRock = (sp: { x: number; y: number }) => {
+        const along = g.orient === "rows" ? sp.x + 1 : sp.y + 1;
+        return along > 6.5 && along < 12.5;
+      };
+      assert.ok(spots.length > 10);
+      for (const [i, sp] of spots.entries()) {
+        if (inRock(sp)) assert.ok(sp.squeezed && sp.stand, `spot ${i} in the corridor squeezes, and may stop there`);
+        else if (!sp.squeezed) assert.equal(sp.stand, true, `spot ${i} outside it, full size`);
+      }
+      assert.ok(spots.some((sp) => !sp.squeezed), "outside it stands full size");
+      assert.ok(spots.some((sp) => sp.squeezed && !sp.stand), "squeezed in the open at its mouth it may not stop: no narrow space holds it there");
+    });
+
     test("through an open door, never a closed one", () => {
       const W = 16;
       const H = 12;
@@ -166,6 +192,21 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       assert.ok(routeCost(s, s.tokens.m, route, g) > 10 * 5, "the web costs more than the plain ten hexes, or the walk round it does");
       const covered = world.input.areas[0]!.cells.map(({ x, y }) => `${x},${y}`);
       assert.ok(covered.includes(`${at(7, 5).col},${at(7, 5).row}`), "the hex under the web's middle is covered");
+    });
+  });
+
+  describe(`${name}: where a drop's walk ends`, () => {
+    test("a drop whose full footprint fits half off the scene aims at it, as the landing lands there, and no walk reaches it", () => {
+      const s = hexWallRoom(shape, 12, 10, [sideWall(g, at(5, 4), 0)]);
+      const t = onHex(g, "big", "large", at(4, 3));
+      const world = new HexWalkWorld(inputOf(s, t));
+      // A Large creature's top hex on the scene's last line of hexes, the two below it past the edge.
+      const span = sceneHexSpan(g, { w: 12, h: 10 });
+      const edge = hexStandPlace(g, t, { size: "large", ref: g.orient === "rows" ? { col: 5, row: span.rows - 1 } : { col: span.cols - 1, row: 5 }, squeezed: false });
+      const ends = world.ends(edge);
+      assert.equal(ends.length, 1);
+      assert.equal(ends[0]!.squeezed, false, "full size, no squeeze inside it");
+      assert.equal(world.standable(ends[0]!), false, "off the scene");
     });
   });
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState } from "#shared/model.ts";
+import { hexAnchor } from "#shared/rules/footprint.ts";
 import { hexCenter, type Hex } from "#shared/rules/hex.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
 import { measureWalk } from "./walkRuler.ts";
@@ -34,6 +35,21 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       assert.ok(m.legs[0]!.corners.length > 0, "it bends");
       assert.ok(m.totalFt > 50, `${m.totalFt} ft: longer than the 50 ft straight through the rock`);
       assert.equal(m.totalFt % 5, 0, "whole hexes");
+    });
+
+    test("a stop on a creature off its anchor is that creature's anchor, as the straight ruler reads it on hexes", () => {
+      const s = room();
+      const goal = at(14, 7);
+      const a = hexCenter(g, at(4, 8));
+      const offsets = [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45].flatMap((dx) => [-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45].map((dy) => [dx, dy] as const));
+      for (const [dx, dy] of offsets) {
+        const gob = onHex(g, "gob", "medium", goal);
+        s.tokens.gob = { ...gob, x: gob.x + dx, y: gob.y + dy };
+        const m = measureWalk({ view: s, sceneId: "s1", stops: [a, { x: 0, y: 0, tokenId: "gob" }], viewer: { role: "dm" }, everything: false })!;
+        const end = m.legs.at(-1)!.to;
+        const c = hexAnchor(g, s.tokens.gob);
+        assert.deepEqual([end.x + 0.5, end.y + 0.5].map((v) => Math.round(v * 1e9) / 1e9), [c.x, c.y].map((v) => Math.round(v * 1e9) / 1e9), `offset ${dx}, ${dy}`);
+      }
     });
 
     test("from a creature it walks the creature's own way, a Large one round the rock as well", () => {
