@@ -7,6 +7,7 @@ import type { Op } from "#shared/protocol.ts";
 import { ATTACH_KINDS, linkHolds, seatSpot } from "#shared/rules/attach.ts";
 import { actor, chance, effect, int, P1, P2, pick, rng, room, token } from "#shared/testutil.ts";
 import { attachAllowed, detachAllowed, dragsToken, reseats } from "./rights.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The client's rights (rights.ts) against the server's (shared/permissions.ts
@@ -47,15 +48,15 @@ function randomRoom(r: () => number): RoomState {
     if (to === id || holder.attached?.to === id) continue;
     const kind = pick(r, ATTACH_KINDS);
     const carried = state.tokens[id]!;
-    const seat = kind === "drag" ? { x: holder.x + 1, y: holder.y } : seatSpot(carried, holder);
+    const seat = kind === "drag" ? { x: holder.x + 1, y: holder.y } : seatSpot(SQUARES, carried, holder);
     if (!seat) continue;
     const linked: Token = { ...carried, ...seat, attached: { to, kind, ...(kind === "ride" && chance(r, 0.6) ? { steer: true as const } : {}) } };
-    if (linkHolds(state.meta.settings, kind, linked, holder)) state.tokens[id] = linked;
+    if (linkHolds(SQUARES, state.meta.settings, kind, linked, holder)) state.tokens[id] = linked;
   }
   // A seat taken later can move a holder off the tokens it holds, and those come loose, as in the link pass.
   for (const t of Object.values(state.tokens)) {
     const holder = t.attached ? state.tokens[t.attached.to] : undefined;
-    if (t.attached && (!holder || !linkHolds(state.meta.settings, t.attached.kind, t, holder))) {
+    if (t.attached && (!holder || !linkHolds(SQUARES, state.meta.settings, t.attached.kind, t, holder))) {
       const { attached: _loose, ...rest } = t;
       state.tokens[t.id] = rest;
     }
@@ -70,7 +71,7 @@ function randomRoom(r: () => number): RoomState {
 
 /** The op the bar sends for a pair: the carried token's seat on the holder, or where a dragged one stands. */
 function attachOp(carried: Token, holder: Token, kind: AttachKind): Op {
-  const seat = kind === "drag" ? carried : (seatSpot(carried, holder) ?? holder);
+  const seat = kind === "drag" ? carried : (seatSpot(SQUARES, carried, holder) ?? holder);
   return { t: "token.attach", tokenId: carried.id, to: holder.id, kind, ...(kind === "ride" ? { steer: true as const } : {}), x: seat.x, y: seat.y, elevation: kind === "drag" ? carried.elevation : holder.elevation };
 }
 

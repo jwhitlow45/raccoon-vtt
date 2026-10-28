@@ -4,6 +4,7 @@ import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
 import type { AreaTemplate, BuildChunk, CompanionBlock, Encounter, FogDraft, Handout, HandoutDoc, Pin, RoomState, Scene, Token, Trap } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { LIMITS } from "../limits.ts";
+import { gridOfToken } from "../project.ts";
 import { holderOf, linkHolds } from "../rules/attach.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { restoreRefusal, restoredHolds, sceneHolds } from "../rules/grid.ts";
@@ -258,7 +259,7 @@ function ridesUpTo(state: RoomState, riderId: string, mountId: string): boolean 
     seen.add(rider.id);
     const link = rider.attached;
     const holder = link?.kind === "ride" && link.steer === true ? (holderOf(state.tokens, rider) as Token | undefined) : undefined;
-    if (!holder || !linkHolds(state.meta.settings, "ride", rider, holder)) return false;
+    if (!holder || !linkHolds(gridOfToken(state, rider), state.meta.settings, "ride", rider, holder)) return false;
     if (holder.id === mountId) return true;
     rider = holder;
   }

@@ -121,9 +121,9 @@ export const DragMarks = memo(function DragMarks(props: { tokenIds: readonly str
   const feetPerCell = useTreeShownView((s) => s.view?.meta.settings.feetPerCell ?? 5);
   const diagonal = useTreeShownView((s) => s.view?.meta.settings.diagonal ?? "five");
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
-  const lines = useMemo(() => (ids.size === 0 ? [] : tethers(tokens, layer.scene.id).filter((l) => ids.has(l.id) || ids.has(l.holderId))), [tokens, layer.scene.id, ids]);
   // The scene's grid, as Top-down's marks read it (hex grids 4.2).
   const grid = sceneGrid(layer.scene);
+  const lines = useMemo(() => (ids.size === 0 ? [] : tethers(grid, tokens, layer.scene.id).filter((l) => ids.has(l.id) || ids.has(l.holderId))), [grid, tokens, layer.scene.id, ids]);
   if (ids.size === 0 || !areas) return null;
   const groundOf = (t: Token) => {
     const r = footprintRect(grid, t);

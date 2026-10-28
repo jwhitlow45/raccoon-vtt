@@ -640,14 +640,14 @@ export function MapStage(props: {
     const next = new Map<string, readonly CellBox[]>();
     const same = (a: CellBox, b: CellBox) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
     for (const t of tokens) {
-      const boxes = holderMiddles(allTokens, t);
+      const boxes = holderMiddles(sceneGrid(scene), allTokens, t);
       if (boxes.length === 0) continue;
       const kept = holesRef.current.get(t.id);
       next.set(t.id, kept && kept.length === boxes.length && kept.every((b, i) => same(b, boxes[i]!)) ? kept : boxes);
     }
     holesRef.current = next;
     return next;
-  }, [tokens, allTokens]);
+  }, [tokens, allTokens, scene.gridShape]);
 
   // A selected token that was deleted, or left this scene, drops out of the selection.
   useEffect(() => ui.keepSelected((id) => tokensById.has(id)), [tokensById, ui]);
@@ -748,7 +748,7 @@ export function MapStage(props: {
   const canDrag = useCallback(
     (t: ViewToken) => {
       if (plainDrag(t)) return true;
-      const lead = dragLead(allTokens, t);
+      const lead = dragLead(sceneGrid(sceneRef.current), allTokens, t);
       if (lead.id !== t.id) return role === "dm" || movesToken(rightsView, attachViewer, t) || movesLead(lead as ViewToken);
       return role === "player" && (dragsToken(rightsView, attachViewer, t) || reseats(rightsView, attachViewer, t));
     },
@@ -818,8 +818,9 @@ export function MapStage(props: {
   dragPartsRef.current = (pressed, selectedIds) => {
     const links = linksRef.current;
     const byId = tokensByIdRef.current;
-    const mount = dragLead(links.allTokens, pressed).id;
-    const lead = pressLead(links.allTokens, pressed, byId, new Set(selectedIds), canDragRef.current, movesLeadRef.current);
+    const grid = sceneGrid(sceneRef.current);
+    const mount = dragLead(grid, links.allTokens, pressed).id;
+    const lead = pressLead(grid, links.allTokens, pressed, byId, new Set(selectedIds), canDragRef.current, movesLeadRef.current);
     const rootOf = new Map<string, string>([[pressed.id, lead.id]]);
     if (lead.id !== pressed.id && lead.id === mount && !movesLeadRef.current(lead)) {
       const refusal = (links.role === "dm" ? dragRefusalRef.current(lead) : null) ?? carriesText(lead, pressed);
@@ -830,7 +831,7 @@ export function MapStage(props: {
       return holder ? byId.get(holder.id) : undefined;
     };
     const followers = groupFollowers(selectedIds, pressed.id, byId, canDragRef.current, holderIn, lead.id === pressed.id ? [] : [lead.id]);
-    const named = dragNamed(links.allTokens, lead, followers, byId, movesLeadRef.current);
+    const named = dragNamed(grid, links.allTokens, lead, followers, byId, movesLeadRef.current);
     // The pressed token, or a selected holder that leads it, which a player may move only within its own holder.
     const reseatOnly = links.role === "player" && (lead.id === pressed.id || lead.id !== mount) && lead.attached !== undefined && !movesLeadRef.current(lead);
     return { lead, named, rootOf, refusal: null, reseatOnly };
@@ -1433,7 +1434,7 @@ export function MapStage(props: {
       if (reseat && parts.lead.attached && lands) {
         const at = { ...parts.lead, x: lands.x, y: lands.y, elevation: lands.elevation ?? parts.lead.elevation };
         const holder = reseat as Token;
-        if (!linkHolds(links.settings ?? DEFAULT_SETTINGS, parts.lead.attached.kind, at, holder)) {
+        if (!linkHolds(sceneGrid(sceneRef.current), links.settings ?? DEFAULT_SETTINGS, parts.lead.attached.kind, at, holder)) {
           putBack(node, token, followers);
           uiRef.current.notify(reseatText(parts.lead, holder));
           return;
@@ -1590,7 +1591,7 @@ export function MapStage(props: {
       selected={selectedSet.has(t.id)}
       active={t.id === activeTokenId}
       draggable={selecting && canDrag(t)}
-      inset={drawsInset(allTokens, t)}
+      inset={drawsInset(sceneGrid(scene), allTokens, t)}
       holes={holes.get(t.id) ?? null}
       iso={iso}
     />

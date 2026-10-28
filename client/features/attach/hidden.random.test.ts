@@ -23,6 +23,7 @@ import { barSlots, detachChoice, detachOp, getOffPlace } from "./detach.ts";
 import { dragLead } from "./groups.ts";
 import { attachOp, attachRows } from "./list.ts";
 import { replayPending } from "../../state/store.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The hidden-state generator (docs/design-v1-attach.md 8.0, the class of
@@ -164,7 +165,7 @@ function world(r: () => number): World {
     // would change what the whole party sees, a difference every player sees and no hidden state's.
     if (vision && isPartyMember(state, carried) && carried.visibility !== "dm" && holder.visibility === "dm") continue;
     const kind: AttachKind = carried.kind === "object" || holder.kind === "object" ? "carry" : carried.size === "tiny" ? "perch" : chance(r, 0.3) ? "drag" : "ride";
-    const seat = kind === "drag" ? carried : seatSpot(carried, holder);
+    const seat = kind === "drag" ? carried : seatSpot(SQUARES, carried, holder);
     if (!seat) continue;
     dm({ t: "token.attach", tokenId: carried.id, to: holder.id, kind, ...(kind === "ride" && chance(r, 0.5) ? { steer: true as const } : {}), x: seat.x, y: seat.y, elevation: kind === "drag" ? carried.elevation : holder.elevation });
   }
@@ -194,7 +195,7 @@ function world(r: () => number): World {
     loose("torch", { visibility: "all", ownerIds: ["p1"], ...on });
     loose("light", { visibility: "all", ownerIds: ["p1"], ...on });
     for (const [carried, holder, kind] of [["imp", "horse", "perch"], ["torch", "imp", "carry"], ["light", "torch", "carry"]] as const) {
-      const seat = seatSpot(state.tokens[carried]!, state.tokens[holder]!);
+      const seat = seatSpot(SQUARES, state.tokens[carried]!, state.tokens[holder]!);
       if (!seat) continue;
       const op: Op = { t: "token.attach", tokenId: carried, to: holder, kind, x: seat.x, y: seat.y, elevation: state.tokens[holder]!.elevation };
       const by = carried === "light" ? P1 : DM;
@@ -229,7 +230,7 @@ function world(r: () => number): World {
   if (chance(r, 0.5) && !(vision && party("dog"))) {
     loose("pony", { visibility: "all" });
     loose("dog", { visibility: "dm" });
-    const seat = seatSpot(state.tokens.dog!, state.tokens.pony!);
+    const seat = seatSpot(SQUARES, state.tokens.dog!, state.tokens.pony!);
     if (seat) dm({ t: "token.attach", tokenId: "dog", to: "pony", kind: "ride", steer: true, x: seat.x, y: seat.y, elevation: state.tokens.pony!.elevation });
   }
   // Often Thorn rides the phantom steed no player sees, but not where his sight is the party's.
@@ -312,14 +313,14 @@ function rawStep(r: () => number, state: RoomState, apart: ReadonlySet<string>):
     const holder = any();
     if (!holder || holder.id === a.id) return { who: DM, op: { t: "encounter.next" } };
     const kind: AttachKind = a.kind === "object" || holder.kind === "object" ? "carry" : a.size === "tiny" ? "perch" : chance(r, 0.4) ? "drag" : "ride";
-    const seat = kind === "drag" ? a : (seatSpot(a, holder) ?? holder);
+    const seat = kind === "drag" ? a : (seatSpot(SQUARES, a, holder) ?? holder);
     return { who, op: { t: "token.attach", tokenId: a.id, to: holder.id, kind, ...(kind === "ride" && chance(r, 0.5) ? { steer: true as const } : {}), x: seat.x, y: seat.y, elevation: kind === "drag" ? a.elevation : holder.elevation } };
   }
   const carried = tokens.filter((t) => t.attached && view.tokens[t.attached.to]);
   const c = carried.length > 0 ? pick(r, carried) : a;
   const holder = holderOf(view.tokens, c) as Token | undefined;
   const scene = view.scenes[c.sceneId];
-  const place = holder && scene && c.kind !== "object" && c.attached?.kind !== "drag" ? getOffSpot(view.meta.settings, scene.bounds, c, holder) : null;
+  const place = holder && scene && c.kind !== "object" && c.attached?.kind !== "drag" ? getOffSpot(SQUARES, view.meta.settings, scene.bounds, c, holder) : null;
   return { who, op: { t: "token.detach", tokenId: c.id, ...(place ? { x: place.x, y: place.y } : {}) } };
 }
 
@@ -390,7 +391,7 @@ function builtStep(r: () => number, a: RoomState, b: RoomState, apart: ReadonlyS
     // The DM's drag, half the time, of a token on a holder some player cannot see in either room, whose drop must land it as
     // in a room without that holder (8.0, the landings).
     const onHidden = who.role === "dm" ? tokens.filter((t) => underHiddenHolder(a, t.id) || underHiddenHolder(b, t.id)) : [];
-    const lead = dragLead(copies[0].tokens, onHidden.length > 0 && chance(r, 0.5) ? pick(r, onHidden) : pick(r, tokens));
+    const lead = dragLead(SQUARES, copies[0].tokens, onHidden.length > 0 && chance(r, 0.5) ? pick(r, onHidden) : pick(r, tokens));
     const far = chance(r, 0.3) ? 6 : 3;
     const raw = { x: nearBy(r, lead.x, far), y: nearBy(r, lead.y, far) };
     const drags = copies.map((copy) => (copy.tokens[lead.id] ? dragOf(copy, who.role, lead.id, raw) : null));
@@ -401,8 +402,8 @@ function builtStep(r: () => number, a: RoomState, b: RoomState, apart: ReadonlyS
     // Half the time led by the creature whose turn it is, so its label is checked against what its move stores, its owner's
     // too on a row the DM hid, whose copy holds no acting row.
     const mover = tokens.find((t) => t.id === (turnMoverId(copies[0]) ?? (who.role === "player" ? turnUnderWay(a.encounter)?.tokenId : undefined)));
-    const first = dragLead(copies[0].tokens, mover && chance(r, 0.5) ? mover : pick(r, tokens));
-    const second = dragLead(copies[0].tokens, pick(r, tokens));
+    const first = dragLead(SQUARES, copies[0].tokens, mover && chance(r, 0.5) ? mover : pick(r, tokens));
+    const second = dragLead(SQUARES, copies[0].tokens, pick(r, tokens));
     if (first.id === second.id) return null;
     const dx = int(r, -3, 3);
     const dy = int(r, -3, 3);
@@ -516,7 +517,7 @@ function unseenOp(r: () => number, state: RoomState, vision: boolean, focus?: Re
   }
   if (n < 0.86) return !tracker || rows.has(h.id) ? null : { t: "encounter.add", entries: [{ id: `r${int(r, 100, 999)}`, tokenId: h.id, value: int(r, 1, 25), hidden: true }] };
   const target = pick(r, Object.values(state.tokens).filter((t) => t.id !== h.id && t.id !== "lurker"));
-  const seat = seatSpot(h, target);
+  const seat = seatSpot(SQUARES, h, target);
   return seat ? { t: "token.attach", tokenId: h.id, to: target.id, kind: h.size === "tiny" ? "perch" : h.kind === "object" ? "carry" : "ride", x: seat.x, y: seat.y, elevation: target.elevation } : null;
 }
 
@@ -1351,7 +1352,7 @@ function previewRun(seed: number): PreviewSeen {
     if (first) {
       // As it stands.
     } else if (!state.tokens[id]!.attached && chance(r, 0.6)) {
-      const seat = seatSpot(state.tokens[id]!, state.tokens.cart!);
+      const seat = seatSpot(SQUARES, state.tokens[id]!, state.tokens.cart!);
       const on = seat ? applyOp(state, { t: "token.attach", tokenId: id, to: "cart", kind: "carry", x: seat.x, y: seat.y, elevation: 10 }, DM, env(seq++)) : null;
       if (on?.ok) state = on.state;
     } else if (state.tokens[id]!.attached && chance(r, 0.5)) {
@@ -1536,7 +1537,7 @@ describe("a player's own creature on a turn the DM hid reads its turn's earlier 
       play(DM, { t: "encounter.next" });
       // On Thorn's turn, which every player sees, the DM now and then gets the goblin on the warhorse under its control: its row
       // is one they cannot see, so the warhorse's row stays as it is.
-      const seat = seatSpot(t.state.tokens.gob!, t.state.tokens.horse!);
+      const seat = seatSpot(SQUARES, t.state.tokens.gob!, t.state.tokens.horse!);
       if (seat && chance(r, 0.5)) {
         const onThorns = tracker();
         if (t.play(DM, { t: "token.attach", tokenId: "gob", to: "horse", kind: "ride", steer: true, x: seat.x, y: seat.y, elevation: t.state.tokens.horse!.elevation }) === "ok") seen.dmRides++;
@@ -1563,7 +1564,7 @@ describe("a player's own creature on a turn the DM hid reads its turn's earlier 
         if (n < 0.3) {
           // The DM gets the goblin on the warhorse under its control, or off it.
           const gob = t.state.tokens.gob!;
-          const seat = seatSpot(gob, t.state.tokens.horse!);
+          const seat = seatSpot(SQUARES, gob, t.state.tokens.horse!);
           const place = gob.attached ? getOffPlace(t.state, DM, gob) : null;
           const op: Op | null = gob.attached ? (place ? (detachOp("gob", place) as Op) : null) : seat ? { t: "token.attach", tokenId: "gob", to: "horse", kind: "ride", steer: true, x: seat.x, y: seat.y, elevation: t.state.tokens.horse!.elevation } : null;
           if (op && t.play(DM, op) === "ok" && op.t === "token.attach") seen.dmRides++;
@@ -1576,8 +1577,8 @@ describe("a player's own creature on a turn the DM hid reads its turn's earlier 
         const ride: Op | null = row ? (attachOp(row, chance(r, 0.5)) as Op) : null;
         // The server takes a ride on her own turn whether or not she has moved, and refuses one on another's in the words a row
         // she sees would get, where no wall stops the step onto the seat first.
-        const seat = seatSpot(t.state.tokens.bree!, t.state.tokens.horse!);
-        const direct: Op | null = !riding && seat && withinReach(t.state.meta.settings, t.state.tokens.bree!, t.state.tokens.horse!) ? { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: seat.x, y: seat.y, elevation: t.state.tokens.horse!.elevation } : null;
+        const seat = seatSpot(SQUARES, t.state.tokens.bree!, t.state.tokens.horse!);
+        const direct: Op | null = !riding && seat && withinReach(SQUARES, t.state.meta.settings, t.state.tokens.bree!, t.state.tokens.horse!) ? { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", x: seat.x, y: seat.y, elevation: t.state.tokens.horse!.elevation } : null;
         const answer = direct ? canApply(direct, P1, t.state, deps) : null;
         if (answer && !own) {
           assert.ok(!answer.ok && [RIDE_ON_YOUR_TURN, WALL_IN_THE_WAY, LEDGE_IN_THE_WAY].includes(answer.message), `seed ${seed}: on another's hidden turn, ${JSON.stringify(answer)}`);

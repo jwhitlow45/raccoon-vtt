@@ -19,6 +19,7 @@ import {
   seatSpot,
   withinReach,
 } from "./attach.ts";
+import { SQUARES } from "./grid.ts";
 
 const NAMES = { carried: "Bree", holder: "Warhorse" };
 const SIZES: CreatureSize[] = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
@@ -95,22 +96,22 @@ describe("which kinds fit which pairs (docs/design-v1-attach.md 5.1)", () => {
 
   test("a link holds while it fits where the two stand, and a drag while within reach", () => {
     const mount = creature("m", "large", { x: 4, y: 4 });
-    assert.equal(linkHolds(rules(), "ride", creature("r", "medium", { x: 5, y: 5 }), mount), true);
-    assert.equal(linkHolds(rules(), "ride", creature("r", "medium", { x: 6, y: 5 }), mount), false);
-    assert.equal(linkHolds(rules(), "ride", creature("r", "medium", { x: 5, y: 5, sceneId: "s2" }), mount), false);
+    assert.equal(linkHolds(SQUARES, rules(), "ride", creature("r", "medium", { x: 5, y: 5 }), mount), true);
+    assert.equal(linkHolds(SQUARES, rules(), "ride", creature("r", "medium", { x: 6, y: 5 }), mount), false);
+    assert.equal(linkHolds(SQUARES, rules(), "ride", creature("r", "medium", { x: 5, y: 5, sceneId: "s2" }), mount), false);
     // Reduce shrinks the mount to the rider's size: it still covers the cell, but no longer carries it.
-    assert.equal(linkHolds(rules(), "ride", creature("r", "medium", { x: 4, y: 4 }), creature("m", "medium", { x: 4, y: 4 })), false);
+    assert.equal(linkHolds(SQUARES, rules(), "ride", creature("r", "medium", { x: 4, y: 4 }), creature("m", "medium", { x: 4, y: 4 })), false);
     // A squeezed mount keeps its rider: links read the full footprint.
-    assert.equal(linkHolds(rules(), "ride", creature("r", "medium", { x: 5, y: 5 }), { ...mount, squeeze: true }), true);
-    assert.equal(linkHolds(rules(), "drag", creature("g", "medium", { x: 6, y: 4 }), mount), true);
-    assert.equal(linkHolds(rules(), "drag", creature("g", "medium", { x: 7, y: 4 }), mount), false);
+    assert.equal(linkHolds(SQUARES, rules(), "ride", creature("r", "medium", { x: 5, y: 5 }), { ...mount, squeeze: true }), true);
+    assert.equal(linkHolds(SQUARES, rules(), "drag", creature("g", "medium", { x: 6, y: 4 }), mount), true);
+    assert.equal(linkHolds(SQUARES, rules(), "drag", creature("g", "medium", { x: 7, y: 4 }), mount), false);
   });
 
   test("containment reads both full footprints on their own snap grids", () => {
     const horse = creature("h", "large", { x: 2, y: 2 });
-    assert.equal(insideHolder(creature("t", "tiny", { x: 3.5, y: 3.5 }), horse), true);
-    assert.equal(insideHolder(creature("t", "tiny", { x: 4, y: 3.5 }), horse), false);
-    assert.equal(insideHolder(creature("b", "medium", { x: 2.4, y: 3 }), horse), true);
+    assert.equal(insideHolder(SQUARES, creature("t", "tiny", { x: 3.5, y: 3.5 }), horse), true);
+    assert.equal(insideHolder(SQUARES, creature("t", "tiny", { x: 4, y: 3.5 }), horse), false);
+    assert.equal(insideHolder(SQUARES, creature("b", "medium", { x: 2.4, y: 3 }), horse), true);
   });
 });
 
@@ -118,34 +119,34 @@ describe("reach (5.1, drag and a player's attach)", () => {
   test("is 5 ft by the room's rule, or one cell where a cell is wider", () => {
     const a = creature("a", "medium", { x: 0, y: 0 });
     for (const diagonal of ["five", "fiveTen", "euclid"] as const) {
-      assert.equal(withinReach(rules(diagonal), a, creature("b", "medium", { x: 1, y: 0 })), true, diagonal);
-      assert.equal(withinReach(rules(diagonal), a, creature("b", "medium", { x: 2, y: 0 })), false, diagonal);
+      assert.equal(withinReach(SQUARES, rules(diagonal), a, creature("b", "medium", { x: 1, y: 0 })), true, diagonal);
+      assert.equal(withinReach(SQUARES, rules(diagonal), a, creature("b", "medium", { x: 2, y: 0 })), false, diagonal);
     }
     // A diagonal neighbor is 5 ft away by the 5 ft and 5-10-5 rules, and 7 ft by true distance.
-    assert.equal(withinReach(rules("five"), a, creature("b", "medium", { x: 1, y: 1 })), true);
-    assert.equal(withinReach(rules("fiveTen"), a, creature("b", "medium", { x: 1, y: 1 })), true);
-    assert.equal(withinReach(rules("euclid"), a, creature("b", "medium", { x: 1, y: 1 })), false);
-    assert.equal(withinReach({ feetPerCell: 10, diagonal: "five" }, a, creature("b", "medium", { x: 1, y: 0 })), true);
+    assert.equal(withinReach(SQUARES, rules("five"), a, creature("b", "medium", { x: 1, y: 1 })), true);
+    assert.equal(withinReach(SQUARES, rules("fiveTen"), a, creature("b", "medium", { x: 1, y: 1 })), true);
+    assert.equal(withinReach(SQUARES, rules("euclid"), a, creature("b", "medium", { x: 1, y: 1 })), false);
+    assert.equal(withinReach(SQUARES, { feetPerCell: 10, diagonal: "five" }, a, creature("b", "medium", { x: 1, y: 0 })), true);
   });
 
   test("counts elevation: a creature 10 ft above is out of reach", () => {
     const a = creature("a", "medium");
-    assert.equal(withinReach(rules(), a, creature("b", "medium", { x: 1, elevation: 5 })), true);
-    assert.equal(withinReach(rules(), a, creature("b", "medium", { x: 1, elevation: 10 })), false);
-    assert.equal(attachDistanceFt(rules(), a, creature("b", "medium", { x: 1, elevation: 10 })), 10);
+    assert.equal(withinReach(SQUARES, rules(), a, creature("b", "medium", { x: 1, elevation: 5 })), true);
+    assert.equal(withinReach(SQUARES, rules(), a, creature("b", "medium", { x: 1, elevation: 10 })), false);
+    assert.equal(attachDistanceFt(SQUARES, rules(), a, creature("b", "medium", { x: 1, elevation: 10 })), 10);
   });
 });
 
 describe("the seat (4.1)", () => {
   test("is the spot on the carried token's own grid inside the holder nearest where it stood, ties to the smaller y then x", () => {
     const horse = creature("h", "large", { x: 4, y: 4 });
-    assert.deepEqual(seatSpot(creature("b", "medium", { x: 7, y: 5 }), horse), { x: 5, y: 5 });
-    assert.deepEqual(seatSpot(creature("b", "medium", { x: 3, y: 3 }), horse), { x: 4, y: 4 });
+    assert.deepEqual(seatSpot(SQUARES, creature("b", "medium", { x: 7, y: 5 }), horse), { x: 5, y: 5 });
+    assert.deepEqual(seatSpot(SQUARES, creature("b", "medium", { x: 3, y: 3 }), horse), { x: 4, y: 4 });
     // Read from its snapped footprint: 4.4 stands in row 4.
-    assert.deepEqual(seatSpot(creature("b", "medium", { x: 6, y: 4.4 }), horse), { x: 5, y: 4 });
+    assert.deepEqual(seatSpot(SQUARES, creature("b", "medium", { x: 6, y: 4.4 }), horse), { x: 5, y: 4 });
     // A Tiny familiar keeps to half cells.
-    assert.deepEqual(seatSpot(creature("f", "tiny", { x: 6.5, y: 4.5 }), horse), { x: 5.5, y: 4.5 });
-    assert.equal(seatSpot(creature("g", "huge"), horse), null);
+    assert.deepEqual(seatSpot(SQUARES, creature("f", "tiny", { x: 6.5, y: 4.5 }), horse), { x: 5.5, y: 4.5 });
+    assert.equal(seatSpot(SQUARES, creature("g", "huge"), horse), null);
   });
 });
 
@@ -155,24 +156,24 @@ describe("getting off (4.3)", () => {
   const rider = creature("b", "medium", { x: 4, y: 4 });
 
   test("lands inside the scene, within 5 ft of the holder and clear of it", () => {
-    assert.equal(getOffFits(rules(), bounds, rider, horse, { x: 6, y: 4 }), true);
-    assert.equal(getOffFits(rules(), bounds, rider, horse, { x: 5, y: 4 }), false);
-    assert.equal(getOffFits(rules(), bounds, rider, horse, { x: 7, y: 4 }), false);
-    assert.equal(getOffFits(rules(), bounds, rider, creature("h", "large", { x: 8, y: 8 }), { x: 10, y: 8 }), false);
+    assert.equal(getOffFits(SQUARES, rules(), bounds, rider, horse, { x: 6, y: 4 }), true);
+    assert.equal(getOffFits(SQUARES, rules(), bounds, rider, horse, { x: 5, y: 4 }), false);
+    assert.equal(getOffFits(SQUARES, rules(), bounds, rider, horse, { x: 7, y: 4 }), false);
+    assert.equal(getOffFits(SQUARES, rules(), bounds, rider, creature("h", "large", { x: 8, y: 8 }), { x: 10, y: 8 }), false);
   });
 
   test("the first spot goes east of the middle, then clockwise, and skips what the device refuses", () => {
     // The middle of the horse is the corner (5, 5) for a Medium creature, so the ring starts at (6, 5) and turns south.
-    const first = getOffSpot(rules(), bounds, rider, horse);
+    const first = getOffSpot(SQUARES, rules(), bounds, rider, horse);
     assert.deepEqual(first, { x: 6, y: 5 });
-    const second = getOffSpot(rules(), bounds, rider, horse, (p) => !(p.x === 6 && p.y === 5));
+    const second = getOffSpot(SQUARES, rules(), bounds, rider, horse, (p) => !(p.x === 6 && p.y === 5));
     assert.deepEqual(second, { x: 6, y: 6 });
-    assert.equal(getOffSpot(rules(), bounds, rider, horse, () => false), null);
+    assert.equal(getOffSpot(SQUARES, rules(), bounds, rider, horse, () => false), null);
   });
 
   test("on a fine grid, reach is 5 ft: five cells", () => {
     const fine = { feetPerCell: 1, diagonal: "five" as const };
-    const spot = getOffSpot(fine, { w: 40, h: 40 }, creature("b", "medium", { x: 10, y: 10 }), creature("h", "large", { x: 10, y: 10 }), (p) => p.x > 15);
+    const spot = getOffSpot(SQUARES, fine, { w: 40, h: 40 }, creature("b", "medium", { x: 10, y: 10 }), creature("h", "large", { x: 10, y: 10 }), (p) => p.x > 15);
     assert.ok(spot && spot.x > 15 && spot.x <= 17, JSON.stringify(spot));
   });
 });

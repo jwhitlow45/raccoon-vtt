@@ -92,7 +92,7 @@ export function endsIn(view: RoomState, world: PublicWorld, token: Token, at: Ro
   // A rider or a passenger set down on its own holder keeps its seat there (docs/design-v1-attach.md 4.2): sharing that space is riding, not ending a move in it.
   const link = token.attached;
   const holder = link && onHolder(link.kind) ? (holderOf(view.tokens, token) as Token | undefined) : undefined;
-  const seat = holder && linkHolds(view.meta.settings, link!.kind, { ...token, x: at.x, y: at.y }, holder) ? holder.id : null;
+  const seat = holder && linkHolds(dropGrid(view, token), view.meta.settings, link!.kind, { ...token, x: at.x, y: at.y }, holder) ? holder.id : null;
   for (const s of world.spaces) {
     if (s.id === seat) continue;
     const overlaps = at.x < s.x1 - 1e-9 && at.x + w > s.x0 + 1e-9 && at.y < s.y1 - 1e-9 && at.y + h > s.y0 + 1e-9 && lo < s.hi && hi > s.lo;
@@ -113,7 +113,7 @@ export function dismountOf(view: RoomState, token: Token, at: RoutePoint, role: 
   if (token.attached?.kind !== "ride") return undefined;
   const mount = holderOf(view.tokens, token) as Token | undefined;
   const walk = speedsOf(view, token)?.walk;
-  if (!mount || walk === undefined || linkHolds(view.meta.settings, "ride", { ...token, ...at }, mount)) return undefined;
+  if (!mount || walk === undefined || linkHolds(dropGrid(view, token), view.meta.settings, "ride", { ...token, ...at }, mount)) return undefined;
   if (!seenIn(view, role)(mount)) return undefined;
   return { mount, halfFt: Math.floor(walk / 2) };
 }

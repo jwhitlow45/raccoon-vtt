@@ -3,7 +3,7 @@ import { imageAssetId } from "./imageRef.ts";
 import { eventLines } from "./logRings.ts";
 import type { Actor, BuildChunk, CastAsk, Character, Drawing, DurationAnchor, Effect, ImageRef, InitEntry, JournalAccess, PromptKey, RollTarget, RoomSettings, RoomState, Scene, Token, Viewer } from "./model.ts";
 import { MAX_ROUTE_REACH, syncStampFits, type ActorTarget, type CharacterExpect, type DoorRef, type ExpectPart, type Op, type OpOf, type RefusalCode, type TokenInput, type TokenPatch } from "./protocol.ts";
-import { hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
+import { gridOfToken, hash128, inSightOfNonOwners, ownsCharacter, ownsToken, projectEntity, stableStringify, viewerSceneId, type ProjectOpts, type ProjectedEncounter } from "./project.ts";
 import { CHARACTER_CHANGED, LIMITS } from "./limits.ts";
 import { restoreAddedAssets } from "./referencedAssets.ts";
 import { handoutPages } from "./handouts.ts";
@@ -1558,7 +1558,7 @@ function namedMoveCheck(c: Check, tokenId: string, to?: Pick<Token, "x" | "y"> &
   const there = { ...token, x: to.x, y: to.y, elevation: to.elevation ?? token.elevation };
   // A token they may not move keeps its height on its holder, or takes the holder's, and a dragged one lands as a walk lands (4.1, 4.3).
   const height = onHolder(link.kind) ? there.elevation === token.elevation || there.elevation === (holder as Token).elevation : landsAt(c.state.buildChunks, token, { ...there, squeeze: to.squeeze === true });
-  return height && linkHolds(c.state.meta.settings, link.kind, there, holder as Token) ? OK : d;
+  return height && linkHolds(gridOfToken(c.state, token), c.state.meta.settings, link.kind, there, holder as Token) ? OK : d;
 }
 
 /**
@@ -1652,7 +1652,7 @@ function attachCheck(c: Check, op: OpOf<"token.attach">): Decision {
   if (grapple) {
     const may = moveCheck(c, holder.id);
     if (!may.ok) return may;
-    if (!withinReach(settings, carried, holder)) return refuse("forbidden", `${shownName(carried)} is too far to ${op.kind === "drag" ? "drag" : "carry"}`);
+    if (!withinReach(gridOfToken(c.state, carried), settings, carried, holder)) return refuse("forbidden", `${shownName(carried)} is too far to ${op.kind === "drag" ? "drag" : "carry"}`);
     // A creature carried by a creature is a grappled one, as the list offers it (4.1). A drag also takes a creature the player may move.
     const marked = grappledShown(c, carried);
     if (op.kind === "carry" ? !marked : !moveCheck(c, carried.id).ok && !marked) return refuse("forbidden", `${shownName(carried)} is not marked Grappled`);
@@ -1666,7 +1666,7 @@ function attachCheck(c: Check, op: OpOf<"token.attach">): Decision {
       const may = moveCheck(c, id);
       if (!may.ok) return may;
     }
-    if (!withinReach(settings, carried, holder)) return refuse("forbidden", `${shownName(carried)} is too far from ${shownName(holder)}`);
+    if (!withinReach(gridOfToken(c.state, carried), settings, carried, holder)) return refuse("forbidden", `${shownName(carried)} is too far from ${shownName(holder)}`);
     const walls = legCheck(c, carried.id, seat, false);
     if (!walls.ok) return walls;
   }

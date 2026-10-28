@@ -1,6 +1,7 @@
 import { sightOf, viewMapsOf } from "#shared/keys.ts";
 import type { Actor, PathStop, RoomState, Token, Viewer } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
+import { gridOfToken } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { DiagonalCounter, DistanceSettings } from "#shared/rules/distance.ts";
 import { footprintSize, placedOnHex } from "#shared/rules/footprint.ts";
@@ -273,7 +274,7 @@ function rulerLead(view: RoomState, input: WalkInput, token: Token): Token {
     if (!seen(token)) return token;
     tokens = Object.fromEntries(Object.entries(view.tokens).filter(([, t]) => t !== undefined && seen(t)));
   }
-  return view.tokens[dragLead(tokens, token).id] ?? token;
+  return view.tokens[dragLead(gridOfToken(view, token), tokens, token).id] ?? token;
 }
 
 /** A leg of the lead's walk as the ruler draws it, from the place of the token it starts on. */

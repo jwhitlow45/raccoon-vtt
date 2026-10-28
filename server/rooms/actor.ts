@@ -10,7 +10,7 @@ import { canApply, doorReachPassed, touchLanding, type PermissionDeps } from "#s
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
-import { inSightOfNonOwners, projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
+import { gridOfToken, inSightOfNonOwners, projectArchivedLog, projectEntity, visibleAssetIds } from "#shared/project.ts";
 import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyOpSchema, type Op, type OpOf, type RefusalCode, type RestoreEntry, type ServerMessage, type ServerOnlyOp } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
@@ -2186,7 +2186,7 @@ function seatedLanding(state: RoomState, token: Token, at: { x: number; y: numbe
   const link = token.attached;
   const holder = link && onHolder(link.kind) ? (holderOf(state.tokens, token) as Token | undefined) : undefined;
   if (!link || !holder || !inSightOfNonOwners(state, token, {}) || !inSightOfNonOwners(state, holder, {})) return null;
-  if (linkHolds(state.meta.settings, link.kind, { ...token, x: at.x, y: at.y, elevation: holder.elevation }, holder)) return holder.elevation;
+  if (linkHolds(gridOfToken(state, token), state.meta.settings, link.kind, { ...token, x: at.x, y: at.y, elevation: holder.elevation }, holder)) return holder.elevation;
   return landedElevation(state.buildChunks, token, at, holder);
 }
 

@@ -237,7 +237,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
       const holder = link && onHolder(link.kind) && standingIds.has(link.to) ? link.to : null;
       const holderToken = holder ? byId.get(holder) : undefined;
       // One seat, read by the drawing (TokenNode.tsx Standee) and by every box below, so they agree.
-      const seat: Seat = holderToken ? { rise: footprint(holderToken).h / 2, inset: drawsInset(all, t) ? COVER_INSET : 1 } : ON_GROUND;
+      const seat: Seat = holderToken ? { rise: footprint(holderToken).h / 2, inset: drawsInset(grid, all, t) ? COVER_INSET : 1 } : ON_GROUND;
       const shape = standeeShape(turn, { x: t.x, y: t.y, w: fp.w, h: fp.h }, base, ground, cam.scale, size.height, seat);
       return {
         id: t.id,

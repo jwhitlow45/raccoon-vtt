@@ -41,7 +41,7 @@ import {
   type WallFeature,
 } from "./model.ts";
 import { wallChunk } from "./keys.ts";
-import { ownsToken } from "./project.ts";
+import { gridOfToken, ownsToken } from "./project.ts";
 import { applyOp, type Env } from "./reducer.ts";
 import { normalizeCompanionState } from "./reducer/companions.ts";
 import { hpUndoRestore } from "./reducer/hpUndo.ts";
@@ -1789,7 +1789,7 @@ function attachOp(r: () => number, state: RoomState, anyToken: () => string): Op
     case 2:
       return { t: "token.detach", tokenId: carried.id };
     default: {
-      const seat = kind === "drag" ? carried : (seatSpot(carried, holder) ?? holder);
+      const seat = kind === "drag" ? carried : (seatSpot(gridOfToken(state, carried), carried, holder) ?? holder);
       const steer = kind === "ride" ? chance(r, 0.6) : chance(r, 0.05);
       return { t: "token.attach", tokenId: carried.id, to: holder.id, kind, ...(steer ? { steer: true as const } : {}), x: seat.x, y: seat.y, elevation: kind === "drag" ? carried.elevation : holder.elevation };
     }

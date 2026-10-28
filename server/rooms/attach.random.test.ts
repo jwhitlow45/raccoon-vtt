@@ -11,6 +11,7 @@ import { describeMove, planMove } from "#shared/rules/moveLeg.ts";
 import { turnUnderWay } from "#shared/rules/path.ts";
 import { DM, P1, P2, actor, chance, effect, env, int, pick, reveal, rng, room, token } from "#shared/testutil.ts";
 import { UndoTable } from "./undoTesting.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 
 /**
  * The randomized test of attached tokens (docs/design-v1-attach.md 13):
@@ -102,7 +103,7 @@ function nextStep(r: () => number, state: RoomState): Step {
     if (mount) return { who: by, op: { t: "token.move", tokenId: mount.id, x: near(r, mount.x, 3), y: near(r, mount.y, 3) } };
     const steed = state.tokens[pick(r, ["horse", "pony"])];
     if (steed && steed.sceneId === acting.sceneId) {
-      const seat = seatSpot(acting, steed) ?? steed;
+      const seat = seatSpot(SQUARES, acting, steed) ?? steed;
       return { who: by, op: { t: "token.attach", tokenId: acting.id, to: steed.id, kind: "ride", steer: true, x: seat.x, y: seat.y, elevation: steed.elevation } };
     }
   }
@@ -114,7 +115,7 @@ function nextStep(r: () => number, state: RoomState): Step {
     if (!carried || !holder) return { who, op: { t: "encounter.next" } };
     const fitting: AttachKind = carried.kind === "object" ? "carry" : carried.size === "tiny" ? "perch" : holder.kind === "object" ? "carry" : chance(r, 0.25) ? "drag" : "ride";
     const kind = chance(r, 0.8) ? fitting : pick(r, ATTACH_KINDS);
-    const seat = kind === "drag" ? carried : (seatSpot(carried, holder) ?? holder);
+    const seat = kind === "drag" ? carried : (seatSpot(SQUARES, carried, holder) ?? holder);
     const steer = kind === "ride" && chance(r, 0.7);
     return { who, op: { t: "token.attach", tokenId: carried.id, to: holder.id, kind, ...(steer ? { steer: true as const } : {}), x: seat.x, y: seat.y, elevation: kind === "drag" ? carried.elevation : holder.elevation } };
   }
@@ -123,7 +124,7 @@ function nextStep(r: () => number, state: RoomState): Step {
     if (!carried) return { who, op: { t: "token.detach", tokenId: anyId() } };
     const holder = holderOf(state.tokens, carried) as Token | undefined;
     const scene = state.scenes[carried.sceneId];
-    const spot = holder && scene && chance(r, 0.7) ? getOffSpot(state.meta.settings, scene.bounds, carried, holder) : null;
+    const spot = holder && scene && chance(r, 0.7) ? getOffSpot(SQUARES, state.meta.settings, scene.bounds, carried, holder) : null;
     return { who, op: { t: "token.detach", tokenId: carried.id, ...(spot ? { x: spot.x, y: spot.y } : {}) } };
   }
   if (n < 0.5) {
@@ -206,7 +207,7 @@ class Watch {
       const holder = after.tokens[link.to];
       holds("links", holder !== undefined, where, `${carried.id} holds on to a missing ${link.to}`);
       holds("links", holder!.sceneId === carried.sceneId, where, `${carried.id} and ${link.to} on different scenes`);
-      holds("links", linkHolds(after.meta.settings, link.kind, carried, holder!), where, `${carried.id} ${link.kind} ${link.to} does not hold`);
+      holds("links", linkHolds(SQUARES, after.meta.settings, link.kind, carried, holder!), where, `${carried.id} ${link.kind} ${link.to} does not hold`);
     }
   }
 
@@ -324,7 +325,7 @@ function normalized(key: string, value: unknown, after: RoomState): unknown {
   if (key.startsWith("token:")) {
     const link = out.attached as Token["attached"];
     const holder = link ? after.tokens[link.to] : undefined;
-    if (!link || !holder || !linkHolds(after.meta.settings, link.kind, out as unknown as Token, holder)) delete out.attached;
+    if (!link || !holder || !linkHolds(SQUARES, after.meta.settings, link.kind, out as unknown as Token, holder)) delete out.attached;
   }
   if (key === "encounter" && out.turnStart) {
     const { mounts: _mounts, ...start } = out.turnStart as Record<string, unknown>;

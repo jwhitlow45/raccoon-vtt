@@ -8,6 +8,7 @@ import { getOffSpot, overlaps, seatSpot } from "./rules/attach.ts";
 import { projectState } from "./project.ts";
 import { applyOp } from "./reducer.ts";
 import { DM, P1, P2, actor, deepClone, effect, entry, env, reveal, room, template, token } from "./testutil.ts";
+import { SQUARES } from "./rules/grid.ts";
 
 /**
  * Movement's generators for the shared differential test
@@ -324,7 +325,7 @@ function attachFrom(carried: string, holder: string, kind: AttachKind, steer = f
     const c = view.tokens[carried];
     const h = view.tokens[holder];
     if (!c || !h) return null;
-    const seat = kind === "drag" ? { x: c.x, y: c.y } : seatSpot(c, h);
+    const seat = kind === "drag" ? { x: c.x, y: c.y } : seatSpot(SQUARES, c, h);
     if (!seat) return null;
     return { t: "token.attach", tokenId: carried, to: holder, kind, ...(steer ? { steer: true as const } : {}), x: seat.x, y: seat.y, elevation: kind === "drag" ? c.elevation : h.elevation };
   };
@@ -338,7 +339,7 @@ function getOffFrom(carried: string): (view: RoomState) => Op | null {
     const scene = c ? view.scenes[c.sceneId] : undefined;
     if (!c || !h || !scene) return null;
     const others = Object.values(view.tokens).filter((t) => t.id !== c.id && t.id !== h.id && t.sceneId === c.sceneId && t.kind !== "object");
-    const spot = getOffSpot(view.meta.settings, scene.bounds, c, h, (p) => !others.some((t) => overlaps({ ...c, x: p.x, y: p.y }, t)));
+    const spot = getOffSpot(SQUARES, view.meta.settings, scene.bounds, c, h, (p) => !others.some((t) => overlaps(SQUARES, { ...c, x: p.x, y: p.y }, t)));
     return spot ? { t: "token.detach", tokenId: carried, x: spot.x, y: spot.y } : null;
   };
 }

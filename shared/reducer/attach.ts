@@ -1,12 +1,12 @@
 import { keys } from "../keys.ts";
 import { LIMITS } from "../limits.ts";
 import type { InitEntry, PathStop, Token, TokenPath } from "../model.ts";
-import { inSightOfNonOwners } from "../project.ts";
+import { gridOfToken, inSightOfNonOwners } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { attaches } from "../migrate.ts";
 import { getOffFits, isCreature, kindRefusal, landsAt, linkHolds, linkLimitRefusal, onHolder, withinReach, type LinkNames } from "../rules/attach.ts";
 import { footprintSize } from "../rules/footprint.ts";
-import { SQUARES } from "../rules/grid.ts";
+import { sceneGrid } from "../rules/grid.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
 import { rowLeadsMounts, sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
@@ -53,14 +53,15 @@ export function tokenAttach(tx: Tx, op: OpOf<"token.attach">): void {
   if (carried.sceneId !== holder.sceneId) throw invalid(`${names.carried} and ${names.holder} are on different scenes`);
   if (op.steer && op.kind !== "ride") throw invalid(ONLY_A_RIDE_STEERS);
   const why = kindRefusal(op.kind, carried, holder, names);
+  const grid = gridOfToken(tx.state, carried);
   if (why) throw invalid(why);
   // A seat is at its holder's elevation (4.1), whatever the op says, so no attach lifts a token another way.
   const elevation = onHolder(op.kind) ? holder.elevation : op.elevation;
   if (onHolder(op.kind)) {
-    if (!linkHolds(settings, op.kind, { ...carried, x: op.x, y: op.y, elevation }, holder)) throw invalid(`${names.carried} does not sit on ${names.holder} there`);
+    if (!linkHolds(grid, settings, op.kind, { ...carried, x: op.x, y: op.y, elevation }, holder)) throw invalid(`${names.carried} does not sit on ${names.holder} there`);
   } else {
     if (op.x !== carried.x || op.y !== carried.y || op.elevation !== carried.elevation) throw invalid(DRAG_STAYS);
-    if (!withinReach(settings, carried, holder)) throw invalid(`${names.carried} is too far to drag`);
+    if (!withinReach(grid, settings, carried, holder)) throw invalid(`${names.carried} is too far to drag`);
   }
   const named = new Set([carried.id, holder.id]);
   const inGraph = tx.actor.role === "dm" ? () => true : (t: { id: string }) => named.has(t.id) || seenByAll(tx, t.id);
@@ -190,7 +191,7 @@ function mountedInPlace(tx: Tx, seated: Token, cost: number): Token {
   if (!last || !sameSpot(last, seated)) return seated;
   // The stop where it sits, seen by whoever saw it get there (docs/design-v1-per-player-vision.md 6.5).
   const stop: PathStop = { x: seated.x, y: seated.y, elevation: seated.elevation, ...(last.seen ? { seen: true as const } : {}), ...(last.seenBy ? { seenBy: last.seenBy } : {}), moved: 0, cost };
-  return { ...seated, path: withStop(path, stop, footprintSize(seated), { token: seated, rules: tx.state.meta.settings, grid: SQUARES }) };
+  return { ...seated, path: withStop(path, stop, footprintSize(seated), { token: seated, rules: tx.state.meta.settings, grid: gridOfToken(tx.state, seated) }) };
 }
 
 /**
@@ -215,7 +216,7 @@ export function tokenDetach(tx: Tx, op: OpOf<"token.detach">): void {
   const holder = tx.token(link.to);
   const scene = tx.scene(carried.sceneId);
   const spot = { x: op.x, y: op.y, elevation: op.elevation ?? carried.elevation };
-  if (!getOffFits(tx.state.meta.settings, scene.bounds, carried, holder, spot)) throw invalid(`${nameFor(tx, carried)} can only get off beside ${nameFor(tx, holder)}`);
+  if (!getOffFits(sceneGrid(scene), tx.state.meta.settings, scene.bounds, carried, holder, spot)) throw invalid(`${nameFor(tx, carried)} can only get off beside ${nameFor(tx, holder)}`);
   // It lands as a walk lands (4.3): on the ground there, or at its own height, as one that flies keeps it.
   if (!landsAt(tx.state.buildChunks, carried, spot)) throw invalid(`${nameFor(tx, carried)} gets off onto the ground there or at its own height`);
   const along = carriedAlong(tx, op);
@@ -260,7 +261,7 @@ export function linkPass(tx: Tx): void {
   for (const token of sortedById(candidates)) {
     const link = token.attached!;
     const holder = tx.state.tokens[link.to];
-    if (holder && holder.id !== token.id && linkHolds(settings, link.kind, token, holder)) continue;
+    if (holder && holder.id !== token.id && linkHolds(gridOfToken(tx.state, token), settings, link.kind, token, holder)) continue;
     const { attached: _gone, ...loose } = token;
     tx.write(keys.token(token.id), loose);
   }

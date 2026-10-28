@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Line } from "react-konva";
 import type { Token } from "#shared/model.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { useDraggedIds } from "../../canvas/draggedIds.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import { boardSizes } from "../../lib/boardScale.ts";
@@ -38,9 +39,9 @@ export const TetherLayer = memo(function TetherLayer(props: LayerProps) {
   const spots = useTreeShownStore(useScoped(localDragSlot), (s) => (iso ? NO_SPOTS : s.spots));
   const dragged = useDraggedIds();
   const lines = useMemo(() => {
-    const all = tethers(tokens, props.scene.id, (t) => spots[t.id] ?? t);
+    const all = tethers(sceneGrid(props.scene), tokens, props.scene.id, (t) => spots[t.id] ?? t);
     return iso ? all.filter((l) => !dragged.all.has(l.id) && !dragged.all.has(l.holderId)) : all;
-  }, [tokens, props.scene.id, spots, iso, dragged]);
+  }, [tokens, props.scene, spots, iso, dragged]);
   if (lines.length === 0) return null;
   return (
     <>

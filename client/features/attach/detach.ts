@@ -1,5 +1,6 @@
 import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { carriedGroup, carriedIndex, getOffSpot, holderOf, isCreature, overlaps } from "#shared/rules/attach.ts";
 import { verticalExtentFt } from "#shared/rules/footprint.ts";
 import { landedElevation, legStop } from "#shared/rules/movement.ts";
@@ -101,14 +102,15 @@ export function getOffPlace(view: RoomState, viewer: AttachViewer, carried: Toke
   const seat = { x: carried.x, y: carried.y, elevation: carried.elevation };
   const seen = dropView(view, viewer.role);
   const landing = (at: { x: number; y: number }) => landedElevation(view.buildChunks, carried, at, holder);
-  const spot = getOffSpot(view.meta.settings, scene.bounds, carried, holder, (at) => {
+  const grid = sceneGrid(scene);
+  const spot = getOffSpot(grid, view.meta.settings, scene.bounds, carried, holder, (at) => {
     const elevation = landing(at);
     const placed: Token = { ...carried, x: at.x, y: at.y, elevation };
     delete placed.squeeze;
     const { lo, hi } = verticalExtentFt(placed, fpc);
     for (const c of creatures) {
       const other = verticalExtentFt(c, fpc);
-      if (overlaps(placed, c) && lo < other.hi && hi > other.lo) return false;
+      if (overlaps(grid, placed, c) && lo < other.hi && hi > other.lo) return false;
     }
     if (!walls) return true;
     const to = { x: at.x, y: at.y, elevation };

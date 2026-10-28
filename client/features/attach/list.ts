@@ -1,4 +1,5 @@
 import type { AttachKind, RoomState, Token } from "#shared/model.ts";
+import { gridOfToken } from "#shared/project.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { attachDistanceFt, attachReachFt, holderOf, isCreature, kindRefusal, linkLimitRefusal, onHolder, seatSpot } from "#shared/rules/attach.ts";
 import { sizeCategory } from "#shared/rules/footprint.ts";
@@ -93,7 +94,7 @@ export function attachRows(view: RoomState, viewer: AttachViewer, selectedId: st
   const others: { token: Token; feet: number; name: string }[] = [];
   for (const t of Object.values(view.tokens)) {
     if (!t || t.id === selected.id || t.sceneId !== selected.sceneId) continue;
-    const feet = attachDistanceFt(settings, selected, t);
+    const feet = attachDistanceFt(gridOfToken(view, selected), settings, selected, t);
     if (feet > reach && (viewer.role !== "dm" || feet > FARTHER_FT)) continue;
     others.push({ token: t, feet, name: displayName(t) });
   }
@@ -119,7 +120,7 @@ function checkedRow(view: RoomState, viewer: AttachViewer, choice: AttachChoice,
   if (kindRefusal(kind, carried, holder, names) !== null) return null;
   let at = { x: carried.x, y: carried.y, elevation: carried.elevation };
   if (onHolder(kind)) {
-    const seat = seatSpot(carried, holder);
+    const seat = seatSpot(gridOfToken(view, carried), carried, holder);
     if (!seat) return null;
     at = { x: seat.x, y: seat.y, elevation: holder.elevation };
   }

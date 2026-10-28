@@ -143,7 +143,7 @@ export function seenSeat(state: DropState, token: DropToken): { holder: DropToke
   const holder = seated && link && onHolder(link.kind) && state.tokens ? (holderOf(state.tokens, seated) as NonNullable<typeof seated> | undefined) : undefined;
   const settings = state.meta?.settings;
   if (!link || !holder || !settings || !state.seen || !state.seen(seated) || !state.seen(holder)) return null;
-  return { holder, keptAt: (at) => linkHolds(settings, link.kind, { ...seated, x: at.x, y: at.y, elevation: holder.elevation }, holder) };
+  return { holder, keptAt: (at) => linkHolds(dropGrid(state, seated), settings, link.kind, { ...seated, x: at.x, y: at.y, elevation: holder.elevation }, holder) };
 }
 
 /**
@@ -159,7 +159,7 @@ export function walkerOf<T extends DropToken>(state: DropView, token: T, to?: Po
   const seated = state.tokens[token.id];
   // A token the room does not hold yet has no holder to leave.
   if (!seated) return ownWalk(token);
-  const walker = walkerFor({ tokens: state.tokens, buildChunks: state.buildChunks }, seated, state.seen, to ? { to } : {});
+  const walker = walkerFor({ tokens: state.tokens, buildChunks: state.buildChunks, scenes: state.scenes }, seated, state.seen, to ? { to } : {});
   // The seated token's walk, at the place this one stands.
   return walker.offHolder ? ({ ...token, footing: "ground", offHolder: walker.offHolder, ...(walker.groundStart ? { groundStart: true } : {}) } as T & Walker) : ownWalk(token);
 }

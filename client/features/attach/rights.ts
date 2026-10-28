@@ -1,4 +1,5 @@
 import type { AttachKind, Effect, MemberId, RoomState, Token } from "#shared/model.ts";
+import { gridOfToken } from "#shared/project.ts";
 import { carriedIndex, holderOf, isCreature, withinReach } from "#shared/rules/attach.ts";
 import { ownsToken } from "../tokens/access.ts";
 import { movesOthers } from "../../canvas/dragRights.ts";
@@ -20,7 +21,7 @@ import { movesOthers } from "../../canvas/dragRights.ts";
 export type AttachViewer = { role: "dm" | "player"; memberId: MemberId | null };
 
 /** The parts of a copy these rules read. */
-export type RightsView = Pick<RoomState, "tokens" | "characters" | "meta" | "encounter">;
+export type RightsView = Pick<RoomState, "tokens" | "characters" | "meta" | "encounter" | "scenes">;
 
 /** The plain right to move a token (shared/permissions.ts moveCheck): the DM always, a player on an unlocked token they own or the room lets them move. */
 export function movesToken(view: RightsView, viewer: AttachViewer, token: Token): boolean {
@@ -145,7 +146,7 @@ export function grapples(kind: AttachKind, carried: Token, holder: Token): boole
  */
 export function attachAllowed(view: RightsView, viewer: AttachViewer, kind: AttachKind, carried: Token, holder: Token): boolean {
   if (viewer.role === "dm") return true;
-  if (!withinReach(view.meta.settings, carried, holder)) return false;
+  if (!withinReach(gridOfToken(view, carried), view.meta.settings, carried, holder)) return false;
   const held = holderOf(view.tokens, carried);
   if (held && (held.id !== holder.id || (carried.attached?.kind === "ride" && kind !== "ride"))) return false;
   if (grapples(kind, carried, holder)) {

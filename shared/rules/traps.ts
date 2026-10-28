@@ -1,6 +1,6 @@
 import { CHUNK_CELLS, MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapDoorRef, type TrapHow, type TrapRig, type TrapZone, type Viewer } from "../model.ts";
 import { chunkKey, wallMidpoint } from "../keys.ts";
-import { playersToken, seenByNonOwners } from "../project.ts";
+import { gridOfScene, playersToken, seenByNonOwners } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { stopsOnTrap } from "../migrate.ts";
 import { isWritable } from "../writable.ts";
@@ -813,7 +813,7 @@ function walkEvents(walk: Walk, index: TrapIndex, before: RoomState, seen: (id: 
   const rangeOf = (j: number): CellRange => cellsAt(walk, j, scratch);
   const floorAt = (j: number, r: CellRange): boolean => {
     if (walk.carriedOn) return false;
-    if (holder && insideHolder(lightAt(walk, j), holder)) return false;
+    if (holder && insideHolder(gridOfScene(before, walk.token.sceneId), lightAt(walk, j), holder)) return false;
     return standing(walk.elevation(j), cache.ground(r)) === "ground";
   };
   const marks = new Int32Array(traps.length);
@@ -1483,10 +1483,10 @@ export function standsOn(state: RoomState, trap: Trap, token: Token, seen: (id: 
 }
 
 /** Whether a creature standing still rides or sits on a holder, within its footprint, by a link every player sees (5.2). */
-function carriedSeen(state: Pick<RoomState, "tokens">, token: Token, seen: (id: string) => boolean): boolean {
+function carriedSeen(state: Pick<RoomState, "tokens" | "scenes">, token: Token, seen: (id: string) => boolean): boolean {
   const link = token.attached;
   const holder = link && onHolder(link.kind) ? (holderOf(state.tokens, token) as Token | undefined) : undefined;
-  return holder !== undefined && seen(token.id) && seen(holder.id) && insideHolder(token, holder);
+  return holder !== undefined && seen(token.id) && seen(holder.id) && insideHolder(gridOfScene(state, token.sceneId), token, holder);
 }
 
 /**

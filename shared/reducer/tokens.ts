@@ -418,7 +418,7 @@ function leftMount(tx: Tx, rider: Token, next: Token, judged: Judged): Token | u
   if (link?.kind !== "ride" || next.sceneId !== rider.sceneId || !attaches(tx.env.opVersion)) return undefined;
   const mount = holderOf(tx.state.tokens, rider) as Token | undefined;
   const there = judged.after().tokens[link.to];
-  if (!mount || !there || linkHolds(tx.state.meta.settings, "ride", next, there)) return undefined;
+  if (!mount || !there || linkHolds(gridOfToken(tx.state, rider), tx.state.meta.settings, "ride", next, there)) return undefined;
   return mount;
 }
 
@@ -464,7 +464,7 @@ export function dismounted(tx: Tx, rider: Token, next: Token, mount: Token, judg
   const from = { x: rider.x, y: rider.y, elevation: walkFrom(tx.state.buildChunks, walking).elevation };
   const points = route ? routePoints(tx.state.buildChunks, walking, route, next.elevation) : [from, { x: next.x, y: next.y, elevation: next.elevation }];
   // The same split a drag's band reads (rules/dismount.ts dismountCost), so the preview and the stored stops agree.
-  const split = dismountSplit(tx.state, walking, mount, points, route);
+  const split = dismountSplit(gridOfToken(tx.state, rider), tx.state, walking, mount, points, route);
   const off: Token = { ...next, ...split.off };
   const first = withPath(tx, rider, off, judgedIn(tx, [off]), false, split.prefix, undefined, cost);
   return split.whole || sameSpot(off, next) ? first : withPath(tx, first, next, judged, false, split.rest);

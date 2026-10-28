@@ -2,6 +2,7 @@ import { LIMITS } from "#shared/limits.ts";
 import type { Token } from "#shared/model.ts";
 import { carriedGroup, carriedIndex, fullRect, holderOf, publicMembers, type SeenByAll } from "#shared/rules/attach.ts";
 import type { PlacedToken } from "#shared/rules/footprint.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 import { displayName } from "../../lib/scene.ts";
 import { linkTag } from "./tags.ts";
 
@@ -19,19 +20,19 @@ type Tokens = Readonly<Record<string, Token | undefined>>;
 export const COVER_INSET = 0.7;
 
 /** Whether a carried token's footprint covers its holder's whole footprint, as a Small rider on a Medium mastiff does (4.2, 4.4). */
-export function coversHolder(carried: PlacedToken, holder: PlacedToken): boolean {
-  const a = fullRect(carried);
-  const b = fullRect(holder);
+export function coversHolder(g: Grid, carried: PlacedToken, holder: PlacedToken): boolean {
+  const a = fullRect(g, carried);
+  const b = fullRect(g, holder);
   const eps = 1e-9;
   return a.x <= b.x + eps && a.y <= b.y + eps && a.x + a.w >= b.x + b.w - eps && a.y + a.h >= b.y + b.h - eps;
 }
 
 /** Whether a token draws inset: it sits on a holder in this copy and covers it. */
-export function drawsInset(tokens: Tokens, token: Token): boolean {
+export function drawsInset(g: Grid, tokens: Tokens, token: Token): boolean {
   const link = token.attached;
   if (!link || link.kind === "drag") return false;
   const holder = holderOf(tokens, token) as Token | undefined;
-  return holder !== undefined && coversHolder(token, holder);
+  return holder !== undefined && coversHolder(g, token, holder);
 }
 
 /** A box in cells. */
@@ -47,12 +48,12 @@ export type CellBox = { x: number; y: number; w: number; h: number };
  * on no holder in this copy, one the holder's middle misses, and one that
  * covers its holder's whole footprint, which moves its holder anyway.
  */
-export function holderMiddle(tokens: Tokens, token: Token): CellBox | null {
+export function holderMiddle(g: Grid, tokens: Tokens, token: Token): CellBox | null {
   const link = token.attached;
   if (!link || link.kind === "drag") return null;
   const holder = holderOf(tokens, token) as Token | undefined;
-  if (!holder || coversHolder(token, holder)) return null;
-  return middleIn(holder, token);
+  if (!holder || coversHolder(g, token, holder)) return null;
+  return middleIn(g, holder, token);
 }
 
 /**
@@ -66,9 +67,9 @@ export function holderMiddle(tokens: Tokens, token: Token): CellBox | null {
  * holders below keep theirs. A dragged creature walks beside its holder
  * and leaves none. In the token's own cells, as its node draws.
  */
-export function holderMiddles(tokens: Tokens, token: Token): CellBox[] {
+export function holderMiddles(g: Grid, tokens: Tokens, token: Token): CellBox[] {
   const out: CellBox[] = [];
-  const own = holderMiddle(tokens, token);
+  const own = holderMiddle(g, tokens, token);
   if (own) out.push(own);
   const seen = new Set<string>([token.id]);
   let at: Token = token;
@@ -78,7 +79,7 @@ export function holderMiddles(tokens: Tokens, token: Token): CellBox[] {
     if (!holder || seen.has(holder.id)) return out;
     seen.add(holder.id);
     if (at !== token) {
-      const box = middleIn(holder, token);
+      const box = middleIn(g, holder, token);
       if (box) out.push(box);
     }
     at = holder;
@@ -86,9 +87,9 @@ export function holderMiddles(tokens: Tokens, token: Token): CellBox[] {
 }
 
 /** The holder's middle (holderMiddle) where it lies inside the carried token's footprint, in the token's own cells, or null where it misses it. */
-function middleIn(holder: Token, token: Token): CellBox | null {
-  const h = fullRect(holder);
-  const t = fullRect(token);
+function middleIn(g: Grid, holder: Token, token: Token): CellBox | null {
+  const h = fullRect(g, holder);
+  const t = fullRect(g, token);
   const mx = Math.min(0.25, h.w / 4);
   const my = Math.min(0.25, h.h / 4);
   const x0 = Math.max(t.x, h.x + h.w / 2 - mx);
@@ -177,7 +178,7 @@ export function drawOrder<T extends Token>(list: readonly T[], tokens: Tokens): 
  * could never move within it. Up the chain while that holds. Any other
  * token drags itself.
  */
-export function dragLead(tokens: Tokens, token: Token): Token {
+export function dragLead(g: Grid, tokens: Tokens, token: Token): Token {
   let at = token;
   const seen = new Set<string>([at.id]);
   for (;;) {
@@ -185,7 +186,7 @@ export function dragLead(tokens: Tokens, token: Token): Token {
     const link = at.attached;
     if (!holder || !link || seen.has(holder.id)) return at;
     const steered = link.kind === "ride" && link.steer === true;
-    if (!steered && !(link.kind !== "drag" && coversHolder(at, holder))) return at;
+    if (!steered && !(link.kind !== "drag" && coversHolder(g, at, holder))) return at;
     seen.add(holder.id);
     at = holder;
   }
@@ -200,6 +201,7 @@ export function dragLead(tokens: Tokens, token: Token): Token {
  * horse is never walked off it.
  */
 export function pressLead<T extends Token>(
+  g: Grid,
   tokens: Tokens,
   pressed: T,
   byId: ReadonlyMap<string, T>,
@@ -207,7 +209,7 @@ export function pressLead<T extends Token>(
   canDrag: (token: T) => boolean,
   movesLead: (token: T) => boolean,
 ): T {
-  let lead = byId.get(dragLead(tokens, pressed).id) ?? pressed;
+  let lead = byId.get(dragLead(g, tokens, pressed).id) ?? pressed;
   if (!selected.has(pressed.id)) return lead;
   const seen = new Set<string>([pressed.id, lead.id]);
   for (let at: Token = lead; ; ) {
@@ -217,7 +219,7 @@ export function pressLead<T extends Token>(
     at = up;
     const held = byId.get(up.id);
     if (!held || !selected.has(held.id) || !canDrag(held)) continue;
-    const moved = byId.get(dragLead(tokens, held).id) ?? held;
+    const moved = byId.get(dragLead(g, tokens, held).id) ?? held;
     if (moved !== held && !movesLead(moved)) continue;
     lead = moved;
     seen.add(lead.id);
@@ -259,7 +261,7 @@ export function dragWalkers(tokens: Tokens, leadId: string, seen: SeenByAll, nam
 export type Tether = { id: string; holderId: string; from: { x: number; y: number }; to: { x: number; y: number } };
 
 /** Every drag link on the scene this copy holds both ends of, in token id order (4.4). */
-export function tethers(tokens: Tokens, sceneId: string, at: (t: Token) => { x: number; y: number } = (t) => t): Tether[] {
+export function tethers(g: Grid, tokens: Tokens, sceneId: string, at: (t: Token) => { x: number; y: number } = (t) => t): Tether[] {
   const out: Tether[] = [];
   for (const [holderId, ids] of carriedIndex(tokens)) {
     const holder = tokens[holderId];
@@ -267,14 +269,14 @@ export function tethers(tokens: Tokens, sceneId: string, at: (t: Token) => { x: 
     for (const id of ids) {
       const t = tokens[id];
       if (t?.attached?.kind !== "drag") continue;
-      out.push({ id, holderId, from: center(t, at(t)), to: center(holder, at(holder)) });
+      out.push({ id, holderId, from: center(g, t, at(t)), to: center(g, holder, at(holder)) });
     }
   }
   return out.sort((a, b) => (a.id < b.id ? -1 : 1));
 }
 
-function center(t: Token, p: { x: number; y: number }): { x: number; y: number } {
-  const r = fullRect({ ...t, x: p.x, y: p.y });
+function center(g: Grid, t: Token, p: { x: number; y: number }): { x: number; y: number } {
+  const r = fullRect(g, { ...t, x: p.x, y: p.y });
   return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
 }
 
@@ -307,10 +309,10 @@ export function groupLine(tokens: Tokens, token: Token): GroupLine {
  * named too is left out, since it goes with that holder, so each token
  * moves once.
  */
-export function dragNamed<T extends Token>(tokens: Tokens, lead: T, followers: readonly T[], byId: ReadonlyMap<string, T>, movesLead: (token: T) => boolean): T[] {
+export function dragNamed<T extends Token>(g: Grid, tokens: Tokens, lead: T, followers: readonly T[], byId: ReadonlyMap<string, T>, movesLead: (token: T) => boolean): T[] {
   const named = new Map<string, T>([[lead.id, lead]]);
   for (const f of followers) {
-    const up = dragLead(tokens, f);
+    const up = dragLead(g, tokens, f);
     const moved = up.id === f.id ? f : byId.get(up.id);
     if (!moved || named.has(moved.id) || (moved !== f && !movesLead(moved))) continue;
     named.set(moved.id, moved);

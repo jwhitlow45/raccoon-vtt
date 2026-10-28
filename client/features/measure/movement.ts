@@ -381,7 +381,7 @@ export function dragReading(input: {
   const leg = legCost(points);
   // Walked off its mount on its own turn, the leg costs what getting off costs and then the rest, as the reducer stores it.
   const off = active && input.dismount && input.costFt === undefined ? input.dismount : undefined;
-  const taken = off ? dismountCost(walk?.build ?? input.build ?? NO_BUILD, token, off.mount, points, walk?.route?.pieces, rules, counter, off.halfFt, swimSpeed) : leg;
+  const taken = off ? dismountCost(grid, walk?.build ?? input.build ?? NO_BUILD, token, off.mount, points, walk?.route?.pieces, rules, counter, off.halfFt, swimSpeed) : leg;
   const surcharge = taken.cost - leg.cost;
   const legFt = input.costFt ?? taken.cost;
   const out: DragRead = { dragFt: legFt, diag: taken.diag };

@@ -1,13 +1,14 @@
 import { LIMITS } from "../limits.ts";
-import type { AttachKind, Token } from "../model.ts";
+import type { AttachKind, Scene, Token } from "../model.ts";
 import { isWritable } from "../writable.ts";
 import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.ts";
-import { footprintRect, footprintSize, sizeCategory, snapStep, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
+import { footprintRect, footprintSize, hexAnchor, occupiedHexes, placedOnHex, sizeCategory, snapStep, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
 import { walksOffFromGround } from "../migrate.ts";
 import type { Walker } from "./movement.ts";
-import { SQUARES } from "./grid.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
+import { hexInScene, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
 
 /**
  * Attached tokens (docs/design-v1-attach.md): a rider on a mount, a
@@ -21,6 +22,11 @@ import { SQUARES } from "./grid.ts";
  * Every walk over the links keeps a visited set, so a loop the rules let
  * stand (one closed through a link not every player sees, 5.1) is walked
  * once, and every group is bounded by its scene's tokens.
+ *
+ * Every rule that reads where tokens stand takes the scene's grid. On hexes
+ * (docs/design-v1-hex-grids.md phase H2) a seat is a hex set inside the
+ * holder's, two tokens overlap when they share a hex, reach counts hex
+ * steps, and a place to get off is searched ring by ring of hexes.
  */
 
 export const ATTACH_KINDS = ["ride", "perch", "carry", "drag"] as const satisfies readonly AttachKind[];
@@ -42,24 +48,42 @@ export function sizesLarger(holder: Pick<PlacedToken, "size" | "w" | "h">, carri
   return SIZE_RANK[sizeCategory(holder)] - SIZE_RANK[sizeCategory(carried)];
 }
 
+/** A token's full footprint fields, without its squeeze. */
+function unsqueezed(token: PlacedToken): PlacedToken {
+  return { size: token.size, x: token.x, y: token.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) };
+}
+
 /** The footprint links read: the full one, squeezed or not, so a mount squeezing through a corridor keeps its rider (5.1). */
-export function fullRect(token: PlacedToken): Rect {
-  return footprintRect(SQUARES, { size: token.size, x: token.x, y: token.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) });
+export function fullRect(g: Grid, token: PlacedToken): Rect {
+  return footprintRect(g, unsqueezed(token));
+}
+
+/** The hexes of a full footprint (fullRect's reading on hexes). */
+function fullHexes(g: HexGrid, token: PlacedToken): Hex[] {
+  return occupiedHexes(g, unsqueezed(token));
 }
 
 const EPS = 1e-9;
 
-/** Whether `carried`'s full footprint lies inside `holder`'s. */
-export function insideHolder(carried: PlacedToken, holder: PlacedToken): boolean {
-  const a = fullRect(carried);
-  const b = fullRect(holder);
+/** Whether `carried`'s full footprint lies inside `holder`'s: on hexes, every hex of it is one of the holder's. */
+export function insideHolder(g: Grid, carried: PlacedToken, holder: PlacedToken): boolean {
+  if (isHex(g)) {
+    const held = new Set(fullHexes(g, holder).map(hexKey));
+    return fullHexes(g, carried).every((h) => held.has(hexKey(h)));
+  }
+  const a = fullRect(g, carried);
+  const b = fullRect(g, holder);
   return a.x >= b.x - EPS && a.y >= b.y - EPS && a.x + a.w <= b.x + b.w + EPS && a.y + a.h <= b.y + b.h + EPS;
 }
 
-/** Whether two full footprints share any area. */
-export function overlaps(a: PlacedToken, b: PlacedToken): boolean {
-  const ra = fullRect(a);
-  const rb = fullRect(b);
+/** Whether two full footprints share any area: on hexes, any hex. */
+export function overlaps(g: Grid, a: PlacedToken, b: PlacedToken): boolean {
+  if (isHex(g)) {
+    const taken = new Set(fullHexes(g, b).map(hexKey));
+    return fullHexes(g, a).some((h) => taken.has(hexKey(h)));
+  }
+  const ra = fullRect(g, a);
+  const rb = fullRect(g, b);
   return ra.x < rb.x + rb.w - EPS && rb.x < ra.x + ra.w - EPS && ra.y < rb.y + rb.h - EPS && rb.y < ra.y + ra.h - EPS;
 }
 
@@ -69,14 +93,14 @@ export function attachReachFt(feetPerCell: number): number {
 }
 
 /** The distance between two tokens' full footprints by the room's rule, elevation and height included. */
-export function attachDistanceFt(settings: DistanceSettings, a: FootprintToken, b: FootprintToken): number {
+export function attachDistanceFt(g: Grid, settings: DistanceSettings, a: FootprintToken, b: FootprintToken): number {
   const full = (t: FootprintToken): FootprintToken => ({ ...t, squeeze: undefined });
-  return boxDistanceFt(tokenCellBox(SQUARES, full(a), settings.feetPerCell), tokenCellBox(SQUARES, full(b), settings.feetPerCell), settings);
+  return boxDistanceFt(tokenCellBox(g, full(a), settings.feetPerCell), tokenCellBox(g, full(b), settings.feetPerCell), settings);
 }
 
 /** Whether two tokens are within reach of each other (attachReachFt). */
-export function withinReach(settings: DistanceSettings, a: FootprintToken, b: FootprintToken): boolean {
-  return attachDistanceFt(settings, a, b) <= attachReachFt(settings.feetPerCell);
+export function withinReach(g: Grid, settings: DistanceSettings, a: FootprintToken, b: FootprintToken): boolean {
+  return attachDistanceFt(g, settings, a, b) <= attachReachFt(settings.feetPerCell);
 }
 
 type Sized = Pick<Token, "kind"> & PlacedToken;
@@ -96,15 +120,15 @@ function needsLarger(kind: AttachKind, carried: Pick<Token, "kind">, holder: Pic
  * holder the footprint inside the holder's and the holder large enough,
  * for a drag within reach. The kind itself is never worked out again.
  */
-export function linkHolds(settings: DistanceSettings, kind: AttachKind, carried: Sized & FootprintToken & Pick<Token, "sceneId">, holder: Sized & FootprintToken & Pick<Token, "sceneId">): boolean {
+export function linkHolds(g: Grid, settings: DistanceSettings, kind: AttachKind, carried: Sized & FootprintToken & Pick<Token, "sceneId">, holder: Sized & FootprintToken & Pick<Token, "sceneId">): boolean {
   if (carried.sceneId !== holder.sceneId) return false;
-  if (!onHolder(kind)) return withinReach(settings, carried, holder);
-  return seatHolds(kind, carried, holder);
+  if (!onHolder(kind)) return withinReach(g, settings, carried, holder);
+  return seatHolds(g, kind, carried, holder);
 }
 
 /** Whether what sits on its holder by a link of this kind still has its seat as they stand: inside the holder's footprint, the holder large enough. */
-export function seatHolds(kind: AttachKind, carried: Sized & FootprintToken, holder: Sized & FootprintToken): boolean {
-  if (!insideHolder(carried, holder)) return false;
+export function seatHolds(g: Grid, kind: AttachKind, carried: Sized & FootprintToken, holder: Sized & FootprintToken): boolean {
+  if (!insideHolder(g, carried, holder)) return false;
   return !needsLarger(kind, carried, holder) || sizesLarger(holder, carried) >= 1;
 }
 
@@ -142,7 +166,13 @@ function notBigEnough(names: LinkNames): string {
   return `${names.holder} is not big enough to carry ${names.carried}`;
 }
 
-/** Whether the carried footprint could lie inside the holder's anywhere, whatever its snap grid. */
+/**
+ * Whether the carried footprint could lie inside the holder's anywhere,
+ * whatever its snap grid. The same on hexes: each size's hexes lie inside
+ * those of every size whose box is as large or larger, on that size's own
+ * anchors (a Large three inside a Huge seven, a Huge seven inside a
+ * Gargantuan twelve), and the seat is searched apart (seatSpot).
+ */
 function fitsInside(carried: PlacedToken, holder: PlacedToken): boolean {
   const a = footprintSize(carried);
   const b = footprintSize(holder);
@@ -154,11 +184,12 @@ function fitsInside(carried: PlacedToken, holder: PlacedToken): boolean {
  * grid inside the holder's full footprint nearest where it stands, ties to
  * the smaller y and then the smaller x, or null when none fits.
  */
-export function seatSpot(carried: PlacedToken, holder: PlacedToken): Point | null {
+export function seatSpot(g: Grid, carried: PlacedToken, holder: PlacedToken): Point | null {
+  if (isHex(g)) return hexSeatSpot(g, carried, holder);
   const size = footprintSize(carried);
   const step = snapStep(carried);
-  const box = fullRect(holder);
-  const from = fullRect(carried);
+  const box = fullRect(g, holder);
+  const from = fullRect(g, carried);
   const xs = gridSpots(box.x, box.x + box.w - size.w, step);
   const ys = gridSpots(box.y, box.y + box.h - size.h, step);
   let best: Point | null = null;
@@ -173,6 +204,37 @@ export function seatSpot(carried: PlacedToken, holder: PlacedToken): Point | nul
     }
   }
   return best;
+}
+
+/**
+ * The seat on hexes: of the anchors of the carried token's size whose hexes
+ * all lie on the holder's, the one nearest its own anchor, ties in lattice
+ * order (the smaller row, then the smaller column, mirrored on hex
+ * columns), as a snap ties. Its stored box goes where that anchor is its
+ * middle (placedOnHex).
+ */
+function hexSeatSpot(g: HexGrid, carried: PlacedToken, holder: PlacedToken): Point | null {
+  const from = hexAnchor(g, unsqueezed(carried));
+  const refs = fullHexes(g, holder).sort((a, b) => latticeOrder(g, a, b));
+  let best: Point | null = null;
+  let bestD = Infinity;
+  for (const ref of refs) {
+    const spot = placedOnHex(g, unsqueezed(carried), ref);
+    const seated = { ...unsqueezed(carried), x: spot.x, y: spot.y };
+    if (!insideHolder(g, seated, holder)) continue;
+    const anchor = hexAnchor(g, seated);
+    const d = (anchor.x - from.x) ** 2 + (anchor.y - from.y) ** 2;
+    if (d < bestD - EPS) {
+      best = spot;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/** Lattice order: by row, then column on hex rows, by column, then row on hex columns. */
+function latticeOrder(g: HexGrid, a: Hex, b: Hex): number {
+  return g.orient === "rows" ? a.row - b.row || a.col - b.col : a.col - b.col || a.row - b.row;
 }
 
 /** The multiples of `step` from `lo` to `hi`, both inclusive, in order. */
@@ -193,11 +255,16 @@ function at(token: PlacedToken, spot: Point): PlacedToken {
  * lands on another creature is the device's to judge, since the server's
  * answer would tell a player where a hidden one stands.
  */
-export function getOffFits(settings: DistanceSettings, bounds: { w: number; h: number }, carried: FootprintToken, holder: FootprintToken, spot: Point & { elevation?: number }): boolean {
+export function getOffFits(g: Grid, settings: DistanceSettings, bounds: { w: number; h: number }, carried: FootprintToken, holder: FootprintToken, spot: Point & { elevation?: number }): boolean {
   const placed: FootprintToken = { ...at(carried, spot), elevation: spot.elevation ?? carried.elevation, ...(carried.height !== undefined ? { height: carried.height } : {}) };
-  const r = fullRect(placed);
-  if (r.x < -EPS || r.y < -EPS || r.x + r.w > bounds.w + EPS || r.y + r.h > bounds.h + EPS) return false;
-  return !overlaps(placed, holder) && withinReach(settings, placed, holder);
+  if (isHex(g)) {
+    // Inside the scene is every hex of it the scene's (docs/design-v1-hex-grids.md 4.2).
+    if (!fullHexes(g, placed).every((h) => hexInScene(g, bounds, h))) return false;
+  } else {
+    const r = fullRect(g, placed);
+    if (r.x < -EPS || r.y < -EPS || r.x + r.w > bounds.w + EPS || r.y + r.h > bounds.h + EPS) return false;
+  }
+  return !overlaps(g, placed, holder) && withinReach(g, settings, placed, holder);
 }
 
 /** A token as a walk reads it beside its link: what walkerFor needs of it and of its holder. */
@@ -228,7 +295,7 @@ type Walking = Sized & FootprintToken & Pick<Token, "id" | "sceneId" | "attached
  * (migrate.ts walksOffFromGround) always starts at the seat.
  */
 export function walkerFor<T extends Walking>(
-  state: { tokens: Readonly<Record<string, Walking | undefined>>; buildChunks: Parameters<typeof footprintGround>[0] },
+  state: { tokens: Readonly<Record<string, Walking | undefined>>; buildChunks: Parameters<typeof footprintGround>[0]; scenes: Readonly<Record<string, Pick<Scene, "gridShape"> | undefined>> },
   token: T,
   seen: SeenByAll,
   off: WalkOff = {},
@@ -239,7 +306,9 @@ export function walkerFor<T extends Walking>(
   const holder = holderOf(state.tokens, token) as Walking | undefined;
   if (!holder || !seen(token) || !seen(holder) || footing(state.buildChunks, holder) !== "ground") return token as T & Walker;
   const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) };
-  const leaves = walksOffFromGround(off.opVersion) && (off.to === undefined || !seatHolds(link.kind, { ...token, x: off.to.x, y: off.to.y }, holder));
+  const scene = state.scenes[token.sceneId];
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  const leaves = walksOffFromGround(off.opVersion) && (off.to === undefined || !seatHolds(g, link.kind, { ...token, x: off.to.x, y: off.to.y }, holder));
   return { ...token, footing: "ground", offHolder, ...(leaves ? { groundStart: true as const } : {}) } as T & Walker;
 }
 
@@ -267,6 +336,7 @@ export function landsAt(chunks: Parameters<typeof footprintGround>[0], token: Pl
  * server measures the op's: its own when not given. Null when none.
  */
 export function getOffSpot(
+  g: Grid,
   settings: DistanceSettings,
   bounds: { w: number; h: number },
   carried: FootprintToken,
@@ -274,19 +344,59 @@ export function getOffSpot(
   accept: (spot: Point) => boolean = () => true,
   landing?: (spot: Point) => number,
 ): Point | null {
+  const fits = (spot: Point) => getOffFits(g, settings, bounds, carried, holder, landing ? { ...spot, elevation: landing(spot) } : spot) && accept(spot);
+  if (isHex(g)) return hexGetOffSpot(g, settings, carried, holder, fits);
   const size = footprintSize(carried);
   const step = snapStep(carried);
-  const box = fullRect(holder);
+  const box = fullRect(g, holder);
   const center = { x: Math.round((box.x + box.w / 2 - size.w / 2) / step) * step + 0, y: Math.round((box.y + box.h / 2 - size.h / 2) / step) * step + 0 };
   // Every spot in reach lies within the holder's half width, the creature's, and the reach in cells and one more of the middle.
   const reachCells = attachReachFt(settings.feetPerCell) / settings.feetPerCell;
   const rings = Math.ceil((Math.max(box.w, box.h) / 2 + Math.max(size.w, size.h) / 2 + reachCells + 1) / step);
   for (let ring = 1; ring <= rings; ring++) {
-    for (const spot of ringSpots(center, ring, step)) {
-      if (getOffFits(settings, bounds, carried, holder, landing ? { ...spot, elevation: landing(spot) } : spot) && accept(spot)) return spot;
+    for (const spot of ringSpots(center, ring, step)) if (fits(spot)) return spot;
+  }
+  return null;
+}
+
+/**
+ * The first place to get off on hexes: ring by ring of hexes round the
+ * holder's reference hex, each ring from its east hex clockwise, as
+ * companions spread on squares, the carried token's box placed with that
+ * hex as its reference hex. A footprint reaches at most two hexes from its
+ * reference hex, so every place in reach lies within both reaches, the
+ * reach in hexes and one more.
+ */
+function hexGetOffSpot(g: HexGrid, settings: DistanceSettings, carried: FootprintToken, holder: FootprintToken, fits: (spot: Point) => boolean): Point | null {
+  const from = fullHexes(g, holder)[0]!;
+  const reachHexes = Math.ceil(attachReachFt(settings.feetPerCell) / settings.feetPerCell);
+  const rings = 2 + 2 + reachHexes + 1;
+  for (let ring = 1; ring <= rings; ring++) {
+    for (const h of eastRing(g, from, ring)) {
+      const spot = placedOnHex(g, unsqueezed(carried), h);
+      if (fits(spot)) return spot;
     }
   }
   return null;
+}
+
+/**
+ * The hexes `k` steps from `center`, from the one due east clockwise
+ * (hex.ts hexNeighbors: east, south-east, south-west, west, north-west,
+ * north-east on hex rows): each side walks one direction, starting
+ * south-west from the east hex.
+ */
+function eastRing(g: HexGrid, center: Hex, k: number): Hex[] {
+  let h = center;
+  for (let i = 0; i < k; i++) h = hexNeighbors(g, h)[0]!;
+  const out: Hex[] = [];
+  for (let side = 0; side < 6; side++) {
+    for (let i = 0; i < k; i++) {
+      out.push(h);
+      h = hexNeighbors(g, h)[(side + 2) % 6]!;
+    }
+  }
+  return out;
 }
 
 /** The spots on the square ring at Chebyshev distance `ring`, from the east of the middle, clockwise (client/features/tokens/factory.ts). */
