@@ -10,7 +10,8 @@ import type { BuildChunk, EdgeFeature, RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
 import { privateFieldsIn } from "#shared/privateFields.ts";
 import { isCellFullyFogged } from "#shared/rules/fog.ts";
-import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { assertCanvasAt, ConsoleWatch, dragCells, expandBar, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
  * Per-player vision (docs/design-v1-per-player-vision.md section 10, steps
@@ -318,6 +319,32 @@ async function exitPreview(preview: Locator): Promise<void> {
 }
 
 /**
+ * Opens View as a player from one of a token's entries (D-261027-09),
+ * checks that it is the one preview, of that player, and leaves it,
+ * waiting for focus to return to the entry.
+ */
+async function viewFrom(button: Locator, name: string, memberId: string, from: string): Promise<void> {
+  await button.click();
+  const preview = dm.locator(`dialog[aria-label="Viewing as ${name}"]`);
+  await preview.waitFor();
+  await preview.locator(".konvajs-content").first().waitFor();
+  const snapshot = previews.frames.map((text) => JSON.parse(text) as Frame).find((f) => f.t === "snapshot");
+  assert.equal(snapshot?.you?.memberId, memberId, `View as ${name} from the ${from} showed someone else's view`);
+  assert.equal(snapshot?.you?.role, "player");
+  assert.equal(await dm.locator('dialog[aria-label^="Viewing as"]').count(), 1, "one preview at a time");
+  await shots.take(dm, `viewas-${from}`);
+  await exitPreview(preview);
+  await waitFor(`focus back on the ${from}'s View as ${name}`, () => button.evaluate((el) => el === el.ownerDocument.activeElement || null));
+}
+
+/** Where a token stands in the DM's copy now. */
+function cellOf(id: string): { x: number; y: number } {
+  const t = sockets.dm.state?.tokens[id];
+  assert.ok(t, `no token ${id} in the DM's copy`);
+  return { x: t.x, y: t.y };
+}
+
+/**
  * Replays every frame a page received from its first, and returns the
  * frames after which its copy broke `rule`, by index, with what it held.
  */
@@ -562,6 +589,72 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
         await exitPreview(preview);
       }
     }
+  });
+
+  test("va-1. View as from a token: Thorn's bar and his panel's header open Ana's view, his Owners group's eye Ben's, the goblin's bar offers none, and each Exit gives focus back", async () => {
+    await dm.keyboard.press("Escape");
+    await tapCell(dm, BOUNDS, cellOf(run.goblinId));
+    const goblin = dm.getByRole("dialog", { name: "Goblin actions" });
+    await goblin.waitFor();
+    assert.equal(await goblin.getByRole("button", { name: /^View as/ }).count(), 0, "the goblin, which no player owns, offers View as");
+    await dm.keyboard.press("Escape");
+    await goblin.waitFor({ state: "detached" });
+
+    await tapCell(dm, BOUNDS, cellOf(run.thornId));
+    const bar = dm.getByRole("dialog", { name: "Thorn actions" });
+    await bar.waitFor();
+    await viewFrom(bar.getByRole("button", { name: "View as Ana", exact: true }), "Ana", run.anaId, "bar");
+
+    await openSideTab(dm, "Token");
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("Token") });
+    await viewFrom(panel.locator("[data-creature-header]").getByRole("button", { name: "View as Ana", exact: true }), "Ana", run.anaId, "panel-header");
+    const owners = panel.getByRole("button", { name: "Owners", exact: true });
+    if ((await owners.getAttribute("aria-expanded")) === "false") await owners.click();
+    // Every player has an eye there, owner or not, and the DM none.
+    assert.equal(await panel.getByRole("button", { name: /^View as Dana/ }).count(), 0, "the DM's own row has an eye");
+    await viewFrom(panel.getByRole("button", { name: "View as Ben", exact: true }), "Ben", run.benId, "owners-eye");
+    await owners.click();
+  });
+
+  test("va-2. Thorn's bar, its Read more row with View as Ana, and his panel's header measure true at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+    const sizes = [
+      { name: "1440x900", width: 1440, height: 900, touch: false },
+      { name: "390x844", width: 390, height: 844, touch: true },
+      { name: "320x568", width: 320, height: 568, touch: true },
+    ];
+    const off: string[] = [];
+    const storageState = await dmContext.storageState();
+    for (const size of sizes) {
+      for (const scale of [1, 1.3]) {
+        const at = `${size.name} at ${Math.round(scale * 100)}%`;
+        // A context of the size's kind, so a phone lays out with touch as Ana's and Ben's do. One at a time, closed after.
+        const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, storageState });
+        try {
+          await context.addInitScript((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+          const page = await context.newPage();
+          await page.goto(`${server.origin}/r/${run.roomId}`);
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          await page.locator(".konvajs-content").first().waitFor();
+          await tapCell(page, BOUNDS, cellOf(run.thornId));
+          const bar = page.getByRole("dialog", { name: "Thorn actions" });
+          await bar.waitFor();
+          await expandBar(bar);
+          const readMore = bar.getByRole("group", { name: "Read more" });
+          await readMore.getByRole("button", { name: "View as Ana", exact: true }).scrollIntoViewIfNeeded();
+          off.push(...alignmentLines(await measureAlignment(bar), `Thorn's bar at ${at}`));
+          off.push(...alignmentLines(await measureAlignment(readMore), `Thorn's Read more at ${at}`));
+          await shots.take(page, `viewas-bar-${size.name}-${Math.round(scale * 100)}`);
+          await bar.getByRole("button", { name: "Details", exact: true }).first().click();
+          const header = page.locator("[data-token-panel] [data-creature-header]").filter({ has: page.getByRole("button", { name: "View as Ana", exact: true }) });
+          await header.waitFor();
+          off.push(...alignmentLines(await measureAlignment(header), `Thorn's panel header at ${at}`));
+          await shots.take(page, `viewas-panel-${size.name}-${Math.round(scale * 100)}`);
+        } finally {
+          await context.close();
+        }
+      }
+    }
+    assert.deepEqual(off, []);
   });
 
   test("pv-5. a Night phase switch keeps the scene per player", async () => {
