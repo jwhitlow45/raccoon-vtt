@@ -11,7 +11,8 @@ import { creaturesInArea } from "../shared/rules/aoe.ts";
 import { footprintSubcells, placedOnHex, tokenRefHex } from "../shared/rules/footprint.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 import { arrowStep, isometric } from "../client/lib/view.ts";
-import { assertCanvasAt, ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
+import { assertCanvasAt, ConsoleWatch, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -22,9 +23,11 @@ import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
  * export's words, and those screens measured for alignment. A player on a
  * phone sees the same lines.
  *
- * The room's battle mat is switched to hex rows by an op, since the
- * settings that make a hex scene come with lane HX-4, which adds its own
- * steps here.
+ * The room's battle mat is switched to hex rows by an op. Lane HX-4's
+ * steps (HX4-) then make hex scenes through the settings: the room's New
+ * scenes grid, the new scene form, a scene's Grid shape and its refusal,
+ * Line up grid's box on a hex map, no "square" on a hex scene's screens,
+ * and those screens' alignment.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus 31. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -79,6 +82,9 @@ const run = {
   imp: randomUUID(),
   fireball: randomUUID(),
   guardians: randomUUID(),
+  /** The battle mat HX4-1 makes through the new scene form, on the room's hex rows. */
+  camp: "",
+  moor: randomUUID(),
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -303,6 +309,53 @@ async function openScenes(page: Page): Promise<Locator> {
 
 function exportSection(panel: Locator, page: Page): Locator {
   return panel.locator("section").filter({ has: page.getByRole("heading", { name: "Export as image", exact: true }) }).last();
+}
+
+/** Opens Room settings: the Menu's side tab on a wide screen, else the Panels sheet's Menu. */
+async function openRoomSettings(page: Page): Promise<Locator> {
+  const wide = (await page.getByRole("tablist", { name: "Panels" }).count()) > 0;
+  let menu: Locator;
+  if (wide) {
+    await openSideTab(page, "Menu");
+    menu = page.getByRole("tabpanel", { name: /^Menu/ });
+  } else {
+    const picker = page.getByRole("list", { name: "Panels" });
+    if (!(await picker.isVisible())) await page.locator('button[title="Panels"]').click();
+    await picker.getByRole("button", { name: /^Menu/ }).click();
+    menu = page.locator("dialog[data-rvtt-sheet]").filter({ visible: true }).last();
+  }
+  const back = page.getByRole("button", { name: /^Back to Menu/ });
+  if ((await back.count()) > 0 && (await back.first().isVisible())) await back.first().click();
+  await menu.getByRole("button", { name: /^Room settings/ }).click();
+  await menu.getByRole("group", { name: "Grid on new scenes" }).waitFor();
+  return menu;
+}
+
+/** Shows the DM a scene from its row in the Scenes panel, and waits for its settings. */
+async function viewScene(page: Page, panel: Locator, sceneId: string): Promise<void> {
+  const name = dmSocket.state?.scenes[sceneId]?.name ?? "";
+  await panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first().click();
+  if (page === dm) await waitFor(`the DM on ${name}`, () => dmSocket.you?.sceneId === sceneId || null);
+  const field = panel.getByRole("textbox", { name: "Scene name" }).last();
+  await waitFor(`${name}'s settings`, async () => ((await field.inputValue()) === name ? true : null));
+}
+
+/** The lines that describe an element, by its `aria-describedby`. */
+async function describedBy(target: Locator): Promise<string[]> {
+  const ids = ((await target.getAttribute("aria-describedby")) ?? "").split(" ").filter(Boolean);
+  return Promise.all(ids.map(async (id) => (await target.page().locator(`[id="${id}"]`).count()) > 0 ? target.page().locator(`[id="${id}"]`).innerText() : `missing ${id}`));
+}
+
+/** H1's limit lines, which say what a hex scene leaves to squares (section 6's table). */
+const LIMIT_LINES = new Set<string>([...Object.values(HEX_LIMITS), "Walking needs squares.", "Counted on squares only."]);
+
+/** Every word "square" the page shows, but the Squares choices' own name and H1's limit lines. */
+async function squareWords(page: Page): Promise<string[]> {
+  const text = await page.locator("body").innerText();
+  return text
+    .split("\n")
+    .map((line: string) => line.trim())
+    .filter((line) => line !== "Squares" && !LIMIT_LINES.has(line) && /square/i.test(line));
 }
 
 /** Opens the room at a size and interface scale, from a new navigation. */
@@ -674,6 +727,173 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           await shots.take(page, `hex-export-${size.name}-${scale * 100}`);
           await section.getByRole("button", { name: "Close", exact: true }).click();
           await page.keyboard.press("Escape");
+        }
+      }
+    } finally {
+      await phoneContext?.close();
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  test("HX4-1. Room settings start new scenes on hex rows, and the new scene form shows it: a battle mat and a map image on hex rows, a builder scene and starter maps on squares", async () => {
+    await dm.bringToFront();
+    const menu = await openRoomSettings(dm);
+    const start = menu.getByRole("group", { name: "Grid on new scenes" });
+    await start.getByText(NEW_SCENES_HELP, { exact: true }).waitFor();
+    assert.equal(await start.getByRole("radio", { name: "Squares" }).isChecked(), true, "the room holds a hex scene, so it names hexes, but new scenes still start on squares");
+    assert.equal(dmSocket.state?.meta.settings.newScenes, undefined);
+    await start.getByRole("radio", { name: "Hex rows" }).check();
+    await waitFor("the room's new scenes on hex rows", () => dmSocket.state?.meta.settings.newScenes === "hexRows" || null);
+    await menu.getByText("Feet per square or hex", { exact: true }).waitFor();
+    await menu.getByText(/On hex scenes every hex is one step\. This rule counts only height there\.$/).waitFor();
+    await shots.take(dm, "hx4-room-settings");
+
+    const panel = await openScenes(dm);
+    const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    const grid = panel.getByRole("radiogroup", { name: "Grid", exact: true });
+    await panel.getByRole("radio", { name: "Builder", exact: true }).click();
+    assert.equal(await grid.getByRole("radio", { name: "Squares" }).isChecked(), true, "a builder scene starts on squares");
+    await grid.getByRole("radio", { name: "Hex rows" }).check();
+    await panel.getByText(HEX_LIMITS.builder, { exact: true }).waitFor();
+    assert.ok((await describedBy(grid)).includes(HEX_LIMITS.builder), "the builder's limit describes the choice");
+    await panel.getByRole("radio", { name: "Map image", exact: true }).click();
+    assert.equal(await grid.getByRole("radio", { name: "Hex rows" }).isChecked(), true, "a map image starts on the room's hex rows");
+    await panel.getByText(HEX_LIMITS.starter, { exact: true }).waitFor();
+    await panel.getByRole("radio", { name: "Battle mat", exact: true }).click();
+    assert.equal(await grid.getByRole("radio", { name: "Hex rows" }).isChecked(), true, "a battle mat starts on the room's hex rows");
+    // The form's and, below it, the hex scene on screen's.
+    await panel.getByText("Size in 5 ft steps", { exact: true }).first().waitFor();
+    await panel.getByText("Holds 30 hexes across and 22 rows down.", { exact: true }).first().waitFor();
+    await shots.take(dm, "hx4-new-scene-hex");
+    await panel.getByPlaceholder("Battle mat").fill("Hex camp");
+    await panel.getByRole("button", { name: "Create", exact: true }).click();
+    const made = await waitFor("the new mat", () => Object.values(dmSocket.state?.scenes ?? {}).find((sc) => sc?.name === "Hex camp" && !known.has(sc.id)));
+    assert.equal(made.gridShape, "hexRows");
+    run.camp = made.id;
+    await waitFor("the DM on it", () => dmSocket.you?.sceneId === made.id || null);
+  });
+
+  test("HX4-2. a scene's Grid shape changes its grid, and a square scene with painted ground keeps its hex choices off, saying why, with focus left on Squares", async () => {
+    await ops.send({ t: "scene.create", scene: { id: run.moor, name: "Moor", bounds: { w: 20, h: 20 } } });
+    await ops.send({ t: "build.paint", sceneId: run.moor, terrain: "dirt", cells: ["4,4"] });
+    await waitFor("the moor in the DM's state", () => dmSocket.state?.scenes[run.moor] ?? null);
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.moor);
+    const map = await openSceneGroup(panel, "Map image and grid");
+    const shape = map.getByRole("radiogroup", { name: "Grid shape", exact: true });
+    const why = "This scene has painted ground on its squares, which can't stand on hexes. Remove them to change the grid.";
+    await map.getByText(why, { exact: true }).waitFor();
+    assert.equal(await shape.getByRole("radio", { name: "Hex rows" }).isDisabled(), true);
+    assert.equal(await shape.getByRole("radio", { name: "Hex columns" }).isDisabled(), true);
+    assert.deepEqual(await describedBy(shape), ["Hex rows have pointed tops and run straight across. Hex columns have flat tops and run straight down.", why]);
+    const squares = shape.getByRole("radio", { name: "Squares" });
+    await squares.focus();
+    await dm.keyboard.press("ArrowRight");
+    assert.equal(await squares.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "focus stays on Squares");
+    assert.equal(dmSocket.state?.scenes[run.moor]?.gridShape, undefined);
+    await shots.take(dm, "hx4-grid-shape-refused");
+
+    await viewScene(dm, panel, run.camp);
+    await openSceneGroup(panel, "Map image and grid");
+    await shape.getByRole("radio", { name: "Hex columns" }).check();
+    await waitFor("the camp on hex columns", () => dmSocket.state?.scenes[run.camp]?.gridShape === "hexColumns" || null);
+    await openSceneGroup(panel, "Scene");
+    await panel.getByText("Holds 34 columns across and 20 hexes down.", { exact: true }).waitFor();
+    await shape.getByRole("radio", { name: "Hex rows" }).check();
+    await waitFor("the camp back on hex rows", () => dmSocket.state?.scenes[run.camp]?.gridShape === "hexRows" || null);
+  });
+
+  test("HX4-3. Line up grid on a hex map: a box over 7 hexes, px per hex, no search for square grids, and Apply stores the hexes' size", async () => {
+    const data = await sharp({ create: { width: 600, height: 400, channels: 3, background: { r: 80, g: 90, b: 70 } } }).png().toBuffer();
+    const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
+    assert.ok(res.ok(), `the upload answered ${res.status()}`);
+    const art = (await res.json()) as { id: string; width: number; height: number };
+    await ops.send({ t: "scene.setMap", sceneId: run.camp, map: { assetId: art.id, widthPx: art.width, heightPx: art.height, cellPx: 50, originPx: { x: 0, y: 0 } } });
+    await waitFor("the camp's map", () => dmSocket.state?.scenes[run.camp]?.map?.assetId === art.id || null);
+    const panel = await openScenes(dm);
+    const map = await openSceneGroup(panel, "Map image and grid");
+    const find = map.getByRole("button", { name: "Find the grid", exact: true });
+    assert.equal(await find.isDisabled(), true, "Find the grid finds square grids only");
+    assert.deepEqual(await describedBy(find), [HEX_LIMITS.findGrid]);
+    await map.getByText(HEX_LIMITS.counting, { exact: true }).waitFor();
+    assert.equal(await map.getByText("Or count the squares").count(), 0);
+    await map.getByRole("button", { name: "Line up the grid", exact: true }).click();
+    const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
+    await bar.locator("[data-options-line]").filter({ hasText: "Drag a box over 3 hexes across. Fine-tune it by its corners." }).waitFor();
+    await bar.getByText("50 px per hex", { exact: true }).filter({ visible: true }).first().waitFor();
+    assert.equal(await bar.getByRole("button", { name: HEX_LIMITS.findGrid }).isDisabled(), true);
+    await bar.getByRole("button", { name: /^Nudge/ }).first().click();
+    const larger = dm.getByRole("button", { name: "Make the hexes larger" });
+    for (let i = 0; i < 3; i++) await larger.click();
+    await dm.keyboard.press("Escape");
+    await bar.getByText("51 px per hex", { exact: true }).filter({ visible: true }).first().waitFor();
+    await shots.take(dm, "hx4-line-up-hexes");
+    await bar.getByRole("button", { name: "Apply", exact: true }).click();
+    const lined = await waitFor("the camp's hexes at 51 px", () => (dmSocket.state?.scenes[run.camp]?.map?.cellPx === 51 ? dmSocket.state.scenes[run.camp]!.map! : null));
+    assert.ok(lined.originPx.x >= 0 && lined.originPx.y >= 0, "a hex scene's origin never lies before the image");
+    await pickTool(dm, "Select");
+  });
+
+  test("HX4-4. no square on a hex scene's screens, the DM's settings or Pat's board, but the Squares choices", async () => {
+    const panel = await openScenes(dm);
+    await openSceneGroup(panel, "Map image and grid");
+    await openSceneGroup(panel, "Scene");
+    assert.deepEqual(await squareWords(dm), [], "the DM's screen");
+    await pat.bringToFront();
+    assert.deepEqual(await squareWords(pat), [], "Pat's screen");
+    await dm.bringToFront();
+  });
+
+  test("HX4-5. Room settings, the new scene form on hexes, a hex scene's settings, Line up grid's options and the builder's line sit within 1 px at each size", async () => {
+    const off: string[] = [];
+    let phoneContext: BrowserContext | null = null;
+    try {
+      for (const size of SIZES) {
+        let page = dm;
+        if (size.touch) {
+          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+          const pages = phoneContext.pages();
+          page = pages[0] ?? (await phoneContext.newPage());
+          if (pages.length === 0) consoles.phone.attach(page);
+        }
+        for (const scale of SCALES) {
+          const at = `${size.name} at ${scale * 100}%`;
+          await openAt(page, size, scale);
+          const menu = await openRoomSettings(page);
+          await menu.getByRole("group", { name: "Grid on new scenes" }).scrollIntoViewIfNeeded();
+          off.push(...alignmentLines(await measureAlignment(menu), `Room settings at ${at}`));
+          await shots.take(page, `hx4-room-settings-${size.name}-${scale * 100}`);
+          await page.keyboard.press("Escape");
+
+          const panel = await openScenes(page);
+          await viewScene(page, panel, run.camp);
+          await openSceneGroup(panel, "Map image and grid");
+          await openSceneGroup(panel, "Scene");
+          await panel.getByRole("radiogroup", { name: "Grid shape", exact: true }).scrollIntoViewIfNeeded();
+          // The groups this lane changed. The scene list above them is not this lane's.
+          off.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Map image and grid")), `a hex scene's Map image and grid at ${at}`));
+          off.push(...alignmentLines(await measureAlignment(sceneGroup(panel, "Scene")), `a hex scene's Scene group at ${at}`));
+          await shots.take(page, `hx4-scene-settings-${size.name}-${scale * 100}`);
+          await panel.getByRole("radio", { name: "Builder", exact: true }).click();
+          const grid = panel.getByRole("radiogroup", { name: "Grid", exact: true });
+          await grid.getByRole("radio", { name: "Hex rows" }).check();
+          await panel.getByText(HEX_LIMITS.builder, { exact: true }).scrollIntoViewIfNeeded();
+          off.push(...alignmentLines(await measureAlignment(panel.getByRole("radiogroup", { name: "Kind of scene" }).locator("xpath=..")), `the new scene form on hexes at ${at}`));
+          await shots.take(page, `hx4-new-scene-${size.name}-${scale * 100}`);
+          await panel.getByRole("button", { name: "Cancel", exact: true }).first().click();
+          await page.keyboard.press("Escape");
+
+          await pickTool(page, "Line up grid");
+          const bar = page.getByRole("toolbar", { name: "Line up grid options" });
+          await bar.locator("[data-options-line]").first().waitFor();
+          off.push(...alignmentLines(await measureAlignment(bar), `Line up grid's options at ${at}`));
+          await shots.take(page, `hx4-line-up-${size.name}-${scale * 100}`);
+          await pickTool(page, "Map builder");
+          const build = page.getByRole("toolbar", { name: "Map builder options" });
+          await build.locator("[data-options-line]").filter({ hasText: HEX_LIMITS.builder }).waitFor();
+          off.push(...alignmentLines(await measureAlignment(build), `the builder's options at ${at}`));
+          await shots.take(page, `hx4-builder-${size.name}-${scale * 100}`);
+          await pickTool(page, "Select");
         }
       }
     } finally {

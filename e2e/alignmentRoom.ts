@@ -3886,6 +3886,18 @@ async function cryptScene(): Promise<string> {
   return id;
 }
 
+/** The crypt on hex rows (docs/design-v1-hex-grids.md section 8): its Grid shape, its Size row's hexes and its map's grid row on hexes. */
+let hexCryptId: string | null = null;
+
+async function hexCryptScene(crypt: string): Promise<string> {
+  if (hexCryptId) return hexCryptId;
+  const id = randomUUID();
+  await ops.send({ t: "scene.duplicate", sceneId: crypt, newSceneId: id, name: "Hex crypt", include: { creatures: false, characters: false, fog: false, drawings: false } });
+  await ops.send({ t: "scene.update", sceneId: id, patch: { gridShape: "hexRows" } });
+  hexCryptId = id;
+  return id;
+}
+
 /** Shows the DM a scene from its row in the Scenes panel, and waits for its settings. */
 async function viewScene(panel: Locator, sceneId: string): Promise<void> {
   const name = dmSocket.state?.scenes[sceneId]?.name ?? "";
@@ -3994,6 +4006,58 @@ export function sceneSettingsTests(): void {
     assert.deepEqual(lines, [], "the scene settings page or the radio cards out of line");
     assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
     withinSnapshotBudget("ms2-a");
+  });
+
+  /*
+   * hx4-a: a hex scene's settings (docs/design-v1-hex-grids.md section 8),
+   * the crypt's map on hex rows, every group open: Grid shape, the Size row
+   * in feet steps with the hexes it holds, and Find the grid and counting
+   * off with their reasons. Then Room settings, which name squares or hexes
+   * once the room holds a hex scene. A session of its own, since ms2-a's
+   * scene switches fill one session's snapshot budget.
+   */
+  test(`hx4-a. a hex scene's settings, every group open, and Room settings in a room with hexes, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, within ${LIMIT_PX} px (docs/design-v1-hex-grids.md section 8)`, async () => {
+    await newDmSession();
+    const hexCrypt = await hexCryptScene(await cryptScene());
+    const lines: string[] = [];
+    for (const at of FU30_AT) {
+      const sweep = new Sweep(`hx4-${atName(at)}`);
+      const page = await dmPageFor(at.size);
+      page.setDefaultTimeout(10_000);
+      await openAt(page, at.size, at.scale);
+      await waitFor("the DM's snapshot", () => dmSocket.state);
+      try {
+        const panel = await openDmPanel(page, "Scenes");
+        await viewScene(panel, hexCrypt);
+        for (const group of SCENE_GROUP_NAMES) await openSceneGroup(panel, group);
+        const map = sceneGroup(panel, "Map image and grid");
+        await map.getByRole("radiogroup", { name: "Grid shape", exact: true }).scrollIntoViewIfNeeded();
+        await sweep.measure(page, "scene-settings-hex", map);
+        await sweep.measure(page, "scene-size-hex", sceneGroup(panel, "Scene"));
+        await shots.take(page, `alignment-${sweep.at}-scene-settings-hex`);
+        await closeSheets(page);
+        const menu = await openMenu(page);
+        const back = page.getByRole("button", { name: /^Back to Menu/ });
+        if (await visible(back)) await back.click();
+        await menu.getByRole("button", { name: /^Room settings/ }).click();
+        await menu.getByText("Feet per square or hex", { exact: true }).waitFor();
+        await sweep.measure(page, "room-settings-hex", menu);
+        await back.click();
+        await closeSheets(page);
+      } finally {
+        await page.evaluate(() => localStorage.removeItem("rvtt.sceneSettingsFolds"));
+        await escapeAll(page);
+      }
+      console.log(`${sweep.at}: measured ${[...sweep.seen].join(", ")}`);
+      lines.push(...sweep.lines);
+    }
+    // Later sweeps start on the players' scene.
+    const page = await dmPageFor(FU30_AT.at(-1)!.size);
+    await viewScene(await openDmPanel(page, "Scenes"), run.sceneId);
+    await escapeAll(page);
+    assert.deepEqual(lines, [], "a hex scene's settings or Room settings out of line");
+    assert.deepEqual(consoles.dm.errors, [], "the DM's page logged errors");
+    withinSnapshotBudget("hx4-a");
   });
 }
 
