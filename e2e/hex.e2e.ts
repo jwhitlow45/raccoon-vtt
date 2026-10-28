@@ -14,6 +14,7 @@ import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
 import { assertCanvasAt, ConsoleWatch, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
 
 /**
  * The board on a hex scene (docs/design-v1-hex-grids.md 10, lane HX-3):
@@ -95,6 +96,11 @@ const run = {
   hall: randomUUID(),
   ash: randomUUID(),
   hallDoor: "hx6door00001",
+  /** Lane HX-5's hex scene (HX5-): a wall of rock with a gap, and a one-row corridor. */
+  vault: randomUUID(),
+  vaultGob: randomUUID(),
+  vaultOgre: randomUUID(),
+  vaultEntry: randomUUID(),
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -1250,6 +1256,93 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
       await phoneContext?.close();
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  /** HX-5's vault: rock down column 10 with a gap at row 6, and a block of rock east of it with a one-row corridor along row 14. */
+  const VAULT_ROCK = (h: Hex) => (h.col === 10 && h.row !== 6) || (h.col >= 16 && h.col <= 22 && h.row >= 11 && h.row <= 17 && h.row !== 14);
+  const vaultToken = (id: string) => dmSocket.state?.tokens[id];
+  const onVaultHex = (id: string, size: "medium" | "large", hex: Hex) => {
+    const at = placedOnHex(G, { size, x: 0, y: 0 }, hex);
+    const t = vaultToken(id);
+    return t && Math.abs(t.x - at.x) < 1e-9 && Math.abs(t.y - at.y) < 1e-9 ? t : null;
+  };
+
+  test("HX5-1. on a hex scene that stops moves the walking ruler walks round the rock through its gap, longer than the straight hexes", async () => {
+    await ops.send({ t: "scene.create", scene: { id: run.vault, name: "Vault", bounds: BOUNDS, gridShape: "hexRows" } });
+    await waitFor("the vault in the DM's state", () => dmSocket.state?.scenes[run.vault] ?? null);
+    // The DM's copy holds the build of the scene in view, so the vault is opened before its walls go down.
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.vault);
+    await dm.keyboard.press("Escape");
+    await ops.send({ t: "scene.update", sceneId: run.vault, patch: { blockMovement: true } });
+    const walls = wallsRound(G, BOUNDS, VAULT_ROCK);
+    for (let i = 0; i < walls.length; i += 100) await ops.send({ t: "build.walls", sceneId: run.vault, put: walls.slice(i, i + 100) });
+    await waitFor("the vault's walls, and moves stopped there", () => (dmSocket.state?.scenes[run.vault]?.blockMovement === true && Object.values(dmSocket.state?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === run.vault ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await pickTool(dm, "Ruler");
+    const { group, popover } = await measureChoice(dm);
+    await group.getByRole("radio", { name: "Walking", exact: true }).click();
+    if (popover) {
+      await dm.keyboard.press("Escape");
+      await popover.waitFor({ state: "detached" });
+    }
+    // Eight hexes east along row 9, through the rock: 40 ft straight, and the walk goes up through the gap at row 6.
+    await holdDrag(dm, hexCenter(G, { col: 6, row: 9 }), hexCenter(G, { col: 14, row: 9 }));
+    await dm.mouse.up();
+    const line = dm.getByRole("toolbar", { name: "Ruler options" }).locator("[data-options-line]");
+    const reading = await waitFor("the walking reading", async () => {
+      const text = await line.innerText();
+      const m = /Walking (\d+) ft/.exec(text);
+      return m ? Number(m[1]) : null;
+    });
+    assert.ok(reading > 40 && reading % 5 === 0, `${reading} ft walks round the rock, whole hexes`);
+    await waitFor("the board's walk drawn round the rock", async () => ((await boardTexts(dm)).some((t) => t.startsWith(`Walking ${reading} ft`)) ? true : null), 5_000);
+    await shots.take(dm, "hx5-walking-ruler");
+    const back = await measureChoice(dm);
+    await back.group.getByRole("radio", { name: "Straight", exact: true }).click();
+    if (back.popover) {
+      await dm.keyboard.press("Escape");
+      await back.popover.waitFor({ state: "detached" });
+    }
+    await pickTool(dm, "Select");
+  });
+
+  test("HX5-2. on its turn a goblin dragged across the rock walks round through the gap: its stop keeps the route's corners and the walk's feet", async () => {
+    await ops.send(creature(run.vaultGob, "Vault goblin", "medium", { col: 6, row: 9 }, { sceneId: run.vault }));
+    await waitFor("the vault goblin", () => onVaultHex(run.vaultGob, "medium", { col: 6, row: 9 }));
+    await ops.send({ t: "encounter.start", entries: [{ id: run.vaultEntry, tokenId: run.vaultGob, value: 12 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the vault goblin's turn", () => (dmSocket.state?.encounter?.activeEntryId === run.vaultEntry ? true : null));
+    await holdDrag(dm, hexCenter(G, { col: 6, row: 9 }), hexCenter(G, { col: 14, row: 9 }));
+    const label = await waitFor("the drag's label", async () => (await boardTexts(dm)).find((t) => /^\d+ ft\b/.test(t)) ?? null, 5_000);
+    await shots.take(dm, "hx5-drag-round-the-rock");
+    await dm.mouse.up();
+    await waitFor("the goblin past the rock", () => onVaultHex(run.vaultGob, "medium", { col: 14, row: 9 }));
+    const stop = await waitFor("the move's stop", () => vaultToken(run.vaultGob)?.path?.stops.at(-1));
+    assert.ok(stop.via && stop.via.length > 0, "the route's corners");
+    assert.ok(stop.moved! > 40, `${stop.moved} ft round the rock`);
+    assert.match(label, new RegExp(`^${stop.cost} ft`), "the label read what the move stored");
+    await ops.send({ t: "encounter.end" });
+  });
+
+  test("HX5-3. an ogre dragged into the one-row corridor squeezes onto one hex there, and one walked through it pays for each squeezed hex", async () => {
+    await ops.send(creature(run.vaultOgre, "Vault ogre", "large", { col: 13, row: 13 }, { sceneId: run.vault }));
+    await waitFor("the vault ogre", () => onVaultHex(run.vaultOgre, "large", { col: 13, row: 13 }));
+    await ops.send({ t: "encounter.start", entries: [{ id: run.vaultEntry, tokenId: run.vaultOgre, value: 12 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the ogre's turn", () => (dmSocket.state?.encounter?.activeEntryId === run.vaultEntry ? true : null));
+    const from = placedOnHex(G, { size: "large", x: 0, y: 0 }, { col: 13, row: 13 });
+    await holdDrag(dm, { x: from.x + 1, y: from.y + 1 }, hexCenter(G, { col: 19, row: 14 }));
+    await dm.mouse.up();
+    const inside = await waitFor("the ogre squeezed in the corridor", () => {
+      const t = vaultToken(run.vaultOgre);
+      return t?.squeeze === true && tokenRefHex(G, t).row === 14 && tokenRefHex(G, t).col >= 16 ? t : null;
+    });
+    assert.equal(footprintSubcells(G, inside).length <= 16, true, "it stands on one hex");
+    await shots.take(dm, "hx5-ogre-squeezed");
+    const stop = inside.path!.stops.at(-1)!;
+    assert.ok(stop.cost! > stop.moved!, `${stop.cost} ft for ${stop.moved} ft walked: the squeeze costs`);
+    await ops.send({ t: "encounter.end" });
   });
 
   test("HX-12. no page logged an error", () => {
