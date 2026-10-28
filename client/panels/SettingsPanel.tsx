@@ -9,6 +9,7 @@ import { Help, Section } from "../components/Panel.tsx";
 import { SettingRow } from "../components/SettingRow.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { RadioGroup } from "../features/dm/controls.tsx";
+import { roomHasHexes, type ShapeChoice } from "../features/grid/words.ts";
 import type { PanelProps } from "../features/panels.ts";
 import { timerChoices } from "../features/encounter/timer.ts";
 import { ExportSection } from "../features/settings/ExportSection.tsx";
@@ -19,9 +20,10 @@ import {
   moveAnyMode,
   newScenesChoice,
   newScenesOptions,
+  newScenesShape,
   parseFeetPerCell,
   parseRoomName,
-  SETTING_GROUPS,
+  settingGroups,
   settingsOp,
   toggleOn,
   withMover,
@@ -46,6 +48,8 @@ export default function SettingsPanel(_props: PanelProps) {
   const settings = useRoomView((s) => s.view?.meta.settings);
   const name = useRoomView((s) => s.view?.meta.name);
   const actions = useRoomActions();
+  // One boolean, so the form redraws only when the room first or last holds a hex scene.
+  const hexes = useRoomView((s) => (s.view ? roomHasHexes(Object.values(s.view.scenes), s.view.meta.settings) : false));
   if (role !== "dm") return <Empty>Only the DM can change the room's settings.</Empty>;
   if (!settings || name === undefined) return <Loading text="Loading…" />;
 
@@ -59,7 +63,7 @@ export default function SettingsPanel(_props: PanelProps) {
       <Section divider={false}>
         <RoomName current={name} onSave={(value) => actions.dispatch({ t: "room.update", name: value })} />
       </Section>
-      {SETTING_GROUPS.map((group) => (
+      {settingGroups(hexes).map((group) => (
         <Section key={group.heading} label={group.heading}>
           {group.fields.map((field) => (
             <SettingControl key={field.key} field={field} settings={settings} onChange={apply} />
@@ -106,6 +110,18 @@ function SettingControl(props: { field: SettingField; settings: RoomSettings; on
             onChange={(v) => {
               if (v !== "before") onChange({ newScenePlayers: v });
             }}
+          />
+        </div>
+      );
+    case "gridShape":
+      return (
+        <div style={{ padding: `${theme.space(2)}px 0` }}>
+          <RadioGroup<ShapeChoice>
+            legend={field.label}
+            help={field.help}
+            value={newScenesShape(settings)}
+            options={field.options}
+            onChange={(v) => onChange({ newScenes: v } as Partial<RoomSettings>)}
           />
         </div>
       );

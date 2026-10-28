@@ -6,6 +6,7 @@ import { playersTypeTotals } from "#shared/permissions.ts";
 import { orderRevealOf } from "#shared/rules/initiative.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
 import { TIMER_CHOICES } from "../encounter/timer.ts";
+import { NEW_SCENES_HELP, SHAPE_CHOICES, shapeChoice, type ShapeChoice } from "../grid/words.ts";
 import { IMAGE_STEPS_DOWN, PLAYERS_SEE } from "../vision/playersSeeRules.ts";
 
 /**
@@ -33,7 +34,9 @@ export type SettingField =
   | { kind: "movers"; key: "playersMoveAny"; label: string; help: string; options: Choice<MoveAnyMode>[] }
   | { kind: "drawers"; key: "playersDraw"; label: string; help: string; options: Choice<MoveAnyMode>[] }
   /** What players see on new scenes, with "As before" offered only while a room has never set it, since no op takes the setting away. */
-  | { kind: "newScenes"; key: "newScenePlayers"; label: string; help: string; options: Choice<ScenePreset>[]; before: Choice<"before"> };
+  | { kind: "newScenes"; key: "newScenePlayers"; label: string; help: string; options: Choice<ScenePreset>[]; before: Choice<"before"> }
+  /** The grid shape new battle mats and map images start with (docs/design-v1-hex-grids.md HX-D19). Squares, absent, store nothing. */
+  | { kind: "gridShape"; key: "newScenes"; label: string; help: string; options: { value: ShapeChoice; label: string }[] };
 
 export type SettingGroup = { heading: string; fields: SettingField[] };
 
@@ -188,6 +191,13 @@ export const SETTING_GROUPS: SettingGroup[] = [
           { value: "euclid", label: "True distance", help: "Measures the straight line, rounded to the nearest foot." },
         ],
       },
+      {
+        kind: "gridShape",
+        key: "newScenes",
+        label: "Grid on new scenes",
+        help: NEW_SCENES_HELP,
+        options: [...SHAPE_CHOICES],
+      },
     ],
   },
   {
@@ -231,6 +241,56 @@ export const SETTING_GROUPS: SettingGroup[] = [
     ],
   },
 ];
+
+/**
+ * The words that name the grid's cell in Room settings, as a room with hex
+ * scenes reads them (docs/design-v1-hex-grids.md section 6, the Room
+ * settings row): while the room holds a hex scene or starts new ones on
+ * hexes, "square" becomes "square or hex", and Diagonal moves says what its
+ * rule counts on hexes. A square room reads SETTING_GROUPS as it is.
+ */
+const HEX_WORDS: Partial<Record<SettingField["key"], { label?: string; help?: string; options?: Record<string, { label?: string; help?: string }> }>> = {
+  feetPerCell: { label: "Feet per square or hex", help: "How far one grid square or hex is. 5 by default, 1 to 100." },
+  diagonal: { help: "How the ruler and ranges count a diagonal step. On hex scenes every hex is one step. This rule counts only height there." },
+  aoeCoverage: {
+    label: "Which squares or hexes an area covers",
+    help: "Decides which grid squares or hexes are shaded as inside an area.",
+    options: {
+      half: { label: "At least half the square or hex" },
+      any: { label: "Any part of the square or hex" },
+      center: { label: "The square's or hex's center", help: "Only squares or hexes whose center is inside." },
+    },
+  },
+  aoeInclusion: {
+    options: {
+      anyCell: { label: "Any square or hex the creature is in", help: "A creature is caught if any of its squares or hexes is covered. The default." },
+    },
+  },
+};
+
+/** The form's groups in the room's words: SETTING_GROUPS, or with HEX_WORDS over it while the room has hexes (grid/words.ts `roomHasHexes`). */
+export function settingGroups(hexes: boolean): SettingGroup[] {
+  if (!hexes) return SETTING_GROUPS;
+  return SETTING_GROUPS.map((g) => ({
+    ...g,
+    fields: g.fields.map((f) => {
+      const words = HEX_WORDS[f.key];
+      if (!words) return f;
+      const next = { ...f, ...(words.label ? { label: words.label } : null), ...(words.help ? { help: words.help } : null) };
+      if ("options" in next && words.options) {
+        const over = words.options;
+        const options = (next.options as readonly { value: string | number }[]).map((o) => ({ ...o, ...over[String(o.value)] }));
+        return { ...next, options } as SettingField;
+      }
+      return next as SettingField;
+    }),
+  }));
+}
+
+/** The grid new scenes start on, as the form shows it: absent is squares. */
+export function newScenesShape(settings: Pick<RoomSettings, "newScenes">): ShapeChoice {
+  return shapeChoice(settings.newScenes);
+}
 
 /** Players see on new scenes as the form shows it: the room's pick, or "As before" in a room from before the setting (docs/design-v1-map-discovery.md 8.2). */
 export function newScenesChoice(settings: Pick<RoomSettings, "newScenePlayers">): ScenePreset | "before" {
@@ -303,6 +363,8 @@ export function settingsPatch(current: RoomSettings, next: Partial<RoomSettings>
     const value = next[key];
     // The one list among the settings compares by its contents.
     if (value === undefined || JSON.stringify(value) === JSON.stringify(current[key])) continue;
+    // Squares are stored as no shape, so picking them in a room that never left squares changes nothing.
+    if (key === "newScenes" && (value as unknown) === "squares" && current.newScenes === undefined) continue;
     (patch as Record<string, unknown>)[key] = value;
     changed = true;
   }

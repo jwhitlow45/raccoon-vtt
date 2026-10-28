@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DEFAULT_SETTINGS, type RoomSettings } from "#shared/model.ts";
 import { clientOpSchema } from "#shared/protocol.ts";
-import { allFields, choiceOf, drawersOf, moveAnyFor, moveAnyMode, newScenesChoice, newScenesOptions, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingsOp, settingsPatch, toggleOn, withMover } from "./form.ts";
+import { roomHasHexes } from "../grid/words.ts";
+import { allFields, choiceOf, drawersOf, moveAnyFor, moveAnyMode, newScenesChoice, newScenesOptions, newScenesShape, parseFeetPerCell, parseRoomName, SETTING_GROUPS, settingGroups, settingsOp, settingsPatch, toggleOn, withMover } from "./form.ts";
 
 describe("settings form", () => {
   test("lists every room setting exactly once", () => {
     const keys = allFields().map((f) => f.key).sort();
     // Settings a room may lack, which read as a default when absent, so DEFAULT_SETTINGS leaves them out.
-    const optional: (keyof RoomSettings)[] = ["playersDraw", "newScenePlayers"];
+    const optional: (keyof RoomSettings)[] = ["playersDraw", "newScenePlayers", "newScenes"];
     assert.deepEqual(keys, [...(Object.keys(DEFAULT_SETTINGS) as (keyof RoomSettings)[]), ...optional].sort());
   });
 
@@ -197,5 +198,42 @@ describe("settings form", () => {
     assert.deepEqual(parseRoomName("  Tuesday  "), { ok: true, value: "Tuesday" });
     assert.equal(parseRoomName("   ").ok, false);
     assert.equal(parseRoomName("x".repeat(81)).ok, false);
+  });
+
+  test("Grid on new scenes is last in Grid and distance, squares by default, and squares in a square room send nothing (docs/design-v1-hex-grids.md HX-D19)", () => {
+    const group = SETTING_GROUPS.find((g) => g.heading === "Grid and distance")!;
+    const field = group.fields.at(-1)!;
+    assert.equal(field.key, "newScenes");
+    assert.equal(field.label, "Grid on new scenes");
+    assert.equal(field.help, "The grid a new battle mat or map starts with. Builder scenes and starter maps start on squares. Each new scene can pick its own.");
+    if (field.kind !== "gridShape") return assert.fail("not a shape choice");
+    assert.deepEqual(field.options.map((o) => o.label), ["Squares", "Hex rows", "Hex columns"]);
+    assert.equal(newScenesShape(DEFAULT_SETTINGS), "squares");
+    assert.equal(newScenesShape({ newScenes: "hexColumns" }), "hexColumns");
+    const op = settingsOp(DEFAULT_SETTINGS, { newScenes: "hexRows" });
+    assert.ok(op && clientOpSchema.safeParse(op).success);
+    assert.equal(settingsOp(DEFAULT_SETTINGS, { newScenes: "squares" } as unknown as Partial<RoomSettings>), null, "squares are no shape at all");
+    const back = settingsOp({ ...DEFAULT_SETTINGS, newScenes: "hexRows" }, { newScenes: "squares" } as unknown as Partial<RoomSettings>);
+    assert.ok(back && clientOpSchema.safeParse(back).success, "squares take the shape away again");
+  });
+
+  test("a room with hexes names squares or hexes, and a square room's words stay as they were (docs/design-v1-hex-grids.md section 6)", () => {
+    assert.equal(settingGroups(false), SETTING_GROUPS);
+    const hex = settingGroups(true).flatMap((g) => g.fields);
+    const by = (key: string) => hex.find((f) => f.key === key)!;
+    assert.equal(by("feetPerCell").label, "Feet per square or hex");
+    assert.match(by("diagonal").help, /On hex scenes every hex is one step\. This rule counts only height there\.$/);
+    assert.equal(by("aoeCoverage").label, "Which squares or hexes an area covers");
+    const cover = by("aoeCoverage");
+    if (cover.kind !== "choice") return assert.fail();
+    assert.deepEqual(cover.options.map((o) => o.label), ["At least half the square or hex", "Any part of the square or hex", "The square's or hex's center"]);
+    assert.equal(cover.options[0]!.help, "The 2024 rule.", "an option's own help stays where the words name no cell");
+    const caught = by("aoeInclusion");
+    if (caught.kind !== "choice") return assert.fail();
+    assert.equal(caught.options[0]!.label, "Any square or hex the creature is in");
+    assert.deepEqual(hex.map((f) => f.key), allFields().map((f) => f.key), "the same settings in the same order");
+    assert.equal(roomHasHexes([{}, {}], {}), false);
+    assert.equal(roomHasHexes([{}, { gridShape: "hexColumns" }], {}), true);
+    assert.equal(roomHasHexes([], { newScenes: "hexRows" }), true);
   });
 });
