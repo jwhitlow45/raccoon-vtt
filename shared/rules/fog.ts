@@ -1,7 +1,8 @@
 import { CHUNK_CELLS, FOG_SUBCELLS, type FogOp, type FogShape, type FogTile, type Label, type Token } from "../model.ts";
 import { tileKey } from "../keys.ts";
 import { occupiedCells, type CellRange, type PlacedToken } from "./footprint.ts";
-import type { Grid } from "./grid.ts";
+import { SQUARES, isHex, type Grid } from "./grid.ts";
+import { hexInScene, hexSubcells, parseHexKey } from "./hex.ts";
 import { labelBox } from "./labels.ts";
 import type { SegmentIndex } from "./segments.ts";
 import { clipFootprint } from "./vision.ts";
@@ -239,7 +240,7 @@ function clampRange(a: number, b: number, max: number): [number, number] {
   return [Math.max(0, a), Math.min(max, b)];
 }
 
-function rasterOf(shape: FogShape, bounds: Bounds): Raster | null {
+function rasterOf(shape: FogShape, bounds: Bounds, grid: Grid): Raster | null {
   const maxSx = bounds.w * FOG_SUBCELLS;
   const maxSy = bounds.h * FOG_SUBCELLS;
   switch (shape.kind) {
@@ -255,6 +256,28 @@ function rasterOf(shape: FogShape, bounds: Bounds): Raster | null {
       return { sx0, sy0, sx1, sy1, inside: (px, py) => px >= x0 && px < x1 && py >= y0 && py < y1 };
     }
     case "cells": {
+      if (isHex(grid)) {
+        // On a hex scene a key names a hex (docs/design-v1-hex-grids.md HX-D10), which covers the sub-cells whose
+        // centers it holds, the ones a creature standing there is read on.
+        const subs = new Set<number>();
+        let sx0 = Number.POSITIVE_INFINITY;
+        let sy0 = Number.POSITIVE_INFINITY;
+        let sx1 = Number.NEGATIVE_INFINITY;
+        let sy1 = Number.NEGATIVE_INFINITY;
+        for (const key of shape.cells) {
+          const hex = parseHexKey(key);
+          if (!hex || !hexInScene(grid, bounds, hex)) continue;
+          for (const [sx, sy] of hexSubcells(grid, hex)) {
+            subs.add(sy * maxSx + sx);
+            sx0 = Math.min(sx0, sx);
+            sy0 = Math.min(sy0, sy);
+            sx1 = Math.max(sx1, sx + 1);
+            sy1 = Math.max(sy1, sy + 1);
+          }
+        }
+        if (subs.size === 0) return null;
+        return { sx0, sy0, sx1, sy1, inside: (px, py) => subs.has(((py - 1) / 2) * maxSx + (px - 1) / 2) };
+      }
       const set = new Set<string>();
       let minX = Number.POSITIVE_INFINITY;
       let minY = Number.POSITIVE_INFINITY;
@@ -385,7 +408,7 @@ export type RasterChange = Record<string, FogTile | null>;
  * changed, keyed like `fogTiles`, with null for tiles that became entirely
  * fogged. Revs are left to the caller.
  */
-export function rasterizeFogOps(tiles: TileMap, sceneId: string, bounds: Bounds, ops: FogOp[]): RasterChange {
+export function rasterizeFogOps(tiles: TileMap, sceneId: string, bounds: Bounds, ops: FogOp[], grid: Grid = SQUARES): RasterChange {
   const work = new Map<string, Uint8Array | null>();
   const tilesX = tilesAcross(bounds.w);
   const tilesY = tilesAcross(bounds.h);
@@ -415,7 +438,7 @@ export function rasterizeFogOps(tiles: TileMap, sceneId: string, bounds: Bounds,
       }
       continue;
     }
-    const raster = rasterOf(op.shape, bounds);
+    const raster = rasterOf(op.shape, bounds, grid);
     if (!raster) continue;
     for (let sy = raster.sy0; sy < raster.sy1; sy++) {
       const py = sy * 2 + 1;

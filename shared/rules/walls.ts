@@ -6,9 +6,12 @@ import type { DoorRef } from "../protocol.ts";
 import { chunkHeights, chunkMarks, COMPASS, compassOf, stairDirections, type Compass } from "./heights.ts";
 import { sweptTouches } from "./movement.ts";
 import { isWritable } from "../writable.ts";
+import { hexAt, hexCenter, hexInScene, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
 import {
+  APART,
   AREAS,
   boundsOf,
+  contact,
   countSplit,
   LATTICE,
   MAX_COORD,
@@ -1640,6 +1643,62 @@ export function floodRoom(
     visit(x - 1, y, edgeId(x, y, "w"));
     visit(x, y + 1, edgeId(x, y + 1, "n"));
     visit(x, y - 1, edgeId(x, y, "n"));
+  }
+  return { cells, truncated };
+}
+
+/**
+ * The room under a point on a hex scene for "reveal room"
+ * (docs/design-v1-hex-grids.md HX-D10, phase H3): the scene's hexes
+ * reachable from the one holding the point, a step between two neighbors
+ * blocked where a movement wall touches the line between their centers. So
+ * walls, windows, closed and locked doors, and secret doors not yet found
+ * bound a room, as they stop a creature's step (HX-D8). Touching counts, as
+ * it does there, so two walls whose ends only meet on that line still
+ * close it. A hex scene has no painted floor, so only its walls and its
+ * edge bound a room, and a room open to the edge runs to it. Empty when the
+ * point holds no hex of the scene. Stops after `maxCells` hexes and reports
+ * `truncated`. Hexes come back as `"col,row"` keys, the form a hex scene's
+ * fog cells take.
+ */
+export function floodHexRoom(
+  walls: WallSet,
+  g: HexGrid,
+  bounds: { w: number; h: number },
+  start: Point,
+  opts: { maxCells?: number } = {},
+): { cells: string[]; truncated: boolean } {
+  const { maxCells = Infinity } = opts;
+  const first = hexAt(g, start);
+  if (!hexInScene(g, bounds, first)) return { cells: [], truncated: false };
+  const index = walls.storedIndex;
+  const xy = index.xy;
+  // A scene's hex keys stay below MAX_BUILD_COORD on both axes, so one number names a hex.
+  const id = (h: Hex) => h.col * (MAX_BUILD_COORD + 1) + h.row;
+  const blocked = (a: Point, b: Point): boolean => {
+    let hit = false;
+    index.query(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y), MOVEMENT, (k) => {
+      if (!hit && contact(a.x, a.y, b.x, b.y, xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!) !== APART) hit = true;
+    });
+    return hit;
+  };
+  const seen = new Set<number>([id(first)]);
+  const queue: Hex[] = [first];
+  const cells: string[] = [];
+  let truncated = false;
+  for (let head = 0; head < queue.length; head++) {
+    if (cells.length >= maxCells) {
+      truncated = true;
+      break;
+    }
+    const h = queue[head]!;
+    cells.push(hexKey(h));
+    const at = hexCenter(g, h);
+    for (const n of hexNeighbors(g, h)) {
+      if (seen.has(id(n)) || !hexInScene(g, bounds, n) || blocked(at, hexCenter(g, n))) continue;
+      seen.add(id(n));
+      queue.push(n);
+    }
   }
   return { cells, truncated };
 }

@@ -123,11 +123,11 @@ describe("H1's refusals on a hex scene", () => {
     assert.equal(decide({ t: "token.update", tokenId: "horse", patch: { sceneId: "s2" } }, squares), "ok", "onto squares");
   });
 
-  test("Reveal room's fog shapes, drafted or live, while every other shape goes", () => {
+  test("from H3 Reveal room's fog shapes go, drafted or live, as every other shape does", () => {
     const cells = { id: "f1", mode: "reveal" as const, shape: { kind: "cells" as const, cells: ["1,1"] } };
     const rect = { id: "f2", mode: "reveal" as const, shape: { kind: "rect" as const, x: 1, y: 1, w: 2, h: 2 } };
-    assert.equal(decide({ t: "fog.draft", sceneId: "s1", add: [rect, cells] }), `invalid: ${ON_HEXES.roomFog}`);
-    assert.equal(decide({ t: "fog.live", sceneId: "s1", ops: [cells] }), `invalid: ${ON_HEXES.roomFog}`);
+    assert.equal(decide({ t: "fog.draft", sceneId: "s1", add: [rect, cells] }), "ok");
+    assert.equal(decide({ t: "fog.live", sceneId: "s1", ops: [cells] }), "ok");
     assert.equal(decide({ t: "fog.draft", sceneId: "s1", add: [rect], remove: ["f0"] }), "ok");
     assert.equal(decide({ t: "fog.live", sceneId: "s1", ops: [rect] }), "ok");
     assert.equal(decide({ t: "fog.live", sceneId: "s2", ops: [cells] }), "ok", "on squares");

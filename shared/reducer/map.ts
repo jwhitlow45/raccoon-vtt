@@ -19,8 +19,8 @@ import { forgetLayerMemory, forgetSceneMemory, forgetStamp, keepsMemory, memoryO
 // Fog (design 13.2).
 
 export function fogDraft(tx: Tx, op: OpOf<"fog.draft">): void {
-  tx.scene(op.sceneId);
-  const draft: FogDraft = tx.state.fogDrafts[op.sceneId] ?? { sceneId: op.sceneId, rev: 0, ops: [] };
+  const scene = tx.scene(op.sceneId);
+  const { grid: _stamp, ...draft }: FogDraft = tx.state.fogDrafts[op.sceneId] ?? { sceneId: op.sceneId, rev: 0, ops: [] };
   const removing = new Set(op.remove ?? []);
   const adding = new Map((op.add ?? []).map((o) => [o.id, o]));
   const ops: FogOp[] = draft.ops.filter((o) => !removing.has(o.id) && !adding.has(o.id));
@@ -30,11 +30,14 @@ export function fogDraft(tx: Tx, op: OpOf<"fog.draft">): void {
     if (tx.state.fogDrafts[op.sceneId]) tx.remove(keys.fogDraft(op.sceneId));
     return;
   }
-  tx.write(keys.fogDraft(op.sceneId), { ...draft, ops });
+  // A draft holding Reveal room's hex keys carries its scene's shape (HX-D14), and drops it with the last of them.
+  const g = sceneGrid(scene);
+  const stamp = isHex(g) && ops.some((o) => o.shape.kind === "cells") ? shapeOfGrid(g) : undefined;
+  tx.write(keys.fogDraft(op.sceneId), stamp ? { ...draft, ops, grid: stamp } : { ...draft, ops });
 }
 
 function applyFogOps(tx: Tx, scene: Scene, ops: FogOp[]): void {
-  const changes = rasterizeFogOps(tx.state.fogTiles, scene.id, scene.bounds, ops);
+  const changes = rasterizeFogOps(tx.state.fogTiles, scene.id, scene.bounds, ops, sceneGrid(scene));
   for (const key of Object.keys(changes).sort()) {
     const tile = changes[key];
     if (tile === undefined) continue;
@@ -60,7 +63,7 @@ function applyFogOps(tx: Tx, scene: Scene, ops: FogOp[]): void {
 function forgetUnderHides(tx: Tx, scene: Scene, ops: FogOp[]): void {
   const hides = ops.filter((o) => o.mode === "hide");
   if (hides.length === 0) return;
-  const changes = rasterizeFogOps(tx.state.exploredTiles, scene.id, scene.bounds, hides);
+  const changes = rasterizeFogOps(tx.state.exploredTiles, scene.id, scene.bounds, hides, sceneGrid(scene));
   for (const key of Object.keys(changes).sort()) {
     const tile = changes[key];
     if (tile === undefined) continue;
@@ -69,7 +72,7 @@ function forgetUnderHides(tx: Tx, scene: Scene, ops: FogOp[]): void {
   }
   for (const memberId of layerOwners(tx.state, scene.id)) {
     const layer = layerOf(tx.state, scene.id, memberId);
-    const changed = rasterizeFogOps(layer, scene.id, scene.bounds, hides);
+    const changed = rasterizeFogOps(layer, scene.id, scene.bounds, hides, sceneGrid(scene));
     for (const key of Object.keys(changed).sort()) {
       const tile = changed[key];
       if (tile === undefined) continue;
