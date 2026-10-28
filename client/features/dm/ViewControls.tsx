@@ -120,7 +120,7 @@ function ViewAsPlayer(props: { members: Record<string, Member | undefined> | und
           View
         </Button>
       </div>
-      <Help>Shows exactly what that player sees, with fog and without hidden things. Nothing you do there is saved.</Help>
+      <Help>Shows the scene as that player can see it, with fog and their own map, and nothing hidden from them. It isn't a mirror of their screen. Nothing you do there is saved.</Help>
     </div>
   );
 }
