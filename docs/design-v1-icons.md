@@ -36,6 +36,7 @@ The audit read every client file for visible words on controls. Its two tables (
 | `retry` | circular arrows | Lucide `refresh-cw` | Try a failed load or request again, Refresh | Roll again |
 | `hidden` | eye struck through | Lucide `eye-off` | Hidden from players: a secret roll, a hidden token, DM only, players see black | The side panel's Hide (`collapsePanel`) |
 | `shown` | eye | Lucide `eye` | Players see it: Shared ruler, shown handout, Reveal | View as a player, look at a thing on the map |
+| `viewAs` | eye in a frame | Lucide `scan-eye` | View as a player, from a token's bar, its panel's header and the eye beside each player in its Owners group (D-261027-09) | Players see it (`shown`) |
 | `delete` | trash can | Lucide `trash-2` | Delete or remove a thing for good | Forget a saved room, Remove from the fight |
 | `edit` | pencil | Lucide `pencil` | Edit | The Draw tool |
 | `duplicate` | two pages and a plus | Lucide `copy-plus` | Duplicate a token, stamp or area | Copy a link |

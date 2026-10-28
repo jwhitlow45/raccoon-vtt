@@ -435,7 +435,7 @@ The DM asks players for a saving throw or an ability check, and each player roll
 
 ## DM tools
 
-- "View as a player" shows exactly what a chosen player sees, whichever scene the DM is on, with "Loading what Ana sees…" until it arrives.
+- "View as a player" shows exactly what a chosen player sees, whichever scene the DM is on, with "Loading what Ana sees…" until it arrives. Besides the DM panel's picker, which reaches a player with no token on the scene, a token a player owns, directly, through its character or as a character's companion, offers it to the DM in its action bar, beside Stat block and Details, and in its token panel's header, as "View as Ana" with an eye in a frame, or "View as a player" with a list of its owners when several players own it. In the token panel's Owners group the same eye stands beside each player. Monsters and NPCs no player owns have none, players never see these, only one preview opens at a time, and Exit puts focus back on the button that opened it.
 - "Follow me" makes players' maps follow the DM's as they pan and zoom. "Bring everyone here" moves them once. A ping with "Look here" on moves every player's view to that spot.
 - "Black out players' screens" for a break or a reveal. Players see only a black screen that says "The DM has paused the game." Meanwhile their devices receive nothing from the game but the X-card. When the game resumes, each player's selected token, its action bar and any HP typed into it and not applied come back as they were.
 - Undo and Redo for the DM's changes, each saying what it took back. They sit in the top bar.
