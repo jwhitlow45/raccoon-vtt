@@ -8,11 +8,11 @@ import { chromium, type Browser, type BrowserContext, type Locator, type Page } 
 import sharp from "sharp";
 import { FOG_SUBCELLS, type AreaTemplate, type Token } from "../shared/model.ts";
 import { creaturesInArea } from "../shared/rules/aoe.ts";
-import { footprintSubcells, placedOnHex, tokenRefHex } from "../shared/rules/footprint.ts";
-import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
+import { footprintSubcells, occupiedHexes, placedOnHex, tokenRefHex } from "../shared/rules/footprint.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexDistance, hexNeighbors, hexSubcells, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
-import { assertCanvasAt, ConsoleWatch, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
 
@@ -32,7 +32,7 @@ import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
  * scene of its own: Wall lines tapped and dragged, a free door's states,
  * Remove and undo, difficult ground by hexes, Erase by hexes, a player's
  * creature opening a free door from a hex beside it, and those screens'
- * alignment.
+ * alignment. Lane HX-7's steps (HX7-) ride, carry and trap on hexes.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus 31. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -101,6 +101,10 @@ const run = {
   vaultGob: randomUUID(),
   vaultOgre: randomUUID(),
   vaultEntry: randomUUID(),
+  /** HX7-'s Large pony and the Medium Kip who rides it, and the trap HX7-2 draws. */
+  pony: randomUUID(),
+  kip: randomUUID(),
+  trapId: "",
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -1343,6 +1347,168 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const stop = inside.path!.stops.at(-1)!;
     assert.ok(stop.cost! > stop.moved!, `${stop.cost} ft for ${stop.moved} ft walked: the squeeze costs`);
     await ops.send({ t: "encounter.end" });
+  });
+
+  /*
+   * Lane HX-7's steps (HX7-): riding and traps on hexes, phase H2. A Medium
+   * gets on a Large pony from the Attach list and off beside it, the Trap
+   * tool draws a trap of hexes that Thorn's walk sets off, a found trap of
+   * hexes stays from Pat while ground beside its hexes is revealed and
+   * reaches Pat once one of its own sub-cells is, and those screens sit
+   * within 1 px at section 8's sizes.
+   */
+
+  test("HX7-1. Kip gets on the pony from the Attach list, sits on one of its hexes, and gets off beside it", async () => {
+    await openAt(dm, SIZES[0], 1);
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.sceneId);
+    await dm.keyboard.press("Escape");
+    await ops.send(creature(run.pony, "Pony", "large", { col: 5, row: 16 }, { disposition: "ally" }));
+    await ops.send(creature(run.kip, "Kip", "medium", { col: 6, row: 16 }, { disposition: "ally" }));
+    await waitFor("Kip in the DM's state", () => dmSocket.state?.tokens[run.kip] ?? null);
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    const at = await pagePoint(dm, BOUNDS, hexCenter(G, { col: 6, row: 16 }));
+    await assertCanvasAt(dm, at);
+    await dm.mouse.click(at.x, at.y);
+    const bar = dm.getByRole("dialog", { name: "Kip actions" });
+    await bar.waitFor();
+    await (await barControl(bar, "Attach")).click();
+    const list = dm.getByRole("dialog", { name: "Attach Kip" });
+    await list.getByRole("button", { name: "Ride Pony" }).click();
+    const ride = list.getByRole("button", { name: "Ride", exact: true });
+    await ride.waitFor();
+    await shots.take(dm, "hx7-attach-ride");
+    await ride.click();
+    const kip = await waitFor("Kip on the pony", () => (dmSocket.state?.tokens[run.kip]?.attached?.to === run.pony ? dmSocket.state.tokens[run.kip]! : null));
+    const pony = dmSocket.state!.tokens[run.pony]!;
+    const ponyHexes = occupiedHexes(G, pony).map((h) => `${h.col},${h.row}`);
+    assert.ok(ponyHexes.includes(occupiedHexes(G, kip).map((h) => `${h.col},${h.row}`)[0]!), `Kip on one of the pony's hexes ${ponyHexes}`);
+
+    await (await barControl(dm.getByRole("dialog", { name: "Kip actions" }), "Get off")).click();
+    const off = await waitFor("Kip off the pony", () => (dmSocket.state?.tokens[run.kip] && dmSocket.state.tokens[run.kip]!.attached === undefined ? dmSocket.state.tokens[run.kip]! : null));
+    const offHex = occupiedHexes(G, off)[0]!;
+    assert.ok(!ponyHexes.includes(`${offHex.col},${offHex.row}`), "off the pony's hexes");
+    assert.ok(occupiedHexes(G, pony).some((h) => hexDistance(G, h, offHex) === 1), "beside it");
+    await shots.take(dm, "hx7-attach-got-off");
+    await dm.keyboard.press("Escape");
+  });
+
+  test("HX7-2. the Trap tool draws a trap of hexes, in hex words, and Thorn's walk across its hexes sets it off", async () => {
+    await pickTool(dm, "Trap");
+    const options = dm.getByRole("toolbar", { name: "Trap options" });
+    await options.locator("[data-options-line]").filter({ hasText: "Drag across the hexes of a new trap" }).waitFor();
+    const from = hexCenter(G, { col: 10, row: 16 });
+    const to = hexCenter(G, { col: 11, row: 17 });
+    await dragWorld(dm, BOUNDS, from, to);
+    const made = await waitFor("the trap on the DM's copy", () => Object.values(dmSocket.state?.traps ?? {}).find((t) => t.sceneId === run.sceneId) ?? null);
+    run.trapId = made.id;
+    assert.deepEqual(made.zone, { cells: [{ x: 10, y: 16, w: 2, h: 2 }] });
+    assert.equal(made.grid, "hexRows");
+    const editor = dm.getByRole("dialog", { name: "Edit trap" });
+    await editor.waitFor();
+    await editor.getByRole("button", { name: "Afterwards", exact: true }).click();
+    const pit = editor.getByRole("switch", { name: "Opens a pit" });
+    assert.equal(await pit.isDisabled(), true, "no pit on hexes");
+    assert.ok((await describedBy(pit)).some((l) => l.includes("A pit needs heights, which hex scenes get later.")));
+    await shots.take(dm, "hx7-trap-pane");
+    await editor.getByRole("button", { name: "Done", exact: true }).click();
+    await editor.waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+
+    // Thorn, Pat's, walks east along row 16 through the trap's hexes.
+    await moveTo(run.thorn, "medium", { col: 7, row: 16 });
+    await ops.send({ t: "token.move", tokenId: run.thorn, ...placedOnHex(G, { size: "medium", x: 0, y: 0 }, { col: 14, row: 16 }) });
+    const sprung = await waitFor("the trap gone off", () => (dmSocket.state?.traps[run.trapId]?.state === "sprung" ? dmSocket.state.traps[run.trapId]! : null));
+    assert.equal(sprung.found, true, "found as Pat's Thorn set it off");
+    await shots.take(dm, "hx7-trap-sprung");
+  });
+
+  test("HX7-3. a found trap of hexes stays from Pat while the ground beside its hexes is revealed, and reaches Pat once a sub-cell of one of them is", async () => {
+    // A found trap in the scene's south-west corner, far from any ground the party's sight explored in HX-9, under the fog once it is reset.
+    await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { fogEnabled: true, vision: { on: false, light: "dark" } } });
+    await ops.send({ t: "fog.reset", sceneId: run.sceneId, to: "hidden" });
+    await waitFor("fog on, vision off", () => (dmSocket.state?.scenes[run.sceneId]?.fogEnabled === true && dmSocket.state.scenes[run.sceneId]?.vision?.on === false) || null);
+    const plate = randomUUID().replace(/-/g, "").slice(0, 16);
+    const rig = { on: ["enter"], who: "party", floor: false, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: plate, sceneId: run.sceneId, name: "Buried plate", zone: { cells: [{ x: 2, y: 18, w: 2, h: 2 }] }, found: true, rig } });
+    await waitFor("the plate on the DM's copy", () => dmSocket.state?.traps[plate]?.grid === "hexRows" || null);
+    const hexes = [{ col: 2, row: 18 }, { col: 3, row: 18 }, { col: 2, row: 19 }, { col: 3, row: 19 }];
+    const own = new Set(hexes.flatMap((h) => hexSubcells(G, h)).map(([x, y]) => `${x},${y}`));
+    // Every other sub-cell of the cells its hexes lie in.
+    const around: ReturnType<typeof revealSubcell>[] = [];
+    const xs = hexes.flatMap((h) => hexSubcells(G, h).map(([x]) => x));
+    const ys = hexes.flatMap((h) => hexSubcells(G, h).map(([, y]) => y));
+    for (let sy = Math.floor(Math.min(...ys) / FOG_SUBCELLS) * FOG_SUBCELLS; sy < (Math.floor(Math.max(...ys) / FOG_SUBCELLS) + 1) * FOG_SUBCELLS; sy++) {
+      for (let sx = Math.floor(Math.min(...xs) / FOG_SUBCELLS) * FOG_SUBCELLS; sx < (Math.floor(Math.max(...xs) / FOG_SUBCELLS) + 1) * FOG_SUBCELLS; sx++) if (!own.has(`${sx},${sy}`)) around.push(revealSubcell(sx, sy));
+    }
+    for (let i = 0; i < around.length; i += 40) await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: around.slice(i, i + 40) });
+    // A marker on revealed ground in the far corner: once Pat's copy holds it, Pat has had every op before it.
+    const marker = randomUUID();
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: { kind: "rect", x: 26, y: 0, w: 4, h: 3 } }] });
+    await ops.send(creature(marker, "Marker", "tiny", { col: 27, row: 1 }));
+    await waitFor("Pat's copy after the reveal", () => patSocket.state?.tokens[marker] ?? null);
+    assert.equal(patSocket.state!.traps[plate], undefined, "the ground beside its hexes revealed");
+    const [sx, sy] = hexSubcells(G, { col: 3, row: 19 })[0]!;
+    await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [revealSubcell(sx, sy)] });
+    const seen = await waitFor("the plate in Pat's copy", () => patSocket.state?.traps[plate] ?? null);
+    assert.deepEqual(seen.zone, { cells: [{ x: 2, y: 18, w: 2, h: 2 }] });
+    await shots.take(pat, "hx7-pat-trap-revealed");
+  });
+
+  test("HX7-4. the Trap tool's options, the trap's pane and the Attach list on a hex scene sit within 1 px at each size", async () => {
+    const off: string[] = [];
+    let phoneContext: BrowserContext | null = null;
+    try {
+      for (const size of SIZES) {
+        let page = dm;
+        if (size.touch) {
+          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+          const pages = phoneContext.pages();
+          page = pages[0] ?? (await phoneContext.newPage());
+          if (pages.length === 0) consoles.phone.attach(page);
+        }
+        for (const scale of SCALES) {
+          const at = `${size.name} at ${scale * 100}%`;
+          await openAt(page, size, scale);
+          const fit = page.getByRole("button", { name: "Fit the map to the screen" });
+          if ((await fit.count()) > 0 && (await fit.first().isVisible())) await fit.first().click();
+          const tap = async (hex: Hex) => {
+            const p = await pagePoint(page, BOUNDS, hexCenter(G, hex));
+            await assertCanvasAt(page, p);
+            if (size.touch) await page.touchscreen.tap(p.x, p.y);
+            else await page.mouse.click(p.x, p.y);
+          };
+          await pickTool(page, "Trap");
+          const options = page.getByRole("toolbar", { name: "Trap options" });
+          await options.locator("[data-options-line]").first().waitFor();
+          off.push(...alignmentLines(await measureAlignment(options), `the Trap tool's options on hexes at ${at}`));
+          await tap({ col: 10, row: 16 });
+          const editor = page.getByRole("dialog", { name: "Edit trap" });
+          await editor.waitFor();
+          await editor.getByRole("button", { name: "Afterwards", exact: true }).click();
+          await editor.getByRole("switch", { name: "Opens a pit" }).scrollIntoViewIfNeeded();
+          off.push(...alignmentLines(await measureAlignment(editor), `the trap's pane on hexes at ${at}`));
+          await shots.take(page, `hx7-trap-pane-${size.name}-${scale * 100}`);
+          await editor.getByRole("button", { name: "Done", exact: true }).click();
+          await editor.waitFor({ state: "detached" });
+          await pickTool(page, "Select");
+          const kip = occupiedHexes(G, dmSocket.state!.tokens[run.kip]!)[0]!;
+          await tap(kip);
+          const bar = page.getByRole("dialog", { name: "Kip actions" });
+          await bar.waitFor();
+          await (await barControl(bar, "Attach")).click();
+          const list = page.getByRole("dialog", { name: "Attach Kip" });
+          await list.getByRole("button", { name: "Ride Pony" }).waitFor();
+          off.push(...alignmentLines(await measureAlignment(list), `the Attach list on hexes at ${at}`));
+          await shots.take(page, `hx7-attach-list-${size.name}-${scale * 100}`);
+          await page.keyboard.press("Escape");
+          await page.keyboard.press("Escape");
+        }
+      }
+    } finally {
+      await phoneContext?.close();
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
   test("HX-12. no page logged an error", () => {
