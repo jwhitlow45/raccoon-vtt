@@ -1,6 +1,5 @@
 import { createStore } from "zustand/vanilla";
 import type { EphEvent } from "#shared/protocol.ts";
-import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { scopeSlot, type RoomScope } from "../../state/scope.ts";
 import type { ToolContext } from "../tools.ts";
 import { allStops, type LastTap, type RulerGesture, type RulerState } from "./ruler.ts";
@@ -36,18 +35,6 @@ export function shares(ctx: Pick<ToolContext, "role" | "scope">): boolean {
   return ctx.role === "player" || ctx.scope.get(rulerSlot).store.getState().share;
 }
 
-/**
- * Whether the ruler walks on this scene: Measure says Walking, and the
- * scene is square. A walk is phase H2's on hexes (docs/design-v1-hex-grids.md
- * section 6), so on a hex scene the ruler measures straight whatever this
- * device remembers, and the row says why.
- */
-export function walksOn(walk: boolean, scene: Parameters<typeof sceneGrid>[0] | undefined): boolean {
-  return walk && !(scene && isHex(sceneGrid(scene)));
-}
-
-/** The words the ruler's row shows for Walking on a hex scene (section 6's limit lines). */
-export const WALKING_NEEDS_SQUARES = "Walking needs squares.";
 
 /** Shows the ruler here and, when it is shared, everywhere on the scene. */
 export function publish(ctx: Pick<ToolContext, "role" | "scope" | "actions"> & Partial<Pick<ToolContext, "scene">>, ruler: RulerState | null): void {
@@ -60,7 +47,7 @@ export function publish(ctx: Pick<ToolContext, "role" | "scope" | "actions"> & P
   }
   const shared = shares(ctx);
   const points = allStops(ruler);
-  const e: EphEvent = { k: "ruler", id: ruler.id, points, shared, ...(walksOn(prev.walk, ctx.scene) ? { walk: true as const } : {}) };
+  const e: EphEvent = { k: "ruler", id: ruler.id, points, shared, ...(prev.walk ? { walk: true as const } : {}) };
   ctx.actions.sendEph(e, { localOnly: !shared });
   rulerStore.setState({ ruler: { ...ruler, shared }, sent: prev.sent || shared });
 }

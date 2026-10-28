@@ -5,11 +5,12 @@ import { applyOp } from "#shared/reducer.ts";
 import type { DiagonalCounter, DistanceSettings } from "#shared/rules/distance.ts";
 import { footprintSize } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { sceneGrid, SQUARES } from "#shared/rules/grid.ts";
 import { isPreview, offKey, previewChunks, type Walker } from "#shared/rules/movement.ts";
 import { pathThisTurn, publicCounters } from "#shared/rules/path.ts";
 import { routeWalkers } from "#shared/rules/route.ts";
-import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits } from "#shared/rules/walk.ts";
+import { WorkBudget } from "#shared/rules/walk.ts";
+import { routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch } from "#shared/rules/hexWalk.ts";
 import { groupWalkWorld, publicToken, seenWhereMoved, type WalkViewer } from "#shared/rules/walkWorld.ts";
 import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, walkStart, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
 import { dragLead } from "../attach/groups.ts";
@@ -116,7 +117,7 @@ const MAX_STEPS = 512;
 const STEP_UNITS = 16;
 
 /** A ruler's walk so far: its legs worked out, and the search and open-ground check of the leg still searching. */
-type Progress = { steps: Step[]; on: { leg: string; search: WalkSearch; check: LegCheck } | null };
+type Progress = { steps: Step[]; on: { leg: string; search: RouteSearch; check: RouteLegCheck } | null };
 
 /**
  * Where a ruler's walk stands before a leg: the room as the legs before it
@@ -132,7 +133,7 @@ type Step = { key: string; leg: WalkLeg; words: string[]; extraFt: number; after
 
 type Kept = {
   basis: Basis;
-  searches: Map<string, WalkSearch>;
+  searches: Map<string, RouteSearch>;
   legs: Map<string, Found>;
   steps: Map<string, Step>;
   /** The tokens players do not see where this view stands, by viewer role (unseenAtStart). */
@@ -162,7 +163,7 @@ function searchKey(walker: Token, everything: boolean, counter: DiagonalCounter)
  * partway (review MV-O-23). Over the cap the one asked for longest ago
  * goes: a ruler still searching holds its own (Progress).
  */
-function searchFor(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, key: string, budget: WorkBudget): WalkSearch {
+function searchFor(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, key: string, budget: WorkBudget): RouteSearch {
   const kept = keptFor(view, walker.sceneId);
   let search = kept.searches.get(key);
   if (search) kept.searches.delete(key);
@@ -171,8 +172,8 @@ function searchFor(view: RoomState, at: Walked, walker: Token & Walker, input: W
     const moved = new Set(Object.keys(at.sim.tokens).filter((id) => !samePose(at.sim.tokens[id], view.tokens[id])));
     // A shared or kept ruler keeps to the ground every player shares, never this player's own memory (docs/design-v1-per-player-vision.md 6.6).
     const world = groupWalkWorld(at.sim, walker, input.viewer, at.left, ownRuler(input) ? { creatures: false, everything: true, moved } : { creatures: false, seenGround: true, sharedGround: true, moved, unseen: unseenAtStart(view, input) });
-    search = new WalkSearch(new WalkWorld({ ...world.input, prone: false }));
-    budget.charge(worldUnits(search.world) + Math.ceil((search.world.nx * search.world.ny) / 400));
+    search = routeSearch(routeWorld({ ...world.input, prone: false }));
+    budget.charge(routeWorldUnits(search.world) + Math.ceil((search.world.nx * search.world.ny) / 400));
     if (kept.searches.size >= MAX_SEARCHES) kept.searches.delete(kept.searches.keys().next().value!);
   }
   kept.searches.set(key, search);
@@ -189,9 +190,9 @@ function searchFor(view: RoomState, at: Walked, walker: Token & Walker, input: W
  * 5-10-5 residue and spot, so a ruler of many legs needs a leg's search
  * only while that leg is searched (review ASTRA-07).
  */
-function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, target: Point, budget: WorkBudget, progress: Progress): { found: Found; search: () => WalkSearch } | null {
+function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: WalkInput, target: Point, budget: WorkBudget, progress: Progress): { found: Found; search: () => RouteSearch } | null {
   const kept = keptFor(view, walker.sceneId);
-  const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(SQUARES, walker, at.left, rulesOf(view), input.viewer.role === "dm"))}`;
+  const key = `${at.history}#${searchKey(walker, input.everything, publicCounters(gridOfView(view, walker.sceneId), walker, at.left, rulesOf(view), input.viewer.role === "dm"))}`;
   const legKey = `${key}|${target.x},${target.y}`;
   const searchOf = () => searchFor(view, at, walker, input, key, budget);
   const known = kept.legs.get(legKey);
@@ -199,7 +200,7 @@ function legFound(view: RoomState, at: Walked, walker: Token & Walker, input: Wa
   if (budget.spent) return null;
   const own = progress.on?.leg === legKey ? progress.on : null;
   const search = own ? own.search : searchOf();
-  const check = own ? own.check : new LegCheck(search.world, target);
+  const check = own ? own.check : routeLegCheck(search.world, target);
   const late = (units = 1) => {
     budget.charge(units);
     return budget.spent;
@@ -330,8 +331,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   for (const [k, drawn] of stops.slice(1).entries()) {
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
-    // A walk is phase H2's on hexes, so a walking ruler reads squares: the ruler's row turns Walking off on a hex scene.
-    const stop = on ? tokenStop(SQUARES, on) : drawn;
+    const stop = on ? tokenStop(gridOfView(view, start.sceneId), on) : drawn;
     const raw = { x: stop.x - size.w / 2 + shift.x, y: stop.y - size.h / 2 + shift.y };
     if (waiting) {
       legs.push({ from: waiting, to: raw, corners: [], ft: 0, none: false, searching: true });
@@ -393,8 +393,8 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, tar
   const token = at.seen.tokens[at.walker.id] ?? at.walker;
   const mode = dropMode(ownRuler(input) ? "dm" : "player", at.sim.scenes[token.sceneId]);
   const account = (to: Point) => {
-    const own = new WalkWorld(answer.search().world.input);
-    budget.charge(worldUnits(own));
+    const own = routeWorld(answer.search().world.input);
+    budget.charge(routeWorldUnits(own));
     return keyStep(own, to, (units) => budget.charge(units));
   };
   const plan = cutForWalkers(at.seen, token, planWalk(at.seen, token, raw, mode, answer.found, rules.feetPerCell, account), walkersFor(at.seen, token.id, role, undefined, at.seen.seen), mode);
@@ -410,8 +410,7 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, tar
     move && trace
       ? dragReading({
           token: walkStart(at.sim, reading),
-          // A walk is phase H2's on hexes: the walking ruler reads squares, and is off on a hex scene.
-          grid: SQUARES,
+          grid: gridOfView(at.sim, token.sceneId),
           to: { x: move.x, y: move.y },
           encounter: null,
           activeTokenId: null,
@@ -628,4 +627,10 @@ export function saveWalk(walk: boolean, storage: () => Storage | undefined = () 
   } catch {
     // A private window or blocked storage: the choice lasts until the page closes.
   }
+}
+
+/** The grid of the scene a ruler walks on: on hexes its walk steps from hex to hex (docs/design-v1-hex-grids.md phase H2). */
+function gridOfView(view: Pick<RoomState, "scenes">, sceneId: string) {
+  const scene = view.scenes[sceneId];
+  return scene ? sceneGrid(scene) : SQUARES;
 }

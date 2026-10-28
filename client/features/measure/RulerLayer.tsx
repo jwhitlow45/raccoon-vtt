@@ -93,7 +93,7 @@ export const RulerLayer = memo(function RulerLayer(props: LayerProps) {
   const feetPerCell = settings?.feetPerCell ?? 5;
   const diagonal = settings?.diagonal ?? "five";
   const rules = useMemo<DistanceRules>(() => ({ feetPerCell, diagonal }), [feetPerCell, diagonal]);
-  // The scene's grid: on hexes a ruler counts hex steps, and walking is off (rulerStore.ts walksOn).
+  // The scene's grid: on hexes a ruler counts hex steps, and a walking ruler steps from hex to hex.
   const gridShape = props.scene.gridShape;
   const grid = useMemo(() => sceneGrid({ gridShape }), [gridShape]);
   const hex = isHex(grid);
@@ -197,8 +197,8 @@ function WalkRuler(props: { stops: readonly RulerStop[]; walk: WalkSource; scale
   const slow = useDelayed(m?.searching === true);
   // One component draws one ruler by its id, which a fresh start keeps, so the start tells them apart.
   const held = useHeldWalk(m, heldKey("", stops));
-  // A walking ruler is a square scene's (rulerStore.ts walksOn), so its straight stand-in reads squares.
-  if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} grid={SQUARES} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
+  // Its straight stand-in reads the scene's grid, as the straight ruler does.
+  if (!m) return <Ruler stops={stops} tokens={walk.view.tokens} rules={walk.view.meta.settings} grid={gridOfWalk(walk)} scale={scale} color={color} owner={props.owner} kept={props.kept === true} />;
   const shown = walkShown(m, held, slow);
   const mid = (p: Point) => ({ x: p.x + m.size.w / 2, y: p.y + m.size.h / 2 });
   const last = mid(m.legs[m.legs.length - 1]!.to);
@@ -416,4 +416,10 @@ function RemoteDragMeasure(props: { drag: DragPreview; token: Token | undefined;
       {...(drag.ft !== undefined ? { costFt: drag.ft } : {})}
     />
   );
+}
+
+/** The grid of the scene a walking ruler walks on, from the room it reads. */
+function gridOfWalk(walk: WalkSource): Grid {
+  const scene = walk.view.scenes[walk.sceneId];
+  return scene ? sceneGrid(scene) : SQUARES;
 }

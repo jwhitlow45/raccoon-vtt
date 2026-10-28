@@ -24,7 +24,7 @@ import {
   type RulerState,
   type RulerToken,
 } from "./ruler.ts";
-import { MEASURES, pickMeasure, publish, rulerSlot, shares, walksOn, WALKING_NEEDS_SQUARES } from "./rulerStore.ts";
+import { MEASURES, pickMeasure, publish, rulerSlot, shares } from "./rulerStore.ts";
 import { useHeldWalk, useWalkMeasure } from "./useWalkMeasure.ts";
 import { heldKey, walkShown, walkText } from "./walkRuler.ts";
 import { rulerCycle } from "../toolChoices.ts";
@@ -119,7 +119,7 @@ function keep(ctx: ToolContext, ruler: RulerState | null): void {
           ownerId: you.memberId,
           color: s.view?.members[you.memberId]?.color ?? theme.color.crest,
           shared: shares(ctx),
-          walk: walksOn(ctx.scope.get(rulerSlot).store.getState().walk, ctx.scene),
+          walk: ctx.scope.get(rulerSlot).store.getState().walk,
         }
       : null,
   );
@@ -159,9 +159,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   const tokens = useRoomView((s) => s.view?.tokens);
   const settings = useRoomView((s) => s.view?.meta.settings);
   const scene = useRoomView((s) => (s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
-  // Walking is off on a hex scene, and the row says so (rulerStore.ts walksOn).
-  const hex = scene !== undefined && isHex(sceneGrid(scene));
-  const walk = walksOn(wantsWalk, scene);
+  const walk = wantsWalk;
   const view = useRoomView((s) => (walk ? s.view : null));
   const kept = useKeptRulers(props.role);
   const stops = ruler ? allStops(ruler) : [];
@@ -210,7 +208,6 @@ function RulerOptions(props: { role: "dm" | "player" }) {
           <>
             {info}
             {reading && settings ? <span style={{ color: theme.color.textMuted }}> · {diagonalLabel(settings.diagonal, scene ? sceneGrid(scene) : SQUARES, settings.feetPerCell)}</span> : null}
-            {hex ? <span style={{ color: theme.color.textMuted }}> · {WALKING_NEEDS_SQUARES}</span> : null}
           </>
         ),
       }}
@@ -253,7 +250,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
             <OptSegmented
               label="Measure"
               value={walk ? "walking" : "straight"}
-              options={hex ? MEASURES.map((m) => (m.value === "walking" ? { ...m, disabled: true, title: WALKING_NEEDS_SQUARES } : m)) : MEASURES}
+              options={MEASURES}
               onChange={(v) => pickMeasure(scope, v)}
             />
           ),

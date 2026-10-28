@@ -5,8 +5,8 @@ import { footprintRect, snapStep, type PlacedToken } from "#shared/rules/footpri
 import type { Rect } from "#shared/rules/geom.ts";
 import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
 import { dismountCost } from "#shared/rules/dismount.ts";
-import { ownWalk, type Walker } from "#shared/rules/movement.ts";
-import { plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkTrace } from "#shared/rules/route.ts";
+import { onSqueezedLattice, ownWalk, type Walker } from "#shared/rules/movement.ts";
+import { hexRouteFeet, plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkTrace } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 
@@ -371,7 +371,10 @@ export function dragReading(input: {
   const step = snapStep(token);
   const legCost = (upTo: readonly RoutePoint[]) =>
     walk?.route
-      ? routeFeet(upTo, pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed, step })
+      ? grid.shape === "hex"
+        ? // On hexes a piece's feet are its hex steps, the walk's end squeezed as it lands (route.ts hexRouteFeet).
+          hexRouteFeet(grid, token, upTo, landed && upTo[upTo.length - 1] === points[points.length - 1] ? landed.squeeze === true : onSqueezedLattice(grid, token, upTo[upTo.length - 1]!), pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed })
+        : routeFeet(upTo, pieces.slice(0, upTo.length - 1), rules, counter, { swimSpeed, step })
       : landed && upTo[upTo.length - 1] === end
         ? plainLegCost(grid, token, landed, rules, counter)
         : straightCost(grid, token, upTo[0]!, upTo[upTo.length - 1]!, rules, counter);

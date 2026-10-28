@@ -3,7 +3,6 @@ import { describe, test } from "node:test";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { hexAt, hexCenter, hexNeighbors, type HexGrid } from "#shared/rules/hex.ts";
 import { hexAnchor, occupiedHexes, placedOnHex } from "#shared/rules/footprint.ts";
-import { walksOn, WALKING_NEEDS_SQUARES } from "./rulerStore.ts";
 import {
   allStops,
   diagonalLabel,
@@ -360,14 +359,6 @@ describe("the ruler on a hex scene (docs/design-v1-hex-grids.md 4.3)", () => {
       assert.equal(measureStops(g, allStops(live), none, five).totalFt, 15);
     });
   }
-
-  test("Walking needs squares: on a hex scene the ruler measures straight whatever this device remembers", () => {
-    assert.equal(walksOn(true, { gridShape: "hexRows" }), false);
-    assert.equal(walksOn(true, { gridShape: "hexColumns" }), false);
-    assert.equal(walksOn(true, {}), true);
-    assert.equal(walksOn(false, {}), false);
-    assert.equal(WALKING_NEEDS_SQUARES, "Walking needs squares.");
-  });
 });
 
 describe("diagonalLabel", () => {

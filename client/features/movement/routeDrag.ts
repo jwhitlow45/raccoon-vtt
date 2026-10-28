@@ -1,5 +1,6 @@
 import type { Point } from "#shared/rules/geom.ts";
-import { LegCheck, WalkSearch, WalkWorld, WorkBudget, worldUnits, type WalkInput, type WalkRoute } from "#shared/rules/walk.ts";
+import { WorkBudget, type WalkInput, type WalkRoute } from "#shared/rules/walk.ts";
+import { routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch, type RouteWorld } from "#shared/rules/hexWalk.ts";
 import type { RouteJob, RouteWork } from "./routeWork.ts";
 
 /**
@@ -31,13 +32,13 @@ export class RouteDrag {
   readonly #input: () => WalkInput | null;
   readonly #work: Pick<RouteWork, "run" | "drop" | "now">;
   readonly #changed: () => void;
-  #world: WalkWorld | null = null;
-  #search: WalkSearch | null = null;
+  #world: RouteWorld | null = null;
+  #search: RouteSearch | null = null;
   /** The walker's search without the creatures it drags, asked only once theirs finds no way, to say whether they are what keeps it from one. */
-  #alone: WalkSearch | null = null;
+  #alone: RouteSearch | null = null;
   #built = false;
   #target: Point | null = null;
-  #check: LegCheck | null = null;
+  #check: RouteLegCheck | null = null;
   #answer: RouteAnswer = { kind: "open" };
   #landing: ((answer: Settled) => void) | null = null;
   #over = false;
@@ -65,7 +66,7 @@ export class RouteDrag {
   }
 
   /** The world the drag walks in, once built. */
-  get world(): WalkWorld | null {
+  get world(): RouteWorld | null {
     return this.#world;
   }
 
@@ -153,12 +154,12 @@ export class RouteDrag {
     const world = this.#worldNow(budget);
     if (!world) return this.#answered({ kind: "open" });
     // The straight leg first: most drags need no search (5.2).
-    this.#check ??= new LegCheck(world, to);
+    this.#check ??= routeLegCheck(world, to);
     if (!this.#check.done && !this.#check.run(late)) return false;
     if (this.#check.open) return this.#answered({ kind: "open" });
     if (!this.#search) {
       if (budget.spent) return false;
-      this.#search = new WalkSearch(world);
+      this.#search = routeSearch(world);
       budget.charge(Math.ceil((world.nx * world.ny) / 400));
     }
     const result = this.#search.settle(to, budget);
@@ -178,13 +179,13 @@ export class RouteDrag {
    * leaves behind, or null when the walker has no way there either. The
    * walker's own search shares the drag's budget as the first one does.
    */
-  #follower(world: WalkWorld, to: Point, budget: WorkBudget): string | null | "paused" {
+  #follower(world: RouteWorld, to: Point, budget: WorkBudget): string | null | "paused" {
     if (!this.#alone) {
       if (budget.spent) return "paused";
       const { towed: _towed, ...input } = world.input;
-      const alone = new WalkWorld(input);
-      budget.charge(worldUnits(alone) + Math.ceil((alone.nx * alone.ny) / 400));
-      this.#alone = new WalkSearch(alone);
+      const alone = routeWorld(input);
+      budget.charge(routeWorldUnits(alone) + Math.ceil((alone.nx * alone.ny) / 400));
+      this.#alone = routeSearch(alone);
     }
     const result = this.#alone.settle(to, budget);
     if (result === "paused") return "paused";
@@ -206,12 +207,12 @@ export class RouteDrag {
   }
 
   /** The drag's world, built when first needed, its build charged to the budget as one step that cannot stop partway. */
-  #worldNow(budget: WorkBudget): WalkWorld | null {
+  #worldNow(budget: WorkBudget): RouteWorld | null {
     if (!this.#built) {
       this.#built = true;
       const input = this.#input();
-      this.#world = input ? new WalkWorld(input) : null;
-      if (this.#world) budget.charge(worldUnits(this.#world));
+      this.#world = input ? routeWorld(input) : null;
+      if (this.#world) budget.charge(routeWorldUnits(this.#world));
     }
     return this.#world;
   }

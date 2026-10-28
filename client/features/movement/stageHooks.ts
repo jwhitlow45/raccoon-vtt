@@ -3,7 +3,8 @@ import type { RoomState, Token } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { footprintSize } from "#shared/rules/footprint.ts";
 import type { RoutePiece } from "#shared/rules/route.ts";
-import { LegCheck, WalkWorld, WorkBudget, worldUnits, type WalkRoute } from "#shared/rules/walk.ts";
+import { WorkBudget, type WalkRoute } from "#shared/rules/walk.ts";
+import { routeLegCheck, routeWorld, routeWorldUnits } from "#shared/rules/hexWalk.ts";
 import type { PublicWorld } from "#shared/rules/walkWorld.ts";
 import { isHex } from "#shared/rules/grid.ts";
 import { walkersCut, walkersFor, walkersOfGroup } from "../attach/walk.ts";
@@ -253,7 +254,7 @@ export function dragStops(deps: DragDeps): DragStops {
     w.straight = null;
     const world = w.drag.world;
     if (!to || !world) return;
-    const check = new LegCheck(world, to, true);
+    const check = routeLegCheck(world, to, true);
     const straight: NonNullable<Walk["straight"]> = {
       to,
       pieces: null,
@@ -342,8 +343,7 @@ export function dragStops(deps: DragDeps): DragStops {
       w.drag = new RouteDrag(
         () => {
           const now = seenView(store.getState().view) ?? view;
-          // A hex scene walks no route in phase H1 (docs/design-v1-hex-grids.md 6): every spot reads as the straight leg.
-          w.world = isHex(dropGrid(now, w.token)) ? null : worldFor(now, w.token, role);
+          w.world = worldFor(now, w.token, role);
           return w.world?.input ?? null;
         },
         work,
@@ -464,8 +464,8 @@ export function dragStops(deps: DragDeps): DragStops {
             const world = w.world;
             const account = world
               ? (to: Point) => {
-                  const own = new WalkWorld(world.input);
-                  budget.charge(worldUnits(own));
+                  const own = routeWorld(world.input);
+                  budget.charge(routeWorldUnits(own));
                   return keyStep(own, to, (units) => budget.charge(units));
                 }
               : undefined;

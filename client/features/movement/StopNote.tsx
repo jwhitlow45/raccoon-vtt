@@ -14,6 +14,7 @@ import { useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { PANE_WIDTH } from "../builder/labelEdit.ts";
 import { noteDoor } from "../doors/doors.ts";
+import { sceneGrid } from "#shared/rules/grid.ts";
 import { cardPlace } from "./anchor.ts";
 import { dropView, stopText } from "./drop.ts";
 import { stopNoteSlot } from "./store.ts";
@@ -133,7 +134,7 @@ export function StopNoteHost(props: { scene: Scene; camera: Camera; viewport: Si
   // The whole sentence, wrapped: it says what stopped the walk. It alone is the status a screen reader hears when the note comes, not Close or the help.
   const status = (
     <span role="status" aria-live="polite">
-      {stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog), searched: note.searched, capped: note.capped, follower: note.follower })}
+      {stopText({ blocker: note.blocker, door: noteDoor(chunks, note.sceneId, note.door, fog, sceneGrid(props.scene)), searched: note.searched, capped: note.capped, follower: note.follower })}
     </span>
   );
   // The note's one action, so the primary (docs/design-v1-visual.md 2.3). The help is its description, read with it.
