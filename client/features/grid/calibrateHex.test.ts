@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { gridOfShape, type Grid } from "#shared/rules/grid.ts";
 import { HEX_R, HEX_S, hexAt, hexCenter, type HexGrid } from "#shared/rules/hex.ts";
 import { rng } from "#shared/testutil.ts";
-import { boxAt, boxCorner, boxFromDrag, boxSides, calibrationFromBox, canonicalToWorld, HEX_BOX_DEPTH, insideBox, nudgeBox, resizeBox, type Calibration } from "./calibrate.ts";
+import { boxAt, boxCorner, boxFromDrag, boxSides, calibrationFromBox, calibrationFromHexFind, canonicalToWorld, HEX_BOX_DEPTH, insideBox, nudgeBox, resizeBox, type Calibration } from "./calibrate.ts";
 
 const ROWS = gridOfShape("hexRows") as HexGrid;
 const COLUMNS = gridOfShape("hexColumns") as HexGrid;
@@ -98,5 +98,50 @@ describe("Line up grid's box on hexes (docs/design-v1-hex-grids.md HX-D12)", () 
     const { w, h } = boxSides({ x: 0, y: 0, size }, g);
     assert.deepEqual(calibrationFromBox({ x: c.x * cellPx - w / 2 - 1, y: c.y * cellPx - h / 2 - 1, size }, g).originPx, { x: 0, y: 0 });
     assert.deepEqual(calibrationFromBox({ x: c.x * cellPx - w / 2 + 1, y: c.y * cellPx - h / 2 + 1, size }, g).originPx, { x: 0, y: 0 });
+  });
+});
+
+describe("a found hex grid's calibration (docs/design-v1-grid-detect.md 10.7)", () => {
+  test("any found center gives the lattice drawn, its origin at or after the image's corner and never past a row, as the box's does (property)", () => {
+    const random = rng(9191);
+    for (const g of [ROWS, COLUMNS] as const) {
+      for (let i = 0; i < 2000; i++) {
+        const cellPx = 14 + Math.round(random() * 1400) / 10;
+        // Clear of FOUND_SNAP's fold just under a whole row or cell.
+        const slack = Math.max(1.1, 0.011 * cellPx);
+        const rowPx = HEX_S * cellPx;
+        const along = (random() < 0.5 ? 0 : cellPx / 2) + random() * (cellPx / 2 - slack);
+        const across = (random() < 0.5 ? 0 : rowPx) + random() * (rowPx - slack);
+        const art: Calibration = { cellPx, originPx: g.orient === "rows" ? { x: along, y: across } : { x: across, y: along } };
+        const c = hexCenter(g, { col: Math.floor(random() * 20), row: Math.floor(random() * 20) });
+        const center = { x: c.x * cellPx + art.originPx.x, y: c.y * cellPx + art.originPx.y };
+        const cal = calibrationFromHexFind({ cellPx, center, orient: g.orient });
+        assert.ok(sameLattice(g, art, cal), `${g.orient} ${i}: ${JSON.stringify(art)} -> ${JSON.stringify(cal)}`);
+        const [a, b] = g.orient === "rows" ? [cal.originPx.x, cal.originPx.y] : [cal.originPx.y, cal.originPx.x];
+        assert.ok(a >= 0 && a < cellPx && b >= 0 && b < rowPx, `${g.orient} ${i}: origin ${JSON.stringify(cal.originPx)} in the first row`);
+      }
+    }
+  });
+
+  test("a measured origin a few px in is kept where the box would snap it to the edge, and one just under a whole row folds to the edge", () => {
+    const cellPx = 70;
+    const rowPx = HEX_S * cellPx;
+    // Hex (2, 2)'s center on art whose hex (0, 0) starts 3 px in, across and down.
+    const c = hexCenter(ROWS, { col: 2, row: 2 });
+    const center = { x: c.x * cellPx + 3, y: c.y * cellPx + 3 };
+    assert.deepEqual(calibrationFromHexFind({ cellPx, center, orient: "rows" }).originPx, { x: 3, y: 3 });
+    const size = 3 * cellPx;
+    const { w, h } = boxSides({ x: 0, y: 0, size }, ROWS);
+    assert.deepEqual(calibrationFromBox({ x: center.x - w / 2, y: center.y - h / 2, size }, ROWS).originPx, { x: 0, y: 0 }, "the box's 5% snap");
+    // Art whose first row starts half a pixel before the image's top: that row is the scene's first, not cut off.
+    const before = calibrationFromHexFind({ cellPx, center: { x: c.x * cellPx, y: c.y * cellPx - 0.5 }, orient: "rows" });
+    assert.deepEqual(before.originPx, { x: 0, y: 0 });
+    // A row's start just past the top is kept, unsnapped: 1.5 px down.
+    assert.deepEqual(calibrationFromHexFind({ cellPx, center: { x: c.x * cellPx, y: c.y * cellPx + 1.5 }, orient: "rows" }).originPx, { x: 0, y: 1.5 });
+    // Just under a whole row down, folded onto the edge: the found hex is then in an odd row, which shifts the origin half a hex along.
+    assert.deepEqual(calibrationFromHexFind({ cellPx, center: { x: c.x * cellPx, y: c.y * cellPx + rowPx - 0.5 }, orient: "rows" }).originPx, { x: 35, y: 0 });
+    // On columns the same, mirrored.
+    const cc = hexCenter(COLUMNS, { col: 2, row: 2 });
+    assert.deepEqual(calibrationFromHexFind({ cellPx, center: { x: cc.x * cellPx + 3, y: cc.y * cellPx + 3 }, orient: "columns" }).originPx, { x: 3, y: 3 });
   });
 });

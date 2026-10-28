@@ -174,23 +174,32 @@ export function calibrationFromBox(box: CalBox, g: Grid = SQUARES): Calibration 
  */
 function hexCalibration(box: CalBox, orient: "rows" | "columns", cellPx: number): Calibration {
   const { w, h } = boxSides(box, { shape: "hex", orient });
-  const mid = { x: box.x + w / 2, y: box.y + h / 2 };
+  const slack = cellPx * ORIGIN_SNAP;
+  return { cellPx, originPx: hexOrigin({ x: box.x + w / 2, y: box.y + h / 2 }, orient, cellPx, slack, slack) };
+}
+
+/**
+ * The origin of hexes of `cellPx` with a center at `mid`, reduced to the
+ * first row at or after the image's top-left (section 4.1). An origin
+ * within `low` of the image's edge folds onto it, and one within `high`
+ * under the next row or hex starts there instead.
+ */
+function hexOrigin(mid: Point, orient: "rows" | "columns", cellPx: number, low: number, high: number): Point {
   const [along, across] = orient === "rows" ? [mid.x, mid.y] : [mid.y, mid.x];
   const rowPx = HEX_S * cellPx;
-  const slack = cellPx * ORIGIN_SNAP;
   const first = across - HEX_R * cellPx;
   let row = Math.floor(first / rowPx);
   let b = first - row * rowPx;
-  if (b >= rowPx - slack) {
+  if (b >= rowPx - high) {
     b = 0;
     row += 1;
-  } else if (b <= slack) b = 0;
+  } else if (b <= low) b = 0;
   const odd = ((row % 2) + 2) % 2 === 1;
   let a = mod(along - (odd ? 1 : 0.5) * cellPx, cellPx);
-  if (a <= slack || a >= cellPx - slack) a = 0;
+  if (a <= low || a >= cellPx - high) a = 0;
   const ox = round(orient === "rows" ? a : b, 2);
   const oy = round(orient === "rows" ? b : a, 2);
-  return { cellPx, originPx: { x: ox, y: oy } };
+  return { x: ox, y: oy };
 }
 
 function snappedOrigin(v: number, cellPx: number): number {
@@ -224,6 +233,19 @@ export function calibrationFromFind(found: { cellPx: number; originPx: Point }):
     return o >= cellPx - slack ? 0 : o;
   };
   return { cellPx, originPx: { x: origin(found.originPx.x), y: origin(found.originPx.y) } };
+}
+
+/**
+ * The calibration a hex grid found in the map's pixels describes
+ * (docs/design-v1-grid-detect.md 10.7): its center taken as a hex center
+ * and the origin reduced as Line up grid's hex box reduces it, so Apply
+ * and the box agree. As for a square find, the measured origin is kept:
+ * only one just under a whole row or hex folds onto the image's edge
+ * (FOUND_SNAP), never the box's ORIGIN_SNAP.
+ */
+export function calibrationFromHexFind(found: { cellPx: number; center: Point; orient: "rows" | "columns" }): Calibration {
+  const cellPx = round(Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, found.cellPx)), 4);
+  return { cellPx, originPx: hexOrigin(found.center, found.orient, cellPx, 0, Math.max(FOUND_SNAP_PX, cellPx * FOUND_SNAP)) };
 }
 
 /**
