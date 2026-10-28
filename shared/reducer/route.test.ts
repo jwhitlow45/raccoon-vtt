@@ -284,6 +284,30 @@ describe("area reminders along a route (7.2)", () => {
     const flat = points.map((p) => ({ ...p, elevation: 0 }));
     assert.deepEqual(routeSweepPlan(flat, 5), flat.slice(1).map(() => 2), "a route inside the cap samples as before");
   });
+
+  test("past the cap, a long flat piece after many steep ones keeps its whole density across the ground (FU34-ASTRA-01, round 2)", () => {
+    // Heights that rise 200 ft and fall to -100 ft at each square from 3 to 62, then ground level at 64 and a flat run to 90 through a sphere.
+    const steep = (climbs: boolean) => (s: RoomState) => {
+      s.scenes.s1!.bounds = { w: 96, h: 16 };
+      for (let cx = 0; cx < 6; cx++) {
+        const feet = new Array<number>(256).fill(0);
+        for (let x = Math.max(3, cx * 16); climbs && x <= Math.min(62, cx * 16 + 15); x++) feet[2 * 16 + (x - cx * 16)] = x % 2 === 1 ? 200 : -100;
+        s.buildChunks[chunkKey("s1", cx, 0)] = { sceneId: "s1", cx, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(feet) };
+      }
+      s.templates.c1 = template("c1", { shape: "sphere", size: 5, origin: { x: 71.5, y: 2.5, z: 0 }, spell: "Grease", triggers: ["enter"] });
+    };
+    const route = [...Array.from({ length: 60 }, (_, i): [number, number, number, 0 | 1] => [3 + i, 2, 0, 0]), [64, 2, 0, 0], [90, 2, 0, 0]] satisfies [number, number, number, 0 | 1][];
+    const east: Op = { t: "token.move", tokenId: "gob", x: 90, y: 2, route };
+    assert.equal(sweep([east], undefined, steep(false)).length, 1, "on flat ground the sphere is entered");
+    assert.equal(sweep([east], undefined, steep(true)).length, 1, "past the climbs it still is");
+    const points = [{ x: 2, y: 2, elevation: 0 }, ...route.map(([x, y]) => ({ x, y, elevation: x <= 62 ? (x % 2 === 1 ? 200 : -100) : 0 }))];
+    const plan = routeSweepPlan(points, 5);
+    assert.ok(plan.reduce((sum, n) => sum + n, 0) <= MAX_ROUTE_SWEEP, "the sweep keeps its cap");
+    assert.equal(plan[plan.length - 1], 52, "the last piece's 26 squares at every half square");
+    // Ground past the cap, which no accepted route has, still keeps it.
+    const far = routeSweepPlan([{ x: 0, y: 0, elevation: 0 }, { x: 200, y: 0, elevation: 0 }, { x: 400, y: 0, elevation: 1000 }], 5);
+    assert.ok(far.reduce((sum, n) => sum + n, 0) <= MAX_ROUTE_SWEEP && far.every((n) => n >= 1), JSON.stringify(far));
+  });
 });
 
 function pick(stop: PathStop): { moved?: number; cost?: number; diag?: [number, number] } {

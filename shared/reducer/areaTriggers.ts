@@ -362,20 +362,31 @@ export const MAX_ROUTE_SWEEP = 664;
  * How many points each piece of a route's sweep takes, the last its end:
  * `ceil(reach / 0.5)`, at least one, the straight leg's density. A player's
  * route under fog counts no climbs toward its cap (MD2-O-13), so steep
- * pieces can want more than MAX_ROUTE_SWEEP in all. Then every piece takes
- * one first and the rest of the cap is shared in proportion to what each
- * wanted past that, so no piece of an accepted route goes unchecked, where
- * sampling in order until the cap ran out skipped every piece after the
- * steep ones.
+ * pieces can want more than MAX_ROUTE_SWEEP in all. Then every piece first
+ * takes what its reach across the ground wants, as on flat ground, which
+ * the cap was sized for, and only the rest of the cap is shared among the
+ * climbs, in proportion to what each wanted past that. So a flat piece
+ * after steep ones keeps its whole density, where sampling in order until
+ * the cap ran out skipped it and sharing the whole cap thinned it past
+ * catching an area. Should the ground alone want more than the cap, which
+ * a route the cap accepts cannot, every piece takes one and the rest is
+ * shared the same way.
  */
 export function routeSweepPlan(points: readonly RoutePoint[], feetPerCell: number): number[] {
   const wanted: number[] = [];
-  for (let i = 1; i < points.length; i++) wanted.push(Math.max(1, Math.ceil(pieceReach(points[i - 1]!, points[i]!, feetPerCell) / SWEEP_STEP)));
-  const total = wanted.reduce((sum, n) => sum + n, 0);
-  if (total <= MAX_ROUTE_SWEEP) return wanted;
-  const left = Math.max(0, MAX_ROUTE_SWEEP - wanted.length);
-  const extra = total - wanted.length;
-  return wanted.map((n) => 1 + Math.floor(((n - 1) * left) / extra));
+  const across: number[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    wanted.push(Math.max(1, Math.ceil(pieceReach(a, b, feetPerCell) / SWEEP_STEP)));
+    across.push(Math.max(1, Math.ceil(pieceReach(a, { ...b, elevation: a.elevation }, feetPerCell) / SWEEP_STEP)));
+  }
+  const sum = (ns: readonly number[]) => ns.reduce((total, n) => total + n, 0);
+  if (sum(wanted) <= MAX_ROUTE_SWEEP) return wanted;
+  const base = sum(across) <= MAX_ROUTE_SWEEP ? across : wanted.map(() => 1);
+  const left = Math.max(0, MAX_ROUTE_SWEEP - sum(base));
+  const extra = sum(wanted) - sum(base);
+  return wanted.map((n, i) => base[i]! + Math.floor(((n - base[i]!) * left) / extra));
 }
 
 /**
