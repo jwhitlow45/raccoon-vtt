@@ -3,11 +3,11 @@ import { describe, test } from "node:test";
 import { chunkKey } from "../keys.ts";
 import { CHUNK_CELLS, type RoomState, type Token } from "../model.ts";
 import { int, pick, rng, template } from "../testutil.ts";
-import { placedOnHex } from "./footprint.ts";
-import { hexDistance, hexNeighbors, sceneHexes, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
+import { placedOnHex, tokenRefHex } from "./footprint.ts";
+import { hexDistance, hexNeighbors, sameHex, sceneHexes, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
 import { findRouteOn, HexWalkSearch, HexWalkWorld } from "./hexWalk.ts";
 import { hexRestand, hexStandPlace, legStop, onSqueezedLattice, ownWalk, type HexStand } from "./movement.ts";
-import { hexRouteFeet, routePoints, routeSpots, routeStop } from "./route.ts";
+import { hexRouteFeet, routePoints, routeSpots, routeStop, routeWalkers } from "./route.ts";
 import type { WalkCreature, WalkInput, WalkRoute } from "./walk.ts";
 import { publicWorld } from "./walkWorld.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "./hexWalls.testkit.ts";
@@ -216,6 +216,7 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       const W = 13;
       const H = 10;
       let routes = 0;
+      let cuts = 0;
       for (let trial = 0; trial < 40; trial++) {
         const walls = sceneHexes(g, { w: W, h: H }).flatMap((h) => [0, 1, 2].filter(() => r() < 0.14).map((d) => sideWall(g, h, d)));
         const s = hexWallRoom(shape, W, H, walls);
@@ -250,11 +251,36 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
             assert.ok(placed, "each piece ends on an anchor");
           }
           assert.equal(routeCost(s, t, found, g), brute, `trial ${trial}: the cost it paid`);
+          // Every place a trap may stop the walk is one its cut route reaches, as the server judges that route (review H2-ASTRA-04).
+          const walkers = routeWalkers(s.buildChunks, ownWalk(t), found.pieces);
+          for (const sp of routeSpots(s, routePoints(s.buildChunks, ownWalk(t), found.pieces, 0), ownWalk(t), undefined, { squeeze: false }).slice(1)) {
+            if (!sp.stand) continue;
+            cuts++;
+            assert.equal(legStop(s, walkers[sp.progress[0]]!, { x: sp.x, y: sp.y, elevation: sp.elevation, squeeze: sp.squeezed }), null, `trial ${trial}: a stand's cut leg is clear`);
+          }
           const search = new HexWalkSearch(world);
           assert.equal(search.settle(to), "settled");
         }
       }
       assert.ok(routes > 20, `${routes} routes checked`);
+      assert.ok(cuts > 100, `${cuts} cuts checked`);
+    });
+  });
+
+  describe(`${name}: where a walk may be cut`, () => {
+    test("a spot partway along a piece stands only where its own cut leg goes: the line to it may step beside the piece's (review H2-ASTRA-04)", () => {
+      const from = at(3, 3);
+      // The line from 3,3 to 1,1 runs by 3,2 and 2,2, the line to 2,2 alone by 2,3, behind this wall.
+      const d = hexNeighbors(g, from).findIndex((n) => sameHex(n, at(2, 3)));
+      const s = room(12, 10, [sideWall(g, from, d)]);
+      const t = onHex(g, "m", "medium", from);
+      const end = placedOnHex(g, t, at(1, 1));
+      assert.equal(legStop(s, ownWalk(t), { ...end, elevation: 0 }), null, "the walk itself goes");
+      const spots = routeSpots(s, routePoints(s.buildChunks, ownWalk(t), [[end.x, end.y, 0, 0]], 0), ownWalk(t), undefined, { squeeze: false });
+      const on = (h: Hex) => spots.find((sp) => sameHex(tokenRefHex(g, { ...t, x: sp.x, y: sp.y }), h))!;
+      assert.equal(on(at(3, 2)).stand, true, "one step along, its cut is the walk's own");
+      assert.equal(on(at(2, 2)).stand, false, "two steps along, its cut runs behind the wall");
+      assert.equal(on(at(1, 1)).stand, true, "the walk's end");
     });
   });
 }

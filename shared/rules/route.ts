@@ -657,9 +657,12 @@ export function routeStands(build: BuildState, route: readonly RoutePoint[], tok
 /**
  * `routeStands` on hexes: a spot is a stand where the creature's hexes
  * there fit (movement.ts HX-D8), squeezed only where that is a real
- * narrow space, and the walk cut there is allowed. A spot lies on its
- * piece's hex line, so the cut is allowed for free wherever the whole
- * piece's leg is, which every piece of a checked route's is.
+ * narrow space, and the walk cut there is allowed. A cut route ends with
+ * the leg from its piece's start to the spot, whose hex line is not always
+ * the piece's line so far: a line to a hex partway along another may step
+ * beside it (hex.ts hexLine), and behind a wall the piece never met. So
+ * the cut leg is judged itself, with the squeeze the cut stores there
+ * (review H2-ASTRA-04).
  */
 function hexStands(
   build: BuildState,
@@ -672,7 +675,6 @@ function hexStands(
 ): { walk: readonly WalkSpot[]; trace: WalkTrace; spot: (s: number) => RouteSpot } {
   const walk = spots ?? routeWalk(t.g, trace, build, undefined, opts.squeeze !== undefined ? { endSqueezed: opts.squeeze } : {});
   const blocks = build.scenes[token.sceneId]?.blockMovement === true;
-  const clear: (boolean | undefined)[] = [];
   const known: RouteSpot[] = [];
   const spot = (s: number): RouteSpot => {
     const hit = known[s];
@@ -684,9 +686,7 @@ function hexStands(
     const squeezed = last && opts.squeeze !== undefined ? opts.squeeze : (w.squeezed ?? false);
     const stand: HexStand = hexStandAt(t.g, token, w, squeezed);
     const fits = squeezed ? hexNarrow(t, token, stand) : hexFitWall(t, stand) < 0;
-    const b = route[i + 1]!;
-    const pieceClear = () => (clear[i] ??= legStop(build, trace[i]!, { x: b.x, y: b.y, elevation: b.elevation }) === null);
-    const ok = fits && (!blocks || pieceClear() || legStop(build, trace[i]!, { x: w.x, y: w.y, elevation: w.elevation }) === null);
+    const ok = fits && (!blocks || legStop(build, trace[i]!, { x: w.x, y: w.y, elevation: w.elevation, squeeze: squeezed }) === null);
     return (known[s] = { x: w.x, y: w.y, elevation: w.elevation, progress: w.progress, squeezed, stand: ok });
   };
   return { walk, trace, spot };
