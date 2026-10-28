@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import { ConsoleWatch, OpSocket, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
  * The shortcut sheet (docs/design-v1-dm-tools.md 3.14): the keys, then on
@@ -970,6 +971,157 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await keyOn(dm, "Shift+X");
     await checked(dm, "Trap", "Squares");
     await keyOn(dm, "v");
+  });
+
+  // ------------------------------------------------ keys on their controls (D-261028-09)
+
+  test("fl1-a. on a computer, each control that does a shortcut names its key in its tooltip and aria-keyshortcuts, never its name: the top bar's, the tools', the side panel's, the outliner's search, a token's bar's, and the View menu's turns and This device's Show the shortcuts in their words, each within 1 px at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, while a touch phone shows none", async () => {
+    /** The shared tooltip an icon alone describes itself by, as its words say. */
+    const tipOf = (button: Locator) =>
+      button.evaluate((el) => {
+        const doc = (globalThis as unknown as { document: { getElementById(id: string): { getAttribute(name: string): string | null; textContent: string | null } | null } }).document;
+        for (const id of (el.getAttribute("aria-describedby") ?? "").split(" ")) {
+          const tip = doc.getElementById(id);
+          if (tip?.getAttribute("role") === "tooltip") return tip.textContent;
+        }
+        return null;
+      });
+    /** A control's name, its key's attribute and its tooltip, to compare in one go. */
+    const keyed = async (button: Locator) => ({ name: await button.getAttribute("aria-label"), keys: await button.getAttribute("aria-keyshortcuts"), tip: await tipOf(button) });
+    await keyOn(dm, "v");
+    const bar = dm.locator("header:has(h1)").first();
+    assert.deepEqual(await keyed(bar.getByRole("button", { name: "Undo", exact: true })), { name: "Undo", keys: "Control+Z Meta+Z", tip: "Undo your last change (Ctrl+Z)" });
+    assert.deepEqual(await keyed(bar.getByRole("button", { name: "Redo", exact: true })), { name: "Redo", keys: "Control+Shift+Z Meta+Shift+Z", tip: "Redo what you undid (Ctrl+Shift+Z)" });
+    const view = bar.getByRole("button", { name: /^View: / });
+    assert.deepEqual({ keys: await view.getAttribute("aria-keyshortcuts"), tip: await tipOf(view) }, { keys: "I", tip: "Change the view (I)" });
+    assert.match((await view.getAttribute("aria-label")) ?? "", /^View: [A-Za-z-]+$/, "its name stays the view's");
+    assert.deepEqual(await keyed(bar.getByRole("button", { name: "Fit the map to the screen", exact: true })), { name: "Fit the map to the screen", keys: "0", tip: "Fit the map to the screen (0)" });
+    assert.deepEqual(await keyed(bar.getByRole("button", { name: "Full screen", exact: true })), { name: "Full screen", keys: "W", tip: "Full screen (W)" });
+    assert.deepEqual(await keyed(toolButton(dm, "Fog")), { name: "Fog", keys: "F", tip: "Fog (F)" });
+    assert.deepEqual(await keyed(dm.getByRole("button", { name: "Hide panels", exact: true })), { name: "Hide panels", keys: "S", tip: "Hide panels (S)" });
+    await openSideTab(dm, "Outliner");
+    const search = dm.getByRole("searchbox", { name: "Search the scene" }).or(dm.getByRole("textbox", { name: "Search the scene" }));
+    assert.deepEqual({ placeholder: await search.getAttribute("placeholder"), keys: await search.getAttribute("aria-keyshortcuts") }, { placeholder: "Search the scene (/)", keys: "/" });
+
+    // A token's bar: Hidden, Locked and Delete name H, L and the Delete keys, and keep their names.
+    const tokenId = randomUUID();
+    const goblin = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
+    await cycle.ops!.send({ t: "token.create", token: { id: tokenId, sceneId: cycle.sceneId, kind: "monster", name: "Hint Goblin", size: "medium", x: 14, y: 10, disposition: "hostile", visibility: "all", actor: { inline: goblin } } });
+    await waitFor("the goblin in the DM's view", () => dmSocket.state?.tokens[tokenId]);
+    await clickCell(dm, { x: 14, y: 10 });
+    const tokenBar = dm.getByRole("dialog", { name: "Hint Goblin actions" });
+    await tokenBar.waitFor();
+    const barKey = async (name: string) => {
+      const button = tokenBar.getByRole("button", { name, exact: true }).first();
+      await button.waitFor();
+      return { keys: await button.getAttribute("aria-keyshortcuts"), tip: await tipOf(button) };
+    };
+    assert.deepEqual(await barKey("Hidden"), { keys: "H", tip: "Hidden (H)" });
+    assert.deepEqual(await barKey("Locked"), { keys: "L", tip: "Locked (L)" });
+    assert.deepEqual(await barKey("Delete"), { keys: "Delete Backspace", tip: "Delete (Delete, Backspace)" });
+    await tokenBar.getByRole("button", { name: "Hidden", exact: true }).first().hover();
+    await dm.locator('[role="tooltip"]:popover-open', { hasText: "Hidden (H)" }).waitFor();
+    await shots.take(dm, "fl1-a-dm-hidden-tooltip");
+    await dm.mouse.move(0, 0);
+    await cycle.ops!.send({ t: "token.delete", tokenId });
+    await tokenBar.waitFor({ state: "detached" });
+
+    /** Each keyed button's words on one line: its key never wraps it. Only the words count, not the icon beside them. */
+    const lines: string[] = [];
+    const wholeLines = async (root: Locator, at: string) => {
+      const broken = await root.locator("button[aria-keyshortcuts]").evaluateAll((buttons) =>
+        buttons.flatMap((b) => {
+          type Node = { nodeType: number; textContent: string | null; childNodes: ArrayLike<Node> };
+          const doc = (globalThis as unknown as { document: { createRange(): { selectNodeContents(n: Node): void; getClientRects(): ArrayLike<{ top: number }> } } }).document;
+          const tops: number[] = [];
+          const walk = (n: Node) => {
+            if (n.nodeType === 3 && (n.textContent ?? "").trim()) {
+              const range = doc.createRange();
+              range.selectNodeContents(n);
+              tops.push(...Array.from(range.getClientRects()).map((r) => r.top));
+            }
+            Array.from(n.childNodes).forEach(walk);
+          };
+          walk(b as unknown as Node);
+          tops.sort((x, y) => x - y);
+          // A new line starts where a word's top is more than a few px below the line before.
+          const count = tops.reduce((n, top, i) => (i > 0 && top - tops[i - 1]! > 4 ? n + 1 : n), tops.length > 0 ? 1 : 0);
+          return count > 1 ? [`"${(b as unknown as Node).textContent}" on ${count} lines`] : [];
+        }),
+      );
+      lines.push(...broken.map((line) => `${at}: ${line}`));
+    };
+    for (const size of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+      { width: 320, height: 568 },
+    ]) {
+      for (const scale of [1, 1.3]) {
+        const at = `${size.width}x${size.height}${scale === 1 ? "" : "-130"}`;
+        await dm.setViewportSize(size);
+        await dm.evaluate((s) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(s)), scale);
+        await reopenRoom(dm);
+        await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+        const wide = (await dm.getByRole("tablist", { name: "Panels" }).count()) > 0;
+        const openMenu = async () => {
+          if (wide) await openSideTab(dm, "Menu");
+          else {
+            await dm.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+            await dm.getByRole("list", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+          }
+        };
+        // The View menu in Isometric, where the turns show on every layout. On the narrowest phones the View button folds into the room's menu (D-261026-12).
+        const folded = (await dm.getByRole("button", { name: /^View: / }).count()) === 0;
+        if (folded) {
+          await openMenu();
+          await dm.getByRole("button", { name: /^View\b(?! as)/ }).click();
+        } else await dm.getByRole("button", { name: /^View: / }).click();
+        const menu = dm.getByRole("dialog", { name: "View" });
+        await menu.waitFor();
+        await menu.getByRole("radio", { name: "Isometric", exact: true }).check();
+        const left = menu.getByRole("button", { name: "Turn left", exact: true });
+        await waitFor(`${at}: Turn left enabled`, async () => ((await left.isEnabled()) ? true : null));
+        assert.equal((await left.textContent())?.trim(), "Turn left (Q)", `${at}: Turn left's words name Q`);
+        assert.equal(await left.getAttribute("aria-keyshortcuts"), "Q");
+        assert.equal((await menu.getByRole("button", { name: "Turn right", exact: true }).textContent())?.trim(), "Turn right (E)", `${at}: Turn right's words name E`);
+        lines.push(...alignmentLines(await measureAlignment(menu.locator("[data-view-menu]")), `${at} view menu`));
+        await wholeLines(menu, `${at} view menu`);
+        await shots.take(dm, `fl1-a-dm-view-menu-${at}`);
+        // Its name runs on into the help under it, so it matches by its start.
+        await menu.getByRole("radio", { name: /^Follow the scene/ }).check();
+        await dm.keyboard.press("Escape");
+        await menu.waitFor({ state: "detached" });
+
+        // This device's Shortcuts, from the room's menu, which a folded View button left open. A reload may come back to This device itself.
+        if (!folded) await openMenu();
+        const thisDevice = dm.getByRole("button", { name: /^This device/ });
+        const show = dm.getByRole("button", { name: "Show the shortcuts", exact: true });
+        // The menu's panel loads as it opens.
+        await thisDevice.or(show).first().waitFor();
+        if ((await thisDevice.count()) > 0) await thisDevice.click();
+        await show.scrollIntoViewIfNeeded();
+        assert.equal((await show.textContent())?.trim(), "Show the shortcuts (?)", `${at}: its words name ?`);
+        assert.equal(await show.getAttribute("aria-keyshortcuts"), "?");
+        const section = show.locator("xpath=..");
+        lines.push(...alignmentLines(await measureAlignment(section), `${at} this device shortcuts`));
+        await wholeLines(section, `${at} this device shortcuts`);
+        await shots.take(dm, `fl1-a-dm-this-device-${at}`);
+      }
+    }
+    assert.deepEqual(lines, []);
+    await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
+    await dm.setViewportSize({ width: 1280, height: 800 });
+    await reopenRoom(dm);
+    await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+
+    // A touch phone that has shown no keyboard names no key. The reload forgets the keys pressed on it before.
+    await player.reload();
+    await player.getByRole("status", { name: "Connected" }).first().waitFor();
+    const phoneView = player.getByRole("button", { name: /^View: / });
+    await phoneView.waitFor();
+    assert.equal(await phoneView.getAttribute("aria-keyshortcuts"), null, "no key on the phone's View button");
+    const select = player.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: "Select", exact: true });
+    assert.deepEqual({ keys: await select.getAttribute("aria-keyshortcuts"), title: await select.getAttribute("title") }, { keys: null, title: "Select" });
   });
 
   test("4. neither page logged an error", () => {
