@@ -6,6 +6,9 @@ import { applyOp } from "../reducer.ts";
 import { placedOnHex } from "../rules/footprint.ts";
 import { cornerAt, hexCorners, sceneHexSpan, type Hex, type HexGrid } from "../rules/hex.ts";
 import { actor, character, DM, env, P1, room, scene, token, trap as trapOf } from "../testutil.ts";
+import { findRouteOn } from "../rules/hexWalk.ts";
+import { ownWalk } from "../rules/movement.ts";
+import { hexWallRoom, onHex, wallsRound } from "../rules/hexWalls.testkit.ts";
 
 /**
  * Traps on a hex scene in the reducer (docs/design-v1-hex-grids.md phase
@@ -120,5 +123,27 @@ describe("a trap's text in the protocol on hexes", () => {
     assert.equal(parses({ wire: { a: [1.3, 1], b: [3, 1] } }), false);
     assert.equal(parses({ cells: [{ x: 0, y: 229, w: 1, h: 1 }] }), true);
     assert.equal(parses({ cells: [{ x: 0, y: 230, w: 1, h: 1 }] }), false);
+  });
+});
+
+describe("a squeezed walk on a hex scene", () => {
+  /** A Large ogre at 2,5 west of rock in columns 6 to 12, with a one-row corridor along row 6, and a plate on `plate`. */
+  function corridor(plate: Hex): RoomState {
+    const s = hexWallRoom("hexRows", 22, 16, wallsRound(ROWS, { w: 22, h: 16 }, (h) => h.col >= 6 && h.col <= 12 && h.row !== 6));
+    s.tokens.ogre = onHex(ROWS, "ogre", "large", { col: 2, row: 5 }, { name: "Ogre" });
+    return run(s, { t: "trap.create", trap: input("plate", { zone: { cells: [{ x: plate.col, y: plate.row, w: 1, h: 1 }] }, rig: { ...trapOf("x").rig!, stops: false } }) });
+  }
+
+  function walkThrough(state: RoomState): RoomState {
+    const to = placedOnHex(ROWS, state.tokens.ogre!, { col: 16, row: 6 });
+    const route = findRouteOn({ build: state, token: ownWalk(state.tokens.ogre!), rules: { feetPerCell: 5, diagonal: "five" }, seen: null, creatures: [], areas: [], prone: false, counter: { h: 0, v: 0 } }, to);
+    assert.ok(route && route !== "none", "a way through the corridor");
+    assert.ok(route.pieces.some(([, , extra]) => extra === 1), "squeezed on the way");
+    return run(state, { t: "token.move", tokenId: "ogre", ...to, route: route.pieces.map(([x, y, extra, swim]) => [x, y, extra, swim]) });
+  }
+
+  test("the ogre squeezed along the corridor sets off a plate in the corridor and none in the rock beside it", () => {
+    assert.equal(walkThrough(corridor({ col: 9, row: 6 })).traps.plate?.state, "sprung", "in the corridor");
+    for (let col = 7; col <= 11; col++) assert.equal(walkThrough(corridor({ col, row: 7 })).traps.plate?.state, "armed", `beside it at ${col},7`);
   });
 });

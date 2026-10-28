@@ -780,13 +780,20 @@ function endsAs(op: Op, token: Token, squeezes: boolean): PlacedToken {
  * The walk's squeeze at each spot as its trace has it there, the rule an
  * area's sweep reads (route.ts onTrace): on a piece its walker where the
  * piece starts, at a piece's end the walker there, and where the walk ends
- * `ends`, the token as the move leaves it.
+ * `ends`, the token as the move leaves it. On hexes the group's head reads
+ * its own walk's squeeze at each spot instead (route.ts hexPiece), its
+ * route's corners included, since a hex route squeezes partway along a
+ * piece. Every other member keeps the trace's rule, as it walks as itself
+ * or is carried.
  */
 function squeezeRule(walk: Walk, ends: PlacedToken): (j: number) => boolean {
   const last = walk.spots.length - 1;
+  const own = isHex(walk.grid) && walk.entry === walk.group.head;
   return (j) => {
     if (j === last) return isSqueezed(ends);
-    const [piece, k, n] = walk.spots[j]!.progress;
+    const spot = walk.spots[j]!;
+    if (own && spot.squeezed !== undefined) return spot.squeezed;
+    const [piece, k, n] = spot.progress;
     return isSqueezed(onTrace(walk.entry.trace, piece, k === n, ends));
   };
 }
