@@ -375,9 +375,8 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
               </div>
               <PasteStatus paste={paste} />
               {hexFor("map") ? (
-                <Help>
-                  A name like <code>crypt_30x20.jpg</code> sets the scale for 30 hexes across. Otherwise you line up the hexes next.
-                </Help>
+                // No file-name scale here: the server reads a name's size as square cells, which hex art named by its hexes never matches (D-261028-05).
+                <Help>Line up the hexes next.</Help>
               ) : (
                 <Help>
                   A name like <code>crypt_30x20.jpg</code> sets the scale for 30 by 20 squares. Otherwise a grid drawn on the map is looked for, and you check it or line up the grid next.
