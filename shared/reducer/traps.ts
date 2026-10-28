@@ -4,7 +4,7 @@ import { type LogEntry, type LogEvent, type RoomState, type Token, type Trap, ty
 import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
 import { cellWord, isHex, sceneGrid, shapeOfGrid } from "../rules/grid.ts";
-import { sceneHexSpan, type HexGrid } from "../rules/hex.ts";
+import { hexInScene, sceneHexSpan, type HexGrid } from "../rules/hex.ts";
 import { doorExists, isPlainId, pitFloorOf, pitOpen } from "../rules/traps.ts";
 import { splitCheck } from "../rules/walls.ts";
 import { sightPiecesCheck } from "../visionLimits.ts";
@@ -49,8 +49,9 @@ export function trapOwnBytes(trap: Trap): number {
 /**
  * Why a trap as an op leaves it cannot be, or null (6.1, 6.2): its zone on
  * its scene and the rig fitting the zone. On a hex scene its rectangles are
- * of hex keys, inside the columns and rows the scene's keys run over
- * (docs/design-v1-hex-grids.md H2), and its wire's ends may lie anywhere on
+ * of hex keys, each key one of the scene's hexes, so a short line's last
+ * key, inside the columns and rows the keys run over but off the scene, is
+ * refused (docs/design-v1-hex-grids.md H2), and its wire's ends may lie anywhere on
  * the 1/64 lattice, as hex corners do. A square scene's wire keeps to cell
  * corners and edge midpoints, as before.
  */
@@ -60,7 +61,14 @@ function trapProblem(tx: Tx, trap: Trap): string | null {
   const { w, h } = isHex(g) ? hexKeySpan(g, scene.bounds) : scene.bounds;
   const rig = trap.rig;
   const zone = trap.zone;
-  const rectsInside = (rects: readonly { x: number; y: number; w: number; h: number }[]) => rects.every((r) => r.x + r.w <= w && r.y + r.h <= h);
+  const inside = (r: { x: number; y: number; w: number; h: number }) => {
+    if (r.x + r.w > w || r.y + r.h > h) return false;
+    if (!isHex(g)) return true;
+    // The schema caps a trap's cells, so reading every key is cheap.
+    for (let row = r.y; row < r.y + r.h; row++) for (let col = r.x; col < r.x + r.w; col++) if (!hexInScene(g, scene.bounds, { col, row })) return false;
+    return true;
+  };
+  const rectsInside = (rects: readonly { x: number; y: number; w: number; h: number }[]) => rects.every(inside);
   const word = cellWord(g, true);
   if ("cells" in zone) {
     if (!rectsInside(zone.cells)) return `a trap's ${word} lie inside its scene`;

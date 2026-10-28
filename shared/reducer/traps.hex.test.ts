@@ -4,7 +4,7 @@ import type { RoomState, Token, Trap, TrapRig, Viewer } from "../model.ts";
 import { opSchema, type Op, type TrapInput } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { placedOnHex } from "../rules/footprint.ts";
-import { cornerAt, hexCorners, sceneHexSpan, type Hex, type HexGrid } from "../rules/hex.ts";
+import { cornerAt, hexCorners, sceneHexes, sceneHexSpan, type Hex, type HexGrid } from "../rules/hex.ts";
 import { actor, character, DM, env, P1, room, scene, token, trap as trapOf } from "../testutil.ts";
 import { findRouteOn } from "../rules/hexWalk.ts";
 import { ownWalk } from "../rules/movement.ts";
@@ -59,9 +59,21 @@ describe("making a trap on a hex scene", () => {
   test("its rectangles keep to the hex keys the scene's hexes run over, in the scene's cell word", () => {
     const state = hexRoom();
     const span = sceneHexSpan(ROWS, state.scenes.s1!.bounds);
-    const last = { x: span.cols - 1, y: span.rows - 1, w: 1, h: 1 };
+    const end = sceneHexes(ROWS, state.scenes.s1!.bounds).at(-1)!;
+    const last = { x: end.col, y: end.row, w: 1, h: 1 };
     assert.deepEqual(run(state, { t: "trap.create", trap: input("t1", { zone: { cells: [last] } }) }).traps.t1?.zone, { cells: [last] });
     assert.equal(refusal(state, { t: "trap.create", trap: input("t1", { zone: { cells: [{ ...last, y: span.rows }] } }) }), "a trap's hexes lie inside its scene");
+  });
+
+  test("a rectangle or a rectangle it hits holding a short row's last key, off the scene's hexes, is refused", () => {
+    // On a 30 by 20 hex rows scene the keys run over 30 columns, but row 1 holds 29 hexes, so its key 29 lies off the scene.
+    const state = room({ scenes: { s1: scene("s1", { gridShape: "hexRows", bounds: { w: 30, h: 20 } }) } });
+    const rig = { ...input("t1").rig, hits: "trigger" as const };
+    assert.equal(refusal(state, { t: "trap.create", trap: input("t1", { zone: { cells: [{ x: 29, y: 1, w: 1, h: 1 }] }, rig }) }), "a trap's hexes lie inside its scene");
+    assert.equal(refusal(state, { t: "trap.create", trap: input("t1", { zone: { cells: [{ x: 27, y: 0, w: 3, h: 2 }] }, rig }) }), "a trap's hexes lie inside its scene");
+    assert.deepEqual(run(state, { t: "trap.create", trap: input("t1", { zone: { cells: [{ x: 29, y: 0, w: 1, h: 1 }] }, rig }) }).traps.t1?.zone, { cells: [{ x: 29, y: 0, w: 1, h: 1 }] });
+    const hits = { ...rig, hits: { cells: [{ x: 28, y: 1, w: 2, h: 1 }] } };
+    assert.equal(refusal(state, { t: "trap.create", trap: input("t1", { zone: { cells: [{ x: 2, y: 2, w: 1, h: 1 }] }, rig: hits }) }), "the hexes it hits lie inside its scene");
   });
 
   test("a 200 by 200 hex rows scene takes a trap on its last row, past where squares stop", () => {
