@@ -522,7 +522,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
           <div role="group" aria-label="Read more" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
             {statBlock ? <BarButton onClick={() => openStatBlock(scope, ui, token.id)}>Stat block</BarButton> : null}
             {inStrip("details") ? null : <BarButton onClick={props.onDetails}>Details</BarButton>}
-            <ViewAsButton token={token} />
+            <ViewAsButton token={token} onOpen={frame.raise} />
           </div>
 
           {access.canEditToken("elevation") ? (

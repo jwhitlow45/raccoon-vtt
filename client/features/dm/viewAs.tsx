@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { Member, RoomState, Token } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -85,15 +85,17 @@ const VIEW_AS_A_PLAYER = "View as a player";
  * A token's View as, in its bar and its panel's header: "View as Ana" for
  * one player owner, and with several, "View as a player" opening a list of
  * them, a menu from 900 px up and a bottom sheet on a phone, as Attach's
- * list opens. Nothing for a token with no player owner.
+ * list opens. Nothing for a token with no player owner. `onOpen` hears
+ * whether the menu is open, so the bar can stand over the notices while it
+ * is, as it does for Attach (docs/design-v1-tool-options.md 7.6).
  */
-export function ViewAsButton(props: { token: Pick<Token, "ownerIds" | "actor" | "companion">; style?: CSSProperties }) {
+export function ViewAsButton(props: { token: Pick<Token, "ownerIds" | "actor" | "companion">; style?: CSSProperties; onOpen?(open: boolean): void }) {
   const players = useTokenPlayers(props.token);
   const wide = useLayoutSize().width >= theme.layout.wideMinWidth;
   const only = players.length === 1 ? players[0] : undefined;
   if (only) return <ViewAsOne player={only} style={props.style} />;
   if (players.length === 0) return null;
-  return wide ? <ViewAsMenu players={players} style={props.style} /> : <ViewAsSheet players={players} style={props.style} />;
+  return wide ? <ViewAsMenu players={players} style={props.style} onOpen={props.onOpen} /> : <ViewAsSheet players={players} style={props.style} />;
 }
 
 function ViewAsOne(props: { player: Member; style: CSSProperties | undefined }) {
@@ -106,9 +108,16 @@ function ViewAsOne(props: { player: Member; style: CSSProperties | undefined }) 
   );
 }
 
-function ViewAsMenu(props: { players: readonly Member[]; style: CSSProperties | undefined }) {
+function ViewAsMenu(props: { players: readonly Member[]; style: CSSProperties | undefined; onOpen: ((open: boolean) => void) | undefined }) {
   const viewAs = useScoped(viewAsSlot);
   const menu = usePopover({ kind: "menu" });
+  const { onOpen } = props;
+  const open = menu.open;
+  useEffect(() => {
+    onOpen?.(open);
+  }, [open, onOpen]);
+  // The bar stands back under the notices when the menu goes with its button, which a switch to one owner or a phone's width does.
+  useEffect(() => () => onOpen?.(false), [onOpen]);
   const anchor = useRef<HTMLElement | null>(null);
   // Toward the larger room, as Attach's list opens: the panel header's copy stands near the side panel's top, a bar's wherever it hangs.
   const [side, setSide] = useState<PopoverSide>("above");
