@@ -17,6 +17,7 @@ import { Loading } from "../../components/Loading.tsx";
 import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { theme } from "../../lib/theme.ts";
 import { useScoped } from "../../state/scope.ts";
+import { useSurfaceKeyHint, withKey } from "../../state/shortcuts.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { SHORT_LANDSCAPE_MAX } from "../encounter/band.ts";
 import { pageMemorySlot, rememberedPage, rememberPage } from "./pageMemory.ts";
@@ -147,6 +148,10 @@ export function HandoutViewer(props: {
   const zoomOutRef = useRef<HTMLButtonElement>(null);
   const zoomInRef = useRef<HTMLButtonElement>(null);
   const resetRef = useRef<HTMLButtonElement>(null);
+  // The viewer's own keys (zoom.ts viewerKey) in the zoom buttons' tooltips, on a device with a keyboard.
+  const inKey = useSurfaceKeyHint("viewerZoom", 0);
+  const outKey = useSurfaceKeyHint("viewerZoom", 1);
+  const resetKey = useSurfaceKeyHint("viewerReset");
   const prevRef = useRef<HTMLButtonElement>(null);
   const nextRef = useRef<HTMLButtonElement>(null);
   const count = props.pages.length;
@@ -662,13 +667,33 @@ export function HandoutViewer(props: {
                 ref={resetRef}
                 icon="resetZoom"
                 label="Reset zoom"
+                title={withKey("Reset zoom", resetKey)}
+                aria-keyshortcuts={resetKey?.aria}
                 onClick={() => control({ t: "reset" })}
                 aria-hidden={reset ? undefined : true}
                 tabIndex={reset ? undefined : -1}
                 style={{ ...overLook(false), visibility: reset ? "visible" : "hidden" }}
               />
-              <IconButton ref={zoomOutRef} icon="minus" label="Zoom out" disabled={outOff} onClick={() => control({ t: "out" })} style={overLook(outOff)} />
-              <IconButton ref={zoomInRef} icon="plus" label="Zoom in" disabled={inOff} onClick={() => control({ t: "in" })} style={overLook(inOff)} />
+              <IconButton
+                ref={zoomOutRef}
+                icon="minus"
+                label="Zoom out"
+                title={withKey("Zoom out", outKey)}
+                aria-keyshortcuts={outKey?.aria}
+                disabled={outOff}
+                onClick={() => control({ t: "out" })}
+                style={overLook(outOff)}
+              />
+              <IconButton
+                ref={zoomInRef}
+                icon="plus"
+                label="Zoom in"
+                title={withKey("Zoom in", inKey)}
+                aria-keyshortcuts={inKey?.aria}
+                disabled={inOff}
+                onClick={() => control({ t: "in" })}
+                style={overLook(inOff)}
+              />
             </div>
           </div>
         ) : null}

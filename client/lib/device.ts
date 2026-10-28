@@ -81,14 +81,34 @@ export function sheetDevice(): { mouse: boolean; android: boolean } {
 }
 
 let keyboardSeen = false;
+const keyboardListeners = new Set<() => void>();
 
 /**
  * A key pressed outside a text field, which an on-screen keyboard never
  * types there: a keyboard is attached, as on a tablet with a keyboard case
  * and no trackpad. The room's shortcut listener reports every such press.
+ * The first one tells subscribeKeyboard's listeners.
  */
 export function noteKeyboard(key: string): void {
-  if (key !== "" && key !== "Unidentified" && key !== "Process") keyboardSeen = true;
+  if (keyboardSeen || key === "" || key === "Unidentified" || key === "Process") return;
+  keyboardSeen = true;
+  for (const listener of keyboardListeners) listener();
+}
+
+/**
+ * Hears hasKeyboard change: the first key pressed on a touch screen, or a
+ * mouse or trackpad connected or taken away. For useSyncExternalStore, so
+ * the controls that name their keys (state/shortcuts.ts useKeyHints) show
+ * them at that press, not at some later render.
+ */
+export function subscribeKeyboard(listener: () => void): () => void {
+  keyboardListeners.add(listener);
+  const pointer = typeof matchMedia === "function" ? matchMedia("(any-pointer: fine)") : null;
+  pointer?.addEventListener?.("change", listener);
+  return () => {
+    keyboardListeners.delete(listener);
+    pointer?.removeEventListener?.("change", listener);
+  };
 }
 
 /**

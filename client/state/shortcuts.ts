@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { Token } from "#shared/model.ts";
 import { drawsAllowed } from "#shared/permissions.ts";
 import type { ClientOp } from "#shared/protocol.ts";
@@ -15,7 +15,7 @@ import { PLACE_TOOL_ID } from "../features/tokens/placement.ts";
 import { cycleStep, type ToolCycle } from "../features/toolChoices.ts";
 import { isoOffered, kindSaid, otherViewPress, sayView, topDownTool, turnRefused } from "../features/view/choice.ts";
 import { pickView, readView, shownView, turnView, viewKey } from "../features/view/store.ts";
-import { hasKeyboard, noteKeyboard } from "../lib/device.ts";
+import { hasKeyboard, noteKeyboard, subscribeKeyboard } from "../lib/device.ts";
 import { fullscreenSupported, toggleFullscreen } from "../lib/fullscreen.ts";
 import { displayName } from "../lib/scene.ts";
 import { turned } from "../lib/view.ts";
@@ -675,8 +675,38 @@ export function useKeyHints(): (id: string, part?: number) => KeyHint | null {
   const keys = useShortcutKeys();
   const room = useRoomRoleIfAny();
   const preview = usePreview() !== null;
-  const role = room && !room.display && !preview && hasKeyboard() ? room.role : null;
+  const keyboard = useHasKeyboard();
+  const role = room && !room.display && !preview && keyboard ? room.role : null;
   return (id, part) => (role ? keyHint(id, role, keys, part) : null);
+}
+
+/** lib/device.ts hasKeyboard, followed: a touch screen's first key shows every control's key at once, with nothing mounted again. */
+function useHasKeyboard(): boolean {
+  return useSyncExternalStore(subscribeKeyboard, hasKeyboard, hasKeyboard);
+}
+
+/**
+ * The keys of a surface's own buttons: fixed rows of BEHAVIORS, which no
+ * device moves, kept apart from the room's rebindable keys. Each lists its
+ * `aria-keyshortcuts` names, one entry per key the sheet's row lists, so
+ * `part` picks one. The handout viewer's are features/handouts/zoom.ts
+ * viewerKey's, where `=` zooms in as `+` does.
+ */
+const SURFACE_ARIA: Readonly<Record<string, readonly string[]>> = {
+  viewerZoom: ["Plus =", "-"],
+  viewerReset: ["0"],
+};
+
+/** The key of a surface's fixed row for one of its buttons, as the sheet writes it: the handout viewer's "+" for Zoom in. Null for a row this table does not hold. */
+export function surfaceKeyHint(id: string, part = 0): KeyHint | null {
+  const text = BEHAVIORS.find((b) => b.id === id)?.input.split(", ")[part];
+  const aria = SURFACE_ARIA[id]?.[part];
+  return text !== undefined && aria !== undefined ? { text, aria } : null;
+}
+
+/** surfaceKeyHint on this device: none on a touch screen that has shown no keyboard. A surface's keys work for every role and in "view as a player". */
+export function useSurfaceKeyHint(id: string, part?: number): KeyHint | null {
+  return useHasKeyboard() ? surfaceKeyHint(id, part) : null;
 }
 
 /** keyHint for one control on this page (useKeyHints). */

@@ -66,6 +66,8 @@ export function Row(props: {
    * (features/panels.ts useSubpageFocus).
    */
   opener?: string;
+  /** The shortcut it does, from state/shortcuts.ts useKeyHint: `title` its hover title with the key, "View (I)", and `aria` its `aria-keyshortcuts`. Only with `onClick`. */
+  keys?: { title: string; aria: string };
   style?: CSSProperties;
 }) {
   const card = props.card === true || props.onClick !== undefined;
@@ -151,6 +153,8 @@ export function Row(props: {
       aria-pressed={props.pressed}
       aria-expanded={props.expanded}
       aria-busy={props.busy ? true : undefined}
+      aria-keyshortcuts={props.keys?.aria}
+      title={props.keys?.title}
       disabled={props.disabled}
       onClick={(e) => {
         // A disclosure takes focus before it folds, so a field being typed in under it blurs and commits first, and focus stays on the row.

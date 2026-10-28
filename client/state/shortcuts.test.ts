@@ -12,6 +12,7 @@ import { builderSlot } from "../features/builder/store.ts";
 import { drawSlot } from "../features/drawings/store.ts";
 import { areaCycle, builderCycle, drawCycle, fogCycle, placeCycle, rulerCycle, SPELL_HELD, trapCycle, type ToolCycle } from "../features/toolChoices.ts";
 import { footprint, snapPosition } from "../lib/scene.ts";
+import { viewerKey, viewerStart } from "../features/handouts/zoom.ts";
 import { RoomScope } from "./scope.ts";
 import { toolbarSlot, toolVoiceSlot } from "./toolbar.ts";
 import { keyLabel, sameKey, type KeyMap } from "./keyBindings.ts";
@@ -22,6 +23,7 @@ import {
   hexNudge,
   isTextField,
   keyHint,
+  surfaceKeyHint,
   keySuffix,
   keyText,
   sheetSections,
@@ -1121,6 +1123,7 @@ describe("a control shows the key of the shortcut it does (D-261028-09)", () => 
     ["turn", "client/features/encounter/parts.tsx", "a player's End turn, in the tracker and the phone's band"],
     ["fit", "client/pages/RoomChrome.tsx", "the top bar's Fit"],
     ["view", "client/pages/RoomChrome.tsx", "the top bar's View"],
+    ["view", "client/panels/MenuPanel.tsx", "the room menu's View row, where the bar folds the button away"],
     ["turnLeft", "client/features/view/ViewMenu.tsx", "the View menu's Turn left"],
     ["turnRight", "client/features/view/ViewMenu.tsx", "the View menu's Turn right"],
     ["outliner", "client/features/outliner/OutlinerPanel.tsx", "the outliner's search field"],
@@ -1200,5 +1203,46 @@ describe("a control shows the key of the shortcut it does (D-261028-09)", () => 
     assert.equal(keySuffix(hint), " (E)");
     assert.equal(withKey("Turn right", null), "Turn right");
     assert.equal(keySuffix(null), "");
+  });
+});
+
+describe("a surface's own buttons show its fixed keys, apart from the room's (D-261028-09)", () => {
+  /** The buttons that do what a surface's fixed key does, by its sheet row and the file that draws them, each taking its key from useSurfaceKeyHint. */
+  const SURFACE_CONTROLS: readonly (readonly [id: string, file: string, control: string])[] = [
+    ["viewerZoom", "client/features/handouts/HandoutViewer.tsx", "the handout viewer's Zoom in"],
+    ["viewerZoom", "client/features/handouts/HandoutViewer.tsx", "the handout viewer's Zoom out"],
+    ["viewerReset", "client/features/handouts/HandoutViewer.tsx", "the handout viewer's Reset zoom"],
+  ];
+
+  test("each surface button takes its key from the sheet's row", () => {
+    const wanted = new Map<string, number>();
+    for (const [id, file] of SURFACE_CONTROLS) wanted.set(`${file} ${id}`, (wanted.get(`${file} ${id}`) ?? 0) + 1);
+    for (const [at, count] of wanted) {
+      const [file, id] = at.split(" ") as [string, string];
+      const found = (readFileSync(new URL(`../../${file}`, import.meta.url), "utf8").match(new RegExp(`useSurfaceKeyHint\\("${id}"`, "g")) ?? []).length;
+      assert.ok(found >= count, `${file}: ${count} control(s) for ${id}, ${found} taking its key`);
+    }
+  });
+
+  test("the handout viewer's keys are the sheet's and the viewer's own: + or = zooms in, - zooms out, 0 resets", () => {
+    assert.deepEqual(surfaceKeyHint("viewerZoom", 0), { text: "+", aria: "Plus =" });
+    assert.deepEqual(surfaceKeyHint("viewerZoom", 1), { text: "-", aria: "-" });
+    assert.deepEqual(surfaceKeyHint("viewerReset"), { text: "0", aria: "0" });
+    assert.equal(surfaceKeyHint("viewerZoom", 2), null);
+    assert.equal(surfaceKeyHint("viewerArrows"), null, "the arrows move the picture, which no button does");
+    // Each name the attribute gives is a key the viewer answers with that button's action.
+    const s = viewerStart(true);
+    const pressed = (aria: string) => aria.split(" ").map((name) => viewerKey(name === "Plus" ? "+" : name, s));
+    assert.deepEqual(pressed(surfaceKeyHint("viewerZoom", 0)!.aria), [{ t: "in" }, { t: "in" }]);
+    assert.deepEqual(pressed(surfaceKeyHint("viewerZoom", 1)!.aria), [{ t: "out" }]);
+    assert.deepEqual(pressed(surfaceKeyHint("viewerReset")!.aria), [{ t: "reset" }]);
+  });
+
+  test("kept apart from the room's keys: no device moves them, and the room's table does not hold them", () => {
+    for (const id of ["viewerZoom", "viewerReset"]) {
+      assert.equal(keyHint(id, "dm", DEFAULT_KEYS), null, id);
+      assert.ok(!(id in DEFAULT_KEYS), `${id} is no binding`);
+      assert.ok(!SHORTCUTS.some((s) => s.id === id), `${id} is no room shortcut`);
+    }
   });
 });

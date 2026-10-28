@@ -18,6 +18,7 @@ import { navigate } from "../lib/navigation.ts";
 import { formatRoomId } from "../lib/roomId.ts";
 import { theme } from "../lib/theme.ts";
 import { useScoped } from "../state/scope.ts";
+import { useKeyHint, withKey } from "../state/shortcuts.ts";
 import { useRoomView } from "../state/view.ts";
 import AboutPanel from "./AboutPanel.tsx";
 import MembersPanel from "./MembersPanel.tsx";
@@ -202,6 +203,8 @@ function menuFallback(place: HTMLElement | null): HTMLElement | null {
 function ViewRow() {
   const folded = useStore(useScoped(viewFoldSlot), (s) => s.folded);
   const choice = useRoomViewChoice();
+  // I, which switches the view from anywhere in the room, as the top bar's View button names it where the row stands in for it.
+  const key = useKeyHint("view");
   const [open, setOpen] = useState(false);
   const place = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -220,6 +223,7 @@ function ViewRow() {
           <MenuItem
             icon={choice.shown.kind === "isometric" ? "viewIsometric" : "viewTopDown"}
             title="View"
+            keys={key ? { title: withKey("View", key), aria: key.aria } : undefined}
             detail={
               <>
                 Showing <ViewName kind={choice.shown.kind} /> on this device. Follow the scene, <ViewName kind="topDown" /> or Isometric, and turning the map.
@@ -242,7 +246,7 @@ function ViewRow() {
  * (features/panels.ts useSubpageFocus), and Leave room, which leaves, does
  * neither.
  */
-function MenuItem(props: { icon: IconName; title: string; detail: ReactNode; page?: Page; opener?: string; disabled?: boolean; onClick(): void }) {
+function MenuItem(props: { icon: IconName; title: string; detail: ReactNode; page?: Page; opener?: string; disabled?: boolean; keys?: { title: string; aria: string }; onClick(): void }) {
   return (
     <Row
       // Before the words, so a list read by scanning is found by its icons (docs/design-v1-icons.md 10.2).
@@ -252,6 +256,7 @@ function MenuItem(props: { icon: IconName; title: string; detail: ReactNode; pag
       trailing={props.page ? <Icon name="chevronRight" style={{ color: theme.color.textMuted }} /> : undefined}
       opener={props.page ? `menu-${props.page}` : props.opener}
       disabled={props.disabled}
+      keys={props.keys}
       onClick={props.onClick}
     />
   );
