@@ -1713,9 +1713,11 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       // The field's areas only: until the field's board lays out, the cavern's may still be the last layout.
       const fieldIds = new Set(ids.map((a) => a.id));
       const first = await layoutWhen(dm, "the first area standing", (x) => x.standing.length > 0 && x.standing.every((id) => fieldIds.has(id)), 30_000);
-      const nearest = [...ids].sort((a, b) => a.d - b.d).slice(0, 8).map((a) => a.id);
+      // How many stand in the first frame depends on the machine, and a cheap area can finish before a costly one begun just ahead of it,
+      // so the check is the nearest among them and none from the far half.
       const ranks = first.standing.map((id) => [...ids].sort((a, b) => a.d - b.d).findIndex((a) => a.id === id));
-      assert.ok(first.standing.every((id) => nearest.includes(id)), `the first to stand lie nearest the middle: ${first.standing.length} of them, ranked ${ranks.join(", ")} by nearness`);
+      assert.ok(first.standing.length < ids.length, `every area stood in the first frame (${ids.length})`);
+      assert.ok(ranks.includes(0) && ranks.every((r) => r < ids.length / 2), `the first to stand lie nearest the middle: ${first.standing.length} of them, ranked ${ranks.join(", ")} by nearness`);
       const status = dm.getByRole("status").filter({ hasText: "Building area shapes" });
       await status.waitFor({ timeout: 30_000 });
       const lines = alignmentLines(await measureAlignment(status), "building");
