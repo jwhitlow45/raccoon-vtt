@@ -84,6 +84,16 @@ const LABEL_TEXT = "Old altar";
 const WHISPER = "Meet me by the old well";
 /** Ground nobody ever explores: past Thorn's torch in the north hall, behind the wall from Bree. */
 const NOBODY_AT = { x: 15, y: 0 };
+/** A member's name at the 80 characters a name may take (shared/protocol.ts MAX_NAME), with no space to wrap at. */
+const LONG_NAME = "W".repeat(80);
+const VIEW_AS_A_PLAYER = "View as a player";
+/**
+ * va-3's creatures near the map's top, both hidden by the DM, so they lend
+ * no sight and reach no player: the pack mule Ben and the long-named
+ * player own, and the wagon only the long-named player owns.
+ */
+const MULE_AT = { x: 14, y: 1 };
+const WAGON_AT = { x: 12, y: 1 };
 /** Installs the hook that picks a view without the View menu (client/canvas/relief/isoTest.ts), set before a page loads. */
 const HOOK_FLAG = "globalThis.__rvttIsoTest = true;";
 
@@ -95,7 +105,10 @@ const run = {
   anaId: "",
   benId: "",
   cyId: "",
+  longId: "",
   thornId: randomUUID(),
+  muleId: randomUUID(),
+  wagonId: randomUUID(),
   breeId: randomUUID(),
   goblinId: randomUUID(),
   labelId: randomUUID(),
@@ -325,6 +338,11 @@ async function exitPreview(preview: Locator): Promise<void> {
  */
 async function viewFrom(button: Locator, name: string, memberId: string, from: string): Promise<void> {
   await button.click();
+  await previewShows(name, memberId, from, button);
+}
+
+/** The preview that a View as opened is the one preview, of that player. Exit leaves it, and focus goes back to `returnTo`. */
+async function previewShows(name: string, memberId: string, from: string, returnTo: Locator): Promise<void> {
   const preview = dm.locator(`dialog[aria-label="Viewing as ${name}"]`);
   await preview.waitFor();
   await preview.locator(".konvajs-content").first().waitFor();
@@ -334,7 +352,85 @@ async function viewFrom(button: Locator, name: string, memberId: string, from: s
   assert.equal(await dm.locator('dialog[aria-label^="Viewing as"]').count(), 1, "one preview at a time");
   await shots.take(dm, `viewas-${from}`);
   await exitPreview(preview);
-  await waitFor(`focus back on the ${from}'s View as ${name}`, () => button.evaluate((el) => el === el.ownerDocument.activeElement || null));
+  await waitFor(`focus back on the ${from}'s View as`, () => returnTo.evaluate((el) => el === el.ownerDocument.activeElement || null));
+}
+
+/** What va-3 reads of the page, which its own types name: the e2e code is compiled without the DOM's. */
+type Box = { left: number; top: number; right: number; bottom: number };
+type El = {
+  getBoundingClientRect(): Box;
+  scrollWidth: number;
+  clientWidth: number;
+  textContent: string | null;
+  contains(n: El): boolean;
+  querySelectorAll(s: string): Iterable<El>;
+};
+
+/** The buttons and items in `root` whose words run past their own box or out of `root`'s sides (HXVA-ASTRA-02). */
+async function spills(root: Locator, at: string): Promise<string[]> {
+  return root.evaluate(
+    (el, at) => {
+      const box = (el as unknown as El).getBoundingClientRect();
+      const out: string[] = [];
+      for (const c of (el as unknown as El).querySelectorAll("button, [role='menuitem']")) {
+        const r = c.getBoundingClientRect();
+        if (c.scrollWidth > c.clientWidth + 1 || r.left < box.left - 1 || r.right > box.right + 1) out.push(`${at}: "${(c.textContent ?? "").slice(0, 20)}" runs past its box`);
+      }
+      return out;
+    },
+    at,
+  );
+}
+
+/**
+ * Opens a token's list of its players from `anchor` on a computer and
+ * reads it: it opens on the side of its button with the more room
+ * (HXVA-OPUS-1), every player in it shows whole, uncovered and unscrolled,
+ * with `notice` even under a notice laid across it in the notices' layer
+ * (HXVA-ASTRA-03), it is no wider than a side panel and no name runs out
+ * of it (HXVA-ASTRA-02), and it sits within 1 px. The list stays open.
+ */
+async function openPlayers(page: Page, anchor: Locator, at: string, notice: boolean): Promise<string[]> {
+  await anchor.click();
+  const menu = page.getByRole("menu", { name: VIEW_AS_A_PLAYER, exact: true });
+  await menu.waitFor();
+  const wrong = alignmentLines(await measureAlignment(menu), `the players' list from ${at}`);
+  const a = (await anchor.boundingBox())!;
+  const m = (await menu.boundingBox())!;
+  const below = a.y + a.height / 2 < page.viewportSize()!.height / 2;
+  if (below ? m.y < a.y + a.height - 1 : m.y + m.height > a.y + 1) wrong.push(`${at}: the list opens ${below ? "above" : "below"} its button, the side with less room`);
+  // As wide as a side panel at most (theme.layout.sidePanelWidth), so a long name wraps there.
+  if (m.width > 361) wrong.push(`${at}: the list is ${Math.round(m.width)} px wide`);
+  wrong.push(...(await spills(menu, `the players' list from ${at}`)));
+  wrong.push(
+    ...(await menu.evaluate(
+      (el, { at, notice }) => {
+        type Doc = { elementFromPoint(x: number, y: number): El | null; querySelector(s: string): (El & { appendChild(n: unknown): void }) | null; createElement(t: string): { style: Record<string, string>; remove(): void } };
+        const { document } = globalThis as unknown as { document: Doc };
+        const list = el as unknown as El;
+        const r = list.getBoundingClientRect();
+        // A notice's box over the whole list, in the notices' own layer, so only the stacking order decides which shows.
+        const layer = document.querySelector("[data-rvtt-toast-layer]");
+        const cover = notice && layer ? document.createElement("div") : null;
+        if (cover && layer) {
+          const l = layer.getBoundingClientRect();
+          Object.assign(cover.style, { position: "absolute", left: `${r.left - l.left}px`, top: `${r.top - l.top}px`, width: `${r.right - r.left}px`, height: `${r.bottom - r.top}px`, pointerEvents: "auto", background: "rgb(255 0 0 / 0.3)" });
+          layer.appendChild(cover);
+        }
+        const out: string[] = [];
+        if (notice && !cover) out.push(`${at}: no notices' layer on the page`);
+        for (const item of list.querySelectorAll("[role='menuitem']")) {
+          const b = item.getBoundingClientRect();
+          const top = document.elementFromPoint((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+          if (!top || !item.contains(top)) out.push(`${at}: "${(item.textContent ?? "").slice(0, 20)}" is hidden${cover ? " under the notice" : ""}`);
+        }
+        cover?.remove();
+        return out;
+      },
+      { at, notice },
+    )),
+  );
+  return wrong;
 }
 
 /** Where a token stands in the DM's copy now. */
@@ -720,6 +816,105 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     assert.equal(has.label(sockets.ben.state), true, "the label left Ben's pooled map");
     await shots.take(ben, "pervision-ben-pooled");
     await shots.take(ana, "pervision-ana-pooled");
+  });
+
+  test("va-3. a token with two player owners lists them from its bar and its panel's header, at 1440 x 900 on the side with room and over a notice, and in a phone's sheet, measured, an unbroken 80-letter name inside every control, and Ben picked shows Ben's view", async () => {
+    const longContext = await browser.newContext();
+    try {
+      run.longId = await join(longContext, LONG_NAME, "#ffb224");
+    } finally {
+      await longContext.close();
+    }
+    await ops.send(creature(run.muleId, "Pack mule", MULE_AT, { kind: "npc", disposition: "ally", visibility: "dm", ownerIds: [run.benId, run.longId] }));
+    await ops.send(creature(run.wagonId, "Wagon", WAGON_AT, { kind: "npc", disposition: "ally", visibility: "dm", ownerIds: [run.longId] }));
+    await waitFor("the mule, the wagon and their player in the DM's copy", () => (sockets.dm.state?.tokens[run.muleId] && sockets.dm.state.tokens[run.wagonId] && sockets.dm.state.members[run.longId] ? true : null));
+    const wrong: string[] = [];
+
+    await dm.setViewportSize({ width: 1440, height: 900 });
+    try {
+      await dm.keyboard.press("Escape");
+      await tapCell(dm, BOUNDS, MULE_AT);
+      const bar = dm.getByRole("dialog", { name: "Pack mule actions" });
+      await bar.waitFor();
+      await expandBar(bar);
+      const fromBar = bar.getByRole("group", { name: "Read more" }).getByRole("button", { name: VIEW_AS_A_PLAYER, exact: true });
+      wrong.push(...(await openPlayers(dm, fromBar, "the bar at 1440 x 900", true)));
+      await shots.take(dm, "viewas-list-bar-1440x900");
+      await dm.getByRole("menuitem", { name: "Ben", exact: true }).click();
+      await previewShows("Ben", run.benId, "bar's list", fromBar);
+
+      await openSideTab(dm, "Token");
+      const panel = dm.getByRole("tabpanel", { name: sideTabName("Token") });
+      const fromHeader = panel.locator("[data-creature-header]").getByRole("button", { name: VIEW_AS_A_PLAYER, exact: true });
+      wrong.push(...(await openPlayers(dm, fromHeader, "the panel header at 1440 x 900", false)));
+      await shots.take(dm, "viewas-list-panel-1440x900");
+      await dm.getByRole("menuitem", { name: "Ben", exact: true }).click();
+      await previewShows("Ben", run.benId, "panel header's list", fromHeader);
+      await dm.keyboard.press("Escape");
+    } finally {
+      await dm.setViewportSize({ width: 1280, height: 800 });
+    }
+
+    const storageState = await dmContext.storageState();
+    for (const size of [
+      { name: "390x844", width: 390, height: 844 },
+      { name: "320x568", width: 320, height: 568 },
+    ]) {
+      for (const scale of [1, 1.3]) {
+        const at = `${size.name} at ${Math.round(scale * 100)}%`;
+        const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState });
+        try {
+          await context.addInitScript((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+          const page = await context.newPage();
+          await page.goto(`${server.origin}/r/${run.roomId}`);
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          await page.locator(".konvajs-content").first().waitFor();
+
+          await tapCell(page, BOUNDS, MULE_AT);
+          const bar = page.getByRole("dialog", { name: "Pack mule actions" });
+          await bar.waitFor();
+          await expandBar(bar);
+          const opener = bar.getByRole("group", { name: "Read more" }).getByRole("button", { name: VIEW_AS_A_PLAYER, exact: true });
+          await opener.scrollIntoViewIfNeeded();
+          await opener.click();
+          const sheet = page.getByRole("dialog", { name: VIEW_AS_A_PLAYER, exact: true });
+          await sheet.waitFor();
+          wrong.push(...alignmentLines(await measureAlignment(sheet), `the players' sheet at ${at}`), ...(await spills(sheet, `the players' sheet at ${at}`)));
+          await shots.take(page, `viewas-sheet-${size.name}-${Math.round(scale * 100)}`);
+          if (size.width === 390 && scale === 1) {
+            await sheet.getByRole("menuitem", { name: "Ben", exact: true }).click();
+            const preview = page.locator('dialog[aria-label="Viewing as Ben"]');
+            await preview.waitFor();
+            await exitPreview(preview);
+            await waitFor(`focus back on View as a player at ${at}`, () => opener.evaluate((el) => el === el.ownerDocument.activeElement || null));
+          } else {
+            await page.keyboard.press("Escape");
+            await sheet.waitFor({ state: "detached" });
+          }
+          await page.keyboard.press("Escape");
+          await bar.waitFor({ state: "detached" });
+
+          await tapCell(page, BOUNDS, WAGON_AT);
+          const wagon = page.getByRole("dialog", { name: "Wagon actions" });
+          await wagon.waitFor();
+          await expandBar(wagon);
+          const readMore = wagon.getByRole("group", { name: "Read more" });
+          await readMore.getByRole("button", { name: `View as ${LONG_NAME}`, exact: true }).scrollIntoViewIfNeeded();
+          wrong.push(...alignmentLines(await measureAlignment(readMore), `the wagon's Read more at ${at}`), ...(await spills(readMore, `the wagon's Read more at ${at}`)));
+          await shots.take(page, `viewas-long-bar-${size.name}-${Math.round(scale * 100)}`);
+          await wagon.getByRole("button", { name: "Details", exact: true }).first().click();
+          const header = page.locator("[data-token-panel] [data-creature-header]").filter({ has: page.getByRole("button", { name: `View as ${LONG_NAME}`, exact: true }) });
+          await header.waitFor();
+          wrong.push(...alignmentLines(await measureAlignment(header), `the wagon's panel header at ${at}`), ...(await spills(header, `the wagon's panel header at ${at}`)));
+          await shots.take(page, `viewas-long-panel-${size.name}-${Math.round(scale * 100)}`);
+        } finally {
+          await context.close();
+        }
+      }
+    }
+    await ops.send({ t: "token.delete", tokenId: run.muleId });
+    await ops.send({ t: "token.delete", tokenId: run.wagonId });
+    assert.deepEqual(wrong, []);
   });
 
   test("pv-7b. in Isometric, per player: the DM's goblin on ground the party explored stands bright and a creature on ground nobody explored dims, and Ben's page stands neither (ISO5P2-FV-4)", async () => {
