@@ -1048,7 +1048,8 @@ function FightAlerts() {
               left: 0,
               right: 0,
               width: "auto",
-              height: `calc(${(typing?.page ?? height) - (asked === "fullScreen" ? 0 : placed.toolbar)}px - ${theme.safe.top})`,
+              // Over the whole screen it stops at the visible area's foot while someone types, so its body scrolls the field above the keyboard.
+              height: `calc(${asked === "fullScreen" ? (typing?.bottom ?? height) : (typing?.page ?? height) - placed.toolbar}px - ${theme.safe.top})`,
               maxHeight: undefined,
               padding: 0,
               overflowY: "hidden",

@@ -988,11 +988,14 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
 
   /*
    * The roll card with the page itself resized: upright over a 300 px keyboard, and at 480 x 320 at 130%, where the card
-   * waits as "Roll asked" and is summoned onto the screen before Total takes focus, leaving an 80 px page.
+   * waits as "Roll asked" and is summoned onto the screen before Total takes focus, leaving an 80 px page. And sideways
+   * over the visual viewport, as iOS Safari's keyboard is, where the alerts take the whole screen and must stop at the
+   * keyboard's top for Total to scroll into view (LP23-A-KBD-1).
    */
   for (const view of [
     { width: 320, height: 568, scale: 1.3, keyboard: 300, native: true },
     { width: 480, height: 320, scale: 1.3, keyboard: 216, native: true },
+    { width: 844, height: 390, scale: 1, keyboard: 216 },
   ] satisfies View[]) {
     test(`kb-16. in the fight at ${viewName(view)}, the roll card's Total and Send show whole over the keyboard`, () => rollCard(view));
   }
