@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type RoomState, type Viewer } from "#shared/model.ts";
+import { chunkKey, wallChunk } from "#shared/keys.ts";
+import { CHUNK_CELLS, type BuildChunk, type EdgeFeature, type FreeWall, type RoomState, type Viewer } from "#shared/model.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { MAX_EPH_BYTES, type EphEvent, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { canApply } from "#shared/permissions.ts";
 import { projectState } from "#shared/project.ts";
+import { gridOfShape } from "#shared/rules/grid.ts";
+import type { HexGrid } from "#shared/rules/hex.ts";
+import { clipFootprint, sightClipOf } from "#shared/rules/vision.ts";
+import { sceneWalls } from "#shared/rules/walls.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { DM, P1, P2, actor, character, env, reveal, room, scene, token } from "#shared/testutil.ts";
 import { Connection } from "./connection.ts";
@@ -569,5 +574,31 @@ describe("two sockets of one member on one preview", () => {
     t.send(t.a.conn, { k: "dragCancel", tokenId: "gob" });
     assert.deepEqual(cancels(t.p1.got), [{ k: "dragCancel", tokenId: "gob" }]);
     assert.ok(!t.p1.conn.previewsHeld.has("dm1|drag:gob"));
+  });
+});
+
+describe("a drag preview on hexes beside a wall (docs/design-v1-hex-grids.md HX-D10)", () => {
+  test("a Medium dragged to (5.49, 0.2), a wall at x = 5.4375 through its hex, stays unseen while only its sub-cells beyond the wall are revealed", () => {
+    const g = gridOfShape("hexRows") as HexGrid;
+    const state = room({ scenes: { s1: scene("s1", { gridShape: "hexRows", fogEnabled: true }), s2: scene("s2", { order: 1 }) } });
+    const wall: FreeWall = { id: "e00000000001", a: [5.4375, 0], b: [5.4375, 3], f: { kind: "wall" } };
+    const { cx, cy } = wallChunk(wall);
+    state.buildChunks[chunkKey("s1", cx, cy)] = { sceneId: "s1", cx, cy, rev: 0, cells: {}, edges: {}, walls: [wall] };
+    state.tokens.gob = token("gob", { x: 10, y: 10 });
+    reveal(state, "s1", { x: 9, y: 9, w: 3, h: 3 });
+    const at = { x: 5.49, y: 0.2 };
+    const { subs, kept, keep } = clipFootprint(g, { ...state.tokens.gob, ...at }, sightClipOf(sceneWalls(state.scenes.s1!, state.buildChunks)));
+    const revealSub = ([sx, sy]: readonly [number, number]) => reveal(state, "s1", { x: sx / 4, y: sy / 4, w: 0.25, h: 0.25 });
+    const behind = subs.filter((_, i) => keep?.[i] !== 1);
+    assert.equal(behind.length, 7);
+    behind.forEach(revealSub);
+    const t = table(state);
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "gob", x: 10, y: 10 });
+    assert.deepEqual(t.p1.got, [{ k: "dragMove", tokenId: "gob", x: 10, y: 10 }], "on revealed ground it shows");
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "gob", ...at });
+    assert.deepEqual(t.p1.got.at(-1), { k: "dragCancel", tokenId: "gob" }, "its sub-cells beyond the wall keep it hidden");
+    revealSub(kept[0]!);
+    t.send(t.dm.conn, { k: "dragMove", tokenId: "gob", ...at });
+    assert.deepEqual(t.p1.got.at(-1), { k: "dragMove", tokenId: "gob", ...at }, "one on its own side shows it");
   });
 });

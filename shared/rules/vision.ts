@@ -18,8 +18,9 @@ import type { PartySight, SightProbe } from "../ruleHooks.ts";
 import { footprintSize, footprintSubcells, isSqueezed, squeezedRect, storedCenter, tokenHeightFt } from "./footprint.ts";
 import type { Bounds } from "./geom.ts";
 import type { Grid } from "./grid.ts";
+import type { HexGrid } from "./hex.ts";
 import { footprintGround, groundAt, standing } from "./heights.ts";
-import { boundsOf, clipToBox, crossingsAt, indexPolygon, orient, SIGHT, stepOffWalls, type Polygon } from "./segments.ts";
+import { boundsOf, clipToBox, contact, CROSS, crossingsAt, indexPolygon, onSegment, orient, SIGHT, stepOffWalls, TOUCH, type Polygon, type SegmentIndex } from "./segments.ts";
 import type { SightSet, WallSet } from "./walls.ts";
 import { isWritable } from "../writable.ts";
 
@@ -85,6 +86,136 @@ export function sightRect(probe: SightProbe): Bounds {
 /** The first sub-cell column (or row) whose center is at or past `x` cells. Exact: SUB is a power of two. */
 function firstCenterFrom(x: number): number {
   return Math.ceil((2 * SUB * x - 1) / 2);
+}
+
+// ---------------------------------------------------------------------------
+// The wall clip on hexes
+
+/**
+ * The sight walls that clip a hex creature's sub-cells
+ * (docs/design-v1-hex-grids.md HX-D10): the stored segments tagged SIGHT,
+ * the set an eye steps off (walls.ts `sight`), as players see them. Raised
+ * edges stay out, since hex scenes have no heights yet. Null when the
+ * scene has none, so the clip costs nothing there.
+ */
+export function sightClipOf(walls: WallSet): SegmentIndex | null {
+  const stored = walls.sight(Infinity).stored;
+  return stored.tags.length > 0 ? stored : null;
+}
+
+/** A hex creature's footprint sub-cells, those the wall clip keeps, and a keep flag per sub-cell, null when it keeps them all. */
+export type ClippedFootprint = {
+  subs: readonly (readonly [number, number])[];
+  kept: readonly (readonly [number, number])[];
+  keep: Uint8Array | null;
+};
+
+/*
+ * Clips by wall set and footprint. A projection asks about every creature
+ * once per viewer class, and a walk's spots repeat, so most asks are
+ * repeats. The bound keeps a long session's spots from piling up.
+ */
+const clipCache = new WeakMap<SegmentIndex, Map<string, ClippedFootprint>>();
+const CLIPS_KEPT = 4096;
+
+/**
+ * HX-D10's wall clip: the sub-cells inside a creature's hexes
+ * (footprint.ts footprintSubcells, the squeezed hexes while it squeezes)
+ * whose centers its stored center sees past no sight wall, so a wall
+ * through one of its hexes never shows it from the far side. A stored
+ * center on a wall steps off it as an eye does (segments.ts
+ * stepOffWalls). One that cannot keeps no sub-cell, and the creature is
+ * unseen and under the fog: it fails closed. Without walls every
+ * sub-cell is kept.
+ */
+export function clipFootprint(g: HexGrid, probe: SightProbe, clip: SegmentIndex | null): ClippedFootprint {
+  if (clip === null) {
+    const subs = footprintSubcells(g, probe);
+    return { subs, kept: subs, keep: null };
+  }
+  const key = `${g.orient}|${probe.size}|${probe.x}|${probe.y}|${probe.w}|${probe.h}|${probe.squeeze === true}`;
+  let held = clipCache.get(clip);
+  const hit = held?.get(key);
+  if (hit) return hit;
+  const out = clipOnce(footprintSubcells(g, probe), storedCenter(probe), clip);
+  if (!held) clipCache.set(clip, (held = new Map()));
+  if (held.size >= CLIPS_KEPT) held.clear();
+  held.set(key, out);
+  return out;
+}
+
+function clipOnce(subs: readonly (readonly [number, number])[], center: { x: number; y: number }, clip: SegmentIndex): ClippedFootprint {
+  const eye = stepOffWalls(center.x, center.y, clip, SIGHT);
+  if (!eye) return { subs, kept: [], keep: new Uint8Array(subs.length) };
+  let x0 = eye.x;
+  let y0 = eye.y;
+  let x1 = eye.x;
+  let y1 = eye.y;
+  for (const [sx, sy] of subs) {
+    const cx = (2 * sx + 1) / (2 * SUB);
+    const cy = (2 * sy + 1) / (2 * SUB);
+    if (cx < x0) x0 = cx;
+    if (cx > x1) x1 = cx;
+    if (cy < y0) y0 = cy;
+    if (cy > y1) y1 = cy;
+  }
+  const xy = clip.xy;
+  // The index files segments by cell, so its answer is cut to the segments whose own boxes meet the footprint's.
+  const near: number[] = [];
+  clip.query(x0, y0, x1, y1, SIGHT, (k) => {
+    const ax = xy[4 * k]!;
+    const ay = xy[4 * k + 1]!;
+    const bx = xy[4 * k + 2]!;
+    const by = xy[4 * k + 3]!;
+    if (Math.max(ax, bx) >= x0 && Math.min(ax, bx) <= x1 && Math.max(ay, by) >= y0 && Math.min(ay, by) <= y1) near.push(k);
+  });
+  if (near.length === 0) return { subs, kept: subs, keep: null };
+  // A point strictly on the eye's side of a segment's line is clear of it, which settles most pairs with one orientation.
+  const sides = near.map((k) => orient(xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!, eye.x, eye.y));
+  const keep = new Uint8Array(subs.length);
+  const kept: (readonly [number, number])[] = [];
+  for (let i = 0; i < subs.length; i++) {
+    const sub = subs[i]!;
+    const px = (2 * sub[0] + 1) / (2 * SUB);
+    const py = (2 * sub[1] + 1) / (2 * SUB);
+    let clear = true;
+    for (let j = 0; j < near.length && clear; j++) {
+      const k = near[j]!;
+      const ax = xy[4 * k]!;
+      const ay = xy[4 * k + 1]!;
+      const bx = xy[4 * k + 2]!;
+      const by = xy[4 * k + 3]!;
+      const side = sides[j]!;
+      if (side !== 0 && orient(ax, ay, bx, by, px, py) === side) continue;
+      clear = !blocks(eye.x, eye.y, px, py, ax, ay, bx, by);
+    }
+    if (!clear) continue;
+    keep[i] = 1;
+    kept.push(sub);
+  }
+  return kept.length === subs.length ? { subs, kept: subs, keep: null } : { subs, kept, keep };
+}
+
+/**
+ * Whether the line from an eye to a point meets none of the segments
+ * `near` lists, by the exact predicate. A touch blocks, failing closed:
+ * the point on a wall, which an eye beyond it can see, or a wall's end on
+ * the line, which may be a closed corner. A wall lying along the line
+ * with the point off it does not, since an eye finds such a wall has no
+ * width (`visibleFrom`). The eye is never on a wall, having stepped off.
+ */
+export function seesPast(ex: number, ey: number, px: number, py: number, xy: Float64Array, near: readonly number[]): boolean {
+  for (const k of near) if (blocks(ex, ey, px, py, xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!)) return false;
+  return true;
+}
+
+/** Whether the segment from a to b blocks the line from an eye to a point, by `seesPast`'s rule. */
+function blocks(ex: number, ey: number, px: number, py: number, ax: number, ay: number, bx: number, by: number): boolean {
+  const meets = contact(ex, ey, px, py, ax, ay, bx, by);
+  if (meets === CROSS) return true;
+  if (meets !== TOUCH) return false;
+  const along = orient(ax, ay, bx, by, ex, ey) === 0 && orient(ax, ay, bx, by, px, py) === 0;
+  return !along || onSegment(px, py, ax, ay, bx, by);
 }
 
 // ---------------------------------------------------------------------------
@@ -353,8 +484,13 @@ class TileSight implements PartySight {
   }
 
   seesToken(probe: SightProbe, g: Grid): boolean {
-    if (g.shape === "hex") return footprintSubcells(g, probe).some(([sx, sy]) => this.levelAt(sx, sy) !== NOT_SEEN);
+    if (g.shape === "hex") return this.seesSubcells(footprintSubcells(g, probe));
     return rectSeen(sightRect(probe), (sx, sy) => this.levelAt(sx, sy));
+  }
+
+  /** Whether any of these sub-cells has a level above 0. */
+  seesSubcells(subs: readonly (readonly [number, number])[]): boolean {
+    return subs.some(([sx, sy]) => this.levelAt(sx, sy) !== NOT_SEEN);
   }
 }
 
@@ -2150,6 +2286,28 @@ class HolderSight implements PartySight {
     const raster = heldRaster(this.#sceneId, this.#entry.serial, this.#key);
     return raster ? raster.sight.seesToken(probe, g) : pointSees(this.#entry, this.#sources, probe, g);
   }
+
+  /** Whether any of these sub-cells is seen, from the raster when the cache holds it and by the point query otherwise. */
+  seesSubcells(subs: readonly (readonly [number, number])[]): boolean {
+    const raster = heldRaster(this.#sceneId, this.#entry.serial, this.#key);
+    return raster ? raster.sight.seesSubcells(subs) : subcellsSeen(this.#entry, this.#sources, inScene(this.#entry, subs));
+  }
+}
+
+/**
+ * Whether the party sees a creature by HX-D10: `seesToken`, except that on
+ * hexes with sight walls only the sub-cells the wall clip keeps count
+ * (`clipFootprint`). Every rule that withholds a creature asks this
+ * (project.ts), with the clip of the walls in the state it reads, so the
+ * raster, the point query and a device's tiles answer alike.
+ */
+export function seesCreature(sight: PartySight, probe: SightProbe, g: Grid, clip: SegmentIndex | null): boolean {
+  if (g.shape !== "hex" || clip === null) return sight.seesToken(probe, g);
+  const { kept, keep } = clipFootprint(g, probe, clip);
+  if (keep === null) return sight.seesToken(probe, g);
+  if (sight instanceof TileSight || sight instanceof HolderSight) return sight.seesSubcells(kept);
+  // A sight made outside this file, as a test's stand-in, reads no sub-cells, so a creature the clip cuts fails closed.
+  return false;
 }
 
 /*
@@ -2163,7 +2321,7 @@ class HolderSight implements PartySight {
 function pointSees(entry: Drawn, sources: readonly SourceEntry[], probe: SightProbe, g: Grid): boolean {
   const W = entry.w * SUB;
   const H = entry.h * SUB;
-  if (g.shape === "hex") return subcellsSeen(entry, sources, footprintSubcells(g, probe).filter(([sx, sy]) => sx >= 0 && sy >= 0 && sx < W && sy < H));
+  if (g.shape === "hex") return subcellsSeen(entry, sources, inScene(entry, footprintSubcells(g, probe)));
   const r = sightRect(probe);
   const box: SubBox = {
     c0: Math.max(0, firstCenterFrom(r.x0)),
@@ -2183,6 +2341,13 @@ function pointSees(entry: Drawn, sources: readonly SourceEntry[], probe: SightPr
     }
   }
   return false;
+}
+
+/** The sub-cells inside the scene's raster. */
+function inScene(entry: Drawn, subs: readonly (readonly [number, number])[]): (readonly [number, number])[] {
+  const W = entry.w * SUB;
+  const H = entry.h * SUB;
+  return subs.filter(([sx, sy]) => sx >= 0 && sy >= 0 && sx < W && sy < H);
 }
 
 /** `pointSees` over a list of sub-cells inside the scene. */

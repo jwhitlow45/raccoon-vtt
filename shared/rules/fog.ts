@@ -1,8 +1,10 @@
 import { CHUNK_CELLS, FOG_SUBCELLS, type FogOp, type FogShape, type FogTile, type Label, type Token } from "../model.ts";
 import { tileKey } from "../keys.ts";
-import { footprintSubcells, occupiedCells, type CellRange, type PlacedToken } from "./footprint.ts";
+import { occupiedCells, type CellRange, type PlacedToken } from "./footprint.ts";
 import type { Grid } from "./grid.ts";
 import { labelBox } from "./labels.ts";
+import type { SegmentIndex } from "./segments.ts";
+import { clipFootprint } from "./vision.ts";
 
 /**
  * The fog bitmap (design section 13.1). One tile covers 16 x 16 cells at 4 x 4
@@ -139,14 +141,17 @@ export function isCellFullyFogged(tiles: TileMap, sceneId: string, cell: Cell): 
  * The section 13.4 test: every occupied cell of the token is fully fogged.
  * On hexes, every fog sub-cell inside its hexes (docs/design-v1-hex-grids.md
  * HX-D10), so a hex half in a revealed cell shows the creature only when a
- * revealed sub-cell lies inside one of its hexes.
+ * revealed sub-cell lies inside one of its hexes. With the scene's sight
+ * walls as `clip` (vision.ts sightClipOf), only the sub-cells the wall
+ * clip keeps count, so ground revealed beyond a wall through its hex never
+ * shows it (vision.ts clipFootprint).
  *
  * Only tests read it, against one tile map. The live rule is project.ts
  * `footprintFogged`, which reads the layers each viewer's fog joins
  * (reviews HX2-OPUS-09, HX2-SEC-03).
  */
-export function isTokenFullyFogged(g: Grid, tiles: TileMap, sceneId: string, token: PlacedToken): boolean {
-  if (g.shape === "hex") return footprintSubcells(g, token).every(([sx, sy]) => isSubcellFogged(tiles, sceneId, sx, sy));
+export function isTokenFullyFogged(g: Grid, tiles: TileMap, sceneId: string, token: PlacedToken, clip: SegmentIndex | null = null): boolean {
+  if (g.shape === "hex") return clipFootprint(g, token, clip).kept.every(([sx, sy]) => isSubcellFogged(tiles, sceneId, sx, sy));
   return occupiedCells(g, token).every((cell) => isCellFullyFogged(tiles, sceneId, cell));
 }
 

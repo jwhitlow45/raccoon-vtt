@@ -69,13 +69,14 @@ import { decodeTile, encodeTile, getBit, isAboveFog, isRangeFullyFogged, labelCe
 import { footprintRect, footprintSubcells, occupiedCells, occupiedHexes, occupiedRange, type CellRange } from "./rules/footprint.ts";
 import { classSight, fogClassOf, groundOf, holdsOwnSight, joinPieces, wallLattice, wallSpans, type CellPiece, type Ground, type Piece, type PieceKind } from "./rules/held.ts";
 import { chunkHeights, chunkMarks, encodeHeights } from "./rules/heights.ts";
-import { hexCenter, hexSubcells, sceneHexSpan } from "./rules/hex.ts";
+import { hexAt, hexCenter, hexKey, hexSubcells, sceneHexSpan, type HexGrid } from "./rules/hex.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./rules/grid.ts";
 import { hpBar, hpLabel, hpLess, type HpLabel } from "./rules/hp.ts";
 import { compareEntries, orderRevealOf, rowCharacter } from "./rules/initiative.ts";
 import { legOnGround, pathThisTurn, seenWhole, stopsForNonOwners, stopsForOwners } from "./rules/path.ts";
 import { zoneRanges } from "./rules/traps.ts";
-import { sightRect } from "./rules/vision.ts";
+import { clipFootprint, seesCreature, sightClipOf, sightRect } from "./rules/vision.ts";
+import type { SegmentIndex } from "./rules/segments.ts";
 import { sceneWalls, type WallSet } from "./rules/walls.ts";
 
 /**
@@ -667,7 +668,9 @@ function tokenVisibleTo(ctx: Ctx, token: Token, revealedSeen = false): boolean {
  * sight and fog are whichever viewer's the caller passes: one player's own
  * on a per-player scene, or what every viewer shares
  * (docs/design-v1-per-player-vision.md 6.2). On a hex scene both read the
- * fog sub-cells inside the creature's hexes (`footprintFogged`).
+ * fog sub-cells inside the creature's hexes (`footprintFogged`), those its
+ * stored center sees past every sight wall when the scene has any
+ * (docs/design-v1-hex-grids.md HX-D10, vision.ts clipFootprint).
  *
  * A creature revealed on its turn follows that rule too (rules/fog.ts
  * isAboveFog). `revealedSeen` brings back the rule that ops stored before
@@ -684,19 +687,62 @@ function withheldFromPlayers(state: RoomState, fogged: FogReader, sight: (sceneI
   if (!visionOn(scene) && !scene.fogEnabled) return false;
   if (isAboveFog(token, isPartyMember(state, token)) || (revealedSeen && token.fogExemptAuto)) return false;
   const grid = sceneGrid(scene);
-  if (visionOn(scene)) return !sight(scene.id).seesToken(token, grid);
-  return footprintFogged(grid, fogged, token);
+  const clip = sightClip(state, scene, grid);
+  if (visionOn(scene)) return !seesCreature(sight(scene.id), token, grid, clip);
+  return footprintFogged(grid, fogged, token, clip);
 }
 
 /**
  * Whether every part of a creature's footprint is fogged by `fogged`: each
  * cell it stands on on squares, and on hexes each fog sub-cell inside its
  * hexes (docs/design-v1-hex-grids.md HX-D10), so a hex half in a revealed
- * cell shows it only where a revealed sub-cell lies inside the hex.
+ * cell shows it only where a revealed sub-cell lies inside the hex. Only
+ * the sub-cells the wall clip keeps count, and a creature that keeps none
+ * is under the fog.
  */
-function footprintFogged(grid: Grid, fogged: FogReader, token: Token): boolean {
-  if (grid.shape === "hex") return footprintSubcells(grid, token).every(([sx, sy]) => fogged.sub(token.sceneId, sx, sy));
+function footprintFogged(grid: Grid, fogged: FogReader, token: Token, clip: SegmentIndex | null): boolean {
+  if (grid.shape === "hex") return clipFootprint(grid, token, clip).kept.every(([sx, sy]) => fogged.sub(token.sceneId, sx, sy));
   return occupiedCells(grid, token).every((cell) => fogged(token.sceneId, cell.x, cell.y));
+}
+
+/*
+ * The sight walls that clip a creature's sub-cells on a hex scene
+ * (HX-D10), per build and scene, null on squares and where there are none.
+ * The walls are the state's own, so a DM's device clips by what the server
+ * does. A build an op is still writing is never kept, as walls.ts keeps no
+ * list of its chunks.
+ */
+const sightClips = new WeakMap<object, WeakMap<Scene, SegmentIndex | null>>();
+
+function sightClip(state: Pick<RoomState, "buildChunks">, scene: Scene, grid: Grid): SegmentIndex | null {
+  if (grid.shape !== "hex") return null;
+  const chunks = state.buildChunks;
+  let byScene = sightClips.get(chunks);
+  const hit = byScene?.get(scene);
+  if (hit !== undefined) return hit;
+  const clip = sightClipOf(sceneWalls(scene, chunks));
+  if (!isWritable(chunks)) {
+    if (!byScene) sightClips.set(chunks, (byScene = new WeakMap()));
+    byScene.set(scene, clip);
+  }
+  return clip;
+}
+
+/**
+ * Whether every hex of a creature holds a sub-cell the wall clip keeps and
+ * `open` passes: on a per-player scene, a spot on shared ground. A hex
+ * the clip empties lies wholly behind a wall and counts as under the fog.
+ */
+function everyHexOpen(grid: HexGrid, token: Token, clip: SegmentIndex | null, open: (sx: number, sy: number) => boolean): boolean {
+  const { subs, keep } = clipFootprint(grid, token, clip);
+  const hexes = new Map<string, boolean>();
+  for (let i = 0; i < subs.length; i++) {
+    const [sx, sy] = subs[i]!;
+    const key = hexKey(hexAt(grid, { x: (sx + 0.5) / FOG_SUBCELLS, y: (sy + 0.5) / FOG_SUBCELLS }));
+    if (hexes.get(key) !== true) hexes.set(key, (keep === null || keep[i] === 1) && open(sx, sy));
+  }
+  for (const ok of hexes.values()) if (!ok) return false;
+  return true;
 }
 
 /**
@@ -785,11 +831,12 @@ export function seenAtEvery(state: RoomState, token: Token, spots: readonly { x:
   if (!spots.every((p) => !withheldFromPlayers(state, shared.fogged, shared.sight, placed(p), revealed))) return false;
   const scene = state.scenes[token.sceneId];
   if (!perPlayerScene(scene) || !scene?.fogEnabled) return true;
-  // Every cell of the footprint on shared ground, not wholly under the shared fog: on hexes every hex of it (HX-D10).
+  // Every cell of the footprint on shared ground, not wholly under the shared fog: on hexes every hex of it, by the sub-cells the wall clip keeps (HX-D10).
   const grid = sceneGrid(scene);
+  const clip = sightClip(state, scene, grid);
   const open = (t: Token) =>
     grid.shape === "hex"
-      ? occupiedHexes(grid, t).every((h) => hexSubcells(grid, h).some(([sx, sy]) => !shared.fogged.sub(token.sceneId, sx, sy)))
+      ? everyHexOpen(grid, t, clip, (sx, sy) => !shared.fogged.sub(token.sceneId, sx, sy))
       : occupiedCells(grid, t).every((cell) => !shared.fogged(token.sceneId, cell.x, cell.y));
   return spots.every((p) => open(placed(p)));
 }

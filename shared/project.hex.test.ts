@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { keys } from "./keys.ts";
-import type { RoomState, Token, Viewer } from "./model.ts";
-import { dependents, projectState, withheldWhereItStands } from "./project.ts";
+import { chunkKey, keys, wallChunk } from "./keys.ts";
+import type { FreeWall, RoomState, Token, Viewer } from "./model.ts";
+import { dependents, projectState, seenAtEvery, withheldWhereItStands } from "./project.ts";
 import { opSchema, type Op, type RestoreEntry } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules } from "./ruleHooks.ts";
-import { footprintRect, footprintSubcells, occupiedRange, placedOnHex } from "./rules/footprint.ts";
+import { isTokenFullyFogged } from "./rules/fog.ts";
+import { footprintRect, footprintSubcells, occupiedHexes, occupiedRange, placedOnHex } from "./rules/footprint.ts";
 import { gridOfShape, SQUARES } from "./rules/grid.ts";
-import type { HexGrid } from "./rules/hex.ts";
-import { clearVisionCache, sightRect } from "./rules/vision.ts";
+import { hexCenter, hexSubcells, type HexGrid } from "./rules/hex.ts";
+import { clearVisionCache, clipFootprint, sightClipOf, sightRect } from "./rules/vision.ts";
+import { sceneWalls } from "./rules/walls.ts";
 import { actor, env, int, P1, reveal, rng, room, scene, token } from "./testutil.ts";
 
 /**
@@ -144,5 +146,101 @@ describe("a sight tile holding only an edge hex of a Large footprint reprojects 
     const [sx, sy] = footprintSubcells(ROWS, gob).at(-1)!;
     reveal(s, "s1", { x: sx / 4, y: sy / 4, w: 0.25, h: 0.25 });
     assert.equal(withheldWhereItStands(s, gob), false);
+  });
+});
+
+/** Free walls added to scene s1's chunks. */
+function addWalls(s: RoomState, walls: FreeWall[]): RoomState {
+  for (const w of walls) {
+    const { cx, cy } = wallChunk(w);
+    const key = chunkKey("s1", cx, cy);
+    const chunk = s.buildChunks[key] ?? { sceneId: "s1", cx, cy, rev: 0, cells: {}, edges: {} };
+    s.buildChunks[key] = { ...chunk, walls: [...(chunk.walls ?? []), w] };
+  }
+  return s;
+}
+
+let wallIds = 0;
+function free(ax: number, ay: number, bx: number, by: number, f: FreeWall["f"] = { kind: "wall" }): FreeWall {
+  return { id: `p${String(wallIds++).padStart(11, "0")}`, a: [ax, ay], b: [bx, by], f };
+}
+
+function revealSub(state: RoomState, [sx, sy]: readonly [number, number]): void {
+  reveal(state, "s1", { x: sx / 4, y: sy / 4, w: 0.25, h: 0.25 });
+}
+
+describe("the wall clip under fog (HX-D10)", () => {
+  test("vision off: a Medium at (5.49, 0.2) is withheld while only its sub-cells beyond a wall through its hex are revealed", () => {
+    const state = room({ scenes: { s1: scene("s1", { gridShape: "hexRows", fogEnabled: true }), s2: scene("s2", { order: 1 }) } });
+    state.tokens.gob = token("gob", { x: 5.49, y: 0.2 });
+    addWalls(state, [free(5.4375, 0, 5.4375, 3)]);
+    const gob = state.tokens.gob;
+    const clip = sightClipOf(sceneWalls(state.scenes.s1!, state.buildChunks));
+    const { subs, kept, keep } = clipFootprint(ROWS, gob, clip);
+    const behind = subs.filter((_, i) => keep?.[i] !== 1);
+    assert.equal(behind.length, 7);
+    for (const sub of behind) revealSub(state, sub);
+    assert.equal(isTokenFullyFogged(ROWS, state.fogTiles, "s1", gob), false, "read unclipped, the revealed sub-cells show it");
+    assert.equal(isTokenFullyFogged(ROWS, state.fogTiles, "s1", gob, clip), true);
+    assert.equal(withheldWhereItStands(state, gob), true);
+    assert.equal(shown(state), false, "a player's projection");
+    // The same walls and fog on squares: its box from x = 5 holds revealed sub-cells, and the square rule shows it as before.
+    const squares: RoomState = { ...state, scenes: { ...state.scenes, s1: { ...state.scenes.s1!, gridShape: undefined } } };
+    delete squares.scenes.s1!.gridShape;
+    assert.equal(withheldWhereItStands(squares, { ...gob, x: 5 }), false);
+    revealSub(state, kept[0]!);
+    assert.equal(withheldWhereItStands(state, gob), false, "one sub-cell on its own side shows it");
+    assert.equal(shown(state), true);
+  });
+
+  test("a stored center on walls it cannot step off is under the fog however much is revealed", () => {
+    const state = room({ scenes: { s1: scene("s1", { gridShape: "hexRows", fogEnabled: true }), s2: scene("s2", { order: 1 }) } });
+    state.tokens.gob = token("gob", { x: 9.5, y: 9.5 });
+    const lines = [
+      [1, 0],
+      [0, 1],
+      [1, 1],
+      [1, -1],
+      [1, 2],
+      [2, 1],
+      [1, -2],
+      [2, -1],
+    ] as const;
+    addWalls(
+      state,
+      lines.map(([a, b]) => free(10 - a, 10 - b, 10 + a, 10 + b)),
+    );
+    reveal(state, "s1", { x: 0, y: 0, w: 40, h: 30 });
+    assert.equal(withheldWhereItStands(state, state.tokens.gob), true);
+    assert.equal(shown(state), false);
+  });
+
+  test("on a per-player scene a spot is on shared ground only where every hex holds a revealed sub-cell the clip keeps", () => {
+    const state = room({ scenes: { s1: scene("s1", { gridShape: "hexRows", fogEnabled: true, vision: { on: false, light: "bright", perPlayer: true } }), s2: scene("s2", { order: 1 }) } });
+    state.tokens.ogre = token("ogre", { size: "large", ...placedOnHex(ROWS, { size: "large", x: 0, y: 0 }, { col: 8, row: 8 }) });
+    const ogre = state.tokens.ogre;
+    const [, ...rest] = occupiedHexes(ROWS, ogre);
+    // A wall down the middle of one of its other hexes, from top to bottom of it, leaves that hex's far half behind it.
+    const cut = rest.reduce((a, b) => (hexCenter(ROWS, b).x > hexCenter(ROWS, a).x ? b : a));
+    const c = hexCenter(ROWS, cut);
+    const x = Math.round(c.x * 64) / 64;
+    const walled = addWalls(structuredClone(state), [free(x, Math.floor(c.y - 1), x, Math.ceil(c.y + 1))]);
+    const clip = sightClipOf(sceneWalls(walled.scenes.s1!, walled.buildChunks));
+    const { subs, keep } = clipFootprint(ROWS, ogre, clip);
+    const kept = new Set(subs.filter((_, i) => keep?.[i] === 1).map(([sx, sy]) => `${sx},${sy}`));
+    assert.ok(keep && kept.size > 0, "the wall cuts the ogre's hexes");
+    for (const h of occupiedHexes(ROWS, ogre)) {
+      const inHex = hexSubcells(ROWS, h);
+      const shownBy = h.col === cut.col && h.row === cut.row ? inHex.filter(([sx, sy]) => !kept.has(`${sx},${sy}`)) : inHex.filter(([sx, sy]) => kept.has(`${sx},${sy}`));
+      assert.ok(shownBy.length > 0, `hex ${h.col},${h.row} has sub-cells to reveal`);
+      for (const sub of shownBy) {
+        revealSub(state, sub);
+        revealSub(walled, sub);
+      }
+    }
+    const spot = [{ x: ogre.x, y: ogre.y, elevation: 0 }];
+    assert.equal(seenAtEvery(state, ogre, spot, {}), true, "without the wall every hex holds revealed shared ground");
+    assert.equal(withheldWhereItStands(walled, ogre), false, "with it the ogre still shows by its other hexes");
+    assert.equal(seenAtEvery(walled, ogre, spot, {}), false, "but the cut hex's ground lies behind the wall");
   });
 });
