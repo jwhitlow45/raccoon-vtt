@@ -3,8 +3,8 @@ import type { PlacedToken } from "./footprint.ts";
 import { snapStep } from "./footprint.ts";
 import { overlaps } from "./attach.ts";
 import type { BuildState } from "../ruleHooks.ts";
-import { walkFrom, walkOn, type Walker } from "./movement.ts";
-import { routeFeet, routePoints, routeWalk, routeWalkers, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint } from "./route.ts";
+import { onSqueezedLattice, walkFrom, walkOn, type Walker } from "./movement.ts";
+import { hexRouteFeet, routeFeet, routePoints, routeWalk, routeWalkers, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint } from "./route.ts";
 import type { Grid } from "./grid.ts";
 
 /**
@@ -70,13 +70,18 @@ export function dismountCost(
   const split = dismountSplit(g, build, rider, mount, points, route);
   const seat = points[0]!;
   const opts = { swimSpeed, step: snapStep(rider) };
-  const along = (from: Walker, pieces: readonly RoutePiece[], landing: number) =>
-    routeFeet(routePoints(build.buildChunks, from, pieces, landing), pieces.map(([, , extra, swim]) => ({ extra, swim })), rules, running, opts);
+  const end = points[points.length - 1]!;
+  // On hexes a part's feet are its hex steps, each part ending squeezed as the walk's end is, as the reducer stores both stops.
+  const endSqueezed = g.shape === "hex" && onSqueezedLattice(g, rider, end);
+  const along = (from: Walker, pieces: readonly RoutePiece[], landing: number) => {
+    const at = routePoints(build.buildChunks, from, pieces, landing);
+    const extras = pieces.map(([, , extra, swim]) => ({ extra, swim }));
+    return g.shape === "hex" ? hexRouteFeet(g, from, at, endSqueezed, extras, rules, running, { swimSpeed }) : routeFeet(at, extras, rules, running, opts);
+  };
   let running = counter;
   const first = split.prefix ? along(rider, split.prefix, split.off.elevation) : straightCost(g, rider, seat, split.off, rules, counter);
   if (split.whole) return { moved: first.moved, cost: halfFt, diag: first.diag };
   running = { h: counter.h + first.diag[0], v: counter.v + first.diag[1] };
-  const end = points[points.length - 1]!;
   // The rest of the walk goes on from where the walk off the mount left the rider (movement.ts walkOn).
   const start = walkFrom(build.buildChunks, rider);
   const off = split.prefix ? routeWalkers(build.buildChunks, rider, split.prefix, split.off.elevation).at(-1)! : walkOn(build.buildChunks, start, split.off, split.off.elevation);

@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import type { CreatureSize, Token } from "../model.ts";
 import { rng, token } from "../testutil.ts";
 import { attachDistanceFt, getOffFits, getOffSpot, insideHolder, kindRefusal, linkHolds, overlaps, seatSpot, withinReach } from "./attach.ts";
-import { dismountSplit } from "./dismount.ts";
+import { dismountCost, dismountSplit } from "./dismount.ts";
 import { hexAnchor, occupiedHexes, placedOnHex } from "./footprint.ts";
 import { ownWalk } from "./movement.ts";
 import { hexDistance, hexInScene, hexKey, hexLine, type Hex, type HexGrid } from "./hex.ts";
+import type { RoutePiece } from "./route.ts";
 
 /**
  * Riding, carrying and dragging on hexes (docs/design-v1-hex-grids.md phase
@@ -156,6 +157,25 @@ describe("getting off on hexes", () => {
     assert.equal(getOffFits(ROWS, rules, BOUNDS, bree, horse, placedOnHex(ROWS, bree, { col: 6, row: 0 })), false, "out of reach");
     assert.equal(getOffFits(ROWS, rules, BOUNDS, bree, horse, placedOnHex(ROWS, bree, { col: -1, row: 1 })), false, "off the scene");
     assert.equal(getOffFits(ROWS, rules, BOUNDS, bree, horse, placedOnHex(ROWS, bree, { col: 0, row: 0 })), true, "beside it");
+  });
+
+  test("a routed walk off a Large mount counts hex steps for both parts, as the straight walk does", () => {
+    for (const g of GRIDS) {
+      const horse = on(g, "horse", "large", { col: 5, row: 3 });
+      const seat = ownWalk({ ...on(g, "bree", "medium", { col: 5, row: 3 }), sceneId: "s1" });
+      assert.ok(keys(g, horse).has("5,3"), "the seat is on the horse");
+      const end = placedOnHex(g, seat, { col: 5, row: 13 });
+      const points = [
+        { x: seat.x, y: seat.y, elevation: 0 },
+        { x: end.x, y: end.y, elevation: 0 },
+      ];
+      const route: RoutePiece[] = [[end.x, end.y, 0, 0]];
+      const cost = (r?: RoutePiece[]) => dismountCost(g, { buildChunks: {} }, seat, horse, points, r, rules, { h: 0, v: 0 }, 15, false);
+      // 10 hex steps: on hex rows two to the first hex clear of the horse for the 15 ft charge and 8 more at 5 ft each, on hex columns one and 9.
+      const charged = g.orient === "rows" ? 15 + 8 * 5 : 15 + 9 * 5;
+      assert.deepEqual({ moved: cost(route).moved, cost: cost(route).cost }, { moved: 50, cost: charged }, `${g.orient}: routed`);
+      assert.deepEqual(cost(route), cost(), `${g.orient}: as the straight walk`);
+    }
   });
 
   test("a rider walking off a Large mount clears it at the first hex of its hex line outside the mount's hexes", () => {
