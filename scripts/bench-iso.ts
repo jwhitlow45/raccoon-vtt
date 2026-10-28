@@ -75,12 +75,18 @@ const ROUNDS = 3;
 const ISO_TEST_FLAG = "__rvttIsoTest";
 
 type View = "topDown" | "isometric";
-type Ms = { median: number; max: number; n: number };
+/** A row's median and largest frame, and for a build's frames every one, as the gate holds each (section 6). */
+type Ms = { median: number; max: number; n: number; frames?: number[] };
 export type BenchRow = { row: string; view: View; ms: Ms };
 
 function stats(times: readonly number[]): Ms {
   const sorted = [...times].sort((a, b) => a - b);
   return { median: sorted[Math.floor(sorted.length / 2)] ?? 0, max: sorted[sorted.length - 1] ?? 0, n: sorted.length };
+}
+
+/** A build's frames, each kept for the gate, in the order they came. */
+function frameStats(times: readonly number[]): Ms {
+  return { ...stats(times), frames: [...times] };
 }
 
 // ---------------------------------------------------------------- the rooms
@@ -338,6 +344,29 @@ async function timed(page: Page, cdp: CDPSession, steps: number, act: (i: number
     out.push((await busy(cdp)) - before);
   }
   return out;
+}
+
+/**
+ * The main thread's busy time of each frame from `act` on until `done`
+ * holds, and how long that took: a build's frames and none of the idle
+ * ones after it. Frames are timed back to back, so a frame drawn between
+ * two looks is still counted, with the look at `done` in the frame after
+ * it. `done` is asked from the `from`th frame on, as a board can report
+ * what stood before the act for a frame or two.
+ */
+export async function timedUntil(page: Page, cdp: CDPSession, act: () => Promise<void>, done: () => Promise<boolean>, from = 3, max = 3000): Promise<{ frames: number[]; ms: number }> {
+  const out: number[] = [];
+  const start = Date.now();
+  let last = await busy(cdp);
+  await act();
+  for (let i = 1; i <= max; i++) {
+    await frames(page, 1);
+    const now = await busy(cdp);
+    out.push(now - last);
+    last = now;
+    if (i >= from && (await done())) return { frames: out, ms: Date.now() - start };
+  }
+  throw new Error(`still building after ${max} frames`);
 }
 
 /**
@@ -734,17 +763,23 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       if (!opts.only || opts.only.some((o) => AIM_MOVE_ROW.includes(o) || AIM_REST_ROW.includes(o))) {
         const moves: number[] = [];
         const rest: number[] = [];
+        const restStood: number[] = [];
+        let round = 0;
         await throttled(() =>
           rounds(async () => {
-            const got = await aimSphere(page, cdp);
-            moves.push(...got.moves);
-            rest.push(...got.rest);
+            const got = await aimSphere(page, cdp, view);
+            // The first round warms the engine up: its steps are left out, as `rounds` leaves them.
+            if (round++ > 0) {
+              moves.push(...got.moves);
+              rest.push(...got.rest);
+              if (got.restMs !== null) restStood.push(got.restMs);
+            }
             return got.moves;
           }),
         );
-        // The first round warms the engine up: its steps are left out, as `rounds` leaves them.
-        rows.push({ row: AIM_MOVE_ROW, view, ms: stats(moves.slice(moves.length / 4)) });
-        rows.push({ row: AIM_REST_ROW, view, ms: stats(rest.slice(rest.length / 4)) });
+        rows.push({ row: AIM_MOVE_ROW, view, ms: stats(moves) });
+        rows.push({ row: AIM_REST_ROW, view, ms: view === "isometric" ? frameStats(rest) : stats(rest) });
+        if (view === "isometric") rows.push({ row: AIM_REST_STOOD_ROW, view, ms: stats(restStood) });
       }
     }
     {
@@ -758,6 +793,7 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       await open("giant", 40);
       let made: Op | null = null;
       const arrivals: number[] = [];
+      const builds: number[] = [];
       const frames = await throttled(() =>
         rounds(async () => {
           // A new one each round, so each builds from nothing.
@@ -765,11 +801,16 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           made = template(dm.sceneId, dm.memberId, { shape: "emanation", size: 500, origin: { x: 100.5, y: 100.5, z: 0 } });
           // The frame it lands in holds the rules' coverage of 40,000 hexes, the same work in either view, so it is a row of its own.
           arrivals.push(...(await timed(page, cdp, 1, () => dm.op(made!), 1)));
-          return timed(page, cdp, 90, async () => undefined, 1);
+          // Top-down has nothing to build: its frames for as long.
+          if (view === "topDown") return timed(page, cdp, 90, async () => undefined, 1);
+          const got = await timedUntil(page, cdp, async () => undefined, () => stoodNow(page));
+          builds.push(got.ms);
+          return got.frames;
         }),
       );
       rows.push({ row: GIANT_ARRIVAL_ROW, view, ms: stats(arrivals.slice(1)) });
-      rows.push({ row: GIANT_ROW, view, ms: stats(frames) });
+      rows.push({ row: GIANT_ROW, view, ms: frameStats(frames) });
+      if (view === "isometric") rows.push({ row: GIANT_STOOD_ROW, view, ms: stats(builds.slice(1)) });
     }
 
     if (view === "isometric") {
@@ -788,20 +829,11 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           await page.getByRole("status", { name: "Connected" }).first().waitFor();
           await hook("pick", "topDown");
           await frames(page, 30);
-          const start = Date.now();
-          let at = 0;
-          const got = await throttled(async () => {
-            const f = await timed(page, cdp, 120, async (i) => {
-              if (i === 0) await hook("pick", "isometric");
-              else if (i >= 3 && at === 0 && (await stoodNow(page))) at = Date.now();
-            }, 1);
-            if (at === 0) at = await waitStood(page);
-            return f;
-          });
-          if (r > 0) first.push(...got);
-          if (r > 0) stood.push(at - start);
+          const got = await throttled(() => timedUntil(page, cdp, () => hook("pick", "isometric").then(() => {}), () => stoodNow(page)));
+          if (r > 0) first.push(...got.frames);
+          if (r > 0) stood.push(got.ms);
         }
-        rows.push({ row: CAP_FIRST_ROW, view, ms: stats(first) });
+        rows.push({ row: CAP_FIRST_ROW, view, ms: frameStats(first) });
         rows.push({ row: CAP_STOOD_ROW, view, ms: stats(stood) });
         // A turn's first visit: each frame while its bands are made, the areas flat until then (design 6).
         const firstTurn: number[] = [];
@@ -813,20 +845,11 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           await hook("turn", 0);
           await frames(page, 4);
           await waitStood(page);
-          const start = Date.now();
-          let at = 0;
-          const got = await throttled(async () => {
-            const f = await timed(page, cdp, 90, async (i) => {
-              if (i === 0) await hook("turn", 1);
-              else if (i >= 3 && at === 0 && (await stoodNow(page))) at = Date.now();
-            }, 1);
-            if (at === 0) at = await waitStood(page);
-            return f;
-          });
-          if (r > 0) firstTurn.push(...got);
-          if (r > 0) turnStood.push(at - start);
+          const got = await throttled(() => timedUntil(page, cdp, () => hook("turn", 1).then(() => {}), () => stoodNow(page)));
+          if (r > 0) firstTurn.push(...got.frames);
+          if (r > 0) turnStood.push(got.ms);
         }
-        rows.push({ row: CAP_FIRST_TURN_ROW, view, ms: stats(firstTurn) });
+        rows.push({ row: CAP_FIRST_TURN_ROW, view, ms: frameStats(firstTurn) });
         rows.push({ row: CAP_FIRST_TURN_STOOD_ROW, view, ms: stats(turnStood) });
         // Each turn's bands, once made, are kept: every turn visited and stood first, then the turns timed.
         for (const t of [2, 3, 0] as const) {
@@ -870,8 +893,8 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
 
 const BRUSH_ROW = "a brush stroke's step from another device of the DM's, caps, 40 px";
 const AIM_MOVE_ROW = "a sphere aimed with the Area tool, each move, typical with four areas";
-const AIM_REST_ROW = "a sphere aimed with the Area tool, each frame once the finger rests, typical with four areas";
-const CAP_FIRST_ROW = "first view, 200 areas, 12 px, each frame";
+const AIM_REST_ROW = "a sphere aimed with the Area tool, each frame once the finger rests until its shape stands, typical with four areas";
+export const CAP_FIRST_ROW = "first view, 200 areas, 12 px, each frame while it stands";
 const CAP_FIRST_TURN_ROW = "a turn's first visit, 200 areas, 12 px, each frame while it stands";
 const CAP_TURN_ROW = "turn, 200 areas, 12 px, each turn visited before";
 /** Not a frame: how long until every area in view stands, reported beside the frames (the design's 7 s estimate). */
@@ -879,6 +902,8 @@ const CAP_STOOD_ROW = "first view, 200 areas, 12 px, until every area stands (ms
 const CAP_FIRST_TURN_STOOD_ROW = "a turn's first visit, 200 areas, 12 px, until every area stands (ms whole, not a frame)";
 /** Each frame while a 500 ft emanation of 142,000 faces builds in slices (review ISOA1-GC: its collector pauses). */
 const GIANT_ROW = "a 500 ft emanation coming in on hex rows, each frame while it builds, 40 px";
+const GIANT_STOOD_ROW = "a 500 ft emanation coming in on hex rows, until it stands (ms whole, not a frame)";
+const AIM_REST_STOOD_ROW = "a sphere aimed with the Area tool, once the finger rests until its shape stands (ms whole, not a frame)";
 const GIANT_ARRIVAL_ROW = "a 500 ft emanation coming in on hex rows, the frame it lands in, 40 px";
 
 /**
@@ -886,7 +911,7 @@ const GIANT_ARRIVAL_ROW = "a 500 ft emanation coming in on hex rows, the frame i
  * map places the draft, then a drag moves it, each move timed, and once it
  * rests each frame while its fine shape stands, then Escape lets it go.
  */
-async function aimSphere(page: Page, cdp: CDPSession): Promise<{ moves: number[]; rest: number[] }> {
+async function aimSphere(page: Page, cdp: CDPSession, view: View): Promise<{ moves: number[]; rest: number[]; restMs: number | null }> {
   await pickTool(page, "Area");
   await pickOption(page, "Area", "Shape", "Sphere");
   const box = await boardBox(page);
@@ -897,24 +922,36 @@ async function aimSphere(page: Page, cdp: CDPSession): Promise<{ moves: number[]
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ ...at, id: 0 }] });
   await frames(page, 2);
   const moves = await timed(page, cdp, STEPS, (i) => cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: at.x + (i + 1) * 6, y: at.y + (i + 1) * 3, id: 0 }] }).then(() => {}));
-  // The finger rests: the preview refines (areas/store.ts REST_MS) and the fine shape stands in the depth list.
-  const rest = await timed(page, cdp, 30, async () => {}, 1);
+  // The finger rests: the preview refines (areas/store.ts REST_MS) and the fine shape stands in the depth list, timed until it does. Top-down stands nothing, so its frames for as long.
+  let rest: number[];
+  let restMs: number | null = null;
+  if (view === "isometric") {
+    const before = (await volumesNow(page))?.standing ?? 0;
+    const got = await timedUntil(page, cdp, async () => {}, async () => {
+      const v = await volumesNow(page);
+      return !!v && !v.waiting && v.standing > before;
+    });
+    rest = got.frames;
+    restMs = got.ms;
+  } else rest = await timed(page, cdp, 30, async () => {}, 1);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await frames(page, 4);
   await page.keyboard.press("Escape");
   await frames(page, 8);
   await pickTool(page, "Select");
   await frames(page, 8);
-  return { moves, rest };
+  return { moves, rest, restMs };
 }
 
-/** Waits until the isometric board says no area in view waits to stand (relief/isoTest.ts layout). */
+/** How many areas the board on screen stands and whether one waits to (relief/isoTest.ts volumes), read without the depth list. */
+function volumesNow(page: Page): Promise<{ standing: number; waiting: boolean } | null> {
+  return page.evaluate(() => (globalThis as unknown as { __rvttIsoHook?: { volumes?(): { standing: number; waiting: boolean } | null } }).__rvttIsoHook?.volumes?.() ?? null);
+}
+
 /** Whether the board on screen has areas standing and none waiting to. */
-function stoodNow(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
-    const l = (globalThis as unknown as { __rvttIsoHook?: { layout?(): { waiting: boolean; standing: string[] } | null } }).__rvttIsoHook?.layout?.();
-    return !!l && !l.waiting && l.standing.length > 0;
-  });
+async function stoodNow(page: Page): Promise<boolean> {
+  const v = await volumesNow(page);
+  return !!v && !v.waiting && v.standing > 0;
 }
 
 /** Waits until the board's areas all stand, and says when. */
@@ -974,11 +1011,18 @@ async function select(page: Page, ids: readonly string[]): Promise<void> {
 // ---------------------------------------------------------------- reports
 
 /** Section 11's gates: every frame at most max(16 ms, 1.75 times Top-down's same frame), a turn at the caps at most 150 ms whole. */
-export function gate(row: string, iso: number, topDown: number | undefined): string {
+export function gate(row: string, ms: Ms, topDown: number | undefined): string {
+  const iso = ms.median;
   if (row.startsWith("turn")) return iso <= 150 ? "ok" : "OVER 150 ms";
-  if (row === CAP_STOOD_ROW || row === CAP_FIRST_TURN_STOOD_ROW) return "(reported, no gate)";
+  if (row.includes("(ms whole, not a frame)")) return "(reported, no gate)";
   if (row.startsWith("ground stage draws")) return iso === 0 ? "ok (none)" : `OVER: ${iso} ground draws`;
-  // A frame Top-down has no counterpart for, as the first view of the cap, gets the floor of the gate.
+  // A build's every frame is held, not its median: most of a build's frames are short slices, and the gate is on each frame.
+  if (ms.frames) {
+    const budget = Math.max(16, 1.75 * (topDown ?? 0));
+    const over = ms.frames.filter((f) => f > budget);
+    return over.length === 0 ? `ok, every frame (budget ${budget.toFixed(1)})` : `OVER: ${over.length} of ${ms.frames.length} frames past ${budget.toFixed(1)}, the largest ${ms.max.toFixed(1)}`;
+  }
+  // A frame Top-down has no counterpart for gets the floor of the gate.
   if (topDown === undefined && row.includes("each frame")) return iso <= 16 ? "ok (budget 16.0)" : "OVER (budget 16.0)";
   if (topDown === undefined) return "";
   const budget = Math.max(16, 1.75 * topDown);
@@ -991,7 +1035,7 @@ export function formatReport(sets: readonly BenchRow[][]): string {
   for (const set of sets) for (const r of set) if (r.view === "topDown") topDown.set(r.row, r.ms.median);
   for (const set of sets) {
     for (const r of set) {
-      const g = r.view === "isometric" ? gate(r.row, r.ms.median, topDown.get(r.row)) : "";
+      const g = r.view === "isometric" ? gate(r.row, r.ms, topDown.get(r.row)) : "";
       lines.push(`${r.row} | ${r.view} | ${r.ms.median.toFixed(1)} / ${r.ms.max.toFixed(1)}, ${r.ms.n} | ${g}`);
     }
   }

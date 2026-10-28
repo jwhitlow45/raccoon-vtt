@@ -14,7 +14,10 @@ import type { VolumesNow } from "./volumes.ts";
  */
 const HOOK = "__rvttIsoHook";
 
-export type Hook = { pick(pick: ViewPick | "follow"): void; turn(turn: Turn): void; layout?(): BoardLayout | null };
+export type Hook = { pick(pick: ViewPick | "follow"): void; turn(turn: Turn): void; layout?(): BoardLayout | null; volumes?(): BoardVolumesNow | null };
+
+/** How many areas stand on the board and whether one waits to, read without the depth list, so the bench can ask each frame of a build at no cost to it. */
+export type BoardVolumesNow = { standing: number; waiting: boolean };
 
 /**
  * The isometric board's depth list as the tests read it
@@ -103,6 +106,10 @@ export function useIsoTestHook(key: string, sceneId: string): void {
       pick: (pick) => pickView(key, pick === "follow" ? null : pick),
       turn: (turn) => turnView(key, sceneId, turn),
       layout: () => layoutOf(boards.at(-1)?.last ?? null),
+      volumes: () => {
+        const r = boards.at(-1)?.last;
+        return r ? { standing: r.volumes?.standing.size ?? 0, waiting: r.volumes?.waiting ?? false } : null;
+      },
     });
   }, [on, key, sceneId]);
 }
