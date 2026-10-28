@@ -1,12 +1,10 @@
 import { useStore } from "zustand";
-import type { Scene } from "#shared/model.ts";
 import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { useShallow } from "zustand/react/shallow";
 import { Icon, type IconName } from "../../components/Icon.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ChoiceTiles, ConfirmButton, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChip } from "../measure/controls.tsx";
-import { HEX_LIMITS } from "../grid/words.ts";
 import { brushLabel, publishLabel, publishShort, type FogMode } from "./shapes.ts";
 import { BRUSH_WIDTHS, FOG_MODES, pickFogMode, useFogStore, type FogShapeKind } from "./store.ts";
 import { closeFogPolygon } from "./tool.tsx";
@@ -26,9 +24,9 @@ const SHAPES: readonly { value: FogShapeKind; label: string; glyph: IconName }[]
   { value: "room", label: "Builder room", glyph: "fogRoom" },
 ];
 
-/** Why Reveal room (the Builder room shape) is off, or null where it works: a hex scene has no room built on squares to flood. */
-export function revealRoomOff(scene: Pick<Scene, "gridShape">): string | null {
-  return isHex(sceneGrid(scene)) ? HEX_LIMITS.revealRoom : null;
+/** The line under the shapes, by the scene's grid: a hex scene's Builder room is the hexes its wall lines close in (docs/design-v1-hex-grids.md HX-D10). */
+export function shapeHint(shape: FogShapeKind, g: Grid): string {
+  return shape === "room" && isHex(g) ? "Tap a room closed in by wall lines." : HINTS[shape];
 }
 
 /** A brush width's title, in the scene's cell word. */
@@ -59,7 +57,6 @@ export default function FogOptions() {
   if (!scene || !sceneId) return null;
   const set = fogState.setState;
   const grid = sceneGrid(scene);
-  const roomOff = revealRoomOff(scene);
   const drafted = draft?.ops.length ?? 0;
 
   if (!scene.fogEnabled) {
@@ -82,8 +79,8 @@ export default function FogOptions() {
     );
   }
 
-  // A brush or polygon the DM picked earlier is still there on a hex scene, so only the room shape's line is replaced.
-  const hint = s.note ?? (s.shape === "room" ? roomOff : null) ?? `${s.live ? `${HINTS[s.shape]} Players see it at once.` : HINTS[s.shape]}${visionOn(scene) ? ` ${EXPLORED_UNDO_HINT}` : ""}`;
+  const words = shapeHint(s.shape, grid);
+  const hint = s.note ?? `${s.live ? `${words} Players see it at once.` : words}${visionOn(scene) ? ` ${EXPLORED_UNDO_HINT}` : ""}`;
   const corners = s.shape === "poly" && s.poly.length > 0;
   // A polygon with corners is a task: its controls lead, and the standing settings drop by 3 (9, "The task rule").
   const drop = corners ? 3 : 0;
@@ -118,7 +115,7 @@ export default function FogOptions() {
                 <ChoiceTiles<FogShapeKind>
                   label="Shape"
                   value={s.shape}
-                  options={SHAPES.map((o) => ({ value: o.value, label: o.label, glyph: <Icon name={o.glyph} />, ...(o.value === "room" && roomOff ? { title: roomOff, disabled: true } : null) }))}
+                  options={SHAPES.map((o) => ({ value: o.value, label: o.label, glyph: <Icon name={o.glyph} /> }))}
                   onChange={(shape) => set({ shape, poly: [], rect: null, stroke: [], note: null })}
                 />
               </PickCloses>

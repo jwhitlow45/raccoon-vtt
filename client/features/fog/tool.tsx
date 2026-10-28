@@ -1,14 +1,15 @@
 import { Suspense } from "react";
 import type { BuildChunk, FogShape } from "#shared/model.ts";
 import { MAX_FOG_DRAFT_OPS, MAX_POLY_VERTICES } from "#shared/protocol.ts";
-import { indexBuild } from "#shared/rules/walls.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { indexBuild, sceneWalls } from "#shared/rules/walls.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { viewToScreen } from "../../lib/camera.ts";
 import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { fogOps, polyShape, rectShape, roomShapes, snapPoint, strokeShapes, type Point } from "./shapes.ts";
+import { fogOps, hexRoomShapes, polyShape, rectShape, roomShapes, snapPoint, strokeShapes, type Point } from "./shapes.ts";
 import { fogSlot, resetFogGesture } from "./store.ts";
 import { fogCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
@@ -68,12 +69,25 @@ function tapPoly(p: ToolPointer, ctx: ToolContext): void {
   fogState.setState({ poly: [...poly, snapPoint(p.world)], note: null });
 }
 
+/** What a Builder room tap that finds nothing says, by the scene's grid: a hex scene floods any whole hex of it. */
+export const ROOM_MISSED = {
+  squares: "Tap inside a room made with the map builder.",
+  hex: "Tap a whole hex inside the map.",
+} as const;
+
 function tapRoom(p: ToolPointer, ctx: ToolContext): void {
   const view = ctx.getState().view;
+  const g = sceneGrid(ctx.scene);
+  if (isHex(g)) {
+    const shapes = hexRoomShapes(sceneWalls(ctx.scene, view?.buildChunks ?? {}), g, p.world, ctx.scene.bounds);
+    if (shapes.length === 0) ctx.scope.get(fogSlot).store.setState({ note: ROOM_MISSED.hex });
+    else submitFog(ctx, shapes);
+    return;
+  }
   const chunks = Object.values(view?.buildChunks ?? {}).filter((c): c is BuildChunk => !!c && c.sceneId === ctx.scene.id);
   const { shapes } = roomShapes(indexBuild(chunks), p.world, ctx.scene.bounds);
   if (shapes.length === 0) {
-    ctx.scope.get(fogSlot).store.setState({ note: "Tap inside a room made with the map builder." });
+    ctx.scope.get(fogSlot).store.setState({ note: ROOM_MISSED.squares });
     return;
   }
   submitFog(ctx, shapes);
@@ -83,7 +97,8 @@ const Options = retryableLazy(() => import("./Options.tsx"), { roles: ["dm"] });
 
 /**
  * The fog tool (design sections 13.1 and 13.2): reveal or hide with a
- * rectangle, a polygon or a brush, or reveal a builder room with one tap.
+ * rectangle, a polygon or a brush, or reveal a builder room with one tap,
+ * on a hex scene the hexes its wall lines close in (docs/design-v1-hex-grids.md HX-D10).
  * Edits go to the draft, which only the DM sees, until "Reveal to players"
  * publishes it. Live mode sends each edit to the players at once.
  */

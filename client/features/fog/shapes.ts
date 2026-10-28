@@ -1,6 +1,7 @@
 import type { FogOp, FogShape } from "#shared/model.ts";
 import { MAX_FOG_CELLS, MAX_POLY_VERTICES, MAX_STROKE_POINTS } from "#shared/protocol.ts";
-import { floodRoom, type BuildIndex } from "#shared/rules/walls.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, parseHexKey, type HexGrid } from "#shared/rules/hex.ts";
+import { floodHexRoom, floodRoom, type BuildIndex, type WallSet } from "#shared/rules/walls.ts";
 
 /**
  * The DM's fog gestures as fog ops (design sections 13.1 and 13.2). Each op
@@ -115,6 +116,18 @@ export function roomShapes(build: BuildIndex, at: Point, bounds: Bounds): { shap
   return { shapes: cellShapes(cells), cells: cells.length };
 }
 
+/**
+ * "Reveal room" on a hex scene (docs/design-v1-hex-grids.md HX-D10): the
+ * hexes flooded from the tap up to wall lines, windows and closed doors,
+ * or to the scene's edge where nothing walls them in, as hex keys the
+ * server reads by their sub-cells. The flood never leaves the scene's
+ * hexes, so its work is bounded by them. Empty when the tap is on no whole
+ * hex of the scene.
+ */
+export function hexRoomShapes(walls: WallSet, g: HexGrid, at: Point, bounds: Bounds): Extract<FogShape, { kind: "cells" }>[] {
+  return cellShapes(floodHexRoom(walls, g, bounds, at).cells);
+}
+
 export function fogOps(shapes: readonly FogShape[], mode: FogMode, newId: () => string): FogOp[] {
   return shapes.map((shape) => ({ id: newId(), mode, shape }));
 }
@@ -136,6 +149,31 @@ export function cellsOutline(cells: readonly string[]): number[] {
     if (!set.has(`${x},${y + 1}`)) out.push(x, y + 1, x + 1, y + 1);
     if (!set.has(`${x - 1},${y}`)) out.push(x, y, x, y + 1);
     if (!set.has(`${x + 1},${y}`)) out.push(x + 1, y, x + 1, y + 1);
+  }
+  return out;
+}
+
+/**
+ * The outline of a set of hexes, as cellsOutline gives a set of squares':
+ * every side of a hex whose hex across is not in the set. The hex across a
+ * side is the one holding the point as far past the side's middle as the
+ * hex's center lies short of it, so no table of sides to neighbors is
+ * needed for either orientation.
+ */
+export function hexCellsOutline(g: HexGrid, cells: readonly string[]): number[] {
+  const set = new Set(cells);
+  const out: number[] = [];
+  for (const key of set) {
+    const hex = parseHexKey(key);
+    if (!hex) continue;
+    const center = hexCenter(g, hex);
+    const corners = hexCorners(g, hex).map((c) => cornerAt(g, c));
+    for (let i = 0; i < 6; i++) {
+      const a = corners[i]!;
+      const b = corners[(i + 1) % 6]!;
+      const beyond = hexAt(g, { x: a.x + b.x - center.x, y: a.y + b.y - center.y });
+      if (!set.has(`${beyond.col},${beyond.row}`)) out.push(a.x, a.y, b.x, b.y);
+    }
   }
   return out;
 }
