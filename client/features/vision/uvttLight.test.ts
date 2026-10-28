@@ -7,7 +7,7 @@ import { importOps, importScene, placeMap } from "../uvtt/batch.ts";
 import { convertUvtt } from "../uvtt/convert.ts";
 import { readUvtt } from "../uvtt/schema.ts";
 import { uvttFile } from "../uvtt/synthetic.ts";
-import { lightsLead, proposedLight, startingLight } from "./uvttLight.ts";
+import { lightsLead, proposedLight, startingLight, whyShown } from "./uvttLight.ts";
 
 describe("the light a Universal VTT import proposes", () => {
   test("a map whose image is already lit is Bright", () => {
@@ -142,5 +142,19 @@ describe("the light a Universal VTT import proposes", () => {
     }
     assert.deepEqual(state.scenes.imp?.vision, { on: true, light: "dark" });
     assert.equal(Object.values(state.lights).filter((l) => l?.sceneId === "imp").length, 2);
+  });
+
+  test("FL2 the light row gives the proposal's reason only while the pick is still the proposal (FL-OPUS-02)", () => {
+    const lit = proposedLight({ baked: true, ambient: "ff000000" }, 41);
+    const dark = startingLight(lit, "reveal");
+    assert.equal(whyShown(lit, dark)?.why, "The map's own lights light it for the party.");
+    // Kept lit, or dark without party vision: the map's lights no longer light it for the party.
+    assert.equal(whyShown(lit, lightsLead(lit, dark, "reveal")!.to), null);
+    assert.equal(whyShown(lit, { seen: "reveal", light: "dark" }), null);
+    // A level proposal holds while the level does, whatever players see.
+    const dim = proposedLight({ baked: false, ambient: "ff808080" });
+    assert.equal(whyShown(dim, { seen: "all", light: "dim" })?.why, "The map's ambient light is 50% bright.");
+    assert.equal(whyShown(dim, { seen: "all", light: "dark" }), null);
+    assert.equal(whyShown(null, dark), null);
   });
 });

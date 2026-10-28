@@ -56,6 +56,18 @@ export function startingLight(proposal: LightProposal | null, roomDefault: Scene
 }
 
 /**
+ * The proposal whose reason the light row shows, only while the pick is
+ * still the proposal: the dark start under party vision for a map that
+ * brings lights, else the level. Once the DM moves off it, the reason no
+ * longer describes the scene they will get.
+ */
+export function whyShown(proposal: LightProposal | null, now: ImportLight): LightProposal | null {
+  if (!proposal) return null;
+  const still = proposal.lights ? now.seen === DARK_WITH_VISION.seen && now.light === DARK_WITH_VISION.light : now.light === proposal.level;
+  return still ? proposal : null;
+}
+
+/**
  * The summary's lead line for a map that brings lights, with its one-tap
  * button. While the scene is set dark under party vision, Keep it lit
  * puts back the start a lit map has: Bright, and the room's default. Once

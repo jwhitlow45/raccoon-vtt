@@ -40,7 +40,7 @@ import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.t
 import { walllessFile } from "../vision/playersSeeRules.ts";
 import { lightOf } from "../vision/settings.ts";
 import { UvttLightChoice } from "../vision/UvttLightChoice.tsx";
-import { lightsLead, startingLight } from "../vision/uvttLight.ts";
+import { lightsLead, startingLight, type LightProposal, whyShown } from "../vision/uvttLight.ts";
 
 /**
  * The Universal VTT import's dialog (docs/design-v1-maps-vision.md section
@@ -126,6 +126,9 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
     workerRef.current = worker;
     setRead(null);
     setPlanKey(null);
+    // Players see and light start from each file's own proposal, so a pick made for a file that failed never stands over the next.
+    setSeen(null);
+    setLight(null);
     setStep({ k: "reading", progress: null });
     let preview: string | null = null;
     const asked = optionsRef.current;
@@ -174,6 +177,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
   const start = startingLight(read?.info.light ?? null, roomDefault);
   const picked = { seen: seen ?? start.seen, light: light ?? start.light };
   const lead = phase ? null : lightsLead(read?.info.light ?? null, picked, roomDefault);
+  const why = whyShown(read?.info.light ?? null, picked);
 
   const pickAnother = (next: File) => {
     abortRef.current?.abort();
@@ -375,6 +379,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
                   }}
                   light={picked.light}
                   onLight={setLight}
+                  why={why}
                   disabled={busy}
                 />
               )
@@ -533,6 +538,8 @@ function Options(props: {
   onSeen(v: PlayersSeeValue): void;
   light: LightLevel;
   onLight(v: LightLevel): void;
+  /** The file's proposal, while the DM's pick is still it. */
+  why: LightProposal | null;
   disabled: boolean;
 }) {
   const portalsId = useId();
@@ -565,7 +572,7 @@ function Options(props: {
         disabled={props.disabled}
         onChange={props.onSeen}
       />
-      <UvttLightChoice value={props.light} proposal={props.read.info.light} disabled={props.disabled} onChange={props.onLight} />
+      <UvttLightChoice value={props.light} proposal={props.why} disabled={props.disabled} onChange={props.onLight} />
     </div>
   );
 }
