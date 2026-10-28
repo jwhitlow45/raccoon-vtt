@@ -212,6 +212,17 @@ describe("walking onto a trap of hexes", () => {
     assert.deepEqual(summary(planTrapMove(move(thorn, ROWS, { col: 10, row: 5 }), state, DM, {}).springings), ["wire:cross:thorn"]);
   });
 
+  test("a stopping trap stops its walker on the trap's hex, which it may stand on, on both lattices", () => {
+    for (const g of GRIDS) {
+      const plate = hexTrap(g, "plate", { cells: [{ x: 6, y: 5, w: 1, h: 1 }] }, { stops: true });
+      const thorn = on(g, "thorn", "medium", { col: 2, row: 5 });
+      const plan = planTrapMove(move(thorn, g, { col: 10, row: 5 }), world(g, [thorn], [plate]), DM, {});
+      assert.deepEqual(summary(plan.springings), ["plate:enter:thorn"], g.orient);
+      const stop = plan.op as Extract<Op, { t: "token.move" }>;
+      assert.deepEqual({ x: stop.x, y: stop.y }, placedOnHex(g, thorn, { col: 6, row: 5 }), `${g.orient}: stopped on the plate`);
+    }
+  });
+
   test("a turn starting on a trap's hex sets it off, one beside it does not", () => {
     for (const g of GRIDS) {
       const plate = hexTrap(g, "plate", { cells: [{ x: 5, y: 5, w: 1, h: 1 }] }, { on: ["turnStart"] });
