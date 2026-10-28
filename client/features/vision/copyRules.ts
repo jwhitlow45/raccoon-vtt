@@ -74,12 +74,12 @@ function refusalWords(a: CopyAnswer): string {
   return `${detail[0]!.toUpperCase()}${detail.slice(1)}.`;
 }
 
-/** "Copied to 3 scenes." or "Copied to 2 of 3 scenes. Hall: <the refusal's words>" (8.3). */
 /** Every scene took the copy, so the sheet clears its ticks and Copy is not offered again for nothing. */
 export function copiedAll(answers: readonly CopyAnswer[]): boolean {
   return answers.every((a) => a.answer === "taken");
 }
 
+/** "Copied to 3 scenes." or "Copied to 2 of 3 scenes. Hall: <the refusal's words>" (8.3). */
 export function copyResult(answers: readonly CopyAnswer[]): string {
   const taken = answers.filter((a) => a.answer === "taken").length;
   const total = answers.length;
