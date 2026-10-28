@@ -2063,6 +2063,8 @@ async function groupHeaderLines(panel: Locator, at: string, screen: string, acti
         const width = summary.getBoundingClientRect().width;
         if (width < floor - 0.5) out.push(`${label}: its summary is ${width.toFixed(1)} px, under its ${floor.toFixed(1)} px floor`);
       }
+      // A summary wraps under its name only where the name and its floor cannot share the row (docs/design-v1-design-pass.md 4.1): never a token panel's.
+      if (summary && summary.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 0.5) out.push(`${label}: its summary wrapped under its name`);
       const heading = fold?.parentElement;
       const action = heading?.nextElementSibling ?? null;
       if (action && heading) {
@@ -3949,6 +3951,8 @@ export function sceneSettingsTests(): void {
           if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
         }
         await sweep.measure(page, "scene-settings-folded", panel);
+        // Each folded group's header with its summary, on the name's line or under it (docs/design-v1-design-pass.md 4.1).
+        await sweep.measure(page, "scene-groups-folded", panel.locator("[data-panel-group] > div:first-child"));
         await shots.take(page, `alignment-${sweep.at}-scene-settings-folded`);
         for (const group of SCENE_GROUP_NAMES) await openSceneGroup(panel, group);
         await sweep.measure(page, "scene-settings-open", panel);

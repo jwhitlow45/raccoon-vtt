@@ -39,6 +39,13 @@ import { chooseStarterWork, starterWork } from "./starterPick.ts";
  *   import is done, each held by the test: changed meanwhile, the new scene
  *   copies the change, and deleted, it starts on the room's choice and a
  *   toast says so.
+ * - dp-1a, on a DM session of its own (docs/design-v1-design-pass.md 4.1
+ *   and 6): the scene settings page's groups as the panel kit's groups,
+ *   each folded with its summary, on the line under its name at 320 x 568
+ *   and 130% and on its line at 390 x 844, the chevron by the name's first
+ *   line, the name under This scene, the folds kept through a reload, Fog
+ *   and party vision chevron first and closed on another scene, and the
+ *   map image's sentence above its buttons.
  * - ss-a, last on a DM session of its own: every new control measured
  *   with the alignment helper at 1440 x 900, 390 x 844 and 320 x 568, at
  *   100% and 130%, in light and dark: the form's Players see, the
@@ -683,6 +690,152 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     const tunnel = await imported("Sewer", deleteIt);
     await gone("Sewer", "Explore");
     assert.deepEqual(seeOf(tunnel.id), { fog: true, vision: true, light: "dark", perPlayer: false }, "an import's start under the room's Explore");
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
+
+  test("dp-1a. the scene settings groups fold as the panel kit's groups, their summaries under the name where a phone's row is too narrow, and the scene's settings read in order", async () => {
+    const SUMMARIES = /^(Explore|Reveal by hand|Everything|Custom) · (Bright|Dim|Dark)( · Per player)?$|^(No map image|Map image) · (Squares|Hex rows|Hex columns)(, [\d.]+ px)?$|^Walls (do not )?block moves$|^\d+ × \d+ (squares|hexes)( · Isometric)?$/;
+    const GROUPS = ["What players see", "Map image and grid", "Walls and movement", "Size and view"];
+    const state = await signInAsDm();
+    const lines: string[] = [];
+    for (const at of [
+      { name: "320x568@1.3", width: 320, height: 568, scale: 1.3, wrapped: true },
+      { name: "390x844@1", width: 390, height: 844, scale: 1, wrapped: false },
+    ]) {
+      const context = await browser.newContext({ viewport: { width: at.width, height: at.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: state });
+      try {
+        const page = await context.newPage();
+        const watch = new ConsoleWatch(`dp-1a ${at.name}`);
+        watch.attach(page);
+        consoles.push(watch);
+        await page.goto(`${server.origin}/`);
+        await page.evaluate((s) => {
+          const storage = (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void; removeItem(k: string): void } }).localStorage;
+          storage.setItem("rvtt.uiScale", String(s));
+          storage.removeItem("rvtt.sceneSettingsFolds");
+        }, at.scale);
+        await page.goto(`${server.origin}/r/${run.roomId}`);
+        await page.getByRole("status", { name: "Connected" }).first().waitFor();
+        await view(run.arenaId, page);
+        let panel = await scenesPanel(page);
+        const fold = (group: string) => panel.getByRole("heading", { name: group, exact: true }).getByRole("button", { name: group, exact: true });
+
+        // The scene on screen's settings start under This scene, apart from New scene above it.
+        const name = panel.getByRole("textbox", { name: "Scene name" }).last();
+        assert.equal(await name.evaluate((el) => (el as unknown as { closest(s: string): { querySelector(s: string): { textContent: string | null } | null } | null }).closest("section")?.querySelector("h3")?.textContent), "This scene", `${at.name}: Scene name under This scene`);
+
+        // A phone opens What players see alone, then the DM folds it too.
+        for (const [i, group] of GROUPS.entries()) assert.equal(await fold(group).getAttribute("aria-expanded"), i === 0 ? "true" : "false", `${at.name}: ${group} on a phone`);
+        await fold(GROUPS[0]!).click();
+        const heads = await panel.evaluate((root) => {
+          type R = { top: number; bottom: number; left: number; right: number; width: number; height: number };
+          type E = { getAttribute(n: string): string | null; getBoundingClientRect(): R; querySelector(s: string): E | null; querySelectorAll(s: string): ArrayLike<E>; textContent: string | null; scrollWidth: number; clientWidth: number };
+          const doc = (globalThis as unknown as { document: { getElementById(id: string): E | null; createRange(): { selectNodeContents(n: E): void; getClientRects(): ArrayLike<R> } } }).document;
+          const textRects = (el: E) => {
+            const range = doc.createRange();
+            range.selectNodeContents(el);
+            return Array.from(range.getClientRects()).filter((r) => r.width > 0);
+          };
+          return Array.from((root as unknown as E).querySelectorAll("[data-panel-group]")).map((group) => {
+            const button = group.querySelector("[data-group-fold]")!;
+            const name = doc.getElementById(button.getAttribute("aria-labelledby") ?? "")!;
+            const summary = doc.getElementById(button.getAttribute("aria-describedby") ?? "");
+            const words = textRects(name);
+            const chevron = button.querySelector("svg")!.getBoundingClientRect();
+            const s = summary?.getBoundingClientRect() ?? null;
+            const sWords = summary ? textRects(summary) : [];
+            return {
+              name: name.textContent ?? "",
+              summary: summary?.textContent ?? null,
+              nameLines: new Set(words.map((r) => Math.round(r.top))).size,
+              nameLeft: name.getBoundingClientRect().left,
+              nameBottom: name.getBoundingClientRect().bottom,
+              nameMiddle: words[0] ? (words[0].top + words[0].bottom) / 2 : 0,
+              chevronMiddle: (chevron.top + chevron.bottom) / 2,
+              buttonRight: button.getBoundingClientRect().right,
+              summaryBox: s ? { top: s.top, left: s.left, right: s.right, middle: (s.top + s.bottom) / 2 } : null,
+              summaryWordsRight: sWords.length > 0 ? Math.max(...sWords.map((r) => r.right)) : null,
+              summaryCut: summary ? summary.scrollWidth > summary.clientWidth : false,
+            };
+          });
+        });
+        assert.deepEqual(heads.map((h) => h.name), GROUPS);
+        for (const h of heads) {
+          const off = (what: string, a: number, b: number) => {
+            if (Math.abs(a - b) > 1) lines.push(`${at.name} ${h.name}: ${what} off by ${Math.abs(a - b).toFixed(1)} px`);
+          };
+          assert.match(h.summary ?? "", SUMMARIES, `${at.name} ${h.name}: says what it holds`);
+          if (h.nameLines !== 1) lines.push(`${at.name} ${h.name}: its name takes ${h.nameLines} lines`);
+          off("the chevron against the name's first line", h.chevronMiddle, h.nameMiddle);
+          const s = h.summaryBox!;
+          if (at.wrapped) {
+            if (s.top < h.nameBottom - 1) lines.push(`${at.name} ${h.name}: its summary is not on the line under the name`);
+            off("the summary's left against the name's", s.left, h.nameLeft);
+          } else {
+            if (s.top >= h.nameBottom - 1) lines.push(`${at.name} ${h.name}: its summary wrapped under the name`);
+            off("the summary's middle against the name's", s.middle, h.nameMiddle);
+          }
+          off("the summary's end against the row's", s.right, h.buttonRight);
+          // A summary cut with an ellipsis ends at its box, which the line above holds to the row's end.
+          if (!h.summaryCut) off("the summary's words' end against the row's", h.summaryWordsRight ?? 0, h.buttonRight);
+          else if (at.wrapped) lines.push(`${at.name} ${h.name}: its summary is cut on a line of its own`);
+        }
+        await panel.locator("[data-panel-group]").first().scrollIntoViewIfNeeded();
+        lines.push(...alignmentLines(await measureAlignment(panel.locator("[data-panel-group] > div:first-child")), `dp-1a ${at.name} folded groups`));
+        await shots.take(page, `dp-1a-${at.name}-groups-folded`);
+        if (!at.wrapped) continue;
+
+        // A fold the DM taps lasts through a reload on this device.
+        await fold("Map image and grid").click();
+        await reopenRoom(page);
+        await page.getByRole("status", { name: "Connected" }).first().waitFor();
+        panel = await scenesPanel(page);
+        await waitFor("Map image and grid open after the reload", async () => ((await fold("Map image and grid").getAttribute("aria-expanded")) === "true" ? true : null));
+        assert.equal(await fold("What players see").getAttribute("aria-expanded"), "false", "What players see stays folded");
+        assert.equal(await fold("Walls and movement").getAttribute("aria-expanded"), "false");
+
+        // The map image's question reads first, then its ways, Cancel and Remove under them.
+        const players = dmSocket.state!.meta.playerSceneId!;
+        await view(players, page);
+        panel = await scenesPanel(page);
+        const map = section(panel, "Map image and grid");
+        await map.getByRole("button", { name: /^(Add a|Replace) map image$/ }).click();
+        const note = map.getByText(/^The players are on this scene\./);
+        await note.waitFor();
+        const choose = map.locator("label").filter({ hasText: "Choose the image" });
+        const cancel = map.getByRole("button", { name: "Cancel", exact: true });
+        const y = async (l: Locator) => (await l.boundingBox())!.y;
+        assert.ok((await y(note)) < (await y(choose)) && (await y(choose)) < (await y(cancel)), "the sentence, then the ways, then Cancel");
+        const remove = map.getByRole("button", { name: "Remove map image" });
+        if ((await remove.count()) > 0) assert.ok((await y(cancel)) < (await y(remove)), "Remove map image last");
+        await note.scrollIntoViewIfNeeded();
+        lines.push(...alignmentLines(await measureAlignment(map), `dp-1a ${at.name} map image question`));
+        await shots.take(page, `dp-1a-${at.name}-map-image-question`);
+        await cancel.click();
+
+        // Fog and party vision folds as a section, chevron first, saying both switches while folded, and starts closed on another scene.
+        if ((await fold("What players see").getAttribute("aria-expanded")) === "false") await fold("What players see").click();
+        const what = section(panel, "What players see");
+        const fog = what.getByRole("heading", { name: "Fog and party vision", exact: true }).getByRole("button");
+        assert.equal(await fog.getAttribute("aria-expanded"), "false");
+        assert.equal(await fog.evaluate((el) => (el as unknown as { firstElementChild: { tagName: string } | null }).firstElementChild?.tagName.toLowerCase()), "svg", "the chevron first");
+        assert.equal(await what.getByRole("heading", { name: "Fog and party vision", exact: true }).evaluate((el) => (el as unknown as { tagName: string }).tagName), "H4", "a level under the group's heading");
+        await what.getByText(/^Fog (on|off) · Party vision (on|off)$/).waitFor();
+        await fog.click();
+        await what.getByRole("switch", { name: /^Fog/ }).waitFor();
+        await fog.scrollIntoViewIfNeeded();
+        await shots.take(page, `dp-1a-${at.name}-fog-and-party-vision`);
+        // Custom opens the fold, so the other scene is any that is not Custom.
+        const other = [run.matId, run.caveId, run.arenaId, run.cryptId].find((id) => id !== players && sceneOf(id) && !(sceneOf(id)!.fogEnabled === false && sceneOf(id)!.vision?.on === true))!;
+        await view(other, page);
+        panel = await scenesPanel(page);
+        if ((await fold("What players see").getAttribute("aria-expanded")) === "false") await fold("What players see").click();
+        assert.equal(await section(panel, "What players see").getByRole("heading", { name: "Fog and party vision", exact: true }).getByRole("button").getAttribute("aria-expanded"), "false", "closed on another scene");
+      } finally {
+        await context.close();
+      }
+    }
+    assert.deepEqual(lines, []);
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
 
