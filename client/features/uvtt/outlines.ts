@@ -9,12 +9,18 @@ import type { Point, UvttPortal } from "./schema.ts";
  * them slivers off the wall. Real Dungeondraft and Dungeon Alchemist files
  * also join real doors end to end, around a room's corner and in long runs
  * of windows, so the shape alone cannot tell an outline from doors. Only a
- * file in Arkenforge's form has its turning chains collapsed, each to its
- * longest portal, which is the leaf. Chains follow the file's order, not
- * every end that touches, so two outlines that touch, at any angle, stay
- * two doors. An outline written out of order is no chain, and its portals
- * stay doors: extra doors the DM can erase, never a lost one.
+ * file in Arkenforge's form has its outlines collapsed, each to its longest
+ * portal, which is the leaf, and an outline is a chain of exactly four that
+ * turns. Chains follow the file's order, not every end that touches, so two
+ * outlines that touch, at any angle, stay two doors. A chain of any other
+ * length keeps every portal, as does an outline written out of order: two
+ * outlines one after another where the second starts at the first's end
+ * are a chain of eight, and might hold two leaves or one. Those are extra
+ * doors the DM can erase, never a lost one.
  */
+
+/** How many portals Arkenforge draws a door's outline with. */
+const OUTLINE_PORTALS = 4;
 
 /** Ends this close are one point, and a `position` this close to the midpoint is at it, in squares. */
 const JOIN_SQUARES = 0.01;
@@ -73,7 +79,7 @@ export function doorsOf(portals: readonly UvttPortal[]): UvttPortal[] {
   if (!arkenforgeForm(portals)) return [...portals];
   const dropped = new Set<number>();
   for (const indexes of chains(portals)) {
-    if (indexes.length < 2) continue;
+    if (indexes.length !== OUTLINE_PORTALS) continue;
     let leaf = indexes[0]!;
     for (const i of indexes) if (length(portals[i]!) > length(portals[leaf]!)) leaf = i;
     if (straight(indexes.map((i) => portals[i]!), portals[leaf]!)) continue;

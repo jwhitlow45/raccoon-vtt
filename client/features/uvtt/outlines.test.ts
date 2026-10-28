@@ -64,6 +64,17 @@ describe("doors drawn as outlines", () => {
     assert.deepEqual(segments(doorsOf([...outline(), ...outline(9.82, 6)])), [[10, 6, 10, 5], [9.82, 7, 9.82, 6]]);
   });
 
+  test("two outlines one after another, the second's leaf starting where the first's last side ends, are a chain of eight and keep every portal (FU34-ASTRA-04, round 3)", () => {
+    // The second turned a quarter, its leaf from (9.82, 6) to (8.82, 6).
+    const next = outline().map((d) => {
+      const turn = (q: Point) => p(10 - 0.18 + (q.y - 6), 6 - (q.x - 10));
+      return arkenforge(turn(d.a), turn(d.b));
+    });
+    const both = [...outline(), ...next];
+    assert.deepEqual(both[3]!.b, next[0]!.a, "the chain runs on");
+    assert.deepEqual(segments(doorsOf(both)), segments(both));
+  });
+
   test("an outline whose portals are not one after another in the file keeps every portal, as extra doors never a lost one", () => {
     const a = outline(10, 5);
     const b = outline(22, 6);
