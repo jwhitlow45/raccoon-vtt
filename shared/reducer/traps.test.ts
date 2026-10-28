@@ -450,13 +450,17 @@ describe("a trap's text in the protocol", () => {
     assert.equal(parses({ t: "trap.create", trap: { ...base, zone: { cells: [...rects(1), ...rects(1)] } } }), true);
   });
 
-  test("a wire is 0.5 to 20 cells, its ends on corners and edge midpoints", () => {
+  test("a wire is 0.5 to 20 cells, its ends on the 1/64 lattice, and a square scene keeps them on corners and edge midpoints", () => {
     const base = input("t");
     const wire = (a: [number, number], b: [number, number]) => parses({ t: "trap.create", trap: { ...base, zone: { wire: { a, b } }, rig: { ...base.rig, on: [] } } });
     assert.equal(wire([1, 1], [1.5, 1]), true);
     assert.equal(wire([1, 1], [1, 1]), false);
     assert.equal(wire([1, 1], [21.5, 1]), false);
-    assert.equal(wire([1.25, 1], [3, 1]), false);
+    assert.equal(wire([1.3, 1], [3, 1]), false);
+    // On the 1/64 lattice since hex grids' H2, where hex corners lie: the reducer keeps a square scene's ends on halves.
+    const quarter = { ...base, zone: { wire: { a: [1.25, 1] as [number, number], b: [3, 1] as [number, number] } }, rig: { ...base.rig, on: [] } };
+    assert.equal(wire([1.25, 1], [3, 1]), true);
+    assert.match(refused(table(), { t: "trap.create", trap: quarter }).message, /corners and edge midpoints/);
   });
 
   test("uses an op sets are 1 to 99, and no op sets noticedBy or due", () => {

@@ -6,6 +6,7 @@ import { applyMode, diceCount, doubleDice, parseExtra, parseFormula, type Formul
 import { ICON_KEY_RE } from "./imageRef.ts";
 import { CLASS_IDS } from "./rules/classResources.ts";
 import { DAMAGE_TYPES } from "./rules/damage.ts";
+import { cellIndexMost } from "./rules/grid.ts";
 import { sceneHexSpan } from "./rules/hex.ts";
 import {
   ABILITY_KEYS,
@@ -1710,7 +1711,8 @@ const manyTokenIds = z
 const trapName = name.refine(whole, wholeText);
 const trapLine = (max: number) => line(max).min(1).refine(whole, wholeText);
 const trapNote = z.string().max(LIMITS.trapNoteChars).regex(MULTI_LINE, "control characters are not allowed").refine(whole, wholeText);
-const sceneCell = z.number().int().min(0).max(MAX_SCENE_CELLS);
+/** A cell's key index, up to a hex scene's last row or column (grid.ts cellIndexMost). The reducer keeps a rectangle inside its scene's own keys. */
+const sceneCell = z.number().int().min(0).max(cellIndexMost(MAX_SCENE_CELLS));
 const cellRect = z.strictObject({ x: sceneCell, y: sceneCell, w: z.number().int().min(1).max(LIMITS.trapRectSide), h: z.number().int().min(1).max(LIMITS.trapRectSide) });
 /** Cells two rectangles share count once. */
 function rectCells(rects: readonly { x: number; y: number; w: number; h: number }[]): number {
@@ -1723,13 +1725,19 @@ const cellRects = z
   .min(1)
   .max(LIMITS.trapRects)
   .refine((rects) => rectCells(rects) <= LIMITS.trapCells, { message: `squares are at most ${LIMITS.trapCells} cells` });
-const halfCell = z
+/**
+ * A wire's end, on the free walls' 1/64 lattice, where hex corners lie
+ * (docs/design-v1-hex-grids.md H2). Every end stored before is a half cell,
+ * which lies on it too, so no op changes meaning. The reducer keeps a
+ * square scene's ends on cell corners and edge midpoints.
+ */
+const wireEnd = z
   .number()
   .min(0)
   .max(MAX_SCENE_CELLS)
-  .refine((v) => Number.isInteger(v * 2), { message: "a wire's ends are on cell corners and edge midpoints" });
+  .refine((v) => Number.isInteger(v * FREE_WALL_LATTICE), { message: "a wire's ends are on the 1/64 cell lattice" });
 const trapWire = z
-  .strictObject({ a: z.tuple([halfCell, halfCell]), b: z.tuple([halfCell, halfCell]) })
+  .strictObject({ a: z.tuple([wireEnd, wireEnd]), b: z.tuple([wireEnd, wireEnd]) })
   .refine((w) => {
     const length = Math.sqrt((w.b[0] - w.a[0]) ** 2 + (w.b[1] - w.a[1]) ** 2);
     return length >= LIMITS.trapWireMin && length <= LIMITS.trapWireMax;

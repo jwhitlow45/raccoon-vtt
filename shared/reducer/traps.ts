@@ -3,6 +3,8 @@ import { LIMITS, serializedBytes } from "../limits.ts";
 import { type LogEntry, type LogEvent, type RoomState, type Token, type Trap, type TrapAction, type TrapDue, type TrapRig } from "../model.ts";
 import { seenByNonOwners, stableStringify } from "../project.ts";
 import type { OpOf } from "../protocol.ts";
+import { cellWord, isHex, sceneGrid, shapeOfGrid } from "../rules/grid.ts";
+import { sceneHexSpan, type HexGrid } from "../rules/hex.ts";
 import { doorExists, isPlainId, pitFloorOf, pitOpen } from "../rules/traps.ts";
 import { splitCheck } from "../rules/walls.ts";
 import { sightPiecesCheck } from "../visionLimits.ts";
@@ -34,30 +36,46 @@ export function trapOwnFields(trap: Trap): Omit<Trap, "rev" | "state" | "found" 
   return { ...rest, rig: own };
 }
 
+/** The columns and rows a hex scene's keys run over (hex.ts sceneHexSpan), as a rectangle of keys. */
+function hexKeySpan(g: HexGrid, bounds: { w: number; h: number }): { w: number; h: number } {
+  const span = sceneHexSpan(g, bounds);
+  return { w: span.cols, h: span.rows };
+}
+
 export function trapOwnBytes(trap: Trap): number {
   return serializedBytes(trapOwnFields(trap));
 }
 
-/** Why a trap as an op leaves it cannot be, or null (6.1, 6.2): its zone on its scene and the rig fitting the zone. */
+/**
+ * Why a trap as an op leaves it cannot be, or null (6.1, 6.2): its zone on
+ * its scene and the rig fitting the zone. On a hex scene its rectangles are
+ * of hex keys, inside the columns and rows the scene's keys run over
+ * (docs/design-v1-hex-grids.md H2), and its wire's ends may lie anywhere on
+ * the 1/64 lattice, as hex corners do. A square scene's wire keeps to cell
+ * corners and edge midpoints, as before.
+ */
 function trapProblem(tx: Tx, trap: Trap): string | null {
   const scene = tx.scene(trap.sceneId);
-  const { w, h } = scene.bounds;
+  const g = sceneGrid(scene);
+  const { w, h } = isHex(g) ? hexKeySpan(g, scene.bounds) : scene.bounds;
   const rig = trap.rig;
   const zone = trap.zone;
   const rectsInside = (rects: readonly { x: number; y: number; w: number; h: number }[]) => rects.every((r) => r.x + r.w <= w && r.y + r.h <= h);
+  const word = cellWord(g, true);
   if ("cells" in zone) {
-    if (!rectsInside(zone.cells)) return "a trap's squares lie inside its scene";
+    if (!rectsInside(zone.cells)) return `a trap's ${word} lie inside its scene`;
   } else if ("wire" in zone) {
     const { a, b } = zone.wire;
-    if (Math.max(a[0], b[0]) > w || Math.max(a[1], b[1]) > h) return "a trip wire lies inside its scene";
+    if (Math.max(a[0], b[0]) > scene.bounds.w || Math.max(a[1], b[1]) > scene.bounds.h) return "a trip wire lies inside its scene";
+    if (!isHex(g) && ![a[0], a[1], b[0], b[1]].every((v) => Number.isInteger(v * 2))) return "a wire's ends are on cell corners and edge midpoints";
   }
   if (!rig) return null;
   const squares = "cells" in zone;
-  if (squares && (rig.on.length < 1 || rig.on.length > 4)) return "a trap on squares goes off one to four ways";
+  if (squares && (rig.on.length < 1 || rig.on.length > 4)) return `a trap on ${word} goes off one to four ways`;
   if (!squares && rig.on.length > 0) return "a trip wire goes off when crossed and a door when opened";
-  if (!squares && rig.pit) return "only a trap on squares opens a pit";
-  if (!squares && rig.hits === "zone") return "only a trap on squares hits everyone on it";
-  if (typeof rig.hits === "object" && "cells" in rig.hits && !rectsInside(rig.hits.cells)) return "the squares it hits lie inside its scene";
+  if (!squares && rig.pit) return `only a trap on ${word} opens a pit`;
+  if (!squares && rig.hits === "zone") return `only a trap on ${word} hits everyone on it`;
+  if (typeof rig.hits === "object" && "cells" in rig.hits && !rectsInside(rig.hits.cells)) return `the ${word} it hits lie inside its scene`;
   if (trapOwnBytes(trap) > LIMITS.trapBytes) return `a trap is at most ${LIMITS.trapBytes / 1024} KiB`;
   return null;
 }
@@ -101,7 +119,9 @@ export function trapCreate(tx: Tx, op: OpOf<"trap.create">): void {
   const input = op.trap;
   tx.scene(input.sceneId);
   if (tx.state.traps[input.id]) throw invalid("a trap with that id is already on the map");
-  const trap: Trap = { id: input.id, rev: 0, sceneId: input.sceneId, name: input.name, zone: input.zone, state: "armed", found: input.found ?? false, rig: { ...input.rig } };
+  // A trap on a hex scene is stamped with its shape, which its keys are of (docs/design-v1-hex-grids.md HX-D14).
+  const shape = shapeOfGrid(sceneGrid(tx.scene(input.sceneId)));
+  const trap: Trap = { id: input.id, rev: 0, sceneId: input.sceneId, name: input.name, zone: input.zone, state: "armed", found: input.found ?? false, rig: { ...input.rig }, ...(shape ? { grid: shape } : {}) };
   const why = trapProblem(tx, trap) ?? refProblem(tx, trap, true, true);
   if (why) throw invalid(why);
   tx.write(keys.trap(trap.id), trap);
