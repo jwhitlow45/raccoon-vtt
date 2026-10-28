@@ -46,6 +46,7 @@ export const PLAYERS_HOLD_NOTHING = "Players have seen none of this scene's buil
 
 const EMPTY_CHUNKS: RoomState["buildChunks"] = {};
 const EMPTY_LABELS: RoomState["labels"] = {};
+const EMPTY_STAMPS: RoomState["stamps"] = {};
 
 export function MapExport(props: { scene: Scene }) {
   const { scene } = props;
@@ -69,7 +70,8 @@ export function MapExport(props: { scene: Scene }) {
 
   const chunks = useRoomView((s) => s.view?.buildChunks ?? EMPTY_CHUNKS);
   const labels = useRoomView((s) => s.view?.labels ?? EMPTY_LABELS);
-  const hasBuild = useMemo(() => hasBuildOn(scene.id, chunks, labels), [scene.id, chunks, labels]);
+  const stamps = useRoomView((s) => s.view?.stamps ?? EMPTY_STAMPS);
+  const hasBuild = useMemo(() => hasBuildOn(scene.id, chunks, labels, stamps), [scene.id, chunks, labels, stamps]);
   const size = exportSize(scene.bounds, pxPerCell);
   const words = exportWords(sceneGrid(scene), scene.bounds, size);
 

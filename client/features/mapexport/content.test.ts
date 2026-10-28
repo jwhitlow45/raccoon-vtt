@@ -206,12 +206,23 @@ describe("exportContent", () => {
 describe("whether a scene has a build to export", () => {
   test("floor, edges and labels count, and so do heights and stairs painted on their own", () => {
     let state = room({ scenes: { s1: scene("s1"), s2: scene("s2", { order: 1 }) } });
-    assert.equal(hasBuildOn("s1", state.buildChunks, state.labels), false);
+    assert.equal(hasBuildOn("s1", state.buildChunks, state.labels, state.stamps), false);
     state = apply(state, { t: "build.height", sceneId: "s1", cells: ["2,2"], height: 10 });
-    assert.equal(hasBuildOn("s1", state.buildChunks, state.labels), true);
-    assert.equal(hasBuildOn("s2", state.buildChunks, state.labels), false);
+    assert.equal(hasBuildOn("s1", state.buildChunks, state.labels, state.stamps), true);
+    assert.equal(hasBuildOn("s2", state.buildChunks, state.labels, state.stamps), false);
     state = apply(state, { t: "build.stairs", sceneId: "s2", cells: ["1,1"], up: "a" });
-    assert.equal(hasBuildOn("s2", state.buildChunks, state.labels), true);
+    assert.equal(hasBuildOn("s2", state.buildChunks, state.labels, state.stamps), true);
+  });
+
+  test("a mat with only stamps or only free walls has something to export, and one with only lights has not, since lights are not drawn (LP23-A-GP3-1)", () => {
+    let state = room({ scenes: { s1: scene("s1"), s2: scene("s2", { order: 1 }), s3: scene("s3", { order: 2 }) } });
+    state = apply(state, { t: "build.stamps", sceneId: "s1", put: [{ id: "barrel", art: { key: "barrel" }, x: 3, y: 3, w: 1, h: 1, rotation: 0, z: 0, visibility: "all" }] });
+    assert.equal(hasBuildOn("s1", state.buildChunks, state.labels, state.stamps), true);
+    assert.equal(hasBuildOn("s2", state.buildChunks, state.labels, state.stamps), false);
+    state = apply(state, { t: "build.walls", sceneId: "s2", put: [{ id: "gggggggggggg", a: [1.5, 2], b: [3, 2.5], f: { kind: "wall" } }] });
+    assert.equal(hasBuildOn("s2", state.buildChunks, state.labels, state.stamps), true);
+    state = apply(state, { t: "build.lights", sceneId: "s3", put: [{ id: "lamp", x: 3, y: 3, bright: 20, dim: 20, on: true, walls: true }] });
+    assert.equal(hasBuildOn("s3", state.buildChunks, state.labels, state.stamps), false);
   });
 });
 
@@ -248,7 +259,7 @@ describe("the player view of a scene with fog on comes from the server (docs/des
     const players = projectState(state, P1, { sceneId: "s1" }) as unknown as RoomState;
     // The DM cleared the build, but players still remember a stone cell: the image is not empty.
     const cleared = { ...state, buildChunks: {}, labels: {}, stamps: {} };
-    assert.equal(hasBuildOn("s1", cleared.buildChunks, cleared.labels), false);
+    assert.equal(hasBuildOn("s1", cleared.buildChunks, cleared.labels, cleared.stamps), false);
     assert.equal(contentEmpty(playerViewContent(players, cleared, "s1")), false);
     const nothing = { buildChunks: {}, labels: {}, stamps: {} };
     assert.equal(contentEmpty(playerViewContent(nothing, cleared, "s1")), true);

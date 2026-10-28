@@ -181,13 +181,19 @@ export function contentEmpty(content: Pick<ExportContent, "chunks" | "labels" | 
 }
 
 /**
- * Whether a scene has anything of the build to export: floor, edges,
- * heights, stairs, difficult ground or labels. Heights and stairs draw on their own, over the
+ * Whether a scene has anything of the build to export: floor, edges, free
+ * walls, heights, stairs, difficult ground, labels or stamps, everything
+ * the drawing draws. Heights and stairs draw on their own, over the
  * background (docs/design-v1-maps-vision.md 4.2), so a blank mat with only
- * those has something to export.
+ * those has something to export, and so does a mat with only stamps, which
+ * is all a hex Battle mat can hold beside labels for now. Lights are not
+ * drawn, so they do not count.
  */
-export function hasBuildOn(sceneId: string, chunks: RoomState["buildChunks"], labels: RoomState["labels"]): boolean {
+export function hasBuildOn(sceneId: string, chunks: RoomState["buildChunks"], labels: RoomState["labels"], stamps: RoomState["stamps"]): boolean {
   const some = (c: BuildChunk | undefined) =>
-    !!c && c.sceneId === sceneId && (Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0 || c.heights !== undefined || c.up !== undefined || c.rough !== undefined);
-  return Object.values(chunks).some(some) || Object.values(labels).some((l: Label | undefined) => l?.sceneId === sceneId);
+    !!c &&
+    c.sceneId === sceneId &&
+    (Object.keys(c.cells).length > 0 || Object.keys(c.edges).length > 0 || (c.walls?.length ?? 0) > 0 || c.heights !== undefined || c.up !== undefined || c.rough !== undefined);
+  const onScene = (item: { sceneId: string } | undefined) => item?.sceneId === sceneId;
+  return Object.values(chunks).some(some) || Object.values(labels).some(onScene) || Object.values(stamps).some(onScene);
 }
