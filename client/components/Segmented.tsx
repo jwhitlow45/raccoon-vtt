@@ -57,7 +57,9 @@ export function Segmented<T extends string | number>(props: {
    * into uneven pieces. The side padding shrinks so four labels still fit,
    * and under 210 px, too narrow even so, they go two by two. Six options,
    * such as the six abilities, go three by three where six cannot keep
-   * 44 px each (docs/design-v1-roll-request.md 4.2).
+   * 44 px each (docs/design-v1-roll-request.md 4.2). Three options with
+   * `wrap`, such as Grid shape, never go two over one: under 220 px they
+   * stand one per row (docs/design-v1-design-pass.md 4.2).
    */
   even?: boolean;
   /** Labels wrap inside their option, for a choice that names something of any length, such as a creature. */
@@ -84,7 +86,7 @@ export function Segmented<T extends string | number>(props: {
       aria-labelledby={props.labelledBy}
       aria-describedby={[described ? descriptionId : null, props.describedBy || null].filter(Boolean).join(" ") || undefined}
       aria-disabled={props.disabled ? true : undefined}
-      className={props.even ? (props.options.length === 6 ? "rvtt-even-choices rvtt-even-six" : "rvtt-even-choices") : undefined}
+      className={props.even ? evenClass(props.options.length, props.wrap === true) : undefined}
       style={{ display: "flex", flexWrap: props.even ? "nowrap" : "wrap", gap: theme.space(1), minWidth: 0, ...(props.even || described ? null : props.style) }}
     >
       {props.options.map((o) => {
@@ -141,4 +143,18 @@ export function Segmented<T extends string | number>(props: {
       <Help id={descriptionId}>{props.description}</Help>
     </div>
   );
+}
+
+/**
+ * The class that sets how even options give way on a narrow row
+ * (globals.css). Three that wrap their words have a rule of their own:
+ * two over one would leave the third alone and twice as wide, so they keep
+ * one row while a third of it holds their longest word and else stand one
+ * per row. Three that keep each label on one line, such as Who in the trap
+ * pane, keep the two by two of the rule for four.
+ */
+export function evenClass(count: number, wrap: boolean): string {
+  if (count === 6) return "rvtt-even-choices rvtt-even-six";
+  if (count === 3 && wrap) return "rvtt-even-choices rvtt-even-three";
+  return "rvtt-even-choices";
 }

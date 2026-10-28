@@ -1,5 +1,6 @@
 import "./testing/register.ts";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { accentFor, contrast } from "../lib/accent.ts";
 import { MEMBER_COLORS, theme } from "../lib/theme.ts";
@@ -246,6 +247,34 @@ describe("tones", () => {
   test("the highlight notice's focus ring reads on cream, where the accent would not", () => {
     assert.ok(contrast(NOTICE_TONES.highlight.focus!, NOTICE_TONES.highlight.fill) >= 3);
     assert.ok(contrast(theme.color.crest, NOTICE_TONES.highlight.fill) < 3);
+  });
+});
+
+describe("three even choices that wrap (docs/design-v1-design-pass.md 4.2)", () => {
+  const three = [
+    { value: "squares", label: "Squares" },
+    { value: "hexRows", label: "Hex rows" },
+    { value: "hexColumns", label: "Hex columns" },
+  ];
+  const classOf = (props: Record<string, unknown>) => /role="radiogroup"[^>]* class="([^"]+)"/.exec(html(createElement(Segmented<string>, { label: "Grid shape", value: "squares", options: three, onChange() {}, ...props })))?.[1];
+
+  test("carry their own class, and three without wrap, four or six that wrap do not", () => {
+    assert.equal(classOf({ even: true, wrap: true }), "rvtt-even-choices rvtt-even-three");
+    assert.equal(classOf({ even: true }), "rvtt-even-choices", "Who in the trap pane keeps the two by two");
+    assert.equal(classOf({ wrap: true }), undefined, "not even, no rule");
+    const four = [...three, { value: "x", label: "X" }];
+    assert.equal(classOf({ even: true, wrap: true, options: four }), "rvtt-even-choices");
+    const six = [...four, { value: "y", label: "Y" }, { value: "z", label: "Z" }];
+    assert.equal(classOf({ even: true, wrap: true, options: six }), "rvtt-even-choices rvtt-even-six");
+  });
+
+  test("their rule stands them one per row under 220 px of their container, above the two by two rule's reach", () => {
+    const css = readFileSync(new URL("../globals.css", import.meta.url), "utf8");
+    const rule = /@container \(width < (\d+)px\) \{\s*\.rvtt-even-choices\.rvtt-even-three \{\s*flex-wrap: wrap !important;\s*\}\s*\.rvtt-even-choices\.rvtt-even-three > \.rvtt-choice \{\s*flex: 1 1 100% !important;\s*\}\s*\}/.exec(css);
+    assert.ok(rule, "one option per row at full width");
+    assert.equal(Number(rule[1]), 220);
+    const pair = /@container \(width < (\d+)px\) \{\s*\.rvtt-even-choices \{/.exec(css);
+    assert.ok(pair && Number(pair[1]) < 220, "the two by two rule starts narrower, where the more specific three rule still wins");
   });
 });
 

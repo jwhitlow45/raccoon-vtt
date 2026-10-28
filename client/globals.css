@@ -405,6 +405,24 @@ summary::-webkit-details-marker {
   }
 }
 
+/* Three even options whose words wrap (components/Segmented.tsx `wrap`),
+   such as Grid shape and Kind of scene (docs/design-v1-design-pass.md
+   4.2), share one row while a third of it holds their longest word whole:
+   "columns" is 58 px at 14 px weight 600, plus an option's 10 px of
+   padding and border, three times, plus two 4 px gaps, is 212, and 8 px
+   more allow for a wider fallback font. Narrower, they stand one per row
+   at full width in their order, never two over one, which would leave the
+   third alone. Its selector is more specific than the two by two rule's,
+   so it wins under 210 px too. */
+@container (width < 220px) {
+  .rvtt-even-choices.rvtt-even-three {
+    flex-wrap: wrap !important;
+  }
+  .rvtt-even-choices.rvtt-even-three > .rvtt-choice {
+    flex: 1 1 100% !important;
+  }
+}
+
 /* A row of Request a roll's picker (features/rolls/RequestSheet.tsx): its
    label stands at the row's start while six 44 px options fit beside a
    48 px label (332 px), else above them. The picker is the container. */
