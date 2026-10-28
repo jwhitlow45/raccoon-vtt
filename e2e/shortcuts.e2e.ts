@@ -1028,6 +1028,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
 
     /** Each keyed button's words on one line: its key never wraps it. Only the words count, not the icon beside them. */
     const lines: string[] = [];
+    const foldedAt: string[] = [];
     const wholeLines = async (root: Locator, at: string) => {
       const broken = await root.locator("button[aria-keyshortcuts]").evaluateAll((buttons) =>
         buttons.flatMap((b) => {
@@ -1073,8 +1074,12 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
         // The View menu in Isometric, where the turns show on every layout. On the narrowest phones the View button folds into the room's menu (D-261026-12).
         const folded = (await dm.getByRole("button", { name: /^View: / }).count()) === 0;
         if (folded) {
+          foldedAt.push(at);
           await openMenu();
-          await dm.getByRole("button", { name: /^View\b(?! as)/ }).click();
+          const row = dm.getByRole("button", { name: /^View\b(?! as)/ });
+          // The row stands in for the button, so it names I too.
+          assert.deepEqual({ keys: await row.getAttribute("aria-keyshortcuts"), title: await row.getAttribute("title") }, { keys: "I", title: "View (I)" }, `${at}: the menu's View row`);
+          await row.click();
         } else await dm.getByRole("button", { name: /^View: / }).click();
         const menu = dm.getByRole("dialog", { name: "View" });
         await menu.waitFor();
@@ -1109,6 +1114,7 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
       }
     }
     assert.deepEqual(lines, []);
+    assert.ok(foldedAt.length > 0, "the View button folded into the menu at some size");
     await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
     await dm.setViewportSize({ width: 1280, height: 800 });
     await reopenRoom(dm);
@@ -1122,6 +1128,21 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     assert.equal(await phoneView.getAttribute("aria-keyshortcuts"), null, "no key on the phone's View button");
     const select = player.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: "Select", exact: true });
     assert.deepEqual({ keys: await select.getAttribute("aria-keyshortcuts"), title: await select.getAttribute("title") }, { keys: null, title: "Select" });
+  });
+
+  test("fl1-b. the phone's first key from a hardware keyboard names every control's key at once, with nothing reloaded or opened again", async () => {
+    const phoneView = player.getByRole("button", { name: /^View: / });
+    const select = player.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: "Select", exact: true });
+    assert.equal(await phoneView.getAttribute("aria-keyshortcuts"), null, "no key yet");
+    // Marked, so the same elements are found after the key: nothing mounts again.
+    await phoneView.evaluate((el) => el.setAttribute("data-fl1-mark", ""));
+    await select.evaluate((el) => el.setAttribute("data-fl1-mark", ""));
+    // Shift does nothing in the room, so only the keyboard's discovery can change what the page shows.
+    await player.evaluate(() => (globalThis as unknown as { document: { activeElement: { blur?(): void } | null } }).document.activeElement?.blur?.());
+    await player.keyboard.press("Shift");
+    await waitFor("I on the phone's View button", async () => ((await phoneView.getAttribute("aria-keyshortcuts")) === "I" ? true : null));
+    assert.deepEqual({ keys: await select.getAttribute("aria-keyshortcuts"), title: await select.getAttribute("title") }, { keys: "V", title: "Select (V)" });
+    assert.equal(await player.locator("[data-fl1-mark]").count(), 2, "the same View and Select buttons");
   });
 
   test("4. neither page logged an error", () => {

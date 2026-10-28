@@ -1046,6 +1046,15 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     // At rest Reset zoom is hidden, though Zoom out still goes to the page fit.
     assert.equal(await popup.getByRole("button", { name: "Reset zoom" }).count(), 0, "Reset zoom at rest");
     assert.equal(await popup.getByRole("button", { name: "Zoom out" }).isEnabled(), true);
+    // A computer has a keyboard, so the zoom buttons name the viewer's own keys (D-261028-09), and keep their names.
+    const zoomIn = popup.getByRole("button", { name: "Zoom in", exact: true });
+    const zoomOut = popup.getByRole("button", { name: "Zoom out", exact: true });
+    assert.deepEqual([await zoomIn.getAttribute("aria-keyshortcuts"), await zoomOut.getAttribute("aria-keyshortcuts")], ["Plus =", "-"]);
+    await zoomIn.hover();
+    await desk.locator('[role="tooltip"]:popover-open', { hasText: "Zoom in (+)" }).waitFor();
+    await zoomOut.hover();
+    await desk.locator('[role="tooltip"]:popover-open', { hasText: "Zoom out (-)" }).waitFor();
+    await desk.mouse.move(0, 0);
     // The keys, with focus on the dialog as it opens.
     await popup.focus();
     await desk.keyboard.press("PageDown");
@@ -1091,6 +1100,10 @@ describe("raccoon-vtt pdf handouts run", { timeout: 900_000 }, () => {
     assert.ok(first.height <= stageBox.height + 1, `no whole page at the page fit: ${JSON.stringify(first)} in ${JSON.stringify(stageBox)}`);
     assert.deepEqual(await settledBoxes(deskZoom, "the card's zoom buttons at the page fit"), cardRest, "Reset zoom moved the card's zoom buttons");
     await shots.take(desk, "pdf-desk-page-fit");
+    assert.equal(await popup.getByRole("button", { name: "Reset zoom" }).getAttribute("aria-keyshortcuts"), "0", "Reset zoom names 0");
+    await popup.getByRole("button", { name: "Reset zoom" }).hover();
+    await desk.locator('[role="tooltip"]:popover-open', { hasText: "Reset zoom (0)" }).waitFor();
+    await shots.take(desk, "fl1-pdf-desk-reset-zoom-tooltip");
     await popup.getByRole("button", { name: "Reset zoom" }).click();
     await indicatorIs(popup, "1 of 4", "Reset zoom on the same page");
     assert.equal(await popup.getByRole("button", { name: "Reset zoom" }).count(), 0);
