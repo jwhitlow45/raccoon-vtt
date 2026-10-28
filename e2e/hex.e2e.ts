@@ -463,8 +463,8 @@ async function sideways(inside: Locator, screen: string): Promise<string[]> {
   return wide.map((line) => `${screen}: ${line}`);
 }
 
-/** H1's limit lines, which say what a hex scene leaves to squares (section 6's table). */
-const LIMIT_LINES = new Set<string>([...Object.values(HEX_LIMITS), "Walking needs squares.", "Counted on squares only."]);
+/** The limit lines, which say what a hex scene leaves to squares (section 6's table). Walking and an area's movement inside are hexes' from H2. */
+const LIMIT_LINES = new Set<string>(Object.values(HEX_LIMITS));
 
 /** Every word "square" the page shows, but the Squares choices' own name and H1's limit lines. */
 async function squareWords(page: Page): Promise<string[]> {
@@ -637,12 +637,12 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await ops.send({ t: "encounter.end" });
   });
 
-  test("HX-5. the Straight ruler counts hexes, and Walking is off, saying it needs squares", async () => {
+  test("HX-5. the Straight ruler counts hexes, and Walking is on offer from phase H2", async () => {
     await pickTool(dm, "Ruler");
     const bar = dm.getByRole("toolbar", { name: "Ruler options" });
     await bar.waitFor();
     const line = bar.locator("[data-options-line]");
-    await line.filter({ hasText: "Walking needs squares." }).waitFor();
+    assert.equal(await line.filter({ hasText: "Walking needs squares." }).count(), 0, "no limit line for walking");
     // Six hexes down a slant of the lattice: 30 ft, where the squares under its ends would read 25.
     let end: Hex = { col: 4, row: 8 };
     for (let i = 0; i < 6; i++) end = hexNeighbors(G, end)[1]!;
@@ -651,9 +651,8 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await line.filter({ hasText: /^30 ft · / }).waitFor();
     await shots.take(dm, "hex-dm-ruler");
     const { group, popover } = await measureChoice(dm);
-    // Its title names it, so the reason is what a screen reader hears (lib/a11y.ts accessibleName).
-    const walking = group.getByRole("radio", { name: "Walking needs squares.", exact: true });
-    assert.equal(await walking.isDisabled(), true, "Walking is off on hexes");
+    const walking = group.getByRole("radio", { name: "Walking", exact: true });
+    assert.equal(await walking.isDisabled(), false, "Walking is on offer on hexes");
     assert.equal(await group.getByRole("radio", { name: "Straight", exact: true }).isChecked(), true);
     if (popover) {
       await dm.keyboard.press("Escape");
@@ -662,14 +661,15 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await pickTool(dm, "Select");
   });
 
-  test("HX-6. an area's options say its movement inside is counted on squares only", async () => {
+  test("HX-6. an area's options offer movement inside with no squares-only line, since a walk on hexes reads it from H2", async () => {
     await pickTool(dm, "Area");
     await pickOption(dm, "Area", "Shape", "Sphere");
     await draftArea(dm);
     const bar = dm.getByRole("toolbar", { name: "Area options" });
     await bar.getByRole("button", { name: "More options" }).click();
     const more = dm.getByRole("dialog", { name: "More Area options" });
-    await more.getByText("Counted on squares only.", { exact: true }).waitFor();
+    await more.getByRole("radiogroup", { name: "Movement inside" }).waitFor();
+    assert.equal(await more.getByText("Counted on squares only.", { exact: true }).count(), 0);
     await shots.take(dm, "hex-dm-area-more");
     await dm.keyboard.press("Escape");
     await more.waitFor({ state: "detached" });
@@ -811,7 +811,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
           await pickTool(page, "Ruler");
           const ruler = page.getByRole("toolbar", { name: "Ruler options" });
-          await ruler.locator("[data-options-line]").filter({ hasText: "Walking needs squares." }).waitFor();
+          await ruler.locator("[data-options-line]").waitFor();
           off.push(...alignmentLines(await measureAlignment(ruler), `the Ruler's options at ${at}`));
           const { group, popover } = await measureChoice(page);
           await group.waitFor();
@@ -829,7 +829,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           off.push(...alignmentLines(await measureAlignment(area), `the Area options at ${at}`));
           await area.getByRole("button", { name: "More options" }).click();
           const more = page.getByRole("dialog", { name: "More Area options" });
-          await more.getByText("Counted on squares only.", { exact: true }).waitFor();
+          await more.getByRole("radiogroup", { name: "Movement inside" }).waitFor();
           off.push(...alignmentLines(await measureAlignment(more), `More area options at ${at}`));
           await shots.take(page, `hex-area-more-${size.name}-${scale * 100}`);
           await page.keyboard.press("Escape");
