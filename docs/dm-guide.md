@@ -163,8 +163,6 @@ A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, f
 
 Every kind but the Universal VTT file has a **Grid** row: **Squares**, **Hex rows** or **Hex columns**. A Battle mat or a Map image starts on your room's choice (see [Hex grids](#hex-grids)), and the row changes it for the one scene you are making. A Builder scene and a starter map start on squares whatever the room says, because the builder's tools and the starter art are drawn on squares. You can still pick hexes for them in the row. A Builder scene then shows what the builder can't do on hexes yet, and a starter map drops its measured square grid and opens **Line up grid**. A Universal VTT file always makes a square scene, and its summary says so when your room starts new scenes on hexes.
 
-![A new Map image scene named Cave, with its file picked and Players see on Reveal by hand, before Upload and create.](dm-guide/scenes-new-map.webp)
-
 ### What players see on new scenes
 
 Every new scene has to start somewhere: under fog for the party to explore, under fog for you to reveal by hand, or in plain view. Your room makes that choice for you, so you don't have to set up each scene. In the Menu, open **Room settings** and find **New scenes** at the end. **Players see on new scenes** is **Explore**, **Reveal by hand** or **Everything** (see [Light and party vision](#light-and-party-vision) for what each one means), and a new room starts on Explore. A room made before this setting existed shows **As before** until you pick one, which keeps the old starts: maps and builder scenes under fog, battle mats without. Once you pick, As before goes away.
@@ -172,6 +170,8 @@ Every new scene has to start somewhere: under fog for the party to explore, unde
 Two exceptions keep things sensible. A map image or a starter map starts on Reveal by hand even when the room says Explore, because a fresh image has no walls yet, and party vision would show the players the whole picture at once. The form tells you why. And the battle mat a new room comes with starts on Everything, so players who join see the mat rather than darkness.
 
 For one scene, the new scene form has its own **Players see** row under the name. It starts on the room's choice, so most of the time you leave it alone, but you can pick any of the three. The fourth option, **Like** followed by the name of the scene on your screen, copies that scene's setup instead: its fog, its party vision with the light and Sight, and whether walls stop players' moves. The line under it says what it will copy, such as "Explore, Dark, Per player, players' moves blocked". So when the party goes down a stair to the next level of the same dark dungeon, make the new level with the first one on your screen, pick **Like**, and it starts exactly as dark. The new scene still gets the automatic walls that suit its kind, so a map image keeps walls around floor only, whatever the scene you copy uses. Like copies the scene as it is when the new one is made, after the upload. If that scene is deleted while your map uploads, the new scene starts on your room's choice instead, and a message says so.
+
+![A new Map image scene named Cave, with its file picked and Players see on Reveal by hand, before Upload and create.](dm-guide/scenes-new-map.webp)
 
 ### A scene's settings
 
@@ -430,7 +430,7 @@ A new scene starts on your room's choice, or on the one you pick as you make it 
 Under Players see sit the settings that fine-tune it:
 
 - **Light**: **Bright** (lit everywhere, as by day), **Dim** or **Dark**. The light level matters only while party vision is on, so on Explore or Custom. On a map with phases, **Light with each map phase** under it lets each phase set the light, so switching to Night can make the scene dark (see [Map phases, imports and exports](#map-phases-imports-and-exports)).
-- **Sight**: **Whole party**, the default, or **Per player**. Normally the party shares its sight and its map: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. Per player lets each player see only through their own creatures' eyes, and remember only where they have been (see [Sight for each player](#sight-for-each-player)).
+- **Sight**: **Whole party**, the default, or **Per player**. Normally the party shares its sight and its map: every player sees everything any of the party's creatures can see, so when the rogue scouts ahead, the whole table sees what she finds. Per player lets each player see only through their own creatures' eyes and those of any creature that shares sight with the party, and remember only where those creatures have been (see [Sight for each player](#sight-for-each-player)).
 - **Who lends the party sight**: the party's creatures on the scene, with their senses and lights. To add an allied NPC, so the party sees what it sees, turn on **Shares sight with the party** in the **Sight** section of its token's panel.
 - **Fog and party vision**, a fold that holds the two switches Players see sets for you: **Fog** and **Party vision**. You rarely need them. The one mix that no choice names, party vision on with fog off, shows as **Custom**: players then see the whole map, dimmed outside what their characters see, and the fold opens so you can see why.
 
@@ -443,7 +443,7 @@ Under Players see sit the settings that fine-tune it:
 - In the builder's **Lights** mode, pick a light under **Light to place** and tap the map. Each light gives Bright Light out to one distance and Dim Light beyond it: a Candle is bright for 5 ft and dim to 10 ft, a Torch 20 ft and dim to 40, a Lamp 15 and 45, a Hooded Lantern 30 and 60, the Light cantrip 20 and 40, and the Daylight spell 60 and 120. Tap a placed light to change its reach, turn it **Lit** or **Out**, choose whether **Walls cast shadows**, give it a name, or delete it. Drag it to move it. Players see the light it gives, but never the light itself.
 - A token can carry a light, which you set with **Light** in its action bar or **Sight** in its panel: a Candle, Torch, Lamp, Hooded Lantern, Light, or a Custom one. A scene lights up to 20 token lights.
 
-**Checking what players see.** Your own map always stays fully lit, so you never lose track of anything in the dark. To see the scene through one player's eyes, use [View as a player](#view-as-a-player). On a scene with party vision, **Party sight** in the DM panel shades what the party can't see on your own map instead, so you can keep working while you check.
+**Checking what players see.** Your own map always stays fully lit, so you never lose track of anything in the dark. To see the scene as one player sees it, use [View as a player](#view-as-a-player). On a scene with party vision, **Party sight** in the DM panel shades what the party can't see on your own map instead, so you can keep working while you check.
 
 The app speaks up in three cases where a change to what players see could surprise you:
 
@@ -485,7 +485,7 @@ Under the list, **Who lends sight** shows each creature with its senses and ligh
 
 **Changing your mind.** A new Sight setting takes effect at once, even in the middle of a fight. Switching to **Whole party** pools every player's map into the party's shared map, and it stays pooled: if you switch back to **Per player** later, each player starts from that pooled map. Switching the map to another phase, such as from Day to Night, or changing the light leaves Sight as it is.
 
-**Checking what each player sees.** [View as a player](#view-as-a-player) shows you exactly what one player sees, their own sight and map included, so it's the quickest way to check that a secret stays with the player who found it. The fastest way in is the player's own token: tap it and press **View as Ana**. **Party sight** still shades what no player can see on your own map.
+**Checking what each player sees.** [View as a player](#view-as-a-player) shows you the scene as one player sees it, their own sight and map included, so it's the quickest way to check that a secret stays with the player who found it. The fastest way in is the player's own token: tap it and press **View as Ana**. **Party sight** still shades what no player can see on your own map.
 
 **The table display** shows what a player without a place sees: only what the creatures that share sight see, on the map the whole party shares. If you want the TV to show more of a per-player scene, mark a creature that's with the party, such as a torch-bearing hireling, to share its sight.
 
@@ -562,7 +562,7 @@ Press **Create scene** to make it, and keep the page open until the walls have b
 
 ![Export as image in the scene's settings: Pixels per square, Player view or DM view, and Grid.](dm-guide/export.webp)
 
-**Exporting a map.** **Export as image**, in the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Pick the **Pixels per square** (50, 70 or 100), the **Player view** or the **DM view**, and whether to include the **Grid** (**Hex lines** on a hex scene). The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. On a scene with fog on, it draws only what the players' maps hold (see [What players' maps hold](#what-players-maps-hold)), and needs a connection to the server. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later.
+**Exporting a map.** **Export as image**, in the scene's settings, saves the map image and the build as a PNG file, without tokens, drawings or fog. Pick the **Pixels per square** (50, 70 or 100, and **Pixels per hex** on a hex scene), the **Player view** or the **DM view**, and whether to include the **Grid** (**Hex lines** on a hex scene). The player view draws secret doors that haven't been found as plain walls, and leaves out DM-only stamps and lock marks. On a scene with fog on, it draws only what the players' maps hold (see [What players' maps hold](#what-players-maps-hold)), and needs a connection to the server. Press **Make image**, then **Download**. The file name carries the grid size, such as `crypt-30x20-70px.png`, so this app and other VTTs can set the scale when you import the image later.
 
 # Running fights
 
@@ -1320,9 +1320,9 @@ Follow me and Bring everyone here move the players only while you are looking at
 
 ### View as a player
 
-Sooner or later you'll want to know exactly what a player is looking at: whether the fog really hides the vault, whether Mara's torch reaches the goblin, or what Ben's phone shows on a scene where each player sees for themselves. **View as a player** shows you their screen as they see it, fog, party vision and their own map included, and without anything hidden from them. It always shows the players' scene, whichever scene you are on, so you can check on the table while you prepare the next map.
+Sooner or later you'll want to know exactly what a player can see: whether the fog really hides the vault, whether Mara's torch reaches the goblin, or what Ben can see of a scene where each player sees for themselves. **View as a player** shows you the scene as that player sees it, fog, party vision and their own map included, and nothing they can't see. It is drawn on your own device and isn't a mirror of their phone: the preview keeps its own framing of the map and its own panels, so it shows what they can see, not where they are looking right now. It always shows the players' scene, whichever scene you are on, so you can check on the table while you prepare the next map.
 
-There are two ways in. The quickest is a creature the player owns: their character, a creature you lent them, or their companion. Tap it, and its action bar has **View as Ana**, with an eye in a frame, right beside **Stat block** and **Details** (on a phone, scroll or expand the bar to reach it). The same button sits at the top of the creature's Token panel, under its name. When several players own the creature, the button reads **View as a player** and opens a short list of them to choose from. In the Token panel's **Owners** group, each player has the same eye beside their name, so you can see what any player sees of this creature, owner or not. Monsters and NPCs that no player owns don't have the button, and your players never see any of it.
+There are two ways in. The quickest is a creature the player owns: their character, a creature you lent them, or their companion. Tap it, and its action bar has **View as Ana**, with an eye in a frame, right beside **Stat block** and **Details** (on a phone, scroll or expand the bar to reach it). The same button sits at the top of the creature's Token panel, under its name. When several players own the creature, the button reads **View as a player** and opens a short list of them to choose from. In the Token panel's **Owners** group, each player has the same eye beside their name, so you can see what any player can see of this creature, owner or not. Monsters and NPCs that no player owns don't have the button, and your players never see any of it.
 
 The other way is the DM panel's **Check their view**, for a player who has no token on the scene: pick them under **View as a player** and press **View**.
 
@@ -1519,7 +1519,7 @@ The party explores a crypt by torchlight, and the players should see only what t
 
 **Running it**
 
-1. **Move players** to the crypt. To check what they see, tap Mara's token and press its **View as** button to look through her player's screen, or turn on **Party sight** in the DM panel: the hall by torchlight, and darkness everywhere else.
+1. **Move players** to the crypt. To check what they see, tap Mara's token and press **View as** followed by her player's name to see the scene as her player sees it, or turn on **Party sight** in the DM panel: the hall by torchlight, and darkness everywhere else.
 2. The players move and see more as they go, and ground they have explored stays on their map, dimmed, as they last saw it. They can open the closed door themselves, by tapping it or with **Open door** in their token's action bar.
 3. The chamber door is locked. When Mara picks the lock, use **Select**, tap the door, and press **Unlock**, then **Open**.
 4. When a character lights a brazier, go to the builder's **Lights** mode, tap the brazier, and set it **Lit**. The chamber lights up for everyone who can see it.
