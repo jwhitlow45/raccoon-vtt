@@ -1,4 +1,4 @@
-import { chunkKey, compareLogIds, doorChunk, holderChunkKey, holderTileKey, keys, parseKey, readEntity, sightOf, tileKey, viewMapsOf, wallChunk, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
+import { chunkKey, compareLogIds, doorChunk, holderChunkKey, holderTileKey, keys, parseKey, partsKey, readEntity, sightOf, tileKey, viewMapsOf, wallChunk, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
 import {
   CHUNK_CELLS,
   FOG_SUBCELLS,
@@ -576,7 +576,7 @@ function holderLayer(state: RoomState, sceneId: string, memberId: string): Recor
   const all = state.exploredBy ?? {};
   const writing = isWritable(all);
   let byHolder = writing ? undefined : holderLayers.get(all);
-  const at = `${sceneId}:${memberId}`;
+  const at = partsKey([sceneId, memberId]);
   const hit = byHolder?.get(at);
   if (hit) return hit;
   const out: Record<string, ExploredTile> = {};
@@ -1579,17 +1579,6 @@ function idOf(o: object | undefined | null): number {
   let id = objectIds.get(o);
   if (id === undefined) objectIds.set(o, (id = nextObjectId++));
   return id;
-}
-
-/*
- * A key of several parts as text no other list of parts gives: an encoded
- * array. Joined by a separator, a part whose text holds that separator, as
- * a cell mask's characters or an id may, reads as two, and two different
- * lists share one key (MD2-ASTRA-9). Every composite key the projection
- * keeps answers under is made here.
- */
-function partsKey(parts: readonly (string | number | boolean | null)[]): string {
-  return JSON.stringify(parts);
 }
 
 /*
@@ -3849,7 +3838,7 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
   // not enough, since a leg runs far from where it stands (MD2-ASTRA-5).
   const cornered = new Set<string>();
   const cornersOn = (sceneId: string, memberId: string | null) => {
-    const at = `${sceneId}:${memberId ?? ""}`;
+    const at = partsKey([sceneId, memberId]);
     if (cornered.has(at)) return;
     cornered.add(at);
     for (const token of Object.values(state.tokens)) {

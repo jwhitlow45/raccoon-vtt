@@ -1,4 +1,4 @@
-import { chunkKey, doorChunk, keys, parseKey, readEntity, type EntityKey } from "#shared/keys.ts";
+import { chunkKey, doorChunk, keys, parseKey, partsKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
 import type { Label, LogEntry, RoomState, Stamp, Trap, Viewer } from "#shared/model.ts";
 import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
@@ -42,8 +42,8 @@ export type CommittedBatch = {
 
 function viewerClass(conn: Connection, state: RoomState): string {
   const scene = viewerSceneId(state, conn.viewer, { sceneId: conn.sceneId });
-  if (conn.previewBy !== null) return `preview|${conn.previewBy}|${conn.memberId}`;
-  return conn.role === "dm" ? `dm|${conn.memberId}|${scene ?? ""}` : `player|${conn.memberId}`;
+  if (conn.previewBy !== null) return partsKey(["preview", conn.previewBy, conn.memberId]);
+  return conn.role === "dm" ? partsKey(["dm", conn.memberId, scene]) : partsKey(["player", conn.memberId]);
 }
 
 /**
@@ -147,7 +147,7 @@ export function perPlayerClasses(state: RoomState, sceneId: string, memberId: st
     if (n === undefined) sights.set(view, (n = sights.size));
     sight = String(n);
   }
-  return { sight, fog: holder ? `holder|${memberId}` : "shared" };
+  return { sight, fog: holder ? partsKey(["holder", memberId]) : "shared" };
 }
 
 /** A player's three classes, each a string naming what it reads. */
@@ -241,10 +241,10 @@ class Projector {
     const state = this.#state;
     const sceneId = viewerSceneId(state, conn.viewer, { sceneId: conn.sceneId });
     const scene = sceneId === null ? undefined : state.scenes[sceneId];
-    const at = sceneId ?? "";
-    if (sceneId === null || !scene || !perPlayerScene(scene)) return { scene: `scene|${at}`, sight: `sight|${at}|party`, fog: `fog|${at}|party` };
+    // Encoded arrays, since a scene id, which the DM names, may hold any separator (FANOUT-CLASS-KEYS).
+    if (sceneId === null || !scene || !perPlayerScene(scene)) return { scene: partsKey(["scene", sceneId]), sight: partsKey(["sight", sceneId, "party"]), fog: partsKey(["fog", sceneId, "party"]) };
     const { sight, fog } = perPlayerClasses(state, sceneId, conn.memberId, this.#sights);
-    return { scene: `scene|${at}`, sight: `sight|${at}|${sight}`, fog: `fog|${at}|${fog}` };
+    return { scene: partsKey(["scene", sceneId]), sight: partsKey(["sight", sceneId, sight]), fog: partsKey(["fog", sceneId, fog]) };
   }
 
   /** A label, stamp or found trap for a fog class, through the memo when it stands on the class's own scene. */

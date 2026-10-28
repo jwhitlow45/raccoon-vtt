@@ -82,6 +82,10 @@ describe("keys", () => {
     assert.deepEqual(parseKey(keys.memoryShared("s1")), { kind: "memoryShared", id: "s1" });
     assert.equal(parseKey("memory:s1"), null);
     assert.equal(parseKey("memoryBy:s1:2,3"), null);
+    // A scene id the DM named with a colon of its own keeps it, since a member id never holds one (MD2-LK-12).
+    assert.deepEqual(parseKey(keys.memoryBy("s1:p", "q", 2, 3)), { kind: "memoryBy", id: "s1:p:q:2,3", sceneId: "s1:p", memberId: "q", cx: 2, cy: 3 });
+    assert.deepEqual(parseKey(keys.exploredBy("s1:p", "q", 2, 3)), { kind: "exploredBy", sceneId: "s1:p", memberId: "q", tx: 2, ty: 3 });
+    assert.deepEqual(parseKey(keys.memory("s1:p", 2, 3)), { kind: "memory", id: "s1:p:2,3", sceneId: "s1:p", cx: 2, cy: 3 });
     const party = { sceneId: "s1", cx: 2, cy: 3, rev: 0, cells: { "33,50": null } };
     const own = { ...party, memberId: "p1" };
     const mark = { sceneId: "s1", rev: 0 };

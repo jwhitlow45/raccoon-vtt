@@ -1,4 +1,4 @@
-import { keys } from "#shared/keys.ts";
+import { keys, partsKey } from "#shared/keys.ts";
 import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { mayMoveToken } from "#shared/permissions.ts";
 import { gridOfToken, inSightOfNonOwners, ownsToken, perPlayerScene, projectEntity, viewerSceneId, withheldFromViewer } from "#shared/project.ts";
@@ -181,7 +181,7 @@ function judgedBy(state: RoomState, sceneId: string, receiver: Connection, sight
   if (!perPlayerScene(scene)) return "party";
   // The fan-out's classes (fanout.ts perPlayerClasses): withholding reads sight alone with vision on, and fog alone otherwise.
   const { sight, fog } = perPlayerClasses(state, sceneId, receiver.memberId, sights);
-  return scene.vision?.on === true ? `sight|${sight}` : `fog|${fog}`;
+  return scene.vision?.on === true ? partsKey(["sight", sight]) : partsKey(["fog", fog]);
 }
 
 /**

@@ -140,6 +140,20 @@ export const keys = {
   meta: "meta" as EntityKey,
 };
 
+/*
+ * A key of several parts as text no other list of parts gives: an encoded
+ * array. Joined by a separator, a part whose text holds that separator, as
+ * a cell mask's characters or a scene id may, reads as two, and two
+ * different lists share one key (MD2-ASTRA-9, JOINED-KEYS). Every
+ * composite key a cache keeps answers under is made here. The state map
+ * keys below stay joined, since rooms store them: each ends in numbers,
+ * which hold no colon, and a member id is the server's, which holds none
+ * either, so they parse from the end whatever a scene id holds.
+ */
+export function partsKey(parts: readonly (string | number | boolean | null)[]): string {
+  return JSON.stringify(parts);
+}
+
 /** The state map key of a chunk, `"<sceneId>:<cx>,<cy>"`. */
 export function chunkKey(sceneId: string, cx: number, cy: number): string {
   return `${sceneId}:${cx},${cy}`;
@@ -258,17 +272,18 @@ export function parseKey(key: EntityKey): ParsedKey | null {
     case "fogDraft":
     case "holders":
       return { kind, sceneId: rest };
+    // The member id lies between the last two colons: a scene id, which the DM names, may hold one of its own (MD2-LK-12).
     case "exploredBy": {
       const sep = rest.lastIndexOf(":");
       const m = sep > 0 ? GRID_RE.exec(rest.slice(sep + 1)) : null;
-      const owner = sep > 0 ? rest.indexOf(":") : -1;
+      const owner = sep > 0 ? rest.lastIndexOf(":", sep - 1) : -1;
       if (!m || owner <= 0 || owner >= sep - 1) return null;
       return { kind, sceneId: rest.slice(0, owner), memberId: rest.slice(owner + 1, sep), tx: Number(m[1]), ty: Number(m[2]) };
     }
     case "memoryBy": {
       const sep = rest.lastIndexOf(":");
       const m = sep > 0 ? GRID_RE.exec(rest.slice(sep + 1)) : null;
-      const owner = sep > 0 ? rest.indexOf(":") : -1;
+      const owner = sep > 0 ? rest.lastIndexOf(":", sep - 1) : -1;
       if (!m || owner <= 0 || owner >= sep - 1) return null;
       return { kind, id: rest, sceneId: rest.slice(0, owner), memberId: rest.slice(owner + 1, sep), cx: Number(m[1]), cy: Number(m[2]) };
     }
