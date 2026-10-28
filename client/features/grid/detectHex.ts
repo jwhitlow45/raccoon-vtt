@@ -37,6 +37,7 @@ import type { HexOrient } from "#shared/rules/hex.ts";
 import { HEX_R, HEX_S } from "#shared/rules/hex.ts";
 import { boxSides, type CalBox } from "./calibrate.ts";
 import { defaultStep, lineReach, MIN_CONFIDENCE, type GridDetection, type Pixels } from "./detect.ts";
+import { autocorrelationPeaks, detrended, fourier, leastSquares, lineCenter, median, mod, noiseOf, peakNear, quantile, windowSums } from "./profile.ts";
 
 type Point = { x: number; y: number };
 type Polarity = "dark" | "light";
@@ -364,36 +365,16 @@ function profilesOf(f: Frame): Record<Polarity, Profiles> {
   return { dark: build(raw.dark, ys.dark), light: build(raw.light, ys.light) };
 }
 
-/** A profile with its slow changes taken out and kept above zero (the square finder's `prepare`). */
+/** A profile detrended (profile.ts), with room for its sums over each line reach it is read at. */
 function prepare(raw: Float64Array, d: number, samples: number, offset: number): Profile {
-  const n = raw.length;
-  const m = 3 * d;
-  const prefix = new Float64Array(n + 1);
-  for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i]! + raw[i]!;
-  const q = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const lo = Math.max(0, i - m);
-    const hi = Math.min(n, i + m + 1);
-    const v = raw[i]! - (prefix[hi]! - prefix[lo]!) / (hi - lo);
-    q[i] = v > 0 ? v : 0;
-  }
-  return { q, samples, offset, sums: new Map(), raw };
+  return { q: detrended(raw, d), samples, offset, sums: new Map(), raw };
 }
 
 /** The profile summed over `w` bins either side of each position: a line's strength wherever it is centered. */
 function summed(prof: Profile, w: number): Float64Array {
   const cached = prof.sums.get(w);
   if (cached) return cached;
-  const { q } = prof;
-  const n = q.length;
-  const s = new Float64Array(n);
-  let run = 0;
-  for (let i = 0; i < Math.min(n, w); i++) run += q[i]!;
-  for (let i = 0; i < n; i++) {
-    if (i + w < n) run += q[i + w]!;
-    if (i - w - 1 >= 0) run -= q[i - w - 1]!;
-    s[i] = run;
-  }
+  const s = windowSums(prof.q, w);
   prof.sums.set(w, s);
   return s;
 }
@@ -410,28 +391,7 @@ function reachFor(period: number, d: number): number {
 
 /** Periods where the profile's autocorrelation peaks, strongest first. */
 function candidatePeriods(q: Float64Array, minP: number, maxP: number, keep: number): number[] {
-  const n = q.length;
-  const lo = Math.max(1, Math.floor(minP) - 1);
-  const hi = Math.min(n - 2, Math.ceil(maxP) + 1);
-  if (hi - lo < 2) return [];
-  const ac = new Float64Array(hi + 2);
-  for (let lag = lo; lag <= hi + 1; lag++) {
-    let sum = 0;
-    for (let i = 0, j = lag; j < n; i++, j++) sum += q[i]! * q[j]!;
-    ac[lag] = sum / (n - lag);
-  }
-  const peaks: { p: number; v: number }[] = [];
-  for (let lag = lo + 1; lag <= hi; lag++) {
-    const a = ac[lag - 1]!;
-    const b = ac[lag]!;
-    const c = ac[lag + 1]!;
-    if (b <= 0 || b < a || b < c) continue;
-    const curve = a - 2 * b + c;
-    const shift = curve < 0 ? (0.5 * (a - c)) / curve : 0;
-    const p = lag + Math.max(-0.5, Math.min(0.5, shift));
-    if (p >= minP && p <= maxP) peaks.push({ p, v: b });
-  }
-  peaks.sort((x, y) => y.v - x.v);
+  const peaks = autocorrelationPeaks(q, minP, maxP);
   // Every whole multiple of a period peaks about as high as the period
   // itself, so the strongest few can all be multiples. The shortest peaks
   // nearly as strong are kept too: the hexes' own size is among them.
@@ -440,77 +400,9 @@ function candidatePeriods(q: Float64Array, minP: number, maxP: number, keep: num
   return [...new Set([...shortest, ...peaks.slice(0, keep)])].map((x) => x.p);
 }
 
-function fourier(q: Float64Array, p: number): { mag: number; arg: number } {
-  const w = (2 * Math.PI) / p;
-  const cr = Math.cos(w);
-  const ci = -Math.sin(w);
-  let zr = 1;
-  let zi = 0;
-  let re = 0;
-  let im = 0;
-  for (let i = 0; i < q.length; i++) {
-    const v = q[i]!;
-    if (v !== 0) {
-      re += v * zr;
-      im += v * zi;
-    }
-    const t = zr * cr - zi * ci;
-    zi = zr * ci + zi * cr;
-    zr = t;
-  }
-  return { mag: Math.hypot(re, im), arg: Math.atan2(im, re) };
-}
-
-function quantile(values: ArrayLike<number>, q: number): number {
-  if (values.length === 0) return 0;
-  const sorted = Float64Array.from(values).sort();
-  if (q === 0.5 && sorted.length % 2 === 0) return (sorted[sorted.length / 2 - 1]! + sorted[sorted.length / 2]!) / 2;
-  return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!;
-}
-
-const median = (values: ArrayLike<number>) => quantile(values, 0.5);
-
-function mod(v: number, m: number): number {
-  return ((v % m) + m) % m;
-}
-
 /** The signed distance from `v` to the nearest multiple of `m`. */
 function wrap(v: number, m: number): number {
   return v - m * Math.round(v / m);
-}
-
-function peakNear(s: Float64Array, x: number, r: number): { at: number; v: number } {
-  const lo = Math.max(0, Math.round(x - r));
-  const hi = Math.min(s.length - 1, Math.round(x + r));
-  let at = lo;
-  let v = -Infinity;
-  for (let i = lo; i <= hi; i++) {
-    if (s[i]! > v) {
-      v = s[i]!;
-      at = i;
-    }
-  }
-  return { at, v };
-}
-
-/** A line's center: the centroid of the response's run around its strongest point (the square finder's `center`). */
-function centroid(q: Float64Array, around: number, d: number): number {
-  const lo = Math.max(0, around - d);
-  const hi = Math.min(q.length - 1, around + d);
-  let top = around;
-  for (let i = lo; i <= hi; i++) if (q[i]! > q[top]!) top = i;
-  const floor = q[top]! / 3;
-  let a = top;
-  let b = top;
-  while (a > lo && q[a - 1]! > floor && q[a - 1]! <= q[a]! * 1.05) a--;
-  while (b < hi && q[b + 1]! > floor && q[b + 1]! <= q[b]! * 1.05) b++;
-  let w = 0;
-  let wx = 0;
-  for (let i = a; i <= b; i++) {
-    w += q[i]!;
-    wx += q[i]! * i;
-  }
-  return w > 0 ? wx / w : top;
 }
 
 /** Theil-Sen, then least squares on the lines within a few median deviations of it. */
@@ -524,37 +416,7 @@ function lineFit(points: { k: number; c: number }[]): { period: number; phase: n
   const residual = points.map((p) => Math.abs(p.c - base - rough * p.k));
   const limit = Math.max(1, 3 * 1.4826 * median(residual));
   const kept = points.filter((_, i) => residual[i]! <= limit);
-  const use = kept.length >= MIN_LINES ? kept : points;
-  const n = use.length;
-  let mk = 0;
-  let mx = 0;
-  for (const p of use) {
-    mk += p.k / n;
-    mx += p.c / n;
-  }
-  let skk = 0;
-  let skx = 0;
-  for (const p of use) {
-    skk += (p.k - mk) ** 2;
-    skx += (p.k - mk) * (p.c - mx);
-  }
-  const period = skk > 0 ? skx / skk : 0;
-  const phase = mx - period * mk;
-  let ss = 0;
-  for (const p of use) ss += (p.c - phase - period * p.k) ** 2;
-  return { period, phase, rms: Math.sqrt(ss / Math.max(1, n)) };
-}
-
-function noiseOf(prof: Profile, s: Float64Array, phase: number, period: number, keep: number, d: number): { mu: number; sigma: number } | null {
-  const off: number[] = [];
-  for (let i = d; i < s.length - d; i++) {
-    const t = mod(i - phase, period);
-    if (Math.min(t, period - t) >= keep) off.push(s[i]!);
-  }
-  if (off.length < 8) return null;
-  const mu = median(off);
-  const sigma = Math.max(1.4826 * median(off.map((v) => Math.abs(v - mu))), 0.05 * prof.samples);
-  return { mu, sigma };
+  return leastSquares(kept.length >= MIN_LINES ? kept : points);
 }
 
 /** One family's lines near period `p0`, as the square finder fits an axis, or null when no line pattern is there. */
@@ -583,7 +445,7 @@ function fitFamily(prof: Profile, p0: number, reach: number): HexFamily | null {
     const k0 = Math.ceil((d - phase) / period);
     const k1 = Math.floor((n - 1 - d - phase) / period);
     if (k1 - k0 + 1 < MIN_LINES) return null;
-    const noise = noiseOf(prof, s, phase, period, r + d + 1, d);
+    const noise = noiseOf(s, prof.samples, phase, period, r + d + 1, d);
     if (!noise) return null;
     ({ mu, sigma } = noise);
     strengths = [];
@@ -592,7 +454,7 @@ function fitFamily(prof: Profile, p0: number, reach: number): HexFamily | null {
       const peak = peakNear(s, phase + k * period, r);
       const v = peak.v - mu;
       strengths.push({ k, v });
-      if (v >= LINE_SIGMA * sigma) found.push({ k, c: centroid(q, peak.at, d) });
+      if (v >= LINE_SIGMA * sigma) found.push({ k, c: lineCenter(q, peak.at, d) });
     }
     if (found.length < MIN_LINES) return null;
     const fit = lineFit(found);
@@ -705,14 +567,14 @@ function leanOf(first: Profile, second: Profile, fam: HexFamily, reach: number, 
   const phase = fam.phase - first.offset;
   const lines = (half: Profile) => {
     const s = summed(half, d);
-    const noise = noiseOf(half, s, phase, fam.period, r + d + 1, d);
+    const noise = noiseOf(s, half.samples, phase, fam.period, r + d + 1, d);
     const at = new Map<number, { c: number; y: number | null }>();
     if (!noise) return at;
     for (let k = Math.ceil((d - phase) / fam.period); phase + k * fam.period < s.length - d; k++) {
       const peak = peakNear(s, phase + k * fam.period, r);
       if (peak.v - noise.mu < LINE_SIGMA * noise.sigma) continue;
       const y = half.ys ? downOf(half.raw, half.ys, peak.at, d) : null;
-      at.set(k, { c: centroid(half.q, peak.at, d), y });
+      at.set(k, { c: lineCenter(half.q, peak.at, d), y });
     }
     return at;
   };

@@ -34,6 +34,8 @@
  * the same code runs in a browser Worker, in Node and in the tests.
  */
 
+import { autocorrelationPeaks, detrended, fourier, leastSquares, lineCenter, median, mod, noiseOf, peakNear, quantile, windowSums } from "./profile.ts";
+
 /** Decoded image samples, row by row, `channels` per pixel. Alpha, when present, is ignored. */
 export type Pixels = {
   width: number;
@@ -265,131 +267,15 @@ function lumaAt(px: Pixels, x: number, y: number): number {
  * shifts the whole sum), kept above zero, and summed over a line's width.
  */
 function prepare(raw: Float64Array, d: number, samples: number): Profile {
-  const n = raw.length;
-  const m = 3 * d;
-  const prefix = new Float64Array(n + 1);
-  for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i]! + raw[i]!;
-  const q = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const lo = Math.max(0, i - m);
-    const hi = Math.min(n, i + m + 1);
-    const v = raw[i]! - (prefix[hi]! - prefix[lo]!) / (hi - lo);
-    q[i] = v > 0 ? v : 0;
-  }
-  const s = new Float64Array(n);
-  let run = 0;
-  for (let i = 0; i < Math.min(n, d); i++) run += q[i]!;
-  for (let i = 0; i < n; i++) {
-    if (i + d < n) run += q[i + d]!;
-    if (i - d - 1 >= 0) run -= q[i - d - 1]!;
-    s[i] = run;
-  }
-  return { q, s, samples };
+  const q = detrended(raw, d);
+  return { q, s: windowSums(q, d), samples };
 }
 
 /** Periods where the profile's autocorrelation peaks, strongest first. */
 function candidatePeriods(q: Float64Array, minP: number, maxP: number, keep: number): number[] {
-  const n = q.length;
-  const lo = Math.max(1, Math.floor(minP) - 1);
-  const hi = Math.min(n - 2, Math.ceil(maxP) + 1);
-  if (hi - lo < 2) return [];
-  const ac = new Float64Array(hi + 2);
-  for (let lag = lo; lag <= hi + 1; lag++) {
-    let sum = 0;
-    for (let i = 0, j = lag; j < n; i++, j++) sum += q[i]! * q[j]!;
-    ac[lag] = sum / (n - lag);
-  }
-  const peaks: { p: number; v: number }[] = [];
-  for (let lag = lo + 1; lag <= hi; lag++) {
-    const a = ac[lag - 1]!;
-    const b = ac[lag]!;
-    const c = ac[lag + 1]!;
-    if (b <= 0 || b < a || b < c) continue;
-    const curve = a - 2 * b + c;
-    const shift = curve < 0 ? (0.5 * (a - c)) / curve : 0;
-    const p = lag + Math.max(-0.5, Math.min(0.5, shift));
-    if (p >= minP && p <= maxP) peaks.push({ p, v: b });
-  }
-  peaks.sort((x, y) => y.v - x.v);
-  return peaks.slice(0, keep).map((x) => x.p);
-}
-
-/** The profile's Fourier coefficient at frequency 1 / p, by rotating a unit phasor rather than calling sin and cos per sample. */
-function fourier(q: Float64Array, p: number): { mag: number; arg: number } {
-  const w = (2 * Math.PI) / p;
-  const cr = Math.cos(w);
-  const ci = -Math.sin(w);
-  let zr = 1;
-  let zi = 0;
-  let re = 0;
-  let im = 0;
-  for (let i = 0; i < q.length; i++) {
-    const v = q[i]!;
-    if (v !== 0) {
-      re += v * zr;
-      im += v * zi;
-    }
-    const t = zr * cr - zi * ci;
-    zi = zr * ci + zi * cr;
-    zr = t;
-  }
-  return { mag: Math.hypot(re, im), arg: Math.atan2(im, re) };
-}
-
-function median(values: ArrayLike<number>): number {
-  return quantile(values, 0.5);
-}
-
-/** The value a share `q` of the way up the sorted values, sorted natively as a typed array. */
-function quantile(values: ArrayLike<number>, q: number): number {
-  if (values.length === 0) return 0;
-  const sorted = Float64Array.from(values).sort();
-  if (q === 0.5 && sorted.length % 2 === 0) return (sorted[sorted.length / 2 - 1]! + sorted[sorted.length / 2]!) / 2;
-  return sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]!;
-}
-
-function mod(v: number, m: number): number {
-  return ((v % m) + m) % m;
-}
-
-/** The largest value of `s` within `r` of `x`, and where. */
-function peakNear(s: Float64Array, x: number, r: number): { at: number; v: number } {
-  const lo = Math.max(0, Math.round(x - r));
-  const hi = Math.min(s.length - 1, Math.round(x + r));
-  let at = lo;
-  let v = -Infinity;
-  for (let i = lo; i <= hi; i++) {
-    if (s[i]! > v) {
-      v = s[i]!;
-      at = i;
-    }
-  }
-  return { at, v };
-}
-
-/**
- * A line's center: the centroid of the response's run around its
- * strongest point, out to where it falls under a third of that. A run
- * rather than a fixed window, so a seam of art a few pixels off, with a
- * dip between, does not pull the line toward it.
- */
-function center(q: Float64Array, around: number, d: number): number {
-  const lo = Math.max(0, around - d);
-  const hi = Math.min(q.length - 1, around + d);
-  let top = around;
-  for (let i = lo; i <= hi; i++) if (q[i]! > q[top]!) top = i;
-  const floor = q[top]! / 3;
-  let a = top;
-  let b = top;
-  while (a > lo && q[a - 1]! > floor && q[a - 1]! <= q[a]! * 1.05) a--;
-  while (b < hi && q[b + 1]! > floor && q[b + 1]! <= q[b]! * 1.05) b++;
-  let w = 0;
-  let wx = 0;
-  for (let i = a; i <= b; i++) {
-    w += q[i]!;
-    wx += q[i]! * i;
-  }
-  return w > 0 ? wx / w : top;
+  return autocorrelationPeaks(q, minP, maxP)
+    .slice(0, keep)
+    .map((x) => x.p);
 }
 
 /**
@@ -410,28 +296,6 @@ function robustFit(points: { k: number; c: number }[]): { period: number; phase:
   }
   const period = median(slopes);
   return { period, phase: median(points.map((p) => p.c - period * p.k)) };
-}
-
-/** Least squares through (k, x): x = phase + k * period. */
-function lineFit(points: { k: number; c: number }[]): { period: number; phase: number; rms: number } {
-  const n = points.length;
-  let mk = 0;
-  let mx = 0;
-  for (const p of points) {
-    mk += p.k / n;
-    mx += p.c / n;
-  }
-  let skk = 0;
-  let skx = 0;
-  for (const p of points) {
-    skk += (p.k - mk) ** 2;
-    skx += (p.k - mk) * (p.c - mx);
-  }
-  const period = skk > 0 ? skx / skk : 0;
-  const phase = mx - period * mk;
-  let ss = 0;
-  for (const p of points) ss += (p.c - phase - period * p.k) ** 2;
-  return { period, phase, rms: Math.sqrt(ss / Math.max(1, n)) };
 }
 
 /**
@@ -469,7 +333,7 @@ function fitAxis(prof: Profile, p0: number, d: number): AxisFit | null {
     const k0 = Math.ceil((d - phase) / period);
     const k1 = Math.floor((n - 1 - d - phase) / period);
     if (k1 - k0 + 1 < MIN_LINES) return null;
-    const noise = noiseOf(prof, phase, period, r + d + 1, d);
+    const noise = noiseOf(prof.s, prof.samples, phase, period, r + d + 1, d);
     if (!noise) return null;
     ({ mu, sigma } = noise);
     strengths = [];
@@ -479,7 +343,7 @@ function fitAxis(prof: Profile, p0: number, d: number): AxisFit | null {
       const v = peak.v - mu;
       strengths.push({ k, v });
       if (v < LINE_SIGMA * sigma) continue;
-      found.push({ k, c: center(q, peak.at, d) });
+      found.push({ k, c: lineCenter(q, peak.at, d) });
     }
     if (found.length < MIN_LINES) return null;
     // Lines further from a robust fit than a few median deviations are
@@ -490,7 +354,7 @@ function fitAxis(prof: Profile, p0: number, d: number): AxisFit | null {
     const limit = Math.max(1, 3 * 1.4826 * median(residual));
     const inliers = found.filter((_, i) => residual[i]! <= limit);
     if (inliers.length >= MIN_LINES) found = inliers;
-    const fit = lineFit(found);
+    const fit = leastSquares(found);
     if (!(fit.period > 2)) return null;
     period = fit.period;
     phase = mod(fit.phase, period);
@@ -618,22 +482,6 @@ function lookAlong(px: Pixels, line: AxisFit, cross: AxisFit, vertical: boolean,
   };
 }
 
-/** The median and spread of a profile's line strength away from every predicted line: its noise. */
-function noiseOf(prof: Profile, phase: number, period: number, keep: number, d: number): { mu: number; sigma: number } | null {
-  const { s } = prof;
-  const off: number[] = [];
-  for (let i = d; i < s.length - d; i++) {
-    const t = mod(i - phase, period);
-    if (Math.min(t, period - t) >= keep) off.push(s[i]!);
-  }
-  if (off.length < 8) return null;
-  const mu = median(off);
-  // A floor under the noise, so a clean image or a flat margin cannot
-  // make every speck a line: a twentieth of a gray level per sample.
-  const sigma = Math.max(1.4826 * median(off.map((v) => Math.abs(v - mu))), 0.05 * prof.samples);
-  return { mu, sigma };
-}
-
 /**
  * How far one axis's lines move between the two halves of the image, as
  * a drift across the whole image, in px: the median offset of each half's
@@ -645,13 +493,13 @@ function driftOf(first: Profile, second: Profile, fit: AxisFit, d: number): numb
   const shift = (half: Profile) => {
     const phase = fit.phase - 0.5;
     const r = Math.max(1, Math.min(2 * d, Math.floor(0.15 * fit.period)));
-    const noise = noiseOf(half, phase, fit.period, r + d + 1, d);
+    const noise = noiseOf(half.s, half.samples, phase, fit.period, r + d + 1, d);
     if (!noise) return null;
     const offsets: number[] = [];
     for (let k = Math.ceil((fit.from - fit.phase) / fit.period - 1e-6); k <= Math.floor((fit.to - fit.phase) / fit.period + 1e-6); k++) {
       const x = phase + k * fit.period;
       const peak = peakNear(half.s, x, r);
-      if (peak.v - noise.mu >= LINE_SIGMA * noise.sigma) offsets.push(center(half.q, peak.at, d) - x);
+      if (peak.v - noise.mu >= LINE_SIGMA * noise.sigma) offsets.push(lineCenter(half.q, peak.at, d) - x);
     }
     return offsets.length >= MIN_LINES ? median(offsets) : null;
   };
