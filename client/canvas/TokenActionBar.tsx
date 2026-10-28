@@ -75,6 +75,7 @@ import { effectChip, elevationBadge } from "../lib/tokenView.ts";
 import { dockSlot, foldsUnderSheet, sideSheetRoom, usePublishBar } from "../pages/fold.ts";
 import { dispatchGesture } from "../state/actions.ts";
 import { useRoomScope, useScoped } from "../state/scope.ts";
+import { useKeyHints, withKey } from "../state/shortcuts.ts";
 import { sheetOpen } from "../state/types.ts";
 import {
   anchoredSpot,
@@ -348,6 +349,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
             key={id}
             icon="hidden"
             iconOnly
+            shortcut="hide"
             pressed={token.visibility === "dm"}
             onClick={() => {
               const showing = token.visibility === "dm";
@@ -372,7 +374,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
         );
       case "locked":
         return (
-          <BarButton key={id} icon="locked" iconOnly pressed={token.locked} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { locked: !token.locked } })}>
+          <BarButton key={id} icon="locked" iconOnly shortcut="lock" pressed={token.locked} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { locked: !token.locked } })}>
             Locked
           </BarButton>
         );
@@ -527,11 +529,11 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
 
           {access.canEditToken("elevation") ? (
             <StepperRow label="Elevation">
-              <BarButton label="Down 5 feet" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) - 5 } })}>
+              <BarButton label="Down 5 feet" shortcut="elevation" shortcutPart={1} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) - 5 } })}>
                 −5
               </BarButton>
               <span style={{ minWidth: 56, textAlign: "center", fontWeight: theme.weight.bold }}>{token.elevation ?? 0} ft</span>
-              <BarButton label="Up 5 feet" onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) + 5 } })}>
+              <BarButton label="Up 5 feet" shortcut="elevation" shortcutPart={0} onClick={() => actions.dispatch({ t: "token.update", tokenId: token.id, patch: { elevation: (token.elevation ?? 0) + 5 } })}>
                 +5
               </BarButton>
             </StepperRow>
@@ -659,6 +661,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
       half={hidden === "some"}
       icon="hidden"
       iconOnly
+      shortcut="hide"
       onClick={() => {
         const patch = flagPatch(tokens, "hidden");
         send([...updateManyOps(ids, patch), ...(patch.visibility === "all" ? shownRowOps(encounter, ids) : [])]);
@@ -716,11 +719,11 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
           ) : null}
           {offers.elevation ? (
             <StepperRow label="Elevation">
-              <BarButton label="All down 5 feet" onClick={() => send(elevationOps(tokens, -5))}>
+              <BarButton label="All down 5 feet" shortcut="elevation" shortcutPart={1} onClick={() => send(elevationOps(tokens, -5))}>
                 −5
               </BarButton>
               <span style={{ minWidth: 56, textAlign: "center", fontWeight: theme.weight.bold }}>{elevation === null ? "Mixed" : `${elevation} ft`}</span>
-              <BarButton label="All up 5 feet" onClick={() => send(elevationOps(tokens, 5))}>
+              <BarButton label="All up 5 feet" shortcut="elevation" shortcutPart={0} onClick={() => send(elevationOps(tokens, 5))}>
                 +5
               </BarButton>
             </StepperRow>
@@ -741,7 +744,7 @@ function GroupBarBody(props: { tokens: readonly ViewToken[]; movable: number; on
             {offers.dm && !inStrip("roll") ? rollButton : null}
             {offers.dm && anyPlayed ? <BarButton onClick={() => openAsk(scope, { kind: "selection", tokenIds: ids })}>Request a roll</BarButton> : null}
             {offers.dm ? (
-              <BarButton pressed={locked === "all"} half={locked === "some"} icon="locked" iconOnly onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
+              <BarButton pressed={locked === "all"} half={locked === "some"} icon="locked" iconOnly shortcut="lock" onClick={() => send(updateManyOps(ids, flagPatch(tokens, "locked")))}>
                 Locked
               </BarButton>
             ) : null}
@@ -2043,6 +2046,8 @@ function DeleteButton(props: { onDelete(): void; armedText?: string; holdsRoom?:
       iconOnly={!armed}
       always={!armed}
       label={words.label}
+      // Armed, it waits for a second tap, which no key stands for, so only the first tap's Delete names the keys.
+      shortcut={armed ? undefined : "delete"}
       onClick={() => {
         if (armed) props.onDelete();
         else setArmed(true);
@@ -2147,8 +2152,14 @@ function BarButton(props: {
   iconOnly?: boolean;
   /** The icon alone on every screen: only for an icon read at once without hover, such as the trash can. */
   always?: boolean;
+  /** The shortcut it does (state/shortcuts.ts keyHint), whose key its tooltip adds to its name and `aria-keyshortcuts` holds, and `shortcutPart` the one key of two it does, as Up 5 feet's Page Up. */
+  shortcut?: string;
+  shortcutPart?: number;
 }) {
   const inRow = useContext(InButtonRow);
+  const hints = useKeyHints();
+  const keys = props.shortcut === undefined ? null : hints(props.shortcut, props.shortcutPart);
+  const named = props.label ?? (typeof props.children === "string" ? props.children : undefined);
   return (
     <Button
       ref={props.ref}
@@ -2160,7 +2171,8 @@ function BarButton(props: {
       pressed={props.half ? undefined : props.pressed}
       aria-pressed={props.half ? "mixed" : props.pressed}
       aria-label={props.label}
-      title={props.label}
+      aria-keyshortcuts={keys?.aria}
+      title={keys && named !== undefined ? withKey(named, keys) : props.label}
       icon={props.icon}
       iconOnly={props.iconOnly ? (props.always ? "always" : "fine") : undefined}
       onClick={props.onClick}

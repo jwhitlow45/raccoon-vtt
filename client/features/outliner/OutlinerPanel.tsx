@@ -8,7 +8,7 @@ import { Icon } from "../../components/Icon.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { outlinerSearchSlot } from "../../state/shortcuts.ts";
+import { outlinerSearchSlot, useKeyHint, withKey } from "../../state/shortcuts.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
@@ -71,6 +71,8 @@ function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
   const [group, setGroup] = useState<OutlineGroup | null>(null);
   const [folded, setFolded] = useState<ReadonlySet<OutlineGroup>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
+  // `/` reaches the field from anywhere in the room, so the field names it.
+  const searchKey = useKeyHint("outliner");
 
   /*
    * `/` opens the outliner with its search focused (state/shortcuts.ts),
@@ -127,8 +129,9 @@ function Outliner(props: { sceneId: string; close(): void; shown: boolean }) {
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search the scene"
+        placeholder={withKey("Search the scene", searchKey)}
         aria-label="Search the scene"
+        aria-keyshortcuts={searchKey?.aria}
         autoComplete="off"
         spellCheck={false}
         style={{ width: "100%" }}

@@ -191,8 +191,8 @@ export default function BuilderOptions() {
         </ValueChip>
       ),
     },
-    { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last change" rowWords="Undo" onClick={() => actions.undo()} /> },
-    { id: "redo", priority: 4 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" onClick={() => actions.redo()} /> },
+    { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last change" rowWords="Undo" shortcut="undo" onClick={() => actions.undo()} /> },
+    { id: "redo", priority: 4 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" shortcut="redo" onClick={() => actions.redo()} /> },
   ];
   if (s.mode === "paint") slots.push(terrain(1), brush(3));
   if (s.mode === "rect") slots.push(terrain(1));

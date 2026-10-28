@@ -322,7 +322,7 @@ function DrawOptions(props: { role: "dm" | "player" }) {
             id: "undo",
             priority: 1,
             control: (
-              <OptButton icon="undo" label="Undo your last change" rowWords="Undo" onClick={() => actions.undo()} />
+              <OptButton icon="undo" label="Undo your last change" rowWords="Undo" shortcut="undo" onClick={() => actions.undo()} />
             ),
           },
           { id: "clearMine", priority: 1, control: clearMine },
@@ -464,8 +464,8 @@ function DrawOptions(props: { role: "dm" | "player" }) {
             </OptButton>
           ),
         },
-        { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last change" rowWords="Undo" onClick={() => actions.undo()} /> },
-        { id: "redo", priority: 3 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" onClick={() => actions.redo()} /> },
+        { id: "undo", priority: 2 + drop, control: <OptButton icon="undo" label="Undo your last change" rowWords="Undo" shortcut="undo" onClick={() => actions.undo()} /> },
+        { id: "redo", priority: 3 + drop, control: <OptButton icon="redo" label="Redo" rowWords="Redo" shortcut="redo" onClick={() => actions.redo()} /> },
         props.role === "dm" && {
           id: "dmOnly",
           priority: 5 + drop,

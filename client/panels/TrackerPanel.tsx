@@ -45,6 +45,7 @@ import { displayName, footprint } from "../lib/scene.ts";
 import { theme } from "../lib/theme.ts";
 import { passingNoticesPx } from "../pages/modalSlot.tsx";
 import { useRoomScope } from "../state/scope.ts";
+import { useKeyHint, withKey } from "../state/shortcuts.ts";
 import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../state/view.ts";
 import { layoutSize } from "../features/device/layout.ts";
 import { uiScale } from "../features/device/settings.ts";
@@ -275,6 +276,8 @@ function TurnControls(props: { compact: boolean; onCompactShown(): void; onConte
   const facts = useRowFacts();
   const endTurn = useSend();
   const timer = useTurnTimer();
+  // N's key in the hover title only: a wider Next would change the widths the compact row's form is chosen by.
+  const turnKey = useKeyHint("turn");
   const active = entries.find((e) => e.id === activeEntryId);
   const status = turnStatus({ entries, activeEntryId, mine: facts.mine });
 
@@ -337,7 +340,14 @@ function TurnControls(props: { compact: boolean; onCompactShown(): void; onConte
             <Button size="sm" disabled={!canGoBack} onClick={() => actions.dispatch(turnOp("encounter.prev", store.getState()))} aria-label="Previous turn">
               Previous
             </Button>
-            <Button size="sm" variant="primary" disabled={entries.length === 0} onClick={() => actions.dispatch(turnOp("encounter.next", store.getState()))}>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={entries.length === 0}
+              title={turnKey ? withKey(activeEntryId === null ? "Start" : "Next", turnKey) : undefined}
+              aria-keyshortcuts={turnKey?.aria}
+              onClick={() => actions.dispatch(turnOp("encounter.next", store.getState()))}
+            >
               {activeEntryId === null ? "Start" : "Next"}
             </Button>
           </>,

@@ -21,6 +21,8 @@ import {
   deletedText,
   hexNudge,
   isTextField,
+  keyHint,
+  keySuffix,
   keyText,
   sheetSections,
   SHORTCUTS,
@@ -36,6 +38,7 @@ import {
   VIEW_BEHAVIORS,
   VIEW_SHORTCUTS,
   whoText,
+  withKey,
   ZOOM_STEP,
   MOUSE_SECTION,
   POINTER_SECTION,
@@ -1086,5 +1089,116 @@ describe("arrow keys on a hex scene (docs/design-v1-hex-grids.md HX-D15)", () =>
       assert.deepEqual(seen.map((h) => h.row), [5, 6, 7, 8, 9]);
       assert.equal(occupiedHexes(g, { ...ogre, ...hexNudge(g, ogre, [0, 1]) }).length, 3);
     }
+  });
+});
+
+describe("a control shows the key of the shortcut it does (D-261028-09)", () => {
+  /**
+   * Every control that does what a shortcut does, by its shortcut and the
+   * file that draws it. Each takes its key from keyHint: useKeyHint("id"),
+   * a component's hints("id"), or a `shortcut` prop that does. The toolbar
+   * stands for every tool's row, "tool:*", by one call for all of them.
+   */
+  const CONTROLS: readonly (readonly [id: string, file: string, control: string])[] = [
+    ["undo", "client/pages/RoomChrome.tsx", "the top bar's Undo"],
+    ["undo", "client/features/drawings/DrawTool.tsx", "Draw's Undo in its row"],
+    ["undo", "client/features/drawings/DrawTool.tsx", "Draw's Undo beside a text or shape"],
+    ["undo", "client/features/builder/Options.tsx", "the builder's Undo"],
+    ["redo", "client/pages/RoomChrome.tsx", "the top bar's Redo"],
+    ["redo", "client/features/drawings/DrawTool.tsx", "Draw's Redo"],
+    ["redo", "client/features/builder/Options.tsx", "the builder's Redo"],
+    ["tool:*", "client/pages/Room.tsx", "each tool's button, and its tile in Setup and the tool menu"],
+    ["elevation", "client/canvas/TokenActionBar.tsx", "a token's Down 5 feet"],
+    ["elevation", "client/canvas/TokenActionBar.tsx", "a token's Up 5 feet"],
+    ["elevation", "client/canvas/TokenActionBar.tsx", "a group's All down 5 feet"],
+    ["elevation", "client/canvas/TokenActionBar.tsx", "a group's All up 5 feet"],
+    ["hide", "client/canvas/TokenActionBar.tsx", "a token's Hidden"],
+    ["hide", "client/canvas/TokenActionBar.tsx", "a group's Hidden"],
+    ["lock", "client/canvas/TokenActionBar.tsx", "a token's Locked"],
+    ["lock", "client/canvas/TokenActionBar.tsx", "a group's Locked"],
+    ["delete", "client/canvas/TokenActionBar.tsx", "Delete, a token's and a group's"],
+    ["turn", "client/panels/TrackerPanel.tsx", "the DM's Start and Next"],
+    ["turn", "client/features/encounter/parts.tsx", "a player's End turn, in the tracker and the phone's band"],
+    ["fit", "client/pages/RoomChrome.tsx", "the top bar's Fit"],
+    ["view", "client/pages/RoomChrome.tsx", "the top bar's View"],
+    ["turnLeft", "client/features/view/ViewMenu.tsx", "the View menu's Turn left"],
+    ["turnRight", "client/features/view/ViewMenu.tsx", "the View menu's Turn right"],
+    ["outliner", "client/features/outliner/OutlinerPanel.tsx", "the outliner's search field"],
+    ["sidePanel", "client/pages/SideTabs.tsx", "Hide panels"],
+    ["sidePanel", "client/pages/Room.tsx", "Panels, while the side panel is hidden"],
+    ["fullscreen", "client/pages/RoomChrome.tsx", "the top bar's Full screen"],
+    ["sheet", "client/features/device/ThisDevice.tsx", "Menu, This device's Show the shortcuts"],
+  ];
+  /** The shortcuts no control does, and why. */
+  const NO_CONTROL: Readonly<Record<string, string>> = {
+    nudge: "a token moves by a drag, never by a button",
+    zoomIn: "the map zooms by a pinch or the wheel. The handout viewer's own + and - are its own keys",
+    zoomOut: "the map zooms by a pinch or the wheel",
+    otherPanel: "the other panel is reached by a tap on it",
+  };
+  const ids = [...new Set([...SHORTCUTS, ...VIEW_SHORTCUTS].map((s) => (s.id.startsWith("tool:") ? "tool:*" : s.id)))];
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const calls = (source: string, id: string) =>
+    id === "tool:*"
+      ? source.split("hints(`tool:${").length - 1
+      : (source.match(new RegExp(`(?:useKeyHint|hints)\\("${escape(id)}"|shortcut=(?:"${escape(id)}"|\\{[^}]*"${escape(id)}"\\})`, "g")) ?? []).length;
+
+  test("every shortcut lists the controls that do it, or why none does", () => {
+    const listed = new Set(CONTROLS.map(([id]) => id));
+    for (const id of ids) assert.ok(listed.has(id) !== (id in NO_CONTROL), `${id}: listed with controls, or with a reason for none, and not both`);
+    for (const id of [...listed, ...Object.keys(NO_CONTROL)]) assert.ok(ids.includes(id), `${id} is no shortcut`);
+  });
+
+  test("each control takes its key from the shortcut table", () => {
+    const wanted = new Map<string, number>();
+    for (const [id, file] of CONTROLS) wanted.set(`${file} ${id}`, (wanted.get(`${file} ${id}`) ?? 0) + 1);
+    for (const [at, count] of wanted) {
+      const [file, id] = at.split(" ") as [string, string];
+      const found = calls(readFileSync(new URL(`../../${file}`, import.meta.url), "utf8"), id);
+      assert.ok(found >= count, `${file}: ${count} control(s) for ${id}, ${found} taking its key`);
+    }
+  });
+
+  test("the key is the sheet's: each single key as the sheet writes it, moved or not, and a fixed row's own words", () => {
+    for (const s of [...SHORTCUTS, ...VIEW_SHORTCUTS]) {
+      for (const role of s.roles) {
+        const hint = keyHint(s.id, role, DEFAULT_KEYS);
+        if (s.key !== undefined) assert.equal(hint?.text, keyText(s.id, DEFAULT_KEYS), `${s.id} for the ${role}`);
+        else if (hint) assert.equal(hint.text, s.keys, `${s.id}'s own words`);
+      }
+    }
+    assert.deepEqual(keyHint("turnLeft", "player", DEFAULT_KEYS), { text: "Q", aria: "Q" });
+    assert.deepEqual(keyHint("view", "dm", DEFAULT_KEYS), { text: "I", aria: "I" });
+    assert.deepEqual(keyHint("sheet", "player", DEFAULT_KEYS), { text: "?", aria: "?" });
+    assert.deepEqual(keyHint("tool:fog", "dm", { ...DEFAULT_KEYS, "tool:fog": "k" }), { text: "K", aria: "K" }, "a moved key");
+    assert.equal(keyHint("tool:fog", "dm", { ...DEFAULT_KEYS, "tool:fog": "" }), null, "a key this device took away");
+    assert.deepEqual(keyHint("zoomIn", "dm", DEFAULT_KEYS), { text: "+", aria: "Plus" }, "+ joins keys in aria-keyshortcuts, so it has a name there");
+  });
+
+  test("the fixed rows: Ctrl or Cmd with Z, each key of Page Up and Page Down, and Delete with Backspace", () => {
+    assert.deepEqual(keyHint("undo", "player", DEFAULT_KEYS), { text: "Ctrl+Z", aria: "Control+Z Meta+Z" });
+    assert.deepEqual(keyHint("redo", "dm", DEFAULT_KEYS), { text: "Ctrl+Shift+Z", aria: "Control+Shift+Z Meta+Shift+Z" });
+    assert.deepEqual(keyHint("elevation", "dm", DEFAULT_KEYS, 0), { text: "Page Up", aria: "PageUp" });
+    assert.deepEqual(keyHint("elevation", "player", DEFAULT_KEYS, 1), { text: "Page Down", aria: "PageDown" });
+    assert.deepEqual(keyHint("elevation", "dm", DEFAULT_KEYS), { text: "Page Up, Page Down", aria: "PageUp PageDown" });
+    assert.equal(keyHint("elevation", "dm", DEFAULT_KEYS, 2), null);
+    assert.deepEqual(keyHint("delete", "dm", DEFAULT_KEYS), { text: "Delete, Backspace", aria: "Delete Backspace" });
+    assert.equal(keyHint("nudge", "dm", DEFAULT_KEYS), null, "no control does it, so it has no attribute's names");
+  });
+
+  test("none for a role whose key does nothing, or a shortcut the table does not hold", () => {
+    for (const id of ["hide", "lock", "delete", "outliner", "tool:fog", "tool:build"]) {
+      assert.equal(keyHint(id, "player", DEFAULT_KEYS), null, `${id} is the DM's`);
+      assert.notEqual(keyHint(id, "dm", DEFAULT_KEYS), null, `${id} for the DM`);
+    }
+    assert.equal(keyHint("nothing", "dm", DEFAULT_KEYS), null);
+  });
+
+  test("a name with its key, and the words after a name", () => {
+    const hint = keyHint("turnRight", "dm", DEFAULT_KEYS);
+    assert.equal(withKey("Turn right", hint), "Turn right (E)");
+    assert.equal(keySuffix(hint), " (E)");
+    assert.equal(withKey("Turn right", null), "Turn right");
+    assert.equal(keySuffix(null), "");
   });
 });

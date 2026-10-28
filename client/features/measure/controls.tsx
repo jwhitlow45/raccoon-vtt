@@ -30,6 +30,7 @@ import { accessibleName, VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { HoldRepeat, type RepeatValue } from "../../lib/holdRepeat.ts";
 import { theme } from "../../lib/theme.ts";
 import { fitRow, heldFit, POPOVER_MIN, SLOT_GAP, type Arrangement, type FitSlot, type RowFit, type SlotForm } from "../../pages/optionsLayout.ts";
+import { useKeyHints, withKey } from "../../state/shortcuts.ts";
 import { uiScale } from "../device/settings.ts";
 
 /**
@@ -1426,6 +1427,8 @@ export function OptButton(props: {
    * slot: a kept ruler's remove in the Kept rulers popover.
    */
   row?: boolean;
+  /** The shortcut it does (state/shortcuts.ts keyHint), whose key its tooltip adds and `aria-keyshortcuts` holds, never its name: Undo's Ctrl+Z. */
+  shortcut?: string;
 }) {
   const place = useSlotPlace();
   if (place?.at === "measure") return <OptButtonFace {...props} form={place.form} />;
@@ -1455,6 +1458,9 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
   const row = inPopover(place) || props.row === true;
   const children = short ? props.short : row && props.children === undefined && props.rowWords ? props.rowWords : props.children;
   const full = props.label ?? textOf(props.children);
+  const hints = useKeyHints();
+  const keys = props.shortcut === undefined ? null : hints(props.shortcut);
+  const tip = short ? full : props.label;
   const act = () => {
     const result = props.onClick();
     if (props.ends) task?.();
@@ -1472,7 +1478,8 @@ function LiveOptButton(props: Parameters<typeof OptButton>[0] & { place: SlotPla
       disabled={props.disabled && !atLimit}
       aria-disabled={atLimit || undefined}
       aria-label={short ? (hasWords(props.short) ? undefined : props.label) : children === undefined ? props.label : accessibleName(children, props.label)}
-      title={short ? full : props.label}
+      aria-keyshortcuts={keys?.aria}
+      title={tip === undefined ? undefined : withKey(tip, keys)}
       onClick={(e) => (props.repeat ? hold.click(e.detail === 0) : act())}
       onPointerDown={props.repeat ? hold.pointerDown : undefined}
       onContextMenu={props.repeat ? (e) => e.preventDefault() : undefined}

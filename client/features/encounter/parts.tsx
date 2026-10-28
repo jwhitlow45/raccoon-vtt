@@ -7,6 +7,7 @@ import { theme } from "../../lib/theme.ts";
 import { Icon } from "../../components/Icon.tsx";
 import { ChipFace } from "../tokens/EffectIcon.tsx";
 import { DISPOSITION_RING, effectChip, initials } from "../../lib/tokenView.ts";
+import { useKeyHint, withKey } from "../../state/shortcuts.ts";
 import { useAssets, useRoomView } from "../../state/view.ts";
 import { entryName, onAnotherScene, portraitDisposition, type HpView } from "./logic.ts";
 import { clockText, type TimerState } from "./timer.ts";
@@ -264,9 +265,13 @@ export const TURN_PILL_PX = 36;
  * unseen, so the pill keeps its width and the button its name.
  */
 export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(): void }) {
+  const keys = useKeyHint("turn");
   return (
     <button
       type="button"
+      // N's key in the hover title only: the phone band's pill has no room for more words.
+      title={keys ? withKey("End turn", keys) : undefined}
+      aria-keyshortcuts={keys?.aria}
       onClick={props.onClick}
       disabled={props.waiting}
       aria-busy={props.waiting ? true : undefined}
