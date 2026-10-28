@@ -307,6 +307,9 @@ describe("area reminders along a route (7.2)", () => {
     // Ground past the cap, which no accepted route has, still keeps it.
     const far = routeSweepPlan([{ x: 0, y: 0, elevation: 0 }, { x: 200, y: 0, elevation: 0 }, { x: 400, y: 0, elevation: 1000 }], 5);
     assert.ok(far.reduce((sum, n) => sum + n, 0) <= MAX_ROUTE_SWEEP && far.every((n) => n >= 1), JSON.stringify(far));
+    // More one-sample pieces than the cap, which no route the protocol allows has, still each take one (FU34-OPUS-6).
+    const many = routeSweepPlan(Array.from({ length: MAX_ROUTE_SWEEP + 41 }, (_, i) => ({ x: i * 0.25, y: 0, elevation: 0 })), 5);
+    assert.deepEqual([many.length, many.every((n) => n === 1)], [MAX_ROUTE_SWEEP + 40, true]);
   });
 });
 

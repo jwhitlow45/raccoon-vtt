@@ -386,6 +386,8 @@ export function routeSweepPlan(points: readonly RoutePoint[], feetPerCell: numbe
   const base = sum(across) <= MAX_ROUTE_SWEEP ? across : wanted.map(() => 1);
   const left = Math.max(0, MAX_ROUTE_SWEEP - sum(base));
   const extra = sum(wanted) - sum(base);
+  // More pieces than the cap, each wanting one, leave nothing to share.
+  if (extra === 0) return base;
   return wanted.map((n, i) => base[i]! + Math.floor(((n - base[i]!) * left) / extra));
 }
 
