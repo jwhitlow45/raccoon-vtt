@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ACTION_TOAST_MS, drawnToasts, heldToasts, TOAST_MS, toastsLeft, withToast } from "./store.ts";
+import { ACTION_TOAST_MS, drawnToasts, heldToasts, TOAST_MS, toastsLeft, waitedToasts, withToast } from "./store.ts";
 import type { Toast } from "./types.ts";
 
 const note = (id: number, shownAt: number): Toast => ({ id, text: `Pat whispers: ${id}`, tone: "info", shownAt });
@@ -186,5 +186,27 @@ describe("a toast's time starts as it first draws, and stops while it shows whol
         }
       }
     }
+  });
+});
+
+describe("a builder hold stops the time of each toast whose button waits on it, as its end gives that time back (FU34-ASTRA-02)", () => {
+  const forget = (id: number, times: Pick<Toast, "shownAt" | "pausedAt">): Toast => ({ id, text: `Forget ${id}`, tone: "info", action: { label: "Forget and undo", run: () => {}, ready: () => false }, ...times });
+
+  test("drawn before the hold, during it, or shown whole before or during it: what a late render reads is what the hold's end leaves", () => {
+    const from = 10_000;
+    const now = 60_000;
+    const toasts = [
+      forget(1, { shownAt: 5_000 }),
+      forget(2, { shownAt: 12_000 }),
+      forget(3, { shownAt: 2_000, pausedAt: 8_000 }),
+      forget(4, { shownAt: 6_000, pausedAt: 14_000 }),
+      { id: 5, text: "Refused", tone: "error", shownAt: 9_000 },
+    ] satisfies Toast[];
+    const during = toastsLeft(toasts, now, from);
+    assert.deepEqual(
+      during.map((t) => t.ms),
+      [ACTION_TOAST_MS - 5_000, ACTION_TOAST_MS, ACTION_TOAST_MS - 6_000, ACTION_TOAST_MS - 4_000, 0],
+    );
+    assert.deepEqual(toastsLeft(waitedToasts(toasts, from, now), now).map((t) => t.ms), during.map((t) => t.ms));
   });
 });

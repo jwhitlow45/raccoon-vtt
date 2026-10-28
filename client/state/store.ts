@@ -88,14 +88,18 @@ export const ACTION_TOAST_MS = 12_000;
  * what it had left as it stopped (`pausedAt`). Neither `runs`, so neither
  * gets a timer, and neither runs out unseen (docs/design-v1-bar-compact.md
  * 3.5, review BC-OPUS-35). Nor does one whose button waits on a builder
- * gesture's asks, until the hold's end gives it back the time it ran
- * (waitedToasts, MD4-ASTRA-14).
+ * gesture's asks (MD4-ASTRA-14): while a hold stands (`heldSince`, the
+ * store's `buildHeldSince`) its time stands at what it had left as the hold
+ * began, or as it was first drawn during it, so no render during a long
+ * hold finds it run out. The hold's end gives it back the time it ran
+ * (waitedToasts), which is the same time.
  */
-export function toastsLeft(toasts: readonly Toast[], now: number): { id: number; ms: number; runs: boolean }[] {
+export function toastsLeft(toasts: readonly Toast[], now: number, heldSince?: number): { id: number; ms: number; runs: boolean }[] {
   return toasts.map((t) => {
     const whole = t.action ? ACTION_TOAST_MS : TOAST_MS;
     if (t.shownAt === undefined) return { id: t.id, ms: whole, runs: false };
-    const at = t.pausedAt ?? now;
+    const waits = heldSince !== undefined && t.action?.ready !== undefined;
+    const at = Math.min(t.pausedAt ?? now, waits ? Math.max(heldSince, t.shownAt) : Infinity);
     return { id: t.id, ms: Math.max(0, t.shownAt + whole - at), runs: t.pausedAt === undefined && t.action?.ready?.() !== false };
   });
 }
@@ -125,7 +129,7 @@ export function heldToasts(toasts: readonly Toast[], id: number, held: boolean, 
  * The toasts after a builder hold that stood from `from` until `now`
  * (holdBuild): each drawn toast whose button waits on the hold (`ready`)
  * gets back the time it ran during the hold, so it runs on from what it
- * had left (MD4-ASTRA-14). A long or offline wait for a gesture's asks
+ * had left, as toastsLeft showed it through the hold (MD4-ASTRA-14). A long or offline wait for a gesture's asks
  * then never takes it away before the DM can press it. The time a toast
  * was held whole already counts for nothing. The same array when nothing
  * changes.
@@ -499,14 +503,13 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
    * none of it is taken before the question.
    */
   const takenInGroup = new Map<string, number>();
-  /** What cancels each builder gesture waiting on its asks, oldest first (holdBuild), and since when one has waited. */
+  /** What cancels each builder gesture waiting on its asks, oldest first (holdBuild). Since when one has waited is the state's `buildHeldSince`. */
   const held: (() => void)[] = [];
-  let heldSince = 0;
   const holdEnded = () => {
-    if (held.length > 0) return;
-    // A fresh array even when no time moved, so the toast layer arms the timers it held back (toastsLeft).
-    const toasts = waitedToasts(get().toasts, heldSince, Date.now());
-    if (toasts.some((t) => t.action?.ready)) store.setState({ toasts: [...toasts] });
+    const since = get().buildHeldSince;
+    if (held.length > 0 || since === undefined) return;
+    // Clearing the hold's start redraws the toast layer, which arms the timers it held back (toastsLeft).
+    store.setState({ toasts: waitedToasts(get().toasts, since, Date.now()), buildHeldSince: undefined });
   };
   let disposed = false;
 
@@ -778,11 +781,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     holdBuild(cancel) {
       // Toast times are wall-clock times (toastsDrawn), so the hold's is too.
-      const first = held.length === 0;
-      if (first) heldSince = Date.now();
+      // Published, so the toast layer drops the timer it armed before the hold for a toast whose button now waits, and stops its time (toastsLeft).
+      if (held.length === 0) store.setState({ buildHeldSince: Date.now() });
       held.push(cancel);
-      // A fresh array, so the toast layer drops the timer it armed before the hold for a toast whose button now waits (toastsLeft).
-      if (first && get().toasts.some((t) => t.action?.ready)) store.setState({ toasts: [...get().toasts] });
       return () => {
         const at = held.indexOf(cancel);
         if (at < 0) return;

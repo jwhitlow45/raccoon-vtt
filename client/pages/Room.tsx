@@ -1720,12 +1720,13 @@ function Toasts(props: {
   safeTop: number;
 }) {
   const toasts = useRoomView((s) => s.toasts);
+  const heldSince = useRoomView((s) => s.buildHeldSince);
   const ui = useRoomUi();
   const slot = useModalSlot("toasts");
   const zoom = useUiScale();
   const { width, height } = useLayoutSize();
   // A toast whose time ran out while play was paused goes with its timer, and is never drawn for a frame first (review FU22B-OP-6).
-  const left = new Map(toastsLeft(toasts, Date.now()).map((t) => [t.id, t.ms]));
+  const left = new Map(toastsLeft(toasts, Date.now(), heldSince).map((t) => [t.id, t.ms]));
   const showing = toasts.filter((t) => (left.get(t.id) ?? 0) > 0);
   const ids = showing.map((t) => t.id);
   /*
@@ -1826,9 +1827,9 @@ function Toasts(props: {
   }, [slot, ui]);
   // Each toast's time counts from when it was first drawn (store.ts toastsLeft), so one that comes or goes, or a blackout that takes them all off screen, never restarts it. One not drawn yet, or shown whole, has no timer.
   useEffect(() => {
-    const timers = toastsLeft(toasts, Date.now()).flatMap(({ id, ms, runs }) => (runs ? [setTimeout(() => ui.dismissToast(id), ms)] : []));
+    const timers = toastsLeft(toasts, Date.now(), heldSince).flatMap(({ id, ms, runs }) => (runs ? [setTimeout(() => ui.dismissToast(id), ms)] : []));
     return () => timers.forEach(clearTimeout);
-  }, [toasts, ui]);
+  }, [toasts, heldSince, ui]);
   const hosts = useRef(new Map<number, HTMLElement>());
   const hostOf = (id: number): HTMLElement => {
     let host = hosts.current.get(id);
@@ -1910,7 +1911,7 @@ function Toasts(props: {
   );
   return (
     <>
-      <ToastVoice toasts={toasts} />
+      <ToastVoice toasts={toasts} heldSince={heldSince} />
       {overMap.length > 0 ? <ToastStack stack={stacks.notices} style={{ width: "100%" }} /> : null}
       {props.layer && lowAt !== null
         ? createPortal(
@@ -2005,7 +2006,7 @@ function toastWords(t: Toast): string {
  * record of what it has said stays in the Room's scope, and its region
  * starts empty in a new place, so a move or a blackout says nothing again.
  */
-function ToastVoice(props: { toasts: readonly Toast[] }) {
+function ToastVoice(props: { toasts: readonly Toast[]; heldSince: number | undefined }) {
   const voice = useScoped(toastVoiceSlot);
   const slot = useModalSlot("status");
   const [said, setSaid] = useState({ key: 0, text: "" });
@@ -2016,7 +2017,7 @@ function ToastVoice(props: { toasts: readonly Toast[] }) {
   }
   useEffect(() => {
     const now = Date.now();
-    const left = new Map(toastsLeft(props.toasts, now).map((t) => [t.id, t.ms]));
+    const left = new Map(toastsLeft(props.toasts, now, props.heldSince).map((t) => [t.id, t.ms]));
     const fresh = props.toasts.filter((t) => t.id > voice.through);
     if (fresh.length === 0) return;
     voice.through = Math.max(...fresh.map((t) => t.id));
@@ -2024,7 +2025,7 @@ function ToastVoice(props: { toasts: readonly Toast[] }) {
     const words = fresh.filter((t) => (left.get(t.id) ?? 0) > 0).map(toastWords);
     // A new node each time, so words that repeat, as a second "Undid moving Thorn.", are said again.
     if (words.length > 0) setSaid((was) => ({ key: was.key + 1, text: words.join(" ") }));
-  }, [props.toasts, voice]);
+  }, [props.toasts, props.heldSince, voice]);
   return inModal(
     <div role="status" data-rvtt-toast-status="" style={VISUALLY_HIDDEN}>
       <span key={said.key}>{said.text}</span>

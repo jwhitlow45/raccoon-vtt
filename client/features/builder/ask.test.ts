@@ -340,10 +340,9 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     // Undo with no gesture waiting gives the toast no time back.
     assert.equal(p.room.cancelHeld(), false);
     assert.equal(left(), ACTION_TOAST_MS - 5_000, "Undo with nothing waiting restarts nothing");
-    const before = p.room.store.getState().toasts;
     dispatchBuild(p.ctx, rect);
-    // The toast layer arms timers only when the toasts change, so the hold must change them to drop the one it armed.
-    assert.notEqual(p.room.store.getState().toasts, before, "the hold publishes the toasts again");
+    // The toast layer arms timers only when what it reads changes, so the hold must publish itself to drop the one it armed.
+    assert.equal(p.room.store.getState().buildHeldSince, now, "the hold publishes its start");
     // A long or offline wait for the bands' answers, past the toast's whole time.
     now += 30_000;
     const running = () => toastsLeft(p.room.store.getState().toasts, now).find((x) => x.id === toast().id)!.runs;
@@ -351,6 +350,32 @@ describe("no builder edit overtakes a gesture waiting on its asks (MD4-ASTRA-9, 
     p.deliver();
     assert.equal(left(), ACTION_TOAST_MS - 5_000, "the 7 s it had left as the gesture began");
     assert.equal(running(), true);
+  });
+
+  test("a render deep into a long hold still finds the forget toast with the time it had as the hold began, and it runs on from there (FU34-ASTRA-02)", (t) => {
+    let now = 1_000_000;
+    t.mock.method(Date, "now", () => now);
+    const p = page();
+    p.connect();
+    const n = p.room.dispatch({ t: "undo" })!;
+    p.room.applyEv({ t: "ev", seq: p.room.store.getState().seq + 1, changes: [], rejects: [{ n, code: "forget", message: FORGET_ASK }] });
+    p.deliver();
+    const toast = () => p.room.store.getState().toasts.find((x) => x.text === FORGET_ASK)!;
+    // As the toast layer reads it (Room.tsx Toasts), which hides a toast with no time left.
+    const shown = () => {
+      const s = p.room.store.getState();
+      return toastsLeft(s.toasts, now, s.buildHeldSince).find((x) => x.id === toast().id)!;
+    };
+    p.room.ui.toastsDrawn([toast().id]);
+    now += 5_000;
+    dispatchBuild(p.ctx, rect);
+    now += 30_000;
+    assert.deepEqual(shown(), { id: toast().id, ms: ACTION_TOAST_MS - 5_000, runs: false }, "the toast stays shown with its 7 s");
+    p.deliver();
+    assert.equal(p.room.store.getState().buildHeldSince, undefined, "the hold is over");
+    assert.deepEqual(shown(), { id: toast().id, ms: ACTION_TOAST_MS - 5_000, runs: true }, "it runs on with its 7 s");
+    now += 2_000;
+    assert.equal(shown().ms, ACTION_TOAST_MS - 7_000);
   });
 
   test("while a gesture waits, a step off the top of the stack from any sender is refused, and an undo aimed at one op goes", () => {

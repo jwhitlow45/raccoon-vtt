@@ -513,6 +513,8 @@ export type RoomView = {
    */
   busy: Readonly<Record<string, true>>;
   toasts: readonly Toast[];
+  /** Since when a builder gesture has waited on its asks (store.ts holdBuild), while one does. It stops the time of a toast whose button waits on it (toastsLeft). A preview, which builds nothing, leaves it out. */
+  buildHeldSince?: number;
   /** The latest X-card the server sent this page, if any (features/xcard). A player preview, which has no socket, leaves it out. */
   xcard?: XCardSignal;
   /**
