@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { SNAPSHOT_VERSION } from "#shared/migrate.ts";
+import { OP_VERSION, SNAPSHOT_VERSION } from "#shared/migrate.ts";
 import type { RoomState } from "#shared/model.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
@@ -71,7 +71,7 @@ describe("the map discovery upgrade over a stored room (ASTRA-31)", () => {
     await back.snapshot("c2");
     assert.equal((await back.apply({ t: "scene.create", scene: S4 })).rejects, undefined);
     const newest = await t.pool.query<{ op_version: number }>("select op_version from room_ops where room_id = $1 order by seq desc limit 1", [roomId]);
-    assert.equal(newest.rows[0]?.op_version, 26);
+    assert.equal(newest.rows[0]?.op_version, OP_VERSION);
     await t.manager.unload(roomId, 1011, false);
     await back.waitClosed();
     const second = await loadRoom(t.pool, roomId);
