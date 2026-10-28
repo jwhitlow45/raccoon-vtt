@@ -210,6 +210,11 @@ const InGroup = createContext(false);
 export const GROUP_BOX = "[data-panel-group]";
 export const GROUP_FOLD = "[data-group-fold]";
 
+/** A group's header row on one line. */
+const GROUP_ROW = 48;
+/** The name's line box: 16 px at the tight leading. */
+const NAME_LINE = theme.font.input * theme.leading.tight;
+
 /**
  * A fold of a panel's sections that belong together by use (the Token
  * panel's Combat, Notes and Position, docs/design-v1-dice-ui.md 5): a 48 px
@@ -234,6 +239,8 @@ export function Group(props: {
   foldRef?: Ref<HTMLButtonElement>;
   /** `sections` for a group of Sections, parted by `space(4)`. A group of fields and lines, the default, keeps a Section's own `space(2)`. */
   holds?: "sections" | "rows";
+  /** Folded content stays mounted and hidden, as a Section fold's `keep`: work under way in it lasts through a fold (the scene settings' groups, docs/design-v1-design-pass.md 4.1). */
+  keep?: boolean;
   children?: ReactNode;
 }) {
   const id = useId();
@@ -241,35 +248,82 @@ export function Group(props: {
   const folds = props.open !== undefined && props.onToggle !== undefined;
   const open = props.open ?? true;
   const name = (
-    <span id={id} style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, flex: "none" }}>
+    <span id={id} style={{ flex: "0 1 auto", minWidth: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>
       {props.label}
     </span>
   );
-  const lead = props.icon ? (
-    <span aria-hidden data-group-icon="" style={{ color: theme.color.textMuted, display: "flex" }}>
-      <Icon name={props.icon} size="sm" />
-    </span>
-  ) : null;
   /*
-   * With an icon, the summary has no more width of its own than a few
-   * words, so the name, the icon and the action keep their line while the
-   * summary still says something, cut sooner rather than the action
-   * wrapping: the one cut the icon pass allows (docs/design-v1-icons-2.md
-   * 3.3). Without one, it gives way to nothing as before, since a floor
-   * there ran a long name such as the trap editor's "Finding and
-   * disarming" past a narrow phone's row (review IC2BUILD-ASTRA-01).
+   * The summary's basis is its floor, a few words: it shares the name's
+   * line wherever the name and the floor fit, grows to fill the rest, and
+   * wraps under the name where they do not, rather than cut the name or
+   * shrink to nothing (docs/design-v1-design-pass.md 4.1). Its words end at
+   * the row's end on either line. Its width, the floor again, is what it
+   * asks of the header's row, so an action ("Attach a stat block") keeps
+   * the name's line wherever the name and the floor leave it room, rather
+   * than wrap for the summary's whole words.
    */
-  const summaryRoom: CSSProperties = props.icon ? { flex: 1, width: 0, minWidth: "4em" } : { flex: 1, minWidth: 0 };
   const summary =
     !open && props.summary ? (
-      <span id={summaryId} style={{ ...summaryRoom, textAlign: "right", fontSize: theme.font.small, fontWeight: theme.weight.regular, color: theme.color.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      <span
+        id={summaryId}
+        style={{
+          flex: "1 1 4em",
+          width: "4em",
+          minWidth: 0,
+          textAlign: "right",
+          fontSize: theme.font.small,
+          fontWeight: theme.weight.regular,
+          lineHeight: theme.leading.body,
+          color: theme.color.textMuted,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
         {props.summary}
       </span>
     ) : null;
+  /*
+   * The chevron and the icon take a column of their own, as tall as the
+   * name's line, so they stand by the name's first line when the summary
+   * or the name wraps, and the summary's line starts at the name's edge.
+   * The row pads the name's line to 48 px, so a wrapped summary adds its
+   * own line and nothing more. All of it is CSS, so the static markup and
+   * the first paint lay out alike.
+   */
+  const hasLead = folds || props.icon !== undefined;
+  const head: CSSProperties = {
+    display: "grid",
+    gridTemplateColumns: hasLead ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)",
+    alignItems: "start",
+    alignContent: "center",
+    columnGap: theme.space(2),
+    minHeight: GROUP_ROW,
+    paddingBlock: (GROUP_ROW - NAME_LINE) / 2,
+    flex: 1,
+    minWidth: 0,
+  };
+  const lead = hasLead ? (
+    <span style={{ display: "flex", alignItems: "center", gap: theme.space(2), height: NAME_LINE, color: theme.color.textMuted }}>
+      {folds ? <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" /> : null}
+      {props.icon ? (
+        <span aria-hidden data-group-icon="" style={{ display: "flex" }}>
+          <Icon name={props.icon} size="sm" />
+        </span>
+      ) : null}
+    </span>
+  ) : null;
+  const words = (
+    <span style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), minWidth: 0 }}>
+      {name}
+      {summary}
+    </span>
+  );
+  const body = props.children && (open || props.keep);
   return (
     <div data-panel-group="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", borderTop: `${theme.line.border}px solid ${theme.color.border}` }}>
       {/* The action wraps under the name where both do not fit, as Add a stat block and Take a shape do in a narrow card, rather than run over it. */}
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: 48 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: GROUP_ROW }}>
         <h3 style={{ margin: 0, display: "flex", flex: "1 1 auto", minWidth: 0 }}>
           {folds ? (
             <button
@@ -286,13 +340,8 @@ export function Group(props: {
                 props.onToggle?.();
               }}
               style={{
-                flex: 1,
-                minWidth: 0,
-                display: "flex",
-                alignItems: "center",
-                gap: theme.space(2),
-                minHeight: 48,
-                padding: 0,
+                ...head,
+                paddingInline: 0,
                 background: "transparent",
                 border: "none",
                 color: theme.color.text,
@@ -301,26 +350,26 @@ export function Group(props: {
                 cursor: "pointer",
               }}
             >
-              <span style={{ color: theme.color.textMuted, display: "flex" }}>
-                <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" />
-              </span>
               {lead}
-              {name}
-              {summary}
+              {words}
             </button>
           ) : (
-            <span style={{ display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1 }}>
+            <span style={head}>
               {lead}
-              {name}
-              {summary}
+              {words}
             </span>
           )}
         </h3>
         {props.action}
       </div>
-      {open && props.children ? (
+      {body ? (
         <InGroup.Provider value={true}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(props.holds === "sections" ? 4 : 2), paddingTop: theme.space(1), paddingBottom: theme.space(4) }}>{props.children}</div>
+          <div
+            hidden={!open}
+            style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(props.holds === "sections" ? 4 : 2), paddingTop: theme.space(1), paddingBottom: theme.space(4) }}
+          >
+            {props.children}
+          </div>
         </InGroup.Provider>
       ) : null}
     </div>

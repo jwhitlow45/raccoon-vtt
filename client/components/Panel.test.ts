@@ -28,7 +28,7 @@ describe("Group", () => {
 
   test("a group that never folds draws its name with no disclosure", () => {
     const markup = renderToStaticMarkup(createElement(Group, { label: "Stat block" }, "block"));
-    assert.match(markup, /<h3[^>]*><span[^>]*><span[^>]*>Stat block<\/span>/);
+    assert.match(markup, /<h3[^>]*><span[^>]*>(<span[^>]*>)+Stat block<\/span>/);
     assert.doesNotMatch(markup, /aria-expanded/);
     assert.doesNotMatch(markup, /data-group-fold/, "and no fold to hand focus to");
   });
@@ -69,5 +69,45 @@ describe("Group", () => {
     assert.match(alone, /<h3[^>]*>Sight<\/h3>/);
     assert.match(alone, /padding-bottom:16px/);
     assert.match(alone, /border-top/);
+  });
+
+  test("with keep, folded content stays mounted and hidden, and without it is not drawn", () => {
+    const kept = renderToStaticMarkup(createElement(Group, { label: "Map image and grid", open: false, onToggle: () => {}, keep: true }, "the upload"));
+    assert.match(kept, /<div hidden=""[^>]*>the upload<\/div>/);
+    const shown = renderToStaticMarkup(createElement(Group, { label: "Map image and grid", open: true, onToggle: () => {}, keep: true }, "the upload"));
+    assert.match(shown, />the upload</);
+    assert.doesNotMatch(shown, /hidden=""/, "open, nothing is hidden");
+    const gone = renderToStaticMarkup(createElement(Group, { label: "Map image and grid", open: false, onToggle: () => {} }, "the upload"));
+    assert.doesNotMatch(gone, /the upload/);
+  });
+
+  test("a folded header lays the chevron and icon in a lead column, the name and summary in a row that wraps, by CSS alone (docs/design-v1-design-pass.md 4.1)", () => {
+    const markup = renderToStaticMarkup(createElement(Group, { label: "Walls and movement", icon: "walls", open: false, onToggle: () => {}, summary: "Walls block moves" }, "inside"));
+    const button = /<button[^>]*style="([^"]*)"[^>]*>(.*)<\/button>/.exec(markup);
+    assert.ok(button, "the fold's button");
+    const [, look = "", inner = ""] = button;
+    assert.match(look, /display:grid/);
+    assert.match(look, /grid-template-columns:auto minmax\(0, 1fr\)/, "the lead column at its own width, then the words");
+    assert.match(look, /align-items:start/, "the lead stands by the name's first line");
+    assert.match(look, /padding-block:14.4px/, "the name's line padded to 48 px, so a wrapped summary adds only its line");
+    // The lead: chevron and icon in one span of the name's line height, before the words' row.
+    assert.match(inner, /^<span style="[^"]*height:19.2px[^"]*"><svg[^>]*>.*?<\/svg><span aria-hidden="true" data-group-icon=""/);
+    const row = /<span style="([^"]*)"><span id="[^"]+" style="([^"]*)">Walls and movement<\/span><span id="[^"]+-summary" style="([^"]*)">Walls block moves<\/span><\/span>/.exec(inner);
+    assert.ok(row, "the name and the summary share one wrapping row");
+    const [, rowLook = "", nameLook = "", summaryLook = ""] = row;
+    assert.match(rowLook, /flex-wrap:wrap/);
+    assert.match(nameLook, /min-width:0/);
+    assert.doesNotMatch(nameLook, /flex:none/, "the name may wrap between its words where it alone is wider than its column");
+    assert.match(summaryLook, /flex:1 1 4em/);
+    assert.match(summaryLook, /text-align:right/);
+    assert.match(summaryLook, /text-overflow:ellipsis/);
+    assert.match(summaryLook, /(?<![-a-z])width:4em/, "it asks the row for its floor alone, so an action keeps the name's line");
+    assert.doesNotMatch(markup, /(?<![-a-z])width:[\d.]+px/, "no width measured");
+  });
+
+  test("a group with no chevron and no icon has no empty lead column", () => {
+    const markup = renderToStaticMarkup(createElement(Group, { label: "Stat block" }, "block"));
+    assert.match(markup, /grid-template-columns:minmax\(0, 1fr\)[^"]*"><span[^>]*><span id/);
+    assert.doesNotMatch(markup, /grid-template-columns:auto/);
   });
 });
