@@ -23,16 +23,28 @@
  * area sweep's samples along it, which once built the whole hex line again
  * for every spot.
  *
+ * Phase H2's wall clip (HX-D10) adds two rows on the walled scene at the
+ * sight caps, set to hex rows: the clip of 500 Gargantuans, a scene's
+ * most tokens, as a projection asks it once per token, and a 200-spot
+ * walk's shared ground on a per-player scene with fog, as seenAtEvery
+ * reads it per spot. Each run puts them at new spots, so no clip comes
+ * from the cache.
+ *
  *   node scripts/bench-grid.ts
  */
-import { DEFAULT_SETTINGS } from "../shared/model.ts";
+import { tileKey } from "../shared/keys.ts";
+import { LIMITS } from "../shared/limits.ts";
+import { DEFAULT_SETTINGS, type FogTile, type RoomState } from "../shared/model.ts";
+import { seenAtEvery } from "../shared/project.ts";
 import { computeCoverage, PREVIEW_SAMPLES, type AreaContext, type AreaTemplateInput } from "../shared/rules/aoe.ts";
 import { placedOnHex } from "../shared/rules/footprint.ts";
 import { gridOfShape, SQUARES, type Grid } from "../shared/rules/grid.ts";
 import type { HexGrid } from "../shared/rules/hex.ts";
 import { ownWalk } from "../shared/rules/movement.ts";
 import { hexPiece, routeWalk } from "../shared/rules/route.ts";
-import { token } from "../shared/testutil.ts";
+import { rng, token } from "../shared/testutil.ts";
+import { FULL_TILE, tilesAcross } from "../shared/rules/fog.ts";
+import { clipFootprint, sightClipOf } from "../shared/rules/vision.ts";
 import { sceneWalls } from "../shared/rules/walls.ts";
 import { capRoom } from "./bench-vision.ts";
 import { hexLinesInView } from "../client/canvas/layers/hexSpans.ts";
@@ -141,6 +153,40 @@ function ringRow(name: string, grid: Grid, ft: number, dragging: boolean): Row {
   });
 }
 
+/**
+ * The wall clip at the sight caps (HX-D10): capRoom's walled scene on hex
+ * rows, every Gargantuan at a new unsnapped spot each run. Per token, the
+ * clip a projection asks of each of a scene's most tokens. Per spot, a
+ * walk's seenAtEvery on the scene made per player with every tile
+ * revealed and vision off, so each spot reads the clip, the fog and every
+ * hex's shared ground.
+ */
+function clipRows(): Row[] {
+  const g = gridOfShape("hexRows") as HexGrid;
+  const { state } = capRoom("bright");
+  const scene = { ...state.scenes.bench!, gridShape: "hexRows" as const, vision: { on: false, light: "bright" as const, perPlayer: true as const } };
+  const clip = sightClipOf(sceneWalls(scene, state.buildChunks));
+  const fogTiles: Record<string, FogTile> = {};
+  for (let ty = 0; ty < tilesAcross(scene.bounds.h); ty++) {
+    for (let tx = 0; tx < tilesAcross(scene.bounds.w); tx++) fogTiles[tileKey(scene.id, tx, ty)] = { sceneId: scene.id, tx, ty, rev: 0, bits: FULL_TILE };
+  }
+  const room: RoomState = { ...state, scenes: { [scene.id]: scene }, fogTiles };
+  const r = rng(2027);
+  const spot = () => ({ x: 4 + r() * (scene.bounds.w - 8), y: 4 + r() * (scene.bounds.h - 8) });
+  const garg = { ...token("g", { sceneId: scene.id, size: "gargantuan" }) };
+  const perToken = timed(`Hex rows at the sight cap, the wall clip of ${LIMITS.tokensPerScene} Gargantuans in a projection`, () => {
+    let kept = 0;
+    for (let i = 0; i < LIMITS.tokensPerScene; i++) kept += clipFootprint(g, { ...garg, ...spot() }, clip).kept.length;
+    return kept;
+  });
+  const perSpot = timed("Hex rows at the sight cap, seenAtEvery over a Gargantuan's 200 spots, per player, fog on", () => {
+    const spots = Array.from({ length: 200 }, () => ({ ...spot(), elevation: 0 }));
+    seenAtEvery(room, garg, spots, {});
+    return spots.length;
+  });
+  return [perToken, perSpot];
+}
+
 export function runGridBench(): Row[] {
   return [
     row("Squares, walled (9.3's worst case)", SQUARES, true),
@@ -159,6 +205,7 @@ export function runGridBench(): Row[] {
     ringRow("Hex rows, a 150 ft range ring round a Gargantuan, 200 by 200, dragged a hex a run", gridOfShape("hexRows"), 150, true),
     ringRow("Hex rows, a 1,000 ft range ring round a Gargantuan, 200 by 200, standing", gridOfShape("hexRows"), 1000, false),
     ringRow("Hex rows, a 1,000 ft range ring round a Gargantuan, 200 by 200, dragged a hex a run", gridOfShape("hexRows"), 1000, true),
+    ...clipRows(),
   ];
 }
 
