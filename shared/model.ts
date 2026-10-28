@@ -252,8 +252,12 @@ export type MemoryEntries = {
  */
 export type RememberedWall = { wall: FreeWall | null; cells: string[] };
 
-/** A stair cell's direction as players get it (5.2): up to the north, east, south or west, or "." for no stair. */
-export type StairDir = "n" | "e" | "s" | "w" | ".";
+/**
+ * A stair cell's direction as players get it (5.2): up to the north, east,
+ * south or west on squares, toward one of a hex's six sides on hexes
+ * (`HexFacing`), or "." for no stair.
+ */
+export type StairDir = "n" | "e" | "s" | "w" | HexFacing | ".";
 
 /**
  * What players see of a new scene (docs/design-v1-map-discovery.md 8.1):
@@ -691,9 +695,18 @@ export type BuildChunk = {
 /**
  * One cell's stair mark: "." not a stair, "a" a stair pointing up by the
  * rule (toward its one higher neighbor, rules/heights.ts), or "n", "e", "s"
- * or "w", a stair pointing up that way.
+ * or "w", a stair pointing up that way. On a hex scene a stair points up
+ * toward one of its hex's six sides instead (`HexFacing`), and its chunk
+ * holds no compass letter.
  */
-export type StairMark = "." | "a" | "n" | "e" | "s" | "w";
+export type StairMark = "." | "a" | "n" | "e" | "s" | "w" | HexFacing;
+/**
+ * A hex stair's facing (docs/design-v1-hex-grids.md H3): "0" to "5", the
+ * index of the neighbor it points up toward in rules/hex.ts hexNeighbors'
+ * order, clockwise from east on hex rows and so counterclockwise from
+ * south on hex columns, the mirror every rule with a handedness reads.
+ */
+export type HexFacing = "0" | "1" | "2" | "3" | "4" | "5";
 /** A stair's direction as a build op sets it: by the rule or by hand. */
 export type StairDirection = Exclude<StairMark, ".">;
 

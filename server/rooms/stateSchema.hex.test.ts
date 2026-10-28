@@ -78,6 +78,30 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     assert.equal((parseRoomState(trapped) as { message: string }).message, "scenes.s1: a trap can't stand on this scene's hexes");
   });
 
+  test("a chunk's stair marks face by its stamp: compass letters on squares, six sides from 0 to 5 on hexes (HX-8)", () => {
+    const marks = (mark: string) => mark.padEnd(256, ".");
+    const onSquares = (up: string) => {
+      const s = room();
+      s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, up };
+      return parseRoomState(s);
+    };
+    const onHexRows = (up: string) => {
+      const s = room();
+      s.scenes.s1 = scene("s1", { gridShape: "hexRows" });
+      s.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, up, grid: "hexRows" };
+      return parseRoomState(s);
+    };
+    for (const mark of ["a", "n", "e", "s", "w"]) assert.equal(onSquares(marks(mark)).ok, true, mark);
+    for (const mark of ["0", "3", "5"]) {
+      const parsed = onSquares(marks(mark));
+      assert.ok(!parsed.ok, mark);
+      assert.match(parsed.message, /a stair on squares faces n, e, s or w/);
+    }
+    for (const mark of ["n", "e", "s", "w"]) assert.equal(onHexRows(marks(mark)).ok, false, mark);
+    assert.equal(onSquares(marks("6")).ok, false);
+    assert.equal(onHexRows(marks("6")).ok, false);
+  });
+
   test("what carries no grid keys loads on a hex scene: a draft of rects, a chunk emptied", () => {
     const s = hexRoom();
     s.fogDrafts.s1 = { sceneId: "s1", rev: 1, ops: [{ id: "f1", mode: "reveal", shape: { kind: "rect", x: 1, y: 1, w: 2, h: 2 } }] };

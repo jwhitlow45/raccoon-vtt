@@ -1447,12 +1447,17 @@ describe("hex grids, phase H3: op version 28, snapshot version 29 (docs/design-v
       fogDrafts: { s1: { sceneId: "s1", rev: 0, grid: "hexColumns", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["3,21", "4,21"] } }] } },
     });
     assert.equal(runMigrations(hex, 28, 29, snapshotMigrations), hex);
+    // H2's stairs, on squares by compass letters, come through as they were: a hex stair's facings are new at 29 (HX-8).
+    const stairs = room({ buildChunks: { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, up: "nesw".padEnd(256, "a") } } });
+    assert.equal(runMigrations(stairs, 28, 29, snapshotMigrations), stairs);
+    assert.equal(migrateSnapshot(stairs, 28), stairs);
   });
 
   test("the op step is the identity, and each op H3 takes on hexes is one today's protocol takes", () => {
     const ops: unknown[] = [
       { t: "fog.draft", sceneId: "s1", add: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["3,21", "4,21"] } }] },
       { t: "fog.live", sceneId: "s1", ops: [{ id: "f2", mode: "reveal", shape: { kind: "cells", cells: ["29,229"] } }] },
+      { t: "build.stairs", sceneId: "s1", cells: ["3,21"], up: "4" },
       { t: "log.chat", text: "hi" },
     ];
     for (const op of ops) assert.equal(runMigrations(op, 27, 28, opMigrations), op);

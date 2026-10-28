@@ -205,8 +205,9 @@ export const snapshotMigrations: MigrationStep[] = [
   { from: 27, to: 28, apply: (state) => state },
   // Hex grids, phase H3 (docs/design-v1-hex-grids.md section 7): a hex scene's fog draft may now hold Reveal room's
   // shapes of hex keys with the draft's stamp, and later in the phase heights, stairs and pits under hex keys, all in
-  // fields a v28 room already has, so a v28 room is a v29 room as it is. The number moves so that an H2 build, which
-  // would read a hex scene's Reveal room keys as squares, refuses a v29 snapshot instead of loading it.
+  // fields a v28 room already has, so a v28 room is a v29 room as it is. A hex stair's mark is one of six facings, "0"
+  // to "5", characters no v28 room holds. The number moves so that an H2 build, which would read a hex scene's Reveal
+  // room keys as squares and refuse those facings, refuses a v29 snapshot instead of loading it.
   { from: 28, to: 29, apply: (state) => state },
 ];
 

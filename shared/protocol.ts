@@ -1264,8 +1264,12 @@ export const routeSchema = z
 /** A door named by its grid edge, or a free door by its chunk and id (`door.set`). */
 const doorRef = z.union([z.strictObject({ edge: edgeKey }), z.strictObject({ cx: chunkIndex, cy: chunkIndex, id: freeWallId })]);
 
-/** A stair's direction as the Stairs brush sets it: by the rule, or north, east, south or west (section 4.2). */
-const stairDirection = z.enum(["a", "n", "e", "s", "w"]);
+/**
+ * A stair's direction as the Stairs brush sets it: by the rule, or north,
+ * east, south or west (section 4.2), or on hexes toward one of six sides
+ * (model.ts HexFacing). The reducer keeps each shape to its own.
+ */
+const stairDirection = z.enum(["a", "n", "e", "s", "w", "0", "1", "2", "3", "4", "5"]);
 
 /** A fog tile's bits: 512 bytes as base64 (shared/rules/fog.ts encodeTile). */
 const tileBits = z.string().regex(/^[A-Za-z0-9+/]{683}=$/, "not a tile of bits");
@@ -1316,8 +1320,9 @@ const rememberedWall = z.strictObject({
 const rememberedLabel = z.strictObject({ id, rev: z.number().int().min(0), sceneId: id, x: coord, y: coord, text: shortText, size: z.number().min(0.1).max(20) });
 /** A stamp as players saw it, so never a DM-only one. */
 const rememberedStamp = z.strictObject({ ...stampFields, rev: z.number().int().min(0), sceneId: id, visibility: z.literal("all") });
-const stairMark = z.enum([".", "a", "n", "e", "s", "w"]);
-const stairDir = z.enum(["n", "e", "s", "w", "."]);
+// A memory chunk carries no stamp, so its stairs take either shape's facings: it remembers only what its scene's chunks held.
+const stairMark = z.enum([".", "a", "n", "e", "s", "w", "0", "1", "2", "3", "4", "5"]);
+const stairDir = z.enum(["n", "e", "s", "w", "0", "1", "2", "3", "4", "5", "."]);
 const CHUNK_CELL_COUNT = CHUNK_CELLS * CHUNK_CELLS;
 /**
  * The most entries of one kind a chunk of memory can name: one per cell,

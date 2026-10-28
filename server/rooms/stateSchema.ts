@@ -199,6 +199,10 @@ const edgeFeature = z.discriminatedUnion("kind", [
 const cellKey = z.string().regex(/^-?\d{1,4},-?\d{1,4}$/);
 const edgeKey = z.string().regex(/^-?\d{1,4},-?\d{1,4},[nw]$/);
 
+/** A chunk's stair marks by its stamp (docs/design-v1-hex-grids.md HX-D14): compass letters on squares, six facings on hexes. */
+const SQUARE_MARKS = /^[.aensw]*$/;
+const HEX_MARKS = /^[.a0-5]*$/;
+
 const chunk = z.strictObject({
   sceneId: id,
   cx: z.number().int().min(-100).max(100),
@@ -210,11 +214,15 @@ const chunk = z.strictObject({
   walls: z.array(mapSchemas.freeWall).min(1).max(LIMITS.freeWallsPerScene).optional(),
   // Wave 4: each cell's height and stair mark, in the stored forms of BuildChunk, absent when there are none.
   heights: z.string().regex(new RegExp(`^[A-Za-z0-9+/]{${HEIGHTS_CHARS - 1}}=$`)).optional(),
-  up: z.string().regex(new RegExp(`^[.aensw]{${STAIRS_CHARS}}$`)).optional(),
+  // Either shape's facings here: the refinement below keeps each to its own stamp.
+  up: z.string().regex(new RegExp(`^[.aensw0-5]{${STAIRS_CHARS}}$`)).optional(),
   // Difficult ground marks (docs/design-v1-movement.md 6.3), absent when there are none.
   rough: z.string().regex(new RegExp(`^[.d]{${ROUGH_CHARS}}$`)).optional(),
   // The hex shape its cell data was written under, absent for squares (docs/design-v1-hex-grids.md HX-D14).
   grid: mapSchemas.gridShape.optional(),
+}).refine((c) => c.up === undefined || (c.grid === undefined ? SQUARE_MARKS : HEX_MARKS).test(c.up), {
+  message: "a stair on squares faces n, e, s or w, and one on hexes a side from 0 to 5",
+  path: ["up"],
 });
 
 const label = z.strictObject({ id, rev, sceneId: id, x: coord, y: coord, text: shortText, size: z.number().min(0.1).max(20) });
