@@ -37,6 +37,16 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       assert.equal(m.totalFt % 5, 0, "whole hexes");
     });
 
+    test("from open ground it starts on the hex under its first stop, wherever in that hex the stop lies", () => {
+      const start = at(4, 8);
+      const c = hexCenter(g, start);
+      for (const [dx, dy] of [[0, 0], [0.3, 0.2], [-0.3, -0.2], [0.4, -0.1], [-0.1, 0.4]] as const) {
+        const m = measureWalk({ view: room(), sceneId: "s1", stops: [{ x: c.x + dx, y: c.y + dy }, hexCenter(g, at(14, 8))], viewer: { role: "player" }, everything: false })!;
+        const from = m.legs[0]!.from;
+        assert.deepEqual([from.x + m.size.w / 2, from.y + m.size.h / 2].map((v) => Math.round(v * 1e9) / 1e9), [c.x, c.y].map((v) => Math.round(v * 1e9) / 1e9), `offset ${dx}, ${dy}`);
+      }
+    });
+
     test("a stop on a creature off its anchor is that creature's anchor, as the straight ruler reads it on hexes", () => {
       const s = room();
       const goal = at(14, 7);

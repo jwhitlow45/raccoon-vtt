@@ -3,9 +3,10 @@ import type { Actor, PathStop, RoomState, Token, Viewer } from "#shared/model.ts
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import type { DiagonalCounter, DistanceSettings } from "#shared/rules/distance.ts";
-import { footprintSize } from "#shared/rules/footprint.ts";
+import { footprintSize, placedOnHex } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
-import { sceneGrid, SQUARES } from "#shared/rules/grid.ts";
+import { isHex, sceneGrid, SQUARES } from "#shared/rules/grid.ts";
+import { hexAt } from "#shared/rules/hex.ts";
 import { isPreview, offKey, previewChunks, type Walker } from "#shared/rules/movement.ts";
 import { pathThisTurn, publicCounters } from "#shared/rules/path.ts";
 import { routeWalkers } from "#shared/rules/route.ts";
@@ -61,8 +62,9 @@ export type WalkMeasure = {
 function walkerAt(view: RoomState, sceneId: string, first: RulerStop): Token | null {
   const on = first.tokenId ? view.tokens[first.tokenId] : undefined;
   if (on) return on;
-  const x = Math.floor(first.x);
-  const y = Math.floor(first.y);
+  // On hexes it stands on the hex under the stop, as a creature dropped there would.
+  const g = gridOfView(view, sceneId);
+  const { x, y } = isHex(g) ? placedOnHex(g, { size: "medium", x: 0, y: 0 }, hexAt(g, first)) : { x: Math.floor(first.x), y: Math.floor(first.y) };
   const stand = { sceneId, size: "medium" as const, x, y, elevation: 0 };
   const elevation = first.z ?? footprintGround(view.buildChunks, stand);
   return { id: "", rev: 0, kind: "pc", name: "", nameHidden: false, rotation: 0, disposition: "ally", visibility: "all", fogExempt: false, fogExemptAuto: false, locked: false, layer: "token", ownerIds: [], hpVisibility: "hidden", actor: { inline: NO_ACTOR }, ...stand, elevation } as Token;
