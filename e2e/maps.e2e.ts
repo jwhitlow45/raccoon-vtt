@@ -9,7 +9,8 @@ import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
 import { STARTER_STAMPS } from "#shared/starterStamps.ts";
 import { retainedGrid, starterMapScene } from "../client/features/starter/mapScene.ts";
-import { ConsoleWatch, dragWorld, openSideTab, pickOption, pressOption, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSideTab, pickOption, pressOption, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
@@ -90,8 +91,9 @@ type P = { x: number; y: number };
  * A Universal VTT file as Dungeondraft writes one (section 3.1's keys), in
  * file squares. A room along grid lines from (1, 1) to (9, 7), a door in its
  * north wall, a window in its south wall, one wall off the grid, and a light.
+ * `lit` gives it a night's ambient light and lights of its own instead.
  */
-async function writeUvtt(file: string): Promise<void> {
+async function writeUvtt(file: string, lit?: { ambient: string; lights: P[] }): Promise<void> {
   const image = await makeImage(UVTT.cols, UVTT.rows, UVTT.ppg, [150, 140, 120]);
   const portal = (a: P, b: P, closed: boolean) => ({
     position: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
@@ -118,8 +120,8 @@ async function writeUvtt(file: string): Promise<void> {
     ],
     objects_line_of_sight: [],
     portals: [portal({ x: 4, y: 1 }, { x: 5, y: 1 }, true), portal({ x: 6, y: 7 }, { x: 7, y: 7 }, false)],
-    environment: { baked_lighting: true, ambient_light: "ffffffff" },
-    lights: [{ position: { x: 5.5, y: 4.5 }, range: 4, intensity: 1, color: "ffeccd8b", shadows: true }],
+    environment: { baked_lighting: true, ambient_light: lit?.ambient ?? "ffffffff" },
+    lights: (lit?.lights ?? [{ x: 5.5, y: 4.5 }]).map((position) => ({ position, range: 4, intensity: 1, color: "ffeccd8b", shadows: true })),
     image: image.toString("base64"),
   };
   writeFileSync(file, JSON.stringify(content));
@@ -726,6 +728,102 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
       await dm.keyboard.press("Escape");
       await menu.waitFor({ state: "detached" });
     }
+  });
+
+  test("fl2-a. an imported map that brings its own lights starts dark under party vision, Keep it lit puts it back, and one undo takes the scene away", async () => {
+    // D-261028-08. Three lights inside the map, and one past its edge that the import leaves out, under a night's ambient light.
+    const file = path.join(work, "Lamplit_vault.dd2vtt");
+    await writeUvtt(file, { ambient: "ff1a1a24", lights: [{ x: 2.5, y: 2.5 }, { x: 5.5, y: 4.5 }, { x: 7.5, y: 5.5 }, { x: 30, y: 30 }] });
+    await openSideTab(dm, "Scenes");
+    await dm.getByLabel("From a Universal VTT file").setInputFiles(file);
+    const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map" });
+    const dark = "This map brings 3 lights. The scene starts dark with party vision on, so they light it for the party.";
+    await dialog.getByText(dark, { exact: true }).waitFor({ timeout: 30_000 });
+    await dialog.getByText("27 walls (26 on the grid, 1 free), 1 door, 1 window, 3 lights.").waitFor();
+    const explore = dialog.getByRole("radiogroup", { name: "Players see", exact: true }).getByRole("radio", { name: "Explore", exact: true });
+    const lightRadio = (name: string) => dialog.getByRole("radio", { name, exact: true });
+    assert.equal(await explore.isChecked(), true);
+    assert.equal(await lightRadio("Dark").isChecked(), true);
+    await shots.take(dm, "fl2-a-lit-summary");
+
+    // Keep it lit: Bright, and this room's default for new scenes, Explore, as an import started before. The same button offers the dark start again, focus and all.
+    await dialog.getByRole("button", { name: "Keep it lit", exact: true }).click();
+    await dialog.getByText("This map brings 3 lights. Start the scene dark with party vision on, and they light it for the party.", { exact: true }).waitFor();
+    assert.equal(await lightRadio("Bright").isChecked(), true);
+    assert.equal(await explore.isChecked(), true);
+    const again = dialog.getByRole("button", { name: "Start it dark", exact: true });
+    assert.equal(await again.evaluate((el) => el === el.ownerDocument.activeElement), true, "the lead's button lost its focus");
+    await shots.take(dm, "fl2-a-kept-lit");
+    await again.click();
+    await dialog.getByText(dark, { exact: true }).waitFor();
+    assert.equal(await lightRadio("Dark").isChecked(), true);
+
+    const sceneIds = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    await dialog.getByRole("button", { name: "Create scene" }).click();
+    await dialog.waitFor({ state: "detached", timeout: 60_000 });
+    const scene = await waitFor("the lamplit scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s && !sceneIds.has(s.id)), 30_000);
+    assert.equal(scene.name, "Lamplit vault");
+    assert.deepEqual(scene.vision, { on: true, light: "dark" });
+    assert.equal(scene.fogEnabled, true);
+    await waitFor("the DM on the lamplit scene", () => dmSocket.you?.sceneId === scene.id || null, 30_000);
+    await waitFor("its three lights", () => Object.values(dmSocket.state?.lights ?? {}).filter((l) => l?.sceneId === scene.id).length === 3 || null);
+    // Nothing more is said once the scene is made.
+    assert.equal(await dm.getByText(/^This map brings/).count(), 0);
+
+    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await waitFor("one undo taking the scene, its walls and its lights away", () => {
+      const state = dmSocket.state;
+      if (sceneOf(state, scene.id)) return null;
+      if (Object.values(state?.lights ?? {}).some((l) => l?.sceneId === scene.id)) return null;
+      return chunksOf(state, scene.id).length === 0 || null;
+    });
+  });
+
+  test("fl2-b. the import's lead line measures aligned at every size", async () => {
+    const file = path.join(work, "Lamplit_vault.dd2vtt");
+    const storageState = await dmContext.storageState();
+    const lines: string[] = [];
+    const sizes = [
+      { name: "1440x900", width: 1440, height: 900, touch: false },
+      { name: "390x844", width: 390, height: 844, touch: true },
+      { name: "320x568", width: 320, height: 568, touch: true },
+    ];
+    for (const size of sizes) {
+      for (const scale of [1, 1.3]) {
+        const screen = `${size.name}@${scale}`;
+        const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, storageState });
+        const watch = new ConsoleWatch(`fl2-b ${screen}`);
+        try {
+          const page = await context.newPage();
+          watch.attach(page);
+          await page.goto(`${server.origin}/`);
+          await page.evaluate((s) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(s)), scale);
+          await page.goto(`${server.origin}/r/${run.roomId}`);
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          // The Scenes panel: a side tab on a computer, a sheet from the Panels button on a phone.
+          const tabs = page.getByRole("tablist", { name: "Panels" });
+          const onTabs = (await tabs.count()) > 0 && (await tabs.isVisible());
+          if (onTabs) await openSideTab(page, "Scenes");
+          else {
+            await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+            await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Scenes/ }).click();
+          }
+          const panel = onTabs ? page.getByRole("tabpanel", { name: sideTabName("Scenes") }) : page.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]');
+          await panel.getByLabel("From a Universal VTT file", { exact: true }).setInputFiles(file);
+          const dialog = page.getByRole("dialog", { name: "Import a Universal VTT map" });
+          const lead = dialog.getByText(/^This map brings 3 lights\./);
+          await lead.waitFor({ timeout: 30_000 });
+          await lead.scrollIntoViewIfNeeded();
+          const found = alignmentLines(await measureAlignment(dialog), screen);
+          await shots.take(page, `fl2-b-${screen}`);
+          lines.push(...found);
+        } finally {
+          await context.close();
+        }
+        assert.deepEqual(watch.errors, [], `${screen} logged errors`);
+      }
+    }
+    assert.deepEqual(lines, []);
   });
 
   test("sd-c. the last scene's Delete row is disabled", async () => {
