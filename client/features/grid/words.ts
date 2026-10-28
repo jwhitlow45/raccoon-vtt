@@ -45,7 +45,7 @@ export function storedShape(choice: ShapeChoice): GridShape | undefined {
  * phase, said where the DM would reach for it.
  */
 export const HEX_LIMITS = {
-  builder: "On hexes the builder places lights, stamps and labels. Walls, painted ground, heights and difficult ground need squares.",
+  builder: "On hexes the builder draws wall lines, marks difficult ground, and places lights, stamps and labels. Painted ground and heights need squares.",
   attach: "Riding and carrying need squares.",
   trap: "Traps need squares.",
   revealRoom: "Reveal room needs a room built on squares.",
