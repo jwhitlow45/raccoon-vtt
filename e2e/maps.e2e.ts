@@ -240,6 +240,8 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     const file = path.join(work, UVTT.file);
     await writeUvtt(file);
     await openSideTab(dm, "Scenes");
+    // LP23-B-IMPORT-1: the entry names every exporter the import reads, Arkenforge's outline doors included (FEATURES.md).
+    await dm.getByText("A map from Dungeondraft, Dungeon Alchemist, Arkenforge or DungeonFog (.dd2vtt, .uvtt or .df2vtt), with its walls, doors and lights.", { exact: true }).waitFor();
     await dm.getByLabel("From a Universal VTT file").setInputFiles(file);
     const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map" });
     await dialog.getByText("11 × 9 squares, 500 × 400 pixels.").waitFor({ timeout: 30_000 });

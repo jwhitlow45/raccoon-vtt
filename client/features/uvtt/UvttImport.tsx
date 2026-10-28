@@ -53,7 +53,7 @@ export function UvttNewScene(props: { sceneCount: number }) {
   return (
     <Entry
       label="From a Universal VTT file"
-      hint="A map from Dungeondraft, Dungeon Alchemist or DungeonFog (.dd2vtt, .uvtt or .df2vtt), with its walls, doors and lights."
+      hint="A map from Dungeondraft, Dungeon Alchemist, Arkenforge or DungeonFog (.dd2vtt, .uvtt or .df2vtt), with its walls, doors and lights."
       target={{ kind: "scene" }}
       full={props.sceneCount >= LIMITS.scenesPerRoom}
     />
