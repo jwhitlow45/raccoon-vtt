@@ -68,8 +68,10 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     const drafted = hexRoom();
     drafted.fogDrafts.s1 = { sceneId: "s1", rev: 1, grid: "hexRows", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
     assert.equal((parseRoomState(drafted) as { message: string }).message, "scenes.s1: Reveal room in its fog draft can't stand on this scene's hexes");
+    // A trap with a pit, which needs heights (H3).
     const trapped = hexRoom();
     trapped.traps.t1 = trap("t1", { grid: "hexRows" });
+    trapped.traps.t1.rig = { ...trapped.traps.t1.rig!, pit: { floor: -10 } };
     assert.equal((parseRoomState(trapped) as { message: string }).message, "scenes.s1: a trap can't stand on this scene's hexes");
   });
 
@@ -102,13 +104,18 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     assert.equal(parseRoomState(s).ok, false);
   });
 
-  test("an import with what H1 leaves off hexes is refused: a trap, a rider", () => {
+  test("in H2 an import with a trap of the scene's shape or a rider on a hex scene loads, and a square trap there is refused", () => {
     const withTrap = hexRoom();
     withTrap.traps.t1 = trap("t1", { grid: "hexRows" });
-    assert.match((parseRoomState(withTrap) as { message: string }).message, /a trap/);
+    const loaded = parseRoomState(withTrap);
+    assert.ok(loaded.ok, loaded.ok ? "" : loaded.message);
+    const squareTrap = hexRoom();
+    squareTrap.traps.t1 = trap("t1");
+    assert.match((parseRoomState(squareTrap) as { message: string }).message, /a trap on squares/);
     const ridden = hexRoom();
     ridden.tokens = { horse: token("horse", { size: "large" }), bree: token("bree", { attached: { to: "horse", kind: "ride" } }) };
-    assert.match((parseRoomState(ridden) as { message: string }).message, /attached creature/);
+    const rode = parseRoomState(ridden);
+    assert.ok(rode.ok, rode.ok ? "" : rode.message);
   });
 
   test("an import refuses a hex scene that reads as having come with its own square grid (D-261026-8)", () => {
