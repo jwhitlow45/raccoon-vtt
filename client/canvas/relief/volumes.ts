@@ -82,6 +82,11 @@ export function viewKeys(vol: Volume, turn: Turn, view: VBox): string[] {
   return out.sort((a, b) => a.d - b.d).map((k) => k.key);
 }
 
+/** Whether every bucket of a built volume in view is drawn at a turn: only then does it stand whole there. */
+function drawnInView(vol: Volume, turn: Turn, view: VBox): boolean {
+  return viewKeys(vol, turn, view).every((key) => vol.drawnNow(key, turn) !== null);
+}
+
 /** The pit cells under a built volume's plan, whose openings clip what lies inside them (design 4.3), kept per volume: its drawn heights are part of its key. */
 const pitsOf = new WeakMap<Volume, readonly { x: number; y: number }[]>();
 
@@ -186,7 +191,7 @@ export class BoardVolumes {
         if (test.result === null) {
           if (test.run(deadline) === null) return { more: true, changed };
           // Either answer can change what shows: the old volume decided flat, or standing again while the next builds.
-          if (!test.result || slot.turns.has(turn)) changed = true;
+          if (!test.result || (slot.turns.has(turn) && drawnInView(old, turn, view))) changed = true;
         }
       }
       const vol = slot.next!;
@@ -219,7 +224,8 @@ export class BoardVolumes {
   /**
    * What stands now, doing no work but the stand test of a small
    * footprint: an area whose volume has every bucket in view drawn at this
-   * turn, else the one that stood before while its own test passes.
+   * turn, else the one that stood before while its own test passes and it
+   * too has every bucket in view drawn.
    */
   now(turn: Turn, view: VBox, world: VolumeWorld): VolumesNow {
     const pieces: VolumePiece[] = [];
@@ -239,7 +245,7 @@ export class BoardVolumes {
       }
       if (verdict === true) {
         keys = viewKeys(vol, turn, view);
-        if (keys.every((key) => vol.drawnNow(key, turn) !== null)) {
+        if (drawnInView(vol, turn, view)) {
           if (slot.shown !== vol) {
             slot.shown = vol;
             slot.turns = new Set();
@@ -248,8 +254,9 @@ export class BoardVolumes {
           use = vol;
         }
       }
+      // A pan can bring buckets into view that the old volume never drew: it stands only whole, else the area lies flat and waits.
       const old = slot.shown;
-      if (!use && old && slot.turns.has(turn) && old.built && standsNow(old, world.fog, world.live) === true) {
+      if (!use && old && slot.turns.has(turn) && old.built && standsNow(old, world.fog, world.live) === true && drawnInView(old, turn, view)) {
         use = old;
         keys = viewKeys(old, turn, view);
       }

@@ -8,7 +8,7 @@ import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { ctxOf } from "../../features/areas/volumeTesting.ts";
 import { FogView } from "./fogView.ts";
 import type { LiveSub } from "./stand.ts";
-import { BoardVolumes, viewBoxOf, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
+import { BoardVolumes, viewBoxOf, viewKeys, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
 
 /*
  * The board's areas standing as their real shapes
@@ -199,6 +199,36 @@ describe("the board's areas standing as their real shapes", () => {
       assert.ok(steps > 0, `${t.shape} built`);
       assert.equal(shows(v.now(0, top, w)), t.id, t.shape);
     }
+  });
+
+  test("a pan that brings buckets into view lies the area flat and waiting until they are drawn, never standing with them missing (review ISOA2-ASTRA-03)", () => {
+    // A 30 ft sphere on the corner of four buckets.
+    const v = new BoardVolumes();
+    const w = world();
+    v.sync([entry(sphere("a", 16, 16, 30))], w);
+    v.volumeOf("a")!.prepare();
+    // At turn 0 a cell shows at view x (x - y) / sqrt 2: only bucket 0,1 holds cells with y more than 8 past x.
+    const left = { x0: -9, y0: -1e4, x1: -6, y1: 1e4 };
+    assert.deepEqual(viewKeys(v.volumeOf("a")!, 0, left), ["0,1"]);
+    assert.equal(viewKeys(v.volumeOf("a")!, 0, VIEW).length, 4);
+    asTheBoard(v, w, left);
+    assert.equal(shows(v.now(0, left, w)), "a");
+    assert.equal(shows(v.now(0, VIEW, w)), " waiting", "three buckets in view are not drawn");
+    asTheBoard(v, w, VIEW);
+    assert.equal(shows(v.now(0, VIEW, w)), "a");
+    assert.ok(viewKeys(v.volumeOf("a")!, 0, VIEW).every((key) => v.volumeOf("a")!.drawnNow(key, 0) !== null));
+    // The same, with a new volume building while the old one stands: missing buckets lie it flat as well.
+    const same = fogBut([[0, 0]]);
+    const v2 = new BoardVolumes();
+    const w0 = world(fogBut([]).view, fogBut([]).tiles);
+    v2.sync([entry(sphere("a", 16, 16, 30))], w0);
+    asTheBoard(v2, w0, left);
+    const w1 = world(same.view, same.tiles);
+    v2.sync([entry(sphere("a", 16, 16, 30))], w1);
+    assert.equal(shows(v2.now(0, left, w1)), "a", "the old one stands where it is drawn");
+    assert.equal(shows(v2.now(0, VIEW, w1)), " waiting", "and not where it is not");
+    asTheBoard(v2, w1, VIEW);
+    assert.equal(shows(v2.now(0, VIEW, w1)), "a");
   });
 
   test("a turn's drawing is made once: a later visit to that turn stands at once", () => {
