@@ -19,8 +19,10 @@ import { footprintHexes, hexCenter, cornerAt, hexSubcells, referenceHex, snapAnc
  * the middle of its stored box: 1 hex up to Medium, 3 for Large, 7 for Huge
  * and 12 for Gargantuan. Every function here whose answer depends on the
  * grid takes it, so the typecheck lists every caller. The square path is
- * the code from before hex grids. Squeezing on hexes is phase H2's: a hex
- * scene holds no squeezed token in H1, so the hex path never reads one.
+ * the code from before hex grids. A creature squeezing on hexes (HX-D17)
+ * takes the hexes of the size one smaller, on that size's anchors: a Large
+ * one stands on one hex, a Huge one on a Large's three and a Gargantuan one
+ * on a Huge's seven.
  *
  * Sight imports this file through heights.ts, so it keeps to the arithmetic
  * sight allows (section 4.3.4) and imports only types from geom.ts.
@@ -117,7 +119,7 @@ export function snapStep(token: PlacedToken): number {
 export function footprintRect(g: Grid, token: PlacedToken): Rect {
   if (g.shape === "hex") {
     const a = hexAnchor(g, token);
-    const side = SIZE_CELLS[sizeCategory(token)];
+    const side = SIZE_CELLS[hexStandSize(token)];
     return { x: a.x - side / 2, y: a.y - side / 2, w: side, h: side };
   }
   if (isSqueezed(token)) return squeezedRect(token);
@@ -202,19 +204,38 @@ export function occupiedCells(g: Grid, token: PlacedToken): Point[] {
  * unchanged, and only the rules read the hexes.
  */
 
-/** The anchor a creature stands on: the one nearest the middle of its stored box, for its size's category. */
+/**
+ * The size a squeeze reads on hexes (HX-D17): one smaller, so a Large
+ * creature squeezes onto a Medium one's hex. Null for a size that has no
+ * smaller hex footprint to squeeze into.
+ */
+export function hexSqueezedSize(size: SizeCategory): SizeCategory | null {
+  return size === "large" ? "medium" : size === "huge" ? "large" : size === "gargantuan" ? "huge" : null;
+}
+
+/**
+ * The size whose hexes a creature takes as it stands: its category, or
+ * the one smaller while it squeezes. Only a creature that can squeeze on
+ * squares (`isSqueezed`) squeezes here, so both grids agree on who can.
+ */
+export function hexStandSize(token: PlacedToken): SizeCategory {
+  const size = sizeCategory(token);
+  return (isSqueezed(token) ? hexSqueezedSize(size) : null) ?? size;
+}
+
+/** The anchor a creature stands on: the one nearest the middle of its stored box, for the size it stands at (`hexStandSize`). */
 export function hexAnchor(g: HexGrid, token: PlacedToken): Point {
-  return snapAnchor(g, sizeCategory(token), storedCenter(token));
+  return snapAnchor(g, hexStandSize(token), storedCenter(token));
 }
 
 /** The hexes a creature stands on, its reference hex first (hex.ts footprintHexes). */
 export function occupiedHexes(g: HexGrid, token: PlacedToken): Hex[] {
-  return footprintHexes(g, sizeCategory(token), hexAnchor(g, token));
+  return footprintHexes(g, hexStandSize(token), hexAnchor(g, token));
 }
 
 /** The hex a creature's steps count from (4.2): its own, a Huge one's center hex, a Large or Gargantuan one's top hex. */
 export function tokenRefHex(g: HexGrid, token: PlacedToken): Hex {
-  return referenceHex(g, sizeCategory(token), hexAnchor(g, token));
+  return referenceHex(g, hexStandSize(token), hexAnchor(g, token));
 }
 
 /** The anchor of a size whose reference hex is `ref`: the hex's center, or for Large and Gargantuan its second point. */
@@ -228,7 +249,7 @@ export function anchorOfHex(g: HexGrid, size: SizeCategory, ref: Hex): Point {
  * A move, a resize and a walk's spots on hexes place a creature by it.
  */
 export function placedOnHex(g: HexGrid, token: PlacedToken, ref: Hex): Point {
-  const a = anchorOfHex(g, sizeCategory(token), ref);
+  const a = anchorOfHex(g, hexStandSize(token), ref);
   const { w, h } = footprintSize(token);
   return { x: a.x - w / 2 + 0, y: a.y - h / 2 + 0 };
 }

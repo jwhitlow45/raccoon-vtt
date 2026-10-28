@@ -1,12 +1,13 @@
 import type { Scene, Token } from "../model.ts";
 import type { DoorRef } from "../protocol.ts";
 import type { Blocker, BuildState, LegEnd } from "../ruleHooks.ts";
-import { canSqueeze, footprintRect, footprintSize, occupiedRange, snapStep, squeezedSize, storedCenter, type PlacedToken } from "./footprint.ts";
+import { anchorOfHex, canSqueeze, footprintRect, footprintSize, hexSqueezedSize, isSqueezed, occupiedRange, sizeCategory, snapStep, squeezedSize, storedCenter, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { footing, footprintGround, standing, type Standing } from "./heights.ts";
 import { APART, contact, CROSS, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
 import { LEDGE, PIECE_BAND, pieceBlocks, pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
-import { SQUARES } from "./grid.ts";
+import { isHex, sceneGrid, SQUARES } from "./grid.ts";
+import { footprintHexes, hexCenter, hexInScene, hexLine, hexNeighbors, referenceHex, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
 
 /**
  * Walls, doors and ledges stopping moves (docs/design-v1-maps-vision.md
@@ -648,7 +649,10 @@ export function walkOn<T extends Walking>(chunks: Chunks, token: T, to: Point, l
   const next: T = { ...token, x: to.x, y: to.y };
   delete next.squeeze;
   next.elevation = landing ?? (token.grounded ? groundUnder(chunks, next, to) : token.elevation);
-  return !next.offHolder || onOffHolder(token, to) ? next : pastHolder(next);
+  const out = !next.offHolder || onOffHolder(token, to) ? next : pastHolder(next);
+  // On hexes a stop says by where it stands whether the walk squeezes there (hexStartStand), so the walker is marked as past its start.
+  onward.add(out);
+  return out;
 }
 
 /** The ground under a walker's footprint as its walk has it there, squeezed or not, standing at `at`. */
@@ -764,6 +768,8 @@ export type LegStop = { blocker: Blocker; door: DoorRef | null };
 export function legStop(state: BuildState, token: Walker, to: LegEnd): LegStop | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
+  const hex = hexWallsOf(state, token);
+  if (hex) return hexLegStopOf(hex, token, to);
   const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
   if (legClear(leg)) return null;
   return firstStop(leg);
@@ -778,6 +784,8 @@ export function legStop(state: BuildState, token: Walker, to: LegEnd): LegStop |
 export function straightClear(state: BuildState, token: Walker, to: LegEnd): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene) return true;
+  const hex = hexWallsOf(state, token);
+  if (hex) return hexLegStopOf(hex, token, to) === null;
   const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
   const { px, py, qx, qy, hx, hy } = leg;
   if (px === qx && py === qy) return true;
@@ -934,6 +942,8 @@ export type Part = readonly [number, number, number, number];
 export function legStopPart(state: BuildState, token: Walker, to: LegEnd): { stop: LegStop; part: Part | null } | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
+  const hex = hexWallsOf(state, token);
+  if (hex) return hexLegStopPart(hex, token, to);
   const leg = legFrom(sceneWalls(scene, state.buildChunks), scene, token, to, pieceTestOf(state.buildChunks));
   if (legClear(leg)) return null;
   const met = firstMet(leg);
@@ -990,6 +1000,8 @@ export function coreBlocked(state: BuildState, end: WalkEnd): boolean {
   const { walker: token, at } = end;
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
+  const hex = hexWallsOf(state, token);
+  if (hex) return hexFitWall(hex, hexEndStand(hex.g, token, at)) >= 0;
   const walls = sceneWalls(scene, state.buildChunks);
   return coreTouchesAt(wallsAt(walls, token, at), token, at, ledgeFloor(walls, scene, token, token.elevation), pieceTestOf(state.buildChunks));
 }
@@ -1009,6 +1021,8 @@ export function coreBlocked(state: BuildState, end: WalkEnd): boolean {
 export function resizeStands(state: BuildState, token: MovingToken, to: PlacedToken): boolean {
   const scene = state.scenes[token.sceneId];
   if (!scene) return true;
+  const hex = hexWallsOf(state, token);
+  if (hex) return hexFitWall(hex, hexStandAt(hex.g, to, to, isSqueezed(to))) < 0;
   const walls = sceneWalls(scene, state.buildChunks);
   const c = storedCenter(to);
   const { w, h } = coreSize(to);
@@ -1025,6 +1039,8 @@ export function resizeStands(state: BuildState, token: MovingToken, to: PlacedTo
 export function resizeLegStop(state: BuildState, token: MovingToken, to: PlacedToken): Blocker | null {
   const scene = state.scenes[token.sceneId];
   if (!scene) return null;
+  const hex = hexWallsOf(state, token);
+  if (hex) return hexResizeStop(hex, token, to);
   const walls = sceneWalls(scene, state.buildChunks);
   const p = storedCenter(token);
   const q = storedCenter(to);
@@ -1085,6 +1101,11 @@ function squeezedThere(state: BuildState, token: Walker, at: Point, fit: boolean
 export function squeezeFits(state: BuildState, end: WalkEnd): boolean {
   const { walker: token, at } = end;
   if (!canSqueeze(token)) return false;
+  const hex = hexWallsOf(state, token);
+  if (hex) {
+    const s = squeezedStandAt(hex.g, token, at);
+    return s !== null && hexNarrow(hex, token, s);
+  }
   const c = storedCenter({ ...token, x: at.x, y: at.y });
   const { w, h } = squeezedSize(token);
   for (const edge of [c.x - w / 2, c.x + w / 2, c.y - h / 2, c.y + h / 2]) if (!Number.isInteger(edge)) return false;
@@ -1101,6 +1122,12 @@ export function squeezeFits(state: BuildState, end: WalkEnd): boolean {
  * (`WalkEnd`).
  */
 export function previewSqueezed(state: BuildState, end: WalkEnd): boolean {
+  const hex = hexWallsOf(state, end.walker);
+  if (hex) {
+    // A preview point on hexes reads at the anchors nearest it, as every rule reads a creature standing there.
+    const s = squeezedStandAt(hex.g, end.walker, end.at);
+    return s !== null && hexNarrow(hex, end.walker, s);
+  }
   return squeezedThere(state, end.walker, end.at, false);
 }
 
@@ -1136,6 +1163,8 @@ export type DropMode = "walk" | "free" | "teleport";
 export function landing(state: BuildState, token: Walker, to: LegEnd, mode: DropMode): Landing {
   const scene = state.scenes[token.sceneId];
   if (!scene) return { x: to.x, y: to.y, squeeze: false, stopped: null };
+  const hex = hexWallsOf(state, token);
+  if (hex) return hexLanding(hex, token, to, mode);
   const walls = sceneWalls(scene, state.buildChunks);
   const test = pieceTestOf(state.buildChunks);
   const legTo = (at: Point) => legFrom(walls, scene, token, { x: at.x, y: at.y, elevation: to.elevation }, test);
@@ -1215,7 +1244,7 @@ export function lineClear(state: BuildState, token: MovingToken, to: Point, door
   const scene = state.scenes[token.sceneId];
   if (!scene) return false;
   const walls = sceneWalls(scene, state.buildChunks);
-  const r = footprintRect(SQUARES, token);
+  const r = footprintRect(sceneGrid(scene), token);
   const cx = r.x + r.w / 2;
   const cy = r.y + r.h / 2;
   const floor = ledgeFloor(walls, scene, token, token.elevation);
@@ -1244,4 +1273,364 @@ function meetsOnlyAtEnd(cx: number, cy: number, qx: number, qy: number, ax: numb
   // Along the line: the segment must not reach back from Q toward C.
   const along = (x: number, y: number) => (x - qx) * (cx - qx) + (y - qy) * (cy - qy);
   return along(ax, ay) <= 0 && along(bx, by) <= 0;
+}
+
+// ---------------------------------------------------------------------------
+// Hexes (docs/design-v1-hex-grids.md HX-D8 and HX-D17)
+
+/*
+ * On a hex scene a creature walks from anchor to anchor, its reference hex
+ * one step to a neighbor at a time, and the movement set is the scene's
+ * free walls, doors and windows (HX-D7). A step is allowed when the
+ * straight step of every hex's center to the next hex's center meets no
+ * movement wall, touching counting as on squares, and at its end no
+ * movement wall meets the line between two neighboring hexes of the
+ * footprint (HX-D8). Both tests ask one thing of the hex lattice, whether
+ * the segment between two neighboring centers meets a movement wall, so a
+ * route search caches it per hex and direction (hexWalk.ts).
+ *
+ * A squeezing creature takes the hexes of the size one smaller, on that
+ * size's anchors (HX-D17, footprint.ts hexStandSize). Those lattices never
+ * meet the creature's own, so a stop of a route says by where it stands
+ * whether it squeezes there (`onSqueezedLattice`). A walker as it stands
+ * says it by its flag. A leg between a full stand and a squeezed one walks
+ * squeezed: the creature squeezes in place where the leg starts, or stands
+ * up in place where it ends, the squeezed hexes of a reference hex always
+ * lying among the full size's hexes of that hex.
+ */
+
+/** A creature on hexes: the size whose hexes it takes (one smaller while it squeezes) and that size's reference hex. */
+export type HexStand = { size: SizeCategory; ref: Hex; squeezed: boolean };
+
+/** The walkers a walk carries past its first stop (`walkOn`), whose squeeze on hexes is where they stand rather than a flag. */
+const onward = new WeakSet<object>();
+
+/** The scene's grid when it is hexes, else null. */
+export function hexGridOf(state: BuildState, token: Pick<Token, "sceneId">): HexGrid | null {
+  const scene = state.scenes[token.sceneId];
+  if (!scene) return null;
+  const g = sceneGrid(scene);
+  return isHex(g) ? g : null;
+}
+
+/** The stand at stored position `at`, squeezed when asked and the creature can squeeze. */
+export function hexStandAt(g: HexGrid, token: PlacedToken, at: Point, squeezed: boolean): HexStand {
+  const full = sizeCategory(token);
+  const small = squeezed && canSqueeze(token) ? hexSqueezedSize(full) : null;
+  const size = small ?? full;
+  const c = storedCenter({ ...token, x: at.x, y: at.y });
+  return { size, ref: referenceHex(g, size, snapAnchor(g, size, c)), squeezed: small !== null };
+}
+
+/**
+ * Whether stored position `at` stands on the squeezed size's anchors: the
+ * box's middle nearer one of those than one of the creature's own. The
+ * two lattices lie at least a corner's distance from a center apart, so
+ * rounding never moves a stop from one to the other.
+ */
+export function onSqueezedLattice(g: HexGrid, token: PlacedToken, at: Point): boolean {
+  if (!canSqueeze(token)) return false;
+  const full = sizeCategory(token);
+  const small = hexSqueezedSize(full);
+  if (!small) return false;
+  const c = storedCenter({ ...token, x: at.x, y: at.y });
+  const a = snapAnchor(g, small, c);
+  const b = snapAnchor(g, full, c);
+  return (a.x - c.x) * (a.x - c.x) + (a.y - c.y) * (a.y - c.y) < (b.x - c.x) * (b.x - c.x) + (b.y - c.y) * (b.y - c.y);
+}
+
+/** The stand a walker starts a leg in: by its flag where it stands, and past its walk's first stop by where that stop is. */
+export function hexStartStand(g: HexGrid, walker: PlacedToken): HexStand {
+  const squeezed = onward.has(walker) ? onSqueezedLattice(g, walker, walker) : isSqueezed(walker);
+  return hexStandAt(g, walker, walker, squeezed);
+}
+
+/** The stand a leg ends in at `to`: squeezed where `to` is one of the squeezed size's spots. */
+export function hexEndStand(g: HexGrid, walker: PlacedToken, to: Point): HexStand {
+  return hexStandAt(g, walker, to, onSqueezedLattice(g, walker, to));
+}
+
+/** Where a creature's stored box stands for a stand: its middle on the stand's anchor. */
+export function hexStandPlace(g: HexGrid, token: PlacedToken, stand: HexStand): Point {
+  const a = anchorOfHex(g, stand.size, stand.ref);
+  const { w, h } = footprintSize(token);
+  return { x: a.x - w / 2 + 0, y: a.y - h / 2 + 0 };
+}
+
+/** The hexes a stand takes, its reference hex first. */
+export function hexStandHexes(g: HexGrid, stand: Pick<HexStand, "size" | "ref">): Hex[] {
+  return footprintHexes(g, stand.size, anchorOfHex(g, stand.size, stand.ref));
+}
+
+/** The stand at the same reference hex, squeezed or full: a squeeze in place, or standing up in place. */
+export function hexRestand(token: PlacedToken, stand: HexStand, squeezed: boolean): HexStand {
+  const full = sizeCategory(token);
+  const size = squeezed ? (hexSqueezedSize(full) ?? full) : full;
+  return { size, ref: stand.ref, squeezed: size !== full };
+}
+
+/** The direction, 0 to 5 in hexNeighbors' order, from a hex to a neighbor, or -1 when they are not neighbors. */
+export function hexDirection(g: HexGrid, from: Hex, to: Hex): number {
+  return hexNeighbors(g, from).findIndex((n) => n.col === to.col && n.row === to.row);
+}
+
+/** What the hex tests read of a scene: its grid, bounds and movement set, and the build's test of held pieces. */
+export type HexWalls = { g: HexGrid; bounds: { w: number; h: number }; walls: WallSet; test: PieceTest };
+
+/** The hex tests' view of the walker's scene, or null when it is not a hex scene. */
+export function hexWallsOf(state: BuildState, token: Pick<Token, "sceneId">): HexWalls | null {
+  const scene = state.scenes[token.sceneId];
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  if (!scene || !isHex(g)) return null;
+  return { g, bounds: scene.bounds, walls: sceneWalls(scene, state.buildChunks), test: pieceTestOf(state.buildChunks) };
+}
+
+/**
+ * The movement walls the segment from hex `h`'s center to its neighbor's
+ * in direction `d` meets, touching included. On hexes no ledge stands
+ * until phase H3, so only walls, closed doors and windows count.
+ */
+export function hexEdgeMeets(t: HexWalls, h: Hex, d: number): number[] {
+  const a = hexCenter(t.g, h);
+  const b = hexCenter(t.g, hexNeighbors(t.g, h)[d]!);
+  return touching(t.walls, a.x, a.y, b.x, b.y, 0, 0, Infinity, t.test);
+}
+
+/**
+ * The wall that stops stand `s` stepping in direction `d` (HX-D8), or -1:
+ * the first a hex's step meets. On a leg's first step a wall the hex's
+ * center touches where it starts may be left toward the center's side, as
+ * a core leaves a wall it overlaps on squares (section 4.1), so a creature
+ * a wall runs through can step off it but never across it.
+ */
+export function hexStepWall(t: HexWalls, s: Pick<HexStand, "size" | "ref">, d: number, first: boolean): number {
+  for (const h of hexStandHexes(t.g, s)) {
+    const segs = hexEdgeMeets(t, h, d);
+    if (segs.length === 0) continue;
+    const c = hexCenter(t.g, h);
+    const n = hexCenter(t.g, hexNeighbors(t.g, h)[d]!);
+    for (const k of segs) {
+      if (first && meets(t.walls, k, t.test, c.x, c.y, c.x, c.y, 0, 0) && leaves(t.walls, k, t.test, c.x, c.y, n.x - c.x, n.y - c.y)) continue;
+      return k;
+    }
+  }
+  return -1;
+}
+
+/**
+ * The wall that meets the line between two neighboring hexes of a stand
+ * (HX-D8), or -1 when its footprint fits there: a single hex always fits.
+ * Each pair is read once, from the hex whose step east, south-east or
+ * south-west (on hex rows) reaches the other.
+ */
+export function hexFitWall(t: HexWalls, s: Pick<HexStand, "size" | "ref">): number {
+  const hexes = hexStandHexes(t.g, s);
+  if (hexes.length === 1) return -1;
+  const keys = new Set(hexes.map((h) => `${h.col},${h.row}`));
+  for (const h of hexes) {
+    const around = hexNeighbors(t.g, h);
+    for (let d = 0; d < 3; d++) {
+      const n = around[d]!;
+      if (!keys.has(`${n.col},${n.row}`)) continue;
+      const segs = hexEdgeMeets(t, h, d);
+      if (segs.length > 0) return segs[0]!;
+    }
+  }
+  return -1;
+}
+
+/** Whether every hex of a stand lies inside the scene (4.2). */
+export function hexStandInside(t: Pick<HexWalls, "g" | "bounds">, s: Pick<HexStand, "size" | "ref">): boolean {
+  return hexStandHexes(t.g, s).every((h) => hexInScene(t.g, t.bounds, h));
+}
+
+/**
+ * Whether a squeezed stand is a real narrow space (HX-D17, the narrow
+ * space test on hexes): its own hexes fit and lie inside the scene, and
+ * no full footprint holding them does. So a Large creature beside a wall
+ * in open ground never squeezes, since the full footprint fits there.
+ */
+export function hexNarrow(t: HexWalls, token: PlacedToken, s: HexStand): boolean {
+  if (!s.squeezed || !hexStandInside(t, s) || hexFitWall(t, s) >= 0) return false;
+  const full = sizeCategory(token);
+  const inner = hexStandHexes(t.g, s);
+  const keys = inner.map((h) => `${h.col},${h.row}`);
+  // A full footprint holding these takes their reference hex, so its own reference hex lies within two steps of it.
+  const seen = new Set<string>();
+  for (const near of [s.ref, ...hexNeighbors(t.g, s.ref), ...hexNeighbors(t.g, s.ref).flatMap((h) => hexNeighbors(t.g, h))]) {
+    const key = `${near.col},${near.row}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const holder: HexStand = { size: full, ref: near, squeezed: false };
+    const around = new Set(hexStandHexes(t.g, holder).map((h) => `${h.col},${h.row}`));
+    if (!keys.every((k) => around.has(k))) continue;
+    if (hexStandInside(t, holder) && hexFitWall(t, holder) < 0) return false;
+  }
+  return true;
+}
+
+/** A leg on hexes: the hex line between its ends' reference hexes, walked at the size it squeezes at when either end squeezes. */
+export type HexLeg = { from: HexStand; to: HexStand; walk: SizeCategory; squeezed: boolean; line: Hex[] };
+
+export function hexLegOf(g: HexGrid, from: HexStand, to: HexStand): HexLeg {
+  const squeezed = from.squeezed || to.squeezed;
+  const walk = from.squeezed ? from.size : to.squeezed ? to.size : from.size;
+  return { from, to, walk, squeezed, line: hexLine(g, from.ref, to.ref) };
+}
+
+/** Where a hex leg stops: the step `step` (0 for the first) that a wall stops, or the last step's end when the footprint does not fit there, and the wall. */
+export type HexLegStop = { step: number; k: number };
+
+/**
+ * What stops a hex leg (HX-D8), or null when it is allowed: each step
+ * clear, and the footprint fitting at each step's end and where the leg
+ * ends, at the size it ends at. A leg that changes only the squeeze, in
+ * place, is judged by its end alone.
+ */
+export function hexLegStop(t: HexWalls, leg: HexLeg): HexLegStop | null {
+  const { line } = leg;
+  // A leg that moves nothing crosses nothing, as on squares, wherever the creature stands.
+  if (line.length === 1 && leg.from.size === leg.to.size) return null;
+  for (let i = 0; i + 1 < line.length; i++) {
+    const d = hexDirection(t.g, line[i]!, line[i + 1]!);
+    const at = { size: leg.walk, ref: line[i]! };
+    const k = hexStepWall(t, at, d, i === 0);
+    if (k >= 0) return { step: i, k };
+    const end = { size: leg.walk, ref: line[i + 1]! };
+    const fit = hexFitWall(t, end);
+    if (fit >= 0) return { step: i, k: fit };
+  }
+  const fit = hexFitWall(t, leg.to);
+  return fit >= 0 ? { step: Math.max(0, line.length - 2), k: fit } : null;
+}
+
+/** The stand at step `k` of a hex leg, 0 its start and the line's last its end. */
+export function hexLegStand(leg: HexLeg, k: number): HexStand {
+  if (k <= 0) return leg.from;
+  if (k >= leg.line.length - 1) return leg.to;
+  return { size: leg.walk, ref: leg.line[k]!, squeezed: leg.squeezed };
+}
+
+/** The hex leg of a walker from where it stands to `to`. */
+function walkerHexLeg(g: HexGrid, token: MovingToken, to: Point): HexLeg {
+  return hexLegOf(g, hexStartStand(g, token), hexEndStand(g, token, to));
+}
+
+/** `legStop` on hexes. */
+function hexLegStopOf(t: HexWalls, token: MovingToken, to: Point): LegStop | null {
+  const stop = hexLegStop(t, walkerHexLeg(t.g, token, to));
+  return stop ? stopBy(t.walls, { k: stop.k }) : null;
+}
+
+/** The squeezed stand nearest `at`, by its middle. */
+function squeezedStandAt(g: HexGrid, token: PlacedToken, at: Point): HexStand | null {
+  if (!canSqueeze(token) || !hexSqueezedSize(sizeCategory(token))) return null;
+  return hexStandAt(g, token, at, true);
+}
+
+/**
+ * Where a drop on hexes lands (`landing`): the stand it aims at when the
+ * leg there is allowed (or, not walking, its footprint fits), squeezed
+ * where that is a real narrow space. A full footprint that does not fit
+ * there tries the squeezed stands inside it, nearest the drop's middle
+ * first. Walking, the last stand of the leg before what stops it that the
+ * creature can stand on, full where it fits and squeezed where it is
+ * narrow, with what stopped it.
+ */
+function hexLanding(t: HexWalls, token: Walker, to: LegEnd, mode: DropMode): Landing {
+  const g = t.g;
+  const start = hexStartStand(g, token);
+  const target = hexEndStand(g, token, to);
+  const fits = (s: HexStand) => hexFitWall(t, s) < 0 && (!s.squeezed || hexNarrow(t, token, s));
+  const allowed = (s: HexStand) => mode === "teleport" || hexLegStop(t, hexLegOf(g, start, s)) === null;
+  const ok = (s: HexStand) => (mode === "walk" ? allowed(s) && fits(s) : fits(s));
+  if (ok(target)) return { x: to.x, y: to.y, squeeze: target.squeezed, stopped: null };
+  if (!target.squeezed && hexFitWall(t, target) >= 0 && canSqueeze(token) && hexSqueezedSize(sizeCategory(token))) {
+    const c = storedCenter({ ...token, x: to.x, y: to.y });
+    const inside = hexStandHexes(g, target)
+      .map((ref) => hexRestand(token, { ...target, ref }, true))
+      .filter((s) => hexStandHexes(g, s).every((h) => hexStandHexes(g, target).some((f) => f.col === h.col && f.row === h.row)))
+      .map((s) => ({ s, d: dist2(anchorOfHex(g, s.size, s.ref), c) }))
+      .sort((a, b) => a.d - b.d || a.s.ref.row - b.s.ref.row || a.s.ref.col - b.s.ref.col);
+    for (const { s } of inside) if (ok(s)) return { ...hexStandPlace(g, token, s), squeeze: true, stopped: null };
+  }
+  if (mode !== "walk") return { x: to.x, y: to.y, squeeze: false, stopped: null };
+  const leg = hexLegOf(g, start, target);
+  const stop = hexLegStop(t, leg);
+  const stopped = stop ? stopBy(t.walls, { k: stop.k }) : null;
+  // The steps the leg takes before it is stopped: the last of them the creature can stand on whose own leg is allowed, since
+  // the hex line to a hex on the way need not be that part of the longer line (hex.ts hexLine), as a snapped spot on squares.
+  for (let k = stop ? stop.step : leg.line.length - 1; k > 0; k--) {
+    const s = hexLegStand(leg, k);
+    const stands = [s, hexRestand(token, s, !s.squeezed)].find((c) => fits(c) && allowed(c));
+    if (stands) return { ...hexStandPlace(g, token, stands), squeeze: stands.squeezed, stopped };
+  }
+  return { x: token.x, y: token.y, squeeze: isSqueezed(token), stopped };
+}
+
+function dist2(a: Point, b: Point): number {
+  return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
+}
+
+/**
+ * The spots of a straight leg on hexes, as `legSpots` gives them on
+ * squares: where the token stands, then the box at each step of the hex
+ * line at the size the leg walks at, and `to` last.
+ */
+export function hexLegSpots(g: HexGrid, token: MovingToken, to: Point): { at: Point; squeeze: boolean }[] {
+  const leg = walkerHexLeg(g, token, to);
+  const out: { at: Point; squeeze: boolean }[] = [{ at: { x: token.x, y: token.y }, squeeze: leg.from.squeezed }];
+  for (let k = 1; k < leg.line.length - 1; k++) {
+    const s = hexLegStand(leg, k);
+    out.push({ at: hexStandPlace(g, token, s), squeeze: s.squeezed });
+  }
+  if (leg.line.length > 1 || to.x !== token.x || to.y !== token.y) out.push({ at: { x: to.x, y: to.y }, squeeze: leg.to.squeezed });
+  return out;
+}
+
+/** `legStopPart` on hexes: the wall that stopped the leg, clipped to the box of the stand where the stopped step starts, a hair past. */
+function hexLegStopPart(t: HexWalls, token: MovingToken, to: Point): { stop: LegStop; part: Part | null } | null {
+  const leg = walkerHexLeg(t.g, token, to);
+  const met = hexLegStop(t, leg);
+  if (!met) return null;
+  const stop = stopBy(t.walls, { k: met.k });
+  const xy = t.walls.stored.xy;
+  const seg: Part = [xy[4 * met.k]!, xy[4 * met.k + 1]!, xy[4 * met.k + 2]!, xy[4 * met.k + 3]!];
+  const at = hexLegStand(leg, met.step);
+  const a = anchorOfHex(t.g, at.size, at.ref);
+  // Half the size's box, and a hex past it, holds every center whose step the leg took there.
+  const r = SIZE_CELLS_HALF[at.size] + 1 + 1e-6;
+  return { stop, part: clipToBox(seg, a.x - r, a.y - r, a.x + r, a.y + r) ?? seg };
+}
+
+const SIZE_CELLS_HALF: Record<SizeCategory, number> = { tiny: 0.25, small: 0.5, medium: 0.5, large: 1, huge: 1.5, gargantuan: 2 };
+
+/**
+ * A resize's leg on hexes (`resizeLegStop`): the steps of the new size
+ * from the reference hex the creature has now to the new spot's, a
+ * resize that keeps its reference hex (4.2) taking none.
+ */
+function hexResizeStop(t: HexWalls, token: MovingToken, to: PlacedToken): Blocker | null {
+  const end = hexStandAt(t.g, to, to, isSqueezed(to));
+  const from: HexStand = { ...end, ref: hexStartStand(t.g, token).ref };
+  const leg = hexLegOf(t.g, from, end);
+  for (let i = 0; i + 1 < leg.line.length; i++) {
+    if (hexStepWall(t, { size: leg.walk, ref: leg.line[i]! }, hexDirection(t.g, leg.line[i]!, leg.line[i + 1]!), i === 0) >= 0) return "wall";
+  }
+  return null;
+}
+
+/**
+ * The segment from hex `h`'s center to its neighbor's in direction `d`, as
+ * a route search caches it: 1 clear, 2 met by a movement wall, 3 met only
+ * by walls the center touches and the step leaves, which only a leg's
+ * first step may take (`hexStepWall`).
+ */
+export function hexEdgeState(t: HexWalls, h: Hex, d: number): 1 | 2 | 3 {
+  const segs = hexEdgeMeets(t, h, d);
+  if (segs.length === 0) return 1;
+  const c = hexCenter(t.g, h);
+  const n = hexCenter(t.g, hexNeighbors(t.g, h)[d]!);
+  for (const k of segs) if (!(meets(t.walls, k, t.test, c.x, c.y, c.x, c.y, 0, 0) && leaves(t.walls, k, t.test, c.x, c.y, n.x - c.x, n.y - c.y))) return 2;
+  return 3;
 }
