@@ -16,6 +16,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Starter art](#starter-art)
   - [Pasting a picture](#pasting-a-picture)
   - [Lining up the grid](#lining-up-the-grid)
+  - [Hex grids](#hex-grids)
   - [The map builder](#the-map-builder)
   - [Walls and doors](#walls-and-doors)
   - [Heights and stairs](#heights-and-stairs)
@@ -155,6 +156,8 @@ Under **New scene**, pick the kind of scene you want:
 - **Builder**: an empty 40 × 30 scene that opens the map builder straight away.
 - **From a Universal VTT file**: see [Map phases, imports and exports](#map-phases-imports-and-exports).
 
+Every kind but the Universal VTT file has a **Grid** row: **Squares**, **Hex rows** or **Hex columns**. A Battle mat or a Map image starts on your room's choice (see [Hex grids](#hex-grids)), and the row changes it for the one scene you are making. A Builder scene and a starter map start on squares whatever the room says, because the builder's tools and the starter art are drawn on squares. You can still pick hexes for them in the row. A Builder scene then shows what the builder can't do on hexes yet, and a starter map drops its measured square grid and opens **Line up grid**. A Universal VTT file always makes a square scene, and its summary says so when your room starts new scenes on hexes.
+
 Under the name, **Players see** asks what the players get of the new scene: **Explore**, **Reveal by hand** or **Everything** (see [Light and party vision](#light-and-party-vision) for what each one means). It starts on your room's choice for new scenes, so most of the time you leave it as it is. The fourth option, **Like** followed by the name of the scene on your screen, copies that scene's setup instead: its fog, its party vision with the light and Sight, and whether walls stop players' moves. The line under it says what it will copy, such as "Explore, Dark, Per player, players' moves blocked". The new scene still gets the automatic walls that suit its kind, so a map image keeps walls around floor only, whatever the scene you copy uses. Like copies the scene as it is when the new one is made, after the upload, and if that scene is deleted while your map uploads, the new scene starts on your room's choice instead, and a message says so.
 
 A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, for example, and the scene comes out 30 by 20 squares. Without a size in the name, the app guesses about 30 squares along the image's long side and opens **Line up grid** so you can correct the guess.
@@ -166,7 +169,7 @@ A map's file name can tell the app its scale. Name the file `crypt_30x20.jpg`, f
 Below the scene list (**All scenes**) and **New scene**, the panel shows the settings of the scene on your screen. The **Scene name** comes first, and players can see it. Everything else sits in four groups, each holding the settings that do one job, so the ones you need are always together:
 
 - **What players see**: **Players see**, **Light** and **Sight**, who lends the party sight, the fog and party vision switches folded under them, and **Use these settings on other scenes…**. Everything that decides what this scene shows your players is here. See [Light and party vision](#light-and-party-vision).
-- **Map image and grid**: the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), then its **Map phases** once the scene has an image (see [Map phases, imports and exports](#map-phases-imports-and-exports)), then the grid: **Grid lines**, **Grid color**, **Opacity** and **Line width**, plus, on a map image, **Line up the grid**, **Find the grid** and **Or count the squares**.
+- **Map image and grid**: the **Map image** (**Add a map image**, **Replace map image** and **Remove map image**), then its **Map phases** once the scene has an image (see [Map phases, imports and exports](#map-phases-imports-and-exports)), then the grid: **Grid lines**, **Grid color**, **Opacity** and **Line width**, then **Grid shape** (see [Hex grids](#hex-grids)), plus, on a map image, **Line up the grid**, **Find the grid** and **Or count the squares**.
 - **Walls and movement**: **Walls and ledges block players' moves**, which is on for new scenes. While it is on, a player's token walks around walls, closed doors and ledges the party has seen, and stops only where there is no way around. Your own moves are never stopped. See [When walls stop a move](#when-walls-stop-a-move). Then **Automatic walls**, **Open the builder** and **Clear the build**.
 - **Scene**: **Size in squares**, the **Background**, the **Starting view** and the **Suggested view**. **Save current view**, under Starting view, saves the way the map is framed on your screen right now as the view the scene opens with for everyone. **Suggested view** is **Top-down** or **Isometric**: see [The isometric view](#the-isometric-view).
 
@@ -234,6 +237,8 @@ Many map images come with a grid already drawn on them. Lining up the grid makes
 
 ![Line up grid after an upload that found the map's grid: "Found a grid of 70 px squares.", the box on 3 by 3 of those squares, the grid drawn over the whole map, and Use default, Find the grid and Nudge in the options row.](dm-guide/grid-line-up.webp)
 
+This section is about squares. On a hex scene the box and a few of the options differ, and the last paragraphs of [Hex grids](#hex-grids) cover them.
+
 1. Pick **Line up grid** in the toolbar (behind **Setup** on a phone), or press **Line up the grid** in the scene's **Map image and grid** settings. When you create a map scene whose file name doesn't give its size, the tool opens on its own.
 2. Drag a box over 3 by 3 squares of the art. To adjust it, drag inside the box to move it, or drag a corner to resize it. You can also tap elsewhere on the map to move the box to the squares you tapped. As you work, the app draws the grid the box would make across the whole map, so you can check that it lines up everywhere, not just inside the box.
 3. For the last pixel of accuracy, use **Nudge**. It moves the box, or makes its squares smaller or larger, one pixel at a time.
@@ -249,6 +254,37 @@ Two more options wait under **⋯**. **Resize scene** (on by default) makes Appl
 > When applying a grid also changes the scene's size, the app saves the two changes as separate undo steps. The first **Undo** takes back the resize, and a second one takes back the grid.
 
 Often you won't need the box at all. When a map's file name gives no size, the app looks for a grid drawn on the map while it uploads: if it's sure of what it found, the scene starts lined up, with **Use default** to go back to the first guess and the scene's earlier size, and if it's less sure, it only places the box on those squares for you to check and **Apply**. On a phone, a large map can take a little longer: the scene opens, and Line up grid says it's still looking until it has an answer. **Find the grid**, in the tool's options or the scene's **Map image and grid** settings, looks again whenever you like, and one undo takes back a grid it applied. If you'd rather not wait for it, just carry on: pressing **Apply** or moving the box stops the search, so it never overwrites what you've done. And if the scene itself changes while it's looking, say someone sets its grid on another device, a grid it then finds isn't applied, and Line up grid tells you so. On a scene from a Universal VTT file, which came with an exact grid of its own, it only places the box, so you can compare the two before you **Apply**, and the same goes for a new image you give that scene.
+
+## Hex grids
+
+Most tables play on squares, and a new room does too. If your maps are drawn on hexes, a scene can use them instead. A scene's grid is **Squares**, **Hex rows** or **Hex columns**. Hex rows have pointed tops, so each row of hexes runs straight across the map. Hex columns have flat tops, so each column runs straight down. Pick the one that matches the art, since the two don't line up with each other.
+
+![A battle mat on hex rows: a goblin, an ogre standing on three hexes, an imp, Thorn and Bree, with the hex lines drawn over the grid.](dm-guide/hex-grid.webp)
+
+**Choosing a shape.** There are three places, from the widest to the narrowest:
+
+- **Grid on new scenes**, in **Menu**, **Room settings**, **Grid and distance**, is the shape a new Battle mat or Map image starts with. It is **Squares** in every room until you change it, so nothing changes for a table that never touches it. Set it once if you prefer hexes, and you won't have to change each new scene.
+- The **Grid** row in **New scene** changes the shape for the one scene you are making.
+- **Grid shape**, in a scene's **Map image and grid** settings, changes a scene that already exists. A map scene that changes shape opens **Line up grid**, because the art's cells are another shape now.
+
+Scenes you made before hex grids came to the app stay squares, and a duplicate keeps the shape of the scene it copies.
+
+A scene won't change shape while it holds something that can't stand on the other grid. The choice is off, and the reason sits right under it, such as painted ground, walls and doors, heights and stairs, difficult ground, traps, a creature that is riding or carrying another, or a squeezing creature. Remove those first, or leave the scene as it is. A scene made from a Universal VTT file came with its own square grid, so its shape can't change either.
+
+**How a hex scene plays.** The distance from one hex center to the next is the room's feet per square, so a hex is one cell across its flat sides and nothing else about the scene's size or units changes. Everything snaps to a hex, and the rules count in hexes:
+
+- **Every hex is one step.** Hexes have no diagonals, so **Diagonal moves** in Room settings counts only height on a hex scene. Moving 4 hexes is 20 ft at 5 ft per hex. The ruler's line reads "every hex 5 ft" and names the height rule, and range rings outline the hexes within reach.
+- **Sizes take hexes.** Tiny, Small and Medium creatures take 1 hex. A Large creature takes 3 hexes, a Huge creature 7 and a Gargantuan creature 12, as the Dungeon Master's Guide's table for hexes says. The ogre in the picture stands on three hexes. A selected token shows the outline of all its hexes, and the distance between two creatures is the fewest steps between any hex of one and any hex of the other.
+- **Placing and moving** work as they do on squares. A token dropped between hexes lands on the nearest one, and **Add token**, a duplicate and a companion look for a free hex nearby. The arrow keys move the selected token one hex. On hex rows, Left and Right go along the row, and Up and Down zigzag so a run of presses keeps to one column. On hex columns it is the other way around.
+- **Areas** keep their true shape and count each hex they cover by the room's rule under **Which squares an area covers**. Room settings say "square or hex" while your room has a hex scene or starts new ones on hexes. An **Emanation** is the one exception. It covers every hex within its size in steps of the creature's hexes, so a 15 ft emanation reaches 3 hexes out from a Medium creature, and it always agrees with the ruler. A free point snaps to a hex corner or center, a placed area moves by whole hex steps, and its rotation snaps to 30° instead of 45°.
+- **Fog and party vision** work as they do on squares. A creature stays hidden while every part of its hexes is under fog, and appears as soon as any part of one is revealed. Because a hex scene has no walls yet, party vision there counts light and senses only.
+- **Export as image** draws the hex lines at a whole number of pixels per hex, and names the file like `crypt-hex-70px.png`.
+
+**What waits for squares.** Hex grids are coming in three steps, and this first one is for running a fight on a hex map. Until the next steps arrive, a hex scene says so in plain words wherever you would reach for these, and the app refuses them there: walls and doors, the **Walking** ruler and routes around things, squeezing through a narrow space, difficult ground, riding and carrying, traps, heights, stairs and pits, **Reveal room**, and **Find the grid**. In the builder, a hex scene gets lights, stamps and labels. A few things stay square for good: painted ground and rooms, pillars, automatic walls, **Or count the squares**, the Universal VTT import and the `WxH` file name of an export. If a map needs those, make it on squares.
+
+**Lining up a hex map.** The box in **Line up grid** is made for hexes. Drag a box over 3 hexes across, which holds 7 hexes, and fine-tune it by its corners. The box keeps the shape of 7 hexes as you drag, resize or nudge it. The app draws the hexes it would make across the whole map, so you can check that they line up everywhere. The option reads **px per hex**. **Or count the squares** gives way to a line saying counting works on squares, so use the box. **Find the grid** is off too: it finds square grids only, so a map for a hex scene is never searched for a grid when you pick it, upload it or put it in place of the scene's art.
+
+**The size of a hex scene.** In a hex scene's **Scene** settings, **Size in 5 ft steps** takes **Across** and **Down**, and a line under them says how many hexes that holds, such as 30 hexes across and 22 rows down.
 
 ## The map builder
 
@@ -1391,7 +1427,7 @@ Open the Menu, then **Room settings** (DM only). Each switch takes effect at onc
 
 - **Players**: **Who can move any token** (No one), **Who can draw** (Every player), **Players can create their own characters** (on), **Players can apply damage and healing** (off), **Players may type their roll totals** (on), **Players see the party's HP** (on) and **Players see each other's areas** (on).
 - **Combat**: **Monsters die at 0 HP** (on), **Healing brings back the dead** (on), **Skip defeated creatures** (on), **Use Initiative scores for monsters** (off), **Reveal hidden combatants on their turn** (on), **Initiative order players see** (**Player characters, the rest on their turn** in a new room), **Critical Hit damage** (**Roll the dice twice**) and **Turn timer** (Off).
-- **Grid and distance**: **Feet per square** (5) and **Diagonal moves**, which can be **Every square is 5 ft** (the 2024 rule, and the default), **Alternate 5 ft and 10 ft**, or **True distance**.
+- **Grid and distance**: **Feet per square** (5) and **Diagonal moves**, which can be **Every square is 5 ft** (the 2024 rule, and the default), **Alternate 5 ft and 10 ft**, or **True distance**. **Grid on new scenes** (**Squares**) is the shape a new Battle mat or Map image starts with: **Squares**, **Hex rows** or **Hex columns**. See [Hex grids](#hex-grids).
 - **Areas of effect**: **Which squares an area covers** (**At least half the square**, the 2024 rule) and **Which creatures an area catches** (**Any square the creature is in**).
 - **New scenes**: **Players see on new scenes** (**Explore** in a new room). See [What players see on new scenes](#what-players-see-on-new-scenes).
 

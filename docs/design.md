@@ -157,6 +157,7 @@ Tests sit next to the code as `*.test.ts`.
   - The alignment tool only edits `cellPx` and `originPx`. A map with a grid drawn into the art and a map without one work the same way. The only difference is whether the app draws grid lines on top.
   - "Or count the squares" in the scene settings is for art whose squares run edge to edge: it sets `originPx` to 0 and `cellPx` from the counts, and resizes the scene to fit. Its fields start from the image's squares under the current grid (`widthPx / cellPx` and `heightPx / cellPx`, rounded), not from the scene's size. A Universal VTT import with a fractional origin (section 14.9) also covers the partial square before its image, so the scene's size would show one square too many on each axis and warn that the squares are not square. A grid whose first line sits before the image (a negative `originPx`, which only such an import makes) offers no counts at all, since setting the origin to 0 would slide the image half a square under the imported walls.
 - **Angles:** degrees, clockwise from +x (east), matching the canvas.
+- **Hex grids (v1).** A scene's grid may be squares, hex rows or hex columns (`Scene.gridShape`, absent for squares). The world unit stays the cell, and on a hex scene one cell is the distance between two hex centers, so positions, elevation, fog and sight keep their units. A cell is named by its hex's key `"col,row"`, and `map.cellPx` is the pixels across a hex's flats. The rules are in docs/design-v1-hex-grids.md.
 
 ## 6. Data model
 
@@ -868,6 +869,8 @@ Pure functions over plain data, no DOM or Node APIs, fully unit-tested.
 
 `custom` uses `w` and `h`. `occupiedCells(token)` returns the whole cells the footprint overlaps, after snapping its position to the nearest half cell (Tiny) or whole cell. A Tiny creature occupies the one cell that contains it. Unsnapped tokens therefore still give clean rules answers.
 
+On a hex scene a footprint is a set of hexes instead: Tiny, Small and Medium 1 hex, Large 3, Huge 7 and Gargantuan 12, anchored as docs/design-v1-hex-grids.md section 4.2 says. The token's `x, y` stays the top-left of the size's box around its anchor.
+
 ### 9.2 Distance
 
 `distanceFt(a, b, settings)` between two creatures, following the 2024 rule "count from a square adjacent to one to the other's square":
@@ -879,6 +882,8 @@ Pure functions over plain data, no DOM or Node APIs, fully unit-tested.
 - `euclid`: `hypot(dx, dy, dz) * feetPerCell`, rounded to the nearest whole foot.
 
 The function is symmetric, and the tests check that. The ruler uses the same functions between points. A point on a token takes the token's box. A free point stands on the ground under it as the measurer saw it when placing it (`pointCellBox` with the point's `z`, section 7.6): all ground for the DM, and for a player only ground their fog shows, 0 elsewhere. So from a cell at 0 to the next cell 10 ft up a ruler reads 10 ft, or 11 ft under `euclid`. With waypoints it sums the segments, and `fiveTen` carries its diagonal counter across segments, as the DMG variant requires. Under `fiveTen`, a creature two diagonal squares away is 15 ft away, so it is outside 10 ft reach.
+
+On a hex scene `distanceFt` counts the fewest hex steps between any hex of one creature and any hex of the other, adjacent hexes being 1 step. A hex has no diagonal, so the room's rule applies only to height there (see docs/design-v1-hex-grids.md 4.3).
 
 Movement and range (v1, `client/features/measure/movement.ts` and `rings.ts`):
 
@@ -892,6 +897,8 @@ Movement and range (v1, `client/features/measure/movement.ts` and `rings.ts`):
 - **Range rings** enclose the ground cells a ruler from the token to a free point would read in range: from the footprint, with the token's elevation, under the room's rule. "Every diagonal 5 ft" draws a square, 5-10-5 an octagon, true distance a stepped circle. A flier's ring shrinks once its height counts and is gone when the ground is out of reach. A ring is only its token's spot and a distance, so it is drawn above the fog.
 
 ### 9.3 Areas of effect
+
+On a hex scene an area keeps its true shape and is graded per hex by the room's coverage rule, except an emanation, which covers the hexes within its size in steps of its creature's hexes (see docs/design-v1-hex-grids.md HX-D11).
 
 Every shape is a 3D predicate `inside(p: {x, y, z}) -> boolean` in world units (cells, with z converted from feet), plus a 2D bounding box. One mechanism then serves all six shapes, elevation, and every coverage rule.
 
@@ -1491,6 +1498,8 @@ docs/design-v1-dm-tools.md 3.12. A token's image can be one of 4,180 game-icons.
 
 The builder edits a scene's build chunks and labels, since v1 wave 3 its stamps, which render on their own Konva layer above the map image (if any) and below tokens, and since v1 wave 4 its heights, stair marks and lights.
 
+On a hex scene the builder offers only what its phase supports. Painted ground, rooms, pillars and automatic walls stay square for good, and walls, difficult ground and heights wait for later phases (see docs/design-v1-hex-grids.md HX-D9).
+
 ```ts
 type TerrainId = 'stone' | 'wood' | 'grass' | 'dirt' | 'cave' | 'water' | 'difficult' | 'rubble' | 'pit' | 'pillar' | 'stairs'
 type EdgeFeature =
@@ -1593,6 +1602,8 @@ type FogShape =
 ### 13.4 Tokens under fog
 
 On a scene with `fogEnabled` true, a token is withheld from player projections like a hidden token when all of these hold: no player owns it, `fogExempt` is not set, and its occupied cells are all fully fogged in the committed bitmap (every sub-cell 0). Revealing the area brings it back, and a monster that walks into the fog disappears for players. Its attached templates and initiative entry follow it (section 7.3). On a scene with fog off, nothing is withheld for fog.
+
+On a hex scene the bitmap and its sub-cells stay as they are. A token counts as fully fogged when every sub-cell inside its hexes is fogged, a hex holding 12 to 16 of them (see docs/design-v1-hex-grids.md HX-D10).
 
 Labels follow the same rule. A label stores only its center, size and text, so its box is estimated as an erase estimates it (`rules/labels.ts`): about 0.6 of its size wide per character, plus a thin halo, and its size tall. The fog and an erase therefore agree on which cells a label covers. Only the builder's tap and outline measure the text on a canvas instead, so a tap picks exactly the label drawn under the finger. A label whose box is fully fogged is withheld from players, and revealing any cell of it brings it back. Stamps (v1 wave 3) follow the same rule over the cells under their rotated bounding box. Fog changes are global, so labels and stamps are re-checked with the tokens.
 

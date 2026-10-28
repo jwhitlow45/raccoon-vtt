@@ -899,6 +899,22 @@ finds no stat block for a dragon turtle. A dragon turtle an old DM page
 places, saves in an encounter or gives an image is stored under the new id,
 so it has its stat block once the page reloads.
 
+Hex grids, phase H1 (docs/design-v1-hex-grids.md), came in two updates.
+The first, just before the isometric view, saves rooms at snapshot version 25
+and stores changes at op version 24, which the builds before it cannot read:
+they answer "Something went wrong" for every room. Back up first. Going back
+is the same restore: check out the commit you ran before (`git log` lists
+it), rebuild with `docker compose -f docker-compose.server.yml up -d --build`,
+then follow Restore under Backups with the backup taken just before the
+update. Every room loses what changed after that backup. The second adds the
+settings that make a hex scene (Grid on new scenes, the new scene form's Grid
+row and a scene's Grid shape) and changes no version. Reload every page left
+open across either update, table displays included, since there is no client
+version check and no version step makes an open page reload. Until it
+reloads, an old page treats a hex scene as squares: it draws and snaps to the
+wrong grid and counts distances wrongly. Scenes made before the update stay
+squares.
+
 The update that adds the isometric view (docs/design-v1-isometric-view.md)
 saves rooms at snapshot version 26 and stores changes at op version 25,
 which the builds before it cannot read: they answer "Something went wrong"

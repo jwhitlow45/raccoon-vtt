@@ -156,7 +156,7 @@ Tiers:
 
 **MVP**
 
-- Square grid, 5 ft per square. Scale and unit can be changed.
+- Square grid, 5 ft per square. Scale and unit can be changed. A scene's grid may instead be hex rows or hex columns (see v1, hex grids).
 - Diagonal rule set per room: every diagonal 5 ft (the 2024 rule, default), 5-10-5, or Euclidean.
 - Tokens snap to the grid. Odd-size tokens snap to square centers and even-size tokens to grid intersections. Snap can be turned off for a drag (not built yet).
 - Ruler:
@@ -178,6 +178,10 @@ Tiers:
 - Range rings around a token, for example 30/60/120 ft.
 
 **v1**
+
+- Hex grids beside squares, the project owner's request of 2026-10-25 ("also hex grids (keep square as the default though)"), with a room default for new scenes.
+  - Designed in docs/design-v1-hex-grids.md in three phases. Phase H1 is built: a scene's grid is Squares (the default for new and existing scenes), Hex rows or Hex columns, picked in the new scene form and in a scene's Map image and grid settings, with "Grid on new scenes" in Room settings. A cell is the distance between two hex centers, so positions, fog, sight and lights keep their units. Every hex is one step, so the room's diagonal rule counts only height there. Sizes follow the DMG's hex table: Tiny, Small and Medium 1 hex, Large 3, Huge 7, Gargantuan 12. Snapping, drops, placement, distance, the Straight ruler, drag labels and speed colors, range rings, arrow keys, areas (graded per hex, with emanations counted in steps), fog and party vision, Line up the grid (a box over 7 hexes) and Export as image all work on hexes.
+  - Square only until phases H2 and H3: walls and doors, the Walking ruler and routes, squeezing, difficult ground, riding and carrying, traps, heights, stairs and pits, Reveal room, and Find the grid. Square for good: painted ground and rooms, pillars, automatic walls, Count the squares, the Universal VTT import and the export's WxH file name. The server refuses on a hex scene what is not hex yet.
 
 - Ruler counts difficult terrain from the map builder (moved up from Later on 2026-10-18 at the project owner's request).
   - Designed in docs/design-v1-movement.md, not built yet.
@@ -687,7 +691,6 @@ Built in v1 wave 7 (docs/design-v1-dice.md), at the project owner's request of 2
 - **Full character sheet builder.** D&D Beyond does this well. Tokens link to it instead.
 - **D&D Beyond import.** Moved into the features on 2026-10-17 (section 15, stat blocks for player characters), best effort. There is no public API, so the server fetches only on a member's tap, only a character its owner made public, keeps no copy and reads no text, and an operator can turn the link import off.
 - **Macros, scripting and a plugin system.** Plugins are Foundry's biggest pain point. Features are built in instead.
-- **Hex grids.** Every rule in the app, from movement to areas of effect, is built on squares.
 - **Native apps.** The installable web app covers phones and tablets.
 - **Non-SRD monsters and art** (Beholder, Mind Flayer and similar). The official sourcebooks are copyrighted and not openly licensed, so there is no legitimate source to ship them from. The project owner chose the custom monster editor (section 15) for monsters from books a group owns. Openly licensed third-party bestiaries (Tome of Beasts and similar) were offered and not chosen.
 
