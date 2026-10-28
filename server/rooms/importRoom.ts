@@ -33,8 +33,8 @@ import { EXPORT_FORMAT, EXPORT_FORMAT_VERSION, assetFileName } from "./exportRoo
 import type { RoomGateway } from "./gateway.ts";
 import { archiveLines } from "./persistence.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
-import { layerCharge } from "./memorySize.ts";
-import { checkWholeScenes, measuredStateBytes, MEMORY_FULL, memoryCapOf, memoryReserves, memoryShare } from "./sizeGuard.ts";
+import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
+import { checkWholeScenes, measuredStateBytes, MEMORY_FULL, memoryCapOf, memoryReserved, memoryReserves, sharesRoom } from "./sizeGuard.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
@@ -330,17 +330,23 @@ export function assertWithinLimits(state: RoomState): void {
   if (bytes + exploredReserve(state) > LIMITS.stateBytes) throw over(NO_ROOM_TO_EXPLORE);
   // And players' memory to its caps where a scene takes its whole cap: shares shrink to fit (docs/design-v1-map-discovery.md 5.5).
   if (bytes + exploredReserve(state) + memoryReserves(state).whole > LIMITS.stateBytes) throw over(MEMORY_FULL);
-  // No measure reads memory, which counts at its caps, so each layer the file holds must lie within its cap (MD3-D-4), at the
-  // share the room's load works out from this state, which the step keeps it to and the measures count (MD3-ASTRA-6).
-  const share = memoryShare(LIMITS.stateBytes, bytes, exploredReserve(state), memoryReserves(state));
+  // No measure reads memory, which counts at its caps, so each layer the file holds must lie within a whole cap, and hold
+  // nothing where memory is not reserved (MD3-D-4). The layers that share the room's space count at what they hold, which
+  // must fit beside the rest: not each at the share this state gives, since the import's remap grows the state a little and
+  // an honest export at its share would then be refused (MD3-D-15). The load works the share out again, lower where the
+  // file sits past it, and its first batch forgets what each layer holds above it (sizeGuard.ts takeShareLowered).
   const layers = new Set<string>();
   for (const c of Object.values(state.memory ?? {})) layers.add(JSON.stringify([c.sceneId, null]));
   for (const c of Object.values(state.memoryBy ?? {})) layers.add(JSON.stringify([c.sceneId, c.memberId ?? null]));
+  let shared = 0;
   for (const key of [...layers].sort()) {
     const [sceneId, layer] = JSON.parse(key) as [string, string | null];
     const scene = state.scenes[sceneId];
-    if (!scene || layerCharge(state, scene, layer) > memoryCapOf(state, scene, share, layer)) throw over(MEMORY_TOO_LARGE);
+    const charge = scene ? layerCharge(state, scene, layer) : Infinity;
+    if (!scene || charge > memoryCapOf(state, scene, MEMORY_CAP, layer)) throw over(MEMORY_TOO_LARGE);
+    if (memoryReserved(state, scene) && sharesRoom(state, scene, layer !== null)) shared += charge;
   }
+  if (bytes + exploredReserve(state) + memoryReserves(state).whole + shared > LIMITS.stateBytes) throw over(MEMORY_TOO_LARGE);
   // Each scene as the ops on it will measure it, its sight and exploration reserved, so no imported scene refuses its first move.
   const scenes = checkWholeScenes(state);
   if (!scenes.ok) throw over(scenes.message);

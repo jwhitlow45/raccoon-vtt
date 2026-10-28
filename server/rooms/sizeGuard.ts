@@ -770,7 +770,7 @@ function memoryLayerCount(state: RoomState, scene: Scene): number {
  * party's alone once the scene folded (ShareMark `party`), so holders'
  * layers a switch back to Per player brings take their whole caps (5.5).
  */
-function sharesRoom(state: RoomState, scene: Scene, holder = false): boolean {
+export function sharesRoom(state: RoomState, scene: Scene, holder = false): boolean {
   const mark = state.memoryShared?.[scene.id];
   return mark !== undefined && (!holder || mark.party !== true);
 }

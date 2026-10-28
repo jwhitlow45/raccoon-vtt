@@ -8,7 +8,7 @@ import { exportableState, roomExport, type RoomExport } from "./exportRoom.ts";
 import { HttpError } from "../auth/http.ts";
 import { assertWithinLimits, MEMORY_TOO_LARGE, withDiscoveryUpgrade } from "./importRoom.ts";
 import { layerCharge, MEMORY_CAP } from "./memorySize.ts";
-import { MEMORY_FULL, measuredStateBytes, memoryReserves, memoryShare, SHARE_MARGIN } from "./sizeGuard.ts";
+import { MEMORY_FULL, measuredStateBytes, memoryReserves, memoryShare, SHARE_MARGIN, SizeGuard } from "./sizeGuard.ts";
 import { exploredReserve, LIMITS } from "#shared/limits.ts";
 import { remapState, type ImportedAsset } from "./remap.ts";
 import { parseRoomState } from "./stateSchema.ts";
@@ -161,29 +161,38 @@ describe("players' memory through a room export and import", () => {
     refused({ ...out, memory: { ...out.memory, [chunkKey(unplayed.id, 0, 0)]: { sceneId: unplayed.id, cx: 0, cy: 0, rev: 0, cells: { "1,1": "stone" } } } });
   });
 
-  test("in a near-full room each layer's memory is measured against the share the room gives it, not a whole cap (MD3-ASTRA-6)", () => {
+  test("in a near-full room a layer past the share it gets is taken while what it holds fits the room, and the load's lowered share trims it (MD3-ASTRA-6, MD3-D-15)", () => {
     const state = room({ scenes: { s1: scene("s1", { fogEnabled: true, vision: { on: true, light: "dark" } }) } });
     state.playedScenes = { s1: { sceneId: "s1", rev: 0 } };
     state.memoryShared = { s1: { sceneId: "s1", rev: 0 } };
     const cells: Record<string, "stone"> = {};
     for (let k = 0; k < 200; k++) cells[`${k % 16},${k >> 4}`] = "stone";
-    const remembered = { [chunkKey("s1", 0, 0)]: { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells } };
-    const small = { [chunkKey("s1", 0, 0)]: { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: { "1,1": "stone" as const } } };
-    state.memory = remembered;
+    state.memory = { [chunkKey("s1", 0, 0)]: { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells } };
+    const charge = layerCharge(state, state.scenes.s1!, null);
     // Four scenes of notes fill the room until the party's share is 1,000 bytes, a fifth of what it remembers.
     const pads = [2, 3, 4, 5].map((i) => {
       state.scenes[`s${i}`] = scene(`s${i}`, { order: i - 1 });
       return (state.tokens[`pad${i}`] = token(`pad${i}`, { sceneId: `s${i}`, notes: "" }));
     });
     const reserves = memoryReserves(state);
-    const fill = LIMITS.stateBytes - exploredReserve(state) - reserves.whole - SHARE_MARGIN - 1_000 * reserves.sharing - measuredStateBytes(state);
-    for (const [i, pad] of pads.entries()) pad.notes = "x".repeat(Math.floor(fill / 4) + (i === 0 ? fill % 4 : 0));
+    const fillTo = (free: number) => {
+      const fill = LIMITS.stateBytes - exploredReserve(state) - reserves.whole - free - measuredStateBytes(state) + pads.reduce((n, p) => n + (p.notes ?? "").length, 0);
+      for (const [i, pad] of pads.entries()) pad.notes = "x".repeat(Math.floor(fill / 4) + (i === 0 ? fill % 4 : 0));
+    };
+    fillTo(SHARE_MARGIN + 1_000);
     assert.equal(memoryShare(LIMITS.stateBytes, measuredStateBytes(state), exploredReserve(state), memoryReserves(state)), 1_000);
-    assert.ok(layerCharge(state, state.scenes.s1!, null) > 1_000 && layerCharge(state, state.scenes.s1!, null) < MEMORY_CAP);
+    assert.ok(charge > 1_000 && charge < MEMORY_CAP);
+    assert.doesNotThrow(() => assertWithinLimits(state), "what the layer holds fits the room's free space");
+    const load = new SizeGuard();
+    load.stateMeasured(measuredStateBytes(state), state);
+    assert.deepEqual([load.share, load.shareLowered], [1_000, true], "the load's first batch measures every layer against the lowered share");
+    // Free space just short of what the layer holds: refused.
+    fillTo(charge - 1);
     assert.throws(
       () => assertWithinLimits(state),
       (err: unknown) => err instanceof HttpError && err.status === 413 && err.extra?.reason === MEMORY_TOO_LARGE,
     );
-    assert.doesNotThrow(() => assertWithinLimits({ ...state, memory: small }), "memory within the share fits");
+    fillTo(charge);
+    assert.doesNotThrow(() => assertWithinLimits(state), "exactly what it holds fits");
   });
 });
