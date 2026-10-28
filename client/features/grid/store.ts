@@ -1,5 +1,6 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
+import type { Grid } from "#shared/rules/grid.ts";
 import { calibrationFromBox, type CalBox, type Calibration, type Corner, type Point } from "./calibrate.ts";
 
 /**
@@ -59,8 +60,8 @@ export type GridToolState = {
  * not `calibrationFromBox`, whose snap for a hand-drawn box would move a
  * measured origin off its lines. Once the box moves, it is the DM's own.
  */
-export function boxCalibration(box: CalBox, found: FoundNote | null, sceneId: string): Calibration {
-  return found?.sceneId === sceneId && found.box === box && found.cal ? found.cal : calibrationFromBox(box);
+export function boxCalibration(box: CalBox, found: FoundNote | null, sceneId: string, g: Grid): Calibration {
+  return found?.sceneId === sceneId && found.box === box && found.cal ? found.cal : calibrationFromBox(box, g);
 }
 
 /**

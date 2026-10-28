@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
+import { cellWord, isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { theme } from "../../lib/theme.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
@@ -9,6 +10,7 @@ import { fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.t
 import { applyGrid, boxAround, fallbackOps, middleOf } from "./outcome.ts";
 import { boxCalibration, endFinding, useGridStore, type Fallback } from "./store.ts";
 import { useFindGrid } from "./useFindGrid.ts";
+import { HEX_LIMITS } from "./words.ts";
 
 /** One canonical pixel per nudge: on the largest maps a thirtieth of a square or less. */
 const STEP = 1;
@@ -22,6 +24,10 @@ const STEP = 1;
  * Resize scene and Grid lines are always in ⋯. After Apply the line says
  * the grid is saved until the box moves again, since an unavailable
  * button alone did not.
+ *
+ * On a hex scene (docs/design-v1-hex-grids.md HX-D12) the box holds 7
+ * hexes, the words say hexes, and Find the grid is off with its reason,
+ * since it finds square grids only until a later phase.
  */
 export default function GridOptions() {
   const sceneId = useRoomView((s) => s.sceneId);
@@ -39,9 +45,12 @@ export default function GridOptions() {
   if (!scene || !sceneId) return null;
   const map = scene.map;
   if (!map) return <OptionsStrip tool="Line up grid" line={{ tone: "hint", content: "This scene has no map image. Add one in the Scenes panel." }} slots={[]} />;
-  if (!box) return <OptionsStrip tool="Line up grid" line={{ tone: "hint", content: "Drag a box over three by three squares of the map." }} slots={[]} />;
+  const grid = sceneGrid(scene);
+  const hex = isHex(grid);
+  const cell = cellWord(grid);
+  if (!box) return <OptionsStrip tool="Line up grid" line={{ tone: "hint", content: hex ? HEX_HINT : "Drag a box over three by three squares of the map." }} slots={[]} />;
 
-  const cal = boxCalibration(box, found, sceneId);
+  const cal = boxCalibration(box, found, sceneId, grid);
   const bounds = fitBounds({ ...map, ...cal });
   const changed = !sameCalibration(cal, map);
   const resize = fitScene && (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h);
@@ -82,8 +91,8 @@ export default function GridOptions() {
           : note?.outcome === "changed"
             ? { tone: "status" as const, content: "The scene changed, so the grid found was not applied." }
             : saved
-              ? { tone: "status" as const, content: `Grid saved at ${formatPx(cal.cellPx)} px per square.` }
-              : { tone: "hint" as const, content: "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
+              ? { tone: "status" as const, content: `Grid saved at ${formatPx(cal.cellPx)} px per ${cell}.` }
+              : { tone: "hint" as const, content: hex ? HEX_HINT : "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
   const fallback = note?.outcome === "applied" ? note.fallback : undefined;
 
   return (
@@ -114,7 +123,7 @@ export default function GridOptions() {
           id: "find",
           priority: 3,
           control: (
-            <OptButton label="Look for a grid drawn on the map and line up with it" onClick={() => findGrid(sceneId)}>
+            <OptButton label={hex ? HEX_LIMITS.findGrid : "Look for a grid drawn on the map and line up with it"} disabled={hex} onClick={() => findGrid(sceneId)}>
               {searching ? "Finding…" : "Find the grid"}
             </OptButton>
           ),
@@ -126,14 +135,14 @@ export default function GridOptions() {
             <ValueChip label="Nudge" kind="setting" plain heading="Nudge the box" value="nudge" options={[{ key: "nudge", words: "Nudge" }]} title="Move or size the box a pixel at a time">
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
                 {/* The same arrows as a list's Move up and Move down: each moves the box one step its way. The size steps zoom, never add (docs/design-v1-icons.md 2.3). */}
-                <OptButton icon="arrowLeft" label="Nudge the box left" onClick={() => set(nudgeBox(box, -STEP, 0))} />
-                <OptButton icon="arrowRight" label="Nudge the box right" onClick={() => set(nudgeBox(box, STEP, 0))} />
-                <OptButton icon="arrowUp" label="Nudge the box up" onClick={() => set(nudgeBox(box, 0, -STEP))} />
-                <OptButton icon="arrowDown" label="Nudge the box down" onClick={() => set(nudgeBox(box, 0, STEP))} />
+                <OptButton icon="arrowLeft" label="Nudge the box left" onClick={() => set(nudgeBox(box, -STEP, 0, 0, grid))} />
+                <OptButton icon="arrowRight" label="Nudge the box right" onClick={() => set(nudgeBox(box, STEP, 0, 0, grid))} />
+                <OptButton icon="arrowUp" label="Nudge the box up" onClick={() => set(nudgeBox(box, 0, -STEP, 0, grid))} />
+                <OptButton icon="arrowDown" label="Nudge the box down" onClick={() => set(nudgeBox(box, 0, STEP, 0, grid))} />
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1) }}>
-                <OptButton icon="zoomOut" label="Make the squares smaller" onClick={() => set(nudgeBox(box, 0, 0, -STEP))} />
-                <OptButton icon="zoomIn" label="Make the squares larger" onClick={() => set(nudgeBox(box, 0, 0, STEP))} />
+                <OptButton icon="zoomOut" label={`Make the ${cellWord(grid, true)} smaller`} onClick={() => set(nudgeBox(box, 0, 0, -STEP, grid))} />
+                <OptButton icon="zoomIn" label={`Make the ${cellWord(grid, true)} larger`} onClick={() => set(nudgeBox(box, 0, 0, STEP, grid))} />
               </div>
             </ValueChip>
           ),
@@ -143,8 +152,8 @@ export default function GridOptions() {
           priority: 4,
           // Tabular figures at the width of the widest value, so a nudge never moves the controls beside it.
           control: (
-            <StripText tabular all={[`${formatPx(cal.cellPx)} px per square`, "888.88 px per square"]}>
-              {formatPx(cal.cellPx)} px per square
+            <StripText tabular all={[`${formatPx(cal.cellPx)} px per ${cell}`, `888.88 px per ${cell}`]}>
+              {formatPx(cal.cellPx)} px per {cell}
             </StripText>
           ),
         },
@@ -153,7 +162,7 @@ export default function GridOptions() {
           priority: 9,
           always: true,
           control: (
-            <OptButton label="Also resize the scene to the squares the map covers" pressed={fitScene} onClick={() => gridState.setState({ fitScene: !fitScene })}>
+            <OptButton label={`Also resize the scene to the ${cellWord(grid, true)} the map covers`} pressed={fitScene} onClick={() => gridState.setState({ fitScene: !fitScene })}>
               {`Resize scene${resize ? ` to ${bounds.w} × ${bounds.h}` : ""}`}
             </OptButton>
           ),
@@ -182,6 +191,9 @@ function GridLinesToggle(props: { scene: Scene }) {
     </OptButton>
   );
 }
+
+/** Line up grid's hint on a hex scene (section 8). */
+const HEX_HINT = "Drag a box over 3 hexes across. Fine-tune it by its corners.";
 
 /** A found square's size in a sentence, to a tenth of a pixel: "70.4", or "70" for 69.998. */
 function formatFound(v: number): string {

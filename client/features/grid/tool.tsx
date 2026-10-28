@@ -6,7 +6,8 @@ import { distance } from "../../lib/gestures.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import type { ToolContext, ToolDef } from "../tools.ts";
-import { boxAtCell, boxCorner, boxFromDrag, canonicalToWorld, resizeBox, worldToCanonical, type CalBox, type Corner } from "./calibrate.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { boxAt, boxCorner, boxFromDrag, canonicalToWorld, insideBox, nudgeBox, resizeBox, worldToCanonical, type CalBox, type Corner } from "./calibrate.ts";
 import { endFinding, gridSlot, HANDLE_HIT_PX } from "./store.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
 
@@ -15,7 +16,7 @@ const TAP_PX = 8;
 
 const CORNERS: readonly Corner[] = ["nw", "ne", "sw", "se"];
 
-/** The box over the 3 x 3 squares at the middle of the screen, under the current calibration. */
+/** The box over the 3 x 3 squares, or the 7 hexes, at the middle of the screen, under the current calibration. */
 export function centeredBox(ctx: ToolContext): CalBox | null {
   const map = ctx.scene.map;
   if (!map) return null;
@@ -24,7 +25,7 @@ export function centeredBox(ctx: ToolContext): CalBox | null {
   const center = live
     ? groundAtMiddle({ ...live, camera: cam })
     : { x: ctx.scene.bounds.w / 2, y: ctx.scene.bounds.h / 2 };
-  return boxAtCell(map, Math.floor(center.x) - 1, Math.floor(center.y) - 1);
+  return boxAt(map, sceneGrid(ctx.scene), center);
 }
 
 function cornerAt(ctx: ToolContext, box: CalBox, screen: { x: number; y: number }): Corner | null {
@@ -34,7 +35,7 @@ function cornerAt(ctx: ToolContext, box: CalBox, screen: { x: number; y: number 
   let best: Corner | null = null;
   let bestDist = HANDLE_HIT_PX;
   for (const corner of CORNERS) {
-    const d = distance(viewToScreen(cam, toView(TOP_DOWN, canonicalToWorld(map, boxCorner(box, corner)))), screen);
+    const d = distance(viewToScreen(cam, toView(TOP_DOWN, canonicalToWorld(map, boxCorner(box, corner, sceneGrid(ctx.scene))))), screen);
     if (d <= bestDist) {
       best = corner;
       bestDist = d;
@@ -43,16 +44,14 @@ function cornerAt(ctx: ToolContext, box: CalBox, screen: { x: number; y: number 
   return best;
 }
 
-function inside(box: CalBox, p: { x: number; y: number }): boolean {
-  return p.x >= box.x && p.x <= box.x + box.size && p.y >= box.y && p.y <= box.y + box.size;
-}
-
 const Options = retryableLazy(() => import("./Options.tsx"), { roles: ["dm"] });
 
 /**
  * Lining up the app's grid with a map (design section 5). The DM drags a
- * box over three by three squares of the art, adjusts it with its corners
- * or the nudge buttons, and applies it. Only `cellPx` and `originPx` change.
+ * box over three by three squares of the art, or on a hex scene over 3
+ * hexes across (docs/design-v1-hex-grids.md HX-D12), adjusts it with its
+ * corners or the nudge buttons, and applies it. Only `cellPx` and
+ * `originPx` change.
  *
  * - Drag on the map outside the box: draw a new box from that point.
  * - Drag inside the box: move it. Drag a corner: resize it about the
@@ -95,7 +94,7 @@ export const gridTool: ToolDef = {
       const corner = box ? cornerAt(ctx, box, p.screen) : null;
       if (box && corner) {
         gridState.setState({ drag: { kind: "corner", corner, start: box } });
-      } else if (box && inside(box, worldToCanonical(map, p.world))) {
+      } else if (box && insideBox(box, sceneGrid(ctx.scene), worldToCanonical(map, p.world))) {
         gridState.setState({ drag: { kind: "move", from: p.world, start: box } });
       } else {
         gridState.setState({ drag: { kind: "new", from: p.world, start: box, moved: false } });
@@ -109,7 +108,7 @@ export const gridTool: ToolDef = {
       // The box moves by hand from here, which ends a Find the grid still running (store.ts `endFinding`).
       if (drag.kind === "corner") {
         endFinding(gridState, ctx.scene.id);
-        gridState.setState({ box: resizeBox(map, drag.start, drag.corner, p.world) });
+        gridState.setState({ box: resizeBox(map, drag.start, drag.corner, p.world, sceneGrid(ctx.scene)) });
       } else if (drag.kind === "move") {
         endFinding(gridState, ctx.scene.id);
         const a = worldToCanonical(map, drag.from);
@@ -120,7 +119,7 @@ export const gridTool: ToolDef = {
         const moved = drag.moved || distance(viewToScreen(cam, toView(TOP_DOWN, drag.from)), p.screen) > TAP_PX;
         if (!moved) return;
         endFinding(gridState, ctx.scene.id);
-        gridState.setState({ drag: { ...drag, moved }, box: boxFromDrag(map, drag.from, p.world) });
+        gridState.setState({ drag: { ...drag, moved }, box: boxFromDrag(map, drag.from, p.world, sceneGrid(ctx.scene)) });
       }
     },
     up(p, ctx) {
@@ -129,11 +128,13 @@ export const gridTool: ToolDef = {
       const { drag, box } = gridState.getState();
       if (!map || !drag) return;
       if (drag.kind === "new" && !drag.moved) {
-        // A tap: the same box size, moved to the squares under the finger.
+        // A tap: the same box size, moved to the squares or hexes under the finger.
         const size = drag.start?.size ?? 3 * map.cellPx;
-        const at = boxAtCell(map, Math.floor(p.world.x) - 1, Math.floor(p.world.y) - 1);
+        const g = sceneGrid(ctx.scene);
+        const at = boxAt(map, g, p.world);
         endFinding(gridState, ctx.scene.id);
-        gridState.setState({ drag: null, box: { ...at, size } });
+        // A hex box stands on the tapped hex's center, so it keeps its size about that center.
+        gridState.setState({ drag: null, box: isHex(g) ? nudgeBox(at, 0, 0, size - at.size, g) : { ...at, size } });
         return;
       }
       // A box dragged to nothing keeps the one before it.

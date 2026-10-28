@@ -7,6 +7,7 @@ import { apply, room as roomState } from "#shared/testutil.ts";
 import { mapScene } from "../scenes/create.ts";
 import { importScene, placeMap } from "../uvtt/batch.ts";
 import type { AxisFit, GridDetection } from "./detect.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { calibrationFromBox, nudgeBox, sameCalibration } from "./calibrate.ts";
 import { cameWithGrid, IMPORT_WAIT_MS, importSearch, importSearchFrom, replacementFound, type ImportWait, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, gridOps, landSearch, middleOf, showOutcome } from "./outcome.ts";
@@ -84,11 +85,11 @@ describe("what a search does to the scene", () => {
     showOutcome({ actions, store, scene: SCENE, found: { tier: "medium", cal: measured }, fit: true, at: { x: 700, y: 500 } });
     const { found, box } = store.getState();
     assert.ok(box);
-    assert.deepEqual(boxCalibration(box, found, "s1"), measured, "Apply and the drawn lines take the find as measured");
+    assert.deepEqual(boxCalibration(box, found, "s1", SQUARES), measured, "Apply and the drawn lines take the find as measured");
     assert.deepEqual(calibrationFromBox(box).originPx, { x: 0, y: 0 }, "the hand-drawn box's snap would have moved it");
-    assert.deepEqual(boxCalibration(box, found, "s2"), calibrationFromBox(box), "another scene's note says nothing");
+    assert.deepEqual(boxCalibration(box, found, "s2", SQUARES), calibrationFromBox(box), "another scene's note says nothing");
     const moved = nudgeBox(box, 1, 0);
-    assert.deepEqual(boxCalibration(moved, found, "s1"), calibrationFromBox(moved), "a box the DM moved is theirs");
+    assert.deepEqual(boxCalibration(moved, found, "s1", SQUARES), calibrationFromBox(moved), "a box the DM moved is theirs");
   });
 
   test("a found box goes to the middle of the box there is, or of the map when that is off the image", () => {

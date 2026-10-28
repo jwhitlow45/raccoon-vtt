@@ -1,4 +1,6 @@
 import type { SceneMap } from "#shared/model.ts";
+import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { HEX_R, HEX_S, hexAt, hexCenter } from "#shared/rules/hex.ts";
 
 /**
  * Grid alignment math (design section 5).
@@ -29,10 +31,42 @@ export const MAX_CELL_PX = 16_384;
 const MAX_SCENE_CELLS = 200;
 
 /**
- * A square box over BOX_CELLS x BOX_CELLS squares of the map art, in
- * canonical pixels: its top-left corner and its side.
+ * A box over BOX_CELLS x BOX_CELLS squares of the map art, in canonical
+ * pixels: its top-left corner and its side. On hexes (HX-D12) it holds the
+ * 7 hexes of one and its six neighbors, `size` its side 3 hexes across
+ * their flats, and its other side HEX_BOX_DEPTH of that: 3 by 2.89 cells
+ * on hex rows, 2.89 by 3 on hex columns. It keeps that shape however it is
+ * dragged, resized or nudged.
  */
 export type CalBox = { x: number; y: number; size: number };
+
+/** The hex box's depth over its width: two rows apart plus a corner above and below, over 3 hexes across. */
+export const HEX_BOX_DEPTH = (2 * HEX_S + 2 * HEX_R) / BOX_CELLS;
+
+/** The box's sides in canonical pixels, by the scene's grid. */
+export function boxSides(box: CalBox, g: Grid): { w: number; h: number } {
+  if (!isHex(g)) return { w: box.size, h: box.size };
+  return g.orient === "rows" ? { w: box.size, h: box.size * HEX_BOX_DEPTH } : { w: box.size * HEX_BOX_DEPTH, h: box.size };
+}
+
+/**
+ * The box the grid tool starts with, or moves to on a tap, at a world
+ * point under the current calibration: the 3 by 3 squares around the
+ * cell there, or the 7 hexes around the hex there.
+ */
+export function boxAt(cal: Calibration, g: Grid, at: Point): CalBox {
+  if (!isHex(g)) return boxAtCell(cal, Math.floor(at.x) - 1, Math.floor(at.y) - 1);
+  const c = worldToCanonical(cal, hexCenter(g, hexAt(g, at)));
+  const size = BOX_CELLS * cal.cellPx;
+  const { w, h } = boxSides({ x: 0, y: 0, size }, g);
+  return { x: c.x - w / 2, y: c.y - h / 2, size };
+}
+
+/** Whether a canonical point lies in the box. */
+export function insideBox(box: CalBox, g: Grid, p: Point): boolean {
+  const { w, h } = boxSides(box, g);
+  return p.x >= box.x && p.x <= box.x + w && p.y >= box.y && p.y <= box.y + h;
+}
 
 export function worldToCanonical(cal: Calibration, p: Point): Point {
   return { x: p.x * cal.cellPx + cal.originPx.x, y: p.y * cal.cellPx + cal.originPx.y };
@@ -53,13 +87,17 @@ export function boxAtCell(cal: Calibration, cx: number, cy: number): CalBox {
  * so the box is too: its side is the larger of the two spans, and it grows
  * from the point where the drag started, toward the finger.
  */
-export function boxFromDrag(cal: Calibration, from: Point, to: Point): CalBox {
+export function boxFromDrag(cal: Calibration, from: Point, to: Point, g: Grid = SQUARES): CalBox {
   const a = worldToCanonical(cal, from);
   const b = worldToCanonical(cal, to);
-  const size = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+  const dx = Math.abs(b.x - a.x);
+  const dy = Math.abs(b.y - a.y);
+  // On hexes the box keeps its shape: the finger sets whichever side it pulls farther, the other follows.
+  const size = !isHex(g) ? Math.max(dx, dy) : g.orient === "rows" ? Math.max(dx, dy / HEX_BOX_DEPTH) : Math.max(dy, dx / HEX_BOX_DEPTH);
+  const { w, h } = boxSides({ x: 0, y: 0, size }, g);
   return {
-    x: b.x < a.x ? a.x - size : a.x,
-    y: b.y < a.y ? a.y - size : a.y,
+    x: b.x < a.x ? a.x - w : a.x,
+    y: b.y < a.y ? a.y - h : a.y,
     size,
   };
 }
@@ -67,27 +105,29 @@ export function boxFromDrag(cal: Calibration, from: Point, to: Point): CalBox {
 export type Corner = "nw" | "ne" | "sw" | "se";
 
 /** The box's corner, in canonical pixels. */
-export function boxCorner(box: CalBox, corner: Corner): Point {
+export function boxCorner(box: CalBox, corner: Corner, g: Grid = SQUARES): Point {
+  const { w, h } = boxSides(box, g);
   return {
-    x: corner === "nw" || corner === "sw" ? box.x : box.x + box.size,
-    y: corner === "nw" || corner === "ne" ? box.y : box.y + box.size,
+    x: corner === "nw" || corner === "sw" ? box.x : box.x + w,
+    y: corner === "nw" || corner === "ne" ? box.y : box.y + h,
   };
 }
 
 const OPPOSITE: Record<Corner, Corner> = { nw: "se", ne: "sw", sw: "ne", se: "nw" };
 
 /** Drags one corner to a world point, keeping the opposite corner where it is. */
-export function resizeBox(cal: Calibration, box: CalBox, corner: Corner, to: Point): CalBox {
-  const fixed = boxCorner(box, OPPOSITE[corner]);
+export function resizeBox(cal: Calibration, box: CalBox, corner: Corner, to: Point, g: Grid = SQUARES): CalBox {
+  const fixed = boxCorner(box, OPPOSITE[corner], g);
   const fixedWorld = canonicalToWorld(cal, fixed);
-  return boxFromDrag(cal, fixedWorld, to);
+  return boxFromDrag(cal, fixedWorld, to, g);
 }
 
-/** Moves the box by canonical pixels and grows it about its center. */
-export function nudgeBox(box: CalBox, dx: number, dy: number, dsize = 0): CalBox {
+/** Moves the box by canonical pixels and grows it about its center, keeping its shape. */
+export function nudgeBox(box: CalBox, dx: number, dy: number, dsize = 0, g: Grid = SQUARES): CalBox {
   const size = Math.max(BOX_CELLS * MIN_CELL_PX, box.size + dsize);
-  const grow = (size - box.size) / 2;
-  return { x: box.x + dx - grow, y: box.y + dy - grow, size };
+  const before = boxSides(box, g);
+  const after = boxSides({ ...box, size }, g);
+  return { x: box.x + dx - (after.w - before.w) / 2, y: box.y + dy - (after.h - before.h) / 2, size };
 }
 
 function round(v: number, places: number): number {
@@ -116,9 +156,41 @@ export const ORIGIN_SNAP = 0.05;
  * (LP5-OPS-4). So an origin within ORIGIN_SNAP of a cell from 0 or from a
  * whole cell is 0. A real margin is wider than that and is kept.
  */
-export function calibrationFromBox(box: CalBox): Calibration {
+export function calibrationFromBox(box: CalBox, g: Grid = SQUARES): Calibration {
   const cellPx = round(Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, box.size / BOX_CELLS)), 4);
+  if (isHex(g)) return hexCalibration(box, g.orient, cellPx);
   return { cellPx, originPx: { x: snappedOrigin(box.x, cellPx), y: snappedOrigin(box.y, cellPx) } };
+}
+
+/**
+ * The hex box's calibration (section 4.1): its middle is a hex center,
+ * and the origin, the canonical pixel of world (0, 0), is reduced to the
+ * first one at or after the image's top-left that puts a hex center there,
+ * so it is never negative and the scene starts at the art's first whole
+ * row. Hex rows are written along x, and hex columns read them mirrored.
+ * Moving the origin down one row shifts the row half a hex, so the row's
+ * parity carries into x. An origin within ORIGIN_SNAP of a cell from the
+ * image's edge, or from the next row, is on the edge, as a square box's is.
+ */
+function hexCalibration(box: CalBox, orient: "rows" | "columns", cellPx: number): Calibration {
+  const { w, h } = boxSides(box, { shape: "hex", orient });
+  const mid = { x: box.x + w / 2, y: box.y + h / 2 };
+  const [along, across] = orient === "rows" ? [mid.x, mid.y] : [mid.y, mid.x];
+  const rowPx = HEX_S * cellPx;
+  const slack = cellPx * ORIGIN_SNAP;
+  const first = across - HEX_R * cellPx;
+  let row = Math.floor(first / rowPx);
+  let b = first - row * rowPx;
+  if (b >= rowPx - slack) {
+    b = 0;
+    row += 1;
+  } else if (b <= slack) b = 0;
+  const odd = ((row % 2) + 2) % 2 === 1;
+  let a = mod(along - (odd ? 1 : 0.5) * cellPx, cellPx);
+  if (a <= slack || a >= cellPx - slack) a = 0;
+  const ox = round(orient === "rows" ? a : b, 2);
+  const oy = round(orient === "rows" ? b : a, 2);
+  return { cellPx, originPx: { x: ox, y: oy } };
 }
 
 function snappedOrigin(v: number, cellPx: number): number {
