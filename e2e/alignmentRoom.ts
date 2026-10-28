@@ -916,7 +916,7 @@ async function visionScreens(sweep: Sweep, page: Page, size: Size): Promise<void
         const section = panel.locator("[data-vision-sight]").locator("xpath=ancestor::section[1]");
         await section.scrollIntoViewIfNeeded();
         await sweep.measure(page, "vision-section", section);
-      } else await sweep.missing(page, "vision-section", "the Vision section on a per-player scene with vision on named no creature lending its sight to Pat");
+      } else await sweep.missing(page, "vision-section", "the What players see group on a per-player scene with vision on named no creature lending its sight to Pat");
       await escapeAll(page);
     }
     await sight(true);
