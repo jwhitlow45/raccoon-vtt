@@ -82,6 +82,15 @@ function useTokenPlayers(token: Pick<Token, "ownerIds" | "actor" | "companion">)
 const VIEW_AS_A_PLAYER = "View as a player";
 
 /**
+ * A player's name may run to 80 letters with no space (shared/protocol.ts
+ * MAX_NAME). Its button breaks it anywhere rather than run out of its row,
+ * and its words keep the whole name, which is the button's accessible name.
+ */
+const NAME_FITS: CSSProperties = { maxWidth: "100%", overflowWrap: "anywhere" };
+/** The words inside such a button, one box, so they wrap as one and center as one beside the icon. */
+const NAME_WORDS: CSSProperties = { minWidth: 0 };
+
+/**
  * A token's View as, in its bar and its panel's header: "View as Ana" for
  * one player owner, and with several, "View as a player" opening a list of
  * them, a menu from 900 px up and a bottom sheet on a phone, as Attach's
@@ -102,8 +111,8 @@ function ViewAsOne(props: { player: Member; style: CSSProperties | undefined }) 
   const viewAs = useScoped(viewAsSlot);
   const { player } = props;
   return (
-    <Button size="sm" icon="viewAs" onClick={(e) => viewAs.open({ memberId: player.id, name: player.name, returnFocus: e.currentTarget })} style={props.style}>
-      View as {player.name}
+    <Button size="sm" icon="viewAs" onClick={(e) => viewAs.open({ memberId: player.id, name: player.name, returnFocus: e.currentTarget })} style={{ ...NAME_FITS, ...props.style }}>
+      <span style={NAME_WORDS}>View as {player.name}</span>
     </Button>
   );
 }
@@ -150,14 +159,17 @@ function ViewAsMenu(props: { players: readonly Member[]; style: CSSProperties | 
         {VIEW_AS_A_PLAYER}
       </Button>
       <Popover handle={menu} side={side} bound={viewportBound}>
-        <Menu
-          label={VIEW_AS_A_PLAYER}
-          sections={[{ key: "players", items: props.players.map((p) => ({ id: p.id, title: p.name, kind: "action" as const })) }]}
-          onPick={(id) => {
-            const player = props.players.find((p) => p.id === id);
-            if (player) viewAs.open({ memberId: player.id, name: player.name, returnFocus: anchor.current });
-          }}
-        />
+        {/* Held to a side panel's width, as Attach's list is, so a long name wraps there rather than stretch the list across the screen. */}
+        <div style={{ maxWidth: theme.layout.sidePanelWidth }}>
+          <Menu
+            label={VIEW_AS_A_PLAYER}
+            sections={[{ key: "players", items: props.players.map((p) => ({ id: p.id, title: p.name, kind: "action" as const })) }]}
+            onPick={(id) => {
+              const player = props.players.find((p) => p.id === id);
+              if (player) viewAs.open({ memberId: player.id, name: player.name, returnFocus: anchor.current });
+            }}
+          />
+        </div>
       </Popover>
     </>
   );
@@ -198,9 +210,9 @@ function ViewAsSheet(props: { players: readonly Member[]; style: CSSProperties |
                 // The first takes focus as the sheet opens, so Down and Up move at once, as in a menu.
                 autoFocus={i === 0}
                 onClick={() => pick(p)}
-                style={{ justifyContent: "flex-start" }}
+                style={{ justifyContent: "flex-start", textAlign: "start", ...NAME_FITS }}
               >
-                {p.name}
+                <span style={NAME_WORDS}>{p.name}</span>
               </Button>
             ))}
           </div>

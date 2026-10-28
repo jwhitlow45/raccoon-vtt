@@ -80,9 +80,20 @@ describe("a token's View as button", () => {
   beforeEach(() => sized());
   test("one player owner: the eye and View as that player, for the DM", () => {
     const markup = button(table(), DM, token("t", { kind: "pc", ownerIds: ["p2"] }));
-    assert.match(markup, /<button[^>]*>.*View as Ben<\/button>/);
+    assert.match(markup, /<button[^>]*>.*View as Ben(<\/span>)?<\/button>/);
     assert.match(markup, /<svg/, "it wears an icon");
     assert.doesNotMatch(markup, /aria-haspopup/, "one tap, no list");
+  });
+
+  test("an 80-letter name with no space breaks anywhere inside its button, which keeps the whole name", () => {
+    const long = "W".repeat(80);
+    const state = table();
+    state.members.p2 = { ...state.members.p2!, name: long };
+    const markup = button(state, DM, token("t", { kind: "pc", ownerIds: ["p2"] }));
+    const style = /<button[^>]*style="([^"]*)"/.exec(markup)?.[1] ?? "";
+    assert.match(style, /max-width:100%/, "held to its row's width");
+    assert.match(style, /overflow-wrap:anywhere/, "broken anywhere");
+    assert.match(markup, new RegExp(`>View as ${long}<`), "the whole name, which the button is named by");
   });
 
   test("several player owners: View as a player opens a list of them, a menu on a computer and a sheet's on a phone", () => {

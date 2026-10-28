@@ -185,7 +185,8 @@ export function Menu(props: {
         ) : (
           <>
             {it.glyph ? <span aria-hidden style={{ display: "grid", placeItems: "center", flex: "none" }}>{it.glyph}</span> : null}
-            <span style={{ flex: 1, minWidth: 0 }}>{it.title}</span>
+            {/* A row keeps to one line, but a title too long for the box, such as an 80-letter name with no space, breaks anywhere rather than run out of it. */}
+            <span style={{ flex: 1, minWidth: 0, whiteSpace: "normal", overflowWrap: "anywhere" }}>{it.title}</span>
             {it.note ? (
               <span aria-hidden style={{ flex: "none", color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>
                 {it.note}
