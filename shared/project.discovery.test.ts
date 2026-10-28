@@ -658,6 +658,25 @@ describe("the players' chunk memo", () => {
     assert.equal(chunksOf(state, P1)["0,0"]!.cells["3,3"], "grass");
   });
 
+  test("a memory chunk written again, its tiles, stored chunks and sight as they were: the cell reads the new entry, the party's and a holder's own alike (MD2-O-18)", () => {
+    const party = fogRoom({ vision: true });
+    paint(party, { x: 3, y: 3, w: 1, h: 1 }, "stone");
+    lift(party, "party", { x: 0, y: 0, w: 8, h: 8 });
+    remember(party, null, 0, 0, { cells: { "3,3": "wood" } });
+    assert.equal(chunksOf(party, P1)["0,0"]!.cells["3,3"], "wood");
+    remember(party, null, 0, 0, { cells: { "3,3": "grass" } });
+    assert.equal(chunksOf(party, P1)["0,0"]!.cells["3,3"], "grass", "the party's");
+    const own = fogRoom({ vision: true, perPlayer: true });
+    own.holders.s1 = { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] };
+    paint(own, { x: 3, y: 3, w: 1, h: 1 }, "stone");
+    lift(own, "party", { x: 0, y: 0, w: 8, h: 8 });
+    lift(own, { holder: "p1" }, { x: 0, y: 0, w: 8, h: 8 });
+    remember(own, "p1", 0, 0, { cells: { "3,3": "wood" } });
+    assert.equal(chunksOf(own, P1)["0,0"]!.cells["3,3"], "wood");
+    remember(own, "p1", 0, 0, { cells: { "3,3": "grass" } });
+    assert.equal(chunksOf(own, P1)["0,0"]!.cells["3,3"], "grass", "a holder's own");
+  });
+
   test("fresh tile objects over cells that are held as before: the very same chunk", () => {
     const state = fogRoom();
     paint(state, { x: 3, y: 3, w: 2, h: 2 });
