@@ -677,6 +677,22 @@ describe("the players' chunk memo", () => {
     assert.equal(chunksOf(own, P1)["0,0"]!.cells["3,3"], "grass", "a holder's own");
   });
 
+  test("memory in one layer and no memory objects in the other: a DM reveal over a remembered cell shows it live (MD2 survivor 20)", () => {
+    for (const layer of [null, "p1"]) {
+      const state = fogRoom({ vision: true, perPlayer: layer !== null });
+      state.holders.s1 = { sceneId: "s1", rev: 0, entries: layer === null ? [] : [{ memberId: layer, on: true }] };
+      delete state.memory;
+      delete state.memoryBy;
+      paint(state, { x: 3, y: 3, w: 1, h: 1 }, "stone");
+      lift(state, "party", { x: 0, y: 0, w: 8, h: 8 });
+      if (layer !== null) lift(state, { holder: layer }, { x: 0, y: 0, w: 8, h: 8 });
+      remember(state, layer, 0, 0, { cells: { "3,3": "wood" } });
+      assert.equal(chunksOf(state, P1)["0,0"]!.cells["3,3"], "wood", `${layer ?? "the party"} remembers`);
+      lift(state, "dm", { x: 3, y: 3, w: 1, h: 1 });
+      assert.equal(chunksOf(state, P1)["0,0"]!.cells["3,3"], "stone", `${layer ?? "the party"}'s cell revealed`);
+    }
+  });
+
   test("fresh tile objects over cells that are held as before: the very same chunk", () => {
     const state = fogRoom();
     paint(state, { x: 3, y: 3, w: 2, h: 2 });
