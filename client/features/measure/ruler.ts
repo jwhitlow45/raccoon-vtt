@@ -3,7 +3,7 @@ import { MAX_RULER_STOPS, type DrawingInput } from "#shared/protocol.ts";
 import { pathDistanceFt, pointCellBox, tokenCellBox, type CellBox } from "#shared/rules/distance.ts";
 import { footprintRect, hexAnchor, occupiedHexes, type FootprintToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
-import type { Grid } from "#shared/rules/grid.ts";
+import { isHex, type Grid } from "#shared/rules/grid.ts";
 import { HEX_R, hexAt, hexCenter, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 
 /**
@@ -94,7 +94,16 @@ export function formatFeet(ft: number): string {
   return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} ft`;
 }
 
-export function diagonalLabel(rule: DiagonalRule): string {
+/**
+ * What the ruler's line says the room counts. A hex has no diagonal (every
+ * hex is one step, and the diagonal rule counts only height there, HX-D3),
+ * so a hex scene's line speaks of hexes and never of diagonals.
+ */
+export function diagonalLabel(rule: DiagonalRule, g: Grid, feetPerCell: number): string {
+  if (isHex(g)) {
+    const per = `every hex ${feetPerCell} ft`;
+    return rule === "five" ? per : rule === "fiveTen" ? `${per}, height 5-10-5` : `${per}, height by true distance`;
+  }
   return rule === "five" ? "every diagonal 5 ft" : rule === "fiveTen" ? "diagonals 5-10-5" : "true distance";
 }
 

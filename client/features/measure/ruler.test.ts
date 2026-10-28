@@ -6,6 +6,7 @@ import { hexAnchor, occupiedHexes, placedOnHex } from "#shared/rules/footprint.t
 import { walksOn, WALKING_NEEDS_SQUARES } from "./rulerStore.ts";
 import {
   allStops,
+  diagonalLabel,
   beginGesture,
   dragTo,
   drawnPoints,
@@ -366,5 +367,20 @@ describe("the ruler on a hex scene (docs/design-v1-hex-grids.md 4.3)", () => {
     assert.equal(walksOn(true, {}), true);
     assert.equal(walksOn(false, {}), false);
     assert.equal(WALKING_NEEDS_SQUARES, "Walking needs squares.");
+  });
+});
+
+describe("diagonalLabel", () => {
+  const hexRows: HexGrid = { shape: "hex", orient: "rows" };
+  test("squares keep their diagonal words", () => {
+    assert.equal(diagonalLabel("five", SQUARES, 5), "every diagonal 5 ft");
+    assert.equal(diagonalLabel("fiveTen", SQUARES, 5), "diagonals 5-10-5");
+    assert.equal(diagonalLabel("euclid", SQUARES, 5), "true distance");
+  });
+  test("a hex scene counts hexes and never names a diagonal", () => {
+    assert.equal(diagonalLabel("five", hexRows, 5), "every hex 5 ft");
+    assert.equal(diagonalLabel("fiveTen", hexRows, 10), "every hex 10 ft, height 5-10-5");
+    assert.equal(diagonalLabel("euclid", hexRows, 5), "every hex 5 ft, height by true distance");
+    for (const r of ["five", "fiveTen", "euclid"] as const) assert.doesNotMatch(diagonalLabel(r, hexRows, 5), /diagonal/);
   });
 });

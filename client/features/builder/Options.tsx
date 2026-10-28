@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { TerrainId } from "#shared/model.ts";
+import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
 import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, Stepper, ValueChip, type Slot } from "../measure/controls.tsx";
@@ -19,6 +20,7 @@ import { BUILD_ASKING } from "./ask.ts";
 import { useStampSlots } from "./stamps/StampOptions.tsx";
 import { useHeightHint, useHeightSlots } from "./heights/HeightOptions.tsx";
 import { LightChip } from "../lights/LightOptions.tsx";
+import { HEX_LIMITS } from "../grid/words.ts";
 
 const EDGES: readonly { value: EdgeKind; label: string }[] = [
   { value: "wall", label: "Wall" },
@@ -51,7 +53,22 @@ const EDGE_HINTS: Record<EdgeKind, string> = {
 /** What painting a terrain does to a walk (docs/design-v1-movement.md 3.4), for the hint of a mode that paints it. */
 const TERRAIN_COST = "Difficult and Rubble cost double to walk through. Water costs double without a swim speed.";
 
-function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId): string {
+/** The modes a hex scene cannot use until a later phase: lights, stamps and labels keep their own hints (H1, section 6). */
+const HEX_LEFT_OUT: ReadonlySet<BuildMode> = new Set<BuildMode>(["paint", "rect", "poly", "erase", "eraseRect", "edge", "height", "rough"]);
+
+/** The line a hex scene shows for a mode it leaves out, or null where the mode keeps its own hint. */
+export function hexBuilderLine(mode: BuildMode, g: Grid): string | null {
+  return isHex(g) && HEX_LEFT_OUT.has(mode) ? HEX_LIMITS.builder : null;
+}
+
+/** The brush's width as the stepper speaks it, in the scene's cell word. */
+export function brushWords(n: number, g: Grid): string {
+  return `${n} ${cellWord(g, n !== 1)}`;
+}
+
+function hint(mode: BuildMode, edge: EdgeKind, secretFound: boolean, hasLights: boolean, heightHint: string, terrain: TerrainId, g: Grid): string {
+  const limit = hexBuilderLine(mode, g);
+  if (limit !== null) return limit;
   if (mode === "light") return lightModeHint(hasLights);
   if (mode === "height" || mode === "rough") return heightHint;
   const costs = terrain === "difficult" || terrain === "rubble" || terrain === "water";
@@ -112,6 +129,7 @@ export default function BuilderOptions() {
   const stamps = useStampSlots({ more });
   if (!sceneId || !scene) return null;
 
+  const grid = sceneGrid(scene);
   const set = builderState.setState;
   const corners = s.mode === "poly" && s.poly.length > 0;
   const stamped = s.mode === "stamp" && stamps.selected;
@@ -139,7 +157,7 @@ export default function BuilderOptions() {
         step={1}
         min={BRUSH_MIN}
         max={BRUSH_MAX}
-        format={(n) => `${n} ${n === 1 ? "square" : "squares"}`}
+        format={(n) => brushWords(n, grid)}
         less="Smaller brush"
         more="Larger brush"
         onChange={(brush) => set({ brush })}
@@ -282,7 +300,7 @@ export default function BuilderOptions() {
 
   return (
     <div ref={row} style={{ display: "contents" }}>
-      <OptionsStrip tool="Map builder" task={corners || stamped} line={asking ? { tone: "status", content: <Asking /> } : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain)) }} slots={slots} />
+      <OptionsStrip tool="Map builder" task={corners || stamped} line={asking ? { tone: "status", content: <Asking /> } : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid)) }} slots={slots} />
       {s.mode === "stamp" ? stamps.picker : null}
     </div>
   );

@@ -1,9 +1,12 @@
 import { useStore } from "zustand";
+import type { Scene } from "#shared/model.ts";
+import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { useShallow } from "zustand/react/shallow";
 import { Icon, type IconName } from "../../components/Icon.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ChoiceTiles, ConfirmButton, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChip } from "../measure/controls.tsx";
+import { HEX_LIMITS } from "../grid/words.ts";
 import { brushLabel, publishLabel, publishShort, type FogMode } from "./shapes.ts";
 import { BRUSH_WIDTHS, FOG_MODES, pickFogMode, useFogStore, type FogShapeKind } from "./store.ts";
 import { closeFogPolygon } from "./tool.tsx";
@@ -22,6 +25,16 @@ const SHAPES: readonly { value: FogShapeKind; label: string; glyph: IconName }[]
   { value: "brush", label: "Brush", glyph: "fogBrush" },
   { value: "room", label: "Builder room", glyph: "fogRoom" },
 ];
+
+/** Why Reveal room (the Builder room shape) is off, or null where it works: a hex scene has no room built on squares to flood. */
+export function revealRoomOff(scene: Pick<Scene, "gridShape">): string | null {
+  return isHex(sceneGrid(scene)) ? HEX_LIMITS.revealRoom : null;
+}
+
+/** A brush width's title, in the scene's cell word. */
+export function brushTitle(w: number, g: Grid): string {
+  return `${w} ${cellWord(g, w !== 1)} wide`;
+}
 
 /**
  * The fog tool's options (docs/design-v1-tool-options.md 9.6): what a drag
@@ -45,6 +58,8 @@ export default function FogOptions() {
   const actions = useRoomActions();
   if (!scene || !sceneId) return null;
   const set = fogState.setState;
+  const grid = sceneGrid(scene);
+  const roomOff = revealRoomOff(scene);
   const drafted = draft?.ops.length ?? 0;
 
   if (!scene.fogEnabled) {
@@ -67,7 +82,8 @@ export default function FogOptions() {
     );
   }
 
-  const hint = s.note ?? `${s.live ? `${HINTS[s.shape]} Players see it at once.` : HINTS[s.shape]}${visionOn(scene) ? ` ${EXPLORED_UNDO_HINT}` : ""}`;
+  // A brush or polygon the DM picked earlier is still there on a hex scene, so only the room shape's line is replaced.
+  const hint = s.note ?? (s.shape === "room" ? roomOff : null) ?? `${s.live ? `${HINTS[s.shape]} Players see it at once.` : HINTS[s.shape]}${visionOn(scene) ? ` ${EXPLORED_UNDO_HINT}` : ""}`;
   const corners = s.shape === "poly" && s.poly.length > 0;
   // A polygon with corners is a task: its controls lead, and the standing settings drop by 3 (9, "The task rule").
   const drop = corners ? 3 : 0;
@@ -102,7 +118,7 @@ export default function FogOptions() {
                 <ChoiceTiles<FogShapeKind>
                   label="Shape"
                   value={s.shape}
-                  options={SHAPES.map((o) => ({ value: o.value, label: o.label, glyph: <Icon name={o.glyph} /> }))}
+                  options={SHAPES.map((o) => ({ value: o.value, label: o.label, glyph: <Icon name={o.glyph} />, ...(o.value === "room" && roomOff ? { title: roomOff, disabled: true } : null) }))}
                   onChange={(shape) => set({ shape, poly: [], rect: null, stroke: [], note: null })}
                 />
               </PickCloses>
@@ -118,7 +134,7 @@ export default function FogOptions() {
               label="Brush width"
               value={s.width}
               onChange={(width) => set({ width })}
-              options={BRUSH_WIDTHS.map((w) => ({ value: w, label: brushLabel(w, feetPerCell), title: `${w} ${w === 1 ? "square" : "squares"} wide` }))}
+              options={BRUSH_WIDTHS.map((w) => ({ value: w, label: brushLabel(w, feetPerCell), title: brushTitle(w, grid) }))}
             />
           ),
         },

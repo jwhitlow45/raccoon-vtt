@@ -209,7 +209,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
         content: (
           <>
             {info}
-            {reading && settings ? <span style={{ color: theme.color.textMuted }}> · {diagonalLabel(settings.diagonal)}</span> : null}
+            {reading && settings ? <span style={{ color: theme.color.textMuted }}> · {diagonalLabel(settings.diagonal, scene ? sceneGrid(scene) : SQUARES, settings.feetPerCell)}</span> : null}
             {hex ? <span style={{ color: theme.color.textMuted }}> · {WALKING_NEEDS_SQUARES}</span> : null}
           </>
         ),

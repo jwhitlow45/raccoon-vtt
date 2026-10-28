@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { Token } from "#shared/model.ts";
+import type { Scene, Token } from "#shared/model.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { SCROLL_FOR_MORE_PX } from "../../canvas/TokenActionBar.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Empty } from "../../components/Empty.tsx";
@@ -9,10 +10,12 @@ import { Help, SectionLabel } from "../../components/Panel.tsx";
 import { Popover, usePopover, type PopoverSide, type Rect } from "../../components/Popover.tsx";
 import { Row, RowChevron } from "../../components/Row.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
+import { HEX_LIMITS } from "../grid/words.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
 import { Portrait } from "../encounter/parts.tsx";
 import { SheetDialog } from "../tokens/SheetDialog.tsx";
+import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
 import { letterOf } from "../../state/shortcuts.ts";
@@ -31,7 +34,30 @@ import { STEER_OPTIONS, steerWords } from "./tags.ts";
 export function AttachButton(props: { token: Token; onOpen?(open: boolean): void }) {
   const layout = useLayoutSize();
   const wide = layout.width >= theme.layout.wideMinWidth;
+  const scene = useRoomView((s) => s.view?.scenes[props.token.sceneId]);
+  const off = attachOff(scene);
+  if (off !== null) return <AttachOff reason={off} />;
   return wide ? <AttachPopover {...props} /> : <AttachSheet token={props.token} />;
+}
+
+/** Why Attach is off, or null where it works: riding and carrying are counted on squares until a later phase of hex grids. */
+export function attachOff(scene: Pick<Scene, "gridShape"> | undefined): string | null {
+  return scene !== undefined && isHex(sceneGrid(scene)) ? HEX_LIMITS.attach : null;
+}
+
+/** The button on a hex scene: still says Attach, takes no tap, and gives its reason to a screen reader through a hidden line it points at. */
+export function AttachOff(props: { reason: string }) {
+  const reasonId = useId();
+  return (
+    <>
+      <Button size="sm" disabled aria-describedby={reasonId} style={{ flex: "1 1 auto" }}>
+        Attach
+      </Button>
+      <span id={reasonId} style={VISUALLY_HIDDEN}>
+        {props.reason}
+      </span>
+    </>
+  );
 }
 
 function AttachPopover(props: { token: Token; onOpen?(open: boolean): void }) {

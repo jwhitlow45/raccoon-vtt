@@ -1,6 +1,7 @@
 import { useStore } from "zustand";
 import { LIMITS } from "#shared/limits.ts";
-import type { Trap, TrapAction, TrapZone } from "#shared/model.ts";
+import type { Scene, Trap, TrapAction, TrapZone } from "#shared/model.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { LEVEL_BANDS, trapPreset, type LevelBand } from "#shared/srd/traps.ts";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
@@ -9,6 +10,7 @@ import { lightAt, LIGHT_REACH_PX } from "../builder/lightTap.ts";
 import { sceneStamps, stampAt } from "../builder/stamps/rules.ts";
 import { doorUnder, sameDoor } from "../doors/doors.ts";
 import { DOOR_SLOP_PX } from "../doors/tap.ts";
+import { HEX_LIMITS } from "../grid/words.ts";
 import { ChoiceRows, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChip } from "../measure/controls.tsx";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
 import { trapCycle } from "../toolChoices.ts";
@@ -24,6 +26,11 @@ import { pickZone, trapSlot, ZONE_KINDS, type TrapDraft, type TrapPicking } from
  * add, the squares it hits, a door, light, creature or stamp it sets), the
  * next tap or drag picks it.
  */
+
+/** Why the Trap tool has nothing to place, or null where it works: zones are squares until a later phase of hex grids. */
+export function trapToolOff(scene: Pick<Scene, "gridShape"> | undefined): string | null {
+  return scene !== undefined && isHex(sceneGrid(scene)) ? HEX_LIMITS.trap : null;
+}
 
 function sceneTraps(ctx: ToolContext): Trap[] {
   const traps = ctx.getState().view?.traps ?? {};
@@ -141,6 +148,7 @@ function sameTarget(a: TrapAction, b: TrapAction): boolean {
 }
 
 function onDown(p: ToolPointer, ctx: ToolContext): void {
+  if (trapToolOff(ctx.scene)) return;
   const slot = ctx.scope.get(trapSlot);
   const st = slot.store.getState();
   const view = ctx.getState().view;
@@ -155,6 +163,7 @@ function drawing(st: { kind: ZoneKind; picking: TrapPicking | null }): "squares"
 }
 
 function onMove(p: ToolPointer, ctx: ToolContext): void {
+  if (trapToolOff(ctx.scene)) return;
   const slot = ctx.scope.get(trapSlot);
   const g = slot.gesture;
   if (!g) return;
@@ -171,6 +180,7 @@ function onMove(p: ToolPointer, ctx: ToolContext): void {
 }
 
 function onUp(p: ToolPointer, ctx: ToolContext): void {
+  if (trapToolOff(ctx.scene)) return;
   const slot = ctx.scope.get(trapSlot);
   const g = slot.gesture;
   slot.gesture = null;
@@ -219,6 +229,9 @@ function TrapOptions() {
   const picking = useStore(store, (s) => s.picking);
   const editing = useStore(store, (s) => s.paneId !== null);
   const pickName = useRoomView((s) => (picking ? (s.view?.traps[picking.trapId]?.name ?? null) : null));
+  const off = useRoomView((s) => trapToolOff(s.sceneId ? s.view?.scenes[s.sceneId] : undefined));
+
+  if (off !== null) return <OptionsStrip tool="Trap" line={{ tone: "hint", content: off }} slots={[]} />;
 
   if (picking) {
     return (
