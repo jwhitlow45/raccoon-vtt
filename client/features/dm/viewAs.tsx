@@ -5,7 +5,7 @@ import { Button } from "../../components/Button.tsx";
 import { IconButton } from "../../components/IconButton.tsx";
 import { Menu } from "../../components/Menu.tsx";
 import { menuAction } from "../../components/menuKeys.ts";
-import { Popover, usePopover, type Rect } from "../../components/Popover.tsx";
+import { Popover, usePopover, type PopoverSide, type Rect } from "../../components/Popover.tsx";
 import { useLayoutSize } from "../device/layout.ts";
 import { uiScale } from "../device/settings.ts";
 import { theme } from "../../lib/theme.ts";
@@ -110,7 +110,14 @@ function ViewAsMenu(props: { players: readonly Member[]; style: CSSProperties | 
   const viewAs = useScoped(viewAsSlot);
   const menu = usePopover({ kind: "menu" });
   const anchor = useRef<HTMLElement | null>(null);
-  const { ref, ...anchorProps } = menu.anchorProps;
+  // Toward the larger room, as Attach's list opens: the panel header's copy stands near the side panel's top, a bar's wherever it hangs.
+  const [side, setSide] = useState<PopoverSide>("above");
+  const { ref, onClick, onKeyDown, ...anchorProps } = menu.anchorProps;
+  // Down and Up open a menu without a click, so every way it opens decides first.
+  const decideSide = () => {
+    const r = anchor.current?.getBoundingClientRect();
+    if (r) setSide(r.top + r.height / 2 > window.innerHeight / 2 ? "above" : "below");
+  };
   return (
     <>
       <Button
@@ -119,13 +126,21 @@ function ViewAsMenu(props: { players: readonly Member[]; style: CSSProperties | 
           ref(el);
           anchor.current = el;
         }}
+        onClick={(e) => {
+          if (!menu.open) decideSide();
+          onClick(e);
+        }}
+        onKeyDown={(e) => {
+          if (!menu.open && (e.key === "ArrowDown" || e.key === "ArrowUp")) decideSide();
+          onKeyDown(e);
+        }}
         size="sm"
         icon="viewAs"
         style={props.style}
       >
         {VIEW_AS_A_PLAYER}
       </Button>
-      <Popover handle={menu} side="above" bound={viewportBound}>
+      <Popover handle={menu} side={side} bound={viewportBound}>
         <Menu
           label={VIEW_AS_A_PLAYER}
           sections={[{ key: "players", items: props.players.map((p) => ({ id: p.id, title: p.name, kind: "action" as const })) }]}
