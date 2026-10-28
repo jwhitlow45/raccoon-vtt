@@ -71,6 +71,8 @@ const run = {
   roomId: "",
   roomName: `E2E hex ${new Date().toISOString().slice(0, 19)}`,
   password: "",
+  /** The DM link's secret, which signs a second DM device in on a session of its own. */
+  dmKey: "",
   sceneId: "",
   goblin: randomUUID(),
   ogre: randomUUID(),
@@ -331,11 +333,36 @@ async function openRoomSettings(page: Page): Promise<Locator> {
   return menu;
 }
 
+/** The room socket of each DM page but the desk's own (dmSocket), so a wait reads that page's scene. */
+const dmPageSockets = new Map<Page, SocketWatch>();
+
+/**
+ * A phone signed in as the DM by the DM link, on a session of its own. A
+ * session gets 20 snapshots a minute (server/rooms/budgets.ts), and a size
+ * sweep's phone spends two at each size and scale: its load, which lands on
+ * the player scene, and its switch back. On the desk's session those came
+ * on top of the desk's own and the sweep before, and the switch past 20
+ * waited out the window, longer than viewScene waits.
+ */
+async function dmPhone(size: (typeof SIZES)[number]): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const res = await context.request.post(`${server.origin}/api/rooms/${run.roomId}/dm`, { headers: { Origin: server.origin }, data: { key: run.dmKey, memberId: dmSocket.you?.memberId } });
+  assert.ok(res.ok(), `the DM link answered ${res.status()}`);
+  const page = await context.newPage();
+  const socket = new SocketWatch("phone");
+  await socket.attach(context, page);
+  dmPageSockets.set(page, socket);
+  consoles.phone.attach(page);
+  return { context, page };
+}
+
 /** Shows the DM a scene from its row in the Scenes panel, and waits for its settings. */
 async function viewScene(page: Page, panel: Locator, sceneId: string): Promise<void> {
   const name = dmSocket.state?.scenes[sceneId]?.name ?? "";
+  const socket = page === dm ? dmSocket : dmPageSockets.get(page);
+  assert.ok(socket, "viewScene waits on the page's own socket");
   await panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first().click();
-  if (page === dm) await waitFor(`the DM on ${name}`, () => dmSocket.you?.sceneId === sceneId || null);
+  await waitFor(`the DM on ${name}`, () => socket.you?.sceneId === sceneId || null);
   const field = panel.getByRole("textbox", { name: "Scene name" }).last();
   await waitFor(`${name}'s settings`, async () => ((await field.inputValue()) === name ? true : null));
 }
@@ -415,6 +442,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const match = /\/r\/([0-9A-Z]{4}-[0-9A-Z]{4})#dm=/.exec(link);
     assert.ok(match, `DM link looks wrong: ${link}`);
     run.roomId = match[1]!.replace("-", "");
+    run.dmKey = link.slice(link.indexOf("#dm=") + "#dm=".length);
     await dm.getByLabel("I saved my DM link").check();
     await dm.getByRole("button", { name: "Continue to the room" }).click();
     await waitFor("the DM's snapshot", () => dmSocket.state);
@@ -848,15 +876,13 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
   test("HX4-5. Room settings, the new scene form on hexes, a hex scene's settings, Line up grid's options and the builder's line sit within 1 px at each size", async () => {
     const off: string[] = [];
-    let phoneContext: BrowserContext | null = null;
+    let phone: Awaited<ReturnType<typeof dmPhone>> | null = null;
     try {
       for (const size of SIZES) {
         let page = dm;
         if (size.touch) {
-          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
-          const pages = phoneContext.pages();
-          page = pages[0] ?? (await phoneContext.newPage());
-          if (pages.length === 0) consoles.phone.attach(page);
+          phone ??= await dmPhone(size);
+          page = phone.page;
         }
         for (const scale of SCALES) {
           const at = `${size.name} at ${scale * 100}%`;
@@ -899,7 +925,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
         }
       }
     } finally {
-      await phoneContext?.close();
+      await phone?.context.close();
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
