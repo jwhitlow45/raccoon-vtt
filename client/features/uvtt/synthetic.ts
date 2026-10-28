@@ -31,7 +31,8 @@ export type FileInput = {
   ppg?: number;
   walls?: P[][];
   objects?: P[][];
-  portals?: { a: P; b: P; closed?: boolean }[];
+  /** `position` defaults to the midpoint, as Dungeondraft writes it. Arkenforge writes the portal's size there. */
+  portals?: { a: P; b: P; closed?: boolean; position?: P }[];
   lights?: { at: P; range: number; color?: string; shadows?: boolean }[];
   image?: string;
 };
@@ -46,7 +47,7 @@ export function uvttFile(input: FileInput = {}): Record<string, unknown> {
     line_of_sight: input.walls ?? [],
     objects_line_of_sight: input.objects ?? [],
     portals: (input.portals ?? []).map((p) => ({
-      position: { x: (p.a.x + p.b.x) / 2, y: (p.a.y + p.b.y) / 2 },
+      position: p.position ?? { x: (p.a.x + p.b.x) / 2, y: (p.a.y + p.b.y) / 2 },
       bounds: [p.a, p.b],
       rotation: 0,
       closed: p.closed ?? true,

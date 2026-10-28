@@ -5,7 +5,8 @@ import { MAX_SCENE_CELLS, type FreeWallInput } from "#shared/protocol.ts";
 import { countChunksSplit } from "#shared/rules/walls.ts";
 import { count, GRID_SNAP_SQUARES, MERGE_SQUARES, SIMPLIFY_STEPS, WELD_SQUARES } from "./limits.ts";
 import { placeLights, type LightPlan, type SightSegment } from "./lights.ts";
-import type { Point, UvttMap } from "./schema.ts";
+import { doorsOf } from "./outlines.ts";
+import type { Point, UvttMap, UvttPortal } from "./schema.ts";
 import { clipLine, clipSegment, simplifyLine, snap } from "./simplify.ts";
 import { cutLong, WallGraph, type LatticeSegment, type SegKind } from "./snap.ts";
 
@@ -123,7 +124,7 @@ function lattice(p: Point): [number, number] {
 
 type Walls = { edges: Map<string, WallFeature>; free: { a: [number, number]; b: [number, number]; f: WallFeature }[]; welded: number; clipped: number };
 
-function buildWalls(map: UvttMap, frame: Frame, options: ImportOptions, tolerance: number): Walls {
+function buildWalls(map: UvttMap, portals: readonly UvttPortal[], frame: Frame, options: ImportOptions, tolerance: number): Walls {
   const graph = new WallGraph();
   const world = (p: Point): Point => ({ x: p.x - frame.shift.x, y: p.y - frame.shift.y });
   let clipped = 0;
@@ -140,7 +141,7 @@ function buildWalls(map: UvttMap, frame: Frame, options: ImportOptions, toleranc
       }
     }
   }
-  for (const portal of map.portals) {
+  for (const portal of portals) {
     const seg = clipSegment(world(portal.a), world(portal.b), frame.w, frame.h);
     if (!seg || seg[2] || seg[3]) clipped++;
     if (!seg) continue;
@@ -225,11 +226,12 @@ export function convertUvtt(map: UvttMap, options: ImportOptions, deps: { newWal
   const framed = frameOf(map);
   if (!framed.ok) return framed;
   const { frame } = framed;
+  const portals = doorsOf(map.portals);
   let walls: Walls | null = null;
   let tolerance: number = SIMPLIFY_STEPS[0];
   for (const step of SIMPLIFY_STEPS) {
     tolerance = step;
-    walls = buildWalls(map, frame, options, step);
+    walls = buildWalls(map, portals, frame, options, step);
     if (walls.free.length <= LIMITS.freeWallsPerScene) break;
   }
   if (!walls) return { ok: false, error: "This file has no map." };

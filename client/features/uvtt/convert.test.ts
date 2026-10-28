@@ -240,6 +240,27 @@ describe("portals", () => {
     assert.equal(open.summary.doors, 2);
     assert.equal(open.summary.windows, 0);
   });
+
+  test("a door Arkenforge draws as an outline of four portals imports as one door, on its wall", () => {
+    // The leaf on the wall at x = 10 and three sides off it, each portal's size in `position`, as Arkenforge writes them.
+    const sides = [
+      [p(10, 6), p(10, 5)],
+      [p(10, 5), p(9.82, 5)],
+      [p(9.82, 5), p(9.7, 5.65)],
+      [p(9.7, 5.65), p(9.82, 6)],
+    ] as const;
+    const portals = sides.map(([a, b]) => ({ a, b, position: p(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) }));
+    const outline = plan({ walls: [[p(10, 2), p(10, 5)], [p(10, 6), p(10, 9)]], portals });
+    assert.equal(outline.summary.doors, 1);
+    assert.deepEqual(edgeMap(outline)["10,5,w"], DOOR);
+    assert.equal(outline.walls.length, 0);
+  });
+
+  test("real doors joined around a corner, positioned at their midpoints, all import", () => {
+    const corner = plan({ portals: [{ a: p(1, 1), b: p(2, 1) }, { a: p(2, 1), b: p(3, 1) }, { a: p(1, 3), b: p(1, 2) }, { a: p(1, 2), b: p(1, 1) }] });
+    assert.equal(corner.summary.doors, 4);
+    assert.deepEqual(edgeMap(corner), { "1,1,n": DOOR, "2,1,n": DOOR, "1,1,w": DOOR, "1,2,w": DOOR });
+  });
 });
 
 describe("objects", () => {

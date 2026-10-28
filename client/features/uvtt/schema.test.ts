@@ -37,7 +37,7 @@ describe("reading a Universal VTT file", () => {
     assert.equal(result.map.pixelsPerGrid, 70);
     assert.equal(result.map.walls.length, 1);
     assert.equal(result.map.objects.length, 1);
-    assert.deepEqual(result.map.portals, [{ a: { x: 1, y: 1 }, b: { x: 2, y: 1 }, closed: false }]);
+    assert.deepEqual(result.map.portals, [{ a: { x: 1, y: 1 }, b: { x: 2, y: 1 }, closed: false, position: { x: 1.5, y: 1 } }]);
     assert.deepEqual(result.map.lights, [{ at: { x: 5, y: 5 }, range: 6, color: "ff112233", shadows: false }]);
   });
 
@@ -53,6 +53,7 @@ describe("reading a Universal VTT file", () => {
     assert.deepEqual(result.map.objects, []);
     assert.deepEqual(result.map.lights, []);
     assert.equal(result.map.portals[0]!.closed, true);
+    assert.equal(result.map.portals[0]!.position, null);
     const noOrigin = uvttFile();
     delete (noOrigin.resolution as Record<string, unknown>).map_origin;
     const read = readUvtt(noOrigin);
@@ -66,6 +67,12 @@ describe("reading a Universal VTT file", () => {
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.error, NOT_UVTT, JSON.stringify(raw));
     }
+    // A portal's `position` is only a hint, so a broken one reads as none.
+    const odd = uvttFile({ portals: [{ a: { x: 1, y: 1 }, b: { x: 2, y: 1 } }] });
+    (odd.portals as Record<string, unknown>[])[0]!.position = { x: "1.5", y: 1 };
+    const oddRead = readUvtt(odd);
+    assert.ok(oddRead.ok);
+    assert.equal(oddRead.map.portals[0]!.position, null);
     const bad = uvttFile({ walls: [[{ x: 1, y: 1 }]] });
     (bad.line_of_sight as unknown[][])[0]!.push({ x: "2", y: 1 });
     assert.equal(readUvtt(bad).ok, false);

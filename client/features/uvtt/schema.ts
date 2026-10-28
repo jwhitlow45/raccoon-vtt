@@ -15,7 +15,8 @@ import { count, MAX_FILE_LIGHTS, MAX_POINTS, MAX_POLYLINES, MAX_PORTALS, NO_IMAG
 
 export type Point = { x: number; y: number };
 
-export type UvttPortal = { a: Point; b: Point; closed: boolean };
+/** `position` is kept only to tell which exporter wrote the file (outlines.ts): Arkenforge writes a portal's size there, the others its midpoint. */
+export type UvttPortal = { a: Point; b: Point; closed: boolean; position: Point | null };
 export type UvttLight = { at: Point; range: number; color: string | null; shadows: boolean };
 
 export type UvttMap = {
@@ -51,6 +52,8 @@ const fileSchema = z.object({
         bounds: z.array(point).length(2),
         // Dungeondraft's "block light" switch. A portal that leaves it out is an ordinary door.
         closed: z.boolean().nullish(),
+        // Only a hint, so one that is not a point reads as none rather than refusing the file.
+        position: point.nullish().catch(null),
       }),
     )
     .max(MAX_PORTALS)
@@ -125,7 +128,12 @@ export function readUvtt(raw: unknown, options: { geometry?: boolean } = {}): Re
     pixelsPerGrid: f.resolution.pixels_per_grid,
     walls: (f.line_of_sight ?? []).map((line) => line.map((p) => ({ x: p.x, y: p.y }))),
     objects: (f.objects_line_of_sight ?? []).map((line) => line.map((p) => ({ x: p.x, y: p.y }))),
-    portals: (f.portals ?? []).map((p) => ({ a: { x: p.bounds[0]!.x, y: p.bounds[0]!.y }, b: { x: p.bounds[1]!.x, y: p.bounds[1]!.y }, closed: p.closed ?? true })),
+    portals: (f.portals ?? []).map((p) => ({
+      a: { x: p.bounds[0]!.x, y: p.bounds[0]!.y },
+      b: { x: p.bounds[1]!.x, y: p.bounds[1]!.y },
+      closed: p.closed ?? true,
+      position: p.position ? { x: p.position.x, y: p.position.y } : null,
+    })),
     lights: (f.lights ?? []).map((l) => ({ at: { x: l.position.x, y: l.position.y }, range: l.range, color: l.color ?? null, shadows: l.shadows ?? true })),
     environment: environmentOf(f.environment),
     image: f.image,
