@@ -152,13 +152,28 @@ describe("finding a map's drawn hex grid", () => {
         const r = detectHex(drawMap(map({ width: 1520, height: 1200, hexGrid: g })), { orient, onLook: (k) => looks.push(k) });
         assert.deepEqual(looks, [1, 2, 4], `width ${width}, ${orient}: the first two looks miss them`);
         assert.ok(r.found && Math.abs(r.cellPx - 100) / 100 < 0.005 && offCenter(g, r.center) < 1, `width ${width}, ${orient}: ${JSON.stringify(r.found ? [r.cellPx, r.center] : r)}`);
-        assert.ok(r.found && r.confidence >= MIN_CONFIDENCE && r.checked, "under the same confidence rules");
+        // Measured again at half size, a find stands as that measure says. One the half size cannot see is only offered.
+        assert.ok(r.found && (r.checked ? r.confidence >= MIN_CONFIDENCE : r.confidence <= UNCHECKED_MAX), `width ${width}, ${orient}: ${r.found ? r.confidence : ""}`);
       }
     }
     // On 1300 by 1000 the first look reads these lines' sides at different sizes, as the Trebia map's first look does, and the third still finds them.
     const g = hexes("rows", 100, { x: 9, y: 4 }, { width: 14, opacity: 0.6 });
     const r = detectHex(drawMap(map({ width: 1300, height: 1000, hexGrid: g })), { orient: "rows" });
     assert.ok(r.found && Math.abs(r.cellPx - 100) / 100 < 0.005, JSON.stringify(r.found ? r.cellPx : r));
+  });
+
+  test("a third look's find is measured again at half size: hexes 1.1% out of shape are refused, a sure find applies, and one the half size cannot see is only offered (D-261029-55)", () => {
+    // Astra's fixture (review FU35B-ASTRA-03): 150 px hex rows of 18 px lines squeezed 1.1%, which the quarter size alone took at 0.83.
+    const tall = drawMap(map({ height: Math.round(H * 1.011), hexGrid: hexes("rows", 150, { x: 380, y: 300 }, { width: 18, opacity: 0.6 }) }));
+    const looks: number[] = [];
+    const r = detectHex(stretched(tall, 1.011), { orient: "rows", onLook: (k) => looks.push(k) });
+    assert.deepEqual(looks, [1, 2, 4]);
+    assert.equal(!r.found && r.failed, "hexes out of shape");
+    const at = (width: number, orient: HexOrient) => detectHex(drawMap(map({ width: 1520, height: 1200, hexGrid: hexes(orient, 100, { x: 9, y: 4 }, { width, opacity: 0.6 }) })), { orient });
+    const sure = at(18, "columns");
+    assert.ok(sure.found && sure.checked && sure.confidence >= HIGH_CONFIDENCE, `measured at half size: ${JSON.stringify(sure.found ? [sure.confidence, sure.checked] : sure)}`);
+    const unseen = at(14, "rows");
+    assert.ok(unseen.found && !unseen.checked && unseen.confidence <= UNCHECKED_MAX, `the half size cannot measure these: ${JSON.stringify(unseen.found ? [unseen.confidence, unseen.checked] : unseen)}`);
   });
 
   test("thick lines turned a third of a degree, seen only at a quarter of the size, are refused there as in the image's own pixels", () => {

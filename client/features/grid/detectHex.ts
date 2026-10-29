@@ -207,14 +207,33 @@ export function detectHex(px: Pixels, options: HexDetectOptions): HexDetection {
     // finely, and a real map 3.6% too wide passed there. Thick lines can
     // read so once (the Trebia map does at full size), not at both sizes.
     if (k === 4 && differentSizes(full) && differentSizes(last)) break;
+    const half = frame;
     frame = { L: halved(frame.L, frame.w, w, h), w, h };
     options.onLook?.(k);
     const look = search(frame.L, w, h, undefined, k, options.onCandidate);
-    if (look.found) return placed(look, k, options.orient);
+    if (look.found) return k === 2 ? placed(look, 2, options.orient) : measuredAtHalf(half, look, lineReach(w, h), options.orient);
     if (seenWhole(look)) break;
     last = look;
   }
   return full;
+}
+
+/**
+ * A third look's find, measured again at half size on its own lattice
+ * (D-261029-55). A quarter of the size cannot measure a stretch of 1%,
+ * so hexes 1.1% out of shape passed there as sure. At half size, with the
+ * line filter's reach doubled to hold the lines the quarter saw, the
+ * three families' sizes and the sides' lean are measured as finely as
+ * the second look measures them, and only that period is tried, so the
+ * wider reach finds nothing new. Measured so, the find stands as that
+ * measure says, out of shape refused. A find the half size cannot see is
+ * held to medium: offered, never applied.
+ */
+function measuredAtHalf(half: { L: Uint8Array; w: number; h: number }, quarter: HexFound, quarterReach: number, orient: HexOrient): HexDetection {
+  const again = search(half.L, half.w, half.h, undefined, 2, undefined, { reach: 2 * quarterReach, period: quarter.cellPx });
+  if (again.found) return placed(again, 2, orient);
+  if (seenWhole(again) || differentSizes(again)) return again;
+  return placed({ ...quarter, confidence: Math.min(quarter.confidence, UNCHECKED_MAX), checked: false }, 4, orient);
 }
 
 function differentSizes(d: HexDetection): boolean {
@@ -255,10 +274,10 @@ function placed(found: HexFound, k: number, orient: HexOrient): HexFound {
  * pixels, or why none. Limits in pixels are the image's, so on a frame `k`
  * times smaller they are `k` times tighter.
  */
-function search(L: Uint8Array, W: number, H: number, stepOption: number | undefined, k: number, onCandidate: HexDetectOptions["onCandidate"]): HexDetection {
+function search(L: Uint8Array, W: number, H: number, stepOption: number | undefined, k: number, onCandidate: HexDetectOptions["onCandidate"], only?: { reach: number; period: number }): HexDetection {
   const minC = Math.max(MIN_HEX_CELL_PX, Math.max(W, H) / MAX_CELLS);
   const maxC = Math.min(W, H) / 3;
-  const d = lineReach(W, H);
+  const d = only?.reach ?? lineReach(W, H);
   // A side 30 degrees off level is 1 / cos 30 thicker down than across.
   const dv = Math.ceil(d / HEX_S);
   const step = Math.max(1, Math.floor(stepOption ?? defaultStep(W, H)));
@@ -281,6 +300,10 @@ function search(L: Uint8Array, W: number, H: number, stepOption: number | undefi
     return fit;
   };
   for (const pol of ["dark", "light"] as const) {
+    if (only) {
+      tryAt(only.period, pol);
+      continue;
+    }
     const tried: number[] = [];
     for (const prof of all[pol].full) {
       for (const p of candidatePeriods(prof.q, minP, maxP, 6)) {
