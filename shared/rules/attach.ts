@@ -76,6 +76,17 @@ export function insideHolder(g: Grid, carried: PlacedToken, holder: PlacedToken)
   return a.x >= b.x - EPS && a.y >= b.y - EPS && a.x + a.w <= b.x + b.w + EPS && a.y + a.h <= b.y + b.h + EPS;
 }
 
+/** Whether a carried token's full footprint lies on what its holder stands on: its squeezed squares or hexes while it squeezes. */
+function onStand(g: Grid, carried: PlacedToken, holder: PlacedToken): boolean {
+  if (isHex(g)) {
+    const stand = new Set(occupiedHexes(g, holder).map(hexKey));
+    return fullHexes(g, carried).every((h) => stand.has(hexKey(h)));
+  }
+  const a = fullRect(g, carried);
+  const b = footprintRect(g, holder);
+  return a.x >= b.x - EPS && a.y >= b.y - EPS && a.x + a.w <= b.x + b.w + EPS && a.y + a.h <= b.y + b.h + EPS;
+}
+
 /** Whether two full footprints share any area: on hexes, any hex. */
 export function overlaps(g: Grid, a: PlacedToken, b: PlacedToken): boolean {
   if (isHex(g)) {
@@ -370,9 +381,13 @@ type Walking = Sized & FootprintToken & Pick<Token, "id" | "sceneId" | "attached
  * on the ground under its own footprint (movement.ts `groundStart`). One
  * whose move keeps its seat, a step to another seat on the holder or a
  * change of height there, starts at the seat, as it stays on the holder
- * (review FU20A-OP-7). With no `to`, as for a drag's search, which has
- * no end yet, the walk is taken to leave. An op stored before version 17
- * (migrate.ts walksOffFromGround) always starts at the seat.
+ * (review FU20A-OP-7). On a squeezed holder, from op version 29, only a
+ * move onto the squares or hexes it stands on keeps its seat, so a Get off
+ * into the band of its full footprint beside the squeeze starts on the
+ * ground too (review DP34-ASTRA-05). The link still reads the full
+ * footprint. With no `to`, as for a drag's search, which has no end yet,
+ * the walk is taken to leave. An op stored before version 17 (migrate.ts
+ * walksOffFromGround) always starts at the seat.
  */
 export function walkerFor<T extends Walking>(
   state: { tokens: Readonly<Record<string, Walking | undefined>>; buildChunks: Parameters<typeof footprintGround>[0]; scenes: Readonly<Record<string, Pick<Scene, "gridShape"> | undefined>> },
@@ -389,7 +404,8 @@ export function walkerFor<T extends Walking>(
   const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}), ...(squeezed ? { squeeze: true as const } : {}) };
   const scene = state.scenes[token.sceneId];
   const g = scene ? sceneGrid(scene) : SQUARES;
-  const leaves = walksOffFromGround(off.opVersion) && (off.to === undefined || !seatHolds(g, link.kind, { ...token, x: off.to.x, y: off.to.y }, holder));
+  const there = off.to && { ...token, x: off.to.x, y: off.to.y };
+  const leaves = walksOffFromGround(off.opVersion) && (!there || !seatHolds(g, link.kind, there, holder) || (squeezed && !onStand(g, there, holder)));
   return { ...token, footing: "ground", offHolder, ...(leaves ? { groundStart: true as const } : {}) } as T & Walker;
 }
 
