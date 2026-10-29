@@ -17,6 +17,7 @@ import { routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegC
 import { groupWalkWorld, publicToken, seenWhereMoved, type WalkViewer } from "#shared/rules/walkWorld.ts";
 import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, walkStart, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
 import { dragLead } from "../attach/groups.ts";
+import { carriedIndex } from "#shared/rules/attach.ts";
 import { towingWord, walkersFor } from "../attach/walk.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
 import { dragReading, extraWords, joinWords } from "./movement.ts";
@@ -134,9 +135,9 @@ type Walked = { sim: RoomState; seen: DropView; walker: Token; left: PathStop[];
 
 /**
  * A leg worked out: as drawn and read, what it adds to the walk's extra
- * words, and where it leaves the walk. On hexes, `along` is the walk of each
- * token the leg takes along (moveLeg.ts planMove), since what sits on a
- * squeezing mount moves seat as it goes (D-261029-52).
+ * words, and where it leaves the walk. `along` is the walk of each token the
+ * leg takes along (moveLeg.ts planMove), since what sits on a squeezing
+ * mount moves seat as it goes (D-261029-52, D-261029-53).
  */
 type Step = { key: string; leg: WalkLeg; words: string[]; extraFt: number; after: Walked; along?: ReadonlyMap<string, readonly RoutePoint[]> };
 
@@ -330,9 +331,9 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   // rider sits on it, and are drawn from the rider's place.
   const start = rulerLead(view, input, anchor);
   const shift = { x: start.x - anchor.x, y: start.y - anchor.y };
-  // On hexes a rider's seat moves while its mount squeezes (D-261029-52), so each leg reads where it sits as the leg starts,
-  // and is drawn along its own walk. On squares the seat never moves, and the start's offset holds.
-  const seated = (shift.x !== 0 || shift.y !== 0) && isHex(gridOfView(view, start.sceneId));
+  // A rider's seat moves while its mount squeezes (D-261029-52 on hexes, D-261029-53 on squares), so each leg reads where it
+  // sits as the leg starts, and is drawn along its own walk.
+  const seated = start.id !== anchor.id;
   const draw = (leg: WalkLeg, by: Point, step?: Step): WalkLeg => {
     const route = seated ? step?.along?.get(anchor.id) : undefined;
     if (route && route.length === leg.corners.length + 2) return { ...leg, from: pointOf(route[0]!), to: pointOf(route[route.length - 1]!), corners: route.slice(1, -1).map(pointOf) };
@@ -354,7 +355,9 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
     const stop = on ? tokenStop(gridOfView(view, start.sceneId), on) : drawn;
     const rider = seated ? at.sim.tokens[anchor.id] : undefined;
-    const by = rider?.attached ? { x: at.walker.x - rider.x, y: at.walker.y - rider.y } : shift;
+    const now = rider?.attached ? { x: at.walker.x - rider.x, y: at.walker.y - rider.y } : shift;
+    // The start's offset, exactly, while the rider keeps its seat, and the new one once a squeeze has moved it.
+    const by = Math.abs(now.x - shift.x) > 1e-6 || Math.abs(now.y - shift.y) > 1e-6 ? now : shift;
     const raw = { x: stop.x - size.w / 2 + by.x, y: stop.y - size.h / 2 + by.y };
     if (waiting) {
       legs.push(draw({ from: waiting, to: raw, corners: [], ft: 0, none: false, searching: true }, by));
@@ -446,7 +449,7 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, tar
       : null;
   const corners = trace ? trace.slice(1, -1).map(({ x, y }) => ({ x, y })) : [];
   const next = simulated(view, at.sim, role, token, plan, ownRuler(input) ? undefined : unseenAtStart(view, input));
-  const along = isHex(gridOfView(at.sim, token.sceneId)) ? carriedWalks(at.sim, role, plan) : undefined;
+  const along = carriedIndex(at.sim.tokens).has(token.id) ? carriedWalks(at.sim, role, plan) : undefined;
   const left = [...at.left];
   if (move) left.push(stopLeft(next.sim, token.id, left, { x: move.x, y: move.y, elevation, ...(corners.length > 0 ? { via: corners.flatMap((c) => [c.x, c.y]) } : {}) }));
   const counter = read ? { h: at.counter.h + read.diag[0], v: at.counter.v + read.diag[1] } : at.counter;

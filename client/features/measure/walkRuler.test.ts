@@ -4,7 +4,8 @@ import { SQUARES } from "#shared/rules/grid.ts";
 import { chunkKey, holderTileKey } from "#shared/keys.ts";
 import type { EdgeFeature, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import { DM, P1, P2, reveal, template, token } from "#shared/testutil.ts";
+import { DM, P1, P2, reveal, room as baseRoom, scene, template, token } from "#shared/testutil.ts";
+import { wall } from "#shared/discoveryTestutil.ts";
 import { rasterizeFogOps } from "#shared/rules/fog.ts";
 import { line, world } from "../movement/testing.ts";
 import { keptDrawing, keptStops, tokenStop, type RulerStop } from "./ruler.ts";
@@ -441,5 +442,28 @@ describe("the walk a ruler holds (review LP2L2-ASTRA-1)", () => {
     assert.equal(moved, before, "the token moved, the ruler is the same");
     assert.notEqual(heldKey("k1", [{ x: 1.5, y: 2.5, tokenId: "goblin" }]), before, "another token is another start");
     assert.deepEqual(run([[done, before], [searching, moved]]), [done, done]);
+  });
+});
+
+describe("the walking ruler from a rider of a Large mount into a corridor one square wide (D-261029-53)", () => {
+  test("from every seat its legs run where the rider sits, on the mount's square in the corridor, never across the rock", () => {
+    const s = baseRoom({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
+    s.buildChunks = {};
+    const runs: [[number, number], [number, number]][] = [[[8, 0], [8, 10]], [[8, 11], [8, 20]], [[16, 0], [16, 10]], [[16, 11], [16, 20]], [[8, 10], [16, 10]], [[8, 11], [16, 11]]];
+    runs.forEach(([a, b], i) => wall(s, `fu35ru${String(i).padStart(6, "0")}`, a, b));
+    const rock = (x: number, y: number) => x >= 8 && x < 16 && (y < 10 || y >= 11);
+    s.tokens.horse = token("horse", { size: "large", x: 3, y: 9, name: "Warhorse" });
+    for (const [x, y] of [[3, 9], [4, 9], [3, 10], [4, 10]] as const) {
+      s.tokens.brom = token("brom", { x, y, name: "Brom", attached: { to: "horse", kind: "ride", steer: true } });
+      const m = measureWalk({ view: s, sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "brom" }, free(12, 10)], viewer: { role: "dm" }, everything: true })!;
+      assert.equal(m.legs.length, 1);
+      const leg = m.legs[0]!;
+      for (const p of [leg.from, ...leg.corners, leg.to]) {
+        const cells = [[Math.floor(p.x), Math.floor(p.y)], [Math.ceil(p.x + 1 - 1e-9) - 1, Math.ceil(p.y + 1 - 1e-9) - 1]];
+        assert.ok(cells.every(([cx, cy]) => !rock(cx!, cy!)), `${p.x}, ${p.y} from seat ${x}, ${y}: never across the rock`);
+      }
+      // The drag aims the mount by the rider's place on it, and the rider sits on whichever corridor square it squeezes onto.
+      assert.ok(leg.to.y === 10 && Number.isInteger(leg.to.x) && leg.to.x >= 8 && leg.to.x < 16, `from seat ${x}, ${y}: ${leg.to.x}, ${leg.to.y} on the mount's square in the corridor`);
+    }
   });
 });
