@@ -8,7 +8,7 @@ import { encodeTile, TILE_BYTES, TILE_SUB } from "#shared/rules/fog.ts";
 import { ctxOf } from "../../features/areas/volumeTesting.ts";
 import { FogView } from "./fogView.ts";
 import type { LiveSub } from "./stand.ts";
-import { BoardVolumes, viewBoxOf, viewKeys, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
+import { BoardVolumes, standOf, viewBoxOf, viewKeys, type VolumeEntry, type VolumesNow, type VolumeWorld } from "./volumes.ts";
 
 /*
  * The board's areas standing as their real shapes
@@ -229,6 +229,37 @@ describe("the board's areas standing as their real shapes", () => {
     assert.equal(shows(v2.now(0, VIEW, w1)), " waiting", "and not where it is not");
     asTheBoard(v2, w1, VIEW);
     assert.equal(shows(v2.now(0, VIEW, w1)), "a");
+  });
+
+  test("FU39-C: a passing old stand test reports no change while its newly visible buckets are undrawn (ISOA2-ASTRA-03-SURVIVOR)", () => {
+    const v = new BoardVolumes();
+    const open = fogBut([]);
+    const w0 = world(open.view, open.tiles);
+    const area = entry(sphere("a", 16, 16, 60));
+    const left = { x0: -18, y0: -1e4, x1: -12, y1: 1e4 };
+    v.sync([area], w0);
+    asTheBoard(v, w0, left);
+    assert.equal(shows(v.now(0, left, w0)), "a");
+    const old = v.volumeOf("a")!;
+    assert.ok(viewKeys(old, 0, VIEW).some((key) => old.drawnNow(key, 0) === null));
+
+    const same = fogBut([[0, 0]]);
+    const w1 = world(same.view, same.tiles);
+    v.sync([area], w1);
+    assert.notEqual(v.volumeOf("a"), old, "a replacement volume must build");
+    assert.equal(shows(v.now(0, VIEW, w1)), " waiting");
+    const retest = standOf(old, w1.fog, w1.live);
+    assert.equal(retest.result, null, "the old footprint needs sliced work");
+    // A passing retest cannot stand the old volume without the missing buckets.
+    for (let i = 0; retest.result === null && i < 1_000; i++) {
+      const step = v.step(0, VIEW, w1, -Infinity);
+      assert.equal(step.more, true);
+      assert.equal(shows(v.now(0, VIEW, w1)), " waiting");
+      assert.equal(step.changed, false, "an undrawn old volume must not request another layout");
+    }
+    assert.equal(retest.result, true, "the assertion covered a completed passing retest");
+    asTheBoard(v, w1);
+    assert.equal(shows(v.now(0, VIEW, w1)), "a");
   });
 
   test("a turn's drawing is made once: a later visit to that turn stands at once", () => {
