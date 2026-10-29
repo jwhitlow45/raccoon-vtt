@@ -44,6 +44,8 @@ import { SheetHeader } from "../components/SheetHeader.tsx";
 import { NOTICE_TONES } from "../components/tones.ts";
 import { addsWords, useTooltip } from "../components/Tooltip.tsx";
 import { QuietLoadNotice } from "./QuietLoadNotice.tsx";
+import { keptMapFoot, putToastHosts } from "./toastPlacement.ts";
+import { BlackoutChip } from "./BlackoutChip.tsx";
 import { Loading } from "../components/Loading.tsx";
 import { ScrollStrip } from "../components/ScrollStrip.tsx";
 import { Sheet, paneBodyPadding, type SheetMode } from "../components/Sheet.tsx";
@@ -1408,9 +1410,13 @@ function TopBar(props: {
   const [strip, setStrip] = useState<HTMLDivElement | null>(null);
   const recordOverflow = useRecordOverflow();
   const { width } = useLayoutSize();
+  // The layout width at which the full blackout notice last overflowed the row.
+  const [blackoutShortUpTo, setBlackoutShortUpTo] = useState(0);
+  // In the compact form the blackout reminder takes the DM chip's place.
+  const blackoutShort = role === "dm" && blackout && width <= blackoutShortUpTo;
   // The layout width at which the DM's whole chip last overflowed the row: up to it, the chip is its dot.
   const [dmDotUpTo, setDmDotUpTo] = useState(0);
-  const dmDot = role === "dm" && width <= dmDotUpTo;
+  const dmDot = role === "dm" && (blackoutShort || width <= dmDotUpTo);
   // On a phone, the width at which the row still overflowed with the chip's dot: up to it, the gaps tighten.
   const [tightUpTo, setTightUpTo] = useState(0);
   // And the width at which the row still overflowed with tight gaps: up to it, the View button folds into the room's menu.
@@ -1442,8 +1448,9 @@ function TopBar(props: {
     const tuck = last ? Math.max(0, -parseFloat(getComputedStyle(last).marginRight) || 0) : 0;
     const overflow = row.scrollWidth - row.clientWidth - tuck;
     if (overflow <= 0) return;
-    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the chip's name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu, and from 900 px up the gaps' room and the View button last.
+    // The strip leaves first. Once it is in the band, this runs again with the row it left. Then the blackout notice folds into the DM chip's place, or the chip loses its name, then on a phone the gaps' room and then the View button, which the room's menu still reaches, then Full screen, which the Menu and a key still reach, then the Phase menu, and from 900 px up the gaps' room and the View button last.
     if (measured) recordOverflow(layoutWidth(), overflow);
+    else if (role === "dm" && blackout && !blackoutShort) setBlackoutShortUpTo(layoutWidth());
     else if (role === "dm" && !dmDot) setDmDotUpTo(layoutWidth());
     else if (isoOffered && props.compact && !tight) setTightUpTo(layoutWidth());
     else if (isoOffered && props.compact && props.canFit && !viewFolded) setViewFoldUpTo(layoutWidth());
@@ -1451,7 +1458,7 @@ function TopBar(props: {
     else if (phaseMenu) setPhaseOffUpTo(layoutWidth());
     else if (isoOffered && !props.compact && !tight) setWideTightUpTo(layoutWidth());
     else if (isoOffered && !props.compact && props.canFit && !viewFolded) setWideFoldUpTo(layoutWidth());
-  }, [checks, measured, recordOverflow, role, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
+  }, [checks, measured, recordOverflow, role, blackout, blackoutShort, dmDot, props.compact, props.canFit, tight, viewFolded, fullscreen, phaseMenu]);
   useLayoutEffect(() => {
     const row = rowRef.current;
     if (!checks || !row) return;
@@ -1509,12 +1516,8 @@ function TopBar(props: {
         >
           {name}
         </h1>
-        {role ? <YouChip dm={role === "dm"} dot={role === "dm" ? dmDot : props.chipDot} /> : null}
-        {role === "dm" && blackout ? (
-          <Chip outline={theme.color.danger} color={theme.color.dangerText}>
-            Players see black
-          </Chip>
-        ) : null}
+        {role && !blackoutShort ? <YouChip dm={role === "dm"} dot={role === "dm" ? dmDot : props.chipDot} /> : null}
+        {role === "dm" && blackout ? <BlackoutChip compact={blackoutShort} /> : null}
         <div style={{ flex: 1 }} />
         {/* Once Isometric is offered, View or Fit always follows them on a scene, so they keep their whole width. */}
         {props.undo ? <UndoButtons tuck={!(isoOffered && props.canFit)} /> : null}
@@ -1790,7 +1793,7 @@ function Toasts(props: {
   const turned = Date.now() - turn.current.at < TURN_MS;
   // The places from the render before, the same again when a render repeats, so this stays pure.
   const placed = useRef<ToastPlaces>(NO_TOAST_PLACES);
-  // The foot of the toasts at the notices' top as last drawn, in the chrome's px, so a toast never starts under the column's card over them (review LP18-TO-4).
+  // The foot of kept map toasts, excluding those still waiting for their card, so only a toast staying above can block the move below (reviews LP18-TO-4 and FU23B-F2).
   const mapFoot = useRef<number | null>(null);
   // A card that comes with its toast is measured a render after it, so the toast counts as new for a moment (review LP18-TO-5).
   const cardMs = cardWaitMs();
@@ -1864,13 +1867,13 @@ function Toasts(props: {
     }
     const put = (stack: HTMLElement | null, list: readonly Toast[]) => {
       if (!stack) return;
-      let at: ChildNode | null = stack.firstChild;
-      for (const t of list) {
-        const host = hosts.current.get(t.id);
-        if (!host) continue;
-        if (host !== at) stack.insertBefore(host, at);
-        at = host.nextSibling;
-      }
+      putToastHosts(
+        stack,
+        list.flatMap((t) => {
+          const host = hosts.current.get(t.id);
+          return host ? [host] : [];
+        }),
+      );
     };
     put(stacks.notices.stack.current, overMap);
     put(stacks.layer.stack.current, low);
@@ -1883,11 +1886,16 @@ function Toasts(props: {
       for (const id of drop) ui.dismissToast(id);
     }
     const notices = stacks.notices.box.current;
-    mapFoot.current = overMap.length > 0 && notices ? notices.getBoundingClientRect().bottom / zoom : null;
+    const mapBoxes = overMap.flatMap((t) => {
+      const box = hosts.current.get(t.id)?.firstElementChild?.getBoundingClientRect();
+      return box ? [{ id: t.id, bottom: box.bottom }] : [];
+    });
+    mapFoot.current = keptMapFoot(mapBoxes, placed.current.awaitCard, zoom);
     // The foot of the toasts over the map, at the top of the notices or in the layer, which the clearing move leaves its token below (barDock.ts clearShift, review LP19-BS-3).
     const layerBox = lowAt !== null ? stacks.layer.box.current : null;
     layerFoot.current = layerBox && low.length > 0 ? layerBox.getBoundingClientRect().bottom / zoom : null;
-    const feet = [mapFoot.current, layerFoot.current].filter((f): f is number => f !== null);
+    const allMapFoot = overMap.length > 0 && notices ? notices.getBoundingClientRect().bottom / zoom : null;
+    const feet = [allMapFoot, layerFoot.current].filter((f): f is number => f !== null);
     spanToast.foot = feet.length > 0 ? Math.max(...feet) : null;
     // A toast that just showed over the bar's header takes its place again under it, on a render before the browser paints. While the bar opens, so does every toast already showing there (review LP19-Q1).
     const opening = barOpening(spanToast.shownAt, Date.now());

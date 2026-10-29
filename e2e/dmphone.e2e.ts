@@ -1187,11 +1187,15 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       await dm.waitForTimeout(300);
       await springs();
       await toast.waitFor();
+      // FU39-B: reparenting the toast as the pane changes shape keeps its action focused.
+      await save.focus();
+      assert.equal(await save.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true);
       await dm.setViewportSize({ width: 844, height: 390 });
       await dm.waitForTimeout(800);
       const sideways = await rectOf(toast);
       assert.ok(sideways.top >= 0 && sideways.bottom <= 390, `turned sideways, the trap's toast stands at ${sideways.top} to ${sideways.bottom}, off the screen`);
       assert.ok(await wholeInReach(save), "turned sideways, the trap's Save and damage is out of reach");
+      assert.equal(await save.evaluate((el) => el === (el as unknown as { ownerDocument: { activeElement: unknown } }).ownerDocument.activeElement), true, "FU39-B: moving the toast blurred Save and damage");
       await shots.take(dm, "dmphone-lp18-pane-toast-turned");
     } finally {
       await dm.setViewportSize({ width: 390, height: 844 });
@@ -1216,11 +1220,18 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
     await waitFor("the trap and the scout in the DM's view", () => (dmSocket.state?.traps[trapId] && dmSocket.state.tokens[walker] ? true : null));
     try {
       assert.equal((await column(dm)).cards.length, 0, "the column shows no card before the trap goes off");
+      // FU39-B: a kept short toast above the card must not inherit the waiting trap toast's longer foot.
+      await dm.evaluate(() => ((globalThis as unknown as { rvttToastCardMs?: number }).rvttToastCardMs = 0));
+      await whisperFromPat("Wait here.");
+      const kept = dm.locator("[data-toast]").filter({ hasText: "Wait here." }).first();
+      await kept.waitFor();
+      await dm.evaluate(() => delete (globalThis as unknown as { rvttToastCardMs?: number }).rvttToastCardMs);
       await ops.send({ t: "token.move", tokenId: walker, x: cell.x, y: cell.y });
       const toast = dm.locator("[data-toast]").filter({ hasText: "Stepstone went off: Scout." }).first();
       const card = dm.getByRole("group", { name: "Stepstone went off" }).first();
       await toast.waitFor();
       await card.waitFor();
+      assert.ok((await rectOf(kept)).bottom < (await rectOf(card)).bottom, "FU39-B: the kept toast must end above the card's foot");
       // Read as both show and again once nothing is moving, so a toast that slid under the card late, or moved again after, is caught.
       for (const when of ["as they show", "after 900 ms"]) {
         if (when !== "as they show") await dm.waitForTimeout(900);
@@ -1235,6 +1246,7 @@ describe("raccoon-vtt: a DM runs the session from a phone", { timeout: 600_000 }
       for (const b of buttons) assert.ok(await wholeInReach(b), `${(await b.textContent()) ?? "a button"} is out of reach`);
       await shots.take(dm, "dmphone-fu23b-trap-toast-under-its-card");
     } finally {
+      await dm.evaluate(() => delete (globalThis as unknown as { rvttToastCardMs?: number }).rvttToastCardMs);
       for (const due of dmSocket.state?.traps[trapId]?.rig?.due ?? []) await ops.send({ t: "trap.settle", trapId, due: due.id });
       await ops.send({ t: "trap.delete", trapId });
       await ops.send({ t: "token.delete", tokenId: walker });

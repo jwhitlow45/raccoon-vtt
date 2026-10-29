@@ -1049,7 +1049,20 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
       const fromBar = bar.getByRole("group", { name: "Read more" }).getByRole("button", { name: VIEW_AS_A_PLAYER, exact: true });
       wrong.push(...(await openPlayers(dm, fromBar, "the bar at 1440 x 900", true)));
       await shots.take(dm, "viewas-list-bar-1440x900");
+      const savedView = await dm.evaluate((id) => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem(`rvtt.view.${id}`), run.roomId);
       await dm.getByRole("menuitem", { name: "Ben", exact: true }).click();
+      // FU39-B: the hook changes the preview's memory, leaving the DM's pick and turns saved as they were.
+      const preview = dm.locator('dialog[aria-label="Viewing as Ben"]');
+      await preview.locator(".konvajs-content").first().waitFor();
+      await dm.evaluate(() => {
+        const hook = (globalThis as unknown as { __rvttIsoHook: { pick(p: string): void; turn(t: number): void } }).__rvttIsoHook;
+        hook.pick("isometric");
+        hook.turn(2);
+      });
+      const previewView = preview.getByRole("button", { name: "View: Isometric", exact: true });
+      await previewView.waitFor();
+      await waitFor("FU39-B: the preview turned halfway", async () => ((await previewView.locator("svg").evaluate((el) => (el as unknown as { style: { transform: string } }).style.transform)) === "scale(-1, -1)" ? true : null));
+      assert.equal(await dm.evaluate((id) => (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage.getItem(`rvtt.view.${id}`), run.roomId), savedView, "FU39-B: preview hook overwrote the DM's view");
       await previewShows("Ben", run.benId, "bar's list", fromBar);
 
       await openSideTab(dm, "Token");

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
+import type { StoreApi } from "zustand/vanilla";
 import { ISO_TEST_FLAG } from "../../features/view/choice.ts";
-import { pickView, turnView, type ViewPick } from "../../features/view/store.ts";
+import { pickView, turnView, withPick, withTurn, type StoredView, type ViewPick } from "../../features/view/store.ts";
 import type { Turn } from "../../lib/view.ts";
 import type { Item } from "./buckets.ts";
 import type { VolumesNow } from "./volumes.ts";
@@ -98,18 +99,32 @@ function layoutOf(r: Reported | null): BoardLayout | null {
 }
 
 /** Installs `__rvttIsoHook` while the test flag is set. */
-export function useIsoTestHook(key: string, sceneId: string): void {
+export function useIsoTestHook(key: string, sceneId: string, memory?: StoreApi<StoredView> | null): void {
   const on = flagged();
   useEffect(() => {
     if (!on) return;
     return installHook({
-      pick: (pick) => pickView(key, pick === "follow" ? null : pick),
-      turn: (turn) => turnView(key, sceneId, turn),
+      ...viewTestHook(key, sceneId, memory),
       layout: () => layoutOf(boards.at(-1)?.last ?? null),
       volumes: () => {
         const r = boards.at(-1)?.last;
         return r ? { standing: r.volumes?.standing.size ?? 0, waiting: r.volumes?.waiting ?? false } : null;
       },
     });
-  }, [on, key, sceneId]);
+  }, [on, key, sceneId, memory]);
+}
+
+/** A board's view controls, targeting the same view state as its menu. */
+export function viewTestHook(key: string, sceneId: string, memory?: StoreApi<StoredView> | null): Hook {
+  return {
+    pick: (pick) => {
+      const next = pick === "follow" ? null : pick;
+      if (memory) memory.setState(withPick(memory.getState(), next), true);
+      else pickView(key, next);
+    },
+    turn: (turn) => {
+      if (memory) memory.setState(withTurn(memory.getState(), sceneId, turn), true);
+      else turnView(key, sceneId, turn);
+    },
+  };
 }

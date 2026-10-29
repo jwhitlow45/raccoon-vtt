@@ -381,7 +381,7 @@ describe("the board's view (ISO-5's hooks)", () => {
   });
 
   test("the test hook picks for the display by the view it is given, not by its camera, which comes later", () => {
-    assert.match(read("canvas/Stage.tsx"), /useIsoTestHook\(props\.view !== undefined \? displayViewKey\(roomId\) : viewKey\(roomId\), scene\.id\);/);
+    assert.match(read("canvas/Stage.tsx"), /useIsoTestHook\(props\.view !== undefined \? displayViewKey\(roomId\) : viewKey\(roomId\), scene\.id, preview \? scope\.get\(previewViewSlot\) : null\);/);
   });
 
   test("the board shows this device's pick now that Isometric is offered, and Top-down again if the switch is ever turned off", async () => {

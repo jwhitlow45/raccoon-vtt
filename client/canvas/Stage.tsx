@@ -91,6 +91,8 @@ import { createEasedDrags, RemoteDragClock, RemoteDrags } from "./RemoteDrags.ts
 import { TreeShownContext } from "./relief/context.ts";
 import { IsoBoard } from "./relief/IsoBoard.tsx";
 import { useIsoTestHook } from "./relief/isoTest.ts";
+import { usePreview } from "../features/dm/previewContext.ts";
+import { previewViewSlot } from "../features/view/choice.ts";
 import { placedTextBoxes } from "./textBoxes.ts";
 import { GroupActionBar, TokenActionBar } from "./TokenActionBar.tsx";
 import { TokenDecor, TokenInteractionContext, TokenNode, type IsoToken, type TokenInteraction } from "./TokenNode.tsx";
@@ -266,7 +268,8 @@ export function MapStage(props: {
   const roomId = useRoomView((s) => s.roomId);
   const roomChoice = useRoomViewChoice();
   // A table display is the board given its own view, whether or not its camera has arrived yet.
-  useIsoTestHook(props.view !== undefined ? displayViewKey(roomId) : viewKey(roomId), scene.id);
+  const preview = usePreview() !== null;
+  useIsoTestHook(props.view !== undefined ? displayViewKey(roomId) : viewKey(roomId), scene.id, preview ? scope.get(previewViewSlot) : null);
   const shown: View = props.view ?? roomChoice.shown;
   const isoShown = shown.kind === "isometric";
   const shownRef = useRef(shown);
@@ -982,6 +985,7 @@ export function MapStage(props: {
   useEffect(() => {
     const slot = scope.get(stageKeysSlot);
     const zoomBy = (factor: number) => {
+      if (dragRef.current) return;
       const s = sizeRef.current;
       const c = pendingCamRef.current ?? camRef.current;
       if (!s || !c) return;
@@ -1274,6 +1278,8 @@ export function MapStage(props: {
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      // The drag's ring height and grab offset belong to its grip-time zoom.
+      if (dragRef.current) return;
       const c = currentCam();
       if (!c) return;
       scheduleCam(zoomAt(c, local(e), wheelZoomFactor(e.deltaY, e.deltaMode, e.ctrlKey), gesture.minScale));

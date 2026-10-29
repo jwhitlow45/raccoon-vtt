@@ -548,16 +548,30 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       await plain.keyboard.press("Escape");
       await sheet.waitFor({ state: "detached" });
 
-      // The narrowest phone with the blackout chip overflows its row: the View button folds into the room's menu, and Redo stays in the bar (D-261026-12). The chip alone still pushes the bar's buttons past the edge at this size, as it did before Isometric.
-      await plain.setViewportSize({ width: 320, height: 568 });
-      await plain.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
-      await reopenRoom(plain);
+      // FU39-B: the blackout reminder folds into the DM chip's place before it can crowd the map controls.
       await ops.send({ t: "view.blackout", blackout: true });
       try {
-        await plain.getByText("Players see black").waitFor();
-        await waitFor("the View button folded into the menu", async () => ((await viewButton(plain).count()) === 0 ? true : null));
-        assert.equal(await plain.getByRole("button", { name: "Redo", exact: true }).count(), 1, "Redo stays in the bar");
-        await shots.take(plain, "iso-plain-dm-320-130-blackout");
+        for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) {
+          for (const scale of [1, 1.3]) {
+            await plain.setViewportSize(size);
+            await plain.evaluate((n) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(n)), scale);
+            await reopenRoom(plain);
+            const bar = plain.locator("[data-rvtt-topbar]");
+            const full = bar.getByText("Players see black", { exact: true });
+            const compact = bar.getByRole("img", { name: "You are the DM. Players see black", exact: true });
+            await full.or(compact).waitFor();
+            if (size.width === 320 && scale === 1.3) {
+              await compact.waitFor();
+              await waitFor("the View button folded into the menu", async () => ((await viewButton(plain).count()) === 0 ? true : null));
+            }
+            for (const name of ["Undo", "Redo", "Fit the map to the screen"]) {
+              const button = bar.getByRole("button", { name, exact: true });
+              await waitFor(`FU39-B: ${name} in reach at ${size.width}/${scale}`, async () => (await wholeInReach(button)) || null);
+            }
+            assert.deepEqual(alignmentLines(await measureAlignment(bar), `FU39-B blackout ${size.width}/${scale}`), []);
+            await shots.take(plain, `fu39-b-blackout-${size.width}-${Math.round(scale * 100)}`);
+          }
+        }
       } finally {
         await ops.send({ t: "view.blackout", blackout: false });
       }
@@ -1148,6 +1162,12 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       });
       assert.equal(m.overlay.rings, 0, "nothing of Pat's own drag moves on the overlay");
       assert.equal(await parentOf(pat, hall.bree), "dragGround", "her standee moved into the drag layer over the ring");
+      // FU39-B: neither wheel nor keyboard zoom changes the grip's geometry mid-drag.
+      const gripCamera = await isoCamera(pat);
+      await pat.mouse.wheel(0, -120);
+      await pat.keyboard.press("+");
+      await pat.waitForTimeout(100);
+      assert.deepEqual(await isoCamera(pat), gripCamera, "FU39-B: zoom moved the camera during the drag");
       await shots.take(pat, "iso-pat-bree-dragged-ring");
     } finally {
       await pat.mouse.up();

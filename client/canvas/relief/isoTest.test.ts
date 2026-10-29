@@ -37,3 +37,34 @@ describe("the isometric test hook", () => {
     assert.equal(current(), undefined);
   });
 });
+
+// The preview's own view must be the only state the hook can change.
+const { createStore } = await import("zustand/vanilla");
+const { FOLLOW_THE_SCENE, readView, viewKey, displayViewKey } = await import("../../features/view/store.ts");
+const { viewTestHook } = await import("./isoTest.ts");
+
+test("FU39-B: preview picks and turns stay in its memory and never write the DM's room view", () => {
+  const key = viewKey("fu39-b-preview");
+  const before = readView(key);
+  const memory = createStore(() => FOLLOW_THE_SCENE);
+  const preview = viewTestHook(key, "scene", memory);
+  preview.pick("isometric");
+  preview.turn(2);
+  assert.equal(readView(key), before, "the DM's saved view is untouched");
+  assert.deepEqual(memory.getState(), { pick: "isometric", turns: [["scene", 2]] });
+  preview.pick("follow");
+  assert.deepEqual(memory.getState(), { pick: null, turns: [["scene", 2]] });
+});
+
+test("FU39-B: a room and a table display still use their separate saved views", () => {
+  const key = viewKey("fu39-b-main");
+  const display = displayViewKey("fu39-b-main");
+  const main = viewTestHook(key, "scene");
+  const tv = viewTestHook(display, "scene");
+  main.pick("isometric");
+  main.turn(1);
+  tv.pick("topDown");
+  tv.turn(3);
+  assert.deepEqual(readView(key), { pick: "isometric", turns: [["scene", 1]] });
+  assert.deepEqual(readView(display), { pick: "topDown", turns: [["scene", 3]] });
+});
