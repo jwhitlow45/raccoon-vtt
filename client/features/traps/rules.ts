@@ -99,8 +99,10 @@ export function tapRect(g: Grid, at: Point, start: string, band: LevelBand, boun
  * on hex rows, the last row's on hex columns. A tap's keeps its size by
  * moving back where that fits it. Otherwise the rectangle gives up its
  * last column on hex rows, or its last row on hex columns, while it holds
- * such a key. A drag keeps its starting or ending line where shrinking to
- * that line preserves the outermost hex. Empty staggered lines give way to the line before.
+ * such a key. A drag compares that shrunk rectangle with its valid endpoint
+ * lines and keeps the most hexes. An equal area favors the line containing
+ * the outermost dragged hex, the pointer's hex when both ends are on that
+ * edge. Empty staggered lines give way to the line before.
  */
 function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, drag?: readonly [Hex, Hex]): CellRect {
   const off = (q: CellRect) => {
@@ -110,12 +112,6 @@ function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, drag?: readonly [
   const rows = g.orient === "rows";
   const along = (q: CellRect) => (rows ? q.x : q.y);
   const back = (q: CellRect): CellRect => (rows ? { ...q, x: q.x - 1 } : { ...q, y: q.y - 1 });
-  if (drag && off(r)) {
-    for (const end of drag) {
-      const line = rows ? { ...r, y: clamp(end.row, r.y, r.y + r.h - 1), h: 1 } : { ...r, x: clamp(end.col, r.x, r.x + r.w - 1), w: 1 };
-      if (!off(line)) return line;
-    }
-  }
   if (!drag) {
     for (let q = r; ; q = back(q)) {
       if (!off(q)) return q;
@@ -131,6 +127,18 @@ function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, drag?: readonly [
     // A line with no hex at all, on a scene under two hexes across, gives way to the line before it.
     else if (rows ? out.y > 0 : out.x > 0) out = rows ? { ...out, y: out.y - 1 } : { ...out, x: out.x - 1 };
     else break;
+  }
+  if (drag && off(r)) {
+    const edgeEnd = (rows ? drag[0].col > drag[1].col : drag[0].row > drag[1].row) ? drag[0] : drag[1];
+    const edge = { col: clamp(edgeEnd.col, r.x, r.x + r.w - 1), row: clamp(edgeEnd.row, r.y, r.y + r.h - 1) };
+    for (const end of drag) {
+      const line = rows ? { ...r, y: clamp(end.row, r.y, r.y + r.h - 1), h: 1 } : { ...r, x: clamp(end.col, r.x, r.x + r.w - 1), w: 1 };
+      if (off(line)) continue;
+      const area = line.w * line.h;
+      const bestArea = out.w * out.h;
+      const holdsEdge = edge.col >= line.x && edge.col < line.x + line.w && edge.row >= line.y && edge.row < line.y + line.h;
+      if (area > bestArea || (area === bestArea && holdsEdge)) out = line;
+    }
   }
   return out;
 }

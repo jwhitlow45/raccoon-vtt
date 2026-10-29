@@ -81,25 +81,59 @@ describe("drawing a zone of hexes", () => {
     assert.deepEqual(tapRect(ROWS, { x: 0.5, y: 0.5 }, "hidden-pit", "1-4", { w: 2, h: 4 }), { x: 0, y: 0, w: 1, h: 2 });
   });
 
-  test("a drag reaching the long row's last hex keeps that row instead of dropping the last column (H2-OPUS-06)", () => {
-    for (const g of GRIDS) {
-      const bounds = { w: 4, h: 4 };
-      const key = (along: number, across: number) => g.orient === "rows" ? { col: along, row: across } : { col: across, row: along };
-      const short = hexCenter(g, key(1, 1));
-      const edge = hexCenter(g, key(3, 2));
-      assert.deepEqual(rectBetween(g, short, edge, bounds), g.orient === "rows" ? { x: 1, y: 2, w: 3, h: 1 } : { x: 2, y: 1, w: 1, h: 3 }, "a drag from a short line reaches the last hex of its ending line");
-      const a = hexCenter(g, key(3, 0));
-      const b = hexCenter(g, key(1, 2));
-      for (const [start, end] of [[a, b], [b, a]] as const) {
-        const rect = rectBetween(g, start, end, bounds);
-        assert.deepEqual(rect, g.orient === "rows" ? { x: 1, y: start === a ? 0 : 2, w: 3, h: 1 } : { x: start === a ? 0 : 2, y: 1, w: 1, h: 3 });
-        const s = room({ scenes: { s1: scene("s1", { gridShape: g.orient === "rows" ? "hexRows" : "hexColumns", bounds }) } });
-        const trap = newTrapInput({ grid: g, id: "edge", sceneId: "s1", start: START_BLANK, band: "1-4", zone: { cells: [rect] }, chunks: {} });
-        assert.ok(canApply({ t: "trap.create", trap }, DM, s, { canUseAsset: () => true }).ok);
-        assert.ok(applyOp(s, { t: "trap.create", trap }, DM, env(1)).ok);
-      }
+  for (const g of GRIDS) {
+    const key = (along: number, across: number) => g.orient === "rows" ? { col: along, row: across } : { col: across, row: along };
+    const boundsOf = (w: number, h: number) => g.orient === "rows" ? { w, h } : { w: h, h: w };
+    const rectOf = (x: number, y: number, w: number, h: number) => g.orient === "rows" ? { x, y, w, h } : { x: y, y: x, w: h, h: w };
+    const between = (a: Hex, b: Hex, bounds: { w: number; h: number }) => rectBetween(g, hexCenter(g, a), hexCenter(g, b), bounds);
+    const accepted = (rect: CellRect, bounds: { w: number; h: number }) => {
+      const s = room({ scenes: { s1: scene("s1", { gridShape: g.orient === "rows" ? "hexRows" : "hexColumns", bounds }) } });
+      const trap = newTrapInput({ grid: g, id: "edge", sceneId: "s1", start: START_BLANK, band: "1-4", zone: { cells: [rect] }, chunks: {} });
+      assert.ok(canApply({ t: "trap.create", trap }, DM, s, { canUseAsset: () => true }).ok);
+      assert.ok(applyOp(s, { t: "trap.create", trap }, DM, env(1)).ok);
+    };
+
+    for (const [bounds, a, b, expected] of [
+      [boundsOf(20, 10), key(10, 2), key(19, 8), rectOf(10, 2, 9, 7)],
+      [boundsOf(4, 4), key(3, 0), key(1, 2), rectOf(1, 0, 2, 3)],
+    ] as const) {
+      test(`${g.orient}: an edge drag keeps ${expected.w * expected.h} hexes instead of collapsing to one line (FU38-OPUS-1)`, () => {
+        for (const [start, end] of [[a, b], [b, a]] as const) {
+          const rect = between(start, end, bounds);
+          assert.deepEqual(rect, expected);
+          accepted(rect, bounds);
+        }
+      });
     }
-  });
+
+    test(`${g.orient}: a tall edge drag keeps every line up to the 20-cell cap (FU38-OPUS-1)`, () => {
+      const bounds = boundsOf(8, 40);
+      const a = key(6, 0);
+      const b = key(7, 36);
+      assert.deepEqual(between(a, b, bounds), rectOf(6, 0, 1, LIMITS.trapRectSide));
+      assert.deepEqual(between(b, a, bounds), rectOf(6, 17, 1, LIMITS.trapRectSide));
+      accepted(between(a, b, bounds), bounds);
+      accepted(between(b, a, bounds), bounds);
+    });
+
+    test(`${g.orient}: equal areas favor the line containing the dragged edge hex (FU38-OPUS-1)`, () => {
+      const bounds = boundsOf(4, 4);
+      for (const [a, b, expected] of [
+        [key(2, 1), key(3, 2), rectOf(2, 2, 2, 1)],
+        [key(3, 2), key(2, 1), rectOf(2, 2, 2, 1)],
+        [key(3, 0), key(2, 1), rectOf(2, 0, 2, 1)],
+        // The pointer can lie beyond a short line. An equal area must not prefer its missing edge hex.
+        [key(2, 2), key(3, 1), rectOf(2, 1, 1, 2)],
+      ] as const) {
+        const rect = between(a, b, bounds);
+        assert.deepEqual(rect, expected);
+        accepted(rect, bounds);
+      }
+      const narrow = boundsOf(1, 4);
+      assert.deepEqual(between(key(0, 0), key(0, 2), narrow), rectOf(0, 2, 1, 1), "when both endpoints are on the edge, prefer the pointer's line");
+      assert.deepEqual(between(key(0, 2), key(0, 0), narrow), rectOf(0, 0, 1, 1));
+    });
+  }
 
   test("a preset on a one-hex-wide scene shrinks across empty staggered rows (H2-ASTRA-07)", () => {
     for (const g of GRIDS) {
