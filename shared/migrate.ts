@@ -847,22 +847,28 @@ export const opMigrations: MigrationStep[] = [
   },
   {
     // Follow-up batch 36 (docs/design-v1-attach.md and
-    // docs/design-v1-hex-grids.md, As built, D-261029-56): no op changes
-    // shape, so the step is the identity. From this version, on squares, a
-    // holder whose walk starts squeezed carries what sits on it by its full
-    // footprint's box as that snaps at each point of the walk, the box its
-    // own seat was kept beside, so four passengers on a squeezed Huge mount
-    // keep their four squares as it walks on (`seatsFromSnappedBox`). Older
-    // ops replay by the rule they were written under, which carried them by
-    // the holder's stored box, half a square off the snapped one, and tied
-    // them onto one square, so they put each token where they put it then
-    // and a stored restore's hash guards still match.
+    // docs/design-v1-hex-grids.md, As built, D-261029-56, D-261029-58 and
+    // D-261029-59): no op changes shape, so the step is the identity. From
+    // this version, on squares, a holder whose walk starts squeezed carries
+    // what sits on it by its full footprint's box as that snaps at each
+    // point of the walk, the box its own seat was kept beside, so four
+    // passengers on a squeezed Huge mount keep their four squares as it
+    // walks on (`seatsFromSnappedBox`). On hexes a stand may hold the side
+    // a stair band's zigzag edge leaves between its flights, so a Large or
+    // a squeezed Huge creature walks a band two hexes wide, a trap's stop
+    // and a dragged creature's own leg included (`standsAcrossBands`). And
+    // a walker's area line is judged by the squares it squeezes onto where
+    // its walk squeezes on squares (`raysFromSqueeze`). Older ops replay by
+    // the rules they were written under, so they put each token where they
+    // put it then, write the lines they wrote, and a stored restore's hash
+    // guards still match.
     //
     // Deploy: back up the database just before. The first op after it is
     // stored at version 30, and the shutdown writes version 29 snapshots,
     // as before. Reload every page left open, table displays included:
     // there is no client version check, and an old page would seat a
-    // passenger by the old rule, which the server's moves no longer match.
+    // passenger, search a way down a stair band and aim a rider's drag by
+    // the old rules, which the server's moves no longer match.
     // Rollback: an older build refuses to migrate a version 30 op down
     // (runMigrations), so a room whose log holds one after its last
     // snapshot would not load there. A clean shutdown writes a snapshot
