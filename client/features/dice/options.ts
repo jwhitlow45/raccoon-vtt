@@ -1,6 +1,7 @@
 import { testOf, type D20Test, type DamagePart, type NamedRoll } from "#shared/dice/bonus.ts";
 import { d20Formula, formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
+import type { PartAmount } from "#shared/rules/typedDamage.ts";
 import type { DayUse, LimitedUse, RechargeUse } from "#shared/dice/uses.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
@@ -494,18 +495,12 @@ export type HpChip = {
   amount: number;
   text: string;
   critical: boolean;
-  /** A damage chip's types as rolled (rolledTypes), absent with none: the HP entry applies no defenses, so they go with an untouched chip's damage (docs/design-v1-combat-controls.md 3.4). */
-  types?: DamageType[];
+  /** Each rolled part stays separate so defenses round each one as in a save. Missing types are never inferred from labels. */
+  parts?: PartAmount[];
 };
 
 const DAMAGE_LABEL = /\bdamage\b/i;
 const HEAL_LABEL = /\bhealing\b/i;
-
-/** The damage types rolls dealt as rolled: each roll's type where its total is above 0, once, in the rules' order. */
-export function rolledTypes(rolls: readonly Pick<DiceRoll, "type" | "total">[]): DamageType[] {
-  const dealt = new Set(rolls.flatMap((r) => (r.type !== undefined && r.total > 0 ? [r.type] : [])));
-  return DAMAGE_TYPES.filter((t) => dealt.has(t));
-}
 
 /** The words of a line's first label without its damage type: "Rapier damage and Sneak Attack". */
 function chipWhat(roll: DiceRoll): string {
@@ -547,12 +542,14 @@ export function hpChips(log: readonly LogEntry[], me: string, kind: "damage" | "
     const rolls = lines.flatMap((l) => l.data.rolls);
     let chip: HpChip | null = null;
     if (!ids.some((id) => opts.applied.has(id))) {
-      const amount = rolls.reduce((n, r) => n + r.total, 0);
+      const parts = kind === "damage" && rolls.some((r) => r.type !== undefined)
+        ? rolls.map((r): PartAmount => ({ amount: Math.max(0, r.total), ...(r.type ? { type: r.type } : {}) }))
+        : undefined;
+      const amount = parts ? parts.reduce((n, part) => n + part.amount, 0) : rolls.reduce((n, r) => n + r.total, 0);
       const what = chipWhat(data.rolls[0]!);
       const text = own ? `Use ${amount} (${what})` : `Use ${amount} (${opts.nameOf(data.by)}'s ${what})`;
-      const types = kind === "damage" ? rolledTypes(rolls) : [];
       // A line rolled before the server marked a crit says so only in its label.
-      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")), ...(types.length > 0 ? { types } : {}) };
+      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")), ...(parts ? { parts } : {}) };
     }
     if (own) mine = chip;
     else theirs = chip;

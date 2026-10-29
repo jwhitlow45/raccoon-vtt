@@ -5,9 +5,10 @@ import type { RoomView } from "../../state/types.ts";
 import { useRoomStore, useRoomView } from "../../state/view.ts";
 import type { HpTarget } from "./groupHp.ts";
 import type { HpMode } from "./hpInput.ts";
+import type { HpChip } from "../dice/options.ts";
 
 /** What was typed into an HP entry and not applied: the mode, the number or math, and the critical hit box. */
-export type HpDraft = { mode: HpMode; text: string; crit: boolean };
+export type HpDraft = { mode: HpMode; text: string; crit: boolean; chip?: HpChip };
 
 /**
  * HP typed and not applied, kept through a DM's blackout (LPD-PLAYER-7).

@@ -4,7 +4,7 @@ import { clientOpSchema } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { actor, customMonster, DM, room, token } from "#shared/testutil.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { deadHealLine, deadLines, entryOperation, entryRefusal, groupAccess, hpOps, hpTargets, sendHpEntry, untouchedTypes, type EntryOperation, type HpTarget } from "./groupHp.ts";
+import { deadHealLine, deadLines, entryOperation, entryRefusal, groupAccess, hpOps, hpTargets, sendHpEntry, type EntryOperation, type HpTarget } from "./groupHp.ts";
 import { parseHpInput, type HpMode } from "./hpInput.ts";
 
 const target = (id: string, over: Partial<HpTarget> = {}): HpTarget => ({
@@ -108,44 +108,27 @@ describe("one HP entry for several creatures", () => {
   });
 });
 
-/** The damage types an HP entry sends (docs/design-v1-combat-controls.md 3.4). */
-describe("the HP entry's damage types", () => {
-  const changeOf = (op: ClientOp | undefined) => (op?.t === "actor.hp" ? op.change : null);
-
-  test("an entry for one creature puts an untouched chip's types on its damage, with its critical hit, and the op passes the protocol", () => {
-    const [op] = hpOps([target("down", { atZero: true })], { kind: "damage", amount: 9 }, true, ["fire", "radiant"]);
-    assert.deepEqual(changeOf(op), { kind: "damage", amount: 9, crit: true, types: ["fire", "radiant"] });
-    assert.ok(clientOpSchema.safeParse(op).success);
-  });
-
-  test("a group's separate ops carry none, nor a heal, nor an empty list the protocol would refuse", () => {
-    const group = hpOps([target("a"), target("b")], { kind: "damage", amount: 9 }, false, ["fire"]);
-    assert.deepEqual(group.map(changeOf), [
-      { kind: "damage", amount: 9 },
-      { kind: "damage", amount: 9 },
-    ]);
-    // Two tokens of one character are one creature but still a group entry, which the design leaves without types.
-    assert.deepEqual(hpOps([target("pc1", { holder: "character:c" }), target("pc2", { holder: "character:c" })], { kind: "damage", amount: 9 }, false, ["fire"]).map(changeOf), [{ kind: "damage", amount: 9 }]);
-    assert.deepEqual(changeOf(hpOps([target("a")], { kind: "heal", amount: 9 }, false, ["fire"])[0]), { kind: "heal", amount: 9 });
-    const [empty] = hpOps([target("a")], { kind: "damage", amount: 9 }, false, []);
-    assert.deepEqual(changeOf(empty), { kind: "damage", amount: 9 });
-    assert.ok(clientOpSchema.safeParse(empty).success);
-  });
-
-  test("only an untouched chip's types go: an edited chip, or HP typed by hand, sends none", () => {
-    const chip = { amount: 9, types: ["fire" as const] };
-    assert.deepEqual(untouchedTypes(chip, "9"), ["fire"]);
-    assert.deepEqual(untouchedTypes(chip, " 9 "), ["fire"]);
-    assert.equal(untouchedTypes(chip, "10"), undefined, "the amount was changed");
-    assert.equal(untouchedTypes(chip, "-9"), undefined, "typed math is the viewer's own");
-    assert.equal(untouchedTypes(null, "9"), undefined, "an edit clears the chip, as it clears its source (HpSection.tsx)");
-    assert.equal(untouchedTypes({ amount: 9 }, "9"), undefined, "a chip whose rolls had no types");
-  });
-
-  test("sendHpEntry passes the types on", () => {
+describe("FL-3 rolled damage through the HP entry", () => {
+  test("a critical chip keeps each part through dispatch, and the server applies resistance before death saves", () => {
+    const parts = [{ amount: 3, type: "fire" as const }, { amount: 3, type: "fire" as const }, { amount: 8, type: "cold" as const }];
+    const parsed = parseHpInput("14", "damage", { amount: 14, parts });
+    assert.ok(parsed.ok);
     const sent: ClientOp[] = [];
-    sendHpEntry({ dispatch: (op: ClientOp) => sent.push(op), newId: () => "g" }, [target("a")], { kind: "damage", amount: 4 }, false, ["acid"]);
-    assert.deepEqual(changeOf(sent[0]), { kind: "damage", amount: 4, types: ["acid"] });
+    sendHpEntry({ dispatch: (op: ClientOp) => sent.push(op), newId: () => "g" }, [target("down", { atZero: true })], parsed.change, true);
+    assert.deepEqual(sent, [{ t: "actor.hp", target: { tokenId: "down" }, change: { kind: "damage", amount: 14, parts, crit: true } }]);
+    const state = room({
+      monsters: { frost: customMonster("frost", { resistances: "Fire", immunities: "Cold" }) },
+      tokens: { down: token("down", { actor: { inline: actor({ monsterId: "frost", hp: { cur: 0, max: 10, temp: 0 }, life: "dying" }) } }) },
+    });
+    const result = applyOp(state, clientOpSchema.parse(sent[0]), DM, { seq: 1, at: new Date(0).toISOString() });
+    assert.ok(result.ok);
+    const damaged = result.state.tokens.down!;
+    assert.ok("inline" in damaged.actor);
+    assert.equal(damaged.actor.inline.life, "dying", "resistance and immunity prevent massive damage");
+    assert.equal(damaged.actor.inline.deathSaves.fail, 2);
+    assert.deepEqual(damaged.actor.inline.hurt, ["fire"]);
+    const hp = result.state.log.find((line) => line.data?.type === "hp");
+    assert.equal(hp?.data?.type === "hp" ? hp.data.amount : null, 2, "the two fire parts round separately");
   });
 });
 

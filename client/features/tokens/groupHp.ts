@@ -1,6 +1,5 @@
 import type { Character, MemberId, Token } from "#shared/model.ts";
 import type { ActorTarget, ClientOp, HpChange } from "#shared/protocol.ts";
-import type { DamageType } from "#shared/rules/damage.ts";
 import { displayName } from "../../lib/scene.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
@@ -78,29 +77,18 @@ export function groupAccess(targets: readonly HpTarget[]): "all" | "relative" | 
 
 /**
  * One `actor.hp` per creature this viewer may change, each holder once. A critical hit counts only where it means something: at 0 HP.
- * `types` are an untouched chip's damage types (dice/options.ts rolledTypes), which go on the damage of an entry for one creature
- * alone: a group's separate ops carry none (docs/design-v1-combat-controls.md 3.4).
+ * Typed parts remain incoming damage. Each creature's defenses are applied by the server.
  */
-export function hpOps(targets: readonly HpTarget[], change: HpChange, crit: boolean, types?: readonly DamageType[]): ClientOp[] {
+export function hpOps(targets: readonly HpTarget[], change: HpChange, crit: boolean): ClientOp[] {
   const relative = change.kind === "damage" || change.kind === "heal";
-  const typed = change.kind === "damage" && targets.length === 1 && types !== undefined && types.length > 0 ? { ...change, types: [...types] } : change;
   const seen = new Set<string>();
   const ops: ClientOp[] = [];
   for (const t of targets) {
     if (t.access === "none" || (t.access === "relative" && !relative) || seen.has(t.holder)) continue;
     seen.add(t.holder);
-    ops.push({ t: "actor.hp", target: t.target, change: withCrit(typed, crit && t.atZero) });
+    ops.push({ t: "actor.hp", target: t.target, change: withCrit(change, crit && t.atZero) });
   }
   return ops;
-}
-
-/**
- * The damage types an entry sends with its damage (docs/design-v1-combat-controls.md
- * 3.4): an untouched chip's, as rolled, while the field still holds its
- * amount. A chip the viewer edited, or HP typed by hand, sends none.
- */
-export function untouchedTypes(chip: { amount: number; types?: readonly DamageType[] } | null, text: string): readonly DamageType[] | undefined {
-  return chip !== null && text.trim() === String(chip.amount) ? chip.types : undefined;
 }
 
 /**
@@ -108,8 +96,8 @@ export function untouchedTypes(chip: { amount: number; types?: readonly DamageTy
  * back from every creature it reached, not from the last of them alone
  * (docs/design-v1-dm-tools.md 3.5).
  */
-export function sendHpEntry(actions: Pick<RoomActions, "dispatch" | "newId">, targets: readonly HpTarget[], change: HpChange, crit: boolean, types?: readonly DamageType[]): void {
-  dispatchGesture(actions, hpOps(targets, change, crit, types));
+export function sendHpEntry(actions: Pick<RoomActions, "dispatch" | "newId">, targets: readonly HpTarget[], change: HpChange, crit: boolean): void {
+  dispatchGesture(actions, hpOps(targets, change, crit));
 }
 
 /** Only the viewer's permitted defenses explain the preview. The server calculates the hit from the full actor. */

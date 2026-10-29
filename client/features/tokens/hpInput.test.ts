@@ -96,6 +96,24 @@ describe("the mode after an apply", () => {
 });
 
 describe("FL-3 typed HP damage", () => {
+  test("an unchanged rolled amount keeps its parts for both the preview and Apply", () => {
+    const chip = { amount: 15, parts: [{ amount: 3 }, { amount: 2 }, { amount: 10, type: "fire" as const }] };
+    const parsed = parseHpInput("15", "damage", chip);
+    assert.deepEqual(parsed, { ok: true, change: { kind: "damage", amount: 15, parts: chip.parts }, summary: "3 + 2 + 10 Fire damage" });
+    assert.deepEqual(parseHpInput(" 15 ", "damage", chip), parsed);
+    assert.deepEqual(parseHpInput("16", "damage", chip), parseHpInput("16", "damage"));
+    assert.deepEqual(parseHpInput("-15", "damage", chip), parseHpInput("-15", "damage"));
+    assert.deepEqual(parseHpInput("15", "heal", chip), parseHpInput("15", "heal"));
+    assert.deepEqual(parseHpInput("15", "damage", null), parseHpInput("15", "damage"));
+  });
+
+  test("a rolled chip beyond the typed part limit is refused before dispatch", () => {
+    const chip = { amount: 101, parts: Array.from({ length: 101 }, () => ({ amount: 1, type: "fire" as const })) };
+    const parsed = parseHpInput("101", "damage", chip);
+    assert.ok(!parsed.ok);
+    assert.match(parsed.error, /100 damage parts/);
+  });
+
   test("keeps typed amounts for the server and accepts the save flow's case-insensitive syntax", () => {
     const parts = [{ amount: 10, type: "fire" }, { amount: 4, type: "cold" }];
     for (const text of ["10 fire + 4 cold", "10 FIRE + 4 Cold", "-10 fire + 4 cold"]) {

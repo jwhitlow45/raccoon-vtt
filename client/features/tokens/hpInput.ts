@@ -1,5 +1,5 @@
 import { MAX_DAMAGE_PARTS, type HpChange } from "#shared/protocol.ts";
-import { parseParts, partAmounts, partsText } from "#shared/rules/typedDamage.ts";
+import { parseParts, partAmounts, partsText, type PartAmount } from "#shared/rules/typedDamage.ts";
 
 /**
  * The HP quick entry (features section 5): `-7` deals 7 damage, `+5` heals
@@ -52,9 +52,12 @@ function tooLarge(n: number): boolean {
   return !Number.isSafeInteger(n) || n > MAX_HP_AMOUNT;
 }
 
-export function parseHpInput(raw: string, mode: HpMode): HpParse {
+export function parseHpInput(raw: string, mode: HpMode, rolled?: { amount: number; parts?: readonly PartAmount[] } | null): HpParse {
   const text = raw.trim().replace(/[\u2212\u2013\u2014]/g, "-").toLowerCase();
   if (text === "") return { ok: false, error: EMPTY };
+
+  // An unchanged chip keeps its exact parts, including adjacent untyped rolls that the text grammar cannot distinguish.
+  if (mode === "damage" && rolled?.parts && text === String(rolled.amount)) return typedDamage(rolled.parts);
 
   const temp = /^t(?:emp)?\s*[:=+]?\s*(.*)$/.exec(text);
   if (temp) {
@@ -78,10 +81,7 @@ export function parseHpInput(raw: string, mode: HpMode): HpParse {
     if (!parsed.ok) return parsed;
     const parts = partAmounts(parsed.parts, []);
     if (!parts) return { ok: false, error: "Type the rolled damage, such as 10 Fire." };
-    if (parts.length > MAX_DAMAGE_PARTS) return { ok: false, error: `Use at most ${MAX_DAMAGE_PARTS} damage parts.` };
-    const amount = parts.reduce((total, part) => total + part.amount, 0);
-    if (tooLarge(amount)) return { ok: false, error: "That number is too large." };
-    return { ok: true, change: { kind: "damage", amount, parts }, summary: `${partsText(parts)} damage` };
+    return typedDamage(parts);
   }
 
   const s = sum(text);
@@ -102,6 +102,14 @@ export function parseHpInput(raw: string, mode: HpMode): HpParse {
     case "temp":
       return { ok: true, change: { kind: "temp", amount: s.value }, summary: `Set Temporary HP to ${s.value}` };
   }
+}
+
+function typedDamage(parts: readonly PartAmount[]): HpParse {
+  if (parts.length > MAX_DAMAGE_PARTS) return { ok: false, error: `Use at most ${MAX_DAMAGE_PARTS} damage parts.` };
+  const amount = parts.reduce((total, part) => total + part.amount, 0);
+  if (tooLarge(amount)) return { ok: false, error: "That number is too large." };
+  if (amount === 0) return { ok: false, error: "That adds up to no change." };
+  return { ok: true, change: { kind: "damage", amount, parts: [...parts] }, summary: `${partsText(parts)} damage` };
 }
 
 function damage(amount: number): HpParse {

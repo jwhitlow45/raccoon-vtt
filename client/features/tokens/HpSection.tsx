@@ -24,7 +24,7 @@ import { useDiceView } from "../dice/useDiceView.ts";
 import { useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
 import { actorOf, openRecord } from "../combat/logic.ts";
 import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
-import { damagePreview, deadCase, deadLines, entryOperation, entryRefusal, sendHpEntry, untouchedTypes, type HpTarget } from "./groupHp.ts";
+import { damagePreview, deadCase, deadLines, entryOperation, entryRefusal, sendHpEntry, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
@@ -98,10 +98,11 @@ export function HpEntry(props: {
   const [mode, setMode] = useState<HpMode>(kept?.mode ?? "damage");
   const [text, setText] = useState(kept?.text ?? "");
   const [crit, setCrit] = useState(kept?.crit ?? false);
-  useKeepHpDraft(key, { mode, text, crit });
+  const [filled, setFilled] = useState<HpChip | null>(kept?.chip ?? null);
+  useKeepHpDraft(key, { mode, text, crit, ...(filled ? { chip: filled } : {}) });
   const [error, setError] = useState<string | null>(null);
   const modes = props.access === "all" ? HP_MODES : HP_MODES.filter((m) => m.mode === "damage" || m.mode === "heal");
-  const preview = text.trim() ? parseHpInput(text, mode) : null;
+  const preview = text.trim() ? parseHpInput(text, mode, filled) : null;
   const typedDamage = preview?.ok && preview.change.kind === "damage" && preview.change.parts !== undefined;
   const { dice } = useDiceView(typedDamage ? props.targets.filter((target) => target.access !== "none").map((target) => target.target) : []);
   const defenseWords = preview?.ok ? damagePreview(props.targets, preview.change, dice) : [];
@@ -121,8 +122,6 @@ export function HpEntry(props: {
   // The newest rolled damage or healing, offered under Damage and Heal (docs/design-v1-roll-options.md 4.3).
   const chips = useHpChips(mode === "damage" || mode === "heal" ? mode : null);
   const markApplied = useMarkChipApplied();
-  // The chip whose amount the field holds, so Apply takes that chip away and sends its rolled damage types. Once the viewer types or picks another mode, the amount is their own, and carries no types.
-  const [filled, setFilled] = useState<HpChip | null>(null);
   const rest = props.rest;
   const resting = rest?.resting === true;
   const descriptionId = useId();
@@ -143,7 +142,7 @@ export function HpEntry(props: {
   };
 
   const apply = () => {
-    const parsed = parseHpInput(text, mode);
+    const parsed = parseHpInput(text, mode, filled);
     if (!parsed.ok) {
       setError(parsed.error);
       return;
@@ -153,7 +152,7 @@ export function HpEntry(props: {
       setError(refused);
       return;
     }
-    sendHpEntry(actions, props.targets, parsed.change, sendsCrit, untouchedTypes(filled, text));
+    sendHpEntry(actions, props.targets, parsed.change, sendsCrit);
     if (filled) markApplied(filled.lineIds);
     setFilled(null);
     setMode(modeAfterApply(mode));

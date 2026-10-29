@@ -115,31 +115,27 @@ describe("HP chips", () => {
   });
 });
 
-/** The types a damage chip carries to the HP entry (docs/design-v1-combat-controls.md 3.4). */
-describe("HP chips' damage types", () => {
-  const typed = (label: string, total: number, type: DiceRoll["type"]): DiceRoll => ({ ...roll(label, total), ...(type ? { type } : {}) });
+describe("FL-3 rolled damage parts", () => {
+  const typed = (total: number, type?: DiceRoll["type"]): DiceRoll => ({ ...roll("Shared damage", total), ...(type ? { type } : {}) });
 
-  test("each type the chip's rolls dealt above 0, once, in the rules' order, from the line's own types and never its labels", () => {
-    const log = [
-      line("me", [typed("Flame Strike damage, radiant", 9, "radiant"), typed("Flame Strike damage, fire", 0, "fire"), typed("Flame Strike damage, cold", 4, "cold"), typed("Flame Strike damage, radiant", 3, "radiant")]),
-    ];
-    assert.deepEqual(hpChips(log, "me", "damage", opts())[0]!.types, ["cold", "radiant"], "fire came to 0, so it adds nothing");
-    const cut = line("me", [typed("Vorpal Longsword of the Seventh Sundered Kingdom damage and…", 7, "slashing")]);
-    assert.deepEqual(hpChips([cut], "me", "damage", opts())[0]!.types, ["slashing"]);
-  });
-
-  test("an untyped line, a line rolled before types, and a healing chip carry none", () => {
-    const old = line("me", [roll("Longsword damage, slashing", 9)]);
-    assert.equal("types" in hpChips([old], "me", "damage", opts())[0]!, false, "no type on the line: the label is no contract");
-    const zero = line("me", [typed("Longsword damage, slashing", 0, "slashing")]);
-    assert.equal(hpChips([zero], "me", "damage", opts())[0]!.types, undefined);
-    const heal = line("p1", [typed("Cure Wounds healing", 8, "radiant")]);
-    assert.equal(hpChips([heal], "me", "heal", opts())[0]!.types, undefined);
-  });
-
-  test("a roll sent as several lines takes the types of every line", () => {
+  test("a batched chip retains each rolled amount and its actual type, including untyped parts", () => {
     const batched = (id: string, rolls: DiceRoll[]): LogEntry => ({ id, at: "", kind: "event", data: { type: "dice", by: "me", to: "all", batch: "b2", rolls } });
-    const log = [batched("20:0", [typed("Shared damage for 2 hits, slashing", 6, "slashing")]), batched("21:0", [typed("Shared damage for 2 hits, poison", 5, "poison")])];
-    assert.deepEqual(hpChips(log, "me", "damage", opts())[0]!.types, ["poison", "slashing"]);
+    const log = [batched("20:0", [typed(3, "fire"), typed(3, "fire")]), batched("21:0", [typed(5), typed(4, "cold")])];
+    const chip = hpChips(log, "me", "damage", opts())[0]!;
+    assert.equal(chip.amount, 15);
+    assert.deepEqual(chip.parts, [{ amount: 3, type: "fire" }, { amount: 3, type: "fire" }, { amount: 5 }, { amount: 4, type: "cold" }]);
+    assert.deepEqual(chip.lineIds, ["20:0", "21:0"]);
+    assert.equal("types" in chip, false, "the server determines the types actually dealt");
+  });
+
+  test("nonpositive damage contributes zero, while healing and untyped rolls keep their behavior", () => {
+    const chip = hpChips([line("me", [typed(0, "fire"), typed(-2, "cold"), typed(8, "radiant")])], "me", "damage", opts())[0]!;
+    assert.equal(chip.amount, 8);
+    assert.deepEqual(chip.parts, [{ amount: 0, type: "fire" }, { amount: 0, type: "cold" }, { amount: 8, type: "radiant" }]);
+    assert.equal(hpChips([line("me", [roll("Longsword damage, slashing", 9)])], "me", "damage", opts())[0]!.parts, undefined, "a label never supplies a missing type");
+    assert.equal(hpChips([line("me", [roll("Damage", 9), roll("Damage", -2)])], "me", "damage", opts())[0]!.amount, 7, "an entirely untyped chip keeps its existing total");
+    const heal = hpChips([line("me", [{ ...typed(8, "radiant"), label: "Cure Wounds healing" }])], "me", "heal", opts())[0]!;
+    assert.equal(heal.parts, undefined);
+    assert.equal(heal.amount, 8);
   });
 });

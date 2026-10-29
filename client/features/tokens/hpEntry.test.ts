@@ -46,6 +46,22 @@ function names(markup: string): string[] {
 }
 
 describe("the HP entry's modes are native radios", () => {
+  test("FL-3: a rolled chip restored after blackout keeps its damage breakdown and resistance preview", () => {
+    const state = room({
+      monsters: { frost: customMonster("frost", { resistances: "Cold" }) },
+      tokens: { a: token("a", { actor: { inline: actor({ monsterId: "frost" }) } }) },
+    });
+    const target = oneTarget({ tokenId: "a" }, "all", false, { name: "Frost", dead: false, max: 20 });
+    const scope = new RoomScope();
+    const chip = { amount: 11, parts: [{ amount: 11, type: "cold" as const }], lineId: "1:0", lineIds: ["1:0"], text: "Use 11 (Cold damage)", critical: false };
+    scope.get(hpDraftSlot).set(hpDraftKey("bar", [target]), { mode: "damage", text: "11", crit: false, chip });
+    const store = createStore(() => ({ view: state, you: DM }));
+    const el = createElement(HpEntry, { targets: [target], access: "all", place: "bar" });
+    const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
+    assert.match(markup, /11 Cold damage/);
+    assert.match(markup, /Resists Cold: 5/);
+  });
+
   test("FL-3: typed damage uses a text keyboard and shows defense words only to a viewer who may read them", () => {
     const state = room({
       monsters: { frost: customMonster("frost", { resistances: "Cold" }) },
