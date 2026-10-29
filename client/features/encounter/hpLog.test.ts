@@ -2,11 +2,13 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
-import type { RoomState } from "#shared/model.ts";
+import type { LogEntry, RoomState } from "#shared/model.ts";
+import { LIMITS } from "#shared/limits.ts";
+import { DM_LINE_BASE } from "#shared/logRings.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
-import { projectState } from "#shared/project.ts";
+import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { actor, apply, customMonster, DM, P1, room, token } from "#shared/testutil.ts";
-import { canTakeBack, fightHpLines } from "./hpLog.ts";
+import { canTakeBack, canUndoLogLine, fightHpLines } from "./hpLog.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -23,6 +25,22 @@ function hurtGoblin(): RoomState {
 }
 
 describe("the combat log of HP changes", () => {
+  test("FU23A-OPUS-9b: an archived HP line still held by the server offers Undo after the DM ring cuts the live view", () => {
+    const state = hurtGoblin();
+    const heal = state.log.at(-1)!;
+    state.log = [...state.log, ...Array.from({ length: LIMITS.dmLogLines }, (_, i): LogEntry => ({ id: `${10 + i}:${DM_LINE_BASE}`, at: heal.at, kind: "event", data: { type: "teleport", tokenId: "gob", past: "wall" } }))];
+    const view = projectState(state, DM, { sceneId: "s1" });
+    assert.ok(!view.log.some((e) => e.id === heal.id), "the ring cut the HP line from the DM's live log");
+    const archived = projectArchivedLog(state, [heal], DM, { sceneId: "s1" })[0]!;
+    assert.ok(hpUndoRestore(state, archived.id).ok, "the server can still take it back");
+    assert.equal(canUndoLogLine(view as RoomState, view.log, archived), true);
+    const dropped = { ...state, log: state.log.filter((e) => e.id !== heal.id) };
+    const gone = projectArchivedLog(dropped, [heal], DM, { sceneId: "s1" })[0]!;
+    assert.equal(canUndoLogLine(view as RoomState, view.log, gone), false, "an archive-only line offers no Undo");
+    const taken: LogEntry = { id: "1000:0", at: heal.at, kind: "event", data: { type: "hp", change: "heal", back: true, of: heal.id } };
+    const already = projectArchivedLog({ ...state, log: [...state.log, taken] }, [heal], DM, { sceneId: "s1" })[0]!;
+    assert.equal(canUndoLogLine(view as RoomState, [], already), false, "a take-back outside the loaded page still prevents another");
+  });
   test("FL3-ASTRA-01: a defense that stops the hit leaves a line without a take-back", () => {
     let state = room({
       monsters: { immune: customMonster("immune", { immunities: "Fire" }) },

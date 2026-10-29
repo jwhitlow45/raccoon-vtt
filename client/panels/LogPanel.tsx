@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import type { LogEntry } from "#shared/model.ts";
+import { displayLog } from "#shared/logText.ts";
 import { MAX_CHAT } from "#shared/protocol.ts";
 import { Button } from "../components/Button.tsx";
 import { Checkbox } from "../components/Checkbox.tsx";
@@ -19,7 +20,7 @@ import {
   whisperHeading,
   type LogNames,
 } from "../features/log/format.ts";
-import { canTakeBack } from "../features/encounter/hpLog.ts";
+import { canUndoLogLine } from "../features/encounter/hpLog.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ExportLog } from "../features/log/ExportLog.tsx";
 import { TakeBack } from "../features/encounter/HpLog.tsx";
@@ -94,13 +95,14 @@ export default function LogPanel(_props: PanelProps) {
     if (trimmed.length > 0) setOlder((list) => mergeLog(list, trimmed));
   }, [log, mainLog, older.length]);
 
-  // Only the log the room holds in memory can be taken back from, so archived pages offer no Undo.
-  const undoable = (entry: LogEntry): boolean => entry.data?.type === "hp" && log.includes(entry) && canTakeBack(names, log, { entry, data: entry.data });
+  // The archive keeps revert records only while the server can still use
+  // them. Include loaded take-backs even when they are outside the live tail.
+  const allEntries = useMemo(() => older.length > 0 ? mergeLog(older, log) : log, [older, log]);
+  const undoable = (entry: LogEntry): boolean => canUndoLogLine(names, allEntries, entry);
 
   const entries = useMemo(() => {
-    const all = older.length > 0 ? mergeLog(older, log) : log;
-    return chatOnly ? all.filter((e) => e.kind !== "event") : all;
-  }, [older, log, chatOnly]);
+    return chatOnly ? allEntries.filter((e) => e.kind !== "event") : displayLog(allEntries);
+  }, [allEntries, chatOnly]);
 
   // Stay at the bottom while the reader is there, and always after sending.
   // The scroll container is the sheet or side panel around this panel, and

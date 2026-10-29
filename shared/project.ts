@@ -3493,9 +3493,18 @@ function projectLiveLogCtx(ctx: Ctx): LogEntry[] {
 export function projectArchivedLog(state: RoomState, lines: readonly LogEntry[], viewer: Viewer, opts: ProjectOpts): LogEntry[] {
   const ctx = ctxOf(state, viewer, opts);
   const out: LogEntry[] = [];
+  // The DM's live projection can start later than the server's retained
+  // HP lines. Keep Undo on those archive pages, but never on dropped or
+  // already reverted lines, whose stored revert record still exists there.
+  const held = viewer.role === "dm" ? new Set(state.log.map((e) => e.id)) : null;
+  const reverted = new Set(viewer.role === "dm" ? state.log.flatMap((e) => e.data?.type === "hp" && e.data.back && e.data.of ? [e.data.of] : []) : []);
   for (const line of lines) {
     const projected = projectLogEntryCtx(ctx, line);
-    if (projected) out.push(projected);
+    if (!projected) continue;
+    if (held && projected.data?.type === "hp" && projected.data.revert && (!held.has(projected.id) || reverted.has(projected.id))) {
+      const { revert: _gone, ...data } = projected.data;
+      out.push({ ...projected, data });
+    } else out.push(projected);
   }
   return out;
 }

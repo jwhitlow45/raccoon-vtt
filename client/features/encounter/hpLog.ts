@@ -57,3 +57,8 @@ export function canTakeBack(view: HolderView, log: readonly LogEntry[], line: Hp
   if (!actor) return true;
   return revertedActor(actor, line.data.revert) !== null;
 }
+
+/** Whether an HP event in the general log offers Undo. */
+export function canUndoLogLine(view: HolderView, log: readonly LogEntry[], entry: LogEntry): boolean {
+  return entry.data?.type === "hp" && canTakeBack(view, log, { entry, data: entry.data });
+}

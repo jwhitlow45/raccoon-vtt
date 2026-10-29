@@ -1,11 +1,26 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { describeEvent, mergeLog, olderCursor, rollText, trimmedOff, type LogNames } from "./logText.ts";
+import { describeEvent, displayLog, mergeLog, olderCursor, rollText, trimmedOff, type LogNames } from "./logText.ts";
 import type { LogEntry, LogEvent, RollTest } from "./model.ts";
 import { character, room, token } from "./testutil.ts";
 
 const DEX: RollTest = { kind: "save", choices: [{ ability: "dex" }] };
 const GRAPPLE: RollTest = { kind: "check", choices: [{ ability: "str", skill: "athletics" }, { ability: "dex", skill: "acrobatics" }] };
+
+test("FU23A-OPUS-9c: private turn-end lines precede the next turn without changing paging ids", () => {
+  const line = (id: string, data: LogEvent): LogEntry => ({ id, at: "2026-10-29T00:00:00Z", kind: "event", data });
+  const previous = line("1:0", { type: "turn", entryId: "old", round: 1 });
+  const turn = line("2:0", { type: "turn", entryId: "next", round: 1 });
+  const start = line("2:1", { type: "area", templateId: "a", tokenId: "next", trigger: "turnStart", area: "Fire" });
+  const end = line("2:100000", { type: "area", templateId: "hidden", tokenId: "old", trigger: "turnEnd", area: "Secret", hidden: true });
+  const save = line("2:100001", { type: "saveEnds", effectId: "fx", key: "poisoned", tokenId: "old", ability: "con", dc: 15 });
+  const later = line("3:100000", { type: "area", templateId: "a", tokenId: "old", trigger: "turnEnd", area: "Fire" });
+  const stored = [previous, turn, start, end, save, later];
+  assert.deepEqual(displayLog(stored), [previous, end, save, turn, start, later]);
+  assert.deepEqual(stored, [previous, turn, start, end, save, later], "storage order remains untouched");
+  assert.deepEqual(displayLog([previous, turn, start]), [previous, turn, start], "a player's view gains no extra line");
+  assert.deepEqual(displayLog([end, save]), [end, save], "a partial archive page retains its lines");
+});
 
 describe("roll lines (docs/design-v1-dm-tools.md 3.3)", () => {
   test("read the total, the test and what the viewer's line kept of the DC and the result", () => {

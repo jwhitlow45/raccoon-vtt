@@ -27,6 +27,28 @@ export type LogNames = Pick<RoomState, "members" | "tokens" | "characters" | "ha
 const SOMEONE = "Someone";
 const A_CREATURE = "A creature";
 
+/** Display order within an operation, without changing its storage or paging ids. */
+export function displayLog(lines: readonly LogEntry[]): LogEntry[] {
+  const out: LogEntry[] = [];
+  const seq = (line: LogEntry) => line.id.slice(0, line.id.indexOf(":"));
+  const endsTurn = (line: LogEntry) => line.data?.type === "saveEnds" || (line.data?.type === "area" && line.data.trigger === "turnEnd");
+  for (let from = 0; from < lines.length;) {
+    let to = from + 1;
+    while (to < lines.length && seq(lines[to]!) === seq(lines[from]!)) to++;
+    const group = lines.slice(from, to);
+    const turn = group.findIndex((e) => e.data?.type === "turn" && !e.data.back);
+    if (turn === -1) out.push(...group);
+    else {
+      // Audience numbering puts private events after shared ones. A turn's
+      // ending still happened before its successor, regardless of audience.
+      const after = group.slice(turn);
+      out.push(...group.slice(0, turn), ...after.filter(endsTurn), ...after.filter((e) => !endsTurn(e)));
+    }
+    from = to;
+  }
+  return out;
+}
+
 /** "Goblin 3" for numbered duplicates. Players' projections already carry the public name. */
 function displayName(token: Pick<Token, "name" | "number">): string {
   return token.number === undefined ? token.name : `${token.name} ${token.number}`;
