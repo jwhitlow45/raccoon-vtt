@@ -1,17 +1,23 @@
 import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { createStore } from "zustand/vanilla";
 import { LIMITS } from "#shared/limits.ts";
 import type { CellRect, Token, Trap, TrapRig } from "#shared/model.ts";
+import { canApply } from "#shared/permissions.ts";
 import { occupiedHexes, placedOnHex } from "#shared/rules/footprint.ts";
 import { cornerAt, hexAt, hexCorners, hexInScene, hexKey, hexLine, sceneHexSpan, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { hexStandPlace } from "#shared/rules/movement.ts";
 import { planTrapMove, type TrapRoom } from "#shared/rules/traps.ts";
-import { DM, int, rng, room, scene, token } from "#shared/testutil.ts";
+import { DM, P1, int, rng, room, scene, token } from "#shared/testutil.ts";
 import { crossedTraps, newTrapInput, rectBetween, START_BLANK, tapRect, tokensOn, trapAt, wireBetween, wireEnd, zoneBox, hitsSummary } from "./rules.ts";
 import { zoneKinds } from "./store.ts";
 
 const { pickLine, trapTool, zoneHint } = await import("./TrapTool.tsx");
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { RoomProvider } = await import("../../state/view.ts");
+const { useTrapCrossing } = await import("./Crossing.tsx");
 
 /**
  * The Trap tool on a hex scene (docs/design-v1-hex-grids.md phase H2): it
@@ -164,13 +170,15 @@ describe("the drag label on hexes", () => {
       const size = (["large", "huge"] as const)[Math.floor(i / 2) % 2]!;
       const small = size === "large" ? "medium" : "large";
       // Squeezed where it ends, where it starts, or both, as a walk into, out of or along a corridor stands.
-      const how = Math.floor(i / 4) % 3;
-      const startSqueezed = how !== 0;
-      const endSqueezed = how !== 1;
+      // A fourth way: full size, though it stands on a squeeze's anchors where it starts (review FU37-ASTRA-01).
+      const how = Math.floor(i / 4) % 4;
+      const startSqueezed = how === 1 || how === 2;
+      const onSqueezedAnchors = how !== 0;
+      const endSqueezed = how === 0 || how === 2;
       const from: Hex = { col: int(r, 2, 6), row: int(r, 2, 6) };
       const to: Hex = { col: int(r, 8, 16), row: int(r, 8, 14) };
       const base = token("m", { size, x: 0, y: 0 });
-      const start = hexStandPlace(g, base, { size: startSqueezed ? small : size, ref: from, squeezed: startSqueezed });
+      const start = hexStandPlace(g, base, { size: onSqueezedAnchors ? small : size, ref: from, squeezed: onSqueezedAnchors });
       const mover: Token = { ...base, ...start, ...(startSqueezed ? { squeeze: true as const } : {}) };
       const end = hexStandPlace(g, base, { size: endSqueezed ? small : size, ref: to, squeezed: endSqueezed });
       const line = hexLine(g, from, to);
@@ -185,11 +193,37 @@ describe("the drag label on hexes", () => {
       const op = { t: "token.move" as const, tokenId: "m", ...end, ...(endSqueezed ? { squeeze: true as const } : {}) };
       const server = planTrapMove(op, state, DM, {}).springings.map((s) => s.trap.id).sort();
       const side = size === "large" ? 2 : 3;
-      const label = crossedTraps(g, traps, { w: side, h: side }, [{ x: mover.x, y: mover.y }, end]).map((t) => t.id).sort();
+      const label = crossedTraps(g, traps, { w: side, h: side, squeeze: startSqueezed }, [{ x: mover.x, y: mover.y }, end]).map((t) => t.id).sort();
       assert.deepEqual(label, server, `${g.orient} ${size} ${startSqueezed ? "squeezed" : "full"} ${hexKey(from)} to ${endSqueezed ? "squeezed" : "full"} ${hexKey(to)}`);
     }
     assert.ok(compared > 150, `${compared} walks compared`);
   });
+
+  for (const g of GRIDS) {
+    test(`${g.orient}: a full token on squeezed anchors warns of the plate the server springs (review FU37-ASTRA-01)`, () => {
+      const shape = g.orient === "rows" ? "hexRows" : "hexColumns";
+      const base = token("m", { size: "large", x: 0, y: 0, ownerIds: [P1.memberId] });
+      // Left on the Medium anchor of hex (3,4) by a drag or a placement off the grid, unsqueezed.
+      const mover: Token = { ...base, ...hexStandPlace(g, base, { size: "medium", ref: { col: 3, row: 4 }, squeezed: true }) };
+      const end = hexStandPlace(g, base, { size: "large", ref: { col: 10, row: 4 }, squeezed: false });
+      const traps = [trap("plate", { cells: [{ x: 6, y: 5, w: 1, h: 1 }] }, shape)];
+      const state: TrapRoom = { ...room({ scenes: { s1: scene("s1", { gridShape: shape }) }, tokens: { m: mover } }), traps: { plate: traps[0]! } };
+      const op = { t: "token.move" as const, tokenId: "m", ...end };
+      assert.ok(canApply(op, P1, state, { canUseAsset: () => true }).ok, "the player can make this move");
+      const server = planTrapMove(op, state, P1, {}).springings.map((x) => x.trap.id);
+      assert.deepEqual(server, ["plate"], `${g.orient}: the server sets the plate off`);
+      assert.deepEqual(crossedTraps(g, traps, { w: 2, h: 2, squeeze: mover.squeeze }, [{ x: mover.x, y: mover.y }, end]).map((t) => t.id), ["plate"], `${g.orient}: the warning names it`);
+      // Exercise the label's caller too: the same coordinates mean different walks with and without the token's flag.
+      const store = createStore(() => ({ view: state, you: P1 }));
+      for (const squeeze of [undefined, true] as const) {
+        function Warning() {
+          return useTrapCrossing({ ...mover, squeeze }, [mover, end])?.value ?? "";
+        }
+        const text = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(Warning) }));
+        assert.equal(text, squeeze ? "" : "Crosses plate", `${g.orient}: the label reads the starting flag ${squeeze}`);
+      }
+    });
+  }
 });
 
 describe("a new trap on hexes", () => {

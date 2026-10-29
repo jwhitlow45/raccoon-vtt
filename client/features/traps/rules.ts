@@ -390,13 +390,14 @@ function samples(points: readonly Point[]): Point[] {
  * footprint is on anywhere past where it starts, and wires the line through
  * its footprint's middle crosses, by the same orientation rule the server
  * reads (shared/rules/traps.ts walkEvents). `points` are the token's top
- * left corners along the walk, the start first. A door trap goes off when
- * the door opens, never on a walk.
+ * left corners along the walk, the start first, and `fp` its footprint
+ * with whether it stands squeezed where it starts (`squeeze`, the token's
+ * own flag). A door trap goes off when the door opens, never on a walk.
  */
-export function crossedTraps<T extends Pick<Trap, "id" | "zone">>(g: Grid, traps: readonly T[], fp: { w: number; h: number }, points: readonly Point[]): T[] {
+export function crossedTraps<T extends Pick<Trap, "id" | "zone">>(g: Grid, traps: readonly T[], fp: { w: number; h: number; squeeze?: boolean }, points: readonly Point[]): T[] {
   if (traps.length === 0 || points.length < 2) return [];
   // A box reads as its size by its longer side on hexes (footprint.ts sizeCategory), as every rule reads a custom size there.
-  if (isHex(g)) return crossedOnHexes(g, traps, { size: "custom", w: fp.w, h: fp.h, x: 0, y: 0 }, points);
+  if (isHex(g)) return crossedOnHexes(g, traps, { size: "custom", w: fp.w, h: fp.h, x: 0, y: 0 }, fp.squeeze === true, points);
   const at = samples(points);
   let x0 = Infinity;
   let y0 = Infinity;
@@ -438,15 +439,18 @@ export function crossedTraps<T extends Pick<Trap, "id" | "zone">>(g: Grid, traps
  * (shared/rules/route.ts routeWalk): a spot a hex along the hex line
  * between each piece's reference hexes, at the size the piece walks at, so
  * a squeezed walk takes only its squeezed hexes (HX7-CROSSES-SQUEEZE), the
- * leg's last as it lands. Each point stands squeezed where it lies on a
- * squeeze's anchors, as a route's stops do and as the drop that lands
- * there sends it (movement.ts onSqueezedLattice). A zone's rectangles are
- * of hex keys, met where any hex of the footprint is one, and a wire is
+ * leg's last as it lands. The walk starts squeezed as the token stands
+ * (`squeezed`, its own flag), as the server's walk starts, since a full
+ * token may stand on a squeeze's anchors after a drag or a placement off
+ * the grid (review FU37-ASTRA-01). Each later point stands squeezed where
+ * it lies on a squeeze's anchors, as a route's stops do and as the drop
+ * that lands there sends it (movement.ts onSqueezedLattice). A zone's
+ * rectangles are of hex keys, met where any hex of the footprint is one, and a wire is
  * crossed by the line between two spots' anchors.
  */
-function crossedOnHexes<T extends Pick<Trap, "id" | "zone">>(g: HexGrid, traps: readonly T[], token: PlacedToken, points: readonly Point[]): T[] {
-  const standing = (p: Point): PlacedToken => ({ ...token, x: p.x, y: p.y, ...(onSqueezedLattice(g, token, p) ? { squeeze: true as const } : {}) });
-  const trace = points.map((p) => ownWalk({ ...standing(p), sceneId: "", elevation: 0 }));
+function crossedOnHexes<T extends Pick<Trap, "id" | "zone">>(g: HexGrid, traps: readonly T[], token: PlacedToken, squeezed: boolean, points: readonly Point[]): T[] {
+  const standing = (p: Point, i: number): PlacedToken => ({ ...token, x: p.x, y: p.y, ...((i === 0 ? squeezed : onSqueezedLattice(g, token, p)) ? { squeeze: true as const } : {}) });
+  const trace = points.map((p, i) => ownWalk({ ...standing(p, i), sceneId: "", elevation: 0 }));
   const end = trace[trace.length - 1]!;
   const spots = routeWalk(g, trace, { buildChunks: {} }, undefined, { endSqueezed: end.squeeze === true }).map(
     (s, j, all): PlacedToken => ({ ...token, x: s.x, y: s.y, ...((j === all.length - 1 ? end.squeeze === true : s.squeezed === true) ? { squeeze: true as const } : {}) }),

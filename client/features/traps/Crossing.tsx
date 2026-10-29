@@ -26,9 +26,10 @@ export function useTrapCrossing(token: Token, path: readonly Point[]): StackPill
   const key = path.map((p) => `${p.x},${p.y}`).join(" ");
   const text = useMemo(() => {
     const live = Object.values(traps).filter((t) => t.sceneId === token.sceneId && warnsOf(t, role));
-    return crossesText(crossedTraps(sceneGrid({ gridShape: shape }), live, fp, path).map((t) => t.name));
+    // The walk starts squeezed as the token stands, which its place alone does not say on hexes.
+    return crossesText(crossedTraps(sceneGrid({ gridShape: shape }), live, { ...fp, squeeze: token.squeeze === true }, path).map((t) => t.name));
     // The path is read by its points, which a drag's every frame rebuilds as a new array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [traps, role, token.sceneId, fp.w, fp.h, shape, key]);
+  }, [traps, role, token.sceneId, token.squeeze, fp.w, fp.h, shape, key]);
   return text ? { value: text, size: "screen", color: theme.color.warning, small: true } : null;
 }
