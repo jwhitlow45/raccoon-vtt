@@ -10,6 +10,7 @@ import {
   hexEdgeState,
   hexEndStand,
   hexFitWall,
+  hexPairWall,
   hexLegOf,
   hexLegStop,
   hexNarrow,
@@ -238,9 +239,10 @@ export class HexWalkWorld {
     return state;
   }
 
-  /** Whether a stand's footprint fits between the walls (HX-D8). */
+  /** Whether a stand's footprint fits between the walls (HX-D8), a stair band's zigzag side no wall inside it (movement.ts hexPairWall). */
   fits(s: HexStand): boolean {
-    if (!this.walls) return true;
+    const walls = this.walls;
+    if (!walls) return true;
     const node = this.nodeOf(s);
     if (node >= 0 && this.#fit[node] !== 0) return this.#fit[node] === 1;
     const hexes = hexStandHexes(this.g, s);
@@ -248,7 +250,7 @@ export class HexWalkWorld {
     let ok = true;
     for (const h of hexes) {
       const around = hexNeighbors(this.g, h);
-      for (let d = 0; d < 3 && ok; d++) if (keys.has(`${around[d]!.col},${around[d]!.row}`) && this.#edge(h, d) !== 1) ok = false;
+      for (let d = 0; d < 3 && ok; d++) if (keys.has(`${around[d]!.col},${around[d]!.row}`) && this.#edge(h, d) !== 1 && hexPairWall(walls, h, d) >= 0) ok = false;
       if (!ok) break;
     }
     if (node >= 0) this.#fit[node] = ok ? 1 : 2;

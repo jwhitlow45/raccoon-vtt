@@ -7,7 +7,7 @@ import { carriedGroup, moveGroups, onHolder, publicMembers, seatedAt, walkerFor,
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid } from "./grid.ts";
 import { footing } from "./heights.ts";
-import { groundUnder, landing } from "./movement.ts";
+import { groundUnder, landing, storedBuild } from "./movement.ts";
 import { followerTrace, pieceReach, routeWalkers, walkSqueezes, type RoutePoint, type WalkTrace } from "./route.ts";
 
 /**
@@ -199,7 +199,7 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
   };
   let route: RoutePoint[] = [{ x: member.x, y: member.y, elevation: member.elevation }];
   for (const p of holder.route.slice(1)) route.push({ x: p.x + ox, y: p.y + oy, elevation: elevationAt(p.x + ox, p.y + oy, p.elevation) });
-  if (!isPublic && byPlayer && holder.how === "walk") route = stoppedAtWalls(before, member, route, holder.route, elevationAt);
+  if (!isPublic && byPlayer && holder.how === "walk") route = stoppedAtWalls(before, member, route, holder.route, elevationAt, env);
   const last = route[route.length - 1]!;
   return { tokenId: member.id, from, to: { sceneId: member.sceneId, ...last }, route, trace: followerTrace(member, route), how: holder.how, carriedBy: holder.tokenId, pass };
 }
@@ -280,17 +280,19 @@ export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "scen
  * leg test stops, which it ends at the last clear spot of, as a lone
  * token's drop lands (design 9.8), on its own ground there.
  */
-function stoppedAtWalls(before: RoomState, member: Token, route: RoutePoint[], holderRoute: readonly RoutePoint[], elevationAt: (x: number, y: number, holderElevation: number) => number): RoutePoint[] {
+function stoppedAtWalls(before: RoomState, member: Token, route: RoutePoint[], holderRoute: readonly RoutePoint[], elevationAt: (x: number, y: number, holderElevation: number) => number, env: Versioned): RoutePoint[] {
   const scene = before.scenes[member.sceneId];
   if (scene?.blockMovement !== true) return route;
+  // Its stands on hexes as the op was written under (movement.ts storedBuild).
+  const build = storedBuild(before, env.opVersion);
   // A creature a holder drags beside it walks as itself, since a drag is no seat (route.ts followerTrace).
   const trace = followerTrace(member, route);
   for (let i = 1; i < route.length; i++) {
     const a = route[i - 1]!;
     const b = route[i]!;
     const at = trace[i - 1]!;
-    if (movementRules.legBlocker(before, at, b) === null) continue;
-    const stop = landing(before, at, b, "walk");
+    if (movementRules.legBlocker(build, at, b) === null) continue;
+    const stop = landing(build, at, b, "walk");
     const kept = route.slice(0, i);
     if (stop.x !== a.x || stop.y !== a.y) kept.push({ x: stop.x, y: stop.y, elevation: elevationAt(stop.x, stop.y, holderRoute[i - 1]!.elevation) });
     return kept;

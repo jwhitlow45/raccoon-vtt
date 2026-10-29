@@ -3,7 +3,8 @@ import type { DoorRef } from "../protocol.ts";
 import type { Blocker, BuildState, LegEnd } from "../ruleHooks.ts";
 import { anchorOfHex, canSqueeze, footprintRect, footprintSize, hexSqueezedSize, isSqueezed, occupiedHexes, occupiedRange, sizeCategory, snapStep, squeezedSize, storedCenter, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point } from "./geom.ts";
-import { footing, footprintGround, standing, type Standing } from "./heights.ts";
+import { footing, footprintGround, oppositeFacing, standing, type Standing } from "./heights.ts";
+import { standsAcrossBands } from "../migrate.ts";
 import { APART, contact, CROSS, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
 import { LEDGE, PIECE_BAND, pieceBlocks, pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES } from "./grid.ts";
@@ -1380,10 +1381,25 @@ export function hexDirection(g: HexGrid, from: Hex, to: Hex): number {
 
 /**
  * What the hex tests read of a scene: its grid, bounds and movement set,
- * the build's test of held pieces, and the lowest top of a ledge that
- * stops the walker (`ledgeFloor`, Infinity where none does).
+ * the build's test of held pieces, the lowest top of a ledge that stops
+ * the walker (`ledgeFloor`, Infinity where none does), and whether a
+ * stand may hold a stair band's zigzag side (`hexPairWall`), which a
+ * build an op stored before version 30 reads says not (`storedBuild`).
  */
-export type HexWalls = { g: HexGrid; bounds: { w: number; h: number }; walls: WallSet; test: PieceTest; floor: number };
+export type HexWalls = { g: HexGrid; bounds: { w: number; h: number }; walls: WallSet; test: PieceTest; floor: number; bands: boolean };
+
+/**
+ * The build as an op stored at `opVersion` reads it on replay: the state
+ * itself for today's rules, and for an op stored before version 30 its
+ * scenes and build marked so a stand on hexes reads every raised side
+ * between two of its hexes as a wall (migrate.ts standsAcrossBands), as
+ * the op was written under. The reducer reads a hex stand through it
+ * wherever it judges one: a trap's stop (traps.ts) and a dragged
+ * creature's own leg (moveLeg.ts).
+ */
+export function storedBuild<T extends BuildState>(state: T, opVersion: number | undefined): T | BuildState {
+  return standsAcrossBands(opVersion) ? state : { scenes: state.scenes, buildChunks: state.buildChunks, ledgedBands: true };
+}
 
 /**
  * The hex tests' view of the walker's scene, or null when it is not a hex
@@ -1396,7 +1412,7 @@ export function hexWallsOf(state: BuildState, token: MovingToken, endElevation =
   const g = scene ? sceneGrid(scene) : SQUARES;
   if (!scene || !isHex(g)) return null;
   const walls = sceneWalls(scene, state.buildChunks);
-  return { g, bounds: scene.bounds, walls, test: pieceTestOf(state.buildChunks), floor: ledgeFloor(walls, scene, token, endElevation) };
+  return { g, bounds: scene.bounds, walls, test: pieceTestOf(state.buildChunks), floor: ledgeFloor(walls, scene, token, endElevation), bands: state.ledgedBands !== true };
 }
 
 /**
@@ -1447,11 +1463,48 @@ export function hexFitWall(t: HexWalls, s: Pick<HexStand, "size" | "ref">): numb
     for (let d = 0; d < 3; d++) {
       const n = around[d]!;
       if (!keys.has(`${n.col},${n.row}`)) continue;
-      const segs = hexEdgeMeets(t, h, d);
-      if (segs.length > 0) return segs[0]!;
+      const k = hexPairWall(t, h, d);
+      if (k >= 0) return k;
     }
   }
   return -1;
+}
+
+/**
+ * The wall or ledge between hex `h` and its neighbor in direction `d` that
+ * keeps a stand from holding both, or -1. Where two stairs side by side
+ * face the same way, a stair band, the band's edge zigzags between hexes,
+ * so a raised side between a stair and the hex its neighbor flight leads
+ * to lies between the band's own flights, a side no stair faces through.
+ * From op version 30 such a side, a ledge and nothing else, is no wall
+ * inside a stand (D-261029-58), as a square creature stands across a
+ * stair's edge: so a Large creature, or a Huge one squeezed onto three
+ * hexes, walks a stair band two hexes wide that a Medium one walks. Every
+ * other raised side stays one, a cliff beside a lone stair included.
+ */
+export function hexPairWall(t: HexWalls, h: Hex, d: number): number {
+  const segs = hexEdgeMeets(t, h, d);
+  if (segs.length === 0) return -1;
+  if (t.bands && segs.every((k) => (t.walls.stored.tags[k]! & MOVEMENT) === 0)) {
+    const n = hexNeighbors(t.g, h)[d]!;
+    if (besideFlight(t, h, n) || besideFlight(t, n, h)) return -1;
+  }
+  return segs[0]!;
+}
+
+/** Whether stair hex `s` has a neighbor stair on its ground facing its way whose flight runs up or down to `x`. */
+function besideFlight(t: HexWalls, s: Hex, x: Hex): boolean {
+  const facing = t.walls.stairAt(s.col, s.row);
+  if (facing === undefined || facing === null) return false;
+  const up = Number(facing);
+  const down = oppositeFacing(t.g, up);
+  const ground = t.walls.groundAt(s.col, s.row);
+  for (const c of hexNeighbors(t.g, s)) {
+    if ((c.col === x.col && c.row === x.row) || t.walls.stairAt(c.col, c.row) !== facing || t.walls.groundAt(c.col, c.row) !== ground) continue;
+    const around = hexNeighbors(t.g, c);
+    for (const e of [around[up]!, around[down]!]) if (e.col === x.col && e.row === x.row) return true;
+  }
+  return false;
 }
 
 /** Whether every hex of a stand lies inside the scene (4.2). */

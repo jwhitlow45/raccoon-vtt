@@ -1205,6 +1205,20 @@ export function seatsFromSnappedBox(opVersion: number | undefined): boolean {
 }
 
 /**
+ * Whether a stand on hexes may hold a raised side between two flights of
+ * a stair band, the side its zigzag edge leaves that no stair faces
+ * through (D-261029-58, movement.ts hexPairWall), so a creature on several
+ * hexes walks a stair band two hexes wide. Ops stored before version 30
+ * read that side as a wall wherever the reducer judges a stand, a trap's
+ * stop and a dragged creature's own leg, and replay so
+ * (movement.ts storedBuild). Live ops carry no stored version and take
+ * today's rule.
+ */
+export function standsAcrossBands(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 30);
+}
+
+/**
  * Whether the reducer writes what traps add on its own
  * (docs/design-v1-traps.md 6.6): springings on walks, landings, turns and
  * doors, their stops, occurrences, lines and actions, and an area reminder

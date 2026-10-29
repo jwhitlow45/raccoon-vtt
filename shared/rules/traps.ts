@@ -9,7 +9,7 @@ import { holderOf, insideHolder, onHolder, walkerFor } from "./attach.ts";
 import { footprintRect, footprintSize, isSqueezed, occupiedHexes, occupiedRange, rangeAtInto, sizeCategory, type CellRange, type PlacedToken } from "./footprint.ts";
 import { footing, footprintGround, groundAt, sceneGround, standing } from "./heights.ts";
 import { planMove, type MovedToken } from "./moveLeg.ts";
-import { groundUnder } from "./movement.ts";
+import { groundUnder, storedBuild } from "./movement.ts";
 import { onTrace, routeLattice, routeStands, routeWalk, type RoutePiece, type RoutePoint, type RouteSpot, type WalkSpot } from "./route.ts";
 import { APART, contact, orient } from "./segments.ts";
 import { sceneWalls } from "./walls.ts";
@@ -1438,7 +1438,7 @@ function standSpots(walks: Walks, walk: Walk, before: RoomState, seen: (id: stri
     const token = walk.holder ? walk.entry.trace[0]! : walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion, to: walk.entry.to });
     // The group's head walks its group's own walk at its step, so its spots are already there.
     const head = walk.entry === walk.group.head && walk.step === walk.group.step;
-    stands = routeStands(before, walk.entry.route, token, walk.group.step, walk.holder ? {} : { squeeze: walk.squeezeAtEnd }, head ? walk.group.base(walk.group.step) : undefined);
+    stands = routeStands(storedBuild(before, walks.opVersion), walk.entry.route, token, walk.group.step, walk.holder ? {} : { squeeze: walk.squeezeAtEnd }, head ? walk.group.base(walk.group.step) : undefined);
   }
   walks.stands.set(walk, stands);
   return stands;
@@ -1510,7 +1510,7 @@ function cutOp(op: Op, walks: Walks, stops: ReadonlyMap<string, Stop>, before: R
     const token = walkerFor(before, walk.token, (t) => seen(t.id), { opVersion: walks.opVersion, to: walk.entry.to });
     const squeeze = op.t === "token.move" && op.tokenId === named && op.squeeze === true;
     // The named token's own walk, as its stop's search read it when it walks as the group's head.
-    const stands = walk.holder ? routeStands(before, group.head.route, token, group.step, { squeeze }) : standSpots(walks, walk, before, seen);
+    const stands = walk.holder ? routeStands(storedBuild(before, walks.opVersion), group.head.route, token, group.step, { squeeze }) : standSpots(walks, walk, before, seen);
     if (stands.walk.length === 0) return null;
     const i = latestIndex(stands.walk, stop.s);
     const at = stands.spot(i);

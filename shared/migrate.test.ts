@@ -27,6 +27,7 @@ import {
   takesBackTurnOnly,
   seatsFromSnappedBox,
   seatsOnSqueeze,
+  standsAcrossBands,
   discoversMap,
   mapDiscoveryUpgrade,
   needsMapDiscoveryUpgrade,
@@ -1505,7 +1506,7 @@ describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount
   });
 });
 
-describe("follow-up batch 36: op version 30, passengers on a holder that starts its walk squeezed (D-261029-56)", () => {
+describe("follow-up batch 36: op version 30, passengers on a holder that starts its walk squeezed and stands across a stair band (D-261029-56, D-261029-58)", () => {
   test("are the versions now, the snapshot's unchanged", () => {
     assert.equal(OP_VERSION, 30);
     assert.equal(SNAPSHOT_VERSION, 29);
@@ -1531,6 +1532,13 @@ describe("follow-up batch 36: op version 30, passengers on a holder that starts 
     assert.equal(seatsFromSnappedBox(1), false);
     assert.equal(seatsFromSnappedBox(30), true);
     assert.equal(seatsFromSnappedBox(undefined), true);
+  });
+
+  test("ops stored before version 30 read a stair band's zigzag side as a wall inside a stand, later and live ops do not", () => {
+    assert.equal(standsAcrossBands(29), false);
+    assert.equal(standsAcrossBands(1), false);
+    assert.equal(standsAcrossBands(30), true);
+    assert.equal(standsAcrossBands(undefined), true);
   });
 
   test("a version 30 op never migrates down", () => {

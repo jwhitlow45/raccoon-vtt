@@ -33,8 +33,12 @@ export type LegEnd = { x: number; y: number; elevation: number; squeeze?: boolea
 /** What stops a leg: a wall (doors, windows and pillars included) or a ledge between two heights. */
 export type Blocker = "wall" | "ledge";
 
-/** The state the movement test reads: the scene and its build. */
-export type BuildState = Pick<RoomState, "scenes" | "buildChunks">;
+/**
+ * The state the movement test reads: the scene and its build, and for an
+ * op stored before version 30 the mark that it reads every raised side
+ * between two hexes of a stand as a wall (movement.ts storedBuild).
+ */
+export type BuildState = Pick<RoomState, "scenes" | "buildChunks"> & { readonly ledgedBands?: true };
 
 export type MovementRules = {
   /**
