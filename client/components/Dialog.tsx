@@ -251,7 +251,7 @@ export function Dialog(props: DialogProps) {
       >
         {header && !tight ? <SheetHeader title={props.title} back={props.back} actions={props.headerActions} detail={props.headerDetail} detailId={detailId} onClose={onClose} divider grab={bottom} /> : null}
         <div ref={body} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", padding: BODY_PAD, ...props.bodyStyle, ...(headlessSheet ? { position: "relative" } : null) }}>
-          {/* With no header to hold it, the X-card's pill sits at the top of its body, all it has to swipe by, in the 20 px its content keeps above its first line. */}
+          {/* With no header to hold it, the X-card's grabber sits at the top of its body, all it has to swipe by, in the 20 px its content keeps above its first line. */}
           {headlessSheet ? <SheetGrabber /> : null}
           <DraftScope value={drafts}>
             <RowHintScope>{props.children}</RowHintScope>

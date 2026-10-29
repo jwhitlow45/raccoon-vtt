@@ -258,7 +258,7 @@ export const TURN_PILL_PX = 36;
  * target. While the op waits for the server it spins and takes no second
  * tap, at full strength so the spinner reads. `stack` puts its two words
  * on two lines, for the phone's turn band when its row is short of room
- * (band.ts bandFit), as the timer stacks "Time’s up" over the time past.
+ * (band.ts bandFit), as the timer stacks "Time's up" over the time past.
  * On one line or two, the spinner stands in the words' place while it
  * waits: beside them it took the pill past the width the band gave it, off
  * the screen at 320 px at 130% and at 360 px at 115%. The words stay,
@@ -329,7 +329,7 @@ export function EndTurnPill(props: { waiting: boolean; stack?: boolean; onClick(
  * seconds, red once it runs out, then counting the time past it. Words go
  * with the color, so the state never rests on color alone.
  *
- * `stack` puts the time past it under "Time’s up", for the phone's turn
+ * `stack` puts the time past it under "Time's up", for the phone's turn
  * band: on one line it is the widest thing in a row that also holds the
  * picture, the name, "Your turn" and End Turn, and at a large interface
  * size on a narrow phone it pushed End Turn off the screen.

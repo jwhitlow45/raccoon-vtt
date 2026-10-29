@@ -457,7 +457,7 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
       const label = `${view.width} x ${view.height} at ${Math.round(view.scale * 100)}%`;
       await setUp(view);
       await player.getByRole("button", { name: "End turn" }).waitFor();
-      // The time past the turn needs room of its own: "Time’s up +0:05" and the like.
+      // The time past the turn needs room of its own: "Time's up +0:05" and the like.
       await waitFor(`time up in the band, ${label}`, async () => /Time's up\s*\+/.test((await band(player)).timerText) || null, 15_000);
       const b = await band(player);
       assert.ok(b.name && b.yourTurn && b.timer && b.endTurn, `${label}: the band is missing a part: ${JSON.stringify(b)}`);

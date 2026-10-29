@@ -92,7 +92,7 @@ const ROW = {
   slack: 4,
 };
 
-/** The band's timer: none, time up ("Time’s up" over the time past it), or a running clock and its text. */
+/** The band's timer: none, time up ("Time's up" over the time past it), or a running clock and its text. */
 export type BandTimer = "none" | "over" | { clock: string };
 
 /**
