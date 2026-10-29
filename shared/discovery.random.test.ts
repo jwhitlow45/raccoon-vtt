@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkOf, discoveryOp, discoveryState, fogRoom, lift, randomFeature, randomWallFeature, remember, TERRAINS, wall } from "./discoveryTestutil.ts";
 import { keys, type EntityKey } from "./keys.ts";
-import { CHUNK_CELLS, type FreeWall, type Label, type PlayerChunk, type RememberedWall, type RoomState, type Scene, type Viewer, type WallFeature } from "./model.ts";
+import { CHUNK_CELLS, MAX_FREE_WALL_CELLS, type FreeWall, type Label, type PlayerChunk, type RememberedWall, type RoomState, type Scene, type Viewer, type WallFeature } from "./model.ts";
 import { exploreFor, playersOf, withCellVision } from "./perPlayerTestutil.ts";
 import { allKeys, applyChanges, changedSightKeys, dependents, diffProjection, heldOf, projectChunkForPlayer, projectEntity, projectState, stableStringify, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "./project.ts";
-import { opSchema, type Op } from "./protocol.ts";
+import { mapSchemas, opSchema, type Op } from "./protocol.ts";
 import { applyOp, type ApplyResult } from "./reducer.ts";
 import { labelCells } from "./rules/fog.ts";
 import { decodeHeights } from "./rules/heights.ts";
@@ -355,7 +355,8 @@ describe("MX1's pairs where live ground meets remembered ground", () => {
       const du = int(r, 1, 2) * 64;
       const dv = int(r, -96, 96);
       const start = 6 * 64 - m * du;
-      const v0 = int(r, 2 * 64, 9 * 64);
+      // Even the longest continuation stays inside the scene, on the stored wall lattice.
+      const v0 = int(r, 7.5 * 64, 8.5 * 64);
       const at = (k: number): [number, number] => {
         const u = (start + k * du) / 64;
         const v = (v0 + k * dv) / 64;
@@ -368,17 +369,24 @@ describe("MX1's pairs where live ground meets remembered ground", () => {
         const old: FreeWall = { id: "abcdefghijkl", a: at(0), b: at(m), f: { kind: "wall" } };
         if (!extended) wall(s, old.id, old.a, old.b);
         else {
-          const ran = wall(s, old.id, old.a, at(m + int(r, 1, 2)));
-          // The map step's version over the remembered cells the new wall crosses: the wall as the party last saw it.
-          const cells = wallSpans(sceneGrid(s.scenes["s1"]!), ran).map((span) => span.cell).filter((key) => {
-            const [x, y] = key.split(",").map(Number) as [number, number];
-            return across ? x >= 6 : y >= 6;
-          });
-          if (cells.length > 0) {
-            const home = Object.values(s.buildChunks).find((c) => c.walls?.some((w) => w.id === old.id))!;
-            remember(s, null, home.cx, home.cy, { walls: { [old.id]: [{ wall: old, cells }] } });
+          const end = at(m + int(r, 1, 2));
+          // Split a long continuation at the held boundary. Its added segment had no remembered wall.
+          const runs: { ran: FreeWall; was: FreeWall | null }[] = Math.hypot(end[0] - old.a[0], end[1] - old.a[1]) <= MAX_FREE_WALL_CELLS
+            ? [{ ran: wall(s, old.id, old.a, end), was: old }]
+            : [{ ran: wall(s, old.id, old.a, old.b), was: old }, { ran: wall(s, "mnopqrstuvwx", old.b, end), was: null }];
+          for (const { ran, was } of runs) {
+            // The map step's version over the remembered cells the new wall crosses.
+            const cells = wallSpans(sceneGrid(s.scenes["s1"]!), ran).map((span) => span.cell).filter((key) => {
+              const [x, y] = key.split(",").map(Number) as [number, number];
+              return across ? x >= 6 : y >= 6;
+            });
+            if (cells.length > 0) {
+              const home = Object.values(s.buildChunks).find((c) => c.walls?.some((w) => w.id === ran.id))!;
+              remember(s, null, home.cx, home.cy, { walls: { [ran.id]: [{ wall: was, cells }] } });
+            }
           }
         }
+        for (const chunk of Object.values(s.buildChunks)) for (const w of chunk.walls ?? []) assert.ok(mapSchemas.freeWall.safeParse(w).success, `seed ${seed}: every continuation is a real wall`);
         return s;
       };
       const a = world(false);

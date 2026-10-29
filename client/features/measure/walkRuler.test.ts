@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { chunkKey, holderTileKey } from "#shared/keys.ts";
 import type { EdgeFeature, RoomState } from "#shared/model.ts";
+import { mapSchemas } from "#shared/protocol.ts";
 import { projectState } from "#shared/project.ts";
 import { DM, P1, P2, reveal, room as baseRoom, scene, template, token } from "#shared/testutil.ts";
 import { wall } from "#shared/discoveryTestutil.ts";
@@ -449,8 +450,12 @@ describe("the walking ruler from a rider of a Large mount into a corridor one sq
   test("from every seat its legs run where the rider sits, on the mount's square in the corridor, never across the rock", () => {
     const s = baseRoom({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
     s.buildChunks = {};
-    const runs: [[number, number], [number, number]][] = [[[8, 0], [8, 10]], [[8, 11], [8, 20]], [[16, 0], [16, 10]], [[16, 11], [16, 20]], [[8, 10], [16, 10]], [[8, 11], [16, 11]]];
-    runs.forEach(([a, b], i) => wall(s, `fu35ru${String(i).padStart(6, "0")}`, a, b));
+    const runs: [[number, number], [number, number]][] = [
+      ...[8, 16].flatMap((x): [[number, number], [number, number]][] => [[[x, 0], [x, 5]], [[x, 5], [x, 10]], [[x, 11], [x, 16]], [[x, 16], [x, 20]]]),
+      [[8, 10], [16, 10]],
+      [[8, 11], [16, 11]],
+    ];
+    runs.forEach(([a, b], i) => assert.ok(mapSchemas.freeWall.safeParse(wall(s, `fu35ru${String(i).padStart(6, "0")}`, a, b)).success, "every corridor wall meets the protocol"));
     const rock = (x: number, y: number) => x >= 8 && x < 16 && (y < 10 || y >= 11);
     s.tokens.horse = token("horse", { size: "large", x: 3, y: 9, name: "Warhorse" });
     for (const [x, y] of [[3, 9], [4, 9], [3, 10], [4, 10]] as const) {

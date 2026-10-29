@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { wall } from "#shared/discoveryTestutil.ts";
 import type { RoomState, Token, Viewer } from "#shared/model.ts";
 import { canApply } from "#shared/permissions.ts";
-import type { Op } from "#shared/protocol.ts";
+import { mapSchemas, type Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { walkerFor } from "#shared/rules/attach.ts";
 import { occupiedHexes } from "#shared/rules/footprint.ts";
@@ -66,8 +66,12 @@ function getsOffClear(s: RoomState, low: { x: number; y: number }, oldCrosses: b
 function corridor(): RoomState {
   const s = room({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
   s.buildChunks = {};
-  const runs: [[number, number], [number, number]][] = [[[8, 0], [8, 10]], [[8, 12], [8, 20]], [[16, 0], [16, 10]], [[16, 12], [16, 20]], [[8, 10], [16, 10]], [[8, 12], [16, 12]]];
-  runs.forEach(([a, b], i) => wall(s, `fu35fw${String(i).padStart(6, "0")}`, a, b));
+  const runs: [[number, number], [number, number]][] = [
+    ...[8, 16].flatMap((x): [[number, number], [number, number]][] => [[[x, 0], [x, 5]], [[x, 5], [x, 10]], [[x, 12], [x, 16]], [[x, 16], [x, 20]]]),
+    [[8, 10], [16, 10]],
+    [[8, 12], [16, 12]],
+  ];
+  runs.forEach(([a, b], i) => assert.ok(mapSchemas.freeWall.safeParse(wall(s, `fu35fw${String(i).padStart(6, "0")}`, a, b)).success, "every corridor wall meets the protocol"));
   return s;
 }
 

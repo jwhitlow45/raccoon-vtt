@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { astraRegion, autoAt, chunksOf, edge, fogRoom, heights, knownAt, lift, liftSubs, moveAstraRegion, paint, remember, stairs, wall, wallsOf } from "./discoveryTestutil.ts";
+import { mapSchemas } from "./protocol.ts";
 import { keys } from "./keys.ts";
 import type { FreeWall, Label, PlayerChunk, RoomState, Scene, Stamp } from "./model.ts";
 import { allKeys, dependents, heldChunks, namedByMemory, pieceId, playerChunk, projectEntity, projectState, stableStringify } from "./project.ts";
@@ -240,7 +241,9 @@ describe("free walls cut at held cells (decision 2)", () => {
   test("two worlds, the same held piece and different unseen continuations: the same bytes, ids and positions", () => {
     const worlds = [6.75, 3, 4.5, 12].map((end) => {
       const state = fogRoom();
-      wall(state, end === 12 ? "zzzzzzzzzzzz" : "abcdefghijkl", [1.25, 1.5], [end, 1.5]);
+      wall(state, end === 12 ? "zzzzzzzzzzzz" : "abcdefghijkl", [1.25, 1.5], [Math.min(end, 7.25), 1.5]);
+      if (end > 7.25) wall(state, "yyyyyyyyyyyy", [7.25, 1.5], [end, 1.5]);
+      for (const chunk of Object.values(state.buildChunks)) for (const w of chunk.walls ?? []) assert.ok(mapSchemas.freeWall.safeParse(w).success, "every continuation is a real wall");
       lift(state, "dm", { x: 0, y: 0, w: 3, h: 5 });
       return JSON.stringify(projectState(state, P1, { sceneId: "s1" }).buildChunks);
     });
