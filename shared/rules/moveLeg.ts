@@ -8,7 +8,7 @@ import { isSqueezed } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid } from "./grid.ts";
 import { footing } from "./heights.ts";
-import { groundUnder, landing, onSqueezedLattice } from "./movement.ts";
+import { groundUnder, landing, onSqueezedLattice, squeezeFits, walkEnds } from "./movement.ts";
 import { followerTrace, pieceReach, routeWalkers, type RoutePoint, type WalkTrace } from "./route.ts";
 
 /**
@@ -203,20 +203,20 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
 }
 
 /**
- * Where what sits on a holder sits at each point of the holder's walk on a
- * hex scene when that walk squeezes (D-261029-52), or null where the
- * offset holds all the way. It holds on squares, where a squeeze reads the
- * core, for ops stored before version 29 (migrate.ts seatsOnSqueeze), for a
- * walk that never squeezes, whose offset keeps it on its seat, and for a
- * change of scene or shape, which no squeeze survives. At each point where
- * the holder stands squeezed, and at the first where it stands full after
- * one, the token takes the seat on the hexes the holder stands on there
+ * Where what sits on a holder sits at each point of the holder's walk when
+ * that walk squeezes (D-261029-52 on hexes, D-261029-53 on squares), or
+ * null where the offset holds all the way. It holds for ops stored before
+ * version 29 (migrate.ts seatsOnSqueeze), for a walk that never squeezes,
+ * whose offset keeps it on its seat, and for a change of scene or shape,
+ * which no squeeze survives. At each point where the holder stands
+ * squeezed, and at the first where it stands full after one, the token
+ * takes the seat on the squares or hexes the holder stands on there
  * nearest where its offset would put it (attach.ts standingSeatSpot), and
- * keeps its offset from there on. So a rider sits on its mount's hex
- * through a one-hex corridor, its light and sight with it, and the walk's
- * route, sweeps and ruler read it there. Its link reads the full footprint
- * (docs/design-v1-attach.md 5.1), which every such seat lies in, so it
- * never lets go mid-corridor.
+ * keeps its offset from there on. So a rider sits on its mount's square or
+ * hex through a corridor one wide, its light and sight with it, and the
+ * walk's route, sweeps and ruler read it there. Its link reads the full
+ * footprint (docs/design-v1-attach.md 5.1), which every such seat lies in,
+ * so it never lets go mid-corridor.
  */
 function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env: Versioned): (Point | null)[] | null {
   if (!seatsOnSqueeze(env.opVersion) || (holder.how !== "walk" && holder.how !== "teleport")) return null;
@@ -224,10 +224,11 @@ function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env
   const standing = before.tokens[holder.tokenId];
   if (!scene || !standing) return null;
   const g = sceneGrid(scene);
-  if (!isHex(g)) return null;
   const last = holder.route.length - 1;
-  // The holder's stand at each point, as its walk has it (route.ts WalkTrace): as it stood at the start, by where it stands past it, and as the move leaves it at the end.
-  const squeezedAt = holder.route.map((p, i) => (i === 0 ? isSqueezed(standing) : i === last ? holder.squeezed === true : onSqueezedLattice(g, standing, p)));
+  // The holder's stand at each point: as it stood at the start, as the move leaves it at the end, and between by where it
+  // stands, as a walk's spots read it (route.ts routeStands): on hexes its lattice, on squares the squeeze rule there.
+  const between = (p: Point, i: number) => (isHex(g) ? onSqueezedLattice(g, standing, p) : squeezeFits(before, walkEnds(before, holder.trace[i - 1]!)(p)));
+  const squeezedAt = holder.route.map((p, i) => (i === 0 ? isSqueezed(standing) : i === last ? holder.squeezed === true : between(p, i)));
   if (!squeezedAt.some((s) => s)) return null;
   const out: (Point | null)[] = [null];
   let offset = { x: member.x - holder.from.x, y: member.y - holder.from.y };

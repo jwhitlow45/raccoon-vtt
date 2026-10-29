@@ -186,10 +186,13 @@ function fitsInside(carried: PlacedToken, holder: PlacedToken): boolean {
  */
 export function seatSpot(g: Grid, carried: PlacedToken, holder: PlacedToken): Point | null {
   if (isHex(g)) return hexSeatSpot(g, carried, holder);
+  return squareSeatIn(carried, fullRect(g, holder), fullRect(g, carried));
+}
+
+/** The seat on squares inside `box`: the spot on the carried token's own snap grid nearest `from`, ties to the smaller y and then the smaller x. */
+function squareSeatIn(carried: PlacedToken, box: Rect, from: Point): Point | null {
   const size = footprintSize(carried);
   const step = snapStep(carried);
-  const box = fullRect(g, holder);
-  const from = fullRect(g, carried);
   const xs = gridSpots(box.x, box.x + box.w - size.w, step);
   const ys = gridSpots(box.y, box.y + box.h - size.h, step);
   let best: Point | null = null;
@@ -218,15 +221,19 @@ function hexSeatSpot(g: HexGrid, carried: PlacedToken, holder: PlacedToken): Poi
 }
 
 /**
- * Where what sits on a holder sits at one point of a squeezed walk on hexes
- * (D-261029-52, moveLeg.ts follow): of the anchors of its size whose hexes
- * all lie on those the holder stands on there, squeezed or full, the one
- * nearest the middle of its box where its offset from the holder puts it,
- * ties in lattice order. Null when none fits. The link still reads the full
- * footprint (5.1), which every hex the holder stands on lies in.
+ * Where what sits on a holder sits at one point of a squeezed walk
+ * (D-261029-52 on hexes, D-261029-53 on squares, moveLeg.ts follow): the
+ * seat on the squares or hexes the holder stands on there, squeezed or
+ * full, nearest where its offset from the holder puts it, ties as a seat's.
+ * On squares that is the spot on its own snap grid inside the holder's
+ * footprint (the squeezed one while it squeezes) nearest its box, on hexes
+ * the anchor of its size whose hexes all lie on the holder's nearest the
+ * middle of its box. Null when none fits. The link still reads the full
+ * footprint (5.1), which every square or hex the holder stands on lies in.
  */
-export function standingSeatSpot(g: HexGrid, carried: PlacedToken, holder: PlacedToken): Point | null {
-  return hexSeatOn(g, carried, occupiedHexes(g, holder), storedCenter(unsqueezed(carried)));
+export function standingSeatSpot(g: Grid, carried: PlacedToken, holder: PlacedToken): Point | null {
+  if (isHex(g)) return hexSeatOn(g, carried, occupiedHexes(g, holder), storedCenter(unsqueezed(carried)));
+  return squareSeatIn(carried, footprintRect(g, holder), { x: carried.x, y: carried.y });
 }
 
 /** The seat on hexes `on`: of the carried size's anchors whose hexes all lie on them, the one nearest `from`, ties in lattice order. */
@@ -268,7 +275,9 @@ function at(token: PlacedToken, spot: Point): PlacedToken {
 
 /**
  * Whether a creature getting off may land at `spot` (4.3, 8.1): inside the
- * scene, within reach of its holder and clear of its footprint. Whether it
+ * scene, within reach of its holder and clear of the squares or hexes the
+ * holder stands on, the squeezed ones while it squeezes, so off a mount in
+ * a corridor it lands in the corridor beside it (D-261029-53). Whether it
  * lands on another creature is the device's to judge, since the server's
  * answer would tell a player where a hidden one stands.
  */
@@ -281,7 +290,22 @@ export function getOffFits(g: Grid, settings: DistanceSettings, bounds: { w: num
     const r = fullRect(g, placed);
     if (r.x < -EPS || r.y < -EPS || r.x + r.w > bounds.w + EPS || r.y + r.h > bounds.h + EPS) return false;
   }
-  return !overlaps(g, placed, holder) && withinReach(g, settings, placed, holder);
+  return clearOfStand(g, placed, holder) && withinReach(g, settings, placed, holder);
+}
+
+/**
+ * Whether a full footprint shares nothing with what the holder stands on:
+ * `overlaps` for a holder at full size, and only its squeezed squares or
+ * hexes while it squeezes, which lie inside its full ones.
+ */
+function clearOfStand(g: Grid, placed: PlacedToken, holder: PlacedToken): boolean {
+  if (isHex(g)) {
+    const taken = new Set(occupiedHexes(g, holder).map(hexKey));
+    return !fullHexes(g, placed).some((h) => taken.has(hexKey(h)));
+  }
+  const a = fullRect(g, placed);
+  const b = footprintRect(g, holder);
+  return !(a.x < b.x + b.w - EPS && b.x < a.x + a.w - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS);
 }
 
 /** A token as a walk reads it beside its link: what walkerFor needs of it and of its holder. */
@@ -365,9 +389,11 @@ export function getOffSpot(
   if (isHex(g)) return hexGetOffSpot(g, settings, carried, holder, fits);
   const size = footprintSize(carried);
   const step = snapStep(carried);
-  const box = fullRect(g, holder);
+  // Round the squares it stands on, the squeezed ones while it squeezes, as on hexes.
+  const box = footprintRect(g, holder);
   const center = { x: Math.round((box.x + box.w / 2 - size.w / 2) / step) * step + 0, y: Math.round((box.y + box.h / 2 - size.h / 2) / step) * step + 0 };
-  // Every spot in reach lies within the holder's half width, the creature's, and the reach in cells and one more of the middle.
+  // Every spot in reach lies within the holder's half width, the creature's, and the reach in cells and one more of the middle,
+  // which also covers a squeezed holder's full footprint, at most a cell past its squeezed one.
   const reachCells = attachReachFt(settings.feetPerCell) / settings.feetPerCell;
   const rings = Math.ceil((Math.max(box.w, box.h) / 2 + Math.max(size.w, size.h) / 2 + reachCells + 1) / step);
   for (let ring = 1; ring <= rings; ring++) {
