@@ -240,7 +240,7 @@ export function groupWalkWorld(state: RoomState, token: Token & Walker, viewer: 
   });
   return {
     ...world,
-    input: { ...world.input, drag, creatures: world.input.creatures.filter((_, i) => keep[i]), ...(towed.length > 0 ? { towed } : {}) },
+    input: { ...world.input, drag, creatures: world.input.creatures.filter((_, i) => keep[i]), ...(towed.length > 0 ? { towed, group: members.map((id) => state.tokens[id]!) } : {}) },
     spaces: world.spaces.filter((_, i) => keep[i]),
   };
 }

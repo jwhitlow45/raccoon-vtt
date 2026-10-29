@@ -5,7 +5,7 @@ import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.t
 import type { Point } from "./geom.ts";
 import { footing } from "./heights.ts";
 import { crossesInnerLedges, groundUnder, legStop, offKey, onOffHolder, pastHolder, stepTester, walkFrom, walkOn, type MovingToken, type StepTester, type Walker } from "./movement.ts";
-import { legSteps, routeFeet, routeLattice, straightCost, trueLength, type RoutePiece, type RoutePoint } from "./route.ts";
+import { followedHeight, legSteps, routeFeet, routeLattice, straightCost, trueLength, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
 import { SQUARES } from "./grid.ts";
 
 /**
@@ -75,6 +75,13 @@ export type WalkInput = {
    * (docs/design-v1-attach.md 4.2, review LP12-AT-2).
    */
   towed?: readonly (Walker & { id: string })[];
+  /**
+   * Every creature the move takes along that every player sees, riders and
+   * carried creatures too, each as the token it is: the links a dragged
+   * creature's height follows up to the mover (route.ts followedHeight).
+   * Only `towed` meet walls.
+   */
+  group?: readonly Follower[];
 };
 
 /** What a found route is: its pieces as the op carries them, the walk's points with their ground, and what the search paid. */
@@ -228,13 +235,8 @@ function stepCache(walls: object, key: string, size: number): Uint8Array {
   return cache;
 }
 
-/**
- * A creature the walker drags beside it (WalkInput `towed`): its place
- * beside the walker, its footprint's size, and its step tests by how it
- * stands. It comes as the token it is (walkWorld.ts groupWalkWorld), its
- * link to its own holder included.
- */
-type Towed = { walker: Walker & { id: string; attached?: { readonly to: string } }; dx: number; dy: number; w: number; h: number; testers: Map<string, StepTester> };
+/** A creature the walker drags beside it (WalkInput `towed`): its place beside the walker, its footprint's size, and its step tests by how it stands. */
+type Towed = { walker: Walker & { id: string }; dx: number; dy: number; w: number; h: number; testers: Map<string, StepTester> };
 
 /**
  * The world a drag walks in, built once per drag: the lattice, the per-cell
@@ -291,9 +293,10 @@ export class WalkWorld {
   readonly #on: Uint8Array;
   /** The creatures the walker drags beside it (WalkInput `towed`). */
   readonly #towed: readonly Towed[];
-  readonly #towedById: ReadonlyMap<string, Towed>;
-  /** The walker's own id, which the links of the creatures it drags name. */
-  readonly #leadId: string | undefined;
+  /** Every creature the walk takes along, by id: the links a dragged creature's height follows (WalkInput `group`). */
+  readonly #members: ReadonlyMap<string, Follower>;
+  /** The walk its followers are read against (route.ts followedHeight). */
+  readonly #lead: FollowLead;
   /** Whether the walk starts on the ground, so what it drags walks on its own ground behind it (moveLeg.ts follow, as the walk's trace stands where it starts). */
   readonly #towedGrounded: boolean;
   /** Whether all of them take a step, by lattice node and direction: 0 not yet known, 1 they do, 2 one of them does not. */
@@ -346,11 +349,11 @@ export class WalkWorld {
       const tester = stepTester(build, t);
       return tester ? [{ walker: t, dx: t.x - token.x, dy: t.y - token.y, ...footprintSize(t), testers: new Map() }] : [];
     }) : [];
-    this.#towedById = pre ? pre.#towedById : new Map(this.#towed.map((t) => [t.walker.id, t]));
-    const lead: Walker & { id?: string } = token;
-    this.#leadId = lead.id;
+    this.#members = pre ? pre.#members : new Map((input.group ?? input.towed ?? []).map((m) => [m.id, m]));
     this.#towedSteps = pre ? pre.#towedSteps : new Uint8Array(this.#towed.length > 0 ? nodes * 8 : 0);
     this.#towedGrounded = pre ? pre.#towedGrounded : footing(chunks, start) === "ground";
+    const lead: Walker & { id?: string } = token;
+    this.#lead = { id: lead.id, elevation: token.elevation, grounded: this.#towedGrounded };
     if (pre) {
       this.flags = pre.flags;
       this.#byCell = pre.#byCell;
@@ -495,33 +498,17 @@ export class WalkWorld {
     return { ...t.walker, x, y, elevation: groundUnder(this.input.build.buildChunks, t.walker, { x, y }), footing: "ground" };
   }
 
-  /**
-   * A creature's height while the walker's stored box is at `p`, past the
-   * walk's start, as the move takes it along (moveLeg.ts follow), through
-   * its own holder, and that holder's, up to the walker: behind a holder
-   * that started on the ground on its own ground, else moved as much as
-   * its holder's height moved, never below its own ground. Null for one
-   * held by a creature the search does not take beside the walker, as a
-   * rider is, whose height it does not follow.
-   */
+  /** A creature's height while the walker's stored box is at `p`, past the walk's start (route.ts followedHeight), or null where it is not followed. */
   #heightAt(id: string, p: Point): number | null {
     const { token, build } = this.input;
-    if (id === this.#leadId) {
-      if (this.mode !== "ground") return token.elevation;
-      const n = this.nodeAt(p);
-      return n >= 0 ? this.elevationAt(n) : groundUnder(build.buildChunks, this.#stepped, p);
-    }
-    const t = this.#towedById.get(id);
-    const holderId = t?.walker.attached?.to;
-    if (!t || holderId === undefined) return null;
-    const ground = groundUnder(build.buildChunks, t.walker, { x: p.x + t.dx, y: p.y + t.dy });
-    const holder = holderId === this.#leadId ? null : this.#towedById.get(holderId);
-    if (holderId !== this.#leadId && !holder) return null;
-    const holderFrom = holder ? holder.walker.elevation : token.elevation;
-    const holderGrounded = holder ? footing(build.buildChunks, holder.walker) === "ground" : this.#towedGrounded;
-    if (holderGrounded) return ground;
-    const holderNow = this.#heightAt(holderId, p);
-    return holderNow === null ? null : Math.max(t.walker.elevation + (holderNow - holderFrom), ground);
+    return followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), id, { x: p.x - token.x, y: p.y - token.y }, this.#leadHeight(p));
+  }
+
+  /** The walker's height with its stored box at `p`: the ground under its footprint for a walk on the ground, the start's height for any other. */
+  #leadHeight(p: Point): number {
+    if (this.mode !== "ground") return this.input.token.elevation;
+    const n = this.nodeAt(p);
+    return n >= 0 ? this.elevationAt(n) : groundUnder(this.input.build.buildChunks, this.#stepped, p);
   }
 
   /**

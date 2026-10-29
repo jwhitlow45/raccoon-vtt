@@ -8,7 +8,7 @@ import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { deviceGround } from "#shared/rules/held.ts";
 import { footing } from "#shared/rules/heights.ts";
 import { groundUnder, landedElevation, landing, legStop, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
-import { followerTrace, routeLattice, routePoints, routeStop, routeWalkers, walkTrace, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { followedHeight, followerTrace, routeLattice, routePoints, routeStop, routeWalkers, walkTrace, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import type { WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, type RouteWorld } from "#shared/rules/hexWalk.ts";
@@ -564,6 +564,9 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
   return { moves, stop: null, held };
 }
 
+/** The room a walk's walkers are read in: its build, and where it has them its tokens, which hold their holders. */
+type WalkersState = BuildState & { tokens?: Readonly<Record<string, Token | undefined>> };
+
 /**
  * The walks of the creatures a holder drags beside it along the holder's
  * walk `points` (docs/design-v1-attach.md 5.1), as the reducer moves them
@@ -574,29 +577,19 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
  * them whose leg from the holder's piece `i`'s start a wall or a ledge
  * stops, with the holder at `to` on that piece.
  */
-function followersOf(state: BuildState, lead: Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { stop: (i: number, to: RoutePoint) => { blocker: Blocker } | null } {
+function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { stop: (i: number, to: RoutePoint) => { blocker: Blocker } | null } {
   // As the holder's walk stands where it starts (route.ts WalkTrace).
   const grounded = footing(state.buildChunks, walkFrom(state.buildChunks, lead)) === "ground";
-  // Each walker comes as the token it is (attach/walk.ts walkersFor), its link to its own holder included.
-  const linked: readonly (DropToken & { attached?: { readonly to: string } })[] = walkers;
-  const byId = new Map(linked.map((w) => [w.id, w]));
+  // Each walker comes as the token it is (attach/walk.ts walkersFor), and its holders up to the lead, riders and carried creatures
+  // included, are the room's tokens: the links its height follows (route.ts followedHeight). A holder this copy does not hold
+  // leaves its height unfollowed.
+  const linked: readonly (DropToken & Pick<Follower, "attached">)[] = walkers;
+  const byId = new Map<string, Follower>(linked.map((w) => [w.id, w]));
+  const memberOf = (id: string): Follower | undefined => byId.get(id) ?? state.tokens?.[id];
   const named: Walker & { id?: string } = lead;
+  const from: FollowLead = { id: named.id, elevation: lead.elevation, grounded };
   const groundAt = (w: DropToken, p: Point) => groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, { x: p.x + w.x - lead.x, y: p.y + w.y - lead.y });
-  /**
-   * A walker's height while the lead is at `p`, as the move takes it along (moveLeg.ts follow), through its own holder up to the
-   * lead: behind a holder that started on the ground on its own ground, else moved as much as its holder's height moved, never
-   * below its own ground. Null for one held by a creature that is not among them, whose height is not followed here.
-   */
-  const heightAt = (w: (typeof linked)[number], p: RoutePoint): number | null => {
-    const ground = groundAt(w, p);
-    const holderId = w.attached?.to;
-    if (holderId !== undefined && holderId === named.id) return grounded ? ground : Math.max(w.elevation + p.elevation - lead.elevation, ground);
-    const holder = holderId === undefined ? undefined : byId.get(holderId);
-    if (!holder) return null;
-    if (footing(state.buildChunks, followerTrace(holder, [holder])[0]!) === "ground") return ground;
-    const now = heightAt(holder, p);
-    return now === null ? null : Math.max(w.elevation + (now - holder.elevation), ground);
-  };
+  const heightAt = (w: DropToken, p: RoutePoint) => followedHeight(state.buildChunks, from, memberOf, w.id, { x: p.x - lead.x, y: p.y - lead.y }, p.elevation);
   const follows = linked.map((w) => {
     // One whose height is not followed stands on its ground, so it meets every ledge, the most any walk of it could.
     const spot = (p: RoutePoint): RoutePoint => ({ x: p.x + w.x - lead.x, y: p.y + w.y - lead.y, elevation: heightAt(w, p) ?? groundAt(w, p) });
@@ -661,7 +654,7 @@ export function cutPieces(points: readonly RoutePoint[], pieces: readonly RouteP
  * is the height the drop lands at a spot, as the op will carry it.
  */
 export function walkersStop(
-  state: BuildState,
+  state: WalkersState,
   lead: DropToken & Walker,
   points: readonly RoutePoint[],
   walkers: readonly DropToken[],

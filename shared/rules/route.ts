@@ -1,4 +1,4 @@
-import type { PathStop } from "../model.ts";
+import type { AttachKind, PathStop } from "../model.ts";
 import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, placedOnHex, rangeAtInto, snapStep, stopFootprint, tokenRefHex, type CellRange, type PlacedToken } from "./footprint.ts";
@@ -114,6 +114,51 @@ export function walkTrace<T extends Walker>(chunks: BuildState["buildChunks"], t
   const walkers = [at];
   for (const p of points.slice(1)) walkers.push((at = walkOn(chunks, at, p, p.elevation)));
   return walkers;
+}
+
+/** A member of a moving group as following reads it (moveLeg.ts follow): where it starts, its footprint, and its link to its own holder. */
+export type Follower = MovingToken & { id: string; attached?: { readonly to: string; readonly kind: AttachKind } };
+
+/** The walk a group's followers are read against: its lead's id, its height where it started, and whether it started on the ground. */
+export type FollowLead = { id: string | undefined; elevation: number; grounded: boolean };
+
+/**
+ * A group member's height as the move takes it along (moveLeg.ts follow),
+ * while the lead's stored box has moved by `shift` from where it started and
+ * the lead stands at `leadNow`, through its own holder and that holder's up
+ * to the lead. What sits on its holder keeps its height over it. A dragged
+ * creature walks on its own ground behind a holder that started on the
+ * ground, else moves as much as its holder's height moved, never below its
+ * own ground. Past the walk's start only: there each stands as it does.
+ *
+ * Null for a member whose chain leaves `memberOf`, as one held by a creature
+ * this copy does not hold would. Its height is not followed, and each
+ * caller reads it the strict way, on its own ground.
+ */
+export function followedHeight(
+  chunks: BuildState["buildChunks"],
+  lead: FollowLead,
+  memberOf: (id: string) => Follower | undefined,
+  id: string,
+  shift: Point,
+  leadNow: number,
+): number | null {
+  if (id === lead.id) return leadNow;
+  const member = memberOf(id);
+  const link = member?.attached;
+  if (!member || !link) return null;
+  const holder = link.to === lead.id ? null : memberOf(link.to);
+  if (link.to !== lead.id && !holder) return null;
+  const holderFrom = holder ? holder.elevation : lead.elevation;
+  if (link.kind === "drag") {
+    const grounded = holder ? footing(chunks, followerTrace(holder, [holder])[0]!) === "ground" : lead.grounded;
+    const ground = groundUnder(chunks, followerTrace(member, [member])[0]!, { x: member.x + shift.x, y: member.y + shift.y });
+    if (grounded) return ground;
+    const holderNow = followedHeight(chunks, lead, memberOf, link.to, shift, leadNow);
+    return holderNow === null ? null : Math.max(member.elevation + (holderNow - holderFrom), ground);
+  }
+  const holderNow = followedHeight(chunks, lead, memberOf, link.to, shift, leadNow);
+  return holderNow === null ? null : holderNow + (member.elevation - holderFrom);
 }
 
 /**

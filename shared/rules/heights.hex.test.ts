@@ -315,6 +315,55 @@ for (const [name, g] of [
       assert.equal(follows, true);
     });
 
+    /**
+     * A Large mount at 4,4 with a rider on it, and `chain` dragged and
+     * carried from there, all 5 ft up over a line of hexes raised 2 ft at
+     * column 7, the mount sent to 10,4: every creature flies over it, as the
+     * server takes it (H3-ASTRA-07).
+     */
+    function mounted(chain: readonly { id: string; at: Hex; size?: Token["size"]; to: string; kind: "ride" | "carry" | "drag" }[]): { found: WalkRoute | null | "none"; follows: boolean } {
+      const line = Array.from({ length: 13 }, (_, i) => [m({ col: 7, row: i }), 2] as [Hex, number]);
+      const s = raised(g, line, [], g.orient === "rows" ? { w: 20, h: 14 } : { w: 14, h: 20 });
+      const mount = on(g, "mount", m({ col: 4, row: 4 }), { name: "Mount", size: "large", elevation: 5 });
+      const others = chain.map((c) => on(g, c.id, m(c.at), { name: c.id, size: c.size ?? "medium", elevation: 5, attached: { to: c.to, kind: c.kind } }));
+      s.tokens = { ...s.tokens, mount, ...Object.fromEntries(others.map((t) => [t.id, t])) };
+      const world = groupWalkWorld(s, ownWalk(mount), { role: "dm" });
+      const to = placedOnHex(g, mount, m({ col: 10, row: 4 }));
+      const found = findRouteOn(world.input, to);
+      if (found === "none") return { found, follows: false };
+      const op: Op = { t: "token.move", tokenId: "mount", x: to.x, y: to.y, ...(found ? { route: found.pieces.map(([x, y, extra, swim]) => [x, y, extra, swim] as [number, number, number, 0 | 1]) } : {}) };
+      const moved = planMove(op, s, DM, {}).filter((mv) => s.tokens[mv.tokenId]?.attached?.kind === "drag");
+      const follows = moved.length > 0 && moved.every((mv) => mv.route.every((p, i) => i === 0 || legStop(s, mv.trace[i - 1]!, p) === null));
+      return { found, follows };
+    }
+
+    const straight = (found: WalkRoute | null | "none") => found === null || (found !== "none" && found.pieces.length === 1);
+
+    test("a rider drags a creature, all flying at 5 ft: the walk goes straight over a 2 ft line of hexes, as the server takes it (H3-ASTRA-07)", () => {
+      const { found, follows } = mounted([
+        { id: "rider", at: { col: 4, row: 4 }, to: "mount", kind: "ride" },
+        { id: "gob", at: { col: 4, row: 7 }, to: "rider", kind: "drag" },
+      ]);
+      assert.ok(straight(found), JSON.stringify(found));
+      assert.equal(follows, true);
+    });
+
+    test("a carried creature drags one, and a rider drags one that drags another, two deep: straight over it too", () => {
+      const carried = mounted([
+        { id: "imp", at: { col: 4, row: 4 }, size: "tiny", to: "mount", kind: "carry" },
+        { id: "gob", at: { col: 4, row: 7 }, to: "imp", kind: "drag" },
+      ]);
+      assert.ok(straight(carried.found), JSON.stringify(carried.found));
+      assert.equal(carried.follows, true);
+      const deep = mounted([
+        { id: "rider", at: { col: 4, row: 4 }, to: "mount", kind: "ride" },
+        { id: "gob", at: { col: 4, row: 7 }, to: "rider", kind: "drag" },
+        { id: "kob", at: { col: 4, row: 8 }, to: "gob", kind: "drag" },
+      ]);
+      assert.ok(straight(deep.found), JSON.stringify(deep.found));
+      assert.equal(deep.follows, true);
+    });
+
     test("fliers all down the chain pass over a low hex together, straight", () => {
       const { found, follows } = chain(raised(g, [[m({ col: 6, row: 6 }), 2]]), [10, 10, 10]);
       assert.ok(found !== null && found !== "none");
