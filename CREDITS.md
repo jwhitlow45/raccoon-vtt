@@ -6,6 +6,27 @@ RaccoonVTT's own code is under the GNU Affero General Public License v3.0 (see t
 
 `shared/credits.ts` holds the same list for the in-app About page. A test (`shared/credits.test.ts`) fails if a file in `public/textures/`, `public/icons/`, `public/stamps/`, `public/starter/` or `public/fonts/` is missing from either one. The token icons are credited by author instead of by file, and the same test fails if a file in `public/game-icons/` is missing from its index or an author in the index is missing from either list.
 
+## Damage type icons
+
+From [game-icons.net](https://game-icons.net), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Built by `node scripts/icons.ts damage` from the local copy at commit `82d948812bfe3f269ef8f731dcdb07b08160edc4`. The black background square was removed and the fill set to `currentColor`. Each file carries its attribution in an XML comment.
+
+| File | Icon | Author | Source |
+| --- | --- | --- | --- |
+| `public/icons/damage/acid.svg` | Acid blob | Lorc | https://game-icons.net/1x1/lorc/acid-blob.html |
+| `public/icons/damage/bludgeoning.svg` | Flat hammer | Lorc | https://game-icons.net/1x1/lorc/flat-hammer.html |
+| `public/icons/damage/cold.svg` | Snowflake 1 | Lorc | https://game-icons.net/1x1/lorc/snowflake-1.html |
+| `public/icons/damage/fire.svg` | Flame | Carl Olsen | https://game-icons.net/1x1/carl-olsen/flame.html |
+| `public/icons/damage/force.svg` | Magic swirl | Lorc | https://game-icons.net/1x1/lorc/magic-swirl.html |
+| `public/icons/damage/lightning.svg` | Electric | sbed | https://game-icons.net/1x1/sbed/electric.html |
+| `public/icons/damage/necrotic.svg` | Death skull | sbed | https://game-icons.net/1x1/sbed/death-skull.html |
+| `public/icons/damage/piercing.svg` | Arrowhead | Lorc | https://game-icons.net/1x1/lorc/arrowhead.html |
+| `public/icons/damage/poison.svg` | Poison bottle | Lorc | https://game-icons.net/1x1/lorc/poison-bottle.html |
+| `public/icons/damage/psychic.svg` | Brain | Lorc | https://game-icons.net/1x1/lorc/brain.html |
+| `public/icons/damage/radiant.svg` | Sun | Lorc | https://game-icons.net/1x1/lorc/sun.html |
+| `public/icons/damage/slashing.svg` | Sword wound | Lorc | https://game-icons.net/1x1/lorc/sword-wound.html |
+| `public/icons/damage/thunder.svg` | Sonic boom | Lorc | https://game-icons.net/1x1/lorc/sonic-boom.html |
+| `public/icons/damage/untyped.svg` | Impact point | Lorc | https://game-icons.net/1x1/lorc/impact-point.html |
+
 ## Condition and status icons
 
 From [game-icons.net](https://game-icons.net), licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Taken from the [game-icons/icons](https://github.com/game-icons/icons) repository at commit `82d948812bfe3f269ef8f731dcdb07b08160edc4` by `node scripts/icons.ts effects`.

@@ -3,8 +3,8 @@
  *
  * CREDITS.md carries the same list for people reading the repository, and
  * credits.test.ts fails when a file in public/textures, public/icons,
- * public/stamps, public/starter or public/fonts is missing from either one. The condition and status icon
- * maps below also drive `node scripts/icons.ts effects`, so the icon a key
+ * public/stamps, public/starter or public/fonts is missing from either one. The condition, status and damage icon
+ * maps below also drive `node scripts/icons.ts effects` and `node scripts/icons.ts damage`, so the icon a key
  * uses and the credit shown for it cannot drift apart. Likewise each shipped
  * stamp names its source in shared/stamps.ts, which scripts/stamps.ts writes,
  * and its credit is found from that. The token icons in public/game-icons
@@ -15,6 +15,7 @@
  * image here is existing work found under an open license, changed only
  * mechanically.
  */
+import type { DamageType } from "./rules/damage.ts";
 import type { ConditionKey, StatusKey } from "./model.ts";
 import { GAME_ICON_AUTHORS, GAME_ICONS_DIR, GAME_ICONS_TOTAL, type GameIconAuthor } from "./gameIcons.ts";
 import type { LicenseId } from "./licenses.ts";
@@ -93,6 +94,23 @@ export const STATUS_ICONS: Record<StatusKey, GameIcon> = {
   readied: { slug: "lorc/hourglass", title: "Hourglass", author: "Lorc" },
 };
 
+export const DAMAGE_ICONS: Record<DamageType | "untyped", GameIcon> = {
+  acid: { slug: "lorc/acid-blob", title: "Acid blob", author: "Lorc" },
+  bludgeoning: { slug: "lorc/flat-hammer", title: "Flat hammer", author: "Lorc" },
+  cold: { slug: "lorc/snowflake-1", title: "Snowflake 1", author: "Lorc" },
+  fire: { slug: "carl-olsen/flame", title: "Flame", author: "Carl Olsen" },
+  force: { slug: "lorc/magic-swirl", title: "Magic swirl", author: "Lorc" },
+  lightning: { slug: "sbed/electric", title: "Electric", author: "sbed" },
+  necrotic: { slug: "sbed/death-skull", title: "Death skull", author: "sbed" },
+  piercing: { slug: "lorc/arrowhead", title: "Arrowhead", author: "Lorc" },
+  poison: { slug: "lorc/poison-bottle", title: "Poison bottle", author: "Lorc" },
+  psychic: { slug: "lorc/brain", title: "Brain", author: "Lorc" },
+  radiant: { slug: "lorc/sun", title: "Sun", author: "Lorc" },
+  slashing: { slug: "lorc/sword-wound", title: "Sword wound", author: "Lorc" },
+  thunder: { slug: "lorc/sonic-boom", title: "Sonic boom", author: "Lorc" },
+  untyped: { slug: "lorc/impact-point", title: "Impact point", author: "Lorc" },
+};
+
 /**
  * The ISC license asks for its copyright and permission notice in every
  * copy, so the About page shows it whole, as CREDITS.md does.
@@ -154,7 +172,7 @@ export const TOKEN_ICONS: {
   authors: GAME_ICON_AUTHORS,
 };
 
-function gameIconCredit(dir: "conditions" | "statuses", key: string, icon: GameIcon): Credit {
+function gameIconCredit(dir: "conditions" | "statuses" | "damage", key: string, icon: GameIcon): Credit {
   const authorUrl = GAME_ICON_AUTHOR_URLS[icon.author];
   return {
     files: [`public/icons/${dir}/${key}.svg`],
@@ -293,10 +311,11 @@ function collectionTitle(works: readonly StarterWork[]): string | null {
 export const CREDITS: CreditGroup[] = [
   {
     id: "icons",
-    heading: "Condition and status icons",
+    heading: "Condition, status and damage icons",
     credits: [
       ...Object.entries(CONDITION_ICONS).map(([key, icon]) => gameIconCredit("conditions", key, icon)),
       ...Object.entries(STATUS_ICONS).map(([key, icon]) => gameIconCredit("statuses", key, icon)),
+      ...Object.entries(DAMAGE_ICONS).map(([key, icon]) => gameIconCredit("damage", key, icon)),
     ],
   },
   {

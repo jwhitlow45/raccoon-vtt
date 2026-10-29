@@ -3,8 +3,9 @@
  *
  *   node scripts/icons.ts          PWA and Home Screen PNGs from public/icon.svg
  *   node scripts/icons.ts effects  condition and status SVGs from game-icons.net
+ *   node scripts/icons.ts damage   damage SVGs from the pinned local game-icons copy
  *
- * Both only convert existing art. The PNGs are rasterized from the raccoon
+ * These commands only convert existing art. The PNGs are rasterized from the raccoon
  * icon (design section 14.5). The effect icons are game-icons.net files
  * reduced to one tintable path (design section 20). Their sources and credits
  * live in shared/credits.ts.
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import {
   CONDITION_ICONS,
+  DAMAGE_ICONS,
   GAME_ICON_CHANGES,
   GAME_ICONS_COMMIT,
   LICENSES,
@@ -138,6 +140,10 @@ export function simplifyGameIcon(svg: string, attribution: string): string {
   const match = GAME_ICON_SHAPE.exec(svg);
   const d = match?.[1];
   if (!d) throw new Error("unexpected game-icons.net SVG shape");
+  return tintGameIcon(d, attribution);
+}
+
+function tintGameIcon(d: string, attribution: string): string {
   if (!PATH_DATA.test(d)) throw new Error("unexpected characters in path data");
   if (attribution.includes("--")) throw new Error("attribution cannot contain -- inside an XML comment");
   return (
@@ -171,9 +177,23 @@ async function buildEffectIcons(): Promise<void> {
   }
 }
 
+/** The local copy already has its background removed by scripts/game-icons.ts. */
+async function buildDamageIcons(): Promise<void> {
+  const dir = join(ICONS_DIR, "damage");
+  await mkdir(dir, { recursive: true });
+  for (const [key, icon] of Object.entries(DAMAGE_ICONS)) {
+    const source = await readFile(join(PUBLIC, "game-icons", GAME_ICONS_COMMIT.slice(0, 8), `${icon.slug}.svg`), "utf8");
+    const d = /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 512 512" width="512" height="512"><path d="([^"]+)"\/><\/svg>\s*$/.exec(source)?.[1];
+    if (!d) throw new Error(`unexpected local game-icons.net SVG shape: ${icon.slug}`);
+    await writeFile(join(dir, `${key}.svg`), tintGameIcon(d, gameIconAttribution(icon)));
+    console.log(`damage/${key}.svg  from ${icon.slug}`);
+  }
+}
+
 if (import.meta.main) {
   const command = process.argv[2] ?? "app";
   if (command === "app") await buildAppIcons();
   else if (command === "effects") await buildEffectIcons();
-  else throw new Error(`unknown command ${command}. Use "app" or "effects".`);
+  else if (command === "damage") await buildDamageIcons();
+  else throw new Error(`unknown command ${command}. Use "app", "effects" or "damage".`);
 }

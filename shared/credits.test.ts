@@ -9,6 +9,7 @@ import { STARTER_CAPS } from "../scripts/starter-art.ts";
 import { footprintCells } from "../scripts/stamps.ts";
 import {
   CONDITION_ICONS,
+  DAMAGE_ICONS,
   CREDITS,
   LICENSES,
   STAMP_CROPPED,
@@ -20,6 +21,7 @@ import {
 } from "./credits.ts";
 import { GAME_ICONS_DIR } from "./gameIcons.ts";
 import { ICON_KEY_RE } from "./imageRef.ts";
+import { DAMAGE_TYPES } from "./rules/damage.ts";
 import { CONDITION_KEYS, STATUS_KEYS, type TerrainId } from "./model.ts";
 import { STARTER_KEY, type StarterWork } from "./starter.ts";
 import { STARTER_PACKS } from "./starterArt.ts";
@@ -132,6 +134,7 @@ describe("condition and status icons", () => {
     const expected = new Set([
       ...CONDITION_KEYS.map((key) => `public/icons/conditions/${key}.svg`),
       ...STATUS_KEYS.map((key) => `public/icons/statuses/${key}.svg`),
+      ...[...DAMAGE_TYPES, "untyped"].map((key) => `public/icons/damage/${key}.svg`),
     ]);
     const svgs = shippedArt.filter((file) => file.endsWith(".svg"));
     assert.deepEqual(new Set(svgs), expected);
@@ -140,6 +143,7 @@ describe("condition and status icons", () => {
   test("icon maps cover exactly the model's keys", () => {
     assert.deepEqual(Object.keys(CONDITION_ICONS), [...CONDITION_KEYS]);
     assert.deepEqual(Object.keys(STATUS_ICONS), [...STATUS_KEYS]);
+    assert.deepEqual(Object.keys(DAMAGE_ICONS), [...DAMAGE_TYPES, "untyped"]);
   });
 
   /**
@@ -156,6 +160,14 @@ describe("condition and status icons", () => {
       const credit = creditFor(file);
       assert.ok(credit);
       assert.ok(comment.includes(credit.author) && comment.includes(credit.source), file);
+    }
+  });
+
+  test("FL-4: damage icons preserve the pinned local path", () => {
+    for (const [key, icon] of Object.entries(DAMAGE_ICONS)) {
+      const original = read(`public${GAME_ICONS_DIR}/${icon.slug}.svg`).toString("utf8");
+      const tint = read(`public/icons/damage/${key}.svg`).toString("utf8");
+      assert.equal(/ d="([^"]+)"/.exec(tint)?.[1], / d="([^"]+)"/.exec(original)?.[1], key);
     }
   });
 
