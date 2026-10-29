@@ -132,7 +132,7 @@ export function hexRoomShapes(walls: WallSet, g: HexGrid, at: Point, bounds: Bou
 
 /**
  * One gesture's fog ops. A gesture of several shapes (a room over 2,000
- * cells, a long brush stroke) names its ops `<gesture>.<n>`, so the draft
+ * cells, a long brush stroke) names its ops `<gesture>.<n>` (GESTURE_OP), so the draft
  * shows and counts them as the one edit the DM made, and Undo takes it
  * back whole (fogEditOf). A gesture of one shape keeps a plain id. The
  * server never reads the names.
@@ -143,7 +143,15 @@ export function fogOps(shapes: readonly FogShape[], mode: FogMode, newId: () => 
   return shapes.map((shape, i) => ({ id: `${gesture}.${i}`, mode, shape }));
 }
 
-const GESTURE_OP = /^(.+)\.(\d+)$/;
+/**
+ * An op id as fogOps names a gesture's ops: a UUIDv7 gesture id (the
+ * client's newId), a dot and the op's place, at most 499, since a draft
+ * holds at most 500 ops. Fog op ids were never checked for form, so an
+ * older or imported draft can hold ids such as `draft.1` and `draft.2` for
+ * separate edits. Only this exact form is read as a gesture, and any other
+ * id is an edit of its own.
+ */
+const GESTURE_OP = /^([0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(0|[1-9][0-9]?|[1-4][0-9]{2})$/;
 
 /** The edit a draft op belongs to (fogOps): its gesture's id, or for an op of one shape, its own. */
 export function fogEditOf(id: string): string {

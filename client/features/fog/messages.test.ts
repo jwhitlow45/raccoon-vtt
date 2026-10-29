@@ -153,6 +153,24 @@ describe("a fog gesture in the draft is one edit", () => {
     assert.equal(fogEditOf(one!.id), one!.id);
   });
 
+  test("an id is read as a gesture's only in the form fogOps makes, so an older draft's dotted ids stay edits of their own", () => {
+    const rect = (id: string, mode: "reveal" | "hide", x: number): FogOp => ({ id, mode, shape: { kind: "rect", x, y: 1, w: 2, h: 2 } });
+    const legacy = [rect("draft.1", "reveal", 1), rect("draft.2", "hide", 4)];
+    assert.equal(publishLabel(legacy), "Show players the changes (2)");
+    assert.equal(publishShort(legacy), "Show (2)");
+    assert.deepEqual(lastEditIds(legacy), ["draft.2"]);
+    const v7 = "0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b";
+    for (const id of ["draft.1", `${v7}.01`, `${v7}.500`, `${v7.toUpperCase()}.1`, "0192a3b4-c5d6-4e8f-9a0b-1c2d3e4f5a6b.1", "0192a3b4-c5d6-7e8f-7a0b-1c2d3e4f5a6b.1", `x${v7}.1`, `${v7}.1.2`]) {
+      assert.equal(fogEditOf(id), id, id);
+    }
+    assert.equal(fogEditOf(`${v7}.0`), v7);
+    assert.equal(fogEditOf(`${v7}.499`), v7);
+    const cells = (id: string, keys: string[]): FogOp => ({ id, mode: "reveal", shape: { kind: "cells", cells: keys } });
+    const rooms = draftOutlines([cells("room.1", ["1,1"]), cells("room.2", ["1,2"])], SQUARES);
+    assert.deepEqual(rooms.get("room.1"), cellsOutline(["1,1"]), "two older rooms keep their own outlines");
+    assert.deepEqual(rooms.get("room.2"), cellsOutline(["1,2"]));
+  });
+
   test("the publish button counts the DM's edits: one Builder room tap is one, on hexes and on squares", () => {
     const hexRoom = fogOps(largestHexRoom(ROWS), "reveal", newId);
     assert.equal(publishLabel(hexRoom), "Reveal to players (1)");
