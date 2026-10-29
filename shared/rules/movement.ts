@@ -1668,15 +1668,18 @@ function hexLanding(t: HexWalls, token: Walker, to: LegEnd, mode: DropMode): Lan
  * when none is. Null off a hex scene.
  */
 export function hexFullStop(state: BuildState, token: Walker, to: LegEnd): Point | null {
-  const t = hexWallsOf(state, token, to.elevation);
+  // A dragged creature walks full size even if it last moved squeezed, as followerTrace reads it at every point.
+  const full = { ...token };
+  delete full.squeeze;
+  const t = hexWallsOf(state, full, to.elevation);
   if (!t) return null;
-  const start = hexStartStand(t.g, token);
-  const leg = hexLegOf(t.g, start, hexStandAt(t.g, token, to, false));
+  const start = hexStartStand(t.g, full);
+  const leg = hexLegOf(t.g, start, hexStandAt(t.g, full, to, false));
   const stop = hexLegStop(t, leg);
   if (!stop) return { x: to.x, y: to.y };
   for (let k = stop.step; k > 0; k--) {
     const s = hexLegStand(leg, k);
-    if (!s.squeezed && hexFitWall(t, s) < 0 && hexLegStop(t, hexLegOf(t.g, start, s)) === null) return hexStandPlace(t.g, token, s);
+    if (!s.squeezed && hexFitWall(t, s) < 0 && hexLegStop(t, hexLegOf(t.g, start, s)) === null) return hexStandPlace(t.g, full, s);
   }
   return { x: token.x, y: token.y };
 }

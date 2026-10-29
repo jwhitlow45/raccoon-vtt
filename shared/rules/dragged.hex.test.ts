@@ -10,7 +10,7 @@ import { hexKey, type Hex, type HexGrid } from "./hex.ts";
 import { findRouteOn } from "./hexWalk.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "./hexWalls.testkit.ts";
 import { planMove } from "./moveLeg.ts";
-import { hexStandPlace, onSqueezedLattice, ownWalk } from "./movement.ts";
+import { hexFullStop, hexStandPlace, legStop, onSqueezedLattice, ownWalk } from "./movement.ts";
 import { groupWalkWorld } from "./walkWorld.ts";
 
 /**
@@ -76,6 +76,32 @@ for (const [name, g] of [
       const mouth = [at(5, 6), at(5, 7), at(4, 7)];
       for (const v of [undefined, 32]) assert.deepEqual(end(v), mouth, `${v}: at the corridor's mouth`);
       assert.ok(end(31).some(solid), `31: ${end(31).map(hexKey).join(" ")} in the rock`);
+    });
+
+    test("a squeezed start lands full size on its first dragged leg (FU37-OPUS-5)", () => {
+      const s = hall({ squeeze: true, visibility: "dm", ownerIds: [] });
+      const horse = s.tokens.horse!;
+      const ogre = s.tokens.ogre!;
+      const inside = hexStandPlace(g, horse, { size: "medium", ref: at(10, 6), squeezed: true });
+      const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", ...inside, squeeze: true };
+      assert.ok(canApply(op, P1, s, { canUseAsset: () => true }).ok);
+      const full = { ...ogre };
+      delete full.squeeze;
+      // Its squeezed starting anchor shifts its offset walk toward the upper side of the mouth.
+      const mouth = [at(5, 5), at(6, 6), at(5, 6)];
+      for (const opVersion of [undefined, 32, 31]) {
+        const moved = planMove(op, s, P1, opVersion === undefined ? {} : { opVersion }).find((m) => m.tokenId === "ogre")!;
+        assert.equal(moved.route.length, 2, "the first leg reaches its stop");
+        assert.deepEqual(occupiedHexes(g, { ...full, ...moved.to }), opVersion === 31 ? [at(7, 5), at(8, 6), at(7, 6)] : mouth, `${opVersion}: the stored stop`);
+      }
+      // followerTrace already clears squeeze at the first point. The helper must also handle the stored token directly.
+      const target = { x: inside.x + ogre.x - horse.x, y: inside.y + ogre.y - horse.y, elevation: 0 };
+      const stop = hexFullStop(s, ownWalk(ogre), target);
+      assert.ok(stop);
+      assert.deepEqual(occupiedHexes(g, { ...full, ...stop }), mouth, "the helper reaches the same last full-size stand");
+      assert.ok(occupiedHexes(g, { ...full, ...stop }).every((h) => !solid(h)), "the full footprint is outside the rock");
+      assert.equal(legStop(s, ownWalk(full), { ...stop, elevation: 0, squeeze: false }), null, "the full-size leg to the stop is clear");
+      assert.equal(ogre.squeeze, true, "the stored starting token is unchanged");
     });
   });
 }
