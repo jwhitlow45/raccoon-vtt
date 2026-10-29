@@ -2472,7 +2472,8 @@ export type LogEvent =
     })
   | (AboutCreature & { type: "life"; life: LifeState })
   | (AboutCreature & { type: "effect"; key: Effect["key"]; action: "add" | "remove" | "expire" | "pause"; spell?: string; hidden?: true })
-  | (AboutCreature & { type: "concentration"; dc?: number; spell?: string; ended?: boolean; hidden?: true })
+  /** `exact` restricts a check from damage with parts to viewers who can read exact HP, at write time and when read later. */
+  | (AboutCreature & { type: "concentration"; dc?: number; spell?: string; ended?: boolean; hidden?: true; exact?: true })
   /**
    * Wave 7: a creature ended its turn with an effect a save ends
    * (docs/design-v1-roll-options.md 6.1). The line's id is the occurrence the

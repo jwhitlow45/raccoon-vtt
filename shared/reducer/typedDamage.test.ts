@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { OP_VERSION, migrateOp, opMigrations, runMigrations } from "../migrate.ts";
 import type { Actor, RoomState } from "../model.ts";
-import { projectState } from "../project.ts";
+import { lineReach, projectArchivedLog, projectState } from "../project.ts";
+import { lineAudience } from "../logRings.ts";
 import { clientOpSchema, type OpOf } from "../protocol.ts";
 import { reads } from "../reads.ts";
 import { applyOp } from "../reducer.ts";
@@ -66,6 +67,76 @@ describe("FL-3 typed damage on the server", () => {
     }
   });
 
+  test("FL3-ASTRA-04: visible concentration reveals no hidden defense through whole player projections", () => {
+    for (const hpVisibility of ["hidden", "label", "bar"] as const) for (const amount of [1, 10]) for (const owned of [false, true]) {
+      const states = ["none", "resist", "immune"].map((defense) => {
+        const before = fixture({ hp: { cur: 750, max: 1000, temp: 0 }, effects: [{ id: "spell", key: "concentrating" }] });
+        before.tokens.target!.hpVisibility = hpVisibility;
+        if (owned) before.tokens.target!.ownerIds = [P2.memberId];
+        before.monsters.monster = customMonster("monster", { resistances: defense === "resist" ? "Fire" : "", immunities: defense === "immune" ? "Fire" : "", vulnerabilities: "" });
+        return applied(before, hit(amount, [{ amount, type: "fire" }])).state;
+      });
+      for (const viewer of owned ? [P1] : [P1, P2]) {
+        const views = states.map((state) => projectState(state, viewer, { sceneId: "s1" }));
+        assert.deepEqual(views[1], views[0], `${viewer.memberId}, ${hpVisibility}, ${amount}: resistance`);
+        assert.deepEqual(views[2], views[0], `${viewer.memberId}, ${hpVisibility}, ${amount}: immunity`);
+        assert.ok(views[0]!.tokens.target!.actor && "inline" in views[0]!.tokens.target!.actor);
+        assert.deepEqual(views[0]!.tokens.target!.actor.inline.effects, [{ id: "spell", key: "concentrating" }]);
+        assert.equal(views[0]!.log.filter((line) => line.data?.type === "concentration").length, 0);
+      }
+      for (const viewer of owned ? [DM, P2] : [DM]) {
+        const checks = states.map((state) => projectState(state, viewer, { sceneId: "s1" }).log.filter((line) => line.data?.type === "concentration"));
+        assert.deepEqual(checks.map((lines) => lines.length), [1, amount === 1 ? 0 : 1, 0], `${viewer.memberId} keeps the real checks`);
+        assert.equal(checks[0]![0]!.data?.type === "concentration" ? checks[0]![0]!.data.dc : null, 10);
+      }
+    }
+  });
+
+  test("FL3-ASTRA-04: a typed check keeps its write-time audience and narrows when HP access is lost", () => {
+    for (const hpVisibility of ["hidden", "exact"] as const) {
+      const before = fixture({ effects: [{ id: "spell", key: "concentrating" }] });
+      before.tokens.target!.ownerIds = [P2.memberId];
+      before.tokens.target!.hpVisibility = hpVisibility;
+      const { state } = applied(before, hit(10, [{ amount: 10, type: "fire" }]));
+      const dm = projectState(state, DM, { sceneId: "s1" }).log.find((line) => line.data?.type === "concentration")!;
+      assert.ok(dm.data?.type === "concentration");
+      assert.equal(dm.data.exact, true);
+      assert.equal(lineReach(state, dm).audience, hpVisibility === "hidden" ? "party" : "shared");
+      assert.equal(lineAudience(dm), hpVisibility === "hidden" ? "dm" : "shared");
+      if (hpVisibility === "hidden") {
+        assert.deepEqual(state.log.filter((line) => line.data?.type === "concentration" && lineAudience(line) === "party").map((line) => line.to), [[P2.memberId]]);
+      }
+      const narrowed = structuredClone(state);
+      narrowed.tokens.target!.ownerIds = [];
+      narrowed.tokens.target!.hpVisibility = "label";
+      for (const viewer of [P1, P2]) {
+        assert.equal(projectState(narrowed, viewer, { sceneId: "s1" }).log.filter((line) => line.data?.type === "concentration").length, 0);
+        assert.equal(projectArchivedLog(narrowed, state.log, viewer, { sceneId: "s1" }).filter((line) => line.data?.type === "concentration").length, 0);
+      }
+      if (hpVisibility === "hidden") {
+        const revealed = structuredClone(state);
+        revealed.tokens.target!.hpVisibility = "exact";
+        assert.equal(projectState(revealed, P1, { sceneId: "s1" }).log.filter((line) => line.data?.type === "concentration").length, 0, "later HP access does not reveal an old check");
+      }
+    }
+
+    const concentrating = fixture({ effects: [{ id: "spell", key: "concentrating" }] });
+    const plain: OpOf<"actor.hp"> = { t: "actor.hp", target: { tokenId: "target" }, change: { kind: "damage", amount: 10 } };
+    const old = applied(concentrating, plain, 30);
+    const current = applied(concentrating, plain);
+    assert.deepEqual(current, old, "stored untyped ops keep their behavior");
+    assert.equal(projectState(current.state, P1, { sceneId: "s1" }).log.filter((line) => line.data?.type === "concentration").length, 1);
+    const ended = applied(concentrating, hit(100, [{ amount: 100, type: "cold" }]));
+    const ending = projectState(ended.state, P1, { sceneId: "s1" }).log.find((line) => line.data?.type === "concentration");
+    assert.ok(ending?.data?.type === "concentration" && ending.data.ended);
+    assert.equal(ending.data.exact, undefined, "losing visible concentration stays public");
+    const hidden = fixture({ effects: [{ id: "spell", key: "concentrating", hiddenFromPlayers: true }] });
+    hidden.tokens.target!.ownerIds = [P2.memberId];
+    const secret = applied(hidden, hit(10, [{ amount: 10, type: "fire" }])).state;
+    assert.equal(projectState(secret, P2, { sceneId: "s1" }).log.filter((line) => line.data?.type === "concentration").length, 0, "the owner's exact HP access never reveals a hidden effect");
+    assert.equal(projectState(secret, DM, { sceneId: "s1" }).log.filter((line) => line.data?.type === "concentration").length, 1);
+  });
+
   test("FL3-ASTRA-01: a zero hit has a DM line without any actor write, concentration prompt or death save", () => {
     for (const life of ["alive", "dying", "stable"] as const) {
       const before = fixture({ life, hp: { cur: life === "alive" ? 50 : 0, max: 50, temp: 3 }, effects: [{ id: "spell", key: "concentrating" }], deathSaves: { ok: 1, fail: 1 } });
@@ -114,11 +185,25 @@ describe("FL-3 typed damage on the server", () => {
     assert.doesNotMatch(JSON.stringify(view), /Resists|Vulnerable|Immune|monsterId/);
   });
 
-  test("immunity and rounding remove types, and an immune hit changes neither HP nor death saves", () => {
-    const state = fixture({ hp: { cur: 0, max: 50, temp: 0 }, life: "dying" });
-    const { actor: result } = applied(state, hit(10, [{ amount: 10, type: "poison" }]));
-    assert.deepEqual(result.deathSaves, { ok: 0, fail: 0 });
-    assert.equal(result.hurt, undefined);
+  test("FL3-OPUS-8: immunity and rounding at 0 HP log the same hit without changing HP or death saves", () => {
+    for (const hpVisibility of ["hidden", "label", "bar"] as const) for (const crit of [false, true]) {
+      const before = fixture({ hp: { cur: 0, max: 50, temp: 0 }, life: "dying" });
+      before.tokens.target!.hpVisibility = hpVisibility;
+      const { state, actor: result } = applied(before, { ...hit(), change: { kind: "damage", amount: 10, parts: [{ amount: 10, type: "poison" }], crit } });
+      assert.deepEqual(state.tokens, before.tokens);
+      assert.deepEqual(result.deathSaves, { ok: 0, fail: 0 });
+      assert.equal(result.hurt, undefined);
+      assert.equal(state.log.length, 1);
+      const data = state.log[0]!.data;
+      assert.ok(data?.type === "hp");
+      assert.equal(data.amount, 0);
+      assert.equal(data.label, "Dying");
+      assert.equal(data.revert, undefined);
+      const rounded = applied(before, { ...hit(), change: { kind: "damage", amount: 1, parts: [{ amount: 1, type: "fire" }], crit } });
+      for (const viewer of [P1, P2]) {
+        assert.deepEqual(projectState(state, viewer, { sceneId: "s1" }), projectState(rounded.state, viewer, { sceneId: "s1" }), `${hpVisibility}: no difference between immunity and resistance rounding to 0`);
+      }
+    }
     const tiny = applied(fixture(), hit(11, [{ amount: 1, type: "fire" }, { amount: 10, type: "poison" }]));
     assert.deepEqual(tiny.actor.hp, { cur: 50, max: 50, temp: 3 });
     assert.equal(tiny.actor.hurt, undefined);

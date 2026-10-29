@@ -691,7 +691,7 @@ const logEvent = z.discriminatedUnion("type", [
     hidden: z.literal(true).optional(),
   }),
   z.strictObject({ type: z.literal("effect"), ...holder, key: effectKey, action: z.enum(["add", "remove", "expire", "pause"]), spell: shortText.optional(), hidden: z.literal(true).optional() }),
-  z.strictObject({ type: z.literal("concentration"), ...holder, dc: z.number().int().min(0).max(30).optional(), spell: shortText.optional(), ended: z.boolean().optional(), hidden: z.literal(true).optional() }),
+  z.strictObject({ type: z.literal("concentration"), ...holder, dc: z.number().int().min(0).max(30).optional(), spell: shortText.optional(), ended: z.boolean().optional(), hidden: z.literal(true).optional(), exact: z.literal(true).optional() }),
   z.strictObject({ type: z.literal("saveEnds"), ...holder, effectId: id, key: effectKey, ability: z.enum(ABILITY_KEYS), dc: z.number().int().min(1).max(50) }),
   z.strictObject({ type: z.literal("deathSave"), ...holder, ok: z.number().int().min(0).max(3), fail: z.number().int().min(0).max(3) }),
   z.strictObject({

@@ -884,9 +884,13 @@ export const opMigrations: MigrationStep[] = [
     // carry the DM's save choices. The reducer applies saves and defenses
     // only to those parts. Existing amounts and type tags remain final damage,
     // so stored version 30 ops replay unchanged and this step is the identity.
+    // The extra zero-damage HP line and `exact: true` concentration-check marker
+    // apply only to version 31 ops with parts. No version 31 ops are stored yet.
+    // The marker is optional in stored logs, so existing snapshots need no migration.
+    // Damage without parts and public events for losing concentration keep their rules.
     // Deploy: back up the database and reload open pages to enable typed input.
-    // Rollback: an older build cannot replay version 31 ops. A clean shutdown
-    // writes the unchanged snapshot format, otherwise use the pre-deploy backup.
+    // Rollback: use the pre-deploy backup. An older build cannot replay version 31
+    // ops or enforce the concentration marker's access rule when HP access changes.
     from: 30,
     to: 31,
     apply: (op) => op,

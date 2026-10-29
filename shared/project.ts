@@ -3269,6 +3269,8 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       const holder = holderInSight(ctx, data);
       if (!holder) return null;
       if (hpAccess(ctx.state, ctx.viewer, holder) === "exact") return data;
+      // lineReader uses this same gate to record the audience, so a hidden check also leaves no gap in player log ids.
+      if (data.exact) return null;
       const { dc: _dc, ...rest } = data;
       return rest;
     }

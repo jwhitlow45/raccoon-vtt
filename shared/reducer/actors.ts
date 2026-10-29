@@ -59,7 +59,11 @@ export function actorHp(tx: Tx, op: OpOf<"actor.hp">, context?: Omit<OutcomeDama
   // The HP after the change, and what it replaced, so the log reads "3/7 left" and the DM can take it back (features section 10).
   const left = { ...r.actor.hp };
   const revert = hpRevertOf(resolved.actor, r.actor, tx.state.encounter?.entries ?? []);
-  tx.addActorEvents(resolved, r.events.map((e) => (e.type === "hp" ? { ...e, left, revert } : e)));
+  tx.addActorEvents(resolved, r.events.map((e) => {
+    if (e.type === "hp") return { ...e, left, revert };
+    if (e.type === "concentration" && !e.ended && c.kind === "damage" && c.parts !== undefined) return { ...e, exact: true as const };
+    return e;
+  }));
 }
 
 /** A short or long rest (shared/rules/rest.ts). A long rest restores HP by itself, so it takes no `heal`. */
