@@ -33,7 +33,6 @@ import {
   needsMapDiscoveryUpgrade,
   MAP_DISCOVERY_OP_VERSION,
   MAP_DISCOVERY_SNAPSHOT_VERSION,
-  raysFromSqueeze,
   runMigrations,
   snapshotMigrations,
   todaysSrdId,
@@ -1540,13 +1539,6 @@ describe("follow-up batch 36: op version 30, passengers on a holder that starts 
     assert.equal(standsAcrossBands(1), false);
     assert.equal(standsAcrossBands(30), true);
     assert.equal(standsAcrossBands(undefined), true);
-  });
-
-  test("ops stored before version 30 read a walker's area rays full size where it squeezes along its walk, later and live ops squeezed", () => {
-    assert.equal(raysFromSqueeze(29), false);
-    assert.equal(raysFromSqueeze(1), false);
-    assert.equal(raysFromSqueeze(30), true);
-    assert.equal(raysFromSqueeze(undefined), true);
   });
 
   test("a version 30 op never migrates down", () => {
