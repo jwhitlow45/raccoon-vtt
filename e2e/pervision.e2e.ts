@@ -145,10 +145,17 @@ const previews = {
   /** Every frame the server sent the preview socket opened last, as text. */
   frames: [] as string[],
   socket: null as WebSocketRoute | null,
+  /** How many of the next preview sockets close before they reach the server, as a refused one does (dp-3a). */
+  refuse: 0,
 };
 
 async function routePreviews(page: Page): Promise<void> {
   await page.routeWebSocket(/[?&]as=(?!display)/, (ws) => {
+    if (previews.refuse > 0) {
+      previews.refuse--;
+      void ws.close();
+      return;
+    }
     previews.frames = [];
     previews.queue = [];
     previews.socket = ws;
@@ -684,6 +691,50 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
       } finally {
         await exitPreview(preview);
       }
+    }
+  });
+
+  test("dp-3a. View as a player whose socket is refused once says it could not load, with Try again, which keeps focus on the wait's status through its loading line and then shows Ana's view", async () => {
+    previews.refuse = 1;
+    previews.hold = true;
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("DM") });
+    await panel.getByRole("combobox", { name: "View as a player" }).selectOption({ label: "Ana" });
+    await panel.getByRole("button", { name: "View", exact: true }).click();
+    const preview = dm.locator('dialog[aria-label="Viewing as Ana"]');
+    await preview.waitFor();
+    try {
+      const wait = preview.locator("[data-preview-wait]");
+      const status = wait.getByRole("status");
+      // The failure is an alert beside the wait's status, never inside it (docs/design-v1-design-pass.md 4.4).
+      const failed = wait.getByRole("alert").filter({ hasText: "Could not load what Ana sees." });
+      await failed.waitFor();
+      assert.equal(await failed.getByText("Close and try again").count(), 0, "the failure still says to close");
+      assert.equal(await status.count(), 1, "the wait's status left with the failure");
+      assert.equal((await status.innerText()).trim(), "", "the failure speaks through the status");
+      assert.deepEqual(alignmentLines(await measureAlignment(wait), "dp-3a failed"), []);
+      await shots.take(dm, "dp-3a-preview-failed");
+
+      const retry = failed.getByRole("button", { name: "Try again", exact: true });
+      await retry.focus();
+      await dm.keyboard.press("Enter");
+      const focused = () => status.evaluate((el) => el === el.ownerDocument.activeElement);
+      await failed.waitFor({ state: "detached" });
+      assert.ok(await focused(), "Try again left focus anywhere but the wait's status");
+      await status.filter({ hasText: "Loading what Ana sees…" }).waitFor();
+      assert.ok(await focused(), "the loading line took focus from the wait's status");
+      await waitFor("the snapshot for Ana's preview, held", () => (previews.queue.length > 0 ? true : null));
+      await shots.take(dm, "dp-3a-preview-retry-loading");
+      releasePreview();
+      await preview.locator(".konvajs-content").first().waitFor();
+      const snapshot = previews.frames.map((text) => JSON.parse(text) as Frame).find((f) => f.t === "snapshot");
+      assert.equal(snapshot?.you?.memberId, run.anaId, "Try again showed someone else's view");
+      // The wait gone, focus stays in the preview rather than fall to the page.
+      assert.ok(await preview.evaluate((el) => el.contains(el.ownerDocument.activeElement)), "focus fell out of the preview as its view came");
+    } finally {
+      previews.refuse = 0;
+      previews.hold = false;
+      await exitPreview(preview);
     }
   });
 

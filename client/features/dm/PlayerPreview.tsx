@@ -47,7 +47,7 @@ export function ViewAsHost() {
  * mirror of the player's screen. The DM's own socket and tools stay as
  * they are. Until the player's snapshot lands it says it is loading,
  * after the shared delay, and after 10 s, or a socket that closed first,
- * that it could not load, with Exit as the way out.
+ * that it could not load, with Try again, and Exit in the banner.
  *
  * The page always fills the viewport, so the banner floats over the map
  * just under the top bar, and a cream frame marks the whole screen as a
@@ -76,6 +76,8 @@ export function PlayerPreview(props: {
   const [live, setLive] = useState<Live | null>(null);
   const [load, setLoad] = useState<PreviewLoad>("loading");
   const [flash, setFlash] = useState(false);
+  // Each Try again opens the preview anew, with a fresh store and socket.
+  const [attempt, setAttempt] = useState(0);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { memberId, name, onExit } = props;
   // The bars the previewed page draws over the map, the top bar and a phone's turn band, as the DM's own view has them: a fight shows in both or neither, outside a blackout.
@@ -130,7 +132,7 @@ export function PlayerPreview(props: {
       if (flashTimer.current) clearTimeout(flashTimer.current);
       setLive(null);
     };
-  }, [roomId, memberId]);
+  }, [roomId, memberId, attempt]);
 
   // A modal dialog (lib/modalDialog.ts), so the DM's own room behind it is inert and Escape leaves the preview.
   // It holds a whole Room page, whose chrome takes the interface size itself and whose map must not.
@@ -184,7 +186,7 @@ export function PlayerPreview(props: {
           </RoomProvider>
         </PreviewContext.Provider>
       ) : (
-        <PreviewWait name={name} failed={load === "failed"} zoom={zoom} />
+        <PreviewWait name={name} failed={load === "failed"} zoom={zoom} onRetry={() => setAttempt((n) => n + 1)} />
       )}
       <div aria-hidden style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", border: `4px solid ${theme.color.accentSoft}` }} />
       <div

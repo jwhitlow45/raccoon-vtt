@@ -1023,8 +1023,9 @@ async function previewWaitTextLines(words: Locator, scale: number, label: string
 /**
  * pv4: View as a player's wait (docs/design-v1-per-player-vision.md 7.4
  * and 11): its socket is held unanswered (holdPreviews), so "Loading
- * what Pat sees…" stands, then closed, so it says it could not load.
- * Each time its words' drawn size and fit are checked at `scale`.
+ * what Pat sees…" stands, then closed, so it says it could not load, in
+ * an alert with Try again (docs/design-v1-design-pass.md 4.4). Each time
+ * its words' drawn size and fit are checked at `scale`.
  */
 async function previewWaitScreens(sweep: Sweep, page: Page, scale: number): Promise<void> {
   heldPreview = null;
@@ -1047,7 +1048,7 @@ async function previewWaitScreens(sweep: Sweep, page: Page, scale: number): Prom
     const held = await waitFor("the preview's socket", () => heldPreview as WebSocketRoute | null, 5_000);
     await held.close();
     const failed = preview.locator('[data-preview-wait="failed"]');
-    const failedWords = failed.getByRole("status").filter({ hasText: "Could not load what Pat sees" });
+    const failedWords = failed.getByRole("alert").filter({ hasText: "Could not load what Pat sees." });
     if (await showsWithin(failedWords, 3_000)) {
       await sweep.measure(page, "preview-failed", failed);
       await sweep.add(page, "preview-failed-words", await previewWaitTextLines(failedWords, scale, `${sweep.at} preview-failed-words`));
