@@ -2480,8 +2480,11 @@ export type LogEvent =
    * effect's `due` names. DM only, as the DC is.
    */
   | (AboutCreature & { type: "saveEnds"; effectId: EffectId; key: Effect["key"]; ability: AbilityKey; dc: number })
-  /** The counts are left out for a player who may not see the creature's exact HP. */
-  | (AboutCreature & { type: "deathSave"; ok?: number; fail?: number })
+  /**
+   * Counts stay private when exact HP is hidden. `exact` restricts the whole line
+   * when it was caused by damage with parts, as for concentration checks.
+   */
+  | (AboutCreature & { type: "deathSave"; ok?: number; fail?: number; exact?: true })
   /**
    * A short or long rest finished (features section 15). `amount` is the HP
    * a short rest's Hit Point Dice gave back. Like an HP line, the numbers

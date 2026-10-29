@@ -13,6 +13,8 @@ import { blockDefenses } from "../dice/defenses.ts";
 import { loadMonsters } from "../srd/monsters.ts";
 import srdDefenses from "../srd/damage-defenses.json" with { type: "json" };
 import { describeEvent } from "../logText.ts";
+import { resolveDiceOp } from "../dice/resolve.ts";
+import { ZERO_HP_UNCONSCIOUS_ID } from "../rules/hp.ts";
 
 const hit = (amount = 14, parts: unknown = [{ amount: 10, type: "fire" }, { amount: 4, type: "cold" }]) => ({
   t: "actor.hp", target: { tokenId: "target" }, change: { kind: "damage", amount, parts },
@@ -207,6 +209,79 @@ describe("FL-3 typed damage on the server", () => {
     const tiny = applied(fixture(), hit(11, [{ amount: 1, type: "fire" }, { amount: 10, type: "poison" }]));
     assert.deepEqual(tiny.actor.hp, { cur: 50, max: 50, temp: 3 });
     assert.equal(tiny.actor.hurt, undefined);
+  });
+
+  test("FL3-OPUS-9: typed death saves reveal no hidden defense beyond a visible life change", () => {
+    for (const life of ["dying", "stable"] as const) for (const hpVisibility of ["hidden", "label", "bar"] as const) for (const owned of [false, true]) for (const crit of [false, true]) {
+      const states = ["none", "resist", "immune"].map((defense) => {
+        const before = fixture({ life, hp: { cur: 0, max: 50, temp: 0 }, effects: [{ id: ZERO_HP_UNCONSCIOUS_ID, key: "unconscious" }] });
+        before.tokens.target!.hpVisibility = hpVisibility;
+        if (owned) before.tokens.target!.ownerIds = [P2.memberId];
+        before.monsters.monster = customMonster("monster", { resistances: defense === "resist" ? "Fire" : "", immunities: defense === "immune" ? "Fire" : "", vulnerabilities: "" });
+        return applied(before, { ...hit(), change: { kind: "damage", amount: 1, parts: [{ amount: 1, type: "fire" }], crit } }).state;
+      });
+      for (const viewer of owned ? [P1] : [P1, P2]) {
+        const [landed, rounded, immune] = states.map((state) => projectState(state, viewer, { sceneId: "s1" }));
+        assert.deepEqual(rounded, immune, `${viewer.memberId}, ${life}, ${hpVisibility}: resistance rounding and immunity`);
+        const expected = structuredClone(immune!);
+        if (life === "stable") {
+          const target = expected.tokens.target!.actor;
+          assert.ok("inline" in target);
+          assert.equal(target.inline.life, "stable");
+          target.inline.life = "dying";
+          expected.log.push({ id: "1:1", at: env(1).at, kind: "event", data: { type: "life", life: "dying", tokenId: "target", seen: true } });
+        }
+        assert.deepEqual(landed, expected, `${viewer.memberId}, ${life}, ${hpVisibility}: only the stable creature's public life change may differ`);
+      }
+      for (const viewer of owned ? [DM, P2] : [DM]) {
+        const saves = states.map((state) => projectState(state, viewer, { sceneId: "s1" }).log.filter((line) => line.data?.type === "deathSave"));
+        assert.deepEqual(saves.map((lines) => lines.length), [1, 0, 0]);
+        assert.deepEqual(saves[0]![0]!.data?.type === "deathSave" ? [saves[0]![0]!.data.ok, saves[0]![0]!.data.fail] : null, [0, crit ? 2 : 1]);
+      }
+    }
+  });
+
+  test("FL3-OPUS-9: a damage death-save line keeps its recorded audience and later exact HP gate", () => {
+    for (const hpVisibility of ["hidden", "exact"] as const) {
+      const before = fixture({ life: "dying", hp: { cur: 0, max: 50, temp: 0 } });
+      before.tokens.target!.ownerIds = [P2.memberId];
+      before.tokens.target!.hpVisibility = hpVisibility;
+      const { state } = applied(before, hit(2, [{ amount: 2, type: "fire" }]));
+      const dm = projectState(state, DM, { sceneId: "s1" }).log.find((line) => line.data?.type === "deathSave")!;
+      assert.ok(dm.data?.type === "deathSave");
+      assert.equal(dm.data.exact, true);
+      assert.equal(lineReach(state, dm).audience, hpVisibility === "hidden" ? "party" : "shared");
+      assert.equal(lineAudience(dm), hpVisibility === "hidden" ? "dm" : "shared");
+      if (hpVisibility === "hidden") {
+        assert.deepEqual(state.log.filter((line) => line.data?.type === "deathSave" && lineAudience(line) === "party").map((line) => line.to), [[P2.memberId]]);
+        const revealed = structuredClone(state);
+        revealed.tokens.target!.hpVisibility = "exact";
+        assert.equal(projectState(revealed, P1, { sceneId: "s1" }).log.filter((line) => line.data?.type === "deathSave").length, 0);
+      }
+      const narrowed = structuredClone(state);
+      narrowed.tokens.target!.ownerIds = [];
+      narrowed.tokens.target!.hpVisibility = "label";
+      for (const viewer of [P1, P2]) {
+        assert.equal(projectState(narrowed, viewer, { sceneId: "s1" }).log.filter((line) => line.data?.type === "deathSave").length, 0);
+        assert.equal(projectArchivedLog(narrowed, state.log, viewer, { sceneId: "s1" }).filter((line) => line.data?.type === "deathSave").length, 0);
+      }
+    }
+
+    const before = fixture({ life: "dying", hp: { cur: 0, max: 50, temp: 0 } });
+    const rolled = resolveDiceOp({ t: "actor.deathRoll", tag: "death", target: { tokenId: "target" } }, before, { draw: () => 9, batch: "AbCdEfGhIjKlMnOp" });
+    assert.ok(rolled.ok);
+    const plain: OpOf<"actor.hp"> = { t: "actor.hp", target: { tokenId: "target" }, change: { kind: "damage", amount: 1 } };
+    const manual: OpOf<"actor.deathSave"> = { t: "actor.deathSave", target: { tokenId: "target" }, ok: 1, fail: 1 };
+    for (const op of [plain, manual, rolled.op]) {
+      const old = applyOp(before, op, DM, { ...env(1), opVersion: 30 });
+      const current = applyOp(before, op, DM, env(1));
+      assert.ok(old.ok && current.ok);
+      assert.deepEqual(current.state, old.state, "damage without parts, manual and rolled death saves keep their behavior");
+      const saves = projectState(current.state, P1, { sceneId: "s1" }).log.filter((line) => line.data?.type === "deathSave");
+      assert.equal(saves.length, 1);
+      assert.ok(saves[0]!.data?.type === "deathSave");
+      assert.equal(saves[0]!.data.exact, undefined);
+    }
   });
 
   test("an SRD block, a companion block, and conditions supply the same defenses as saves", () => {

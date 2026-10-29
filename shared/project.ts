@@ -3298,6 +3298,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       const holder = holderInSight(ctx, data);
       if (!holder) return null;
       if (hpAccess(ctx.state, ctx.viewer, holder) === "exact") return data;
+      if (data.exact) return null;
       const { ok: _ok, fail: _fail, ...rest } = data;
       return rest;
     }

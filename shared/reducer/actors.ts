@@ -61,7 +61,7 @@ export function actorHp(tx: Tx, op: OpOf<"actor.hp">, context?: Omit<OutcomeDama
   const revert = hpRevertOf(resolved.actor, r.actor, tx.state.encounter?.entries ?? []);
   tx.addActorEvents(resolved, r.events.map((e) => {
     if (e.type === "hp") return { ...e, left, revert };
-    if (e.type === "concentration" && !e.ended && c.kind === "damage" && c.parts !== undefined) return { ...e, exact: true as const };
+    if ((e.type === "deathSave" || (e.type === "concentration" && !e.ended)) && c.kind === "damage" && c.parts !== undefined) return { ...e, exact: true as const };
     return e;
   }));
 }
