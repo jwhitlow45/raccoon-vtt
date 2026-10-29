@@ -254,11 +254,13 @@ function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env
  * falls (MD2-O-13): the trace reads the real ground's heights, so counting
  * them would refuse a route in place by the heights of ground the player
  * never touched. The cap only bounds the work a route costs, and its
- * squares across the ground do that alone.
+ * squares across the ground do that alone. `squeezed` is whether the move
+ * ends squeezed, so what sits on the walker is read on the seat the move
+ * gives it there (review DP34-OPUS-3).
  */
-export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "sceneId" | "x" | "y" | "elevation">, trace: WalkTrace, seen: SeenByAll, feetPerCell: number, role: Viewer["role"]): number {
+export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "sceneId" | "x" | "y" | "elevation">, trace: WalkTrace, seen: SeenByAll, feetPerCell: number, role: Viewer["role"], squeezed = false): number {
   const route = trace.map(({ x, y, elevation }) => ({ x, y, elevation }));
-  const lead: MovedToken = { tokenId: token.id, from: poseOf(token), to: { sceneId: token.sceneId, ...route[route.length - 1]! }, route, trace, how: "walk", pass: "public" };
+  const lead: MovedToken = { tokenId: token.id, from: poseOf(token), to: { sceneId: token.sceneId, ...route[route.length - 1]! }, route, trace, how: "walk", pass: "public", ...(squeezed ? { squeezed: true as const } : {}) };
   const walks = [lead];
   const walked = new Map<string, MovedToken>([[token.id, lead]]);
   for (const id of publicMembers(before.tokens, token.id, seen, new Set([token.id])).slice(1)) {

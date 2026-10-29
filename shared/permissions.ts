@@ -491,7 +491,7 @@ function routeFits(op: Op, c: Check): Decision {
   }
   const seen = seenAllIn(c);
   const trace = routeWalkers(c.state.buildChunks, walkerFor(c.state, token, seen, { to: op }), op.route, op.elevation ?? token.elevation);
-  return checkSetReach(c.state, token, trace, seen, c.state.meta.settings.feetPerCell, c.actor.role) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
+  return checkSetReach(c.state, token, trace, seen, c.state.meta.settings.feetPerCell, c.actor.role, op.squeeze === true) <= MAX_ROUTE_REACH ? OK : refuse("invalid", ROUTE_TOO_LONG);
 }
 
 /**

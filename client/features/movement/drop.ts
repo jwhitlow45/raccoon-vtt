@@ -439,7 +439,7 @@ function landingOf(state: DropView, token: DropToken, target: Point & { squeeze?
   // A squeeze at the walk's end is judged as the end of the walk, as the server judges it (permissions.ts squeezeFits).
   if (at.squeeze && !squeezeFits(state, walkEnd(state, walking, at, points.slice(1, -1)))) return null;
   // The cap reads what the token takes along too, each on its own ground, as the server's does (moveLeg.ts checkSetReach).
-  return checkSetReach(state, token, trace, state.seen, feetPerCell, state.role) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
+  return checkSetReach(state, token, trace, state.seen, feetPerCell, state.role, at.squeeze === true) <= MAX_ROUTE_REACH ? { pieces: kept, at, points, cut: cut !== null } : null;
 }
 
 /**
