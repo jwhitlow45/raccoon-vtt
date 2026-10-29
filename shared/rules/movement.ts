@@ -43,8 +43,9 @@ import { footprintHexes, hexCenter, hexInScene, hexLine, hexNeighbors, reference
  * ledge stops it, but for one exemption (docs/design-v1-attach.md 4.3, reviews AT-O-26,
  * AT-ASTRA-16 and AT-ASTRA-17). Until it first stands clear of the holder,
  * no ledge whose whole length lies strictly inside the holder's footprint
- * stops it (walls.ts `withoutLedgesInside`), so it crosses the step under a
- * holder that straddles two heights. A ledge on the footprint's boundary
+ * stops it (walls.ts `withoutLedgesInside`), the squeezed footprint while
+ * the holder squeezes (rules/attach.ts walkerFor), so it crosses the step
+ * under a holder that straddles two heights. A ledge on the footprint's boundary
  * stops it, so a rider steps off no cliff at her mount's side, and so does
  * every ledge beyond, so she climbs none either. Each leg is one straight
  * test, walls and ledges alike. `offHolder` is the walk's state: a walk
@@ -592,7 +593,7 @@ function legOf(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: Movin
 /** What a walk's tests read of the holder it walks off, for what is kept per walker (MovingToken). */
 export function offKey(token: MovingToken): string {
   const h = token.offHolder;
-  return h ? `${h.size},${h.w},${h.h},${h.x},${h.y}` : "";
+  return h ? `${h.size},${h.w},${h.h},${h.x},${h.y},${h.squeeze === true}` : "";
 }
 
 /** Whether the token's full footprint, standing at `at`, shares area with the holder it walks off. */
@@ -606,7 +607,7 @@ export function onOffHolder(token: MovingToken, at: Point): boolean {
 }
 
 function holderRect(holder: OffHolder): { x: number; y: number; w: number; h: number } {
-  return footprintRect(SQUARES, { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) });
+  return footprintRect(SQUARES, { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}), ...(holder.squeeze === true ? { squeeze: true } : {}) });
 }
 
 declare const stepping: unique symbol;

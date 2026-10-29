@@ -2,10 +2,10 @@ import { LIMITS } from "../limits.ts";
 import type { AttachKind, Scene, Token } from "../model.ts";
 import { isWritable } from "../writable.ts";
 import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.ts";
-import { footprintRect, footprintSize, hexAnchor, occupiedHexes, placedOnHex, sizeCategory, snapStep, storedCenter, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
+import { footprintRect, footprintSize, hexAnchor, isSqueezed, occupiedHexes, placedOnHex, sizeCategory, snapStep, storedCenter, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { walksOffFromGround } from "../migrate.ts";
+import { seatsOnSqueeze, walksOffFromGround } from "../migrate.ts";
 import type { Walker } from "./movement.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexInScene, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
@@ -317,15 +317,20 @@ type Walking = Sized & FootprintToken & Pick<Token, "id" | "sceneId" | "attached
  * the ground, as it lands there, whatever the ground under its seat, and
  * every ledge stops it but those whose whole length lies strictly inside
  * the holder's footprint, until the walk first stands clear of the holder
- * (movement.ts MovingToken). So it crosses the step under a holder that
- * straddles two heights, and steps off no cliff at the holder's side and
- * climbs no ledge beyond it. The route search, every leg test, the walk's
- * points and its cost read it so, on the player's device and on the server
- * alike, wherever the walk ends, so both judge the one walk whatever cuts
- * it short. This reads only a link every player sees (`seen`, both
- * tokens): off a holder some player cannot see the token walks as itself,
- * as it does with no holder at all (8.0). So does one on a holder that
- * flies. The copy is for the walk alone and is never stored.
+ * (movement.ts MovingToken). That is the footprint the holder stands on,
+ * the squeezed one while it squeezes, so a ledge in the band of its full
+ * footprint beside the squeeze stops it as the ground's (review
+ * DP34-ASTRA-02), but for an op stored before version 29, which reads the
+ * full one (migrate.ts seatsOnSqueeze). So it crosses the step under a
+ * holder that straddles two heights, and steps off no cliff at the
+ * holder's side and climbs no ledge beyond it. The route search, every
+ * leg test, the walk's points and its cost read it so, on the player's
+ * device and on the server alike, wherever the walk ends, so both judge
+ * the one walk whatever cuts it short. This reads only a link every
+ * player sees (`seen`, both tokens): off a holder some player cannot see
+ * the token walks as itself, as it does with no holder at all (8.0). So
+ * does one on a holder that flies. The copy is for the walk alone and is
+ * never stored.
  *
  * A walk that leaves the holder, its move landing off it at `off.to`, starts
  * on the ground under its own footprint (movement.ts `groundStart`). One
@@ -346,7 +351,8 @@ export function walkerFor<T extends Walking>(
   if (!link || !onHolder(link.kind)) return token as T & Walker;
   const holder = holderOf(state.tokens, token) as Walking | undefined;
   if (!holder || !seen(token) || !seen(holder) || footing(state.buildChunks, holder) !== "ground") return token as T & Walker;
-  const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}) };
+  const squeezed = isSqueezed(holder) && seatsOnSqueeze(off.opVersion);
+  const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}), ...(squeezed ? { squeeze: true as const } : {}) };
   const scene = state.scenes[token.sceneId];
   const g = scene ? sceneGrid(scene) : SQUARES;
   const leaves = walksOffFromGround(off.opVersion) && (off.to === undefined || !seatHolds(g, link.kind, { ...token, x: off.to.x, y: off.to.y }, holder));
