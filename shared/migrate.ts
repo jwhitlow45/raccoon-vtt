@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 29;
-export const OP_VERSION = 28;
+export const OP_VERSION = 29;
 
 export type MigrationStep = {
   from: number;
@@ -812,6 +812,30 @@ export const opMigrations: MigrationStep[] = [
     to: 28,
     apply: (op) => op,
   },
+  {
+    // Follow-up batch 35 (docs/design-v1-hex-grids.md, As built, D-261029-52):
+    // no op changes shape, so the step is the identity. From this version,
+    // on a hex scene, what sits on a holder whose walk squeezes takes the
+    // seat nearest it on the hexes the holder stands on at each point of
+    // the walk, and its nearest full seat again where the holder stands up
+    // (`seatsOnSqueeze`), so a rider squeezes through a corridor on its
+    // mount's hex. Older ops replay by the rule they were written under,
+    // where it kept its offset from the holder's box, so they put each
+    // token where they put it then and a stored restore's hash guards
+    // still match.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 29, and the shutdown writes version 29 snapshots,
+    // as before. Rollback: an older build refuses to migrate a version 29
+    // op down (runMigrations), so a room whose log holds one after its last
+    // snapshot would not load there. A clean shutdown writes a snapshot
+    // after the last op, and an older build loads it, since nothing stored
+    // changed shape. So only a room with version 29 ops after its last
+    // snapshot needs the backup from before the deploy.
+    from: 28,
+    to: 29,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1111,6 +1135,18 @@ export function walksRoutes(opVersion: number | undefined): boolean {
  */
 export function attaches(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 14);
+}
+
+/**
+ * Whether what sits on a holder whose walk squeezes on a hex scene takes
+ * the seat nearest it on the hexes the holder stands on at each point of
+ * the walk, and its nearest full seat again where the holder stands up
+ * (D-261029-52, moveLeg.ts follow). Ops stored before version 29 kept its
+ * offset from the holder's box all the way and replay by that rule. Live
+ * ops carry no stored version and take today's rule.
+ */
+export function seatsOnSqueeze(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 29);
 }
 
 /**

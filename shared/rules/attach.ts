@@ -2,7 +2,7 @@ import { LIMITS } from "../limits.ts";
 import type { AttachKind, Scene, Token } from "../model.ts";
 import { isWritable } from "../writable.ts";
 import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.ts";
-import { footprintRect, footprintSize, hexAnchor, occupiedHexes, placedOnHex, sizeCategory, snapStep, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
+import { footprintRect, footprintSize, hexAnchor, occupiedHexes, placedOnHex, sizeCategory, snapStep, storedCenter, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
 import { walksOffFromGround } from "../migrate.ts";
@@ -214,14 +214,31 @@ export function seatSpot(g: Grid, carried: PlacedToken, holder: PlacedToken): Po
  * middle (placedOnHex).
  */
 function hexSeatSpot(g: HexGrid, carried: PlacedToken, holder: PlacedToken): Point | null {
-  const from = hexAnchor(g, unsqueezed(carried));
-  const refs = fullHexes(g, holder).sort((a, b) => latticeOrder(g, a, b));
+  return hexSeatOn(g, carried, fullHexes(g, holder), hexAnchor(g, unsqueezed(carried)));
+}
+
+/**
+ * Where what sits on a holder sits at one point of a squeezed walk on hexes
+ * (D-261029-52, moveLeg.ts follow): of the anchors of its size whose hexes
+ * all lie on those the holder stands on there, squeezed or full, the one
+ * nearest the middle of its box where its offset from the holder puts it,
+ * ties in lattice order. Null when none fits. The link still reads the full
+ * footprint (5.1), which every hex the holder stands on lies in.
+ */
+export function standingSeatSpot(g: HexGrid, carried: PlacedToken, holder: PlacedToken): Point | null {
+  return hexSeatOn(g, carried, occupiedHexes(g, holder), storedCenter(unsqueezed(carried)));
+}
+
+/** The seat on hexes `on`: of the carried size's anchors whose hexes all lie on them, the one nearest `from`, ties in lattice order. */
+function hexSeatOn(g: HexGrid, carried: PlacedToken, on: readonly Hex[], from: Point): Point | null {
+  const held = new Set(on.map(hexKey));
+  const refs = [...on].sort((a, b) => latticeOrder(g, a, b));
   let best: Point | null = null;
   let bestD = Infinity;
   for (const ref of refs) {
     const spot = placedOnHex(g, unsqueezed(carried), ref);
     const seated = { ...unsqueezed(carried), x: spot.x, y: spot.y };
-    if (!insideHolder(g, seated, holder)) continue;
+    if (!fullHexes(g, seated).every((h) => held.has(hexKey(h)))) continue;
     const anchor = hexAnchor(g, seated);
     const d = (anchor.x - from.x) ** 2 + (anchor.y - from.y) ** 2;
     if (d < bestD - EPS) {
@@ -361,14 +378,17 @@ export function getOffSpot(
 
 /**
  * The first place to get off on hexes: ring by ring of hexes round the
- * holder's reference hex, each ring from its east hex clockwise, as
- * companions spread on squares, the carried token's box placed with that
- * hex as its reference hex. A footprint reaches at most two hexes from its
- * reference hex, so every place in reach lies within both reaches, the
- * reach in hexes and one more.
+ * reference hex of the hexes the holder stands on, each ring from its east
+ * hex clockwise, as companions spread on squares, the carried token's box
+ * placed with that hex as its reference hex. So off a mount squeezed into
+ * a corridor the first ring is the corridor's hexes beside it (D-261029-52).
+ * A footprint reaches at most two hexes from its reference hex, and a
+ * squeezed holder's full one at most two from the one it squeezes onto, so
+ * every place in reach lies within both reaches, the reach in hexes and
+ * one more.
  */
 function hexGetOffSpot(g: HexGrid, settings: DistanceSettings, carried: FootprintToken, holder: FootprintToken, fits: (spot: Point) => boolean): Point | null {
-  const from = fullHexes(g, holder)[0]!;
+  const from = occupiedHexes(g, holder)[0]!;
   const reachHexes = Math.ceil(attachReachFt(settings.feetPerCell) / settings.feetPerCell);
   const rings = 2 + 2 + reachHexes + 1;
   for (let ring = 1; ring <= rings; ring++) {
