@@ -323,14 +323,14 @@ function ModifierField(props: { ability: CountAbility; text: string; onText(text
 }
 
 /** A resource's own fields: its name, whether it spends an amount, its count and the rest that brings it back (7.1). */
-function OwnFields(props: { draft: OwnDraft; onChange(next: OwnDraft): void }) {
+export function OwnFields(props: { draft: OwnDraft; onChange(next: OwnDraft): void }) {
   const { draft } = props;
   const set = (patch: Partial<OwnDraft>) => props.onChange({ ...draft, ...patch });
   const most = draft.pool ? LIMITS.resourcePoolMax : LIMITS.resourceMax;
   return (
     <>
       <FieldRow label="Name" fill>
-        <Input aria-label="Name" value={draft.name} maxLength={LIMITS.resourceNameChars} placeholder="Superiority Dice" autoComplete="off" enterKeyHint="done" onChange={(e) => set({ name: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+        <Input aria-label="Name" value={draft.name} maxLength={LIMITS.resourceNameChars} placeholder="Superiority Dice" autoComplete="off" enterKeyHint="done" onChange={(e) => set({ name: e.target.value })} style={{ flex: 1, minWidth: 0, width: 0 }} />
       </FieldRow>
       <Checkbox checked={draft.pool} onChange={(pool) => set({ pool })} label="Spend an amount" help="For a pool of points, such as Lay on Hands, where a use spends any amount." />
       <FieldRow label={draft.pool ? "Amount" : "Count"} hint={`1 to ${most}`}>
