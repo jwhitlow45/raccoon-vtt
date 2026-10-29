@@ -64,5 +64,7 @@ describe("sceneRowDetail", () => {
     assert.equal(sceneRowDetail(scene("s", { bounds: { w: 30, h: 20 }, gridShape: "hexRows" })), "Grid, 30 × 22 hexes, fog off");
     const map = { assetId: "a", widthPx: 1000, heightPx: 700, cellPx: 50, originPx: { x: 0, y: 0 } };
     assert.equal(sceneRowDetail(scene("s", { map, bounds: { w: 20, h: 14 }, suggestedView: "isometric" })), "Map, 20 × 14, fog off");
+    // Too small for a whole hex, mid-line in lower case (review FU35B-OPUS-04).
+    assert.equal(sceneRowDetail(scene("s", { bounds: { w: 1, h: 1 }, gridShape: "hexRows" })), "Grid, no whole hex, fog off");
   });
 });

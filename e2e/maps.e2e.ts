@@ -977,7 +977,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
       await group.getByLabel("Replace map image", { exact: true }).setInputFiles(file);
       await uploaded;
     };
-    /** Waits out a replacement that should change nothing in Line up grid: its row back to its label, and the 2 s a search may still take. */
+    /** Waits out a replacement that should change nothing in Line up grid: its row back to its label, which comes back only after the search's wait, then a moment more. */
     const settledRow = async () => {
       const group = await mapGroup();
       await group.getByLabel("Replace map image", { exact: true }).waitFor({ timeout: 15_000 });

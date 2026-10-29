@@ -524,11 +524,13 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
         return;
       }
       // A replacement keeps the scene as it is, unless a grid was found on
-      // new art, which a scene with its own grid is only offered, or a
-      // phone's search of the copy goes on past the wait, which Line up grid
-      // shows. A first image either knows its scale from its name, so the
-      // scene fits it now, or the grid tool comes up to find the scale
-      // (and fits the scene when applied).
+      // new art, which a scene with its own grid is only offered, as art of
+      // the old image's shape is one that differs from the grid it keeps
+      // (findGrid.ts `replacementFound`), or a phone's search of the copy
+      // goes on past the wait, which Line up grid shows. A first image
+      // either knows its scale from its name, so the scene fits it now, or
+      // the grid tool comes up to find the scale (and fits the scene when
+      // applied).
       const fallback = { cellPx: next.cellPx, originPx: next.originPx };
       if (!map && asset.cellPx !== undefined && next.cellPx === asset.cellPx && !found && !wait.later) {
         const bounds = fitBounds(next);

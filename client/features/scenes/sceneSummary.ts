@@ -64,7 +64,8 @@ export function fogFoldSummary(scene: Pick<Scene, "fogEnabled" | "vision">): str
  * square scenes there too.
  */
 export function sceneRowDetail(scene: Scene): string {
-  const size = isHex(sceneGrid(scene)) ? sizeText(scene) : `${scene.bounds.w} × ${scene.bounds.h}`;
+  // The summary's words stand alone, so their first letter is a capital. In the row's list they follow a comma.
+  const size = isHex(sceneGrid(scene)) ? sizeText(scene).replace(/^No /, "no ") : `${scene.bounds.w} × ${scene.bounds.h}`;
   return `${scene.map ? "Map" : "Grid"}, ${size}, fog ${scene.fogEnabled ? "on" : "off"}`;
 }
 
