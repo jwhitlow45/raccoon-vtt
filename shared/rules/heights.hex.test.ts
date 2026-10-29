@@ -303,6 +303,33 @@ for (const [name, g] of [
     });
   });
 
+  describe(`${name}: a raised side below the floor keeps its own top (H3-ASTRA-06)`, () => {
+    test("the side between hexes sunk 20 ft and 10 ft tops out at -10 ft: it stops an eye below that, never one at or above it", () => {
+      const deep = H;
+      const shallow = near(H, 0);
+      const s = raised(g, [[deep, -20], [shallow, -10]]);
+      const walls = sceneWalls(s.scenes.s1!, s.buildChunks);
+      // The side of `deep` toward `shallow`, between its corners 1 and 2, and a side of `shallow` toward the floor at 0.
+      const side = (h: Hex, d: number) => {
+        const cs = hexCorners(g, h).map((c) => cornerAt(g, c));
+        return [cs[(d + 1) % 6]!, cs[(d + 2) % 6]!];
+      };
+      const blocks = (eye: number, [a, b]: { x: number; y: number }[]) => {
+        const xy = walls.sight(eye).pieces;
+        for (let k = 0; 4 * k < xy.length; k++) {
+          const [px, py, qx, qy] = [xy[4 * k]!, xy[4 * k + 1]!, xy[4 * k + 2]!, xy[4 * k + 3]!];
+          if ((px === a!.x && py === a!.y && qx === b!.x && qy === b!.y) || (px === b!.x && py === b!.y && qx === a!.x && qy === a!.y)) return true;
+        }
+        return false;
+      };
+      const shared = side(deep, 0);
+      assert.equal(blocks(-15, shared), true, "an eye below its top");
+      assert.equal(blocks(-10, shared), false, "an eye at its top sees over it");
+      assert.equal(blocks(-5, shared), false, "an eye above it");
+      assert.equal(blocks(-5, side(shallow, 0)), true, "the side up to the floor still stops an eye below 0");
+    });
+  });
+
   describe(`${name}: a light stands on the hex under it`, () => {
     test("a lamp on a raised hex lights the floor past a lower ridge, as its eye 5 ft over that hex sees over it", () => {
       // Built on hex rows and mirrored onto columns: their keys, centers and bounds swap.

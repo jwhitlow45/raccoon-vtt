@@ -1338,11 +1338,13 @@ export class WallSet {
         const by = p.xy[4 * k + 3]!;
         const mx = (ax + bx) / 2;
         const my = (ay + by) / 2;
-        let top = 0;
+        // Tops run below the floor too, so none is assumed: a piece always lies along the side it was cut from, and one
+        // that somehow did not would stop every eye rather than open a gap.
+        let top: number | null = null;
         index.query(mx, my, mx, my, RAISED, (j) => {
-          if (alongSide(s.xy, j, ax, ay, bx, by)) top = Math.max(top, this.storedTops[j]!);
+          if (alongSide(s.xy, j, ax, ay, bx, by)) top = Math.max(top ?? -Infinity, this.storedTops[j]!);
         });
-        tops[k] = top;
+        tops[k] = top ?? HIGHEST_TOP;
       }
     } else if (g.relief) {
       const ground = g.relief.ground;
@@ -1364,6 +1366,9 @@ export class WallSet {
     return (this.#pieceTops = tops);
   }
 }
+
+/** The highest top a piece can hold (`storedTops` is 16-bit), over every eye. */
+const HIGHEST_TOP = 32767;
 
 /** Split points lie on the 1/64 lattice, so a piece of a slanted side may stand off it by up to half a lattice step. */
 const SIDE_SLACK = 1 / 64;
