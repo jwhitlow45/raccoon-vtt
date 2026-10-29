@@ -24,8 +24,11 @@ export type LoadFailedAction =
  * failure in a list reads as a state of that list rather than as a broken
  * screen. A failure that takes a whole panel's place is that panel's
  * notice instead (LoadFailureNotice, or SrdLoadFailed's danger Notice).
+ * `centered` is for a failure that stands alone, centered over the stage,
+ * as View as a player's: where the line wraps, the words and the button
+ * under them stay centered as the line was, never at the left edge.
  */
-export function LoadFailed(props: { children: ReactNode } & LoadFailedAction) {
+export function LoadFailed(props: { children: ReactNode; centered?: boolean } & LoadFailedAction) {
   const { retry, focusTo } = props;
   const onRetry = (e: MouseEvent<HTMLButtonElement>) => {
     const from = e.currentTarget;
@@ -35,7 +38,16 @@ export function LoadFailed(props: { children: ReactNode } & LoadFailedAction) {
   return (
     <div
       role="alert"
-      style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted, fontSize: theme.font.body14, lineHeight: theme.leading.body }}
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: theme.space(2),
+        color: theme.color.textMuted,
+        fontSize: theme.font.body14,
+        lineHeight: theme.leading.body,
+        ...(props.centered ? { justifyContent: "center", textAlign: "center" as const } : null),
+      }}
     >
       <span style={{ flex: "1 1 160px", minWidth: 0 }}>{props.children}</span>
       {retry ? (

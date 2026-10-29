@@ -33,6 +33,8 @@ describe("the preview's wait", () => {
     assert.doesNotMatch(alert, /Close and try again/);
     assert.match(alert, /<button[^>]*>.*Try again.*<\/button>/);
     assert.ok(html.indexOf('role="status"') < html.indexOf('role="alert"'), "the alert comes after the status, as its sibling");
+    // Centered over the stage as the loading line is, also where a phone at 130% wraps Try again under the words (LP25-B-VIEWAS-1).
+    assert.match(/<div role="alert" style="([^"]*)"/.exec(html)?.[1] ?? "", /justify-content:center.*text-align:center/);
   });
 
   test("the words take the interface size, while the stage around them keeps the window's", () => {

@@ -34,7 +34,7 @@ export function PreviewWait(props: { name: string; failed: boolean; zoom: number
           {props.failed ? null : <Loading live={false} text={`Loading what ${props.name} sees…`} />}
         </div>
         {props.failed ? (
-          <LoadFailed retry={props.onRetry} focusTo={() => status.current}>
+          <LoadFailed centered retry={props.onRetry} focusTo={() => status.current}>
             {`Could not load what ${props.name} sees.`}
           </LoadFailed>
         ) : null}

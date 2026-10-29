@@ -34,4 +34,11 @@ describe("LoadFailed", () => {
     assert.match(html, /<button type="button">Reload<\/button>/);
     assert.doesNotMatch(html, /Try again/);
   });
+
+  test("centered, its words and Try again stay centered where the line wraps them, and beside what still works they keep to the left (LP25-B-VIEWAS-1)", () => {
+    const style = (centered: boolean) => /^<div role="alert" style="([^"]*)"/.exec(renderToStaticMarkup(createElement(LoadFailed, { retry: () => undefined, centered, children: WORDS })))?.[1] ?? "";
+    assert.match(style(true), /justify-content:center/);
+    assert.match(style(true), /text-align:center/);
+    assert.doesNotMatch(style(false), /justify-content|text-align/);
+  });
 });
