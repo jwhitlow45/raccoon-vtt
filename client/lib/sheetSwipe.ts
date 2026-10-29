@@ -617,8 +617,8 @@ export function startsOn(target: SwipeNode | null, surface: SwipeNode, riders: r
 }
 
 /** A control whose tap is its own: by its tag, or by its role. */
-const CONTROL_TAGS = new Set(["BUTTON", "A", "SUMMARY", "LABEL"]);
-const CONTROL_ROLES = new Set(["button", "link", "checkbox", "switch", "radio", "tab", "menuitem", "option"]);
+const CONTROL_TAGS = new Set(["BUTTON", "A", "SUMMARY", "LABEL", "INPUT"]);
+const CONTROL_ROLES = new Set(["button", "link", "checkbox", "switch", "radio", "tab", "menuitem", "option", "menuitemcheckbox", "menuitemradio", "slider", "spinbutton"]);
 
 /**
  * Whether a touch on `target` in the grab area lands on a control there,

@@ -116,6 +116,12 @@ describe("the sheet grabber", () => {
         assert.match(styleOf(/^<header[^>]*>/.exec(sheet)?.[0] ?? ""), new RegExp(`min-height:${56 + room - 6}px;padding:${room - 6}px 8px 0`), d.id);
         const stacked = renderToStaticMarkup(createElement(SheetHeader, { title: "Log", onClose() {}, grab: true, stacked: true }));
         assert.match(styleOf(/^<header[^>]*>/.exec(stacked)?.[0] ?? ""), new RegExp(`padding:${6 + room - 6}px 8px 6px`), d.id);
+        const detail = renderToStaticMarkup(createElement(SheetHeader, { title: "Scene", detail: "12 x 8 squares", onClose() {}, grab: true }));
+        assert.equal(grabbers(detail).length, 1, `${d.id}: a detail header has one grabber`);
+        assert.match(styleOf(/^<header[^>]*>/.exec(detail)?.[0] ?? ""), new RegExp(`padding-top:${room - 6}px(;|$)`), `${d.id}: the detail header leaves room for its design`);
+        const noGrab = renderToStaticMarkup(createElement(SheetHeader, { title: "Scene", detail: "12 x 8 squares", onClose() {} }));
+        assert.equal(grabbers(noGrab).length, 0, `${d.id}: a detail header that does not swipe has no grabber`);
+        assert.match(styleOf(/^<header[^>]*>/.exec(noGrab)?.[0] ?? ""), /padding-top:0(;|$)/, `${d.id}: a detail header that does not swipe keeps its height`);
         const pane = renderToStaticMarkup(createElement(PaneHeader, { title: "Label", onClose() {}, grab: true }));
         const paneRow = styleOf(/^<div[^>]*>/.exec(pane)?.[0] ?? "");
         assert.match(paneRow, new RegExp(`padding-top:${room - 2}px(;|$)`), d.id);

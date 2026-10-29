@@ -749,12 +749,12 @@ describe("13. the held glow", () => {
     assert.equal(page.heldOn, false);
   });
 
-  test("a touch left to the browser, a second finger, a touchcancel, a new item and an unmount each let go at once", () => {
+  test("a touch left to the browser, a cancelled touch, a new item and an unmount each let go at once", () => {
     const cases: [string, (session: InstanceType<typeof SwipeSession>) => void][] = [
       ["a sideways move", (s) => s.move({ dx: 30, dy: 2, at: 30, cancelable: true })],
       ["a move the browser will not let the page cancel", (s) => s.move({ dx: 0, dy: 20, at: 30, cancelable: false })],
-      ["a second finger", (s) => s.cancel()],
-      ["a touchcancel", (s) => s.cancel()],
+      // Both DOM events use this cancel. swipe.e2e.ts checks the second finger's document listener.
+      ["a cancelled touch", (s) => s.cancel()],
       ["a new item", (s) => s.stop()],
       ["an unmount", (s) => s.dispose()],
     ];
@@ -801,6 +801,29 @@ describe("13. the held glow", () => {
     const outer = el("header", wrapper, { attrs: { [GRAB_ATTR]: "" } });
     assert.equal(onControl(el("h2", outer), []), false);
   });
+
+  for (const type of ["checkbox", "radio", "button"]) {
+    test(`FU39-B: a bare ${type} input in the header is a control and its tap never holds the sheet`, () => {
+      const t = sheet();
+      const input = el("input", t.header, { attrs: { type } });
+      const control = onControl(input, []);
+      assert.equal(control, true);
+      const page = new FakePage();
+      const session = new SwipeSession(page.host);
+      session.begin(sessionStart({ on: startsOn(input, t.surface, [], css)!, control }));
+      session.end(100);
+      assert.deepEqual(page.helds, []);
+    });
+  }
+
+  for (const role of ["menuitemcheckbox", "menuitemradio", "slider", "spinbutton"]) {
+    test(`FU39-B: a ${role} and its child in the header are controls`, () => {
+      const t = sheet();
+      const control = el("div", t.header, { attrs: { role } });
+      assert.equal(onControl(control, []), true);
+      assert.equal(onControl(el("span", control), []), true);
+    });
+  }
 });
 
 // ------------------------------------------------------------ 12. randomized

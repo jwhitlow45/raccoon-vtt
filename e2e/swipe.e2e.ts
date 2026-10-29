@@ -625,7 +625,10 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await f.down(await headerPoint(sheet));
     await f.drag(closePast(rest.height) + 20);
     await f.rest(100);
+    assert.notEqual(await sheet.getAttribute("data-sheet-held"), null, "FU39-B: the first finger holds the sheet");
     await f.second(mapPoint());
+    await waitFor("FU39-B: the second finger to release the sheet", async () => ((await sheet.getAttribute("data-sheet-held")) === null ? true : null), 3_000);
+    assert.equal(await sheet.getAttribute("data-sheet-held"), null, "FU39-B: the second finger releases the glow before the first finger lifts");
     await f.up(100);
     assert.equal(await settled(sheet), "rest", "a second finger did not cancel the swipe");
     assert.deepEqual(await rectOf(sheet), rest);
@@ -1676,6 +1679,34 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     } finally {
       await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sheetHandle"));
       await player.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sheetHandle"));
+    }
+  });
+
+  test("FU39-B: the X-card leaves room for the mask at normal and large interface sizes", async () => {
+    try {
+      for (const view of [
+        { width: 375, height: 667, scale: 1 },
+        { width: 320, height: 568, scale: 1.3 },
+      ]) {
+        await setUp(dm, view);
+        await pickHandle(dm, "mask");
+        const sent = await playerContext.request.post(`${server.origin}/api/rooms/${run.roomId}/xcard`, { headers: { Origin: server.origin } });
+        assert.ok(sent.ok(), `the X-card answered ${sent.status()}`);
+        const card = dm.getByRole("dialog", { name: "X-card" }).locator("section").first();
+        try {
+          await steadyRect(card);
+          await expectGrabbers(dm, ["X-card"], "FU39-B: the X-card with the mask");
+          assert.equal(await designOf(card.locator("[data-sheet-grabber]")), "mask");
+          await checkFit(card, view.scale, "FU39-B: the X-card with the mask", { width: 40, height: 9 });
+          await shots.take(dm, `fu39-b-mask-xcard-${view.width}x${view.height}-${view.scale * 100}`);
+        } finally {
+          if (await card.isVisible()) await card.getByRole("button", { name: "Dismiss" }).click();
+          const playerCard = player.getByRole("dialog", { name: "X-card" });
+          if (await playerCard.isVisible()) await playerCard.getByRole("button", { name: "Dismiss" }).click();
+        }
+      }
+    } finally {
+      await dm.evaluate(() => (globalThis as unknown as { localStorage: { removeItem(k: string): void } }).localStorage.removeItem("rvtt.sheetHandle"));
     }
   });
 
