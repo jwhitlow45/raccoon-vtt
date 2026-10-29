@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import sharp from "sharp";
+import { createStore } from "zustand/vanilla";
+import type { ClientOp } from "#shared/protocol.ts";
 import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
 import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
 import { calibrationFromHexFind } from "./calibrate.ts";
-import type { HexDetection } from "./detectHex.ts";
-import { cameWithGrid, decodeSize, headerSize, importSearch, importSearchFrom, findFound, foundGrid, importFound, nameGivesSize, pickedGrid, replacementFound, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import { pickShape, type HexDetection } from "./detectHex.ts";
+import { cameWithGrid, decodeSize, headerSize, HIGH_CONFIDENCE, importSearch, importSearchFrom, findFound, foundGrid, importFound, keptGridHolds, nameGivesSize, offeredLater, offeredOnly, pickedGrid, replacementFound, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import { landSearch, showOutcome } from "./outcome.ts";
+import type { GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
 
 const AXIS = { found: 20, expected: 20, from: 0, to: 0, snr: 50, between: 0, parity: 1, rms: 0.1, continuity: 1, restart: 0, coverage: 1, drift: 0 } as const;
@@ -432,5 +436,89 @@ describe("the shape a search picks (docs/design-v1-grid-detect.md 10.5 to 10.7)"
     assert.equal(importFound(answer, true, map), null, "named");
     const scene = { gridShape: "hexRows" as const, map: { originPx: { x: 0, y: 0 } } };
     assert.equal(replacementFound(answer, false, map, scene).found?.shape, "hexColumns");
+  });
+});
+
+/** Line up grid's store and the ops a landing sends. */
+function gridRoom() {
+  const sent: ClientOp[] = [];
+  let ids = 0;
+  const actions = { dispatch: (op: ClientOp) => sent.push(op), newId: () => `g${++ids}` };
+  const store = createStore<GridToolState>(() => ({ box: null, drag: null, fitScene: true, sceneId: null, found: null, finding: null }));
+  return { sent, actions, store };
+}
+
+describe("new art of the old image's shape keeps the scene's grid, and a find there is only offered (D-261029-50)", () => {
+  // The scene stood on 70 px squares from (20, 35) on a 1400 x 1000 map, and the new art is 1400 x 1000 too.
+  const next = { widthPx: 1400, heightPx: 1000 };
+  const kept = { cellPx: 70, originPx: { x: 20, y: 35 } };
+  const before = { map: { originPx: kept.originPx } };
+  const landing = { id: "s1", bounds: { w: 20, h: 14 }, map: { assetId: "b", ...next, ...kept } };
+  /** A square find in the map's pixels, as the Worker answers it from a 700 x 500 decode. */
+  const squaresAt = (cellPx: number, origin: { x: number; y: number }, confidence = 0.9) => done(detection(cellPx / 2, { x: origin.x / 2, y: origin.y / 2 }, confidence), 700, 500);
+
+  test("a sure find that differs from the kept grid is only offered, and Line up grid applies nothing", () => {
+    const sure = squaresAt(70, { x: 45, y: 10 });
+    assert.equal(replacementFound(sure, false, next, before).found?.tier, "high", "on art of another shape it applies");
+    const { found } = replacementFound(sure, false, next, before, kept);
+    assert.deepEqual(found, { tier: "medium", cal: { cellPx: 70, originPx: { x: 45, y: 10 } } });
+    const { sent, actions, store } = gridRoom();
+    showOutcome({ actions, store, scene: landing, found, fit: true, at: { x: 700, y: 500 }, fallback: kept });
+    assert.deepEqual(sent, [], "nothing applied");
+    assert.equal(store.getState().found?.outcome, "offered");
+    assert.deepEqual(store.getState().found?.cal, found?.cal, "the box on the lines found");
+  });
+
+  test("a find that puts its cells where the kept grid has them is none, sure or doubtful: the scene stands on it already", () => {
+    assert.equal(replacementFound(squaresAt(70, { x: 20, y: 35 }), false, next, before, kept).found, null);
+    assert.equal(replacementFound(squaresAt(70.01, { x: 20.4, y: 34.7 }), false, next, before, kept).found, null, "within a pixel at every corner");
+    assert.equal(replacementFound(squaresAt(70, { x: 20, y: 35 }, 0.45), false, next, before, kept).found, null);
+  });
+
+  test("a size off by half a percent lines up at the map's middle but not at its corners, and is offered", () => {
+    // 70.35 px squares whose lines meet the kept ones at the middle's cell, (9, 6), and miss them by 3 px at the corners.
+    const found = replacementFound(squaresAt(70.35, { x: 16.85, y: 32.9 }), false, next, before, kept).found;
+    assert.equal(found?.tier, "medium");
+    assert.equal(found?.cal.cellPx, 70.35);
+  });
+
+  test("on hex rows the same hexes say nothing, and squares found surely are only offered, the shape kept", () => {
+    const center = { x: 704, y: 498 };
+    const hexKept = calibrationFromHexFind({ cellPx: 64, center, orient: "rows" });
+    const hexScene = { gridShape: "hexRows" as const, map: { originPx: hexKept.originPx } };
+    const hexes = looked(NO_SQUARES, hexFind("rows", 32, { x: center.x / 2, y: center.y / 2 }, 0.9), NO_HEX, 700, 500);
+    assert.equal(replacementFound(hexes, false, next, hexScene, hexKept).found, null);
+    assert.equal(keptGridHolds({ tier: "high", cal: hexKept }, hexKept, "hexRows", next), false, "squares are not the hexes, whatever their numbers");
+    const squares = looked(detection(35, { x: 10, y: 17.5 }, 0.9), NO_HEX, NO_HEX, 700, 500);
+    assert.equal(replacementFound(squares, false, next, hexScene).found?.tier, "high", "on art of another shape squares would switch the scene");
+    const { found } = replacementFound(squares, false, next, hexScene, hexKept);
+    assert.equal(found?.tier, "medium");
+    const { sent, actions, store } = gridRoom();
+    showOutcome({ actions, store, scene: { ...landing, gridShape: "hexRows", map: { ...landing.map, ...hexKept } }, found, fit: true, at: { x: 700, y: 500 }, fallback: hexKept });
+    assert.deepEqual(sent, [], "neither the shape nor the grid sent");
+    assert.equal(store.getState().found?.other?.shape, "squares", "the squares said, for Grid shape to bring");
+  });
+
+  test("a phone's search that outlives the wait lands only as an offer", async () => {
+    for (const offered of [false, true]) {
+      const { sent, actions, store } = gridRoom();
+      const worker = new FakeWorker();
+      const search = searchGrid({ urls: ["/m/mobile"] }, () => worker);
+      const landed = landSearch({ actions, store, sceneId: "s1", start: landing, scene: () => landing, search: offered ? offeredLater(search) : search, ms: 30_000, timers: fakeTimers(), fit: true, fallback: kept });
+      worker.answer(squaresAt(70, { x: 45, y: 10 }));
+      await landed;
+      assert.equal(store.getState().found?.outcome, offered ? "offered" : "applied");
+      assert.equal(sent.length > 0, !offered);
+    }
+  });
+
+  test("only offered: the surest just under the line, the shapes in the same order", () => {
+    const answer = looked(detection(35, { x: 10, y: 17.5 }, 0.9), hexFind("rows", 26, { x: 350, y: 250 }, 0.8), NO_HEX, 700, 500);
+    const offered = offeredOnly(answer);
+    const pick = pickShape(offered.result, offered.hex!.rows, offered.hex!.columns);
+    assert.deepEqual(pick && { shape: pick.shape, contested: pick.contested }, { shape: "squares", contested: true });
+    assert.ok(pick && pick.confidence < HIGH_CONFIDENCE && pick.confidence > HIGH_CONFIDENCE - 0.02);
+    const doubtful = done(detection(35, { x: 10, y: 17.5 }, 0.45), 700, 500);
+    assert.equal(offeredOnly(doubtful), doubtful, "a doubtful answer as it was");
   });
 });

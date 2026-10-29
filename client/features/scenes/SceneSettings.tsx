@@ -19,7 +19,7 @@ import type { ViewKind } from "../../lib/view.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
-import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound, searchOnImport, type ImportWait } from "../grid/findGrid.ts";
+import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, offeredLater, replacementFound, searchOnImport, type ImportWait } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { shapeChanged, useGridStore } from "../grid/store.ts";
 import { useFindGrid, useLandLater, useSwitchRefusal } from "../grid/useFindGrid.ts";
@@ -34,7 +34,7 @@ import { isoOffered, suggestedKind, SUGGESTED_VIEW, SUGGESTED_VIEW_HELP, VIEW_NA
 import { VisionSettings } from "../vision/VisionSettings.tsx";
 import { deleteBlocked, sceneAfterDelete } from "./afterDelete.ts";
 import { ColorInput, ConfirmButton, NumberInput, Select, Slider } from "./controls.tsx";
-import { fogsWithFirstMap, replaceMap, sameArt, viewFromCamera } from "./create.ts";
+import { fogsWithFirstMap, replacement, viewFromCamera } from "./create.ts";
 import { useStartFraming } from "./FrameView.tsx";
 import { sceneGroupSummary } from "./sceneSummary.ts";
 import { SCENE_GROUP_ICONS, SCENE_GROUP_LABELS, useSceneFolds, type SceneGroup } from "./settingsFolds.ts";
@@ -489,7 +489,9 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
     setUpload({ busy: true, waiting: false, error: null });
     // A new image is searched for a drawn grid while it uploads, as a new
     // map scene's is (NewScene.tsx). Only the upload tells whether it is
-    // the old art at another size, which keeps the scene's grid, scaled.
+    // the same file, which keeps the grid unsearched, or has the old
+    // image's shape, which keeps the grid scaled and only offers a find
+    // (create.ts `replacement`).
     const device = thisDevice();
     const hex = isHex(sceneGrid(scene));
     // Squares and hexes are both looked for. A name's size wins only on squares: on hexes names are not read (D-261028-05).
@@ -498,7 +500,8 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
     try {
       const asset = await uploadMap(roomId, file, { pasted, signal: abort.signal, onWaiting: (waiting) => setUpload((u) => ({ ...u, waiting })) });
       let wait: ImportWait = { answer: null, later: null };
-      if ((!map || !sameArt(map, asset)) && (asset.cellPx === undefined || hex)) {
+      const { map: next, search: searched, kept } = replacement(map, asset, hex);
+      if (searched) {
         search ??= importSearch(file, device);
         setUpload({ busy: true, waiting: false, finding: true, error: null });
         wait = await search.afterUpload(copyUrls(device, (variant) => assets.url(asset.id, variant)), IMPORT_WAIT_MS);
@@ -509,8 +512,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
       }
       setUpload({ busy: false, waiting: false, error: null });
       setArmed(false);
-      const next = replaceMap(map, asset);
-      const { found, ownGrid } = replacementFound(wait.answer, asset.cellPx !== undefined && !hex, next, scene);
+      const { found, ownGrid } = replacementFound(wait.answer, asset.cellPx !== undefined && !hex, next, scene, kept);
       // Fog first, so players on this scene never see the map before it.
       if (firstFog && (!playersHere || fogIt)) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { fogEnabled: true } });
       actions.dispatch({ t: "scene.setMap", sceneId: scene.id, map: next });
@@ -538,7 +540,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
         if (found) {
           const at = { x: next.widthPx / 2, y: next.heightPx / 2 };
           showOutcome({ actions, store: gridStore, scene: landing, found, fit: true, at, fallback, ownGrid, refusal: (to) => refusal(landing, to) });
-        } else if (wait.later) landLater({ sceneId: scene.id, start: landing, search: wait.later, fallback, ownGrid });
+        } else if (wait.later) landLater({ sceneId: scene.id, start: landing, search: kept ? offeredLater(wait.later) : wait.later, fallback, ownGrid });
         ui.setTool("grid");
         props.close({ placing: true });
       }

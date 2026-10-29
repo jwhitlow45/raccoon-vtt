@@ -17,7 +17,8 @@ import {
   pickNow,
   playersSeeFields,
   replaceMap,
-  sameArt,
+  replacement,
+  sameImageShape,
   stepsDown,
   viewFromCamera,
   withPlayersSee,
@@ -89,8 +90,25 @@ describe("new scenes", () => {
     const other = replaceMap(old, { id: "c", width: 1000, height: 1000, cellPx: 50 });
     assert.equal(other.cellPx, 50);
     assert.deepEqual(other.originPx, { x: 0, y: 0 });
-    assert.equal(sameArt(old, { id: "b", width: 1220, height: 845 }), true);
-    assert.equal(sameArt(old, { id: "c", width: 1000, height: 1000 }), false);
+    assert.equal(sameImageShape(old, { id: "b", width: 1220, height: 845 }), true);
+    assert.equal(sameImageShape(old, { id: "c", width: 1000, height: 1000 }), false);
+  });
+
+  test("a new image keeps the grid unsearched when it is the same file, keeps it scaled and is searched when it has the old shape, and starts over otherwise (D-261029-50)", () => {
+    const old = { assetId: "a", widthPx: 2440, heightPx: 1690, cellPx: 80, originPx: { x: 40, y: 50 } };
+    // A room stores a file once, so the same file uploads as the same image.
+    for (const hex of [false, true]) assert.deepEqual(replacement(old, { id: "a", width: 2440, height: 1690 }, hex), { map: old, search: false, kept: null }, `the same file, hex ${hex}`);
+    // Other art of the old shape, or the old art at another size: the grid kept, scaled, and the new art searched.
+    const half = { cellPx: 40, originPx: { x: 20, y: 25 } };
+    assert.deepEqual(replacement(old, { id: "b", width: 1220, height: 845 }, false), { map: { assetId: "b", widthPx: 1220, heightPx: 845, ...half }, search: true, kept: half });
+    assert.deepEqual(replacement(old, { id: "b", width: 2440, height: 1690 }, true).kept, { cellPx: 80, originPx: { x: 40, y: 50 } });
+    // Another shape starts over, searched, with nothing kept.
+    assert.deepEqual(replacement(old, { id: "c", width: 1000, height: 1000 }, false), { map: replaceMap(old, { id: "c", width: 1000, height: 1000 }), search: true, kept: null });
+    assert.equal(replacement(undefined, { id: "c", width: 1000, height: 1000 }, false).search, true, "a first image");
+    // A size in the file name wins on squares, so nothing is searched. On hexes names are not read.
+    assert.equal(replacement(old, { id: "c", width: 1000, height: 1000, cellPx: 50 }, false).search, false);
+    assert.equal(replacement(old, { id: "b", width: 1220, height: 845, cellPx: 50 }, false).search, false);
+    assert.equal(replacement(old, { id: "c", width: 1000, height: 1000, cellPx: 50 }, true).search, true);
   });
 });
 

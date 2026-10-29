@@ -1,7 +1,7 @@
 import type { GridShape, LightLevel, RoomState, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
 import { PLAYERS_SEE_WORDS } from "#shared/playersSee.ts";
 import { MAX_NAME, MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
-import { fitBounds, MAX_CELL_PX, MIN_CELL_PX } from "../grid/calibrate.ts";
+import { fitBounds, MAX_CELL_PX, MIN_CELL_PX, type Calibration } from "../grid/calibrate.ts";
 import { groundAtMiddle, type Live } from "../../lib/view.ts";
 import { lightOf } from "../vision/settings.ts";
 
@@ -236,12 +236,12 @@ export function withPlayersSee(scene: SceneInput, pick: NewScenePick, light?: Li
 }
 
 /**
- * A new image for a scene that already has one. If it is the same art at
- * another size, the old alignment still fits once scaled by the width
- * ratio, so tokens and builds stay on their squares.
+ * A new image for a scene that already has one. If it has the old image's
+ * shape, the old alignment still fits once scaled by the width ratio, so
+ * tokens and builds stay on their squares.
  */
 export function replaceMap(old: SceneMap | undefined, asset: MapAsset): SceneMap {
-  if (!old || !sameArt(old, asset)) return initialMap(asset).map;
+  if (!old || !sameImageShape(old, asset)) return initialMap(asset).map;
   const k = asset.width / old.widthPx;
   return {
     assetId: asset.id,
@@ -253,12 +253,30 @@ export function replaceMap(old: SceneMap | undefined, asset: MapAsset): SceneMap
 }
 
 /**
- * Whether a new image is taken for the old art at another size: the same
- * shape, to 1%. Anything else starts over from the upload, as a first
- * image does.
+ * Whether a new image has the old one's shape, to 1%, so the old grid
+ * still fits it once scaled. It may be the old art at another size, or
+ * other art: exporters write many maps at one size. Anything else starts
+ * over from the upload, as a first image does.
  */
-export function sameArt(old: SceneMap, asset: MapAsset): boolean {
+export function sameImageShape(old: SceneMap, asset: MapAsset): boolean {
   return Math.abs(asset.height / old.heightPx - asset.width / old.widthPx) < 0.01;
+}
+
+/**
+ * What a scene's new image does with the grid once its upload answers
+ * (D-261029-50). The same file is the same art, since a room stores a
+ * file once, so it keeps the grid and nothing is searched. An image of the
+ * old one's shape keeps the grid, scaled, and is searched all the same,
+ * but a find that differs from that grid is only offered (`kept`): the DM
+ * may have lined it up by hand. Other art starts over, as a first image
+ * does. A size in the file name wins on squares, so such a file is not
+ * searched.
+ */
+export function replacement(old: SceneMap | undefined, asset: MapAsset, hex: boolean): { map: SceneMap; search: boolean; kept: Calibration | null } {
+  const map = replaceMap(old, asset);
+  const sameFile = old?.assetId === asset.id;
+  const kept = old && !sameFile && sameImageShape(old, asset) ? { cellPx: map.cellPx, originPx: map.originPx } : null;
+  return { map, search: !sameFile && (asset.cellPx === undefined || hex), kept };
 }
 
 /**

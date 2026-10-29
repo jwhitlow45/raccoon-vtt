@@ -1,9 +1,11 @@
 import type { GridShape, Scene } from "#shared/model.ts";
+import { gridOfShape, isHex, type Grid } from "#shared/rules/grid.ts";
+import { hexAt, hexCenter } from "#shared/rules/hex.ts";
 import { sniffImage } from "../uvtt/image.ts";
 import type { Device } from "../uvtt/limits.ts";
 import type { GridDetection } from "./detect.ts";
 import { pickShape, type HexDetection, type HexFound, type MapShape } from "./detectHex.ts";
-import { calibrationFromFind, calibrationFromHexFind, type Calibration, type Point } from "./calibrate.ts";
+import { canonicalToWorld, calibrationFromFind, calibrationFromHexFind, FOUND_SNAP, FOUND_SNAP_PX, worldToCanonical, type Calibration, type Point } from "./calibrate.ts";
 
 /**
  * Finding a map's drawn grid from the page (docs/design-v1-grid-detect.md
@@ -156,15 +158,83 @@ export function findFound(found: FoundGrid | null, ownGrid: boolean): FoundGrid 
  * imported walls, which stand in the file's grid, so the scene keeps its
  * mark. `scene.map` is the image before, whose first line before the image
  * marks an import from before the mark.
+ *
+ * Art of the old image's shape keeps the scene's grid, scaled (`kept`,
+ * scenes/create.ts `replacement`). A find there is only offered, since the
+ * DM may have lined that grid up by hand, and a find that puts its cells
+ * where the kept grid has them is no find at all: the scene already
+ * stands on it (D-261029-50).
  */
 export function replacementFound(
   answer: SearchDone | null,
   named: boolean,
   next: { widthPx: number; heightPx: number },
   scene: Pick<Scene, "gridFromFile" | "gridShape"> & { map?: { originPx: Point } },
+  kept: Calibration | null = null,
 ): { found: FoundGrid | null; ownGrid: boolean } {
   const ownGrid = cameWithGrid({ gridFromFile: scene.gridFromFile, map: scene.map ?? { originPx: { x: 0, y: 0 } } });
-  return { found: findFound(importFound(answer, named, next, scene.gridShape), ownGrid), ownGrid };
+  const found = findFound(importFound(answer && kept ? offeredOnly(answer) : answer, named, next, scene.gridShape), ownGrid);
+  if (found && kept && keptGridHolds(found, kept, scene.gridShape, next)) return { found: null, ownGrid };
+  return { found, ownGrid };
+}
+
+/**
+ * Whether a find puts its cells where a kept grid has them: the same
+ * shape, and the kept grid's cells at the map's four corners and its
+ * middle each within FOUND_SNAP of a found cell's center (FOUND_SNAP_PX at
+ * least). A size that differs adds up across the map, so the corners show
+ * it where the middle alone would not.
+ */
+export function keptGridHolds(found: FoundGrid, kept: Calibration, shape: GridShape | undefined, map: { widthPx: number; heightPx: number }): boolean {
+  if (found.shape !== shape) return false;
+  const g = gridOfShape(shape);
+  const slack = Math.max(FOUND_SNAP_PX, kept.cellPx * FOUND_SNAP);
+  const inset = Math.min(kept.cellPx, map.widthPx, map.heightPx) / 2;
+  const points = [
+    { x: inset, y: inset },
+    { x: map.widthPx - inset, y: inset },
+    { x: inset, y: map.heightPx - inset },
+    { x: map.widthPx - inset, y: map.heightPx - inset },
+    { x: map.widthPx / 2, y: map.heightPx / 2 },
+  ];
+  return points.every((p) => {
+    const k = cellCenter(kept, g, p);
+    const f = cellCenter(found.cal, g, k);
+    return Math.hypot(f.x - k.x, f.y - k.y) <= slack;
+  });
+}
+
+/** The center of the cell of `g` under `cal` that holds a point, in canonical pixels. */
+function cellCenter(cal: Calibration, g: Grid, p: Point): Point {
+  const w = canonicalToWorld(cal, p);
+  return worldToCanonical(cal, isHex(g) ? hexCenter(g, hexAt(g, w)) : { x: Math.floor(w.x) + 0.5, y: Math.floor(w.y) + 0.5 });
+}
+
+/** The surest a find may be and still only be offered. */
+const OFFERED_MOST = HIGH_CONFIDENCE - 0.01;
+
+/**
+ * A search's answer with every find only offered: each look's confidence
+ * scaled down by one factor, so the surest stands just under
+ * HIGH_CONFIDENCE and the shapes keep their order (`pickShape`).
+ */
+export function offeredOnly(answer: SearchDone): SearchDone {
+  const top = Math.max(confidenceOf(answer.result), confidenceOf(answer.hex?.rows ?? NO_HEXES), confidenceOf(answer.hex?.columns ?? NO_HEXES));
+  if (top < HIGH_CONFIDENCE) return answer;
+  const k = OFFERED_MOST / top;
+  const scaled = <T extends GridDetection | HexDetection>(d: T): T => (d.found ? { ...d, confidence: d.confidence * k } : d);
+  return { ...answer, result: scaled(answer.result), ...(answer.hex ? { hex: { rows: scaled(answer.hex.rows), columns: scaled(answer.hex.columns) } } : {}) };
+}
+
+/**
+ * A search whose finds are only offered (`offeredOnly`), for one the page
+ * hands to Line up grid on art whose kept grid a find must not replace.
+ * Line up grid lands it as any other (outcome.ts `landSearch`). It is
+ * already saying "Looking for a grid…" there, so a find that matches the
+ * kept grid is shown too, as an offer of the lines the scene stands on.
+ */
+export function offeredLater(search: GridSearch): GridSearch {
+  return { result: search.result.then((answer) => answer && offeredOnly(answer)), cancel: () => search.cancel() };
 }
 
 /**

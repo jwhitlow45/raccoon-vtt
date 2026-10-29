@@ -930,6 +930,95 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await dm.keyboard.press("Escape");
   });
 
+  test("fu35b-1. new art of the old image's shape is searched: a sure grid that differs is only offered, the same lines say nothing, and the same file is not searched", async () => {
+    // Three maps of one shape, 1400 by 1000, drawn here by code, never art: noise under 70 px squares, the
+    // keep's and the hall's lines crossing at (45, 10) under different noise, the field's at (20, 35).
+    const write = async (name: string, seed: number, origin: { x: number; y: number }) => {
+      const file = path.join(work, name);
+      const px = drawMap({ width: 1400, height: 1000, seed, art: [{ kind: "noise", scale: 60, amp: 70 }], noise: 4, grid: { cellPx: 70, origin, opacity: 0.5, width: 2 } });
+      await sharp(Buffer.from(px.data), { raw: { width: px.width, height: px.height, channels: 1 } }).png().toFile(file);
+      return file;
+    };
+    const field = await write("Shape field.png", 11, { x: 20, y: 35 });
+    const keep = await write("Shape keep.png", 12, { x: 45, y: 10 });
+    const hall = await write("Shape hall.png", 13, { x: 45, y: 10 });
+    const gridOptions = dm.getByRole("toolbar", { name: "Line up grid options" });
+    const MAP_UPLOAD = /\/api\/rooms\/[^/]+\/assets\?kind=map/;
+    const gridOf = (id: string) => {
+      const map = sceneOf(dmSocket.state, id)?.map;
+      return map ? { assetId: map.assetId, cellPx: Math.round(map.cellPx * 100) / 100, x: Math.round(map.originPx.x), y: Math.round(map.originPx.y) } : null;
+    };
+
+    // A new scene from the field finds its lines. Use default then puts the first guess back, so the scene stands off them.
+    const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("radio", { name: "Map image", exact: true }).click();
+    await dm.getByRole("button", { name: "Choose a map image" }).setInputFiles(field);
+    await dm.getByRole("button", { name: "Upload and create" }).click();
+    const made = await waitFor("the new map scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.map && !known.has(s.id)), 30_000);
+    await dm.getByText("Found a grid of 70 px squares.").first().waitFor({ timeout: 15_000 });
+    await gridOptions.getByRole("button", { name: "Use default", exact: true }).click();
+    await waitFor("the first guess", () => gridOf(made.id)?.cellPx === 47 || null);
+    const guess = gridOf(made.id)!;
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
+    await gridOptions.waitFor({ state: "detached" });
+
+    /** The scene's Map image and grid settings, unfolded where they were left folded. */
+    const mapGroup = async () => {
+      const fold = dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("heading", { name: "Map image and grid", exact: true }).getByRole("button", { name: "Map image and grid", exact: true });
+      if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+      return fold.locator("xpath=ancestor::*[@data-panel-group][1]");
+    };
+    /** Replaces the scene's image from its Map image and grid settings, and waits for the row to be done with it. */
+    const replace = async (file: string) => {
+      await openSideTab(dm, "Scenes");
+      const group = await mapGroup();
+      const uploaded = dm.waitForResponse((r) => MAP_UPLOAD.test(r.url()) && r.request().method() === "PUT", { timeout: 30_000 });
+      await group.getByLabel("Replace map image", { exact: true }).setInputFiles(file);
+      await uploaded;
+    };
+    /** Waits out a replacement that should change nothing in Line up grid: its row back to its label, and the 2 s a search may still take. */
+    const settledRow = async () => {
+      const group = await mapGroup();
+      await group.getByLabel("Replace map image", { exact: true }).waitFor({ timeout: 15_000 });
+      await dm.waitForTimeout(500);
+    };
+
+    // The same file is the same art: its grid stays and nothing is searched, or the field's lines, off the scene's grid, would be offered.
+    await replace(field);
+    await settledRow();
+    assert.equal(await gridOptions.count(), 0, "Line up grid opened for the same file");
+    assert.deepEqual(gridOf(made.id), guess, "the grid stays");
+
+    // The keep is other art of the same shape. It is searched, and its sure grid, not the scene's, is only offered.
+    await replace(keep);
+    await dm.getByText("These lines may be the map's grid: 70 px squares. Check the box, then Apply.").first().waitFor({ timeout: 15_000 });
+    const offered = await waitFor("the keep on the scene", () => {
+      const g = gridOf(made.id);
+      return g && g.assetId !== guess.assetId ? g : null;
+    });
+    assert.deepEqual({ ...offered, assetId: guess.assetId }, guess, "the grid the scene stood on, not the one found");
+    await shots.take(dm, "fu35b-1-same-shape-offered");
+    await gridOptions.getByRole("button", { name: "Apply", exact: true }).click();
+    await waitFor("the keep's lines applied", () => {
+      const g = gridOf(made.id);
+      return (g?.cellPx === 70 && g.x === 45 && g.y === 10) || null;
+    });
+    const applied = gridOf(made.id)!;
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
+    await gridOptions.waitFor({ state: "detached" });
+
+    // The hall's lines are where the scene's grid is now, so its search finds nothing to say.
+    await replace(hall);
+    await settledRow();
+    assert.equal(await gridOptions.count(), 0, "Line up grid opened on the lines the scene stands on");
+    const after = await waitFor("the hall on the scene", () => {
+      const g = gridOf(made.id);
+      return g && g.assetId !== applied.assetId ? g : null;
+    });
+    assert.deepEqual({ ...after, assetId: applied.assetId }, applied, "the grid stays");
+  });
+
   test("8. no page logged an error or a warning", () => {
     for (const c of [dmConsole, playerConsole]) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);
