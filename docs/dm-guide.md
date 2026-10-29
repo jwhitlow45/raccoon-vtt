@@ -967,7 +967,7 @@ The shapes show exactly what the rules measure. When the flat shading in Top-dow
 
 Isometric never shows a player more than Top-down does. On a player's screen an area stands up only where every bit of the ground under it is revealed and in that player's sight right now. Over fog, or over ground the player only remembers, it lies flat as it does in Top-down. Your DM-only areas stand dimmed, with a dashed outline, and players never get them at all.
 
-When many areas fill the screen, the ones nearest the middle stand up first, and "Building area shapes" shows at the top of the map while the rest still lie flat. The same can happen the first time you turn the map to a new side. Once a side has been drawn, turning back to it is quick. While you aim an area with the Area tool, or drag a creature that carries an aura, the shape follows your finger in a simpler form and settles into place a moment after you let go.
+When many areas fill the screen, the ones nearest the middle stand up first, and "Building area shapes…" shows at the top of the map while the rest still lie flat. The same can happen the first time you turn the map to a new side. Once a side has been drawn, turning back to it is quick. While you aim an area with the Area tool, or drag a creature that carries an aura, the shape follows your finger in a simpler form and settles into place a moment after you let go.
 
 ### Reminders
 
@@ -1330,7 +1330,7 @@ There are two ways in. The quickest is a creature the player owns: their charact
 
 The other way is the DM panel's **Check their view**, for a player who has no token on the scene: pick them under **View as a player** and press **View**.
 
-While you look, a line at the top reads "Viewing as Ana. Nothing here is saved. Whispers between players are not shown." Until their view arrives, it says it is loading. The whispers players send each other stay private, so you can look in without reading the notes they passed. **Exit**, or Escape, brings you back to the button you pressed.
+While you look, a line at the top reads "Viewing as Ana. Nothing here is saved. Whispers between players are not shown." Until their view arrives, it says it is loading. If it can't load, it says so, and **Try again** asks for their view once more. The whispers players send each other stay private, so you can look in without reading the notes they passed. **Exit**, or Escape, brings you back to the button you pressed.
 
 **Party sight**, under View as a player in the DM panel, does something different. On a scene with party vision it shades what the party can't see on your own map, so you keep working with everything in view and still know at a glance what lies in the dark for them.
 
