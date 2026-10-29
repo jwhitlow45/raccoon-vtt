@@ -5,7 +5,7 @@ import { boxSides, HEX_BOX_DEPTH } from "./calibrate.ts";
 import { detectGrid, MIN_CONFIDENCE, type GridDetection, type Pixels } from "./detect.ts";
 import { detectHex, pickShape, UNCHECKED_MAX, type HexDetection } from "./detectHex.ts";
 import { HIGH_CONFIDENCE } from "./findGrid.ts";
-import { drawMap, toRgba, type SynthHexGrid, type SynthMap } from "./synthetic.ts";
+import { drawMap, rng, toRgba, type SynthHexGrid, type SynthMap } from "./synthetic.ts";
 
 // Every map here is drawn by code (synthetic.ts). The wider evaluation,
 // with JPEG copies and openly licensed real maps, is in
@@ -183,6 +183,40 @@ describe("finding a map's drawn hex grid", () => {
     assert.ok(sure.found && sure.checked && sure.confidence >= HIGH_CONFIDENCE, `measured at half size: ${JSON.stringify(sure.found ? [sure.confidence, sure.checked] : sure)}`);
     const unseen = at(14, "rows");
     assert.ok(unseen.found && !unseen.checked && unseen.confidence <= UNCHECKED_MAX, `the half size cannot measure these: ${JSON.stringify(unseen.found ? [unseen.confidence, unseen.checked] : unseen)}`);
+  });
+
+  test("a third look's find applies by itself only on a half frame 600 px down or more, its stretch under the limit by more than the measure's error (review FU35B-ASTRA-03, round 3, D-261029-151)", () => {
+    const offered = (r: HexDetection, what: string) => assert.ok(!r.found || (!r.checked && r.confidence <= UNCHECKED_MAX), `${what}: ${JSON.stringify(r.found ? [r.confidence, r.checked] : r)}`);
+    // Astra's fixture: 100 px hex columns from (85.85, 18.55), 14 px lines, drawn 1.1% too tall on 760 by 593. The half measure read 0.2% and applied it at 0.73.
+    const looks: number[] = [];
+    const tall = drawMap(map({ height: 593, hexGrid: hexes("columns", 100, { x: 85.85, y: 18.55 }, { width: 14, opacity: 0.6 }) }));
+    offered(detectHex(stretched(tall, 0.989), { orient: "columns", onLook: (k) => looks.push(k) }), "astra's");
+    assert.deepEqual(looks, [1, 2, 4]);
+    // Regular hexes on a half frame 629 px across and 458 px down, measured as regular: under 600 px down the frame decides (the floor).
+    offered(detectHex(drawMap(map({ width: 1259, height: 916, seed: 98029, hexGrid: hexes("rows", 133.5, { x: 74.1, y: 259.2 }, { width: 16.2, opacity: 0.56 }) })), { orient: "rows" }), "a 458 px frame");
+    // Regular hexes on a 1600 px frame read 0.47% out of shape, their lines' leans scattered: two standard errors reach the limit.
+    offered(detectHex(drawMap(map({ width: 3200, height: 1179, seed: 76917, hexGrid: hexes("columns", 197.2, { x: 345.5, y: 2.2 }, { width: 15.8, opacity: 0.6 }) })), { orient: "columns" }), "scattered leans");
+    // Hexes 0.9% out of shape on a 1230 px frame read 0.92%, their leans close together: a pixel's error over half the frame reaches the limit.
+    const near = drawMap(map({ width: 1664, height: Math.round(2461 * 1.009), seed: 32831, hexGrid: hexes("rows", 269.8, { x: 165.5, y: 240.5 }, { width: 18.8, opacity: 0.78 }) }));
+    offered(detectHex(stretched(near, 1.009), { orient: "rows" }), "a pixel from the limit");
+    // A small seeded sweep of the kind that proved it (both orientations, so both of the frame's axes, squeezed and stretched, 1.0 to 1.3%):
+    // no third-look find of hexes out of shape applies.
+    const random = rng(151);
+    let third = 0;
+    for (let i = 0; i < 10; i++) {
+      const width = Math.round(1200 + 250 * random());
+      const height = Math.round(1200 + 250 * random());
+      const orient = random() < 0.5 ? "rows" : "columns";
+      const cell = Math.min(width, height) / (5 + 4 * random());
+      const k = 1 + (random() < 0.5 ? 1 : -1) * (0.01 + 0.003 * random());
+      const g = hexes(orient, cell, { x: 2 * cell * random(), y: 2 * cell * random() }, { width: cell * (0.08 + 0.08 * random()), opacity: 0.45 + 0.35 * random() });
+      const seen: number[] = [];
+      const r = detectHex(stretched(drawMap(map({ width, height: Math.round(height * k), seed: 1 + Math.floor(100000 * random()), hexGrid: g })), k), { orient, onLook: (q) => seen.push(q) });
+      if (seen.at(-1) !== 4) continue;
+      third++;
+      assert.ok(!r.found || r.confidence < HIGH_CONFIDENCE, `${i}: ${width} x ${height} ${orient}, ${k}: ${r.found ? r.confidence : ""}`);
+    }
+    assert.ok(third >= 3, `${third} reached the third look`);
   });
 
   test("thick lines turned a third of a degree, seen only at a quarter of the size, are refused there as in the image's own pixels", () => {
