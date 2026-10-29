@@ -202,6 +202,10 @@ const edgeKey = z.string().regex(/^-?\d{1,4},-?\d{1,4},[nw]$/);
 /** A chunk's stair marks by its stamp (docs/design-v1-hex-grids.md HX-D14): compass letters on squares, six facings on hexes. */
 const SQUARE_MARKS = /^[.aensw]*$/;
 const HEX_MARKS = /^[.a0-5]*$/;
+/** A remembered stair's way up by its scene's shape: memory carries no stamp, so its scene's shape is the one it was seen on. */
+const SQUARE_WAYS = /^[nesw.]$/;
+const HEX_WAYS = /^[0-5.]$/;
+const STAIR_FACINGS = "a stair on squares faces n, e, s or w, and one on hexes a side from 0 to 5";
 
 const chunk = z.strictObject({
   sceneId: id,
@@ -221,7 +225,7 @@ const chunk = z.strictObject({
   // The hex shape its cell data was written under, absent for squares (docs/design-v1-hex-grids.md HX-D14).
   grid: mapSchemas.gridShape.optional(),
 }).refine((c) => c.up === undefined || (c.grid === undefined ? SQUARE_MARKS : HEX_MARKS).test(c.up), {
-  message: "a stair on squares faces n, e, s or w, and one on hexes a side from 0 to 5",
+  message: STAIR_FACINGS,
   path: ["up"],
 });
 
@@ -958,6 +962,21 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
     if (isHex(sceneGrid(scene)) && cameWithGrid(scene)) return { ok: false, message: `scenes.${scene.id}: ${OWN_SQUARE_GRID}` };
     const found = sceneHolds(state, scene);
     if (found) return { ok: false, message: `scenes.${scene.id}: ${standsWords(found, scene)}` };
+  }
+  // Memory holds what its scene's own chunks held, and the scene's shape switching takes it all away (reducer/memory.ts),
+  // so its stairs face by that shape. A backup made by hand can give them the other's.
+  for (const [layer, chunks] of [
+    ["memory", state.memory],
+    ["memoryBy", state.memoryBy],
+  ] as const) {
+    for (const [key, chunk] of Object.entries(chunks ?? {})) {
+      const scene = state.scenes[chunk.sceneId];
+      if (!scene) continue;
+      const hex = isHex(sceneGrid(scene));
+      const marks = Object.values(chunk.up ?? {}).every((m) => (hex ? HEX_MARKS : SQUARE_MARKS).test(m));
+      const ways = Object.values(chunk.upDir ?? {}).every((d) => (hex ? HEX_WAYS : SQUARE_WAYS).test(d));
+      if (!marks || !ways) return { ok: false, message: `${layer}.${key}.${marks ? "upDir" : "up"}: ${STAIR_FACINGS}` };
+    }
   }
   for (const character of Object.values(state.characters)) {
     if (character.ddbSync && syncAtAhead(character.ddbSync.at, now)) character.ddbSync = { ...character.ddbSync, at: new Date(now).toISOString() };

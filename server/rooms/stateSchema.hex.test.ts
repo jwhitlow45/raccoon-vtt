@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { chunkKey } from "#shared/keys.ts";
+import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import type { BuildChunk, RoomState } from "#shared/model.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
@@ -138,6 +138,30 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     const after = applyOp(parsed.state, { t: "build.height", sceneId: "s1", cells: ["2,2"], height: 10 }, DM, env(2));
     assert.ok(after.ok);
     assert.ok(parseRoomState(after.state).ok);
+  });
+
+  test("memory's stairs face by their scene's shape: an import with compass letters on hexes or digits on squares is refused (H3-DATA-3)", () => {
+    const withMemory = (state: RoomState, field: "up" | "upDir", value: string, layer: "party" | "holder") => {
+      const chunk = { sceneId: "s1", cx: 0, cy: 0, rev: 1, [field]: { "3,3": value } };
+      if (layer === "party") state.memory = { [chunkKey("s1", 0, 0)]: chunk };
+      else state.memoryBy = { [holderChunkKey("s1", "p1", 0, 0)]: { ...chunk, memberId: "p1" } };
+      return parseRoomState(state);
+    };
+    for (const layer of ["party", "holder"] as const) {
+      for (const [field, square, hex] of [
+        ["up", "n", "4"],
+        ["upDir", "e", "5"],
+      ] as const) {
+        assert.ok(withMemory(room(), field, square, layer).ok, `${layer} ${field} ${square} on squares`);
+        assert.ok(withMemory(hexRoom(), field, hex, layer).ok, `${layer} ${field} ${hex} on hexes`);
+        const onSquares = withMemory(room(), field, hex, layer);
+        assert.ok(!onSquares.ok, `${layer} ${field} ${hex} on squares`);
+        assert.match(onSquares.message, /a stair on squares faces n, e, s or w/);
+        assert.equal(withMemory(hexRoom(), field, square, layer).ok, false, `${layer} ${field} ${square} on hexes`);
+      }
+      assert.ok(withMemory(hexRoom(), "up", "a", layer).ok, "Auto stands on both");
+      assert.ok(withMemory(room(), "upDir", ".", layer).ok, "no way up stands on both");
+    }
   });
 
   test("an import with square cell data on a hex scene is refused, naming it", () => {
