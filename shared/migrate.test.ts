@@ -1471,7 +1471,7 @@ describe("hex grids, phase H3: op version 28, snapshot version 29 (docs/design-v
   });
 });
 
-describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount on hexes (D-261029-52)", () => {
+describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount on hexes and squares (D-261029-52, D-261029-53)", () => {
   test("are the versions now, the snapshot's unchanged", () => {
     assert.equal(OP_VERSION, 29);
     assert.equal(SNAPSHOT_VERSION, 29);
@@ -1483,6 +1483,8 @@ describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount
     const ops: unknown[] = [
       { t: "token.move", tokenId: "horse", x: 8.5, y: 4.696152422706632, squeeze: true, route: [[8.5, 4.696152422706632, 1, 0]] },
       { t: "token.detach", tokenId: "brom", x: 10, y: 5.196152422706632, elevation: 0 },
+      { t: "token.move", tokenId: "horse", x: 11.5, y: 9.5, squeeze: true },
+      { t: "token.detach", tokenId: "brom", x: 14, y: 11, elevation: 0 },
       { t: "log.chat", text: "hi" },
     ];
     for (const op of ops) assert.equal(runMigrations(op, 28, 29, opMigrations), op);

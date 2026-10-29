@@ -113,7 +113,10 @@ function namedMoves(op: Op, before: RoomState, env: Versioned): Named[] {
  * its own holder took, offset by its place, top down: what sits on its
  * holder takes the holder's change of elevation, and a dragged creature
  * keeps to its own ground behind a holder that walked on the ground, else
- * takes the holder's change but never sinks below the ground (5.1). A
+ * takes the holder's change but never sinks below the ground (5.1). Where
+ * the holder's walk squeezes, what sits on it takes the seat the holder's
+ * stand there gives it instead of its offset, from op version 29
+ * (`squeezedSeats`, D-261029-52 on hexes, D-261029-53 on squares). A
  * teleport leaves what it drags, and a scene change takes everything.
  *
  * On a player's walk on a scene whose walls stop moves, a dragged creature

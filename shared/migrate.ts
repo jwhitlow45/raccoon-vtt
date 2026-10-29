@@ -813,20 +813,27 @@ export const opMigrations: MigrationStep[] = [
     apply: (op) => op,
   },
   {
-    // Follow-up batch 35 (docs/design-v1-hex-grids.md, As built, D-261029-52):
-    // no op changes shape, so the step is the identity. From this version,
-    // on a hex scene, what sits on a holder whose walk squeezes takes the
-    // seat nearest it on the hexes the holder stands on at each point of
-    // the walk, and its nearest full seat again where the holder stands up
-    // (`seatsOnSqueeze`), so a rider squeezes through a corridor on its
-    // mount's hex. Older ops replay by the rule they were written under,
-    // where it kept its offset from the holder's box, so they put each
-    // token where they put it then and a stored restore's hash guards
-    // still match.
+    // Follow-up batch 35 (docs/design-v1-hex-grids.md, As built,
+    // D-261029-52 on hexes, D-261029-53 on squares): no op changes shape,
+    // so the step is the identity. From this version, on hexes and on
+    // squares, what sits on a holder whose walk squeezes takes the seat
+    // nearest it on the hexes or squares the holder stands on at each point
+    // of the walk where the holder squeezes, and its own seat where the
+    // holder stands full size (`seatsOnSqueeze`), so a rider squeezes
+    // through a corridor on its mount. A walk off a squeezed holder crosses
+    // only the ledges inside its squeezed footprint, no longer those in the
+    // band of its full one beside it (review DP34-ASTRA-02). Older ops
+    // replay by the rules they were written under, where it kept its offset
+    // from the holder's box and a walk off read the full footprint, so they
+    // put each token where they put it then and a stored restore's hash
+    // guards still match.
     //
     // Deploy: back up the database just before. The first op after it is
     // stored at version 29, and the shutdown writes version 29 snapshots,
-    // as before. Rollback: an older build refuses to migrate a version 29
+    // as before. Reload every page left open, table displays included:
+    // there is no client version check, and an old page would seat a rider,
+    // search a mount's way and pick a Get off place by the old rules, which
+    // the server's moves no longer match. Rollback: an older build refuses to migrate a version 29
     // op down (runMigrations), so a room whose log holds one after its last
     // snapshot would not load there. A clean shutdown writes a snapshot
     // after the last op, and an older build loads it, since nothing stored
@@ -1138,12 +1145,16 @@ export function attaches(opVersion: number | undefined): boolean {
 }
 
 /**
- * Whether what sits on a holder whose walk squeezes on a hex scene takes
- * the seat nearest it on the hexes the holder stands on at each point of
- * the walk, and its nearest full seat again where the holder stands up
- * (D-261029-52, moveLeg.ts follow). Ops stored before version 29 kept its
- * offset from the holder's box all the way and replay by that rule. Live
- * ops carry no stored version and take today's rule.
+ * Whether what sits on a holder whose walk squeezes, on hexes or squares,
+ * takes the seat nearest it on the hexes or squares the holder stands on
+ * at each point of the walk where the holder squeezes, and its own seat
+ * where it stands full size (D-261029-52, D-261029-53, moveLeg.ts
+ * squeezedSeats), and whether a walk off a squeezed holder crosses only
+ * the ledges inside its squeezed footprint (attach.ts walkerFor, review
+ * DP34-ASTRA-02). Ops stored before version 29 kept its offset from the
+ * holder's box all the way, and crossed the ledges inside the full
+ * footprint, and replay by those rules. Live ops carry no stored version
+ * and take today's rules.
  */
 export function seatsOnSqueeze(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 29);
