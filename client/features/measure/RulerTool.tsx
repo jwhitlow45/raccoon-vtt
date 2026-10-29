@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useStore } from "zustand";
-import { Spinner, useDelayed } from "../../components/Loading.tsx";
+import { useDelayed } from "../../components/Loading.tsx";
 import { TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { boardPickOf, pressGap } from "../../canvas/boardPick.ts";
 import { theme } from "../../lib/theme.ts";
@@ -9,7 +9,7 @@ import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomView } from "../../state/view.ts";
 import { isHex, sceneGrid, SQUARES } from "#shared/rules/grid.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { OptButton, OptionsStrip, OptSegmented } from "./controls.tsx";
+import { OptButton, OptionsStrip, OptSegmented, StripWait } from "./controls.tsx";
 import { KeptRulersChip, useKeptRulers } from "./KeptRulers.tsx";
 import {
   allStops,
@@ -148,8 +148,8 @@ function onCancel(ctx: ToolContext): void {
  * the hint, or the reading with the diagonal rule: a walking ruler's walk
  * and what terrain added (docs/design-v1-movement.md 3.3). While a walk is
  * searching the line keeps the last walk, and past the shared loading
- * delay it says "Finding the way…" beside a spinner, as Loading does
- * (walkRuler.ts walkShown).
+ * delay it says "Finding the way…" in the small loading line (StripWait,
+ * walkRuler.ts walkShown).
  */
 function RulerOptions(props: { role: "dm" | "player" }) {
   const scope = useRoomScope();
@@ -172,12 +172,7 @@ function RulerOptions(props: { role: "dm" | "player" }) {
   // The diagonal rule follows a reading only, never the hint or the wait.
   let reading = false;
   if (shown?.finding) {
-    info = (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted }}>
-        <Spinner size={16} />
-        Finding the way…
-      </span>
-    );
+    info = <StripWait text="Finding the way…" />;
   } else if (shown?.reading) {
     const [first, extra] = walkText(shown.reading).split("\n");
     reading = true;

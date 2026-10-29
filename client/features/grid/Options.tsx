@@ -1,14 +1,28 @@
 import { useState } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
-import { cellWord, isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
+import { useDelayed } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
-import { OptButton, OptionsStrip, StripText, ValueChip } from "../measure/controls.tsx";
+import { OptButton, OptionsStrip, StripText, StripWait, ValueChip, type StripLine } from "../measure/controls.tsx";
 import { fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
 import { applyGrid, foundLine, putBack } from "./outcome.ts";
-import { boxCalibration, endFinding, noteFor, useGridStore, type Fallback } from "./store.ts";
+import { boxCalibration, endFinding, noteFor, useGridStore, type Fallback, type FoundNote } from "./store.ts";
 import { useFindGrid, useSwitchRefusal } from "./useFindGrid.ts";
+
+/**
+ * Line up grid's line (docs/design-v1-design-pass.md 2.4 rule 5): a
+ * search's wait once it has lasted the shared delay, muted, its line kept
+ * as a reading's; else what the last search said, "Grid saved" in the
+ * success green, or the hint.
+ */
+export function gridLine(input: { slow: boolean; note: FoundNote | null; saved: string | null; grid: Grid }): StripLine {
+  if (input.slow) return { tone: "hint", finding: true, content: <StripWait text="Looking for a grid…" /> };
+  if (input.note) return foundLine(input.note, input.grid);
+  if (input.saved) return { tone: "status", content: input.saved };
+  return { tone: "hint", content: isHex(input.grid) ? HEX_HINT : "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
+}
 
 /** One canonical pixel per nudge: on the largest maps a thirtieth of a square or less. */
 const STEP = 1;
@@ -42,6 +56,9 @@ export default function GridOptions() {
   const refusal = useSwitchRefusal();
   /** The box last applied, to say so while it stands. */
   const [applied, setApplied] = useState<CalBox | null>(null);
+  const searching = finding !== null && finding.sceneId === sceneId;
+  // A search says it is looking once the wait shows (Loading.tsx), so a quick answer never flashes it. Find the grid says "Finding…" at once.
+  const slow = useDelayed(searching);
 
   if (!scene || !sceneId) return null;
   const map = scene.map;
@@ -61,7 +78,6 @@ export default function GridOptions() {
     gridState.setState({ box: next });
   };
   const saved = applied === box && !changed && !resize;
-  const searching = finding?.sceneId === sceneId;
   // A search's note stands while the box is where the search left it.
   const left = noteFor(found, sceneId, grid);
   const note = left?.box === box ? left : null;
@@ -77,13 +93,7 @@ export default function GridOptions() {
     putBack({ actions, store: gridState, scene: now, fallback, refusal: (to) => refusal(now, to) });
   };
 
-  const line = searching
-    ? { tone: "status" as const, content: "Looking for a grid…" }
-    : note
-      ? foundLine(note, grid)
-      : saved
-        ? { tone: "status" as const, content: `Grid saved at ${formatPx(cal.cellPx)} px per ${cell}.` }
-        : { tone: "hint" as const, content: hex ? HEX_HINT : "Drag a box over 3 by 3 squares of the art, then fit it by its corners." };
+  const line = gridLine({ slow, note, saved: saved ? `Grid saved at ${formatPx(cal.cellPx)} px per ${cell}.` : null, grid });
   const fallback = note?.outcome === "applied" ? note.fallback : undefined;
 
   return (

@@ -14,6 +14,7 @@ import { isCellFullyFogged } from "#shared/rules/fog.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { partySight } from "#shared/rules/vision.ts";
 import { sceneWalls } from "#shared/rules/walls.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { assertCanvasAt, ConsoleWatch, dragCells, openSideTab, OpSocket, pagePoint, pickOption, pickTool, Shots, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -663,11 +664,27 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     await playersTo(run.halls);
     await waitFor("the cavern floored again", () => (floored() === whole ? true : null));
     await pickOption(dm, "Map builder", "Builder mode", "Erase area");
+    // The wait is the small loading line, muted, and the line keeps its place and a reading's height through it, so the
+    // row and the line stand still before, during and after (docs/design-v1-design-pass.md 2.4 rules 5 and 6).
+    const builderBar = dm.getByRole("toolbar", { name: "Map builder options" });
+    const line = builderBar.locator("[data-options-line]");
+    const place = async () => ({ line: await line.boundingBox(), row: await builderBar.locator("[data-options-row]").boundingBox(), reading: (await line.getAttribute("data-options-reading")) !== null });
+    const colorOf = (el: unknown) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color;
+    const hintColor = await line.evaluate(colorOf);
+    const resting = await place();
     consoles.dm.expectSocketFailures = true;
     await dmContext.setOffline(true);
     await dragCells(dm, CAVERN.bounds, { x: 2, y: 6 }, { x: 77, y: 62 });
-    const checking = dm.locator("[data-build-asking]");
+    const checking = line.locator("[data-options-wait]").filter({ hasText: "Checking players' remembered map…" });
     await checking.waitFor();
+    const waiting = await place();
+    assert.equal(waiting.reading, true, "the wait gave up the line's place as a reading");
+    assert.equal(await line.getAttribute("data-finding"), "", "the wait is not marked as one");
+    assert.equal(await checking.evaluate(colorOf), hintColor, "the wait is not in the muted hint's color");
+    for (const [what, a, b] of [["line's top", resting.line?.y, waiting.line?.y], ["line's height", resting.line?.height, waiting.line?.height], ["row's top", resting.row?.y, waiting.row?.y]] as const) {
+      assert.ok(a !== undefined && b !== undefined && Math.abs(a - b) <= 0.5, `the ${what} moved for the wait: ${a} to ${b}`);
+    }
+    assert.deepEqual(alignmentLines(await measureAlignment(line), "the builder's asking line"), []);
     await shots.take(dm, "mapdiscovery-dm-build-asking");
     assert.equal(floored(), whole, "a band went before the answer");
     // While it waits, the builder takes no other edit (D-261027-07): an Erase tap on a corner the rectangle leaves does nothing.
@@ -677,6 +694,10 @@ describe("raccoon-vtt map discovery run", { timeout: 900_000 }, () => {
     await dmContext.setOffline(false);
     await ask.waitFor({ timeout: 30_000 });
     await checking.waitFor({ state: "detached" });
+    const answered = await place();
+    for (const [what, a, b] of [["line's top", resting.line?.y, answered.line?.y], ["line's height", resting.line?.height, answered.line?.height], ["row's top", resting.row?.y, answered.row?.y]] as const) {
+      assert.ok(a !== undefined && b !== undefined && Math.abs(a - b) <= 0.5, `the ${what} moved for the answer: ${a} to ${b}`);
+    }
     consoles.dm.expectSocketFailures = false;
     await ask.getByRole("button", { name: "Go ahead" }).click();
     await ask.waitFor({ state: "detached" });

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, describe, test } from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { openSideTab, pagePoint, pickTool, Touches, waitFor, wholeInReach } from "./harness.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import {
   assertNoConsoleErrors,
   closeAll,
@@ -20,6 +21,7 @@ import {
   options,
   type PageDoc,
   pick,
+  type Size,
   player,
   playerCdp,
   playerSocket,
@@ -945,6 +947,73 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     for (const line of lines) assert.ok(!overlap(line, name), `"${line.text}" is drawn over the trap's name`);
     await shots.take(dm, "lp2-2c-trap-name");
     await ops.send({ t: "trap.delete", trapId });
+  });
+
+  test("dp-3b. a walking ruler's search past the shared delay says Finding the way… in the small loading line, muted, the line keeping a reading's place, measured at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+    const sizesHere: Size[] = [
+      { width: 1440, height: 900, insets: {} },
+      { width: 390, height: 844, insets: {} },
+      { width: 320, height: 568, insets: {} },
+    ];
+    const lines: string[] = [];
+    // A wall between the ruler's two points, open at its foot, that blocks moves, so the walk searches its way round: open ground needs no search.
+    const scene = dmSocket.state!.scenes[run.sceneId]!;
+    const bounds = scene.bounds;
+    const blocked = scene.blockMovement === true;
+    if (!blocked) await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { blockMovement: true } });
+    const toX = Math.min(16, bounds.w - 2);
+    const wallX = Math.floor((2 + toX) / 2);
+    // A leg already walked is kept (features/measure/walkRuler.ts), so each size measures a row of its own.
+    let leg = 0;
+    const wall = Array.from({ length: Math.min(10, bounds.h - 2) }, (_, y) => `${wallX},${y},w`);
+    await ops.send({ t: "build.edge", sceneId: run.sceneId, edges: wall.map((key) => ({ key, feature: { kind: "wall" as const } })) });
+    try {
+      for (const scale of [1, 1.3]) {
+        await reloadAt(dm, scale);
+        for (const size of sizesHere) {
+          await view(dm, dmCdp, size);
+          await selectTool(dm, "r");
+          await pick(dm, "Ruler", "Measure", "Walking");
+          await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+          // One unit of route work a frame (features/movement/boardWork.ts), so the walk's search outlasts the shared delay on any machine.
+          await dm.evaluate(() => void ((globalThis as unknown as { rvttRouteUnitsPerFrame?: number }).rvttRouteUnitsPerFrame = 1));
+          const y = 1 + leg++;
+          await tapCellAt(dm, { x: 2, y });
+          await tapCellAt(dm, { x: toX, y });
+          const line = options(dm).locator("[data-options-line]");
+          const wait = line.locator("[data-options-wait]").filter({ hasText: "Finding the way…" });
+          const at = `${size.width}x${size.height} at ${scale * 100}%`;
+          await wait.waitFor({ timeout: 10_000 }).catch(async () => {
+            await shots.take(dm, `dp-3b-no-wait-${size.width}x${size.height}-${scale * 100}`);
+            assert.fail(`${at}: the walk's search showed no wait, its line reading "${await line.innerText().catch(() => "")}"`);
+          });
+          assert.equal(await line.getAttribute("data-options-reading"), "", `${at}: the wait gave up the line's place as a reading`);
+          assert.equal(await line.getAttribute("data-finding"), "", `${at}: the wait is not marked as a search`);
+          const look = await wait.evaluate((el) => {
+            const g = globalThis as unknown as { getComputedStyle(e: unknown): { fontSize: string; color: string } };
+            const words = el.querySelector("span > span") as unknown as { currentCSSZoom?: number } | null;
+            const spinner = el.querySelector("svg") as unknown as { getAttribute(n: string): string | null } | null;
+            return { px: words ? parseFloat(g.getComputedStyle(words).fontSize) : 0, spinner: spinner?.getAttribute("width") ?? null, color: g.getComputedStyle(el.firstElementChild).color };
+          });
+          assert.equal(look.px, 13, `${at}: the wait's words are not the small line's 13 px`);
+          assert.equal(look.spinner, "16", `${at}: the wait's spinner is not the small line's`);
+          lines.push(...alignmentLines(await measureAlignment(line), `dp-3b ${at}`));
+          await shots.take(dm, `dp-3b-ruler-finding-${size.width}x${size.height}-${scale * 100}`);
+          await dm.evaluate(() => void delete (globalThis as unknown as { rvttRouteUnitsPerFrame?: number }).rvttRouteUnitsPerFrame);
+          await waitFor(`${at}: the walk found`, async () => ((await line.getAttribute("data-finding")) === null ? true : null), 20_000);
+          await pressSlot(dm, "clear");
+        }
+      }
+    } finally {
+      await dm.evaluate(() => void delete (globalThis as unknown as { rvttRouteUnitsPerFrame?: number }).rvttRouteUnitsPerFrame);
+      await ops.send({ t: "build.edge", sceneId: run.sceneId, edges: wall.map((key) => ({ key, feature: null })) });
+      if (!blocked) await ops.send({ t: "scene.update", sceneId: run.sceneId, patch: { blockMovement: false } });
+      await pick(dm, "Ruler", "Measure", "Straight").catch(() => undefined);
+      await reloadAt(dm, 1);
+      await view(dm, dmCdp, DESK);
+      await key(dm, "v");
+    }
+    assert.deepEqual(lines, []);
   });
 
   test("9. nothing went wrong in the browsers", assertNoConsoleErrors);

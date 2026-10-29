@@ -1247,3 +1247,35 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
     assert.equal(lineOf(live), "No grid found. Drag a box over 3 hexes across instead.");
   });
 });
+
+/*
+ * The options line's tones (docs/design-v1-design-pass.md 2.4 rule 5):
+ * green only for a grid that was applied, the warning tone for a search
+ * that failed or a switch or Use default that was refused, and a muted
+ * hint for an offer the DM checks.
+ */
+describe("the line's tone after a search", () => {
+  const box = { x: 0, y: 0, size: 141 };
+  const cal = { cellPx: 70, originPx: { x: 0, y: 0 } };
+  const note = (outcome: "applied" | "offered" | "none" | "changed", extra: object = {}) => ({ sceneId: "s1", outcome, cellPx: outcome === "none" || outcome === "changed" ? 0 : 70, box, ...extra });
+  const HEX_ROWS = gridOfShape("hexRows");
+
+  test("a grid applied is a status, in the success green", () => {
+    assert.equal(foundLine(note("applied", { cal }), SQUARES).tone, "status");
+    assert.equal(foundLine(note("applied", { cal, switched: true, shape: "hexRows" }), HEX_ROWS).tone, "status");
+  });
+
+  test("no grid found, on squares and on hexes, and a scene that changed under the search, are warnings", () => {
+    assert.deepEqual(foundLine(note("none"), SQUARES), { tone: "warning", content: "No grid found. Drag a box over 3 by 3 squares instead." });
+    assert.deepEqual(foundLine(note("none", { shape: "hexRows" }), HEX_ROWS), { tone: "warning", content: "No grid found. Drag a box over 3 hexes across instead." });
+    assert.deepEqual(foundLine(note("changed"), SQUARES), { tone: "warning", content: "The scene changed, so the grid found was not applied." });
+  });
+
+  test("a refused switch and a refused Use default are warnings, an offer to check is a hint", () => {
+    const refusal = "This scene has painted ground on its squares, which can't stand on hexes. Remove them to change the grid.";
+    assert.equal(foundLine(note("offered", { cal, other: { shape: "hexRows", cal, box, refusal } }), SQUARES).tone, "warning");
+    assert.equal(foundLine(note("applied", { cal, switched: true, shape: "hexRows", fallback: { ...cal, bounds: { w: 10, h: 10 }, shape: "squares" }, backRefused: refusal }), HEX_ROWS).tone, "warning");
+    assert.equal(foundLine(note("offered", { cal, other: { shape: "hexRows", cal, box } }), SQUARES).tone, "hint");
+    assert.equal(foundLine(note("offered", { cal }), SQUARES).tone, "hint");
+  });
+});

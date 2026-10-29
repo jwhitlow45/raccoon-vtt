@@ -5,9 +5,9 @@ import type { TerrainId } from "#shared/model.ts";
 import { cellWord, isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { useRoomScope, useScoped } from "../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
-import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, Stepper, ValueChip, type Slot } from "../measure/controls.tsx";
+import { ChoiceRows, ChoiceTiles, ConfirmButton, OptButton, OptInput, OptionsStrip, OptSegmented, PickCloses, Stepper, StripWait, ValueChip, type Slot, type StripLine } from "../measure/controls.tsx";
 import { Icon } from "../../components/Icon.tsx";
-import { Spinner, useDelayed } from "../../components/Loading.tsx";
+import { useDelayed } from "../../components/Loading.tsx";
 import { theme } from "../../lib/theme.ts";
 import { BRUSH_MAX, BRUSH_MIN } from "./cells.ts";
 import { LABEL_SIZES } from "./labelEdit.ts";
@@ -377,7 +377,7 @@ export default function BuilderOptions() {
 
   return (
     <div ref={row} style={{ display: "contents" }}>
-      <OptionsStrip tool="Map builder" task={corners || stamped} line={asking ? { tone: "status", content: <Asking /> } : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid)) }} slots={slots} />
+      <OptionsStrip tool="Map builder" task={corners || stamped} line={asking ? ASKING_LINE : { tone: s.note || s.inSight ? "warning" : "hint", content: s.note ?? (s.inSight ? BUILD_IN_SIGHT : hint(s.mode, s.edge, s.secretFound, hasLights, heightHint, s.terrain, grid)) }} slots={slots} />
       {s.mode === "stamp" ? stamps.picker : null}
     </div>
   );
@@ -413,12 +413,5 @@ function useHexRoughSlots(): Slot[] {
   ];
 }
 
-/** The builder's line while a gesture's ops wait on the server's answer to its asks (ask.ts). */
-function Asking() {
-  return (
-    <span data-build-asking="" style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1.5) }}>
-      <Spinner size={14} />
-      {BUILD_ASKING}
-    </span>
-  );
-}
+/** The builder's line while a gesture's ops wait on the server's answer to its asks (ask.ts): a wait, which holds the map's controls where the answer's note will need them. */
+export const ASKING_LINE: StripLine = { tone: "hint", finding: true, content: <StripWait text={BUILD_ASKING} /> };

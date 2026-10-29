@@ -19,6 +19,7 @@ import {
 import { Button } from "../../components/Button.tsx";
 import { Input, Select } from "../../components/Field.tsx";
 import { Icon, type IconName } from "../../components/Icon.tsx";
+import { Loading } from "../../components/Loading.tsx";
 import { buttonLook, choiceLook } from "../../components/looks.ts";
 import { MeasuringContext } from "../../components/measuring.ts";
 import { sectionLabelLook } from "../../components/Panel.tsx";
@@ -202,11 +203,39 @@ export type Slot = {
   part?: string;
 };
 
-/** The line's tone (8): a hint, a reading, a warning, or a status such as "Grid saved". */
+/**
+ * The line's tone (8, docs/design-v1-design-pass.md 2.4 rule 5): a hint
+ * for an instruction, a reading for a measure, a warning for a refusal or
+ * a failure, and a status, in the success green, only for a result that
+ * worked ("Grid saved"). A wait is a hint that is `finding`, its words a
+ * StripWait.
+ */
 export type LineTone = "hint" | "reading" | "warning" | "status";
 
-/** `finding`: the reading is being worked out, such as a walking ruler's search, marked `data-finding` on the line so a run can see the search happen. */
+/**
+ * `finding`: the reading is being worked out, such as a walking ruler's
+ * search, marked `data-finding` on the line so a run can see the search
+ * happen. The line keeps a reading's place meanwhile, so the map's
+ * controls stand where the answer will need them rather than drop for
+ * the wait and rise again with the answer.
+ */
 export type StripLine = { tone: LineTone; content: ReactNode; finding?: boolean };
+
+/**
+ * A wait's words in the options line: the small loading line, muted,
+ * after a delay its caller has already waited (docs/design-v1-design-pass.md
+ * 2.4 rules 5 and 6). It is no live region of its own, since the line is
+ * the one polite live region. It stands as a block inside the line's
+ * words, so its spinner sets no baseline that would grow the line past a
+ * reading's height, which is the map's reserve.
+ */
+export function StripWait(props: { text: string }) {
+  return (
+    <span data-options-wait="" style={{ display: "flex", minWidth: 0 }}>
+      <Loading small live={false} delay={0} text={props.text} />
+    </span>
+  );
+}
 
 /**
  * A tool's options as one row and its line (6): the slots that fit
@@ -714,7 +743,7 @@ function OptionsLine(props: { line: StripLine | null; tool: string; frame: Optio
   }, [open]);
 
   const tone = line?.tone ?? "hint";
-  const reading = !pill && tone !== "hint";
+  const reading = !pill && (tone !== "hint" || line?.finding === true);
   const floating = frame?.line ?? null;
   const look: CSSProperties = {
     boxSizing: "border-box",

@@ -9,6 +9,7 @@ import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
 import { STARTER_STAMPS } from "#shared/starterStamps.ts";
 import { retainedGrid, starterMapScene } from "../client/features/starter/mapScene.ts";
+import { theme } from "../client/lib/theme.ts";
 import { ConsoleWatch, dragWorld, openSideTab, pickOption, pressOption, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
@@ -480,6 +481,13 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
       );
     };
     const gridOptions = dm.getByRole("toolbar", { name: "Line up grid options" });
+    // The line's tone (docs/design-v1-design-pass.md 2.4 rule 5): the success green only for a grid that was applied, the warning tone for a search that failed.
+    const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
+    const lineTone = (words: string) =>
+      gridOptions
+        .locator("[data-options-line]")
+        .filter({ hasText: words })
+        .evaluate((el) => (globalThis as unknown as { getComputedStyle(e: unknown): { color: string } }).getComputedStyle(el).color);
     const drawn = path.join(work, "Drawn keep.png");
     const plain = path.join(work, "Plain field.png");
     await write(drawn, true);
@@ -489,6 +497,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     const keep = await upload(drawn);
     await waitFor("the found grid on the scene", () => gridIs(keep, DRAWN) || null, 15_000);
     await dm.getByText("Found a grid of 70 px squares.").first().waitFor();
+    assert.equal(await lineTone("Found a grid of 70 px squares."), rgb(theme.color.success), "a grid applied is not in the success green");
     await shots.take(dm, "maps-gd-found-on-upload");
 
     // Use default puts the first guess back.
@@ -510,6 +519,7 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     await openSideTab(dm, "Scenes");
     await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: "Find the grid", exact: true }).click();
     await dm.getByText("No grid found.", { exact: false }).first().waitFor({ timeout: 15_000 });
+    assert.equal(await lineTone("No grid found."), rgb(theme.color.warning), "a search that found nothing is not in the warning tone");
     assert.ok(gridIs(field, GUESS), "finding no grid changes nothing");
     await shots.take(dm, "maps-gd-no-grid");
 

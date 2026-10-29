@@ -341,11 +341,12 @@ export function foundLine(note: FoundNote, g: Grid): { tone: "status" | "hint" |
   const hex = isHex(g);
   const status = (content: string) => ({ tone: "status" as const, content });
   const hint = (content: string) => ({ tone: "hint" as const, content });
+  const warning = (content: string) => ({ tone: "warning" as const, content });
   switch (note.outcome) {
     case "applied": {
       if (note.backRefused && note.fallback?.shape) {
         const why = note.backRefused;
-        return { tone: "warning", content: `Can't go back to ${shapeWords(note.fallback.shape)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}` };
+        return warning(`Can't go back to ${shapeWords(note.fallback.shape)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`);
       }
       if (!note.switched) return status(`Found a grid of ${n} px ${hex ? "hexes" : "squares"}.`);
       const words = shapeWords(mapShape(g));
@@ -360,16 +361,18 @@ export function foundLine(note: FoundNote, g: Grid): { tone: "status" | "hint" |
         const words = shapeWords(note.other.shape);
         if (both) return hint(`${both} Change Grid shape to use them.`);
         const { refusal } = note.other;
-        if (refusal) return hint(`Found ${words} of ${n} px, but ${refusal.charAt(0).toLowerCase()}${refusal.slice(1)}`);
+        // A refused switch says what stopped it, as Can't go back does: a refusal, so a warning.
+        if (refusal) return warning(`Found ${words} of ${n} px, but ${refusal.charAt(0).toLowerCase()}${refusal.slice(1)}`);
         return hint(`These lines may be ${words} of ${n} px. Change Grid shape to use them.`);
       }
       if (both) return hint(`${both} Check the box, then Apply.`);
       if (note.ownGrid) return hint(`This scene came with its own grid. The lines found make ${n} px squares: check the box, then Apply.`);
       return hint(hex ? `These lines may be the map's hexes: ${n} px. Check the box, then Apply.` : `These lines may be the map's grid: ${n} px squares. Check the box, then Apply.`);
     }
+    // A search that found nothing or came too late failed, so it takes the warning tone: green says only that something worked (docs/design-v1-design-pass.md 2.4 rule 5).
     case "none":
-      return status(hex ? "No grid found. Drag a box over 3 hexes across instead." : "No grid found. Drag a box over 3 by 3 squares instead.");
+      return warning(hex ? "No grid found. Drag a box over 3 hexes across instead." : "No grid found. Drag a box over 3 by 3 squares instead.");
     case "changed":
-      return status("The scene changed, so the grid found was not applied.");
+      return warning("The scene changed, so the grid found was not applied.");
   }
 }
