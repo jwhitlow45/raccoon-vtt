@@ -626,4 +626,22 @@ describe("the label names a squeeze as squeezing", () => {
       assert.equal(ruled(hexRoom(true), onHex(g, "horse", "large", ref(1, 5)), hexCenter(g, ref(9, 6))), "Walking 80 ft\n+40 ft for squeezing", `${shape}: into the corridor over rubble, walked squeezed from its first step at the same cost`);
     }
   });
+
+  test("on hex rows and hex columns a walk squeezes whether or not the scene's walls stop moves, so a squeezed piece says squeezing either way (review FU36-ASTRA-03)", () => {
+    for (const [shape, g] of [["hexRows", ROWS], ["hexColumns", COLUMNS]] as const) {
+      const ref = (along: number, across: number) => (g.orient === "rows" ? { col: along, row: across } : { col: across, row: along });
+      const alongOf = (x: { col: number; row: number }) => (g.orient === "rows" ? x.col : x.row);
+      const acrossOf = (x: { col: number; row: number }) => (g.orient === "rows" ? x.row : x.col);
+      for (const blockMovement of [true, false]) {
+        // A corridor one hex wide along line 6, rubble on every hex but the corridor's.
+        const h = hexWallRoom(shape, 16, 16, wallsRound(g, { w: 16, h: 16 }, (x) => alongOf(x) >= 6 && alongOf(x) <= 12 && acrossOf(x) !== 6));
+        h.scenes.s1 = { ...h.scenes.s1!, blockMovement };
+        const key = chunkKey("s1", 0, 0);
+        const rough = Array.from({ length: CHUNK_CELLS * CHUNK_CELLS }, (_, k) => (acrossOf({ col: k % CHUNK_CELLS, row: Math.floor(k / CHUNK_CELLS) }) === 6 ? "." : "d")).join("");
+        h.buildChunks[key] = { ...(h.buildChunks[key] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {} }), rough, grid: shape };
+        const horse = onHex(g, "horse", "large", ref(9, 6), { name: "Warhorse", squeeze: true });
+        assert.equal(ruled(h, horse, hexCenter(g, ref(11, 6))), "Walking 20 ft\n+10 ft for squeezing", `${shape}, walls ${blockMovement ? "stopping" : "stopping no"} moves`);
+      }
+    }
+  });
 });

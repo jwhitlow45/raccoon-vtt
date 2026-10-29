@@ -492,14 +492,19 @@ export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSp
 /**
  * What cost extra along a drag's walk (`extraWords`), each piece read at
  * the size the route search walked it at (`piecesWalked`). `token` is the
- * walker where the walk starts. A walk squeezes only on a scene whose
- * walls stop moves (walk.ts WalkWorld `squeezes`).
+ * walker where the walk starts. On squares a walk squeezes only on a scene
+ * whose walls stop moves (walk.ts WalkWorld `squeezes`), while the squeeze
+ * test reads the walls on any scene. On hexes the search walks a squeezed
+ * piece on any scene, and the label reads that from the piece's ends,
+ * which read no walls (review FU36-ASTRA-03).
  */
 export function walkWords(walk: DragWalk, token: MovingToken, swimSpeed: boolean): string[] {
   if (!walk.route) return [];
   const { scenes } = walk.build;
   const scene = scenes?.[token.sceneId];
-  const walked = scenes && scene?.blockMovement === true && canSqueeze(token) ? piecesWalked({ scenes, buildChunks: walk.build.buildChunks }, sceneGrid(scene), token, walk.route.points, walk.trace) : undefined;
+  const g = scene ? sceneGrid(scene) : null;
+  const squeezes = g !== null && (isHex(g) || scene?.blockMovement === true) && canSqueeze(token);
+  const walked = scenes && g && squeezes ? piecesWalked({ scenes, buildChunks: walk.build.buildChunks }, g, token, walk.route.points, walk.trace) : undefined;
   return extraWords(walk.route.pieces, walk.prone, swimSpeed, walk.towing, walked);
 }
 
