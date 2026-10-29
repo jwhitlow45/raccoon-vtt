@@ -6,6 +6,8 @@ import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { tokenAccess, type Role } from "./access.ts";
 import { withCrit, type HpMode, type HpParse } from "./hpInput.ts";
+import { creatureRolls, type DiceView } from "../dice/creature.ts";
+import { damageWords, rowDamage } from "#shared/rules/typedDamage.ts";
 
 /**
  * One HP entry for several creatures (features section 10: "one entry can
@@ -108,6 +110,22 @@ export function untouchedTypes(chip: { amount: number; types?: readonly DamageTy
  */
 export function sendHpEntry(actions: Pick<RoomActions, "dispatch" | "newId">, targets: readonly HpTarget[], change: HpChange, crit: boolean, types?: readonly DamageType[]): void {
   dispatchGesture(actions, hpOps(targets, change, crit, types));
+}
+
+/** Only the viewer's permitted defenses explain the preview. The server calculates the hit from the full actor. */
+export function damagePreview(targets: readonly HpTarget[], change: HpChange, dice: DiceView | null): string[] {
+  if (!dice || change.kind !== "damage" || !change.parts) return [];
+  const seen = new Set<string>();
+  const words: string[] = [];
+  for (const target of targets) {
+    if (target.access === "none" || seen.has(target.holder)) continue;
+    seen.add(target.holder);
+    const rolls = creatureRolls(dice, target.target);
+    if (!rolls) continue;
+    const dealt = rowDamage(change.parts, "fail", { onPass: "none", dexSave: false, row: { defenses: rolls.defenses, qualifiedOn: new Set(), evasion: false, effects: [] } });
+    if (dealt.notes.length > 0) words.push(`${target.name}: ${damageWords(change.parts, dealt)}`);
+  }
+  return words;
 }
 
 /** What an entry will send, as its lines judge it: a heal, damage, a set (with the current HP it names, once typed) or temporary HP. */

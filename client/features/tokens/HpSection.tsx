@@ -24,7 +24,7 @@ import { useDiceView } from "../dice/useDiceView.ts";
 import { useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
 import { actorOf, openRecord } from "../combat/logic.ts";
 import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
-import { deadCase, deadLines, entryOperation, entryRefusal, sendHpEntry, untouchedTypes, type HpTarget } from "./groupHp.ts";
+import { damagePreview, deadCase, deadLines, entryOperation, entryRefusal, sendHpEntry, untouchedTypes, type HpTarget } from "./groupHp.ts";
 import { hpDraftKey, useKeepHpDraft, useKeptHpDraft, type HpPlace } from "./hpDraft.ts";
 import { HP_MODES, MAX_HP_AMOUNT, modeAfterApply, parseHpInput, type HpMode } from "./hpInput.ts";
 import { FieldRow, Note, NumberField, Section, SmallButton } from "./ui.tsx";
@@ -102,6 +102,10 @@ export function HpEntry(props: {
   const [error, setError] = useState<string | null>(null);
   const modes = props.access === "all" ? HP_MODES : HP_MODES.filter((m) => m.mode === "damage" || m.mode === "heal");
   const preview = text.trim() ? parseHpInput(text, mode) : null;
+  const typedDamage = preview?.ok && preview.change.kind === "damage" && preview.change.parts !== undefined;
+  const { dice } = useDiceView(typedDamage ? props.targets.filter((target) => target.access !== "none").map((target) => target.target) : []);
+  const defenseWords = preview?.ok ? damagePreview(props.targets, preview.change, dice) : [];
+  const summary = preview?.ok ? [preview.summary, ...defenseWords].join(". ") : null;
   // At 0 HP and dying or stable, damage can be a critical hit: two failed death saves.
   const atZero = props.targets.some((t) => t.atZero);
   const showCrit = atZero && (preview?.ok ? preview.change.kind === "damage" : mode === "damage");
@@ -169,7 +173,7 @@ export function HpEntry(props: {
   const said = {
     error: error ?? refusal,
     dead: deadCase(props.targets, operation, { revives, dm }),
-    preview: preview?.ok && refusal === null ? preview.summary : null,
+    preview: refusal === null ? summary : null,
     typed: text.trim() !== "",
     crit: sendsCrit,
     reach,
@@ -222,11 +226,11 @@ export function HpEntry(props: {
         aria-describedby={describedBy}
         data-rest-field=""
         value={text}
-        inputMode="numeric"
+        inputMode={mode === "damage" ? "text" : "numeric"}
         enterKeyHint="done"
         autoComplete="off"
         // The toggle names the mode in the strip, so its sample alone is enough there.
-        placeholder={resting ? MODE_SAMPLE[mode] : mode === "damage" ? "7 or -7" : mode === "heal" ? "5 or +5" : mode === "set" ? "20 or =20" : "5 or t5"}
+        placeholder={resting ? MODE_SAMPLE[mode] : mode === "damage" ? "7 or 10 fire" : mode === "heal" ? "5 or +5" : mode === "set" ? "20 or =20" : "5 or t5"}
         onChange={(e) => {
           setText(e.target.value);
           setError(null);
@@ -291,7 +295,7 @@ export function HpEntry(props: {
     error || refusal ? (
       <Note tone="error">{error ?? refusal}</Note>
     ) : preview?.ok ? (
-      <Note>{reach > 1 ? `${preview.summary}, to each of ${reach}` : preview.summary}</Note>
+      <Note>{reach > 1 ? `${preview.summary}, to each of ${reach}. ${defenseWords.join(". ")}`.trim() : summary}</Note>
     ) : null;
 
   return (

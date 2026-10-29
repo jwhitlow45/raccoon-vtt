@@ -19,12 +19,21 @@ import { hpRevertOf } from "./hpUndo.ts";
 import { keys } from "../keys.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
 import { typeUnion } from "./uses.ts";
+import { damageDefenses } from "../rules/damageDefenses.ts";
+import { dealtTypes, rowDamage } from "../rules/typedDamage.ts";
 
 export function actorHp(tx: Tx, op: OpOf<"actor.hp">): void {
   const resolved = tx.resolveActor(op.target);
   const settings = tx.state.meta.settings;
   const revivesDead = healRevivesDead(settings, tx.env.opVersion);
-  const c = op.change;
+  let c = op.change;
+  if (c.kind === "damage" && c.parts !== undefined) {
+    const dealt = rowDamage(c.parts, "fail", {
+      onPass: "none", dexSave: false,
+      row: { defenses: damageDefenses(tx.state, resolved.actor, resolved.character), qualifiedOn: new Set(), evasion: false, effects: resolved.actor.effects },
+    });
+    c = { ...c, amount: Math.min(100_000, dealt.amount), types: dealtTypes(c.parts, dealt.byPart) };
+  }
   const r =
     c.kind === "damage"
       ? applyDamage(resolved.actor, c.amount, resolved.kind, settings, c.crit ?? false)
@@ -34,8 +43,8 @@ export function actorHp(tx: Tx, op: OpOf<"actor.hp">): void {
           ? applyTemp(resolved.actor, c.amount)
           : applyHpSet(resolved.actor, c, resolved.kind, settings, revivesDead);
   if (r.actor === resolved.actor) return;
-  // The types a hit of at least 1 dealt, for the Regeneration note (docs/design-v1-combat-controls.md 3.4), as the op carried them: the
-  // reducer reads no block to filter them. Temporary HP that took the hit still count, and a take back of the hit leaves them.
+  // Regeneration counts only types that dealt damage after defenses. Temporary HP that took the hit still count,
+  // and a take back of the hit leaves them. Older ops carry their final types directly.
   const hurt = c.kind === "damage" && c.types !== undefined && c.amount >= 1 && combatUses(tx.env.opVersion) ? typeUnion(r.actor.hurt, c.types) : undefined;
   tx.putActor(resolved, hurt ? { ...r.actor, hurt } : r.actor);
   // The HP after the change, and what it replaced, so the log reads "3/7 left" and the DM can take it back (features section 10).

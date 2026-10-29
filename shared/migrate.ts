@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 29;
-export const OP_VERSION = 30;
+export const OP_VERSION = 31;
 
 export type MigrationStep = {
   from: number;
@@ -877,6 +877,17 @@ export const opMigrations: MigrationStep[] = [
     // snapshot needs the backup from before the deploy.
     from: 29,
     to: 30,
+    apply: (op) => op,
+  },
+  {
+    // Typed HP damage carries its incoming parts. The reducer applies defenses
+    // only to those parts. Existing amounts and type tags remain final damage,
+    // so stored version 30 ops replay unchanged and this step is the identity.
+    // Deploy: back up the database and reload open pages to enable typed input.
+    // Rollback: an older build cannot replay version 31 ops. A clean shutdown
+    // writes the unchanged snapshot format, otherwise use the pre-deploy backup.
+    from: 30,
+    to: 31,
     apply: (op) => op,
   },
 ];

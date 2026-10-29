@@ -1411,9 +1411,13 @@ const handoutInput = z.union([
 /** A document as its create op carries it. The reducer sets `rev` and `createdAt`. */
 const handoutDocInput = z.strictObject({ id, title: name, pages: handoutPages });
 
+export const MAX_DAMAGE_PARTS = 100;
+const damageParts = z.array(z.strictObject({ amount: z.number().int().min(0).max(100_000), type: z.enum(DAMAGE_TYPES).optional() })).min(1).max(MAX_DAMAGE_PARTS);
+
 const hpChange = z.discriminatedUnion("kind", [
   /** `types` are the damage types the hit dealt, for the Regeneration note (docs/design-v1-combat-controls.md 3.4). */
-  z.strictObject({ kind: z.literal("damage"), amount: z.number().int().min(0).max(100_000), crit: z.boolean().optional(), types: damageTypes.optional() }),
+  z.strictObject({ kind: z.literal("damage"), amount: z.number().int().min(0).max(100_000), crit: z.boolean().optional(), types: damageTypes.optional(), parts: damageParts.optional() })
+    .refine((c) => c.parts === undefined || (c.types === undefined && c.parts.reduce((sum, part) => sum + part.amount, 0) === c.amount), { message: "Damage parts must add up to the amount and cannot carry final damage types." }),
   z.strictObject({ kind: z.literal("heal"), amount: z.number().int().min(0).max(100_000) }),
   z.strictObject({ kind: z.literal("set"), cur: hpValue.optional(), max: hpValue.optional(), temp: hpValue.optional() }),
   z.strictObject({ kind: z.literal("temp"), amount: hpValue }),

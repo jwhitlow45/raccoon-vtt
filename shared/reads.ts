@@ -151,6 +151,8 @@ export function reads(op: Op, state: RoomState): Reads {
       return of([{ key: keys.token(op.tokenId), fields: ["path"] }, { key: keys.encounter }]);
 
     case "actor.hp":
+      // Even an owner's projection can omit a defense from a hidden effect or room monster.
+      if (op.change.kind === "damage" && op.change.parts !== undefined) return NEVER;
       return of([holderRead(state, op.target, ["hp", "life", "effects"])]);
     case "actor.damageMany":
       return of(op.hits.map((hit) => holderRead(state, hit.target, ["hp", "life", "effects"])));

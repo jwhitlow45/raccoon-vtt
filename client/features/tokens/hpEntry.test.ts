@@ -18,6 +18,8 @@ const { RoomProvider } = await import("../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../state/scope.ts");
 const { DeathSaves, HpEntry, HpSection, oneTarget } = await import("./HpSection.tsx");
 const { actor, customMonster, DM, entry, room, token } = await import("#shared/testutil.ts");
+const { projectState } = await import("#shared/project.ts");
+const { hpDraftKey, hpDraftSlot } = await import("./hpDraft.ts");
 
 function render(access: "all" | "relative", vitals = { name: "Thorn", dead: false, max: 20 as number | undefined }, settings: { healRevives?: boolean } = {}, role: "dm" | "player" = "dm"): string {
   const target = oneTarget({ tokenId: "t1" }, access, false, vitals);
@@ -44,6 +46,25 @@ function names(markup: string): string[] {
 }
 
 describe("the HP entry's modes are native radios", () => {
+  test("FL-3: typed damage uses a text keyboard and shows defense words only to a viewer who may read them", () => {
+    const state = room({
+      monsters: { frost: customMonster("frost", { resistances: "Cold" }) },
+      tokens: { a: token("a", { actor: { inline: actor({ monsterId: "frost" }) } }) },
+    });
+    state.meta.settings.playersApplyDamage = true;
+    for (const you of [DM, { memberId: "p1", role: "player" as const }]) {
+      const target = oneTarget({ tokenId: "a" }, "relative", false, { name: "Frost", dead: false, max: 20 });
+      const scope = new RoomScope();
+      scope.get(hpDraftSlot).set(hpDraftKey("bar", [target]), { mode: "damage", text: "11 cold", crit: false });
+      const store = createStore(() => ({ view: projectState(state, you, { sceneId: "s1" }), you }));
+      const el = createElement(HpEntry, { targets: [target], access: "relative", place: "bar" });
+      const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
+      assert.match(markup, /aria-label="HP change"[^>]*inputMode="text"/);
+      if (you.role === "dm") assert.match(markup, /Resists Cold: 5/);
+      else assert.doesNotMatch(markup, /Resists|Vulnerable|Immune/);
+    }
+  });
+
   test("one radiogroup named What the number does, a radio per mode sharing one name, Damage checked", () => {
     const markup = render("all");
     assert.equal([...markup.matchAll(/role="radiogroup"/g)].length, 1);

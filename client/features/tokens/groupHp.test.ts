@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
-import { actor, DM, room, token } from "#shared/testutil.ts";
+import { actor, customMonster, DM, room, token } from "#shared/testutil.ts";
 import type { ClientOp } from "#shared/protocol.ts";
 import { deadHealLine, deadLines, entryOperation, entryRefusal, groupAccess, hpOps, hpTargets, sendHpEntry, untouchedTypes, type EntryOperation, type HpTarget } from "./groupHp.ts";
 import { parseHpInput, type HpMode } from "./hpInput.ts";
@@ -19,6 +19,24 @@ const target = (id: string, over: Partial<HpTarget> = {}): HpTarget => ({
 });
 
 describe("one HP entry for several creatures", () => {
+  test("FL-3: a typed single-target entry sends raw parts and the server applies its resistance", () => {
+    const state = room({
+      monsters: { frost: customMonster("frost", { resistances: "Cold" }) },
+      tokens: { a: token("a", { actor: { inline: actor({ monsterId: "frost" }) } }) },
+    });
+    const parsed = parseHpInput("11 cold", "damage");
+    assert.ok(parsed.ok);
+    const sent: ClientOp[] = [];
+    sendHpEntry({ dispatch: (op: ClientOp) => sent.push(op), newId: () => "g" }, [target("a")], parsed.change, false);
+    assert.equal(sent.length, 1);
+    const op = clientOpSchema.parse(sent[0]);
+    const result = applyOp(state, op, DM, { seq: 1, at: new Date(0).toISOString() });
+    assert.ok(result.ok);
+    const damaged = result.state.tokens.a!;
+    assert.ok("inline" in damaged.actor);
+    assert.equal(damaged.actor.inline.hp.cur, 15);
+  });
+
   test("each creature gets its own op, and a shared character only once", () => {
     const ops = hpOps([target("a"), target("b"), target("pc1", { holder: "character:c" }), target("pc2", { holder: "character:c" })], { kind: "damage", amount: 7 }, false);
     assert.deepEqual(

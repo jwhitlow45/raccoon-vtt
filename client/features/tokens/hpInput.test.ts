@@ -94,3 +94,22 @@ describe("the mode after an apply", () => {
     assert.equal(modeAfterApply("heal"), "heal");
   });
 });
+
+describe("FL-3 typed HP damage", () => {
+  test("keeps typed amounts for the server and accepts the save flow's case-insensitive syntax", () => {
+    const parts = [{ amount: 10, type: "fire" }, { amount: 4, type: "cold" }];
+    for (const text of ["10 fire + 4 cold", "10 FIRE + 4 Cold", "-10 fire + 4 cold"]) {
+      const parsed = change(text);
+      assert.deepEqual(parsed, { kind: "damage", amount: 14, parts });
+      assert.ok(clientOpSchema.safeParse({ t: "actor.hp", target: { tokenId: "t1" }, change: parsed }).success);
+    }
+    assert.deepEqual(change("-10 fire", "heal"), { kind: "damage", amount: 10, parts: [{ amount: 10, type: "fire" }] });
+  });
+
+  test("rejects dice, unknown types, typed healing and totals beyond the HP limit", () => {
+    for (const text of ["2d6 fire", "10 lava", "10 fire 4 cold", "100000 fire + 1 cold", "+10 fire", "=10 fire", "t10 fire"]) {
+      assert.equal(parseHpInput(text, "damage").ok, false, text);
+    }
+    for (const mode of ["heal", "set", "temp"] as const) assert.equal(parseHpInput("10 fire", mode).ok, false);
+  });
+});

@@ -1,4 +1,5 @@
-import type { HpChange } from "#shared/protocol.ts";
+import { MAX_DAMAGE_PARTS, type HpChange } from "#shared/protocol.ts";
+import { parseParts, partAmounts, partsText } from "#shared/rules/typedDamage.ts";
 
 /**
  * The HP quick entry (features section 5): `-7` deals 7 damage, `+5` heals
@@ -68,6 +69,19 @@ export function parseHpInput(raw: string, mode: HpMode): HpParse {
     const s = sum(text.slice(1));
     if (!s) return { ok: false, error: UNREADABLE };
     return set(s.value);
+  }
+
+  if (/\d\s*[a-z]{3,}/.test(text)) {
+    const negative = text.startsWith("-");
+    if ((!negative && mode !== "damage") || text.startsWith("+")) return { ok: false, error: "Damage types go with damage only." };
+    const parsed = parseParts(negative ? text.slice(1).trim() : text);
+    if (!parsed.ok) return parsed;
+    const parts = partAmounts(parsed.parts, []);
+    if (!parts) return { ok: false, error: "Type the rolled damage, such as 10 Fire." };
+    if (parts.length > MAX_DAMAGE_PARTS) return { ok: false, error: `Use at most ${MAX_DAMAGE_PARTS} damage parts.` };
+    const amount = parts.reduce((total, part) => total + part.amount, 0);
+    if (tooLarge(amount)) return { ok: false, error: "That number is too large." };
+    return { ok: true, change: { kind: "damage", amount, parts }, summary: `${partsText(parts)} damage` };
   }
 
   const s = sum(text);

@@ -1508,7 +1508,7 @@ describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount
 
 describe("follow-up batch 36: op version 30, passengers on a holder that starts its walk squeezed and stands across a stair band (D-261029-56, D-261029-58)", () => {
   test("are the versions now, the snapshot's unchanged", () => {
-    assert.equal(OP_VERSION, 30);
+    assert.ok(OP_VERSION >= 30);
     assert.equal(SNAPSHOT_VERSION, 29);
     assert.ok(opMigrations.some((s) => s.from === 29 && s.to === 30));
     assert.ok(!snapshotMigrations.some((s) => s.from === 29));
