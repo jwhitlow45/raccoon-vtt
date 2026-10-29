@@ -13,19 +13,23 @@ import {
   cardCombat,
   cardGroups,
   combatSummary,
+  headerActions,
   holdsClassResources,
   offersMakeCompanion,
   panelGroups,
   panelRelation,
   panelSections,
+  playersPlace,
   reactionSpent,
   type CardPartId,
+  type HeaderActionId,
   type PanelGroupsInput,
   type PanelPart,
   type PanelSectionId,
 } from "./panelOrder.ts";
 
 const { reactionFor } = await import("../encounter/ReactionSection.tsx");
+const { viewAsPlayers } = await import("../dm/viewAs.tsx");
 
 /** A viewer's own copy of the room, read as the client's helpers read it. */
 const seen = (state: RoomState, viewer: typeof DM) => projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
@@ -419,16 +423,16 @@ function pageFor(state: ReturnType<typeof room>, viewer: typeof DM, characterId:
 describe("a character's page's parts (docs/design-v1-look-pass.md 3.1)", () => {
   const SETUP: CardPartId[] = ["image", "stats"];
 
-  test("the DM: the header, Place a token, the block, Combat, Companions, Notes, setup, Played by and Remove", () => {
+  test("the DM: the header, the block, Combat, Companions, Notes, setup, Played by and Remove, with Place a token in the header's actions", () => {
     const state = room();
     state.characters.c = character("c");
-    assert.deepEqual(pageFor(state, DM, "c"), ["header", "place", "statBlock", "combat", "companions", "notes", ...SETUP, "owners", "remove"]);
+    assert.deepEqual(pageFor(state, DM, "c"), ["header", "statBlock", "combat", "companions", "notes", ...SETUP, "owners", "remove"]);
   });
 
   test("a player who plays it alone: the same, with no Played by", () => {
     const state = room();
     state.characters.c = character("c", { ownerIds: ["p1"] });
-    assert.deepEqual(pageFor(state, P1, "c"), ["header", "place", "statBlock", "combat", "companions", "notes", ...SETUP, "remove"]);
+    assert.deepEqual(pageFor(state, P1, "c"), ["header", "statBlock", "combat", "companions", "notes", ...SETUP, "remove"]);
   });
 
   test("a player who shares it: the same parts, Remove holding the line that says why there is no Delete", () => {
@@ -444,7 +448,7 @@ describe("a character's page's parts (docs/design-v1-look-pass.md 3.1)", () => {
     const none = pageFor(state, DM, "c");
     state.characters.c = character("c", { stats: {} as Character["stats"] });
     assert.deepEqual(pageFor(state, DM, "c"), none);
-    assert.equal(none.indexOf("statBlock"), none.indexOf("place") + 1);
+    assert.equal(none.indexOf("statBlock"), none.indexOf("header") + 1);
   });
 
   test("Companions follows Combat with companions or the right to add one, and is not drawn with neither", () => {
@@ -472,6 +476,82 @@ describe("a character's page's parts (docs/design-v1-look-pass.md 3.1)", () => {
       for (const companions of [true, false]) {
         const parts = pageFor(state, viewer, "c", { companions });
         assert.equal(new Set(parts).size, parts.length, `${viewer.memberId}: ${parts.join(" ")}`);
+      }
+    }
+  });
+});
+
+/** A token's header actions for a viewer, from their own copy of the room, as the token panel's header decides them. */
+function tokenActions(state: RoomState, viewer: typeof DM, tokenId: string): HeaderActionId[] {
+  const view = seen(state, viewer);
+  const t = view.tokens[tokenId] as Token;
+  return headerActions({ dm: viewer.role === "dm", on: "token", viewAsPlayers: viewAsPlayers(view, t).length });
+}
+
+/** A character's page's header actions for a viewer, from their own copy of the room, as CharacterPage decides them. */
+function pageActions(state: RoomState, viewer: typeof DM, characterId: string): HeaderActionId[] {
+  const view = seen(state, viewer);
+  const c = view.characters[characterId] as Character;
+  const access = characterAccess({ role: viewer.role, memberId: viewer.memberId, character: c });
+  return headerActions({ dm: access.dm, on: "page", plays: access.owner, playersPlace: playersPlace(view) });
+}
+
+describe("a creature header's actions row (docs/design-v1-design-pass.md 4.3)", () => {
+  /** Thorn played by p1, his token and his companion Skitter, a mule p1 and p2 own, and a goblin no player owns. */
+  function party(): RoomState {
+    const state = room({ characters: { thorn: character("thorn", { name: "Thorn", ownerIds: ["p1"] }) } });
+    state.tokens.thornT = token("thornT", { kind: "pc", name: "Thorn", actor: { ref: "thorn" } });
+    state.tokens.skitter = token("skitter", { kind: "npc", name: "Skitter", companion: { of: "thorn", turn: "shared" }, actor: { inline: actor() } });
+    state.tokens.mule = token("mule", { kind: "npc", name: "Mule", ownerIds: ["p1", "p2"], actor: { inline: actor() } });
+    state.tokens.goblin = token("goblin", { name: "Goblin", actor: { inline: actor() } });
+    return state;
+  }
+
+  test("the DM's token panel: View as on a token one player owns or two, through its character or its keeper's too, and no row on one no player owns", () => {
+    const state = party();
+    assert.deepEqual(tokenActions(state, DM, "thornT"), ["viewAs"]);
+    assert.deepEqual(tokenActions(state, DM, "skitter"), ["viewAs"]);
+    assert.equal(viewAsPlayers(seen(state, DM), state.tokens.mule as Token).length, 2);
+    assert.deepEqual(tokenActions(state, DM, "mule"), ["viewAs"]);
+    assert.deepEqual(tokenActions(state, DM, "goblin"), []);
+  });
+
+  test("a player's token panel has no actions row, on a token they own or another's", () => {
+    const state = party();
+    for (const id of ["thornT", "skitter", "mule", "goblin"]) assert.deepEqual(tokenActions(state, P1, id), [], id);
+    assert.deepEqual(tokenActions(state, P2, "mule"), []);
+  });
+
+  test("the DM's page: Place a token, with the character on the map or not", () => {
+    const state = party();
+    assert.deepEqual(pageActions(state, DM, "thorn"), ["place"]);
+    delete state.tokens.thornT;
+    assert.deepEqual(pageActions(state, DM, "thorn"), ["place"]);
+  });
+
+  test("a player's page: Place my token where the room lets players place theirs, with the character on the map or not, and no row where it does not or with no scene for the players", () => {
+    const state = party();
+    assert.equal(state.meta.settings.playersCreateCharacters, true);
+    assert.deepEqual(pageActions(state, P1, "thorn"), ["placeMine"]);
+    delete state.tokens.thornT;
+    assert.deepEqual(pageActions(state, P1, "thorn"), ["placeMine"]);
+    state.meta.settings = { ...state.meta.settings, playersCreateCharacters: false };
+    assert.deepEqual(pageActions(state, P1, "thorn"), []);
+    state.meta.settings = { ...state.meta.settings, playersCreateCharacters: true };
+    state.meta.playerSceneId = null;
+    assert.deepEqual(pageActions(state, P1, "thorn"), []);
+    state.meta.playerSceneId = "gone";
+    assert.deepEqual(pageActions(state, P1, "thorn"), [], "the players' scene is not in the copy");
+  });
+
+  test("a player who does not play the character gets no row, and neither place offers View as nor the panel a place", () => {
+    const state = party();
+    assert.deepEqual(pageActions(state, P2, "thorn"), []);
+    for (const dm of [true, false]) {
+      for (const plays of [true, false]) {
+        assert.equal(headerActions({ dm, on: "page", plays, playersPlace: true, viewAsPlayers: 2 }).includes("viewAs"), false);
+        const panel = headerActions({ dm, on: "token", plays, playersPlace: true, viewAsPlayers: 2 });
+        assert.equal(panel.includes("place") || panel.includes("placeMine"), false);
       }
     }
   });

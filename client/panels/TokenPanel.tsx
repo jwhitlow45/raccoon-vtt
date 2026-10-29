@@ -21,7 +21,7 @@ import { QuickStartLink } from "../features/guide/GuideLink.tsx";
 import { DotLabel } from "../components/Row.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
-import { ViewAsButton, ViewAsEye } from "../features/dm/viewAs.tsx";
+import { ViewAsButton, ViewAsEye, viewAsPlayers } from "../features/dm/viewAs.tsx";
 import { usePanelHere, type PanelProps } from "../features/panels.ts";
 import { ImageField } from "../features/images/ImageField.tsx";
 import { RangeRingsSection } from "../features/measure/RangeRingsSection.tsx";
@@ -37,7 +37,7 @@ import { EffectsSection } from "../features/tokens/EffectsSection.tsx";
 import { shownRowOps } from "../features/tokens/groupEdit.ts";
 import { HpSection } from "../features/tokens/HpSection.tsx";
 import { relationKey, usePanelFolds, type FoldKey } from "../features/tokens/panelFolds.ts";
-import { combatSummary, holdsClassResources, offersMakeCompanion, panelGroups, panelRelation, reactionSpent, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
+import { combatSummary, headerActions, holdsClassResources, offersMakeCompanion, panelGroups, panelRelation, reactionSpent, type PanelGroupId, type PanelSectionId } from "../features/tokens/panelOrder.ts";
 import { backTo, baseSize, customWords, SIZE_WORDS } from "../features/tokens/resize.ts";
 import { RestSection } from "../features/tokens/RestSection.tsx";
 import { StatBlockSection } from "../features/tokens/StatBlockSection.tsx";
@@ -321,12 +321,16 @@ function TokenDetails(props: PanelProps) {
  * The token's header (CreatureHeader.tsx): its picture as the image field
  * previews it, the name, the kind line and the tags. A companion names its
  * character in the tracker's words (docs/design-v1-combat-flow.md 3.6.7),
- * and wears its portrait, for whoever's copy holds the link.
+ * and wears its portrait, for whoever's copy holds the link. The DM's View
+ * as takes the header's actions row, one tap from the header, folded
+ * groups or not (D-261027-09).
  */
 function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | undefined; character: Character | undefined; feetPerCell: number; children?: ReactNode }) {
   const { token } = props;
   const keeper = useRoomView((s) => (token.companion ? s.view?.characters[token.companion.of] : undefined));
   const you = useRoomView((s) => s.you);
+  // A count, so the header draws again only when it changes.
+  const players = useRoomView((s) => viewAsPlayers(s.view, token).length);
   const ui = useRoomUi();
   const scope = useRoomScope();
   const here = usePanelHere();
@@ -359,13 +363,9 @@ function NameBlock(props: { token: Token; name: string; actor: Partial<Actor> | 
       // Focus lands here once a press selected another token and the panel remounted for it, as Duplicate's does.
       focusable
       tags={tags}
-      afterTags={
-        <>
-          <SteerControl token={token} />
-          {/* One tap from the header, folded groups or not (D-261027-09). Nothing for a token no player owns. */}
-          <ViewAsButton token={token} style={{ justifySelf: "start" }} />
-        </>
-      }
+      afterTags={<SteerControl token={token} />}
+      // A token's header offers View as alone: placing is the character page's.
+      actions={headerActions({ dm: you?.role === "dm", on: "token", viewAsPlayers: players }).flatMap((id) => (id === "viewAs" ? [<ViewAsButton key={id} token={token} />] : []))}
     >
       {props.children}
     </CreatureHeader>

@@ -39,6 +39,12 @@ export type CreaturePicture = {
  * Independent), and the quick numbers as `children`. The token panel opens with it, so a token's
  * details and a character's read alike.
  *
+ * What the DM or a player can do from the header (panelOrder.ts
+ * headerActions: Place a token, View as Pat) takes one row under it all,
+ * from the picture's edge, which is the panel's, so the numbers keep their
+ * place under the kind line and both pages put their actions in one place
+ * (docs/design-v1-design-pass.md 4.3). No actions, no row and no gap.
+ *
  * A companion's picture carries its character's portrait (`badge`) as a
  * 20 px disk at its lower right, so the tie reads before the words (3.3).
  * The pictures are decoration: the name and the kind line say who it is,
@@ -60,11 +66,14 @@ export function CreatureHeader(props: {
   tags: readonly (string | HeaderTag)[];
   afterTags?: ReactNode;
   children?: ReactNode;
+  /** The actions row's controls, each keyed. Pass only what draws, so an empty list draws no row (headerActions). */
+  actions?: readonly ReactNode[];
 }) {
   const { picture, badge, line } = props;
+  const actions = props.actions ?? [];
   return (
     // The picture beside the name, then one column no wider than the panel, so a tag too long for it is cut rather than widening the column.
-    <div data-creature-header="" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", columnGap: theme.space(3), alignItems: "start", paddingTop: theme.space(2), paddingBottom: theme.space(4) }}>
+    <div data-creature-header="" style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", columnGap: theme.space(3), rowGap: theme.space(3), alignItems: "start", paddingTop: theme.space(2), paddingBottom: theme.space(4) }}>
       <span aria-hidden style={{ position: "relative", display: "flex" }}>
         <ImagePreview image={picture.image} shape={picture.shape} aspect={picture.aspect} width={PICTURE_PX} ring={picture.ring} initials={picture.initials} />
         {badge ? (
@@ -114,6 +123,12 @@ export function CreatureHeader(props: {
         {props.afterTags}
         {props.children}
       </div>
+      {actions.length > 0 ? (
+        // Across both columns, wrapping where a phone cannot hold them side by side.
+        <div data-header-actions="" style={{ gridColumn: "1 / -1", display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }

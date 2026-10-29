@@ -94,6 +94,8 @@ const VIEW_AS_A_PLAYER = "View as a player";
  */
 const MULE_AT = { x: 14, y: 1 };
 const WAGON_AT = { x: 12, y: 1 };
+/** dp-4a's companion, hidden by the DM as the mule is, whose character Ana and Ben play. */
+const HAWK_AT = { x: 13, y: 0 };
 /** Installs the hook that picks a view without the View menu (client/canvas/relief/isoTest.ts), set before a page loads. */
 const HOOK_FLAG = "globalThis.__rvttIsoTest = true;";
 
@@ -109,6 +111,8 @@ const run = {
   thornId: randomUUID(),
   muleId: randomUUID(),
   wagonId: randomUUID(),
+  ivyId: randomUUID(),
+  hawkId: randomUUID(),
   breeId: randomUUID(),
   goblinId: randomUUID(),
   labelId: randomUUID(),
@@ -387,6 +391,82 @@ async function spills(root: Locator, at: string): Promise<string[]> {
     },
     at,
   );
+}
+
+/**
+ * A creature header as the page lays it out (CreatureHeader.tsx): how many
+ * rows its grid holds, the words of its actions row's buttons and lines,
+ * and the boxes of the header, its name, its quick numbers, its actions
+ * row and the part after it.
+ */
+type HeaderLayout = { rows: number; actions: string[]; header: Box; name: Box; numbers: Box | null; row: Box | null; next: Box | null };
+
+async function headerLayout(header: Locator): Promise<HeaderLayout> {
+  return header.evaluate((el) => {
+    type Node = El & { nextElementSibling: Node | null; querySelector(s: string): Node | null; children: Iterable<Node> };
+    const { getComputedStyle } = globalThis as unknown as { getComputedStyle(e: unknown): { gridTemplateRows: string } };
+    const h = el as unknown as Node;
+    const box = (n: Node | null): Box | null => {
+      if (!n) return null;
+      const r = n.getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    };
+    const row = h.querySelector("[data-header-actions]");
+    return {
+      rows: getComputedStyle(h).gridTemplateRows.trim().split(/\s+/).length,
+      actions: row ? [...row.children].map((c) => (c.textContent ?? "").trim()) : [],
+      header: box(h)!,
+      name: box(h.querySelector("h3"))!,
+      numbers: box(h.querySelector("[data-quick-numbers]")),
+      row: box(row),
+      next: box(h.nextElementSibling),
+    };
+  });
+}
+
+/** Ivy's page in the Characters panel of a page that has just loaded: the side panel's tab from 900 px, else a sheet from Panels. Returns her header. */
+async function ivysPage(page: Page, side: boolean): Promise<Locator> {
+  let panel: Locator;
+  if (side) {
+    await openSideTab(page, "Characters");
+    panel = page.getByRole("tabpanel", { name: sideTabName("Characters") });
+  } else {
+    await page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+    await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Characters/ }).click();
+    panel = page.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+  }
+  await panel.locator(`[data-opener="character:${run.ivyId}"]`).click();
+  const header = panel.locator("[data-creature-header]").filter({ has: page.getByRole("heading", { name: "Ivy", exact: true }) });
+  await header.waitFor();
+  await header.scrollIntoViewIfNeeded();
+  return header;
+}
+
+/** Back to the Characters list, and on a phone its sheet put away, so the map takes taps again. */
+async function leavePage(page: Page, side: boolean): Promise<void> {
+  await page.getByRole("button", { name: "Back to Characters" }).click();
+  if (side) return;
+  const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Characters"]');
+  await sheet.getByRole("button", { name: /^Close / }).first().click();
+  await sheet.waitFor({ state: "hidden" });
+}
+
+/**
+ * What is wrong with a header's actions row (docs/design-v1-design-pass.md
+ * 4.3): it holds `want`, under the quick numbers, from the header's own
+ * left edge rather than the name's, and above the part after the header.
+ */
+function actionsRowWrong(at: string, layout: HeaderLayout, want: string[]): string[] {
+  const { row, numbers, header, name, next } = layout;
+  if (!row || !numbers) return [`${at}: no actions row${numbers ? "" : " and no quick numbers"}`];
+  const out: string[] = [];
+  if (JSON.stringify(layout.actions) !== JSON.stringify(want)) out.push(`${at}: the row holds ${JSON.stringify(layout.actions)}`);
+  if (layout.rows !== 2) out.push(`${at}: the header lays out ${layout.rows} rows`);
+  if (row.top < numbers.bottom) out.push(`${at}: the row starts ${(numbers.bottom - row.top).toFixed(1)} px above the quick numbers' foot`);
+  if (Math.abs(row.left - header.left) > 1) out.push(`${at}: the row starts ${(row.left - header.left).toFixed(1)} px from the header's edge`);
+  if (row.left > name.left - 1) out.push(`${at}: the row starts in the name's column`);
+  if (next && next.top < row.bottom - 1) out.push(`${at}: the part after the header starts above the row's foot`);
+  return out;
 }
 
 /**
@@ -763,7 +843,54 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     await owners.click();
   });
 
-  test("va-2. Thorn's bar, its Read more row with View as Ana, and his panel's header measure true at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+  test("dp-4a. a creature header's actions row at a desk: View as Ana under Thorn's quick numbers, View as a player under a companion's whose character Ana and Ben play, no row and no gap for the goblin, and Place a token in the same place on the character's page (va-2 measures the page at every size, then removes Ivy and her hawk)", async () => {
+    await ops.send({ t: "character.create", character: { id: run.ivyId, name: "Ivy", size: "medium", ownerIds: [run.anaId, run.benId], actor: actor() } });
+    await ops.send(creature(run.hawkId, "Hawk", HAWK_AT, { kind: "npc", disposition: "ally", visibility: "dm", companion: { of: run.ivyId, turn: "none" } }));
+    await waitFor("Ivy and her hawk in the DM's copy", () => (sockets.dm.state?.characters[run.ivyId] && sockets.dm.state.tokens[run.hawkId] ? true : null));
+    const wrong: string[] = [];
+    const panelHeader = async (cell: { x: number; y: number }, name: string): Promise<HeaderLayout> => {
+      await dm.keyboard.press("Escape");
+      await tapCell(dm, BOUNDS, cell);
+      await dm.getByRole("dialog", { name: `${name} actions` }).waitFor();
+      await openSideTab(dm, "Token");
+      const header = dm.getByRole("tabpanel", { name: sideTabName("Token") }).locator("[data-creature-header]").filter({ has: dm.getByRole("heading", { name, exact: true }) });
+      await header.waitFor();
+      // The panel keeps where it was scrolled for the token before, so the header is brought into view for the picture.
+      await header.scrollIntoViewIfNeeded();
+      await shots.take(dm, `dp-4a-panel-${name.toLowerCase()}`);
+      return headerLayout(header);
+    };
+    const goblin = await panelHeader(cellOf(run.goblinId), "Goblin");
+    if (goblin.row || goblin.actions.length > 0) wrong.push(`the goblin's header has an actions row: ${JSON.stringify(goblin.actions)}`);
+    // One row in the header's grid, so no row gap stands under the numbers either.
+    if (goblin.rows !== 1) wrong.push(`the goblin's header lays out ${goblin.rows} rows`);
+    const thorn = await panelHeader(cellOf(run.thornId), "Thorn");
+    wrong.push(...actionsRowWrong("Thorn's panel", thorn, ["View as Ana"]));
+    const hawk = await panelHeader(HAWK_AT, "Hawk");
+    wrong.push(...actionsRowWrong("the hawk's panel", hawk, [VIEW_AS_A_PLAYER]));
+    const kind = await dm.getByRole("tabpanel", { name: sideTabName("Token") }).locator("[data-kind-line]").innerText();
+    assert.match(kind, /^Companion of Ivy · /, "the hawk's kind line");
+    await dm.keyboard.press("Escape");
+
+    // The page draws its row where the panel does: as far under the numbers, from the same edge.
+    await openSideTab(dm, "Characters");
+    const characters = dm.getByRole("tabpanel", { name: sideTabName("Characters") });
+    await characters.locator(`[data-opener="character:${run.ivyId}"]`).click();
+    const header = characters.locator("[data-creature-header]").filter({ has: dm.getByRole("heading", { name: "Ivy", exact: true }) });
+    await header.waitFor();
+    const page = await headerLayout(header);
+    wrong.push(...actionsRowWrong("Ivy's page", page, ["Place a token"]));
+    if (page.row && page.numbers && thorn.row && thorn.numbers) {
+      const under = (l: HeaderLayout) => l.row!.top - l.numbers!.bottom;
+      if (Math.abs(under(page) - under(thorn)) > 1) wrong.push(`Ivy's page sets its row ${under(page).toFixed(1)} px under the numbers, the panel ${under(thorn).toFixed(1)}`);
+    }
+    await shots.take(dm, "dp-4a-page-ivy");
+    // In the panel's own header, outside its tab panel.
+    await dm.getByRole("button", { name: "Back to Characters" }).click();
+    assert.deepEqual(wrong, []);
+  });
+
+  test("va-2. Thorn's bar, its Read more row with View as Ana, his panel's header and Ivy's page's header with Place a token (dp-4a's) measure true at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
     const sizes = [
       { name: "1440x900", width: 1440, height: 900, touch: false },
       { name: "390x844", width: 390, height: 844, touch: true },
@@ -771,35 +898,47 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     ];
     const off: string[] = [];
     const storageState = await dmContext.storageState();
-    for (const size of sizes) {
-      for (const scale of [1, 1.3]) {
-        const at = `${size.name} at ${Math.round(scale * 100)}%`;
-        // A context of the size's kind, so a phone lays out with touch as Ana's and Ben's do. One at a time, closed after.
-        const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, storageState });
-        try {
-          await context.addInitScript((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
-          const page = await context.newPage();
-          await page.goto(`${server.origin}/r/${run.roomId}`);
-          await page.getByRole("status", { name: "Connected" }).first().waitFor();
-          await page.locator(".konvajs-content").first().waitFor();
-          await tapCell(page, BOUNDS, cellOf(run.thornId));
-          const bar = page.getByRole("dialog", { name: "Thorn actions" });
-          await bar.waitFor();
-          await expandBar(bar);
-          const readMore = bar.getByRole("group", { name: "Read more" });
-          await readMore.getByRole("button", { name: "View as Ana", exact: true }).scrollIntoViewIfNeeded();
-          off.push(...alignmentLines(await measureAlignment(bar), `Thorn's bar at ${at}`));
-          off.push(...alignmentLines(await measureAlignment(readMore), `Thorn's Read more at ${at}`));
-          await shots.take(page, `viewas-bar-${size.name}-${Math.round(scale * 100)}`);
-          await bar.getByRole("button", { name: "Details", exact: true }).first().click();
-          const header = page.locator("[data-token-panel] [data-creature-header]").filter({ has: page.getByRole("button", { name: "View as Ana", exact: true }) });
-          await header.waitFor();
-          off.push(...alignmentLines(await measureAlignment(header), `Thorn's panel header at ${at}`));
-          await shots.take(page, `viewas-panel-${size.name}-${Math.round(scale * 100)}`);
-        } finally {
-          await context.close();
+    try {
+      for (const size of sizes) {
+        for (const scale of [1, 1.3]) {
+          const at = `${size.name} at ${Math.round(scale * 100)}%`;
+          // A context of the size's kind, so a phone lays out with touch as Ana's and Ben's do. One at a time, closed after.
+          const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, storageState });
+          try {
+            await context.addInitScript((s) => localStorage.setItem("rvtt.uiScale", String(s)), scale);
+            const page = await context.newPage();
+            await page.goto(`${server.origin}/r/${run.roomId}`);
+            await page.getByRole("status", { name: "Connected" }).first().waitFor();
+            await page.locator(".konvajs-content").first().waitFor();
+            // Ivy's page first, in the same load, since every load takes a snapshot from the DM's budget, which va-3's previews need after it.
+            const ivy = await ivysPage(page, size.width >= 900);
+            off.push(...actionsRowWrong(`Ivy's page at ${at}`, await headerLayout(ivy), ["Place a token"]));
+            off.push(...alignmentLines(await measureAlignment(ivy), `Ivy's page header at ${at}`), ...(await spills(ivy, `Ivy's page header at ${at}`)));
+            await shots.take(page, `dp-4a-page-${size.name}-${Math.round(scale * 100)}`);
+            await leavePage(page, size.width >= 900);
+            await tapCell(page, BOUNDS, cellOf(run.thornId));
+            const bar = page.getByRole("dialog", { name: "Thorn actions" });
+            await bar.waitFor();
+            await expandBar(bar);
+            const readMore = bar.getByRole("group", { name: "Read more" });
+            await readMore.getByRole("button", { name: "View as Ana", exact: true }).scrollIntoViewIfNeeded();
+            off.push(...alignmentLines(await measureAlignment(bar), `Thorn's bar at ${at}`));
+            off.push(...alignmentLines(await measureAlignment(readMore), `Thorn's Read more at ${at}`));
+            await shots.take(page, `viewas-bar-${size.name}-${Math.round(scale * 100)}`);
+            await bar.getByRole("button", { name: "Details", exact: true }).first().click();
+            const header = page.locator("[data-token-panel] [data-creature-header]").filter({ has: page.getByRole("button", { name: "View as Ana", exact: true }) });
+            await header.waitFor();
+            off.push(...actionsRowWrong(`Thorn's panel at ${at}`, await headerLayout(header), ["View as Ana"]));
+            off.push(...alignmentLines(await measureAlignment(header), `Thorn's panel header at ${at}`));
+            await shots.take(page, `viewas-panel-${size.name}-${Math.round(scale * 100)}`);
+          } finally {
+            await context.close();
+          }
         }
       }
+    } finally {
+      await ops.send({ t: "token.delete", tokenId: run.hawkId });
+      await ops.send({ t: "character.delete", characterId: run.ivyId });
     }
     assert.deepEqual(off, []);
   });

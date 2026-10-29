@@ -192,8 +192,8 @@ export function combatSummary(input: { hp: string; effects: number; reactionUsed
   return [input.hp, effects > 0 ? `${effects} ${effects === 1 ? "condition" : "conditions"}` : "", input.reactionUsed ? "Reaction used" : "", rings.length > 0 ? `rings ${rings.join(", ")} ft` : ""].filter(Boolean).join(" · ");
 }
 
-/** A character's page, top to bottom (docs/design-v1-look-pass.md 3.1): the header, the actions row, then parts that are groups but Remove. */
-export type CardPartId = "header" | "place" | "statBlock" | "combat" | "companions" | "notes" | "image" | "stats" | "owners" | "remove";
+/** A character's page, top to bottom (docs/design-v1-look-pass.md 3.1): the header with its actions row, then parts that are groups but Remove. */
+export type CardPartId = "header" | "statBlock" | "combat" | "companions" | "notes" | "image" | "stats" | "owners" | "remove";
 
 export type CardGroupsInput = {
   dm: boolean;
@@ -211,8 +211,9 @@ export type CardGroupsInput = {
 
 /**
  * Which parts a character's page shows, in the token panel's order by use:
- * the header with the quick numbers, Place a token, the stat block, Combat,
- * Companions, Notes, then setup folded at the foot, and Remove last. A
+ * the header with the quick numbers and its actions (headerActions), the
+ * stat block, Combat, Companions, Notes, then setup folded at the foot,
+ * and Remove last. A
  * player opens the page for companions more often than to edit its
  * numbers (docs/design-v1-combat-flow.md 3.7.5), so Companions follows
  * Combat. An empty group is not drawn: Notes with nothing to read and no
@@ -223,7 +224,6 @@ export type CardGroupsInput = {
 export function cardGroups(input: CardGroupsInput): CardPartId[] {
   const out: CardPartId[] = ["header"];
   if (!input.dm && !input.plays) return out;
-  out.push("place");
   if (input.statBlock) out.push("statBlock");
   out.push("combat");
   if (input.companions) out.push("companions");
@@ -233,6 +233,44 @@ export function cardGroups(input: CardGroupsInput): CardPartId[] {
   if (input.dm) out.push("owners");
   out.push("remove");
   return out;
+}
+
+/** What a creature's header offers in its actions row (CreatureHeader.tsx `actions`), left to right. */
+export type HeaderActionId = "place" | "placeMine" | "viewAs";
+
+export type HeaderActionsInput = {
+  dm: boolean;
+  /** Whose header: a token's, in its panel, or a character's, on its page. */
+  on: "token" | "page";
+  /** A player who plays the page's character, alone or with others. */
+  plays?: boolean;
+  /** The room lets players place their characters' tokens now (playersPlace). */
+  playersPlace?: boolean;
+  /** How many players the DM may view the token as (viewAs.tsx viewAsPlayers). */
+  viewAsPlayers?: number;
+};
+
+/** Whether the room lets a player place a token of their character now: the room allows it, and the players are on a scene. */
+export function playersPlace(view: Pick<RoomState, "meta" | "scenes">): boolean {
+  const sceneId = view.meta.playerSceneId;
+  return view.meta.settings.playersCreateCharacters === true && sceneId !== null && view.scenes[sceneId] !== undefined;
+}
+
+/**
+ * The actions under a creature's header, one row for the token panel and
+ * the character's page alike (docs/design-v1-design-pass.md 4.3): the
+ * DM's Place a token and a player's Place my token on the page, and the
+ * DM's View as on a token some player owns. The header draws no row for
+ * an empty list, so a goblin's panel has no empty row and no gap. A
+ * player's Place my token stays once the character is on the map, where
+ * it says so in the button's place.
+ */
+export function headerActions(input: HeaderActionsInput): HeaderActionId[] {
+  if (input.on === "page") {
+    if (input.dm) return ["place"];
+    return input.plays === true && input.playersPlace === true ? ["placeMine"] : [];
+  }
+  return input.dm && (input.viewAsPlayers ?? 0) > 0 ? ["viewAs"] : [];
 }
 
 /** The sections of a character's Combat. */

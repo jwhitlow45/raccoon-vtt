@@ -28,7 +28,7 @@ import { characterKind, kindLine, sizeText } from "./creatureKind.ts";
 import { EffectsSection } from "./EffectsSection.tsx";
 import { HpSection } from "./HpSection.tsx";
 import { usePanelFolds, type FoldKey } from "./panelFolds.ts";
-import { cardCombat, cardGroups, combatSummary, reactionSpent, type CardCombatId, type CardPartId } from "./panelOrder.ts";
+import { cardCombat, cardGroups, combatSummary, headerActions, playersPlace, reactionSpent, type CardCombatId, type CardPartId } from "./panelOrder.ts";
 import { PLACE_TOOL_ID, setPending } from "./placement.ts";
 import { onScene, playerToken } from "./playerCharacters.ts";
 import { QuickNumbers } from "./QuickNumbers.tsx";
@@ -79,6 +79,7 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
   // Each a yes or no, so the page draws again only when one changes, not on every change to the room.
   const reaction = useRoomView((s) => (s.view ? reactionFor(s.view, s.you, self) !== null : false));
   const spent = useRoomView((s) => (s.view ? reactionSpent(s.view, self) : false));
+  const placeMine = useRoomView((s) => (s.view ? playersPlace(s.view) : false));
   const { folds, slot } = usePanelFolds();
   const preview = usePreview() !== null;
   // A viewer's tap is what this device remembers. "View as a player" reads what is stored and never writes it.
@@ -106,6 +107,9 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
   const cells = character.size === "custom" ? 1 : SIZE_CELLS[character.size];
   const notes = access.canEditActor("notes") || !!actor.notes?.trim() || access.dm;
   const parts = cardGroups({ dm: access.dm, plays: access.owner, statBlock: access.full, companions: true, notes, image: access.canEdit("defaultImage") });
+  const headerRow = headerActions({ dm: access.dm, on: "page", plays: access.owner, playersPlace: placeMine }).flatMap((id) =>
+    id === "place" ? [<PlaceToken key={id} character={character} close={props.close} />] : id === "placeMine" ? [<PlaceMine key={id} character={character} close={props.close} />] : [],
+  );
 
   // A group's one-line summary, shown while it is folded, in the token panel's words.
   const effects = actor.effects?.length ?? 0;
@@ -148,12 +152,11 @@ export function CharacterPage(props: { character: Character; close: PanelClose; 
             line={kindLine(characterKind(character), sizeText(character.size, { w: cells, h: cells }, feetPerCell))}
             focusable
             tags={[]}
+            actions={headerRow}
           >
             <QuickNumbers items={vitals({ actor, token: { kind: "pc" }, fullAccess: access.full, place: "panel" })} actor={actor} token={{ kind: "pc", elevation: 0 }} />
           </CreatureHeader>
         );
-      case "place":
-        return access.dm ? <PlaceToken key={id} character={character} close={props.close} /> : <PlaceMine key={id} character={character} close={props.close} />;
       case "statBlock":
         // The one fold the page shares with the token panel: the `own` relation's, as every viewer of the page plays or runs the character.
         return <PcStatBlock key={id} character={character} fold={fold("statBlock")} />;
@@ -277,24 +280,22 @@ function CharacterOwners(props: { character: Character; members: RoomState["memb
   );
 }
 
-/** The DM's "Place a token", under the header: the place tool, holding this character. */
+/** The DM's "Place a token", in the header's actions row: the place tool, holding this character. */
 function PlaceToken(props: { character: Character; close: PanelClose }) {
   const { character } = props;
   const ui = useRoomUi();
   const scope = useRoomScope();
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), paddingBottom: theme.space(2) }}>
-      <Button
-        size="sm"
-        onClick={() => {
-          setPending(scope, { kind: "character", characterId: character.id, name: character.name });
-          ui.setTool(PLACE_TOOL_ID);
-          props.close({ placing: true });
-        }}
-      >
-        Place a token
-      </Button>
-    </div>
+    <Button
+      size="sm"
+      onClick={() => {
+        setPending(scope, { kind: "character", characterId: character.id, name: character.name });
+        ui.setTool(PLACE_TOOL_ID);
+        props.close({ placing: true });
+      }}
+    >
+      Place a token
+    </Button>
   );
 }
 
@@ -308,7 +309,11 @@ export function myToken(scope: RoomScope, input: Omit<Parameters<typeof playerTo
   return token && placeOnGround(input.view.buildChunks, token);
 }
 
-/** "Place my token" for a player's own character, when the room lets players place them. */
+/**
+ * "Place my token" for a player's own character, in the header's actions
+ * row, when the room lets players place them (panelOrder.ts playersPlace).
+ * Once the character is on the map, the row says so in its place.
+ */
 function PlaceMine(props: { character: Character; close(): void }) {
   const { character } = props;
   const view = useRoomView((s) => s.view);
@@ -318,21 +323,19 @@ function PlaceMine(props: { character: Character; close(): void }) {
   const scope = useRoomScope();
   const scene = view?.meta.playerSceneId ? view.scenes[view.meta.playerSceneId] : undefined;
   if (!view || !you || !scene || view.meta.settings.playersCreateCharacters !== true) return null;
-  if (onScene(view, character.id, scene.id)) return <Help style={{ paddingBottom: theme.space(2), overflowWrap: "anywhere" }}>{character.name} is on the map.</Help>;
+  if (onScene(view, character.id, scene.id)) return <Help style={{ overflowWrap: "anywhere" }}>{character.name} is on the map.</Help>;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), paddingBottom: theme.space(2) }}>
-      <Button
-        size="sm"
-        onClick={() => {
-          const token = myToken(scope, { view, scene, character, memberId: you.memberId, id: actions.newId() });
-          if (!token || actions.dispatch({ t: "token.create", token }) === null) return;
-          ui.select(token.id, { opens: true });
-          props.close();
-        }}
-      >
-        Place my token
-      </Button>
-    </div>
+    <Button
+      size="sm"
+      onClick={() => {
+        const token = myToken(scope, { view, scene, character, memberId: you.memberId, id: actions.newId() });
+        if (!token || actions.dispatch({ t: "token.create", token }) === null) return;
+        ui.select(token.id, { opens: true });
+        props.close();
+      }}
+    >
+      Place my token
+    </Button>
   );
 }
 
