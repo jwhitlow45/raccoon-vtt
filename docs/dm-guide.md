@@ -444,7 +444,7 @@ A few other things cost extra too, and the app counts them the same way:
 - **Squeezing** through a space made for a smaller creature counts as difficult terrain, so every foot costs 1 extra, and a squeeze through rubble costs no more than the rubble does (see [When walls stop a move](#when-walls-stop-a-move)).
 - **Dragging or carrying a creature** costs 1 extra foot per foot, unless the creature is Tiny or at least two sizes smaller than the one hauling it (see [Mounts, familiars and dragging](#mounts-familiars-and-dragging)).
 
-Difficult terrain isn't cumulative: a square is difficult or it isn't. Plant Growth's 4 ft per foot replaces it rather than adding to it. The other costs do add up, though, squeezing aside, so a creature dragging a goblin through rubble pays 3 feet for every foot.
+Difficult terrain isn't cumulative: a square is difficult or it isn't. Plant Growth's 4 ft per foot replaces it rather than adding to it. The other costs do add up, though. Squeezing counts as difficult terrain, so it adds nothing to rubble, but it does add to dragging and crawling: a creature dragging a goblin through rubble pays 3 feet for every foot, and so does one dragging a goblin while it squeezes.
 
 Whenever one of these makes a walk cost more, the label on the drag says what it was, such as "+10 ft for difficult terrain", "+25 ft for squeezing" or "+15 ft for dragging", so nobody has to wonder why a short walk used so much of a turn.
 
