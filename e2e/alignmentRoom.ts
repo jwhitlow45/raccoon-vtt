@@ -62,9 +62,9 @@ import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measure
  * forms, Exhaustion 2 and Poisoned, and the goblin hidden, locked and its
  * name hidden. The DM measures the side panel's tabs (one line, each
  * 44 px, no name cut) or a phone's Panels list, Thorn's and Wren's panels
- * with every group folded (each name on one line, a summary never under
- * its 4em floor, and on a computer the Stat block's action on its name's
- * line), the goblin's header tags, the round header with its clock as tall
+ * with every group folded (each name on one line, a summary cut only at
+ * its 4em floor or wider, and on a computer the Stat block's action on its
+ * name's line), the goblin's header tags, the round header with its clock as tall
  * as without the timer, the tracker's and party bar's chips in their
  * 20 x 18 box, and the time-up and ended-effect lines as tall and on as
  * many lines with their lead as without it.
@@ -2024,10 +2024,12 @@ async function groupOverflowLines(root: Locator, at: string, screen: string): Pr
 }
 
 /**
- * Each group header's name on one line, a folded summary never under its
- * 4em floor, and, where `actionInline`, every header's action on its
- * name's line (docs/design-v1-icons-2.md 3.3 and 5): lines naming each
- * header that breaks a rule.
+ * Each group header's name on one line, a folded summary on its name's
+ * line and cut only at its 4em floor or wider, since words fewer than the
+ * floor show whole in less, and, where `actionInline`, every header's
+ * action on its name's line (docs/design-v1-icons-2.md 3.3 and 5,
+ * docs/design-v1-design-pass.md 4.1): lines naming each header that breaks
+ * a rule.
  */
 async function groupHeaderLines(panel: Locator, at: string, screen: string, actionInline: boolean): Promise<string[]> {
   const found = await panel.evaluate((root) => {
@@ -2060,11 +2062,10 @@ async function groupHeaderLines(panel: Locator, at: string, screen: string, acti
       if (lines(name) !== 1) out.push(`${label}: its name takes ${lines(name)} lines`);
       const summaryId = fold?.getAttribute("aria-describedby");
       const summary = summaryId ? g.document.getElementById(summaryId) : null;
-      // The floor is a group with an icon's: one without keeps the summary that gives way to nothing (review IC2BUILD-ASTRA-01).
-      if (summary && fold?.querySelector("[data-group-icon]")) {
+      // Every group keeps the floor, one without an icon too (D-261028-84). Words fewer than the floor ("Pat") show whole in less, so the floor is what a cut summary keeps.
+      if (summary) {
         const floor = 4 * parseFloat(g.getComputedStyle(summary).fontSize) * zoom(summary);
         const width = summary.getBoundingClientRect().width;
-        // Words fewer than the floor ("Pat") show whole in less (docs/design-v1-design-pass.md 4.1): the floor is what a cut summary keeps.
         const cut = summary.scrollWidth > summary.clientWidth;
         if (cut && width < floor - 0.5) out.push(`${label}: its summary is cut at ${width.toFixed(1)} px, under its ${floor.toFixed(1)} px floor`);
       }
@@ -2187,7 +2188,7 @@ async function ic2Screens(sweep: Sweep, page: Page, size: Size, scale: number): 
     await closeSheets(page);
   }
 
-  // Thorn's and Wren's panels with every group folded: one line a name, a summary at least its floor, and on a computer the Stat block's action on its name's line.
+  // Thorn's and Wren's panels with every group folded: one line a name, a summary cut only at its floor or wider, and on a computer the Stat block's action on its name's line.
   for (const [name, cell] of [
     ["Thorn", { x: 5, y: 5 }],
     ["Wren", WREN_AT],
