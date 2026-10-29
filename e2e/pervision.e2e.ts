@@ -1128,32 +1128,35 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
 
   test("FU38-B: Attach stays above notices when a closed View as list mounts and unmounts", async () => {
     const id = randomUUID();
-    const holder = randomUUID();
-    await ops.send(creature(holder, "FU38 porter", { x: 13, y: 1 }, { kind: "npc", visibility: "dm" }));
-    await ops.send(creature(id, "FU38 lantern", MULE_AT, { kind: "object", size: "tiny", visibility: "dm", ownerIds: [run.benId, run.anaId] }));
+    const lantern = randomUUID();
+    await ops.send(creature(lantern, "FU38 lantern", { x: 13, y: 1 }, { kind: "object", size: "tiny", visibility: "dm" }));
+    // Attach lists what the selected token can carry, so select the porter beside the lantern.
+    await ops.send(creature(id, "FU38 porter", MULE_AT, { kind: "npc", disposition: "ally", visibility: "dm", ownerIds: [run.benId, run.anaId] }));
     try {
-      await waitFor("FU38-B Attach fixtures in the DM's copy", () => sockets.dm.state?.tokens[id] && sockets.dm.state.tokens[holder] ? true : null);
+      await waitFor("FU38-B Attach fixtures in the DM's copy", () => sockets.dm.state?.tokens[id] && sockets.dm.state.tokens[lantern] ? true : null);
       await dm.setViewportSize({ width: 1440, height: 900 });
       await dm.keyboard.press("Escape");
-      await tapCell(dm, BOUNDS, { x: MULE_AT.x - 0.25, y: MULE_AT.y - 0.25 });
-      const bar = dm.getByRole("dialog", { name: "FU38 lantern actions", exact: true });
+      await tapCell(dm, BOUNDS, MULE_AT);
+      const bar = dm.getByRole("dialog", { name: "FU38 porter actions", exact: true });
       await bar.waitFor();
       await expandBar(bar);
-      await watchNoticeCover(dm, "Attach FU38 lantern");
+      const readMore = bar.getByRole("group", { name: "Read more", exact: true });
+      await readMore.getByRole("button", { name: VIEW_AS_A_PLAYER, exact: true }).waitFor();
+      await watchNoticeCover(dm, "Attach FU38 porter");
       await bar.getByRole("button", { name: "Attach", exact: true }).click();
-      const list = dm.getByRole("dialog", { name: "Attach FU38 lantern", exact: true });
-      await list.waitFor();
+      const list = dm.getByRole("dialog", { name: "Attach FU38 porter", exact: true });
+      await list.getByRole("button", { name: "Carry FU38 lantern", exact: true }).waitFor();
       await assertNoticeCover(dm);
       for (const ownerIds of [[run.benId], [run.benId, run.anaId]]) {
         await ops.send({ t: "token.update", tokenId: id, patch: { ownerIds } });
-        await bar.getByRole("button", { name: ownerIds.length === 1 ? "View as Ben" : VIEW_AS_A_PLAYER, exact: true }).waitFor();
+        await readMore.getByRole("button", { name: ownerIds.length === 1 ? "View as Ben" : VIEW_AS_A_PLAYER, exact: true }).waitFor();
         await assertNoticeCover(dm);
       }
       assert.deepEqual(alignmentLines(await measureAlignment(list), "FU38-B Attach"), []);
     } finally {
       await dm.keyboard.press("Escape");
       await ops.send({ t: "token.delete", tokenId: id });
-      await ops.send({ t: "token.delete", tokenId: holder });
+      await ops.send({ t: "token.delete", tokenId: lantern });
       await dm.setViewportSize({ width: 1280, height: 800 });
     }
   });
@@ -1171,15 +1174,19 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
       const bar = dm.getByRole("dialog", { name: "FU38 lantern actions", exact: true });
       await bar.waitFor();
       await expandBar(bar);
+      await bar.getByRole("button", { name: "Attach", exact: true }).waitFor();
+      const fromBar = bar.getByRole("group", { name: "Read more", exact: true }).getByRole("button", { name: VIEW_AS_A_PLAYER, exact: true });
       await watchNoticeCover(dm, VIEW_AS_A_PLAYER);
-      await bar.getByRole("button", { name: VIEW_AS_A_PLAYER, exact: true }).click();
+      assert.deepEqual(await openPlayers(dm, fromBar, "FU38-B View as", true), []);
       const list = dm.getByRole("menu", { name: VIEW_AS_A_PLAYER, exact: true });
       await list.waitFor();
       await assertNoticeCover(dm);
       await ops.send({ t: "token.attach", tokenId: id, to: holder, kind: "carry", x: 13, y: 1, elevation: 0 });
+      await bar.getByRole("button", { name: "Put down", exact: true }).waitFor();
       await bar.getByRole("button", { name: "Attach", exact: true }).waitFor({ state: "detached" });
       await assertNoticeCover(dm);
-      await ops.send({ t: "token.detach", tokenId: id, ...MULE_AT, elevation: 0 });
+      // Put down preserves the carried object's position. Only Get off accepts a destination.
+      await ops.send({ t: "token.detach", tokenId: id });
       await bar.getByRole("button", { name: "Attach", exact: true }).waitFor();
       await assertNoticeCover(dm);
       assert.deepEqual(alignmentLines(await measureAlignment(list), "FU38-B View as"), []);
