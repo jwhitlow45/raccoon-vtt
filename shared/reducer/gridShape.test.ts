@@ -174,7 +174,7 @@ describe("the shape switch (HX-D14)", () => {
 
   test("a draft holding Reveal room's cells keeps the scene on squares", () => {
     const state = run(room(), { t: "fog.draft", sceneId: "s1", add: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1", "2,1"] } }] }).state;
-    assert.match(refusal(state, toHex()), /Reveal room in its fog draft/);
+    assert.match(refusal(state, toHex()), /Builder room in its fog draft/);
   });
 
   test("a stationary emanation goes through a switch, rows to columns, as it was: it holds a size, never cell keys", () => {

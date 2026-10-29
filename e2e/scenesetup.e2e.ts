@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type Route } from "playwright-core";
 import sharp from "sharp";
 import type { RoomState, Scene } from "#shared/model.ts";
-import { ConsoleWatch, OpSocket, openSideTab, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, OpSocket, openSideTab, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { chooseStarterWork, starterWork } from "./starterPick.ts";
 
@@ -1024,6 +1024,39 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
       }
     }
     assert.deepEqual(lines, []);
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
+
+  test("fu37b-2. a hex scene whose fog draft holds a Builder room keeps Squares off, naming the Fog tool's Builder room as its control does (GP4-GRIDSHAPE-WORDS)", async () => {
+    const id = randomUUID();
+    await ops.send({ t: "scene.create", scene: { id, name: "Drafted hexes", bounds: { w: 20, h: 16 }, gridShape: "hexRows", fogEnabled: true, blockMovement: false } });
+    await waitFor("the drafted hexes in the DM's state", () => sceneOf(id));
+    // Hex keys in a draft, as a Builder room tap on a hex scene drafts them (client/features/fog/shapes.ts).
+    await ops.send({ t: "fog.draft", sceneId: id, add: [{ id: randomUUID(), mode: "reveal", shape: { kind: "cells", cells: ["5,5", "6,5"] } }] });
+    // The DM's copy holds the draft of the scene they view.
+    await view(id);
+    await waitFor("the room in the draft", () => (dmSocket.state?.fogDrafts[id]?.ops.length === 1 ? true : null));
+    const panel = await scenesPanel(dm);
+    const fold = panel.getByRole("heading", { name: "Map image and grid", exact: true }).getByRole("button", { name: "Map image and grid", exact: true });
+    if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+    // Squares and hex columns are both off, each reason said once under the group.
+    const why = [
+      "This scene has Builder room in its fog draft on its hexes, which can't stand on squares. Remove them to change the grid.",
+      "This scene has Builder room in its fog draft on its hex rows, which can't stand on hex columns. Remove them to change the grid.",
+    ].join(" ");
+    await panel.getByText(why, { exact: true }).waitFor();
+    const shape = panel.getByRole("radiogroup", { name: "Grid shape", exact: true });
+    assert.equal(await shape.getByRole("radio", { name: "Squares" }).isDisabled(), true);
+    assert.equal(await shape.getByRole("radio", { name: "Hex columns" }).isDisabled(), true);
+    await panel.getByText(why, { exact: true }).scrollIntoViewIfNeeded();
+    await shots.take(dm, "fu37b-2-grid-shape-builder-room");
+    await dm.keyboard.press("Escape");
+    // The control the words name: the Fog tool's shape.
+    await pickTool(dm, "Fog");
+    await pickOption(dm, "Fog", "Shape", "Builder room");
+    await shots.take(dm, "fu37b-2-fog-builder-room");
+    await pickTool(dm, "Select");
+    await ops.send({ t: "fog.discard", sceneId: id });
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
 });

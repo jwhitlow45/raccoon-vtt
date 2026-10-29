@@ -272,7 +272,7 @@ function holdingWords(h: ShapeHeld): string {
     case "trap":
       return h.count === 1 ? "a trap" : `${h.count} traps`;
     case "roomFog":
-      return "Reveal room in its fog draft";
+      return "Builder room in its fog draft";
     case "squeeze":
       return h.count === 1 ? "a squeezing creature" : `${h.count} squeezing creatures`;
     case "link":

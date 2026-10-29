@@ -90,7 +90,7 @@ describe("what keeps a scene from a shape (HX-D14)", () => {
       tokens: { a: token("a", { size: "large", squeeze: true }) },
     });
     const held = switchHolds(state, state.scenes.s1!, ROWS);
-    assert.equal(heldList(held), "painted ground, walls and doors, heights, stairs, difficult ground, 2 traps, Reveal room in its fog draft and a squeezing creature");
+    assert.equal(heldList(held), "painted ground, walls and doors, heights, stairs, difficult ground, 2 traps, Builder room in its fog draft and a squeezing creature");
     assert.equal(switchHolds(state, state.scenes.s1!, SQUARES).length, 0, "the shape it has already");
     assert.equal(switchHolds(state, state.scenes.s2!, ROWS).length, 0, "another scene's data");
   });

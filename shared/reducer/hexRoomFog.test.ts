@@ -112,7 +112,7 @@ for (const [shape, g] of [
       const state = run(hexRoom(shape, g), { t: "fog.draft", sceneId: "s1", add: [cellsOp(room7(g))] }).state;
       const r = applyOp(state, opSchema.parse({ t: "scene.update", sceneId: "s1", patch: { gridShape: shape === "hexRows" ? "hexColumns" : "hexRows" } }), A, env(seq++));
       assert.ok(!r.ok);
-      assert.match(r.message, /Reveal room in its fog draft/);
+      assert.match(r.message, /Builder room in its fog draft/);
     });
   });
 }

@@ -70,7 +70,7 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     const roomFog = parseRoomState(drafted);
     assert.ok(roomFog.ok, roomFog.ok ? "" : roomFog.message);
     drafted.fogDrafts.s1 = { ...drafted.fogDrafts.s1, grid: "hexColumns" };
-    assert.equal((parseRoomState(drafted) as { message: string }).message, "scenes.s1: Reveal room in its fog draft on hex columns can't stand on this scene's hex rows");
+    assert.equal((parseRoomState(drafted) as { message: string }).message, "scenes.s1: Builder room in its fog draft on hex columns can't stand on this scene's hex rows");
     // From H3 heights, stairs and a pit of the scene's own shape load, and another shape's are refused (HX-8).
     const raised = hexRoom();
     raised.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: "A".repeat(683) + "=", up: "2".padEnd(256, "."), grid: "hexRows" };

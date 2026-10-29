@@ -157,7 +157,7 @@ describe("a restore keeps the shape's invariant (HX-D14)", () => {
     const draft = { sceneId: "s1", rev: 0, grid: "hexRows", ops: [{ id: "f1", mode: "reveal", shape: { kind: "cells", cells: ["1,1"] } }] };
     const restored = run(hex, undo([{ key: "fogDraft:s1", value: draft, expectRev: null }])).state.fogDrafts.s1;
     assert.deepEqual([restored?.grid, restored?.ops], [draft.grid, draft.ops]);
-    assert.equal(refusal(hex, undo([{ key: "fogDraft:s1", value: { ...draft, grid: "hexColumns" }, expectRev: null }])), "Can't undo that: Reveal room in its fog draft on hex columns can't stand on this scene's hex rows.");
+    assert.equal(refusal(hex, undo([{ key: "fogDraft:s1", value: { ...draft, grid: "hexColumns" }, expectRev: null }])), "Can't undo that: Builder room in its fog draft on hex columns can't stand on this scene's hex rows.");
     // A trap of the scene's own shape restores from H2, and from H3 one with a pit too.
     const stamped = { ...trap("t1"), grid: "hexRows" };
     assert.equal(run(hex, undo([{ key: "trap:t1", value: stamped, expectRev: null }])).state.traps.t1?.grid, "hexRows");
