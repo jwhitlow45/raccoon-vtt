@@ -169,6 +169,15 @@ describe("finding a map's drawn hex grid", () => {
     const r = detectHex(stretched(tall, 1.011), { orient: "rows", onLook: (k) => looks.push(k) });
     assert.deepEqual(looks, [1, 2, 4]);
     assert.equal(!r.found && r.failed, "hexes out of shape");
+    // Round 2's fixtures: 100 px hex rows squeezed 1.1%, which the half measure reads 0.64% and 0.96% off a 300 px frame. Too near the limit to apply.
+    for (const width of [14, 18]) {
+      const squeezed = drawMap(map({ height: Math.round(H * 1.011), hexGrid: hexes("rows", 100, { x: 9, y: 4 }, { width, opacity: 0.6 }) }));
+      const near = detectHex(stretched(squeezed, 1.011), { orient: "rows" });
+      assert.ok(!near.found || (!near.checked && near.confidence <= UNCHECKED_MAX), `width ${width}: ${JSON.stringify(near.found ? [near.confidence, near.checked] : near)}`);
+    }
+    // The margin is the half measure's own: a first look reads thin lines finely, and its 0.9% stays sure, as 10.2 found.
+    const thin = detectHex(stretched(drawMap(map({ height: Math.round(H * 0.991), hexGrid: hexes("rows", 100, { x: W / 2, y: H / 2 }) })), 0.991), { orient: "rows" });
+    assert.ok(thin.found && thin.checked && thin.confidence >= HIGH_CONFIDENCE, JSON.stringify(thin.found ? [thin.confidence, thin.checked] : thin));
     const at = (width: number, orient: HexOrient) => detectHex(drawMap(map({ width: 1520, height: 1200, hexGrid: hexes(orient, 100, { x: 9, y: 4 }, { width, opacity: 0.6 }) })), { orient });
     const sure = at(18, "columns");
     assert.ok(sure.found && sure.checked && sure.confidence >= HIGH_CONFIDENCE, `measured at half size: ${JSON.stringify(sure.found ? [sure.confidence, sure.checked] : sure)}`);

@@ -154,6 +154,15 @@ const MAX_DRIFT_SHARE = 0.01;
  * that is not hexes.
  */
 const MIN_BROKEN = 0.5;
+/**
+ * How far off a third look's half measure may read a line's place, in its
+ * frame's pixels. The lean compares lines in the frame's top and bottom
+ * halves, half its height apart, so the stretch it gives is that far off
+ * by this over half the height. Drawn thick-lined hexes squeezed 1 to 1.5%
+ * on 760 to 1520 px maps read up to 1.2 / H under their stretch there,
+ * and no regular grid came within 2 / H of the limit.
+ */
+const STRETCH_ERROR_PX = 1;
 
 /**
  * `q` is the detrended profile's positive part. `sums` holds it summed
@@ -172,7 +181,8 @@ type Profile = {
 /** One polarity's three profiles, over the whole image and over its top and bottom halves. */
 type Profiles = { full: Profile[]; top: Profile[]; bottom: Profile[] };
 /** Gray levels on hex rows, and how many of the image's pixels one of its pixels spans. */
-type Frame = { L: Uint8Array; W: number; H: number; d: number; dv: number; step: number; k: number };
+/** `margin`: the frame measures a third look's find again, so a stretch near the limit is held as not measured (STRETCH_ERROR_PX). */
+type Frame = { L: Uint8Array; W: number; H: number; d: number; dv: number; step: number; k: number; margin: boolean };
 type Fit = { fams: [HexFamily, HexFamily, HexFamily]; polarity: Polarity; failed: string | null; score: number };
 
 /**
@@ -281,7 +291,7 @@ function search(L: Uint8Array, W: number, H: number, stepOption: number | undefi
   // A side 30 degrees off level is 1 / cos 30 thicker down than across.
   const dv = Math.ceil(d / HEX_S);
   const step = Math.max(1, Math.floor(stepOption ?? defaultStep(W, H)));
-  const frame: Frame = { L, W, H, d, dv, step, k };
+  const frame: Frame = { L, W, H, d, dv, step, k, margin: only !== undefined };
   const all = profilesOf(frame);
   const minP = minC / 2;
   const maxP = maxC / 2;
@@ -687,7 +697,12 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
   if (upLean !== null && Math.abs(upLean) * f.H > Math.max(MAX_DRIFT_PX / f.k, MAX_DRIFT_SHARE * cell)) return "lines turned";
   const aLean = leanOf(prof.top[1]!, prof.bottom[1]!, a, f.d, f.H);
   const bLean = leanOf(prof.top[2]!, prof.bottom[2]!, b, f.d, f.H);
-  if (aLean !== null && bLean !== null && Math.abs(aLean + bLean) / (2 * HEX_S) >= MAX_STRETCH) return "hexes out of shape";
+  const stretch = aLean !== null && bLean !== null ? Math.abs(aLean + bLean) / (2 * HEX_S) : null;
+  if (stretch !== null && stretch >= MAX_STRETCH) return "hexes out of shape";
+  // The half measure of a third look's find reads thick lines' places less
+  // finely than a look at their own size: hexes squeezed 1.1% read as 0.64%
+  // on a 300 px frame. A stretch that near the limit is not measured.
+  const nearLimit = f.margin && stretch !== null && stretch + STRETCH_ERROR_PX / (f.H / 2) >= MAX_STRETCH;
   // A point where all three families cross, near the middle: x from the
   // upright sides and from the sloped ones' difference, y cos 30 from the
   // sloped ones' mean.
@@ -704,7 +719,7 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
   const coverage = best.values.filter((v) => v > threshold).length / best.values.length;
   // Sides that barely break at the corners lower the confidence, which
   // may fall under the cutoff here, after the profiles passed it.
-  const checked = upLean !== null && aLean !== null && bLean !== null;
+  const checked = upLean !== null && aLean !== null && bLean !== null && !nearLimit;
   const measured = fit.score * clamp01((broken - MIN_BROKEN) / 0.3);
   if (measured < MIN_CONFIDENCE) return "low confidence";
   const confidence = checked ? measured : Math.min(measured, UNCHECKED_MAX);
