@@ -9,6 +9,11 @@ import { incapacitated } from "./rollReminders.ts";
 /** One damage part of the outcome: rolled dice with their type, or a number typed. */
 export type OutcomePart = { formula: string; type?: DamageType } | { amount: number; type?: DamageType };
 
+/** Negative rolled parts count as zero damage, never as a subtraction from another part. Formulas stay unrolled. */
+export function nonnegativeDamageParts<T extends OutcomePart>(parts: readonly T[]): T[] {
+  return parts.map((part) => "amount" in part ? { ...part, amount: Math.max(0, part.amount) } : part);
+}
+
 const TYPE_WORDS = new Set<string>(DAMAGE_TYPES);
 
 /**

@@ -210,7 +210,9 @@ describe("a row in words", () => {
   test("the notes say only what the amount does not: a condition gained, a typed amount", () => {
     const fails: Page = { ...sunburst(13), states: { [holder]: { way: "type", typed: 5 } } };
     assert.deepEqual(words(fails).notes, ["Gains Blinded"]);
-    assert.deepEqual(words(setAmount(fails, holder, 3)).notes, ["Typed 3, worked out 12", "Gains Blinded"]);
+    assert.deepEqual(words(setAmount(fails, holder, 3)).notes, ["Typed 3", "Gains Blinded"]);
+    const withDamage = { ...fails, outcome: { ...fails.outcome, damage: "12" } };
+    assert.deepEqual(words(setAmount(withDamage, holder, 3)).notes, ["Typed 3, worked out 12", "Gains Blinded"]);
   });
 });
 

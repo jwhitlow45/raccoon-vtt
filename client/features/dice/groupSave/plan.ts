@@ -1,10 +1,11 @@
-import { damageSummary, type DamageSummaryLines } from "../damageSummaryLines.ts";
 import type { ConditionKey, Effect, RoomState } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import { MAX_DAMAGE_PARTS, type ActorTarget, type DurationInput, type OpOf, type OutcomeDamage } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { effectName } from "#shared/logText.ts";
+import { nonnegativeDamageParts } from "#shared/rules/typedDamage.ts";
+import { damageSummary, type DamageSummaryLines } from "../damageSummaryLines.ts";
 import { creatureRolls, type DiceView } from "../creature.ts";
 import type { Page } from "./chain.ts";
 import { stateOf } from "./chain.ts";
@@ -24,8 +25,8 @@ export type RowOutcome = {
   resisted: boolean;
   /** What the row takes: the DM's own amount where typed, else the worked-out one. */
   amount: number;
-  /** The worked-out amount, from the parts, the save and the row's defenses, whatever the DM typed over it. */
-  computed: number;
+  /** The worked-out amount, from the parts, the save and the row's defenses, whatever the DM typed over it. Null until nonempty damage is known. */
+  computed: number | null;
   /** What the amount alone does not say: "Immune to fire: 9 radiant", "Typed 5, worked out 12", else "". */
   words: string;
   summary?: DamageSummaryLines;
@@ -107,7 +108,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
     .map((d) => ({ key: `${d.kind}:${d.of}:${d.qualifier ?? ""}:${d.source}`, words: `${d.kind === "immune" ? "Immune to" : d.kind === "resist" ? "Resists" : "Vulnerable to"} ${d.of} ${d.qualifier}` }));
   const evasionApplies = page.test.kind === "save" && page.test.ability === "dex" && page.outcome.onPass === "half";
   const evasion = state.evasion ?? rolls?.evasion ?? false;
-  const out: RowOutcome = { result, resisted, amount: 0, computed: 0, words: "", conditions: [], skips: [], legendaryLeft, qualified, evasionApplies, evasion, types: [] };
+  const out: RowOutcome = { result, resisted, amount: 0, computed: null, words: "", conditions: [], skips: [], legendaryLeft, qualified, evasionApplies, evasion, types: [] };
   if (result === null || result === "skip" || state.gone) return out;
   let types: DamageType[] = [];
   if (amounts) {
@@ -115,7 +116,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
     const dealt = rowDamage(incoming.parts, result, { onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dexSave: evasionApplies, row: { defenses, qualifiedOn, evasion, effects } });
     if (incoming.parts.length > 0) out.summary = damageSummary(incoming.parts, { result: dealt, defenses, qualifiedOn, ...(result === "pass" ? { saved: page.test.kind === "none" ? "none" as const : page.outcome.onPass } : {}) });
     out.amount = dealt.amount;
-    out.computed = dealt.amount;
+    out.computed = amounts.length > 0 && page.outcome.damage.trim() ? dealt.amount : null;
     types = dealtTypes(amounts, dealt.byPart);
     // The amount shows on the row's first line, so words come only when a defense or Evasion changed it.
     out.words = amounts.length > 0 && dealt.notes.length > 0 ? damageWords(amounts, dealt) : "";
@@ -139,7 +140,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
     } else {
       out.summary = damageSummary([{ amount: parsed.amount }]);
       out.amount = parsed.amount;
-      out.words = amounts ? `Typed ${parsed.amount}, worked out ${out.computed}` : `Typed ${parsed.amount}`;
+      out.words = out.computed !== null ? `Typed ${parsed.amount}, worked out ${out.computed}` : `Typed ${parsed.amount}`;
     }
   }
   // Only parts that deal damage contribute to the Regeneration note.
@@ -161,7 +162,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
 
 function incomingDamage(page: Page, state: ReturnType<typeof stateOf>, parts: PartAmount[], result: "pass" | "fail", evasion: boolean): OutcomeDamage {
   return {
-    parts: parts.map((part) => ({ ...part, amount: Math.max(0, part.amount) })),
+    parts: nonnegativeDamageParts(parts),
     save: { result, onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dex: page.test.kind === "save" && page.test.ability === "dex", evasion },
     ...(state.qualifiedOn?.length ? { qualifiedOn: state.qualifiedOn } : {}),
   };

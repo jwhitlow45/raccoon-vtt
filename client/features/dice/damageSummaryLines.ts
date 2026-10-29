@@ -1,12 +1,11 @@
 import type { Defense } from "#shared/dice/defenses.ts";
 import { damageTypeName, type DamageType } from "#shared/rules/damage.ts";
-import { defenseApplies, type OutcomePart, type rowDamage } from "#shared/rules/typedDamage.ts";
+import { defenseApplies, nonnegativeDamageParts, type OutcomePart, type rowDamage } from "#shared/rules/typedDamage.ts";
 
 export type DamageSummaryContext = {
   result?: ReturnType<typeof rowDamage>;
   defenses?: readonly Defense[];
   qualifiedOn?: ReadonlySet<string>;
-  visible?: boolean;
   saved?: "half" | "none";
 };
 
@@ -29,7 +28,8 @@ export type DamageSummaryLines = {
 
 /** Presentation only. Amounts and applied defense notes come from the shared rule. */
 export function damageSummary(parts: readonly OutcomePart[], context: DamageSummaryContext & { targets?: readonly (DamageSummaryContext & { name: string })[] } = {}): DamageSummaryLines {
-  const result = context.visible === false || context.targets ? undefined : context.result;
+  parts = nonnegativeDamageParts(parts);
+  const result = context.targets ? undefined : context.result;
   const lines = parts.map((part, index): DamageSummaryLines["parts"][number] => {
     const before = "amount" in part ? part.amount : part.formula;
     const amount = result?.byPart[index] ?? before;
@@ -64,7 +64,7 @@ export function damageSummary(parts: readonly OutcomePart[], context: DamageSumm
     else if (context.saved && parts.some((part) => "amount" in part && part.amount > 0)) defenses.push({ label: "Saved", entries: [{ text: context.saved === "half" ? "half" : "no damage" }] });
   }
   const targets = (context.targets ?? []).flatMap((target) => {
-    if (target.visible === false || !target.result) return [];
+    if (!target.result) return [];
     const summary = damageSummary(parts, target);
     if (!summary.parts.some((part) => part.original !== undefined) && summary.defenses.length === 0) return [];
     return [{ name: target.name, amount: target.result.amount, defenses: summary.defenses }];

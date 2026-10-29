@@ -1,13 +1,12 @@
 import type { Character, MemberId, Token } from "#shared/model.ts";
 import type { ActorTarget, ClientOp, HpChange } from "#shared/protocol.ts";
+import { rowDamage } from "#shared/rules/typedDamage.ts";
 import { displayName } from "../../lib/scene.ts";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { tokenAccess, type Role } from "./access.ts";
 import { withCrit, type HpMode, type HpParse } from "./hpInput.ts";
 import { creatureRolls, type DiceView } from "../dice/creature.ts";
-import { rowDamage } from "#shared/rules/typedDamage.ts";
-
 import { damageSummary, type DamageSummaryLines, type DamageSummaryContext } from "../dice/damageSummaryLines.ts";
 
 /**

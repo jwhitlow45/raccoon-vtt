@@ -1,5 +1,3 @@
-import { DamageSummary } from "../DamageSummary.tsx";
-import { damageSummary, type DamageSummaryLines } from "../damageSummaryLines.ts";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
@@ -9,6 +7,8 @@ import type { ActorTarget, OpOf } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
 import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { effectName } from "#shared/logText.ts";
+import { DamageSummary } from "../DamageSummary.tsx";
+import { damageSummary, type DamageSummaryLines } from "../damageSummaryLines.ts";
 import { Button } from "../../../components/Button.tsx";
 import { Checkbox } from "../../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../../components/Chip.tsx";
@@ -81,15 +81,15 @@ import { castFill } from "../cast/castStart.ts";
 import { sentAny } from "./start.ts";
 import { parseDamageOverride } from "./damageInput.ts";
 
-export function RowDamageField(props: { name: string; value: number | string | undefined; computed: number; summary?: DamageSummaryLines; onChange(value: string | null): void }) {
+export function RowDamageField(props: { name: string; value: number | string | undefined; computed: number | null; summary?: DamageSummaryLines; onChange(value: string | null): void }) {
   const errorId = useId();
   const parsed = props.value === undefined ? null : parseDamageOverride(props.value);
   const error = parsed?.ok === false ? parsed.error : null;
   return (
     <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
-        <Input aria-label={`${props.name}'s damage`} inputMode="text" value={props.value ?? ""} placeholder={`${props.computed} or 10 fire`} autoComplete="off" error={error !== null} aria-describedby={error ? errorId : undefined} onChange={(e) => props.onChange(e.target.value)} style={{ flex: "1 1 160px", width: 160 }} />
-        {props.value !== undefined ? <Button size="sm" onClick={() => props.onChange(null)}>{`Back to ${props.computed}`}</Button> : null}
+        <Input aria-label={`${props.name}'s damage`} inputMode="text" value={props.value ?? ""} placeholder={props.computed === null ? "10 fire" : `${props.computed} or 10 fire`} autoComplete="off" error={error !== null} aria-describedby={error ? errorId : undefined} onChange={(e) => props.onChange(e.target.value)} style={{ flex: "1 1 160px", width: 160 }} />
+        {props.value !== undefined ? <Button size="sm" onClick={() => props.onChange(null)}>{props.computed === null ? "Clear override" : `Back to ${props.computed}`}</Button> : null}
       </div>
       {!error && (props.summary || parsed?.ok) ? <DamageSummary summary={props.summary ?? damageSummary(parsed?.ok ? parsed.parts ?? [{ amount: parsed.amount }] : [])} /> : null}
       {error ? <span id={errorId} role="status" style={{ fontSize: theme.font.small, color: theme.color.dangerText }}>{error}</span> : null}
@@ -922,8 +922,10 @@ function GroupRow(props: {
   const details: string[] = [];
   if (s.says) details.push(s.says);
   if (row.why && setup) details.push(`Not asked: ${row.why}`);
-  details.push(...words.notes.filter((note) => !outcome.summary || s.amount !== undefined && !outcome.damage || note !== outcome.words));
-  if (s.amount !== undefined && outcome.damage) details.push(`Typed override, worked out ${outcome.computed}`);
+  // The slip explains typed parts and defenses. A plain override still needs its comparison in words.
+  const slipSaysIt = outcome.summary !== undefined && (s.amount === undefined || outcome.damage !== undefined);
+  details.push(...words.notes.filter((note) => !slipSaysIt || note !== outcome.words));
+  if (s.amount !== undefined && outcome.damage && outcome.computed !== null) details.push(`Typed override, worked out ${outcome.computed}`);
   // The control shows the DM's own mark alone: a computed pass or fail is the verdict beside the total, which a DC change judges again.
   const markValue: Mark | null = s.mark ?? null;
   const waitingAsk = s.asked && !s.answer;

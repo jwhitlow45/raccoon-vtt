@@ -31,13 +31,13 @@ test("FL-4: qualifiers, vulnerability, inactive defenses and duplicate sources",
   assert.deepEqual(damageSummary(parts, { result, defenses: all }).defenses.map(defenseSummaryText), ["Immune: Slashing", "Resists: Fire"]);
 });
 
-test("FL-4: hidden defenses suppress adjusted amounts and every explanation", () => {
-  assert.deepEqual(damageSummary(parts, { result, defenses, visible: false, saved: "half" }), damageSummary(parts));
+test("FL-4: no result keeps incoming amounts and omits every defense explanation", () => {
+  assert.deepEqual(damageSummary(parts, { defenses, saved: "half" }), damageSummary(parts));
 });
 
 test("FL-4: several targets keep incoming parts and only changed visible target lines", () => {
   const summary = damageSummary(parts, { result, targets: [
-    { name: "Guard", result, defenses }, { name: "Hidden", result, defenses, visible: false }, { name: "Unchanged" },
+    { name: "Guard", result, defenses }, { name: "Hidden", defenses }, { name: "Unchanged" },
     { name: "Same", result: { amount: 52, byPart: [28, 14, 10], notes: [] } },
   ] });
   assert.deepEqual(summary.parts, damageSummary(parts).parts);
@@ -104,4 +104,12 @@ test("FL-4 design: defense lines retain type identity and qualifiers for their i
   const qualified: Defense = { kind: "resist", of: "fire", qualifier: "from Spells", source: "Stat block" };
   const summary = damageSummary(parts, { result, defenses: [qualified], qualifiedOn: new Set([defenseKey(qualified)]) });
   assert.deepEqual(summary.defenses, [{ label: "Resists", entries: [{ icon: "fire", text: "Fire", qualifier: "from Spells" }] }]);
+});
+
+test("FL-4 review: each incoming numeric part counts at least zero, including mixed formulas", () => {
+  const source = [{ amount: -5, type: "cold" as const }, { amount: 6, type: "fire" as const }];
+  assert.deepEqual(damageSummary(source).parts.map(p => [p.amount, p.original]), [[0, undefined], [6, undefined]]);
+  assert.equal(damageSummary(source).total, 6);
+  assert.deepEqual(damageSummary([...source, { formula: "1d6" }]).parts.map(p => p.amount), [0, 6, "1d6"]);
+  assert.deepEqual(source.map(p => p.amount), [-5, 6], "normalizing a preview does not edit the recorded roll");
 });
