@@ -9,7 +9,8 @@ import { deriveWalls, indexBuild } from "#shared/rules/walls.ts";
 import { room, scene } from "#shared/testutil.ts";
 import { RoomScope } from "../../state/scope.ts";
 import type { ToolContext } from "../tools.ts";
-import { fogMessages, fogOps, hexRoomShapes, MAX_FOG_MESSAGE_BYTES, roomShapes, strokeShapes, type FogMessage } from "./shapes.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
+import { cellsOutline, draftOutlines, fogEditOf, fogMessages, fogOps, hexCellsOutline, hexRoomShapes, lastEditIds, MAX_FOG_MESSAGE_BYTES, publishLabel, publishShort, rectShape, roomShapes, strokeShapes, type FogMessage } from "./shapes.ts";
 import { fogSlot } from "./store.ts";
 
 const { submitFog } = await import("./tool.tsx");
@@ -134,5 +135,64 @@ describe("a fog gesture's messages", () => {
     scope.get(fogSlot).store.setState({ live: true, note: null });
     submitFog(ctx, shapes);
     assert.ok(sent.length > 1 && sent.every((s) => s.op.t === "fog.live" && s.group === sent[0]!.group), "live, the draft's room never matters");
+  });
+});
+
+describe("a fog gesture in the draft is one edit", () => {
+  const ROWS: HexGrid = { shape: "hex", orient: "rows" };
+  const rect = (x: number) => rectShape({ x, y: 1 }, { x: x + 2, y: 3 })!;
+
+  test("a gesture of several shapes names its ops after it, and one of a single shape keeps a plain id", () => {
+    const room = fogOps(largestHexRoom(ROWS), "reveal", newId);
+    assert.ok(room.length > 1);
+    assert.equal(new Set(room.map((o) => o.id)).size, room.length, "each op its own id");
+    assert.equal(new Set(room.map((o) => fogEditOf(o.id))).size, 1, "all of one edit");
+    assert.ok(room.every((o) => o.id.length <= 64));
+    assert.ok(clientMessageSchema.safeParse({ t: "op", n: 1, op: fogMessages(SCENE_ID, room, false)[0] }).success);
+    const [one] = fogOps([rect(1)], "reveal", newId);
+    assert.equal(fogEditOf(one!.id), one!.id);
+  });
+
+  test("the publish button counts the DM's edits: one Builder room tap is one, on hexes and on squares", () => {
+    const hexRoom = fogOps(largestHexRoom(ROWS), "reveal", newId);
+    assert.equal(publishLabel(hexRoom), "Reveal to players (1)");
+    assert.equal(publishShort(hexRoom), "Reveal (1)");
+    const squareRoom = fogOps(largestSquareRoom(), "reveal", newId);
+    assert.ok(squareRoom.length > 1);
+    const draft = [...squareRoom, ...fogOps([rect(1)], "hide", newId), ...fogOps(longStroke(), "reveal", newId)];
+    assert.equal(publishLabel(draft), "Show players the changes (3)");
+    assert.equal(publishShort(draft), "Show (3)");
+    const rects = [1, 4, 7].flatMap((x) => fogOps([rect(x)], "hide", newId));
+    assert.equal(publishLabel(rects), "Fog for players (3)", "an edit of one shape counts as before");
+  });
+
+  test("the fog bar's Undo takes the last edit back whole, and then the one before it", () => {
+    const first = fogOps([rect(1)], "reveal", newId);
+    const room = fogOps(largestSquareRoom(), "reveal", newId);
+    const ops = [...first, ...room];
+    assert.deepEqual(lastEditIds(ops), room.map((o) => o.id));
+    assert.deepEqual(lastEditIds(first), [first[0]!.id]);
+    assert.deepEqual(lastEditIds([]), []);
+    const take = { t: "fog.draft", sceneId: SCENE_ID, remove: lastEditIds(fogOps(largestHexRoom(ROWS), "reveal", newId)) };
+    assert.ok(clientMessageSchema.safeParse({ t: "op", n: 1, op: take, g: GROUP }).success, "the whole hex room's ids go in one message");
+    assert.ok(serializedBytes({ t: "op", n: 1, op: take, g: GROUP }) <= MAX_FRAME_BYTES);
+  });
+
+  test("a room sent in several ops is outlined as one room, not in bands, on hexes and on squares", () => {
+    const hexShapes = largestHexRoom(ROWS);
+    const hexRoom = fogOps(hexShapes, "reveal", newId);
+    const hexLines = draftOutlines(hexRoom, ROWS);
+    const all = hexShapes.flatMap((sh) => (sh.kind === "cells" ? sh.cells : []));
+    assert.deepEqual(hexLines.get(hexRoom[0]!.id), hexCellsOutline(ROWS, all));
+    assert.ok(hexRoom.slice(1).every((o) => hexLines.get(o.id)?.length === 0), "the rest draw nothing");
+    const squareRoom = fogOps(largestSquareRoom(), "reveal", newId);
+    const squareLines = draftOutlines(squareRoom, SQUARES);
+    assert.equal(squareLines.get(squareRoom[0]!.id)!.length, 4 * 200 * 4, "the 800 unit sides round a 200 by 200 room");
+    // Two rooms tapped one after the other are two edits, each with its own outline.
+    const a = fogOps(roomShapes(indexBuild([{ sceneId: SCENE_ID, cx: 0, cy: 0, rev: 0, cells: { "1,1": "stone" }, edges: {} }]), { x: 1.5, y: 1.5 }, { w: 10, h: 10 }).shapes, "reveal", newId);
+    const b = fogOps(roomShapes(indexBuild([{ sceneId: SCENE_ID, cx: 0, cy: 0, rev: 0, cells: { "1,2": "stone" }, edges: {} }]), { x: 1.5, y: 2.5 }, { w: 10, h: 10 }).shapes, "reveal", newId);
+    const two = draftOutlines([...a, ...b], SQUARES);
+    assert.deepEqual(two.get(a[0]!.id), cellsOutline(["1,1"]));
+    assert.deepEqual(two.get(b[0]!.id), cellsOutline(["1,2"]));
   });
 });

@@ -1,6 +1,7 @@
 import { serializedBytes } from "#shared/limits.ts";
 import type { FogOp, FogShape } from "#shared/model.ts";
 import { MAX_ASK_BYTES, MAX_FOG_CELLS, MAX_FOG_DRAFT_OPS, MAX_POLY_VERTICES, MAX_STROKE_POINTS, type ClientOp } from "#shared/protocol.ts";
+import { isHex, type Grid } from "#shared/rules/grid.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, parseHexKey, type HexGrid } from "#shared/rules/hex.ts";
 import { floodHexRoom, floodRoom, type BuildIndex, type WallSet } from "#shared/rules/walls.ts";
 
@@ -129,8 +130,65 @@ export function hexRoomShapes(walls: WallSet, g: HexGrid, at: Point, bounds: Bou
   return cellShapes(floodHexRoom(walls, g, bounds, at).cells);
 }
 
+/**
+ * One gesture's fog ops. A gesture of several shapes (a room over 2,000
+ * cells, a long brush stroke) names its ops `<gesture>.<n>`, so the draft
+ * shows and counts them as the one edit the DM made, and Undo takes it
+ * back whole (fogEditOf). A gesture of one shape keeps a plain id. The
+ * server never reads the names.
+ */
 export function fogOps(shapes: readonly FogShape[], mode: FogMode, newId: () => string): FogOp[] {
-  return shapes.map((shape) => ({ id: newId(), mode, shape }));
+  if (shapes.length === 1) return [{ id: newId(), mode, shape: shapes[0]! }];
+  const gesture = newId();
+  return shapes.map((shape, i) => ({ id: `${gesture}.${i}`, mode, shape }));
+}
+
+const GESTURE_OP = /^(.+)\.(\d+)$/;
+
+/** The edit a draft op belongs to (fogOps): its gesture's id, or for an op of one shape, its own. */
+export function fogEditOf(id: string): string {
+  return GESTURE_OP.exec(id)?.[1] ?? id;
+}
+
+/**
+ * A draft's ops as the edits the DM made, each edit's ops together, in the
+ * order the edits began. An op without an id is an edit of its own.
+ */
+export function draftEdits<T extends { id?: string }>(ops: readonly T[]): T[][] {
+  const edits = new Map<string, T[]>();
+  ops.forEach((op, i) => {
+    const key = op.id === undefined ? `#${i}` : `=${fogEditOf(op.id)}`;
+    const edit = edits.get(key);
+    if (edit) edit.push(op);
+    else edits.set(key, [op]);
+  });
+  return [...edits.values()];
+}
+
+/** The ids the fog bar's Undo takes out of a draft: every op of the edit its last op belongs to, so a room sent in several ops goes whole. */
+export function lastEditIds(ops: readonly FogOp[]): string[] {
+  const last = ops[ops.length - 1];
+  if (!last) return [];
+  const edit = fogEditOf(last.id);
+  return ops.filter((o) => fogEditOf(o.id) === edit).map((o) => o.id);
+}
+
+/**
+ * The draft's outlines of its "cells" ops, by op id: one outline round all
+ * the cells of an edit, on its first cells op, and none on the rest, so a
+ * room sent in several ops draws as one room and not as bands. The sides
+ * of squares, or of hexes on a hex scene.
+ */
+export function draftOutlines(ops: readonly FogOp[], g: Grid): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const edit of draftEdits(ops)) {
+    const cellOps = edit.filter((o) => o.shape.kind === "cells");
+    if (cellOps.length === 0) continue;
+    const cells = cellOps.flatMap((o) => (o.shape.kind === "cells" ? o.shape.cells : []));
+    out.set(cellOps[0]!.id, isHex(g) ? hexCellsOutline(g, cells) : cellsOutline(cells));
+    for (const o of cellOps.slice(1)) out.set(o.id, []);
+  }
+  return out;
 }
 
 /**
@@ -221,18 +279,19 @@ export function hexCellsOutline(g: HexGrid, cells: readonly string[]): number[] 
 /**
  * The draft's publish button, named for what it does to the players' view:
  * a draft of reveals clears fog, one of hides adds it, and a mix does both.
- * The count is the number of draft edits.
+ * The count is the number of draft edits: what the DM did, so one Builder
+ * room tap is one however many ops it took (draftEdits).
  */
-export function publishLabel(ops: readonly { mode: FogMode }[]): string {
-  const n = ops.length;
+export function publishLabel(ops: readonly { id?: string; mode: FogMode }[]): string {
+  const n = draftEdits(ops).length;
   if (ops.every((o) => o.mode === "reveal")) return `Reveal to players (${n})`;
   if (ops.every((o) => o.mode === "hide")) return `Fog for players (${n})`;
   return `Show players the changes (${n})`;
 }
 
 /** The publish button's short words where the row is narrow (docs/design-v1-tool-options.md 9.6): "Reveal (4)", "Fog (4)" or "Show (4)". Its tooltip keeps the whole sentence. */
-export function publishShort(ops: readonly { mode: FogMode }[]): string {
-  const n = ops.length;
+export function publishShort(ops: readonly { id?: string; mode: FogMode }[]): string {
+  const n = draftEdits(ops).length;
   if (ops.every((o) => o.mode === "reveal")) return `Reveal (${n})`;
   if (ops.every((o) => o.mode === "hide")) return `Fog (${n})`;
   return `Show (${n})`;

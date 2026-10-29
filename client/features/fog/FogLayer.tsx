@@ -3,11 +3,11 @@ import { Circle, Line, Rect, Shape } from "react-konva";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { FogDraft, FogOp, GridShape } from "#shared/model.ts";
-import { gridOfShape, isHex } from "#shared/rules/grid.ts";
+import { gridOfShape } from "#shared/rules/grid.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
 import type { LayerProps } from "../layers.ts";
-import { cellsOutline, hexCellsOutline, rectShape } from "./shapes.ts";
+import { draftOutlines, rectShape } from "./shapes.ts";
 import { useFogStore } from "./store.ts";
 
 /** Reveals outline in the crest yellow, hides in red. */
@@ -35,13 +35,8 @@ export function FogLayer(props: LayerProps) {
 
 const DraftOutline = memo(function DraftOutline(props: { draft: FogDraft; bounds: { w: number; h: number }; shape: GridShape | undefined }) {
   const { draft, bounds, shape } = props;
-  // A "cells" op is outlined along its edge, computed once per draft change: the sides of its squares, or of its hexes on a hex scene.
-  const outlines = useMemo(() => {
-    const g = gridOfShape(shape);
-    const out = new Map<string, number[]>();
-    for (const op of draft.ops) if (op.shape.kind === "cells") out.set(op.id, isHex(g) ? hexCellsOutline(g, op.shape.cells) : cellsOutline(op.shape.cells));
-    return out;
-  }, [draft, shape]);
+  // "Cells" ops are outlined along their edit's edge, computed once per draft change.
+  const outlines = useMemo(() => draftOutlines(draft.ops, gridOfShape(shape)), [draft, shape]);
   return <>{draft.ops.map((op) => <OpOutline key={op.id} op={op} bounds={bounds} cells={outlines.get(op.id)} />)}</>;
 });
 

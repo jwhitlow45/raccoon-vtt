@@ -5,7 +5,7 @@ import { Icon, type IconName } from "../../components/Icon.tsx";
 import { useRoomScope } from "../../state/scope.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { ChoiceTiles, ConfirmButton, OptButton, OptionsStrip, OptSegmented, PickCloses, ValueChip } from "../measure/controls.tsx";
-import { brushLabel, publishLabel, publishShort, type FogMode } from "./shapes.ts";
+import { brushLabel, lastEditIds, publishLabel, publishShort, type FogMode } from "./shapes.ts";
 import { BRUSH_WIDTHS, FOG_MODES, pickFogMode, useFogStore, type FogShapeKind } from "./store.ts";
 import { closeFogPolygon } from "./tool.tsx";
 import { EXPLORED_UNDO_HINT, visionOn } from "../vision/sightMode.ts";
@@ -161,8 +161,8 @@ export default function FogOptions() {
             <OptButton
               label="Take back the last draft edit"
               onClick={() => {
-                const last = draft?.ops[draft.ops.length - 1];
-                if (last) actions.dispatch({ t: "fog.draft", sceneId, remove: [last.id] });
+                const ids = lastEditIds(draft?.ops ?? []);
+                if (ids.length > 0) actions.dispatch({ t: "fog.draft", sceneId, remove: ids });
               }}
             >
               Undo
