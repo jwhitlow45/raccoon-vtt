@@ -1550,7 +1550,7 @@ describe("follow-up batch 36: op version 30, passengers on a holder that starts 
 
 describe("follow-up batch 37: op version 32, a walk off a holder on hexes crosses the raised sides between its hexes, and a dragged creature walks full size (D-261029-170, D-261029-171)", () => {
   test("is the version now, the snapshot's unchanged", () => {
-    assert.equal(OP_VERSION, 32);
+    assert.ok(OP_VERSION >= 32);
     assert.equal(SNAPSHOT_VERSION, 29);
     assert.ok(opMigrations.some((s) => s.from === 31 && s.to === 32));
     assert.ok(!snapshotMigrations.some((s) => s.from === 29));
@@ -1584,6 +1584,15 @@ describe("follow-up batch 37: op version 32, a walk off a holder on hexes crosse
 
   test("a version 32 op never migrates down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 32, 31, opMigrations), /down/);
+  });
+});
+
+describe("follow-up batch 39: op version 33", () => {
+  test("keeps stored operations unchanged through the identity step", () => {
+    assert.equal(OP_VERSION, 33);
+    const op = { t: "vision.holders", sceneId: "s1", on: ["p1"] };
+    assert.equal(runMigrations(op, 32, 33, opMigrations), op);
+    assert.throws(() => runMigrations(op, 33, 32, opMigrations), /down/);
   });
 });
 

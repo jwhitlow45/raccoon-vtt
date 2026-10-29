@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 29;
-export const OP_VERSION = 32;
+export const OP_VERSION = 33;
 
 export type MigrationStep = {
   from: number;
@@ -931,7 +931,35 @@ export const opMigrations: MigrationStep[] = [
     to: 32,
     apply: (op) => op,
   },
+  {
+    // Follow-up batch 39: controlled rides read the players' scene even
+    // for character-only rows, holder picks check a supplied revision,
+    // and center inclusion stops at scene bounds for reminders and traps.
+    // Reorders may now mark the round a mount just finished, an optional
+    // field no older operation carries.
+    // Older operations keep their original behavior and restore hashes.
+    // Deploy: back up first and reload open pages. Rollback requires the
+    // backup for rooms with version 33 operations after their snapshot.
+    from: 32,
+    to: 33,
+    apply: (op) => op,
+  },
 ];
+
+/** Controlled rides must be on the players' scene even when their rows name characters alone. */
+export function mountsOnPlayerScene(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 33;
+}
+
+/** A holder pick may carry the revision the DM saw, so a newer join cannot be replaced by a stale list. */
+export function guardsHolderPick(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 33;
+}
+
+/** Center inclusion on squares stops at the scene boundary, as coverage already does. */
+export function areaCentersOnScene(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 33;
+}
 
 /**
  * SRD ids an earlier import spelled wrong, each with the id the SRD data
