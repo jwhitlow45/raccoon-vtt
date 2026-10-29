@@ -11,7 +11,7 @@ import type { Op } from "./protocol.ts";
  * no old ops at all. The op pipeline is here for the crash case.
  */
 export const SNAPSHOT_VERSION = 29;
-export const OP_VERSION = 31;
+export const OP_VERSION = 32;
 
 export type MigrationStep = {
   from: number;
@@ -897,6 +897,34 @@ export const opMigrations: MigrationStep[] = [
     to: 31,
     apply: (op) => op,
   },
+  {
+    // Follow-up batch 37 (docs/design-v1-hex-grids.md, As built,
+    // D-261029-170): no op changes shape, so the step is the identity. From
+    // this version a walk off a holder on hexes crosses the raised sides
+    // between two of the holder's hexes until it first stands clear of
+    // them, as a walk off a holder on squares crosses the ledges inside its
+    // footprint, so a rider gets off a mount that straddles two heights
+    // (`holderLedgesOnHexes`). The reducer reads it where a trap stops such
+    // a walk. Older ops replay by the rules they were written under, where
+    // every such side stopped the walk, so they put each token where they
+    // put it then, and a stored restore's hash guards still match.
+    //
+    // Deploy: back up the database just before. The first op after it is
+    // stored at version 32, and the shutdown writes version 29 snapshots,
+    // as before. Reload every page left open, table displays included:
+    // there is no client version check, and an old page would search a
+    // rider's way off such a mount by the old rule, which the server's
+    // moves no longer match.
+    // Rollback: an older build refuses to migrate a version 32 op down
+    // (runMigrations), so a room whose log holds one after its last
+    // snapshot would not load there. A clean shutdown writes a snapshot
+    // after the last op, and an older build loads it, since nothing stored
+    // changed shape. So only a room with version 32 ops after its last
+    // snapshot needs the backup from before the deploy.
+    from: 31,
+    to: 32,
+    apply: (op) => op,
+  },
 ];
 
 /**
@@ -1240,6 +1268,19 @@ export function seatsFromSnappedBox(opVersion: number | undefined): boolean {
  */
 export function standsAcrossBands(opVersion: number | undefined): boolean {
   return !(opVersion !== undefined && opVersion < 30);
+}
+
+/**
+ * Whether a walk off a holder on hexes crosses the raised sides between two
+ * of the holder's hexes until it first stands clear of the holder's hexes
+ * (D-261029-170, movement.ts MovingToken), as a walk off a holder on
+ * squares crosses the ledges inside its footprint. Ops stored before
+ * version 32 met every such side, wherever the reducer judges the walk (a
+ * trap's stop), and replay so (attach.ts walkerFor). Live ops carry no
+ * stored version and take today's rule.
+ */
+export function holderLedgesOnHexes(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 32);
 }
 
 /**

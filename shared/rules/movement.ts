@@ -8,7 +8,7 @@ import { standsAcrossBands } from "../migrate.ts";
 import { APART, contact, CROSS, MOVEMENT, onSegment, orient, PIECE } from "./segments.ts";
 import { LEDGE, PIECE_BAND, pieceBlocks, pieceTouches, sceneWalls, type WallSet } from "./walls.ts";
 import { isHex, sceneGrid, SQUARES } from "./grid.ts";
-import { footprintHexes, hexCenter, hexInScene, hexLine, hexNeighbors, referenceHex, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
+import { footprintHexes, hexCenter, hexInScene, hexKey, hexLine, hexNeighbors, referenceHex, snapAnchor, type Hex, type HexGrid } from "./hex.ts";
 
 /**
  * Walls, doors and ledges stopping moves (docs/design-v1-maps-vision.md
@@ -46,7 +46,10 @@ import { footprintHexes, hexCenter, hexInScene, hexLine, hexNeighbors, reference
  * no ledge whose whole length lies strictly inside the holder's footprint
  * stops it (walls.ts `withoutLedgesInside`), the squeezed footprint while
  * the holder squeezes (rules/attach.ts walkerFor), so it crosses the step
- * under a holder that straddles two heights. A ledge on the footprint's boundary
+ * under a holder that straddles two heights. On hexes those are the raised
+ * sides between two of the hexes the holder stands on (walls.ts
+ * `withoutLedgesBetween`, `hexWallsOf`), and the walk is clear of the
+ * holder once it shares none of them (OffHolder). A ledge on the footprint's boundary
  * stops it, so a rider steps off no cliff at her mount's side, and so does
  * every ledge beyond, so she climbs none either. Each leg is one straight
  * test, walls and ledges alike. `offHolder` is the walk's state: a walk
@@ -86,8 +89,14 @@ export function landedElevation(
   return before === "ground" ? there : Math.max(token.elevation, there);
 }
 
-/** The holder a walk off it leaves, where it stands. */
-export type OffHolder = PlacedToken;
+/**
+ * The holder a walk off it leaves, where it stands. On a hex scene, from op
+ * version 32, it carries the scene's grid (attach.ts walkerFor), and the
+ * walk reads the holder by the hexes it stands on: on it while it shares
+ * one of them, crossing the raised sides between two of them until then.
+ * Without the grid it is read by its box, and on hexes no ledge is crossed.
+ */
+export type OffHolder = PlacedToken & { hex?: HexGrid };
 
 declare const walking: unique symbol;
 
@@ -594,17 +603,27 @@ function legOf(walls: WallSet, scene: Pick<Scene, "blockMovement">, token: Movin
 /** What a walk's tests read of the holder it walks off, for what is kept per walker (MovingToken). */
 export function offKey(token: MovingToken): string {
   const h = token.offHolder;
-  return h ? `${h.size},${h.w},${h.h},${h.x},${h.y},${h.squeeze === true}` : "";
+  return h ? `${h.size},${h.w},${h.h},${h.x},${h.y},${h.squeeze === true},${h.hex?.orient ?? ""}` : "";
 }
 
-/** Whether the token's full footprint, standing at `at`, shares area with the holder it walks off. */
+/** Whether the token's full footprint, standing at `at`, shares area with the holder it walks off: on hexes, a hex (OffHolder). */
 export function onOffHolder(token: MovingToken, at: Point): boolean {
   const holder = token.offHolder;
   if (!holder) return false;
+  if (holder.hex) {
+    const held = new Set(holderHexes(holder.hex, holder).map(hexKey));
+    const { squeeze: _squeeze, ...full } = { ...token, x: at.x, y: at.y };
+    return occupiedHexes(holder.hex, full).some((h) => held.has(hexKey(h)));
+  }
   const a = footprintRect(SQUARES, { size: token.size, x: at.x, y: at.y, ...(token.w !== undefined ? { w: token.w } : {}), ...(token.h !== undefined ? { h: token.h } : {}) });
   const b = holderRect(holder);
   const EPS = 1e-9;
   return a.x < b.x + b.w - EPS && b.x < a.x + a.w - EPS && a.y < b.y + b.h - EPS && b.y < a.y + a.h - EPS;
+}
+
+/** The hexes the holder stands on, its squeezed ones while it squeezes. */
+function holderHexes(g: HexGrid, holder: OffHolder): Hex[] {
+  return occupiedHexes(g, holder);
 }
 
 function holderRect(holder: OffHolder): { x: number; y: number; w: number; h: number } {
@@ -1412,7 +1431,10 @@ export function hexWallsOf(state: BuildState, token: MovingToken, endElevation =
   const g = scene ? sceneGrid(scene) : SQUARES;
   if (!scene || !isHex(g)) return null;
   const walls = sceneWalls(scene, state.buildChunks);
-  return { g, bounds: scene.bounds, walls, test: pieceTestOf(state.buildChunks), floor: ledgeFloor(walls, scene, token, endElevation), bands: state.ledgedBands !== true };
+  // A walk off a holder that has not yet cleared it crosses the raised sides between the holder's hexes (OffHolder), as `wallsAt` leaves out the ledges inside it on squares.
+  const holder = token.offHolder;
+  const moves = holder?.hex && onOffHolder(token, token) ? walls.withoutLedgesBetween(holderHexes(holder.hex, holder)) : walls;
+  return { g, bounds: scene.bounds, walls: moves, test: pieceTestOf(state.buildChunks), floor: ledgeFloor(walls, scene, token, endElevation), bands: state.ledgedBands !== true };
 }
 
 /**

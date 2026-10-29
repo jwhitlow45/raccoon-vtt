@@ -28,6 +28,7 @@ import {
   seatsFromSnappedBox,
   seatsOnSqueeze,
   standsAcrossBands,
+  holderLedgesOnHexes,
   discoversMap,
   mapDiscoveryUpgrade,
   needsMapDiscoveryUpgrade,
@@ -1543,6 +1544,38 @@ describe("follow-up batch 36: op version 30, passengers on a holder that starts 
 
   test("a version 30 op never migrates down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 30, 29, opMigrations), /down/);
+  });
+});
+
+describe("follow-up batch 37: op version 32, a walk off a holder on hexes crosses the raised sides between its hexes (D-261029-170)", () => {
+  test("is the version now, the snapshot's unchanged", () => {
+    assert.equal(OP_VERSION, 32);
+    assert.equal(SNAPSHOT_VERSION, 29);
+    assert.ok(opMigrations.some((s) => s.from === 31 && s.to === 32));
+    assert.ok(!snapshotMigrations.some((s) => s.from === 29));
+  });
+
+  test("the op step is the identity, a rider's walk off a mount on hexes included", () => {
+    const ops: unknown[] = [
+      { t: "token.move", tokenId: "bree", x: 9, y: 7.005553499465135, elevation: 0 },
+      { t: "token.move", tokenId: "bree", x: 9.5, y: 7.871578903249572, elevation: 0, route: [[8, 7.005553499465135, 0, 0], [9.5, 7.871578903249572, 0, 0]] },
+      { t: "token.detach", tokenId: "bree", x: 9, y: 7.005553499465135, elevation: 0 },
+      { t: "log.chat", text: "hi" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 31, 32, opMigrations), op);
+    for (const op of ops) assert.equal(migrateOp(op, 31), op);
+    for (const op of ops) assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
+  });
+
+  test("ops stored before version 32 meet every ledge on a walk off a holder on hexes, later and live ops cross those between its hexes", () => {
+    assert.equal(holderLedgesOnHexes(31), false);
+    assert.equal(holderLedgesOnHexes(1), false);
+    assert.equal(holderLedgesOnHexes(32), true);
+    assert.equal(holderLedgesOnHexes(undefined), true);
+  });
+
+  test("a version 32 op never migrates down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 32, 31, opMigrations), /down/);
   });
 });
 

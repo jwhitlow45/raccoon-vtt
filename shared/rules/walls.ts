@@ -1075,6 +1075,54 @@ export class WallSet {
   }
 
   /**
+   * `withoutLedgesInside` on hexes (D-261029-170): no raised side between
+   * two of `hexes`, the hexes a holder stands on, stops a walk off it, so it
+   * crosses the step under a holder that straddles two heights. A side
+   * between one of them and a hex beyond, and every side farther out, stop
+   * the walk as any ledge does, and so does a wall or a door on the side,
+   * which is a segment of its own. Each raised side is one stored segment
+   * between its two corners (`gridCandidates`), so the sides are matched by
+   * their corners. The set itself when no ledge is exempt. Kept per set of
+   * hexes, so a walk's tests share one set.
+   */
+  withoutLedgesBetween(hexes: readonly Hex[]): WallSet {
+    const key = `hex:${hexes.map(hexKey).sort().join(";")}`;
+    const known = this.#inside.get(key);
+    if (known) return known;
+    const g = this.#grid.grid;
+    const inner = new Set<string>();
+    if (isHex(g)) {
+      const held = new Set(hexes.map(hexKey));
+      for (const h of hexes) {
+        const around = hexNeighbors(g, h);
+        for (let d = 0; d < 6; d++) {
+          if (!held.has(hexKey(around[d]!))) continue;
+          const [a, b] = hexSideEnds(g, h.col, h.row, d);
+          inner.add(`${a.x},${a.y},${b.x},${b.y}`);
+        }
+      }
+    }
+    let exempt = false;
+    const s = this.stored;
+    const out = new CandidateList();
+    for (let k = 0; k < s.n; k++) {
+      const ax = s.xy[4 * k]!;
+      const ay = s.xy[4 * k + 1]!;
+      const bx = s.xy[4 * k + 2]!;
+      const by = s.xy[4 * k + 3]!;
+      let tags = s.tags[k]!;
+      if ((tags & LEDGE) !== 0 && (inner.has(`${ax},${ay},${bx},${by}`) || inner.has(`${bx},${by},${ax},${ay}`))) {
+        tags &= ~LEDGE;
+        exempt = true;
+      }
+      out.add(ax, ay, bx, by, tags, s.free[k]!, this.storedTops[k]!, this.#origin[k]!);
+    }
+    const set = !exempt ? this : new WallSet(`${this.version}|off:${key}`, this.#grid, this.free, out.done(), this.bounds);
+    this.#inside.set(key, set);
+    return set;
+  }
+
+  /**
    * The movement test's set for a walk off a holder before it first clears
    * the holder (movement.ts MovingToken, reviews AT-O-26 and AT-ASTRA-16):
    * no ledge edge whose whole length lies strictly inside the holder's

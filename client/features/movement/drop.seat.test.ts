@@ -160,6 +160,27 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
 }
 
 for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const) {
+  describe(`${name}: a rider gets off a mount that straddles a step (HX8-RIDER-LEDGE)`, () => {
+    test("the device's drop takes her across the step under the mount and off its low side, a walk the server takes", () => {
+      const shape = g.orient === "rows" ? "hexRows" : "hexColumns";
+      let s = hexWallRoom(shape, 20, 14, []);
+      const horse = onHex(g, "horse", "large", { col: 8, row: 6 }, { name: "Warhorse", kind: "npc", ownerIds: ["p1"], elevation: 10 });
+      const [high, low] = occupiedHexes(g, horse) as [Hex, Hex];
+      s = apply(s, { t: "build.height", sceneId: "s1", cells: [hexKey(high)], height: 10 }, DM);
+      s.tokens.horse = horse;
+      s.tokens.bree = onHex(g, "bree", "medium", high, { name: "Bree", kind: "pc", ownerIds: ["p1"], elevation: 10, attached: { to: "horse", kind: "ride" } });
+      const d = hexNeighbors(g, high).findIndex((n) => n.col === low.col && n.row === low.row);
+      const off = hexStandPlace(g, s.tokens.bree, { size: "medium", ref: hexNeighbors(g, low)[d]!, squeezed: false });
+      const plan = planOne(seenRoom(s), s.tokens.bree, off, "walk");
+      const ops = moveOpsOf(plan.moves);
+      assert.equal(ops.length, 1, "one move");
+      const op = ops[0] as OpOf<"token.move">;
+      assert.deepEqual({ x: op.x, y: op.y }, { x: off.x, y: off.y }, "off the low side");
+      const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+      assert.ok(allowed.ok, allowed.ok ? "" : allowed.message);
+    });
+  });
+
   describe(`${name}: a rider a little off its seat drags a goblin on a walk that never squeezes`, () => {
     test("the server and the device put the goblin beside Brom on his seat, so a drop the device sends is one the server takes (review DP34-OPUS-10)", () => {
       const shape = g.orient === "rows" ? "hexRows" : "hexColumns";

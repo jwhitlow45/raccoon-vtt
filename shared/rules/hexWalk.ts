@@ -20,7 +20,9 @@ import {
   hexStandPlace,
   hexStartStand,
   hexWallsOf,
+  onOffHolder,
   onSqueezedLattice,
+  pastHolder,
   walkFrom,
   type HexStand,
   type HexWalls,
@@ -50,6 +52,14 @@ import { LegCheck, MAX_SETTLED, WalkSearch, WalkWorld, WorkBudget, worldUnits, t
  * step with it by the same rule, so a found way is one they all fit
  * through (docs/design-v1-attach.md 4.2).
  *
+ * A walk off a holder crosses the raised sides between the holder's hexes
+ * until it first stands clear of them (movement.ts OffHolder), so a state
+ * of the search also says whether the walk is still before its holder, as
+ * walk.ts's `post` world does on squares. A step is judged by the state it
+ * starts in, as the server judges a leg by where it starts, and the walk is
+ * past its holder from the first stand clear of it, which a piece's start
+ * never reaches sooner on the server, so a found way is one it takes.
+ *
  * The client calls it through `routeWorld`, `routeSearch` and
  * `routeLegCheck`, which hand a square scene to walk.ts unchanged, so a
  * drag, an arrow key and the walking ruler run the same work either way.
@@ -76,8 +86,10 @@ const START = 7;
 export class HexWalkWorld {
   readonly input: WalkInput;
   readonly g: HexGrid;
-  /** The movement set to test steps against, or null on a scene that stops no moves. */
+  /** The movement set to test steps against, or null on a scene that stops no moves: the walk's past its holder (movement.ts OffHolder). */
   readonly walls: HexWalls | null;
+  /** The movement set before the walk clears its holder, which crosses the raised sides between the holder's hexes, or null where that is `walls`. */
+  readonly #onWalls: HexWalls | null;
   /** The index space of reference hexes: the columns and rows the scene's hex keys run over. */
   readonly cols: number;
   readonly rows: number;
@@ -95,6 +107,10 @@ export class HexWalkWorld {
   readonly #edges: Uint8Array;
   readonly #flags: Uint8Array;
   readonly #fit: Uint8Array;
+  /** `#edges` and `#fit` before the walk clears its holder, and per node whether its stand is on the holder: 0 not yet known, 1 on it, 2 clear. */
+  readonly #edgesOn: Uint8Array;
+  readonly #fitOn: Uint8Array;
+  readonly #on: Uint8Array;
   /** A walker's ground per node, worked out when first asked. */
   readonly #ground: Float64Array;
   readonly #byHex = new Map<number, number[]>();
@@ -116,8 +132,12 @@ export class HexWalkWorld {
     this.g = g;
     this.#bounds = scene.bounds;
     const walking = walkFrom(build.buildChunks, token);
-    this.#narrowWalls = hexWallsOf(build, walking);
-    this.walls = scene.blockMovement === true ? this.#narrowWalls : null;
+    // As the walk starts, which a drop's landing reads (movement.ts hexLanding), and past its holder.
+    const before = hexWallsOf(build, walking);
+    const after = walking.offHolder ? hexWallsOf(build, pastHolder(walking)) : before;
+    this.#narrowWalls = before;
+    this.walls = scene.blockMovement === true ? after : null;
+    this.#onWalls = this.walls && before && before.walls !== after?.walls ? before : null;
     // Only where walls stop moves, as the server tests them there alone (permissions.ts draggedWalls).
     this.#towed = this.walls ? (input.towed ?? []).map((t) => ({ walker: t, dx: t.x - token.x, dy: t.y - token.y })) : [];
     this.#members = new Map((input.group ?? input.towed ?? []).map((m) => [m.id, m]));
@@ -139,6 +159,9 @@ export class HexWalkWorld {
     this.#edges = new Uint8Array(hexes * 6);
     this.#flags = new Uint8Array(hexes);
     this.#fit = new Uint8Array(hexes * 2);
+    this.#edgesOn = new Uint8Array(this.#onWalls ? hexes * 6 : 0);
+    this.#fitOn = new Uint8Array(this.#onWalls ? hexes * 2 : 0);
+    this.#on = new Uint8Array(this.#onWalls ? hexes * 2 : 0);
     this.#ground = new Float64Array(this.mode === "ground" ? hexes * 2 : 0).fill(NaN);
     if (this.mode === "ground") this.#markGround(scene.id);
     if (this.mode !== "inside") {
@@ -227,50 +250,82 @@ export class HexWalkWorld {
     return yes;
   }
 
-  /** The segment from a hex's center to its neighbor's in direction `d` (movement.ts hexEdgeState), kept per hex inside the index. */
-  #edge(h: Hex, d: number): 1 | 2 | 3 {
-    const walls = this.walls!;
+  /** Whether the walk starts before its holder, crossing the raised sides between the holder's hexes until it stands clear of them. */
+  get startsOn(): boolean {
+    return this.#onWalls !== null;
+  }
+
+  /** The movement set a leg from where the walk starts reads, as the server's leg test reads it (movement.ts hexWallsOf), or null on a scene that stops no moves. */
+  get startWalls(): HexWalls | null {
+    return this.#onWalls ?? this.walls;
+  }
+
+  /** Whether a stand shares a hex with the holder the walk leaves (movement.ts onOffHolder), where the walk starts before it. */
+  onHolder(s: HexStand): boolean {
+    if (!this.#onWalls) return false;
+    const node = this.nodeOf(s);
+    const known = node >= 0 ? this.#on[node]! : 0;
+    if (known !== 0) return known === 1;
+    const on = onOffHolder(this.input.token, this.place(s));
+    if (node >= 0) this.#on[node] = on ? 1 : 2;
+    return on;
+  }
+
+  /** The movement set a step reads: before the walk clears its holder (`on`), or past it. */
+  #wallsFor(on: boolean): HexWalls {
+    return (on ? this.#onWalls : null) ?? this.walls!;
+  }
+
+  /** The segment from a hex's center to its neighbor's in direction `d` (movement.ts hexEdgeState), kept per hex inside the index, before the walk clears its holder (`on`) or past it. */
+  #edge(h: Hex, d: number, on = false): 1 | 2 | 3 {
+    const walls = this.#wallsFor(on);
+    const known = walls === this.walls ? this.#edges : this.#edgesOn;
     const i = this.#index(h);
     if (i < 0) return hexEdgeState(walls, h, d);
-    const known = this.#edges[i * 6 + d]!;
-    if (known !== 0) return known as 1 | 2 | 3;
+    const hit = known[i * 6 + d]!;
+    if (hit !== 0) return hit as 1 | 2 | 3;
     const state = hexEdgeState(walls, h, d);
-    this.#edges[i * 6 + d] = state;
+    known[i * 6 + d] = state;
     return state;
   }
 
-  /** Whether a stand's footprint fits between the walls (HX-D8), a stair band's zigzag side no wall inside it (movement.ts hexPairWall). */
-  fits(s: HexStand): boolean {
-    const walls = this.walls;
-    if (!walls) return true;
+  /** Whether a stand's footprint fits between the walls (HX-D8), a stair band's zigzag side no wall inside it (movement.ts hexPairWall), before the walk clears its holder (`on`) or past it. */
+  fits(s: HexStand, on = false): boolean {
+    if (!this.walls) return true;
+    const walls = this.#wallsFor(on);
+    const fit = walls === this.walls ? this.#fit : this.#fitOn;
     const node = this.nodeOf(s);
-    if (node >= 0 && this.#fit[node] !== 0) return this.#fit[node] === 1;
+    if (node >= 0 && fit[node] !== 0) return fit[node] === 1;
     const hexes = hexStandHexes(this.g, s);
     const keys = new Set(hexes.map((h) => `${h.col},${h.row}`));
     let ok = true;
     for (const h of hexes) {
       const around = hexNeighbors(this.g, h);
-      for (let d = 0; d < 3 && ok; d++) if (keys.has(`${around[d]!.col},${around[d]!.row}`) && this.#edge(h, d) !== 1 && hexPairWall(walls, h, d) >= 0) ok = false;
+      for (let d = 0; d < 3 && ok; d++) if (keys.has(`${around[d]!.col},${around[d]!.row}`) && this.#edge(h, d, on) !== 1 && hexPairWall(walls, h, d) >= 0) ok = false;
       if (!ok) break;
     }
-    if (node >= 0) this.#fit[node] = ok ? 1 : 2;
+    if (node >= 0) fit[node] = ok ? 1 : 2;
     return ok;
   }
 
-  /** Whether a full footprint fits between the scene's walls, stopping moves or not, as the landing reads it: no squeeze is tried there. */
+  /** Whether a full footprint fits between the scene's walls, stopping moves or not, as the landing reads it from where the walk starts: no squeeze is tried there. */
   #fitsAnyway(s: HexStand): boolean {
-    return this.walls ? this.fits(s) : !this.#narrowWalls || hexFitWall(this.#narrowWalls, s) < 0;
+    return this.walls ? this.fits(s, this.startsOn) : !this.#narrowWalls || hexFitWall(this.#narrowWalls, s) < 0;
   }
 
-  /** Whether stand `a` steps in direction `d` to `b` (HX-D8): `b` standable and fitting, and no hex's step meets a wall, but one it leaves on a first step. */
-  stepOk(a: HexStand, b: HexStand, d: number, first: boolean): boolean {
+  /**
+   * Whether stand `a` steps in direction `d` to `b` (HX-D8): `b` standable
+   * and fitting, and no hex's step meets a wall, but one it leaves on a
+   * first step. `on` is whether the walk is still before its holder at `a`.
+   */
+  stepOk(a: HexStand, b: HexStand, d: number, first: boolean, on = false): boolean {
     if (!this.standable(b)) return false;
     if (!this.walls) return true;
     for (const h of hexStandHexes(this.g, a)) {
-      const e = this.#edge(h, d);
+      const e = this.#edge(h, d, on);
       if (e === 2 || (e === 3 && !first)) return false;
     }
-    return this.fits(b) && this.#towedStep(a, b, d, first);
+    return this.fits(b, on) && this.#towedStep(a, b, d, first);
   }
 
   /** Whether the walker drags a creature beside it that a step can leave behind. */
@@ -416,8 +471,8 @@ export class HexWalkWorld {
    * squeeze in place from a full one, and each creature that a token
    * sitting on it drags walks with that token's new seat (`#towedStand`).
    */
-  restandOk(to: HexStand): boolean {
-    if (!this.standable(to) || !(to.squeezed || this.fits(to))) return false;
+  restandOk(to: HexStand, on = false): boolean {
+    if (!this.standable(to) || !(to.squeezed || this.fits(to, on))) return false;
     if (this.#towed.length === 0) return true;
     const from = hexRestand(this.input.token, to, !to.squeezed);
     const pa = this.place(from);
@@ -547,14 +602,17 @@ export class HexWalkWorld {
    * allowed at the extra the walk paid, at the size the walk squeezed at
    * between them. So a walk across open hexes that zigzags is one piece,
    * and every piece costs what the walk did. `charge` counts the checks.
+   * `on` says at each node whether the walk is still before its holder
+   * there, which judges a piece from it, as the server judges a leg by
+   * where it starts.
    */
-  piecesOf(nodes: readonly number[], via: readonly number[], extras: readonly number[], charge: (units?: number) => void = () => {}): { pieces: RoutePiece[]; points: RoutePoint[] } {
+  piecesOf(nodes: readonly number[], via: readonly number[], extras: readonly number[], charge: (units?: number) => void = () => {}, on: readonly boolean[] = []): { pieces: RoutePiece[]; points: RoutePoint[] } {
     const pieces: RoutePiece[] = [];
     const points: RoutePoint[] = [{ x: this.input.token.x, y: this.input.token.y, elevation: this.elevation }];
     let i = 0;
     while (i < nodes.length - 1) {
       let j = i + 1;
-      while (j + 1 < nodes.length && this.#pieceHolds(nodes, via, extras, i, j + 1, charge)) j++;
+      while (j + 1 < nodes.length && this.#pieceHolds(nodes, via, extras, i, j + 1, charge, on[i] === true)) j++;
       const end = this.standOf(nodes[j]!);
       const at = this.place(end);
       pieces.push([at.x, at.y, this.#pieceExtra(via, extras, i, j), 0]);
@@ -570,7 +628,7 @@ export class HexWalkWorld {
     return 0;
   }
 
-  #pieceHolds(nodes: readonly number[], via: readonly number[], extras: readonly number[], i: number, j: number, charge: (units?: number) => void): boolean {
+  #pieceHolds(nodes: readonly number[], via: readonly number[], extras: readonly number[], i: number, j: number, charge: (units?: number) => void, on: boolean): boolean {
     const a = this.standOf(nodes[i]!);
     const b = this.standOf(nodes[j]!);
     const squeezed = a.squeezed || b.squeezed;
@@ -593,7 +651,7 @@ export class HexWalkWorld {
     for (let k = 1; k < line.length; k++) {
       const to: HexStand = { size: leg.walk, ref: line[k]!, squeezed: leg.squeezed };
       const d = hexNeighbors(this.g, from.ref).findIndex((n) => n.col === to.ref.col && n.row === to.ref.row);
-      if (d < 0 || !this.stepOk(from, to, d, k === 1)) return false;
+      if (d < 0 || !this.stepOk(from, to, d, k === 1, on)) return false;
       if (this.elevationOf(to) - this.elevationOf(from) !== rise) return false;
       if (this.extraOf(from, to) !== Math.max(0, extra)) return false;
       if (k < line.length - 1 && this.endOnly(to)) return false;
@@ -675,7 +733,9 @@ class Heap {
  * residue, started from the walk's own counter, as walk.ts WalkSearch
  * keeps it: every other climb costs 5 ft more, so the cheapest way on from
  * a node depends on how many climbs led there. A hex step is never
- * diagonal, so the horizontal counter never moves.
+ * diagonal, so the horizontal counter never moves. A walk off a holder
+ * also keeps apart a node reached before it clears the holder from one
+ * reached after (HexWalkWorld `onHolder`).
  */
 export class HexWalkSearch {
   readonly world: HexWalkWorld;
@@ -694,7 +754,9 @@ export class HexWalkSearch {
   #heading = new Int8Array(1024);
   #extra = new Int8Array(1024);
   #done = new Uint8Array(1024);
-  /** States at the starting residue, by node, and the others by key. */
+  /** Whether the walk is still before its holder in a state. */
+  #pre = new Uint8Array(1024);
+  /** States at the starting residue past the walk's holder, by node, and the others by key. */
   readonly #dense: Int32Array;
   readonly #sparse = new Map<number, number>();
   readonly #v0: number;
@@ -715,31 +777,32 @@ export class HexWalkSearch {
     this.#best = new Int32Array(n).fill(-1);
     const start = world.startNode;
     if (start >= 0) {
-      const s = this.#slot(start, this.#v0);
+      const s = this.#slot(start, this.#v0, world.startsOn);
       this.#cost[s] = 0;
       this.#via[s] = START;
       this.#heap.push(s, 0, 0, this.#seq++);
     }
   }
 
-  /** The state of a node at a residue, or -1. */
-  #find(node: number, v: number): number {
-    return v === this.#v0 ? this.#dense[node]! : (this.#sparse.get(node * 2 * this.#S + v) ?? -1);
+  /** The state of a node at a residue, before the walk's holder or past it, or -1. */
+  #find(node: number, v: number, pre: boolean): number {
+    return v === this.#v0 && !pre ? this.#dense[node]! : (this.#sparse.get((node * 2 * this.#S + v) * 2 + (pre ? 1 : 0)) ?? -1);
   }
 
-  /** The state of a node at a residue, made when new. */
-  #slot(node: number, v: number): number {
-    const known = this.#find(node, v);
+  /** The state of a node at a residue, before the walk's holder or past it, made when new. */
+  #slot(node: number, v: number, pre: boolean): number {
+    const known = this.#find(node, v, pre);
     if (known >= 0) return known;
     if (this.#n === this.#node.length) this.#grow();
     const s = this.#n++;
     this.#node[s] = node;
     this.#v[s] = v;
+    this.#pre[s] = pre ? 1 : 0;
     this.#cost[s] = Infinity;
     this.#parent[s] = -1;
     this.#heading[s] = -1;
-    if (v === this.#v0) this.#dense[node] = s;
-    else this.#sparse.set(node * 2 * this.#S + v, s);
+    if (v === this.#v0 && !pre) this.#dense[node] = s;
+    else this.#sparse.set((node * 2 * this.#S + v) * 2 + (pre ? 1 : 0), s);
     return s;
   }
 
@@ -759,6 +822,7 @@ export class HexWalkSearch {
     this.#heading = grown(this.#heading, (n) => new Int8Array(n));
     this.#extra = grown(this.#extra, (n) => new Int8Array(n));
     this.#done = grown(this.#done, (n) => new Uint8Array(n));
+    this.#pre = grown(this.#pre, (n) => new Uint8Array(n));
   }
 
   #endsOf(to: Point): HexStand[] {
@@ -807,23 +871,27 @@ export class HexWalkSearch {
     if (this.#via[s] !== START && world.endOnly(A)) return;
     // A leg's first step may leave a wall its hexes' centers touch, so the start and a squeeze or stand in place there step first.
     const first = this.#via[s] === START || (this.#via[s] === IN_PLACE && this.#via[this.#parent[s]!] === START);
+    // A step is judged as the walk stands where it starts, and leaves it past its holder once it stands clear of it.
+    const pre = this.#pre[s] === 1;
     const neighbors = hexNeighbors(world.g, A.ref);
     for (let d = 0; d < 6; d++) {
       const B: HexStand = { size: A.size, ref: neighbors[d]!, squeezed: A.squeezed };
       const b = world.nodeOf(B);
       if (b < 0) continue;
       const { length, v } = this.#step(A, B, this.#v[s]!);
-      const known = this.#find(b, v);
-      if ((known >= 0 && this.#done[known] === 1) || !world.stepOk(A, B, d, first)) continue;
+      const still = pre && world.onHolder(B);
+      const known = this.#find(b, v, still);
+      if ((known >= 0 && this.#done[known] === 1) || !world.stepOk(A, B, d, first, pre)) continue;
       const extra = world.extraOf(A, B);
       const heading = this.#heading[s]!;
-      this.#relax(s, b, v, this.#cost[s]! + (1 + extra) * length, this.#corners[s]! + (heading >= 0 && heading !== d ? 1 : 0), d, d, extra);
+      this.#relax(s, b, v, still, this.#cost[s]! + (1 + extra) * length, this.#corners[s]! + (heading >= 0 && heading !== d ? 1 : 0), d, d, extra);
     }
     if (world.small) {
       const B = hexRestand(world.input.token, A, !A.squeezed);
       const b = world.nodeOf(B);
-      const known = b < 0 ? -1 : this.#find(b, this.#v[s]!);
-      if (b >= 0 && !(known >= 0 && this.#done[known] === 1) && world.restandOk(B)) this.#relax(s, b, this.#v[s]!, this.#cost[s]!, this.#corners[s]!, IN_PLACE, this.#heading[s]!, 0);
+      const still = pre && b >= 0 && world.onHolder(B);
+      const known = b < 0 ? -1 : this.#find(b, this.#v[s]!, still);
+      if (b >= 0 && !(known >= 0 && this.#done[known] === 1) && world.restandOk(B, pre)) this.#relax(s, b, this.#v[s]!, still, this.#cost[s]!, this.#corners[s]!, IN_PLACE, this.#heading[s]!, 0);
     }
   }
 
@@ -838,10 +906,10 @@ export class HexWalkSearch {
     return { length: units / S, v: (v + vMin) % (2 * S) };
   }
 
-  #relax(from: number, b: number, v: number, cost: number, corners: number, via: number, heading: number, extra: number): void {
-    const known = this.#find(b, v);
+  #relax(from: number, b: number, v: number, pre: boolean, cost: number, corners: number, via: number, heading: number, extra: number): void {
+    const known = this.#find(b, v, pre);
     if (known >= 0 && (cost > this.#cost[known]! || (cost === this.#cost[known]! && corners >= this.#corners[known]!))) return;
-    const t = known >= 0 ? known : this.#slot(b, v);
+    const t = known >= 0 ? known : this.#slot(b, v, pre);
     this.#cost[t] = cost;
     this.#corners[t] = corners;
     this.#parent[t] = from;
@@ -864,7 +932,8 @@ export class HexWalkSearch {
     const nodes = states.map((s) => this.#node[s]!);
     const via = states.map((s) => this.#via[s]!);
     const extras = states.map((s) => this.#extra[s]!);
-    const { pieces, points } = this.world.piecesOf(nodes, via, extras, (units = 1) => budget.charge(units));
+    const on = states.map((s) => this.#pre[s] === 1);
+    const { pieces, points } = this.world.piecesOf(nodes, via, extras, (units = 1) => budget.charge(units), on);
     return { pieces, points, endsBlocked: this.world.endOnly(this.world.standOf(this.#node[end]!)) };
   }
 
@@ -926,7 +995,7 @@ export class HexLegCheck {
     this.#done = true;
     if (to.x === token.x && to.y === token.y) return true;
     const leg = hexLegOf(world.g, world.start, hexEndStand(world.g, token, to));
-    if (world.walls && hexLegStop(world.walls, leg) !== null) {
+    if (world.startWalls && hexLegStop(world.startWalls, leg) !== null) {
       this.stopped = true;
       this.#open = false;
     } else if (world.tows && !world.towedFollow(to)) {
@@ -952,14 +1021,17 @@ export class HexLegCheck {
       via.push(IN_PLACE);
     }
     const extras: number[] = [0];
+    // Whether the walk is still before its holder at each node (HexWalkWorld onHolder).
+    const on: boolean[] = [world.startsOn];
     let inside = true;
     let rise: number | null = null;
     for (let k = 1; k < nodes.length; k++) {
       const a = nodes[k - 1]!;
       const b = nodes[k]!;
+      on.push(on[k - 1]! && world.onHolder(b));
       if (via[k] === IN_PLACE) {
         extras.push(0);
-        if (!world.restandOk(b)) inside = false;
+        if (!world.restandOk(b, on[k - 1]!)) inside = false;
         continue;
       }
       if (!world.standable(b)) inside = false;
@@ -976,7 +1048,7 @@ export class HexLegCheck {
     if (!this.#wantRoute || !inside || nodes.length < 2) return true;
     const ids = nodes.map((s) => world.nodeOf(s));
     if (ids.some((n) => n < 0)) return true;
-    const { pieces, points } = world.piecesOf(ids, via, extras, late);
+    const { pieces, points } = world.piecesOf(ids, via, extras, late, on);
     // The leg's own end, not a stand placed for it, so the route ends where the drop does.
     const last = pieces[pieces.length - 1]!;
     pieces[pieces.length - 1] = [to.x, to.y, last[2], last[3]];

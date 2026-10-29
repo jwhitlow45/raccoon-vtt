@@ -351,7 +351,7 @@ describe("FL-3 typed damage on the server", () => {
   });
 
   test("typed damage has an identity op migration and never migrates down", () => {
-    assert.equal(OP_VERSION, 31);
+    assert.ok(OP_VERSION >= 31);
     const op = hit();
     assert.equal(runMigrations(op, 30, 31, opMigrations), op);
     assert.throws(() => runMigrations(op, 31, 30, opMigrations), /down/);

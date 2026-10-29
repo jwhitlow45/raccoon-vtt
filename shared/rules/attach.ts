@@ -5,7 +5,7 @@ import { boxDistanceFt, tokenCellBox, type DistanceSettings } from "./distance.t
 import { footprintRect, footprintSize, hexAnchor, isSqueezed, occupiedHexes, placedOnHex, sizeCategory, snapStep, storedCenter, type FootprintToken, type PlacedToken, type SizeCategory } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
 import { footing, footprintGround } from "./heights.ts";
-import { seatsFromSnappedBox, seatsOnSqueeze, walksOffFromGround } from "../migrate.ts";
+import { holderLedgesOnHexes, seatsFromSnappedBox, seatsOnSqueeze, walksOffFromGround } from "../migrate.ts";
 import type { Walker } from "./movement.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexInScene, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
@@ -374,7 +374,11 @@ type Walking = Sized & FootprintToken & Pick<Token, "id" | "sceneId" | "attached
  * the squeezed one while it squeezes, so a ledge in the band of its full
  * footprint beside the squeeze stops it as the ground's (review
  * DP34-ASTRA-02), but for an op stored before version 29, which reads the
- * full one (migrate.ts seatsOnSqueeze). So it crosses the step under a
+ * full one (migrate.ts seatsOnSqueeze). On hexes the ledges it crosses are
+ * the raised sides between two of the hexes the holder stands on, and it
+ * stands clear of the holder once it shares none of them, but for an op
+ * stored before version 32, where every ledge stopped it (migrate.ts
+ * holderLedgesOnHexes). So it crosses the step under a
  * holder that straddles two heights, and steps off no cliff at the
  * holder's side and climbs no ledge beyond it. The route search, every
  * leg test, the walk's points and its cost read it so, on the player's
@@ -409,9 +413,11 @@ export function walkerFor<T extends Walking>(
   const holder = holderOf(state.tokens, token) as Walking | undefined;
   if (!holder || !seen(token) || !seen(holder) || footing(state.buildChunks, holder) !== "ground") return token as T & Walker;
   const squeezed = isSqueezed(holder) && seatsOnSqueeze(off.opVersion);
-  const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}), ...(squeezed ? { squeeze: true as const } : {}) };
   const scene = state.scenes[token.sceneId];
   const g = scene ? sceneGrid(scene) : SQUARES;
+  // On hexes the walk reads the holder by its hexes from op version 32, before which it crossed no ledge there (movement.ts OffHolder).
+  const hex = isHex(g) && holderLedgesOnHexes(off.opVersion) ? { hex: g } : {};
+  const offHolder = { size: holder.size, x: holder.x, y: holder.y, ...(holder.w !== undefined ? { w: holder.w } : {}), ...(holder.h !== undefined ? { h: holder.h } : {}), ...(squeezed ? { squeeze: true as const } : {}), ...hex };
   const there = off.to && { ...token, x: off.to.x, y: off.to.y };
   const leaves = walksOffFromGround(off.opVersion) && (!there || !seatHolds(g, link.kind, there, holder) || (squeezed && !onStand(g, there, holder)));
   return { ...token, footing: "ground", offHolder, ...(leaves ? { groundStart: true as const } : {}) } as T & Walker;
