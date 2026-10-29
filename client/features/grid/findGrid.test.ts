@@ -3,12 +3,13 @@ import { describe, test } from "node:test";
 import sharp from "sharp";
 import { createStore } from "zustand/vanilla";
 import type { ClientOp } from "#shared/protocol.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
 import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
 import { calibrationFromHexFind } from "./calibrate.ts";
 import { pickShape, type HexDetection } from "./detectHex.ts";
 import { cameWithGrid, decodeSize, headerSize, HIGH_CONFIDENCE, importSearch, importSearchFrom, findFound, foundGrid, importFound, keptGridHolds, nameGivesSize, offeredLater, offeredOnly, pickedGrid, replacementFound, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
-import { landSearch, showOutcome } from "./outcome.ts";
+import { foundLine, landSearch, showOutcome } from "./outcome.ts";
 import type { GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
 
@@ -451,9 +452,9 @@ function gridRoom() {
 describe("new art of the old image's shape keeps the scene's grid, and a find there is only offered (D-261029-50)", () => {
   // The scene stood on 70 px squares from (20, 35) on a 1400 x 1000 map, and the new art is 1400 x 1000 too.
   const next = { widthPx: 1400, heightPx: 1000 };
-  const kept = { cellPx: 70, originPx: { x: 20, y: 35 } };
+  const kept = { cellPx: 70, originPx: { x: 20, y: 35 }, scale: 1 };
   const before = { map: { originPx: kept.originPx } };
-  const landing = { id: "s1", bounds: { w: 20, h: 14 }, map: { assetId: "b", ...next, ...kept } };
+  const landing = { id: "s1", bounds: { w: 20, h: 14 }, map: { assetId: "b", ...next, cellPx: kept.cellPx, originPx: kept.originPx } };
   /** A square find in the map's pixels, as the Worker answers it from a 700 x 500 decode. */
   const squaresAt = (cellPx: number, origin: { x: number; y: number }, confidence = 0.9) => done(detection(cellPx / 2, { x: origin.x / 2, y: origin.y / 2 }, confidence), 700, 500);
 
@@ -484,7 +485,7 @@ describe("new art of the old image's shape keeps the scene's grid, and a find th
 
   test("on hex rows the same hexes say nothing, and squares found surely are only offered, the shape kept", () => {
     const center = { x: 704, y: 498 };
-    const hexKept = calibrationFromHexFind({ cellPx: 64, center, orient: "rows" });
+    const hexKept = { ...calibrationFromHexFind({ cellPx: 64, center, orient: "rows" }), scale: 1 };
     const hexScene = { gridShape: "hexRows" as const, map: { originPx: hexKept.originPx } };
     const hexes = looked(NO_SQUARES, hexFind("rows", 32, { x: center.x / 2, y: center.y / 2 }, 0.9), NO_HEX, 700, 500);
     assert.equal(replacementFound(hexes, false, next, hexScene, hexKept).found, null);
@@ -494,7 +495,7 @@ describe("new art of the old image's shape keeps the scene's grid, and a find th
     const { found } = replacementFound(squares, false, next, hexScene, hexKept);
     assert.equal(found?.tier, "medium");
     const { sent, actions, store } = gridRoom();
-    showOutcome({ actions, store, scene: { ...landing, gridShape: "hexRows", map: { ...landing.map, ...hexKept } }, found, fit: true, at: { x: 700, y: 500 }, fallback: hexKept });
+    showOutcome({ actions, store, scene: { ...landing, gridShape: "hexRows", map: { ...landing.map, cellPx: hexKept.cellPx, originPx: hexKept.originPx } }, found, fit: true, at: { x: 700, y: 500 }, fallback: hexKept });
     assert.deepEqual(sent, [], "neither the shape nor the grid sent");
     assert.equal(store.getState().found?.other?.shape, "squares", "the squares said, for Grid shape to bring");
   });
@@ -510,6 +511,45 @@ describe("new art of the old image's shape keeps the scene's grid, and a find th
       assert.equal(store.getState().found?.outcome, offered ? "offered" : "applied");
       assert.equal(sent.length > 0, !offered);
     }
+  });
+
+  test("a finer or coarser grid on the kept grid's centers is another grid, and offered (review FU35B-ASTRA-01)", () => {
+    // Every kept center lies on a lattice a whole fraction of its size from the same origin, so the sizes decide.
+    assert.equal(replacementFound(squaresAt(70, { x: 20, y: 35 }), false, next, before, { cellPx: 210, originPx: { x: 20, y: 35 }, scale: 1 }).found?.cal.cellPx, 70, "a third of the kept squares");
+    assert.equal(replacementFound(squaresAt(70 / 3, { x: 20, y: 35 }), false, next, before, kept).found?.tier, "medium", "70 against 70 / 3");
+    const center = { x: 704, y: 498 };
+    const rows = { ...calibrationFromHexFind({ cellPx: 64, center, orient: "rows" }), scale: 1 };
+    const halfRows = looked(NO_SQUARES, hexFind("rows", 16, { x: center.x / 2, y: center.y / 2 }, 0.9), NO_HEX, 700, 500);
+    assert.equal(replacementFound(halfRows, false, next, { gridShape: "hexRows", map: { originPx: rows.originPx } }, rows).found?.cal.cellPx, 32, "64 against 32 on hex rows");
+  });
+
+  test("on hex columns the same hexes say nothing", () => {
+    const center = { x: 702, y: 497 };
+    const columns = { ...calibrationFromHexFind({ cellPx: 64, center, orient: "columns" }), scale: 1 };
+    const again = looked(NO_SQUARES, NO_HEX, hexFind("columns", 32, { x: center.x / 2, y: center.y / 2 }, 0.9), 700, 500);
+    assert.equal(replacementFound(again, false, next, { gridShape: "hexColumns", map: { originPx: columns.originPx } }, columns).found, null);
+  });
+
+  test("the kept squares found again beside hexes are still said, naming both (review FU35B-ASTRA-02)", () => {
+    // Squares on the kept lines and hexes as tiles under them: the squares alone would say nothing, but the hexes are news (design 10.6).
+    const both = looked(detection(35, { x: 10, y: 17.5 }, 0.7), hexFind("rows", 26, { x: 350, y: 250 }, 0.8), NO_HEX, 700, 500);
+    const { found } = replacementFound(both, false, next, before, kept);
+    assert.deepEqual(found, { tier: "medium", cal: { cellPx: 70, originPx: { x: 20, y: 35 } }, contested: { shape: "hexRows", cellPx: 52 } });
+    const { sent, actions, store } = gridRoom();
+    const note = showOutcome({ actions, store, scene: landing, found, fit: true, at: { x: 700, y: 500 }, fallback: kept });
+    assert.deepEqual(sent, [], "nothing applied");
+    assert.equal(note && foundLine(note, SQUARES).content, "The map shows squares of 70 px and hexes of 52 px. Check the box, then Apply.");
+  });
+
+  test("art twice the size keeps a grid found on the smaller copy, scaled with its errors, and the same lines found again say nothing (D-261029-54)", () => {
+    // Hex rows whose first row sits 0.7 px under the small copy's edge, folded there (FOUND_SNAP_PX), and 1.4 px under it at twice the size, kept.
+    const center = { x: 700.3, y: 721.75 };
+    const small = calibrationFromHexFind({ cellPx: 44.73 / 2, center: { x: center.x / 2, y: center.y / 2 }, orient: "rows" });
+    const scaled = { cellPx: small.cellPx * 2, originPx: { x: small.originPx.x * 2, y: small.originPx.y * 2 } };
+    const scene = { gridShape: "hexRows" as const, map: { originPx: small.originPx } };
+    const again = looked(NO_SQUARES, hexFind("rows", 44.73 / 2, { x: center.x / 2, y: center.y / 2 }, 0.9), NO_HEX, 700, 500);
+    assert.equal(replacementFound(again, false, next, scene, { ...scaled, scale: 2 }).found, null);
+    assert.equal(replacementFound(again, false, next, scene, { ...scaled, scale: 1 }).found?.tier, "medium", "the 1 px slack of art the same size would offer it");
   });
 
   test("only offered: the surest just under the line, the shapes in the same order", () => {

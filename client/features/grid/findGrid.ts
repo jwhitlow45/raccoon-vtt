@@ -5,7 +5,7 @@ import { sniffImage } from "../uvtt/image.ts";
 import type { Device } from "../uvtt/limits.ts";
 import type { GridDetection } from "./detect.ts";
 import { pickShape, type HexDetection, type HexFound, type MapShape } from "./detectHex.ts";
-import { canonicalToWorld, calibrationFromFind, calibrationFromHexFind, FOUND_SNAP, FOUND_SNAP_PX, worldToCanonical, type Calibration, type Point } from "./calibrate.ts";
+import { canonicalToWorld, calibrationFromFind, calibrationFromHexFind, FOUND_SNAP, FOUND_SNAP_PX, worldToCanonical, type Calibration, type KeptGrid, type Point } from "./calibrate.ts";
 
 /**
  * Finding a map's drawn grid from the page (docs/design-v1-grid-detect.md
@@ -163,32 +163,42 @@ export function findFound(found: FoundGrid | null, ownGrid: boolean): FoundGrid 
  * scenes/create.ts `replacement`). A find there is only offered, since the
  * DM may have lined that grid up by hand, and a find that puts its cells
  * where the kept grid has them is no find at all: the scene already
- * stands on it (D-261029-50).
+ * stands on it (D-261029-50). A find that names another shape too is
+ * still said, though its own shape matches: the map may hold either as
+ * tiles under the other (design 10.6).
  */
 export function replacementFound(
   answer: SearchDone | null,
   named: boolean,
   next: { widthPx: number; heightPx: number },
   scene: Pick<Scene, "gridFromFile" | "gridShape"> & { map?: { originPx: Point } },
-  kept: Calibration | null = null,
+  kept: KeptGrid | null = null,
 ): { found: FoundGrid | null; ownGrid: boolean } {
   const ownGrid = cameWithGrid({ gridFromFile: scene.gridFromFile, map: scene.map ?? { originPx: { x: 0, y: 0 } } });
   const found = findFound(importFound(answer && kept ? offeredOnly(answer) : answer, named, next, scene.gridShape), ownGrid);
-  if (found && kept && keptGridHolds(found, kept, scene.gridShape, next)) return { found: null, ownGrid };
+  if (found && kept && !found.contested && keptGridHolds(found, kept, scene.gridShape, next)) return { found: null, ownGrid };
   return { found, ownGrid };
 }
 
+/** How far apart two grids' cell sizes may be and still be one grid, before their cells are compared. */
+const SAME_SPACING = 0.25;
+
 /**
  * Whether a find puts its cells where a kept grid has them: the same
- * shape, and the kept grid's cells at the map's four corners and its
- * middle each within FOUND_SNAP of a found cell's center (FOUND_SNAP_PX at
- * least). A size that differs adds up across the map, so the corners show
- * it where the middle alone would not.
+ * shape, cells of nearly one size, and the kept grid's cells at the map's
+ * four corners and its middle each within FOUND_SNAP of a found cell's
+ * center (FOUND_SNAP_PX at least). A size that differs a little adds up
+ * across the map, so the corners show it where the middle alone would
+ * not. A whole fraction of the kept cell puts a center on every kept one,
+ * so a size that differs a lot is told by the sizes. The kept grid was
+ * scaled up with the art, its errors with it, so the slack grows by as
+ * much (D-261029-54).
  */
-export function keptGridHolds(found: FoundGrid, kept: Calibration, shape: GridShape | undefined, map: { widthPx: number; heightPx: number }): boolean {
+export function keptGridHolds(found: FoundGrid, kept: KeptGrid, shape: GridShape | undefined, map: { widthPx: number; heightPx: number }): boolean {
   if (found.shape !== shape) return false;
+  if (Math.abs(found.cal.cellPx / kept.cellPx - 1) > SAME_SPACING) return false;
   const g = gridOfShape(shape);
-  const slack = Math.max(FOUND_SNAP_PX, kept.cellPx * FOUND_SNAP);
+  const slack = Math.max(FOUND_SNAP_PX, kept.cellPx * FOUND_SNAP) * Math.max(1, kept.scale);
   const inset = Math.min(kept.cellPx, map.widthPx, map.heightPx) / 2;
   const points = [
     { x: inset, y: inset },

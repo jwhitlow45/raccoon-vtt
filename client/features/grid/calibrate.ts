@@ -19,6 +19,8 @@ export type Point = { x: number; y: number };
 /** Map fields the math needs. */
 export type Calibration = Pick<SceneMap, "cellPx" | "originPx">;
 export type MapSize = Pick<SceneMap, "widthPx" | "heightPx">;
+/** The grid a scene keeps on new art of its old image's shape, and how many times larger the new art is (scenes/create.ts `replacement`). */
+export type KeptGrid = Calibration & { scale: number };
 
 /** Squares per side of the alignment box. Three squares average out a hand-placed corner. */
 export const BOX_CELLS = 3;

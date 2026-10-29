@@ -1,7 +1,7 @@
 import type { GridShape, LightLevel, RoomState, Scene, SceneMap, ScenePreset } from "#shared/model.ts";
 import { PLAYERS_SEE_WORDS } from "#shared/playersSee.ts";
 import { MAX_NAME, MAX_SCENE_CELLS, type OpOf } from "#shared/protocol.ts";
-import { fitBounds, MAX_CELL_PX, MIN_CELL_PX, type Calibration } from "../grid/calibrate.ts";
+import { fitBounds, MAX_CELL_PX, MIN_CELL_PX, type KeptGrid } from "../grid/calibrate.ts";
 import { groundAtMiddle, type Live } from "../../lib/view.ts";
 import { lightOf } from "../vision/settings.ts";
 
@@ -272,10 +272,10 @@ export function sameImageShape(old: SceneMap, asset: MapAsset): boolean {
  * does. A size in the file name wins on squares, so such a file is not
  * searched.
  */
-export function replacement(old: SceneMap | undefined, asset: MapAsset, hex: boolean): { map: SceneMap; search: boolean; kept: Calibration | null } {
+export function replacement(old: SceneMap | undefined, asset: MapAsset, hex: boolean): { map: SceneMap; search: boolean; kept: KeptGrid | null } {
   const map = replaceMap(old, asset);
   const sameFile = old?.assetId === asset.id;
-  const kept = old && !sameFile && sameImageShape(old, asset) ? { cellPx: map.cellPx, originPx: map.originPx } : null;
+  const kept = old && !sameFile && sameImageShape(old, asset) ? { cellPx: map.cellPx, originPx: map.originPx, scale: asset.width / old.widthPx } : null;
   return { map, search: !sameFile && (asset.cellPx === undefined || hex), kept };
 }
 

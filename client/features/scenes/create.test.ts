@@ -100,8 +100,10 @@ describe("new scenes", () => {
     for (const hex of [false, true]) assert.deepEqual(replacement(old, { id: "a", width: 2440, height: 1690 }, hex), { map: old, search: false, kept: null }, `the same file, hex ${hex}`);
     // Other art of the old shape, or the old art at another size: the grid kept, scaled, and the new art searched.
     const half = { cellPx: 40, originPx: { x: 20, y: 25 } };
-    assert.deepEqual(replacement(old, { id: "b", width: 1220, height: 845 }, false), { map: { assetId: "b", widthPx: 1220, heightPx: 845, ...half }, search: true, kept: half });
-    assert.deepEqual(replacement(old, { id: "b", width: 2440, height: 1690 }, true).kept, { cellPx: 80, originPx: { x: 40, y: 50 } });
+    assert.deepEqual(replacement(old, { id: "b", width: 1220, height: 845 }, false), { map: { assetId: "b", widthPx: 1220, heightPx: 845, ...half }, search: true, kept: { ...half, scale: 0.5 } });
+    assert.deepEqual(replacement(old, { id: "b", width: 2440, height: 1690 }, true).kept, { cellPx: 80, originPx: { x: 40, y: 50 }, scale: 1 });
+    // Art twice the size: the kept grid's errors doubled with it (D-261029-54).
+    assert.equal(replacement(old, { id: "b", width: 4880, height: 3380 }, false).kept?.scale, 2);
     // Another shape starts over, searched, with nothing kept.
     assert.deepEqual(replacement(old, { id: "c", width: 1000, height: 1000 }, false), { map: replaceMap(old, { id: "c", width: 1000, height: 1000 }), search: true, kept: null });
     assert.equal(replacement(undefined, { id: "c", width: 1000, height: 1000 }, false).search, true, "a first image");
