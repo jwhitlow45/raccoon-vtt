@@ -2594,6 +2594,18 @@ const CASES = `
 <div data-case="hint-centered">
   <div style="height: 44px; padding: 6px 10px; background: #333; overflow: hidden; display: grid; align-content: center"><div style="font-size: 13px; line-height: 1.4; white-space: nowrap">Drag to measure. Tap to add a waypoint.</div></div>
 </div>
+<div data-case="summary-under" style="width: 214px">
+  <button style="display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; align-content: center; column-gap: 8px; width: 214px; height: auto; min-height: 48px; padding: 14.4px 0; border: none; border-radius: 0; background: none; text-align: left">
+    <span style="display: flex; align-items: center; height: 19.2px"><svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" fill="#aaa"/></svg></span>
+    <span style="display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; min-width: 0"><span style="flex: none; width: 150px; overflow: hidden; white-space: nowrap; font-size: 16px; font-weight: 700; line-height: 1.2">Save</span><span style="flex: none; width: 40px; margin-left: auto; overflow: hidden; white-space: nowrap; text-align: right; font-size: 13px; line-height: 1.4">None</span></span>
+  </button>
+</div>
+<div data-case="summary-under-high" style="width: 214px">
+  <button style="display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; align-content: center; column-gap: 8px; width: 214px; height: auto; min-height: 48px; padding: 10px 0 18.8px; border: none; border-radius: 0; background: none; text-align: left">
+    <span style="display: flex; align-items: center; height: 19.2px"><svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" fill="#aaa"/></svg></span>
+    <span style="display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; min-width: 0"><span style="flex: none; width: 150px; overflow: hidden; white-space: nowrap; font-size: 16px; font-weight: 700; line-height: 1.2">Save</span><span style="flex: none; width: 40px; margin-left: auto; overflow: hidden; white-space: nowrap; text-align: right; font-size: 13px; line-height: 1.4">None</span></span>
+  </button>
+</div>
 <div data-case="chips-wrap" style="width: 200px">
   <div role="group" aria-label="On a fail" style="display: flex; flex-wrap: wrap; gap: 4px"><button class="chip">Poisoned</button><button class="chip">Blinded</button><button class="chip">Restrained</button></div>
 </div>
@@ -2714,6 +2726,9 @@ export function helperTest(): void {
       await passes("remove-held");
       await caught("hint-high", "center");
       await passes("hint-centered");
+      // A group header whose short summary wrapped under its name at the row's end, beside the name across but on a line of its own: one block of two lines, centered as one (DPFIX-MEASURE). Set high, it is caught.
+      await passes("summary-under");
+      await caught("summary-under-high", "center");
       await passes("chips-wrap");
       await caught("buttons-wrap", "wrap-orphan");
       await passes("buttons-share");

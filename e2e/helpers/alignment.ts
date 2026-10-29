@@ -600,8 +600,8 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
         const atoms = flowing.length ? flowing : atomsOf(el, true);
         if (atoms.length) {
           const stacks = stacksOf(atoms);
-          // Where a stack runs over several lines, the stacks beside it are placed against it by the row check, so the content is centered as one.
-          const several = stacks.some((s) => linesOf(s.items).length > 1);
+          // Where a stack runs over several lines, the stacks beside it are placed against it by the row check, so the content is centered as one. So is content whose stacks stand on lines of their own, as a group header's short summary wrapped under its name at the row's end, beside the name across but under it.
+          const several = stacks.some((s) => linesOf(s.items).length > 1) || linesOf(stacks.map((s) => s.box)).length > 1;
           const judged = several ? [{ box: union(stacks.map((s) => s.box)), items: atoms }] : stacks;
           for (const s of judged) {
             const off = mid(s.box) - mid(b.inner);
