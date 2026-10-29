@@ -532,7 +532,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
       // the grid tool comes up to find the scale (and fits the scene when
       // applied).
       const fallback = { cellPx: next.cellPx, originPx: next.originPx };
-      if (!map && asset.cellPx !== undefined && next.cellPx === asset.cellPx && !found && !wait.later) {
+      if (!map && !hex && asset.cellPx !== undefined && next.cellPx === asset.cellPx && !found && !wait.later) {
         const bounds = fitBounds(next);
         if (bounds.w !== scene.bounds.w || bounds.h !== scene.bounds.h) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { bounds } });
       } else if (!map || found || wait.later) {

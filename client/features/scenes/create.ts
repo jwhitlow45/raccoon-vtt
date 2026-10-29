@@ -103,9 +103,9 @@ function validHint(v: number | undefined): v is number {
   return typeof v === "number" && Number.isFinite(v) && v >= MIN_CELL_PX && v <= MAX_CELL_PX;
 }
 
-/** The map placement for a fresh upload: the hint or a guess, the grid's first line at the image's corner. */
-export function initialMap(asset: MapAsset): { map: SceneMap; hinted: boolean } {
-  const hinted = validHint(asset.cellPx);
+/** The map placement for a fresh upload: a square-count hint on squares only, otherwise a guess. */
+export function initialMap(asset: MapAsset, hex = false): { map: SceneMap; hinted: boolean } {
+  const hinted = !hex && validHint(asset.cellPx);
   const cellPx = hinted ? asset.cellPx! : guessCellPx(asset.width, asset.height);
   return {
     map: { assetId: asset.id, widthPx: asset.width, heightPx: asset.height, cellPx, originPx: { x: 0, y: 0 } },
@@ -125,7 +125,7 @@ export function initialMap(asset: MapAsset): { map: SceneMap; hinted: boolean } 
  * blank mat or a builder scene says nothing and keeps the older rule.
  */
 export function mapScene(input: { id: string; name: string; asset: MapAsset; gridShape?: GridShape }): { scene: SceneInput; hinted: boolean } {
-  const { map, hinted } = initialMap(input.asset);
+  const { map, hinted } = initialMap(input.asset, input.gridShape !== undefined);
   return {
     scene: {
       id: input.id,
@@ -240,8 +240,8 @@ export function withPlayersSee(scene: SceneInput, pick: NewScenePick, light?: Li
  * shape, the old alignment still fits once scaled by the width ratio, so
  * tokens and builds stay on their squares.
  */
-export function replaceMap(old: SceneMap | undefined, asset: MapAsset): SceneMap {
-  if (!old || !sameImageShape(old, asset)) return initialMap(asset).map;
+export function replaceMap(old: SceneMap | undefined, asset: MapAsset, hex = false): SceneMap {
+  if (!old || !sameImageShape(old, asset)) return initialMap(asset, hex).map;
   const k = asset.width / old.widthPx;
   return {
     assetId: asset.id,
@@ -273,7 +273,7 @@ export function sameImageShape(old: SceneMap, asset: MapAsset): boolean {
  * searched.
  */
 export function replacement(old: SceneMap | undefined, asset: MapAsset, hex: boolean): { map: SceneMap; search: boolean; kept: KeptGrid | null } {
-  const map = replaceMap(old, asset);
+  const map = replaceMap(old, asset, hex);
   const sameFile = old?.assetId === asset.id;
   const kept = old && !sameFile && sameImageShape(old, asset) ? { cellPx: map.cellPx, originPx: map.originPx, scale: asset.width / old.widthPx } : null;
   return { map, search: !sameFile && (asset.cellPx === undefined || hex), kept };

@@ -7,6 +7,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 import sharp from "sharp";
 import type { BuildChunk, RoomState, Scene, Stamp } from "#shared/model.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
+import { uvttFile } from "../client/features/uvtt/synthetic.ts";
 import { STARTER_STAMPS } from "#shared/starterStamps.ts";
 import { retainedGrid, starterMapScene } from "../client/features/starter/mapScene.ts";
 import { theme } from "../client/lib/theme.ts";
@@ -1113,6 +1114,81 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     }
     assert.deepEqual(watch.errors, [], "the phone logged errors");
     assert.deepEqual(watch.warnings, [], "the phone logged warnings");
+  });
+
+  test("FU38-B: a square-count name skips alignment only on squares, with both hex orientations using the guess", async () => {
+    const file = path.join(work, "crypt_20x14.png");
+    await sharp({ create: { width: 1400, height: 980, channels: 3, background: "#685443" } }).png().toFile(file);
+    for (const [label, shape] of [["Hex rows", "hexRows"], ["Hex columns", "hexColumns"], ["Squares", undefined]] as const) {
+      await pickTool(dm, "Select");
+      await openSideTab(dm, "Scenes");
+      const panel = dm.getByRole("tabpanel", { name: sideTabName("Scenes") });
+      await panel.getByRole("radio", { name: "Map image", exact: true }).click();
+      await panel.getByRole("radiogroup", { name: "Grid", exact: true }).getByRole("radio", { name: label, exact: true }).check();
+      const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+      await panel.getByRole("button", { name: "Choose a map image" }).setInputFiles(file);
+      await panel.getByRole("button", { name: "Upload and create" }).click();
+      const scene = await waitFor(`FU38-B ${label} map`, () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.map && !known.has(s.id)), 30_000);
+      await waitFor("the DM on the named map", () => dmSocket.you?.sceneId === scene.id || null);
+      assert.equal(scene.gridShape, shape);
+      assert.equal(scene.map?.cellPx, shape ? 47 : 70);
+      const grid = dm.getByRole("toolbar", { name: "Line up grid options" });
+      if (shape) await grid.waitFor();
+      else assert.equal(await grid.count(), 0, "the square name still supplies its scale");
+    }
+  });
+
+  test("FU38-B: a hex mat's first image opens alignment even when its name's hint equals the guessed scale", async () => {
+    const file = path.join(work, "crypt_30x20.png");
+    await sharp({ create: { width: 2100, height: 1400, channels: 3, background: "#594533" } }).png().toFile(file);
+    await pickTool(dm, "Select");
+    await openSideTab(dm, "Scenes");
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("Scenes") });
+    await panel.getByRole("radio", { name: "Battle mat", exact: true }).click();
+    await panel.getByRole("radiogroup", { name: "Grid", exact: true }).getByRole("radio", { name: "Hex rows", exact: true }).check();
+    const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    await panel.getByRole("button", { name: "Create", exact: true }).click();
+    const scene = await waitFor("FU38-B hex mat", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s && !known.has(s.id)));
+    await waitFor("the DM on the hex mat", () => dmSocket.you?.sceneId === scene.id || null);
+    const group = await openSceneGroup(panel, "Map image and grid");
+    await group.getByLabel("Add a map image", { exact: true }).setInputFiles(file);
+    await dm.getByRole("toolbar", { name: "Line up grid options" }).waitFor({ timeout: 30_000 });
+    const map = await waitFor("the hex mat's image", () => sceneOf(dmSocket.state, scene.id)?.map);
+    assert.equal(map.cellPx, 70);
+    assert.equal(sceneOf(dmSocket.state, scene.id)?.gridShape, "hexRows");
+  });
+
+  test("FU38-B: a successful Universal VTT retry restores the lights line and keeps explicit light choices", async () => {
+    const file = path.join(work, "Retry_lights.dd2vtt");
+    const image = await sharp({ create: { width: 1120, height: 490, channels: 3, background: "#685443" } }).png().toBuffer();
+    const objects = Array.from({ length: 4001 }, (_, i) => {
+      const x = (i % 100) * 1.5;
+      const y = Math.floor(i / 100) * 1.5;
+      return [{ x: x + 0.2, y: y + 0.2 }, { x: x + 0.7, y: y + 0.7 }];
+    });
+    const raw = uvttFile({ size: { x: 160, y: 70 }, ppg: 7, image: image.toString("base64"), objects, lights: [{ at: { x: 5, y: 5 }, range: 4 }] });
+    writeFileSync(file, JSON.stringify({ ...raw, environment: { baked_lighting: false, ambient_light: "ff202020" } }));
+    await openSideTab(dm, "Scenes");
+    await dm.getByLabel("From a Universal VTT file").setInputFiles(file);
+    const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map" });
+    try {
+      await dialog.getByText(/more than a scene holds/).waitFor({ timeout: 30_000 });
+      assert.equal(await dialog.getByText(/^This map brings/).count(), 0);
+      const objectsBlock = dialog.getByRole("checkbox", { name: "Objects block sight and movement" });
+      await objectsBlock.uncheck();
+      await dialog.getByText(/^This map brings 1 light\./).waitFor();
+      assert.equal(await dialog.getByRole("radio", { name: "Explore", exact: true }).isChecked(), true);
+      assert.equal(await dialog.getByRole("radio", { name: "Dark", exact: true }).isChecked(), true);
+      await dialog.getByRole("button", { name: "Keep it lit", exact: true }).click();
+      await objectsBlock.check();
+      await dialog.getByText(/more than a scene holds/).waitFor();
+      await objectsBlock.uncheck();
+      await dialog.getByRole("button", { name: "Start it dark", exact: true }).waitFor();
+      assert.equal(await dialog.getByRole("radio", { name: "Bright", exact: true }).isChecked(), true);
+      assert.deepEqual(alignmentLines(await measureAlignment(dialog), "FU38-B retried import"), []);
+    } finally {
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    }
   });
 
   test("8. no page logged an error or a warning", () => {

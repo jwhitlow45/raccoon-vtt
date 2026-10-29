@@ -34,7 +34,7 @@ import {
   type Answers,
   type Contents,
 } from "./rules.ts";
-import { foundLine, imageNote, notes, shapeNote, sizeText } from "./summary.ts";
+import { foundLine, imageNote, notes, shapeNote, sizeText, summaryLight } from "./summary.ts";
 import type { LightLevel, Scene, ScenePreset } from "#shared/model.ts";
 import { NewScenePlayersSee, type PlayersSeeValue } from "../vision/PlayersSee.tsx";
 import { walllessFile } from "../vision/playersSeeRules.ts";
@@ -174,10 +174,11 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
   const busy = step.k === "image" || step.k === "upload" || step.k === "walls" || step.k === "checking";
   const phase = props.target.kind === "phase";
   const roomDefault = newScenePreset(setting, "uvtt");
-  const start = startingLight(read?.info.light ?? null, roomDefault);
+  const proposal = summaryLight(read);
+  const start = startingLight(proposal, roomDefault);
   const picked = { seen: seen ?? start.seen, light: light ?? start.light };
-  const lead = phase ? null : lightsLead(read?.info.light ?? null, picked, roomDefault);
-  const why = whyShown(read?.info.light ?? null, picked);
+  const lead = phase ? null : lightsLead(proposal, picked, roomDefault);
+  const why = whyShown(proposal, picked);
 
   const pickAnother = (next: File) => {
     abortRef.current?.abort();

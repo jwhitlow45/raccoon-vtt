@@ -2,7 +2,14 @@ import { LIMITS } from "#shared/limits.ts";
 import type { GridShape } from "#shared/model.ts";
 import { HEX_LIMITS } from "../grid/words.ts";
 import { MAX_MAP_SIDE, MAX_MAP_UPLOAD_BYTES, SIMPLIFY_STEPS, count } from "./limits.ts";
-import type { Summary } from "./convert.ts";
+import type { ImportPlan, Summary } from "./convert.ts";
+import type { ReadInfo } from "./messages.ts";
+import { proposedLight, type LightProposal } from "../vision/uvttLight.ts";
+
+/** The proposal shown with the current conversion, including a retry after the first plan failed. */
+export function summaryLight(read: { info: Pick<ReadInfo, "environment">; plan: Pick<ImportPlan, "lights"> | null } | null): LightProposal | null {
+  return read ? proposedLight(read.info.environment, read.plan?.lights.length ?? 0) : null;
+}
 
 /**
  * The summary sheet's sentences (docs/design-v1-maps-vision.md section

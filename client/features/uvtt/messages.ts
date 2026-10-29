@@ -1,4 +1,4 @@
-import type { LightProposal } from "../vision/uvttLight.ts";
+import type { UvttEnvironment } from "../vision/uvttLight.ts";
 import type { ImportOptions, ImportPlan } from "./convert.ts";
 import type { ImageType } from "./image.ts";
 import type { Device } from "./limits.ts";
@@ -20,8 +20,8 @@ export type ReadInfo = {
   hasObjects: boolean;
   /** Portals whose "block light" switch is off, which the DM chooses to import as windows or open doors. */
   lightPortals: number;
-  /** The scene's light level the file suggests, if it says anything about its light (vision/uvttLight.ts). */
-  light: LightProposal | null;
+  /** Kept so each conversion's lights can propose a level, including a retry after a refused plan. */
+  environment: UvttEnvironment | null;
 };
 
 export type ToWorker =

@@ -4,7 +4,6 @@ import { fileSizeProblem, MAX_MAP_UPLOAD_BYTES, NOT_UVTT, RESIZE_QUALITY, type D
 import type { FromWorker, PreparedImage, Stage, ToWorker } from "./messages.ts";
 import type { UvttMap } from "./schema.ts";
 import { checkFile, planScene, type ReadTarget } from "./steps.ts";
-import { proposedLight } from "../vision/uvttLight.ts";
 
 /**
  * The Universal VTT import's worker (docs/design-v1-maps-vision.md section
@@ -107,8 +106,7 @@ async function read(file: File, device: Device, target: ReadTarget, options: Imp
       resize: plan.kind === "resize",
       hasObjects: map.objects.length > 0,
       lightPortals: map.portals.filter((p) => !p.closed).length,
-      // The lights the scene would keep, so a phase, which takes none, proposes by the file's environment alone.
-      light: proposedLight(map.environment, converted.plan?.lights.length ?? 0),
+      environment: map.environment ?? null,
     },
     plan: converted.plan,
     problem: converted.problem,

@@ -6,6 +6,7 @@ import {
   builderScene,
   fogsWithFirstMap,
   guessCellPx,
+  initialMap,
   likeGoneText,
   mapScene,
   matScene,
@@ -31,6 +32,24 @@ function valid(scene: unknown) {
 }
 
 describe("new scenes", () => {
+  test("FU38-B: a square-count file name gives no scale to either hex shape", () => {
+    const asset = { id: "a", width: 1400, height: 980, cellPx: 70 };
+    for (const gridShape of ["hexRows", "hexColumns"] as const) {
+      const made = mapScene({ id: "s", name: "crypt 20x14", asset, gridShape });
+      valid(made.scene);
+      assert.equal(made.hinted, false, "a guessed scale must open Line up grid");
+      assert.equal(made.scene.map?.cellPx, guessCellPx(asset.width, asset.height));
+    }
+    assert.equal(initialMap(asset, true).hinted, false, "a first image on a hex scene also needs alignment");
+    const old = { ...initialMap(asset).map, assetId: "old", widthPx: 700, heightPx: 700 };
+    for (const previous of [undefined, old]) {
+      const next = replacement(previous, asset, true);
+      assert.equal(next.map.cellPx, guessCellPx(asset.width, asset.height));
+      assert.equal(next.search, true);
+    }
+    assert.equal(initialMap(asset).map.cellPx, 70, "squares still take the file name's scale");
+  });
+
   test("a battle mat has fog off and a builder scene has fog on", () => {
     const mat = matScene({ id: "m", name: "  ", w: 30.4, h: 500 });
     valid(mat);

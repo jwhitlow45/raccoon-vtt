@@ -219,7 +219,7 @@ export function NewScene(props: { sceneCount: number; close: PanelClose }) {
       landLater({ sceneId: id, start: { id, bounds: scene.bounds, gridShape: shape, map }, search: later, fallback });
     } else wait.later?.cancel();
     // A scale from the file name is usually right. A guess never is.
-    open(id, hinted && !found && !later ? null : "grid");
+    open(id, named && !found && !later ? null : "grid");
   };
 
   const createFromStarter = (row: AssetRow, found: FoundWork, grid: StarterGrid | null, intent: NewSceneIntent, gridShape: ShapeChoice | undefined) => {
