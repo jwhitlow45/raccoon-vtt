@@ -7,7 +7,7 @@ import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts"
 import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { deviceGround } from "#shared/rules/held.ts";
 import { footing } from "#shared/rules/heights.ts";
-import { groundUnder, landedElevation, landing, legStop, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
+import { groundUnder, hexEndStand, hexLegOf, hexLegStand, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legStop, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
 import { followedHeight, followerTrace, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import type { WalkRoute } from "#shared/rules/walk.ts";
@@ -657,6 +657,10 @@ export function cutPieces(points: readonly RoutePoint[], pieces: readonly RouteP
  * axis or diagonal is one the server takes. Null when all of them walk
  * the whole way. `pieces` counts the pieces kept whole before it.
  *
+ * The walk cut at a spot ends there full, as it lands, so each walker is
+ * read with the holder full there, at a waypoint too, where its walk on
+ * read it as the holder stood on the way (D-261029-83).
+ *
  * A walk along `route` keeps a spot only where the server takes the cut
  * whole (review FU20A-CUTSTOP): the holder's own check of the cut route
  * (route.ts routeStop), which may judge a straight walk's own route by
@@ -684,6 +688,18 @@ export function walkersStop(
     if (routeStop(state, lead, cutPieces(points, route, { at: c, pieces: whole }), walk.landing ? walk.landing(c) : c.elevation) === null) return {};
     return legStop(state, trace[0]!, c) === null && followersOf(state, lead, [start, c], walkers, false).stop(1, c) === null ? { plain: true } : null;
   };
+  const hex = hexWallsOf(state, lead)?.g ?? null;
+  // The spots a cut of the piece from `a` to `b` may end at, from its end back: on squares its lattice steps, and on hexes the
+  // stands of its hex line, where the walk is full size along it, since a cut lands full (review DP34-ASTRA-04).
+  const spots = (a: RoutePoint, b: RoutePoint, at: Walker): Point[] => {
+    if (hex) {
+      const leg = hexLegOf(hex, hexStartStand(hex, at), hexEndStand(hex, lead, b));
+      return leg.squeezed ? [] : leg.line.slice(1, -1).map((_, k) => hexStandPlace(hex, lead, hexLegStand(leg, leg.line.length - 2 - k)));
+    }
+    const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
+    const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
+    return Array.from({ length: n - 1 }, (_, m) => ({ x: a.x + along(b.x - a.x, n - 1 - m), y: a.y + along(b.y - a.y, n - 1 - m) }));
+  };
   for (let i = 1; i < points.length; i++) {
     const stopped = followers.stop(i, points[i]!);
     if (!stopped) continue;
@@ -691,16 +707,16 @@ export function walkersStop(
       const a = points[j - 1]!;
       const b = points[j]!;
       const at = trace[j - 1]!;
-      const n = Math.max(1, Math.round(Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y)) / L));
-      const along = (d: number, k: number) => Math.round((d * k) / n / L) * L + 0;
-      for (let k = n - 1; k >= 1; k--) {
-        const c = { x: a.x + along(b.x - a.x, k), y: a.y + along(b.y - a.y, k), elevation: 0 };
-        c.elevation = landedElevation(state.buildChunks, at, c);
+      for (const spot of spots(a, b, at)) {
+        const c = { ...spot, elevation: landedElevation(state.buildChunks, at, spot) };
         if (legStop(state, at, c) !== null || followers.stop(j, c) !== null) continue;
         const kept = taken(c, j - 1);
         if (kept) return { at: c, pieces: kept.plain ? 0 : j - 1, blocker: stopped.blocker, ...kept };
       }
-      const kept = j === 1 ? {} : taken(a, j - 1);
+      // A cut at a waypoint ends there full, as it lands (`cutForWalkers`), so what the holder drags is read with the holder full there,
+      // on the seat that gives a rider, not as it stood there on the way (review DP34-ASTRA-04).
+      const endsFull = () => (!hex || !onSqueezedLattice(hex, lead, a)) && followersOf(state, lead, points.slice(0, j), walkers, false).stop(j - 1, a) === null;
+      const kept = j === 1 ? {} : endsFull() ? taken(a, j - 1) : null;
       if (kept) return { at: a, pieces: kept.plain ? 0 : j - 1, blocker: stopped.blocker, ...kept };
     }
     return { at: start, pieces: 0, blocker: stopped.blocker };

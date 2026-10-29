@@ -14,7 +14,8 @@ import { hexStandPlace, ownWalk } from "#shared/rules/movement.ts";
 import { routePoints } from "#shared/rules/route.ts";
 import { groupWalkWorld } from "#shared/rules/walkWorld.ts";
 import { env, P1, room, scene, token } from "#shared/testutil.ts";
-import { walkersStop } from "./drop.ts";
+import { cutForWalkers, moveOpsOf, walkersStop } from "./drop.ts";
+import { seenRoom } from "./testing.ts";
 
 /**
  * A rider on a squeezing mount moves seat (D-261029-52, D-261029-53), and
@@ -47,6 +48,20 @@ function deviceTakes(s: RoomState, to: { x: number; y: number }, squeeze: boolea
   assert.equal(walkersStop(s, ownWalk(horse), points, walkers, { ...(route ? { route } : {}), squeeze }), null, "no cut for the goblin");
 }
 
+/**
+ * The device's cut of the mount's walk along `route` to `to` where the goblin cannot follow: the walk is cut short, and every
+ * op it sends is one the server takes as it stands, ending full as a cut lands (review DP34-ASTRA-04).
+ */
+function cutTaken(s: RoomState, to: { x: number; y: number }, route: [number, number, number, 0 | 1][]): void {
+  const horse = s.tokens.horse!;
+  const plan = cutForWalkers(seenRoom(s), horse, { moves: [{ tokenId: "horse", ...to, route }], stop: null, held: [] }, [s.tokens.gob!], "walk");
+  assert.ok(plan.stop, "the walk is cut where the goblin cannot follow");
+  for (const op of moveOpsOf(plan.moves)) {
+    const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+    assert.ok(allowed.ok, `${JSON.stringify(op)}: ${allowed.ok ? "" : allowed.message}`);
+  }
+}
+
 describe("squares: a rider on a Large mount drags a goblin into a corridor one square wide", () => {
   function keep(): RoomState {
     const s = room({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
@@ -67,6 +82,15 @@ describe("squares: a rider on a Large mount drags a goblin into a corridor one s
     assert.deepEqual([after.tokens.gob!.x, after.tokens.gob!.y], [11, 10]);
     assert.equal(after.tokens.gob!.attached?.to, "brom");
     deviceTakes(s, inside, true);
+  });
+
+  test("a walk through the corridor the goblin cannot follow out of is cut where the server takes it, Brom on his own seat there", () => {
+    const s = keep();
+    // Brom on the mount's top left square, the goblin beside him, and a stub of wall at the corridor's far end that only the goblin meets.
+    s.tokens.brom = { ...s.tokens.brom!, x: 3, y: 9 };
+    s.tokens.gob = { ...s.tokens.gob!, x: 2, y: 9 };
+    wall(s, "fu35fx000009", [16, 10], [16.5, 10]);
+    cutTaken(s, { x: 20, y: 9 }, [[6, 9.5, 0, 0], [7.5, 9.5, 1, 0], [11.5, 9.5, 1, 0], [17, 9.5, 1, 0], [20, 9, 0, 0]]);
   });
 
   test("a route that stops half a square off the grid in the corridor seats Brom on the mount's square there, for the server and the device's cut alike", () => {
@@ -113,6 +137,19 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       assert.deepEqual(occupiedHexes(g, after.tokens.gob!).map(hexKey), [hexKey(at(9, 6))]);
       assert.equal(after.tokens.gob!.attached?.to, "brom");
       deviceTakes(s, inside, true);
+    });
+
+    test("a walk through the corridor and out that the goblin cannot follow is cut where the server takes it, at a hex the mount stands on full size", () => {
+      const s = keep();
+      const horse = s.tokens.horse!;
+      // Out past the corridor's far end, standing up there, by the way the mount alone finds, its squeezed piece split halfway.
+      const out = hexStandPlace(g, horse, { size: "large", ref: at(14, 6), squeezed: false });
+      const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(horse), { role: "player" }).input, towed: [] }, out);
+      assert.ok(found && found !== "none", "a way for the mount alone");
+      const halfway = hexStandPlace(g, horse, { size: "medium", ref: at(9, 6), squeezed: true });
+      const route = found.pieces.flatMap(([x, y, extra, swim]): [number, number, number, 0 | 1][] => (extra === 1 ? [[halfway.x, halfway.y, 1, 0], [x, y, 1, swim]] : [[x, y, extra, swim]]));
+      assert.equal(route.length, found.pieces.length + 1, "one squeezed piece");
+      cutTaken(s, out, route);
     });
   });
 }
