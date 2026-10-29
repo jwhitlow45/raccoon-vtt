@@ -3453,17 +3453,15 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
       // 16 bands of 1,600 squares on ground the party never held, so every one is read through.
       const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: 60 + k * 8, w: 200, h: 8 }));
-      let longest = 0;
+      // Counts the timer's turns while the ask is read, not how long the longest took: a loaded machine
+      // stretches every turn (243 ms once beside other lanes, GP3-FLAKE-ACTOR) but never merges two into one.
+      let turnsWhileReading = 0;
       let done = false;
-      let last = performance.now();
       const tick = () => {
-        const at = performance.now();
-        longest = Math.max(longest, at - last);
-        last = at;
+        if (actor.askState.reading) turnsWhileReading++;
         if (!done) setTimeout(tick, 0);
       };
       setTimeout(tick, 0);
-      last = performance.now();
       await actor.op(table.conn, 1, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g1");
       assert.equal(actor.askState.reading, true, "still reading after its first turn");
       await actor.op(table.conn, 2, { t: "build.paint", sceneId, terrain: "grass", cells: ["2,2"] }, "g2");
@@ -3473,7 +3471,8 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       assert.ok(asked !== "stuck" && painted !== "stuck");
       assert.ok(asked.acks?.includes(1), "the bands fit");
       assert.ok(table.sent.indexOf(asked) <= table.sent.indexOf(painted) && (asked !== painted || asked.acks!.indexOf(1) < asked.acks!.indexOf(2)), "the paint was answered after the ask");
-      assert.ok(longest < 150, `the longest turn took ${longest.toFixed(0)} ms`);
+      // About one turn for each band at 8 ms a turn, and a read that never let go would get at most one.
+      assert.ok(turnsWhileReading >= 4, `the timer got ${turnsWhileReading} turns while the ask was read`);
       // A socket that spent most of its burst is told busy for an ask of 16, though one op would go.
       // Spent down to a fixed level, since how much refilled while the ask was read depends on the machine's load.
       while (table.conn.opRate.wouldAllow(11)) table.conn.opRate.allow();
