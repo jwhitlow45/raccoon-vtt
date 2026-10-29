@@ -4,7 +4,7 @@ import { canSqueeze, footprintSize, hexSqueezedSize, sizeCategory, tokenHeightFt
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid } from "./grid.ts";
 import { hexCenter, hexDistance, hexInScene, hexNeighbors, hexSubcells, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
-import { footing, hexesGround, type Standing } from "./heights.ts";
+import { footing, hexesGround, standing, type Standing } from "./heights.ts";
 import { legFeet } from "./distance.ts";
 import {
   hexEdgeState,
@@ -284,20 +284,44 @@ export class HexWalkWorld {
       const to = this.#towedStand(t, pb);
       const n = hexNeighbors(this.g, from.ref)[d]!;
       if (n.col !== to.ref.col || n.row !== to.ref.row || !this.standable(to)) return false;
+      const walls = this.#towedWalls(t, from, to);
       for (const h of hexStandHexes(this.g, from)) {
-        const e = this.#edge(h, d);
+        const e = walls === this.walls ? this.#edge(h, d) : hexEdgeState(walls, h, d);
         if (e === 2 || (e === 3 && !first)) return false;
       }
-      if (hexFitWall(this.walls!, to) >= 0) return false;
+      if (hexFitWall(walls, to) >= 0) return false;
     }
     return true;
+  }
+
+  /**
+   * The walls as a creature dragged beside the walker meets them on its leg
+   * from `from` to `to`: by its own ledge floor, as the server's leg test
+   * reads its trace (moveLeg.ts follow, movement.ts ledgeFloor), never the
+   * walker's, so a flier never takes the creature beside it over a ledge.
+   * Behind a walker on the ground it walks on its own ground. Beside any
+   * other, which the search keeps at one height, it keeps its own height
+   * or the ground under it, whichever is higher. On its own hex it stands
+   * as it does now.
+   */
+  #towedWalls(t: Towed, from: HexStand, to: HexStand): HexWalls {
+    const walls = this.walls!;
+    if (!walls.walls.hasRelief) return walls;
+    const groundOf = (s: HexStand) => hexesGround(this.input.build.buildChunks, this.input.token.sceneId, hexStandHexes(this.g, s));
+    const elevationOn = (ground: number) => (this.mode === "ground" ? ground : Math.max(t.walker.elevation, ground));
+    const ground = groundOf(from);
+    const home = this.#towedStand(t, this.input.token).ref;
+    const elevation = from.ref.col === home.col && from.ref.row === home.row ? t.walker.elevation : elevationOn(ground);
+    const how = standing(elevation, ground);
+    const floor = how === "ground" ? -Infinity : how === "flying" ? Math.min(elevation, elevationOn(groundOf(to))) : Infinity;
+    return floor === walls.floor ? walls : { ...walls, floor };
   }
 
   /** Whether a creature dragged beside the walker walks the leg from `from` to its place beside `to`, by the leg test the server runs on it (permissions.ts draggedWalls), on ground the search may read. */
   #towedLeg(t: Towed, from: HexStand, to: Point): boolean {
     const end = this.#towedStand(t, to);
     const leg = hexLegOf(this.g, from, end);
-    return leg.line.every((ref) => this.standable({ size: end.size, ref })) && hexLegStop(this.walls!, leg) === null;
+    return leg.line.every((ref) => this.standable({ size: end.size, ref })) && hexLegStop(this.#towedWalls(t, from, end), leg) === null;
   }
 
   /** Whether every creature dragged beside the walker walks the straight leg to `to` with it (walk.ts towedFollow). */

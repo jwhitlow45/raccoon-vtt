@@ -2,17 +2,19 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { GridShape, RoomState, StairMark, Token } from "../model.ts";
 import type { Op } from "../protocol.ts";
-import { actor, apply, room, scene, token } from "../testutil.ts";
+import { actor, apply, DM, room, scene, token } from "../testutil.ts";
 import { placedOnHex } from "./footprint.ts";
 import { cornerAt, hexCenter, hexCorners, hexKey, hexNeighbors, type Hex, type HexGrid } from "./hex.ts";
 import { facingsOf, footprintGround, heightsGrid, oppositeFacing, stepper } from "./heights.ts";
 import { findRouteOn, HexWalkWorld } from "./hexWalk.ts";
+import { planMove } from "./moveLeg.ts";
 import { landedElevation, legStop, ownWalk } from "./movement.ts";
 import { hexRouteFeet, routePoints } from "./route.ts";
 import { coldPartySight, type VisionWorld } from "./vision.ts";
 import type { WalkInput, WalkRoute } from "./walk.ts";
 import { LEDGE, RAISED, sceneWalls } from "./walls.ts";
 import { COLUMNS, ROWS } from "./hexWalls.testkit.ts";
+import { groupWalkWorld } from "./walkWorld.ts";
 
 /**
  * Heights, ledges and stairs on hexes (docs/design-v1-hex-grids.md phase
@@ -243,6 +245,33 @@ for (const [name, g] of [
       const odd = walk(s, from, up[2]!, { h: 0, v: 1 });
       assert.ok(!onDifficult(odd.points), "round: the climb costs 10 ft, doubled on difficult ground");
       assert.equal(odd.cost, 25);
+    });
+  });
+
+  describe(`${name}: a creature dragged beside a flier walks on its own ground`, () => {
+    // Built on hex rows and mirrored onto columns, whose keys and bounds swap.
+    const m = (h: Hex): Hex => (g.orient === "rows" ? h : { col: h.row, row: h.col });
+
+    /** Whether the server's leg test (permissions.ts draggedWalls) takes every leg of the goblin's walk beside Thorn's, the plain drop where `route` is null. */
+    function goblinFollows(s: RoomState, to: { x: number; y: number }, route: WalkRoute | null): boolean {
+      const op: Op = { t: "token.move", tokenId: "thorn", x: to.x, y: to.y, ...(route ? { route: route.pieces.map(([x, y, extra, swim]) => [x, y, extra, swim] as [number, number, number, 0 | 1]) } : {}) };
+      const moved = planMove(op, s, DM, {}).find((mv) => mv.tokenId === "gob")!;
+      for (let i = 1; i < moved.route.length; i++) if (legStop(s, moved.trace[i - 1]!, moved.route[i]!) !== null) return false;
+      return true;
+    }
+
+    test("Thorn flying at 10 ft passes over a 5 ft hex, and the way found keeps the goblin on the ground beside him off its ledges", () => {
+      const s = raised(g, [[m({ col: 5, row: 4 }), 5]]);
+      // A new collection, as the reducer writes one: the rules keep what they read of the tokens by the collection.
+      const thorn = on(g, "thorn", m({ col: 4, row: 4 }), { name: "Thorn", elevation: 10 });
+      s.tokens = { ...s.tokens, thorn, gob: on(g, "gob", m({ col: 3, row: 4 }), { name: "Goblin", attached: { to: "thorn", kind: "drag" } }) };
+      const world = groupWalkWorld(s, ownWalk(thorn), { role: "dm" });
+      assert.equal(world.input.towed?.length, 1);
+      const to = placedOnHex(g, thorn, m({ col: 7, row: 4 }));
+      const found = findRouteOn(world.input, to);
+      assert.notEqual(found, null, "the straight line takes the goblin over the raised hex, so it is no way");
+      assert.ok(found && found !== "none", "a way round it");
+      assert.equal(goblinFollows(s, to, found), true);
     });
   });
 
