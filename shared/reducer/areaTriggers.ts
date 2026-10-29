@@ -81,10 +81,10 @@ function contextOf(state: RoomState, sceneId: string): AreaContext | null {
 }
 
 /** The ids of `candidates` inside the area. */
-function inside(state: RoomState, template: AreaTemplate, candidates: readonly Token[]): Set<string> {
+function inside(state: RoomState, template: AreaTemplate, candidates: readonly Token[], opVersion?: number): Set<string> {
   const ctx = contextOf(state, template.sceneId);
   if (!ctx || candidates.length === 0) return new Set();
-  return new Set(creaturesInArea(template, candidates, ctx));
+  return new Set(creaturesInArea(template, candidates, { ...ctx, opVersion }));
 }
 
 /**
@@ -265,7 +265,7 @@ function remindAtTurn(tx: Tx, trigger: "turnStart" | "turnEnd"): void {
   const token = activeCreature(tx.state);
   if (!token) return;
   for (const template of triggering(tx.state, token.sceneId, trigger)) {
-    if (inside(tx.state, template, [token]).has(token.id)) remind(tx, template, token, trigger, false);
+    if (inside(tx.state, template, [token], tx.env.opVersion).has(token.id)) remind(tx, template, token, trigger, false);
   }
 }
 
@@ -623,7 +623,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
     if (candidates.length === 0) continue;
     const was = before.templates[template.id];
-    const earlier = was ? inside(before, was, candidates.map((t) => before.tokens[t.id]).filter((t): t is Token => t !== undefined)) : new Set<string>();
+    const earlier = was ? inside(before, was, candidates.map((t) => before.tokens[t.id]).filter((t): t is Token => t !== undefined), tx.env.opVersion) : new Set<string>();
     let outside = candidates.filter((t) => !earlier.has(t.id));
     // Each creature that entered, with the room at the point of the leg where it did.
     const entered = new Map<string, RoomState>();
@@ -631,7 +631,7 @@ export function remindAfter(tx: Tx, before: RoomState, op: Op): void {
     for (const at of leg) {
       const area = at.templates[template.id];
       if (!area) continue;
-      for (const id of inside(at, area, outside.map((t) => at.tokens[t.id]!))) entered.set(id, at);
+      for (const id of inside(at, area, outside.map((t) => at.tokens[t.id]!), tx.env.opVersion)) entered.set(id, at);
       outside = outside.filter((t) => !entered.has(t.id));
       if (outside.length === 0) break;
     }

@@ -1,4 +1,5 @@
 import type { AoeCoverage, AreaFootprint, AreaShape, AreaTemplate, DiagonalRule, RoomSettings, Token, TokenId } from "../model.ts";
+import { areaCentersOnScene } from "../migrate.ts";
 import { axisSteps, hexSetSteps, legFeet } from "./distance.ts";
 import { footprintRect, hexAnchor, occupiedHexes, occupiedRange, sizeCategory, tokenHeightFt, verticalExtentFt, type FootprintToken } from "./footprint.ts";
 import { clamp, distToSegment, sdBox3, sdCorner2, yawVector, type Bounds, type Point, type Point3, type Rect } from "./geom.ts";
@@ -55,6 +56,8 @@ export type AreaTemplateInput = Pick<AreaTemplate, "id" | "rev" | "shape" | "siz
 export type AreaToken = FootprintToken & Pick<Token, "id" | "rev"> & Partial<Pick<Token, "sceneId">>;
 
 export type AreaContext = {
+  /** Stored operations keep the inclusion rule they originally used. Absent means live. */
+  opVersion?: number;
   /** The room's settings areas read. The diagonal rule counts an emanation's height on hexes, `five` where a caller leaves it out. */
   settings: Pick<RoomSettings, "feetPerCell" | "aoeCoverage" | "aoeInclusion"> & Partial<Pick<RoomSettings, "diagonal">>;
   /** Scene size in cells. Coverage is clipped to it. */
@@ -929,6 +932,8 @@ type SampledArea = Pick<ResolvedArea, "polygons" | "reach"> & { shape: Shape3 };
  * are kept for the next cell in that row.
  */
 class Sampler {
+  readonly scene: { w: number; h: number };
+  readonly clipCenter: boolean;
   readonly shape: Shape3;
   readonly n: number;
   readonly total: number;
@@ -944,7 +949,9 @@ class Sampler {
   /** Whether the center of the cell last passed to `evalCell` is inside. */
   center = false;
 
-  constructor(area: SampledArea, n: number, scene: { w: number; h: number }) {
+  constructor(area: SampledArea, n: number, scene: { w: number; h: number }, clipCenter = true) {
+    this.scene = scene;
+    this.clipCenter = clipCenter;
     this.shape = area.shape;
     this.n = n;
     this.total = n * n;
@@ -1004,6 +1011,7 @@ class Sampler {
   }
 
   pointInside(x: number, y: number, z: number): boolean {
+    if (this.clipCenter && (x < 0 || y < 0 || x >= this.scene.w || y >= this.scene.h)) return false;
     if (!this.shape.inside(x, y, z)) return false;
     return (
       this.polys.length === 0 ||
@@ -1165,7 +1173,7 @@ export function creaturesInArea(template: AreaTemplateInput, tokens: Iterable<Ar
   if (!area) return [];
   if (ctx.grid.shape === "hex") return creaturesOnHexes(ctx.grid, template, area, tokens, ctx);
   const fpc = feetPerCellOf(ctx);
-  const s = new Sampler(area, samplesOf(ctx), sceneBounds(ctx));
+  const s = new Sampler(area, samplesOf(ctx), sceneBounds(ctx), areaCentersOnScene(ctx.opVersion));
   const { aoeCoverage, aoeInclusion } = ctx.settings;
   const caught: TokenId[] = [];
   for (const t of tokens) {

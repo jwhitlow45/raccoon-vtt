@@ -4,7 +4,8 @@ import type { AreaTrigger, LogEvent, RoomState } from "../model.ts";
 import { projectState, stableStringify } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
-import { actor, DM, entry, env, P1, P2, reveal, room, template, token } from "../testutil.ts";
+import { actor, DM, entry, env, P1, P2, reveal, room, template, token, trap } from "../testutil.ts";
+import { planHand, planTrapMove } from "../rules/traps.ts";
 
 /**
  * A cleric (p1's) with Spirit Guardians, a 15 ft emanation that follows
@@ -38,6 +39,32 @@ function play(start: RoomState, ops: Op[]): { state: RoomState; reminders: LogEv
 const move = (tokenId: string, x: number, y = 5): Op => ({ t: "token.move", tokenId, x, y });
 
 describe("area reminders", () => {
+  test("ISOA1-PTIN: a turn outside a shrunken scene has no reminder, but stored turns keep theirs", () => {
+    const s = fight(["turnEnd"]);
+    s.meta.settings = { ...s.meta.settings, aoeInclusion: "center" };
+    s.scenes.s1 = { ...s.scenes.s1!, bounds: { w: 10, h: 10 } };
+    s.templates.sg = template("sg", { shape: "sphere", size: 30, origin: { x: 9, y: 5, z: 0 }, triggers: ["turnEnd"] });
+    for (const opVersion of [32, 33, undefined]) {
+      const result = applyOp(s, { t: "encounter.next" }, DM, { ...env(20), opVersion });
+      assert.ok(result.ok);
+      assert.equal(result.log.some((e) => e.data?.type === "area" && e.data.tokenId === "g1"), opVersion === 32, `version ${opVersion}`);
+    }
+  });
+
+  test("ISOA1-PTIN: trap areas keep the same version boundary for manual and walking triggers", () => {
+    const s = fight([]);
+    s.meta.settings = { ...s.meta.settings, aoeInclusion: "center" };
+    s.scenes.s1 = { ...s.scenes.s1!, bounds: { w: 10, h: 10 } };
+    const plate = trap("plate", { zone: { cells: [{ x: 6, y: 5, w: 1, h: 1 }] } });
+    plate.rig = { ...plate.rig!, stops: false, hits: { area: { shape: "sphere", size: 30, origin: { x: 9, y: 5, z: 0 }, yaw: 0, includeOrigin: true } } };
+    s.traps = { plate };
+    for (const opVersion of [32, 33, undefined]) {
+      const manual = planHand(s, plate, ["cleric"], { opVersion });
+      const walk = planTrapMove({ t: "token.move", tokenId: "cleric", x: 6, y: 5 }, s, DM, { opVersion });
+      assert.equal(walk.springings.length, 1);
+      for (const spring of [manual, walk.springings[0]!]) assert.equal(spring.hits.includes("g1"), opVersion === 32, `version ${opVersion}`);
+    }
+  });
   test("a creature that walks into an area that hits on entering is reminded once that turn", () => {
     const { reminders } = play(fight(), [move("g1", 8), move("g1", 12), move("g1", 8), { t: "encounter.next" }]);
     // In, out and in again, then its turn ends inside: Spirit Guardians hits once per turn.

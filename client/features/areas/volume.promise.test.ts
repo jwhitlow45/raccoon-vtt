@@ -303,8 +303,8 @@ function nudgedCenter(g: HexGrid, h: Hex): P {
   return { x: c.x + 0.0123, y: c.y + 0.0071 };
 }
 
-describe("the known exception: a creature off the scene (review ISOA1-ASTRA-03)", () => {
-  test("a scene shrunk under a token: the center rule still catches it, where no solid stands", () => {
+describe("a creature off the scene (review ISOA1-PTIN)", () => {
+  test("a scene shrunk under a token: the center rule stops where the solid stops", () => {
     // A 20 ft sphere at the scene's right edge, and a goblin left two cells past it when the scene shrank from 30 cells wide to 20.
     const bounds = { w: 20, h: 20 };
     const t: AreaTemplateInput = { id: "s", rev: 1, shape: "sphere", size: 20, origin: { x: 19, y: 10, z: 5 }, yaw: 0, includeOrigin: true };
@@ -315,8 +315,7 @@ describe("the known exception: a creature off the scene (review ISOA1-ASTRA-03)"
     const vol = buildVolume({ area, bounds, ground: () => 0, px: 40 });
     vol.ensureAll();
     assert.ok(!meshMeets(vol, faceIndex(vol), { x: 21.5123, y: 10.5071 }, 0, 1, 0), "the solid stops at the scene's edge");
-    // The rules read no scene bounds for the center (aoe.ts Sampler.pointInside): a follow-up for the rules, not this drawing.
-    assert.equal(caughtUnder(t, goblin, base, "half", "center"), true);
+    assert.equal(caughtUnder(t, goblin, base, "half", "center"), false);
     assert.equal(caughtUnder(t, goblin, base, "half", "anyCell"), false);
   });
 });

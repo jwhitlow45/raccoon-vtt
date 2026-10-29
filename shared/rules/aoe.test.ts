@@ -55,6 +55,15 @@ function counts(t: AreaTemplateInput, extra: Partial<AreaContext> = {}): { half:
   };
 }
 
+test("ISOA1-PTIN: center inclusion clips all four scene edges, with old op behavior preserved", () => {
+  const area = tpl({ size: 100, origin: { x: 10, y: 10, z: 0 }, includeOrigin: true });
+  const tokens = [tok("in", { x: 19, y: 10 }), tok("right", { x: 19.5, y: 10 }), tok("bottom", { x: 10, y: 19.5 }), tok("left", { x: -1, y: 10 }), tok("top", { x: 10, y: -1 })];
+  for (const opVersion of [32, 33, undefined]) {
+    const context = ctx({ inclusion: "center", bounds: { w: 20, h: 20 }, opVersion });
+    assert.deepEqual(creaturesInArea(area, tokens, context), opVersion === 32 ? tokens.map((t) => t.id) : ["in"], `version ${opVersion}`);
+  }
+});
+
 function chunk(cells: string[], edges: Record<string, EdgeFeature> = {}): BuildChunk {
   return { sceneId: "s", cx: 0, cy: 0, rev: 1, cells: Object.fromEntries(cells.map((k) => [k, "stone" as const])), edges };
 }

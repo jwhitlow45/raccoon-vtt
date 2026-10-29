@@ -1566,11 +1566,11 @@ function springingIn(trap: Trap, how: TrapHow, pass: "public" | "private", toget
     if (seenByNonOwners(sightRoom, token, env)) seen.add(id);
     if (playersToken(m.before, token)) party.add(id);
   }
-  return { trap, how, pass, by, hits: hitsIn(trap, m, by), perceived: pass === "public" && seen.size > 0, seen, party };
+  return { trap, how, pass, by, hits: hitsIn(trap, m, by, env.opVersion), perceived: pass === "public" && seen.size > 0, seen, party };
 }
 
 /** `trapHits` at a walk's moment: on squares, each creature of the op read from its spot, never placed whole. */
-function hitsIn(trap: Trap, m: Moment, by: readonly string[]): string[] {
+function hitsIn(trap: Trap, m: Moment, by: readonly string[], opVersion?: number): string[] {
   const hits = trap.rig?.hits;
   if (hits === undefined) return [];
   const rects = hits === "zone" ? zoneRects(trap.zone) : typeof hits === "object" && "cells" in hits ? hits.cells : null;
@@ -1580,7 +1580,7 @@ function hitsIn(trap: Trap, m: Moment, by: readonly string[]): string[] {
       return t !== undefined && t.sceneId === trap.sceneId && trapCreature(m.before, t);
     });
   }
-  if (!rects) return trapHits(trap, roomAt(m), by);
+  if (!rects) return trapHits(trap, roomAt(m), by, opVersion);
   const g = gridOfScene(m.before, trap.sceneId);
   const box = rectsBox(rects);
   const scratch: CellRange = { x0: 0, y0: 0, x1: 0, y1: 0 };
@@ -1630,7 +1630,7 @@ function springingAt(trap: Trap, how: TrapHow, pass: "public" | "private", toget
     if (seenByNonOwners(moment, token, env)) seen.add(id);
     if (playersToken(moment, token)) party.add(id);
   }
-  return { trap, how, pass, by, hits: trapHits(trap, moment, by), perceived: pass === "public" && seen.size > 0, seen, party };
+  return { trap, how, pass, by, hits: trapHits(trap, moment, by, env.opVersion), perceived: pass === "public" && seen.size > 0, seen, party };
 }
 
 /**
@@ -1641,7 +1641,7 @@ function springingAt(trap: Trap, how: TrapHow, pass: "public" | "private", toget
  * Only creatures, never the dead, by id. `who`, the floor and size decide
  * who sets it off, never who it hits.
  */
-export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): string[] {
+export function trapHits(trap: Trap, moment: RoomState, by: readonly string[], opVersion?: number): string[] {
   const rig = trap.rig;
   if (!rig) return [];
   const isCreature = (t: Token | undefined): t is Token => t !== undefined && t.sceneId === trap.sceneId && trapCreature(moment, t);
@@ -1666,7 +1666,7 @@ export function trapHits(trap: Trap, moment: RoomState, by: readonly string[]): 
     .filter(isCreature)
     .sort((a, b) => cmp(a.id, b.id));
   const template = { id: `trap:${trap.id}`, rev: 0, sceneId: trap.sceneId, ...hits.area };
-  const ctx = { settings: moment.meta.settings, bounds: scene.bounds, grid: g, walls: sceneWalls(scene, moment.buildChunks), tokens: moment.tokens as Readonly<Record<string, AreaToken>> };
+  const ctx = { opVersion, settings: moment.meta.settings, bounds: scene.bounds, grid: g, walls: sceneWalls(scene, moment.buildChunks), tokens: moment.tokens as Readonly<Record<string, AreaToken>> };
   return creaturesInArea(template, creatures, ctx).sort(cmp);
 }
 
