@@ -234,7 +234,7 @@ export function Menu(props: {
     if (!section.heading) return content;
     const headingId = `${ids}-${section.key}`;
     return (
-      <div role="group" aria-labelledby={headingId} style={{ display: "grid" }}>
+      <div role="group" aria-labelledby={headingId} style={{ display: "grid", gridTemplateColumns: tiles ? undefined : "minmax(0, 1fr)" }}>
         <div id={headingId} aria-hidden style={{ ...sectionLabelLook(), padding: `${theme.space(2)}px ${theme.space(3)}px ${theme.space(1)}px` }}>
           {section.heading}
         </div>
@@ -244,7 +244,8 @@ export function Menu(props: {
   };
 
   return (
-    <div {...props.data} ref={root} role="menu" id={handle.contentId} aria-label={props.label} onKeyDown={onKeyDown} style={{ display: "grid", gap: tiles ? theme.space(2) : 0, width: tiles ? undefined : `var(${ROWS_WIDTH}, auto)`, maxWidth: tiles ? undefined : "100%" }}>
+    // The columns here and in each group must shrink below a word's intrinsic width so break-word can keep a long name within the cap.
+    <div {...props.data} ref={root} role="menu" id={handle.contentId} aria-label={props.label} onKeyDown={onKeyDown} style={{ display: "grid", gridTemplateColumns: tiles ? undefined : "minmax(0, 1fr)", gap: tiles ? theme.space(2) : 0, width: tiles ? undefined : `var(${ROWS_WIDTH}, auto)`, maxWidth: tiles ? undefined : "100%" }}>
       {props.sections.map((section) => (
         <Fragment key={section.key}>
           {section.separator ? <div role="separator" style={{ height: theme.line.border, margin: `${theme.space(1)}px 0`, background: theme.color.border }} /> : null}

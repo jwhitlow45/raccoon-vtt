@@ -3362,6 +3362,7 @@ function moreMenuTest(size: Size, scale: number, at: string): void {
       const box = page.locator("[data-rvtt-popover]");
       await menu.waitFor();
       await sweep.measure(page, "fl5-more-fixture", box);
+      if (sweep.lines.length) console.error(sweep.lines.join("\n"));
       const wrapped = await menu.locator('[role^="menuitem"]').evaluateAll((items) => {
         type Item = { children: ArrayLike<{ textContent: string | null; getAttribute(name: string): string | null; ownerDocument: { createRange(): { selectNodeContents(node: unknown): void; getClientRects(): ArrayLike<{ top: number }> } } }> };
         return (items as unknown as Item[]).flatMap((item) => {
@@ -3415,8 +3416,10 @@ function moreMenuTest(size: Size, scale: number, at: string): void {
       // Ordinary words wrap onto their own lines. Only a word wider than the whole cap breaks inside itself.
       await page.keyboard.press("Home");
       await resetScroll();
-      for (const [index, words] of ["Show every creature in the encounter before opening another panel", "W".repeat(80)].entries()) {
-        await menu.getByRole("menuitemcheckbox").evaluate((el, text) => {
+      for (const [index, words] of ["Show every creature in the encounter before opening another panel", "W".repeat(80), "W".repeat(80)].entries()) {
+        const caseName = index === 0 ? "long-phrase" : index === 1 ? "unbroken-word" : "grouped-unbroken-word";
+        const item = index < 2 ? menu.getByRole("menuitemcheckbox") : menu.getByRole("group", { name: "Prepare" }).getByRole("menuitemradio").first();
+        await item.evaluate((el, text) => {
           type Label = { textContent: string | null; getAttribute(name: string): string | null };
           const item = el as unknown as { children: ArrayLike<Label> };
           const label = Array.from(item.children).find((child) => child.getAttribute("aria-hidden") !== "true" && child.textContent?.trim());
@@ -3428,13 +3431,18 @@ function moreMenuTest(size: Size, scale: number, at: string): void {
           const win = globalThis as unknown as { dispatchEvent(event: unknown): void; Event: new (type: string) => unknown };
           win.dispatchEvent(new win.Event("resize"));
         }, 281 + index);
-        assert.deepEqual(await menuWordLines(box, `${at} long label ${index}`), []);
+        const label = item.getByText(words, { exact: true });
+        await label.waitFor();
+        await item.scrollIntoViewIfNeeded();
+        await shots.take(page, `fl5-more-${at}-${caseName}`);
+        assert.deepEqual(await menuWordLines(box, `${at} ${caseName}`), []);
         const capped = await box.boundingBox();
-        assert.ok(capped && capped.x >= 8 * scale - 1 && capped.x + capped.width <= size.width - 8 * scale + 1, `${at}: the long label exceeds the gutter`);
-        assert.equal(await box.evaluate((el) => {
-          const box = el as unknown as { scrollWidth: number; clientWidth: number };
-          return box.scrollWidth <= box.clientWidth + 1;
-        }), true, `${at}: the long label must not require sideways scrolling`);
+        assert.ok(capped && capped.x >= 8 * scale - 1 && capped.x + capped.width <= size.width - 8 * scale + 1, `${at} ${caseName}: the long label exceeds the gutter`);
+        const widths = await Promise.all([box, item, label].map((part) => part.evaluate((el) => {
+          const part = el as unknown as { scrollWidth: number; clientWidth: number };
+          return { scroll: part.scrollWidth, client: part.clientWidth };
+        })));
+        assert.ok(widths.every((width) => width.scroll <= width.client + 1), `${at} ${caseName}: the popover, item and label must not scroll sideways: ${JSON.stringify(widths)}`);
       }
       assert.equal(sweep.lines.length, 0, sweep.lines.join("\n"));
     } finally {
