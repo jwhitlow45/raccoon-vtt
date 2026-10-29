@@ -53,7 +53,7 @@ function world(fog: FogView = new FogView(null, "s1", BOUNDS), tiles: unknown = 
   return { heights: flat, tiles, px: 32, fog, live };
 }
 
-/** What the board shows of `now`: the areas standing, and whether "Building area shapes" shows. */
+/** What the board shows of `now`: the areas standing, and whether "Building area shapes…" shows. */
 function shows(n: VolumesNow): string {
   return `${[...n.standing].sort().join(",")}${n.waiting ? " waiting" : ""}`;
 }

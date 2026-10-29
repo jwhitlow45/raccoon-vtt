@@ -628,7 +628,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
         {aiming && settings && !hidden ? (
           <AimProbe settings={settings} chunks={chunks} liveGround={liveGround} scene={scene} fog={fog} aimMoving={aimMoving} tool={areaTool} draft={draft} selectedId={selectedArea} live={areaLive} templates={templates} role={props.role} youId={youId} casts={casts} onAim={setAim} />
         ) : null}
-        {!hidden ? <Loading text="Building area shapes" active={volumesNow?.waiting === true} style={buildingStyle(props.insets)} /> : null}
+        {!hidden ? <Loading text="Building area shapes…" active={volumesNow?.waiting === true} style={buildingStyle(props.insets)} /> : null}
       </IsoAreasContext.Provider>
       </TreeShownContext.Provider>
     </div>
@@ -675,7 +675,7 @@ function AimProbe(props: {
   return null;
 }
 
-/** Where "Building area shapes" shows: at the top of the canvas, clear of the bar over it, taking no presses (docs/design-v1-iso-area-shapes.md 7). */
+/** Where "Building area shapes…" shows: at the top of the canvas, clear of the bar over it, taking no presses (docs/design-v1-iso-area-shapes.md 7). */
 function buildingStyle(insets: Insets | undefined): CSSProperties {
   return {
     position: "absolute",

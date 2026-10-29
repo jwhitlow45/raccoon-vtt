@@ -1683,7 +1683,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await layoutWhen(pat, "Pat's sphere standing again", (x) => x.standing.includes(cavern.sphere));
   });
 
-  test("ISOA-10. sixty areas in view: the one nearest the middle stands first, and \"Building area shapes\" shows while any waits, clear of the bar and within 1 px", async () => {
+  test("ISOA-10. sixty areas in view: the one nearest the middle stands first, and \"Building area shapes…\" shows while any waits, clear of the bar and within 1 px", async () => {
     cavern.field = randomUUID();
     await ops.send({ t: "scene.create", scene: { id: cavern.field, name: "The field", bounds: { w: 80, h: 80 }, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: cavern.field, patch: { defaultView: { x: 40, y: 40, zoom: 12 } } });
@@ -1718,7 +1718,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       const ranks = first.standing.map((id) => [...ids].sort((a, b) => a.d - b.d).findIndex((a) => a.id === id));
       assert.ok(first.standing.length < ids.length, `every area stood in the first frame (${ids.length})`);
       assert.ok(ranks.includes(0) && ranks.every((r) => r < ids.length / 2), `the first to stand lie nearest the middle: ${first.standing.length} of them, ranked ${ranks.join(", ")} by nearness`);
-      const status = dm.getByRole("status").filter({ hasText: "Building area shapes" });
+      const status = dm.getByRole("status").filter({ hasText: "Building area shapes…" });
       await status.waitFor({ timeout: 30_000 });
       const lines = alignmentLines(await measureAlignment(status), "building");
       assert.deepEqual(lines, []);
@@ -1731,7 +1731,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       await cdp.detach();
     }
     await layoutWhen(dm, "every area standing", (x) => !x.waiting && x.standing.length >= 40, 60_000);
-    await dm.getByRole("status").filter({ hasText: "Building area shapes" }).waitFor({ state: "detached" });
+    await dm.getByRole("status").filter({ hasText: "Building area shapes…" }).waitFor({ state: "detached" });
     await openSideTab(dm, "Scenes");
     await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^The cavern/ }).first().click();
   });
