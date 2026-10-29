@@ -1971,10 +1971,28 @@ function coverLive(g: Ground, token: FootprintToken & Point): boolean {
 function stoppingStep(state: RoomState, walker: Walker, to: LegEnd): { from: Point; to: Point } | null {
   const allowed = (at: Point) => legStop(state, walker, { x: at.x, y: at.y, elevation: to.elevation }) === null;
   if (allowed(to)) return null;
+  const scene = state.scenes[walker.sceneId];
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  if (isHex(g)) return hexStoppingStep(state, g, walker, to);
   const from = lastClearSpot(walker, to, allowed);
   const spots = legSpots(walker, to);
   const i = spots.findIndex((s) => s.x === from.x && s.y === from.y);
   return { from, to: spots[i + 1] ?? { x: to.x, y: to.y } };
+}
+
+/**
+ * The stopping step on hexes (LP24-A-HEXFIGHT-3): a walk there lands on
+ * the stands of its hex line (movement.ts hexLanding), which the square
+ * lattice's spots do not follow, so the step runs from the stand `landing`
+ * gives to the next stand of that line. A stand may be squeezed or full at
+ * the same hex, so it is found by its reference hex.
+ */
+function hexStoppingStep(state: RoomState, g: HexGrid, walker: Walker, to: LegEnd): { from: Point; to: Point } {
+  const from = landing(state, walker, to, "walk");
+  const spots = hexLegSpots(g, walker, to);
+  const ref = (at: Point, squeezed: boolean) => hexKey(hexStandAt(g, walker, at, squeezed).ref);
+  const i = spots.findIndex((s) => ref(s.at, s.squeeze) === ref(from, from.squeeze));
+  return { from: { x: from.x, y: from.y }, to: (i < 0 ? undefined : spots[i + 1]?.at) ?? { x: to.x, y: to.y } };
 }
 
 /**
