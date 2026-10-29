@@ -1,8 +1,7 @@
-import { damageSummary, type DamageSummaryLines } from "./damageSummaryLines.ts";
 import { testOf, type D20Test, type DamagePart, type NamedRoll } from "#shared/dice/bonus.ts";
 import { d20Formula, formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
-import type { PartAmount } from "#shared/rules/typedDamage.ts";
+import { nonnegativeDamageParts, type PartAmount } from "#shared/rules/typedDamage.ts";
 import type { DayUse, LimitedUse, RechargeUse } from "#shared/dice/uses.ts";
 import { keptD20 } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
@@ -12,6 +11,7 @@ import { findEntryFor } from "#shared/rules/durations.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { ABILITY_ABBR, ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { critSums, effectName } from "#shared/logText.ts";
+import { damageSummary, type DamageSummaryLines } from "./damageSummaryLines.ts";
 import type { PanelRoll } from "./useDicePanel.ts";
 import type { CastBlock } from "./optionState.ts";
 import type { CastPhase } from "./cast/cast.ts";
@@ -544,14 +544,14 @@ export function hpChips(log: readonly LogEntry[], me: string, kind: "damage" | "
     const rolls = lines.flatMap((l) => l.data.rolls);
     let chip: HpChip | null = null;
     if (!ids.some((id) => opts.applied.has(id))) {
-      const parts = kind === "damage" && rolls.some((r) => r.type !== undefined)
-        ? rolls.map((r): PartAmount => ({ amount: Math.max(0, r.total), ...(r.type ? { type: r.type } : {}) }))
-        : undefined;
-      const amount = parts ? parts.reduce((n, part) => n + part.amount, 0) : rolls.reduce((n, r) => n + r.total, 0);
+      const damageParts = kind === "damage" ? nonnegativeDamageParts(rolls.map((r): PartAmount => ({ amount: r.total, ...(r.type ? { type: r.type } : {}) }))) : undefined;
+      const parts = damageParts?.some((part) => part.type !== undefined) ? damageParts : undefined;
+      const breakdown = damageParts && (damageParts.length > 1 || parts) ? damageSummary(damageParts) : undefined;
+      const amount = damageParts ? damageParts.reduce((n, part) => n + part.amount, 0) : rolls.reduce((n, r) => n + r.total, 0);
       const what = chipWhat(data.rolls[0]!);
       const text = own ? `Use ${amount} (${what})` : `Use ${amount} (${opts.nameOf(data.by)}'s ${what})`;
       // A line rolled before the server marked a crit says so only in its label.
-      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")), ...(parts ? { parts } : {}), ...(kind === "damage" ? { breakdown: damageSummary(parts ?? rolls.map((roll) => ({ amount: roll.total }))) } : {}) };
+      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")), ...(parts ? { parts } : {}), ...(breakdown ? { breakdown } : {}) };
     }
     if (own) mine = chip;
     else theirs = chip;

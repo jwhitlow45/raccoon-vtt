@@ -128,12 +128,12 @@ describe("FL-3 rolled damage parts", () => {
     assert.equal("types" in chip, false, "the server determines the types actually dealt");
   });
 
-  test("nonpositive damage contributes zero, while healing and untyped rolls keep their behavior", () => {
+  test("nonpositive damage contributes zero without inferring types or changing healing", () => {
     const chip = hpChips([line("me", [typed(0, "fire"), typed(-2, "cold"), typed(8, "radiant")])], "me", "damage", opts())[0]!;
     assert.equal(chip.amount, 8);
     assert.deepEqual(chip.parts, [{ amount: 0, type: "fire" }, { amount: 0, type: "cold" }, { amount: 8, type: "radiant" }]);
     assert.equal(hpChips([line("me", [roll("Longsword damage, slashing", 9)])], "me", "damage", opts())[0]!.parts, undefined, "a label never supplies a missing type");
-    assert.equal(hpChips([line("me", [roll("Damage", 9), roll("Damage", -2)])], "me", "damage", opts())[0]!.amount, 7, "an entirely untyped chip keeps its existing total");
+    assert.equal(hpChips([line("me", [roll("Damage", 9), roll("Damage", -2)])], "me", "damage", opts())[0]!.amount, 9, "untyped negative parts also count as zero");
     const heal = hpChips([line("me", [{ ...typed(8, "radiant"), label: "Cure Wounds healing" }])], "me", "heal", opts())[0]!;
     assert.equal(heal.parts, undefined);
     assert.equal(heal.amount, 8);
@@ -148,4 +148,19 @@ test("FL-4: chip breakdowns keep typed and untyped rolled parts, and healing has
   ]);
   assert.equal(chip.breakdown?.total, 14);
   assert.equal(hpChips([line("me", [roll("Cure Wounds healing", 9)])], "me", "heal", opts())[0]?.breakdown, undefined);
+});
+
+test("FL-4 review: only a typed or multipart chip gets a slip", () => {
+  const one = roll("Longsword damage", 7);
+  assert.equal(hpChips([line("me", [one])], "me", "damage", opts())[0]?.breakdown, undefined);
+  assert.ok(hpChips([line("me", [{ ...one, type: "slashing" }])], "me", "damage", opts())[0]?.breakdown);
+  assert.equal(hpChips([line("me", [one, one])], "me", "damage", opts())[0]?.breakdown?.total, 14);
+});
+
+test("FL-4 review: negative chip parts cannot subtract from damage, typed or untyped", () => {
+  for (const type of [undefined, "cold"] as const) {
+    const chip = hpChips([line("me", [{ ...roll("Spell damage", -5), ...(type ? { type } : {}) }, roll("Spell damage", 6)])], "me", "damage", opts())[0]!;
+    assert.equal(chip.amount, 6);
+    assert.deepEqual(chip.breakdown?.parts.map(p => p.amount), [0, 6]);
+  }
 });
