@@ -1,7 +1,7 @@
 import { CHUNK_CELLS, HEIGHTS_CHARS, STAIRS_CHARS, type BuildChunk, type GridShape, type HexFacing, type SceneId, type StairMark } from "../model.ts";
 import { isWritable } from "../writable.ts";
 import { occupiedHexes, occupiedRange, type CellRange, type PlacedToken } from "./footprint.ts";
-import { gridOfShape, isHex, SQUARES, type Grid } from "./grid.ts";
+import { gridOfShape, holdsGridKeys, isHex, SQUARES, type Grid } from "./grid.ts";
 import { hexNeighbors, type Hex } from "./hex.ts";
 
 /**
@@ -224,7 +224,8 @@ const gridCache = new WeakMap<object, Map<SceneId, Grid>>();
  * import all keep to it). So the stamp is the grid its keys mean, which
  * lets every reader of a footprint's ground follow the scene's grid with
  * the chunks it already holds. Squares when no chunk of the scene carries
- * a stamp, and a hex scene with no stamped chunk has no ground to read.
+ * a stamp, and a hex scene with no stamped chunk has no ground to read. A
+ * stamp on a chunk with no grid keys speaks for nothing, so it is passed by.
  */
 export function heightsGrid(chunks: Chunks, sceneId: SceneId): Grid {
   // A transaction's chunks may still change under it (writable.ts), so only a finished set keeps its answers.
@@ -235,8 +236,10 @@ export function heightsGrid(chunks: Chunks, sceneId: SceneId): Grid {
   const prefix = `${sceneId}:`;
   for (const key in chunks) {
     if (!key.startsWith(prefix)) continue;
-    shape = chunks[key]!.grid;
-    if (shape !== undefined) break;
+    const chunk = chunks[key]!;
+    if (chunk.grid === undefined || !holdsGridKeys(chunk)) continue;
+    shape = chunk.grid;
+    break;
   }
   const g = gridOfShape(shape);
   if (!isWritable(chunks)) {

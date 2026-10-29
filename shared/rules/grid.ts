@@ -112,6 +112,15 @@ function chunkKeyed(chunk: BuildChunk): ShapeHolding[] {
   return out;
 }
 
+/**
+ * Whether a chunk holds grid-keyed content (HX-D14), the only content a
+ * stamp speaks for. A stamp on a chunk without any, as a hand-made backup
+ * may put on one of free walls, names no grid.
+ */
+export function holdsGridKeys(chunk: BuildChunk): boolean {
+  return chunkKeyed(chunk).length > 0;
+}
+
 /** Whether a fog draft holds a shape of cell keys, as Reveal room makes. Its other shapes are in world units and fit every grid. */
 function draftKeyed(draft: FogDraft): boolean {
   return draft.ops.some((op) => op.shape.kind === "cells");

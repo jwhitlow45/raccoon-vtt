@@ -43,7 +43,7 @@ import {
 } from "#shared/protocol.ts";
 import { MAX_LOG_LINES } from "#shared/logRings.ts";
 import { phaseMap, phaseProblem } from "#shared/reducer/phases.ts";
-import { OWN_SQUARE_GRID, cameWithGrid, isHex, sceneGrid, sceneHolds, standsWords } from "#shared/rules/grid.ts";
+import { OWN_SQUARE_GRID, cameWithGrid, holdsGridKeys, isHex, sceneGrid, sceneHolds, standsWords } from "#shared/rules/grid.ts";
 
 /**
  * The shape of a stored room state, for validating an imported `room.json`
@@ -943,6 +943,13 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
     return { ok: false, message: `${issue?.path.join(".") ?? ""}: ${issue?.message ?? "invalid"}` };
   }
   const state = parsed.data as RoomState;
+  // A stamp speaks only for grid-keyed content (HX-D14). One on a chunk without any, as a backup made by hand may put on
+  // free walls, names no grid, and the room keeps none, so no rule reads the chunks of its scene by it.
+  for (const [key, chunk] of Object.entries(state.buildChunks)) {
+    if (chunk.grid === undefined || holdsGridKeys(chunk)) continue;
+    const { grid: _grid, ...rest } = chunk;
+    state.buildChunks[key] = rest;
+  }
   // Cell data stands only on the shape it was written for, and a hex scene holds only what its phase supports
   // (docs/design-v1-hex-grids.md HX-D14), as every op leaves a room. A backup made by hand can break that, and the
   // rules would read its square keys as hexes.

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { chunkKey } from "#shared/keys.ts";
 import type { BuildChunk, RoomState } from "#shared/model.ts";
-import { room, scene, template, token, trap } from "#shared/testutil.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { footprintGround } from "#shared/rules/heights.ts";
+import { DM, env, room, scene, template, token, trap } from "#shared/testutil.ts";
 import { parseRoomState } from "./stateSchema.ts";
 
 /**
@@ -120,6 +122,22 @@ describe("roomStateSchema, hex grids (docs/design-v1-hex-grids.md section 7)", (
     walled.buildChunks[chunkKey("s1", 0, 0)] = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, walls: [{ id: "w00000000001", a: [1, 1], b: [3, 1], f: { kind: "wall" } }] };
     const parsed = parseRoomState(walled);
     assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+  });
+
+  test("an import drops a stamp from a chunk with no grid keys, so a square scene's heights read by squares (H3-DATA-2)", () => {
+    const s = room();
+    const walls = [{ id: "w00000000001", a: [1, 1] as [number, number], b: [3, 1] as [number, number], f: { kind: "wall" as const } }];
+    const painted = applyOp(s, { t: "build.height", sceneId: "s1", cells: ["17,2"], height: 20 }, DM, env(1));
+    assert.ok(painted.ok);
+    s.buildChunks = { [chunkKey("s1", 0, 0)]: { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, walls, grid: "hexColumns" }, ...painted.state.buildChunks };
+    const parsed = parseRoomState(s);
+    assert.ok(parsed.ok, parsed.ok ? "" : parsed.message);
+    assert.equal(parsed.state.buildChunks[chunkKey("s1", 0, 0)]!.grid, undefined);
+    assert.equal(footprintGround(parsed.state.buildChunks, token("t", { x: 17, y: 2 })), 20);
+    // Painted afterwards, the chunk stands on squares, and the room it leaves loads again.
+    const after = applyOp(parsed.state, { t: "build.height", sceneId: "s1", cells: ["2,2"], height: 10 }, DM, env(2));
+    assert.ok(after.ok);
+    assert.ok(parseRoomState(after.state).ok);
   });
 
   test("an import with square cell data on a hex scene is refused, naming it", () => {

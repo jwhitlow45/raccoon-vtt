@@ -12,7 +12,7 @@ import { carriedIndex, holderOf, onHolder } from "../rules/attach.ts";
 import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
 import { Refuse, gone, invalid, type Tx } from "./tx.ts";
-import { SQUARES, isHex, sceneGrid, shapeOfGrid } from "../rules/grid.ts";
+import { SQUARES, holdsGridKeys, isHex, sceneGrid, shapeOfGrid } from "../rules/grid.ts";
 import { HEX_R, HEX_S, hexAt, hexCenter, hexInScene, hexKey, type HexGrid } from "../rules/hex.ts";
 import { forgetLayerMemory, forgetSceneMemory, forgetStamp, keepsMemory, memoryOwners, poolMemory, pruneLostGround, pruneMovedMarks, rememberLayer } from "./memory.ts";
 
@@ -813,8 +813,9 @@ function boxTouchesHex(g: HexGrid, box: { x0: number; y0: number; x1: number; y1
  * The hex shape a chunk's grid-keyed content stands on (HX-D14): a chunk
  * of a hex scene that holds cells, edges, heights, stairs or difficult
  * ground carries its scene's shape, and one left with none of them, or
- * free walls only, carries none. A square scene's chunks are left as they
- * are, so their stored form never changes.
+ * free walls only, carries none. A square scene's chunks carry none: an
+ * unstamped one is left as it is, so its stored form never changes, and a
+ * stamp a hand-made backup put on one goes with its first write.
  */
 function stamped(tx: Tx, chunk: BuildChunk): BuildChunk {
   return stampedOn(tx.state.scenes[chunk.sceneId], chunk);
@@ -823,11 +824,10 @@ function stamped(tx: Tx, chunk: BuildChunk): BuildChunk {
 /** A chunk with its scene's stamp while it holds grid-keyed content on a hex scene, and none otherwise (HX-D14), for a chunk worked out but not written too. */
 export function stampedOn(scene: Pick<Scene, "gridShape"> | undefined, chunk: BuildChunk): BuildChunk {
   const g = scene ? sceneGrid(scene) : SQUARES;
-  if (!isHex(g)) return chunk;
-  const keyed = Object.keys(chunk.cells).length > 0 || Object.keys(chunk.edges).length > 0 || chunk.heights !== undefined || chunk.up !== undefined || chunk.rough !== undefined;
+  if (!isHex(g) && chunk.grid === undefined) return chunk;
   const { grid: _grid, ...rest } = chunk;
   const shape = shapeOfGrid(g);
-  return keyed && shape !== undefined ? { ...rest, grid: shape } : rest;
+  return isHex(g) && holdsGridKeys(chunk) && shape !== undefined ? { ...rest, grid: shape } : rest;
 }
 
 /** Writes a chunk, or removes it when nothing is left in it: no floor, edges, free walls, heights or stairs. On a hex scene it carries the stamp of its content (`stamped`). */

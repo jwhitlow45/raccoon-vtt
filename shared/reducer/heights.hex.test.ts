@@ -8,7 +8,7 @@ import { opSchema, type Op, type RestoreEntry } from "../protocol.ts";
 import { applyOp } from "../reducer.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { gridOfShape, switchRefusal } from "../rules/grid.ts";
-import { groundAt } from "../rules/heights.ts";
+import { footprintGround, groundAt, heightsGrid } from "../rules/heights.ts";
 import { hexKey, sceneHexSpan, type Hex, type HexGrid } from "../rules/hex.ts";
 import { withPitsCounted } from "../rules/pitCount.ts";
 import { sceneWalls } from "../rules/walls.ts";
@@ -212,5 +212,28 @@ describe("hex rows: what players and the fan-out read of heights and stairs", ()
     const deps = dependents(painted, [keys.chunk("s1", 0, 10)]);
     assert.ok(deps.includes(keys.token("above")), "16 cells above the chunk's hexes, above the square chunk's box");
     assert.ok(!deps.includes(keys.token("far")));
+  });
+});
+
+describe("a stamp on a chunk with no grid keys (H3-DATA-2)", () => {
+  /** A square scene with a 20 ft height at 17,2, and before it in the room's order a chunk of free walls only, stamped by hand with a hex shape. */
+  function strayStamp(): RoomState {
+    const painted = run(room(), { t: "build.height", sceneId: "s1", cells: ["17,2"], height: 20 }).state;
+    const stray = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, walls: [{ id: "w00000000001", a: [1, 1] as [number, number], b: [3, 1] as [number, number], f: { kind: "wall" as const } }], grid: "hexColumns" as const };
+    return { ...painted, buildChunks: { [chunkKey("s1", 0, 0)]: stray, ...painted.buildChunks } };
+  }
+
+  test("names no grid: a square scene's heights still read by squares", () => {
+    const s = strayStamp();
+    assert.equal(Object.keys(s.buildChunks)[0], chunkKey("s1", 0, 0), "the stamped chunk comes first");
+    assert.equal(heightsGrid(s.buildChunks, "s1").shape, "squares");
+    assert.equal(footprintGround(s.buildChunks, token("t", { x: 17, y: 2 })), 20);
+  });
+
+  test("goes when the chunk is written on a square scene, so its heights stand under no other shape's stamp", () => {
+    const painted = run(strayStamp(), { t: "build.height", sceneId: "s1", cells: ["2,2"], height: 10 }).state;
+    const chunk = painted.buildChunks[chunkKey("s1", 0, 0)]!;
+    assert.equal(chunk.heights !== undefined, true);
+    assert.equal(chunk.grid, undefined);
   });
 });
