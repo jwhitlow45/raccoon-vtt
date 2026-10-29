@@ -20,6 +20,7 @@ import { useFightJoin } from "../features/combat/state.ts";
 import { SrdLoadFailed } from "../features/monsters/SrdLoadFailed.tsx";
 import { useGroupSaveStore } from "../features/dice/groupSave/store.ts";
 import { usePreview } from "../features/dm/previewContext.ts";
+import { tokenSizeLabel } from "../features/grid/words.ts";
 import { ViewAsButton } from "../features/dm/viewAs.tsx";
 import { useSend } from "../features/encounter/hooks.ts";
 import { tokenAccess } from "../features/tokens/access.ts";
@@ -59,7 +60,7 @@ import { GroupHpEntry } from "../features/tokens/GroupHpEntry.tsx";
 import { GroupMoreSheet } from "../features/tokens/GroupMoreSheet.tsx";
 import { DeathSaves, HpEntry, oneTarget } from "../features/tokens/HpSection.tsx";
 import { pathNow } from "../features/measure/movement.ts";
-import { customWords, SIZE_WORDS, stepSize } from "../features/tokens/resize.ts";
+import { customWords, stepSize } from "../features/tokens/resize.ts";
 import { useDuplicate, type DuplicateFocus } from "../features/tokens/useDuplicate.ts";
 import { useResize } from "../features/tokens/useResize.ts";
 import { REVIVE_NOTE, ReviveButton, offersRevive } from "../features/tokens/Revive.tsx";
@@ -2074,20 +2075,21 @@ function DeleteButton(props: { onDelete(): void; armedText?: string; holdsRoom?:
  * The creature's size on the map (docs/design-v1-token-window.md 8.9): a
  * stepper as Elevation is, one size a press, Reduce and Enlarge being one
  * size, with the size between the buttons in a slot as wide as
- * "Gargantuan", so the buttons never move under the thumb. A Custom size
+ * "Gargantuan", with hex counts on a second line, so the buttons never move under the thumb. A Custom size
  * is shown, set by the DM in Stats. A refusal is the room's toast, and the
  * size stays. Focus stays on the button pressed, or moves to the other one
  * where a press reaches Tiny or Gargantuan and disables it.
  */
-function SizeRow(props: { token: ViewToken; owner: boolean; canResize: boolean }) {
+export function SizeRow(props: { token: ViewToken; owner: boolean; canResize: boolean }) {
   const { token } = props;
   const resize = useResize();
+  const gridShape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
   const smaller = useRef<HTMLButtonElement>(null);
   const larger = useRef<HTMLButtonElement>(null);
   if (token.size === "custom" || !props.canResize) {
     return (
       <StepperRow label="Size" group>
-        <span style={{ fontWeight: theme.weight.bold, overflowWrap: "anywhere" }}>{token.size === "custom" ? customWords(token, props.owner) : SIZE_WORDS[token.size]}</span>
+        <span style={{ fontWeight: theme.weight.bold, overflowWrap: "anywhere" }}>{token.size === "custom" ? customWords(token, props.owner) : tokenSizeLabel(token.size, gridShape)}</span>
       </StepperRow>
     );
   }
@@ -2100,12 +2102,12 @@ function SizeRow(props: { token: ViewToken; owner: boolean; canResize: boolean }
   return (
     <StepperRow label="Size" group>
       <BarButton ref={smaller} label="One size smaller" icon="minus" iconOnly always disabled={down === null} onClick={() => down && press(down, -1)} />
-      <span style={{ display: "inline-grid", textAlign: "center", fontWeight: theme.weight.bold }}>
+      <span style={{ display: "inline-grid", textAlign: "center", whiteSpace: "pre-line", fontWeight: theme.weight.bold }}>
         <span aria-hidden style={{ gridArea: "1 / 1", visibility: "hidden" }}>
-          Gargantuan
+          {tokenSizeLabel("gargantuan", gridShape).replace(" (", "\n(")}
         </span>
         <span aria-live="polite" style={{ gridArea: "1 / 1" }}>
-          {SIZE_WORDS[token.size]}
+          {tokenSizeLabel(token.size, gridShape).replace(" (", "\n(")}
         </span>
       </span>
       <BarButton ref={larger} label="One size larger" icon="plus" iconOnly always disabled={up === null} onClick={() => up && press(up, 1)} />

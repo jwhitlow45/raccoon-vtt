@@ -18,6 +18,7 @@ import { Checkbox } from "../components/Checkbox.tsx";
 import { Empty } from "../components/Empty.tsx";
 import { Group } from "../components/Panel.tsx";
 import { QuickStartLink } from "../features/guide/GuideLink.tsx";
+import { tokenSizeLabel } from "../features/grid/words.ts";
 import { DotLabel } from "../components/Row.tsx";
 import { Switch } from "../components/Switch.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
@@ -620,13 +621,14 @@ function DuplicateButton(props: { token: Token }) {
  * (features/tokens/resize.ts), so the panel and the window place the
  * footprint alike, and a refusal's words show under the field.
  */
-function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAccess; feetPerCell: number }) {
+export function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAccess; feetPerCell: number }) {
   const { token, access } = props;
   const resize = useResize();
   const [refused, setRefused] = useState<string | null>(null);
   const characters = useRoomView((s) => s.view?.characters);
   const monsters = useRoomView((s) => s.view?.monsters);
   const blocks = useRoomView((s) => s.view?.companionBlocks);
+  const gridShape = useRoomView((s) => s.view?.scenes[token.sceneId]?.gridShape);
   // A companion's stored block or a room monster's comes first, so the SRD loads only when it is the link (statBlockLink.ts tokenStatBlock).
   const srd = useSrdList(props.actor.srdId !== undefined && props.actor.monsterId === undefined && props.actor.blockId === undefined);
   // A refusal belongs to the size it was about: a new size, or a new token, clears it.
@@ -643,13 +645,13 @@ function SizeField(props: { token: Token; actor: Partial<Actor>; access: TokenAc
          * line (FU32-FT-ALONE).
          */}
         <span>
-          <Unbroken>{`${SIZE_WORDS[token.size]} (${fp.w * props.feetPerCell} ft),`}</Unbroken> locked by <Unbroken>the DM</Unbroken>
+          {gridShape ? <span>{tokenSizeLabel(token.size, gridShape).replace(" hex", "\u00a0hex")},</span> : <Unbroken>{`${SIZE_WORDS[token.size]} (${fp.w * props.feetPerCell} ft),`}</Unbroken>} locked by <Unbroken>the DM</Unbroken>
         </span>
       </FieldRow>
     );
   }
   const base = backTo(token.size, baseSize({ token, actor: props.actor, characters, monsters, blocks, srd: srd.list }));
-  const options = access.dm ? SIZE_OPTIONS : SIZE_OPTIONS.filter((o) => o.value !== "custom");
+  const options = (access.dm ? SIZE_OPTIONS : SIZE_OPTIONS.filter((o) => o.value !== "custom")).map((o) => ({ ...o, label: tokenSizeLabel(o.value, gridShape) }));
   return (
     <>
       <FieldRow label="Size" fill hint={refused ? <span role="alert">{refused}</span> : undefined}>

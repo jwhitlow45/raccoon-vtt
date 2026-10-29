@@ -3,7 +3,7 @@ import { scopeSlot, useScoped } from "../../state/scope.ts";
 import type { GridShape } from "#shared/model.ts";
 import { shapeOfGrid, type Grid } from "#shared/rules/grid.ts";
 import type { MapShape } from "./detectHex.ts";
-import { boxAt, boxSides, calibrationFromBox, canonicalToWorld, type CalBox, type Calibration, type Corner, type Point } from "./calibrate.ts";
+import { boxAt, boxSides, calibrationFromBox, canonicalToWorld, nudgeBox, type CalBox, type Calibration, type Corner, type Point } from "./calibrate.ts";
 
 /**
  * The alignment box while the grid tool is active. It lives outside the
@@ -131,7 +131,8 @@ export function shapeChanged(store: StoreApi<GridToolState>, sceneId: string, sh
   let next: CalBox | null = null;
   if (box && shape) {
     const { w, h } = boxSides(box, shape.from);
-    next = boxAt(shape.map, shape.to, canonicalToWorld(shape.map, { x: box.x + w / 2, y: box.y + h / 2 }));
+    const at = boxAt(shape.map, shape.to, canonicalToWorld(shape.map, { x: box.x + w / 2, y: box.y + h / 2 }));
+    next = nudgeBox(at, 0, 0, box.size - at.size, shape.to);
   }
   store.setState({ ...(found?.sceneId === sceneId ? { found: null } : {}), ...(open === sceneId ? { box: next, drag: null } : {}) });
 }

@@ -610,6 +610,24 @@ describe("a switch to hexes", () => {
       assert.ok(Math.hypot(mid(after, to).x - mid(before, from).x, mid(after, to).y - mid(before, from).y) <= MAP.cellPx, "where the old one was, within a cell");
     }
   });
+
+  test("FU39-B: a shape switch keeps the size fitted to the art around the new cell center", () => {
+    const grids = [SQUARES, HEX_ROWS, gridOfShape("hexColumns")];
+    for (const from of grids) for (const to of grids) {
+      if (from === to) continue;
+      for (const size of [90, 240, 375]) {
+        const before = nudgeBox(boxAt(MAP, from, { x: 12.2, y: 8.7 }), 0, 0, size - 3 * MAP.cellPx, from);
+        const store = createStore<GridToolState>(() => ({ box: before, drag: null, fitScene: true, sceneId: "s1", found: null, finding: null }));
+        const middle = (box: CalBox, grid: Grid) => ({ x: box.x + boxSides(box, grid).w / 2, y: box.y + boxSides(box, grid).h / 2 });
+        const at = boxAt(MAP, to, canonicalToWorld(MAP, middle(before, from)));
+        shapeChanged(store, "s1", { map: MAP, from, to });
+        const after = store.getState().box;
+        assert.ok(after);
+        assert.equal(after.size, size, "the DM's measured size survives the shape switch");
+        assert.ok(Math.hypot(middle(after, to).x - middle(at, to).x, middle(after, to).y - middle(at, to).y) < 1e-9, "resizing keeps the new cell center");
+      }
+    }
+  });
 });
 
 describe("where a scene came from", () => {

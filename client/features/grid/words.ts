@@ -1,4 +1,4 @@
-import type { GridShape, RoomSettings, Scene } from "#shared/model.ts";
+import type { CreatureSize, GridShape, RoomSettings, Scene } from "#shared/model.ts";
 import { cellWord, isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { sceneHexSpan } from "#shared/rules/hex.ts";
 
@@ -54,6 +54,14 @@ export const HEX_LIMITS = {
 
 /** How many hexes a creature of a size takes on a hex scene (HX-D4), for "Large (3 hexes)". */
 export const SIZE_HEXES = { tiny: 1, small: 1, medium: 1, large: 3, huge: 7, gargantuan: 12 } as const;
+
+/** A named token size includes its footprint on either hex orientation. */
+export function tokenSizeLabel(size: CreatureSize, shape?: GridShape): string {
+  const name = size[0]!.toUpperCase() + size.slice(1);
+  if (shape === undefined || size === "custom") return name;
+  const count = SIZE_HEXES[size];
+  return `${name} (${count} ${count === 1 ? "hex" : "hexes"})`;
+}
 
 /**
  * Whether the room's settings speak of hexes beside squares: the room

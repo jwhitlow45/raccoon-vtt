@@ -16,7 +16,7 @@ import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
 import { calibrationFromHexFind } from "../client/features/grid/calibrate.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
-import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, expandBar, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
 
@@ -515,6 +515,63 @@ async function openAt(page: Page, size: (typeof SIZES)[number], scale: number): 
   await page.locator(".konvajs-content").first().waitFor();
 }
 
+/** FU39-B: the size's count stays inside the bar and the panel on each measured hex screen. */
+async function hexSizeControls(page: Page, tokenId: string, at: string, shot: string): Promise<string[]> {
+  const socket = page === dm ? dmSocket : dmPageSockets.get(page);
+  assert.ok(socket);
+  await ops.send({ t: "token.update", tokenId, patch: { size: "large", x: 4, y: 3 } });
+  await waitFor("FU39-B's Large token", () => socket.state?.tokens[tokenId]?.size === "large" || null);
+  await page.getByRole("button", { name: "Fit the map to the screen" }).click();
+  const point = await pagePoint(page, dmSocket.state!.scenes[run.camp]!.bounds, { x: 5, y: 4 });
+  await assertCanvasAt(page, point);
+  await page.mouse.click(point.x, point.y);
+  const bar = page.getByRole("dialog", { name: /^FU39 Size token/ }).first();
+  await bar.waitFor();
+  await expandBar(bar);
+  const group = bar.getByRole("group", { name: "Size", exact: true });
+  await group.scrollIntoViewIfNeeded();
+  const live = group.locator('[aria-live="polite"]');
+  const words = async () => (await live.innerText()).replace(/\s+/g, " ").trim();
+  await waitFor("FU39-B's Large hex count", async () => (await words()) === "Large (3 hexes)" || null);
+  const off = alignmentLines(await measureAlignment(group), `FU39-B hex Size stepper at ${at}`);
+  await shots.take(page, `fu39b-size-large-${shot}`);
+  const smaller = group.getByRole("button", { name: "One size smaller" });
+  const larger = group.getByRole("button", { name: "One size larger" });
+  const before = { smaller: await smaller.boundingBox(), larger: await larger.boundingBox() };
+  assert.ok(before.smaller && before.larger);
+  for (const [size, label] of [["huge", "Huge (7 hexes)"], ["gargantuan", "Gargantuan (12 hexes)"]] as const) {
+    await larger.click();
+    await waitFor(`FU39-B's ${label}`, async () => (socket.state?.tokens[tokenId]?.size === size && (await words()) === label) || null);
+    const after = { smaller: await smaller.boundingBox(), larger: await larger.boundingBox() };
+    assert.ok(after.smaller && after.larger);
+    assert.ok(Math.abs(before.smaller.x - after.smaller.x) <= 1 && Math.abs(before.larger.x - after.larger.x) <= 1, `FU39-B Size buttons moved at ${at}`);
+  }
+  assert.equal(await larger.isDisabled(), true);
+  assert.equal(await smaller.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "focus leaves the disabled plus button");
+  off.push(...alignmentLines(await measureAlignment(group), `FU39-B Gargantuan Size stepper at ${at}`));
+  off.push(...(await sideways(group, `FU39-B Gargantuan Size stepper at ${at}`)));
+  await shots.take(page, `fu39b-size-gargantuan-${shot}`);
+  await (await barControl(bar, "Details")).click();
+  const panel = page.locator("[data-token-panel]").filter({ visible: true });
+  const fold = panel.getByRole("button", { name: "Stats", exact: true });
+  const wasFolded = (await fold.getAttribute("aria-expanded")) === "false";
+  if (wasFolded) await fold.click();
+  const stats = panel.locator("[data-panel-group]").filter({ has: page.getByRole("button", { name: "Stats", exact: true }) });
+  const size = stats.getByRole("combobox", { name: "Size", exact: true });
+  await size.scrollIntoViewIfNeeded();
+  assert.deepEqual(await size.locator("option").allTextContents(), ["Tiny (1 hex)", "Small (1 hex)", "Medium (1 hex)", "Large (3 hexes)", "Huge (7 hexes)", "Gargantuan (12 hexes)", "Custom"]);
+  off.push(...alignmentLines(await measureAlignment(stats), `FU39-B hex Stats at ${at}`));
+  off.push(...(await sideways(stats, `FU39-B hex Stats at ${at}`)));
+  await shots.take(page, `fu39b-size-panel-${shot}`);
+  await size.selectOption("large");
+  await waitFor("FU39-B's panel restores Large", () => socket.state?.tokens[tokenId]?.size === "large" || null);
+  if (wasFolded) await fold.click();
+  await page.keyboard.press("Escape");
+  await openScenes(page);
+  await page.keyboard.press("Escape");
+  return off;
+}
+
 describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   before(async () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
@@ -984,6 +1041,42 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await pickTool(dm, "Select");
   });
 
+  test("FU39-B-G2. a pending 51 px alignment survives Hex columns, Squares and Hex rows before Apply", async () => {
+    const before = dmSocket.state!.scenes[run.camp]!;
+    assert.ok(before.map);
+    try {
+      await ops.send({ t: "scene.setGrid", sceneId: run.camp, cellPx: 50, originPx: before.map.originPx });
+      await waitFor("FU39-B's stored 50 px grid", () => dmSocket.state?.scenes[run.camp]?.map?.cellPx === 50 || null);
+      await pickTool(dm, "Line up grid");
+      const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
+      await bar.getByText("50 px per hex", { exact: true }).filter({ visible: true }).first().waitFor();
+      await bar.getByRole("button", { name: /^Nudge/ }).first().click();
+      for (let i = 0; i < 3; i++) await dm.getByRole("button", { name: "Make the hexes larger" }).click();
+      await dm.keyboard.press("Escape");
+      await bar.getByText("51 px per hex", { exact: true }).filter({ visible: true }).first().waitFor();
+      for (const [label, shape, cell] of [["Hex columns", "hexColumns", "hex"], ["Squares", undefined, "square"], ["Hex rows", "hexRows", "hex"]] as const) {
+        const panel = await openScenes(dm);
+        await openSceneGroup(panel, "Map image and grid");
+        await panel.getByRole("radiogroup", { name: "Grid shape", exact: true }).getByRole("radio", { name: label, exact: true }).check();
+        await waitFor(`FU39-B's switch to ${label}`, () => dmSocket.state?.scenes[run.camp]?.gridShape === shape || null);
+        assert.equal(dmSocket.state!.scenes[run.camp]!.map!.cellPx, 50, "switching the shape does not apply the pending size");
+        await bar.getByText(`51 px per ${cell}`, { exact: true }).filter({ visible: true }).first().waitFor();
+      }
+      await shots.take(dm, "fu39b-grid-pending-size");
+      await bar.getByRole("button", { name: "Apply", exact: true }).click();
+      await waitFor("FU39-B's measured grid applied", () => dmSocket.state?.scenes[run.camp]?.map?.cellPx === 51 || null);
+    } finally {
+      await ops.send({ t: "scene.setGrid", sceneId: run.camp, cellPx: before.map.cellPx, originPx: before.map.originPx });
+      await ops.send({ t: "scene.update", sceneId: run.camp, patch: { gridShape: before.gridShape ?? "squares", bounds: before.bounds } });
+      await waitFor("FU39-B's camp grid restored", () => {
+        const scene = dmSocket.state?.scenes[run.camp];
+        return (scene?.gridShape === before.gridShape && scene?.map?.cellPx === before.map!.cellPx && scene.map.originPx.x === before.map!.originPx.x && scene.map.originPx.y === before.map!.originPx.y && scene.bounds.w === before.bounds.w && scene.bounds.h === before.bounds.h) || null;
+      });
+      await dm.keyboard.press("Escape");
+      await pickTool(dm, "Select");
+    }
+  });
+
   test("HX4-4. no square on a hex scene's screens, the DM's settings or Pat's board, but the Squares choices", async () => {
     const panel = await openScenes(dm);
     await openSceneGroup(panel, "Map image and grid");
@@ -994,10 +1087,12 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await dm.bringToFront();
   });
 
-  test("HX4-5. Room settings, the new scene form on hexes, a hex scene's settings, Line up grid's options and the builder's line sit within 1 px at each size", async () => {
+  test("HX4-5. Room settings, the new scene form on hexes, a hex scene's settings, Line up grid's options, the builder's line and FU39-B-G1's token Size controls sit within 1 px at each size", async () => {
     const off: string[] = [];
+    const sizeToken = randomUUID();
     let phone: Awaited<ReturnType<typeof dmPhone>> | null = null;
     try {
+      await ops.send({ t: "token.create", token: { id: sizeToken, sceneId: run.camp, kind: "monster", name: "FU39 Size token", size: "large", x: 4, y: 3, disposition: "hostile", visibility: "all", actor: { inline: ACTOR } } });
       for (const size of SIZES) {
         let page = dm;
         if (size.touch) {
@@ -1042,10 +1137,12 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           off.push(...alignmentLines(await measureAlignment(build), `the builder's options at ${at}`));
           await shots.take(page, `hx4-builder-${size.name}-${scale * 100}`);
           await pickTool(page, "Select");
+          off.push(...(await hexSizeControls(page, sizeToken, at, `${size.name}-${scale * 100}`)));
         }
       }
     } finally {
       await phone?.context.close();
+      if (dmSocket.state?.tokens[sizeToken]) await ops.send({ t: "token.delete", tokenId: sizeToken });
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
