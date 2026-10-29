@@ -9,7 +9,7 @@ import { applyOp } from "../reducer.ts";
 import { occupiedHexes, placedOnHex } from "../rules/footprint.ts";
 import { gridOfShape, switchRefusal } from "../rules/grid.ts";
 import { footprintGround, groundAt, heightsGrid } from "../rules/heights.ts";
-import { hexKey, sceneHexSpan, type Hex, type HexGrid } from "../rules/hex.ts";
+import { hexKey, hexNeighbors, sceneHexSpan, type Hex, type HexGrid } from "../rules/hex.ts";
 import { withPitsCounted } from "../rules/pitCount.ts";
 import { sceneWalls } from "../rules/walls.ts";
 import { DM, env, P1, room, scene, token, trap as trapOf } from "../testutil.ts";
@@ -74,6 +74,18 @@ for (const shape of ["hexRows", "hexColumns"] as const) {
       s.tokens.by = on(g, "by", { col: 8, row: 5 });
       const after = run(s, { t: "build.height", sceneId: "s1", cells: ["5,5"], height: 15 }).state;
       assert.deepEqual([after.tokens.on!.elevation, after.tokens.by!.elevation], [15, 0]);
+    });
+
+    test("an erase of the raised hexes under a goblin lands it on the ground they leave, in the same op (H3-OPUS-02)", () => {
+      const s = hexRoom(shape);
+      const H: Hex = { col: 5, row: 5 };
+      s.tokens.gob = on(g, "gob", H);
+      const under = [H, ...hexNeighbors(g, H)].map(hexKey);
+      const raised = run(s, { t: "build.height", sceneId: "s1", cells: under, height: 10 }).state;
+      assert.equal(raised.tokens.gob!.elevation, 10);
+      const erased = run(raised, { t: "build.erase", sceneId: "s1", cells: under });
+      assert.equal(erased.state.tokens.gob!.elevation, 0);
+      assert.equal(run(erased.state, undo(erased.inverse)).state.tokens.gob!.elevation, 10, "one undo stands it back up");
     });
 
     test("the switch is refused while heights or stairs stand, naming them", () => {

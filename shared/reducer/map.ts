@@ -720,9 +720,10 @@ function eraseLabels(tx: Tx, sceneId: string, cells: Cell[]): void {
  * hexes by key. A free wall lives in the world chunk of its midpoint, not
  * a hex's chunk, so the world chunks each hex covers are read for the free
  * walls whose midpoint lies in an erased hex, and so are the stamps and
- * lights whose center does and the labels whose text touches one. Hexes
- * hold no painted ground, edges or heights in H2, so no token's ground
- * changes.
+ * lights whose center does and the labels whose text touches one. From
+ * H3 an erased hex takes its height and stair too, so the tokens standing
+ * on that ground land on what is left (landOnGround), as on squares. Hexes
+ * hold no painted ground or edges.
  */
 function eraseHexes(tx: Tx, scene: Scene, g: HexGrid, cells: readonly Cell[]): void {
   const erased = new Set<string>();
@@ -745,6 +746,7 @@ function eraseHexes(tx: Tx, scene: Scene, g: HexGrid, cells: readonly Cell[]): v
     }
   }
   const inErased = (x: number, y: number) => erased.has(hexKey(hexAt(g, { x, y })));
+  const standing = standingOn(tx, scene.id, erased);
   const touched = new Set([...byChunk.keys(), ...worldChunks.keys()]);
   for (const key of [...touched].sort()) {
     const stored = tx.state.buildChunks[key];
@@ -759,6 +761,7 @@ function eraseHexes(tx: Tx, scene: Scene, g: HexGrid, cells: readonly Cell[]): v
     if (worldChunks.has(key) && stored.walls) next = withWalls(next, stored.walls.filter((w) => !inErased(...wallMidpoint(w))));
     if (!sameChunk(stored, next)) writeChunk(tx, next);
   }
+  landOnGround(tx, standing);
   for (const stamp of sortedById(Object.values(tx.state.stamps))) {
     if (stamp.sceneId === scene.id && inErased(stamp.x, stamp.y)) tx.remove(keys.stamp(stamp.id));
   }
