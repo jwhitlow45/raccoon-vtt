@@ -74,12 +74,11 @@ export type PopoverKind = "dialog" | "menu";
 type FocusInside = (from: "first" | "last") => void;
 
 /**
- * Lays the content out for the width the box may take, as the box is
- * placed and before it measures the content: a menu's tiles choose their
- * rows there (Menu.tsx), so the box takes the width of the rows they
- * settle into rather than the widest the bound allows.
+ * Lays the content out before the box measures it. Room is the available
+ * width inside its padding and border, in the chrome's own px. A menu
+ * measures complete list items or balances its tile rows there.
  */
-type FitContent = () => void;
+type FitContent = (room: number) => void;
 
 export type PopoverHandle = {
   readonly kind: PopoverKind;
@@ -337,7 +336,7 @@ function OpenPopover(props: PopoverProps) {
       const scrolled = box.scrollTop;
       // The content's natural size, wrapped at the widest the bound allows and at least the anchor's width.
       Object.assign(box.style, { left: "0px", top: "0px", height: "auto", width: "max-content", maxWidth: `${widest}px`, minWidth: `${Math.min(a.width / scale, widest)}px` });
-      fitContent.current?.();
+      fitContent.current?.(Math.max(0, widest - 2 * (POPOVER_PAD + theme.line.border)));
       const natural = box.getBoundingClientRect();
       const at = popoverPlace({
         ...next,
@@ -497,6 +496,7 @@ function OpenPopover(props: PopoverProps) {
           zIndex: theme.z.popover,
           boxSizing: "border-box",
           overflowY: "auto",
+          scrollbarWidth: "none",
           overscrollBehavior: "contain",
           padding: POPOVER_PAD,
           background: theme.color.surface,

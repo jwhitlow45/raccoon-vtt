@@ -1,3 +1,8 @@
+/** A row menu takes its widest max-content item, capped by the room inside the popover's padding and border. */
+export function menuWidth(widths: readonly number[], room: number): number {
+  return Math.min(Math.max(0, ...widths), Math.max(0, room));
+}
+
 /**
  * How a menu's tiles break into rows (components/Menu.tsx), from each
  * tile's own width, the gap between them and the room the box gives

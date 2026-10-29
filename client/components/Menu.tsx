@@ -6,7 +6,7 @@ import { letterOf } from "../state/shortcuts.ts";
 import { Icon } from "./Icon.tsx";
 import { buttonLook } from "./looks.ts";
 import { menuAction, openingIndex, typeahead, type Typed } from "./menuKeys.ts";
-import { laidGap, tileRows } from "./menuTiles.ts";
+import { laidGap, menuWidth, tileRows } from "./menuTiles.ts";
 import { sectionLabelLook } from "./Panel.tsx";
 import { focusInView, usePopoverContext } from "./Popover.tsx";
 
@@ -107,10 +107,22 @@ export function Menu(props: {
    * the cap it had.
    */
   useLayoutEffect(() => {
-    if (!tiles) return;
-    setFitContent(() => {
+    setFitContent((room) => {
       const menu = root.current;
       if (!menu) return;
+      if (!tiles) {
+        // Measure whole rows before constraining them. A flex label's zero basis can otherwise make the popover hug its shortest words.
+        menu.style.removeProperty(ROWS_WIDTH);
+        const zoom = effectiveZoom(menu);
+        const widths = [menu.getBoundingClientRect().width / zoom];
+        for (const node of nodes.current.values()) {
+          node.style.width = "max-content";
+          widths.push(node.getBoundingClientRect().width / zoom);
+          node.style.width = "";
+        }
+        menu.style.setProperty(ROWS_WIDTH, `${menuWidth(widths, room)}px`);
+        return;
+      }
       for (const row of menu.querySelectorAll<HTMLElement>("[data-rvtt-tiles]")) {
         row.style.removeProperty(TILES_WIDTH);
         const zoom = effectiveZoom(row);
@@ -189,8 +201,8 @@ export function Menu(props: {
         ) : (
           <>
             {it.glyph ? <span aria-hidden style={{ display: "grid", placeItems: "center", flex: "none" }}>{it.glyph}</span> : null}
-            {/* A row keeps to one line, but a title too long for the box, such as an 80-letter name with no space, breaks anywhere rather than run out of it. */}
-            <span style={{ flex: 1, minWidth: 0, whiteSpace: "normal", overflowWrap: "anywhere" }}>{it.title}</span>
+            {/* Unlike anywhere, break-word preserves the intrinsic word width while keeping a name longer than the cap inside the menu. */}
+            <span style={{ flex: "1 1 auto", minWidth: 0, whiteSpace: "normal", overflowWrap: "break-word", wordBreak: "normal" }}>{it.title}</span>
             {it.note ? (
               <span aria-hidden style={{ flex: "none", color: theme.color.textMuted, fontSize: theme.font.small, fontWeight: theme.weight.regular }}>
                 {it.note}
@@ -232,7 +244,7 @@ export function Menu(props: {
   };
 
   return (
-    <div {...props.data} ref={root} role="menu" id={handle.contentId} aria-label={props.label} onKeyDown={onKeyDown} style={{ display: "grid", gap: tiles ? theme.space(2) : 0 }}>
+    <div {...props.data} ref={root} role="menu" id={handle.contentId} aria-label={props.label} onKeyDown={onKeyDown} style={{ display: "grid", gap: tiles ? theme.space(2) : 0, width: tiles ? undefined : `var(${ROWS_WIDTH}, auto)`, maxWidth: tiles ? undefined : "100%" }}>
       {props.sections.map((section) => (
         <Fragment key={section.key}>
           {section.separator ? <div role="separator" style={{ height: theme.line.border, margin: `${theme.space(1)}px 0`, background: theme.color.border }} /> : null}
@@ -245,6 +257,9 @@ export function Menu(props: {
 
 /** The custom property that caps a section's row of tiles where they wrap, set as the popover places its box. */
 const TILES_WIDTH = "--rvtt-tiles-width";
+
+/** The measured row width survives renders until the popover places the menu again. */
+const ROWS_WIDTH = "--rvtt-menu-width";
 
 /** A list item: 44 px tall, the menu's full width, its badge at the end, as the phone's list of panels has it. */
 const ROW = {

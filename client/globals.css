@@ -78,6 +78,11 @@ textarea {
   display: none !important;
 }
 
+/* Popover's sticky foot cues scrolling. Keep the same content width at the bottom, when the foot disappears. */
+[data-rvtt-popover]::-webkit-scrollbar {
+  display: none;
+}
+
 /* A panel sheet is a dialog that lays itself out inline while open
    (components/Sheet.tsx), which would beat the browser's own rule that
    hides a closed dialog. Hidden by its Hide, it stays mounted, closed. */
