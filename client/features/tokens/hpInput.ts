@@ -1,4 +1,5 @@
 import { MAX_DAMAGE_PARTS, type HpChange } from "#shared/protocol.ts";
+import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import { parseParts, partAmounts, partsText, type PartAmount } from "#shared/rules/typedDamage.ts";
 
 /**
@@ -37,6 +38,8 @@ export type HpParse = { ok: true; change: HpChange; summary: string } | { ok: fa
 
 const EMPTY = "Type a number.";
 const UNREADABLE = "Use a number, such as -7, +5, =20 or t5.";
+const FORMULA_PROBLEMS: ReadonlySet<string> = new Set(Object.values(FORMULA_ERRORS));
+const DAMAGE_TOTALS = "Enter a total for each damage type, such as 8 Fire + 4 Cold.";
 
 /** Integer terms joined by + and -, with an optional leading sign. Null when unreadable. */
 function sum(text: string): { value: number; signed: boolean } | null {
@@ -78,7 +81,8 @@ export function parseHpInput(raw: string, mode: HpMode, rolled?: { amount: numbe
     const negative = text.startsWith("-");
     if ((!negative && mode !== "damage") || text.startsWith("+")) return { ok: false, error: "Damage types go with damage only." };
     const parsed = parseParts(negative ? text.slice(1).trim() : text);
-    if (!parsed.ok) return parsed;
+    // HP takes amounts already known. The save parser's advice to roll dice cannot help here.
+    if (!parsed.ok) return FORMULA_PROBLEMS.has(parsed.error) ? { ok: false, error: DAMAGE_TOTALS } : parsed;
     const parts = partAmounts(parsed.parts, []);
     if (!parts) return { ok: false, error: "Type the rolled damage, such as 10 Fire." };
     return typedDamage(parts);

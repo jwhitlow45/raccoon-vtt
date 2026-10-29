@@ -96,6 +96,14 @@ describe("the mode after an apply", () => {
 });
 
 describe("FL-3 typed HP damage", () => {
+  test("FU38-B: typed damage arithmetic asks for totals, never for dice", () => {
+    for (const text of ["5 + 3 fire", "-5+3 fire", "10 fire + 5-3 cold", "1001+3 fire"]) {
+      assert.equal(error(text), "Enter a total for each damage type, such as 8 Fire + 4 Cold.");
+    }
+    assert.match(error("10 lava"), /not a damage type/);
+    assert.match(error("100001 fire"), /1 to 100,000/);
+  });
+
   test("an unchanged rolled amount keeps its parts for both the preview and Apply", () => {
     const chip = { amount: 15, parts: [{ amount: 3 }, { amount: 2 }, { amount: 10, type: "fire" as const }] };
     const parsed = parseHpInput("15", "damage", chip);
