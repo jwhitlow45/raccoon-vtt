@@ -116,12 +116,15 @@ export function drawnToasts(toasts: readonly Toast[], ids: readonly number[], no
  * on from what it had left. A toast not drawn yet, or already in that
  * state, stays as it is. The same array when nothing changes.
  */
-export function heldToasts(toasts: readonly Toast[], id: number, held: boolean, now: number): readonly Toast[] {
+export function heldToasts(toasts: readonly Toast[], id: number, held: boolean, now: number, heldSince?: number): readonly Toast[] {
   const at = toasts.findIndex((t) => t.id === id);
   const toast = toasts[at];
   if (!toast || toast.shownAt === undefined || (toast.pausedAt !== undefined) === held) return toasts;
   const { pausedAt, ...rest } = toast;
-  const next: Toast = held ? { ...toast, pausedAt: now } : { ...rest, shownAt: toast.shownAt + (now - (pausedAt ?? now)) };
+  // The builder hold refunds its own interval when it ends. A collapse
+  // refunds only the expanded time before that hold, so overlaps count once.
+  const until = heldSince !== undefined && toast.action?.ready ? Math.min(now, heldSince) : now;
+  const next: Toast = held ? { ...toast, pausedAt: now } : { ...rest, shownAt: toast.shownAt + Math.max(0, until - (pausedAt ?? now)) };
   return toasts.map((t, i) => (i === at ? next : t));
 }
 
@@ -724,7 +727,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       if (toasts !== get().toasts) store.setState({ toasts: [...toasts] });
     },
     holdToast(id, held) {
-      const toasts = heldToasts(get().toasts, id, held, Date.now());
+      const toasts = heldToasts(get().toasts, id, held, Date.now(), get().buildHeldSince);
       if (toasts !== get().toasts) store.setState({ toasts: [...toasts] });
     },
     dismissXcard(id) {

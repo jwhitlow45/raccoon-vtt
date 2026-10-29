@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { ACTION_TOAST_MS, drawnToasts, heldToasts, TOAST_MS, toastsLeft, waitedToasts, withToast } from "./store.ts";
+import { ACTION_TOAST_MS, createRoomStore, drawnToasts, heldToasts, TOAST_MS, toastsLeft, waitedToasts, withToast } from "./store.ts";
 import type { Toast } from "./types.ts";
 
 const note = (id: number, shownAt: number): Toast => ({ id, text: `Pat whispers: ${id}`, tone: "info", shownAt });
@@ -191,6 +191,66 @@ describe("a toast's time starts as it first draws, and stops while it shows whol
 
 describe("a builder hold stops the time of each toast whose button waits on it, as its end gives that time back (FU34-ASTRA-02)", () => {
   const forget = (id: number, times: Pick<Toast, "shownAt" | "pausedAt">): Toast => ({ id, text: `Forget ${id}`, tone: "info", action: { label: "Forget and undo", run: () => {}, ready: () => false }, ...times });
+
+  test("FU34-ASTRA-05: expanding and collapsing during a builder hold preserves seven seconds", () => {
+    let list: readonly Toast[] = [forget(1, { shownAt: 0 })];
+    list = heldToasts(list, 1, true, 10_000, 5_000);
+    list = heldToasts(list, 1, false, 40_000, 5_000);
+    assert.equal(toastsLeft(list, 40_000, 5_000)[0]!.ms, 7_000);
+    assert.equal(toastsLeft(waitedToasts(list, 5_000, 60_000), 60_000)[0]!.ms, 7_000);
+  });
+
+  test("FU34-ASTRA-05: the store forwards its builder hold when the toast collapses", (t) => {
+    let now = 0;
+    t.mock.method(Date, "now", () => now);
+    const room = createRoomStore({ roomId: "room", you: { memberId: "dm", role: "dm" }, clientId: "device" });
+    try {
+      room.ui.notify("Forget", "info", undefined, { label: "Undo", run() {}, ready: () => room.store.getState().buildHeldSince === undefined });
+      const id = room.store.getState().toasts[0]!.id;
+      room.ui.toastsDrawn([id]);
+      now = 5_000;
+      const release = room.holdBuild(() => {});
+      now = 10_000;
+      room.ui.holdToast(id, true);
+      now = 40_000;
+      room.ui.holdToast(id, false);
+      now = 60_000;
+      release();
+      assert.deepEqual(toastsLeft(room.store.getState().toasts, now), [{ id, ms: 7_000, runs: true }]);
+    } finally {
+      room.dispose();
+    }
+  });
+
+  test("FU34-ASTRA-05: random overlapping pauses count only the union of their intervals", () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      let random = seed;
+      const draw = () => (random = (Math.imul(random, 1664525) + 1013904223) >>> 0);
+      let now = 0;
+      let ran = 0;
+      let since: number | undefined;
+      let expanded = false;
+      let list: readonly Toast[] = [{ ...forget(1, { shownAt: 0 }), action: { label: "Undo", run() {}, ready: () => since === undefined } }];
+      for (let step = 0; step < 100; step++) {
+        const elapsed = draw() % 200;
+        if (!expanded && since === undefined) ran += elapsed;
+        now += elapsed;
+        if (draw() % 3 === 0) {
+          if (since === undefined) since = now;
+          else {
+            list = waitedToasts(list, since, now);
+            since = undefined;
+          }
+        } else {
+          expanded = !expanded;
+          list = heldToasts(list, 1, expanded, now, since);
+        }
+        const left = toastsLeft(list, now, since)[0]!;
+        assert.equal(left.ms, Math.max(0, ACTION_TOAST_MS - ran), `seed ${seed}, step ${step}: each paused millisecond counts once`);
+        assert.equal(left.runs, !expanded && since === undefined, `seed ${seed}, step ${step}: either pause stops the timer`);
+      }
+    }
+  });
 
   test("drawn before the hold, during it, or shown whole before or during it: what a late render reads is what the hold's end leaves", () => {
     const from = 10_000;
