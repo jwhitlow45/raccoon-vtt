@@ -960,6 +960,13 @@ export function parseRoomState(value: unknown, now = Date.now()): { ok: true; st
   for (const scene of Object.values(state.scenes).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
     // A hex scene never reads as a file's own square grid (D-261026-8), as `scene.create` and the map ops refuse it.
     if (isHex(sceneGrid(scene)) && cameWithGrid(scene)) return { ok: false, message: `scenes.${scene.id}: ${OWN_SQUARE_GRID}` };
+    if (!isHex(sceneGrid(scene))) {
+      for (const trap of Object.values(state.traps)) {
+        if (trap.sceneId !== scene.id || !("wire" in trap.zone)) continue;
+        const { a, b } = trap.zone.wire;
+        if (![...a, ...b].every((v) => Number.isInteger(v * 2))) return { ok: false, message: `traps.${trap.id}: a wire's ends are on cell corners and edge midpoints` };
+      }
+    }
     const found = sceneHolds(state, scene);
     if (found) return { ok: false, message: `scenes.${scene.id}: ${standsWords(found, scene)}` };
   }
