@@ -704,7 +704,8 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
   return {
     stop: (i, to) => {
       for (const f of follows) {
-        const stop = legStop(state, f.trace[i - 1]!, f.spot(to, squeezedAt(i, to)));
+        // Full size at each point, as the server stores it wherever it stops (moveLeg.ts stoppedAtWalls).
+        const stop = legStop(state, f.trace[i - 1]!, { ...f.spot(to, squeezedAt(i, to)), squeeze: false });
         if (stop) return stop;
       }
       return null;

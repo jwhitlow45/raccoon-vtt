@@ -157,6 +157,32 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       cutTaken(s, out, route);
     });
   });
+
+  describe(`${name}: a Large horse drags a Large ogre into a corridor one hex wide`, () => {
+    test("the device cuts the walk where the ogre would stand full size in the rock, as the server stores it, and the server takes the cut (FU35A-HEX-LATTICE-END)", () => {
+      const solid = (h: Hex) => {
+        const along = g.orient === "rows" ? h.col : h.row;
+        const across = g.orient === "rows" ? h.row : h.col;
+        return along >= 6 && along <= 12 && across !== 6;
+      };
+      const s = hexWallRoom(shape, bounds.w, bounds.h, wallsRound(g, bounds, solid));
+      s.tokens.horse = onHex(g, "horse", "large", at(3, 6), { name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
+      s.tokens.ogre = onHex(g, "ogre", "large", at(1, 6), { name: "Ogre", kind: "npc", ownerIds: ["p1"], attached: { to: "horse", kind: "drag" } });
+      const horse = s.tokens.horse;
+      const inside = hexStandPlace(g, horse, { size: "medium", ref: at(10, 6), squeezed: true });
+      const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(horse), { role: "player" }).input, towed: [] }, inside);
+      assert.ok(found && found !== "none", "a way in for the horse alone");
+      const route = found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]);
+      const points = routePoints(s.buildChunks, ownWalk(horse), route, horse.elevation);
+      assert.notEqual(walkersStop(s, ownWalk(horse), points, [s.tokens.ogre], { route, squeeze: true }), null, "the ogre cannot follow");
+      const plan = cutForWalkers(seenRoom(s), horse, { moves: [{ tokenId: "horse", ...inside, squeeze: true, route }], stop: null, held: [] }, [s.tokens.ogre], "walk");
+      assert.ok(plan.stop, "the walk is cut where the ogre cannot follow");
+      for (const op of moveOpsOf(plan.moves)) {
+        const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+        assert.ok(allowed.ok, `${JSON.stringify(op)}: ${allowed.ok ? "" : allowed.message}`);
+      }
+    });
+  });
 }
 
 for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const) {

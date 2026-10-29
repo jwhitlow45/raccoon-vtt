@@ -1565,9 +1565,11 @@ function draggedWalls(c: Check, op: Op): Decision {
     const member = c.state.tokens[moved.tokenId];
     if (moved.carriedBy === undefined || moved.pass !== "public" || !member || member.attached?.kind !== "drag") continue;
     for (let i = 1; i < moved.route.length; i++) {
-      // A creature a holder drags beside it walks as itself, since a drag is no seat: as the move's trace has it (route.ts followerTrace).
-      const blocker = movementRules.legBlocker(c.state, moved.trace[i - 1]!, moved.route[i]!);
-      if (blocker !== null) return refuse("forbidden", walkWords(c, moved.trace[i - 1]!, moved.route[i]!, blocker));
+      // A creature a holder drags beside it walks as itself, since a drag is no seat: as the move's trace has it (route.ts followerTrace),
+      // full size at each point, as it is stored wherever it stops (moveLeg.ts stoppedAtWalls).
+      const to = { ...moved.route[i]!, squeeze: false };
+      const blocker = movementRules.legBlocker(c.state, moved.trace[i - 1]!, to);
+      if (blocker !== null) return refuse("forbidden", walkWords(c, moved.trace[i - 1]!, to, blocker));
     }
   }
   return OK;

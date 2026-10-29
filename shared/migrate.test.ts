@@ -29,6 +29,7 @@ import {
   seatsOnSqueeze,
   standsAcrossBands,
   holderLedgesOnHexes,
+  draggedWalkFull,
   discoversMap,
   mapDiscoveryUpgrade,
   needsMapDiscoveryUpgrade,
@@ -1547,7 +1548,7 @@ describe("follow-up batch 36: op version 30, passengers on a holder that starts 
   });
 });
 
-describe("follow-up batch 37: op version 32, a walk off a holder on hexes crosses the raised sides between its hexes (D-261029-170)", () => {
+describe("follow-up batch 37: op version 32, a walk off a holder on hexes crosses the raised sides between its hexes, and a dragged creature walks full size (D-261029-170, D-261029-171)", () => {
   test("is the version now, the snapshot's unchanged", () => {
     assert.equal(OP_VERSION, 32);
     assert.equal(SNAPSHOT_VERSION, 29);
@@ -1572,6 +1573,13 @@ describe("follow-up batch 37: op version 32, a walk off a holder on hexes crosse
     assert.equal(holderLedgesOnHexes(1), false);
     assert.equal(holderLedgesOnHexes(32), true);
     assert.equal(holderLedgesOnHexes(undefined), true);
+  });
+
+  test("ops stored before version 32 read a dragged creature's point on its squeezed anchors as squeezed on hexes, later and live ops read it full size", () => {
+    assert.equal(draggedWalkFull(31), false);
+    assert.equal(draggedWalkFull(1), false);
+    assert.equal(draggedWalkFull(32), true);
+    assert.equal(draggedWalkFull(undefined), true);
   });
 
   test("a version 32 op never migrates down", () => {
