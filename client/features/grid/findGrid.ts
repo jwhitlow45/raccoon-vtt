@@ -1,6 +1,6 @@
 import type { GridShape, Scene } from "#shared/model.ts";
 import { gridOfShape, isHex, type Grid } from "#shared/rules/grid.ts";
-import { hexAt, hexCenter } from "#shared/rules/hex.ts";
+import { hexAt, hexCenter, HEX_R, HEX_S } from "#shared/rules/hex.ts";
 import { sniffImage } from "../uvtt/image.ts";
 import type { Device } from "../uvtt/limits.ts";
 import type { GridDetection } from "./detect.ts";
@@ -182,36 +182,62 @@ export function replacementFound(
 
 /**
  * Whether a find puts its cells where a kept grid has them: the same
- * shape, cells of one size, and the kept grid's cells at the map's four
- * corners and its middle each within FOUND_SNAP of a found cell's center
- * (FOUND_SNAP_PX at least). A size that differs a little adds up across
- * the map, so the corners show it where the middle alone would not. A
- * grid of another spacing can put a center on all five kept ones (100 px
- * squares and 80 px ones from (10, 10) meet every 400 px), so the sizes
- * are compared first: they may differ by the slack at most, which the
- * middle and a corner already ask of a grid 5 or more cells across. The
- * kept grid was scaled up with the art, its errors with it, so the
- * slack's pixel floor grows by as much (D-261029-54). Its share of a
- * cell grows already, with the kept cell.
+ * shape, and every cell of each with its center on the map within the
+ * slack of its partner in the other. FOUND_SNAP of a cell is the slack,
+ * FOUND_SNAP_PX at least. The kept grid was scaled up with the art, its
+ * errors with it, so the slack's pixel floor grows by as much
+ * (D-261029-54). Its share of a cell grows already, with the kept cell.
+ *
+ * Partners are paired by their steps from the map's middle cell, not as
+ * each cell's nearest: grids of near sizes drift apart by their sizes'
+ * difference a cell, and drift of a whole cell meets the nearest again
+ * (20 px squares and 19.2 px ones meet every 25 cells, and miss by 9.6 px
+ * between). Two partners part by the middle pair's offset plus that
+ * drift times their distance from the middle, a straight line across the
+ * map, so the farthest apart are at the ends of a row of cells, and only
+ * those are measured. Sizes are not compared apart: on a map 3 cells
+ * across, a size more than the slack off already parts a cell beside the
+ * middle from its partner by more than the slack.
  */
 export function keptGridHolds(found: FoundGrid, kept: KeptGrid, shape: GridShape | undefined, map: { widthPx: number; heightPx: number }): boolean {
   if (found.shape !== shape) return false;
   const slack = Math.max(FOUND_SNAP_PX * Math.max(1, kept.scale), kept.cellPx * FOUND_SNAP);
-  if (Math.abs(found.cal.cellPx - kept.cellPx) > slack) return false;
   const g = gridOfShape(shape);
-  const inset = Math.min(kept.cellPx, map.widthPx, map.heightPx) / 2;
-  const points = [
-    { x: inset, y: inset },
-    { x: map.widthPx - inset, y: inset },
-    { x: inset, y: map.heightPx - inset },
-    { x: map.widthPx - inset, y: map.heightPx - inset },
-    { x: map.widthPx / 2, y: map.heightPx / 2 },
-  ];
-  return points.every((p) => {
-    const k = cellCenter(kept, g, p);
-    const f = cellCenter(found.cal, g, k);
-    return Math.hypot(f.x - k.x, f.y - k.y) <= slack;
-  });
+  const keptMiddle = cellCenter(kept, g, { x: map.widthPx / 2, y: map.heightPx / 2 });
+  const foundMiddle = cellCenter(found.cal, g, keptMiddle);
+  return partnersWithin(kept, keptMiddle, found.cal, foundMiddle, g, map, slack) && partnersWithin(found.cal, foundMiddle, kept, keptMiddle, g, map, slack);
+}
+
+/** Whether each of `a`'s cells on the map lies within the slack of its partner in `b`, the cell as many steps from `bMiddle` as it is from `aMiddle`. */
+function partnersWithin(a: Calibration, aMiddle: Point, b: Calibration, bMiddle: Point, g: Grid, map: { widthPx: number; heightPx: number }, slack: number): boolean {
+  const drift = b.cellPx / a.cellPx - 1;
+  return rowEnds(a, g, map).every((p) => Math.hypot(bMiddle.x - aMiddle.x + drift * (p.x - aMiddle.x), bMiddle.y - aMiddle.y + drift * (p.y - aMiddle.y)) <= slack);
+}
+
+/**
+ * The centers on the map of the cells at each end of a row of a grid's
+ * cells, in canonical pixels: of a column on hex columns, whose cells
+ * stand in columns. Every other center on the map lies between two.
+ */
+function rowEnds(cal: Calibration, g: Grid, map: { widthPx: number; heightPx: number }): Point[] {
+  const hex = isHex(g);
+  const [along, down] = hex && g.orient === "columns" ? (["y", "x"] as const) : (["x", "y"] as const);
+  const size = { x: map.widthPx, y: map.heightPx };
+  // In cells, where a row lies across the map (hexes' rows HEX_S apart, from HEX_R) and a cell along its row. A cell more at
+  // either end takes in the hexes of every other row, half a cell along, and only the centers on the map are kept.
+  const rowAt = (v: number) => ((v - cal.originPx[down]) / cal.cellPx - (hex ? HEX_R : 0.5)) / (hex ? HEX_S : 1);
+  const cellAt = (v: number) => (v - cal.originPx[along]) / cal.cellPx - 0.5;
+  const center = (i: number, j: number) => worldToCanonical(cal, hex ? hexCenter(g, along === "y" ? { col: j, row: i } : { col: i, row: j }) : { x: i + 0.5, y: j + 0.5 });
+  const onMap = (c: Point) => c.x >= 0 && c.y >= 0 && c.x <= map.widthPx && c.y <= map.heightPx;
+  const ends: Point[] = [];
+  for (let j = Math.floor(rowAt(0)) - 1; j <= Math.ceil(rowAt(size[down])) + 1; j++) {
+    let i0 = Math.floor(cellAt(0)) - 1;
+    let i1 = Math.ceil(cellAt(size[along])) + 1;
+    while (i0 <= i1 && !onMap(center(i0, j))) i0++;
+    while (i1 >= i0 && !onMap(center(i1, j))) i1--;
+    if (i0 <= i1) ends.push(center(i0, j), center(i1, j));
+  }
+  return ends;
 }
 
 /** The center of the cell of `g` under `cal` that holds a point, in canonical pixels. */

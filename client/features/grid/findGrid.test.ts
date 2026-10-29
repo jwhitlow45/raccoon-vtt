@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import sharp from "sharp";
 import { createStore } from "zustand/vanilla";
+import type { GridShape } from "#shared/model.ts";
 import type { ClientOp } from "#shared/protocol.ts";
-import { SQUARES } from "#shared/rules/grid.ts";
+import { gridOfShape, isHex, SQUARES } from "#shared/rules/grid.ts";
+import { hexAt, hexCenter, HEX_S } from "#shared/rules/hex.ts";
 import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
 import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
-import { calibrationFromHexFind } from "./calibrate.ts";
+import { calibrationFromHexFind, canonicalToWorld, FOUND_SNAP, FOUND_SNAP_PX, worldToCanonical, type Calibration, type Point } from "./calibrate.ts";
 import { pickShape, type HexDetection } from "./detectHex.ts";
 import { cameWithGrid, decodeSize, headerSize, HIGH_CONFIDENCE, importSearch, importSearchFrom, findFound, foundGrid, importFound, keptGridHolds, nameGivesSize, offeredLater, offeredOnly, pickedGrid, replacementFound, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { foundLine, landSearch, showOutcome } from "./outcome.ts";
@@ -449,6 +451,31 @@ function gridRoom() {
   return { sent, actions, store };
 }
 
+/** The center of the cell of a grid that holds a point, in the map's pixels. */
+function nearestCenter(cal: Calibration, shape: GridShape | undefined, p: Point): Point {
+  const g = gridOfShape(shape);
+  const w = canonicalToWorld(cal, p);
+  return worldToCanonical(cal, isHex(g) ? hexCenter(g, hexAt(g, w)) : { x: Math.floor(w.x) + 0.5, y: Math.floor(w.y) + 0.5 });
+}
+
+/** Whether every cell of `a` with its center on the map has a center of `b` within the slack, by brute force over every cell. */
+function everyCellMeets(a: Calibration, b: Calibration, shape: GridShape | undefined, map: { widthPx: number; heightPx: number }, slack: number): boolean {
+  const g = gridOfShape(shape);
+  const from = canonicalToWorld(a, { x: 0, y: 0 });
+  const to = canonicalToWorld(a, { x: map.widthPx, y: map.heightPx });
+  const lo = (v: number) => Math.floor(Math.min(v, v / HEX_S)) - 2;
+  const hi = (v: number) => Math.ceil(Math.max(v, v / HEX_S)) + 2;
+  for (let col = lo(from.x); col <= hi(to.x); col++) {
+    for (let row = lo(from.y); row <= hi(to.y); row++) {
+      const c = worldToCanonical(a, isHex(g) ? hexCenter(g, { col, row }) : { x: col + 0.5, y: row + 0.5 });
+      if (c.x < 0 || c.y < 0 || c.x > map.widthPx || c.y > map.heightPx) continue;
+      const near = nearestCenter(b, shape, c);
+      if (Math.hypot(near.x - c.x, near.y - c.y) > slack) return false;
+    }
+  }
+  return true;
+}
+
 describe("new art of the old image's shape keeps the scene's grid, and a find there is only offered (D-261029-50)", () => {
   // The scene stood on 70 px squares from (20, 35) on a 1400 x 1000 map, and the new art is 1400 x 1000 too.
   const next = { widthPx: 1400, heightPx: 1000 };
@@ -572,6 +599,83 @@ describe("new art of the old image's shape keeps the scene's grid, and a find th
       const answer = looked(NO_SQUARES, orient === "rows" ? find : NO_HEX, orient === "rows" ? NO_HEX : find, size.widthPx, size.heightPx);
       assert.equal(replacementFound(answer, false, size, { gridShape: shape, map: { originPx: hex100.originPx } }, hex100).found?.cal.cellPx, 80, orient);
     }
+  });
+
+  test("grids of near sizes drift apart a cell at a time, so one that meets the kept grid at the middle and every corner can miss it between (review FU35B-ASTRA-01, round 3)", () => {
+    // Astra's map: 20 px squares from the corner and 19.2 px ones from (0.4, 0.4) meet at the middle and at all four corners, and miss by 9.6 px between.
+    const kept20 = { cellPx: 20, originPx: { x: 0, y: 0 }, scale: 1 };
+    const map980 = { widthPx: 980, heightPx: 980 };
+    assert.equal(keptGridHolds({ tier: "high", cal: { cellPx: 19.2, originPx: { x: 0.4, y: 0.4 } } }, kept20, undefined, map980), false);
+    const answer = done(detection(19.2, { x: 0.4, y: 0.4 }, 0.78), 980, 980);
+    assert.equal(replacementFound(answer, false, map980, { map: { originPx: kept20.originPx } }, kept20).found?.tier, "medium");
+    // The same slip on hexes: 19 px hexes against 20 px ones, a whole hex out between the middle and each corner.
+    const rows = { tier: "high" as const, cal: { cellPx: 19, originPx: { x: 67, y: 49.941 } }, shape: "hexRows" as const };
+    assert.equal(keptGridHolds(rows, kept20, "hexRows", { widthPx: 2673, heightPx: 2010 }), false, "hex rows");
+    const columns = { tier: "high" as const, cal: { cellPx: 19, originPx: { x: 49.941, y: 67 } }, shape: "hexColumns" as const };
+    assert.equal(keptGridHolds(columns, kept20, "hexColumns", { widthPx: 2010, heightPx: 2673 }), false, "hex columns");
+    // Every row is measured at its ends, not only the first and the last: hex rows start half a hex apart, so the second row can reach further out.
+    const kept49 = { cellPx: 49.086, originPx: { x: 46.53, y: 22.381 }, scale: 1 };
+    const near49 = { tier: "high" as const, cal: { cellPx: 49.16, originPx: { x: 45.613, y: 22.029 } }, shape: "hexRows" as const };
+    const map978 = { widthPx: 978, heightPx: 418 };
+    assert.equal(keptGridHolds(near49, kept49, "hexRows", map978), false, "a row's end inside the outer rows'");
+    assert.equal(everyCellMeets(kept49, near49.cal, "hexRows", map978, 1), false);
+  });
+
+  test("a find holds the kept grid exactly when each cell of either with its center on the map has a cell of the other within the slack, on 3,000 drawn pairs (review FU35B-ASTRA-01, round 3)", () => {
+    const random = rng(20261029);
+    const between = (lo: number, hi: number) => lo + (hi - lo) * random();
+    let holds = 0;
+    let made = 0;
+    const wrong: string[] = [];
+    while (made < 3000) {
+      const shape = ([undefined, "hexRows", "hexColumns"] as const)[Math.floor(3 * random())];
+      let map = { widthPx: Math.round(between(200, 2000)), heightPx: Math.round(between(200, 2000)) };
+      const scale = random() < 0.7 ? 1 : 2 + Math.floor(7 * random());
+      // Every map holds 3 cells or more across, and its cells are 10 times the slack or more: a scene's map and grid.
+      const largest = Math.min(150, map.widthPx / 3, map.heightPx / 3);
+      const smallest = Math.max(12, 10 * scale);
+      if (smallest > largest) continue;
+      made++;
+      const cellPx = smallest * (largest / smallest) ** random();
+      const kept = { cellPx, originPx: { x: between(0, cellPx), y: between(0, cellPx) }, scale };
+      const slack = Math.max(FOUND_SNAP_PX * scale, FOUND_SNAP * cellPx);
+      // A grid that slips a whole cell of its own in n cells, on a map n cells either side of its middle cell, square or a few cells across the other way:
+      // the slip lands on the corners, or on the ends of every row.
+      const n = Math.ceil(cellPx / slack) + Math.floor(3 * random());
+      const tuned = random() < 0.2 && cellPx * (2 * n + 1) <= 2600;
+      if (tuned) {
+        const long = Math.round(cellPx * (2 * n + 1));
+        const short = random() < 0.5 ? long : Math.round(cellPx * between(3, 6));
+        map = random() < 0.5 ? { widthPx: long, heightPx: short } : { widthPx: short, heightPx: long };
+      }
+      const middle = nearestCenter(kept, shape, { x: map.widthPx / 2, y: map.heightPx / 2 });
+      // A found grid of `size` px whose cell at the kept middle cell's place is `off` from it.
+      const meeting = (size: number, off: number): Calibration => {
+        const world = canonicalToWorld(kept, middle);
+        return { cellPx: size, originPx: { x: middle.x + between(-off, off) - size * world.x, y: middle.y + between(-off, off) - size * world.y } };
+      };
+      // Near the kept grid by about what the slack allows across this map; slipping a whole cell every n cells, within the slack in size;
+      // a whole fraction or multiple of its size; or any other grid near its size.
+      const kind = random();
+      const across = Math.max(map.widthPx, map.heightPx) / cellPx;
+      let cal: Calibration;
+      if (tuned) cal = meeting(cellPx * (random() < 0.5 ? n / (n + 1) : n / (n - 1)), 0.5 * slack);
+      else if (kind < 0.35) cal = meeting(cellPx + between(-2, 2) * (slack / across), 0.8 * slack);
+      else if (kind < 0.6) {
+        const n = Math.ceil(cellPx / slack) + Math.floor(20 * random());
+        cal = meeting(cellPx * (1 + (random() < 0.5 ? 1 : -1) / n), 0.8 * slack);
+      } else if (kind < 0.75) cal = meeting(cellPx * [1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4, 4 / 3, 3 / 2, 2, 3][Math.floor(9 * random())]!, slack);
+      else {
+        const size = cellPx * between(0.95, 1.05);
+        cal = { cellPx: size, originPx: { x: between(0, size), y: between(0, size) } };
+      }
+      const found = { tier: "high" as const, cal, ...(shape ? { shape } : {}) };
+      const truth = everyCellMeets(kept, cal, shape, map, slack) && everyCellMeets(cal, kept, shape, map, slack);
+      if (truth) holds++;
+      if (keptGridHolds(found, kept, shape, map) !== truth) wrong.push(`${shape ?? "squares"} ${map.widthPx} x ${map.heightPx}, kept ${JSON.stringify(kept)}, found ${JSON.stringify(cal)}: truth ${truth}`);
+    }
+    assert.deepEqual(wrong.slice(0, 5), [], `${wrong.length} wrong`);
+    assert.ok(holds > 300 && holds < 2700, `${holds} hold`);
   });
 
   test("the slack's pixel floor grows with the art, its share of a cell only with the cell (review FU35B-ASTRA-04)", () => {
