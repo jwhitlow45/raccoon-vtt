@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { clientOpSchema } from "#shared/protocol.ts";
+import { parseParts } from "#shared/rules/typedDamage.ts";
 import { modeAfterApply, parseHpInput, withCrit, type HpMode } from "./hpInput.ts";
 
 function change(text: string, mode: HpMode = "damage") {
@@ -96,6 +97,13 @@ describe("the mode after an apply", () => {
 });
 
 describe("FL-3 typed HP damage", () => {
+  test("FU38-OPUS-2: unknown HP damage types suggest amounts while the save flow still suggests dice", () => {
+    for (const text of ["10 lava", "10 LAVA", "-10 lava", "10 fire + 4 lava"]) {
+      assert.equal(error(text), '"lava" is not a damage type. Try 28 Fire.');
+    }
+    assert.deepEqual(parseParts("8d6 lava"), { ok: false, error: '"lava" is not a damage type. Try 8d6 Fire or 28 Fire.' });
+  });
+
   test("FU38-B: typed damage arithmetic asks for totals, never for dice", () => {
     for (const text of ["5 + 3 fire", "-5+3 fire", "10 fire + 5-3 cold", "1001+3 fire"]) {
       assert.equal(error(text), "Enter a total for each damage type, such as 8 Fire + 4 Cold.");

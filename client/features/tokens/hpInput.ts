@@ -82,7 +82,10 @@ export function parseHpInput(raw: string, mode: HpMode, rolled?: { amount: numbe
     if ((!negative && mode !== "damage") || text.startsWith("+")) return { ok: false, error: "Damage types go with damage only." };
     const parsed = parseParts(negative ? text.slice(1).trim() : text);
     // HP takes amounts already known. The save parser's advice to roll dice cannot help here.
-    if (!parsed.ok) return FORMULA_PROBLEMS.has(parsed.error) ? { ok: false, error: DAMAGE_TOTALS } : parsed;
+    if (!parsed.ok) {
+      const error = FORMULA_PROBLEMS.has(parsed.error) ? DAMAGE_TOTALS : parsed.error.replace("Try 8d6 Fire or 28 Fire.", "Try 28 Fire.");
+      return { ok: false, error };
+    }
     const parts = partAmounts(parsed.parts, []);
     if (!parts) return { ok: false, error: "Type the rolled damage, such as 10 Fire." };
     return typedDamage(parts);
