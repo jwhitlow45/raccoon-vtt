@@ -5,6 +5,7 @@ import { LIMITS } from "#shared/limits.ts";
 import type { CellRect, Token, Trap, TrapRig } from "#shared/model.ts";
 import { occupiedHexes, placedOnHex } from "#shared/rules/footprint.ts";
 import { cornerAt, hexAt, hexCorners, hexInScene, hexKey, hexLine, sceneHexSpan, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { hexStandPlace } from "#shared/rules/movement.ts";
 import { planTrapMove, type TrapRoom } from "#shared/rules/traps.ts";
 import { DM, int, rng, room, scene, token } from "#shared/testutil.ts";
 import { crossedTraps, newTrapInput, rectBetween, START_BLANK, tapRect, tokensOn, trapAt, wireBetween, wireEnd, zoneBox, hitsSummary } from "./rules.ts";
@@ -150,6 +151,42 @@ describe("the drag label on hexes", () => {
       const server = planTrapMove({ t: "token.move", tokenId: "m", ...end }, state, DM, {}).springings.map((s) => s.trap.id).sort();
       const label = crossedTraps(g, traps, { w: size === "medium" ? 1 : size === "large" ? 2 : 3, h: size === "medium" ? 1 : size === "large" ? 2 : 3 }, [{ x: mover.x, y: mover.y }, end]).map((t) => t.id).sort();
       assert.deepEqual(label, server, `${g.orient} ${size} ${hexKey(from)} to ${hexKey(to)}`);
+    }
+    assert.ok(compared > 150, `${compared} walks compared`);
+  });
+
+  test("a walk that starts or ends squeezed is warned of only what its squeezed hexes meet, as the server sets it off (HX7-CROSSES-SQUEEZE)", () => {
+    const r = rng(29);
+    let compared = 0;
+    for (let i = 0; i < 300; i++) {
+      const g = GRIDS[i % 2]!;
+      const shape = g.orient === "rows" ? "hexRows" : "hexColumns";
+      const size = (["large", "huge"] as const)[Math.floor(i / 2) % 2]!;
+      const small = size === "large" ? "medium" : "large";
+      // Squeezed where it ends, where it starts, or both, as a walk into, out of or along a corridor stands.
+      const how = Math.floor(i / 4) % 3;
+      const startSqueezed = how !== 0;
+      const endSqueezed = how !== 1;
+      const from: Hex = { col: int(r, 2, 6), row: int(r, 2, 6) };
+      const to: Hex = { col: int(r, 8, 16), row: int(r, 8, 14) };
+      const base = token("m", { size, x: 0, y: 0 });
+      const start = hexStandPlace(g, base, { size: startSqueezed ? small : size, ref: from, squeezed: startSqueezed });
+      const mover: Token = { ...base, ...start, ...(startSqueezed ? { squeeze: true as const } : {}) };
+      const end = hexStandPlace(g, base, { size: endSqueezed ? small : size, ref: to, squeezed: endSqueezed });
+      const line = hexLine(g, from, to);
+      const near: Hex = line[int(r, 1, line.length - 1)]!;
+      const c0 = cornerAt(g, hexCorners(g, { col: near.col + int(r, -2, 2), row: near.row - 2 })[0]!);
+      const c1 = cornerAt(g, hexCorners(g, { col: near.col + int(r, -2, 2), row: near.row + 2 })[3]!);
+      const traps = [trap("plate", { cells: [{ x: near.col + int(r, -2, 2), y: near.row + int(r, -2, 2), w: 1, h: 1 }] }, shape), trap("wire", { wire: { a: [c0.x, c0.y], b: [c1.x, c1.y] } }, shape)];
+      const plate = (traps[0]!.zone as { cells: CellRect[] }).cells[0]!;
+      if (occupiedHexes(g, mover).some((h) => h.col === plate.x && h.row === plate.y)) continue;
+      compared++;
+      const state: TrapRoom = { ...room({ scenes: { s1: scene("s1", { gridShape: shape }) }, tokens: { m: mover } }), traps: Object.fromEntries(traps.map((t) => [t.id, t])) };
+      const op = { t: "token.move" as const, tokenId: "m", ...end, ...(endSqueezed ? { squeeze: true as const } : {}) };
+      const server = planTrapMove(op, state, DM, {}).springings.map((s) => s.trap.id).sort();
+      const side = size === "large" ? 2 : 3;
+      const label = crossedTraps(g, traps, { w: side, h: side }, [{ x: mover.x, y: mover.y }, end]).map((t) => t.id).sort();
+      assert.deepEqual(label, server, `${g.orient} ${size} ${startSqueezed ? "squeezed" : "full"} ${hexKey(from)} to ${endSqueezed ? "squeezed" : "full"} ${hexKey(to)}`);
     }
     assert.ok(compared > 150, `${compared} walks compared`);
   });

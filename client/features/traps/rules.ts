@@ -1,8 +1,10 @@
 import { LIMITS } from "#shared/limits.ts";
 import { MIN_HEIGHT_FT, type BuildChunk, type CellRect, type RoomState, type Token, type Trap, type TrapArea, type TrapCheck, type TrapRig, type TrapZone } from "#shared/model.ts";
 import type { TrapInput } from "#shared/protocol.ts";
-import { footprintRect, hexAnchor, occupiedHexes, placedOnHex, tokenRefHex, type PlacedToken } from "#shared/rules/footprint.ts";
-import { cornerAt, hexAt, hexCenter, hexCorners, hexInScene, hexLine, hexNeighbors, sceneHexSpan, HEX_R, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { footprintRect, hexAnchor, occupiedHexes, type PlacedToken } from "#shared/rules/footprint.ts";
+import { onSqueezedLattice, ownWalk } from "#shared/rules/movement.ts";
+import { routeWalk } from "#shared/rules/route.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexInScene, hexNeighbors, sceneHexSpan, HEX_R, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { groundAt, rangeGround } from "#shared/rules/heights.ts";
 import { inRects, pitFloorOf, rectHexes, trapCreature, wireHexes } from "#shared/rules/traps.ts";
 import { ABILITY_NAMES, choiceText } from "#shared/rules/skills.ts";
@@ -434,30 +436,32 @@ export function crossedTraps<T extends Pick<Trap, "id" | "zone">>(g: Grid, traps
 /**
  * crossedTraps on hexes, read as the server walks a leg there
  * (shared/rules/route.ts routeWalk): a spot a hex along the hex line
- * between each piece's reference hexes, the leg's last as it lands. A
- * zone's rectangles are of hex keys, met where any hex of the footprint is
- * one, and a wire is crossed by the line between two spots' anchors.
+ * between each piece's reference hexes, at the size the piece walks at, so
+ * a squeezed walk takes only its squeezed hexes (HX7-CROSSES-SQUEEZE), the
+ * leg's last as it lands. Each point stands squeezed where it lies on a
+ * squeeze's anchors, as a route's stops do and as the drop that lands
+ * there sends it (movement.ts onSqueezedLattice). A zone's rectangles are
+ * of hex keys, met where any hex of the footprint is one, and a wire is
+ * crossed by the line between two spots' anchors.
  */
 function crossedOnHexes<T extends Pick<Trap, "id" | "zone">>(g: HexGrid, traps: readonly T[], token: PlacedToken, points: readonly Point[]): T[] {
-  const spots: Point[] = [points[0]!];
-  for (let i = 1; i < points.length; i++) {
-    const from = tokenRefHex(g, { ...token, ...points[i - 1]! });
-    const to = tokenRefHex(g, { ...token, ...points[i]! });
-    const line = hexLine(g, from, to);
-    for (let k = 1; k < line.length; k++) spots.push(k === line.length - 1 && i === points.length - 1 ? points[i]! : placedOnHex(g, token, line[k]!));
-    if (line.length === 1 && i === points.length - 1) spots.push(points[i]!);
-  }
+  const standing = (p: Point): PlacedToken => ({ ...token, x: p.x, y: p.y, ...(onSqueezedLattice(g, token, p) ? { squeeze: true as const } : {}) });
+  const trace = points.map((p) => ownWalk({ ...standing(p), sceneId: "", elevation: 0 }));
+  const end = trace[trace.length - 1]!;
+  const spots = routeWalk(g, trace, { buildChunks: {} }, undefined, { endSqueezed: end.squeeze === true }).map(
+    (s, j, all): PlacedToken => ({ ...token, x: s.x, y: s.y, ...((j === all.length - 1 ? end.squeeze === true : s.squeezed === true) ? { squeeze: true as const } : {}) }),
+  );
   const hits: { trap: T; at: number }[] = [];
   for (const trap of traps) {
     const zone = trap.zone;
     if ("cells" in zone) {
-      const j = spots.findIndex((p, i) => i > 0 && occupiedHexes(g, { ...token, ...p }).some((h) => inRects(zone.cells, h.col, h.row)));
+      const j = spots.findIndex((p, i) => i > 0 && occupiedHexes(g, p).some((h) => inRects(zone.cells, h.col, h.row)));
       if (j > 0) hits.push({ trap, at: j });
     } else if ("wire" in zone) {
       const { a, b } = zone.wire;
       for (let j = 1; j < spots.length; j++) {
-        const p = hexAnchor(g, { ...token, ...spots[j - 1]! });
-        const q = hexAnchor(g, { ...token, ...spots[j]! });
+        const p = hexAnchor(g, spots[j - 1]!);
+        const q = hexAnchor(g, spots[j]!);
         if (side(a[0], a[1], b[0], b[1], p.x, p.y) === 0) continue;
         if (segmentsMeet(p, q, a, b)) {
           hits.push({ trap, at: j });
