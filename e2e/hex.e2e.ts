@@ -40,7 +40,8 @@ import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
  * Lane HX-9b's steps (HX9b-) reveal rooms on hex scenes: a room of hexes
  * closed by free walls and a door, revealed through the Fog tool's Builder
  * room and shown to Pat, the door open and shut, a room on hex columns,
- * and the Fog tool's options measured.
+ * the Fog tool's options measured, and the whole of the largest open hex
+ * scene drafted in messages that each fit a socket frame.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus 31. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -119,6 +120,8 @@ const run = {
   cellarGob: randomUUID(),
   cellarFar: randomUUID(),
   cellarDoor: "hx9bdoor0001",
+  /** HX9b-5's open 200 by 200 hex scene. */
+  moorland: randomUUID(),
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -1675,6 +1678,36 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
       await phone?.context.close();
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  test("HX9b-5. Builder room on an open 200 by 200 hex scene drafts all of its hexes without closing the socket, and one undo takes the draft back", async () => {
+    const big = { w: 200, h: 200 };
+    await ops.send({ t: "scene.create", scene: { id: run.moorland, name: "Moorland", bounds: big, gridShape: "hexRows" } });
+    await waitFor("the moorland in the DM's state", () => dmSocket.state?.scenes[run.moorland] ?? null);
+    await ops.send({ t: "scene.update", sceneId: run.moorland, patch: { fogEnabled: true } });
+    await dm.bringToFront();
+    await openAt(dm, SIZES[0], 1);
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.moorland);
+    await dm.keyboard.press("Escape");
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await pickTool(dm, "Fog");
+    await pickOption(dm, "Fog", "Shape", "Builder room");
+    const closes = dmSocket.closes;
+    const p = await pagePoint(dm, big, { x: 100, y: 100 });
+    await assertCanvasAt(dm, p);
+    await dm.mouse.click(p.x, p.y);
+    const all = sceneHexes(G, big).length;
+    // A frame over the socket's limit closes it, and the outbox would send the op again on every reconnect, so nothing would land.
+    await waitFor(`a draft of all ${all} hexes`, () => (draftCells(run.moorland).length === all ? true : null), 30_000);
+    assert.equal(dmSocket.closes, closes, "the DM's socket stayed open");
+    assert.ok((dmSocket.state!.fogDrafts[run.moorland]?.ops.length ?? 0) > 1, "the room in several draft edits");
+    await shots.take(dm, "hx9b-moorland-draft");
+    // The top bar's Undo, not the fog bar's, which takes back only the draft's last edit.
+    await dm.getByRole("button", { name: "Undo", exact: true, description: "Undo your last change (Ctrl+Z)" }).click();
+    await waitFor("the whole draft taken back by one undo", () => (dmSocket.state?.fogDrafts[run.moorland] === undefined ? true : null));
+    assert.equal(dmSocket.closes, closes);
+    await pickTool(dm, "Select");
   });
 
   /*
