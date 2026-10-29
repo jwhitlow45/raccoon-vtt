@@ -2092,6 +2092,55 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
 
+  /*
+   * Lane FU35-A's step (fu35a-): a rider on a Large mount squeezed into a
+   * one-hex corridor sits on the mount's one hex there (D-261029-52), so
+   * the rider's own torch lights the corridor and the party sees down it.
+   */
+
+  test("fu35a-1. Brom rides the warhorse into a one-hex corridor: he sits on its one hex there, and his torch lights the corridor for the party, so Pat sees the goblin down it", async () => {
+    const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID(), gob: randomUUID() };
+    // A block of rock with a one-row corridor along row 14, the warhorse well west of it, a goblin in the dark down the corridor.
+    const rock = (h: Hex) => h.col >= 16 && h.col <= 22 && h.row >= 11 && h.row <= 17 && h.row !== 14;
+    await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "Keep", bounds: BOUNDS, gridShape: "hexRows" } });
+    await waitFor("the keep in the DM's state", () => dmSocket.state?.scenes[keep.scene] ?? null);
+    // The DM's copy holds the build of the scene in view, so the keep is opened before its walls go down.
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, keep.scene);
+    await dm.keyboard.press("Escape");
+    await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true, fogEnabled: true, vision: { on: true, light: "dark" } } });
+    const walls = wallsRound(G, BOUNDS, rock);
+    for (let i = 0; i < walls.length; i += 100) await ops.send({ t: "build.walls", sceneId: keep.scene, put: walls.slice(i, i + 100) });
+    await waitFor("the keep's walls", () => (Object.values(dmSocket.state?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    await ops.send(creature(keep.horse, "Warhorse", "large", { col: 8, row: 9 }, { sceneId: keep.scene, kind: "npc", disposition: "ally" }));
+    await ops.send(creature(keep.brom, "Brom", "medium", { col: 6, row: 9 }, { sceneId: keep.scene, kind: "pc", disposition: "ally", ownerIds: [run.patId], light: { bright: 10, dim: 10 } }));
+    await ops.send(creature(keep.gob, "Keep goblin", "medium", { col: 21, row: 14 }, { sceneId: keep.scene }));
+    const horse = await waitFor("the warhorse", () => dmSocket.state?.tokens[keep.horse] ?? null);
+    // Brom on the warhorse's lower west hex, which its offset alone would carry into the rock beside the corridor.
+    const seat = placedOnHex(G, { size: "medium", x: 0, y: 0 }, occupiedHexes(G, horse)[2]!);
+    await ops.send({ t: "token.attach", tokenId: keep.brom, to: keep.horse, kind: "ride", x: seat.x, y: seat.y, elevation: 0 });
+    await waitFor("Brom on the warhorse", () => (dmSocket.state?.tokens[keep.brom]?.attached?.to === keep.horse ? true : null));
+    await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
+    await waitFor("Brom in Pat's copy", () => (patSocket.state?.tokens[keep.brom] ? true : null));
+    assert.equal(patSocket.state?.tokens[keep.gob], undefined, "the goblin in the dark, past Brom's torch");
+
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    // The warhorse's middle starts a drag of the warhorse, whatever it carries.
+    await holdDrag(dm, { x: horse.x + 1, y: horse.y + 1 }, hexCenter(G, { col: 19, row: 14 }));
+    await dm.mouse.up();
+    const inside = await waitFor("the warhorse squeezed in the corridor", () => {
+      const t = dmSocket.state?.tokens[keep.horse];
+      return t?.squeeze === true && tokenRefHex(G, t).row === 14 && tokenRefHex(G, t).col >= 17 ? t : null;
+    });
+    const brom = dmSocket.state!.tokens[keep.brom]!;
+    assert.equal(brom.attached?.to, keep.horse, "still riding");
+    assert.deepEqual(occupiedHexes(G, brom).map(hexKey), occupiedHexes(G, inside).map(hexKey), "Brom on the warhorse's one hex");
+    await waitFor("the goblin in Pat's copy, in Brom's torchlight", () => (patSocket.state?.tokens[keep.gob] ? true : null));
+    await shots.take(dm, "fu35a-brom-in-corridor-dm");
+    await shots.take(pat, "fu35a-corridor-lit-pat");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+  });
+
   test("HX-12. no page logged an error", () => {
     for (const c of Object.values(consoles)) assert.deepEqual(c.errors, [], `${c.label}'s console`);
   });
