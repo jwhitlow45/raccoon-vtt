@@ -928,6 +928,104 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     assert.deepEqual(lines, []);
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
+
+  test("fu35b-1. the Scenes list's row says a scene's size as its Size and view summary does, on squares, hex rows and hex columns", async () => {
+    // 30 × 20 steps each: 30 × 20 squares, and on hexes the whole hexes they hold, never the steps.
+    const made: { id: string; name: string; unit: string }[] = [];
+    for (const [name, gridShape, unit] of [["Sizes squares", "squares", "squares"], ["Sizes hex rows", "hexRows", "hexes"], ["Sizes hex columns", "hexColumns", "hexes"]] as const) {
+      const id = randomUUID();
+      await ops.send({ t: "scene.create", scene: { id, name, bounds: { w: 30, h: 20 }, gridShape, fogEnabled: true, blockMovement: false } });
+      await waitFor(`${name} in the DM's state`, () => sceneOf(id));
+      made.push({ id, name, unit });
+    }
+    for (const scene of made) {
+      await view(scene.id);
+      const panel = await scenesPanel(dm);
+      const fold = panel.getByRole("heading", { name: "Size and view", exact: true }).getByRole("button", { name: "Size and view", exact: true });
+      // A group says its summary while folded.
+      if ((await fold.getAttribute("aria-expanded")) === "true") await fold.click();
+      const summaryId = await waitFor(`${scene.name}: Size and view folded with its summary`, () => fold.getAttribute("aria-describedby"));
+      const size = (await dm.locator(`[id="${summaryId}"]`).textContent()) ?? "";
+      assert.match(size, new RegExp(`^\\d+ × \\d+ ${scene.unit}$`), `${scene.name}: ${size}`);
+      const row = panel.getByRole("button", { name: new RegExp(`^${scene.name}(?![A-Za-z])`) }).first();
+      const detail = (await row.textContent()) ?? "";
+      // Squares go unnamed in the row, as they always did.
+      const rowSize = scene.unit === "squares" ? size.replace(/ squares$/, "") : size;
+      assert.ok(detail.includes(`Grid, ${rowSize}, fog on`), `${scene.name}: the row says "${detail}" where Size and view says "${size}"`);
+    }
+    await shots.take(dm, "fu35b-1-scene-rows-sizes");
+
+    // The row's waits are Loading's small line: "loading…" on a scene's row while its contents come, and "Moving players…"
+    // under it until the server confirms the move. Each is held by keeping the server's frames back from the page, and
+    // measured at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%, on two sessions as ss-a takes turns on them. The
+    // pages ask for reduced motion, so the spinner holds still: a turning spinner's box grows with its angle, not the layout.
+    const sessions = [await signInAsDm(), await signInAsDm()];
+    const lines: string[] = [];
+    let screens = 0;
+    for (const size of [
+      { name: "1440x900", width: 1440, height: 900, touch: false },
+      { name: "390x844", width: 390, height: 844, touch: true },
+      { name: "320x568", width: 320, height: 568, touch: true },
+    ]) {
+      for (const scale of [1, 1.3]) {
+        const screen = `${size.name}@${scale}`;
+        const context = await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: size.touch, hasTouch: size.touch, reducedMotion: "reduce", storageState: sessions[screens++ % sessions.length] });
+        try {
+          const page = await context.newPage();
+          const watch = new ConsoleWatch(`fu35b-1 ${screen}`);
+          watch.attach(page);
+          consoles.push(watch);
+          const held: { frames: (() => void)[] | null } = { frames: null };
+          await page.routeWebSocket(/\/ws\?room=/, (ws) => {
+            const upstream = ws.connectToServer();
+            upstream.onMessage((m) => (held.frames ? held.frames.push(() => ws.send(m)) : ws.send(m)));
+          });
+          const release = () => {
+            const frames = held.frames ?? [];
+            held.frames = null;
+            for (const send of frames) send();
+          };
+          await page.goto(`${server.origin}/`);
+          await page.evaluate((v) => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", String(v)), scale);
+          await page.goto(`${server.origin}/r/${run.roomId}`);
+          await page.getByRole("status", { name: "Connected" }).first().waitFor();
+          const rowOf = (panel: Locator, name: string) => panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first();
+          await view(made[0]!.id, page);
+          // A scene loading.
+          held.frames = [];
+          await rowOf(await scenesPanel(page), made[1]!.name).click();
+          const loadingRow = rowOf(await scenesPanel(page), made[1]!.name);
+          await waitFor(`${screen}: the row says it is loading`, async () => ((await loadingRow.textContent())?.includes("· loading…") ? true : null));
+          const found = alignmentLines(await measureAlignment(loadingRow.locator("xpath=ancestor::li[1]")), `${screen} scene-row-loading`);
+          if (found.length > 0 || screens === 1) await shots.take(page, `fu35b-1-${screen}-row-loading`);
+          lines.push(...found);
+          release();
+          await waitFor(`${screen}: ${made[1]!.name} loaded`, async () => ((await loadingRow.textContent())?.includes("loading…") ? null : true));
+          // Players moved, waiting for the server.
+          const target = made.find((m) => m.id !== dmSocket.state?.meta.playerSceneId)!;
+          const panel = await scenesPanel(page);
+          held.frames = [];
+          await panel.getByRole("button", { name: `Move players to ${target.name}`, exact: true }).click();
+          // A scene the party may see nothing on asks first.
+          const anyway = panel.getByRole("button", { name: "Move anyway", exact: true });
+          const moving = panel.getByRole("status").filter({ hasText: "Moving players…" });
+          await waitFor(`${screen}: the move waiting for the server`, async () => {
+            if (await anyway.isVisible()) await anyway.click();
+            return (await moving.isVisible()) || null;
+          });
+          const movingFound = alignmentLines(await measureAlignment(moving.locator("xpath=ancestor::li[1]")), `${screen} scene-row-moving`);
+          if (movingFound.length > 0 || screens === 1) await shots.take(page, `fu35b-1-${screen}-row-moving`);
+          lines.push(...movingFound);
+          release();
+          await waitFor(`${screen}: the players on ${target.name}`, () => dmSocket.state?.meta.playerSceneId === target.id || null);
+        } finally {
+          await context.close();
+        }
+      }
+    }
+    assert.deepEqual(lines, []);
+    assert.deepEqual(consoles.flatMap((c) => c.errors), []);
+  });
 });
 
 /** A new DM session, signed in by the DM link on a device of its own, as the storage state its pages start from. */

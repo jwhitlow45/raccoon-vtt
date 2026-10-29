@@ -55,6 +55,19 @@ export function fogFoldSummary(scene: Pick<Scene, "fogEnabled" | "vision">): str
   return `Fog ${scene.fogEnabled ? "on" : "off"} · Party vision ${scene.vision?.on === true ? "on" : "off"}`;
 }
 
+/**
+ * A scene's line in the Scenes list (SceneList.tsx): its kind, its size as
+ * Size and view's summary says it, and its fog. A hex scene's bounds are
+ * steps, so a row that read them would count one scene two ways. Squares
+ * go unnamed, as they always did: a hex room's screens name squares only
+ * where they are a choice (hex.e2e.ts HX4-4), and the list shows its
+ * square scenes there too.
+ */
+export function sceneRowDetail(scene: Scene): string {
+  const size = isHex(sceneGrid(scene)) ? sizeText(scene) : `${scene.bounds.w} × ${scene.bounds.h}`;
+  return `${scene.map ? "Map" : "Grid"}, ${size}, fog ${scene.fogEnabled ? "on" : "off"}`;
+}
+
 function formatPx(v: number): string {
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }

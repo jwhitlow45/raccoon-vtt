@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { scene } from "#shared/testutil.ts";
-import { fogFoldSummary, sceneGroupSummary } from "./sceneSummary.ts";
+import { fogFoldSummary, sceneGroupSummary, sceneRowDetail } from "./sceneSummary.ts";
 
 /** What each folded group of the scene settings page says (docs/design-v1-design-pass.md 4.1). */
 describe("sceneGroupSummary", () => {
@@ -50,5 +50,19 @@ describe("fogFoldSummary", () => {
     assert.equal(fogFoldSummary(scene("s", { fogEnabled: true, vision: { on: true, light: "dark" } })), "Fog on · Party vision on");
     assert.equal(fogFoldSummary(scene("s")), "Fog off · Party vision off");
     assert.equal(fogFoldSummary(scene("s", { fogEnabled: true })), "Fog on · Party vision off");
+  });
+});
+
+describe("sceneRowDetail", () => {
+  test("the Scenes list's row says a scene's size as Size and view's summary does, on squares, hex rows and hex columns", () => {
+    for (const gridShape of [undefined, "hexRows", "hexColumns"] as const) {
+      const s = scene("s", { bounds: { w: 30, h: 20 }, fogEnabled: true, ...(gridShape ? { gridShape } : {}) });
+      // Squares go unnamed in the row.
+      assert.equal(sceneRowDetail(s), `Grid, ${sceneGroupSummary(s, "scene").replace(/ squares$/, "")}, fog on`, gridShape ?? "squares");
+    }
+    // 30 × 20 steps on hex rows hold 30 hexes across in 22 rows: the row counts hexes, never steps.
+    assert.equal(sceneRowDetail(scene("s", { bounds: { w: 30, h: 20 }, gridShape: "hexRows" })), "Grid, 30 × 22 hexes, fog off");
+    const map = { assetId: "a", widthPx: 1000, heightPx: 700, cellPx: 50, originPx: { x: 0, y: 0 } };
+    assert.equal(sceneRowDetail(scene("s", { map, bounds: { w: 20, h: 14 }, suggestedView: "isometric" })), "Map, 20 × 14, fog off");
   });
 });

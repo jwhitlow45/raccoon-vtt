@@ -13,6 +13,7 @@ import { theme } from "../../lib/theme.ts";
 import { useAssets, useRoomActions, useRoomView } from "../../state/view.ts";
 import { browserStorage, cleanFolderName, groupScenes, moveFolder, moveScene, readCollapsed, renameMergesInto, sendFolderRename, writeCollapsed, type SceneGroup } from "./folders.ts";
 import { SceneMenuButton } from "./SceneMenu.tsx";
+import { sceneRowDetail } from "./sceneSummary.ts";
 import { thumbSources } from "./thumbnail.ts";
 import { sightOf } from "#shared/keys.ts";
 import { moveWarning } from "../vision/moveWarning.ts";
@@ -134,7 +135,7 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
                 <span style={{ ...oneLine, fontSize: theme.font.input, fontWeight: theme.weight.strong, lineHeight: theme.leading.tight }}>{name}</span>
                 <span style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, fontSize: theme.font.small, lineHeight: theme.leading.tight, color: theme.color.textMuted }}>
                   <span style={oneLine}>
-                    {describe(scene)}
+                    {sceneRowDetail(scene)}
                     {loading ? " · " : viewing ? " · you are here" : ""}
                   </span>
                   {/* The row's button is the name a screen reader reads, so the wait is words in it, not a status of its own. */}
@@ -417,10 +418,4 @@ function HeaderRow(props: { children: ReactNode }) {
       {props.children}
     </div>
   );
-}
-
-function describe(scene: Scene): string {
-  const kind = scene.map ? "Map" : "Grid";
-  const fog = scene.fogEnabled ? "fog on" : "fog off";
-  return `${kind}, ${scene.bounds.w} × ${scene.bounds.h}, ${fog}`;
 }
