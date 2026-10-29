@@ -5,9 +5,13 @@ import { projectState } from "#shared/project.ts";
 import type { Op } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { RESHAPE_NOT_A_MOVE } from "#shared/reducer/tokens.ts";
-import { DM, P1, P2, room, token } from "#shared/testutil.ts";
+import { DM, P1, P2, room, scene, token } from "#shared/testutil.ts";
 import { resizeGroup } from "../tokens/resize.ts";
-import { dragLabel, dragReading, ellipseExit, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, trailSegments, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
+import { dragLabel, dragReading, ellipseExit, extraWords, halvedSpeeds, leftText, movedFeet, movementText, pathNow, remoteWalk, speedsLeft, trailSegments, turnTrail, type DragWalk, type MovingToken, type TurnView } from "./movement.ts";
+import { measureWalk, walkText } from "./walkRuler.ts";
+import { wall } from "#shared/discoveryTestutil.ts";
+import { hexCenter } from "#shared/rules/hex.ts";
+import { hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
 import { ownWalk, type Walker } from "#shared/rules/movement.ts";
 import { walkTrace } from "#shared/rules/route.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
@@ -497,5 +501,59 @@ describe("a drag along a route (docs/design-v1-movement.md 3.1, 3.2 and 4.2)", (
     const theirs: PathStop[] = [stop(2, 2), { ...stop(4, 4), via: [2, 4] }];
     const seen = turnTrail({ grid: SQUARES, encounter: fight, sceneId: "s1", token: tok({ x: 4, y: 4, path: { turn: 7, stops: theirs } }), rules: five, role: "player" })!;
     assert.deepEqual([seen.movedFt, seen.usedFt], [20, 20], "down two squares, then across two: never the straight 10 ft");
+  });
+});
+
+/*
+ * A squeeze's extra foot in the label (review GP4-SQUEEZE-LABEL): a piece
+ * the walk squeezes along pays its foot as difficult terrain does, and the
+ * label names it as squeezing, or both where both were walked.
+ */
+describe("the label names a squeeze as squeezing", () => {
+  /** Rock from x 8 to 16 but for a corridor along row 10, walled round. */
+  function corridor(): RoomState {
+    const s = room({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
+    s.buildChunks = {};
+    const runs: [[number, number], [number, number]][] = [[[8, 0], [8, 10]], [[8, 11], [8, 20]], [[16, 0], [16, 10]], [[16, 11], [16, 20]], [[8, 10], [16, 10]], [[8, 11], [16, 11]]];
+    runs.forEach(([a, b], i) => wall(s, `gp4sq${String(i).padStart(6, "0")}`, a, b));
+    return s;
+  }
+  const calm = { encounter: null, activeTokenId: null, speeds: { walk: 60 }, rules: five, role: "dm" as const };
+  const horse = tok({ size: "large", x: 3, y: 9 });
+  const walkOn = (s: RoomState, points: [number, number][], pieces: [number, number, number, 0 | 1][]): DragWalk => {
+    const pts = points.map(([x, y]) => ({ x, y, elevation: 0 }));
+    return { route: { points: pts, pieces }, build: s, trace: walkTrace(s.buildChunks, horse, pts), halved: () => null, prone: false };
+  };
+
+  test("by piece: a squeezed piece's foot is squeezing, any other's difficult terrain, and both are named where both were walked", () => {
+    const pieces: [number, number, number, 0 | 1][] = [[2, 0, 1, 0], [4, 0, 1, 0], [6, 0, 0, 0]];
+    assert.deepEqual(extraWords(pieces, false, false, undefined, [false, true, true]), ["difficult terrain", "squeezing"]);
+    assert.deepEqual(extraWords(pieces, false, false, undefined, [true, true, false]), ["squeezing"]);
+    assert.deepEqual(extraWords(pieces, false, false), ["difficult terrain"], "with no squeeze known, as before");
+    assert.deepEqual(extraWords([[2, 0, 2, 0]], false, false, "dragging", [true]), ["squeezing", "dragging"], "a tow's foot on top");
+  });
+
+  test("a Large warhorse's walk into a corridor one square wide reads its squeeze as squeezing, and rubble on its way in as difficult terrain too", () => {
+    const s = corridor();
+    const into = dragReading({ grid: SQUARES, ...calm, token: horse, to: { x: 11.5, y: 9.5 }, walk: walkOn(s, [[3, 9], [7.5, 9.5], [11.5, 9.5]], [[7.5, 9.5, 0, 0], [11.5, 9.5, 1, 0]]) });
+    assert.equal(into.extra?.words, "+20 ft for squeezing");
+    const rough = dragReading({ grid: SQUARES, ...calm, token: horse, to: { x: 11.5, y: 9.5 }, walk: walkOn(s, [[3, 9], [5, 9], [7.5, 9.5], [11.5, 9.5]], [[5, 9, 1, 0], [7.5, 9.5, 0, 0], [11.5, 9.5, 1, 0]]) });
+    assert.equal(rough.extra?.words, "+30 ft for difficult terrain and squeezing");
+    // A Medium creature never squeezes: its extra foot is the ground's.
+    const goblin = tok({ x: 3, y: 10 });
+    const pts = [{ x: 3, y: 10, elevation: 0 }, { x: 12, y: 10, elevation: 0 }];
+    assert.equal(dragReading({ grid: SQUARES, ...calm, token: goblin, to: { x: 12, y: 10 }, walk: { route: { points: pts, pieces: [[12, 10, 1, 0]] }, build: s, trace: walkTrace(s.buildChunks, goblin, pts), halved: () => null, prone: false } }).extra?.words, "+45 ft for difficult terrain");
+  });
+
+  test("the walking ruler from the warhorse into the corridor, on squares and on hex rows, says squeezing", () => {
+    const s = corridor();
+    s.tokens.horse = token("horse", { size: "large", x: 3, y: 9, name: "Warhorse" });
+    const m = measureWalk({ view: s, sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "horse" }, { x: 12.5, y: 10.5 }], viewer: { role: "player" }, everything: false })!;
+    assert.match(walkText(m), /^Walking \d+ ft\n\+\d+ ft for squeezing$/);
+    const g = ROWS;
+    const h = hexWallRoom("hexRows", 22, 16, wallsRound(g, { w: 22, h: 16 }, (x) => x.col >= 6 && x.col <= 12 && x.row !== 6));
+    h.tokens.horse = onHex(g, "horse", "large", { col: 2, row: 5 }, { name: "Warhorse" });
+    const onHexes = measureWalk({ view: h, sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "horse" }, hexCenter(g, { col: 9, row: 6 })], viewer: { role: "player" }, everything: false })!;
+    assert.match(walkText(onHexes), /^Walking \d+ ft\n\+\d+ ft for squeezing$/);
   });
 });

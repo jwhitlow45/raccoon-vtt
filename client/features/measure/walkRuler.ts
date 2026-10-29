@@ -20,7 +20,7 @@ import { dragLead } from "../attach/groups.ts";
 import { carriedIndex } from "#shared/rules/attach.ts";
 import { towingWord, walkersFor } from "../attach/walk.ts";
 import type { RouteJob } from "../movement/routeWork.ts";
-import { dragReading, extraWords, joinWords } from "./movement.ts";
+import { dragReading, EXTRA_WORDS, joinWords, walkWords, type DragWalk } from "./movement.ts";
 import { formatFeet, tokenStop, type Point, type RulerStop } from "./ruler.ts";
 
 /**
@@ -385,7 +385,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     at = step.after;
   }
   const searching = waiting !== null;
-  const named = ["difficult terrain", "overgrowth", "swimming", "crawling", "dragging", "carrying"].filter((w) => words.has(w));
+  const named = EXTRA_WORDS.filter((w) => words.has(w));
   const walk: WalkMeasure = { legs, totalFt, extra: extraFt > 0 && named.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(named)}` : null, size, searching };
   if (!searching) {
     const byViewer = memo.get(stops) ?? new Map<string, WalkMeasure>();
@@ -432,10 +432,12 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Aim, targe
   const reading: Token & Walker = move ? walkerOf(at.seen, at.walker, move) : walking;
   const trace = move ? routeWalkers(at.sim.buildChunks, reading, route ?? [[move.x, move.y, 0, 0]], elevation) : null;
   const towing = answer.search().world.input.drag === 1 ? towingWord(at.sim, token.id, role, at.seen.seen) : undefined;
+  const walk: DragWalk | null = trace ? { route: route ? { points: trace.map(({ x, y, elevation }) => ({ x, y, elevation })), pieces: route } : null, build: at.sim, trace, halved: () => null, prone: false, ...(towing ? { towing } : {}) } : null;
+  const start = walkStart(at.sim, reading);
   const read =
-    move && trace
+    move && walk
       ? dragReading({
-          token: walkStart(at.sim, reading),
+          token: start,
           grid: gridOfView(at.sim, token.sceneId),
           to: { x: move.x, y: move.y },
           encounter: null,
@@ -443,7 +445,7 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Aim, targe
           speeds: undefined,
           rules,
           role,
-          walk: { route: route ? { points: trace.map(({ x, y, elevation }) => ({ x, y, elevation })), pieces: route } : null, build: at.sim, trace, halved: () => null, prone: false, ...(towing ? { towing } : {}) },
+          walk,
           ...(route ? {} : { landing: { elevation, ...(move.squeeze ? { squeeze: true as const } : {}) } }),
           counter: at.counter,
         })
@@ -457,7 +459,7 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Aim, targe
   return {
     key,
     leg: { from, to: move ? { x: move.x, y: move.y } : from, corners, ft: read?.dragFt ?? 0, none: answer.found.kind === "none" },
-    words: route ? extraWords(route, false, false, towing) : [],
+    words: walk ? walkWords(walk, start, false) : [],
     extraFt: read?.extra?.ft ?? 0,
     after: { ...next, left, counter, history: `${at.history}|${JSON.stringify(plan.moves)}` },
     ...(along ? { along } : {}),

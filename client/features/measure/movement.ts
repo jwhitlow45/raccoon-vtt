@@ -1,12 +1,12 @@
 import type { PathStop, TokenPath, TurnStart } from "#shared/model.ts";
 import type { BuildState } from "#shared/ruleHooks.ts";
 import type { DiagonalCounter } from "#shared/rules/distance.ts";
-import { footprintRect, snapStep, type PlacedToken } from "#shared/rules/footprint.ts";
+import { canSqueeze, footprintRect, snapStep, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { Rect } from "#shared/rules/geom.ts";
 import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
 import { dismountCost } from "#shared/rules/dismount.ts";
 import { onSqueezedLattice, ownWalk, type Walker } from "#shared/rules/movement.ts";
-import { hexRouteFeet, plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkTrace } from "#shared/rules/route.ts";
+import { hexRouteFeet, plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkSqueezes, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkTrace } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 
@@ -278,8 +278,8 @@ export function leftText(left: SpeedLeft): string {
 export type DragWalk = {
   /** The route, or null for the straight leg. */
   route: { points: readonly RoutePoint[]; pieces: readonly RoutePiece[] } | null;
-  /** The map, for the ground under each spot of the walk. */
-  build: Pick<BuildState, "buildChunks">;
+  /** The map, for the ground under each spot of the walk, and its scenes, for where the walk squeezes (`walkWords`), when this copy has them. */
+  build: Pick<BuildState, "buildChunks"> & Partial<Pick<BuildState, "scenes">>;
   /** The walk's trace along its route, or along the straight leg (route.ts WalkTrace): each spot of it reads the walker it has there. */
   trace: WalkTrace;
   /** The name of the Half Speed area the creature would stand in at a spot of the walk's piece `piece` (0 the first), at its end where `end`, or null (4.2). */
@@ -385,7 +385,7 @@ export function dragReading(input: {
   const surcharge = taken.cost - leg.cost;
   const legFt = input.costFt ?? taken.cost;
   const out: DragRead = { dragFt: legFt, diag: taken.diag };
-  const words = walk?.route ? extraWords(walk.route.pieces, walk.prone, swimSpeed, walk.towing) : [];
+  const words = walk ? walkWords(walk, token, swimSpeed) : [];
   if (leg.cost > leg.moved && words.length > 0) out.extra = { ft: leg.cost - leg.moved, words: `+${formatFeet(leg.cost - leg.moved)} for ${joinWords(words)}` };
   if (fighting && !active) return out;
   const before = trail?.usedFt ?? 0;
@@ -452,27 +452,46 @@ function lastHalvedSpot(g: Grid, walk: DragWalk): { piece: number; at: RoutePoin
   return null;
 }
 
+/** Every word the label names what cost extra by, in the order it names them (`extraWords`). */
+export const EXTRA_WORDS = ["difficult terrain", "squeezing", "overgrowth", "swimming", "crawling", "dragging", "carrying"] as const;
+
 /**
  * What cost extra along a route, in the order the label names it: the
- * ground's difficult terrain, Plant Growth's overgrowth (4 ft per foot),
- * swimming without a Swim Speed, crawling, and a creature the walker drags
- * or carries (`towing`, docs/design-v1-attach.md 7.3). A piece's extra
- * holds the ground's 1 or 3, 1 for swimming or crawling, never both, and 1
- * more on every piece while it tows.
+ * ground's difficult terrain, squeezing through a narrow space, Plant
+ * Growth's overgrowth (4 ft per foot), swimming without a Swim Speed,
+ * crawling, and a creature the walker drags or carries (`towing`,
+ * docs/design-v1-attach.md 7.3). A piece's extra holds the ground's 1 or
+ * 3, 1 for swimming or crawling, never both, and 1 more on every piece
+ * while it tows. A squeeze pays its foot in the ground's place, as
+ * difficult terrain does, so a piece the walk squeezes along (`squeezed`,
+ * by piece) names squeezing for that foot (review GP4-SQUEEZE-LABEL).
  */
-export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSpeed: boolean, towing?: "dragging" | "carrying"): string[] {
+export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSpeed: boolean, towing?: "dragging" | "carrying", squeezed?: readonly boolean[]): string[] {
   const found = new Set<string>();
   const tow = towing ? 1 : 0;
-  for (const [, , extra, swim] of pieces) {
+  pieces.forEach(([, , extra, swim], i) => {
     const moving = swim === 1 || prone ? 1 : 0;
     const ground = extra - moving - tow;
-    if (ground === 1) found.add("difficult terrain");
+    if (ground === 1) found.add(squeezed?.[i] === true ? "squeezing" : "difficult terrain");
     else if (ground >= 3) found.add("overgrowth");
     if (swim === 1 && !swimSpeed) found.add("swimming");
     else if (swim === 0 && prone && extra - tow >= 1) found.add("crawling");
     if (towing) found.add(towing);
-  }
-  return ["difficult terrain", "overgrowth", "swimming", "crawling", "dragging", "carrying"].filter((w) => found.has(w));
+  });
+  return EXTRA_WORDS.filter((w) => found.has(w));
+}
+
+/**
+ * What cost extra along a drag's walk (`extraWords`), each piece read
+ * squeezed where the walk stands squeezed at its end (route.ts
+ * walkSqueezes), as the route search paid for it. `token` is the walker
+ * where the walk starts.
+ */
+export function walkWords(walk: DragWalk, token: MovingToken, swimSpeed: boolean): string[] {
+  if (!walk.route) return [];
+  const { scenes } = walk.build;
+  const squeezed = scenes && canSqueeze(token) ? walkSqueezes({ scenes, buildChunks: walk.build.buildChunks }, token, walk.route.points, walk.trace).slice(1) : undefined;
+  return extraWords(walk.route.pieces, walk.prone, swimSpeed, walk.towing, squeezed);
 }
 
 /** The label's lines (docs/design-v1-movement.md 3.1): the leg's cost with the band's words, what cost extra, and the Half Speed area it would end in. */
