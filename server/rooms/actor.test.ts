@@ -3214,10 +3214,10 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
   });
 
   /** A DM's device on a socket of its own, under a session that outlives the room's restart. */
-  function dmDevice(actor: RoomActor, dm: Member, sessionId = uuidv7()): { conn: Connection; sent: ServerMessage[]; sessionId: string } {
+  function dmDevice(actor: RoomActor, dm: Member, sessionId = uuidv7(), now?: () => number): { conn: Connection; sent: ServerMessage[]; sessionId: string } {
     const sent: ServerMessage[] = [];
     const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as ServerMessage), close: () => undefined, terminate: () => undefined };
-    const conn = new Connection(socket as never, { sessionId, roomId: ROOM, memberId: dm.id, role: "dm" }, "203.0.113.9");
+    const conn = new Connection(socket as never, { sessionId, roomId: ROOM, memberId: dm.id, role: "dm" }, "203.0.113.9", { now });
     actor.attach(conn);
     return { conn, sent, sessionId };
   }
@@ -3449,7 +3449,8 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     const actor = await RoomActor.load(deps(db));
     assert.ok(actor);
     try {
-      const table = dmDevice(actor, dm);
+      // FU39-C, FU34-OPUS-4: only the rate clock stops. The event loop still yields normally.
+      const table = dmDevice(actor, dm, undefined, () => 0);
       await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
       // 16 bands of 1,600 squares on ground the party never held, so every one is read through.
       const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: 60 + k * 8, w: 200, h: 8 }));
@@ -3474,8 +3475,9 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       // About one turn for each band at 8 ms a turn, and a read that never let go would get at most one.
       assert.ok(turnsWhileReading >= 4, `the timer got ${turnsWhileReading} turns while the ask was read`);
       // A socket that spent most of its burst is told busy for an ask of 16, though one op would go.
-      // Spent down to a fixed level, since how much refilled while the ask was read depends on the machine's load.
-      while (table.conn.opRate.wouldAllow(11)) table.conn.opRate.allow();
+      // The 60-op burst paid 16 for the ask and one for the paint, with no refill.
+      assert.ok(table.conn.opRate.wouldAllow(43) && !table.conn.opRate.wouldAllow(44));
+      for (let i = 0; i < 33; i++) assert.ok(table.conn.opRate.allow());
       assert.ok(table.conn.opRate.wouldAllow(1) && !table.conn.opRate.wouldAllow(16));
       await actor.op(table.conn, 3, { t: "build.ask", sceneId, ops: bands, part: 0 }, "g3");
       assert.deepEqual(table.sent.at(-1), { t: "retry", n: 3, code: "busy" });
