@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import type { Member, RoomState, Token } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
@@ -122,11 +122,12 @@ function ViewAsMenu(props: { players: readonly Member[]; style: CSSProperties | 
   const menu = usePopover({ kind: "menu" });
   const { onOpen } = props;
   const open = menu.open;
-  useEffect(() => {
+  // In a layout effect, so the bar stands over the notices in the commit that shows the menu, not a task later (VA3-NOTICE-FLAKE).
+  useLayoutEffect(() => {
     onOpen?.(open);
   }, [open, onOpen]);
   // The bar stands back under the notices when the menu goes with its button, which a switch to one owner or a phone's width does.
-  useEffect(() => () => onOpen?.(false), [onOpen]);
+  useLayoutEffect(() => () => onOpen?.(false), [onOpen]);
   const anchor = useRef<HTMLElement | null>(null);
   // Toward the larger room, as Attach's list opens: the panel header's copy stands near the side panel's top, a bar's wherever it hangs.
   const [side, setSide] = useState<PopoverSide>("above");

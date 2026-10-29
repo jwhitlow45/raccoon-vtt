@@ -351,10 +351,11 @@ function ViewPopover(props: { choice: ViewChoiceState; onOpen?(open: boolean): v
   const handle = usePopover({ kind: "dialog" });
   const { onOpen } = props;
   const open = handle.open;
-  useEffect(() => {
+  // In a layout effect, so the top bar stands over the notices in the commit that shows the popover, not a task later (VA3-NOTICE-FLAKE).
+  useLayoutEffect(() => {
     onOpen?.(open);
   }, [open, onOpen]);
-  useEffect(() => () => onOpen?.(false), [onOpen]);
+  useLayoutEffect(() => () => onOpen?.(false), [onOpen]);
   const { onClick, ...anchor } = handle.anchorProps;
   return (
     <>

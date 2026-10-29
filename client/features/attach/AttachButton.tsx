@@ -40,10 +40,11 @@ function AttachPopover(props: { token: Token; onOpen?(open: boolean): void }) {
   const [side, setSide] = useState<PopoverSide>("above");
   const { onOpen } = props;
   const open = handle.open;
-  useEffect(() => {
+  // In a layout effect, so the bar stands over the notices in the commit that shows the popover, not a task later (VA3-NOTICE-FLAKE).
+  useLayoutEffect(() => {
     onOpen?.(open);
   }, [open, onOpen]);
-  useEffect(() => () => onOpen?.(false), [onOpen]);
+  useLayoutEffect(() => () => onOpen?.(false), [onOpen]);
   const { onClick, ...anchor } = handle.anchorProps;
   return (
     <>

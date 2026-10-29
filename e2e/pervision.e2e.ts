@@ -476,25 +476,22 @@ function actionsRowWrong(at: string, layout: HeaderLayout, want: string[]): stri
  * with `notice` even under a notice laid across it in the notices' layer
  * (HXVA-ASTRA-03), it is no wider than a side panel and no name runs out
  * of it (HXVA-ASTRA-02), and it sits within 1 px. The list stays open.
+ *
+ * The cover is read twice: in the task the list first appears in, and once
+ * it is measured. Its holder once stood over the notices a task after the
+ * list showed, so a read that slipped in between, as one did under load,
+ * found the list under the notice (VA3-NOTICE-FLAKE). Read as it opens,
+ * a holder raised late fails every time.
  */
 async function openPlayers(page: Page, anchor: Locator, at: string, notice: boolean): Promise<string[]> {
-  await anchor.click();
-  const menu = page.getByRole("menu", { name: VIEW_AS_A_PLAYER, exact: true });
-  await menu.waitFor();
-  const wrong = alignmentLines(await measureAlignment(menu), `the players' list from ${at}`);
-  const a = (await anchor.boundingBox())!;
-  const m = (await menu.boundingBox())!;
-  const below = a.y + a.height / 2 < page.viewportSize()!.height / 2;
-  if (below ? m.y < a.y + a.height - 1 : m.y + m.height > a.y + 1) wrong.push(`${at}: the list opens ${below ? "above" : "below"} its button, the side with less room`);
-  // As wide as a side panel at most (theme.layout.sidePanelWidth), so a long name wraps there.
-  if (m.width > 361) wrong.push(`${at}: the list is ${Math.round(m.width)} px wide`);
-  wrong.push(...(await spills(menu, `the players' list from ${at}`)));
-  wrong.push(
-    ...(await menu.evaluate(
-      (el, { at, notice }) => {
-        type Doc = { elementFromPoint(x: number, y: number): El | null; querySelector(s: string): (El & { appendChild(n: unknown): void }) | null; createElement(t: string): { style: Record<string, string>; remove(): void } };
-        const { document } = globalThis as unknown as { document: Doc };
-        const list = el as unknown as El;
+  await page.evaluate(
+    ({ at, notice, name }) => {
+      type Doc = { body: unknown; elementFromPoint(x: number, y: number): El | null; querySelector(s: string): (El & { appendChild(n: unknown): void }) | null; createElement(t: string): { style: Record<string, string>; remove(): void } };
+      type Observer = { observe(target: unknown, options: { childList: boolean; subtree: boolean }): void; disconnect(): void };
+      type Win = { document: Doc; MutationObserver: new (callback: () => void) => Observer; rvttCover?: (list: El) => string[]; rvttFirstCover?: string[] | null };
+      const win = globalThis as unknown as Win;
+      const { document } = win;
+      win.rvttCover = (list) => {
         const r = list.getBoundingClientRect();
         // A notice's box over the whole list, in the notices' own layer, so only the stacking order decides which shows.
         const layer = document.querySelector("[data-rvtt-toast-layer]");
@@ -513,10 +510,31 @@ async function openPlayers(page: Page, anchor: Locator, at: string, notice: bool
         }
         cover?.remove();
         return out;
-      },
-      { at, notice },
-    )),
+      };
+      win.rvttFirstCover = null;
+      const opening = new win.MutationObserver(() => {
+        const list = document.querySelector(`[role="menu"][aria-label="${name}"]`);
+        if (!list) return;
+        opening.disconnect();
+        win.rvttFirstCover = win.rvttCover!(list).map((line) => `${line} as the list opens`);
+      });
+      opening.observe(document.body, { childList: true, subtree: true });
+    },
+    { at, notice, name: VIEW_AS_A_PLAYER },
   );
+  await anchor.click();
+  const menu = page.getByRole("menu", { name: VIEW_AS_A_PLAYER, exact: true });
+  await menu.waitFor();
+  const wrong = alignmentLines(await measureAlignment(menu), `the players' list from ${at}`);
+  const a = (await anchor.boundingBox())!;
+  const m = (await menu.boundingBox())!;
+  const below = a.y + a.height / 2 < page.viewportSize()!.height / 2;
+  if (below ? m.y < a.y + a.height - 1 : m.y + m.height > a.y + 1) wrong.push(`${at}: the list opens ${below ? "above" : "below"} its button, the side with less room`);
+  // As wide as a side panel at most (theme.layout.sidePanelWidth), so a long name wraps there.
+  if (m.width > 361) wrong.push(`${at}: the list is ${Math.round(m.width)} px wide`);
+  wrong.push(...(await spills(menu, `the players' list from ${at}`)));
+  wrong.push(...(await page.evaluate((at) => (globalThis as unknown as { rvttFirstCover?: string[] | null }).rvttFirstCover ?? [`${at}: the list was never seen opening`], at)));
+  wrong.push(...(await menu.evaluate((el) => (globalThis as unknown as { rvttCover(list: El): string[] }).rvttCover(el as unknown as El))));
   return wrong;
 }
 
