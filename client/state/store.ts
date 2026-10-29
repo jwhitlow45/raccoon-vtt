@@ -299,6 +299,8 @@ export type RoomStore = {
   // From the socket.
 
   setOutbox(outbox: Outbox | null): void;
+  /** The outbox has room again for the op it could not send: sends what waits. */
+  flushOutbox(): void;
   /** Drops ops too old to save and says where the server should resume. Call right before sending `hello`. */
   prepareHello(): { clientId: string; resumeFrom: number };
   applySnapshot(msg: Snapshot): void;
@@ -810,6 +812,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
 
     setOutbox(next) {
       outbox = next;
+    },
+
+    flushOutbox() {
+      flush();
     },
 
     prepareHello() {

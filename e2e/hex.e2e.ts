@@ -1716,7 +1716,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await pickTool(dm, "Select");
   });
 
-  test("HX9b-7. two Builder room taps back to back on the open 200 by 200 hex scene overrun the socket's byte budget, and every op still lands: the draft holds both rooms, the socket stays open and the next edit goes through", async () => {
+  test("HX9b-7. two Builder room taps back to back on the open 200 by 200 hex scene send more than the socket's byte budget, and the outbox paces them: both rooms land well before the answer timer, the socket stays open and the next edit goes through", async () => {
     const big = { w: 200, h: 200 };
     const all = sceneHexes(G, big).length;
     await pickTool(dm, "Fog");
@@ -1724,18 +1724,16 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const closes = dmSocket.closes;
     const p = await pagePoint(dm, big, { x: 100, y: 100 });
     await assertCanvasAt(dm, p);
-    // Each tap sends about 447 KB, and the server takes 512 KiB at once and 256 KiB a second after
-    // (server/rooms/budgets.ts FrameBudget), dropping the rest unread, so the second tap's last frames go unanswered.
+    // Each tap sends about 447 KB, past the 512 KiB the server takes at once and 256 KiB a second after (server/rooms/budgets.ts
+    // FrameBudget). The outbox sends no faster than that (client/state/socket.ts SendBudget), so the server drops no frame and no
+    // op waits for the 10 s answer timer to go again (OP_ANSWER_MS, client/state/store.ts), as every one did before (H3-FOG-BURST).
     await dm.mouse.click(p.x, p.y);
     await dm.waitForTimeout(300);
     await dm.mouse.click(p.x + 40, p.y + 40);
     const tapped = Date.now();
-    await dm.waitForTimeout(3_000);
-    const early = draftCells(run.moorland).length;
-    assert.ok(early < 2 * all, `the server dropped frames: ${early} of ${2 * all} hexes in its draft after 3 s`);
-    // The outbox sends again what has had no answer for OP_ANSWER_MS (client/state/store.ts), once the budget has refilled.
     await waitFor("both rooms in the draft", () => (draftCells(run.moorland).length === 2 * all ? true : null), 40_000);
     const took = Date.now() - tapped;
+    assert.ok(took < 8_000, `both rooms landed ${took} ms after the second tap`);
     assert.equal(dmSocket.closes, closes, "the DM's socket stayed open");
     const draft = dmSocket.state!.fogDrafts[run.moorland]!;
     assert.equal(new Set(draft.ops.map((o) => o.id)).size, draft.ops.length, "every op once");
@@ -1745,7 +1743,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await waitFor("the second room taken back", () => (draftCells(run.moorland).length === all ? true : null), 5_000);
     await fogBar(dm).getByRole("button", { name: "Undo", exact: true }).click();
     await waitFor("the first room taken back", () => (dmSocket.state?.fogDrafts[run.moorland] === undefined ? true : null), 5_000);
-    console.error(`[hx9b-7] ${early} of ${2 * all} hexes after 3 s, both rooms ${took} ms after the second tap`);
+    console.error(`[hx9b-7] both rooms ${took} ms after the second tap`);
     await pickTool(dm, "Select");
   });
 

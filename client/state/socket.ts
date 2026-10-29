@@ -33,6 +33,66 @@ export const EPH_PER_SECOND = 30;
 /** Previews still in progress are repeated this often, so receivers never time them out while a finger rests. */
 export const EPH_KEEPALIVE_MS = 1_000;
 
+/*
+ * What one socket lets itself send, under the server's frame budget
+ * (server/rooms/budgets.ts FrameBudget: 100 frames and 256 KiB a second, with
+ * a burst of twice that), so the server never drops an op's frame unread and
+ * the op never waits for OP_ANSWER_MS to go again (H3-FOG-BURST). Half the
+ * burst and three quarters of the rate: frames the network or a busy server
+ * bunches up, and the frames other than ops that always go, still fit in
+ * what the server holds.
+ */
+export const SEND_BYTES_PER_SEC = 192 * 1024;
+export const SEND_BYTES_BURST = 256 * 1024;
+export const SEND_FRAMES_PER_SEC = 75;
+export const SEND_FRAMES_BURST = 100;
+
+const utf8 = new TextEncoder();
+
+/** The frames and bytes a socket may still send (SEND_*), refilled with time as the server's budget refills. */
+class SendBudget {
+  #bytes = SEND_BYTES_BURST;
+  #frames = SEND_FRAMES_BURST;
+  #at: number;
+  readonly #clock: Clock;
+
+  constructor(clock: Clock) {
+    this.#clock = clock;
+    this.#at = clock.now();
+  }
+
+  #refill(): void {
+    const now = this.#clock.now();
+    const seconds = Math.max(0, now - this.#at) / 1000;
+    this.#at = now;
+    this.#bytes = Math.min(SEND_BYTES_BURST, this.#bytes + seconds * SEND_BYTES_PER_SEC);
+    this.#frames = Math.min(SEND_FRAMES_BURST, this.#frames + seconds * SEND_FRAMES_PER_SEC);
+  }
+
+  /** Spends a frame of `bytes` when there is room for it, or when the budget is full, so a frame larger than the burst is never held for good. */
+  take(bytes: number): boolean {
+    this.#refill();
+    if (this.#bytes < Math.min(bytes, SEND_BYTES_BURST) || this.#frames < 1) return false;
+    this.#bytes -= bytes;
+    this.#frames -= 1;
+    return true;
+  }
+
+  /** Spends a frame that goes with room or without, so what waits for room waits longer. */
+  force(bytes: number): void {
+    this.#refill();
+    this.#bytes -= bytes;
+    this.#frames -= 1;
+  }
+
+  /** How long until a frame of `bytes` fits, a millisecond over so the refill has surely come. */
+  waitFor(bytes: number): number {
+    this.#refill();
+    const seconds = Math.max((Math.min(bytes, SEND_BYTES_BURST) - this.#bytes) / SEND_BYTES_PER_SEC, (1 - this.#frames) / SEND_FRAMES_PER_SEC, 0);
+    return Math.ceil(seconds * 1000) + 1;
+  }
+}
+
 export const CLOSE_REVOKED = 4001;
 export const CLOSE_DENIED = 4003;
 export const CLOSE_ABUSE = 4008;
@@ -210,6 +270,9 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   const deadline = new Timer(clock);
   const staleTimer = new Timer(clock);
   const sceneRetryTimer = new Timer(clock);
+  /** Wakes the outbox once the op it could not send fits the socket's budget. */
+  const paceTimer = new Timer(clock);
+  let budget = new SendBudget(clock);
   let pingK = 0;
   /** The `k` of the oldest ping still waiting for its pong. */
   let unansweredK: number | null = null;
@@ -244,11 +307,25 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     return everOpen ? "reconnecting" : "connecting";
   }
 
-  function sendRaw(msg: ClientMessage): boolean {
+  /**
+   * Sends a frame, counted against the socket's budget (SendBudget). An op
+   * that does not fit is not sent: it waits in the outbox, pending and so
+   * saving, until the budget has room for it. Every other frame goes at once,
+   * since a hello, a ping or a preview is small and late would be wrong, and
+   * the ops after it wait that much longer.
+   */
+  function sendRaw(msg: ClientMessage, paced = false): boolean {
     if (!ws || ws.readyState !== OPEN) return false;
     if (previewOf !== undefined && msg.t !== "hello" && msg.t !== "ping") return false;
+    const data = JSON.stringify(msg);
+    const bytes = utf8.encode(data).length;
+    if (!paced) budget.force(bytes);
+    else if (!budget.take(bytes)) {
+      paceTimer.set(budget.waitFor(bytes), () => room.flushOutbox());
+      return false;
+    }
     try {
-      ws.send(JSON.stringify(msg));
+      ws.send(data);
       return true;
     } catch {
       return false;
@@ -272,6 +349,8 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
       return;
     }
     ws = socket;
+    // The server's budget is per connection, and a new one starts full.
+    budget = new SendBudget(clock);
     socket.onopen = () => {
       if (ws !== socket) return;
       openTimer.clear();
@@ -308,6 +387,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     deadline.clear();
     staleTimer.clear();
     sceneRetryTimer.clear();
+    paceTimer.clear();
     unansweredK = null;
     sceneInFlight = false;
     ephQueue.clear();
@@ -658,7 +738,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
   return {
     start() {
       if (phase !== "idle" || unsubscribeEnv) return;
-      room.setOutbox({ send: sendRaw });
+      room.setOutbox({ send: (msg) => sendRaw(msg, true) });
       unsubscribeEnv =
         env?.subscribe({
           wake,

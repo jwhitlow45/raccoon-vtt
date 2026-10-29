@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { FrameBudget } from "#server/rooms/budgets.ts";
 import type { RoomState, Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import type { ClientMessage, ServerMessage } from "#shared/protocol.ts";
-import { DM, P1, room, token } from "#shared/testutil.ts";
+import type { ClientMessage, ClientOp, ServerMessage } from "#shared/protocol.ts";
+import { DM, P1, rng, room, token } from "#shared/testutil.ts";
 import {
   createRoomSocket,
   EPH_PER_SECOND,
@@ -12,13 +13,15 @@ import {
   PONG_TIMEOUT_MS,
   roomSocketUrl,
   SCENE_RETRY_MS,
+  SEND_BYTES_BURST,
+  SEND_BYTES_PER_SEC,
   SNAPSHOT_DEADLINE_MS,
   STALE_SNAPSHOT_MS,
   UNLOADED_WAIT_MS,
   type ConnectionEnv,
   type SocketLike,
 } from "./socket.ts";
-import { createRoomStore } from "./store.ts";
+import { createRoomStore, OP_ANSWER_MS } from "./store.ts";
 import { FakeClock } from "./testing.ts";
 import { backoffDelay, BACKOFF_CAP_MS } from "./timing.ts";
 import type { You } from "./types.ts";
@@ -31,9 +34,12 @@ class FakeSocket implements SocketLike {
   onerror: SocketLike["onerror"] = null;
   sent: ClientMessage[] = [];
   closedWith: number | null = null;
+  /** Hears each frame as the server would, raw. */
+  onSend: ((data: string) => void) | null = null;
 
   send(data: string): void {
     if (this.readyState !== 1) throw new Error("not open");
+    this.onSend?.(data);
     this.sent.push(JSON.parse(data) as ClientMessage);
   }
   close(code = 1000): void {
@@ -681,6 +687,162 @@ describe("ephemeral sending", () => {
     s.socket.sendEph({ k: "ping", x: 1, y: 1 });
     s.runFrames();
     assert.equal(s.last().take("eph").length, 0);
+  });
+});
+
+describe("the outbox's pace (H3-FOG-BURST)", () => {
+  const bytesOf = (data: string) => new TextEncoder().encode(data).length;
+
+  /** A fog draft of about `kib` KiB, as a band of a Builder room on a large map is: parts of at most 2,000 cells (MAX_FOG_CELLS) of about 8 bytes each. */
+  function fogDraft(k: number, kib: number): ClientOp {
+    const cells = Array.from({ length: Math.max(1, Math.round((kib * 1024) / 8)) }, (_, i) => `${i % 40},${Math.floor(i / 40) % 30}`);
+    const add = [];
+    for (let at = 0; at < cells.length; at += 2_000) add.push({ id: `f${k}.${at}`, mode: "reveal" as const, shape: { kind: "cells" as const, cells: cells.slice(at, at + 2_000) } });
+    return { t: "fog.draft", sceneId: "s1", add };
+  }
+
+  /** Each socket's frames as the server's own budget reads them, from the moment it opens: a frame it would drop is named. */
+  function serverSide(s: ReturnType<typeof setup>) {
+    const dropped: string[] = [];
+    const frames: { socket: number; at: number; msg: ClientMessage }[] = [];
+    const watch = (index: number) => {
+      const socket = s.sockets[index]!;
+      if (socket.onSend) return;
+      const budget = new FrameBudget(() => s.clock.now());
+      socket.onSend = (data) => {
+        const msg = JSON.parse(data) as ClientMessage;
+        frames.push({ socket: index, at: s.clock.now(), msg });
+        if (budget.accept(bytesOf(data)) !== "ok") dropped.push(`socket ${index} at ${s.clock.now()} ms: ${msg.t}${msg.t === "op" ? ` ${msg.n}` : ""}, ${bytesOf(data)} bytes`);
+      };
+    };
+    return { dropped, frames, watch: () => s.sockets.forEach((_, i) => watch(i)) };
+  }
+
+  test("two Builder rooms' ops at once go as the server's budget refills, each once and in order, the rest waiting as saving, and none waits for the answer timer", () => {
+    const s = setup();
+    s.socket.start();
+    const server = serverSide(s);
+    server.watch();
+    s.connect();
+    // 14 drafts of 60 KiB: 840 KiB, about two rooms' worth on a 200 by 200 scene.
+    const ns = Array.from({ length: 14 }, (_, k) => s.room.dispatch(fogDraft(k, 60))!);
+    const sentNow = server.frames.filter((f) => f.msg.t === "op").length;
+    assert.ok(sentNow > 0 && sentNow < ns.length, `${sentNow} ops went at once`);
+    // What waits is still pending, which the room reads as saving (lib/chunkLoad.ts reloadGate).
+    assert.equal(s.room.store.getState().pending.length, ns.length);
+    const wait = Math.ceil(((14 * 60 * 1024 - SEND_BYTES_BURST) / SEND_BYTES_PER_SEC) * 1000) + 500;
+    for (let t = 0; t < wait; t += 50) s.clock.advance(50);
+    const ops = server.frames.filter((f) => f.msg.t === "op").map((f) => (f.msg as { n: number }).n);
+    assert.deepEqual(ops, ns, "every op once, in order");
+    assert.ok(wait < OP_ANSWER_MS, `${wait} ms to send them all`);
+    assert.deepEqual(server.dropped, []);
+    assert.equal(s.last().closedWith, null);
+  });
+
+  test("a ping and a preview go however many frames the ops spent, and a new socket's budget starts full, as the server's does", () => {
+    const s = setup();
+    s.socket.start();
+    const server = serverSide(s);
+    server.watch();
+    s.connect();
+    s.clock.advance(PING_INTERVAL_MS - 10);
+    // More small ops than the budget's frames, so the next ones wait on the frame count rather than bytes.
+    for (let k = 0; k < 150; k++) s.room.dispatch({ t: "log.chat", text: `line ${k}` });
+    assert.ok(s.last().take("op").length < 150, "the ops wait for frames");
+    s.socket.sendEph({ k: "laser", x: 1, y: 1, on: true });
+    s.runFrames();
+    assert.equal(s.last().take("eph").length, 1, "the preview went with ops waiting");
+    s.clock.advance(10);
+    assert.equal(s.last().take("ping").length, 1, "the heartbeat's ping went with ops waiting");
+    s.last().drop(1012);
+    s.clock.advance(1);
+    server.watch();
+    s.connect();
+    assert.ok(s.last().take("op").length >= 50, "the new socket sends a burst of the ops at once");
+    assert.deepEqual(server.dropped, []);
+  });
+
+  test("an op larger than the whole burst goes once the budget is full, and the op after it once the budget has room again", () => {
+    const s = setup();
+    s.socket.start();
+    s.connect();
+    s.room.dispatch(fogDraft(0, 60));
+    // Bigger than any op the app sends (the server takes frames of 64 KiB at most), so only this rule moves it.
+    const huge = s.room.dispatch(fogDraft(1, 300))!;
+    const after = s.room.dispatch({ t: "log.chat", text: "after" })!;
+    s.last().take("op");
+    s.clock.advance(Math.ceil((60 * 1024 / SEND_BYTES_PER_SEC) * 1000) + 50);
+    assert.deepEqual(s.last().take("op").map((m) => (m as { n: number }).n), [huge]);
+    // It spent past the budget's floor, so the next op waits for that much to come back.
+    s.clock.advance(Math.ceil(((300 - 256) * 1024 / SEND_BYTES_PER_SEC) * 1000) + 50);
+    assert.deepEqual(s.last().take("op").map((m) => (m as { n: number }).n), [after]);
+  });
+
+  test("random sequences of ops of every size, previews, pings, acks and reconnects: the server never drops a frame, no op goes twice on a socket, and every op lands", () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const r = rng(seed);
+      const s = setup();
+      s.socket.start();
+      const server = serverSide(s);
+      let acked = 0;
+      let seq = 0;
+      let live = -1;
+      const open = () => {
+        server.watch();
+        live = s.sockets.length - 1;
+        seq = 0;
+        s.last().open();
+        s.last().take("hello");
+        s.last().emit(s.snapshot("s1", acked));
+      };
+      server.watch();
+      open();
+      let k = 0;
+      const serve = () => {
+        const socket = s.last();
+        if (s.sockets.length - 1 !== live || socket.readyState !== 1) return;
+        for (const m of socket.take()) {
+          if (m.t === "ping") socket.emit({ t: "pong", k: m.k });
+          if (m.t !== "op") continue;
+          const n = m.n;
+          // Answered after a short while, on the socket it came on only.
+          s.clock.setTimeout(() => {
+            if (socket !== s.last() || socket.readyState !== 1) return;
+            acked = Math.max(acked, n);
+            socket.emit({ t: "ev", seq: ++seq, changes: [], acks: [n] });
+          }, Math.floor(r() * 300));
+        }
+      };
+      for (let step = 0; step < 80; step++) {
+        const roll = r();
+        // Now and then a gesture's worth at once, as a Builder room is, past the server's burst.
+        if (roll < 0.35) for (let i = 1 + Math.floor(r() ** 3 * 24); i > 0; i--) s.room.dispatch(fogDraft(k++, 0.2 + r() * 62));
+        else if (roll < 0.5) s.socket.sendEph({ k: "laser", x: r() * 10, y: r() * 10, on: true });
+        else if (roll < 0.53 && s.last().readyState === 1) {
+          s.last().drop(1012);
+          s.clock.advance(1);
+          open();
+        }
+        s.runFrames();
+        serve();
+        s.clock.advance(Math.floor(r() * 400));
+        serve();
+      }
+      for (let t = 0; t < 60_000; t += 100) {
+        s.runFrames();
+        serve();
+        s.clock.advance(100);
+      }
+      serve();
+      assert.deepEqual(server.dropped, [], `seed ${seed}: the server dropped a frame`);
+      for (let i = 0; i < s.sockets.length; i++) {
+        const ns = server.frames.filter((f) => f.socket === i && f.msg.t === "op").map((f) => (f.msg as { n: number }).n);
+        assert.ok(ns.every((n, j) => j === 0 || n > ns[j - 1]!), `seed ${seed}: socket ${i} sent ${JSON.stringify(ns)}`);
+      }
+      assert.deepEqual(s.room.store.getState().pending, [], `seed ${seed}: ops still pending`);
+      s.socket.dispose();
+      s.room.dispose();
+    }
   });
 });
 
