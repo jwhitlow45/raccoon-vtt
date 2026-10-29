@@ -9,12 +9,12 @@ import { rasterizeFogOps } from "#shared/rules/fog.ts";
 import { member, P1, room, scene } from "#shared/testutil.ts";
 import { createFixtureState, FIXTURE_IDS } from "../../dev/fixture.ts";
 import { api } from "../../lib/api.ts";
-import { createRoomSocket, previewSocketUrl, type SocketLike } from "../../state/socket.ts";
+import { createRoomSocket, previewSocketUrl, SNAPSHOT_DEADLINE_MS, type SocketLike } from "../../state/socket.ts";
 import { createRoomStore } from "../../state/store.ts";
 import { FakeClock } from "../../state/testing.ts";
 import type { Ended } from "../../state/types.ts";
 import { EMPTY_EPHEMERAL, INITIAL_LOCAL, type RoomView } from "../../state/types.ts";
-import { createPreview, previewNotice, PREVIEW_LOAD_MS, watchPreviewLoad, type PreviewLoad } from "./preview.ts";
+import { createPreview, previewNotice, previewRoom, PREVIEW_LOAD_MS, watchPreviewLoad, type PreviewLoad } from "./preview.ts";
 
 const { thorn, cave } = FIXTURE_IDS;
 
@@ -224,5 +224,106 @@ describe("view as a player (docs/design-v1-per-player-vision.md 7.4)", () => {
     const wait = watchPreviewLoad(ready, { clock: new FakeClock(), stop: () => {}, onChange: (load) => seen.push(load) });
     assert.deepEqual([seen, wait.load], [["loaded"], "loaded"]);
     wait.dispose();
+  });
+
+  test("its wait follows a wait the server names past the snapshot budget: loading past 10 s while the server counts down, loaded when the snapshot comes, failed only once that wait and the socket's grace pass with nothing (D-261029-150, LP25-B-VIEWAS-2)", () => {
+    // `tick` moves the clock a second at a time and answers the socket's pings, as the server does, so only the snapshot's deadline can end it.
+    const run = (steps: (send: (m: ServerMessage) => void, tick: (ms: number) => void) => void) => {
+      const clock = new FakeClock();
+      const pings: number[] = [];
+      const store = createRoomStore({ roomId: "R1", you: { memberId: "p1", role: "player" }, clock, random: () => 0.5, clientId: "preview" });
+      const seen: PreviewLoad[] = [];
+      let socket: ReturnType<typeof createRoomSocket> | null = null;
+      const wait = watchPreviewLoad(store.store, { clock, stop: () => socket?.dispose(), onChange: (load) => seen.push(load) });
+      const sockets: (SocketLike & { readyState: number })[] = [];
+      socket = createRoomSocket({
+        url: previewSocketUrl("R1", "p1", { protocol: "https:", host: "vtt.example" }),
+        room: previewRoom(store, wait),
+        clock,
+        previewOf: "p1",
+        frame: (cb) => cb(),
+        createSocket: () => {
+          const sock = {
+            readyState: 0,
+            send: (data: string) => {
+              const m = JSON.parse(data) as ClientMessage;
+              if (m.t === "ping") pings.push(m.k);
+            },
+            close: () => {},
+            onopen: null,
+            onmessage: null,
+            onclose: null,
+            onerror: null,
+          } as SocketLike & { readyState: number };
+          sockets.push(sock);
+          return sock;
+        },
+      });
+      socket.start();
+      const sock = sockets[0]!;
+      sock.readyState = 1;
+      sock.onopen?.({});
+      const send = (m: ServerMessage) => sock.onmessage?.({ data: JSON.stringify(m) });
+      const tick = (ms: number) => {
+        for (let left = ms; left > 0; left -= 1_000) {
+          clock.advance(Math.min(1_000, left));
+          for (const k of pings.splice(0)) send({ t: "pong", k });
+        }
+      };
+      try {
+        steps(send, tick);
+        return { seen, load: wait.load, sockets: sockets.length };
+      } finally {
+        wait.dispose();
+        socket.dispose();
+        store.dispose();
+      }
+    };
+    const s = room({ members: { dm1: member("dm1", "dm"), p1: member("p1") } });
+    s.scenes.s1 = scene("s1");
+    const snapshot: ServerMessage = { t: "snapshot", seq: 0, state: projectState(s, P1, { sceneId: null }), you: { memberId: "p1", role: "player", sceneId: "s1" }, watermark: 0 };
+    // The server waits 49 s and says so every 2 s, as the snapshot budget does (server/rooms/actor.ts #delaySnapshot): no failure at 10 s, nor at 40.
+    assert.deepEqual(
+      run((send, tick) => {
+        for (let left = 49_000; left > 9_000; left -= 2_000) {
+          send({ t: "wait", ms: left });
+          tick(2_000);
+        }
+      }),
+      { seen: [], load: "loading", sockets: 1 },
+    );
+    // The snapshot when the wait runs out: loaded, never failed.
+    assert.deepEqual(
+      run((send, tick) => {
+        send({ t: "wait", ms: 30_000 });
+        tick(PREVIEW_LOAD_MS);
+        tick(20_000);
+        send(snapshot);
+      }),
+      { seen: ["loaded"], load: "loaded", sockets: 1 },
+    );
+    // Nothing when the wait has run out: failed with Try again once the socket's grace passes too, not before, and no new socket.
+    assert.deepEqual(
+      run((send, tick) => {
+        send({ t: "wait", ms: 30_000 });
+        tick(30_000 + SNAPSHOT_DEADLINE_MS - 1);
+      }),
+      { seen: [], load: "loading", sockets: 1 },
+    );
+    assert.deepEqual(
+      run((send, tick) => {
+        send({ t: "wait", ms: 30_000 });
+        tick(30_000 + SNAPSHOT_DEADLINE_MS);
+      }),
+      { seen: ["failed"], load: "failed", sockets: 1 },
+    );
+    // A preview the server has not answered still fails at 10 s (design 7.4), its socket's own deadline aside.
+    assert.deepEqual(
+      run((_send, tick) => {
+        tick(PREVIEW_LOAD_MS - 1);
+      }).load,
+      "failed",
+      "a socket with no frame gives up at its own 5 s deadline first",
+    );
   });
 });

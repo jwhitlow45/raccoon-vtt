@@ -1137,6 +1137,36 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     }
   });
 
+  test("LP25-B-VIEWAS-2. a wait the server names for the preview's snapshot, as past the snapshot budget, keeps View as a player loading past design 7.4's 10 s, with no failure and no Try again, and the snapshot as the wait runs out shows Ana's view (D-261029-150)", async () => {
+    previews.hold = true;
+    await openSideTab(dm, "DM");
+    const panel = dm.getByRole("tabpanel", { name: sideTabName("DM") });
+    await panel.getByRole("combobox", { name: "View as a player" }).selectOption({ label: "Ana" });
+    const opened = Date.now();
+    await panel.getByRole("button", { name: "View", exact: true }).click();
+    const preview = dm.locator('dialog[aria-label="Viewing as Ana"]');
+    await preview.waitFor();
+    try {
+      const wait = preview.locator("[data-preview-wait]");
+      await wait.getByRole("status").filter({ hasText: "Loading what Ana sees…" }).waitFor();
+      // The server's word as server/rooms/actor.ts #delaySnapshot sends it, while the held snapshot stands for the one it delays.
+      await waitFor("the preview's socket", () => previews.socket);
+      previews.socket!.send(JSON.stringify({ t: "wait", ms: 15_000 }));
+      await dm.waitForTimeout(Math.max(0, opened + 11_500 - Date.now()));
+      assert.equal(await wait.getByRole("alert").count(), 0, "the preview failed while the server counted down its wait");
+      assert.equal(await preview.getByRole("button", { name: "Try again" }).count(), 0, "Try again was offered while the server counted down its wait");
+      assert.equal((await wait.getByRole("status").innerText()).trim(), "Loading what Ana sees…");
+      await shots.take(dm, "lp25-b-viewas-2-server-wait");
+      releasePreview();
+      await preview.locator(".konvajs-content").first().waitFor();
+      const snapshot = previews.frames.map((text) => JSON.parse(text) as Frame).find((f) => f.t === "snapshot");
+      assert.equal(snapshot?.you?.memberId, run.anaId, "the wait ended in someone else's view");
+    } finally {
+      previews.hold = false;
+      await exitPreview(preview);
+    }
+  });
+
   test("pv-8. no frame Ben's page or the display received held or named the goblin, its row or a list or layer while per player, or the label before the pool, and no page logged an error", () => {
     for (const [who, watch, pooledAt] of [["Ben", sockets.ben, run.pooledAt.ben], ["the display", sockets.tv, run.pooledAt.tv]] as const) {
       assert.ok(pooledAt > 0, "pv-7 never ran");

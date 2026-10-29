@@ -1,7 +1,7 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
 import { realClock, type Clock } from "../../state/timing.ts";
-import { drawnToasts, heldToasts, type RoomUi } from "../../state/store.ts";
+import { drawnToasts, heldToasts, type RoomStore, type RoomUi } from "../../state/store.ts";
 import { addToSelection, doneSelecting, keepSelected, selectToken, setMultiSelect, showActions, tapToken } from "../../state/selection.ts";
 import { crossWide, INITIAL_LOCAL, withoutBelow, withoutPanel, withoutSheets, withPanel, withPanelList, withSheetExpanded, withSheetHidden, withSidePanelHidden, withSplit, withSplitFits, withSwap, type RoomActions, type RoomView } from "../../state/types.ts";
 import { panelById } from "../panels.ts";
@@ -33,16 +33,34 @@ export const PREVIEW_LOAD_MS = 10_000;
 
 export type PreviewLoad = "loading" | "loaded" | "failed";
 
+/** A preview's wait (watchPreviewLoad), and the word that the server named a wait for its snapshot. */
+export type PreviewLoadWatch = {
+  readonly load: PreviewLoad;
+  /**
+   * The server named a wait for the snapshot (`wait`, design 10.4, as
+   * past the snapshot budget). PREVIEW_LOAD_MS no longer applies: the
+   * socket's own deadline, that wait and its grace, renewed by each `wait`
+   * the server repeats, ends the socket if nothing comes, and that end
+   * fails the preview (D-261029-150).
+   */
+  serverWaits(): void;
+  dispose(): void;
+};
+
 /**
  * Where a preview's wait stands (7.4): loading until the player's
  * snapshot lands in its store, then loaded, and failed once its socket
  * ended (refused, closed before it loaded, or turned away later) or
- * PREVIEW_LOAD_MS passed with no snapshot. Failed is final: it stops the
- * socket (`stop`), so a snapshot that comes late draws nothing. Each
- * change is told to `onChange`, the first one at once when the store
- * already says it.
+ * PREVIEW_LOAD_MS passed with no snapshot and no wait named by the
+ * server. While the server counts down a wait it named, the preview keeps
+ * loading: failing at 10 s offered Try again, each a new delayed request,
+ * and the server's abuse rule then closed every socket of the DM's
+ * session, the DM's own room included (LP25-B-VIEWAS-2). Failed is final:
+ * it stops the socket (`stop`), so a snapshot that comes late draws
+ * nothing. Each change is told to `onChange`, the first one at once when
+ * the store already says it.
  */
-export function watchPreviewLoad(source: PreviewSource, options: { stop(): void; onChange(load: PreviewLoad): void; clock?: Clock }): { readonly load: PreviewLoad; dispose(): void } {
+export function watchPreviewLoad(source: PreviewSource, options: { stop(): void; onChange(load: PreviewLoad): void; clock?: Clock }): PreviewLoadWatch {
   const clock = options.clock ?? realClock;
   let load: PreviewLoad = "loading";
   const set = (next: PreviewLoad) => {
@@ -65,9 +83,27 @@ export function watchPreviewLoad(source: PreviewSource, options: { stop(): void;
     get load() {
       return load;
     },
+    serverWaits() {
+      clock.clearTimeout(timer);
+    },
     dispose() {
       unsubscribe();
       clock.clearTimeout(timer);
+    },
+  };
+}
+
+/**
+ * The room a preview's socket reports to: the preview's own store, which
+ * also tells its wait when the server names a wait for the snapshot. The
+ * socket reports that as a slow load (state/socket.ts `wait`).
+ */
+export function previewRoom(room: RoomStore, wait: Pick<PreviewLoadWatch, "serverWaits">): RoomStore {
+  return {
+    ...room,
+    trackScene(e) {
+      if (e.t === "slow") wait.serverWaits();
+      room.trackScene(e);
     },
   };
 }

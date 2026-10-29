@@ -7,13 +7,13 @@ import { useModalDialog } from "../../lib/modalDialog.ts";
 import { useUiScale } from "../device/settings.ts";
 import { theme } from "../../lib/theme.ts";
 import { Room } from "../../pages/Room.tsx";
-import { browserEnv, createRoomSocket, previewSocketUrl } from "../../state/socket.ts";
+import { browserEnv, createRoomSocket, previewSocketUrl, type RoomSocket } from "../../state/socket.ts";
 import { createRoomStore, type RoomStore } from "../../state/store.ts";
 import { useScoped } from "../../state/scope.ts";
 import { RoomProvider, useAssets, useRoomView } from "../../state/view.ts";
 import { SHORT_LANDSCAPE_MAX, useTopBars } from "../encounter/band.ts";
 import { useLayoutSize } from "../device/layout.ts";
-import { createPreview, watchPreviewLoad, type Preview, type PreviewLoad } from "./preview.ts";
+import { createPreview, previewRoom, watchPreviewLoad, type Preview, type PreviewLoad } from "./preview.ts";
 import { PreviewContext, type PreviewNotice } from "./previewContext.ts";
 import { PreviewWait } from "./PreviewWait.tsx";
 import { viewAsSlot } from "./viewAs.tsx";
@@ -110,7 +110,11 @@ export function PlayerPreview(props: {
   nameRef.current = name;
   useEffect(() => {
     const room = createRoomStore({ roomId, you: { memberId, role: "player" } });
-    const socket = createRoomSocket({ url: previewSocketUrl(roomId, memberId), room, env: browserEnv(), previewOf: memberId });
+    // Until the snapshot lands the socket retries nothing (state/socket.ts previewOf), so the wait ends in its close or here.
+    setLoad("loading");
+    let socket: RoomSocket | null = null;
+    const wait = watchPreviewLoad(room.store, { stop: () => socket?.dispose(), onChange: setLoad });
+    socket = createRoomSocket({ url: previewSocketUrl(roomId, memberId), room: previewRoom(room, wait), env: browserEnv(), previewOf: memberId });
     socket.start();
     const preview = createPreview(room.store, memberId, {
       name: nameRef.current,
@@ -120,9 +124,6 @@ export function PlayerPreview(props: {
         flashTimer.current = setTimeout(() => setFlash(false), FLASH_MS);
       },
     });
-    // Until the snapshot lands the socket retries nothing (state/socket.ts previewOf), so the wait ends in its close or here.
-    setLoad("loading");
-    const wait = watchPreviewLoad(room.store, { stop: () => socket.dispose(), onChange: setLoad });
     setLive({ room, preview });
     return () => {
       wait.dispose();
