@@ -552,6 +552,41 @@ describe("new art of the old image's shape keeps the scene's grid, and a find th
     assert.equal(replacementFound(again, false, next, scene, { ...scaled, scale: 1 }).found?.tier, "medium", "the 1 px slack of art the same size would offer it");
   });
 
+  test("a grid of another spacing whose centers meet the kept ones at all five points is another grid, and offered (review FU35B-ASTRA-01, round 2)", () => {
+    // 100 px squares from the corner and 80 px ones from (10, 10) meet every 400 px, at every point looked at on 900 by 900.
+    const squares = done(detection(80, { x: 10, y: 10 }, 0.9), 900, 900);
+    const square100 = { cellPx: 100, originPx: { x: 0, y: 0 }, scale: 1 };
+    assert.equal(replacementFound(squares, false, { widthPx: 900, heightPx: 900 }, { map: { originPx: square100.originPx } }, square100).found?.cal.cellPx, 80);
+    // 70 px squares from the corner and 52.5 px ones from (8.75, 8.75) meet every 210 px, at all five points on 500 by 500.
+    const square70 = { cellPx: 70, originPx: { x: 0, y: 0 }, scale: 1 };
+    const quarters = done(detection(52.5, { x: 8.75, y: 8.75 }, 0.9), 500, 500);
+    assert.equal(replacementFound(quarters, false, { widthPx: 500, heightPx: 500 }, { map: { originPx: square70.originPx } }, square70).found?.cal.cellPx, 52.5);
+    // Hexes of 100 and 80 px around one center meet on a lattice of 400: on 1300 by 793 at all five points too.
+    for (const [orient, shape, size] of [
+      ["rows", "hexRows", { widthPx: 1300, heightPx: 793 }],
+      ["columns", "hexColumns", { widthPx: 793, heightPx: 1300 }],
+    ] as const) {
+      const center = { x: 50, y: 50 };
+      const hex100 = { ...calibrationFromHexFind({ cellPx: 100, center, orient }), scale: 1 };
+      const find = hexFind(orient, 80, center, 0.9);
+      const answer = looked(NO_SQUARES, orient === "rows" ? find : NO_HEX, orient === "rows" ? NO_HEX : find, size.widthPx, size.heightPx);
+      assert.equal(replacementFound(answer, false, size, { gridShape: shape, map: { originPx: hex100.originPx } }, hex100).found?.cal.cellPx, 80, orient);
+    }
+  });
+
+  test("the slack's pixel floor grows with the art, its share of a cell only with the cell (review FU35B-ASTRA-04)", () => {
+    // 700 px art replaced by 5600 px art: kept 70 px squares become 560 px, and the slack 8 px, not 1% of 560 px times 8.
+    const big = { widthPx: 5600, heightPx: 4000 };
+    const at = (cellPx: number, x: number, y: number) => done(detection(cellPx, { x, y }, 0.9), 5600, 4000);
+    const by8 = { cellPx: 560, originPx: { x: 160, y: 280 }, scale: 8 };
+    assert.equal(replacementFound(at(560, 190, 280), false, big, { map: { originPx: by8.originPx } }, by8).found?.tier, "medium", "30 px off is another grid");
+    assert.equal(replacementFound(at(560, 166, 280), false, big, { map: { originPx: by8.originPx } }, by8).found, null, "6 px off is within 8");
+    // 4 times larger, 280 px cells: the slack is 4 px, the floor times the scale.
+    const by4 = { cellPx: 280, originPx: { x: 80, y: 140 }, scale: 4 };
+    assert.equal(replacementFound(at(280, 86, 140), false, big, { map: { originPx: by4.originPx } }, by4).found?.tier, "medium", "6 px off");
+    assert.equal(replacementFound(at(280, 83, 140), false, big, { map: { originPx: by4.originPx } }, by4).found, null, "3 px off");
+  });
+
   test("only offered: the surest just under the line, the shapes in the same order", () => {
     const answer = looked(detection(35, { x: 10, y: 17.5 }, 0.9), hexFind("rows", 26, { x: 350, y: 250 }, 0.8), NO_HEX, 700, 500);
     const offered = offeredOnly(answer);

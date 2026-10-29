@@ -180,25 +180,25 @@ export function replacementFound(
   return { found, ownGrid };
 }
 
-/** How far apart two grids' cell sizes may be and still be one grid, before their cells are compared. */
-const SAME_SPACING = 0.25;
-
 /**
  * Whether a find puts its cells where a kept grid has them: the same
- * shape, cells of nearly one size, and the kept grid's cells at the map's
- * four corners and its middle each within FOUND_SNAP of a found cell's
- * center (FOUND_SNAP_PX at least). A size that differs a little adds up
- * across the map, so the corners show it where the middle alone would
- * not. A whole fraction of the kept cell puts a center on every kept one,
- * so a size that differs a lot is told by the sizes. The kept grid was
- * scaled up with the art, its errors with it, so the slack grows by as
- * much (D-261029-54).
+ * shape, cells of one size, and the kept grid's cells at the map's four
+ * corners and its middle each within FOUND_SNAP of a found cell's center
+ * (FOUND_SNAP_PX at least). A size that differs a little adds up across
+ * the map, so the corners show it where the middle alone would not. A
+ * grid of another spacing can put a center on all five kept ones (100 px
+ * squares and 80 px ones from (10, 10) meet every 400 px), so the sizes
+ * are compared first: they may differ by the slack at most, which the
+ * middle and a corner already ask of a grid 5 or more cells across. The
+ * kept grid was scaled up with the art, its errors with it, so the
+ * slack's pixel floor grows by as much (D-261029-54). Its share of a
+ * cell grows already, with the kept cell.
  */
 export function keptGridHolds(found: FoundGrid, kept: KeptGrid, shape: GridShape | undefined, map: { widthPx: number; heightPx: number }): boolean {
   if (found.shape !== shape) return false;
-  if (Math.abs(found.cal.cellPx / kept.cellPx - 1) > SAME_SPACING) return false;
+  const slack = Math.max(FOUND_SNAP_PX * Math.max(1, kept.scale), kept.cellPx * FOUND_SNAP);
+  if (Math.abs(found.cal.cellPx - kept.cellPx) > slack) return false;
   const g = gridOfShape(shape);
-  const slack = Math.max(FOUND_SNAP_PX, kept.cellPx * FOUND_SNAP) * Math.max(1, kept.scale);
   const inset = Math.min(kept.cellPx, map.widthPx, map.heightPx) / 2;
   const points = [
     { x: inset, y: inset },
