@@ -41,7 +41,6 @@ import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx"
 import { DragMarks } from "../DragMarks.tsx";
 import { useBoardText, type BoardTextInput, type TokenText } from "../useBoardText.ts";
 import { decorPlace, mapLabelInk, viewPill } from "./isoText.ts";
-import { pressCells, type PressCell } from "../isoPlace.ts";
 import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type DrawPiece, type Item, type StandeeIn } from "./buckets.ts";
@@ -59,6 +58,7 @@ import { useLayoutReport } from "./isoTest.ts";
 import { ON_GROUND, standeeShape, type Seat } from "./standee.ts";
 import { COVER_INSET, drawsInset } from "../../features/attach/groups.ts";
 import { sceneGrid } from "#shared/rules/grid.ts";
+import { flatPressTokens, keepRingPairs, sameIso } from "./renderCache.ts";
 
 /**
  * The isometric board (docs/design-v1-isometric-view.md 5.1): two stages,
@@ -131,6 +131,7 @@ const EMPTY_CHUNKS: Record<string, BuildChunk> = {};
 const EMPTY_TEMPLATES: RoomState["templates"] = {};
 const EMPTY_TOKENS: RoomState["tokens"] = {};
 const NO_RINGS: readonly string[] = [];
+const NO_RING_PAIRS: ReadonlySet<string> = new Set();
 /** The most an animation frame gives to standing areas as their real shapes (docs/design-v1-iso-area-shapes.md 6). */
 const VOLUME_SLICE_MS = 6;
 /** While areas still build, how often the ones done since come in. */
@@ -359,7 +360,9 @@ function IsoBoardImpl(props: IsoBoardProps) {
     const list = entries.filter((e) => volumesNow.standing.has(e.id)).map((e) => ({ id: e.id, color: e.look.color, caught: caughtTokens(e.template, e.ctx, scene.id) }));
     return ringsAtBase(list, byId, fog, grid);
   }, [volumesNow, entries, scene.id, byId, fog, grid]);
-  const isoAreas = useMemo((): IsoAreas => ({ ctx: stillCtx, ringsUp: rings?.pairs ?? new Set(), world: stand ? world : null }), [stillCtx, rings, stand, world]);
+  const ringPairs = useRef(NO_RING_PAIRS);
+  const ringsUp = useMemo(() => (ringPairs.current = keepRingPairs(ringPairs.current, rings?.pairs ?? NO_RING_PAIRS)), [rings]);
+  const isoAreas = useMemo((): IsoAreas => ({ ctx: stillCtx, ringsUp, world: stand ? world : null }), [stillCtx, ringsUp, stand, world]);
 
   // The box is made anew each render, so its numbers say when it changed.
   const items = useMemo(() => relief.layout(turn, cull, standees, volumesNow?.pieces ?? []), [relief, synced, turn, cullKey, standees, volumesNow]);
@@ -403,6 +406,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
 
   // Each standee's placing, kept while it is the same, so its node does not render again for a pan.
   const isoCache = useRef(new Map<string, IsoToken>());
+  const flatCache = useRef(new Map<string, IsoToken>());
   const isoOf = useMemo(() => {
     const next = new Map<string, IsoToken>();
     for (const item of items) {
@@ -479,6 +483,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
   }, [standees]);
   // A creature lying flat lays out on the drawn ground under it, where the ground stage copies its picture up a seen column.
   const flatGround = useCallback((t: ViewToken) => drawnFootprintGround(src, occupiedRange(grid, t)) / feet, [src, grid, feet]);
+  const flatIsoOf = useMemo(() => (flatCache.current = flatPressTokens(flatCache.current, flat, turn, flatGround, groundAt)), [flat, turn, flatGround, groundAt]);
   const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id), flatGround(t)), [turn, frames, flatGround]);
   const viewPills = useMemo(() => props.text.pills.map((p) => viewPill(p, isometric(turn), groundAt)), [props.text.pills, turn, groundAt]);
   const labelInk = useMemo(
@@ -567,7 +572,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
                 {items.map((item, i) =>
                   item.kind === "run" ? <ReliefRun key={`run${i}`} pieces={item.pieces} dc={dc} /> : props.renderToken(byId.get(item.id)!, isoOf.get(item.id)!, isoText.get(item.id)),
                 )}
-                {flat.map((t) => props.renderToken(t, pressOnly(turn, flatGround(t), pressCells({ x: t.x, y: t.y }, footprint(t), groundAt))))}
+                {flat.map((t) => props.renderToken(t, flatIsoOf.get(t.id)!))}
               </Group>
             </Group>
           </Layer>
@@ -702,11 +707,6 @@ function withoutTokens(tokens: Readonly<Record<string, Token | undefined>>, hide
 /** A standing token as the board lays it out: its depth entry, its drawn base and seat, and the box its decor lays out on. */
 type Standing = StandeeIn & { ground: number; capped: boolean; drawn: number; rise: number; inset: number; frame: VBox; ring: VBox };
 
-/** A flat creature's press area on the relief, piece by piece on the drawn ground under it (`press`), its decor on the highest (`ground`, cells). */
-function pressOnly(turn: Turn, ground: number, press: readonly PressCell[]): IsoToken {
-  return { turn, base: ground, ground, drawn: ground, capped: false, rise: 0, inset: 1, pits: [], dim: false, pressOnly: true, press };
-}
-
 /** One run of relief pieces, drawn by one shape that does not listen. */
 const ReliefRun = memo(function ReliefRun(props: { pieces: DrawPiece[]; dc: { readonly current: DrawContext | null } }) {
   const { pieces, dc } = props;
@@ -794,24 +794,4 @@ function sameBox(a: VBox, b: VBox): boolean {
 function sameRect(a: { x: number; y: number; width: number; height: number } | undefined, b: { x: number; y: number; width: number; height: number } | undefined): boolean {
   if (!a || !b) return a === b;
   return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-}
-
-function sameIso(a: IsoToken, b: IsoToken): boolean {
-  return (
-    a.turn === b.turn &&
-    a.base === b.base &&
-    a.drawn === b.drawn &&
-    a.ground === b.ground &&
-    a.capped === b.capped &&
-    a.rise === b.rise &&
-    a.inset === b.inset &&
-    a.dim === b.dim &&
-    a.pressOnly === b.pressOnly &&
-    a.press.length === b.press.length &&
-    a.press.every((c, i) => { const d = b.press[i]!; return c.x === d.x && c.y === d.y && c.w === d.w && c.h === d.h && c.z === d.z; }) &&
-    a.pits.length === b.pits.length &&
-    a.pits.every((p, i) => p.x === b.pits[i]!.x && p.y === b.pits[i]!.y) &&
-    (a.rings ?? NO_RINGS).length === (b.rings ?? NO_RINGS).length &&
-    (a.rings ?? NO_RINGS).every((c, i) => c === b.rings![i])
-  );
 }

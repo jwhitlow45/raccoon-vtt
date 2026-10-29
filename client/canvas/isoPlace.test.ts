@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { rng } from "#shared/testutil.ts";
+import { rng, token } from "#shared/testutil.ts";
 import { groundGroups, isometric, K, toView, TOP_DOWN, type Turn } from "../lib/view.ts";
 import { readFileSync } from "node:fs";
 import { boxGround, drawsHere, liftInPlane, liftView, pressCells, pressRects, viewPointOf } from "./isoPlace.ts";
+import { flatPressTokens } from "./relief/renderCache.ts";
 
 const TURNS: readonly Turn[] = [0, 1, 2, 3];
 
@@ -101,8 +102,11 @@ describe("where marks go in Isometric", () => {
     // The node presses by those pieces, and the board gives a flat creature its own.
     const node = readFileSync(new URL("./TokenNode.tsx", import.meta.url), "utf8");
     assert.match(node, /<FootprintPress rects=\{pressRects\(iso\.turn, iso\.press\)\} \/>/);
+    const placed = flatPressTokens(new Map(), [token("flat", { x: 6, y: 6, size: "large" })], 0, () => 2, ground);
+    assert.deepEqual(placed.get("flat")!.press, cells);
     const board = readFileSync(new URL("./relief/IsoBoard.tsx", import.meta.url), "utf8");
-    assert.match(board, /pressOnly\(turn, flatGround\(t\), pressCells\(\{ x: t\.x, y: t\.y \}, footprint\(t\), groundAt\)\)/);
+    assert.match(board, /flatPressTokens\(flatCache\.current, flat, turn, flatGround, groundAt\)/);
+    assert.match(board, /renderToken\(t, flatIsoOf\.get\(t\.id\)!\)/);
   });
 
   test("a thing under the stand rule draws in exactly one place: flat on the ground stage, or upright on the overlay", () => {
