@@ -1219,6 +1219,20 @@ export function standsAcrossBands(opVersion: number | undefined): boolean {
 }
 
 /**
+ * Whether the rays a walker's area line is judged by end on the squares it
+ * squeezes onto where its walk squeezes on squares, between the walk's
+ * ends, where its trace reads it full size (D-261029-59,
+ * reducer/areaTriggers.ts squeezedAlong), so a mount's line through an area
+ * in a corridor reaches the players who watched it. Ops stored before
+ * version 30 read it full size there, into the rock beside the corridor,
+ * and kept the line to the DM, and replay so. Live ops carry no stored
+ * version and take today's rule.
+ */
+export function raysFromSqueeze(opVersion: number | undefined): boolean {
+  return !(opVersion !== undefined && opVersion < 30);
+}
+
+/**
  * Whether the reducer writes what traps add on its own
  * (docs/design-v1-traps.md 6.6): springings on walks, landings, turns and
  * doors, their stops, occurrences, lines and actions, and an area reminder

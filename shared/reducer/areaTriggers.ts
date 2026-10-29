@@ -1,4 +1,4 @@
-import { attaches, discoversMap, logsByAudience, trapsGoOff, walksRoutes } from "../migrate.ts";
+import { attaches, discoversMap, logsByAudience, raysFromSqueeze, trapsGoOff, walksRoutes } from "../migrate.ts";
 import type { AreaTemplate, AreaTrigger, LogEntry, LogEvent, RoomState, Token } from "../model.ts";
 import { areaSeenMark, gridOfScene, inSightOfNonOwners, seenByNonOwners } from "../project.ts";
 import { MAX_NAME, type Op } from "../protocol.ts";
@@ -7,7 +7,8 @@ import { walkerFor } from "../rules/attach.ts";
 import { describeMove, type MovedToken } from "../rules/moveLeg.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, type Hex, type HexGrid } from "../rules/hex.ts";
 import { hexPiece, pieceReach, placedOnTrace, routePoints, type HexPiece, type RoutePoint } from "../rules/route.ts";
-import { footprintRect, isSqueezed, occupiedHexes, occupiedRange, type PlacedToken } from "../rules/footprint.ts";
+import { canSqueeze, footprintRect, isSqueezed, occupiedHexes, occupiedRange, type PlacedToken } from "../rules/footprint.ts";
+import { previewSqueezed, walkEnds } from "../rules/movement.ts";
 import type { Point, Rect } from "../rules/geom.ts";
 import { convexLive, fogClassOf, pendingGround } from "../rules/held.ts";
 import { sceneWalls } from "../rules/walls.ts";
@@ -143,7 +144,9 @@ function remind(tx: Tx, template: AreaTemplate, token: Token, trigger: AreaTrigg
  * docs/design-v1-per-player-vision.md 6.5).
  */
 function marksOf(tx: Tx, template: AreaTemplate, there: Token, at: RoomState): { seen?: true; seenBy?: string[]; hidden?: true } {
-  const rays = discoversMap(tx.env.opVersion) ? raysOnLiveGround(at, template, there) : null;
+  // From op version 30 a walker squeezing there is read on the squares it squeezes onto (`squeezedAlong`, D-261029-59).
+  const ends = raysFromSqueeze(tx.env.opVersion) && squeezedAlong.get(at)?.get(there.id)?.() === true ? { ...there, squeeze: true as const } : there;
+  const rays = discoversMap(tx.env.opVersion) ? raysOnLiveGround(at, template, ends) : null;
   const perPlayer = areaSeenMark(at, template, there, tx.env);
   if (perPlayer) {
     const { hidden, ...seen } = perPlayer;
@@ -439,6 +442,18 @@ function alongWalkBeforeV14(after: RoomState, walk: Walked): RoomState[] {
  * a sphere on a steep diagonal enters it, and the sweep reads the same
  * hexes as the walk's spots.
  */
+/**
+ * Whether a walker stands squeezed at a point along its walk on squares,
+ * by the rooms along the walk (`alongGroups`): the trace reads it full
+ * size between the walk's ends, so where it squeezes there is the narrow
+ * space's to say, as the walk's seats read it (route.ts walkSqueezes).
+ * Asked only by a line's rays (`marksOf`), so only a creature that entered
+ * an area pays for the test, and from op version 30 alone
+ * (migrate.ts raysFromSqueeze): an area's inclusion still reads the
+ * footprint the trace has.
+ */
+const squeezedAlong = new WeakMap<RoomState, ReadonlyMap<string, () => boolean>>();
+
 function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, routed: boolean): RoomState[] {
   const fpc = after.meta.settings.feetPerCell;
   const { named, all } = moved.walks;
@@ -485,18 +500,25 @@ function alongGroups(after: RoomState, moved: Moved & { walks: GroupWalks }, rou
   };
   const place = (piece: number, f: number): RoomState => {
     const placed = { ...after.tokens };
+    let squeezing: Map<string, () => boolean> | null = null;
     for (const walk of all) {
       const token = after.tokens[walk.tokenId];
       if (!token || walk.from.sceneId !== walk.to.sceneId) continue;
       const p = at(walk, piece, f);
       const spot = placedOnTrace(walk.trace, p.piece, p.end, token, p.spot);
-      if (p.squeezed === undefined) placed[token.id] = spot;
-      else {
+      if (p.squeezed === undefined) {
+        placed[token.id] = spot;
+        // Only a token's own walk squeezes (reducer/tokens.ts carriedAlong), judged from where its piece starts.
+        const walker = walk.trace[p.piece];
+        if (walk.carriedBy === undefined && walker && canSqueeze(token) && !isSqueezed(spot)) (squeezing ??= new Map()).set(token.id, () => previewSqueezed(after, walkEnds(after, walker)(p.spot)));
+      } else {
         const { squeeze: _squeeze, ...rest } = spot;
         placed[token.id] = p.squeezed ? { ...rest, squeeze: true } : rest;
       }
     }
-    return { ...after, tokens: placed };
+    const room = { ...after, tokens: placed };
+    if (squeezing) squeezedAlong.set(room, squeezing);
+    return room;
   };
   const out: RoomState[] = [];
   if (routed) {
