@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { GridShape, RoomState, StairMark, Token } from "../model.ts";
+import type { FreeWall, GridShape, RoomState, StairMark, Token } from "../model.ts";
+import { chunkKey, wallChunk } from "../keys.ts";
 import type { Op } from "../protocol.ts";
 import { actor, apply, DM, room, scene, token } from "../testutil.ts";
 import { placedOnHex } from "./footprint.ts";
@@ -12,6 +13,7 @@ import { landedElevation, legStop, ownWalk } from "./movement.ts";
 import { hexRouteFeet, routePoints } from "./route.ts";
 import { coldPartySight, type VisionWorld } from "./vision.ts";
 import type { WalkInput, WalkRoute } from "./walk.ts";
+import { SIGHT } from "./segments.ts";
 import { LEDGE, RAISED, sceneWalls } from "./walls.ts";
 import { COLUMNS, ROWS } from "./hexWalls.testkit.ts";
 import { groupWalkWorld } from "./walkWorld.ts";
@@ -272,6 +274,32 @@ for (const [name, g] of [
       assert.notEqual(found, null, "the straight line takes the goblin over the raised hex, so it is no way");
       assert.ok(found && found !== "none", "a way round it");
       assert.equal(goblinFollows(s, to, found), true);
+    });
+  });
+
+  describe(`${name}: a raised side cut near a rounded corner keeps its top`, () => {
+    test("a window across hex 1,0's sides by its corners leaves every piece of them raised 10 ft, so an eye at 5 ft is stopped all along them", () => {
+      // Built on hex rows and mirrored onto columns: x and y swap.
+      const xy = (x: number, y: number): [number, number] => (g.orient === "rows" ? [x, y] : [y, x]);
+      const s = raised(g, [[g.orient === "rows" ? { col: 1, row: 0 } : { col: 0, row: 1 }, 10]]);
+      const window: FreeWall = { id: "w1", a: xy(1, 0.28125), b: xy(5, 0.296875), f: { kind: "window" } };
+      const { cx, cy } = wallChunk(window);
+      const key = chunkKey("s1", cx, cy);
+      const chunk = s.buildChunks[key] ?? { sceneId: "s1", cx, cy, rev: 0, cells: {}, edges: {} };
+      s.buildChunks = { ...s.buildChunks, [key]: { ...chunk, walls: [...(chunk.walls ?? []), window] } };
+      const walls = sceneWalls(s.scenes.s1!, s.buildChunks);
+      const length = (xy: Float64Array, keep: (k: number) => boolean = () => true) => {
+        let sum = 0;
+        for (let k = 0; 4 * k < xy.length; k++) if (keep(k)) sum += Math.hypot(xy[4 * k + 2]! - xy[4 * k]!, xy[4 * k + 3]! - xy[4 * k + 1]!);
+        return sum;
+      };
+      const p = walls.pieces;
+      const cut = length(p.xy, (k) => (p.tags[k]! & RAISED) !== 0);
+      assert.ok(p.n > walls.stored.n, "the window cuts the raised sides");
+      assert.ok(cut > 0);
+      // Every raised side here tops out at 10 ft, and the window lets sight through: the eye's set is exactly the raised pieces.
+      assert.ok(Math.abs(length(walls.sight(5).pieces) - length(p.xy, (k) => (p.tags[k]! & (RAISED | SIGHT)) !== 0)) < 1e-9);
+      assert.ok(Math.abs(length(walls.sight(5).pieces) - cut) < 1e-9);
     });
   });
 

@@ -1326,29 +1326,23 @@ export class WallSet {
     const g = this.#grid;
     const tops = new Int16Array(p.n);
     if (g.relief && isHex(g.grid)) {
-      const hex = g.grid;
-      const ground = g.relief.ground;
-      const at = (h: Hex) => {
-        const i = h.col - g.gx;
-        const j = h.row - g.gy;
-        return i < 0 || j < 0 || i >= g.w || j >= g.h ? 0 : ground[j * g.w + i]!;
-      };
+      // A piece of a hex side keeps the top of the raised side it was cut from: the stored one running along it through its
+      // middle. Corners are rounded onto the lattice, so the hex centers nearest a short piece by a corner may name another side.
+      const s = this.stored;
+      const index = this.storedIndex;
       for (let k = 0; k < p.n; k++) {
         if (!(p.tags[k]! & RAISED)) continue;
-        // A piece of a hex side: its middle lies on the side, between the two hexes whose centers are nearest it.
-        const m = { x: (p.xy[4 * k]! + p.xy[4 * k + 2]!) / 2, y: (p.xy[4 * k + 1]! + p.xy[4 * k + 3]!) / 2 };
-        const a = hexAt(hex, m);
-        let b = a;
-        let best = Infinity;
-        for (const n of hexNeighbors(hex, a)) {
-          const c = hexCenter(hex, n);
-          const d = (c.x - m.x) * (c.x - m.x) + (c.y - m.y) * (c.y - m.y);
-          if (d < best) {
-            best = d;
-            b = n;
-          }
-        }
-        tops[k] = Math.max(at(a), at(b));
+        const ax = p.xy[4 * k]!;
+        const ay = p.xy[4 * k + 1]!;
+        const bx = p.xy[4 * k + 2]!;
+        const by = p.xy[4 * k + 3]!;
+        const mx = (ax + bx) / 2;
+        const my = (ay + by) / 2;
+        let top = 0;
+        index.query(mx, my, mx, my, RAISED, (j) => {
+          if (alongSide(s.xy, j, ax, ay, bx, by)) top = Math.max(top, this.storedTops[j]!);
+        });
+        tops[k] = top;
       }
     } else if (g.relief) {
       const ground = g.relief.ground;
@@ -1369,6 +1363,26 @@ export class WallSet {
     }
     return (this.#pieceTops = tops);
   }
+}
+
+/** Split points lie on the 1/64 lattice, so a piece of a slanted side may stand off it by up to half a lattice step. */
+const SIDE_SLACK = 1 / 64;
+
+/** Whether the piece from (ax, ay) to (bx, by) lies along stored segment `j`: parallel to it, its middle on it. */
+function alongSide(xy: Float64Array, j: number, ax: number, ay: number, bx: number, by: number): boolean {
+  const cx = xy[4 * j]!;
+  const cy = xy[4 * j + 1]!;
+  const ex = xy[4 * j + 2]! - cx;
+  const ey = xy[4 * j + 3]! - cy;
+  const len = Math.hypot(ex, ey);
+  const px = bx - ax;
+  const py = by - ay;
+  const plen = Math.hypot(px, py);
+  if (len === 0 || plen === 0 || Math.abs(px * ey - py * ex) / (len * plen) > SIDE_SLACK) return false;
+  const mx = (ax + bx) / 2 - cx;
+  const my = (ay + by) / 2 - cy;
+  const t = (mx * ex + my * ey) / (len * len);
+  return Math.abs(mx * ey - my * ex) / len <= SIDE_SLACK && t >= 0 && t <= 1;
 }
 
 /** The stored segments of a build under an automatic walls rule: grid edges and raised edges, pillar squares, then free walls. */
