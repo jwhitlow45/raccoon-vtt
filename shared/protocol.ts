@@ -2017,6 +2017,8 @@ export const clientOps = [
    */
   op("vision.holders", {
     sceneId: id,
+    /** Absent on older clients and stored picks. Zero names a list not created yet. */
+    rev: z.number().int().min(0).optional(),
     // Bounded by the roster, so a seventh name reaches the reducer, which refuses it in the DM's words (map.ts HOLDERS_FULL, review PV1-O6).
     on: z
       .array(id)
@@ -2318,7 +2320,11 @@ export const clientOps = [
   op("encounter.setValues", {
     values: z.array(z.strictObject({ entryId: id, value: z.number().int().min(-50).max(100).nullable() })).min(1).max(MAX_ENTRIES_PER_OP),
   }),
-  op("encounter.reorder", { entryIds: z.array(id).min(1).max(MAX_ENTRIES_PER_OP) }),
+  op("encounter.reorder", {
+    entryIds: z.array(id).min(1).max(MAX_ENTRIES_PER_OP),
+    /** Move after ends the mount's turn first. Its moved row must not act twice in that round. */
+    finished: z.strictObject({ entryId: id, round: z.number().int().min(1) }).optional(),
+  }),
   /**
    * `from` names the turn the press ends: the acting row, null for Start
    * before any turn, and the round, since a lone combatant's next turn has

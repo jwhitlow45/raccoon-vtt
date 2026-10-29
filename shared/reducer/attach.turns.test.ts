@@ -6,7 +6,9 @@ import { projectState } from "../project.ts";
 import type { Op } from "../protocol.ts";
 import { applyOp, type Applied } from "../reducer.ts";
 import { sortEntries } from "../rules/initiative.ts";
-import { DM, P1, P2, actor, character, effect, env, room, token } from "../testutil.ts";
+import { DM, P1, P2, actor, character, effect, env, room, scene, token } from "../testutil.ts";
+import { sharedMounts } from "./encounter.ts";
+import { Tx } from "./tx.ts";
 
 /**
  * A controlled mount's turn is its rider's (docs/design-v1-attach.md 7.1):
@@ -76,6 +78,27 @@ function fight(setup?: (s: RoomState) => void) {
 }
 
 describe("the mount's row on a controlled ride (7.1)", () => {
+  test("GP2-2: character-only rows do not move or share an off-scene ride, while old operations replay it", () => {
+    const s = room({
+      scenes: { s1: scene("s1"), s2: scene("s2") },
+      characters: { bree: character("bree"), horse: character("horse") },
+      tokens: {
+        bree: token("bree", { sceneId: "s2", size: "medium", x: 5, y: 4, actor: { ref: "bree" } }),
+        horse: token("horse", { sceneId: "s2", size: "large", x: 4, y: 4, actor: { ref: "horse" } }),
+      },
+    });
+    const started = applyOp(s, { t: "encounter.start", entries: [{ id: "eb", characterId: "bree", value: 16 }, { id: "eh", characterId: "horse", value: 8 }] }, DM, env(1));
+    assert.ok(started.ok);
+    for (const opVersion of [32, 33, undefined]) {
+      const environment = { ...env(2), opVersion };
+      const result = applyOp(started.state, { t: "token.attach", tokenId: "bree", to: "horse", kind: "ride", steer: true, x: 5, y: 4, elevation: 0 }, DM, environment);
+      assert.ok(result.ok);
+      assert.equal(result.state.encounter!.entries.find((e) => e.id === "eh")!.value, opVersion === 32 ? 16 : 8, `version ${opVersion}: no off-scene value or order change`);
+      assert.deepEqual(sharedMounts(new Tx(result.state, DM, environment), "bree"), opVersion === 32 ? ["horse"] : [], `version ${opVersion}: no off-scene turn sharing`);
+      const here = { ...result.state, meta: { ...result.state.meta, playerSceneId: "s2" } };
+      assert.deepEqual(sharedMounts(new Tx(here, DM, environment), "bree"), ["horse"], "the same visible ride shares on the players' scene");
+    }
+  });
   test("takes its rider's value and goes right after it, when it has not acted this round", () => {
     const f = fight().next().ride();
     assert.deepEqual(f.order(), ["bree", "horse", "gob", "ogre"]);

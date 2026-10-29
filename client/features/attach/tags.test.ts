@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { canApply } from "#shared/permissions.ts";
 import { applyOp } from "#shared/reducer.ts";
-import type { ClientOp, Op } from "#shared/protocol.ts";
+import { opSchema, type ClientOp, type Op } from "#shared/protocol.ts";
 import type { Encounter, RoomState, Token } from "#shared/model.ts";
-import { character, DM, entry, env, P1, P2, room, token } from "#shared/testutil.ts";
+import { actor, character, DM, entry, env, P1, P2, room, token } from "#shared/testutil.ts";
 import { carriesTag, linkTag, marksTime, moveAfterRider, panelLinkTags, rowLink, steerChoice, steerOp } from "./tags.ts";
 import { copyFor } from "./testing.ts";
 
@@ -85,14 +85,72 @@ describe("Move after Bree", () => {
   }
   const row = (state: RoomState, id: string) => state.encounter!.entries.find((e) => e.id === id)!;
 
+  test("FU23A-AT-1: finishing a mount ahead of its rider does not skip the rider or repeat the mount's duration tick", () => {
+    for (const between of [false, true]) {
+      let state = fight({ value: 20 });
+      if (between) state.encounter!.entries = state.encounter!.entries.map((e) => e.id === "i-gob" ? { ...e, value: 18 } : e);
+      const offer = moveAfterRider(state, row(state, "i-horse"));
+      assert.ok(offer);
+      let seq = 10;
+      const run = (op: ClientOp) => {
+        const result = applyOp(state, opSchema.parse(op), DM, env(seq++));
+        assert.ok(result.ok, result.ok ? "" : result.message);
+        state = result.state;
+      };
+      for (const op of offer.ops) run(op);
+      assert.equal(state.encounter!.activeEntryId, between ? "i-gob" : "i-bree", "the original next row acts");
+      assert.equal(row(state, "i-horse").skipRound, 2, "the mount already finished its own row this round");
+      if (between) run({ t: "encounter.next" });
+      assert.equal(state.encounter!.activeEntryId, "i-bree");
+      run({ t: "encounter.next" });
+      assert.notEqual(state.encounter!.activeEntryId, "i-horse", "its own row never ticks again this round");
+    }
+  });
+
+  test("FU23A-AT-1: ending a last mount starts the next round and does not skip its new round's row", () => {
+    let state = fight();
+    const offer = moveAfterRider(state, row(state, "i-horse"));
+    assert.ok(offer);
+    let seq = 10;
+    for (const op of [...offer.ops, { t: "encounter.next" } as const]) {
+      const result = applyOp(state, opSchema.parse(op), DM, env(seq++));
+      assert.ok(result.ok);
+      state = result.state;
+    }
+    assert.equal(state.encounter!.round, 3);
+    assert.equal(state.encounter!.activeEntryId, "i-horse");
+    assert.equal(row(state, "i-horse").markRound, 3, "its rider shared the new turn");
+  });
+
+  test("FU23A-AT-1: a mount left acting after defeated rows are skipped can move in its next round", () => {
+    let state = fight({ value: 20 });
+    state.meta.settings = { ...state.meta.settings, skipDefeated: true };
+    state.characters.bree = { ...state.characters.bree!, actor: actor({ life: "dead" }) };
+    state.tokens.goblin = { ...state.tokens.goblin!, actor: { inline: actor({ life: "dead" }) } };
+    const offer = moveAfterRider(state, row(state, "i-horse"));
+    assert.ok(offer);
+    let seq = 10;
+    for (const op of offer.ops) {
+      const result = applyOp(state, opSchema.parse(op), DM, env(seq++));
+      assert.ok(result.ok, result.ok ? "" : result.message);
+      state = result.state;
+    }
+    assert.equal(state.encounter!.round, 3);
+    assert.equal(state.encounter!.activeEntryId, "i-horse");
+    assert.equal(row(state, "i-horse").skipRound, 2);
+    assert.equal(row(state, "i-horse").value, 15);
+    assert.deepEqual(state.encounter!.entries.map((e) => e.id), ["i-bree", "i-horse", "i-gob"]);
+  });
+
   test("on the mount's acting row, it takes its rider's value and goes right after the rider's row, as one gesture", () => {
     const state = fight();
     const offer = moveAfterRider(state, row(state, "i-horse"));
     assert.ok(offer);
     assert.equal(offer.riderName, "Bree");
     assert.deepEqual(offer.ops, [
+      { t: "encounter.next", from: { entry: "i-horse", round: 2 } },
       { t: "encounter.setValue", entryId: "i-horse", value: 15 },
-      { t: "encounter.reorder", entryIds: ["i-bree", "i-horse", "i-gob"] },
+      { t: "encounter.reorder", entryIds: ["i-bree", "i-horse", "i-gob"], finished: { entryId: "i-horse", round: 2 } },
     ] satisfies ClientOp[]);
   });
 
@@ -107,7 +165,7 @@ describe("Move after Bree", () => {
         entries: [entry("i-horse", { tokenId: "horse", value: 15, tieOrder: 0 }), entry("i-bree", { tokenId: "bree", value: 15, tieOrder: 1 }), entry("i-gob", { tokenId: "goblin", value: 12 })],
       } as Encounter;
     });
-    assert.deepEqual(moveAfterRider(tied, row(tied, "i-horse"))?.ops, [{ t: "encounter.reorder", entryIds: ["i-bree", "i-horse", "i-gob"] }]);
+    assert.deepEqual(moveAfterRider(tied, row(tied, "i-horse"))?.ops, [{ t: "encounter.next", from: { entry: "i-horse", round: 2 } }, { t: "encounter.reorder", entryIds: ["i-bree", "i-horse", "i-gob"], finished: { entryId: "i-horse", round: 2 } }]);
   });
 
   test("never on another row, a row not acting, a free ride, or a rider with no value", () => {

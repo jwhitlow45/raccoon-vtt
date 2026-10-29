@@ -27,10 +27,10 @@ import {
   unbindFromEntry,
   type StoredDuration,
 } from "../rules/durations.ts";
-import { attaches, combatUses, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, revealsRowAnew, takesBackTurnOnly } from "../migrate.ts";
+import { attaches, combatUses, hiddenRowsShareNoMount, logsByAudience, marksHadTurn, mountsOnPlayerScene, revealsRowAnew, takesBackTurnOnly } from "../migrate.ts";
 import { LIMITS } from "../limits.ts";
 import { holderOf } from "../rules/attach.ts";
-import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners, rowSeenMark, seenMark, stableStringify } from "../project.ts";
+import { activeRowShownTo, inSightOfNonOwners, rowSeenByNonOwners, rowSeenMark, seenByNonOwners, seenMark, stableStringify } from "../project.ts";
 import { effectEvent } from "../rules/hp.ts";
 import { actorOfEntry, groupKeyFor, nextTurn, placeEntry, renumber, rowCharacter, scoredValue, sortEntries, turnMovedOn } from "../rules/initiative.ts";
 import { gone, invalid, type Env, type ResolvedActor, type Tx } from "./tx.ts";
@@ -89,6 +89,11 @@ export function tokenRow(entries: readonly InitEntry[], state: RoomState, tokenI
   return ref === undefined ? undefined : entries.find((e) => e.tokenId === undefined && e.characterId === ref);
 }
 
+/** Character-only rows can be public off-scene. Their rides must still be visible on the players' scene. */
+export function mountSeenByAll(tx: Tx, token: Token): boolean {
+  return (mountsOnPlayerScene(tx.env.opVersion) ? seenByNonOwners : inSightOfNonOwners)(tx.state, token, tx.env);
+}
+
 /**
  * The mounts a creature's turn shares (docs/design-v1-attach.md 7.1): up
  * its chain of controlled rides, each mount whose rider and itself every
@@ -104,7 +109,7 @@ export function sharedMounts(tx: Tx, creatureId: string): string[] {
     seen.add(rider.id);
     const link = rider.attached;
     const mount = link?.kind === "ride" && link.steer ? holderOf(tx.state.tokens, rider) : undefined;
-    if (!mount || !inSightOfNonOwners(tx.state, rider, tx.env) || !inSightOfNonOwners(tx.state, tx.state.tokens[mount.id]!, tx.env)) break;
+    if (!mount || !mountSeenByAll(tx, rider) || !mountSeenByAll(tx, tx.state.tokens[mount.id]!)) break;
     mounts.push(mount.id);
     rider = tx.state.tokens[mount.id];
   }
@@ -330,7 +335,13 @@ export function encounterReorder(tx: Tx, op: OpOf<"encounter.reorder">): void {
     listed.push(entry);
   }
   const rest = sortEntries(encounter.entries).filter((e) => !seen.has(e.id));
-  writeEncounter(tx, { ...encounter, entries: renumber([...listed, ...rest]) });
+  let ordered = renumber([...listed, ...rest]);
+  const finished = op.finished;
+  if (finished) {
+    if (!seen.has(finished.entryId) || finished.round > encounter.round || (finished.round === encounter.round && finished.entryId === encounter.activeEntryId)) throw invalid("that turn has not finished");
+    ordered = ordered.map((e) => e.id === finished.entryId ? { ...e, skipRound: finished.round } : e);
+  }
+  writeEncounter(tx, { ...encounter, entries: ordered });
 }
 
 export function encounterUpdate(tx: Tx, op: OpOf<"encounter.update">): void {

@@ -118,10 +118,10 @@ function riderRow(entries: readonly InitEntry[], rider: Token): InitEntry | unde
 }
 
 /**
- * The DM's "Move after Bree" on a controlled mount's acting row (7.1): a
- * ride taken while the mount's own row acts moves no row, so once its turn
- * is done the DM can put it right after its rider with the rider's value.
- * The value and the order go as one gesture. Null when the
+ * The DM's "End turn and move after Bree" on a controlled mount's acting
+ * row (7.1): finish in the existing order so no creature between the mount
+ * and rider loses its turn, then move the mount with its rider's value.
+ * The completed mount is passed over for the rest of that round. Null when the
  * row is not the acting one, it has no controlling rider with a row and a
  * value, or it already stands right after that row with that value.
  */
@@ -138,8 +138,8 @@ export function moveAfterRider(view: Pick<RoomState, "tokens" | "encounter">, en
   const ids = [...order.slice(0, at + 1).map((e) => e.id), entry.id, ...order.slice(at + 1).map((e) => e.id)];
   const now = sortedEntries(encounter.entries).map((e) => e.id);
   if (entry.value === value && now.indexOf(entry.id) === now.indexOf(row.id) + 1) return null;
-  const ops: ClientOp[] = [];
+  const ops: ClientOp[] = [{ t: "encounter.next", from: { entry: entry.id, round: encounter.round } }];
   if (entry.value !== value) ops.push({ t: "encounter.setValue", entryId: entry.id, value });
-  ops.push({ t: "encounter.reorder", entryIds: ids });
+  ops.push({ t: "encounter.reorder", entryIds: ids, finished: { entryId: entry.id, round: encounter.round } });
   return { riderName: displayName(rider), ops };
 }

@@ -316,7 +316,7 @@ function HolderList(props: { sceneId: string; busy: boolean }) {
   const underId = useId();
   const send = (on: string[]) => {
     setRefusal(null);
-    actions.dispatch({ t: "vision.holders", sceneId, on });
+    actions.dispatch({ t: "vision.holders", sceneId, on, rev: holders?.[sceneId]?.rev ?? 0 });
   };
   const backTo = (memberId: string) => {
     setAsking(null);

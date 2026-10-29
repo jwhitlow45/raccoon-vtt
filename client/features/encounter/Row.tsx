@@ -913,9 +913,9 @@ function RowMenu(props: {
           <RowRollTools entry={entry} />
           {props.moveAfter ? (
             <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>For after its turn: its rider's initiative, right after its rider</span>
+              <span style={{ flex: "1 1 160px", minWidth: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>Ends its turn, then takes its rider's initiative and place right after its rider.</span>
               <Button size="sm" busy={moving.waiting} onClick={() => props.moveAfter && !moving.waiting && moving.send(props.moveAfter.ops)}>
-                Move after {props.moveAfter.riderName}
+                End turn and move after {props.moveAfter.riderName}
               </Button>
             </div>
           ) : null}

@@ -47,6 +47,20 @@ function revealed(tile: FogTile | undefined, x: number, y: number): boolean {
 }
 
 describe("the contract (6.7)", () => {
+  test("PV-HOLDERS-REV: a stale pick cannot turn off a newly joined holder or forget their map", () => {
+    const s = perPlayerRoom();
+    const stale = opSchema.parse({ t: "vision.holders", sceneId: "s1", on: ["p1"], rev: 0 });
+    const result = applyOp(s, stale, DM, env(5));
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.message, /changed/);
+    assert.equal(s.holders.s1!.entries[1]!.on, true);
+    assert.ok(s.exploredBy[holderTileKey("s1", "p2", 0, 0)]);
+    const fresh = applyOp(s, { ...stale, rev: 1 } as Op, DM, env(6));
+    assert.ok(fresh.ok);
+    assert.equal(fresh.state.holders.s1!.entries[1]!.on, false);
+    const old = applyOp(s, stale, DM, { ...env(5), opVersion: 32 });
+    assert.ok(old.ok, "stored operations keep their replacement rule");
+  });
   test("a lower cap in force refuses no explore op stored under the design's most (SEC-PV1-4, PV1-O4)", async () => {
     const limits = LIMITS as { sightHoldersPerScene: number };
     const cap = limits.sightHoldersPerScene;

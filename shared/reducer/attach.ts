@@ -9,7 +9,7 @@ import { footprintSize } from "../rules/footprint.ts";
 import { sceneGrid } from "../rules/grid.ts";
 import { sameSpot, turnUnderWay, withStop } from "../rules/path.ts";
 import { renumber, sortEntries } from "../rules/initiative.ts";
-import { rowLeadsMounts, sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
+import { mountSeenByAll, rowLeadsMounts, sharedMounts, tokenRow, writeEncounter } from "./encounter.ts";
 import { carriedAlong, dismounted, hiddenTurnOf, judgedIn, mountCost, placeCarried, sharesTurn, sortedById, startStop, withPath } from "./tokens.ts";
 import { invalid, type Tx } from "./tx.ts";
 
@@ -119,7 +119,7 @@ function controlledRide(tx: Tx, riderId: string, mountId: string): void {
   const actingRow = encounter.entries.find((e) => e.id === encounter.activeEntryId);
   const turnShown = encounter.activeEntryId === null || rowLeadsMounts(tx, encounter, actingRow);
   // The rows move only for a ride every player sees, both tokens and so the link, since the tracker shows the move to all (section 10).
-  const shown = seenByAll(tx, riderId) && seenByAll(tx, mountId) && rowLeadsMounts(tx, encounter, riderRow) && turnShown;
+  const shown = mountSeenByAll(tx, tx.token(riderId)) && mountSeenByAll(tx, tx.token(mountId)) && rowLeadsMounts(tx, encounter, riderRow) && turnShown;
   if (shown && riderRow && mountRow && riderRow.id !== mountRow.id && mountRow.id !== encounter.activeEntryId) {
     const sorted = sortEntries(entries);
     const acting = sorted.findIndex((e) => e.id === encounter.activeEntryId);

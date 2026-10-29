@@ -7,7 +7,7 @@ import { allRevealedTiles, decodeTile, encodeTile, isEmptyBits, pointInPolygonFi
 import { occupiedCells, occupiedHexes } from "../rules/footprint.ts";
 import { footprintGround } from "../rules/heights.ts";
 import { boxTouchesCell, labelBox } from "../rules/labels.ts";
-import { attaches, discoversMap } from "../migrate.ts";
+import { attaches, discoversMap, guardsHolderPick } from "../migrate.ts";
 import { carriedIndex, holderOf, onHolder } from "../rules/attach.ts";
 import { ridingGroup } from "../rules/moveLeg.ts";
 import { sortedById } from "./tokens.ts";
@@ -292,6 +292,7 @@ export function visionHolders(tx: Tx, op: OpOf<"vision.holders">): void {
   for (const id of op.on) if (tx.state.members[id]?.kind !== "player") throw invalid("only a player on the roster sees for themselves");
   const list: SightHolders = tx.state.holders?.[scene.id] ?? { sceneId: scene.id, rev: 0, entries: [] };
   const named = new Set(op.on);
+  if (guardsHolderPick(tx.env.opVersion) && op.rev !== undefined && op.rev !== list.rev) throw invalid("The sight holder list changed. Try again.");
   const entries = list.entries.map((e) => ({ memberId: e.memberId, on: named.has(e.memberId) }));
   for (const id of op.on) if (!entries.some((e) => e.memberId === id)) entries.push({ memberId: id, on: true });
   for (const e of list.entries) if (e.on && !named.has(e.memberId)) forgetHolder(tx, scene.id, e.memberId);
