@@ -1182,7 +1182,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await shots.take(dm, "hx6-difficult-ground");
 
     await pickOption(dm, "Map builder", "Builder mode", "Erase");
-    await buildBar(dm).locator("[data-options-line]").filter({ hasText: "Drag to erase walls, doors, windows, difficult ground, labels, stamps and lights." }).waitFor();
+    await buildBar(dm).locator("[data-options-line]").filter({ hasText: "Drag to erase walls, doors, windows, heights, stairs, difficult ground, labels, stamps and lights." }).waitFor();
     await tapAt(dm, hexCenter(G, { col: 4, row: 14 }));
     await waitFor("hex 4,14 erased", () => (!rough(4, 14) && rough(3, 14) && rough(5, 14) ? true : null));
     const p = corner(10, 10, 1);
@@ -1418,8 +1418,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await editor.waitFor();
     await editor.getByRole("button", { name: "Afterwards", exact: true }).click();
     const pit = editor.getByRole("switch", { name: "Opens a pit" });
-    assert.equal(await pit.isDisabled(), true, "no pit on hexes");
-    assert.ok((await describedBy(pit)).some((l) => l.includes("A pit needs heights, which hex scenes get later.")));
+    assert.equal(await pit.isDisabled(), false, "from H3 a pit opens on hexes too (HX-8)");
     await shots.take(dm, "hx7-trap-pane");
     await editor.getByRole("button", { name: "Done", exact: true }).click();
     await editor.waitFor({ state: "detached" });
@@ -1670,6 +1669,170 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
           await bar.locator("[data-options-line]").filter({ hasText: ROOM_LINE }).waitFor();
           off.push(...alignmentLines(await measureAlignment(bar), `the Fog tool's Builder room on hexes at ${at}`));
           await shots.take(page, `hx9b-fog-bar-${size.name}-${scale * 100}`);
+          await pickTool(page, "Select");
+        }
+      }
+    } finally {
+      await phoneContext?.close();
+    }
+    assert.deepEqual(off, [], "out of line by more than 1 px");
+  });
+
+  /*
+   * Lane HX-8's steps (HX8-): heights, stairs and pits on hexes, phase H3,
+   * on a scene of their own. A 10 ft terrace along row 8 from column 12,
+   * reached by a stair on hex 11,8 facing east, its up side.
+   */
+  const terrace = { scene: randomUUID(), gob: randomUUID(), entry: randomUUID(), pit: randomUUID(), thorn: randomUUID() };
+  const TERRACE = [12, 13, 14, 15, 16].map((col) => ({ col, row: 8 }));
+  const terraceChunk = () => dmSocket.state?.buildChunks[`${terrace.scene}:0,0`];
+  const groundOf = (h: Hex) => {
+    const c = dmSocket.state?.buildChunks[`${terrace.scene}:${Math.floor(h.col / 16)},${Math.floor(h.row / 16)}`];
+    if (!c?.heights) return 0;
+    const bytes = Buffer.from(c.heights, "base64");
+    const k = (h.row % 16) * 16 + (h.col % 16);
+    const u = bytes[2 * k]! + bytes[2 * k + 1]! * 256;
+    return u >= 32768 ? u - 65536 : u;
+  };
+  const onTerraceHex = (id: string, hex: Hex) => {
+    const at = placedOnHex(G, { size: "medium", x: 0, y: 0 }, hex);
+    const t = dmSocket.state?.tokens[id];
+    return t && Math.abs(t.x - at.x) < 1e-9 && Math.abs(t.y - at.y) < 1e-9 ? t : null;
+  };
+
+  test("HX8-1. Heights and stairs paints a terrace by hexes and a stair facing it, under the chunk's hex rows stamp", async () => {
+    await ops.send({ t: "scene.create", scene: { id: terrace.scene, name: "Terrace", bounds: BOUNDS, gridShape: "hexRows" } });
+    await waitFor("the terrace scene", () => dmSocket.state?.scenes[terrace.scene] ?? null);
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, terrace.scene);
+    await dm.keyboard.press("Escape");
+    await ops.send({ t: "scene.update", sceneId: terrace.scene, patch: { blockMovement: true } });
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await pickTool(dm, "Map builder");
+    await pickOption(dm, "Map builder", "Builder mode", "Heights and stairs");
+    const bar = buildBar(dm);
+    assert.equal((await bar.getByRole("group", { name: "Height" }).innerText()).trim(), "10 ft up");
+    await holdDrag(dm, hexCenter(G, TERRACE[0]!), hexCenter(G, TERRACE[4]!));
+    await dm.mouse.up();
+    await waitFor("the terrace's five hexes at 10 ft", () => (TERRACE.every((h) => groundOf(h) === 10) ? true : null));
+    assert.equal(groundOf({ col: 12, row: 7 }) + groundOf({ col: 12, row: 9 }) + groundOf({ col: 11, row: 8 }), 0, "and no hex beside them");
+    assert.equal(terraceChunk()?.grid, "hexRows", "its chunk carries the shape");
+
+    await pickOption(dm, "Map builder", "Paint", "Mark stairs");
+    // A press on the compact chip pins it, and the row refits around it in its full form (pages/optionsLayout.ts fitRow), so the arrows may unfold in the row rather than open in a popover.
+    await bar.getByRole("button", { name: /^Stairs point:/ }).click();
+    const popover = dm.getByRole("dialog", { name: "Stairs point" });
+    const east = (within: Locator) => within.getByRole("radio", { name: "Up to the east", exact: true });
+    await east(popover).or(east(bar.locator("[data-options-row]").getByRole("radiogroup", { name: "Stairs point" }))).click();
+    await popover.waitFor({ state: "detached" });
+    await tapAt(dm, hexCenter(G, { col: 11, row: 8 }));
+    await waitFor("the stair facing east", () => (terraceChunk()?.up?.[8 * 16 + 11] === "0" ? true : null));
+    await bar.locator("[data-options-line]").filter({ hasText: "Drag to mark stairs." }).waitFor();
+    await shots.take(dm, "hx8-terrace-and-stair");
+    await pickTool(dm, "Select");
+  });
+
+  test("HX8-2. a goblin walks up the stair onto the terrace, and the walking ruler's feet are the feet its move stores", async () => {
+    await ops.send(creature(terrace.gob, "Terrace goblin", "medium", { col: 8, row: 8 }, { sceneId: terrace.scene }));
+    await waitFor("the terrace goblin", () => onTerraceHex(terrace.gob, { col: 8, row: 8 }));
+    await pickTool(dm, "Ruler");
+    const { group, popover } = await measureChoice(dm);
+    await group.getByRole("radio", { name: "Walking", exact: true }).click();
+    if (popover) {
+      await dm.keyboard.press("Escape");
+      await popover.waitFor({ state: "detached" });
+    }
+    // Six hexes east along row 8, the fourth a climb of 10 ft up the stair: more than the 30 ft of level hexes.
+    await holdDrag(dm, hexCenter(G, { col: 8, row: 8 }), hexCenter(G, { col: 14, row: 8 }));
+    await dm.mouse.up();
+    const line = dm.getByRole("toolbar", { name: "Ruler options" }).locator("[data-options-line]");
+    const reading = await waitFor("the walking reading", async () => {
+      const m = /Walking (\d+) ft/.exec(await line.innerText());
+      return m ? Number(m[1]) : null;
+    });
+    assert.ok(reading > 30, `${reading} ft counts the climb`);
+    await shots.take(dm, "hx8-walking-ruler-up-the-stair");
+    const back = await measureChoice(dm);
+    await back.group.getByRole("radio", { name: "Straight", exact: true }).click();
+    if (back.popover) {
+      await dm.keyboard.press("Escape");
+      await back.popover.waitFor({ state: "detached" });
+    }
+    await pickTool(dm, "Select");
+
+    await ops.send({ t: "encounter.start", entries: [{ id: terrace.entry, tokenId: terrace.gob, value: 12 }] });
+    await ops.send({ t: "encounter.next" });
+    await waitFor("the terrace goblin's turn", () => (dmSocket.state?.encounter?.activeEntryId === terrace.entry ? true : null));
+    await holdDrag(dm, hexCenter(G, { col: 8, row: 8 }), hexCenter(G, { col: 14, row: 8 }));
+    await dm.mouse.up();
+    const up = await waitFor("the goblin on the terrace", () => onTerraceHex(terrace.gob, { col: 14, row: 8 }));
+    assert.equal(up.elevation, 10, "standing on the terrace's ground");
+    const stop = up.path!.stops.at(-1)!;
+    assert.equal(stop.cost, reading, "the move stored the ruler's feet");
+    await shots.take(dm, "hx8-goblin-on-the-terrace");
+    await ops.send({ t: "encounter.end" });
+  });
+
+  test("HX8-3. a pit trap on hexes springs under Thorn's walk: its hexes drop to the floor under the stamp, and Thorn with them", async () => {
+    const pitHexes = [{ col: 5, row: 12 }, { col: 6, row: 12 }];
+    // Traps go off by themselves on the players' scene (rules/traps.ts liveTrapScene).
+    await ops.send({ t: "room.setPlayerScene", sceneId: terrace.scene });
+    await ops.send({
+      t: "trap.create",
+      trap: {
+        id: terrace.pit,
+        sceneId: terrace.scene,
+        name: "Hidden Pit",
+        zone: { cells: [{ x: 5, y: 12, w: 2, h: 1 }] },
+        found: false,
+        rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: true, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false, pit: { floor: -10 } },
+      },
+    });
+    const made = await waitFor("the pit on the DM's copy", () => dmSocket.state?.traps[terrace.pit] ?? null);
+    assert.equal(made.grid, "hexRows");
+    await ops.send(creature(terrace.thorn, "Thorn", "medium", { col: 2, row: 12 }, { sceneId: terrace.scene, kind: "pc" }));
+    await waitFor("Thorn by the pit", () => onTerraceHex(terrace.thorn, { col: 2, row: 12 }));
+    await ops.send({ t: "token.move", tokenId: terrace.thorn, ...placedOnHex(G, { size: "medium", x: 0, y: 0 }, { col: 10, row: 12 }) });
+    const sprung = await waitFor("the pit gone off", () => (dmSocket.state?.traps[terrace.pit]?.state === "sprung" ? true : null));
+    assert.ok(sprung);
+    await waitFor("its hexes at the floor", () => (pitHexes.every((h) => groundOf(h) === -10) ? true : null));
+    assert.equal(groundOf({ col: 7, row: 12 }), 0, "beside it the ground stays");
+    const fell = await waitFor("Thorn in the pit", () => onTerraceHex(terrace.thorn, { col: 5, row: 12 }));
+    assert.equal(fell.elevation, -10);
+    await shots.take(dm, "hx8-pit-sprung");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+  });
+
+  test("HX8-4. Heights and stairs' options on a hex scene, painting a height and marking stairs with six facings, sit within 1 px at each size", async () => {
+    const off: string[] = [];
+    let phoneContext: BrowserContext | null = null;
+    try {
+      for (const size of SIZES) {
+        let page = dm;
+        if (size.touch) {
+          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+          const pages = phoneContext.pages();
+          page = pages[0] ?? (await phoneContext.newPage());
+          if (pages.length === 0) consoles.phone.attach(page);
+        }
+        for (const scale of SCALES) {
+          const at = `${size.name} at ${scale * 100}%`;
+          await openAt(page, size, scale);
+          const panel = await openScenes(page);
+          await viewScene(page, panel, terrace.scene);
+          await page.keyboard.press("Escape");
+          await pickTool(page, "Map builder");
+          const bar = buildBar(page);
+          await pickOption(page, "Map builder", "Builder mode", "Heights and stairs");
+          await pickOption(page, "Map builder", "Paint", "Paint a height");
+          await bar.locator("[data-options-line]").filter({ hasText: "to paint the height" }).waitFor();
+          off.push(...alignmentLines(await measureAlignment(bar), `Heights on hexes at ${at}`));
+          await shots.take(page, `hx8-heights-bar-${size.name}-${scale * 100}`);
+          await pickOption(page, "Map builder", "Paint", "Mark stairs");
+          await bar.locator("[data-options-line]").filter({ hasText: "to mark stairs" }).waitFor();
+          off.push(...alignmentLines(await measureAlignment(bar), `Stairs on hexes at ${at}`));
+          await shots.take(page, `hx8-stairs-bar-${size.name}-${scale * 100}`);
+          await pickOption(page, "Map builder", "Paint", "Paint a height");
           await pickTool(page, "Select");
         }
       }
