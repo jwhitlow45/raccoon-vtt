@@ -1648,15 +1648,13 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
   test("HX9b-4. the Fog tool's options with Builder room picked on a hex scene sit within 1 px at each size", async () => {
     const off: string[] = [];
-    let phoneContext: BrowserContext | null = null;
+    let phone: Awaited<ReturnType<typeof dmPhone>> | null = null;
     try {
       for (const size of SIZES) {
         let page = dm;
         if (size.touch) {
-          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
-          const pages = phoneContext.pages();
-          page = pages[0] ?? (await phoneContext.newPage());
-          if (pages.length === 0) consoles.phone.attach(page);
+          phone ??= await dmPhone(size);
+          page = phone.page;
         }
         for (const scale of SCALES) {
           const at = `${size.name} at ${scale * 100}%`;
@@ -1674,7 +1672,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
         }
       }
     } finally {
-      await phoneContext?.close();
+      await phone?.context.close();
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
@@ -1806,15 +1804,13 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
   test("HX8-4. Heights and stairs' options on a hex scene, painting a height and marking stairs with six facings, sit within 1 px at each size", async () => {
     const off: string[] = [];
-    let phoneContext: BrowserContext | null = null;
+    let phone: Awaited<ReturnType<typeof dmPhone>> | null = null;
     try {
       for (const size of SIZES) {
         let page = dm;
         if (size.touch) {
-          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
-          const pages = phoneContext.pages();
-          page = pages[0] ?? (await phoneContext.newPage());
-          if (pages.length === 0) consoles.phone.attach(page);
+          phone ??= await dmPhone(size);
+          page = phone.page;
         }
         for (const scale of SCALES) {
           const at = `${size.name} at ${scale * 100}%`;
@@ -1838,7 +1834,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
         }
       }
     } finally {
-      await phoneContext?.close();
+      await phone?.context.close();
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
@@ -1949,15 +1945,13 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
 
   test("hx9c-4. Line up grid's options strip with the longest new line, a refused switch, sits within 1 px at each size", async () => {
     const off: string[] = [];
-    let phoneContext: BrowserContext | null = null;
+    let phone: Awaited<ReturnType<typeof dmPhone>> | null = null;
     try {
       for (const size of SIZES) {
         let page = dm;
         if (size.touch) {
-          phoneContext ??= await browser.newContext({ viewport: { width: size.width, height: size.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
-          const pages = phoneContext.pages();
-          page = pages[0] ?? (await phoneContext.newPage());
-          if (pages.length === 0) consoles.phone.attach(page);
+          phone ??= await dmPhone(size);
+          page = phone.page;
         }
         for (const scale of SCALES) {
           const at = `${size.name} at ${scale * 100}%`;
@@ -1982,7 +1976,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
         }
       }
     } finally {
-      await phoneContext?.close();
+      await phone?.context.close();
     }
     assert.deepEqual(off, [], "out of line by more than 1 px");
   });
