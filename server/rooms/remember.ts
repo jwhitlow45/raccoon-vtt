@@ -313,7 +313,7 @@ function changedOn(before: RoomState, after: RoomState, scene: Scene, touch: Sce
       }
     }
   }
-  if (!hex && (touch.chunks.size > 0 || touch.scene)) stairsChanged(out, before, after, scene);
+  if (touch.chunks.size > 0 || touch.scene) stairsChanged(out, before, after, scene);
   for (const { field, id } of touch.marks) {
     const b = shownMark(before, field, id, sceneId);
     const a = shownMark(after, field, id, sceneId);
