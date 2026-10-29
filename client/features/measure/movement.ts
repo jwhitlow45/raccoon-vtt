@@ -5,10 +5,10 @@ import { canSqueeze, footprintRect, snapStep, type PlacedToken } from "#shared/r
 import type { Rect } from "#shared/rules/geom.ts";
 import { legGeometry, legTaken, pathThisTurn, sameSpot } from "#shared/rules/path.ts";
 import { dismountCost } from "#shared/rules/dismount.ts";
-import { onSqueezedLattice, ownWalk, type Walker } from "#shared/rules/movement.ts";
-import { hexRouteFeet, plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkSqueezes, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkTrace } from "#shared/rules/route.ts";
+import { onSqueezedLattice, ownWalk, previewSqueezed, walkEnds, type Walker } from "#shared/rules/movement.ts";
+import { hexRouteFeet, plainLegCost, routeFeet, routeWalk, spotRect, straightCost, walkSqueezes, walkTrace, type LegCost, type RoutePiece, type RoutePoint, type SizedSpot, type WalkSpot, type WalkTrace } from "#shared/rules/route.ts";
 import { formatFeet, type DistanceRules, type Point } from "./ruler.ts";
-import type { Grid } from "#shared/rules/grid.ts";
+import { isHex, sceneGrid, type Grid } from "#shared/rules/grid.ts";
 
 /**
  * How far a creature has moved this turn (features sections 4 and 10), kept
@@ -455,6 +455,9 @@ function lastHalvedSpot(g: Grid, walk: DragWalk): { piece: number; at: RoutePoin
 /** Every word the label names what cost extra by, in the order it names them (`extraWords`). */
 export const EXTRA_WORDS = ["difficult terrain", "squeezing", "overgrowth", "swimming", "crawling", "dragging", "carrying"] as const;
 
+/** How a piece of a walk walks (`walkWords`): at the walker's full size, squeezed, or some of each. */
+export type PieceWalk = "full" | "squeezed" | "both";
+
 /**
  * What cost extra along a route, in the order the label names it: the
  * ground's difficult terrain, squeezing through a narrow space, Plant
@@ -463,17 +466,22 @@ export const EXTRA_WORDS = ["difficult terrain", "squeezing", "overgrowth", "swi
  * docs/design-v1-attach.md 7.3). A piece's extra holds the ground's 1 or
  * 3, 1 for swimming or crawling, never both, and 1 more on every piece
  * while it tows. A squeeze pays its foot in the ground's place, as
- * difficult terrain does, so a piece the walk squeezes along (`squeezed`,
- * by piece) names squeezing for that foot (review GP4-SQUEEZE-LABEL).
+ * difficult terrain does, so the foot of a piece the walk squeezes along
+ * (`walked`, by piece) names squeezing, and one it walks partly squeezed
+ * names both (reviews GP4-SQUEEZE-LABEL, FU36-ASTRA-02, FU36-OPUS-3).
+ * `walked` is asked only for a piece that pays the ground's 1.
  */
-export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSpeed: boolean, towing?: "dragging" | "carrying", squeezed?: readonly boolean[]): string[] {
+export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSpeed: boolean, towing?: "dragging" | "carrying", walked?: (piece: number) => PieceWalk): string[] {
   const found = new Set<string>();
   const tow = towing ? 1 : 0;
   pieces.forEach(([, , extra, swim], i) => {
     const moving = swim === 1 || prone ? 1 : 0;
     const ground = extra - moving - tow;
-    if (ground === 1) found.add(squeezed?.[i] === true ? "squeezing" : "difficult terrain");
-    else if (ground >= 3) found.add("overgrowth");
+    if (ground === 1) {
+      const size = walked?.(i) ?? "full";
+      if (size !== "full") found.add("squeezing");
+      if (size !== "squeezed") found.add("difficult terrain");
+    } else if (ground >= 3) found.add("overgrowth");
     if (swim === 1 && !swimSpeed) found.add("swimming");
     else if (swim === 0 && prone && extra - tow >= 1) found.add("crawling");
     if (towing) found.add(towing);
@@ -482,16 +490,48 @@ export function extraWords(pieces: readonly RoutePiece[], prone: boolean, swimSp
 }
 
 /**
- * What cost extra along a drag's walk (`extraWords`), each piece read
- * squeezed where the walk stands squeezed at its end (route.ts
- * walkSqueezes), as the route search paid for it. `token` is the walker
- * where the walk starts.
+ * What cost extra along a drag's walk (`extraWords`), each piece read at
+ * the size the route search walked it at (`piecesWalked`). `token` is the
+ * walker where the walk starts. A walk squeezes only on a scene whose
+ * walls stop moves (walk.ts WalkWorld `squeezes`).
  */
 export function walkWords(walk: DragWalk, token: MovingToken, swimSpeed: boolean): string[] {
   if (!walk.route) return [];
   const { scenes } = walk.build;
-  const squeezed = scenes && canSqueeze(token) ? walkSqueezes({ scenes, buildChunks: walk.build.buildChunks }, token, walk.route.points, walk.trace).slice(1) : undefined;
-  return extraWords(walk.route.pieces, walk.prone, swimSpeed, walk.towing, squeezed);
+  const scene = scenes?.[token.sceneId];
+  const walked = scenes && scene?.blockMovement === true && canSqueeze(token) ? piecesWalked({ scenes, buildChunks: walk.build.buildChunks }, sceneGrid(scene), token, walk.route.points, walk.trace) : undefined;
+  return extraWords(walk.route.pieces, walk.prone, swimSpeed, walk.towing, walked);
+}
+
+/**
+ * How each piece of a walk walks, as the route search paid for it. On hexes
+ * a piece walks at one size, squeezed where either end squeezes
+ * (hexWalk.ts `#pieceHolds`, rules/movement.ts hexLegOf). On squares each
+ * lattice step pays at the footprint it reaches (walk.ts `extraOf`), and a
+ * piece joins steps of one cost whatever their size, so a straight piece
+ * from rubble into a corridor walks only its last steps squeezed. There
+ * each step is read where the walk's spots put it, which are the search's
+ * steps (route.ts walkSpots), by the search's squeeze test.
+ */
+function piecesWalked(build: BuildState, g: Grid, token: MovingToken, points: readonly RoutePoint[], trace: WalkTrace): (piece: number) => PieceWalk {
+  if (isHex(g)) {
+    const ends = walkSqueezes(build, token, points, trace);
+    return (i) => (ends[i] || ends[i + 1] ? "squeezed" : "full");
+  }
+  let spots: WalkSpot[] | null = null;
+  return (i) => {
+    spots ??= routeWalk(g, trace, build);
+    const at = walkEnds(build, trace[i]!);
+    let squeezed = false;
+    let full = false;
+    for (const s of spots) {
+      if (s.progress[0] !== i || s.progress[1] === 0) continue;
+      if (previewSqueezed(build, at(s))) squeezed = true;
+      else full = true;
+      if (squeezed && full) return "both";
+    }
+    return squeezed ? "squeezed" : "full";
+  };
 }
 
 /** The label's lines (docs/design-v1-movement.md 3.1): the leg's cost with the band's words, what cost extra, and the Half Speed area it would end in. */
