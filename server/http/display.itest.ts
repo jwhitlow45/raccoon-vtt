@@ -142,7 +142,8 @@ describe("display codes and sessions", () => {
     assert.match(body.code, /^[0-9A-HJKMNP-TV-Z]{10}$/);
     assert.equal(body.link, `/display#code=${body.code}`);
     const minutes = (Date.parse(body.expiresAt) - Date.now()) / 60_000;
-    assert.ok(minutes > 9 && minutes <= 10);
+    // The expiry comes from the database's clock, which can run a little ahead of Node's.
+    assert.ok(minutes > 9 && minutes <= 10 + 1 / 60, `expires in ${minutes} minutes`);
 
     const tv = t.client();
     // Typed with a remote: lowercase, grouped, an O for a zero.
