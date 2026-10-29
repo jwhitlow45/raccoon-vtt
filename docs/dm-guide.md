@@ -270,6 +270,8 @@ Two more options wait under **⋯**. **Resize scene** (on by default) makes Appl
 
 **Squares or hexes.** You never have to tell the app which kind of grid a map has, because every search looks for squares, hex rows and hex columns at once. Hexes drawn with heavy lines are found too, even on very large maps. When the app is sure of a grid of the other shape, the scene changes shape to match in the same step. Upload a hex map in a room that starts new scenes on squares, for example, and its scene starts on hexes, lined up, with a line such as "Found hex rows of 70.4 px. The grid is hex rows now." Undo takes the find back, shape and all, and right after an upload **Use default** puts back both the first guess and the shape the scene started with. Once something stands on the new grid that the old one can't keep, such as heights painted on its hexes, Use default leaves the scene as it is and says why.
 
+![Meadow ruins, a new Map image scene made on Squares from a forest map drawn with hex lines: the app's hexes over the art, "Found hex rows of 70 px. The grid is hex rows now." with Use default and Find the grid, and Grid shape on Hex rows in the scene's settings.](dm-guide/hex-find.webp)
+
 Sometimes the scene can't change shape at all, because painted ground, walls or traps already stand on its squares, or because it came with its own grid from a Universal VTT file. Line up grid then tells you what it found and why the scene kept its shape. When the app is less sure, the box only goes on the scene's own grid, and if the other shape looks more likely, the line says so ("These lines may be hex columns of 70.4 px. Change Grid shape to use them."). Change **Grid shape**, and the box moves onto those lines. A map that shows both shapes, such as a square grid drawn over hexagonal floor tiles, never changes shape by itself: the box goes on the scene's own grid, and the line names both sizes.
 
 **A new image for a scene.** When you replace a scene's map image, the new one is searched too. If it has the same proportions as the old one, the scene keeps its grid, scaled to the new image, since you may have lined the old grid up by hand. A grid found on it that differs is only placed as the box in Line up grid, for you to check and **Apply**. Uploading the same file again changes nothing at all. On a scene from a Universal VTT file, which came with an exact grid of its own, any search only places the box, so you can compare the two before you **Apply**.
@@ -307,7 +309,7 @@ A scene won't change shape while it holds something laid out on its own cells, w
 
 **Lining up a hex map.** The box in **Line up grid** is made for hexes. Drag a box over 3 hexes across, which holds 7 hexes, and fine-tune it by its corners. The box keeps the shape of 7 hexes as you drag, resize or nudge it. The app draws the hexes it would make across the whole map, so you can check that they line up everywhere. The option reads **px per hex**, and **Or count the squares** gives way to a line saying counting works on squares, so use the box. **Find the grid** works on a hex scene as on any other: it looks for squares and hexes alike, and when it finds the other shape it can change the scene's shape to match, as [Lining up the grid](#lining-up-the-grid) describes.
 
-![Line up grid on a hex map: a forest map, the app's own hexes drawn over the whole map, the box on 3 hexes across with a handle at each corner, and "Drag a box over 3 hexes across. Fine-tune it by its corners." with 70 px per hex in the options row.](dm-guide/hex-line-up.webp)
+![Line up grid on a hex map: a forest map drawn with hex lines, which the upload's search found, the app's hexes over the art, the box on 3 hexes across with a handle at each corner, and "Found a grid of 70 px hexes." with Use default, Find the grid and 70.00 px per hex.](dm-guide/hex-line-up.webp)
 
 **The size of a hex scene.** In a hex scene's **Size and view** settings, **Size in 5 ft steps** takes **Across** and **Down**, and a line under them says how many hexes that holds, such as 30 hexes across and 22 rows down. The folded group and the scene's row in the scene list give the same count, such as "30 × 22 hexes".
 
@@ -356,6 +358,8 @@ A scene can hold up to 100 lights, 500 stamps and 500 labels, and it can be at m
 
 **Wall lines on a hex scene.** A hex scene has no square edges to follow and no automatic walls, so every wall there is one you draw as a wall line. Pick **Walls/doors** and choose **Wall**, **Door**, **Secret door** or **Window** under **Edge**, then tap the points of the wall one after another. Each tap lands on the nearest hex corner. Press **Done** to put the line down, or tap its first point again to close it into a room. **Undo point** takes back the last point, and **Cancel** drops the line. For one straight wall, drag from one end to the other instead. A long run is cut into pieces for you, at most 8 hexes each. To trace walls in the art that don't follow the hexes, turn off **Snap**, and the points go exactly where you tap. With **Door** chosen and no line started, a tap on a door steps it through closed, open and locked, and **Remove** takes a wall, door or window off with a tap. Players open a door from a hex beside it, just as they do from a square beside one.
 
+![The Hex keep, a battle mat on hex rows walled with wall lines: a hall with a terrace and a stair, an open door into a corridor one hex wide, and a chamber. Walls/doors is on Wall, and a new line zigzags down the chamber along hex sides, with Done, Undo point and Cancel in the row.](dm-guide/hex-walls.webp)
+
 **During play**, you open and lock doors with the **Select** tool. Tap a door, and a small pill names it ("Locked door", "Closed secret door, hidden") and offers **Open** or **Close**, **Lock** or **Unlock**, and on a secret door, **Mark found** or **Hide**.
 
 ![A tap on a secret door with the Select tool: "Closed secret door, hidden" with Open, Lock and Mark found.](dm-guide/doors.webp)
@@ -381,6 +385,8 @@ Heights let you raise or lower the ground, for a hill, a watchtower or a pit, an
 - **Stairs**: **Stairs point** sets which way the stairs climb. **Auto** points each stair toward its one higher neighbor, or you can pick an arrow yourself. Where Auto can't tell which way is up, a "?" shows when you zoom in: pick an arrow and paint over that stair again. The Stairs terrain from the Brush counts as a stair too.
 
 **On a hex scene** heights and stairs work just as they do on squares, painted by hexes. The brush covers 1 hex, a hex and the six around it, or two hexes out, and **Area** takes the hexes in a box you drag. **Stairs point** offers **Auto** and six arrows, one for each side of a hex: on hex rows they run from east round to north-east, and on hex columns from south round to south-west. A stair climbs toward the side its arrow points to and comes down through the side straight across from it, while its other four sides are ledges, just as a square stair's sides are.
+
+![Heights/stairs on the Hex keep, marking stairs: Mara on the terrace 10 ft up, the stair beside it 5 ft up, each height in a pill, and Stairs point's Auto and its six arrows, from east round to north-east, in the row.](dm-guide/hex-stairs.webp)
 
 While this mode is open, each raised or lowered area shows its height in a pill, such as "↑10 ft". During play, tap the ground with **Select** to see its height for a few seconds ("↑10 ft", or "Stairs · ↑5 ft" on a stair). Raised ground is also drawn lighter and casts a shadow, so the shape of the land shows at a glance.
 
@@ -585,6 +591,8 @@ A phase can also set the scene's light. Under **What players see**, **Light with
 - **Light, for party vision**: the app suggests Bright, Dim or Dark from the file and says why. Like sets it to the copied scene's light, and you can still change it.
 
 **Maps that bring their own lights.** Some files carry lights with the map: torches, lamps, glowing crystals. When yours does, the import starts the scene dark on **Explore**, so those lights show the party what they reach and the rest stays in shadow, and the summary opens by telling you how many lights the map brings. If you'd rather keep the map lit, press **Keep it lit** beside that line. The scene then starts Bright, and **Players see** goes back to your room's choice. **Start it dark** changes your mind again. A daylit map, one whose file sets its ambient light at 70% or brighter, keeps its daylight, and a map whose art is already lit but brings no lights starts Bright.
+
+![Import a Universal VTT map for Lantern road: "This map brings 4 lights. The scene starts dark with party vision on, so they light it for the party." with Keep it lit beside it, then the map, 100 walls and 4 lights found, and Players see on Explore.](dm-guide/uvtt-lights.webp)
 
 Press **Create scene** to make it, and keep the page open until the walls have been added. One undo takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls, and it is always on squares, since the file states its own square grid (see [Hex grids](#hex-grids)). Arkenforge draws each door as an outline, and the app brings it in as the one door on the wall. A light placed far outside the map is left out, and the summary says so, so the rest of the map still comes in. A phone can only take files up to 40 MB, so import large maps on a computer.
 
@@ -1151,6 +1159,8 @@ A player's walk only ever uses ground the party has seen, so a route never leads
 
 **Squeezing.** The rules let a creature squeeze through a space big enough for a creature one size smaller, and the app does it for you. Drag a Large warhorse into a corridor 5 ft wide, and it squeezes to fit: on squares it takes one square there, and on hexes a squeezing Large creature takes one hex and a Huge one three. Every foot it moves while squeezed costs 1 extra foot, just as difficult terrain does, and the drag's label counts it with difficult terrain. It stands up to its full size again where it stops with room enough. A creature squeezes only in a truly narrow space, so one walking beside a single wall in the open never does.
 
+![The DM drags the warhorse, Thorn in the saddle, through the open door into a corridor one hex wide: it squeezes onto one hex with Thorn on it, and the label reads "65 ft · 55 ft left with Dash" with "+25 ft for difficult terrain" under it.](dm-guide/hex-squeeze.webp)
+
 ### Speed and the turn's path
 
 During a fight, the app keeps track of where the creature whose turn it is has gone:
@@ -1330,7 +1340,7 @@ This part covers the tools that help a long campaign run smoothly: the Outliner,
 
 The **Outliner** (DM only) lists everything on the scene you are viewing, along with what the players get of each thing. It is the place to find one token in a crowd, check what is still hidden, and track down things you have lost. The `/` key opens it with the search ready to type in.
 
-![The Outliner on the crypt: the chips that show one group, groups that fold, and each row with what players get, such as Out of the party's sight.](dm-guide/outliner.webp)
+![The Outliner on the crypt: Search the scene (/) with its key, the chips that show one group, groups that fold, and each row with what players get, such as Out of the party's sight.](dm-guide/outliner.webp)
 
 - Everything is sorted into groups that fold: **Creatures and objects**, **Map** (stamps, labels, pins and lights), **Areas**, **Drawings**, **Doors** (windows too) and **Traps**. The chips at the top show one group at a time.
 - Each row says what the players get of it: **Hidden**, **Under fog**, **Out of the party's sight**, **DM only**, **Only Pat** (only that one player gets it, such as a pin linked to a page only Pat can read), **Secret door, hidden** or **Secret door, found**. A trap's row reads **Hidden** until the players have found it and **Found** after, with **Armed**, **Sprung** or **Disarmed** under its name. On a scene you are preparing, the rows read as they will once the players move there, so you can check a scene before anyone arrives.
@@ -1362,7 +1372,7 @@ Sooner or later you'll want to know exactly what a player can see: whether the f
 
 There are two ways in. The quickest is a creature the player owns: their character, a creature you lent them, or their companion. Tap it, and its action bar has **View as** and the player's name, such as **View as Pat**, with an eye in a frame, right beside **Stat block** and **Details** (on a phone, scroll or expand the bar to reach it). The same button sits at the top of the creature's Token panel, in a row of its own under the quick numbers, the same place a character's page keeps **Place a token**. When several players own the creature, the button reads **View as a player** and opens a short list of them to choose from. In the Token panel's **Owners** group, each player has the same eye beside their name, so you can see what any player can see of this creature, owner or not. Monsters and NPCs that no player owns don't have the button, and your players never see any of it.
 
-![Thorn's Token panel: under his name and "Level 5 character · Medium (5 ft)", the View as Pat button with its eye, then his quick numbers and his stat block.](dm-guide/token-view-as.webp)
+![Thorn's Token panel: under his name and "Level 5 character · Medium (5 ft)", his quick numbers, then the View as Pat button with its eye in a row of its own, then his stat block.](dm-guide/token-view-as.webp)
 
 The other way is the DM panel's **Check their view**, for a player who has no token on the scene: pick them under **View as a player** and press **View**.
 
@@ -1378,7 +1388,7 @@ The **Characters** panel lists the party. A character belongs to the room rather
 - To put a character on the scene you are viewing, open it, press **Place a token**, and tap the map.
 - Tap a character to open its page. It reads like the Token panel: the picture, name, level and size, the quick numbers and **Place a token**, then the stat block, then **Combat** and **Companions**, open, and **Notes**, **Image**, **Stats** and **Played by**, folded until you need them. Your device remembers which ones you open. At the foot of the page, **Delete Thorn** (after a trash can) deletes the character with its tokens, its companions and its place in a fight. The line above it says what will go, and it takes a second tap ("Tap again to delete"). The chevron before the character's name at the top of the panel (**Back to Characters**) returns to the list. A player who plays a single character goes straight to its page, until they go back to the list. The list then stays until they leave the room or reload the page.
 
-![Thorn's page in the Characters panel: his picture, level and quick numbers, then his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
+![Thorn's page in the Characters panel: his picture, level and quick numbers, Place a token in a row under them, then his stat block with its scores, skills and weapons.](dm-guide/pc-stats.webp)
 
 **Stat blocks.** A character can have a stat block of its own: its level, ability scores, save and skill proficiencies, spellcasting, defenses, and its weapons, spells and other rolls, with riders such as Sneak Attack. A stat block makes the rest of the app smarter about that character. The Dice panel offers its rolls, roll requests know its bonuses, and the group save knows its resistances and Evasion. The block stays between you and the character's own players: only you and those players see it, and only you and they get **Add a stat block**, **Edit**, **Take a shape** and **End the shape**. Other players and the table display never see it. Folded, the **Stat block** row says what it holds, such as "Level 5, PB +3", or "Wild Shape: Brown Bear" while the character is in a shape.
 
