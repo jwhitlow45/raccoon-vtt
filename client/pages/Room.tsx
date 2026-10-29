@@ -136,7 +136,7 @@ const UPLOAD_WAITING = "1 upload waiting";
 
 const { topBar: TOP_BAR, toolbar: TOOLBAR } = theme.layout;
 /** "Viewing as Pat" at its widest, in window pixels (features/dm/PlayerPreview.tsx). */
-const PREVIEW_NOTICE_MAX = 520;
+const PREVIEW_NOTICE_MAX = theme.layout.notice;
 /** Over the whole map, drawing nothing but its focus ring, inside the map's edge. */
 const MAP_FOCUS_STYLE: CSSProperties = { position: "absolute", inset: 0, pointerEvents: "none", outlineOffset: -2 };
 
@@ -1633,7 +1633,7 @@ function Banner() {
   // Nothing at all while it is not due: an empty box would still take a gap in the stack, 8 px a short screen does not have.
   if (!due) return null;
   return inModal(
-    <div style={{ pointerEvents: "auto", width: "100%", maxWidth: 520, minWidth: 0 }}>
+    <div style={{ pointerEvents: "auto", width: "100%", maxWidth: theme.layout.notice, minWidth: 0 }}>
       <ReconnectNotice state={connection} compact={compact} />
     </div>,
     slot,
@@ -1975,7 +1975,7 @@ function cardWaitMs(): number {
 }
 
 /** The widest a toast stands, and a stack that scrolls with it, so the map either side still takes a tap. */
-const TOAST_MAX_PX = 520;
+const TOAST_MAX_PX = theme.layout.notice;
 
 /**
  * What a tool's key said (docs/design-v1-tool-cycle.md 4.3), "Area:

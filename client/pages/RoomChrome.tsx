@@ -208,7 +208,7 @@ export function PauseScreen() {
       }}
     >
       <div style={{ position: "absolute", top: `calc(${theme.safe.top} + ${theme.space(3)}px)`, left: theme.space(3), right: theme.space(3), display: "flex", justifyContent: "center" }}>
-        <div style={{ width: "100%", maxWidth: 520, minWidth: 0 }}>
+        <div style={{ width: "100%", maxWidth: theme.layout.notice, minWidth: 0 }}>
           <ReconnectBanner state={connection} />
         </div>
       </div>

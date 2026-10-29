@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useStore } from "zustand";
 import { Notice } from "../components/Notice.tsx";
 import { quietFailures, quietNotice } from "../lib/quietFailures.ts";
+import { theme } from "../lib/theme.ts";
 import { RoomLoadNotice } from "../panels/Panels.tsx";
 import { SHORT_LANDSCAPE_MAX } from "../features/encounter/band.ts";
 import { useLayoutSize } from "../features/device/layout.ts";
@@ -23,7 +24,7 @@ export function QuietLoadNotice() {
   const compact = useLayoutSize().height < SHORT_LANDSCAPE_MAX;
   if (!notice) return null;
   return inModal(
-    <Notice float compact={compact} style={{ pointerEvents: "auto", width: "100%", maxWidth: 520 }}>
+    <Notice float compact={compact} style={{ pointerEvents: "auto", width: "100%", maxWidth: theme.layout.notice }}>
       <RoomLoadNotice failure={notice.failure} retry={notice.retry} subject={notice.subject} verb="load" compact line={compact} reopen={{}} />
     </Notice>,
     slot,

@@ -196,13 +196,13 @@ export function PlayerPreview(props: {
           zIndex: 2,
           // Just under the Room page's top bar and its turn band, which take the interface size.
           top: `calc(${theme.safe.top} * ${zoom} + ${(topBars + 8) * zoom}px)`,
-          ...(placed ? { left: placed.left, width: placed.width } : { left: "50%", transform: "translateX(-50%)", width: `min(520px, calc(100% - ${theme.space(6)}px))` }),
+          ...(placed ? { left: placed.left, width: placed.width } : { left: "50%", transform: "translateX(-50%)", width: `min(${theme.layout.notice}px, calc(100% - ${theme.space(6)}px))` }),
           fontFamily: theme.font.body,
         }}
       >
         {slot ? null : banner}
       </div>
-      {slot ? createPortal(<div style={{ width: "100%", maxWidth: 520, pointerEvents: "auto", fontFamily: theme.font.body }}>{banner}</div>, slot) : null}
+      {slot ? createPortal(<div style={{ width: "100%", maxWidth: theme.layout.notice, pointerEvents: "auto", fontFamily: theme.font.body }}>{banner}</div>, slot) : null}
     </dialog>,
     document.body,
   );

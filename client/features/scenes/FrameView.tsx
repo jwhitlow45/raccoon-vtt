@@ -60,7 +60,7 @@ export function FrameViewBar() {
     </>
   );
   return inModal(
-    <div role="group" aria-label="Starting view" style={{ pointerEvents: "auto", width: "100%", maxWidth: 520 }}>
+    <div role="group" aria-label="Starting view" style={{ pointerEvents: "auto", width: "100%", maxWidth: theme.layout.notice }}>
       {compact ? (
         <Notice float compact action={buttons}>
           {words}

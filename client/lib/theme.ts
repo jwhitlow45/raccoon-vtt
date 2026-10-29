@@ -183,6 +183,13 @@ export const theme = {
     /** Dialog widths on a computer. A phone shows a dialog full screen or as a bottom sheet. */
     dialog: { sm: 440, md: 560, lg: 720 },
     /**
+     * The widest a floating notice stands over the map: the connection
+     * banner, the quiet load, the starting view's bar, a toast and the
+     * preview's banner, so the map either side still takes a tap
+     * (docs/design-v1-design-pass.md 4.4).
+     */
+    notice: 520,
+    /**
      * The shared popover base (components/Popover.tsx, docs/design-v1-tool-options.md 7.1 and 7.2): its
      * gap from its anchor, its margin inside its bound, and the size of a tile in a menu of tiles.
      */
