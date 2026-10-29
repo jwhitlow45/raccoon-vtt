@@ -228,8 +228,13 @@ function stepCache(walls: object, key: string, size: number): Uint8Array {
   return cache;
 }
 
-/** A creature the walker drags beside it (WalkInput `towed`): its place beside the walker, its footprint's size, and its step tests by how it stands. */
-type Towed = { walker: Walker & { id: string }; dx: number; dy: number; w: number; h: number; testers: Map<string, StepTester> };
+/**
+ * A creature the walker drags beside it (WalkInput `towed`): its place
+ * beside the walker, its footprint's size, and its step tests by how it
+ * stands. It comes as the token it is (walkWorld.ts groupWalkWorld), its
+ * link to its own holder included.
+ */
+type Towed = { walker: Walker & { id: string; attached?: { readonly to: string } }; dx: number; dy: number; w: number; h: number; testers: Map<string, StepTester> };
 
 /**
  * The world a drag walks in, built once per drag: the lattice, the per-cell
@@ -286,6 +291,9 @@ export class WalkWorld {
   readonly #on: Uint8Array;
   /** The creatures the walker drags beside it (WalkInput `towed`). */
   readonly #towed: readonly Towed[];
+  readonly #towedById: ReadonlyMap<string, Towed>;
+  /** The walker's own id, which the links of the creatures it drags name. */
+  readonly #leadId: string | undefined;
   /** Whether the walk starts on the ground, so what it drags walks on its own ground behind it (moveLeg.ts follow, as the walk's trace stands where it starts). */
   readonly #towedGrounded: boolean;
   /** Whether all of them take a step, by lattice node and direction: 0 not yet known, 1 they do, 2 one of them does not. */
@@ -338,6 +346,9 @@ export class WalkWorld {
       const tester = stepTester(build, t);
       return tester ? [{ walker: t, dx: t.x - token.x, dy: t.y - token.y, ...footprintSize(t), testers: new Map() }] : [];
     }) : [];
+    this.#towedById = pre ? pre.#towedById : new Map(this.#towed.map((t) => [t.walker.id, t]));
+    const lead: Walker & { id?: string } = token;
+    this.#leadId = lead.id;
     this.#towedSteps = pre ? pre.#towedSteps : new Uint8Array(this.#towed.length > 0 ? nodes * 8 : 0);
     this.#towedGrounded = pre ? pre.#towedGrounded : footing(chunks, start) === "ground";
     if (pre) {
@@ -472,10 +483,45 @@ export class WalkWorld {
     return true;
   }
 
-  /** A creature the walker drags beside it at its place `x`, `y` past the walk's start: on its own ground behind a walk on the ground, else at its own height, never below the ground there (drop.ts followersOf). */
+  /**
+   * A creature the walker drags beside it at its place `x`, `y` past the
+   * walk's start, at its height there (`#heightAt`). One whose height the
+   * search does not follow stands on its ground, so it meets every ledge,
+   * the most any walk of it could.
+   */
   #towedAt(t: Towed, x: number, y: number): Walker {
-    const ground = groundUnder(this.input.build.buildChunks, t.walker, { x, y });
-    return { ...t.walker, x, y, elevation: this.#towedGrounded ? ground : Math.max(t.walker.elevation, ground) };
+    const height = this.#heightAt(t.walker.id, { x: x - t.dx, y: y - t.dy });
+    if (height !== null) return { ...t.walker, x, y, elevation: height };
+    return { ...t.walker, x, y, elevation: groundUnder(this.input.build.buildChunks, t.walker, { x, y }), footing: "ground" };
+  }
+
+  /**
+   * A creature's height while the walker's stored box is at `p`, past the
+   * walk's start, as the move takes it along (moveLeg.ts follow), through
+   * its own holder, and that holder's, up to the walker: behind a holder
+   * that started on the ground on its own ground, else moved as much as
+   * its holder's height moved, never below its own ground. Null for one
+   * held by a creature the search does not take beside the walker, as a
+   * rider is, whose height it does not follow.
+   */
+  #heightAt(id: string, p: Point): number | null {
+    const { token, build } = this.input;
+    if (id === this.#leadId) {
+      if (this.mode !== "ground") return token.elevation;
+      const n = this.nodeAt(p);
+      return n >= 0 ? this.elevationAt(n) : groundUnder(build.buildChunks, this.#stepped, p);
+    }
+    const t = this.#towedById.get(id);
+    const holderId = t?.walker.attached?.to;
+    if (!t || holderId === undefined) return null;
+    const ground = groundUnder(build.buildChunks, t.walker, { x: p.x + t.dx, y: p.y + t.dy });
+    const holder = holderId === this.#leadId ? null : this.#towedById.get(holderId);
+    if (holderId !== this.#leadId && !holder) return null;
+    const holderFrom = holder ? holder.walker.elevation : token.elevation;
+    const holderGrounded = holder ? footing(build.buildChunks, holder.walker) === "ground" : this.#towedGrounded;
+    if (holderGrounded) return ground;
+    const holderNow = this.#heightAt(holderId, p);
+    return holderNow === null ? null : Math.max(t.walker.elevation + (holderNow - holderFrom), ground);
   }
 
   /**
