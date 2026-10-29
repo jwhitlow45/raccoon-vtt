@@ -34,6 +34,7 @@ export type RulerStop = { x: number; y: number; z?: number; tokenId?: string };
  * The ground under a cell in feet, as the measurer may read it: all of it
  * for the DM, and for a player 0 where their fog hides it, so a ruler
  * cannot probe the dark (features/builder/heights/ground.ts seenGround).
+ * On a hex scene the cell is a hex, `x` its column and `y` its row.
  */
 export type GroundReader = (cell: Point) => number;
 
@@ -46,9 +47,15 @@ export type RulerToken = FootprintToken & { id: string };
 export const MAX_RULER_POINTS = MAX_RULER_STOPS;
 
 export function freeStop(g: Grid, p: Point, ground?: GroundReader): RulerStop {
-  // A hex scene has no heights until phase H3, but its ground is read as a square scene's is, under the stop.
-  const at = g.shape === "hex" ? hexCenter(g, hexAt(g, p)) : { x: Math.floor(p.x) + 0.5, y: Math.floor(p.y) + 0.5 };
-  const z = ground?.({ x: Math.floor(at.x), y: Math.floor(at.y) }) ?? 0;
+  if (isHex(g)) {
+    const hex = hexAt(g, p);
+    return onGround(hexCenter(g, hex), ground?.({ x: hex.col, y: hex.row }) ?? 0);
+  }
+  const cell = { x: Math.floor(p.x), y: Math.floor(p.y) };
+  return onGround({ x: cell.x + 0.5, y: cell.y + 0.5 }, ground?.(cell) ?? 0);
+}
+
+function onGround(at: Point, z: number): RulerStop {
   return z === 0 ? { x: at.x, y: at.y } : { x: at.x, y: at.y, z };
 }
 
