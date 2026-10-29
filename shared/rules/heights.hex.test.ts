@@ -275,6 +275,52 @@ for (const [name, g] of [
       assert.ok(found && found !== "none", "a way round it");
       assert.equal(goblinFollows(s, to, found), true);
     });
+
+    /**
+     * A chain of drags down column 4 from the lead at row 4, each creature
+     * at `heights[i]` and dragged by the one before it, the lead routed 3
+     * hexes east. Whatever the search answers, every dragged creature's
+     * walk passes the server's leg test (permissions.ts draggedWalls),
+     * each following its own holder (moveLeg.ts follow).
+     */
+    function chain(s: RoomState, heights: readonly number[]): { found: WalkRoute | null | "none"; follows: boolean } {
+      const ids = heights.map((_, i) => `c${i}`);
+      const tokens = heights.map((elevation, i) =>
+        on(g, ids[i]!, m({ col: 4, row: 4 + i }), { name: `Creature ${i}`, elevation, ...(i > 0 ? { attached: { to: ids[i - 1]!, kind: "drag" as const } } : {}) }),
+      );
+      s.tokens = { ...s.tokens, ...Object.fromEntries(tokens.map((t) => [t.id, t])) };
+      const lead = tokens[0]!;
+      const world = groupWalkWorld(s, ownWalk(lead), { role: "dm" });
+      assert.equal(world.input.towed?.length, heights.length - 1);
+      const to = placedOnHex(g, lead, m({ col: 7, row: 4 }));
+      const found = findRouteOn(world.input, to);
+      if (found === "none") return { found, follows: true };
+      const op: Op = { t: "token.move", tokenId: lead.id, x: to.x, y: to.y, ...(found ? { route: found.pieces.map(([x, y, extra, swim]) => [x, y, extra, swim] as [number, number, number, 0 | 1]) } : {}) };
+      const moved = planMove(op, s, DM, {}).filter((mv) => mv.carriedBy !== undefined);
+      assert.equal(moved.length, heights.length - 1);
+      const follows = moved.every((mv) => mv.route.every((p, i) => i === 0 || legStop(s, mv.trace[i - 1]!, p) === null));
+      return { found, follows };
+    }
+
+    test("two deep: a flier drags a creature on the ground, which drags one at 5 ft, and that one follows its own holder down to the ground (H3-ASTRA-03)", () => {
+      const { found, follows } = chain(raised(g, [[m({ col: 6, row: 6 }), 2]]), [5, 0, 5]);
+      assert.notEqual(found, null, "the last creature walks on the ground behind its holder, so a 2 ft hex in its row is a ledge to it");
+      assert.equal(follows, true);
+    });
+
+    test("three deep: a flier and a flier drag a creature on a causeway, which drags one at 10 ft that walks on its own ground", () => {
+      const causeway = [2, 3, 4, 5, 6, 7, 8, 9].map((col) => [m({ col, row: 6 }), 5] as [Hex, number]);
+      const { found, follows } = chain(raised(g, [...causeway, [m({ col: 6, row: 7 }), 2]]), [10, 10, 5, 10]);
+      assert.notEqual(found, null);
+      assert.equal(follows, true);
+    });
+
+    test("fliers all down the chain pass over a low hex together, straight", () => {
+      const { found, follows } = chain(raised(g, [[m({ col: 6, row: 6 }), 2]]), [10, 10, 10]);
+      assert.ok(found !== null && found !== "none");
+      assert.equal(found.pieces.length, 1, "one straight piece, at the drag's extra foot");
+      assert.equal(follows, true);
+    });
   });
 
   describe(`${name}: a raised side cut near a rounded corner keeps its top`, () => {

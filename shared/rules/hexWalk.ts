@@ -57,7 +57,11 @@ import { LegCheck, MAX_SETTLED, WalkSearch, WalkWorld, WorkBudget, worldUnits, t
  */
 
 /** A creature the walker drags beside it (WalkInput `towed`), and its place beside the walker's stored box. */
-type Towed = { walker: Walker & { id: string }; dx: number; dy: number };
+/** Each comes as the token it is (walkWorld.ts groupWalkWorld), its link to its own holder included. */
+type Towed = { walker: Walker & { id: string; attached?: { readonly to: string } }; dx: number; dy: number };
+
+/** Where the walker is when a dragged creature's height is read: its stored box, its stand there when known, and whether that is the walk's start. */
+type LeadAt = { place: Point; stand: HexStand | null; start: boolean };
 
 const SEEN_KNOWN = 1;
 const SEEN = 2;
@@ -97,6 +101,9 @@ export class HexWalkWorld {
   readonly #narrowWalls: HexWalls | null;
   /** The creatures the walker drags beside it (WalkInput `towed`), each with its place beside the walker's stored box. */
   readonly #towed: readonly Towed[];
+  readonly #towedById: ReadonlyMap<string, Towed>;
+  /** The walker's own id, which the links of the creatures it drags name. */
+  readonly #leadId: string | undefined;
 
   constructor(input: WalkInput) {
     this.input = input;
@@ -111,6 +118,9 @@ export class HexWalkWorld {
     this.walls = scene.blockMovement === true ? this.#narrowWalls : null;
     // Only where walls stop moves, as the server tests them there alone (permissions.ts draggedWalls).
     this.#towed = this.walls ? (input.towed ?? []).map((t) => ({ walker: t, dx: t.x - token.x, dy: t.y - token.y })) : [];
+    this.#towedById = new Map(this.#towed.map((t) => [t.walker.id, t]));
+    const lead: Walker & { id?: string } = token;
+    this.#leadId = lead.id;
     const span = sceneHexSpan(g, scene.bounds);
     this.cols = span.cols;
     this.rows = span.rows;
@@ -279,12 +289,14 @@ export class HexWalkWorld {
     if (this.#towed.length === 0) return true;
     const pa = this.place(a);
     const pb = this.place(b);
+    const at: LeadAt = { place: pa, stand: a, start: this.nodeOf(a) === this.startNode };
+    const next: LeadAt = { place: pb, stand: b, start: false };
     for (const t of this.#towed) {
       const from = this.#towedStand(t, pa);
       const to = this.#towedStand(t, pb);
       const n = hexNeighbors(this.g, from.ref)[d]!;
       if (n.col !== to.ref.col || n.row !== to.ref.row || !this.standable(to)) return false;
-      const walls = this.#towedWalls(t, from, to);
+      const walls = this.#towedWalls(t, at, next);
       for (const h of hexStandHexes(this.g, from)) {
         const e = walls === this.walls ? this.#edge(h, d) : hexEdgeState(walls, h, d);
         if (e === 2 || (e === 3 && !first)) return false;
@@ -296,37 +308,67 @@ export class HexWalkWorld {
 
   /**
    * The walls as a creature dragged beside the walker meets them on its leg
-   * from `from` to `to`: by its own ledge floor, as the server's leg test
-   * reads its trace (moveLeg.ts follow, movement.ts ledgeFloor), never the
-   * walker's, so a flier never takes the creature beside it over a ledge.
-   * Behind a walker on the ground it walks on its own ground. Beside any
-   * other, which the search keeps at one height, it keeps its own height
-   * or the ground under it, whichever is higher. On its own hex it stands
-   * as it does now.
+   * from beside the walker at `a` to beside it at `b`: by its own ledge
+   * floor, as the server's leg test reads its trace (movement.ts
+   * ledgeFloor), never the walker's, so a flier never takes the creature
+   * beside it over a ledge. One whose height the search does not follow
+   * meets every ledge, the most any walk of it could.
    */
-  #towedWalls(t: Towed, from: HexStand, to: HexStand): HexWalls {
+  #towedWalls(t: Towed, a: LeadAt, b: LeadAt): HexWalls {
     const walls = this.walls!;
     if (!walls.walls.hasRelief) return walls;
-    const groundOf = (s: HexStand) => hexesGround(this.input.build.buildChunks, this.input.token.sceneId, hexStandHexes(this.g, s));
-    const elevationOn = (ground: number) => (this.mode === "ground" ? ground : Math.max(t.walker.elevation, ground));
-    const ground = groundOf(from);
-    const home = this.#towedStand(t, this.input.token).ref;
-    const elevation = from.ref.col === home.col && from.ref.row === home.row ? t.walker.elevation : elevationOn(ground);
-    const how = standing(elevation, ground);
-    const floor = how === "ground" ? -Infinity : how === "flying" ? Math.min(elevation, elevationOn(groundOf(to))) : Infinity;
+    const ea = this.#heightAt(t.walker.id, a);
+    const eb = this.#heightAt(t.walker.id, b);
+    if (ea === null || eb === null) return walls.floor === -Infinity ? walls : { ...walls, floor: -Infinity };
+    const how = standing(ea, this.#towedGround(t, a.place));
+    const floor = how === "ground" ? -Infinity : how === "flying" ? Math.min(ea, eb) : Infinity;
     return floor === walls.floor ? walls : { ...walls, floor };
   }
 
-  /** Whether a creature dragged beside the walker walks the leg from `from` to its place beside `to`, by the leg test the server runs on it (permissions.ts draggedWalls), on ground the search may read. */
-  #towedLeg(t: Towed, from: HexStand, to: Point): boolean {
-    const end = this.#towedStand(t, to);
+  /**
+   * A creature's height as the walk takes it along (moveLeg.ts follow),
+   * through its own holder, and that holder's, up to the walker: at the
+   * walk's start as it stands, behind a holder that started on the ground
+   * on its own ground, else moved as much as its holder's height moved,
+   * never below its own ground. Null for one held by a creature the search
+   * does not take beside the walker, as a rider is, whose height it does
+   * not follow.
+   */
+  #heightAt(id: string, at: LeadAt): number | null {
+    const token = this.input.token;
+    if (id === this.#leadId) return at.start ? token.elevation : this.elevationOf(at.stand ?? hexEndStand(this.g, token, at.place));
+    const t = this.#towedById.get(id);
+    if (!t) return null;
+    if (at.start) return t.walker.elevation;
+    const holderId = t.walker.attached?.to;
+    if (holderId === undefined) return null;
+    const ground = this.#towedGround(t, at.place);
+    const holder = holderId === this.#leadId ? null : this.#towedById.get(holderId);
+    if (holderId !== this.#leadId && !holder) return null;
+    const holderFrom = holder ? holder.walker.elevation : token.elevation;
+    const holderGrounded = holder ? standing(holderFrom, this.#towedGround(holder, token)) === "ground" : this.mode === "ground";
+    if (holderGrounded) return ground;
+    const holderNow = this.#heightAt(holderId, at);
+    return holderNow === null ? null : Math.max(t.walker.elevation + (holderNow - holderFrom), ground);
+  }
+
+  /** The ground under a creature dragged beside the walker while the walker's stored box is at `p`. */
+  #towedGround(t: Towed, p: Point): number {
+    return hexesGround(this.input.build.buildChunks, this.input.token.sceneId, hexStandHexes(this.g, this.#towedStand(t, p)));
+  }
+
+  /** Whether a creature dragged beside the walker walks the leg from beside it at `pa` to beside it at `pb`, by the leg test the server runs on it (permissions.ts draggedWalls), on ground the search may read. */
+  #towedLeg(t: Towed, pa: Point, pb: Point, start: boolean): boolean {
+    const from = this.#towedStand(t, pa);
+    const end = this.#towedStand(t, pb);
     const leg = hexLegOf(this.g, from, end);
-    return leg.line.every((ref) => this.standable({ size: end.size, ref })) && hexLegStop(this.#towedWalls(t, from, end), leg) === null;
+    const walls = this.#towedWalls(t, { place: pa, stand: null, start }, { place: pb, stand: null, start: false });
+    return leg.line.every((ref) => this.standable({ size: end.size, ref })) && hexLegStop(walls, leg) === null;
   }
 
   /** Whether every creature dragged beside the walker walks the straight leg to `to` with it (walk.ts towedFollow). */
   towedFollow(to: Point): boolean {
-    for (const t of this.#towed) if (!this.#towedLeg(t, this.#towedStand(t, this.input.token), to)) return false;
+    for (const t of this.#towed) if (!this.#towedLeg(t, this.input.token, to, true)) return false;
     return true;
   }
 
@@ -403,7 +445,7 @@ export class HexWalkWorld {
   /** The first creature dragged beside the walker that a walk along `points` leaves behind, piece by piece, or null when all of them follow it. */
   cannotFollow(points: readonly Point[]): string | null {
     for (let i = 1; i < points.length; i++) {
-      for (const t of this.#towed) if (!this.#towedLeg(t, this.#towedStand(t, points[i - 1]!), points[i]!)) return t.walker.id;
+      for (const t of this.#towed) if (!this.#towedLeg(t, points[i - 1]!, points[i]!, i === 1)) return t.walker.id;
     }
     return null;
   }
