@@ -18,7 +18,9 @@ import { anyRerun, attempt, filePassed, NO_TIME, outcome, passedOnRerun, plan, r
  *
  * It needs dist/ from `pnpm build`, and reads what the e2e files read:
  * E2E_PORT, DATABASE_URL and E2E_SCREENSHOT_DIR. Each run's output is also
- * kept in test-results/e2e-logs.
+ * kept in test-results/e2e-logs. Reserve the whole E2E_PORT through
+ * E2E_PORT+29 range per shard. On macOS skip bases 6971 through 7000,
+ * whose range includes AirPlay Receiver's port 7000 (README).
  *
  * The files are placed by the time each took in e2e/durations.json
  * (scripts/e2e-shard-plan.ts). A file missing from the list counts as its

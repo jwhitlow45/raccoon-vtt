@@ -174,9 +174,12 @@ second run that overlaps it queues part of its shards.
 
 A file that takes much over 5 minutes in CI holds its shard up, so a long
 one is split into files that each build their own room from a module they
-share, as `e2e/alignmentRoom.ts` does for the alignment sweep's three files,
+share, as `e2e/alignmentRoom.ts` does for the alignment sweep's five files,
 `e2e/barrestRoom.ts` for the resting bar's four and `e2e/tokenpanelRoom.ts`
-for the token panel's two.
+for the token panel's four. The new alignment and token-panel splits have
+initial planning estimates in `e2e/durations.json`, pending measured CI
+times. Keep every test when splitting and check each resulting file stays
+under five minutes.
 
 A shard runs on a laptop too, against the dev postgres. Build first, then
 give the shard's number and the shard count. `--list` prints what every
@@ -195,6 +198,11 @@ It reads `E2E_PORT`, `DATABASE_URL` and `E2E_SCREENSHOT_DIR` as
 can run side by side on one machine when each has its own database and its
 own `E2E_PORT`, at least 30 apart: a file uses ports up to `E2E_PORT` plus
 29, and the join limits count every run from one address in the database.
+On macOS, reserve port 7000 for AirPlay Receiver. Choose a whole 30-port
+range that excludes it, such as 7010 to 7039 with `E2E_PORT=7010`, then
+7040 to 7069 with `E2E_PORT=7040`. Bases from 6971 through 7000 include
+port 7000 and must be skipped. Lane briefs should reserve those whole
+ranges too.
 
 ## Deploying
 
