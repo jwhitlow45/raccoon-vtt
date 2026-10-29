@@ -94,7 +94,8 @@ export default function GridOptions() {
   };
 
   const line = gridLine({ slow, note, saved: saved ? `Grid saved at ${formatPx(cal.cellPx)} px per ${cell}.` : null, grid });
-  const fallback = note?.outcome === "applied" ? note.fallback : undefined;
+  // After an import's find applied a grid, or switched the shape and offered its grid, Use default puts back what the scene had.
+  const fallback = note?.outcome === "applied" || note?.switched ? note.fallback : undefined;
 
   return (
     <OptionsStrip

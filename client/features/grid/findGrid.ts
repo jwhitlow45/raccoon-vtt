@@ -26,7 +26,18 @@ export const IMPORT_WAIT_MS = 2000;
  * squares. `contested` names the other shape found on the same map, which
  * makes even a sure find only an offer (docs/design-v1-grid-detect.md 10.6).
  */
-export type FoundGrid = { tier: "high" | "medium"; cal: Calibration; shape?: GridShape; contested?: { shape: MapShape; cellPx: number } };
+export type FoundGrid = {
+  tier: "high" | "medium";
+  cal: Calibration;
+  shape?: GridShape;
+  contested?: { shape: MapShape; cellPx: number };
+  /**
+   * A medium hex find that the stretch margin alone held there, sure
+   * without it (detectHex.ts `held`): its shape may still switch the
+   * scene, and its lattice is only offered (D-261029-210).
+   */
+  shapeSure?: true;
+};
 
 /**
  * The size the Worker asks the browser to decode a file at, or null to
@@ -70,7 +81,9 @@ function foundHexGrid(result: HexFound, decoded: { width: number; height: number
   const ky = canonical.heightPx / decoded.height;
   if (!(kx > 0 && ky > 0) || Math.abs(kx - ky) / kx > 0.01) return null;
   const cal = calibrationFromHexFind({ cellPx: result.cellPx * kx, center: { x: result.center.x * kx, y: result.center.y * ky }, orient: result.orient });
-  return { tier: result.confidence >= HIGH_CONFIDENCE ? "high" : "medium", cal, shape: result.orient === "rows" ? "hexRows" : "hexColumns" };
+  const high = result.confidence >= HIGH_CONFIDENCE;
+  const shapeSure = !high && result.held !== undefined && result.held.confidence >= HIGH_CONFIDENCE;
+  return { tier: high ? "high" : "medium", cal, shape: result.orient === "rows" ? "hexRows" : "hexColumns", ...(shapeSure ? { shapeSure: true as const } : {}) };
 }
 
 /** A search's answer when the Worker read the image. */
@@ -104,7 +117,8 @@ export function pickedGrid(answer: SearchDone, canonical: { widthPx: number; hei
   others.sort((a, b) => confidenceOf(looks[b]) - confidenceOf(looks[a]));
   const other = others[0]!;
   const otherFound = at(other);
-  return { ...found, tier: "medium", ...(otherFound ? { contested: { shape: other, cellPx: otherFound.cal.cellPx } } : {}) };
+  const { shapeSure: _shapeSure, ...one } = found;
+  return { ...one, tier: "medium", ...(otherFound ? { contested: { shape: other, cellPx: otherFound.cal.cellPx } } : {}) };
 }
 
 function confidenceOf(d: GridDetection | HexDetection): number {
@@ -146,9 +160,11 @@ export function cameWithGrid(scene: Pick<Scene, "gridFromFile"> & { map: { origi
   return scene.gridFromFile === true || scene.map.originPx.x < 0 || scene.map.originPx.y < 0;
 }
 
-/** What Find the grid makes of a find: on a scene that came with its own grid, even a sure one is only offered. */
+/** What Find the grid makes of a find: on a scene that came with its own grid, even a sure one is only offered, its shape too. */
 export function findFound(found: FoundGrid | null, ownGrid: boolean): FoundGrid | null {
-  return found && ownGrid ? { ...found, tier: "medium" } : found;
+  if (!found || !ownGrid) return found;
+  const { shapeSure: _shapeSure, ...offered } = found;
+  return { ...offered, tier: "medium" };
 }
 
 /**
@@ -261,13 +277,20 @@ const OFFERED_MOST = HIGH_CONFIDENCE - 0.01;
 /**
  * A search's answer with every find only offered: each look's confidence
  * scaled down by one factor, so the surest stands just under
- * HIGH_CONFIDENCE and the shapes keep their order (`pickShape`).
+ * HIGH_CONFIDENCE and the shapes keep their order (`pickShape`). A hex
+ * find the stretch margin held loses that mark, so its shape never
+ * switches the scene either (D-261029-210).
  */
 export function offeredOnly(answer: SearchDone): SearchDone {
   const top = Math.max(confidenceOf(answer.result), confidenceOf(answer.hex?.rows ?? NO_HEXES), confidenceOf(answer.hex?.columns ?? NO_HEXES));
-  if (top < HIGH_CONFIDENCE) return answer;
-  const k = OFFERED_MOST / top;
-  const scaled = <T extends GridDetection | HexDetection>(d: T): T => (d.found ? { ...d, confidence: d.confidence * k } : d);
+  const held = [answer.hex?.rows, answer.hex?.columns].some((d) => d?.found && d.held !== undefined);
+  if (top < HIGH_CONFIDENCE && !held) return answer;
+  const k = top < HIGH_CONFIDENCE ? 1 : OFFERED_MOST / top;
+  const scaled = <T extends GridDetection | HexDetection>(d: T): T => {
+    if (!d.found) return d;
+    const { held: _held, ...rest } = d as T & { held?: unknown };
+    return { ...rest, confidence: d.confidence * k } as T;
+  };
   return { ...answer, result: scaled(answer.result), ...(answer.hex ? { hex: { rows: scaled(answer.hex.rows), columns: scaled(answer.hex.columns) } } : {}) };
 }
 

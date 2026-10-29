@@ -6,14 +6,14 @@ import type { ClientOp, Op } from "#shared/protocol.ts";
 import { apply, room as roomState } from "#shared/testutil.ts";
 import { mapScene } from "../scenes/create.ts";
 import { importScene, placeMap } from "../uvtt/batch.ts";
-import type { AxisFit, GridDetection } from "./detect.ts";
+import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
 import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { boxAt, boxSides, calibrationFromBox, calibrationFromHexFind, canonicalToWorld, fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
-import { cameWithGrid, IMPORT_WAIT_MS, importSearch, importSearchFrom, replacementFound, type ImportWait, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import { cameWithGrid, HIGH_CONFIDENCE, IMPORT_WAIT_MS, importFound, importSearch, importSearchFrom, offeredOnly, pickedGrid, replacementFound, type ImportWait, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, foundLine, gridOps, landSearch, middleOf, putBack, showOutcome } from "./outcome.ts";
-import type { HexDetection } from "./detectHex.ts";
+import { detectHex, type HexDetection, type HexFound } from "./detectHex.ts";
 import { boxCalibration, endFinding, noteFor, shapeChanged, type GridToolState } from "./store.ts";
-import { rng } from "./synthetic.ts";
+import { drawMap, rng } from "./synthetic.ts";
 
 type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile" | "gridShape"> & { map: SceneMap };
 
@@ -952,6 +952,8 @@ const NO_SQUARES = { found: false, reason: "none" } as const;
 const answerOf = (squares: GridDetection, rows: HexDetection): SearchAnswer => ({ t: "done", result: squares, hex: { rows, columns: NO_HEX }, width: 700, height: 500 });
 const HEXES_SURE = answerOf(NO_SQUARES, HEX_ROWS_FOUND);
 const HEXES_DOUBTFUL = answerOf(NO_SQUARES, { ...HEX_ROWS_FOUND, confidence: 0.5 });
+const MARGIN_HEX: HexFound = { ...HEX_ROWS_FOUND, confidence: 0.5, checked: false, held: { by: "margin", confidence: 0.9 } };
+const HEXES_MARGIN = answerOf(NO_SQUARES, MARGIN_HEX) as SearchDone;
 const BOTH = answerOf(DETECTED, { ...HEX_ROWS_FOUND, confidence: 0.97, cellPx: 26 });
 
 /** Find the grid on the live scene, answered with `answer`. */
@@ -969,6 +971,145 @@ function lineOf(live: ReturnType<typeof liveRoom>): string | undefined {
   const note = noteFor(live.store.getState().found, "s1", g);
   return note && note.box === live.store.getState().box ? foundLine(note, g).content : undefined;
 }
+
+describe("a hex find held only by the stretch margin (D-261029-210)", () => {
+  test("a new map in a square room switches to its drawn hex orientation, only offers the measured box, and Use default reverses the one op", () => {
+    for (const orient of ["rows", "columns"] as const) {
+      // A small regular grid with heavy lines, found at half size. Transposing
+      // the picture exercises the same margin in the other orientation.
+      const pixels = drawMap({ width: orient === "columns" ? 760 : 600, height: orient === "columns" ? 600 : 760, seed: 7, art: [{ kind: "noise", scale: 40, amp: 60 }], noise: 4, hexGrid: { orient, cellPx: 70, center: orient === "columns" ? { x: 9, y: 4 } : { x: 4, y: 9 }, width: 7, opacity: 0.6 } });
+      const hex = { rows: detectHex(pixels, { orient: "rows" }), columns: detectHex(pixels, { orient: "columns" }) };
+      const detected = hex[orient];
+      assert.ok(detected.found && !detected.checked && detected.held?.by === "margin");
+      assert.ok(detected.confidence < HIGH_CONFIDENCE && detected.held.confidence >= HIGH_CONFIDENCE);
+      const answer: SearchDone = { t: "done", result: detectGrid(pixels), hex, width: pixels.width, height: pixels.height };
+      const live = liveRoom();
+      const scene = { ...SCENE, map: { ...MAP, widthPx: pixels.width, heightPx: pixels.height } };
+      live.elsewhere(scene);
+      const found = importFound(answer, false, scene.map);
+      assert.ok(found && found.tier === "medium" && found.shapeSure && !found.contested);
+      const at = { x: pixels.width / 2, y: pixels.height / 2 };
+      showOutcome({ actions: live.actions, store: live.store, scene, found, fit: true, at, fallback: scene.map });
+      const shape = orient === "rows" ? "hexRows" : "hexColumns";
+      const grid = gridOfShape(shape);
+      assert.deepEqual(live.sent.map((s) => s.op), [{ t: "scene.update", sceneId: "s1", patch: { gridShape: shape } }], "one op is one undo step, without applying the grid or fitting the scene");
+      assert.equal(live.scene().gridShape, shape);
+      assert.deepEqual(live.scene().map, scene.map);
+      assert.deepEqual(live.scene().bounds, scene.bounds);
+      const { found: note, box } = live.store.getState();
+      assert.equal(note?.outcome, "offered");
+      assert.equal(note?.switched, true);
+      assert.deepEqual(box, boxAround(found.cal, at, grid));
+      assert.deepEqual(boxCalibration(box!, note, "s1", grid), found.cal, "Apply keeps the measured grid");
+      assert.equal(foundLine(note!, grid).tone, "hint");
+      assert.match(lineOf(live)!, new RegExp(`Found hex ${orient}\\. The grid is hex ${orient} now\\. Check the box`));
+      assert.ok(note?.fallback);
+      assert.equal(putBack({ actions: live.actions, store: live.store, scene: live.scene(), fallback: note.fallback }), true);
+      assert.deepEqual(live.sent.slice(1).map((s) => s.op), [{ t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } }]);
+      assert.deepEqual(live.scene(), scene, "Use default restores the original shape, grid and size");
+      assert.equal(live.store.getState().found, null);
+    }
+  });
+
+  test("a missing measure or confidence below sure before the cap never switches shape", async () => {
+    for (const rows of [{ ...HEX_ROWS_FOUND, confidence: 0.5, checked: false }, { ...MARGIN_HEX, held: { by: "margin" as const, confidence: HIGH_CONFIDENCE - 0.001 } }]) {
+      const live = liveRoom();
+      await findWith(live, answerOf(NO_SQUARES, rows));
+      assert.deepEqual(live.sent, []);
+      assert.equal(live.scene().gridShape, undefined);
+      assert.equal(live.store.getState().found?.other?.shape, "hexRows");
+    }
+    // These real detector paths must not acquire the margin-only exception:
+    // too few upright sides, a third look unseen at half size, and its frame floor.
+    for (const spec of [
+      { width: 760, height: 600, seed: 7, orient: "columns" as const, cellPx: 150, center: { x: 9, y: 4 }, widthLine: 1, opacity: 0.6 },
+      { width: 1520, height: 1200, seed: 7, orient: "rows" as const, cellPx: 100, center: { x: 9, y: 4 }, widthLine: 14, opacity: 0.6 },
+      { width: 1259, height: 916, seed: 98029, orient: "rows" as const, cellPx: 133.5, center: { x: 74.1, y: 259.2 }, widthLine: 16.2, opacity: 0.56 },
+      { width: 719, height: 674, seed: 2991, orient: "rows" as const, cellPx: 153.685, center: { x: 26.3674, y: 40.7131 }, widthLine: 14.3493, opacity: 0.6 },
+    ]) {
+      const pixels = drawMap({ ...spec, art: [{ kind: "noise", scale: 40, amp: 60 }], noise: 4, hexGrid: { orient: spec.orient, cellPx: spec.cellPx, center: spec.center, width: spec.widthLine, opacity: spec.opacity } });
+      const result = detectHex(pixels, { orient: spec.orient });
+      assert.ok(result.found && !result.checked);
+      assert.equal(result.held, undefined, JSON.stringify(spec));
+    }
+    // Erase the upright sides in the top half, leaving enough slopes to
+    // measure stretch but no upright pairs to measure turn.
+    const spec = { width: 600, height: 600, seed: 7, art: [{ kind: "noise" as const, scale: 40, amp: 60 }], noise: 4 };
+    const bare = drawMap(spec);
+    const pixels = drawMap({ ...spec, hexGrid: { orient: "rows", cellPx: 70, center: { x: 4, y: 9 }, width: 7, opacity: 0.6 } });
+    for (let y = 0; y < 300; y++) {
+      for (let x = 0; x < 600; x++) {
+        if (Math.abs((x - 4) / 35 - Math.round((x - 4) / 35)) * 35 < 8) pixels.data[y * 600 + x] = bare.data[y * 600 + x]!;
+      }
+    }
+    const unturned = detectHex(pixels, { orient: "rows" });
+    assert.ok(unturned.found && !unturned.checked);
+    assert.equal(unturned.held, undefined, "a measured stretch cannot stand in for an unmeasured turn");
+  });
+
+  test("a competing shape and a refused switch keep the scene's shape even when the margin is all that held the hex find", async () => {
+    const contested = liveRoom();
+    contested.elsewhere({ ...SCENE, gridShape: "hexColumns" });
+    const answer = answerOf({ ...DETECTED, confidence: 0.4 }, MARGIN_HEX) as SearchDone;
+    assert.equal(pickedGrid(answer, MAP, "hexColumns")?.shapeSure, undefined, "a contested pick loses its shape permission");
+    await findWith(contested, answer);
+    assert.deepEqual(contested.sent, []);
+    const refused = liveRoom();
+    await findWith(refused, HEXES_MARGIN, () => "Remove painted ground to change the grid.");
+    assert.deepEqual(refused.sent, []);
+    assert.match(lineOf(refused)!, /but remove painted ground/);
+    // The outcome's own guard also holds for a prebuilt contested find.
+    const direct = liveRoom();
+    showOutcome({ actions: direct.actions, store: direct.store, scene: SCENE, found: { ...importFound(HEXES_MARGIN, false, MAP)!, contested: { shape: "squares", cellPx: 70 } }, fit: true, at: { x: 700, y: 500 } });
+    assert.deepEqual(direct.sent, []);
+  });
+
+  test("offeredOnly and a scene's imported grid suppress the margin exception, on time and late", async () => {
+    for (const answer of [HEXES_MARGIN, { ...HEXES_MARGIN, result: DETECTED }]) {
+      const offered = offeredOnly(answer);
+      assert.ok(offered.hex?.rows.found);
+      assert.equal(offered.hex.rows.held, undefined, "offeredOnly clears the exception even when no confidence needed scaling");
+      assert.ok(offered.hex.rows.confidence < HIGH_CONFIDENCE);
+      assert.equal(pickedGrid(offered, MAP, undefined)?.shapeSure, undefined);
+    }
+    for (const ownGrid of [false, true]) {
+      const live = liveRoom();
+      const scene = { ...SCENE, ...(ownGrid ? { gridFromFile: true as const } : { gridShape: "hexColumns" as const }) };
+      live.elsewhere(scene);
+      const kept = ownGrid ? null : { ...MAP, scale: 1 };
+      const onTime = replacementFound(HEXES_MARGIN, false, MAP, scene, kept);
+      assert.equal(onTime.found?.shapeSure, undefined);
+      showOutcome({ actions: live.actions, store: live.store, scene, ...onTime, fit: true, at: { x: 700, y: 500 } });
+      assert.deepEqual(live.sent, []);
+      const search = { result: Promise.resolve(HEXES_MARGIN), cancel() {} };
+      await landSearch({ actions: live.actions, store: live.store, sceneId: "s1", start: scene, scene: live.scene, search, ms: 100, kept });
+      assert.deepEqual(live.sent, [], "the late answer obeys the same rule");
+    }
+  });
+
+  test("the scene's current hex orientation only receives the offered box", async () => {
+    const live = liveRoom();
+    live.elsewhere({ ...SCENE, gridShape: "hexRows" });
+    await findWith(live, HEXES_MARGIN);
+    assert.deepEqual(live.sent, []);
+    assert.equal(live.store.getState().found?.outcome, "offered");
+    assert.equal(live.store.getState().found?.switched, undefined);
+    assert.deepEqual(boxCalibration(live.store.getState().box!, live.store.getState().found, "s1", gridOfShape("hexRows")), HEX_CAL);
+  });
+
+  test("Use default after a margin-only switch still refuses a blocked return, keeps the box and says why", () => {
+    const live = liveRoom();
+    showOutcome({ actions: live.actions, store: live.store, scene: SCENE, found: importFound(HEXES_MARGIN, false, MAP), fit: true, at: { x: 700, y: 500 }, fallback: MAP });
+    const before = live.scene();
+    const { found, box } = live.store.getState();
+    assert.ok(found?.fallback);
+    assert.equal(putBack({ actions: live.actions, store: live.store, scene: before, fallback: found.fallback, refusal: () => "Remove heights to change the grid." }), false);
+    assert.equal(live.sent.length, 1);
+    assert.equal(live.scene(), before);
+    assert.equal(live.store.getState().box, box);
+    assert.equal(lineOf(live), "Can't go back to squares: remove heights to change the grid.");
+  });
+});
 
 describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)", () => {
   const HEX_ROWS = gridOfShape("hexRows");
@@ -1148,7 +1289,7 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
 
   /**
    * Random runs of Find the grid on scenes of every shape: answers of
-   * squares, hex rows, both, doubtful hexes and none, answers from ended
+   * squares, hex rows, both, doubtful or margin-held hexes and none, answers from ended
    * searches, Grid shape changed here or on another device, and the
    * scene's content refusing a switch or not. Invariants, after every event:
    * - `finding` is set exactly while a search runs.
@@ -1161,10 +1302,10 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
    */
   test("random finds, shape changes here and elsewhere, refusals and late answers keep every invariant", async () => {
     const next = rng(20261028);
-    const kinds = ["find", "squares", "hexes", "both", "doubtful", "nothing", "late", "shapeHere", "shapeElsewhere", "refuse"] as const;
+    const kinds = ["find", "squares", "hexes", "margin", "both", "doubtful", "nothing", "late", "shapeHere", "shapeElsewhere", "refuse"] as const;
     const shapes = [undefined, "hexRows", "hexColumns"] as const;
     const pick = <T>(list: readonly T[]): T => list[Math.floor(next() * list.length)]!;
-    const answers = { squares: SURE, hexes: HEXES_SURE, both: BOTH, doubtful: HEXES_DOUBTFUL, nothing: NOTHING };
+    const answers = { squares: SURE, hexes: HEXES_SURE, margin: HEXES_MARGIN, both: BOTH, doubtful: HEXES_DOUBTFUL, nothing: NOTHING };
     for (let run = 0; run < 400; run++) {
       const live = liveRoom();
       live.elsewhere({ ...SCENE, ...(pick(shapes) ? { gridShape: pick(["hexRows", "hexColumns"] as const) } : {}) });
@@ -1194,15 +1335,16 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
           if (running) {
             const own = shapeBefore ?? "squares";
             running.worker.answer(answers[kind as keyof typeof answers]);
-            if (!running.stale && (kind === "squares" || kind === "hexes")) {
+            if (!running.stale && (kind === "squares" || kind === "hexes" || kind === "margin")) {
               const found = kind === "squares" ? "squares" : "hexRows";
-              if (found === own) expect = { sends: true, to: null };
+              if (found === own && kind !== "margin") expect = { sends: true, to: null };
+              else if (found === own) expect = { sends: false };
               else if (!refused) expect = { sends: true, to: found };
             }
             end();
           }
         } else if (kind === "late") {
-          if (ended.length) pick(ended).answer(pick([SURE, HEXES_SURE, BOTH]));
+          if (ended.length) pick(ended).answer(pick([SURE, HEXES_SURE, HEXES_MARGIN, BOTH]));
         } else if (kind === "shapeHere" || kind === "shapeElsewhere") {
           const s = live.scene();
           const to = pick(shapes.filter((x) => x !== s.gridShape));
@@ -1218,6 +1360,7 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
         const after = live.store.getState();
         assert.equal(after.finding !== null, running !== null, `${label}: finding is set exactly while a search runs`);
         const sent = live.sent.slice(sentBefore);
+        if (kind === "margin") assert.ok(sent.every((x) => x.op.t === "scene.update" && Object.keys(x.op.patch).join() === "gridShape"), `${label}: the margin never applies a lattice or size`);
         if (!expect.sends) {
           assert.equal(sent.length, 0, `${label}: nothing sent`);
           if (kind !== "shapeHere" && kind !== "shapeElsewhere") assert.equal(live.scene().gridShape, shapeBefore, `${label}: the shape stays`);

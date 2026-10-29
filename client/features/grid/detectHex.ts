@@ -85,6 +85,14 @@ export type HexFound = {
    * measured too (STRETCH_ERROR_PX, STRETCH_ERROR_SE).
    */
   checked: boolean;
+  /**
+   * Present when that margin alone held the find to medium: its turn and
+   * its shape were measured, and `confidence` is what it had before. The
+   * margin guards the lattice, which may be a hair out of shape, not the
+   * shape: the map's hexes are of this orientation (D-261029-210). A find
+   * held because something could not be measured has none.
+   */
+  held?: { by: "margin"; confidence: number };
   families: [HexFamily, HexFamily, HexFamily];
 };
 
@@ -273,7 +281,8 @@ function measuredAtHalf(half: { L: Uint8Array; w: number; h: number }, quarter: 
 
 /** A find held to medium, as one whose turn or shape could not be measured. */
 function unchecked(found: HexFound): HexFound {
-  return { ...found, confidence: Math.min(found.confidence, UNCHECKED_MAX), checked: false };
+  const { held: _held, ...rest } = found;
+  return { ...rest, confidence: Math.min(found.confidence, UNCHECKED_MAX), checked: false };
 }
 
 function differentSizes(d: HexDetection): boolean {
@@ -763,10 +772,12 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
   const coverage = best.values.filter((v) => v > threshold).length / best.values.length;
   // Sides that barely break at the corners lower the confidence, which
   // may fall under the cutoff here, after the profiles passed it.
-  const checked = upLean !== null && aLean !== null && bLean !== null && !nearLimit;
+  const seen = upLean !== null && aLean !== null && bLean !== null;
+  const checked = seen && !nearLimit;
   const measured = fit.score * clamp01((broken - MIN_BROKEN) / 0.3);
   if (measured < MIN_CONFIDENCE) return "low confidence";
   const confidence = checked ? measured : Math.min(measured, UNCHECKED_MAX);
+  const held = seen && nearLimit && measured > confidence ? { held: { by: "margin" as const, confidence: measured } } : {};
   const center = nearestCenter(best.center, cell, { x: f.W / 2, y: f.H / 2 });
   return {
     found: true,
@@ -779,6 +790,7 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
     broken,
     coverage,
     checked,
+    ...held,
     families: fit.fams,
   };
 }

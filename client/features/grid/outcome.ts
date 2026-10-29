@@ -15,8 +15,9 @@ import { endFinding, type Fallback, type FoundNote, type GridToolState } from ".
  * grid found with high confidence is applied, a doubtful one is only
  * offered by the box, and no grid is said. A sure find of another shape
  * than the scene's, found alone, switches the scene to it with the grid
- * when the scene can switch, and is otherwise only said. Import and Find
- * the grid share it.
+ * when the scene can switch, and is otherwise only said. A hex find held
+ * only by the stretch margin can switch the shape while offering its
+ * lattice (10.5). Import and Find the grid share it.
  */
 
 export type GridScene = Pick<Scene, "id" | "bounds" | "gridFromFile" | "gridShape"> & { map: SceneMap };
@@ -74,8 +75,8 @@ export function fallbackOps(scene: GridScene, fallback: Fallback): ClientOp[] {
 }
 
 /**
- * Use default, after an import applied a grid it found: `fallbackOps` as
- * one undo step, and the box on the grid put back. The ops are not one
+ * Use default, after an import applied a grid or only switched its shape:
+ * `fallbackOps` as one undo step, and the box on the grid put back. The ops are not one
  * transaction, so when the find switched the scene's shape and the scene
  * can no longer take its old shape back (heights painted on its hexes
  * since, say), nothing is sent: the grid and size it started with are
@@ -182,17 +183,24 @@ export function showOutcome(input: {
   return note;
 }
 
-/** A find of shape `to` on a scene of `grid`: switched to when sure, alone and allowed, else only said. */
+/**
+ * A find of shape `to` on a scene of `grid`: switched to when sure of its
+ * shape, alone and allowed, else only said. A hex find the stretch margin
+ * alone held is sure of its shape but not of its lattice, so the switch
+ * comes alone, as its own undo step, and the box is only offered
+ * (D-261029-210).
+ */
 function otherShape(input: Parameters<typeof showOutcome>[0] & { found: FoundGrid; grid: Grid; to: Grid }): FoundNote {
   const { scene, found, grid, to } = input;
   const refusal = input.ownGrid && !isHex(grid) ? OWN_SQUARE_GRID : (input.refusal?.(to) ?? null);
   const box = boxAround(found.cal, input.at, to);
-  if (found.tier === "high" && !found.contested && refusal === null) {
-    const ops: ClientOp[] = [{ t: "scene.update", sceneId: scene.id, patch: { gridShape: mapShape(to) } }, ...gridOps({ ...scene, gridShape: shapeOfGrid(to) }, found.cal, input.fit)];
-    dispatchGesture(input.actions, ops);
+  const high = found.tier === "high";
+  if ((high || found.shapeSure === true) && !found.contested && refusal === null) {
+    const switched: ClientOp = { t: "scene.update", sceneId: scene.id, patch: { gridShape: mapShape(to) } };
+    dispatchGesture(input.actions, high ? [switched, ...gridOps({ ...scene, gridShape: shapeOfGrid(to) }, found.cal, input.fit)] : [switched]);
     const note: FoundNote = {
       sceneId: scene.id,
-      outcome: "applied",
+      outcome: high ? "applied" : "offered",
       cellPx: found.cal.cellPx,
       box,
       cal: found.cal,
@@ -354,17 +362,22 @@ export function foundLine(note: FoundNote, g: Grid): { tone: "status" | "hint" |
   const status = (content: string) => ({ tone: "status" as const, content });
   const hint = (content: string) => ({ tone: "hint" as const, content });
   const warning = (content: string) => ({ tone: "warning" as const, content });
+  if (note.backRefused && note.fallback?.shape) {
+    const why = note.backRefused;
+    return warning(`Can't go back to ${shapeWords(note.fallback.shape)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`);
+  }
   switch (note.outcome) {
     case "applied": {
-      if (note.backRefused && note.fallback?.shape) {
-        const why = note.backRefused;
-        return warning(`Can't go back to ${shapeWords(note.fallback.shape)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}`);
-      }
       if (!note.switched) return status(`Found a grid of ${n} px ${hex ? "hexes" : "squares"}.`);
       const words = shapeWords(mapShape(g));
       return status(`Found ${words} of ${n} px. The grid is ${words} now.`);
     }
     case "offered": {
+      // The shape is sure and switched, its lattice only offered (D-261029-210).
+      if (note.switched) {
+        const words = shapeWords(mapShape(g));
+        return hint(`Found ${words}. The grid is ${words} now. Check the box on its ${n} px hexes, then Apply.`);
+      }
       const offered = note.other?.shape ?? mapShape(g);
       const { contested } = note;
       // Another shape than the scene's is named in full, so "hexes" never stands for the orientation the scene is not on.
