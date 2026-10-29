@@ -125,6 +125,88 @@ export const LIMIT_PX = 1;
 /** The interface's indent step (theme.space(3)), in CSS px: the least a nested list or group is set in to make a column of its own. */
 export const INDENT_PX = 12;
 
+/** FL5: a split word is wrong when it could fit the menu's width. A word wider than the whole menu must break to stay inside it. */
+export async function menuWordLines(root: Locator, at: string): Promise<string[]> {
+  return root.evaluateAll((roots, name) => {
+    type Node = { nodeType: number; textContent: string | null; childNodes: ArrayLike<Node>; parentElement: Element | null };
+    type Element = Node & {
+      style: Record<string, string>;
+      getAttribute(name: string): string | null;
+      closest(selector: string): Element | null;
+      querySelectorAll(selector: string): ArrayLike<Element>;
+      getBoundingClientRect(): { width: number; height: number };
+      appendChild(node: Element): void;
+      remove(): void;
+      ownerDocument: {
+        createElement(tag: string): Element;
+        createRange(): { setStart(node: Node, offset: number): void; setEnd(node: Node, offset: number): void; getClientRects(): ArrayLike<{ top: number; width: number; height: number }> };
+        defaultView: { getComputedStyle(el: Element): { display: string; visibility: string } };
+      };
+    };
+    const lines: string[] = [];
+    let words = 0;
+    for (const root of roots as unknown as Element[]) {
+      for (const item of Array.from(root.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]'))) {
+        const box = item.getBoundingClientRect();
+        if (!box.width || !box.height) continue;
+        const doc = item.ownerDocument;
+        const room = (item.closest('[role="menu"]') ?? item).getBoundingClientRect().width;
+        const visit = (node: Node) => {
+          if (node.nodeType === 1) {
+            const el = node as Element;
+            const style = doc.defaultView.getComputedStyle(el);
+            if (el.getAttribute("aria-hidden") === "true" || style.display === "none" || style.visibility === "hidden") return;
+          }
+          if (node.nodeType === 3) {
+            for (const match of (node.textContent ?? "").matchAll(/[\p{L}\p{N}]+/gu)) {
+              const range = doc.createRange();
+              range.setStart(node, match.index);
+              range.setEnd(node, match.index + match[0].length);
+              const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+              if (!rects.length) continue;
+              words++;
+              if (rects.some((r) => Math.abs(r.top - rects[0]!.top) > 1)) {
+                // Inherit the label's font and zoom, but measure the whole word without its current flex constraint.
+                const probe = doc.createElement("span");
+                probe.textContent = match[0];
+                Object.assign(probe.style, { position: "absolute", visibility: "hidden", whiteSpace: "nowrap", width: "max-content", maxWidth: "none" });
+                (node.parentElement ?? item).appendChild(probe);
+                const width = probe.getBoundingClientRect().width;
+                probe.remove();
+                if (width <= room + 1) lines.push(`${name}: menu word "${match[0]}" breaks inside the word despite fitting the menu's width`);
+              }
+            }
+          } else for (const child of Array.from(node.childNodes)) visit(child);
+        };
+        visit(item);
+      }
+    }
+    if (!words) lines.push(`${name}: no menu words measured`);
+    return lines;
+  }, at);
+}
+
+/** FL5: check both scrollbar rules, even on systems whose overlay scrollbar occupies no width. */
+export async function popoverScrollbarLines(root: Locator, at: string): Promise<string[]> {
+  return root.evaluateAll((roots, name) => {
+    type Box = {
+      clientWidth: number; offsetWidth: number;
+      ownerDocument: { defaultView: { getComputedStyle(el: Box, pseudo?: string): { scrollbarWidth: string; display: string; borderLeftWidth: string; borderRightWidth: string } } };
+    };
+    const lines: string[] = [];
+    for (const box of roots as unknown as Box[]) {
+      const win = box.ownerDocument.defaultView;
+      const style = win.getComputedStyle(box);
+      if (style.scrollbarWidth !== "none") lines.push(`${name}: scrollbar-width is ${style.scrollbarWidth}`);
+      if (win.getComputedStyle(box, "::-webkit-scrollbar").display !== "none") lines.push(`${name}: the WebKit scrollbar is visible`);
+      const gutter = box.offsetWidth - box.clientWidth - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth);
+      if (gutter > 1) lines.push(`${name}: the scrollbar takes ${gutter}px`);
+    }
+    if (!roots.length) lines.push(`${name}: no popover measured`);
+    return lines;
+  }, at);
+}
+
 export type Box = { l: number; r: number; t: number; b: number };
 
 export type Finding = {

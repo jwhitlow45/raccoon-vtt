@@ -12,9 +12,10 @@ import { readDdbCharacter } from "../shared/ddb/read.ts";
 import { SKILLS } from "../shared/rules/skills.ts";
 import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monsters.ts";
 import { trapPreset } from "../shared/srd/traps.ts";
-import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, dragCells, expandBar, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
-import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, pillLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
+import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
+import { moreMenuFixture } from "./helpers/menuFixture.ts";
 
 /**
  * The alignment sweep (docs/design-v1-polish.md 4): the screens the
@@ -319,6 +320,9 @@ class Sweep {
       return;
     }
     await this.add(page, screen, [...alignmentLines(await measureAlignment(shown), `${this.at} ${screen}`), ...await damageSummaryAlignment(shown, `${this.at} ${screen}`)]);
+    if (await shown.locator('[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]').count()) await this.add(page, screen, await menuWordLines(shown, `${this.at} ${screen}`));
+    const popovers = shown.and(page.locator("[data-rvtt-popover]")).or(shown.locator("[data-rvtt-popover]"));
+    if (await popovers.count()) await this.add(page, screen, await popoverScrollbarLines(popovers, `${this.at} ${screen}`));
   }
 
   /** The board's pills, as `screen`, with each trap name's pointer it read counted as a screen of its own. */
@@ -700,6 +704,16 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   await sweep.pills(page, "board", { points: await trapPoints(page, true), needPills: true });
   await toolMenuScreen(sweep, page);
   await shortcutSheetScreen(sweep, page);
+
+  // FL5: the real room's More menu, alongside the component fixture at phone widths where Room uses a sheet instead.
+  const morePanels = page.getByRole("tablist", { name: "Panels" }).locator('[aria-haspopup="menu"]');
+  if (await visible(morePanels)) {
+    await morePanels.click();
+    const menu = page.getByRole("menu", { name: "More panels" });
+    await menu.waitFor();
+    await sweep.measure(page, "fl5-more-panels", page.locator("[data-rvtt-popover]").filter({ has: menu }));
+    await page.keyboard.press("Escape");
+  }
 
   // The Trap tool's options, its Start from, and its More where the row has one.
   await pickTool(page, "Trap");
@@ -2836,6 +2850,29 @@ export function alignmentFile(title: string, steps: () => void): void {
 
 /** pl3-0: the helper on drawn cases, which needs no room. */
 export function helperTest(): void {
+  test("fl5-a. the menu word check catches a word squeezed below the menu's width, but accepts word boundaries and an oversized word", async () => {
+    const page = await dmContext.newPage();
+    try {
+      await page.setContent('<div role="menu" style="width: 200px; font: 20px monospace"><div role="menuitem" style="width: 65px; overflow-wrap: anywhere">Monsters</div></div>');
+      const menu = page.getByRole("menu");
+      assert.ok((await menuWordLines(menu, "fl5-broken")).some((line) => line.includes('"Monsters"')));
+      await page.getByRole("menuitem").evaluate((el) => {
+        const item = el as unknown as { textContent: string; style: { overflowWrap: string; width: string } };
+        item.textContent = "Two panels";
+        item.style.overflowWrap = "break-word";
+        item.style.width = "95px";
+      });
+      assert.deepEqual(await menuWordLines(menu, "fl5-whole"), []);
+      await page.getByRole("menuitem").evaluate((el) => { (el as unknown as { textContent: string }).textContent = "Encounters"; });
+      assert.ok((await menuWordLines(menu, "fl5-squeezed")).some((line) => line.includes('"Encounters"')));
+      await page.getByRole("menuitem").evaluate((el) => { (el as unknown as { textContent: string }).textContent = "W".repeat(80); });
+      assert.deepEqual(await menuWordLines(menu, "fl5-oversized"), []);
+      assert.ok((await menuWordLines(page.locator(".missing"), "fl5-missing")).length > 0);
+    } finally {
+      await page.close();
+    }
+  });
+
   test("pl3-0. the helper on drawn cases: each shape the polish pass found is caught, and the shape its fix gives passes", async () => {
     const page = await dmContext.newPage();
     try {
@@ -3194,6 +3231,7 @@ export function sizeTests(names: readonly string[]): void {
         }
         assert.equal(sweep.lines.length, 0, `${sweep.lines.length} lines out of line at ${at}:\n${sweep.lines.join("\n")}`);
       });
+      moreMenuTest(size, scale, at);
     }
   }
   for (const size of SIZES.filter((s) => names.includes(s.name) && DICE_AT.has(s.name))) {
@@ -3307,6 +3345,102 @@ async function forgetRoomScreen(sweep: Sweep, page: Page): Promise<void> {
   assert.equal(await opener.count(), 0, "the room stays forgotten after reload");
   const me = await page.context().request.get(`${server.origin}/api/rooms/${run.roomId}/me`);
   assert.equal(me.status(), 200, "forgetting neither deletes the server room nor signs this device out");
+}
+
+/** FL5: the production SideTabs, Popover and Menu mounted together, including phone widths where Room uses the Panels sheet. */
+function moreMenuTest(size: Size, scale: number, at: string): void {
+  test(`fl5-b. More at ${at}: whole labels, viewport gutter and scrolling without a scrollbar`, async () => {
+    await dmPageFor(size);
+    const page = await dmContext.newPage();
+    const sweep = new Sweep(at);
+    try {
+      await page.setViewportSize({ width: size.width, height: size.height });
+      await moreMenuFixture(page, server.origin, scale);
+      const opener = page.getByRole("tablist", { name: "Panels" }).locator('[aria-haspopup="menu"]');
+      await opener.click();
+      const menu = page.getByRole("menu", { name: "More panels" });
+      const box = page.locator("[data-rvtt-popover]");
+      await menu.waitFor();
+      await sweep.measure(page, "fl5-more-fixture", box);
+      const wrapped = await menu.locator('[role^="menuitem"]').evaluateAll((items) => {
+        type Item = { children: ArrayLike<{ textContent: string | null; getAttribute(name: string): string | null; ownerDocument: { createRange(): { selectNodeContents(node: unknown): void; getClientRects(): ArrayLike<{ top: number }> } } }> };
+        return (items as unknown as Item[]).flatMap((item) => {
+          const label = Array.from(item.children).find((child) => child.getAttribute("aria-hidden") !== "true" && child.textContent?.trim());
+          if (!label) return ["missing label"];
+          const range = label.ownerDocument.createRange();
+          range.selectNodeContents(label);
+          const rects = Array.from(range.getClientRects());
+          return rects.some((rect) => Math.abs(rect.top - rects[0]!.top) > 1) ? [label.textContent] : [];
+        });
+      });
+      assert.deepEqual(wrapped, [], `${at}: a normal menu label wrapped despite room for its whole row`);
+      const placed = await box.boundingBox();
+      assert.ok(placed && placed.x >= 8 * scale - 1 && placed.x + placed.width <= size.width - 8 * scale + 1, `${at}: the menu exceeds its viewport gutter`);
+      await shots.take(page, `fl5-more-${at}`);
+
+      // A short containing panel guarantees the scrolling path even on a tall desktop.
+      await page.locator("aside").evaluate((el) => {
+        (el as unknown as { style: { height: string } }).style.height = "280px";
+        const win = globalThis as unknown as { dispatchEvent(event: unknown): void; Event: new (type: string) => unknown };
+        win.dispatchEvent(new win.Event("resize"));
+      });
+      await box.getByText("Scroll for more", { exact: true }).waitFor();
+      assert.deepEqual(await popoverScrollbarLines(box, at), []);
+      const scrollTop = () => box.evaluate((el) => (el as unknown as { scrollTop: number }).scrollTop);
+      const resetScroll = () => box.evaluate((el) => { (el as unknown as { scrollTop: number }).scrollTop = 0; });
+      await box.hover();
+      await page.mouse.wheel(0, 100);
+      await waitFor(`${at}: the hidden-scrollbar menu scrolls by wheel`, async () => (await scrollTop()) > 0 || null);
+      await resetScroll();
+      await opener.press("ArrowDown");
+      await page.keyboard.press("End");
+      await waitFor(`${at}: End scrolls to the last item`, async () => (await scrollTop()) > 0 || null);
+      assert.equal(await menu.locator('[role^="menuitem"]').last().evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true);
+      assert.deepEqual(await popoverScrollbarLines(box, `${at} at the bottom`), []);
+      if (size.touch) {
+        await page.keyboard.press("Home");
+        await resetScroll();
+        const rect = await box.boundingBox();
+        assert.ok(rect);
+        const cdp = await dmContext.newCDPSession(page);
+        try {
+          const x = rect.x + rect.width / 2;
+          await touchSwipe(cdp, { x, y: rect.y + rect.height - 50 }, { x, y: rect.y + 50 }, { steps: 12, everyMs: 30 });
+          await waitFor(`${at}: the hidden-scrollbar menu scrolls by touch`, async () => (await scrollTop()) > 0 || null);
+        } finally {
+          await cdp.detach();
+        }
+      }
+
+      // Ordinary words wrap onto their own lines. Only a word wider than the whole cap breaks inside itself.
+      await page.keyboard.press("Home");
+      await resetScroll();
+      for (const [index, words] of ["Show every creature in the encounter before opening another panel", "W".repeat(80)].entries()) {
+        await menu.getByRole("menuitemcheckbox").evaluate((el, text) => {
+          type Label = { textContent: string | null; getAttribute(name: string): string | null };
+          const item = el as unknown as { children: ArrayLike<Label> };
+          const label = Array.from(item.children).find((child) => child.getAttribute("aria-hidden") !== "true" && child.textContent?.trim());
+          if (!label) throw new Error("FL5 checkbox label is missing");
+          label.textContent = text;
+        }, words);
+        await page.locator("aside").evaluate((el, height) => {
+          (el as unknown as { style: { height: string } }).style.height = `${height}px`;
+          const win = globalThis as unknown as { dispatchEvent(event: unknown): void; Event: new (type: string) => unknown };
+          win.dispatchEvent(new win.Event("resize"));
+        }, 281 + index);
+        assert.deepEqual(await menuWordLines(box, `${at} long label ${index}`), []);
+        const capped = await box.boundingBox();
+        assert.ok(capped && capped.x >= 8 * scale - 1 && capped.x + capped.width <= size.width - 8 * scale + 1, `${at}: the long label exceeds the gutter`);
+        assert.equal(await box.evaluate((el) => {
+          const box = el as unknown as { scrollWidth: number; clientWidth: number };
+          return box.scrollWidth <= box.clientWidth + 1;
+        }), true, `${at}: the long label must not require sideways scrolling`);
+      }
+      assert.equal(sweep.lines.length, 0, sweep.lines.join("\n"));
+    } finally {
+      await page.close();
+    }
+  });
 }
 
 /** pl3-b13: the combat controls' screens at the lane rule's smallest screen. */

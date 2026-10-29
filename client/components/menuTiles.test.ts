@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { laidGap, tileRows, type TileRect } from "./menuTiles.ts";
+import { laidGap, menuWidth, tileRows, type TileRect } from "./menuTiles.ts";
+
+describe("fl5: a menu's row width", () => {
+  test("uses the widest complete row, including its icon, gaps, note and badge", () => {
+    assert.equal(menuWidth([112, 158.25, 141], 300), 158.25);
+    assert.equal(menuWidth([112, 158.25, 196.5], 300), 196.5);
+  });
+
+  test("caps long labels at the room inside the popover's gutter, border and padding at every interface size", () => {
+    for (const viewport of [320, 390, 1440]) {
+      for (const scale of [1, 1.3]) {
+        const room = viewport / scale - 2 * (8 + 1 + 12);
+        assert.equal(menuWidth([160, 2000], room), room);
+        assert.equal(menuWidth([112, 158.25], room), 158.25);
+      }
+    }
+    assert.equal(menuWidth([160], -10), 0);
+    assert.equal(menuWidth([], 300), 0);
+  });
+});
 
 /*
  * The rows of Setup's and Tools' tiles (docs/design-v1-tool-options.md
