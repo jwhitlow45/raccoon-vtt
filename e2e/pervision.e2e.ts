@@ -1233,10 +1233,13 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
   test("pv-7b. in Isometric, per player: the DM's goblin on ground the party explored stands bright and a creature on ground nobody explored dims, and Ben's page stands neither (ISO5P2-FV-4)", async () => {
     // The pool left the goblin's ground in the party's explored layer, which the DM's map draws beside the DM's own (D-261026-18).
     const imp = randomUUID();
+    const pc = randomUUID();
     await ops.send(creature(imp, "Imp", NOBODY_AT, { disposition: "hostile" }));
+    await ops.send(creature(pc, "FU39-C flat control", NOBODY_AT, { kind: "pc" }));
     try {
-      await waitFor("the imp in the DM's copy", () => (sockets.dm.state?.tokens[imp] ? true : null));
+      await waitFor("FU39-C controls in the pages' copies", () => sockets.dm.state?.tokens[imp] && sockets.dm.state.tokens[pc] && sockets.ben.state?.tokens[pc] ? true : null);
       const dmState = sockets.dm.state!;
+      assert.equal(isCellFullyFogged(dmState.fogTiles, run.sceneId, GOBLIN_LATER), true, "FU39-C: the DM's own fog still covers the goblin");
       assert.equal(isCellFullyFogged(dmState.exploredTiles, run.sceneId, GOBLIN_LATER), false, "the goblin's ground is not in the party's explored layer");
       assert.equal(isCellFullyFogged(dmState.exploredTiles, run.sceneId, NOBODY_AT) && isCellFullyFogged(dmState.fogTiles, run.sceneId, NOBODY_AT), true, "someone revealed the imp's ground");
 
@@ -1247,16 +1250,26 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
         return n?.as === "standee" && n.opacity === 0.5 ? true : null;
       });
       assert.deepEqual(await isoNode(dm, run.goblinId), { as: "standee", opacity: 1 }, "the DM's goblin on explored ground");
+      assert.deepEqual(await isoNode(dm, pc), { as: "standee", opacity: 0.5 }, "FU39-C: the DM's PC control on unexplored ground");
       await shots.take(dm, "pervision-dm-isometric-goblin-bright-imp-dim");
 
       // Ben's own Bree stands in her light, so his board is up and drawn, and neither creature reached his page to stand or lie flat.
       await waitFor("Bree standing on Ben's board", async () => ((await isoNode(ben, run.breeId))?.as === "standee" ? true : null));
+      await waitFor("FU39-C PC control flat on Ben's board", async () => ((await isoNode(ben, pc))?.as === "flat" ? true : null));
+      assert.deepEqual(await isoNode(ben, pc), { as: "flat" }, "Ben draws a known creature flat under fog");
       assert.equal(has.goblin(sockets.ben.state) || sockets.ben.state?.tokens[imp] !== undefined, false, "a creature Ben does not see reached his copy");
       for (const [name, id] of [["goblin", run.goblinId], ["imp", imp]] as const) assert.equal(await isoNode(ben, id), null, `Ben's board draws the ${name}`);
       await shots.take(ben, "pervision-ben-isometric");
     } finally {
-      for (const page of [dm, ben]) await pickView(page, "follow");
-      await ops.send({ t: "token.delete", tokenId: imp });
+      try {
+        await ops.send({ t: "token.delete", tokenId: imp });
+      } finally {
+        try {
+          await ops.send({ t: "token.delete", tokenId: pc });
+        } finally {
+          for (const page of [dm, ben]) await pickView(page, "follow");
+        }
+      }
     }
   });
 

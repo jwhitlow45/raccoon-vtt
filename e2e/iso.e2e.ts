@@ -310,6 +310,33 @@ async function isoCamera(page: Page): Promise<{ x: number; y: number; scale: num
   return cam;
 }
 
+/** FU39-C: the middle the bars leave clear, in the same view units as the area centers. */
+async function clearMiddle(page: Page): Promise<{ x: number; y: number }> {
+  const cam = await isoCamera(page);
+  const canvas = await page.evaluate(() => {
+    type Stage = { width(): number; height(): number; visible(): boolean; listening(): boolean };
+    const main = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages.find((s) => s.width() > 0 && s.visible() && s.listening());
+    if (!main) throw new Error("no isometric board on screen");
+    return { width: main.width(), height: main.height() };
+  });
+  const bar = await page.locator("[data-rvtt-topbar]").boundingBox();
+  const tools = await page.getByRole("navigation", { name: "Tools", exact: true }).boundingBox();
+  assert.ok(bar && tools, "the bars over the board show");
+  const top = Math.max(cam.top, bar.y + bar.height);
+  let bottom = Math.min(cam.top + canvas.height, tools.y);
+  for (const options of await page.getByRole("toolbar", { name: / options$/ }).all()) {
+    const box = await options.boundingBox();
+    if (box) bottom = Math.min(bottom, box.y);
+    // The options' reading line can stand above its own row, outside that row's box.
+    for (const line of await options.locator('[data-options-line="shown"]').all()) {
+      const lineBox = await line.boundingBox();
+      if (lineBox) bottom = Math.min(bottom, lineBox.y);
+    }
+  }
+  assert.ok(bottom > top, "the bars leave some of the canvas clear");
+  return { x: (canvas.width / 2 - cam.x) / cam.scale, y: ((top + bottom) / 2 - cam.top - cam.y) / cam.scale };
+}
+
 /** Where a token's standee shows on the page: the middle of its node's box on screen. */
 async function standeeAt(page: Page, tokenId: string): Promise<{ x: number; y: number }> {
   const at = await page.evaluate((id) => {
@@ -1743,19 +1770,19 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await layoutWhen(pat, "Pat's sphere standing again", (x) => x.standing.includes(cavern.sphere));
   });
 
-  test("ISOA-10. sixty areas in view: the one nearest the middle stands first, and \"Building area shapes…\" shows while any waits, clear of the bar and within 1 px", async () => {
+  test("ISOA-10. sixty areas in view: the nearest to the middle the bars leave clear stand first, and \"Building area shapes…\" shows while any waits, clear of the bar and within 1 px", async () => {
     cavern.field = randomUUID();
     await ops.send({ t: "scene.create", scene: { id: cavern.field, name: "The field", bounds: { w: 80, h: 80 }, fogEnabled: false } });
     await ops.send({ t: "scene.update", sceneId: cavern.field, patch: { defaultView: { x: 40, y: 40, zoom: 12 } } });
     const dmId = dmSocket.you!.memberId;
-    const ids: { id: string; d: number }[] = [];
+    const ids: { id: string; x: number; y: number }[] = [];
     for (let i = 0; i < 60; i++) {
       const x = 12 + (i % 8) * 8;
       const y = 14 + Math.floor(i / 8) * 7;
       const id = randomUUID();
-      // How far its middle, 10 ft up, shows from the scene's starting middle, the cell 40, 40 on the ground, in view units at turn 0.
-      ids.push({ id, d: Math.hypot((x - y) / Math.SQRT2, (x + y - 80) / (2 * Math.SQRT2) - 0.866 * 2) });
-      await ops.send({ t: "template.create", template: { id, sceneId: cavern.field, shape: "sphere", size: 20, origin: { x, y, z: 10 }, yaw: 0, includeOrigin: true, color: SPHERE, ownerId: dmId, visibility: "all" } });
+      // Wholly above ground, so clipping cannot move a built sphere's middle and change its rank.
+      ids.push({ id, x: (x - y) / Math.SQRT2, y: (x + y) / (2 * Math.SQRT2) - K * 6 });
+      await ops.send({ t: "template.create", template: { id, sceneId: cavern.field, shape: "sphere", size: 20, origin: { x, y, z: 30 }, yaw: 0, includeOrigin: true, color: SPHERE, ownerId: dmId, visibility: "all" } });
     }
     await dm.bringToFront();
     await openSideTab(dm, "Scenes");
@@ -1773,11 +1800,11 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
       // The field's areas only: until the field's board lays out, the cavern's may still be the last layout.
       const fieldIds = new Set(ids.map((a) => a.id));
       const first = await layoutWhen(dm, "the first area standing", (x) => x.standing.length > 0 && x.standing.every((id) => fieldIds.has(id)), 30_000);
-      // How many stand in the first frame depends on the machine, and a cheap area can finish before a costly one begun just ahead of it,
-      // so the check is the nearest among them and none from the far half.
-      const ranks = first.standing.map((id) => [...ids].sort((a, b) => a.d - b.d).findIndex((a) => a.id === id));
+      const mid = await clearMiddle(dm);
+      const nearest = [...ids].sort((a, b) => Math.hypot(a.x - mid.x, a.y - mid.y) - Math.hypot(b.x - mid.x, b.y - mid.y));
+      const ranks = first.standing.map((id) => nearest.findIndex((a) => a.id === id)).sort((a, b) => a - b);
       assert.ok(first.standing.length < ids.length, `every area stood in the first frame (${ids.length})`);
-      assert.ok(ranks.includes(0) && ranks.every((r) => r < ids.length / 2), `the first to stand lie nearest the middle: ${first.standing.length} of them, ranked ${ranks.join(", ")} by nearness`);
+      assert.deepEqual(ranks, Array.from({ length: first.standing.length }, (_, i) => i), "FU39-C: the first N areas stand nearest the clear middle (ISOA2-OPUS-4)");
       const status = dm.getByRole("status").filter({ hasText: "Building area shapes…" });
       await status.waitFor({ timeout: 30_000 });
       const lines = alignmentLines(await measureAlignment(status), "building");

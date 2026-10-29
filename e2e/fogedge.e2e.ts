@@ -535,7 +535,7 @@ describe("raccoon-vtt the fog's edge", { timeout: 600_000 }, () => {
     assert.deepEqual(misses, []);
   });
 
-  test("FE-4. two columns and a row revealed among fogged cells: every pixel whose center lies in a fogged sub-cell is the fog, at every zoom, pan, ratio and view", async () => {
+  test("FE-4. three columns and two rows revealed among fogged cells: every pixel whose center lies in a fogged sub-cell is the fog, at every zoom, pan, ratio and view", async () => {
     await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: [{ id: randomUUID(), mode: "hide", shape: { kind: "rect", x: 0, y: 0, w: BOUNDS.w, h: BOUNDS.h } }] });
     await ops.send({ t: "fog.live", sceneId: run.sceneId, ops: SPLIT.map((rect) => ({ id: randomUUID(), mode: "reveal", shape: { kind: "rect", ...rect } })) });
     await sweep("split");
