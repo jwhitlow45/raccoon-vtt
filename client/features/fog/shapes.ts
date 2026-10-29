@@ -1,5 +1,6 @@
+import { serializedBytes } from "#shared/limits.ts";
 import type { FogOp, FogShape } from "#shared/model.ts";
-import { MAX_FOG_CELLS, MAX_POLY_VERTICES, MAX_STROKE_POINTS } from "#shared/protocol.ts";
+import { MAX_ASK_BYTES, MAX_FOG_CELLS, MAX_FOG_DRAFT_OPS, MAX_POLY_VERTICES, MAX_STROKE_POINTS, type ClientOp } from "#shared/protocol.ts";
 import { cornerAt, hexAt, hexCenter, hexCorners, parseHexKey, type HexGrid } from "#shared/rules/hex.ts";
 import { floodHexRoom, floodRoom, type BuildIndex, type WallSet } from "#shared/rules/walls.ts";
 
@@ -130,6 +131,45 @@ export function hexRoomShapes(walls: WallSet, g: HexGrid, at: Point, bounds: Bou
 
 export function fogOps(shapes: readonly FogShape[], mode: FogMode, newId: () => string): FogOp[] {
   return shapes.map((shape) => ({ id: newId(), mode, shape }));
+}
+
+/**
+ * The most bytes one fog message's op carries: an ask's (protocol.ts
+ * MAX_ASK_BYTES), so the op and the frame round it fit a socket frame
+ * (server/rooms/ws.ts MAX_FRAME_BYTES). The server closes a socket on a
+ * bigger frame, and the outbox would send the op again on every reconnect.
+ */
+export const MAX_FOG_MESSAGE_BYTES = MAX_ASK_BYTES;
+
+export type FogMessage = Extract<ClientOp, { t: "fog.draft" | "fog.live" }>;
+
+/**
+ * One gesture's fog ops as the fewest `fog.draft` (or, live, `fog.live`)
+ * ops that each hold at most MAX_FOG_DRAFT_OPS of them and
+ * MAX_FOG_MESSAGE_BYTES, in order, to go out as one undo step. A Builder
+ * room on a large hex scene runs to hundreds of kilobytes. One fog op
+ * always fits alone: a shape holds at most 2,000 cells, 500 stroke points
+ * or 200 corners.
+ */
+export function fogMessages(sceneId: string, ops: readonly FogOp[], live: boolean): FogMessage[] {
+  const wrap = (batch: FogOp[]): FogMessage => (live ? { t: "fog.live", sceneId, ops: batch } : { t: "fog.draft", sceneId, add: batch });
+  // An array's JSON is its items joined by commas inside its brackets, so a batch's size adds up without serializing it again.
+  const empty = serializedBytes(wrap([]));
+  const out: FogMessage[] = [];
+  let batch: FogOp[] = [];
+  let bytes = empty;
+  for (const op of ops) {
+    const size = serializedBytes(op);
+    if (batch.length > 0 && (batch.length >= MAX_FOG_DRAFT_OPS || bytes + 1 + size > MAX_FOG_MESSAGE_BYTES)) {
+      out.push(wrap(batch));
+      batch = [];
+      bytes = empty;
+    }
+    bytes += (batch.length > 0 ? 1 : 0) + size;
+    batch.push(op);
+  }
+  if (batch.length > 0) out.push(wrap(batch));
+  return out;
 }
 
 /**

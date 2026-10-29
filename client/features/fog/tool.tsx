@@ -9,7 +9,8 @@ import { TOP_DOWN, toView } from "../../lib/view.ts";
 import { distance, TAP_SLOP_PX } from "../../lib/gestures.ts";
 import { retryableLazy } from "../../lib/retryableLazy.ts";
 import type { ToolContext, ToolDef, ToolPointer } from "../tools.ts";
-import { fogOps, hexRoomShapes, polyShape, rectShape, roomShapes, snapPoint, strokeShapes, type Point } from "./shapes.ts";
+import { dispatchGesture } from "../../state/actions.ts";
+import { fogMessages, fogOps, hexRoomShapes, polyShape, rectShape, roomShapes, snapPoint, strokeShapes, type Point } from "./shapes.ts";
 import { fogSlot, resetFogGesture } from "./store.ts";
 import { fogCycle } from "../toolChoices.ts";
 import { TOOL_ORDER } from "../toolbarOrder.ts";
@@ -27,7 +28,9 @@ function isTap(ctx: ToolContext, p: ToolPointer): boolean {
 /**
  * Sends shapes as fog ops: into the scene's draft, or to the players at once
  * in live mode. A draft holds at most 500 ops, so an edit that would
- * overflow it is refused here with a note instead of by the server.
+ * overflow it is refused here with a note instead of by the server. A
+ * gesture too big for one socket frame goes as several messages under one
+ * undo step (fogMessages).
  */
 export function submitFog(ctx: Pick<ToolContext, "scene" | "actions" | "getState" | "scope">, shapes: readonly FogShape[]): void {
   if (shapes.length === 0) return;
@@ -35,16 +38,14 @@ export function submitFog(ctx: Pick<ToolContext, "scene" | "actions" | "getState
   const { mode, live } = fogState.getState();
   const sceneId = ctx.scene.id;
   const ops = fogOps(shapes, mode, ctx.actions.newId);
-  if (live) {
-    for (let i = 0; i < ops.length; i += MAX_FOG_DRAFT_OPS) ctx.actions.dispatch({ t: "fog.live", sceneId, ops: ops.slice(i, i + MAX_FOG_DRAFT_OPS) });
-    return;
+  if (!live) {
+    const drafted = ctx.getState().view?.fogDrafts[sceneId]?.ops.length ?? 0;
+    if (drafted + ops.length > MAX_FOG_DRAFT_OPS) {
+      fogState.setState({ note: "The draft is full. Reveal it to the players or discard it first." });
+      return;
+    }
   }
-  const drafted = ctx.getState().view?.fogDrafts[sceneId]?.ops.length ?? 0;
-  if (drafted + ops.length > MAX_FOG_DRAFT_OPS) {
-    fogState.setState({ note: "The draft is full. Reveal it to the players or discard it first." });
-    return;
-  }
-  ctx.actions.dispatch({ t: "fog.draft", sceneId, add: ops });
+  dispatchGesture(ctx.actions, fogMessages(sceneId, ops, live));
 }
 
 export function closeFogPolygon(ctx: Pick<ToolContext, "scene" | "actions" | "getState" | "scope">): void {
