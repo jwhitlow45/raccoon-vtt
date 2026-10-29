@@ -1893,6 +1893,17 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
     await bar.locator("[data-options-line]").filter({ hasText: `Found hex rows of ${hx9cPx(map.cellPx)} px. The grid is hex rows now.` }).first().waitFor();
     await shots.take(dm, "hx9c-new-scene-hex-rows");
+    // Heights raised on the hexes since: squares are refused, so Use default sends nothing and says why (H3-OPUS-03).
+    await ops.send({ t: "build.height", sceneId: made.id, cells: ["3,3"], height: 10 });
+    await bar.getByRole("button", { name: "Use default", exact: true }).click();
+    await bar.locator("[data-options-line]").filter({ hasText: "Can't go back to squares: this scene has heights on its hexes, which can't stand on squares. Remove them to change the grid." }).first().waitFor();
+    assert.ok(hx9cOnHexes(made.id, "rows", 64), "the scene keeps its hexes and their grid");
+    await shots.take(dm, "hx9cfix-use-default-refused");
+    // Undo takes the heights back (the op socket is the DM's), and Use default may go.
+    const raised = () => Object.values(dmSocket.state?.buildChunks ?? {}).some((c) => c?.sceneId === made.id && c.heights !== undefined);
+    assert.equal(raised(), true);
+    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await waitFor("the heights undone", () => !raised() || null);
     // Use default puts back the form's squares and the first guess, 47 px for a 1400 by 1000 image.
     await bar.getByRole("button", { name: "Use default", exact: true }).click();
     await waitFor("squares and the guess back", () => hx9cGuess(made.id, undefined, 47));
