@@ -6,11 +6,12 @@ import { projectState } from "../project.ts";
 import { clientOpSchema, type OpOf } from "../protocol.ts";
 import { reads } from "../reads.ts";
 import { applyOp } from "../reducer.ts";
-import { actor, character, companionBlock, customMonster, DM, env, P1, room, token } from "../testutil.ts";
+import { actor, character, companionBlock, customMonster, DM, env, P1, P2, room, token } from "../testutil.ts";
 import { EMPTY_PC_STATS } from "../rules/pcStats.ts";
 import { blockDefenses } from "../dice/defenses.ts";
 import { loadMonsters } from "../srd/monsters.ts";
 import srdDefenses from "../srd/damage-defenses.json" with { type: "json" };
+import { describeEvent } from "../logText.ts";
 
 const hit = (amount = 14, parts: unknown = [{ amount: 10, type: "fire" }, { amount: 4, type: "cold" }]) => ({
   t: "actor.hp", target: { tokenId: "target" }, change: { kind: "damage", amount, parts },
@@ -34,6 +35,73 @@ function applied(state = fixture(), op = hit(), opVersion?: number) {
 }
 
 describe("FL-3 typed damage on the server", () => {
+  test("FL3-OPUS-1: damage with no surviving type never stores an empty hurt set", () => {
+    for (const parts of [[{ amount: 5 }], [{ amount: 10, type: "poison" }, { amount: 5 }]]) {
+      const result = applied(fixture(), hit(parts.reduce((sum, part) => sum + part.amount, 0), parts));
+      assert.equal(result.actor.hp.cur, 48);
+      assert.equal(result.actor.hurt, undefined);
+      const previous = applied(fixture({ hurt: ["cold"] }), hit(parts.reduce((sum, part) => sum + part.amount, 0), parts));
+      assert.deepEqual(previous.actor.hurt, ["cold"], "untyped damage keeps earlier recorded types");
+    }
+  });
+
+  test("FL3-ASTRA-01: whole player projections cannot distinguish small hidden defense probes", () => {
+    for (const hpVisibility of ["hidden", "label", "bar"] as const) {
+      const views = ["none", "resist", "immune"].map((defense) => {
+        let state = fixture({ hp: { cur: 750, max: 1000, temp: 0 } });
+        state.tokens.target!.hpVisibility = hpVisibility;
+        state.monsters.monster = customMonster("monster", { resistances: defense === "resist" ? "Fire" : "", immunities: defense === "immune" ? "Fire" : "", vulnerabilities: "" });
+        const projected = [];
+        for (const amount of [1, 2]) {
+          const result = applyOp(state, hit(amount, [{ amount, type: "fire" }]), P1, env(amount));
+          assert.ok(result.ok);
+          state = result.state;
+          projected.push([P1, P2].map((viewer) => projectState(state, viewer, { sceneId: "s1" })));
+        }
+        return projected;
+      });
+      assert.deepEqual(views[1], views[0], `${hpVisibility}: resistance must not change log presence`);
+      assert.deepEqual(views[2], views[0], `${hpVisibility}: immunity must not change log presence`);
+      for (const view of views[0]![1]!) assert.equal(view.log.filter((line) => line.data?.type === "hp").length, 2);
+    }
+  });
+
+  test("FL3-ASTRA-01: a zero hit has a DM line without any actor write, concentration prompt or death save", () => {
+    for (const life of ["alive", "dying", "stable"] as const) {
+      const before = fixture({ life, hp: { cur: life === "alive" ? 50 : 0, max: 50, temp: 3 }, effects: [{ id: "spell", key: "concentrating" }], deathSaves: { ok: 1, fail: 1 } });
+      const { state, actor: after } = applied(before, { ...hit(10, [{ amount: 10, type: "poison" }]), change: { kind: "damage", amount: 10, parts: [{ amount: 10, type: "poison" }], crit: true } });
+      assert.deepEqual(state.tokens, before.tokens, "no actor revision or other actor field changes");
+      assert.deepEqual(after, "inline" in before.tokens.target!.actor ? before.tokens.target!.actor.inline : null);
+      const dm = projectState(state, DM, { sceneId: "s1" });
+      assert.equal(dm.log.length, 1);
+      const data = dm.log[0]!.data;
+      assert.ok(data?.type === "hp");
+      assert.deepEqual({ amount: data.amount, label: data.label, left: data.left, crit: data.crit, revert: data.revert }, { amount: 0, label: life === "alive" ? "Healthy" : "Dying", left: after.hp, crit: true, revert: undefined });
+      assert.match(describeEvent(data, state, true), /takes 0 damage from a Critical Hit/);
+      const player = projectState(state, P1, { sceneId: "s1" });
+      const shown = player.log[0]!.data!;
+      assert.match(describeEvent(shown, state), /takes damage from a Critical Hit/);
+      assert.doesNotMatch(describeEvent(shown, state), /takes 0|Immune|Resists/);
+    }
+  });
+
+  test("FL3-ASTRA-01: only defenses zeroing a live hit add a line", () => {
+    const before = fixture();
+    const stopped = applyOp(before, { t: "actor.outcome", plan: "p", targets: [{ target: { tokenId: "target" }, damage: { parts: [{ amount: 2, type: "fire" }], save: { result: "pass", onPass: "half", dex: false, evasion: false } } }] }, DM, env(1));
+    assert.ok(stopped.ok);
+    assert.equal(stopped.state.log.length, 1, "the save leaves 1, which resistance rounds to 0");
+    assert.deepEqual(stopped.state.tokens, before.tokens);
+    assert.equal(applied(fixture({ life: "dead" }), hit(10, [{ amount: 10, type: "poison" }])).state.log.length, 0);
+    assert.equal(applied(fixture(), hit(0, [{ amount: 0, type: "fire" }])).state.log.length, 0);
+    for (const save of [{ result: "pass" as const, onPass: "none" as const, dex: false, evasion: false }, { result: "pass" as const, onPass: "half" as const, dex: true, evasion: true }, { result: "pass" as const, onPass: "half" as const, dex: false, evasion: false }]) {
+      const state = fixture();
+      const result = applyOp(state, { t: "actor.outcome", plan: "p", targets: [{ target: { tokenId: "target" }, damage: { parts: [{ amount: 1, type: "fire" }], save } }] }, DM, env(1));
+      assert.ok(result.ok);
+      assert.deepEqual(result.state.log, []);
+      assert.deepEqual(result.state.tokens, state.tokens);
+    }
+  });
+
   test("each type meets its own defense before temporary HP, even when the player holds no defenses", () => {
     const { actor: result, state } = applied();
     assert.deepEqual(result.hp, { cur: 40, max: 50, temp: 0 }, "5 Fire + 8 Cold, then 3 temporary HP");

@@ -9,11 +9,8 @@ export { parseParts, partsText, typedOnly, partAmounts, defenseKey, rowDamage, d
 import { effectName } from "#shared/logText.ts";
 
 /**
- * A group save's outcome (docs/design-v1-roll-options.md 5.4 and 5.5), as
- * plain functions for node --test: the damage field's typed parts, what
- * each row takes by its result, its Evasion and its defenses part by part,
- * the conditions a failed row gains, and the one `actor.outcome` plan, with
- * its worst case checked against the op's bounds before any roll.
+ * A group save's conditions, outcome plan and op bounds (docs/design-v1-roll-options.md 5.4 and 5.5).
+ * Damage parsing and defenses use shared/rules/typedDamage.ts on both the device and the server.
  */
 
 /** Why a failed row gains no condition (5.4), or null when it gains it. */

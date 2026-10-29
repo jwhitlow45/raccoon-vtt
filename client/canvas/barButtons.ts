@@ -293,6 +293,8 @@ export type EntryStatus = {
   dead: DeadCase | null;
   /** The typed change's summary while the field's text parses, such as "7 damage". */
   preview: string | null;
+  /** Defense results follow the summary's target count and exclusions. */
+  defenseWords?: readonly string[];
   /** The field holds text. */
   typed: boolean;
   /** A Critical Hit that Apply will send (`crit && showCrit`). */
@@ -398,7 +400,7 @@ function sentenceOf(input: RestStatusInput): Sentence | null {
     return {
       error: false,
       name,
-      words: (cut) => `${preview}${crit}${each}${input.left.length > 0 ? `, not ${leftOut(cut)}${cut.count ? " of them" : ""}` : ""}`,
+      words: (cut) => [`${preview}${crit}${each}${input.left.length > 0 ? `, not ${leftOut(cut)}${cut.count ? " of them" : ""}` : ""}`, ...(input.defenseWords ?? [])].join(". "),
     };
   }
   return null;

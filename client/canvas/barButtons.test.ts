@@ -514,6 +514,11 @@ describe("the strip's status line (docs/design-v1-bar-compact.md 3.3)", () => {
     assert.equal(said({ standing: "Leaves out Goblin 2: you cannot change their HP.", preview: "7 damage", typed: true, reach: 3, left: ["Goblin 2"] }), "7 damage, to each of 3, not Goblin 2");
   });
 
+  test("FL3-OPUS-4: group reach and exclusions precede defense words", () => {
+    assert.equal(status({ preview: "10 Fire damage", defenseWords: ["Goblin: Resists Fire: 5"], typed: true, reach: 3, left: ["Goblin 2"], crit: true }).full,
+      "10 Fire damage, Critical Hit, to each of 3, not Goblin 2. Goblin: Resists Fire: 5");
+  });
+
   test("at 320 x 568 at 130%, the group's preview takes the note, its full sentence kept, and the line keeps the vitals", () => {
     const s = status({ preview: "7 damage", typed: true, reach: 3, left: ["Goblin 2"] }, AT320);
     assert.equal(s.sentence?.place, "note");

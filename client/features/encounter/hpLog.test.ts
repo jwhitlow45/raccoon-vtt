@@ -1,9 +1,17 @@
+import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { createStore } from "zustand/vanilla";
 import type { RoomState } from "#shared/model.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
-import { actor, apply, DM, room, token } from "#shared/testutil.ts";
+import { projectState } from "#shared/project.ts";
+import { actor, apply, customMonster, DM, P1, room, token } from "#shared/testutil.ts";
 import { canTakeBack, fightHpLines } from "./hpLog.ts";
+
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { RoomProvider } = await import("../../state/view.ts");
+const { HpLog } = await import("./HpLog.tsx");
 
 function hurtGoblin(): RoomState {
   let state = room();
@@ -15,6 +23,27 @@ function hurtGoblin(): RoomState {
 }
 
 describe("the combat log of HP changes", () => {
+  test("FL3-ASTRA-01: a defense that stops the hit leaves a line without a take-back", () => {
+    let state = room({
+      monsters: { immune: customMonster("immune", { immunities: "Fire" }) },
+      tokens: { gob: token("gob", { actor: { inline: actor({ monsterId: "immune" }) } }) },
+    });
+    state = apply(state, { t: "encounter.start", entries: [{ id: "n1", tokenId: "gob", value: 10 }] }, DM, 1);
+    state = apply(state, { t: "actor.hp", target: { tokenId: "gob" }, change: { kind: "damage", amount: 10, parts: [{ amount: 10, type: "fire" }] } }, DM, 2);
+    const lines = fightHpLines(state.log);
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0]!.data.amount, 0);
+    assert.equal(canTakeBack(state, state.log, lines[0]!), false);
+    assert.equal(hpUndoRestore(state, lines[0]!.entry.id).ok, false);
+    for (const you of [DM, P1]) {
+      const view = projectState(state, you, { sceneId: "s1" });
+      const store = createStore(() => ({ view, you }));
+      const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(HpLog) }));
+      assert.doesNotMatch(markup, /Undo this change|Immune|Resists/);
+      assert.match(markup, you.role === "dm" ? /takes 0 damage, 20\/20 left\./ : /takes damage \(Healthy\)\./);
+    }
+  });
+
   test("lists the fight's HP lines, newest first, and none from before it began", () => {
     const lines = fightHpLines(hurtGoblin().log);
     assert.deepEqual(lines.map((l) => [l.data.change, l.data.amount]), [["heal", 1], ["damage", 2]]);

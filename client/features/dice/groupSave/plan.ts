@@ -136,7 +136,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
       out.words = amounts ? `Typed ${parsed.amount}, worked out ${out.computed}` : `Typed ${parsed.amount}`;
     }
   }
-  // Damage of 0 writes nothing (actors.ts), so it carries no type either.
+  // Only parts that deal damage contribute to the Regeneration note.
   out.types = out.amount > 0 ? types : [];
   if (result === "fail" && state.conditions !== "off") {
     for (const key of page.outcome.conditions as ConditionKey[]) {
@@ -156,7 +156,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
 function incomingDamage(page: Page, state: ReturnType<typeof stateOf>, parts: PartAmount[], result: "pass" | "fail", evasion: boolean): OutcomeDamage {
   return {
     parts: parts.map((part) => ({ ...part, amount: Math.max(0, part.amount) })),
-    ...(page.test.kind !== "none" ? { save: { result, onPass: page.outcome.onPass, dex: page.test.kind === "save" && page.test.ability === "dex", evasion } } : {}),
+    save: { result, onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dex: page.test.kind === "save" && page.test.ability === "dex", evasion },
     ...(state.qualifiedOn?.length ? { qualifiedOn: state.qualifiedOn } : {}),
   };
 }

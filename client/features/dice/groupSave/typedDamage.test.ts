@@ -22,6 +22,26 @@ function setup() {
 }
 
 describe("FL-3 group save typed server damage", () => {
+  test("FL3-OPUS-2: No save honors one Pass and Pass on every row through the reducer", () => {
+    for (const passAll of [false, true]) {
+      const { dice, page } = setup();
+      dice.view.tokens.b = token("b", { actor: { inline: actor({ hp: { cur: 100, max: 100, temp: 0 } }) } });
+      const rows = groupRows(dice, ["a", "b"], { kind: "none" }, false);
+      let noSave = { ...page, test: { kind: "none" as const }, rows, states: {}, outcome: { ...page.outcome, damage: "10 cold" } };
+      noSave = { ...noSave, states: Object.fromEntries(rows.map((row, i) => [row.holder, { way: "type" as const, mark: i === 0 || passAll ? "pass" as const : "fail" as const, evasion: true }])) };
+      const parts = amountsOf(noSave)!;
+      assert.deepEqual(rows.map((row) => rowOutcome(noSave, row, dice, parts).amount), passAll ? [0, 0] : [0, 10]);
+      const plan = buildPlan(noSave, dice, parts, { plan: "no-save", newId: () => "e" })!;
+      assert.deepEqual(plan.targets.map((target) => target.damage?.save), rows.map((_, i) => ({ result: i === 0 || passAll ? "pass" : "fail", onPass: "none", dex: false, evasion: true })));
+      const result = applyOp(dice.view, clientOpSchema.parse(plan), DM, { seq: 1, at: "2026-10-29T00:00:00Z" });
+      assert.ok(result.ok);
+      assert.deepEqual(result.state.tokens.a, dice.view.tokens.a, "the row marked Pass is spared");
+      const b = result.state.tokens.b!.actor;
+      assert.ok("inline" in b);
+      assert.equal(b.inline.hp.cur, passAll ? 100 : 90, "No save never applies Evasion");
+      assert.equal(result.state.log.filter((line) => line.data?.type === "hp").length, passAll ? 0 : 1);
+    }
+  });
   test("typed outcomes wait for the server instead of predicting from incomplete defense reads", () => {
     const { dice, page, parts } = setup();
     const plan = buildPlan(page, dice, parts, { plan: "plan", newId: () => "e" })!;

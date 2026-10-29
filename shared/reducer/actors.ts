@@ -12,6 +12,7 @@ import {
   applyTemp,
   effectEvent,
   endConcentration,
+  hpLabel,
   type ActorEvent,
 } from "../rules/hp.ts";
 import { applyRest, restedResources } from "../rules/rest.ts";
@@ -29,10 +30,17 @@ export function actorHp(tx: Tx, op: OpOf<"actor.hp">, context?: Omit<OutcomeDama
   const revivesDead = healRevivesDead(settings, tx.env.opVersion);
   let c = op.change;
   if (c.kind === "damage" && c.parts !== undefined) {
-    const dealt = rowDamage(c.parts, context?.save?.result ?? "fail", {
+    const options: Parameters<typeof rowDamage>[2] = {
       onPass: context?.save?.onPass ?? "none", dexSave: context?.save?.dex ?? false,
       row: { defenses: damageDefenses(tx.state, resolved.actor, resolved.character), qualifiedOn: new Set(context?.qualifiedOn), evasion: context?.save?.evasion ?? false, effects: resolved.actor.effects },
-    });
+    };
+    const result = context?.save?.result ?? "fail";
+    const dealt = rowDamage(c.parts, result, options);
+    if (dealt.amount === 0 && resolved.actor.life !== "dead") {
+      const beforeDefenses = rowDamage(c.parts, result, { ...options, row: { ...options.row, defenses: [] } });
+      // A missing line would reveal a hidden defense. A save that prevents the hit still writes nothing.
+      if (beforeDefenses.amount >= 1) tx.addActorEvents(resolved, [{ type: "hp", change: "damage", amount: 0, label: hpLabel(resolved.actor), left: { ...resolved.actor.hp }, ...(c.crit ? { crit: true } : {}) }]);
+    }
     c = { ...c, amount: Math.min(100_000, dealt.amount), types: dealtTypes(c.parts, dealt.byPart) };
   }
   const r =
@@ -46,7 +54,7 @@ export function actorHp(tx: Tx, op: OpOf<"actor.hp">, context?: Omit<OutcomeDama
   if (r.actor === resolved.actor) return;
   // Regeneration counts only types that dealt damage after defenses. Temporary HP that took the hit still count,
   // and a take back of the hit leaves them. Older ops carry their final types directly.
-  const hurt = c.kind === "damage" && c.types !== undefined && c.amount >= 1 && combatUses(tx.env.opVersion) ? typeUnion(r.actor.hurt, c.types) : undefined;
+  const hurt = c.kind === "damage" && c.types !== undefined && c.types.length > 0 && c.amount >= 1 && combatUses(tx.env.opVersion) ? typeUnion(r.actor.hurt, c.types) : undefined;
   tx.putActor(resolved, hurt ? { ...r.actor, hurt } : r.actor);
   // The HP after the change, and what it replaced, so the log reads "3/7 left" and the DM can take it back (features section 10).
   const left = { ...r.actor.hp };

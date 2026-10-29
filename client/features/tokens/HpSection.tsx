@@ -106,12 +106,12 @@ export function HpEntry(props: {
   const typedDamage = preview?.ok && preview.change.kind === "damage" && preview.change.parts !== undefined;
   const { dice } = useDiceView(typedDamage ? props.targets.filter((target) => target.access !== "none").map((target) => target.target) : []);
   const defenseWords = preview?.ok ? damagePreview(props.targets, preview.change, dice) : [];
-  const summary = preview?.ok ? [preview.summary, ...defenseWords].join(". ") : null;
   // At 0 HP and dying or stable, damage can be a critical hit: two failed death saves.
   const atZero = props.targets.some((t) => t.atZero);
   const showCrit = atZero && (preview?.ok ? preview.change.kind === "damage" : mode === "damage");
   const sendsCrit = critSent({ crit, atZero, mode, preview });
   const reach = new Set(props.targets.filter((t) => t.access !== "none").map((t) => t.holder)).size;
+  const summary = preview?.ok ? [`${preview.summary}${reach > 1 ? `, to each of ${reach}` : ""}`, ...defenseWords].join(". ") : null;
   // Typed math such as =12 may ask for what this viewer cannot send, which shows at once in the summary's place.
   const refusal = preview?.ok ? entryRefusal(props.access, preview.change, props.targets.length) : null;
   // What will be sent decides the lines on the dead: the typed text once it parses and may go, the chosen mode otherwise.
@@ -172,7 +172,8 @@ export function HpEntry(props: {
   const said = {
     error: error ?? refusal,
     dead: deadCase(props.targets, operation, { revives, dm }),
-    preview: refusal === null ? summary : null,
+    preview: refusal === null && preview?.ok ? preview.summary : null,
+    defenseWords,
     typed: text.trim() !== "",
     crit: sendsCrit,
     reach,
@@ -294,7 +295,7 @@ export function HpEntry(props: {
     error || refusal ? (
       <Note tone="error">{error ?? refusal}</Note>
     ) : preview?.ok ? (
-      <Note>{reach > 1 ? `${preview.summary}, to each of ${reach}. ${defenseWords.join(". ")}`.trim() : summary}</Note>
+      <Note>{summary}</Note>
     ) : null;
 
   return (

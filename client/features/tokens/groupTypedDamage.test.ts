@@ -99,3 +99,18 @@ test("FL-3: map and tracker group entries share typed previews without disclosin
     }
   }
 });
+
+test("FL3-OPUS-4: plain group previews have no trailing period", () => {
+  for (const place of ["bar", "panel"] as const) {
+    const view = projectState(fixture(), DM, { sceneId: "s1" }) as RoomState;
+    const tokens = Object.values(view.tokens);
+    const targets = hpTargets(tokens, { ...DM, characters: view.characters, playersApplyDamage: true });
+    const scope = new RoomScope();
+    scope.get(hpDraftSlot).set(hpDraftKey(place, targets), { mode: "damage", text: "7", crit: false });
+    const store = createStore(() => ({ view, you: DM }));
+    const el = createElement(GroupHpEntry, { tokens, place });
+    const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
+    assert.match(markup, /7 damage, to each of 5</);
+    assert.doesNotMatch(markup, /7 damage, to each of 5\./);
+  }
+});
