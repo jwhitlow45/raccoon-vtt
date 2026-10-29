@@ -207,6 +207,45 @@ for (const [name, g] of [
     });
   });
 
+  describe(`${name}: the search counts climbs by the 5-10-5 counter`, () => {
+    // Built on hex rows and mirrored onto columns, whose keys and bounds swap.
+    const m = (h: Hex): Hex => (g.orient === "rows" ? h : { col: h.row, row: h.col });
+    const fiveTen = { feetPerCell: 5, diagonal: "fiveTen" } as const;
+    function walk(s: RoomState, from: Hex, to: Hex, counter: { h: number; v: number }) {
+      const t = on(g, "w", from);
+      const input: WalkInput = { build: s, token: ownWalk(t), rules: fiveTen, seen: null, creatures: [], areas: [], prone: false, counter };
+      const found = findRouteOn(input, placedOnHex(g, t, to));
+      assert.ok(found && found !== "none", "the straight leg is not open, so the search walks it");
+      const points = routePoints(s.buildChunks, ownWalk(t), found.pieces, landedElevation(s.buildChunks, t, placedOnHex(g, t, to)));
+      const charged = hexRouteFeet(g, t, points, false, found.pieces.map(([, , extra, swim]) => ({ extra, swim })), fiveTen, { ...counter }, { swimSpeed: false });
+      return { points, cost: charged.cost };
+    }
+
+    test("two bumps of 5 ft cost 30 ft straight over them, so the search walks the 25 ft way round", () => {
+      const s = raised(g, [[m({ col: 4, row: 4 }), 5], [m({ col: 6, row: 4 }), 5]], [[m({ col: 4, row: 4 }), "0"], [m({ col: 6, row: 4 }), "0"]]);
+      const { points, cost } = walk(s, m({ col: 3, row: 4 }), m({ col: 7, row: 4 }), { h: 0, v: 0 });
+      assert.equal(cost, 25);
+      assert.ok(points.every((p) => p.elevation === 0), "never on a bump");
+    });
+
+    test("a walk's counter carries in: one climb onto difficult ground is cheaper straight from an even count, round from an odd one", () => {
+      // Hexes 4, 5 and 6 of row 4 are 5 ft up, hex 4 difficult: straight climbs onto it, the way round climbs onto 5 or 6.
+      const up = [4, 5, 6].map((col) => m({ col, row: 4 }));
+      let s = room({ scenes: { s1: scene("s1", { gridShape: g.orient === "rows" ? "hexRows" : "hexColumns", bounds: { w: 20, h: 14 } }) } });
+      s = apply(s, { t: "build.height", sceneId: "s1", cells: up.map(hexKey), height: 5 } as Op);
+      s = apply(s, { t: "build.rough", sceneId: "s1", cells: [hexKey(up[0]!)], on: true } as Op);
+      const from = m({ col: 3, row: 4 });
+      const at = placedOnHex(g, on(g, "w", from), up[0]!);
+      const onDifficult = (points: readonly { x: number; y: number }[]) => points.some((p) => p.x === at.x && p.y === at.y);
+      const even = walk(s, from, up[2]!, { h: 0, v: 0 });
+      assert.ok(onDifficult(even.points), "straight: 10 ft onto the difficult hex and 10 ft on, no dearer than round and with no turn");
+      assert.equal(even.cost, 20);
+      const odd = walk(s, from, up[2]!, { h: 0, v: 1 });
+      assert.ok(!onDifficult(odd.points), "round: the climb costs 10 ft, doubled on difficult ground");
+      assert.equal(odd.cost, 25);
+    });
+  });
+
   describe(`${name}: a light stands on the hex under it`, () => {
     test("a lamp on a raised hex lights the floor past a lower ridge, as its eye 5 ft over that hex sees over it", () => {
       // Built on hex rows and mirrored onto columns: their keys, centers and bounds swap.

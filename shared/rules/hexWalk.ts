@@ -361,7 +361,7 @@ export class HexWalkWorld {
     return ground;
   }
 
-  /** A step's length in hexes with its rise from `a` to `b` by the room's rule, 1 on level ground (route.ts hexRouteFeet counts the same). */
+  /** A step's length in hexes with its rise from `a` to `b` by the room's rule, 1 on level ground (route.ts hexRouteFeet counts the same). Under 5-10-5 it is a climb from an even count: the search carries the counter itself (HexWalkSearch). */
   stepLength(a: HexStand, b: HexStand): number {
     const dz = this.elevationOf(b) - this.elevationOf(a);
     if (dz === 0) return 1;
@@ -547,38 +547,96 @@ class Heap {
  * 5.2): a uniform-cost search over the world's nodes, grown on demand,
  * by cost in hexes times their multipliers, then by corners, then by the
  * order found, so every device settles the same walk. Capped at
- * MAX_SETTLED nodes as the square search is.
+ * MAX_SETTLED states as the square search is.
+ *
+ * Under the 5-10-5 rule a state is a node and the vertical counter's
+ * residue, started from the walk's own counter, as walk.ts WalkSearch
+ * keeps it: every other climb costs 5 ft more, so the cheapest way on from
+ * a node depends on how many climbs led there. A hex step is never
+ * diagonal, so the horizontal counter never moves.
  */
 export class HexWalkSearch {
   readonly world: HexWalkWorld;
   settled = 0;
-  readonly #cost: Float64Array;
-  readonly #corners: Int32Array;
-  readonly #parent: Int32Array;
-  readonly #via: Uint8Array;
-  readonly #heading: Int8Array;
-  readonly #extra: Int8Array;
-  readonly #done: Uint8Array;
+  readonly #fiveTen: boolean;
+  /** Counter units per cell: half feet, so heights in whole feet stay whole. */
+  readonly #S: number;
+  // State slots, grown as the search reaches new states.
+  #n = 0;
+  #node = new Int32Array(1024);
+  #v = new Int32Array(1024);
+  #cost = new Float64Array(1024);
+  #corners = new Int32Array(1024);
+  #parent = new Int32Array(1024);
+  #via = new Uint8Array(1024);
+  #heading = new Int8Array(1024);
+  #extra = new Int8Array(1024);
+  #done = new Uint8Array(1024);
+  /** States at the starting residue, by node, and the others by key. */
+  readonly #dense: Int32Array;
+  readonly #sparse = new Map<number, number>();
+  readonly #v0: number;
+  /** The first state settled at each node: the cheapest way there. */
+  readonly #best: Int32Array;
   readonly #heap = new Heap();
   #seq = 0;
   readonly #ends = new Map<string, HexStand[]>();
 
   constructor(world: HexWalkWorld) {
     this.world = world;
+    const { rules, counter } = world.input;
+    this.#fiveTen = rules.diagonal === "fiveTen";
+    this.#S = 2 * rules.feetPerCell;
+    this.#v0 = this.#fiveTen ? mod(Math.round(counter.v * this.#S), 2 * this.#S) : 0;
     const n = world.cols * world.rows * 2;
-    this.#cost = new Float64Array(n).fill(Infinity);
-    this.#corners = new Int32Array(n);
-    this.#parent = new Int32Array(n).fill(-1);
-    this.#via = new Uint8Array(n);
-    this.#heading = new Int8Array(n).fill(-1);
-    this.#extra = new Int8Array(n);
-    this.#done = new Uint8Array(n);
-    const s = world.startNode;
-    if (s >= 0) {
+    this.#dense = new Int32Array(n).fill(-1);
+    this.#best = new Int32Array(n).fill(-1);
+    const start = world.startNode;
+    if (start >= 0) {
+      const s = this.#slot(start, this.#v0);
       this.#cost[s] = 0;
       this.#via[s] = START;
       this.#heap.push(s, 0, 0, this.#seq++);
     }
+  }
+
+  /** The state of a node at a residue, or -1. */
+  #find(node: number, v: number): number {
+    return v === this.#v0 ? this.#dense[node]! : (this.#sparse.get(node * 2 * this.#S + v) ?? -1);
+  }
+
+  /** The state of a node at a residue, made when new. */
+  #slot(node: number, v: number): number {
+    const known = this.#find(node, v);
+    if (known >= 0) return known;
+    if (this.#n === this.#node.length) this.#grow();
+    const s = this.#n++;
+    this.#node[s] = node;
+    this.#v[s] = v;
+    this.#cost[s] = Infinity;
+    this.#parent[s] = -1;
+    this.#heading[s] = -1;
+    if (v === this.#v0) this.#dense[node] = s;
+    else this.#sparse.set(node * 2 * this.#S + v, s);
+    return s;
+  }
+
+  #grow(): void {
+    const size = this.#node.length * 2;
+    const grown = <T extends Int32Array | Float64Array | Uint8Array | Int8Array>(a: T, make: (n: number) => T): T => {
+      const b = make(size);
+      b.set(a);
+      return b;
+    };
+    this.#node = grown(this.#node, (n) => new Int32Array(n));
+    this.#v = grown(this.#v, (n) => new Int32Array(n));
+    this.#cost = grown(this.#cost, (n) => new Float64Array(n));
+    this.#corners = grown(this.#corners, (n) => new Int32Array(n));
+    this.#parent = grown(this.#parent, (n) => new Int32Array(n));
+    this.#via = grown(this.#via, (n) => new Uint8Array(n));
+    this.#heading = grown(this.#heading, (n) => new Int8Array(n));
+    this.#extra = grown(this.#extra, (n) => new Int8Array(n));
+    this.#done = grown(this.#done, (n) => new Uint8Array(n));
   }
 
   #endsOf(to: Point): HexStand[] {
@@ -588,68 +646,87 @@ export class HexWalkSearch {
     return ends;
   }
 
-  /** The end a drop at `to` reaches, once settled: the first of its ends the search settled, the cheapest. */
+  /** The state a drop at `to` reaches, once settled: the cheapest of the first states settled at its ends. */
   #reached(to: Point): number {
     let best = -1;
-    for (const s of this.#endsOf(to)) {
-      const n = this.world.nodeOf(s);
-      if (n < 0 || this.#done[n] === 0) continue;
-      if (best < 0 || this.#cost[n]! < this.#cost[best]!) best = n;
+    for (const end of this.#endsOf(to)) {
+      const n = this.world.nodeOf(end);
+      const s = n < 0 ? -1 : this.#best[n]!;
+      if (s >= 0 && (best < 0 || this.#cost[s]! < this.#cost[best]!)) best = s;
     }
     return best;
   }
 
-  /** Settles nodes until an end of a drop at `to` is settled (walk.ts WalkSearch settle). */
+  /** Settles states until an end of a drop at `to` is settled (walk.ts WalkSearch settle). */
   settle(to: Point, slice: Slice = Infinity): SettleResult {
     const ends = this.#endsOf(to).map((s) => this.world.nodeOf(s)).filter((n) => n >= 0);
     if (ends.length === 0) return "unreachable";
     const budget = typeof slice === "number" ? (slice === Infinity ? WorkBudget.all() : WorkBudget.until(slice)) : slice;
-    while (!ends.some((n) => this.#done[n] === 1)) {
+    while (!ends.some((n) => this.#best[n]! >= 0)) {
       if (this.settled >= MAX_SETTLED) return "capped";
       if (budget.spent) return "paused";
       const top = this.#heap.pop();
       if (!top) return "unreachable";
-      if (this.#done[top.node] === 1 || top.cost !== this.#cost[top.node] || top.corners !== this.#corners[top.node]) continue;
-      this.#settle(top.node);
+      const s = top.node;
+      if (this.#done[s] === 1 || top.cost !== this.#cost[s] || top.corners !== this.#corners[s]) continue;
+      this.#settle(s);
       budget.charge();
     }
     return "settled";
   }
 
-  #settle(a: number): void {
+  #settle(s: number): void {
     const world = this.world;
-    this.#done[a] = 1;
+    this.#done[s] = 1;
     this.settled++;
+    const a = this.#node[s]!;
+    if (this.#best[a]! < 0) this.#best[a] = s;
     const A = world.standOf(a);
-    if (this.#via[a] !== START && world.endOnly(A)) return;
+    if (this.#via[s] !== START && world.endOnly(A)) return;
     // A leg's first step may leave a wall its hexes' centers touch, so the start and a squeeze or stand in place there step first.
-    const first = this.#via[a] === START || (this.#via[a] === IN_PLACE && this.#via[this.#parent[a]!] === START);
+    const first = this.#via[s] === START || (this.#via[s] === IN_PLACE && this.#via[this.#parent[s]!] === START);
     const neighbors = hexNeighbors(world.g, A.ref);
     for (let d = 0; d < 6; d++) {
       const B: HexStand = { size: A.size, ref: neighbors[d]!, squeezed: A.squeezed };
       const b = world.nodeOf(B);
-      if (b < 0 || this.#done[b] === 1 || !world.stepOk(A, B, d, first)) continue;
+      if (b < 0) continue;
+      const { length, v } = this.#step(A, B, this.#v[s]!);
+      const known = this.#find(b, v);
+      if ((known >= 0 && this.#done[known] === 1) || !world.stepOk(A, B, d, first)) continue;
       const extra = world.extraOf(A, B);
-      const heading = this.#heading[a]!;
-      this.#relax(a, b, this.#cost[a]! + (1 + extra) * world.stepLength(A, B), this.#corners[a]! + (heading >= 0 && heading !== d ? 1 : 0), d, d, extra);
+      const heading = this.#heading[s]!;
+      this.#relax(s, b, v, this.#cost[s]! + (1 + extra) * length, this.#corners[s]! + (heading >= 0 && heading !== d ? 1 : 0), d, d, extra);
     }
     if (world.small) {
       const B = hexRestand(world.input.token, A, !A.squeezed);
       const b = world.nodeOf(B);
-      if (b >= 0 && this.#done[b] === 0 && world.restandOk(B)) this.#relax(a, b, this.#cost[a]!, this.#corners[a]!, IN_PLACE, this.#heading[a]!, 0);
+      const known = b < 0 ? -1 : this.#find(b, this.#v[s]!);
+      if (b >= 0 && !(known >= 0 && this.#done[known] === 1) && world.restandOk(B)) this.#relax(s, b, this.#v[s]!, this.#cost[s]!, this.#corners[s]!, IN_PLACE, this.#heading[s]!, 0);
     }
   }
 
-  #relax(a: number, b: number, cost: number, corners: number, via: number, heading: number, extra: number): void {
-    const known = this.#cost[b]!;
-    if (cost > known || (cost === known && corners >= this.#corners[b]!)) return;
-    this.#cost[b] = cost;
-    this.#corners[b] = corners;
-    this.#parent[b] = a;
-    this.#via[b] = via;
-    this.#heading[b] = heading;
-    this.#extra[b] = extra;
-    this.#heap.push(b, cost, corners, this.#seq++);
+  /** A step's length in hexes and the vertical residue after it: under 5-10-5 by the counter (distance.ts legFeet in half feet, as walk.ts WalkSearch advances), else by the world's rule. */
+  #step(A: HexStand, B: HexStand, v: number): { length: number; v: number } {
+    if (!this.#fiveTen) return { length: this.world.stepLength(A, B), v };
+    const S = this.#S;
+    const Z = Math.round(Math.abs(this.world.elevationOf(B) - this.world.elevationOf(A)) * 2);
+    if (Z === 0) return { length: 1, v };
+    const vMin = Math.min(S, Z);
+    const units = Math.max(S, Z) + S * (Math.floor((v + vMin) / (2 * S)) - Math.floor(v / (2 * S)));
+    return { length: units / S, v: (v + vMin) % (2 * S) };
+  }
+
+  #relax(from: number, b: number, v: number, cost: number, corners: number, via: number, heading: number, extra: number): void {
+    const known = this.#find(b, v);
+    if (known >= 0 && (cost > this.#cost[known]! || (cost === this.#cost[known]! && corners >= this.#corners[known]!))) return;
+    const t = known >= 0 ? known : this.#slot(b, v);
+    this.#cost[t] = cost;
+    this.#corners[t] = corners;
+    this.#parent[t] = from;
+    this.#via[t] = via;
+    this.#heading[t] = heading;
+    this.#extra[t] = extra;
+    this.#heap.push(t, cost, corners, this.#seq++);
   }
 
   /** The settled walk to a drop at `to` as a route (walk.ts WalkSearch traceTo), null when the start is the end, or "paused" when the budget ran out. */
@@ -658,14 +735,15 @@ export class HexWalkSearch {
     if (end < 0) return null;
     const budget = typeof slice === "number" ? (slice === Infinity ? WorkBudget.all() : WorkBudget.until(slice)) : slice;
     if (budget.spent) return "paused";
-    const nodes: number[] = [];
-    for (let n = end; n >= 0; n = this.#parent[n]!) nodes.push(n);
-    nodes.reverse();
-    if (nodes.length < 2) return null;
-    const via = nodes.map((n) => this.#via[n]!);
-    const extras = nodes.map((n) => this.#extra[n]!);
+    const states: number[] = [];
+    for (let s = end; s >= 0; s = this.#parent[s]!) states.push(s);
+    states.reverse();
+    if (states.length < 2) return null;
+    const nodes = states.map((s) => this.#node[s]!);
+    const via = states.map((s) => this.#via[s]!);
+    const extras = states.map((s) => this.#extra[s]!);
     const { pieces, points } = this.world.piecesOf(nodes, via, extras, (units = 1) => budget.charge(units));
-    return { pieces, points, endsBlocked: this.world.endOnly(this.world.standOf(end)) };
+    return { pieces, points, endsBlocked: this.world.endOnly(this.world.standOf(this.#node[end]!)) };
   }
 
   /** The whole walk to `to`, searched to the end with no slices, or null when none reaches it. */
@@ -674,6 +752,10 @@ export class HexWalkSearch {
     const route = this.traceTo(to);
     return route === "paused" ? null : route;
   }
+}
+
+function mod(a: number, n: number): number {
+  return ((a % n) + n) % n;
 }
 
 /**
