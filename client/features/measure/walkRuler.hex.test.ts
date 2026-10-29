@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { RoomState } from "#shared/model.ts";
-import { hexAnchor } from "#shared/rules/footprint.ts";
-import { hexCenter, type Hex } from "#shared/rules/hex.ts";
+import { hexAnchor, occupiedHexes } from "#shared/rules/footprint.ts";
+import { hexCenter, hexKey, type Hex } from "#shared/rules/hex.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
 import { measureWalk } from "./walkRuler.ts";
 
@@ -68,6 +68,33 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       const m = measureWalk({ view: s, sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "ogre" }, hexCenter(g, at(14, 8))], viewer: { role: "dm" }, everything: false })!;
       assert.ok(m.legs[0]!.corners.length > 0);
       assert.ok(m.totalFt > 50);
+    });
+
+    test("from a rider of a Large mount through a one-hex corridor, its legs run where the rider sits, on the mount's hex (D-261029-52)", () => {
+      const solid = (h: Hex) => {
+        const along = g.orient === "rows" ? h.col : h.row;
+        const across = g.orient === "rows" ? h.row : h.col;
+        return along >= 6 && along <= 12 && across !== 6;
+      };
+      const wide = g.orient === "rows" ? { w: 22, h: 16 } : { w: 16, h: 22 };
+      const s = hexWallRoom(shape, wide.w, wide.h, wallsRound(g, wide, solid));
+      s.scenes.s1 = { ...s.scenes.s1!, fogEnabled: false };
+      s.tokens.horse = onHex(g, "horse", "large", at(2, 5), { name: "Warhorse" });
+      for (const seat of occupiedHexes(g, s.tokens.horse!)) {
+        s.tokens.brom = onHex(g, "brom", "medium", seat, { name: "Brom", attached: { to: "horse", kind: "ride", steer: true } });
+        const m = measureWalk({ view: s, sceneId: "s1", stops: [{ x: 0, y: 0, tokenId: "brom" }, hexCenter(g, at(9, 6)), hexCenter(g, at(16, 6))], viewer: { role: "dm" }, everything: true })!;
+        assert.equal(m.legs.length, 2);
+        const points = m.legs.flatMap((leg) => [leg.from, ...leg.corners, leg.to]);
+        for (const p of points) {
+          const hexes = occupiedHexes(g, { size: "medium", x: p.x, y: p.y });
+          assert.ok(!hexes.some(solid), `${hexes.map(hexKey)} from seat ${hexKey(seat)}: never in the rock`);
+        }
+        // The first stop is in the corridor, which the rider's leg ends in, on its mount's one hex there.
+        const end = occupiedHexes(g, { size: "medium", ...m.legs[0]!.to })[0]!;
+        assert.ok((g.orient === "rows" ? end.row : end.col) === 6 && (g.orient === "rows" ? end.col : end.row) >= 6, `${hexKey(end)} in the corridor`);
+        // The next leg is planned from where the rider sits then, as a drag from it would be, so it ends on the stop's hex from any seat.
+        assert.equal(hexKey(occupiedHexes(g, { size: "medium", ...m.legs[1]!.to })[0]!), hexKey(at(16, 6)), `from seat ${hexKey(seat)}`);
+      }
     });
   });
 }

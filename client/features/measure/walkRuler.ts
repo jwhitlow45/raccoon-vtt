@@ -3,6 +3,7 @@ import type { Actor, PathStop, RoomState, Token, Viewer } from "#shared/model.ts
 import type { Op } from "#shared/protocol.ts";
 import { gridOfToken } from "#shared/project.ts";
 import { applyOp } from "#shared/reducer.ts";
+import { planMove } from "#shared/rules/moveLeg.ts";
 import type { DiagonalCounter, DistanceSettings } from "#shared/rules/distance.ts";
 import { footprintSize, placedOnHex } from "#shared/rules/footprint.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
@@ -10,7 +11,7 @@ import { isHex, sceneGrid, SQUARES } from "#shared/rules/grid.ts";
 import { hexAt } from "#shared/rules/hex.ts";
 import { isPreview, offKey, previewChunks, type Walker } from "#shared/rules/movement.ts";
 import { pathThisTurn, publicCounters } from "#shared/rules/path.ts";
-import { routeWalkers } from "#shared/rules/route.ts";
+import { routeWalkers, type RoutePoint } from "#shared/rules/route.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
 import { routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch } from "#shared/rules/hexWalk.ts";
 import { groupWalkWorld, publicToken, seenWhereMoved, type WalkViewer } from "#shared/rules/walkWorld.ts";
@@ -131,8 +132,13 @@ type Progress = { steps: Step[]; on: { leg: string; search: RouteSearch; check: 
  */
 type Walked = { sim: RoomState; seen: DropView; walker: Token; left: PathStop[]; counter: DiagonalCounter; history: string };
 
-/** A leg worked out: as drawn and read, what it adds to the walk's extra words, and where it leaves the walk. */
-type Step = { key: string; leg: WalkLeg; words: string[]; extraFt: number; after: Walked };
+/**
+ * A leg worked out: as drawn and read, what it adds to the walk's extra
+ * words, and where it leaves the walk. On hexes, `along` is the walk of each
+ * token the leg takes along (moveLeg.ts planMove), since what sits on a
+ * squeezing mount moves seat as it goes (D-261029-52).
+ */
+type Step = { key: string; leg: WalkLeg; words: string[]; extraFt: number; after: Walked; along?: ReadonlyMap<string, readonly RoutePoint[]> };
 
 type Kept = {
   basis: Basis;
@@ -277,6 +283,10 @@ function rulerLead(view: RoomState, input: WalkInput, token: Token): Token {
   return view.tokens[dragLead(gridOfToken(view, token), tokens, token).id] ?? token;
 }
 
+function pointOf(p: RoutePoint): Point {
+  return { x: p.x, y: p.y };
+}
+
 /** A leg of the lead's walk as the ruler draws it, from the place of the token it starts on. */
 function shiftLeg(leg: WalkLeg, by: Point): WalkLeg {
   const back = (p: Point) => ({ x: p.x - by.x, y: p.y - by.y });
@@ -320,6 +330,14 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   // rider sits on it, and are drawn from the rider's place.
   const start = rulerLead(view, input, anchor);
   const shift = { x: start.x - anchor.x, y: start.y - anchor.y };
+  // On hexes a rider's seat moves while its mount squeezes (D-261029-52), so each leg reads where it sits as the leg starts,
+  // and is drawn along its own walk. On squares the seat never moves, and the start's offset holds.
+  const seated = (shift.x !== 0 || shift.y !== 0) && isHex(gridOfView(view, start.sceneId));
+  const draw = (leg: WalkLeg, by: Point, step?: Step): WalkLeg => {
+    const route = seated ? step?.along?.get(anchor.id) : undefined;
+    if (route && route.length === leg.corners.length + 2) return { ...leg, from: pointOf(route[0]!), to: pointOf(route[route.length - 1]!), corners: route.slice(1, -1).map(pointOf) };
+    return by.x === 0 && by.y === 0 ? leg : shiftLeg(leg, by);
+  };
   // The room as the legs so far leave it, each planned as the board plans a drag and applied by the room's own reducer
   // (planStep), so a later leg walks, lands and is seen as the token would after them (reviews AT-SOL-1, AT-SOL-3,
   // AT-ASTRA-25, AT-SOL-5 and AT-ASTRA-26).
@@ -335,9 +353,11 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     // A stop on a token is where that token stands now, as the straight ruler reads it. One this view cannot resolve stays where it was drawn.
     const on = drawn.tokenId ? view.tokens[drawn.tokenId] : undefined;
     const stop = on ? tokenStop(gridOfView(view, start.sceneId), on) : drawn;
-    const raw = { x: stop.x - size.w / 2 + shift.x, y: stop.y - size.h / 2 + shift.y };
+    const rider = seated ? at.sim.tokens[anchor.id] : undefined;
+    const by = rider?.attached ? { x: at.walker.x - rider.x, y: at.walker.y - rider.y } : shift;
+    const raw = { x: stop.x - size.w / 2 + by.x, y: stop.y - size.h / 2 + by.y };
     if (waiting) {
-      legs.push({ from: waiting, to: raw, corners: [], ft: 0, none: false, searching: true });
+      legs.push(draw({ from: waiting, to: raw, corners: [], ft: 0, none: false, searching: true }, by));
       waiting = raw;
       continue;
     }
@@ -345,7 +365,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     const key = `${memoKey}${at.history}|${target.x},${target.y},${target.squeeze}`;
     const step = (progress.steps[k]?.key === key ? progress.steps[k] : undefined) ?? room.steps.get(key) ?? planStep(view, input, at, raw, target, key, budget, progress);
     if (!step) {
-      legs.push({ from: { x: at.walker.x, y: at.walker.y }, to: { x: target.x, y: target.y }, corners: [], ft: 0, none: false, searching: true });
+      legs.push(draw({ from: { x: at.walker.x, y: at.walker.y }, to: { x: target.x, y: target.y }, corners: [], ft: 0, none: false, searching: true }, by));
       waiting = { x: target.x, y: target.y };
       continue;
     }
@@ -354,7 +374,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
       if (room.steps.size >= MAX_STEPS) room.steps.delete(room.steps.keys().next().value!);
       room.steps.set(key, step);
     }
-    legs.push(step.leg);
+    legs.push(draw(step.leg, by, step));
     totalFt += step.leg.ft;
     extraFt += step.extraFt;
     for (const w of step.words) words.add(w);
@@ -362,8 +382,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
   }
   const searching = waiting !== null;
   const named = ["difficult terrain", "overgrowth", "swimming", "crawling", "dragging", "carrying"].filter((w) => words.has(w));
-  const shown = shift.x === 0 && shift.y === 0 ? legs : legs.map((leg) => shiftLeg(leg, shift));
-  const walk: WalkMeasure = { legs: shown, totalFt, extra: extraFt > 0 && named.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(named)}` : null, size, searching };
+  const walk: WalkMeasure = { legs, totalFt, extra: extraFt > 0 && named.length > 0 ? `+${formatFeet(extraFt)} for ${joinWords(named)}` : null, size, searching };
   if (!searching) {
     const byViewer = memo.get(stops) ?? new Map<string, WalkMeasure>();
     byViewer.set(memoKey, walk);
@@ -427,6 +446,7 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, tar
       : null;
   const corners = trace ? trace.slice(1, -1).map(({ x, y }) => ({ x, y })) : [];
   const next = simulated(view, at.sim, role, token, plan, ownRuler(input) ? undefined : unseenAtStart(view, input));
+  const along = isHex(gridOfView(at.sim, token.sceneId)) ? carriedWalks(at.sim, role, plan) : undefined;
   const left = [...at.left];
   if (move) left.push(stopLeft(next.sim, token.id, left, { x: move.x, y: move.y, elevation, ...(corners.length > 0 ? { via: corners.flatMap((c) => [c.x, c.y]) } : {}) }));
   const counter = read ? { h: at.counter.h + read.diag[0], v: at.counter.v + read.diag[1] } : at.counter;
@@ -436,7 +456,17 @@ function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, tar
     words: route ? extraWords(route, false, false, towing) : [],
     extraFt: read?.extra?.ft ?? 0,
     after: { ...next, left, counter, history: `${at.history}|${JSON.stringify(plan.moves)}` },
+    ...(along ? { along } : {}),
   };
+}
+
+/** The walks of the tokens a leg's plan takes along, as the room's own move plans them on the room before it (moveLeg.ts planMove). */
+function carriedWalks(sim: RoomState, role: WalkViewer["role"], plan: DropPlan): ReadonlyMap<string, readonly RoutePoint[]> {
+  const out = new Map<string, readonly RoutePoint[]>();
+  for (const op of moveOpsOf(plan.moves)) {
+    for (const moved of planMove(op as Op, sim, RULER_ACTOR(role), {})) if (moved.carriedBy !== undefined) out.set(moved.tokenId, moved.route);
+  }
+  return out;
 }
 
 /**
