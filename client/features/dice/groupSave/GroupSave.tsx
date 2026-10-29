@@ -1,3 +1,5 @@
+import { DamageSummary } from "../DamageSummary.tsx";
+import { damageSummary, type DamageSummaryLines } from "../damageSummaryLines.ts";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
@@ -79,7 +81,7 @@ import { castFill } from "../cast/castStart.ts";
 import { sentAny } from "./start.ts";
 import { parseDamageOverride } from "./damageInput.ts";
 
-export function RowDamageField(props: { name: string; value: number | string | undefined; computed: number; onChange(value: string | null): void }) {
+export function RowDamageField(props: { name: string; value: number | string | undefined; computed: number; summary?: DamageSummaryLines; onChange(value: string | null): void }) {
   const errorId = useId();
   const parsed = props.value === undefined ? null : parseDamageOverride(props.value);
   const error = parsed?.ok === false ? parsed.error : null;
@@ -89,6 +91,7 @@ export function RowDamageField(props: { name: string; value: number | string | u
         <Input aria-label={`${props.name}'s damage`} inputMode="text" value={props.value ?? ""} placeholder={`${props.computed} or 10 fire`} autoComplete="off" error={error !== null} aria-describedby={error ? errorId : undefined} onChange={(e) => props.onChange(e.target.value)} style={{ flex: "1 1 160px", width: 160 }} />
         {props.value !== undefined ? <Button size="sm" onClick={() => props.onChange(null)}>{`Back to ${props.computed}`}</Button> : null}
       </div>
+      {!error && (props.summary || parsed?.ok) ? <DamageSummary summary={props.summary ?? damageSummary(parsed?.ok ? parsed.parts ?? [{ amount: parsed.amount }] : [])} /> : null}
       {error ? <span id={errorId} role="status" style={{ fontSize: theme.font.small, color: theme.color.dangerText }}>{error}</span> : null}
     </div>
   );
@@ -772,8 +775,10 @@ function OutcomePanel(props: {
   }
   const rolledText =
     damageState?.state === "committed" && damageState.amounts
-      ? `Rolled: ${damageState.amounts.flatMap((a, i) => (a === undefined ? [] : [`${a}${props.parsed?.ok && props.parsed.parts[i]?.type ? ` ${damageTypeName(props.parsed.parts[i]!.type!)}` : ""}`])).join(" + ")}`
+      ? "Rolled"
       : damageState?.state === "sending" ? "Rolling…" : damageState?.state === "refused" ? damageState.says : damageState?.state === "unknown" ? "This may have happened. Check the log." : null;
+  const damageParts = amountsOf(page, page.fill?.damageType);
+  const summaryParts = damageParts ?? (props.parsed?.ok ? props.parsed.parts : []);
   const hasDice = props.parsed?.ok === true && props.parsed.parts.some((p) => "formula" in p);
   const fight = props.view.encounter?.entries ?? [];
   return (
@@ -807,6 +812,7 @@ function OutcomePanel(props: {
         ) : null}
       </form>
       {props.parsed && !props.parsed.ok ? <Note tone="error">{props.parsed.error}</Note> : rolledText ? <Note>{rolledText}</Note> : null}
+      {summaryParts.length > 0 ? <DamageSummary summary={damageSummary(summaryParts)} /> : null}
       {theirs && !frozen ? (
         <ChipRow label="Rolled by someone else">
           <Chip onClick={() => setOutcome({ damage: theirs.text })}>{theirs.chip}</Chip>
@@ -916,7 +922,8 @@ function GroupRow(props: {
   const details: string[] = [];
   if (s.says) details.push(s.says);
   if (row.why && setup) details.push(`Not asked: ${row.why}`);
-  details.push(...words.notes);
+  details.push(...words.notes.filter((note) => !outcome.summary || s.amount !== undefined && !outcome.damage || note !== outcome.words));
+  if (s.amount !== undefined && outcome.damage) details.push(`Typed override, worked out ${outcome.computed}`);
   // The control shows the DM's own mark alone: a computed pass or fail is the verdict beside the total, which a DC change judges again.
   const markValue: Mark | null = s.mark ?? null;
   const waitingAsk = s.asked && !s.answer;
@@ -951,7 +958,7 @@ function GroupRow(props: {
         </div>
       </div>
       {takes && editing ? (
-        <RowDamageField name={row.name} value={s.amount} computed={outcome.computed} onChange={(value) => props.onChange(setAmount(page, row.holder, value))} />
+        <RowDamageField name={row.name} value={s.amount} computed={outcome.computed} summary={outcome.summary} onChange={(value) => props.onChange(setAmount(page, row.holder, value))} />
       ) : null}
       {setup && props.loading ? (
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Loading</span>
@@ -975,6 +982,7 @@ function GroupRow(props: {
           ) : null}
         </div>
       )}
+      {outcome.summary && !(takes && editing) ? <DamageSummary summary={outcome.summary} /> : null}
       {details.length > 0 ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted, display: "grid", gap: theme.space(1) }}>{details.map((d, i) => <span key={i}>{d}</span>)}</div> : null}
       {!setup && !frozen ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>

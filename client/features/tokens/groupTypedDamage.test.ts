@@ -87,15 +87,15 @@ test("FL-3: map and tracker group entries share typed previews without disclosin
     const store = createStore(() => ({ view, you }));
     const el = createElement(GroupHpEntry, { tokens, place });
     const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
-    assert.match(markup, /11 Cold damage/);
+    assert.match(markup.replace(/<[^>]*>/g, ""), /11 Cold damage/);
     assert.match(markup, /to each of 5/);
     assert.match(markup, /inputMode="text"/);
     if (you.role === "dm") {
-      assert.match(markup, /Resists Cold: 5/);
-      assert.match(markup, /Immune to Cold: 0/);
-      assert.match(markup, /Vulnerable to Cold: 22/);
+      assert.match(markup.replace(/<[^>]*>/g, ""), /Resistant: Resists Cold, 5/);
+      assert.match(markup.replace(/<[^>]*>/g, ""), /Immune: Immune Cold, 0/);
+      assert.match(markup.replace(/<[^>]*>/g, ""), /Vulnerable: Vulnerable Cold, 22/);
     } else {
-      assert.doesNotMatch(markup, /Resists Cold|Immune to Cold|Vulnerable to Cold/);
+      assert.doesNotMatch(markup, /data-damage-defenses|data-damage-target|<s /);
     }
   }
 });
@@ -110,7 +110,7 @@ test("FL3-OPUS-4: plain group previews have no trailing period", () => {
     const store = createStore(() => ({ view, you: DM }));
     const el = createElement(GroupHpEntry, { tokens, place });
     const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
-    assert.match(markup, /7 damage, to each of 5</);
+    assert.match(markup.replace(/<[^>]*>/g, ""), /7 damage, to each of 5/);
     assert.doesNotMatch(markup, /7 damage, to each of 5\./);
   }
 });

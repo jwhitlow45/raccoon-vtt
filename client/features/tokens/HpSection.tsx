@@ -18,6 +18,8 @@ import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts"
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { useHpChips, useMarkChipApplied } from "../dice/hpChips.ts";
+import { defenseSummaryText } from "../dice/damageSummaryLines.ts";
+import { DamageSummary } from "../dice/DamageSummary.tsx";
 import { resultWords, type HpChip } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
@@ -105,13 +107,14 @@ export function HpEntry(props: {
   const preview = text.trim() ? parseHpInput(text, mode, filled) : null;
   const typedDamage = preview?.ok && preview.change.kind === "damage" && preview.change.parts !== undefined;
   const { dice } = useDiceView(typedDamage ? props.targets.filter((target) => target.access !== "none").map((target) => target.target) : []);
-  const defenseWords = preview?.ok ? damagePreview(props.targets, preview.change, dice) : [];
+  const damage = preview?.ok ? damagePreview(props.targets, preview.change, dice) : null;
   // At 0 HP and dying or stable, damage can be a critical hit: two failed death saves.
   const atZero = props.targets.some((t) => t.atZero);
   const showCrit = atZero && (preview?.ok ? preview.change.kind === "damage" : mode === "damage");
   const sendsCrit = critSent({ crit, atZero, mode, preview });
   const reach = new Set(props.targets.filter((t) => t.access !== "none").map((t) => t.holder)).size;
-  const summary = preview?.ok ? [`${preview.summary}${reach > 1 ? `, to each of ${reach}` : ""}`, ...defenseWords].join(". ") : null;
+  const suffix = reach > 1 ? `, to each of ${reach}` : "";
+
   // Typed math such as =12 may ask for what this viewer cannot send, which shows at once in the summary's place.
   const refusal = preview?.ok ? entryRefusal(props.access, preview.change, props.targets.length) : null;
   // What will be sent decides the lines on the dead: the typed text once it parses and may go, the chosen mode otherwise.
@@ -172,8 +175,8 @@ export function HpEntry(props: {
   const said = {
     error: error ?? refusal,
     dead: deadCase(props.targets, operation, { revives, dm }),
-    preview: refusal === null && preview?.ok ? preview.summary : null,
-    defenseWords,
+    preview: refusal === null && preview?.ok ? damage ? damage.parts.map((part) => `${part.original !== undefined ? `${part.original} to ` : ""}${part.amount} ${part.label}`).join(" + ") : preview.summary : null,
+    defenseWords: damage ? [...damage.defenses.map(defenseSummaryText), ...damage.targets.map((target) => `${target.name}: ${target.amount} damage (${target.defenses.map(defenseSummaryText).join(". ")})`)] : [],
     typed: text.trim() !== "",
     crit: sendsCrit,
     reach,
@@ -295,7 +298,7 @@ export function HpEntry(props: {
     error || refusal ? (
       <Note tone="error">{error ?? refusal}</Note>
     ) : preview?.ok ? (
-      <Note>{summary}</Note>
+      damage ? <DamageSummary summary={damage} suffix={suffix} /> : preview.change.kind !== "damage" ? <DamageSummary change={{ kind: preview.change.kind, text: preview.summary }} suffix={suffix} /> : null
     ) : null;
 
   return (
@@ -315,11 +318,12 @@ export function HpEntry(props: {
         <ChipRow label="Rolled amounts">
           {chipRow.map((chip) => (
             // A long label wraps inside its chip rather than pushing the entry wider than a phone.
-            <span key={chip.lineId} style={{ display: "grid", maxWidth: "100%" }}>
+            <div key={chip.lineId} style={{ display: "grid", maxWidth: "100%" }}>
               <Chip onClick={() => fillFrom(chip)}>
                 <span style={{ whiteSpace: "normal", textAlign: "center" }}>{chip.text}</span>
               </Chip>
-            </span>
+              {chip.breakdown ? <DamageSummary summary={chip.breakdown} /> : null}
+            </div>
           ))}
         </ChipRow>
       ) : null}

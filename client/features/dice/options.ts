@@ -1,3 +1,4 @@
+import { damageSummary, type DamageSummaryLines } from "./damageSummaryLines.ts";
 import { testOf, type D20Test, type DamagePart, type NamedRoll } from "#shared/dice/bonus.ts";
 import { d20Formula, formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { DAMAGE_TYPES, damageTypeName, type DamageType } from "#shared/rules/damage.ts";
@@ -497,6 +498,7 @@ export type HpChip = {
   critical: boolean;
   /** Each rolled part stays separate so defenses round each one as in a save. Missing types are never inferred from labels. */
   parts?: PartAmount[];
+  breakdown?: DamageSummaryLines;
 };
 
 const DAMAGE_LABEL = /\bdamage\b/i;
@@ -549,7 +551,7 @@ export function hpChips(log: readonly LogEntry[], me: string, kind: "damage" | "
       const what = chipWhat(data.rolls[0]!);
       const text = own ? `Use ${amount} (${what})` : `Use ${amount} (${opts.nameOf(data.by)}'s ${what})`;
       // A line rolled before the server marked a crit says so only in its label.
-      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")), ...(parts ? { parts } : {}) };
+      chip = { lineId: entry.id, lineIds: ids, amount, text, critical: rolls.some((r) => r.crit !== undefined || /\bcritical\b/i.test(r.label ?? "")), ...(parts ? { parts } : {}), ...(kind === "damage" ? { breakdown: damageSummary(parts ?? rolls.map((roll) => ({ amount: roll.total }))) } : {}) };
     }
     if (own) mine = chip;
     else theirs = chip;

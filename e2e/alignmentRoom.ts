@@ -1,3 +1,4 @@
+import { damageSummaryAlignment } from "./helpers/damageSummary.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -243,6 +244,12 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
   "request-roll": { phones: 4, wide: 0 },
   "group-save": { phones: 4, wide: 2 },
   "group-save-row": { phones: 4, wide: 2 },
+  "fl4-hp-bar": { phones: 6, wide: 6 },
+  "fl4-hp-heal": { phones: 6, wide: 6 },
+  "fl4-hp-temp": { phones: 6, wide: 6 },
+  "fl4-hp-panel": { phones: 4, wide: 2 },
+  "fl4-hp-character": { phones: 4, wide: 2 },
+  "fl4-hp-group": { phones: 6, wide: 6 },
   // Setup on the phone layout (the upright phones, the tablet and 844 x 390 at 100%), Tools in the pair (844 x 390 at 130%).
   "setup-menu": { phones: 6, wide: 3 },
   "tools-menu": { phones: 0, wide: 1 },
@@ -309,7 +316,7 @@ class Sweep {
       if (!opts.optional) await this.missing(page, screen, (await root.count()) === 0 ? "nothing on the page matched it" : "what matched it is hidden");
       return;
     }
-    await this.add(page, screen, alignmentLines(await measureAlignment(shown), `${this.at} ${screen}`));
+    await this.add(page, screen, [...alignmentLines(await measureAlignment(shown), `${this.at} ${screen}`), ...await damageSummaryAlignment(shown, `${this.at} ${screen}`)]);
   }
 
   /** The board's pills, as `screen`, with each trap name's pointer it read counted as a screen of its own. */
@@ -844,6 +851,15 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const thorn = await selectToken(page, "Thorn", { x: 5, y: 5 });
   if (thorn) {
     await measureWindow(sweep, page, "window-thorn", thorn, headers, false);
+    await thorn.getByLabel("HP change", { exact: true }).fill("28 fire + 14 slashing + 10");
+    await thorn.getByLabel("HP change", { exact: true }).blur();
+    await sweep.measure(page, "fl4-hp-bar", thorn.locator("[data-damage-summary]"));
+    for (const [screen, value] of [["fl4-hp-heal", "+5"], ["fl4-hp-temp", "t5"]] as const) {
+      await thorn.getByLabel("HP change", { exact: true }).fill(value);
+      await thorn.getByLabel("HP change", { exact: true }).blur();
+      await sweep.measure(page, screen, thorn.locator("[data-damage-summary]"));
+    }
+    await thorn.getByLabel("HP change", { exact: true }).fill("");
     // An upright phone's bar expanded from the strip, whole (docs/design-v1-bar-compact.md 5), as measureWindow leaves it.
     if ((await thorn.getAttribute("data-bar-state")) === "expanded") await sweep.measure(page, "window-expanded", thorn);
     const attach = await barControl(thorn, "Attach");
@@ -873,6 +889,7 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
       await group.first().getByLabel("HP change", { exact: true }).fill("11 cold + 3 fire");
       await group.first().getByLabel("HP change", { exact: true }).blur();
       await measureWindow(sweep, page, "window-group", group.first(), headers, false);
+      await sweep.measure(page, "fl4-hp-group", group.first().locator("[data-damage-summary]"));
       // The group's bar expanded from its strip on an upright phone.
       if ((await group.first().getAttribute("data-bar-state")) === "expanded") await sweep.measure(page, "group-expanded", group.first());
       await openTracker(page);
@@ -906,6 +923,24 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     } else await sweep.missing(page, "rest-crit", "a tap on the dying Thorn opened no window");
     await escapeAll(page);
     await ops.send({ t: "actor.hp", target: { characterId: run.ids.thornChar }, change: { kind: "heal", amount: 30 } });
+  }
+
+  if (GROUP_SAVE_AT.has(size.name)) {
+    // FL-4: panel and character pages share the entry, but have different available widths.
+    const panel = await ic2TokenPanel(page, "Goblin", "Goblin", { x: 9, y: 3 });
+    for (const [screen, host] of [["fl4-hp-panel", panel], ["fl4-hp-character", null]] as const) {
+      const target = screen === "fl4-hp-character" ? await thornsPage(page) : host;
+      if (!target) { await sweep.missing(page, screen, "the HP page did not open"); continue; }
+      const combat = target.getByRole("button", { name: "Combat", exact: true });
+      if (await visible(combat) && await combat.getAttribute("aria-expanded") === "false") await combat.click();
+      const field = target.getByLabel("HP change", { exact: true });
+      await field.fill("28 fire + 14 slashing + 10");
+      await field.blur();
+      await sweep.measure(page, screen, target.locator("[data-damage-summary]"));
+      await field.fill("");
+      await closeSheets(page);
+      await escapeAll(page);
+    }
   }
 
   if (headers.length === 0) await sweep.missing(page, "headers", "no header place was read");
@@ -1841,6 +1876,7 @@ async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: s
     await host.getByRole("button", { name: /'s damage, .*Change it/ }).first().click();
     await host.getByLabel(/'s damage$/).first().fill("11 cold + 3 fire");
   }
+  if (screen === "group-save-row") await host.locator("[data-damage-summary]").first().waitFor();
   await sweep.measure(page, screen, host);
   await host.getByRole("button", { name: "Discard", exact: true }).first().click();
   const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');

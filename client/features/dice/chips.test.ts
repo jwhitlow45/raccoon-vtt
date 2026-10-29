@@ -139,3 +139,13 @@ describe("FL-3 rolled damage parts", () => {
     assert.equal(heal.amount, 8);
   });
 });
+
+test("FL-4: chip breakdowns keep typed and untyped rolled parts, and healing has none", () => {
+  const chip = hpChips([line("me", [{ ...roll("Spell damage", 11), type: "cold" }, roll("Spell damage", 3)])], "me", "damage", opts())[0]!;
+  assert.deepEqual(chip.breakdown?.parts, [
+    { icon: "cold", gutter: "", amount: 11, label: "Cold damage" },
+    { icon: "untyped", gutter: "+", amount: 3, label: "damage" },
+  ]);
+  assert.equal(chip.breakdown?.total, 14);
+  assert.equal(hpChips([line("me", [roll("Cure Wounds healing", 9)])], "me", "heal", opts())[0]?.breakdown, undefined);
+});

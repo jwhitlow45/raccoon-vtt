@@ -2,6 +2,7 @@ import "../../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { theme } from "../../../lib/theme.ts";
+import { damageSummary } from "../damageSummaryLines.ts";
 import { newPage } from "./chain.ts";
 
 /*
@@ -56,4 +57,15 @@ describe("the open group save's notice (7.8)", () => {
     assert.match(markup, /Dexterity save for 2: [a-z0-9 ]+\./);
     assert.doesNotMatch(markup, /set up\./);
   });
+});
+
+
+test("FL-4: an override renders the computed parts and describes a struck amount", () => {
+  const summary = damageSummary([{ amount: 11, type: "cold" }], { result: { amount: 5, byPart: [5], notes: ["Resists Cold"] }, defenses: [{ kind: "resist", of: "cold", source: "Stat block" }] });
+  const markup = renderToStaticMarkup(createElement(groupSave.RowDamageField, { name: "Frost", value: "11 cold", computed: 7, summary, onChange() {} }));
+  assert.match(markup, /data-damage-icon="cold"/);
+  assert.match(markup, /<s aria-hidden="true"[^>]*>11<\/s>/);
+  assert.match(markup, /was 11, now /);
+  assert.match(markup.replace(/<[^>]*>/g, ""), /5 Cold damage/);
+  assert.match(markup.replace(/<[^>]*>/g, ""), /Resists: Cold/);
 });

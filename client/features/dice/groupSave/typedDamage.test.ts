@@ -1,3 +1,4 @@
+import { defenseSummaryText } from "../damageSummaryLines.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { actor, castAsk, customMonster, DM, effect, room, token } from "#shared/testutil.ts";
@@ -173,4 +174,18 @@ describe("FL-3 group save typed server damage", () => {
       assert.equal(target.inline.hp.cur, 92);
     }
   });
+});
+
+test("FL-4: row summaries follow the shared rule through saves, overrides and reset", () => {
+  const { dice, page, row, parts } = setup();
+  const saved = rowOutcome(page, row, dice, parts).summary!;
+  assert.deepEqual(saved.parts.map((part) => [part.original, part.amount]), [[15, 3], [9, 0], [5, 4]]);
+  assert.equal(saved.total, 7);
+  assert.deepEqual(saved.defenses.map(defenseSummaryText), ["Immune: Fire", "Resists: Cold", "Vulnerable: Radiant", "Saved: half"]);
+  const typed = setAmount(page, row.holder, "11 cold + 3 radiant");
+  const override = rowOutcome(typed, row, dice, parts).summary!;
+  assert.deepEqual(override.parts.map((part) => [part.original, part.amount]), [[11, 5], [3, 6]]);
+  assert.deepEqual(override.defenses.map(defenseSummaryText), ["Resists: Cold", "Vulnerable: Radiant"]);
+  assert.deepEqual(rowOutcome(setAmount(typed, row.holder, null), row, dice, parts).summary, saved);
+  assert.deepEqual(rowOutcome(setAmount(typed, row.holder, "5"), row, dice, parts).summary?.parts, [{ icon: "untyped", gutter: "", amount: 5, label: "damage" }]);
 });

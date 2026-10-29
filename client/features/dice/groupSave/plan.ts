@@ -1,3 +1,4 @@
+import { damageSummary, type DamageSummaryLines } from "../damageSummaryLines.ts";
 import type { ConditionKey, Effect, RoomState } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
 import { MAX_DAMAGE_PARTS, type ActorTarget, type DurationInput, type OpOf, type OutcomeDamage } from "#shared/protocol.ts";
@@ -27,6 +28,7 @@ export type RowOutcome = {
   computed: number;
   /** What the amount alone does not say: "Immune to fire: 9 radiant", "Typed 5, worked out 12", else "". */
   words: string;
+  summary?: DamageSummaryLines;
   conditions: OutcomeCondition[];
   /** Why a condition does not go on: "Immune to Frightened". */
   skips: string[];
@@ -111,6 +113,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
   if (amounts) {
     const incoming = incomingDamage(page, state, amounts, result, evasion);
     const dealt = rowDamage(incoming.parts, result, { onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dexSave: evasionApplies, row: { defenses, qualifiedOn, evasion, effects } });
+    if (incoming.parts.length > 0) out.summary = damageSummary(incoming.parts, { result: dealt, defenses, qualifiedOn, ...(result === "pass" ? { saved: page.test.kind === "none" ? "none" as const : page.outcome.onPass } : {}) });
     out.amount = dealt.amount;
     out.computed = dealt.amount;
     types = dealtTypes(amounts, dealt.byPart);
@@ -120,6 +123,7 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
   }
   if (state.amount !== undefined) {
     delete out.damage;
+    delete out.summary;
     const parsed = parseDamageOverride(state.amount);
     if (!parsed.ok) {
       out.error = parsed.error;
@@ -127,11 +131,13 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
       out.words = parsed.error;
     } else if (parsed.parts) {
       const dealt = rowDamage(parsed.parts, "fail", { onPass: "none", dexSave: false, row: { defenses, qualifiedOn, evasion: false, effects } });
+      out.summary = damageSummary(parsed.parts, { result: dealt, defenses, qualifiedOn });
       out.amount = dealt.amount;
       out.words = `Typed ${state.amount}: ${damageWords(parsed.parts, dealt)}`;
       types = dealtTypes(parsed.parts, dealt.byPart);
       out.damage = { parts: parsed.parts, ...(state.qualifiedOn?.length ? { qualifiedOn: state.qualifiedOn } : {}) };
     } else {
+      out.summary = damageSummary([{ amount: parsed.amount }]);
       out.amount = parsed.amount;
       out.words = amounts ? `Typed ${parsed.amount}, worked out ${out.computed}` : `Typed ${parsed.amount}`;
     }

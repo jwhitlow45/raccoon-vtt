@@ -1,10 +1,11 @@
+import { damageSummaryAlignment } from "./helpers/damageSummary.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, expandBar, openSideTab, pagePoint, waitFor, wholeInReach } from "./harness.ts";
+import { barControl, expandBar, multiSelect, openSideTab, pagePoint, waitFor, wholeInReach } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterCounts, starterWork } from "./starterPick.ts";
 import { actor, applyInView, bar, combatSections, DESK, dm, dmCdp, dmConsole, dmContext, dmSocket, type El, failSrdData, familyOf, fieldBeforeModes, fitMap, focused, foldedSummary, footprintRect, groupIn, hpPairSideBySide, inside, labelUnderFade, LONG_IMMUNITIES, mapBadges, mapLocks, noSideScroll, openGroup, ops, panelFile, panelOf, player, playerCdp, playerContext, playerSocket, rectOf, resize, ringsCompact, ringsFull, run, sectionIn, server, settle, setUp, SHEET, shots, speedUnitsWhole, steadyAboveSize, stepperRows, storedFolds, tapToken, tokenPanel, type View } from "./tokenpanelRoom.ts";
 
@@ -104,6 +105,60 @@ panelFile(null, () => {
     await ops.send({ t: "actor.life", target: { tokenId: run.goblin.id }, life: "alive" });
     await ops.send({ t: "actor.hp", target: { tokenId: run.goblin.id }, change: { kind: "set", cur: 10 } });
     await goblin.getByRole("img", { name: "Armor Class 15" }).waitFor();
+  });
+
+  test("FL-4. damage, healing and multi-target slips align on desktop and phones", async () => {
+    const monster = dmSocket.state!.monsters[run.bog.monsterId]!;
+    await ops.send({ t: "monster.update", monsterId: run.bog.monsterId, patch: { resistances: "Fire", immunities: "Slashing", vulnerabilities: "" } });
+    try {
+      for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) for (const scale of [1, 1.3]) {
+        await setUp(dm, dmCdp, { ...size, scale }, null);
+        await tapToken(dm, run.bog.at);
+        const bog = bar(dm, "Bog Thing");
+        await expandBar(bog);
+        const input = bog.getByLabel("HP change", { exact: true });
+        await input.fill("28 fire + 14 slashing + 10 piercing");
+        await input.blur();
+        const summary = bog.locator("[data-damage-summary]").filter({ hasText: "Immune: Slashing" });
+        await summary.getByText("Resists: Fire", { exact: true }).waitFor();
+        assert.deepEqual(await summary.locator("s").allTextContents(), ["28", "14"]);
+        assert.deepEqual(await summary.locator("[data-damage-result]").allTextContents(), ["14", "0", "10", "24"]);
+        for (const words of ["Fire damage", "Slashing damage", "Piercing damage"]) await summary.getByText(words, { exact: true }).waitFor();
+        const at = `fl4-${size.width}x${size.height}-${Math.round(scale * 100)}`;
+        assert.deepEqual(await damageSummaryAlignment(summary, at), []);
+        assert.deepEqual(alignmentLines(await measureAlignment(summary), at), []);
+        await shots.take(dm, `${at}-damage-summary`);
+        await input.fill("+5");
+        await input.blur();
+        const healing = bog.locator('[data-hp-preview="heal"]');
+        await healing.getByText("Heal 5", { exact: true }).waitFor();
+        assert.deepEqual(alignmentLines(await measureAlignment(healing), at), []);
+        await shots.take(dm, `${at}-healing-summary`);
+        await input.fill("");
+        await multiSelect(bog);
+        await fitMap(dm);
+        await tapToken(dm, run.goblin.at);
+        const group = dm.locator('[role="dialog"][data-bar-mode]');
+        await expandBar(group);
+        const groupInput = group.getByLabel("HP change", { exact: true });
+        await groupInput.fill("28 fire + 14 slashing + 10 piercing");
+        await groupInput.blur();
+        const several = group.locator("[data-damage-summary]").filter({ has: dm.locator("[data-damage-target]") });
+        await several.getByText("Bog Thing:", { exact: true }).waitFor();
+        assert.deepEqual(await several.locator("[data-damage-result]").allTextContents(), ["28", "14", "10", "52"]);
+        assert.equal(await several.locator("s").count(), 0);
+        assert.equal(await several.locator("[data-damage-target]").count(), 1);
+        assert.deepEqual(await damageSummaryAlignment(several, at), []);
+        assert.deepEqual(alignmentLines(await measureAlignment(several), at), []);
+        await shots.take(dm, `${at}-multi-target-summary`);
+        await groupInput.fill("");
+        await dm.getByRole("button", { name: "Deselect all", exact: true }).first().click();
+        const done = dm.getByRole("button", { name: "Done", exact: true });
+        if (await done.isVisible()) await done.click();
+      }
+    } finally {
+      await ops.send({ t: "monster.update", monsterId: run.bog.monsterId, patch: { resistances: monster.resistances, immunities: monster.immunities, vulnerabilities: monster.vulnerabilities } });
+    }
   });
 
   test("1z. at 130% on a desk, an icon's name shows beside it and inside the window: Duplicate in the action bar near the bottom, the window's resize handle, and Hide panels at the right edge (docs/design-v1-icons.md 3.2)", async () => {

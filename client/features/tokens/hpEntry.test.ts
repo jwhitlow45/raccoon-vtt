@@ -58,8 +58,10 @@ describe("the HP entry's modes are native radios", () => {
     const store = createStore(() => ({ view: state, you: DM }));
     const el = createElement(HpEntry, { targets: [target], access: "all", place: "bar" });
     const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
-    assert.match(markup, /11 Cold damage/);
-    assert.match(markup, /Resists Cold: 5/);
+    assert.match(markup, /<s aria-hidden="true"[^>]*>11<\/s>/);
+    assert.match(markup.replace(/<[^>]*>/g, ""), /5 Cold damage/);
+    assert.match(markup, /data-damage-icon="cold"/);
+    assert.match(markup.replace(/<[^>]*>/g, ""), /Resists: Cold/);
   });
 
   test("FL-3: typed damage uses a text keyboard and shows defense words only to a viewer who may read them", () => {
@@ -68,16 +70,19 @@ describe("the HP entry's modes are native radios", () => {
       tokens: { a: token("a", { actor: { inline: actor({ monsterId: "frost" }) } }) },
     });
     state.meta.settings.playersApplyDamage = true;
-    for (const you of [DM, { memberId: "p1", role: "player" as const }]) {
+    for (const you of [DM, { memberId: "p1", role: "player" as const }]) for (const place of ["bar", "panel"] as const) {
       const target = oneTarget({ tokenId: "a" }, "relative", false, { name: "Frost", dead: false, max: 20 });
       const scope = new RoomScope();
-      scope.get(hpDraftSlot).set(hpDraftKey("bar", [target]), { mode: "damage", text: "11 cold", crit: false });
+      scope.get(hpDraftSlot).set(hpDraftKey(place, [target]), { mode: "damage", text: "11 cold", crit: false });
       const store = createStore(() => ({ view: projectState(state, you, { sceneId: "s1" }), you }));
-      const el = createElement(HpEntry, { targets: [target], access: "relative", place: "bar" });
+      const el = createElement(HpEntry, { targets: [target], access: "relative", place });
       const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
       assert.match(markup, /aria-label="HP change"[^>]*inputMode="text"/);
-      if (you.role === "dm") assert.match(markup, /Resists Cold: 5/);
-      else assert.doesNotMatch(markup, /Resists|Vulnerable|Immune/);
+      if (you.role === "dm") assert.match(markup.replace(/<[^>]*>/g, ""), /Resists: Cold/);
+      else {
+        assert.match(markup.replace(/<[^>]*>/g, ""), /11 Cold damage/);
+        assert.doesNotMatch(markup, /<s |Resists|Vulnerable|Immune/);
+      }
     }
   });
 
@@ -185,4 +190,18 @@ describe("the death save Roll while Regeneration is open", () => {
     assert.doesNotMatch(roll(open), /disabled=""/);
     assert.doesNotMatch(open, /Waiting for Regeneration/);
   });
+});
+
+test("FL-4 design: healing, temporary and set HP entries render the shared slip in bars and pages", () => {
+  for (const place of ["bar", "panel"] as const) for (const [input, kind, words] of [["+5", "heal", "Heal 5"], ["t5", "temp", "Set Temporary HP to 5"], ["=20", "set", "Set HP to 20"]] as const) {
+    const state = room({ tokens: { a: token("a", { actor: { inline: actor() } }) } });
+    const target = oneTarget({ tokenId: "a" }, "all", false, { name: "Guard", dead: false, max: 20 });
+    const scope = new RoomScope();
+    scope.get(hpDraftSlot).set(hpDraftKey(place, [target]), { mode: "damage", text: input, crit: false });
+    const store = createStore(() => ({ view: state, you: DM }));
+    const el = createElement(HpEntry, { targets: [target], access: "all", place });
+    const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
+    assert.ok(markup.includes(`data-hp-preview="${kind}"`));
+    assert.ok(markup.includes(words));
+  }
 });

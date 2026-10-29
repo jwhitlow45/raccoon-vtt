@@ -1,0 +1,53 @@
+import type { Locator } from "playwright-core";
+
+/** FL-4: measure the icon against the text's actual line bounds, including wrapped lines, and the results against their shared right edge. */
+export async function damageSummaryAlignment(root: Locator, screen: string): Promise<string[]> {
+  return root.evaluateAll((roots, screen) => {
+    type Element = {
+      matches(selector: string): boolean;
+      querySelector(selector: string): Element | null;
+      querySelectorAll(selector: string): ArrayLike<Element>;
+      lastChild: unknown;
+      getAttribute(name: string): string | null;
+      getBoundingClientRect(): { left: number; right: number; top: number; bottom: number; width: number; height: number };
+      ownerDocument: {
+        createRange(): { selectNodeContents(node: unknown): void; getBoundingClientRect(): { top: number; bottom: number; right: number } };
+        defaultView: { getComputedStyle(element: Element): { display: string } } | null;
+      };
+    };
+    const lines: string[] = [];
+    for (const root of roots as unknown as Element[]) {
+      const summaries = root.matches("[data-damage-summary]") ? [root] : Array.from(root.querySelectorAll("[data-damage-summary]"));
+      for (const summary of summaries) {
+        const icons: number[] = [];
+        for (const part of Array.from(summary.querySelectorAll("[data-damage-part], [data-damage-defense-entry]"))) {
+          const icon = part.querySelector("[data-damage-icon]");
+          const text = part.querySelector("[data-damage-text]");
+          if (!icon || !text?.lastChild) {
+            lines.push(`${screen}: damage part has no icon or words`);
+            continue;
+          }
+          const box = icon.getBoundingClientRect();
+          if (box.width < 1 || box.height < 1) continue;
+          const range = text.ownerDocument.createRange();
+          range.selectNodeContents(text);
+          const words = range.getBoundingClientRect();
+          const offset = Math.abs((box.top + box.bottom - words.top - words.bottom) / 2);
+          if (offset > 1) lines.push(`${screen}: ${icon.getAttribute("data-damage-icon")} icon is ${offset.toFixed(2)} px off its text's vertical center`);
+          if (part.matches("[data-damage-part]")) icons.push(box.left);
+        }
+        const list = summary.querySelector('[aria-label="Damage parts"]');
+        const display = list ? list.ownerDocument.defaultView?.getComputedStyle(list).display : null;
+        if (display === "grid" && icons.some((left) => Math.abs(left - icons[0]!) > 1)) lines.push(`${screen}: damage icons do not share a column`);
+        const rights = Array.from(summary.querySelectorAll("[data-damage-result]")).flatMap((amount) => {
+          if (amount.getBoundingClientRect().width < 1) return [];
+          const range = amount.ownerDocument.createRange();
+          range.selectNodeContents(amount);
+          return [range.getBoundingClientRect().right];
+        });
+        if (rights.some((right) => Math.abs(right - rights[0]!) > 1)) lines.push(`${screen}: result amounts do not share a right edge`);
+      }
+    }
+    return lines;
+  }, screen);
+}

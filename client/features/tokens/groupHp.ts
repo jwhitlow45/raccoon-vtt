@@ -6,7 +6,9 @@ import type { RoomActions } from "../../state/types.ts";
 import { tokenAccess, type Role } from "./access.ts";
 import { withCrit, type HpMode, type HpParse } from "./hpInput.ts";
 import { creatureRolls, type DiceView } from "../dice/creature.ts";
-import { damageWords, rowDamage } from "#shared/rules/typedDamage.ts";
+import { rowDamage } from "#shared/rules/typedDamage.ts";
+
+import { damageSummary, type DamageSummaryLines, type DamageSummaryContext } from "../dice/damageSummaryLines.ts";
 
 /**
  * One HP entry for several creatures (features section 10: "one entry can
@@ -101,19 +103,24 @@ export function sendHpEntry(actions: Pick<RoomActions, "dispatch" | "newId">, ta
 }
 
 /** Only the viewer's permitted defenses explain the preview. The server calculates the hit from the full actor. */
-export function damagePreview(targets: readonly HpTarget[], change: HpChange, dice: DiceView | null): string[] {
-  if (!dice || change.kind !== "damage" || !change.parts) return [];
+export function damagePreview(targets: readonly HpTarget[], change: HpChange, dice: DiceView | null): DamageSummaryLines | null {
+  if (change.kind !== "damage") return null;
+  const parts = change.parts ?? [{ amount: change.amount }];
   const seen = new Set<string>();
-  const words: string[] = [];
+  const previews: (DamageSummaryContext & { name: string })[] = [];
   for (const target of targets) {
     if (target.access === "none" || seen.has(target.holder)) continue;
     seen.add(target.holder);
-    const rolls = creatureRolls(dice, target.target);
-    if (!rolls) continue;
-    const dealt = rowDamage(change.parts, "fail", { onPass: "none", dexSave: false, row: { defenses: rolls.defenses, qualifiedOn: new Set(), evasion: false, effects: [] } });
-    if (dealt.notes.length > 0) words.push(`${target.name}: ${damageWords(change.parts, dealt)}`);
+    const rolls = dice && change.parts ? creatureRolls(dice, target.target) : null;
+    previews.push({
+      name: target.name,
+      ...(rolls ? {
+        defenses: rolls.defenses,
+        result: rowDamage(parts, "fail", { onPass: "none", dexSave: false, row: { defenses: rolls.defenses, qualifiedOn: new Set(), evasion: false, effects: [] } }),
+      } : {}),
+    });
   }
-  return words;
+  return damageSummary(parts, previews.length === 1 ? previews[0] : { targets: previews });
 }
 
 /** What an entry will send, as its lines judge it: a heal, damage, a set (with the current HP it names, once typed) or temporary HP. */
