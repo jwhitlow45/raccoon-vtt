@@ -6,7 +6,7 @@ import { playersTypeTotals } from "#shared/permissions.ts";
 import { orderRevealOf } from "#shared/rules/initiative.ts";
 import { MAX_NAME, type ClientOp } from "#shared/protocol.ts";
 import { TIMER_CHOICES } from "../encounter/timer.ts";
-import { NEW_SCENES_HELP, SHAPE_CHOICES, shapeChoice, type ShapeChoice } from "../grid/words.ts";
+import { NEW_SCENES_HELP, shapeChoice, type ShapeChoice } from "../grid/words.ts";
 import { IMAGE_STEPS_DOWN, PLAYERS_SEE } from "../vision/playersSeeRules.ts";
 
 /**
@@ -35,8 +35,11 @@ export type SettingField =
   | { kind: "drawers"; key: "playersDraw"; label: string; help: string; options: Choice<MoveAnyMode>[] }
   /** What players see on new scenes, with "As before" offered only while a room has never set it, since no op takes the setting away. */
   | { kind: "newScenes"; key: "newScenePlayers"; label: string; help: string; options: Choice<ScenePreset>[]; before: Choice<"before"> }
-  /** The grid shape new battle mats and map images start with (docs/design-v1-hex-grids.md HX-D19). Squares, absent, store nothing. */
-  | { kind: "gridShape"; key: "newScenes"; label: string; help: string; options: { value: ShapeChoice; label: string }[] };
+  /**
+   * The grid shape new battle mats and map images start with (docs/design-v1-hex-grids.md HX-D19). Squares, absent, store nothing.
+   * No options of its own: it draws a scene's own Grid shape choice, with that choice's words (docs/design-v1-design-pass.md 4.2).
+   */
+  | { kind: "gridShape"; key: "newScenes"; label: string; help: string };
 
 export type SettingGroup = { heading: string; fields: SettingField[] };
 
@@ -196,7 +199,6 @@ export const SETTING_GROUPS: SettingGroup[] = [
         key: "newScenes",
         label: "Grid on new scenes",
         help: NEW_SCENES_HELP,
-        options: [...SHAPE_CHOICES],
       },
     ],
   },

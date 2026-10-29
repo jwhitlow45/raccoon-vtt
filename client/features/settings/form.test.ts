@@ -206,8 +206,7 @@ describe("settings form", () => {
     assert.equal(field.key, "newScenes");
     assert.equal(field.label, "Grid on new scenes");
     assert.equal(field.help, "The grid a new battle mat or map starts with. Builder scenes and starter maps start on squares. Each new scene can pick its own.");
-    if (field.kind !== "gridShape") return assert.fail("not a shape choice");
-    assert.deepEqual(field.options.map((o) => o.label), ["Squares", "Hex rows", "Hex columns"]);
+    assert.equal(field.kind, "gridShape", "the scene's own Grid shape choice, with its words");
     assert.equal(newScenesShape(DEFAULT_SETTINGS), "squares");
     assert.equal(newScenesShape({ newScenes: "hexColumns" }), "hexColumns");
     const op = settingsOp(DEFAULT_SETTINGS, { newScenes: "hexRows" });
