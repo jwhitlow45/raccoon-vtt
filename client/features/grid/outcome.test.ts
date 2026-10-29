@@ -10,7 +10,7 @@ import type { AxisFit, GridDetection } from "./detect.ts";
 import { gridOfShape, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { boxAt, boxSides, calibrationFromBox, calibrationFromHexFind, canonicalToWorld, fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
 import { cameWithGrid, IMPORT_WAIT_MS, importSearch, importSearchFrom, replacementFound, type ImportWait, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
-import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, foundLine, gridOps, landSearch, middleOf, showOutcome } from "./outcome.ts";
+import { applyGrid, boxAround, fallbackOps, FIND_TIMEOUT_MS, findOnScene, foundLine, gridOps, landSearch, middleOf, putBack, showOutcome } from "./outcome.ts";
 import type { HexDetection } from "./detectHex.ts";
 import { boxCalibration, endFinding, noteFor, shapeChanged, type GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
@@ -1004,6 +1004,43 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
     for (const op of back) live.actions.dispatch(op);
     assert.equal(live.scene().gridShape, undefined, "shape back");
     assert.ok(sameCalibration(live.scene().map, guess), "grid back");
+  });
+
+  test("Use default after a switch the scene can no longer take back sends nothing and says why, and puts back all once it can (H3-OPUS-03)", () => {
+    const live = liveRoom();
+    const guess = { cellPx: 47, originPx: { x: 0, y: 0 } };
+    showOutcome({ actions: live.actions, store: live.store, scene: live.scene(), found: { tier: "high", cal: HEX_CAL, shape: "hexRows" }, fit: true, at: { x: 700, y: 500 }, fallback: guess });
+    live.store.setState({ sceneId: "s1" });
+    const switched = live.scene();
+    const box = live.store.getState().box;
+    // Heights painted on the hexes since: the reducer would refuse squares, so nothing that assumes them may go.
+    const why = "This scene has heights on its hexes, which can't stand on squares. Remove them to change the grid.";
+    const asked: Grid[] = [];
+    const before = live.sent.length;
+    const fallback = live.store.getState().found!.fallback!;
+    assert.equal(putBack({ actions: live.actions, store: live.store, scene: live.scene(), fallback, refusal: (to) => (asked.push(to), why) }), false);
+    assert.deepEqual(asked, [SQUARES], "the shape it would put back is asked");
+    assert.equal(live.sent.length, before, "nothing sent: no shape, no square grid, no size");
+    assert.equal(live.scene(), switched);
+    assert.equal(live.store.getState().box, box, "the box stays on the hexes");
+    assert.equal(live.store.getState().found?.fallback, fallback, "Use default stays, for once the heights go");
+    assert.equal(lineOf(live), "Can't go back to squares: this scene has heights on its hexes, which can't stand on squares. Remove them to change the grid.");
+    // The heights gone, Use default puts back the shape, the guess and the size as one step.
+    assert.equal(putBack({ actions: live.actions, store: live.store, scene: live.scene(), fallback, refusal: () => null }), true);
+    const back = live.sent.slice(before);
+    assert.deepEqual(back[0]?.op, { t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } });
+    assert.ok(back.every((x) => x.group === back[0]!.group));
+    assert.equal(live.scene().gridShape, undefined);
+    assert.ok(sameCalibration(live.scene().map, guess));
+    assert.equal(live.store.getState().found, null);
+    assert.deepEqual(live.store.getState().box, boxAround(guess, middleOf(box, MAP, gridOfShape("hexRows")), SQUARES), "a box of squares under the guess");
+    // A find that kept the scene's shape puts back its grid whatever else the scene holds: there is no switch to refuse.
+    const kept = liveRoom();
+    showOutcome({ actions: kept.actions, store: kept.store, scene: kept.scene(), found: { tier: "high", cal: FOUND }, fit: true, at: { x: 700, y: 500 }, fallback: guess });
+    const sent = kept.sent.length;
+    assert.equal(putBack({ actions: kept.actions, store: kept.store, scene: kept.scene(), fallback: kept.store.getState().found!.fallback!, refusal: () => why }), true);
+    assert.ok(kept.sent.length > sent);
+    assert.ok(sameCalibration(kept.scene().map, guess));
   });
 
   test("Find the grid on a hex scene applies a sure find of its own hexes, and a square scene's sure squares switch a hex scene back", async () => {

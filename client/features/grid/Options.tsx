@@ -1,16 +1,14 @@
 import { useState } from "react";
 import { useStore } from "zustand";
 import type { Scene } from "#shared/model.ts";
-import { cellWord, gridOfShape, isHex, sceneGrid } from "#shared/rules/grid.ts";
+import { cellWord, isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { theme } from "../../lib/theme.ts";
-import { dispatchGesture } from "../../state/actions.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
 import { OptButton, OptionsStrip, StripText, ValueChip } from "../measure/controls.tsx";
 import { fitBounds, nudgeBox, sameCalibration, type CalBox } from "./calibrate.ts";
-import { applyGrid, boxAround, fallbackOps, foundLine, middleOf } from "./outcome.ts";
+import { applyGrid, foundLine, putBack } from "./outcome.ts";
 import { boxCalibration, endFinding, noteFor, useGridStore, type Fallback } from "./store.ts";
-import { useFindGrid } from "./useFindGrid.ts";
-import { storedShape } from "./words.ts";
+import { useFindGrid, useSwitchRefusal } from "./useFindGrid.ts";
 
 /** One canonical pixel per nudge: on the largest maps a thirtieth of a square or less. */
 const STEP = 1;
@@ -41,6 +39,7 @@ export default function GridOptions() {
   const finding = useStore(gridState, (s) => s.finding);
   const actions = useRoomActions();
   const findGrid = useFindGrid();
+  const refusal = useSwitchRefusal();
   /** The box last applied, to say so while it stands. */
   const [applied, setApplied] = useState<CalBox | null>(null);
 
@@ -72,11 +71,10 @@ export default function GridOptions() {
     setApplied(box);
   };
 
-  /** Back to the grid, the size and the shape the scene had before an import applied a found grid, as one undo step. */
-  const putBack = (fallback: Fallback) => {
-    dispatchGesture(actions, fallbackOps({ id: sceneId, bounds: scene.bounds, gridShape: scene.gridShape, map }, fallback));
-    const back = fallback.shape === undefined ? grid : gridOfShape(storedShape(fallback.shape));
-    gridState.setState({ found: null, box: boxAround(fallback, middleOf(box, map, grid), back) });
+  /** Back to the grid, the size and the shape the scene had before an import applied a found grid, as one undo step, unless that shape is refused now. */
+  const restoreDefault = (fallback: Fallback) => {
+    const now = { id: sceneId, bounds: scene.bounds, gridShape: scene.gridShape, gridFromFile: scene.gridFromFile, map };
+    putBack({ actions, store: gridState, scene: now, fallback, refusal: (to) => refusal(now, to) });
   };
 
   const line = searching
@@ -107,7 +105,7 @@ export default function GridOptions() {
           id: "useDefault",
           priority: 2,
           control: (
-            <OptButton label="Put back the grid the scene started with" onClick={() => putBack(fallback)}>
+            <OptButton label="Put back the grid the scene started with" onClick={() => restoreDefault(fallback)}>
               Use default
             </OptButton>
           ),

@@ -73,6 +73,37 @@ export function fallbackOps(scene: GridScene, fallback: Fallback): ClientOp[] {
   return ops;
 }
 
+/**
+ * Use default, after an import applied a grid it found: `fallbackOps` as
+ * one undo step, and the box on the grid put back. The ops are not one
+ * transaction, so when the find switched the scene's shape and the scene
+ * can no longer take its old shape back (heights painted on its hexes
+ * since, say), nothing is sent: the grid and size it started with are
+ * cells of that shape. The note keeps Use default and says why, for once
+ * what holds the scene is gone. False when refused.
+ */
+export function putBack(input: {
+  actions: Gesture;
+  store: StoreApi<GridToolState>;
+  scene: GridScene;
+  fallback: Fallback;
+  /** Why the scene cannot change to a shape, as the room holds it now (shared/rules/grid.ts `switchRefusal`). */
+  refusal?: (to: Grid) => string | null;
+}): boolean {
+  const { scene, fallback, store } = input;
+  const grid = sceneGrid(scene);
+  const back = fallback.shape === undefined ? grid : gridOfShape(fallback.shape === "squares" ? undefined : fallback.shape);
+  const refused = mapShape(back) !== mapShape(grid) ? (input.refusal?.(back) ?? null) : null;
+  const { found, box } = store.getState();
+  if (refused !== null) {
+    if (found) store.setState({ found: { ...found, backRefused: refused } });
+    return false;
+  }
+  dispatchGesture(input.actions, fallbackOps(scene, fallback));
+  store.setState({ found: null, box: boxAround(fallback, middleOf(box, scene.map, grid), back) });
+  return true;
+}
+
 /** The box over the 3 by 3 squares of `cal` nearest a point of the map, or on hexes the 7 hexes, in canonical pixels. */
 export function boxAround(cal: Calibration, at: Point, g: Grid = SQUARES): CalBox {
   const cell = canonicalToWorld(cal, at);
@@ -305,13 +336,17 @@ export function formatFound(v: number): string {
  * grid `g` (docs/design-v1-grid-detect.md 6.1 and 10.8). Only a note that
  * stands for this scene's cells reaches it (store.ts `noteFor`).
  */
-export function foundLine(note: FoundNote, g: Grid): { tone: "status" | "hint"; content: string } {
+export function foundLine(note: FoundNote, g: Grid): { tone: "status" | "hint" | "warning"; content: string } {
   const n = formatFound(note.cellPx);
   const hex = isHex(g);
   const status = (content: string) => ({ tone: "status" as const, content });
   const hint = (content: string) => ({ tone: "hint" as const, content });
   switch (note.outcome) {
     case "applied": {
+      if (note.backRefused && note.fallback?.shape) {
+        const why = note.backRefused;
+        return { tone: "warning", content: `Can't go back to ${shapeWords(note.fallback.shape)}: ${why.charAt(0).toLowerCase()}${why.slice(1)}` };
+      }
       if (!note.switched) return status(`Found a grid of ${n} px ${hex ? "hexes" : "squares"}.`);
       const words = shapeWords(mapShape(g));
       return status(`Found ${words} of ${n} px. The grid is ${words} now.`);

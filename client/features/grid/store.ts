@@ -46,6 +46,8 @@ export type FoundNote = {
    * when a switch was refused, why. The note's own box stays the scene's.
    */
   other?: { shape: MapShape; cal: Calibration; box: CalBox; refusal?: string };
+  /** Use default was refused, since the scene can no longer take back the shape the find switched it from: why. */
+  backRefused?: string;
 };
 
 /**
