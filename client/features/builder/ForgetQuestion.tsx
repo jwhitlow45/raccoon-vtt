@@ -4,6 +4,7 @@ import { Dialog } from "../../components/Dialog.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
+import { BUILD_ASKING } from "./ask.ts";
 
 /** The forget question's title, and what it says the yes does. */
 export const FORGET_TITLE = "Remembered map";
@@ -23,22 +24,27 @@ export const FORGET_BUSY = "Saving…";
  */
 export function ForgetQuestion() {
   const ask = useRoomView((s) => (s.you?.role === "dm" ? (s.forgetAsk ?? null) : null));
+  const held = useRoomView((s) => s.buildHeldSince !== undefined);
   const ui = useRoomUi();
   if (!ask || ask.asks.length === 0) return null;
-  const sending = ask.sending !== undefined;
+  return <ForgetDialog sending={ask.sending !== undefined} held={held} answer={ui.answerForget} />;
+}
+
+/** The question's presentation, including the server wait after its answer. */
+export function ForgetDialog({ sending, held, answer }: { sending: boolean; held: boolean; answer(yes: boolean): void }) {
   return (
     <Dialog
       title={FORGET_TITLE}
       width="sm"
       phone="sheet"
-      onClose={() => ui.answerForget(false)}
+      onClose={() => answer(false)}
       dismissOnBackdrop={!sending}
       footer={
         <>
-          <Button disabled={sending} onClick={() => ui.answerForget(false)}>
+          <Button disabled={sending} onClick={() => answer(false)}>
             Cancel
           </Button>
-          <Button variant="primary" busy={sending} onClick={() => ui.answerForget(true)}>
+          <Button variant="primary" busy={sending} disabled={held && !sending} onClick={() => answer(true)}>
             {sending ? FORGET_BUSY : FORGET_YES}
           </Button>
         </>
@@ -49,6 +55,9 @@ export function ForgetQuestion() {
           {FORGET_ASK}
         </p>
         <Help>{FORGET_HELP}</Help>
+        {held && !sending ? (
+          <p role="status" style={{ margin: 0, color: theme.color.textMuted }}>{BUILD_ASKING}</p>
+        ) : null}
       </div>
     </Dialog>
   );
