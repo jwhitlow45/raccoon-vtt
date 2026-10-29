@@ -1522,7 +1522,7 @@ export function MapStage(props: {
         if (shownRef.current.kind === "isometric") dragRef.current.homes = gripIso(node, token, parts.lead, followers);
         setDraggingId(token.id);
         setCarried(new Set([token.id, ...followers.map((f) => f.token.id)]));
-        dragStopsRef.current.start(parts.lead.id);
+        dragStopsRef.current.start(parts.lead.id, token);
         actions.sendEph({ k: "dragStart", tokenId: token.id, x: token.x, y: token.y });
         for (const f of followers) actions.sendEph({ k: "dragStart", tokenId: f.token.id, x: f.token.x, y: f.token.y });
       },

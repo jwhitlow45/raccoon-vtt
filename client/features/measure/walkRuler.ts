@@ -15,7 +15,7 @@ import { routeWalkers, type RoutePoint } from "#shared/rules/route.ts";
 import { WorkBudget } from "#shared/rules/walk.ts";
 import { routeLegCheck, routeSearch, routeWorld, routeWorldUnits, type RouteLegCheck, type RouteSearch } from "#shared/rules/hexWalk.ts";
 import { groupWalkWorld, publicToken, seenWhereMoved, type WalkViewer } from "#shared/rules/walkWorld.ts";
-import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, walkStart, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
+import { cutForWalkers, dropMode, dropView, keyStep, moveOpsOf, planWalk, routeTarget, walkerOf, walkStart, type Aim, type DropPlan, type DropView, type Found } from "../movement/drop.ts";
 import { dragLead } from "../attach/groups.ts";
 import { carriedIndex } from "#shared/rules/attach.ts";
 import { towingWord, walkersFor } from "../attach/walk.ts";
@@ -358,7 +358,8 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
     const now = rider?.attached ? { x: at.walker.x - rider.x, y: at.walker.y - rider.y } : shift;
     // The start's offset, exactly, while the rider keeps its seat, and the new one once a squeeze has moved it.
     const by = Math.abs(now.x - shift.x) > 1e-6 || Math.abs(now.y - shift.y) > 1e-6 ? now : shift;
-    const raw = { x: stop.x - size.w / 2 + by.x, y: stop.y - size.h / 2 + by.y };
+    // A drag from the rider aims the mount at the stand that keeps her middle on the stop (drop.ts Aim.seat, D-261029-57).
+    const raw: Aim = { x: stop.x - size.w / 2 + by.x, y: stop.y - size.h / 2 + by.y, ...(seated ? { seat: { x: stop.x, y: stop.y } } : {}) };
     if (waiting) {
       legs.push(draw({ from: waiting, to: raw, corners: [], ft: 0, none: false, searching: true }, by));
       waiting = raw;
@@ -406,7 +407,7 @@ export function measureWalk(input: WalkInput & { deadline?: number; budget?: Wor
  * leg is still searching. Its simulation and planning are charged to the
  * frame's budget (review AT-O-33).
  */
-function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Point, target: Point & { squeeze: boolean }, key: string, budget: WorkBudget, progress: Progress): Step | null {
+function planStep(view: RoomState, input: WalkInput, at: Walked, raw: Aim, target: Point & { squeeze: boolean }, key: string, budget: WorkBudget, progress: Progress): Step | null {
   // Once the frame's budget is spent no leg begins, its search, planning and simulation alike.
   if (budget.spent) return null;
   const role = input.viewer.role;

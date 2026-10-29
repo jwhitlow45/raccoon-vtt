@@ -14,7 +14,7 @@ import { useRoomScope, type RoomScope } from "../../state/scope.ts";
 import type { RoomUi } from "../../state/store.ts";
 import type { RoomActions } from "../../state/types.ts";
 import { useRoomActions, useRoomStore, useRoomUi, type RoomViewStore } from "../../state/view.ts";
-import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, previewView, routeLanding, routeTarget, sameCut, samePose, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
+import { cutForWalkers, dropGrid, dropMode, dropView, goesStraight, keyStep, namedFollower, planGroup, planLands, planOne, planWalk, pressedAim, previewView, routeLanding, routeTarget, sameCut, samePose, type Aim, type DropPlan, type DropToken, type DropView, type Found, type Point, type Pose, type Role, type Stop, type WalkersCut } from "./drop.ts";
 import { frameFields as routeFrame, groupReading, walkPreview } from "./preview.ts";
 import { pressPlan, worldFor } from "./press.ts";
 import { RouteDrag, type RouteAnswer } from "./routeDrag.ts";
@@ -36,8 +36,12 @@ type DragNode = { x(): number; y(): number; position(p: Point): void };
  * Kept here so the canvas needs a line for each step of a drag.
  */
 export type DragStops = {
-  /** A drag began: an earlier note about this token goes. */
-  start(tokenId: string): void;
+  /**
+   * A drag of `tokenId` began: an earlier note about this token goes. A drag
+   * led by a mount names the token it was pressed on (`pressed`), whose
+   * dropped middle the mount's stand keeps on it (drop.ts pressedAim).
+   */
+  start(tokenId: string, pressed?: DropToken): void;
   /**
    * A frame of a lone token's drag. Its route is searched toward the spot
    * under the finger. While no route reaches it for a player whose walls
@@ -154,8 +158,11 @@ export function dragStops(deps: DragDeps): DragStops {
   const holds = scope.get(holdSlot);
   const notes = scope.get(stopNoteSlot);
   const routes = scope.get(routeSlot);
-  /** Where the finger is, before a hold moved the preview back to the wall: the drop's own spot. */
-  let raw: ({ tokenId: string } & Point) | null = null;
+  /** Where the finger is, before a hold moved the preview back to the wall: the drop's own spot, with the pressed token's middle when it sits on the lead. */
+  let raw: ({ tokenId: string } & Aim) | null = null;
+  /** The token the drag was pressed on, when a mount it sits on leads the drag. */
+  let pressedOn: { leadId: string; token: DropToken } | null = null;
+  const aimAt = (view: DropView, token: DropToken, at: Point): { tokenId: string } & Aim => ({ tokenId: token.id, ...pressedAim(view, token, pressedOn?.leadId === token.id ? pressedOn.token : null, at) });
   /** The lone drag's search, its world and what the world was built from. */
   let walk: Walk | null = null;
   /*
@@ -228,6 +235,7 @@ export function dragStops(deps: DragDeps): DragStops {
       waiting.live = false;
     }
     raw = null;
+    pressedOn = null;
     memo = null;
     walkMemo = null;
     if (walk) goStraight(walk, null);
@@ -384,8 +392,9 @@ export function dragStops(deps: DragDeps): DragStops {
     });
 
   return {
-    start(tokenId) {
+    start(tokenId, pressed) {
       reset(true);
+      pressedOn = pressed && pressed.id !== tokenId ? { leadId: tokenId, token: pressed } : null;
       const s = notes.getState();
       if (s.note?.tokenId === tokenId && !s.busy) notes.setState({ note: null });
     },
@@ -398,6 +407,7 @@ export function dragStops(deps: DragDeps): DragStops {
           setHold(null);
           return;
         }
+        raw = aimAt(view, token, raw);
         const w = walkFor(view, token);
         const target = routeTarget(view, token, raw);
         if (w) {
@@ -434,13 +444,14 @@ export function dragStops(deps: DragDeps): DragStops {
     drop(node, token, group, land) {
       // A drop's work, its time counted against the frame's budget, and its landing queued as route work when the budget is spent.
       work.within(() => {
-        const at = raw?.tokenId === token.id ? { x: raw.x, y: raw.y } : { x: node.x(), y: node.y() };
+        const spot = raw?.tokenId === token.id ? raw : null;
         const view = seenView(store.getState().view);
         if (!view) {
           reset();
           land(NOTHING);
           return;
         }
+        const at: Aim = spot ?? aimAt(view, token, { x: node.x(), y: node.y() });
         const mode = dropMode(role, view.scenes[token.sceneId]);
         const w = group.length > 1 ? null : walkFor(view, token);
         if (!w) {

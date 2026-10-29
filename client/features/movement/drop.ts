@@ -3,11 +3,12 @@ import { MAX_MOVES, MAX_ROUTE_PIECES, MAX_ROUTE_REACH, type ClientOp, type DoorR
 import { SOMETHING_BLOCKS, stopWords, WALL_IN_THE_WAY } from "#shared/permissions.ts";
 import type { Blocker, BuildState, LegEnd } from "#shared/ruleHooks.ts";
 import { holderOf, linkHolds, onHolder, publicMembers, walkerFor, type SeenByAll } from "#shared/rules/attach.ts";
-import { canSqueeze, footprintSize, snapStep } from "#shared/rules/footprint.ts";
+import { anchorOfHex, canSqueeze, footprintSize, hexSqueezedSize, sizeCategory, snapStep, squeezedSize } from "#shared/rules/footprint.ts";
 import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { hexAt, hexKey, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
 import { deviceGround } from "#shared/rules/held.ts";
 import { footing } from "#shared/rules/heights.ts";
-import { groundUnder, hexEndStand, hexLegOf, hexLegStand, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legStop, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
+import { coreBlocked, groundUnder, hexEndStand, hexFitWall, hexLegOf, hexLegStand, hexNarrow, hexStandHexes, hexStandInside, hexStandPlace, hexStartStand, hexWallsOf, landedElevation, landing, legStop, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type HexStand, type Walker } from "#shared/rules/movement.ts";
 import { followedHeight, followerTrace, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import type { WalkRoute } from "#shared/rules/walk.ts";
@@ -257,17 +258,108 @@ export function squeezedSpot(state: DropView, token: DropToken, raw: Point, mode
 }
 
 /**
+ * Where a drop aims: the dragged token's box at the pointer, and for a
+ * drag led by a mount that was pressed on a token sitting on it, that
+ * token's dropped middle (`seat`, D-261029-57), which the mount's stand
+ * keeps on it (`seatedStand`).
+ */
+export type Aim = Point & { seat?: Point };
+
+/**
+ * The aim of a drag of `lead`, its box dropped at `at`, that was pressed on
+ * `pressed`: with the pressed token's dropped middle where that token sits
+ * on the lead, up a chain of tokens each sitting on the next, as a press on
+ * a rider of a controlled mount moves the mount (docs/design-v1-attach.md
+ * 4.2). Its middle is where its own box would be dropped, by the lead's
+ * box at the pointer's offset.
+ */
+export function pressedAim(state: DropView, lead: DropToken, pressed: DropToken | null | undefined, at: Point): Aim {
+  if (!pressed || pressed.id === lead.id || !sitsOn(state, pressed.id, lead.id)) return { x: at.x, y: at.y };
+  const size = footprintSize(pressed);
+  return { x: at.x, y: at.y, seat: { x: at.x + pressed.x - lead.x + size.w / 2, y: at.y + pressed.y - lead.y + size.h / 2 } };
+}
+
+function sitsOn(state: DropView, id: string, leadId: string): boolean {
+  const visited = new Set<string>();
+  for (let at = state.tokens[id]; at?.attached && onHolder(at.attached.kind) && !visited.has(at.id); at = state.tokens[at.attached.to]) {
+    if (at.attached.to === leadId) return true;
+    visited.add(at.id);
+  }
+  return false;
+}
+
+/**
+ * The stand a drag led by a mount aims the mount at when it was pressed on
+ * a token sitting on it (D-261029-57): of the mount's stands whose squares
+ * or hexes hold that token's dropped middle `seat`, full size first and
+ * then squeezed, the nearest the box the pointer's offset drops it at
+ * (`raw`) that it can stand on. A full stand stands where its core touches
+ * no wall on squares and where its hexes fit on hexes, a squeezed one only
+ * in a real narrow space (movement.ts squeezeFits). So from any seat a
+ * rider dragged into a corridor one wide takes its mount in, where the
+ * mount's box at the offset lay across the corridor's wall or on the rock
+ * beside it, and on open ground the mount stands where it was dropped.
+ * Null where no stand holds the middle, and the drop goes as the mount's
+ * box dropped at `raw`.
+ */
+function seatedStand(state: DropView, token: DropToken, raw: Point, seat: Point): Point | null {
+  const g = dropGrid(state, token);
+  const walker = walkerOf(state, token);
+  const size = footprintSize(token);
+  const middle = { x: raw.x + size.w / 2, y: raw.y + size.h / 2 };
+  const nearest = <T extends { at: Point; mid: Point }>(spots: T[]): T[] =>
+    spots.sort((a, b) => (a.mid.x - middle.x) ** 2 + (a.mid.y - middle.y) ** 2 - ((b.mid.x - middle.x) ** 2 + (b.mid.y - middle.y) ** 2) || a.at.y - b.at.y || a.at.x - b.at.x);
+  if (isHex(g)) {
+    const t = hexWallsOf(state, walker);
+    const on = hexAt(g, seat);
+    const refs = new Map<string, Hex>();
+    for (const h of [on, ...hexNeighbors(g, on), ...hexNeighbors(g, on).flatMap((n) => hexNeighbors(g, n))]) refs.set(hexKey(h), h);
+    const full = sizeCategory(token);
+    const small = canSqueeze(token) ? hexSqueezedSize(full) : null;
+    for (const [size, squeezed] of [[full, false], ...(small ? [[small, true] as const] : [])] as const) {
+      const stands = [...refs.values()].map((ref): HexStand => ({ size, ref, squeezed })).filter((s) => hexStandHexes(g, s).some((h) => h.col === on.col && h.row === on.row));
+      const ok = (s: HexStand) => !t || (squeezed ? hexNarrow(t, token, s) : hexStandInside(t, s) && hexFitWall(t, s) < 0);
+      const best = nearest(stands.map((s) => ({ at: hexStandPlace(g, token, s), mid: anchorOfHex(g, s.size, s.ref), s }))).find((c) => ok(c.s));
+      if (best) return best.at;
+    }
+    return null;
+  }
+  const step = snapStep(token);
+  const fullSpots: { at: Point; mid: Point }[] = [];
+  for (const x of holdingStarts(seat.x, size.w, step)) for (const y of holdingStarts(seat.y, size.h, step)) fullSpots.push({ at: { x, y }, mid: { x: x + size.w / 2, y: y + size.h / 2 } });
+  const full = nearest(fullSpots).find((c) => !coreBlocked(state, walkEnd(state, walker, c.at)));
+  if (full) return full.at;
+  if (!canSqueeze(token)) return null;
+  // A squeeze stands on whole squares, its sides one shorter where they reach two, centered in the full footprint.
+  const small = squeezedSize(token);
+  if (!Number.isInteger(small.w) || !Number.isInteger(small.h)) return null;
+  const squeezedSpots: { at: Point; mid: Point }[] = [];
+  for (const x0 of holdingStarts(seat.x, small.w, 1)) for (const y0 of holdingStarts(seat.y, small.h, 1)) squeezedSpots.push({ at: { x: x0 - (size.w - small.w) / 2, y: y0 - (size.h - small.h) / 2 }, mid: { x: x0 + small.w / 2, y: y0 + small.h / 2 } });
+  return nearest(squeezedSpots).find((c) => squeezeFits(state, walkEnd(state, walker, c.at)))?.at ?? null;
+}
+
+/** The multiples of `step` a side of `length` can start at and still hold `p`, its far end open. */
+function holdingStarts(p: number, length: number, step: number): number[] {
+  const out: number[] = [];
+  for (let v = Math.floor((p - length) / step + 1e-9) * step + step; v <= p + 1e-9; v += step) if (p < v + length - 1e-9) out.push(v + 0);
+  return out;
+}
+
+/**
  * Where one token dropped at the unsnapped point `raw` lands: in the
  * squeezed spot under it when the creature squeezes there, else on its own
  * snap grid by the movement rule's landing (movement.ts `landing`), which
  * walks a player's token up to the last clear spot and lines a squeezing
- * creature up with a narrow opening.
+ * creature up with a narrow opening. A mount aimed by the token pressed on
+ * it lands on the stand that keeps that token's middle on it, where it has
+ * one (`seatedStand`).
  */
-export function planOne(state: DropView, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">): DropPlan {
-  const squeezed = squeezedSpot(state, token, raw, mode);
+export function planOne(state: DropView, token: DropToken, raw: Aim, mode: Exclude<DropMode, "teleport">): DropPlan {
+  const stand = raw.seat ? seatedStand(state, token, raw, raw.seat) : null;
+  const squeezed = stand ? null : squeezedSpot(state, token, raw, mode);
   if (squeezed) return { moves: moved(token, squeezed) ? [landed(state, token, squeezed)] : [], stop: null, held: [] };
   const g = dropGrid(state, token);
-  const to = snapPosition(g, raw.x, raw.y, footprintSize(token));
+  const to = stand ?? snapPosition(g, raw.x, raw.y, footprintSize(token));
   if (to.x === token.x && to.y === token.y) return { moves: [], stop: null, held: [] };
   const elevation = dropLanding(state, token, to);
   // Walked as the route search, the server's check and the route walk it (walkerOf): on the ground, crossing only the inner ledges of a holder every player sees that stands on the ground.
@@ -306,10 +398,13 @@ export type Found = { kind: "open" } | { kind: "route"; route: Pick<WalkRoute, "
  * The spot a lone drop's route aims at (docs/design-v1-movement.md 3.1):
  * where the drop would be placed, by the drop's own rule and squeezed where
  * the creature squeezes, with no leg test, since the route is the leg. A
- * route steps on the lattice from where the token stands, so a token that
- * stands off its grid lands on that lattice, the nearest spot to it.
+ * mount a rider's drag leads aims at the stand that keeps the rider's
+ * dropped middle on it (`Aim.seat`, D-261029-57), and so does the walking
+ * ruler from the rider. A route steps on the lattice from where the token
+ * stands, so a token that stands off its grid lands on that lattice, the
+ * nearest spot to it.
  */
-export function routeTarget(state: DropView, token: DropToken, raw: Point): Point & { squeeze: boolean } {
+export function routeTarget(state: DropView, token: DropToken, raw: Aim): Point & { squeeze: boolean } {
   const placed = planOne(state, token, raw, "free").moves[0];
   const at = placed ? { x: placed.x, y: placed.y, squeeze: placed.squeeze === true } : { x: token.x, y: token.y, squeeze: token.squeeze === true };
   // On hexes the drop's own rule already stands it on an anchor, which is where a route's pieces end (route.ts hexPiece).
@@ -513,7 +608,7 @@ export const CUT_TEXT = "Stopped partway: the way there turns too often for one 
  * straight leg, as the DM's drop through a wall, it goes as the straight
  * leg alone.
  */
-export function planWalk(state: DropView, token: DropToken, raw: Point, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found): DropPlan {
+export function planWalk(state: DropView, token: DropToken, raw: Aim, mode: Exclude<DropMode, "teleport">, found: Found, feetPerCell: number, account?: (to: Point) => Found): DropPlan {
   const walk = found.kind === "route" ? routeLanding(state, token, routeTarget(state, token, raw), found.route.pieces, feetPerCell) : null;
   if (walk) {
     const move = landed(state, token, { ...walk.at, squeeze: walk.at.squeeze === true });

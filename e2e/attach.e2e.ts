@@ -6,6 +6,9 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { RoomState, Token } from "../shared/model.ts";
+import { occupiedHexes, placedOnHex } from "../shared/rules/footprint.ts";
+import { hexCenter, hexKey, type Hex, type HexGrid } from "../shared/rules/hex.ts";
+import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
 import { barControl, ConsoleWatch, dragCells, dragWorld, expandBar, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
 
 /**
@@ -1005,5 +1008,57 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
       await ops.send({ t: "scene.delete", sceneId: field.sceneId });
       for (const c of Object.values(consoles)) assert.deepEqual(c.errors.slice(errorsBefore[c.label] ?? 0), [], c.label);
     });
+  });
+
+  /*
+   * Lane FU36-A's step (fu36a-): a rider's drag aims its mount at the stand
+   * that keeps the rider's dropped middle on it (D-261029-57), so from a seat
+   * other than the mount's first one a drag into a corridor one wide takes
+   * the mount in, squeezed, with the rider on its square or hex, where the
+   * mount's box at the finger's offset lay across the corridor's wall.
+   */
+  test("fu36a-1. Pat drags Brom from a seat of the warhorse other than its first into a corridor one square wide, then one hex wide on hex rows: the warhorse squeezes in on the square or hex under his finger (LP25-A-RIDE-2)", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const G: HexGrid = { shape: "hex", orient: "rows" };
+    const field = { w: 20, h: 12 };
+    for (const shape of ["squares", "hexRows"] as const) {
+      const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID() };
+      await ops.send({ t: "scene.create", scene: { id: keep.scene, name: `FU36A ${shape}`, bounds: field, fogEnabled: false, ...(shape === "hexRows" ? { gridShape: "hexRows" } : {}) } });
+      await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true } });
+      // Rock from x 6 to 14 but for a corridor along row 6, in runs of at most 8 cells on squares, round its hexes on hex rows.
+      const walls =
+        shape === "squares"
+          ? ([[6, 0, 6, 6], [6, 7, 6, 12], [14, 0, 14, 6], [14, 7, 14, 12], [6, 6, 14, 6], [6, 7, 14, 7]] as const).map(([ax, ay, bx, by], i) => ({ id: `fu36aq${String(i).padStart(6, "0")}`, a: [ax, ay] as [number, number], b: [bx, by] as [number, number], f: { kind: "wall" as const } }))
+          : wallsRound(G, field, (h: Hex) => h.col >= 7 && h.col <= 12 && h.row !== 6);
+      for (let i = 0; i < walls.length; i += 100) await ops.send({ t: "build.walls", sceneId: keep.scene, put: walls.slice(i, i + 100) });
+      const horseAt = shape === "squares" ? { x: 2, y: 5 } : placedOnHex(G, { size: "large", x: 0, y: 0 }, { col: 3, row: 6 });
+      await ops.send({ t: "token.create", token: { id: keep.horse, sceneId: keep.scene, kind: "npc", name: "Warhorse", size: "large", ...horseAt, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor({ speeds: { walk: 60 } }) } } });
+      // A seat the mount's own box at the finger's offset carries a square or a hex wide of the finger: the lower right square, or the second hex.
+      const seat = shape === "squares" ? { x: 3, y: 6 } : placedOnHex(G, { size: "medium", x: 0, y: 0 }, occupiedHexes(G, { size: "large", ...horseAt })[1]!);
+      await ops.send({ t: "token.create", token: { id: keep.brom, sceneId: keep.scene, kind: "pc", name: "Brom", size: "medium", ...seat, disposition: "ally", visibility: "all", ownerIds: [run.patId], actor: { inline: actor() } } });
+      await ops.send({ t: "token.attach", tokenId: keep.brom, to: keep.horse, kind: "ride", steer: true, ...seat, elevation: 0 });
+      await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
+      await waitFor("Brom in Pat's copy", () => (token(patSocket, keep.brom)?.attached ? true : null));
+      await waitFor("the corridor's walls in Pat's copy", () => (Object.values((patSocket.state as RoomState | null)?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+      await pat.locator(".konvajs-content").first().waitFor();
+      // On squares the finger lands up and left in the square, as a finger does.
+      const goal = shape === "squares" ? { x: 10.2, y: 6.2 } : hexCenter(G, { col: 10, row: 6 });
+      const from = await pagePoint(pat, field, { x: seat.x + 0.5, y: seat.y + 0.5 });
+      const to = await pagePoint(pat, field, goal);
+      await touchSwipe(patCdp, from, to, { steps: 16, everyMs: 20 });
+      const inside = await waitFor(`the warhorse squeezed in the corridor on ${shape}`, () => {
+        const t = token(patSocket, keep.horse);
+        return t?.squeeze === true && (shape === "squares" ? t.x === 9.5 && t.y === 5.5 : hexKey(occupiedHexes(G, t)[0]!) === "10,6") ? t : null;
+      });
+      const brom = token(patSocket, keep.brom)!;
+      assert.equal(brom.attached?.to, keep.horse, "still riding");
+      if (shape === "squares") assert.deepEqual([brom.x, brom.y], [10, 6], "Brom on the warhorse's square, the one under the finger");
+      else assert.deepEqual(occupiedHexes(G, brom).map(hexKey), occupiedHexes(G, inside).map(hexKey), "Brom on the warhorse's hex, the one under the finger");
+      await shots.take(pat, `fu36a-far-seat-corridor-${shape}`);
+      await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+      await waitFor("Pat back on the party's scene", () => ((patSocket.state as RoomState | null)?.meta.playerSceneId === run.sceneId ? true : null));
+      for (const id of [keep.brom, keep.horse]) await ops.send({ t: "token.delete", tokenId: id });
+      await ops.send({ t: "scene.delete", sceneId: keep.scene });
+    }
   });
 });
