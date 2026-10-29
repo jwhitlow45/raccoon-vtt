@@ -40,8 +40,9 @@ import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
  * Lane HX-9b's steps (HX9b-) reveal rooms on hex scenes: a room of hexes
  * closed by free walls and a door, revealed through the Fog tool's Builder
  * room and shown to Pat, the door open and shut, a room on hex columns,
- * the Fog tool's options measured, and the whole of the largest open hex
- * scene drafted in messages that each fit a socket frame.
+ * the Fog tool's options measured, the whole of the largest open hex scene
+ * drafted in messages that each fit a socket frame, and a room sent in
+ * several ops counted and taken back as one edit, on hexes and squares.
  *
  * It runs with `pnpm test:e2e` on its own port: E2E_PORT plus 31. The
  * other environment variables are the smoke run's (smoke.e2e.ts).
@@ -120,8 +121,9 @@ const run = {
   cellarGob: randomUUID(),
   cellarFar: randomUUID(),
   cellarDoor: "hx9bdoor0001",
-  /** HX9b-5's open 200 by 200 hex scene. */
+  /** HX9b-5's open 200 by 200 hex scene, and HX9b-6's square one with a builder floor of 6,000 squares. */
   moorland: randomUUID(),
+  granary: randomUUID(),
 };
 
 const ACTOR = { hp: { cur: 7, max: 7, temp: 0 }, life: "alive", ac: 15, speeds: { walk: 30 }, initBonus: 0, passivePerception: 9, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" };
@@ -1701,12 +1703,41 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     // A frame over the socket's limit closes it, and the outbox would send the op again on every reconnect, so nothing would land.
     await waitFor(`a draft of all ${all} hexes`, () => (draftCells(run.moorland).length === all ? true : null), 30_000);
     assert.equal(dmSocket.closes, closes, "the DM's socket stayed open");
-    assert.ok((dmSocket.state!.fogDrafts[run.moorland]?.ops.length ?? 0) > 1, "the room in several draft edits");
+    assert.ok((dmSocket.state!.fogDrafts[run.moorland]?.ops.length ?? 0) > 1, "the room in several ops");
+    await fogBar(dm).getByRole("button", { name: "Reveal to players (1)" }).waitFor();
     await shots.take(dm, "hx9b-moorland-draft");
-    // The top bar's Undo, not the fog bar's, which takes back only the draft's last edit.
     await dm.getByRole("button", { name: "Undo", exact: true, description: "Undo your last change (Ctrl+Z)" }).click();
-    await waitFor("the whole draft taken back by one undo", () => (dmSocket.state?.fogDrafts[run.moorland] === undefined ? true : null));
+    await waitFor("the whole draft taken back by the top bar's one undo", () => (dmSocket.state?.fogDrafts[run.moorland] === undefined ? true : null));
+    await dm.mouse.click(p.x, p.y);
+    await waitFor("the room drafted again", () => (draftCells(run.moorland).length === all ? true : null), 30_000);
+    await fogBar(dm).getByRole("button", { name: "Undo", exact: true }).click();
+    await waitFor("the whole draft taken back by the fog bar's one undo", () => (dmSocket.state?.fogDrafts[run.moorland] === undefined ? true : null));
     assert.equal(dmSocket.closes, closes);
+    await pickTool(dm, "Select");
+  });
+
+  test("HX9b-6. on squares a builder room sent in several ops counts as one edit, outlined as one room, and the fog bar's Undo takes it back whole", async () => {
+    const field = { w: 100, h: 60 };
+    await ops.send({ t: "scene.create", scene: { id: run.granary, name: "Granary", bounds: field } });
+    await waitFor("the granary in the DM's state", () => dmSocket.state?.scenes[run.granary] ?? null);
+    await ops.send({ t: "scene.update", sceneId: run.granary, patch: { fogEnabled: true } });
+    for (const y of [0, 20, 40]) await ops.send({ t: "build.rect", sceneId: run.granary, terrain: "stone", x: 0, y, w: 100, h: 20 });
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, run.granary);
+    await dm.keyboard.press("Escape");
+    await waitFor("the granary's floor in the DM's state", () => (Object.values(dmSocket.state?.buildChunks ?? {}).filter((c) => c?.sceneId === run.granary).reduce((n, c) => n + Object.keys(c!.cells).length, 0) === 6000 ? true : null));
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    await pickTool(dm, "Fog");
+    await pickOption(dm, "Fog", "Shape", "Builder room");
+    const p = await pagePoint(dm, field, { x: 50.5, y: 30.5 });
+    await assertCanvasAt(dm, p);
+    await dm.mouse.click(p.x, p.y);
+    await waitFor("the granary drafted", () => (draftCells(run.granary).length === 6000 ? true : null));
+    assert.equal(dmSocket.state!.fogDrafts[run.granary]?.ops.length, 3, "in three ops of 2,000 squares");
+    await fogBar(dm).getByRole("button", { name: "Reveal to players (1)" }).waitFor();
+    await shots.take(dm, "hx9b-granary-draft");
+    await fogBar(dm).getByRole("button", { name: "Undo", exact: true }).click();
+    await waitFor("the whole room taken back by one tap", () => (dmSocket.state?.fogDrafts[run.granary] === undefined ? true : null));
     await pickTool(dm, "Select");
   });
 
