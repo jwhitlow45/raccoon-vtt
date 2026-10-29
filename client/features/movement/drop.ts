@@ -577,14 +577,29 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
 function followersOf(state: BuildState, lead: Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { stop: (i: number, to: RoutePoint) => { blocker: Blocker } | null } {
   // As the holder's walk stands where it starts (route.ts WalkTrace).
   const grounded = footing(state.buildChunks, walkFrom(state.buildChunks, lead)) === "ground";
-  const follows = walkers.map((w) => {
-    const self = followerTrace(w, [w])[0]!;
-    const spot = (p: RoutePoint): RoutePoint => {
-      const x = p.x + w.x - lead.x;
-      const y = p.y + w.y - lead.y;
-      const ground = groundUnder(state.buildChunks, self, { x, y });
-      return { x, y, elevation: grounded ? ground : Math.max(w.elevation + p.elevation - lead.elevation, ground) };
-    };
+  // Each walker comes as the token it is (attach/walk.ts walkersFor), its link to its own holder included.
+  const linked: readonly (DropToken & { attached?: { readonly to: string } })[] = walkers;
+  const byId = new Map(linked.map((w) => [w.id, w]));
+  const named: Walker & { id?: string } = lead;
+  const groundAt = (w: DropToken, p: Point) => groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, { x: p.x + w.x - lead.x, y: p.y + w.y - lead.y });
+  /**
+   * A walker's height while the lead is at `p`, as the move takes it along (moveLeg.ts follow), through its own holder up to the
+   * lead: behind a holder that started on the ground on its own ground, else moved as much as its holder's height moved, never
+   * below its own ground. Null for one held by a creature that is not among them, whose height is not followed here.
+   */
+  const heightAt = (w: (typeof linked)[number], p: RoutePoint): number | null => {
+    const ground = groundAt(w, p);
+    const holderId = w.attached?.to;
+    if (holderId !== undefined && holderId === named.id) return grounded ? ground : Math.max(w.elevation + p.elevation - lead.elevation, ground);
+    const holder = holderId === undefined ? undefined : byId.get(holderId);
+    if (!holder) return null;
+    if (footing(state.buildChunks, followerTrace(holder, [holder])[0]!) === "ground") return ground;
+    const now = heightAt(holder, p);
+    return now === null ? null : Math.max(w.elevation + (now - holder.elevation), ground);
+  };
+  const follows = linked.map((w) => {
+    // One whose height is not followed stands on its ground, so it meets every ledge, the most any walk of it could.
+    const spot = (p: RoutePoint): RoutePoint => ({ x: p.x + w.x - lead.x, y: p.y + w.y - lead.y, elevation: heightAt(w, p) ?? groundAt(w, p) });
     return { spot, trace: followerTrace(w, [{ x: w.x, y: w.y, elevation: w.elevation }, ...points.slice(1).map(spot)]) };
   });
   return {
