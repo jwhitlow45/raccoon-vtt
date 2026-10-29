@@ -10,7 +10,7 @@ import { drawMap } from "../client/features/grid/synthetic.ts";
 import { STARTER_STAMPS } from "#shared/starterStamps.ts";
 import { retainedGrid, starterMapScene } from "../client/features/starter/mapScene.ts";
 import { theme } from "../client/lib/theme.ts";
-import { ConsoleWatch, dragWorld, openSideTab, pickOption, pressOption, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
+import { ConsoleWatch, dragWorld, openSceneGroup, openSideTab, pickOption, pickTool, pressOption, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { assetRow, chooseStarterWork, starterWork } from "./starterPick.ts";
 
@@ -567,6 +567,32 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
       assert.ok(box.size > 0);
     }
     await shots.take(dm, "maps-uip3-box-after-switch");
+  });
+
+  test("LP24-B-FIND-1. new art of another shape on a scene with map phases is refused, and the grid found on it opens nothing", async () => {
+    // The imported scene holds two phases (test 5) and its players (test 4). A drawn map of 70 px squares, 1400 by 1000,
+    // is not its 500 by 400 map's shape, so the scene refuses it. Its sure grid must not land in Line up grid as an offer.
+    const file = path.join(work, "Other shape.png");
+    const px = drawMap({ width: 1400, height: 1000, seed: 5, art: [{ kind: "noise", scale: 60, amp: 70 }], noise: 4, grid: { cellPx: 70, origin: { x: 20, y: 35 }, opacity: 0.5, width: 2 } });
+    await sharp(Buffer.from(px.data), { raw: { width: px.width, height: px.height, channels: 1 } }).png().toFile(file);
+    await pickTool(dm, "Select");
+    const gridOptions = dm.getByRole("toolbar", { name: "Line up grid options" });
+    assert.equal(await gridOptions.count(), 0, "Line up grid closed before the replacement");
+    await openSideTab(dm, "Scenes");
+    const group = await openSceneGroup(dm.getByRole("tabpanel", { name: "Scenes" }), "Map image and grid");
+    await group.getByRole("button", { name: "Replace map image", exact: true }).click();
+    await group.getByLabel("Choose the image", { exact: true }).setInputFiles(file);
+    await dm.locator("[data-toast]").filter({ hasText: "This image is not the same shape as the map, so the grid would not line up." }).first().waitFor({ timeout: 30_000 });
+    // Line up grid would open in the same moment the scene refuses the art. A little more time makes sure it did not.
+    await dm.waitForTimeout(500);
+    const scene = sceneOf(dmSocket.state, run.sceneId);
+    assert.equal(scene?.map?.assetId, run.dayAssetId, "the map stays");
+    assert.equal(scene?.phases?.length, 2);
+    assert.equal(await gridOptions.count(), 0, "Line up grid opened on a grid found on art the scene refused");
+    assert.equal(sceneOf(playerSocket.state, run.sceneId)?.map?.assetId, run.dayAssetId, "the player's map stays");
+    await shots.take(dm, "lp24b-find-1-refused-art");
+    // The refusal's toast stands over the map's top for its 5 s, where the next steps tap.
+    await dm.locator("[data-toast]").filter({ hasText: "This image is not the same shape as the map" }).first().waitFor({ state: "detached", timeout: 15_000 });
   });
 
   test("sa-a-2. new scene from a starter map: the map is copied in, and the scene starts on its measured grid in its grid color, with no alignment", async () => {

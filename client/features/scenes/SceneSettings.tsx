@@ -514,6 +514,13 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
       // Fog first, so players on this scene never see the map before it.
       if (firstFog && (!playersHere || fogIt)) actions.dispatch({ t: "scene.update", sceneId: scene.id, patch: { fogEnabled: true } });
       actions.dispatch({ t: "scene.setMap", sceneId: scene.id, map: next });
+      // A scene with map phases takes new art only in its map's shape, and this device's own
+      // prediction has already refused any other with the reducer's words (NOT_SAME_SHAPE). A grid
+      // found on art the scene refused belongs to no image it shows, so Line up grid is left alone.
+      if (room.getState().view?.scenes[scene.id]?.map?.assetId !== next.assetId) {
+        wait.later?.cancel();
+        return;
+      }
       // A replacement keeps the scene as it is, unless a grid was found on
       // new art, which a scene with its own grid is only offered, or a
       // phone's search of the copy goes on past the wait, which Line up grid
