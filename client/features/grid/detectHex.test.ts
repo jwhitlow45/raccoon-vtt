@@ -61,6 +61,20 @@ function stretched(px: Pixels, k: number): Pixels {
   return { width: px.width, height, data: out, channels: 1 };
 }
 
+/** The image squeezed across by `k`, as `stretched` squeezes it down. */
+function stretchedAcross(px: Pixels, k: number): Pixels {
+  const width = Math.round(px.width / k);
+  const out = new Uint8Array(width * px.height);
+  for (let x = 0; x < width; x++) {
+    const sx = (x + 0.5) * k - 0.5;
+    const x0 = Math.max(0, Math.floor(sx));
+    const x1 = Math.min(px.width - 1, x0 + 1);
+    const t = sx - x0;
+    for (let y = 0; y < px.height; y++) out[y * width + x] = Math.round(px.data[y * px.width + x0]! * (1 - t) + px.data[y * px.width + x1]! * t);
+  }
+  return { width, height: px.height, data: out, channels: 1 };
+}
+
 /**
  * Lines in the three directions of a hex grid's sides, running on through
  * every hex: a triangle grid. `shift` moves the last family's lines along
@@ -175,9 +189,6 @@ describe("finding a map's drawn hex grid", () => {
       const near = detectHex(stretched(squeezed, 1.011), { orient: "rows" });
       assert.ok(!near.found || (!near.checked && near.confidence <= UNCHECKED_MAX), `width ${width}: ${JSON.stringify(near.found ? [near.confidence, near.checked] : near)}`);
     }
-    // The margin is the half measure's own: a first look reads thin lines finely, and its 0.9% stays sure, as 10.2 found.
-    const thin = detectHex(stretched(drawMap(map({ height: Math.round(H * 0.991), hexGrid: hexes("rows", 100, { x: W / 2, y: H / 2 }) })), 0.991), { orient: "rows" });
-    assert.ok(thin.found && thin.checked && thin.confidence >= HIGH_CONFIDENCE, JSON.stringify(thin.found ? [thin.confidence, thin.checked] : thin));
     const at = (width: number, orient: HexOrient) => detectHex(drawMap(map({ width: 1520, height: 1200, hexGrid: hexes(orient, 100, { x: 9, y: 4 }, { width, opacity: 0.6 }) })), { orient });
     const sure = at(18, "columns");
     assert.ok(sure.found && sure.checked && sure.confidence >= HIGH_CONFIDENCE, `measured at half size: ${JSON.stringify(sure.found ? [sure.confidence, sure.checked] : sure)}`);
@@ -217,6 +228,35 @@ describe("finding a map's drawn hex grid", () => {
       assert.ok(!r.found || r.confidence < HIGH_CONFIDENCE, `${i}: ${width} x ${height} ${orient}, ${k}: ${r.found ? r.confidence : ""}`);
     }
     assert.ok(third >= 3, `${third} reached the third look`);
+  });
+
+  test("every look holds a stretch within its measure's error of the limit as not measured, so hexes 1.0 to 1.1% out of shape are only offered on the first and second looks too (FU35B-HALF-MARGIN)", () => {
+    const offered = (r: HexDetection, what: string) => assert.ok(!r.found || (!r.checked && r.confidence <= UNCHECKED_MAX), `${what}: ${JSON.stringify(r.found ? [r.confidence, r.checked] : r)}`);
+    // Runs of round 3's sweep that applied at 0.67 to 0.82 without it: drawn out of proportion down the image (y) or across it (x), then resized to its size.
+    const runs = [
+      { width: 760, height: 593, k: 0.98976, axis: "y", seed: 6189, looks: [1], g: hexes("rows", 90.99, { x: 96.16, y: 143.57 }, { width: 6.05, opacity: 0.686 }) },
+      { width: 760, height: 600, k: 1.010314, axis: "x", seed: 55991, looks: [1], g: hexes("columns", 73.028, { x: 100.832, y: 105.781 }, { width: 5.265, opacity: 0.787 }) },
+      { width: 593, height: 760, k: 1.010325, axis: "y", seed: 57633, looks: [1, 2], g: hexes("rows", 108.977, { x: 125.439, y: 12.086 }, { width: 10.027, opacity: 0.69 }) },
+      { width: 700, height: 1100, k: 1.01002, axis: "x", seed: 11894, looks: [1, 2], g: hexes("columns", 70.66, { x: 17.12, y: 116.95 }, { width: 8.87, opacity: 0.768 }) },
+      // Read 0.79% on a frame 852 px across and 1701 px down: a pixel over half its height is 0.12%, but its sloped lines' parts lie 254 px apart.
+      { width: 1701, height: 852, k: 0.98944, axis: "x", seed: 38948, looks: [1], g: hexes("columns", 133.64, { x: 149.13, y: 158.39 }, { width: 8.17, opacity: 0.797 }) },
+    ] as const;
+    for (const run of runs) {
+      const down = run.axis === "y";
+      const drawn = drawMap(map({ width: down ? run.width : Math.round(run.width * run.k), height: down ? Math.round(run.height * run.k) : run.height, seed: run.seed, hexGrid: run.g }));
+      const looks: number[] = [];
+      const r = detectHex(down ? stretched(drawn, run.k) : stretchedAcross(drawn, run.k), { orient: run.g.orient, onLook: (k) => looks.push(k) });
+      const what = `${run.g.orient} ${run.width} x ${run.height}, ${run.axis} ${run.k}`;
+      assert.deepEqual(looks, run.looks, what);
+      offered(r, what);
+    }
+    // Thin lines 0.9% out of shape on a 600 px frame read within a pixel's error of the limit, so they are offered where 10.2's build applied them.
+    offered(detectHex(stretched(drawMap(map({ height: Math.round(H * 0.991), hexGrid: hexes("rows", 100, { x: W / 2, y: H / 2 }) })), 0.991), { orient: "rows" }), "0.9% on 600 px");
+    // The same hexes drawn regular apply on the first look.
+    const regular = detectHex(drawMap(map({ hexGrid: hexes("rows", 100, { x: W / 2, y: H / 2 }) })), { orient: "rows" });
+    assert.ok(regular.found && regular.checked && regular.confidence >= HIGH_CONFIDENCE, JSON.stringify(regular.found ? [regular.confidence, regular.checked] : regular));
+    // Regular hexes read 0.11% on a 2789 px frame, a pixel well inside the limit, but their leans scattered: two standard errors reach it.
+    offered(detectHex(drawMap(map({ width: 1786, height: 2789, seed: 40903, hexGrid: hexes("rows", 180.33, { x: 167.87, y: 249.84 }, { width: 12.04, opacity: 0.584 }) })), { orient: "rows" }), "scattered leans on a first look");
   });
 
   test("thick lines turned a third of a degree, seen only at a quarter of the size, are refused there as in the image's own pixels", () => {
@@ -344,7 +384,8 @@ describe("finding a map's drawn hex grid", () => {
       for (const c of seen) assert.ok(c.failed !== null || c.confidence >= MIN_CONFIDENCE);
       if (strength === 0.27) {
         assert.ok(seen.some((c) => c.failed === "low confidence"), "the first look's finds fall under the cutoff");
-        assert.ok(r.found && r.confidence >= 0.6, "the second look finds the hexes cleanly");
+        // Its 380 by 300 frame cannot measure their shape to 1%: the sloped lines' parts lie under 100 px apart, so it is offered.
+        assert.ok(r.found && r.confidence === UNCHECKED_MAX && !r.checked, "the second look finds the hexes");
       }
     }
   });

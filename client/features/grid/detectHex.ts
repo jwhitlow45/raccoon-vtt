@@ -80,7 +80,9 @@ export type HexFound = {
    * Whether every family's lean could be measured, so the turn and the
    * shape were checked. When a family shows too few lines in both halves
    * of the image (large hexes on a small map), they were not, and the
-   * confidence is held to `UNCHECKED_MAX`: offered, never applied.
+   * confidence is held to `UNCHECKED_MAX`: offered, never applied. A
+   * stretch within its measure's error of the limit counts as not
+   * measured too (STRETCH_ERROR_PX, STRETCH_ERROR_SE).
    */
   checked: boolean;
   families: [HexFamily, HexFamily, HexFamily];
@@ -155,18 +157,27 @@ const MAX_DRIFT_SHARE = 0.01;
  */
 const MIN_BROKEN = 0.5;
 /**
- * How far off a third look's half measure may read a line's place, in its
- * frame's pixels. The lean compares lines in the frame's top and bottom
- * halves, half its height apart, so the stretch it gives is that far off
- * by this over half the height. Drawn thick-lined hexes squeezed 1 to 1.5%
- * on 760 to 1520 px maps read up to 1.2 / H under their stretch there,
- * and no regular grid came within 2 / H of the limit.
+ * How far off a look may read a line's place, in its frame's pixels. The
+ * stretch is the sloped lines' lean, each line's move from its part in
+ * the frame's top half to its part in the bottom half over how far apart
+ * the parts lie (`leanOf`), so it is that far off by this over that
+ * distance. Upright lines' parts are half the frame's height apart, and
+ * sloped lines' parts closer: on a frame narrower than it is tall they
+ * cross from side to side in less than its height. A stretch within that
+ * of MAX_STRETCH is not measured, so the find is only offered, on every
+ * look (FU35B-HALF-MARGIN). Drawn thick-lined hexes squeezed 1 to 1.5% on
+ * 760 to 1520 px maps read up to 1.2 / H under their stretch on a third
+ * look's half measure, hexes 1.0 to 1.1% out of shape passed the first and
+ * second looks without the margin, and hex columns 1.07% too wide read
+ * 0.79% on a first look's frame 852 px across and 1701 px down, whose
+ * sloped lines' parts lie 254 px apart.
  */
 const STRETCH_ERROR_PX = 1;
 /**
  * The same margin from the lines themselves: this many standard errors
  * of the stretch, as the scatter of the lines' own leans gives it
- * (`leanOf`), when that is wider than STRETCH_ERROR_PX's (D-261029-151).
+ * (`leanOf`), when that is wider than STRETCH_ERROR_PX's (D-261029-151),
+ * on every look as that one is.
  */
 const STRETCH_ERROR_SE = 2;
 /**
@@ -195,8 +206,7 @@ type Profile = {
 /** One polarity's three profiles, over the whole image and over its top and bottom halves. */
 type Profiles = { full: Profile[]; top: Profile[]; bottom: Profile[] };
 /** Gray levels on hex rows, and how many of the image's pixels one of its pixels spans. */
-/** `margin`: the frame measures a third look's find again, so a stretch near the limit is held as not measured (STRETCH_ERROR_PX, STRETCH_ERROR_SE). */
-type Frame = { L: Uint8Array; W: number; H: number; d: number; dv: number; step: number; k: number; margin: boolean };
+type Frame = { L: Uint8Array; W: number; H: number; d: number; dv: number; step: number; k: number };
 type Fit = { fams: [HexFamily, HexFamily, HexFamily]; polarity: Polarity; failed: string | null; score: number };
 
 /**
@@ -311,7 +321,7 @@ function search(L: Uint8Array, W: number, H: number, stepOption: number | undefi
   // A side 30 degrees off level is 1 / cos 30 thicker down than across.
   const dv = Math.ceil(d / HEX_S);
   const step = Math.max(1, Math.floor(stepOption ?? defaultStep(W, H)));
-  const frame: Frame = { L, W, H, d, dv, step, k, margin: only !== undefined };
+  const frame: Frame = { L, W, H, d, dv, step, k };
   const all = profilesOf(frame);
   const minP = minC / 2;
   const maxP = maxC / 2;
@@ -642,9 +652,10 @@ function closeness(f: Fit): number {
  * their parts are half of it apart. Null when fewer than MIN_LINES lines
  * say. `se` is the median's standard error, from the lines' scatter
  * about it (1.4826 times their median deviation, over the root of their
- * count).
+ * count), and `apart` the median distance between a line's two parts,
+ * over which a pixel's error in a part's place moves the lean.
  */
-function leanOf(first: Profile, second: Profile, fam: HexFamily, reach: number, H: number): { lean: number; se: number } | null {
+function leanOf(first: Profile, second: Profile, fam: HexFamily, reach: number, H: number): { lean: number; se: number; apart: number } | null {
   const d = reachFor(fam.period, reach);
   const r = Math.max(1, Math.min(2 * d, Math.floor(0.15 * fam.period)));
   const phase = fam.phase - first.offset;
@@ -664,16 +675,20 @@ function leanOf(first: Profile, second: Profile, fam: HexFamily, reach: number, 
   const top = lines(first);
   const bottom = lines(second);
   const leans: number[] = [];
+  const aparts: number[] = [];
   for (const [k, above] of top) {
     const below = bottom.get(k);
     if (!below) continue;
     const apart = above.y === null || below.y === null ? H / 2 : below.y - above.y;
     // A line that barely reaches one half cannot say how it leans.
-    if (apart >= 0.1 * H) leans.push((below.c - above.c) / apart);
+    if (apart >= 0.1 * H) {
+      leans.push((below.c - above.c) / apart);
+      aparts.push(apart);
+    }
   }
   if (leans.length < MIN_LINES) return null;
   const lean = median(leans);
-  return { lean, se: (1.4826 * median(leans.map((l) => Math.abs(l - lean)))) / Math.sqrt(leans.length) };
+  return { lean, se: (1.4826 * median(leans.map((l) => Math.abs(l - lean)))) / Math.sqrt(leans.length), apart: median(aparts) };
 }
 
 /**
@@ -721,13 +736,17 @@ function confirm(f: Frame, prof: Profiles, fit: Fit): HexFound | string {
   if (upLean !== null && Math.abs(upLean.lean) * f.H > Math.max(MAX_DRIFT_PX / f.k, MAX_DRIFT_SHARE * cell)) return "lines turned";
   const aLean = leanOf(prof.top[1]!, prof.bottom[1]!, a, f.d, f.H);
   const bLean = leanOf(prof.top[2]!, prof.bottom[2]!, b, f.d, f.H);
-  const shape = aLean !== null && bLean !== null ? { stretch: Math.abs(aLean.lean + bLean.lean) / (2 * HEX_S), se: Math.hypot(aLean.se, bLean.se) / (2 * HEX_S) } : null;
+  const shape =
+    aLean !== null && bLean !== null
+      ? { stretch: Math.abs(aLean.lean + bLean.lean) / (2 * HEX_S), se: Math.hypot(aLean.se, bLean.se) / (2 * HEX_S), apart: Math.min(f.H / 2, aLean.apart, bLean.apart) }
+      : null;
   if (shape !== null && shape.stretch >= MAX_STRETCH) return "hexes out of shape";
-  // The half measure of a third look's find reads thick lines' places less
-  // finely than a look at their own size: hexes squeezed 1.1% read as 0.64%
-  // on a 300 px frame. A stretch within that measure's error of the limit,
-  // by the frame's pixels or by the lines' own scatter, is not measured.
-  const nearLimit = f.margin && shape !== null && shape.stretch + Math.max(STRETCH_ERROR_PX / (f.H / 2), STRETCH_ERROR_SE * shape.se) >= MAX_STRETCH;
+  // A look reads a line's place only so finely: hexes squeezed 1.1% read as
+  // 0.64% on a third look's 300 px half frame, and as under 1% on first and
+  // second looks. A stretch within the measure's error of the limit, by a
+  // pixel over the sloped lines' parts' distance or by the lines' own
+  // scatter, is not measured.
+  const nearLimit = shape !== null && shape.stretch + Math.max(STRETCH_ERROR_PX / shape.apart, STRETCH_ERROR_SE * shape.se) >= MAX_STRETCH;
   // A point where all three families cross, near the middle: x from the
   // upright sides and from the sloped ones' difference, y cos 30 from the
   // sloped ones' mean.
