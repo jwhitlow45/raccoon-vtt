@@ -29,7 +29,8 @@
  * 5. The upright sides must sit in the same place in the top and bottom
  *    halves of the image, or the grid is turned, which the app cannot
  *    follow. A map with no grid found gets a second look at half size,
- *    where lines too wide for the filter fit inside it.
+ *    where lines too wide for the filter fit inside it, and a third at a
+ *    quarter for lines wider still.
  *
  * Pure and synchronous, like `detectGrid`, with the same input.
  */
@@ -104,6 +105,8 @@ export type HexDetectOptions = {
   step?: number;
   /** Each fit looked at along its lines and how it fared, for the tests and the evaluation script. */
   onCandidate?: (c: { cellPx: number; confidence: number; failed: string | null }) => void;
+  /** Each look as it starts, by how many times smaller than the image it reads it, for the tests. */
+  onLook?: (k: 1 | 2 | 4) => void;
 };
 
 /** The smallest hex this looks for, px across the flats. The upright sides of one hex are a cell apart and must clear the line filter. */
@@ -183,18 +186,43 @@ export function detectHex(px: Pixels, options: HexDetectOptions): HexDetection {
   const H = rows ? px.height : px.width;
   if (!holdsHexes(W, H)) return { found: false, reason: "small" };
   const L = grayFrame(px, rows);
+  options.onLook?.(1);
   const full = search(L, W, H, options.step, 1, options.onCandidate);
   if (full.found) return placed(full, 1, options.orient);
   // Lines wider than the line filter's reach show only as their two
-  // edges. Half the size, they fit inside it. A quarter of the work again,
-  // and only when the first look found nothing.
-  const w = Math.floor(W / 2);
-  const h = Math.floor(H / 2);
-  if (!holdsHexes(w, h)) return full;
-  // A grid seen whole but turned or out of shape is not given a second, coarser chance.
-  if (full.failed === "lines turned" || full.failed === "hexes out of shape") return full;
-  const half = search(halved(L, W, w, h), w, h, undefined, 2, options.onCandidate);
-  return half.found ? placed(half, 2, options.orient) : full;
+  // edges. Half the size, they fit inside it, and a quarter of the size
+  // lines wider still do (D-261029-51). Each look is a quarter of the work
+  // of the one before, and comes only when every look before it found
+  // nothing. A grid seen whole but turned or out of shape is given no
+  // coarser chance.
+  if (seenWhole(full)) return full;
+  let frame = { L, w: W, h: H };
+  let last = full;
+  for (const k of [2, 4] as const) {
+    const w = Math.floor(frame.w / 2);
+    const h = Math.floor(frame.h / 2);
+    if (!holdsHexes(w, h)) break;
+    // Sides of different sizes at full and at half size is a grid drawn
+    // out of shape, measured twice. A quarter of the size measures it less
+    // finely, and a real map 3.6% too wide passed there. Thick lines can
+    // read so once (the Trebia map does at full size), not at both sizes.
+    if (k === 4 && differentSizes(full) && differentSizes(last)) break;
+    frame = { L: halved(frame.L, frame.w, w, h), w, h };
+    options.onLook?.(k);
+    const look = search(frame.L, w, h, undefined, k, options.onCandidate);
+    if (look.found) return placed(look, k, options.orient);
+    if (seenWhole(look)) break;
+    last = look;
+  }
+  return full;
+}
+
+function differentSizes(d: HexDetection): boolean {
+  return !d.found && d.failed === "sides of different sizes";
+}
+
+function seenWhole(d: HexDetection): boolean {
+  return !d.found && (d.failed === "lines turned" || d.failed === "hexes out of shape");
 }
 
 function holdsHexes(W: number, H: number): boolean {

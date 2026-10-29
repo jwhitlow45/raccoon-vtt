@@ -143,6 +143,46 @@ describe("finding a map's drawn hex grid", () => {
     }
   });
 
+  test("lines wider still, missed at full and half size, found on a third look at a quarter of the size (D-261029-51)", () => {
+    // Lines 14 and 18 px wide on 100 px hexes: past the filter's reach at half size too, as the Trebia map's are at 4096 px.
+    for (const width of [14, 18]) {
+      for (const orient of ["rows", "columns"] as const) {
+        const g = hexes(orient, 100, { x: 9, y: 4 }, { width, opacity: 0.6 });
+        const looks: number[] = [];
+        const r = detectHex(drawMap(map({ width: 1520, height: 1200, hexGrid: g })), { orient, onLook: (k) => looks.push(k) });
+        assert.deepEqual(looks, [1, 2, 4], `width ${width}, ${orient}: the first two looks miss them`);
+        assert.ok(r.found && Math.abs(r.cellPx - 100) / 100 < 0.005 && offCenter(g, r.center) < 1, `width ${width}, ${orient}: ${JSON.stringify(r.found ? [r.cellPx, r.center] : r)}`);
+        assert.ok(r.found && r.confidence >= MIN_CONFIDENCE && r.checked, "under the same confidence rules");
+      }
+    }
+    // On 1300 by 1000 the first look reads these lines' sides at different sizes, as the Trebia map's first look does, and the third still finds them.
+    const g = hexes("rows", 100, { x: 9, y: 4 }, { width: 14, opacity: 0.6 });
+    const r = detectHex(drawMap(map({ width: 1300, height: 1000, hexGrid: g })), { orient: "rows" });
+    assert.ok(r.found && Math.abs(r.cellPx - 100) / 100 < 0.005, JSON.stringify(r.found ? r.cellPx : r));
+  });
+
+  test("thick lines turned a third of a degree, seen only at a quarter of the size, are refused there as in the image's own pixels", () => {
+    // The lines move about 5 px across this map. A quarter of the size, the limits in pixels (the meeting point, the turn) are a quarter too.
+    assertNone(detectHex(drawMap(map({ width: 1300, height: 1000, hexGrid: hexes("rows", 100, { x: 9, y: 4 }, { width: 14, opacity: 0.6, rotate: 0.3 }) })), { orient: "rows" }));
+  });
+
+  test("the third look comes only when the first two find nothing, and never after a grid seen turned or measured out of shape twice", () => {
+    const looksOf = (spec: Partial<SynthMap>, orient: HexOrient, px = drawMap(map(spec))) => {
+      const looks: number[] = [];
+      detectHex(px, { orient, onLook: (k) => looks.push(k) });
+      return looks;
+    };
+    assert.deepEqual(looksOf({ hexGrid: hexes("rows", 70, { x: 9, y: 4 }) }, "rows"), [1], "found on the first look");
+    assert.deepEqual(looksOf({ hexGrid: hexes("rows", 70, { x: 9, y: 4 }, { width: 7, opacity: 0.6 }) }, "rows"), [1, 2], "found on the second");
+    assert.deepEqual(looksOf({ hexGrid: hexes("rows", 50, { x: 0, y: 0 }, { rotate: 0.35 }) }, "rows"), [1], "seen turned");
+    assert.deepEqual(looksOf({ hexGrid: hexes("rows", 70, { x: 9, y: 4 }, { width: 9, opacity: 0.6, rotate: 0.4 }) }, "rows"), [1, 2], "thick lines seen turned at half size");
+    // Hexes 3.6% out of shape: the three families' sizes differ at full and at half size, so a quarter, which measures them less finely, is not asked.
+    const tall = drawMap(map({ height: Math.round(H * 1.036), hexGrid: hexes("rows", 100, { x: 380, y: 300 }) }));
+    assert.deepEqual(looksOf({}, "rows", stretched(tall, 1.036)), [1, 2]);
+    // A gradient without lines is looked at three times.
+    assert.deepEqual(looksOf({ art: [{ kind: "gradient", from: 60, to: 200 }] }, "rows"), [1, 2, 4]);
+  });
+
   test("small hexes and large ones", () => {
     for (const cell of [16.3, 20, 150]) {
       const g = hexes("rows", cell, { x: 4, y: 9 });
