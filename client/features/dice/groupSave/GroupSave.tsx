@@ -77,6 +77,22 @@ import { useGroupSave, useGroupSaveStore } from "./store.ts";
 import { actionFill, areaFill, casterActions } from "./fills.ts";
 import { castFill } from "../cast/castStart.ts";
 import { sentAny } from "./start.ts";
+import { parseDamageOverride } from "./damageInput.ts";
+
+export function RowDamageField(props: { name: string; value: number | string | undefined; computed: number; onChange(value: string | null): void }) {
+  const errorId = useId();
+  const parsed = props.value === undefined ? null : parseDamageOverride(props.value);
+  const error = parsed?.ok === false ? parsed.error : null;
+  return (
+    <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
+        <Input aria-label={`${props.name}'s damage`} inputMode="text" value={props.value ?? ""} placeholder={`${props.computed} or 10 fire`} autoComplete="off" error={error !== null} aria-describedby={error ? errorId : undefined} onChange={(e) => props.onChange(e.target.value)} style={{ flex: "1 1 160px", width: 160 }} />
+        {props.value !== undefined ? <Button size="sm" onClick={() => props.onChange(null)}>{`Back to ${props.computed}`}</Button> : null}
+      </div>
+      {error ? <span id={errorId} role="status" style={{ fontSize: theme.font.small, color: theme.color.dangerText }}>{error}</span> : null}
+    </div>
+  );
+}
 
 /**
  * The group save (docs/design-v1-roll-options.md 5): rows rolled by the
@@ -935,14 +951,7 @@ function GroupRow(props: {
         </div>
       </div>
       {takes && editing ? (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: theme.space(1), alignItems: "center" }}>
-          <NumberField label={`${row.name}'s damage`} value={s.amount} min={0} max={100_000} nullable placeholder={String(outcome.computed)} onCommit={(n) => props.onChange(setAmount(page, row.holder, n))} width={88} />
-          {s.amount !== undefined ? (
-            <Button size="sm" onClick={() => props.onChange(setAmount(page, row.holder, null))}>
-              {`Back to ${outcome.computed}`}
-            </Button>
-          ) : null}
-        </div>
+        <RowDamageField name={row.name} value={s.amount} computed={outcome.computed} onChange={(value) => props.onChange(setAmount(page, row.holder, value))} />
       ) : null}
       {setup && props.loading ? (
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>Loading</span>

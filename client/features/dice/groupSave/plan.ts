@@ -1,6 +1,6 @@
 import type { ConditionKey, Effect, RoomState } from "#shared/model.ts";
 import { playersToken } from "#shared/project.ts";
-import type { ActorTarget, DurationInput, OpOf } from "#shared/protocol.ts";
+import { MAX_DAMAGE_PARTS, type ActorTarget, type DurationInput, type OpOf, type OutcomeDamage } from "#shared/protocol.ts";
 import { DAMAGE_TYPES, type DamageType } from "#shared/rules/damage.ts";
 import { formatFormula, parseFormula } from "#shared/dice/formula.ts";
 import { effectName } from "#shared/logText.ts";
@@ -9,6 +9,7 @@ import type { Page } from "./chain.ts";
 import { stateOf } from "./chain.ts";
 import { conditionSkip, damageWords, dealtTypes, parseParts, partAmounts, planTargets, rowDamage, worstCase, type OutcomeCondition, type PartAmount, type PlanRow } from "./outcome.ts";
 import { rowResult, type Mark, type RowBase } from "./rows.ts";
+import { parseDamageOverride } from "./damageInput.ts";
 
 /**
  * What the outcome does to each row (docs/design-v1-roll-options.md 5.4)
@@ -40,9 +41,13 @@ export type RowOutcome = {
   /**
    * The damage types its amount carries (outcome.ts dealtTypes), for the
    * Regeneration note (docs/design-v1-combat-controls.md 3.4): none when it
-   * takes nothing. An amount the DM typed keeps the worked-out parts' types.
+   * takes nothing. A plain override keeps the worked-out parts' types,
+   * and a typed override supplies its own.
    */
   types: DamageType[];
+  /** Incoming parts and the DM's choices, for authoritative application. */
+  damage?: OutcomeDamage;
+  error?: string;
 };
 
 function hpOf(dice: DiceView, target: ActorTarget): { cur: number; temp: number } | null {
@@ -104,16 +109,32 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
   if (result === null || result === "skip" || state.gone) return out;
   let types: DamageType[] = [];
   if (amounts) {
-    const dealt = rowDamage(amounts, result, { onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dexSave: evasionApplies, row: { defenses, qualifiedOn, evasion, effects } });
+    const incoming = incomingDamage(page, state, amounts, result, evasion);
+    const dealt = rowDamage(incoming.parts, result, { onPass: page.test.kind === "none" ? "none" : page.outcome.onPass, dexSave: evasionApplies, row: { defenses, qualifiedOn, evasion, effects } });
     out.amount = dealt.amount;
     out.computed = dealt.amount;
     types = dealtTypes(amounts, dealt.byPart);
     // The amount shows on the row's first line, so words come only when a defense or Evasion changed it.
     out.words = amounts.length > 0 && dealt.notes.length > 0 ? damageWords(amounts, dealt) : "";
+    if (amounts.length > 0) out.damage = incoming;
   }
   if (state.amount !== undefined) {
-    out.amount = state.amount;
-    out.words = amounts ? `Typed ${state.amount}, worked out ${out.computed}` : `Typed ${state.amount}`;
+    delete out.damage;
+    const parsed = parseDamageOverride(state.amount);
+    if (!parsed.ok) {
+      out.error = parsed.error;
+      out.amount = 0;
+      out.words = parsed.error;
+    } else if (parsed.parts) {
+      const dealt = rowDamage(parsed.parts, "fail", { onPass: "none", dexSave: false, row: { defenses, qualifiedOn, evasion: false, effects } });
+      out.amount = dealt.amount;
+      out.words = `Typed ${state.amount}: ${damageWords(parsed.parts, dealt)}`;
+      types = dealtTypes(parsed.parts, dealt.byPart);
+      out.damage = { parts: parsed.parts, ...(state.qualifiedOn?.length ? { qualifiedOn: state.qualifiedOn } : {}) };
+    } else {
+      out.amount = parsed.amount;
+      out.words = amounts ? `Typed ${parsed.amount}, worked out ${out.computed}` : `Typed ${parsed.amount}`;
+    }
   }
   // Damage of 0 writes nothing (actors.ts), so it carries no type either.
   out.types = out.amount > 0 ? types : [];
@@ -132,6 +153,20 @@ export function rowOutcome(page: Page, row: RowBase, dice: DiceView, amounts: Pa
   return out;
 }
 
+function incomingDamage(page: Page, state: ReturnType<typeof stateOf>, parts: PartAmount[], result: "pass" | "fail", evasion: boolean): OutcomeDamage {
+  return {
+    parts: parts.map((part) => ({ ...part, amount: Math.max(0, part.amount) })),
+    ...(page.test.kind !== "none" ? { save: { result, onPass: page.outcome.onPass, dex: page.test.kind === "save" && page.test.ability === "dex", evasion } } : {}),
+    ...(state.qualifiedOn?.length ? { qualifiedOn: state.qualifiedOn } : {}),
+  };
+}
+
+/** The bound and the sent plan include the same ask or trap that Apply settles. */
+function closingOf(page: Page): Pick<OpOf<"actor.outcome">, "cast" | "trap"> {
+  if (page.cast) return { cast: page.cast.ask.id };
+  return page.source.kind === "trap" ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
+}
+
 /**
  * Whether the page's whole outcome fits one `actor.outcome` (5.5), sized
  * as Apply would send it: each row's conditions with their end and the
@@ -144,6 +179,14 @@ export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
   const conditions = page.outcome.conditions as ConditionKey[];
   // Every type the damage field names, which each row's damage may carry.
   const parsed = page.outcome.damage.trim() ? parseParts(page.outcome.damage, page.fill?.damageType) : null;
+  if (parsed?.ok && parsed.parts.length > MAX_DAMAGE_PARTS) return `Use at most ${MAX_DAMAGE_PARTS} damage parts.`;
+  if (parsed?.ok && parsed.parts.reduce((sum, part) => sum + ("amount" in part ? part.amount : 0), 0) > 100_000) return "That number is too large.";
+  for (const row of rows) {
+    const state = stateOf(page, row);
+    if (state.gone || state.mark === "skip" || state.amount === undefined) continue;
+    const override = parseDamageOverride(state.amount);
+    if (!override.ok) return `${row.name}: ${override.error}`;
+  }
   const named = new Set(parsed?.ok ? parsed.parts.flatMap((p) => (p.type ? [p.type] : [])) : []);
   const types = DAMAGE_TYPES.filter((t) => named.has(t));
   return worstCase(
@@ -153,7 +196,21 @@ export function pageBound(page: Page, rows: readonly RowBase[]): string | null {
       return conditions.map((key) => ({ key, ...(duration ? { duration } : {}), ...(save ? { save } : {}) }));
     },
     page.fill?.name,
-    { ...(types.length > 0 ? { types } : {}), quiet: page.secret },
+    {
+      ...(types.length > 0 ? { types } : {}), quiet: page.secret,
+      ...closingOf(page),
+      damage: (target) => {
+        const row = rows.find((r) => r.target === target)!;
+        const state = stateOf(page, row);
+        if (state.amount !== undefined) {
+          const override = parseDamageOverride(state.amount);
+          return override.ok && override.parts ? { parts: override.parts, ...(state.qualifiedOn?.length ? { qualifiedOn: state.qualifiedOn } : {}) } : undefined;
+        }
+        if (!parsed?.ok) return undefined;
+        // A die total can need six digits. The bound measures bytes, before that total is known.
+        return incomingDamage(page, state, parsed.parts.map((p) => ({ amount: "amount" in p ? p.amount : 100_000, ...(p.type ? { type: p.type } : {}) })), "fail", false);
+      },
+    },
   );
 }
 
@@ -165,8 +222,14 @@ export function applyWaits(page: Page, dice: DiceView, amounts: PartAmount[] | n
   if (page.rolls.some((r) => r.state === "sending") || tapWaits) return "Rolling…";
   if (page.damage?.state === "sending") return "Rolling…";
   if (amounts === null) return "Type the damage, or roll it";
+  if (amounts.length > MAX_DAMAGE_PARTS) return `Use at most ${MAX_DAMAGE_PARTS} damage parts.`;
+  if (amounts.reduce((sum, part) => sum + Math.max(0, part.amount), 0) > 100_000) return "That number is too large.";
   if (page.outcome.saveEnds && page.outcome.conditions.length > 0 && saveEndsDc(page) === null) return "Give the save that ends it a DC";
   const live = page.rows.filter((r) => !stateOf(page, r).gone);
+  for (const row of live) {
+    const error = rowOutcome(page, row, dice, amounts).error;
+    if (error) return `${row.name}: ${error}`;
+  }
   const waiting = live.filter((r) => rowOutcome(page, r, dice, amounts).result === null).length;
   if (waiting > 0) return `${waiting} still waiting: mark them or wait`;
   return null;
@@ -213,6 +276,8 @@ export const SETTLE_WORDS = "Settle: it changes no one";
  * creature (docs/design-v1-traps.md 4.4).
  */
 export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | null, ids: { plan: string; newId: () => string }): OpOf<"actor.outcome"> | null {
+  if (amounts && (amounts.length > MAX_DAMAGE_PARTS || amounts.reduce((sum, part) => sum + Math.max(0, part.amount), 0) > 100_000)) return null;
+  if (pageBound(page, page.rows) !== null) return null;
   const rows: PlanRow[] = [];
   const seen = new Set<string>();
   for (const row of page.rows) {
@@ -221,16 +286,17 @@ export function buildPlan(page: Page, dice: DiceView, amounts: PartAmount[] | nu
     const state = stateOf(page, row);
     if (state.gone || state.mark === "skip") continue;
     const outcome = rowOutcome(page, row, dice, amounts);
+    if (outcome.error) return null;
     if (outcome.result === null || outcome.result === "skip") continue;
-    rows.push({ target: row.target, amount: outcome.amount, conditions: outcome.conditions, resist: outcome.resisted, types: outcome.types });
+    rows.push({ target: row.target, amount: outcome.amount, conditions: outcome.conditions, resist: outcome.resisted, types: outcome.types, ...(outcome.damage ? { damage: outcome.damage } : {}) });
   }
   const targets = planTargets(rows, ids.newId);
   // The outcome closes the player's ask it answers in the same op (docs/design-v1-player-save-spell.md 3.3).
   // A trap's springing is settled by the outcome that applies it, in the same op (docs/design-v1-traps.md 4.4).
-  const trap = page.source.kind === "trap" && !page.cast ? { trap: { trapId: page.source.trapId, due: page.source.due } } : {};
-  if (targets.length === 0 && !("trap" in trap)) return null;
+  const closing = closingOf(page);
+  if (targets.length === 0 && closing.trap === undefined) return null;
   // Saves rolled in secret keep a Legendary Resistance's use line from players (docs/design-v1-combat-controls.md 8).
-  return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...(page.cast ? { cast: page.cast.ask.id } : {}), ...trap, targets, ...(page.secret ? { quiet: true as const } : {}) };
+  return { t: "actor.outcome", plan: ids.plan, ...(page.fill ? { label: page.fill.name } : {}), ...closing, targets, ...(page.secret ? { quiet: true as const } : {}) };
 }
 
 // ------------------------------------------------------------ a row in words (5.8)

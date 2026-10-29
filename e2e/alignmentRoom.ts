@@ -862,9 +862,19 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
     if (await canvasAt(page, { x: 10, y: 3 })) await tapCell(page, BOUNDS, { x: 10, y: 3 });
     const group = page.locator('[role="dialog"][data-bar-mode]');
     if (await showsWithin(group.first(), 3_000)) {
+      // FL-3: both group entry points show mixed typed damage at every measured size.
+      await group.first().getByLabel("HP change", { exact: true }).fill("11 cold + 3 fire");
+      await group.first().getByLabel("HP change", { exact: true }).blur();
       await measureWindow(sweep, page, "window-group", group.first(), headers, false);
       // The group's bar expanded from its strip on an upright phone.
       if ((await group.first().getAttribute("data-bar-state")) === "expanded") await sweep.measure(page, "group-expanded", group.first());
+      await openTracker(page);
+      const several = page.getByText("Several at once", { exact: true }).locator("xpath=ancestor::section[1]");
+      await several.getByLabel("HP change", { exact: true }).fill("11 cold + 3 fire");
+      await several.getByLabel("HP change", { exact: true }).blur();
+      await sweep.measure(page, "tracker-group-hp", several);
+      const trackerSheet = page.locator("dialog[data-rvtt-sheet]").filter({ has: page.locator("[data-round-header]") });
+      if (await visible(trackerSheet)) await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "Deselect all" }).first().click();
     } else await sweep.missing(page, "window-group", "Multi-select and two taps opened no group window");
     await escapeAll(page);
@@ -1772,6 +1782,13 @@ async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: s
   await card.getByRole("button", { name: "Save and damage", exact: true }).click();
   const host = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]').or(page.getByRole("tabpanel", { name: /Dice/ }));
   if (!(await showsWithin(host.getByText(new RegExp(`^From ${trap}`)).first(), 4_000))) return sweep.missing(page, screen, "Save and damage opened no group save page");
+  if (screen === "group-save-row") {
+    // FL-3: measure the expanded typed override, which the closed row never exposed to the sweep.
+    await host.getByRole("radiogroup", { name: "What they roll" }).getByRole("radio", { name: "No save" }).check({ force: true });
+    await host.getByLabel("Damage", { exact: true }).fill("11 cold + 3 fire");
+    await host.getByRole("button", { name: /'s damage, .*Change it/ }).first().click();
+    await host.getByLabel(/'s damage$/).first().fill("11 cold + 3 fire");
+  }
   await sweep.measure(page, screen, host);
   await host.getByRole("button", { name: "Discard", exact: true }).first().click();
   const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');

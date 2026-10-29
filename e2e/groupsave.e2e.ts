@@ -519,9 +519,13 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await own.fill("4");
     await own.press("Enter");
     await creatures.getByRole("button", { name: `${one.name}'s damage, 4, typed. Change it` }).waitFor();
+    // FL-3: a typed override carries each part through the same row and Apply.
+    await own.fill("4 fire + 1 cold");
+    await own.press("Enter");
+    await creatures.getByRole("button", { name: `${one.name}'s damage, 5, typed. Change it` }).waitFor();
     await sheet.getByRole("button", { name: /^Apply: / }).tap();
     await sheet.getByText("Applied to 3. Undo takes it all back.").waitFor();
-    await waitFor(`${one.name} at ${HP - 4}`, () => (goblinHp(one.id) === HP - 4 ? true : null));
+    await waitFor(`${one.name} at ${HP - 5}`, () => (goblinHp(one.id) === HP - 5 ? true : null));
     for (const g of run.goblins.slice(1)) await waitFor(`${g.name} at ${HP - 10}`, () => (goblinHp(g.id) === HP - 10 ? true : null));
     await shots.take(dm, "groupsave-no-save-own-amount-130");
     await sheet.getByRole("button", { name: "Done", exact: true }).tap();

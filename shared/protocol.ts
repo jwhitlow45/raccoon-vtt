@@ -1414,6 +1414,14 @@ const handoutDocInput = z.strictObject({ id, title: name, pages: handoutPages })
 export const MAX_DAMAGE_PARTS = 100;
 const damageParts = z.array(z.strictObject({ amount: z.number().int().min(0).max(100_000), type: z.enum(DAMAGE_TYPES).optional() })).min(1).max(MAX_DAMAGE_PARTS);
 
+/** Only the DM's outcome carries save choices. HP entries send incoming parts without them. */
+const outcomeDamage = z.strictObject({
+  parts: damageParts,
+  save: z.strictObject({ result: z.enum(["pass", "fail"]), onPass: z.enum(["half", "none"]), dex: z.boolean(), evasion: z.boolean() }).optional(),
+  qualifiedOn: z.array(z.string().min(1).max(2000)).max(100).optional(),
+}).refine((d) => d.parts.reduce((sum, part) => sum + part.amount, 0) <= 100_000, { message: "Damage is at most 100,000." });
+export type OutcomeDamage = z.infer<typeof outcomeDamage>;
+
 const hpChange = z.discriminatedUnion("kind", [
   /** `types` are the damage types the hit dealt, for the Regeneration note (docs/design-v1-combat-controls.md 3.4). */
   z.strictObject({ kind: z.literal("damage"), amount: z.number().int().min(0).max(100_000), crit: z.boolean().optional(), types: damageTypes.optional(), parts: damageParts.optional() })
@@ -2105,7 +2113,8 @@ export const clientOps = [
           resist: z.literal(true).optional(),
           /** The damage types of the creature's adjusted parts above 0 (docs/design-v1-combat-controls.md 3.4). */
           types: damageTypes.optional(),
-        }),
+          damage: outcomeDamage.optional(),
+        }).refine((t) => t.damage === undefined || (t.amount === undefined && t.types === undefined), { message: "Incoming damage cannot also carry a final amount or damage types." }),
       )
       .max(LIMITS.outcomeTargets),
     /** The saves were rolled in secret, so a Legendary Resistance's use line reaches only the DM and the creature's owners (8). */

@@ -2,7 +2,7 @@ import type { Defense } from "#shared/dice/defenses.ts";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
 import type { ConditionKey, DiceRoll, Effect } from "#shared/model.ts";
 import { hitOf } from "#shared/dice/roll.ts";
-import { OUTCOME_TOO_BIG, type ActorTarget, type DurationInput, type EffectInput, type OpOf } from "#shared/protocol.ts";
+import { OUTCOME_TOO_BIG, type ActorTarget, type DurationInput, type EffectInput, type OpOf, type OutcomeDamage } from "#shared/protocol.ts";
 import type { DamageType } from "#shared/rules/damage.ts";
 import { defenseApplies as applies } from "#shared/rules/typedDamage.ts";
 export { parseParts, partsText, typedOnly, partAmounts, defenseKey, rowDamage, dealtTypes, damageWords, type OutcomePart, type PartAmount, type RowDefenses } from "#shared/rules/typedDamage.ts";
@@ -27,7 +27,7 @@ export function conditionSkip(key: ConditionKey, row: { defenses: readonly Defen
 export type OutcomeCondition = { key: ConditionKey; duration?: DurationInput; save?: NonNullable<Effect["save"]> };
 
 /** One creature's part of the plan, before it is frozen. `types` go with its damage (dealtTypes), never without it. */
-export type PlanRow = { target: ActorTarget; amount: number; conditions: readonly OutcomeCondition[]; remove?: readonly string[]; resist: boolean; types?: readonly DamageType[] };
+export type PlanRow = { target: ActorTarget; amount: number; conditions: readonly OutcomeCondition[]; remove?: readonly string[]; resist: boolean; types?: readonly DamageType[]; damage?: OutcomeDamage };
 
 /**
  * The plan's targets: each creature once, with its amount, its conditions
@@ -38,14 +38,15 @@ export function planTargets(rows: readonly PlanRow[], newId: () => string): OpOf
   const out: OpOf<"actor.outcome">["targets"] = [];
   for (const row of rows) {
     const item: OpOf<"actor.outcome">["targets"][number] = { target: row.target };
-    if (row.amount > 0) item.amount = Math.min(100_000, row.amount);
+    if (row.damage) item.damage = row.damage;
+    else if (row.amount > 0) item.amount = Math.min(100_000, row.amount);
     if (item.amount !== undefined && row.types && row.types.length > 0) item.types = [...row.types];
     if (row.conditions.length > 0) {
       item.effects = row.conditions.map((c): EffectInput => ({ id: newId(), key: c.key, ...(c.duration ? { duration: c.duration } : {}), ...(c.save ? { save: c.save } : {}) }));
     }
     if (row.remove && row.remove.length > 0) item.remove = [...row.remove];
     if (row.resist) item.resist = true;
-    if (item.amount !== undefined || item.effects || item.remove || item.resist) out.push(item);
+    if (item.amount !== undefined || item.damage || item.effects || item.remove || item.resist) out.push(item);
   }
   return out;
 }
@@ -61,7 +62,7 @@ export function worstCase(
   rows: readonly ActorTarget[],
   conditions: readonly OutcomeCondition[] | ((target: ActorTarget) => readonly OutcomeCondition[]),
   label?: string,
-  more: { types?: readonly DamageType[]; quiet?: boolean } = {},
+  more: { types?: readonly DamageType[]; quiet?: boolean; damage?: (target: ActorTarget) => OutcomeDamage | undefined } & Pick<OpOf<"actor.outcome">, "cast" | "trap"> = {},
 ): string | null {
   if (rows.length > LIMITS.outcomeTargets) return "At most 100 creatures in one group save.";
   const of = typeof conditions === "function" ? conditions : () => conditions;
@@ -72,8 +73,13 @@ export function worstCase(
     t: "actor.outcome",
     plan: id(),
     ...(label ? { label } : {}),
+    ...(more.cast ? { cast: more.cast } : {}),
+    ...(more.trap ? { trap: more.trap } : {}),
     targets: planTargets(
-      rows.map((target) => ({ target, amount: 100_000, conditions: of(target), resist: true, ...(more.types ? { types: more.types } : {}) })),
+      rows.map((target) => {
+        const damage = more.damage?.(target);
+        return { target, amount: 100_000, conditions: of(target), resist: true, ...(more.types ? { types: more.types } : {}), ...(damage ? { damage } : {}) };
+      }),
       id,
     ),
     ...(more.quiet ? { quiet: true as const } : {}),

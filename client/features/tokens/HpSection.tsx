@@ -111,7 +111,7 @@ export function HpEntry(props: {
   const atZero = props.targets.some((t) => t.atZero);
   const showCrit = atZero && (preview?.ok ? preview.change.kind === "damage" : mode === "damage");
   const sendsCrit = critSent({ crit, atZero, mode, preview });
-  const reach = props.targets.filter((t) => t.access !== "none").length;
+  const reach = new Set(props.targets.filter((t) => t.access !== "none").map((t) => t.holder)).size;
   // Typed math such as =12 may ask for what this viewer cannot send, which shows at once in the summary's place.
   const refusal = preview?.ok ? entryRefusal(props.access, preview.change, props.targets.length) : null;
   // What will be sent decides the lines on the dead: the typed text once it parses and may go, the chosen mode otherwise.

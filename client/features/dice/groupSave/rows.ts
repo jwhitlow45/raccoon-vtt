@@ -122,7 +122,7 @@ export type RowState = {
   /** The words of a refusal: "Not asked: 20 requests are open", "Not rolled: you are going too fast". */
   says?: string;
   /** The DM's typed amount, which wins over the outcome's. */
-  amount?: number;
+  amount?: number | string;
   /** The bonus the DM typed for a row with no stat block, which its server roll takes (rowBonus). */
   typedBonus?: number;
   legendary?: boolean;

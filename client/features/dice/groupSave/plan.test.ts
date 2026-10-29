@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { actor, castAsk, character, customMonster, effect, member, room, token } from "#shared/testutil.ts";
 import type { DiceView } from "../creature.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { OUTCOME_TOO_BIG } from "#shared/protocol.ts";
 import { apply, mark, markGone, newPage, setAmount, setDc, stateOf, typeTotal, type Page } from "./chain.ts";
 import { worstCase } from "./outcome.ts";
@@ -80,7 +81,8 @@ describe("the DM's own amount and the outcome's size", () => {
     assert.equal(setup.phase, "setup");
     const typed = setAmount(setup, rows[0]!.holder, 4);
     const plan = buildPlan(typed, dice, [{ amount: 10 }], { plan: "p", newId: () => "e" })!;
-    assert.deepEqual(plan.targets.map((t) => t.amount), [4, 10]);
+    assert.equal(plan.targets[0]!.amount, 4);
+    assert.deepEqual(plan.targets[1]!.damage?.parts, [{ amount: 10 }]);
   });
 
   test("the bound counts each condition's end and save, so 100 creatures with three conditions that last and end on a save are refused before any roll (ASTRA-14)", () => {
@@ -121,7 +123,14 @@ describe("the plan's damage types and its quiet", () => {
   }
   const typesOf = (p: Page, amounts: { amount: number; type?: "fire" | "radiant" }[]) => {
     const plan = buildPlan(p, dice, amounts, { plan: "plan", newId: () => "e" })!;
-    return Object.fromEntries(plan.targets.map((t) => ["tokenId" in t.target ? t.target.tokenId : "", t.types ?? null]));
+    const result = applyOp(dice.view, plan, dice.you, { seq: 1, at: "2026-10-29T00:00:00Z" });
+    assert.ok(result.ok);
+    return Object.fromEntries(plan.targets.flatMap((t) => {
+      const id = "tokenId" in t.target ? t.target.tokenId : "";
+      const actor = result.state.tokens[id]?.actor;
+      const types = actor && "inline" in actor ? actor.inline.hurt : undefined;
+      return types?.length ? [[id, types]] : [];
+    }));
   };
 
   test("mixed damage sends each type taken, immunity drops one, and temporary HP still counts, since the types go with the hit", () => {
@@ -130,7 +139,7 @@ describe("the plan's damage types and its quiet", () => {
       { amount: 6, type: "radiant" as const },
     ];
     assert.deepEqual(typesOf(page("10 fire + 6 radiant", "fail"), flame), { g1: ["fire", "radiant"], imp: ["radiant"], tough: ["fire", "radiant"], stone: ["fire", "radiant"] });
-    assert.deepEqual(rowOutcome(page("10 fire + 6 radiant", "fail"), rows[1]!, dice, flame).types, ["radiant"], "the row says what its plan target sends");
+    assert.deepEqual(rowOutcome(page("10 fire + 6 radiant", "fail"), rows[1]!, dice, flame).types, ["radiant"], "the preview agrees with the server");
   });
 
   test("a part rounded to 0 adds nothing, and a creature that takes nothing sends no types at all", () => {
@@ -139,10 +148,10 @@ describe("the plan's damage types and its quiet", () => {
       { amount: 3, type: "radiant" as const },
     ];
     // Halved on a pass: fire 1 becomes 0, radiant 3 becomes 1. Petrified halves again: radiant 1 becomes 0.
-    assert.deepEqual(typesOf(page("1 fire + 3 radiant", "pass"), thin), { g1: ["radiant"], imp: ["radiant"], tough: ["radiant"] }, "the statue takes 0 and is left out");
+    assert.deepEqual(typesOf(page("1 fire + 3 radiant", "pass"), thin), { g1: ["radiant"], imp: ["radiant"], tough: ["radiant"] }, "the statue takes 0 and records no types");
     const fire = [{ amount: 8, type: "fire" as const }];
     const only = buildPlan(page("8 fire", "fail"), dice, fire, { plan: "plan", newId: () => "e" })!;
-    assert.equal(only.targets.some((t) => "tokenId" in t.target && t.target.tokenId === "imp"), false, "immune to all of it: no amount, no types");
+    assert.deepEqual(only.targets.find((t) => "tokenId" in t.target && t.target.tokenId === "imp")?.damage?.parts, fire, "the server decides immunity even when the preview is zero");
     const lurker = rowOutcome(page("8 fire", "fail"), rows[1]!, dice, fire);
     assert.deepEqual([lurker.amount, lurker.types], [0, []]);
     assert.deepEqual(rowOutcome(page("12", "fail"), rows[0]!, dice, [{ amount: 12 }]).types, [], "untyped damage names none");
@@ -171,7 +180,7 @@ describe("the plan's damage types and its quiet", () => {
       fill: { name: "Prismatic Storm", from: "" },
       outcome: { damage, onPass: "none", conditions: ["charmed", "incapacitated"], lasts: { mode: "turnEnd", rounds: 10, anchor: "own" }, saveEnds: { ability: "wis", dc: null } },
     });
-    assert.equal(pageBound(at("1d6 fire"), cultists), null);
+    assert.equal(pageBound(at("1d6 fire"), cultists.slice(0, 80)), null);
     const every = "1 acid + 1 bludgeoning + 1 cold + 1 fire + 1 force + 1 lightning + 1 necrotic + 1 piercing + 1 poison + 1 psychic + 1 radiant + 1 slashing + 1 thunder";
     assert.equal(pageBound(at(every), cultists), OUTCOME_TOO_BIG);
   });

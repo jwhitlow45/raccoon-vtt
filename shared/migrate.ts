@@ -880,7 +880,8 @@ export const opMigrations: MigrationStep[] = [
     apply: (op) => op,
   },
   {
-    // Typed HP damage carries its incoming parts. The reducer applies defenses
+    // Typed HP and group save damage carry incoming parts. Group saves also
+    // carry the DM's save choices. The reducer applies saves and defenses
     // only to those parts. Existing amounts and type tags remain final damage,
     // so stored version 30 ops replay unchanged and this step is the identity.
     // Deploy: back up the database and reload open pages to enable typed input.

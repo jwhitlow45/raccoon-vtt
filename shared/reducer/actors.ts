@@ -1,6 +1,6 @@
 import { combatUses, healRevivesDead, reviveToOne } from "../migrate.ts";
 import type { Effect } from "../model.ts";
-import { MAX_EFFECTS, type DurationInput, type OpOf } from "../protocol.ts";
+import { MAX_EFFECTS, type DurationInput, type OpOf, type OutcomeDamage } from "../protocol.ts";
 import { resolveDuration } from "../rules/durations.ts";
 import {
   INCAPACITATING_KEYS,
@@ -22,15 +22,16 @@ import { typeUnion } from "./uses.ts";
 import { damageDefenses } from "../rules/damageDefenses.ts";
 import { dealtTypes, rowDamage } from "../rules/typedDamage.ts";
 
-export function actorHp(tx: Tx, op: OpOf<"actor.hp">): void {
+/** Save choices come only from the DM's outcome, never from a player's HP change. */
+export function actorHp(tx: Tx, op: OpOf<"actor.hp">, context?: Omit<OutcomeDamage, "parts">): void {
   const resolved = tx.resolveActor(op.target);
   const settings = tx.state.meta.settings;
   const revivesDead = healRevivesDead(settings, tx.env.opVersion);
   let c = op.change;
   if (c.kind === "damage" && c.parts !== undefined) {
-    const dealt = rowDamage(c.parts, "fail", {
-      onPass: "none", dexSave: false,
-      row: { defenses: damageDefenses(tx.state, resolved.actor, resolved.character), qualifiedOn: new Set(), evasion: false, effects: resolved.actor.effects },
+    const dealt = rowDamage(c.parts, context?.save?.result ?? "fail", {
+      onPass: context?.save?.onPass ?? "none", dexSave: context?.save?.dex ?? false,
+      row: { defenses: damageDefenses(tx.state, resolved.actor, resolved.character), qualifiedOn: new Set(context?.qualifiedOn), evasion: context?.save?.evasion ?? false, effects: resolved.actor.effects },
     });
     c = { ...c, amount: Math.min(100_000, dealt.amount), types: dealtTypes(c.parts, dealt.byPart) };
   }

@@ -157,6 +157,7 @@ export function reads(op: Op, state: RoomState): Reads {
     case "actor.damageMany":
       return of(op.hits.map((hit) => holderRead(state, hit.target, ["hp", "life", "effects"])));
     case "actor.outcome": {
+      if (op.targets.some((item) => item.damage !== undefined)) return NEVER;
       const r: Read[] = [];
       for (const item of op.targets) {
         r.push(holderRead(state, item.target, ["hp", "life", "effects", "legendary", "deathSaves"]));

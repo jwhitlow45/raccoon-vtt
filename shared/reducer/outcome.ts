@@ -46,6 +46,7 @@ export function actorOutcome(tx: Tx, op: OpOf<"actor.outcome">): void {
     }
     for (const effectId of item.remove ?? []) effectRemove(tx, { t: "actor.effect.remove", target: item.target, effectId });
     if (item.amount !== undefined) actorHp(tx, { t: "actor.hp", target: item.target, change: { kind: "damage", amount: item.amount, ...(item.types ? { types: item.types } : {}) } });
+    if (item.damage) actorHp(tx, { t: "actor.hp", target: item.target, change: { kind: "damage", amount: item.damage.parts.reduce((sum, part) => sum + part.amount, 0), parts: item.damage.parts } }, item.damage);
     for (const effect of item.effects ?? []) effectAdd(tx, { t: "actor.effect.add", target: item.target, effect });
   }
 }
