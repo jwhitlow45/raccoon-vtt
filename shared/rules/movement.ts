@@ -1658,6 +1658,29 @@ function hexLanding(t: HexWalls, token: Walker, to: LegEnd, mode: DropMode): Lan
   return { x: token.x, y: token.y, squeeze: isSqueezed(token), stopped };
 }
 
+/**
+ * Where a walk on hexes toward `to` stops full size, for a creature that is
+ * stored full size wherever it stops, as one a holder drags beside it
+ * (moveLeg.ts stoppedAtWalls): `to` when the leg there is allowed, else
+ * the last stand of the full-size leg's hex line before what stops it
+ * where the full footprint fits and the leg from where the walk starts is
+ * allowed, as `hexLanding` walks back but never squeezed, and the start
+ * when none is. Null off a hex scene.
+ */
+export function hexFullStop(state: BuildState, token: Walker, to: LegEnd): Point | null {
+  const t = hexWallsOf(state, token, to.elevation);
+  if (!t) return null;
+  const start = hexStartStand(t.g, token);
+  const leg = hexLegOf(t.g, start, hexStandAt(t.g, token, to, false));
+  const stop = hexLegStop(t, leg);
+  if (!stop) return { x: to.x, y: to.y };
+  for (let k = stop.step; k > 0; k--) {
+    const s = hexLegStand(leg, k);
+    if (!s.squeezed && hexFitWall(t, s) < 0 && hexLegStop(t, hexLegOf(t.g, start, s)) === null) return hexStandPlace(t.g, token, s);
+  }
+  return { x: token.x, y: token.y };
+}
+
 function dist2(a: Point, b: Point): number {
   return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
 }

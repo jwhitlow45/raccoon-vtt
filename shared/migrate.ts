@@ -908,10 +908,12 @@ export const opMigrations: MigrationStep[] = [
     // a walk. A creature a holder drags beside it on hexes meets the walls
     // full size, as it is stored, where a point of its walk lies on its
     // squeezed anchors (`draggedWalkFull`, D-261029-171), which the reducer
-    // reads where it stops one players cannot see. Older ops replay by the
-    // rules they were written under, where every such side stopped the walk
-    // and such a point read squeezed, so they put each token where they put
-    // it then, and a stored restore's hash guards still match.
+    // reads where it stops one players cannot see. A blocked hex leg ends
+    // at its last reachable full-size stand. Squares keep the drop's
+    // landing, including a squeezed stop, at every version. Older ops replay
+    // by the rules they were written under, where every such side stopped
+    // the walk and such a point read squeezed, so they put each token where
+    // they put it then, and a stored restore's hash guards still match.
     //
     // Deploy: back up the database just before. The first op after it is
     // stored at version 32, and the shutdown writes version 29 snapshots,
@@ -1291,9 +1293,10 @@ export function holderLedgesOnHexes(opVersion: number | undefined): boolean {
  * Whether a creature its holder drags beside it on hexes meets the walls
  * full size at each point of its walk, as it is stored wherever it stops
  * (D-261029-171, moveLeg.ts stoppedAtWalls), and stops only where it stands
- * full size. Ops stored before version 32 read a point on its squeezed
- * anchors as squeezed, so it walked where only its squeezed hexes fit and
- * was stored full size there, and replay so. Live ops carry no stored
+ * full size. Squares keep the drop's landing at every version. Ops stored
+ * before version 32 read a point on its squeezed anchors as squeezed, so
+ * it walked where only its squeezed hexes fit and was stored full size
+ * there, and replay so. Live ops carry no stored
  * version and take today's rule.
  */
 export function draggedWalkFull(opVersion: number | undefined): boolean {

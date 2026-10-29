@@ -3,7 +3,8 @@ import { describe, test } from "node:test";
 import type { RoomState, Token } from "../model.ts";
 import { canApply } from "../permissions.ts";
 import type { OpOf } from "../protocol.ts";
-import { P1 } from "../testutil.ts";
+import { wall } from "../discoveryTestutil.ts";
+import { P1, room, scene, token } from "../testutil.ts";
 import { occupiedHexes } from "./footprint.ts";
 import { hexKey, type Hex, type HexGrid } from "./hex.ts";
 import { findRouteOn } from "./hexWalk.ts";
@@ -71,8 +72,38 @@ for (const [name, g] of [
         const ogre = planMove(op, s, P1, opVersion === undefined ? {} : { opVersion }).find((m) => m.tokenId === "ogre")!;
         return occupiedHexes(g, { ...s.tokens.ogre!, ...ogre.to });
       };
-      for (const v of [undefined, 32]) assert.ok(end(v).every((h) => !solid(h)), `${v}: ${end(v).map(hexKey).join(" ")} clear of the rock`);
+      // Dropping the squeezed landing used to discard this whole piece, stopping two hexes short of the mouth.
+      const mouth = [at(5, 6), at(5, 7), at(4, 7)];
+      for (const v of [undefined, 32]) assert.deepEqual(end(v), mouth, `${v}: at the corridor's mouth`);
       assert.ok(end(31).some(solid), `31: ${end(31).map(hexKey).join(" ")} in the rock`);
     });
   });
 }
+
+describe("squares: a Large ogre no player sees, dragged toward a corridor one square wide", () => {
+  test("keeps the drop's landing where its leg is stopped, at every op version, as its core walks the corridor (review FU37-OPUS-3)", () => {
+    const s = room({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
+    s.buildChunks = {};
+    // Rock from x 8 to 16 but for row 10, each wall at most 8 squares long.
+    const runs: [[number, number], [number, number]][] = [
+      ...[8, 16].flatMap((x): [[number, number], [number, number]][] => [[[x, 0], [x, 5]], [[x, 5], [x, 10]], [[x, 11], [x, 15.5]], [[x, 15.5], [x, 20]]]),
+      [[8, 10], [16, 10]],
+      [[8, 11], [16, 11]],
+    ];
+    runs.forEach(([a, b], i) => wall(s, `fu37fa${String(i).padStart(6, "0")}`, a, b));
+    s.tokens.horse = token("horse", { size: "large", x: 3, y: 9, name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
+    // Half a square off the grid, so its stopped leg lands on a squeezed shift in the corridor.
+    s.tokens.ogre = token("ogre", { size: "large", x: 1, y: 8.5, name: "Ogre", kind: "npc", ownerIds: [], visibility: "dm", attached: { to: "horse", kind: "drag" } });
+    const to = { x: 11.5, y: 9.5 };
+    const found = findRouteOn({ ...groupWalkWorld(s, ownWalk(s.tokens.horse), { role: "player" }).input, towed: [] }, to);
+    assert.ok(found && found !== "none", "a way in for the horse alone");
+    const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", ...to, squeeze: true, route: found.pieces.map(([x, y, extra, swim]): [number, number, number, 0 | 1] => [x, y, extra, swim]) };
+    assert.ok(canApply(op, P1, s, { canUseAsset: () => true }).ok);
+    const walk = (opVersion?: number) => planMove(op, s, P1, opVersion === undefined ? {} : { opVersion }).find((m) => m.tokenId === "ogre")!.route.map((p) => [p.x, p.y]);
+    const old = walk(31);
+    assert.equal(old.length, found.pieces.length + 1, "its last piece is stopped and lands on the way");
+    assert.deepEqual(old.at(-1), [9.5, 9.5], "the stopped piece keeps its squeezed landing");
+    assert.deepEqual(walk(32), old, "op 32");
+    assert.deepEqual(walk(), old, "live");
+  });
+});

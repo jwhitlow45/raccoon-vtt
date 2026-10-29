@@ -7,7 +7,7 @@ import { carriedGroup, moveGroups, onHolder, publicMembers, seatedAt, walkerFor,
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid } from "./grid.ts";
 import { footing } from "./heights.ts";
-import { groundUnder, landing, storedBuild } from "./movement.ts";
+import { groundUnder, hexFullStop, landing, storedBuild } from "./movement.ts";
 import { followerTrace, pieceReach, routeWalkers, walkSqueezes, type RoutePoint, type WalkTrace } from "./route.ts";
 
 /**
@@ -279,10 +279,14 @@ export function checkSetReach(before: RoomState, token: Pick<Token, "id" | "scen
  * walls stop moves (4.2): its own offset walk up to its first piece the
  * leg test stops, which it ends at the last clear spot of, as a lone
  * token's drop lands (design 9.8), on its own ground there. It is stored
- * full size wherever it stops (reducer/tokens.ts carriedAlong), so from op
- * version 32 each piece ends full size, never squeezed where it lies on a
- * squeeze's anchors, and a spot it could stand on only squeezed is no
- * stop (migrate.ts draggedWalkFull).
+ * full size wherever it stops (reducer/tokens.ts carriedAlong), so on hexes
+ * from op version 32 each piece ends full size, never squeezed where it
+ * lies on a squeeze's anchors, and a stopped piece ends at the last stand
+ * of its line where it stands full size (movement.ts hexFullStop,
+ * migrate.ts draggedWalkFull). On squares its walk is judged by its core,
+ * which a corridor one square wide lets through, so it keeps the drop's
+ * landing at every op version: refusing only a stopped walk's squeezed
+ * landing there would part it from the walk that is not stopped.
  */
 function stoppedAtWalls(before: RoomState, member: Token, route: RoutePoint[], holderRoute: readonly RoutePoint[], elevationAt: (x: number, y: number, holderElevation: number) => number, env: Versioned): RoutePoint[] {
   const scene = before.scenes[member.sceneId];
@@ -291,15 +295,15 @@ function stoppedAtWalls(before: RoomState, member: Token, route: RoutePoint[], h
   const build = storedBuild(before, env.opVersion);
   // A creature a holder drags beside it walks as itself, since a drag is no seat (route.ts followerTrace).
   const trace = followerTrace(member, route);
-  const full = draggedWalkFull(env.opVersion);
+  const full = draggedWalkFull(env.opVersion) && isHex(sceneGrid(scene));
   for (let i = 1; i < route.length; i++) {
     const a = route[i - 1]!;
     const b = full ? { ...route[i]!, squeeze: false } : route[i]!;
     const at = trace[i - 1]!;
     if (movementRules.legBlocker(build, at, b) === null) continue;
-    const stop = landing(build, at, b, "walk");
+    const stop = (full ? hexFullStop(build, at, b) : null) ?? landing(build, at, b, "walk");
     const kept = route.slice(0, i);
-    if ((stop.x !== a.x || stop.y !== a.y) && !(full && stop.squeeze)) kept.push({ x: stop.x, y: stop.y, elevation: elevationAt(stop.x, stop.y, holderRoute[i - 1]!.elevation) });
+    if (stop.x !== a.x || stop.y !== a.y) kept.push({ x: stop.x, y: stop.y, elevation: elevationAt(stop.x, stop.y, holderRoute[i - 1]!.elevation) });
     return kept;
   }
   return route;
