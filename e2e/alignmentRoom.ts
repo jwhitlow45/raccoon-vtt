@@ -3955,7 +3955,7 @@ async function viewScene(panel: Locator, sceneId: string): Promise<void> {
 /*
  * ms2-a: the scene settings page (docs/design-v1-map-discovery.md 8.4 and
  * 9), and every other page that shows the shared radio cards
- * (features/dm/controls.tsx RadioGroup), at FU30_AT's sizes. The page on
+ * (components/RadioCards.tsx), at FU30_AT's sizes. The page on
  * the players' scene as it opens, which starts the groups as 8.4 says,
  * with every group folded and with every group open, its map image's
  * question asked, then a map scene with two phases, one in edit. Then Room

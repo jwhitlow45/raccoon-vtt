@@ -917,7 +917,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
             await menu.getByRole("button", { name: /^Room settings/ }).click();
             const newScenes = page.getByRole("group", { name: "Players see on new scenes" });
             await newScenes.waitFor();
-            // Room settings' radio cards stand in one block under their name and help (features/dm/controls.tsx RadioGroup), so the whole group is held to the checks.
+            // Room settings' radio cards stand in one block under their name and help (components/RadioCards.tsx), so the whole group is held to the checks.
             await measure("room-new-scenes", newScenes.locator("xpath=ancestor::section[1]"));
           } finally {
             await context.close();
