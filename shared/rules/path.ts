@@ -1,10 +1,10 @@
 import type { Encounter, PathStop, Token, TokenPath, TurnStart } from "../model.ts";
 import { MAX_PATH_CORNERS, MAX_PATH_STOPS } from "../protocol.ts";
 import type { DiagonalCounter, DistanceSettings } from "./distance.ts";
-import { occupiedHexes, type PlacedToken } from "./footprint.ts";
+import { footprintSize, isSqueezed, occupiedHexes, snapStep, type PlacedToken } from "./footprint.ts";
 import type { Grid } from "./grid.ts";
 import { hexSubcells, type HexGrid } from "./hex.ts";
-import { hexPiece, hexPieceSpots, legSteps, routeLattice, spotRect, standingAt, straightCost, type LegCost, type SizedSpot } from "./route.ts";
+import { hexPiece, hexPieceSpots, hexRouteFeet, legSteps, routeFeet, routeLattice, spotRect, standingAt, straightCost, type LegCost, type SizedSpot } from "./route.ts";
 
 /**
  * A creature's path on its turn (features section 4, design 6): the rules
@@ -349,10 +349,22 @@ export function publicCounters(g: Grid, token: PlacedToken, stops: readonly Path
 
 /**
  * What a leg takes read from its geometry alone, its stops and corners, as
- * players who do not own the creature read it (7.3): each straight part by
- * `straightCost`, the 5-10-5 count running on from `counter` (read only).
+ * players who do not own the creature read it (7.3). A route at one size
+ * uses its lattice and rounds once. A straight leg or one joined across
+ * a resize reads each part by `straightCost`. The 5-10-5 count runs on
+ * from `counter` (read only).
  */
 export function legGeometry(g: Grid, token: PlacedToken, from: PathStop, to: PathStop, rules: DistanceSettings, counter: DiagonalCounter): LegCost {
+  if (to.via?.length && oneSize(from, to, footprintSize(token))) {
+    // A route's corners do not inherit its final squeeze. Hex anchors identify each stand, while square routes count
+    // their half-cell coordinates without snapping a corner to the final footprint. Round once for the whole route.
+    const points = [from, ...legParts(from, to).map(([, b]) => b)];
+    const start = standingAt(token, from);
+    const pieces = points.slice(1).map(() => ({ extra: 0, swim: 0 as const }));
+    return g.shape === "hex"
+      ? hexRouteFeet(g, start, points, isSqueezed(standingAt(token, to)), pieces, rules, counter, { swimSpeed: false })
+      : routeFeet(points, pieces, rules, counter, { swimSpeed: false, step: snapStep(start) });
+  }
   const running = { ...counter };
   let moved = 0;
   for (const [a, b] of legParts(from, to)) {

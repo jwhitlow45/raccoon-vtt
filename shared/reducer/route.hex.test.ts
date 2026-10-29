@@ -8,6 +8,7 @@ import { hexCenter, hexNeighbors, type Hex } from "../rules/hex.ts";
 import { findRouteOn } from "../rules/hexWalk.ts";
 import { hexStandAt, hexStandPlace, onSqueezedLattice, ownWalk } from "../rules/movement.ts";
 import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "../rules/hexWalls.testkit.ts";
+import { legGeometry } from "../rules/path.ts";
 import { DM, env, template } from "../testutil.ts";
 
 /**
@@ -75,6 +76,9 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       assert.equal(state.tokens.ogre!.squeeze, true);
       const stop = state.tokens.ogre!.path!.stops.at(-1) as PathStop;
       assert.ok(stop.cost! > stop.moved!);
+      const moved = state.tokens.ogre!;
+      const start = moved.path!.stops[0]!;
+      assert.equal(legGeometry(g, moved, start, stop, state.meta.settings, { h: 0, v: 0 }).moved, stop.moved, "a non-owner reads the same moved feet from the stored route");
     });
 
     test("an area in the corridor is met along the route's hex lines", () => {

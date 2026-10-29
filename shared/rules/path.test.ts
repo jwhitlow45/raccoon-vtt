@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { PathStop } from "../model.ts";
+import { stopFootprint } from "./footprint.ts";
+import { COLUMNS, ROWS } from "./hexWalls.testkit.ts";
+import { SQUARES } from "./grid.ts";
+import { hexStandPlace } from "./movement.ts";
+import { hexRouteFeet, routeFeet } from "./route.ts";
 import { MAX_PATH_STOPS } from "../protocol.ts";
-import { oneSize, reshapeLeg, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts";
+import { legGeometry, oneSize, publicCounters, reshapeLeg, stopsForNonOwners, stopsForOwners, withStop } from "./path.ts";
 
 /**
  * A path's stops each keep the size the creature had there
@@ -91,5 +96,51 @@ describe("a full path keeps its legs at one size (withStop)", () => {
     const kept = withStop({ turn: 1, stops: stops.slice(0, 50) }, stops[50]!).stops;
     assert.equal(kept.length, MAX_PATH_STOPS);
     assert.deepEqual(kept.slice(0, 3), [at(0, MEDIUM), at(2, large), at(3, large)], "the move at x 1 and the resize at x 2 joined, counted, at the resize's size");
+  });
+});
+
+
+describe("a visible route's corners keep their own stand (LP26-RIDE-1)", () => {
+  const rules = { feetPerCell: 5, diagonal: "fiveTen" as const };
+  const zero = { h: 0, v: 0 };
+
+  for (const g of [ROWS, COLUMNS]) for (const [size, small] of [["large", "medium"], ["huge", "large"]] as const) {
+    test(`${g.orient}, ${size}: into and out of a squeeze, the displayed feet equal the stored route's feet`, () => {
+      const point = (col: number, row: number, squeeze: boolean) => ({
+        size,
+        ...hexStandPlace(g, { size, x: 0, y: 0 }, { size: squeeze ? small : size, ref: g.orient === "rows" ? { col, row } : { col: row, row: col }, squeezed: squeeze }),
+        elevation: 0,
+        ...(squeeze ? { squeeze: true as const } : {}),
+      });
+      const inward = [point(8, 7, false), point(11, 9, false), point(16, 9, true)];
+      const through = [...inward, point(18, 10, true), point(20, 11, false)];
+      const bent = [point(2, 2, false), point(4, 4, false), point(3, 4, true)];
+      const back = [point(2, 2, false), point(4, 4, false), point(3, 3, true)];
+      for (const points of [inward, inward.toReversed(), through, through.toReversed(), bent, bent.toReversed(), back, back.toReversed()]) {
+        const start = points[0]!;
+        const token = points.at(-1)!;
+        const from: PathStop = { ...start, footprint: stopFootprint(start), seen: true };
+        const to: PathStop = { x: token.x, y: token.y, elevation: token.elevation, via: points.slice(1, -1).flatMap((p) => [p.x, p.y]), routeSeen: true, seen: true };
+        const stored = hexRouteFeet(g, start, points, token.squeeze === true, points.slice(1).map(() => ({ extra: 1, swim: 0 as const })), rules, zero, { swimSpeed: false });
+        const displayed = legGeometry(g, token, from, to, rules, zero);
+        assert.equal(displayed.moved, stored.moved);
+        assert.equal(displayed.cost, stored.moved, "the public geometry reveals no extra cost");
+        if (points === inward) assert.equal(displayed.moved, 45, "the reported mount walk");
+        assert.deepEqual(publicCounters(g, token, [from, to], rules, true), { h: stored.diag[0], v: stored.diag[1] });
+      }
+    });
+  }
+
+  test("squares: a Large creature's half-cell corners count where the route walked them", () => {
+    const inward = [{ x: 3, y: 9, elevation: 0 }, { x: 6, y: 9.5, elevation: 0 }, { x: 7.5, y: 9.5, elevation: 0 }, { x: 11.5, y: 9.5, elevation: 0 }];
+    for (const points of [inward, inward.toReversed()]) {
+      const entering = points === inward;
+      const token = { size: "large" as const, ...points.at(-1)!, ...(entering ? { squeeze: true as const } : {}) };
+      const from: PathStop = { ...points[0]!, footprint: { w: 2, h: 2, ...(!entering ? { squeeze: true as const } : {}) }, seen: true };
+      const to: PathStop = { ...points.at(-1)!, via: points.slice(1, -1).flatMap((p) => [p.x, p.y]), seen: true, routeSeen: true };
+      const stored = routeFeet(points, points.slice(1).map(() => ({ extra: 1, swim: 0 as const })), rules, zero, { swimSpeed: false, step: 1 });
+      assert.deepEqual(legGeometry(SQUARES, token, from, to, rules, zero), { ...stored, cost: stored.moved });
+      assert.deepEqual(publicCounters(SQUARES, token, [from, to], rules, true), { h: stored.diag[0], v: stored.diag[1] });
+    }
   });
 });
