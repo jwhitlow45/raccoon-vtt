@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { switchRefusal, type Grid } from "#shared/rules/grid.ts";
 import { useAssets, useRoomActions, useRoomStore } from "../../state/view.ts";
 import { thisDevice } from "../uvtt/limits.ts";
-import type { Calibration } from "./calibrate.ts";
+import type { Calibration, KeptGrid } from "./calibrate.ts";
 import { copyUrls, type GridSearch } from "./findGrid.ts";
 import { FIND_TIMEOUT_MS, findOnScene, landSearch, type GridScene } from "./outcome.ts";
 import { useGridStore } from "./store.ts";
@@ -65,7 +65,7 @@ export function useFindGrid(): (sceneId: string) => void {
  * shows Find the grid's answer (outcome.ts `landSearch`). It has as long
  * as Find the grid has.
  */
-export function useLandLater(): (input: { sceneId: string; start: GridScene; search: GridSearch; fallback: Calibration; ownGrid?: boolean }) => void {
+export function useLandLater(): (input: { sceneId: string; start: GridScene; search: GridSearch; fallback: Calibration; ownGrid?: boolean; kept?: KeptGrid | null }) => void {
   const store = useGridStore();
   const sceneOf = useSceneOf();
   const actions = useRoomActions();

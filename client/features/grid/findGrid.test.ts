@@ -10,7 +10,7 @@ import { jpegOrientation, sniffImage } from "../uvtt/image.ts";
 import { detectGrid, type AxisFit, type GridDetection } from "./detect.ts";
 import { calibrationFromHexFind, canonicalToWorld, FOUND_SNAP, FOUND_SNAP_PX, worldToCanonical, type Calibration, type Point } from "./calibrate.ts";
 import { pickShape, type HexDetection } from "./detectHex.ts";
-import { cameWithGrid, decodeSize, headerSize, HIGH_CONFIDENCE, importSearch, importSearchFrom, findFound, foundGrid, importFound, keptGridHolds, nameGivesSize, offeredLater, offeredOnly, pickedGrid, replacementFound, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
+import { cameWithGrid, decodeSize, headerSize, HIGH_CONFIDENCE, importSearch, importSearchFrom, findFound, foundGrid, importFound, keptGridHolds, nameGivesSize, offeredOnly, pickedGrid, replacementFound, searchGrid, searchOnImport, within, type SearchAnswer, type SearchDone, type SearchRequest, type SearchWorker, type Timers } from "./findGrid.ts";
 import { foundLine, landSearch, showOutcome } from "./outcome.ts";
 import type { GridToolState } from "./store.ts";
 import { rng } from "./synthetic.ts";
@@ -527,17 +527,41 @@ describe("new art of the old image's shape keeps the scene's grid, and a find th
     assert.equal(store.getState().found?.other?.shape, "squares", "the squares said, for Grid shape to bring");
   });
 
+  /** A phone's search of the copy that outlived the wait, landed by Line up grid with the kept grid or without it, answering `answer`, on the scene as `now` has it then. */
+  const landLate = async (answer: SearchDone, withKept: boolean, now: typeof landing = landing) => {
+    const room = gridRoom();
+    const worker = new FakeWorker();
+    const search = searchGrid({ urls: ["/m/mobile"] }, () => worker);
+    const landed = landSearch({ actions: room.actions, store: room.store, sceneId: "s1", start: landing, scene: () => now, search, ms: 30_000, timers: fakeTimers(), fit: true, fallback: kept, ...(withKept ? { kept } : {}) });
+    worker.answer(answer);
+    await landed;
+    return room;
+  };
+
   test("a phone's search that outlives the wait lands only as an offer", async () => {
-    for (const offered of [false, true]) {
-      const { sent, actions, store } = gridRoom();
-      const worker = new FakeWorker();
-      const search = searchGrid({ urls: ["/m/mobile"] }, () => worker);
-      const landed = landSearch({ actions, store, sceneId: "s1", start: landing, scene: () => landing, search: offered ? offeredLater(search) : search, ms: 30_000, timers: fakeTimers(), fit: true, fallback: kept });
-      worker.answer(squaresAt(70, { x: 45, y: 10 }));
-      await landed;
-      assert.equal(store.getState().found?.outcome, offered ? "offered" : "applied");
-      assert.equal(sent.length > 0, !offered);
+    for (const withKept of [false, true]) {
+      const { sent, store } = await landLate(squaresAt(70, { x: 45, y: 10 }), withKept);
+      assert.equal(store.getState().found?.outcome, withKept ? "offered" : "applied");
+      assert.equal(sent.length > 0, !withKept);
     }
+  });
+
+  test("a phone's late find on the kept grid's lines is dropped silently, sure or doubtful, as on time (FU35B-LATE-MATCH)", async () => {
+    for (const confidence of [0.9, 0.45]) {
+      const { sent, store } = await landLate(squaresAt(70.01, { x: 20.4, y: 34.7 }, confidence), true);
+      assert.deepEqual(sent, [], `${confidence}: nothing applied`);
+      assert.equal(store.getState().found, null, `${confidence}: no box, no line`);
+      assert.equal(store.getState().finding, null, `${confidence}: no longer looking`);
+    }
+    // The same lines beside hexes are still said, naming both, as on time.
+    const both = looked(detection(35, { x: 10, y: 17.5 }, 0.7), hexFind("rows", 26, { x: 350, y: 250 }, 0.8), NO_HEX, 700, 500);
+    const { store } = await landLate(both, true);
+    assert.equal(store.getState().found?.outcome, "offered");
+    assert.deepEqual(store.getState().found?.contested, { shape: "hexRows", cellPx: 52 });
+    // On a scene that changed meanwhile, the kept grid's lines are still no find, so nothing says a grid found was not applied. Lines that differ say so.
+    const resized = { ...landing, bounds: { w: 21, h: 14 } };
+    assert.equal((await landLate(squaresAt(70, { x: 20, y: 35 }), true, resized)).store.getState().found, null);
+    assert.equal((await landLate(squaresAt(70, { x: 45, y: 10 }), true, resized)).store.getState().found?.outcome, "changed");
   });
 
   test("a finer or coarser grid on the kept grid's centers is another grid, and offered (review FU35B-ASTRA-01)", () => {

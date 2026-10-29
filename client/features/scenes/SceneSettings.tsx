@@ -19,7 +19,7 @@ import type { ViewKind } from "../../lib/view.ts";
 import { useRoomScope } from "../../state/scope.ts";
 import { useAssets, useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { calibrationFromCounts, fitBounds, imageSquares, sameCalibration } from "../grid/calibrate.ts";
-import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, offeredLater, replacementFound, searchOnImport, type ImportWait } from "../grid/findGrid.ts";
+import { copyUrls, importSearch, IMPORT_WAIT_MS, nameGivesSize, replacementFound, searchOnImport, type ImportWait } from "../grid/findGrid.ts";
 import { showOutcome } from "../grid/outcome.ts";
 import { shapeChanged, useGridStore } from "../grid/store.ts";
 import { useFindGrid, useLandLater, useSwitchRefusal } from "../grid/useFindGrid.ts";
@@ -542,7 +542,7 @@ function MapImageRow(props: { scene: Scene; close: PanelClose }) {
         if (found) {
           const at = { x: next.widthPx / 2, y: next.heightPx / 2 };
           showOutcome({ actions, store: gridStore, scene: landing, found, fit: true, at, fallback, ownGrid, refusal: (to) => refusal(landing, to) });
-        } else if (wait.later) landLater({ sceneId: scene.id, start: landing, search: kept ? offeredLater(wait.later) : wait.later, fallback, ownGrid });
+        } else if (wait.later) landLater({ sceneId: scene.id, start: landing, search: wait.later, fallback, ownGrid, kept });
         ui.setTool("grid");
         props.close({ placing: true });
       }

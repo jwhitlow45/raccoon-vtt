@@ -176,8 +176,17 @@ export function replacementFound(
 ): { found: FoundGrid | null; ownGrid: boolean } {
   const ownGrid = cameWithGrid({ gridFromFile: scene.gridFromFile, map: scene.map ?? { originPx: { x: 0, y: 0 } } });
   const found = findFound(importFound(answer && kept ? offeredOnly(answer) : answer, named, next, scene.gridShape), ownGrid);
-  if (found && kept && !found.contested && keptGridHolds(found, kept, scene.gridShape, next)) return { found: null, ownGrid };
-  return { found, ownGrid };
+  return { found: beside(found, kept, scene.gridShape, next), ownGrid };
+}
+
+/**
+ * A find on art that keeps its scene's grid (`kept`), as `replacementFound`
+ * and a phone's late search (outcome.ts `landSearch`) both take it: none
+ * when it puts its cells where the kept grid has them, unless another
+ * shape contests it.
+ */
+export function beside(found: FoundGrid | null, kept: KeptGrid | null, shape: GridShape | undefined, map: { widthPx: number; heightPx: number }): FoundGrid | null {
+  return found && kept && !found.contested && keptGridHolds(found, kept, shape, map) ? null : found;
 }
 
 /**
@@ -260,17 +269,6 @@ export function offeredOnly(answer: SearchDone): SearchDone {
   const k = OFFERED_MOST / top;
   const scaled = <T extends GridDetection | HexDetection>(d: T): T => (d.found ? { ...d, confidence: d.confidence * k } : d);
   return { ...answer, result: scaled(answer.result), ...(answer.hex ? { hex: { rows: scaled(answer.hex.rows), columns: scaled(answer.hex.columns) } } : {}) };
-}
-
-/**
- * A search whose finds are only offered (`offeredOnly`), for one the page
- * hands to Line up grid on art whose kept grid a find must not replace.
- * Line up grid lands it as any other (outcome.ts `landSearch`). It is
- * already saying "Looking for a grid…" there, so a find that matches the
- * kept grid is shown too, as an offer of the lines the scene stands on.
- */
-export function offeredLater(search: GridSearch): GridSearch {
-  return { result: search.result.then((answer) => answer && offeredOnly(answer)), cancel: () => search.cancel() };
 }
 
 /**

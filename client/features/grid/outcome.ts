@@ -4,9 +4,9 @@ import type { ClientOp } from "#shared/protocol.ts";
 import type { StoreApi } from "zustand/vanilla";
 import { dispatchGesture } from "../../state/actions.ts";
 import type { RoomActions } from "../../state/types.ts";
-import { boxAt, boxAtCell, boxSides, canonicalToWorld, fitBounds, sameCalibration, type CalBox, type Calibration, type Point } from "./calibrate.ts";
+import { boxAt, boxAtCell, boxSides, canonicalToWorld, fitBounds, sameCalibration, type CalBox, type Calibration, type KeptGrid, type Point } from "./calibrate.ts";
 import type { MapShape } from "./detectHex.ts";
-import { cameWithGrid, findFound, pickedGrid, searchGrid, within, type FoundGrid, type GridSearch, type SearchWorker, type Timers } from "./findGrid.ts";
+import { beside, cameWithGrid, findFound, offeredOnly, pickedGrid, searchGrid, within, type FoundGrid, type GridSearch, type SearchWorker, type Timers } from "./findGrid.ts";
 import { endFinding, type Fallback, type FoundNote, type GridToolState } from "./store.ts";
 
 /**
@@ -266,7 +266,10 @@ export async function findOnScene(input: {
  * image with the same grid and size as at `start`, so work done meanwhile,
  * on this device or another, is never overwritten. A grid found and
  * dropped so leaves a note that says the scene changed. On a scene that
- * came with its own grid, a find is only offered.
+ * came with its own grid, a find is only offered. On art that keeps its
+ * scene's grid (`kept`), every find is only offered and one on the kept
+ * grid's lines is none, as on time (findGrid.ts `replacementFound`): it
+ * ends the search with nothing to say, since the scene stands on it.
  */
 export async function landSearch(input: {
   actions: Gesture;
@@ -285,6 +288,8 @@ export async function landSearch(input: {
   fallback?: Calibration;
   /** The scene came with its own grid, when its image before says so and this one cannot (findGrid.ts `replacementFound`). */
   ownGrid?: boolean;
+  /** The grid art of the old image's shape keeps (scenes/create.ts `replacement`). */
+  kept?: KeptGrid | null;
   /** Why the scene, as it is when the answer lands, cannot change to a shape (`showOutcome`'s). */
   refusal?: (scene: GridScene, to: Grid) => string | null;
 }): Promise<void> {
@@ -292,25 +297,32 @@ export async function landSearch(input: {
   store.getState().finding?.cancel();
   const finding = { sceneId: input.sceneId, cancel: input.search.cancel };
   store.setState({ finding, found: null });
-  const answer = await within(input.search, input.ms, input.timers);
+  const searched = await within(input.search, input.ms, input.timers);
   if (store.getState().finding !== finding) return;
   store.setState({ finding: null });
   const scene = input.scene();
   if (!scene) return;
   const state = store.getState();
+  const kept = input.kept ?? null;
+  const answer = searched && kept ? offeredOnly(searched) : searched;
+  const pickedOn = (on: GridScene) => (answer ? pickedGrid(answer, on.map, on.gridShape) : null);
   if (!unchangedSince(input.start, scene)) {
     // Said, or the DM would see "Looking for a grid…" give way to nothing. A search that found no grid on the
     // image before says nothing of this one, so it leaves the line as it was.
-    if (answer && pickedGrid(answer, input.start.map, input.start.gridShape)) store.setState({ found: { sceneId: scene.id, outcome: "changed", cellPx: 0, box: state.box } });
+    if (beside(pickedOn(input.start), kept, input.start.gridShape, input.start.map)) store.setState({ found: { sceneId: scene.id, outcome: "changed", cellPx: 0, box: state.box } });
     return;
   }
+  const picked = pickedOn(scene);
+  const found = beside(picked, kept, scene.gridShape, scene.map);
+  // A find on the kept grid's lines is no find, and not "No grid found" either: the scene stands on it.
+  if (picked && !found) return;
   const ownGrid = input.ownGrid ?? cameWithGrid(scene);
   const { refusal } = input;
   showOutcome({
     actions: input.actions,
     store,
     scene,
-    found: findFound(answer ? pickedGrid(answer, scene.map, scene.gridShape) : null, ownGrid),
+    found: findFound(found, ownGrid),
     fit: input.fit ?? state.fitScene,
     at: middleOf(state.box, scene.map, sceneGrid(scene)),
     ownGrid,

@@ -1019,6 +1019,102 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     assert.deepEqual({ ...after, assetId: applied.assetId }, applied, "the grid stays");
   });
 
+  test("fu37b-1. on a phone, new art of the old image's shape searched past the wait: the kept grid's lines say nothing, and a sure grid that differs is only offered", async () => {
+    // Maps drawn here by code, never art: a 1400 by 1000 field of 70 px squares from (20, 35), then art of its shape three
+    // times as large, past the 4096 px a phone decodes from the file, so a phone searches the server's copy after the upload.
+    const write = async (name: string, seed: number, scale: number, origin: { x: number; y: number }) => {
+      const file = path.join(work, name);
+      const px = drawMap({ width: 1400 * scale, height: 1000 * scale, seed, art: [{ kind: "noise", scale: 60 * scale, amp: 70 }], noise: 4, grid: { cellPx: 70 * scale, origin, opacity: 0.5, width: 2 * scale } });
+      await sharp(Buffer.from(px.data), { raw: { width: px.width, height: px.height, channels: 1 } }).jpeg({ quality: 85 }).toFile(file);
+      return file;
+    };
+    const field = await write("Late field.jpg", 21, 1, { x: 20, y: 35 });
+    // The kept grid three times as large is 210 px squares from (60, 105). The moved art's lines cross at (135, 30) instead.
+    const same = await write("Late same.jpg", 22, 3, { x: 60, y: 105 });
+    const moved = await write("Late moved.jpg", 23, 3, { x: 135, y: 30 });
+    const gridOf = (id: string) => {
+      const map = sceneOf(dmSocket.state, id)?.map;
+      return map ? { assetId: map.assetId, cellPx: Math.round(map.cellPx * 100) / 100, x: Math.round(map.originPx.x), y: Math.round(map.originPx.y) } : null;
+    };
+
+    const known = new Set(Object.keys(dmSocket.state?.scenes ?? {}));
+    await openSideTab(dm, "Scenes");
+    await dm.getByRole("radio", { name: "Map image", exact: true }).click();
+    await dm.getByRole("button", { name: "Choose a map image" }).setInputFiles(field);
+    await dm.getByRole("button", { name: "Upload and create" }).click();
+    const made = await waitFor("the new map scene", () => Object.values(dmSocket.state?.scenes ?? {}).find((s) => s?.map && !known.has(s.id)), 30_000);
+    await dm.getByText("Found a grid of 70 px squares.").first().waitFor({ timeout: 15_000 });
+    await dm.getByRole("button", { name: "Select", exact: true }).click();
+    const fieldGrid = gridOf(made.id)!;
+    assert.deepEqual({ cellPx: fieldGrid.cellPx, x: fieldGrid.x, y: fieldGrid.y }, { cellPx: 70, x: 20, y: 35 });
+
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, storageState: await dmContext.storageState() });
+    const watch = new ConsoleWatch("fu37b-1 phone");
+    try {
+      const phone = await context.newPage();
+      watch.attach(phone);
+      await phone.goto(`${server.origin}/r/${run.roomId}`);
+      await phone.getByRole("status", { name: "Connected" }).first().waitFor();
+      // The server's copy held 3 s, past the import's 2 s wait, as a phone's download and decode of a large map can take.
+      let held = 0;
+      await phone.route(/\/api\/assets\/[^/]+\/mobile$/, async (route) => {
+        held++;
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+        await route.continue();
+      });
+      const options = phone.getByRole("toolbar", { name: "Line up grid options" });
+      const looking = options.getByText("Looking for a grid…");
+      /** The new art drawn, its download held as the search's was, before a picture is taken. */
+      const drawn = () => phone.getByText("Changing the map…").waitFor({ state: "detached", timeout: 30_000 });
+      /** Replaces the scene's image from the Scenes sheet's Map image and grid settings, as the DM's phone does. */
+      const replace = async (file: string) => {
+        await phone.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ }).click();
+        await phone.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Scenes/ }).click();
+        const sheet = phone.locator('dialog[data-rvtt-sheet][aria-label="Scenes"]');
+        await sheet.waitFor();
+        // Each device shows the scene picked on it, so the phone picks the field's from its row.
+        const name = sheet.getByRole("textbox", { name: "Scene name" }).last();
+        if ((await name.inputValue()) !== made.name) {
+          await sheet.getByRole("button", { name: new RegExp(`^${made.name}(?![A-Za-z])`) }).first().click();
+          await waitFor("the field's settings on the phone", async () => ((await name.inputValue()) === made.name ? true : null));
+        }
+        const fold = sheet.getByRole("heading", { name: "Map image and grid", exact: true }).getByRole("button", { name: "Map image and grid", exact: true });
+        if ((await fold.getAttribute("aria-expanded")) === "false") await fold.click();
+        await sheet.getByLabel("Replace map image", { exact: true }).setInputFiles(file);
+        await looking.waitFor({ timeout: 30_000 });
+      };
+
+      // Art on the kept grid's lines: its late find is no find, so Line up grid stops looking and says nothing.
+      await replace(same);
+      const kept = await waitFor("the same art on the scene", () => {
+        const g = gridOf(made.id);
+        return g && g.assetId !== fieldGrid.assetId ? g : null;
+      });
+      assert.deepEqual({ cellPx: kept.cellPx, x: kept.x, y: kept.y }, { cellPx: 210, x: 60, y: 105 }, "the field's grid kept, three times as large");
+      await looking.waitFor({ state: "detached", timeout: 30_000 });
+      assert.ok(held > 0, "the copy was held past the wait");
+      assert.equal(await options.getByText(/^(These lines may be|Found a grid|No grid found)/).count(), 0, "Line up grid said something of the lines the scene stands on");
+      assert.deepEqual(gridOf(made.id), kept, "the grid stays");
+      await drawn();
+      await shots.take(phone, "fu37b-1-late-same-lines");
+
+      // Art whose sure grid differs: offered on the scene's kept grid, never applied.
+      await replace(moved);
+      await options.getByText("These lines may be the map's grid: 210 px squares. Check the box, then Apply.").waitFor({ timeout: 30_000 });
+      const offered = await waitFor("the moved art on the scene", () => {
+        const g = gridOf(made.id);
+        return g && g.assetId !== kept.assetId ? g : null;
+      });
+      assert.deepEqual({ ...offered, assetId: kept.assetId }, kept, "the grid the scene stood on, not the one found");
+      await drawn();
+      await shots.take(phone, "fu37b-1-late-moved-offered");
+    } finally {
+      await context.close();
+    }
+    assert.deepEqual(watch.errors, [], "the phone logged errors");
+    assert.deepEqual(watch.warnings, [], "the phone logged warnings");
+  });
+
   test("8. no page logged an error or a warning", () => {
     for (const c of [dmConsole, playerConsole]) {
       assert.deepEqual(c.errors, [], `${c.label} logged errors`);
