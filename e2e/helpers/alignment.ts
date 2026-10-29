@@ -214,7 +214,8 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   const PICTURE = ["svg", "img", "canvas"];
 
   /** A part of what the eye reads. `start` marks a part set at its line's start, not centered or at the end, the only kind an edge follows. */
-  type Atom = Box & { kind: "text" | "icon" | "box"; what: string; start?: boolean };
+  /** `wrap` is the nearest flex row that wraps holding it, from the measured element down, if any. */
+  type Atom = Box & { kind: "text" | "icon" | "box"; what: string; start?: boolean; wrap?: DomElement | null };
   type Item = { node: DomNode; v: Box; first: Box; box: Box; boxed: boolean; mode: "center" | "start" | "baseline" | "other"; what: string };
 
   const style = (el: DomElement) => win.getComputedStyle(el);
@@ -388,7 +389,12 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
       const cut = { ...a, l: Math.max(a.l, clip.l), r: Math.min(a.r, clip.r), t: Math.max(a.t, clip.t), b: Math.min(a.b, clip.b) };
       if (cut.r - cut.l > 1 && cut.b - cut.t > 1) out.push(cut);
     };
-    const walk = (node: DomElement, clip: Box | null) => {
+    const wraps = (el: DomElement) => {
+      const cs = style(el);
+      return (cs.display === "flex" || cs.display === "inline-flex") && !cs.flexDirection.startsWith("column") && cs.flexWrap === "wrap";
+    };
+    const walk = (node: DomElement, clip: Box | null, outer: DomElement | null) => {
+      const wrap = wraps(node) ? node : outer;
       for (const ch of Array.from(node.childNodes)) {
         if (ch.nodeType === 3) {
           const words = (ch.textContent ?? "").trim();
@@ -399,7 +405,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
           for (const r of Array.from(range.getClientRects())) {
             if (r.width <= 1 || r.height <= 1) continue;
             const lb = lineBox(r, parent);
-            const line: Atom = { kind: "text", l: r.left, r: r.right, t: lb.t, b: lb.b, what: `"${words.slice(0, 32)}"`, start: setAtStart(parent, container) };
+            const line: Atom = { kind: "text", l: r.left, r: r.right, t: lb.t, b: lb.b, what: `"${words.slice(0, 32)}"`, start: setAtStart(parent, container), wrap };
             // A line whose glyphs all show is seen whole, its leading too, though the leading runs past a cut.
             if (clip && r.top >= clip.t - 1 && r.bottom <= clip.b + 1) add(line, null);
             else add(line, clip);
@@ -407,13 +413,13 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
         } else if (isEl(ch)) {
           if (!shown(ch) || (placedApart(ch) && !(placed && style(ch).position === "absolute"))) continue;
           const start = setAtStart(node, container);
-          if (isPicture(ch)) add({ kind: "icon", ...rectOf(ch), what: ch.getAttribute("role") === "img" ? `img "${ch.getAttribute("aria-label") ?? ""}"` : tag(ch), start }, clip);
-          else if (FIELD.includes(tag(ch)) || ch.matches(INTERACTIVE) || paints(ch)) add({ kind: "box", ...rectOf(ch), what: say(ch), start }, clip);
-          else walk(ch, clips(ch) ? cutBy(clip, rectOf(ch)) : clip);
+          if (isPicture(ch)) add({ kind: "icon", ...rectOf(ch), what: ch.getAttribute("role") === "img" ? `img "${ch.getAttribute("aria-label") ?? ""}"` : tag(ch), start, wrap }, clip);
+          else if (FIELD.includes(tag(ch)) || ch.matches(INTERACTIVE) || paints(ch)) add({ kind: "box", ...rectOf(ch), what: say(ch), start, wrap }, clip);
+          else walk(ch, clips(ch) ? cutBy(clip, rectOf(ch)) : clip, wrap);
         }
       }
     };
-    walk(container, clips(container) ? rectOf(container) : null);
+    walk(container, clips(container) ? rectOf(container) : null, null);
     return out;
   }
 
@@ -600,8 +606,17 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
         const atoms = flowing.length ? flowing : atomsOf(el, true);
         if (atoms.length) {
           const stacks = stacksOf(atoms);
-          // Where a stack runs over several lines, the stacks beside it are placed against it by the row check, so the content is centered as one. So is content whose stacks stand on lines of their own, as a group header's short summary wrapped under its name at the row's end, beside the name across but under it.
-          const several = stacks.some((s) => linesOf(s.items).length > 1) || linesOf(stacks.map((s) => s.box)).length > 1;
+          // Where a stack runs over several lines, the stacks beside it are placed against it by the row check, so the content is centered as one.
+          // So is content whose stacks a wrap put on lines of their own, as a group header's short summary wrapped under its name at the row's end:
+          // each later line holds something that wrapped in the same flex row as something on a line above. An icon wholly above or below the
+          // words beside it shares no wrapping row with them, so each is still centered on its own (DP34-OPUS-4).
+          const stackLines = linesOf(stacks.map((s) => ({ ...s.box, s })));
+          const wrapsOn = (k: number) => {
+            const above = new Set(stackLines.slice(0, k).flatMap((ln) => ln.items.flatMap((it) => it.s.items.map((a) => a.wrap))));
+            return stackLines[k]!.items.some((it) => it.s.items.some((a) => a.wrap && above.has(a.wrap)));
+          };
+          const wrapped = stackLines.length > 1 && stackLines.every((_, k) => k === 0 || wrapsOn(k));
+          const several = stacks.some((s) => linesOf(s.items).length > 1) || wrapped;
           const judged = several ? [{ box: union(stacks.map((s) => s.box)), items: atoms }] : stacks;
           for (const s of judged) {
             const off = mid(s.box) - mid(b.inner);

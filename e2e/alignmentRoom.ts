@@ -2623,6 +2623,9 @@ const CASES = `
     <span style="display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; min-width: 0"><span style="flex: none; width: 150px; overflow: hidden; white-space: nowrap; font-size: 16px; font-weight: 700; line-height: 1.2">Save</span><span style="flex: none; width: 40px; margin-left: auto; overflow: hidden; white-space: nowrap; text-align: right; font-size: 13px; line-height: 1.4">None</span></span>
   </button>
 </div>
+<div data-case="icon-over-words">
+  <button style="display: flex; align-items: flex-start; column-gap: 8px; height: 44px; padding: 0 12px; border: none; box-sizing: border-box"><svg width="16" height="16" viewBox="0 0 16 16" style="flex: none; margin-top: 4px"><rect width="16" height="16" fill="#aaa"/></svg><span style="margin-top: 22px; font-size: 13px; line-height: 18px; white-space: nowrap">Attach</span></button>
+</div>
 <div data-case="chips-wrap" style="width: 200px">
   <div role="group" aria-label="On a fail" style="display: flex; flex-wrap: wrap; gap: 4px"><button class="chip">Poisoned</button><button class="chip">Blinded</button><button class="chip">Restrained</button></div>
 </div>
@@ -2746,6 +2749,8 @@ export function helperTest(): void {
       // A group header whose short summary wrapped under its name at the row's end, beside the name across but on a line of its own: one block of two lines, centered as one (DPFIX-MEASURE). Set high, it is caught.
       await passes("summary-under");
       await caught("summary-under-high", "center");
+      // An icon beside its words but wholly above their line, the two centered only as one block: no wrap put them on lines of their own, so each is caught (DP34-OPUS-4).
+      await caught("icon-over-words", "center");
       await passes("chips-wrap");
       await caught("buttons-wrap", "wrap-orphan");
       await passes("buttons-share");
