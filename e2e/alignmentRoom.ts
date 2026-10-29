@@ -245,6 +245,7 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
   "group-save": { phones: 4, wide: 2 },
   "group-save-row": { phones: 4, wide: 2 },
   "fl4-hp-bar": { phones: 6, wide: 6 },
+  "fl4-defense-lines": { phones: 6, wide: 6 },
   "fl4-hp-heal": { phones: 6, wide: 6 },
   "fl4-hp-temp": { phones: 6, wide: 6 },
   "fl4-hp-panel": { phones: 4, wide: 2 },
@@ -851,9 +852,21 @@ async function dmScreens(sweep: Sweep, page: Page, size: Size): Promise<void> {
   const thorn = await selectToken(page, "Thorn", { x: 5, y: 5 });
   if (thorn) {
     await measureWindow(sweep, page, "window-thorn", thorn, headers, false);
-    await thorn.getByLabel("HP change", { exact: true }).fill("28 fire + 14 slashing + 10");
-    await thorn.getByLabel("HP change", { exact: true }).blur();
-    await sweep.measure(page, "fl4-hp-bar", thorn.locator("[data-damage-summary]"));
+    const before = dmSocket.state!.characters[run.ids.thornChar]!;
+    try {
+      // FL-4: differing result widths expose drifting originals, and the two defense lines expose their labels' baselines.
+      await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { stats: { defenses: { fire: "resistant", slashing: "immune" } } } });
+      await thorn.getByLabel("HP change", { exact: true }).fill("28 fire + 14 slashing + 10");
+      await thorn.getByLabel("HP change", { exact: true }).blur();
+      const slip = thorn.locator("[data-damage-summary]");
+      await slip.getByText("Immune: Slashing", { exact: true }).waitFor();
+      await slip.getByText("Resists: Fire", { exact: true }).waitFor();
+      assert.deepEqual(await slip.locator("s").allTextContents(), ["28", "14"]);
+      await sweep.measure(page, "fl4-hp-bar", slip);
+      await sweep.measure(page, "fl4-defense-lines", slip);
+    } finally {
+      await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { stats: before.stats ?? null, ...(!before.stats ? { actor: { initBonus: before.actor.initBonus, passivePerception: before.actor.passivePerception } } : {}) } });
+    }
     for (const [screen, value] of [["fl4-hp-heal", "+5"], ["fl4-hp-temp", "t5"]] as const) {
       await thorn.getByLabel("HP change", { exact: true }).fill(value);
       await thorn.getByLabel("HP change", { exact: true }).blur();

@@ -14,18 +14,19 @@ const mutedLabel = { color: theme.color.textMuted, fontWeight: theme.weight.stro
 /** Icons are CSS masks so the external SVGs inherit the surrounding text color. */
 function DamageIcon({ icon }: { icon: DamageSummaryLines["parts"][number]["icon"] }) {
   return <span aria-hidden data-damage-icon={icon} style={{
-    display: "inline-block", flex: "none", width: "1em", height: "1em", background: "currentColor",
+    display: "inline-block", flex: "none", alignSelf: "center", width: "1em", height: "1em", background: "currentColor",
     maskImage: `url(/icons/damage/${icon}.svg)`, maskRepeat: "no-repeat", maskSize: "contain", maskPosition: "center",
     WebkitMaskImage: `url(/icons/damage/${icon}.svg)`, WebkitMaskRepeat: "no-repeat", WebkitMaskSize: "contain", WebkitMaskPosition: "center",
   }} />;
 }
 
+// The type supplies the inline flex baseline. The centered icon must not set the surrounding text's baseline.
 function DefenseWords({ line, inline = false }: { line: DefenseSummaryLine; inline?: boolean }) {
   return <>
     <span style={mutedLabel}>{line.label}{line.entries.length ? inline ? " " : ": " : ""}</span>
     {line.entries.map((entry, index) => <Fragment key={index}>
       {index > 0 ? ", " : null}
-      {entry.icon ? <span data-damage-defense-entry="" style={{ display: "inline-flex", alignItems: "center", gap: theme.space(1), whiteSpace: "nowrap" }}>
+      {entry.icon ? <span data-damage-defense-entry="" style={{ display: "inline-flex", alignItems: "baseline", gap: theme.space(1), whiteSpace: "nowrap" }}>
         <DamageIcon icon={entry.icon} /><span data-damage-text="">{entry.text}</span>
       </span> : entry.text}
       {entry.qualifier ? ` ${entry.qualifier}` : null}
@@ -38,6 +39,8 @@ export function DamageSummary(props: Props) {
   const summary = "summary" in props ? props.summary : null;
   const kind = "change" in props ? props.change.kind : "damage";
   const suffix = props.suffix ?? "";
+  const hasOriginals = summary?.parts.some((part) => part.original !== undefined) ?? false;
+  const resultColumn = hasOriginals ? 4 : 3;
   return (
     <div data-damage-summary="" data-hp-preview={kind} style={{
       display: "grid", gap: theme.space(1), width: "100%", minWidth: 0, boxSizing: "border-box",
@@ -46,14 +49,17 @@ export function DamageSummary(props: Props) {
       fontSize: theme.font.small, lineHeight: theme.leading.body, color: theme.color.text,
     }}>
       {summary ? <>
-        <div role="list" aria-label="Damage parts" style={{ display: "grid", gridTemplateColumns: "1ch 1em max-content minmax(0, 1fr)", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
+        <div role="list" aria-label="Damage parts" style={{ display: "grid", gridTemplateColumns: hasOriginals ? "1ch 1em max-content max-content minmax(0, 1fr)" : "1ch 1em max-content minmax(0, 1fr)", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
           {summary.parts.map((part, index) => (
-            // Contents keeps every row in the same grid so a wider original never moves another row's result.
+            // Both amounts share columns across rows, even when an unchanged part has no original.
             <div key={index} role="listitem" data-damage-part="" style={{ display: "contents" }}>
               <span aria-hidden data-damage-gutter="" style={{ width: "1ch", color: theme.color.textMuted }}>{part.gutter ? `${part.gutter} ` : ""}</span>
               <DamageIcon icon={part.icon} />
+              {hasOriginals ? <span data-damage-original="" style={{ textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                {part.original !== undefined ? <><s aria-hidden style={{ color: theme.color.textMuted }}>{part.original}</s>{" "}</> : null}
+              </span> : null}
               <span data-damage-amount="" style={{ textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                {part.original !== undefined ? <><s aria-hidden style={{ color: theme.color.textMuted }}>{part.original}</s>{" "}<span style={VISUALLY_HIDDEN}>{`was ${part.original}, now `}</span></> : null}
+                {part.original !== undefined ? <span style={VISUALLY_HIDDEN}>{`was ${part.original}, now `}</span> : null}
                 <span data-damage-result="" style={{ fontWeight: theme.weight.strong }}>{part.amount}</span>{" "}
               </span>
               <span data-damage-text="" style={{ minWidth: 0, overflowWrap: "anywhere" }}>{`${part.label}${summary.parts.length === 1 ? suffix : ""}`}</span>
@@ -62,7 +68,7 @@ export function DamageSummary(props: Props) {
           {summary.total !== undefined ? <div role="listitem" data-damage-total="" style={{ display: "contents" }}>
             <span aria-hidden data-damage-total-rule="" style={{ gridColumn: "3 / -1", borderTop: `${theme.line.border}px solid ${theme.color.border}` }} />
             <span aria-hidden style={{ gridColumn: 1, color: theme.color.textMuted }}>{"= "}</span>
-            <span data-damage-amount="" style={{ gridColumn: 3, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+            <span data-damage-amount="" style={{ gridColumn: resultColumn, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
               <span data-damage-result="" style={{ fontWeight: theme.weight.bold }}>{summary.total}</span>{" "}
             </span>
             <span data-damage-text="" style={{ minWidth: 0, overflowWrap: "anywhere" }}>{`damage${suffix}`}</span>

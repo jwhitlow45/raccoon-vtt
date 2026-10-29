@@ -17,7 +17,7 @@ test("FL-4 design: damage uses a raised outlined slip, a danger stripe and share
     `border:${theme.line.border}px solid ${theme.color.border}`, `border-radius:${theme.radius.sm}px`,
     `padding:${theme.space(2)}px`, `gap:${theme.space(1)}px`, "width:100%", "box-sizing:border-box",
   ]) assert.ok(markup.includes(style), style);
-  assert.match(markup, /grid-template-columns:1ch 1em max-content minmax\(0, 1fr\)/);
+  assert.match(markup, /grid-template-columns:1ch 1em max-content max-content minmax\(0, 1fr\)/);
   assert.match(markup, /data-damage-result=""[^>]*font-weight:600[^>]*>14<\/span>/);
   assert.match(markup, /data-damage-amount=""[^>]*text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums/);
   assert.match(markup, /data-damage-total-rule=""[^>]*grid-column:3 \/ -1;border-top:1px solid/);
@@ -51,7 +51,7 @@ test("FL-4 design: defenses have their own rule, muted labels, icons and qualifi
   assert.equal((markup.match(/data-damage-defense-entry=/g) ?? []).length, 2);
   assert.equal((markup.match(/data-damage-icon=/g) ?? []).length, 3);
   for (const icon of ["fire", "cold"]) assert.ok(markup.includes(`data-damage-icon="${icon}"`));
-  assert.match(markup, /data-damage-defense-entry=""[^>]*display:inline-flex;align-items:center/);
+  assert.match(markup, /data-damage-defense-entry=""[^>]*display:inline-flex;align-items:baseline/);
   assert.match(text(markup), /Resists: Fire from Spells, Cold/);
   assert.match(text(markup), /Saved: half/);
   assert.doesNotMatch(markup, /<s /);
@@ -72,5 +72,27 @@ test("FL-4 design: healing, temporary HP and set previews use the same slip with
     assert.ok(markup.includes(`background:${theme.color.surfaceRaised}`));
     assert.equal(text(markup), `${words}, to each of 2`);
     assert.doesNotMatch(markup, /data-damage-defenses|data-damage-part=/);
+  }
+});
+
+test("FL-4 alignment: originals have their own column beside differently sized results", () => {
+  const markup = draw(damageSummary([{ amount: 28, type: "fire" }, { amount: 14, type: "slashing" }, { amount: 10 }], { result: { amount: 24, byPart: [14, 0, 10], notes: [] } }));
+  assert.match(markup, /grid-template-columns:1ch 1em max-content max-content minmax\(0, 1fr\)/);
+  assert.equal((markup.match(/data-damage-original=/g) ?? []).length, 3);
+  assert.match(markup, /data-damage-original=""[^>]*text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums[^>]*><s aria-hidden="true"[^>]*>28<\/s>/);
+  assert.match(markup, /data-damage-original=""[^>]*><s aria-hidden="true"[^>]*>14<\/s>/);
+  assert.match(markup, /data-damage-amount=""[^>]*grid-column:4/);
+  assert.doesNotMatch(markup, /data-damage-amount=""[^>]*><s /);
+  assert.match(text(markup), /was 28, now 14 Fire damage/);
+  assert.doesNotMatch(draw(damageSummary([{ amount: 7 }])), /data-damage-original=/);
+});
+
+test("FL-4 alignment: defense values share the label's text baseline while icons stay centered", () => {
+  const line = { label: "Resists" as const, entries: [{ icon: "fire" as const, text: "Fire" }] };
+  for (const extra of [{ defenses: [line] }, { targets: [{ name: "Bog Thing", amount: 14, defenses: [line] }] }]) {
+    const markup = draw({ ...damageSummary([{ amount: 28, type: "fire" }]), ...extra });
+    assert.match(markup, /data-damage-defense-entry=""[^>]*display:inline-flex;align-items:baseline/);
+    assert.match(markup, /data-damage-icon="fire"[^>]*align-self:center/);
+    assert.match(text(markup), /Resists:? Fire/);
   }
 });
