@@ -4,12 +4,13 @@ import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
 import { LIMITS } from "#shared/limits.ts";
 import type { CellRect, Token, Trap, TrapRig } from "#shared/model.ts";
+import { applyOp } from "#shared/reducer.ts";
 import { canApply } from "#shared/permissions.ts";
 import { occupiedHexes, placedOnHex } from "#shared/rules/footprint.ts";
-import { cornerAt, hexAt, hexCorners, hexInScene, hexKey, hexLine, sceneHexSpan, type Hex, type HexGrid } from "#shared/rules/hex.ts";
+import { cornerAt, hexAt, hexCenter, hexCorners, hexInScene, hexKey, hexLine, sceneHexSpan, type Hex, type HexGrid } from "#shared/rules/hex.ts";
 import { hexStandPlace } from "#shared/rules/movement.ts";
 import { planTrapMove, type TrapRoom } from "#shared/rules/traps.ts";
-import { DM, P1, int, rng, room, scene, token } from "#shared/testutil.ts";
+import { DM, P1, env, int, rng, room, scene, token } from "#shared/testutil.ts";
 import { crossedTraps, newTrapInput, rectBetween, START_BLANK, tapRect, tokensOn, trapAt, wireBetween, wireEnd, zoneBox, hitsSummary } from "./rules.ts";
 import { zoneKinds } from "./store.ts";
 
@@ -78,6 +79,44 @@ describe("drawing a zone of hexes", () => {
       }
     }
     assert.deepEqual(tapRect(ROWS, { x: 0.5, y: 0.5 }, "hidden-pit", "1-4", { w: 2, h: 4 }), { x: 0, y: 0, w: 1, h: 2 });
+  });
+
+  test("a drag reaching the long row's last hex keeps that row instead of dropping the last column (H2-OPUS-06)", () => {
+    for (const g of GRIDS) {
+      const bounds = { w: 4, h: 4 };
+      const key = (along: number, across: number) => g.orient === "rows" ? { col: along, row: across } : { col: across, row: along };
+      const short = hexCenter(g, key(1, 1));
+      const edge = hexCenter(g, key(3, 2));
+      assert.deepEqual(rectBetween(g, short, edge, bounds), g.orient === "rows" ? { x: 1, y: 2, w: 3, h: 1 } : { x: 2, y: 1, w: 1, h: 3 }, "a drag from a short line reaches the last hex of its ending line");
+      const a = hexCenter(g, key(3, 0));
+      const b = hexCenter(g, key(1, 2));
+      for (const [start, end] of [[a, b], [b, a]] as const) {
+        const rect = rectBetween(g, start, end, bounds);
+        assert.deepEqual(rect, g.orient === "rows" ? { x: 1, y: start === a ? 0 : 2, w: 3, h: 1 } : { x: start === a ? 0 : 2, y: 1, w: 1, h: 3 });
+        const s = room({ scenes: { s1: scene("s1", { gridShape: g.orient === "rows" ? "hexRows" : "hexColumns", bounds }) } });
+        const trap = newTrapInput({ grid: g, id: "edge", sceneId: "s1", start: START_BLANK, band: "1-4", zone: { cells: [rect] }, chunks: {} });
+        assert.ok(canApply({ t: "trap.create", trap }, DM, s, { canUseAsset: () => true }).ok);
+        assert.ok(applyOp(s, { t: "trap.create", trap }, DM, env(1)).ok);
+      }
+    }
+  });
+
+  test("a preset on a one-hex-wide scene shrinks across empty staggered rows (H2-ASTRA-07)", () => {
+    for (const g of GRIDS) {
+      const bounds = g.orient === "rows" ? { w: 1, h: 4 } : { w: 4, h: 1 };
+      for (const across of [0, 1, 2, 3]) {
+        const at = hexCenter(g, g.orient === "rows" ? { col: 0, row: across } : { col: across, row: 0 });
+        for (const start of [START_BLANK, "hidden-pit"]) {
+          const rect = tapRect(g, at, start, "1-4", bounds);
+          assert.equal(rect.w * rect.h, 1);
+          assert.ok(hexInScene(g, bounds, { col: rect.x, row: rect.y }));
+          const s = room({ scenes: { s1: scene("s1", { gridShape: g.orient === "rows" ? "hexRows" : "hexColumns", bounds }) } });
+          const trap = newTrapInput({ grid: g, id: "narrow", sceneId: "s1", start, band: "1-4", zone: { cells: [rect] }, chunks: {} });
+          assert.ok(canApply({ t: "trap.create", trap }, DM, s, { canUseAsset: () => true }).ok);
+          assert.ok(applyOp(s, { t: "trap.create", trap }, DM, env(1)).ok);
+        }
+      }
+    }
   });
 
   test("a tap places one hex, or a preset's own size, on the hex tapped", () => {

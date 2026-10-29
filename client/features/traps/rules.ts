@@ -74,7 +74,7 @@ export function rectBetween(g: Grid, a: Point, b: Point, bounds: Bounds): CellRe
   const w = Math.min(Math.abs(bx - ax) + 1, side);
   const h = Math.min(Math.abs(by - ay) + 1, side);
   const rect = { x: bx < ax ? ax - w + 1 : ax, y: by < ay ? ay - h + 1 : ay, w, h };
-  return isHex(g) ? onSceneHexes(g, rect, bounds, true) : rect;
+  return isHex(g) ? onSceneHexes(g, rect, bounds, [{ col: ax, row: ay }, { col: bx, row: by }]) : rect;
 }
 
 /**
@@ -89,7 +89,7 @@ export function tapRect(g: Grid, at: Point, start: string, band: LevelBand, boun
   const h = Math.min(zone?.kind === "squares" ? zone.h : 1, keys.h);
   const [x, y] = keyAt(g, at, keys);
   const rect = { x: clamp(x, 0, keys.w - w), y: clamp(y, 0, keys.h - h), w, h };
-  return isHex(g) ? onSceneHexes(g, rect, bounds, false) : rect;
+  return isHex(g) ? onSceneHexes(g, rect, bounds) : rect;
 }
 
 /**
@@ -99,9 +99,10 @@ export function tapRect(g: Grid, at: Point, start: string, band: LevelBand, boun
  * on hex rows, the last row's on hex columns. A tap's keeps its size by
  * moving back where that fits it. Otherwise the rectangle gives up its
  * last column on hex rows, or its last row on hex columns, while it holds
- * such a key, and a single key moves back, or to the line before where it cannot.
+ * such a key. A drag keeps its starting or ending line where shrinking to
+ * that line preserves the outermost hex. Empty staggered lines give way to the line before.
  */
-function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, shrink: boolean): CellRect {
+function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, drag?: readonly [Hex, Hex]): CellRect {
   const off = (q: CellRect) => {
     for (let row = q.y; row < q.y + q.h; row++) for (let col = q.x; col < q.x + q.w; col++) if (!hexInScene(g, bounds, { col, row })) return true;
     return false;
@@ -109,7 +110,13 @@ function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, shrink: boolean):
   const rows = g.orient === "rows";
   const along = (q: CellRect) => (rows ? q.x : q.y);
   const back = (q: CellRect): CellRect => (rows ? { ...q, x: q.x - 1 } : { ...q, y: q.y - 1 });
-  if (!shrink) {
+  if (drag && off(r)) {
+    for (const end of drag) {
+      const line = rows ? { ...r, y: clamp(end.row, r.y, r.y + r.h - 1), h: 1 } : { ...r, x: clamp(end.col, r.x, r.x + r.w - 1), w: 1 };
+      if (!off(line)) return line;
+    }
+  }
+  if (!drag) {
     for (let q = r; ; q = back(q)) {
       if (!off(q)) return q;
       if (along(q) === 0) break;
@@ -119,6 +126,8 @@ function onSceneHexes(g: HexGrid, r: CellRect, bounds: Bounds, shrink: boolean):
   while (off(out)) {
     if (rows ? out.w > 1 : out.h > 1) out = rows ? { ...out, w: out.w - 1 } : { ...out, h: out.h - 1 };
     else if (along(out) > 0) out = back(out);
+    // A one-hex-wide scene has empty odd lines, so a preset must give up its other side too.
+    else if (rows ? out.h > 1 : out.w > 1) out = rows ? { ...out, h: out.h - 1 } : { ...out, w: out.w - 1 };
     // A line with no hex at all, on a scene under two hexes across, gives way to the line before it.
     else if (rows ? out.y > 0 : out.x > 0) out = rows ? { ...out, y: out.y - 1 } : { ...out, x: out.x - 1 };
     else break;
