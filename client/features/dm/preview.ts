@@ -96,7 +96,12 @@ export function watchPreviewLoad(source: PreviewSource, options: { stop(): void;
 /**
  * The room a preview's socket reports to: the preview's own store, which
  * also tells its wait when the server names a wait for the snapshot. The
- * socket reports that as a slow load (state/socket.ts `wait`).
+ * socket reports that as a slow load (state/socket.ts `wait`). Every slow
+ * load a preview's socket reports is such a wait: the socket's only other
+ * one, a refused scene request's retry, needs a scene request in flight,
+ * and a preview's socket never sends one (socket.ts `sendRaw`, review
+ * FU36-OPUS-5). A preview that could switch scenes would need that retry
+ * told apart here, or it would wait past its 10 s cap with no named wait.
  */
 export function previewRoom(room: RoomStore, wait: Pick<PreviewLoadWatch, "serverWaits">): RoomStore {
   return {

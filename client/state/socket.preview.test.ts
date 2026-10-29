@@ -129,6 +129,23 @@ describe("view as a player's socket (7.4)", () => {
     }
   });
 
+  test("reports a slow load only for the server's named wait: a refused scene request's retry finds none in flight (review FU36-OPUS-5)", () => {
+    const s = setup();
+    const slow: string[] = [];
+    const trackScene = s.store.trackScene;
+    s.store.trackScene = (e) => {
+      slow.push(e.t);
+      trackScene(e);
+    };
+    s.socket.start();
+    s.last().open();
+    s.socket.switchScene("s2");
+    s.last().emit({ t: "retry", code: "busy" });
+    assert.deepEqual(slow, [], "no scene request left it, so no retry is its own");
+    s.last().emit({ t: "wait", ms: 20_000 });
+    assert.deepEqual(slow, ["slow"]);
+  });
+
   test("once it has the player's view, a dropped socket comes back as any room's does", () => {
     const s = setup();
     s.socket.start();
