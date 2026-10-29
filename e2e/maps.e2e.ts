@@ -1169,12 +1169,12 @@ describe("raccoon-vtt maps run", { timeout: 300_000 }, () => {
     const raw = uvttFile({ size: { x: 160, y: 70 }, ppg: 7, image: image.toString("base64"), objects, lights: [{ at: { x: 5, y: 5 }, range: 4 }] });
     writeFileSync(file, JSON.stringify({ ...raw, environment: { baked_lighting: false, ambient_light: "ff202020" } }));
     await openSideTab(dm, "Scenes");
-    await dm.getByLabel("From a Universal VTT file").setInputFiles(file);
-    const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map" });
+    await dm.getByLabel("From a Universal VTT file", { exact: true }).setInputFiles(file);
+    const dialog = dm.getByRole("dialog", { name: "Import a Universal VTT map", exact: true });
     try {
       await dialog.getByText(/more than a scene holds/).waitFor({ timeout: 30_000 });
       assert.equal(await dialog.getByText(/^This map brings/).count(), 0);
-      const objectsBlock = dialog.getByRole("checkbox", { name: "Objects block sight and movement" });
+      const objectsBlock = dialog.getByRole("checkbox", { name: "Objects block sight and movement", exact: true });
       await objectsBlock.uncheck();
       await dialog.getByText(/^This map brings 1 light\./).waitFor();
       assert.equal(await dialog.getByRole("radio", { name: "Explore", exact: true }).isChecked(), true);
