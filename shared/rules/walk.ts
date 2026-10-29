@@ -5,7 +5,7 @@ import { canSqueeze, footprintSize, snapStep, squeezedSize } from "./footprint.t
 import type { Point } from "./geom.ts";
 import { footing } from "./heights.ts";
 import { crossesInnerLedges, groundUnder, legStop, offKey, onOffHolder, pastHolder, stepTester, walkFrom, walkOn, type MovingToken, type StepTester, type Walker } from "./movement.ts";
-import { followedHeight, legSteps, routeFeet, routeLattice, straightCost, trueLength, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
+import { followedHeight, legSteps, routeFeet, routeLattice, seatedOn, seatShift, straightCost, trueLength, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
 import { SQUARES } from "./grid.ts";
 
 /**
@@ -235,8 +235,13 @@ function stepCache(walls: object, key: string, size: number): Uint8Array {
   return cache;
 }
 
-/** A creature the walker drags beside it (WalkInput `towed`): its place beside the walker, its footprint's size, and its step tests by how it stands. */
-type Towed = { walker: Walker & { id: string }; dx: number; dy: number; w: number; h: number; testers: Map<string, StepTester> };
+/**
+ * A creature the walker drags beside it (WalkInput `towed`): its place
+ * beside the walker, its footprint's size, its step tests by how it stands,
+ * and whether a token sitting on the walker drags it, so it goes with that
+ * token's seat (route.ts seatShift).
+ */
+type Towed = { walker: Walker & { id: string }; dx: number; dy: number; w: number; h: number; testers: Map<string, StepTester>; seated: boolean };
 
 /**
  * The world a drag walks in, built once per drag: the lattice, the per-cell
@@ -344,13 +349,15 @@ export class WalkWorld {
       : null;
     const layered = !pre && this.tester !== null && crossesInnerLedges(build, token);
     this.#on = new Uint8Array(layered ? nodes : 0);
+    this.#members = pre ? pre.#members : new Map((input.group ?? input.towed ?? []).map((m) => [m.id, m]));
     // Only where walls stop moves, as the server tests them there alone (permissions.ts draggedWalls).
     this.#towed = pre ? pre.#towed : this.tester ? (input.towed ?? []).flatMap((t) => {
       const tester = stepTester(build, t);
-      return tester ? [{ walker: t, dx: t.x - token.x, dy: t.y - token.y, ...footprintSize(t), testers: new Map() }] : [];
+      const seated = seatedOn(token as Walker & { id?: string }, (m) => this.#members.get(m), t.id) !== undefined;
+      return tester ? [{ walker: t, dx: t.x - token.x, dy: t.y - token.y, ...footprintSize(t), testers: new Map(), seated }] : [];
     }) : [];
-    this.#members = pre ? pre.#members : new Map((input.group ?? input.towed ?? []).map((m) => [m.id, m]));
     this.#towedSteps = pre ? pre.#towedSteps : new Uint8Array(this.#towed.length > 0 ? nodes * 8 : 0);
+
     this.#towedGrounded = pre ? pre.#towedGrounded : footing(chunks, start) === "ground";
     const lead: Walker & { id?: string } = token;
     this.#lead = { id: lead.id, elevation: token.elevation, grounded: this.#towedGrounded };
@@ -451,10 +458,34 @@ export class WalkWorld {
     return ok;
   }
 
-  /** Whether every creature the walker drags beside it follows the walker's straight sweep between two stored positions, offset by its place, on seen ground and by its own step test. */
+  /** Whether every creature the walker drags beside it follows the walker's straight sweep between two stored positions, straight from its place beside the one to its place beside the other (`#towedPlace`), on seen ground and by its own step test. */
   towedClear(ax: number, ay: number, bx: number, by: number): boolean {
-    for (const t of this.#towed) if (!this.#towedSeen(t, ax, ay, bx, by) || !this.#towedTester(t, ax, ay, bx, by).clear(ax + t.dx, ay + t.dy, bx + t.dx, by + t.dy)) return false;
+    for (const t of this.#towed) if (!this.#towedWalks(t, ax, ay, bx, by)) return false;
     return true;
+  }
+
+  #towedWalks(t: Towed, ax: number, ay: number, bx: number, by: number): boolean {
+    const a = this.#towedPlace(t, ax, ay);
+    const b = this.#towedPlace(t, bx, by);
+    return this.#towedSeen(t, a, b) && this.#towedTester(t, ax, ay, bx, by).clear(a.x, a.y, b.x, b.y);
+  }
+
+  /**
+   * Where a creature the walker drags beside it stands with the walker's
+   * stored box at `x`, `y`: where it stands at the walk's start, past it
+   * offset by its place, and moved with the seat of a token sitting on the
+   * walker that drags it, as a rider drags a goblin, where the walker
+   * squeezes (route.ts seatShift, review DP34-ASTRA-01), as the move takes
+   * it along (moveLeg.ts follow).
+   */
+  #towedPlace(t: Towed, x: number, y: number): Point {
+    const { token } = this.input;
+    if (Math.abs(x - token.x) < EPS && Math.abs(y - token.y) < EPS) return { x: t.walker.x, y: t.walker.y };
+    if (!t.seated) return { x: x + t.dx, y: y + t.dy };
+    // Squeezed where the search's own footprint is (`#box`), as the server's move reads a point of its route (route.ts walkSqueezes).
+    const squeezed = this.squeezes && this.#pinched(x, y, this.nodeAt({ x, y }));
+    const by = seatShift(SQUARES, token as Walker & { id?: string }, (m) => this.#members.get(m), t.walker.id, { x, y }, squeezed);
+    return { x: x + t.dx + by.x, y: y + t.dy + by.y };
   }
 
   /**
@@ -467,10 +498,10 @@ export class WalkWorld {
    */
   #towedTester(t: Towed, ax: number, ay: number, bx: number, by: number): StepTester {
     const { x, y } = this.input.token;
-    const from = Math.abs(ax - x) < EPS && Math.abs(ay - y) < EPS ? t.walker : this.#towedAt(t, ax + t.dx, ay + t.dy);
+    const from = Math.abs(ax - x) < EPS && Math.abs(ay - y) < EPS ? t.walker : this.#towedAt(t, ax, ay);
     const stands = footing(this.input.build.buildChunks, from);
     // Off the ground its ledges read from the lower of its heights at the two ends, as the server's leg test reads them.
-    const floor = stands === "flying" ? Math.min(from.elevation, this.#towedAt(t, bx + t.dx, by + t.dy).elevation) : from.elevation;
+    const floor = stands === "flying" ? Math.min(from.elevation, this.#towedAt(t, bx, by).elevation) : from.elevation;
     const key = stands === "flying" ? `flying ${floor}` : stands;
     let tester = t.testers.get(key);
     if (!tester) {
@@ -480,28 +511,45 @@ export class WalkWorld {
     return tester;
   }
 
-  /** Whether each creature the walker drags beside it has the same step test for its step from beside A to beside B as for the one from beside Q to beside B. */
+  /**
+   * Whether each creature the walker drags beside it has the same step test
+   * for its step from beside A to beside B as for the one from beside Q to
+   * beside B, and keeps its seat from A through Q to B, so its walk to B is
+   * the walker's own moved by its place and a piece may run on for it.
+   */
   towedAlike(a: Point, q: Point, b: Point): boolean {
-    for (const t of this.#towed) if (this.#towedTester(t, a.x, a.y, b.x, b.y) !== this.#towedTester(t, q.x, q.y, b.x, b.y)) return false;
+    for (const t of this.#towed) {
+      if (this.#towedTester(t, a.x, a.y, b.x, b.y) !== this.#towedTester(t, q.x, q.y, b.x, b.y)) return false;
+      if (t.seated && ![a, q, b].every((p) => this.#seatStays(t, a, p))) return false;
+    }
     return true;
   }
 
-  /**
-   * A creature the walker drags beside it at its place `x`, `y` past the
-   * walk's start, at its height there (`#heightAt`). One whose height the
-   * search does not follow stands on its ground, so it meets every ledge,
-   * the most any walk of it could.
-   */
-  #towedAt(t: Towed, x: number, y: number): Walker {
-    const height = this.#heightAt(t.walker.id, { x: x - t.dx, y: y - t.dy });
-    if (height !== null) return { ...t.walker, x, y, elevation: height };
-    return { ...t.walker, x, y, elevation: groundUnder(this.input.build.buildChunks, t.walker, { x, y }), footing: "ground" };
+  /** Whether a creature the walker drags beside it stands as far from the walker with its box at `p` as at `a`. */
+  #seatStays(t: Towed, a: Point, p: Point): boolean {
+    const at = this.#towedPlace(t, a.x, a.y);
+    const there = this.#towedPlace(t, p.x, p.y);
+    return Math.abs(there.x - p.x - (at.x - a.x)) < EPS && Math.abs(there.y - p.y - (at.y - a.y)) < EPS;
   }
 
-  /** A creature's height while the walker's stored box is at `p`, past the walk's start (route.ts followedHeight), or null where it is not followed. */
-  #heightAt(id: string, p: Point): number | null {
+  /**
+   * A creature the walker drags beside it with the walker's stored box at
+   * `x`, `y` past the walk's start: at its place there (`#towedPlace`), at
+   * its height there (`#heightAt`). One whose height the search does not
+   * follow stands on its ground, so it meets every ledge, the most any walk
+   * of it could.
+   */
+  #towedAt(t: Towed, x: number, y: number): Walker {
+    const at = this.#towedPlace(t, x, y);
+    const height = this.#heightAt(t.walker.id, { x, y }, { x: at.x - x - t.dx, y: at.y - y - t.dy });
+    if (height !== null) return { ...t.walker, ...at, elevation: height };
+    return { ...t.walker, ...at, elevation: groundUnder(this.input.build.buildChunks, t.walker, at), footing: "ground" };
+  }
+
+  /** A creature's height while the walker's stored box is at `p`, past the walk's start (route.ts followedHeight), or null where it is not followed. `by` is how far its seat moved it (route.ts seatShift). */
+  #heightAt(id: string, p: Point, by: Point): number | null {
     const { token, build } = this.input;
-    return followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), id, { x: p.x - token.x, y: p.y - token.y }, this.#leadHeight(p));
+    return followedHeight(build.buildChunks, this.#lead, (m) => this.#members.get(m), id, { x: p.x - token.x + by.x, y: p.y - token.y + by.y }, this.#leadHeight(p));
   }
 
   /** The walker's height with its stored box at `p`: the ground under its footprint for a walk on the ground, the start's height for any other. */
@@ -513,20 +561,22 @@ export class WalkWorld {
 
   /**
    * Whether a creature the walker drags beside it keeps to ground players
-   * have seen as it follows the walker's straight sweep between two stored
-   * positions, offset by its place (review FU20A-ASTRA-4). Each lattice step
-   * of the sweep reads the box its footprint sweeps over, the start's place
-   * included, so its step test never reads a square under the fog, and a
-   * creature in the fog follows no searched way at all.
+   * have seen as it walks straight between two of its places (review
+   * FU20A-ASTRA-4). Each lattice step of the sweep reads the box its
+   * footprint sweeps over, the start's place included, so its step test
+   * never reads a square under the fog, and a creature in the fog follows
+   * no searched way at all.
    */
-  #towedSeen(t: { dx: number; dy: number; w: number; h: number }, ax: number, ay: number, bx: number, by: number): boolean {
+  #towedSeen(t: { w: number; h: number }, a: Point, b: Point): boolean {
     if (!this.input.seen) return true;
+    const { x: ax, y: ay } = a;
+    const { x: bx, y: by } = b;
     const n = Math.max(1, Math.ceil(Math.max(Math.abs(bx - ax), Math.abs(by - ay)) / this.L - EPS));
-    let px = ax + t.dx;
-    let py = ay + t.dy;
+    let px = ax;
+    let py = ay;
     for (let k = 1; k <= n; k++) {
-      const x = (k === n ? bx : ax + ((bx - ax) * k) / n) + t.dx;
-      const y = (k === n ? by : ay + ((by - ay) * k) / n) + t.dy;
+      const x = k === n ? bx : ax + ((bx - ax) * k) / n;
+      const y = k === n ? by : ay + ((by - ay) * k) / n;
       if (!this.#seenRect(Math.min(px, x), Math.min(py, y), Math.max(px, x) + t.w, Math.max(py, y) + t.h)) return false;
       px = x;
       py = y;
@@ -541,10 +591,10 @@ export class WalkWorld {
    * `to`, on its own ground behind a walk on the ground (drop.ts followersOf).
    */
   towedFollow(to: Point): boolean {
-    const { x: ax, y: ay } = this.input.token;
     for (const t of this.#towed) {
-      if (!this.#towedSeen(t, ax, ay, to.x, to.y)) return false;
-      if (legStop(this.input.build, t.walker, this.#towedAt(t, to.x + t.dx, to.y + t.dy)) !== null) return false;
+      const there = this.#towedAt(t, to.x, to.y);
+      if (!this.#towedSeen(t, t.walker, there)) return false;
+      if (legStop(this.input.build, t.walker, there) !== null) return false;
     }
     return true;
   }
@@ -554,7 +604,7 @@ export class WalkWorld {
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1]!;
       const b = points[i]!;
-      for (const t of this.#towed) if (!this.#towedSeen(t, a.x, a.y, b.x, b.y) || !this.#towedTester(t, a.x, a.y, b.x, b.y).clear(a.x + t.dx, a.y + t.dy, b.x + t.dx, b.y + t.dy)) return t.walker.id;
+      for (const t of this.#towed) if (!this.#towedWalks(t, a.x, a.y, b.x, b.y)) return t.walker.id;
     }
     return null;
   }

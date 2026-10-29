@@ -189,12 +189,12 @@ export function seatSpot(g: Grid, carried: PlacedToken, holder: PlacedToken): Po
   return squareSeatIn(carried, fullRect(g, holder), fullRect(g, carried));
 }
 
-/** The seat on squares inside `box`: the spot on the carried token's own snap grid nearest `from`, ties to the smaller y and then the smaller x. */
-function squareSeatIn(carried: PlacedToken, box: Rect, from: Point): Point | null {
+/** The seat on squares inside `box`: the spot on the carried token's own snap grid nearest `from`, ties to the smaller y and then the smaller x. `lined` counts the grid from the box's corner, not the scene's. */
+function squareSeatIn(carried: PlacedToken, box: Rect, from: Point, lined = false): Point | null {
   const size = footprintSize(carried);
   const step = snapStep(carried);
-  const xs = gridSpots(box.x, box.x + box.w - size.w, step);
-  const ys = gridSpots(box.y, box.y + box.h - size.h, step);
+  const xs = gridSpots(box.x, box.x + box.w - size.w, step, lined ? box.x : 0);
+  const ys = gridSpots(box.y, box.y + box.h - size.h, step, lined ? box.y : 0);
   let best: Point | null = null;
   let bestD = Infinity;
   for (const y of ys) {
@@ -226,14 +226,48 @@ function hexSeatSpot(g: HexGrid, carried: PlacedToken, holder: PlacedToken): Poi
  * seat on the squares or hexes the holder stands on there, squeezed or
  * full, nearest where its offset from the holder puts it, ties as a seat's.
  * On squares that is the spot on its own snap grid inside the holder's
- * footprint (the squeezed one while it squeezes) nearest its box, on hexes
- * the anchor of its size whose hexes all lie on the holder's nearest the
- * middle of its box. Null when none fits. The link still reads the full
- * footprint (5.1), which every square or hex the holder stands on lies in.
+ * footprint (the squeezed one while it squeezes) nearest its box, the grid
+ * counted from the footprint's corner, so a holder squeezed off the grid as
+ * it walks past seats it too (review DP34-ASTRA-01), and on hexes the anchor
+ * of its size whose hexes all lie on the holder's nearest the middle of its
+ * box. Null when none fits. The link still reads the full footprint (5.1),
+ * which every square or hex the holder stands on lies in.
  */
 export function standingSeatSpot(g: Grid, carried: PlacedToken, holder: PlacedToken): Point | null {
   if (isHex(g)) return hexSeatOn(g, carried, occupiedHexes(g, holder), storedCenter(unsqueezed(carried)));
-  return squareSeatIn(carried, footprintRect(g, holder), { x: carried.x, y: carried.y });
+  return squareSeatIn(carried, footprintRect(g, holder), { x: carried.x, y: carried.y }, true);
+}
+
+/**
+ * Where a token that sits on a walker sits while the walker's stored box is
+ * at `at`, squeezed there or not (D-261029-52, D-261029-53): its own seat,
+ * carried along by the walker's move, and where the walker stands squeezed
+ * the seat on the squares or hexes it squeezes onto nearest that
+ * (standingSeatSpot), its own seat still where none fits. Its own seat is
+ * where it sits as the walk starts, or, on a walker that starts squeezed,
+ * the seat of the walker's full footprint nearest it, kept beside the box
+ * the full footprint has. So where it sits depends on the walker's stand
+ * there alone, and the reducer's move (moveLeg.ts follow) and a device's
+ * route search and cut (walk.ts, hexWalk.ts, drop.ts) read one place.
+ * On hexes its own seat is the anchor its place stands on, since the
+ * walker's corners, each rounded, carry it a hair off. `walker` and
+ * `seated` are as they stand where the walk starts.
+ */
+export function seatedAt(g: Grid, seated: PlacedToken, walker: PlacedToken, at: Point, squeezed: boolean): Point {
+  const own = isSqueezed(walker) ? fullSeat(g, seated, walker) : { seat: seated, beside: walker };
+  const place = { x: at.x + (own.seat.x - own.beside.x), y: at.y + (own.seat.y - own.beside.y) };
+  if (!squeezed && !isHex(g)) return place;
+  return standingSeatSpot(g, { ...unsqueezed(seated), ...place }, { ...unsqueezed(walker), x: at.x, y: at.y, ...(squeezed ? { squeeze: true as const } : {}) }) ?? place;
+}
+
+/** On a walker standing squeezed: the seat of its full footprint nearest the seated token, and where the walker's box stands for that footprint. */
+function fullSeat(g: Grid, seated: PlacedToken, walker: PlacedToken): { seat: Point; beside: Point } {
+  const full = unsqueezed(walker);
+  const seat = standingSeatSpot(g, seated, full) ?? seated;
+  if (!isHex(g)) return { seat, beside: fullRect(g, full) };
+  const a = hexAnchor(g, full);
+  const { w, h } = footprintSize(full);
+  return { seat, beside: { x: a.x - w / 2, y: a.y - h / 2 } };
 }
 
 /** The seat on hexes `on`: of the carried size's anchors whose hexes all lie on them, the one nearest `from`, ties in lattice order. */
@@ -262,9 +296,9 @@ function latticeOrder(g: HexGrid, a: Hex, b: Hex): number {
 }
 
 /** The multiples of `step` from `lo` to `hi`, both inclusive, in order. */
-function gridSpots(lo: number, hi: number, step: number): number[] {
+function gridSpots(lo: number, hi: number, step: number, origin = 0): number[] {
   const out: number[] = [];
-  for (let v = Math.ceil(lo / step - EPS) * step; v <= hi + EPS; v += step) out.push(v + 0);
+  for (let v = origin + Math.ceil((lo - origin) / step - EPS) * step; v <= hi + EPS; v += step) out.push(v + 0);
   return out;
 }
 

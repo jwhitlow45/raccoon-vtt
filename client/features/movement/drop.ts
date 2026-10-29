@@ -8,7 +8,7 @@ import { isHex, sceneGrid, SQUARES, type Grid } from "#shared/rules/grid.ts";
 import { deviceGround } from "#shared/rules/held.ts";
 import { footing } from "#shared/rules/heights.ts";
 import { groundUnder, landedElevation, landing, legStop, onSqueezedLattice, ownWalk, previewChunks, previewSqueezed, squeezeFits, walkEnd, walkFrom, type DropMode, type Walker } from "#shared/rules/movement.ts";
-import { followedHeight, followerTrace, routeLattice, routePoints, routeStop, routeWalkers, walkTrace, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
+import { followedHeight, followerTrace, routeLattice, routePoints, routeStop, routeWalkers, seatShift, walkSqueezes, walkTrace, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "#shared/rules/route.ts";
 import { checkSetReach } from "#shared/rules/moveLeg.ts";
 import type { WalkRoute } from "#shared/rules/walk.ts";
 import { routeLegCheck, type RouteWorld } from "#shared/rules/hexWalk.ts";
@@ -557,7 +557,7 @@ export function planGroup(state: DropView, tokens: readonly DropToken[], dx: num
     // A group move stores no squeeze, so on hexes its leg ends full size wherever it lies (LegEnd), as the server judges it.
     const end = { x: to.x, y: to.y, elevation, ...(isHex(g) ? { squeeze: false } : {}) };
     const own = mode === "walk" ? legStop(state, walking, end) : null;
-    const stopped = own ? heardStop(state, walking, end, own) : mode === "walk" ? followersOf(state, walking, [from, end], walkersOf(token)).stop(1, end) : null;
+    const stopped = own ? heardStop(state, walking, end, own) : mode === "walk" ? followersOf(state, walking, [from, end], walkersOf(token), false).stop(1, end) : null;
     if (stopped) held.push({ token, blocker: stopped.blocker });
     else moves.push(landed(state, token, { ...to, squeeze: false }));
   }
@@ -573,11 +573,15 @@ type WalkersState = BuildState & { tokens?: Readonly<Record<string, Token | unde
  * (shared/rules/moveLeg.ts): each from where it stands, offset by its
  * place, on its own ground behind a holder whose walk is on the ground,
  * else by the holder's change of height, never below the ground, and
- * walked by its own rule (route.ts followerTrace). `stop` is the first of
- * them whose leg from the holder's piece `i`'s start a wall or a ledge
- * stops, with the holder at `to` on that piece.
+ * walked by its own rule (route.ts followerTrace). One that a token
+ * sitting on the holder drags, as a rider drags a goblin, goes with that
+ * token's seat, which moves where the holder squeezes (route.ts seatShift,
+ * review DP34-ASTRA-01). `end` is whether the walk ends squeezed, as the
+ * op says, else as where it stands: a cut along a piece ends it full.
+ * `stop` is the first of them whose leg from the holder's piece `i`'s
+ * start a wall or a ledge stops, with the holder at `to` on that piece.
  */
-function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePoint[], walkers: readonly DropToken[]): { stop: (i: number, to: RoutePoint) => { blocker: Blocker } | null } {
+function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePoint[], walkers: readonly DropToken[], end?: boolean): { stop: (i: number, to: RoutePoint) => { blocker: Blocker } | null } {
   // As the holder's walk stands where it starts (route.ts WalkTrace).
   const grounded = footing(state.buildChunks, walkFrom(state.buildChunks, lead)) === "ground";
   // Each walker comes as the token it is (attach/walk.ts walkersFor), and its holders up to the lead, riders and carried creatures
@@ -588,17 +592,24 @@ function followersOf(state: WalkersState, lead: Walker, points: readonly RoutePo
   const memberOf = (id: string): Follower | undefined => byId.get(id) ?? state.tokens?.[id];
   const named: Walker & { id?: string } = lead;
   const from: FollowLead = { id: named.id, elevation: lead.elevation, grounded };
-  const groundAt = (w: DropToken, p: Point) => groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, { x: p.x + w.x - lead.x, y: p.y + w.y - lead.y });
-  const heightAt = (w: DropToken, p: RoutePoint) => followedHeight(state.buildChunks, from, memberOf, w.id, { x: p.x - lead.x, y: p.y - lead.y }, p.elevation);
+  const scene = state.scenes[lead.sceneId];
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  const squeezes = walkSqueezes(state, lead, points, walkTrace(state.buildChunks, lead, points), end);
+  const squeezedAt = (i: number, to: Point) => to.x === points[i]!.x && to.y === points[i]!.y && squeezes[i]!;
+  const groundAt = (w: DropToken, p: Point, by: Point) => groundUnder(state.buildChunks, followerTrace(w, [w])[0]!, { x: p.x + w.x - lead.x + by.x, y: p.y + w.y - lead.y + by.y });
+  const heightAt = (w: DropToken, p: RoutePoint, by: Point) => followedHeight(state.buildChunks, from, memberOf, w.id, { x: p.x - lead.x + by.x, y: p.y - lead.y + by.y }, p.elevation);
   const follows = linked.map((w) => {
     // One whose height is not followed stands on its ground, so it meets every ledge, the most any walk of it could.
-    const spot = (p: RoutePoint): RoutePoint => ({ x: p.x + w.x - lead.x, y: p.y + w.y - lead.y, elevation: heightAt(w, p) ?? groundAt(w, p) });
-    return { spot, trace: followerTrace(w, [{ x: w.x, y: w.y, elevation: w.elevation }, ...points.slice(1).map(spot)]) };
+    const spot = (p: RoutePoint, squeezed: boolean): RoutePoint => {
+      const by = seatShift(g, named, memberOf, w.id, p, squeezed);
+      return { x: p.x + w.x - lead.x + by.x, y: p.y + w.y - lead.y + by.y, elevation: heightAt(w, p, by) ?? groundAt(w, p, by) };
+    };
+    return { spot, trace: followerTrace(w, [{ x: w.x, y: w.y, elevation: w.elevation }, ...points.slice(1).map((p, k) => spot(p, squeezes[k + 1]!))]) };
   });
   return {
     stop: (i, to) => {
       for (const f of follows) {
-        const stop = legStop(state, f.trace[i - 1]!, f.spot(to));
+        const stop = legStop(state, f.trace[i - 1]!, f.spot(to, squeezedAt(i, to)));
         if (stop) return stop;
       }
       return null;
@@ -658,20 +669,20 @@ export function walkersStop(
   lead: DropToken & Walker,
   points: readonly RoutePoint[],
   walkers: readonly DropToken[],
-  walk: { route?: readonly RoutePiece[]; landing?: (at: Point) => number } = {},
+  walk: { route?: readonly RoutePiece[]; landing?: (at: Point) => number; squeeze?: boolean } = {},
 ): { at: RoutePoint; pieces: number; blocker: Blocker; plain?: true } | null {
   if (walkers.length === 0) return null;
   const L = routeLattice(lead);
   // The holder's walk (route.ts WalkTrace): the leg test of each piece counts from its walker where it starts.
   const trace = walkTrace(state.buildChunks, lead, points);
-  const followers = followersOf(state, lead, points, walkers);
+  const followers = followersOf(state, lead, points, walkers, walk.squeeze);
   const route = walk.route && state.scenes[lead.sceneId]?.blockMovement === true ? walk.route : undefined;
   const start = points[0]!;
   // The cut to `c`, `whole` pieces kept and then one on to it unless a piece starts there: as the route it sends, else as the plain leg.
   const taken = (c: RoutePoint, whole: number): { plain?: true } | null => {
     if (!route) return {};
     if (routeStop(state, lead, cutPieces(points, route, { at: c, pieces: whole }), walk.landing ? walk.landing(c) : c.elevation) === null) return {};
-    return legStop(state, trace[0]!, c) === null && followersOf(state, lead, [start, c], walkers).stop(1, c) === null ? { plain: true } : null;
+    return legStop(state, trace[0]!, c) === null && followersOf(state, lead, [start, c], walkers, false).stop(1, c) === null ? { plain: true } : null;
   };
   for (let i = 1; i < points.length; i++) {
     const stopped = followers.stop(i, points[i]!);
@@ -711,7 +722,7 @@ export function cutForWalkers(state: DropView, lead: DropToken, plan: DropPlan, 
   const landing = move.elevation ?? lead.elevation;
   const walking = walkerOf(state, lead, move);
   const points = move.route ? routePoints(state.buildChunks, walking, move.route, landing) : [{ x: lead.x, y: lead.y, elevation: lead.elevation }, { x: move.x, y: move.y, elevation: landing }];
-  const stop = walkersStop(state, walking, points, walkers, { ...(move.route ? { route: move.route } : {}), landing: (at) => dropLanding(state, lead, at) });
+  const stop = walkersStop(state, walking, points, walkers, { ...(move.route ? { route: move.route } : {}), landing: (at) => dropLanding(state, lead, at), squeeze: move.squeeze === true });
   if (!stop) return plan;
   const others = plan.moves.filter((m) => m !== move);
   const searched = plan.stop?.searched ? { searched: true as const, ...(plan.stop.capped ? { capped: true as const } : {}) } : {};

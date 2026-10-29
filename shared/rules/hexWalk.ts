@@ -1,6 +1,6 @@
 import type { BuildChunk } from "../model.ts";
 import { CHUNK_CELLS } from "../model.ts";
-import { canSqueeze, footprintSize, hexSqueezedSize, sizeCategory, tokenHeightFt, type SizeCategory } from "./footprint.ts";
+import { canSqueeze, footprintSize, hexSqueezedSize, isSqueezed, sizeCategory, tokenHeightFt, type SizeCategory } from "./footprint.ts";
 import type { Point } from "./geom.ts";
 import { isHex, sceneGrid } from "./grid.ts";
 import { hexCenter, hexDistance, hexInScene, hexNeighbors, hexSubcells, sceneHexSpan, type Hex, type HexGrid } from "./hex.ts";
@@ -19,12 +19,13 @@ import {
   hexStandPlace,
   hexStartStand,
   hexWallsOf,
+  onSqueezedLattice,
   walkFrom,
   type HexStand,
   type HexWalls,
   type Walker,
 } from "./movement.ts";
-import { followedHeight, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
+import { followedHeight, seatShift, type FollowLead, type Follower, type RoutePiece, type RoutePoint } from "./route.ts";
 import { LegCheck, MAX_SETTLED, WalkSearch, WalkWorld, WorkBudget, worldUnits, type SettleResult, type Slice, type WalkInput, type WalkRoute } from "./walk.ts";
 
 /**
@@ -275,9 +276,36 @@ export class HexWalkWorld {
     return this.#towed.length > 0;
   }
 
-  /** Where a creature dragged beside the walker stands while the walker's stored box is at `p`: as itself, never squeezed (route.ts followerTrace). */
-  #towedStand(t: Towed, p: Point): HexStand {
-    return hexStandAt(this.g, t.walker, { x: p.x + t.dx, y: p.y + t.dy }, false);
+  /**
+   * Where a creature dragged beside the walker stands while the walker's
+   * stored box is at `p`, squeezed there or not: as itself, never squeezed
+   * (route.ts followerTrace), offset by its place, and moved with the seat
+   * of a token sitting on the walker that drags it, as a rider drags a
+   * goblin, where the walker squeezes (route.ts seatShift, review
+   * DP34-ASTRA-01), as the move takes it along (moveLeg.ts follow).
+   */
+  #towedStand(t: Towed, p: Point, squeezed: boolean): HexStand {
+    const by = this.#seatShift(t, p, squeezed);
+    return hexStandAt(this.g, t.walker, { x: p.x + t.dx + by.x, y: p.y + t.dy + by.y }, false);
+  }
+
+  #seatShift(t: Towed, p: Point, squeezed: boolean): Point {
+    const { token } = this.input;
+    // Where the walk starts, as it stands, each creature stands where it is, as the move's first point leaves it (moveLeg.ts squeezedSeats).
+    if (p.x === token.x && p.y === token.y && squeezed === isSqueezed(token)) return { x: 0, y: 0 };
+    return seatShift(this.g, token as Walker & { id?: string }, (m) => this.#members.get(m), t.walker.id, p, squeezed);
+  }
+
+  /** Whether the walker stands squeezed with its box at `at`: by its stand where the search has one, at the walk's start as it stands, else by where it is (route.ts walkSqueezes). */
+  #leadSqueezed(at: LeadAt): boolean {
+    if (at.stand) return at.stand.squeezed;
+    return at.start ? isSqueezed(this.input.token) : onSqueezedLattice(this.g, this.input.token, at.place);
+  }
+
+  /** Whether a creature dragged beside the walker walks its own straight leg between two stands, on stands the search may read, as the server's leg test runs it (permissions.ts draggedWalls). */
+  #towedJump(from: HexStand, to: HexStand, walls: HexWalls): boolean {
+    const leg = hexLegOf(this.g, from, to);
+    return leg.line.every((ref) => this.standable({ size: to.size, ref })) && hexLegStop(walls, leg) === null && hexFitWall(walls, to) < 0;
   }
 
   /**
@@ -292,11 +320,18 @@ export class HexWalkWorld {
     const at: LeadAt = { place: pa, stand: a, start: this.nodeOf(a) === this.startNode };
     const next: LeadAt = { place: pb, stand: b, start: false };
     for (const t of this.#towed) {
-      const from = this.#towedStand(t, pa);
-      const to = this.#towedStand(t, pb);
+      const from = this.#towedStand(t, pa, a.squeezed);
+      const to = this.#towedStand(t, pb, b.squeezed);
       const n = hexNeighbors(this.g, from.ref)[d]!;
-      if (n.col !== to.ref.col || n.row !== to.ref.row || !this.standable(to)) return false;
       const walls = this.#towedWalls(t, at, next);
+      // A seat that moves with the step takes the creature it drags on a leg of its own, not the walker's step.
+      if (n.col !== to.ref.col || n.row !== to.ref.row) {
+        const sa = this.#seatShift(t, pa, a.squeezed);
+        const sb = this.#seatShift(t, pb, b.squeezed);
+        if ((sa.x === sb.x && sa.y === sb.y) || !this.#towedJump(from, to, walls)) return false;
+        continue;
+      }
+      if (!this.standable(to)) return false;
       for (const h of hexStandHexes(this.g, from)) {
         const e = walls === this.walls ? this.#edge(h, d) : hexEdgeState(walls, h, d);
         if (e === 2 || (e === 3 && !first)) return false;
@@ -317,45 +352,83 @@ export class HexWalkWorld {
   #towedWalls(t: Towed, a: LeadAt, b: LeadAt): HexWalls {
     const walls = this.walls!;
     if (!walls.walls.hasRelief) return walls;
-    const ea = this.#heightAt(t.walker.id, a);
-    const eb = this.#heightAt(t.walker.id, b);
+    const ea = this.#heightAt(t.walker.id, a, this.#seatShift(t, a.place, this.#leadSqueezed(a)));
+    const eb = this.#heightAt(t.walker.id, b, this.#seatShift(t, b.place, this.#leadSqueezed(b)));
     if (ea === null || eb === null) return walls.floor === -Infinity ? walls : { ...walls, floor: -Infinity };
-    const how = standing(ea, this.#towedGround(t, a.place));
+    const how = standing(ea, this.#towedGround(t, a.place, this.#leadSqueezed(a)));
     const floor = how === "ground" ? -Infinity : how === "flying" ? Math.min(ea, eb) : Infinity;
     return floor === walls.floor ? walls : { ...walls, floor };
   }
 
-  /** A creature's height with the walker at `at`: at the walk's start as it stands, past it as the move takes it along (route.ts followedHeight), or null where it is not followed. */
-  #heightAt(id: string, at: LeadAt): number | null {
+  /** A creature's height with the walker at `at`: at the walk's start as it stands, past it as the move takes it along (route.ts followedHeight), or null where it is not followed. `by` is how far its seat moved it (`#seatShift`). */
+  #heightAt(id: string, at: LeadAt, by: Point = { x: 0, y: 0 }): number | null {
     const token = this.input.token;
     if (at.start) return id === this.#lead.id ? token.elevation : (this.#members.get(id)?.elevation ?? null);
     const leadNow = this.elevationOf(at.stand ?? hexEndStand(this.g, token, at.place));
-    return followedHeight(this.input.build.buildChunks, this.#lead, (m) => this.#members.get(m), id, { x: at.place.x - token.x, y: at.place.y - token.y }, leadNow);
+    return followedHeight(this.input.build.buildChunks, this.#lead, (m) => this.#members.get(m), id, { x: at.place.x - token.x + by.x, y: at.place.y - token.y + by.y }, leadNow);
   }
 
   /** The ground under a creature dragged beside the walker while the walker's stored box is at `p`. */
-  #towedGround(t: Towed, p: Point): number {
-    return hexesGround(this.input.build.buildChunks, this.input.token.sceneId, hexStandHexes(this.g, this.#towedStand(t, p)));
+  #towedGround(t: Towed, p: Point, squeezed: boolean): number {
+    return hexesGround(this.input.build.buildChunks, this.input.token.sceneId, hexStandHexes(this.g, this.#towedStand(t, p, squeezed)));
   }
 
-  /** Whether a creature dragged beside the walker walks the leg from beside it at `pa` to beside it at `pb`, by the leg test the server runs on it (permissions.ts draggedWalls), on ground the search may read. */
-  #towedLeg(t: Towed, pa: Point, pb: Point, start: boolean): boolean {
-    const from = this.#towedStand(t, pa);
-    const end = this.#towedStand(t, pb);
+  /** Whether a creature dragged beside the walker walks the leg from beside it at `a` to beside it at `b`, by the leg test the server runs on it (permissions.ts draggedWalls), on ground the search may read. */
+  #towedLeg(t: Towed, a: LeadAt, b: LeadAt): boolean {
+    const from = this.#towedStand(t, a.place, this.#leadSqueezed(a));
+    const end = this.#towedStand(t, b.place, this.#leadSqueezed(b));
     const leg = hexLegOf(this.g, from, end);
-    const walls = this.#towedWalls(t, { place: pa, stand: null, start }, { place: pb, stand: null, start: false });
+    const walls = this.#towedWalls(t, a, b);
     return leg.line.every((ref) => this.standable({ size: end.size, ref })) && hexLegStop(walls, leg) === null;
   }
 
   /** Whether every creature dragged beside the walker walks the straight leg to `to` with it (walk.ts towedFollow). */
   towedFollow(to: Point): boolean {
-    for (const t of this.#towed) if (!this.#towedLeg(t, this.input.token, to, true)) return false;
+    for (const t of this.#towed) if (!this.#towedLeg(t, { place: this.input.token, stand: null, start: true }, { place: to, stand: null, start: false })) return false;
     return true;
   }
 
-  /** Whether the creature may stand up in place from a squeezed stand, or squeeze in place from a full one. */
+  /**
+   * Whether every creature dragged beside the walker walks a piece of the
+   * walk from node `i` to node `j` as the server takes it along: straight
+   * from beside the walker at the piece's start to beside it at its end.
+   * One whose seat stays put along the piece walks it as the walker's own
+   * steps have it (`#towedStep`), so only one whose seat moves on it needs
+   * the leg of its own (review DP34-ASTRA-01).
+   */
+  #towedPiece(nodes: readonly number[], i: number, j: number): boolean {
+    if (this.#towed.length === 0) return true;
+    const stands = nodes.slice(i, j + 1).map((n) => this.standOf(n));
+    const a: LeadAt = { place: this.place(stands[0]!), stand: stands[0]!, start: nodes[i] === this.startNode };
+    const b: LeadAt = { place: this.place(stands[stands.length - 1]!), stand: stands[stands.length - 1]!, start: false };
+    for (const t of this.#towed) {
+      const shifts = stands.map((s) => this.#seatShift(t, this.place(s), s.squeezed));
+      if (shifts.every((by) => by.x === shifts[0]!.x && by.y === shifts[0]!.y)) continue;
+      if (!this.#towedLeg(t, a, b)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Whether the creature may stand up in place from a squeezed stand, or
+   * squeeze in place from a full one, and each creature that a token
+   * sitting on it drags walks with that token's new seat (`#towedStand`).
+   */
   restandOk(to: HexStand): boolean {
-    return this.standable(to) && (to.squeezed || this.fits(to));
+    if (!this.standable(to) || !(to.squeezed || this.fits(to))) return false;
+    if (this.#towed.length === 0) return true;
+    const from = hexRestand(this.input.token, to, !to.squeezed);
+    const pa = this.place(from);
+    const pb = this.place(to);
+    const a: LeadAt = { place: pa, stand: from, start: this.nodeOf(from) === this.startNode };
+    const b: LeadAt = { place: pb, stand: to, start: false };
+    for (const t of this.#towed) {
+      const sa = this.#seatShift(t, pa, from.squeezed);
+      const sb = this.#seatShift(t, pb, to.squeezed);
+      if (sa.x === 0 && sa.y === 0 && sb.x === 0 && sb.y === 0) continue;
+      if (!this.#towedJump(this.#towedStand(t, pa, from.squeezed), this.#towedStand(t, pb, to.squeezed), this.#towedWalls(t, a, b))) return false;
+    }
+    return true;
   }
 
   /**
@@ -426,7 +499,7 @@ export class HexWalkWorld {
   /** The first creature dragged beside the walker that a walk along `points` leaves behind, piece by piece, or null when all of them follow it. */
   cannotFollow(points: readonly Point[]): string | null {
     for (let i = 1; i < points.length; i++) {
-      for (const t of this.#towed) if (!this.#towedLeg(t, points[i - 1]!, points[i]!, i === 1)) return t.walker.id;
+      for (const t of this.#towed) if (!this.#towedLeg(t, { place: points[i - 1]!, stand: null, start: i === 1 }, { place: points[i]!, stand: null, start: false })) return t.walker.id;
     }
     return null;
   }
@@ -524,7 +597,7 @@ export class HexWalkWorld {
       if (k < line.length - 1 && this.endOnly(to)) return false;
       from = to;
     }
-    return true;
+    return this.#towedPiece(nodes, i, j);
   }
 }
 

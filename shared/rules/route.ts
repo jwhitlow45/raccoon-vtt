@@ -3,8 +3,9 @@ import type { Blocker, BuildState } from "../ruleHooks.ts";
 import { legFeet, type DiagonalCounter, type DistanceSettings } from "./distance.ts";
 import { canSqueeze, footprintRect, footprintSize, isSqueezed, placedOnHex, rangeAtInto, snapStep, stopFootprint, tokenRefHex, type CellRange, type PlacedToken } from "./footprint.ts";
 import type { Point, Rect } from "./geom.ts";
-import { SQUARES, type Grid } from "./grid.ts";
+import { isHex, sceneGrid, SQUARES, type Grid } from "./grid.ts";
 import { hexDistance, hexLine, type HexGrid } from "./hex.ts";
+import { onHolder, seatedAt } from "./attach.ts";
 import { footing, footprintGround, sceneGround } from "./heights.ts";
 import {
   coreBlocked,
@@ -19,7 +20,9 @@ import {
   hexStartStand,
   hexWallsOf,
   legStop,
+  onSqueezedLattice,
   ownWalk,
+  previewSqueezed,
   squeezeFits,
   straightClear,
   walkEnds,
@@ -159,6 +162,52 @@ export function followedHeight(
   }
   const holderNow = followedHeight(chunks, lead, memberOf, link.to, shift, leadNow);
   return holderNow === null ? null : holderNow + (member.elevation - holderFrom);
+}
+
+/**
+ * How far a group member stands from its place offset from the lead while
+ * the lead's stored box is at `at`, squeezed there or not: by as much as
+ * the token sitting on the lead it goes with moves seat there (attach.ts
+ * seatedAt, D-261029-52 and D-261029-53), the member itself or the one it
+ * hangs from up its chain, and nothing for a member no such token holds.
+ * So a creature a rider drags walks beside the rider wherever the rider
+ * sits, as the move takes it along (moveLeg.ts follow). `lead` and the
+ * members are as they stand where the walk starts.
+ */
+export function seatShift(g: Grid, lead: PlacedToken & { id?: string | undefined }, memberOf: (id: string) => Follower | undefined, id: string, at: Point, squeezed: boolean): Point {
+  const member = seatedOn(lead, memberOf, id);
+  if (!member) return { x: 0, y: 0 };
+  const seat = seatedAt(g, member, lead, at, squeezed);
+  return { x: seat.x - (at.x + (member.x - lead.x)), y: seat.y - (at.y + (member.y - lead.y)) };
+}
+
+/** The token sitting on the lead that a group member goes with (`seatShift`): the member itself or the one it hangs from up its chain, or undefined for a member no such token holds. */
+export function seatedOn(lead: { id?: string | undefined }, memberOf: (id: string) => Follower | undefined, id: string): Follower | undefined {
+  const seen = new Set<string>();
+  let member = memberOf(id);
+  while (member?.attached && member.attached.to !== lead.id && !seen.has(member.id)) {
+    seen.add(member.id);
+    member = memberOf(member.attached.to);
+  }
+  return member?.attached && member.attached.to === lead.id && onHolder(member.attached.kind) ? member : undefined;
+}
+
+/**
+ * Whether a walker stands squeezed at each point of its walk along
+ * `points`, its trace `trace`: as it stands where the walk starts, as the
+ * move leaves it where the walk ends (`end`, else as below), and between
+ * by where it stands as it walks past: on hexes by its lattice, on squares
+ * where a narrow space pinches it there, on the grid or off it, as a drag
+ * preview's squeeze is judged (movement.ts previewSqueezed) and as the
+ * route search walks it (walk.ts WalkWorld), so a seat that moves with the
+ * squeeze moves where the search finds it does (review DP34-ASTRA-01).
+ */
+export function walkSqueezes(build: BuildState, token: PlacedToken & Pick<Walker, "sceneId">, points: readonly Point[], trace: WalkTrace, end?: boolean): boolean[] {
+  const scene = build.scenes[token.sceneId];
+  const g = scene ? sceneGrid(scene) : SQUARES;
+  const last = points.length - 1;
+  const where = (p: Point, i: number) => (isHex(g) ? onSqueezedLattice(g, token, p) : previewSqueezed(build, walkEnds(build, trace[i - 1]!)(p)));
+  return points.map((p, i) => (i === 0 ? isSqueezed(token) : i === last && end !== undefined ? end : where(p, i)));
 }
 
 /**
