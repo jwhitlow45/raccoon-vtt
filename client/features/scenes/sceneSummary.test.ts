@@ -35,6 +35,14 @@ describe("sceneGroupSummary", () => {
     assert.equal(sceneGroupSummary(scene("s", { bounds: { w: 40, h: 30 }, gridShape: "hexRows" }), "scene"), "40 × 34 hexes");
     assert.equal(sceneGroupSummary(scene("s", { bounds: { w: 40, h: 30 }, gridShape: "hexColumns", suggestedView: "isometric" }), "scene"), "45 × 30 hexes · Isometric");
   });
+
+  test("Size and view: a hex scene too small to hold a whole hex says so, as its size row's help does, rather than 0 × 0 hexes (DPB-OPUS-04)", () => {
+    // 1 × 1 steps hold no whole hex on either shape (shared/rules/hex.ts sceneHexSpan), and 3 × 1 none on hex rows.
+    assert.equal(sceneGroupSummary(scene("s", { bounds: { w: 1, h: 1 }, gridShape: "hexRows" }), "scene"), "No whole hex");
+    assert.equal(sceneGroupSummary(scene("s", { bounds: { w: 3, h: 1 }, gridShape: "hexRows", suggestedView: "isometric" }), "scene"), "No whole hex · Isometric");
+    assert.equal(sceneGroupSummary(scene("s", { bounds: { w: 1, h: 1 }, gridShape: "hexColumns" }), "scene"), "No whole hex");
+    assert.equal(sceneGroupSummary(scene("s", { bounds: { w: 1, h: 2 }, gridShape: "hexRows" }), "scene"), "1 × 1 hexes");
+  });
 });
 
 describe("fogFoldSummary", () => {

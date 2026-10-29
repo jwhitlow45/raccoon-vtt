@@ -40,13 +40,14 @@ export function sceneGroupSummary(scene: Scene, group: SceneGroup): string {
 /**
  * The scene's size in its cells. A hex scene's bounds are steps of the
  * room's distance, not hexes, so it says the whole hexes they hold, as
- * the size row's help does (grid/words.ts `sizeWords`).
+ * the size row's help does (grid/words.ts `sizeWords`), and that it holds
+ * none where it is too small for one.
  */
 function sizeText(scene: Scene): string {
   const g = sceneGrid(scene);
   if (!isHex(g)) return `${scene.bounds.w} × ${scene.bounds.h} squares`;
   const span = sceneHexSpan(g, scene.bounds);
-  return `${span.cols} × ${span.rows} hexes`;
+  return span.cols === 0 || span.rows === 0 ? "No whole hex" : `${span.cols} × ${span.rows} hexes`;
 }
 
 /** Fog and party vision's fold, folded inside What players see. */
