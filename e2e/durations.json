@@ -2,7 +2,9 @@
   "defaultSeconds": 60,
   "seconds": {
     "alignment": 220,
-    "alignment-icons": 333,
+    "alignment-followups": 180,
+    "alignment-icons": 80,
+    "alignment-settings": 130,
     "alignment-wide": 252,
     "areafog": 88,
     "areas": 33,
@@ -66,7 +68,9 @@
     "swipe": 288,
     "table": 11,
     "tokenpanel": 216,
-    "tokenpanel-lines": 367,
+    "tokenpanel-lines": 160,
+    "tokenpanel-summaries": 180,
+    "tokenpanel-words": 80,
     "tools": 32,
     "traps": 78,
     "vision": 54

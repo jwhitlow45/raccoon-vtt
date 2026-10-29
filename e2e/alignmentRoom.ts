@@ -2390,6 +2390,11 @@ const CASES = `
 </style>
 <!-- First, so the board stays inside the window for the pill cases. -->
 <div id="board" style="width: 300px; height: 160px; background: #111"></div>
+<div data-case="min-width-wrap" style="display: flex; flex-wrap: wrap; gap: 8px; width: 90px">
+  <button style="flex: none; width: 28px; min-width: 0; padding: 0">A</button>
+  <button style="flex: none; width: 44px; min-width: 44px; padding: 0">B</button>
+  <button style="flex: none; width: 60px; min-width: 60px; padding: 0">C</button>
+</div>
 <div data-case="kin-tall">
   <div style="display: grid; gap: 4px"><button>One</button><button>Two</button><button style="height: 52px">Three</button></div>
 </div>
@@ -2732,6 +2737,13 @@ export function helperTest(): void {
         assert.ok(found.some((l) => l.startsWith(`${name}: ${check} `)), `${name}: no ${check} line in ${JSON.stringify(found)}`);
       };
       const passes = async (name: string) => assert.deepEqual(await lines(name), [], `${name} should pass`);
+      // FU39-C, FU33-O6: B and C cannot share 90 px once their minimum widths count.
+      for (const zoom of [1, 1.3]) {
+        await page.locator('[data-case="min-width-wrap"]').evaluate((el, z) => {
+          (el as unknown as { style: { zoom: string } }).style.zoom = String(z);
+        }, zoom);
+        assert.deepEqual((await lines("min-width-wrap")).filter((line) => line.startsWith("min-width-wrap: wrap-orphan ")), [], `minimum widths at ${zoom * 100}%`);
+      }
       await caught("tick-dropped", "row");
       await passes("tick-on-first-line");
       // A label wrapped onto two lines over its help is met at its first line, so a box there passes and a box centered on both lines is caught.
@@ -3160,12 +3172,17 @@ export function restScrollsTest(): void {
   });
 }
 
-/** ic2-a and ic2-b1 to ic2-b7: the second icon pass, in its own fight. */
-export function iconPassTests(): void {
+/** The icon pass and follow-up round headers need the same fight in separate rooms. */
+export function iconFightTest(): void {
   test("ic2-a. the second icon pass's fight: Thorn at level 7 with a stat block and a counted Hex, Wren a druid with known forms, Exhaustion 2 and Poisoned, the goblin hidden, locked and its name hidden, and the turn timer on", async () => {
     await ic2Start();
     await waitFor("Wren on the DM's copy", () => (dmSocket.state?.tokens[run.ids.wren] ? true : null));
   });
+}
+
+/** ic2-b1 to ic2-b7: the second icon pass, in its own fight. */
+export function iconPassTests(): void {
+  iconFightTest();
 
   for (const [i, { size, scale }] of IC2_AT.entries()) {
     const at = `ic2-${size.name}-${Math.round(scale * 100)}`;
@@ -3218,7 +3235,7 @@ const SUMMARY_AT: { size: Size; scale: number }[] = [
 ];
 const atName = (at: { size: Size; scale: number }) => `${at.size.name}${at.scale === 1 ? "" : `-${Math.round(at.scale * 100)}`}`;
 
-/** fu30-a to fu30-d, after the second icon pass, and the app icon's places, appicon-a. */
+/** fu30-a to fu30-d, in the icon pass's fight, and the app icon's places, appicon-a. */
 export function fu30Tests(): void {
   test(`fu30-a. the round header's words and number, and its clock, never sit under Previous or Next, nor are cut, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, and with an overtime turn's clock at 390 x 844 at 130%, within ${LIMIT_PX} px (ICONS2B-OPUS-06, FU30-OPUS-1)`, async () => {
     const lines: string[] = [];

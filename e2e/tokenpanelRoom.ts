@@ -10,8 +10,8 @@ import { barControl, ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, star
 
 /**
  * The token panel's room and helpers (docs/design-v1-token-panel.md
- * section 7), shared by tokenpanel.e2e.ts and tokenpanel-lines.e2e.ts, so
- * the CI shards can run the two side by side. Each file builds its own
+ * section 7), shared by tokenpanel.e2e.ts and the lines, summaries and
+ * words files, so the CI shards can run the four side by side. Each file builds its own
  * room in step 0 and checks the pages' errors in step 10.
  *
  * Every file runs with `pnpm test:e2e` on E2E_PORT plus ten. The other

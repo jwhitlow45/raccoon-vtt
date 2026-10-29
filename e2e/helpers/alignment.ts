@@ -683,14 +683,15 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             const held = union(controls.map((it) => it.v));
             return need <= content.r - content.l - (held.r - held.l) + LIMIT;
           };
-          // A part's width by its content, with its padding and border, where it is drawn wider: a part that grows to fill its line, or is sized against the line, would sit at that width beside another (review FU33-O3).
+          // A growing part could shrink beside another only to its content or CSS minimum width (reviews FU33-O3 and FU33-O6).
           const needs = (it: Item) => {
             const drawn = it.box.r - it.box.l;
             const atoms = isEl(it.node) ? atomsOf(it.node) : [];
             if (!isEl(it.node) || !atoms.length) return drawn;
             const own = union(atoms);
             const { border, inner, pad } = boxes(it.node);
-            return Math.min(drawn, own.r - own.l + pad.l + pad.r + (inner.l - border.l) + (border.r - inner.r));
+            const content = own.r - own.l + pad.l + pad.r + (inner.l - border.l) + (border.r - inner.r);
+            return Math.min(drawn, Math.max(num(style(it.node), "min-width") * zoomOf(it.node), content));
           };
           // A lone last part has company only where the part before it, the last on the line above, fits beside it on a line: a legendary row's LA with LR under its AC, HP and Lair is alone by need where Lair with LA and LR runs wider than the line (FU32-LAIR-ALONE). A part sized almost to its line is still alone, since at its content's width it would fit beside the part before it.
           const couldShare = (above: Item[], lone: Item) => {
