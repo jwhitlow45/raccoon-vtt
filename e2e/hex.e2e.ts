@@ -2093,9 +2093,10 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
   });
 
   /*
-   * Lane FU35-A's step (fu35a-): a rider on a Large mount squeezed into a
-   * one-hex corridor sits on the mount's one hex there (D-261029-52), so
-   * the rider's own torch lights the corridor and the party sees down it.
+   * Lane FU35-A's steps (fu35a-): a rider on a Large mount squeezed into a
+   * corridor one hex or one square wide sits on the mount's one hex or
+   * square there (D-261029-52, D-261029-53), so the rider's own torch
+   * lights the corridor and the party sees down it.
    */
 
   test("fu35a-1. Brom rides the warhorse into a one-hex corridor: he sits on its one hex there, and his torch lights the corridor for the party, so Pat sees the goblin down it", async () => {
@@ -2138,6 +2139,49 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await waitFor("the goblin in Pat's copy, in Brom's torchlight", () => (patSocket.state?.tokens[keep.gob] ? true : null));
     await shots.take(dm, "fu35a-brom-in-corridor-dm");
     await shots.take(pat, "fu35a-corridor-lit-pat");
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+  });
+
+  test("fu35a-2. on squares too (D-261029-53): Brom, on the warhorse's far lower square, rides into a corridor one square wide on its one square there, and Pat sees the goblin down it", async () => {
+    const keep = { scene: randomUUID(), horse: randomUUID(), brom: randomUUID(), gob: randomUUID() };
+    await ops.send({ t: "scene.create", scene: { id: keep.scene, name: "Square keep", bounds: BOUNDS } });
+    await waitFor("the square keep in the DM's state", () => dmSocket.state?.scenes[keep.scene] ?? null);
+    const panel = await openScenes(dm);
+    await viewScene(dm, panel, keep.scene);
+    await dm.keyboard.press("Escape");
+    await ops.send({ t: "scene.update", sceneId: keep.scene, patch: { blockMovement: true, fogEnabled: true, vision: { on: true, light: "dark" } } });
+    // Rock from x 8 to 16 but for a corridor along row 10, its walls in runs of at most 8 cells.
+    const runs: [number, number, number, number][] = [[8, 0, 8, 8], [8, 8, 8, 10], [8, 11, 8, 19], [8, 19, 8, 20], [16, 0, 16, 8], [16, 8, 16, 10], [16, 11, 16, 19], [16, 19, 16, 20], [8, 10, 16, 10], [8, 11, 16, 11]];
+    const walls = runs.map(([ax, ay, bx, by], i) => ({ id: `fu35aq${String(i).padStart(6, "0")}`, a: [ax, ay] as [number, number], b: [bx, by] as [number, number], f: { kind: "wall" as const } }));
+    await ops.send({ t: "build.walls", sceneId: keep.scene, put: walls });
+    await waitFor("the square keep's walls", () => (Object.values(dmSocket.state?.buildChunks ?? {}).reduce((n, c) => n + (c?.sceneId === keep.scene ? (c.walls?.length ?? 0) : 0), 0) === walls.length ? true : null));
+    const make = (id: string, name: string, size: "medium" | "large", x: number, y: number, extra: Record<string, unknown>) => ({ t: "token.create" as const, token: { id, sceneId: keep.scene, kind: "monster", name, size, x, y, disposition: "hostile", visibility: "all", actor: { inline: ACTOR }, ...extra } });
+    await ops.send(make(keep.horse, "Warhorse", "large", 3, 9, { kind: "npc", disposition: "ally" }));
+    await ops.send(make(keep.brom, "Brom", "medium", 1, 9, { kind: "pc", disposition: "ally", ownerIds: [run.patId], light: { bright: 10, dim: 10 } }));
+    await ops.send(make(keep.gob, "Keep goblin", "medium", 14, 10, {}));
+    await waitFor("the warhorse", () => dmSocket.state?.tokens[keep.horse] ?? null);
+    // The square whose offset alone would leave Brom straddling the corridor's far wall, his eye on the rock's side of it.
+    await ops.send({ t: "token.attach", tokenId: keep.brom, to: keep.horse, kind: "ride", x: 4, y: 10, elevation: 0 });
+    await waitFor("Brom on the warhorse", () => (dmSocket.state?.tokens[keep.brom]?.attached?.to === keep.horse ? true : null));
+    await ops.send({ t: "room.setPlayerScene", sceneId: keep.scene });
+    await waitFor("Brom in Pat's copy", () => (patSocket.state?.tokens[keep.brom] ? true : null));
+    assert.equal(patSocket.state?.tokens[keep.gob], undefined, "the goblin in the dark, past Brom's torch");
+
+    await dm.getByRole("button", { name: "Fit the map to the screen" }).click();
+    // The warhorse's middle, a corner Brom's square only touches, starts a drag of the warhorse.
+    await holdDrag(dm, { x: 4, y: 10 }, { x: 12.5, y: 10.5 });
+    await dm.mouse.up();
+    await waitFor("the warhorse squeezed in the corridor", () => {
+      const t = dmSocket.state?.tokens[keep.horse];
+      return t?.squeeze === true && t.y === 9.5 && t.x >= 8 ? t : null;
+    });
+    const brom = dmSocket.state!.tokens[keep.brom]!;
+    const horse = dmSocket.state!.tokens[keep.horse]!;
+    assert.equal(brom.attached?.to, keep.horse, "still riding");
+    assert.deepEqual([brom.x, brom.y], [horse.x + 0.5, horse.y + 0.5], "Brom on the warhorse's one square");
+    await waitFor("the goblin in Pat's copy, in Brom's torchlight", () => (patSocket.state?.tokens[keep.gob] ? true : null));
+    await shots.take(dm, "fu35a-square-corridor-dm");
+    await shots.take(pat, "fu35a-square-corridor-lit-pat");
     await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
   });
 
