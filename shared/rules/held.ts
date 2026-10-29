@@ -459,11 +459,11 @@ export function convexLive(ground: Ground, hull: readonly Point[], work?: { n: n
  * it live, since its height is a fact of the ground on both sides. The
  * part is cut at the grid lines, and each stretch is judged at its middle,
  * which lies inside the cells the stretch lies in or on the line between
- * them. On hexes, every hex it touches. Cells off the scene hold nothing
- * to hide.
+ * them. Hexes read the same way (hexPartLive). Cells off the scene hold
+ * nothing to hide.
  */
 export function partLive(ground: Ground, [ax, ay, bx, by]: readonly [number, number, number, number], both: boolean): boolean {
-  if (isHex(ground.grid)) return convexLive(ground, [{ x: ax, y: ay }, { x: bx, y: by }]);
+  if (isHex(ground.grid)) return hexPartLive(ground, [ax, ay, bx, by], both);
   const cuts = [0, 1];
   for (const [a, b] of [
     [ax, bx],
@@ -488,6 +488,39 @@ export function partLive(ground: Ground, [ax, ay, bx, by]: readonly [number, num
     if (cuts[i]! === cuts[i - 1]!) continue;
     const t = (cuts[i - 1]! + cuts[i]!) / 2;
     if (!liveAt(ax + (bx - ax) * t, ay + (by - ay) * t)) return false;
+  }
+  return true;
+}
+
+/**
+ * partLive on hexes, by the rule squares keep: the part is cut where it
+ * enters and leaves each hex's closure (hexSpans, on the walls' lattice),
+ * and each stretch counts by the hexes holding it, either of the two
+ * beside a side it runs along, or both for a ledge. Walls on a hex scene
+ * mostly run along hex sides, so a rule asking every hex the part touches
+ * would ask for the hex past the wall too, and never name a wall the
+ * player sees from their side, which D-261027-04 names.
+ */
+function hexPartLive(ground: Ground, [ax, ay, bx, by]: readonly [number, number, number, number], both: boolean): boolean {
+  const grid = ground.grid as HexGrid;
+  const judge = (keys: readonly string[]) => {
+    const on = keys.filter((key) => {
+      const hx = parseHexKey(key);
+      return hx !== null && hexInScene(grid, ground.bounds, hx);
+    });
+    return on.length === 0 || (both ? on.every(ground.keyLive) : on.some(ground.keyLive));
+  };
+  const part = { a: [ax, ay] as [number, number], b: [bx, by] as [number, number] };
+  const [px, py, qx, qy] = latticeEnds(part);
+  if (px === qx && py === qy) return judge(cellsAt(grid, px, py));
+  const spans = hexSpans(grid, part);
+  const cuts = spans.flatMap((s) => [s.t0, s.t1]).sort((p, q) => p.n * q.d - q.n * p.d);
+  for (let i = 1; i < cuts.length; i++) {
+    const lo = cuts[i - 1]!;
+    const hi = cuts[i]!;
+    if (!less(lo, hi)) continue;
+    const mid = ratio(lo.n * hi.d + hi.n * lo.d, 2 * lo.d * hi.d);
+    if (!judge(spans.filter((s) => !less(mid, s.t0) && !less(s.t1, mid)).map((s) => s.cell))) return false;
   }
   return true;
 }

@@ -18,8 +18,10 @@ import {
 import type { Op, OpOf } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { visionRules } from "./ruleHooks.ts";
+import { placedOnHex, tokenRefHex } from "./rules/footprint.ts";
 import { sceneGrid } from "./rules/grid.ts";
-import { hexAt, hexCenter, hexKey, type HexGrid } from "./rules/hex.ts";
+import { hexAt, hexCenter, hexKey, hexNeighbors, type Hex, type HexGrid } from "./rules/hex.ts";
+import { sideWall } from "./rules/hexWalls.testkit.ts";
 import { NO_ROOM_TO_GROW } from "./rules/resize.ts";
 import { DM, P1, actor, character, env, member, room, token } from "./testutil.ts";
 
@@ -261,15 +263,50 @@ describe("the touch rule on hexes (MD2-ASTRA-1, MD2-LK-3)", () => {
       lastHex(lit, inLight?.op);
     });
 
-    test(`${gridShape}: the stopping step crosses one unheld hex, every square cell round it partly revealed: no kind named where the wall it meets stands in that hex, its kind where it stands in a live one (D-261027-04)`, () => {
+    test(`${gridShape}: the stopping step crosses one unheld hex, every square cell round it partly revealed: no kind named where the wall it meets stands in that hex, its kind where it stands in a live one or on the side it shares with one (D-261027-04)`, () => {
       for (const at of [8, 8 + 1 / 64]) {
         const s = hexRoom("allButStep", at);
         const grid = sceneGrid(s.scenes.s1!) as HexGrid;
-        const inHidden = hexKey(hexAt(grid, { x: at, y: 5.5 })) === hexKey(hexAt(grid, { x: 8, y: 5.5 }));
+        const hidden = hexAt(grid, { x: 8, y: 5.5 });
+        const p = { x: at, y: 5.5 };
+        const dist = (h: Hex) => Math.hypot(hexCenter(grid, h).x - p.x, hexCenter(grid, h).y - p.y);
+        // On hex rows x = 8 runs along the side the unheld hex shares with a live one, seen from that side as a square's side is.
+        const onSide = hexNeighbors(grid, hidden).some((n) => Math.abs(dist(n) - dist(hidden)) < 1e-9);
+        const inHidden = hexKey(hexAt(grid, p)) === hexKey(hidden) && !onSide;
         const words = inHidden ? SOMETHING_BLOCKS : WALL_IN_THE_WAY;
         assert.equal(decide(east, s), words, `wall at x = ${at}`);
         assert.equal(touchLanding(east, P1, s, deps)?.words, words, `wall at x = ${at}`);
       }
+    });
+
+    test(`${gridShape}: a wall on the side of a live hex names its kind, the hex past it unseen, and a ledge there names none until both hexes beside it are live (D-261027-04, LP24-A-HEXFIGHT-2)`, () => {
+      // Thorn's step to the hex beside his, across the side they share.
+      const make = (blocker: "wall" | "ledge", hide: boolean) => {
+        const s = hexRoom("none");
+        const grid = sceneGrid(s.scenes.s1!) as HexGrid;
+        const near = tokenRefHex(grid, s.tokens.thorn!);
+        const far = hexNeighbors(grid, near)[1]!;
+        // Standing on his hex, as a hex scene stores a creature.
+        s.tokens.thorn = { ...s.tokens.thorn!, ...placedOnHex(grid, s.tokens.thorn!, near) };
+        if (blocker === "wall") {
+          const w = sideWall(grid, near, 1);
+          wall(s, "cdefghijklmn", w.a, w.b);
+        } else {
+          heights(s, { x: far.col, y: far.row, w: 1, h: 1 }, 10);
+          for (const c of Object.values(s.buildChunks)) if (c) c.grid = gridShape;
+        }
+        if (hide) liftAllBut(s, "dm", [hexKey(far)]);
+        else lift(s, "dm", { x: 0, y: 0, w: 24, h: 16 });
+        const step: OpOf<"token.move"> = { t: "token.move", tokenId: "thorn", ...placedOnHex(grid, s.tokens.thorn!, far) };
+        return { s, step };
+      };
+      const seen = make("wall", true);
+      assert.equal(decide(seen.step, seen.s), WALL_IN_THE_WAY, "a wall on the walker's live side");
+      assert.equal(touchLanding(seen.step, P1, seen.s, deps)?.words, WALL_IN_THE_WAY);
+      const dark = make("ledge", true);
+      assert.equal(decide(dark.step, dark.s), SOMETHING_BLOCKS, "a ledge up to ground the player does not see");
+      const lit = make("ledge", false);
+      assert.equal(decide(lit.step, lit.s), LEDGE_IN_THE_WAY, "a ledge with both sides live");
     });
   }
 });
