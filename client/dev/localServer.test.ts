@@ -97,68 +97,79 @@ describe("the dev room's View as a player (D-261026-10, docs/design-v1-per-playe
     assert.deepEqual(sent, [], "a closed preview heard a batch");
   });
 
-  test("its socket sends nothing but hello and ping, anything else closes it with 4003, and a refused one never opens", async () => {
+  test("its socket sends nothing but hello and ping, anything else closes it with 4003, and a refused one never opens", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const server = new LocalServer(room(), DM, "s1");
     const sockets = localSocketFactory({ server, latencyMs: 0, members: () => ["dm1"] });
-    const settle = () => new Promise((resolve) => setTimeout(resolve, 100));
-    const open = async (as: string) => {
+    // Closing and delivering a snapshot each queue another timer. A wall-clock
+    // sleep can finish before that timer when the connection's turn runs late.
+    const settle = () => {
+      t.mock.timers.tick(100);
+      t.mock.timers.tick(1);
+    };
+    const open = (as: string) => {
       const socket = sockets.create(`ws://local/ws?room=DEVR00M0&as=${as}`);
       const got: ServerMessage[] = [];
       const closes: number[] = [];
       socket.onmessage = (e) => got.push(JSON.parse(e.data as string) as ServerMessage);
       socket.onclose = (e) => closes.push(e.code);
-      await settle();
+      settle();
       return { socket, got, closes };
     };
 
-    const refused = await open("dm1");
+    const refused = open("dm1");
     assert.deepEqual(refused.closes, [1006], "a preview of the DM opened");
 
-    const preview = await open("p1");
+    const preview = open("p1");
     assert.equal(preview.socket.readyState, 1);
     preview.socket.send(JSON.stringify({ t: "hello", clientId: "c", resumeFrom: 1 }));
     preview.socket.send(JSON.stringify({ t: "ping", k: 7 }));
-    await settle();
+    settle();
     const snapshot = preview.got.find((m) => m.t === "snapshot");
     assert.ok(snapshot && snapshot.t === "snapshot" && snapshot.you.memberId === "p1" && snapshot.you.role === "player");
     assert.ok(preview.got.some((m) => m.t === "pong" && m.k === 7));
     // The DM's own socket still gets what it gets, and the preview only its player's view.
     sockets.push({ t: "eph", from: "dm1", e: { k: "ping", x: 1, y: 1 } });
-    await settle();
+    settle();
     assert.equal(preview.got.filter((m) => m.t === "eph").length, 0, "the DM's frames reached the preview");
     preview.socket.send(JSON.stringify({ t: "op", n: 1, op: { t: "log.chat", text: "from the preview" } }));
-    await settle();
+    settle();
     assert.deepEqual(preview.closes, [4003]);
     assert.equal(server.state.log.some((line) => line.text === "from the preview"), false, "the preview's op applied");
 
     for (const msg of [{ t: "scene", sceneId: "s2" }, { t: "hello", clientId: "c", resumeFrom: 1, as: "p1" }]) {
-      const again = await open("p1");
+      const again = open("p1");
       again.socket.send(JSON.stringify(msg));
-      await settle();
+      settle();
       assert.deepEqual(again.closes, [4003], `${msg.t} closes it`);
     }
   });
 
-  test("a late snapshot is built when its delay ends, so a chat sent meanwhile is in it and no event comes before it (review PV5-ASTRA-2)", async () => {
+  test("a late snapshot is built when its delay ends, so a chat sent meanwhile is in it and no event comes before it (review PV5-ASTRA-2)", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     for (const as of ["p1", null]) {
       const server = new LocalServer(room(), DM, "s1");
       const sockets = localSocketFactory({ server, latencyMs: 0, snapshotDelayMs: 150, members: () => ["dm1"] });
       const socket = sockets.create(as === null ? "local" : `ws://local/ws?room=DEVR00M0&as=${as}`);
       const got: ServerMessage[] = [];
       socket.onmessage = (e) => got.push(JSON.parse(e.data as string) as ServerMessage);
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      t.mock.timers.tick(60);
       socket.send(JSON.stringify({ t: "hello", clientId: "c", resumeFrom: 1 }));
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      t.mock.timers.tick(40);
       server.external({ t: "log.chat", text: "during the wait" }, DM);
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      t.mock.timers.tick(110);
+      t.mock.timers.tick(1);
       const kinds = got.map((m) => m.t).filter((t) => t !== "presence");
       assert.equal(kinds[0], "snapshot", `${as ?? "the room's socket"}: ${kinds.join(", ")}`);
       const snapshot = got.find((m) => m.t === "snapshot");
       assert.ok(snapshot?.t === "snapshot" && (snapshot.state as ProjectedState).log.some((line) => line.text === "during the wait"), `${as ?? "the room's socket"}: the snapshot lacks the chat sent while it waited`);
+      socket.close();
+      t.mock.timers.tick(1);
     }
   });
 
-  test("a socket closed before it connects never opens, and registers no preview (review PV5-ASTRA-4)", async () => {
+  test("a socket closed before it connects never opens, and registers no preview (review PV5-ASTRA-4)", (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const server = new LocalServer(room(), DM, "s1");
     const sockets = localSocketFactory({ server, latencyMs: 0, members: () => ["dm1"] });
     const socket = sockets.create("ws://local/ws?room=DEVR00M0&as=p1");
@@ -166,7 +177,7 @@ describe("the dev room's View as a player (D-261026-10, docs/design-v1-per-playe
     socket.onopen = () => events.push("open");
     socket.onclose = () => events.push("close");
     socket.close();
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    t.mock.timers.tick(60);
     assert.deepEqual(events, ["close"]);
     assert.equal(socket.readyState, 3);
     assert.equal((server as unknown as { previews: Set<unknown> }).previews.size, 0, "a preview was registered for a closed socket");
