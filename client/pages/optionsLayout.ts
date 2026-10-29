@@ -411,17 +411,23 @@ function placedOrWaiting(id: string, placed: ReadonlyMap<string, SlotForm>, wait
 
 /**
  * Whether the row holds as it stood for a pin that stands compact in it,
- * as a chip just pressed does (HX8-FITROW-PIN): the press takes focus, and
- * the fit, placing that pin first in its full form, unfolded the chip's
- * choices in the row under the press, pushed its neighbours behind ⋯ and
- * opened no popover. It holds only while the room and the slots are as
- * they were. Once they change, the pins go first as ever, so a chip held
- * compact never unfolds later, as focus leaves it, under the next tap.
+ * or as a value chip in any form, as a chip just pressed does
+ * (HX8-FITROW-PIN): the press takes focus, and the fit, placing that pin
+ * first in its full form, unfolded the chip's choices in the row under the
+ * press, pushed its neighbours behind ⋯ and opened no popover. A value
+ * chip opens its popover in every form, but where the row stood around
+ * another pin, as Paint focused from its pick, the fit around the pressed
+ * Builder mode chip still pushed Paint behind ⋯ and unfolded Stairs point
+ * under the open popover (LP25-B-CHIP-1). It holds only while the room and
+ * the slots are as they were. Once they change, the pins go first as ever,
+ * so a chip held compact never unfolds later, as focus leaves it, under
+ * the next tap.
  */
 export function pinHolds(previous: { fit: RowFit; input: FitInput } | null, input: FitInput): boolean {
   if (!previous || previous.input.room !== input.room || previous.input.alwaysMore !== input.alwaysMore) return false;
   if (JSON.stringify(previous.input.slots) !== JSON.stringify(input.slots)) return false;
-  return input.pins.some((id) => previous.fit.row.some((p) => p.id === id && p.form === "compact"));
+  const chips = new Set(input.slots.filter((s) => s.glyph !== undefined || s.hosts !== undefined).map((s) => s.id));
+  return input.pins.some((id) => previous.fit.row.some((p) => p.id === id && (p.form === "compact" || chips.has(id))));
 }
 
 /**

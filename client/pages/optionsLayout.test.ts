@@ -318,6 +318,37 @@ describe("the fit (6.3)", () => {
     assert.equal(pinHolds(null, pressed), false);
   });
 
+  test("a pressed value chip holds the row as it stood in its glyph form and in its words, where the row stood around another pin (LP25-B-CHIP-1)", () => {
+    // The heights row on hexes: the Builder mode chip with its glyph, Undo, Redo, and Paint, the brush and Stairs point as chips, Paint focused from its pick.
+    const slots = [slot("mode", 1, 120, { glyph: 140 }), slot("undo", 2, 44), slot("redo", 3, 44), slot("paint", 2, 193, { compact: 119 }), slot("brush", 3, 154, { compact: 61 }), slot("stairs", 1, 332, { compact: 97 })];
+    const resting = { room: 622, slots, alwaysMore: true, pins: ["paint"] };
+    const stood = fitRow(resting);
+    assert.equal(ids(stood), "mode:glyph undo redo paint:compact brush:compact stairs:compact …");
+    // A press on Builder mode: around it alone, Paint and the brush went behind ⋯ and Stairs point unfolded under the open popover.
+    const pressed = { ...resting, pins: ["mode"] };
+    assert.equal(ids(fitRow(pressed)), "mode:glyph undo redo stairs …");
+    assert.ok(pinHolds({ fit: stood, input: resting }, pressed));
+    assert.deepEqual(heldFit(stood, pressed, false).row, stood.row);
+    assert.ok(pinHolds({ fit: stood, input: pressed }, { ...pressed, pins: ["mode", "mode"] }));
+
+    // On squares the chip stands in its words, where Paint's choices stand inline around the pin: still a chip, so it holds too.
+    const words = [slot("mode", 1, 94, { glyph: 184 }), slot("undo", 2, 44), slot("redo", 3, 44), slot("paint", 2, 167, { compact: 88 }), slot("brush", 3, 170, { compact: 51 }), slot("stairs", 1, 303, { compact: 71 })];
+    const restingWords = { room: 622, slots: words, alwaysMore: true, pins: ["paint"] };
+    const stoodWords = fitRow(restingWords);
+    assert.equal(ids(stoodWords), "mode paint stairs …");
+    const pressedWords = { ...restingWords, pins: ["mode"] };
+    assert.equal(ids(fitRow(pressedWords)), "mode undo redo brush:compact stairs …");
+    assert.ok(pinHolds({ fit: stoodWords, input: restingWords }, pressedWords));
+    // A chip that shows a waiting slot's value is a value chip too.
+    const hosting = words.map((s) => (s.id === "mode" ? slot("mode", 1, 94, { hosts: { id: "brush", words: 120 } }) : s));
+    const restingHost = { ...restingWords, slots: hosting };
+    assert.ok(pinHolds({ fit: fitRow(restingHost), input: restingHost }, { ...restingHost, pins: ["mode"] }));
+    // Paint in its full form is no chip: it holds nothing, as before.
+    assert.equal(pinHolds({ fit: stoodWords, input: restingWords }, restingWords), false);
+    // A new room still refits.
+    assert.equal(pinHolds({ fit: stood, input: resting }, { ...pressed, room: 700 }), false);
+  });
+
   test("the same input gives the same output", () => {
     const input = { room: 300, slots: [slot("a", 1, 100), slot("b", 2, 120, { compact: 50 }), slot("c", 3, 80)], alwaysMore: false, pins: [] };
     assert.deepEqual(fitRow(input), fitRow(structuredClone(input)));

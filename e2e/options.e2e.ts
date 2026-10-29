@@ -1057,5 +1057,48 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     console.log(`dp-3c: Stairs point compact at ${compacted.join(", ")}`);
   });
 
+  test("LP25-B-CHIP-1. a press on Builder mode's chip, its glyph or its words, while the row stands around Paint focused from its pick, opens its popover and leaves the row as it stood, at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130%", async () => {
+    const sizesHere: Size[] = [
+      { width: 1440, height: 900, insets: {} },
+      { width: 390, height: 844, insets: {} },
+      { width: 320, height: 568, insets: {} },
+    ];
+    const moved: string[] = [];
+    let pressedAt = 0;
+    try {
+      for (const scale of [1, 1.3]) {
+        await reloadAt(dm, scale);
+        for (const size of sizesHere) {
+          await view(dm, dmCdp, size);
+          await selectTool(dm, "b");
+          await pick(dm, "Map builder", "Builder mode", "Heights and stairs");
+          // The pick leaves focus on Paint, so the row stands around that pin, Paint's choices inline where they fit.
+          await pick(dm, "Map builder", "Paint", "Mark stairs");
+          const row = options(dm).locator("[data-options-row]");
+          const chip = row.getByRole("button", { name: /^Builder mode:/ });
+          const at = `${size.width}x${size.height} at ${scale * 100}%`;
+          if ((await chip.count()) === 0) continue;
+          pressedAt++;
+          const slotsInRow = () => row.locator("> [data-rvtt-slot]").evaluateAll((els) => els.map((e) => e.getAttribute("data-rvtt-slot")));
+          const resting = await slotsInRow();
+          await chip.click();
+          const popover = dm.getByRole("dialog", { name: "Builder mode" });
+          await popover.waitFor({ timeout: 3_000 }).catch(() => assert.fail(`${at}: the press on Builder mode's chip opened no popover`));
+          const pressed = await slotsInRow();
+          if (JSON.stringify(pressed) !== JSON.stringify(resting)) moved.push(`${at}: ${resting.join(" ")} became ${pressed.join(" ")}`);
+          await shots.take(dm, `lp25-b-chip-1-${size.width}x${size.height}-${scale * 100}`);
+          await closePopover(dm);
+        }
+      }
+    } finally {
+      await pick(dm, "Map builder", "Builder mode", "Brush").catch(() => undefined);
+      await reloadAt(dm, 1);
+      await view(dm, dmCdp, DESK);
+      await key(dm, "v");
+    }
+    assert.ok(pressedAt > 0, "Builder mode stood in no row as a chip, so nothing here was tested");
+    assert.deepEqual(moved, [], "the row refit around the pressed chip");
+  });
+
   test("9. nothing went wrong in the browsers", assertNoConsoleErrors);
 });
