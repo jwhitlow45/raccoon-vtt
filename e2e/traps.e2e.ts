@@ -7,6 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import type { RoomState, Token, Trap } from "../shared/model.ts";
 import { groundAt } from "../shared/rules/heights.ts";
+import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { ConsoleWatch, dragCells, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
@@ -1183,6 +1184,63 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     await dm.setViewportSize(DESKTOP);
     await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
     await reopenRoom(dm);
+  });
+
+  test("dpfix-1. a new trap's pane on a 320 x 568 phone at 130%, every group folded: each header within 1 px, and a summary that fits beside its name keeps the name's line (HX7-4 on squares, docs/design-v1-design-pass.md 4.1)", async () => {
+    const bareId = randomUUID().replace(/-/g, "").slice(0, 16);
+    const rig = { on: ["enter" as const], who: "party" as const, floor: true, resets: "never" as const, stops: false, foundOnSpring: true, hits: "zone" as const, actions: [], find: [], notice: false };
+    await ops.send({ t: "trap.create", trap: { id: bareId, sceneId: run.sceneId, name: "Bare Trap", zone: { cells: [{ x: 10, y: 8, w: 1, h: 1 }] }, rig } });
+    await waitFor("the bare trap on the DM's copy", () => state(dmSocket)?.traps?.[bareId] ?? null);
+    await dm.setViewportSize({ width: 320, height: 568 });
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1.3"));
+    await reopenRoom(dm);
+    await waitFor("the DM's snapshot again", () => state(dmSocket)?.traps?.[bareId] ?? null);
+    await dm.locator(".konvajs-content").first().waitFor();
+    await pickTool(dm, "Trap");
+    await tapCell(dm, BOUNDS, { x: 10, y: 8 });
+    const editor = pane(dm);
+    await editor.getByText("Bare Trap", { exact: true }).first().waitFor();
+    for (let open = editor.locator('[data-group-fold][aria-expanded="true"]'); (await open.count()) > 0; ) await open.first().click();
+    await dm.waitForTimeout(200);
+    const off = alignmentLines(await measureAlignment(editor.locator("[data-panel-group] > div:first-child")), "the trap's pane at 320 x 568 at 130%");
+    // A summary wraps under its name only where the name and the summary, up to its 4em floor, cannot share the row.
+    const heads = await editor.evaluate((root) => {
+      type E = { getAttribute(n: string): string | null; getBoundingClientRect(): { top: number; bottom: number; width: number }; querySelectorAll(s: string): ArrayLike<E>; textContent: string | null; parentElement: E | null };
+      const doc = (globalThis as unknown as { document: { getElementById(id: string): E | null; createRange(): { selectNodeContents(n: E): void; getBoundingClientRect(): { width: number } } } }).document;
+      const words = (el: E) => {
+        const range = doc.createRange();
+        range.selectNodeContents(el);
+        return range.getBoundingClientRect().width;
+      };
+      return Array.from((root as unknown as E).querySelectorAll("[data-group-fold]")).map((fold) => {
+        const name = doc.getElementById(fold.getAttribute("aria-labelledby") ?? "")!;
+        const summary = doc.getElementById(fold.getAttribute("aria-describedby") ?? "");
+        const floor = summary ? 4 * parseFloat((globalThis as unknown as { getComputedStyle(e: E): { fontSize: string } }).getComputedStyle(summary).fontSize) * (((summary as unknown as { currentCSSZoom?: number }).currentCSSZoom) ?? 1) : 0;
+        return {
+          name: name.textContent ?? "",
+          summary: summary?.textContent ?? null,
+          row: name.parentElement!.getBoundingClientRect().width,
+          nameWidth: words(name),
+          summaryWidth: summary ? words(summary) : 0,
+          floor,
+          wrapped: summary !== null && summary.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 0.5,
+        };
+      });
+    });
+    assert.ok(heads.some((h) => h.name === "Save and damage" && h.summary === "None"), `a new trap's Save and damage says None: ${JSON.stringify(heads)}`);
+    for (const h of heads) {
+      const needs = h.nameWidth + 8 * 1.3 + Math.min(h.summaryWidth, h.floor);
+      if (h.wrapped && needs <= h.row - 1) off.push(`${h.name}: its summary "${h.summary}" wrapped though the name (${h.nameWidth.toFixed(1)} px), the gap and ${Math.min(h.summaryWidth, h.floor).toFixed(1)} px of it need ${needs.toFixed(1)} of the row's ${h.row.toFixed(1)}`);
+    }
+    await shots.take(dm, "traps-dpfix-1-320x568-130-folded");
+    await editor.getByRole("button", { name: "Done", exact: true }).click();
+    await editor.waitFor({ state: "detached" });
+    await pickTool(dm, "Select");
+    await ops.send({ t: "trap.delete", trapId: bareId });
+    await dm.setViewportSize(DESKTOP);
+    await dm.evaluate(() => localStorage.setItem("rvtt.uiScale", "1"));
+    await reopenRoom(dm);
+    assert.deepEqual(off, [], "out of line by more than 1 px, or wrapped where it fits");
   });
 
   test("pl1-b. at 1440 x 900, at 100% and 130%, a docked token window's Close stands as far under its frame's top as a trap pane's, and the Trap tool's hint sits in the middle of its line (docs/design-v1-polish.md R7, R8)", async () => {

@@ -770,7 +770,8 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
           const s = h.summaryBox!;
           if (at.wrapped) {
             if (s.top < h.nameBottom - 1) lines.push(`${at.name} ${h.name}: its summary is not on the line under the name`);
-            off("the summary's left against the name's", s.left, h.nameLeft);
+            // Its box is as wide as its words, set at the row's end, so on its own line it stands in the name's column, set in past the chevron and the icon.
+            if (s.left < h.nameLeft - 1) lines.push(`${at.name} ${h.name}: its summary starts ${(h.nameLeft - s.left).toFixed(1)} px left of the name`);
           } else {
             if (s.top >= h.nameBottom - 1) lines.push(`${at.name} ${h.name}: its summary wrapped under the name`);
             off("the summary's middle against the name's", s.middle, h.nameMiddle);

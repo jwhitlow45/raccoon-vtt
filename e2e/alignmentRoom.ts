@@ -2039,6 +2039,8 @@ async function groupHeaderLines(panel: Locator, at: string, screen: string, acti
       querySelector(s: string): El | null;
       querySelectorAll(s: string): ArrayLike<El>;
       getBoundingClientRect(): { top: number; bottom: number; width: number };
+      scrollWidth: number;
+      clientWidth: number;
     };
     const g = globalThis as unknown as { document: { getElementById(id: string): El | null; createRange(): { selectNodeContents(n: El): void; getClientRects(): ArrayLike<{ top: number }> } }; getComputedStyle(e: El): { fontSize: string } };
     const lines = (el: El) => {
@@ -2061,7 +2063,9 @@ async function groupHeaderLines(panel: Locator, at: string, screen: string, acti
       if (summary && fold?.querySelector("[data-group-icon]")) {
         const floor = 4 * parseFloat(g.getComputedStyle(summary).fontSize) * zoom(summary);
         const width = summary.getBoundingClientRect().width;
-        if (width < floor - 0.5) out.push(`${label}: its summary is ${width.toFixed(1)} px, under its ${floor.toFixed(1)} px floor`);
+        // Words fewer than the floor ("Pat") show whole in less (docs/design-v1-design-pass.md 4.1): the floor is what a cut summary keeps.
+        const cut = summary.scrollWidth > summary.clientWidth;
+        if (cut && width < floor - 0.5) out.push(`${label}: its summary is cut at ${width.toFixed(1)} px, under its ${floor.toFixed(1)} px floor`);
       }
       // A summary wraps under its name only where the name and its floor cannot share the row (docs/design-v1-design-pass.md 4.1): never a token panel's.
       if (summary && summary.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 0.5) out.push(`${label}: its summary wrapped under its name`);

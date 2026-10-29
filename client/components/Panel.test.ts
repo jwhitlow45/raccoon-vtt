@@ -99,6 +99,8 @@ describe("Group", () => {
     assert.match(nameLook, /min-width:0/);
     assert.doesNotMatch(nameLook, /flex:none/, "the name may wrap between its words where it alone is wider than its column");
     assert.match(summaryLook, /flex:1 1 4em/);
+    assert.match(summaryLook, /max-width:max-content/, "it asks no more than its words, so a summary shorter than its floor keeps the name's line where it fits");
+    assert.match(summaryLook, /margin-left:auto/, "its margin sets it at the row's end, on either line");
     assert.match(summaryLook, /text-align:right/);
     assert.match(summaryLook, /text-overflow:ellipsis/);
     assert.match(summaryLook, /(?<![-a-z])width:4em/, "it asks the row for its floor alone, so an action keeps the name's line");

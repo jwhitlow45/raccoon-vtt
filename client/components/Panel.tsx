@@ -253,14 +253,15 @@ export function Group(props: {
     </span>
   );
   /*
-   * The summary's basis is its floor, a few words: it shares the name's
-   * line wherever the name and the floor fit, grows to fill the rest, and
-   * wraps under the name where they do not, rather than cut the name or
-   * shrink to nothing (docs/design-v1-design-pass.md 4.1). Its words end at
+   * The summary asks the row for its floor, a few words, or for its words
+   * where they are fewer ("None"): it shares the name's line wherever the
+   * name and that much fit, grows up to its words, and wraps under the name
+   * where they do not, rather than cut the name or shrink to nothing
+   * (docs/design-v1-design-pass.md 4.1). Its auto margin sets its words at
    * the row's end on either line. Its width, the floor again, is what it
-   * asks of the header's row, so an action ("Attach a stat block") keeps
-   * the name's line wherever the name and the floor leave it room, rather
-   * than wrap for the summary's whole words.
+   * asks of the header's row too, so an action ("Attach a stat block")
+   * keeps the name's line wherever the name and the floor leave it room,
+   * rather than wrap for the summary's whole words.
    */
   const summary =
     !open && props.summary ? (
@@ -270,6 +271,8 @@ export function Group(props: {
           flex: "1 1 4em",
           width: "4em",
           minWidth: 0,
+          maxWidth: "max-content",
+          marginLeft: "auto",
           textAlign: "right",
           fontSize: theme.font.small,
           fontWeight: theme.weight.regular,
