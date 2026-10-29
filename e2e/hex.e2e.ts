@@ -1815,11 +1815,14 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.equal(terraceChunk()?.grid, "hexRows", "its chunk carries the shape");
 
     await pickOption(dm, "Map builder", "Paint", "Mark stairs");
-    // A press on the compact chip pins it, and the row refits around it in its full form (pages/optionsLayout.ts fitRow), so the arrows may unfold in the row rather than open in a popover.
+    // A press on the compact chip pins it in the form it stands in (pages/optionsLayout.ts fitRow, HX8-FITROW-PIN), so its popover opens and nothing in the row moves.
+    const slotsInRow = () => bar.locator("[data-options-row] > [data-rvtt-slot]").evaluateAll((els) => els.map((e) => e.getAttribute("data-rvtt-slot")));
+    const resting = await slotsInRow();
     await bar.getByRole("button", { name: /^Stairs point:/ }).click();
     const popover = dm.getByRole("dialog", { name: "Stairs point" });
-    const east = (within: Locator) => within.getByRole("radio", { name: "Up to the east", exact: true });
-    await east(popover).or(east(bar.locator("[data-options-row]").getByRole("radiogroup", { name: "Stairs point" }))).click();
+    await popover.waitFor();
+    assert.deepEqual(await slotsInRow(), resting, "the row refit around the pressed chip");
+    await popover.getByRole("radio", { name: "Up to the east", exact: true }).click();
     await popover.waitFor({ state: "detached" });
     await tapAt(dm, hexCenter(G, { col: 11, row: 8 }));
     await waitFor("the stair facing east", () => (terraceChunk()?.up?.[8 * 16 + 11] === "0" ? true : null));

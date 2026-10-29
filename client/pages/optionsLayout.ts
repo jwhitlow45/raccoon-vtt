@@ -410,8 +410,24 @@ function placedOrWaiting(id: string, placed: ReadonlyMap<string, SlotForm>, wait
 }
 
 /**
+ * Whether the row holds as it stood for a pin that stands compact in it,
+ * as a chip just pressed does (HX8-FITROW-PIN): the press takes focus, and
+ * the fit, placing that pin first in its full form, unfolded the chip's
+ * choices in the row under the press, pushed its neighbours behind ⋯ and
+ * opened no popover. It holds only while the room and the slots are as
+ * they were. Once they change, the pins go first as ever, so a chip held
+ * compact never unfolds later, as focus leaves it, under the next tap.
+ */
+export function pinHolds(previous: { fit: RowFit; input: FitInput } | null, input: FitInput): boolean {
+  if (!previous || previous.input.room !== input.room || previous.input.alwaysMore !== input.alwaysMore) return false;
+  if (JSON.stringify(previous.input.slots) !== JSON.stringify(input.slots)) return false;
+  return input.pins.some((id) => previous.fit.row.some((p) => p.id === id && p.form === "compact"));
+}
+
+/**
  * The split while it holds (6.4): while ⋯'s popover is open (`moreOpen`),
- * and while a press that began on the row is down. No slot crosses
+ * while a press that began on the row is down, and while a compact pin
+ * stands in it (pinHolds). No slot crosses
  * between the row and ⋯. A slot that goes leaves from wherever it is, and
  * a slot that appears joins its home. While ⋯ is open it stays, even with
  * nothing left in it, until the popover closes, and then the row refits

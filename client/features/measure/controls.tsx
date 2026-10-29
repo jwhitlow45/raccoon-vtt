@@ -30,7 +30,7 @@ import { Swatches, type SwatchOption } from "../../components/Swatches.tsx";
 import { accessibleName, VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { HoldRepeat, type RepeatValue } from "../../lib/holdRepeat.ts";
 import { theme } from "../../lib/theme.ts";
-import { fitRow, heldFit, POPOVER_MIN, SLOT_GAP, type Arrangement, type FitSlot, type RowFit, type SlotForm } from "../../pages/optionsLayout.ts";
+import { fitRow, heldFit, pinHolds, POPOVER_MIN, SLOT_GAP, type Arrangement, type FitInput, type FitSlot, type RowFit, type SlotForm } from "../../pages/optionsLayout.ts";
 import { useKeyHints, withKey } from "../../state/shortcuts.ts";
 import { uiScale } from "../device/settings.ts";
 
@@ -314,17 +314,19 @@ export function OptionsStrip(props: {
 
   const fitSlots = inRow.map((s) => fitSlotOf(s, widths));
   const measured = fitSlots.every((s): s is FitSlot => s !== null);
-  const last = useRef<RowFit | null>(null);
+  const last = useRef<{ fit: RowFit; input: FitInput } | null>(null);
   let fit: RowFit | null = null;
+  let lastInput: FitInput | null = null;
   if (room !== null) {
     const known = fitSlots.filter((s): s is FitSlot => s !== null);
     const input = { room, slots: known, alwaysMore: always.length > 0, pins: [focused, anchor].filter((id): id is string => id !== null) };
     const before = last.current;
-    if (before && (pressed || more.open || !measured)) fit = heldFit(before, input, more.open);
+    if (before && (pressed || more.open || !measured || pinHolds(before, input))) fit = heldFit(before.fit, input, more.open);
     else if (measured) fit = fitRow(input);
+    lastInput = input;
   }
   useLayoutEffect(() => {
-    last.current = fit;
+    last.current = fit && lastInput ? { fit, input: lastInput } : null;
   });
 
   // Focus never falls to the page (6.4): the control holding it left the row.

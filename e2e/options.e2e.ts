@@ -1016,5 +1016,46 @@ describe("raccoon-vtt tool options in one row", { timeout: 3_600_000 }, () => {
     assert.deepEqual(lines, []);
   });
 
+  test("dp-3c. a press on Stairs point's compact chip opens its popover and leaves the row as it stood, wherever the row compacts it, at 1440 x 900, 390 x 844 and 320 x 568, at 100% and 130% (HX8-FITROW-PIN)", async () => {
+    const sizesHere: Size[] = [
+      { width: 1440, height: 900, insets: {} },
+      { width: 390, height: 844, insets: {} },
+      { width: 320, height: 568, insets: {} },
+    ];
+    const compacted: string[] = [];
+    try {
+      for (const scale of [1, 1.3]) {
+        await reloadAt(dm, scale);
+        for (const size of sizesHere) {
+          await view(dm, dmCdp, size);
+          await selectTool(dm, "b");
+          await pick(dm, "Map builder", "Builder mode", "Heights and stairs");
+          // Focus stays where the pick left it, on Paint, as after any pick: the row stands around that pin.
+          await pick(dm, "Map builder", "Paint", "Mark stairs");
+          const row = options(dm).locator("[data-options-row]");
+          const chip = row.getByRole("button", { name: /^Stairs point:/ });
+          if ((await chip.count()) === 0) continue;
+          const at = `${size.width}x${size.height} at ${scale * 100}%`;
+          compacted.push(at);
+          const slotsInRow = () => row.locator("> [data-rvtt-slot]").evaluateAll((els) => els.map((e) => e.getAttribute("data-rvtt-slot")));
+          const resting = await slotsInRow();
+          await chip.click();
+          const popover = dm.getByRole("dialog", { name: "Stairs point" });
+          await popover.waitFor({ timeout: 3_000 }).catch(() => assert.fail(`${at}: the press on Stairs point's chip opened no popover`));
+          assert.deepEqual(await slotsInRow(), resting, `${at}: the row refit around the pressed chip`);
+          await shots.take(dm, `dp-3c-stairs-point-${size.width}x${size.height}-${scale * 100}`);
+          await closePopover(dm);
+        }
+      }
+    } finally {
+      await pick(dm, "Map builder", "Builder mode", "Brush").catch(() => undefined);
+      await reloadAt(dm, 1);
+      await view(dm, dmCdp, DESK);
+      await key(dm, "v");
+    }
+    assert.ok(compacted.length > 0, "Stairs point stood in full at every size, so nothing here was tested");
+    console.log(`dp-3c: Stairs point compact at ${compacted.join(", ")}`);
+  });
+
   test("9. nothing went wrong in the browsers", assertNoConsoleErrors);
 });

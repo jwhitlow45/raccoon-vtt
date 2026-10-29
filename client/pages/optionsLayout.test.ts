@@ -16,6 +16,7 @@ import {
   optionsLift,
   PAIR,
   PART_DIVIDER,
+  pinHolds,
   POPOVER_MIN,
   SLOT_GAP,
   toolbarShape,
@@ -293,6 +294,28 @@ describe("the fit (6.3)", () => {
     const narrow = fitRow({ room: 100, slots: [slot("wide", 1, 120)], alwaysMore: true, pins: ["wide"] });
     assert.deepEqual(narrow.broken, ["wide"]);
     assert.deepEqual(narrow.more, ["wide"]);
+  });
+
+  test("a pressed chip holds the row as it stood, so it stays a chip and opens its popover, until the room or the slots change (HX8-FITROW-PIN)", () => {
+    // The builder's heights row: its mode chip, Paint, Stairs point (its choices inline in full), the brush and Undo, with ⋯ always.
+    const slots = [slot("mode", 1, 132), slot("paint", 2, 152), slot("stairs", 2, 318, { compact: 128 }), slot("brush", 3, 166, { compact: 96 }), slot("undo", 2, 92)];
+    const resting = { room: 578, slots, alwaysMore: true, pins: ["paint"] };
+    const stood = fitRow(resting);
+    assert.equal(ids(stood), "mode paint stairs:compact undo …", "Stairs point is a chip, Paint still focused from its pick");
+    // A press moves focus to the chip. Placed first in full, its choices unfolded in the row under the press and pushed Paint and Undo behind ⋯.
+    const pressed = { ...resting, pins: ["stairs"] };
+    assert.equal(ids(fitRow(pressed)), "mode stairs …");
+    assert.ok(pinHolds({ fit: stood, input: resting }, pressed));
+    assert.deepEqual(heldFit(stood, pressed, false).row, stood.row);
+    // Its popover open, the chip is the popover's anchor too, and the row still holds.
+    assert.ok(pinHolds({ fit: stood, input: pressed }, { ...pressed, pins: ["stairs", "stairs"] }));
+    // A pin in full, as the focused Paint, holds nothing: the pins go first as ever.
+    assert.equal(pinHolds({ fit: stood, input: resting }, resting), false);
+    // A new room or new slots: the pins go first as ever, so a chip held compact never unfolds later as focus leaves it.
+    assert.equal(pinHolds({ fit: stood, input: resting }, { ...pressed, room: 700 }), false);
+    assert.equal(pinHolds({ fit: stood, input: resting }, { ...pressed, slots: slots.map((s) => (s.id === "undo" ? { ...s, full: 96 } : s)) }), false);
+    assert.equal(pinHolds({ fit: stood, input: resting }, { ...pressed, alwaysMore: false }), false);
+    assert.equal(pinHolds(null, pressed), false);
   });
 
   test("the same input gives the same output", () => {
