@@ -76,6 +76,8 @@ export type PartySight = {
    * this one question.
    */
   seesToken(token: SightProbe, grid: Grid): boolean;
+  /** Whether any of these sub-cells has sight above 0, after a caller clips the footprint to its walls. */
+  seesSubcells(subs: readonly (readonly [number, number])[]): boolean;
   /** Every tile with a level above 0, keyed `"<tx>,<ty>"`, as players and DMs receive them. */
   readonly tiles: ReadonlyMap<string, SightTile>;
 };

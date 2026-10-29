@@ -2311,9 +2311,7 @@ export function seesCreature(sight: PartySight, probe: SightProbe, g: Grid, clip
   if (g.shape !== "hex" || clip === null) return sight.seesToken(probe, g);
   const { kept, keep } = clipFootprint(g, probe, clip);
   if (keep === null) return sight.seesToken(probe, g);
-  if (sight instanceof TileSight || sight instanceof HolderSight) return sight.seesSubcells(kept);
-  // A sight made outside this file, as a test's stand-in, reads no sub-cells, so a creature the clip cuts fails closed.
-  return false;
+  return sight.seesSubcells(kept);
 }
 
 /*

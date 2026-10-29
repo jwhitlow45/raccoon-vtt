@@ -144,10 +144,10 @@ describe("fan-out invariant on vision scenes", () => {
    * runs real sight, whose changed tiles the narrow diff finds.
    */
   const fake: VisionRules = {
-    partySight: (): PartySight => ({ seesToken: (t) => t.x < 15, tiles: new Map([["0,0", { f: 2 }]]) }),
+    partySight: (): PartySight => ({ seesSubcells: () => false, seesToken: (t) => t.x < 15, tiles: new Map([["0,0", { f: 2 }]]) }),
     // No scene here is per player, so nothing asks.
-    holderSight: (): PartySight => ({ seesToken: () => false, tiles: new Map() }),
-    sightFromTiles: (tiles, sceneId): PartySight => ({ seesToken: (t) => tiles[`${sceneId}:0,0`] !== undefined && t.x < 15, tiles: new Map() }),
+    holderSight: (): PartySight => ({ seesSubcells: () => false, seesToken: () => false, tiles: new Map() }),
+    sightFromTiles: (tiles, sceneId): PartySight => ({ seesSubcells: () => false, seesToken: (t) => tiles[`${sceneId}:0,0`] !== undefined && t.x < 15, tiles: new Map() }),
   };
   test("applying each viewer's diffs to its snapshot equals a fresh projection, with creatures walking in and out of sight", () => {
     const real = { ...visionRules };

@@ -204,6 +204,28 @@ describe("the wall clip on hexes (HX-D10)", () => {
     assert.equal(withheldWhereItStands(clipRoom(8), m), false);
   });
 
+  test("any PartySight implementation reads the clipped sub-cells (H2-OPUS-04)", () => {
+    const s = clipRoom(8);
+    const probe = s.tokens.m!;
+    const clip = clipOf(s);
+    const { kept, keep } = clipFootprint(g, probe, clip);
+    assert.notEqual(keep, null);
+    for (const visible of [true, false]) {
+      let read = false;
+      const sight = {
+        tiles: new Map(),
+        seesToken: () => { assert.fail("the unclipped footprint must not be read"); },
+        seesSubcells: (subs: readonly (readonly [number, number])[]) => {
+          read = true;
+          assert.deepEqual(subs, kept);
+          return visible;
+        },
+      };
+      assert.equal(seesCreature(sight, probe, g, clip), visible);
+      assert.equal(read, true);
+    }
+  });
+
   test("a creature whose stored center lies on walls it cannot step off is unseen and withheld", () => {
     clearVisionCache();
     // Eight walls through its center, one along each line the sixteen step directions lie on: every direction slides along one.

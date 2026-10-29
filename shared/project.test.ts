@@ -604,10 +604,10 @@ describe("projection properties over random rooms with a party that sees", () =>
    * vision rule is checked on rooms where it matters.
    */
   const fake: VisionRules = {
-    partySight: (): PartySight => ({ seesToken: (t) => t.x < 15, tiles: new Map([["1,0", { f: 1 }]]) }),
+    partySight: (): PartySight => ({ seesSubcells: () => false, seesToken: (t) => t.x < 15, tiles: new Map([["1,0", { f: 1 }]]) }),
     // No scene here is per player, so nothing asks.
-    holderSight: () => ({ seesToken: () => false, tiles: new Map() }),
-    sightFromTiles: () => ({ seesToken: () => false, tiles: new Map() }),
+    holderSight: () => ({ seesSubcells: () => false, seesToken: () => false, tiles: new Map() }),
+    sightFromTiles: () => ({ seesSubcells: () => false, seesToken: () => false, tiles: new Map() }),
   };
 
   test("no player projection holds a creature out of the party's sight, and projectEntity agrees with projectState", () => {
