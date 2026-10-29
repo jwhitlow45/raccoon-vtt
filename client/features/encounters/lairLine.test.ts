@@ -42,11 +42,13 @@ describe("an encounter's line offers In its lair where its block has lair number
     assert.ok(!line(lurker).includes("In its lair"));
   });
 
-  test("a line already in its lair keeps the box that takes it out, and says its block changes nothing there", () => {
-    for (const view of [keeper, warden, lurker]) {
+  test("FU33-O7: a lair-actions-only line already ticked describes its running-fight reminder", () => {
+    for (const view of [keeper, warden]) {
       const html = line(view, true);
       assert.ok(html.includes("In its lair"), `${view.name}: no In its lair`);
-      assert.ok(html.includes("Its stat block changes nothing in its lair."), `${view.name}: the help`);
+      assert.ok(html.includes("Joins a running fight with In lair on when Add to fight is on."), `${view.name}: the help`);
+      assert.ok(!html.includes("changes nothing"));
     }
+    assert.ok(line(lurker, true).includes("Its stat block changes nothing in its lair."));
   });
 });

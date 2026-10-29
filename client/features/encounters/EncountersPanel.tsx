@@ -22,7 +22,7 @@ import { viewOf } from "../monsters/draft.ts";
 import { currentStageCamera } from "../scenes/stageCamera.ts";
 import type { Point } from "../tokens/factory.ts";
 import { PLACE_TOOL_ID, setPending } from "../tokens/placement.ts";
-import { hasLairValues } from "../tokens/factory.ts";
+import { blockHasLair, hasLairValues } from "../tokens/factory.ts";
 import { useMonsterFilters } from "../tokens/filterState.ts";
 import { filterCount } from "../tokens/monsterFilters.ts";
 import { MonsterFilterBar } from "../tokens/MonsterFilters.tsx";
@@ -404,7 +404,7 @@ export function MonsterLine(props: {
       </div>
       {/* As on the Monsters place card, not for lair actions alone: outside a drop into a running fight, the tick reaches a token's counts and XP and nothing else (factory.ts hasLairValues). One already in its lair keeps the box that takes it out. */}
       {view && (hasLairValues(view) || line.inLair === true) ? (
-        <Checkbox checked={line.inLair === true} onChange={props.onLair} label="In its lair" help={hasLairValues(view) ? "Uses the lair's legendary uses and XP." : "Its stat block changes nothing in its lair."} />
+        <Checkbox checked={line.inLair === true} onChange={props.onLair} label="In its lair" help={hasLairValues(view) ? "Uses the lair's legendary uses and XP." : blockHasLair(view) ? "Joins a running fight with In lair on when Add to fight is on." : "Its stat block changes nothing in its lair."} />
       ) : null}
     </div>
   );
