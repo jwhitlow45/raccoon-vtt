@@ -17,8 +17,8 @@ import { DM, P1, character, env, template } from "../testutil.ts";
  * What sits on a holder whose walk squeezes on a hex scene (D-261029-52,
  * LP24-A-HEXFIGHT-1): at each point of the walk it takes the seat nearest
  * it on the hexes the holder stands on there, so a rider squeezes through
- * a corridor on its mount's hex, and takes its nearest full seat again
- * where the mount stands up. Its link reads the full footprint, so it never
+ * a corridor on its mount's hex, and takes its own seat again where the
+ * mount stands up (D-261029-80). Its link reads the full footprint, so it never
  * lets go, and Get off from a squeezed mount lands in the corridor. Ops
  * stored before version 29 replay by the offset they were written under.
  */

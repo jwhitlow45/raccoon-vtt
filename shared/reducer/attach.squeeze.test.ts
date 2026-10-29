@@ -18,7 +18,7 @@ import { DM, P1, character, env, member, room, scene, token } from "../testutil.
  * What sits on a holder whose walk squeezes on squares (D-261029-53, as
  * D-261029-52 on hexes): at each point where the holder stands squeezed it
  * takes the seat nearest it on the squares the squeeze stands on, and its
- * nearest full seat where the holder stands full size. So a rider in a
+ * own seat where the holder stands full size (D-261029-80). So a rider in a
  * corridor one square wide sits on its mount's square there, never
  * straddling the corridor's wall, and its torch lights the corridor for
  * the party from every seat. Get off from a squeezed mount lands in the

@@ -820,13 +820,15 @@ export const opMigrations: MigrationStep[] = [
     // nearest it on the hexes or squares the holder stands on at each point
     // of the walk where the holder squeezes, and its own seat where the
     // holder stands full size (`seatsOnSqueeze`), so a rider squeezes
-    // through a corridor on its mount. A walk off a squeezed holder crosses
-    // only the ledges inside its squeezed footprint, no longer those in the
-    // band of its full one beside it (review DP34-ASTRA-02). Older ops
-    // replay by the rules they were written under, where it kept its offset
-    // from the holder's box and a walk off read the full footprint, so they
-    // put each token where they put it then and a stored restore's hash
-    // guards still match.
+    // through a corridor on its mount. On hexes every walk seats it so,
+    // squeezed or not (review DP34-OPUS-10). A walk off a squeezed holder
+    // crosses only the ledges inside its squeezed footprint, no longer those
+    // in the band of its full one beside it, and one that lands in that band
+    // leaves its seat, starting on the ground (reviews DP34-ASTRA-02 and
+    // DP34-ASTRA-05). Older ops replay by the rules they were written under,
+    // where it kept its offset from the holder's box and a walk off read the
+    // full footprint, so they put each token where they put it then and a
+    // stored restore's hash guards still match.
     //
     // Deploy: back up the database just before. The first op after it is
     // stored at version 29, and the shutdown writes version 29 snapshots,
@@ -1148,12 +1150,13 @@ export function attaches(opVersion: number | undefined): boolean {
  * Whether what sits on a holder whose walk squeezes, on hexes or squares,
  * takes the seat nearest it on the hexes or squares the holder stands on
  * at each point of the walk where the holder squeezes, and its own seat
- * where it stands full size (D-261029-52, D-261029-53, moveLeg.ts
- * squeezedSeats), and whether a walk off a squeezed holder crosses only
- * the ledges inside its squeezed footprint (attach.ts walkerFor, review
- * DP34-ASTRA-02). Ops stored before version 29 kept its offset from the
- * holder's box all the way, and crossed the ledges inside the full
- * footprint, and replay by those rules. Live ops carry no stored version
+ * where it stands full size, on hexes on every walk (D-261029-52,
+ * D-261029-53, moveLeg.ts squeezedSeats), and whether a walk off a
+ * squeezed holder crosses only the ledges inside its squeezed footprint and
+ * leaves its seat once it lands off that footprint (attach.ts walkerFor,
+ * reviews DP34-ASTRA-02 and DP34-ASTRA-05). Ops stored before version 29
+ * kept its offset from the holder's box all the way, and read the full
+ * footprint for a walk off, and replay by those rules. Live ops carry no stored version
  * and take today's rules.
  */
 export function seatsOnSqueeze(opVersion: number | undefined): boolean {
