@@ -5,7 +5,7 @@ import type { Op } from "../protocol.ts";
 import { movementRules } from "../ruleHooks.ts";
 import { carriedGroup, moveGroups, onHolder, publicMembers, seatedAt, walkerFor, type SeenByAll } from "./attach.ts";
 import type { Point } from "./geom.ts";
-import { sceneGrid } from "./grid.ts";
+import { isHex, sceneGrid } from "./grid.ts";
 import { footing } from "./heights.ts";
 import { groundUnder, landing } from "./movement.ts";
 import { followerTrace, pieceReach, routeWalkers, walkSqueezes, type RoutePoint, type WalkTrace } from "./route.ts";
@@ -206,22 +206,25 @@ function follow(before: RoomState, member: Token, holder: MovedToken, isPublic: 
 
 /**
  * Where what sits on a holder sits at each point of the holder's walk when
- * that walk squeezes (D-261029-52 on hexes, D-261029-53 on squares), or
- * null where the offset holds all the way: for ops stored before version
- * 29 (migrate.ts seatsOnSqueeze), for a walk that neither squeezes nor
- * starts squeezed, whose offset keeps it on its seat, for a change of
- * scene or shape, which no squeeze survives, and for a holder another
- * token carries, since only a token's own move takes a squeeze
- * (reducer/tokens.ts carriedAlong). At each point it sits where the
+ * that walk squeezes, and on hexes on any walk (D-261029-52 on hexes,
+ * D-261029-53 on squares), or null where the offset holds all the way: for
+ * ops stored before version 29 (migrate.ts seatsOnSqueeze), for a walk on
+ * squares that neither squeezes nor starts squeezed, whose offset keeps it
+ * on its seat, for a change of scene or shape, which no squeeze survives,
+ * and for a holder another token carries, since only a token's own move
+ * takes a squeeze (reducer/tokens.ts carriedAlong). At each point it sits where the
  * holder's stand there seats it (attach.ts seatedAt): on its own seat
  * where the holder stands full size, and where it squeezes on the seat
  * nearest that on the squares or hexes it squeezes onto. So a rider sits
  * on its mount's square or hex through a corridor one wide, its light and
  * sight with it, and is on its own seat again past it, and the walk's
  * route, sweeps and ruler read it there. A device's route search and cut
- * read what the rider drags by the same seat (route.ts seatShift). Its
- * link reads the full footprint (docs/design-v1-attach.md 5.1), which
- * every such seat lies in, so it never lets go mid-corridor.
+ * read what the rider drags by the same seat (route.ts seatShift). On
+ * hexes its own seat is the anchor nearest its place, so every walk there
+ * seats it, and one nudged off its anchor sits on it again, as a device
+ * reads it (review DP34-OPUS-10). Its link reads the full footprint
+ * (docs/design-v1-attach.md 5.1), which every such seat lies in, so it
+ * never lets go mid-corridor.
  */
 function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env: Versioned): (Point | null)[] | null {
   if (!seatsOnSqueeze(env.opVersion) || holder.carriedBy !== undefined || (holder.how !== "walk" && holder.how !== "teleport")) return null;
@@ -229,8 +232,8 @@ function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env
   const standing = before.tokens[holder.tokenId];
   if (!scene || !standing) return null;
   const squeezedAt = walkSqueezes(before, standing, holder.route, holder.trace, holder.squeezed === true);
-  if (!squeezedAt.some((s) => s)) return null;
   const g = sceneGrid(scene);
+  if (!isHex(g) && !squeezedAt.some((s) => s)) return null;
   return holder.route.map((p, i) => (i === 0 ? null : seatedAt(g, member, standing, p, squeezedAt[i]!)));
 }
 

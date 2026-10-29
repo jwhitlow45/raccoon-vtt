@@ -7,14 +7,14 @@ import type { OpOf } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { planMove } from "#shared/rules/moveLeg.ts";
 import { occupiedHexes } from "#shared/rules/footprint.ts";
-import { hexKey, type Hex } from "#shared/rules/hex.ts";
+import { hexKey, hexNeighbors, type Hex } from "#shared/rules/hex.ts";
 import { findRouteOn } from "#shared/rules/hexWalk.ts";
-import { COLUMNS, hexWallRoom, onHex, ROWS, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
+import { COLUMNS, hexWallRoom, onHex, ROWS, sideWall, wallsRound } from "#shared/rules/hexWalls.testkit.ts";
 import { hexStandPlace, ownWalk } from "#shared/rules/movement.ts";
-import { routePoints } from "#shared/rules/route.ts";
+import { routePoints, seatShift } from "#shared/rules/route.ts";
 import { groupWalkWorld } from "#shared/rules/walkWorld.ts";
-import { env, P1, room, scene, token } from "#shared/testutil.ts";
-import { cutForWalkers, moveOpsOf, walkersStop } from "./drop.ts";
+import { apply, DM, env, P1, room, scene, token } from "#shared/testutil.ts";
+import { cutForWalkers, moveOpsOf, planOne, walkersStop } from "./drop.ts";
 import { seenRoom } from "./testing.ts";
 
 /**
@@ -150,6 +150,39 @@ for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const)
       const route = found.pieces.flatMap(([x, y, extra, swim]): [number, number, number, 0 | 1][] => (extra === 1 ? [[halfway.x, halfway.y, 1, 0], [x, y, 1, swim]] : [[x, y, extra, swim]]));
       assert.equal(route.length, found.pieces.length + 1, "one squeezed piece");
       cutTaken(s, out, route);
+    });
+  });
+}
+
+for (const [name, g] of [["hex rows", ROWS], ["hex columns", COLUMNS]] as const) {
+  describe(`${name}: a rider a little off its seat drags a goblin on a walk that never squeezes`, () => {
+    test("the server and the device put the goblin beside Brom on his seat, so a drop the device sends is one the server takes (review DP34-OPUS-10)", () => {
+      const shape = g.orient === "rows" ? "hexRows" : "hexColumns";
+      let s = hexWallRoom(shape, 20, 20, []);
+      s.tokens.horse = onHex(g, "horse", "large", { col: 6, row: 6 }, { name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
+      const seat = occupiedHexes(g, s.tokens.horse!)[1]!;
+      s.tokens.brom = onHex(g, "brom", "medium", seat, { name: "Brom", ownerIds: ["p1"], attached: { to: "horse", kind: "ride", steer: true } });
+      s.tokens.gob = onHex(g, "gob", "medium", hexNeighbors(g, seat)[0]!, { name: "Goblin", ownerIds: ["p1"], attached: { to: "brom", kind: "drag" } });
+      // Nudged a little off his seat's anchor, across the grid's rows or columns, Brom still rides and still drags the goblin.
+      const [nx, ny] = g.orient === "rows" ? [0.3, 0.4] : [0.4, 0.3];
+      s = apply(s, { t: "token.update", tokenId: "brom", patch: { x: s.tokens.brom!.x + nx, y: s.tokens.brom!.y + ny } }, DM);
+      assert.equal(s.tokens.brom!.attached?.to, "horse");
+      assert.equal(s.tokens.gob!.attached?.to, "brom");
+      const horse = s.tokens.horse!;
+      // Three rows or columns over, where the nudged offset falls in another hex than his seat's.
+      const to = hexStandPlace(g, horse, { size: "large", ref: g.orient === "rows" ? { col: 6, row: 9 } : { col: 9, row: 6 }, squeezed: false });
+      // Walls round the hex the goblin's old offset from the mount would take it to, beside the one his seat takes it to.
+      const gob = s.tokens.gob!;
+      const offset = occupiedHexes(g, { ...gob, x: gob.x + to.x - horse.x, y: gob.y + to.y - horse.y })[0]!;
+      const by = seatShift(g, horse, (id) => s.tokens[id], "gob", to, false);
+      assert.notEqual(hexKey(occupiedHexes(g, { ...gob, x: gob.x + to.x - horse.x + by.x, y: gob.y + to.y - horse.y + by.y })[0]!), hexKey(offset), "the seat and the offset part");
+      for (let d = 0; d < 6; d++) s.buildChunks = hexWallRoom(shape, 20, 20, [...Object.values(s.buildChunks).flatMap((c) => c.walls ?? []), sideWall(g, offset, d)]).buildChunks;
+      const view = seenRoom(s);
+      const plan = cutForWalkers(view, horse, planOne(view, horse, to, "walk"), [gob], "walk");
+      for (const op of moveOpsOf(plan.moves)) {
+        const allowed = canApply(op, P1, s, { canUseAsset: () => true });
+        assert.ok(allowed.ok, `${JSON.stringify(op)}: ${allowed.ok ? "" : allowed.message}`);
+      }
     });
   });
 }
