@@ -28,12 +28,17 @@ import { seenRoom } from "./testing.ts";
  * corridor's mouth. The walking ruler from the rider reads the same aim.
  */
 
-/** Rock from x 8 to 16 but for a corridor along rows 10 to 10 + `wide`, walled round, the warhorse in the hall west of it. */
+/** Rock from x 8 to 16 but for a corridor along rows 10 to 10 + `wide`, walled round, each wall at most 8 squares long as the protocol takes one, the warhorse in the hall west of it. */
 function squareCorridor(wide: 1 | 2): RoomState {
   const s = room({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
   s.buildChunks = {};
   const bottom = 10 + wide;
-  const runs: [[number, number], [number, number]][] = [[[8, 0], [8, 10]], [[8, bottom], [8, 20]], [[16, 0], [16, 10]], [[16, bottom], [16, 20]], [[8, 10], [16, 10]], [[8, bottom], [16, bottom]]];
+  const below = (bottom + 20) / 2;
+  const runs: [[number, number], [number, number]][] = [
+    ...[8, 16].flatMap((x): [[number, number], [number, number]][] => [[[x, 0], [x, 5]], [[x, 5], [x, 10]], [[x, bottom], [x, below]], [[x, below], [x, 20]]]),
+    [[8, 10], [16, 10]],
+    [[8, bottom], [16, bottom]],
+  ];
   runs.forEach(([a, b], i) => wall(s, `fu36aa${String(i).padStart(6, "0")}`, a, b));
   s.tokens.horse = token("horse", { size: "large", x: 3, y: 9, name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
   return s;

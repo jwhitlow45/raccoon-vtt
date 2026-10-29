@@ -31,11 +31,10 @@ function corridor(wide: 1 | 2): { s: RoomState; rock: (x: number, y: number) => 
   const bottom = top + wide;
   const s = room({ members: { dm1: member("dm1", "dm"), p1: member("p1") }, scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off", fogEnabled: true, vision: { on: true, light: "dark" } }) } });
   s.buildChunks = {};
+  // Each wall at most 8 squares long, as the protocol takes one: a longer one would be dropped.
+  const below = (bottom + 20) / 2;
   const runs: [[number, number], [number, number]][] = [
-    [[8, 0], [8, top]],
-    [[8, bottom], [8, 20]],
-    [[16, 0], [16, top]],
-    [[16, bottom], [16, 20]],
+    ...[8, 16].flatMap((x): [[number, number], [number, number]][] => [[[x, 0], [x, top / 2]], [[x, top / 2], [x, top]], [[x, bottom], [x, below]], [[x, below], [x, 20]]]),
     [[8, top], [16, top]],
     [[8, bottom], [16, bottom]],
   ];

@@ -997,7 +997,7 @@ describe("golden bits", () => {
     const build: Build = {
       edges,
       cells: { "6,6": "pillar", "20,4": "pillar" },
-      walls: [free(4, 3, 9 + 1 / 64, 7 + 3 / 64), free(16, 13, 22.5, 15.25), free(30, 5, 26, 12)],
+      walls: [free(4, 3, 9 + 1 / 64, 7 + 3 / 64), free(16, 13, 22.5, 15.25), free(30, 5, 28, 8.5), free(28, 8.5, 26, 12)],
       heights,
     };
     const tokens = [

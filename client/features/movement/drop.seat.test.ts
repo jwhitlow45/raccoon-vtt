@@ -66,7 +66,12 @@ describe("squares: a rider on a Large mount drags a goblin into a corridor one s
   function keep(): RoomState {
     const s = room({ scenes: { s1: scene("s1", { bounds: { w: 30, h: 20 }, blockMovement: true, autoWalls: "off" }) } });
     s.buildChunks = {};
-    const runs: [[number, number], [number, number]][] = [[[8, 0], [8, 10]], [[8, 11], [8, 20]], [[16, 0], [16, 10]], [[16, 11], [16, 20]], [[8, 10], [16, 10]], [[8, 11], [16, 11]]];
+    // Each wall at most 8 squares long, as the protocol takes one: a longer one would be dropped.
+    const runs: [[number, number], [number, number]][] = [
+      ...[8, 16].flatMap((x): [[number, number], [number, number]][] => [[[x, 0], [x, 5]], [[x, 5], [x, 10]], [[x, 11], [x, 15.5]], [[x, 15.5], [x, 20]]]),
+      [[8, 10], [16, 10]],
+      [[8, 11], [16, 11]],
+    ];
     runs.forEach(([a, b], i) => wall(s, `fu35fx${String(i).padStart(6, "0")}`, a, b));
     s.tokens.horse = token("horse", { size: "large", x: 3, y: 9, name: "Warhorse", kind: "npc", ownerIds: ["p1"] });
     s.tokens.brom = token("brom", { x: 4, y: 10, name: "Brom", ownerIds: ["p1"], attached: { to: "horse", kind: "ride", steer: true } });

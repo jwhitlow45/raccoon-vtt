@@ -74,11 +74,16 @@ function randomScene(seed: number): RoomState {
   for (let i = 0; i < int(r, 0, 6); i++) edges[`${int(r, 0, 15)},${int(r, 1, 15)},${pick(r, ["n", "w"])}`] = pick(r, [{ kind: "wall" }, { kind: "door", state: "closed", secret: false, discovered: false }, { kind: "window" }] as const);
   state.buildChunks[first] = { ...base, cells, edges };
   for (const [x, y, feet] of steps) setGround(state, "s1", x, y, feet);
-  // A free wall now and then, so the split has something to cut.
+  // A free wall now and then, so the split has something to cut: three pieces on the 1/64 lattice, each at most 8 squares long as the protocol takes one.
   if (r() < 0.6) {
     const key = chunkKey("s1", 0, 0);
     const chunk = state.buildChunks[key] ?? { sceneId: "s1", cx: 0, cy: 0, rev: 0, cells: {}, edges: {} };
-    state.buildChunks[key] = { ...chunk, walls: [{ id: "freewall0001", a: [int(r, 0, 8) + 0.5, 0.5], b: [int(r, 9, 15) + 0.25, 15.5], f: { kind: "wall" } }] };
+    const a: [number, number] = [int(r, 0, 8) + 0.5, 0.5];
+    const b: [number, number] = [int(r, 9, 15) + 0.25, 15.5];
+    const along = (t: number): [number, number] => [Math.round((a[0] + (b[0] - a[0]) * t) * 64) / 64, a[1] + (b[1] - a[1]) * t];
+    const points = [a, along(1 / 3), along(2 / 3), b];
+    const walls = points.slice(1).map((end, i) => ({ id: `freewall000${i + 1}`, a: points[i]!, b: end, f: { kind: "wall" as const } }));
+    state.buildChunks[key] = { ...chunk, walls };
   }
   for (let i = 0; i < int(r, 1, 3); i++) {
     const cells = Array.from({ length: int(r, 1, 2) }, () => ({ x: int(r, 0, 15), y: int(r, 0, 15), w: int(r, 1, 4), h: int(r, 1, 4) }));
