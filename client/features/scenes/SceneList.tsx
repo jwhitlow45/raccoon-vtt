@@ -5,7 +5,7 @@ import { useSceneLoading } from "../../canvas/SceneLoading.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Icon } from "../../components/Icon.tsx";
-import { Spinner, useDelayed } from "../../components/Loading.tsx";
+import { Loading, useDelayed } from "../../components/Loading.tsx";
 import { Section } from "../../components/Panel.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
@@ -135,9 +135,10 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
                 <span style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0, fontSize: theme.font.small, lineHeight: theme.leading.tight, color: theme.color.textMuted }}>
                   <span style={oneLine}>
                     {describe(scene)}
-                    {loading ? " · loading…" : viewing ? " · you are here" : ""}
+                    {loading ? " · " : viewing ? " · you are here" : ""}
                   </span>
-                  {loading ? <Spinner size={12} /> : null}
+                  {/* The row's button is the name a screen reader reads, so the wait is words in it, not a status of its own. */}
+                  {loading ? <Loading small live={false} delay={0} text="loading…" style={{ flex: "none", whiteSpace: "nowrap", lineHeight: theme.leading.tight }} /> : null}
                 </span>
               </span>
             </button>
@@ -151,13 +152,10 @@ export function SceneList(props: { scenes: Scene[]; viewingId: string | null; pl
             )}
           </div>
           {arranging ? null : (
-            // Lined up under the name, past the thumbnail.
-            <div style={{ display: "flex", alignItems: "center", minHeight: players ? undefined : theme.touch, paddingLeft: THUMB_WIDTH + theme.space(4) }}>
+            // Lined up under the name, past the thumbnail. A button's line is a touch target tall, and words take their own height, as the tag does.
+            <div style={{ display: "flex", alignItems: "center", minHeight: players || moving === scene.id ? undefined : theme.touch, paddingLeft: THUMB_WIDTH + theme.space(4) }}>
               {moving === scene.id ? (
-                <span role="status" style={{ display: "flex", alignItems: "center", gap: theme.space(1), fontSize: theme.font.small, color: theme.color.textMuted }}>
-                  <Spinner size={12} />
-                  Moving players…
-                </span>
+                <Loading small delay={0} text="Moving players…" />
               ) : players ? (
                 <Tag tone="turn">Players here</Tag>
               ) : (
