@@ -363,7 +363,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
       case "light":
         return <LightChip key={id} token={token} />;
       case "attach":
-        return <AttachButton key={id} token={token} onOpen={frame.raise} />;
+        return <AttachButton key={id} token={token} onOpen={frame.raiseAttach} />;
       case "detach":
         return <DetachButton key={id} token={token} detach={detach} noteId={detachNoteId} />;
       case "multiSelect":
@@ -524,7 +524,7 @@ function TokenBarBody(props: { token: ViewToken; fullAccess: boolean; onDetails(
           <div role="group" aria-label="Read more" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
             {statBlock ? <BarButton onClick={() => openStatBlock(scope, ui, token.id)}>Stat block</BarButton> : null}
             {inStrip("details") ? null : <BarButton onClick={props.onDetails}>Details</BarButton>}
-            <ViewAsButton token={token} onOpen={frame.raise} />
+            <ViewAsButton token={token} onOpen={frame.raiseViewAs} />
           </div>
 
           {access.canEditToken("elevation") ? (
@@ -894,7 +894,8 @@ type FrameControls = {
   /** The bar has under 300 px where it stands (barButtons.ts barShort), whatever its content. */
   short: boolean;
   /** Stands the bar over the notices while a popover of its own is open (docs/design-v1-tool-options.md 7.6). */
-  raise(on: boolean): void;
+  raiseAttach(on: boolean): void;
+  raiseViewAs(on: boolean): void;
   /** The strip's own controls for its header, while the bar spans an upright phone. */
   strip: StripControls | null;
 };
@@ -912,7 +913,7 @@ const WHOLE_HEADER: FrameControls["header"] = { grip: "button", badgeInHeader: t
 
 const NO_RAISE = () => {};
 
-const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, rest: null, header: WHOLE_HEADER, short: false, raise: NO_RAISE, strip: null });
+const FrameContext = createContext<FrameControls>({ handle: null, sticky: false, place: null, rest: null, header: WHOLE_HEADER, short: false, raiseAttach: NO_RAISE, raiseViewAs: NO_RAISE, strip: null });
 
 /**
  * The strip's width, in layout px, from which Expand and Collapse show
@@ -1277,7 +1278,9 @@ function BarFrame(props: {
   );
   const [dragBox, setDragBox] = useState<Box | null>(null);
   const dragRef = useRef<Drag | null>(null);
-  const [raised, setRaised] = useState(false);
+  // A closed sibling can mount or unmount while a popover is open. It must clear only its own raise.
+  const [attachRaised, setAttachRaised] = useState(false);
+  const [viewAsRaised, setViewAsRaised] = useState(false);
   useSheetReturnFocus(barRef, RETURN_RANK.tokenBar);
   usePublishBar({ label: props.label, ...props.dock, frame: barRef });
   /*
@@ -1692,7 +1695,7 @@ function BarFrame(props: {
           summary: headerSummary,
         }
       : null;
-  const controls: FrameControls = { handle, sticky: mode === "dock" || (mode === "span" && !scrolls), place, rest, header, short, raise: setRaised, strip };
+  const controls: FrameControls = { handle, sticky: mode === "dock" || (mode === "span" && !scrolls), place, rest, header, short, raiseAttach: setAttachRaised, raiseViewAs: setViewAsRaised, strip };
 
   const { hang } = placed;
   // Placed on the page as it is while someone types, which a browser may have made shorter than the room it keeps (barDock.ts Typing).
@@ -1740,7 +1743,7 @@ function BarFrame(props: {
         boxShadow: theme.shadow.pane,
         color: theme.color.text,
         fontSize: theme.font.body14,
-        zIndex: raised ? theme.z.popover : overBars && typing !== null ? theme.z.overBars : mode === "compact" ? theme.z.barOverlay : theme.z.pane,
+        zIndex: attachRaised || viewAsRaised ? theme.z.popover : overBars && typing !== null ? theme.z.overBars : mode === "compact" ? theme.z.barOverlay : theme.z.pane,
       }}
     >
       <div
