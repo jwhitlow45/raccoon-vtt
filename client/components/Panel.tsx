@@ -218,8 +218,11 @@ const NAME_LINE = theme.font.input * theme.leading.tight;
 /**
  * A fold of a panel's sections that belong together by use (the Token
  * panel's Combat, Notes and Position, docs/design-v1-dice-ui.md 5): a 48 px
- * row with a chevron, the group's name at 16 px weight 700, and when folded
- * a one-line summary of what it holds ("HP 18/24 · 2 conditions"). Groups
+ * row with a chevron, the group's icon where it has one, its name at 16 px
+ * weight 700, and when folded a one-line summary of what it holds ("HP
+ * 18/24 · 2 conditions") at the row's end. Where the row cannot hold the
+ * name and the summary's least beside it, the summary takes a line of its
+ * own under the name, and the row grows by that line. Groups
  * part by a 1 px line, and the sections inside part by `space(4)`, keeping
  * their capitals labels as h4 under the group's h3, so the two levels never
  * look alike. A group of fields rather than sections spaces them as a
@@ -253,14 +256,14 @@ export function Group(props: {
     </span>
   );
   /*
-   * The summary asks the row for its floor, a few words, or for its words
-   * where they are fewer ("None"): it shares the name's line wherever the
-   * name and that much fit, grows up to its words, and wraps under the name
-   * where they do not, rather than cut the name or shrink to nothing
-   * (docs/design-v1-design-pass.md 4.1). Its auto margin sets its words at
-   * the row's end on either line. Its width, the floor again, is what it
-   * asks of the header's row too, so an action ("Attach a stat block")
-   * keeps the name's line wherever the name and the floor leave it room,
+   * The summary asks the row for its floor, a few words, or for its words,
+   * whichever is less ("None" asks for its one word): it shares the name's
+   * line wherever the name and that much fit, grows up to its words, and
+   * wraps under the name where they do not, rather than cut the name or
+   * shrink to nothing (docs/design-v1-design-pass.md 4.1). Its auto margin
+   * sets its words at the row's end on either line. Its width asks the
+   * header's row for the same least, so an action ("Attach a stat block")
+   * keeps the name's line wherever the name and that least leave it room,
    * rather than wrap for the summary's whole words.
    */
   const summary =
