@@ -25,6 +25,7 @@ import {
   logsByAudience,
   combatUses,
   takesBackTurnOnly,
+  seatsFromSnappedBox,
   seatsOnSqueeze,
   discoversMap,
   mapDiscoveryUpgrade,
@@ -1472,8 +1473,8 @@ describe("hex grids, phase H3: op version 28, snapshot version 29 (docs/design-v
 });
 
 describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount on hexes and squares (D-261029-52, D-261029-53)", () => {
-  test("are the versions now, the snapshot's unchanged", () => {
-    assert.equal(OP_VERSION, 29);
+  test("brought op version 29, the snapshot's unchanged", () => {
+    assert.ok(OP_VERSION >= 29);
     assert.equal(SNAPSHOT_VERSION, 29);
     assert.ok(opMigrations.some((s) => s.from === 28 && s.to === 29));
     assert.ok(!snapshotMigrations.some((s) => s.from === 29));
@@ -1501,6 +1502,39 @@ describe("follow-up batch 35: op version 29, a rider's seat on a squeezing mount
 
   test("a version 29 op never migrates down", () => {
     assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 29, 28, opMigrations), /down/);
+  });
+});
+
+describe("follow-up batch 36: op version 30, passengers on a holder that starts its walk squeezed (D-261029-56)", () => {
+  test("are the versions now, the snapshot's unchanged", () => {
+    assert.equal(OP_VERSION, 30);
+    assert.equal(SNAPSHOT_VERSION, 29);
+    assert.ok(opMigrations.some((s) => s.from === 29 && s.to === 30));
+    assert.ok(!snapshotMigrations.some((s) => s.from === 29));
+  });
+
+  test("the op step is the identity, a squeezed holder's moves on squares and hexes included", () => {
+    const ops: unknown[] = [
+      { t: "token.move", tokenId: "mammoth", x: 11.5, y: 9.5, squeeze: true },
+      { t: "token.move", tokenId: "mammoth", x: 17, y: 9, route: [[12.5, 9.5, 0, 0], [17, 9, 0, 0]] },
+      { t: "token.move", tokenId: "horse", x: 8.5, y: 4.696152422706632, squeeze: true, route: [[8.5, 4.696152422706632, 1, 0]] },
+      { t: "token.detach", tokenId: "kira", x: 14, y: 11, elevation: 0 },
+      { t: "log.chat", text: "hi" },
+    ];
+    for (const op of ops) assert.equal(runMigrations(op, 29, 30, opMigrations), op);
+    for (const op of ops) assert.equal(migrateOp(op, 29), op);
+    for (const op of ops) assert.ok(opSchema.safeParse(op).success, JSON.stringify(op));
+  });
+
+  test("ops stored before version 30 carry a squeezed holder's seats by its stored box, later and live ops by its snapped one", () => {
+    assert.equal(seatsFromSnappedBox(29), false);
+    assert.equal(seatsFromSnappedBox(1), false);
+    assert.equal(seatsFromSnappedBox(30), true);
+    assert.equal(seatsFromSnappedBox(undefined), true);
+  });
+
+  test("a version 30 op never migrates down", () => {
+    assert.throws(() => runMigrations({ t: "log.chat", text: "hi" }, 30, 29, opMigrations), /down/);
   });
 });
 

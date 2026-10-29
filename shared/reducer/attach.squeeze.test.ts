@@ -195,4 +195,73 @@ describe("squares: a Huge mount in a corridor two squares wide", () => {
       }
     }
   });
+
+  /*
+   * Live play LP25-A-RIDE-1 (D-261029-56): a holder that starts its walk
+   * squeezed keeps each passenger's own seat beside its full footprint's
+   * snapped box, so each point of the walk reads its box snapped there too,
+   * and four passengers keep four squares. Op version 29 carried them by
+   * the stored box, half a square off, and every one tied onto one square.
+   */
+  const passengers = ["pa", "pb", "pc", "pd"] as const;
+  function fourAboard(): RoomState {
+    const { s: base } = corridor(2);
+    let s = withMount(base, "huge", 2, 9);
+    const corners: [number, number][] = [[2, 9], [4, 9], [2, 11], [4, 11]];
+    passengers.forEach((id, i) => {
+      s = { ...s, tokens: { ...s.tokens, [id]: token(id, { size: "medium", x: corners[i]![0], y: corners[i]![1], name: `Crate ${i}`, kind: "object", attached: { to: "horse", kind: "carry" } }) } };
+    });
+    return s;
+  }
+  const placesOf = (s: RoomState) => passengers.map((id) => `${s.tokens[id]!.x},${s.tokens[id]!.y}`);
+  /** Every passenger on its own square of the squares the mount stands on. */
+  function apart(s: RoomState, label: string): void {
+    const places = placesOf(s);
+    assert.equal(new Set(places).size, 4, `${label}: ${places.join(" ")} four squares`);
+    const stand = new Set(squares(footprintRect(SQUARES, s.tokens.horse!)));
+    for (const id of passengers) assert.ok(stand.has(`${s.tokens[id]!.x},${s.tokens[id]!.y}`), `${label}: ${id} on the mount's squares`);
+    for (const id of passengers) assert.equal(s.tokens[id]!.attached?.to, "horse");
+  }
+
+  test("four passengers on a Huge mount squeezed in it keep four squares one and two squares on along the corridor and out of it (LP25-A-RIDE-1)", () => {
+    const into = run(fourAboard(), { t: "token.move", tokenId: "horse", x: 10.5, y: 9.5, squeeze: true });
+    apart(into, "into the corridor");
+    for (const on of [1, 2]) {
+      const along = run(into, { t: "token.move", tokenId: "horse", x: 10.5 + on, y: 9.5, squeeze: true });
+      apart(along, `${on} on`);
+      assert.deepEqual(placesOf(along), placesOf(into).map((p) => `${Number(p.split(",")[0]) + on},${p.split(",")[1]}`), `${on} on: each kept its square`);
+      const out = run(along, { t: "token.move", tokenId: "horse", x: 17, y: 9 });
+      apart(out, `${on} on, then out`);
+      assert.deepEqual(placesOf(out), ["17,9", "18,9", "17,10", "18,10"], "each on its square of the full footprint");
+    }
+    // A route from the squeeze out of the corridor, stopping squeezed on its way.
+    const route: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", x: 17, y: 9, route: [[12.5, 9.5, 0, 0], [17, 9, 0, 0]] };
+    apart(run(into, route), "by a route out");
+    const plan = planMove(route, into, DM, {});
+    const mid = passengers.map((id) => plan.find((m) => m.tokenId === id)!.route[1]!).map((p) => `${p.x},${p.y}`);
+    assert.equal(new Set(mid).size, 4, `${mid.join(" ")} four squares where the route stops in the corridor`);
+  });
+
+  test("a Tiny passenger on a mount that starts squeezed keeps its own half square of the full footprint along the walk, where the mount stands up half a square off the grid too", () => {
+    const { s: base } = corridor(2);
+    const s = withMount(base, "huge", 2, 9);
+    const aboard = { ...s, tokens: { ...s.tokens, owl: token("owl", { size: "tiny", x: 4.5, y: 11.5, name: "Owl", kind: "npc", attached: { to: "horse", kind: "perch" } }) } };
+    const into = run(aboard, { t: "token.move", tokenId: "horse", x: 10.5, y: 9.5, squeeze: true });
+    // Its seat in the full footprint, which stands at 11, 10 there.
+    assert.deepEqual([into.tokens.owl!.x - 11, into.tokens.owl!.y - 10], [1.5, 1.5]);
+    const plan = planMove({ t: "token.move", tokenId: "horse", x: 17, y: 9, route: [[12.5, 9.5, 0, 0], [16.5, 9.5, 0, 0], [17, 9, 0, 0]] }, into, DM, {});
+    const holder = plan.find((m) => m.tokenId === "horse")!;
+    const owl = plan.find((m) => m.tokenId === "owl")!;
+    holder.route.forEach((p, i) => {
+      const full = footprintRect(SQUARES, { ...into.tokens.horse!, x: p.x, y: p.y, squeeze: undefined });
+      assert.deepEqual([owl.route[i]!.x - full.x, owl.route[i]!.y - full.y], [1.5, 1.5], `point ${i}: the mount at ${p.x}, ${p.y}`);
+    });
+  });
+
+  test("an op stored at version 29 replays to the one square it piled them on, version 30 and a live op to four", () => {
+    const into = run(fourAboard(), { t: "token.move", tokenId: "horse", x: 10.5, y: 9.5, squeeze: true });
+    const op: OpOf<"token.move"> = { t: "token.move", tokenId: "horse", x: 11.5, y: 9.5, squeeze: true };
+    assert.deepEqual(placesOf(run(into, op, DM, 29)), ["12,10", "12,10", "12,10", "12,10"], "op 29's place, all on one square");
+    for (const opVersion of [30, undefined]) apart(run(into, op, DM, opVersion), `op ${opVersion ?? "live"}`);
+  });
 });

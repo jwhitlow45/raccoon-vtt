@@ -234,7 +234,7 @@ function squeezedSeats(before: RoomState, member: Token, holder: MovedToken, env
   const squeezedAt = walkSqueezes(before, standing, holder.route, holder.trace, holder.squeezed === true);
   const g = sceneGrid(scene);
   if (!isHex(g) && !squeezedAt.some((s) => s)) return null;
-  return holder.route.map((p, i) => (i === 0 ? null : seatedAt(g, member, standing, p, squeezedAt[i]!)));
+  return holder.route.map((p, i) => (i === 0 ? null : seatedAt(g, member, standing, p, squeezedAt[i]!, env.opVersion)));
 }
 
 /**
