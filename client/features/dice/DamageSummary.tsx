@@ -55,14 +55,18 @@ export function DamageSummary(props: Props) {
             <div key={index} role="listitem" data-damage-part="" style={{ display: "contents" }}>
               <span aria-hidden data-damage-gutter="" style={{ width: "1ch", color: theme.color.textMuted }}>{part.gutter ? `${part.gutter} ` : ""}</span>
               <DamageIcon icon={part.icon} />
-              {hasOriginals ? <span data-damage-original="" style={{ textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                {part.original !== undefined ? <><s aria-hidden style={{ color: theme.color.textMuted }}>{part.original}</s>{" "}</> : null}
-              </span> : null}
-              <span data-damage-amount="" style={{ textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                {part.original !== undefined ? <span style={VISUALLY_HIDDEN}>{`was ${part.original}, now `}</span> : null}
-                <span data-damage-result="" style={{ fontWeight: theme.weight.strong }}>{part.amount}</span>{" "}
-              </span>
-              <span data-damage-text="" style={{ minWidth: 0, overflowWrap: "anywhere" }}>{`${part.label}${summary.parts.length === 1 ? suffix : ""}`}</span>
+              {typeof part.amount === "string" ? <span data-damage-formula="" style={{ gridColumn: "3 / -1", minWidth: 0, whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                <span data-damage-text="">{`${part.amount} ${part.label}${summary.parts.length === 1 ? suffix : ""}`}</span>
+              </span> : <>
+                {hasOriginals ? <span data-damage-original="" style={{ textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                  {part.original !== undefined ? <><s aria-hidden style={{ color: theme.color.textMuted }}>{part.original}</s>{" "}</> : null}
+                </span> : null}
+                <span data-damage-amount="" style={{ textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                  {part.original !== undefined ? <span style={VISUALLY_HIDDEN}>{`was ${part.original}, now `}</span> : null}
+                  <span data-damage-result="" style={{ fontWeight: theme.weight.strong }}>{part.amount}</span>{" "}
+                </span>
+                <span data-damage-text="" style={{ minWidth: 0, overflowWrap: "anywhere" }}>{`${part.label}${summary.parts.length === 1 ? suffix : ""}`}</span>
+              </>}
             </div>
           ))}
           {summary.total !== undefined ? <div role="listitem" data-damage-total="" style={{ display: "contents" }}>

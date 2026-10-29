@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { theme } from "../../lib/theme.ts";
 import { damageSummary } from "./damageSummaryLines.ts";
+import { parseParts } from "#shared/rules/typedDamage.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -95,4 +96,16 @@ test("FL-4 alignment: defense values share the label's text baseline while icons
     assert.match(markup, /data-damage-icon="fire"[^>]*align-self:center/);
     assert.match(text(markup), /Resists:? Fire/);
   }
+});
+
+test("FL-4 review: long valid formulas wrap across the amount and words tracks", () => {
+  const formula = Array.from({ length: 20 }, () => "1d6").join("+");
+  assert.equal(formula.length, 79);
+  const parsed = parseParts(`${formula} cold + 7 fire`);
+  assert.ok(parsed.ok);
+  const markup = draw(damageSummary(parsed.parts));
+  assert.match(markup, /data-damage-formula=""[^>]*grid-column:3 \/ -1;min-width:0;white-space:normal;overflow-wrap:anywhere/);
+  assert.match(text(markup), /Cold damage/);
+  assert.equal((markup.match(/data-damage-result=/g) ?? []).length, 1, "only numeric parts use the aligned result column");
+  assert.match(markup, /data-damage-amount=""[^>]*white-space:nowrap/);
 });

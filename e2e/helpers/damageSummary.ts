@@ -21,6 +21,11 @@ export async function damageSummaryAlignment(root: Locator, screen: string): Pro
     for (const root of roots as unknown as Element[]) {
       const summaries = root.matches("[data-damage-summary]") ? [root] : Array.from(root.querySelectorAll("[data-damage-summary]"));
       for (const summary of summaries) {
+        const bounds = summary.getBoundingClientRect();
+        for (const element of Array.from(summary.querySelectorAll("*"))) {
+          const box = element.getBoundingClientRect();
+          if (box.width > 0 && (box.left < bounds.left - 1 || box.right > bounds.right + 1)) lines.push(`${screen}: damage summary content extends past the slip's edge`);
+        }
         const icons: number[] = [];
         for (const part of Array.from(summary.querySelectorAll("[data-damage-part], [data-damage-defense-entry]"))) {
           const icon = part.querySelector("[data-damage-icon]");

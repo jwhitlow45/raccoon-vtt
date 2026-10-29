@@ -246,6 +246,7 @@ const SOME_SIZES: Record<string, Record<SizesFile, number>> = {
   "group-save-row": { phones: 4, wide: 2 },
   "fl4-hp-bar": { phones: 6, wide: 6 },
   "fl4-defense-lines": { phones: 6, wide: 6 },
+  "fl4-long-formula": { phones: 4, wide: 2 },
   "fl4-hp-heal": { phones: 6, wide: 6 },
   "fl4-hp-temp": { phones: 6, wide: 6 },
   "fl4-hp-panel": { phones: 4, wide: 2 },
@@ -1891,6 +1892,14 @@ async function groupSaveScreen(sweep: Sweep, page: Page, screen: string, trap: s
   }
   if (screen === "group-save-row") await host.locator("[data-damage-summary]").first().waitFor();
   await sweep.measure(page, screen, host);
+  if (screen === "group-save-row") {
+    // FL-4: a valid long formula must fit before rolling, including at 320 px and 130%.
+    const formula = Array.from({ length: 20 }, () => "1d6").join("+");
+    await host.getByLabel("Damage", { exact: true }).fill(`${formula} cold + 7 fire`);
+    const slip = host.getByRole("group", { name: "Outcome", exact: true }).locator("[data-damage-summary]");
+    await slip.filter({ hasText: formula }).waitFor();
+    await sweep.measure(page, "fl4-long-formula", slip);
+  }
   await host.getByRole("button", { name: "Discard", exact: true }).first().click();
   const sheet = page.locator('dialog[data-rvtt-sheet][aria-label="Dice"]');
   if (await visible(sheet)) {
