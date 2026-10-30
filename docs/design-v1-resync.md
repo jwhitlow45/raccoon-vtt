@@ -30,7 +30,7 @@ The project owner, 2026-10-22: "Another useful feature would be to have a "re-sy
 2. **Fetch.** `Loading` "Getting Bree from D&D Beyond…" after the shared 200 ms delay, the primary busy as "Getting it…". Cancel and closing abort it (flow.ts's rule).
 3. **Review**, titled "Check what changes" (3.3). It follows the live character. When another device changes Bree while it is open, its lists rebuild and its status says so (3.3).
 4. **Apply** sends one `character.update` with the merged parts and an `expect` of each part it writes, busy as "Applying…". The server refuses it when any of those parts changed since (4). On `taken` the dialog shows the done state.
-5. **Undo the re-sync**, in the done state until the dialog closes, puts back each part and field the re-sync wrote, the exact HP and the record before it, under its own `expect` of what Apply wrote. The DM's re-sync is also on the DM's undo stack.
+5. **Undo the re-sync**, in the done state until the dialog closes, puts back each part and field the re-sync wrote, the exact HP and the record before it, under its own `expect` of what Apply wrote. The DM's re-sync is also on the DM's undo stack. See [the undo scope design](design-v1-undo-scope.md): that stack is Setup history, never the toolbar's Undo, and Undo setup after the dialog's Undo reapplies the sync.
 
 ### 1.3 Characters in each state
 
