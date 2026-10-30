@@ -429,95 +429,125 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     await phoneSheet.waitFor({ state: "detached" });
   });
 
-  test("FU40-B ISO5-SHEET-WIDE. at 390 and 320 px, 130%, no Change or Reset in the shortcut list covers a row's words, the longest row wraps beside its Change, and nothing runs off to the side", async () => {
-    for (const size of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
-      await dm.setViewportSize(size);
-      await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1.3"));
-      await reopenRoom(dm);
-      await dm.getByRole("status", { name: "Connected" }).first().waitFor();
-      await dm.keyboard.press("?");
-      const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
-      await sheet.waitFor();
-      // Draw on K, so one row has Reset under its Change.
-      await sheet.getByRole("button", { name: "Change the key for Draw", exact: true }).click();
-      await dm.keyboard.press("k");
-      await sheet.getByRole("button", { name: "Reset the key for Draw", exact: true }).waitFor();
+  test("FU40-B ISO5-SHEET-WIDE. at 390 and 320 px, 130%, shortcut words and every rebind or conflict control fit and stay reachable", async () => {
+    const previousViewport = dm.viewportSize();
+    const previous = await dm.evaluate(() => {
+      const storage = (globalThis as unknown as { localStorage: { getItem(k: string): string | null } }).localStorage;
+      return ["rvtt.uiScale", "rvtt.keys"].map((key) => [key, storage.getItem(key)] as const);
+    });
+    try {
+      for (const size of [{ width: 390, height: 844 }, { width: 320, height: 568 }]) {
+        await dm.setViewportSize(size);
+        await dm.evaluate(() => {
+          const storage = (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage;
+          storage.setItem("rvtt.uiScale", "1.3");
+          // A preexisting Fog binding leaves Turn left unbound, so its conflict offers Take.
+          storage.setItem("rvtt.keys", JSON.stringify({ v: 1, keys: { "tool:fog": "q" } }));
+        });
+        await reopenRoom(dm);
+        await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+        await dm.keyboard.press("?");
+        const sheet = dm.getByRole("dialog", { name: "Shortcuts" });
+        await sheet.waitFor();
+        // Draw on K, so one row also offers Reset.
+        await sheet.getByRole("button", { name: "Change the key for Draw", exact: true }).click();
+        await dm.keyboard.press("k");
+        await sheet.getByRole("button", { name: "Reset the key for Draw", exact: true }).waitFor();
 
-      const layout = await sheet.evaluate((root) => {
-        type Rect = { left: number; right: number; top: number; bottom: number };
-        type Node = { nodeType: number; textContent: string | null; childNodes: ArrayLike<Node> };
-        type El = Node & { tagName: string; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El>; getBoundingClientRect(): Rect; getAttribute(n: string): string | null; scrollWidth: number; clientWidth: number };
-        const doc = (globalThis as unknown as { document: { createRange(): { selectNodeContents(n: Node): void; getClientRects(): ArrayLike<Rect> } } }).document;
-        const overlaps = (a: Rect, b: Rect) => a.right > b.left + 0.5 && a.left < b.right - 0.5 && a.bottom > b.top + 0.5 && a.top < b.bottom - 0.5;
-        // A cell's words as the boxes of their lines, so a word under a button is found however the cell wraps.
-        const lines = (cell: Node): Rect[] => {
-          const out: Rect[] = [];
-          const walk = (n: Node) => {
-            if (n.nodeType === 3 && (n.textContent ?? "").trim()) {
-              const range = doc.createRange();
-              range.selectNodeContents(n);
-              out.push(...Array.from(range.getClientRects()));
-            }
-            Array.from(n.childNodes).forEach(walk);
+        const layout = await sheet.evaluate((root) => {
+          type Rect = { left: number; right: number; top: number; bottom: number };
+          type Node = { nodeType: number; textContent: string | null; childNodes: ArrayLike<Node> };
+          type El = Node & { nextElementSibling: El | null; tagName: string; querySelector(s: string): El | null; querySelectorAll(s: string): ArrayLike<El>; getBoundingClientRect(): Rect; getAttribute(n: string): string | null; scrollWidth: number; clientWidth: number };
+          const doc = (globalThis as unknown as { document: { createRange(): { selectNodeContents(n: Node): void; getClientRects(): ArrayLike<Rect> } } }).document;
+          const overlaps = (a: Rect, b: Rect) => a.right > b.left + 0.5 && a.left < b.right - 0.5 && a.bottom > b.top + 0.5 && a.top < b.bottom - 0.5;
+          // A cell's words as the boxes of their lines, so a word under a button is found however the cell wraps.
+          const lines = (cell: Node): Rect[] => {
+            const out: Rect[] = [];
+            const walk = (n: Node) => {
+              if (n.nodeType === 3 && (n.textContent ?? "").trim()) {
+                const range = doc.createRange();
+                range.selectNodeContents(n);
+                out.push(...Array.from(range.getClientRects()));
+              }
+              Array.from(n.childNodes).forEach(walk);
+            };
+            walk(cell);
+            return out;
           };
-          walk(cell);
-          return out;
-        };
-        const el = root as unknown as El;
-        const covered: string[] = [];
-        let longest = { words: "", lines: 0 };
-        let rows = 0;
-        for (const row of Array.from(el.querySelectorAll("tr"))) {
-          const key = row.querySelector("th");
-          const words = row.querySelector("td");
-          const buttons = Array.from(row.querySelectorAll("button"));
-          if (!key || !words || buttons.length === 0) continue;
-          rows++;
-          const boxes = [...lines(key), ...lines(words)];
-          for (const button of buttons) {
-            for (const box of boxes) if (overlaps(button.getBoundingClientRect(), box)) covered.push(`${button.getAttribute("aria-label")} over "${(words.textContent ?? "").trim()}"`);
+          const el = root as unknown as El;
+          const covered: string[] = [];
+          let longest = { words: "", lines: 0 };
+          let rows = 0;
+          for (const row of Array.from(el.querySelectorAll("tr"))) {
+            const key = row.querySelector("th");
+            const words = row.querySelector("td");
+            if (!key || !words) continue;
+            const ownButtons = Array.from(row.querySelectorAll("button"));
+            const next = row.nextElementSibling;
+            const buttons = ownButtons.length > 0 ? ownButtons : next?.querySelector("td")?.getAttribute("headers") === key.getAttribute("id") ? Array.from(next.querySelectorAll("button")) : [];
+            if (buttons.length === 0) continue;
+            rows++;
+            const boxes = [...lines(key), ...lines(words)];
+            for (const button of buttons) {
+              for (const box of boxes) if (overlaps(button.getBoundingClientRect(), box)) covered.push(`${button.getAttribute("aria-label")} over "${(words.textContent ?? "").trim()}"`);
+            }
+            const text = (words.textContent ?? "").trim();
+            if (text.length > longest.words.length) longest = { words: text, lines: new Set(lines(words).map((r) => Math.round(r.top))).size };
           }
-          const text = (words.textContent ?? "").trim();
-          if (text.length > longest.words.length) longest = { words: text, lines: new Set(lines(words).map((r) => Math.round(r.top))).size };
-        }
-        const wide = [el, ...Array.from(el.querySelectorAll("*"))].filter((e) => e.clientWidth > 1 && e.scrollWidth > e.clientWidth + 1).map((e) => `${e.tagName} ${e.scrollWidth} > ${e.clientWidth}`);
-        return { rows, covered, longest, wide };
-      });
-      assert.ok(layout.rows >= 20, `only ${layout.rows} rows with Change`);
-      assert.deepEqual(layout.covered, [], `a button over a row's words at ${size.width} px and 130%`);
-      assert.ok(layout.longest.lines >= 2, `the longest row, "${layout.longest.words}", is on ${layout.longest.lines} line beside its Change`);
-      assert.deepEqual(layout.wide, [], `content wider than its box at ${size.width} px and 130%`);
-      await shots.take(dm, `fu40-b-shortcuts-${size.width}-130-top`);
-      await sheet.getByText(layout.longest.words, { exact: true }).scrollIntoViewIfNeeded();
-      await shots.take(dm, `fu40-b-shortcuts-${size.width}-130-longest`);
+          const wide = [el, ...Array.from(el.querySelectorAll("*"))].filter((e) => e.clientWidth > 1 && e.scrollWidth > e.clientWidth + 1).map((e) => `${e.tagName} ${e.scrollWidth} > ${e.clientWidth}`);
+          return { rows, covered, longest, wide };
+        });
+        assert.ok(layout.rows >= 20, `only ${layout.rows} rows with Change`);
+        assert.deepEqual(layout.covered, [], `a button over a row's words at ${size.width} px and 130%`);
+        assert.ok(layout.longest.lines >= 2, `the longest row, "${layout.longest.words}", is on ${layout.longest.lines} line`);
+        assert.deepEqual(layout.wide, [], `content wider than its box at ${size.width} px and 130%`);
+        await shots.take(dm, `fu40-b-shortcuts-${size.width}-130-top`);
+        await sheet.getByText(layout.longest.words, { exact: true }).scrollIntoViewIfNeeded();
+        await shots.take(dm, `fu40-b-shortcuts-${size.width}-130-longest`);
 
-      const controlsFit = async () => {
-        const bounds = await sheet.boundingBox();
-        assert.ok(bounds);
-        for (const control of await sheet.getByRole("button", { name: /^(Change the key for |Reset the key for |Swap$|Take$|Cancel$)/ }).all()) {
-          await control.scrollIntoViewIfNeeded();
-          const box = await control.boundingBox();
-          assert.ok(box && box.x >= bounds.x - 1 && box.x + box.width <= bounds.x + bounds.width + 1, `${size.width}: ${await control.getAttribute("aria-label") ?? await control.innerText()} extends outside the sheet`);
-          await control.click({ trial: true });
-        }
-      };
-      await controlsFit();
-      await sheet.getByRole("button", { name: "Change the key for Draw", exact: true }).click();
-      await dm.keyboard.press("r");
-      await sheet.locator("table").getByText("Already Ruler.").waitFor();
-      await controlsFit();
-      await shots.take(dm, `fu40-b-shortcuts-${size.width}-130-conflict`);
-      await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+        const controlsFit = async (conflict = false) => {
+          const bounds = await sheet.boundingBox();
+          assert.ok(bounds);
+          for (const control of await sheet.getByRole("button", { name: conflict ? /^(Swap|Take|Cancel)$/ : /^(Change the key for |Reset the key for )/ }).all()) {
+            await control.scrollIntoViewIfNeeded();
+            const box = await control.boundingBox();
+            assert.ok(box && box.x >= bounds.x - 1 && box.x + box.width <= bounds.x + bounds.width + 1, `${size.width}: ${await control.getAttribute("aria-label") ?? await control.innerText()} extends outside the sheet`);
+            await control.click({ trial: true });
+          }
+        };
+        await controlsFit();
+        await sheet.getByRole("button", { name: "Change the key for Draw", exact: true }).click();
+        await dm.keyboard.press("r");
+        await sheet.locator("table").getByText("Already Ruler.").waitFor();
+        await controlsFit(true);
+        await shots.take(dm, `fu40-b-shortcuts-${size.width}-130-conflict`);
+        await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
+        await sheet.getByRole("button", { name: "Change the key for Turn left", exact: true }).click();
+        await dm.keyboard.press("r");
+        await sheet.getByRole("button", { name: "Take", exact: true }).waitFor();
+        await controlsFit(true);
+        await shots.take(dm, `fu40-b-shortcuts-${size.width}-130-take`);
+        await sheet.getByRole("button", { name: "Cancel", exact: true }).click();
 
-      await sheet.locator("footer").getByRole("button", { name: "Reset all keys", exact: true }).click();
-      await sheet.locator("footer").getByRole("button", { name: "Tap again to reset all keys", exact: true }).click();
-      await sheet.getByRole("button", { name: "Reset the key for Draw", exact: true }).waitFor({ state: "detached" });
-      await dm.keyboard.press("Escape");
-      await sheet.waitFor({ state: "detached" });
-      await dm.evaluate(() => (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void } }).localStorage.setItem("rvtt.uiScale", "1"));
-      await dm.setViewportSize({ width: 1280, height: 800 });
+        await sheet.locator("footer").getByRole("button", { name: "Reset all keys", exact: true }).click();
+        await sheet.locator("footer").getByRole("button", { name: "Tap again to reset all keys", exact: true }).click();
+        await sheet.getByRole("button", { name: "Reset the key for Draw", exact: true }).waitFor({ state: "detached" });
+        await dm.keyboard.press("Escape");
+        await sheet.waitFor({ state: "detached" });
+      }
+    } finally {
+      // Restore storage before reloading, which also closes a listening or conflict row after any assertion failure.
+      await dm.evaluate((entries) => {
+        const storage = (globalThis as unknown as { localStorage: { setItem(k: string, v: string): void; removeItem(k: string): void } }).localStorage;
+        for (const [key, value] of entries) {
+          if (value === null) storage.removeItem(key);
+          else storage.setItem(key, value);
+        }
+      }, previous);
+      if (previousViewport) await dm.setViewportSize(previousViewport);
       await reopenRoom(dm);
       await dm.getByRole("status", { name: "Connected" }).first().waitFor();
+      await dm.getByRole("dialog", { name: "Shortcuts" }).waitFor({ state: "detached" });
     }
   });
 

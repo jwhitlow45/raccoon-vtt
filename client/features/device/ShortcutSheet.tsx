@@ -10,6 +10,7 @@ import { useRoomScope } from "../../state/scope.ts";
 import { DEFAULT_KEYS, setShortcutSheet, sheetSections, SHORTCUTS, shortcutSheetSlot, useShortcutKeys, type SheetRow } from "../../state/shortcuts.ts";
 import { ConfirmButton } from "../scenes/controls.tsx";
 import { keyChanges, setKeyChanges } from "./settings.ts";
+import { useLayoutSize } from "./layout.ts";
 
 /**
  * The shortcut sheet (docs/design-v1-dm-tools.md 3.14): the keys this role
@@ -114,6 +115,8 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
   const keys = useShortcutKeys();
   const sections = sheetSections(props.role, sheetDevice(), keys);
   const rebind = props.rebind === true;
+  // At 320 px and 130%, a third column leaves no room for the key and its words.
+  const stackControls = useLayoutSize().width < 300;
   const [editing, setEditing] = useState<Editing | null>(null);
   const changeButtons = useRef(new Map<string, HTMLButtonElement>());
   const swapButton = useRef<HTMLButtonElement>(null);
@@ -241,7 +244,7 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
   };
 
   return (
-    <div style={{ display: "grid" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
       {sections.map((section, i) => {
         const controls = rebind && section.rows.some((row) => row.rebind);
         return (
@@ -251,7 +254,7 @@ export function ShortcutList(props: { role: "dm" | "player"; rebind?: boolean; s
             <table style={{ borderCollapse: "collapse", width: "100%", fontSize: theme.font.body14 }}>
               <tbody>
                 {section.rows.map((row) => (
-                  <KeyRows key={row.id} row={row} controls={controls} editing={editing?.id === row.id ? editing : null} taken={editing?.step === "taken" && editing.id === row.id ? takenWords(keyChanges(), editing, nameOf) : null} actions={actions} />
+                  <KeyRows key={row.id} row={row} controls={controls} stackControls={stackControls} editing={editing?.id === row.id ? editing : null} taken={editing?.step === "taken" && editing.id === row.id ? takenWords(keyChanges(), editing, nameOf) : null} actions={actions} />
                 ))}
               </tbody>
             </table>
@@ -273,12 +276,13 @@ type RowActions = {
 };
 
 /**
- * One row of the sheet, and with `controls` a third cell for its Change
- * and Reset. While the row waits, or its key is taken, a line under it
+ * A key and its words, with Change and Reset beside them or in a full
+ * row below on the narrowest screens. While the row waits, a line under it
  * says so, with Swap (Take from a row with no key) and Cancel for a taken key.
  */
-function KeyRows(props: { row: SheetRow; controls: boolean; editing: Editing | null; taken: ReturnType<typeof takenWords> | null; actions: RowActions }) {
+function KeyRows(props: { row: SheetRow; controls: boolean; stackControls: boolean; editing: Editing | null; taken: ReturnType<typeof takenWords> | null; actions: RowActions }) {
   const { row, editing, actions } = props;
+  const stacked = props.controls && props.stackControls;
   const lineId = `rvtt-key-${row.id}`;
   const border = `${theme.line.border}px solid ${theme.color.border}`;
   // The line under a row that waits shows in full, as the row may be the last one in view.
@@ -289,44 +293,46 @@ function KeyRows(props: { row: SheetRow; controls: boolean; editing: Editing | n
   }, [step]);
   // Beside a 44 px Change, the key and its words sit at its middle.
   const align: CSSProperties | null = props.controls ? { verticalAlign: "middle" } : null;
+  const buttons = row.rebind ? (
+    <div style={stacked ? STACKED_CONTROLS : CONTROLS}>
+      <Button
+        ref={(el) => actions.ref(row.id, el)}
+        size="sm"
+        aria-label={`Change the key for ${row.rebind.name}`}
+        aria-describedby={editing ? lineId : undefined}
+        onClick={(e) => actions.change(row.id, e.currentTarget)}
+        onBlur={() => actions.leave(row.id)}
+        style={editing?.step === "listening" ? { borderColor: theme.color.accent } : undefined}
+      >
+        Change
+      </Button>
+      {row.rebind.changed ? (
+        <Button size="sm" variant="quiet" aria-label={`Reset the key for ${row.rebind.name}`} onClick={() => actions.reset(row.id)}>
+          Reset
+        </Button>
+      ) : null}
+    </div>
+  ) : null;
   return (
     <>
       <tr style={{ borderTop: border }}>
-        <th scope="row" style={{ ...(row.keys ? KEY_CELL : INPUT_CELL), ...align }}>
+        <th id={`${lineId}-key`} scope="row" style={{ ...(row.keys ? KEY_CELL : INPUT_CELL), ...align }}>
           {row.keys ? <KeyInput text={row.input} /> : row.input}
         </th>
         <td style={{ padding: `${theme.space(2)}px 0`, color: theme.color.text, verticalAlign: "top", ...align }}>
           {row.does}
           {row.when ? <span style={WHEN}>{capitalized(row.when)}</span> : null}
         </td>
-        {props.controls ? (
-          <td style={CONTROLS_CELL}>
-            {row.rebind ? (
-              <div style={CONTROLS}>
-                <Button
-                  ref={(el) => actions.ref(row.id, el)}
-                  size="sm"
-                  aria-label={`Change the key for ${row.rebind.name}`}
-                  aria-describedby={editing ? lineId : undefined}
-                  onClick={(e) => actions.change(row.id, e.currentTarget)}
-                  onBlur={() => actions.leave(row.id)}
-                  style={editing?.step === "listening" ? { borderColor: theme.color.accent } : undefined}
-                >
-                  Change
-                </Button>
-                {row.rebind.changed ? (
-                  <Button size="sm" variant="quiet" aria-label={`Reset the key for ${row.rebind.name}`} onClick={() => actions.reset(row.id)}>
-                    Reset
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-          </td>
-        ) : null}
+        {props.controls && !stacked ? <td style={CONTROLS_CELL} headers={`${lineId}-key`}>{buttons}</td> : null}
       </tr>
+      {stacked && buttons ? (
+        <tr>
+          <td colSpan={2} headers={`${lineId}-key`} style={{ paddingBottom: theme.space(2) }}>{buttons}</td>
+        </tr>
+      ) : null}
       {editing ? (
         <tr ref={line}>
-          <td colSpan={3} style={{ padding: `0 0 ${theme.space(2)}px` }}>
+          <td colSpan={stacked ? 2 : 3} style={{ padding: `0 0 ${theme.space(2)}px` }}>
             <div id={lineId} style={{ fontSize: theme.font.small, color: editing.step === "listening" && editing.refused ? theme.color.dangerText : theme.color.text }}>
               {editing.step === "listening"
                 ? editing.refused
@@ -429,6 +435,8 @@ const CONTROLS_CELL: CSSProperties = { padding: `${theme.space(1)}px 0 ${theme.s
  * button whole at any interface size, and the words wrap beside it.
  */
 const CONTROLS: CSSProperties = { display: "grid", gridTemplateColumns: "max-content", justifyItems: "end", gap: theme.space(1) };
+
+const STACKED_CONTROLS: CSSProperties = { display: "flex", flexWrap: "wrap", gap: theme.space(1) };
 
 /** The condition beyond the role, under what the row does: "With the Select tool". */
 const WHEN: CSSProperties = { display: "block", color: theme.color.textMuted, fontSize: theme.font.small };
