@@ -1,233 +1,170 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { RoomState, Viewer } from "#shared/model.ts";
+import type { Viewer } from "#shared/model.ts";
+import { projectState } from "#shared/project.ts";
 import type { ClientOp, ServerMessage } from "#shared/protocol.ts";
-import { character, DM, P1, room as roomState, scene } from "#shared/testutil.ts";
-import { LocalServer } from "../dev/localServer.ts";
+import type { UndoScope } from "#shared/undoContract.ts";
+import { DM, P1, room as roomState } from "#shared/testutil.ts";
 import { createRoomStore } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 
 const SAVED = "Saved. Undo in Setup history.";
 const rename: ClientOp = { t: "scene.update", sceneId: "s1", patch: { name: "The crypt" } };
+type Ev = Extract<ServerMessage, { t: "ev" }>;
 
-function setup(state: RoomState = roomState(), viewer: Viewer = DM) {
+function setup(viewer: Viewer = DM) {
   const room = createRoomStore({ roomId: "R1", you: viewer, clock: new FakeClock() });
-  const server = new LocalServer(state, viewer, "s1");
-  const outbox = new FakeOutbox();
-  room.setOutbox(outbox);
+  room.setOutbox(new FakeOutbox());
   room.setConnection("open");
-  room.applySnapshot(server.hello({ resumeFrom: 1, sceneId: "s1" }));
-  const receive = (message: ServerMessage) => {
-    if (message.t === "ev") room.applyEv(message);
-  };
-  const deliver = () => {
-    const ops = outbox.sent.flatMap((message) => message.t === "op" ? [{ n: message.n, op: message.op }] : []);
-    outbox.sent = [];
-    const messages = server.batch(ops);
-    messages.forEach(receive);
-    return messages;
-  };
+  const snapshot = (watermark = 0) => room.applySnapshot({ t: "snapshot", seq: room.store.getState().seq, watermark, state: projectState(roomState(), viewer, { sceneId: "s1" }), you: { ...viewer, sceneId: "s1" } });
+  snapshot();
+  const event = (n: number, scope: UndoScope = "setup", changed = true, extra: Partial<Ev> = {}): Ev => ({
+    t: "ev", seq: room.store.getState().seq + 1, changes: [], acks: [n], ackDetails: [{ n, scope, changed }], ...extra,
+  });
   const notices = () => room.store.getState().toasts.filter((toast) => toast.text === SAVED);
-  return { room, server, outbox, receive, deliver, notices };
+  const clear = () => notices().forEach((toast) => room.ui.dismissToast(toast.id));
+  return { room, snapshot, event, notices, clear };
 }
 
-test("Setup saves announce only after an acknowledgment, including editors with quiet errors", () => {
+test("only a server-confirmed effective Setup save announces, including quiet editors", () => {
   for (const quiet of [false, true]) {
     const s = setup();
-    s.room.dispatch(rename, { quiet });
-    assert.equal(s.notices().length, 0, "optimistic state is not a confirmed save");
-    s.deliver();
-    assert.equal(s.notices().length, 1);
+    const n = s.room.dispatch(rename, { quiet })!;
+    assert.equal(s.notices().length, 0, "optimistic state is not a confirmation");
+    s.room.applyEv(s.event(n));
+    assert.equal(s.notices().length, 1, "the server's per-op effect is authoritative even without visible changes");
     s.room.dispose();
   }
 });
 
-test("a refusal, a no-effect save, and a player save never advertise Setup history", () => {
-  const refused = setup();
-  const n = refused.room.dispatch(rename)!;
-  refused.room.applyEv({ t: "ev", seq: 1, changes: [{ key: "scene:s1", value: { ...refused.server.state.scenes.s1, name: "Another DM's edit" } }], rejects: [{ n, code: "invalid", message: "Changed elsewhere" }] });
-  assert.equal(refused.notices().length, 0);
-  refused.room.dispose();
-  const same = setup();
-  same.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { name: "s1" } });
-  same.deliver();
-  assert.equal(same.notices().length, 0, "a revision bump alone is not a saved change");
-  same.room.dispose();
-  const state = roomState({ characters: { c1: character("c1", { ownerIds: ["p1"] }) } });
-  const player = setup(state, P1);
-  player.room.dispatch({ t: "character.update", characterId: "c1", patch: { name: "Bree" } });
-  player.deliver();
-  assert.equal(player.server.state.characters.c1!.name, "Bree");
-  assert.equal(player.notices().length, 0);
-  player.room.dispose();
+test("server scope overrides the client's apparent operation scope and group declaration", () => {
+  for (const scope of ["play", "none", "setup"] as const) {
+    const s = setup();
+    const n = s.room.dispatch(rename, { group: "setup", groupScope: "setup" })!;
+    s.room.applyEv(s.event(n, scope, true, { changes: [{ key: "scene:s1", value: { ...s.room.store.getState().view!.scenes.s1, name: "The crypt" } }] }));
+    assert.equal(s.notices().length, scope === "setup" ? 1 : 0);
+    s.room.dispose();
+  }
+  const promoted = setup();
+  const n = promoted.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric" } })!;
+  promoted.room.applyEv(promoted.event(n));
+  assert.equal(promoted.notices().length, 1, "a later gesture part can inherit Setup without a local declaration");
+  promoted.room.dispose();
 });
 
-test("Play and None changes never advertise Setup history", () => {
+test("changed false and missing metadata never infer success from projected values", () => {
+  for (const details of ["unchanged", "missing"] as const) {
+    const s = setup();
+    const n = s.room.dispatch(rename)!;
+    const ev = s.event(n, "setup", false, { changes: [{ key: "scene:s1", value: { ...s.room.store.getState().view!.scenes.s1, name: "The crypt" } }] });
+    if (details === "missing") delete ev.ackDetails;
+    s.room.applyEv(ev);
+    assert.equal(s.notices().length, 0, details);
+    s.room.dispose();
+  }
+});
+
+test("mixed-device batches and incomplete projections still confirm this sender's save", () => {
   const s = setup();
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric" } });
-  s.deliver();
-  assert.equal(s.notices().length, 0);
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { thumb: null } });
-  s.deliver();
-  assert.equal(s.notices().length, 0);
-  s.room.dispose();
-});
-
-test("classification uses the accepted before-state rather than the resulting state", () => {
-  const state = roomState({ characters: { c1: character("c1") } });
-  state.characters.c1!.actor.legendary = { actionsMax: 3, actionsUsed: 0, resistMax: 3, resistUsed: 0 };
-  const s = setup(state);
-  const max: ClientOp = { t: "character.update", characterId: "c1", patch: { actor: { legendary: { actionsMax: 4, actionsUsed: 0, resistMax: 3, resistUsed: 0 } } } };
-  s.room.dispatch(max);
-  s.deliver();
-  assert.equal(s.notices().length, 1, "classifying the resulting state would incorrectly call this Play");
-  s.room.ui.dismissToast(s.notices()[0]!.id);
-  s.room.dispatch({ t: "character.update", characterId: "c1", patch: { actor: { legendary: { actionsMax: 4, actionsUsed: 1, resistMax: 3, resistUsed: 0 } } } });
-  s.deliver();
-  assert.equal(s.notices().length, 0, "spending a use stays Play");
-  s.room.dispose();
-});
-
-test("an earlier accepted Play op supplies the next op's before-state", () => {
-  const s = setup();
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric" } });
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric", name: "s1" } });
-  s.deliver();
-  assert.equal(s.notices().length, 0, "the Setup-classified patch has no effect after the preceding Play op");
-  assert.equal(s.server.state.scenes.s1!.suggestedView, "isometric");
-  s.room.dispose();
-});
-
-test("a Setup batch that leaves the confirmed values unchanged reports no saved change", () => {
-  const s = setup();
-  s.room.dispatch(rename);
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { name: "s1" } });
-  s.deliver();
-  assert.equal(s.notices().length, 0);
-  s.room.dispose();
-});
-
-test("declared Setup promotion includes Play parts but never promotes None", () => {
-  const s = setup();
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric" } }, { group: "setup", groupScope: "setup" });
-  s.deliver();
+  const n = s.room.dispatch({ t: "character.update", characterId: "outside-view", patch: { ownerIds: [] } })!;
+  s.room.applyEv(s.event(n, "setup", true, { seq: 18 }));
   assert.equal(s.notices().length, 1);
-  s.room.ui.dismissToast(s.notices()[0]!.id);
-  s.room.dispatch({ t: "member.update", memberId: "dm1", name: "DM" }, { group: "setup", groupScope: "setup" });
-  s.deliver();
-  assert.equal(s.notices().length, 0);
-  assert.equal(s.server.state.members.dm1!.name, "DM");
   s.room.dispose();
 });
 
-test("a batch with unknown ops or incomplete reads cannot establish a Setup save", () => {
-  const s = setup();
-  s.room.dispatch(rename);
-  s.server.external({ t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric" } }, DM);
-  s.deliver();
-  assert.equal(s.notices().length, 0, "a batch sequence gap may hide a different accepted before-state");
-  s.room.dispose();
-  const state = roomState({ scenes: { s1: scene("s1"), s2: scene("s2") }, characters: { c1: character("c1") } });
-  const incomplete = setup(state);
-  incomplete.room.dispatch({ t: "character.update", characterId: "c1", patch: { ownerIds: [] } });
-  incomplete.deliver();
-  assert.equal(incomplete.notices().length, 0, "a character owner edit reads tokens outside this scene");
-  incomplete.room.dispose();
+test("players and displays never advertise Setup history", () => {
+  for (const role of ["player", "display"] as const) {
+    const s = setup(P1);
+    s.room.applySnapshot({ t: "snapshot", seq: 0, watermark: 0, state: projectState(roomState(), P1, { sceneId: "s1" }), you: { ...P1, role, sceneId: "s1" } });
+    const n = s.room.dispatch(rename)!;
+    s.room.applyEv(s.event(n));
+    assert.equal(s.notices().length, 0, role);
+    s.room.dispose();
+  }
 });
 
-test("unacknowledged Setup changes stay silent while a confirmed Play edit changes the same entity", () => {
-  const s = setup();
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric" } });
-  const first = s.outbox.sent.find((message) => message.t === "op")!;
-  s.room.dispatch(rename);
-  if (first.t !== "op") throw new Error("missing first op");
-  s.server.batch([{ n: first.n, op: first.op }]).forEach(s.receive);
-  assert.equal(s.notices().length, 0);
-  assert.equal(s.room.store.getState().pending.length, 1);
-  s.room.dispose();
+test("details must match both an acknowledgment and a pending command by number", () => {
+  for (const kind of ["no-ack", "foreign-number", "pending-other"] as const) {
+    const s = setup();
+    const n = s.room.dispatch(rename)!;
+    const other = s.room.dispatch(rename)!;
+    const ev = s.event(n);
+    if (kind === "no-ack") ev.acks = [];
+    if (kind === "foreign-number") ev.ackDetails = [{ n: 999, scope: "setup", changed: true }];
+    if (kind === "pending-other") ev.ackDetails = [{ n: other, scope: "setup", changed: true }];
+    s.room.applyEv(ev);
+    assert.equal(s.notices().length, 0, kind);
+    s.room.dispose();
+  }
 });
 
-test("another device's Setup save cannot confirm this device's pending save", () => {
-  const s = setup();
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { suggestedView: "isometric" } });
-  const first = s.outbox.sent.find((message) => message.t === "op")!;
-  s.room.dispatch(rename);
-  s.server.external(rename, DM);
-  if (first.t !== "op") throw new Error("missing first op");
-  s.server.batch([{ n: first.n, op: first.op }]).forEach(s.receive);
-  assert.equal(s.notices().length, 0);
-  assert.equal(s.room.store.getState().pending.length, 1);
-  s.room.dispose();
-});
-
-test("a refusal wins over a contradictory acknowledgment", () => {
+test("a refusal wins over contradictory acknowledgment metadata", () => {
   const s = setup();
   const n = s.room.dispatch(rename)!;
-  s.room.applyEv({ t: "ev", seq: 1, acks: [n], rejects: [{ n, code: "invalid", message: "Changed elsewhere" }], changes: [{ key: "scene:s1", value: { ...s.server.state.scenes.s1, name: "The crypt" } }] });
+  s.room.applyEv(s.event(n, "setup", true, { rejects: [{ n, code: "invalid", message: "Changed elsewhere" }] }));
   assert.equal(s.notices().length, 0);
   s.room.dispose();
 });
 
-test("an acknowledged save that cannot replay against the known view never claims a Setup change", () => {
-  const state = roomState();
-  const s = setup(state);
-  const n = s.room.dispatch({ t: "scene.setGrid", sceneId: "s1", cellPx: 50, originPx: { x: 0, y: 0 } })!;
-  const next = s.room.dispatch(rename)!;
-  // The transport can acknowledge a save whose accepted before-state this projection cannot reproduce.
-  s.room.applyEv({ t: "ev", seq: 2, acks: [n, next], changes: [{ key: "scene:s1", value: { ...state.scenes.s1, name: "The crypt" } }] });
-  assert.equal(s.notices().length, 0);
-  s.room.dispose();
-});
-
-test("grouped Setup saves announce once and a later confirmed save announces again", () => {
+test("per-op effects survive a batch that returns to its starting values", () => {
   const s = setup();
-  s.room.dispatch(rename, { group: "setup", groupScope: "setup" });
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { background: "#123456" } }, { group: "setup", groupScope: "setup" });
-  const messages = s.deliver();
-  assert.equal(s.notices().length, 1);
+  const first = s.room.dispatch(rename)!;
+  const second = s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { name: "s1" } })!;
+  s.room.applyEv(s.event(first, "setup", true, { seq: 2, acks: [first, second], ackDetails: [{ n: second, scope: "setup", changed: true }, { n: first, scope: "setup", changed: true }] }));
+  assert.equal(s.notices().length, 1, "one confirmation for this batch of saves, despite no net projected change");
+  s.room.dispose();
+});
+
+test("a later save renews the notice, but duplicate acknowledgments never do", () => {
+  const s = setup();
+  const n = s.room.dispatch(rename)!;
+  const ev = s.event(n);
+  s.room.applyEv(ev);
   const first = s.notices()[0]!.id;
-  messages.forEach(s.receive);
-  assert.equal(s.notices()[0]!.id, first, "a repeated ack never announces twice");
-  s.room.dispatch({ t: "scene.update", sceneId: "s1", patch: { name: "The vault" } });
-  s.deliver();
+  s.room.applyEv(ev);
+  assert.equal(s.notices()[0]!.id, first);
+  const next = s.room.dispatch(rename)!;
+  s.room.applyEv(s.event(next));
   assert.equal(s.notices().length, 1);
-  assert.notEqual(s.notices()[0]!.id, first, "a new save is a new announcement");
+  assert.notEqual(s.notices()[0]!.id, first);
+  s.clear();
+  s.room.applyEv(s.event(next));
+  assert.equal(s.notices().length, 0, "dismissed confirmations do not return on duplicate delivery");
   s.room.dispose();
 });
 
-test("a reconnect snapshot never claims that a lost answer was a confirmed save", () => {
+test("a reconnect snapshot settles a lost answer without confirming a save", () => {
   const s = setup();
-  s.room.dispatch(rename);
-  s.server.batch(s.outbox.sent.flatMap((message) => message.t === "op" ? [{ n: message.n, op: message.op }] : []));
+  const n = s.room.dispatch(rename)!;
   s.room.suspend();
-  s.room.applySnapshot(s.server.hello({ resumeFrom: 1, sceneId: "s1" }));
+  s.snapshot(n);
   assert.equal(s.notices().length, 0);
+  s.room.applyEv(s.event(n));
+  assert.equal(s.notices().length, 0, "a delayed receipt cannot revive a settled command");
   s.room.dispose();
 });
 
-test("randomized saves, no-effect edits, lost answers and duplicate deliveries keep confirmation invariants", () => {
+test("randomized scopes, effects, refusals, missing receipts and lost answers keep confirmation invariants", () => {
   for (let seed = 1; seed <= 20; seed++) {
     const s = setup();
     let random = seed;
     const next = () => (random = (Math.imul(random, 1664525) + 1013904223) >>> 0);
     for (let step = 0; step < 30; step++) {
-      for (const notice of s.notices()) s.room.ui.dismissToast(notice.id);
-      const kind = next() % 3;
-      const current = s.server.state.scenes.s1!;
-      const op: ClientOp = kind === 0 ? { t: "scene.update", sceneId: "s1", patch: { name: `Save ${seed}:${step}` } }
-        : kind === 1 ? { t: "scene.update", sceneId: "s1", patch: { name: current.name } }
-          : { t: "scene.update", sceneId: "s1", patch: { suggestedView: current.suggestedView === "isometric" ? "topDown" : "isometric" } };
-      s.room.dispatch(op, { quiet: next() % 2 === 0 });
+      s.clear();
+      const n = s.room.dispatch(rename, { quiet: next() % 2 === 0 })!;
       assert.equal(s.notices().length, 0, `seed ${seed}, step ${step}: no optimistic confirmation`);
-      const messages = s.server.batch(s.outbox.sent.flatMap((message) => message.t === "op" ? [{ n: message.n, op: message.op }] : []));
-      s.outbox.sent = [];
-      const lost = next() % 4 === 0;
-      if (lost) s.room.applySnapshot(s.server.hello({ resumeFrom: 1, sceneId: "s1" }));
-      else messages.forEach(s.receive);
-      assert.equal(s.notices().length, kind === 0 && !lost ? 1 : 0, `seed ${seed}, step ${step}: only a confirmed Setup change`);
+      const scope = (["play", "setup", "none"] as const)[next() % 3]!;
+      const changed = next() % 3 !== 0;
+      const kind = next() % 5;
+      const ev = s.event(n, scope, changed, { seq: s.room.store.getState().seq + 1 + next() % 5 });
+      if (kind === 0) delete ev.ackDetails;
+      if (kind === 1) ev.rejects = [{ n, code: "invalid", message: "No longer available" }];
+      if (kind === 2) s.snapshot(n);
+      else s.room.applyEv(ev);
+      assert.equal(s.notices().length, kind > 2 && scope === "setup" && changed ? 1 : 0, `seed ${seed}, step ${step}: only an accepted effective Setup receipt confirms`);
       const id = s.notices()[0]?.id;
-      messages.forEach(s.receive);
-      assert.equal(s.notices()[0]?.id, id, `seed ${seed}, step ${step}: no duplicate confirmation`);
+      s.room.applyEv(ev);
+      assert.equal(s.notices()[0]?.id, id, `seed ${seed}, step ${step}: repeated delivery never repeats confirmation`);
     }
     s.room.dispose();
   }

@@ -175,7 +175,7 @@ describe("states", () => {
     assert.equal(s.conn(), "connecting");
     s.last().open();
     const [hello] = s.last().take("hello");
-    assert.deepEqual(hello, { t: "hello", clientId: "c1", resumeFrom: 1 });
+    assert.deepEqual(hello, { t: "hello", clientId: "c1", resumeFrom: 1, ackDetails: true });
     assert.equal(s.conn(), "connecting", "an open socket without its snapshot is not connected");
     s.last().emit(s.snapshot());
     assert.equal(s.conn(), "open");
@@ -952,4 +952,29 @@ test("history waits for this connection's snapshot, rejects retired socket callb
   assert.equal(s.room.store.getState().history?.ready, false);
   s.socket.dispose();
   s.room.dispose();
+});
+
+
+test("every hello requests op details, including scene resync and reconnect", () => {
+  for (const viewer of [DM, P1]) {
+    const s = setup({ viewer });
+    const check = () => {
+      const hello = s.last().take("hello");
+      assert.equal(hello.length, 1);
+      assert.equal(hello[0]?.t === "hello" && hello[0].ackDetails, true);
+    };
+    s.socket.start();
+    s.last().open();
+    check();
+    s.last().emit(s.snapshot());
+    s.last().emit({ t: "resync", reason: "scene" });
+    check();
+    s.last().emit(s.snapshot());
+    s.last().drop(1012);
+    s.clock.advance(0);
+    s.last().open();
+    check();
+    s.socket.dispose();
+    s.room.dispose();
+  }
 });

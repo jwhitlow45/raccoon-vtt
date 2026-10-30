@@ -537,7 +537,7 @@ export function createRoomSocket(options: RoomSocketOptions): RoomSocket {
     const sceneId = role() === "dm" ? (wantedScene ?? current ?? undefined) : undefined;
     requestedScene = sceneId ?? null;
     if (sceneId && sceneId !== current) room.trackScene({ t: "request", sceneId });
-    const msg: ClientMessage = sceneId ? { t: "hello", clientId, resumeFrom, sceneId } : { t: "hello", clientId, resumeFrom };
+    const msg: ClientMessage = { t: "hello", clientId, resumeFrom, ackDetails: true, ...(sceneId ? { sceneId } : {}) };
     if (!sendRaw(msg)) return;
     const wasOpen = phase === "open";
     phase = "hello";

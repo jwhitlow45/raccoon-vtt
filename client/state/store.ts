@@ -1,5 +1,4 @@
 import { CorrectionAnnouncements } from "../features/log/corrections.ts";
-import { confirmedSetupSave, SETUP_SAVED } from "./setupSave.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
 import { blockerText, EMPTY_HISTORY, HistoryController, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -955,7 +954,9 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone });
       };
       const accepted = s.pending.filter((p) => msg.acks?.includes(p.n) && !msg.rejects?.some((r) => r.n === p.n));
-      if (confirmedSetupSave({ before: s.confirmed, after: confirmed, beforeSeq: s.seq, seq: msg.seq, accepted, viewer: s.you, sceneId: s.sceneId })) renew(SETUP_SAVED, "info");
+      if (s.you?.role === "dm" && msg.ackDetails?.some((detail) => detail.scope === "setup" && detail.changed && accepted.some((p) => p.n === detail.n))) {
+        renew("Saved. Undo in Setup history.", "info");
+      }
       // Builder ops the server asked about (FORGET_ASK), one question for all of them, and a question answered once its ops are.
       const asks: { n: number; op: ClientOp; group?: string; groupScope?: "setup" }[] = [];
       let forgetAsk = s.forgetAsk ?? null;
