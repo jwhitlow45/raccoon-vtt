@@ -786,10 +786,11 @@ run's page, once. After the approval it builds the amd64 image and runs
 the smoke test (`selfhost/smoke-test.sh`): the image comes up healthy with
 `selfhost/compose.yml`, and the files its services mount match `docker/`
 byte for byte. It then pushes amd64 and arm64 from the same build, checks
-that the amd64 image pushed is the one it tested, and tags `X.Y.Z`. It signs
-the multi-architecture digest with Cosign, retrying up to three times, before
-moving `X.Y` and `latest`. After publication succeeds, a read-only job
-generates the release notes, and a separate job creates the GitHub Release.
+that the amd64 image pushed is the one it tested, and signs the
+multi-architecture digest with Cosign, retrying up to three times, before
+tagging `X.Y.Z` or moving `X.Y` and `latest`. After publication succeeds,
+a read-only job generates the release notes, and a separate job creates the
+GitHub Release.
 An existing GitHub Release is left unchanged on a rerun.
 
 Tags only move forward, by what Docker Hub holds. A release always tags
@@ -803,8 +804,8 @@ A version already on Docker Hub is never rebuilt or replaced: to change
 one, release the next patch. The one exception is a run that pushed
 `X.Y.Z` and then stopped before `X.Y` or `latest`. Run it again: it finds
 `X.Y.Z` from the same commit, signs that digest and adds the floating tags.
-A signing failure leaves `X.Y.Z` available for this resume, with no floating
-tags moved. A run that finds `X.Y.Z` from another commit refuses.
+If signing exhausts retries before `X.Y.Z` exists, no tag moves and a rerun rebuilds.
+A run that finds `X.Y.Z` from another commit refuses.
 
 Releases run one at a time, so push one tag at a time and let its run
 finish before you push the next. GitHub keeps only one run waiting for the

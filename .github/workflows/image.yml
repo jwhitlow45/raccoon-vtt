@@ -363,18 +363,7 @@ jobs:
           fi
           echo "INDEX=$index" >> "$GITHUB_ENV"
           echo "The pushed linux/amd64 image is the one smoke-tested ($pushed): index $index, linux/amd64 $amd64, linux/arm64 $arm64."
-      # Keep the immutable tag before signing, so an outage of the signing
-      # service can resume from this image without another build.
-      - name: Tag the version
-        if: env.MODE == 'build'
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          trap 'docker logout docker.io' EXIT
-          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
-          docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$INDEX"
-          echo "Tagged $VERSION: $INDEX."
+      # If signing exhausts retries in build mode, no tag moves and a rerun rebuilds.
       - name: Install Cosign
         run: |
           curl -fsSL --retry 3 --max-time 60 --output "$RUNNER_TEMP/cosign" \
@@ -411,6 +400,16 @@ jobs:
             fi
             sleep $((attempt * 5))
           done
+      - name: Tag the version
+        if: env.MODE == 'build'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          trap 'docker logout docker.io' EXIT
+          printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$INDEX"
+          echo "Tagged $VERSION: $INDEX."
       # Floating tags move only after signing succeeds, and only over this
       # release or older ones (scripts/release-tags.ts).
       - name: Tag the floating versions

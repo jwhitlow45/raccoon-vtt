@@ -340,30 +340,31 @@ describe("signing the published image", () => {
       const r = signAndTag({ mode, index: INDEX, pipeline: true });
       assert.equal(r.status, 0, r.out);
       assert.deepEqual(r.calls, [
-        ...(mode === "build" ? [`tag --tag ${IMAGE}:0.2.0 ${IMAGE}@${INDEX}`] : []),
         `inspect ${IMAGE}@${INDEX}`,
         `sign sign --yes ${IMAGE}@${INDEX}`,
+        ...(mode === "build" ? [`tag --tag ${IMAGE}:0.2.0 ${IMAGE}@${INDEX}`] : []),
         `tag --tag ${IMAGE}:0.2 --tag ${IMAGE}:latest ${IMAGE}@${INDEX}`,
       ]);
     });
   }
 
-  test("two signing failures retry with pauses before moving floating tags", () => {
+  test("two signing failures retry with pauses before moving any tags", () => {
     const r = signAndTag({ index: INDEX, signFailures: 2, pipeline: true });
     assert.equal(r.status, 0, r.out);
-    assert.deepEqual(r.calls.slice(1, -1), [
+    assert.deepEqual(r.calls, [
       `inspect ${IMAGE}@${INDEX}`, `sign sign --yes ${IMAGE}@${INDEX}`, "pause 5",
       `sign sign --yes ${IMAGE}@${INDEX}`, "pause 10", `sign sign --yes ${IMAGE}@${INDEX}`,
+      `tag --tag ${IMAGE}:0.2.0 ${IMAGE}@${INDEX}`,
+      `tag --tag ${IMAGE}:0.2 --tag ${IMAGE}:latest ${IMAGE}@${INDEX}`,
     ]);
-    assert.match(r.calls.at(-1)!, /^tag --tag .*:0\.2 --tag .*:latest /);
   });
 
-  test("a signing outage leaves the immutable tag and a resume signs the same digest before floating tags move", () => {
+  test("a signing outage moves no tag and a resume from an existing version signs before floating tags move", () => {
     const failed = signAndTag({ index: INDEX, signFailures: 3, pipeline: true });
     assert.equal(failed.status, 1, failed.out);
     assert.equal(failed.calls.filter((c) => c.startsWith("sign ")).length, 3);
     assert.equal(failed.calls.filter((c) => c.startsWith("pause ")).length, 2);
-    assert.deepEqual(failed.calls.filter((c) => c.startsWith("tag ")), [`tag --tag ${IMAGE}:0.2.0 ${IMAGE}@${INDEX}`]);
+    assert.deepEqual(failed.calls.filter((c) => c.startsWith("tag ")), []);
     const resumed = signAndTag({ mode: "resume", index: INDEX, pipeline: true });
     assert.equal(resumed.status, 0, resumed.out);
     assert.deepEqual(resumed.calls, [
