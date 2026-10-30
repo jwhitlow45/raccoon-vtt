@@ -1,4 +1,6 @@
 version: 2
+# The Node image is updated by hand in Dockerfile's ARG NODE_IMAGE.
+# Dependabot's Docker parser does not expand ARG references in FROM lines.
 updates:
   - package-ecosystem: npm
     directory: /
@@ -29,22 +31,6 @@ updates:
     open-pull-requests-limit: 2
     groups:
       github-actions:
-        patterns: ["*"]
-  - package-ecosystem: docker
-    directory: /
-    cooldown:
-      default-days: 14
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-    schedule:
-      interval: weekly
-      day: wednesday
-      time: "02:00"
-      timezone: Etc/UTC
-    open-pull-requests-limit: 2
-    groups:
-      docker:
         patterns: ["*"]
   # Compose has its own updater. Changes to selfhost/compose.yml also need
   # their source updated and `pnpm selfhost` run before merging.

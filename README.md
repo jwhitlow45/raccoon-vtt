@@ -754,6 +754,8 @@ For maintainers. The image is built and pushed to Docker Hub only by GitHub
 Actions, in [`.github/workflows/image.yml`](.github/workflows/image.yml),
 never from a laptop.
 
+The Node image is pinned in `Dockerfile`'s `ARG NODE_IMAGE` and is updated by hand.
+
 Once, before the first tag, create the repository `raccoon-vtt` on Docker
 Hub under the namespace the image uses, and make it public. A repository
 that a push creates takes the account's default visibility, which can be
