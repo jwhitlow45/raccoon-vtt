@@ -45,7 +45,7 @@ describe("a monster block's ability table, three across (docs/design-v1-dice-ui.
     const markup = withoutFrames(renderToStaticMarkup(createElement(StatBlockView, { view: monsters[0]!, source: "srd" })));
     assert.doesNotMatch(markup, /<table/);
     assert.equal(markup.match(/<dt/g)?.length, 6);
-    // FL-7 (D-261030-436): the Dex save's word "Save" takes the proficient underline, which names it for a screen reader.
+    // FL-12 (D-261030-527): the Dex save is framed whole, "Save +3", and its picture names it for a screen reader.
     assert.match(markup, /data-proficiency-level="prof" title="Proficient"[^>]*>Save<span data-proficiency-marker="prof" role="img" aria-label="Proficient"[^>]*><\/span><\/span> <\/span>\+3/, "the aboleth's Dex save is set apart and named");
   });
 });

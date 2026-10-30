@@ -30,7 +30,7 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
   });
 
   test("a proficient save is bold and named proficient, the others neither", () => {
-    // FL-12 (D-261030-500): a proficient save's word "Save" takes the circle, and its picture names it for a screen reader.
+    // FL-12 (D-261030-527): a proficient save is framed whole, "Save +7", and its picture names it for a screen reader.
     const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*><span[^>]*><span data-proficiency-label="" data-proficiency-level="\w+"[^>]*>Save(<span data-proficiency-marker="prof" role="img" aria-label="Proficient"[^>]*><\/span>)?<\/span> <\/span>([^<]+)<\/dd>/.exec(box);
     const dex = save(boxes[1]!);
     const str = save(boxes[0]!);
