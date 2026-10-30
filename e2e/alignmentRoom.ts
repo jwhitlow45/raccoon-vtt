@@ -14,7 +14,7 @@ import { loadMonsters, monsterActor, type SrdMonster } from "../shared/srd/monst
 import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
-import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
+import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 
 /**
@@ -324,6 +324,7 @@ class Sweep {
     const popovers = shown.and(page.locator("[data-rvtt-popover]")).or(shown.locator("[data-rvtt-popover]"));
     if (await popovers.count()) await this.add(page, screen, await popoverScrollbarLines(popovers, `${this.at} ${screen}`));
     await this.add(page, screen, await proficiencyLines(shown, `${this.at} ${screen}`, false));
+    await this.add(page, screen, await proficiencyHeightLines(shown, `${this.at} ${screen}`, false));
   }
 
   /** The board's pills, as `screen`, with each trap name's pointer it read counted as a screen of its own. */
@@ -3277,9 +3278,10 @@ export function roomTest(): void {
   });
 }
 
-const FL7 = { monster: randomUUID(), token: randomUUID(), companion: randomUUID(), block: randomUUID() };
+const FL7 = { monster: randomUUID(), token: randomUUID(), companion: randomUUID(), block: randomUUID(), dragon: randomUUID() };
 const FL7_MONSTER_AT = { x: 1, y: 2 };
 const FL7_COMPANION_AT = { x: 2, y: 2 };
+const FL7_DRAGON_AT = { x: 1, y: 8 };
 const FL7_STATS = {
   abilities: { str: 10, dex: 14, con: 10, int: 10, wis: 14, cha: 10 },
   saves: ["dex", "con"],
@@ -3307,17 +3309,20 @@ async function proficiencyScreen(sweep: Sweep, page: Page, screen: string, root:
   });
   await sweep.measure(page, `fl7-${screen}`, labels);
   await sweep.add(page, `fl7-${screen}`, await proficiencyLines(root, `${sweep.at} fl7-${screen}`));
+  await sweep.add(page, `fl7-${screen}`, await proficiencyHeightLines(root, `${sweep.at} fl7-${screen}`));
 }
 
 async function proficiencyLevel(root: Locator, words: RegExp, level: "none" | "prof" | "expert"): Promise<void> {
   const label = root.locator("[data-proficiency-label]").filter({ hasText: words }).first();
   await label.waitFor();
   const marker = label.locator("[data-proficiency-marker]");
-  await waitFor(`fl7: ${words} resolves to ${level}`, async () => (await marker.getAttribute("data-proficiency-marker")) === level || null);
-  assert.equal(await marker.getAttribute("data-proficiency-marker"), level, `fl7: ${words} has ${level}`);
+  await waitFor(`fl7: ${words} resolves to ${level}`, async () => (await label.getAttribute("data-proficiency-level")) === level || null);
+  assert.equal(await label.getAttribute("data-proficiency-level"), level, `fl7: ${words} has ${level}`);
   if (level === "none") {
-    assert.equal(await marker.getAttribute("aria-hidden"), "true", "fl7: an empty slot is silent");
-    assert.equal(await marker.locator("svg").count(), 0, "fl7: neither has no glyph");
+    if ((await label.getAttribute("data-proficiency-layout")) === "column") {
+      assert.equal(await marker.getAttribute("aria-hidden"), "true", "fl7: an empty column slot is silent");
+      assert.equal(await marker.locator("svg").count(), 0, "fl7: neither has no glyph");
+    } else assert.equal(await marker.count(), 0, "fl7: untrained flowing text has no slot");
   } else {
     const name = level === "prof" ? "Proficient" : "Expertise";
     assert.equal(await marker.getAttribute("aria-label"), name, `fl7: ${name} is accessible`);
@@ -3372,6 +3377,15 @@ async function proficiencyToken(sweep: Sweep, page: Page, name: string, at: { x:
   const more = bar.getByRole("button", { name: "More stats", exact: true });
   if (await visible(more)) await more.click();
   await proficiencyScreen(sweep, page, `${screen}-summary`, bar.locator("[data-saves]"));
+  if (screen === "dragon") {
+    await sweep.measure(page, "fl7-dragon-bar", bar);
+    if (sweep.at.endsWith("390x844-1")) {
+      const tops = await bar.locator("[data-saves] [data-proficiency-label], [data-saves] > [data-saves-part]:first-child > span:first-child").evaluateAll((labels) => labels.map((el) => (el as unknown as { getBoundingClientRect(): { top: number } }).getBoundingClientRect().top));
+      assert.equal(tops.length, 7, "fl7: the dragon bar holds the heading and six saves");
+      assert.ok(Math.max(...tops) - Math.min(...tops) <= 1, "fl7: the dragon's heading and saves stay on one line at 390x844");
+    }
+    await shots.take(page, `${sweep.at}-dragon-bar`);
+  }
   const panel = await openPanel(page, "Token");
   const fold = panel.getByRole("button", { name: "Stat block", exact: true });
   await fold.waitFor();
@@ -3530,6 +3544,38 @@ async function proficiencyEncounter(sweep: Sweep, page: Page): Promise<void> {
 
 /** FL-7 has its own matrix so every required surface is measured in both color schemes. */
 export function proficiencyTests(): void {
+  test("fl7-helper. hiding markers detects added container rows and restores their display", async () => {
+    const page = await dmContext.newPage();
+    try {
+      for (const scale of SCALES) {
+        await page.setContent(`<style>
+          [data-proficiency-label] { display:inline-block; position:relative; white-space:nowrap; }
+          [data-proficiency-name] { display:inline-block; width:80px; }
+          [data-proficiency-marker] { position:absolute; width:6px; height:6px; }
+        </style><div id="root" style="width:180px;font:14px/20px sans-serif;zoom:${scale}">
+          <span data-proficiency-label><span data-proficiency-marker="prof"></span><span data-proficiency-name>Save +5</span></span>
+          <span data-proficiency-label><span data-proficiency-marker="expert"></span><span data-proficiency-name>Skill +7</span></span>
+        </div><div id="empty"></div>`);
+        const root = page.locator("#root");
+        assert.deepEqual(await proficiencyHeightLines(root, "fl7-height"), [], "absolute markers add no row");
+        await root.locator("[data-proficiency-label]").evaluateAll((labels) => {
+          type El = { style: { display: string; gap: string }; querySelector(s: string): { style: { position: string; width: string } } };
+          for (const label of labels as unknown as El[]) {
+            label.style.display = "inline-flex";
+            label.style.gap = "4px";
+            const marker = label.querySelector("[data-proficiency-marker]");
+            marker.style.position = "static";
+            marker.style.width = "14px";
+          }
+        });
+        assert.match((await proficiencyHeightLines(root, "fl7-height")).join("\n"), /change container height/, "inline marker widths that cause a second row fail");
+        assert.ok(await root.locator("[data-proficiency-marker]").first().isVisible(), "temporary hiding is restored after a failure");
+        assert.match((await proficiencyHeightLines(page.locator("#empty"), "fl7-height")).join("\n"), /no visible/, "empty coverage cannot pass");
+      }
+    } finally {
+      await page.close();
+    }
+  });
   test("fl7-helper. empty, proficient and expert slots share edges and retain drift and overflow checks", async () => {
     const page = await dmContext.newPage();
     const marker = (level: "none" | "prof" | "expert") => `<span data-proficiency-marker="${level}"${level === "none" ? ' aria-hidden="true"' : ' role="img"'}>${level === "none" ? "" : '<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="3" /></svg>'}</span>`;
@@ -3611,17 +3657,19 @@ export function proficiencyTests(): void {
     await ops.send({ t: "companionBlock.create", block: { ...FL7_BLOCK, id: FL7.block, characterId: run.ids.thornChar, name: "FL7 Companion" } });
     await ops.send({ t: "token.create", token: { id: FL7.token, sceneId: run.sceneId, kind: "monster", name: "FL7 Monster", size: "medium", ...FL7_MONSTER_AT, disposition: "hostile", actor: { inline: actor({ monsterId: FL7.monster }) } } });
     await ops.send({ t: "token.create", token: { id: FL7.companion, sceneId: run.sceneId, kind: "npc", name: "FL7 Companion", size: "medium", ...FL7_COMPANION_AT, disposition: "ally", companion: { of: run.ids.thornChar, turn: "shared" }, actor: { inline: actor({ blockId: FL7.block }) } } });
+    await ops.send({ t: "token.create", token: { id: FL7.dragon, sceneId: run.sceneId, kind: "monster", name: "Adult White Dragon", size: "huge", ...FL7_DRAGON_AT, disposition: "hostile", actor: { inline: srdActor("adult-white-dragon") } } });
   });
   for (const scheme of ["light", "dark"] as const) {
     for (const size of SIZES.filter((s) => ["1440x900", "390x844", "360x740", "320x568"].includes(s.name))) {
       for (const scale of SCALES) {
-        test(`fl7-${scheme}-${size.name}-${scale}. every creature skill/save label stays on one line and its marker centers within 1 px`, async () => {
+        test(`fl7-${scheme}-${size.name}-${scale}. markers add no rows and stay within 1 px of their label position`, async () => {
           const sweep = new Sweep(`fl7-${scheme}-${size.name}-${scale}`);
           const page = await dmPageFor(size);
           await page.emulateMedia({ colorScheme: scheme });
           await pat.emulateMedia({ colorScheme: scheme });
           await openAt(page, size, scale);
           await openAt(pat, size, scale);
+          await proficiencyToken(sweep, page, "Adult White Dragon", { x: FL7_DRAGON_AT.x + 1, y: FL7_DRAGON_AT.y + 1 }, "dragon");
           await proficiencyToken(sweep, page, "FL7 Monster", FL7_MONSTER_AT, "monster");
           await proficiencyOptions(sweep, page, await openDice(page), "monster");
           await proficiencyToken(sweep, page, "FL7 Companion", FL7_COMPANION_AT, "companion");
@@ -3650,7 +3698,7 @@ export function proficiencyTests(): void {
           await proficiencyScreen(sweep, pat, "shape-effective", sheet.locator("[data-shape-numbers]"));
           await proficiencyLevel(sheet.locator("[data-shape-numbers]"), /^DEX /, "prof");
           await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: "wolf" } } });
-          await waitFor("fl7: Polymorph uses the beast's saving proficiency", async () => (await sheet.locator('[data-shape-numbers] [data-proficiency-label]').filter({ hasText: /^DEX / }).locator("[data-proficiency-marker]").getAttribute("data-proficiency-marker")) === "none" || null);
+          await waitFor("fl7: Polymorph uses the beast's saving proficiency", async () => (await sheet.locator('[data-shape-numbers] [data-proficiency-label]').filter({ hasText: /^DEX / }).getAttribute("data-proficiency-level")) === "none" || null);
           await proficiencyScreen(sweep, pat, "polymorph", sheet);
           await ops.send({ t: "character.update", characterId: run.ids.thornChar, patch: { actor: { srdId: null } } });
           await sheet.locator("[data-pc-stats]").waitFor();

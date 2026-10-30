@@ -61,8 +61,9 @@ import type { Locator, Page } from "playwright-core";
  *   their first lines.
  * - A `role="img"` is one picture, its insides drawn on purpose (the AC
  *   shield sets its number above its middle).
- * - A proficiency marker reserves the same square with or without a
- *   glyph. Its empty slot still places the label and its column's edge.
+ * - A proficiency column reserves the same square with or without a
+ *   glyph. Flowing labels use an absolute mark below the first capital,
+ *   checked separately by proficiencyLines without affecting line layout.
  * - Content placed absolutely beside content in the flow (a badge, a
  *   ring around a die) is placed against its containing block on purpose.
  *   A control whose only content is placed so is measured by it.
@@ -124,6 +125,66 @@ import type { Locator, Page } from "playwright-core";
 /** The most a part may be off, in CSS px. Offsets are rounded to 0.1 px first, so layout rounding at 130% (1.0 px) passes. */
 export const LIMIT_PX = 1;
 
+/** Marks may decorate a line, but may not add height to the label or any container measured here. */
+export async function proficiencyHeightLines(root: Locator, screen: string, required = true): Promise<string[]> {
+  const measured = await root.evaluateAll((roots) => {
+    type El = {
+      tagName: string;
+      textContent: string | null;
+      parentElement: El | null;
+      currentCSSZoom?: number;
+      matches(selector: string): boolean;
+      querySelectorAll(selector: string): ArrayLike<El>;
+      getAttribute(name: string): string | null;
+      getBoundingClientRect(): { width: number; height: number };
+      ownerDocument: {
+        head: { appendChild(node: Style): void };
+        createElement(tag: string): Style;
+        defaultView: { getComputedStyle(node: El): { visibility: string } };
+      };
+    };
+    type Style = { textContent: string | null; remove(): void };
+    const containers = new Set<El>();
+    let count = 0;
+    for (const root of roots as unknown as El[]) {
+      const labels = [...(root.matches("[data-proficiency-label]") ? [root] : []), ...Array.from(root.querySelectorAll("[data-proficiency-label]"))];
+      for (const label of labels) {
+        const box = label.getBoundingClientRect();
+        if (box.width === 0 || box.height === 0 || label.ownerDocument.defaultView.getComputedStyle(label).visibility === "hidden") continue;
+        count++;
+        for (let container: El | null = label; container; container = container.parentElement) {
+          const rect = container.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) containers.add(container);
+          if (container === root) break;
+        }
+      }
+    }
+    const before = [...containers].map((node) => ({ node, height: node.getBoundingClientRect().height, zoom: node.currentCSSZoom ?? 1 }));
+    const styles: Style[] = [];
+    const lines: string[] = [];
+    try {
+      // Keep both reads in one browser task so ResizeObservers cannot freeze the temporary layout into app state.
+      for (const doc of new Set(before.map(({ node }) => node.ownerDocument))) {
+        const style = doc.createElement("style");
+        style.textContent = "[data-proficiency-marker] { display: none !important; }";
+        styles.push(style);
+        doc.head.appendChild(style);
+      }
+      for (const { node, height, zoom } of before) {
+        const without = node.getBoundingClientRect().height;
+        const difference = Math.abs(height - without) / zoom;
+        if (difference <= 0.01) continue;
+        const name = node.getAttribute("aria-label") ?? node.textContent?.replace(/\s+/g, " ").trim().slice(0, 72) ?? "";
+        lines.push(`${node.tagName.toLowerCase()} "${name}": proficiency markers change container height by ${difference.toFixed(2)} px (${(height / zoom).toFixed(2)} with, ${(without / zoom).toFixed(2)} without)`);
+      }
+    } finally {
+      for (const style of styles) style.remove();
+    }
+    return { count, lines };
+  });
+  return [...(required && measured.count === 0 ? ["no visible skill/save containers were measured"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
+}
+
 /** Skill/save units keep their marker, name and number together, including outside a button. */
 export async function proficiencyLines(root: Locator, screen: string, required = true): Promise<string[]> {
   const measured = await root.evaluateAll((roots) => {
@@ -144,7 +205,7 @@ export async function proficiencyLines(root: Locator, screen: string, required =
       getAttribute(name: string): string | null;
       ownerDocument: {
         createRange(): { selectNodeContents(node: El): void; getClientRects(): ArrayLike<Rect> };
-        defaultView: { getComputedStyle(node: El): { overflowX: string; paddingLeft: string; paddingRight: string; borderLeftWidth: string; borderRightWidth: string } };
+        defaultView: { getComputedStyle(node: El): { fontSize: string; overflowX: string; paddingLeft: string; paddingRight: string; borderLeftWidth: string; borderRightWidth: string } };
       };
     };
     const labels = new Set<El>();
@@ -161,10 +222,12 @@ export async function proficiencyLines(root: Locator, screen: string, required =
       const name = label.querySelector("[data-proficiency-name]");
       const marker = label.querySelector("[data-proficiency-marker]");
       const words = name?.textContent?.trim() || "unnamed proficiency label";
-      if (!name || !marker) {
+      const unmarkedFlow = label.getAttribute("data-proficiency-layout") === "flow" && label.getAttribute("data-proficiency-level") === "none";
+      if (!name || (!marker && !unmarkedFlow)) {
         lines.push(`${words}: missing the name or fixed marker slot`);
         continue;
       }
+      if (unmarkedFlow && marker) lines.push(`${words}: untrained flowing label reserves a marker slot`);
       const rects: Rect[] = [];
       const readText = (node: El): void => {
         if (node.nodeType === 3 && node.textContent?.trim()) {
@@ -177,11 +240,17 @@ export async function proficiencyLines(root: Locator, screen: string, required =
       const zoom = label.currentCSSZoom ?? 1;
       // Small ability capitals and a larger bonus share a baseline, so their glyph boxes overlap rather than sharing a top.
       if (rects.length === 0 || Math.max(...rects.map((r) => r.top)) >= Math.min(...rects.map((r) => r.bottom)) - zoom) lines.push(`${words}: skill/save name or number wraps`);
-      const mark = marker.getBoundingClientRect();
       const text = name.getBoundingClientRect();
-      const off = Math.abs((mark.top + mark.bottom - text.top - text.bottom) / 2) / zoom;
-      if (off > 1) lines.push(`${words}: marker center is ${off.toFixed(2)} px from the name`);
-      if (mark.width <= 0 || Math.abs(mark.width - mark.height) / zoom > 1) lines.push(`${words}: marker slot is missing or not square`);
+      if (marker) {
+        const mark = marker.getBoundingClientRect();
+        const under = marker.getAttribute("data-proficiency-placement") === "under";
+        const em = parseFloat(label.ownerDocument.defaultView.getComputedStyle(label).fontSize);
+        const center = under ? (box.top + box.bottom) / 2 + 0.5 * em * zoom : (text.top + text.bottom) / 2;
+        const off = Math.abs((mark.top + mark.bottom) / 2 - center) / zoom;
+        if (off > 1) lines.push(`${words}: marker center is ${off.toFixed(2)} px from its ${under ? "under-letter position" : "name"}`);
+        if (mark.width <= 0 || Math.abs(mark.width - mark.height) / zoom > 1) lines.push(`${words}: marker slot is missing or not square`);
+        if (under && (mark.left < box.left - zoom || mark.right > box.right + zoom)) lines.push(`${words}: under-letter marker runs outside its label`);
+      }
       if (label.scrollWidth > label.clientWidth + 1) lines.push(`${words}: label overflows its own unit`);
       for (let ancestor = label.parentElement; ancestor; ancestor = ancestor.parentElement) {
         const css = ancestor.ownerDocument.defaultView.getComputedStyle(ancestor);

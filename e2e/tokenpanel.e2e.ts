@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { Locator, Page } from "playwright-core";
 import { INTER_FAMILY } from "../client/lib/interFont.ts";
-import { alignmentLines, measureAlignment, proficiencyLines } from "./helpers/alignment.ts";
+import { alignmentLines, measureAlignment, proficiencyHeightLines, proficiencyLines } from "./helpers/alignment.ts";
 import { barControl, expandBar, multiSelect, openSideTab, pagePoint, waitFor, wholeInReach } from "./harness.ts";
 import { assetRow, chooseStarterWork, starterCounts, starterWork } from "./starterPick.ts";
 import { actor, applyInView, bar, combatSections, DESK, dm, dmCdp, dmConsole, dmContext, dmSocket, type El, failSrdData, familyOf, fieldBeforeModes, fitMap, focused, foldedSummary, footprintRect, groupIn, hpPairSideBySide, inside, labelUnderFade, LONG_IMMUNITIES, mapBadges, mapLocks, noSideScroll, openGroup, ops, panelFile, panelOf, player, playerCdp, playerContext, playerSocket, rectOf, resize, ringsCompact, ringsFull, run, sectionIn, server, settle, setUp, SHEET, shots, speedUnitsWhole, steadyAboveSize, stepperRows, storedFolds, tapToken, tokenPanel, type View } from "./tokenpanelRoom.ts";
@@ -511,6 +511,7 @@ panelFile(null, () => {
     const sizes: (View & { label: string })[] = [
       { ...DESK, label: "1280 x 800" },
       { width: 390, height: 844, scale: 1, label: "390 x 844" },
+      { width: 320, height: 568, scale: 1, label: "320 x 568" },
       { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 }, label: "480 x 320 at 130%" },
     ];
     for (const size of sizes) {
@@ -530,6 +531,16 @@ panelFile(null, () => {
         if ((await more.count()) > 0) await more.click();
         await speedUnitsWhole(b, `${size.label}, ${name}'s bar`);
         await noSideScroll(b, `${size.label}, ${name}'s bar opened`);
+        if (name === "Adult White Dragon") {
+          const saves = b.locator("[data-saves]");
+          await saves.waitFor();
+          assert.deepEqual(await proficiencyHeightLines(b, `${size.label}, dragon bar`), [], "markers add no height to the dragon bar");
+          if (size.width === 390) {
+            const boxes = await Promise.all((await saves.locator("[data-proficiency-label], :scope > [data-saves-part]:first-child > span:first-child").all()).map(rectOf));
+            assert.equal(boxes.length, 7);
+            assert.ok(Math.max(...boxes.map((box) => box.top)) - Math.min(...boxes.map((box) => box.top)) <= 1, "the dragon's heading and saves stay on one line at 390 x 844");
+          }
+        }
         await shots.take(dm, `tokenpanel-${size.width}x${size.height}-${name.split(" ")[0]!.toLowerCase()}-bar`);
         await (await barControl(b, "Details")).click();
         const panel = tokenPanel(dm);
@@ -588,10 +599,10 @@ panelFile(null, () => {
       const row = boxes.slice(start, start + 3);
       assert.ok(Math.max(...row.map((box) => box.top)) - Math.min(...row.map((box) => box.top)) <= 1, `saves ${start + 1} to ${start + 3} share a row: ${JSON.stringify(row)}`);
     }
-    // The six marker slots add width. This phone keeps the complete saves in two balanced triples.
-    assert.ok(boxes[3]!.top >= boxes[0]!.bottom - 1, "the second triple starts below the first");
+    assert.ok(Math.max(...boxes.map((box) => box.top)) - Math.min(...boxes.map((box) => box.top)) <= 1, "390 x 844: proficiency markers preserve the single save line");
     await noSideScroll(saves, "390 x 844: all six saves");
-    assert.deepEqual(await proficiencyLines(saves, "390 x 844: summary saves"), [], "every marker is centered and every label fits");
+    assert.deepEqual(await proficiencyLines(saves, "390 x 844: summary saves"), [], "every marker is placed and every label fits");
+    assert.deepEqual(await proficiencyHeightLines(goblin, "390 x 844: goblin bar"), [], "the bar has the same height with markers hidden");
     // At 100% the expanded bar's full layout shows Apply wherever its token stands (barButtons.ts barCapacity).
     await applyInView(goblin, "390 x 844, Goblin 4 mid-screen");
     // A token at the scene's foot gets the same layout: the field under the mode buttons, no More stats.
