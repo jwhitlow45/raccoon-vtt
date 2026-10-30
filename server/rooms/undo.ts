@@ -314,6 +314,14 @@ export class UndoStacks {
     return { undo: s?.undo.length ?? 0, redo: s?.redo.length ?? 0 };
   }
 
+  clear(memberId: string): void {
+    const member = this.#member(memberId);
+    member.play = { undo: [], redo: [] };
+    member.setup = { undo: [], redo: [] };
+    member.latest = null;
+    member.serial++;
+  }
+
   groupScope(memberId: string, client: string, group: string): { group: string; scope: HistoryScope; declared: boolean } | undefined {
     const member = this.#members.get(memberId);
     if (!member) return undefined;

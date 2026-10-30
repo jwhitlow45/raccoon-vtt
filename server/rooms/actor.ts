@@ -1638,6 +1638,7 @@ export class RoomActor {
       cmd.reject(new SysOpRefused(reduced.code, reduced.message));
       return;
     }
+    if (op.t === "sys.memberSetKind") this.#clearHistory(op.memberId);
     this.#ensureBatch().sys.push(cmd);
     this.#scheduleCommit();
   }
@@ -2186,12 +2187,26 @@ export class RoomActor {
         continue;
       }
       if (grant.memberId !== conn.memberId || grant.role !== conn.role) {
+        for (const memberId of new Set([conn.memberId, grant.memberId])) this.#clearHistory(memberId);
         conn.memberId = grant.memberId;
         conn.role = grant.role;
         this.#resync(conn, "role");
       }
     }
     await this.reconcileKinds();
+  }
+
+  /** Role changes invalidate histories immediately, including copies frozen by a pending commit. */
+  #clearHistory(memberId: string): void {
+    this.#undo.clear(memberId);
+    const empty = this.#undo.summary(memberId, "dm", 0, 0);
+    this.#committedHistory.set(memberId, empty);
+    this.#inFlight?.history?.set(memberId, empty);
+    this.#batch?.history?.set(memberId, empty);
+    for (const [key, conn] of this.#clients) if (conn.memberId === memberId) {
+      this.#groupScopes.delete(key);
+      this.#forgetAsks.delete(key);
+    }
   }
 
   /**

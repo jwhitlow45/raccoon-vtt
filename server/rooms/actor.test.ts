@@ -4006,3 +4006,106 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
     }
   });
 });
+
+for (const pendingCommit of [false, true]) test(`role resync clears all four histories, pending commit ${pendingCommit}`, async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const dm = member("DM", "dm");
+  const { state, tokenId } = roomWithGoblin(dm);
+  const db = new FakeDb({ state, dmGrants: [dm.id] });
+  let role: "dm" | "player" = "dm";
+  const base = db.pool();
+  let pause = false;
+  let waiting = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  t.after(release);
+  const pool = {
+    ...base,
+    connect: async () => {
+      const client = await base.connect();
+      return { ...client, query: async (sql: string, params: unknown[] = []) => {
+        if (pause && sql.trim() === "commit") {
+          waiting = true;
+          await gate;
+        }
+        return client.query(sql, params);
+      } };
+    },
+  } as Pool;
+  const query = async (sql: string, params: unknown[] = []) => sql.includes("g.session_id = $1")
+    ? { rows: [{ member_id: dm.id, role, epoch: 1, player_epoch: 1, dm_epoch: 1 }] }
+    : base.query(sql, params);
+  const actor = await RoomActor.load({ ...deps(db), pool: { ...pool, query } as Pool });
+  assert.ok(actor);
+  t.after(() => actor.shutdown({ code: 1012, snapshot: false }));
+  const { conn, sent } = connect(actor, dm);
+  const clientId = uuidv7();
+  await actor.hello(conn, { clientId, resumeFrom: 1 });
+  const history = () => historyMessageSchema.parse(sent.findLast((m) => m.t === "history"));
+  let n = 0;
+  const accepted = async (op: Op) => {
+    await actor.op(conn, ++n, op);
+    const answer = await answerTo(sent, n);
+    assert.notEqual(answer, "stuck");
+    assert.ok(answer !== "stuck" && answer.acks?.includes(n));
+  };
+  await accepted({ t: "token.move", tokenId, x: 2, y: 1 });
+  await accepted({ t: "token.move", tokenId, x: 3, y: 1 });
+  await accepted({ t: "undo", head: history().play.undo.head!.id });
+  await accepted({ t: "room.update", name: "Private setup one" });
+  await accepted({ t: "room.update", name: "Private setup two" });
+  await accepted({ t: "undo", scope: "setup", head: history().setup!.undo.head!.id });
+  const old = history();
+  for (const pair of [old.play, old.setup!]) assert.deepEqual([pair.undo.depth, pair.redo.depth], [1, 1]);
+  if (pendingCommit) {
+    pause = true;
+    await actor.op(conn, ++n, { t: "room.update", name: "Pending DM edit" });
+    assert.equal(await within(2_000, (async () => {
+      while (!waiting) await new Promise((resolve) => setTimeout(resolve, 2));
+      return "waiting";
+    })()), "waiting");
+  }
+  for (const nextRole of ["player", "dm"] as const) {
+    role = nextRole;
+    t.mock.timers.tick(60_000);
+    assert.equal(await within(2_000, (async () => {
+      while (conn.role !== role) await new Promise((resolve) => setTimeout(resolve, 2));
+      return "changed";
+    })()), "changed");
+    release();
+    await actor.deletionStep(async () => ({ deleted: [], result: undefined }));
+    await actor.hello(conn, { clientId, resumeFrom: n + 1 });
+    const cleared = history();
+    assert.deepEqual([cleared.play.undo.depth, cleared.play.redo.depth], [0, 0]);
+    if (nextRole === "dm") assert.deepEqual([cleared.setup!.undo.depth, cleared.setup!.redo.depth], [0, 0]);
+    else assert.equal(cleared.setup, undefined);
+    assert.ok(cleared.serial > old.serial);
+  }
+  const before = actor.committed.state;
+  await actor.op(conn, ++n, { t: "undo", head: old.play.undo.head!.id });
+  const refused = await answerTo(sent, n);
+  assert.ok(refused !== "stuck" && refused.rejects?.length === 1);
+  assert.deepEqual(actor.committed.state, before);
+});
+
+test("member kind changes clear disconnected DM histories before a player reconnects", async (t) => {
+  const dm = member("DM", "dm");
+  const { state, tokenId } = roomWithGoblin(dm);
+  const db = new FakeDb({ state, dmGrants: [dm.id] });
+  const actor = await RoomActor.load(deps(db));
+  assert.ok(actor);
+  t.after(() => actor.shutdown({ code: 1012, snapshot: false }));
+  const original = connect(actor, dm);
+  await actor.hello(original.conn, { clientId: uuidv7(), resumeFrom: 1 });
+  await actor.op(original.conn, 1, { t: "token.move", tokenId, x: 2, y: 1 });
+  assert.notEqual(await answerTo(original.sent, 1), "stuck");
+  const head = historyMessageSchema.parse(original.sent.findLast((m) => m.t === "history")).play.undo.head;
+  assert.ok(head);
+  original.conn.close(1000);
+  await actor.sys({ t: "sys.memberSetKind", memberId: dm.id, kind: "player" });
+  const player = connect(actor, dm, "player");
+  await actor.hello(player.conn, { clientId: uuidv7(), resumeFrom: 1 });
+  const history = historyMessageSchema.parse(player.sent.findLast((m) => m.t === "history"));
+  assert.equal(history.play.undo.head, null);
+  assert.equal(history.setup, undefined);
+});
