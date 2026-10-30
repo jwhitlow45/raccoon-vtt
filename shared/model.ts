@@ -11,6 +11,7 @@
  */
 
 import type { DamageType } from "./rules/damage.ts";
+import type { CorrectionLogEvent } from "./undoContract.ts";
 
 export type MemberId = string;
 export type SceneId = string;
@@ -2453,6 +2454,7 @@ export type HpRevert = {
 };
 
 export type LogEvent =
+  | CorrectionLogEvent
   /**
    * `label` is the HP label after the change, so a viewer who may not see
    * numbers still reads "is Bloodied". `left` is the HP after it, for

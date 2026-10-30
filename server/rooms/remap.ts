@@ -602,6 +602,7 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
       case "member":
         return { ...data, memberId: members.of(data.memberId) };
       case "encounter":
+      case "correction":
         return data;
       case "teleport":
         return { ...data, tokenId: tokens.of(data.tokenId) };

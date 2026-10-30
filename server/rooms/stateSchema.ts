@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { correctionLogEventSchema } from "#shared/undoContract.ts";
 import { ABILITY_KEYS, CONDITION_KEYS, CRIT_RULES, HEIGHTS_CHARS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, ORDER_REVEALS, ROUGH_CHARS, STAIRS_CHARS, STATUS_KEYS, TURN_FLAGS, type MapPhase, type PhaseGrid, type RoomState, type SceneMap } from "#shared/model.ts";
 import { chunkKey, holderChunkKey } from "#shared/keys.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "#shared/limits.ts";
@@ -654,6 +655,7 @@ const hpNumber = z.number().int().min(0).max(100_000);
 const hpValues = z.strictObject({ cur: hpNumber, max: hpNumber, temp: hpNumber });
 const vitals = z.strictObject({ hp: hpValues, life: lifeState, deathSaves: z.strictObject({ ok: z.number().int().min(0).max(3), fail: z.number().int().min(0).max(3) }) });
 const logEvent = z.discriminatedUnion("type", [
+  correctionLogEventSchema,
   z.strictObject({
     type: z.literal("hp"),
     ...holder,

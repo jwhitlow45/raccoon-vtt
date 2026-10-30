@@ -120,7 +120,8 @@ export const historyCommandSchema = z.union([
   z.strictObject({ t: z.literal("undo"), ...stackFields, scope: z.literal("play").optional(), of: commandNumber.optional() }),
   z.strictObject({ t: z.literal("undo"), ...stackFields, scope: z.literal("setup"), of: absent }),
   z.strictObject({ t: z.literal("redo"), ...stackFields, of: absent }),
-  z.strictObject({ t: historyDirection, ...targetFields, discard: z.literal(true), of: absent, forget: absent }),
+  z.strictObject({ t: z.literal("undo"), ...targetFields, discard: z.literal(true), of: absent, forget: absent }),
+  z.strictObject({ t: z.literal("redo"), ...targetFields, discard: z.literal(true), of: absent, forget: absent }),
   z.strictObject({
     t: z.literal("undo"),
     // Keep the existing log ID format without importing protocol.ts, which will consume this contract.

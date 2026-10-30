@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { historyCommandSchema, historyMessageSchema, restoreHistoryFieldsSchema } from "./undoContract.ts";
 import { LIMITS, MOST_SIGHT_HOLDERS, serializedBytes } from "./limits.ts";
 import { ATTACH_KINDS } from "./rules/attach.ts";
 import { critBound } from "./dice/crit.ts";
@@ -1948,7 +1949,7 @@ export const MAX_ASK_PARTS = 16;
 export const ASK_LOST = "the server lost this change's earlier asks";
 
 /** Ops a client may send (design 8.1). */
-export const clientOps = [
+const stateClientOps = [
   op("room.update", { name: name.optional(), settings: settingsPatch.optional() }),
   op("room.setPlayerScene", { sceneId: id }),
   op("view.follow", { follow: z.boolean() }),
@@ -2447,30 +2448,12 @@ export const clientOps = [
   op("actor.deathRoll", deathRollFields).superRefine(extraParses),
   /** An ability's recharge roll on the server (docs/design-v1-combat-controls.md 3.1), permitted as `actor.use` is. */
   op("actor.rechargeRoll", rechargeRollFields),
-  op("undo", {
-    /**
-     * The `n` of this client's op that made the step the undo is meant for,
-     * such as the token bar's "Undo move". The server then takes back that
-     * step or nothing, never an older one (design 7.7).
-     */
-    of: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
-    /**
-     * The DM only: the log line of an HP change to take back, whoever made
-     * it (features section 10). The server builds the restore from that line
-     * and refuses it when the creature changed since.
-     */
-    log: logId.optional(),
-    /**
-     * The DM's yes to forgetting players' remembered map
-     * (docs/design-v1-map-discovery.md 5.3): the seq of the step the undo
-     * toast asked about. A step that no longer heads the stack is refused
-     * as stale, so a yes never forgets for another step.
-     */
-    forget: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional(),
-  }),
-  /** `forget` as on `undo`. */
-  op("redo", { forget: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional() }),
 ] as const;
+
+export const clientOps = [...stateClientOps, ...historyCommandSchema.options] as const;
+
+// Dispatch by t before the strict history union so legacy commands keep its terminal reload refusal.
+const historyOpSchema = z.looseObject({ t: z.enum(["undo", "redo"]) }).pipe(historyCommandSchema);
 
 /**
  * Ops only the server produces: roster changes made over HTTP, and the
@@ -2485,6 +2468,7 @@ export const serverOnlyOps = [
   /** Takes a member with no grants left off the roster (S-15), with everything it owned let go. */
   op("sys.memberRemove", { memberId: id }),
   op("sys.restore", {
+    ...restoreHistoryFieldsSchema.shape,
     entries: z.array(restoreEntry).min(1).max(MAX_RESTORE_ENTRIES),
     /** Which stack the restore came from, so the server can push its inverse on the other one. */
     from: z.enum(["undo", "redo"]),
@@ -2610,9 +2594,9 @@ export const serverOnlyOps = [
   }),
 ] as const;
 
-export const clientOpSchema = z.discriminatedUnion("t", [...clientOps]);
+export const clientOpSchema = z.discriminatedUnion("t", [...stateClientOps, historyOpSchema]);
 export const serverOnlyOpSchema = z.discriminatedUnion("t", [...serverOnlyOps]);
-export const opSchema = z.discriminatedUnion("t", [...clientOps, ...serverOnlyOps]);
+export const opSchema = z.discriminatedUnion("t", [...stateClientOps, historyOpSchema, ...serverOnlyOps]);
 
 export type ClientOp = z.infer<typeof clientOpSchema>;
 export type ServerOnlyOp = z.infer<typeof serverOnlyOpSchema>;
@@ -2897,7 +2881,8 @@ export const clientMessageSchema = z.discriminatedUnion("t", [
     op: z.unknown(),
     /** The undo group (design 7.7): ops sent under one group, one after another, undo as one step. */
     g: id.optional(),
-  }),
+    groupScope: z.literal("setup").optional(),
+  }).refine((m) => m.groupScope === undefined || m.g !== undefined, { message: "a setup gesture needs a group", path: ["groupScope"] }),
   z.strictObject({ t: z.literal("eph"), sceneId: id, e: ephEventSchema.refine(withinEphBytes, { message: "ephemeral payload too large" }) }),
   z.strictObject({ t: z.literal("scene"), sceneId: id }),
   z.strictObject({ t: z.literal("ping"), k: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER) }),
@@ -2926,6 +2911,7 @@ export const changeSchema = z.union([
 export type Change = z.infer<typeof changeSchema>;
 
 export const serverMessageSchema = z.discriminatedUnion("t", [
+  historyMessageSchema,
   z.strictObject({
     t: z.literal("snapshot"),
     seq: z.number().int().min(0),

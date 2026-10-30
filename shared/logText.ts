@@ -413,6 +413,11 @@ export function describeEvent(data: LogEvent, names: LogNames, dm = false): stri
 
 function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
   switch (data.type) {
+    case "correction": {
+      const action = data.from === "undo" ? "undid" : "redid";
+      if (dm && data.label !== undefined) return `The DM ${action}${data.scope === "setup" ? " setup:" : ""} ${data.label}.`;
+      return `The DM ${action} a ${data.scope} change${data.name !== undefined ? ` to ${data.name}` : ""}.`;
+    }
     case "hp": {
       const who = creatureName(names, data);
       // With the numbers, the HP after the change says it all, and the label adds only Dying or Dead.

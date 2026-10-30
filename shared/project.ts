@@ -2977,6 +2977,9 @@ function both(a: Reach, b: Reach): Reach {
 export function eventReach(state: RoomState, data: LogEvent): Reach {
   if (neverRead(data)) return [];
   switch (data.type) {
+    case "correction":
+      // A correction without stored authorization evidence cannot reach players.
+      return [];
     case "area":
       // On a per-player scene a reminder reaches exactly its witnesses, its creature's owners among them only as they saw the area (6.5).
       if (data.seenBy !== undefined && !data.seen) return state.tokens[data.tokenId] ? data.seenBy : [];
@@ -3375,6 +3378,7 @@ function projectEventCtx(ctx: Ctx, data: LogEvent, copy = false): LogEvent | nul
       // As the ask itself (projectCastCtx): its caster's players, never behind a pause.
       return ctx.paused ? null : data;
     // The DM's alone (neverRead), and trap lines live in their own logs (projectTrapSeenCtx).
+    case "correction":
     case "teleport":
     case "saveEnds":
     case "companion":

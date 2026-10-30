@@ -10,8 +10,8 @@ import type { Op } from "./protocol.ts";
  * A deploy writes snapshots on shutdown, so a version bump normally replays
  * no old ops at all. The op pipeline is here for the crash case.
  */
-export const SNAPSHOT_VERSION = 29;
-export const OP_VERSION = 33;
+export const SNAPSHOT_VERSION = 30;
+export const OP_VERSION = 34;
 
 export type MigrationStep = {
   from: number;
@@ -209,6 +209,8 @@ export const snapshotMigrations: MigrationStep[] = [
   // to "5", characters no v28 room holds. The number moves so that an H2 build, which would read a hex scene's Reveal
   // room keys as squares and refuse those facings, refuses a v29 snapshot instead of loading it.
   { from: 28, to: 29, apply: (state) => state },
+  // Correction events extend the closed log union. Older readers must refuse even with no replay tail.
+  { from: 29, to: 30, apply: (state) => state },
 ];
 
 /**
@@ -944,7 +946,14 @@ export const opMigrations: MigrationStep[] = [
     to: 33,
     apply: (op) => op,
   },
+  // Scoped restores add correction notices. Replay gates them on the original stored version.
+  { from: 33, to: 34, apply: (op) => op },
 ];
+
+/** Historical restores keep their original log entries and numbering. */
+export function writesUndoCorrections(opVersion: number | undefined): boolean {
+  return opVersion === undefined || opVersion >= 34;
+}
 
 /** Controlled rides must be on the players' scene even when their rows name characters alone. */
 export function mountsOnPlayerScene(opVersion: number | undefined): boolean {
