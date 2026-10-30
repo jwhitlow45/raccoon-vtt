@@ -1,34 +1,35 @@
 # raccoon-vtt v1: keep the relief picture across a pan
 
-Status: design, draft 1, for lane HXPERF-2. Code references are to main at `2d73a8a5`. This follows the hex relief design (`docs/design-v1-iso-hex-relief.md`), whose section 9 sets the gate and whose As built (section 11) records the misses this note closes. The relief code lives in `client/canvas/relief/`. Client only: no server, protocol or stored data change.
+Status: design, draft 2, revised for design review round 1, for lane HXPERF-2. Code references are to main at `2d73a8a5` (no cited file differs at `677cf341`). This follows the hex relief design (`docs/design-v1-iso-hex-relief.md`), whose section 9 sets the gate and whose As built (section 11) records the misses this note closes. The relief code lives in `client/canvas/relief/`. Client only: no server, protocol or stored data change.
 
 ## 1. Why
 
-There are no owner's words for this run. It is the coordinator's follow-up D-261030-532 (amending D-261030-529): raised hexes shipped at about 40 frames a second zoomed out on a slow phone, and the 12 px pan misses design 9's gate on both hex orientations. The owner plays on phones, wants full quality there and dislikes visible regressions. The gate stays as design 9 has it: each frame metric at most `max(16 ms, 1.75 × matched Top-down)`, no loosening.
+There are no owner's words for this run. It is the coordinator's follow-up D-261030-532 (amending D-261030-529): raised hexes shipped at about 40 frames a second zoomed out on a slow phone, and the 12 px pan misses design 9's gate on both hex orientations. The owner plays on phones, iPhones included, wants full quality there and dislikes visible regressions. The gate stays as design 9 has it: each frame metric at most `max(16 ms, 1.75 × matched Top-down)`, no loosening. Per D-261030-536 a pan's largest move is held to it too.
 
 ## 2. The answer in short
 
-- **Keep the relief layer's own canvas as the picture.** A pan scrolls it by whole pixels and paints only the strips the move uncovers: every piece and standee meeting a strip, in depth order, clipped to it. No new canvas and no margin past the view.
-- **Repaint whole on anything else.** A mark on the relief or the ground that the camera did not make, a turn, a zoom, a new size or pixel ratio, or a jump past the canvas repaints the view whole. A whole repaint costs what every frame costs today.
-- **The camera reaches Konva without React in Isometric.** A live camera slot and an applier move both stages. The board renders once per 128 px cull step and once when the gesture ends. Only the chrome hung on map points renders each move, and only while it shows.
-- **Whole CSS pixels.** The isometric camera's translation reaches Konva rounded to a whole CSS pixel, so a scroll is an exact copy and nothing blurs at rest.
-- **Outlines stay.** Skipping them below 16 px saved nothing measurable. No look change, so no screenshots.
-- **The pattern snapshot needs no fix:** 0.1 ms a pan frame. **The map row's rise** is single steps of garbage collection over about 7.8 MB more live heap, not the snapshot (section 7.3).
-- **Areas:** a frame that publishes standing areas runs no build slice, and the ground comparison after a fog change reads only the fog tiles that changed.
+- **Keep the relief layer's own canvas as the picture.** A pan scrolls it by whole device pixels and paints only what the move uncovers, plus the cells whose ground copy can change: every piece and standee whose painted bounds meet a strip, in depth order, clipped to it. No new canvas and no margin past the view.
+- **Repaint whole on anything else.** A mark the camera did not make, a turn, a zoom, a new size or pixel ratio, or a jump past the canvas repaints the view whole. A whole repaint costs what every frame costs today.
+- **A cull step costs no whole repaint.** The next layout is built in slices and committed at low priority while the board keeps answering "inside". A commit that only moved the cull box keeps the picture.
+- **The camera reaches Konva without React in Isometric.** A live camera slot, the single source of truth, and an applier move both stages. The chrome and the sliding pills read the slot, each only while it shows something.
+- **The device grid.** The stages get the camera's translation rounded to the canvas's own device pixels, so a scroll is an exact copy at any pixel ratio and nothing blurs at rest.
+- **Outlines stay.** Skipping them saved nothing measurable. No look change, so no screenshots.
+- **The pattern snapshot needs no fix:** 0.1 ms a pan frame. **The map row's rise** is single steps of garbage collection over about 7.8 MB more live heap (section 7.3).
+- **Areas:** a build slice never shares a frame with a whole repaint, and the ground comparison after a fog change reads only the fog tiles that changed.
 
 ## 3. Decided, with rejected options
 
-These guesses are logged as D-261030-540 to D-261030-549.
+These guesses are logged as D-261030-540 to D-261030-549, with a round 1 addendum.
 
-- **D-261030-540 The kept picture:** the relief layer's canvas keeps its pixels between draws. A camera-only move copies the canvas onto itself by the shift in device pixels and paints the uncovered strips (section 5). Rejected: a kept canvas wider than the view with a whole refill at its edge (by section 4's costs scaled to its area, a 25 to 40 ms frame at each crossing, two to four a second in a fast pan, and 15 to 60 MB more canvas at DPR 2), Konva's node cache (whole refills only), moving the relief canvas by CSS (its hit graph and the stage's other layers would part from it), and dirty rectangles for content changes (needs every standee's own update attributed, section 5.3).
-- **D-261030-541 What repaints whole:** marks made inside the scheduler's camera move are camera marks. Every other mark on the relief or ground layer repaints whole. Rejected: attributing marks to their sources (a standee updates itself from the store and from its image load), a repaint on a timer after a pan.
-- **D-261030-542 Whole-pixel camera:** in Isometric the translation the stages get is rounded to a whole CSS pixel, the camera the gestures keep is not. Rejected: subpixel scrolls (resampling blurs the picture at rest), a whole repaint when a pan stops (an extra full frame every time).
-- **D-261030-543 The live camera:** a room-scoped slot holds the camera. In Isometric a move at the same scale and turn inside the rendered cull step goes to the slot and the applier, not to React state. The board renders on a cull step, at the gesture's end and on any other change. The chrome over the map reads the slot. Rejected: rendering the board every move behind more memo walls (React alone is 2.9 ms in Top-down's pan), moving the chrome by CSS (its edge clamping breaks), changing Top-down's camera path (out of scope, its pans meet their budgets).
-- **D-261030-544 The pattern snapshot:** keep one pattern per ground draw, made when the first top is copied. Rejected: an `ImageBitmap` of the ground (one more copy each ground draw for the same main-thread cost).
-- **D-261030-545 Outlines:** keep every outline at every zoom. Rejected: dropping them below 16 px a cell (a visible change for a saving inside the noise, section 7.2).
-- **D-261030-546 The map row:** no change in this lane. The bench reports its largest step and the page's live heap beside it. Rejected: trimming the kept shapes' memory now (the median is unchanged and the shapes carry the 12 px pan gains of HXPERF).
-- **D-261030-547 Area frames:** a frame that publishes newly standing areas runs no build slice, and the next frame resumes. Rejected: a smaller slice for every frame (every area stands later), publishing less often (areas come in later).
-- **D-261030-548 The ground comparison:** fix it in this lane. `groundChanges` reads only the cells under fog tiles that differ, when both heights come from the same chunks, grid, bounds, feet and stand. Rejected: a follow-up (a 200 by 200 hex scene pays about 90 ms at full CPU speed on every fog change while an area stands).
+- **D-261030-540 The kept picture:** the relief layer's canvas keeps its pixels between draws. A camera-only move copies the canvas onto itself by the shift in device pixels and paints the uncovered strips and the cells whose ground copy changes (section 5). Strip culling tests painted bounds, never geometric ones. Rejected: a kept canvas wider than the view refilled whole at its edge (by section 4's costs scaled to its area, a 25 to 40 ms frame at each crossing, two to four a second in a fast pan, and 15 to 60 MB more canvas at DPR 2), Konva's node cache (whole refills only), moving the relief canvas by CSS (its hit graph and the stage's other layers would part from it), dirty rectangles for content changes (every standee's own update would need attributing, a follow-up).
+- **D-261030-541 What repaints whole:** marks made inside the scheduler's camera move are camera marks, and a cull step's layout-only commit keeps the picture. Every other mark, and any ground draw the scheduler's counter does not account for, repaints whole. Rejected: attributing every mark to its source, a repaint on a timer after a pan.
+- **D-261030-542 The device grid:** in Isometric the stages get `x = round(x·r)/r` with `r` the layer canvas's pixel ratio, and picks read that applied camera. Rejected: whole CSS pixels (a 1 CSS px move is 1.5 device px at ratio 1.5), subpixel scrolls (resampling blurs the picture), the whole path at fractional ratios (common phones would lose the gain).
+- **D-261030-543 The live camera:** a room-scoped slot holds the camera on screen. Every camera path writes it, `camRef` reads it, and the applier positions the stages from it. A move at the same scale and turn inside the rendered cull box renders no board. The chrome and the sliding pills subscribe only while they show something. Top-down keeps its camera path. Rejected: rendering the board every move behind more memo walls, moving the chrome by CSS (edge clamping breaks), changing Top-down too.
+- **D-261030-544 The pattern snapshot:** one pattern per ground draw, made when a strip first copies a top. Rejected: an `ImageBitmap` of the ground (one more copy each ground draw).
+- **D-261030-545 Outlines:** every outline at every zoom. Rejected: dropping them below 16 px a cell (a visible change for a saving inside the noise, section 7.2).
+- **D-261030-546 The map row:** no change in this lane. The bench reports its largest step and the page's live heap. Rejected: trimming the kept shapes' memory now (the median is unchanged and the shapes carry the 12 px pan gains of HXPERF).
+- **D-261030-547 Area frames:** a build slice runs only in a frame with no whole repaint pending, so the frame that repaints after a publish never slices. Rejected: a smaller slice for every frame (every area stands later), publishing less often (areas come in later), skipping the publish's own frame (the repaint lands in the next one).
+- **D-261030-548 The ground comparison:** fix it in this lane. `groundChanges` reads only the cells under fog tiles that differ when both heights share scene id, chunks, grid, bounds, feet and stand. Rejected: a follow-up (a 200 by 200 hex scene pays about 90 ms at full CPU speed on every fog change while an area stands).
 - **D-261030-549 Delivery:** one lane, HXPERF-2, with bench rows on both grids, then its docs commit. Rejected: separate lanes for the picture and the camera (both own `IsoBoard.tsx` and `scheduler.ts`).
 
 ## 4. Where a pan frame's time goes today
@@ -55,46 +56,69 @@ So a 12 px pan frame is half relief raster calls, a fifth React, and a fifth eve
 
 ### 5.1 What is kept
 
-A new `client/canvas/relief/kept.ts` (`KeptRelief`) holds, for the relief layer, what its pixels were drawn at: the stage position in whole CSS pixels, scale, turn, canvas size, pixel ratio and stage key, and a `whole` flag. The relief layer is set `clearBeforeDraw(false)`. The scheduler owns the `KeptRelief` and replaces the layer's `drawScene` and `drawHit` with own properties, as it already replaces `batchDraw` (`scheduler.ts:38`), and deletes them in `detach`. A `drawScene` given another canvas (`toDataURL`, the bench's parity images, the guide's pictures) takes the whole path into that canvas.
+A new `client/canvas/relief/kept.ts` (`KeptRelief`) holds, for the relief layer, what its pixels were drawn at: the stage position on the device grid, scale, turn, canvas size, pixel ratio and stage key, the layout it painted with, the screen boxes of last draw's toned cells (5.3), and a `whole` flag. The scheduler owns it and replaces only the relief layer's `drawScene` with an own property, as it replaces `batchDraw` (`scheduler.ts:38`), and deletes it in `detach`. `clearBeforeDraw` stays true, so Konva's hit path is untouched: the hit canvas clears and redraws whole each draw, as today (standees only, about 1.3 ms profiled). The override's whole path is Konva's own `drawScene`. Its scroll path copies, clips, clears the strips and calls `Container.prototype.drawScene` itself, firing the layer's draw events as Konva does. A `drawScene` given another canvas (`toDataURL`, the bench's parity images, the guide's pictures) takes the whole path into that canvas.
+
+**The self-copy probe** (D-261030-537). Once at board mount, before its first draw, `KeptRelief` paints a known 2 by 2 block on the relief canvas, copies the canvas onto itself shifted by one device pixel, reads both pixels back and clears. A wrong read turns scrolling off for that board: every draw takes the whole path, today's behavior. The coordinator's phone pass confirms it on an iPhone.
 
 ### 5.2 A pan frame
 
-`FrameScheduler` gains `moveCamera(apply)`: it sets a camera flag, runs `apply` (the applier setting both stages' positions, section 6.2), then clears it. A `batchDraw` mark made while the flag is set is a camera mark. The frame then runs as today: the ground draws if marked, then the relief.
+`FrameScheduler` gains `moveCamera(apply)`: it sets a camera flag, runs `apply` (the applier positioning both stages, section 6.2), then clears it. A `batchDraw` mark made while the flag is set is a camera mark. The frame then runs as today: the ground draws if marked, then the relief.
 
-The relief's draw scrolls when its only marks since the last draw were camera marks, the ground drew only for the camera, and scale, turn, size, ratio and stage key are the kept ones. Otherwise it repaints whole.
+The relief scrolls when its only marks since the last draw were camera marks or a layout-only commit's (5.6), the ground drew only for the camera, and scale, turn, size, ratio and stage key are the kept ones. "The ground drew only for the camera" is decided from the ground layer's draw counter (`groundCopy.version`, `IsoBoard.tsx:461`, counted on every path that draws it, Konva's resize included) against the scheduler's own camera draws of the ground: any draw it did not make is a content draw. Otherwise the relief repaints whole.
 
-- **Scroll.** The shift is `(dx, dy)` device pixels, whole numbers. With `|dx|` and `|dy|` under the canvas's width and height, the canvas is drawn onto itself at the shift (identity transform, composite `copy`). The uncovered strips are a band `|dx|` wide at the left or right edge and a band `|dy|` tall at the top or bottom, at most two rectangles in device pixels.
-- **Strips.** Clip to the strips' union, clear it, and draw the relief root's children in order. `dc.view` becomes the strips' rectangles in view units, so `drawRun` (`drawRelief.ts:444`) skips every piece that meets neither. A standee draws only when its layout box, grown by its ring and shadow as the board's frames are (`IsoBoard.tsx` `frames`), meets a strip.
-- **Hit graph.** The hit canvas redraws whole, as today: it holds only the standees' hit shapes, about 1.3 ms profiled.
-- **The camera at draw time.** `dc` reads the camera from the main stage when it draws, not from the board's render (`IsoBoard.tsx:443`), so a strip and its pattern use the applied camera.
+- **Scroll.** The shift `(dx, dy)` is whole device pixels by 6.2's rounding. With `|dx|` and `|dy|` under the canvas's width and height, the canvas is drawn onto itself at the shift (identity transform, composite `copy`).
+- **What is painted.** The band `|dx|` wide at the left or right edge, the band `|dy|` tall at the top or bottom, and the toned-cell boxes of 5.3. Each is tested on its own, a piece or standee drawing when its painted bounds meet any of them. They are painted through one clip of their union, cleared first, so an overlap is painted once.
+- **Painted bounds.** A relief piece's cull box is its geometric bounds (`pieces.ts:163`) grown by half the widest stroke it draws plus 1 device px for antialiasing: half a device px for terrain outlines (`drawRelief.ts:263`, `:353`, `:409`), 1.25 CSS px for a selected area's 2.5 px outline (`:505`, `:705`). A standee's is its `StandeeShape.bounds` (`standee.ts:75`), which holds the ring, shadow, outlines, caught rings and facing tick with the decor's reach. The strip clip stays exact.
+- **The camera at draw time.** Every camera-derived field of `dc` (camera, view box, strips) is computed in the override from the main stage when it draws, on the whole path too, never from the board's render (`IsoBoard.tsx:443`, `:449`). A whole repaint between renders therefore culls by the view on screen.
+- **Batches.** Tops batch by the layout, not by what a draw culls: a batch is a run of consecutive equal-height columns of a run piece list, broken by any other piece whether or not it draws. A draw fills each batch's members that meet its region as one path at the batch's place. A strip and a whole repaint of one layout then fill the same unions, so their pixels match at the shared edges of tops too, where a separate fill would leave a faint conflation seam.
 
 There is no margin to run out of: each frame paints what its own move uncovers, however far the pan goes. At the bench's pan, 9.8 px a move, the strips are about 3% of the canvas. The expected relief cost is one pass of box tests over the layout's pieces and the strips' fills, about 1 to 1.5 ms at 12 px, against 11.5 today. With the board's render gone too (section 6), the expected 12 px pan frame is about 7 to 10 ms: relief 1 to 1.5, its hit graph about 1, overlay 1.2, ground 0.65, the applier and Konva's transform clearing about 1, and the rest 3 to 4. The budget is 16.
 
-### 5.3 What repaints whole
+### 5.3 Ground copies near the ground canvas's edges
 
-Everything not a camera mark repaints the view whole, at today's cost:
+A top or a pit floor copies the ground canvas through a bounded, non-repeating pattern, and takes the face tone where its source lies past the canvas (`drawRelief.ts:296` to `:343`). The ground canvas is the view's width and starts at the screen's top, so a pit floor near the top, whose source lies above it by its depth, and a top near the bottom when the lift margin is capped at one canvas height (`IsoBoard.tsx:434`) can change between tone and ground as the camera moves, well inside the canvas. A pure scroll would carry the old pixels.
 
-- **The relief:** any commit into its tree (the board's layout after an edit, a fog change, a cull step, areas standing, a selection, a drag's start and drop moving a standee between the relief and the drag layer), a standee's own update (its character or image arriving), a texture or tint arriving.
-- **The ground:** any ground draw the applier did not cause: the map, fog, sight, board layers, creatures lying flat, still marks, and a ground canvas made again or resized. Tops copy the ground, so a ground change is a relief change.
-- **The view:** scale (each pinch frame, as today), turn, canvas size, pixel ratio, stage key, the board shown again, and a shift as large as the canvas on either axis (Find, follow the turn, a new scene).
+- The tone decision is made per cell, from the cell's own source box, not from the batch's union. Today a batch straddling the canvas's edge tones all its members, so a top's look would depend on its batch-mates and so on the region drawn. Where the ground canvas is opaque under a member, as it is inside a scene, the pattern covers the tone and nothing changes.
+- `drawRun` records the screen box (painted bounds) of each cell that took the tone branch.
+- A scroll paints, besides the bands, last draw's toned boxes moved by the shift (cells that may now gain ground) and the boxes of cells whose source box crosses the ground canvas's edge at the new camera (cells that may now lose it). The second set comes from the same pass of box tests, run once before the clip is set.
+- If measuring shows the boxes cost more than bands, the fallback is a top band as tall as the deepest pit on screen and, when the margin is capped, a bottom band as tall as the highest lift past it, on any `dy`.
 
-Frames between those draw only what moves: a local drag redraws the drag layer alone, and a remote ghost or ping the drag and overlay layers, as today. Dirty rectangles for content would cut a cube's publish frame further (section 8), but need every standee's own update reported with its box. That is a follow-up, not this lane.
+### 5.4 What repaints whole
 
-### 5.4 Depth order while the picture is reused
+Everything not a camera mark or a layout-only commit repaints the view whole, at today's cost:
 
-A strip redraws every item of the current layout that meets it, in the layout's order, clipped to it. Each pixel in a strip therefore gets what a whole draw would give it. Pixels outside the strips are a whole draw's pixels moved by whole device pixels at the same scale and turn, and nothing drawn there changed, or the frame would have repainted whole. Standees are children of the relief root in that same order, and walls, pits and area bands are pieces of its runs. The drag layer and the overlay still draw above the relief every frame.
+- **The relief:** any other commit into its tree (the board's layout after an edit, a fog change, areas standing, a selection, a drag's start and drop moving a standee between the relief and the drag layer), a standee's own update (its character or image arriving), a texture or tint arriving.
+- **The ground:** any ground draw the scheduler did not make for the camera: the map, fog, sight, board layers, creatures lying flat, still marks, a ground canvas made again or resized. Tops copy the ground, so a ground change is a relief change.
+- **The view:** scale (each pinch frame, as today), turn, canvas size, pixel ratio, stage key, the board shown again, a shift as large as the canvas on either axis (Find, follow the turn, a new scene), a failed probe, and a late relayout (5.6).
 
-The layout covers the cull box, at least 128 screen px past the view on every side (`IsoBoard.tsx:273`). Within a cull step every strip lies inside it. The move that crosses a step asks for one board render (section 6.2), whose relayout repaints whole.
+Frames between those draw only what moves: a local drag redraws the drag layer alone, and a remote ghost or ping the drag and overlay layers, as today.
 
-Tops copy the ground drawn in the same frame at the same camera, so a strip's tops read the ground under them. A scrolled top keeps the ground it read, and a camera-only ground draw gives the same pixels moved by whole device pixels: map, grid, fog and sight are drawn by the same transform shifted by a whole pixel. GPU raster may differ in the last bit at antialiased edges, so the e2e compare allows 2/255 a channel and reports the largest difference it finds (section 10.3).
+### 5.5 Depth order while the picture is reused
 
-### 5.5 Memory
+A painted region gets every item of the current layout whose painted bounds meet it, in the layout's order, clipped to it. Each pixel there gets what a whole draw would give it. Pixels outside are a whole draw's pixels moved by whole device pixels at the same scale and turn, and nothing drawn there changed, or the frame would have repainted whole. Standees are children of the relief root in that order, and walls, pits and area bands are pieces of its runs. The drag layer and the overlay still draw above the relief every frame.
+
+Tops copy the ground drawn in the same frame at the same camera. A scrolled top keeps the ground it read, and a camera-only ground draw gives the same pixels moved by whole device pixels, except where 5.3 repaints. GPU raster may differ in the last bit at antialiased edges, so the e2e compare allows 2/255 a channel and reports the largest difference it finds (section 10.3).
+
+### 5.6 The cull step, without a whole repaint
+
+The layout covers the cull box, at least one 128 px step past the view on every side (`IsoBoard.tsx:273`). Per D-261030-536 its frame must meet the frame rule too, so the board relays out ahead of need:
+
+- **Slack.** The applier answers "inside" while the view lies inside the rendered cull box. A strip is always inside the layout then.
+- **Ahead of need.** On the first move past a step boundary, the board starts the next layout as a sliced job outside React: `ReliefIndex.layout`'s bucket sort and k-way merge, resumable, given at most 4 ms a frame and only in frames with no whole repaint pending.
+- **At low priority.** When the job finishes, the board sets it in a transition (`startTransition`), so the render yields to input. It renders only `IsoBoard` (the ground stage's subtree sits in a memo component whose props a relayout does not change), about 3 to 4 ms.
+- **Layout-only.** The board's render compares every relief input with its last: the relief sync, turn, standees, area pieces, standee placings, labels and kept ids. When only the layout changed, items entering or leaving lie outside the view by construction, and items in view draw as before. Two probe components bracket the main stage, whose layout effect applies react-konva's commit, and mark that window. Marks inside it are the layout-only commit's and keep the picture. Each standee sits in a board-owned wrapper group whose Konva subtree observer reports a change. A report inside the window for a standee the comparison calls unchanged makes the commit content.
+- **Seams.** A standee entering or leaving the middle of a run regroups the batches of 5.2, which can move a conflation seam on screen. After a layout-only commit the picture repaints the view in four horizontal bands, one a frame, about 3 ms each at 12 px.
+- **Late relayout.** A move that would leave the rendered cull box before the next layout commits (a fling) renders the board at once and repaints whole. The bench counts these and expects none at its speed.
+
+### 5.7 Memory
 
 No canvas is added. Today's isometric canvases at 390 by 844 and DPR 2 are the ground stage, 780 by up to 3,376 device px (10.5 MB at most, 8.5 MB at 12 px on the hex fixture), the main stage's three layers at 5.3 MB each, and hit canvases at ratio 1 (1.3 MB each): about 28 MB. Top-down's stage is 0 by 0 while Isometric shows. The copy onto itself may take a transient copy inside the browser. The cap stays as it is: Konva's pixel ratio at most 2, the ground's lift margin at most one canvas height. Past it nothing new happens: a larger screen gets larger canvases, as today.
 
-### 5.6 The ground stage
+### 5.8 The ground stage and the sliding pills
 
-The ground keeps its rules: taller by the lift margin, redrawn whenever its camera moves, as Top-down redraws its own layers on a pan. The applier moves it, so a pan renders none of its React layers. Its one camera-reading consumer in Isometric, the measure pill's board view (`features/measure/Pill.tsx`), reads the cull box's board view, which changes once a step.
+The ground keeps its rules: taller by the lift margin, redrawn whenever its camera moves, as Top-down redraws its own layers on a pan. The applier moves it, so a pan renders none of its React layers. Its pills keep their points (`slide={false}`), so it takes the cull box's board view, which changes once a step.
+
+The upright and moving places' pills slide into the clear part of the screen by the board view (`measure/Pill.tsx:18`): pin labels, area and trap names, turn start, move pills and ruler readouts. In Isometric a small provider around the overlay and drag layers subscribes to the slot and recomputes `boardViewsOf` each move, so an edge label keeps sliding through a pan. Those pills render each move, and only they.
 
 ## 6. No board render per camera move
 
@@ -111,18 +135,19 @@ That is the 4.5 ms of section 4 at 12 px.
 
 ### 6.2 How the camera reaches Konva
 
-- A room-scoped `liveCameraSlot` (new `client/state/liveCamera.ts`) holds the camera on screen, with `subscribe`.
-- `IsoBoard` registers an applier through its `onStage` path. It runs `scheduler.moveCamera`, which positions the ground stage and the main stage at the camera rounded to a whole CSS pixel, and answers whether the camera stays inside the rendered cull step.
-- In Isometric, `scheduleCam`'s frame sends a move at the same scale and turn to the slot, `camRef` and the applier. When the applier answers no, or the move changes scale or turn, and for every Top-down move, it sets state as today.
-- The isometric stages take no `x`, `y` or scale props, so a later render can never write a stale camera back. The applier sets them in a layout effect after each board render as well.
+- A room-scoped `liveCameraSlot` (new `client/state/liveCamera.ts`) holds the camera on screen, with `subscribe`. It is the single source of truth: every camera path writes it, the setCam calls at `Stage.tsx:350`, `:398`, `:425`, `:501`, `:546`, `:557`, `:575`, `:584`, `:600`, `:613` and `:978` included. `camRef` reads the slot and is no longer assigned from state on each render (`:296`), so a render mid-pan cannot hand picks, `keepInView` or a second finger an older camera.
+- `IsoBoard` registers an applier through its `onStage` path. It runs `scheduler.moveCamera`, which positions both stages at the slot's camera with its translation rounded to the device grid, `round(x·r)/r` with `r` the layer canvas's pixel ratio, and answers whether the view stays inside the rendered cull box.
+- In Isometric, `scheduleCam`'s frame writes a move at the same scale and turn to the slot and the applier. When the applier answers no, or the move changes scale or turn, and for every Top-down move, it also sets state as today.
+- The isometric stages take no `x`, `y` or scale props. A layout effect after each board render applies the slot's camera, so a render can never write an older camera back.
 - Picks read the applied camera, the one Konva draws with, so a press and the drawing agree.
 - When the gesture ends, `MapStage` sets its state to the final camera once.
 
 ### 6.3 What still renders, and why
 
-- **`MapStage` and `IsoBoard`, once per cull step** (128 screen px of travel): the layout, the culling of decor and areas, and the area build's middle are React-owned. At 9.8 px a move that is one move in 13, costing today's frame.
-- **The same, once when the gesture ends:** picks, `live` for the controllers, and the saved and followed views then read the final camera.
-- **The chrome hung on map points,** each move while shown: one component in `Stage.tsx` reads the slot and renders the bars and hosts with it. Their HTML clamps to the screen's edges, so they cannot move rigidly.
+- **`IsoBoard`, once per cull step,** at low priority, from the sliced layout (5.6): the layout, the culling of decor and areas and the area build's middle are React-owned.
+- **`MapStage` and `IsoBoard`, once when the gesture ends:** `live` for the controllers and the saved and followed views then read the final camera.
+- **The chrome hung on map points,** each move while it shows: the token and group action bars, rendered by a component in `Stage.tsx`, and the door pill, readout, stop note and the DM's label, light, pin and trap pane hosts. Each subscribes to the slot only in the part it mounts when it has something to show, so a mounted host showing nothing costs nothing. Their HTML clamps to the screen's edges, so they cannot move rigidly.
+- **The sliding pills** of 5.8, each move.
 - **The DM's camera controller** (`features/dm/CameraLayer.tsx`) subscribes to the slot without rendering, and publishes the focus and the table display's view as often as it does now.
 - **A zoom** renders every frame, as today: scale changes standee shapes, the stand rule and the area octave.
 
@@ -153,20 +178,20 @@ The rise is in single steps. Every run of the build after had a step of 29 to 45
 
 ## 8. Area frames and the ground comparison
 
-**A cube's frames.** As built gives a 40 ft cube on alternating hex heights at 40 px one build frame of 21 to 25 ms, in which it stands, and an arrival frame of 55 to 56 ms against 1.75 times Top-down's 41 to 53. The standing frame holds a 6 ms build slice and the publish (`setVolumeTick`, `IsoBoard.tsx:353`): the board's render and relayout, then a whole repaint. A scratch run of four arrivals, which could not part the arrival from its build frames, found up to 12 ms of React, 7 to 10 of relief, 2.3 to 3.3 of overlay and 0.6 to 1.5 of ground in them together, the rest in the socket and the store. With D-261030-547 a frame that publishes runs no slice, and the slice resumes the frame after. The publish frame keeps a whole repaint, about 6 ms at 40 px, with the board's render and the overlay: 13 to 16 ms expected. The cube stands about one frame later. The kept picture cannot reuse that frame, since a 40 ft cube covers most of a phone's view at 40 px. If the publish frame still passes 16 ms, the lane reports it with its parts, as design 9 says.
+**A cube's frames.** As built gives a 40 ft cube on alternating hex heights at 40 px one build frame of 21 to 25 ms, in which it stands, and an arrival frame of 55 to 56 ms against 1.75 times Top-down's 41 to 53. The standing frame holds a 6 ms build slice and the publish's repaint. The publish (`setVolumeTick`, `IsoBoard.tsx:353`) runs in React's default lane after the tick, and its commit's mark asks the scheduler for the next frame, where the tick requested earlier runs its slice first. A scratch run of four arrivals, which could not part the arrival from its build frames, found up to 12 ms of React, 7 to 10 of relief, 2.3 to 3.3 of overlay and 0.6 to 1.5 of ground in them together, the rest in the socket and the store. With D-261030-547 the tick asks the scheduler whether a whole repaint is pending and runs no slice in that frame, whenever the publish's commit lands. The repaint frame keeps a whole repaint, about 6 ms at 40 px, with the overlay: 13 to 16 ms expected. The cube stands about one frame later. If that frame still passes 16 ms, the lane reports it with its parts, as design 9 says.
 
-**The ground comparison.** `groundChanges` (`volumes.ts:203`) walks every cell of the scene on each sync whose heights are new, and on a player's board every fog change makes new heights. Timed in Node at full speed with real chunks and fog tiles, cold as after a fog change: 45,885 hexes on a 200 by 200 hex rows scene took 83 to 95 ms, about four times that at the bench's slowdown, and the 40 by 40 fixture's 1,778 took 3.4 ms. One 16 by 16 fog tile grown by a cell, 448 hexes, took 1.1 ms. So `DrawnHeights` carries its source (chunks, fog tiles, grid, bounds, feet and stand), and when two snapshots share all but their tiles, `groundChanges` reads only the cells meeting a tile whose bits differ or that one side lacks, grown by one cell, since a hex's sub-cells can reach into the next tile. Any other difference keeps the whole pass.
+**The ground comparison.** `groundChanges` (`volumes.ts:203`) walks every cell of the scene on each sync whose heights are new, and on a player's board every fog change makes new heights. Timed in Node at full speed with real chunks and fog tiles, cold as after a fog change: 45,885 hexes on a 200 by 200 hex rows scene took 83 to 95 ms, about four times that at the bench's slowdown, and the 40 by 40 fixture's 1,778 took 3.4 ms. One 16 by 16 fog tile grown by a cell, 448 hexes, took 1.1 ms. So `DrawnHeights` carries its source (scene id, chunks, fog tiles, grid, bounds, feet and stand). When two snapshots share all but their tiles, `groundChanges` reads only the cells meeting a tile whose bits differ or that one side lacks, grown by one cell, since a hex's sub-cells can reach into the next tile. Any other difference keeps the whole pass.
 
 ## 9. The bench
 
 `scripts/bench-iso.ts` adds, in both views, under one load, before and after interleaved as the HXREL-1 bench did, with the load average beside each round:
 
-- **Pans** on hex rows, hex columns and a new fully raised 40 by 40 square fixture made by the hex fixture's generator on squares: at fit, 12 px, 23 and 24 px in Low power (flat, then standing) and 40 px. Low power rows reload the page with the setting on. The caps get a 12 px pan row too.
-- **Counters,** each pan move in Isometric on an untimed pan: whole repaints, strip area as a share of the canvas, board renders (a test hook counts `IsoBoard` and `MapStage` commits), ground draws, patterns made, fills and strokes. Expected at 12 px: under 0.1 whole repaints a move, strips under 5%, board renders under 0.1, ground draws 1, patterns at most 1.
-- **The largest move** of every pan row, reported beside its median, so a cull step's frame shows.
-- **A 40 ft cube** on alternating heights, on both hex orientations and on the square fixture: the frame it lands in in both views, each frame until it stands with every frame gated, the publish frame named, and the time from sending until it stands.
+- **Pans** on hex rows, hex columns and a new fully raised 40 by 40 square fixture made by the hex fixture's generator on squares: at fit, 12 px, 23 and 24 px in Low power (flat, then standing) and 40 px. Low power rows reload the page with the setting on. The caps get a 12 px pan row too. Each pan row's median and its largest move are both gated, the largest against `max(16 ms, 1.75 × matched Top-down's largest move)` (D-261030-536).
+- **Pans with a bar shown:** the 12 px and 40 px hex rows pans again with a selected token's action bar showing, on the DM's page and on a player's, gated like the rest.
+- **Counters,** each pan move in Isometric on an untimed pan: whole repaints, painted area as a share of the canvas, toned boxes, board renders (a test hook counts `IsoBoard` and `MapStage` commits), sliced layout time, late relayouts, ground draws, patterns made, fills and strokes. Expected at 12 px: whole repaints and late relayouts 0, painted area under 5%, board renders under 0.1, ground draws 1, patterns at most 1.
+- **A 40 ft cube** on alternating heights, on both hex orientations and on the square fixture: the frame it lands in in both views, each frame until it stands with every frame gated, the repaint frame after the publish named, and the time from sending until it stands.
 - **A fog change on a player's board:** the harness can hold a player, through the join API `e2e/areas.e2e.ts` uses (`/api/rooms/:id/join` and `/join/complete` with the room's password), in a second browser context. The bench sets a password when it makes the room, gives the player a PC with darkvision on a fogged scene, and times the player's page while the DM's socket reveals one fog tile a step. Rows: the 40 by 40 hex rows fixture with its four areas standing, and the 200 by 200 hex rows scene with the 500 ft emanation standing, in both views.
-- **Parity:** `--parity` and `--compare` must still match pixel for pixel in Top-down. Isometric images move by up to half a CSS pixel where the camera was not whole, so they are looked at, not compared.
+- **Parity:** the parity cameras move to translations whole in device pixels at DPR 2, so `--parity` and `--compare` stay mechanical in both views. Top-down must match pixel for pixel. Isometric may differ only where a batch straddled the ground canvas's edge (5.3), which the compare lists.
 
 The gate is design 9's, unchanged: each frame metric at most `max(16 ms, 1.75 × matched Top-down)`, a warm turn at most 150 ms, every area-building frame held. A row that still misses goes to review with its numbers.
 
@@ -178,9 +203,9 @@ HXPERF-2 owns the whole change, in this order, tests beside each step.
 
 | Part | Owned production files and reason |
 |---|---|
-| Kept picture | New `client/canvas/relief/kept.ts`, `scheduler.ts` (`moveCamera`, the layer's `drawScene` and `drawHit`), `drawRelief.ts` (strips as `dc.view`, the camera read at draw time), `IsoBoard.tsx` (no camera props on the stages, the applier, standee boxes for strips, the cull box's board view) |
-| Live camera | New `client/state/liveCamera.ts`, `client/canvas/Stage.tsx` (`scheduleCam`, the gesture's end, the chrome component), `client/features/dm/CameraLayer.tsx` (subscribe to the slot) |
-| Area frames | `IsoBoard.tsx` (the publish frame), `client/canvas/relief/volumes.ts` (`groundChanges`), `client/lib/view.ts` (`DrawnHeights` source) |
+| Kept picture | New `client/canvas/relief/kept.ts`, `scheduler.ts` (`moveCamera`, the relief's `drawScene`, the ground draw counter), `drawRelief.ts` (painted-bounds culling, layout batches, per-cell tone and its boxes), `buckets.ts` (the sliced layout), `IsoBoard.tsx` (no camera props on the stages, the applier, standee wrappers, the commit probes, the memo'd ground subtree, the sliding pills' provider) |
+| Live camera | New `client/state/liveCamera.ts`, `client/canvas/Stage.tsx` (every camera path, `camRef`, the bar component), `features/dm/CameraLayer.tsx`, the hosts' files: `builder/LabelPaneHost.tsx`, `lights/LightPaneHost.tsx`, `pins/PinPaneHost.tsx`, `traps/TrapPaneHost.tsx`, `doors/DoorPill.tsx`, `builder/heights/ReadoutHost.tsx`, `movement/StopNote.tsx` |
+| Area frames | `IsoBoard.tsx` (the slice rule), `client/canvas/relief/volumes.ts` (`groundChanges`), `client/lib/view.ts` (`DrawnHeights` source) |
 | Acceptance | Unit files beside each, `e2e/iso.e2e.ts` with the HXPERF2 step prefix, `scripts/bench-iso.ts` and its test |
 | Docs commit | This note's As built, `docs/design-v1-iso-hex-relief.md` section 11 (the misses closed or reported), `docs/design-v1-isometric-view.md` 5.1 (the scheduler's rules) |
 
@@ -188,23 +213,25 @@ No visible change is intended, so FEATURES.md and the DM guide need no edit. If 
 
 ### 10.2 Tests
 
-- **Kept picture units** (`kept.test.ts`): each whole-repaint cause of 5.3 repaints whole, a camera-only move scrolls, the strips for each sign of `dx` and `dy` and both, a shift as large as the canvas, a mark inside and outside `moveCamera`, a ground draw for the camera and for content, the rounding to whole CSS pixels, and the path for another canvas.
-- **One randomized test** (`kept.random.test.ts`, seeded): 400 sequences of 40 events on hex rows, hex columns and squares, each a small, large or canvas-sized pan, a zoom, a turn, a height or wall edit, a fog reveal, an area standing, a selection, a token moved or a texture arriving, through the board's real `ReliefIndex.layout` and `drawRun` on a canvas that rasterizes at points, as `reliefOracle.test.ts` does, extended with clip rectangles, whole-pixel translation and a copy onto itself. Invariants: after every frame the kept canvas equals a whole draw of the same state at every sample point. A camera-only move paints at most `|dx|·H + |dy|·W` pixels. Any other mark repaints whole.
-- **Live camera units:** a pan inside a step sets no `MapStage` state, so the board renders at most once per cull step, a step's crossing and the gesture's end set it once, Top-down sets it every move, the chrome reads the slot, and the camera controller publishes on each move without a render.
-- **Area units:** a publish frame runs no slice and the next one does. `groundChanges` by changed tiles equals the whole pass on random chunks and fog, for both hex orientations and squares, including a hex whose sub-cells cross into the next tile.
-- **Mutation checks,** each to be killed: a scroll by the unrounded shift, a strip one pixel short, the second strip dropped, a ground content draw taken as a camera move, every mark taken as a camera move, scale, turn or pixel ratio left out of the kept key, a standee culled by its art box without its ring, strips drawn from the layout before a step, no whole repaint for a canvas-sized shift, camera props back on the stages, the chrome reading the rendered camera, a publish frame that also slices, the tile pass used when chunks differ, a tile not grown by a cell.
+- **Kept picture units** (`kept.test.ts`): each whole-repaint cause of 5.4 repaints whole, a camera-only move scrolls, the regions for each sign of `dx` and `dy` and both, a shift as large as the canvas, a mark inside and outside `moveCamera`, a ground draw by the scheduler for the camera, by it for content and by Konva directly, the device-grid rounding at ratios 1, 1.25, 1.5 and 2 with repeated reversals, the path for another canvas, and the probe failing (whole repaints from then on).
+- **Ground edge units:** a connected pit near the screen's top and a top under a capped margin, panned down and up, each repainting the cells that gain and lose ground, and a batch straddling the canvas's edge toning only its own edge cells.
+- **Cull step units:** the sliced layout equals `layout` in one go, a layout-only commit keeps the picture and starts the four bands, a commit with any other input changed repaints whole, a standee wrapper's report inside the window makes it content, a fling past the cull box is a late relayout.
+- **One randomized test** (`kept.random.test.ts`, seeded): 400 sequences of 40 events on hex rows, hex columns and squares at ratios 1.5 and 2, each a small, large or canvas-sized pan, a cull step, a zoom, a turn, a height or wall edit, a fog reveal, an area standing, a selection, a token moved or a texture arriving, through the board's real `ReliefIndex.layout` and `drawRun` on a canvas that rasterizes at points, as `reliefOracle.test.ts` does, extended with clip rectangles, translation on the device grid, a copy onto itself, strokes with their widths, standees by their paint bounds, and a ground canvas of its real extent whose out-of-canvas pattern samples are transparent. Invariants: after every frame, once any four seam bands are done, the kept canvas equals a whole draw of the same state at every sample point. A camera-only move paints at most `|dx|·H + |dy|·W` pixels plus the toned boxes' area. Any other mark repaints whole.
+- **Live camera units:** a pan inside the cull box sets no `MapStage` state, a `MapStage` render mid-pan neither moves the stages nor resets `camRef`, every camera path writes the slot, the gesture's end sets state once, Top-down sets it every move, a host showing nothing does not subscribe, a press reads the applied camera, and the camera controller publishes on each move without a render.
+- **Area units:** a frame with a whole repaint pending runs no slice, including the repaint after a publish whose commit lands late. `groundChanges` by changed tiles equals the whole pass on random chunks and fog, for both hex orientations and squares, including a hex whose sub-cells cross into the next tile, and keeps the whole pass for two equal-sized scenes sharing the room's chunk object.
+- **Mutation checks,** each to be killed: a shift on whole CSS pixels at ratio 1.5, a strip one pixel short, the second strip dropped, strips tested as one bounding box, culling by geometric bounds, standees culled by frame and ring, toned boxes recorded per batch, the losing-ground boxes dropped, a whole repaint culling by the render's view, a ground draw by Konva taken as a camera draw, every mark taken as a camera move, scale, turn or pixel ratio left out of the kept key, batches by the region drawn, the seam bands skipped, a layout-only verdict blind to standee placings, no whole repaint for a canvas-sized shift, camera props back on the stages, `camRef` assigned from state, the chrome reading the rendered camera, a slice in a repaint frame, the tile pass used across scene ids, a tile not grown by a cell.
 
 ### 10.3 E2E
 
-`e2e/iso.e2e.ts` step HXPERF2, on hex rows, hex columns and squares at 390 by 844 and DPR 2: pan in 37 small moves and back, then compare the relief canvas with a whole repaint at the same camera, forced through the test hook (`relief/isoTest.ts`), within 2/255 a channel, and report the largest difference. Again with a height edit from the DM's socket mid-pan, with a fog reveal on a player's page, and with a turn. The selected token's action bar stays under its token through a pan, within 1 px at each sampled move, at 100% and 130% interface size.
+`e2e/iso.e2e.ts` step HXPERF2, on hex rows, hex columns and squares at 390 by 844 and DPR 2, and on hex rows at DPR 1.5: pan in 37 small moves and back by touch, by Space with the left button and by the middle button, then compare the relief canvas with a whole repaint at the same camera, forced through the test hook (`relief/isoTest.ts`), within 2/255 a channel, and report the largest difference. Again across a cull step, with a pit floor by the screen's top, with a height edit from the DM's socket mid-pan, with a fog reveal on a player's page, and with a turn. Through a pan, the selected token's action bar stays under its token within 1 px at each sampled move, at 100% and 130% interface size, and a pin label at the screen's edge stays in view.
 
-Run `iso`, `hex`, `areas`, `traps`, `pervision`, `vision`, `fogedge`, `alignment`, `alignment-wide` and `reach`: the relief, both grids, areas over relief, trap names, per-player boards, sight, the fog's edge and the alignment sweeps. Also `display` (the table display follows the DM's pan), `bardock` (the bar's docking through a pan), `swipe` and `keyboard` (gesture and key pans).
+Run `iso`, `hex`, `areas`, `traps`, `pervision`, `vision`, `fogedge`, `alignment`, `alignment-wide` and `reach`: the relief, both grids, areas over relief, trap names, per-player boards, sight, the fog's edge and the alignment sweeps. Also `display` (the table display follows the DM's pan), `bardock` (the bar's docking through a pan) and `swipe` (touch pans).
 
 ### 10.4 UI checklist
 
 - **Words shown:** none new. "Loading the isometric view" and "Building area shapes" stay.
 - **Loading:** unchanged. A whole repaint is today's frame, so nothing new waits.
-- **Keys, touch and focus:** unchanged. Arrow keys, pinch, two-finger and one-finger pans keep their behavior. A pan moves no focus.
+- **Keys, touch and focus:** unchanged. Pinch, one- and two-finger pans and mouse pans (Space with the left button, the middle or right button, `mousePanRef`) keep their behavior. A pan moves no focus.
 - **Screen readers:** unchanged. The canvas adds no focus target and announces nothing new.
 - **Large interface sizes and alignment:** no DOM layout change. The chrome takes its camera from the slot through the same zoomed conversions (`cameraInZoomed`), checked by the e2e bar step at 100% and 130%. The alignment sweep's roots already cover the action bar and hosts in `e2e/alignmentRoom.ts`. The lane confirms that and adds a root only if one is missing.
 
@@ -212,23 +239,27 @@ Run `iso`, `hex`, `areas`, `traps`, `pervision`, `vision`, `fogedge`, `alignment
 
 | Case | Expected | Test |
 |---|---|---|
-| A pan of whole-pixel moves within a cull step, hex rows, hex columns and squares | Strips only, canvas equals a whole draw, no board render | kept units, randomized test, iso e2e |
-| A move crossing a cull step | One board render, one whole repaint, layout covers every later strip | randomized test, bench counters |
-| A pan right, down, left, up and diagonally | Two strips at most, each the right side and size | kept units |
+| A pan within the cull box, hex rows, hex columns and squares, ratios 1, 1.25, 1.5, 2 | Regions only, canvas equals a whole draw, no board render | kept units, randomized test, iso e2e |
+| A move past a step boundary, then the sliced layout committing | No whole repaint, four seam bands, no frame over the gate | cull step units, randomized test, bench largest move |
+| A fling past the cull box | One late relayout, whole repaint | cull step units, bench counters |
+| A pit floor by the top, a top under a capped margin, panned | Cells gaining and losing ground repainted | ground edge units, randomized test, iso e2e |
+| A selected area's outline or a standee's caught ring crossing a strip's edge | Drawn by its painted bounds, clipped exactly | kept units, randomized test |
 | A jump as large as the canvas (Find, follow the turn) | Whole repaint | kept units |
 | Pinch zoom, a turn, Low power toggled, the interface size changed | Whole repaint each time, as today | kept units, iso e2e |
 | A height edit, a wall, a fog reveal, a map set mid-pan | Whole repaint that frame, then strips again | randomized test, iso e2e |
-| A standee's own update (an image arriving, its character changing) | Whole repaint | kept units |
+| A standee's own update, a ground draw outside the scheduler | Whole repaint | kept units |
+| The self-copy probe failing | Whole repaints from then on | kept units |
 | A local drag, a remote ghost, a ping during a still camera | Relief not drawn, as today | bench ground counters, iso e2e |
-| An area standing while panning | Whole repaint on its publish frame, no slice in it | area units, bench cube rows |
-| The action bar, door pill and readout during a pan | Follow the map every move, clamped as before | live camera units, iso e2e, bardock |
+| An area standing while panning | Whole repaint after its publish, no slice in that frame | area units, bench cube rows |
+| The action bar, door pill, readout and an edge pin label during a pan | Follow the map every move, clamped and sliding as before | live camera units, iso e2e, bardock |
+| A `MapStage` render mid-pan | Stages and `camRef` keep the slot's camera | live camera units |
 | The table display following the DM | Same views sent as now | display e2e |
-| Bench parity in Top-down | Pixel for pixel | `--compare` |
+| Bench parity at device-aligned cameras | Top-down pixel for pixel, Isometric listed | `--compare` |
 | A fog change on a player's board with an area standing, 40 by 40 and 200 by 200 | Comparison reads only changed tiles, same answer as the whole pass | area units, bench fog rows |
 
 ### 10.6 Real phones
 
-No real-phone timing is claimed. The copy of a canvas onto itself is specified for every browser, but only Chrome runs here. A browser that drew it wrongly would need a second canvas of the relief's size (5.3 MB at DPR 2). The coordinator's phone pass checks Safari on an iPhone.
+No real-phone timing is claimed. The copy onto itself is probed at mount on every browser, with today's whole repaints as the fallback, and the coordinator's phone pass checks Safari on an iPhone. The seam bands and the layout-only verdict rest on React running a transition's commit apart from a standee's own updates. The wrapper groups' subtree observers (`_addSubtreeObserver`, internal to Konva 10.7.1) catch the case where it does not, and a unit fails if that API goes away.
 
 ## 11. As built
 
