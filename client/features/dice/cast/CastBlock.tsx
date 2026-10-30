@@ -4,6 +4,8 @@ import type { NamedRoll } from "#shared/dice/bonus.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import type { CastAsk, RoomState } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
+import { useRollModeMenu } from "../useRollModeMenu.tsx";
+import type { RollModeOverride } from "../rollMode.ts";
 import { Button } from "../../../components/Button.tsx";
 import { displayName } from "../../../lib/scene.ts";
 import { scrollBox, startInScrollBox } from "../../../lib/reveal.ts";
@@ -82,10 +84,10 @@ export function useCastEnv(): CastEnv {
       tracker,
       connected: () => room.getState().connection === "open",
       dispatch: (op, opts) => actions.dispatch(op, opts),
-      rollDamage: (rolls) => {
+      rollDamage: (rolls, override) => {
         let parts = 0;
         // Thrown from the tapped button's place, as the row's Damage throws (docs/design-v1-roll-animation.md 3.1).
-        const tag = panel.roll(rolls, { origin: throws.current?.origin(), parts: (n) => (parts = n) });
+        const tag = panel.roll(rolls, { origin: throws.current?.origin(), parts: (n) => (parts = n), ...(override ? { override } : {}) });
         return tag === null ? null : { tag, parts };
       },
       newId: uuidv7,
@@ -262,6 +264,7 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
   const { spec, dice } = props;
   const view = dice.view;
   const env = useCastEnv();
+  const panel = useDicePanel();
   const store = useOptionStore();
   const room = useRoomStore();
   const ui = useRoomUi();
@@ -289,6 +292,16 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
   const sentPhase = sent ? phaseOf(env.tracker.state(sent.id), view.casts[sent.id] !== undefined) : null;
   const preset = !spec.area && targets.length === 0 ? areaPresetOf(spec.spell) : undefined;
 
+  const rollMenu = useRollModeMenu({
+    source: JSON.stringify([spec, slot, rolls, targets, template, sceneId, props.riders ? [...props.riders] : [], sentPhase, panel.adv, panel.dis, panel.secret]),
+    name: words.first,
+    capability: { d20: false, visibility: rolls.length > 0 ? "selectable" : "request", damage: true },
+    dm: you.role === "dm", disabled: reason !== null || sentPhase === "sending",
+    valid: () => room.getState().connection === "open" && room.getState().sceneId === sceneId && room.getState().view === view && JSON.stringify(room.getState().local.selectedIds) === JSON.stringify(selected) && store.getState().cast === spec && ask() !== null && reason === null,
+    fallbackFocus: () => props.opener?.current ?? group.current?.querySelector("button") ?? null,
+    onTap: () => go(true), onRoll: (override) => go(true, override),
+  });
+
   // Focus goes to its first button that takes a tap, which with no target yet is Cancel (6, Accessibility), once the panel has drawn, with the block brought into its scroll box: a phone's sheet opening on an area's ask starts at its top.
   // Only for a new opening, so a group reopened or a tab picked back keeps the focus on the control the viewer used (docs/design-v1-dice-pass.md 6.6).
   useEffect(() => {
@@ -315,10 +328,10 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
     if (!at || !now) return null;
     return askInput({ caster: at.id, sceneId: now.meta.playerSceneId ?? at.sceneId, spell: spec.spell, slot, area: spec.area, targets: spec.area ? [] : selectionTargets(now, room.getState().local.selectedIds, at.id, sceneId), roll: named?.key });
   };
-  const go = (withRoll: boolean) => {
+  const go = (withRoll: boolean, override?: RollModeOverride) => {
     const input = ask();
     if (!input || reason !== null) return;
-    const id = askFor(env, { key: spec.key, spell: spec.spell, ...(spec.roll !== undefined ? { roll: spec.roll } : {}), ...(spec.area !== undefined ? { area: spec.area } : {}), ask: input, rolls: withRoll ? rolls : null });
+    const id = askFor(env, { key: spec.key, spell: spec.spell, ...(spec.roll !== undefined ? { roll: spec.roll } : {}), ...(spec.area !== undefined ? { area: spec.area } : {}), ask: input, rolls: withRoll ? rolls : null, ...(override ? { override } : {}) });
     if (id === null) return;
     store.setState((s) => (s.cast === spec ? { cast: { ...spec, sent: id } } : {}));
     props.onSent?.();
@@ -366,9 +379,9 @@ function CastBlockView(props: Parameters<typeof RowCast>[0] & { spec: CastBlock 
       ) : (
         <>
           <div style={BUTTONS}>
-            <Button size="sm" variant="primary" busy={busy} disabled={reason !== null} title={reason ?? undefined} onClick={() => go(true)}>
+            <Button {...rollMenu.buttonProps} aria-describedby={rollMenu.describe()} style={rollMenu.pressStyle} size="sm" variant="primary" busy={busy} disabled={reason !== null} title={reason ?? undefined}>
               {words.first}
-            </Button>
+            </Button>{rollMenu.menu}
             <Button size="sm" variant="quiet" disabled={busy} onClick={cancel}>
               Cancel
             </Button>

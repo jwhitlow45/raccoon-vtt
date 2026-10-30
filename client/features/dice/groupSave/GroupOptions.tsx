@@ -23,7 +23,7 @@ import { severalKey, useDiceFolds } from "../diceFolds.ts";
 import { rollsOf } from "../logic.ts";
 import { cutLabel, damageRolls, withExtra } from "../options.ts";
 import { presetFor } from "../presets.ts";
-import { useDicePanel, type PanelRoll } from "../useDicePanel.ts";
+import { secretStartIn, useDicePanel, type PanelRoll } from "../useDicePanel.ts";
 import { loadedSrdRolls, useDiceView } from "../useDiceView.ts";
 import { useReceipt, useReceipts, type ReceiptState } from "../useReceipt.ts";
 import { useRollBlocked } from "../useRollOption.ts";
@@ -31,7 +31,10 @@ import { attackResults } from "./outcome.ts";
 import { ReplaceConfirm } from "./ReplaceConfirm.tsx";
 import { useAutoInitiativeFor } from "../../encounter/AutoInitiative.tsx";
 import { useStartGroupSave, type StartInput } from "./start.ts";
-import type { GroupTest } from "./rows.ts";
+import { groupRows, type GroupTest } from "./rows.ts";
+import { quickRollNow } from "./start.ts";
+import { useRollModeMenu } from "../useRollModeMenu.tsx";
+import { effectiveRollMode, type RollModeOverride, type RollModeCapability } from "../rollMode.ts";
 
 /**
  * Several selected creatures (docs/design-v1-roll-options.md 4.4): a DC,
@@ -87,9 +90,20 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
   const go = (input: StartInput) => {
     if (!start(input)) setPending(input);
   };
-  const quick = (test: GroupTest) => {
-    const taken = panel.take(creatures);
-    go({ source: { kind: "selection", tokenIds: [...props.tokenIds] }, test, dc, panel: "dice", rollNow: { sources: taken.sources, secret: taken.secret } });
+  const quick = (test: GroupTest, override?: RollModeOverride) => {
+    if (blocked) return;
+    const taken = override ? panel.peek(creatures) : panel.take(creatures);
+    go({ source: { kind: "selection", tokenIds: [...props.tokenIds] }, test, dc, panel: "dice", rollNow: quickRollNow(taken, secretStartIn(room.getState(), creatures), override) });
+  };
+  const source = JSON.stringify([props.tokenIds, dc, dice?.view.tokens, dice?.view.characters, dice?.view.encounter, panel.adv, panel.dis, panel.secret]);
+  const quickMode = (test: GroupTest): CellMode => {
+    const server = !!dice && groupRows(dice, [...props.tokenIds], test, false).some((r) => !r.skip && r.ways[0] === "server");
+    return {
+      source: `${source}|${JSON.stringify(test)}`,
+      capability: { d20: server, visibility: server ? "selectable" : "request", batch: true },
+      valid: () => !blocked && room.getState().connection === "open" && JSON.stringify(room.getState().local.selectedIds) === JSON.stringify(props.tokenIds),
+      onRoll: (override) => quick(test, override),
+    };
   };
   const sharedSummary = shared.map((s) => attackSummary(s.name, attackState[s.name], (tag) => tracker.state(tag))).join(", ");
 
@@ -115,13 +129,13 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
       </CreatureCard>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
         <Group label="Saves and checks" {...fold(severalKey("saves"))} summary={dc !== null ? `DC ${dc}` : "No DC"}>
-          <QuickGrid label="Saves" n={n} disabled={blocked} onTap={(a) => quick({ kind: "save", ability: a })} kind="save" />
-          <QuickGrid label="Checks" n={n} disabled={blocked} onTap={(a) => quick({ kind: "check", ability: a })} kind="check" />
+          <QuickGrid label="Saves" n={n} disabled={blocked} onTap={(a) => quick({ kind: "save", ability: a })} kind="save" mode={(a) => quickMode({ kind: "save", ability: a })} />
+          <QuickGrid label="Checks" n={n} disabled={blocked} onTap={(a) => quick({ kind: "check", ability: a })} kind="check" mode={(a) => quickMode({ kind: "check", ability: a })} />
         </Group>
         <Group label="Skills" {...fold(severalKey("skills"))}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
             {SKILL_KEYS.map((s: SkillKey) => (
-              <Cell key={s} text={SKILLS[s].name} name={`${SKILLS[s].name} for ${n}`} disabled={blocked} onTap={() => quick({ kind: "check", ability: SKILLS[s].ability, skill: s })} />
+              <Cell key={s} text={SKILLS[s].name} name={`${SKILLS[s].name} for ${n}`} disabled={blocked} mode={quickMode({ kind: "check", ability: SKILLS[s].ability, skill: s })} onTap={() => quick({ kind: "check", ability: SKILLS[s].ability, skill: s })} />
             ))}
           </div>
         </Group>
@@ -149,18 +163,23 @@ export function GroupOptions(props: { tokenIds: readonly string[] }) {
  * for 3" (docs/design-v1-dice-pass.md 5.3), so the words take one line at
  * every size and a voice user still says the whole name.
  */
-function Cell(props: { text: string; name: string; disabled: string | null; busy?: boolean; center?: boolean; onTap(): void }) {
+type CellMode = { source: string; capability: RollModeCapability; valid(): boolean; onRoll(override: RollModeOverride): void };
+
+function Cell(props: { text: string; name: string; disabled: string | null; busy?: boolean; center?: boolean; mode?: CellMode; onTap(): void }) {
   const off = props.disabled !== null;
+  const room = useRoomStore();
+  const liveView = useRoomView((s) => s.view);
+  const binding = useRollModeMenu({ source: props.mode?.source ?? props.name, name: props.name, capability: props.mode?.capability ?? { d20: false, visibility: "creature" }, dm: true, disabled: off || props.busy, valid: () => room.getState().view === liveView && props.mode?.valid() !== false, onTap: () => { if (!props.busy) props.onTap(); }, onRoll: (override) => props.mode?.onRoll(override) });
+  const { tooltipHold: _hold, ...buttonProps } = binding.buttonProps;
   return (
-    <button
+    <><button
+      {...buttonProps}
+      aria-describedby={binding.describe()}
       type="button"
       aria-label={props.name}
       aria-busy={props.busy ? true : undefined}
       disabled={off}
       title={props.disabled ?? undefined}
-      onClick={() => {
-        if (!props.busy) props.onTap();
-      }}
       style={{
         display: "flex",
         alignItems: "center",
@@ -178,10 +197,11 @@ function Cell(props: { text: string; name: string; disabled: string | null; busy
         textAlign: props.center ? "center" : "left",
         overflowWrap: "anywhere",
         cursor: off || props.busy ? "default" : "pointer",
+        ...binding.pressStyle,
       }}
     >
       {props.busy ? `${props.text}…` : props.text}
-    </button>
+    </button>{binding.menu}</>
   );
 }
 
@@ -194,7 +214,7 @@ function GridLabel(props: { id: string; children: ReactNode }) {
   );
 }
 
-function QuickGrid(props: { label: string; n: number; kind: "save" | "check"; disabled: string | null; onTap(a: AbilityKey): void }) {
+function QuickGrid(props: { label: string; n: number; kind: "save" | "check"; disabled: string | null; onTap(a: AbilityKey): void; mode(a: AbilityKey): CellMode }) {
   const id = useId();
   return (
     <div role="group" aria-labelledby={id} style={{ display: "grid" }}>
@@ -202,7 +222,7 @@ function QuickGrid(props: { label: string; n: number; kind: "save" | "check"; di
       {/* Rows of one height, as a creature's grids (RollOptions.tsx Grid). */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
         {ABILITY_KEYS.map((a) => (
-          <Cell key={a} text={ABILITY_SHORT[a]} name={`${ABILITY_SHORT[a]} ${props.kind} for ${props.n}`} disabled={props.disabled} onTap={() => props.onTap(a)} />
+          <Cell key={a} text={ABILITY_SHORT[a]} name={`${ABILITY_SHORT[a]} ${props.kind} for ${props.n}`} disabled={props.disabled} mode={props.mode(a)} onTap={() => props.onTap(a)} />
         ))}
       </div>
     </div>
@@ -338,6 +358,7 @@ export function attackSummary(name: string, state: SharedAttackState | undefined
  */
 function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; blocked: string | null }) {
   const panel = useDicePanel();
+  const room = useRoomStore();
   const store = useSharedAttacksStore();
   const state = useStore(store, (s) => s.byName[props.name] ?? NO_ATTACK);
   const set = (patch: Partial<SharedAttackState>) => store.setState((s) => patchShared(s, props.name, patch));
@@ -345,40 +366,44 @@ function SharedAttack(props: { name: string; each: Attacker[]; dice: DiceView; b
   const damage = useReceipt(state.damageTag);
   const { results, hits } = hitsOf(state, receipt);
   const n = props.each.length;
-  const attack = () => {
+  const attack = (override?: RollModeOverride) => {
     const rolls: PanelRoll[] = props.each.map(({ creature, named }) => {
       const preset = presetFor(props.dice, creature, { kind: "attack" });
       return { formula: withExtra(d20Formula(named.attack ?? 0), preset.extra), label: cutLabel(named.name), creature, sources: [...preset.sources] as AdvantageSource[], ...(named.critOn ? { critOn: named.critOn } : {}) };
     });
     const ac = state.ac;
     set({ damageTag: null });
-    const tag = panel.roll(rolls, ac !== null ? { ac } : {});
+    const tag = panel.roll(rolls, { ...(ac !== null ? { ac } : {}), ...(override ? { override } : {}) });
     // The attack sends the AC, and the field stays to read the hits, so the AC counts from the last attack on (docs/design-v1-sheet-swipe.md 4.6).
     set({ sent: tag ? { tag, each: [...props.each], ac } : null, acSent: ac });
   };
-  const rollDamage = () => {
+  const rollDamage = (override?: RollModeOverride) => {
     const label = `${props.name} damage for ${hits.length} hits`;
     const rolls = hits.flatMap(({ each, verdict }) =>
       damageRolls({ ...each.named, name: label }, { on: new Set(), critical: verdict === "critical", creature: each.creature }).map((r) => ({ ...r, label: cutLabel(`${label}${r.label?.includes(",") ? `,${r.label.split(",").at(-1)}` : ""}`) })),
     );
-    set({ damageTag: panel.roll(rolls) });
+    set({ damageTag: panel.roll(rolls.map((r) => ({ ...r, modeEligible: false })), override ? { override } : {}) });
   };
+  const source = JSON.stringify([props.name, props.each, state, props.dice.view.tokens, props.dice.view.characters, panel.adv, panel.dis, panel.secret]);
+  const valid = () => props.blocked === null && room.getState().connection === "open" && receipt?.state !== "sending" && JSON.stringify(room.getState().local.selectedIds) === JSON.stringify(props.each.flatMap((e) => "tokenId" in e.creature ? [e.creature.tokenId] : []));
+  const secret = receipt?.state === "committed" && receipt.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
+  const secretDamage = damage?.state === "committed" && damage.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
   const total = damage?.state === "committed" ? rollsOf(damage.lines).reduce((a, r) => a + r.total, 0) : null;
   return (
     <div style={{ display: "grid", gap: theme.space(1), borderTop: `${theme.line.border}px solid ${theme.color.border}`, paddingTop: theme.space(1) }}>
       <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 auto", display: "grid" }}>
-          <Cell text={`${props.name} for ${n}`} name={`${props.name} for ${n}`} disabled={props.blocked} busy={receipt?.state === "sending"} onTap={attack} />
+          <Cell text={`${props.name} for ${n}`} name={`${props.name} for ${n}`} disabled={props.blocked} busy={receipt?.state === "sending"} onTap={attack} mode={{ source: `${source}|attack`, capability: { d20: true, visibility: "selectable" }, valid, onRoll: attack }} />
         </div>
         <NumberField label="Target's AC" value={state.ac ?? undefined} min={1} max={50} nullable placeholder="AC" onCommit={(ac) => set({ ac })} width={72} />
       </div>
       {results.length > 0 ? (
-        <Note>{results.map((r) => `${r.roll.total}${r.verdict === "critical" ? " Critical Hit" : r.verdict === "hit" ? " hit" : r.verdict === "miss" ? " miss" : ""}`).join(", ")}</Note>
+        <Note>{results.map((r) => `${r.roll.total}${r.verdict === "critical" ? " Critical Hit" : r.verdict === "hit" ? " hit" : r.verdict === "miss" ? " miss" : ""} (${effectiveRollMode(r.roll, secret)})`).join(", ")}</Note>
       ) : null}
       {hits.length > 0 ? (
-        <Cell text={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} name={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} disabled={props.blocked} busy={damage?.state === "sending"} onTap={rollDamage} />
+        <Cell text={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} name={`Roll damage for ${hits.length} hit${hits.length === 1 ? "" : "s"}`} disabled={props.blocked} busy={damage?.state === "sending"} onTap={rollDamage} mode={{ source: `${source}|damage`, capability: { d20: false, visibility: "selectable", damage: true }, valid: () => valid() && damage?.state !== "sending", onRoll: rollDamage }} />
       ) : null}
-      {total !== null ? <Note>{`${total} damage. Every HP entry offers it as a chip.`}</Note> : null}
+      {total !== null ? <Note>{`${total} damage${secretDamage ? ", Secret" : ""}. Every HP entry offers it as a chip.`}</Note> : null}
     </div>
   );
 }
@@ -388,5 +413,5 @@ function GroupInitiative(props: { tokenIds: readonly string[]; blocked: string |
   const auto = useAutoInitiativeFor(props.tokenIds);
   if (auto.count === 0) return null;
   const words = `Initiative for the ${auto.count} in the fight`;
-  return <Cell text={words} name={words} busy={auto.busy} disabled={props.blocked} center onTap={auto.press} />;
+  return <Cell text={words} name={words} busy={auto.busy} disabled={props.blocked} center onTap={auto.press} mode={{ source: auto.source, capability: { d20: true, visibility: "creature" }, valid: auto.valid, onRoll: auto.press }} />;
 }

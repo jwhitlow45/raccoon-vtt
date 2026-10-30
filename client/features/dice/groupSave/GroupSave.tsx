@@ -10,7 +10,7 @@ import { ABILITY_NAMES, SKILLS } from "#shared/rules/skills.ts";
 import { effectName } from "#shared/logText.ts";
 import { DamageSummary } from "../DamageSummary.tsx";
 import { damageSummary, type DamageSummaryLines } from "../damageSummaryLines.ts";
-import { Button } from "../../../components/Button.tsx";
+import { Button, type ButtonProps } from "../../../components/Button.tsx";
 import { Checkbox } from "../../../components/Checkbox.tsx";
 import { Chip, ChipRow } from "../../../components/Chip.tsx";
 import { Input } from "../../../components/Field.tsx";
@@ -21,7 +21,9 @@ import { stickyPaneFoot } from "../../../components/Sheet.tsx";
 import { Section } from "../../../components/Panel.tsx";
 import { Switch } from "../../../components/Switch.tsx";
 import { theme } from "../../../lib/theme.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../../state/view.ts";
+import { useRollModeMenu } from "../useRollModeMenu.tsx";
+import { effectiveRollMode, rollModeTo, resolveRollMode, type RollModeOverride, type RollModeCapability } from "../rollMode.ts";
 import { usePanelHeader } from "../../panels.ts";
 import { EffectPicker } from "../../tokens/EffectsSection.tsx";
 import { SaveEndsFields, type SaveEndsForm } from "../../tokens/SaveEndsFields.tsx";
@@ -33,7 +35,7 @@ import { creatureKey, holderTarget, markOnRoll, rechargeUseOf, signedText, spend
 import { presetFor } from "../presets.ts";
 import { marksTest } from "../proficiencyPresentation.ts";
 import { useRollSender } from "../send.ts";
-import { useDicePanel } from "../useDicePanel.ts";
+import { useDicePanel, type PanelRoll } from "../useDicePanel.ts";
 import { useDiceView } from "../useDiceView.ts";
 import { SrdLoadFailed } from "../../monsters/SrdLoadFailed.tsx";
 import { useReceipt, type ReceiptState } from "../useReceipt.ts";
@@ -326,14 +328,15 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     });
   };
 
-  const startRoll = (given?: AdvantageSource[]) => {
+  const startRoll = (given?: AdvantageSource[], override?: RollModeOverride) => {
+    if (blocked || offScene || loading) return;
     if (bound) {
       setError(bound);
       return;
     }
-    // A quick tap took the panel's choices when it was made, so they are its own. Otherwise this tap takes them.
-    const taken = given ? { sources: given, restore: () => undefined } : panel.take();
-    const step = roll(pageRef.current, { rows, server: serverRolls(rows), tag: uuidv7(), requestIds: () => actions.newId(), openRequests: Object.keys(view.rolls).length, taken: taken.sources, at: new Date().toISOString() });
+    // A quick roll keeps the choices captured before replacement confirmation. A menu pick only reads the current choices.
+    const taken = given ? { sources: given, restore: () => undefined } : override ? panel.peek() : panel.take();
+    const step = roll(pageRef.current, { rows, server: serverRolls(rows), tag: uuidv7(), requestIds: () => actions.newId(), openRequests: Object.keys(view.rolls).length, taken: taken.sources, at: new Date().toISOString(), ...(override ? { override } : {}) });
     if (step.error) taken.restore();
     run(step);
     setOutcomeOpen(false);
@@ -347,13 +350,9 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
     startRoll(sources);
   };
 
-  const rollDamage = () => {
-    if (!parsedParts?.ok) return;
-    const to = damageTo(page, view);
-    // A damage roll in the open names what players may know (Fill.publicName).
-    const named = page.fill ? (to === "dm" ? page.fill.name : publicName(page.fill)) : "Group save";
-    // Each roll keeps its type on its line, which a label cut to fit cannot promise (docs/design-v1-combat-controls.md 3.4).
-    const rollsToSend = parsedParts.parts.flatMap((p) => ("formula" in p ? [{ formula: p.formula, label: `${named} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`.slice(0, 60), ...(p.type ? { type: p.type } : {}) }] : []));
+  const rollDamage = (override?: RollModeOverride) => {
+    if (blocked || offScene || page.phase === "applying" || page.phase === "applied" || pageRef.current.damage?.state === "sending") return;
+    const { rolls: rollsToSend, to } = groupDamageInvocation(pageRef.current, view, override);
     if (rollsToSend.length === 0) return;
     const tag = uuidv7();
     if (panel.roll(rollsToSend, { to, tag }) !== null) update(damageSent(pageRef.current, tag));
@@ -459,6 +458,7 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       onOpen={() => setOutcomeOpen(true)}
       onChange={update}
       onRoll={rollDamage}
+      blocked={blocked !== null || offScene}
       picking={picking}
       setPicking={setPicking}
       parsed={parsedParts}
@@ -502,6 +502,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
         ))
       : [];
 
+  const rowSource = JSON.stringify([dice.view.tokens, dice.view.characters, dice.view.encounter, dice.view.rolls]);
+  const hasServerRoll = rows.some((r) => !r.skip && stateOf(shown, r).mark !== "skip" && stateOf(shown, r).way === "server");
   const rowList = (
     <div role="group" aria-label="Creatures" style={{ display: "grid", gap: theme.space(1) }}>
       {/*
@@ -527,13 +529,14 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
         <GroupRow
           key={row.holder}
           page={shown}
+          source={rowSource}
           row={row}
           level={dice && marksTest(pageTest) ? creatureProficiency(dice, row.target, pageTest) : undefined}
           outcome={outcomes.get(row.holder)!}
           loading={loading && row.bonus === null}
           blocked={blocked ?? (offScene ? "Go back to the scene first." : null)}
           onChange={(next) => update(page.phase === "setup" ? { ...next, rows: pageRef.current.rows } : next)}
-          onDmRoll={(typed) => {
+          onDmRoll={(typed, override) => {
             const s = stateOf(page, row);
             const d20 = d20Of(page.test, page.spell);
             if (!s.asked || !d20 || !row.askRef) return;
@@ -546,11 +549,11 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
               unanswered: true,
               ...(preset.extra.length > 0 ? { extra: preset.extra.join("").replace(/^\+/, "") } : {}),
               ...(typed !== undefined ? { bonus: typed } : {}),
-              ...modeOf(preset.sources),
+              ...resolveRollMode(preset.sources, [], override),
             };
             run(dmRoll(pageRef.current, row.holder, op));
           }}
-          onRollAgain={() => run(rollAgain(pageRef.current, { holders: [row.holder], server: serverRolls([row]), tag: uuidv7() }))}
+          onRollAgain={(override) => run(rollAgain(pageRef.current, { holders: [row.holder], server: serverRolls([row]), tag: uuidv7(), ...(override ? { override } : {}) }))}
         />
       ))}
     </div>
@@ -611,9 +614,9 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
           {outcome}
           {rowList}
           {page.test.kind !== "none" ? (
-            <Button variant="primary" busy={loading} disabled={blocked !== null || offScene || rows.length === 0 || tooMany || bound !== null} onClick={() => startRoll()}>
+            <GroupRollButton source={JSON.stringify([page, rows, dice.view.tokens, dice.view.characters, dice.view.encounter, panel.adv, panel.dis, panel.secret])} name={rollWords(shown)} capability={{ d20: hasServerRoll, visibility: hasServerRoll ? "selectable" : "request", batch: true }} valid={() => pageRef.current.phase === "setup" && !offScene} variant="primary" busy={loading} disabled={blocked !== null || offScene || rows.length === 0 || tooMany || bound !== null} onRoll={(override) => startRoll(undefined, override)}>
               {bound ?? (loading ? "Loading the stat blocks…" : rollWords(shown))}
-            </Button>
+            </GroupRollButton>
           ) : null}
         </>
       ) : (
@@ -643,15 +646,6 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       {page.apply === "taken" ? <AppliedToast page={page} ui={ui} /> : null}
     </div>
   );
-}
-
-function modeOf(sources: readonly { kind: "adv" | "dis" }[]): { mode?: "adv" | "dis"; cancelled?: true } {
-  const adv = sources.some((s) => s.kind === "adv");
-  const dis = sources.some((s) => s.kind === "dis");
-  if (adv && dis) return { cancelled: true };
-  if (adv) return { mode: "adv" };
-  if (dis) return { mode: "dis" };
-  return {};
 }
 
 /** The toast once Apply is taken: "Fireball: 5 took damage, 3 are Frightened. Undo takes it all back." Once per plan. */
@@ -750,7 +744,8 @@ function OutcomePanel(props: {
   summary: string;
   onOpen(): void;
   onChange(page: Page): void;
-  onRoll(): void;
+  onRoll(override?: RollModeOverride): void;
+  blocked: boolean;
   picking: boolean;
   setPicking(v: boolean): void;
   parsed: ReturnType<typeof parseParts> | null;
@@ -768,6 +763,8 @@ function OutcomePanel(props: {
   const frozen = page.phase === "applying" || page.phase === "applied";
   const setOutcome = (patch: Partial<Page["outcome"]>) => props.onChange({ ...page, outcome: { ...page.outcome, ...patch } });
   const damageState = page.damage;
+  const damageReceipt = useReceipt(damageState?.tag ?? null);
+  const secretDamage = damageReceipt?.state === "committed" && damageReceipt.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
   if (!props.open) {
     return (
       <div style={{ display: "flex", gap: theme.space(2), alignItems: "center", flexWrap: "wrap" }}>
@@ -780,7 +777,7 @@ function OutcomePanel(props: {
   }
   const rolledText =
     damageState?.state === "committed" && damageState.amounts
-      ? "Rolled"
+      ? secretDamage ? "Rolled, Secret" : "Rolled"
       : damageState?.state === "sending" ? "Rolling…" : damageState?.state === "refused" ? damageState.says : damageState?.state === "unknown" ? "This may have happened. Check the log." : null;
   const damageParts = amountsOf(page, page.fill?.damageType);
   const summaryParts = damageParts ?? (props.parsed?.ok ? props.parsed.parts : []);
@@ -795,7 +792,7 @@ function OutcomePanel(props: {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (hasDice) props.onRoll();
+          if (hasDice && !frozen && !props.blocked && damageState?.state !== "sending") props.onRoll();
         }}
         style={{ display: "flex", gap: theme.space(1), marginTop: -theme.space(1) }}
       >
@@ -811,9 +808,9 @@ function OutcomePanel(props: {
           style={{ flex: 1, width: 0 }}
         />
         {hasDice ? (
-          <Button type="submit" size="sm" disabled={frozen} busy={damageState?.state === "sending"}>
+          <GroupRollButton type="button" source={JSON.stringify([page, props.view.tokens, props.view.characters])} name="Group damage" capability={{ d20: false, visibility: damageTo({ ...page, secret: true }, props.view) === "dm" ? "selectable" : "creature", damage: true }} valid={() => !frozen && hasDice} size="sm" disabled={frozen || props.blocked} busy={damageState?.state === "sending"} onRoll={props.onRoll}>
             {damageState?.state === "committed" ? "Roll again" : "Roll"}
-          </Button>
+          </GroupRollButton>
         ) : null}
       </form>
       {props.parsed && !props.parsed.ok ? <Note tone="error">{props.parsed.error}</Note> : rolledText ? <Note>{rolledText}</Note> : null}
@@ -909,6 +906,7 @@ function entryName(view: RoomState, entry: { tokenId?: string; characterId?: str
  */
 function GroupRow(props: {
   page: Page;
+  source: string;
   row: RowBase;
   outcome: ReturnType<typeof rowOutcome>;
   /** Its stat block is still loading, so how it rolls is not known yet. */
@@ -918,8 +916,8 @@ function GroupRow(props: {
   blocked: string | null;
   onChange(page: Page): void;
   /** The DM's roll of an asked row, with the bonus typed for a creature with no stat block. */
-  onDmRoll(typed?: number): void;
-  onRollAgain(): void;
+  onDmRoll(typed?: number, override?: RollModeOverride): void;
+  onRollAgain(override?: RollModeOverride): void;
 }) {
   const { page, row, outcome } = props;
   const s = stateOf(page, row);
@@ -942,6 +940,10 @@ function GroupRow(props: {
   // The DM's roll for an asked creature with no stat block takes the bonus typed beside it (knownOrTyped).
   const [bonusText, setBonusText] = useState("");
   const typed = knownOrTyped(row.bonus, bonusText, !props.loading);
+  const receipt = useReceipt(s.batch?.tag ?? null);
+  const returned = s.answer?.dice ?? s.rolled;
+  const secret = receipt?.state === "committed" && receipt.lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
+  const effective = returned ? effectiveRollMode(returned, secret) : "";
   // A page with No save has no roll, so it is in setup until Apply: its rows' amounts open there too.
   const takes = (!setup || page.test.kind === "none") && !frozen && !s.gone && (outcome.result === "fail" || outcome.result === "pass");
   return (
@@ -983,7 +985,7 @@ function GroupRow(props: {
         </>
       ) : (
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
-          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{words.how ?? (s.way === "server" ? serverWords(row, s) : WAY_WORDS[s.way])}</span>
+          <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{words.how ? [words.how, effective].filter(Boolean).join(", ") : s.way === "server" ? serverWords(row, s) : WAY_WORDS[s.way]}</span>
           {words.verdict ? (
             <span data-verdict="" style={{ fontSize: theme.font.small, color: theme.color.text, border: `${theme.line.border}px solid ${theme.color.controlBorder}`, borderRadius: theme.radius.sm, padding: `0 ${theme.space(1)}px` }}>
               {words.verdict}
@@ -1009,20 +1011,22 @@ function GroupRow(props: {
             />
           ) : null}
           {waitingAsk && (row.bonus !== null || typed.typing) ? (
-            <Button
+            <GroupRollButton
+              source={JSON.stringify([props.source, page, row, bonusText])} name={`${row.name}'s requested roll`}
+              capability={{ d20: true, visibility: "request" }} valid={() => !!waitingAsk && typed.bonus !== null && !frozen}
+              onRoll={(override) => typed.bonus !== null && props.onDmRoll(typed.typing ? typed.bonus : undefined, override)}
               size="sm"
               disabled={(props.blocked ?? typed.waits) !== null}
               title={props.blocked ?? typed.waits ?? undefined}
               busy={page.dmRolls.some((r) => r.holder === row.holder && r.state === "sending")}
-              onClick={() => typed.bonus !== null && props.onDmRoll(typed.typing ? typed.bonus : undefined)}
             >
               {row.bonus !== null ? `Roll ${signedText(row.bonus)}` : typed.bonus !== null ? `Roll ${d20Text(typed.bonus)}` : "Roll d20"}
-            </Button>
+            </GroupRollButton>
           ) : null}
           {s.status === "notRolled" || s.status === "unknown" ? (
-            <Button size="sm" disabled={props.blocked !== null || rowBonus(row, s) === null} onClick={props.onRollAgain}>
+            <GroupRollButton source={JSON.stringify([props.source, page, row])} name={`${row.name}'s roll`} capability={{ d20: true, visibility: "selectable" }} valid={() => !frozen && !s.gone && (s.status === "notRolled" || s.status === "unknown")} size="sm" disabled={props.blocked !== null || rowBonus(row, s) === null} onRoll={props.onRollAgain}>
               {s.status === "unknown" ? "Roll again" : "Roll them"}
-            </Button>
+            </GroupRollButton>
           ) : null}
           {s.way === "type" || s.status ? (
             <NumberField label={`${row.name}'s total`} value={s.typed} min={-50} max={100} nullable placeholder="Total" onCommit={(n) => props.onChange(typeTotal(page, row.holder, n))} width={88} />
@@ -1102,4 +1106,24 @@ function groupSeen(dcShown: boolean, hasDc: boolean, resultShown: boolean): stri
   if (hasDc && dcShown) return resultShown ? "The DC and pass or fail." : "The DC. Pass or fail hidden.";
   if (hasDc) return resultShown ? "DC hidden. Pass or fail shown." : "DC and pass or fail hidden.";
   return resultShown ? "Pass or fail shown." : "Pass or fail hidden.";
+}
+
+function GroupRollButton(props: Omit<ButtonProps, "onClick"> & { source: string; name: string; capability: RollModeCapability; valid(): boolean; onRoll(override?: RollModeOverride): void }) {
+  const { source, name, capability, valid, onRoll, ...button } = props;
+  const room = useRoomStore();
+  const viewing = useRoomView((s) => s.sceneId);
+  const liveView = useRoomView((s) => s.view);
+  const online = useRoomView((s) => s.connection === "open");
+  const binding = useRollModeMenu({ source: `${viewing}|${source}`, name, capability, dm: true, disabled: button.disabled || button.busy || !online, valid: () => room.getState().connection === "open" && room.getState().sceneId === viewing && room.getState().view === liveView && valid(), onTap: () => onRoll(), onRoll });
+  return <><Button {...button} {...binding.buttonProps} aria-describedby={binding.describe(button["aria-describedby"])} style={{ ...button.style, ...binding.pressStyle }} />{binding.menu}</>;
+}
+
+/** Player-caster damage keeps its public route, including from an older open menu. */
+export function groupDamageInvocation(page: Page, view: RoomState, override?: RollModeOverride): { to: "all" | "dm"; rolls: PanelRoll[] } {
+  const baseline = damageTo(page, view);
+  const selectable = damageTo({ ...page, secret: true }, view) === "dm";
+  const to = selectable ? rollModeTo(baseline, baseline, override) : baseline;
+  const parsed = parseParts(page.outcome.damage, page.fill?.damageType);
+  const named = page.fill ? (to === "dm" ? page.fill.name : publicName(page.fill)) : "Group save";
+  return { to, rolls: parsed.ok ? parsed.parts.flatMap((p) => "formula" in p ? [{ formula: p.formula, modeEligible: false, label: `${named} damage${p.type ? `, ${damageTypeName(p.type)}` : ""}`.slice(0, 60), ...(p.type ? { type: p.type } : {}) }] : []) : [] };
 }

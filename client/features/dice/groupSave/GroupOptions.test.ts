@@ -18,6 +18,8 @@ import { receiptsSlot } from "../useReceipt.ts";
  * a selection that changes while the attack stays shared, keeps the hits.
  */
 
+const panelModule = await import("../useDicePanel.ts");
+const saveStoreModule = await import("./store.ts");
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../../state/view.ts");
@@ -181,7 +183,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     const s = setup();
     sentAttack(s);
     const markup = render(s, ["ta", "tb"]);
-    assert.match(markup, /15 hit, 20 hit/);
+    assert.match(markup, /15 hit \(Normal\), 20 hit \(Normal\)/);
     assert.equal(cells(markup).get("Roll damage for 2 hits"), "Roll damage for 2 hits");
   });
 
@@ -190,7 +192,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     sentAttack(s);
     const markup = render(s, ["ta", "tb"]);
     assert.ok(cells(markup).has("Dagger for 2"), "both attacks are shared");
-    assert.equal([...markup.matchAll(/15 hit, 20 hit/g)].length, 1);
+    assert.equal([...markup.matchAll(/15 hit \(Normal\), 20 hit \(Normal\)/g)].length, 1);
     assert.equal([...markup.matchAll(/aria-label="Roll damage for 2 hits"/g)].length, 1);
     // Each row from its attack's button to the next row's line.
     const row = (name: string) => {
@@ -213,7 +215,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     assert.match(folded, />(Dagger, Rapier: 2 hits|Rapier: 2 hits, Dagger)<\/span>/, "the folded line names the hits that wait for their damage");
     folds.tap(severalKey("sharedAttacks"), true, false);
     const open = render(s, ["ta", "tb"]);
-    assert.match(open, /15 hit, 20 hit/);
+    assert.match(open, /15 hit \(Normal\), 20 hit \(Normal\)/);
     assert.equal(cells(open).get("Roll damage for 2 hits"), "Roll damage for 2 hits");
   });
 
@@ -223,7 +225,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     const markup = render(s, ["ta", "tb", "tc"]);
     const named = cells(markup);
     assert.equal(named.get("Rapier for 3"), "Rapier for 3");
-    assert.match(markup, /15 hit, 20 hit/);
+    assert.match(markup, /15 hit \(Normal\), 20 hit \(Normal\)/);
     assert.equal(named.get("Roll damage for 2 hits"), "Roll damage for 2 hits");
   });
 
@@ -232,7 +234,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     sentAttack(s);
     const markup = render(s, ["ta", "tc"]);
     assert.equal(cells(markup).get("Rapier for 2"), "Rapier for 2");
-    assert.match(markup, /15 hit, 20 hit/);
+    assert.match(markup, /15 hit \(Normal\), 20 hit \(Normal\)/);
     assert.equal(cells(markup).get("Roll damage for 2 hits"), "Roll damage for 2 hits");
   });
 
@@ -240,7 +242,7 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     const s = setup([20, 1]);
     sentAttack(s);
     const markup = render(s, ["ta", "tb"]);
-    assert.match(markup, /27 Critical Hit, 8 miss/);
+    assert.match(markup, /27 Critical Hit \(Normal\), 8 miss \(Normal\)/);
     assert.equal(cells(markup).get("Roll damage for 1 hit"), "Roll damage for 1 hit");
     const state = s.scope.get(sharedAttacksSlot).store.getState().byName.Rapier!;
     assert.equal(attackSummary("Rapier", state, (tag) => s.scope.get(receiptsSlot).state(tag)), "Rapier: 1 hit");
@@ -363,4 +365,102 @@ describe("a shared attack's slot, by the attack's name (5.3)", () => {
     assert.equal(attackSummary("Rapier", { ...state, sent: { ...state.sent!, ac: null }, ac: 16 }, receipt), "Rapier: 1 hit", "with none sent, by the AC typed");
     assert.equal(attackSummary("Rapier", { ...state, sent: { ...state.sent!, tag: "not-yet" } }, () => ({ state: "sending" })), "Rapier", "no answer yet");
   });
+});
+
+test("one-roll group menus register actual server dice and leave ask-only openers alone", () => {
+  const s = setup();
+  const askOnly = render(s, ["ta", "tb"]);
+  const setupButton = /<button[^>]*aria-label="Set up a group save"[^>]*>/.exec(askOnly)?.[0];
+  assert.ok(setupButton);
+  assert.doesNotMatch(setupButton, /aria-haspopup/);
+  assert.doesNotMatch(/<button[^>]*aria-label="DEX save for 2"[^>]*>/.exec(askOnly)?.[0] ?? "", /aria-haspopup/, "players' ask-only save has no menu");
+  const attack = /<button[^>]*aria-label="Rapier for 2"[^>]*>/.exec(askOnly)?.[0];
+  assert.match(attack ?? "", /aria-haspopup="menu"/);
+  assert.match(askOnly, /Hold, right-click or Shift\+F10 for Advantage, Disadvantage, Secret or Normal/);
+  sentAttack(s);
+  const hits = render(s, ["ta", "tb"]);
+  assert.match(/<button[^>]*aria-label="Roll damage for 2 hits"[^>]*>/.exec(hits)?.[0] ?? "", /aria-haspopup="menu"/);
+  assert.match(hits, /Hold, right-click or Shift\+F10 for Secret or Normal/);
+  assert.doesNotMatch(hits, /tooltipHold=/);
+});
+
+test("group menu callbacks preserve panel choices through quick saves, shared attacks and hit damage", () => {
+  const { diceChoicesSlot } = panelModule;
+  for (const override of ["adv", "dis", "secret", "normal"] as const) {
+    const s = setup();
+    for (const id of ["a", "b"]) {
+      s.view.characters[id]!.ownerIds = [];
+      s.view.tokens[`t${id}`]!.ownerIds = [];
+    }
+    for (const each of s.shared.find((attack) => attack.name === "Rapier")!.each) each.named.damage[0] = { ...each.named.damage[0]!, formula: "1d20" };
+    sentAttack(s);
+    const choices = s.scope.get(diceChoicesSlot);
+    const initial = { adv: false, dis: true, secret: false, secretFor: panelModule.panelKeyIn({ you: DM, local: { selectedIds: ["ta", "tb"] } } as never), version: 17, last: null };
+    choices.setState(initial);
+    choices.getInitialState = choices.getState;
+    const sent: import("#shared/protocol.ts").ClientOp[] = [];
+    const store = createStore(() => ({ view: s.view, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["ta", "tb"], multi: false } }));
+    const cells: Record<string, { mode?: { capability: { d20: boolean }; onRoll(value: typeof override): void } }> = {};
+    function collect(value: unknown): void {
+      if (Array.isArray(value)) { value.forEach(collect); return; }
+      if (!value || typeof value !== "object" || !("props" in value) || !("type" in value)) return;
+      const element = value as { type: { name?: string } | string; props: { name?: string; children?: unknown } };
+      if (typeof element.type === "function" && ["QuickGrid", "SharedAttack"].includes(element.type.name)) {
+        collect((element.type as (p: never) => unknown)(element.props as never));
+      } else if (typeof element.type !== "string" && element.type.name === "Cell") {
+        cells[element.props.name!] = element.props as never;
+      } else collect(element.props.children);
+    }
+    function Probe() { collect(GroupOptions({ tokenIds: ["ta", "tb"] })); return null; }
+    renderToStaticMarkup(createElement(RoomProvider, {
+      store: store as never, actions: { newId: () => "request", dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op) } as never,
+      ui: { openPanel() {}, notify() {} } as never, assets: { url: () => "" } as never,
+      children: createElement(RoomScopeProvider, { scope: s.scope, children: createElement(Probe) }),
+    }));
+    const save = cells["DEX save for 2"]?.mode;
+    assert.equal(save?.capability.d20, true);
+    save!.onRoll(override);
+    const created = s.scope.get(saveStoreModule.groupSaveSlot).getState().page!;
+    assert.deepEqual(created.rollNow?.sources, override === "normal" ? [] : override === "secret" ? [{ kind: "dis", from: "pressed" }] : [{ kind: override, from: "roll-menu" }]);
+    assert.equal(created.secret, override === "secret" || override === "normal");
+    assert.deepEqual({ ...choices.getState(), last: null }, initial, "quick rolls never consume choices");
+    cells["Rapier for 2"]!.mode!.onRoll(override);
+    const attack = sent.find((op) => op.t === "dice.roll");
+    assert.ok(attack?.t === "dice.roll");
+    assert.equal(attack.to, override === "secret" || override === "normal" ? "dm" : "all");
+    assert.ok(attack.rolls.every((r) => r.mode === (override === "secret" ? "dis" : override === "normal" ? undefined : override)));
+    assert.deepEqual({ ...choices.getState(), last: null }, initial, "attacks never consume choices");
+    cells["Roll damage for 2 hits"]!.mode!.onRoll(override);
+    const damage = sent.at(-1);
+    assert.ok(damage?.t === "dice.roll");
+    assert.equal(damage.to, override === "secret" || override === "normal" ? "dm" : "all");
+    assert.ok(damage.rolls.every((r) => r.mode === undefined));
+    assert.deepEqual({ ...choices.getState(), last: null }, initial, "damage never consumes choices");
+  }
+});
+
+test("shared result details use returned cancellation, mode and visibility", () => {
+  const s = setup();
+  const data = s.view.log[0]!.data;
+  assert.ok(data?.type === "dice");
+  data.to = "dm";
+  data.rolls[0]!.mode = "adv";
+  data.rolls[1]!.cancelled = true;
+  sentAttack(s);
+  const html = render(s, ["ta", "tb"]);
+  assert.match(html, /15 hit \(Advantage, Secret\)/);
+  assert.match(html, /20 hit \(Normal: Advantage and Disadvantage cancelled, Secret\)/);
+});
+
+test("shared damage details name returned Secret", () => {
+  const s = setup();
+  sentAttack(s);
+  const attacks = s.scope.get(sharedAttacksSlot).store;
+  attacks.setState((state) => patchShared(state, "Rapier", { damageTag: "damage" }));
+  const tracker = s.scope.get(receiptsSlot);
+  const lines: LogEntry[] = [{ id: "8:0", at: "now", kind: "event", data: { type: "dice", tag: "damage", by: DM.memberId, to: "dm", rolls: [{ formula: "1d8", faces: [7], total: 7 }] } }];
+  tracker.env = { lookup: async () => ({ parts: [] }), log: () => lines };
+  tracker.sending("damage", 0);
+  tracker.answer("damage", 0, "taken");
+  assert.match(render(s, ["ta", "tb"]), /7 damage, Secret/);
 });

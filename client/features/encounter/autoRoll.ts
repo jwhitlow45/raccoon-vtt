@@ -5,6 +5,7 @@ import { MAX_ENTRIES_PER_OP, type ClientOp } from "#shared/protocol.ts";
 import { rowGroup } from "#shared/rules/initiative.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
 import { rollsOf } from "../dice/logic.ts";
+import { rollModeSources, type RollModeOverride } from "../dice/rollMode.ts";
 import { withExtra } from "../dice/options.ts";
 import type { PanelRoll } from "../dice/useDicePanel.ts";
 import type { ReceiptState } from "../dice/useReceipt.ts";
@@ -305,11 +306,12 @@ export function joinGroups(rows: readonly RollRow[], kept: readonly RollRow[]): 
 /**
  * What one press rolls: the shared rolls by the mode, and, by creature, the
  * waiting monsters that join their group's value instead (joinGroups).
- * `kept` are the monsters that keep their values this time.
+ * `kept` are the monsters that keep their values this time. Joins use the
+ * original presets, then the invocation changes only rows drawing new dice.
  */
-export function planPress(rows: readonly RollRow[], mode: RollMode, kept: readonly RollRow[] = []): { groups: RollGroup[]; joined: JoinedGroup[] } {
+export function planPress(rows: readonly RollRow[], mode: RollMode, kept: readonly RollRow[] = [], override?: RollModeOverride): { groups: RollGroup[]; joined: JoinedGroup[] } {
   const { joined, rest } = mode === "creature" ? joinGroups(rows, kept) : { joined: [], rest: [...rows] };
-  return { groups: planRolls(rest, mode), joined };
+  return { groups: planRolls(rest.map((row) => ({ ...row, sources: rollModeSources(row.sources, [], override) })), mode), joined };
 }
 
 // ---------------------------------------------------------------- rolling on the server

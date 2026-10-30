@@ -16,6 +16,7 @@ import { areaTitle } from "../../areas/labels.ts";
 import { rollsOf } from "../logic.ts";
 import { creatureKey, cutLabel, sameSpell } from "../options.ts";
 import { ReceiptTracker, type ReceiptState } from "../useReceipt.ts";
+import type { RollModeOverride } from "../rollMode.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import type { FillInput } from "../groupSave/fills.ts";
 import { parseParts } from "../groupSave/outcome.ts";
@@ -231,7 +232,8 @@ export function askInput(input: { caster: string; sceneId: string; spell: string
 export function rolledText(lines: readonly LogEntry[]): string | null {
   const rolls = rollsOf(lines);
   if (rolls.length === 0) return null;
-  return `Rolled ${rolls.map((r) => `${r.total.toLocaleString("en-US")}${labelDamageType(r.label) ? ` ${damageTypeName(labelDamageType(r.label)!)}` : ""}`).join(" + ")}`;
+  const secret = lines.some((line) => line.data?.type === "dice" && line.data.to === "dm");
+  return `Rolled ${rolls.map((r) => `${r.total.toLocaleString("en-US")}${labelDamageType(r.label) ? ` ${damageTypeName(labelDamageType(r.label)!)}` : ""}`).join(" + ")}${secret ? ", Secret" : ""}`;
 }
 
 // ------------------------------------------------------------ sends
@@ -287,7 +289,7 @@ export type CastEnv = {
   connected(): boolean;
   dispatch(op: ClientOp, opts: { quiet: true; onAnswer: OnAnswer }): number | null;
   /** Rolls the damage as a Dice panel roll: its tag and how many batches it went in, or null for nothing sent. */
-  rollDamage(rolls: PanelRoll[]): { tag: string; parts: number } | null;
+  rollDamage(rolls: PanelRoll[], override?: RollModeOverride): { tag: string; parts: number } | null;
   newId(): string;
   view(): Pick<RoomState, "casts"> | null;
   /** The unsettled sends, kept for a reload (castDraft). */
@@ -317,11 +319,11 @@ export function busySend(env: CastEnv, key: string, spell: string): CastSend | u
  * order. Nothing goes while the block's last send still waits, or without
  * a connection. Returns the ask's id, or null for nothing asked.
  */
-export function askFor(env: CastEnv, input: { key: string; spell: string; roll?: string; area?: string; ask: Omit<CastInput, "id" | "damage">; rolls: PanelRoll[] | null }): string | null {
+export function askFor(env: CastEnv, input: { key: string; spell: string; roll?: string; area?: string; ask: Omit<CastInput, "id" | "damage">; rolls: PanelRoll[] | null; override?: RollModeOverride }): string | null {
   if (busySend(env, input.key, input.spell) || !env.connected()) return null;
   let damage: CastSend["damage"];
   if (input.rolls && input.rolls.length > 0) {
-    const rolled = env.rollDamage(input.rolls);
+    const rolled = env.rollDamage(input.rolls.map((r) => ({ ...r, modeEligible: false })), input.override);
     if (!rolled) return null;
     damage = rolled;
   }

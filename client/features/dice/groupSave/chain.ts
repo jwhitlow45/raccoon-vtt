@@ -10,6 +10,7 @@ import { MAX_OP_AGE_MS } from "../../../state/store.ts";
 import { asSave, cutLabel, testLabel, withExtra } from "../options.ts";
 import type { PanelRoll } from "../useDicePanel.ts";
 import { rollsOf } from "../logic.ts";
+import { overrideRollSources, rollModeTo, type RollModeOverride } from "../rollMode.ts";
 import { parseParts } from "./outcome.ts";
 import { d20Of, rowResult, type GroupTest, type Mark, type RowBase, type RowState, type Way } from "./rows.ts";
 
@@ -240,14 +241,16 @@ export type ServerRoll = { holder: string; target: ActorTarget; bonus: number; s
 /**
  * The roll (5.1): one tap freezes the rows and sends every server roll
  * in one tag and every request at once, 50 targets a request, after
- * checking the room's open requests leave room for them all. `taken` is
- * the panel's choices consumed at the tap, which start every server row.
+ * checking the room's open requests leave room for them all. `taken` holds
+ * the panel choices for this invocation. Ordinary taps consume them before
+ * this step. Menu picks read them without consuming them.
  */
-export function roll(page: Page, input: { rows: RowBase[]; server: readonly ServerRoll[]; tag: string; requestIds: () => string; openRequests: number; taken: readonly AdvantageSource[]; at: string }): Step {
+export function roll(page: Page, input: { rows: RowBase[]; server: readonly ServerRoll[]; tag: string; requestIds: () => string; openRequests: number; taken: readonly AdvantageSource[]; at: string; override?: RollModeOverride }): Step {
   if (page.phase !== "setup") return { page, send: [] };
   const { rollNow: _now, ...rest } = page;
   let next: Page = { ...rest, rows: input.rows, phase: "rolled", rolledAt: input.at };
   if (page.test.kind === "none") return { page: next, send: [] };
+  const envelopePage = invocationPage(page, input.override);
   const test = page.test;
   const live = input.rows.filter((r) => stateOf(next, r).mark !== "skip");
   const asked = live.filter((r) => stateOf(next, r).way === "ask" && r.askRef);
@@ -261,9 +264,9 @@ export function roll(page: Page, input: { rows: RowBase[]; server: readonly Serv
   const serverRows = input.server.filter((s) => live.some((r) => r.holder === s.holder && stateOf(next, r).way === "server"));
   if (serverRows.length > 0) {
     const d20 = d20Of(test, page.spell)!;
-    const label = cutLabel(page.fill ? `${rollName(page)}, ${testLabel(d20)}` : testLabel(d20));
-    const rolls = serverRows.map((s): PanelRoll => asSave({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources, ...input.taken] }, d20));
-    send.push({ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(page) });
+    const label = cutLabel(page.fill ? `${rollName(envelopePage)}, ${testLabel(d20)}` : testLabel(d20));
+    const rolls = serverRows.map((s): PanelRoll => asSave({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: overrideRollSources(s.sources, input.taken, input.override) }, d20));
+    send.push({ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(envelopePage) });
     next = { ...next, rolls: [...next.rolls, { tag: input.tag, holders: serverRows.map((s) => s.holder), state: "sending" }] };
     for (const s of serverRows) next = withState(next, s.holder, { batch: { tag: input.tag, part: 0 } }, rowOf(next, s.holder));
   }
@@ -382,20 +385,27 @@ function diceEnvelope(page: Page): { to: "all" | "dm"; dc?: number } {
   return dc === undefined ? { to } : { to, dc };
 }
 
+/** Visibility and public labels belong to this invocation, never the stored switch. */
+function invocationPage(page: Page, override?: RollModeOverride): Page {
+  const baseline = page.secret ? "dm" : "all";
+  return { ...page, secret: rollModeTo(baseline, baseline, override) === "dm" };
+}
+
 /** Roll them again (5.10): only the DM's own step, under a new tag, for rows whose roll was refused or never settled. */
-export function rollAgain(page: Page, input: { holders: readonly string[]; server: readonly ServerRoll[]; tag: string }): Step {
+export function rollAgain(page: Page, input: { holders: readonly string[]; server: readonly ServerRoll[]; tag: string; override?: RollModeOverride }): Step {
   if (page.phase !== "rolled" || page.test.kind === "none") return { page, send: [] };
   const again = input.server.filter((s) => input.holders.includes(s.holder) && (() => {
     const st = page.states[s.holder];
     return st?.status === "notRolled" || st?.status === "unknown";
   })());
   if (again.length === 0) return { page, send: [] };
+  const envelopePage = invocationPage(page, input.override);
   const d20 = d20Of(page.test, page.spell)!;
-  const label = cutLabel(page.fill ? `${rollName(page)}, ${testLabel(d20)}` : testLabel(d20));
+  const label = cutLabel(page.fill ? `${rollName(envelopePage)}, ${testLabel(d20)}` : testLabel(d20));
   let next: Page = { ...page, rolls: [...page.rolls, { tag: input.tag, holders: again.map((s) => s.holder), state: "sending" }] };
   for (const s of again) next = withState(next, s.holder, { status: undefined, says: undefined, batch: { tag: input.tag, part: 0 } });
-  const rolls = again.map((s): PanelRoll => asSave({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: [...s.sources] }, d20));
-  return { page: next, send: [{ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(page) }] };
+  const rolls = again.map((s): PanelRoll => asSave({ formula: withExtra(d20Formula(s.bonus), s.extra), label, creature: s.target, sources: overrideRollSources(s.sources, [], input.override) }, d20));
+  return { page: next, send: [{ kind: "dice", tag: input.tag, rolls, ...diceEnvelope(envelopePage) }] };
 }
 
 /**

@@ -4,7 +4,7 @@ import { FORMULA_ERRORS } from "#shared/dice/formula.ts";
 import type { InitEntry } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import { groupKeyFor, orderRevealOf, rowGroup } from "#shared/rules/initiative.ts";
-import { Button } from "../../components/Button.tsx";
+import { Button, type ButtonProps } from "../../components/Button.tsx";
 import { Checkbox } from "../../components/Checkbox.tsx";
 import { Help } from "../../components/Panel.tsx";
 import { Segmented } from "../../components/Segmented.tsx";
@@ -14,6 +14,8 @@ import { useRoomStore, useRoomView } from "../../state/view.ts";
 import { presetFor } from "../dice/presets.ts";
 import { NEEDS_CONNECTION } from "../dice/send.ts";
 import { useDicePanel } from "../dice/useDicePanel.ts";
+import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
+import { effectiveRollMode, type RollModeOverride } from "../dice/rollMode.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useReceipt } from "../dice/useReceipt.ts";
 import { describeRoll, initiativeRolls, MAY_HAVE_HAPPENED, noBonusSet, planPress, rollRows, rowsToRoll, totalsHelp, type RollMode, type RollRow } from "./autoRoll.ts";
@@ -50,12 +52,12 @@ function useRollRows(entries: readonly InitEntry[]) {
  * autoState.ts sets the totals. With nothing to roll, every monster joined
  * its group's value, and the totals go at once.
  */
-function usePress(): (rows: readonly RollRow[], mode: RollMode, kept?: readonly RollRow[]) => void {
+function usePress(): (rows: readonly RollRow[], mode: RollMode, kept?: readonly RollRow[], override?: RollModeOverride) => void {
   const { store } = useAuto();
   const panel = useDicePanel();
   const room = useRoomStore();
-  return (rows, mode, kept = []) => {
-    const plan = planPress(rows, mode, kept);
+  return (rows, mode, kept = [], override) => {
+    const plan = planPress(rows, mode, kept, override);
     const base = { mode, ...plan, tag: null, rolled: null, error: null, changed: [], done: false, sent: [] };
     if (plan.groups.length === 0) {
       store.setState({ last: base });
@@ -75,7 +77,7 @@ function usePress(): (rows: readonly RollRow[], mode: RollMode, kept?: readonly 
  * by the tracker's mode as Auto initiative rolls them, their values
  * replaced.
  */
-export function useAutoInitiativeFor(tokenIds: readonly string[]): { count: number; busy: boolean; press(): void } {
+export function useAutoInitiativeFor(tokenIds: readonly string[]): { count: number; busy: boolean; source: string; valid(): boolean; press(override?: RollModeOverride): void } {
   const { mode } = useAuto();
   const sorted = useSortedEntries();
   const key = tokenIds.join(",");
@@ -83,7 +85,17 @@ export function useAutoInitiativeFor(tokenIds: readonly string[]): { count: numb
   const { rows } = useRollRows(entries);
   const busy = useRollBusy();
   const press = usePress();
-  return { count: rows.length, busy, press: () => !busy && rows.length > 0 && press(rows, mode, []) };
+  const room = useRoomStore();
+  return { source: JSON.stringify([tokenIds, rows, mode]), valid: () => !busy && room.getState().connection === "open" && JSON.stringify(room.getState().local.selectedIds) === JSON.stringify(tokenIds), count: rows.length, busy, press: (override) => !busy && rows.length > 0 && press(rows, mode, [], override) };
+}
+
+function InitiativeButton(props: Omit<ButtonProps, "onClick"> & { source: string; d20?: boolean; valid(): boolean; onRoll(override?: RollModeOverride): void }) {
+  const { source, d20 = true, valid, onRoll, ...button } = props;
+  const room = useRoomStore();
+  const viewing = useRoomView((s) => s.sceneId);
+  const liveView = useRoomView((s) => s.view);
+  const binding = useRollModeMenu({ source: `${viewing}|${source}`, name: "Initiative", capability: { d20, visibility: "creature" }, dm: true, disabled: props.disabled || props.busy, valid: () => room.getState().connection === "open" && room.getState().sceneId === viewing && room.getState().view === liveView && valid(), onTap: () => onRoll(), onRoll });
+  return <><Button {...button} {...binding.buttonProps} aria-describedby={binding.describe(button["aria-describedby"])} style={{ ...button.style, ...binding.pressStyle }} />{binding.menu}</>;
 }
 
 const MODES: { mode: RollMode; label: string; hint: string }[] = [
@@ -124,19 +136,22 @@ export function AutoInitiativeControls() {
       />
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
         {/* Secondary: the tracker's one primary is Next (docs/design-v1-visual.md 3.3). */}
-        <Button
+        <InitiativeButton
+          source={JSON.stringify([rows, mode, reroll])}
+          d20={planPress(toRoll, mode, reroll ? [] : rows.filter((r) => r.value !== null)).groups.length > 0}
+          valid={() => !waiting && online && toRoll.length > 0}
           size="sm"
           busy={waiting}
           disabled={!waiting && (toRoll.length === 0 || !online)}
-          onClick={() => {
+          onRoll={(override) => {
             if (waiting || !online) return;
             // Without re-roll, monsters with a value keep it, and a waiting one may join its group's.
-            press(toRoll, mode, reroll ? [] : rows.filter((r) => r.value !== null));
+            press(toRoll, mode, reroll ? [] : rows.filter((r) => r.value !== null), override);
             restart();
           }}
         >
           {waiting ? "Rolling…" : `Auto Initiative (${toRoll.length})`}
-        </Button>
+        </InitiativeButton>
       </div>
       {!online && !waiting && toRoll.length > 0 ? <Help>{NEEDS_CONNECTION}</Help> : null}
       {toRoll.length === 0 && !waiting ? (
@@ -221,6 +236,7 @@ export function AutoInitiativeResult() {
                 <span style={{ ...note, display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1), fontVariantNumeric: "tabular-nums" }}>
                   {group.roll.mode ? <RollBadge kind={group.roll.mode} /> : null}
                   {describeRoll(group.roll)}
+                  <span>{effectiveRollMode(group.roll, true)}</span>
                 </span>
               ) : (
                 <span style={note}>{rows.length === 1 ? "Takes its group's Initiative" : "Take their group's Initiative"}, as identical monsters do.</span>
@@ -289,9 +305,9 @@ export function RowRollTools(props: { entry: InitEntry }) {
           Initiative modifier {row.modifier < 0 ? `−${-row.modifier}` : `+${row.modifier}`}
           {noBonusSet(entryActor(facts.view, entry)) ? " (no Initiative bonus set)" : ""}
         </span>
-        <Button size="sm" busy={busy} disabled={!busy && !online} onClick={() => !busy && online && press([row], "each")}>
+        <InitiativeButton source={JSON.stringify([entry, row])} valid={() => !busy && online && entries.some((e) => e.id === entry.id)} size="sm" busy={busy} disabled={!busy && !online} onRoll={(override) => !busy && online && press([row], "each", [], override)}>
           {busy ? "Rolling…" : "Roll Initiative"}
-        </Button>
+        </InitiativeButton>
       </div>
       {!online && !busy ? <Help>{NEEDS_CONNECTION}</Help> : null}
       {grouped.length > 1 ? (

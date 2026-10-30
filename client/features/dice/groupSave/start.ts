@@ -6,6 +6,8 @@ import { useRoomScope } from "../../../state/scope.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../../../state/view.ts";
 import { askSwitches } from "../../rolls/logic.ts";
 import { newPage, readDraft, replace, restoredPage, type Fill, type OutcomeForm, type Page, type PageCast, type Source } from "./chain.ts";
+import { rollModeSources, rollModeTo, type RollModeOverride } from "../rollMode.ts";
+import type { Taken } from "../useDicePanel.ts";
 import type { GroupTest } from "./rows.ts";
 import { useGroupSaveStore } from "./store.ts";
 
@@ -56,12 +58,17 @@ export type StartInput = {
   outcome?: Partial<OutcomeForm>;
   spell?: boolean;
   panel: "dice" | "areas";
-  /** A quick tap (4.4): roll at once with the choices the tap took. */
+  /** A quick roll (4.4): roll at once with the choices captured by this gesture. */
   rollNow?: { sources: AdvantageSource[]; secret: boolean };
   /** A player's ask the page answers, and the caster's roll it brought (dice/cast/castStart.ts). */
   cast?: PageCast;
   damage?: Page["damage"];
 };
+
+/** Freeze a quick roll before replacement confirmation, using only the existing page shape. */
+export function quickRollNow(taken: Pick<Taken, "sources" | "secret">, baseline: boolean, override?: RollModeOverride): NonNullable<StartInput["rollNow"]> {
+  return { sources: rollModeSources([], taken.sources, override), secret: rollModeTo(taken.secret ? "dm" : "all", baseline ? "dm" : "all", override) === "dm" };
+}
 
 /**
  * Starts a group save (5.1): one at a time in a browser tab, so a start

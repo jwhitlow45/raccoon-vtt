@@ -1091,3 +1091,29 @@ describe("the results card's word on what players see (LP8-COMBAT-2)", () => {
     }
   });
 });
+
+test("one-roll initiative overrides apply before grouping and leave kept values outside the invocation", () => {
+  const rows = [row("a", { groupKey: "g" }), row("b", { groupKey: "g", sources: [INVISIBLE] })];
+  const plan = planPress(rows, "creature", [], "adv");
+  assert.equal(plan.groups.length, 1, "the two resulting Advantage rolls can share");
+  assert.deepEqual(advantageFields(plan.groups[0]!.sources), { mode: "adv" });
+  assert.deepEqual(rows[0]!.sources, [], "the reminders stay unchanged");
+  const kept = row("old", { groupKey: "g", value: 16 });
+  const joined = planPress([rows[0]!], "creature", [kept], "dis");
+  assert.equal(joined.joined.length, 1, "existing join rules run on the original presets");
+  assert.equal(joined.groups.length, 0);
+  const cancelled = planPress([row("c", { sources: [POISONED], extra: ["-2"] })], "each", [], "adv");
+  assert.deepEqual(advantageFields(cancelled.groups[0]!.sources), { cancelled: true });
+  assert.equal(initiativeRolls(cancelled.groups)[0]!.formula, "1d20+2-2");
+});
+
+for (const override of ["adv", "dis", "normal"] as const) test(`initiative ${override} retains independent presets and extras before grouping`, () => {
+  const rows = [row("a", { groupKey: "g", sources: [INVISIBLE] }), row("b", { groupKey: "g", sources: [POISONED] }), row("c", { groupKey: "g", sources: [POISONED], extra: ["-2"] })];
+  const before = structuredClone(rows);
+  const plan = planPress(rows, "creature", [], override);
+  assert.equal(plan.groups.length, 3);
+  assert.deepEqual(advantageFields(plan.groups[0]!.sources), override === "dis" ? { cancelled: true } : { mode: "adv" });
+  assert.deepEqual(advantageFields(plan.groups[1]!.sources), override === "adv" ? { cancelled: true } : { mode: "dis" });
+  assert.equal(initiativeRolls(plan.groups)[2]!.formula, "1d20+2-2");
+  assert.deepEqual(rows, before);
+});

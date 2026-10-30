@@ -5,6 +5,7 @@ import { createStore } from "zustand/vanilla";
 import type { PcStats, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { P1, castAsk, castTable, character } from "#shared/testutil.ts";
+import { creatureRolls } from "../creature.ts";
 import { diceFoldsSlot } from "../diceFolds.ts";
 import { optionSlot } from "../optionState.ts";
 import { castReceiptsSlot, castSendsSlot, type CastSend } from "./cast.ts";
@@ -20,7 +21,8 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { RoomProvider } = await import("../../../state/view.ts");
 const { RoomScope, RoomScopeProvider } = await import("../../../state/scope.ts");
 const { PlayerOptions } = await import("../RollOptions.tsx");
-const { WaitingAsks } = await import("./CastBlock.tsx");
+const panelModule = await import("../useDicePanel.ts");
+const { WaitingAsks, useCastEnv, RowCast } = await import("./CastBlock.tsx");
 
 const THORN: PcStats = {
   abilities: { str: 8, dex: 14, con: 12, int: 18, wis: 10, cha: 10 },
@@ -45,6 +47,7 @@ type Input = {
   picked: string | null;
   cast: { spell: string; roll?: string; area?: string; sent: string; opened?: number } | null;
   offScene?: boolean;
+  selected?: string[];
   only?: "list";
   shaped?: true;
   /** Thorn's Spells folded after the block's opening and send opened it once. */
@@ -109,7 +112,7 @@ function setup(input: Input) {
 
 function draw(ready: ReturnType<typeof setup>): string {
   const { input, view, scope } = ready;
-  const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: P1, sceneId: "s1", local: { selectedIds: [], multi: false }, ephemeral: { drags: {} } }));
+  const store = createStore(() => ({ view, roomId: "r1", connection: "open", you: P1, sceneId: "s1", local: { selectedIds: input.selected ?? [], multi: false }, ephemeral: { drags: {} } }));
   const body = input.only === "list" ? createElement(WaitingAsks, { view, pickedKey: input.picked, blockDraws: false }) : createElement(PlayerOptions, { view, selected: [] });
   return renderToStaticMarkup(
     createElement(RoomProvider, {
@@ -237,4 +240,93 @@ describe("Ask for saves in its row (docs/design-v1-dice-pass.md 7.3)", () => {
     assert.ok(button, "the row's Ask for saves");
     assert.match(button, new RegExp(`border:${theme.line.border}px solid ${theme.color.controlBorder}`));
   });
+});
+
+test("cast damage menu keeps panel state, disables d20 damage modes and uses ordinary default visibility", () => {
+  for (const override of ["secret", "normal"] as const) {
+    const ready = setup({ picked: "c:thorn-c", cast: null });
+    const choices = ready.scope.get(panelModule.diceChoicesSlot);
+    const initial = { adv: true, dis: false, secret: true, version: 21, last: null };
+    choices.setState(initial);
+    choices.getInitialState = choices.getState;
+    const sent: import("#shared/protocol.ts").ClientOp[] = [];
+    const store = createStore(() => ({ view: ready.view, roomId: "r1", connection: "open", you: P1, sceneId: "s1", local: { selectedIds: [], multi: false } }));
+    let env: ReturnType<typeof useCastEnv> | undefined;
+    function Probe() { env = useCastEnv(); return null; }
+    renderToStaticMarkup(createElement(RoomProvider, {
+      store: store as never, actions: { dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op) } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
+      children: createElement(RoomScopeProvider, { scope: ready.scope, children: createElement(Probe) }),
+    }));
+    assert.ok(env);
+    assert.ok(env.rollDamage([{ formula: "1d20", modeEligible: false }], override));
+    const op = sent[0];
+    assert.ok(op?.t === "dice.roll");
+    assert.equal(op.to, override === "secret" ? "dm" : "all");
+    assert.equal(op.rolls[0]!.mode, undefined);
+    assert.deepEqual({ ...choices.getState(), last: null }, initial);
+  }
+  const fire = render({ picked: "c:thorn-c", selected: ["g1"], cast: { spell: "Fireball", roll: "fb", sent: "fresh", opened: 1 } });
+  assert.match(fire, /Hold, right-click or Shift\+F10 for Secret or Normal/);
+  const hold = render({ picked: "c:thorn-c", selected: ["g1"], cast: { spell: "Hold Person", roll: "hp", sent: "fresh", opened: 1 } });
+  const ask = /<button[^>]*>Ask the DM<\/button>/.exec(hold)?.[0];
+  assert.ok(ask);
+  assert.doesNotMatch(ask, /aria-haspopup/);
+});
+
+test("cast menu picks reach the damage invocation once before the unchanged ask", () => {
+  for (const override of ["secret", "normal"] as const) {
+    const ready = setup({ picked: "c:thorn-c", cast: { spell: "Fireball", roll: "fb", sent: "fresh", opened: 1 }, selected: ["g1"] });
+    const choices = ready.scope.get(panelModule.diceChoicesSlot);
+    const initial = { adv: true, dis: false, secret: true, version: 23, last: null };
+    choices.setState(initial);
+    choices.getInitialState = choices.getState;
+    const sent: import("#shared/protocol.ts").ClientOp[] = [];
+    const store = createStore(() => ({ view: ready.view, roomId: "r1", connection: "open", you: P1, sceneId: "s1", local: { selectedIds: ["g1"], multi: false }, ephemeral: { drags: {} } }));
+    let source: import("../useRollModeMenu.tsx").RollModeButtonProps | undefined;
+    let pick: ((override: "secret" | "normal") => void) | undefined;
+    function collect(value: unknown): void {
+      if (Array.isArray(value)) { value.forEach(collect); return; }
+      if (!value || typeof value !== "object" || !("props" in value) || !("type" in value)) return;
+      const element = value as { type: { name?: string } | string; props: { children?: unknown; onPick?: typeof pick } };
+      if (typeof element.type === "function" && element.type.name === "CastBlockView") collect((element.type as (p: never) => unknown)(element.props as never));
+      else if (typeof element.type !== "string" && element.type.name === "Button" && typeof element.props.children === "string" && element.props.children.startsWith("Roll ")) source = element.props as never;
+      else if (typeof element.type !== "string" && element.type.name === "RollModeMenu") pick = element.props.onPick;
+      else collect(element.props.children);
+    }
+    function Probe() {
+      const dice = { view: ready.view, you: P1, srd: { monsters: null, rolls: null } };
+      const named = creatureRolls(dice, { characterId: "thorn-c" })!.named.find((roll) => roll.key === "fb")!;
+      collect(RowCast({ dice, creatureKey: "c:thorn-c", creature: { characterId: "thorn-c" }, name: "Thorn", blocked: null, named, rowSlot: 3, blockHere: true }));
+      return null;
+    }
+    renderToStaticMarkup(createElement(RoomProvider, {
+      store: store as never, actions: { dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op) } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
+      children: createElement(RoomScopeProvider, { scope: ready.scope, children: createElement(Probe) }),
+    }));
+    assert.ok(source && pick);
+    const previous = { window: globalThis.window, document: globalThis.document, Node: globalThis.Node };
+    class FakeNode {}
+    Object.assign(globalThis, { window: new EventTarget(), document: { activeElement: null, body: null }, Node: FakeNode });
+    try {
+      source.ref({ style: { boxShadow: "" }, closest: () => null, parentElement: null, isConnected: true, getClientRects: () => [1], focus() {}, dispatchEvent: () => true } as unknown as HTMLButtonElement);
+      const open = () => source!.onKeyDown?.({ key: "F10", shiftKey: true, preventDefault() {} } as never);
+      for (const stale of ["selection", "scene", "view"] as const) {
+        const before = store.getState();
+        open();
+        store.setState(stale === "selection" ? { local: { ...before.local, selectedIds: ["bree"] } } : stale === "scene" ? { sceneId: "s2" } : { view: structuredClone(before.view) });
+        pick(override);
+        assert.equal(sent.length, 0, `a stale ${stale} cannot send`);
+        store.setState(before);
+      }
+      open();
+      pick(override);
+      pick(override);
+      assert.equal(sent.length, 2, "one damage roll precedes one ask");
+      const damage = sent[0];
+      assert.ok(damage?.t === "dice.roll");
+      assert.equal(damage.to, override === "secret" ? "dm" : "all");
+      assert.equal(sent[1]?.t, "cast.ask");
+      assert.deepEqual({ ...choices.getState(), last: null }, initial);
+    } finally { Object.assign(globalThis, previous); }
+  }
 });

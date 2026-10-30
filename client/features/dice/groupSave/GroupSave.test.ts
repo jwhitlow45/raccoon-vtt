@@ -10,6 +10,7 @@ import { clientOpSchema } from "#shared/protocol.ts";
 import { newPage, setAmount, type Page } from "./chain.ts";
 import { amountsOf, buildPlan, rowOutcome } from "./plan.ts";
 import { groupRows } from "./rows.ts";
+import { receiptsSlot } from "../useReceipt.ts";
 import { groupSaveSlot } from "./store.ts";
 
 /*
@@ -18,6 +19,7 @@ import { groupSaveSlot } from "./store.ts";
  * status rather than a sentence among the rolls.
  */
 
+const panelModule = await import("../useDicePanel.ts");
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const groupSave = await import("./GroupSave.tsx");
@@ -30,9 +32,15 @@ function damagePage(damage: string): Page {
   const test = { kind: "none" } as const;
   return { ...newPage({ id: "damage", sceneId: "s1", source: { kind: "selection", tokenIds: ["g1"] }, test, dc: null, secret: false, spell: false, switches: { dcShown: true, resultShown: true }, outcome: { damage, conditions: ["prone"] } }), rows: groupRows(DICE, ["g1"], test, false) };
 }
-function drawPage(page: Page): string {
+function drawPage(page: Page, lines: import("#shared/model.ts").LogEntry[] = []): string {
   const scope = new RoomScope();
   const saves = scope.get(groupSaveSlot);
+  if (page.damage && lines.length > 0) {
+    const tracker = scope.get(receiptsSlot);
+    tracker.env = { lookup: async () => ({ parts: [] }), log: () => lines };
+    tracker.sending(page.damage.tag, 0);
+    tracker.answer(page.damage.tag, 0, "taken");
+  }
   saves.setState({ page });
   saves.getInitialState = saves.getState;
   const store = createStore(() => ({ view: VIEW, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
@@ -132,4 +140,119 @@ test("FL-4 review: an override with no computed damage can be cleared without pr
   const markup = renderToStaticMarkup(createElement(groupSave.RowDamageField, { name: "Guard", value: "5 fire", computed: null, onChange() {} }));
   assert.match(markup, /Clear override/);
   assert.match(markup, /placeholder="10 fire"/);
+});
+
+test("one-roll group damage uses safe public labels and preserves the fixed caster exception", () => {
+  const page = { ...damagePage("1d20 fire + 7 cold + 1d6 radiant"), fill: { name: "Hidden trap", publicName: "Trap", from: "Trap" } };
+  for (const override of ["normal", "secret"] as const) {
+    const invocation = groupSave.groupDamageInvocation(page, VIEW, override);
+    assert.equal(invocation.to, override === "secret" ? "dm" : "all");
+    assert.equal(invocation.rolls.length, 2, "typed damage stays typed");
+    assert.ok(invocation.rolls.every((r) => r.modeEligible === false));
+    assert.match(invocation.rolls[0]!.label!, override === "secret" ? /^Hidden trap damage/ : /^Trap damage/);
+    assert.equal(page.secret, false);
+  }
+  const own = { ...page, secret: true, fill: { ...page.fill, caster: "g1" } };
+  const view = structuredClone(VIEW);
+  view.tokens.g1!.ownerIds = ["p1"];
+  const invocation = groupSave.groupDamageInvocation(own, view, "secret");
+  assert.equal(invocation.to, "all");
+  assert.match(invocation.rolls[0]!.label!, /^Trap damage/);
+  const html = drawPage(page);
+  assert.match(html, /Hold, right-click or Shift\+F10 for Secret or Normal/);
+  assert.doesNotMatch(html, /type="submit"/);
+});
+
+function captureRolls(page: Page) {
+  const scope = new RoomScope();
+  const saves = scope.get(groupSaveSlot);
+  saves.setState({ page });
+  saves.getInitialState = saves.getState;
+  const choices = scope.get(panelModule.diceChoicesSlot);
+  const initial = { adv: true, dis: false, secret: true, secretFor: "g1", version: 19, last: null };
+  choices.setState(initial);
+  choices.getInitialState = choices.getState;
+  const store = createStore(() => ({ view: VIEW, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: ["g1"], multi: false } }));
+  const sent: import("#shared/protocol.ts").ClientOp[] = [];
+  const buttons: { name: string; onRoll(override?: import("../rollMode.ts").RollModeOverride): void }[] = [];
+  function collect(value: unknown): void {
+    if (Array.isArray(value)) { value.forEach(collect); return; }
+    if (!value || typeof value !== "object" || !("props" in value) || !("type" in value)) return;
+    const element = value as { type: { name?: string } | string; props: { children?: unknown } };
+    if (typeof element.type === "function" && ["GroupSavePage", "GroupRow", "OutcomePanel"].includes(element.type.name)) collect((element.type as (p: never) => unknown)(element.props as never));
+    else if (typeof element.type !== "string" && element.type.name === "GroupRollButton") buttons.push(element.props as never);
+    else collect(element.props.children);
+  }
+  function Probe() { collect(groupSave.GroupSave({ parent: "Dice", onBack() {} })); return null; }
+  renderToStaticMarkup(createElement(RoomProvider, {
+    store: store as never, actions: { newId: () => "ask", dispatch: (op: import("#shared/protocol.ts").ClientOp) => sent.push(op) } as never, ui: { notify() {} } as never, assets: { url: () => "" } as never,
+    children: createElement(RoomScopeProvider, { scope, children: createElement(Probe) }),
+  }));
+  return { buttons, sent, saves, choices, initial };
+}
+
+for (const override of ["adv", "dis", "secret", "normal"] as const) test(`group page ${override} callbacks preserve the existing switch and choices`, () => {
+  const base: Page = { ...PAGE, secret: false, source: { kind: "selection", tokenIds: ["g1"] }, states: { "token:g1": { way: "server", typedBonus: 4 } } };
+  const ready = captureRolls(base);
+  assert.ok(ready.buttons.some((button) => button.name.startsWith("Roll ")), JSON.stringify(ready.buttons));
+  ready.buttons.find((button) => button.name.startsWith("Roll "))!.onRoll(override);
+  const sent = ready.sent.find((op) => op.t === "dice.roll");
+  assert.ok(sent?.t === "dice.roll");
+  assert.equal(sent.to, override === "secret" ? "dm" : "all");
+  assert.equal(sent.rolls[0]!.mode, override === "secret" ? "adv" : override === "normal" ? undefined : override);
+  assert.equal(ready.saves.getState().page!.secret, false);
+  assert.deepEqual({ ...ready.choices.getState(), last: null }, ready.initial);
+  const rolled = ready.saves.getState().page!;
+  const retry = captureRolls({ ...rolled, states: { "token:g1": { way: "server", typedBonus: 4, status: "unknown" } } });
+  retry.buttons.find((button) => button.name === "Guard's roll")!.onRoll(override);
+  const resent = retry.sent.find((op) => op.t === "dice.roll");
+  assert.ok(resent?.t === "dice.roll");
+  assert.equal(resent.to, override === "secret" ? "dm" : "all");
+  assert.equal(resent.rolls[0]!.mode, override === "adv" || override === "dis" ? override : undefined);
+  assert.deepEqual({ ...retry.choices.getState(), last: null }, retry.initial);
+  const waiting = captureRolls({ ...rolled, rows: rolled.rows.map((r) => ({ ...r, askRef: { tokenId: "g1" }, bonus: 4 })), states: { "token:g1": { way: "ask", asked: { rollId: "request" } } } });
+  const button = waiting.buttons.find((b) => b.name === "Guard's requested roll")!;
+  button.onRoll(override);
+  button.onRoll(override);
+  assert.equal(waiting.sent.length, 1, "an outstanding request answer cannot be sent twice");
+  const answer = waiting.sent[0];
+  assert.ok(answer?.t === "roll.dice");
+  assert.equal(answer.unanswered, true);
+  assert.equal(answer.mode, override === "adv" || override === "dis" ? override : undefined);
+  assert.equal("to" in answer, false, "request visibility stays fixed");
+  assert.deepEqual({ ...waiting.choices.getState(), last: null }, waiting.initial);
+});
+
+for (const override of ["normal", "secret"] as const) test(`group damage ${override} callback keeps every part and its page envelope`, () => {
+  const base = { ...damagePage("1d20 fire + 8 cold + 1d6 radiant"), fill: { name: "Hidden trap", publicName: "Trap", from: "Trap" } };
+  const ready = captureRolls(base);
+  ready.buttons.find((b) => b.name === "Group damage")!.onRoll(override);
+  ready.buttons.find((b) => b.name === "Group damage")!.onRoll(override);
+  assert.equal(ready.sent.length, 1, "busy damage cannot send twice");
+  const op = ready.sent[0];
+  assert.ok(op?.t === "dice.roll");
+  assert.equal(op.to, override === "secret" ? "dm" : "all");
+  assert.equal(op.rolls.length, 2);
+  assert.ok(op.rolls.every((r) => r.mode === undefined));
+  assert.deepEqual(op.rolls.map((r) => r.type), ["fire", "radiant"]);
+  assert.match(op.rolls[0]!.label!, override === "secret" ? /^Hidden trap damage/ : /^Trap damage/);
+  assert.equal(ready.saves.getState().page!.secret, false);
+  assert.deepEqual({ ...ready.choices.getState(), last: null }, ready.initial);
+});
+
+test("group row details name the returned effective mode", () => {
+  const base = damagePage("");
+  for (const [fields, words] of [[{ mode: "dis" as const }, "Disadvantage"], [{ cancelled: true as const }, "Normal: Advantage and Disadvantage cancelled"], [{}, "Normal"]] as const) {
+    const page: Page = { ...base, phase: "rolled", states: { "token:g1": { way: "server", rolled: { formula: "1d20+4", faces: [12], total: 16, ...fields } } } };
+    assert.ok(drawPage(page).replace(/<[^>]*>/g, "").includes(words));
+  }
+});
+
+test("group damage result names Secret only from its returned envelope", () => {
+  const page = { ...damagePage("1d6 fire"), damage: { tag: "damage", state: "committed" as const, amounts: [4] } };
+  const line: import("#shared/model.ts").LogEntry = { id: "1:0", kind: "event", at: "now", data: { type: "dice", tag: "damage", to: "dm", by: DM.memberId, rolls: [{ formula: "1d6", total: 4, faces: [4] }] } };
+  assert.match(drawPage(page, [line]), /Rolled, Secret/);
+  assert.ok(line.data?.type === "dice");
+  line.data.to = "all";
+  assert.doesNotMatch(drawPage(page, [line]), /Rolled, Secret/);
 });

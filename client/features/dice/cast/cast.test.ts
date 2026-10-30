@@ -438,3 +438,33 @@ describe("a send the list above the card changes while its block is folded or an
     assert.equal(options.getState().cast, BLOCK);
   });
 });
+
+for (const override of ["normal", "secret"] as const) test(`cast ${override} covers every damage part and never survives into ask-again`, () => {
+  const p = page();
+  const picks: unknown[] = [];
+  const original = p.env.rollDamage;
+  p.env.rollDamage = (rolls, chosen) => {
+    picks.push(chosen);
+    assert.ok(rolls.every((r) => r.modeEligible === false), "even d20 damage cannot gain d20 modes");
+    return original(rolls, chosen);
+  };
+  const id = askFor(p.env, input({ rolls: [fire, radiant, { formula: "1d20", type: "fire" }], override }));
+  assert.ok(id);
+  assert.deepEqual(picks, [override]);
+  assert.equal("override" in p.env.store.getState().sends[id]!, false);
+  const answer = p.sent.find((s) => s.op.t === "cast.ask")!;
+  assert.ok(answer.op.t === "cast.ask");
+  assert.equal("mode" in answer.op.cast, false);
+  answer.onAnswer("refused", { code: "invalid", message: "Try again", text: "Try again" });
+  assert.ok(askAgain(p.env, id));
+  assert.deepEqual(picks, [override], "retry keeps the first damage reference without rolling again");
+});
+
+test("cast result secrecy comes from the returned dice envelope", () => {
+  const line = diceLine("1:0", "roll", [damageRoll({ total: 12 })]);
+  assert.ok(line.data?.type === "dice");
+  line.data.to = "dm";
+  assert.match(rolledText([line])!, /, Secret$/);
+  line.data.to = "all";
+  assert.doesNotMatch(rolledText([line])!, /Secret/);
+});
