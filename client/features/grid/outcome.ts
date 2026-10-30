@@ -61,14 +61,15 @@ export function applyGrid(input: {
  * The ops Use default sends, as one undo step: the grid the import started
  * with, and the size the scene had then. The size is put back as it was,
  * not fitted to that grid: a battle mat that took its first image, or a
- * scene that took new art, had a size of its own. Shape, calibration and
- * size travel in one op, so a refused switch cannot leave half a reset.
+ * scene that took new art, had a size of its own. A saved shape travels
+ * with calibration and size, so a refused switch cannot leave half a
+ * reset. Without one, the server keeps its current shape.
  */
 export function fallbackOps(scene: GridScene, fallback: Fallback): ClientOp[] {
-  const shape = fallback.shape ?? mapShape(sceneGrid(scene));
+  const shape = fallback.shape;
   const { bounds } = fallback;
-  if (shape === mapShape(sceneGrid(scene)) && sameCalibration(fallback, scene.map) && bounds.w === scene.bounds.w && bounds.h === scene.bounds.h) return [];
-  return [{ t: "scene.setGrid", sceneId: scene.id, cellPx: fallback.cellPx, originPx: fallback.originPx, gridShape: shape, bounds }];
+  if ((shape === undefined || shape === mapShape(sceneGrid(scene))) && sameCalibration(fallback, scene.map) && bounds.w === scene.bounds.w && bounds.h === scene.bounds.h) return [];
+  return [{ t: "scene.setGrid", sceneId: scene.id, cellPx: fallback.cellPx, originPx: fallback.originPx, ...(shape !== undefined ? { gridShape: shape } : {}), bounds }];
 }
 
 /**
@@ -191,8 +192,11 @@ function otherShape(input: Parameters<typeof showOutcome>[0] & { found: FoundGri
   const box = boxAround(found.cal, input.at, to);
   const high = found.tier === "high";
   if ((high || found.shapeSure === true) && !found.contested && refusal === null) {
-    const switched: ClientOp = { t: "scene.update", sceneId: scene.id, patch: { gridShape: mapShape(to) } };
-    dispatchGesture(input.actions, high ? [switched, ...gridOps({ ...scene, gridShape: shapeOfGrid(to) }, found.cal, input.fit)] : [switched], { groupScope: "setup" });
+    // The server may refuse the shape after this device's check, so its calibration and fitted size must travel with it.
+    const switched: ClientOp = high
+      ? { t: "scene.setGrid", sceneId: scene.id, ...found.cal, gridShape: mapShape(to), ...(input.fit ? { bounds: fitBounds({ ...scene.map, ...found.cal }) } : {}) }
+      : { t: "scene.update", sceneId: scene.id, patch: { gridShape: mapShape(to) } };
+    dispatchGesture(input.actions, [switched], { groupScope: "setup" });
     const note: FoundNote = {
       sceneId: scene.id,
       outcome: high ? "applied" : "offered",

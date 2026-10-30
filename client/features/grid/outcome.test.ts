@@ -66,7 +66,7 @@ describe("what a search does to the scene", () => {
     assert.deepEqual(fallback, { cellPx: 47, originPx: { x: 0, y: 0 }, bounds: { w: 60, h: 40 } });
     const ops = fallbackOps(live.scene(), fallback!);
     assert.deepEqual(ops, [
-      { t: "scene.setGrid", sceneId: "s1", cellPx: 47, originPx: { x: 0, y: 0 }, gridShape: "squares", bounds: { w: 60, h: 40 } },
+      { t: "scene.setGrid", sceneId: "s1", cellPx: 47, originPx: { x: 0, y: 0 }, bounds: { w: 60, h: 40 } },
     ]);
     assert.deepEqual(fallbackOps(mat, fallback!), [], "nothing to send when the scene is so already");
   });
@@ -1135,6 +1135,72 @@ describe("a hex find held only by the stretch margin (D-261029-210)", () => {
 describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)", () => {
   const HEX_ROWS = gridOfShape("hexRows");
 
+  test("Use default without a saved shape preserves an unseen shape change (FU40AC-OPUS-3)", () => {
+    for (const [from, to] of [[undefined, "hexRows"], ["hexRows", "hexColumns"], ["hexColumns", undefined]] as const) {
+      for (const held of [false, true]) {
+        const client = room();
+        const scene = { ...roomState().scenes.s1!, gridShape: from, map: { ...MAP, ...FOUND } };
+        let server = roomState({ scenes: { s1: scene } });
+        server = apply(server, { t: "scene.update", sceneId: "s1", patch: { gridShape: to ?? "squares" } });
+        if (held) server = apply(server, { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true });
+        const sent: ClientOp[] = [];
+        const actions = {
+          newId: () => "restore",
+          dispatch(op: ClientOp) {
+            sent.push(op);
+            server = apply(server, op);
+            return sent.length;
+          },
+        };
+        assert.equal(putBack({ actions, store: client.store, scene, fallback: { ...MAP, bounds: SCENE.bounds } }), true);
+        assert.equal(server.scenes.s1!.gridShape, to, "a calibration reset has no saved shape to restore");
+        assert.equal(server.scenes.s1!.map!.cellPx, MAP.cellPx);
+        assert.deepEqual(server.scenes.s1!.map!.originPx, MAP.originPx);
+        assert.deepEqual(server.scenes.s1!.bounds, SCENE.bounds);
+        assert.equal(sent.length, 1);
+        assert.ok(!("gridShape" in sent[0]!), "the old client view cannot choose the server's shape");
+      }
+    }
+  });
+
+  test("a sure find of another shape refuses calibration and bounds when concurrent ground blocks the switch (FU40AC-OPUS-2)", () => {
+    for (const [from, to] of [[undefined, "hexRows"], ["hexRows", "hexColumns"], ["hexColumns", undefined]] as const) {
+      for (const fit of [false, true]) {
+        const client = room();
+        const scene = { ...roomState().scenes.s1!, gridShape: from, map: MAP };
+        let server = roomState({ scenes: { s1: scene } });
+        const refusals: string[] = [];
+        const sent: ClientOp[] = [];
+        const actions = {
+          newId: () => "find",
+          dispatch(op: ClientOp) {
+            sent.push(op);
+            const result = applyOp(server, op, DM, env(sent.length + 1));
+            if (result.ok) server = result.state;
+            else refusals.push(result.message);
+            return sent.length;
+          },
+        };
+        showOutcome({
+          actions,
+          store: client.store,
+          scene,
+          found: { tier: "high", cal: FOUND, shape: to },
+          fit,
+          at: { x: 700, y: 500 },
+          refusal: () => {
+            server = apply(server, { t: "build.rough", sceneId: "s1", cells: ["1,1"], on: true });
+            return null;
+          },
+        });
+        assert.equal(refusals.length, 1);
+        assert.match(refusals[0]!, /difficult ground/);
+        assert.deepEqual(server.scenes.s1, scene, "a refused shape change cannot apply its grid or fitted size");
+        assert.deepEqual(sent, [{ t: "scene.setGrid", sceneId: "s1", ...FOUND, gridShape: to ?? "squares", ...(fit ? { bounds: fitBounds({ ...MAP, ...FOUND }) } : {}) }]);
+      }
+    }
+  });
+
   test("Use default refuses the whole restoration when another device adds ground after the client's check (H3-USEDEFAULT-RACE)", () => {
     const client = room();
     const scene = { ...roomState().scenes.s1!, gridShape: "hexRows" as const, map: { ...MAP, ...HEX_CAL }, bounds: { w: 23, h: 16 } };
@@ -1174,9 +1240,7 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
     assert.deepEqual(
       live.sent.map((s) => s.op),
       [
-        { t: "scene.update", sceneId: "s1", patch: { gridShape: "hexRows" } },
-        { t: "scene.setGrid", sceneId: "s1", cellPx: HEX_CAL.cellPx, originPx: HEX_CAL.originPx },
-        { t: "scene.update", sceneId: "s1", patch: { bounds: fitBounds({ ...MAP, ...HEX_CAL }) } },
+        { t: "scene.setGrid", sceneId: "s1", cellPx: HEX_CAL.cellPx, originPx: HEX_CAL.originPx, gridShape: "hexRows", bounds: fitBounds({ ...MAP, ...HEX_CAL }) },
       ],
     );
     assert.ok(live.sent.every((s) => s.group === live.sent[0]!.group), "one undo step");
@@ -1245,7 +1309,7 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
     const squares = liveRoom();
     squares.elsewhere({ ...SCENE, gridShape: "hexColumns" });
     await findWith(squares, SURE);
-    assert.deepEqual(squares.sent[0]?.op, { t: "scene.update", sceneId: "s1", patch: { gridShape: "squares" } });
+    assert.deepEqual(squares.sent.map((s) => s.op), [{ t: "scene.setGrid", sceneId: "s1", ...FOUND, gridShape: "squares", bounds: fitBounds({ ...MAP, ...FOUND }) }]);
     assert.equal(squares.scene().gridShape, undefined);
     assert.equal(lineOf(squares), "Found squares of 70 px. The grid is squares now.");
   });
@@ -1346,7 +1410,7 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
    * - Only an answer that lands while its search runs, on a scene unchanged
    *   since it began, sends anything, and then one undo group.
    * - The shape changes only by a sure find of another shape found alone
-   *   on a scene that may switch, its first op, with the grid in its group.
+   *   on a scene that may switch, in one op with any applied calibration.
    *   A contested, doubtful or refused find sends nothing.
    * - A note the options line reads stands for cells of the scene's shape now.
    */
@@ -1417,11 +1481,11 @@ describe("squares and hexes both looked for (docs/design-v1-grid-detect.md 10.7)
         } else {
           // Nothing at all when the scene holds that grid already.
           assert.ok(sent.every((x) => x.group === sent[0]!.group), `${label}: one undo group`);
-          const switches = sent.filter((x) => x.op.t === "scene.update" && x.op.patch.gridShape !== undefined);
+          const switches = sent.filter((x) => (x.op.t === "scene.update" && x.op.patch.gridShape !== undefined) || (x.op.t === "scene.setGrid" && x.op.gridShape !== undefined));
           if (expect.to === null) assert.equal(switches.length, 0, `${label}: no switch`);
           else {
             assert.equal(switches.length, 1, `${label}: one switch`);
-            assert.equal(sent[0], switches[0], `${label}: the switch goes first`);
+            assert.equal(sent.length, 1, `${label}: the switch carries any applied calibration and fitted bounds`);
             assert.equal(live.scene().gridShape ?? "squares", expect.to, `${label}: the shape found`);
           }
         }
