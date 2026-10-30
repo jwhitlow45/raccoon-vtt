@@ -7,7 +7,7 @@ import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
 import sharp from "sharp";
 import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
-import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { alignmentLines, LIMIT_PX, measureAlignment } from "./helpers/alignment.ts";
 import { isometric, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
 
 /**
@@ -75,6 +75,46 @@ async function join(context: BrowserContext, name: string, color: string): Promi
 
 const viewButton = (page: Page) => page.getByRole("button", { name: /^View: / });
 const viewMenu = (page: Page) => page.getByRole("dialog", { name: "View" });
+
+/** The status dot and chips share a middle, but keep their own heights. */
+async function checkBlackoutBar(bar: Locator, scale: number, at: string): Promise<void> {
+  const row = bar.locator(":scope > div").first();
+  const box = await row.boundingBox();
+  assert.ok(box, `${at}: no top-bar row`);
+  assert.ok(Math.abs(box.height - 52 * scale) <= LIMIT_PX, `${at}: the top-bar row changed height`);
+  const middle = box.y + box.height / 2;
+  const middles: number[] = [];
+  const parts = row.locator(":scope > *");
+  for (const part of await parts.all()) {
+    const b = await part.boundingBox();
+    if (!b || b.width === 0 || b.height === 0) continue;
+    middles.push(b.y + b.height / 2);
+    assert.ok(Math.abs(b.y + b.height / 2 - middle) <= LIMIT_PX, `${at}: a top-bar part is off the row's middle`);
+  }
+  const blackout = bar.getByText("Players see black", { exact: true }).or(bar.getByRole("img", { name: "You are the DM. Players see black", exact: true }));
+  assert.equal(await blackout.count(), 1, `${at}: one blackout chip`);
+  const groups: [Locator, number, string][] = [
+    [bar.getByRole("status", { name: "Connected", exact: true }), 10, "connection dot"],
+    [blackout.or(bar.getByText("DM", { exact: true })), 28, "chip"],
+    [bar.getByRole("button"), 44, "button"],
+  ];
+  for (const [members, height, name] of groups) {
+    assert.ok(await members.count(), `${at}: no ${name}`);
+    const heights: number[] = [];
+    for (const member of await members.all()) {
+      const b = await member.boundingBox();
+      assert.ok(b, `${at}: no ${name} box`);
+      heights.push(b.height);
+      middles.push(b.y + b.height / 2);
+      assert.ok(Math.abs(b.height - height * scale) <= LIMIT_PX, `${at}: ${name} height ${b.height} instead of ${height * scale}`);
+      assert.ok(Math.abs(b.y + b.height / 2 - middle) <= LIMIT_PX, `${at}: ${name} is off the row's middle`);
+    }
+    assert.ok(Math.max(...heights) - Math.min(...heights) <= LIMIT_PX, `${at}: ${name} heights differ`);
+  }
+  assert.ok(Math.max(...middles) - Math.min(...middles) <= LIMIT_PX, `${at}: top-bar parts do not share one middle`);
+  // Measure each part's contents without treating the painted 10 px dot as a 28 px chip.
+  assert.deepEqual(alignmentLines(await measureAlignment(parts), at), []);
+}
 
 /** What this browser keeps for the room under `key`, parsed. */
 async function stored(page: Page, key: string): Promise<unknown> {
@@ -568,7 +608,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
               const button = bar.getByRole("button", { name, exact: true });
               await waitFor(`FU39-B: ${name} in reach at ${size.width}/${scale}`, async () => (await wholeInReach(button)) || null);
             }
-            assert.deepEqual(alignmentLines(await measureAlignment(bar), `FU39-B blackout ${size.width}/${scale}`), []);
+            await checkBlackoutBar(bar, scale, `FU39-B blackout ${size.width}/${scale}`);
             await shots.take(plain, `fu39-b-blackout-${size.width}-${Math.round(scale * 100)}`);
           }
         }
