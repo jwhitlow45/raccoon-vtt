@@ -1,6 +1,11 @@
-/**
- * How log entries read on this device. The wording lives in
- * shared/logText.ts, which the session log export renders with too
- * (docs/design-v1-dm-tools.md 3.10), so the panel and the file never differ.
- */
+/** How log entries read on this device. */
 export * from "#shared/logText.ts";
+
+import type { LogEvent } from "#shared/model.ts";
+import type { CorrectionLogEvent } from "#shared/undoContract.ts";
+import { describeEvent as describeSharedEvent, type LogNames } from "#shared/logText.ts";
+import { correctionText } from "./corrections.ts";
+
+export function describeEvent(data: LogEvent | CorrectionLogEvent, names: LogNames, dm = false): string {
+  return data.type === "correction" ? correctionText(data, dm) : describeSharedEvent(data, names, dm);
+}
