@@ -236,9 +236,9 @@ export function AttachList(props: { token: Token; capped?: boolean; onDone(): vo
     <div ref={listRef} onKeyDown={onKeyDown} style={{ display: "grid", gap: theme.space(1), ...(props.capped ? { minWidth: 240, ...cap } : null) }}>
       {near.map(renderRow)}
       {far.length > 0 ? (
-        <div role="group" aria-labelledby={fartherId} style={{ display: "grid", gap: theme.space(1), marginTop: near.length > 0 ? theme.space(2) : 0 }}>
+        <div role="group" aria-labelledby={fartherId} style={{ display: "grid", gap: theme.space(2), marginTop: near.length > 0 ? theme.space(2) : 0 }}>
           <SectionLabel id={fartherId}>Farther away</SectionLabel>
-          {far.map(renderRow)}
+          <div style={{ display: "grid", gap: theme.space(1) }}>{far.map(renderRow)}</div>
         </div>
       ) : null}
     </div>
