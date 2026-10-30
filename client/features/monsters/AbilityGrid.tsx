@@ -1,5 +1,5 @@
 import { ABILITY_ABBR, ABILITY_NAMES } from "#shared/rules/skills.ts";
-import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
+import { ProficiencyLabel, ProficiencyUnit } from "../../components/ProficiencyMark.tsx";
 import { theme } from "../../lib/theme.ts";
 import type { AbilityBox } from "./abilityTable.ts";
 
@@ -23,11 +23,13 @@ export function AbilityGrid(props: { abilities: readonly AbilityBox[] }) {
             <strong style={{ fontSize: theme.font.input }}>{a.score}</strong> <span style={{ color: theme.color.textMuted }}>{a.mod}</span>
           </dd>
           <dd style={{ margin: 0, fontSize: theme.font.small, whiteSpace: "nowrap", fontWeight: a.proficient ? theme.weight.bold : theme.weight.regular }}>
-            {/* "Save" carries the mark, which names it proficient for a screen reader too. */}
-            <span style={{ color: theme.color.textMuted, fontWeight: theme.weight.regular }}>
-              <ProficiencyLabel level={a.proficient ? "prof" : "none"}>Save</ProficiencyLabel>{" "}
-            </span>
-            {a.save}
+            {/* "Save" names it proficient for a screen reader too, and "Save +3" is framed whole (D-261030-527). */}
+            <ProficiencyUnit level={a.proficient ? "prof" : "none"}>
+              <span style={{ color: theme.color.textMuted, fontWeight: theme.weight.regular }}>
+                <ProficiencyLabel level={a.proficient ? "prof" : "none"} bare>Save</ProficiencyLabel>{" "}
+              </span>
+              {a.save}
+            </ProficiencyUnit>
           </dd>
         </div>
       ))}

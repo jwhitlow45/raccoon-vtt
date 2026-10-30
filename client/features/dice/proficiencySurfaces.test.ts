@@ -1,4 +1,5 @@
 import "../../components/testing/register.ts";
+import { withoutFrames } from "../../components/testing/proficiencyMarkup.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createStore } from "zustand/vanilla";
@@ -40,7 +41,7 @@ function render(s: RoomState, body: ReactNode, folded: readonly string[] = []): 
   const scope = new RoomScope();
   for (const key of DICE_FOLD_KEYS) scope.get(diceFoldsSlot).tap(key, !folded.includes(key), false);
   const store = createStore(() => ({ view: s, you: DM, sceneId: "s1", roomId: "r1", connection: "open", local: { selectedIds: [], multi: false } }));
-  return renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: { dispatch: () => 1 } as never, ui: {} as never, assets: { url: () => "" } as never, children: createElement(RoomScopeProvider, { scope, children: body }) }));
+  return withoutFrames(renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: { dispatch: () => 1 } as never, ui: {} as never, assets: { url: () => "" } as never, children: createElement(RoomScopeProvider, { scope, children: body }) })));
 }
 
 function options(s: RoomState, folded: readonly string[] = []): string {

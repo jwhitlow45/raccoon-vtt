@@ -1,4 +1,5 @@
 import "../../components/testing/register.ts";
+import { withoutFrames } from "../../components/testing/proficiencyMarkup.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { PcStats } from "#shared/model.ts";
@@ -17,7 +18,7 @@ const THORN: PcStats = {
 };
 
 describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", () => {
-  const markup = renderToStaticMarkup(createElement(PcStatsView, { character: { stats: THORN, level: 5 } }));
+  const markup = withoutFrames(renderToStaticMarkup(createElement(PcStatsView, { character: { stats: THORN, level: 5 } })));
   const boxes = [...markup.matchAll(/<div[^>]*><dt[^>]*>(.*?)<\/div>/g)].map((m) => m[1]!);
 
   test("six boxes in one three-column grid, and no table", () => {
@@ -29,7 +30,7 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
   });
 
   test("a proficient save is bold and named proficient, the others neither", () => {
-    // FL-7 (D-261030-436): a proficient save's word "Save" takes the underline, and its picture names it for a screen reader.
+    // FL-12 (D-261030-500): a proficient save's word "Save" takes the circle, and its picture names it for a screen reader.
     const save = (box: string) => /<dd[^>]*font-weight:(\d+)[^>]*><span[^>]*><span data-proficiency-label="" data-proficiency-level="\w+"[^>]*>Save(<span data-proficiency-marker="prof" role="img" aria-label="Proficient"[^>]*><\/span>)?<\/span> <\/span>([^<]+)<\/dd>/.exec(box);
     const dex = save(boxes[1]!);
     const str = save(boxes[0]!);

@@ -15,7 +15,7 @@ import { Chip } from "../../components/Chip.tsx";
 import { Input } from "../../components/Field.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { Group, Help, sectionLabelLook } from "../../components/Panel.tsx";
-import { ProficiencyLabel, spokenProficiency } from "../../components/ProficiencyMark.tsx";
+import { markedBy, ProficiencyLabel, ProficiencyUnit, proficiencyBox, spokenProficiency } from "../../components/ProficiencyMark.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { Switch } from "../../components/Switch.tsx";
 import { WholeParts } from "../../components/WholeParts.tsx";
@@ -471,20 +471,33 @@ function CardBody(props: Shown) {
 /** A folded line whose saves and skills carry their marks, cut only between whole parts. Nothing to say leaves no line. */
 function markedSummary(ctx: Ctx, parts: readonly SummaryPart[]): ReactNode {
   if (parts.length === 0) return "";
+  const levels = parts.map((part) => (marksTest(part.test) ? creatureProficiency(ctx.dice, ctx.creature, part.test) : "none"));
+  // A framed part takes the comma after it, which would otherwise touch its frame, from the next part's join: the words stay the same, and a cut after it still reads ", …".
+  const takes = parts.map((_, i) => levels[i] !== "none" && (parts[i + 1]?.join.startsWith(",") ?? false));
   return (
     <WholeParts
       words={parts.map((part) => part.join + part.lead + part.name + part.rest).join("")}
-      parts={parts.map((part) => ({
-        join: part.join,
+      parts={parts.map((part, i) => ({
+        join: i > 0 && takes[i - 1] ? part.join.slice(1) : part.join,
         node: (
           <>
             {part.lead}
-            {marksTest(part.test) ? <ProficiencyLabel level={creatureProficiency(ctx.dice, ctx.creature, part.test)}>{part.name}</ProficiencyLabel> : part.name}
-            {part.rest}
+            <SummaryUnit level={levels[i]!} name={part.name} rest={part.rest + (takes[i] ? "," : "")} />
           </>
         ),
       }))}
     />
+  );
+}
+
+/** A folded line's part, "Athletics +6,": a marked one is framed with its bonus and the comma after it. */
+function SummaryUnit(props: { level: Proficiency; name: string; rest: string }) {
+  if (props.level === "none") return <>{props.name}{props.rest}</>;
+  return (
+    <ProficiencyUnit level={props.level}>
+      <ProficiencyLabel level={props.level} bare>{props.name}</ProficiencyLabel>
+      {props.rest}
+    </ProficiencyUnit>
   );
 }
 
@@ -739,6 +752,7 @@ function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?
       type="button"
       aria-label={props.name}
       aria-busy={waiting ? true : undefined}
+      {...markedBy(props.level, "box")}
       disabled={props.disabled !== null}
       title={props.disabled ?? props.name}
       onClick={() => {
@@ -763,6 +777,8 @@ function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?
         borderRadius: theme.radius.md,
         border: OPTION_OUTLINE,
         background: theme.color.surfaceRaised,
+        // A save or skill's level shows on the cell's own border (D-261030-527), so its words stay where they were.
+        ...proficiencyBox(props.level, theme.color.surfaceRaised),
         color: props.disabled !== null ? theme.color.textDisabled : theme.color.text,
         fontFamily: theme.font.body,
         cursor: props.disabled !== null || waiting ? "default" : "pointer",
@@ -780,13 +796,13 @@ function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?
   );
 }
 
-/** "DEX +7", "Sleight of Hand d20": a cell's words, the name before its bonus carrying the mark where the test takes one. */
+/** "DEX +7", "Sleight of Hand d20": a cell's words, the name before its bonus naming its level. The cell's border draws the mark. */
 function MarkedName(props: { text: string; level: Proficiency | undefined }) {
   const at = props.text.lastIndexOf(" ");
   if (props.level === undefined || at <= 0) return <>{props.text}</>;
   return (
     <>
-      <ProficiencyLabel level={props.level}>{props.text.slice(0, at)}</ProficiencyLabel>
+      <ProficiencyLabel level={props.level} bare>{props.text.slice(0, at)}</ProficiencyLabel>
       {props.text.slice(at)}
     </>
   );

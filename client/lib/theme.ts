@@ -133,6 +133,14 @@ export const theme = {
     sheet: "0 -8px 32px rgba(0, 0, 0, 0.45)",
     /** Dialogs, the handout and the X-card. */
     dialog: "0 16px 48px rgba(0, 0, 0, 0.5)",
+    /** A proficiency mark's 1 px line in its words' own color, just outside a roll in text (components/ProficiencyMark.tsx). */
+    mark: "0 0 0 1px currentColor",
+    /** The same line inside a box: a proficient roll button's second line, or the frame of a label that cuts its words. */
+    markInside: "inset 0 0 0 1px currentColor",
+    /** Expertise on a roll button: a 2 px band of the button's own `fill` inside its border, then a second line. */
+    markDouble: (fill: string) => `inset 0 0 0 2px ${fill}, inset 0 0 0 3px currentColor`,
+    /** A sticky foot's `fill` carried over the pane's side padding beside it (components/Sheet.tsx `--pane-pad-x`), taking no room. */
+    paneSides: (fill: string) => `calc(-1 * var(--pane-pad-x, 0px)) 0 0 ${fill}, var(--pane-pad-x, 0px) 0 0 ${fill}`,
   },
   /**
    * Stacking over the map, lowest first. Dialogs open with showModal and

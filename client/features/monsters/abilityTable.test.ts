@@ -1,4 +1,5 @@
 import "../../components/testing/register.ts";
+import { withoutFrames } from "../../components/testing/proficiencyMarkup.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { loadMonsters } from "#shared/srd/monsters.ts";
@@ -41,7 +42,7 @@ describe("a monster block's ability table, three across (docs/design-v1-dice-ui.
     for (const m of monsters) assert.ok(splitAbilityTable(m.statBlock), m.srdId);
     const room = monsterView(statBlockOf(customMonster("ogre-ish")));
     assert.ok(splitAbilityTable(room.statBlock), "the app writes its own blocks with the same table");
-    const markup = renderToStaticMarkup(createElement(StatBlockView, { view: monsters[0]!, source: "srd" }));
+    const markup = withoutFrames(renderToStaticMarkup(createElement(StatBlockView, { view: monsters[0]!, source: "srd" })));
     assert.doesNotMatch(markup, /<table/);
     assert.equal(markup.match(/<dt/g)?.length, 6);
     // FL-7 (D-261030-436): the Dex save's word "Save" takes the proficient underline, which names it for a screen reader.

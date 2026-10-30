@@ -1,4 +1,5 @@
 import "../../components/testing/register.ts";
+import { withoutFrames } from "../../components/testing/proficiencyMarkup.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createStore } from "zustand/vanilla";
@@ -27,10 +28,10 @@ function render(body: ReactNode): string {
     other: character("other", { name: "Other", level: 5, stats: { ...structuredClone(EMPTY_PC_STATS), saves: ["str"] } }),
   } });
   const store = createStore(() => ({ view: state, you: DM, sceneId: "s1", roomId: "r1", connection: "open", local: { selectedIds: [], multi: false } }));
-  return renderToStaticMarkup(createElement(RoomProvider, {
+  return withoutFrames(renderToStaticMarkup(createElement(RoomProvider, {
     store: store as never, actions: { dispatch: () => 1 } as never, ui: {} as never, assets: { url: () => "" } as never,
     children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: body }),
-  }));
+  })));
 }
 
 function request(targets: RollTarget[] = [{ characterId: "hero" }]): RollRequest {

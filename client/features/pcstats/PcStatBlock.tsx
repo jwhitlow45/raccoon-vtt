@@ -7,7 +7,7 @@ import { ABILITY_ABBR } from "#shared/rules/skills.ts";
 import { signed } from "#shared/statBlock.ts";
 import { Loading } from "../../components/Loading.tsx";
 import { GROUP_BOX, GROUP_FOLD, Group, Help } from "../../components/Panel.tsx";
-import { MarkedText, ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
+import { MarkedText, ProficiencyLabel, ProficiencyUnit } from "../../components/ProficiencyMark.tsx";
 import { handFocusNow, handFocusOn, pressedControl } from "../../lib/handFocus.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomView } from "../../state/view.ts";
@@ -182,10 +182,13 @@ function ShapeBody(props: { character: Character; edits: boolean }) {
         <p data-shape-numbers="" style={{ margin: 0, fontSize: theme.font.body14 }}>
           <span style={{ color: theme.color.textMuted }}>Rolls now: saves </span>
           <SaveUnits text={saveUnitsOf(savesOf(numbers)).join(", ")} level={(ability) => levelOf(self, { kind: "save", ability })} />
-          <span style={{ color: theme.color.textMuted }}>
-            , <ProficiencyLabel level={levelOf(self, { kind: "check", ability: "wis", skill: "perception" })}>Perception</ProficiencyLabel>{" "}
-          </span>
-          {signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}
+          <span style={{ color: theme.color.textMuted }}>, </span>
+          <ProficiencyUnit level={levelOf(self, { kind: "check", ability: "wis", skill: "perception" })}>
+            <span style={{ color: theme.color.textMuted }}>
+              <ProficiencyLabel level={levelOf(self, { kind: "check", ability: "wis", skill: "perception" })} bare>Perception</ProficiencyLabel>{" "}
+            </span>
+            {signed(numbers.skills.perception ?? numbers.abilities.wis.mod)}
+          </ProficiencyUnit>
         </p>
       ) : null}
       {end}

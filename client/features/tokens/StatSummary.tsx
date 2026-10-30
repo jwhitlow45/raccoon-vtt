@@ -7,7 +7,7 @@ import { AcBadge } from "../../components/AcBadge.tsx";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
 import { Loading } from "../../components/Loading.tsx";
-import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
+import { ProficiencyLabel, ProficiencyUnit } from "../../components/ProficiencyMark.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
@@ -235,12 +235,19 @@ export function SavesLine(props: { block: LinkedBlock }) {
   const proficiency = block.kind === "numbers" ? block.proficiency : saveProficiencies({ monster: { numbers: blockRollNumbers(block.block), cr: block.block.cr } });
   const saves = (block.kind === "numbers" ? saveUnitsOf(block.saves) : saveUnits(block.block)).map((text, i) => {
     const [ability, value] = text.split(" ");
-    return (
-      <span key={ability} style={{ whiteSpace: "nowrap" }}>
+    const level = proficiency?.[ABILITY_KEYS[i]!] ?? "none";
+    const unit = (
+      <>
         <span style={{ color: theme.color.textMuted, fontSize: theme.font.tiny, fontWeight: theme.weight.bold, letterSpacing: theme.caps }}>
-          <ProficiencyLabel level={proficiency?.[ABILITY_KEYS[i]!] ?? "none"}>{ability}</ProficiencyLabel>{" "}
+          <ProficiencyLabel level={level} bare>{ability}</ProficiencyLabel>{" "}
         </span>
         <span style={{ fontWeight: theme.weight.strong }}>{value}</span>
+      </>
+    );
+    // A proficient save is framed whole, "DEX +5", which takes no room from the line (D-261030-527).
+    return (
+      <span key={ability} style={{ whiteSpace: "nowrap" }}>
+        {level === "none" ? unit : <ProficiencyUnit level={level}>{unit}</ProficiencyUnit>}
       </span>
     );
   });

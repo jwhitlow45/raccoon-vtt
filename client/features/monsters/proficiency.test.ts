@@ -1,4 +1,5 @@
 import "../../components/testing/register.ts";
+import { withoutFrames } from "../../components/testing/proficiencyMarkup.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PcStats } from "#shared/model.ts";
@@ -18,12 +19,12 @@ const { SavesLine } = await import("../tokens/StatSummary.tsx");
 
 /** Each marked name: its level and its words. */
 function marks(markup: string): string[] {
-  return [...markup.matchAll(/<span data-proficiency-label="" data-proficiency-level="(\w+)"[^>]*>([^<]*)/g)].map((m) => `${m[1]}:${m[2]}`);
+  return [...withoutFrames(markup).matchAll(/<span data-proficiency-label="" data-proficiency-level="(\w+)"[^>]*>([^<]*)/g)].map((m) => `${m[1]}:${m[2]}`);
 }
 
 /** The markup with every mark taken out, as it was before FL-7. */
 function unmarked(markup: string): string {
-  return markup.replace(/<span data-proficiency-marker="\w+"[^>]*><\/span>/g, "").replace(/<span data-proficiency-label="" data-proficiency-level="\w+"[^>]*>([^<]*)<\/span>/g, "$1");
+  return withoutFrames(markup).replace(/<span data-proficiency-marker="\w+"[^>]*><\/span>/g, "").replace(/<span data-proficiency-label="" data-proficiency-level="\w+"[^>]*>([^<]*)<\/span>/g, "$1");
 }
 
 test("fl7: the PC sheet marks explicit proficiencies, keeps \"(expertise)\" and leaves an adjusted skill neither", () => {

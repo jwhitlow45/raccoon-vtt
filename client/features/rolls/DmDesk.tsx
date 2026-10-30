@@ -366,6 +366,7 @@ function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: L
   const waiting = !answered(target);
   // With several creatures the title stays neutral, so a row's name carries its mark. A recorded choice of two is marked where the answer names it.
   const nameTest = request.targets.length > 1 ? rowTest(request, target) : null;
+  const nameLevel = nameTest ? props.levelOf(ref, nameTest) : "none";
   const answerText = dmAnswerText(target, request.test);
   const mark = (result: "pass" | "fail") => {
     if (target.result === result) return;
@@ -385,7 +386,10 @@ function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: L
     >
       <div style={{ flex: 1, minWidth: 0, display: "grid" }}>
         <span style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
-          <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.body14 }}>{nameTest ? <ProficiencyLabel level={props.levelOf(ref, nameTest)}>{name}</ProficiencyLabel> : name}</strong>
+          {/* The name cuts itself with "…", so a marked one gets 1 px of room, taken back by its margin, for the frame drawn 1 px outside it (D-261030-527). */}
+          <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.body14, ...(nameLevel === "none" ? {} : { padding: 1, margin: -1 }) }}>
+            {nameTest ? <ProficiencyLabel level={nameLevel}>{name}</ProficiencyLabel> : name}
+          </strong>
           <ResultBadge result={target.result} wantsMark={wantsMark(request, target)} />
         </span>
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>

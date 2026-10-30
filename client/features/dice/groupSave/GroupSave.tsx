@@ -638,7 +638,8 @@ function GroupSavePage(props: { page: Page; parent: "Dice" | "Areas"; onBack(): 
       ) : null}
       {/* Apply alone in the foot, so the count, the first row and Apply share a 130% phone's sheet with no scroll (5.8, Appendix D). Its own room is even above and below Apply, as the Log's composer's is, under the pane's inset at its foot (review LP17-HP-1). */}
       {page.phase !== "setup" || page.test.kind === "none" ? (
-        <div style={{ ...stickyPaneFoot(theme.space(2)), background: theme.color.surface, paddingTop: theme.space(2), display: "grid", gap: theme.space(1) }}>{applyButton}</div>
+        // Shadows of its fill cover the pane's side padding beside it, so a row's proficiency frame, drawn 1 px outside its name, never shows there as the row scrolls under the foot (D-261030-527). They take no room and leave its fill's edges where every other fill's are.
+        <div style={{ ...stickyPaneFoot(theme.space(2)), background: theme.color.surface, boxShadow: theme.shadow.paneSides(theme.color.surface), paddingTop: theme.space(2), display: "grid", gap: theme.space(1) }}>{applyButton}</div>
       ) : null}
       {page.apply === "taken" ? <AppliedToast page={page} ui={ui} /> : null}
     </div>

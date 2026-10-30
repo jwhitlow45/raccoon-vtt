@@ -361,7 +361,7 @@ describe("raccoon-vtt pc stat blocks", { timeout: 600_000 }, () => {
     await view.getByText("Initiative").waitFor();
     // The Dex box of the six across: its score, its modifier, and its save named as proficient (docs/design-v1-dice-ui.md 6.1).
     assert.match((await view.textContent()) ?? "", /DEX16 \+3Save \+6/);
-    // FL-7 (D-261030-436): the proficient save's "Save" is underlined, and its picture names it for a screen reader.
+    // FL-12 (D-261030-527): the proficient save is framed, "Save +6", and its picture names it for a screen reader.
     await view.locator("[data-ability-grid] > div").filter({ hasText: /^DEX/ }).locator('[data-proficiency-level="prof"]').getByRole("img", { name: "Proficient", exact: true }).waitFor({ state: "attached" });
     assert.match(await savesLine(ana), /DEX \+6/);
     await shots.take(ana, "pcstats-panel");

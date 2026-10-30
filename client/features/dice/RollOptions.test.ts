@@ -1,4 +1,5 @@
 import "../../components/testing/register.ts";
+import { withoutFrames } from "../../components/testing/proficiencyMarkup.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { createStore } from "zustand/vanilla";
@@ -41,7 +42,7 @@ const THORN: PcStats = {
  * (proficiencySurfaces.test.ts reads the marks).
  */
 function unmarked(markup: string): string {
-  return markup
+  return withoutFrames(markup)
     .replace(/<span data-proficiency-marker="\w+"[^>]*><\/span>/g, "")
     .replace(/<span data-proficiency-label="" data-proficiency-level="\w+"[^>]*>([^<]*)<\/span>/g, "$1")
     .replace(/<span data-summary-more=""[^>]*><span><\/span>…<\/span>/g, "")

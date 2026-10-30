@@ -531,10 +531,10 @@ panelFile(null, () => {
         await speedUnitsWhole(b, `${size.label}, ${name}'s bar`);
         await noSideScroll(b, `${size.label}, ${name}'s bar opened`);
         if (name === "Adult White Dragon") {
-          // FL-7 (D-261030-436): the dragon's listed saves are underlined, which adds no height and keeps "Saves" and its six saves where they were.
+          // FL-12 (D-261030-527): the dragon's listed saves are framed, which adds no height and keeps "Saves" and its six saves where they were.
           await b.locator("[data-saves]").waitFor();
           assert.deepEqual(await proficiencyHeightLines(b, `${size.label}, dragon bar`), [], "marks add no height to the dragon bar");
-          assert.deepEqual(await proficiencyLines(b, `${size.label}, dragon bar`), [], "each mark is the underline its level takes");
+          assert.deepEqual(await proficiencyLines(b, `${size.label}, dragon bar`), [], "each mark is the border its level takes");
           if (size.width === 390) {
             const boxes = await Promise.all((await b.locator("[data-saves] [data-saves-part] > span").all()).map(rectOf));
             assert.equal(boxes.length, 7);

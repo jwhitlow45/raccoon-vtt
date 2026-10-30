@@ -1,4 +1,5 @@
 import "../../components/testing/register.ts";
+import { withoutFrames } from "../../components/testing/proficiencyMarkup.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createStore } from "zustand/vanilla";
@@ -35,12 +36,12 @@ function fixture(): RoomState {
 
 function render(state: RoomState, child: ReactNode): string {
   const store = createStore(() => ({ view: state, roomId: "r1", connection: "open", you: DM, sceneId: "s1", local: { selectedIds: [], multi: false } }));
-  return renderToStaticMarkup(createElement(RoomProvider, {
+  return withoutFrames(renderToStaticMarkup(createElement(RoomProvider, {
     store: store as never,
     actions: { dispatch: () => 1 } as never,
     ui: {} as never,
     children: createElement(RoomScopeProvider, { scope: new RoomScope(), children: child }),
-  }));
+  })));
 }
 
 test("fl7: a save-ends card keeps its words and marks the creature's save, never its DC (FL7-R1-13)", () => {

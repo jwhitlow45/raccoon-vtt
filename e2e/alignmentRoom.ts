@@ -3522,7 +3522,7 @@ const FL7_LAST_LINE = 44;
 
 /**
  * A screen with marks: `aligned` (the root unless given) measured by the
- * sweep, each mark the underline it should be and adding no height, and at
+ * sweep, each mark the border it should be and adding no height, and at
  * least one mark in sight unless `optional`, as a folded line whose marked
  * parts are past its cut is.
  */
@@ -3534,6 +3534,23 @@ async function proficiencyScreen(sweep: Sweep, page: Page, screen: string, root:
   await sweep.measure(page, `fl7-${screen}`, aligned);
   await sweep.add(page, `fl7-${screen}`, await proficiencyLines(root, `${sweep.at} fl7-${screen}`, !optional));
   await sweep.add(page, `fl7-${screen}`, await proficiencyHeightLines(root, `${sweep.at} fl7-${screen}`, !optional));
+}
+
+/**
+ * A roll as components/ProficiencyMark.tsx draws it in text, for the helper
+ * checks: a unit framing a marked name and its `tail` (a bonus, a comma).
+ * `style` adds to the unit's style, `title` replaces the label's tooltip.
+ */
+function markedUnit(level: "prof" | "expert", words: string, spoil: { tail?: string; style?: string; title?: string } = {}): string {
+  const word = level === "expert" ? "Expertise" : "Proficient";
+  const lines = `text-box:trim-both cap alphabetic;padding:0.05em 0 0.214em;border-radius:3px;box-shadow:0 0 0 1px currentColor;box-decoration-break:clone${level === "expert" ? ";background-color:color-mix(in srgb, currentColor 16%, transparent)" : ""}`;
+  return `<span data-proficiency-mark="${level}" data-proficiency-form="unit" style="${lines};${spoil.style ?? ""}">${markedLabel(level, words, spoil.title ?? word)}${spoil.tail ?? ""}</span>`;
+}
+
+/** A marked name with no mark of its own, as a unit or a button around it draws it. */
+function markedLabel(level: "prof" | "expert", words: string, title = level === "expert" ? "Expertise" : "Proficient"): string {
+  const word = level === "expert" ? "Expertise" : "Proficient";
+  return `<span data-proficiency-label data-proficiency-level="${level}" title="${title}">${words}<span data-proficiency-marker="${level}" role="img" aria-label="${word}"></span></span>`;
 }
 
 /** The test name `words` names in `root` carries `level`: its tooltip and its picture's name say it, and neither has neither. */
@@ -3614,7 +3631,7 @@ async function proficiencyOptions(sweep: Sweep, page: Page, host: Locator, kind:
     // A cut line hides whole parts and ends with "…". It never shows the start of a part it cut.
     const cut = await summary.getAttribute("data-summary-cut");
     // Or its first part alone is too long, and the summary's own ellipsis cuts it.
-    if (cut !== null) assert.ok((await summary.locator("[data-summary-more]").isVisible()) || (await summary.evaluate((node) => (node as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (node as unknown as { clientWidth: number }).clientWidth)), `fl7: ${sweep.at} a cut ${name} line ends with "…"`);
+    if (cut !== null && !((await summary.locator("[data-summary-more]").isVisible()) || (await summary.evaluate((node) => (node as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (node as unknown as { clientWidth: number }).clientWidth)))) await sweep.add(page, `fl7-${kind}-${screen}-folded`, [`${sweep.at} fl7-${kind}-${screen}-folded: a cut ${name} line does not end with "…"`]);
     await proficiencyScreen(sweep, page, `${kind}-${screen}-folded`, summary, summary, true);
     if (kind !== "companion") {
       await fold.scrollIntoViewIfNeeded();
@@ -3652,7 +3669,8 @@ async function proficiencyToken(sweep: Sweep, page: Page, name: string, at: { x:
     if (sweep.at.endsWith("390x844-1")) {
       const tops = await bar.locator("[data-saves] [data-saves-part] > span").evaluateAll((labels) => labels.map((el) => Math.round((el as unknown as { getBoundingClientRect(): { top: number } }).getBoundingClientRect().top)));
       assert.equal(tops.length, 7, "fl7: the dragon bar holds the heading and six saves");
-      assert.ok(Math.max(...tops) - Math.min(...tops) <= 2, `fl7: the dragon's heading and saves stay on one line at 390x844: ${JSON.stringify(tops)}`);
+      // A line, not a stop, so one run lists every surface out of place.
+      if (Math.max(...tops) - Math.min(...tops) > 2) await sweep.add(page, "fl7-dragon-bar", [`${sweep.at} fl7-dragon-bar: the dragon's heading and saves wrap at 390x844: ${JSON.stringify(tops)}`]);
     }
     await shot(page, "dragon-bar");
   }
@@ -3753,7 +3771,8 @@ async function proficiencyResults(sweep: Sweep, page: Page, shot: (page: Page, n
   await shot(page, "toast-one-roll");
   await patOps.send({ t: "dice.roll", tag: randomUUID(), to: "all", rolls: [roll, roll] });
   const several = page.locator("[data-toast]").filter({ hasText: /rolled 2 Perception checks\./ }).filter({ visible: true }).last();
-  await proficiencyLevel(several, /^Perception check$/, "expert");
+  // The mark takes in the word its name ends inside, so its frame never cuts "checks".
+  await proficiencyLevel(several, /^Perception checks$/, "expert");
   assert.match((await several.textContent()) ?? "", /^[^\n]*rolled 2 Perception checks\.( Natural (20|1)\.)?$/, "fl7: the toast's words, no line per roll");
   const lines = await several.evaluate((node) => {
     const range = (node as unknown as { ownerDocument: { createRange(): { selectNodeContents(n: unknown): void; getClientRects(): ArrayLike<{ top: number; width: number }> } } }).ownerDocument.createRange();
@@ -3862,7 +3881,7 @@ async function proficiencyEncounter(sweep: Sweep, page: Page, shot: (page: Page,
 }
 
 /**
- * The FL-7 rework's sizes (D-261030-436 to 438): the alignment sizes, each
+ * The FL-7 rework's sizes (D-261030-437, 438 and 527): the alignment sizes, each
  * at 100% and 130%. The app has one theme, a dark one (globals.css), so
  * there is no second scheme to run. The phones are shot.
  */
@@ -3870,47 +3889,84 @@ const FL7_SIZES = ["1440x900", "390x844", "320x568"];
 
 /** FL-7 has its own matrix so every surface it marks is measured, and shot on a phone. */
 export function proficiencyTests(): void {
-  test("fl7-helper. taking marks off finds one that adds height and puts it back", async () => {
+  test("fl12-helper. taking marks off finds one that adds height or cuts words, and puts it back", async () => {
     const page = await dmContext.newPage();
     try {
       for (const scale of SCALES) {
         await page.setContent(`<div id="root" style="width:180px;font:14px/20px sans-serif;zoom:${scale}">
-          <span data-proficiency-label data-proficiency-level="prof" title="Proficient" style="text-decoration:underline dotted 2px;text-underline-offset:1px">Save<span data-proficiency-marker="prof" role="img" aria-label="Proficient"></span></span> +5
-          <span data-proficiency-label data-proficiency-level="expert" title="Expertise" style="text-decoration:underline double 1px;text-underline-offset:1px">Skill<span data-proficiency-marker="expert" role="img" aria-label="Expertise"></span></span> +7
-        </div><div id="empty"></div>`);
+          ${markedUnit("prof", "Save", { tail: " +5" })}
+          ${markedUnit("expert", "Skill", { tail: " +7" })}
+        </div><div id="cut" style="font:14px/20px sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;zoom:${scale}">${markedUnit("prof", "Perception", { style: "padding-inline:2px" })}</div><div id="empty"></div>`);
         const root = page.locator("#root");
-        assert.deepEqual(await proficiencyHeightLines(root, "fl7-height"), [], "an underline adds no row");
-        assert.deepEqual(await proficiencyLines(root, "fl7-lines"), [], "both marks are what D-261030-436 asks for");
-        // A mark that takes room, as FL-7's slots did, adds a row. Taking it off must find that.
-        await root.locator("[data-proficiency-label]").first().evaluate((node) => {
-          (node as unknown as { style: { cssText: string } }).style.cssText += ";display:inline-block;padding-bottom:6px";
+        assert.deepEqual(await proficiencyHeightLines(root, "fl12-height"), [], "a frame on the line adds no row");
+        // A mark that takes room, as a padded inline-block would, adds height. Taking it off must find that.
+        await root.locator("[data-proficiency-mark]").first().evaluate((node) => {
+          (node as unknown as { style: { cssText: string } }).style.cssText += ";display:inline-block;padding:6px";
         });
-        assert.match((await proficiencyHeightLines(root, "fl7-height")).join("\n"), /change its height/, "a mark that adds height fails");
-        assert.match(await root.locator("[data-proficiency-label]").first().evaluate((node) => (node as unknown as { style: { cssText: string } }).style.cssText), /padding-bottom: 6px/, "the mark is put back after the check");
-        assert.match((await proficiencyHeightLines(page.locator("#empty"), "fl7-height")).join("\n"), /no visible/, "empty coverage cannot pass");
+        assert.match((await proficiencyHeightLines(root, "fl12-height")).join("\n"), /change its height/, "a mark that adds height fails");
+        assert.match(await root.locator("[data-proficiency-mark]").first().evaluate((node) => (node as unknown as { style: { cssText: string } }).style.cssText), /padding: 6px/, "the mark is put back after the check");
+        // A box just wide enough for the words alone cuts them with "…" once a padding not taken back widens them.
+        const cut = page.locator("#cut");
+        const bare = await cut.locator("[data-proficiency-label]").evaluate((node) => {
+          const label = node as unknown as { firstChild: unknown; ownerDocument: { createRange(): { selectNodeContents(n: unknown): void; getBoundingClientRect(): { width: number } } } };
+          const range = label.ownerDocument.createRange();
+          range.selectNodeContents(label.firstChild);
+          return range.getBoundingClientRect().width;
+        });
+        await cut.evaluate((node, width) => {
+          (node as unknown as { style: { width: string } }).style.width = `${width + 1}px`;
+        }, bare / scale);
+        assert.match((await proficiencyHeightLines(cut, "fl12-height")).join("\n"), /cut its words/, "a mark that pushes words past an ellipsis fails");
+        assert.match((await proficiencyHeightLines(page.locator("#empty"), "fl12-height")).join("\n"), /no visible/, "empty coverage cannot pass");
       }
     } finally {
       await page.close();
     }
   });
-  test("fl7-helper. the mark check rejects a solid or colored underline, a missing name and a clipped foot", async () => {
+  test("fl12-helper. the frame check rejects a wrong or colored line, a missing name or frame, one cut or crowding a character, its words or a neighbor, but not one out of view", async () => {
     const page = await dmContext.newPage();
     try {
-      const label = (style: string, title = "Proficient") => `<span data-proficiency-label data-proficiency-level="prof" title="${title}" style="${style}">Perception<span data-proficiency-marker="prof" role="img" aria-label="Proficient"></span></span>`;
-      const good = "text-decoration:underline dotted 2px;text-underline-offset:1px";
-      await page.setContent(`<div style="font:14px/1.4 sans-serif">
-        <p id="good">${label(good)}</p>
-        <p id="solid">${label("text-decoration:underline solid 1px")}</p>
-        <p id="colored">${label(`${good};text-decoration-color:red`)}</p>
-        <p id="unnamed">${label(good, "")}</p>
-        <div id="clipped" style="height:14px;overflow:hidden;line-height:14px">${label(good)}</div>
+      await page.setContent(`<div style="font:14px/1.4 sans-serif;color:#eee;background:#222;padding:8px">
+        <p id="good">Rolls: ${markedUnit("prof", "Perception", { tail: " +5," })} and ${markedUnit("expert", "Sleight of Hand")} today</p>
+        <div id="frame" style="width:120px;height:24px;overflow:hidden;display:flex;align-items:center;line-height:1.2"><span data-proficiency-mark="expert" data-proficiency-form="frame" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 4px;border-radius:6px;box-shadow:inset 0 0 0 1px currentColor;outline:1px solid currentColor;outline-offset:-3px">${markedLabel("expert", "Sleight of Hand check")}</span></div>
+        <button id="box" data-proficiency-mark="expert" data-proficiency-form="box" style="color:#eee;background:#333;border:1px solid #777;border-color:currentColor;box-shadow:inset 0 0 0 2px #333, inset 0 0 0 3px currentColor;padding:0 12px;min-height:44px">${markedLabel("expert", "Stealth")} +4</button>
+        <p id="tinted">${markedUnit("prof", "Perception", { style: "background-color:color-mix(in srgb, currentColor 16%, transparent)" })}</p>
+        <p id="untinted">${markedUnit("expert", "Perception", { style: "background-color:transparent" })}</p>
+        <p id="untrimmed">${markedUnit("prof", "Perception", { style: "text-box:normal" })}</p>
+        <p id="colored">${markedUnit("prof", "Perception", { style: "box-shadow:inset 0 0 0 1px red" })}</p>
+        <p id="unnamed">${markedUnit("prof", "Perception", { title: "" })}</p>
+        <p id="bare">${markedLabel("prof", "Perception")}</p>
+        <div id="clipped" style="width:200px;height:15px;overflow:hidden;line-height:15px">${markedUnit("prof", "Perception")}</div>
+        <div id="scrolled" style="width:200px;height:28px;padding-left:1px;overflow:auto;line-height:14px"><br>${markedUnit("prof", "Perception")}<br>&nbsp;</div>
+        <div id="ellipsis" style="width:60px;padding-left:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${markedUnit("prof", "Perception check")}</div>
+        <div id="dropped" style="height:30px;overflow:hidden"><div style="width:100px;height:20px;overflow:hidden;display:flex;flex-wrap:wrap;line-height:20px"><span style="flex:none;width:100px;height:20px"></span><span>${markedUnit("expert", "Perception")}</span></div></div>
+        <p id="comma">${markedUnit("expert", "Perception")}, Stealth</p>
+        <div id="covered" style="padding:0 2px"><div style="position:sticky;top:0;margin-bottom:-20px;background:#222">Apply</div>${markedUnit("prof", "Perception")}</div>
+        <p id="neighbors">${markedUnit("prof", "DEX", { tail: " +5" })}${markedUnit("prof", "CON", { tail: " +2" })}</p>
+        <p id="tight">${markedUnit("prof", "Perception", { style: "padding:0;margin:0" })}</p>
+        <p id="lines">${markedUnit("expert", "Perception")} and
+          ${markedUnit("prof", "Stealth")}</p>
       </div>`);
-      const lines = async (id: string) => (await proficiencyLines(page.locator(`#${id}`), "fl7-helper")).join("\n");
-      assert.equal(await lines("good"), "");
-      assert.match(await lines("solid"), /a solid underline/);
-      assert.match(await lines("colored"), /not its words'/);
+      const lines = async (id: string) => (await proficiencyLines(page.locator(`#${id}`), "fl12-helper")).join("\n");
+      assert.equal(await lines("good"), "", "proficient and expertise units, a comma inside one");
+      assert.equal(await lines("frame"), "", "a frame from inside, as the sticky result draws one");
+      assert.equal(await lines("box"), "", "a button's double border");
+      assert.match(await lines("tinted"), /does not draw proficient's line/, "a tint is expertise's alone");
+      assert.match(await lines("untinted"), /does not draw expertise's line and tint/);
+      assert.match(await lines("untrimmed"), /does not draw proficient's line/, "an untrimmed box frames the line's whole box");
+      assert.match(await lines("colored"), /does not draw proficient's line in its words' color/);
       assert.match(await lines("unnamed"), /not named Proficient/);
-      assert.match(await lines("clipped"), /under the div that clips it/);
+      assert.match(await lines("bare"), /no box draws its mark/);
+      assert.match(await lines("clipped"), /border runs .* past the div that clips it/, "a line box too short for the frame cuts it");
+      assert.equal(await lines("scrolled"), "", "a scroller shows the rest of a frame by scrolling");
+      assert.equal(await lines("ellipsis"), "", "a frame cut with its words by \"…\"");
+      // FL-7's foot check failed here: a part the sticky result drops onto its unseen second line is out of view, not cut by the boxes further out.
+      assert.equal(await lines("dropped"), "", "a roll a box clips out of view whole has no border to cut");
+      assert.match(await lines("comma"), /border is .* px from a character outside it/, "a comma right after a frame crowds it");
+      assert.equal(await lines("covered"), "", "a sticky foot over a frame covers it rather than crowds it");
+      assert.match(await lines("neighbors"), /border is .* px from/, "two frames side by side touch");
+      assert.match(await lines("tight"), /border crosses its own words/, "a frame with no room inside it runs over its words");
+      assert.equal(await lines("lines"), "", "an expertise frame beside a space and a proficient one keep clear");
     } finally {
       await page.close();
     }
@@ -3926,7 +3982,7 @@ export function proficiencyTests(): void {
   for (const name of FL7_SIZES) {
     const size = SIZES.find((s) => s.name === name)!;
     for (const scale of SCALES) {
-      test(`fl7-${size.name}-${scale}. marks are underlines on the words each surface already had, adding no rows`, async () => {
+      test(`fl7-${size.name}-${scale}. marks are borders around the rolls each surface already had, adding no rows`, async () => {
         const sweep = new Sweep(`fl7-${size.name}-${scale}`);
         const shot = async (on: Page, what: string) => {
           if (size.touch) await shots.take(on, `fl7-${size.name}-${Math.round(scale * 100)}-${on === pat ? "player" : "dm"}-${what}`);

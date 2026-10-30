@@ -11,7 +11,7 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { choiceLook } from "../../components/looks.ts";
 import { sectionLabelLook } from "../../components/Panel.tsx";
-import { ProficiencyLabel, spokenProficiency } from "../../components/ProficiencyMark.tsx";
+import { markedBy, ProficiencyLabel, proficiencyFrame, spokenProficiency } from "../../components/ProficiencyMark.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -275,7 +275,12 @@ function ResultRest(props: { sum: string | null; label: string | undefined; leve
         ) : null}
         {/* Grows only to its own width, so the parts after it sit beside it rather than at the line's end. */}
         <span style={{ flex: "1 1 0", minWidth: 0, maxWidth: "max-content", display: "flex", alignItems: "center", gap: theme.space(2), overflow: "hidden" }}>
-          {props.label ? <span style={{ flex: "0 10 auto", minWidth: 0, fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis" }}>{props.level ? <ProficiencyLabel level={props.level}>{props.label}</ProficiencyLabel> : props.label}</span> : null}
+          {/* A marked label is framed from inside, since every box around it cuts what reaches past its words (D-261030-527). */}
+          {props.label ? (
+            <span {...markedBy(props.level, "frame")} style={{ flex: "0 10 auto", minWidth: 0, fontSize: theme.font.body14, overflow: "hidden", textOverflow: "ellipsis", ...proficiencyFrame(props.level) }}>
+              {props.level ? <ProficiencyLabel level={props.level} bare>{props.label}</ProficiencyLabel> : props.label}
+            </span>
+          ) : null}
           {chips === null ? (
             // A stored formula that no longer parses shows as its text (rolledTerms).
             <span style={{ flex: "0 1000 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", ...muted }}>{props.dice.map((roll) => roll.formula).join(" + ")}</span>
