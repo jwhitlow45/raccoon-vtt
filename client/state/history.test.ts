@@ -337,3 +337,122 @@ test("a cached summary behind the confirmed view never dispatches or describes t
   h.controller.receive(frame(2, 1, 1));
   assert.equal(h.sent[0]!.command.head, id(2));
 });
+
+for (const before of [false, true]) for (const quiet of [false, true]) test(`retained refusal has one notice with Review step, history first=${before}, quiet=${quiet}`, () => {
+  const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
+  room.setOutbox(new FakeOutbox());
+  room.setConnection("open");
+  room.applySnapshot({ t: "snapshot", seq: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  const initial = frame();
+  room.applyHistory(initial);
+  const expected = initial.setup!.undo.head!.id;
+  const n = room.dispatch({ t: "undo", scope: "setup", head: expected }, { quiet })!;
+  const retained = { ...frame(1, 0, 1, n) };
+  retained.setup!.undo.head!.retained = { scope: "play", direction: "redo", label: "damage", buried: false };
+  if (before) {
+    room.applyHistory(retained);
+    assert.equal(room.store.getState().toasts.length, 0, "the matching pending command will supply its answer");
+  }
+  room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n, code: "invalid", message: "could not undo changing AC: redo the play step first: damage" }] });
+  const id = room.store.getState().toasts[0]?.id;
+  if (!before) room.applyHistory(retained);
+  const notes = room.store.getState().toasts;
+  assert.equal(notes.length, quiet ? 0 : 1);
+  if (!quiet) {
+    assert.equal(notes[0]!.id, id, "adding Review does not create another announcement");
+    assert.equal(notes[0]!.action?.label, "Review step");
+    notes[0]!.action!.run();
+    assert.deepEqual(room.store.getState().historyReview, { scope: "setup", direction: "undo" });
+    room.applyHistory({ ...retained, serial: 2 });
+    assert.equal(room.store.getState().toasts, notes, "unchanged retention keeps the existing notice object");
+    room.ui.dismissToast(id!);
+    room.applyHistory({ ...retained, serial: 3 });
+    assert.equal(room.store.getState().toasts.length, 0, "a dismissed result stays dismissed");
+  }
+  room.dispose();
+});
+
+test("randomized retained answers never duplicate a notice or replace its identity", () => {
+  for (let seed = 1; seed <= 20; seed++) {
+    let random = seed;
+    const next = () => (random = (Math.imul(random, 1664525) + 1013904223) >>> 0);
+    const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
+    room.setOutbox(new FakeOutbox());
+    room.setConnection("open");
+    room.applySnapshot({ t: "snapshot", seq: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+    for (let step = 0; step < 20; step++) {
+      const scope = next() % 2 ? "setup" : "play";
+      const direction = next() % 3 ? "undo" : "redo";
+      const quiet = next() % 3 === 0;
+      const start = frame(step + 1, 0, step * 2, step);
+      start[scope]![direction] = { depth: 1, head: { id: id(step + 10000), label: "changing AC" } };
+      room.applyHistory(start);
+      const head = start[scope]![direction].head!.id;
+      const command: HistoryCommand = direction === "redo" ? { t: "redo", scope, head }
+        : scope === "setup" ? { t: "undo", scope: "setup", head } : { t: "undo", scope: "play", head };
+      const n = room.dispatch(command, { quiet })!;
+      const retained = structuredClone(start);
+      retained.serial++;
+      retained.watermark = n;
+      retained[scope]![direction].head!.retained = { scope: scope === "setup" ? "play" : "setup", direction: "redo", label: "damage", buried: false };
+      const before = next() % 2 === 0;
+      if (before) room.applyHistory(retained);
+      room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n, code: "invalid", message: "could not undo changing AC: redo the other step first" }] });
+      if (!before) room.applyHistory(retained);
+      const notes = room.store.getState().toasts;
+      assert.equal(notes.length, quiet ? 0 : 1, `seed ${seed}, step ${step}: one terminal announcement, none for quiet commands`);
+      const identity = notes[0]?.id;
+      room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n, code: "invalid", message: "could not undo changing AC: redo the other step first" }] });
+      room.applyHistory(retained);
+      assert.equal(room.store.getState().toasts[0]?.id, identity, `seed ${seed}, step ${step}: replay preserves identity`);
+      if (identity !== undefined) {
+        assert.equal(notes[0]!.action?.label, "Review step");
+        notes[0]!.action!.run();
+        assert.deepEqual(room.store.getState().historyReview, { scope, direction });
+        room.ui.dismissToast(identity);
+      }
+    }
+    room.dispose();
+  }
+});
+
+test("a retained different head is independent of an old refusal and a pending command", () => {
+  const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
+  room.setOutbox(new FakeOutbox());
+  room.setConnection("open");
+  room.applySnapshot({ t: "snapshot", seq: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  room.applyHistory(frame());
+  const first = room.dispatch({ t: "undo", scope: "setup", head: id(1001) })!;
+  room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n: first, code: "invalid", message: "The step changed" }] });
+  room.ui.dismissToast(room.store.getState().toasts[0]!.id);
+  room.dispatch({ t: "undo", scope: "setup", head: id(1001) });
+  const different = frame(2, 0, 1, first);
+  different.setup!.undo.head!.retained = { scope: "play", direction: "redo", label: "damage", buried: false };
+  room.applyHistory(different);
+  assert.equal(room.store.getState().toasts.length, 1);
+  assert.equal(room.store.getState().toasts[0]!.action?.label, "Review step");
+  room.dispose();
+});
+
+
+test("Review is attached only to the matching refusal toast", () => {
+  const room = createRoomStore({ roomId: "R1", you: DM, clock: new FakeClock() });
+  room.setOutbox(new FakeOutbox());
+  room.setConnection("open");
+  room.applySnapshot({ t: "snapshot", seq: 0, state: projectState(testRoom(), DM, { sceneId: "s1" }), you: { ...DM, sceneId: "s1" }, watermark: 0 });
+  room.applyHistory(frame());
+  room.ui.notify("Another notice", "info");
+  const n = room.dispatch({ t: "undo", scope: "setup", head: id(1001) })!;
+  room.applyEv({ t: "ev", seq: 0, changes: [], rejects: [{ n, code: "invalid", message: "could not undo changing AC: redo damage first" }] });
+  const retained = frame(1, 0, 1, n);
+  retained.setup!.undo.head!.retained = { scope: "play", direction: "redo", label: "damage", buried: false };
+  room.applyHistory(retained);
+  const notes = room.store.getState().toasts;
+  assert.equal(notes.length, 2);
+  assert.equal(notes[0]!.text, "Another notice");
+  assert.equal(notes[0]!.action, undefined);
+  assert.equal(notes[1]!.action?.label, "Review step");
+  room.applyHistory({ ...retained, serial: 2 });
+  assert.equal(room.store.getState().toasts, notes);
+  room.dispose();
+});

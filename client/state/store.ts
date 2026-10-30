@@ -1,4 +1,4 @@
-import { CorrectionAnnouncements } from "../features/log/corrections.ts";
+import { CorrectionAnnouncements, type OwnCorrection } from "../features/log/corrections.ts";
 import { undoNotice, type UndoNotice } from "./historyNotice.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
 import { blockerText, EMPTY_HISTORY, HistoryController, type HistoryActivation, type HistoryCommand } from "./history.ts";
@@ -536,6 +536,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
   const get = () => store.getState();
 
   const retainedNotices = new Map<string, string>();
+  const historyRefusals = new Map<string, { head: string; toast: number | null }>();
   const history = new HistoryController({
     context: () => ({ seq: get().seq, terminal, issued: nextN - 1, enabled: ready && get().connection === "open" && !get().ended, dm: get().you?.role === "dm" }),
     send: (command, opts) => room.dispatch(command, opts),
@@ -547,6 +548,20 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         const head = value.summary[scope]?.[direction].head;
         const key = `${scope}:${direction}`;
         const signature = JSON.stringify(head ?? null);
+        if (head?.retained) {
+          const action = { label: "Review step", run: () => ui.openHistory?.({ scope, direction }) };
+          const refusal = historyRefusals.get(key);
+          if (refusal?.head === head.id) {
+            const toasts = get().toasts;
+            if (toasts.some((toast) => toast.id === refusal.toast && !toast.action)) {
+              store.setState({ toasts: toasts.map((toast) => toast.id === refusal.toast ? { ...toast, action } : toast) });
+            }
+            retainedNotices.set(key, signature);
+            continue;
+          }
+          // A summary can precede its refusal. Let that command's answer supply the one announcement.
+          if (get().pending.some(({ op }) => op.t === direction && op.head === head.id && (op.scope ?? "play") === scope)) continue;
+        }
         if (retainedNotices.get(key) === signature) continue;
         retainedNotices.set(key, signature);
         if (head?.retained) pushToast(blockerText(head.retained), "info", undefined, { label: "Review step", run: () => ui.openHistory?.({ scope, direction }) });
@@ -957,8 +972,15 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       // second replaces the first as a new toast, so each press visibly lands.
       const renew = (text: string, tone: Toast["tone"]) => {
         toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone });
+        return toastSeq;
       };
       const accepted = s.pending.filter((p) => msg.acks?.includes(p.n) && !msg.rejects?.some((r) => r.n === p.n));
+      const ownCorrections: OwnCorrection[] = accepted.flatMap(({ n, op }) => {
+        const restored = msg.restored?.find((r) => r.n === n);
+        return restored && (op.t === "undo" || op.t === "redo") && !op.log && !op.discard
+          ? [{ from: op.t, scope: op.scope ?? "play", label: restored.what }]
+          : [];
+      });
       if (s.you?.role === "dm" && msg.ackDetails?.some((detail) => detail.scope === "setup" && detail.changed && accepted.some((p) => p.n === detail.n))) {
         renew("Saved. Undo in Setup history.", "info");
       }
@@ -987,6 +1009,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         for (const r of msg.rejects ?? []) {
           const sent = pending.find((p) => p.n === r.n);
           const op = sent?.op;
+          const historyKey = (op?.t === "undo" || op?.t === "redo") && op.head ? `${op.scope ?? "play"}:${op.t}` : null;
+          if (historyKey && op && "head" in op && op.head) historyRefusals.set(historyKey, { head: op.head, toast: null });
           if (!op || sent.quiet) continue;
           if (r.code === "forget" && (op.t === "undo" || op.t === "redo") && "head" in op && typeof op.head === "string") {
             // The undo toast's confirm (docs/design-v1-map-discovery.md 5.3): a yes names the refused step's n, which the server checks still heads the stack.
@@ -1008,7 +1032,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           if (op.t === "build.ask") continue;
           if (op.t === "undo" || op.t === "redo") {
             const answer = undoAnswer(op.t, { refused: r.message });
-            renew(answer.text, answer.tone);
+            const toast = renew(answer.text, answer.tone);
+            if (historyKey && op.head) historyRefusals.set(historyKey, { head: op.head, toast });
             continue;
           }
           if (isRace(r.code)) continue;
@@ -1020,7 +1045,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
         for (const n of settled) sentAt.delete(n);
         retryAttempt = 0;
       }
-      for (const correction of corrections.take(confirmed.log, s.you?.role === "dm", confirmed as RoomState)) {
+      for (const correction of corrections.take(confirmed.log, s.you?.role === "dm", confirmed as RoomState, ownCorrections)) {
         toasts = withToast(toasts, { id: ++toastSeq, text: correction.text, tone: "info", logged: true });
       }
       // An `ev` that touches a token settles any drag preview of it (design 7.6).
