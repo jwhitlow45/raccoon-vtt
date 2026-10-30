@@ -424,7 +424,7 @@ describe("an expired gesture stays expired (MD4-ASTRA-11)", () => {
     assert.equal(p.cell("1,1"), undefined, "nothing of the rectangle applied");
     assert.equal(p.server.state.scenes.s1?.name, "Renamed");
     assert.equal(p.counted.waiting, 0);
-    assert.deepEqual(p.room.store.getState().toasts.map((t) => t.text), ["1 offline edit was too old to save."]);
+    assert.deepEqual(p.room.store.getState().toasts.map((t) => t.text), ["1 offline edit was too old to save.", "Saved. Undo in Setup history."]);
     // A gesture asked about in two parts is one edit too.
     const k = page();
     k.connect();

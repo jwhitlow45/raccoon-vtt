@@ -1,4 +1,5 @@
 import { CorrectionAnnouncements } from "../features/log/corrections.ts";
+import { confirmedSetupSave, SETUP_SAVED } from "./setupSave.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
 import { blockerText, EMPTY_HISTORY, HistoryController, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
@@ -183,6 +184,7 @@ export type DispatchOptions = UndoGroupOptions & {
    * toast for its answer: "Teleport here" takes the stopped walk back with
    * an undo, and "Undid moving Thorn." would read as if the teleport had
    * been taken back.
+   * Confirmed DM Setup saves still announce where their Undo lives.
    */
   quiet?: boolean;
   /**
@@ -952,6 +954,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
       const renew = (text: string, tone: Toast["tone"]) => {
         toasts = withToast(toasts.filter((t) => t.text !== text), { id: ++toastSeq, text, tone });
       };
+      const accepted = s.pending.filter((p) => msg.acks?.includes(p.n) && !msg.rejects?.some((r) => r.n === p.n));
+      if (confirmedSetupSave({ before: s.confirmed, after: confirmed, beforeSeq: s.seq, seq: msg.seq, accepted, viewer: s.you, sceneId: s.sceneId })) renew(SETUP_SAVED, "info");
       // Builder ops the server asked about (FORGET_ASK), one question for all of them, and a question answered once its ops are.
       const asks: { n: number; op: ClientOp; group?: string; groupScope?: "setup" }[] = [];
       let forgetAsk = s.forgetAsk ?? null;
