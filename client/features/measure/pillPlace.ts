@@ -16,6 +16,7 @@ const PILL_MAX_PX = 240;
 export const LEADING = 1.15;
 const POINTER_PX = 6;
 export const POINTER_WIDTH_PX = 10;
+export const PILL_STROKE_PX = 1.5;
 /** Room kept between a pill and the edge of the map the bars leave clear, when it slides back into view. */
 const EDGE_PX = 4;
 /** Room between the pills of a stack. */
@@ -133,6 +134,13 @@ export function pillReach(props: Omit<PillProps, "color">): Box {
   const w = box.x1 - box.x0;
   const corner = Math.min(theme.radius.sm / props.scale, w / 2);
   return { ...box, x0: props.x - w + corner, x1: props.x + w - corner };
+}
+
+/** The full reach including the centered outline, for collisions with drawn text. */
+export function pillInkReach(props: Omit<PillProps, "color">): Box {
+  const b = pillReach(props);
+  const halo = PILL_STROKE_PX / 2 / props.scale;
+  return { x0: b.x0 - halo, y0: b.y0 - halo, x1: b.x1 + halo, y1: b.y1 + halo };
 }
 
 /** One pill of a stack: its words and look. The stack places it. */

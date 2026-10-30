@@ -11,12 +11,22 @@ import { tokenBoxes as topDownBoxes } from "../../features/areas/labelSpot.ts";
 import { standeeShape } from "./standee.ts";
 
 const { layoutBoardText } = await import("../useBoardText.ts");
+const { areaNamePill } = await import("../../features/areas/TemplateLayer.tsx");
 const { decorPlace, isoTokenBoxes, isoNamePill, tokenLayoutPills, mapLabelInk, viewPill } = await import("./isoText.ts");
 const { measureLabel } = await import("../../features/builder/draw.ts");
 
 before(() => {
-  // Map labels measure in a canvas, which node has none of: the estimate stands in.
-  (globalThis as { document?: unknown }).document ??= { createElement: () => ({ getContext: () => null }) };
+  // Inter widths from the shipped font at 12 px. The estimate alone picks a
+  // different area candidate and misses the browser fixture's narrow overlap.
+  const widths: Record<string, number> = { Raised: 37.99, Bree: 26.16, Grum: 31.08, Front: 29.26, Behind: 39.29, "30/30": 34.29, "Area name": 61.16, "Wire trap": 51.95 };
+  const context = {
+    font: "",
+    measureText(text: string) {
+      const px = Number(this.font.match(/([\d.]+)px/)?.[1] ?? 12);
+      return { width: widths[text] === undefined ? text.length * px * (this.font.startsWith("bold") ? 0.62 : 0.58) : widths[text]! * px / 12 };
+    },
+  };
+  (globalThis as { document?: unknown }).document = { createElement: () => ({ getContext: () => context }) };
 });
 
 const SCALE = 80;
@@ -146,7 +156,7 @@ test("ISO34-LABELS: area and trap names avoid the raised token's actual label at
     const at = place();
     const ink = { x0: at.x + label.x / SCALE, y0: at.y + label.y / SCALE, x1: at.x + (label.x + label.width) / SCALE, y1: at.y + (label.y + label.height) / SCALE };
     const boxes = isoTokenBoxes([t], text, SCALE, place);
-    assert.ok(boxes.some((b) => Math.abs(b.x0 - ink.x0) < 1e-9 && Math.abs(b.y1 - ink.y1) < 1e-9));
+    assert.ok(boxes.some((b) => b.x0 < ink.x0 && b.y1 > ink.y1));
     const point = toWorld(view, toView({ kind: "topDown" }, { x: (ink.x0 + ink.x1) / 2, y: ink.y1 }));
     for (const name of ["Fireball", "Poison trap"]) {
       const original = { ...point, name, size: "map" as const, small: true, above: true };
@@ -183,4 +193,46 @@ test("ISO34-LABELS: a centered pill must also clear the token label after slidin
   const far = toWorld(view, toView({ kind: "topDown" }, { x: 0, y: 2 }));
   const chosen = isoNamePill([original, { ...original, ...far }], { view, ground: () => 0, boxes: [obstacle] }, SCALE);
   assert.ok(!overlaps(pillPlace({ ...viewPill(chosen, view, () => 0), scale: SCALE }, edge).box, obstacle));
+});
+
+
+test("ISO34-LABELS: real area candidates clear the raised name's halo beside Bree and a wire trap", () => {
+  const scale = 40;
+  const raised = token("raised", { x: 10, y: 10, elevation: 20, name: "Raised", actor: { inline: { ...actor(), hp: { cur: 30, max: 30, temp: 0 }, ac: 12 } } }) as ViewToken;
+  const tokens = [raised, token("bree", { kind: "npc", x: 6, y: 9, name: "Bree", disposition: "ally" }), token("grum", { kind: "npc", x: 2, y: 2, size: "large", name: "Grum", disposition: "ally" }), token("front", { x: 13, y: 9, name: "Front" }), token("behind", { x: 12, y: 8, name: "Behind" })].map((t) => ({ ...t, actor: raised.actor })) as ViewToken[];
+  for (const turn of [0, 1, 2, 3] as Turn[]) {
+    const view = isometric(turn);
+    const ground = (x: number, y: number) => x >= 8 && x < 12 && y >= 4 && y < 8 ? 2 : 0;
+    const place = (t: ViewToken) => decorPlace(view, t, standeeShape(turn, { x: t.x, y: t.y, w: t.size === "large" ? 2 : 1, h: t.size === "large" ? 2 : 1 }, t.elevation / 5, ground(t.x, t.y), scale, 900));
+    const text = layoutBoardText({ tokens, scale, characters: undefined, role: "dm", ownsToken: () => true, activeTokenId: null, selectedId: null, pills: [], mapLabels: [], lockShown: () => false, fontEpoch: 0, place }, undefined).out;
+    const label = text.get(raised.id)!.label!;
+    const at = place(raised);
+    // The browser reads the first Text's getClientRect, including its px/4 stroke.
+    const font = label.lines[0]!.px;
+    const halo = font / 8;
+    const ink = { x0: at.x + (label.x - halo) / scale, y0: at.y + (label.y - halo) / scale, x1: at.x + (label.x + label.width + halo) / scale, y1: at.y + (label.y + font + halo) / scale };
+    const point = toWorld(view, toView({ kind: "topDown" }, { x: (ink.x0 + ink.x1) / 2, y: ink.y1 }));
+    const names = { view, ground, boxes: isoTokenBoxes(tokens, text, scale, place) };
+    const original = { ...point, name: "Area name", size: "map" as const, small: true, maxLines: 2 as const, above: true, below: false };
+    const trap = { x: Math.round(point.x), y: Math.round(point.y), name: "Wire trap", size: "map" as const, small: true, maxLines: 1 as const, offsetPx: 11, below: true };
+    const traps = [trap, ...[0, -0.25, 0.25, -0.5, 0.5].flatMap((f) => [true, false].map((above) => ({ ...trap, x: trap.x + 2 * f, above, below: !above })))];
+    const chosenTrap = isoNamePill(traps, names, scale);
+    const chosen = areaNamePill(original, { kind: "circle", x: point.x, y: point.y + 1, r: 1 }, names, scale, () => true, [chosenTrap]);
+    const box = pillPlace({ ...viewPill(chosen, view, ground), scale }, null).box;
+    const gap = Math.max(box.x0 - ink.x1, ink.x0 - box.x1, box.y0 - ink.y1, ink.y0 - box.y1) * scale - 0.75;
+    // Match the browser assertion's 1 px antialiasing allowance at every turn.
+    assert.ok(gap >= -1, `turn ${turn}: area outline overlaps the raised name by ${-gap} px: ${JSON.stringify({ box, ink, chosen })}`);
+  }
+});
+
+
+test("ISO34-LABELS: the area candidate's outline counts even when its fill clears token text", () => {
+  const view = isometric(0);
+  const point = toWorld(view, toView({ kind: "topDown" }, { x: 0, y: 0 }));
+  const original = { ...point, name: "Area name", size: "map" as const, small: true, above: true };
+  const reach = pillReach({ ...viewPill(original, view, () => 0), scale: SCALE });
+  const ink = { x0: reach.x1 + 0.25 / SCALE, x1: reach.x1 + 1 / SCALE, y0: reach.y0, y1: reach.y1 };
+  const far = { ...original, ...toWorld(view, toView({ kind: "topDown" }, { x: 0, y: 2 })) };
+  assert.ok(!overlaps(reach, ink), "the unstroked box misses the collision");
+  assert.equal(isoNamePill([original, far], { view, ground: () => 0, boxes: [ink] }, SCALE), far);
 });

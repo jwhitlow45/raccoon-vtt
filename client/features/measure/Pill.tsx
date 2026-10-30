@@ -3,7 +3,7 @@ import { Label, Tag, Text } from "react-konva";
 import { useBoardView } from "../../canvas/boardView.ts";
 import { screenPx } from "../../lib/boardScale.ts";
 import { theme } from "../../lib/theme.ts";
-import { LEADING, pillGeometry, pillPlace, pillStackPlace, POINTER_WIDTH_PX, type PillProps, type StackPill } from "./pillPlace.ts";
+import { LEADING, pillGeometry, pillPlace, pillStackPlace, POINTER_WIDTH_PX, PILL_STROKE_PX, type PillProps, type StackPill } from "./pillPlace.ts";
 
 export { pillGeometry, pillPlace, pillReach, pillStackPlace, type PillProps, type StackPill } from "./pillPlace.ts";
 
@@ -87,7 +87,7 @@ function PillShape(props: Omit<PillProps, "x" | "y"> & { at: { x: number; y: num
       <Tag
         fill={theme.color.overlay}
         stroke={props.color}
-        strokeWidth={1.5}
+        strokeWidth={PILL_STROKE_PX}
         cornerRadius={theme.radius.sm}
         pointerDirection={pointer}
         pointerWidth={pointer !== "none" ? screenPx(POINTER_WIDTH_PX) : 0}

@@ -39,6 +39,12 @@ describe("the text boxes the layers under the decor keep clear of", () => {
     assert.deepEqual(placedTextBoxes([token], new Map(), 40), []);
   });
 
+  test("a name's halo extends beyond its measured block on every edge", () => {
+    const label = { ...block, lines: [{ text: "Raised", px: 12, kind: "name" as const }] };
+    const placed = new Map([["t", { label } as unknown as TokenText]]);
+    assert.deepEqual(placedTextBoxes([token], placed, 40), [{ x0: 68.5, y0: 168.5, x1: 131.5, y1: 191.5 }]);
+  });
+
   // The marks draw over the layers under the decor as the labels do: an elevation badge half over a height pill left neither readable.
   test("a token's chips, elevation badge and HP bar are boxes too, beside its label or plate", () => {
     const badge = { x0: 30, y0: -9, x1: 62, y1: 9 };

@@ -9,7 +9,7 @@ import type { PillSpec } from "../boardView.ts";
 import type { VBox } from "./pieces.ts";
 import { placedTextBoxes } from "../textBoxes.ts";
 import type { TokenText } from "../useBoardText.ts";
-import { pillReach } from "../../features/measure/pillPlace.ts";
+import { pillInkReach } from "../../features/measure/pillPlace.ts";
 
 /** Names place after token text in Isometric. Keeping this one way avoids two labels chasing each other. */
 export type IsoNames = { view: View; ground: (x: number, y: number) => number; boxes: readonly Box[] };
@@ -33,18 +33,24 @@ export function isoTokenBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<st
 
 /** Candidates stay in world cells for the stand rule. Their costs use the upright pill's complete viewport-slide reach. */
 export function isoNamePill(candidates: readonly PillSpec[], layout: IsoNames, scale: number, allowed: (p: PillSpec) => boolean = () => true, others: readonly PillSpec[] = []): PillSpec {
-  const boxes = [...layout.boxes, ...others.map((p) => pillReach({ ...viewPill(p, layout.view, layout.ground), scale }))];
+  const otherBoxes = others.map((p) => pillInkReach({ ...viewPill(p, layout.view, layout.ground), scale }));
   let best = candidates[0]!;
-  let cost = Infinity;
+  let tokenCost = Infinity;
+  let otherCost = Infinity;
+  const overlap = (box: Box, boxes: readonly Box[]) => boxes.reduce((sum, b) => sum + Math.max(0, Math.min(box.x1, b.x1) - Math.max(box.x0, b.x0)) * Math.max(0, Math.min(box.y1, b.y1) - Math.max(box.y0, b.y0)), 0);
   for (const candidate of candidates) {
     if (!allowed(candidate)) continue;
-    const box = pillReach({ ...viewPill(candidate, layout.view, layout.ground), scale });
-    const overlap = boxes.reduce((sum, b) => sum + Math.max(0, Math.min(box.x1, b.x1) - Math.max(box.x0, b.x0)) * Math.max(0, Math.min(box.y1, b.y1) - Math.max(box.y0, b.y0)), 0);
-    if (overlap < cost) {
+    const box = pillInkReach({ ...viewPill(candidate, layout.view, layout.ground), scale });
+    const token = overlap(box, layout.boxes);
+    const other = overlap(box, otherBoxes);
+    // Token text draws over these names. A trap name must not make an area
+    // trade a clear token label for a smaller combined overlap.
+    if (token < tokenCost || (token === tokenCost && other < otherCost)) {
       best = candidate;
-      cost = overlap;
+      tokenCost = token;
+      otherCost = other;
     }
-    if (cost === 0) break;
+    if (tokenCost === 0 && otherCost === 0) break;
   }
   return best;
 }

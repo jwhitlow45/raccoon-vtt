@@ -47,7 +47,9 @@ export function placedTextBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<
       out.push({ x0: ox + b.x0, y0: oy + b.y0, x1: ox + b.x1, y1: oy + b.y1 });
     } else if (placed?.label) {
       const b = placed.label;
-      out.push({ x0: ox + b.x, y0: oy + b.y, x1: ox + b.x + b.width, y1: oy + b.y + b.height });
+      // Lines in TokenNode draw a px/4 halo centered on each text edge.
+      const halo = Math.max(0, ...b.lines.map((line) => line.px / 8));
+      out.push({ x0: ox + b.x - halo, y0: oy + b.y - halo, x1: ox + b.x + b.width + halo, y1: oy + b.y + b.height + halo });
     }
   }
   return out;

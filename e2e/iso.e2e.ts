@@ -1548,7 +1548,7 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
           for (const name of seen.names.filter((n) => n.name !== "Raised")) {
             const a = name.box;
             const b = tokenName;
-            assert.ok(a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1, `turn ${turn}: ${name.name} overlaps the raised name`);
+            assert.ok(a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1, `turn ${turn}: ${name.name} ${JSON.stringify(a)} overlaps the raised name ${JSON.stringify(b)} at ${seen.scale} px per cell`);
           }
           await shots.take(dm, `fu40-b-iso-labels-turn-${turn}`);
         } finally {

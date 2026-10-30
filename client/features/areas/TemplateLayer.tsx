@@ -10,7 +10,7 @@ import { drawsHere } from "../../canvas/isoPlace.ts";
 import { pillStands } from "../../canvas/markStand.ts";
 import { measureLabel } from "../../canvas/measureText.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
-import { IsoNamesContext, isoNamePill } from "../../canvas/relief/isoText.ts";
+import { IsoNamesContext, isoNamePill, type IsoNames } from "../../canvas/relief/isoText.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import type { VolumeWorld } from "../../canvas/relief/volumes.ts";
 import { useViewerFog } from "../../canvas/viewerFog.ts";
@@ -209,6 +209,17 @@ function outlineEdge(o: Outline, dx: number, side: "top" | "bottom"): { x: numbe
   return { x: mid.x + dx, y: mid.y };
 }
 
+/** The candidates used by a standing area name, in its outline's world coordinates. */
+export function areaNamePill(original: PillSpec, outline: Outline, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean, others?: readonly PillSpec[]): PillSpec {
+  const candidates: PillSpec[] = [original];
+  for (const lines of [original.maxLines ?? 2, 1] as const) {
+    for (const f of [0, -0.25, 0.25, -0.5, 0.5, -0.75, 0.75, -1, 1]) {
+      for (const side of ["top", "bottom"] as const) candidates.push({ ...original, ...outlineEdge(outline, f * outlineReach(outline), side), maxLines: lines, above: side === "top", below: side === "bottom" });
+    }
+  }
+  return isoNamePill(candidates, names, scale, allowed, others);
+}
+
 /**
  * Where a placed area draws: as Top-down draws it, on the isometric
  * ground stage, its standing name on the overlay, or as a dragged token's
@@ -263,13 +274,7 @@ export const PlacedArea = memo(function PlacedArea(props: {
     const original = { x: spot.x, y: spot.y, name, size: "map" as const, small: true, maxLines, above, below: !above };
     const allowed = (p: PillSpec) => !props.fog || pillStands(props.fog, { ...p, scale });
     if (!names || !outline || !allowed(original)) return original;
-    const candidates: PillSpec[] = [original];
-    for (const lines of [maxLines, 1] as const) {
-      for (const f of [0, -0.25, 0.25, -0.5, 0.5, -0.75, 0.75, -1, 1]) {
-        for (const side of ["top", "bottom"] as const) candidates.push({ ...original, ...outlineEdge(outline, f * outlineReach(outline), side), maxLines: lines, above: side === "top", below: side === "bottom" });
-      }
-    }
-    return isoNamePill(candidates, names, scale, allowed, props.otherPills);
+    return areaNamePill(original, outline, names, scale, allowed, props.otherPills);
   }, [spot.x, spot.y, name, maxLines, above, names, outline, props.fog, props.otherPills, scale]);
   // Top-down's tokens avoid this pill. Isometric's pill avoids its tokens.
   usePublishPills(`area:${t.id}`, useMemo(() => [spec], [spec]));
