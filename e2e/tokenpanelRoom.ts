@@ -6,7 +6,7 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page, type Route } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
-import { barControl, ConsoleWatch, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, openPage, OpSocket, pagePoint, Shots, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 
 /**
  * The token panel's room and helpers (docs/design-v1-token-panel.md
@@ -187,7 +187,7 @@ export async function setUp(page: Page, cdp: CDPSession, view: View, folds?: str
    * steps back off it (lib/backClose.ts), which a run that reloads often
    * can catch mid-navigation, landing on the page before the room.
    */
-  await page.goto(`${server.origin}/r/${run.roomId.slice(0, 4)}-${run.roomId.slice(4)}`);
+  await openPage(page, `${server.origin}/r/${run.roomId.slice(0, 4)}-${run.roomId.slice(4)}`);
   await page.getByRole("status", { name: "Connected" }).first().waitFor();
   await page.locator(".konvajs-content").first().waitFor();
 }
