@@ -8,13 +8,13 @@
 - **undo**: confirm setup saves from accepted changes
 - **undo**: declare setup gestures and explain resync history
 - **undo**: add authoritative scoped client history
-- **log**: render scoped correction notices
 - **undo**: acknowledge committed operation scope
 - **undo**: record private correction notices
 - **undo**: enforce scoped histories and guarded restores
 - **undo**: wire scoped history protocol and replay versions
 - **undo**: classify play and setup operations
 - **undo**: define scoped history contracts
+- **log**: render scoped correction notices
 - **encounter**: mark save cards and log results
 - **stats**: show skill and save proficiency markers
 - **dice**: show proficiency on rolls and requests
@@ -116,9 +116,14 @@
 
 ### Fixes
 
-- **undo**: word history refusals and cut labels as one sentence
-- **undo**: keep focus and one edge in the setup history sheet
-- **undo**: announce the setup history notice as a passing toast
+- **deps**: document manual node image updates
+- **image**: sign the digest before publishing any tag
+- **deps**: delay updates and protect container major versions
+- **github**: allow bug reports outside a room
+- **release**: require the changelog version before tagging
+- **image**: require successful push ci on the tagged commit
+- **image**: resume signing from the immutable version tag
+- **release**: publish notes only after the image succeeds
 - **undo**: report oversized changes without promising undo
 - **undo**: bound the rollout notice to the deploy window
 - **undo**: name setup history in token and journal feedback
@@ -129,8 +134,11 @@
 - **undo**: report actual history recording in acknowledgments
 - **undo**: compare effective saves and prompt settlements
 - **undo**: use committed scope acknowledgments for save feedback
+- **undo**: word history refusals and cut labels as one sentence
 - **undo**: announce history results once and scope sheet keys
+- **undo**: keep focus and one edge in the setup history sheet
 - **log**: use shared correction text for every client surface
+- **undo**: announce the setup history notice as a passing toast
 - **undo**: preserve histories after no-effect edits
 - **ui**: span the phone toolbar's tools across their section
 - **ui**: refit folded summaries after web fonts load
@@ -637,6 +645,6 @@
 - **vision**: a holder's raster starts from whichever drawing leaves the fewest tiles, and redraws a source only where its sight changed
 - **vision**: a holder's presence map is kept per pair of layer maps, not copied for every label
 
-## v0.1.0 (2026-10-25)
+## v0.1.0 (2026-10-26)
 
 First public release

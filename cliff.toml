@@ -1,11 +1,9 @@
 [changelog]
-header = "# Changelog\n\n"
+header = "# Changelog\n"
 body = """
 {% if version %}
-
 ## {{ version }} ({{ timestamp | date(format="%Y-%m-%d") }})
 {% else %}
-
 ## Unreleased
 {% endif %}\
 {% if version == "v0.1.0" %}
