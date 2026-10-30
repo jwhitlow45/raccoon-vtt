@@ -380,9 +380,9 @@ export async function proficiencyLines(root: Locator, screen: string, required =
         range.setEnd(text, i + 1);
         const r = Array.from(range.getClientRects()).find((rect) => rect.width > 0 && rect.height > 0);
         if (!r) continue;
-        // The baseline from the drawn size, whose descent the browser rounds as it lays the line out.
-        context.font = look.font;
-        const baseline = r.bottom - context.measureText(ch).fontBoundingBoxDescent * zoom;
+        // The baseline from the descent the browser rounds to whole pixels as it lays the line out: at the zoomed size, as a zoomed line is laid out (5 px at 16 px and 130%, not 4 px times 1.3).
+        context.font = `${look.getPropertyValue("font-style")} ${look.getPropertyValue("font-weight")} ${parseFloat(look.getPropertyValue("font-size")) * zoom}px ${look.getPropertyValue("font-family")}`;
+        const baseline = r.bottom - context.measureText(ch).fontBoundingBoxDescent;
         if (precise) context.font = precise.font;
         const m = context.measureText(ch);
         const k = (precise?.scale ?? 1) * zoom;
@@ -490,9 +490,6 @@ export async function proficiencyLines(root: Locator, screen: string, required =
           if (!said.some((r) => overlaps(grow(grow(r, 0), -0.5), inside))) break;
           const scrollsX = /auto|scroll/.test(around.overflowX) && ancestor.scrollWidth > ancestor.clientWidth + 1;
           const scrollsY = /auto|scroll/.test(around.overflowY) && ancestor.scrollHeight > ancestor.clientHeight + 1;
-          // Only a box a line or two tall clips a line. A pane that shows part of one is scrolled there, unless the roll is wholly in it. A scroller is judged by how far it scrolls.
-          const whole = said.every((r) => r.top >= inside.t - 0.5 && r.bottom <= inside.b + 0.5 && r.left >= inside.l - 0.5 && r.right <= inside.r + 0.5);
-          if (edge.height > 64 * scale && !whole && !scrollsX && !scrollsY) continue;
           // A box that clips with overflow: clip paints its overflow-clip-margin past its inside too.
           const margin = (overflow: string) => (overflow === "clip" ? (parseFloat(around.getPropertyValue("overflow-clip-margin")) || 0) * scale : 0);
           const shown: Box = { l: inside.l - margin(around.overflowX), r: inside.r + margin(around.overflowX), t: inside.t - margin(around.overflowY), b: inside.b + margin(around.overflowY) };
@@ -509,6 +506,9 @@ export async function proficiencyLines(root: Locator, screen: string, required =
           Object.assign(win, { l: Math.max(win.l, shown.l), r: Math.min(win.r, shown.r), t: Math.max(win.t, shown.t), b: Math.min(win.b, shown.b) });
           // "…" cuts a roll's words at the box's end, and their border with them: no border closes around part of its words, here or further out.
           if (around.textOverflow === "ellipsis" && said.some((r) => r.right > inside.r + 0.5)) for (const o of held) o.r = Math.min(o.r, shown.r);
+          // Only a box a line or two tall, a box that holds the roll's words whole, or a scroller, by how far it scrolls, is judged on its own. A taller box that shows part of the roll still narrows the window for every box around it.
+          const whole = said.every((r) => r.top >= inside.t - 0.5 && r.bottom <= inside.b + 0.5 && r.left >= inside.l - 0.5 && r.right <= inside.r + 0.5);
+          if (edge.height > 64 * scale && !whole && !scrollsX && !scrollsY) continue;
           // How far past the window the frame stays at its best place along one way: it must shift by at least `need`, by at most `room`, and only within [least, most].
           const short = (need: number, room: number, least: number, most: number) => {
             const best = Math.min(most, Math.max(least, (need + room) / 2));

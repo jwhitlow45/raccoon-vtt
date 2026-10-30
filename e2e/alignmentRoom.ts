@@ -3945,6 +3945,7 @@ export function proficiencyTests(): void {
         <p id="unnamed">${markedUnit("prof", "Perception", { title: "" })}</p>
         <p id="bare">${markedLabel("prof", "Perception")}</p>
         <div id="clipped" style="width:200px;height:15px;overflow:hidden;line-height:15px">${markedUnit("prof", "Perception")}</div>
+        <div id="tall-cut" style="height:120px;overflow:hidden"><div style="height:100px;padding-left:2px;overflow:hidden;line-height:20px"><div style="height:88px"></div>${markedUnit("prof", "Perception")}</div></div>
         <div id="clip-margin" style="width:200px;height:15px;overflow:clip;overflow-clip-margin:3px;line-height:15px">${markedUnit("prof", "Perception")}</div>
         <div id="scrolled" style="width:200px;height:28px;padding-left:1px;overflow:auto;line-height:14px"><br>${markedUnit("prof", "Perception")}<br>&nbsp;</div>
         <div id="first-line" style="width:200px;height:80px;padding-left:1px;overflow:auto;line-height:10px">${markedUnit("prof", "Perception")}${"<br>".repeat(12)}&nbsp;</div>
@@ -3960,6 +3961,8 @@ export function proficiencyTests(): void {
         <p id="neighbors">${markedUnit("prof", "DEX", { tail: " +5" })}${markedUnit("prof", "CON", { tail: " +2" })}</p>
         <p id="tight">${markedUnit("prof", "Perception", { style: "padding:0;margin:0" })}</p>
         <p id="ascender">${markedUnit("prof", "Hff", { style: "padding-top:0" })}</p>
+        <p id="ascender-zoomed" style="zoom:1.3">${markedUnit("prof", "Hff", { style: "padding-top:0" })}</p>
+        <p id="zoomed-sizes" style="zoom:1.3;line-height:2">${[14, 16, 18].map((px) => `<span style="font-size:${px}px">${markedUnit("prof", "Wisdom (Perception)")} ${markedUnit("prof", "Sleight of Hand")}</span>`).join("<br>")}</p>
         <p id="lines">${markedUnit("expert", "Perception")} and
           ${markedUnit("prof", "Stealth")}</p>
       </div>`);
@@ -3975,6 +3978,8 @@ export function proficiencyTests(): void {
       assert.match(await lines("unnamed"), /not named Proficient/);
       assert.match(await lines("bare"), /no box draws its mark/);
       assert.match(await lines("clipped"), /border runs .* past the div that clips it/, "a line box too short for the frame cuts it");
+      // A box too tall to judge alone still narrows what the boxes around it can show (FL12-OPUS-8).
+      assert.match(await lines("tall-cut"), /border runs .* past the div that clips it/, "a tall box that cuts a frame cuts it for every box around it");
       assert.equal(await lines("clip-margin"), "", "a box that clips 3 px out from itself shows the frame whole, as a folded group's summary does");
       assert.equal(await lines("scrolled"), "", "a scroller shows the rest of a frame by scrolling");
       assert.equal(await lines("scrolled-within"), "", "a box a fraction of a pixel short of its scroller cuts nothing scrolling shows, as a sheet around a pane at 85% is");
@@ -3996,6 +4001,9 @@ export function proficiencyTests(): void {
       assert.match(await lines("tight"), /border crosses its own words/, "a frame with no room inside it runs over its words");
       // Inter's f stands 0.47 px over its capitals at its 14 px optical size, and level with them at 32: the outline is measured at the size the page draws.
       assert.match(await lines("ascender"), /border crosses its own words/, "a frame at the capitals' height crosses an f");
+      assert.match(await lines("ascender-zoomed"), /border crosses its own words/, "and at 130%, where Chrome keeps the optical size of the unzoomed 14 px");
+      // At 130% a line is laid out at the zoomed size, its descent rounded there: 5 px at 16 px, not 4 px times 1.3. Parentheses and descenders clear their frames by a fraction of a pixel, so the baseline must be the line's own.
+      assert.equal(await lines("zoomed-sizes"), "", "parentheses and descenders clear their frames at 130% and 14, 16 and 18 px");
       assert.equal(await lines("lines"), "", "an expertise frame beside a space and a proficient one keep clear");
       // Linux's canvas gives a glyph's bounds in whole pixels rounded out (Inter's H 11 px tall at 14 px). The check measures outlines, so a frame that clears them still passes there.
       await page.evaluate(() => {
