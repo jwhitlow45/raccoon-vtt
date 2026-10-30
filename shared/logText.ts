@@ -220,7 +220,7 @@ export function critSums(rolls: readonly Pick<DiceResult, "formula" | "faces" | 
 type DiceEvent = Extract<LogEvent, { type: "dice" }>;
 
 /** The creature a roll names, mid-sentence: "Thorn", or "a creature" for one the viewer's view does not hold. */
-function rollCreature(roll: DiceRoll, names: LogNames): string | undefined {
+export function rollCreature(roll: DiceRoll, names: LogNames): string | undefined {
   if (roll.tokenId === undefined && roll.characterId === undefined) return undefined;
   const name = creatureName(names, roll);
   return name === A_CREATURE ? "a creature" : name;

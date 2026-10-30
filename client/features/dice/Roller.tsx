@@ -11,7 +11,7 @@ import { IconButton } from "../../components/IconButton.tsx";
 import { Loading } from "../../components/Loading.tsx";
 import { choiceLook } from "../../components/looks.ts";
 import { sectionLabelLook } from "../../components/Panel.tsx";
-import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
+import { ProficiencyLabel, spokenProficiency } from "../../components/ProficiencyMark.tsx";
 import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
@@ -98,9 +98,10 @@ export function spokenVerdict(roll: DiceRoll, data: LogEntry["data"]): string | 
   return shownVerdict(roll, data);
 }
 
-/** The live region's words for a result, said once at the answer: "Rolled 23, Critical Hit: Longsword." */
-export function spokenResult(head: HeaderRoll, verdict: string | null): string {
-  return `Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${verdict ? `, ${verdict}` : ""}${head.label ? `: ${labelText(head.label)}` : ""}.`;
+/** The live region's words for a result, said once at the answer: "Rolled 23, Critical Hit: Longsword.", and a marked test says its level: "Rolled 19: Stealth check, expertise." (FL7-SOL-04). */
+export function spokenResult(head: HeaderRoll, verdict: string | null, level?: Proficiency): string {
+  const label = head.label ? `: ${labelText(head.label)}${level ? spokenProficiency(level) : ""}` : "";
+  return `Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${verdict ? `, ${verdict}` : ""}${label}.`;
 }
 
 /**
@@ -132,8 +133,12 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const firstLine = committed?.lines[0]?.id ?? null;
   const data = committed?.lines[0]?.data;
   const levelOf = useProficiency();
+  // The label is the first roll's own unless several damage types share it, which is no test.
+  const target = first ? rollTarget(first) : null;
+  const test = first && head?.label !== undefined && head.label === first.label ? rollTest(first) : null;
+  const level = target && marksTest(test) ? levelOf(target, test) : undefined;
   // A polite live region says each result once, from the render that first holds it, so it is said as it lands on the server even while the dice still fly.
-  const said = first && head ? spokenResult(head, spokenVerdict(first, data)) : "";
+  const said = first && head ? spokenResult(head, spokenVerdict(first, data), level) : "";
   if (!last) return null;
   let body;
   if ("error" in last) body = <span role="alert" style={{ color: theme.color.dangerText }}>{last.error}</span>;
@@ -147,10 +152,6 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   else {
     const verdict = shownVerdict(first, data);
     const label = head.label !== undefined ? labelText(head.label) : "once" in last ? last.label : undefined;
-    // The label is the first roll's own unless several damage types share it, which is no test.
-    const target = rollTarget(first);
-    const test = head.label !== undefined && head.label === first.label ? rollTest(first) : null;
-    const level = target && marksTest(test) ? levelOf(target, test) : undefined;
     body = (
       <button
         type="button"

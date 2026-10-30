@@ -120,6 +120,18 @@ test("fl7: a creature named like a skill is never marked, a save-ends line marks
   assert.deepEqual(two.marks.map((m) => two.text.slice(m.at, m.at + m.length)), ["Dexterity save"]);
 });
 
+test("fl7: a creature whose name holds a comma and a test's name is never marked, in one roll or several (FL7-SOL-03)", () => {
+  const s = state();
+  s.characters.hero!.name = "Hero, Stealth check";
+  const roll: DiceRoll = { characterId: "hero", label: "Stealth check", formula: "1d20+7", faces: [9], total: 16 };
+  const one = eventMarks({ type: "dice", by: "dm1", to: "all", rolls: [roll] }, namesOf(s), true, levelOf(s) as never);
+  assert.deepEqual(one.marks.map((m) => m.at), [one.text.indexOf(", Stealth check:") + 2]);
+  const two = eventMarks({ type: "dice", by: "dm1", to: "all", rolls: [roll, { ...roll, total: 4 }] }, namesOf(s), true, levelOf(s) as never);
+  const labels = [...two.text.matchAll(/, Stealth check:/g)].map((m) => m.index + 2);
+  assert.deepEqual(two.marks.map((m) => m.at), labels);
+  assert.equal(labels.length, 2);
+});
+
 test("fl7: a toast keeps its words and marks the label only for one creature's rolls", () => {
   const s = state();
   const roll: DiceRoll = { characterId: "hero", label: "Stealth check", formula: "1d20+7", faces: [9], total: 16 };
@@ -128,4 +140,13 @@ test("fl7: a toast keeps its words and marks the label only for one creature's r
   assert.equal(toastMarks("Pat rolled 2 Stealth checks.", [roll, { ...roll, total: 4 }], levelOf(s) as never).length, 1, "one creature twice");
   assert.deepEqual(toastMarks("Pat rolled 2 Stealth checks.", [roll, { ...roll, characterId: "other" }], levelOf(s) as never), [], "two creatures stay neutral");
   assert.deepEqual(toastMarks("Pat rolled 16 for Hero, Stealth damage.", [{ ...roll, label: "Stealth damage" }], levelOf(s) as never), []);
+});
+
+test("fl7: the live region that says a result names its test's level after the test, and a result with no level says nothing more (FL7-SOL-04)", async () => {
+  const { spokenResult } = await import("./Roller.tsx");
+  const head = { total: 23, label: "Stealth check", sums: null, dice: [], more: 0 };
+  assert.equal(spokenResult(head, null, "expert"), "Rolled 23: Stealth check, expertise.");
+  assert.equal(spokenResult(head, "pass", "prof"), "Rolled 23, pass: Stealth check, proficient.");
+  assert.equal(spokenResult(head, null, "none"), "Rolled 23: Stealth check.");
+  assert.equal(spokenResult(head, null, undefined), "Rolled 23: Stealth check.");
 });

@@ -1,5 +1,5 @@
 import { testOf, type D20Test } from "#shared/dice/bonus.ts";
-import { creatureName, describeEvent, labelText, memberName, type LogNames } from "#shared/logText.ts";
+import { creatureName, describeEvent, labelText, memberName, rollCreature, type LogNames } from "#shared/logText.ts";
 import type { LogEvent } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import type { Proficiency } from "#shared/rules/proficiency.ts";
@@ -20,8 +20,8 @@ export function eventMarks(data: LogEvent, names: LogNames, dm: boolean, levelOf
     const labels = data.rolls.flatMap((roll) => {
       const target = rollTarget(roll);
       const test = rollTest(roll);
-      // A creature's roll reads "for Thorn, Perception check: " (shared/logText.ts rollSubject).
-      return target && roll.label !== undefined && marksTest(test) ? [{ label: labelText(roll.label), level: levelOf(target, test), after: ", " }] : [];
+      // A creature's roll reads "for Thorn, Perception check: " (shared/logText.ts rollSubject). The label is looked for after the whole subject, so a name with a comma and a test's name in it is never marked (FL7-SOL-03).
+      return target && roll.label !== undefined && marksTest(test) ? [{ label: labelText(roll.label), level: levelOf(target, test), after: `for ${rollCreature(roll, names)}, ` }] : [];
     });
     return { text, marks: findMarks(text, labels, memberName(names, data.by).length) };
   }
