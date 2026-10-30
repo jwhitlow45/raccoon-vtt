@@ -35,4 +35,6 @@ test("a PNG's text chunk is written once before IEND and read back", () => {
   assert.equal(readPngText(twice, "Version"), "0.3.0");
   assert.equal(twice.toString("latin1").split("tEXtVersion").length, 2, "one Version chunk, not two");
   assert.equal(twice.toString("latin1", twice.length - 8, twice.length - 4), "IEND", "IEND stays last");
+  // The chunk's CRC, worked out apart from node:zlib so a writer that hashes the wrong bytes fails.
+  assert.equal(twice.readUInt32BE(twice.length - 16), 0x52b4b189, "the CRC of tEXt, Version, NUL, 0.3.0");
 });
