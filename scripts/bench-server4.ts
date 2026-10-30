@@ -26,7 +26,8 @@
  *   node scripts/bench-server4.ts            (a laptop: budgets over 1.5, the reference server's ratio on this bench)
  *   node scripts/bench-server4.ts --server   (the server box itself: budgets as they are)
  *   node scripts/bench-server4.ts --discovery   (map discovery's rows alone, with or without --server)
- *   node scripts/bench-server4.ts --ask   (the builder's ask rows alone)
+ *   node scripts/bench-server4.ts --ask   (the builder's ask rows alone, whole party and per player)
+ *   Add --revision <full commit id> to tie the output to the measured checkout.
  *
  * Then the bright and dark scenes again per player
  * (docs/design-v1-per-player-vision.md 8.1), with the six players as the
@@ -610,7 +611,7 @@ async function runWalk(perPlayer: boolean, rows: Row[]): Promise<void> {
   });
   const reminded = table.actor.committed.state.log.filter((e) => e.data?.type === "area").length;
   if (reminded < 3 * RUNS) throw new Error(`the walks reminded ${reminded} times`);
-  rows.push({ row: `A routed walk across three areas during its turn, dark scene${perPlayer ? `, ${PER_PLAYER}` : ""}`, budget: 30, ms: walk.total, covers: "the DM's token.move with a route, each crossing judged at its moment" });
+  rows.push({ row: `A routed walk across three areas during its turn, dark scene${perPlayer ? `, ${PER_PLAYER}` : ", whole party"}`, budget: 30, ms: walk.total, covers: "the DM's token.move with a route, each crossing judged at its moment" });
   await table.actor.shutdown({ code: 1012, snapshot: false });
 }
 
@@ -662,7 +663,7 @@ function exploredAt(state: RoomState, tx: number, ty: number, perPlayer: boolean
 
 async function runDiscovery(perPlayer: boolean, rows: Row[]): Promise<void> {
   clearVisionCache();
-  const where = perPlayer ? `dark scene, ${PER_PLAYER}` : "dark scene";
+  const where = perPlayer ? `dark scene, ${PER_PLAYER}` : "dark scene, whole party";
   const table = await sitDown(remembering(perPlayer, false));
   checkMode(table.actor.committed.state, perPlayer);
   const state = () => table.actor.committed.state;
@@ -777,10 +778,16 @@ async function runFragmented(rows: Row[]): Promise<void> {
  * as the delay of a zero-delay timer kept running through it, which every
  * other room on the server waits out, and its whole time to the answer.
  */
-async function runAsk(rows: Row[]): Promise<void> {
+export function askBenchRoom(perPlayer: boolean): RoomState {
+  // Holder fixtures normally start with explored layers. Asks must read every op on ground no layer has seen.
+  return { ...benchRoom("dark", 5, perPlayer), buildChunks: {}, fogTiles: {}, exploredTiles: {}, exploredBy: {}, memory: {}, memoryBy: {}, playedScenes: { [SCENE]: { sceneId: SCENE, rev: 0 } }, memoryShared: {} };
+}
+
+async function runAsk(perPlayer: boolean, rows: Row[]): Promise<void> {
   clearVisionCache();
-  const room = benchRoom("dark", 5);
-  const table = await sitDown({ ...room, buildChunks: {}, memory: {}, memoryBy: {}, playedScenes: { [SCENE]: { sceneId: SCENE, rev: 0 } }, memoryShared: {} });
+  const table = await sitDown(askBenchRoom(perPlayer));
+  checkMode(table.actor.committed.state, perPlayer);
+  const where = `empty Explore scene, ${perPlayer ? PER_PLAYER : "whole party"}`;
   const terrain = (r: number): TerrainId => (r % 2 === 0 ? "wood" : "stone");
   const rect = (r: number, k: number): Op => ({ t: "build.rect", sceneId: SCENE, terrain: terrain(r), x: 0, y: (k % 20) * 10, w: 200, h: 10 });
   const gestures = [
@@ -797,8 +804,8 @@ async function runAsk(rows: Row[]): Promise<void> {
       turns.push(t.turn);
       totals.push(t.total);
     }
-    rows.push({ row: `${what}, its longest synchronous turn, empty Explore scene`, budget: 25, ms: stats(turns), covers: "the DM's build.ask parts: the event loop's delay while they are read, which every room waits out" });
-    rows.push({ row: `${what}, to its answer, empty Explore scene`, budget: 5_000, ms: stats(totals), covers: "the DM's build.ask parts from the first's arrival to the last's answer" });
+    rows.push({ row: `${what}, its longest synchronous turn, ${where}`, budget: 25, ms: stats(turns), covers: "the DM's build.ask parts: the event loop's delay while they are read, which every room waits out" });
+    rows.push({ row: `${what}, to its answer, ${where}`, budget: 5_000, ms: stats(totals), covers: "the DM's build.ask parts from the first's arrival to the last's answer" });
   }
   // What an ask's turn is held to: a batch today with one such band, applied, remembered and sent.
   const turns: number[] = [];
@@ -808,7 +815,7 @@ async function runAsk(rows: Row[]): Promise<void> {
     const turn = sampler.stop();
     if (r >= 2) turns.push(turn);
   }
-  rows.push({ row: "One band of 2,000 squares sent as an op, its longest synchronous turn, empty Explore scene", budget: 25, ms: stats(turns), covers: "the DM's build.rect: a batch's turn, which an ask's turn matches" });
+  rows.push({ row: `One band of 2,000 squares sent as an op, its longest synchronous turn, ${where}`, budget: 25, ms: stats(turns), covers: "the DM's build.rect: a batch's turn, which an ask's turn matches" });
   await table.actor.shutdown({ code: 1012, snapshot: false });
 }
 
@@ -873,14 +880,12 @@ export async function runServerBench(): Promise<Row[]> {
     await runLevel("dark", 1, rows);
     await runFreeLight(5, false, rows);
     await runFreeLight(1, false, rows);
-    await runWalk(false, rows);
     // The same per player, at the worst ownership the holder cap allows.
     await runLevel("bright", 5, rows, true);
     await runLevel("dark", 5, rows, true);
     await runFogOff("bright", rows);
     await runFogOff("dark", rows);
     await runFreeLight(5, true, rows);
-    await runWalk(true, rows);
     rows.push(...(await runDiscoveryBench()));
   } finally {
     untime();
@@ -891,21 +896,39 @@ export async function runServerBench(): Promise<Row[]> {
 /** Map discovery's rows alone (`--discovery`). */
 export async function runDiscoveryBench(): Promise<Row[]> {
   const rows: Row[] = [];
+  await runWalk(false, rows);
+  await runWalk(true, rows);
   await runDiscovery(false, rows);
   await runDiscovery(true, rows);
   await runFragmented(rows);
-  await runAsk(rows);
+  await runAsk(false, rows);
+  await runAsk(true, rows);
   return rows;
 }
 
-export function formatServerBench(rows: Row[], onServer: boolean): string {
+/** A recorded gate names a complete commit, since bookmarks can move after the measurement. */
+export function benchRevision(args: readonly string[]): string | undefined {
+  const flags = args.flatMap((arg, i) => arg === "--revision" ? [i] : []);
+  if (flags.length === 0) return undefined;
+  const value = args[flags[0]! + 1];
+  if (flags.length !== 1 || !value || !/^[0-9a-f]{40}$/.test(value)) throw new Error("--revision needs one full 40-character commit id");
+  return value;
+}
+
+export function formatServerBench(rows: Row[], onServer: boolean, revision?: string): string {
   // The reference server ran these rows at about 1.5 times an M1 laptop's times (the gate of 2026-10-14).
   const factor = onServer ? 1 : 1.5;
   const ms = (s: Ms) => `${s.median.toFixed(1)} / ${s.max.toFixed(1)}`;
-  const lines = ["row | ms here (median / max) | budget | limit here | ok | what it runs", "--- | --- | --- | --- | --- | ---"];
+  const lines = [
+    `Revision: ${revision ?? "unrecorded"}`,
+    `Machine: ${onServer ? "server-box measurement, unscaled server budgets" : "laptop measurement, server budgets divided by 1.5"}.`,
+    "",
+    "row | ms here (median / max) | budget | limit here | median / limit | ok | above twice limit | what it runs",
+    "--- | --- | --- | --- | --- | --- | --- | ---",
+  ];
   for (const r of rows) {
     const limit = r.budget / factor;
-    lines.push(`${r.row} | ${ms(r.ms)} | ${r.budget} | ${limit.toFixed(1)} | ${r.ms.median <= limit ? "yes" : "NO"} | ${r.covers}`);
+    lines.push(`${r.row} | ${ms(r.ms)} | ${r.budget} | ${limit.toFixed(1)} | ${(r.ms.median / limit).toFixed(2)} | ${r.ms.median <= limit ? "yes" : "NO"} | ${r.ms.median > 2 * limit ? "yes" : "no"} | ${r.covers}`);
   }
   lines.push(
     "",
@@ -916,7 +939,11 @@ export function formatServerBench(rows: Row[], onServer: boolean): string {
 
 const argv = process.argv;
 if (argv[1] && import.meta.url.endsWith(argv[1].replace(/^.*scripts\//, "scripts/"))) {
+  const revision = benchRevision(argv);
   const rows: Row[] = [];
-  if (argv.includes("--ask")) await runAsk(rows);
-  console.log(formatServerBench(argv.includes("--ask") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server")));
+  if (argv.includes("--ask")) {
+    await runAsk(false, rows);
+    await runAsk(true, rows);
+  }
+  console.log(formatServerBench(argv.includes("--ask") ? rows : argv.includes("--discovery") ? await runDiscoveryBench() : await runServerBench(), argv.includes("--server"), revision));
 }
