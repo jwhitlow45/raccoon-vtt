@@ -1,8 +1,8 @@
-import { useMemo } from "react";
-import { advantageFields } from "#shared/dice/formula.ts";
+import { useMemo, useRef } from "react";
+import { resolveRollMode, type RollModeOverride } from "../dice/rollMode.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomView } from "../../state/view.ts";
+import { useRoomStore, useRoomView } from "../../state/view.ts";
 import { alertCard } from "../encounter/alertCard.ts";
 import { CardButtons, rollTrouble, useCardRoll } from "../encounter/CardRoll.tsx";
 import type { CardButton } from "../encounter/saveCards.ts";
@@ -10,7 +10,7 @@ import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useRollBlocked } from "../dice/useRollOption.ts";
 import type { PromptCard } from "./alerts.ts";
-import { actorOf, deathSaveResult, deathSaveWords, promptOp, type DeathSavePrompt } from "./logic.ts";
+import { actorOf, openRecord, deathSaveResult, deathSaveWords, promptOp, type DeathSavePrompt } from "./logic.ts";
 import { useAnsweredSend } from "./send.ts";
 import { WAITS_FOR_REGENERATION } from "./state.ts";
 
@@ -39,13 +39,16 @@ export function deathSaveRow(target: { tokenId: string } | { characterId: string
  */
 export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits: boolean; onDismiss(): void }) {
   const { card } = props;
+  const root = useRef<HTMLElement>(null);
+  const room = useRoomStore();
+  const dm = useRoomView((s) => s.you?.role === "dm");
   const { participant, prompt } = card;
   const target = participant.target;
   const saves = useRoomView((s) => (s.view ? actorOf(s.view, target)?.deathSaves : undefined));
   const creatures = useMemo(() => [target], [target]);
   const { dice } = useDiceView(creatures);
   const blocked = useRollBlocked();
-  const roll = useCardRoll(deathSaveRow(target));
+  const roll = useCardRoll(deathSaveRow(target), card.record);
   const send = useAnsweredSend<Action>();
   const settled = prompt.settled;
   const buttons: CardButton<Action>[] = settled
@@ -55,21 +58,26 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
         { action: "skip", text: "Skip" },
         { action: "dismiss", text: "Dismiss" },
       ];
-  const tap = (action: Action) => {
+  const valid = () => {
+    const state = room.getState();
+    return state.connection === "open" && !!state.view && openRecord(state.view.encounter, actorOf(state.view, target), "deathSave") === card.record;
+  };
+  const tap = (action: Action, override?: RollModeOverride) => {
     if (action === "roll") {
-      if (props.waits || blocked || !dice || roll.waiting) return;
+      if (props.waits || blocked || !dice || roll.waiting || send.busy || settled || !valid()) return;
       // Its preset is read at the tap, from the creature's effects then, with none of the Dice panel's choices (docs/design-v1-roll-options.md 6.3).
       const preset = presetFor(dice, target, { kind: "deathSave" });
       const extra = preset.extra.join("").replace(/^\+/, "");
-      roll.send({ t: "actor.deathRoll", tag: uuidv7(), target, ...advantageFields(preset.sources), ...(extra ? { extra } : {}), record: card.record });
+      roll.send({ t: "actor.deathRoll", tag: uuidv7(), target, ...resolveRollMode(preset.sources, [], override), ...(extra ? { extra } : {}), record: card.record });
     } else if (action === "skip") send.send("skip", promptOp(target, card.record, "deathSave", "skipped"));
     else props.onDismiss();
   };
   const trouble = rollTrouble(roll.receipt, roll.unsent) ?? send.refusal;
-  const status = settled ? deathSaveResult(participant.name, settled) : props.waits ? WAITS_FOR_REGENERATION : null;
+  const status = settled ? `${deathSaveResult(participant.name, settled)}${roll.mode ? ` ${roll.mode}.` : ""}` : props.waits ? WAITS_FOR_REGENERATION : null;
   return (
     // Focusable from script, not by Tab, so the dock's summary can show it (pages/fold.ts focusAlert).
     <section
+      ref={root}
       role="group"
       aria-label={`Death save for ${participant.name}`}
       tabIndex={-1}
@@ -88,7 +96,13 @@ export function DeathSaveCard(props: { card: PromptCard<DeathSavePrompt>; waits:
           {trouble ? <span style={{ color: theme.color.dangerText }}>{trouble}</span> : null}
         </div>
       ) : null}
-      <CardButtons buttons={buttons} busy={send.busy} rollBusy={roll.waiting} blocked={props.waits ? WAITS_FOR_REGENERATION : blocked} onTap={tap} />
+      <CardButtons buttons={buttons} busy={send.busy} rollBusy={roll.waiting} blocked={props.waits ? WAITS_FOR_REGENERATION : blocked} onTap={tap} rollMenu={{
+        source: JSON.stringify([card, target, props.waits, dice && actorOf(dice.view, target), dice?.view.encounter, blocked]),
+        name: `Death Save for ${participant.name}`, capability: { d20: !settled, visibility: "creature" }, dm,
+        disabled: props.waits || !!blocked || !dice || roll.waiting || send.busy !== null,
+        valid, fallbackFocus: () => root.current,
+        onTap: () => tap("roll"), onRoll: (override) => tap("roll", override),
+      }} />
     </section>
   );
 }

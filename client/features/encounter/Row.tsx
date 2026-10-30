@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject } from "react";
+import { startsSecret } from "#shared/dice/secret.ts";
 import type { Effect, InitEntry, Token } from "#shared/model.ts";
 import { playersTypeTotals } from "#shared/permissions.ts";
 import { playerPlays, type ProjectedActor } from "#shared/project.ts";
@@ -12,10 +13,13 @@ import { Switch } from "../../components/Switch.tsx";
 import { Tag } from "../../components/Tag.tsx";
 import { theme } from "../../lib/theme.ts";
 import { useRoomScope } from "../../state/scope.ts";
-import { useRoomActions, useRoomUi, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomUi, useRoomView } from "../../state/view.ts";
 import { creatureRolls, srdNeeds } from "../dice/creature.ts";
 import { creatureKey, signedText } from "../dice/options.ts";
 import { useOptionStore } from "../dice/optionState.ts";
+import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
+import { useDicePanel } from "../dice/useDicePanel.ts";
+import type { RollModeOverride } from "../dice/rollMode.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "../dice/useRollOption.ts";
@@ -725,6 +729,10 @@ function rollFitsBeside(linePx: number, slotted: boolean): boolean {
  */
 function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: string; onRolled(at: RollAt): void }) {
   const { entry, creature } = props;
+  const room = useRoomStore();
+  const fallback = useRef<HTMLElement | null>(null);
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  const panel = useDicePanel();
   const creatures = useMemo(() => [creature], [creature]);
   const { dice, failed } = useDiceView(creatures);
   const option = useRollOption();
@@ -733,13 +741,16 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
   const watch = useWatchInitiative();
   const blocked = useRollBlocked();
   const { waiting } = useRowResult(rollRow(entry.id));
-  if (!dice) return null;
-  const numbers = creatureRolls(dice, creature);
-  const needs = srdNeeds(dice, creature);
+  const numbers = dice ? creatureRolls(dice, creature) : null;
+  const needs = dice ? srdNeeds(dice, creature) : { monsters: false, rolls: false };
   const loading = numbers === null && !failed && (needs.monsters || needs.rolls);
-  if (numbers === null && !loading && !failed) return null;
-  const roll = () => {
-    if (!numbers) return;
+  const valid = () => {
+    const state = room.getState();
+    const live = state.view?.encounter?.entries.find((e) => e.id === entry.id);
+    return state.connection === "open" && !!live && JSON.stringify(live) === JSON.stringify(entry);
+  };
+  const roll = (override?: RollModeOverride) => {
+    if (!numbers || !dice || waiting || blocked || !valid()) return;
     if (numbers.initBonus === null) {
       options.setState((s) => ({ focus: s.focus + 1, picked: creatureKey(dice.view, creature) }));
       ui.openPanel("dice");
@@ -748,6 +759,7 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
     const tag = option.d20({
       creature,
       test: INITIATIVE,
+      override,
       bonus: numbers.initBonus,
       preset: presetFor(dice, creature, INITIATIVE, { rolls: numbers }),
       label: "Initiative",
@@ -762,18 +774,35 @@ function InitiativeRoll(props: { entry: InitEntry; creature: ActorTarget; name: 
   };
   const text = numbers ? (numbers.initBonus === null ? "Roll d20" : `Roll ${signedText(numbers.initBonus)}`) : "Roll";
   const reason = blocked ?? (failed ? "Its numbers did not load. Reload to try again." : null);
+  const menu = useRollModeMenu({
+    source: JSON.stringify([entry, creature, numbers, dice && numbers && presetFor(dice, creature, INITIATIVE, { rolls: numbers }), dice && startsSecret(dice.view, dm, [creature]), panel.adv, panel.dis, panel.secret]),
+    name: `${text} Initiative for ${props.name}`,
+    capability: { d20: numbers?.initBonus !== null && !!numbers, visibility: numbers?.initBonus === null ? "creature" : "selectable" }, dm,
+    disabled: waiting || loading || !!reason, valid,
+    fallbackFocus: () => fallback.current,
+    onTap: () => roll(), onRoll: roll,
+  });
+  if (!dice || (numbers === null && !loading && !failed)) return null;
   return (
-    <Button
-      size="sm"
-      busy={waiting || loading}
-      disabled={reason !== null}
-      title={reason ?? undefined}
-      aria-label={`${text} Initiative for ${props.name}${entry.value === null ? "" : `, replacing ${entry.value}`}`}
-      onClick={roll}
-      style={{ flex: "none", width: ROLL_PX, padding: `0 ${theme.space(2)}px` }}
-    >
-      {waiting || loading ? null : text}
-    </Button>
+    <>
+      <Button
+        {...menu.buttonProps}
+        ref={(node) => {
+          if (node) fallback.current = node.closest("[data-entry-row]")?.querySelector<HTMLElement>("[data-row-button]") ?? null;
+          menu.buttonProps.ref(node);
+        }}
+        size="sm"
+        busy={waiting || loading}
+        disabled={reason !== null}
+        title={reason ?? undefined}
+        aria-label={`${text} Initiative for ${props.name}${entry.value === null ? "" : `, replacing ${entry.value}`}`}
+        aria-describedby={menu.describe()}
+        style={{ flex: "none", width: ROLL_PX, padding: `0 ${theme.space(2)}px`, ...menu.pressStyle }}
+      >
+        {waiting || loading ? null : text}
+      </Button>
+      {menu.menu}
+    </>
   );
 }
 

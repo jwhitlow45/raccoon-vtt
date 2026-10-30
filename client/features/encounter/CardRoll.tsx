@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import type { ClientOp } from "#shared/protocol.ts";
 import { Button, type ButtonVariant } from "../../components/Button.tsx";
 import { Chip } from "../../components/Chip.tsx";
@@ -10,6 +10,9 @@ import { sendRoll, useRollSender, type TaggedOp } from "../dice/send.ts";
 import { useDicePanel, type PanelRoll } from "../dice/useDicePanel.ts";
 import type { ReceiptState } from "../dice/useReceipt.ts";
 import { useRowResult } from "../dice/useRollOption.ts";
+import { useRollModeMenu, type UseRollModeMenuOptions } from "../dice/useRollModeMenu.tsx";
+import type { RollModeOverride } from "../dice/rollMode.ts";
+import { returnedRollMode } from "../rolls/card.ts";
 import { pressChip, type CardButton, type CardChip } from "./saveCards.ts";
 
 /*
@@ -41,9 +44,10 @@ export function useCardRoll(row: string, after?: number) {
   };
   return {
     ...result,
+    mode: result.receipt?.state === "committed" ? returnedRollMode(result.receipt.lines) : "",
     /** The last tap sent nothing, such as a roll the splitter refused. */
     unsent,
-    roll: (rolls: PanelRoll[], opts: { to: "all" | "dm"; dc?: number }) => remember(panel.roll(rolls, opts)),
+    roll: (rolls: PanelRoll[], opts: { to: "all" | "dm"; dc?: number; override?: RollModeOverride }) => remember(panel.roll(rolls, opts)),
     /** A request's answer rolled on the server (`roll.dice`), tracked the same way. */
     send: (op: TaggedOp) => remember(sendRoll(sender, op) === null ? null : op.tag),
   };
@@ -158,7 +162,9 @@ export function CardButtons<A extends string>(props: {
   /** Roll opens the bonus field first, as a disclosure (useTypedRoll). */
   rollOpens?: boolean;
   onTap(action: A): void;
+  rollMenu?: UseRollModeMenuOptions;
 }) {
+  const menu = useRollModeMenu(props.rollMenu ?? { source: "no-roll-menu", name: "Roll", capability: { d20: false, visibility: "creature" }, dm: false, onTap() {}, onRoll() {} });
   return (
     // The row is a size container, so a narrow one can shorten Roll d20's words and every button's side padding with them (globals.css, rvtt-roll-word).
     <div className={props.rollOpens ? "rvtt-roll-row" : undefined} style={{ display: "flex", flexWrap: "wrap", gap: theme.space(2), containerType: "inline-size" }}>
@@ -167,28 +173,32 @@ export function CardButtons<A extends string>(props: {
         const variant: ButtonVariant = i === 0 && PRIMARY.has(b.action) ? "primary" : DANGER.has(b.action) ? "danger" : "secondary";
         const opens = roll && props.rollOpens === true;
         return (
-          <Button
-            key={b.action}
-            size="sm"
-            variant={variant}
-            busy={roll ? props.rollBusy : props.busy === b.action}
-            expanded={opens ? false : undefined}
-            disabled={roll && props.blocked !== null}
-            title={roll && props.blocked !== null ? props.blocked : undefined}
-            aria-label={opens ? b.text : undefined}
-            onClick={() => props.onTap(b.action)}
-            style={{ flex: "1 1 auto" }}
-          >
-            {opens && b.text.startsWith("Roll ") ? (
-              // One run of text, so the button's flex box never splits the words into two items.
-              <span>
-                <span className="rvtt-roll-word">Roll </span>
-                {b.text.slice("Roll ".length)}
-              </span>
-            ) : (
-              b.text
-            )}
-          </Button>
+          <Fragment key={b.action}>
+            <Button
+              {...(roll && props.rollMenu ? menu.buttonProps : {})}
+              size="sm"
+              variant={variant}
+              busy={roll ? props.rollBusy : props.busy === b.action}
+              expanded={opens ? false : undefined}
+              disabled={roll && props.blocked !== null}
+              title={roll && props.blocked !== null ? props.blocked : undefined}
+              aria-label={opens ? b.text : undefined}
+              onClick={roll && props.rollMenu ? menu.buttonProps.onClick : () => props.onTap(b.action)}
+              aria-describedby={roll && props.rollMenu ? menu.describe() : undefined}
+              style={{ flex: "1 1 auto", ...(roll && props.rollMenu ? menu.pressStyle : {}) }}
+            >
+              {opens && b.text.startsWith("Roll ") ? (
+                // One run of text, so the button's flex box never splits the words into two items.
+                <span>
+                  <span className="rvtt-roll-word">Roll </span>
+                  {b.text.slice("Roll ".length)}
+                </span>
+              ) : (
+                b.text
+              )}
+            </Button>
+            {roll && props.rollMenu ? menu.menu : null}
+          </Fragment>
         );
       })}
     </div>

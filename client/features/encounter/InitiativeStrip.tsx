@@ -4,6 +4,7 @@ import { useStore } from "zustand";
 import type { Effect, LogEntry } from "#shared/model.ts";
 import { Button } from "../../components/Button.tsx";
 import { Icon } from "../../components/Icon.tsx";
+import type { RollModeOverride } from "../dice/rollMode.ts";
 import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
 import { askedAlerts, barDockSlot, CARD_MAX, columnFacts, columnRoom, columnTop, DOCK_MIN_WIDTH, EDGE, placedChrome, raisedRow, SHADOW_ROOM, SUMMARY_ROW, type AskedAlerts } from "../../canvas/barDock.ts";
 import { ScrollForMore } from "../../canvas/TokenActionBar.tsx";
@@ -1414,6 +1415,7 @@ function seqOf(entry: LogEntry): number {
  */
 export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone(): void; onResult(text: string): void }) {
   const { prompt } = props;
+  const root = useRef<HTMLElement>(null);
   const dm = useYou().role === "dm";
   const actions = useRoomActions();
   const room = useRoomStore();
@@ -1451,20 +1453,24 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
     const decided = total >= prompt.dc ? "pass" : left === 0 ? "fail" : null;
     if (decided === null) return;
     // The card goes as the roll decides it, so its result stays a moment as a notice.
-    props.onResult(concentrationWords(name, total, decided));
+    props.onResult(`${concentrationWords(name, total, decided)}${own.mode ? ` ${own.mode}.` : ""}`);
     if (decided === "pass") props.onDone();
     else end();
   });
 
   const model = concentrationCard({ dc: prompt.dc, bonus, typed: typed.typing, loading: !failed && rolls === null, preset, legendaryLeft: left, failTapped, rolled: own.rolls[0]?.total ?? null });
   const trouble = rollTrouble(own.receipt, own.unsent);
-  const tap = (action: ConcentrationAction) => {
+  const valid = () => {
+    const state = room.getState();
+    return state.connection === "open" && !!state.view && !!entryActor(state.view, prompt.target)?.effects.some((e) => e.key === "concentrating");
+  };
+  const tap = (action: ConcentrationAction, override?: RollModeOverride) => {
     switch (action) {
       case "roll":
         if (typedRoll.closed) typedRoll.open();
-        else if (bonus !== null && preset) {
+        else if (bonus !== null && preset && !blocked && !own.waiting && !send.busy && valid()) {
           const state = room.getState().view;
-          if (state) own.roll([cardRoll(prompt.target, bonus, preset, CONCENTRATION_TEST, chip)], concentrationRollTo(state, dm, prompt));
+          if (state) own.roll([cardRoll(prompt.target, bonus, preset, CONCENTRATION_TEST, chip)], { ...concentrationRollTo(state, dm, prompt), override });
         }
         return;
       case "pass":
@@ -1486,6 +1492,7 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
     // Focusable from script, not by Tab, so the dock's summary can show it (pages/fold.ts focusAlert).
     <section
       role="group"
+      ref={root}
       aria-label={`Concentration save for ${name}`}
       tabIndex={-1}
       data-alert="concentration"
@@ -1504,7 +1511,7 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
       </div>
       {model.status || trouble ? (
         <div role="status" style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>
-          {model.status ? <span>{model.status}</span> : null}
+          {model.status ? <span>{model.status}{own.mode ? ` ${own.mode}.` : ""}</span> : null}
           {trouble ? <span style={{ color: own.receipt?.state === "refused" ? theme.color.dangerText : theme.color.textMuted }}>{trouble}</span> : null}
         </div>
       ) : null}
@@ -1512,7 +1519,13 @@ export function ConcentrationCard(props: { prompt: ConcentrationPrompt; onDone()
       {model.buttons.some((b) => b.action === "roll") && !typedRoll.closed ? (
         <CardChips chip={chip} onChange={setChip} name={name} bonus={typed.typing ? <CardBonus name={name} value={bonusText} error={typed.error} onChange={setBonusText} /> : null} />
       ) : null}
-      <CardButtons buttons={model.buttons} busy={send.busy} rollBusy={own.waiting || model.rollLoading} blocked={typedRoll.blocked} rollOpens={typedRoll.closed} onTap={tap} />
+      <CardButtons buttons={model.buttons} busy={send.busy} rollBusy={own.waiting || model.rollLoading} blocked={typedRoll.blocked} rollOpens={typedRoll.closed} onTap={tap} rollMenu={{
+        source: JSON.stringify([prompt, bonus, bonusText, chip, preset, model, typedRoll.closed, dice ? concentrationRollTo(dice.view, dm, prompt) : null]),
+        name: `Concentration save for ${name}`, capability: { d20: !typedRoll.closed, visibility: "creature" }, dm,
+        disabled: !!typedRoll.blocked || own.waiting || model.rollLoading || send.busy !== null,
+        valid, fallbackFocus: () => root.current,
+        onTap: () => tap("roll"), onRoll: (override) => tap("roll", override),
+      }} />
     </section>
   );
 }

@@ -16,11 +16,15 @@ import { VISUALLY_HIDDEN } from "../../lib/a11y.ts";
 import { handFocusOn } from "../../lib/handFocus.ts";
 import { hpDisplay, hpLabel, hpText, type HpView } from "../../lib/tokenView.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { useHpChips, useMarkChipApplied } from "../dice/hpChips.ts";
 import { defenseSummaryText } from "../dice/damageSummaryLines.ts";
 import { DamageSummary } from "../dice/DamageSummary.tsx";
 import { resultWords, type HpChip } from "../dice/options.ts";
+import { returnedRollMode } from "../rolls/card.ts";
+import { useDicePanel } from "../dice/useDicePanel.ts";
+import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
+import type { RollModeOverride } from "../dice/rollMode.ts";
 import { presetFor } from "../dice/presets.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useRollBlocked, useRollOption, useRowResult } from "../dice/useRollOption.ts";
@@ -641,6 +645,10 @@ export function DeathSaves(props: { saves: { ok: number; fail: number }; canEdit
  */
 function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
   const { target } = props;
+  const room = useRoomStore();
+  const fallback = useRef<HTMLElement | null>(null);
+  const panel = useDicePanel();
+  const dm = useRoomView((s) => s.you?.role === "dm");
   const option = useRollOption();
   const waits = useDeathSaveWaits(target);
   const blocked = useRollBlocked() ?? (waits ? WAITS_FOR_REGENERATION : null);
@@ -648,11 +656,22 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
   const row = `deathSave:${"tokenId" in target ? target.tokenId : target.characterId}`;
   const { receipt, rolls, waiting } = useRowResult(row);
   const blockedId = useId();
-  const roll = () => {
-    if (waiting || blocked || !dice) return;
-    // The preset is read at the tap, from the creature's effects then (presets.ts). While its turn's death save is open, the roll settles it (docs/design-v1-combat-controls.md 2.3).
-    option.deathSave(target, presetFor(dice, target, { kind: "deathSave" }), row, openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"));
+  const valid = () => {
+    const state = room.getState();
+    return state.connection === "open" && !!state.view && actorOf(state.view, target)?.life === "dying";
   };
+  const roll = (override?: RollModeOverride) => {
+    if (waiting || blocked || !dice || !valid()) return;
+    // The preset is read at the tap, from the creature's effects then (presets.ts). While its turn's death save is open, the roll settles it (docs/design-v1-combat-controls.md 2.3).
+    option.deathSave(target, presetFor(dice, target, { kind: "deathSave" }), row, openRecord(dice.view.encounter, actorOf(dice.view, target), "deathSave"), override);
+  };
+  const menu = useRollModeMenu({
+    source: JSON.stringify([target, dice && actorOf(dice.view, target), dice?.view.encounter, waits, blocked, panel.adv, panel.dis, panel.secret]), name: "Death Save",
+    capability: { d20: true, visibility: "creature" }, dm,
+    disabled: waiting || !!blocked || !dice, valid,
+    fallbackFocus: () => fallback.current,
+    onTap: () => roll(), onRoll: roll,
+  });
   const said = blocked
     ? null
     : receipt?.state === "refused"
@@ -660,23 +679,28 @@ function DeathRoll(props: { target: ActorTarget; children: ReactNode }) {
       : receipt?.state === "unknown"
         ? "This may have happened. Check the log."
         : rolls.length > 0
-          ? resultWords(rolls, "d20")
+          ? `${resultWords(rolls, "d20").replace(", normal: Advantage and Disadvantage cancelled", "")}${receipt?.state === "committed" ? `. ${returnedRollMode(receipt.lines)}.` : ""}`
           : null;
   return (
     <>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: theme.space(2) }}>
         {props.children}
         <Button
+          {...menu.buttonProps}
+          ref={(node) => {
+            if (node) fallback.current = node.closest("section")?.querySelector<HTMLElement>("[data-hp-vitals]") ?? node.closest<HTMLElement>("[role='dialog'][data-bar-mode]");
+            menu.buttonProps.ref(node);
+          }}
           size="sm"
           busy={waiting}
           disabled={blocked !== null || !dice}
           aria-label={waiting ? "Rolling a Death Save" : "Roll a Death Save"}
-          aria-describedby={blocked ? blockedId : undefined}
-          onClick={roll}
-          style={{ flex: "none", whiteSpace: "nowrap" }}
+          aria-describedby={menu.describe(blocked ? blockedId : undefined)}
+          style={{ flex: "none", whiteSpace: "nowrap", ...menu.pressStyle }}
         >
           {waiting ? "Rolling…" : "Roll"}
         </Button>
+        {menu.menu}
       </div>
       {blocked ? (
         <span id={blockedId} style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>

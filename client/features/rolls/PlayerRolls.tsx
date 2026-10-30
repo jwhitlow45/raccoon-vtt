@@ -34,6 +34,9 @@ import { creatureProficiency, creatureRolls } from "../dice/creature.ts";
 import { presetFor } from "../dice/presets.ts";
 import { findMarks, marksTest } from "../dice/proficiencyPresentation.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "../dice/send.ts";
+import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
+import type { RollModeOverride } from "../dice/rollMode.ts";
+import { useRollBlocked } from "../dice/useRollOption.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
 import { useProficiency } from "../dice/useProficiency.ts";
 import { refusalWords } from "../dice/useReceipt.ts";
@@ -42,7 +45,7 @@ import { editsPcStats } from "../tokens/access.ts";
 import { announceTurn } from "../encounter/alerts.ts";
 import { chromeZoom, screenHeight, smallUi, useLayoutSize } from "../device/layout.ts";
 import { uiScale, useUiScale } from "../device/settings.ts";
-import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
+import { askedText, askItems, askKept, bestChoice, cardRoll, choiceLabel, KEPT, naturalText, normalResult, parseBonus, rolledDice, rolledNews, verdictText, type AskItem, type RollInputs } from "./card.ts";
 import {
   answered,
   answerFlow,
@@ -754,6 +757,7 @@ function CreatureAnswer(props: {
   const keep = (draft: { text?: string; choice?: 0 | 1; focused?: boolean; inputs?: RollInputs }) =>
     drafts.set(key, { text, choice, inputs, focused: drafts.get(key)?.focused === true, ...draft, base: answerKey(target) });
   const field = useRef<HTMLInputElement>(null);
+  const answerRoot = useRef<HTMLDivElement>(null);
   // A card mounted afresh by turning the phone gives focus back to the field being typed in.
   useLayoutEffect(() => {
     if (start.focused) revealAndFocus(field.current);
@@ -797,8 +801,17 @@ function CreatureAnswer(props: {
     return answer === "taken" || landing === "mine";
   };
 
-  const tapRoll = () => {
-    const now = cardRoll({ bonus, preset: dice ? presetFor(dice, ref, test, { rolls }) : null, inputs, text, typeTotals });
+  const rollBlocked = useRollBlocked();
+  const liveRoll = () => {
+    const state = store.getState();
+    const live = state.view?.rolls[request.id];
+    const answer = live?.targets.find((t) => targetKey(t) === tkey);
+    return state.connection === "open" && !!live && live.rev === request.rev && !!answer && !finalForPlayer(live, answer) && !answered(answer) && flowRef.current.busy === null;
+  };
+  const tapRoll = (override?: RollModeOverride) => {
+    if (rollBlocked || !liveRoll()) return;
+    const now = cardRoll({ bonus, preset: dice ? presetFor(dice, ref, test, { rolls }) : null, inputs, text, typeTotals, override });
+    if (now.blocked) return;
     if (!now.fields.ok) {
       step({ t: "check", error: now.fields.error });
       return;
@@ -816,6 +829,18 @@ function CreatureAnswer(props: {
     });
     if (n === null) step({ t: "answer", tag, answer: "refused", text: connected ? "That roll could not be sent." : NEEDS_CONNECTION });
   };
+
+  const rollMenu = useRollModeMenu({
+    source: JSON.stringify([request, ref, picked, bonus, inputs, text, typeTotals, preset]),
+    name: `${roll.label} for ${name}`,
+    capability: { d20: true, visibility: "request" },
+    disabled: busy !== null || !offers.roll || !!rollBlocked,
+    dm: useRoomView((s) => s.you?.role === "dm"),
+    valid: liveRoll,
+    fallbackFocus: () => answerRoot.current?.closest<HTMLElement>("[role='dialog']") ?? null,
+    onTap: () => tapRoll(),
+    onRoll: tapRoll,
+  });
 
   const send = (op: { total: number } | { fail: true }) => {
     const tag = actions.newId();
@@ -904,6 +929,7 @@ function CreatureAnswer(props: {
 
   return (
     <div
+      ref={answerRoot}
       style={{
         display: "grid",
         gap: theme.space(2),
@@ -983,17 +1009,23 @@ function CreatureAnswer(props: {
                  */}
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2) }}>
                   <Button
+                    {...rollMenu.buttonProps}
                     type="submit"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      rollMenu.buttonProps.onClick?.(event);
+                    }}
                     size="sm"
-                    style={{ flex: "1 1 auto" }}
+                    style={{ flex: "1 1 auto", ...rollMenu.pressStyle }}
                     variant={failsFirst || (typeTotals && text.trim() !== "") ? "secondary" : "primary"}
                     aria-label={`${roll.label} for ${name}`}
-                    aria-describedby={[waitsFor ? whyId : null, roll.reading ? readingId : null].filter((d) => d !== null).join(" ") || undefined}
+                    aria-describedby={rollMenu.describe([waitsFor ? whyId : null, roll.reading ? readingId : null].filter((d) => d !== null).join(" ") || undefined)}
                     busy={busy === "roll"}
                     disabled={busy === null ? !offers.roll : busy !== "roll"}
                   >
                     {roll.label}
                   </Button>
+                  {rollMenu.menu}
                   <span style={{ display: "inline-flex", gap: theme.space(1) }}>
                     <Chip pressed={inputs.pressed === "adv"} aria-label="Advantage" disabled={busy !== null} onClick={() => setInput({ pressed: inputs.pressed === "adv" ? null : "adv" })}>
                       Adv
@@ -1227,7 +1259,7 @@ function RolledResult(props: { target: RollTarget }) {
           )}
         </Fragment>
       ))}
-      ).{natural ? ` ${natural}.` : ""}
+      ).{natural ? ` ${natural}.` : ""}{normalResult(dice) ? ` ${normalResult(dice)}.` : ""}
       {verdict ? ` ${verdict}.` : ""} Final.
     </div>
   );

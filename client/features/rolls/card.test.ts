@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import type { DiceResult, RollTarget } from "#shared/model.ts";
+import type { DiceResult, LogEntry, RollTarget } from "#shared/model.ts";
 import { reminderPreset } from "#shared/rules/rollReminders.ts";
-import { askedText, askItems, askKept, askRowText, bestChoice, BONUS_WORDS, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, knownOrTyped, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, TYPE_BONUS, verdictText } from "./card.ts";
+import { askedText, askItems, askKept, askRowText, bestChoice, BONUS_WORDS, cardRoll, dmRoll, choiceLabel, CLEAR_TOTAL, knownOrTyped, NO_INPUTS, parseBonus, rolledDice, rolledNews, rolledText, returnedRollMode, normalResult, TYPE_BONUS, verdictText } from "./card.ts";
 
 const DEX = { kind: "save", ability: "dex" } as const;
 const restrained = [{ key: "restrained" as const }];
@@ -79,9 +79,9 @@ describe("a rolled result's words (5.4)", () => {
     const target: RollTarget = { characterId: "thorn", total: 12, result: "fail", dice: dis, tag: "t1" };
     assert.deepEqual(rolledDice(dis), { formula: "1d20+3+1d4 with Disadvantage", faces: [{ face: 14, dropped: true }, { face: 6, dropped: false }, { face: 3, dropped: false }] });
     assert.equal(rolledText(target), "Rolled 12 (1d20+3+1d4 with Disadvantage: 14 dropped, 6, 3). Fail.");
-    assert.equal(rolledNews("Thorn", target), "Thorn rolled 12. Fail.");
+    assert.equal(rolledNews("Thorn", target), "Thorn rolled 12. Disadvantage. Fail.");
     const twenty: RollTarget = { characterId: "thorn", total: 25, result: "pass", dice: { formula: "1d20+5", faces: [20], total: 25 }, tag: "t2" };
-    assert.equal(rolledText(twenty), "Rolled 25 (1d20+5: 20). Natural 20. Pass.");
+    assert.equal(rolledText(twenty), "Rolled 25 (1d20+5: 20). Natural 20. Normal. Pass.");
     assert.equal(verdictText({ result: "fail", dice: { ...dis, fails: "stunned" } }), "Fail (Stunned)");
     assert.equal(verdictText({ dice: dis }), null, "pass or fail hidden");
   });
@@ -163,4 +163,35 @@ describe("an ask that went away (docs/design-v1-roll-request.md 5.5)", () => {
     assert.equal(askKept(ask, { tag: "answer-2" }, null), false, "the allowed change wrote a new answer");
     assert.equal(askKept(ask, {}, null), false, "a Reopen, or an allowed Fix my total, cleared the answer");
   });
+});
+
+
+describe("one-roll request modes", () => {
+  test("a pick replaces only the manual chip and retains typed bonus, extras and effects", () => {
+    const inputs = { pressed: "dis" as const, extra: "1d6", bonus: "+4" };
+    const preset = reminderPreset(restrained, DEX);
+    const base = { bonus: null, preset, inputs, text: "" };
+    assert.deepEqual(cardRoll({ ...base, override: "adv" }).fields, { ok: true, value: { cancelled: true, extra: "+1d6", bonus: 4 } });
+    assert.deepEqual(cardRoll({ ...base, override: "normal" }).fields, { ok: true, value: { mode: "dis", extra: "+1d6", bonus: 4 } });
+    assert.equal(inputs.pressed, "dis");
+    assert.equal(cardRoll({ ...base, text: "12", override: "adv" }).blocked, CLEAR_TOTAL);
+    assert.equal(cardRoll({ ...base, inputs: { ...inputs, bonus: "" }, override: "normal" }).blocked, TYPE_BONUS);
+  });
+
+  test("the DM resolves all preset sources once and keeps its typed bonus", () => {
+    const preset = reminderPreset([{ key: "restrained" }, { key: "blessed" }], DEX);
+    assert.deepEqual(dmRoll({ bonus: 4, typed: true, preset, override: "adv" }).fields, { cancelled: true, extra: "+1d4", bonus: 4 });
+    assert.deepEqual(dmRoll({ bonus: 4, typed: true, preset, override: "normal" }).fields, { mode: "dis", extra: "+1d4", bonus: 4 });
+  });
+});
+
+
+test("returned result modes describe cancellation and Secret without reading the picked action", () => {
+  const line: LogEntry = { id: "8:0", at: "", kind: "event", data: { type: "dice", by: "dm", to: "dm", rolls: [{ formula: "1d20+2", faces: [10], total: 12, cancelled: true }] } };
+  assert.equal(returnedRollMode([line]), "Normal: Advantage and Disadvantage cancelled, Secret");
+  assert.equal(returnedRollMode([]), "");
+  assert.equal(normalResult({ formula: "1d20+2", faces: [10], total: 12 }), "Normal");
+  assert.equal(normalResult({ formula: "2d20kh1+2", faces: [10, 12], total: 14, mode: "adv" }), "");
+  assert.match(rolledText({ dice: { formula: "1d20+2", faces: [10], total: 12, cancelled: true } }), /Normal: Advantage and Disadvantage cancelled/);
+  assert.equal(rolledNews("Hero", { dice: { formula: "1d20+2", faces: [10], total: 12, cancelled: true } }), "Hero rolled 12. Normal: Advantage and Disadvantage cancelled.");
 });

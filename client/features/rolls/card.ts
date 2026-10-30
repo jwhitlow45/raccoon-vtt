@@ -3,8 +3,9 @@ import { OUT_OF_RANGE } from "#shared/dice/resolve.ts";
 import { naturalOf, rerollable, rerollFace, rolledTerms } from "#shared/dice/roll.ts";
 import { LIMITS } from "#shared/limits.ts";
 import { effectName } from "#shared/logText.ts";
-import type { DiceResult, RollChange, RollRequest, RollTarget } from "#shared/model.ts";
+import type { DiceResult, LogEntry, RollChange, RollRequest, RollTarget } from "#shared/model.ts";
 import type { RollPreset } from "#shared/rules/rollReminders.ts";
+import { effectiveRollMode, rollModeSources, type RollModeOverride } from "../dice/rollMode.ts";
 import { CONDITIONS } from "#shared/srd/conditions.ts";
 
 /**
@@ -123,12 +124,12 @@ export type CardRoll = {
  * totals (`typeTotals`, absent reads as on): off, the field is hidden with
  * whatever it held, so that draft is no reason to wait.
  */
-export function cardRoll(input: { bonus: number | null; preset: RollPreset | null; inputs: RollInputs; text: string; typeTotals?: boolean }): CardRoll {
+export function cardRoll(input: { bonus: number | null; preset: RollPreset | null; inputs: RollInputs; text: string; typeTotals?: boolean; override?: RollModeOverride }): CardRoll {
   const { preset, inputs } = input;
   const typed = input.bonus === null ? parseBonus(inputs.bonus) : null;
   const bonus = input.bonus ?? (typed?.ok ? typed.bonus : null);
   const label = input.bonus !== null ? `Roll ${signed(input.bonus)}` : typed?.ok ? `Roll ${d20Text(typed.bonus)}` : "Roll d20";
-  const sources: AdvantageSource[] = [...(preset?.sources ?? []), ...(inputs.pressed ? [{ kind: inputs.pressed, from: "pressed" }] : [])];
+  const sources = rollModeSources(preset?.sources ?? [], inputs.pressed ? [{ kind: inputs.pressed, from: "pressed" }] : [], input.override);
   const presetExtra = (preset?.extra ?? []).join("");
   const own = signedExtra(inputs.extra);
   const extra = `${presetExtra}${own}`;
@@ -212,6 +213,22 @@ export function verdictText(target: Pick<RollTarget, "result" | "dice">): string
   return target.result === "pass" ? "Pass" : "Fail";
 }
 
+/** Advantage and Disadvantage already appear beside the formula. */
+export function normalResult(dice: DiceResult): string {
+  return dice.mode ? "" : effectiveRollMode(dice);
+}
+
+/** The returned envelope supplies Secret, including routes whose visibility is fixed. */
+export function returnedRollMode(lines: readonly LogEntry[]): string {
+  for (const line of lines) {
+    if (line.kind !== "event") continue;
+    const data = line.data;
+    if (data?.type === "dice" && data.rolls[0]) return effectiveRollMode(data.rolls[0], data.to === "dm");
+    if (data?.type === "roll" && data.dice) return effectiveRollMode(data.dice);
+  }
+  return "";
+}
+
 /**
  * The card's result in words (5.4): "Rolled 17 (1d20+5 with Advantage: 12, 7
  * dropped). Pass.", with "Natural 20." where it shows one. The screen draws
@@ -224,13 +241,14 @@ export function rolledText(target: Pick<RollTarget, "total" | "result" | "dice">
   const faces = shown.faces.map((f) => (f.dropped ? `${f.face} dropped` : String(f.face))).join(", ");
   const natural = naturalText(dice);
   const verdict = verdictText(target);
-  return `Rolled ${target.total ?? dice.total} (${shown.formula}${faces ? `: ${faces}` : ""}).${natural ? ` ${natural}.` : ""}${verdict ? ` ${verdict}.` : ""}`;
+  return `Rolled ${target.total ?? dice.total} (${shown.formula}${faces ? `: ${faces}` : ""}).${natural ? ` ${natural}.` : ""}${normalResult(dice) ? ` ${normalResult(dice)}.` : ""}${verdict ? ` ${verdict}.` : ""}`;
 }
 
-/** What the polite live region says when a roll lands while the card shows: "Thorn rolled 17. Pass." */
+/** The live region includes the returned mode once beside the total and verdict. */
 export function rolledNews(name: string, target: Pick<RollTarget, "total" | "result" | "dice">): string {
   const verdict = verdictText(target);
-  return `${name} rolled ${target.total ?? target.dice?.total ?? ""}.${verdict ? ` ${verdict}.` : ""}`;
+  const mode = target.dice ? effectiveRollMode(target.dice) : "";
+  return `${name} rolled ${target.total ?? target.dice?.total ?? ""}.${mode ? ` ${mode}.` : ""}${verdict ? ` ${verdict}.` : ""}`;
 }
 
 /** The one of two choices a creature starts at (5.1): the higher bonus, the first on a tie or with none known. */
@@ -258,9 +276,9 @@ export function holds(request: Pick<RollRequest, "targets"> | undefined, target:
  * knows no bonus, the DM types one: "Roll d20" until then, "Roll d20+3"
  * after, and the fields carry it for the server to use where it knows none.
  */
-export function dmRoll(input: { bonus: number | null; typed?: boolean; preset: RollPreset | null; ability?: string }): { label: string; fields: { mode?: AdvantageMode; cancelled?: true; extra?: string; bonus?: number } } {
+export function dmRoll(input: { bonus: number | null; typed?: boolean; preset: RollPreset | null; ability?: string; override?: RollModeOverride }): { label: string; fields: { mode?: AdvantageMode; cancelled?: true; extra?: string; bonus?: number } } {
   const { preset, bonus } = input;
-  const sources = preset?.sources ?? [];
+  const sources = rollModeSources(preset?.sources ?? [], [], input.override);
   const mode = advantageFields(sources);
   const extra = (preset?.extra ?? []).join("");
   const how = bonus === null ? "d20" : input.typed ? d20Text(bonus) : signed(bonus);

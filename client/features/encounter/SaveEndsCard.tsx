@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import { pendingSaves, type PendingSave } from "#shared/rules/saveEnds.ts";
 import { ABILITY_NAMES } from "#shared/rules/skills.ts";
@@ -8,6 +8,7 @@ import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { creatureProficiency, creatureRolls } from "../dice/creature.ts";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { creatureKey } from "../dice/options.ts";
+import { rollModeSources, type RollModeOverride } from "../dice/rollMode.ts";
 import { presetFor } from "../dice/presets.ts";
 import { findMarks } from "../dice/proficiencyPresentation.ts";
 import { useDiceView } from "../dice/useDiceView.ts";
@@ -65,6 +66,7 @@ export function saveAlertId(pending: PendingSave): string {
  */
 export function SaveEndsCard(props: { pending: PendingSave; onResult(text: string): void }) {
   const { pending } = props;
+  const root = useRef<HTMLElement>(null);
   const actions = useRoomActions();
   const room = useRoomStore();
   const view = useRoomView((s) => s.view);
@@ -102,7 +104,7 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
     send.send(total >= now.effect.save.dc ? "pass" : "fail", [op]);
     // The card goes as the op lands, so its result stays a moment as a notice.
     const words = landedWords(now, nowFacts.name, total, nowFacts.legendaryLeft);
-    if (words) props.onResult(words);
+    if (words) props.onResult(`${words}${card.mode ? ` ${card.mode}.` : ""}`);
   });
 
   if (!view) return null;
@@ -112,7 +114,13 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
   const trouble = error ?? rollTrouble(card.receipt, card.unsent);
   const rolling = model.buttons.some((b) => b.action === "roll");
 
-  const tap = (action: SaveAction) => {
+  const valid = () => {
+    const state = room.getState();
+    if (state.connection !== "open" || !state.view) return false;
+    const now = pendingSaves(state.view).find((p) => p.effect.due.id === pending.effect.due.id);
+    return !!now && JSON.stringify(now) === JSON.stringify(pending) && (!now.request || now.request.targets.every((t) => t.total === undefined && t.result === undefined && !t.noRoll && !t.dice));
+  };
+  const tap = (action: SaveAction, override?: RollModeOverride) => {
     setError(null);
     switch (action) {
       case "ask": {
@@ -126,11 +134,11 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
           typedRoll.open();
           return;
         }
-        if (bonus === null || !preset) return;
+        if (bonus === null || !preset || blocked || card.waiting || send.busy || !valid()) return;
         if (pending.request) {
-          const op = waitingRollOp(pending, preset, chip, actions.newId(), typed.typing ? bonus : undefined);
+          const op = waitingRollOp(pending, { ...preset, sources: rollModeSources(preset.sources, chip ? [{ kind: chip, from: "pressed" }] : [], override) }, null, actions.newId(), typed.typing ? bonus : undefined);
           if (op) card.send(op);
-        } else card.roll([cardRoll(pending.target, bonus, preset, test, chip)], saveEndsRollTo(view, pending));
+        } else card.roll([cardRoll(pending.target, bonus, preset, test, chip)], { ...saveEndsRollTo(view, pending), override });
         return;
       }
       case "pass":
@@ -157,6 +165,7 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
   return (
     // Focusable from script, not by Tab, so the dock's summary can show it (pages/fold.ts focusAlert).
     <section
+      ref={root}
       role="group"
       aria-label={`${model.head} ${model.save}`}
       tabIndex={-1}
@@ -173,7 +182,7 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
       </div>
       {model.status || trouble ? (
         <div role="status" style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>
-          {model.status ? <span>{model.status}</span> : null}
+          {model.status ? <span>{model.status}{card.mode ? ` ${card.mode}.` : ""}</span> : null}
           {trouble ? <span style={{ color: error || card.receipt?.state === "refused" ? theme.color.dangerText : theme.color.textMuted }}>{trouble}</span> : null}
         </div>
       ) : null}
@@ -198,6 +207,14 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
         blocked={typedRoll.blocked}
         rollOpens={typedRoll.closed}
         onTap={tap}
+        rollMenu={{
+          source: JSON.stringify([pending, test, bonus, bonusText, chip, preset, model, typedRoll.closed, saveEndsRollTo(view, pending)]),
+          name: `${model.save} for ${facts.name}`,
+          capability: { d20: rolling && !typedRoll.closed, visibility: pending.request ? "request" : "creature" },
+          dm: true, disabled: !!typedRoll.blocked || card.waiting || model.rollLoading || send.busy !== null,
+          valid, fallbackFocus: () => root.current,
+          onTap: () => tap("roll"), onRoll: (override) => tap("roll", override),
+        }}
       />
     </section>
   );

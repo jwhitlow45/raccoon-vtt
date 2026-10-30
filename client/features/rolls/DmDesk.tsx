@@ -27,7 +27,10 @@ import { useProficiency } from "../dice/useProficiency.ts";
 import { refusalWords } from "../dice/useReceipt.ts";
 import { useLayoutSize } from "../device/layout.ts";
 import { AskRow } from "./AskRow.tsx";
-import { askRowText, bestChoice, dmRoll, knownOrTyped } from "./card.ts";
+import { useRollModeMenu } from "../dice/useRollModeMenu.tsx";
+import type { RollModeOverride } from "../dice/rollMode.ts";
+import { useRollBlocked } from "../dice/useRollOption.ts";
+import { askRowText, bestChoice, dmRoll, knownOrTyped, normalResult } from "./card.ts";
 import {
   allAnsweredIds,
   answered,
@@ -394,6 +397,7 @@ function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: L
         </span>
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>
           <MarkedText text={answerText} marks={answerChoiceMarks(answerText, request, target, props.levelOf)} />
+          {target.dice && normalResult(target.dice) ? `. ${normalResult(target.dice)}.` : ""}
         </span>
         {answered(target) ? (
           // It acts in place, so it reads as a quiet button rather than a link's accent (docs/design-v1-visual.md F24).
@@ -432,6 +436,7 @@ function TargetRow(props: { request: RollRequest; target: RollTarget; levelOf: L
  */
 function DmRollButton(props: { request: RollRequest; target: RollTarget; name: string }) {
   const { request, target, name } = props;
+  const sourceButton = useRef<HTMLButtonElement | null>(null);
   const ui = useRoomUi();
   const sender = useRollSender();
   const store = useRoomStore();
@@ -447,15 +452,21 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
   const bonuses = request.test.choices.map((_, i) => (rolls?.numbers ? bonusFor(rolls.numbers, testOf(request, i)) : null));
   const choice = two ? bestChoice(bonuses) : 0;
   const known = bonuses[choice] ?? null;
-  if (!dice || !rolls) return null;
+  const blocked = useRollBlocked();
   const { bonus, waits, error } = knownOrTyped(known, text, true);
   const test = testOf(request, choice);
   const picked = request.test.choices[choice]!;
-  const roll = dmRoll({ bonus, typed: known === null, preset: presetFor(dice, ref, test, { rolls }), ...(two ? { ability: ABILITY_ABBR[picked.ability] } : {}) });
-  const tap = () => {
-    if (busy || bonus === null) return;
+  const roll = dmRoll({ bonus, typed: known === null, preset: dice ? presetFor(dice, ref, test, { rolls }) : null, ...(two ? { ability: ABILITY_ABBR[picked.ability] } : {}) });
+  const valid = () => {
+    const state = store.getState();
+    const live = state.view?.rolls[request.id];
+    const answer = live?.targets.find((t) => targetKey(t) === targetKey(target));
+    return state.connection === "open" && live?.rev === request.rev && !!answer && !answered(answer) && answer.dice === undefined;
+  };
+  const tap = (override?: RollModeOverride) => {
+    if (busy || blocked || bonus === null || !dice || !rolls || !valid()) return;
     // Read again at the tap, so the effects and Magic Resistance then decide (doc 3 3.2).
-    const now = dmRoll({ bonus, typed: known === null, preset: presetFor(dice, ref, test, { rolls }) });
+    const now = dmRoll({ bonus, typed: known === null, preset: presetFor(dice, ref, test, { rolls }), override });
     const tag = actions.newId();
     const op = { t: "roll.dice" as const, tag, rollId: request.id, target: ref, ...(two ? { choice } : {}), ...now.fields, unanswered: true as const };
     const n = sendRoll(sender, op, {
@@ -469,19 +480,34 @@ function DmRollButton(props: { request: RollRequest; target: RollTarget; name: s
     if (n === null) ui.notify(NEEDS_CONNECTION, "error");
     else setBusy(true);
   };
+  const menu = useRollModeMenu({
+    source: JSON.stringify([request, ref, choice, known, text, roll, dice ? presetFor(dice, ref, test, { rolls }) : null, rolls]),
+    name: `${roll.label} for ${name}`,
+    capability: { d20: true, visibility: "request" },
+    disabled: busy || !!blocked || waits !== null || !dice || !rolls,
+    dm: true, valid,
+    fallbackFocus: () => sourceButton.current?.closest("section")?.querySelector<HTMLButtonElement>("button[aria-expanded]") ?? null,
+    onTap: () => tap(), onRoll: tap,
+  });
+  if (!dice || !rolls) return null;
   const button = (
-    <Button
-      variant="quiet"
-      size="sm"
-      busy={busy}
-      disabled={!connected || waits !== null}
-      title={!connected ? NEEDS_CONNECTION : (waits ?? undefined)}
-      aria-label={`${roll.label} for ${name}`}
-      onClick={tap}
-      style={{ justifySelf: "start", padding: 0, fontSize: theme.font.small, textAlign: "left" }}
-    >
-      {roll.label}
-    </Button>
+    <>
+      <Button
+        {...menu.buttonProps}
+        ref={(node) => { sourceButton.current = node; menu.buttonProps.ref(node); }}
+        variant="quiet"
+        size="sm"
+        busy={busy}
+        disabled={!connected || waits !== null}
+        title={!connected ? NEEDS_CONNECTION : (waits ?? undefined)}
+        aria-label={`${roll.label} for ${name}`}
+        aria-describedby={menu.describe()}
+        style={{ justifySelf: "start", padding: 0, fontSize: theme.font.small, textAlign: "left", ...menu.pressStyle }}
+      >
+        {roll.label}
+      </Button>
+      {menu.menu}
+    </>
   );
   if (known !== null) return button;
   return (
