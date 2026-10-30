@@ -22,12 +22,20 @@ export function tokenLayoutPills(pills: Readonly<Record<string, readonly PillSpe
 /** Actual frames, rings, marks and placed text, in the same view units as standing names. */
 export function isoTokenBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<string, TokenText>, scale: number, place: (t: ViewToken) => { x: number; y: number; ring?: Box }): Box[] {
   const placed = tokens.map((t) => ({ ...t, ...place(t) }));
+  // Isometric names clear TokenNode's px/4 stroke. Keep this padding out
+  // of the shared layout used by Top-down height pills and light captions.
+  const ink = new Map([...text].map(([id, block]) => {
+    if (block.plate || !block.label) return [id, block] as const;
+    const b = block.label;
+    const halo = Math.max(0, ...b.lines.map((line) => line.px / 8));
+    return [id, { ...block, label: { ...b, x: b.x - halo, y: b.y - halo, width: b.width + 2 * halo, height: b.height + 2 * halo } }] as const;
+  }));
   return [
     ...placed.flatMap((t) => {
       const fp = footprint(t);
       return [{ x0: t.x, y0: t.y, x1: t.x + fp.w, y1: t.y + fp.h }, ...(t.ring ? [t.ring] : [])];
     }),
-    ...placedTextBoxes(placed, text, scale).map((b) => ({ x0: b.x0 / scale, y0: b.y0 / scale, x1: b.x1 / scale, y1: b.y1 / scale })),
+    ...placedTextBoxes(placed, ink, scale).map((b) => ({ x0: b.x0 / scale, y0: b.y0 / scale, x1: b.x1 / scale, y1: b.y1 / scale })),
   ];
 }
 

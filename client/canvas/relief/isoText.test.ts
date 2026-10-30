@@ -6,6 +6,7 @@ import { SQUARES } from "#shared/rules/grid.ts";
 import { labelShape } from "../../features/builder/labelShape.ts";
 import { overlaps, type Box } from "../../lib/boardText.ts";
 import type { ViewToken } from "../../lib/scene.ts";
+import type { TokenText } from "../useBoardText.ts";
 import { isometric, toView, toWorld, type Turn } from "../../lib/view.ts";
 import { pillInkReach, pillPlace, pillReach } from "../../features/measure/pillPlace.ts";
 import { tokenBoxes as topDownBoxes } from "../../features/areas/labelSpot.ts";
@@ -147,6 +148,19 @@ describe("token labels in Isometric lay out in view space (docs/design-v1-isomet
   });
 });
 
+
+test("FU40B-OPUS-3: only isometric name obstacles include the drawn halo", () => {
+  const t = token("named", { x: 8, y: 9 }) as ViewToken;
+  const label = { x: -10, y: 50, width: 60, height: 20, lines: [{ text: "Raised", px: 12, kind: "name" as const }] };
+  const before = structuredClone(label);
+  const text = new Map([[t.id, { label, plate: null, marks: null } as unknown as TokenText]]);
+  const boxes = isoTokenBoxes([t], text, 40, () => ({ x: 2, y: 3 }));
+  assert.deepEqual(boxes[1], { x0: 68.5 / 40, y0: 168.5 / 40, x1: 131.5 / 40, y1: 191.5 / 40 });
+  assert.deepEqual(text.get(t.id)?.label, before, "isometric padding cannot alter the shared placement");
+  const plate = new Map([[t.id, { label, plate: label, marks: null } as unknown as TokenText]]);
+  const plated = isoTokenBoxes([t], plate, 40, () => ({ x: 2, y: 3 }));
+  assert.deepEqual(plated[1], { x0: 69.5 / 40, y0: 166.5 / 40, x1: 130.5 / 40, y1: 193.5 / 40 }, "a plate keeps only its own padding and stroke");
+});
 
 test("ISO34-LABELS: area and trap names avoid the raised token's actual label at every turn and viewport edge", () => {
   for (const turn of [0, 1, 2, 3] as Turn[]) {
