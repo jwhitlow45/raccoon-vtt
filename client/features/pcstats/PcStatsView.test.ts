@@ -41,3 +41,15 @@ describe("a PC block's abilities three across (docs/design-v1-dice-ui.md 6.1)", 
     assert.doesNotMatch(str[2]!, /aria-label="Proficient"/);
   });
 });
+
+test("skill prose omits untrained marker slots while ability columns keep theirs", () => {
+  const stats: PcStats = { ...THORN, skills: { perception: "expert", stealth: "prof" }, adjust: { skills: { investigation: 9 } } };
+  const markup = renderToStaticMarkup(createElement(PcStatsView, { character: { stats, level: 5 } }));
+  const skills = /<p[^>]*><strong>Skills<\/strong>(.*?)<\/p>/.exec(markup)?.[1];
+  assert.ok(skills);
+  assert.doesNotMatch(skills, /data-proficiency-marker="none"/, "untrained skill prose has no empty slot");
+  assert.match(skills, /data-proficiency-marker="expert"[^>]*aria-label="Expertise"/);
+  assert.match(skills, /data-proficiency-marker="prof"[^>]*aria-label="Proficient"/);
+  assert.equal(skills.replace(/<[^>]*>/g, "").trim(), "Investigation +9, Perception +7, Stealth +7");
+  assert.equal(markup.match(/data-proficiency-marker="none"/g)?.length, 4, "four untrained ability columns keep aligned slots");
+});

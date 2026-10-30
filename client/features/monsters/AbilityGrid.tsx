@@ -22,7 +22,7 @@ export function AbilityGrid(props: { abilities: readonly AbilityBox[] }) {
             <strong style={{ fontSize: theme.font.input }}>{a.score}</strong> <span style={{ color: theme.color.textMuted }}>{a.mod}</span>
           </dd>
           <dd style={{ margin: 0, fontSize: theme.font.small, whiteSpace: "nowrap", fontWeight: a.proficient ? theme.weight.bold : theme.weight.regular }}>
-            <ProficiencyLabel level={a.proficient ? "prof" : "none"}>
+            <ProficiencyLabel column level={a.proficient ? "prof" : "none"}>
               <span style={{ color: theme.color.textMuted, fontWeight: theme.weight.regular }}>Save </span>{a.save}
             </ProficiencyLabel>
           </dd>

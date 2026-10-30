@@ -780,7 +780,7 @@ function OptionCell(props: { level?: Proficiency; text: string; tag?: string | u
     >
       {/* Skills keep their names whole in wider columns. Other options may wrap inside the cell. */}
       <span style={{ minWidth: 0, fontSize: theme.font.body14, fontWeight: theme.weight.strong, textAlign: props.fill ? "center" : "left", overflowWrap: "anywhere", whiteSpace: props.nowrap ? "nowrap" : undefined }}>
-        {props.level !== undefined ? <ProficiencyLabel level={props.level}>{waiting ? `${props.text}…` : props.text}</ProficiencyLabel> : waiting ? `${props.text}…` : props.text}
+        {props.level !== undefined ? <ProficiencyLabel column level={props.level}>{waiting ? `${props.text}…` : props.text}</ProficiencyLabel> : waiting ? `${props.text}…` : props.text}
       </span>
       {props.tag ? <span style={{ flex: "none", fontSize: theme.font.tiny, fontWeight: theme.weight.strong, color: theme.color.textMuted, whiteSpace: "nowrap" }}>{props.tag}</span> : null}
     </button>

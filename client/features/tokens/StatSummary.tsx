@@ -213,8 +213,9 @@ const SAVES_TRIPLE = { display: "inline-flex", flexWrap: "nowrap", flex: "none",
  * never breaks. The abbreviation takes the ability grid's small capitals
  * (AbilityGrid.tsx): at the body's size, capitals widen the line past one
  * row on a phone held upright, where "Str" fit. Where one line does not
- * hold them, they wrap three and three. The heading can stand above the
- * first triple when it leaves too little room, but no save stands alone
+ * hold them, they wrap three and three. Compact proficiency marks sit
+ * below each abbreviation without widening it, so they add no rows.
+ * The triples stay whole so no save stands alone
  * (D-261024-42). While the SRD chunk loads the line
  * keeps its place and, after the usual 200 ms, says so, and a failed load
  * offers the reload.

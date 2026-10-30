@@ -332,18 +332,20 @@ describe("the summary lines' parts, so no unit stands alone on a line (D-261024-
     assert.equal(partOf(line, ">Later<"), "quick 2");
   });
 
-  test("marked saves keep three complete name-number units together when the heading wraps", () => {
+  test("marked saves add no inline width and keep three complete name-number units together", () => {
     const saves = { str: 8, dex: 6, con: 7, int: 3, wis: 7, cha: 6 };
     const line = renderToStaticMarkup(createElement(SavesLine, { block: { kind: "numbers", saves, defenses: [], proficiency: { str: "none", dex: "prof", con: "prof", int: "none", wis: "prof", cha: "prof" } } }));
     const triples = line.split('data-saves-triple=""').slice(1);
     assert.equal(triples.length, 2, "two indivisible triples, independently of the Saves heading");
     for (const [index, triple] of triples.entries()) {
       assert.match(triple, /^ style="[^"]*flex-wrap:nowrap/, "a triple cannot leave its last save alone");
-      assert.equal(triple.match(/data-proficiency-label=/g)?.length, 3, "every save retains a fixed marker slot");
+      assert.equal(triple.match(/data-proficiency-label=/g)?.length, 3, "every save retains its whole label");
       const names = [...triple.matchAll(/>(STR|DEX|CON|INT|WIS|CHA) </g)].map((match) => match[1]);
       assert.deepEqual(names, index === 0 ? ["STR", "DEX", "CON"] : ["INT", "WIS", "CHA"]);
     }
     assert.equal(line.replace(/<[^>]*>/g, ""), "SavesSTR +8DEX +6CON +7INT +3WIS +7CHA +6");
+    assert.doesNotMatch(line, /data-proficiency-layout="column"|data-proficiency-marker="none"/);
+    assert.equal(line.match(/data-proficiency-placement="under"/g)?.length, 4, "four marks decorate the existing line without taking inline width");
   });
 
   test("the saves wrap three and three: Saves with the first three as one part, the other three as another", () => {

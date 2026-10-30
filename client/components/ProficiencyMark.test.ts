@@ -7,7 +7,7 @@ const { ProficiencyLabel } = await import("./ProficiencyMark.tsx");
 
 test("fl7: each proficiency marker has its own glyph and accessible name", () => {
   for (const [level, name, circles] of [["none", null, 0], ["prof", "Proficient", 1], ["expert", "Expertise", 2]] as const) {
-    const html = renderToStaticMarkup(createElement(ProficiencyLabel, { level, children: "Sleight of Hand +7" }));
+    const html = renderToStaticMarkup(createElement(ProficiencyLabel, { column: true, level, children: "Sleight of Hand +7" }));
     assert.match(html, new RegExp(`data-proficiency-marker="${level}"`));
     assert.equal((html.match(/<circle /g) ?? []).length, circles);
     assert.match(html, /white-space:nowrap/);
@@ -18,5 +18,20 @@ test("fl7: each proficiency marker has its own glyph and accessible name", () =>
       assert.match(html, new RegExp(`aria-label="${name}"`));
       assert.match(html, new RegExp(`title="${name}"`));
     } else assert.doesNotMatch(html, /role="img"|title=|aria-label=/);
+  }
+});
+
+test("fl7: flowing labels add no inline marker width and untrained labels have no slot", () => {
+  for (const level of ["none", "prof", "expert"] as const) {
+    const html = renderToStaticMarkup(createElement(ProficiencyLabel, { level, children: "Perception +7" }));
+    assert.match(html, new RegExp(`data-proficiency-level="${level}"`));
+    assert.match(html, /data-proficiency-layout="flow"/);
+    assert.doesNotMatch(html, /gap:|padding:|margin:/);
+    if (level === "none") assert.doesNotMatch(html, /data-proficiency-marker|<svg/);
+    else {
+      assert.match(html, /data-proficiency-placement="under"/);
+      assert.match(html, /position:absolute/);
+      assert.equal((html.match(/<circle /g) ?? []).length, level === "expert" ? 2 : 1);
+    }
   }
 });

@@ -39,6 +39,7 @@ test("fl7: dice options mark saves and skills from the actual creature", () => {
   assert.match(html, /data-proficiency-marker="prof"/);
   assert.match(html, /data-proficiency-marker="none"/);
   assert.match(html, /aria-label="Expertise"/);
+  assert.equal(html.match(/data-proficiency-layout="column"/g)?.length, 24, "six saves and eighteen skills keep aligned button columns");
 });
 
 test("fl7: recent creature results retain the skill's expertise", () => {
@@ -46,6 +47,17 @@ test("fl7: recent creature results retain the skill's expertise", () => {
   assert.match(html, /data-proficiency-marker="expert"/);
   assert.match(html, /Stealth check/);
   assert.match(html, /16/);
+  assert.doesNotMatch(html, /data-proficiency-layout="column"/, "recent results flow without a reserved column");
+});
+
+test("fl7: an untrained toast and log label reserve no inline slot", () => {
+  const toast: Toast = { id: 1, tone: "info", text: "Rolled 10: Athletics check.", rolls: [{ characterId: "hero", label: "Athletics check", formula: "1d20", faces: [10], total: 10 }] };
+  const event: Extract<LogEvent, { type: "roll" }> = { type: "roll", characterId: "hero", test: { kind: "check", choices: [{ ability: "str", skill: "athletics" }] }, result: "pass", total: 10 };
+  for (const html of [fixture(false, toast), fixture(false, undefined, event)]) {
+    assert.match(html, /data-proficiency-layout="flow"/);
+    assert.match(html, /data-proficiency-level="none"/);
+    assert.doesNotMatch(html, /data-proficiency-marker=/);
+  }
 });
 
 test("fl7: a folded recent result keeps its proficiency and whole label", () => {

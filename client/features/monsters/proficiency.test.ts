@@ -13,7 +13,10 @@ const { SavesLine } = await import("../tokens/StatSummary.tsx");
 
 function marked(markup: string, level: string, name: string): void {
   const labels = markup.split('data-proficiency-label=""').slice(1);
-  assert.ok(labels.some((label) => label.includes(`data-proficiency-marker="${level}"`) && label.includes(name)), `${name}: ${level} marker`);
+  const label = labels.find((candidate) => candidate.includes(name));
+  assert.ok(label, `${name}: structured label`);
+  if (level === "none") assert.doesNotMatch(label, /data-proficiency-marker=/, `${name}: flowing untrained text has no marker slot`);
+  else assert.match(label, new RegExp(`data-proficiency-marker="${level}"`), `${name}: ${level} marker`);
 }
 
 test("fl7: the PC sheet marks explicit proficiencies and keeps adjusted skills unmarked", () => {
