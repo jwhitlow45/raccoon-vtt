@@ -173,7 +173,7 @@ function EndLink(props: { href: string; label: string; align: "start" | "end"; c
   return (
     <a href={props.href} style={card}>
       {end ? null : <Icon name="chevronUp" />}
-      <span style={{ display: "grid", gap: 2 }}>
+      <span style={{ display: "grid", gap: theme.space(0.5) }}>
         <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{props.label}</span>
         <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold }}>{props.children}</span>
       </span>

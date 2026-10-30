@@ -201,7 +201,7 @@ export function ViewMenuBody(props: { choice: ViewChoiceState; steadyTurns?: boo
                 onChange={() => choice.pick(pickOf(c))}
                 style={RADIO_COVER}
               />
-              <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 2 }}>
+              <span style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5) }}>
                 <span>{choiceWords(c)}</span>
                 {c === "follow" ? (
                   <span id={helpId} style={{ fontSize: theme.font.small, fontWeight: theme.weight.regular, color: theme.color.textMuted, lineHeight: theme.leading.body }}>
