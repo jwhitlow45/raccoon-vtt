@@ -51,14 +51,14 @@ body:
       label: Screen size
       description: Give the browser's width and height in pixels if known, and portrait or landscape on a phone or tablet.
     validations:
-      required: true
+      required: false
   - type: input
     id: interface-size
     attributes:
       label: Interface size
       description: Give the app's interface size setting and any browser zoom or operating system text scaling.
     validations:
-      required: true
+      required: false
   - type: dropdown
     id: role
     attributes:
@@ -67,5 +67,6 @@ body:
         - DM
         - Player
         - Table display
+        - Not in a room (admin page, self-hosting)
     validations:
       required: true
