@@ -269,7 +269,7 @@ Changed by docs/design-v1-design-pass.md 4.1: the name sits under "This scene", 
 
 | Case | Expected | Test |
 | --- | --- | --- |
-| An imported free door just inside an adjacent held square, matching the player's door | Named blocker words on server and device, for vertical and horizontal doors | `permissions.touch.test.ts`, `stopWords.test.ts` |
+| An imported free door just inside an adjacent held square, matching the player's door | Named blocker words on server and device, for vertical and horizontal doors | `permissions.touch.test.ts` |
 | An unseen added or changed door, a mismatched memory, unheld ground or geometry outside the boundary band | Generic blocker words | `permissions.touch.test.ts` |
 | A batch projects neighboring chunks for several fog classes | Shared wall cuts match cold projections, including memories and neighboring sources | `project.discovery.test.ts`, `fanout.discovery.test.ts` |
 | An edit on ground no relevant layer holds | Detailed growth comparisons skipped, estimate still bounds actual growth | `remember.test.ts`, `remember.random.test.ts` |
