@@ -16,8 +16,9 @@ import { arrowStep, isometric } from "../client/lib/view.ts";
 import { HEX_LIMITS, NEW_SCENES_HELP } from "../client/features/grid/words.ts";
 import { calibrationFromHexFind } from "../client/features/grid/calibrate.ts";
 import { drawMap } from "../client/features/grid/synthetic.ts";
-import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, expandBar, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
+import { assertCanvasAt, barControl, ConsoleWatch, dragWorld, expandBar, openSceneGroup, openSideTab, sceneGroup, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, SocketWatch, startServer, untilReady, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { setupHistory } from "./helpers/undoScope.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
 
 /**
@@ -570,6 +571,17 @@ async function hexSizeControls(page: Page, tokenId: string, at: string, shot: st
   await openScenes(page);
   await page.keyboard.press("Escape");
   return off;
+}
+
+/** Takes back the newest Setup step from Setup history, as a DM does, and closes the sheet. */
+async function undoSetup(page: Page): Promise<void> {
+  const { sheet } = await setupHistory(page);
+  const undo = sheet.getByRole("button", { name: "Undo setup", exact: true });
+  await untilReady(undo, "Undo setup");
+  await undo.click();
+  await sheet.locator("[data-history-result]").filter({ hasText: /^Undid setup: / }).waitFor();
+  await page.keyboard.press("Escape");
+  await sheet.waitFor({ state: "detached" });
 }
 
 describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
@@ -2104,10 +2116,10 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     // Use default puts back the form's squares and the first guess, 47 px for a 1400 by 1000 image.
     await bar.getByRole("button", { name: "Use default", exact: true }).click();
     await waitFor("squares and the guess back", () => hx9cGuess(made.id, undefined, 47));
-    // Undo takes Use default back, then the find, each in one step.
-    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    // Grid calibration is Setup (docs/design-v1-undo-scope.md 2): Undo setup takes Use default back, then the find, each in one step.
+    await undoSetup(dm);
     await waitFor("the found hexes again", () => hx9cOnHexes(made.id, "rows", 64));
-    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await undoSetup(dm);
     await waitFor("one undo back to squares and the guess", () => hx9cGuess(made.id, undefined, 47));
     await pickTool(dm, "Select");
   });
@@ -2123,7 +2135,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const bar = dm.getByRole("toolbar", { name: "Line up grid options" });
     await bar.locator("[data-options-line]").filter({ hasText: `Found hex columns of ${hx9cPx(map.cellPx)} px. The grid is hex columns now.` }).first().waitFor();
     await shots.take(dm, "hx9c-find-switches-to-hex-columns");
-    await dm.getByRole("button", { name: "Undo", exact: true }).click();
+    await undoSetup(dm);
     await waitFor("one undo back to hex rows and the guess", () => hx9cGuess(run.camp, "hexRows", 50));
     // From the options strip: the button keeps focus through the search and the switch.
     const find = bar.getByRole("button", { name: "Find the grid", exact: true });
