@@ -2,6 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import type { Token } from "#shared/model.ts";
 import { drawsAllowed } from "#shared/permissions.ts";
 import type { ClientOp } from "#shared/protocol.ts";
+import type { HistoryScope } from "#shared/undoContract.ts";
 import { placedOnHex, tokenRefHex, type PlacedToken } from "#shared/rules/footprint.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
 import { fitSlot } from "../canvas/fitSlot.ts";
@@ -138,8 +139,8 @@ export function undoShortcut(e: KeyPress): "undo" | "redo" | null {
 }
 
 /** Only the focused history sheet owns these keys. Its text fields keep native Undo. */
-export function setupHistoryShortcut(e: KeyPress, gates: { focused: boolean; dm: boolean; preview: boolean; confirming: boolean }): "undo" | "redo" | null {
-  return gates.focused && gates.dm && !gates.preview && !gates.confirming ? undoShortcut(e) : null;
+export function setupHistoryShortcut(e: KeyPress, gates: { focused: boolean; dm: boolean; preview: boolean; confirming: boolean; scope: HistoryScope }): "undo" | "redo" | null {
+  return gates.scope === "setup" && gates.focused && gates.dm && !gates.preview && !gates.confirming ? undoShortcut(e) : null;
 }
 
 /** A tool as the table needs it: its id, and for the status the name and the main choice its key moves through. */
@@ -700,6 +701,8 @@ function useHasKeyboard(): boolean {
 const SURFACE_ARIA: Readonly<Record<string, readonly string[]>> = {
   viewerZoom: ["Plus =", "-"],
   viewerReset: ["0"],
+  setupUndo: ["Control+Z Meta+Z"],
+  setupRedo: ["Control+Shift+Z Meta+Shift+Z"],
 };
 
 /** The key of a surface's fixed row for one of its buttons, as the sheet writes it: the handout viewer's "+" for Zoom in. Null for a row this table does not hold. */

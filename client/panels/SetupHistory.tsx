@@ -7,7 +7,7 @@ import { Loading } from "../components/Loading.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { theme } from "../lib/theme.ts";
 import { blockerText, EMPTY_HISTORY, HISTORY_LOADING } from "../state/history.ts";
-import { setupHistoryShortcut } from "../state/shortcuts.ts";
+import { setupHistoryShortcut, useSurfaceKeyHint, withKey } from "../state/shortcuts.ts";
 import { useRoomActions, useRoomUi, useRoomView } from "../state/view.ts";
 
 export function HistoryDialogs() {
@@ -25,6 +25,8 @@ export function SetupHistory(props: { scope?: HistoryScope; direction?: HistoryD
   const dm = useRoomView((s) => s.you?.role === "dm");
   const preview = usePreview() !== null;
   const actions = useRoomActions();
+  const undoKey = useSurfaceKeyHint("setupUndo");
+  const redoKey = useSurfaceKeyHint("setupRedo");
   const body = useRef<HTMLDivElement>(null);
   const [review, setReview] = useState<HistoryDirection | null>(props.direction ?? null);
   const [discard, setDiscard] = useState<{ direction: HistoryDirection; head: HistoryHead } | null>(null);
@@ -35,7 +37,7 @@ export function SetupHistory(props: { scope?: HistoryScope; direction?: HistoryD
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const direction = setupHistoryShortcut(event, { focused: body.current?.closest("dialog")?.contains(event.target as Node) === true, dm, preview, confirming: discard !== null });
+      const direction = setupHistoryShortcut(event, { focused: body.current?.closest("dialog")?.contains(event.target as Node) === true, dm, preview, confirming: discard !== null, scope });
       if (!direction) return;
       event.preventDefault();
       event.stopPropagation();
@@ -51,16 +53,17 @@ export function SetupHistory(props: { scope?: HistoryScope; direction?: HistoryD
   return (
     <Dialog title={title} phone="sheet" width="sm" onClose={props.onClose}>
       <div ref={body} data-setup-history={scope} style={{ display: "grid", gap: theme.space(4), minWidth: 0, overflowWrap: "anywhere" }}>
-        <p style={{ margin: 0 }}>Your saved definitions and configuration have their own history. Play and board changes stay in Undo.</p>
+        <p style={{ margin: 0 }}>{scope === "setup" ? "Your saved definitions and configuration have their own history. Play and board changes stay in Undo." : "Your play and board changes have their own history. Saved definitions and configuration stay in Setup history."}</p>
         {!connected ? <p role="status">Connect to use history.</p> : <Loading text={HISTORY_LOADING} active={!history.ready || history.pending > 0} />}
         {(["undo", "redo"] as const).map((direction) => {
           const head = history.summary?.[scope]?.[direction].head;
           const verb = direction === "undo" ? "Undo" : "Redo";
           const label = `${verb}${scope === "setup" ? " setup" : ""}`;
+          const key = scope === "setup" ? direction === "undo" ? undoKey : redoKey : null;
           return (
             <section key={direction} aria-label={`${label} step`} style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
               <p id={`history-${scope}-${direction}`} style={{ margin: 0, whiteSpace: "normal" }}>{head?.label ?? (history.ready ? `Nothing to ${direction}.` : "Waiting for history.")}</p>
-              <Button disabled={disabled || (history.ready && !head)} aria-describedby={`history-${scope}-${direction}`} onClick={(event) => actions[direction]({ scope, control: `history-${scope}-${direction}`, detail: event.detail })}>{label}</Button>
+              <Button disabled={disabled || (history.ready && !head)} title={withKey(label, key)} aria-keyshortcuts={key?.aria} aria-describedby={`history-${scope}-${direction}`} onClick={(event) => actions[direction]({ scope, control: `history-${scope}-${direction}`, detail: event.detail })}>{label}</Button>
               {head?.retained ? (
                 <div data-history-review style={{ display: "grid", gap: theme.space(2), minWidth: 0 }}>
                   <p style={{ margin: 0 }}>{blockerText(head.retained)}</p>
@@ -74,7 +77,8 @@ export function SetupHistory(props: { scope?: HistoryScope; direction?: HistoryD
             </section>
           );
         })}
-        {history.result ? <p role="status" style={{ margin: 0 }}>{history.result}</p> : null}
+        {/* ToastVoice announces each terminal answer once. Keep its words visible here without a second live region. */}
+        {history.result ? <p data-history-result style={{ margin: 0 }}>{history.result}</p> : null}
         {history.result === FORGET_ASK && forget?.action ? <div data-history-forget style={{ display: "grid", gap: theme.space(2) }}>
           <Button disabled={disabled || forget.action.ready?.() === false} onClick={() => { forget.action?.run(); ui.dismissToast(forget.id); }}>{forget.action.label}</Button>
           <Button onClick={() => ui.dismissToast(forget.id)}>Cancel</Button>

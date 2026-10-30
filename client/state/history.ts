@@ -77,7 +77,7 @@ export class HistoryController {
     this.ordered = null;
     const abandoned = this.queue.splice(0);
     for (const request of abandoned) request.options.onAnswer?.("unknown", undefined, "snapshot");
-    if (abandoned.length) this.ports.notify("Undo history disconnected. Try again when connected.");
+    if (abandoned.some((request) => !request.options.quiet)) this.ports.notify("Undo history disconnected. Try again when connected.");
     this.refresh();
   }
 
@@ -151,6 +151,7 @@ export class HistoryController {
             this.result = args[0] === "taken"
               ? options.discard ? "Discarded this step. The game stays as it is." : `${direction === "undo" ? "Undid" : "Redid"}${scope === "setup" ? " setup:" : ""} ${head.label}.`
               : args[1]?.message ?? "The answer was lost. Check the next change.";
+            if (args[0] === "unknown" && !options.quiet) this.ports.notify(this.result);
             options.onAnswer?.(...args);
             this.refresh();
           },

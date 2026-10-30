@@ -299,6 +299,25 @@ test("terminal results name the captured setup action and preserve a reload refu
   assert.equal(h.view().result, "Reload to use Undo");
 });
 
+test("a lost history answer announces once, while quiet flows keep their own feedback", () => {
+  for (const quiet of [false, true]) {
+    const h = harness();
+    h.controller.receive(frame());
+    h.controller.activate("undo", { quiet });
+    h.sent[0]!.answer("unknown", undefined, "snapshot");
+    assert.deepEqual(h.notes, quiet ? [] : ["The answer was lost. Check the next change."]);
+  }
+});
+
+test("disconnecting a quiet activation waiting for history does not add a second notice", () => {
+  const h = harness();
+  const answers: string[] = [];
+  h.controller.activate("undo", { quiet: true, onAnswer: (answer) => answers.push(answer) });
+  h.controller.suspend();
+  assert.deepEqual(answers, ["unknown"]);
+  assert.deepEqual(h.notes, []);
+});
+
 test("an unfamiliar epoch on the established connection cannot replace its heads", () => {
   const h = harness();
   h.controller.receive(frame());

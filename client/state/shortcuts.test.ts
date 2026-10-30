@@ -1212,6 +1212,8 @@ describe("a surface's own buttons show its fixed keys, apart from the room's (D-
     ["viewerZoom", "client/features/handouts/HandoutViewer.tsx", "the handout viewer's Zoom in"],
     ["viewerZoom", "client/features/handouts/HandoutViewer.tsx", "the handout viewer's Zoom out"],
     ["viewerReset", "client/features/handouts/HandoutViewer.tsx", "the handout viewer's Reset zoom"],
+    ["setupUndo", "client/panels/SetupHistory.tsx", "Setup history's Undo setup"],
+    ["setupRedo", "client/panels/SetupHistory.tsx", "Setup history's Redo setup"],
   ];
 
   test("each surface button takes its key from the sheet's row", () => {
@@ -1239,21 +1241,27 @@ describe("a surface's own buttons show its fixed keys, apart from the room's (D-
   });
 
   test("kept apart from the room's keys: no device moves them, and the room's table does not hold them", () => {
-    for (const id of ["viewerZoom", "viewerReset"]) {
+    for (const id of ["viewerZoom", "viewerReset", "setupUndo", "setupRedo"]) {
       assert.equal(keyHint(id, "dm", DEFAULT_KEYS), null, id);
       assert.ok(!(id in DEFAULT_KEYS), `${id} is no binding`);
       assert.ok(!SHORTCUTS.some((s) => s.id === id), `${id} is no room shortcut`);
     }
   });
+
+  test("Setup history's buttons expose the keys its focused shortcuts handle", () => {
+    assert.deepEqual(surfaceKeyHint("setupUndo"), { text: "Ctrl+Z (Cmd+Z on a Mac)", aria: "Control+Z Meta+Z" });
+    assert.deepEqual(surfaceKeyHint("setupRedo"), { text: "Ctrl+Shift+Z (Cmd+Shift+Z on a Mac)", aria: "Control+Shift+Z Meta+Shift+Z" });
+  });
 });
 
 test("focused setup keys preserve native editing, repeated keys, and other dialogs", async () => {
   const { setupHistoryShortcut } = await import("./shortcuts.ts");
-  const yes = { focused: true, dm: true, preview: false, confirming: false };
+  const yes = { focused: true, dm: true, preview: false, confirming: false, scope: "setup" as const };
   const key = press({ key: "z", code: "KeyZ", ctrlKey: true });
   assert.equal(setupHistoryShortcut(key, yes), "undo");
   assert.equal(setupHistoryShortcut({ ...key, shiftKey: true }, yes), "redo");
   for (const target of [{ tagName: "INPUT", type: "text" }, { tagName: "TEXTAREA" }, { isContentEditable: true }]) assert.equal(setupHistoryShortcut({ ...key, target }, yes), null);
   assert.equal(setupHistoryShortcut({ ...key, repeat: true }, yes), null);
+  assert.equal(setupHistoryShortcut(key, { ...yes, scope: "play" }), null, "the retained Play sheet keeps the usual dialog key boundary");
   for (const no of [{ focused: false }, { dm: false }, { preview: true }, { confirming: true }]) assert.equal(setupHistoryShortcut(key, { ...yes, ...no }), null);
 });
