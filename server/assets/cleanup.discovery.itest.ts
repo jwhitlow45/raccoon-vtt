@@ -191,10 +191,11 @@ describe("deleting an image only players remember (D-261026-34)", () => {
     const { roomId, sceneId, socket, dm, image } = await rememberingRoom();
     socket.close();
     await socket.waitClosed();
-    await t.pool.query("update rooms set read_only = true where id = $1", [roomId]);
     await t.manager.unload(roomId);
     const actor = await t.manager.acquire(roomId);
-    assert.equal(actor.readOnly, true);
+    // Marked on the loaded room: a load measures a stored quota flag again, and this room is not really full.
+    await t.pool.query("update rooms set read_only = true where id = $1", [roomId]);
+    actor.readOnly = true;
     const res = await dm.post(`/api/rooms/${roomId}/assets/delete`, { ids: [image] });
     assert.equal(res.statusCode, 200, res.body);
     assert.equal(await rowExists(image), false);

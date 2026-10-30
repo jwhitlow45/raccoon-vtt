@@ -4109,3 +4109,110 @@ test("member kind changes clear disconnected DM histories before a player reconn
   assert.equal(history.play.undo.head, null);
   assert.equal(history.setup, undefined);
 });
+
+describe("the log archive's guards", () => {
+  /** The pool's statements as they are sent, with the quota's measure answered as `stored`. */
+  function recording(db: FakeDb, stored = 0): { pool: Pool; sql: string[] } {
+    const sql: string[] = [];
+    const inner = db.pool();
+    const query = (text: string, params?: unknown[]) => {
+      sql.push(text.trim());
+      if (/ as bytes$/.test(text.trim())) return Promise.resolve({ rows: [{ bytes: String(stored) }] });
+      return inner.query(text, params);
+    };
+    const pool = {
+      query,
+      connect: async () => {
+        const client = (await inner.connect()) as unknown as { release: () => void };
+        return { query, release: client.release };
+      },
+    } as unknown as Pool;
+    return { pool, sql };
+  }
+
+  const join = (actor: RoomActor, name: string) =>
+    actor.sys({ t: "sys.memberJoin", member: { id: uuidv7(), name, color: "#336699", kind: "player", createdAt: new Date().toISOString() } });
+
+  test("a batch whose lines the free-disk guard refuses commits without them, with a warning, and each batch asks again", async () => {
+    const dm = member("DM", "dm");
+    const db = new FakeDb({ state: createInitialState({ roomName: "Short disk", dm }), dmGrants: [dm.id] });
+    const { pool, sql } = recording(db);
+    const warnings: string[] = [];
+    let answer: () => Promise<boolean> = () => Promise.resolve(false);
+    const d = deps(db);
+    const actor = await RoomActor.load({
+      ...d,
+      pool,
+      log: { ...quiet, warn: (_obj: unknown, msg?: string) => void warnings.push(msg ?? "") },
+      options: { ...d.options, archiveGuard: () => answer() },
+    });
+    assert.ok(actor);
+    const archived = () => sql.filter((s) => s.startsWith("insert into room_log")).length;
+    try {
+      await join(actor, "Pip");
+      assert.equal(actor.committed.seq, 1);
+      assert.equal(db.inserts, 1, "the op is written");
+      assert.equal(archived(), 0, "its line is not");
+      assert.equal(warnings.length, 1);
+      assert.match(warnings[0]!, /not archived/);
+      assert.ok(actor.committed.state.log.some((e) => e.id.startsWith("1:")), "the line stays in the live log");
+      answer = () => Promise.reject(new Error("statfs failed"));
+      await join(actor, "Quin");
+      assert.equal(archived(), 0, "a failed check counts as no");
+      assert.equal(warnings.length, 2);
+      answer = () => Promise.resolve(true);
+      await join(actor, "Rho");
+      assert.equal(archived(), 1);
+      assert.equal(actor.committed.seq, 3);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a room read-only at its quota is measured again as it loads, before any write, and takes ops once it is under", async () => {
+    const dm = member("DM", "dm");
+    const db = new FakeDb({ state: createInitialState({ roomName: "Was full", dm }), dmGrants: [dm.id] });
+    const { pool, sql } = recording(db, 10);
+    const d = deps(db, { readOnly: true });
+    const actor = await RoomActor.load({ ...d, pool, options: { ...d.options, quotaBytes: 1_000 } });
+    assert.ok(actor);
+    try {
+      assert.equal(actor.readOnly, false);
+      assert.ok(sql.some((s) => s.startsWith("update rooms set read_only")), "the stored flag is cleared");
+      await join(actor, "Pip");
+      assert.equal(actor.committed.seq, 1);
+    } finally {
+      db.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+
+  test("a room still over its quota as it loads stays read-only, and one whose replay failed stays read-only after its flag clears", async () => {
+    const dm = member("DM", "dm");
+    const over = new FakeDb({ state: createInitialState({ roomName: "Still full", dm }), dmGrants: [dm.id] });
+    const still = recording(over, 5_000);
+    const d = deps(over, { readOnly: true });
+    const full = await RoomActor.load({ ...d, pool: still.pool, options: { ...d.options, quotaBytes: 1_000 } });
+    assert.ok(full);
+    assert.equal(full.readOnly, true);
+    assert.ok(!still.sql.some((s) => s.startsWith("update rooms set read_only")));
+    over.freeze();
+    void full.shutdown({ code: 1012, snapshot: false });
+
+    const broken = new FakeDb({ state: createInitialState({ roomName: "Broken and was full", dm }), opRows: [brokenRow(dm)], dmGrants: [dm.id] });
+    const small = recording(broken, 10);
+    const b = deps(broken, { readOnly: true });
+    const actor = await RoomActor.load({ ...b, pool: small.pool, options: { ...b.options, quotaBytes: 1_000 } });
+    assert.ok(actor);
+    try {
+      assert.equal(actor.replayFailed, true);
+      assert.ok(small.sql.some((s) => s.startsWith("update rooms set read_only")), "only the quota flag is recomputed");
+      assert.equal(actor.readOnly, true, "the failed replay keeps the room read-only");
+      await assert.rejects(join(actor, "Pip"), RoomReplayFailed);
+    } finally {
+      broken.freeze();
+      void actor.shutdown({ code: 1012, snapshot: false });
+    }
+  });
+});

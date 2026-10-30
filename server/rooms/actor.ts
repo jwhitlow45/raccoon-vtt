@@ -32,6 +32,8 @@ import { exploreOp } from "./explore.ts";
 import { buildSnapshot, publishBatch, type Reject, type Restored, type Stamped } from "./fanout.ts";
 import type { SocketFilter } from "./gateway.ts";
 import {
+  ARCHIVE_ALWAYS,
+  archiveAdmitted,
   assetIdsOf,
   batchCommitted,
   commitBatch,
@@ -42,6 +44,7 @@ import {
   readWatermark,
   setReadOnly,
   writeSnapshot,
+  type ArchiveGuard,
   type AssetFact,
   type BatchWrite,
   type OpRecord,
@@ -95,6 +98,8 @@ export type ActorOptions = {
   receiptCaps: Partial<ReceiptCaps>;
   /** The map step (remember.ts), which only tests replace, to make its op one the schema or the reducer refuses. */
   mapStep: typeof mapStepOps;
+  /** Asked before each write to the log archive (persistence.ts ArchiveGuard). The app passes the asset volume's free-disk check. */
+  archiveGuard: ArchiveGuard;
 };
 
 export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
@@ -113,6 +118,7 @@ export const DEFAULT_ACTOR_OPTIONS: ActorOptions = {
   draw: serverDraw,
   receiptCaps: {},
   mapStep: mapStepOps,
+  archiveGuard: ARCHIVE_ALWAYS,
 };
 
 export type ActorDeps = {
@@ -454,14 +460,22 @@ export class RoomActor {
 
   /** Loads the room (design 16.2) and reconciles its DM labels with the grants that exist. Null when the room has no snapshot. */
   static async load(deps: ActorDeps): Promise<RoomActor | null> {
-    const loaded = await loadRoom(deps.pool, deps.info.roomId, (seq, reason) => {
-      deps.log.error({ roomId: deps.info.roomId, seq, reason }, "room replay failed, serving it read-only");
-    });
+    const roomId = deps.info.roomId;
+    const opts = { ...DEFAULT_ACTOR_OPTIONS, ...deps.options };
+    const loaded = await loadRoom(
+      deps.pool,
+      roomId,
+      (seq, reason) => {
+        deps.log.error({ roomId, seq, reason }, "room replay failed, serving it read-only");
+      },
+      undefined,
+      () => admitArchive(opts.archiveGuard, deps.log, roomId),
+    );
     if (!loaded) return null;
     // The receipts younger than 24 hours, so a restart keeps the duplicate rule and the day's caps (docs/design-v1-dice.md 1.2).
-    const now = deps.options?.now ?? DEFAULT_ACTOR_OPTIONS.now;
-    const receipts = await loadReceipts(deps.pool, deps.info.roomId, new Date(now() - DAY_MS));
-    const actor = new RoomActor(deps, loaded, receipts);
+    const receipts = await loadReceipts(deps.pool, roomId, new Date(opts.now() - DAY_MS));
+    const info = await recheckQuotaOnLoad(deps, opts.quotaBytes);
+    const actor = new RoomActor({ ...deps, info }, loaded, receipts);
     await actor.reconcileKinds();
     if (actor.#opsSinceSnapshot >= actor.#opts.snapshotOps) actor.#scheduleSnapshot();
     return actor;
@@ -813,7 +827,8 @@ export class RoomActor {
    * The lines a committed op of this seq wrote, `<seq>:<index>`, while the
    * in-memory log still holds every one the viewer reads (holdsOp), for the
    * receipt lookup (docs/design-v1-dice.md 1.2). Null once some may have
-   * left it: the archive has them, or pruned them.
+   * left it: the archive has them, unless an older archive's trim or a
+   * short disk (persistence.ts ArchiveGuard) kept them out.
    */
   committedLines(seq: number, viewer: Viewer): LogEntry[] | null {
     if (!holdsOp(this.#committed.state, viewer, seq)) return null;
@@ -1967,6 +1982,7 @@ export class RoomActor {
         at: new Date(r.at).toISOString(),
       })),
     };
+    const lines = batch.ops.some((r) => r.log.length > 0);
     let attempt = 0;
     // Once a COMMIT's answer is lost, the batch may be durable, so nothing is
     // written again until a read says whether it is. A failed read proves
@@ -1983,6 +1999,8 @@ export class RoomActor {
           }
           outcomeUnknown = false;
         }
+        // Asked again on every attempt, since free space can come back or run out between them.
+        write.archive = !lines || (await admitArchive(this.#opts.archiveGuard, this.#log, this.roomId, batch.seq));
         await commitBatch(this.#pool, this.roomId, write);
         break;
       } catch (err) {
@@ -2117,7 +2135,10 @@ export class RoomActor {
     });
   }
 
-  /** A room at its storage quota becomes read-only except for deletions (design 10.5), and recovers when it shrinks. */
+  /**
+   * A room at its storage quota becomes read-only except for deletions (design 10.5), and recovers when it shrinks.
+   * The quota counts what a room's members can choose to store or delete, never the log archive (quota.ts).
+   */
   async #checkQuota(): Promise<void> {
     if (this.#opts.quotaBytes <= 0 || this.replayFailed) return;
     const stored = await roomStoredBytes(this.#pool as Parameters<typeof roomStoredBytes>[0], this.roomId);
@@ -2336,6 +2357,31 @@ function checkServerOp(op: ServerOnlyOp): { ok: true; op: ServerOnlyOp } | { ok:
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** The archive guard's answer, with the operator's warning when it refuses. */
+async function admitArchive(guard: ArchiveGuard, log: Logger, roomId: string, seq?: number): Promise<boolean> {
+  const ok = await archiveAdmitted(guard);
+  if (!ok) log.warn({ roomId, seq }, "free disk is under the floor or could not be read, so log lines were not archived");
+  return ok;
+}
+
+/**
+ * A room that went read-only at its quota is measured again as it loads,
+ * before anyone can write to it: what the quota counts can have changed
+ * since the flag was stored (the log archive once counted, and no longer
+ * does), and a room nobody can write to might never get the op and
+ * snapshot that would measure it otherwise. Only the stored quota flag
+ * changes here. A failed replay keeps the room read-only on its own.
+ */
+async function recheckQuotaOnLoad(deps: ActorDeps, quotaBytes: number): Promise<RoomInfo> {
+  const { info } = deps;
+  if (!info.readOnly || quotaBytes <= 0) return info;
+  const stored = await roomStoredBytes(deps.pool as Parameters<typeof roomStoredBytes>[0], info.roomId);
+  if (stored >= quotaBytes) return info;
+  await setReadOnly(deps.pool, info.roomId, false);
+  deps.log.info({ roomId: info.roomId, stored }, "room back under its quota as it loaded");
+  return { ...info, readOnly: false };
 }
 
 /**

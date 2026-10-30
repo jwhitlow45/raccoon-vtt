@@ -30,6 +30,7 @@ export type EngineOptions = {
   ws?: AppDeps["ws"];
   export?: AppDeps["export"];
   assets?: AppDeps["assets"];
+  log?: AppDeps["log"];
 };
 
 export type Engine = {
@@ -69,6 +70,7 @@ export async function startEngine(opts: EngineOptions = {}): Promise<Engine> {
       ws: opts.ws,
       export: opts.export,
       assets: opts.assets,
+      log: opts.log,
     });
     await app.listen({ port: 0, host: "127.0.0.1" });
     return app;

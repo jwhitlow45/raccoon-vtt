@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
-import type pg from "pg";
+import pg from "pg";
 import type { ApiErrorCode } from "#shared/apiErrors.ts";
 import { registerCleanup, type CleanupOptions } from "./assets/cleanup.ts";
 import { AssetError } from "./assets/errors.ts";
@@ -15,7 +15,7 @@ import { registerDisplayRoutes } from "./http/display.ts";
 import { registerDmRoutes } from "./http/dm.ts";
 import { registerExportRoutes, type ExportOptions } from "./http/export.ts";
 import { registerJoinRoutes } from "./http/join.ts";
-import { registerLogRoutes } from "./http/log.ts";
+import { registerLogRoutes, type LogRouteOptions } from "./http/log.ts";
 import { registerReceiptRoutes } from "./http/receipts.ts";
 import { registerMemberRoutes } from "./http/members.ts";
 import { registerRoomRoutes } from "./http/rooms.ts";
@@ -46,7 +46,17 @@ export type AppDeps = {
   ddb?: Partial<DdbImportOptions>;
   /** The asset service's options, for tests: a starter catalog of their own (docs/design-v1-starter-art.md 5). */
   assets?: AssetRouteOptions;
+  /** The log archive reader's admission and batches, for tests. */
+  log?: Omit<LogRouteOptions, "pool">;
 };
+
+/**
+ * Connections the log archive's scans may hold, apart from the rooms' pool:
+ * the scan budget's two page leases and two export leases
+ * (server/rooms/logScanBudget.ts), so no archive reader can take a
+ * connection a room needs to commit.
+ */
+const LOG_SCAN_CONNECTIONS = 4;
 
 /**
  * Builds the HTTP and WebSocket server without listening, so integration
@@ -56,7 +66,7 @@ export type AppDeps = {
  * server/rooms/*). Add the registration here, one line per module, after
  * setupAuth: the rate limiter only covers routes registered after it.
  */
-export async function buildApp({ config, pool, gateway, hasher, rooms, ws, export: exportOptions, cleanup, ddb, assets }: AppDeps): Promise<FastifyInstance> {
+export async function buildApp({ config, pool, gateway, hasher, rooms, ws, export: exportOptions, cleanup, ddb, assets, log }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: config.NODE_ENV === "test" ? false : { level: config.production ? "info" : "debug" },
     // cloudflared keeps idle origin connections for 90 s. A shorter Node
@@ -88,7 +98,15 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   const manager = new RoomManager({
     pool,
     log: app.log,
-    options: { ...rooms, actor: { quotaBytes: config.ROOM_QUOTA_MB * 1024 * 1024, ...rooms?.actor } },
+    options: {
+      ...rooms,
+      actor: {
+        quotaBytes: config.ROOM_QUOTA_MB * 1024 * 1024,
+        // The archive shares the asset volume's floor. The asset service is registered below, before any room loads.
+        archiveGuard: () => app.assets.archiveDiskOk(),
+        ...rooms?.actor,
+      },
+    },
   });
   app.decorate("rooms", manager);
   // Shutdown steps 3 and 4 (design 15.4): the socket layer's preClose has already sent 1012.
@@ -124,7 +142,10 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   await registerAdminRoutes(app, kit);
   await registerWebSocket(app, { manager, config, options: ws });
   await registerExportRoutes(app, kit, { manager, options: exportOptions });
-  await registerLogRoutes(app, kit, { manager });
+  const scanPool = new pg.Pool({ ...pool.options, max: LOG_SCAN_CONNECTIONS });
+  scanPool.on("error", (err) => app.log.warn({ err }, "idle log scan connection failed"));
+  app.addHook("onClose", async () => scanPool.end());
+  await registerLogRoutes(app, kit, { manager, options: { ...log, pool: scanPool } });
   await registerReceiptRoutes(app, kit, { manager });
   await registerXCardRoutes(app, kit, { manager });
   await registerPlayerViewRoutes(app, kit, { manager });

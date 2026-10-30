@@ -18,6 +18,33 @@ import type { Queryable } from "../auth/tx.ts";
  */
 export type Pool = Pick<pg.Pool, "query" | "connect">;
 
+/**
+ * The row count the archive was once trimmed to after every snapshot. It
+ * keeps every row now, so this is only what an older archive may show:
+ * one that reached it may have lost its oldest rows to the trim.
+ */
+export const LEGACY_LOG_STORED = 10_000;
+
+/**
+ * Whether the archive may take more rows now: false while the shared volume
+ * is under its free-space floor (server/assets/quota.ts hasFreeDisk). Asked
+ * before each archive write. A refused write skips only the log rows: the
+ * ops, receipts and snapshots around them commit as they always do, and the
+ * lines stay in the room's live log while it holds them.
+ */
+export type ArchiveGuard = () => Promise<boolean>;
+
+export const ARCHIVE_ALWAYS: ArchiveGuard = () => Promise.resolve(true);
+
+/** The guard's answer, a failed check counting as no. */
+export async function archiveAdmitted(guard: ArchiveGuard): Promise<boolean> {
+  try {
+    return await guard();
+  } catch {
+    return false;
+  }
+}
+
 export type RoomInfo = { roomId: string; pinned: boolean; createdIp: string | null; readOnly: boolean };
 
 export async function roomInfo(pool: Pool, roomId: string): Promise<RoomInfo | null> {
@@ -67,6 +94,7 @@ export async function loadRoom(
   roomId: string,
   onReplayFailure?: (seq: number, reason: string) => void,
   migrations: MigrationStep[] = opMigrations,
+  admitArchive: ArchiveGuard = ARCHIVE_ALWAYS,
 ): Promise<LoadedRoom | null> {
   const snap = await pool.query<{ seq: string; state: unknown; schema_version: number }>(
     "select seq, state, schema_version from room_snapshots where room_id = $1",
@@ -79,16 +107,17 @@ export async function loadRoom(
   let state = logsInIdOrder(migrateSnapshot(row.state, row.schema_version));
   // An import's lines are numbered at seq 0. One made before imports wrote them to the archive has none there, so its
   // lines still in the log are written now, and Show older reaches them once the live log moves past them. An import
-  // writes them all in its transaction, so one of them in the archive means they came. An archive at its stored cap
-  // would prune them first, as older than every line it holds. Either way they are not written.
+  // writes them all in its transaction, so one of them in the archive means they came. An archive that once held
+  // LEGACY_LOG_STORED rows may have had some of them trimmed while the archive kept only that many, and is left as it
+  // is. Either way they are not written, and they are not written while the disk is short of space either.
   const imported = state.log.filter((e) => e.id.startsWith("0:"));
   if (imported.length > 0) {
     const { rows } = await pool.query<{ held: boolean }>(
       `select exists (select 1 from room_log where room_id = $1 and id = any($2::text[]))
            or exists (select 1 from room_log where room_id = $1 offset $3) as held`,
-      [roomId, imported.map((e) => e.id), LIMITS.logStored - 1],
+      [roomId, imported.map((e) => e.id), LEGACY_LOG_STORED - 1],
     );
-    if (!rows[0]?.held) await archiveLines(pool, roomId, imported);
+    if (!rows[0]?.held && (await archiveAdmitted(admitArchive))) await archiveLines(pool, roomId, imported);
   }
   let seq = snapshotSeq;
   let replayFailed = false;
@@ -173,6 +202,8 @@ export type BatchWrite = {
    * rather than loading the room, so it is written with the ops that changed it.
    */
   name?: string;
+  /** False when the free-disk guard refused the batch's log rows (ArchiveGuard): the rest commits without them. */
+  archive?: boolean;
 };
 
 /** The error thrown when the COMMIT itself failed, so the outcome must be read back before any retry. */
@@ -218,7 +249,7 @@ export async function commitBatch(pool: Pool, roomId: string, batch: BatchWrite)
          from unnest($2::bigint[], $3::text[], $4::text[], $5::text[], $6::text[]) as t(s, a, m, r, o)`,
         [roomId, seqs, ats, members, roles, ops, OP_VERSION],
       );
-      await archiveLines(client, roomId, batch.ops.flatMap((r) => r.log));
+      if (batch.archive !== false) await archiveLines(client, roomId, batch.ops.flatMap((r) => r.log));
       if (batch.name === undefined) await client.query("update rooms set last_active_at = now() where id = $1", [roomId]);
       else await client.query("update rooms set last_active_at = now(), name = $2 where id = $1", [roomId, batch.name]);
     }
@@ -302,7 +333,8 @@ export async function readWatermark(pool: Pool, roomId: string, key: WatermarkKe
 /**
  * Writes the committed state as the room's snapshot, then prunes what it
  * covers (design 16.2): ops at or below its seq that are also older than an
- * hour, and log rows past the stored cap. Returns the serialized size in UTF-8 bytes.
+ * hour. The log archive is never trimmed: it keeps every line for the
+ * members who may read it. Returns the serialized size in UTF-8 bytes.
  */
 export async function writeSnapshot(pool: Pool, roomId: string, seq: number, state: RoomState): Promise<number> {
   const json = JSON.stringify(state);
@@ -312,13 +344,6 @@ export async function writeSnapshot(pool: Pool, roomId: string, seq: number, sta
     [roomId, seq, json, SNAPSHOT_VERSION],
   );
   await pool.query("delete from room_ops where room_id = $1 and seq <= $2 and at < now() - interval '1 hour'", [roomId, seq]);
-  await pool.query(
-    `delete from room_log where room_id = $1 and id in (
-       select id from room_log where room_id = $1
-       order by split_part(id, ':', 1)::bigint desc, split_part(id, ':', 2)::int desc
-       offset $2)`,
-    [roomId, LIMITS.logStored],
-  );
   return Buffer.byteLength(json);
 }
 
@@ -353,7 +378,7 @@ export async function archiveLines(q: Queryable, roomId: string, lines: readonly
   );
 }
 
-/** The log rows one op wrote, `<seq>:<index>`, in order. The archive may have pruned them. */
+/** The log rows one op wrote, `<seq>:<index>`, in order. An older archive's trim or a short disk may have kept some out. */
 export async function readLogLines(pool: Pool, roomId: string, seq: number): Promise<LogEntry[]> {
   const { rows } = await pool.query<{ entry: LogEntry }>(
     `select entry from room_log where room_id = $1 and split_part(id, ':', 1) = $2
@@ -394,21 +419,57 @@ export async function setReadOnly(pool: Pool, roomId: string, readOnly: boolean)
   await pool.query("update rooms set read_only = $2 where id = $1", [roomId, readOnly]);
 }
 
-/** Older log rows, newest first, strictly before `before` (a `"<seq>:<index>"` id). */
-export async function readLogPage(pool: Pool, roomId: string, before: string | null, limit: number): Promise<LogEntry[]> {
-  const { rows } = before
-    ? await pool.query<{ entry: LogEntry }>(
-        `select entry from room_log where room_id = $1
-         and (split_part(id, ':', 1)::bigint, split_part(id, ':', 2)::int) < ($2::bigint, $3::int)
-         order by split_part(id, ':', 1)::bigint desc, split_part(id, ':', 2)::int desc limit $4`,
-        [roomId, before.split(":")[0], before.split(":")[1] ?? "0", limit],
-      )
-    : await pool.query<{ entry: LogEntry }>(
-        `select entry from room_log where room_id = $1
-         order by split_part(id, ':', 1)::bigint desc, split_part(id, ':', 2)::int desc limit $2`,
-        [roomId, limit],
-      );
-  return rows.map((r) => r.entry);
+/** One end of an archive scan: an entry id, split, and whether the id itself is inside. */
+export type LogBound = { seq: string; index: number; inclusive: boolean };
+
+/**
+ * A pass over one room's archive in id order, numeric by op seq then line
+ * index, through rows at or below `maxSeq`: the committed seq the reader
+ * captured, so a row committed later never meets a state that lacks it.
+ */
+export type LogScanRange = { roomId: string; maxSeq: number; order: "asc" | "desc"; lower?: LogBound; upper?: LogBound };
+
+/**
+ * Opens a cursor named `name` over the ids of a range, on a connection in
+ * a transaction. The ids are ordered once, by one sort for the whole pass,
+ * and fetched a batch at a time (fetchLogIds) with their entries read by
+ * key (readLogEntries), so no batch sorts the room again and no batch holds
+ * more than its own rows.
+ */
+export async function declareLogScan(client: Queryable, name: string, range: LogScanRange): Promise<void> {
+  const params: unknown[] = [range.roomId, range.maxSeq];
+  const where = ["room_id = $1", "split_part(id, ':', 1)::bigint <= $2"];
+  const key = "(split_part(id, ':', 1)::bigint, split_part(id, ':', 2)::int)";
+  for (const [bound, op] of [
+    [range.lower, ">"],
+    [range.upper, "<"],
+  ] as const) {
+    if (!bound) continue;
+    params.push(bound.seq, bound.index);
+    where.push(`${key} ${op}${bound.inclusive ? "=" : ""} ($${params.length - 1}::bigint, $${params.length}::int)`);
+  }
+  const dir = range.order === "asc" ? "asc" : "desc";
+  await client.query(
+    `declare ${name} no scroll cursor for select id from room_log where ${where.join(" and ")}
+     order by split_part(id, ':', 1)::bigint ${dir}, split_part(id, ':', 2)::int ${dir}`,
+    params,
+  );
+}
+
+export async function fetchLogIds(client: Queryable, name: string, n: number): Promise<string[]> {
+  const { rows } = await client.query<{ id: string }>(`fetch ${Math.trunc(n)} from ${name}`);
+  return rows.map((r) => r.id);
+}
+
+/** The entries of `ids`, in that order, read by the archive's key. */
+export async function readLogEntries(client: Queryable, roomId: string, ids: readonly string[]): Promise<LogEntry[]> {
+  if (ids.length === 0) return [];
+  const { rows } = await client.query<{ id: string; entry: LogEntry }>("select id, entry from room_log where room_id = $1 and id = any($2::text[])", [roomId, ids]);
+  const byId = new Map(rows.map((r) => [r.id, r.entry]));
+  return ids.flatMap((id) => {
+    const entry = byId.get(id);
+    return entry ? [entry] : [];
+  });
 }
 
 export type AssetFact = { id: string; roomId: string; kind: "map" | "token" | "handout" | "thumb"; width: number; height: number; uploaders: string[] };

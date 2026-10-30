@@ -11,6 +11,7 @@ import { blockOf, customMonster } from "#shared/testutil.ts";
 import { variantPath } from "../assets/store.ts";
 import { solid, SVG } from "../assets/testImages.ts";
 import type { RoomExport, ExportManifest } from "../rooms/exportRoom.ts";
+import { CLOSE } from "../rooms/connection.ts";
 import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
 import { imageAssetId } from "#shared/imageRef.ts";
 
@@ -997,9 +998,33 @@ describe("an imported log in the archive (shared/logRings.ts)", () => {
     socket.close();
   });
 
-  test("a load writes no seq-0 line again once the archive holds the import's, so rows a snapshot pruned stay pruned", async () => {
+  test("a short disk takes an import with its live log but no archive lines, and a load writes them only once there is room", async () => {
+    const assets = t.app.assets;
+    let room = false;
+    assets.archiveDiskOk = () => Promise.resolve(room);
+    try {
+      const { roomId, importer } = await importWithLog((i) => ({ id: `${i + 1}:0`, at: "2026-10-01T00:00:00.000Z", kind: "chat", text: `line ${i}` }), 20);
+      const archived = async () => (await t.pool.query<{ n: number }>("select count(*)::int as n from room_log where room_id = $1", [roomId])).rows[0]!.n;
+      assert.equal(await archived(), 0, "the import wrote no archive row");
+      const socket = await t.connect(roomId, importer);
+      const snap = await socket.snapshot("i");
+      assert.equal((snap.state as { log: unknown[] }).log.length, 20, "the room keeps its live log");
+      assert.equal(await archived(), 0, "the load's repair waited too");
+      socket.close();
+      await t.manager.unload(roomId, CLOSE.evicted, false);
+      room = true;
+      const again = await t.connect(roomId, importer);
+      await again.snapshot("i");
+      assert.equal(await archived(), 20);
+      again.close();
+    } finally {
+      delete (assets as { archiveDiskOk?: unknown }).archiveDiskOk;
+    }
+  });
+
+  test("a load writes no seq-0 line again once the archive holds some of the import's, so rows an older archive lost stay lost", async () => {
     const { roomId, importer } = await importWithLog((i) => ({ id: `${i + 1}:0`, at: "2026-10-01T00:00:00.000Z", kind: "chat", text: `line ${i}` }), 20);
-    // As a snapshot's prune takes the oldest rows past the stored cap.
+    // As the trim to LEGACY_LOG_STORED rows an archive once took after each snapshot left it: its oldest rows gone.
     await t.pool.query("delete from room_log where room_id = $1 and id = any($2::text[])", [roomId, ["0:0", "0:1", "0:2"]]);
     const socket = await t.connect(roomId, importer);
     await socket.snapshot("i");

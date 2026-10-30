@@ -93,6 +93,7 @@ export class RoomManager {
   #locks = new Map<string, Promise<void>>();
   #closing = false;
   #pruneTimer: NodeJS.Timeout;
+  #deleteListeners: Array<(roomId: string) => void> = [];
 
   constructor(deps: { pool: pg.Pool; log: Logger; options?: Partial<ManagerOptions> }) {
     this.#pool = deps.pool;
@@ -252,8 +253,14 @@ export class RoomManager {
     for (const entry of this.#entries.values()) entry.actor?.closeSockets({ all: true }, code);
   }
 
+  /** Called as a room is about to be deleted, loaded or not, so work reading it outside the actor (archive scans) stops. */
+  onDelete(listener: (roomId: string) => void): void {
+    this.#deleteListeners.push(listener);
+  }
+
   /** Closes the room's sockets with 4009 and drops it from memory without a snapshot, ahead of deleting its rows. */
   async unloadForDelete(roomId: string): Promise<void> {
+    for (const listener of this.#deleteListeners) listener(roomId);
     const entry = this.#entries.get(roomId);
     if (!entry) return;
     if (entry.unloading) {

@@ -9,7 +9,7 @@ import { AssetError } from "./errors.ts";
 import { KINDS, PIPELINE, cellPxHint, type AssetKind, type UploadResult } from "./kinds.ts";
 import { WindowLimiter, hourlyChecks, starterHourlyChecks } from "./limits.ts";
 import { ProcessingQueue, configureSharp, processImage, removeFiles, sniffImage } from "./process.ts";
-import { RoomQuota, assertFreeDisk, roomStoredBytes, type Reservation } from "./quota.ts";
+import { RoomQuota, assertFreeDisk, hasFreeDisk, roomStoredBytes, type Reservation } from "./quota.ts";
 import { OpenverseSearch, openverseHttp, type OpenverseHttp } from "./openverse.ts";
 import { ImageSearch, httpJson, type HttpJson } from "./serpapi.ts";
 import { IntakeSlots, Semaphore, type SlotLimits } from "./slots.ts";
@@ -167,6 +167,11 @@ export class AssetService {
 
   assertFreeDisk(): Promise<void> {
     return assertFreeDisk(this.assetDir, this.minFreeBytes);
+  }
+
+  /** The log archive's guard (persistence.ts ArchiveGuard): the same floor on the same volume as uploads. */
+  archiveDiskOk(): Promise<boolean> {
+    return hasFreeDisk(this.assetDir, this.minFreeBytes);
   }
 
   /** The hourly budgets an upload spends (limits.ts hourlyChecks). */
