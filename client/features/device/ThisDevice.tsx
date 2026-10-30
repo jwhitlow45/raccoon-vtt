@@ -103,17 +103,20 @@ export default function ThisDevice() {
         />
       </Section>
       <Section label="Map detail">
-        <RadioCards
-          legend="Map images"
-          help={lowPower ? "Low power loads the phone size on every device." : undefined}
-          value={lowPower ? "mobile" : variant}
-          disabled={lowPower}
-          options={[
-            { value: "mobile", label: "Phone size", help: "Up to 4096 pixels across. Loads faster and needs less memory." },
-            { value: "full", label: "Full size", help: "Sharper on a large screen. A big map can be too much for a phone." },
-          ]}
-          onChange={setMapDetail}
-        />
+        {/* In a settings row's padding, as Room settings stands the same cards, so its label stands where Battery's and Sounds' do (docs/design-v1-spacing-pass.md S3). */}
+        <div style={{ padding: `${theme.space(2)}px 0` }}>
+          <RadioCards
+            legend="Map images"
+            help={lowPower ? "Low power loads the phone size on every device." : undefined}
+            value={lowPower ? "mobile" : variant}
+            disabled={lowPower}
+            options={[
+              { value: "mobile", label: "Phone size", help: "Up to 4096 pixels across. Loads faster and needs less memory." },
+              { value: "full", label: "Full size", help: "Sharper on a large screen. A big map can be too much for a phone." },
+            ]}
+            onChange={setMapDetail}
+          />
+        </div>
       </Section>
       <Section label="Sounds">
         <Switch label="Turn sound" help="A short chime on your turn. Android phones also vibrate." checked={turnSound} onChange={setSoundOn} />

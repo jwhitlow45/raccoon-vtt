@@ -89,42 +89,49 @@ export function DiceSetPicker() {
 
   const previews = drawn && on && !lowPower;
   return (
-    <fieldset disabled={!on} style={{ margin: 0, padding: 0, border: "none", minWidth: 0, display: "grid", gap: theme.space(1) }}>
+    <fieldset disabled={!on} style={{ margin: 0, padding: 0, border: "none", minWidth: 0 }}>
       <legend style={{ padding: 0, fontSize: theme.font.input, fontWeight: theme.weight.strong, color: on ? theme.color.text : theme.color.textDisabled }}>Dice</legend>
-      {on ? null : <Help>Turn on Roll animation to throw dice.</Help>}
-      {/* Marked as a card group for the spacing check (e2e/helpers/spacing.ts), as RadioCards' cards are. */}
-      <div data-card-group="" style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_MIN_PX}px, 1fr))`, gap: theme.space(1) }}>
-        {DICE_SETS.map((set) => {
-          const picked = set.id === chosen;
-          return (
-            <label key={set.id} className="rvtt-choice" data-dice-set={set.id} style={tileStyle(picked, on)}>
-              <input
-                type="radio"
-                name={name}
-                value={set.id}
-                checked={picked}
-                onChange={() => setDiceSetId(set.id)}
-                // Unseen over its whole tile, as Segmented's: a tap anywhere hits it, the arrow keys move along the group, and a screen reader reads "Dice: Ruby, selected".
-                style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}
-              />
-              {/* Drawn over the radio, so taps pass through it to the radio under it. */}
-              <span style={{ position: "relative", width: DIE_PX, height: DIE_PX, pointerEvents: "none" }}>
-                {previews ? null : <D20Icon size={DIE_PX} text="20" body={set.body} edge={set.edge} ink={set.ink} />}
-                <canvas
-                  aria-hidden="true"
-                  ref={(el) => {
-                    if (el) canvases.current.set(set.id, el);
-                    else canvases.current.delete(set.id);
-                  }}
-                  width={DIE_PX * ratio}
-                  height={DIE_PX * ratio}
-                  style={{ position: "absolute", inset: 0, width: DIE_PX, height: DIE_PX, display: previews ? "block" : "none" }}
+      {/*
+       * One column under the legend, as RadioCards stands its cards (docs/design-v1-spacing-pass.md S2): the help space(1) under it and the
+       * tiles space(2) under whatever stands above them, further than the tiles stand from each other. Margins, since a fieldset's gap never
+       * reaches its legend.
+       */}
+      <div style={{ display: "grid", minWidth: 0 }}>
+        {on ? null : <Help style={{ marginTop: theme.space(1) }}>Turn on Roll animation to throw dice.</Help>}
+        {/* Marked as a card group for the spacing check (e2e/helpers/spacing.ts), as RadioCards' cards are. */}
+        <div data-card-group="" style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_MIN_PX}px, 1fr))`, gap: theme.space(1), marginTop: theme.space(2) }}>
+          {DICE_SETS.map((set) => {
+            const picked = set.id === chosen;
+            return (
+              <label key={set.id} className="rvtt-choice" data-dice-set={set.id} style={tileStyle(picked, on)}>
+                <input
+                  type="radio"
+                  name={name}
+                  value={set.id}
+                  checked={picked}
+                  onChange={() => setDiceSetId(set.id)}
+                  // Unseen over its whole tile, as Segmented's: a tap anywhere hits it, the arrow keys move along the group, and a screen reader reads "Dice: Ruby, selected".
+                  style={{ position: "absolute", inset: 0, width: "100%", height: "100%", margin: 0, opacity: 0, cursor: "inherit" }}
                 />
-              </span>
-              <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, textAlign: "center", overflowWrap: "anywhere" }}>{set.name}</span>
-            </label>
-          );
-        })}
+                {/* Drawn over the radio, so taps pass through it to the radio under it. */}
+                <span style={{ position: "relative", width: DIE_PX, height: DIE_PX, pointerEvents: "none" }}>
+                  {previews ? null : <D20Icon size={DIE_PX} text="20" body={set.body} edge={set.edge} ink={set.ink} />}
+                  <canvas
+                    aria-hidden="true"
+                    ref={(el) => {
+                      if (el) canvases.current.set(set.id, el);
+                      else canvases.current.delete(set.id);
+                    }}
+                    width={DIE_PX * ratio}
+                    height={DIE_PX * ratio}
+                    style={{ position: "absolute", inset: 0, width: DIE_PX, height: DIE_PX, display: previews ? "block" : "none" }}
+                  />
+                </span>
+                <span style={{ fontSize: theme.font.small, fontWeight: theme.weight.strong, textAlign: "center", overflowWrap: "anywhere" }}>{set.name}</span>
+              </label>
+            );
+          })}
+        </div>
       </div>
     </fieldset>
   );
