@@ -83,11 +83,22 @@ const noteStart = room.indexOf("function ToastNote(");
 const noteEnd = room.indexOf("\n/** The toast die's size", noteStart);
 assert.ok(noteStart > 0 && noteEnd > noteStart);
 const noteCode = await transformWithOxc(room.slice(noteStart, noteEnd), "toast-note.tsx", { jsx: { runtime: "classic" } });
-const note = new Function("React", "Button", "IconButton", "ToastD20", "theme", "NOTICE_TONES", "TOAST_MAX_PX", `${noteCode.code}\nreturn ToastNote;`)(React, "button", "close", "die", theme, { info: {}, danger: {} }, 440) as (props: object) => Node;
+// This test follows ToastNote's controls. Proficiency resolution has separate room-backed tests.
+function ProficientToastStub(props: { toast: { text: string } }): React.ReactElement {
+  return React.createElement(React.Fragment, null, props.toast.text);
+}
+const note = new Function("React", "Button", "IconButton", "ToastD20", "ProficientToast", "theme", "NOTICE_TONES", "TOAST_MAX_PX", `${noteCode.code}\nreturn ToastNote;`)(React, "button", "close", "die", ProficientToastStub, theme, { info: {}, danger: {} }, 440) as (props: object) => Node;
+
+function textOf(node: React.ReactNode): string {
+  if (!React.isValidElement(node)) return typeof node === "string" || typeof node === "number" ? String(node) : "";
+  const element = node as Node;
+  if (typeof element.type === "function") return textOf((element.type as (props: object) => Node)(element.props));
+  return React.Children.toArray(element.props.children as React.ReactNode).map(textOf).join("");
+}
 
 function buttonPath(node: Node, label: string, path: string[] = []): string[] | null {
   const here = [...path, `${typeof node.type === "function" ? node.type.name : String(node.type)}:${node.key ?? ""}`];
-  if (node.type === "button" && (node.props.children === label || node.props["aria-label"] === label)) return here;
+  if (node.type === "button" && (textOf(node) === label || node.props["aria-label"] === label)) return here;
   if (typeof node.type === "function") return buttonPath((node.type as (props: object) => Node)(node.props), label, here);
   for (const [index, child] of children(node).entries()) {
     const found = buttonPath(child, label, [...here, String(index)]);
