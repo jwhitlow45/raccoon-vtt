@@ -1385,7 +1385,8 @@ export class RoomActor {
    * `over` when one would pass its cap. Null when the op adds nothing.
    */
   #memoryEstimate(after: RoomState, touched: readonly EntityKey[], from: { before: RoomState; totals: ReadonlyMap<string, number> } | null = null): { over: boolean; next: ReadonlyMap<string, number>; commit: () => void } | null {
-    const growth = memoryGrowth(from?.before ?? this.#staged.state, after, touched);
+    // Applied edits share a complete scan with their map step. Ask copies have no step to reuse it.
+    const growth = memoryGrowth(from?.before ?? this.#staged.state, after, touched, from === null);
     if (growth.size === 0) return null;
     const estimate = this.#ensureBatch().estimate;
     const next = new Map<string, number>();

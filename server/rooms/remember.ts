@@ -931,16 +931,18 @@ export function layerKey(sceneId: string, layer: Layer): string {
  * The most an op can add to each layer's memory (5.3): every element it
  * changed on a layer's remembered ground counts as out of sight, at the
  * charge of the entry the step would write from what the build was, so
- * the estimate is never low. Keyed by layerKey.
+ * the estimate is never low. Keyed by layerKey. Applied edits retain a
+ * complete scan for the map step. Ask-only reads filter unheld ground,
+ * since no map step will use their discarded changes.
  */
-export function memoryGrowth(before: RoomState, after: RoomState, touched: readonly EntityKey[]): Map<string, number> {
+export function memoryGrowth(before: RoomState, after: RoomState, touched: readonly EntityKey[], forMapStep = false): Map<string, number> {
   const out = new Map<string, number>();
   const byScene = touchedByScene(before, after, touched);
   for (const [sceneId, touch] of byScene) {
     const scene = after.scenes[sceneId];
     if (!scene || !keepsMemory(scene) || (touch.chunks.size === 0 && !touch.scene && touch.marks.length === 0)) continue;
     const layers = layersOf(after, scene).map((layer) => ({ layer, held: layerHeld(after, scene, layer) }));
-    const heldByAny: Held = {
+    const heldByAny: Held | undefined = forMapStep ? undefined : {
       key: (cell) => layers.some(({ held }) => held.key(cell)),
       range: (range) => layers.some(({ held }) => held.range(range)),
     };

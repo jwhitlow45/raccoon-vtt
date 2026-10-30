@@ -543,6 +543,32 @@ describe("the estimate for the ask (5.3)", () => {
     }
   }
 
+  test("an applied estimate shares its complete change scan with the map step after exploration", () => {
+    const before = fogRoom({ vision: true, bounds: { w: 16, h: 16 }, scene: { autoWalls: "off" } });
+    paint(before, { x: 4, y: 5, w: 1, h: 1 }, "wood");
+    lift(before, "party", { x: 0, y: 0, w: 16, h: 16 });
+    const result = applyOp(before, { t: "build.paint", sceneId: "s1", terrain: "stone", cells: ["4,5"] }, DM, env(9));
+    assert.ok(result.ok);
+    let reads = 0;
+    const after = { ...result.state, buildChunks: Object.fromEntries(Object.entries(result.state.buildChunks).map(([key, chunk]) => [key, {
+      ...chunk,
+      cells: new Proxy(chunk.cells, { get(target, property, receiver) {
+        if (property === "4,5") reads++;
+        return Reflect.get(target, property, receiver);
+      } }),
+    }])) };
+    const growth = memoryGrowth(before, after, result.touched, true);
+    assert.ok(growth.size > 0 && reads > 0, "the estimate reads the changed terrain and charges its memory");
+    const estimatedReads = reads;
+    // Exploration replaces the state and its tiles, but cannot invalidate a complete build-change scan.
+    const explored = { ...after, exploredTiles: { ...after.exploredTiles } };
+    const ops = mapStepOps({ before, after: explored, touched: result.touched, cap: () => Infinity });
+    assert.ok(ops.length > 0, "the step still remembers the changed ground");
+    // The cold stair index can inspect the terrain once, but a second diff repeats the estimator's reads.
+    assert.ok(reads <= estimatedReads + 1, `the step repeated the complete scan: ${reads} reads after ${estimatedReads} estimated reads`);
+    assert.deepEqual(memoryGrowth(before, after, result.touched), growth, "filtered and complete estimates charge identical memory");
+  });
+
   test("a 2,000-cell edit outside every held layer does no detailed terrain reads", () => {
     const before = fogRoom({ vision: true, perPlayer: true, bounds: { w: 160, h: 64 } });
     before.holders = { s1: { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] } };
