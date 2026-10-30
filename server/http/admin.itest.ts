@@ -215,10 +215,12 @@ describe("the admin page", () => {
     assert.ok(room);
     assert.deepEqual(Object.keys(room).sort(), ["bytes", "createdAt", "id", "images", "lastActiveAt", "loaded", "name", "pinned", "readOnly", "sockets"]);
     assert.equal(room.bytes, await roomPhysicalBytes(t.pool, roomId));
-    // The log archive (the chat above) is on disk but outside the quota.
+    // The log archive (the chat above) and its access rows are on disk but outside the quota.
     const { rows } = await t.pool.query<{ bytes: number }>("select coalesce(sum(pg_column_size(l.*)), 0)::int as bytes from room_log l where room_id = $1", [roomId]);
+    const { rows: access } = await t.pool.query<{ bytes: number }>("select coalesce(sum(pg_column_size(a.*)), 0)::int as bytes from room_log_access a where room_id = $1", [roomId]);
     assert.ok(rows[0]!.bytes > 0);
-    assert.equal(room.bytes, (await roomStoredBytes(t.pool, roomId)) + rows[0]!.bytes);
+    assert.ok(access[0]!.bytes > 0, "the chat line has its access row");
+    assert.equal(room.bytes, (await roomStoredBytes(t.pool, roomId)) + rows[0]!.bytes + access[0]!.bytes);
     assert.equal(room.images, 1);
     assert.equal(room.loaded, true);
     assert.equal(room.sockets, 1);

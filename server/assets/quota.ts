@@ -27,8 +27,9 @@ export const ROOM_QUOTA_BYTES_SQL = `
      + coalesce((select sum(pg_column_size(w.*)) from client_watermarks w where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(r.*)) from roll_receipts r where room_id = $1), 0)`;
 
-/** The log archive's bytes for the room id `$1`, which a room's size on disk counts and its quota does not. */
-export const ROOM_ARCHIVE_BYTES_SQL = `coalesce((select sum(pg_column_size(l.*)) from room_log l where room_id = $1), 0)`;
+/** The log archive's bytes for the room id `$1`, its access rows included, which a room's size on disk counts and its quota does not. */
+export const ROOM_ARCHIVE_BYTES_SQL = `coalesce((select sum(pg_column_size(l.*)) from room_log l where room_id = $1), 0)
+     + coalesce((select sum(pg_column_size(x.*)) from room_log_access x where room_id = $1), 0)`;
 
 export async function roomStoredBytes(db: pg.Pool | pg.PoolClient, roomId: string): Promise<number> {
   const { rows } = await db.query<{ bytes: string }>(`select ${ROOM_QUOTA_BYTES_SQL} as bytes`, [roomId]);

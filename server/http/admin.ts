@@ -76,8 +76,8 @@ export type AdminStorage = {
 /**
  * Every room with what the admin page shows of it, newest activity first.
  * The size is the room's size on disk (roomPhysicalBytes): the quota's own
- * sum, starter picks left out as there, plus the log archive, which uploads
- * and the read-only switch never count. The page and the CLI's list-rooms
+ * sum, starter picks left out as there, plus the log archive and its access
+ * rows, which uploads and the read-only switch never count. The page and the CLI's list-rooms
  * agree. The image count counts starter picks, since they are the room's
  * images all the same.
  */
