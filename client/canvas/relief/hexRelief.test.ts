@@ -12,11 +12,13 @@ import { cellAtPoint, cellCenter, cellPolygon, footprintCells, polygonSide, type
 import { depth, drawnBase, drawnHeights, type Turn } from "../../lib/view.ts";
 import { groupWalls, ReliefIndex, type Item, type StandeeIn } from "./buckets.ts";
 import { FogView } from "./fogView.ts";
-import { facesOf, keyOf, localKeyOf, sortKey, wallItems, type CellPiece, type PieceSource } from "./pieces.ts";
+import { cellPieces, facesOf, keyOf, localKeyOf, sortKey, wallItems, type CellPiece, type PieceSource } from "./pieces.ts";
 import { wallPieces, type WallPiece } from "./runs.ts";
 import { drawRun } from "./drawRelief.ts";
 import { CellTints, hexLook, sideLook } from "./looks.ts";
 import { standeeShape } from "./standee.ts";
+import { splitTokens } from "./stand.ts";
+import type { ViewToken } from "../../lib/scene.ts";
 
 /*
  * Raised hexes in the depth list (docs/design-v1-iso-hex-relief.md 6 and
@@ -524,5 +526,81 @@ describe("drawn heights on hexes (5.4)", () => {
     assert.deepEqual([a.low, a.high, a.at(6, 6)], [b.low, b.high, b.at(6, 6)]);
     const fp = [{ col: 6, row: 6 }];
     assert.equal(drawnBase(src(10, fogWith([one])), fp, 10), 10 - 0, "a creature on fogged ground stands at its lift over 0");
+  });
+});
+
+describe("per player on hexes (10.3, review HXREL1-OPUS-9)", () => {
+  test("two players' boards over one scene: each raises only the hexes its own fog shows, and a creature stands on one board and lies flat on the other", () => {
+    for (const grid of [ROWS, COLUMNS]) {
+      const bounds = { w: 16, h: 16 };
+      const ana = { col: 3, row: 4 };
+      const ben = { col: 10, row: 9 };
+      const feet = new Array<number>(256).fill(0);
+      feet[ana.row * 16 + ana.col] = 10;
+      feet[ben.row * 16 + ben.col] = 15;
+      const chunks = { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(feet) } as BuildChunk };
+      // Each player has explored only their own hex and the ring round it.
+      const explored = (h: GroundCell) => {
+        const bits = new Uint8Array(TILE_BYTES);
+        for (const [sx, sy] of [h, ...hexNeighbors(grid, { col: h.col, row: h.row })].flatMap((c) => hexSubcells(grid, { col: c.col, row: c.row }))) {
+          const i = sy * TILE_SUB + sx;
+          bits[i >> 3] = bits[i >> 3]! | (1 << (i & 7));
+        }
+        return { [tileKey("s1", 0, 0)]: { sceneId: "s1", tx: 0, ty: 0, rev: 1, bits: encodeTile(bits) } };
+      };
+      const boardOf = (fog: Record<string, FogTile>) => {
+        const heights = drawnHeights({ chunks, sceneId: "s1", bounds, grid, fog, stand: true }, 5);
+        const relief = new ReliefIndex();
+        relief.sync({ sceneId: "s1", bounds, chunks, tiles: fog, walls: new Map(), global: null, src: { ground: (x, y) => heights.at(x, y), terrain: () => null, look: () => ({ texture: null, color: "#777" }), bounds, grid }, grid });
+        const raised = relief.layout(0, EVERYTHING, []).flatMap((i) => (i.kind === "run" ? i.pieces.filter((p) => p.kind === "column").map((p) => p.id) : []));
+        return { heights, raised, fog: new FogView(fog, "s1", bounds) };
+      };
+      const anaBoard = boardOf(explored(ana));
+      const benBoard = boardOf(explored(ben));
+      assert.deepEqual(anaBoard.raised, [`c${ana.col},${ana.row}`], `${grid.orient}: Ana's board raises her hex alone`);
+      assert.deepEqual(benBoard.raised, [`c${ben.col},${ben.row}`], `${grid.orient}: Ben's board raises his hex alone`);
+      assert.equal(anaBoard.heights.atCell(ben), 0, `${grid.orient}: Ben's height is not Ana's to draw`);
+      // A creature on Ana's hex: standing on her board, flat on Ben's, which has not seen that ground.
+      const at = hexCenter(grid, ana);
+      const goblin = { id: "g", x: at.x - 0.5, y: at.y - 0.5, size: "medium", kind: "monster" } as unknown as ViewToken;
+      assert.equal(splitTokens(anaBoard.fog, grid, [goblin], () => false).standing.length, 1, `${grid.orient}: on Ana's board it stands`);
+      assert.equal(splitTokens(benBoard.fog, grid, [goblin], () => false).flat.length, 1, `${grid.orient}: on Ben's it lies flat`);
+    }
+  });
+});
+
+describe("a stair on hexes, facing each of six sides (10.3, review HXREL1-OPUS-9)", () => {
+  test("both orientations: its top copies its treads, its risers toward lower hexes stand in its swatch, the hex above shows its side over it, and the walls still say which way it faces", () => {
+    for (const grid of [ROWS, COLUMNS]) {
+      const stair = { col: 6, row: 6 };
+      for (let d = 0; d < 6; d++) {
+        const up = hexNeighbors(grid, stair)[d]!;
+        // The stair 5 ft up, the hex it faces 10 ft up, every other hex at 0.
+        const feet = new Array<number>(256).fill(0);
+        feet[stair.row * 16 + stair.col] = 5;
+        feet[up.row * 16 + up.col] = 10;
+        const marks = new Array<string>(256).fill(".");
+        marks[stair.row * 16 + stair.col] = String(d);
+        const chunk: BuildChunk = { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(feet), up: marks.join("") };
+        const z = (c: GroundCell) => (c.col >= 0 && c.col < 16 && c.row >= 0 && c.row < 16 ? feet[c.row * 16 + c.col]! / 5 : 0);
+        const src: PieceSource = { ground: (x, y) => z({ col: x, row: y }), terrain: () => null, look: (_x, _y, t) => sideLook(t, null), bounds: { w: 16, h: 16 }, grid };
+        const pieces = cellPieces(src, 0, 0, chunk);
+        const s = pieces.find((p) => p.x === stair.col && p.y === stair.row)!;
+        const above = pieces.find((p) => p.x === up.col && p.y === up.row)!;
+        assert.ok(s.stair, `${grid.orient} facing ${d}: a stair, whose top copies the ground's treads`);
+        assert.deepEqual(s.look, sideLook("stairs", null), `${grid.orient} facing ${d}: its risers wear the stair's swatch`);
+        for (const turn of TURNS) {
+          const faces = facesOf(s, turn);
+          // Its risers: every near side toward lower ground, solid from 0 up to it, none toward the hex it climbs to.
+          for (const f of faces) assert.ok(s.around[f.side]! < s.z && f.z0 === 0 && f.z1 === 1, `${grid.orient} facing ${d} turn ${turn}: a riser to lower ground`);
+          assert.ok(!faces.some((f) => f.side === d), `${grid.orient} facing ${d} turn ${turn}: no riser toward the hex above`);
+          const toward = hexNeighbors(grid, up).findIndex((n) => n.col === stair.col && n.row === stair.row);
+          const showing = depth(turn, above.sides[toward]!.out.x, above.sides[toward]!.out.y) > 0;
+          assert.equal(facesOf(above, turn).some((f) => f.side === toward && f.z0 === 1 && f.z1 === 2), showing, `${grid.orient} facing ${d} turn ${turn}: the hex above shows its side over the stair when it faces the viewer`);
+        }
+        const walls = sceneWalls({ id: "s1", autoWalls: "off", bounds: { w: 16, h: 16 }, gridShape: grid.orient === "rows" ? "hexRows" : "hexColumns" }, { [`s1:0,0`]: chunk });
+        assert.equal(walls.stairAt(stair.col, stair.row), String(d), `${grid.orient}: the stair faces ${d}`);
+      }
+    }
   });
 });

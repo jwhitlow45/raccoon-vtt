@@ -329,6 +329,34 @@ describe("a press on hexes reaches the rules as the hex it showed (7)", () => {
   });
 });
 
+describe("the stand threshold on hexes, Low power's too (10.3, review HXREL1-OPUS-9)", () => {
+  test("both orientations: a raised hex stands from 12 px a hex and lies flat at 11, and in Low power from 24 px and flat at 23, for the drawn heights and a press alike", () => {
+    for (const orient of ["hexRows", "hexColumns"] as const) {
+      const grid: HexGrid = { shape: "hex", orient: orient === "hexRows" ? "rows" : "columns" };
+      const h = { col: 5, row: 5 };
+      const feet = new Array<number>(256).fill(0);
+      feet[h.row * 16 + h.col] = 20;
+      const room = { buildChunks: { "s1:0,0": { sceneId: "s1", cx: 0, cy: 0, rev: 1, cells: {}, edges: {}, heights: encodeHeights(feet) } }, fogTiles: {}, meta: { settings: { feetPerCell: 5 } } } as never;
+      for (const [scale, lowPower, stands] of [
+        [11, false, false],
+        [12, false, true],
+        [23, true, false],
+        [24, true, true],
+      ] as const) {
+        const camera = { x: 200, y: 100, scale };
+        const pick = boardPickFor({ room, scene: { id: "s1", bounds: { w: 16, h: 16 }, gridShape: orient }, role: "dm", fog: false, view: isometric(0), camera, lowPower }, new DrawnHeightsMemo());
+        const label = `${orient} at ${scale} px${lowPower ? " in Low power" : ""}`;
+        assert.equal(pick.heights.atCell(h), stands ? 4 : 0, `${label}: the hex's drawn height`);
+        assert.equal(pick.heights.high, stands ? 4 : 0, label);
+        // A press on the hex's center as its top would draw: on the top when it stands, else on the flat ground under the same screen point.
+        const c = hexCenter(grid, h);
+        const hit = pressHit(pick, viewToScreen(camera, toView(isometric(0), c, 4)));
+        assert.equal(hit.z, stands ? 4 : 0, `${label}: the press meets ${stands ? "the top" : "the ground"}`);
+      }
+    }
+  });
+});
+
 describe("a drag on hexes reads the hexes it would stand on (7)", () => {
   test("a Medium dragged over a raised hex lands on its top under the finger, and a Large across a ledge stands on its highest own hex, never one its box only touches", () => {
     for (const grid of [ROWS, COLUMNS]) {

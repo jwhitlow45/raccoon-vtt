@@ -146,6 +146,36 @@ describe("an area's ground cut on hexes (8)", () => {
   });
 });
 
+describe("cones, cylinders and lines on hexes (10.3, review HXREL1-OPUS-9)", () => {
+  test("each over a ledge and a pit on both orientations: closed, no face twice, none below the ground of every hex beside it", () => {
+    for (const grid of [ROWS, COLUMNS]) {
+      const bounds = { w: 14, h: 14 };
+      const ground: Record<string, number> = {};
+      let i = 0;
+      for (const h of sceneHexes(grid, bounds)) ground[`${h.col},${h.row}`] = [0, 2, -1, 1, 0][i++ % 5]!;
+      const center = hexCenter(grid, { col: 6, row: 6 });
+      for (const template of [
+        { shape: "cone", size: 30, origin: { x: center.x, y: center.y, z: 5 }, yaw: 30, pitch: 20 },
+        { shape: "cylinder", size: 10, height: 20, origin: { x: center.x, y: center.y, z: -5 } },
+        { shape: "line", size: 40, width: 5, origin: { x: center.x - 3, y: center.y, z: 2 }, yaw: 60 },
+      ] as const) {
+        const label = `${grid.orient} ${template.shape}`;
+        const vol = volumeOn(grid, template, ground, bounds);
+        assert.ok(vol.faces().length > 0, label);
+        assertNoDuplicates(vol, label);
+        assertClosed(vol, label);
+        for (const f of facesOf(vol)) {
+          const mx = f.reduce((t, p) => t + p[0], 0) / f.length;
+          const my = f.reduce((t, p) => t + p[1], 0) / f.length;
+          const top = Math.max(...f.map((p) => p[2]));
+          const near = sceneHexes(grid, bounds).filter((h) => Math.hypot(hexCenter(grid, h).x - mx, hexCenter(grid, h).y - my) < 0.7);
+          if (near.length > 0) assert.ok(near.some((h) => top > (ground[`${h.col},${h.row}`] ?? 0) - 1e-7), `${label}: a face below every hex beside it`);
+        }
+      }
+    }
+  });
+});
+
 describe("a build on raised hexes comes in slices (9, review HXR1-ASTRA-6)", () => {
   test("hexesMeeting gives cellsMeeting's hexes in its order, and a null for each candidate it rejects", () => {
     const rand = mulberry32(31);
