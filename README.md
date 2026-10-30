@@ -551,13 +551,13 @@ Its project, network and volume names are the same as
 ### Verify the image
 
 Images published with signing enabled carry a keyless Cosign signature for
-their multi-architecture digest. With [Cosign](https://docs.sigstore.dev/cosign/verifying/verify/)
-installed, replace `X.Y.Z` with the release version and verify its release
+their multi-architecture digest. With [Cosign v3 or later](https://docs.sigstore.dev/cosign/verifying/verify/)
+installed, replace `X.Y.Z` in both places with the release version and verify its release
 workflow identity before running it. Older releases may be unsigned.
 
 ```sh
 cosign verify \
-  --certificate-identity-regexp '^https://github[.]com/jwhitlow45/raccoon-vtt/[.]github/workflows/image[.]yml@refs/tags/v[0-9]+[.][0-9]+[.][0-9]+$' \
+  --certificate-identity 'https://github.com/jwhitlow45/raccoon-vtt/.github/workflows/image.yml@refs/tags/vX.Y.Z' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   docker.io/jwhitlow45/raccoon-vtt:X.Y.Z
 ```
