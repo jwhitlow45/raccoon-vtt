@@ -1290,12 +1290,15 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
     await view(desk, deskCdp, { width: 1280, height: 800 });
   });
 
-  test("9. at 900 x 800 in a fight with the players' screens black, narrow gaps alone do not fit: View folds into the side panel's Menu, and a widening that brings it back hands focus to the Menu's tab", async () => {
+  test("9. at 900 x 800 in a fight with a long active name and the players' screens black, narrow gaps alone do not fit: View folds into the side panel's Menu, and a widening that brings it back hands focus to the Menu's tab", async () => {
     await startFight();
+    const goblinName = deskSocket.state!.tokens[run.goblin.id]!.name;
     await ops.send({ t: "view.blackout", blackout: true });
     try {
+      // The compact blackout badge now fits where the DM dot did. A longer turn name still requires View to fold.
+      await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { name: "Goblin captain 1" } });
       await view(desk, deskCdp, { width: 900, height: 800 });
-      await topBar(desk).getByText("Players see black").waitFor();
+      await topBar(desk).getByRole("img", { name: "You are the DM. Players see black", exact: true }).waitFor();
       const viewButton = topBar(desk).getByRole("button", { name: /^View: / });
       await waitFor("the View button folded into the Menu", async () => ((await viewButton.count()) === 0 ? true : null));
       if (await sidePanel(desk).isHidden()) await toolbar(desk).getByRole("button", { name: "Panels" }).click();
@@ -1319,6 +1322,7 @@ describe("raccoon-vtt: layout and hierarchy", { timeout: 1_200_000 }, () => {
         }, label),
       );
     } finally {
+      await ops.send({ t: "token.update", tokenId: run.goblin.id, patch: { name: goblinName } });
       await ops.send({ t: "view.blackout", blackout: false });
       await endFight();
       await view(desk, deskCdp, { width: 1280, height: 800 });
