@@ -7,6 +7,7 @@ import { after, afterEach, before, beforeEach, describe, test } from "node:test"
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from "playwright-core";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { barControl, ConsoleWatch, OpSocket, pickTool, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 
 /**
  * A field in a phone's sheet stays in view over the on-screen keyboard
@@ -164,12 +165,33 @@ const STEP_REQUESTS = 30;
 /** Each step's requests from Pat's page, and the most the last minute held at any of its loads. */
 const steps: { name: string; requests: number; peak: number }[] = [];
 let stepPeak = 0;
+/** When each of Pat's room sockets opened: each takes a snapshot from his session's budget (server/rooms/budgets.ts). */
+const patSnapshots: number[] = [];
+/** The test notes a socket a little before the server counts its snapshot, so an entry leaves the server's window this much later. */
+const SNAPSHOT_SLACK_MS = 2_000;
+
+/**
+ * Waits until one more of Pat's loads fits his session's snapshot budget,
+ * 20 a minute. Over it the server holds the snapshot back for up to a
+ * minute behind "Connecting…", up against setUp's 30 s wait for Connected:
+ * kb-7's last size, the 21st load in about 33 s, spent 27 to 30 s there on
+ * CI, and failed when it passed 30.
+ */
+async function underSnapshotBudget(page: Page): Promise<void> {
+  const { windowMs, sessionCount } = DEFAULT_SNAPSHOT_BUDGET;
+  for (;;) {
+    const live = patSnapshots.filter((t) => t > Date.now() - windowMs - SNAPSHOT_SLACK_MS);
+    if (live.length < sessionCount) return;
+    await page.waitForTimeout(live[0]! + windowMs + SNAPSHOT_SLACK_MS - Date.now());
+  }
+}
 
 async function setUp(page: Page, view: View): Promise<void> {
   // This file loads Pat's room every few seconds, which can reach the server's limit and leave a load unconnected, so it waits until the last minute's requests leave room.
   const recent = () => patRequests.filter((t) => t > Date.now() - 60_000).length;
   stepPeak = Math.max(stepPeak, recent());
   while (recent() > REQUESTS_PER_MINUTE) await page.waitForTimeout(1_000);
+  await underSnapshotBudget(page);
   await patCdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
   await page.setViewportSize({ width: view.width, height: view.height });
   await page.evaluate((s) => localStorage.setItem("rvtt.uiScale", String(s)), view.scale);
@@ -742,6 +764,9 @@ describe("raccoon-vtt: a sheet's field over the phone keyboard", { timeout: 900_
     pat.on("request", (r) => {
       const at = new URL(r.url());
       if (at.origin === server.origin && (at.pathname.startsWith("/api/") || at.pathname.startsWith("/ws")) && !at.pathname.startsWith("/api/assets")) patRequests.push(Date.now());
+    });
+    pat.on("websocket", (ws) => {
+      if (new URL(ws.url()).pathname === "/ws") patSnapshots.push(Date.now());
     });
   });
 
