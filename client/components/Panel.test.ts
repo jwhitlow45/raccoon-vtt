@@ -4,7 +4,7 @@ import { describe, test } from "node:test";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
-const { GROUP_BOX, GROUP_FOLD, Group, Section } = await import("./Panel.tsx");
+const { GROUP_BOX, GROUP_FOLD, Group, Section, summaryClip } = await import("./Panel.tsx");
 
 /** A panel's groups (docs/design-v1-dice-ui.md 3.2, docs/design-v1-token-panel-groups.md 4), as markup. */
 describe("Group", () => {
@@ -105,6 +105,25 @@ describe("Group", () => {
     assert.match(summaryLook, /text-overflow:ellipsis/);
     assert.match(summaryLook, /(?<![-a-z])width:4em/, "it asks the row for its floor alone, so an action keeps the name's line");
     assert.doesNotMatch(markup, /(?<![-a-z])width:[\d.]+px/, "no width measured");
+  });
+
+  test("fl12: a folded summary clips 1 px out where the browser takes a clip margin, and elsewhere gets 1 px of padding its margins take back (FL12-OPUS-6)", () => {
+    // WebKit, so every browser on an iPhone, has no overflow-clip-margin: clipped at its box, a proficiency frame at its first or last word would lose its edges.
+    const world = globalThis as { CSS?: unknown };
+    const before = world.CSS;
+    const asked: string[] = [];
+    try {
+      for (const margin of [true, false]) {
+        world.CSS = { supports: (property: string, value: string) => (asked.push(`${property}: ${value}`), margin) };
+        assert.deepEqual(summaryClip(), margin ? { overflow: "clip", overflowClipMargin: 1 } : { overflow: "hidden", paddingInline: 1, marginRight: -1 });
+      }
+      assert.deepEqual(asked, ["overflow-clip-margin: 1px", "overflow-clip-margin: 1px"]);
+    } finally {
+      world.CSS = before;
+    }
+    // Rendered here, with no browser to ask, it takes Chrome's way, as the end-to-end checks see it.
+    const markup = renderToStaticMarkup(createElement(Group, { label: "Skills", open: false, onToggle: () => {}, summary: "Athletics +6" }, "inside"));
+    assert.match(/id="[^"]+-summary" style="([^"]*)"/.exec(markup)?.[1] ?? "", /overflow:clip;overflow-clip-margin:1px/);
   });
 
   test("a group with no chevron and no icon has no empty lead column", () => {

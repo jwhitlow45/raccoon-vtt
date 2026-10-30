@@ -226,6 +226,23 @@ const GROUP_ROW = 48;
 const NAME_LINE = theme.font.input * theme.leading.tight;
 
 /**
+ * How a folded group's summary cuts its words with "…" and still shows
+ * whole the frame a proficiency mark draws 1 px outside its first or last
+ * word (D-261030-527). Clip cuts with "…" as hidden does, and unlike
+ * hidden takes a margin, so the summary clips 1 px out from a box and
+ * words that stay where they are. WebKit, so every browser on an iPhone,
+ * takes no clip margin: there the summary is hidden with 1 px of padding at
+ * each side, which its margins take back, the auto left one wherever the
+ * line has room, so a summary cut with "…" starts 1 px further in.
+ */
+export function summaryClip(): CSSProperties {
+  const css = (globalThis as { CSS?: { supports?(property: string, value: string): boolean } }).CSS;
+  if (css?.supports?.("overflow-clip-margin", "1px") ?? true) return { overflow: "clip", overflowClipMargin: 1 };
+  return { overflow: "hidden", paddingInline: 1, marginRight: -1 };
+}
+const SUMMARY_CLIP = summaryClip();
+
+/**
  * A fold of a panel's sections that belong together by use (the Token
  * panel's Combat, Notes and Position, docs/design-v1-dice-ui.md 5): a 48 px
  * row with a chevron, the group's icon where it has one, its name at 16 px
@@ -292,9 +309,7 @@ export function Group(props: {
           lineHeight: theme.leading.body,
           color: theme.color.textMuted,
           whiteSpace: "nowrap",
-          // Clipped 1 px out from its box, so the frame a proficiency mark draws 1 px outside its first or last word shows whole (D-261030-527), while the summary's box and words stay where they were. Clip, unlike hidden, cuts with "…" and takes a margin.
-          overflow: "clip",
-          overflowClipMargin: 1,
+          ...SUMMARY_CLIP,
           textOverflow: "ellipsis",
         }}
       >
