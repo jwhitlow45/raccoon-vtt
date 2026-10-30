@@ -1205,10 +1205,11 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
           const words = (it: Item) => {
             if (!isEl(it.node)) return true;
             if (FIELD.includes(tag(it.node)) || it.node.matches(CONTROL) && !(tag(it.node) === "label" && !it.node.querySelector("input, select, textarea, button"))) return false;
-            // A part that holds nothing to read, as a picture or a bare swatch, is no name. Counted as words, a crest beside a title sent the pair to the label check and hid an orphan under them.
             const atoms = atomsOf(it.node);
             return atoms.length > 0 && atoms.every((a) => a.kind === "text");
           };
+          // A part that holds nothing to read, as a picture or a bare swatch, is neither a name nor a control. It takes no side in the label check: an icon beside a name still names the controls under it, and an icon alone under words is still alone (FU40AC-OPUS-4).
+          const blank = (it: Item) => isEl(it.node) && !FIELD.includes(tag(it.node)) && !it.node.matches(CONTROL) && atomsOf(it.node).length === 0;
           const prose = (it: Item) => isEl(it.node) && /^(h[1-6]|p)$/.test(tag(it.node));
           const pill = (it: Item) => isEl(it.node) && cornerDown(it.node, it.box.b - it.box.t) >= (it.box.b - it.box.t) / 2 - 0.5;
           const choices = el.getAttribute("role") === "radiogroup" || items.every(pill);
@@ -1241,8 +1242,10 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
             const prev = lines[i - 1]!.items.filter((it) => !ownLine(it));
             const cur = lines[i]!.items.filter((it) => !ownLine(it));
             if (!prev.length || !cur.length) continue;
-            if (i === 1 && prev.every(words) && !prev.some(prose) && cur.some((it) => !words(it))) {
-              if (roomBeside(prev, cur)) push({ check: "wrap-label", role: roleOf(el), name: nameOf(el), offset: round(mid(cur[0]!.box) - mid(prev[0]!.box)), box: union([...prev, ...cur].map((it) => it.box)), what: `${prev.map((it) => it.what).join(" + ")} alone above ${cur.map((it) => it.what).join(" + ")}`, detail: `in ${width} px` });
+            const named = i === 1 && prev.every((it) => words(it) || blank(it)) && prev.some(words) && !prev.some(prose) && cur.some((it) => !words(it) && !blank(it));
+            // Names with no room beside their controls head them, but the last part above may still share a line with a lone part under it, as a crest and a short title over a header's actions.
+            if (named && roomBeside(prev, cur)) {
+              push({ check: "wrap-label", role: roleOf(el), name: nameOf(el), offset: round(mid(cur[0]!.box) - mid(prev[0]!.box)), box: union([...prev, ...cur].map((it) => it.box)), what: `${prev.map((it) => it.what).join(" + ")} alone above ${cur.map((it) => it.what).join(" + ")}`, detail: `in ${width} px` });
             } else if (i === lines.length - 1 && cur.length === 1 && prev.length >= 2 && !choices && !fills(cur[0]!) && couldShare(prev, cur[0]!)) {
               push({ check: "wrap-orphan", role: roleOf(el), name: nameOf(el), offset: round(mid(cur[0]!.box) - mid(prev[0]!.box)), box: union([...prev, ...cur].map((it) => it.box)), what: `${cur[0]!.what} alone under ${prev.map((it) => it.what).join(" + ")}`, detail: `in ${width} px` });
             }

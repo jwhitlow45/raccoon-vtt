@@ -2764,6 +2764,21 @@ const CASES = `
     <button aria-label="Remove this damage">x</button>
   </div>
 </div>
+<div data-case="picture-alone" style="width: 200px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+    <span style="flex: none; width: 100px; overflow: hidden; white-space: nowrap">Armor Class and hit points</span><span style="flex: 1 0 70px; min-width: 0; overflow: hidden; white-space: nowrap">Speed and senses</span><svg width="16" height="16" viewBox="0 0 16 16" style="flex: none"><rect width="16" height="16" fill="#aaa"/></svg>
+  </div>
+</div>
+<div data-case="picture-under-name" style="width: 200px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+    <span style="flex: 1 1 190px; min-width: 0">Speed</span><svg width="16" height="16" viewBox="0 0 16 16" style="flex: none"><rect width="16" height="16" fill="#aaa"/></svg>
+  </div>
+</div>
+<div data-case="icon-label-alone" style="width: 300px">
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+    <svg width="16" height="16" viewBox="0 0 16 16" style="flex: none"><rect width="16" height="16" fill="#aaa"/></svg><span style="flex: 1 1 240px; min-width: 0">Light</span><button style="flex: none; width: 60px">On</button><button style="flex: none; width: 60px">Off</button>
+  </div>
+</div>
 <div data-case="hint-high">
   <div style="height: 44px; padding: 6px 10px; background: #333; overflow: hidden"><div style="font-size: 13px; line-height: 1.4; white-space: nowrap">Drag to measure. Tap to add a waypoint.</div></div>
 </div>
@@ -3016,6 +3031,10 @@ export function helperTest(): void {
       await caught("label-room", "wrap-label");
       await caught("remove-alone", "wrap-orphan");
       await passes("remove-held");
+      // A picture is neither a name nor a control (FU40AC-OPUS-4): one wrapped alone under words is an orphan, and an icon beside a name keeps the name's label check over two buttons.
+      await caught("picture-alone", "wrap-orphan");
+      await passes("picture-under-name");
+      await caught("icon-label-alone", "wrap-label");
       await caught("hint-high", "center");
       await passes("hint-centered");
       // A group header whose short summary wrapped under its name at the row's end, beside the name across but on a line of its own: one block of two lines, centered as one (DPFIX-MEASURE). Set high, it is caught.
