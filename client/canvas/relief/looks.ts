@@ -123,7 +123,8 @@ export class CellTints {
    * fog sub-cells, so nothing of a neighbor's art, revealed or not, comes in.
    */
   hexAt(grid: HexGrid, cell: GroundCell): string | null {
-    const key = -1 - ((cell.row + 4096) * 8192 + (cell.col + 4096));
+    // By orientation too: the same col and row is another polygon on the other lattice (D-261030-465), and one image can serve both.
+    const key = -1 - (((cell.row + 4096) * 8192 + (cell.col + 4096)) * 2 + (grid.orient === "columns" ? 1 : 0));
     if (this.#known.has(key)) return this.#known.get(key)!;
     const poly = cellPolygon(grid, cell);
     const xs = poly.map((p) => p.x);

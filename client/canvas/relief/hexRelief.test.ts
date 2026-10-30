@@ -407,6 +407,42 @@ describe("a hex side's tint (D-261030-465)", () => {
       assert.equal(hexLook(all, tints, grid, h, "stairs").color, sideLook("stairs", null).color, "a stair wears its swatch");
     }
   });
+
+  test("one cache asked by both orientations and fogs keeps each orientation's own polygon: a hex's tint never comes from the other's (review HXR1-ASTRA-4)", () => {
+    // 8 px a cell: the rows polygon of (7,3) blue, everything else red, so the columns polygon of (7,3) reads red.
+    const h = { col: 7, row: 3 };
+    const size = { width: 160, height: 160 };
+    const rect = { x: 0, y: 0, width: 20, height: 20 };
+    const rowsPoly = cellPolygon(ROWS, h);
+    const read = (r: { sx: number; sy: number; sw: number; sh: number }) => {
+      const out: number[] = [];
+      for (let j = 0; j < r.sh; j++) {
+        for (let i = 0; i < r.sw; i++) {
+          const mid = { x: (r.sx + i + 0.5) / 8, y: (r.sy + j + 0.5) / 8 };
+          const blue = polygonSide(rowsPoly, mid, 0) >= 0;
+          out.push(blue ? 0 : 255, 0, blue ? 255 : 0, 255);
+        }
+      }
+      return out;
+    };
+    const fresh = (grid: HexGrid) => new CellTints(read, rect, size).hexAt(grid, h);
+    assert.equal(fresh(ROWS), "rgb(0, 0, 255)");
+    assert.equal(fresh(COLUMNS), "rgb(255, 0, 0)");
+    const all = new FogView(null, "s1", { w: 20, h: 20 });
+    const fogged = new FogView({}, "s1", { w: 20, h: 20 });
+    const shared = new CellTints(read, rect, size);
+    for (const [grid, fog] of [
+      [ROWS, all],
+      [COLUMNS, all],
+      [ROWS, fogged],
+      [COLUMNS, fogged],
+      [COLUMNS, all],
+      [ROWS, all],
+    ] as const) {
+      const want = fog === all ? fresh(grid) : sideLook(null, null).color;
+      assert.equal(hexLook(fog, shared, grid, h, null).color, want, `${grid.orient}, ${fog === all ? "seen" : "fogged"}`);
+    }
+  });
 });
 
 describe("a hex bucket's inputs (9)", () => {
