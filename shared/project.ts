@@ -138,7 +138,11 @@ export type ProjectedEncounter = Omit<Encounter, "entries"> & { entries: Project
  */
 export type ProjectedTrap = Omit<Trap, "state" | "found"> & Partial<Pick<Trap, "state" | "found">> & { disarmed?: true };
 
-export type ProjectedState = Omit<RoomState, "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy"> & {
+export type ProjectedState = Omit<RoomState, "meta" | "tokens" | "characters" | "templates" | "encounter" | "traps" | "holders" | "exploredBy"> & {
+  meta: RoomMeta & {
+    /** DM only, never stored. Retained HP undo records, including lines outside the live projection. */
+    hpUndoLogIds?: string[];
+  };
   tokens: Record<string, ProjectedToken>;
   traps: Record<string, ProjectedTrap>;
   characters: Record<string, ProjectedCharacter>;
@@ -3551,8 +3555,15 @@ function projectMemberCtx(_ctx: Ctx, member: Member): Member {
   return member;
 }
 
-function projectMetaCtx(ctx: Ctx): RoomMeta {
-  return ctx.state.meta;
+function projectMetaCtx(ctx: Ctx): ProjectedState["meta"] {
+  const { name, settings, playerSceneId, view } = ctx.state.meta;
+  const meta = { name, settings, playerSceneId, view };
+  if (ctx.viewer.role !== "dm") return meta;
+  // Archive pages can outlive the server's undo records. Send their current
+  // eligibility with live updates, independently of the DM's shorter tail.
+  const reverted = new Set(ctx.state.log.flatMap((e) => e.data?.type === "hp" && e.data.back && e.data.of ? [e.data.of] : []));
+  const hpUndoLogIds = ctx.state.log.filter((e) => e.data?.type === "hp" && e.data.revert && !e.data.back && !reverted.has(e.id)).map((e) => e.id);
+  return { ...meta, hpUndoLogIds };
 }
 
 /** One entity as the viewer may see it, or null when the viewer may not know it exists. */
@@ -3883,6 +3894,9 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
       out.push(key);
     }
   };
+  // The DM's projected meta carries retained HP undo ids, which can change
+  // when a log line is added or dropped without changing the stored meta.
+  if (touched.some((key) => key.startsWith("log:"))) add(keys.meta);
   const tokenIds = new Set<string>();
   const characterIds = new Set<string>();
   const handoutIds = new Set<string>();

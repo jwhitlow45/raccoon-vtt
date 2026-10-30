@@ -153,6 +153,7 @@ function mergedFog(state: RoomState): Record<string, FogTile> {
 
 /** The design 18 leak list, checked against one player projection of one state. */
 function assertNoLeaks(state: RoomState, viewer: Viewer, p: ProjectedState, label: string): void {
+  assert.ok(!("hpUndoLogIds" in p.meta), `${label}: retained HP undo ids leaked`);
   if (state.meta.view.blackout) assertPaused(p, label);
   const sceneId = state.meta.view.blackout ? null : state.meta.playerSceneId!;
   assert.deepEqual(Object.keys(p.scenes), sceneId === null ? [] : [sceneId], `${label}: scenes`);
@@ -590,7 +591,8 @@ describe("projection properties over random rooms", () => {
             assert.equal(single, state.encounterHistory.length === 0 ? null : state.encounterHistory);
             continue;
           }
-          assert.equal(single, inState === null ? null : inState, `seed ${seed} dm ${key}`);
+          if (key === keys.meta) assert.deepEqual(single, inState, `seed ${seed} dm derived meta`);
+          else assert.equal(single, inState === null ? null : inState, `seed ${seed} dm ${key}`);
         }
       }
     }

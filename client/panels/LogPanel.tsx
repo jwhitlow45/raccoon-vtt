@@ -61,6 +61,10 @@ export default function LogPanel(_props: PanelProps) {
   const you = useRoomView((s) => s.you);
   const sceneId = useRoomView((s) => s.sceneId);
   const mainLog = useRoomView((s) => s.view?.log ?? EMPTY_LOG);
+  const hpUndoLogIds = useRoomView((s) => s.view?.meta.hpUndoLogIds);
+  // An older server supplies no archive retention, so only its live lines
+  // offer Undo. A new server keeps loaded pages current without a refetch.
+  const retainedIds = useMemo(() => hpUndoLogIds ?? mainLog.map((entry) => entry.id), [hpUndoLogIds, mainLog]);
   // Trap lines keep logs of their own, so no players' line ever pushes out a DM's, and read in among the rest (docs/design-v1-traps.md 6.3).
   const trapLog = useRoomView((s) => s.view?.trapLog ?? EMPTY_LOG);
   const trapSeen = useRoomView((s) => s.view?.trapSeen ?? EMPTY_LOG);
@@ -95,10 +99,10 @@ export default function LogPanel(_props: PanelProps) {
     if (trimmed.length > 0) setOlder((list) => mergeLog(list, trimmed));
   }, [log, mainLog, older.length]);
 
-  // The archive keeps revert records only while the server can still use
-  // them. Include loaded take-backs even when they are outside the live tail.
+  // Cached revert records may outlive retention. Check the live undo ids,
+  // and include loaded take-backs even when they are outside the live tail.
   const allEntries = useMemo(() => older.length > 0 ? mergeLog(older, log) : log, [older, log]);
-  const undoable = (entry: LogEntry): boolean => canUndoLogLine(names, allEntries, entry);
+  const undoable = (entry: LogEntry): boolean => canUndoLogLine(names, allEntries, entry, retainedIds);
 
   const entries = useMemo(() => {
     return chatOnly ? allEntries.filter((e) => e.kind !== "event") : displayLog(allEntries);

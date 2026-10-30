@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { EntityKey } from "#shared/keys.ts";
-import type { RoomState, Viewer } from "#shared/model.ts";
+import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
+import { DM_LINE_BASE, MAX_LOG } from "#shared/logRings.ts";
 import { applyChanges, changedSightKeys, hashValue, heldOf, projectState, stableStringify, type ProjectedState } from "#shared/project.ts";
 import { opSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
@@ -115,6 +116,34 @@ function run(seed: number, batches: number, tally: Tally): void {
 }
 
 describe("the server's fan-out with the explore step", () => {
+  test("FU39-ASTRA-02: a DM's retained undo ids advance with live log batches, never reaching players", () => {
+    const hit = applyOp(room({ tokens: { gob: token("gob") } }), { t: "actor.hp", target: { tokenId: "gob" }, change: { kind: "damage", amount: 1 } }, DM, env(1));
+    assert.ok(hit.ok);
+    const hp = hit.log.find((line) => line.data?.type === "hp")!;
+    let state = { ...hit.state, log: [...hit.state.log, ...Array.from({ length: LIMITS.dmLogLines }, (_, i): LogEntry => ({ id: `${10 + i}:${DM_LINE_BASE}`, at: hp.at, kind: "event", data: { type: "teleport", tokenId: "gob", past: "wall" } }))] };
+    const dm = open(state, DM, "s1");
+    const player = open(state, P1, "s1");
+    const display = open(state, { memberId: "display:abcdefghijkl", role: "player" }, "s1");
+    const viewers = [dm, player, display];
+    assert.ok(!dm.view.log.some((line) => line.id === hp.id), "the live tail already excludes the retained HP line");
+    assert.deepEqual(dm.view.meta.hpUndoLogIds, [hp.id]);
+    assert.equal(projectState(dm.view as RoomState, P1, { sceneId: "s1" }).meta.hpUndoLogIds, undefined, "reprojecting a DM view strips its private retention");
+    for (let i = 0; i < MAX_LOG; i++) {
+      const before = state;
+      const seq = 1_000 + i;
+      const result = applyOp(state, { t: "log.chat", text: `next ${i}` }, DM, env(seq));
+      assert.ok(result.ok);
+      state = result.state;
+      publishBatch({ seq, before, after: state, touched: result.touched, global: result.global, acks: new Map(), rejects: new Map(), restored: new Map() }, viewers.map((v) => v.conn), () => undefined);
+      for (const viewer of viewers) {
+        for (const message of viewer.inbox.splice(0)) if (message.t === "ev") viewer.view = applyChanges(viewer.view, message.changes as Change[]);
+      }
+      assert.deepEqual(dm.view.meta.hpUndoLogIds, i < MAX_LOG - 1 ? [hp.id] : [], `chat ${i}: existing socket follows actual retention`);
+      for (const viewer of [player, display]) assert.equal(viewer.view.meta.hpUndoLogIds, undefined, "undo retention stays DM-only");
+    }
+    assert.ok(!("hpUndoLogIds" in state.meta), "derived retention is never stored");
+  });
+
   test("applying each socket's events to its snapshot equals a fresh projection, over random batches with real sight", () => {
     const tally: Tally = { batches: 0, explores: 0, narrowSight: 0 };
     for (let seed = 201; seed <= 260; seed++) run(seed, 30, tally);

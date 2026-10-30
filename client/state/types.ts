@@ -473,7 +473,7 @@ export type RoomView = {
    * 13.3) keys on this, so nothing from any scene draws before it. Entities
    * that did not change keep their object identity across updates.
    */
-  view: RoomState | null;
+  view: (RoomState & { meta: ProjectedState["meta"] }) | null;
   /** The scene shown: always the player scene for players, the DM's pick for a DM. */
   sceneId: SceneId | null;
   /** `open` only once the snapshot has arrived (section 7.5). */
