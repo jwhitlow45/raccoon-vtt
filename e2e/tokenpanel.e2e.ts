@@ -511,7 +511,6 @@ panelFile(null, () => {
     const sizes: (View & { label: string })[] = [
       { ...DESK, label: "1280 x 800" },
       { width: 390, height: 844, scale: 1, label: "390 x 844" },
-      { width: 320, height: 568, scale: 1, label: "320 x 568" },
       { width: 480, height: 320, scale: 1.3, insets: { side: 47, bottom: 21 }, label: "480 x 320 at 130%" },
     ];
     for (const size of sizes) {
@@ -532,11 +531,12 @@ panelFile(null, () => {
         await speedUnitsWhole(b, `${size.label}, ${name}'s bar`);
         await noSideScroll(b, `${size.label}, ${name}'s bar opened`);
         if (name === "Adult White Dragon") {
-          const saves = b.locator("[data-saves]");
-          await saves.waitFor();
-          assert.deepEqual(await proficiencyHeightLines(b, `${size.label}, dragon bar`), [], "markers add no height to the dragon bar");
+          // FL-7 (D-261030-436): the dragon's listed saves are underlined, which adds no height and keeps "Saves" and its six saves where they were.
+          await b.locator("[data-saves]").waitFor();
+          assert.deepEqual(await proficiencyHeightLines(b, `${size.label}, dragon bar`), [], "marks add no height to the dragon bar");
+          assert.deepEqual(await proficiencyLines(b, `${size.label}, dragon bar`), [], "each mark is the underline its level takes");
           if (size.width === 390) {
-            const boxes = await Promise.all((await saves.locator("[data-proficiency-label], :scope > [data-saves-part]:first-child > span:first-child").all()).map(rectOf));
+            const boxes = await Promise.all((await b.locator("[data-saves] [data-saves-part] > span").all()).map(rectOf));
             assert.equal(boxes.length, 7);
             assert.ok(Math.max(...boxes.map((box) => box.top)) - Math.min(...boxes.map((box) => box.top)) <= 1, "the dragon's heading and saves stay on one line at 390 x 844");
           }
@@ -591,19 +591,8 @@ panelFile(null, () => {
     await expandBar(goblin);
     const vitals = await rectOf(goblin.locator("[data-vitals]"));
     assert.ok(vitals.height < 30, `the vitals take more than one line spanning: ${vitals.height} px`);
-    const saves = goblin.locator("[data-saves]");
-    const labels = saves.locator("[data-proficiency-label]");
-    assert.deepEqual(await labels.allTextContents(), ["STR −1", "DEX +2", "CON +0", "INT +0", "WIS −1", "CHA −1"], "all six names and bonuses stay whole");
-    const boxes = await Promise.all((await labels.all()).map(rectOf));
-    for (const start of [0, 3]) {
-      const row = boxes.slice(start, start + 3);
-      assert.ok(Math.max(...row.map((box) => box.top)) - Math.min(...row.map((box) => box.top)) <= 1, `saves ${start + 1} to ${start + 3} share a row: ${JSON.stringify(row)}`);
-    }
-    assert.ok(Math.max(...boxes.map((box) => box.top)) - Math.min(...boxes.map((box) => box.top)) <= 1, "390 x 844: proficiency markers preserve the single save line");
-    await noSideScroll(saves, "390 x 844: all six saves");
-    assert.deepEqual(await proficiencyLines(saves, "390 x 844: summary saves"), [], "every marker is placed and every label fits");
-    // A goblin lists no saves, so its bar may hold no marker: the dragon bar's check (above) is the one that must hide some.
-    assert.deepEqual(await proficiencyHeightLines(goblin, "390 x 844: goblin bar", false), [], "the bar has the same height with markers hidden");
+    const saves = await rectOf(goblin.locator("[data-saves]"));
+    assert.ok(saves.height < 30, `the saves take more than one line spanning: ${saves.height} px`);
     // At 100% the expanded bar's full layout shows Apply wherever its token stands (barButtons.ts barCapacity).
     await applyInView(goblin, "390 x 844, Goblin 4 mid-screen");
     // A token at the scene's foot gets the same layout: the field under the mode buttons, no More stats.

@@ -293,7 +293,7 @@ describe("raccoon-vtt group save", { timeout: 300_000 }, () => {
     await save.tap();
     const line = await waitFor("the Cha save's line", () => diceLines(dmSocket.state?.log).slice(before)[0] ?? null);
     // The result lands in the panel's header line, which stays in view, and never under the cell (docs/design-v1-dice-ui.md 4.1).
-    const result = sheet.locator("[data-dice-last]").getByText(`Charisma save ${line.rolls[0]!.total}`, { exact: true });
+    const result = sheet.locator("[data-dice-last]").getByText(String(line.rolls[0]!.total), { exact: true });
     await result.waitFor();
     await waitFor("the result inside the sheet's view", async () => {
       const box = await result.boundingBox();

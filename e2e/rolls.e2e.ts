@@ -302,7 +302,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
 
   test("4. a card being typed into stays when a newer request arrives under a sheet, which becomes a chip", async () => {
     await ask("save", "dex");
-    await card(player).getByText("The DM asks for DEX save.").waitFor();
+    await card(player).getByText("The DM asks for a Dexterity saving throw.").waitFor();
     await card(player).getByLabel("Total Thorn rolled").fill("9");
     await openLog(player);
     const buzzes = await vibrations(player);
@@ -310,7 +310,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await waitFor("the newer request's chime", async () => (await vibrations(player)) > buzzes || null);
     await rollAsked(player).waitFor();
     await player.getByRole("button", { name: "Close Log" }).tap();
-    await card(player).getByText("The DM asks for DEX save.").waitFor();
+    await card(player).getByText("The DM asks for a Dexterity saving throw.").waitFor();
     assert.equal(await card(player).getByLabel("Total Thorn rolled").inputValue(), "9", "the typed total is kept");
     await player.getByRole("button", { name: /^STR save: waiting for your roll\./ }).waitFor();
     await shots.take(player, "rolls-newer-request-a-chip");
@@ -321,16 +321,16 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await ask("save", "str");
     await ask("save", "dex");
     await ask("save", "con");
-    await card(player).getByText("The DM asks for CON save.").waitFor();
+    await card(player).getByText("The DM asks for a Constitution saving throw.").waitFor();
     // The oldest is a chip under the newest two: open it, then put it off. With no answer yet it offers no change (LPD-PLAYER-6).
     await player.getByRole("button", { name: "STR save: waiting for your roll.", exact: true }).tap();
-    await card(player).getByText("The DM asks for STR save.").waitFor();
+    await card(player).getByText("The DM asks for a Strength saving throw.").waitFor();
     await card(player).getByRole("button", { name: "Fold it into a chip, to answer later" }).tap();
-    await card(player).getByText("The DM asks for CON save.").waitFor();
+    await card(player).getByText("The DM asks for a Constitution saving throw.").waitFor();
 
     await openLog(player);
     await rollAsked(player).tap();
-    await card(player).getByText("The DM asks for CON save.").waitFor();
+    await card(player).getByText("The DM asks for a Constitution saving throw.").waitFor();
     assert.equal(await focused(player), "card");
 
     // Every one put off: the summary undoes Later for the newest.
@@ -341,7 +341,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await waitFor("every request put off", async () => (await cardElement(player).count()) === 0 || null);
     await openLog(player);
     await rollAsked(player).tap();
-    await card(player).getByText("The DM asks for CON save.").waitFor();
+    await card(player).getByText("The DM asks for a Constitution saving throw.").waitFor();
     assert.equal(await focused(player), "card");
     await closeAll();
   });
@@ -349,15 +349,15 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
   test("6. the older request's card, opened from its chip and typed into, comes back from the summary with its total", async () => {
     await ask("check", "wis");
     await ask("check", "cha");
-    await card(player).getByText("The DM asks for CHA check.").waitFor();
+    await card(player).getByText("The DM asks for a Charisma check.").waitFor();
     await player.getByRole("button", { name: /^WIS check: waiting for your roll\./ }).tap();
-    await card(player).getByText("The DM asks for WIS check.").waitFor();
+    await card(player).getByText("The DM asks for a Wisdom check.").waitFor();
     await card(player).getByLabel("Total Thorn rolled").fill("11");
     await openLog(player);
     // It names the card its tap brings back, not the newest request (LPD-PLAYER-6).
     assert.equal(await rollAsked(player).getAttribute("aria-label"), "Roll asked: the DM asks for a Wisdom check and 1 more roll. Close the sheet to answer.");
     await rollAsked(player).tap();
-    await card(player).getByText("The DM asks for WIS check.").waitFor();
+    await card(player).getByText("The DM asks for a Wisdom check.").waitFor();
     assert.equal(await card(player).getByLabel("Total Thorn rolled").inputValue(), "11");
     assert.equal(await focused(player), "card");
     await closeAll();
@@ -486,7 +486,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     const sent = await waitFor("the request in the player's state", () => Object.values(playerSocket.state?.rolls ?? {})[0]);
     run.open.push(sent.id);
     assert.deepEqual(sent.test, { kind: "check", choices: [{ ability: "str" }] }, "the DM asked for a Strength check and sent one");
-    await card(player).getByText("The DM asks for STR check.").waitFor();
+    await card(player).getByText("The DM asks for a Strength check.").waitFor();
     await closeAll();
   });
 
@@ -538,12 +538,12 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     const live = dm.getByRole("group", { name: "Roll request: DEX save, DC 10" });
     const id = await ask("save", "dex", 10);
     const c = card(player);
-    await c.getByText("The DM asks for DEX save, DC 10.").waitFor();
+    await c.getByText("The DM asks for a Dexterity saving throw, DC 10.").waitFor();
     assert.equal(await c.getByRole("button", { name: "Roll d20 for Thorn" }).isDisabled(), true, "no bonus is known yet");
     await c.getByText(/^Type your bonus first, such as \+5 or 0\./).waitFor();
     await c.getByLabel("Your bonus for Thorn").fill("4");
     await c.getByRole("button", { name: "Roll d20+4 for Thorn" }).tap();
-    await c.getByText(/^Rolled DEX save \d+ \(1d20\+4: \d+\)\./).waitFor();
+    await c.getByText(/^Rolled \d+ \(1d20\+4: \d+\)\./).waitFor();
     const rolled = playerSocket.state!.rolls[id]!.targets[0]!;
     assert.ok(rolled.dice && rolled.typedBonus, "rolled on the server with the bonus typed");
     await shots.take(player, "rolls-card-rolled-in-place");
@@ -554,7 +554,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
 
     await live.getByRole("button", { expanded: false }).first().tap();
     // The DM reads the player's typed bonus as theirs (LP7-DICE-11).
-    await live.getByText(new RegExp(`^rolled DEX save ${rolled.total} \\(1d20\\+4, their bonus: \\d+\\)`)).waitFor();
+    await live.getByText(new RegExp(`^rolled ${rolled.total} \\(1d20\\+4, their bonus: \\d+\\)`)).waitFor();
 
     // Heroic Inspiration, asked from the chip's card and allowed in one tap.
     await chip.tap();
@@ -566,7 +566,7 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     await shots.take(dm, "rolls-dm-ask");
     await live.getByRole("button", { name: "Allow Thorn's ask" }).tap();
     // The redrawn d20 may show a 20 or a 1, which the DM's line names before what it was (logic.ts dmWords).
-    await live.getByText(/^rerolled DEX save \d+ \(Heroic Inspiration\)(, natural (20|1))?, was rolled DEX save \d+/).waitFor();
+    await live.getByText(/^rerolled \d+ \(Heroic Inspiration\)(, natural (20|1))?, was \d+/).waitFor();
     const changed = await waitFor("the allowed reroll on the player's phone", () => playerSocket.state?.rolls[id]?.targets[0]?.changed);
     assert.equal(changed.reason, "heroic-inspiration");
     await closeAll();
@@ -608,8 +608,8 @@ describe("raccoon-vtt roll requests on phones", { timeout: 300_000 }, () => {
     const live = dm.getByRole("group", { name: "Roll request: DEX save, DC 13" });
     await live.getByRole("button", { expanded: false }).first().tap();
     await live.getByRole("button", { name: "Roll +5: fails (Stunned) for Thorn" }).tap();
-    await live.getByText(/^rolled DEX save \d+ \(1d20\+5: \d+\)(, natural (20|1))?, fails \(Stunned\)/).waitFor();
-    await c.getByText(/^Rolled DEX save \d+ \(1d20\+5: \d+\)\.( Natural (20|1)\.)? Fail \(Stunned\)\. Final\./).waitFor();
+    await live.getByText(/^rolled \d+ \(1d20\+5: \d+\)(, natural (20|1))?, fails \(Stunned\)/).waitFor();
+    await c.getByText(/^Rolled \d+ \(1d20\+5: \d+\)\.( Natural (20|1)\.)? Fail \(Stunned\)\. Final\./).waitFor();
     await shots.take(dm, "rolls-dm-rolled-for-thorn");
     await closeAll();
 

@@ -61,9 +61,6 @@ import type { Locator, Page } from "playwright-core";
  *   their first lines.
  * - A `role="img"` is one picture, its insides drawn on purpose (the AC
  *   shield sets its number above its middle).
- * - A proficiency column reserves the same square with or without a
- *   glyph. Flowing labels use an absolute mark below the first capital,
- *   checked separately by proficiencyLines without affecting line layout.
  * - Content placed absolutely beside content in the flow (a badge, a
  *   ring around a die) is placed against its containing block on purpose.
  *   A control whose only content is placed so is measured by it.
@@ -125,91 +122,94 @@ import type { Locator, Page } from "playwright-core";
 /** The most a part may be off, in CSS px. Offsets are rounded to 0.1 px first, so layout rounding at 130% (1.0 px) passes. */
 export const LIMIT_PX = 1;
 
-/** Marks may decorate a line, but may not add height to the label or any container measured here. */
+/**
+ * FL-7's mark is an underline under a test's name (D-261030-436), and it
+ * may add no height. With every mark taken off, its label's own style
+ * cleared and its picture hidden through the CSSOM (the page's CSP refuses
+ * a style element), no marked label and no box around one may change
+ * height. Whatever a mark draws with, an underline or a slot or a border,
+ * goes with its style, so a mark that takes room is caught. Each label
+ * must really lose its underline, so a hiding that does nothing cannot
+ * pass. `required` asks for at least one mark among the roots.
+ */
 export async function proficiencyHeightLines(root: Locator, screen: string, required = true): Promise<string[]> {
   const measured = await root.evaluateAll((roots) => {
+    type Style = { cssText: string };
     type El = {
       tagName: string;
       textContent: string | null;
       parentElement: El | null;
       currentCSSZoom?: number;
+      style: Style;
       matches(selector: string): boolean;
       querySelectorAll(selector: string): ArrayLike<El>;
       getAttribute(name: string): string | null;
       getBoundingClientRect(): { width: number; height: number };
-      style: {
-        getPropertyValue(name: string): string;
-        getPropertyPriority(name: string): string;
-        setProperty(name: string, value: string, priority: string): void;
-        removeProperty(name: string): void;
-      };
-      ownerDocument: {
-        querySelectorAll(selector: string): ArrayLike<El>;
-        defaultView: { getComputedStyle(node: El): { visibility: string; display: string } };
-      };
+      ownerDocument: { defaultView: { getComputedStyle(node: El): { visibility: string; textDecorationLine: string } } };
     };
+    const MARKED = '[data-proficiency-level="prof"], [data-proficiency-level="expert"]';
+    const labels: El[] = [];
     const containers = new Set<El>();
-    let count = 0;
     for (const root of roots as unknown as El[]) {
-      const labels = [...(root.matches("[data-proficiency-label]") ? [root] : []), ...Array.from(root.querySelectorAll("[data-proficiency-label]"))];
-      for (const label of labels) {
+      for (const label of [...(root.matches(MARKED) ? [root] : []), ...Array.from(root.querySelectorAll(MARKED))]) {
         const box = label.getBoundingClientRect();
         if (box.width === 0 || box.height === 0 || label.ownerDocument.defaultView.getComputedStyle(label).visibility === "hidden") continue;
-        count++;
+        labels.push(label);
         for (let container: El | null = label; container; container = container.parentElement) {
-          const rect = container.getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) containers.add(container);
+          containers.add(container);
           if (container === root) break;
         }
       }
     }
     const before = [...containers].map((node) => ({ node, height: node.getBoundingClientRect().height, zoom: node.currentCSSZoom ?? 1 }));
-    const markers = [...new Set(before.map(({ node }) => node.ownerDocument))].flatMap((doc) => Array.from(doc.querySelectorAll("[data-proficiency-marker]")));
-    const visible = markers.filter((marker) => {
-      const rect = marker.getBoundingClientRect();
-      const css = marker.ownerDocument.defaultView.getComputedStyle(marker);
-      return rect.width > 0 && rect.height > 0 && css.visibility === "visible" && css.display !== "none";
-    });
-    const styles = markers.map((marker) => ({ marker, display: marker.style.getPropertyValue("display"), priority: marker.style.getPropertyPriority("display") }));
+    const pictures = labels.flatMap((label) => Array.from(label.querySelectorAll("[data-proficiency-marker]")));
+    const saved = [...labels, ...pictures].map((node) => ({ node, css: node.style.cssText }));
     const lines: string[] = [];
     try {
-      // Keep both reads in one browser task so ResizeObservers cannot freeze the temporary layout into app state.
-      // CSSOM properties work under the app's CSP, which rejects injected style elements.
-      for (const marker of markers) marker.style.setProperty("display", "none", "important");
-      const notHidden = visible.filter((marker) => marker.ownerDocument.defaultView.getComputedStyle(marker).display !== "none");
-      if (visible.length > 0 && notHidden.length === visible.length) lines.push("no visible proficiency markers were hidden");
-      if (notHidden.length > 0) lines.push(`${notHidden.length} of ${visible.length} visible proficiency markers did not compute display: none`);
+      // Both reads stay in one browser task, so no ResizeObserver can carry the bare layout into the app's state.
+      for (const label of labels) label.style.cssText = "";
+      for (const picture of pictures) picture.style.cssText = "display: none !important";
+      const kept = labels.filter((label) => label.ownerDocument.defaultView.getComputedStyle(label).textDecorationLine !== "none");
+      if (kept.length > 0) lines.push(`${kept.length} of ${labels.length} marks kept their underline when taken off`);
       for (const { node, height, zoom } of before) {
         const without = node.getBoundingClientRect().height;
         const difference = Math.abs(height - without) / zoom;
         if (difference <= 0.01) continue;
         const name = node.getAttribute("aria-label") ?? node.textContent?.replace(/\s+/g, " ").trim().slice(0, 72) ?? "";
-        lines.push(`${node.tagName.toLowerCase()} "${name}": proficiency markers change container height by ${difference.toFixed(2)} px (${(height / zoom).toFixed(2)} with, ${(without / zoom).toFixed(2)} without)`);
+        lines.push(`${node.tagName.toLowerCase()} "${name}": marks change its height by ${difference.toFixed(2)} px (${(height / zoom).toFixed(2)} with, ${(without / zoom).toFixed(2)} without)`);
       }
     } finally {
-      for (const { marker, display, priority } of styles) {
-        if (display) marker.style.setProperty("display", display, priority);
-        else marker.style.removeProperty("display");
-      }
+      for (const { node, css } of saved) node.style.cssText = css;
     }
-    return { count, visible: visible.length, lines };
+    return { count: labels.length, lines };
   });
-  return [...(required && measured.count === 0 ? ["no visible skill/save containers were measured"] : []), ...(required && measured.visible === 0 ? ["no visible proficiency markers were hidden"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
+  return [...(required && measured.count === 0 ? ["no visible proficiency marks were measured"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
 }
 
-/** Skill/save units keep their marker, name and number together, including outside a button. */
+/**
+ * Each visible mark is the underline D-261030-436 asks for: dotted for
+ * proficient and double for expertise, in its words' own color, with
+ * "Proficient" or "Expertise" as its tooltip and its picture's name, and
+ * never cut by a box that clips its line. The underline's foot is worked
+ * out from the font's own descent: both end 3 px under the baseline
+ * (components/ProficiencyMark.tsx). Only a box that clips its height
+ * counts: what a scroller cuts scrolls into view. A name kept from sight
+ * for a screen reader, as a folded line's parts past its cut are, has no
+ * underline to see.
+ */
 export async function proficiencyLines(root: Locator, screen: string, required = true): Promise<string[]> {
   const measured = await root.evaluateAll((roots) => {
-    type Rect = { left: number; right: number; top: number; bottom: number; width: number; height: number };
+    type Rect = { top: number; bottom: number; width: number; height: number };
+    type Css = { font: string; fontSize: string; color: string; clip: string; overflowX: string; overflowY: string; textDecorationLine: string; textDecorationStyle: string; textDecorationColor: string; visibility: string };
     type El = {
       textContent: string | null;
+      parentElement: El | null;
       nodeType: number;
       childNodes: ArrayLike<El>;
-      parentElement: El | null;
       currentCSSZoom?: number;
-      clientLeft: number;
-      clientWidth: number;
-      scrollWidth: number;
+      clientTop: number;
+      clientHeight: number;
+      tagName: string;
       matches(selector: string): boolean;
       querySelector(selector: string): El | null;
       querySelectorAll(selector: string): ArrayLike<El>;
@@ -217,71 +217,70 @@ export async function proficiencyLines(root: Locator, screen: string, required =
       getAttribute(name: string): string | null;
       ownerDocument: {
         createRange(): { selectNodeContents(node: El): void; getClientRects(): ArrayLike<Rect> };
-        defaultView: { getComputedStyle(node: El): { fontSize: string; overflowX: string; paddingLeft: string; paddingRight: string; borderLeftWidth: string; borderRightWidth: string } };
+        createElement(tag: "canvas"): { getContext(kind: "2d"): { font: string; measureText(text: string): { fontBoundingBoxDescent: number } } | null };
+        defaultView: { getComputedStyle(node: El): Css };
       };
     };
+    const MARKED = '[data-proficiency-level="prof"], [data-proficiency-level="expert"]';
     const labels = new Set<El>();
     for (const root of roots as unknown as El[]) {
-      if (root.matches("[data-proficiency-label]")) labels.add(root);
-      for (const label of Array.from(root.querySelectorAll("[data-proficiency-label]"))) labels.add(label);
+      if (root.matches(MARKED)) labels.add(root);
+      for (const label of Array.from(root.querySelectorAll(MARKED))) labels.add(label);
     }
     const lines: string[] = [];
     let count = 0;
     for (const label of labels) {
+      const css = label.ownerDocument.defaultView.getComputedStyle(label);
       const box = label.getBoundingClientRect();
-      if (box.width === 0 || box.height === 0) continue;
+      if (box.width === 0 || box.height === 0 || css.visibility === "hidden") continue;
+      // A name kept from sight for a screen reader sits in a box clipped to nothing (lib/a11y.ts VISUALLY_HIDDEN).
+      let unseen = false;
+      for (let ancestor = label.parentElement; ancestor && !unseen; ancestor = ancestor.parentElement) unseen = ancestor.ownerDocument.defaultView.getComputedStyle(ancestor).clip === "rect(0px, 0px, 0px, 0px)";
+      if (unseen) continue;
       count++;
-      const name = label.querySelector("[data-proficiency-name]");
-      const marker = label.querySelector("[data-proficiency-marker]");
-      const words = name?.textContent?.trim() || "unnamed proficiency label";
-      const unmarkedFlow = label.getAttribute("data-proficiency-layout") === "flow" && label.getAttribute("data-proficiency-level") === "none";
-      if (!name || (!marker && !unmarkedFlow)) {
-        lines.push(`${words}: missing the name or fixed marker slot`);
-        continue;
-      }
-      if (unmarkedFlow && marker) lines.push(`${words}: untrained flowing label reserves a marker slot`);
+      const level = label.getAttribute("data-proficiency-level");
+      const word = level === "expert" ? "Expertise" : "Proficient";
+      const words = label.textContent?.trim() || "an unnamed mark";
+      const marker = label.querySelector(`[data-proficiency-marker="${level}"][role="img"]`);
+      if (label.getAttribute("title") !== word || marker?.getAttribute("aria-label") !== word) lines.push(`${words}: not named ${word}`);
+      if (!css.textDecorationLine.includes("underline")) lines.push(`${words}: no underline`);
+      if (css.textDecorationStyle !== (level === "expert" ? "double" : "dotted")) lines.push(`${words}: a ${css.textDecorationStyle} underline for ${word}`);
+      if (css.textDecorationColor !== css.color) lines.push(`${words}: its underline is ${css.textDecorationColor}, not its words' ${css.color}`);
+      const context = label.ownerDocument.createElement("canvas").getContext("2d");
+      if (!context) continue;
+      context.font = css.font;
+      const zoom = label.currentCSSZoom ?? 1;
+      const descent = context.measureText(words).fontBoundingBoxDescent;
+      // The name's own words, not its picture, give its lines.
       const rects: Rect[] = [];
-      const readText = (node: El): void => {
-        if (node.nodeType === 3 && node.textContent?.trim()) {
-          const range = name.ownerDocument.createRange();
+      const read = (node: El): void => {
+        if (node.nodeType === 3) {
+          const range = label.ownerDocument.createRange();
           range.selectNodeContents(node);
           rects.push(...Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0));
-        } else for (const child of Array.from(node.childNodes)) readText(child);
+        } else if (!node.matches("[data-proficiency-marker]")) for (const child of Array.from(node.childNodes)) read(child);
       };
-      readText(name);
-      const zoom = label.currentCSSZoom ?? 1;
-      // Small ability capitals and a larger bonus share a baseline, so their glyph boxes overlap rather than sharing a top.
-      if (rects.length === 0 || Math.max(...rects.map((r) => r.top)) >= Math.min(...rects.map((r) => r.bottom)) - zoom) lines.push(`${words}: skill/save name or number wraps`);
-      const text = name.getBoundingClientRect();
-      if (marker) {
-        const mark = marker.getBoundingClientRect();
-        const under = marker.getAttribute("data-proficiency-placement") === "under";
-        const em = parseFloat(label.ownerDocument.defaultView.getComputedStyle(label).fontSize);
-        const center = under ? (box.top + box.bottom) / 2 + 0.5 * em * zoom : (text.top + text.bottom) / 2;
-        const off = Math.abs((mark.top + mark.bottom) / 2 - center) / zoom;
-        if (off > 1) lines.push(`${words}: marker center is ${off.toFixed(2)} px from its ${under ? "under-letter position" : "name"}`);
-        if (mark.width <= 0 || Math.abs(mark.width - mark.height) / zoom > 1) lines.push(`${words}: marker slot is missing or not square`);
-        if (under && (mark.left < box.left - zoom || mark.right > box.right + zoom)) lines.push(`${words}: under-letter marker runs outside its label`);
-      }
-      if (label.scrollWidth > label.clientWidth + 1) lines.push(`${words}: label overflows its own unit`);
+      for (const child of Array.from(label.childNodes)) read(child);
+      if (rects.length === 0) continue;
+      // The underline's foot under the lowest line the name takes: 3 px under its baseline.
+      const foot = Math.max(...rects.map((r) => r.bottom - descent * zoom)) + 3 * zoom;
       for (let ancestor = label.parentElement; ancestor; ancestor = ancestor.parentElement) {
-        const css = ancestor.ownerDocument.defaultView.getComputedStyle(ancestor);
-        if (!ancestor.matches("button") && !["hidden", "clip", "auto", "scroll"].includes(css.overflowX)) continue;
-        const parent = ancestor.getBoundingClientRect();
-        const parentZoom = ancestor.currentCSSZoom ?? 1;
-        const inset = ancestor.matches("button");
-        const left = parent.left + (inset ? parseFloat(css.paddingLeft) + parseFloat(css.borderLeftWidth) : ancestor.clientLeft) * parentZoom;
-        // clientWidth measures the actual clipping area with either overlay or classic scrollbars.
-        const right = inset ? parent.right - (parseFloat(css.paddingRight) + parseFloat(css.borderRightWidth)) * parentZoom : parent.left + (ancestor.clientLeft + ancestor.clientWidth) * parentZoom;
-        if (box.left < left - parentZoom || box.right > right + parentZoom) {
-          lines.push(`${words}: label or marker runs outside its button or clipping ancestor`);
+        const look = ancestor.ownerDocument.defaultView.getComputedStyle(ancestor);
+        if (!["hidden", "clip"].includes(look.overflowY)) continue;
+        const scale = ancestor.currentCSSZoom ?? 1;
+        // Only a box a line or two tall clips a line: a dialog or a pane that cuts what scrolls past its edge is no line box.
+        if (ancestor.getBoundingClientRect().height > 64 * scale) continue;
+        const bottom = ancestor.getBoundingClientRect().top + (ancestor.clientTop + ancestor.clientHeight) * scale;
+        // A name the box hides whole is content out of view, not a mark its line cut.
+        if (foot > bottom + 0.5 * scale && Math.min(...rects.map((r) => r.top)) < bottom) {
+          lines.push(`${words}: its underline's foot is ${((foot - bottom) / scale).toFixed(2)} px under the ${ancestor.tagName.toLowerCase()} that clips it`);
           break;
         }
       }
     }
     return { count, lines };
   });
-  return [...(required && measured.count === 0 ? ["no visible skill/save labels were measured"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
+  return [...(required && measured.count === 0 ? ["no visible proficiency marks were measured"] : []), ...measured.lines].map((line) => `${screen}: ${line}`);
 }
 
 /** The interface's indent step (theme.space(3)), in CSS px: the least a nested list or group is set in to make a column of its own. */
@@ -610,7 +609,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
 
   const say = (el: DomElement) => `${roleOf(el)} "${nameOf(el)}"`;
 
-  const isPicture = (el: DomElement) => PICTURE.includes(tag(el)) || el.getAttribute("role") === "img" || el.matches("[data-proficiency-marker]");
+  const isPicture = (el: DomElement) => PICTURE.includes(tag(el)) || el.getAttribute("role") === "img";
 
   /** Whether an element cuts what overflows it, as a scroller or an ellipsis does. */
   const clips = (el: DomElement) => {
