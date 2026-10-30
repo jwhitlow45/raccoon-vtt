@@ -301,14 +301,19 @@ export function paneBodyPadding(top: number, x: number, bottom: number): CSSProp
 
 /**
  * A footer stuck to the foot of a pane's scrolling body, such as the Log's
- * composer. At `bottom: 0` it would rest on the body's bottom padding, a
- * strip above the pane's edge where what scrolls shows under it. So it
- * sticks that padding lower, takes the padding back with a negative margin
- * so nothing is left to scroll below it, and gives it back as its own
- * padding under `pad`, so its fill reaches the edge. Outside a pane the
- * padding reads as 0 and it sticks at the foot as before.
+ * composer, drawn in `fill`. At `bottom: 0` it would rest on the body's
+ * bottom padding, a strip above the pane's edge where what scrolls shows
+ * under it. So it sticks that padding lower, takes the padding back with a
+ * negative margin so nothing is left to scroll below it, and gives it back
+ * as its own padding under `pad`, so its fill reaches the edge. Outside a
+ * pane the padding reads as 0 and it sticks at the foot as before.
+ *
+ * Shadows of its fill cover the pane's side padding beside it, taking no
+ * room and leaving its own edges where every other fill's are, so a
+ * proficiency frame drawn 1 px past a line's first word never shows there
+ * as the line scrolls under it (D-261030-527).
  */
-export function stickyPaneFoot(pad: number): CSSProperties {
+export function stickyPaneFoot(pad: number, fill: string): CSSProperties {
   const bottom = "var(--pane-pad-bottom, 0px)";
-  return { position: "sticky", bottom: `calc(-1 * ${bottom})`, marginBottom: `calc(-1 * ${bottom})`, paddingBottom: `calc(${pad}px + ${bottom})` };
+  return { position: "sticky", bottom: `calc(-1 * ${bottom})`, marginBottom: `calc(-1 * ${bottom})`, paddingBottom: `calc(${pad}px + ${bottom})`, background: fill, boxShadow: theme.shadow.paneSides(fill) };
 }

@@ -296,12 +296,11 @@ function Composer(props: { names: LogNames; me: string; onSend(op: NonNullable<R
       onSubmit={submit}
       style={{
         // Flush on the pane's foot, so no entry shows under it.
-        ...stickyPaneFoot(theme.space(2)),
+        ...stickyPaneFoot(theme.space(2), theme.color.surface),
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr)",
         gap: theme.space(2),
         paddingTop: theme.space(2),
-        background: theme.color.surface,
         borderTop: `${theme.line.border}px solid ${theme.color.border}`,
       }}
     >
