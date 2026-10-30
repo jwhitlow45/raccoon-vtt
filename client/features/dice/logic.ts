@@ -1,3 +1,4 @@
+import { acceptsRollMode, type RollModeOverride } from "./rollMode.ts";
 import { askedCritical } from "#shared/dice/crit.ts";
 import { applyMode, formatFormula, formulaRange, parseFormula, parseRollText, type AdvantageMode } from "#shared/dice/formula.ts";
 import { hitOf, naturalOf } from "#shared/dice/roll.ts";
@@ -225,10 +226,23 @@ export function againInput(roll: DiceRoll): DiceRollInput | null {
   if (roll.label !== undefined) input.label = roll.label;
   if (roll.tokenId !== undefined) input.creature = { tokenId: roll.tokenId };
   else if (roll.characterId !== undefined) input.creature = { characterId: roll.characterId };
+  if (roll.type !== undefined) input.type = roll.type;
   if (roll.critOn !== undefined) input.critOn = roll.critOn;
   if ((roll.initiative || roll.hidden) && input.creature) input.initiative = true;
   if (roll.save !== undefined && input.creature) input.save = roll.save;
   return input;
+}
+
+/** Every member must accept the chosen mode. Repeats rebuild no current creature sources. */
+export function modeRepeat(rolls: readonly DiceRoll[], override: RollModeOverride, to: "all" | "dm"): DiceRollInput[] | null {
+  if (override === "secret" || rolls.length === 0 || rolls.some((roll) => roll.type !== undefined || roll.crit !== undefined)) return null;
+  const inputs = rolls.map(againInput);
+  if (inputs.some((input) => input === null || !acceptsRollMode(input.formula))) return null;
+  return (inputs as DiceRollInput[]).map(({ mode: _mode, cancelled: _cancelled, label, ...rest }) => ({
+    ...rest,
+    ...(label !== undefined || to === "all" ? { label: to === "all" ? "Repeated roll" : label } : {}),
+    ...(override === "adv" || override === "dis" ? { mode: override } : {}),
+  }));
 }
 
 // ------------------------------------------------------------ history

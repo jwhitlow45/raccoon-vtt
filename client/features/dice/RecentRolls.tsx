@@ -12,11 +12,14 @@ import { theme } from "../../lib/theme.ts";
 import { useRoomUi, useRoomView } from "../../state/view.ts";
 import { usePanelHere } from "../panels.ts";
 import { useDiceFolds } from "./diceFolds.ts";
-import { againInput, askedRoll, recentRolls, rollVerdict, type RecentRow } from "./logic.ts";
+import { againInput, askedRoll, modeRepeat, recentRolls, rollVerdict, type RecentRow } from "./logic.ts";
 import { eventMarks, ProficientEvent, type LevelOf } from "./ProficientEvent.tsx";
 import { findMarks, marksTest, rollTarget, rollTest, type TextMark } from "./proficiencyPresentation.ts";
 import type { ThrowOrigin } from "./throw/store.ts";
 import { useThrows, useThrowView } from "./throw/useThrows.ts";
+import { effectiveRollMode } from "./rollMode.ts";
+import { useRollModeMenu } from "./useRollModeMenu.tsx";
+import { useRollBlocked } from "./useRollOption.ts";
 import { useProficiency } from "./useProficiency.ts";
 
 /**
@@ -203,6 +206,7 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
           <span style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2), rowGap: theme.space(1), minWidth: 0 }}>
             <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{formula}</span>
             <DiceFaces result={roll} />
+            {!roll.mode && effectiveRollMode(roll) ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{effectiveRollMode(roll)}</span> : null}
           </span>
           {/* Only the DM's copy keeps the mark of an initiative roll kept from players (docs/design-v1-combat-flow.md 11.3). */}
           {roll.hidden ? (
@@ -249,7 +253,6 @@ function LastGrows(props: { children: ReactNode[] }) {
 
 function Row(props: { row: RecentRow; names: LogNames; levelOf: LevelOf; me: string; dm: boolean; open: boolean; again(rolls: DiceRollInput[], to: "all" | "dm", origin: ThrowOrigin): void }) {
   const { row, names } = props;
-  const throws = useThrows();
   const [all, setAll] = useState(props.open);
   // The sticky line's tap brings its row into view clear of that line by the line's own height (DicePanel.tsx revealUnderLine).
   const base: CSSProperties = { display: "grid", gap: theme.space(1), padding: `${theme.space(2)}px 0`, borderTop: `${theme.line.border}px solid ${theme.color.border}` };
@@ -289,12 +292,7 @@ function Row(props: { row: RecentRow; names: LogNames; levelOf: LevelOf; me: str
   );
   const again =
     canAgain && first ? (
-      <IconButton
-        icon="again"
-        label={`Roll again: ${[askedRoll(first)?.formula, first.label === undefined ? undefined : labelText(first.label)].filter(Boolean).join(" ")}${single ? "" : ` and ${row.rolls.length - 1} more`}`}
-        title="Roll again"
-        onClick={() => props.again(inputs as DiceRollInput[], row.to, throws.origin())}
-      />
+      <AgainButton row={row} inputs={inputs as DiceRollInput[]} dm={props.dm} again={props.again} />
     ) : null;
   return (
     <li data-roll-row={row.ids.join(" ")} style={base}>
@@ -349,4 +347,17 @@ export function RecentRolls(props: { names: LogNames; me: string; open: string |
       </Group>
     </div>
   );
+}
+
+/** A separate component keeps gesture hooks mounted only for repeatable own dice rows. */
+function AgainButton(props: { row: Extract<RecentRow, { kind: "dice" }>; inputs: DiceRollInput[]; dm: boolean; again(rolls: DiceRollInput[], to: "all" | "dm", origin: ThrowOrigin): void }) {
+  const { row } = props;
+  const throws = useThrows();
+  const blocked = useRollBlocked();
+  const first = row.rolls[0]!;
+  const menu = useRollModeMenu({ source: JSON.stringify([row.key, row.to, row.rolls]), name: "Again", capability: { d20: modeRepeat(row.rolls, "normal", row.to) !== null, visibility: "repeat", repeat: true }, disabled: blocked !== null, dm: props.dm,
+    onTap: () => props.again(props.inputs, row.to, throws.origin()),
+    onRoll: (override) => { const inputs = modeRepeat(row.rolls, override, row.to); if (inputs) props.again(inputs, row.to, throws.origin()); },
+  });
+  return <><IconButton icon="again" label={`Roll again: ${[askedRoll(first)?.formula, first.label === undefined ? undefined : labelText(first.label)].filter(Boolean).join(" ")}${row.rolls.length === 1 ? "" : ` and ${row.rolls.length - 1} more`}`} title="Roll again" {...menu.buttonProps} style={menu.pressStyle} />{menu.menu}</>;
 }

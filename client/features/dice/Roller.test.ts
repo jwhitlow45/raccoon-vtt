@@ -136,3 +136,15 @@ describe("the roller's frame (7.4, 7.7, 7.9)", () => {
     assert.match(markup, /aria-label="Only the DM sees it"/);
   });
 });
+
+test("the discoverability help sits outside the unchanged modes and quick-dice rows", () => {
+  const html = inRoom(P1, [createElement(Roller)]);
+  assert.match(html, /Hold or right-click a roll button for one-roll options\. Keyboard: Shift\+F10\./);
+  assert.ok(html.indexOf("data-roll-mode-help") > html.indexOf("data-dice-modes"));
+  for (const button of buttons(html).values()) if (button.includes("Add a d")) assert.doesNotMatch(button, /aria-haspopup|aria-keyshortcuts/);
+});
+test("the result announcement names returned effective modes and secrecy once", async () => {
+  const { spokenResult } = await import("./Roller.tsx");
+  const dice = [{ formula: "1d20+5", faces: [10], total: 15, cancelled: true as const }];
+  assert.equal(spokenResult({ total: 15, label: "Dexterity save", sums: null, dice, more: 0 }, null, undefined, true), "Rolled 15, Normal: Advantage and Disadvantage cancelled, Secret: Dexterity save.");
+});

@@ -184,3 +184,16 @@ describe("Recent rolls' rows (7.6)", () => {
     assert.match(markup, new RegExp(`margin-inline-start:-${theme.space(3) + theme.line.border}px">Older rolls are in the Log`));
   });
 });
+
+test("only own homogeneous d20 repeats get a menu, and fixed repeats omit Secret from their hint", () => {
+  const own = render([entry({ type: "dice", by: "p1", to: "all", rolls: [LONGSWORD] })]);
+  assert.match(own, /aria-label="Roll again:[^"]*"[^>]*aria-haspopup="menu"/);
+  assert.match(own, /Hold, right-click or Shift\+F10 for Advantage, Disadvantage or Normal/);
+  for (const rolls of [[FREE], [LONGSWORD, FREE], [{ ...LONGSWORD, type: "fire" as const }]]) {
+    const html = render([entry({ type: "dice", by: "p1", to: "all", rolls })]);
+    assert.doesNotMatch(html, /aria-haspopup|aria-keyshortcuts|Hold, right-click/);
+    assert.match(html, /aria-label="Roll again:/);
+  }
+  const other = render([entry({ type: "dice", by: "p2", to: "all", rolls: [LONGSWORD] })]);
+  assert.doesNotMatch(other, /aria-haspopup|Roll again:/);
+});

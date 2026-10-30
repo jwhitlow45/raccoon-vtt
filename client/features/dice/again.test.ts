@@ -108,3 +108,13 @@ describe("Again on a creature's save", () => {
     assert.deepEqual(againInput(lastDice(checked).rolls[0]!), check);
   });
 });
+
+test("menu repeats replace aggregate modes without reconstructing current effects or carrying private labels", async () => {
+  const { modeRepeat } = await import("./logic.ts");
+  const saved: DiceRoll = { formula: "2d20kh1+2+1d4", faces: [15, 3, 2], total: 19, mode: "adv", cancelled: true, label: "Private trap DC 19", tokenId: "gob", save: "wis" };
+  assert.deepEqual(modeRepeat([saved], "dis", "all"), [{ formula: "1d20+2+1d4", creature: { tokenId: "gob" }, save: "wis", label: "Repeated roll", mode: "dis" }]);
+  assert.deepEqual(modeRepeat([saved], "normal", "dm"), [{ formula: "1d20+2+1d4", creature: { tokenId: "gob" }, save: "wis", label: "Private trap DC 19" }]);
+  assert.equal(modeRepeat([saved], "secret", "all"), null);
+  assert.deepEqual(againInput({ formula: "2d6", faces: [3, 4], total: 7, type: "fire" }), { formula: "2d6", type: "fire" });
+  assert.equal(modeRepeat([saved, { formula: "1d6", faces: [2], total: 2 }], "adv", "all"), null);
+});

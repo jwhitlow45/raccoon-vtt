@@ -23,7 +23,7 @@ import { tabKeyIndex } from "../../lib/a11y.ts";
 import { scrollBox, startInScrollBox } from "../../lib/reveal.ts";
 import { displayName } from "../../lib/scene.ts";
 import { theme } from "../../lib/theme.ts";
-import { useRoomActions, useRoomView } from "../../state/view.ts";
+import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { abilityOp, openRecord } from "../combat/logic.ts";
 import { useDeathSaveWaits, WAITS_FOR_REGENERATION } from "../combat/state.ts";
 import { useAnyPending } from "../encounter/hooks.ts";
@@ -96,6 +96,8 @@ import { actionFill } from "./groupSave/fills.ts";
 import { AskForSavesButton, RowCast, useCloseSettledBlock, WaitingAsks } from "./cast/CastBlock.tsx";
 import { useCastTracker } from "./cast/alerts.ts";
 import { phaseOf } from "./cast/cast.ts";
+import { acceptsRollMode, type RollModeCapability, type RollModeOverride } from "./rollMode.ts";
+import { useRollModeMenu } from "./useRollModeMenu.tsx";
 import { useActOnce, useInitiativeChanged, useRollBlocked, useRollOption, useRowResult, useWatchInitiative } from "./useRollOption.ts";
 
 /** The roll mode row (Roller.tsx) and the sticky result line, which a token's Roll lands the panel by (docs/design-v1-dice-pass.md 8), found from the Dice panel's root (DicePanel.tsx). */
@@ -747,20 +749,21 @@ function Grid(props: { label: string; note?: string; children: ReactNode }) {
  * until its line lands. Its result shows in the panel's newest-roll line at the top (the project owner,
  * 2026-10-17: "it should just be in the header"), so a row never grows when a roll lands.
  */
-function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?: string | undefined; name: string; row: string; disabled: string | null; onTap(): void; pressed?: boolean; grow?: boolean; fill?: boolean; nowrap?: boolean }) {
+function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?: string | undefined; name: string; row: string; disabled: string | null; onTap(override?: RollModeOverride): void; mode?: RollModeCapability; source?: string; valid?(): boolean; pressed?: boolean; grow?: boolean; fill?: boolean; nowrap?: boolean }) {
   const { waiting } = useRowResult(props.row);
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  const menu = useRollModeMenu({ source: props.source ?? JSON.stringify([props.row, props.name, props.text, props.tag]), name: props.name, capability: props.mode ?? { d20: false, visibility: "creature" }, disabled: waiting || props.disabled !== null, dm, valid: props.valid, onTap: () => props.onTap(), onRoll: props.onTap });
+  const { tooltipHold: _hold, ...events } = menu.buttonProps;
   return (
+    <>
     <button
+      {...events}
       type="button"
       aria-label={props.name}
       aria-busy={waiting ? true : undefined}
       {...markedBy(props.level, "box")}
       disabled={props.disabled !== null}
       title={props.disabled ?? props.name}
-      onClick={() => {
-        if (waiting) return;
-        props.onTap();
-      }}
       style={{
         minHeight: theme.touch,
         padding: `0 ${theme.space(3)}px`,
@@ -786,6 +789,7 @@ function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?
         cursor: props.disabled !== null || waiting ? "default" : "pointer",
         minWidth: 0,
         width: props.grow === false || props.fill ? undefined : "100%",
+        ...menu.pressStyle,
       }}
     >
       {/* Skills keep their names whole in wider columns. Other options may wrap inside the cell. */}
@@ -795,6 +799,8 @@ function OptionCell(props: { text: string; level?: Proficiency | undefined; tag?
       </span>
       {props.tag ? <span style={{ flex: "none", fontSize: theme.font.tiny, fontWeight: theme.weight.strong, color: theme.color.textMuted, whiteSpace: "nowrap" }}>{props.tag}</span> : null}
     </button>
+    {menu.menu}
+    </>
   );
 }
 
@@ -815,9 +821,10 @@ function MarkedName(props: { text: string; level: Proficiency | undefined }) {
  * where its tap goes. With `unknown` the creature has no numbers here, and
  * the tap goes by the bonus typed (options.ts typedTap).
  */
-function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { typed: TypedBonus }; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; grow?: boolean; fill?: boolean; common?: readonly string[]; onLanded?(critical: boolean): void }) {
+function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { typed: TypedBonus }; text: string; label?: string; critOn?: 18 | 19; rowKey?: string; grow?: boolean; fill?: boolean; common?: readonly string[]; contextVersion?: string; onLanded?(critical: boolean): void }) {
   const { ctx, test } = props;
   const option = useRollOption("dice");
+  const liveRoom = useRoomStore();
   const route = routeOf({ state: ctx.dice.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask });
   const tap = props.unknown ? typedTap(route.kind, props.unknown.typed) : { bonus: props.bonus, waits: null };
   // An answer rolls the request's own test, with its `spell`, so the button shows the preset its tap sends.
@@ -838,6 +845,12 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
   const level = marksTest(test) ? creatureProficiency(ctx.dice, ctx.creature, test) : undefined;
   return (
     <OptionCell
+      mode={route.kind === "ask" ? undefined : { d20: true, visibility: route.kind === "answer" ? "request" : "selectable" }}
+      source={JSON.stringify([row, route, test, tap, preset, ctx.creature, ctx.ask, props.contextVersion])}
+      valid={() => {
+        const now = liveRoom.getState();
+        return now.view !== null && now.connection === "open" && JSON.stringify(routeOf({ state: now.view, creature: ctx.creature, test, dm: ctx.dice.you.role === "dm", played: ctx.played, ask: ctx.ask })) === JSON.stringify(route);
+      }}
       text={props.text}
       level={level}
       nowrap={test.kind === "check" && test.skill !== undefined}
@@ -847,8 +860,9 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
       disabled={ctx.blocked ?? tap.waits}
       grow={props.grow}
       fill={props.fill}
-      onTap={() =>
+      onTap={(override) =>
         option.d20({
+          override,
           creature: ctx.creature,
           test,
           bonus: tap.bonus,
@@ -895,8 +909,8 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
   const score = entry && (dm || playersTypeTotals(state.meta.settings)) ? scoreOf(state, ctx.creature) : null;
   const test: D20Test = { kind: "initiative" };
   const preset = presetFor(ctx.dice, ctx.creature, test, { rolls: ctx.rolls });
-  const roll = () => {
-    const sent = option.d20({ creature: ctx.creature, test, bonus: props.bonus, preset, label: "Initiative", row, played: false, ask: false });
+  const roll = (override?: RollModeOverride) => {
+    const sent = option.d20({ override, creature: ctx.creature, test, bonus: props.bonus, preset, label: "Initiative", row, played: false, ask: false });
     if (sent !== null && sent !== "asked" && entry) watch(sent, entry.id);
   };
   const bonus = props.bonusText;
@@ -913,6 +927,8 @@ function InitiativeCell(props: { ctx: Ctx; bonus: number; bonusText: string }) {
         ) : null}
         <div style={{ minWidth: 0 }}>
           <OptionCell
+            mode={{ d20: true, visibility: "selectable" }}
+            source={JSON.stringify([row, entry, props.bonus, preset])}
             text={scored ? "Roll instead" : `Initiative ${bonus}`}
             tag={tag || undefined}
             name={["Initiative", does, presetLine(preset)].filter(Boolean).join(", ")}
@@ -942,12 +958,14 @@ function DeathSaveCell(props: { ctx: Ctx; bonus: number | null }) {
   // Across the card, above Initiative (docs/design-v1-dice-pass.md 5.1).
   return (
     <OptionCell
+      mode={{ d20: true, visibility: "creature" }}
+      source={JSON.stringify([row, ctx.creature, preset, ctx.actor?.deathSaves, ctx.dice.view.encounter?.round])}
       text={props.bonus === null ? "Death Save" : `Death Save ${signedText(props.bonus)}`}
       tag={presetTag(preset) || undefined}
       name={["Death Save", presetLine(preset)].filter(Boolean).join(", ")}
       row={row}
       disabled={ctx.blocked ?? (waits ? WAITS_FOR_REGENERATION : null)}
-      onTap={() => option.deathSave(ctx.creature, preset, row, openRecord(ctx.dice.view.encounter, ctx.actor, "deathSave"))}
+      onTap={(override) => option.deathSave(ctx.creature, preset, row, openRecord(ctx.dice.view.encounter, ctx.actor, "deathSave"), override)}
     />
   );
 }
@@ -1083,6 +1101,7 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         {named.attack !== undefined ? (
           <D20Cell
             ctx={ctx}
+            contextVersion={JSON.stringify([crit, [...on], slot])}
             test={named.section === "spells" ? { kind: "attack", spell: true } : { kind: "attack" }}
             bonus={named.attack}
             text="Attack"
@@ -1104,13 +1123,15 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         {hasDamage ? (
           <OptionCell
             text="Damage"
+            mode={{ d20: false, damage: true, visibility: "selectable" }}
+            source={JSON.stringify([damageRow, ctx.creature, named, crit, [...on]])}
             name={`${named.name} damage${canCrit && crit ? `, ${CRIT_WORDS[critRule]}` : ""}`}
             row={damageRow}
             disabled={ctx.blocked}
             fill
-            onTap={() => {
+            onTap={(override) => {
               const rolls = damageRolls(named, { on, critical: canCrit && crit, creature: ctx.creature });
-              const tag = option.rolls(rolls, damageRow);
+              const tag = option.rolls(rolls.map((roll) => ({ ...roll, modeEligible: false })), damageRow, override);
               if (tag !== null) {
                 if (crit) setCrit(false);
                 markRecharge(option.wentSecret(tag));
@@ -1137,15 +1158,17 @@ function NamedRow(props: { ctx: Ctx; named: NamedRoll }) {
         {named.heal ? (
           <OptionCell
             text="Heal"
+            mode={{ d20: false, visibility: "selectable" }}
+            source={JSON.stringify([healRow, ctx.creature, named.heal, slot])}
             name={`${named.name} healing`}
             row={healRow}
             disabled={ctx.blocked}
             fill
-            onTap={() => option.rolls([namedRoll(named.heal!.formula, `${named.name} healing`, ctx.creature)], healRow)}
+            onTap={(override) => option.rolls([namedRoll(named.heal!.formula, `${named.name} healing`, ctx.creature)], healRow, override)}
           />
         ) : null}
         {named.dice ? (
-          <OptionCell text="Roll" name={`${named.name}, ${named.dice}`} row={diceRow} disabled={ctx.blocked} fill onTap={() => option.rolls([namedRoll(named.dice!, named.name, ctx.creature)], diceRow)} />
+          <OptionCell text="Roll" mode={{ d20: acceptsRollMode(named.dice), visibility: "selectable" }} source={JSON.stringify([diceRow, ctx.creature, named.dice, slot])} name={`${named.name}, ${named.dice}`} row={diceRow} disabled={ctx.blocked} fill onTap={(override) => option.rolls([namedRoll(named.dice!, named.name, ctx.creature)], diceRow, override)} />
         ) : null}
         {rechargeUse ? (
           <OptionCell

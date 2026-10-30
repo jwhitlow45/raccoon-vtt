@@ -40,6 +40,12 @@ function useThrowPanel(throws: ThrowStore) {
   const log = useRoomView((s) => s.view?.log);
   const logRef = useRef(log);
   logRef.current = log;
+  useEffect(() => {
+    const node = root.current;
+    const fromMenu = (e: Event) => throws.keyDown(e.target instanceof Element ? e.target : null);
+    node?.addEventListener("rvtt-roll-mode-origin", fromMenu);
+    return () => node?.removeEventListener("rvtt-roll-mode-origin", fromMenu);
+  }, [throws]);
   useEffect(() => throws.mount({ kinds: () => recentKinds(logRef.current ?? []) }), [throws]);
   useEffect(() => {
     const pane = root.current?.closest("[data-pane-body]");

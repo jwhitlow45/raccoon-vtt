@@ -16,7 +16,9 @@ import { ScrollStrip } from "../../components/ScrollStrip.tsx";
 import { useUnsavedInput } from "../../lib/sheetSwipe.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomView } from "../../state/view.ts";
-import { answerVerdict, headerRoll, readHistory, readingOf, rollsOf, rollVerdict, stepHistory, withHistory, writeHistory, type HeaderRoll } from "./logic.ts";
+import { answerVerdict, headerRoll, modeRepeat, readHistory, readingOf, rollsOf, rollVerdict, stepHistory, withHistory, writeHistory, type HeaderRoll } from "./logic.ts";
+import { acceptsRollMode, effectiveRollMode, type RollModeOverride } from "./rollMode.ts";
+import { useRollModeMenu } from "./useRollModeMenu.tsx";
 import { critical } from "./options.ts";
 import { marksTest, rollTarget, rollTest } from "./proficiencyPresentation.ts";
 import { FACE_CHIP, faceChips } from "./RecentRolls.tsx";
@@ -98,10 +100,10 @@ export function spokenVerdict(roll: DiceRoll, data: LogEntry["data"]): string | 
   return shownVerdict(roll, data);
 }
 
-/** The live region's words for a result, said once at the answer: "Rolled 23, Critical Hit: Longsword.", and a marked test says its level: "Rolled 19: Stealth check, expertise." (FL7-SOL-04). */
-export function spokenResult(head: HeaderRoll, verdict: string | null, level?: Proficiency): string {
+/** The live region says the returned mode and visibility with the total once. Proficiency follows its test's name (FL7-SOL-04). */
+export function spokenResult(head: HeaderRoll, verdict: string | null, level?: Proficiency, secret = false): string {
   const label = head.label ? `: ${labelText(head.label)}${level ? spokenProficiency(level) : ""}` : "";
-  return `Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${verdict ? `, ${verdict}` : ""}${label}.`;
+  return `Rolled ${head.total}${head.sums ? ` (${head.sums})` : ""}${verdict ? `, ${verdict}` : ""}${head.dice[0] && effectiveRollMode(head.dice[0], secret) ? `, ${effectiveRollMode(head.dice[0], secret)}` : ""}${label}.`;
 }
 
 /**
@@ -138,7 +140,14 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   const test = first && head?.label !== undefined && head.label === first.label ? rollTest(first) : null;
   const level = target && marksTest(test) ? levelOf(target, test) : undefined;
   // A polite live region says each result once, from the render that first holds it, so it is said as it lands on the server even while the dice still fly.
-  const said = first && head ? spokenResult(head, spokenVerdict(first, data), level) : "";
+  const said = first && head ? spokenResult(head, spokenVerdict(first, data), level, data?.type === "dice" && data.to === "dm") : "";
+  const again = againOf(last);
+  const blocked = useRollBlocked();
+  const dm = useRoomView((s) => s.you?.role === "dm");
+  const repeat = useRollModeMenu({ source: JSON.stringify([tag, again]), name: "Again", capability: { d20: !!again && modeRepeat(rolls, "normal", again.to) !== null, visibility: "repeat", repeat: true }, disabled: waiting || blocked !== null, dm,
+    onTap: () => { if (again) panel.again(again.rolls, again.to, throws.origin()); },
+    onRoll: (override) => { if (!again) return; const inputs = modeRepeat(rolls, override, again.to); if (inputs) panel.again(inputs, again.to, throws.origin()); },
+  });
   if (!last) return null;
   let body;
   if ("error" in last) body = <span role="alert" style={{ color: theme.color.dangerText }}>{last.error}</span>;
@@ -157,6 +166,7 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         type="button"
         onClick={() => firstLine && props.onOpen(firstLine)}
         aria-label={`Show this roll in Recent rolls`}
+        aria-description={effectiveRollMode(first, data?.type === "dice" && data.to === "dm") || undefined}
         style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1, minHeight: LAST_LINE_PX, overflow: "hidden", whiteSpace: "nowrap" }}
       >
         <span style={{ flex: "none", fontSize: theme.font.heading, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{head.total.toLocaleString("en-US")}</span>
@@ -164,7 +174,6 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       </button>
     );
   }
-  const again = againOf(last);
   return (
     <div
       data-dice-last=""
@@ -185,11 +194,12 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
       <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
         <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>{body}</div>
         {again ? (
-          <Button size="sm" variant="quiet" icon="again" busy={waiting} style={{ flex: "none" }} onClick={() => panel.again(again.rolls, again.to, throws.origin())}>
+          <Button size="sm" variant="quiet" icon="again" busy={waiting} {...repeat.buttonProps} style={{ flex: "none", ...repeat.pressStyle }}>
             Again
           </Button>
         ) : null}
       </div>
+      {repeat.menu}
       <span role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
         {said}
       </span>
@@ -301,6 +311,7 @@ function ResultRest(props: { sum: string | null; label: string | undefined; leve
 /** The formula field, Roll, the reading, the quick dice and the one-roll choices. */
 export function Roller() {
   const roomId = useRoomView((s) => s.roomId);
+  const selectedIds = useRoomView((s) => s.local.selectedIds);
   const dm = useRoomView((s) => s.you?.role === "dm");
   // Offline, or a preview as a player, which refuses every op: Roll waits and says why, as every option does.
   const blocked = useRollBlocked();
@@ -343,14 +354,14 @@ export function Roller() {
     setAt(-1);
   };
 
-  const roll = () => {
+  const roll = (override?: RollModeOverride) => {
     if (busy || blocked !== null || text.trim() === "") return;
     const parsed = parseRollText(text);
     if (!parsed.ok) {
       setError(parsed.error);
       return;
     }
-    const tag = panel.roll([{ formula: formatFormula(parsed.formula), ...(parsed.label !== undefined ? { label: parsed.label } : {}), sources: parsed.sources }], { origin: throws.origin() });
+    const tag = panel.roll([{ formula: formatFormula(parsed.formula), ...(parsed.label !== undefined ? { label: parsed.label } : {}), sources: parsed.sources }], { origin: throws.origin(), override });
     if (tag === null) return;
     setSent(tag);
     const next = withHistory(history, text);
@@ -361,6 +372,8 @@ export function Roller() {
     draft.current = "";
   };
 
+  const parsedMode = parseRollText(text);
+  const menu = useRollModeMenu({ source: JSON.stringify([text, selectedIds, panel.adv, panel.dis, panel.secret]), name: "Dice formula", capability: { d20: parsedMode.ok && acceptsRollMode(formatFormula(parsedMode.formula)), visibility: parsedMode.ok ? "selectable" : "creature" }, disabled: busy || blocked !== null || text.trim() === "", dm, onTap: () => roll(), onRoll: roll });
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -410,10 +423,11 @@ export function Roller() {
             />
           ) : null}
         </div>
-        <Button variant="primary" size="sm" busy={busy} disabled={blocked !== null || text.trim() === ""} onClick={roll}>
+        <Button variant="primary" size="sm" busy={busy} disabled={blocked !== null || text.trim() === ""} {...menu.buttonProps} style={menu.pressStyle}>
           {busy ? "Rolling…" : "Roll"}
         </Button>
       </div>
+      {menu.menu}
       <div data-dice-note style={{ height: `${NOTE_LINE}em`, lineHeight: `${NOTE_LINE}em`, fontSize: theme.font.small, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {blocked !== null ? (
           <span id={blockedId} style={{ color: theme.color.textMuted }}>
@@ -439,6 +453,7 @@ export function Roller() {
         ))}
       </ScrollStrip>
       <RollModes adv={panel.adv} dis={panel.dis} secret={panel.secret} dm={dm} onPress={panel.press} />
+      <p data-roll-mode-help="" style={{ margin: 0, fontSize: theme.font.small, color: theme.color.textMuted }}>Hold or right-click a roll button for one-roll options. Keyboard: Shift+F10.</p>
     </div>
   );
 }

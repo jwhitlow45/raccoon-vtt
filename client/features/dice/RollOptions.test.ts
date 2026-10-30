@@ -64,8 +64,9 @@ function line(tag: string, total: number, label: string, n: number): LogEntry {
   return { id: `${n}:0`, at: "2026-10-17T20:00:00.000Z", kind: "event", data: { type: "dice", tag, by: "p1", to: "all", rolls: [{ formula: "1d20+7", faces: [total - 7], total, label }] } };
 }
 
-function render(viewer: Viewer, landed: boolean, pending = false, requests: RoomState["rolls"] = {}, open = true, typedBonus?: string): string {
+function render(viewer: Viewer, landed: boolean, pending = false, requests: RoomState["rolls"] = {}, open = true, typedBonus?: string, extraRolls: PcStats["rolls"] = []): string {
   const state = table();
+  if (extraRolls.length) state.characters.thorn!.stats = { ...THORN, rolls: [...THORN.rolls, ...extraRolls] };
   if (typedBonus !== undefined) delete state.characters.thorn!.stats;
   state.rolls = requests;
   const view = projectState(state, viewer, { sceneId: "s1" }) as unknown as RoomState;
@@ -395,7 +396,11 @@ describe("a row's recharge and X/Day uses, read from the room", () => {
   const chip = (markup: string, label: string) => new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`).exec(markup)?.[0] ?? null;
 
   test("Used is pressed only while the room holds the breath's mark", () => {
-    assert.match(chip(draw(DM), "Mark Fire Breath used") ?? "", /aria-pressed="false"/);
+    const html = draw(DM);
+    assert.match(chip(html, "Mark Fire Breath used") ?? "", /aria-pressed="false"/);
+    const recharge = chip(html, "Fire Breath recharge, 1d6");
+    assert.ok(recharge);
+    assert.doesNotMatch(recharge, /aria-haspopup|aria-keyshortcuts/);
     const used = draw(DM, { "actions:fire-breath": { kind: "recharge", name: "Fire Breath", used: 1, max: 1, min: 5 } });
     assert.match(chip(used, "Fire Breath is used. Tap when it recharges") ?? "", /aria-pressed="true"/);
   });
@@ -463,5 +468,29 @@ describe("the death save row while Regeneration is open", () => {
     const settled = deathSave(draw(true));
     assert.ok(settled, "the row draws while the troll is dying");
     assert.doesNotMatch(settled, /disabled=""/);
+    assert.match(settled, /aria-haspopup="menu"/);
   });
+});
+
+test("actual single-creature rolls register menus without changing proficiency names or adding controls", () => {
+  const html = render(P1, false, false, {}, true, undefined, [
+    { id: "heal", name: "Healing Light", kind: "other", dice: [{ formula: "1d6", type: "healing" }] },
+    { id: "plain", name: "Bardic Inspiration", kind: "other", dice: [{ formula: "1d8" }] },
+  ]);
+  const buttons = [...html.matchAll(/<button[^>]*>/g)].map((m) => m[0]);
+  for (const name of ["Dexterity save, proficient", "Strength check", "Perception", "Rapier", "Rapier damage", "Initiative", "Healing Light healing", "Bardic Inspiration, 1d8"]) {
+    const button = buttons.find((b) => b.includes(`aria-label="${name}`));
+    assert.ok(button, name);
+    assert.match(button, /aria-haspopup="menu"/);
+    assert.match(button, /aria-keyshortcuts="ContextMenu Shift\+F10"/);
+  }
+  assert.match(html, /Hold, right-click or Shift\+F10 for Secret or Normal/);
+  const ask = /<button[^>]*aria-label="Dexterity save[^>]*>/.exec(render(DM, false))?.[0];
+  assert.ok(ask); assert.doesNotMatch(ask, /aria-haspopup|aria-keyshortcuts/);
+  const unknown = render(P1, false, false, {}, true, "");
+  const unknownSave = /<button[^>]*aria-label="Dexterity save[^>]*>/.exec(unknown)?.[0];
+  assert.ok(unknownSave); assert.doesNotMatch(unknownSave, /aria-haspopup/);
+  const busy = render(P1, true, true);
+  const pending = /<button[^>]*aria-label="Dexterity save[^>]*>/.exec(busy)?.[0];
+  assert.ok(pending); assert.doesNotMatch(pending, /aria-haspopup/);
 });
