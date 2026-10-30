@@ -48,6 +48,7 @@ The app does a lot, and you don't need most of it on day one. Read the [Quick st
   - [Ping, Look here and pins](#ping-look-here-and-pins)
   - [The table display](#the-table-display)
   - [Room settings for fights and maps](#room-settings-for-fights-and-maps)
+  - [Undo, Redo and Setup history](#undo-redo-and-setup-history)
 - Scenarios
   - [A forest road ambush](#a-forest-road-ambush)
   - [A dungeon crawl in the dark](#a-dungeon-crawl-in-the-dark)
@@ -85,9 +86,9 @@ When you pick a tool, its options appear in a row just above the toolbar, and an
 
 **Buttons tell you their keys.** You don't have to learn the keys from a list. On a computer, rest the pointer on a button, and its name appears with its key, such as **Fog (F)**, **Change the view (I)** or a token's **Hidden (H)**. A few buttons carry the key in their own words: the View menu's **Turn left (Q)** and **Turn right (E)**, **Show the shortcuts (?)** in **This device**, and the Outliner's **Search the scene (/)**. If you move a key to another one in the shortcut list, the buttons name your key instead. A phone or a tablet shows no keys, since it has nothing to press them on, until you press a key on a keyboard joined to it. From then on it names them all, just as a computer does.
 
-**The top bar** holds **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`), the two curved arrows (with Cmd in place of Ctrl on a Mac), which take back your own changes one at a time and put them back again. Beside them, **View** chooses whether your device shows the map from straight above or tilted, in the [isometric view](#the-isometric-view), and **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
+**The top bar** holds **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`), the two curved arrows (with Cmd in place of Ctrl on a Mac), which take back your own play and board changes one at a time and put them back again (saved definitions have their own history in the Menu, see [Undo, Redo and Setup history](#undo-redo-and-setup-history)). Beside them, **View** chooses whether your device shows the map from straight above or tilted, in the [isometric view](#the-isometric-view), and **Fit the map to the screen** (four corners, or the `0` key) brings the map back when you have panned or zoomed it out of sight. On a computer, the last button in the top bar is **Full screen** (`W`), which gives the whole screen to the room. Press it or `W` again to leave. If the window is too narrow for the button, **This device** in the Menu has the same switch, and that is also where you find it on a tablet or an Android phone.
 
-**The Menu** panel holds the X-card, **Copy player link**, **Members**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**. When the top bar is too crowded for the View button, it waits here as a **View** row instead.
+**The Menu** panel holds the X-card, **Copy player link**, **Members**, **Setup history**, **Room settings**, **This device**, **DM guide**, **About** and **Leave room**. When the top bar is too crowded for the View button, it waits here as a **View** row instead.
 
 These are the panels a DM uses most for maps and fights:
 
@@ -118,7 +119,7 @@ This section gets you through a first session with only a handful of tools: one 
 6. You can reveal a hidden monster yourself with **Hidden** in its action bar. Or you can leave it to the app: the room setting "Reveal hidden combatants on their turn", which is on by default, makes a hidden monster appear on its own when its turn comes.
 7. When the fight is over, press **End the fight** in Initiative, and tap it again to confirm.
 
-If you make a mistake along the way, **Undo** takes back any of your changes, even a whole encounter you dropped on the map.
+If you make a mistake along the way, **Undo** takes back what you did at the table or on the board, even a whole encounter you dropped on the map. Changes to a saved stat block, a scene's settings or the room's settings are taken back in **Setup history** instead, in the Menu (see [Undo, Redo and Setup history](#undo-redo-and-setup-history)).
 
 ## Use what helps your table
 
@@ -264,7 +265,7 @@ Two more options wait under **⋯**. **Resize scene** (on by default) makes Appl
 **Counting the squares instead.** If the art's squares run all the way to the edges of the image, you can skip the box and simply type the count. In the scene's **Map image and grid** settings, under **Or count the squares**, enter how many squares the image has across and down, then press **Apply**.
 
 > [!NOTE]
-> When applying a grid also changes the scene's size, the app saves the two changes as separate undo steps. The first **Undo** takes back the resize, and a second one takes back the grid.
+> When applying a grid also changes the scene's size, the app saves the two changes as separate steps in **Setup history** (Menu), since a scene's size and grid are settings. The first **Undo setup** takes back the resize, and a second one takes back the grid.
 
 **Letting the app find the grid.** Often you won't need the box at all. When a square scene's map file name gives no size, or whenever you upload a map for a hex scene, the app looks for a grid drawn on the map while it uploads. If it's sure of what it found, the scene starts lined up, and Line up grid opens to tell you so, such as "Found a grid of 70 px squares.", with **Use default** to go back to the first guess and the scene's earlier size. If it's less sure, it only places the box on those squares for you to check and **Apply**. On a phone, a large map can take a little longer: the scene opens, and Line up grid says it's still looking until it has an answer. **Find the grid**, in the tool's options or the scene's **Map image and grid** settings, looks again whenever you like, and one undo takes back a grid it applied. If you'd rather not wait for it, just carry on: pressing **Apply** or moving the box stops the search, so it never overwrites what you've done. And if the scene itself changes while it's looking, say someone sets its grid on another device, a grid it then finds isn't applied, and Line up grid tells you so.
 
@@ -595,7 +596,7 @@ A phase can also set the scene's light. Under **What players see**, **Light with
 
 ![Import a Universal VTT map for Lantern road: "This map brings 4 lights. The scene starts dark with party vision on, so they light it for the party." with Keep it lit beside it, then the map, 100 walls and 4 lights found, and Players see on Explore.](dm-guide/uvtt-lights.webp)
 
-Press **Create scene** to make it, and keep the page open until the walls have been added. One undo takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls, and it is always on squares, since the file states its own square grid (see [Hex grids](#hex-grids)). Arkenforge draws each door as an outline, and the app brings it in as the one door on the wall. A light placed far outside the map is left out, and the summary says so, so the rest of the map still comes in. A phone can only take files up to 40 MB, so import large maps on a computer.
+Press **Create scene** to make it, and keep the page open until the walls have been added. One **Undo setup** in **Setup history** takes the whole import back. An imported scene has **Automatic walls** off, since the file brings its own walls, and it is always on squares, since the file states its own square grid (see [Hex grids](#hex-grids)). Arkenforge draws each door as an outline, and the app brings it in as the one door on the wall. A light placed far outside the map is left out, and the summary says so, so the rest of the map still comes in. A phone can only take files up to 40 MB, so import large maps on a computer.
 
 ![Export as image in the scene's settings: Pixels per square, Player view or DM view, and Grid.](dm-guide/export.webp)
 
@@ -832,7 +833,7 @@ Tap a row to select its token and open its action bar. Each row's **⋯** holds 
 - **Move up** and **Move down**, for a row that ties with others.
 - **Remove**, which takes the creature out of the fight. Its token stays on the map.
 
-**HP changes**, under the order, lists every HP change of the fight ("Goblin Warrior 2 takes 7 damage, 3/10 left."). **Undo** (a curved arrow) on a line takes back that one change, as long as the creature is still as that change left it. To damage or heal several creatures from the tracker, turn on **Multi-select** in the **Several at once** section and tap their rows (or their tokens). One HP entry then applies to all of them.
+**HP changes**, under the order, lists every HP change of the fight ("Goblin Warrior 2 takes 7 damage, 3/10 left."). **Undo** (a curved arrow) on a line takes back that one change, as long as the creature is still as that change left it (see [Undo, Redo and Setup history](#undo-redo-and-setup-history) for how this differs from the top bar's Undo). To damage or heal several creatures from the tracker, turn on **Multi-select** in the **Several at once** section and tap their rows (or their tokens). One HP entry then applies to all of them.
 
 ### What players see of the order
 
@@ -1449,7 +1450,7 @@ Class resources come in the same way, each on a line of its own, such as "Update
 
 ![Check what changes for Kael, a barbarian who spent a Rage here and then reached level 6 in D&D Beyond: "Updates Rage: 4 uses, now 3" comes in, and under Also set, Level 6 and Max HP 78 are ticked while "Rage 4 of 4 left, now 3 of 4" is not, since unticked keeps what was spent here.](dm-guide/ddb-resources.webp)
 
-Press **Apply** to make the changes. The app tells you how many came in and how many of your changes stayed, and **Undo the re-sync** takes it all back, the exact HP included, until you close the dialog.
+Press **Apply** to make the changes. The app tells you how many came in and how many of your changes stayed, and **Undo the re-sync** takes it all back, the exact HP included, until you close the dialog. For you, a re-sync is also a step in **Setup history**, and so is that Undo. If you press **Undo setup** after the dialog's own Undo, it puts the sync back again, which the top bar's **Undo** never does. See [Undo, Redo and Setup history](#undo-redo-and-setup-history).
 
 A few cases work a little differently. A character imported before re-sync existed has no record of its last sync, so the app can't tell whose change is whose. Most of what differs is then listed under **Different from D&D Beyond**, and stays as it is unless you take it. Two things don't wait for you, though. The level, max HP, AC, Speed and senses come in ticked under **Also set**, as they do on an import. And the rolls that came from the earlier import follow D&D Beyond, so they update or go with the sheet, even where someone changed them here. So before the first re-sync of such a character, read both lists, and untick any Also set line you want kept. If D&D Beyond sends a character with something missing, the review says what it could not read, and those parts stay as they are. While the character is in Wild Shape or another shape, its AC and Speed are left out of the comparison, so re-sync again after the shape ends to update them. A re-sync can change the maximum HP, but it never brings a character back from death or knocks one out, and it never changes the character's size.
 
@@ -1524,6 +1525,71 @@ A few of these deserve a closer look.
 The server uses whichever rule is set at the moment of the roll, and each roll shows how it reached its total, such as "12 max + 2d6+3 (4, 6) = 25".
 
 **Initiative order players see** works separately from **Hidden**. Turning a token's **Hidden** off shows its row only where this setting allows, so in a new room a monster's row still waits for its first turn even after you reveal the monster. See [What players see of the order](#what-players-see-of-the-order).
+
+## Undo, Redo and Setup history
+
+Every DM taps the wrong token now and then, so the app keeps two histories of your changes. They are kept apart on purpose. What happens at the table can be taken back with one tap in the middle of a fight. A change to what a creature or a scene *is* is a different kind of mistake. The app makes you ask for that one deliberately, so you can't undo a stat block by reaching for the button that takes back a hit.
+
+**Play** is the history of the table and the board. The top bar's **Undo** (`Ctrl+Z`) and **Redo** (`Ctrl+Shift+Z`) work on it, with Cmd in place of Ctrl on a Mac. So do the **Undo** and **Redo** buttons in the map builder's row and the Draw tool. Play takes back damage, healing, death saves, rests and conditions, turns and the fight itself, moves, facing and size, carrying and dragging, taking or ending a shape, doors, fog, drawings, areas, everything the builder paints, tokens you place or remove (a whole encounter dropped on the map too), a group save's Apply, a secret or a handout you showed, and switching a scene to another of its prepared phases. A change belongs to the same history in the middle of a fight and on the night before, because starting a fight doesn't change what a change is.
+
+Rest the pointer on a button, and it names the step it would take, such as "Undo your last play or board change: moving Goblin 2". After you press it, the app says what happened: "Undid moving Goblin 2." Redo says "Redid" the same way. If Play has nothing to undo, the button does nothing, and the app never reaches into Setup to find something else.
+
+**Setup history** is the history of what things are. Open the Menu and choose **Setup history**. It holds the saved definitions and settings: stat blocks and character sheets (known forms, resources and level included), companions' stat blocks, monsters in your library, saved encounters, a scene's settings, map, grid and sight, the room's settings, journal pages and pins, your library of handouts, and a trap's name, area and rig. Creating or deleting any of these counts too.
+
+The sheet shows the next step to take back, with **Undo setup** beside it, and the next step to put back, with **Redo setup** beside that. While the sheet has focus, and you aren't typing in a text field, `Ctrl+Z` is **Undo setup** and `Ctrl+Shift+Z` is **Redo setup** (Cmd on a Mac). `Escape` closes the sheet and returns you to the button that opened it. When you save in one of those editors, the app tells you where the change went: "Saved. Undo in Setup history." Setup history isn't a backup and doesn't list old versions. It takes back the last thing you saved, then the one before it, and so on.
+
+Both histories remember your last 50 steps in each direction, on every device you use as the same DM. They live in the server's memory, so a restart of the server clears them. A co-DM has histories of their own.
+
+### Where the line falls
+
+Two things belong to Play even though they look like setup. **Painting a floor or erasing a wall** is undone with the top bar's **Undo**, because a stray stroke needs fixing at once. And **Set maximum HP** in a creature's HP section is Play, since Aid and Life Drain change a maximum during the game. A maximum HP you change by saving a character sheet or a stat block is Setup.
+
+If one save changes both kinds of thing, such as a token's name and its position, the whole save goes to Setup. The app never splits one save between the two histories.
+
+The history leaves some things alone. Dice rolls and chat lines are facts in the Log, and so is a member's name or color, which you change directly in **Members**. Dismissing or withdrawing an ask stays final too.
+
+### A move and a fix of AC
+
+Say you move Goblin 2 into the doorway, and then notice its AC is wrong and fix it in its stat block. Press **Undo** (`Ctrl+Z`). Goblin 2 steps back to where it stood, and it keeps the new AC. Undo gave back only its place, facing and size, so a later fix isn't lost. The AC fix is a Setup step. **Undo setup** in Setup history would take that back, and only that.
+
+### A stat block and a hit
+
+The order of steps matters when two of them touch the same creature. Say you change Bree's Charisma in her stat block, and then hit her for 6 damage. Open **Setup history** and press **Undo setup**. The app won't put her old sheet back over her newer HP, so it keeps the step and says "Undo the play step first: damaging Bree." Then:
+
+1. Close the sheet, and press **Undo** (`Ctrl+Z`) in the top bar. The hit comes off.
+2. Open **Setup history** again, and press **Undo setup**. Her Charisma goes back.
+
+The same works the other way around. If you took back a setup step and then a play step, the play step's **Redo** may say "Redo the setup step first: changing Bree's stat block." When the step you need is buried under others, the sentence says so: "Undo the play steps through damaging Bree first." Each time, the app names the newest step in the way and which history it is in. It never takes steps you didn't ask for.
+
+### A step that stays
+
+A step the app can't take right now isn't thrown away, if the thing in its way is another step of your own in the other history. It stays at the top of its history, and its sentence offers **Review step**. Review opens the history's sheet with **Retry** and **Discard this step**. Take the step the sentence names, then press **Retry**. Press **Discard this step** if you would rather forget the step. It asks "Discard this undo step? The game stays as it is.", and after you confirm, it says "Discarded this step. The game stays as it is." The step goes and nothing in the game changes.
+
+If someone else changed the thing since, such as a co-DM, a player answering a roll or a change that records no step, the app can't tell what you would be undoing. It drops the step and says what changed. Offline, a read-only room or a busy server refuses without touching either history, and **Discard this step** isn't offered, since the step is still good. Try again when the room is back.
+
+### Taking the step you saw
+
+Each press takes the step the button showed. If another device or a co-DM changed that step in the meantime, nothing is undone. The app says "Play history changed. Check the next change." (or "Setup history changed…") and shows the new next step. While the app waits to learn the next step it says "Loading undo history…", and the sheet says "Connect to use history." when you are offline. A second tap in one double tap never takes the step after, and neither does holding a key down. A page that has been open since the app was updated says "Reload to use Undo". Reload it, table displays too.
+
+### Redo
+
+**Redo** (`Ctrl+Shift+Z`) puts back what you took back, in the same history. A new step clears only the Redo of its own history. A move doesn't clear what you can redo in Setup history, and a save doesn't clear what you can redo in Play. A chat line, a die or a player's own change that records no step clears neither.
+
+### What Undo can't give back
+
+If a step would make a player's map forget ground, either history asks first: "Players' remembered map here will be forgotten. Go ahead?" **Forget and undo** (or **Forget and redo**) goes ahead, and **Cancel** keeps the step. Whichever you pick, Undo never brings back a map a player forgot, or something they already read or saw, such as a secret you revealed. See [What players' maps hold](#what-players-maps-hold).
+
+### What your players see
+
+When your Undo or Redo changes something a player can see, such as their hit points, a condition, a shape, an ability score or their own token's place, that player gets one line in their Log, and the app says it once on their screen: "The DM undid a play change." or "The DM undid a setup change to Bree." They never see your wording of the step, a hidden creature, or a number. A change to a wall, fog, a drawing or someone else's token sends no line. You see the exact step in your own Log: "The DM undid setup: changing Bree's stat block." A correction so large that one Log line can't hold who may read it keeps the readers that fit, and the line disappears for everyone if all of them lose the right to read it. It never shows a player something new.
+
+### The HP changes list
+
+**Undo** on a line in the Log or Initiative's **HP changes** takes back that one change, whoever made it, as long as the creature is still as the change left it. That works even when the top bar's Undo would be refused for the same creature, because it checks only that one creature's HP. It has no Redo and no second notice. And it takes back that line only. A condition, another creature hit by the same blow or the note of a damage type stays. To take back a whole group save, with everything it did, use the top bar's **Undo**.
+
+### Re-sync
+
+A re-sync from D&D Beyond is a Setup step, and so is the dialog's **Undo the re-sync**. Pressing **Undo setup** after that Undo puts the sync back, which is the one time Undo setup repeats something. The top bar's **Undo** never touches either. A player who re-syncs their own character has only the dialog's Undo, and it ends when they close the dialog.
 
 # Scenarios
 
@@ -1717,7 +1783,7 @@ These are the keys a DM uses most:
 - `H` hides or shows the selected tokens, `L` locks them, and Delete deletes them.
 - The arrow keys move the selection a square, or a hex on a hex scene. Page Up raises it 5 ft, and Page Down lowers it 5 ft.
 - `/` searches the scene in the Outliner.
-- `Ctrl+Z` is Undo, and `Ctrl+Shift+Z` is Redo (Cmd in place of Ctrl on a Mac).
+- `Ctrl+Z` is Undo, and `Ctrl+Shift+Z` is Redo, for play and board changes (Cmd in place of Ctrl on a Mac). Inside the **Setup history** sheet the same two keys are **Undo setup** and **Redo setup**.
 - `0` fits the map to the screen, `+` zooms in and `-` zooms out. `S` hides or shows the side panel, and `O` switches to the other of two panels.
 - `I` switches between Top-down and Isometric, `Q` turns the isometric view left and `E` turns it right.
 - `W` turns full screen on or off, where the browser allows it.
