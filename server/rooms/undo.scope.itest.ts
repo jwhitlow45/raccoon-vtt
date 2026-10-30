@@ -101,6 +101,8 @@ test("undo-scope-isolation: devices share only their member's history, and stale
   assert.match(refusal.rejects?.[0]?.message ?? "", /Setup history changed/);
   const preserved = await history(one, one.n);
   assert.deepEqual(preserved.setup, replacement.setup);
+  const check = await (await engine.connect(roomId, device)).snapshot("isolation-check");
+  assert.equal((check.state as RoomState).scenes[sceneId]?.name, "Second preparation");
 });
 
 test("undo-scope-reconnect: restart replaces the epoch and refuses a head from the retired room", async (t) => {
@@ -127,6 +129,8 @@ test("undo-scope-reconnect: restart replaces the epoch and refuses a head from t
   const recorded = await history(next, next.n);
   assert.equal(recorded.setup?.undo.depth, 1);
   assert.notEqual(recorded.setup?.undo.head?.id, before.setup.undo.head.id);
+  const check = await (await engine.connect(roomId, device)).snapshot("restart-check");
+  assert.equal((check.state as RoomState).meta.name, "After restart");
 });
 
 test("undo-scope-groups: declared mixed gestures enter Setup from their first part and merge there", async (t) => {
@@ -199,4 +203,8 @@ test("undo-scope-groups: players cannot declare Setup groups", async (t) => {
   const after = await history(socket, 1);
   assert.equal(after.setup, undefined);
   assert.equal(after.play.undo.depth, 0);
+  const check = await (await engine.connect(roomId, dmDevice)).snapshot("declaration-check");
+  assert.ok(!(check.state as RoomState).log.some((line) => line.text === "Must not be accepted"));
+  const compatible = await socket.apply({ t: "log.chat", text: "Ordinary chat still works" });
+  assert.equal(compatible.rejects?.length ?? 0, 0);
 });

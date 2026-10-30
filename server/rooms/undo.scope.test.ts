@@ -202,23 +202,45 @@ describe("scoped history through the room actor", () => {
 
   for (const role of ["dm", "player"] as const) {
     for (const direction of ["undo", "redo"] as const) {
-      for (const scope of (role === "dm" ? ["play", "setup"] : ["play"]) as HistoryScope[]) {
-        test(`${role} ${scope} ${direction}: quota refusal preserves both stacks and ids`, async (t) => {
+      for (const admission of ["quota", "replay", "rate"] as const) for (const scope of (role === "dm" ? ["play", "setup"] : ["play"]) as HistoryScope[]) {
+        test(`${role} ${scope} ${direction}: ${admission} refusal preserves both stacks and ids`, async (t) => {
           const f = scopeFixture();
           const h = await scopeActor(t, f.state);
-          const client = await h.connect(role === "dm" ? f.dm : f.player);
+          let now = 0;
+          const client = await h.connect(role === "dm" ? f.dm : f.player, role, () => now);
           await client.apply(scope === "setup" ? ac(f.goblin) : { t: "token.move", tokenId: f.pc, x: 10, y: 3 });
           if (direction === "redo") await client.restore(scope);
           const histories = client.history();
           const before = h.actor.committed.state;
-          h.actor.readOnly = true;
-          const event = await client.send({ t: direction, scope, head: client.head(scope, direction).id });
-          assert.equal(event.rejects?.[0]?.code, "quota");
-          unchanged(before, h.actor.committed.state);
-          assert.deepEqual(client.history().play, histories.play);
-          assert.deepEqual(client.history().setup, histories.setup);
-          h.actor.readOnly = false;
-          await client.restore(scope, direction);
+          const command = { t: direction, scope, head: client.head(scope, direction).id };
+          if (admission === "rate") {
+            while (client.conn.opRate.allow()) { /* Spend only this connection's burst. */ }
+            const n = ++client.n;
+            await h.actor.op(client.conn, n, command);
+            assert.ok(client.sent.some((m) => m.t === "retry" && m.n === n && m.code === "busy"));
+            unchanged(before, h.actor.committed.state);
+            assert.deepEqual(client.history().play, histories.play);
+            assert.deepEqual(client.history().setup, histories.setup);
+            now += 10_000;
+            await h.actor.op(client.conn, n, command);
+            const answer = await until(() => client.sent.find((m) => m.t === "ev" && (m.acks?.includes(n) || m.rejects?.some((r) => r.n === n))), "retry after rate admission recovers");
+            assert.ok(answer.t === "ev" && answer.acks?.includes(n), "the original command number and head still succeed");
+          } else {
+            // A load failure normally precedes history. Force only its admission flag to isolate preservation of existing stacks.
+            if (admission === "replay") Object.defineProperty(h.actor, "replayFailed", { value: true, configurable: true });
+            else h.actor.readOnly = true;
+            try {
+              const event = await client.send(command);
+              assert.equal(event.rejects?.[0]?.code, "quota");
+              unchanged(before, h.actor.committed.state);
+              assert.deepEqual(client.history().play, histories.play);
+              assert.deepEqual(client.history().setup, histories.setup);
+            } finally {
+              if (admission === "replay") Object.defineProperty(h.actor, "replayFailed", { value: false });
+              else h.actor.readOnly = false;
+            }
+            await client.restore(scope, direction);
+          }
         });
       }
     }
@@ -244,6 +266,25 @@ describe("scoped history through the room actor", () => {
     assert.notEqual(dm.head("play", "redo").id, second);
   });
 
+  for (const scope of ["play", "setup"] as const) test(`${scope} gesture splits after an intervening action in the other scope`, async (t) => {
+    const f = scopeFixture();
+    const h = await scopeActor(t, f.state);
+    const dm = await h.connect(f.dm);
+    const second = await h.connect(f.dm);
+    const group = uuidv7();
+    const declaration = scope === "setup" ? "setup" : undefined;
+    await dm.apply({ t: "token.move", tokenId: f.goblin, x: 5, y: 3 }, group, declaration);
+    const first = dm.head(scope).id;
+    await second.apply(scope === "play" ? { t: "room.update", name: "Interruption" } : { t: "token.move", tokenId: f.pc, x: 9, y: 3 });
+    await dm.apply({ t: "token.move", tokenId: f.goblin, x: 6, y: 3 }, group, declaration);
+    assert.equal(dm.history()[scope]!.undo.depth, 2, "an old group id cannot merge across the intervening scope");
+    assert.notEqual(dm.head(scope).id, first);
+    await dm.restore(scope);
+    assert.equal(h.actor.committed.state.tokens[f.goblin]!.x, 5, "only the resumed gesture's part is restored");
+    assert.equal(dm.head(scope).id, first);
+    assert.equal(dm.history()[scope === "play" ? "setup" : "play"]!.undo.depth, 1);
+  });
+
   test("None and no-effect edits preserve both Redo stacks", async (t) => {
     const f = scopeFixture();
     const h = await scopeActor(t, f.state);
@@ -258,9 +299,11 @@ describe("scoped history through the room actor", () => {
       { t: "token.move", tokenId: f.goblin, x: 3, y: 3 },
       { t: "room.update", name: f.state.meta.name },
       { t: "log.chat", text: "Keep both redo steps" },
-    ]) await dm.apply(op);
-    assert.deepEqual(dm.history().play, before.play);
-    assert.deepEqual(dm.history().setup, before.setup);
+    ]) {
+      await dm.apply(op);
+      assert.deepEqual(dm.history().play, before.play, `${op.t} preserves Play Redo`);
+      assert.deepEqual(dm.history().setup, before.setup, `${op.t} preserves Setup Redo`);
+    }
   });
 
   test("HP Log correction remains available after a whole-value conflict and creates no Redo", async (t) => {
@@ -370,6 +413,51 @@ describe("scoped history through the room actor", () => {
     unchanged(replacedState, h.actor.committed.state);
     assert.equal(dm.head().id, replacement);
   });
+
+  for (const scope of ["play", "setup"] as const) for (const direction of ["undo", "redo"] as const) for (const refreshed of [false, true]) {
+    test(`${scope} ${direction}: forget confirmation preserves the head and checks current memory${refreshed ? " after the party revisits" : " before forgetting"}`, async (t) => {
+      const f = scopeFixture();
+      const elsewhere = uuidv7();
+      f.state.scenes[elsewhere] = scene(elsewhere);
+      f.state.meta.playerSceneId = elsewhere;
+      f.state.scenes[f.sceneId] = { ...f.state.scenes[f.sceneId]!, bounds: { w: 80, h: 64 }, fogEnabled: true, autoWalls: "all", blockMovement: true, vision: { on: true, light: "bright" } };
+      for (let ty = 0; ty < 4; ty++) for (let tx = 0; tx < 5; tx++) {
+        f.state.exploredTiles[`${f.sceneId}:${tx},${ty}`] = { sceneId: f.sceneId, tx, ty, rev: 0, bits: encodeTile(fullTileBits()) };
+        const cells: Record<string, "stone"> = {};
+        for (let y = ty * 16; y < ty * 16 + 16; y++) for (let x = tx * 16; x < tx * 16 + 16; x++) cells[`${x},${y}`] = "stone";
+        f.state.buildChunks[chunkKey(f.sceneId, tx, ty)] = { sceneId: f.sceneId, cx: tx, cy: ty, rev: 0, cells, edges: {} };
+      }
+      const h = await scopeActor(t, f.state);
+      const dm = await h.connect(f.dm);
+      const other = await h.connect(f.otherDm);
+      const visit = async () => {
+        await other.apply({ t: "room.setPlayerScene", sceneId: f.sceneId });
+        await other.apply({ t: "room.setPlayerScene", sceneId: elsewhere });
+      };
+      await dm.apply({ t: "build.rect", sceneId: f.sceneId, terrain: "wood", x: 0, y: 0, w: 80, h: 16 }, scope === "setup" ? uuidv7() : undefined, scope === "setup" ? "setup" : undefined);
+      if (direction === "redo") await dm.restore(scope);
+      await visit();
+      for (let y = 16; y < 64; y += 16) await other.apply({ t: "build.rect", sceneId: f.sceneId, terrain: "grass", x: 0, y, w: 80, h: 16 });
+      const head = dm.head(scope, direction).id;
+      const before = h.actor.committed.state;
+      const histories = { play: dm.history().play, setup: dm.history().setup };
+      const asked = await dm.send({ t: direction, scope, head });
+      assert.equal(asked.rejects?.[0]?.code, "forget");
+      const question = dm.n;
+      unchanged(before, h.actor.committed.state);
+      assert.deepEqual({ play: dm.history().play, setup: dm.history().setup }, histories, "cancel and pending confirmation consume nothing");
+      const wrong = await dm.send({ t: direction, scope, head, forget: question - 1 });
+      assert.equal(wrong.rejects?.[0]?.code, "invalid");
+      unchanged(before, h.actor.committed.state);
+      if (refreshed) await visit();
+      const explored = h.actor.committed.state.exploredTiles;
+      await dm.apply({ t: direction, scope, head, forget: question });
+      assert.equal(h.actor.committed.state.buildChunks[chunkKey(f.sceneId, 0, 0)]?.cells["0,0"], direction === "undo" ? "stone" : "wood");
+      if (refreshed) assert.deepEqual(h.actor.committed.state.exploredTiles, explored, "a valid old yes cannot forget memory that no longer needs forgetting");
+      else assert.notDeepEqual(h.actor.committed.state.exploredTiles, explored, "the confirmed restore performs the necessary forgetting");
+      assert.notEqual(dm.history()[scope]![direction].head?.id, head);
+    });
+  }
 
   test("controlled attach restores encounter effects together with pose and preserves later AC", async (t) => {
     const f = scopeFixture();

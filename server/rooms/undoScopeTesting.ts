@@ -99,7 +99,7 @@ export async function scopeActor(t: TestContext, state: RoomState) {
     db.beforeAssets = undefined;
     await actor.shutdown({ code: 1012, snapshot: false });
   });
-  return { actor, db, info, connect: (who: Member, role: "dm" | "player" = who.kind === "dm" ? "dm" : "player") => ScopeClient.open(actor, who, role) };
+  return { actor, db, info, connect: (who: Member, role: "dm" | "player" = who.kind === "dm" ? "dm" : "player", now?: () => number) => ScopeClient.open(actor, who, role, now) };
 }
 
 export class ScopeClient {
@@ -109,15 +109,15 @@ export class ScopeClient {
   readonly clientId = uuidv7();
   n = 0;
 
-  private constructor(actor: RoomActor, who: Member, role: "dm" | "player") {
+  private constructor(actor: RoomActor, who: Member, role: "dm" | "player", now?: () => number) {
     this.actor = actor;
     const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => this.sent.push(JSON.parse(text) as Wire), close() {}, terminate() {} };
-    this.conn = new Connection(socket as never, { sessionId: uuidv7(), roomId: "UNDOSCOPE", memberId: who.id, role }, "203.0.113.9");
+    this.conn = new Connection(socket as never, { sessionId: uuidv7(), roomId: "UNDOSCOPE", memberId: who.id, role }, "203.0.113.9", { now });
     actor.attach(this.conn);
   }
 
-  static async open(actor: RoomActor, who: Member, role: "dm" | "player"): Promise<ScopeClient> {
-    const client = new ScopeClient(actor, who, role);
+  static async open(actor: RoomActor, who: Member, role: "dm" | "player", now?: () => number): Promise<ScopeClient> {
+    const client = new ScopeClient(actor, who, role, now);
     await actor.hello(client.conn, { clientId: client.clientId, resumeFrom: 1 });
     await until(() => client.sent.find((m) => m.t === "snapshot"), "snapshot");
     return client;
@@ -135,14 +135,15 @@ export class ScopeClient {
     return stack.head;
   }
 
-  async send(op: unknown, group?: string): Promise<Event> {
+  async send(op: unknown, group?: string, groupScope?: "setup"): Promise<Event> {
     const n = ++this.n;
-    await this.actor.op(this.conn, n, op, group);
+    const dispatch: (conn: Connection, n: number, op: unknown, group?: string, groupScope?: "setup") => Promise<void> = this.actor.op.bind(this.actor);
+    await dispatch(this.conn, n, op, group, groupScope);
     return until(() => this.sent.find((m): m is Event => m.t === "ev" && Boolean(m.acks?.includes(n) || m.rejects?.some((r) => r.n === n))), `terminal event ${n}`);
   }
 
-  async apply(op: unknown, group?: string): Promise<Event> {
-    const event = await this.send(op, group);
+  async apply(op: unknown, group?: string, groupScope?: "setup"): Promise<Event> {
+    const event = await this.send(op, group, groupScope);
     assert.equal(event.rejects?.length ?? 0, 0, JSON.stringify(event.rejects));
     assert.ok(event.acks?.includes(this.n), "accepted command has a terminal ack");
     return event;
