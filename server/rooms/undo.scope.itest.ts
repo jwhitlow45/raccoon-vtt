@@ -25,7 +25,13 @@ test("undo-scope-legacy: raw old hello and queued bare commands refuse without c
   await history(modern);
   const sceneId = (snap.state as RoomState).meta.playerSceneId!;
   const tokenId = uuidv7();
-  const created = await modern.apply({ t: "token.create", token: { id: tokenId, sceneId, kind: "object", name: "Crate", size: "medium", x: 2, y: 2 } });
+  const created = await modern.apply({
+    t: "token.create",
+    token: {
+      id: tokenId, sceneId, kind: "object", name: "Crate", size: "medium", x: 2, y: 2,
+      actor: { inline: { hp: { cur: 5, max: 5, temp: 0 }, life: "alive", ac: 10, speeds: { walk: 0 }, initBonus: 0, passivePerception: 10, senses: "", effects: [], deathSaves: { ok: 0, fail: 0 }, notes: "", dmNotes: "" } },
+    },
+  });
   assert.equal(created.rejects, undefined);
   await history(modern, modern.n);
   await modern.apply({ t: "token.move", tokenId, x: 4, y: 2 });
