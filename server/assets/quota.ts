@@ -15,11 +15,10 @@ import { KeyedMutex } from "./locks.ts";
  * bounds how many a room can hold, so it is nothing a room can grow
  * without end.
  *
- * The log archive is left out too. It keeps every line for good, each for
- * the members who may read it, so it is nothing the members can see in full
- * or delete, and the quota counts only what they can. The free-disk floor
- * bounds it instead (hasFreeDisk), and the admin page shows it in a room's
- * size on disk (ROOM_ARCHIVE_BYTES_SQL).
+ * The log archive is left out: it keeps every line for good and nothing in
+ * the room deletes it, so the free-disk floor bounds it instead
+ * (hasFreeDisk). The admin page shows it in a room's size on disk
+ * (ROOM_ARCHIVE_BYTES_SQL).
  */
 export const ROOM_QUOTA_BYTES_SQL = `
        coalesce((select sum(bytes) from assets where room_id = $1 and starter is null), 0)
