@@ -242,6 +242,72 @@ describe("the log metadata worker", () => {
     await m.stop();
   });
 
+  test("a build that keeps failing is tried again only at each backoff step, however often rooms are asked for, and a stop ends the wait", async () => {
+    let now = 0;
+    const timers: { at: number; fn: () => void }[] = [];
+    const advance = async (ms: number) => {
+      const end = now + ms;
+      for (;;) {
+        timers.sort((a, b) => a.at - b.at);
+        const next = timers[0];
+        if (!next || next.at > end) break;
+        timers.shift();
+        now = next.at;
+        next.fn();
+        await tick();
+      }
+      now = end;
+      await tick();
+    };
+    let connects = 0;
+    const m = new LogHistoryMigration({
+      connect: () => {
+        connects++;
+        return Promise.reject(new Error("could not connect"));
+      },
+      budget: new LogScanBudget(),
+      guard: () => Promise.resolve(true),
+      log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+      retryMs: 100,
+      maxRetryMs: 400,
+      setTimer: (fn, ms) => {
+        const t = { at: now + ms, fn };
+        timers.push(t);
+        return t;
+      },
+      clearTimer: (t) => {
+        const at = timers.indexOf(t as never);
+        if (at >= 0) timers.splice(at, 1);
+      },
+    });
+    m.start();
+    await tick();
+    assert.equal(connects, 1, "the first attempt at once");
+    // Reads ask for rooms all along: each step of 100, 200, 400 and 400 ms holds one attempt only.
+    const asks = async (ms: number) => {
+      for (let t = 0; t < ms; t += 10) {
+        m.want(`ROOM${t}`);
+        await advance(10);
+      }
+    };
+    await asks(90);
+    assert.equal(connects, 1, "no attempt before the first step ends");
+    await asks(10);
+    assert.equal(connects, 2);
+    await asks(190);
+    assert.equal(connects, 2);
+    await asks(10);
+    assert.equal(connects, 3);
+    await asks(400);
+    assert.equal(connects, 4);
+    await asks(400);
+    assert.equal(connects, 5, "the backoff stops doubling at its bound");
+    const stopping = m.stop();
+    await tick();
+    await stopping;
+    assert.equal(connects, 5, "a stop ends the wait without another attempt");
+  });
+
   test("rooms are asked for once each, up to a bound, and a deleted one leaves the queue", async () => {
     const { m } = rig(database(0, (text) => (text.includes("indisvalid") ? "hang" : undefined)), { maxWanted: 2 });
     m.start();

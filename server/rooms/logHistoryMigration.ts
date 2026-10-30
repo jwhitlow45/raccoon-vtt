@@ -87,6 +87,9 @@ export type MigrationOptions = {
   pollMs?: number;
   /** Rooms that may wait for a backfill. One asked for past this is asked for again by its next read. */
   maxWanted?: number;
+  /** The timers the worker waits on, for tests. */
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (timer: unknown) => void;
   /** For tests: runs before each step, on the worker's own time, with the job's cancel. */
   onStep?: (step: MigrationStep, signal: AbortSignal) => Promise<void>;
 };
@@ -117,7 +120,10 @@ export class LogHistoryMigration implements HistoryMetadata {
   #malformed = new Set<string>();
   /** The job running now, and how to stop it. */
   #job: { roomId: string | null; abort: AbortController } | null = null;
-  #wake: (() => void) | null = null;
+  /** Ends the idle wait: a room was asked for, or stop. */
+  #wakeIdle: (() => void) | null = null;
+  /** Ends the wait before the index build is tried again: stop alone, never a read, so the backoff holds however often rooms are asked for. */
+  #wakeRetry: (() => void) | null = null;
   #lastDiskWarning = -Infinity;
 
   constructor(opts: MigrationOptions) {
@@ -130,6 +136,8 @@ export class LogHistoryMigration implements HistoryMetadata {
       maxRetryMs: 60_000,
       pollMs: 100,
       maxWanted: 1_024,
+      setTimer: (fn, ms) => setTimeout(fn, ms),
+      clearTimer: (timer) => clearTimeout(timer as NodeJS.Timeout),
       ...opts,
       cancel: opts.cancel ?? ((client) => cancelRequest(client)),
     };
@@ -156,7 +164,7 @@ export class LogHistoryMigration implements HistoryMetadata {
     if (this.#stopped || this.#malformed.has(roomId) || this.#job?.roomId === roomId) return;
     if (!this.#wanted.has(roomId) && this.#wanted.size >= this.#opts.maxWanted) return;
     this.#wanted.add(roomId);
-    this.#wake?.();
+    this.#wakeIdle?.();
   }
 
   /** A deleted room: dropped from the queue, and its running job cancelled. */
@@ -171,7 +179,8 @@ export class LogHistoryMigration implements HistoryMetadata {
     this.#stopped = true;
     this.#wanted.clear();
     this.#job?.abort.abort(new Error("shutting down"));
-    this.#wake?.();
+    this.#wakeIdle?.();
+    this.#wakeRetry?.();
     await this.#loop;
   }
 
@@ -327,23 +336,23 @@ export class LogHistoryMigration implements HistoryMetadata {
 
   /** Waits `ms`, or until stop. With a signal, a cancel rejects the wait. */
   #sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    const { setTimer, clearTimer } = this.#opts;
     return new Promise<void>((resolve, reject) => {
       if (signal?.aborted) return reject(new ScanCancelledError(signal.reason));
       if (!signal && this.#stopped) return resolve();
       const finish = () => {
-        clearTimeout(timer);
+        clearTimer(timer);
         signal?.removeEventListener("abort", onAbort);
-        if (this.#wake === finish) this.#wake = null;
+        if (this.#wakeRetry === finish) this.#wakeRetry = null;
         resolve();
       };
       const onAbort = () => {
-        clearTimeout(timer);
-        if (this.#wake === finish) this.#wake = null;
+        clearTimer(timer);
         reject(new ScanCancelledError(signal!.reason));
       };
-      const timer = setTimeout(finish, ms);
+      const timer = setTimer(finish, ms);
       signal?.addEventListener("abort", onAbort, { once: true });
-      if (!signal) this.#wake = finish;
+      if (!signal) this.#wakeRetry = finish;
     });
   }
 
@@ -351,8 +360,8 @@ export class LogHistoryMigration implements HistoryMetadata {
   #idle(): Promise<void> {
     if (this.#stopped || this.#wanted.size > 0) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      this.#wake = () => {
-        this.#wake = null;
+      this.#wakeIdle = () => {
+        this.#wakeIdle = null;
         resolve();
       };
     });
