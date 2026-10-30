@@ -1,4 +1,4 @@
-import { parseKey } from "#shared/keys.ts";
+import { parseKey, readEntity } from "#shared/keys.ts";
 import type { RoomState, Token } from "#shared/model.ts";
 import { MAX_KEPT_ROUTES, MAX_RESTORE_ENTRIES, onPlayerUndoStack, type Op, type OpOf, type RefusalCode, type RestoreEntry } from "#shared/protocol.ts";
 
@@ -10,6 +10,10 @@ import { LIMITS } from "#shared/limits.ts";
 import { inSightOfNonOwners, stableStringify } from "#shared/project.ts";
 import { holderOf } from "#shared/rules/attach.ts";
 import { addTally, describeTally, type Tally } from "./undoLabels.ts";
+import { randomUUID } from "node:crypto";
+import type { HistoryBlocker, HistoryDirection, HistoryMessage, HistoryScope, ScopeHistory } from "#shared/undoContract.ts";
+import { undoScope } from "#shared/undoScope.ts";
+import { attributesConflict, historyConflicts, mergeDmHistory, type DmHistoryValues } from "./undoDm.ts";
 
 /**
  * Per-member undo and redo stacks (design 7.7). They hold the inverses the
@@ -17,11 +21,9 @@ import { addTally, describeTally, type Tally } from "./undoLabels.ts";
  * them, and that is fine because only the resolved `sys.restore` op is ever
  * logged.
  *
- * The DM's stack records every DM op. A player's stack records only their
- * own drawing ops, their token moves, a change of elevation or facing
- * alone included (isPoseOp), and their resizes (isResizeOp). A new op clears the member's redo
- * stack, as every editor does, so redo never replays an inverse made
- * against state that has since moved on.
+ * DMs keep independent Play and Setup pairs. Players keep only their own
+ * drawing, movement and resize history. Recording clears only that scope's
+ * Redo. Other scopes remain guarded against the current room.
  */
 export const UNDO_DEPTH = 50;
 
@@ -79,9 +81,13 @@ export type Shows = (tokenId: string) => boolean;
  * step in its place.
  */
 export type UndoEntry = {
+  id?: string;
+  retained?: HistoryBlocker;
+  values?: DmHistoryValues;
   entries: RestoreEntry[];
   label: string;
   group?: string;
+  gesture?: { group: string; client?: string; declared: boolean };
   poses?: Record<string, Pose>;
   origin?: Origin;
   tally?: Tally;
@@ -127,9 +133,14 @@ export type Walk = { tokenId: string; route: KeptRoute; routed: boolean };
 export type Origin = { client: string; n: number };
 
 type Stacks = { undo: UndoEntry[]; redo: UndoEntry[] };
+type MemberHistory = { play: Stacks; setup: Stacks; serial: number; latest: UndoEntry | null };
+export type RecordHistory = { scope?: HistoryScope; values?: DmHistoryValues; declared?: boolean };
 
 export class UndoStacks {
-  #members = new Map<string, Stacks>();
+  #members = new Map<string, MemberHistory>();
+  #orders = new WeakMap<UndoEntry, number>();
+  #order = 0;
+  readonly epoch = randomUUID();
 
   /**
    * Whether an applied op by this role goes on the stack at all. A scene's
@@ -141,7 +152,8 @@ export class UndoStacks {
    * told was settled. Keep stands, as the Allow's roll does. Nor does a
    * close of an ask for saves, for the same reason.
    */
-  static records(role: "dm" | "player", op: Op): boolean {
+  static records(role: "dm" | "player", op: Op, before?: RoomState): boolean {
+    if (before) return role === "dm" ? undoScope(op, before) !== "none" : onPlayerUndoStack(op);
     if (op.t.startsWith("sys.")) return false;
     if (op.t === "roll.change") return false;
     // A dismissal answers the player, as Keep does, and a withdrawal is the player's own (docs/design-v1-player-save-spell.md 5.6).
@@ -176,15 +188,20 @@ export class UndoStacks {
    * It keeps where its last op left each token, and names its last op as its
    * origin.
    */
-  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[], trapped = false): void {
-    const s = this.#stacks(memberId);
+  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[], trapped = false, history: RecordHistory = {}): void {
+    if (inverse.length === 0) return;
+    label = label.slice(0, 200);
+    const member = this.#member(memberId);
+    const s = member[history.scope ?? "play"];
+    member.serial++;
     s.redo = [];
     if (inverse.length > MAX_RESTORE_ENTRIES) {
       s.undo = [];
+      member.latest = null;
       return;
     }
     const top = s.undo.at(-1);
-    if (group !== undefined && top?.group === group && (top.poses === undefined) === (poses === undefined)) {
+    if (group !== undefined && top?.group === group && member.latest === top && (top.poses === undefined) === (poses === undefined)) {
       const merged = mergeInverses(top.entries, inverse);
       if (merged && merged.length <= MAX_RESTORE_ENTRIES) {
         top.entries = merged;
@@ -195,18 +212,24 @@ export class UndoStacks {
         if (whole) top.tally = whole;
         else delete top.tally;
         const named = whole && describeTally(whole);
-        if (named) top.label = named;
+        if (named) top.label = named.slice(0, 200);
         else if (!whole && top.opLabel !== undefined) top.label = top.opLabel;
         // A walk merged into a teleport's step is tested again on redo.
         if (!teleport) delete top.teleport;
         withWalk(top, walk);
         withRides(top, rides);
         if (trapped) top.trapped = true;
+        if (top.gesture && history.declared) top.gesture.declared = true;
+        const values = mergeDmHistory(top.values, history.values);
+        if (values) top.values = values;
+        else delete top.values;
+        delete top.retained;
+        this.#identify(top);
         return;
       }
     }
     const named = group !== undefined && tally ? describeTally(tally) : undefined;
-    const entry: UndoEntry = group === undefined ? { entries: inverse, label } : { entries: inverse, label: named ?? label, group };
+    const entry: UndoEntry = group === undefined ? { entries: inverse, label } : { entries: inverse, label: (named ?? label).slice(0, 200), group };
     if (named !== undefined && named !== label) entry.opLabel = label;
     if (teleport) entry.teleport = true;
     if (walk) {
@@ -215,17 +238,22 @@ export class UndoStacks {
     }
     withRides(entry, rides);
     if (trapped) entry.trapped = true;
-    s.undo.push(withExtras(group !== undefined && tally ? { ...entry, tally } : entry, poses, origin));
+    const recorded = withExtras(group !== undefined && tally ? { ...entry, tally } : entry, poses, origin);
+    if (group !== undefined) recorded.gesture = { group, ...(origin ? { client: origin.client } : {}), declared: history.declared === true };
+    if (history.values) recorded.values = history.values;
+    this.#identify(recorded);
+    member.latest = recorded;
+    s.undo.push(recorded);
     if (s.undo.length > UNDO_DEPTH) s.undo.splice(0, s.undo.length - UNDO_DEPTH);
   }
 
-  /** Takes the newest undo entry, dropping it from the stack whatever happens to it next. */
-  popUndo(memberId: string): UndoEntry | null {
-    return this.#stacks(memberId).undo.pop() ?? null;
+  /** Removes the newest entry. Live restores use consume after validation or an explicit conflict drop. */
+  popUndo(memberId: string, scope: HistoryScope = "play"): UndoEntry | null {
+    return this.#pop(memberId, "undo", scope);
   }
 
-  popRedo(memberId: string): UndoEntry | null {
-    return this.#stacks(memberId).redo.pop() ?? null;
+  popRedo(memberId: string, scope: HistoryScope = "play"): UndoEntry | null {
+    return this.#pop(memberId, "redo", scope);
   }
 
   /**
@@ -233,13 +261,13 @@ export class UndoStacks {
    * reads the images it names before the undo joins the queue
    * (docs/design-v1-dm-tools.md 2.6).
    */
-  peek(memberId: string, which: "undo" | "redo"): UndoEntry | null {
-    return this.#members.get(memberId)?.[which].at(-1) ?? null;
+  peek(memberId: string, which: HistoryDirection, scope: HistoryScope = "play"): UndoEntry | null {
+    return this.#members.get(memberId)?.[scope][which].at(-1) ?? null;
   }
 
   /** Whether the newest undo entry is the step this client op made. */
   newestIs(memberId: string, origin: Origin): boolean {
-    const top = this.#stacks(memberId).undo.at(-1)?.origin;
+    const top = this.peek(memberId, "undo")?.origin;
     return top !== undefined && top.client === origin.client && top.n === origin.n;
   }
 
@@ -249,8 +277,12 @@ export class UndoStacks {
    * still the one its op made. It carries no group, so nothing sent later
    * merges into a step that was undone and redone.
    */
-  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed" | "rides">): void {
-    const s = this.#stacks(memberId);
+  pushRestored(memberId: string, from: "undo" | "redo", inverse: RestoreEntry[], label: string, poses?: Record<string, Pose>, origin?: Origin, teleport = false, walked?: Pick<UndoEntry, "routes" | "routed" | "rides" | "gesture">, history: RecordHistory = {}): void {
+    label = label.slice(0, 200);
+    const member = this.#member(memberId);
+    const s = member[history.scope ?? "play"];
+    member.serial++;
+    member.latest = null;
     if (inverse.length > MAX_RESTORE_ENTRIES) {
       s.undo = [];
       s.redo = [];
@@ -262,22 +294,99 @@ export class UndoStacks {
     if (walked?.routes) entry.routes = walked.routes;
     if (walked?.routed) entry.routed = true;
     if (walked?.rides) entry.rides = walked.rides;
-    target.push(withExtras(entry, poses, origin));
+    if (walked?.gesture) entry.gesture = walked.gesture;
+    const recorded = withExtras(entry, poses, origin);
+    if (history.values) recorded.values = history.values;
+    this.#identify(recorded);
+    target.push(recorded);
     if (target.length > UNDO_DEPTH) target.splice(0, target.length - UNDO_DEPTH);
   }
 
-  depth(memberId: string): { undo: number; redo: number } {
-    const s = this.#members.get(memberId);
+  depth(memberId: string, scope: HistoryScope = "play"): { undo: number; redo: number } {
+    const s = this.#members.get(memberId)?.[scope];
     return { undo: s?.undo.length ?? 0, redo: s?.redo.length ?? 0 };
   }
 
-  #stacks(memberId: string): Stacks {
+  groupScope(memberId: string, client: string, group: string): { group: string; scope: HistoryScope; declared: boolean } | undefined {
+    const member = this.#members.get(memberId);
+    if (!member) return undefined;
+    for (const scope of ["play", "setup"] as const) {
+      for (const entry of [...member[scope].undo, ...member[scope].redo]) {
+        if (entry.gesture?.group === group && entry.gesture.client === client) return { group, scope, declared: entry.gesture.declared };
+      }
+    }
+    return undefined;
+  }
+
+  #member(memberId: string): MemberHistory {
     let s = this.#members.get(memberId);
     if (!s) {
-      s = { undo: [], redo: [] };
+      s = { play: { undo: [], redo: [] }, setup: { undo: [], redo: [] }, serial: 0, latest: null };
       this.#members.set(memberId, s);
     }
     return s;
+  }
+
+  #identify(entry: UndoEntry): void {
+    entry.id = randomUUID();
+    this.#orders.set(entry, ++this.#order);
+  }
+
+  #pop(memberId: string, direction: HistoryDirection, scope: HistoryScope): UndoEntry | null {
+    const member = this.#member(memberId);
+    const entry = member[scope][direction].pop() ?? null;
+    if (entry) {
+      member.serial++;
+      member.latest = null;
+    }
+    return entry;
+  }
+
+  consume(memberId: string, direction: HistoryDirection, scope: HistoryScope, head: string): boolean {
+    if (this.peek(memberId, direction, scope)?.id !== head) return false;
+    return this.#pop(memberId, direction, scope) !== null;
+  }
+
+  discard(memberId: string, direction: HistoryDirection, scope: HistoryScope, head: string): boolean {
+    const step = this.peek(memberId, direction, scope);
+    return step?.retained !== undefined && this.consume(memberId, direction, scope, head);
+  }
+
+  /** Every conflict must match a value actually left by this member's other scope. */
+  retain(memberId: string, direction: HistoryDirection, scope: HistoryScope, state: RoomState, dependencies: readonly string[] = []): HistoryBlocker | null {
+    const member = this.#member(memberId);
+    const step = this.peek(memberId, direction, scope);
+    if (!step) return null;
+    const conflicts = [...historyConflicts(state, step.entries, step.values), ...dependencies.map((key) => ({ key, current: readEntity(state, key), pose: false }))];
+    if (conflicts.length === 0) return null;
+    const other = scope === "play" ? "setup" : "play";
+    const candidates = (["undo", "redo"] as const).flatMap((which) => member[other][which].map((entry, index, stack) => ({ entry, direction: which, buried: index < stack.length - 1 })));
+    const matched = conflicts.map((conflict) => candidates.filter(({ entry }) => attributesConflict(conflict, entry.values)).sort((a, b) => (this.#orders.get(b.entry) ?? 0) - (this.#orders.get(a.entry) ?? 0))[0]);
+    if (matched.some((candidate) => !candidate)) return null;
+    const newest = matched.filter((candidate) => candidate !== undefined).sort((a, b) => (this.#orders.get(b.entry) ?? 0) - (this.#orders.get(a.entry) ?? 0))[0]!;
+    const blocker: HistoryBlocker = { scope: other, direction: newest.direction, label: newest.entry.label, buried: newest.buried };
+    if (stableStringify(step.retained ?? null) !== stableStringify(blocker)) {
+      step.retained = blocker;
+      member.serial++;
+    }
+    return blocker;
+  }
+
+  summary(memberId: string, role: "dm" | "player", seq: number, watermark: number): HistoryMessage {
+    const member = this.#members.get(memberId);
+    const scope = (which: HistoryScope): ScopeHistory => {
+      const stack = (direction: HistoryDirection) => {
+        const entries = member?.[which][direction] ?? [];
+        const head = entries.at(-1);
+        return { depth: entries.length, head: head ? { id: head.id!, label: head.label, ...(head.retained ? { retained: { ...head.retained } } : {}) } : null };
+      };
+      return { undo: stack("undo"), redo: stack("redo") };
+    };
+    return { t: "history", epoch: this.epoch, seq, serial: member?.serial ?? 0, watermark, play: scope("play"), ...(role === "dm" ? { setup: scope("setup") } : {}) };
+  }
+
+  summaries(): Map<string, HistoryMessage> {
+    return new Map([...this.#members.keys()].map((id) => [id, this.summary(id, "dm", 0, 0)]));
   }
 }
 

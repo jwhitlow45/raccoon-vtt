@@ -1098,9 +1098,10 @@ function forPlayer(op: Op, c: Check): Decision {
 
     case "undo":
       // Taking back an HP change from the log is the DM's (features section 10). A player's own stack is theirs.
-      return op.log === undefined ? OK : refuse("forbidden", "only the DM takes back a change from the log");
+      if (op.log !== undefined) return refuse("forbidden", "only the DM takes back a change from the log");
+      return op.scope === "setup" || op.discard === true ? refuse("forbidden", "only the DM uses setup history or discards a step") : OK;
     case "redo":
-      return OK;
+      return op.scope === "setup" || op.discard === true ? refuse("forbidden", "only the DM uses setup history or discards a step") : OK;
 
     case "sys.restore": {
       // A player's stack holds only their own drawings and token moves and resizes (design 7.7), so that is all a restore may touch.

@@ -1,10 +1,10 @@
-import { keys, parseKey, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
+import { keys, parseKey, readEntity, revOf, type EntityKey, type ParsedKey } from "../keys.ts";
 import { oldSrdIdGuards, withOldSrdIds } from "../migrate.ts";
 import { MOVE_PLAYERS_FIRST_BACK } from "../permissions.ts";
 import type { AreaTemplate, BuildChunk, CompanionBlock, Encounter, FogDraft, Handout, HandoutDoc, Pin, RoomState, Scene, Token, Trap } from "../model.ts";
 import type { OpOf, RestoreEntry } from "../protocol.ts";
 import { LIMITS } from "../limits.ts";
-import { gridOfToken } from "../project.ts";
+import { allKeys, gridOfToken } from "../project.ts";
 import { holderOf, linkHolds } from "../rules/attach.ts";
 import { autoWallsOf } from "../rules/autoWalls.ts";
 import { restoreRefusal, restoredHolds, sceneHolds } from "../rules/grid.ts";
@@ -270,6 +270,27 @@ function ridesUpTo(state: RoomState, riderId: string, mountId: string): boolean 
 export const DEPENDED_ON = "other work depends on it";
 /** The refusal when a restore would put back something whose scene, character or token was deleted since. */
 export const PARENT_GONE = "what it belongs to was deleted since";
+
+/** The current entities behind a reference refusal, for value-based attribution without applying any restore. */
+export function restoreReferenceConflicts(state: RoomState, entries: readonly RestoreEntry[]): EntityKey[] {
+  const restored = new Map(entries.map((entry) => [entry.key, entry.value ?? null]));
+  const after = (key: string) => restored.has(key) ? restored.get(key) : readEntity(state, key);
+  const removed = new Set(entries.filter((entry) => entry.value == null && readEntity(state, entry.key) !== null).map((entry) => entry.key));
+  const conflicts = new Set<string>();
+  for (const entry of entries) {
+    const parsed = parseKey(entry.key);
+    if (!parsed) continue;
+    const held = new Set(referencesOf(parsed, readEntity(state, entry.key)));
+    for (const ref of referencesOf(parsed, entry.value ?? null)) if (!held.has(ref) && after(ref) == null) conflicts.add(ref);
+  }
+  if (removed.size > 0) {
+    for (const key of new Set([...allKeys(state), ...restored.keys()])) {
+      const parsed = parseKey(key);
+      if (parsed && referencesOf(parsed, after(key)).some((ref) => removed.has(ref))) conflicts.add(key);
+    }
+  }
+  return [...conflicts];
+}
 
 /**
  * A restore never leaves anything pointing at a scene, a character or a

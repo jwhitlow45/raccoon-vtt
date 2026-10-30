@@ -288,7 +288,7 @@ class Projector {
  * client's current socket only (`current`), never by socket identity, so a
  * client that reconnected during the commit still gets them.
  */
-export function publishBatch(batch: CommittedBatch, connections: Iterable<Connection>, current: (key: ClientKey) => Connection | undefined): void {
+export function publishBatch(batch: CommittedBatch, connections: Iterable<Connection>, current: (key: ClientKey) => Connection | undefined, history?: (conn: Connection, delivered: boolean) => void): void {
   const all = [...connections];
   // In key order, never the order the reducer wrote them, so the order of a viewer's changes says nothing of work they never see.
   const candidates = [
@@ -318,7 +318,10 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     const trapped = mine ? batch.trapped?.get(key) : undefined;
     const stamped = mine ? batch.stamped?.get(key) : undefined;
     const blocked = mine ? batch.blocked?.get(key) : undefined;
-    if (diff.changes.length === 0 && !acks?.length && !rejects?.length) continue;
+    if (diff.changes.length === 0 && !acks?.length && !rejects?.length) {
+      history?.(conn, false);
+      continue;
+    }
     const msg: { t: "ev"; seq: number; changes: Change[]; acks?: number[]; rejects?: Reject[]; restored?: Restored[]; trapped?: number[]; stamped?: Stamped[]; blocked?: number[] } = {
       t: "ev",
       seq: batch.seq,
@@ -331,6 +334,7 @@ export function publishBatch(batch: CommittedBatch, connections: Iterable<Connec
     if (stamped?.length) msg.stamped = stamped;
     if (blocked?.length) msg.blocked = blocked;
     conn.send(msg);
+    history?.(conn, true);
   }
 }
 

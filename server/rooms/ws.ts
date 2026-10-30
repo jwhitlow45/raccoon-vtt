@@ -238,7 +238,7 @@ export async function registerWebSocket(app: FastifyInstance, deps: { manager: R
               conn.close(CLOSE.authFailure, "op before hello");
               return;
             }
-            chain(() => room.op(conn, msg.n, msg.op, msg.g));
+            chain(() => room.op(conn, msg.n, msg.op, msg.g, msg.groupScope));
             return;
           case "eph":
             room.ephemeral(conn, msg);

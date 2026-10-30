@@ -6,7 +6,7 @@ import { serverDraw, type Draw } from "#shared/dice/roll.ts";
 import { withTodaysSrdIds } from "#shared/migrate.ts";
 import { sightPiecesCheck } from "#shared/visionLimits.ts";
 import type { HandoutPage, LogEntry, RoomState, Token, Viewer } from "#shared/model.ts";
-import { canApply, doorReachPassed, touchLanding, type PermissionDeps } from "#shared/permissions.ts";
+import { canApply, doorReachPassed, touchLanding, MOVE_PLAYERS_FIRST_BACK, type PermissionDeps } from "#shared/permissions.ts";
 import { holderOf, linkHolds, onHolder } from "#shared/rules/attach.ts";
 import { footprintGround } from "#shared/rules/heights.ts";
 import { landedElevation } from "#shared/rules/movement.ts";
@@ -15,6 +15,7 @@ import { ASK_LOST, clientOpSchema, FORGET_ASK, isPoseOp, isResizeOp, serverOnlyO
 import { applyOp } from "#shared/reducer.ts";
 import { restoreAddedAssets } from "#shared/referencedAssets.ts";
 import { hpUndoRestore } from "#shared/reducer/hpUndo.ts";
+import { CHANGED_SINCE, DEPENDED_ON, PARENT_GONE, restoreReferenceConflicts } from "#shared/reducer/misc.ts";
 import { stampedAt } from "#shared/reducer/tokens.ts";
 import { splitCheck } from "#shared/rules/walls.ts";
 import { pitsMoved, withPitsCounted } from "#shared/rules/pitCount.ts";
@@ -52,8 +53,11 @@ import { admissionCost, DAY_MS, ReceiptBook, tagOf, type Receipt, type ReceiptCa
 import { layerCharge } from "./memorySize.ts";
 import { forgetAllOps, forgetSceneOp, mapStepOps, memoryGrowth, type DoorTouch } from "./remember.ts";
 import { growthBound, measuredFromStored, SizeGuard, touchedScenes } from "./sizeGuard.ts";
-import { keptFrom, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
+import { keptFrom, MOVED_SINCE, NOT_NEWEST, TRAPPED_ON_THE_WAY, plannedOn, poseRestore, posesAfter, ridesChanged, UndoStacks, type UndoEntry, type Walk } from "./undo.ts";
 import { describeHpEvent, describeOp, tallyOf } from "./undoLabels.ts";
+import { undoScope } from "#shared/undoScope.ts";
+import type { HistoryDirection, HistoryMessage, HistoryScope, StackHistoryCommand } from "#shared/undoContract.ts";
+import { dmHistoryValues, dmPoseRestore } from "./undoDm.ts";
 
 /**
  * The single writer of one loaded room (design sections 7.2, 7.3, 7.6, 7.7,
@@ -190,7 +194,7 @@ type Lookup = { gen: number; ids: ReadonlySet<string> };
 export type DeletionRun<T> = (state: RoomState, seq: number) => Promise<{ deleted: readonly string[]; result: T }>;
 
 type Command =
-  | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null }
+  | { t: "op"; conn: Connection; n: number; raw: unknown; group: string | undefined; groupScope: "setup" | undefined; facts: Map<string, AssetFact>; lookup: Lookup | null }
   | { t: "hello"; conn: Connection; clientId: string; resumeFrom: number; sceneId: string | undefined; stored: number; fresh: boolean }
   | { t: "snapshot"; conn: Connection; key: ClientKey }
   | { t: "sys"; op: ServerOnlyOp; resolve: () => void; reject: (err: Error) => void }
@@ -198,6 +202,7 @@ type Command =
   | { t: "step"; run: DeletionRun<unknown>; resolve: (value: unknown) => void; reject: (err: Error) => void };
 
 type Batch = {
+  history?: Map<string, HistoryMessage>;
   before: RoomState;
   ops: OpRecord[];
   touched: EntityKey[];
@@ -351,8 +356,11 @@ export class RoomActor {
    */
   #shownDisplays = new WeakSet<Connection>();
   #undo = new UndoStacks();
+  #committedHistory = new Map<string, HistoryMessage>();
+  #sentHistory = new WeakMap<Connection, number>();
+  #groupScopes = new Map<ClientKey, { group: string; scope: HistoryScope; declared: boolean }>();
   /** Each client's last Undo or Redo refused with FORGET_ASK, and the step it asked about (docs/design-v1-map-discovery.md 5.3). */
-  #forgetAsks = new Map<ClientKey, { n: number; step: UndoEntry }>();
+  #forgetAsks = new Map<ClientKey, { n: number; head: string }>();
   /**
    * Each client's gesture whose asks are still coming (`build.ask` with
    * `more`, AskChain). A chain ends at its last part, at the client's next
@@ -590,7 +598,7 @@ export class RoomActor {
   }
 
   /** `group` is the undo group the client sent the op under (design 7.7): ops of one gesture undo as one step. */
-  async op(conn: Connection, n: number, raw: unknown, group?: string): Promise<void> {
+  async op(conn: Connection, n: number, raw: unknown, group?: string, groupScope?: "setup"): Promise<void> {
     if (this.#queue.length >= this.#opts.queueCap || this.#closed) {
       conn.send({ t: "retry", n, code: "busy" });
       return;
@@ -624,7 +632,7 @@ export class RoomActor {
       if (!conn.closed) conn.send({ t: "retry", n, code: "busy" });
       return;
     }
-    this.#enqueue({ t: "op", conn, n, raw, group, facts, lookup });
+    this.#enqueue({ t: "op", conn, n, raw, group, groupScope, facts, lookup });
   }
 
   /**
@@ -637,11 +645,14 @@ export class RoomActor {
    */
   #restoreAssetIds(conn: Connection, raw: unknown): string[] {
     if (raw === null || typeof raw !== "object") return [];
-    const { t, log } = raw as { t?: unknown; log?: unknown };
+    const { t, log, scope, head, discard } = raw as { t?: unknown; log?: unknown; scope?: unknown; head?: unknown; discard?: unknown };
     if ((t !== "undo" && t !== "redo") || log !== undefined) return [];
-    const step = this.#undo.peek(conn.memberId, t);
-    if (!step) return [];
-    return restoreAddedAssets(step.entries, this.#staged.state).map((ref) => ref.assetId.toLowerCase());
+    if ((scope !== undefined && scope !== "play" && scope !== "setup") || discard === true || conn.display || conn.previewBy !== null) return [];
+    if (conn.role !== "dm" && scope === "setup") return [];
+    const step = this.#undo.peek(conn.memberId, t, scope ?? "play");
+    if (!step || step.id !== head) return [];
+    const entries = conn.role === "dm" ? dmPoseRestore(this.#staged.state, step.entries, step.values) : step.entries;
+    return restoreAddedAssets(entries, this.#staged.state).map((ref) => ref.assetId.toLowerCase());
   }
 
   /**
@@ -950,6 +961,7 @@ export class RoomActor {
     }
     if (n <= wm.committed) {
       conn.send({ t: "ev", seq: this.#committed.seq, changes: [], acks: [n] });
+      this.#sendHistory(conn);
       return;
     }
     if (n <= wm.staged) return;
@@ -969,6 +981,10 @@ export class RoomActor {
     }
     // A page left open across the dragon turtle's rename still names the old id, which nothing would rename once stored.
     const clientOp = withTodaysSrdIds(parsed.data);
+    if (cmd.groupScope !== undefined && (cmd.group === undefined || viewer.role !== "dm")) {
+      this.#refuse(key, wm, n, "forbidden", "only the DM may declare a setup gesture with a group");
+      return;
+    }
     this.#endAsks(key, cmd.group);
     // The rest of a gesture the DM was asked about goes unmade with it, unless sent with the yes (5.3).
     const refusedGroup = this.#askRefused.get(key);
@@ -997,6 +1013,8 @@ export class RoomActor {
     let restoredFrom: "undo" | "redo" | null = null;
     let step: UndoEntry | null = null;
     let fromLog = false;
+    let historyScope: HistoryScope = "play";
+    let historyHead: string | undefined;
     if (op.t === "undo" && op.log !== undefined) {
       // Taking an HP change back from the log (features section 10): not a
       // step of anyone's stack, but a restore built from the log line and
@@ -1023,39 +1041,65 @@ export class RoomActor {
       step = { entries: built.entries, label: label ?? "an HP change" };
       op = checked.op;
     } else if (op.t === "undo" || op.t === "redo") {
-      // Checked before the pop, so the newer step it found stays for an undo meant for it.
+      const command = op;
+      historyScope = op.scope ?? "play";
+      historyHead = op.head;
+      const allowed = canApply(op, viewer, this.#staged.state, this.#permissionDeps(viewer, facts));
+      if (!allowed.ok || conn.display || conn.previewBy !== null) {
+        this.#refuse(key, wm, n, "forbidden", allowed.ok ? "undo history is unavailable in this view" : allowed.message);
+        return;
+      }
+      const next = this.#undo.peek(viewer.memberId, op.t, historyScope);
+      if (!next || next.id !== historyHead) {
+        this.#refuse(key, wm, n, "invalid", historyScope === "play" ? "Play history changed. Check the next change." : "Setup history changed. Check the next change.");
+        return;
+      }
+      // Admission failures preserve both directions, including a retained step being discarded.
+      if (this.replayFailed || this.readOnly) {
+        this.#refuse(key, wm, n, "quota", this.replayFailed ? "the room could not be fully loaded and is read-only" : "the room is full: it is at its storage quota, so only deletions are accepted");
+        return;
+      }
+      if (op.discard) {
+        if (!this.#undo.discard(viewer.memberId, op.t, historyScope, historyHead)) {
+          this.#refuse(key, wm, n, "invalid", "only a retained step can be discarded");
+          return;
+        }
+        wm.staged = n;
+        const batch = this.#ensureBatch();
+        push(batch.acks, key, n);
+        batch.watermarks.set(key, n);
+        this.#scheduleCommit();
+        return;
+      }
+      // Origin matching is additional to the head check for the token bar's Undo move.
       if (op.t === "undo" && op.of !== undefined && !this.#undo.newestIs(viewer.memberId, { client: key, n: op.of })) {
         this.#refuse(key, wm, n, "invalid", NOT_NEWEST);
         return;
       }
       // The images this step would put back must have been read with the op (#restoreAssetIds). A step that changed since,
-      // under an op of the same member ahead of this one, is not popped: the client sends the op again and it is read anew.
-      const next = this.#undo.peek(viewer.memberId, op.t);
+      // under an op of the same member ahead of this one stays untouched until the retry reads its assets.
+      const adapted = viewer.role === "dm" ? dmPoseRestore(this.#staged.state, next.entries, next.values) : next.entries;
       const asked = cmd.lookup?.ids ?? NO_IDS;
-      if (next && restoreAddedAssets(next.entries, this.#staged.state).some((ref) => !asked.has(ref.assetId.toLowerCase()))) {
+      if (restoreAddedAssets(adapted, this.#staged.state).some((ref) => !asked.has(ref.assetId.toLowerCase()))) {
         conn.send({ t: "retry", n, code: "busy" });
         return;
       }
-      // The DM's Undo and Redo ask before the step is popped, so a no leaves it where it was (5.3).
-      if (viewer.role === "dm" && next && !this.#forgetAnswered(key, wm, n, op, next, viewer)) return;
-      step = op.t === "undo" ? this.#undo.popUndo(viewer.memberId) : this.#undo.popRedo(viewer.memberId);
-      if (!step) {
-        this.#refuse(key, wm, n, "invalid", `nothing to ${op.t}`);
-        return;
-      }
+      step = next;
       // A move a trap stopped, or that showed its player a line, is the DM's to take back (docs/design-v1-traps.md 6.5). The step is dropped, as a failed guard drops it.
       if (op.t === "undo" && viewer.role === "player" && step.trapped) {
+        this.#undo.consume(viewer.memberId, op.t, historyScope, historyHead);
         this.#refuse(key, wm, n, "invalid", `could not undo ${step.label}: ${TRAPPED_ON_THE_WAY}`);
         return;
       }
       restoredFrom = op.t;
-      let entries = step.entries;
+      let entries = adapted;
       let quiet: string[] | undefined;
       if (step.poses) {
         const state = this.#staged.state;
         const shown = (id: string) => (viewer.role === "dm" ? (state.tokens[id] ?? null) : (projectEntity(keys.token(id), state, viewer, { sceneId: state.meta.playerSceneId }) as Partial<Token> | null));
         const moved = poseRestore(state, { ...step, poses: step.poses }, (id) => shown(id) !== null, (id) => shown(id)?.path !== undefined);
         if (!moved.ok) {
+          this.#undo.consume(viewer.memberId, op.t, historyScope, historyHead);
           this.#refuse(key, wm, n, moved.code, `could not ${op.t} ${step.label}: ${moved.message}`);
           return;
         }
@@ -1067,11 +1111,12 @@ export class RoomActor {
       const routes = op.t === "redo" && step.routed && step.routes ? { routes: step.routes } : {};
       // A controlled ride the step ended or made shares its turn again when put back on that turn (docs/design-v1-attach.md 8.3).
       const rides = step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {};
-      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}) });
+      const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label } } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}) });
       if (!checked.ok) {
         this.#refuse(key, wm, n, "invalid", checked.message);
         return;
       }
+      if (viewer.role === "dm" && !this.#forgetAnswered(key, wm, n, command as StackHistoryCommand, checked.op as OpOf<"sys.restore">, viewer)) return;
       op = checked.op;
     }
     // A tag already settled is answered from its receipt, before anything else is looked at (docs/design-v1-dice.md 4.2).
@@ -1144,7 +1189,8 @@ export class RoomActor {
       if (op.t === "door.set" && decision.code === "gone" && viewer.role === "player" && doorReachPassed(op, viewer, this.#staged.state, deps)) {
         this.#ensureBatch().doors.push({ sceneId: op.sceneId, door: op.door, memberId: viewer.memberId });
       }
-      const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${decision.message}` : decision.message;
+      const reason = restoredFrom && step && !fromLog ? this.#failedHistory(viewer, restoredFrom, historyScope, step, decision.code, decision.message) : decision.message;
+      const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${reason}` : reason;
       this.#refuse(key, wm, n, decision.code, message, admitted);
       return;
     }
@@ -1163,13 +1209,24 @@ export class RoomActor {
       op = checked.op;
     }
     const before = this.#staged.state;
+    const naturalScope = undoScope(op, before);
+    const recordedScope = naturalScope === "none" ? "none" : cmd.groupScope === "setup" ? "setup" : naturalScope;
+    const lastGroup = this.#groupScopes.get(key);
+    const priorGroup = cmd.group === undefined || lastGroup?.group === cmd.group ? lastGroup : this.#undo.groupScope(viewer.memberId, key, cmd.group);
+    const sameGroup = cmd.group !== undefined && priorGroup?.group === cmd.group;
+    const actionScope = sameGroup && priorGroup.declared && naturalScope !== "none" ? "setup" : recordedScope;
+    if (sameGroup && actionScope !== "none" && actionScope !== priorGroup.scope) {
+      this.#refuse(key, wm, n, "invalid", "this gesture's undo scope was fixed by its first accepted part");
+      return;
+    }
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).
     const asks = viewer.role === "dm" && ASK_OPS.has(op.t) && (op as { forget?: true }).forget !== true;
     const reduced = this.#reduce(op, viewer, asks);
     if (!reduced.ok && reduced.code === "forget" && cmd.group !== undefined) this.#askRefused.set(key, cmd.group);
     if (!reduced.ok) {
       // A restore that failed says which step it was, so a refused undo is never a riddle.
-      const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${reduced.message}` : reduced.message;
+      const reason = restoredFrom && step && !fromLog ? this.#failedHistory(viewer, restoredFrom, historyScope, step, reduced.code, reduced.message) : reduced.message;
+      const message = restoredFrom && step ? `could not ${restoredFrom} ${step.label}: ${reason}` : reason;
       this.#refuse(key, wm, n, reduced.code, message, admitted);
       return;
     }
@@ -1184,15 +1241,17 @@ export class RoomActor {
     if (stamped !== undefined) push(batch.stamped, key, { n, at: stamped });
     batch.watermarks.set(key, n);
     if (admitted) this.#stageReceipt(batch, admitted, { state: "committed", seq: this.#staged.seq });
+    if (cmd.group !== undefined && actionScope !== "none") this.#groupScopes.set(key, { group: cmd.group, scope: actionScope, declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared) });
     if (restoredFrom && step) {
       push(batch.restored, key, { n, what: step.label });
       const inverse = reduced.inverse;
       // A change taken back from the log goes on no stack. Redone, it would come back with no line to say so, and its own line
       // would read as taken back for good. The DM deals it again instead, which the log records.
-      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), keptFrom(step.poses, before)) : undefined, step.origin, step.teleport === true, step);
-    } else if (UndoStacks.records(viewer.role, op) && reduced.inverse) {
-      // A player's move or resize takes back only the move or the resize (undo.ts poseRestore). The DM's undo restores whole
-      // values, as for every other op. What a trap wrote on the way stays as it is (docs/design-v1-traps.md 6.5).
+      if (!fromLog && historyHead !== undefined) this.#undo.consume(viewer.memberId, restoredFrom, historyScope, historyHead);
+      if (inverse && !fromLog) this.#undo.pushRestored(viewer.memberId, restoredFrom, inverse, step.label, step.poses ? posesAfter(this.#staged.state, inverse, this.#shows(viewer), keptFrom(step.poses, before)) : undefined, step.origin, step.teleport === true, step, { scope: historyScope, ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, historyScope === "play") } : {}) });
+    } else if (actionScope !== "none" && UndoStacks.records(viewer.role, op, before) && reduced.inverse) {
+      // Players keep their existing pose and trap rules. DM history independently records eligible token poses and
+      // keeps every other inverse, including trap effects, under its original whole-value guard.
       const pose = viewer.role === "player" && (isPoseOp(op) || isResizeOp(op));
       const trapWrote = reduced.trapWrote;
       const inverse = pose && trapWrote ? reduced.inverse.filter((e) => !trapWrote.has(e.key)) : reduced.inverse;
@@ -1203,9 +1262,22 @@ export class RoomActor {
       const walk: Walk | undefined =
         poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.#staged.state) : undefined;
-      this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true);
+      this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}) });
     }
     this.#scheduleCommit();
+  }
+
+  #failedHistory(viewer: Viewer, direction: HistoryDirection, scope: HistoryScope, step: UndoEntry, code: RefusalCode, reason: string): string {
+    if (code === "quota" || code === "forget") return reason;
+    const dependencies = [DEPENDED_ON, PARENT_GONE, MOVE_PLAYERS_FIRST_BACK].includes(reason) ? restoreReferenceConflicts(this.#staged.state, dmPoseRestore(this.#staged.state, step.entries, step.values)) : [];
+    const attributable = reason === CHANGED_SINCE || reason === MOVED_SINCE || dependencies.length > 0;
+    const blocker = viewer.role === "dm" && attributable ? this.#undo.retain(viewer.memberId, direction, scope, this.#staged.state, dependencies) : null;
+    if (blocker) {
+      const verb = blocker.direction === "undo" ? "Undo" : "Redo";
+      return blocker.buried ? `${verb} the ${blocker.scope} steps through ${blocker.label} first` : `${verb} the ${blocker.scope} step first: ${blocker.label}`;
+    }
+    if (step.id) this.#undo.consume(viewer.memberId, direction, scope, step.id);
+    return reason;
   }
 
   /** Which tokens a viewer sees in the staged room, as their undo's poses read links (undo.ts poseOf). */
@@ -1283,22 +1355,24 @@ export class RoomActor {
    * that no longer heads the stack is refused as stale, so it never
    * forgets for another step. True when the op goes on.
    */
-  #forgetAnswered(key: ClientKey, wm: Watermark, n: number, op: Extract<Op, { t: "undo" | "redo" }>, step: UndoEntry, viewer: Viewer): boolean {
+  #forgetAnswered(key: ClientKey, wm: Watermark, n: number, op: StackHistoryCommand, restore: OpOf<"sys.restore">, viewer: Viewer): boolean {
     const asked = this.#forgetAsks.get(key);
+    let confirmed = false;
     if (op.forget !== undefined) {
-      if (asked && asked.n === op.forget && asked.step === step) {
-        this.#forgetAsks.delete(key);
-        return true;
+      if (asked && asked.n === op.forget && asked.head === op.head) {
+        confirmed = true;
+      } else {
+        this.#refuse(key, wm, n, "invalid", FORGET_STALE);
+        return false;
       }
-      this.#refuse(key, wm, n, "invalid", FORGET_STALE);
-      return false;
     }
-    const checked = checkServerOp({ t: "sys.restore", entries: step.entries, from: op.t, deps: true });
-    if (!checked.ok) return true;
-    const result = applyOp(this.#staged.state, checked.op, viewer, { seq: this.#staged.seq + 1, at: new Date(this.#opts.now()).toISOString() });
-    // A step the restore refuses is refused with its own words once popped.
-    if (!result.ok || !this.#memoryEstimate(result.state, result.touched)?.over) return true;
-    this.#forgetAsks.set(key, { n, step });
+    const result = applyOp(this.#staged.state, restore, viewer, { seq: this.#staged.seq + 1, at: new Date(this.#opts.now()).toISOString() });
+    const over = result.ok && this.#memoryEstimate(result.state, result.touched)?.over;
+    if (!over || confirmed) {
+      this.#forgetAsks.delete(key);
+      return true;
+    }
+    this.#forgetAsks.set(key, { n, head: op.head });
     this.#refuse(key, wm, n, "forget", FORGET_ASK);
     return false;
   }
@@ -1649,6 +1723,7 @@ export class RoomActor {
     const snapshot = buildSnapshot(this.#committed.state, this.#committed.seq, conn, wm?.committed ?? 0);
     const bytes = conn.send(snapshot.message);
     conn.held = snapshot.held;
+    this.#sendHistory(conn);
     // A device that takes a snapshot drops every other screen's preview it showed (client/state/store.ts keepLocal), so
     // the server counts it as holding none, and an end it missed while it resynced leaves nothing behind (review
     // PV3-ASTRA-4).
@@ -1752,6 +1827,7 @@ export class RoomActor {
     if (batch.ops.length > 0 || batch.doors.length > 0) this.#explore(batch);
     batch.state = this.#staged.state;
     batch.seq = this.#staged.seq;
+    batch.history = this.#undo.summaries();
     this.#inFlight = batch;
     this.#inFlightDone = this.#runCommit(batch);
   }
@@ -1905,6 +1981,7 @@ export class RoomActor {
     }
     this.retrying = false;
     this.#committed = { state: batch.state, seq: batch.seq };
+    this.#committedHistory = batch.history ?? new Map();
     this.#receipts.committed(batch.receipts);
     for (const [key, n] of batch.watermarks) {
       const wm = this.#watermarks.get(key);
@@ -1927,6 +2004,7 @@ export class RoomActor {
       },
       this.#connections,
       (key) => this.#clients.get(key),
+      (conn, delivered) => this.#sendHistory(conn, delivered),
     );
     // A batch that re-projects everything can take away what a held drag or live ruler showed (docs/design-v1-per-player-vision.md 7.2).
     if (batch.global) rejudgePreviews(batch.state, this.#connections);
@@ -1943,6 +2021,19 @@ export class RoomActor {
     this.#drain();
     // A batch begun while it committed, outside the queue, which nothing could schedule then: an ask read meanwhile (MD4-ASTRA-10).
     this.#scheduleCommit();
+  }
+
+  /** Histories are frozen with the commit, so a delayed snapshot never pairs an old view with staged heads. */
+  #sendHistory(conn: Connection, delivered = true): void {
+    if (conn.closed || conn.held === null || conn.display || conn.previewBy !== null) return;
+    const stored = this.#committedHistory.get(conn.memberId);
+    const empty = { undo: { head: null, depth: 0 }, redo: { head: null, depth: 0 } };
+    const { setup, ...common } = stored ?? { t: "history" as const, epoch: this.#undo.epoch, seq: 0, serial: 0, watermark: 0, play: empty, setup: empty };
+    if (!delivered && this.#sentHistory.get(conn) === common.serial) return;
+    if (!delivered) conn.send({ t: "ev", seq: this.#committed.seq, changes: [] });
+    const watermark = conn.key === null ? 0 : (this.#watermarks.get(conn.key)?.committed ?? 0);
+    conn.send({ ...common, seq: this.#committed.seq, watermark, ...(conn.role === "dm" ? { setup: setup ?? empty } : {}) });
+    this.#sentHistory.set(conn, common.serial);
   }
 
   /** A batch that could not commit while the room was shutting down. Its clients still hold those ops and resend them. */
