@@ -9,6 +9,18 @@ const HEAD = "018f1234-5678-7000-8000-000000000001";
 const EMPTY = { head: null, depth: 0 };
 
 describe("scoped history protocol wiring", () => {
+  test("acknowledgment details are optional and hello accepts only an explicit true capability", () => {
+    const hello = { t: "hello", clientId: "ack-capability", resumeFrom: 1 };
+    assert.equal(clientMessageSchema.safeParse(hello).success, true);
+    assert.equal(clientMessageSchema.safeParse({ ...hello, ackDetails: true }).success, true);
+    for (const ackDetails of [false, 1, "true", null]) assert.equal(clientMessageSchema.safeParse({ ...hello, ackDetails }).success, false);
+    const event = { t: "ev", seq: 1, changes: [], acks: [1] };
+    assert.equal(serverMessageSchema.safeParse(event).success, true);
+    const detail = { n: 1, scope: "setup", changed: false };
+    assert.equal(serverMessageSchema.safeParse({ ...event, ackDetails: [detail] }).success, true);
+    assert.equal(serverMessageSchema.safeParse({ ...event, ackDetails: [{ ...detail, label: "secret" }] }).success, false);
+  });
+
   for (const command of [
     { t: "undo", head: HEAD },
     { t: "undo", scope: "setup", head: HEAD },

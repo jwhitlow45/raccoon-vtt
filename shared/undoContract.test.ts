@@ -4,6 +4,7 @@ import {
   correctionLogEventSchema,
   historyCommandSchema,
   historyMessageSchema,
+  opAcknowledgmentSchema,
   restoreHistoryFieldsSchema,
   type DiscardHistoryCommand,
   type HistoryMessage,
@@ -19,6 +20,22 @@ const summary = (): HistoryMessage => ({
   t: "history", epoch: EPOCH, seq: 0, serial: 0, watermark: 0,
   play: { undo: { head: { id: HEAD, label: "moving a token" }, depth: 1 }, redo: { head: null, depth: 0 } },
   setup: { undo: { head: null, depth: 0 }, redo: { head: { id: HEAD, label: "changing a sheet" }, depth: 1 } },
+});
+
+test("operation acknowledgments require a positive safe number, known scope and boolean effect with no private fields", () => {
+  for (const scope of ["play", "setup", "none"]) for (const changed of [false, true]) {
+    for (const n of [1, Number.MAX_SAFE_INTEGER]) {
+      const detail = { n, scope, changed };
+      assert.deepEqual(opAcknowledgmentSchema.parse(detail), detail);
+    }
+  }
+  const detail = { n: 1, scope: "setup", changed: true };
+  for (const n of [0, -1, 1.1, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN, "1"]) bad(opAcknowledgmentSchema, { ...detail, n });
+  for (const patch of [{ scope: "unknown" }, { changed: 1 }, { changed: "true" }, { privateLabel: "secret" }, { head: HEAD }, { key: "token:hidden" }]) bad(opAcknowledgmentSchema, { ...detail, ...patch });
+  for (const field of ["n", "scope", "changed"] as const) {
+    const { [field]: _missing, ...incomplete } = detail;
+    bad(opAcknowledgmentSchema, incomplete);
+  }
 });
 
 test("stack commands preserve explicit scopes and the omitted Play default", () => {

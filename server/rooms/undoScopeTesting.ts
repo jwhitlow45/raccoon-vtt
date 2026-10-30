@@ -99,15 +99,15 @@ export async function scopeActor(t: TestContext, state: RoomState, options: Acto
     db.beforeAssets = undefined;
     await actor.shutdown({ code: 1012, snapshot: false });
   });
-  return { actor, db, info, connect: (who: Member, role: "dm" | "player" = who.kind === "dm" ? "dm" : "player", now?: () => number) => ScopeClient.open(actor, who, role, now) };
+  return { actor, db, info, connect: (who: Member, role: "dm" | "player" = who.kind === "dm" ? "dm" : "player", now?: () => number, ackDetails?: true) => ScopeClient.open(actor, who, role, now, ackDetails) };
 }
 
-export async function scopeObserver(actor: RoomActor, grant: Pick<ConstructorParameters<typeof Connection>[1], "memberId" | "role" | "display" | "previewOf">) {
+export async function scopeObserver(actor: RoomActor, grant: Pick<ConstructorParameters<typeof Connection>[1], "memberId" | "role" | "display" | "previewOf">, ackDetails?: true) {
   const sent: Wire[] = [];
   const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as Wire), close() {}, terminate() {} };
   const conn = new Connection(socket as never, { sessionId: uuidv7(), roomId: "UNDOSCOPE", ...grant }, "203.0.113.12");
   actor.attach(conn);
-  await actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
+  await actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1, ackDetails });
   await until(() => sent.find((m) => m.t === "snapshot"), "observer snapshot");
   return { conn, sent };
 }
@@ -126,9 +126,9 @@ export class ScopeClient {
     actor.attach(this.conn);
   }
 
-  static async open(actor: RoomActor, who: Member, role: "dm" | "player", now?: () => number): Promise<ScopeClient> {
+  static async open(actor: RoomActor, who: Member, role: "dm" | "player", now?: () => number, ackDetails?: true): Promise<ScopeClient> {
     const client = new ScopeClient(actor, who, role, now);
-    await actor.hello(client.conn, { clientId: client.clientId, resumeFrom: 1 });
+    await actor.hello(client.conn, { clientId: client.clientId, resumeFrom: 1, ackDetails });
     await until(() => client.sent.find((m) => m.t === "snapshot"), "snapshot");
     return client;
   }
