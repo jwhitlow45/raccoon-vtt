@@ -994,7 +994,8 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
          * until it stands, Top-down's for as long having nothing to build, and
          * in Isometric the whole time from the op's sending until the board
          * first says it stands: one more area standing than the scene's own,
-         * so the cube before it, deleted first, is never read as this one.
+         * read each round once the cube before it is gone, so that cube is
+         * never read as this one.
          */
         let made: Op | null = null;
         const arrivals: number[] = [];
@@ -1004,11 +1005,13 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
         const frames2 = await throttled(() =>
           rounds(async () => {
             if (made) {
+              const had = view === "isometric" ? await standing() : 0;
               await dm.op({ t: "template.delete", templateId: (made.template as { id: string }).id });
-              if (view === "isometric") for (const until = Date.now() + 10_000; Date.now() < until && (await standing()) > others; ) await page.waitForTimeout(20);
+              if (view === "isometric") for (const until = Date.now() + 10_000; Date.now() < until && (await standing()) >= had; ) await page.waitForTimeout(20);
             }
-            if (view === "isometric" && others < 0) {
-              await waitStood(page);
+            // Read again each round, once the cube before is gone: what else stands can change between rounds.
+            if (view === "isometric") {
+              if (others < 0) await waitStood(page);
               others = await standing();
             }
             made = template(dm.sceneId, dm.memberId, HEX_CUBE);
