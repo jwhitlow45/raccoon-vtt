@@ -4,7 +4,7 @@ import type { LogEntry, RoomState, Viewer } from "../model.ts";
 import { projectArchivedLog, projectState } from "../project.ts";
 import type { Op, OpOf, RestoreEntry } from "../protocol.ts";
 import { applyOp, type Applied } from "../reducer.ts";
-import { EMPTY_PC_STATS } from "../rules/pcStats.ts";
+import { EMPTY_PC_STATS, namedRollOf } from "../rules/pcStats.ts";
 import { AT, DM, P1, P2, actor, character, companionBlock, customMonster, env, room, token } from "../testutil.ts";
 import type { CorrectionLogEvent, RestoreHistoryFields } from "../undoContract.ts";
 import { hpUndoRestore } from "./hpUndo.ts";
@@ -132,6 +132,59 @@ describe("correction notices compare gameplay beyond Actor", () => {
   }
 });
 
+describe("corrections include effective saves and prompt settlement", () => {
+  for (const from of ["undo", "redo"] as const) test(`resolved save behavior notifies on ${from} after a spell rename`, () => {
+    const before = fixture();
+    const stats = before.characters.bree!.stats!;
+    stats.rolls = [{ id: "spell", name: "Fireball", kind: "spell", level: 3, save: { ability: "dex" }, dice: [{ formula: "8d6", type: "fire" }] }];
+    const edited = run(before, { t: "character.update", characterId: "bree", patch: { stats: { rolls: [{ ...stats.rolls[0]!, name: "Disintegrate" }] } } }, 1);
+    const next = edited.state.characters.bree!.stats!;
+    assert.equal(namedRollOf(stats, 4, stats.rolls[0]!).save?.onPass, "half");
+    assert.equal(namedRollOf(next, 4, next.rolls[0]!).save?.onPass, "none");
+    const undone = restore(edited.state, edited.inverse!);
+    const result = from === "undo" ? undone : restore(undone.state, undone.inverse!, "redo", 3);
+    expectNotice(result, from);
+  });
+
+  test("resolved save behavior stays cosmetic when an explicit result overrides the name", () => {
+    const before = fixture();
+    before.characters.bree!.stats!.rolls = [{ id: "spell", name: "Fireball", kind: "spell", save: { ability: "dex", onPass: "half" }, dice: [{ formula: "8d6", type: "fire" }] }];
+    const rolls = before.characters.bree!.stats!.rolls.map((roll) => ({ ...roll, name: "Disintegrate" }));
+    const edited = run(before, { t: "character.update", characterId: "bree", patch: { stats: { rolls } } }, 1);
+    const undone = restore(edited.state, edited.inverse!);
+    assert.equal(notices(seen(undone.state, P1).log).length, 0);
+  });
+
+  for (const field of ["due", "bookkeeping"] as const) test(`turn record ${field} comparison excludes identity and start-of-turn bookkeeping`, () => {
+    const before = fixture();
+    before.characters.bree!.actor.turnRecord = { id: 1, entryId: "turn", round: 1, hp: 20, life: "alive", due: ["actions:breath"] };
+    const after = structuredClone(before);
+    after.characters.bree!.actor.turnRecord = field === "due"
+      ? { ...before.characters.bree!.actor.turnRecord, due: ["actions:other"] }
+      : { ...before.characters.bree!.actor.turnRecord, id: 2, entryId: "next", round: 2, hp: 10, life: "dying", took: ["fire"] };
+    const undone = restore(after, [{ key: "character:bree", value: before.characters.bree }]);
+    const redone = restore(undone.state, undone.inverse!, "redo", 3);
+    if (field === "due") {
+      expectNotice(undone, "undo");
+      expectNotice(redone, "redo");
+    } else for (const result of [undone, redone]) assert.equal(notices(seen(result.state, P1).log).length, 0);
+  });
+
+  for (const state of ["skipped", "open"] as const) for (const from of ["undo", "redo"] as const) test(`prompt ${state} notifies its owner on ${from}`, () => {
+    const before = fixture();
+    before.characters.bree!.actor = actor({ hp: { cur: 0, max: 20, temp: 0 }, life: "dying" });
+    const started = run(before, { t: "encounter.start", entries: [{ id: "bree-turn", tokenId: "bree", value: 20 }] }, 1);
+    const active = run(started.state, { t: "encounter.next" }, 2);
+    const record = active.state.characters.bree!.actor.turnRecord!.id;
+    const prompt: Op = { t: "actor.prompt", target: { characterId: "bree" }, record, what: "deathSave", state: "skipped" };
+    const skipped = run(active.state, prompt, 3);
+    const edited = state === "skipped" ? skipped : run(skipped.state, { ...prompt, state: "open" }, 4);
+    const undone = restore(edited.state, edited.inverse!, "undo", 5);
+    const result = from === "undo" ? undone : restore(undone.state, undone.inverse!, "redo", 6);
+    expectNotice(result, from);
+  });
+});
+
 describe("correction audiences stay private after persistence and ownership changes", () => {
   test("gaining ownership cannot gain an old notice, and losing ownership removes it from live and archive reads", () => {
     const before = fixture();
@@ -181,7 +234,7 @@ describe("correction audiences stay private after persistence and ownership chan
   test("op-33 restores keep their historical log numbering, op-34 replays frozen correction notices", () => {
     const before = fixture();
     const edited = run(before, { t: "character.update", characterId: "bree", patch: { stats: { evasion: true } } }, 1);
-    const historical = run(edited.state, { t: "sys.restore", entries: edited.inverse!, from: "undo", deps: true }, 2, DM, 33);
+    const historical = restore(edited.state, edited.inverse!, "undo", 2, 33);
     assert.deepEqual(historical.state.log, edited.state.log);
     assert.equal(notices(historical.log).length, 0);
     const live = restore(edited.state, edited.inverse!);

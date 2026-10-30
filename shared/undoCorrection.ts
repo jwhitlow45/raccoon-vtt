@@ -1,6 +1,7 @@
 import { parseKey, readEntity } from "./keys.ts";
-import type { Character, CorrectionWitness, LineParts, LogEvent, RoomState, Token, Viewer } from "./model.ts";
+import type { Character, CorrectionWitness, LineParts, LogEvent, PcRoll, RoomState, Token, Viewer } from "./model.ts";
 import { ownsCharacter, ownsToken, projectEntity, stableStringify } from "./project.ts";
+import { unknownOnPass } from "./rules/pcStats.ts";
 import type { CorrectionLogEvent, HistoryDirection, HistoryScope } from "./undoContract.ts";
 
 const ACTOR_FIELDS = ["hp", "hpLabel", "hpBar", "life", "ac", "speeds", "initBonus", "initScore", "passivePerception", "senses", "creatureType", "cr", "xp", "srdId", "blockId", "wildShape", "effects", "deathSaves", "legendary", "uses", "hurt"];
@@ -26,11 +27,15 @@ function mechanics(key: string, projected: Value, owner: boolean): Value {
   const actorFields = pick(kind === "token" ? object(actor.inline) : actor, ACTOR_FIELDS);
   if (Array.isArray(actorFields.effects)) actorFields.effects = actorFields.effects.map((effect) => without(object(effect), ["id", "due", "color", "glyph"]));
   const out: Value = { actor: actorFields };
+  if (owner) out.prompts = pick(object((kind === "token" ? object(actor.inline) : actor).turnRecord), ["settled", "due"]);
   if (kind === "token" && owner) out.pose = pick(projected, POSE_FIELDS);
   if (kind === "character" && owner) {
     const stats = object(projected.stats);
     const rolls = Array.isArray(stats.rolls) ? stats.rolls.map((roll) => {
       const clean = without(object(roll), ["id", "name", "ddb"]);
+      // A spell's name supplies its default successful-save behavior.
+      const saved = roll as PcRoll;
+      if (saved.save) clean.save = { ...saved.save, onPass: saved.save.onPass ?? unknownOnPass(saved) };
       if (Array.isArray(clean.dice)) clean.dice = clean.dice.map((part) => without(object(part), ["name"]));
       return clean;
     }) : undefined;
