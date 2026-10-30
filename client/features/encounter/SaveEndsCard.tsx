@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import { pendingSaves, type PendingSave } from "#shared/rules/saveEnds.ts";
+import { ABILITY_NAMES } from "#shared/rules/skills.ts";
 import { theme } from "../../lib/theme.ts";
 import { useRoomActions, useRoomStore, useRoomView } from "../../state/view.ts";
 import { creatureRolls } from "../dice/creature.ts";
+import { ProficientTest } from "../dice/ProficientTest.tsx";
 import { SrdLoadFailed } from "../monsters/SrdLoadFailed.tsx";
 import { creatureKey } from "../dice/options.ts";
 import { presetFor } from "../dice/presets.ts";
@@ -163,7 +165,9 @@ export function SaveEndsCard(props: { pending: PendingSave; onResult(text: strin
     >
       <div>
         <div style={{ fontWeight: theme.weight.bold }}>{model.head}</div>
-        <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>{model.save}</div>
+        <div style={{ fontSize: theme.font.body14, color: theme.color.textMuted }}>
+          <ProficientTest creature={pending.target} test={test}>{`${ABILITY_NAMES[test.ability]} save, DC ${pending.effect.save.dc}`}</ProficientTest>, ends it.
+        </div>
       </div>
       {model.status || trouble ? (
         <div role="status" style={{ display: "grid", gap: theme.space(1), fontSize: theme.font.body14 }}>

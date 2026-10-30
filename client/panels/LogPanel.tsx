@@ -10,7 +10,6 @@ import { stickyPaneFoot } from "../components/Sheet.tsx";
 import {
   chatTargets,
   composerTarget,
-  describeEvent,
   memberName,
   mergeLog,
   messageOp,
@@ -21,6 +20,7 @@ import {
   type LogNames,
 } from "../features/log/format.ts";
 import { canUndoLogLine } from "../features/encounter/hpLog.ts";
+import { ProficientEvent } from "../features/dice/ProficientEvent.tsx";
 import { usePreview } from "../features/dm/previewContext.ts";
 import { ExportLog } from "../features/log/ExportLog.tsx";
 import { TakeBack } from "../features/encounter/HpLog.tsx";
@@ -231,7 +231,7 @@ function EntryRow(props: { entry: LogEntry; names: LogNames; me: string; dm: boo
     return (
       <li style={{ display: "flex", alignItems: "center", gap: theme.space(2), color: theme.color.textMuted, fontSize: theme.font.small, lineHeight: theme.leading.body }}>
         {/* A name with no break in it, such as an 80-letter one, wraps anywhere rather than run past a narrow panel, as a chat line does. A line of several rolls puts each on its own line. */}
-        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}>{describeEvent(entry.data, names, props.dm)}</span>
+        <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere", whiteSpace: "pre-line" }}><ProficientEvent data={entry.data} names={names} dm={props.dm} /></span>
         {/* The DM takes an HP change back from the log (features section 10). */}
         {props.canUndo ? <TakeBack logId={entry.id} /> : null}
         <time dateTime={entry.at} style={{ flex: "none", fontVariantNumeric: "tabular-nums" }}>
