@@ -3,6 +3,7 @@ import { chromeZoom, smallUi } from "../features/device/layout.ts";
 import { useUiScale } from "../features/device/settings.ts";
 import { subpageBack, subpageKey, usePanelScroll, useSubpageFocus, type PanelHeader } from "../features/panels.ts";
 import { bodyHoldsField, useFieldInView, useKeyboardView } from "../lib/keyboardInset.ts";
+import { useBackSwipe } from "../lib/backSwipe.ts";
 import { useSheetDialog } from "../lib/modalDialog.ts";
 import { DraftScope, useDraftRegistry, useSheetSwipe } from "../lib/sheetSwipe.ts";
 import { theme } from "../lib/theme.ts";
@@ -53,6 +54,10 @@ export type SheetMode = "bottom" | "side" | "full";
  * body once that is at its top. `riders` ride its top edge and move with
  * it, the dock's row (pages/RoomDock.tsx). It provides its panel the
  * context that reports unsaved input, which makes a swipe spring back.
+ *
+ * Swiped right, in any mode and from anywhere on it, it does what its
+ * header's Back does (lib/backSwipe.ts): its body follows the finger
+ * under the header, which stays.
  *
  * Swiped up from its header, or by the Expand sheet button that Tab
  * reaches in its header, it fills the screen (`expanded`, 4.7): the very
@@ -126,6 +131,7 @@ export function Sheet(props: {
   const titleRef = props.titleRef ?? ownTitleRef;
   const bodyRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
   useSubpageFocus(subpage ?? null, { title: titleRef, body: bodyRef, root: sectionRef });
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const { ref: outer } = props;
@@ -164,6 +170,8 @@ export function Sheet(props: {
   useEffect(() => () => onTall?.(false), [onTall]);
   useFieldInView(bodyRef, useMemo(() => ({ view, tall }), [view, tall]), theme.space(2));
   const back: HeaderBack | null = subpage ? subpageBack(subpage) : props.onBack ? { label: props.backLabel ?? "Back", onBack: props.onBack } : null;
+  // A swipe right does what the header's Back does, in every mode a phone shows the sheet in (lib/backSwipe.ts). The body moves under a header that stays, grabber and all, as a phone app's page does under its bar.
+  useBackSwipe(dialogRef, { enabled: shown && back !== null, onBack: () => back?.onBack(), page: pageRef, item, drafts });
   const actionCount = props.actions ? (props.actionCount ?? 0) : 0;
   const stacked = headerStacks({ width: props.headerWidth, buttons: (back ? 1 : 0) + (onHide ? 1 : 0) + 1 + actionCount, actions: actionCount > 0 });
   const insetTop = sheetTop(inset.top, keyboard);
@@ -270,7 +278,7 @@ export function Sheet(props: {
         />
         {mode === "full" || filled ? props.notices : null}
         {/* Every mode keeps this shape, so a change of mode never mounts the panel again. */}
-        <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <div ref={pageRef} style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
           {/* The 4 px on top hold the focus ring of a first full-width control (2 px out, 2 px wide), which the scrolling body would clip. */}
           {/* data-pane-body and the padding variables let a sticky header inside meet the scroller's edges in every mode (docs/design-v1-combat-flow.md 3.1). */}
           <div

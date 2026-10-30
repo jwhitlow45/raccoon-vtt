@@ -1928,7 +1928,241 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await message.blur();
     await sheet.getByRole("button", { name: "Close Log" }).click();
   });
+
+  // FL-14: a swipe right in a phone's panel goes back, as the Back in its header does (client/lib/backSwipe.ts).
+  test("fl14-a. a slow swipe right past half a panel goes back to Panels as All panels does, with its focus, a short one springs back, and a flick goes back", async () => {
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    const list = dm.getByRole("region", { name: "Panels" });
+    // All panels first, for where its focus lands.
+    let sheet = await openPanel(dm, "Log");
+    await steadyRect(sheet);
+    await sheet.getByRole("button", { name: "All panels" }).click();
+    await list.waitFor();
+    const byButton = await focusedName(dm);
+    await list.getByRole("button", { name: "Log", exact: true }).click();
+    await dm.locator('section[aria-label="Log"]').waitFor();
+    sheet = sheetOf(dm, "Log");
+    const box = await steadyRect(sheet);
+    const page = movingBody(sheet);
+    const half = box.width / 2;
+    // Short of half: it follows the finger, then springs back with nothing changed.
+    const f = new Finger(dmCdp, dm);
+    await f.down(await leftBodyPoint(sheet));
+    await f.drag(0, { dx: 8 + half - 30 });
+    const held = await translateXOf(page);
+    assert.ok(Math.abs(held - (half - 30)) < 2, `FL-14: the page stood ${held} px right, not with the finger at ${half - 30}`);
+    await shots.take(dm, "fl14-a-following");
+    await f.up();
+    assert.equal(await pageSettled(page), "rest");
+    assert.equal(await list.count(), 0, "FL-14: a short swipe went back");
+    assert.deepEqual(await rectOf(sheet), box, "FL-14: the sheet moved");
+    // Past half: back to Panels, focus where All panels puts it.
+    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + half + 20);
+    await list.waitFor();
+    assert.equal(await sheetOf(dm, "Log").count(), 0, "FL-14: the panel stayed after its back swipe");
+    assert.equal(await focusedName(dm), byButton, "FL-14: focus differs from All panels'");
+    await shots.take(dm, "fl14-a-back-to-panels");
+    // A flick from the header, short of half, goes back too.
+    await list.getByRole("button", { name: "Log", exact: true }).click();
+    await dm.locator('section[aria-label="Log"]').waitFor();
+    sheet = sheetOf(dm, "Log");
+    await steadyRect(sheet);
+    const head = await headerPoint(sheet);
+    await backSwipe(dmCdp, { x: 40, y: head.y }, 70, { flick: true });
+    await list.waitFor();
+    assert.equal(await sheetOf(dm, "Log").count(), 0, "FL-14: a flick from the header did not go back");
+    await list.getByRole("button", { name: "Close Panels" }).click();
+  });
+
+  test("fl14-b. a vertical scroll that drifts sideways, a start in the screen's edge zone and a mouse drag never go back, and All panels still does", async () => {
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    const sheet = await openPanel(dm, "Scenes");
+    await openSceneGroup(sheet, "Map image and grid");
+    await openSceneGroup(sheet, "Size and view");
+    await steadyRect(sheet);
+    const body = sheet.locator("[data-pane-body]").first();
+    const scrolls = await body.evaluate((el) => (el as unknown as El).scrollHeight > (el as unknown as El).clientHeight);
+    assert.ok(scrolls, "FL-14: the Scenes panel did not scroll at this size");
+    const page = movingBody(sheet);
+    // Up with a sideways drift: a scroll, all the way.
+    const from = await leftBodyPoint(sheet, 200);
+    const f = new Finger(dmCdp, dm);
+    await f.down(from);
+    await f.drag(-160, { dx: 70 });
+    assert.equal(await translateXOf(page), 0, "FL-14: a scroll moved the page sideways");
+    await f.up();
+    assert.ok((await bodyScroll(sheet)) > 0, "FL-14: the drag up did not scroll");
+    // Up first, then far to the right: the first move locked it to the scroll.
+    await f.down(await leftBodyPoint(sheet, 200));
+    await f.drag(-20);
+    await f.drag(0, { dx: 250 });
+    await f.up();
+    assert.equal(await pageSettled(page), "rest");
+    // Up first on the header, where nothing pans and the sheet's own swipe waits for twice the slop, then far to the right: still locked to up and down.
+    await body.evaluate((el) => {
+      (el as unknown as El).scrollTop = 0;
+    });
+    const head = await headerPoint(sheet);
+    await f.down({ x: 70, y: head.y });
+    await f.drag(-12);
+    await f.drag(0, { dx: 8 + (await rectOf(sheet)).width / 2 + 20 });
+    await f.up();
+    assert.equal(await pageSettled(page), "rest");
+    assert.equal(await dm.getByRole("region", { name: "Panels" }).count(), 0, "FL-14: a swipe that started up went back");
+    // Inside the system's edge zone the swipe is the browser's.
+    await backSwipe(dmCdp, { x: 10, y: from.y }, 300);
+    assert.equal(await pageSettled(page), "rest");
+    // A mouse drag is never a swipe.
+    await dm.mouse.move(40, from.y);
+    await dm.mouse.down();
+    await dm.mouse.move(340, from.y, { steps: 12 });
+    await dm.mouse.up();
+    assert.equal(await pageSettled(page), "rest");
+    assert.equal(await dm.getByRole("region", { name: "Panels" }).count(), 0, "FL-14: a scroll, an edge start or a mouse drag went back");
+    assert.equal(await sheet.count(), 1);
+    // A slider takes a drag to the right, past the distance that would go back, and the panel stays.
+    const slider = sheet.locator('input[type="range"]').first();
+    await slider.scrollIntoViewIfNeeded();
+    const value = await slider.inputValue();
+    const r = await rectOf(slider);
+    await backSwipe(dmCdp, { x: Math.max(r.left + 4, 40), y: r.top + r.height / 2 }, 8 + (await rectOf(sheet)).width / 2 + 20);
+    await waitFor("FL-14: the slider to move", async () => ((await slider.inputValue()) !== value ? true : null), 3_000);
+    assert.equal(await pageSettled(page), "rest");
+    assert.equal(await dm.getByRole("region", { name: "Panels" }).count(), 0, "FL-14: a slider drag went back");
+    // Back in the header still goes back.
+    await sheet.getByRole("button", { name: "All panels" }).click();
+    await dm.getByRole("region", { name: "Panels" }).waitFor();
+    await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Close Panels" }).click();
+  });
+
+  test("fl14-c. the Dice panel's quick dice scroll sideways and keep the swipe while scrolled, hand it over at their left edge, and a roll's fired hold keeps its finger", async () => {
+    await setUp(dm, { width: 320, height: 568, scale: 1 });
+    const list = dm.getByRole("region", { name: "Panels" });
+    let sheet = await openPanel(dm, "Dice");
+    await steadyRect(sheet);
+    // The strip's own element scrolls (components/ScrollStrip.tsx).
+    const scroller = sheet.locator('[aria-label="Quick dice"]').first();
+    await scroller.waitFor();
+    const left = () => scroller.evaluate((el) => (el as unknown as { scrollLeft: number }).scrollLeft);
+    const wide = await scroller.evaluate((el) => (el as unknown as { scrollWidth: number; clientWidth: number }).scrollWidth > (el as unknown as { clientWidth: number }).clientWidth);
+    assert.ok(wide, "FL-14: the quick dice fit at 320 px, so nothing scrolls");
+    const row = await rectOf(scroller);
+    const y = row.top + row.height / 2;
+    // A swipe left scrolls them.
+    await backSwipe(dmCdp, { x: row.right - 30, y }, -160);
+    await waitFor("FL-14: the quick dice to scroll", async () => ((await left()) > 0 ? true : null), 3_000);
+    // Scrolled, a swipe right scrolls them back and the panel stays.
+    const scrolled = await left();
+    await backSwipe(dmCdp, { x: row.left + 40, y }, 60);
+    await waitFor("FL-14: the quick dice to scroll back", async () => ((await left()) < scrolled ? true : null), 3_000);
+    assert.equal(await list.count(), 0, "FL-14: a swipe on scrolled quick dice went back");
+    await scroller.evaluate((el) => {
+      (el as unknown as { scrollLeft: number }).scrollLeft = 0;
+    });
+    // At their left edge, a swipe right is the panel's.
+    await backSwipe(dmCdp, { x: row.left + 40, y }, 8 + (await rectOf(sheet)).width / 2 + 20);
+    await list.waitFor();
+    assert.equal(await sheetOf(dm, "Dice").count(), 0, "FL-14: a swipe right at the quick dice' left edge did not go back");
+    // A held Roll opens its one-roll menu, and the finger that held it drifts right without going back.
+    await list.getByRole("button", { name: "Dice", exact: true }).click();
+    await dm.locator('section[aria-label="Dice"]').waitFor();
+    sheet = sheetOf(dm, "Dice");
+    await steadyRect(sheet);
+    await sheet.getByLabel("Dice formula").fill("1d20");
+    await sheet.getByLabel("Dice formula").blur();
+    const roll = sheet.getByRole("button", { name: /^Roll\b/ }).first();
+    const at = await middleOf(roll);
+    const f = new Finger(dmCdp, dm);
+    await f.down(at);
+    await f.rest(650);
+    await waitFor("FL-14: the one-roll menu to open", async () => ((await dm.locator("[data-roll-mode-menu]").count()) > 0 ? true : null), 3_000);
+    await f.drag(0, { dx: 200 });
+    assert.equal(await translateXOf(movingBody(sheet)), 0, "FL-14: the held finger moved the page");
+    await f.up();
+    assert.equal(await list.count(), 0, "FL-14: a fired hold's drift went back");
+    assert.equal(await sheet.count(), 1);
+    await dm.keyboard.press("Escape");
+    await sheet.getByLabel("Dice formula").fill("");
+    await sheet.getByRole("button", { name: "Close Dice" }).click();
+  });
+
+  test("fl14-d. on a page inside a panel the swipe goes back to the panel, unsaved words spring it back, and with reduced motion it goes back within a frame", async () => {
+    await setUp(dm, { width: 375, height: 667, scale: 1 });
+    let sheet = await openPanel(dm, "Menu");
+    await steadyRect(sheet);
+    await sheet.getByRole("button", { name: /^Members/ }).first().click();
+    await sheet.getByRole("heading", { name: "Members" }).waitFor();
+    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + (await rectOf(sheet)).width / 2 + 20);
+    await waitFor("FL-14: Menu's first page", async () => ((await sheet.getByRole("heading", { name: "Members" }).count()) === 0 ? true : null), 3_000);
+    assert.equal(await sheet.count(), 1, "FL-14: a swipe on a subpage left the panel");
+    assert.equal(await dm.getByRole("region", { name: "Panels" }).count(), 0, "FL-14: a swipe on a subpage went to Panels");
+    await sheet.getByRole("button", { name: "Close Menu" }).click();
+    // A message typed and not sent: it springs back with the words kept.
+    sheet = await openPanel(dm, "Log");
+    await steadyRect(sheet);
+    const message = sheet.getByLabel("Message");
+    await message.fill("FL-14 unsent");
+    await message.blur();
+    await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + (await rectOf(sheet)).width / 2 + 60);
+    assert.equal(await pageSettled(movingBody(sheet)), "rest");
+    assert.equal(await sheet.count(), 1, "FL-14: unsaved words let the swipe go back");
+    assert.equal(await message.inputValue(), "FL-14 unsent");
+    await message.fill("");
+    await message.blur();
+    await sheet.getByRole("button", { name: "Close Log" }).click();
+    await dm.emulateMedia({ reducedMotion: "reduce" });
+    try {
+      sheet = await openPanel(dm, "Log");
+      await steadyRect(sheet);
+      await backSwipe(dmCdp, await leftBodyPoint(sheet), 8 + (await rectOf(sheet)).width / 2 + 20);
+      await dm.evaluate(() => new Promise((resolve) => (globalThis as unknown as { requestAnimationFrame(fn: () => void): void }).requestAnimationFrame(() => resolve(null))));
+      assert.equal(await sheet.count(), 0, "FL-14: the panel still showed a frame after the lift");
+      await dm.getByRole("region", { name: "Panels" }).getByRole("button", { name: "Close Panels" }).click();
+    } finally {
+      await dm.emulateMedia({ reducedMotion: "no-preference" });
+    }
+  });
 });
+
+/** A point in the sheet's body near its left side, clear of the system's edge zone, so a swipe right has the panel's width to travel. */
+async function leftBodyPoint(sheet: Locator, down = 60): Promise<Pt> {
+  const r = await rectOf(sheet.locator("[data-pane-body]").first());
+  return { x: Math.max(r.left + 16, 40), y: r.top + down };
+}
+
+/** A whole swipe sideways: down at `from`, `dx` in 10 px steps (slow: 30 ms apart, flick: 2 ms), then up. */
+async function backSwipe(cdp: CDPSession, from: Pt, dx: number, opts: { flick?: boolean } = {}, page: Page = dm): Promise<void> {
+  const f = new Finger(cdp, page);
+  await f.down(from);
+  await f.drag(0, { dx, every: opts.flick ? 2 : 30 });
+  await f.up();
+}
+
+/** What a back swipe moves: the body's box under the header (components/Sheet.tsx). */
+function movingBody(sheet: Locator): Locator {
+  return sheet.locator("[data-pane-body]").first().locator("xpath=..");
+}
+
+/** How far right the page stands, from its inline transform, in screen px at 100%. */
+function translateXOf(locator: Locator): Promise<number> {
+  return locator.evaluate((el) => {
+    const m = /translateX\((-?[\d.]+)px\)/.exec((el as unknown as El).style.transform ?? "");
+    return m ? Number(m[1]) : 0;
+  });
+}
+
+/** Waits until a back swipe's slide is over: the page gone, or at rest with no transform. */
+async function pageSettled(page: Locator): Promise<"gone" | "rest"> {
+  return settled(page);
+}
+
+/** The accessible name of what has focus, as a test compares two routes to one place. */
+function focusedName(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const a = (globalThis as unknown as Win).document.activeElement;
+    return a ? `${a.getAttribute("aria-label") ?? ""}|${(a as unknown as { textContent: string | null }).textContent ?? ""}` : "";
+  });
+}
 
 /** Picks a design in Menu, This device, as a person does, and puts the Menu away: every sheet takes it at once, with no reload. */
 async function pickHandle(page: Page, id: GrabberId): Promise<void> {
