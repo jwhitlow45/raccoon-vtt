@@ -84,14 +84,14 @@ export async function until<T>(get: () => T | undefined, what: string): Promise<
   assert.fail(`timed out waiting for ${what}`);
 }
 
-export async function scopeActor(t: TestContext, state: RoomState) {
+export async function scopeActor(t: TestContext, state: RoomState, options: ActorDeps["options"] = {}) {
   const db = new UndoScopeDb(state);
   const info: ActorDeps["info"] = { roomId: "UNDOSCOPE", pinned: false, createdIp: null, readOnly: false };
   const actor = await RoomActor.load({
     pool: db.pool(), info,
     log: { info() {}, warn() {}, error() {}, debug() {} },
     budget: new SnapshotBudget(), gateway: {} as RoomGateway,
-    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000 },
+    options: { batchMs: 1, retryBaseMs: 5, retryMaxMs: 20, snapshotIdleMs: 60_000, grantRecheckMs: 60_000, ...options },
   });
   assert.ok(actor);
   t.after(async () => {
@@ -100,6 +100,16 @@ export async function scopeActor(t: TestContext, state: RoomState) {
     await actor.shutdown({ code: 1012, snapshot: false });
   });
   return { actor, db, info, connect: (who: Member, role: "dm" | "player" = who.kind === "dm" ? "dm" : "player", now?: () => number) => ScopeClient.open(actor, who, role, now) };
+}
+
+export async function scopeObserver(actor: RoomActor, grant: Pick<ConstructorParameters<typeof Connection>[1], "memberId" | "role" | "display" | "previewOf">) {
+  const sent: Wire[] = [];
+  const socket = { readyState: 1, OPEN: 1, CONNECTING: 0, send: (text: string) => sent.push(JSON.parse(text) as Wire), close() {}, terminate() {} };
+  const conn = new Connection(socket as never, { sessionId: uuidv7(), roomId: "UNDOSCOPE", ...grant }, "203.0.113.12");
+  actor.attach(conn);
+  await actor.hello(conn, { clientId: uuidv7(), resumeFrom: 1 });
+  await until(() => sent.find((m) => m.t === "snapshot"), "observer snapshot");
+  return { conn, sent };
 }
 
 export class ScopeClient {

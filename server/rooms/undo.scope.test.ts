@@ -2,12 +2,19 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { uuidv7 } from "#shared/ids.ts";
 import { chunkKey } from "#shared/keys.ts";
-import type { Actor, RoomState } from "#shared/model.ts";
+import { LIMITS } from "#shared/limits.ts";
+import { cutLine } from "#shared/logRings.ts";
+import type { Actor, RoomState, Viewer } from "#shared/model.ts";
+import { withCellVision } from "#shared/perPlayerTestutil.ts";
 import { expectHash } from "#shared/permissions.ts";
+import { projectArchivedLog, projectLogEntry, projectState } from "#shared/project.ts";
+import { applyOp } from "#shared/reducer.ts";
+import { guardHash } from "#shared/reducer/tx.ts";
 import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
 import type { HistoryScope } from "#shared/undoContract.ts";
-import { comparable, scene, template, token, trap } from "#shared/testutil.ts";
-import { scopeActor, scopeFixture, until, type ScopeClient } from "./undoScopeTesting.ts";
+import { DM, P1, P2, character, comparable, env, room, scene, template, token, trap } from "#shared/testutil.ts";
+import { UndoStacks } from "./undo.ts";
+import { scopeActor, scopeFixture, scopeObserver, until, type ScopeClient } from "./undoScopeTesting.ts";
 
 function inline(state: RoomState, id: string): Actor {
   const held = state.tokens[id]!.actor;
@@ -696,5 +703,209 @@ describe("history delivery and legacy commands", () => {
     assert.equal(one.head().id, head);
     await two.apply({ t: "undo", head, of: 1 });
     assert.equal(h.actor.committed.state.tokens[f.pc]!.x, 9);
+  });
+});
+
+describe("history while asset lookup waits", () => {
+  for (const scope of ["play", "setup"] as const) for (const direction of ["undo", "redo"] as const) {
+    for (const interference of ["replace", "other-scope", "no-effect", "read-only"] as const) {
+      // The original replaced-step test also checks that a known stale head skips the next lookup.
+      if (scope === "play" && direction === "undo" && interference === "replace") continue;
+      test(`${scope} ${direction} asset wait: ${interference}`, async (t) => {
+        const f = scopeFixture();
+        const assetId = uuidv7();
+        const image = { assetId, crop: { cx: 0, cy: 0, zoom: 1 } };
+        f.state.tokens[f.goblin]!.image = image;
+        const { rev: _rev, fogExemptAuto: _auto, ...created } = f.state.tokens[f.goblin]!;
+        if (direction === "redo") {
+          if (scope === "play") delete f.state.tokens[f.goblin];
+          else delete f.state.tokens[f.goblin]!.image;
+        }
+        const h = await scopeActor(t, f.state);
+        h.db.assetRows = [{ id: assetId, room_id: "UNDOSCOPE", kind: "token", width: 128, height: 128, uploaders: [f.dm.id] }];
+        const dm = await h.connect(f.dm);
+        const other = await h.connect(f.dm);
+        if (direction === "undo") {
+          await dm.apply(scope === "play" ? { t: "token.delete", tokenId: f.goblin } : { t: "token.update", tokenId: f.goblin, patch: { image: null } });
+        } else {
+          await dm.apply(scope === "play" ? { t: "token.create", token: created } : { t: "token.update", tokenId: f.goblin, patch: { image } });
+          await dm.restore(scope);
+        }
+        const old = dm.head(scope, direction).id;
+        let release!: () => void;
+        let started = false;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        t.after(release);
+        h.db.beforeAssets = async () => { started = true; await gate; };
+        const pending = dm.send({ t: direction, scope, head: old });
+        await until(() => started || undefined, "asset lookup");
+        const play = { t: "token.move", tokenId: f.pc, x: 10, y: 3 };
+        const setup = { t: "room.update", name: "Changed room" };
+        try {
+          if (interference === "replace") {
+            await other.apply(scope === "play" ? play : setup);
+            if (direction === "redo") await other.restore(scope);
+          } else if (interference === "other-scope") {
+            await other.apply(scope === "play" ? setup : play);
+          } else if (interference === "no-effect") {
+            await other.apply({ t: "token.move", tokenId: f.pc, x: 8, y: 3 });
+          } else h.actor.readOnly = true;
+        } finally {
+          release();
+        }
+        const before = h.actor.committed.state;
+        const beforeHistory = other.history()[scope];
+        const event = await pending;
+        if (interference === "replace" || interference === "read-only") {
+          assert.equal(event.rejects?.length, 1);
+          unchanged(before, h.actor.committed.state);
+          assert.deepEqual(dm.history()[scope], beforeHistory, "replacement or admission refusal preserves the current head");
+        } else {
+          assert.equal(event.rejects?.length ?? 0, 0, JSON.stringify(event.rejects));
+          assert.ok(h.actor.committed.state.tokens[f.goblin]!.image, "restore keeps the looked-up image");
+          assert.notEqual(dm.head(scope, direction === "undo" ? "redo" : "undo").id, old, "transfer gets a fresh head");
+        }
+      });
+    }
+  }
+});
+
+describe("history delivery windows and observer isolation", () => {
+  test("commit waits, reconnects and duplicate acks keep every history behind its committed view", async (t) => {
+    const f = scopeFixture();
+    const h = await scopeActor(t, f.state);
+    const dm = await h.connect(f.dm);
+    const peer = await h.connect(f.dm);
+    const display = await scopeObserver(h.actor, { memberId: "display:abcdefghijkl", role: "player", display: true });
+    const preview = await scopeObserver(h.actor, { memberId: f.dm.id, role: "dm", previewOf: f.player.id });
+    await dm.apply({ t: "character.update", characterId: f.bree, patch: { level: 4 } });
+    const old = dm.history();
+    let release!: () => void;
+    let waiting = false;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    t.after(release);
+    h.db.beforeCommit = async () => { waiting = true; await gate; };
+    const pending = dm.restore("setup");
+    await until(() => waiting || undefined, "commit wait");
+    let reconnect: ReturnType<typeof h.connect>;
+    let queued: ReturnType<ScopeClient["send"]>;
+    try {
+      assert.deepEqual(peer.history().setup, old.setup);
+      reconnect = h.connect(f.dm);
+      queued = peer.send({ t: "undo", scope: "setup", head: old.setup!.undo.head!.id });
+      assert.deepEqual(dm.history(), old);
+    } finally {
+      release();
+    }
+    await pending;
+    const joined = await reconnect;
+    assert.equal((await queued).rejects?.length, 1, "a queued old head cannot consume the transferred head");
+    assert.deepEqual(joined.history().setup, dm.history().setup);
+    await h.actor.op(dm.conn, dm.n, { t: "undo", head: old.setup!.undo.head!.id, scope: "setup" });
+    for (const client of [dm, peer, joined]) {
+      let covered = -1;
+      let serial = -1;
+      let seq = -1;
+      let watermark = -1;
+      for (const message of client.sent) {
+        if (message.t === "snapshot" || message.t === "ev") covered = message.seq;
+        if (message.t !== "history") continue;
+        assert.equal(message.seq, covered, "history follows a covering view");
+        assert.ok(message.serial >= serial && message.seq >= seq && message.watermark >= watermark, "coverage never regresses");
+        serial = message.serial;
+        seq = message.seq;
+        watermark = message.watermark;
+      }
+    }
+    for (const client of [display, preview]) {
+      assert.equal(client.sent.some((m) => m.t === "history"), false);
+      const bytes = JSON.stringify(client.sent);
+      assert.ok(!bytes.includes(old.setup!.undo.head!.id));
+      assert.ok(!bytes.includes(old.setup!.undo.head!.label));
+      assert.ok(!bytes.includes('"correction":['));
+    }
+  });
+
+  test("a snapshot and duplicate ack during the batch window expose only committed heads", async (t) => {
+    const f = scopeFixture();
+    // A long batch window lets the explicit queue barrier flush each batch without racing the timer.
+    const h = await scopeActor(t, f.state, { batchMs: 60_000 });
+    const dm = await h.connect(f.dm);
+    const flush = () => h.actor.deletionStep(async () => ({ deleted: [], result: undefined }));
+    await h.actor.op(dm.conn, ++dm.n, { t: "token.move", tokenId: f.goblin, x: 5, y: 3 });
+    await flush();
+    const before = dm.history();
+    await h.actor.op(dm.conn, ++dm.n, { t: "token.update", tokenId: f.goblin, patch: { name: "Staged private label" } });
+    await h.actor.op(dm.conn, 1, { t: "token.move", tokenId: f.goblin, x: 5, y: 3 });
+    assert.deepEqual(dm.history(), before, "a duplicate ack does not pair the old view with staged heads");
+    const joined = await h.connect(f.dm);
+    assert.equal(joined.history().serial, before.serial);
+    assert.deepEqual(joined.history().setup, before.setup);
+    assert.equal(joined.sent.find((m) => m.t === "snapshot")!.seq, before.seq);
+    await flush();
+    assert.equal(joined.history().setup?.undo.depth, 1);
+    assert.ok(joined.history().serial > before.serial);
+  });
+});
+
+test("no-effect histories ignore revision-only writes but keep every guard in mixed effects", () => {
+  const stacks = new UndoStacks();
+  const old = { id: "a", rev: 1, x: 2 };
+  const revision = { key: "token:a", value: old, expectHash: guardHash("token:a", { ...old, rev: 2 }) };
+  const changed = { key: "token:b", value: { id: "b", rev: 1, x: 1 }, expectHash: guardHash("token:b", { id: "b", rev: 2, x: 2 }) };
+  stacks.push("dm", [revision], "no effect");
+  assert.equal(stacks.depth("dm").undo, 0);
+  stacks.push("dm", [revision, changed], "mixed");
+  assert.deepEqual(stacks.peek("dm", "undo")!.entries, [revision, changed]);
+});
+
+test("8 KiB evidence cap can hide a large notice when its retained witnesses lose access", () => {
+  const state = room();
+  const witnesses = Array.from({ length: 150 }, (_, i) => ({ key: `character:c${i}`, owner: true, name: "A".repeat(200) }));
+  for (let i = 0; i < 150; i++) state.characters[`c${i}`] = character(`c${i}`, { ownerIds: ["p1"] });
+  const entry = cutLine({ id: "2:0", at: "2026-10-29T00:00:00Z", kind: "event", to: ["p1"], copyOf: "2:1", data: { type: "correction", from: "undo", scope: "setup" }, parts: { correction: witnesses } });
+  assert.ok(Buffer.byteLength(JSON.stringify(entry)) <= LIMITS.apartLineBytes);
+  const kept = entry.parts!.correction!;
+  assert.ok(kept.length > 0 && kept.length < witnesses.length);
+  assert.deepEqual(kept, witnesses.slice(0, kept.length), "trimming preserves a prefix of the frozen evidence");
+  assert.ok(projectLogEntry(state, entry, P1, { sceneId: null }));
+  for (const witness of kept) state.characters[witness.key.slice("character:".length)]!.ownerIds = [];
+  assert.equal(projectLogEntry(state, entry, P1, { sceneId: null }), null, "readable omitted witnesses do not expand authorization");
+  assert.deepEqual(projectArchivedLog(state, [entry], P1, { sceneId: null }), []);
+  assert.equal(projectLogEntry(state, entry, P2, { sceneId: null }), null);
+});
+
+test("per-player sight freezes correction recipients and narrows later live and archive reads", () => {
+  withCellVision(() => {
+    const state = room({
+      scenes: { s1: scene("s1", { vision: { on: true, light: "bright", perPlayer: true } }) },
+      tokens: {
+        a: token("a", { ownerIds: ["p1"], kind: "pc", x: 1, y: 2 }),
+        b: token("b", { ownerIds: ["p2"], kind: "pc", x: 20, y: 20 }),
+        target: token("target", { x: 3, y: 3, hpVisibility: "exact", name: "Private creature name", nameHidden: true }),
+      },
+      holders: { s1: { sceneId: "s1", rev: 1, entries: [{ memberId: "p1", on: true }, { memberId: "p2", on: true }] } },
+    });
+    const hit = applyOp(state, { t: "actor.hp", target: { tokenId: "target" }, change: { kind: "damage", amount: 5 } }, DM, env(1));
+    assert.ok(hit.ok);
+    const undo = applyOp(hit.state, { t: "sys.restore", entries: hit.inverse!, from: "undo", scope: "play", correction: { label: "Private label" }, deps: true }, DM, env(2));
+    assert.ok(undo.ok);
+    const notices = (current: RoomState, viewer: Viewer) => projectArchivedLog(current, undo.log, viewer, { sceneId: null }).filter((e) => e.data?.type === "correction");
+    assert.equal(notices(undo.state, P1).length, 1);
+    assert.equal(notices(undo.state, P2).length, 0);
+    assert.deepEqual(projectState(undo.state, P2, { sceneId: null }), projectState(hit.state, P2, { sceneId: null }), "an invisible correction changes no projected counters");
+    assert.ok(!JSON.stringify(notices(undo.state, P1)).includes("Private"));
+    const hiddenHp = applyOp(undo.state, { t: "token.update", tokenId: "target", patch: { hpVisibility: "hidden" } }, DM, env(3));
+    assert.ok(hiddenHp.ok);
+    assert.equal(notices(hiddenHp.state, P1).length, 0, "lost field permission narrows archive access");
+    const gained = applyOp(undo.state, { t: "token.move", tokenId: "b", x: 1, y: 1 }, DM, env(3));
+    assert.ok(gained.ok);
+    assert.equal(notices(gained.state, P2).length, 0, "new sight cannot gain an old notice");
+    const lost = applyOp(gained.state, { t: "token.move", tokenId: "a", x: 30, y: 20 }, DM, env(4));
+    assert.ok(lost.ok);
+    assert.equal(notices(lost.state, P1).length, 0, "lost sight narrows archive access");
+    assert.equal(projectState(lost.state, P1, { sceneId: null }).log.filter((e) => e.data?.type === "correction").length, 0);
+    const blackout = { ...undo.state, meta: { ...undo.state.meta, view: { ...undo.state.meta.view, blackout: true } } };
+    assert.equal(notices(blackout, P1).length, 0, "blackout removes target-based notices");
   });
 });

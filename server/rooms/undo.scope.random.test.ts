@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { uuidv7 } from "#shared/ids.ts";
 import { rng } from "#shared/testutil.ts";
 import type { HistoryDirection, HistoryScope } from "#shared/undoContract.ts";
 import { scopeActor, scopeFixture, type ScopeClient } from "./undoScopeTesting.ts";
@@ -165,6 +166,155 @@ for (const seed of SEEDS) test(`undo-scope-random: seed ${seed}`, async (t) => {
       assert.equal(external.history().play.undo.depth, 0, "co-DM never inherits this member's Play history");
       await h.actor.shutdown({ code: 1012, snapshot: false });
     }
+  } catch (error) {
+    if (error instanceof Error) error.message += `\nseed=${seed}\ntrace=${trace.join(" > ")}`;
+    throw error;
+  }
+});
+
+type ModelValue = { x: number; name: string };
+type ModelEntry = {
+  id: string;
+  label: string;
+  before: ModelValue;
+  after: ModelValue;
+  order: number;
+  retained?: { scope: HistoryScope; direction: HistoryDirection; label: string; buried: boolean };
+};
+type Model = Record<HistoryScope, Record<HistoryDirection, ModelEntry[]>>;
+
+for (const seed of [17, 42, 97, 101]) test(`undo-scope-model: seed ${seed}`, async (t) => {
+  let randomState = seed;
+  const random = (n: number) => {
+    randomState = (Math.imul(randomState, 1664525) + 1013904223) >>> 0;
+    return (randomState >>> 8) % n;
+  };
+  const trace: string[] = [];
+  const f = scopeFixture();
+  const h = await scopeActor(t, f.state);
+  let one = await h.connect(f.dm);
+  const two = await h.connect(f.dm);
+  const external = await h.connect(f.otherDm);
+  const player = await h.connect(f.player);
+  const model: Model = { play: { undo: [], redo: [] }, setup: { undo: [], redo: [] } };
+  const seenHeads = new Set<string>();
+  let order = 0;
+  const coverage = { fresh: 0, external: 0, noEffect: 0, stale: 0, admission: 0, discard: 0, restored: 0, retained: 0, dropped: 0 };
+  const value = (): ModelValue => {
+    const token = h.actor.committed.state.tokens[f.goblin]!;
+    return { x: token.x, name: token.name };
+  };
+  const same = (a: ModelValue, b: ModelValue) => a.x === b.x && a.name === b.name;
+  const fresh = (client: ScopeClient, scope: HistoryScope, direction: HistoryDirection, before: ModelValue, after: ModelValue, label?: string) => {
+    const head = client.head(scope, direction);
+    assert.ok(!seenHeads.has(head.id), "a fresh head is never reused, even after its entry leaves the model");
+    seenHeads.add(head.id);
+    model[scope][direction].push({ id: head.id, label: label ?? head.label, before, after, order: ++order });
+    if (model[scope][direction].length > 50) model[scope][direction].shift();
+  };
+  const check = () => {
+    const history = one.history();
+    for (const scope of SCOPES) for (const direction of DIRECTIONS) {
+      const expected = model[scope][direction];
+      const actual = history[scope]![direction];
+      assert.equal(actual.depth, expected.length, "bounded depth tracks only its scope and direction");
+      assert.equal(actual.head?.id, expected.at(-1)?.id, "the current head matches the independent model");
+      assert.deepEqual(actual.head?.retained, expected.at(-1)?.retained, "retention has the exact prerequisite");
+    }
+    assert.deepEqual(two.history().play, history.play, "devices share committed Play");
+    assert.deepEqual(two.history().setup, history.setup, "devices share committed Setup");
+    const privateBytes = JSON.stringify(player.sent);
+    assert.equal(player.history().setup, undefined, "players get no Setup history");
+    for (const head of seenHeads) assert.ok(!privateBytes.includes(head), "no other member's head reaches any player frame");
+  };
+  try {
+    for (let turn = 0; turn < 80; turn++) {
+      if (turn === 23 || turn === 53) {
+        h.actor.detach(one.conn);
+        one = await h.connect(f.dm);
+        check();
+      }
+      const client = random(2) ? one : two;
+      const kind = random(10);
+      const scope: HistoryScope = random(2) ? "play" : "setup";
+      const direction: HistoryDirection = random(2) ? "undo" : "redo";
+      const before = value();
+      trace.push(`${turn}:${kind}:${scope}:${direction}`);
+      if (kind < 3) {
+        const after = scope === "play" ? { ...before, x: random(20) + 1 } : { ...before, name: `Setup ${turn}` };
+        await client.apply(scope === "play" ? { t: "token.move", tokenId: f.goblin, x: after.x, y: 3 } : { t: "token.update", tokenId: f.goblin, patch: { name: after.name } });
+        if (!same(before, after)) {
+          coverage.fresh++;
+          model[scope].redo = [];
+          fresh(client, scope, "undo", before, after);
+        }
+        assert.deepEqual(value(), after);
+      } else if (kind === 3) {
+        coverage.external++;
+        await external.apply({ t: "token.move", tokenId: f.goblin, x: 40 + random(10), y: 3 });
+      } else if (kind === 4) {
+        coverage.noEffect++;
+        const old = client.history();
+        await client.apply(random(2) ? { t: "token.move", tokenId: f.goblin, x: before.x, y: 3 } : { t: "log.chat", text: "No history mutation" });
+        assert.deepEqual(client.history().play, old.play, "None and no-effect preserve Play");
+        assert.deepEqual(client.history().setup, old.setup, "None and no-effect preserve Setup");
+        assert.equal(client.history().serial, old.serial, "None and no-effect preserve serial");
+      } else {
+        const stack = model[scope][direction];
+        const entry = stack.at(-1);
+        const discard = kind === 5 && entry?.retained !== undefined;
+        const stale = kind === 6 || !entry;
+        const admission = kind === 7 && !stale;
+        const state = h.actor.committed.state;
+        const old = client.history();
+        h.actor.readOnly = admission;
+        let event: Awaited<ReturnType<ScopeClient["send"]>>;
+        try {
+          event = await client.send({ t: direction, scope, head: stale ? uuidv7() : entry.id, ...(discard ? { discard: true } : {}) });
+        } finally {
+          h.actor.readOnly = false;
+        }
+        if (stale || admission) {
+          coverage[stale ? "stale" : "admission"]++;
+          assert.equal(event.rejects?.length, 1);
+          assert.deepEqual(h.actor.committed.state, state, "stale or admission refusal is atomic");
+          assert.deepEqual(client.history().play, old.play, "stale or admission refusal preserves Play");
+          assert.deepEqual(client.history().setup, old.setup, "stale or admission refusal preserves Setup");
+        } else if (discard) {
+          coverage.discard++;
+          assert.equal(event.rejects?.length ?? 0, 0);
+          stack.pop();
+          assert.deepEqual(h.actor.committed.state, state, "discard writes no game state");
+        } else {
+          const conflict = scope === "play" ? before.x !== entry.after.x : !same(before, entry.after);
+          if (!conflict) {
+            coverage.restored++;
+            assert.equal(event.rejects?.length ?? 0, 0, JSON.stringify(event.rejects));
+            const after = scope === "play" ? { ...before, x: entry.before.x } : entry.before;
+            assert.deepEqual(value(), after, "restore is whole-value or pose-only as scoped");
+            stack.pop();
+            fresh(client, scope, direction === "undo" ? "redo" : "undo", before, after, entry.label);
+          } else {
+            assert.equal(event.rejects?.length, 1);
+            assert.deepEqual(h.actor.committed.state, state, "a state-conflict refusal is atomic");
+            const other = scope === "play" ? "setup" : "play";
+            const candidates = DIRECTIONS.flatMap((d) => model[other][d].map((e, index, all) => ({ e, d, buried: index < all.length - 1 })))
+              .filter((c) => scope === "play" ? before.x === c.e.after.x : same(before, c.e.after))
+              .sort((a, b) => b.e.order - a.e.order);
+            const candidate = candidates[0];
+            if (candidate) {
+              coverage.retained++;
+              entry.retained = { scope: other, direction: candidate.d, label: candidate.e.label, buried: candidate.buried };
+            } else {
+              coverage.dropped++;
+              stack.pop();
+            }
+          }
+        }
+      }
+      check();
+    }
+    t.diagnostic(`seed=${seed} actions=80 coverage=${JSON.stringify(coverage)}`);
   } catch (error) {
     if (error instanceof Error) error.message += `\nseed=${seed}\ntrace=${trace.join(" > ")}`;
     throw error;
