@@ -1,6 +1,6 @@
 # raccoon-vtt v1: Undo during play and reopening a save
 
-Status: proposed, revision 5, 2026-10-29. Design only. Code checked at `cdecf8b8cc69eded887480c38aa71fbf8ef6215c`. This revision addresses S-1 through S-8 from review round 4 of `238f374d71d433f4c11c3124b17f916392459552`. Batch 39 owns op version 33. Build batch A takes op 34/snapshot 30, batch B op 35/snapshot 31, confirmed at landing. Nothing described below has been built or runtime-tested yet.
+Status: proposed, revision 5, 2026-10-29. Batch A is built and batch B is not. Code was checked at `cdecf8b8cc69eded887480c38aa71fbf8ef6215c`. This revision addresses S-1 through S-8 from review round 4 of `238f374d71d433f4c11c3124b17f916392459552`. Batch 39 owns op version 33. Build batch A takes op 34/snapshot 30, batch B op 35/snapshot 31, confirmed at landing. The sections for batch B describe a design that is not built or runtime-tested. Section 11 records what batch A built.
 
 This extends [the core design](design.md), section 7.7, [group saves](design-v1-roll-options.md), section 5, [player save spells](design-v1-player-save-spell.md), [combat controls](design-v1-combat-controls.md), and [re-sync](design-v1-resync.md). Those notes' Undo rules change only where this one says so.
 
@@ -322,9 +322,14 @@ Batch A is built on the integrated undo stack. Its results are not recorded yet.
 
 - **Versions:** op 34 (identity migration 33 to 34) and snapshot 30 (identity migration 29 to 30). Batch B keeps its planned op 35 and snapshot 31, confirmed at its landing.
 - **Deviations from this design:**
-  - D-261030-433: a correction notice too large for the existing 8 KiB private log-line cap keeps only the authorization evidence that fits, and fails closed. If every kept reader loses permission, the notice disappears for everyone, even a reader an omitted target would still allow. The correction itself and the DM's exact-label record stay intact. The ring and storage bounds were not raised.
+  - D-261030-433: a correction notice too large for the existing 8 KiB private log-line cap keeps only the authorization evidence that fits, trimmed inside each player's own copy of the line, and fails closed. If every witness kept in a player's copy stops allowing that player to read it, that copy disappears, even where an omitted target would still allow it. Other players' copies are unaffected. The correction itself and the DM's exact-label record stay intact. The ring and storage bounds were not raised.
   - D-261030-434: the server tells the sender, on its own acknowledgments, each accepted op's undo scope and whether it changed anything, and the client's "Saved. Undo in Setup history." reads that. The client does not replay acknowledged ops to classify them, which would go silent whenever another device's op shares the batch.
   - Partial cancel of a declared mixed gesture: when a forget question is canceled after part of a Setup gesture (a Universal VTT import, for example) was saved, the client sends no Play Undo and says "Some setup changes were saved. Undo them in Setup history." Rolling back only that Setup gesture is not built, since the fixed contract has no origin-matched Setup Undo.
+  - D-261030-435: no-effect actions record nothing and clear neither Redo stack, as designed. Residual UNDO-A-NOEFFECT-1: if the DM makes a hidden edit that changes nothing and then presses Undo, players can see that Undo reach an older visible step, so they learn the hidden edit was a no-op. It needs the DM's own Undo right after their own no-op and reveals no hidden value.
+  - A retained Play step's Review opens a "Play history" sheet, the same sheet as Setup history with the Play stack's Retry and Discard this step. The design described only the Setup sheet.
+  - D-261030-441: the one-time notice "Undo now separates play from setup. Earlier undo history was cleared. Setup history is in the menu." is per device, kept in browser storage, with a page-lifetime fallback where storage is unavailable, and shows only within 14 days of the batch A deploy.
+  - D-261030-440: the device whose own Undo or Redo produced a correction line announces the result once ("Undid moving Goblin 2."), not also "The DM undid moving Goblin 2." Quiet commands announce nothing extra. Other devices and co-DMs keep the announcement.
+  - D-261030-444: an oversized entry, Play or Setup, tells only its sender "This change is too large to undo." and never "Saved. Undo in Setup history." The server's per-op acknowledgment carries whether a step was recorded.
 - **Tests:** TBD by the coordinator.
 - **Screenshots:** TBD by the coordinator.
 
