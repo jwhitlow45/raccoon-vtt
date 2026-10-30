@@ -3146,8 +3146,13 @@ export function sizeTests(names: readonly string[]): void {
         page.setDefaultTimeout(10_000);
         await openAt(page, size, scale);
         await shapeScrollbarScreen(sweep, page, size, scale);
-        await forgetRoomScreen(sweep, page);
-        assert.deepEqual(sweep.lines, [], "FL-6 screens out of line");
+        try {
+          await forgetRoomScreen(sweep, page);
+          assert.deepEqual(sweep.lines, [], "FL-6 screens out of line");
+        } finally {
+          // Later steps observe room ops through this page's socket, which Home closes.
+          await openAt(page, size, scale);
+        }
       });
     }
   }
