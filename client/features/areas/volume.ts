@@ -5,7 +5,7 @@ import { cornerAt, hexAt, hexCenter, hexCorners } from "#shared/rules/hex.ts";
 import { crossingsAt, insideCrossings, type Polygon, type PolygonIndex } from "#shared/rules/walls.ts";
 import { isHex } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
-import { cellAtPoint, cellPolygon, cellsMeeting, polygonSide, sameCell, type GroundCell, type GroundSurface } from "../../lib/groundCells.ts";
+import { cellAtPoint, cellPolygon, cellsMeeting, hexesMeeting, polygonSide, sameCell, type GroundCell, type GroundSurface } from "../../lib/groundCells.ts";
 import { K, turnAxes, type Turn } from "../../lib/view.ts";
 
 /**
@@ -214,12 +214,14 @@ class Store {
   readonly plan = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
   /** Hexes a hex stack's walk has visited, counted apart from the budget for the tests. */
   visits = 0;
+  /** Hexes of a hex scene's ground tested against a box, each kept or not, counted apart from the budget for the tests. */
+  tested = 0;
   /**
    * On a hex scene, the vertices hex side planes made, by position: several
    * sides meet at a hex corner, and two faces cut there by different sides
    * must still share the corner's vertex, or the edge between them opens.
    */
-  merge: Map<string, number> | null = null;
+  merge: Map<number, Map<number, Map<number, number>>> | null = null;
 
   add(x: number, y: number, z: number): number {
     if (3 * (this.n + 1) > this.p.length) {
@@ -267,14 +269,24 @@ class Store {
     if (pl.snap === 1) x = pl.e;
     else if (pl.snap === 2) y = pl.e;
     else if (pl.snap === 3) z = pl.e;
-    const at = this.merge && pl.id >= HEX_SIDE ? `${Math.round(x * 1e9)},${Math.round(y * 1e9)},${Math.round(z * 1e9)}` : null;
-    const same = at !== null ? this.merge!.get(at) : undefined;
-    if (same !== undefined) {
-      cache.set(key, same);
-      return same;
+    // By position, rounded to a billionth, in maps of numbers: a string key for every vertex cost the build more than the cut.
+    let byZ: Map<number, number> | undefined;
+    const rz = Math.round(z * 1e9);
+    if (this.merge && pl.id >= HEX_SIDE) {
+      const rx = Math.round(x * 1e9);
+      const ry = Math.round(y * 1e9);
+      let byY = this.merge.get(rx);
+      if (!byY) this.merge.set(rx, (byY = new Map()));
+      byZ = byY.get(ry);
+      if (!byZ) byY.set(ry, (byZ = new Map()));
+      const same = byZ.get(rz);
+      if (same !== undefined) {
+        cache.set(key, same);
+        return same;
+      }
     }
     const id = this.add(x, y, z);
-    if (at !== null) this.merge!.set(at, id);
+    byZ?.set(rz, id);
     cache.set(key, id);
     return id;
   }
@@ -1627,6 +1639,8 @@ export class Volume {
   readonly #levels = new Map<number, Plane>();
   /** The levels of every hex under the shell's plan, low to high, which cut every face on a hex scene. */
   #hexLevels: Plane[] = [];
+  #sidesOf = new Map<string, { pl: Plane; inside: 1 | -1 }[]>();
+  #onGroundOf = new Map<number, boolean>();
   readonly #bounds: { w: number; h: number };
   readonly #buckets: Bucket[] = [];
   readonly #byKey = new Map<string, number>();
@@ -1674,6 +1688,11 @@ export class Volume {
   /** Hexes the walk of a hex stack has visited, for the tests: counted apart from the budget, so a visit left uncharged still shows. */
   get hexVisits(): number {
     return this.#st.visits;
+  }
+
+  /** Hexes of a hex scene's ground the build has tested against a box, for the tests: counted apart from the budget, as `hexVisits` is. */
+  get hexTests(): number {
+    return this.#st.tested;
   }
 
   /** Open edges the caps could not close: 0 but for a broken clip, which the tests hold. */
@@ -1803,8 +1822,10 @@ export class Volume {
     // On hexes every level under the plan cuts every face, as on squares, so the parts either side of any edge part it at the same heights.
     if (capped.length > 0 && this.#hex) {
       const heights = new Set<number>();
-      for (const c of cellsMeeting(this.#hex.grid, { x0: under.x0 - EPS, y0: under.y0 - EPS, x1: under.x1 + EPS, y1: under.y1 + EPS }, null)) {
-        heights.add(this.#hex.atCell(c));
+      // Each candidate hex is charged as it is tested, so a wide plan never enumerates past the build's slice in one go.
+      for (const c of hexesMeeting(this.#hex.grid, { x0: under.x0 - EPS, y0: under.y0 - EPS, x1: under.x1 + EPS, y1: under.y1 + EPS })) {
+        this.#st.tested++;
+        if (c) heights.add(this.#hex.atCell(c));
         if (budget.spend(1)) yield;
       }
       this.#hexLevels = [...heights].sort((p, q) => p - q).map((z) => this.#level(z));
@@ -1932,7 +1953,7 @@ export class Volume {
       }
     }
     let guides = this.#hex
-      ? this.#hexGuides(b.guidesPending)
+      ? yield* this.#hexGuides(b.guidesPending, budget)
       : cutGuides(b.guidesPending, planes).filter((g) => (g.az + g.bz) / 2 > ground(Math.floor((g.ax + g.bx) / 2), Math.floor((g.ay + g.by) / 2)) + EPS);
     if (this.banded) guides = guides.flatMap((g) => this.#bandGuide(g));
     if (budget.spend(b.guidesPending.length * (1 + planes.length) + guides.length)) yield;
@@ -1985,8 +2006,15 @@ export class Volume {
     this.#drawEpoch++;
   }
 
-  /** A hex's six side planes, each with the sign its inside takes. */
+  /** A hex's six side planes, each with the sign its inside takes, kept for the build: every face over the hex asks again. */
   #hexSides(cell: GroundCell): { pl: Plane; inside: 1 | -1 }[] {
+    const key = `${cell.col},${cell.row}`;
+    let sides = this.#sidesOf.get(key);
+    if (!sides) this.#sidesOf.set(key, (sides = this.#hexSidesOf(cell)));
+    return sides;
+  }
+
+  #hexSidesOf(cell: GroundCell): { pl: Plane; inside: 1 | -1 }[] {
     const grid = this.#hex!.grid;
     const poly = cellPolygon(grid, cell);
     const c = { x: 0, y: 0 };
@@ -2039,9 +2067,11 @@ export class Volume {
     const surface = this.#hex!;
     const box = planBox(st, [face]);
     const out: Poly[] = [];
-    const cells = cellsMeeting(surface.grid, { x0: box.x0 - EPS, y0: box.y0 - EPS, x1: box.x1 + EPS, y1: box.y1 + EPS }, null);
     const levels = this.#hexLevels.filter((pl) => pl.e > box.z0 + EPS && pl.e < box.z1 - EPS);
-    for (const cell of cells) {
+    for (const cell of hexesMeeting(surface.grid, { x0: box.x0 - EPS, y0: box.y0 - EPS, x1: box.x1 + EPS, y1: box.y1 + EPS })) {
+      st.tested++;
+      if (budget.spend(1)) yield;
+      if (!cell) continue;
       let p: Poly | null = face;
       let along = false;
       for (const { pl, inside } of this.#hexSides(cell)) {
@@ -2078,13 +2108,20 @@ export class Volume {
   }
 
   /** Guides cut at the sides of the hexes they cross, each piece kept where it stands above its hex's ground. */
-  #hexGuides(guides: readonly Guide[]): Guide[] {
+  *#hexGuides(guides: readonly Guide[], budget: Budget): Job<Guide[]> {
     const surface = this.#hex!;
     const out: Guide[] = [];
     for (const g of guides) {
       const box = { x0: Math.min(g.ax, g.bx) - EPS, y0: Math.min(g.ay, g.by) - EPS, x1: Math.max(g.ax, g.bx) + EPS, y1: Math.max(g.ay, g.by) + EPS };
-      const planes = cellsMeeting(surface.grid, box, null).flatMap((c) => this.#hexSides(c).map((s) => s.pl));
-      for (const piece of cutGuides([g], [...new Set(planes)])) {
+      const planes = new Set<Plane>();
+      for (const c of hexesMeeting(surface.grid, box)) {
+        this.#st.tested++;
+        if (c) for (const s of this.#hexSides(c)) planes.add(s.pl);
+        if (budget.spend(1)) yield;
+      }
+      const pieces = cutGuides([g], [...planes]);
+      if (budget.spend(planes.size + pieces.length)) yield;
+      for (const piece of pieces) {
         if ((piece.az + piece.bz) / 2 > surface.atPoint({ x: (piece.ax + piece.bx) / 2, y: (piece.ay + piece.by) / 2 }) + EPS) out.push(piece);
       }
     }
@@ -2315,6 +2352,8 @@ export class Volume {
         const g = this.#cutNeighbor(F.nb[at + e]!);
         let lineNear = near;
         if (g < 0) {
+          // A hex edge's ground asks the lattice around it: charged as the hexes it may test.
+          if (this.#hex && budget.spend(9)) yield;
           if (!this.onGround(a, c)) continue;
         } else {
           const gBand = this.#faceBand(g, turn);
@@ -2574,7 +2613,13 @@ export class Volume {
     const p = this.#st.p;
     const [ax, ay, az] = [p[3 * a]!, p[3 * a + 1]!, p[3 * a + 2]!];
     const [bx, by, bz] = [p[3 * b]!, p[3 * b + 1]!, p[3 * b + 2]!];
-    if (this.#hex) return this.#onHexGround(ax, ay, az, bx, by, bz);
+    if (this.#hex) {
+      // Kept by edge: every turn's drawing and its lines ask again, and on hexes each answer is a lattice query.
+      const key = Math.min(a, b) * VMAX + Math.max(a, b);
+      let on = this.#onGroundOf.get(key);
+      if (on === undefined) this.#onGroundOf.set(key, (on = this.#onHexGround(ax, ay, az, bx, by, bz)));
+      return on;
+    }
     const mx = (ax + bx) / 2;
     const my = (ay + by) / 2;
     const g = this.#ground;

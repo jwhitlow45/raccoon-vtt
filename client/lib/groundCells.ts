@@ -247,14 +247,7 @@ export function cellsMeeting(grid: Grid, box: WorldRect, bounds: { w: number; h:
   }
   // The whole scene, as a fit or a drag's levels ask: its hexes in order, without a test each.
   if (bounds && box.x0 <= 0 && box.y0 <= 0 && box.x1 >= bounds.w && box.y1 >= bounds.h) return sceneHexes(grid, bounds).map((h) => ({ col: h.col, row: h.row }));
-  // On the rows lattice a hex's row r spans y from r·S to r·S + 2R, and its column c spans x from c to c + 1.5.
-  const S = 0.8660254037844386;
-  const R2 = 1.1547005383792515;
-  const m = grid.orient === "rows" ? box : { x0: box.y0, y0: box.x0, x1: box.y1, y1: box.x1 };
-  const r0 = Math.floor((m.y0 - R2) / S) - 1;
-  const r1 = Math.ceil(m.y1 / S) + 1;
-  const c0 = Math.floor(m.x0 - 1.5) - 1;
-  const c1 = Math.ceil(m.x1) + 1;
+  const { r0, r1, c0, c1 } = hexSpan(grid, box);
   for (let r = r0; r <= r1; r++) {
     for (let c = c0; c <= c1; c++) {
       const cell = grid.orient === "rows" ? { col: c, row: r } : { col: r, row: c };
@@ -263,6 +256,31 @@ export function cellsMeeting(grid: Grid, box: WorldRect, bounds: { w: number; h:
     }
   }
   return out;
+}
+
+/** The lattice rows and columns of hexes that can meet a box, in the rows frame (a columns grid swaps them). */
+function hexSpan(grid: HexGrid, box: WorldRect): { r0: number; r1: number; c0: number; c1: number } {
+  // On the rows lattice a hex's row r spans y from r·S to r·S + 2R, and its column c spans x from c to c + 1.5.
+  const S = 0.8660254037844386;
+  const R2 = 1.1547005383792515;
+  const m = grid.orient === "rows" ? box : { x0: box.y0, y0: box.x0, x1: box.y1, y1: box.x1 };
+  return { r0: Math.floor((m.y0 - R2) / S) - 1, r1: Math.ceil(m.y1 / S) + 1, c0: Math.floor(m.x0 - 1.5) - 1, c1: Math.ceil(m.x1) + 1 };
+}
+
+/**
+ * The hexes `cellsMeeting` gives for a box with no scene bounds, in the
+ * same order, one at a time, and `null` after each candidate it tests and
+ * rejects: a build sliced by a budget charges every candidate as it goes,
+ * so a large box never runs past the build's slice in one enumeration.
+ */
+export function* hexesMeeting(grid: HexGrid, box: WorldRect): Generator<GroundCell | null, void, void> {
+  const { r0, r1, c0, c1 } = hexSpan(grid, box);
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      const cell = grid.orient === "rows" ? { col: c, row: r } : { col: r, row: c };
+      yield polygonMeetsRect(cellPolygon(grid, cell), box) ? cell : null;
+    }
+  }
 }
 
 /** The world box holding every scene cell's polygon: past it the drawn ground is 0. */
