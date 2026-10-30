@@ -756,6 +756,13 @@ export class OpSocket {
   private readonly ws: WebSocket;
   private next = 1;
   private readonly waiting = new Map<number, { resolve(): void; reject(err: Error): void }>();
+  /**
+   * Why the server will answer nothing more, once it closed the socket or
+   * resynced it (a resynced socket hears nothing until a new hello, which
+   * this one never sends). Each op waiting then, and each sent after, fails
+   * at once with it, rather than as an op that got no answer.
+   */
+  private gone: string | null = null;
 
   private constructor(ws: WebSocket) {
     this.ws = ws;
@@ -766,14 +773,23 @@ export class OpSocket {
         rejects?: { n: number; code: string; message: string }[];
         n?: number;
         code?: string;
+        reason?: string;
       };
       if (msg.t === "ev") {
         for (const n of msg.acks ?? []) this.waiting.get(n)?.resolve();
         for (const r of msg.rejects ?? []) this.waiting.get(r.n)?.reject(new Error(`op ${r.n} refused: ${r.code}: ${r.message}`));
       } else if (msg.t === "retry" && msg.n !== undefined) {
         this.waiting.get(msg.n)?.reject(new Error(`op ${msg.n} asked to retry: ${msg.code}`));
+      } else if (msg.t === "resync") {
+        this.end(`the server resynced the op socket (${msg.reason ?? "no reason"})`);
       }
     });
+    ws.on("close", (code, reason) => this.end(`the op socket closed with ${code}${reason.length ? ` (${reason.toString()})` : ""}`));
+  }
+
+  private end(why: string): void {
+    this.gone ??= why;
+    for (const [n, w] of [...this.waiting]) w.reject(new Error(`op ${n} got no answer: ${this.gone}`));
   }
 
   static async open(input: { origin: string; roomId: string; cookie: string }): Promise<OpSocket> {
@@ -796,6 +812,7 @@ export class OpSocket {
   /** Sends one op and resolves once the server took it, or rejects with its refusal. */
   send(op: Record<string, unknown>): Promise<void> {
     const n = this.next++;
+    if (this.gone) return Promise.reject(new Error(`op ${n} (${String(op.t)}) not sent: ${this.gone}`));
     return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`op ${n} (${String(op.t)}) got no answer within 10 s`)), 10_000);
       this.waiting.set(n, {
