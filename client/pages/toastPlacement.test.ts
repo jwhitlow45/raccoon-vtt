@@ -9,6 +9,30 @@ import { keptMapFoot, mapToastBox, putToastHosts } from "./toastPlacement.ts";
 import { columnFacts, columnTop, EDGE, nextToastPlaces, NO_TOAST_PLACES, raisedRow, SHADOW_ROOM, toastTop, type ColumnFacts } from "../canvas/barDock.ts";
 import { theme } from "../lib/theme.ts";
 
+// Read the actual measurement so a first-card-only clearance cannot pass.
+const alertsSource = readFileSync(new URL("../features/encounter/InitiativeStrip.tsx", import.meta.url), "utf8");
+const measureFrom = alertsSource.indexOf("const measured = drawn(cards) ?");
+const measureTo = alertsSource.indexOf(";", measureFrom);
+assert.ok(measureFrom > 0 && measureTo > measureFrom);
+const measureCards = new Function("cards", "zoom", "drawn", "firstCardHeight", `${stripTypeScriptTypes(alertsSource.slice(measureFrom, measureTo + 1))}\nreturn measured;`);
+
+test("FU40-B pl2-b: three unfolded cards end at 497, so the toast starts at 505, not 240", () => {
+  // Browser capture at 390 x 844: the first card ends at 232, the column
+  // starts at 108, and its three cards end at 497. No summary row stands in.
+  const cards = { getBoundingClientRect: () => ({ height: 389 }) };
+  const measured = measureCards(cards, 1, () => true, () => 124);
+  const column = columnFacts(null, { top: 108, measured });
+  assert.ok(column);
+  assert.equal(column.first, 124, "folding still measures only the first card");
+  const phone = { spanning: true, column, cards: true, optionsTop: 784 };
+  assert.equal(toastTop(phone), 505, "the 8 px gap belongs below all three drawn cards");
+  assert.equal(toastTop({ ...phone, optionsTop: 505 + 44 }), 505);
+  assert.equal(toastTop({ ...phone, optionsTop: 505 + 44 - 1 }), null, "without a full toast row it stays above the column");
+  assert.equal(toastTop({ ...phone, cards: false }), null, "a folded column places no toast underneath its hidden cards");
+  const single = columnFacts(null, { top: 108, measured: measureCards({ getBoundingClientRect: () => ({ height: 124 }) }, 1, () => true, () => 124) });
+  assert.equal(toastTop({ ...phone, column: single }), 240, "one drawn card keeps the original 8 px gap");
+});
+
 test("ALERTS-FIRSTCARD: a 359 px desk measures its first trap card, not the whole stack", async () => {
   const { createStore } = await import("zustand/vanilla");
   const { room, trap } = await import("#shared/testutil.ts");
@@ -50,10 +74,6 @@ test("ALERTS-FIRSTCARD: a 359 px desk measures its first trap card, not the whol
     assert.equal(firstHeight(cards), 62, "the 359 px desk must not become the first card");
     const zoom = 1.3;
     const first = firstHeight(cards) / zoom;
-    const measureFrom = source.indexOf("const measured = drawn(cards) ?");
-    const measureTo = source.indexOf(";", measureFrom);
-    assert.ok(measureFrom > 0 && measureTo > measureFrom);
-    const measureCards = new Function("cards", "zoom", "drawn", "firstCardHeight", `${stripTypeScriptTypes(source.slice(measureFrom, measureTo + 1))}\nreturn measured;`);
     const measured = measureCards(cards, zoom, () => true, firstHeight);
     const facts = columnFacts(null, { top: 120, measured });
     assert.ok(facts);
