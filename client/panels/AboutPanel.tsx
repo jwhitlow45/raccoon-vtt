@@ -30,20 +30,22 @@ export default function AboutPanel(_props: PanelProps) {
           <NoticeBlock key={i} block={block} />
         ))}
       </section>
-      <section style={{ display: "grid", gap: theme.space(3) }}>
+      <section style={{ display: "grid", gap: theme.space(2) }}>
         <h3 style={{ margin: 0, fontSize: theme.font.heading, fontWeight: theme.weight.bold }}>Credits</h3>
-        {creditSections().map((section) => [
-          <div key={section.id} style={{ display: "grid", gap: theme.space(1) }}>
-            <h4 style={{ margin: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold }}>{section.heading}</h4>
-            {section.changes ? <p style={{ margin: 0, color: theme.color.textMuted }}>Changes: {section.changes}</p> : null}
-            <ul style={{ margin: 0, paddingLeft: theme.space(5), display: "grid", gap: theme.space(1) }}>
-              {section.rows.map((row) => (
-                <CreditItem key={row.key} row={row} />
-              ))}
-            </ul>
-          </div>,
-          section.id === "icons" ? <TokenIconsCredit key="token-icons" /> : null,
-        ])}
+        <div style={{ display: "grid", gap: theme.space(3) }}>
+          {creditSections().map((section) => [
+            <div key={section.id} style={{ display: "grid", gap: theme.space(1) }}>
+              <h4 style={{ margin: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold }}>{section.heading}</h4>
+              {section.changes ? <p style={{ margin: 0, color: theme.color.textMuted }}>Changes: {section.changes}</p> : null}
+              <ul style={{ margin: 0, paddingLeft: theme.space(5), display: "grid", gap: theme.space(1) }}>
+                {section.rows.map((row) => (
+                  <CreditItem key={row.key} row={row} />
+                ))}
+              </ul>
+            </div>,
+            section.id === "icons" ? <TokenIconsCredit key="token-icons" /> : null,
+          ])}
+        </div>
       </section>
     </div>
   );
@@ -105,7 +107,8 @@ function NoticeBlock(props: { block: Block }) {
           <Spans inline={block.inline} />
         </h3>
       ) : (
-        <h4 style={{ margin: 0, fontSize: theme.font.input, fontWeight: theme.weight.bold }}>
+        // The notice section's gap is space(2), so the negative margin brings an h4 to space(1) over its first block, as the credit names stand over their lists.
+        <h4 style={{ margin: 0, marginBottom: -theme.space(1), fontSize: theme.font.input, fontWeight: theme.weight.bold }}>
           <Spans inline={block.inline} />
         </h4>
       );
