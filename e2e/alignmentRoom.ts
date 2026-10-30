@@ -3021,6 +3021,26 @@ export function helperTest(): void {
       // A group header whose short summary wrapped under its name at the row's end, beside the name across but on a line of its own: one block of two lines, centered as one (DPFIX-MEASURE). Set high, it is caught.
       await passes("summary-under");
       await caught("summary-under-high", "center");
+      // FU40-C: cross the 8 px gap transition one CSS pixel at a time, keeping DP34's displaced-icon control.
+      for (const zoom of [1, 1.3]) for (let width = 204; width <= 232; width++) {
+        const root = page.locator('[data-case="summary-under"]');
+        await root.evaluate((el, at) => {
+          type El = { style: { width: string; zoom: string }; querySelector(s: string): El };
+          const node = el as unknown as El;
+          node.style.width = `${at.width}px`;
+          node.style.zoom = String(at.zoom);
+          node.querySelector("button").style.width = `${at.width}px`;
+        }, { width, zoom });
+        assert.deepEqual(await lines("summary-under"), [], `fu40-c summary at ${width}px, ${zoom * 100}%`);
+        const icon = root.locator("svg");
+        try {
+          await icon.evaluate((el) => { (el as unknown as { style: { transform: string } }).style.transform = "translateY(4px)"; });
+          const found = await lines("summary-under");
+          assert.ok(found.some((line) => line.startsWith("summary-under: center ") || line.startsWith("summary-under: row ")), `fu40-c displaced icon at ${width}px, ${zoom * 100}%: ${JSON.stringify(found)}`);
+        } finally {
+          await icon.evaluate((el) => { (el as unknown as { style: { transform: string } }).style.transform = ""; });
+        }
+      }
       // An icon beside its words but wholly above their line, the two centered only as one block: no wrap put them on lines of their own, so each is caught (DP34-OPUS-4).
       await caught("icon-over-words", "center");
       await passes("chips-wrap");
@@ -4534,6 +4554,49 @@ const atName = (at: { size: Size; scale: number }) => `${at.size.name}${at.scale
 
 /** fu30-a to fu30-d, in the icon pass's fight, and the app icon's places, appicon-a. */
 export function fu30Tests(): void {
+  test("fu40-c-admin. the current HomeHeader accepts a full action row and reports a deliberately orphaned Admin action", async () => {
+    const page = await dmContext.newPage();
+    try {
+      await page.route("**/api/admin/storage", (route) => route.fulfill({ json: {
+        volume: null, databaseBytes: 0, images: { count: 0, bytes: 0 },
+        cleanup: { waiting: { count: 0, bytes: 0 }, trash: { files: 0, bytes: 0 } },
+        backup: { last: null, lastGood: null, warning: null },
+      } }));
+      await page.route("**/api/admin/rooms", (route) => route.fulfill({ json: { rooms: [] } }));
+      for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) for (const zoom of [1, 1.3]) {
+        await page.setViewportSize(size);
+        await page.goto(`${server.origin}/admin`);
+        const header = page.locator("header").filter({ has: page.getByRole("heading", { name: "Server admin", exact: true }) });
+        await header.getByRole("button", { name: "Refresh", exact: true }).waitFor();
+        await page.evaluate(async () => { await (globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }).document.fonts.ready; });
+        await header.evaluate((el, z) => { (el as unknown as { style: { zoom: string } }).style.zoom = String(z); }, zoom);
+        const at = `fu40-c Admin ${size.width}px ${zoom * 100}%`;
+        assert.deepEqual(alignmentLines(await measureAlignment(header), at), [], `${at}: current shared header`);
+        // Keep the real shared layout, icon and actions. A short title leaves room for the actions beside it alone.
+        const wrapped = await header.evaluate((el) => {
+          type El = { textContent: string; style: { flex: string; width: string }; children: ArrayLike<El>; querySelector(s: string): El; currentCSSZoom: number; getBoundingClientRect(): { width: number; top: number; bottom: number }; ownerDocument: { createRange(): { selectNodeContents(e: El): void; getBoundingClientRect(): { width: number } }; defaultView: { getComputedStyle(e: El): { columnGap: string } } } };
+          const node = el as unknown as El;
+          const title = node.querySelector("h1");
+          title.textContent = "Admin";
+          const actions = Array.from(node.children).at(-1)!;
+          actions.style.flex = "0 0 auto";
+          const range = node.ownerDocument.createRange();
+          range.selectNodeContents(title);
+          const z = node.currentCSSZoom;
+          const gap = parseFloat(node.ownerDocument.defaultView.getComputedStyle(node).columnGap);
+          node.style.width = `${Math.ceil((range.getBoundingClientRect().width + actions.getBoundingClientRect().width) / z + gap + 2)}px`;
+          return actions.getBoundingClientRect().top >= title.getBoundingClientRect().bottom && actions.getBoundingClientRect().width < node.getBoundingClientRect().width - 1;
+        });
+        assert.ok(wrapped, `${at}: the negative fixture really orphaned its action group`);
+        assert.ok((await measureAlignment(header)).some((f) => f.check === "wrap-orphan"), `${at}: the orphan must be reported`);
+        await header.locator(":scope > div").last().evaluate((el) => { (el as unknown as { style: { flex: string } }).style.flex = "1 0 auto"; });
+        assert.deepEqual(alignmentLines(await measureAlignment(header), at), [], `${at}: intentional full-width action row`);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   test(`fu30-a. the round header's words and number, and its clock, never sit under Previous or Next, nor are cut, at 1440 x 900, 390 x 844 and 320 x 568 at 100% and 130%, and with an overtime turn's clock at 390 x 844 at 130%, within ${LIMIT_PX} px (ICONS2B-OPUS-06, FU30-OPUS-1)`, async () => {
     const lines: string[] = [];
     for (const at of FU30_AT) {
