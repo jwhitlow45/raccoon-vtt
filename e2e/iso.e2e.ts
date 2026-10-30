@@ -9,6 +9,8 @@ import sharp from "sharp";
 import { ConsoleWatch, openSideTab, OpSocket, pagePoint, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { alignmentLines, LIMIT_PX, measureAlignment } from "./helpers/alignment.ts";
 import { isometric, toWorld, type Turn, type ViewPoint } from "../client/lib/view.ts";
+import { placedOnHex } from "../shared/rules/footprint.ts";
+import { cornerAt, hexCenter, hexCorners, hexNeighbors, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 
 /**
  * The isometric view's choice (docs/design-v1-isometric-view.md 7 and 8,
@@ -352,6 +354,48 @@ async function standeeAt(page: Page, tokenId: string): Promise<{ x: number; y: n
   return at;
 }
 
+
+// ---------------------------------------------------------------- raised hexes (lane HXREL-1)
+
+/** The map's stripes, one cell wide down the scene, so a pixel names the world column it came from. */
+const STRIPES: readonly [number, number, number][] = [
+  [200, 60, 60],
+  [60, 170, 70],
+  [60, 90, 200],
+  [210, 190, 60],
+  [160, 70, 180],
+  [60, 180, 190],
+];
+
+/** A map of STRIPES at 25 px a cell over the scene, uploaded as the DM. */
+async function uploadStripes(bounds: { w: number; h: number }) {
+  const cellPx = 25;
+  const width = bounds.w * cellPx;
+  const height = bounds.h * cellPx;
+  const raw = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) raw.set(STRIPES[Math.floor(x / cellPx) % 6]!, (y * width + x) * 3);
+  const data = await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+  const res = await dmContext.request.put(`${server.origin}/api/rooms/${run.roomId}/assets?kind=map`, { headers: { Origin: server.origin, "content-type": "image/png" }, data });
+  assert.ok(res.ok(), `the upload answered ${res.status()}`);
+  const row = (await res.json()) as { id: string; width: number; height: number };
+  return { assetId: row.id, widthPx: row.width, heightPx: row.height, cellPx, originPx: { x: 0, y: 0 } };
+}
+
+/** A page point's view point on the isometric board. */
+async function viewOf(page: Page, p: { x: number; y: number }): Promise<ViewPoint> {
+  const cam = await isoCamera(page);
+  return { x: (p.x - cam.left - cam.x) / cam.scale, y: (p.y - cam.top - cam.y) / cam.scale } as ViewPoint;
+}
+
+/** The page's color at a point, the average of the 3 by 3 device pixels round it. */
+async function pixelAt(page: Page, p: { x: number; y: number }): Promise<number[]> {
+  const png = await page.screenshot({ clip: { x: p.x - 1, y: p.y - 1, width: 3, height: 3 } });
+  const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const sum = [0, 0, 0];
+  const n = info.width * info.height;
+  for (let i = 0; i < n; i++) for (let c = 0; c < 3; c++) sum[c]! += data[i * 3 + c]!;
+  return sum.map((v) => v / n);
+}
 
 // ---------------------------------------------------------------- areas standing as their real shapes (lane ISOA-2)
 
@@ -1885,6 +1929,134 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     await dm.getByRole("status").filter({ hasText: "Building area shapes…" }).waitFor({ state: "detached" });
     await openSideTab(dm, "Scenes");
     await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^The cavern/ }).first().click();
+  });
+
+  test("HXREL-1. raised hexes stand in Isometric on hex rows and hex columns: a terrace, a stair, a wall on its ground, a connected pit showing each floor's own pixels with one shade, an area at a ledge, fogged hexes flat and remembered ground past a scout's darkvision, every turn, phone and desktop at 100% and 130%", async () => {
+    if (dmSocket.state?.encounter) await ops.send({ t: "encounter.end" });
+    const dmId = dmSocket.you!.memberId;
+    const bounds = { w: 16, h: 16 };
+    const map = await uploadStripes(bounds);
+    for (const shape of ["hexRows", "hexColumns"] as const) {
+      const G: HexGrid = { shape: "hex", orient: shape === "hexRows" ? "rows" : "columns" };
+      // Written for hex rows. Hex columns take the mirror, so every key and point swaps its axes.
+      const key = (col: number, row: number) => (shape === "hexRows" ? `${col},${row}` : `${row},${col}`);
+      const hex = (col: number, row: number): Hex => (shape === "hexRows" ? { col, row } : { col: row, row: col });
+      const sceneId = randomUUID();
+      const goblin = randomUUID();
+      const ogre = randomUUID();
+      const area = randomUUID();
+      await ops.send({ t: "scene.create", scene: { id: sceneId, name: `HXREL ${shape}`, bounds, fogEnabled: true, gridShape: shape } });
+      await ops.send({ t: "scene.setMap", sceneId, map });
+      await ops.send({ t: "scene.update", sceneId, patch: { blockMovement: false, defaultView: { x: 8, y: 8, zoom: 40 } } });
+      // A terrace: a ring at 10 ft round a 20 ft hex, and a row of alternating 5 ft and 0 ft hexes that shows their sides.
+      const terrace = hexNeighbors(G, hex(4, 4)).map((h) => `${h.col},${h.row}`);
+      await ops.send({ t: "build.height", sceneId, cells: terrace, height: 10 });
+      await ops.send({ t: "build.height", sceneId, cells: [key(4, 4)], height: 20 });
+      await ops.send({ t: "build.height", sceneId, cells: [2, 4, 6].map((c) => key(c, 1)), height: 5 });
+      // A stair up the terrace's near side.
+      await ops.send({ t: "build.height", sceneId, cells: [key(4, 7)], height: 5 });
+      await ops.send({ t: "build.stairs", sceneId, cells: [key(4, 7)], up: "a" });
+      // A connected pit: six by five hexes at -10 ft, one of them at -5 ft.
+      const pit: string[] = [];
+      for (let row = 6; row <= 10; row++) for (let col = 9; col <= 14; col++) pit.push(key(col, row));
+      await ops.send({ t: "build.height", sceneId, cells: pit, height: -10 });
+      await ops.send({ t: "build.height", sceneId, cells: [key(13, 7)], height: -5 });
+      // A wall along the side between the 20 ft hex and its east neighbor, so it stands on 20 ft.
+      const corners = hexCorners(G, hex(4, 4)).map((c) => cornerAt(G, c));
+      await ops.send({ t: "build.walls", sceneId, put: [{ id: "hxrelwall001", a: [corners[1]!.x, corners[1]!.y], b: [corners[2]!.x, corners[2]!.y], f: { kind: "wall" } }] });
+      // A goblin on the terrace, an ogre across its ledge, and a 10 ft sphere at the ledge.
+      const at = (h: Hex) => hexCenter(G, h);
+      await ops.send(tokenOp(goblin, { sceneId, kind: "monster", name: "Goblin", ...placedOnHex(G, { size: "medium", x: 0, y: 0 }, hex(5, 4)), elevation: 10, disposition: "hostile" }));
+      await ops.send(tokenOp(ogre, { sceneId, kind: "monster", name: "Ogre", size: "large", ...placedOnHex(G, { size: "large", x: 0, y: 0 }, hex(3, 6)), elevation: 0, disposition: "hostile" }));
+      await ops.send({ t: "template.create", template: { id: area, sceneId, shape: "sphere", size: 10, origin: { ...at(hex(6, 5)), z: 5 }, yaw: 0, includeOrigin: true, color: SPHERE, ownerId: dmId, visibility: "all" } });
+      // Pat sees all but a strip on the right, where the hexes lie flat under the fog.
+      await ops.send({ t: "fog.live", sceneId, ops: [{ id: randomUUID(), mode: "reveal", shape: shape === "hexRows" ? { kind: "rect", x: 0, y: 0, w: 15, h: 16 } : { kind: "rect", x: 0, y: 0, w: 16, h: 15 } }] });
+      await ops.send({ t: "room.setPlayerScene", sceneId });
+      await waitFor(`Pat on ${shape}`, () => (patSocket.state?.meta.playerSceneId === sceneId ? true : null));
+      await reopenRoom(pat);
+      await dm.bringToFront();
+      await openSideTab(dm, "Scenes");
+      await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: new RegExp(`^HXREL ${shape}`) }).first().click();
+
+      // The pixel case, on Pat's phone at turn 0: a floor far in the pit shows through a nearer hex's opening in its own color, darkened once.
+      await pat.bringToFront();
+      await isoOn(pat, 0);
+      await pat.waitForTimeout(800);
+      const view = isometric(0);
+      for (const [col, row] of [
+        [9, 6],
+        [10, 6],
+      ] as const) {
+        const floor = at(hex(col, row));
+        const shown = await isoPoint(pat, floor, -2);
+        const v = await viewOf(pat, shown);
+        const opening = toWorld(view, v, 0);
+        assert.notEqual(Math.floor(opening.x) % 6, Math.floor(floor.x) % 6, `${shape}: the opening's own ground is another stripe`);
+        const px = await pixelAt(pat, shown);
+        const want = STRIPES[Math.floor(floor.x) % 6]!.map((c) => c * 0.6);
+        assert.ok(
+          px.every((c, i) => Math.abs(c - want[i]!) <= 14),
+          `${shape} floor ${col},${row}: ${px} where its own stripe, shaded once, is ${want.map(Math.round)}`,
+        );
+      }
+
+      // Night, and Pat's scout who sees 30 ft in the dark. It looks over the hollow from its rim, then climbs to the goblin's terrace,
+      // where Pat's board stands the goblin (seen from the ground beside the terrace, it lay flat). Past its sight there, the hollow
+      // Pat saw stays, remembered, for the shots below.
+      const scout = randomUUID();
+      const scoutOp = tokenOp(scout, { sceneId, kind: "npc", name: "Scout", ...placedOnHex(G, { size: "medium", x: 0, y: 0 }, hex(12, 4)), ownerIds: [patSocket.you!.memberId], disposition: "ally" });
+      scoutOp.token.actor.inline.senses = "Darkvision 30 ft.";
+      await ops.send(scoutOp);
+      await ops.send({ t: "scene.update", sceneId, patch: { vision: { on: true, light: "dark" } } });
+      await waitFor(`the hollow explored on ${shape}`, () => (Object.keys(dmSocket.state?.exploredTiles ?? {}).some((k) => k.startsWith(`${sceneId}:`)) ? true : null));
+      const perch = hexNeighbors(G, hex(5, 4))
+        .filter((h) => terrace.includes(`${h.col},${h.row}`))
+        .sort((a, b) => at(b).x + at(b).y - (at(a).x + at(a).y))[0]!;
+      await ops.send({ t: "token.move", tokenId: scout, ...placedOnHex(G, { size: "medium", x: 0, y: 0 }, perch), elevation: 10 });
+      await waitFor(`the goblin in Pat's copy by the scout's sight on ${shape}`, () => (patSocket.state?.tokens[goblin] ? true : null));
+
+      for (const scale of [1, 1.3]) {
+        for (const [page, who, size] of [
+          [pat, "pat", { width: 390, height: 844 }],
+          [dm, "dm", { width: 1440, height: 900 }],
+        ] as const) {
+          await page.bringToFront();
+          await page.setViewportSize(size);
+          await page.evaluate((v) => localStorage.setItem("rvtt.uiScale", String(v)), scale);
+          await reopenRoom(page);
+          if (page === dm) {
+            await openSideTab(dm, "Scenes");
+            await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: new RegExp(`^HXREL ${shape}`) }).first().click();
+          }
+          for (const turn of [0, 1, 2, 3] as const) {
+            await isoOn(page, turn);
+            const l = await layoutWhen(page, `${who}'s board at turn ${turn}`, (x) => x.order.some((e) => e.kind === "standee" && e.id === goblin) && !x.waiting);
+            // At night Pat sees the sphere only where the scout does, so the DM's board is the one to say it stands.
+            if (page === dm) assert.ok(l.standing.includes(area), `${shape} turn ${turn}: the sphere stands at the ledge`);
+            await shots.take(page, `hxrel-${shape}-${who}-${size.width}x${size.height}-${Math.round(scale * 100)}-turn${turn}`);
+          }
+        }
+      }
+      for (const page of [pat, dm]) {
+        await page.evaluate(() => localStorage.removeItem("rvtt.uiScale"));
+      }
+      await pat.setViewportSize({ width: 390, height: 844 });
+      await dm.setViewportSize({ width: 1280, height: 800 });
+      if (shape === "hexRows") {
+        // The DM guide's picture of it, on a computer's 1280 by 800 window (client/features/guide/guide.ts).
+        await reopenRoom(dm);
+        await openSideTab(dm, "Scenes");
+        await dm.getByRole("tabpanel", { name: "Scenes" }).getByRole("button", { name: /^HXREL hexRows/ }).first().click();
+        await isoOn(dm, 0);
+        await layoutWhen(dm, "the DM's board for the guide", (x) => x.order.some((e) => e.kind === "standee" && e.id === goblin) && !x.waiting);
+        await shots.take(dm, "hxrel-guide-hexRows-dm-1280x800");
+      }
+    }
+    await ops.send({ t: "room.setPlayerScene", sceneId: run.sceneId });
+    await reopenRoom(pat);
+    await reopenRoom(dm);
+    assert.deepEqual(consoles.dm.errors, [], "the DM's board drew without an error");
+    assert.deepEqual(consoles.pat.errors, [], "Pat's board drew without an error");
   });
 
   test("ISO-12. no page logged an error", () => {
