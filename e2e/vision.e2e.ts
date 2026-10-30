@@ -640,12 +640,14 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
     await pickOption(dm, "Map builder", "Builder mode", "Heights and stairs");
     const stepper = dm.getByRole("group", { name: "Height" });
     const plus = stepper.getByRole("button", { name: "5 ft higher" });
-    assert.equal((await stepper.innerText()).trim(), "10 ft up");
+    // The value alone: the group also holds each button's tooltip, which keyboard focus shows 150 ms later (Tooltip.tsx FOCUS_MS).
+    const height = async () => (await stepper.locator("[aria-live]").innerText()).trim();
+    assert.equal(await height(), "10 ft up");
     const b = await plus.boundingBox();
     assert.ok(b);
     await dm.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
     await dm.mouse.down();
-    await waitFor("the stepper at 100 ft", async () => (await stepper.innerText()).trim() === "100 ft up", 5_000);
+    await waitFor("the stepper at 100 ft", async () => (await height()) === "100 ft up", 5_000);
     assert.equal(await plus.getAttribute("aria-disabled"), "true");
     await waitFor("the value spoken again before the lift", async () => (await stepper.locator("[aria-live]").getAttribute("aria-live")) === "polite");
     await shots.take(dm, "vision-dm-stepper-held-to-100");
@@ -662,7 +664,7 @@ describe("raccoon-vtt vision run", { timeout: 300_000 }, () => {
       await button.focus();
       for (let i = 0; i < 30; i++) await dm.keyboard.down("Enter");
       await dm.keyboard.up("Enter");
-      assert.equal((await stepper.innerText()).trim(), end, `a held Enter on ${name}`);
+      assert.equal(await height(), end, `a held Enter on ${name}`);
       assert.equal(await focused(), name, `the focus left ${name} at its limit`);
       assert.equal(await button.getAttribute("aria-disabled"), "true");
       assert.equal(await button.evaluate((b) => (b as unknown as { disabled: boolean }).disabled), false, "a button at its limit stays focusable");

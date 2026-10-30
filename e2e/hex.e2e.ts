@@ -1903,7 +1903,8 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     await pickTool(dm, "Map builder");
     await pickOption(dm, "Map builder", "Builder mode", "Heights and stairs");
     const bar = buildBar(dm);
-    assert.equal((await bar.getByRole("group", { name: "Height" }).innerText()).trim(), "10 ft up");
+    // The value alone, not the stepper's buttons' tooltips the group also holds.
+    assert.equal((await bar.getByRole("group", { name: "Height" }).locator("[aria-live]").innerText()).trim(), "10 ft up");
     await holdDrag(dm, hexCenter(G, TERRACE[0]!), hexCenter(G, TERRACE[4]!));
     await dm.mouse.up();
     await waitFor("the terrace's five hexes at 10 ft", () => (TERRACE.every((h) => groundOf(h) === 10) ? true : null));
