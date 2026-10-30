@@ -1,12 +1,25 @@
 import { connect } from "node:net";
 import type pg from "pg";
+import { holdsOp } from "#shared/logRings.ts";
 import type { LogNames } from "#shared/logText.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { SessionFold, type LogSession } from "../http/logExport.ts";
 import { previewOmits } from "./fanout.ts";
 import { ScanBusyError, ScanCancelledError, type Scan } from "./logScanBudget.ts";
-import { declareLogScan, fetchLogIds, readLogEntries, type LogBound, type LogScanRange } from "./persistence.ts";
+import {
+  archiveIncomplete,
+  declareLogScan,
+  fetchAccessIds,
+  fetchLogIds,
+  readerStreams,
+  readLogEntries,
+  readLogLines,
+  readOpLinesByAccess,
+  type LogAccess,
+  type LogBound,
+  type LogScanRange,
+} from "./persistence.ts";
 
 /**
  * The one reader of the log archive (docs/design-v1-dm-tools.md 3.10 and
@@ -23,6 +36,16 @@ import { declareLogScan, fetchLogIds, readLogEntries, type LogBound, type LogSca
  * admitted by the scan budget (logScanBudget.ts), until the answer is full
  * or the archive is done. A scan that cannot finish fails the request,
  * never answers short.
+ *
+ * Two readers give the same answers. The indexed one reads only the
+ * caller's own few streams of candidates (room_log_access, by its key),
+ * a quantum at a time on a connection held for that quantum alone. The raw
+ * one walks every row of the room in id order through a cursor. A request
+ * uses the indexed reader only when the access table's partial index is
+ * built (HistoryMetadata.ready) and the room holds no row without its
+ * metadata, which it asks of the database itself before every read: never
+ * a stored flag, so a row an older server wrote sends the read back to the
+ * raw reader until the background job completes it.
  */
 
 /** Source rows read and projected in one turn. */
@@ -173,6 +196,16 @@ export async function admissionHolds(pool: Pick<pg.Pool, "query">, a: HistoryAdm
 
 // The reader ----------------------------------------------------------------
 
+/**
+ * What the reader needs of the metadata worker (logHistoryMigration.ts):
+ * whether its partial index is valid, so the completeness check is quick,
+ * and where to say that a room needs its rows completed. Saying so only
+ * queues the work, outside the request.
+ */
+export type HistoryMetadata = { readonly ready: boolean; want(roomId: string): void };
+
+export type HistoryReader = "indexed" | "raw";
+
 export type HistoryPage = { entries: LogEntry[]; nextBefore: string | null; nextAfter: string | null };
 export type SessionPage = { sessions: LogSession[]; lines: number; nextSessionsBefore: string | null };
 /** What an export covers: an id range (inclusive), or the older time filter, or everything. */
@@ -187,9 +220,14 @@ export type LogHistoryOptions = {
   cancel?: (client: pg.PoolClient) => Promise<void>;
   batchRows?: number;
   summaryBytes?: number;
+  /** The metadata worker. Without one every read is raw. */
+  metadata?: HistoryMetadata;
   /** For tests: runs in each batch's turn, after its rows are read. */
-  onBatch?: (what: { roomId: string; pass: "page" | "sessions" | "bounds" | "lines" }) => Promise<void>;
+  onBatch?: (what: { roomId: string; pass: "page" | "sessions" | "bounds" | "lines"; reader: HistoryReader }) => Promise<void>;
 };
+
+/** One stream's candidates read ahead of the merge, and where the next read of it starts. */
+type StreamCursor = { access: LogAccess; buffer: { id: string; seq: string; line: number }[]; last: { seq: string; line: number } | null; done: boolean };
 
 export class LogHistory {
   #pool: Pick<pg.Pool, "connect">;
@@ -197,6 +235,7 @@ export class LogHistory {
   #batchRows: number;
   #summaryBytes: number;
   #onBatch: LogHistoryOptions["onBatch"];
+  #metadata: HistoryMetadata | undefined;
   /** Canonical session lists, least recently used first. */
   #summaries = new Map<string, Canonical>();
   #summaryTotal = 0;
@@ -209,12 +248,146 @@ export class LogHistory {
     this.#batchRows = opts.batchRows ?? HISTORY_BATCH_ROWS;
     this.#summaryBytes = opts.summaryBytes ?? SUMMARY_BYTES;
     this.#onBatch = opts.onBatch;
+    this.#metadata = opts.metadata;
   }
 
   /**
    * The view's readable lines over a range, a batch at a time, each batch
-   * projected in its own turn. Batches with nothing readable are passed
-   * over, never answered.
+   * projected in its own turn, from the indexed reader when the room's
+   * metadata is complete and from the raw one otherwise (see above).
+   * Batches with nothing readable are passed over, never answered.
+   */
+  async *batches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
+    if (await this.#indexed(view.roomId, scan)) yield* this.#indexedBatches(view, range, scan, pass);
+    else yield* this.#rawBatches(view, range, scan, pass);
+  }
+
+  /** Whether this request may use the indexed reader. A room that may not is queued for the background job. */
+  async #indexed(roomId: string, scan: Scan): Promise<boolean> {
+    const metadata = this.#metadata;
+    if (!metadata?.ready) {
+      metadata?.want(roomId);
+      return false;
+    }
+    const incomplete = await this.#quantum(scan, (client) => archiveIncomplete(client, roomId));
+    if (incomplete) metadata.want(roomId);
+    return !incomplete;
+  }
+
+  /**
+   * The indexed reader. Each quantum reads ahead at most `batchRows`
+   * candidates of each of the viewer's streams, merges them in id order,
+   * takes at most `batchRows` of them, reads those rows by key and projects
+   * them. Candidates read ahead and not taken wait in their stream for the
+   * next quantum, so a stream is only ever read past what was taken. A row
+   * the viewer may not read costs a candidate and nothing else.
+   */
+  async *#indexedBatches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
+    const full: LogScanRange = { ...range, roomId: view.roomId, maxSeq: view.seq };
+    const asc = range.order === "asc";
+    const streams: StreamCursor[] = readerStreams(view.viewer).map((access) => ({ access, buffer: [], last: null, done: false }));
+    const n = this.#batchRows;
+    for (;;) {
+      const batch = await this.#quantum(scan, async (client) => {
+        for (const s of streams) {
+          if (s.done || s.buffer.length >= n) continue;
+          const want = n - s.buffer.length;
+          const got = await fetchAccessIds(client, full, s.access, s.last, want);
+          if (got.length > 0) {
+            s.buffer.push(...got);
+            s.last = got[got.length - 1]!;
+          }
+          if (got.length < want) s.done = true;
+        }
+        const ids: string[] = [];
+        let prev: string | null = null;
+        // Every stream not yet done holds n candidates now, so n takes never leave one empty that could hold the next.
+        for (let taken = 0; taken < n; taken++) {
+          if (streams.some((s) => !s.done && s.buffer.length === 0)) break;
+          let best: StreamCursor | null = null;
+          for (const s of streams) {
+            const head = s.buffer[0];
+            if (head && (!best || compareKeys(head, best.buffer[0]!) * (asc ? 1 : -1) < 0)) best = s;
+          }
+          if (!best) break;
+          const head = best.buffer.shift()!;
+          // A row in two of one viewer's streams would come twice in a row: it is read once.
+          if (head.id !== prev) ids.push(head.id);
+          prev = head.id;
+        }
+        const rows = await readLogEntries(client, view.roomId, ids);
+        await this.#onBatch?.({ roomId: view.roomId, pass, reader: "indexed" });
+        return { entries: projectRows(view, rows), done: streams.every((s) => s.done && s.buffer.length === 0) };
+      });
+      if (batch.entries.length > 0) yield batch.entries;
+      if (batch.done) return;
+    }
+  }
+
+  /**
+   * One turn's work on a connection taken in the turn and let go before the
+   * turn ends, so the scan holds no connection while it waits for its next
+   * turn or for its reader. Each step is bounded as the raw reader's are: the
+   * checkout by the pool's timeout or the cancel, each query by the pool's
+   * query timeout. A cancelled or failed quantum sends its backend a cancel
+   * request and destroys the connection, with no more SQL on it, and the
+   * scan keeps its lease until that is done (Scan.retain). A connection the
+   * pool cannot give now frees the turn and is asked for again, until the
+   * lease wait runs out.
+   */
+  async #quantum<T>(scan: Scan, fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+    let unavailableSince: number | null = null;
+    for (;;) {
+      try {
+        return await scan.batch(() => this.#onConnection(scan, fn));
+      } catch (err) {
+        if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
+        if (!(err instanceof ConnectionUnavailable)) throw err;
+        unavailableSince ??= scan.now();
+        if (scan.now() - unavailableSince >= CONNECTION_WAIT_MS) throw new ScanBusyError();
+        await scan.wait(CONNECTION_RETRY_MS);
+      }
+    }
+  }
+
+  async #onConnection<T>(scan: Scan, fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.#connect(scan);
+    const letGo = scan.retain();
+    let ended = false;
+    const onEnd = () => {
+      ended = true;
+    };
+    client.once("end", onEnd);
+    let dropping: Promise<void> | null = null;
+    const drop = (): Promise<void> =>
+      (dropping ??= (async () => {
+        if (!ended) await this.#cancelBackend(client);
+        client.release(true);
+        letGo();
+      })());
+    const onAbort = () => void drop();
+    scan.signal.addEventListener("abort", onAbort);
+    try {
+      if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
+      return await fn(client);
+    } catch (err) {
+      await drop();
+      if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
+      throw err;
+    } finally {
+      scan.signal.removeEventListener("abort", onAbort);
+      client.removeListener("end", onEnd);
+      if (dropping) await dropping;
+      else if (ended) await drop();
+      else {
+        client.release();
+        letGo();
+      }
+    }
+  }
+
+  /**
+   * The raw reader: every row of the range in id order, a batch at a time.
    *
    * The cursor's connection is taken in the first turn and held to the end,
    * and the scan keeps its lease until the connection is physically back in
@@ -232,7 +405,7 @@ export class LogHistory {
    * A connection the pool cannot give now frees the turn and is asked for
    * again, until the lease wait runs out.
    */
-  async *batches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
+  async *#rawBatches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
     let client: pg.PoolClient | null = null;
     let letGo: (() => void) | null = null;
     let dropping: Promise<void> | null = null;
@@ -277,7 +450,7 @@ export class LogHistory {
             const held = client as pg.PoolClient;
             const ids = await fetchLogIds(held, CURSOR, this.#batchRows);
             const rows = await readLogEntries(held, view.roomId, ids);
-            await this.#onBatch?.({ roomId: view.roomId, pass });
+            await this.#onBatch?.({ roomId: view.roomId, pass, reader: "raw" });
             return { entries: projectRows(view, rows), done: ids.length < this.#batchRows };
           });
         } catch (err) {
@@ -553,6 +726,13 @@ function untilCancelled<T>(work: Promise<T>, scan: Scan): Promise<T> {
   });
 }
 
+/** Two candidates' order by op seq, then line number. The seq is bigint text with no leading zero, so its length orders first. */
+function compareKeys(a: { seq: string; line: number }, b: { seq: string; line: number }): number {
+  if (a.seq.length !== b.seq.length) return a.seq.length - b.seq.length;
+  if (a.seq !== b.seq) return a.seq < b.seq ? -1 : 1;
+  return a.line - b.line;
+}
+
 /** A view's readable lines among `rows`, against its one captured state. */
 function projectRows(view: HistoryView, rows: readonly LogEntry[]): LogEntry[] {
   const projected = projectArchivedLog(view.state, rows, view.viewer, { sceneId: view.sceneId });
@@ -581,4 +761,141 @@ export function sliceSessions(sessions: readonly LogSession[], before: string | 
   const start = Math.max(0, end - limit);
   const page = sessions.slice(start, end).reverse();
   return { sessions: page, nextSessionsBefore: start > 0 ? page[page.length - 1]!.firstId : null };
+}
+
+// Receipts ------------------------------------------------------------------
+
+/** How long a receipt lookup may wait for its connection, and run each query. */
+const RECEIPT_CHECKOUT_MS = 1_000;
+const RECEIPT_QUERY_MS = 5_000;
+
+export type ReceiptLinesOptions = {
+  /** The pool the lookup takes its one connection from. */
+  pool: Pick<pg.Pool, "connect">;
+  metadata?: HistoryMetadata;
+  cancel?: (client: pg.PoolClient) => Promise<void>;
+  checkoutMs?: number;
+  queryMs?: number;
+};
+
+/**
+ * The lines committed ops wrote, for the receipt lookup
+ * (server/http/receipts.ts), unprojected: the caller projects them against
+ * the one state it captured. Once the room's metadata is complete they are
+ * read by the caller's own streams and the op's seq, the access table's key
+ * (design: access-prefix receipts), and otherwise by the raw query, which
+ * reads every row of the room to find the op's. Either way the projection
+ * decides what the caller gets, so the two give the same answer.
+ *
+ * Every step is bounded and stops at the request's cancel: the checkout by
+ * `checkoutMs` (a connection handed over after that is destroyed), each
+ * query by `queryMs`. A cancelled or failed lookup sends its backend a
+ * cancel request and destroys the connection, with no more SQL on it.
+ */
+export class ReceiptLines {
+  #pool: Pick<pg.Pool, "connect">;
+  #metadata: HistoryMetadata | undefined;
+  #cancel: (client: pg.PoolClient) => Promise<void>;
+  #checkoutMs: number;
+  #queryMs: number;
+
+  constructor(opts: ReceiptLinesOptions) {
+    this.#pool = opts.pool;
+    this.#metadata = opts.metadata;
+    this.#cancel = opts.cancel ?? cancelRequest;
+    this.#checkoutMs = opts.checkoutMs ?? RECEIPT_CHECKOUT_MS;
+    this.#queryMs = opts.queryMs ?? RECEIPT_QUERY_MS;
+  }
+
+  /** Each seq's lines, read on one connection after one completeness check. */
+  async read(roomId: string, seqs: readonly number[], viewer: Viewer, signal: AbortSignal): Promise<Map<number, LogEntry[]>> {
+    const out = new Map<number, LogEntry[]>();
+    if (seqs.length === 0) return out;
+    await this.#withConnection(signal, async (q) => {
+      const metadata = this.#metadata;
+      let indexed = false;
+      if (metadata?.ready) {
+        indexed = !(await archiveIncomplete(q, roomId));
+        if (!indexed) metadata.want(roomId);
+      } else metadata?.want(roomId);
+      const streams = readerStreams(viewer);
+      for (const seq of seqs) {
+        if (out.has(seq)) continue;
+        out.set(seq, indexed ? await readOpLinesByAccess(q, roomId, seq, streams) : await readLogLines(q, roomId, seq));
+      }
+    });
+    return out;
+  }
+
+  async #withConnection(signal: AbortSignal, fn: (q: Pick<pg.PoolClient, "query">) => Promise<void>): Promise<void> {
+    const client = await checkout(this.#pool, signal, this.#checkoutMs);
+    let ended = false;
+    const onEnd = () => {
+      ended = true;
+    };
+    client.once("end", onEnd);
+    let dropping: Promise<void> | null = null;
+    const drop = (): Promise<void> =>
+      (dropping ??= (async () => {
+        if (!ended) await this.#cancel(client).catch(() => undefined);
+        client.release(true);
+      })());
+    const onAbort = () => void drop();
+    signal.addEventListener("abort", onAbort);
+    const queryMs = this.#queryMs;
+    const bounded = { query: (text: string, values?: unknown[]) => client.query({ text, values, query_timeout: queryMs } as pg.QueryConfig) } as Pick<pg.PoolClient, "query">;
+    try {
+      if (signal.aborted) throw new ScanCancelledError(signal.reason);
+      await fn(bounded);
+    } catch (err) {
+      await drop();
+      if (signal.aborted) throw new ScanCancelledError(signal.reason);
+      throw err;
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+      client.removeListener("end", onEnd);
+      if (dropping) await dropping;
+      else if (ended) await drop();
+      else client.release();
+    }
+  }
+}
+
+/** A connection from `pool` within `ms`, or ScanBusyError, or ScanCancelledError at the cancel. One handed over after either is destroyed. */
+function checkout(pool: Pick<pg.Pool, "connect">, signal: AbortSignal, ms: number): Promise<pg.PoolClient> {
+  if (signal.aborted) return Promise.reject(new ScanCancelledError(signal.reason));
+  return new Promise<pg.PoolClient>((resolve, reject) => {
+    let settled = false;
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(err);
+    };
+    const onAbort = () => fail(new ScanCancelledError(signal.reason));
+    const timer = setTimeout(() => fail(new ScanBusyError()), ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+    pool.connect().then(
+      (client) => {
+        if (settled) {
+          client.release(true);
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        resolve(client);
+      },
+      (err: unknown) => fail(err instanceof Error ? err : new Error(String(err))),
+    );
+  });
+}
+
+/** The lines op `seq` wrote that the in-memory log of `state` still holds for the viewer, or null once some may have left it. */
+export function heldOpLines(state: RoomState, viewer: Viewer, seq: number): LogEntry[] | null {
+  if (!holdsOp(state, viewer, seq)) return null;
+  const prefix = `${seq}:`;
+  const lines = state.log.filter((e) => e.id.startsWith(prefix));
+  return lines.length > 0 ? lines : null;
 }
