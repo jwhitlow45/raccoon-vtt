@@ -376,7 +376,52 @@ function outsideMemberRings(log: readonly LogEntry[], members: Roster): string[]
 
 type LogRoom = Pick<RoomState, "log" | "members">;
 
-const starts = new WeakMap<readonly LogEntry[], WeakMap<Roster, Map<string, string | null>>>();
+type LiveStarts = { dm: string | null; members: Map<string, string> };
+const starts = new WeakMap<readonly LogEntry[], WeakMap<Roster, LiveStarts>>();
+
+/** All rings share one backwards pass. A member stops counting once their newest full ring is found. */
+function liveStarts({ log, members }: LogRoom): LiveStarts {
+  const writable = isWritable(log) || isWritable(members);
+  const cached = writable ? undefined : starts.get(log)?.get(members);
+  if (cached) return cached;
+  let largest = Object.keys(members).length;
+  for (const e of log) if (e.data?.type === "member" && e.data.action === "remove") largest++;
+  largest = Math.min(largest, LIMITS.membersPerRoom);
+  const bounds = { whisper: memberRing("whisper", largest), party: memberRing("party", largest) };
+  const rings = new Map<string, { whisper: MemberRing; party: MemberRing }>();
+  const out: LiveStarts = { dm: null, members: new Map() };
+  let dm = 0;
+  for (let i = log.length - 1; i >= 0; i--) {
+    const e = log[i]!;
+    const audience = lineAudience(e);
+    if (audience === "dm") {
+      if (++dm === LIMITS.dmLogLines) out.dm = e.id;
+      continue;
+    }
+    if (audience !== "whisper" && audience !== "party") continue;
+    const bytes = lineBytes(e);
+    for (const id of ringMembers(e)) {
+      if (out.members.has(id)) continue;
+      let counts = rings.get(id);
+      if (!counts) rings.set(id, (counts = { whisper: { lines: 0, bytes: 0 }, party: { lines: 0, bytes: 0 } }));
+      const ring = counts[audience];
+      ring.lines++;
+      ring.bytes += bytes;
+      if (ring.lines === bounds[audience].lines || ring.bytes > bounds[audience].bytes - LIMITS.apartLineBytes) out.members.set(id, e.id);
+    }
+  }
+  if (!writable) {
+    let byRoster = starts.get(log);
+    if (!byRoster) starts.set(log, (byRoster = new WeakMap()));
+    byRoster.set(members, out);
+  }
+  return out;
+}
+
+function startFor(starts: LiveStarts, viewer: Viewer): string | null {
+  const own = starts.members.get(viewer.memberId) ?? null;
+  return viewer.role === "dm" && starts.dm !== null && (own === null || compareLogIds(starts.dm, own) > 0) ? starts.dm : own;
+}
 
 /**
  * The oldest line of a viewer's live log, or null for all of it: the
@@ -398,41 +443,7 @@ const starts = new WeakMap<readonly LogEntry[], WeakMap<Roster, Map<string, stri
  * oldest shared line then always lies before where the live log starts.
  */
 export function liveStart(room: LogRoom, viewer: Viewer): string | null {
-  const { log, members } = room;
-  const key = `${viewer.role}|${viewer.memberId}`;
-  const cached = starts.get(log)?.get(members)?.get(key);
-  if (cached !== undefined) return cached;
-  let largest = Object.keys(members).length;
-  for (const e of log) if (e.data?.type === "member" && e.data.action === "remove") largest++;
-  largest = Math.min(largest, LIMITS.membersPerRoom);
-  const dmViewer = viewer.role === "dm";
-  const bounds = { whisper: memberRing("whisper", largest), party: memberRing("party", largest) };
-  const rings = { whisper: { lines: 0, bytes: 0 }, party: { lines: 0, bytes: 0 } };
-  let start: string | null = null;
-  let dm = 0;
-  // Newest first, so the first ring to fill is the newer start.
-  for (let i = log.length - 1; i >= 0 && start === null; i--) {
-    const e = log[i]!;
-    const audience = lineAudience(e);
-    if (audience === "dm") {
-      if (dmViewer && ++dm === LIMITS.dmLogLines) start = e.id;
-      continue;
-    }
-    const kind = audience === "whisper" ? "whisper" : audience === "party" ? "party" : null;
-    if (kind === null || !ringMembers(e).includes(viewer.memberId)) continue;
-    const ring = rings[kind];
-    ring.lines++;
-    ring.bytes += lineBytes(e);
-    if (ring.lines === bounds[kind].lines || ring.bytes > bounds[kind].bytes - LIMITS.apartLineBytes) start = e.id;
-  }
-  if (!isWritable(log) && !isWritable(members)) {
-    let byRoster = starts.get(log);
-    if (!byRoster) starts.set(log, (byRoster = new WeakMap()));
-    let byViewer = byRoster.get(members);
-    if (!byViewer) byRoster.set(members, (byViewer = new Map()));
-    byViewer.set(key, start);
-  }
-  return start;
+  return startFor(liveStarts(room), viewer);
 }
 
 /**
@@ -464,21 +475,36 @@ export function linesPastStart(beforeRoom: LogRoom, afterRoom: LogRoom, viewers:
   const before = beforeRoom.log;
   const after = afterRoom.log;
   if (before === after && beforeRoom.members === afterRoom.members) return [];
-  const out = new Set<string>();
-  const done = new Set<string>();
-  for (const viewer of viewers) {
-    const key = `${viewer.role}|${viewer.memberId}`;
-    if (done.has(key)) continue;
-    done.add(key);
-    const a = liveStart(beforeRoom, viewer);
-    const b = liveStart(afterRoom, viewer);
+  const all = [...viewers];
+  if (all.length === 0) return [];
+  const startsBefore = liveStarts(beforeRoom);
+  const startsAfter = liveStarts(afterRoom);
+  const ranges: { lo: string | null; hi: string }[] = [];
+  for (const viewer of all) {
+    const a = startFor(startsBefore, viewer);
+    const b = startFor(startsAfter, viewer);
     if (a === b) continue;
     const [lo, hi] = a === null ? [null, b!] : b === null ? [null, a] : compareLogIds(a, b) < 0 ? [a, b] : [b, a];
-    for (const log of [before, after]) {
-      for (const e of log) {
-        if (compareLogIds(e.id, hi) >= 0) break;
-        if (lo === null || compareLogIds(e.id, lo) >= 0) out.add(e.id);
-      }
+    ranges.push({ lo, hi });
+  }
+  if (ranges.length === 0) return [];
+  ranges.sort((a, b) => a.lo === b.lo ? 0 : a.lo === null ? -1 : b.lo === null ? 1 : compareLogIds(a.lo, b.lo));
+  const merged: typeof ranges = [];
+  for (const range of ranges) {
+    const last = merged.at(-1);
+    if (last && (range.lo === null || compareLogIds(range.lo, last.hi) <= 0)) {
+      if (compareLogIds(range.hi, last.hi) > 0) last.hi = range.hi;
+    } else merged.push({ ...range });
+  }
+  const out = new Set<string>();
+  // Each log is in id order, so overlapping viewer ranges cost one scan together.
+  for (const log of [before, after]) {
+    let i = 0;
+    for (const e of log) {
+      while (i < merged.length && compareLogIds(e.id, merged[i]!.hi) >= 0) i++;
+      const range = merged[i];
+      if (!range) break;
+      if (range.lo === null || compareLogIds(e.id, range.lo) >= 0) out.add(e.id);
     }
   }
   return [...out];

@@ -26,6 +26,7 @@ import { applyChanges, dependents, diffProjection, heldOf, lineReach, projectArc
 import { MAX_CHAT, MAX_OWNERS, type Op } from "./protocol.ts";
 import { applyOp } from "./reducer.ts";
 import { TOO_MANY_LINES, Tx } from "./reducer/tx.ts";
+import { markWritable } from "./writable.ts";
 import { AT, DM, P1, P2, chance, effect, member, pick, randomState, rng, room, token } from "./testutil.ts";
 
 /**
@@ -687,5 +688,99 @@ describe("whispers, bounded by the room (shared/logRings.ts)", () => {
     const dropped = new Set(droppedLines(state.log, left));
     const kept = state.log.filter((e) => !dropped.has(e.id));
     assert.deepEqual(kept.map((e) => e.id), [...state.log.slice(10, 60), ...state.log.slice(60, 70)].map((e) => e.id), "the DM's newest 50 and P2's 10, and none of P3's");
+  });
+});
+
+// This deliberately retains the per-viewer calculation as an independent oracle.
+function referenceStart(state: Pick<RoomState, "log" | "members">, viewer: Viewer): string | null {
+  const largest = Math.min(LIMITS.membersPerRoom, Object.keys(state.members).length + state.log.filter((e) => e.data?.type === "member" && e.data.action === "remove").length);
+  const counts = { whisper: { lines: 0, bytes: 0 }, party: { lines: 0, bytes: 0 } };
+  let dm = 0;
+  for (const e of [...state.log].reverse()) {
+    const audience = lineAudience(e);
+    if (audience === "dm") {
+      if (viewer.role === "dm" && ++dm === LIMITS.dmLogLines) return e.id;
+    } else if (audience === "whisper" || audience === "party") {
+      const readers = audience === "whisper" ? whisperParties(e) : e.to!.slice(0, 1);
+      if (!readers.includes(viewer.memberId)) continue;
+      const ring = counts[audience];
+      const bound = memberRing(audience, largest);
+      ring.lines++;
+      ring.bytes += serializedBytes(e);
+      if (ring.lines === bound.lines || ring.bytes > bound.bytes - LIMITS.apartLineBytes) return e.id;
+    }
+  }
+  return null;
+}
+
+function referencePassed(before: Pick<RoomState, "log" | "members">, after: Pick<RoomState, "log" | "members">, viewers: Viewer[]): Set<string> {
+  const out = new Set<string>();
+  for (const viewer of viewers) {
+    const a = referenceStart(before, viewer);
+    const b = referenceStart(after, viewer);
+    if (a === b) continue;
+    const [lo, hi] = a === null ? [null, b!] : b === null ? [null, a] : compareLogIds(a, b) < 0 ? [a, b] : [b, a];
+    for (const e of [...before.log, ...after.log]) if (compareLogIds(e.id, hi) < 0 && (lo === null || compareLogIds(e.id, lo) >= 0)) out.add(e.id);
+  }
+  return out;
+}
+
+describe("shared live-log scans", () => {
+  test("a maximum roster shares scans and preserves every viewer's start and touched lines", (t) => {
+    const before = room();
+    before.members = Object.fromEntries(Array.from({ length: LIMITS.membersPerRoom }, (_, i) => [`m${i}`, member(`m${i}`, i % 10 === 0 ? "dm" : "player")]));
+    const viewers: Viewer[] = Object.values(before.members).map((m) => ({ memberId: m.id, role: m.kind === "dm" ? "dm" : "player" }));
+    viewers.push(DISPLAY, viewers[0]!);
+    before.log = Array.from({ length: 1000 }, (_, i): LogEntry => i % 5 === 0
+      ? { id: `${i + 1}:${DM_LINE_BASE}`, at: AT, kind: "chat", text: "dm" }
+      : i % 5 === 1 ? { id: `${i + 1}:0`, at: AT, kind: "chat", to: [`m${i % viewers.length}`], text: "copy" }
+      : { id: `${i + 1}:0`, at: AT, kind: "whisper", from: `m${i % LIMITS.membersPerRoom}`, to: [`m${(i + 7) % LIMITS.membersPerRoom}`], text: i % 7 ? "short" : "x".repeat(2500) });
+    const added = Array.from({ length: LIMITS.membersPerRoom }, (_, i): LogEntry => ({ id: `${1001 + i}:0`, at: AT, kind: "whisper", from: `m${i}`, to: [`m${(i + 7) % LIMITS.membersPerRoom}`], text: "new" }));
+    const after = { log: before.log.slice(80).concat(added, { id: `${1001 + added.length}:0`, at: AT, kind: "event", data: { type: "member", memberId: "m2", action: "remove" } }), members: { ...before.members } };
+    delete after.members.m2;
+    const expected = referencePassed(before, after, viewers);
+    assert.ok(expected.size > 0, "the new lines move viewer starts");
+    const starts = viewers.map((viewer) => [referenceStart(before, viewer), referenceStart(after, viewer)]);
+    let reads = 0;
+    const watched = (log: LogEntry[]) => new Proxy(log, { get(target, key, receiver) {
+      if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+      return Reflect.get(target, key, receiver);
+    } });
+    before.log = watched(before.log);
+    after.log = watched(after.log);
+    assert.deepEqual(new Set(linesPastStart(before, after, viewers)), expected);
+    viewers.forEach((viewer, i) => assert.deepEqual([liveStart(before, viewer), liveStart(after, viewer)], starts[i]));
+    t.diagnostic(`${reads} shared entry reads`);
+    assert.ok(reads <= 3 * (before.log.length + after.log.length), `${reads} entry reads must fit three shared passes per log`);
+    reads = 0;
+    assert.deepEqual(linesPastStart(after, after, viewers), []);
+    viewers.forEach((viewer) => liveStart(after, viewer));
+    assert.equal(reads, 0, "unchanged log and roster reuse all starts");
+    const smaller = { log: after.log, members: { m0: after.members.m0!, m1: after.members.m1! } };
+    for (const viewer of viewers) assert.equal(liveStart(smaller, viewer), referenceStart(smaller, viewer));
+  });
+
+  test("a removed member preserves the earlier full-ring bound", () => {
+    const before = room();
+    before.members = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`p${i}`, member(`p${i}`)]));
+    before.log = Array.from({ length: 40 }, (_, i) => ({ id: `${i + 1}:0`, at: AT, kind: "whisper" as const, from: "p1", to: ["p2"], text: "hi" }));
+    const after = { members: { ...before.members }, log: before.log.concat({ id: "41:0", at: AT, kind: "event", data: { type: "member", memberId: "p9", action: "remove" } }) };
+    delete after.members.p9;
+    assert.equal(liveStart(before, P1), "1:0");
+    assert.equal(liveStart(after, P1), referenceStart(after, P1));
+    assert.equal(liveStart(after, P1), "1:0", "leaving does not reveal older lines the smaller ring dropped");
+    assert.deepEqual(new Set(linesPastStart(before, after, [P1, P2])), referencePassed(before, after, [P1, P2]));
+  });
+
+  test("writable logs and rosters never reuse shared answers", () => {
+    for (const writable of ["log", "members"] as const) {
+      const state = room();
+      state.log = Array.from({ length: 50 }, (_, i) => ({ id: `${i + 1}:0`, at: AT, kind: "whisper" as const, from: "p1", to: ["p2"], text: "hi" }));
+      markWritable(state[writable]);
+      assert.equal(liveStart(state, P1), referenceStart(state, P1));
+      if (writable === "log") state.log.splice(0, 30);
+      else for (let i = 0; i < 40; i++) state.members[`new${i}`] = member(`new${i}`);
+      assert.equal(liveStart(state, P1), referenceStart(state, P1));
+    }
   });
 });
