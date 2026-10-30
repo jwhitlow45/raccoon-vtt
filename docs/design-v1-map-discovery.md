@@ -182,6 +182,28 @@ Scratch prototype on the development laptop, Node 24, bench-vision.ts `capRoom`:
 - A naive version took 33 ms a class, so the build keeps held maps per fog tile object and packed chunk indexes per chunk object.
 - **Rows the build adds** to `scripts/bench-server4.ts`, the 200 x 200 room with 8 players, whole party and 6 holders: a build edit in sight, one on remembered ground, a move exploring a tile, a move with every layer's memory full (MD-O-21), a global batch with memory full, the worst fragmented free walls (4,000 walls at 5 pieces, ASTRA-12), a stair edit felt chunks away, and a first snapshot. Budgets as the per-player rows: ops 25 ms, fan-out 10 ms, global 250 ms.
 
+### Integrated follow-up gate (FU40-C)
+
+Use the same benchmark source on a clean baseline commit and the integrated commit, on the same idle machine. Land the benchmark-only changes before choosing the baseline, then add the rule changes. Record each full 40-character commit id with `--revision`. An uncommitted workspace is not a recorded gate. The historical measurements in section 15 predate this gate and do not establish the current result.
+
+Run `node scripts/bench-server4.ts --ask --revision <commit>` and `node scripts/bench-server4.ts --discovery --revision <commit>` on each checkout. Add `--server` only when measuring the server box itself. Laptop output divides the server budgets by 1.5. That scaling is an estimate from the reference comparison, not a measurement of the server box. Keep the whole-party rows separate from the per-player rows with six holders and the shared class.
+
+`--discovery` now includes the routed walk across three areas, which the earlier discovery-only selection omitted. `--ask` runs both sight modes on empty Explore scenes, clearing every explored layer so no holder's fixture accidentally skips the worst-case ask work. Discovery also includes these ask rows. Targets are unchanged:
+
+| Rows | Server budget (ms) | Laptop limit (ms, budget / 1.5) |
+| --- | --- | --- |
+| Routed walk across three areas, each sight mode | 30 | 20 |
+| Build in sight, build on remembered ground, stair edit, each sight mode | 25 each | 16.667 each |
+| Move exploring a tile, move with memory full, each sight mode | 25 each | 16.667 each |
+| Fan-out for each of those moves, each sight mode | 10 each | 6.667 each |
+| Global batch with memory full, each sight mode | 250 | 166.667 |
+| DM first snapshot and each player's first snapshot with memory full, each sight mode | 250 each | 166.667 each |
+| Fragmented 4,000-wall global batch and player first snapshot | 250 each | 166.667 each |
+| Each ask gesture's longest synchronous turn and the single-band control, each sight mode | 25 each | 16.667 each |
+| Each ask gesture's complete answer, each sight mode | 5,000 | 3,333.333 |
+
+Every output row records median and maximum, its target, the machine's limit, median divided by that limit, pass or fail, and whether it exceeds twice the limit. Both comparisons use the unrounded limit. A ratio above 2 for whole-party build or stair edits keeps DEPLOY open and requires a fix before deploy. A ratio between 1 and 2 still misses its target. MD2-PERF-REST closes only from the current rows, including the per-player memory-full move, routed walk and three build edits. A passing baseline closes an obsolete concern without requiring a rule change. No current baseline or integrated measurement has been made by the sandboxed tooling lane.
+
 ## 8. Scene setup
 
 ### 8.1 Players see

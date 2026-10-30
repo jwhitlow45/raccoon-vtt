@@ -294,6 +294,8 @@ Rule functions take the grid as a required parameter. Their square path is today
 - **e2e.** A new `e2e/hex.e2e.ts` (prefix HX): the room's default set to Hex rows, a mat made, a goblin and a Large ogre placed, the goblin moved 4 hexes on its turn, measured, a fireball and Spirit Guardians read for who they catch, fog revealed, and a player seeing the same. Plus the alignment roots, `maps.e2e.ts` for the Grid rows and Line up grid, and `reach`.
 - **Bench.** `scripts/bench-grid.ts`: hex lines at fit and at 100% on the largest scene, area coverage for a 1,000 ft line, against design 9.3's budgets. From H2, the wall clip at the sight caps: per token in a projection and per spot in `seenAtEvery`, up to 12 hexes of sub-cells against the sight walls near them.
 
+The shared public-determinism harness also runs both hex orientations (`shared/differential.hex.test.ts`, HX5-FOLLOWUPS). It uses the drag's grid-aware route engine and records the visible fog sub-cells of every legal scene hex. An integer square scan cannot distinguish two different sub-cells in one square at a staggered hex's edge. Paired rooms cover unseen wall changes, a legal one-hex squeeze and a rider walking off its mount. Each starts with equal copies for both players and a table display, finds a usable walk, and compares the route, inputs, op, answer, frame and resulting copies. Square generators remain in `shared/differential.test.ts`.
+
 ## 11. Lane plan
 
 Order: after the per-player vision run lands, since both touch `vision.ts`. H1's lanes, a review, a deploy and live play, then H2, then H3.
