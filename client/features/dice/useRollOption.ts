@@ -1,6 +1,5 @@
 import { useContext, useEffect, useMemo } from "react";
 import type { D20Test } from "#shared/dice/bonus.ts";
-import { advantageFields } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import type { StoreApi } from "zustand";
 import type { ActorTarget, ClientOp } from "#shared/protocol.ts";
@@ -16,6 +15,7 @@ import { logSeq, remembered, rowTag, useOption, useOptionStore, type OptionState
 import { useReceipt, useReceipts, type ReceiptState, type ReceiptTracker } from "./useReceipt.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender } from "./send.ts";
 import { diceChoicesSlot, useDicePanel, type PanelRoll } from "./useDicePanel.ts";
+import { resolveRollMode, type RollModeOverride } from "./rollMode.ts";
 import { rechargeRollOp } from "../combat/logic.ts";
 import { throwHooksSlot } from "./throw/hooks.ts";
 
@@ -64,6 +64,7 @@ export function useRollOption(surface?: "dice") {
     return {
       /** A save, check, initiative or attack. Returns the row's new tag, "asked" for an opened request sheet, or null for nothing sent. */
       d20(input: {
+        override?: RollModeOverride;
         creature: ActorTarget;
         test: D20Test;
         /**
@@ -89,17 +90,19 @@ export function useRollOption(surface?: "dice") {
         critOn?: 18 | 19;
       }): string | "asked" | null {
         const state = room.getState().view;
-        if (!state) return null;
+        if (!state || ("tokenId" in input.creature ? !state.tokens[input.creature.tokenId] : !state.characters[input.creature.characterId])) return null;
         const route = routeOf({ state, creature: input.creature, test: input.test, dm, played: input.played, ask: input.ask });
+        if (input.override && route.kind === "ask") return null;
         if (route.kind === "ask" && (input.test.kind === "save" || input.test.kind === "check") && input.tokenId) {
           openAsk(scope, { kind: "selection", tokenIds: [input.tokenId], fill: { test: rollTestOf(input.test) } });
           return "asked";
         }
         if (input.bonus === null) return null;
         if (route.kind === "answer") {
+          if (input.override === "secret") return null;
           const preset = input.presetOf ? input.presetOf(routedTest(route, input.test)) : input.preset;
           // The taken choices belong to this tap, as a panel roll's do, and come back if nothing went.
-          const taken = panel.take();
+          const taken = input.override ? panel.peek() : panel.take();
           const tag = uuidv7();
           const extra = preset.extra.join("").replace(/^\+/, "");
           const n = sendRoll(
@@ -110,7 +113,7 @@ export function useRollOption(surface?: "dice") {
               rollId: route.request.id,
               target: targetRef(route.target),
               ...(route.request.test.choices.length > 1 ? { choice: route.choice === 1 ? (1 as const) : (0 as const) } : {}),
-              ...advantageFields([...preset.sources, ...taken.sources]),
+              ...resolveRollMode(preset.sources, taken.sources, input.override),
               ...(extra ? { extra } : {}),
               ...(input.typed ? { bonus: input.bonus } : {}),
               ...(dm ? { unanswered: true as const } : {}),
@@ -124,15 +127,16 @@ export function useRollOption(surface?: "dice") {
           panel.noted(tag, input.label, origin());
           return remember(input.row, tag);
         }
-        return remember(input.row, panel.roll([asInitiative(asSave(d20Roll(input.creature, input.bonus, input.preset, input.label, input.critOn), input.test), input.test)], { origin: origin() }));
+        return remember(input.row, panel.roll([asInitiative(asSave(d20Roll(input.creature, input.bonus, input.preset, input.label, input.critOn), input.test), input.test)], { origin: origin(), override: input.override }));
       },
       /**
        * A death save, counted by the server from the state then (4.3).
        * `record` names the turn record whose open death save it settles
        * (docs/design-v1-combat-controls.md 2.3, combat/logic.ts openRecord).
        */
-      deathSave(creature: ActorTarget, preset: RollPreset, row: string, record?: number): string | null {
-        const taken = panel.take();
+      deathSave(creature: ActorTarget, preset: RollPreset, row: string, record?: number, override?: RollModeOverride): string | null {
+        if (override === "secret") return null;
+        const taken = override ? panel.peek() : panel.take();
         const tag = uuidv7();
         const extra = preset.extra.join("").replace(/^\+/, "");
         const n = sendRoll(
@@ -141,7 +145,7 @@ export function useRollOption(surface?: "dice") {
             t: "actor.deathRoll",
             tag,
             target: creature,
-            ...advantageFields([...preset.sources, ...taken.sources]),
+            ...resolveRollMode(preset.sources, taken.sources, override),
             ...(extra ? { extra } : {}),
             ...(record !== undefined ? { record } : {}),
           },
@@ -177,9 +181,9 @@ export function useRollOption(surface?: "dice") {
         actions.dispatch(asDm ? { t: "encounter.setValues", values: [{ entryId, value }] } : { t: "encounter.setValue", entryId, value });
       },
       /** Damage, healing, a plain roll or a recharge, as panel rolls. */
-      rolls(rolls: PanelRoll[], row: string): string | null {
+      rolls(rolls: PanelRoll[], row: string, override?: RollModeOverride): string | null {
         if (rolls.length === 0) return null;
-        return remember(row, panel.roll(rolls, { origin: origin() }));
+        return remember(row, panel.roll(rolls, { origin: origin(), override }));
       },
     };
   }, [panel, sender, scope, store, room, actions, dm, surface, throws, choices]);

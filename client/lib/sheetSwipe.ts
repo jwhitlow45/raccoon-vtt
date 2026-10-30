@@ -635,7 +635,7 @@ function ownField(node: SwipeNode): boolean {
  */
 export function startsOn(target: SwipeNode | null, surface: SwipeNode, riders: readonly SwipeNode[], style: SwipeStyle): SwipeOn | null {
   for (let n = target; n; n = n.parentElement) {
-    if (ownField(n) || style(n).touchAction === "none") return "owned";
+    if (n.hasAttribute("data-roll-mode-menu") || ownField(n) || style(n).touchAction === "none") return "owned";
     if (n.hasAttribute(GRAB_ATTR) || riders.includes(n)) return "grab";
     if (n === surface) return "content";
   }

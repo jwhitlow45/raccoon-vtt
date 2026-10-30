@@ -23,7 +23,7 @@ const { useRollOption } = await import("./useRollOption.ts");
 type Api = ReturnType<typeof useRollOption>;
 
 /** The hook's sends, captured from one render: its functions read the room's store and scope when called, not when drawn. */
-function probe(): { api: Api; sent: ClientOp[]; scope: InstanceType<typeof RoomScope> } {
+function probe(): { api: Api; sent: ClientOp[]; scope: InstanceType<typeof RoomScope>; view: ReturnType<typeof room> } {
   const view = room({
     characters: { bree: character("bree", { name: "Bree", ownerIds: ["p1"] }) },
     tokens: { drag: token("drag", { kind: "monster", name: "Dragon" }), bt: token("bt", { kind: "pc", name: "Bree", ownerIds: ["p1"], actor: { ref: "bree" } }) },
@@ -45,7 +45,7 @@ function probe(): { api: Api; sent: ClientOp[]; scope: InstanceType<typeof RoomS
     }),
   );
   assert.ok(api);
-  return { api, sent, scope };
+  return { api, sent, scope, view };
 }
 
 const NONE = { sources: [], extra: [], notes: [] };
@@ -89,4 +89,40 @@ describe("whether a panel roll went secret", () => {
     assert.equal(api.wentSecret(pc), false);
     assert.equal(api.wentSecret(monster), false, "it is asked right after its own tap: a later roll replaces what the panel knows");
   });
+});
+
+test("one-off death saves preserve panel presses, resolve opposing sources once and keep the turn record", () => {
+  const { api, sent, scope } = probe();
+  const choices = scope.get(diceChoicesSlot);
+  choices.setState({ adv: true, secret: true, version: 9 });
+  api.deathSave({ tokenId: "drag" }, { ...NONE, sources: [{ kind: "dis", from: "restrained" }] }, "deathSave:drag", 12, "adv");
+  assert.equal(sent[0]?.t === "actor.deathRoll" && sent[0].record, 12);
+  assert.equal(sent[0]?.t === "actor.deathRoll" && sent[0].cancelled, true);
+  assert.equal(sent[0]?.t === "actor.deathRoll" && sent[0].mode, undefined);
+  assert.equal(choices.getState().adv, true); assert.equal(choices.getState().version, 9);
+  api.deathSave({ tokenId: "drag" }, NONE, "deathSave:drag", 12, "secret");
+  assert.equal(sent.length, 1, "fixed death-save route refuses a secret override");
+});
+test("request answers retain route, typed bonus, unanswered guard and extra dice without consuming choices", () => {
+  const { api, sent, scope, view } = probe();
+  view.rolls.q1 = { id: "q1", rev: 0, at: "2026-10-30T12:00:00Z", test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: false, resultShown: false, targets: [{ tokenId: "drag" }] };
+  const choices = scope.get(diceChoicesSlot); choices.setState({ dis: true, version: 13 });
+  const input = { creature: { tokenId: "drag" }, test: { kind: "save" as const, ability: "dex" as const }, bonus: 4, typed: true, preset: { ...NONE, extra: ["+1d4"] }, label: "Dexterity save", row: "drag:dex", played: false, ask: false, override: "adv" as const };
+  api.d20(input);
+  const op = sent[0]; assert.equal(op?.t, "roll.dice");
+  if (op?.t === "roll.dice") { assert.equal(op.rollId, "q1"); assert.equal(op.mode, "adv"); assert.equal(op.bonus, 4); assert.equal(op.extra, "1d4"); assert.equal(op.unanswered, true); assert.ok(!("to" in op)); }
+  assert.equal(choices.getState().dis, true); assert.equal(choices.getState().version, 13);
+  api.d20({ ...input, override: "secret" }); assert.equal(sent.length, 1);
+});
+
+test("free d20 and plain-roll overrides reach the panel without taking its choices", () => {
+  const { api, sent, scope } = probe();
+  const choices = scope.get(diceChoicesSlot); choices.setState({ adv: true, secret: false, secretFor: "drag", version: 17 });
+  api.d20({ creature: { tokenId: "drag" }, test: { kind: "attack" }, bonus: 4, preset: { ...NONE, sources: [{ kind: "dis", from: "poisoned" }], extra: ["+1d4"] }, label: "Claw", row: "drag:claw", played: false, ask: false, override: "normal" });
+  assert.equal(sent[0]?.t === "dice.roll" && sent[0].to, "dm");
+  assert.equal(sent[0]?.t === "dice.roll" && sent[0].rolls[0]?.mode, "dis");
+  assert.equal(sent[0]?.t === "dice.roll" && sent[0].rolls[0]?.formula, "1d20+4+1d4");
+  api.rolls([{ formula: "1d6" }], "plain", "secret");
+  assert.equal(sent[1]?.t === "dice.roll" && sent[1].to, "dm");
+  assert.equal(choices.getState().adv, true); assert.equal(choices.getState().version, 17);
 });

@@ -132,3 +132,13 @@ describe("typeahead", () => {
     assert.equal(typeahead(null, "l", 0, setup, 2).index, 3);
   });
 });
+
+
+test("roll menus opt into enabled opening without changing existing menus", () => {
+  const items: OpeningItem[] = [{ kind: "radio", checked: true, disabled: true }, { kind: "action", disabled: true }, { kind: "radio" }, { kind: "radio" }];
+  assert.equal(openingIndex(items, "first"), 0);
+  assert.equal(openingIndex(items, "first", true), 2);
+  assert.equal(openingIndex(items, "last", true), 3);
+  assert.equal(openingIndex([{ disabled: true }], "first", true), -1);
+  assert.equal(openingIndex([{ kind: "action", disabled: true }, { kind: "action" }], "first", true), 1);
+});

@@ -60,7 +60,7 @@ export function menuAction(e: MenuKey, index: number, count: number, tiles: bool
 }
 
 /** What the opening item is chosen by: whether an item is one of the menu's one choice ("radio", the default) and whether it is checked. */
-export type OpeningItem = { kind?: "radio" | "checkbox" | "action"; checked?: boolean };
+export type OpeningItem = { kind?: "radio" | "checkbox" | "action"; checked?: boolean; disabled?: boolean };
 
 /**
  * The item a key open focuses: the checked one, else the first, or with
@@ -69,13 +69,13 @@ export type OpeningItem = { kind?: "radio" | "checkbox" | "action"; checked?: bo
  * 6), never takes the place a key open lands on, checked or not. A menu
  * of checkboxes or actions alone opens at its first or last.
  */
-export function openingIndex(items: readonly OpeningItem[], from: "first" | "last"): number {
-  if (items.length === 0) return -1;
-  const radio = items.flatMap((item, i) => ((item.kind ?? "radio") === "radio" ? [i] : []));
+export function openingIndex(items: readonly OpeningItem[], from: "first" | "last", skipDisabled = false): number {
+  const candidates = items.flatMap((item, i) => skipDisabled && item.disabled ? [] : [i]);
+  const radio = candidates.filter((i) => (items[i]!.kind ?? "radio") === "radio");
   const checked = radio.find((i) => items[i]!.checked === true);
   if (checked !== undefined) return checked;
-  if (radio.length === 0) return from === "last" ? items.length - 1 : 0;
-  return from === "last" ? radio[radio.length - 1]! : radio[0]!;
+  const preferred = radio.length > 0 ? radio : candidates;
+  return (from === "last" ? preferred.at(-1) : preferred[0]) ?? -1;
 }
 
 /** How long typed letters run together into one prefix. */

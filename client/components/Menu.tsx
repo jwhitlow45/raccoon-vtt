@@ -72,6 +72,8 @@ export function Menu(props: {
   onPick(id: string): void;
   /** Tiles in rows, for Setup and Tools, where Right and Left move as Down and Up do. */
   tiles?: boolean;
+  /** Roll options open at an enabled action. Other menus retain their existing opening rule. */
+  skipDisabledOnOpen?: boolean;
   /** Data attributes for the menu element, such as the side panel's `data-tabs-menu`. */
   data?: Readonly<Record<`data-${string}`, string>>;
 }) {
@@ -90,7 +92,7 @@ export function Menu(props: {
   };
 
   useLayoutEffect(() => {
-    setInsideFocus((from) => focusItem(openingIndex(items, from)));
+    setInsideFocus((from) => focusItem(openingIndex(items, from, props.skipDisabledOnOpen)));
     return () => setInsideFocus(null);
   });
 

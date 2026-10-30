@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useStore } from "zustand";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { batchRolls } from "#shared/dice/batch.ts";
-import { advantageFields, applyMode, FORMULA_ERRORS, parseFormula, type AdvantageSource } from "#shared/dice/formula.ts";
+import { advantageFields, FORMULA_ERRORS, type AdvantageSource } from "#shared/dice/formula.ts";
 import { startsSecret } from "#shared/dice/secret.ts";
 import { uuidv7 } from "#shared/ids.ts";
 import type { ActorTarget, DiceRollInput } from "#shared/protocol.ts";
@@ -10,6 +10,7 @@ import type { RoomView } from "../../state/types.ts";
 import { scopeSlot, useScoped } from "../../state/scope.ts";
 import { useRoomStore, useRoomView } from "../../state/view.ts";
 import { NEEDS_CONNECTION, sendRoll, useRollSender, type RollSender } from "./send.ts";
+import { acceptsRollMode, overrideRollSources, rollModeTo, type RollModeOverride } from "./rollMode.ts";
 import { throwHooksSlot } from "./throw/hooks.ts";
 import type { ThrowOrigin } from "./throw/store.ts";
 
@@ -29,6 +30,8 @@ import type { ThrowOrigin } from "./throw/store.ts";
 export type PanelRoll = Omit<DiceRollInput, "mode" | "cancelled"> & {
   /** The roll's own advantage sources, unresolved: a preset's, typed words. */
   sources?: AdvantageSource[];
+  /** Damage never accepts d20 modes, even when its formula contains a d20. */
+  modeEligible?: boolean;
 };
 
 /** A panel roll, as the sticky line shows it and Again sends it again. */
@@ -95,16 +98,20 @@ export type DicePanelApi = {
   secret: boolean;
   /** The choices as sources, reset at once. `creatures` are the ones the roll is for, which set Secret's start. */
   take(creatures?: readonly ActorTarget[]): Taken;
+  /** Read current choices without consuming them. The restore function does nothing. */
+  peek(creatures?: readonly ActorTarget[]): Taken;
   /**
    * Rolls on the server. With no `to` it is a panel roll: it takes the
    * choices, goes under the taken Secret, and becomes the sticky line. With
    * `to` it goes under that visibility with only its own sources. Returns
    * its tag, or null when nothing was sent. With `origin`, a Dice panel
    * control's tap, its dice may be thrown (docs/design-v1-roll-animation.md 3.1).
+   * An override reads choices without taking them and keeps the sticky
+   * result when `to` is absent. A supplied `to` keeps its fixed envelope.
    * `parts` hears how many batches the roll went in, before it returns, so
    * an ask for saves can name the roll whole (docs/design-v1-player-save-spell.md 5.3).
    */
-  roll(rolls: PanelRoll[], opts?: { dc?: number; ac?: number; to?: "all" | "dm"; tag?: string; origin?: ThrowOrigin; parts?(n: number): void }): string | null;
+  roll(rolls: PanelRoll[], opts?: { override?: RollModeOverride; dc?: number; ac?: number; to?: "all" | "dm"; tag?: string; origin?: ThrowOrigin; parts?(n: number): void }): string | null;
   /** A chip's tap. Adv and Dis are never pressed together. */
   press(choice: "adv" | "dis" | "secret"): void;
   /** Again: rolls exactly what was rolled, under its own visibility, taking no choice. */
@@ -129,12 +136,6 @@ function take(store: StoreApi<DiceState>, start: boolean, key: string): Taken {
       store.setState({ adv: before.adv, dis: before.dis, secret: before.secret, secretFor: before.secretFor, version: version + 1 });
     },
   };
-}
-
-/** Whether a formula has the one plain d20 a mode applies to (3.4). */
-function hasOneD20(formula: string): boolean {
-  const parsed = parseFormula(formula);
-  return parsed.ok && applyMode(parsed.formula, "adv").ok;
 }
 
 /**
@@ -187,6 +188,10 @@ export function createDicePanel(deps: {
   const fail = (error: string) => store.setState({ last: { error, at: Date.now() } });
   return {
     take: (creatures = []) => take(store, secretStart(creatures), panelKey()),
+    peek: (creatures = []) => {
+      const state = store.getState();
+      return { sources: [...(state.adv ? [{ kind: "adv" as const, from: "pressed" }] : []), ...(state.dis ? [{ kind: "dis" as const, from: "pressed" }] : [])], secret: secretNow(state, panelKey(), secretStart(creatures)), restore() {} };
+    },
     press(choice) {
       const s = store.getState();
       const version = s.version + 1;
@@ -197,14 +202,19 @@ export function createDicePanel(deps: {
     },
     roll(rolls, opts = {}) {
       const panel = opts.to === undefined;
-      const taken = panel ? take(store, secretStart(rolls.flatMap((r) => (r.creature ? [r.creature] : []))), panelKey()) : null;
-      const to = opts.to ?? (taken?.secret ? "dm" : "all");
+      const baseline = secretStart(rolls.flatMap((r) => r.creature ? [r.creature] : []));
+      const state = store.getState();
+      const taken = panel && !opts.override ? take(store, baseline, panelKey()) : null;
+      const manual = taken?.sources ?? (panel && opts.override ? [...(state.adv ? [{ kind: "adv" as const, from: "pressed" }] : []), ...(state.dis ? [{ kind: "dis" as const, from: "pressed" }] : [])] : []);
+      const ordinary = (taken?.secret ?? secretNow(state, panelKey(), baseline)) ? "dm" : "all";
+      const to = opts.to ?? rollModeTo(ordinary, baseline ? "dm" : "all", opts.override);
       const inputs: DiceRollInput[] = [];
       for (const roll of rolls) {
-        const { sources = [], ...rest } = roll;
+        const { sources = [], modeEligible, ...rest } = roll;
+        const resolved = overrideRollSources(sources, manual, opts.override);
         // A roll with no d20, such as damage, never gets a source: a typed one there is refused, the panel's left out.
-        if (!hasOneD20(roll.formula)) {
-          if (advantageFields(sources).mode) {
+        if (!acceptsRollMode(roll.formula) || modeEligible === false) {
+          if (advantageFields(sources).mode && (!opts.override || opts.override === "secret")) {
             taken?.restore();
             if (panel) fail(FORMULA_ERRORS.mode);
             return null;
@@ -212,7 +222,7 @@ export function createDicePanel(deps: {
           inputs.push(rest);
           continue;
         }
-        inputs.push({ ...rest, ...advantageFields([...sources, ...(taken?.sources ?? [])]) });
+        inputs.push({ ...rest, ...advantageFields(resolved) });
       }
       const envelope = { to, ...(opts.dc !== undefined ? { dc: opts.dc } : {}), ...(opts.ac !== undefined ? { ac: opts.ac } : {}) };
       const sent = send(sender, inputs, envelope, () => taken?.restore(), opts.tag);

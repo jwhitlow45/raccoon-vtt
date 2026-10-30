@@ -19,11 +19,13 @@ export function IconButton(
     /** The tooltip, when it should say more than the name. */
     title?: string;
     pressed?: boolean;
+    /** The roll menu owns touch holds while hover and focus tips stay available. */
+    tooltipHold?: boolean;
     /** Drawn after the icon, such as a count. Rare: most icon buttons are the icon alone. */
     children?: ReactNode;
   },
 ) {
-  const { icon, label, title, pressed, disabled, style, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, ...rest } = props;
+  const { tooltipHold, icon, label, title, pressed, disabled, style, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, ...rest } = props;
   // The name on hover, keyboard focus and a long press, never covering the button (docs/design-v1-icons.md 3). Said by a reader only when it adds to the name.
   const tooltip = useTooltip(title ?? label, { describes: addsWords(title, label) });
   const look: CSSProperties = disabled
@@ -40,6 +42,7 @@ export function IconButton(
       disabled={disabled}
       {...rest}
       {...tooltip.anchor({ onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, "aria-describedby": rest["aria-describedby"] })}
+      {...(tooltipHold === false ? { onPointerDown, onPointerUp, onPointerCancel, onClickCapture } : {})}
       style={{
         flex: "none",
         display: "inline-grid",

@@ -153,3 +153,21 @@ describe("choices and icon buttons", () => {
 function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+test("roll buttons opt out of tooltip hold handlers while keeping hover and focus tips", () => {
+  for (const icon of [false, true]) {
+    const down = () => {}, up = () => {}, cancel = () => {}, capture = () => {};
+    function Probe() {
+      const tree = icon ? IconButton({ icon: "again", label: "Again", tooltipHold: false, onPointerDown: down, onPointerUp: up, onPointerCancel: cancel, onClickCapture: capture }) : Button({ icon: "again", iconOnly: "always", children: "Again", tooltipHold: false, onPointerDown: down, onPointerUp: up, onPointerCancel: cancel, onClickCapture: capture });
+      const button = (tree.props.children as unknown as { props: Record<string, unknown> }[])[0]!;
+      assert.equal(button.props.onPointerDown, down);
+      assert.equal(button.props.onPointerUp, up);
+      assert.equal(button.props.onPointerCancel, cancel);
+      assert.equal(button.props.onClickCapture, capture);
+      assert.equal(typeof button.props.onPointerEnter, "function");
+      assert.equal(typeof button.props.onFocus, "function");
+      return tree;
+    }
+    assert.doesNotMatch(html(createElement(Probe)), /tooltipHold/);
+  }
+});

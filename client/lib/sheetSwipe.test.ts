@@ -1281,3 +1281,13 @@ describe("FL-8. pull toward the next stand", () => {
     }
   });
 });
+
+test("roll mode menu owns its rows and native scrolling without disabling touch panning", () => {
+  const surface = el("div", null);
+  const menu = el("div", surface, { attrs: { "data-roll-mode-menu": "" }, overflowY: "auto" });
+  const row = el("div", menu, { attrs: { role: "menuitem" } });
+  assert.equal(startsOn(row, surface, [], css), "owned");
+  assert.equal(startsOn(menu, surface, [], css), "owned");
+  assert.equal(menu.style.touchAction, "auto");
+  assert.equal(startsOn(el("button", surface), surface, [], css), "content");
+});

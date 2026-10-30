@@ -77,6 +77,8 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
    * words, since nothing may need hover (rule 2).
    */
   iconOnly?: "always" | "fine";
+  /** The roll menu owns touch holds while hover and focus tips stay available. */
+  tooltipHold?: boolean;
 };
 
 /**
@@ -104,7 +106,7 @@ function wordsOf(children: ReactNode): string | undefined {
  * destructive actions, and `armed` marks one that waits for its second tap.
  */
 export function Button(props: ButtonProps) {
-  const { variant = "secondary", size = "md", block, armed, pressed, expanded, busy, icon, iconOnly, title, style, disabled, onClick, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, ...rest } = props;
+  const { tooltipHold, variant = "secondary", size = "md", block, armed, pressed, expanded, busy, icon, iconOnly, title, style, disabled, onClick, children, onPointerEnter, onPointerLeave, onPointerDown, onPointerUp, onPointerCancel, onClickCapture, onFocus, onBlur, ...rest } = props;
   const ignore = busy === true && disabled !== true;
   const bare = icon !== undefined && (iconOnly === "always" || (iconOnly === "fine" && !isCoarsePointer()));
   const name = rest["aria-label"] ?? wordsOf(children);
@@ -124,6 +126,7 @@ export function Button(props: ButtonProps) {
       aria-label={bare ? name : rest["aria-label"]}
       title={tipped ? undefined : title}
       {...(tipped ? tooltip.anchor({ ...handlers, "aria-describedby": rest["aria-describedby"] }) : handlers)}
+      {...(tooltipHold === false ? { onPointerDown, onPointerUp, onPointerCancel, onClickCapture } : {})}
       onClick={(e: MouseEvent<HTMLButtonElement>) => {
         // Not `disabled`: a busy button keeps its focus and its color. A submit button's default would send the form again.
         if (ignore) {
