@@ -449,19 +449,13 @@ describe("each part below 0 shows only through its own pit region (review HXREL1
       assert.ok(now.standing.has("a"), `${label} turn ${turn}: it stands`);
       const low = now.pieces.flatMap((p) => p.draws.map((d) => d.low));
       const { c, s } = turnAxes(turn);
+      // The mesh's own faces below 0, not the loops the drawing merged them into: each face is convex, so its middle lies on it and over its own cell (review HXR1-ASTRA-9).
       const loops: { poly: P[]; region: number }[] = [];
-      for (const part of low) {
-        for (const q of [...part.far, ...part.near]) {
-          const poly: P[] = [];
-          let cx = 0;
-          let cy = 0;
-          for (let i = 0; i + 2 < q.length; i += 3) {
-            poly.push({ x: c * q[i]! - s * q[i + 1]!, y: (s * q[i]! + c * q[i + 1]!) / 2 - K * q[i + 2]! });
-            cx += q[i]!;
-            cy += q[i + 1]!;
-          }
-          loops.push({ poly, region: regionAt((3 * cx) / q.length, (3 * cy) / q.length) });
-        }
+      for (const f of v.volumeOf("a")!.faces()) {
+        const pts = [...f.v].map((i) => v.volumeOf("a")!.vertex(i));
+        if (Math.min(...pts.map((q) => q[2])) >= -1e-9) continue;
+        const poly = pts.map(([x, y, z]) => ({ x: c * x - s * y, y: (s * x + c * y) / 2 - K * z }));
+        loops.push({ poly, region: regionAt(pts.reduce((m, q) => m + q[0], 0) / pts.length, pts.reduce((m, q) => m + q[1], 0) / pts.length) });
       }
       const regions = new Set(loops.map((l) => l.region));
       assert.ok(!regions.has(-1) && regions.size === withParts, `${label} turn ${turn}: parts below 0 over ${[...regions]}`);
@@ -505,6 +499,28 @@ describe("each part below 0 shows only through its own pit region (review HXREL1
     const ball: AreaTemplateInput = { id: "a", rev: 1, shape: "sphere", size: 20, origin: { x: 6.5, y: 6.5, z: -4 }, yaw: 0, includeOrigin: true };
     const pits = { "6,6": -4, "7,6": -4, "7,7": -4, "8,7": -4, "8,8": -4, "9,8": -4, "9,9": -4, "10,10": -4 };
     assert.ok(checkRegions("sphere", SQUARES, pits, ball, 1) > 0, "a clip by both openings together would show a part over the flat ground");
+  });
+
+  test("a zigzag pit across one band: a cube's merged loop below 0 draws whole in its region, at every turn (review HXREL1-OPUS-11)", () => {
+    // A staircase of pits up and to the right, along a band at turn 0, under a 30 ft cube whose bottom lies 0.2 cells down.
+    const stairs = { "2,6": -4, "3,6": -4, "3,5": -4, "4,5": -4, "4,4": -4, "5,4": -4, "5,3": -4, "6,3": -4 };
+    const cube: AreaTemplateInput = { id: "a", rev: 1, shape: "cube", size: 30, origin: { x: 1.5, y: 5, z: 14 }, yaw: 0, includeOrigin: true };
+    checkRegions("zigzag", SQUARES, stairs, cube, 1);
+  });
+
+  test("the reviewer's L-shaped pit: (6,7), (6,8) and (5,8) under a 30 ft cube 14 ft up, whose loop below 0 has its corners' middle on flat (5,7): view point (-2.14, 4.78) takes one fill (review HXR1-ASTRA-9)", () => {
+    const bounds = { w: 12, h: 12 };
+    const heights = heightsOn(SQUARES, bounds, { "6,7": -4, "6,8": -4, "5,8": -4 });
+    const w: VolumeWorld = { heights, tiles: null, px: 32, fog: new FogView(null, "s1", bounds), live: null };
+    const cube: AreaTemplateInput = { id: "a", rev: 1, shape: "cube", size: 30, origin: { x: 3, y: 6, z: 14 }, yaw: 0, includeOrigin: true };
+    const v = new BoardVolumes();
+    v.sync([{ id: "a", template: cube, ctx: ctxOf(bounds, null), look: LOOK }], w);
+    settle(v, w);
+    const now = v.now(0, VIEW, w);
+    assert.ok(now.standing.has("a"));
+    const at = fillsAt({ x: -2.14, y: 4.78 });
+    drawVolume(at.g, [], now.pieces.flatMap((p) => p.draws.map((d) => d.low)), now.pieces[0]!.pits, LOOK, 0, 1 / 32);
+    assert.equal(at.count(), 1);
   });
 
   test("a part whose middle lies on its pit's wall, as a grid-snapped cube's face does, finds that pit on either grid", () => {
@@ -600,6 +616,40 @@ describe("an area that stood, over ground that changed (design 8, review HXR1-AS
     const sceneCells = 60 * 70;
     assert.ok(many <= 2 * sceneCells, `${many} ground reads for 40 areas`);
     assert.ok(many <= few + 2 * 40, `${few} reads for 5 areas, ${many} for 40`);
+  });
+
+  test("areas built under different fog snapshots, each in its own view with the others kept off it: the next fog change reads the ground a bounded number of times, however many there are (review HXR1-ASTRA-7)", () => {
+    const wide = { w: 60, h: 60 };
+    let reads = 0;
+    const counted = (): DrawnHeights => {
+      const h = heightsOn(ROWS, wide, { "55,55": -100 });
+      return { ...h, atCell: (c) => (reads++, h.atCell(c)), at: (x, y) => (reads++, h.at(x, y)) };
+    };
+    const readsFor = (n: number) => {
+      const v = new BoardVolumes();
+      const cubes: VolumeEntry[] = [];
+      let w: VolumeWorld = { heights: counted(), tiles: null, px: 32, fog: new FogView(null, "s1", wide), live: null };
+      for (let i = 0; i < n; i++) {
+        const x = 4 + (i % 8) * 6;
+        const y = 4 + Math.floor(i / 8) * 6;
+        cubes.push({ id: `c${i}`, template: { id: `c${i}`, rev: 1, shape: "cube", size: 5, origin: { x, y, z: 5 }, yaw: 0, includeOrigin: true }, ctx: ctxOf(wide, null, {}, ROWS), look: LOOK });
+        // A fog change, then the new cube built and standing in a view of its own, the older ones past its edge.
+        w = { ...w, heights: counted(), fog: new FogView(null, "s1", wide) };
+        v.sync(cubes, w);
+        const own = viewBoxOf({ x0: x - 1, y0: y - 1, z0: 0, x1: x + 2, y1: y + 2, z1: 3 }, 0);
+        while (v.step(0, own, w, -Infinity).more);
+        assert.ok(v.now(0, own, w).standing.has(`c${i}`));
+      }
+      w = { ...w, heights: counted(), fog: new FogView(null, "s1", wide) };
+      reads = 0;
+      v.sync(cubes, w);
+      assert.equal(v.now(0, VIEW, w).standing.size, n, "the same ground: every cube stays standing");
+      return reads;
+    };
+    const few = readsFor(4);
+    const many = readsFor(24);
+    assert.ok(many <= 2 * 60 * 70, `${many} ground reads for 24 areas`);
+    assert.equal(many, few, `${few} reads for 4 areas, ${many} for 24`);
   });
 
   test("an area wholly above 0 keeps standing when a deep pit changes far from it: no pit's opening shows any of it (review HXR1-ASTRA-7)", () => {

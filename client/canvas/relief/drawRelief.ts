@@ -591,10 +591,15 @@ const shares = new WeakMap<BandPart, { pits: AreaPits; byRegion: Map<number, Ban
 
 const LINES = ["outline", "hidden", "guide", "guideHidden"] as const;
 
+/** A region's share is drawn, not split again, so it carries no points. */
+const NO_POINTS = new Float64Array(0);
+
 /**
  * Each pit region's share of a part below 0: a loop by the region under
- * its middle, a line segment by the region under its own middle. A loop
- * or segment over no region's pit lies under the ground, and nothing
+ * the point the volume gave it, over the cell its faces lie over (a
+ * merged loop can be concave, so its corners' middle can lie off it,
+ * review HXR1-ASTRA-9), a line segment by the region under its middle. A
+ * loop or segment over no region's pit lies under the ground, and nothing
  * shows it.
  */
 function sharesOf(part: BandPart, pits: AreaPits): Map<number, BandPart> {
@@ -603,14 +608,10 @@ function sharesOf(part: BandPart, pits: AreaPits): Map<number, BandPart> {
   const loops = new Map<number, { far: Float64Array[]; near: Float64Array[] }>();
   const lines = new Map<number, Record<(typeof LINES)[number], number[]>>();
   for (const which of ["far", "near"] as const) {
-    for (const q of part[which]) {
-      let x = 0;
-      let y = 0;
-      for (let i = 0; i + 2 < q.length; i += 3) {
-        x += q[i]!;
-        y += q[i + 1]!;
-      }
-      const r = pits.at((3 * x) / q.length, (3 * y) / q.length);
+    const at = which === "far" ? part.farAt : part.nearAt;
+    for (let k = 0; k < part[which].length; k++) {
+      const q = part[which][k]!;
+      const r = 2 * k + 1 < at.length ? pits.at(at[2 * k]!, at[2 * k + 1]!) : -1;
       if (r < 0) continue;
       let own = loops.get(r);
       if (!own) loops.set(r, (own = { far: [], near: [] }));
@@ -643,7 +644,7 @@ function sharesOf(part: BandPart, pits: AreaPits): Map<number, BandPart> {
     const l = loops.get(r);
     const s = lines.get(r);
     const line = (which: (typeof LINES)[number]) => Float64Array.from(s?.[which] ?? []);
-    byRegion.set(r, { far: l?.far ?? [], near: l?.near ?? [], outline: line("outline"), hidden: line("hidden"), guide: line("guide"), guideHidden: line("guideHidden") });
+    byRegion.set(r, { far: l?.far ?? [], near: l?.near ?? [], farAt: NO_POINTS, nearAt: NO_POINTS, outline: line("outline"), hidden: line("hidden"), guide: line("guide"), guideHidden: line("guideHidden") });
   }
   shares.set(part, { pits, byRegion });
   return byRegion;

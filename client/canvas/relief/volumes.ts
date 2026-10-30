@@ -240,6 +240,14 @@ type Slot = {
   /** The last volume that stood, and the turns it has stood at whole, kept while `next` builds. */
   shown: Volume | null;
   turns: Set<Turn>;
+  /**
+   * The latest drawn heights `shown` is known to fit: those it was built
+   * on, moved on to each sync's own once the ground under it reads the
+   * same. So every area kept standing compares from the last sync's
+   * heights, and a fog change compares two snapshots once for all of them,
+   * however many fog changes ago each was built (review HXR1-ASTRA-7).
+   */
+  seen: DrawnHeights | null;
 };
 
 /** What the board lays out: the bands of every area that stands now, which areas those are, and whether one in view still waits to stand. */
@@ -274,8 +282,13 @@ export class BoardVolumes {
       const vol = this.#cache.get({ template: entry.template, ctx: entry.ctx, heights: world.heights, tiles: world.tiles, px: world.px, coarse: false });
       if (vol && !builtOn.has(vol)) builtOn.set(vol, world.heights);
       let shown = old?.shown ?? null;
-      if (shown && shown !== vol && !sameGroundUnder(shown, builtOn.get(shown), world.heights, changesFrom)) shown = null;
-      next.set(entry.id, { entry, next: vol, shown, turns: shown ? (old?.turns ?? new Set()) : new Set() });
+      let seen = old?.seen ?? null;
+      if (shown && (shown === vol || sameGroundUnder(shown, seen ?? builtOn.get(shown), world.heights, changesFrom))) seen = world.heights;
+      else {
+        shown = null;
+        seen = null;
+      }
+      next.set(entry.id, { entry, next: vol, shown, turns: shown ? (old?.turns ?? new Set()) : new Set(), seen });
     }
     this.#slots = next;
   }

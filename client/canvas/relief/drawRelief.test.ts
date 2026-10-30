@@ -57,7 +57,8 @@ const line = Float64Array.of(0, 0, 1, 1, 1, 1);
 const none = new Float64Array(0);
 
 function part(fill: boolean): BandPart {
-  return { far: fill ? [loop] : [], near: fill ? [loop] : [], outline: fill ? line : none, hidden: fill ? line : none, guide: fill ? line : none, guideHidden: fill ? line : none };
+  const inside = fill ? Float64Array.of(0.5, 0.5) : none;
+  return { far: fill ? [loop] : [], near: fill ? [loop] : [], farAt: inside, nearAt: inside, outline: fill ? line : none, hidden: fill ? line : none, guide: fill ? line : none, guideHidden: fill ? line : none };
 }
 
 describe("an area's run of bands drawn as one", () => {
@@ -150,7 +151,7 @@ describe("an area's parts below 0, each in its own pit region's clip (review HXR
     const square = (x: number, y: number) => Float64Array.of(x, y, -1, x + 1, y, -1, x + 1, y + 1, -1, x, y + 1, -1);
     // A line from region 0 across into region 1 and on past both, then a lone segment in region 1.
     const chain = Float64Array.of(0.5, 0.5, -1, 1.5, 0.5, -1, 2.5, 0.5, -1, 3.5, 0.5, -1, 13, 0.5, -1, NaN, NaN, NaN, 3, 3.5, -1, 4, 3.5, -1);
-    const low: BandPart = { far: [square(0, 0), square(3, 3), square(8, 8)], near: [], outline: chain, hidden: new Float64Array(0), guide: new Float64Array(0), guideHidden: new Float64Array(0) };
+    const low: BandPart = { far: [square(0, 0), square(3, 3), square(8, 8)], near: [], farAt: Float64Array.of(0.5, 0.5, 3.5, 3.5, 8.5, 8.5), nearAt: new Float64Array(0), outline: chain, hidden: new Float64Array(0), guide: new Float64Array(0), guideHidden: new Float64Array(0) };
     const { c, s } = turnAxes(0);
     const view = (x: number, y: number, z: number) => `${(c * x - s * y).toFixed(6)},${((s * x + c * y) / 2 - K * z).toFixed(6)}`;
     const subpaths = (q: ArrayLike<number>) => {

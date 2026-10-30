@@ -5,7 +5,7 @@ import { cornerAt, hexAt, hexCenter, hexCorners } from "#shared/rules/hex.ts";
 import { crossingsAt, insideCrossings, type Polygon, type PolygonIndex } from "#shared/rules/walls.ts";
 import { isHex } from "#shared/rules/grid.ts";
 import type { HexGrid } from "#shared/rules/hex.ts";
-import { cellAtPoint, cellPolygon, cellsMeeting, hexesMeeting, polygonSide, sameCell, type GroundCell, type GroundSurface } from "../../lib/groundCells.ts";
+import { cellAtPoint, cellId, cellPolygon, cellsMeeting, hexesMeeting, polygonSide, sameCell, type GroundCell, type GroundSurface } from "../../lib/groundCells.ts";
 import { K, turnAxes, type Turn } from "../../lib/view.ts";
 
 /**
@@ -1489,6 +1489,14 @@ export type BandPart = {
   far: Float64Array[];
   near: Float64Array[];
   /**
+   * Inside a pit's opening, for each loop of `far` and of `near` in turn,
+   * a world point `x, y` over the one cell every face of that loop lies
+   * over, read before the loop is merged, so the board knows the pit
+   * region it shows in (review HXR1-ASTRA-9). Empty above the ground.
+   */
+  farAt: Float64Array;
+  nearAt: Float64Array;
+  /**
    * Strokes as polylines, `[x, y, z, ...]` with a NaN between one line and
    * the next, so a dash runs on along a chain of short edges: the outline
    * (silhouettes, near creases, cap rims, near ground rims), the hidden
@@ -2099,6 +2107,29 @@ export class Volume {
     return out;
   }
 
+  /**
+   * A point over the cell a face lies over: its corners' middle, which a
+   * convex face holds. A face on a pit's wall has it on the wall, where the
+   * board reads a hair to each side (relief/volumes.ts pitsUnder).
+   */
+  #middleOf(id: number): [number, number] {
+    const F = this.#faces;
+    const p = this.#st.p;
+    let x = 0;
+    let y = 0;
+    const n = F.off[id + 1]! - F.off[id]!;
+    for (let q = F.off[id]!; q < F.off[id + 1]!; q++) {
+      x += p[3 * F.v[q]!]!;
+      y += p[3 * F.v[q]! + 1]!;
+    }
+    return [x / n, y / n];
+  }
+
+  /** The cell under a point, as one number: a hex scene's hex, else a square. */
+  #cellKey(x: number, y: number): number {
+    return cellId(this.#hex ? cellAtPoint(this.#hex.grid, { x, y }) : { col: Math.floor(x), row: Math.floor(y) });
+  }
+
   /** The hex a face along a side belongs to: the canonical polygon a point just inside the solid lies in, opposite the face's outward normal. */
   #ownerOf(p: Poly): GroundCell {
     const [x, y] = centroid(this.#st, p.v);
@@ -2310,34 +2341,45 @@ export class Volume {
     // Under the ground at 0 lies only what is inside a pit's opening, and the ground's level cut at 0 parts every face there from what is above, so a face, line or guide is inside when its lowest point is under 0.
     const lowAt = (z: number) => z < -EPS;
     // The faces by band, near or far, and above the ground at 0 or inside a pit's opening.
-    const groups = new Map<number, number[]>();
+    // Inside it, by cell too: a loop merged across cells can be concave, with no point of its own to say which pit region it shows in.
+    const groups = new Map<number | string, { g: number; ids: number[]; x: number; y: number }>();
     for (let k = 0; k < b.faces.length; k++) {
       const id = b.faces[k]!;
       let bottom = Infinity;
       for (let q = F.off[id]!; q < F.off[id + 1]!; q++) bottom = Math.min(bottom, p[3 * F.v[q]! + 2]!);
-      const g = 4 * t.band[k]! + 2 * t.near[k]! + (lowAt(bottom) ? 1 : 0);
-      const list = groups.get(g);
-      if (list) list.push(id);
-      else groups.set(g, [id]);
+      const low = lowAt(bottom);
+      const g = 4 * t.band[k]! + 2 * t.near[k]! + (low ? 1 : 0);
+      let key: number | string = g;
+      let x = NaN;
+      let y = NaN;
+      if (low) {
+        [x, y] = this.#middleOf(id);
+        key = `${g}:${this.#cellKey(x, y)}`;
+      }
+      const group = groups.get(key);
+      if (group) group.ids.push(id);
+      else groups.set(key, { g, ids: [id], x, y });
       if (budget.spend(F.off[id + 1]! - F.off[id]!)) yield;
     }
     // Strokes by their ends, vertex ids for the edges and points for the guides, chained into polylines at the end.
-    type Build = { far: Float64Array[]; near: Float64Array[]; outline: number[]; hidden: number[]; guide: number[]; guideHidden: number[] };
+    type Build = { far: Float64Array[]; near: Float64Array[]; farAt: number[]; nearAt: number[]; outline: number[]; hidden: number[]; guide: number[]; guideHidden: number[] };
     const bands = new Map<number, [Build, Build]>();
     const partOf = (band: number, low: boolean): Build => {
       let pair = bands.get(band);
       if (!pair) {
-        const empty = (): Build => ({ far: [], near: [], outline: [], hidden: [], guide: [], guideHidden: [] });
+        const empty = (): Build => ({ far: [], near: [], farAt: [], nearAt: [], outline: [], hidden: [], guide: [], guideHidden: [] });
         bands.set(band, (pair = [empty(), empty()]));
       }
       return pair[low ? 1 : 0];
     };
-    for (const [g, ids] of groups) {
+    for (const { g, ids, x, y } of groups.values()) {
       const band = Math.floor(g / 4);
       const r = g - 4 * band;
-      const part = partOf(band, (r & 1) === 1);
+      const low = (r & 1) === 1;
+      const part = partOf(band, low);
       const loops = yield* this.#walk(ids, budget);
       (r & 2 ? part.near : part.far).push(...loops);
+      if (low) for (let i = 0; i < loops.length; i++) (r & 2 ? part.nearAt : part.farAt).push(x, y);
     }
     // Each edge once, by the nearer band beside it, as `lines` reads it.
     for (let k = 0; k < b.faces.length; k++) {
@@ -2397,7 +2439,7 @@ export class Volume {
       const done = function* (q: Build): Job<BandPart> {
         for (const loop of q.far) yield* grow(loop);
         for (const loop of q.near) yield* grow(loop);
-        const part: BandPart = { far: q.far, near: q.near, outline: yield* chained(q.outline, p, budget), hidden: yield* chained(q.hidden, p, budget), guide: yield* chainedPoints(q.guide, budget), guideHidden: yield* chainedPoints(q.guideHidden, budget) };
+        const part: BandPart = { far: q.far, near: q.near, farAt: Float64Array.from(q.farAt), nearAt: Float64Array.from(q.nearAt), outline: yield* chained(q.outline, p, budget), hidden: yield* chained(q.hidden, p, budget), guide: yield* chainedPoints(q.guide, budget), guideHidden: yield* chainedPoints(q.guideHidden, budget) };
         yield* grow(part.outline);
         yield* grow(part.hidden);
         yield* grow(part.guide);
