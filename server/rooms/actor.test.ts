@@ -3485,8 +3485,9 @@ describe("map discovery on the actor (docs/design-v1-map-discovery.md 5.3 and 6)
       // FU39-C, FU34-OPUS-4: only the rate clock stops. The event loop still yields normally.
       const table = dmDevice(actor, dm, undefined, () => 0);
       await actor.hello(table.conn, { clientId: "c1", resumeFrom: 1 });
-      // 16 bands of 1,600 squares on ground the party never held, so every one is read through.
-      const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: 60 + k * 8, w: 200, h: 8 }));
+      // Held stone ground keeps every band's detailed comparisons active. Narrow bands
+      // keep their combined memory growth below the cap, so the ask reads all 16.
+      const bands: OpOf<"build.rect">[] = Array.from({ length: 16 }, (_, k) => ({ t: "build.rect", sceneId, terrain: "wood", x: 0, y: k, w: 96, h: 1 }));
       // Counts the timer's turns while the ask is read, not how long the longest took: a loaded machine
       // stretches every turn (243 ms once beside other lanes, GP3-FLAKE-ACTOR) but never merges two into one.
       let turnsWhileReading = 0;
