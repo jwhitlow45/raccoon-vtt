@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Viewer } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
-import type { ClientOp, ServerMessage } from "#shared/protocol.ts";
+import { serverMessageSchema, type ClientOp, type ServerMessage } from "#shared/protocol.ts";
 import type { UndoScope } from "#shared/undoContract.ts";
 import { DM, P1, room as roomState } from "#shared/testutil.ts";
 import { createRoomStore } from "./store.ts";
@@ -12,8 +12,7 @@ const SAVED = "Saved. Undo in Setup history.";
 const TOO_LARGE = "This change is too large to undo.";
 const rename: ClientOp = { t: "scene.update", sceneId: "s1", patch: { name: "The crypt" } };
 type StateEvent = Extract<ServerMessage, { t: "ev" }>;
-type Ack = NonNullable<StateEvent["ackDetails"]>[number] & { recorded?: boolean; tooLarge?: true };
-type Ev = Omit<StateEvent, "ackDetails"> & { ackDetails?: Ack[] };
+type Ev = StateEvent;
 
 function setup(viewer: Viewer = DM) {
   const room = createRoomStore({ roomId: "R1", you: viewer, clock: new FakeClock() });
@@ -54,6 +53,20 @@ test("server scope overrides the client's apparent operation scope and group dec
   promoted.room.applyEv(promoted.event(n));
   assert.equal(promoted.notices().length, 1, "a later gesture part can inherit Setup without a local declaration");
   promoted.room.dispose();
+});
+
+test("recorded and oversized acknowledgment fields survive the socket's parse of the wire frame", () => {
+  for (const tooLarge of [false, true]) {
+    const s = setup();
+    const n = s.room.dispatch(rename)!;
+    const ev = s.event(n, "setup", true, { ackDetails: [{ n, scope: "setup", changed: true, recorded: !tooLarge, ...(tooLarge ? { tooLarge: true as const } : {}) }] });
+    const parsed = serverMessageSchema.parse(JSON.parse(JSON.stringify(ev)));
+    assert.equal(parsed.t, "ev");
+    s.room.applyEv(parsed as Ev);
+    assert.equal(s.notices().length, tooLarge ? 0 : 1, "only a recorded step promises Setup history");
+    assert.equal(s.oversized().length, tooLarge ? 1 : 0, "only the sender hears that the change is too large");
+    s.room.dispose();
+  }
 });
 
 test("changed false and missing metadata never infer success from projected values", () => {

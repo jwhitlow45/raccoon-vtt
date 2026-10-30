@@ -981,7 +981,7 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
           ? [{ from: op.t, scope: op.scope ?? "play", label: restored.what }]
           : [];
       });
-      const ownDetails = ((msg.ackDetails ?? []) as readonly OpRecording[]).filter((detail) => accepted.some((p) => p.n === detail.n));
+      const ownDetails = (msg.ackDetails ?? []).filter((detail) => accepted.some((p) => p.n === detail.n));
       if (ownDetails.some((detail) => detail.changed && detail.tooLarge === true)) {
         toasts = toasts.filter((toast) => toast.text !== SETUP_SAVED);
         renew(TOO_LARGE_TO_UNDO, "info");
