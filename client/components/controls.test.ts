@@ -355,6 +355,25 @@ describe("radio cards (docs/design-v1-design-pass.md 4.2)", () => {
     assert.doesNotMatch(status, /<div|role=/);
   });
 
+  test("both forms, with a help and without, stand the help space(1) under the name and the cards space(2) under what stands above them, with no fieldset gap (docs/design-v1-spacing-pass.md S1)", () => {
+    /** The style attribute of the first element that `open` finds. */
+    const styleOf = (markup: string, open: RegExp) => new RegExp(`${open.source}[^>]*?style="([^"]*)"`).exec(markup)?.[1] ?? null;
+    for (const radiogroup of [false, true]) {
+      for (const help of [undefined, "For this device only."]) {
+        const at = `${radiogroup ? "the radio group" : "the fieldset"} ${help ? "with" : "without"} a help`;
+        const markup = cards({ radiogroup, help });
+        // A fieldset's gap never reaches its rendered legend, which is no grid item, and left the cards on it.
+        if (!radiogroup) assert.doesNotMatch(styleOf(markup, /^<fieldset/) ?? "", /(^|;)(row-)?gap:/, `${at}: the fieldset sets no gap`);
+        const name = markup.indexOf(radiogroup ? ">Map images</span>" : ">Map images</legend>");
+        const line = help ? markup.indexOf(`>${help}</p>`) : -1;
+        const group = markup.search(/<div[^>]*data-card-group=""/);
+        assert.ok(name >= 0 && group > name && (!help || (line > name && line < group)), `${at}: the name, then the help, then the cards`);
+        if (help) assert.match(styleOf(markup, /<p/) ?? "", new RegExp(`(^|;)margin-top:${theme.space(1)}px`), `${at}: the help stands space(1) under the name`);
+        assert.match(styleOf(markup, /<div[^>]*data-card-group=""/) ?? "", new RegExp(`(^|;)margin-top:${theme.space(2)}px`), `${at}: the cards stand space(2) under what stands above them`);
+      }
+    }
+  });
+
   test("with nothing chosen the group is described by the none line, in the warning tone", () => {
     const markup = html(createElement(PlayersSeeChoice, { value: null, none: "Custom: this scene's own settings.", onChange() {} }));
     const id = /<div role="radiogroup"[^>]* aria-describedby="([^"]+)"/.exec(markup)?.[1];

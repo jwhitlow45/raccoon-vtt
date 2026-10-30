@@ -125,6 +125,21 @@ export function RadioCards<V extends string>(props: {
     );
   });
 
+  /*
+   * Both forms stand one column under the name: the help `space(1)` under
+   * it, and the cards `space(2)` under whatever stands above them, further
+   * than the cards stand from each other, so the first card never reads as
+   * part of the name (docs/design-v1-spacing-pass.md S1). Margins, not a
+   * gap: a fieldset's gap never reaches its rendered legend, which is no
+   * grid item, and left the cards on it.
+   */
+  const help = props.help ? (
+    <Help id={helpId} style={{ marginTop: theme.space(1) }}>
+      {props.help}
+    </Help>
+  ) : null;
+  const column: CSSProperties = { display: "grid", gap: theme.space(1), marginTop: theme.space(2), minWidth: 0 };
+
   if (props.radiogroup) {
     return (
       // No gap of its own: the status under the cards is mounted while empty, and only what it says takes room.
@@ -132,11 +147,7 @@ export function RadioCards<V extends string>(props: {
         <span id={nameId} style={nameStyle}>
           {props.legend}
         </span>
-        {props.help ? (
-          <Help id={helpId} style={{ marginTop: theme.space(1) }}>
-            {props.help}
-          </Help>
-        ) : null}
+        {help}
         <div
           role="radiogroup"
           aria-labelledby={nameId}
@@ -144,7 +155,7 @@ export function RadioCards<V extends string>(props: {
           aria-busy={props.busy ? true : undefined}
           aria-disabled={disabled ? true : undefined}
           data-card-group=""
-          style={{ display: "grid", gap: theme.space(1), marginTop: theme.space(1), minWidth: 0 }}
+          style={column}
         >
           {cards}
         </div>
@@ -157,12 +168,14 @@ export function RadioCards<V extends string>(props: {
       aria-describedby={describedBy}
       aria-busy={props.busy ? true : undefined}
       disabled={disabled}
-      style={{ margin: 0, padding: 0, border: "none", minWidth: 0, display: "grid", gap: theme.space(1) }}
+      style={{ margin: 0, padding: 0, border: "none", minWidth: 0 }}
     >
       <legend style={nameStyle}>{props.legend}</legend>
-      <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
-        {props.help ? <Help id={helpId}>{props.help}</Help> : null}
-        <div data-card-group="" style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>{cards}</div>
+      <div style={{ display: "grid", minWidth: 0 }}>
+        {help}
+        <div data-card-group="" style={column}>
+          {cards}
+        </div>
       </div>
     </fieldset>
   );
