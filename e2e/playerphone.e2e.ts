@@ -507,10 +507,19 @@ describe("raccoon-vtt player on a phone after the design pass", { timeout: 240_0
           const m = { player: await toolSection(player, view.scale), dm: draw === "all" ? await toolSection(dm, view.scale) : null };
           await shots.take(player, `player-toolbar-${draw === "all" ? "draw" : "nodraw"}-${tag}`);
           if (draw === "all") await shots.take(dm, `dm-toolbar-${tag}`);
-          if (!phone) continue;
+          // The sideways phone shares the toolbar's row with the options, so it has no strip to measure.
+          if (view.width === 844) continue;
+          // The tablet keeps its capped buttons, so a player's four tools still stop short of Panels.
+          if (!phone) {
+            if (draw === "none") assert.ok(m.player && m.player.endGap > 0, `the tablet's four tools no longer stop short: ${JSON.stringify(m.player)}`);
+            continue;
+          }
           for (const [who, one] of Object.entries(m)) {
-            if (!one) continue;
             const where = `${who}, Draw ${draw}, ${label}`;
+            // The DM's bar is measured once, with Draw shown: Draw has no say in what the DM's toolbar holds.
+            if (who === "dm" && draw === "none") continue;
+            assert.ok(one, `${where}: no tool strip was measured`);
+            assert.ok(one.count >= (who === "dm" ? 7 : 4), `${where}: only ${one.count} tools in the strip`);
             assert.ok(Math.abs(one.startGap) <= 1, `${where}: the first tool is ${one.startGap} px from its section's start`);
             assert.ok(Math.abs(one.endGap) <= 1, `${where}: the last tool is ${one.endGap} px from its section's end`);
             assert.equal(one.tops, 1, `${where}: a tool wrapped`);
