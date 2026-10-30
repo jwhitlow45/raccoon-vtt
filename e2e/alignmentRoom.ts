@@ -5464,7 +5464,10 @@ export function undoScopeAlignmentTests(names: readonly string[]): void {
           await reopenRoom(page);
           const loading = (await setupHistory(page)).sheet;
           await loading.getByText("Loading undo history…", { exact: true }).waitFor();
+          // A turning spinner's box grows by up to 3.7 px each side at 45 degrees, though its ring stays in place. Measure it still, as reduced motion draws it.
+          await page.emulateMedia({ reducedMotion: "reduce" });
           await sweep.measure(page, "undo-scope-loading", loading);
+          await page.emulateMedia({ reducedMotion: null });
           await shots.take(page, `undo-scope-${name}-${scale}-loading`);
           hold = false;
           for (const deliver of held.splice(0)) deliver();

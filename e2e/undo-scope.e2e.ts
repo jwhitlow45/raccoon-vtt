@@ -10,8 +10,8 @@ import { isCellFullyFogged } from "#shared/rules/fog.ts";
 import { EMPTY_PC_STATS } from "#shared/rules/pcStats.ts";
 import { actor, companionBlock } from "#shared/testutil.ts";
 import type { CorrectionLogEvent, HistoryMessage } from "#shared/undoContract.ts";
-import { ConsoleWatch, Shots, SocketWatch, openSideTab, pickTool, startServer, untilReady, waitFor, type Server } from "./harness.ts";
-import { UndoWire, historyOf, playControl, setupHistory } from "./helpers/undoScope.ts";
+import { ConsoleWatch, Shots, SocketWatch, openSideTab, pickTool, startServer, undoNoticeSeen, untilReady, waitFor, type Server } from "./harness.ts";
+import { UndoWire, historyOf, openMenu, playControl, setupHistory } from "./helpers/undoScope.ts";
 
 const PORT = Number(process.env.E2E_PORT ?? 3100) + 4;
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgres://raccoon:raccoon@localhost:5434/raccoon";
@@ -48,10 +48,21 @@ const releaseCommands = () => { gate.command = false; for (const send of gate.co
 const releaseHistory = () => { gate.history = false; for (const send of gate.histories.splice(0)) send(); };
 const frames = () => clients.map((client) => client.watch.received.length);
 
+/** The seq of the newest snapshot or state event a page received. */
+function viewSeq(watch: SocketWatch): number {
+  for (const raw of [...watch.received].reverse()) {
+    const frame = JSON.parse(raw) as { t?: string; seq?: number };
+    if ((frame.t === "ev" || frame.t === "snapshot") && typeof frame.seq === "number") return frame.seq;
+  }
+  return -1;
+}
 async function settle(): Promise<HistoryMessage> {
   const latest = await dmWire.history();
   const seq = Math.max(latest.seq, historyOf(dm().watch)?.seq ?? 0);
-  await waitFor("all pages cover the committed change", () => clients.every((client) => (historyOf(client.watch)?.seq ?? -1) >= seq));
+  // DM pages see every committed change. A player's page gets no event, and so no summary, for a change it cannot see,
+  // so it has caught up once its summary covers its own newest event. The DM pages arrive first, so a player's event is not still on its way.
+  await waitFor("DM pages cover the committed change", () => clients.slice(0, 3).every((client) => (historyOf(client.watch)?.seq ?? -1) >= seq));
+  await waitFor("player pages cover their own view", () => clients.slice(3).every((client) => (historyOf(client.watch)?.seq ?? -1) >= viewSeq(client.watch)));
   return latest;
 }
 async function clickPlay(direction: "undo" | "redo") {
@@ -85,6 +96,8 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     for (const [index, name] of ["DM", "same DM phone", "co-DM", "Bree's player", "unrelated player"].entries()) {
       const phone = index === 1 || index === 3;
       const context = await browser.newContext({ viewport: phone ? { width: 390, height: 844 } : { width: 1440, height: 900 }, isMobile: phone, hasTouch: phone });
+      // undo-scope-notice covers the rollout notice in contexts of its own. Here it would only stand over the controls.
+      await undoNoticeSeen(context);
       const page = await context.newPage();
       page.setDefaultTimeout(10_000);
       if (index === 0) await page.routeWebSocket(/\/ws\?room=/, (socket) => {
@@ -161,6 +174,7 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     await dm().page.keyboard.press("ControlOrMeta+Shift+z");
     await waitFor("focused Setup Redo", () => goblinActor().ac === 18);
     await dm().page.keyboard.press("Escape");
+    await sheet.waitFor({ state: "detached" });
     assert.ok(await opener.evaluate((button) => button === button.ownerDocument.activeElement));
   });
 
@@ -171,8 +185,16 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     assert.ok(before.play.undo.head && before.setup?.undo.head);
     assert.equal(historyOf(second().watch)?.play.undo.head?.id, before.play.undo.head.id);
     assert.notEqual(historyOf(co().watch)?.setup?.undo.head?.id, before.setup.undo.head.id);
+    const moved = before.play.undo.head.label;
     await clickPlay("undo");
     assert.equal(goblin().x, 3);
+    // The device that undid announces its own result once. Its other device and the co-DM hear the correction (D-261030-440).
+    const toast = (page: Page, text: string) => page.locator("[data-toast]").filter({ hasText: text });
+    await toast(dm().page, `Undid ${moved}.`).first().waitFor();
+    for (const client of [second(), co()]) await toast(client.page, `The DM undid ${moved}.`).first().waitFor();
+    assert.equal(await toast(dm().page, `Undid ${moved}.`).count(), 1, "one own result");
+    assert.equal(await toast(dm().page, `The DM undid ${moved}.`).count(), 0, "no second announcement of the own correction");
+    assert.ok(corrections(dm().watch.state!.log).some((line) => line.label === moved), "the own correction stays in the Log");
     assert.equal(goblinActor().ac, 19);
     await clickPlay("redo");
     assert.equal(goblin().x, 6);
@@ -180,8 +202,10 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     for (const client of [owner(), other()]) {
       assert.equal(historyOf(client.watch)?.setup, undefined);
       assert.ok(!client.watch.everSaw(before.setup.undo.head.id));
-      await openSideTab(client.page, "Menu");
+      await openMenu(client.page);
+      await client.page.getByRole("button", { name: /^Members|^About/ }).first().waitFor();
       assert.equal(await client.page.getByRole("button", { name: /^Setup history/ }).count(), 0);
+      await client.page.keyboard.press("Escape");
     }
     await shots.take(dm().page, "undo-scope-pose-preserves-ac");
   });
@@ -194,6 +218,12 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     let sheet = await clickSetup("undo");
     await sheet.getByText(/^Undo the play step first:/).waitFor();
     assert.equal(historyOf(dm().watch)?.setup?.undo.head?.id, before.setup!.undo.head!.id);
+    // A retained refusal is one toast, which offers Review step.
+    const refusal = dm().page.locator("[data-toast]").filter({ hasText: /^Could not undo .*: Undo the play step first:/ });
+    await refusal.getByRole("button", { name: "Review step", exact: true }).first().waitFor();
+    assert.equal(await refusal.count(), 1);
+    assert.equal(await refusal.getByRole("button", { name: "Review step", exact: true }).count(), 1);
+    await shots.take(dm().page, "undo-scope-retained-refusal-toast");
     await sheet.getByRole("button", { name: "Review step", exact: true }).click();
     await sheet.getByRole("button", { name: "Retry", exact: true }).waitFor();
     await shots.take(dm().page, "undo-scope-retained-setup");
@@ -315,7 +345,7 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     await dmWire.apply({ t: "build.paint", sceneId, terrain: "stone", cells: ["1,1"] });
     await settle();
     await pickTool(dm().page, "Map builder");
-    const builderUndo = dm().page.getByRole("button", { name: "Undo your last change", exact: true });
+    const builderUndo = dm().page.getByRole("button", { name: "Undo your last play or board change", exact: true });
     await untilReady(builderUndo, "Builder Undo");
     await builderUndo.click();
     await waitFor("Builder Undo removes the paint", () => !Object.values(dm().watch.state!.buildChunks).some((chunk) => chunk.cells["1,1"] === "stone"));
@@ -376,7 +406,8 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
     await undo.click({ clickCount: 1 });
     await waitFor("first pointer Undo committed", () => goblin().x === 14);
     await settle();
-    await undo.click({ clickCount: 2 });
+    // The same double click's second tap, landing after the first one's ack. A click with clickCount 2 would be a new double click, whose first tap is deliberate.
+    await undo.dispatchEvent("click", { detail: 2 });
     await dmWire.apply({ t: "log.chat", text: "Pointer sequence barrier" });
     await settle();
     assert.equal(stackCommands().length, before + 1, "the platform's second click sends no second Undo");
@@ -433,10 +464,11 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
 
   test("undo-scope-4-offline: another device changes history, reconnect takes its current head and never another member's", async () => {
     const retired = historyOf(dm().watch)!;
+    const room = dm().page.url();
     dm().console.allow = [/WebSocket/, /ERR_INTERNET_DISCONNECTED/, /ERR_NETWORK_CHANGED/];
     try {
-      await dm().context.setOffline(true);
-      await dm().page.getByRole("status", { name: "Connected" }).first().waitFor({ state: "hidden" });
+      // The page's socket is routed through the test (gate), which going offline would not drop, so the page leaves instead.
+      await dm().page.goto("about:blank");
       const { sheet } = await setupHistory(second().page);
       const undo = sheet.getByRole("button", { name: "Undo setup", exact: true });
       await untilReady(undo, "second device Setup Undo");
@@ -444,14 +476,14 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
       await waitFor("second device advances history", () => historyOf(second().watch)!.serial > retired.serial);
       const next = historyOf(second().watch)!;
       await closeSheet(second().page);
-      await dm().context.setOffline(false);
-      await dm().page.reload();
+      await dm().page.goto(room);
       await waitFor("reconnected history", () => historyOf(dm().watch)?.serial === next.serial);
       assert.deepEqual(historyOf(dm().watch)?.setup, next.setup);
       assert.equal(historyOf(dm().watch)?.epoch, next.epoch);
       assert.equal(historyOf(owner().watch)?.setup, undefined);
     } finally {
-      await dm().context.setOffline(false);
+      if (dm().page.url() !== room) await dm().page.goto(room);
+      await dm().page.getByRole("status", { name: "Connected" }).first().waitFor();
       dm().console.allow = [];
     }
   });
@@ -467,9 +499,8 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
       assert.deepEqual(after.play.redo, before.play.redo);
       assert.equal(after.setup, undefined);
       await settle();
-      const redo = playControl(owner().page, "redo");
-      await untilReady(redo, "player movement Redo after a sheet save");
-      await redo.click();
+      // A player has no top-bar Redo. Their Redo is the shortcut, here from the phone's hardware keyboard.
+      await owner().page.keyboard.press("ControlOrMeta+Shift+z");
       await waitFor("player Redo restores only the pose", () => owner().watch.state!.tokens[ids.pc]?.x === 10);
       assert.equal(owner().watch.state!.characters[ids.bree]!.actor.ac, 23);
     } finally { wire.close(); }
@@ -548,6 +579,55 @@ describe("undo-scope batch A", { timeout: 300_000 }, () => {
       await settle();
       assert.ok(dm().watch.state!.log.some((line) => line.text === "The old queue continued."));
     } finally { old.close(); }
+  });
+
+  test("undo-scope-notice: a DM device's first visit through November 13 UTC says once, as a passing toast, that Undo now separates play from setup, and from November 14 it says nothing", async () => {
+    const notice = "Undo now separates play from setup. Earlier undo history was cleared. Setup history is in the menu.";
+    const sizes = [{ width: 390, height: 844, label: "390x844" }, { width: 320, height: 568, label: "320x568" }];
+    for (const [i, { width, height, label }] of [...sizes, { width: 390, height: 844, label: "after" }].entries()) {
+      const late = i === sizes.length;
+      const context = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true });
+      try {
+        await context.addCookies(await dm().context.cookies(server.origin));
+        const page = await context.newPage();
+        page.setDefaultTimeout(10_000);
+        const watch = new SocketWatch(`notice ${label}`);
+        await watch.attach(context, page);
+        await page.clock.setFixedTime(new Date(late ? "2026-11-14T00:00:00Z" : "2026-11-13T23:00:00Z"));
+        await page.goto(`${server.origin}/r/${roomId}`);
+        await page.getByRole("status", { name: "Connected" }).first().waitFor();
+        await page.locator(".konvajs-content").first().waitFor();
+        // The notice is claimed as the first scoped history arrives, and drawn on the next render.
+        const told = async () => { await waitFor("the page's history", () => historyOf(watch)?.setup); await page.waitForTimeout(300); };
+        const toast = page.locator("[data-toast]").filter({ hasText: notice });
+        if (late) {
+          await told();
+          assert.equal(await toast.count(), 0, "no notice after the rollout window");
+          continue;
+        }
+        await toast.first().waitFor();
+        assert.equal(await toast.count(), 1);
+        const open = toast.getByRole("button", { name: "Setup history", exact: true });
+        const box = (await open.boundingBox())!;
+        assert.ok(box.height >= 44 && box.x >= 0 && box.x + box.width <= width && box.y + box.height <= height, `Setup history is a whole 44 px target at ${label}`);
+        await shots.take(page, `undo-scope-notice-${label}`);
+        await open.click();
+        const sheet = page.getByRole("dialog", { name: "Setup history", exact: true });
+        await sheet.waitFor();
+        await shots.take(page, `undo-scope-notice-history-${label}`);
+        await page.keyboard.press("Escape");
+        await sheet.waitFor({ state: "detached" });
+        assert.equal(await toast.count(), 0, "its button takes the notice away");
+        const frames = watch.received.length;
+        await page.reload();
+        await page.getByRole("status", { name: "Connected" }).first().waitFor();
+        await waitFor("the reloaded page's history", () => watch.received.slice(frames).some((raw) => raw.includes('"t":"history"')));
+        await page.waitForTimeout(300);
+        assert.equal(await page.locator("[data-toast]").filter({ hasText: notice }).count(), 0, "the same device is told once");
+      } finally {
+        await context.close();
+      }
+    }
   });
 
   test("undo-scope-console: no unexpected browser errors", () => {

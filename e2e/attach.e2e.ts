@@ -9,7 +9,7 @@ import type { RoomState, Token } from "../shared/model.ts";
 import { occupiedHexes, placedOnHex } from "../shared/rules/footprint.ts";
 import { hexCenter, hexKey, type Hex, type HexGrid } from "../shared/rules/hex.ts";
 import { wallsRound } from "../shared/rules/hexWalls.testkit.ts";
-import { barControl, ConsoleWatch, dragCells, dragWorld, expandBar, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, touchSwipe, waitFor, type Server } from "./harness.ts";
+import { barControl, ConsoleWatch, dragCells, dragWorld, expandBar, OpSocket, pagePoint, Shots, SocketWatch, startServer, tapCell, touchSwipe, undoNoticeSeen, waitFor, type Server } from "./harness.ts";
 
 /**
  * Attached tokens end to end (docs/design-v1-attach.md 13), on the real
@@ -159,6 +159,8 @@ type Elem = {
 /** The DM on a phone of their own at its size and interface size, signed in as the DM. */
 async function dmPhone(viewport: { width: number; height: number }, scale: number): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  // A new DM phone would first be told that Undo now separates play from setup, over the cells these steps tap.
+  await undoNoticeSeen(context);
   await context.addCookies(await dmContext.cookies(server.origin));
   const page = await context.newPage();
   if (scale !== 1) {
@@ -189,6 +191,7 @@ describe("raccoon-vtt attached tokens", { timeout: 600_000 }, () => {
     server = await startServer({ port: PORT, assetDir, databaseUrl: DATABASE_URL });
     browser = await chromium.launch({ channel: "chrome", headless: process.env.E2E_HEADED !== "1" });
     dmContext = await browser.newContext({ viewport: DESKTOP });
+    await undoNoticeSeen(dmContext);
     patContext = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     samContext = await browser.newContext({ viewport: DESKTOP });
     dm = await dmContext.newPage();

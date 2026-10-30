@@ -990,8 +990,8 @@ describe("raccoon-vtt shortcut sheet on a desktop and an Android phone", { timeo
     const keyed = async (button: Locator) => ({ name: await button.getAttribute("aria-label"), keys: await button.getAttribute("aria-keyshortcuts"), tip: await tipOf(button) });
     await keyOn(dm, "v");
     const bar = dm.locator("header:has(h1)").first();
-    assert.deepEqual(await keyed(bar.getByRole("button", { name: "Undo", exact: true })), { name: "Undo", keys: "Control+Z Meta+Z", tip: "Undo your last change (Ctrl+Z)" });
-    assert.deepEqual(await keyed(bar.getByRole("button", { name: "Redo", exact: true })), { name: "Redo", keys: "Control+Shift+Z Meta+Shift+Z", tip: "Redo what you undid (Ctrl+Shift+Z)" });
+    assert.deepEqual(await keyed(bar.getByRole("button", { name: "Undo", exact: true })), { name: "Undo", keys: "Control+Z Meta+Z", tip: "Undo your last play or board change: adding a label (Ctrl+Z)" });
+    assert.deepEqual(await keyed(bar.getByRole("button", { name: "Redo", exact: true })), { name: "Redo", keys: "Control+Shift+Z Meta+Shift+Z", tip: "Redo your last play or board change (Ctrl+Shift+Z)" });
     const view = bar.getByRole("button", { name: /^View: / });
     assert.deepEqual({ keys: await view.getAttribute("aria-keyshortcuts"), tip: await tipOf(view) }, { keys: "I", tip: "Change the view (I)" });
     assert.match((await view.getAttribute("aria-label")) ?? "", /^View: [A-Za-z-]+$/, "its name stays the view's");

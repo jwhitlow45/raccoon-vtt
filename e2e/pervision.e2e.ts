@@ -295,7 +295,7 @@ async function pickSight(choice: "Whole party" | "Per player"): Promise<void> {
   const done = () => has.perPlayer(sockets.dm.state) === (choice === "Per player");
   await waitFor(`the question or the scene ${choice}`, async () => (done() || (await asked.count()) > 0 ? true : null));
   if (!done()) {
-    assert.equal((await asked.getByRole("status").innerText()).trim(), "Each player's own map joins the party's. Undo does not split them again.");
+    assert.equal((await asked.getByRole("status").innerText()).trim(), "Each player's own map joins the party's. Undo setup in Setup history does not split them again.");
     await asked.getByRole("button", { name: "Change", exact: true }).click();
   }
   await waitFor(`the scene ${choice} in the DM's copy`, () => (done() ? true : null));

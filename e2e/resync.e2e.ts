@@ -759,6 +759,7 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await reopen(dm, { width: 1440, height: 900 });
     const panel = await openCharacters(dm);
     await openCard(panel, run.bree.characterId);
+    await shots.take(dm, "resync-dm-card-1440");
     const resync = panel.getByRole("button", { name: "Re-sync from D&D Beyond", exact: true });
     const undoSetupByKeys = async () => {
       const { sheet } = await setupHistory(dm);
@@ -796,6 +797,8 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await history.getByText("Undid setup: re-syncing Bree from D&D Beyond.", { exact: true }).waitFor();
     await dm.keyboard.press("Escape");
     await waitFor("Setup Undo took the re-sync back", () => (breeIn(dmSocket)?.level === 5 && breeIn(dmSocket)?.actor.ac === 17 ? true : null));
+    // Setup history lives in the Menu panel, so Bree's page is a panel switch away again.
+    await openCard(await openCharacters(dm), run.bree.characterId);
 
     done = await syncByKeys();
     await tabTo(dm, "button Undo the re-sync", true);

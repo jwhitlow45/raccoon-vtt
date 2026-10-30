@@ -1266,7 +1266,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     const c = corner(14, 8, 0);
     await tapAt(dm, { x: b.x + 0.04, y: (b.y + c.y) / 2 });
     await waitFor("the wall down taken off", () => (hallWalls().some((w) => joins(w, b, c)) ? null : true));
-    await buildBar(dm).getByRole("button", { name: "Undo your last change" }).click();
+    await buildBar(dm).getByRole("button", { name: "Undo your last play or board change" }).click();
     await waitFor("the wall down back", () => (hallWalls().some((w) => joins(w, b, c)) ? true : null));
   });
 
@@ -1804,7 +1804,7 @@ describe("raccoon-vtt hex grids: the board", { timeout: 600_000 }, () => {
     assert.ok((dmSocket.state!.fogDrafts[run.moorland]?.ops.length ?? 0) > 1, "the room in several ops");
     await fogBar(dm).getByRole("button", { name: "Reveal to players (1)" }).waitFor();
     await shots.take(dm, "hx9b-moorland-draft");
-    await dm.getByRole("button", { name: "Undo", exact: true, description: "Undo your last change (Ctrl+Z)" }).click();
+    await dm.getByRole("button", { name: "Undo", exact: true, description: /^Undo your last play or board change(: .+)? \(Ctrl\+Z\)$/ }).click();
     await waitFor("the whole draft taken back by the top bar's one undo", () => (dmSocket.state?.fogDrafts[run.moorland] === undefined ? true : null));
     await dm.mouse.click(p.x, p.y);
     await waitFor("the room drafted again", () => (draftCells(run.moorland).length === all ? true : null), 30_000);

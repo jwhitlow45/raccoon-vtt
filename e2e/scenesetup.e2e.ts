@@ -9,6 +9,7 @@ import sharp from "sharp";
 import type { RoomState, Scene } from "#shared/model.ts";
 import { ConsoleWatch, OpSocket, openSideTab, pickOption, pickTool, reopenRoom, Shots, sideTabName, SocketWatch, startServer, waitFor, type Server } from "./harness.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
+import { setupHistory } from "./helpers/undoScope.ts";
 import { chooseStarterWork, starterWork } from "./starterPick.ts";
 
 /**
@@ -67,7 +68,7 @@ const assetDir = path.join(work, "assets");
 const shots = new Shots(SHOT_DIR === "0" ? null : SHOT_DIR);
 
 const WIDE = { width: 1280, height: 800 };
-const LEAVE = "Players will see the build as it is now on everything they explored. Undo does not bring back what they remembered.";
+const LEAVE = "Players will see the build as it is now on everything they explored. Undo setup in Setup history does not bring back what they remembered.";
 const WALLLESS = "This map has no walls yet, so party vision shows players all of it at once. Add walls first, or choose Reveal by hand.";
 const STEPS_DOWN = "Under Explore a map image with no walls starts on Reveal by hand, since party vision would show players all of it.";
 const CUSTOM = "Custom: party vision is on and fog is off, so players see the whole map, dimmed outside what their characters see.";
@@ -474,7 +475,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     assert.equal(barrow.blockMovement, false);
   });
 
-  test("ss-3. Cave's settings used on 3 scenes in one step name what each will do, and one Undo puts all 3 back", async () => {
+  test("ss-3. Cave's settings used on 3 scenes in one step name what each will do, and one Undo setup in Setup history puts all 3 back", async () => {
     await view(run.caveId);
     const panel = await scenesPanel(dm);
     const opener = section(panel, "What players see").getByRole("button", { name: "Use these settings on other scenes…" });
@@ -497,6 +498,8 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     const before = { arena: seeOf(run.arenaId), crypt: seeOf(run.cryptId), mat: seeOf(run.matId) };
     await copy.click();
     await sheet.getByRole("status").filter({ hasText: "Copied to 3 scenes." }).waitFor();
+    // Copying scene configuration is Setup (docs/design-v1-undo-scope.md 2), so the save says where its Undo is.
+    await dm.getByText("Saved. Undo in Setup history.", { exact: true }).first().waitFor();
     const cave = { fog: true, vision: false, light: "bright", perPlayer: false };
     await waitFor("all 3 copied", () => ([run.arenaId, run.cryptId, run.matId].every((id) => JSON.stringify(seeOf(id)) === JSON.stringify(cave)) ? true : null));
     assert.equal(sceneOf(run.cryptId)?.blockMovement, false, "movement stays as it was");
@@ -509,10 +512,14 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
     await sheet.waitFor({ state: "detached" });
     assert.equal(await opener.evaluate((el) => el === (globalThis as unknown as { document: { activeElement: unknown } }).document.activeElement), true, "focus went back to the button");
 
-    // One Undo, named for the copy, puts every scene back.
-    await dm.getByRole("button", { name: "Undo", exact: true }).click();
-    await dm.getByText("Undid using Cave's vision settings on 3 scenes.", { exact: true }).first().waitFor();
+    // One Undo setup, named for the copy, puts every scene back. The top bar's Undo is for play and board changes.
+    const { sheet: history } = await setupHistory(dm);
+    await history.getByText("using Cave's vision settings on 3 scenes", { exact: true }).waitFor();
+    await history.getByRole("button", { name: "Undo setup", exact: true }).click();
+    await dm.getByText("Undid setup: using Cave's vision settings on 3 scenes.", { exact: true }).first().waitFor();
     await waitFor("all 3 back", () => (JSON.stringify([seeOf(run.arenaId), seeOf(run.cryptId), seeOf(run.matId)]) === JSON.stringify([before.arena, before.crypt, before.mat]) ? true : null));
+    await dm.keyboard.press("Escape");
+    await history.waitFor({ state: "detached" });
     assert.deepEqual(consoles.flatMap((c) => c.errors), []);
   });
 

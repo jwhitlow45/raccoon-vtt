@@ -69,11 +69,28 @@ export function historyOf(watch: SocketWatch): HistoryMessage | undefined {
   return undefined;
 }
 
+/** Opens the Menu: its side panel tab from 900 px up, else its sheet from Panels, as a phone shows it. */
+export async function openMenu(page: Page): Promise<void> {
+  const menuSheet = page.locator('dialog[data-rvtt-sheet][aria-label="Menu"]');
+  const tabs = page.getByRole("tablist", { name: "Panels" });
+  const panels = page.getByRole("navigation", { name: "Tools" }).getByRole("button", { name: /^Panels/ });
+  // A page just loaded shows neither yet. Wait for the one its width gives it.
+  await tabs.or(panels).or(menuSheet).first().waitFor();
+  if (await tabs.isVisible()) await openSideTab(page, "Menu");
+  else if (!(await menuSheet.isVisible())) {
+    await panels.click();
+    await page.getByRole("region", { name: "Panels" }).getByRole("button", { name: /^Menu/ }).click();
+    await menuSheet.waitFor();
+  }
+}
+
+/** Opens Setup history from the Menu. */
 export async function setupHistory(page: Page) {
-  await openSideTab(page, "Menu");
+  await openMenu(page);
   const back = page.getByRole("button", { name: "Back to Menu", exact: true });
   if (await back.isVisible()) await back.click();
-  const opener = page.getByRole("button", { name: /^Setup history(?:\s|$)/ });
+  // The Menu's row, named with its detail, never a toast that starts with the same words.
+  const opener = page.getByRole("button", { name: /^Setup history Undo or redo/ });
   await opener.click();
   const sheet = page.getByRole("dialog", { name: "Setup history", exact: true });
   await sheet.waitFor();

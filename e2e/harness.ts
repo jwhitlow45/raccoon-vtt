@@ -7,6 +7,8 @@ import type { BrowserContext, CDPSession, Locator, Page, Request } from "playwri
 import WebSocket from "ws";
 import type { RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
+import type { HistoryMessage } from "#shared/undoContract.ts";
+import { UNDO_NOTICE_KEY } from "../client/state/historyNotice.ts";
 
 /**
  * Plumbing for the end-to-end smoke run (design section 18, Stage 3): the
@@ -259,6 +261,24 @@ export async function diceFoldsOpen(context: BrowserContext): Promise<void> {
     },
     { key: "rvtt.diceFolds", value },
   );
+}
+
+/**
+ * Makes each page the context opens a DM device that already saw the one-time
+ * "Undo now separates play from setup" toast (client/state/historyNotice.ts),
+ * before the page's own scripts run. Until its rollout window ends, the
+ * toast greets every new DM device for 12 seconds over the map's top, where
+ * a suite's first taps land. A suite not about it calls this once.
+ * undo-scope.e2e.ts covers the notice itself.
+ */
+export async function undoNoticeSeen(context: BrowserContext): Promise<void> {
+  await context.addInitScript((key) => {
+    try {
+      localStorage.setItem(key, "1");
+    } catch {
+      // A page with no storage, such as about:blank, shows no room.
+    }
+  }, UNDO_NOTICE_KEY);
 }
 
 type Json = Record<string, unknown>;
@@ -763,9 +783,12 @@ export class OpSocket {
    * at once with it, rather than as an op that got no answer.
    */
   private gone: string | null = null;
+  private history: HistoryMessage | null;
+  private readonly historyWaiters = new Set<() => void>();
 
-  private constructor(ws: WebSocket) {
+  private constructor(ws: WebSocket, history: HistoryMessage | null) {
     this.ws = ws;
+    this.history = history;
     ws.on("message", (data) => {
       const msg = JSON.parse(Buffer.isBuffer(data) ? data.toString("utf8") : String(data)) as {
         t?: string;
@@ -775,7 +798,10 @@ export class OpSocket {
         code?: string;
         reason?: string;
       };
-      if (msg.t === "ev") {
+      if (msg.t === "history") {
+        this.history = msg as HistoryMessage;
+        for (const wake of [...this.historyWaiters]) wake();
+      } else if (msg.t === "ev") {
         for (const n of msg.acks ?? []) this.waiting.get(n)?.resolve();
         for (const r of msg.rejects ?? []) this.waiting.get(r.n)?.reject(new Error(`op ${r.n} refused: ${r.code}: ${r.message}`));
       } else if (msg.t === "retry" && msg.n !== undefined) {
@@ -794,6 +820,13 @@ export class OpSocket {
 
   static async open(input: { origin: string; roomId: string; cookie: string }): Promise<OpSocket> {
     const ws = new WebSocket(`${input.origin.replace(/^http/, "ws")}/ws?room=${input.roomId}`, { headers: { Origin: input.origin, Cookie: input.cookie } });
+    // The summary after the snapshot can arrive before the socket's own listener is on.
+    let early: HistoryMessage | null = null;
+    const keep = (data: WebSocket.RawData) => {
+      const msg = JSON.parse(Buffer.isBuffer(data) ? data.toString("utf8") : String(data)) as { t?: unknown };
+      if (msg.t === "history") early = msg as HistoryMessage;
+    };
+    ws.on("message", keep);
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("No snapshot within 10 s")), 10_000);
       ws.on("open", () => ws.send(JSON.stringify({ t: "hello", clientId: randomUUID(), resumeFrom: 1 })));
@@ -806,7 +839,33 @@ export class OpSocket {
       });
       ws.on("error", reject);
     });
-    return new OpSocket(ws);
+    const socket = new OpSocket(ws, early);
+    ws.off("message", keep);
+    return socket;
+  }
+
+  /**
+   * Sends a stack Undo or Redo naming the head from the newest history summary that covers
+   * this socket's ops, as a page captures it. An empty history sends an id no step has.
+   */
+  async step(t: "undo" | "redo", scope: "play" | "setup" = "play"): Promise<void> {
+    const covered = this.next - 1;
+    const summary = await new Promise<HistoryMessage>((resolve, reject) => {
+      const check = () => {
+        if (!this.history || this.history.watermark < covered) return;
+        clearTimeout(timer);
+        this.historyWaiters.delete(check);
+        resolve(this.history);
+      };
+      const timer = setTimeout(() => {
+        this.historyWaiters.delete(check);
+        reject(new Error(`no history summary covering op ${covered} within 10 s`));
+      }, 10_000);
+      this.historyWaiters.add(check);
+      check();
+    });
+    const head = summary[scope]?.[t].head?.id ?? randomUUID();
+    return this.send({ t, head, ...(scope === "setup" ? { scope } : {}) });
   }
 
   /** Sends one op and resolves once the server took it, or rejects with its refusal. */

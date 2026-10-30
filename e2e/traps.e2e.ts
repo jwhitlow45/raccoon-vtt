@@ -412,7 +412,7 @@ describe("raccoon-vtt traps", { timeout: 600_000 }, () => {
     const cookie = (await patContext.cookies(server.origin)).map((c) => `${c.name}=${c.value}`).join("; ");
     const patOps = await OpSocket.open({ origin: server.origin, roomId: run.roomId, cookie });
     try {
-      await assert.rejects(patOps.send({ t: "undo" }), /could not undo moving Thorn: something happened on the way\. Ask the DM/);
+      await assert.rejects(patOps.step("undo"), /could not undo moving Thorn: something happened on the way\. Ask the DM/);
     } finally {
       patOps.close();
     }
