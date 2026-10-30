@@ -195,7 +195,7 @@ export function MonsterImageSection(props: {
           <Help>Tokens on other scenes keep theirs. Open this monster while viewing that scene to apply it there.</Help>
         </div>
       ) : null}
-      {applied !== null ? <Notice role="status">{`Applied to ${applied} ${applied === 1 ? "token" : "tokens"}. One undo takes them all back.`}</Notice> : null}
+      {applied !== null ? <Notice role="status">{`Applied to ${applied} ${applied === 1 ? "token" : "tokens"}. Undo setup in Setup history takes them all back.`}</Notice> : null}
     </section>
   );
 }

@@ -81,7 +81,7 @@ export function GroupMoreSheet(props: { tokens: readonly Token[]; onClose(): voi
 
   return (
     <SheetDialog title={`${tokens.length} tokens`} onClose={props.onClose} opener={props.opener} width={theme.layout.dialog.md}>
-      <Note>Each change applies to all {tokens.length} at once, and one undo takes it back.</Note>
+      <Note>Each change applies to all {tokens.length} at once. Use Undo for size. Use Undo setup in Setup history for the other settings.</Note>
       <Section title="Look">
         <FieldRow label="Ring">
           <Segmented<Token["disposition"]>

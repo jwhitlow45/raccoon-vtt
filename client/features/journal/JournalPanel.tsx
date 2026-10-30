@@ -244,7 +244,7 @@ function PageView(props: { page: JournalPage; dm: boolean; shown: boolean; onBac
           <Markdown key={block.id} journal text={block.text} style={READING} />
         ),
       )}
-      {dm ? <Help>Deleting a page makes every pin linked to it DM only. Undo brings both back.</Help> : null}
+      {dm ? <Help>Deleting a page makes every pin linked to it DM only. Undo setup in Setup history brings both back.</Help> : null}
     </article>
   );
 }
