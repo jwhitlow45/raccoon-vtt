@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { LIMITS, serializedBytes } from "#shared/limits.ts";
-import { logsInIdOrder } from "#shared/logRings.ts";
+import { dmNumbered, logsInIdOrder, whisperParties } from "#shared/logRings.ts";
 import { MAP_DISCOVERY_OP_VERSION, OP_VERSION, SNAPSHOT_VERSION, mapDiscoveryUpgrade, migrateOp, migrateSnapshot, needsMapDiscoveryUpgrade, opMigrations, type MigrationStep } from "#shared/migrate.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { opSchema, type Op } from "#shared/protocol.ts";
@@ -367,20 +367,227 @@ export async function readReceipts(pool: Pool, roomId: string, memberId: string,
   return rows.map((r) => ({ memberId, tag, part: r.part, state: r.state, seq: r.seq === null ? null : Number(r.seq), code: r.code, message: r.message, at: r.at.toISOString() }));
 }
 
-/** Writes log lines to the archive (`room_log`), `on conflict do nothing`, so a replay or a second load never writes one twice. */
+/**
+ * Writes log lines to the archive (`room_log`), each with its op seq, line
+ * number and access rows (lineAccess) in one statement, so a row either
+ * lands with all of its metadata or not at all, whether or not the caller
+ * holds a transaction. A row already stored is left as it is: `on conflict`
+ * never writes a line twice, so a replay or a second load is harmless. One
+ * stored without metadata (an older server's write) gets it here, but only
+ * when its entry is this very line, so its access rows come from what it
+ * holds. An id the metadata cannot hold (storedKey) is stored without any,
+ * which leaves its room on the complete raw reader.
+ */
 export async function archiveLines(q: Queryable, roomId: string, lines: readonly LogEntry[]): Promise<void> {
   if (lines.length === 0) return;
+  const seen = new Set<string>();
+  const src: { ids: string[]; ats: string[]; entries: string[]; seqs: (string | null)[]; nos: (number | null)[] } = { ids: [], ats: [], entries: [], seqs: [], nos: [] };
+  const access = accessColumns();
+  for (const e of lines) {
+    // One statement cannot update a row twice, so a line named twice is written once.
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    const key = storedKey(e.id);
+    src.ids.push(e.id);
+    src.ats.push(e.at);
+    src.entries.push(JSON.stringify(e));
+    src.seqs.push(key?.seq ?? null);
+    src.nos.push(key?.line ?? null);
+    if (key) access.add(e, key);
+  }
   await q.query(
-    `insert into room_log (room_id, id, at, entry)
-     select $1, i, a::timestamptz, e::jsonb from unnest($2::text[], $3::text[], $4::text[]) as t(i, a, e)
+    `with src as (
+       insert into room_log (room_id, id, at, entry, seq, line_no)
+       select $1, i, a::timestamptz, e::jsonb, s, n from unnest($2::text[], $3::text[], $4::text[], $5::bigint[], $6::int[]) as t(i, a, e, s, n)
+       on conflict (room_id, id) do update set seq = excluded.seq, line_no = excluded.line_no
+         where room_log.seq is null and excluded.seq is not null and room_log.entry = excluded.entry
+       returning id
+     )
+     insert into room_log_access (room_id, stream, member_id, seq, line_no, id)
+     select $1, st, m, s, n, i from unnest($7::text[], $8::text[], $9::text[], $10::bigint[], $11::int[]) as x(i, st, m, s, n)
+     where i in (select id from src)
      on conflict do nothing`,
-    [roomId, lines.map((e) => e.id), lines.map((e) => e.at), lines.map((e) => JSON.stringify(e))],
+    [roomId, src.ids, src.ats, src.entries, src.seqs, src.nos, ...access.params()],
   );
 }
 
+/**
+ * The streams a reader's archive reads come from (room_log_access): the
+ * shared and DM lines, each party reader's copies and each member's
+ * whispers. They only narrow which rows a read looks at: every row read is
+ * projected for its reader, as the raw reader's are.
+ */
+export type LogStream = "shared" | "dm" | "party" | "whisper";
+export type LogAccess = { stream: LogStream; memberId: string };
+
+/** A stored id as the reducer writes it: decimal with no leading zero, the seq a bigint and the line six digits at most. */
+const STORED_ID = /^(0|[1-9]\d{0,17}):(0|[1-9]\d{0,5})$/;
+
+/**
+ * A stored id's op seq (as text, since it is a bigint) and line number, or
+ * null for an id the metadata cannot hold. Two ids that differ only by a
+ * leading zero would share one key, so only the reducer's own form counts.
+ */
+export function storedKey(id: string): { seq: string; line: number } | null {
+  const m = STORED_ID.exec(id);
+  return m ? { seq: m[1]!, line: Number(m[2]) } : null;
+}
+
+/**
+ * The streams a line is a candidate in, for every reader the projector
+ * (shared/project.ts projectLogEntry) could ever let read it: a whisper in
+ * each of its parties', a party copy in its one reader's, a line numbered
+ * with the DM's in the DM stream, and every other line in the shared one.
+ *
+ * It goes by what a line's id and fields say alone, never by what anyone
+ * can see now, so a later change of sight never needs a row rewritten. A
+ * line from before op version 19 that only lineAudience's event rule makes
+ * a DM line (neverRead) is filed as shared: the projector still keeps it
+ * from players, and a rule about events can change without leaving a
+ * readable line out of every player's stream.
+ */
+export function lineAccess(entry: Pick<LogEntry, "id" | "kind" | "from" | "to">): LogAccess[] {
+  if (entry.kind === "whisper") return whisperParties(entry).map((memberId) => ({ stream: "whisper", memberId }));
+  if (entry.to !== undefined) return entry.to[0] === undefined ? [] : [{ stream: "party", memberId: entry.to[0] }];
+  return [{ stream: dmNumbered(entry.id) ? "dm" : "shared", memberId: "" }];
+}
+
+/** The streams a viewer's reads merge: a player's own party copies, a DM's lines, and each one's own whispers. */
+export function readerStreams(viewer: Viewer): LogAccess[] {
+  const own: LogAccess = viewer.role === "dm" ? { stream: "dm", memberId: "" } : { stream: "party", memberId: viewer.memberId };
+  return [{ stream: "shared", memberId: "" }, own, { stream: "whisper", memberId: viewer.memberId }];
+}
+
+function accessColumns() {
+  const ids: string[] = [];
+  const streams: string[] = [];
+  const members: string[] = [];
+  const seqs: string[] = [];
+  const nos: number[] = [];
+  return {
+    add(e: Pick<LogEntry, "id" | "kind" | "from" | "to">, key: { seq: string; line: number }) {
+      for (const a of lineAccess(e)) {
+        ids.push(e.id);
+        streams.push(a.stream);
+        members.push(a.memberId);
+        seqs.push(key.seq);
+        nos.push(key.line);
+      }
+    },
+    params: () => [ids, streams, members, seqs, nos],
+  };
+}
+
+/**
+ * Whether a room holds an archive row without its metadata. Only this
+ * decides whether a read may use the access rows: any such row, from an
+ * older server, a backfill not yet done or an id the metadata cannot hold,
+ * sends the read to the complete raw reader. Quick only with the partial
+ * index on rows whose seq is null (logHistoryMigration.ts), so asked only
+ * once that index is valid.
+ */
+export async function archiveIncomplete(q: Queryable, roomId: string): Promise<boolean> {
+  const { rows } = await q.query<{ incomplete: boolean }>("select exists (select 1 from room_log where room_id = $1 and seq is null) as incomplete", [roomId]);
+  return rows[0]?.incomplete === true;
+}
+
+/** Up to `limit` of a room's rows without metadata, for the backfill: by the partial index, in no order, since each batch completes the rows it read. */
+export async function incompleteLines(q: Queryable, roomId: string, limit: number): Promise<{ id: string; entry: LogEntry }[]> {
+  const { rows } = await q.query<{ id: string; entry: LogEntry }>("select id, entry from room_log where room_id = $1 and seq is null limit $2", [roomId, Math.trunc(limit)]);
+  return rows;
+}
+
+/**
+ * Completes stored rows' metadata: the numbers and every access row, in one
+ * statement, so a row's seq is set only with all of its access rows. Only a
+ * row still without them is touched, so a second run, or a write that
+ * repaired the row first, changes nothing. Every id must pass storedKey.
+ * Returns how many rows it completed.
+ */
+export async function completeLines(q: Queryable, roomId: string, rows: readonly { id: string; entry: LogEntry }[]): Promise<number> {
+  if (rows.length === 0) return 0;
+  const ids: string[] = [];
+  const seqs: string[] = [];
+  const nos: number[] = [];
+  const access = accessColumns();
+  for (const { id, entry } of rows) {
+    const key = storedKey(id);
+    if (!key) throw new Error(`log row ${JSON.stringify(id)} has no stored id`);
+    ids.push(id);
+    seqs.push(key.seq);
+    nos.push(key.line);
+    // The row's own id, not the entry's, names it: they agree for every line the reducer writes.
+    access.add({ ...entry, id }, key);
+  }
+  const { rows: out } = await q.query<{ completed: string }>(
+    `with done as (
+       update room_log l set seq = c.s, line_no = c.n
+       from unnest($2::text[], $3::bigint[], $4::int[]) as c(i, s, n)
+       where l.room_id = $1 and l.id = c.i and l.seq is null
+       returning l.id
+     ), acc as (
+       insert into room_log_access (room_id, stream, member_id, seq, line_no, id)
+       select $1, st, m, s, n, i from unnest($5::text[], $6::text[], $7::text[], $8::bigint[], $9::int[]) as x(i, st, m, s, n)
+       where i in (select id from done)
+       on conflict do nothing
+     )
+     select count(*)::text as completed from done`,
+    [roomId, ids, seqs, nos, ...access.params()],
+  );
+  return Number(out[0]?.completed ?? 0);
+}
+
+/**
+ * The next `limit` candidate ids of one stream inside a range, in the
+ * range's order, by the access table's key: `after` is the last id this
+ * stream gave, which the next call starts past.
+ */
+export async function fetchAccessIds(q: Queryable, range: LogScanRange, access: LogAccess, after: { seq: string; line: number } | null, limit: number): Promise<{ id: string; seq: string; line: number }[]> {
+  const params: unknown[] = [range.roomId, access.stream, access.memberId, range.maxSeq];
+  const where = ["room_id = $1", "stream = $2", "member_id = $3", "seq <= $4"];
+  const asc = range.order === "asc";
+  const bounds: [LogBound | undefined, ">" | "<"][] = [
+    [range.lower, ">"],
+    [range.upper, "<"],
+  ];
+  for (const [b, op] of bounds) {
+    // Past the first call the stream's own last id replaces the bound it travels from.
+    const travelling = (op === ">") === asc;
+    if (travelling && after) {
+      params.push(after.seq, after.line);
+      where.push(`(seq, line_no) ${op} ($${params.length - 1}::bigint, $${params.length}::int)`);
+      continue;
+    }
+    if (!b) continue;
+    params.push(b.seq, b.index);
+    where.push(`(seq, line_no) ${op}${b.inclusive ? "=" : ""} ($${params.length - 1}::bigint, $${params.length}::int)`);
+  }
+  const dir = asc ? "asc" : "desc";
+  params.push(Math.trunc(limit));
+  // The seq comes back as text under another name: an output column named seq would be what `order by seq` sorts, as text.
+  const { rows } = await q.query<{ id: string; seq_text: string; line_no: number }>(
+    `select id, seq::text as seq_text, line_no from room_log_access where ${where.join(" and ")} order by seq ${dir}, line_no ${dir} limit $${params.length}`,
+    params,
+  );
+  return rows.map((r) => ({ id: r.id, seq: r.seq_text, line: r.line_no }));
+}
+
+/** The lines one op wrote in a reader's streams, by the access table's key and then the archive's, in line order. */
+export async function readOpLinesByAccess(q: Queryable, roomId: string, seq: number, streams: readonly LogAccess[]): Promise<LogEntry[]> {
+  const { rows } = await q.query<{ id: string; entry: LogEntry }>(
+    `select l.id, l.entry from unnest($3::text[], $4::text[]) as s(stream, member_id)
+     join room_log_access a on a.room_id = $1 and a.stream = s.stream and a.member_id = s.member_id and a.seq = $2
+     join room_log l on l.room_id = a.room_id and l.id = a.id
+     order by a.line_no`,
+    [roomId, seq, streams.map((s) => s.stream), streams.map((s) => s.memberId)],
+  );
+  const seen = new Set<string>();
+  return rows.flatMap((r) => (seen.has(r.id) ? [] : (seen.add(r.id), [r.entry])));
+}
+
 /** The log rows one op wrote, `<seq>:<index>`, in order. An older archive's trim or a short disk may have kept some out. */
-export async function readLogLines(pool: Pool, roomId: string, seq: number): Promise<LogEntry[]> {
-  const { rows } = await pool.query<{ entry: LogEntry }>(
+export async function readLogLines(q: Queryable, roomId: string, seq: number): Promise<LogEntry[]> {
+  const { rows } = await q.query<{ entry: LogEntry }>(
     `select entry from room_log where room_id = $1 and split_part(id, ':', 1) = $2
      order by split_part(id, ':', 2)::int`,
     [roomId, String(seq)],

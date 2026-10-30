@@ -236,3 +236,41 @@ create index if not exists roll_receipts_room_at on roll_receipts (room_id, at);
 -- 5), set by the server from its own catalog. Such a row stays out of the
 -- room's storage quota. Null for every upload.
 alter table assets add column if not exists starter text;
+-- The log archive's reading metadata (log history, server stage B). The
+-- entry stays the authority: these say only which readers a row is a
+-- candidate for, and every read still projects the entry for its reader.
+--
+-- A row's op seq and line number, numeric, set together with every one of
+-- its access rows in one statement (server/rooms/persistence.ts
+-- archiveLines and completeLines), so a non-null seq means the row's
+-- metadata is complete. Null for a row written before these columns, by an
+-- older server, or under an id the metadata cannot hold. No default, so
+-- adding them rewrites no row.
+alter table room_log add column if not exists seq bigint;
+alter table room_log add column if not exists line_no integer;
+-- Which readers a row is for: the shared and DM streams (member ''), a
+-- party copy's one reader, and each of a whisper's sender and recipients.
+-- A reader's page reads its few streams by this key, so rows it may not
+-- read cost it nothing. Created empty here: the server fills it as it
+-- writes, and a background job fills it for older rows after boot
+-- (server/rooms/logHistoryMigration.ts), never this file, which must stay
+-- quick on a database with a large archive.
+create table if not exists room_log_access (
+  room_id text not null,
+  stream text not null check (stream in ('shared', 'dm', 'party', 'whisper')),
+  member_id text not null,
+  seq bigint not null,
+  line_no integer not null,
+  id text not null,
+  primary key (room_id, stream, member_id, seq, line_no),
+  foreign key (room_id, id) references room_log (room_id, id) on delete cascade
+);
+-- For the cascade from room_log: a room's deletion removes each archive
+-- row's access rows by this key, not by a scan of the room's. The id leads,
+-- so the index is no use to a read of a room's stream: led by room_id, a
+-- planner whose statistics predate a room's rows took it for those reads
+-- and sorted the whole room's access rows for each one.
+create index if not exists room_log_access_source on room_log_access (id, room_id);
+-- The partial index on room_log (room_id) where seq is null, which finds a
+-- room's incomplete rows, is built after boot with create index
+-- concurrently, which cannot run here (logHistoryMigration.ts).

@@ -4227,7 +4227,7 @@ describe("the log archive's guards", () => {
       options: { ...d.options, now: () => clock, archiveGuard: () => answer() },
     });
     assert.ok(actor);
-    const archived = () => sql.filter((s) => s.startsWith("insert into room_log")).length;
+    const archived = () => sql.filter((s) => s.includes("insert into room_log (")).length;
     try {
       await join(actor, "Pip");
       assert.equal(actor.committed.seq, 1);
