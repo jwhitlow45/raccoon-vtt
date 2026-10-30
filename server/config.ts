@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { statfsSync } from "node:fs";
 import { z } from "zod";
 
 /**
@@ -101,6 +102,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const { ROOM_SECRET_KEY: keyText, ...rest } = c;
   const roomSecretKey = keyText ? secretKeyOf(keyText) : DEVELOPMENT_ROOM_SECRET_KEY;
   return { ...rest, production, publicOrigin, roomSecretKey };
+}
+
+/**
+ * DATABASE_DISK_DIR, when set, must be a folder whose disk can be measured,
+ * since the log archive's free-disk floor reads it before every write
+ * (server/assets/quota.ts hasFreeDisk). A wrong path would refuse every
+ * archive write for as long as the server runs, each failed check counting
+ * as a full disk, so the boot stops here instead, once. The check at each
+ * write still fails closed.
+ */
+export function checkDatabaseDisk(config: Pick<Config, "DATABASE_DISK_DIR">, measure: (dir: string) => unknown = statfsSync): void {
+  const dir = config.DATABASE_DISK_DIR;
+  if (dir === undefined) return;
+  try {
+    measure(dir);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`DATABASE_DISK_DIR must be a folder on the database's disk that the server can read: ${reason}`);
+  }
 }
 
 /**

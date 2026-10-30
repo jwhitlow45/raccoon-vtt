@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { loadConfig } from "./config.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { checkDatabaseDisk, loadConfig } from "./config.ts";
 
 const base = { NODE_ENV: "test", DATABASE_URL: "postgres://x@localhost/x" };
 
@@ -71,5 +74,26 @@ describe("ROOM_SECRET_KEY", () => {
     const set = loadConfig({ ...base, ROOM_SECRET_KEY: key });
     assert.ok(!("ROOM_SECRET_KEY" in set));
     assert.ok(!JSON.stringify(set).includes(key));
+  });
+
+  test("a DATABASE_DISK_DIR the server cannot measure stops the boot, once, and an unset one checks nothing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rvtt-dbdisk-"));
+    try {
+      assert.doesNotThrow(() => checkDatabaseDisk(loadConfig({ ...base, DATABASE_DISK_DIR: dir })));
+      assert.throws(() => checkDatabaseDisk(loadConfig({ ...base, DATABASE_DISK_DIR: join(dir, "missing") })), /DATABASE_DISK_DIR must be a folder on the database's disk/);
+      const measured: string[] = [];
+      checkDatabaseDisk(loadConfig(base), (d) => measured.push(d));
+      checkDatabaseDisk(loadConfig({ ...base, DATABASE_DISK_DIR: "" }), (d) => measured.push(d));
+      assert.deepEqual(measured, [], "unset, and empty as compose passes unset, measure nothing");
+      assert.throws(
+        () =>
+          checkDatabaseDisk({ DATABASE_DISK_DIR: dir }, () => {
+            throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+          }),
+        /EACCES/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
