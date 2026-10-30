@@ -224,10 +224,14 @@ describe("dice on the server", () => {
   test("a committed op whose lines are pruned, or now hidden from the roller, is still committed, with no lines", async () => {
     const room = await setup(t, "Dice pruned");
     const pip = room.players[0]!;
-    // A receipt whose op's lines the archive no longer holds, as the log's count prune leaves one.
+    // A receipt whose op's lines the archive no longer holds, as the log's count prune leaves one: an op the room has
+    // committed, at the edge of the live log, which therefore leaves its lines to the archive, and its archive rows gone.
     const pruned = uuidv7();
-    await t.pool.query(`insert into roll_receipts (room_id, member_id, tag, part, state, seq, at) values ($1, $2, $3, 0, 'committed', 999999, now())`, [room.roomId, pip.id, pruned]);
-    assert.deepEqual((await pip.client.get(`/api/rooms/${room.roomId}/receipts/${pruned}`)).json<Lookup>(), { parts: [{ part: 0, state: "committed", seq: 999999, lines: [] }] });
+    const oldest = (await t.manager.acquire(room.roomId)).committed.state.log[0]!.id;
+    const seq = Number(oldest.slice(0, oldest.indexOf(":")));
+    await t.pool.query("delete from room_log where room_id = $1 and split_part(id, ':', 1) = $2", [room.roomId, String(seq)]);
+    await t.pool.query(`insert into roll_receipts (room_id, member_id, tag, part, state, seq, at) values ($1, $2, $3, 0, 'committed', $4, now())`, [room.roomId, pip.id, pruned, seq]);
+    assert.deepEqual((await pip.client.get(`/api/rooms/${room.roomId}/receipts/${pruned}`)).json<Lookup>(), { parts: [{ part: 0, state: "committed", seq, lines: [] }] });
     // Pip rolls for a token of theirs, then the DM takes it and hides it.
     const id = uuidv7();
     await room.dm.apply({ t: "token.create", token: { id, sceneId: room.sceneId, kind: "npc", name: "Wolf", size: "medium", x: 2, y: 2, ownerIds: [pip.id], actor: { inline } } } as Op);
