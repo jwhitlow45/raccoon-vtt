@@ -3565,9 +3565,10 @@ async function proficiencyResults(sweep: Sweep, page: Page, shot: (page: Page, n
   // The Log's own controls keep a wrap from before FL-7 at 320 px ("Chat only" under Show older and Export), so the sweep measures the lines FL-7 marks.
   await proficiencyScreen(sweep, page, "log", log, log.locator("li").filter({ has: page.locator("[data-proficiency-label]") }));
   await shot(page, "log");
-  // The toasts stand over the map, where the group save's taps go next. A tap on one closes it.
+  // The toasts stand over the map, where the group save's taps go next. A tap on one closes it, a few tries at most so a toast that will not close fails here, not at the test's timeout (as savespell.e2e.ts dismissToasts).
   const toasts = page.locator("[data-toast]").filter({ visible: true });
-  while ((await toasts.count()) > 0) await toasts.first().click();
+  for (let i = 0; i < 8 && (await toasts.count()) > 0; i++) await toasts.first().click({ timeout: 1000 }).catch(() => {});
+  assert.equal(await toasts.count(), 0, `fl7: ${sweep.at} toasts still over the map after 8 taps`);
 }
 
 async function proficiencyGroup(sweep: Sweep, page: Page, shot: (page: Page, name: string) => Promise<void>): Promise<void> {
