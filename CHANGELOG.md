@@ -1,0 +1,642 @@
+# Changelog
+
+## Unreleased
+
+### Features
+
+- **undo**: show the setup history rollout notice once per device
+- **undo**: confirm setup saves from accepted changes
+- **undo**: declare setup gestures and explain resync history
+- **undo**: add authoritative scoped client history
+- **log**: render scoped correction notices
+- **undo**: acknowledge committed operation scope
+- **undo**: record private correction notices
+- **undo**: enforce scoped histories and guarded restores
+- **undo**: wire scoped history protocol and replay versions
+- **undo**: classify play and setup operations
+- **undo**: define scoped history contracts
+- **encounter**: mark save cards and log results
+- **stats**: show skill and save proficiency markers
+- **dice**: show proficiency on rolls and requests
+- **rules**: add skill and save proficiency markers
+- **ui**: fill and stretch sheet grabbers with the pull
+- **ui**: show typed damage breakdowns consistently
+- **icons**: add credited damage type icons
+- **combat**: finish typed damage for group entries and saves
+- **combat**: preserve typed damage in rolled hp chips
+- **combat**: apply typed hp damage through shared defense rules
+- **grid**: every search looks for squares and hexes, and a sure find of one shape alone switches the scene to it
+- **grid**: a found hex grid's calibration, its measured origin kept and reduced as the hex box reduces it
+- **grid**: a hex grid finder, measured, not yet called by the app
+- **builder**: heights and stairs mode on hexes, painting by hex with six facings, its relief, marks and readout
+- **rules**: heights, ledges, stairs and pits on hexes, read by walks, sight, lights and players' copies
+- **model**: a hex stair faces one of six sides, marked 0 to 5, each shape's chunks held to their own facings
+- **fog**: builder room on a hex scene reveals the hexes its wall lines close in, outlined by their sides
+- **hex**: reveal room floods a hex scene's hexes up to free walls and closed doors, its fog read by their sub-cells and its draft stamped
+- **hex**: phase H3's versions, and Reveal room's cells of a hex scene's own stamp in the phase check
+- **traps**: the trap tool draws hexes, snaps wires to hex corners and speaks of hexes on a hex scene
+- **traps**: traps allowed on hex scenes, a pit refused until heights
+- **hex**: traps but pits stand on hex scenes in the phase check
+- **traps**: a found trap of hexes reaches players by the sub-cells inside its hexes
+- **traps**: trap zones, walks, hits and the notice hint read hexes on a hex scene
+- **traps**: trap wires on the 1/64 lattice and trap keys to a hex scene's last row, each trap stamped with its scene's shape
+- **attach**: the attach button works on hex scenes
+- **attach**: riding, carrying and dragging allowed on hex scenes
+- **hex**: attach links stand on hex scenes in the switch and the phase check
+- **attach**: attach and dismount rules read a hex scene's hexes, the grid passed by every caller
+- **movement**: drags, arrow keys and the walking ruler route on hexes
+- **permissions**: routes and squeezes on hexes, each stop on an anchor
+- **movement**: routes on the hex anchor lattice, squeezed through narrow spaces, their feet and spots
+- **movement**: a step on hexes stops at walls between hex centers, and a squeeze takes the size one smaller
+- **project**: a wall change on a hex scene reprojects the tokens on its chunk and the 8 around it
+- **vision**: a hex creature is read only on the sub-cells its stored center sees past every sight wall
+- **builder**: a hex scene's builder line says it draws wall lines and marks difficult ground
+- **builder**: wall lines, erase and difficult ground by hexes on a hex scene, and its free doors seen by the hexes beside them
+- **hex**: erase and difficult ground by hex keys in stamped chunks, and a free door's reach from the hexes beside it
+- **hex**: phase H2's versions, the shared hex key bound, and free walls, difficult ground and squeezes on hexes in the phase check
+- **uvtt**: an imported map that brings its own lights starts dark under party vision, with keep it lit in the summary
+- **ui**: a token's bar, the tracker's turn buttons, the outliner's search and the tools' undo and redo name their keys
+- **ui**: the top bar, the toolbar, the view menu and the side panel name each control's key from the shortcut table
+- **ui**: three wrapping even choices stand one per row where a third cannot hold a word
+- **scenes**: the settings groups fold as the panel kit's groups, with icons and summaries
+- **ui**: a group can keep its content mounted while folded, and puts its summary under a name that fills the row
+- **ui**: a small loading line for a wait inside help or an options line
+- **ui**: view as a token's player owners from its action bar, its panel header and its owners group
+- **dm**: one view as a player preview per room, which every entry opens and which returns focus to its opener
+- **ui**: a view as icon, lucide scan-eye, credited beside the other lucide icons
+- **ui**: hex scenes say what the builder, attach, traps, reveal room and the ruler leave to squares
+- **grid**: line up grid on hexes with a box over 7 hexes and an origin reduced into the first row
+- **uvtt**: the import says it makes square scenes in a room whose new scenes start on hexes
+- **ui**: new scene form picks the grid, battle mats and maps on the room's shape, builder and starter maps on squares
+- **ui**: room settings pick the grid new scenes start on and name hexes beside squares
+- **ui**: grid shape choice and the hex size row in scene settings
+- **ui**: areas stand as their real shapes in isometric, banded among the standees by their natural keys and stood by the stand rule on live ground
+- **areas**: a volume chains its strokes so dashes run on, and says its reach before it builds
+- **areas**: a volume draws bucket by bucket in slices, and its clip pools each face's lines
+- **areas**: an area's solid as a closed mesh, clipped, capped, cut by the drawn ground and banded
+- **rules**: area solids give their height span over a point and name their parameters
+- **ui**: the scene settings page groups its settings by purpose, each group a fold the device remembers
+- **ui**: a folding section can keep its content mounted and hidden while folded
+- **ui**: use these settings on other scenes, in one undo step
+- **ui**: new scenes start on the room's players see, or like the scene on screen
+- **ui**: players see as one choice in a scene's settings, with fog and party vision in a fold
+- **client**: a builder gesture of several ops asks before any of them applies, so cancel leaves a big rectangle unmade
+- **server**: a builder gesture's ask reads its ops on a copy before any applies, and the rest of a gesture asked about waits with it
+- **client**: the builder says when the party sees where the DM builds, and asks before players' remembered map is forgotten
+- **client**: the map export's player view of a scene with fog on asks the server for what players get
+- **client**: a player's caught lists and target rings name a creature only where every ray to it lies on their live ground
+- **client**: a stop off a player's live ground or blocked by the server names no kind, and its teleport sends unknown
+- **client**: drops, presses and every gate send what the pieces allow, and rulers and a drag's held picture read the band
+- **shared**: a held build's pieces stop what a device sends by the gate test and what it previews by the band
+- **server**: the map export's player view of a scene
+- **server**: deleting an image only players remember drops it from their maps through a stored op
+- **server**: a room import carries players' memory and marks, and takes the upgrade only for older files
+- **server**: the actor runs the map step in each batch, asks before forgetting, and lands walks the real build stops
+- **server**: the map step remembers each edit out of a layer's sight as that layer last saw it
+- **server**: reserve players' memory at its caps, share a full room's space, and count what players' copies may hold
+- **server**: charge players' memory at no less than its JSON and each free wall at its largest form
+- **shared**: an area's reminder reaches a player only when every ray its inclusion reads lies on their live ground
+- **shared**: the touch rule lands a player's stopped walk, squeeze, resize or companion and words each stop by their live ground
+- **shared**: an owner gets a private leg's corners on a scene with memory only on their sight or ground the DM revealed
+- **shared**: players hold the build only where they discovered it, live or as remembered
+- **shared**: a device reads its held chunks' known cells, automatic walls and stair directions, and the server's pieces
+- **shared**: held ground by fog class and free walls cut at held cells
+- **server**: run the map discovery upgrade step at the replay version boundary
+- **shared**: the reducer keeps what players remember of the map and marks played scenes
+- **shared**: snapshot version 27 and op version 26 with the map discovery upgrade step
+- **shared**: map discovery memory types, keys and protocol
+- **export**: a hex scene exports with hex lines, at px per hex, as crypt-hex-70px.png
+- **keys**: arrow keys move a token one hex on a hex scene, zigzagging up one column
+- **tokens**: new tokens, duplicates and companions spread over rings of hexes on a hex scene, each on its anchor
+- **areas**: areas on a hex scene snap to the hex lattice, start on a token's hex outline and shade the hexes the rules cover
+- **measure**: the ruler, drag labels, speed bands and range rings count hexes, and walking says it needs squares
+- **canvas**: a selected token on a hex scene shows the outline of its hexes, in both views
+- **canvas**: hex grid lines for the hexes in view, drawn in both views, skipped under 6 px a hex
+- **board**: tokens snap, drop and group-drop to hex anchors, both views reading the scene's grid
+
+### Fixes
+
+- **undo**: word history refusals and cut labels as one sentence
+- **undo**: keep focus and one edge in the setup history sheet
+- **undo**: announce the setup history notice as a passing toast
+- **undo**: report oversized changes without promising undo
+- **undo**: bound the rollout notice to the deploy window
+- **undo**: name setup history in token and journal feedback
+- **undo**: name setup history in map configuration feedback
+- **undo**: announce each history result once
+- **undo**: clear histories when member roles change
+- **undo**: settle invalid history and gesture refusals
+- **undo**: report actual history recording in acknowledgments
+- **undo**: compare effective saves and prompt settlements
+- **undo**: use committed scope acknowledgments for save feedback
+- **undo**: announce history results once and scope sheet keys
+- **log**: use shared correction text for every client surface
+- **undo**: preserve histories after no-effect edits
+- **ui**: span the phone toolbar's tools across their section
+- **ui**: refit folded summaries after web fonts load
+- **dice**: say the test's proficiency in the live result and find it after the whole creature
+- **rolls**: mark the earlier answer's choice on the dm's history line
+- **ui**: draw proficiency as an underline and keep pre-fl-7 layouts
+- **ui**: keep proficiency markers from adding rows
+- **ui**: keep save summary triples together
+- **dice**: use themed spacing for roll toasts
+- **rolls**: preserve request disclosure names
+- **dice**: fit marked save buttons in narrow panels
+- **dice**: preserve compact sticky results
+- **ui**: scope grabber feedback to its drawing and permitted moves
+- **ui**: let long menu labels wrap within capped columns
+- **ui**: size popover menus to labels and hide scrollbars
+- **ui**: size clipped hp previews to the entry width
+- **dice**: show breakdowns only for typed or multipart chips
+- **ui**: wrap unrolled damage formulas within the preview
+- **dice**: normalize damage previews and omit unavailable comparisons
+- **ui**: align defense labels and damage amount columns
+- **pcstats**: reserve scrollbar space only in the shape picker
+- **home**: fill wrapped confirmation button rows
+- **dice**: keep skill check names on one line
+- **ui**: confirm before forgetting a room
+- **ui**: reserve dialog scrollbar space so take a shape never shifts
+- **ui**: measure trap and save cards before placing their toasts
+- **ui**: keep new toasts in the retained stack
+- **ui**: keep alert cards clear of existing toasts
+- **ui**: preserve toast focus across compact row transitions
+- **ui**: keep toast stacks mounted through focused host moves
+- **grid**: show hex footprint counts in size controls and keep the alignment box size across shape changes
+- **ui**: recognize sheet controls and cover grabber geometry
+- **builder**: show the forget question waiting on a gesture
+- **ui**: keep toast focus and placement, compact the blackout notice and hold zoom during drags
+- **log**: account for derived undo metadata in projection checks
+- **log**: expire cached archive undo with server retention
+- **ui**: count overlapping toast pauses once
+- **encounters**: describe lair action reminders accurately
+- **log**: preserve archived hp undo and turn-end display order
+- **areas**: clip center inclusion to scene bounds
+- **rules**: finish a mount's turn before moving its row, guard sight holder picks and keep controlled rides on the players' scene
+- **tokens**: suggest numeric amounts for unknown hp damage types
+- **ui**: track token popover raises separately
+- **resources**: let the name field shrink with its sheet
+- **tokens**: explain typed damage formulas in hp entry
+- **scenes**: honor hex alignment and refresh retried import lights
+- **traps**: keep the largest valid rectangle at hex edges
+- **movement**: normalize squeezed starts before finding full hex stops
+- **traps**: keep hex rectangles on real scene cells
+- **import**: validate square trap wire endpoints
+- **path**: measure routed paths at each corner's stand
+- **grid**: switch margin-held hex shapes while offering their grid
+- **traps**: read the starting squeeze flag in hex crossing warnings
+- **movement**: keep dragged hex stops full size without changing square landings
+- **socket**: the outbox sends ops no faster than the server's frame budget takes them, so a burst of builder rooms lands in seconds instead of after the 10 s resend
+- **ui**: a popover's holder stands over the notices in the commit that opens the popover, so a read between the two never finds the view as list under a notice
+- **grid**: every look of the hex finder only offers hexes whose stretch reads within its error of the limit, a pixel over how far apart the sloped lines' parts lie
+- **grid**: a phone's late search on art of the old image's shape says nothing of a find on the kept grid's lines, as the search on time does
+- **grid**: the grid shape refusal names builder room in a fog draft as the fog tool's control does
+- **movement**: a creature dragged on hexes walks full size where it stands on its squeezed anchors, as it is stored, from op version 32, so it never ends in the rock beside a corridor
+- **traps**: the trap tool's crosses warning on hexes reads a squeezed walk's squeezed hexes, as the server sets traps off
+- **movement**: a walk off a holder on hexes crosses the raised sides between the holder's hexes until it clears them, from op version 32, so a rider gets off a mount that straddles a step
+- **combat**: restrict typed damage death saves to exact hp viewers
+- **combat**: restrict typed concentration checks to exact hp viewers
+- **combat**: preserve typed damage state and hidden defenses
+- **measure**: only a walk on squares needs walls that stop moves to squeeze, so a hex walk squeezed on a scene that stops none still says squeezing
+- **measure**: the label reads each piece at the size the walk has along it, so a hex piece out of a corridor says squeezing and a piece partly squeezed names both
+- **areas**: a squeezing walker's own area line is judged by its full footprint at every op version, so walls under the fog decide nothing a player reads
+- **dm**: view as a player keeps loading while the server counts down a wait it named
+- **dm**: view as a player's failure stays centered where its line wraps
+- **ui**: a pressed value chip holds the options row as it stood, in its glyph or its words
+- **measure**: a drag's label and the walking ruler name a squeeze's extra cost as squeezing, beside difficult terrain where both were walked
+- **movement**: a rider's drag aims its mount at the stand that keeps the rider's dropped middle on it, and the walking ruler from the rider does too
+- **areas**: a squeezing walker's own area line is judged by the squares it squeezes onto, so it reaches the players who saw it, from op version 30
+- **movement**: a stand on hexes may hold a stair band's zigzag side, so Large and squeezed Huge creatures walk a band two hexes wide, from op version 30
+- **attach**: passengers on a holder that starts its walk squeezed keep their own squares, from op version 30
+- **grid**: a third look's half measure counts its lines' own standard error in the margin, and applies a find by itself only on a half frame 600 px down or more
+- **grid**: a find holds the kept grid only when every cell on the map lies within the slack of its partner, paired from the middle, so grids that drift a whole cell between samples are offered
+- **grid**: the kept grid's slack grows only its pixel floor with the art, and a find matches it only with cells within that slack of its size
+- **grid**: a third look's half measure counts a stretch within its own error of the limit as not measured, so such hexes are only offered
+- **scenes**: a scene's row says no whole hex in lower case, and comments say what replaced art of the old shape offers
+- **grid**: replaced art's kept grid matches only a find of nearly its cell size, by a slack grown with the art, and a find naming another shape is still said
+- **grid**: a third look's find is measured again at half size, so hexes out of shape are refused and a find it cannot confirm is only offered
+- **scenes**: a scene's row in the scenes panel says its size as size and view does, in hexes on a hex scene
+- **scenes**: the scenes panel's rows wait with the shared small loading line
+- **grid**: a third look at a quarter of the size finds hexes drawn with lines too thick for the first two
+- **scenes**: new art of the old image's shape is searched, and a find that differs from the grid it keeps is only offered
+- **movement**: on hexes every walk seats a rider, so one nudged off its seat's anchor is read on the seat by the server and a device alike
+- **movement**: a walk cut for what a drag takes along is read where it lands full size, at a corner of the walk and at a hex's stand
+- **attach**: a Get off into the band beside a squeezed mount's stand leaves its seat and walks from the ground, from op version 29
+- **movement**: a device's route search and cut take what a rider drags along the rider's seat on a squeezing mount, as the server's move does
+- **attach**: getting off a squeezed mount crosses only the ledges inside the squares it stands on, from op version 29
+- **movement**: the route reach cap reads what sits on a walker on the seat a squeezed move ends it on
+- **measure**: the walking ruler from a rider on squares runs where the rider sits as its mount squeezes
+- **attach**: on squares too a rider on a squeezing mount sits on the squares the mount stands on, and gets off into the corridor
+- **measure**: the walking ruler from a rider on hexes runs where the rider sits as its mount squeezes
+- **attach**: on hexes a rider on a squeezing mount sits on the hexes the mount stands on, at op version 29
+- **movement**: a hex walk's stop words take the stopping step from its hex line, so a wall after its first step on hex columns is named
+- **scenes**: art a phased scene refuses opens no line up grid on the grid found in it
+- **movement**: a stop at a wall on the side of a hex the player sees names the wall, as on squares
+- **scenes**: a hex scene too small for a whole hex folds its size as no whole hex
+- **tokens**: a creature header's actions take a row under it
+- **e2e**: the alignment check centers a short group summary wrapped under its name with the name, as one block
+- **ui**: a pressed compact chip holds a tool's options row as it stood and opens its popover
+- **iso**: building area shapes ends in an ellipsis
+- **ui**: the options line says waits muted and failures as warnings, and holds its place while it waits
+- **dm**: view as a player's failure offers try again
+- **walk**: a dragged creature's height follows riders and carried creatures up its chain too, by one rule for both searches and the walk's cut
+- **movement**: a drag's walk is cut where a creature down a chain of drags stops, each following its own holder
+- **walk**: a creature dragged on squares takes its height from its own holder, down a chain of drags
+- **fog**: only a gesture id fogOps makes groups draft ops, so an older draft's dotted ids stay edits of their own
+- **walk**: a creature dragged on hexes takes its height from its own holder, down a chain of drags
+- **walls**: a raised hex side below the floor keeps its own top, so an eye above it sees over it
+- **fog**: a fog gesture sent in several ops is one draft edit, outlined as one room, counted once and taken back whole by the fog bar's undo
+- **fog**: a fog gesture goes as messages that each fit a socket frame, under one undo step
+- **grid**: use default after a find that switched the shape sends nothing and says why when the scene can no longer take its old shape back
+- **builder**: an erase on hexes lands the tokens standing on the heights it takes
+- **import**: remembered stairs face by their scene's shape, in the party's memory and each holder's
+- **grid**: a stamp on a chunk with no grid keys names no grid, and the import and the next write drop it
+- **walls**: a piece of a raised hex side keeps the top of the side it was cut from, near a rounded corner too
+- **walk**: a creature dragged on hexes meets ledges by its own footing, never its holder's
+- **ruler**: a free stop on hexes reads the ground and the fog of its own hex
+- **walk**: the hex search carries the 5-10-5 counter from the walk's own, so every other climb costs 5 ft more
+- **memory**: a hex stair taken away or turned out of sight keeps the way it pointed on players' maps
+- **grid**: an offer of another shape places its box on the scene it lands on, never the box left from another scene
+- **grid**: a hex find whose lean could not be measured is held to medium, so it is only offered
+- **grid**: the hex finder refuses finds under the cutoff, judges hexes out of shape by how their sides lean, and picks the surer shape
+- **ui**: a group's summary shorter than its floor keeps its name's line where it fits
+- **traps**: a preset tapped on a scene too narrow for it on hexes gives up the keys off the scene
+- **traps**: a walk on hexes squeezes along its way only as the stored move ends squeezed
+- **traps**: the trap tool's rectangles on hexes give up a short line's last key, off the scene
+- **traps**: a trap's rectangles on hexes keep every key to the scene's hexes
+- **attach**: a routed walk off a mount on hexes counts both parts by hex steps
+- **traps**: a squeezed walk on hexes meets traps by the squeeze its hex walk has at each spot
+- **movement**: a walk on hexes is cut only where the cut leg itself goes, since a line partway along a piece may step beside it
+- **areas**: a walk on hexes meets areas squeezed at its route's stops and along a straight leg, as it stands there
+- **permissions**: a leg on hexes ends on the hexes its stored squeeze takes, for every caller, and a squeeze left in place meets the walls
+- **movement**: a drag on a hex scene finds a way the creature it drags beside it fits through too
+- **attach**: a carried leg on a hex scene counts the hex steps its holder's walk took it
+- **measure**: a walking ruler from open ground on hexes starts on the hex under its first stop
+- **rules**: a resize on a hex scene that stops moves reads its walls by the hex rules
+- **measure**: a walking ruler on hexes draws its walk on the board, not a straight stand-in
+- **areas**: movement inside an area drops its squares-only line on hexes
+- **ui**: view as a player's help, features and comments say it shows only what that player may see, not their screen
+- **ui**: view as a player's help says it shows what that player can see, not a mirror of their screen
+- **uvtt**: a file chosen after a failed import starts from its own light proposal, and the light row gives its reason only while the pick is still it
+- **ui**: the handout viewer's zoom buttons and the menu's view row name their keys, and a touch screen's first key shows every key at once
+- **settings**: grid on new scenes draws the scene's own grid choice
+- **settings**: the room name's row fits a 320 px phone at 130% without a sideways scroll
+- **grid**: grid shape and new scene kinds share one row
+- **scenes**: the map image's question reads before its buttons
+- **scenes**: the scene on screen's settings start under this scene, and its last group is size and view
+- **vision**: sight's working line is the small loading line
+- **vision**: fog and party vision folds as a section, chevron first
+- **uvtt**: the new scene's universal vtt help names arkenforge beside the other exporters
+- **ui**: the alerts over a sideways phone's whole screen stop at the keyboard, so a roll card's total scrolls into view
+- **ui**: export as image takes a scene whose build holds only stamps or free walls
+- **grid**: a shape switch with line up grid open moves its box to the new cells instead of dropping it
+- **ui**: an unbroken 80-letter player name wraps inside view as buttons, the list and menu rows
+- **ui**: a token's bar stands over the notices while its view as list is open
+- **ui**: a token's view as list opens toward the larger room, by click or by arrow key
+- **grid**: a square grid search never lands on a scene switched to hexes, here or on another device
+- **ui**: the hex map image help says only to line up the hexes, with no file-name scale
+- **ui**: the focus icon draws its corners as the one joined path again
+- **ui**: an area whose old volume lacks a bucket a pan brings into view lies flat and waits until it is drawn
+- **areas**: a volume's reach before it builds runs as high and low as its solid does, so a tall pillar or a line aimed up seen at its top builds
+- **ui**: a stand test that passes on a drawn large footprint says what stands has changed, so a sight change never leaves an area flat
+- **ui**: areas stand nearest the middle of the board a panel leaves clear, where building area shapes shows
+- **areas**: a draw reads only cut buckets, so a neighbor drawn mid-cut never keeps its turn without its guides
+- **areas**: every loop of a volume's build charges its work, its line index is sparse over the scene, and its footprint is a sub-cell map
+- **rules**: a hex stack walks the scene's hexes within its reach's box, its layers found by halving
+- **areas**: a volume builds in bounded slices, reads walls by what meets each face, and keeps its footprint in the scene
+- **rules**: a steep cone's span holds its apex column, and a hex stack walks out from its source
+- **reducer**: a route sweep plan with more one-sample pieces than its cap gives each one instead of nan
+- **uvtt**: only a turning chain of exactly four arkenforge portals collapses to its leaf, so outlines that chain on keep every door
+- **uvtt**: arkenforge outlines are chains of portals in file order, so two outlines that touch at any angle keep both leaves
+- **reducer**: a route's area sweep past its cap keeps every piece's density across the ground and shares only the rest among climbs
+- **builder**: a builder hold stops a waiting toast's time in what every render reads, so a long hold never hides the forget toast
+- **uvtt**: a turning group of Arkenforge portals keeps every portal on its leaf's line, so two outlines that touch import as two doors
+- **reducer**: a route's area sweep past its cap gives every piece a sample first and shares the rest by reach, so steep fog climbs never leave later pieces unchecked
+- **builder**: a gesture's hold publishes the toasts so the forget toast's armed timer stops, and undo with nothing held gives no toast time back
+- **uvtt**: a light far outside its map is left out and counted, and no longer refuses the file
+- **uvtt**: a light color the import cannot use reads as none, so Dungeon Alchemist beta files import
+- **uvtt**: a door Arkenforge draws as an outline of four portals imports as one door
+- **scripts**: e2e-durations reads job logs through gh versions that hold back escape sequences
+- **builder**: the forget toast's time stops while its button waits on a gesture's asks and runs on from what it had left after
+- **builder**: go ahead on a stroke's forget question while another gesture waits on its asks keeps the question open for a later press
+- **builder**: a forget question whose yes lost one op's answer to a reconnect says the outcome is not known when its last op is answered
+- **server**: a room import counts shared memory layers at what they hold against the room's free space, so an honest export at its share is taken
+- **shared**: a holder's memory and explored keys parse a scene id holding a colon, and caches and fan-out classes key by encoded parts
+- **movement**: a player's route on a fog scene counts no climbs toward the 300-square cap, so heights of untouched ground refuse nothing
+- **ui**: the shared radio cards stand in one block under their name and help
+- **ui**: the copy sheet clears its ticks once every scene took the copy
+- **ui**: the Like choice reads its scene once an upload, a starter copy or an import is done, and a toast says when that scene was deleted
+- **ui**: a Players see question gives focus back to the control that asked last, and a fold closed over one keeps focus on its header
+- **ui**: a Players see question holds what the DM chose and builds its change as it is answered, so a light changed meanwhile stays
+- **client**: the store refuses every builder edit and stack undo or redo while a gesture waits on its asks, and the forget toast waits too
+- **client**: no second builder gesture starts while one waits on its asks
+- **client**: redo while a builder gesture waits on its asks does nothing, so no step it brings back lands first
+- **client**: the builder takes no edit while a gesture waits on its asks, undo cancels the waiting gesture, and an expired gesture stays unsent
+- **server**: an ask read while a commit runs begins its batch where that commit ends and goes when it ends, and a gone socket keeps no refused gesture
+- **client**: the builder holds a gesture's ops until its asks answer, says it is checking meanwhile, and asks again once when the server lost them
+- **server**: a gesture's asks go as numbered parts read in turns that let the event loop go, each op costs rate, and a chain ends with its group, socket, a refusal or 30 s
+- **ui**: the builder's note shows whole when opened at 320 px and 130%
+- **client**: the map export's player view asks the server whatever the dm's live build, and says when players hold none of it
+- **client**: the forget question closes when a snapshot or an expiry settles its yes, and says when the outcome is not known
+- **client**: a walk's blocked answer is heard only by that walk, and one a later walk overtook makes no note
+- **client**: a walk stopped at its first step sends nothing, so the token never leaves its square and the note keeps its words
+- **shared**: a stop names the blocker it met where the player holds that blocker live, a door in sight among them
+- **shared**: every gate reads a held piece within its band, so a creature leaves a wall it overlaps and squeezes wherever the exact wall lets it
+- **server**: a room import measures players' memory against the share each layer gets
+- **shared**: the upgrade gives a whole-party scene's share to the party alone, so holders turned on later take whole caps
+- **server**: a player's group drag, Get off and placed token on a scene with fog on land at the heights the real build gives them
+- **server**: a stair put out of sight keeps the automatic walls players remember beside it
+- **server**: a player's move on a scene with fog on lands at the height the real build gives it
+- **server**: a room import refuses players' memory of a layer past its cap
+- **server**: the room share leaves a 64 KiB margin, and players' ops count what their copies may hold
+- **server**: after a fold, a switch back to per player takes the holders' whole memory caps while the party keeps its share
+- **server**: a lowered share stays to answer when the map step that should have answered it fails
+- **server**: taking a remembered stamp's art away leaves an absence where its live stamp would show
+- **server**: a map step the schema or the reducer refuses fails closed for its scene, as one that throws
+- **server**: a scene change that changes what players' chunks show goes through the map step, the estimate and the fallback
+- **server**: the map step never writes back a stamp the DM keeps to themselves
+- **server**: the ground an area's reminder rests on is explored in its batch, though a later op looks away
+- **shared**: every composite key the projection keeps answers under is an encoded array, so no part's text reads as a separator
+- **shared**: live-ground hull tests search only the scene's box, and an attached area's stored origin is no probe
+- **shared**: a group mover whose own landing would squeeze goes back to the last spot it takes unsqueezed
+- **shared**: a group move lands each mover by the single move's rule, its dragged creatures included
+- **shared**: a remembered door the DM hid again answers gone once reach passes, never opened
+- **shared**: the touch rule and area reminders test live ground by the grid's own cells, hexes too, over every probe a ray starts from
+- **server**: a label or stamp some memory names is projected afresh, never from the fan-out's kept answer
+- **shared**: a sight or explore write on a scene with vision brings owners' route corners again, and the names memory holds are found by id
+- **shared**: a piece end on the scene's own side moves like any other and clamps to the side, never an exact ratio
+- **shared**: every free wall piece end on a cell side moves past it, so an end beside remembered ground tells nothing of the live build
+- **shared**: memory of a label or stamp the DM moves off its layer's ground or takes away is pruned
+- **shared**: a grid shape switch forgets explored ground on every scene, for ops of version 26 on
+- **server**: a room import takes the map discovery upgrade step
+- **shared**: projections answer null for memory and the scenes' marks by name
+- **shared**: memory schemas hold remembered walls, chunk keys and chunk places to the reducer's rules
+- **shared**: memory bounds cover every layer a fold pools at its cap
+- **shared**: the fold keeps the party's absence of a label or stamp on ground it held
+- **shared**: memory drops what its layer stops holding by any path, a shrink and a switch to per player included
+- **areas**: a player's placed areas, the auras moving with their creatures, and the areas panel's and cast block's lists read only the walls beside ground their fog reveals
+- **areas**: a player's aimed area, its rings and its in area list read only the walls beside ground their fog reveals
+- **areas**: an aimed area shades only the ground a player's fog reveals, in both views
+- **tokens**: a custom drawing larger than a hex scene starts its spot search inside the scene, so it lands on hexes there
+- **areas**: a tap picks a hex emanation only on its hexes, and a moved area's corner origin snaps to the stored corner
+- **canvas**: the dm's standee dims by its hexes' sub-cells alone on a hex scene, as the server withholds it
+- **tokens**: a full hex scene stacks new tokens on the nearest spot whose hexes all lie inside it
+- **canvas**: a moving area's clip box holds its outline and stroke, not only the hexes it covers
+- **measure**: a hex range ring walks only its edge band, found from every hex of its token even off the scene
+- **ui**: the fog image keeps its own cells' places and is clipped to whole pixels, so no fogged sub-cell shows the map
+- **ui**: the fog's frame and image meet on whole pixels or overlap by one, so no hairline of map shows at the scene's edge
+- **canvas**: an automatic wall level with the ground beside it stands nothing, not a hairline
+- **canvas**: automatic walls stand level beside raised ground in isometric
+
+### Performance
+
+- **canvas**: reuse flat token geometry and area ring context
+- **ui**: the isometric test hook reads a board's layout only when asked
+- **ui**: a volume's hidden creases and far guides take one dashed stroke
+- **ui**: a volume drawn whole in the drag layer builds between renders and renders once it is done
+- **ui**: only a probe mounted while the area tool aims reads the live tokens, so a drag elsewhere renders no isometric board
+- **ui**: the volumes drawn whole in the drag layer share one slice a frame
+- **ui**: an area's bands with only other areas' bands between them draw as one run
+- **ui**: the board lays out again once an area stands, and a few times a second while areas build, not once a bucket
+- **areas**: a hex stack's maps key corners, layers and hexes by numbers, not strings
+- **server**: the map step reads stairs only where a chunk holds one, and shares the estimate's changes
+- **shared**: one ground per class and scene, entry ids and memory chunks found by position, and chunk slots keep the answers read last
+- **vision**: a holder's raster for a computation the scene still holds is kept, so a creature back where it stood does not redraw it on every read
+- **shared**: an area's ray test asks each holder's sight cell by cell and draws no raster
+- **shared**: players' chunks found again by the cells each fog layer holds, and one position's pieces cut alone
+- **shared**: a companion's landing asks the check only of spots within its reach of its character, and of 160 at most
+- **shared**: the players' chunk memo keys the scene fields a position reads, in slots that go with the room
+- **shared**: players' chunks skip positions with nothing held near and share live edges across fog classes
+- **shared**: the lost-ground pass reads no tile of a layer with no memory
+
+## v0.2.0 (2026-10-26)
+
+### Features
+
+- **ui**: the menu's this device row names the sheet handle, measured at phone sizes
+- **ui**: a sheet handle choice with its preview in this device
+- **ui**: six sheet grabber designs, each header keeping the room its own needs, lit in the member's color while held
+- **ui**: a sheet's swipe tells when a finger holds it, for the grabber's glow
+- **view**: isometric is in reach, offered on every page
+- **keys**: a key someone chose stays theirs when a new default lands on it, and that shortcut shows no key until reset
+- **ui**: in isometric token names, chips and plates lay out in view space round the standees, their rings, the pills and the map labels as drawn
+- **ui**: in isometric this device's drag moves its rings, auras and tethers in the drag layer under the standees it moves
+- **ui**: a new suggested view or turn waits for any gesture on the map, a pinch and a held ruler as a drag
+- **ui**: find my token and an outline row's focus frame their target in the view the board shows
+- **ui**: an isometric dm's view event carries its turn and size, and a table display fits the ground it may see under that camera
+- **ui**: the action bar, door pill, height readout and stop note stand by what they name as the isometric view draws it
+- **ui**: the isometric camera keeps the ground under the clear middle on the scene, fits with the lift, and a switch holds the selected token or the picked middle still
+- **ui**: arrow keys nudge the selection by the screen in isometric
+- **ui**: an isometric drag lands on the drawn ground under the finger, previews the drop's landing and moves in the drag layer
+- **ui**: a tap again in isometric walks the standees under it front to back, and a box takes tokens by their ring's center
+- **ui**: rulers, areas and polygons reach their handles by screen distance through the isometric view
+- **ui**: a press on the isometric board means the drawn ground its ray meets, and doors and labels take it where they stand
+- **ui**: in isometric, a dragged token's rings, auras and tethers move on the overlay, auras and tethers clipped to revealed ground
+- **ui**: in isometric, area, trap and text names stand by the stand rule, ring and turn pills stand, and still rings and tethers keep their shapes through a drag
+- **ui**: pins stand upright in isometric at their drawn ground, and a tap finds them there
+- **ui**: rulers, movement marks and the outliner flash draw in isometric at their drawn height, rulers as upright lines
+- **ui**: pings, the laser and area previews draw in isometric at their drawn height, their names upright
+- **ui**: isometric places for the board's marks: lifted in the drag layer, upright on the overlay, by the stand rule
+- **ui**: the board hands its controllers the stage on screen
+- **ui**: the board draws the room's view choice, a table display its own, and a token drag holds a view change
+- **ui**: the isometric board, two stages with standees, ghosts and decor, its controllers mounted once outside both trees
+- **ui**: map content shared by both views, and hex row spans for culling in isometric
+- **ui**: the build's ground drawing leaves standing walls, pillars and labels to the isometric relief
+- **ui**: isometric relief drawing, a one-draw-a-frame scheduler, standing pillars and the test flag
+- **ui**: isometric side looks from the builder's textures, and map tints read only inside wholly revealed cells
+- **ui**: isometric relief pieces in depth-sorted buckets, with culling, own cells, pit clips and silhouettes
+- **ui**: standing wall pieces for the isometric view, cut into quarter-cell runs by the fog
+- **ui**: the isometric view's stand rule, tested as a property over random fogged scenes
+- **display**: the table display's own view rows in its menu
+- **scenes**: the dm's suggested view in scene settings
+- **ui**: the view button and menu in the top bar, the narrowest phones tightening its gaps and then dropping redo
+- **ui**: i, q and e for the view and the standee's tap in the shortcut sheet once isometric is offered
+- **view**: the view choice's rules and words, offered only to a page a test flags until isoready
+- **view**: the view store, a pick per device and room and a turn per scene, with isometric out of reach
+- **scenes**: a scene's suggested view and the view event's iso in the model, ops, stored state and versions
+- **view**: the view contract, its projection, drawn heights, picking and the ground at the middle
+- **grid**: areas on hexes grade each hex, emanations count steps from their creature's hexes, and sweeps keep height on the hex line
+- **grid**: fog, sight and drag previews on hexes read the sub-cells inside a creature's hexes
+- **grid**: undo steps on a hex scene say hexes, and a custom size there names its category
+- **grid**: a resize on hexes keeps the reference hex where it was
+- **grid**: a straight leg on hexes counts the hex steps between its reference hexes, and its walk spots stand on the hex line
+- **grid**: footprints and distance take the scene's grid, with a creature's hexes and the hex steps between them
+- **ui**: the room keeps a focused field in view, and popovers open above the keyboard
+- **ui**: read the on-screen keyboard from the visual viewport and cap a sheet above it
+- **grid**: phase h1's refusals on hex scenes, with companion reach and placement read by hexes
+- **grid**: restores keep the shape's invariant, and a switch, its undo and its redo reproject
+- **grid**: grid shapes and the room's new scenes default in ops, the switch, stored state and versions
+- **grid**: hex geometry, the grid contract and the shape invariant's rules, with the shape fields in the model
+- **dev**: the dev room's view as a player is served by its local server, as the server serves a preview
+- **server**: the size guard counts per-player layers, the shared maps and every list of who saw at their widest, never what they hold
+- **log**: an older log page asked as a player is that player's less whispers between players, and names who it was answered as
+- **server**: view as a player opens a read-only socket for a DM grant and a roster player, with no acks, no presence and no whispers between players
+- **server**: drag frames are judged by each player's own sight or fog class, and held previews are judged again after a global batch
+- **server**: the fan-out shares sight by source set and fog, labels, stamps and traps by fog class, kept by every input
+- **vision**: the explore step writes each holder's own ground and joins players by ownership under the cap in force
+- **dm**: view as a player asks the server for that player's own view on every scene, with its loading line and whispers kept out
+- **dm**: the socket client's read-only preview of one player, refusing any other view and ending on a close before it loads
+- **outliner**: the outliner and the tracker's visible add read what any player sees on a per-player scene
+- **movement**: a player's drop notes on a per-player scene name their own sight and read their own fog
+- **vision**: the sight row, who sees for themselves, who lends sight to whom and the unshared mount note
+- **vision**: per-player sight holders' rasters, the shared sight, the point query and their cache bytes
+- **vision**: per-player sight's contract, marks, memory and per-viewer projection
+- **ui**: class resource counts in words stand at the name line's right end, as pips do
+
+### Fixes
+
+- **iso**: a board that goes hands the isometric test hook back to the board under it
+- **ui**: the shortcut sheet says what a taken key leaves the other row from a row with no key, and offers take
+- **ui**: this device's help says a shortcut has no key rather than leave a gap for it
+- **ui**: a widening that unfolds the side panel's View row hands focus to the tab that names the menu
+- **ui**: from 900 px up a full top bar narrows its gaps and then folds the view button into the menu, once isometric is offered
+- **ui**: the dm's isometric dims a standee by the fog the dm's map draws, the party's explored ground with it
+- **ui**: a widening that closes the folded view sheet hands focus to the room menu's title
+- **view**: a scene's turn is kept in an ordered list, so no scene id reads the object prototype or loses its place
+- **ui**: the isometric view's footprint reads take the square grid, as hx-2 made every client caller
+- **ui**: find my token never settles on a zoom its board does not fit at, showing a platform flat just under the stand threshold when neither side fits
+- **ui**: find my token and outline rows read the board rebuilt at the zoom they find, heights that stand or lie flat there included
+- **ui**: a flat creature in isometric takes presses on each part of its picture at that cell's drawn ground, a large across a ledge on both sides
+- **ui**: an isometric stroke being drawn lies in pieces on each cell's drawn ground, cut from the stroke where it lies before the lift, so a player's never shows fogged parts on a revealed top
+- **ui**: the outliner's door flash in isometric reads the door's own two cells, as its tap and pill do, never one past its ends
+- **ui**: a switch to isometric holds a selected creature where isometric draws it, flat under a player's fog when it lies flat there
+- **ui**: an isometric drag of a capped flier takes the drawn ground whose spot has that ground under it, so a flier over a platform does not jump
+- **ui**: find my token and an outline token row center a flier's ring where it draws at the zoom found, its lift capped there
+- **ui**: an isometric drag casts its ray at the height its grab was taken from, on the ground for a flat creature, and seeks a capped ring's height until its spot holds
+- **ui**: the outliner's flash in isometric bounds every cell it flashes at its own drawn height, a door's line on its higher side
+- **ui**: a moving tether in isometric shows whole only where its stroke and round caps cover revealed sub-cells
+- **ui**: a moving aura in isometric judges its clip by the rings round every creature it catches, a gargantuan's past its window too
+- **ui**: an isometric stroke being drawn lifts each point by its own drawn ground, and a player's draws only on revealed ground
+- **ui**: an isometric area aims and turns on the plane at its origin's drawn ground, and its handle is pressed where it draws
+- **ui**: find my token and an outline row's focus frame their target in isometric where it draws: its ring on a platform, in a pit or in the air, and the raised ground round it
+- **ui**: the pin tool in isometric presses, drags and frames its pane by a pin where it stands on the drawn ground
+- **ui**: in isometric a token label keeps off a flat map label on every height its parts lie at, and a drag's label stack hangs at its footprint's highest ground
+- **ui**: an isometric creature lying flat takes presses and lays its decor out on the drawn ground under it, with its picture
+- **ui**: in isometric box select, a drag's grab, a switch's held point and the action bar take a token's ring where it draws: its lift capped, flat under the fog for a player
+- **ui**: an isometric door is reached where it draws: its search spans the scene's heights, and a player's piece, tap and pill stand only where the relief stands it
+- **ui**: in isometric a mark round a footprint wholly in a pit stays down in it
+- **ui**: the stand rule tests every sub-cell a label's ink and halo touch, and each pill's outline, not the shorter boxes
+- **ui**: a map removed from its scene is never read again by the side tints, and its bitmap is freed then rather than at the next map
+- **ui**: isometric map labels split again by the stand rule when the board's font loads, since the fallback's widths no longer hold
+- **ui**: a board tree on another map than the shared one keeps no image, and the side tints let go of a map image before the loader frees it
+- **ui**: a side tint read from a map image that can no longer be drawn is the neutral tone, never a throw
+- **ui**: the test hook keys a display by the view it is given, with tests that the board shows top-down until isometric is offered and that the room's choice runs no effects on a display
+- **ui**: the isometric overlay draws layers placed upright, and the moving place names the drag layer it draws in
+- **ui**: the isometric board splits map labels once for the ground's build and the overlay, and draws an upright one from its label shape
+- **ui**: another member's ghost previews where the drop would land it, on the ground this viewer has seen, as a shadow does
+- **ui**: a scene's size is part of each relief bucket's signature, so a resize never leaves columns past the edge or misses new ones
+- **ui**: walls on a scene's east and south edges at a multiple of 16 cells go to the bucket inside it, so they stand
+- **ui**: a rider's art, decor, silhouette and culling read one seated box, up its holder and inset where it covers it
+- **ui**: a standee draws from the capped base the layout culls and decorates by, its logical base kept apart
+- **ui**: a standing ghost's tag stands only where the whole pill top-down draws for it at this zoom is revealed
+- **ui**: trap alerts and teleport toasts mount once as the board's controllers, the laser waits for its own, and the scan follows imported hooks
+- **ui**: the stand rule judges a token's art turned as top-down turns it, apart from its footprint
+- **bench**: the horse is pressed at its foot, clear of its rider, and the ping row presses the board that shows
+- **ui**: the isometric board takes no browser touch gestures, as top-down's stage takes none
+- **bench**: rows press a token or the canvas on screen, toward the middle, and check that it moved, and pans return to where they began
+- **ui**: low power shows another member's drag at each frame at once, and the action bar hangs under a standee's ring
+- **ui**: a player's token shadow reads only the ground the fog shows
+- **ui**: the room menu's view row keeps each view's name on one line, measured and shown at 320 and 130%
+- **ui**: a widening that unfolds the room menu's view row closes its sheet for good
+- **ui**: the view popover holds its turns' reason in place in every view, so a pick never changes its size
+- **ui**: on the narrowest phones the view button folds into the room's menu, and redo stays in the bar
+- **ui**: the top bar's and the display menu's new room only once isometric is offered, the menu's cap border-box
+- **view**: view as a player keeps a view of its own and never saves it
+- **ui**: the view popover's turns disabled in top-down with their reason, in place of an empty band
+- **ui**: any open of the view menu puts focus on the checked radio
+- **ui**: top-down never breaks at its hyphen in the view's help
+- **ui**: the turn buttons named by their words, with the map in their description
+- **view**: the builder's line promises isometric back only to a user who wants it
+- **ui**: a builder tile's spoken name gives way to its title where the title holds it, as its shown words do
+- **rules**: under center a straddling large or gargantuan is caught the same on every row, and one with no hex on the scene by no area
+- **encounters**: an encounter's line offers in its lair only where its stat block has lair numbers, as the place card does
+- **rules**: under center a creature on a hex past the scene's edge is caught by no area, as under any other rule
+- **ui**: a screen reader says walls and doors and heights and stairs for the builder's tiles, chip and key presses while they show the slash
+- **ui**: a kind line keeps its size whole and a locked size its words, so no unit or word stands alone on its last line
+- **ui**: an encounter's line and has a lair take a block with lair actions alone as having a lair
+- **grid**: steps between a box on hexes and one on squares throw instead of reading the hex box as squares
+- **grid**: a new phase list on a hex scene keeps the map's origin in the image, as every other map write does
+- **grid**: a dm's growth at a hex scene's edge moves the creature the least to lie wholly inside, as on squares
+- **grid**: resize candidates on hexes that tie fall in lattice order, mirrored on hex columns
+- **grid**: a hex past the scene's edge catches no one, as it is never shaded
+- **grid**: under center a creature on hexes is judged at its anchor point, and an emanation counts steps from all its hexes
+- **grid**: a stationary cast on hexes knows its caster by the footprint's outline, so a caster left out is never caught
+- **grid**: a private leg's corners reach a co-owner on hexes only where every hex it crosses holds a sub-cell their fog reveals
+- **grid**: on a per-player scene a leg on hexes is on shared ground when no hex of it lies wholly under the shared fog
+- **grid**: a phase switch on a hex scene keeps the map's origin in the image, as every other map write does
+- **ui**: a cramped roll card stands on the visible area's foot and fits it whatever its stand
+- **ui**: the roll card rises over the bars and lets its header go when the keyboard leaves it too little room
+- **ui**: the token bar, alerts and dock fit the page as it is while someone types, and the options row counts its own lift
+- **ui**: a page the browser shrinks for its keyboard is the keyboard's view, so a cramped surface still takes the visible area
+- **ui**: a speed of several modes stays whole beside AC in the quick numbers
+- **ui**: a sheet or dialog too short for its field takes the visible area, and the dock and the tool's options follow the keyboard
+- **ui**: the token bar, roll card and alerts place by the visible area while someone types, and size by the room without it
+- **ui**: android chrome shrinks only the visual viewport, and the room keeps its size and orientation while someone types
+- **ui**: the keyboard's view lasts until the viewport grows back, and a popover's field follows until the viewer scrolls
+- **ui**: a token's quick numbers wrap as two parts, so none stands alone on a line
+- **ui**: the tool's options, token bar, alerts, roll card and map panes stand on the keyboard
+- **ui**: a dialog stands above the keyboard with its field in view
+- **ui**: a creature's name stands at its picture's middle in its header
+- **ui**: android chrome resizes the page for the keyboard
+- **ui**: a phone's sheet and its dock ride the keyboard, the focused field scrolled into view
+- **grid**: players' copies keep a scene's grid shape and the stamps, each field held to a list of what players take
+- **grid**: on hexes one key names one hex in a scene
+- **grid**: a hex scene's map origin is never negative, and the import refuses a hex scene with its own square grid
+- **grid**: large and gargantuan snap to the nearest corner as rounded onto the lattice
+- **grid**: in h1 a hex scene holds no grid-keyed content, whatever its stamp, on restore and import
+- **vision**: the fog line on a per-player scene speaks of each player's own map and what creatures that share sight add to every map
+- **dev**: the dev room's late snapshot is built when its wait ends, and a socket closed while connecting never opens
+- **server**: a socket's snapshot clears the previews it held, as its device drops them
+- **server**: a held preview names the socket that sent it by id, so a stale entry never keeps a closed socket reachable
+- **vision**: the shrink prune removes each tile under its own scene's key, and another per-player scene keeps its tiles
+- **server**: a socket's tidied preview ends it only on screens still showing that socket's frame, not another socket's of the same member
+- **server**: a socket's previews keep only frames some screen shows, at most 64, and go after 10 s without one
+- **server**: the size guard's growth bound counts tokens, the fight and saved steps without the names their lists of who saw hold
+- **server**: a per-player scene keeps no layer's tile past its bounds, and the size guard counts the shared fog past them at its widest
+- **server**: an import maps holder lists, holders' layers and turn starts' lists of who saw to the new roster, dropping what it cannot map
+- **ui**: the preview wait's spinner and words center on one line in its status
+- **log**: a preview's older log pages are taken only when the server answered as that player
+- **dm**: the preview's wait takes the interface size, speaks through one status mounted from the start, and its 10 s limit is a tested watcher
+- **vision**: escape from the box answers the untick question, its words speak through a mounted status, and the switch's working line names each player
+- **measure**: shared and kept walking rulers keep to the ground every player shares on a per-player scene
+- **bench**: the per-player snapshot rows load a per-player room, and every bench room is checked for its mode and holders
+- **vision**: a holder's answer holds no raster and a computation keeps at most 14, so every raster alive is one the cache counts
+- **server**: a room with a per-player scene projects each player's sight, fog, labels and stamps alone in a batch
+- **vision**: a DM's device predicts the trap hint from every holder's map, as the server reads it
+- **vision**: the holder cap in force is a live op's alone, so a room played at six replays at five
+- **vision**: the trap hint on a fog-only per-player scene reads every holder's map
+- **vision**: a holder list on a whole-party scene projects to no one, as the snapshot leaves it out
+- **vision**: schemas bound lists by the design's most holders, a seventh pick reaches the reducer's refusal, and stored lines refuse lists
+- **vision**: a line no player reads is stored with no list of who saw
+- **vision**: after any change of a holder list or the roster, only players who see for themselves keep an entry on and a layer
+- **vision**: an area reminder's witnesses are every player on the roster, and a hidden one holds no list
+- **server**: the fan-out projects each player alone in a room with a per-player scene
+- **vision**: a private leg's corners are sampled at the lattice it was walked at, so a resize never shows them to a co-owner
+
+### Performance
+
+- **iso**: the fog view reads each tile once per view rather than once per sub-cell
+- **ui**: a drag's start in isometric lays no token labels out again, its frames being the same
+- **ui**: the hidden isometric board builds no relief buckets until it shows, so a map swapped in top-down rebuilds none there
+- **ui**: live tokens and the moving marks' layers read nothing while their drawing tree is hidden
+- **ui**: a hidden board tree keeps its last read of the build, so a brush stroke rebuilds no paths, area coverage or trap marks there
+- **ui**: the isometric board finds a standee by id for its silhouette and decor
+- **ui**: the hidden isometric board keeps its last read of the room, so a brush stroke in top-down rebuilds nothing there
+- **ui**: both board trees draw one decoded map image, loaded above them, and only the tree on screen reports its progress
+- **ui**: other members' drags and the moving marks draw in the isometric drag layer, so a ghost's frame redraws none of the overlay's text
+- **ui**: a hidden board tree skips its draws, and its ghosts and shadows read no drag
+- **grid**: bench rows for a 1,000 ft emanation and a 2,000-hex walk on hexes
+- **grid**: an emanation's shading on hexes reads each distance's reach once and skips its own empty filter
+- **grid**: an emanation on hexes reads only the scene's hexes, each one's steps worked out once
+- **grid**: a walk on hexes builds each piece's hex line once, for its spots and the area sweep alike
+- **grid**: a bench of a 1,000 ft line's coverage on hexes and squares against design 9.3
+- **grid**: hex coverage passes over far hexes with one distance each
+- **server**: the explore step's lookup of each holder's own new ground builds no array
+- **vision**: the explore step draws every holder's raster before the commit with fog off too, so the fan-out draws none
+- **vision**: a source set keeps its newest computations' rasters, so a fan-out after the explore step never draws one again
+- **vision**: a holder who lacks one source redraws from the union only the tiles where that source alone gives some level
+- **vision**: a holder's raster starts from whichever drawing leaves the fewest tiles, and redraws a source only where its sight changed
+- **vision**: a holder's presence map is kept per pair of layer maps, not copied for every label
+
+## v0.1.0 (2026-10-25)
+
+First public release
