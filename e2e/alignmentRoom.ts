@@ -3517,12 +3517,21 @@ function moreMenuTest(size: Size, scale: number, at: string): void {
         try {
           await touchSwipe(cdp, swipe.from, swipe.to, { steps: 12, everyMs: 30 });
           await waitFor(`${at}: the hidden-scrollbar menu scrolls by touch`, async () => (await scrollTop()) > 0 || null);
+          assert.equal(await opener.getAttribute("aria-expanded"), "true", `${at}: touch scrolling must leave the menu open`);
+          assert.equal(await menu.count(), 1, `${at}: touch scrolling must not activate an item`);
         } finally {
           await cdp.detach();
         }
       }
 
       // Ordinary words wrap onto their own lines. Only a word wider than the whole cap breaks inside itself.
+      // A pointer open keeps focus on More through a swipe. Enter the menu before Home, which would otherwise choose the tab strip's first tab and close the menu.
+      assert.equal(await opener.getAttribute("aria-expanded"), "true", `${at}: the menu must remain open before the label checks`);
+      await opener.press("ArrowDown");
+      assert.equal(await menu.evaluate((el) => {
+        const menu = el as unknown as { contains(node: unknown): boolean; ownerDocument: { activeElement: unknown } };
+        return menu.contains(menu.ownerDocument.activeElement);
+      }), true, `${at}: Home must be sent inside the menu`);
       await page.keyboard.press("Home");
       await resetScroll();
       for (const [index, words] of ["Show every creature in the encounter before opening another panel", "W".repeat(80), "W".repeat(80)].entries()) {
