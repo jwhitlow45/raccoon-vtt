@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { projectState } from "#shared/project.ts";
 import { DM, room as testRoom } from "#shared/testutil.ts";
 import { createRoomActions } from "./actions.ts";
-import { createRoomStore } from "./store.ts";
+import { createRoomStore, undoAnswer } from "./store.ts";
 import { FakeClock, FakeOutbox } from "./testing.ts";
 import { undoNotice } from "./historyNotice.ts";
 
@@ -23,7 +23,8 @@ test("stack activation waits for authoritative history after a snapshot", () => 
 });
 
 import type { HistoryMessage } from "#shared/undoContract.ts";
-import { HistoryController, EMPTY_HISTORY, type HistoryCommand, type HistoryView } from "./history.ts";
+import { HistoryController, EMPTY_HISTORY, blockerText, refusalSentence, type HistoryCommand, type HistoryView } from "./history.ts";
+import { FORGET_ASK } from "#shared/protocol.ts";
 import type { OnAnswer } from "./types.ts";
 
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString().padStart(12, "0")}`;
@@ -301,6 +302,13 @@ test("terminal results name the captured setup action and preserve a reload refu
   h.context.terminal = 2;
   h.sent[1]!.answer("refused", { code: "invalid", message: "Reload to use Undo", text: "Reload to use Undo" });
   assert.equal(h.view().result, "Reload to use Undo");
+  h.controller.receive(frame(3, 0, 2, 2));
+  h.controller.activate("undo", { scope: "setup" });
+  h.context.terminal = 3;
+  const refused = "could not undo changing Bree's stat block: Undo the play step first: damaging Bree";
+  h.sent[2]!.answer("refused", { code: "invalid", message: refused, text: refused });
+  assert.equal(h.view().result, "Could not undo changing Bree's stat block: Undo the play step first: damaging Bree.", "the sheet shows the toast's sentence");
+  assert.equal(refusalSentence(FORGET_ASK), FORGET_ASK, "the forget question stays the question Setup history answers");
 });
 
 test("a lost history answer announces once, while quiet flows keep their own feedback", () => {
@@ -459,4 +467,12 @@ test("Review is attached only to the matching refusal toast", () => {
   room.applyHistory({ ...retained, serial: 2 });
   assert.equal(room.store.getState().toasts, notes);
   room.dispose();
+});
+
+test("a label cut short with an ellipsis ends its sentence without a second mark", () => {
+  const label = "changing the character Bree, keeper of the western beacon and …";
+  assert.equal(blockerText({ scope: "play", direction: "undo", label, buried: false }), `Undo the play step first: ${label}`);
+  assert.equal(blockerText({ scope: "setup", direction: "redo", label: "changing Bree's AC", buried: false }), "Redo the setup step first: changing Bree's AC.");
+  assert.equal(undoAnswer("undo", { what: label }, "setup").text, `Undid setup: ${label}`);
+  assert.equal(refusalSentence(`could not undo ${label}`), `Could not undo ${label}`);
 });

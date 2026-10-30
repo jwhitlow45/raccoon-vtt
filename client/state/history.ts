@@ -1,4 +1,5 @@
 import type { DiscardHistoryCommand, HistoryBlocker, HistoryDirection, HistoryMessage, HistoryScope, StackHistoryCommand } from "#shared/undoContract.ts";
+import { endSentence } from "#shared/logText.ts";
 import type { OnAnswer } from "./types.ts";
 import { Timer, type Clock } from "./timing.ts";
 
@@ -35,11 +36,20 @@ export function historyChanged(scope: HistoryScope): string {
   return `${scope === "setup" ? "Setup" : "Play"} history changed. Check the next change.`;
 }
 
+/** A refused history command as one sentence, the words its toast shows (store.ts undoAnswer). */
+export function refusalSentence(message: string): string {
+  if (message === "Reload to use Undo") return message;
+  const detail = message.trim().replace(/\.$/, "");
+  if (!detail) return "";
+  // A question, such as the forget question, keeps its own mark.
+  return endSentence(detail[0]!.toUpperCase() + detail.slice(1));
+}
+
 export function blockerText(blocker: HistoryBlocker): string {
   const verb = blocker.direction === "undo" ? "Undo" : "Redo";
   return blocker.buried
     ? `${verb} the ${blocker.scope} steps through ${blocker.label} first.`
-    : `${verb} the ${blocker.scope} step first: ${blocker.label}.`;
+    : endSentence(`${verb} the ${blocker.scope} step first: ${blocker.label}`);
 }
 
 /** Authoritative heads stay outside optimistic room state and the transport retry queue. */
@@ -149,8 +159,8 @@ export class HistoryController {
           onAnswer: (...args) => {
             this.active--;
             this.result = args[0] === "taken"
-              ? options.discard ? "Discarded this step. The game stays as it is." : `${direction === "undo" ? "Undid" : "Redid"}${scope === "setup" ? " setup:" : ""} ${head.label}.`
-              : args[1]?.message ?? "The answer was lost. Check the next change.";
+              ? options.discard ? "Discarded this step. The game stays as it is." : endSentence(`${direction === "undo" ? "Undid" : "Redid"}${scope === "setup" ? " setup:" : ""} ${head.label}`)
+              : (args[1]?.message !== undefined ? refusalSentence(args[1].message) : "") || "The answer was lost. Check the next change.";
             if (args[0] === "unknown" && !options.quiet) this.ports.notify(this.result);
             options.onAnswer?.(...args);
             this.refresh();

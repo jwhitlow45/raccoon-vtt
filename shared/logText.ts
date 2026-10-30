@@ -28,6 +28,11 @@ const SOMEONE = "Someone";
 const A_CREATURE = "A creature";
 
 /** Display order within an operation, without changing its storage or paging ids. */
+/** Ends a sentence that may end in a label: a label cut short with "…", or ending in its own mark, takes no second one. */
+export function endSentence(text: string): string {
+  return /[.?!…]$/.test(text) ? text : `${text}.`;
+}
+
 export function displayLog(lines: readonly LogEntry[]): LogEntry[] {
   const out: LogEntry[] = [];
   const seq = (line: LogEntry) => line.id.slice(0, line.id.indexOf(":"));
@@ -415,7 +420,7 @@ function eventText(data: LogEvent, names: LogNames, dm: boolean): string {
   switch (data.type) {
     case "correction": {
       const action = data.from === "undo" ? "undid" : "redid";
-      if (dm && data.label !== undefined) return `The DM ${action}${data.scope === "setup" ? " setup:" : ""} ${data.label}.`;
+      if (dm && data.label !== undefined) return endSentence(`The DM ${action}${data.scope === "setup" ? " setup:" : ""} ${data.label}`);
       return `The DM ${action} a ${data.scope} change${data.name !== undefined ? ` to ${data.name}` : ""}.`;
     }
     case "hp": {

@@ -1,10 +1,11 @@
 import { CorrectionAnnouncements, type OwnCorrection } from "../features/log/corrections.ts";
 import { UNDO_NOTICE, undoNotice, type UndoNotice } from "./historyNotice.ts";
 import { historyCommandSchema, type HistoryDirection, type HistoryMessage, type UndoGroupOptions } from "#shared/undoContract.ts";
-import { blockerText, EMPTY_HISTORY, HistoryController, type HistoryActivation, type HistoryCommand } from "./history.ts";
+import { blockerText, EMPTY_HISTORY, HistoryController, refusalSentence, type HistoryActivation, type HistoryCommand } from "./history.ts";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { uuidv7 } from "#shared/ids.ts";
 import { parseKey } from "#shared/keys.ts";
+import { endSentence } from "#shared/logText.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { applyChanges, projectLogEntry, type ProjectedState } from "#shared/project.ts";
 import {
@@ -210,7 +211,6 @@ export type RoomStoreState = RoomView & {
 
 type Snapshot = Extract<ServerMessage, { t: "snapshot" }>;
 type Ev = Extract<ServerMessage, { t: "ev" }>;
-type OpRecording = NonNullable<Ev["ackDetails"]>[number] & { recorded?: boolean; tooLarge?: true };
 
 /** Where the store sends ops. `send` returns false when the socket is not open. */
 export type Outbox = { send(msg: ClientMessage): boolean };
@@ -386,13 +386,11 @@ export function refusalText(code: RefusalCode, message: string): string {
 export function undoAnswer(t: "undo" | "redo", answer: { what: string | undefined } | { refused: string }, scope: "play" | "setup" = "play"): { text: string; tone: Toast["tone"] } {
   if ("what" in answer) {
     const verb = t === "undo" ? "Undid" : "Redid";
-    return { text: answer.what ? `${verb}${scope === "setup" ? " setup:" : ""} ${answer.what}.` : `${verb} your last ${t === "undo" ? "change" : "undone change"}.`, tone: "info" };
+    return { text: answer.what ? endSentence(`${verb}${scope === "setup" ? " setup:" : ""} ${answer.what}`) : `${verb} your last ${t === "undo" ? "change" : "undone change"}.`, tone: "info" };
   }
-  if (answer.refused === "Reload to use Undo") return { text: answer.refused, tone: "error" };
-  const detail = answer.refused.trim().replace(/\.$/, "");
-  if (!detail) return { text: `Could not ${t}.`, tone: "error" };
-  const text = detail[0]!.toUpperCase() + detail.slice(1) + ".";
-  return { text, tone: /^nothing to /i.test(detail) ? "info" : "error" };
+  const text = refusalSentence(answer.refused);
+  if (!text) return { text: `Could not ${t}.`, tone: "error" };
+  return { text, tone: /^nothing to /i.test(text) ? "info" : "error" };
 }
 
 /** The entity keys an op names, for the `busy` spinners of ops that wait. */
