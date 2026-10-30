@@ -26,8 +26,12 @@
  *   orientation (docs/design-v1-iso-hex-relief.md 9): a terrace,
  *   alternating heights, pits and a seeded field over the whole height
  *   range, a wall across levels, 40 creatures of mixed sizes and four
- *   areas, with pans at 40 px, 12 px and fit, a local drag, a warm turn and
- *   a 40 ft cube on alternating hex heights coming in.
+ *   areas, with pans at 40 px, 12 px and fit, a local drag, a warm turn
+ *   and a 40 ft cube on alternating hex heights coming in: the frame it
+ *   lands in, in both views, then each frame until it stands. In
+ *   Isometric the pans at 40 px and 12 px are counted too, on an untimed
+ *   pan of their own: the canvas's fills, clips, image copies and patterns
+ *   and the ground stage's draws, each a frame.
  *
  * Rows: pan (the typical scene at 40 px, the caps at fit and at 40 px, the
  * crowd at 40 px), a local drag (each whole frame), the ringed and aura'd
@@ -540,6 +544,44 @@ function countGroundDraws(page: Page): Promise<void> {
   });
 }
 
+/**
+ * The canvas calls a pan makes, each a frame, counted on an untimed pan of
+ * its own: the 2D context's fills and strokes, its clips and image copies,
+ * the patterns it makes, and the ground stage's draws. The counting comes
+ * off again before the next timed row, so it slows none.
+ */
+async function canvasCalls(page: Page, cdp: CDPSession, steps: number): Promise<{ fills: number; cuts: number; patterns: number; ground: number }> {
+  await countGroundDraws(page);
+  await page.evaluate(() => {
+    type Proto = Record<string, (...a: unknown[]) => unknown>;
+    const g = globalThis as unknown as { CanvasRenderingContext2D: { prototype: Proto }; __benchCanvas?: { n: Record<string, number>; kept: Proto } };
+    const proto = g.CanvasRenderingContext2D.prototype;
+    const n: Record<string, number> = { fill: 0, stroke: 0, clip: 0, drawImage: 0, createPattern: 0 };
+    const kept: Proto = {};
+    for (const k of Object.keys(n)) {
+      const f = proto[k]!;
+      kept[k] = f;
+      proto[k] = function (this: unknown, ...a: unknown[]) {
+        n[k]!++;
+        return f.apply(this, a);
+      };
+    }
+    g.__benchCanvas = { n, kept };
+  });
+  await touchPan(page, cdp, steps);
+  const n = await page.evaluate(() => {
+    type Proto = Record<string, (...a: unknown[]) => unknown>;
+    const g = globalThis as unknown as { CanvasRenderingContext2D: { prototype: Proto }; __benchCanvas?: { n: Record<string, number>; kept: Proto } };
+    const { n, kept } = g.__benchCanvas!;
+    Object.assign(g.CanvasRenderingContext2D.prototype, kept);
+    delete g.__benchCanvas;
+    return n;
+  });
+  const ground = await groundDraws(page);
+  const per = (v: number) => Math.round((10 * v) / steps) / 10;
+  return { fills: per(n.fill! + n.stroke!), cuts: per(n.clip! + n.drawImage!), patterns: per(n.createPattern!), ground: per(ground) };
+}
+
 function groundDraws(page: Page): Promise<number> {
   return page.evaluate(() => {
     type Layer = { __benchDraws?: number };
@@ -916,11 +958,21 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
       const { scene } = built[kind]!;
       for (const zoom of [40, 12, "fit"] as const) {
         await open(kind, zoom);
-        await add(hexRow(orient, `pan, ${zoom === "fit" ? "fit" : `${zoom} px`}`), () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+        const pan = hexRow(orient, `pan, ${zoom === "fit" ? "fit" : `${zoom} px`}`);
+        await add(pan, () => throttled(() => rounds(() => touchPan(page, cdp, STEPS))));
+        if (view === "isometric" && zoom !== "fit" && (!opts.only || opts.only.some((o) => pan.includes(o)))) {
+          const c = await throttled(() => canvasCalls(page, cdp, STEPS));
+          const count = (what: string, v: number) => rows.push({ row: hexRow(orient, `pan, ${zoom} px, ${what} a frame (calls, not ms)`), view, ms: { median: v, max: v, n: STEPS } });
+          count("fills and strokes", c.fills);
+          count("clips and image copies", c.cuts);
+          count("patterns made", c.patterns);
+          count("ground stage draws", c.ground);
+        }
       }
       const dm = await open(kind, 40);
       await add(hexRow(orient, "local drag, whole frame, 40 px"), () => throttled(() => rounds(() => touchDrag(page, cdp, scene.walker, STEPS))));
-      if (view === "isometric" && (!opts.only || opts.only.some((o) => "hex relief".includes(o) || o.includes("hex relief")))) {
+      const hexRows = !opts.only || opts.only.some((o) => "hex relief".includes(o) || o.includes("hex relief"));
+      if (view === "isometric" && hexRows) {
         const hook = (call: "turn" | "pick", arg?: unknown) => page.evaluate(([c, a]) => (globalThis as unknown as { __rvttIsoHook?: Record<string, (a: unknown) => unknown> }).__rvttIsoHook?.[c]?.(a), [call, arg] as const);
         // A turn keeps still the point a press at the middle meets, here a column up to 200 ft tall at the scene's near corner, so the
         // camera would walk off toward it turn by turn. The selected walker is the point it keeps instead (boardPick.ts heldPoint).
@@ -931,19 +983,32 @@ export async function runBench(view: View, opts: { parity?: string; shots?: stri
           await waitStood(page);
         }
         await add(`turn, hex relief ${orient}, 40 px, each turn visited before`, () => throttled(() => rounds(() => timed(page, cdp, 4, async (i) => void (await hook("turn", (i + 1) % 4)), 4))));
+      }
+      if (hexRows) {
+        /*
+         * The 40 ft cube comes in from another device of the DM's, as the 500 ft
+         * emanation does. The frame it lands in holds what any new area costs
+         * either view (the store, the rules' coverage its flat drawing reads,
+         * a layout), so it is a row of its own, timed in both. Then each frame
+         * until it stands, Top-down's for as long having nothing to build.
+         */
         let made: Op | null = null;
+        const arrivals: number[] = [];
         const builds: number[] = [];
         const frames2 = await throttled(() =>
           rounds(async () => {
             if (made) await dm.op({ t: "template.delete", templateId: (made.template as { id: string }).id });
             made = template(dm.sceneId, dm.memberId, HEX_CUBE);
-            const got = await timedUntil(page, cdp, () => dm.op(made!), () => stoodNow(page));
+            arrivals.push(...(await timed(page, cdp, 1, () => dm.op(made!), 1)));
+            if (view === "topDown") return timed(page, cdp, 3, async () => undefined, 1);
+            const got = await timedUntil(page, cdp, async () => undefined, () => stoodNow(page));
             builds.push(got.ms);
             return got.frames;
           }),
         );
+        rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, the frame it lands in, 40 px"), view, ms: stats(arrivals.slice(1)) });
         rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, each frame while it builds, 40 px"), view, ms: frameStats(frames2) });
-        rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, until it stands (ms whole, not a frame)"), view, ms: stats(builds.slice(1)) });
+        if (view === "isometric") rows.push({ row: hexRow(orient, "a 40 ft cube on alternating hex heights, until it stands (ms whole, not a frame)"), view, ms: stats(builds.slice(1)) });
       }
     }
 
@@ -1149,7 +1214,7 @@ async function select(page: Page, ids: readonly string[]): Promise<void> {
 export function gate(row: string, ms: Ms, topDown: number | undefined): string {
   const iso = ms.median;
   if (row.startsWith("turn")) return iso <= 150 ? "ok" : "OVER 150 ms";
-  if (row.includes("(ms whole, not a frame)")) return "(reported, no gate)";
+  if (row.includes("(ms whole, not a frame)") || row.includes("(calls, not ms)")) return "(reported, no gate)";
   if (row.startsWith("ground stage draws")) return iso === 0 ? "ok (none)" : `OVER: ${iso} ground draws`;
   // A build's every frame is held, not its median: most of a build's frames are short slices, and the gate is on each frame.
   if (ms.frames) {
