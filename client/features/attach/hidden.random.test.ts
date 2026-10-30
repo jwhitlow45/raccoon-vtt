@@ -771,8 +771,6 @@ function compareFeeds(fa: readonly Feed[], fb: readonly Feed[], a: RoomState, b:
   }
 }
 
-const NEUTRAL: Op = { t: "token.update", tokenId: "lurker", patch: { notes: "" } };
-
 /** What a run reached, so the totals can say the generator tests the cases it is for. */
 type Seen = {
   unseen: number;
@@ -836,15 +834,19 @@ function run(seed: number, steps = 70): Seen {
     // a turn that passes onto or off a creature a player owns is never unseen.
     if (b.state.encounter?.activeEntryId !== trial.state.encounter?.activeEntryId && (ownedTurn(b.state) || ownedTurn(trial.state))) return null;
     const before = b.state;
+    const head = b.stacks.peek(DM.memberId, "undo")?.id;
     assert.equal(b.play(DM, op), "ok", `${where}: the unseen ${op.t}`);
     for (const id of new Set([...Object.keys(before.tokens), ...Object.keys(b.state.tokens)])) if (before.tokens[id] !== b.state.tokens[id]) marks.touched.add(id);
     publish(b, fb);
-    assert.equal(a.play(DM, NEUTRAL), "ok");
+    // Match the hidden step's history effect. A repeated empty note is a
+    // no-effect edit, so its Undo would reach an older visible move.
+    const recorded = b.stacks.peek(DM.memberId, "undo")?.id !== head;
+    assert.equal(a.play(DM, { t: "token.update", tokenId: "lurker", patch: recorded ? { notes: `unseen ${b.seq}` } : {} }), "ok");
     publish(a, fa);
     // Nothing reaches a player: no change at all, not even one that leaves their copy as it was.
     for (const f of [...fa, ...fb]) assert.deepEqual(f.changes, [], `${where}: the unseen ${op.t} sends ${f.who.memberId} changes`);
     seen.unseen++;
-    return op;
+    return recorded ? op : null;
   };
   /**
    * Whether a player's undo or redo would put back, by its own answer, a
