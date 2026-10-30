@@ -302,6 +302,8 @@ export class Scan {
   #budget: LogScanBudget;
   #abort = new AbortController();
   #closed = false;
+  /** Connections the scan's owner still holds (retain), which keep the lease after close until they are let go. */
+  #retained = 0;
 
   constructor(budget: LogScanBudget, pool: ScanPool, roomId: string, memberId: string, background: boolean, signal: AbortSignal | undefined) {
     this.#budget = budget;
@@ -322,8 +324,30 @@ export class Scan {
       return await fn();
     } finally {
       this.#budget.endTurn(this);
-      if (this.#closed) this.#budget.release(this);
+      this.#settle();
     }
+  }
+
+  /**
+   * Marks a connection taken for the scan, and returns the call that lets it
+   * go once the connection is back in the pool or destroyed. The lease
+   * stays until then, even after close, so a room never holds more
+   * connections than its leases.
+   */
+  retain(): () => void {
+    this.#retained++;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      this.#retained--;
+      this.#settle();
+    };
+  }
+
+  /** Leaves the budget once closed with no batch running and no connection held. */
+  #settle(): void {
+    if (this.#closed && !this.turn && this.#retained === 0) this.#budget.release(this);
   }
 
   cancel(reason: unknown): void {
@@ -354,15 +378,16 @@ export class Scan {
 
   /**
    * Releases the lease and leaves the budget. Idempotent. Close the scan's
-   * cursor first. A scan closed while a batch of its own runs is cancelled,
-   * and keeps its turn and lease until that batch ends, since the batch
-   * still holds the connection.
+   * cursor first. A scan closed while a batch of its own runs, or while it
+   * still holds a connection, is cancelled, and keeps its turn and lease
+   * until the batch ends and the connection is let go.
    */
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    if (this.turn) {
+    if (this.turn || this.#retained > 0) {
       this.cancel(new Error("scan closed"));
+      this.#settle();
       return;
     }
     this.#budget.release(this);

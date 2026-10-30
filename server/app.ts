@@ -152,8 +152,7 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   // A connection that drops while a scan holds it errors on the client, which must never go unheard.
   watchPoolErrors(scanPool, (err, where) => app.log.warn({ err, where }, "log scan connection failed"));
   app.addHook("onClose", async () => scanPool.end());
-  // A cancelled scan's backend query is cancelled from the rooms' pool, never from the scans' own, which may be full.
-  await registerLogRoutes(app, kit, { manager, options: { ...log, pool: scanPool, history: { cancelPool: pool, ...log?.history } } });
+  await registerLogRoutes(app, kit, { manager, options: { ...log, pool: scanPool } });
   await registerReceiptRoutes(app, kit, { manager });
   await registerXCardRoutes(app, kit, { manager });
   await registerPlayerViewRoutes(app, kit, { manager });

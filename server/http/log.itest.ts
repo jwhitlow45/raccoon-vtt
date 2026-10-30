@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { createServer, type Socket } from "node:net";
 import { after, before, describe, test } from "node:test";
 import pg from "pg";
 import { uuidv7 } from "#shared/ids.ts";
@@ -7,9 +8,9 @@ import { createInitialState } from "#shared/initial.ts";
 import type { LogEntry } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { rng } from "#shared/testutil.ts";
-import { captureView, compareIds, LogHistory, type HistoryView } from "../rooms/logHistory.ts";
+import { cancelRequest, captureView, compareIds, LogHistory, type HistoryView } from "../rooms/logHistory.ts";
 import { LogScanBudget, ScanBusyError, ScanCancelledError } from "../rooms/logScanBudget.ts";
-import { startEngine, type Engine, type TestClient } from "../rooms/testing.ts";
+import { startEngine, TEST_DATABASE_URL, type Engine, type TestClient } from "../rooms/testing.ts";
 
 type Page = { entries: LogEntry[]; nextBefore: string | null; nextAfter: string | null };
 
@@ -623,7 +624,7 @@ describe("a scan's connection, every step bounded and cancellable", () => {
   const view = captureView({ state, seq: 10 }, "FAKEROOM", { memberId: dm.id, role: "dm" });
   const tick = () => new Promise<void>((r) => setImmediate(r));
 
-  function rig(connect: () => Promise<unknown>, cancelLog?: string[]) {
+  function rig(connect: () => Promise<unknown>, cancelLog?: string[], cancel?: (client: { processID: number }) => Promise<void>) {
     let now = 0;
     const timers: { at: number; fn: () => void }[] = [];
     const budget = new LogScanBudget({
@@ -642,8 +643,8 @@ describe("a scan's connection, every step bounded and cancellable", () => {
         t.fn();
       }
     };
-    const cancelPool = { query: (_sql: string, params: unknown[]) => (cancelLog?.push(`cancel ${String(params[0])}`), Promise.resolve({ rows: [] })) };
-    const history = new LogHistory({ pool: { connect } as never, cancelPool: cancelPool as never, batchRows: 2 });
+    const recorded = (client: { processID: number }) => (cancelLog?.push(`cancel ${client.processID}`), Promise.resolve());
+    const history = new LogHistory({ pool: { connect } as never, cancel: (cancel ?? recorded) as never, batchRows: 2 });
     const scan = budget.open({ pool: "page", roomId: "FAKEROOM", memberId: dm.id });
     return { budget, history, scan, advance };
   }
@@ -736,6 +737,206 @@ describe("a scan's connection, every step bounded and cancellable", () => {
     assert.ok(!steps.some((s) => s.startsWith("cancel")), "an ended connection's id is never cancelled");
     scan.close();
     assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+  });
+
+  test("a cancel in the moment a connection is handed over drops it before any query runs on it", async () => {
+    const steps: string[] = [];
+    const conn = new FakeConnection(rows, steps);
+    let cancelNext = () => {};
+    const { budget, history, scan } = rig(() => {
+      // The pool answers, then the scan is cancelled one microtask later: after the checkout hands the connection on,
+      // before the scan's own code has it.
+      const answer = Promise.resolve(conn);
+      void answer.then(() => queueMicrotask(() => cancelNext()));
+      return answer;
+    }, steps);
+    cancelNext = () => scan.cancel(new Error("deadline"));
+    await assert.rejects(history.page(view, { limit: 50 }, scan), ScanCancelledError);
+    assert.ok(!steps.includes("begin"), steps.join(" "));
+    assert.deepEqual(conn.released, [true]);
+    scan.close();
+    assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+  });
+
+  test("a dropped connection keeps its scan's lease until it is destroyed, so the room admits no other scan before", async () => {
+    const steps: string[] = [];
+    const conn = new FakeConnection(rows, steps);
+    let finishCancel = () => {};
+    const { budget, history, scan } = rig(
+      () => Promise.resolve(conn),
+      steps,
+      () => new Promise<void>((resolve) => (finishCancel = resolve)),
+    );
+    // One batch, then the reader stops taking them, as a stalled download's does.
+    const reading = history.batches(view, { order: "asc" }, scan, "lines")[Symbol.asyncIterator]();
+    assert.equal((await reading.next()).done, false);
+    // The export's stream closes: the scan is cancelled and closed, and its backend's cancel takes a while.
+    scan.cancel(new Error("deadline"));
+    scan.close();
+    await tick();
+    assert.deepEqual(conn.released, [], "the connection is still out while its cancel runs");
+    assert.equal(budget.usage.leases.page, 1, "so the lease is still held");
+    // The reader asks for more: the scan ends only once its connection is gone, never before.
+    let ended = false;
+    const next = reading.next().then(
+      () => "more",
+      (err: unknown) => (err instanceof ScanCancelledError ? "cancelled" : String(err)),
+    );
+    void next.then(() => (ended = true));
+    await tick();
+    assert.equal(ended, false, "the scan has not ended while its connection is out");
+    const second = budget.open({ pool: "page", roomId: "FAKEROOM", memberId: "someone else" });
+    let admitted = false;
+    const later = second.batch(async () => void (admitted = true));
+    await tick();
+    assert.equal(admitted, false, "no second scan of the room while the first's connection is out");
+    finishCancel();
+    await later;
+    assert.deepEqual(conn.released, [true]);
+    assert.equal(admitted, true);
+    assert.equal(await next, "cancelled");
+    second.close();
+    assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+  });
+
+  test("a query that fails or times out is followed by no more SQL: the backend is cancelled and the connection destroyed", async () => {
+    const steps: string[] = [];
+    const conn = new FakeConnection(rows, steps);
+    const query = conn.query.bind(conn);
+    let fetches = 0;
+    conn.query = (text: string, params?: unknown[]) => {
+      // What pg's query_timeout answers, while the statement may still run on the server.
+      if (/^fetch/.test(text) && ++fetches === 2) {
+        steps.push("fetch");
+        return Promise.reject(new Error("Query read timeout"));
+      }
+      return query(text, params);
+    };
+    const { budget, history, scan } = rig(() => Promise.resolve(conn), steps);
+    await assert.rejects(history.page(view, { limit: 50 }, scan), /Query read timeout/);
+    assert.deepEqual(steps.slice(-3), ["fetch", "cancel 4242", "destroy"]);
+    assert.ok(!steps.includes("rollback"), "no rollback queued behind the stuck query");
+    scan.close();
+    assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+  });
+
+  test("a request waiting on another's session list stops at its own cancel, and the one finding it goes on", async () => {
+    let gateOpen = () => {};
+    const gate = new Promise<void>((resolve) => (gateOpen = resolve));
+    let gated = true;
+    const history = new LogHistory({
+      pool: { connect: () => Promise.resolve(new FakeConnection(rows, [])) } as never,
+      cancel: () => Promise.resolve(),
+      batchRows: 2,
+      onBatch: async () => {
+        if (gated) {
+          gated = false;
+          await gate;
+        }
+      },
+    });
+    const budget = new LogScanBudget();
+    const leader = budget.open({ pool: "page", roomId: "FAKEROOM", memberId: dm.id });
+    const waiter = budget.open({ pool: "page", roomId: "FAKEROOM", memberId: dm.id });
+    const found = history.sessions(view, { limit: 25 }, leader);
+    await tick();
+    const waiting = history.sessions(view, { limit: 25 }, waiter).then(
+      () => "served",
+      (err: unknown) => (err instanceof ScanCancelledError ? "cancelled" : String(err)),
+    );
+    await tick();
+    waiter.cancel(new Error("client went away"));
+    assert.equal(await waiting, "cancelled", "the wait ends with the waiter's own cancel");
+    // A waiter already cancelled when it arrives gets no answer either.
+    const late = budget.open({ pool: "page", roomId: "FAKEROOM", memberId: dm.id });
+    late.cancel(new Error("deadline"));
+    await assert.rejects(history.sessions(view, { limit: 25 }, late), ScanCancelledError);
+    gateOpen();
+    assert.equal((await found).lines, 6, "the one finding the list was not stopped by the waiters");
+    for (const s of [leader, waiter, late]) s.close();
+    budget.close();
+  });
+});
+
+describe("PostgreSQL's cancel request", () => {
+  test("stops only the backend whose secret it carries, and gives up on a server that does not answer", async () => {
+    const url = TEST_DATABASE_URL;
+    const victim = new pg.Client({ connectionString: url });
+    const watcher = new pg.Client({ connectionString: url });
+    await victim.connect();
+    await watcher.connect();
+    try {
+      const sleeping = victim.query("select pg_sleep(3)").then(
+        () => "finished",
+        (err: Error) => err.message,
+      );
+      const running = async () =>
+        (await watcher.query<{ n: number }>("select count(*)::int as n from pg_stat_activity where pid = $1 and state = 'active'", [(victim as unknown as { processID: number }).processID])).rows[0]!.n === 1;
+      for (let i = 0; i < 50 && !(await running()); i++) await new Promise((r) => setTimeout(r, 20));
+      // As if the process id had passed to another session since: same id, another secret.
+      const impostor = Object.assign(Object.create(victim) as pg.Client, { secretKey: ((victim as unknown as { secretKey: number }).secretKey ^ 1) | 0 });
+      await cancelRequest(impostor);
+      await new Promise((r) => setTimeout(r, 300));
+      assert.equal(await running(), true, "a request with another secret stops nothing");
+      await cancelRequest(victim);
+      assert.match(await sleeping, /cancel/i, "the backend's own secret stops it");
+    } finally {
+      await victim.end();
+      await watcher.end();
+    }
+    // A server that takes the connection and never answers: the request gives up after its wait.
+    const held: Socket[] = [];
+    const silent = createServer((socket) => void held.push(socket));
+    await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (silent.address() as { port: number }).port;
+      const started = Date.now();
+      await cancelRequest({ processID: 1, secretKey: 2, host: "127.0.0.1", port } as never, 200);
+      assert.ok(Date.now() - started < 1_000);
+    } finally {
+      for (const socket of held) socket.destroy();
+      await new Promise((resolve) => silent.close(resolve));
+    }
+  });
+
+  test("a scan's query_timeout cancels the statement on the server and destroys the connection, with no rollback", async () => {
+    const pool = new pg.Pool({ connectionString: TEST_DATABASE_URL, max: 1, query_timeout: 200 });
+    const watcher = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await watcher.connect();
+    const sent: string[] = [];
+    let backend = 0;
+    const history = new LogHistory({
+      pool: {
+        connect: async () => {
+          const client = await pool.connect();
+          backend = (client as unknown as { processID: number }).processID;
+          const query = client.query.bind(client) as (text: string, params?: unknown[]) => Promise<unknown>;
+          // The fetch becomes a statement that outlives the timeout, so pg gives up on it while the server still runs it.
+          (client as unknown as { query: typeof query }).query = (text, params) => {
+            sent.push(text.trim().split(/\s+/)[0]!.toLowerCase());
+            return query(/^fetch/i.test(text.trim()) ? "select pg_sleep(5)" : text, params);
+          };
+          return client;
+        },
+      } as never,
+    });
+    const dm = { id: "dm1", rev: 1, name: "DM", color: "#f7df00", kind: "dm" as const, createdAt: "2026-01-01T00:00:00Z" };
+    const view = captureView({ state: createInitialState({ roomName: "Timeout", dm: dm as never }), seq: 10 }, "NOSUCHROOM", { memberId: dm.id, role: "dm" });
+    const budget = new LogScanBudget();
+    const scan = budget.open({ pool: "page", roomId: "NOSUCHROOM", memberId: dm.id });
+    try {
+      await assert.rejects(history.page(view, { limit: 50 }, scan), /Query read timeout/);
+      assert.ok(sent.includes("fetch") && !sent.includes("rollback"), `no rollback after the timeout: ${sent.join(", ")}`);
+      assert.equal(pool.totalCount, 0, "the connection is destroyed, not returned");
+      const active = async () => (await watcher.query<{ n: number }>("select count(*)::int as n from pg_stat_activity where pid = $1 and state = 'active'", [backend])).rows[0]!.n;
+      for (let i = 0; i < 50 && (await active()) > 0; i++) await new Promise((r) => setTimeout(r, 20));
+      assert.equal(await active(), 0, "the server stopped the statement well before its 5 s");
+      scan.close();
+      assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+    } finally {
+      await watcher.end();
+      await pool.end();
+    }
   });
 });
 

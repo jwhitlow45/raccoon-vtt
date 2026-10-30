@@ -1,3 +1,4 @@
+import { connect } from "node:net";
 import type pg from "pg";
 import type { LogNames } from "#shared/logText.ts";
 import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
@@ -34,8 +35,50 @@ const CURSOR = "log_history";
 /** How long a scan keeps asking for a connection the pool cannot give, as long as a lease is waited for, and how often. */
 const CONNECTION_WAIT_MS = 1_000;
 const CONNECTION_RETRY_MS = 50;
-/** How long dropping a cancelled scan's connection waits for its backend's cancel. */
+/** How long a cancel request may take, connecting and sending, before its socket is destroyed. */
 const CANCEL_WAIT_MS = 1_000;
+
+/**
+ * PostgreSQL's cancel request for a connection's backend: a new socket to the
+ * same server carrying the backend's process id and the secret key the
+ * backend gave this connection at startup. Only that backend matches the
+ * pair, so a request that arrives late cannot stop another session that has
+ * the process id since. It is bounded: connecting and sending get
+ * CANCEL_WAIT_MS, and the socket is destroyed after either way. It sends
+ * no SQL, so nothing is left queued anywhere.
+ */
+export function cancelRequest(client: pg.ClientBase, waitMs = CANCEL_WAIT_MS): Promise<void> {
+  const c = client as unknown as { processID: unknown; secretKey: unknown; host?: string; port?: number };
+  const pid = c.processID;
+  const key = c.secretKey;
+  if (typeof pid !== "number" || typeof key !== "number" || c.port === undefined) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const socket = c.host?.startsWith("/") ? connect(`${c.host}/.s.PGSQL.${c.port}`) : connect(c.port!, c.host ?? "localhost");
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve();
+    };
+    const timer = setTimeout(done, waitMs);
+    socket.once("error", done);
+    socket.once("close", done);
+    socket.once("connect", () => {
+      const message = Buffer.alloc(16);
+      message.writeInt32BE(16, 0);
+      message.writeInt32BE(CANCEL_REQUEST_CODE, 4);
+      message.writeInt32BE(pid, 8);
+      message.writeInt32BE(key, 12);
+      // The server reads the request and closes the socket, which ends the wait.
+      socket.end(message);
+    });
+  });
+}
+
+/** The protocol's code for a cancel request (1234 in the high 16 bits, 5678 in the low). */
+const CANCEL_REQUEST_CODE = 80_877_102;
 
 /** The pool had no connection to give within its checkout timeout. */
 class ConnectionUnavailable extends Error {
@@ -140,8 +183,8 @@ type Canonical = { sessions: LogSession[]; lines: number; bytes: number };
 export type LogHistoryOptions = {
   /** The pool scans take their cursors' connections from, apart from the rooms' own. */
   pool: Pick<pg.Pool, "connect">;
-  /** Where a cancelled scan's backend query is cancelled from: any pool but the scans' own. */
-  cancelPool?: Pick<pg.Pool, "query">;
+  /** How a dropped connection's backend is told to stop. Defaults to PostgreSQL's cancel request (cancelRequest). Tests replace it. */
+  cancel?: (client: pg.PoolClient) => Promise<void>;
   batchRows?: number;
   summaryBytes?: number;
   /** For tests: runs in each batch's turn, after its rows are read. */
@@ -150,7 +193,7 @@ export type LogHistoryOptions = {
 
 export class LogHistory {
   #pool: Pick<pg.Pool, "connect">;
-  #cancelPool: Pick<pg.Pool, "query"> | undefined;
+  #cancel: (client: pg.PoolClient) => Promise<void>;
   #batchRows: number;
   #summaryBytes: number;
   #onBatch: LogHistoryOptions["onBatch"];
@@ -162,7 +205,7 @@ export class LogHistory {
 
   constructor(opts: LogHistoryOptions) {
     this.#pool = opts.pool;
-    this.#cancelPool = opts.cancelPool;
+    this.#cancel = opts.cancel ?? cancelRequest;
     this.#batchRows = opts.batchRows ?? HISTORY_BATCH_ROWS;
     this.#summaryBytes = opts.summaryBytes ?? SUMMARY_BYTES;
     this.#onBatch = opts.onBatch;
@@ -173,30 +216,44 @@ export class LogHistory {
    * projected in its own turn. Batches with nothing readable are passed
    * over, never answered.
    *
-   * The cursor's connection is taken in the first turn and held to the
-   * end. Every step on it is bounded and stops when the scan is cancelled:
-   * taking it (the pool's checkout timeout, or the cancel, which disposes
-   * of a connection handed over too late), each query (the pool's query
-   * timeout), and the rollback at the end. A cancelled scan cancels its
-   * backend's query, then drops the connection, without a rollback. A
-   * connection the pool cannot give now frees the turn and is asked for
+   * The cursor's connection is taken in the first turn and held to the end,
+   * and the scan keeps its lease until the connection is physically back in
+   * the pool or destroyed (Scan.retain). Every step on it is bounded and
+   * stops when the scan is cancelled:
+   * - taking it: the pool's checkout timeout, or the cancel, which disposes
+   *   of a connection handed over too late, including one handed over in the
+   *   moment before it was cancelled, before any query runs on it;
+   * - each query: the pool's query timeout;
+   * - the end: a rollback and a return to the pool, but only for a scan that
+   *   was neither cancelled nor failed. A cancelled scan, or one whose query
+   *   failed or timed out, sends its backend a cancel request keyed by the
+   *   backend's secret (cancelBackend) and destroys the connection, sending
+   *   no more SQL on it.
+   * A connection the pool cannot give now frees the turn and is asked for
    * again, until the lease wait runs out.
    */
   async *batches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
     let client: pg.PoolClient | null = null;
-    let released = false;
+    let letGo: (() => void) | null = null;
+    let dropping: Promise<void> | null = null;
+    let failed = false;
     let ended = false;
     const onEnd = () => {
       ended = true;
     };
-    const drop = () => {
+    const drop = (): Promise<void> => {
       const held = client;
-      if (!held || released) return;
-      released = true;
-      void this.#cancelBackend(held, ended).finally(() => held.release(true));
+      if (!held) return Promise.resolve();
+      dropping ??= (async () => {
+        if (!ended) await this.#cancelBackend(held);
+        held.release(true);
+        letGo?.();
+      })();
+      return dropping;
     };
-    // Kept until the connection is released, so a cancel during the closing rollback still drops it.
-    scan.signal.addEventListener("abort", drop);
+    const onAbort = () => void drop();
+    // Kept until the connection is let go, so a cancel during the closing rollback still drops it.
+    scan.signal.addEventListener("abort", onAbort);
     let unavailableSince: number | null = null;
     try {
       for (;;) {
@@ -204,14 +261,22 @@ export class LogHistory {
         try {
           batch = await scan.batch(async () => {
             if (!client) {
-              client = await this.#connect(scan);
-              client.once("end", onEnd);
+              const taken = await this.#connect(scan);
+              client = taken;
+              letGo = scan.retain();
+              taken.once("end", onEnd);
+              // Cancelled in the moment between the pool's answer and here: the abort found no connection to drop.
+              if (scan.signal.aborted) {
+                await drop();
+                throw new ScanCancelledError(scan.signal.reason);
+              }
               // One snapshot for the cursor and every entry read beside it.
-              await client.query("begin isolation level repeatable read read only");
-              await declareLogScan(client, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.seq });
+              await taken.query("begin isolation level repeatable read read only");
+              await declareLogScan(taken, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.seq });
             }
-            const ids = await fetchLogIds(client, CURSOR, this.#batchRows);
-            const rows = await readLogEntries(client, view.roomId, ids);
+            const held = client as pg.PoolClient;
+            const ids = await fetchLogIds(held, CURSOR, this.#batchRows);
+            const rows = await readLogEntries(held, view.roomId, ids);
             await this.#onBatch?.({ roomId: view.roomId, pass });
             return { entries: projectRows(view, rows), done: ids.length < this.#batchRows };
           });
@@ -226,26 +291,29 @@ export class LogHistory {
         if (batch.done) return;
       }
     } catch (err) {
+      failed = true;
       if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
       throw err;
     } finally {
       const held = client as pg.PoolClient | null;
-      if (held && !released) {
-        // A cancelled scan's connection is already dropped (the abort listener), so only an ended one is left here.
-        if (ended) drop();
+      if (held && !dropping) {
+        if (failed || ended || scan.signal.aborted) await drop();
         else {
           try {
             await held.query("rollback");
           } catch {
-            drop();
+            await drop();
           }
-          if (!released) {
-            released = true;
+          // Set inside the scan's callbacks, so read through casts the compiler cannot narrow away.
+          if (!(dropping as Promise<void> | null)) {
             held.release();
+            (letGo as (() => void) | null)?.();
           }
         }
       }
-      scan.signal.removeEventListener("abort", drop);
+      // A drop started by the abort finishes before the scan can give up its lease: bounded, since the cancel is.
+      if (dropping as Promise<void> | null) await dropping;
+      scan.signal.removeEventListener("abort", onAbort);
       held?.removeListener("end", onEnd);
     }
   }
@@ -280,19 +348,9 @@ export class LogHistory {
     });
   }
 
-  /**
-   * Cancels what the scan's backend is running, so a long sort does not run on after its lease is freed. Skipped
-   * when the connection has already ended, since its process id could belong to another session by then.
-   */
-  async #cancelBackend(client: pg.PoolClient, ended: boolean): Promise<void> {
-    const pid = (client as { processID?: number | null }).processID;
-    if (ended || !this.#cancelPool || typeof pid !== "number") return;
-    let timer: NodeJS.Timeout | undefined;
-    const late = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, CANCEL_WAIT_MS);
-    });
-    await Promise.race([this.#cancelPool.query("select pg_cancel_backend($1)", [pid]).then(() => undefined, () => undefined), late]);
-    clearTimeout(timer);
+  /** Cancels what the scan's backend is running, so a long sort does not run on after the scan lets go of it. */
+  #cancelBackend(client: pg.PoolClient): Promise<void> {
+    return this.#cancel(client).catch(() => undefined);
   }
 
   /**
@@ -332,10 +390,12 @@ export class LogHistory {
     const key = `${view.roomId}|${view.seq}|${stateSerial(view.state)}|${view.viewer.memberId}|${view.viewer.role}|${view.sceneId ?? ""}|${view.previewBy ?? ""}`;
     const hit = this.#hit(key);
     if (hit) return { ...sliceSessions(hit.sessions, q.before, q.limit), lines: hit.lines };
-    // A second request for a list being found waits for that one, holding nothing, rather than finding it again.
+    // A second request for a list being found waits for that one, holding nothing, rather than finding it again. It
+    // waits on its own terms: its cancel ends its wait, and the one finding the list goes on regardless.
     const pending = this.#folding.get(key);
     if (pending) {
-      const found = await pending;
+      const found = await untilCancelled(pending, scan);
+      if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
       if (found) {
         this.#hit(key);
         return { ...sliceSessions(found.sessions, q.before, q.limit), lines: found.lines };
@@ -472,6 +532,25 @@ function stateSerial(state: RoomState): number {
     stateSerials.set(state, serial);
   }
   return serial;
+}
+
+/** `work`'s answer, or ScanCancelledError as soon as the scan is cancelled, whichever comes first. `work` runs on. */
+function untilCancelled<T>(work: Promise<T>, scan: Scan): Promise<T> {
+  if (scan.signal.aborted) return Promise.reject(new ScanCancelledError(scan.signal.reason));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new ScanCancelledError(scan.signal.reason));
+    scan.signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        scan.signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        scan.signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }
 
 /** A view's readable lines among `rows`, against its one captured state. */
