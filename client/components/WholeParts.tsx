@@ -10,6 +10,41 @@ const HIDE: readonly [string, string][] = [
   ["white-space", "nowrap"],
 ];
 
+/** The part of document.fonts a fit listens to, so a test can stand in for it. */
+type FontLoads = { ready: Promise<unknown>; addEventListener(type: "loadingdone", listener: () => void): void; removeEventListener(type: "loadingdone", listener: () => void): void };
+
+/**
+ * Calls `fit` again whenever what fits may have changed after the first
+ * fit: a new width of the row, or a web font that loaded since. Inter
+ * loads with font-display swap, so a line first fitted in the fallback
+ * font would otherwise keep a cut its own font no longer needs, or overflow
+ * (FL7-R2-OPUS-01). Returns the cleanup.
+ */
+export function refitOn(row: Pick<HTMLElement, "clientWidth">, fit: () => void, env: { Observer?: typeof ResizeObserver; fonts?: FontLoads | undefined } = {}): () => void {
+  const Observer = env.Observer ?? ResizeObserver;
+  const fonts = "fonts" in env ? env.fonts : globalThis.document?.fonts;
+  let stopped = false;
+  let width = row.clientWidth;
+  const observer = new Observer(() => {
+    // Only a new width can change what fits. Hiding parts can move the summary beside or under the name, which a height change would measure again without end.
+    const now = row.clientWidth;
+    if (now === width) return;
+    width = now;
+    fit();
+  });
+  observer.observe(row as Element);
+  const onFonts = () => {
+    if (!stopped) fit();
+  };
+  void fonts?.ready.then(onFonts);
+  fonts?.addEventListener("loadingdone", onFonts);
+  return () => {
+    stopped = true;
+    observer.disconnect();
+    fonts?.removeEventListener("loadingdone", onFonts);
+  };
+}
+
 /**
  * A group's folded line of whole parts, inside Group's summary, which
  * clips it to one line (components/Panel.tsx). Where the line cannot hold
@@ -19,9 +54,9 @@ const HIDE: readonly [string, string][] = [
  * cut, by the summary's own ellipsis. The parts past the cut stay for a
  * screen reader, which hears the whole line as the fold's description.
  *
- * It measures after layout and again when its row changes width. The
- * parts it hides carry no style from React, so it sets theirs directly
- * and React never undoes it.
+ * It measures after layout and again when its row changes width or a web
+ * font loads (refitOn). The parts it hides carry no style from React, so
+ * it sets theirs directly and React never undoes it.
  */
 export function WholeParts(props: { parts: readonly { join: string; node: ReactNode }[]; words: string }) {
   const line = useRef<HTMLSpanElement>(null);
@@ -54,16 +89,7 @@ export function WholeParts(props: { parts: readonly { join: string; node: ReactN
       clip.setAttribute("data-summary-cut", "");
     };
     fit();
-    let width = row.getBoundingClientRect().width;
-    const observer = new ResizeObserver(() => {
-      // Only a new width can change what fits. Hiding parts can move the summary beside or under the name, which a height change would measure again without end.
-      const now = row.getBoundingClientRect().width;
-      if (now === width) return;
-      width = now;
-      fit();
-    });
-    observer.observe(row);
-    return () => observer.disconnect();
+    return refitOn(row, fit);
   }, [props.words]);
   return (
     <span ref={line}>
