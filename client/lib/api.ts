@@ -67,11 +67,20 @@ export type DmInviteState = { expiresAt: string; used: boolean };
 export type DisplayCode = { code: string; link: string; expiresAt: string };
 /** Who a table display is in its room: no member, only an id no member can have. */
 export type DisplayMe = { roomId: string; roomName: string; role: "display"; memberId: string };
+/**
+ * A page of the log's archive, projected for the caller
+ * (docs/design-v1-log-history.md 2.2). Its cursors are its own oldest and
+ * newest lines. A full page offers the next one in both directions, which
+ * may come back empty. A short page ends the direction it was read in, and
+ * an empty one names no cursor at all.
+ */
 export type LogPage = {
   /** Oldest first. */
   entries: LogEntry[];
-  /** Pass as `before` for the page after this one. Null when there are no older entries. */
+  /** Pass as `before` for the next older page. Null once an older page came back short or empty. */
   nextBefore: string | null;
+  /** Pass as `after` for the next newer page. Null once a newer page came back short or empty, and absent from a server before history paging. */
+  nextAfter?: string | null;
   /**
    * The member a page asked for `as` was answered as, a DM's preview of
    * that player (docs/design-v1-per-player-vision.md 7.4, D-261026-10).
@@ -88,10 +97,38 @@ export type LogPage = {
 export type ReceiptLookup = {
   parts: ({ part: number; state: "committed"; seq: number; lines: LogEntry[] } | { part: number; state: "refused"; code: string; message: string })[];
 };
-/** One evening of the log, as the caller's own Log panel holds it (docs/design-v1-dm-tools.md 3.10). */
-export type LogSession = { from: string; to: string; lines: number };
+/**
+ * One evening of the log the caller may read (docs/design-v1-dm-tools.md
+ * 3.10): its first and last lines' ids, which select it for an export, and
+ * their times, which only label it. Times can run backward when a clock
+ * did, so the ids are its key.
+ */
+export type LogSession = { firstId: string; lastId: string; from: string; to: string; lines: number };
+/** A page of sessions, newest first. `lines` counts the caller's whole readable log, whatever the page. */
+export type LogSessionPage = { sessions: LogSession[]; lines: number; nextSessionsBefore: string | null };
+/** An export to read in full: one session by its first and last ids, both inclusive, or everything with neither. */
+export type LogRange = { fromId?: string; toId?: string };
+/**
+ * The largest log file the page reads into memory before it offers the
+ * browser's own download instead (docs/design-v1-log-history.md 4.2).
+ */
+export const MAX_LOG_FILE_BYTES = 8 * 1024 * 1024;
 /** A file the server rendered, with the name it asked to be saved under. */
 export type ServerFile = { blob: Blob; fileName: string };
+/** A file past the size the page reads, cancelled before any of it became a Blob. */
+export class FileTooLargeError extends Error {
+  constructor() {
+    super("This file is large.");
+    this.name = "FileTooLargeError";
+  }
+}
+/** A file whose body stopped before its end, as the server ends one that fails partway. Never saved. */
+export class FileCutShortError extends Error {
+  constructor() {
+    super("The file stopped before its end.");
+    this.name = "FileCutShortError";
+  }
+}
 export type ImportForm = {
   /** Replaces the exported room's name. Left out, the name in the export is kept. */
   name?: string;
@@ -263,8 +300,13 @@ export function dispositionFileName(header: string | null): string | null {
   return match ? match[1]! : null;
 }
 
-/** A GET whose answer is a file, read whole, with the same errors as `request`. */
-async function requestFile(path: string, fallbackName: string, signal?: AbortSignal): Promise<ServerFile> {
+/**
+ * A GET whose answer is a file, read whole, with the same errors as
+ * `request`. With `maxBytes` the body is read a chunk at a time and
+ * cancelled once it passes that, so a large file never sits in memory
+ * whole. A body that breaks off is an error, never a shorter file.
+ */
+async function requestFile(path: string, fallbackName: string, signal?: AbortSignal, maxBytes?: number): Promise<ServerFile> {
   let res: Response;
   try {
     res = await fetch(path, { method: "GET", headers: { accept: "text/markdown, application/json" }, mode: "same-origin", credentials: "same-origin", signal });
@@ -273,7 +315,36 @@ async function requestFile(path: string, fallbackName: string, signal?: AbortSig
     throw new ApiError(0, "Could not reach the server. Check your connection.", "network", null);
   }
   if (!res.ok) throw await toApiError(res);
-  return { blob: await res.blob(), fileName: dispositionFileName(res.headers.get("content-disposition")) ?? fallbackName };
+  const fileName = dispositionFileName(res.headers.get("content-disposition")) ?? fallbackName;
+  const type = res.headers.get("content-type") ?? "";
+  if (maxBytes === undefined || !res.body) {
+    try {
+      return { blob: await res.blob(), fileName };
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      throw new FileCutShortError();
+    }
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    let next: ReadableStreamReadResult<Uint8Array>;
+    try {
+      next = await reader.read();
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      throw new FileCutShortError();
+    }
+    if (next.done) break;
+    size += next.value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new FileTooLargeError();
+    }
+    chunks.push(next.value);
+  }
+  return { blob: new Blob(chunks as BlobPart[], { type }), fileName };
 }
 
 export async function retryOn503<T>(attempt: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
@@ -467,25 +538,28 @@ export const api = {
   /** Runs the export route's checks without making the zip: resolves when an export may start now, else throws the refusal. */
   checkExport: (roomId: string) => request<void>("HEAD", exportUrl(roomId)),
 
-  /**
-   * Older log entries, projected for the caller. A DM names the scene it is
-   * viewing, because creature events are projected per scene.
-   */
   /** The caller's own receipts of one tag, for an op whose answer this device lost (docs/design-v1-dice.md 1.2). */
   getReceipts: (roomId: string, tag: string) => request<ReceiptLookup>("GET", `${room(roomId)}/receipts/${encodeURIComponent(tag)}`),
 
   /** A public D&D Beyond character read by the server into a stat block's fill (docs/design-v1-pc-stats.md 6.3). The caller checks the fill. */
   ddbImport: (roomId: string, link: string, signal?: AbortSignal) => request<{ fill: unknown }>("POST", `${room(roomId)}/ddb-import`, { json: { link }, signal }),
 
-  /** `as`: a DM's preview of that player, whose pages the server projects for them (docs/design-v1-per-player-vision.md 7.4). */
-  getLog: (roomId: string, options: { before?: string; sceneId?: string | null; limit?: number; as?: string } = {}) => {
+  /**
+   * A page of the log's archive, projected for the caller: lines before an
+   * id, after one, or the newest with neither (docs/design-v1-log-history.md
+   * 2.2). A DM's page names the scene it is viewing. `as`: a DM's preview of
+   * that player, whose pages the server projects for them
+   * (docs/design-v1-per-player-vision.md 7.4).
+   */
+  getLog: (roomId: string, options: { before?: string; after?: string; sceneId?: string | null; limit?: number; as?: string } = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (options.before !== undefined) q.set("before", options.before);
+    if (options.after !== undefined) q.set("after", options.after);
     if (options.sceneId) q.set("sceneId", options.sceneId);
     if (options.limit !== undefined) q.set("limit", String(options.limit));
     if (options.as !== undefined) q.set("as", options.as);
     const query = q.toString();
-    return request<LogPage>("GET", `${room(roomId)}/log${query ? `?${query}` : ""}`);
+    return request<LogPage>("GET", `${room(roomId)}/log${query ? `?${query}` : ""}`, { signal });
   },
 
   /**
@@ -569,24 +643,26 @@ export const api = {
   // Notes and the table (docs/design-v1-dm-tools.md 3.10 and 3.11).
 
   /**
-   * The evenings of the log the caller may read, newest first, and how many
-   * lines they hold. Every listing counts against the same hourly limit as
-   * an export, whatever the server had cached.
+   * The evenings of the log the caller may read, newest first, 25 to a page
+   * by default: the page before `before`, a session's `firstId` from
+   * `nextSessionsBefore`, or the newest. Every page counts against the same
+   * hourly limit as an export, whatever the server had cached.
    */
-  logSessions: (roomId: string) => request<{ sessions: LogSession[]; lines: number }>("GET", `${room(roomId)}/log/sessions`),
+  logSessions: (roomId: string, options: { before?: string; limit?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (options.before !== undefined) q.set("before", options.before);
+    if (options.limit !== undefined) q.set("limit", String(options.limit));
+    const query = q.toString();
+    return request<LogSessionPage>("GET", `${room(roomId)}/log/sessions${query ? `?${query}` : ""}`);
+  },
 
   /**
-   * The log as a Markdown file: one session (`from` and `to` from the
-   * listing, inclusive) or everything (neither), with times in `tz`, the
-   * device's IANA time zone.
+   * The log as a Markdown file, read into memory up to MAX_LOG_FILE_BYTES:
+   * one session or everything (`range`), with times in `tz`, the device's
+   * IANA time zone. Past that size it throws FileTooLargeError, and
+   * logExportUrl then serves the browser's own download.
    */
-  exportLog: (roomId: string, range: { from?: string; to?: string }, tz: string, signal?: AbortSignal) => {
-    const q = new URLSearchParams();
-    if (range.from !== undefined) q.set("from", range.from);
-    if (range.to !== undefined) q.set("to", range.to);
-    q.set("tz", tz);
-    return requestFile(`${room(roomId)}/log/export?${q.toString()}`, "log.md", signal);
-  },
+  exportLog: (roomId: string, range: LogRange, tz: string, signal?: AbortSignal) => requestFile(logExportUrl(roomId, range, tz), "log.md", signal, MAX_LOG_FILE_BYTES),
 
   /**
    * The X-card: asks the whole table to edit out what just happened, with
@@ -625,6 +701,17 @@ export function displayAssetUrl(roomId: string, assetId: AssetId, variant: Asset
 }
 
 /** A plain GET the browser downloads, so the zip streams to disk instead of into memory. */
+/** The log export's address, for the browser's own download of a file too large to read here. Each visit is another export. */
+export function logExportUrl(roomId: string, range: LogRange, tz: string): string {
+  const q = new URLSearchParams();
+  if (range.fromId !== undefined && range.toId !== undefined) {
+    q.set("fromId", range.fromId);
+    q.set("toId", range.toId);
+  }
+  q.set("tz", tz);
+  return `${room(roomId)}/log/export?${q.toString()}`;
+}
+
 export function exportUrl(roomId: string): string {
   return `${room(roomId)}/export`;
 }
