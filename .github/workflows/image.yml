@@ -16,6 +16,8 @@
 # stopped after pushing X.Y.Z can be run again to sign and finish tagging.
 # X.Y and latest move only forward, by what Docker Hub holds
 # (scripts/release-tags.ts).
+# After publication succeeds, separate jobs generate notes with read-only
+# access and create the GitHub Release without changing an existing one.
 #
 # A run on a ci/ branch that changes the image's own files, and a run
 # started by hand, do the checks and the smoke test, and never push. A change
