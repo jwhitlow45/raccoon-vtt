@@ -272,7 +272,7 @@ export function ShapePicker(props: { character: Pick<Character, "id" | "name" | 
   });
   const none = (knownIds?.length ?? 0) === 0;
   return (
-    <Dialog title="Take a shape" onClose={props.onClose} phone="fill" width="md">
+    <Dialog title="Take a shape" onClose={props.onClose} phone="fill" width="md" bodyStyle={{ scrollbarGutter: "stable" }}>
       <PickerBody>
         <Help>{`An SRD creature for ${whose(name)} token to take the shape of. The token keeps ${whose(name)} HP and conditions.`}</Help>
         {refusalLine}

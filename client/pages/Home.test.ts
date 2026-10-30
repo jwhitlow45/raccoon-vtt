@@ -69,24 +69,26 @@ describe("forgetting a saved room from Home", () => {
   }
 });
 
-test("dialog bodies reserve classic scrollbar space before their content needs to scroll", () => {
+test("dialog bodies reserve classic scrollbar space only when requested", () => {
   const before = Object.getOwnPropertyDescriptor(globalThis, "document");
   const elementBefore = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
   Object.defineProperty(globalThis, "document", { configurable: true, value: { body: { nodeType: 1 } } });
   Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: class {} });
   try {
-    for (const children of ["Short list", Array.from({ length: 100 }, (_, i) => createElement("p", { key: i }, `Creature ${i}`))]) {
-      let bodies = 0;
-      function Probe() {
-        const portal = Dialog({ title: "Take a shape", onClose() {}, children });
-        const body = elements(portal.children).find((el) => el.props.style?.overflowY === "auto");
-        assert.ok(body, "the shared scrolling body draws");
-        assert.equal(body.props.style?.scrollbarGutter, "stable");
-        bodies++;
-        return null;
+    for (const bodyStyle of [undefined, { scrollbarGutter: "stable" }]) {
+      for (const children of ["Short list", Array.from({ length: 100 }, (_, i) => createElement("p", { key: i }, `Creature ${i}`))]) {
+        let bodies = 0;
+        function Probe() {
+          const portal = Dialog({ title: "A dialog", onClose() {}, children, bodyStyle });
+          const body = elements(portal.children).find((el) => el.props.style?.overflowY === "auto");
+          assert.ok(body, "the shared scrolling body draws");
+          assert.equal(body.props.style?.scrollbarGutter, bodyStyle?.scrollbarGutter);
+          bodies++;
+          return null;
+        }
+        renderToStaticMarkup(createElement(Probe));
+        assert.equal(bodies, 1);
       }
-      renderToStaticMarkup(createElement(Probe));
-      assert.equal(bodies, 1);
     }
   } finally {
     if (before) Object.defineProperty(globalThis, "document", before);
