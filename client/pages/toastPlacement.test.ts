@@ -162,6 +162,7 @@ test("HF-41 R1: a kept notice followed by a trap and its card places the trap to
       cardsRef: { current: { getBoundingClientRect: () => ({ height: cardHeight * zoom }) } },
       colTop: top, zoom, alerts: [], rolls: null as object | null,
       summarized: false, folded: false, forFootCard: false, forRoom: false, overlay: false, rowPlace: { lift: 0 },
+      turnFolded: false, turnHidden: false,
       drawn: () => true, firstCardHeight: () => cardHeight * zoom, setFirstHeight: () => {},
       dock: { getState: () => state, setState: (patch: { column: ColumnFacts | null }) => Object.assign(state, patch) },
       columnFacts, SUMMARY_ROW: 44,
@@ -186,8 +187,32 @@ test("HF-41 R1: a kept notice followed by a trap and its card places the trap to
     assert.ok(top >= kept.bottom / zoom + EDGE);
     const settled = nextToastPlaces(placed, { ...waiting, low, recent: new Set<number>() });
     assert.deepEqual(settled.places, placed.places, "the trap toast must not move again after its card wait ends");
+    cardHeight = 44;
+    bindings.turnFolded = true;
+    measure(...Object.values(bindings));
+    assert.equal((state.column as ColumnFacts | null)?.cover, 44, "HF41-R2-1: folding remeasures the first card before ResizeObserver runs");
+    cardHeight = 0;
+    bindings.turnHidden = true;
+    measure(...Object.values(bindings));
+    assert.equal(state.column, null, "HF41-R2-1: hiding remeasures the empty column in the same frame");
     cleanUp?.();
   }
+});
+
+test("FU39-ASTRA-04 and FU39-S-2: a turn keeps its pushed top after the aged toast moves or expires", () => {
+  const input = { ids: [1], pane: null, paneStands: false, low: null, layer: true, slot: false, recent: new Set<number>() };
+  const before = nextToastPlaces(NO_TOAST_PLACES, input);
+  const top = columnTop(60, null, 112);
+  assert.equal(top, 120);
+  const moved = nextToastPlaces(before, { ...input, low: top + 55 + EDGE, turnStarted: true });
+  assert.deepEqual(moved.places.get(1), { low: 183, column: true });
+  const released = columnTop(60, null, null, top);
+  const toast = moved.places.get(1);
+  assert.ok(typeof toast === "object");
+  assert.equal(toast.low - (released + 55), 8, "reservation release must leave 8 px, not 68 px");
+  assert.equal(columnTop(60, null, null, top), top, "an older toast timing out cannot move a live card");
+  assert.equal(columnTop(60, null, 140, top), 148, "a taller kept toast still clears the card");
+  assert.equal(columnTop(60, null, null, null), 60, "an empty column releases the held top");
 });
 
 test("FU39-B: the room publishes visible spanning toasts and the column uses only the kept foot", () => {
@@ -218,7 +243,10 @@ test("FU39-B: the room publishes visible spanning toasts and the column uses onl
     const measure = () => publish(...Object.values(bindings));
     measure();
     assert.ok(state.mapToasts, "the room must publish clearance before the first card is placed");
-    const top = new Function("laneTop", "lasting", "mapToasts", "columnTop", `${colLine}\nreturn colTop;`)(60, null, state.mapToasts, columnTop) as number;
+    const placeColumn: (...args: unknown[]) => number = new Function("laneTop", "lasting", "mapToasts", "columnTop", "cardsWaiting", "heldTop", `${colLine}\nreturn colTop;`) as (...args: unknown[]) => number;
+    const top = placeColumn(60, null, state.mapToasts, columnTop, true, { current: null }) as number;
+    assert.equal(placeColumn(60, null, null, columnTop, true, { current: 120 }), 120, "the mounted column keeps its latched top when the toast leaves");
+    assert.equal(placeColumn(60, null, null, columnTop, false, { current: 120 }), 60, "an empty column ignores the latch");
     assert.ok(Math.abs(top - 120) < 1e-9, "the real column must clear the kept toast without reserving the waiting toast");
     const rulesBindings = {
       usual: { left: 12, right: 378, top: 160 * zoom, height: 44 * zoom },

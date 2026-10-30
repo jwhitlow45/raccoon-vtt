@@ -597,8 +597,31 @@ function FightAlerts() {
   const barSummary = useDockSummary("bar");
   const roomSummary = useDockSummary("room");
   const rolls = useAlertsSummaryEntry();
+  /*
+   * The turn card (docs/design-v1-combat-controls.md 4.2) folds to its 44 px
+   * row under 600 px wide, and wherever the card unfolded would not stack
+   * above a bar that shares the lane. It is drawn last and is never the
+   * column's first card to the bar (firstCard skips it), so a turn card
+   * alone never forces the summary row or moves the bar, and with other
+   * cards it folds or is cut below them. Where even its row would meet the bar, a
+   * card alone is left out of the column, and the same uses stay in the
+   * row's options and the bar. Its unfolded height is the last one drawn,
+   * measured while it shows unfolded.
+   */
+  const turnRef = useRef<HTMLElement | null>(null);
+  const turnOpenHeight = useRef(0);
+  const [turnFit, setTurnFit] = useState<"open" | "folded" | "hidden">("open");
+  const narrow = width < DOCK_MIN_WIDTH;
+  const turnShown = combat.turn !== null && local.shown.has(combat.turn.id);
+  const turnFolded = !turnShown && (narrow || turnFit !== "open");
+  const turnHidden = !turnShown && turnFit === "hidden";
   const laneTop = chrome ? chrome.top + EDGE : null;
-  const colTop = laneTop === null ? null : columnTop(laneTop, lasting, mapToasts?.keptBottom ?? null);
+  const cardsWaiting = alerts.some((a) => a.kind !== "turn" || !turnHidden) || (!footRolls && rolls !== null);
+  const heldTop = useRef<number | null>(null);
+  const colTop = laneTop === null ? null : columnTop(laneTop, lasting, mapToasts?.keptBottom ?? null, cardsWaiting ? heldTop.current : null);
+  useLayoutEffect(() => {
+    heldTop.current = cardsWaiting ? colTop : null;
+  }, [cardsWaiting, colTop]);
   const push = laneTop !== null && colTop !== null ? colTop - laneTop : 0;
   // A roll card folded at the screen's foot, for a compact bar or a screen too short for it, needs the row to stand for it, room or not (PlayerRolls.tsx).
   const forFootCard = !folded && footYields && barSummary !== null;
@@ -863,27 +886,9 @@ function FightAlerts() {
     const observer = new ResizeObserver(measure);
     observer.observe(cards);
     return () => observer.disconnect();
-  }, [dock, colTop, zoom, alerts, rolls, summarized, folded, forFootCard, forRoom, overlay, rowPlace.lift]);
+  }, [dock, colTop, zoom, alerts, rolls, summarized, folded, forFootCard, forRoom, overlay, rowPlace.lift, turnFolded, turnHidden]);
   useLayoutEffect(() => () => dock.setState({ column: null }), [dock]);
 
-  /*
-   * The turn card (docs/design-v1-combat-controls.md 4.2) folds to its 44 px
-   * row under 600 px wide, and wherever the card unfolded would not stack
-   * above a bar that shares the lane. It is drawn last and is never the
-   * column's first card to the bar (firstCard skips it), so a turn card
-   * alone never forces the summary row or moves the bar, and with other
-   * cards it folds or is cut below them. Where even its row would meet the bar, a
-   * card alone is left out of the column, and the same uses stay in the
-   * row's options and the bar. Its unfolded height is the last one drawn,
-   * measured while it shows unfolded.
-   */
-  const turnRef = useRef<HTMLElement | null>(null);
-  const turnOpenHeight = useRef(0);
-  const [turnFit, setTurnFit] = useState<"open" | "folded" | "hidden">("open");
-  const narrow = width < DOCK_MIN_WIDTH;
-  const turnShown = combat.turn !== null && local.shown.has(combat.turn.id);
-  const turnFolded = !turnShown && (narrow || turnFit !== "open");
-  const turnHidden = !turnShown && turnFit === "hidden";
   useLayoutEffect(() => {
     const cards = cardsRef.current;
     if (!combat.turn || !cards || summarized || folded || overlay) return;

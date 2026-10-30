@@ -1762,9 +1762,9 @@ export function fitToasts(stack: readonly { id: number; height: number; action: 
   return { drop, scrolls: total > room + 0.5 };
 }
 
-/** The column clears lasting notices and toasts staying above it. Toasts awaiting its card reserve no space. */
-export function columnTop(laneTop: number, lastingBottom: number | null, toastBottom: number | null = null): number {
-  return Math.max(laneTop, lastingBottom === null ? laneTop : lastingBottom + EDGE, toastBottom === null ? laneTop : toastBottom + EDGE);
+/** The column clears kept toasts and holds its pushed top until no card remains, so expiry cannot move a button under a finger. */
+export function columnTop(laneTop: number, lastingBottom: number | null, toastBottom: number | null = null, heldTop: number | null = null): number {
+  return Math.max(laneTop, lastingBottom === null ? laneTop : lastingBottom + EDGE, toastBottom === null ? laneTop : toastBottom + EDGE, heldTop ?? laneTop);
 }
 
 // ------------------------------------------------------------ the Room's slot
