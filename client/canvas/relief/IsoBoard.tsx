@@ -40,7 +40,8 @@ import { MapContent, useReadableMap, type DrawnMap } from "../layers/MapLayer.ts
 import { RemoteDrags, type EasedDrags, type IsoGhost } from "../RemoteDrags.tsx";
 import { DragMarks } from "../DragMarks.tsx";
 import { useBoardText, type BoardTextInput, type TokenText } from "../useBoardText.ts";
-import { decorPlace, mapLabelInk, viewPill } from "./isoText.ts";
+import { decorPlace, IsoNamesContext, isoTokenBoxes, mapLabelInk, tokenLayoutPills, viewPill } from "./isoText.ts";
+import { boardPillsSlot } from "../boardView.ts";
 import { useDraggedIds } from "../draggedIds.ts";
 import type { IsoToken } from "../TokenNode.tsx";
 import { groupWalls, meets, ReliefIndex, type DrawPiece, type Item, type StandeeIn } from "./buckets.ts";
@@ -485,12 +486,17 @@ function IsoBoardImpl(props: IsoBoardProps) {
   const flatGround = useCallback((t: ViewToken) => drawnFootprintGround(src, occupiedRange(grid, t)) / feet, [src, grid, feet]);
   const flatIsoOf = useMemo(() => (flatCache.current = flatPressTokens(flatCache.current, flat, turn, flatGround, groundAt)), [flat, turn, flatGround, groundAt]);
   const placeOf = useCallback((t: ViewToken) => decorPlace(isometric(turn), t, frames.get(t.id), flatGround(t)), [turn, frames, flatGround]);
-  const viewPills = useMemo(() => props.text.pills.map((p) => viewPill(p, isometric(turn), groundAt)), [props.text.pills, turn, groundAt]);
+  const publishedPills = useTreeShownStore(useScoped(boardPillsSlot), (s) => s.pills);
+  // Area and trap names read this layout. They cannot also be its inputs.
+  const fixedPillsKey = JSON.stringify(tokenLayoutPills(publishedPills));
+  const fixedPills = useMemo(() => tokenLayoutPills(publishedPills), [fixedPillsKey]);
+  const viewPills = useMemo(() => fixedPills.map((p) => viewPill(p, isometric(turn), groundAt)), [fixedPills, turn, groundAt]);
   const labelInk = useMemo(
     () => labels.map((l) => mapLabelInk(l, isometric(turn), uprightIds.has(l.id), groundAt, measureLabel)),
     [labels, uprightIds, turn, groundAt, fontEpoch],
   );
   const isoText = useBoardText({ ...props.text, tokens: hidden ? NO_TOKENS : props.tokens, scale: cam.scale, pills: viewPills, mapLabels: labelInk, place: placeOf });
+  const names = useMemo(() => ({ view, ground: groundAt, boxes: isoTokenBoxes(hidden ? NO_TOKENS : props.tokens, isoText, cam.scale, placeOf) }), [view, groundAt, hidden, props.tokens, isoText, cam.scale, placeOf]);
   const onText = props.onText;
   useLayoutEffect(() => {
     if (!hidden) onText(isoText);
@@ -532,6 +538,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
     <div style={{ position: "absolute", inset: 0, pointerEvents: hidden ? "none" : undefined }} aria-hidden={hidden || undefined}>
       <TreeShownContext.Provider value={!hidden}>
       <IsoAreasContext.Provider value={isoAreas}>
+      <IsoNamesContext.Provider value={names}>
         <Stage
           key={`ground:${props.stageKey}`}
           ref={groundStageRef}
@@ -634,6 +641,7 @@ function IsoBoardImpl(props: IsoBoardProps) {
           <AimProbe settings={settings} chunks={chunks} liveGround={liveGround} scene={scene} fog={fog} aimMoving={aimMoving} tool={areaTool} draft={draft} selectedId={selectedArea} live={areaLive} templates={templates} role={props.role} youId={youId} casts={casts} onAim={setAim} />
         ) : null}
         {!hidden ? <Loading text="Building area shapes…" active={volumesNow?.waiting === true} style={buildingStyle(props.insets)} /> : null}
+      </IsoNamesContext.Provider>
       </IsoAreasContext.Provider>
       </TreeShownContext.Provider>
     </div>

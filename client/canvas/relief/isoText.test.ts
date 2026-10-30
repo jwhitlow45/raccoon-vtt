@@ -5,11 +5,13 @@ import { actor, token } from "#shared/testutil.ts";
 import { labelShape } from "../../features/builder/labelShape.ts";
 import { overlaps, type Box } from "../../lib/boardText.ts";
 import type { ViewToken } from "../../lib/scene.ts";
-import { isometric, toView, type Turn } from "../../lib/view.ts";
+import { isometric, toView, toWorld, type Turn } from "../../lib/view.ts";
+import { pillPlace, pillReach } from "../../features/measure/pillPlace.ts";
+import { tokenBoxes as topDownBoxes } from "../../features/areas/labelSpot.ts";
 import { standeeShape } from "./standee.ts";
 
 const { layoutBoardText } = await import("../useBoardText.ts");
-const { decorPlace, mapLabelInk, viewPill } = await import("./isoText.ts");
+const { decorPlace, isoTokenBoxes, isoNamePill, tokenLayoutPills, mapLabelInk, viewPill } = await import("./isoText.ts");
 const { measureLabel } = await import("../../features/builder/draw.ts");
 
 before(() => {
@@ -130,4 +132,55 @@ describe("token labels in Isometric lay out in view space (docs/design-v1-isomet
     assert.deepEqual({ x: moved.x, y: moved.y }, { x: v.x, y: v.y });
     assert.equal(moved.value, "15 ft");
   });
+});
+
+
+test("ISO34-LABELS: area and trap names avoid the raised token's actual label at every turn and viewport edge", () => {
+  for (const turn of [0, 1, 2, 3] as Turn[]) {
+    const view = isometric(turn);
+    const t = token("raised", { x: 6, y: 6, name: "Raised goblin" }) as ViewToken;
+    const shape = standeeShape(turn, { x: t.x, y: t.y, w: 1, h: 1 }, 4, 0, SCALE, 900);
+    const place = () => decorPlace(view, t, shape);
+    const text = layout([t], place);
+    const label = text.get(t.id)!.label!;
+    const at = place();
+    const ink = { x0: at.x + label.x / SCALE, y0: at.y + label.y / SCALE, x1: at.x + (label.x + label.width) / SCALE, y1: at.y + (label.y + label.height) / SCALE };
+    const boxes = isoTokenBoxes([t], text, SCALE, place);
+    assert.ok(boxes.some((b) => Math.abs(b.x0 - ink.x0) < 1e-9 && Math.abs(b.y1 - ink.y1) < 1e-9));
+    const point = toWorld(view, toView({ kind: "topDown" }, { x: (ink.x0 + ink.x1) / 2, y: ink.y1 }));
+    for (const name of ["Fireball", "Poison trap"]) {
+      const original = { ...point, name, size: "map" as const, small: true, above: true };
+      const clearPoint = toWorld(view, toView({ kind: "topDown" }, { x: (ink.x0 + ink.x1) / 2, y: ink.y1 + 2 }));
+      const clear = { ...original, ...clearPoint };
+      assert.ok(topDownBoxes([t], SCALE, measureLabel).every((b) => !overlaps(b, pillReach({ ...original, scale: SCALE }))), "Top-down's token boxes miss the raised name collision");
+      assert.ok(overlaps(pillReach({ ...viewPill(original, view, () => 0), scale: SCALE }), ink));
+      const chosen = isoNamePill([original, clear], { view, ground: () => 0, boxes }, SCALE);
+      for (const viewport of [null, { x0: ink.x0, x1: ink.x0 + 5, y0: ink.y0 - 4, y1: ink.y1 + 4 }, { x0: ink.x1 - 5, x1: ink.x1, y0: ink.y0 - 4, y1: ink.y1 + 4 }]) {
+        const box = pillPlace({ ...viewPill(chosen, view, () => 0), scale: SCALE }, viewport).box;
+        assert.ok(boxes.every((b) => !overlaps(box, b)), `turn ${turn} ${name}: the placed pill overlaps actual token text`);
+      }
+      assert.equal(isoNamePill([original, clear], { view, ground: () => 0, boxes }, SCALE, () => false), original, "with no allowed standing candidate, retain the original flat pill");
+    }
+  }
+});
+
+test("ISO34-LABELS: token layout ignores area and trap publications so moving names cannot move token labels", () => {
+  const pill = { x: 1, y: 2, name: "Name", size: "map" as const };
+  assert.deepEqual(tokenLayoutPills({ "area:a": [pill], "trap:t": [pill], "move:t": [pill] }), [pill]);
+});
+
+test("ISO34-LABELS: a centered pill must also clear the token label after sliding at the viewport edge", () => {
+  const view = isometric(0);
+  const anchor = toWorld(view, toView({ kind: "topDown" }, { x: 0, y: 0 }));
+  const original = { ...anchor, name: "Long name", size: "map" as const, above: true, small: true };
+  const projected = viewPill(original, view, () => 0);
+  const centered = pillPlace({ ...projected, scale: SCALE }, null).box;
+  const reach = pillReach({ ...projected, scale: SCALE });
+  const obstacle = { x0: centered.x1 + 0.02, x1: reach.x1, y0: centered.y0, y1: centered.y1 };
+  const edge = { x0: 0, x1: 5, y0: -5, y1: 5 };
+  assert.ok(!overlaps(centered, obstacle));
+  assert.ok(overlaps(pillPlace({ ...projected, scale: SCALE }, edge).box, obstacle));
+  const far = toWorld(view, toView({ kind: "topDown" }, { x: 0, y: 2 }));
+  const chosen = isoNamePill([original, { ...original, ...far }], { view, ground: () => 0, boxes: [obstacle] }, SCALE);
+  assert.ok(!overlaps(pillPlace({ ...viewPill(chosen, view, () => 0), scale: SCALE }, edge).box, obstacle));
 });

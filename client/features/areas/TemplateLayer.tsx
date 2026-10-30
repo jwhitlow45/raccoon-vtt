@@ -3,13 +3,14 @@ import { Group } from "react-konva";
 import type { AreaTemplate, RoomState, Token } from "#shared/model.ts";
 import type { AreaContext } from "#shared/rules/aoe.ts";
 import type { LayerProps } from "../layers.ts";
-import { useBoardPillsExcept, usePublishPills } from "../../canvas/boardView.ts";
+import { useBoardPillsExcept, usePublishPills, type PillSpec } from "../../canvas/boardView.ts";
 import { useDraggedIds } from "../../canvas/draggedIds.ts";
 import { Lift, MarkPill } from "../../canvas/IsoParts.tsx";
 import { drawsHere } from "../../canvas/isoPlace.ts";
 import { pillStands } from "../../canvas/markStand.ts";
 import { measureLabel } from "../../canvas/measureText.ts";
 import type { FogView } from "../../canvas/relief/fogView.ts";
+import { IsoNamesContext, isoNamePill } from "../../canvas/relief/isoText.ts";
 import { useIsoGround, useTreeShownStore, useTreeShownView } from "../../canvas/relief/context.ts";
 import type { VolumeWorld } from "../../canvas/relief/volumes.ts";
 import { useViewerFog } from "../../canvas/viewerFog.ts";
@@ -121,6 +122,7 @@ export function useAreaParts(
 ): {
   ctx: AreaContext;
   avoid: readonly Box[];
+  otherPills: readonly PillSpec[];
   fogged: ((cx: number, cy: number) => boolean) | undefined;
 } | null {
   const { scene, scale, role, fog } = props;
@@ -149,18 +151,19 @@ export function useAreaParts(
    * area pills either, so no two pills chase each other.
    */
   const others = useBoardPillsExcept("area:");
+  const names = useContext(IsoNamesContext);
   const avoid = useMemo(
     () => [
-      ...tokenBoxes(Object.values(tokens).filter((t) => !!t && t.sceneId === scene.id), scale, measureLabel),
+      ...(names ? [] : tokenBoxes(Object.values(tokens).filter((t) => !!t && t.sceneId === scene.id), scale, measureLabel)),
       // Each where the view could slide it (Pill.tsx pillReach), so a name never lands on a trap's name slid in from the edge.
       ...others.map((spec) => pillReach({ ...spec, scale })),
     ],
-    [tokens, scene.id, scale, others],
+    [tokens, scene.id, scale, others, names],
   );
   // A player's names keep off the opaque fog as well, which would cut them off. The DM sees through it.
   const fogTiles = useTreeShownView((s) => s.view?.fogTiles ?? EMPTY_TILES);
   const fogged = useMemo(() => (role === "player" && fog ? foggedCells(fogTiles, scene.id, scene.bounds) : undefined), [role, fog, fogTiles, scene.id, scene.bounds]);
-  return useMemo(() => (ctx ? { ctx, avoid, fogged } : null), [ctx, avoid, fogged]);
+  return useMemo(() => (ctx ? { ctx, avoid, fogged, otherPills: others } : null), [ctx, avoid, fogged, others]);
 }
 
 function withoutTokens(tokens: Readonly<Record<string, Token | undefined>>, hide: ReadonlySet<string>): Record<string, Token> {
@@ -226,6 +229,7 @@ export const PlacedArea = memo(function PlacedArea(props: {
   sceneId: string;
   dm: boolean;
   avoid: readonly Box[];
+  otherPills?: readonly PillSpec[];
   fogged: ((cx: number, cy: number) => boolean) | undefined;
   mode: AreaMode;
   /** This viewer's fog for the stand rule, in Isometric. */
@@ -254,11 +258,20 @@ export const PlacedArea = memo(function PlacedArea(props: {
   });
   const above = spot.place === "above";
   const maxLines: 1 | 2 = spot.oneLine ? 1 : 2;
-  const spec = useMemo(
-    () => ({ x: spot.x, y: spot.y, name, size: "map" as const, small: true, maxLines, above, below: !above }),
-    [spot.x, spot.y, name, maxLines, above],
-  );
-  // Token labels keep off the name (useBoardText.ts). Every place it draws in publishes the same pill under its one key.
+  const names = useContext(IsoNamesContext);
+  const spec = useMemo(() => {
+    const original = { x: spot.x, y: spot.y, name, size: "map" as const, small: true, maxLines, above, below: !above };
+    const allowed = (p: PillSpec) => !props.fog || pillStands(props.fog, { ...p, scale });
+    if (!names || !outline || !allowed(original)) return original;
+    const candidates: PillSpec[] = [original];
+    for (const lines of [maxLines, 1] as const) {
+      for (const f of [0, -0.25, 0.25, -0.5, 0.5, -0.75, 0.75, -1, 1]) {
+        for (const side of ["top", "bottom"] as const) candidates.push({ ...original, ...outlineEdge(outline, f * outlineReach(outline), side), maxLines: lines, above: side === "top", below: side === "bottom" });
+      }
+    }
+    return isoNamePill(candidates, names, scale, allowed, props.otherPills);
+  }, [spot.x, spot.y, name, maxLines, above, names, outline, props.fog, props.otherPills, scale]);
+  // Top-down's tokens avoid this pill. Isometric's pill avoids its tokens.
   usePublishPills(`area:${t.id}`, useMemo(() => [spec], [spec]));
   const iso = useIsoGround();
   // The rings the board draws at standees' bases are not drawn here too.

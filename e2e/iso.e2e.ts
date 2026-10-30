@@ -1503,6 +1503,61 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
     for (const k of crowd) await ops.send({ t: "token.delete", tokenId: k.id });
   });
 
+  test("FU40-B ISO34-LABELS: area and trap names clear a raised token's drawn name at every turn", async () => {
+    const raised = randomUUID();
+    await ops.send(tokenOp(raised, { kind: "monster", name: "Raised", x: 10, y: 10, elevation: 20, disposition: "hostile" }));
+    const readNames = async () => dm.evaluate(() => {
+      type Rect = { x: number; y: number; width: number; height: number };
+      type Text = { text(): string; isVisible(): boolean; getClientRect(): Rect; getParent(): { getClientRect(): Rect; getClassName(): string } };
+      type Stage = { width(): number; listening(): boolean; x(): number; y(): number; scaleX(): number; getLayers(): { find(s: string): Text[] }[] };
+      const main = (globalThis as unknown as { Konva: { stages: Stage[] } }).Konva.stages.find((s) => s.width() > 0 && s.listening());
+      if (!main) return null;
+      const names = main.getLayers()[2]?.find("Text").filter((n) => n.isVisible() && ["Raised", "Area name", "Wire trap"].includes(n.text())).map((n) => ({ name: n.text(), box: n.getParent().getClassName() === "Label" ? n.getParent().getClientRect() : n.getClientRect() }));
+      return { names: names ?? [], x: main.x(), y: main.y(), scale: main.scaleX() };
+    });
+    try {
+      for (const turn of [0, 1, 2, 3] as const) {
+        await isoOn(dm, turn);
+        const before = await waitFor("the raised token's name", async () => {
+          const seen = await readNames();
+          return seen?.names.some((n) => n.name === "Raised") ? seen : null;
+        });
+        const box = before.names.find((n) => n.name === "Raised")!.box;
+        const point = toWorld(isometric(turn), { x: (box.x + box.width / 2 - before.x) / before.scale, y: (box.y + box.height - before.y) / before.scale } as ViewPoint);
+        const areaId = randomUUID();
+        const trapId = randomUUID().replaceAll("-", "").slice(0, 16);
+        try {
+          await ops.send({ t: "template.create", template: { id: areaId, sceneId: run.sceneId, shape: "sphere", size: 5, origin: { x: point.x, y: point.y + 1, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: dmSocket.you!.memberId, visibility: "all", label: "Area name" } });
+          const x = Math.round(point.x);
+          const y = Math.round(point.y);
+          await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Wire trap", zone: { wire: { a: [x - 1, y], b: [x + 1, y] } }, rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } } });
+          await waitFor("all three placed names", async () => {
+            const value = await readNames();
+            return value?.names.length === 3 ? value : null;
+          });
+          await dm.evaluate(() => new Promise<void>((resolve) => {
+            const w = globalThis as unknown as { requestAnimationFrame(cb: () => void): void };
+            w.requestAnimationFrame(() => w.requestAnimationFrame(resolve));
+          }));
+          const seen = (await readNames())!;
+          const tokenName = seen.names.find((n) => n.name === "Raised")!.box;
+          for (const name of seen.names.filter((n) => n.name !== "Raised")) {
+            const a = name.box;
+            const b = tokenName;
+            assert.ok(a.x + a.width <= b.x + 1 || b.x + b.width <= a.x + 1 || a.y + a.height <= b.y + 1 || b.y + b.height <= a.y + 1, `turn ${turn}: ${name.name} overlaps the raised name`);
+          }
+          await shots.take(dm, `fu40-b-iso-labels-turn-${turn}`);
+        } finally {
+          await ops.send({ t: "template.delete", templateId: areaId });
+          await ops.send({ t: "trap.delete", trapId });
+          await waitFor("the temporary names removed", async () => (await readNames())?.names.length === 1);
+        }
+      }
+    } finally {
+      await ops.send({ t: "token.delete", tokenId: raised });
+    }
+  });
+
   test("ISO-47. a creature lying flat for Pat on a seen 10 ft top takes a press where its picture lies, up on the top", async () => {
     await pat.bringToFront();
     const lurker = randomUUID();

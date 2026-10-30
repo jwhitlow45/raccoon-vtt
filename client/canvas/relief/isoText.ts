@@ -1,4 +1,5 @@
 import type { Label } from "#shared/model.ts";
+import { createContext } from "react";
 import type { MeasureText } from "#shared/rules/labels.ts";
 import { LABEL_INK, labelInkBox, labelShape } from "../../features/builder/labelShape.ts";
 import type { Box } from "../../lib/boardText.ts";
@@ -6,6 +7,47 @@ import { footprint, type ViewToken } from "../../lib/scene.ts";
 import { toView, type View } from "../../lib/view.ts";
 import type { PillSpec } from "../boardView.ts";
 import type { VBox } from "./pieces.ts";
+import { placedTextBoxes } from "../textBoxes.ts";
+import type { TokenText } from "../useBoardText.ts";
+import { pillReach } from "../../features/measure/pillPlace.ts";
+
+/** Names place after token text in Isometric. Keeping this one way avoids two labels chasing each other. */
+export type IsoNames = { view: View; ground: (x: number, y: number) => number; boxes: readonly Box[] };
+export const IsoNamesContext = createContext<IsoNames | null>(null);
+
+export function tokenLayoutPills(pills: Readonly<Record<string, readonly PillSpec[]>>): PillSpec[] {
+  return Object.entries(pills).flatMap(([key, list]) => key.startsWith("area:") || key.startsWith("trap:") ? [] : list);
+}
+
+/** Actual frames, rings, marks and placed text, in the same view units as standing names. */
+export function isoTokenBoxes(tokens: readonly ViewToken[], text: ReadonlyMap<string, TokenText>, scale: number, place: (t: ViewToken) => { x: number; y: number; ring?: Box }): Box[] {
+  const placed = tokens.map((t) => ({ ...t, ...place(t) }));
+  return [
+    ...placed.flatMap((t) => {
+      const fp = footprint(t);
+      return [{ x0: t.x, y0: t.y, x1: t.x + fp.w, y1: t.y + fp.h }, ...(t.ring ? [t.ring] : [])];
+    }),
+    ...placedTextBoxes(placed, text, scale).map((b) => ({ x0: b.x0 / scale, y0: b.y0 / scale, x1: b.x1 / scale, y1: b.y1 / scale })),
+  ];
+}
+
+/** Candidates stay in world cells for the stand rule. Their costs use the upright pill's complete viewport-slide reach. */
+export function isoNamePill(candidates: readonly PillSpec[], layout: IsoNames, scale: number, allowed: (p: PillSpec) => boolean = () => true, others: readonly PillSpec[] = []): PillSpec {
+  const boxes = [...layout.boxes, ...others.map((p) => pillReach({ ...viewPill(p, layout.view, layout.ground), scale }))];
+  let best = candidates[0]!;
+  let cost = Infinity;
+  for (const candidate of candidates) {
+    if (!allowed(candidate)) continue;
+    const box = pillReach({ ...viewPill(candidate, layout.view, layout.ground), scale });
+    const overlap = boxes.reduce((sum, b) => sum + Math.max(0, Math.min(box.x1, b.x1) - Math.max(box.x0, b.x0)) * Math.max(0, Math.min(box.y1, b.y1) - Math.max(box.y0, b.y0)), 0);
+    if (overlap < cost) {
+      best = candidate;
+      cost = overlap;
+    }
+    if (cost === 0) break;
+  }
+  return best;
+}
 
 /**
  * What the token label layout (useBoardText.ts) reads in the isometric view,
