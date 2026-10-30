@@ -232,8 +232,13 @@ class Finger {
 
   /** A failed assertion must not leave a touch held across the next test's navigation. */
   async cancel(): Promise<void> {
-    await this.cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
-    fingersDown.delete(this);
+    try {
+      await this.cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+    } catch {
+      // A closed page or session must not hide the test's original failure.
+    } finally {
+      fingersDown.delete(this);
+    }
   }
 }
 
@@ -1811,7 +1816,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
       const pill = sheet.locator("[data-sheet-grabber]");
       const colors = await systemColors(player);
       const duration = await pill.evaluate((el) => parseFloat((globalThis as unknown as Win).getComputedStyle(el as unknown as El).transitionDuration ?? ""));
-      assert.ok(duration <= 0.00001, `the glow still fades over ${duration} s`);
+      assert.ok(duration <= 0.00001, `the color still fades over ${duration} s`);
       const finger = new Finger(playerCdp, player);
       await finger.down(await headerPoint(sheet));
       // Read in the frame after the press: no fade to wait for.
@@ -1866,7 +1871,7 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     }
   });
 
-  test("fl8-unsaved. unsaved input follows at half and caps the pull at half, then keeps the draft on release and cancel", async () => {
+  test("fl8-unsaved. unsaved input caps closing pull at half, fills toward full screen and normal, and keeps the draft on release and cancel", async () => {
     await setUp(player, { width: 390, height: 844, scale: 1 });
     const sheet = await openPanel(player, "Log");
     const box = await steadyRect(sheet);
@@ -1895,6 +1900,29 @@ describe("raccoon-vtt: swipe a phone's bottom sheet", { timeout: 1_500_000 }, ()
     await expectGrabberRest(sheet);
     await finger.up();
     assert.equal(await settled(sheet), "rest");
+    assert.equal(await message.inputValue(), "FL-8 unsent message");
+    // A draft blocks closing, but expanding and stepping back down remain permitted.
+    const normal = await steadyRect(sheet);
+    const step = stepOf(normal.top);
+    await finger.down(await headerPoint(sheet));
+    await finger.drag(-(16 + step * 0.5));
+    await checkPull(sheet, 0.5);
+    await finger.drag(step * -0.55);
+    await checkPull(sheet, 1);
+    await finger.rest(120);
+    await finger.up();
+    await waitFor("FL-8: the unsaved sheet to fill the screen", async () => (await sheet.getAttribute("aria-modal")) === "true" || null, 3_000);
+    assert.equal(await settled(sheet), "rest");
+    await expectGrabberRest(sheet);
+    assert.equal(await message.inputValue(), "FL-8 unsent message");
+    await finger.down(await headerPoint(sheet));
+    await finger.drag(8 + step * 1.05);
+    await checkPull(sheet, 1);
+    await finger.rest(120);
+    await finger.up();
+    await waitFor("FL-8: the unsaved sheet to return to normal", async () => (await sheet.getAttribute("aria-modal")) === null || null, 3_000);
+    assert.equal(await settled(sheet), "rest");
+    await expectGrabberRest(sheet);
     assert.equal(await message.inputValue(), "FL-8 unsent message");
     await message.fill("");
     await message.blur();
@@ -1971,7 +1999,7 @@ function mixedGrabberColor(page: Page, pull: number): Promise<string> {
   }, pull);
 }
 
-function grabberLook(surface: Locator): Promise<{ color: string; matrix: number[]; pull: number; property: string; duration: string }> {
+function grabberLook(surface: Locator): Promise<{ color: string; matrix: number[]; pull: number; property: string; duration: string; surfaceVars: string[] }> {
   return surface.evaluate((el) => {
     const g = globalThis as unknown as Win;
     const node = el as unknown as El;
@@ -1980,8 +2008,10 @@ function grabberLook(surface: Locator): Promise<{ color: string; matrix: number[
     const style = g.getComputedStyle(drawing);
     const transform = style.transform ?? "";
     const matrix = transform === "none" ? [1, 0, 0, 1, 0, 0] : (transform.match(/^matrix\(([^)]+)\)$/)?.[1] ?? "").split(",").map(Number);
-    const props = (el as unknown as { style: { getPropertyValue(name: string): string } }).style;
-    return { color: style.color ?? "", matrix, pull: Number(props.getPropertyValue("--rvtt-grabber-pull")), property: style.transitionProperty ?? "", duration: style.transitionDuration ?? "" };
+    const props = (drawing as unknown as { style: { getPropertyValue(name: string): string } }).style;
+    const outerProps = (el as unknown as { style: { getPropertyValue(name: string): string } }).style;
+    const surfaceVars = ["--rvtt-grabber-held", "--rvtt-grabber-pull", "--rvtt-grabber-stretch", "--rvtt-grabber-transition"].filter((name) => outerProps.getPropertyValue(name) !== "");
+    return { color: style.color ?? "", matrix, pull: Number(props.getPropertyValue("--rvtt-grabber-pull")), property: style.transitionProperty ?? "", duration: style.transitionDuration ?? "", surfaceVars };
   });
 }
 
@@ -1994,6 +2024,7 @@ async function checkPull(surface: Locator, expected: number, reduced = false): P
   });
   assert.equal(look.color, await mixedGrabberColor(surface.page(), look.pull), `FL-8: wrong mix at pull ${look.pull}`);
   assert.equal(look.property, "none", "FL-8: a transition trails the finger");
+  assert.deepEqual(look.surfaceVars, [], "FL-8: the sheet's content inherits changing grabber properties");
   const stretch = reduced ? 0 : look.pull;
   const matrix = [1 + 0.4 * stretch, 0, 0, 1 - 0.25 * stretch, 0, 0];
   assert.equal(look.matrix.length, 6, "FL-8: the drawing has no valid scale transform");

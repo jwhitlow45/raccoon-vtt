@@ -1055,7 +1055,8 @@ describe("12. randomized touches, from both stands", () => {
           // The glow follows the machine's own hold: on from a claim until the touch stops, never for a control's tap or a touch that may not swipe.
           assert.equal(page.heldOn, session.touch.holding, `${where}: the host's glow differs from the hold`);
           const pull = session.touch.pull;
-          assert.ok(pull >= 0 && pull <= (unsavedAtClaim ? 0.5 : 1), `${where}: pull escaped its bounds`);
+          const closing = s.stand === "normal" && session.touch.position > 0;
+          assert.ok(pull >= 0 && pull <= (unsavedAtClaim && closing ? 0.5 : 1), `${where}: pull escaped its bounds`);
           if (session.touch.phase !== "claimed") assert.equal(pull, 0, `${where}: an inactive touch has pull`);
           if (!followed || stopped) assert.equal(page.heldOn, false, `${where}: held by a touch that may not swipe, or one stopped`);
           else if (claimedAt !== null) assert.equal(page.heldOn, true, `${where}: a claimed touch not held`);
@@ -1190,7 +1191,7 @@ describe("FL-8. pull toward the next stand", () => {
     near(swipePull({ stand: "full", position: -350, closeAt: 400, up: 300, scale: 1, unsaved: false }), 0);
   });
 
-  test("unsaved resistance uses the shown position, and caps every direction at half", () => {
+  test("unsaved resistance uses the shown position, and caps only pulls toward closing at half", () => {
     const touch = new SheetSwipe();
     touch.start(start({ up: 200 }));
     touch.move({ dx: 0, dy: 108, at: 30, cancelable: true });
@@ -1201,8 +1202,32 @@ describe("FL-8. pull toward the next stand", () => {
       near(touch.pull, 0.5);
     }
     touch.move({ dx: 0, dy: -200, at: 90, cancelable: true });
-    near(touch.pull, 0.5, "the unsaved cap also applies toward full");
-    near(swipePull({ stand: "full", position: 0, closeAt: 400, up: 200, scale: 1, unsaved: true }), 0.5);
+    near(touch.pull, 1, "unsaved input still allows full screen");
+    touch.move({ dx: 0, dy: 408, at: 120, cancelable: true });
+    near(touch.pull, 0.5, "reversing toward closing restores the cap");
+  });
+
+  test("unsaved input reaches full pull at either permitted stand, including a step down beyond normal", () => {
+    for (const scale of [1, 1.3]) {
+      for (const up of [80, 200]) {
+        for (const share of [0, 0.25, 0.5, 1, 2, 3]) {
+          const distance = Math.max(up / 2, 44 * scale) * share;
+          near(swipePull({ stand: "normal", position: -distance, closeAt: 400, up, scale, unsaved: true }), Math.min(1, share));
+          near(swipePull({ stand: "full", position: -up + distance, closeAt: 400, up, scale, unsaved: true }), Math.min(1, share));
+        }
+      }
+    }
+    const touch = new SheetSwipe();
+    touch.start(start({ up: 200 }));
+    touch.move({ dx: 0, dy: -116, at: 30, cancelable: true });
+    touch.claimed(true);
+    near(touch.pull, 1);
+    assert.equal(touch.end(160).end, "full", "full pull must agree with a slow release toward full");
+    touch.start(start({ stand: "full", up: 200 }));
+    touch.move({ dx: 0, dy: 108, at: 30, cancelable: true });
+    touch.claimed(true);
+    near(touch.pull, 1);
+    assert.equal(touch.end(160).end, "normal", "full pull must agree with the permitted step down");
   });
 
   test("holding without moving, a reversal, cancel and a new touch never retain pull", () => {

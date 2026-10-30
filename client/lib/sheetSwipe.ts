@@ -362,7 +362,8 @@ export function swipePull(i: { stand: SwipeStand; position: number; closeAt: num
   if (i.stand === "full" && i.up > 0) progress = (i.position + i.up) / stepDistance(i.up, i.scale);
   else if (i.position < 0 && i.up > 0) progress = -i.position / stepDistance(i.up, i.scale);
   else if (i.position > 0 && i.closeAt > 0) progress = i.position / closeDistance(i.closeAt, i.scale);
-  return Math.max(0, Math.min(i.unsaved ? 0.5 : 1, progress));
+  const closing = i.stand === "normal" && i.position > 0;
+  return Math.max(0, Math.min(i.unsaved && closing ? 0.5 : 1, progress));
 }
 
 // ------------------------------------------------------------ the surface over time
@@ -937,10 +938,12 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
 
     const host: SwipeHost = {
       place(look, ease, pull) {
-        if (pull !== undefined) {
-          el.style.setProperty(PULL_VAR, String(pull));
-          el.style.setProperty(STRETCH_VAR, String(host.reducedMotion() ? 0 : pull));
-          el.style.setProperty(GRABBER_TRANSITION_VAR, "none");
+        const grabber = el.querySelector<SVGSVGElement>("[data-sheet-grabber]");
+        if (grabber && pull !== undefined) {
+          // Keep changing properties on the drawing, so the sheet's content does not inherit a new value on every move.
+          grabber.style.setProperty(PULL_VAR, String(pull));
+          grabber.style.setProperty(STRETCH_VAR, String(host.reducedMotion() ? 0 : pull));
+          grabber.style.setProperty(GRABBER_TRANSITION_VAR, "none");
         }
         const g = geometry;
         if (look === null || !g) {
@@ -1041,12 +1044,14 @@ export function useSheetSwipe(surface: RefObject<HTMLElement | null>, options: S
       },
       held(on) {
         el.toggleAttribute(HELD_ATTR, on);
-        // The member's own color, which every other control in view wears: a custom property inherited by the grabber, so the swipe renders nothing.
+        const grabber = el.querySelector<SVGSVGElement>("[data-sheet-grabber]");
+        if (!grabber) return;
+        // The member's own color, which every other control in view wears, without a render.
         if (on) {
-          el.style.setProperty(HELD_COLOR_VAR, theme.color.accent);
-          el.style.setProperty(GRABBER_TRANSITION_VAR, `color ${HOLD_MS}ms ease`);
+          grabber.style.setProperty(HELD_COLOR_VAR, theme.color.accent);
+          grabber.style.setProperty(GRABBER_TRANSITION_VAR, `color ${HOLD_MS}ms ease`);
         } else {
-          for (const name of [HELD_COLOR_VAR, PULL_VAR, STRETCH_VAR, GRABBER_TRANSITION_VAR]) el.style.removeProperty(name);
+          for (const name of [HELD_COLOR_VAR, PULL_VAR, STRETCH_VAR, GRABBER_TRANSITION_VAR]) grabber.style.removeProperty(name);
         }
       },
     };
