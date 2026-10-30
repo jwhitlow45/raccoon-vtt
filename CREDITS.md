@@ -994,6 +994,10 @@ Public domain dedication. Source: https://www.drivethrurpg.com/product/114894/Sc
 
 `public/icon.svg` was drawn as an SVG for this project. `public/icons/app-192.png`, `public/icons/app-512.png`, `public/icons/app-maskable-512.png` and `public/icons/apple-touch-icon-180.png` are rasterized from it by `node scripts/icons.ts`. It is not third-party art.
 
+## README button
+
+The whale in the README's Docker Hub button (`docs/images/docker-hub-button.html`, drawn to `docker-hub-button.png`) is the Docker icon from [Simple Icons](https://simpleicons.org) 16.33.0, used under [CC0 1.0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md). Docker and the Docker logo are trademarks of Docker, Inc. The button links to the project's image on Docker Hub and implies no endorsement.
+
 ## 3D dice
 
 The dice the Dice panel throws, their numbers and their finishes are drawn in code, with no image, texture or model file. They are rendered with [three.js](https://threejs.org) 0.160.0, by the three.js authors, bundled into the app's dice chunk and used under the MIT License:

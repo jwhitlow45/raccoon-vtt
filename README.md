@@ -5,7 +5,16 @@
 <h1 align="center">raccoon-vtt</h1>
 
 <p align="center">
-  <a href="https://hub.docker.com/r/jwhitlow45/raccoon-vtt">Docker image on Docker Hub</a>
+  <a href="https://hub.docker.com/r/jwhitlow45/raccoon-vtt"><img src="docs/images/docker-hub-button.png" width="240" alt="Get it on Docker Hub"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/jwhitlow45/raccoon-vtt/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jwhitlow45/raccoon-vtt/ci.yml?branch=main&amp;label=CI&amp;logo=githubactions&amp;logoColor=white" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
+  <a href="https://hub.docker.com/r/jwhitlow45/raccoon-vtt"><img src="https://img.shields.io/docker/pulls/jwhitlow45/raccoon-vtt?logo=docker&amp;logoColor=white&amp;label=pulls" alt="Docker pulls"></a>
+  <a href="https://hub.docker.com/r/jwhitlow45/raccoon-vtt/tags"><img src="https://img.shields.io/docker/image-size/jwhitlow45/raccoon-vtt/latest?logo=docker&amp;logoColor=white&amp;label=size" alt="Docker image size"></a>
+  <img src="https://img.shields.io/badge/platforms-amd64%20%7C%20arm64-blue?logo=linux&amp;logoColor=white" alt="Platforms: amd64 and arm64">
+  <img src="https://img.shields.io/badge/rules-5.5e-c0392b" alt="Rules: D&amp;D 5.5e (2024)">
 </p>
 
 A self-hosted virtual tabletop for D&D groups playing the 2024 rules
@@ -730,8 +739,10 @@ as absent only when Docker Hub answers "not found", which needs the
 repository to exist.
 
 1. On main, bump `version` in `package.json` to the new `X.Y.Z` and run
-   `pnpm selfhost`, which writes the new `X.Y` into `selfhost/`. Commit
-   both. The unit tests fail while `selfhost/` is out of date.
+   `pnpm selfhost`, which writes the new `X.Y` into `selfhost/`, and
+   `pnpm readme-button`, which draws the new version into the Docker Hub
+   button at the top of this file (it needs Chrome). Commit all three. The
+   unit tests fail while either is out of date.
 2. Wait for CI to pass on that commit.
 3. Tag the commit `vX.Y.Z` and push the tag.
 
