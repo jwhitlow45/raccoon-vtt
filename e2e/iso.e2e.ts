@@ -1526,11 +1526,15 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
         const point = toWorld(isometric(turn), { x: (box.x + box.width / 2 - before.x) / before.scale, y: (box.y + box.height - before.y) / before.scale } as ViewPoint);
         const areaId = randomUUID();
         const trapId = randomUUID().replaceAll("-", "").slice(0, 16);
+        let areaCreated = false;
+        let trapCreated = false;
         try {
           await ops.send({ t: "template.create", template: { id: areaId, sceneId: run.sceneId, shape: "sphere", size: 5, origin: { x: point.x, y: point.y + 1, z: 0 }, yaw: 0, includeOrigin: true, color: "#ff8800", ownerId: dmSocket.you!.memberId, visibility: "all", label: "Area name" } });
+          areaCreated = true;
           const x = Math.round(point.x);
           const y = Math.round(point.y);
-          await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Wire trap", zone: { wire: { a: [x - 1, y], b: [x + 1, y] } }, rig: { on: ["enter"], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } } });
+          await ops.send({ t: "trap.create", trap: { id: trapId, sceneId: run.sceneId, name: "Wire trap", zone: { wire: { a: [x - 1, y], b: [x + 1, y] } }, rig: { on: [], who: "any", floor: true, resets: "never", stops: false, foundOnSpring: true, hits: "trigger", actions: [], find: [], notice: false } } });
+          trapCreated = true;
           await waitFor("all three placed names", async () => {
             const value = await readNames();
             return value?.names.length === 3 ? value : null;
@@ -1548,8 +1552,12 @@ describe("raccoon-vtt isometric view: the choice", { timeout: 300_000 }, () => {
           }
           await shots.take(dm, `fu40-b-iso-labels-turn-${turn}`);
         } finally {
-          await ops.send({ t: "template.delete", templateId: areaId });
-          await ops.send({ t: "trap.delete", trapId });
+          // Only remove acknowledged creations, so cleanup cannot hide a refused setup op.
+          try {
+            if (trapCreated) await ops.send({ t: "trap.delete", trapId });
+          } finally {
+            if (areaCreated) await ops.send({ t: "template.delete", templateId: areaId });
+          }
           await waitFor("the temporary names removed", async () => (await readNames())?.names.length === 1);
         }
       }
