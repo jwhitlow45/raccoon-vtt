@@ -124,13 +124,53 @@ export function trapNamePill(g: Grid, trap: Trap, chunks: Readonly<Record<string
 
 /** Standing trap names use the same candidates in placement and its geometry tests. */
 export function isoTrapNamePill(original: PillSpec, grid: Grid, trap: Trap, chunks: Readonly<Record<string, BuildChunk>>, names: IsoNames, scale: number, allowed: (p: PillSpec) => boolean): PillSpec {
-  const box = zoneBox(grid, trap, chunks);
-  if (!box) return original;
-  const candidates: PillSpec[] = [original];
-  for (const f of [0, -0.25, 0.25, -0.5, 0.5]) {
-    for (const above of [true, false]) candidates.push({ ...original, x: (box.x0 + box.x1) / 2 + f * (box.x1 - box.x0), y: above ? box.y0 : box.y1, above, below: !above });
+  const zone = trap.zone;
+  const candidates: PillSpec[] = [];
+  const add = (x: number, y: number, above: boolean) => candidates.push({ ...original, x, y, above, below: !above });
+  const fractions = [0.5, 0.25, 0.75, 0, 1];
+  if ("cells" in zone) {
+    const box = zoneBox(grid, trap, chunks)!;
+    const outlines = isHex(grid) ? zone.cells.map((r) => hexOutline(grid, rectHexes([r]))) : null;
+    // A vertical slice reads occupied boundaries, not the empty corners of
+    // an L-shaped zone's box. Hexes use the same outlines the ground draws.
+    const edges = (x: number): number[] => outlines
+      ? outlines.flatMap((points) => points.flatMap((ax, i) => {
+          if (i % 2) return [];
+          const ay = points[i + 1]!;
+          const bx = points[(i + 2) % points.length]!;
+          const by = points[(i + 3) % points.length]!;
+          if (x < Math.min(ax, bx) || x > Math.max(ax, bx)) return [];
+          return ax === bx ? [ay, by] : [ay + (by - ay) * (x - ax) / (bx - ax)];
+        }))
+      : zone.cells.filter((r) => x >= r.x && x <= r.x + r.w).flatMap((r) => [r.y, r.y + r.h]);
+    const originalEdges = edges(original.x);
+    if (originalEdges.length && (Math.abs(original.y - Math.min(...originalEdges)) < 1e-9 || Math.abs(original.y - Math.max(...originalEdges)) < 1e-9)) candidates.push(original);
+    for (const f of fractions) {
+      const x = box.x0 + f * (box.x1 - box.x0);
+      const ys = edges(x);
+      if (ys.length === 0) continue;
+      add(x, Math.min(...ys), true);
+      add(x, Math.max(...ys), false);
+    }
+  } else {
+    const line = "wire" in zone
+      ? { a: { x: zone.wire.a[0], y: zone.wire.a[1] }, b: { x: zone.wire.b[0], y: zone.wire.b[1] } }
+      : findDoor(chunks, trap.sceneId, zone.door);
+    if (!line) return original;
+    candidates.push(original);
+    for (const f of fractions) {
+      const x = line.a.x + f * (line.b.x - line.a.x);
+      const y = line.a.y + f * (line.b.y - line.a.y);
+      // Above and below move the pill along view-up after projection. Its
+      // pointer stays on the actual wire or door, including diagonal ones.
+      add(x, y, true);
+      add(x, y, false);
+    }
   }
-  return isoNamePill(candidates, names, scale, allowed);
+  // The original already passed the stand rule. If every sampled edge is
+  // fogged, keep it rather than choosing an unpermitted first candidate.
+  const permitted = candidates.filter(allowed);
+  return permitted.length ? isoNamePill(permitted, names, scale, allowed) : original;
 }
 
 const NO_PILLS: readonly PillSpec[] = [];
