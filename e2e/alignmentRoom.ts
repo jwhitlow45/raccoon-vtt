@@ -4566,8 +4566,9 @@ export function fu30Tests(): void {
       for (const size of [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 320, height: 568 }]) for (const zoom of [1, 1.3]) {
         await page.setViewportSize(size);
         await page.goto(`${server.origin}/admin`);
-        const header = page.locator("header").filter({ has: page.getByRole("heading", { name: "Server admin", exact: true }) });
-        await header.getByRole("button", { name: "Refresh", exact: true }).waitFor();
+        // Found by its actions, not its title: the fixture below renames the title, and a locator found by the old one would match nothing, which measureAlignment reads as nothing out of line.
+        const header = page.locator("header").filter({ has: page.getByRole("button", { name: "Refresh", exact: true }) });
+        await header.getByRole("heading", { name: "Server admin", exact: true }).waitFor();
         await page.evaluate(async () => { await (globalThis as unknown as { document: { fonts: { ready: Promise<unknown> } } }).document.fonts.ready; });
         await header.evaluate((el, z) => { (el as unknown as { style: { zoom: string } }).style.zoom = String(z); }, zoom);
         const at = `fu40-c Admin ${size.width}px ${zoom * 100}%`;

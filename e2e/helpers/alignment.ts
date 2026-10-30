@@ -1205,7 +1205,9 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
           const words = (it: Item) => {
             if (!isEl(it.node)) return true;
             if (FIELD.includes(tag(it.node)) || it.node.matches(CONTROL) && !(tag(it.node) === "label" && !it.node.querySelector("input, select, textarea, button"))) return false;
-            return !atomsOf(it.node).some((a) => a.kind !== "text");
+            // A part that holds nothing to read, as a picture or a bare swatch, is no name. Counted as words, a crest beside a title sent the pair to the label check and hid an orphan under them.
+            const atoms = atomsOf(it.node);
+            return atoms.length > 0 && atoms.every((a) => a.kind === "text");
           };
           const prose = (it: Item) => isEl(it.node) && /^(h[1-6]|p)$/.test(tag(it.node));
           const pill = (it: Item) => isEl(it.node) && cornerDown(it.node, it.box.b - it.box.t) >= (it.box.b - it.box.t) / 2 - 0.5;
