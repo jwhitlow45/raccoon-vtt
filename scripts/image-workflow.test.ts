@@ -244,3 +244,131 @@ read -r digest file
     });
   }
 });
+
+const INDEX = `sha256:${"a".repeat(64)}`;
+const IMAGE = "docker.io/example/raccoon-vtt";
+
+type SigningCase = { mode?: string; index?: string; inspectFails?: boolean; signFailures?: number; pipeline?: boolean };
+
+/** Execute the workflow's tag/sign steps with registry and signing-service stand-ins. */
+function signAndTag(options: SigningCase = {}): { status: number | null; calls: string[]; out: string } {
+  const dir = mkdtempSync(path.join(tmpdir(), "raccoon-sign-step-"));
+  try {
+    writeFileSync(path.join(dir, "docker"), `#!/bin/bash
+case "$*" in
+  login*) cat > /dev/null ;;
+  logout*) ;;
+  "buildx imagetools inspect --raw "*)
+    printf 'inspect %s\\n' "\${@:5}" >> "$CALLS"
+    [ "$INSPECT_FAILS" != true ] ;;
+  "buildx imagetools inspect "*) echo '{"linux/amd64":{"config":{"Labels":{"org.opencontainers.image.version":"0.1.0"}}}}' ;;
+  "buildx imagetools create "*) printf 'tag %s\\n' "\${*:4}" >> "$CALLS" ;;
+  run*) printf 'TAG_MINOR=true\\nTAG_LATEST=true\\n' ;;
+  *) exit 9 ;;
+esac
+`);
+    writeFileSync(path.join(dir, "cosign"), `#!/bin/bash
+[ -z "\${DOCKERHUB_TOKEN+x}" ] || { echo 'token reached cosign' >&2; exit 9; }
+count=0
+[ ! -f "$RUNNER_TEMP/count" ] || count=$(cat "$RUNNER_TEMP/count")
+count=$((count + 1))
+printf '%s' "$count" > "$RUNNER_TEMP/count"
+printf 'sign %s\\n' "$*" >> "$CALLS"
+[ "$count" -gt "$SIGN_FAILURES" ]
+`);
+    writeFileSync(path.join(dir, "sleep"), '#!/bin/bash\nprintf "pause %s\\n" "$1" >> "$CALLS"\n');
+    for (const name of ["docker", "cosign", "sleep"]) chmodSync(path.join(dir, name), 0o755);
+    const env: Record<string, string> = {
+      PATH: `${dir}:${process.env.PATH ?? ""}`, RUNNER_TEMP: dir, CALLS: path.join(dir, "calls"),
+      IMAGE, VERSION: "0.2.0", MINOR: "0.2", MODE: options.mode ?? "build",
+      DOCKERHUB_USERNAME: "example", DOCKERHUB_TOKEN: "not-a-token",
+      INSPECT_FAILS: String(options.inspectFails ?? false), SIGN_FAILURES: String(options.signFailures ?? 0),
+    };
+    if (options.index !== undefined) env.INDEX = options.index;
+    const wanted = ["Tag the version", "Sign the published index", "Tag the floating versions"];
+    const steps = options.pipeline
+      ? [...jobBlock("publish").matchAll(/^      - name: (.+)$/gm)].map((m) => m[1]!).filter((name) => wanted.includes(name))
+      : ["Sign the published index"];
+    let status: number | null = 0;
+    let out = "";
+    for (const name of steps) {
+      if (name === "Tag the version" && env.MODE !== "build") continue;
+      const run = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", stepScript(name)], { encoding: "utf8", env });
+      status = run.status;
+      out += run.stdout + run.stderr;
+      if (status !== 0) break;
+    }
+    const callsFile = path.join(dir, "calls");
+    return { status, out, calls: existsSync(callsFile) ? readFileSync(callsFile, "utf8").trim().split("\n") : [] };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("signing the published image", () => {
+  test("refuses an unknown mode before contacting the registry or signer", () => {
+    const r = signAndTag({ mode: "unknown", index: INDEX });
+    assert.equal(r.status, 1, r.out);
+    assert.deepEqual(r.calls, []);
+    assert.match(r.out, /No completed image push or verified release/);
+  });
+
+  for (const index of [undefined, "", "null", "sha256:abc", `sha256:${"A".repeat(64)}`, `sha256:${"a".repeat(64)}:latest`]) {
+    test(`refuses ${index === undefined ? "a missing" : JSON.stringify(index)} digest before contacting the registry or signer`, () => {
+      const r = signAndTag({ index });
+      assert.equal(r.status, 1, r.out);
+      assert.deepEqual(r.calls, []);
+      assert.match(r.out, /digest is missing or invalid/);
+    });
+  }
+
+  test("signs only IMAGE@INDEX after its registry inspect succeeds, without the token in its environment", () => {
+    const r = signAndTag({ index: INDEX });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.calls, [`inspect ${IMAGE}@${INDEX}`, `sign sign --yes ${IMAGE}@${INDEX}`]);
+  });
+
+  test("a failed registry inspect signs nothing", () => {
+    const r = signAndTag({ index: INDEX, inspectFails: true });
+    assert.equal(r.status, 1, r.out);
+    assert.deepEqual(r.calls, [`inspect ${IMAGE}@${INDEX}`]);
+  });
+
+  for (const mode of ["build", "resume"]) {
+    test(`${mode} signs the immutable version before moving floating tags`, () => {
+      assert.match(jobBlock("publish"), /- name: Tag the version\n        if: env.MODE == 'build'/);
+      const r = signAndTag({ mode, index: INDEX, pipeline: true });
+      assert.equal(r.status, 0, r.out);
+      assert.deepEqual(r.calls, [
+        ...(mode === "build" ? [`tag --tag ${IMAGE}:0.2.0 ${IMAGE}@${INDEX}`] : []),
+        `inspect ${IMAGE}@${INDEX}`,
+        `sign sign --yes ${IMAGE}@${INDEX}`,
+        `tag --tag ${IMAGE}:0.2 --tag ${IMAGE}:latest ${IMAGE}@${INDEX}`,
+      ]);
+    });
+  }
+
+  test("two signing failures retry with pauses before moving floating tags", () => {
+    const r = signAndTag({ index: INDEX, signFailures: 2, pipeline: true });
+    assert.equal(r.status, 0, r.out);
+    assert.deepEqual(r.calls.slice(1, -1), [
+      `inspect ${IMAGE}@${INDEX}`, `sign sign --yes ${IMAGE}@${INDEX}`, "pause 5",
+      `sign sign --yes ${IMAGE}@${INDEX}`, "pause 10", `sign sign --yes ${IMAGE}@${INDEX}`,
+    ]);
+    assert.match(r.calls.at(-1)!, /^tag --tag .*:0\.2 --tag .*:latest /);
+  });
+
+  test("a signing outage leaves the immutable tag and a resume signs the same digest before floating tags move", () => {
+    const failed = signAndTag({ index: INDEX, signFailures: 3, pipeline: true });
+    assert.equal(failed.status, 1, failed.out);
+    assert.equal(failed.calls.filter((c) => c.startsWith("sign ")).length, 3);
+    assert.equal(failed.calls.filter((c) => c.startsWith("pause ")).length, 2);
+    assert.deepEqual(failed.calls.filter((c) => c.startsWith("tag ")), [`tag --tag ${IMAGE}:0.2.0 ${IMAGE}@${INDEX}`]);
+    const resumed = signAndTag({ mode: "resume", index: INDEX, pipeline: true });
+    assert.equal(resumed.status, 0, resumed.out);
+    assert.deepEqual(resumed.calls, [
+      `inspect ${IMAGE}@${INDEX}`, `sign sign --yes ${IMAGE}@${INDEX}`,
+      `tag --tag ${IMAGE}:0.2 --tag ${IMAGE}:latest ${IMAGE}@${INDEX}`,
+    ]);
+  });
+});
