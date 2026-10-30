@@ -1,4 +1,6 @@
+import { FOG_SUBCELLS } from "#shared/model.ts";
 import { isometric, K, toView, toWorld, type Turn, type ViewPoint } from "../lib/view.ts";
+import { cellCenter, type GroundSurface } from "../lib/groundCells.ts";
 import type { IsoGround } from "./relief/context.ts";
 
 /**
@@ -35,8 +37,14 @@ export function viewPointOf(iso: Pick<IsoGround, "turn" | "ground"> | null, p: P
   return toView(isometric(iso.turn), p, z ?? iso.ground(p.x, p.y));
 }
 
-/** The highest drawn ground under a box in cells, its far edges left out: where a mark round a footprint stands, down in a pit when every cell is. */
-export function boxGround(iso: Pick<IsoGround, "ground">, box: { x0: number; y0: number; x1: number; y1: number }): number {
+/**
+ * The highest drawn ground under a box in cells, its far edges left out:
+ * where a mark round a footprint stands, down in a pit when every cell is.
+ * On hexes, the hexes whose centers lie inside the box (IsoGround.top), so
+ * a creature's box reads its own hexes and not the ones its corners touch.
+ */
+export function boxGround(iso: Pick<IsoGround, "ground" | "top">, box: { x0: number; y0: number; x1: number; y1: number }): number {
+  if (iso.top) return iso.top(box);
   const x0 = Math.floor(box.x0);
   const y0 = Math.floor(box.y0);
   const x1 = Math.max(x0 + 1, Math.ceil(box.x1));
@@ -45,6 +53,16 @@ export function boxGround(iso: Pick<IsoGround, "ground">, box: { x0: number; y0:
   let top = -Infinity;
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) top = Math.max(top, iso.ground(x + 0.5, y + 0.5));
   return top;
+}
+
+/** `boxGround` on a hex surface: the hexes whose centers lie strictly inside the box, or the one under its middle when none does. */
+export function hexBoxGround(surface: Pick<GroundSurface, "grid" | "cellsIn" | "atCell" | "atPoint">, box: { x0: number; y0: number; x1: number; y1: number }): number {
+  let top = -Infinity;
+  for (const c of surface.cellsIn(box)) {
+    const p = cellCenter(surface.grid, c);
+    if (p.x > box.x0 && p.x < box.x1 && p.y > box.y0 && p.y < box.y1) top = Math.max(top, surface.atCell(c));
+  }
+  return top === -Infinity ? surface.atPoint({ x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 }) : top;
 }
 
 /**
@@ -70,7 +88,8 @@ export type PressCell = { x: number; y: number; w: number; h: number; z: number 
  * ground, since a seen raised cell copies the picture over it up and the
  * rest stays down (ISO34-ASTRA-14). From the node's corner `at`.
  */
-export function pressCells(at: Point, size: { w: number; h: number }, ground: (x: number, y: number) => number): PressCell[] {
+export function pressCells(at: Point, size: { w: number; h: number }, ground: (x: number, y: number) => number, hexes = false): PressCell[] {
+  if (hexes) return hexPressCells(at, size, ground);
   const out: PressCell[] = [];
   for (let y = at.y; y < at.y + size.h - 1e-9; y = Math.min(Math.floor(y) + 1, at.y + size.h)) {
     const y1 = Math.min(Math.floor(y) + 1, at.y + size.h);
@@ -78,6 +97,35 @@ export function pressCells(at: Point, size: { w: number; h: number }, ground: (x
       const x1 = Math.min(Math.floor(x) + 1, at.x + size.w);
       out.push({ x: x - at.x, y: y - at.y, w: x1 - x, h: y1 - y, z: ground(Math.floor(x) + 0.5, Math.floor(y) + 0.5) });
     }
+  }
+  return out;
+}
+
+/**
+ * On hexes the footprint is cut at the fog's quarter-cell lines instead,
+ * each piece on the drawn ground under its middle, and pieces side by side
+ * in a row on one ground merged: within a quarter cell of where the
+ * ground stage's hex tops lift the picture, which no rectangle follows
+ * exactly (docs/design-v1-iso-hex-relief.md 7).
+ */
+function hexPressCells(at: Point, size: { w: number; h: number }, ground: (x: number, y: number) => number): PressCell[] {
+  const out: PressCell[] = [];
+  const q = 1 / FOG_SUBCELLS;
+  const line = (v: number) => Math.floor(v / q + 1e-9) * q + q;
+  for (let y = at.y; y < at.y + size.h - 1e-9; ) {
+    const y1 = Math.min(line(y), at.y + size.h);
+    let open: PressCell | null = null;
+    for (let x = at.x; x < at.x + size.w - 1e-9; ) {
+      const x1 = Math.min(line(x), at.x + size.w);
+      const z = ground((x + x1) / 2, (y + y1) / 2);
+      if (open && open.z === z) open.w = x1 - at.x - open.x;
+      else {
+        open = { x: x - at.x, y: y - at.y, w: x1 - x, h: y1 - y, z };
+        out.push(open);
+      }
+      x = x1;
+    }
+    y = y1;
   }
   return out;
 }

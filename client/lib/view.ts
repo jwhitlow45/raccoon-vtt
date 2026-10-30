@@ -1,10 +1,9 @@
 import { CHUNK_CELLS } from "#shared/model.ts";
-import type { CellRange } from "#shared/rules/footprint.ts";
-import { isCellFullyFogged } from "#shared/rules/fog.ts";
-import { isHex, type Grid } from "#shared/rules/grid.ts";
-import { chunkHeights, heightsGrid } from "#shared/rules/heights.ts";
+import { isHex, SQUARES, type Grid } from "#shared/rules/grid.ts";
+import { chunkHeights } from "#shared/rules/heights.ts";
 import { seenGround, type Cell, type GroundSource } from "../features/builder/heights/ground.ts";
 import { cameraOfStage, screenToView, type Camera, type Insets, type Point, type Rect, type Size } from "./camera.ts";
+import { cellAtPoint, cellId, cellPolygon, groundSurface, lineInterval, neighborsOf, polygonSide, sameCell, sceneExtent, type GroundCell, type GroundSurface } from "./groundCells.ts";
 
 /**
  * The board's two views (docs/design-v1-isometric-view.md section 4).
@@ -184,40 +183,29 @@ export function standScale(lowPower: boolean): number {
   return (lowPower ? 2 : 1) * STAND_MIN_PX;
 }
 
-/** What drawn heights read: the ground this viewer may see (heights/ground.ts), and whether heights stand at this zoom. */
-export type DrawnSource = GroundSource & { stand: boolean };
+/** What drawn heights read: the ground this viewer may see (heights/ground.ts) on the scene's own grid, never one guessed from its chunks, and whether heights stand at this zoom. */
+export type DrawnSource = GroundSource & { grid: Grid; stand: boolean };
 
 /**
  * A cell's drawn ground in feet: its seen ground while heights stand, and 0
  * below the threshold and wherever this viewer has not seen the cell
- * (section 4.3). Every drawn height reads it, so the same visible state
- * over different hidden heights draws the same pixels. Rules keep reading
- * real heights.
+ * (section 4.3). A cell is a key on the scene's grid, a hex's on hexes.
+ * Every drawn height reads it, so the same visible state over different
+ * hidden heights draws the same pixels. Rules keep reading real heights.
  */
 export function drawnGround(src: DrawnSource, cell: Cell): number {
-  if (!src.stand || flatOnHexes(src)) return 0;
+  if (!src.stand) return 0;
   return seenGround(src, cell) ?? 0;
 }
 
-/**
- * Whether the scene's heights are keyed by hexes (heights.ts heightsGrid),
- * which this view's square cells cannot read: there it draws the ground
- * flat, each creature standing at its elevation over it, until raised hexes
- * stand in the isometric view (docs/design-v1-hex-grids.md H3, As built).
- */
-function flatOnHexes(src: Pick<DrawnSource, "chunks" | "sceneId">): boolean {
-  return isHex(heightsGrid(src.chunks, src.sceneId));
-}
-
-/** The highest seen ground in feet under a footprint's cells (footprint.ts occupiedRange), a cell this viewer has not seen counting 0. */
-export function seenFootprintGround(src: GroundSource, range: CellRange): number {
-  if (flatOnHexes(src)) return 0;
-  return highestOver(range, (cell) => seenGround(src, cell) ?? 0);
+/** The highest seen ground in feet under a footprint's cells (groundCells.ts footprintCells), a cell this viewer has not seen counting 0. */
+export function seenFootprintGround(src: GroundSource, cells: Iterable<GroundCell>): number {
+  return highestOver(cells, (cell) => seenGround(src, { x: cell.col, y: cell.row }) ?? 0);
 }
 
 /** `seenFootprintGround` through `drawnGround`. */
-export function drawnFootprintGround(src: DrawnSource, range: CellRange): number {
-  return highestOver(range, (cell) => drawnGround(src, cell));
+export function drawnFootprintGround(src: DrawnSource, cells: Iterable<GroundCell>): number {
+  return highestOver(cells, (cell) => drawnGround(src, { x: cell.col, y: cell.row }));
 }
 
 /**
@@ -225,38 +213,41 @@ export function drawnFootprintGround(src: DrawnSource, range: CellRange): number
  * under it, set on the drawn ground there (section 4.3). Above the
  * threshold that is its elevation, below it the lift alone. Hidden terrain
  * never enters, so a token over fogged ground draws the same whatever lies
- * under the fog.
+ * under the fog. `cells` are the cells it stands on, its actual hexes on
+ * hexes (docs/design-v1-iso-hex-relief.md D-261030-462).
  */
-export function drawnBase(src: DrawnSource, range: CellRange, elevation: number): number {
-  return drawnFootprintGround(src, range) + elevation - seenFootprintGround(src, range);
+export function drawnBase(src: DrawnSource, cells: readonly GroundCell[], elevation: number): number {
+  return drawnFootprintGround(src, cells) + elevation - seenFootprintGround(src, cells);
 }
 
-function highestOver(r: CellRange, groundOf: (cell: Cell) => number): number {
-  if (r.x0 >= r.x1 || r.y0 >= r.y1) return 0;
+function highestOver(cells: Iterable<GroundCell>, groundOf: (cell: GroundCell) => number): number {
   let top = -Infinity;
-  for (let y = r.y0; y < r.y1; y++) for (let x = r.x0; x < r.x1; x++) top = Math.max(top, groundOf({ x, y }));
-  return top;
+  for (const c of cells) top = Math.max(top, groundOf(c));
+  return top === -Infinity ? 0 : top;
 }
 
-/** A scene's drawn ground as a pick reads it, in cells of height. */
-export type DrawnHeights = {
-  /** The scene's size in cells. Cells outside it count as 0. */
-  readonly bounds: { w: number; h: number };
+/** A scene's drawn ground as a pick and the relief read it, in cells of height. */
+export type DrawnHeights = GroundSurface & {
   /** The lowest and the highest drawn ground in the scene, in cells of height, each with 0 among them. */
   readonly low: number;
   readonly high: number;
-  /** The drawn ground of a cell inside the scene, in cells of height. */
+  /** The drawn ground of a cell key, in cells of height: `atCell` by its column and row. */
   at(x: number, y: number): number;
 };
 
 /** Flat ground: what a pick reads below the threshold, on a scene without heights, and in tests. */
-export function flatHeights(bounds: { w: number; h: number }): DrawnHeights {
-  return { bounds, low: 0, high: 0, at: () => 0 };
+export function flatHeights(bounds: { w: number; h: number }, grid: Grid = SQUARES): DrawnHeights {
+  return { ...groundSurface(grid, bounds, () => 0), low: 0, high: 0, at: () => 0 };
 }
 
-/** The drawn heights of a viewer's scene, read once per pick or per change of the ground. */
+/**
+ * The drawn heights of a viewer's scene, read once per pick or per change
+ * of the ground. Each cell's drawn ground is read once and kept, since a
+ * hex's fog test reads its sub-cells.
+ */
 export function drawnHeights(src: DrawnSource, feetPerCell: number): DrawnHeights {
-  if (!src.stand || flatOnHexes(src)) return flatHeights(src.bounds);
+  if (!src.stand) return flatHeights(src.bounds, src.grid);
+  const grid = src.grid;
   let low = 0;
   let high = 0;
   const prefix = `${src.sceneId}:`;
@@ -268,13 +259,20 @@ export function drawnHeights(src: DrawnSource, feetPerCell: number): DrawnHeight
       const feet = heights[i]!;
       if (feet === 0 || (feet >= low && feet <= high)) continue;
       const cell = { x: chunk.cx * CHUNK_CELLS + (i % CHUNK_CELLS), y: chunk.cy * CHUNK_CELLS + Math.floor(i / CHUNK_CELLS) };
-      if (cell.x < 0 || cell.y < 0 || cell.x >= src.bounds.w || cell.y >= src.bounds.h) continue;
-      if (src.fog && isCellFullyFogged(src.fog, src.sceneId, cell)) continue;
+      if (seenGround(src, cell) === null) continue;
       low = Math.min(low, feet);
       high = Math.max(high, feet);
     }
   }
-  return { bounds: src.bounds, low: low / feetPerCell, high: high / feetPerCell, at: (x, y) => drawnGround(src, { x, y }) / feetPerCell };
+  const known = new Map<number, number>();
+  const at = (x: number, y: number): number => {
+    const id = cellId({ col: x, row: y });
+    let z = known.get(id);
+    if (z === undefined) known.set(id, (z = drawnGround(src, { x, y }) / feetPerCell));
+    return z;
+  };
+  const surface = groundSurface(grid, src.bounds, (c) => at(c.col, c.row));
+  return { ...surface, low: low / feetPerCell, high: high / feetPerCell, at: (x, y) => surface.atCell({ col: x, row: y }) };
 }
 
 // ---------------------------------------------------------------- picking
@@ -282,7 +280,7 @@ export function drawnHeights(src: DrawnSource, feetPerCell: number): DrawnHeight
 /** What a pick reads: the camera, the view, the scene's grid and its drawn heights. */
 export type PickSource = { camera: Camera; view: View; grid: Grid; heights: DrawnHeights };
 
-/** How far a pick on a cell's near face lands inside that cell, so the point names the cell it hit and not its neighbor. */
+/** How far a pick on a square's near face lands inside that cell, so the point names the cell it hit and not its neighbor. Hexes reconcile instead (groundCells.ts ruleBoundPoint). */
 export const FACE_NUDGE = 1e-6;
 
 /**
@@ -293,27 +291,36 @@ export function pickGround(src: PickSource, screen: Point): Point {
   return pickWalk(src, screen).point;
 }
 
+/** A pick: the point the ray met, its height in cells, the cell it hit, and how many cells the walk visited. */
+export type PickHit = { point: Point; z: number; cell: GroundCell; visited: number };
+
 /**
- * `pickGround` with the height, in cells, where the ray met the ground, and
- * how many cells the walk visited. In Isometric the ray's trace on the
- * ground, toWorld(v, z), runs from near the viewer to far as z falls from
- * the highest drawn ground to the lowest, 2K cells of trace per cell of
- * height. The walk visits the scene's cells the trace crosses, in that
- * order. A cell entered at or below its ground is hit on its near face, and
- * one whose ground lies between entry and exit on its top. Outside the
- * scene the ground is 0, so the walk covers only the stretch of the trace
- * over the scene: at most 2√2·K·Δz + 3 cells, since a stretch crosses at
- * most one more cell line on each axis than its length along it, and never
- * more than the scene's w + h.
+ * `pickGround` with the height, in cells, where the ray met the ground, the
+ * cell whose drawn surface it met, and how many cells the walk visited. In
+ * Isometric the ray's trace on the ground, toWorld(v, z), runs from near
+ * the viewer to far as z falls from the highest drawn ground to the
+ * lowest, 2K cells of trace per cell of height. The walk visits the cells
+ * the trace crosses, in that order. A cell entered at or below its ground
+ * is hit on its near face, and one whose ground lies between entry and
+ * exit on its top. Outside the scene the ground is 0. On squares the walk
+ * covers only the stretch of the trace over the scene: at most
+ * 2√2·K·Δz + 3 cells, since a stretch crosses at most one more cell line on
+ * each axis than its length along it, and never more than the scene's
+ * w + h. Hexes walk their canonical polygons (`hexWalk`).
+ *
+ * `cell` names the surface hit. A point on a rounded hex edge can lie where
+ * `hexAt` names the neighbor, so a rule reads it through
+ * groundCells.ts ruleBoundPoint, never the point alone.
  */
-export function pickWalk(src: PickSource, screen: Point): { point: Point; z: number; visited: number } {
-  const { view, heights } = src;
+export function pickWalk(src: PickSource, screen: Point): PickHit {
+  const { view, heights, grid } = src;
   const v = screenToView(src.camera, screen);
-  // Hex scenes hold no heights before the hex grids' H3, which brings the hex walk (section 4.4).
-  if (view.kind === "topDown" || isHex(src.grid)) return { point: toWorld(view, v), z: 0, visited: 0 };
+  const flat = (p: Point, z = 0, visited = 0): PickHit => ({ point: p, z, cell: cellAtPoint(grid, p), visited });
+  if (view.kind === "topDown") return flat(toWorld(view, v));
   const top = Math.max(heights.high, 0);
   const bottom = Math.min(heights.low, 0);
-  if (top === bottom) return { point: toWorld(view, v), z: 0, visited: 0 };
+  if (top === bottom) return flat(toWorld(view, v));
+  if (isHex(grid)) return hexWalk(src, v, top, bottom);
   const { c, s } = AXES[view.turn]!;
   const a = toWorld(view, v);
   // The trace is a + z·(dx, dy). Neither is ever 0, since the ground is turned 45 degrees.
@@ -326,7 +333,7 @@ export function pickWalk(src: PickSource, screen: Point): { point: Point; z: num
   const enter = Math.min(top, zx[1], zy[1]);
   const leave = Math.max(bottom, zx[0], zy[0]);
   // The trace meets the ground outside the scene at 0 before it reaches the scene, or misses the scene.
-  if (enter <= leave || enter < 0) return { point: at(0), z: 0, visited: 0 };
+  if (enter <= leave || enter < 0) return flat(at(0));
   const stepX = dx > 0 ? -1 : 1;
   const stepY = dy > 0 ? -1 : 1;
   const start = at(enter);
@@ -337,11 +344,11 @@ export function pickWalk(src: PickSource, screen: Point): { point: Point; z: num
   while (visited <= w + h) {
     visited++;
     const ground = heights.at(cx, cy);
-    if (z <= ground) return { point: inCell(at(z), cx, cy), z, visited };
+    if (z <= ground) return { point: inCell(at(z), cx, cy), z, cell: { col: cx, row: cy }, visited };
     const exitX = ((stepX > 0 ? cx + 1 : cx) - a.x) / dx;
     const exitY = ((stepY > 0 ? cy + 1 : cy) - a.y) / dy;
     const out = Math.max(exitX, exitY, leave);
-    if (ground >= out) return { point: inCell(at(ground), cx, cy), z: ground, visited };
+    if (ground >= out) return { point: inCell(at(ground), cx, cy), z: ground, cell: { col: cx, row: cy }, visited };
     z = out;
     if (out === leave) break;
     if (exitX >= exitY) cx += stepX;
@@ -349,12 +356,79 @@ export function pickWalk(src: PickSource, screen: Point): { point: Point; z: num
     if (cx < 0 || cy < 0 || cx >= w || cy >= h) break;
   }
   // Past the scene's far edge the ground is 0: its near face when the trace leaves at or below 0, else its top.
-  if (z > 0) return { point: at(0), z: 0, visited };
+  if (z > 0) return flat(at(0), 0, visited);
   const past = at(z);
-  return { point: { x: past.x + stepX * FACE_NUDGE, y: past.y + stepY * FACE_NUDGE }, z, visited };
+  return flat({ x: past.x + stepX * FACE_NUDGE, y: past.y + stepY * FACE_NUDGE }, z, visited);
 }
 
-/** The cell a trace moving by `step` along an axis is in at `x`: on a cell line, the cell it moves into. */
+/**
+ * The hex walk (docs/design-v1-iso-hex-relief.md section 7): the trace's
+ * stretch inside the box that holds the scene's hexes, polygon by
+ * canonical polygon, each a positive-length interval of z. The next cell
+ * is the neighbor whose interval carries on below the exit, so a trace
+ * through a corner moves on once, into the hex it enters. z falls at every
+ * step, so the walk ends: past the box the ground is 0, and inside it a
+ * cell whose ground the trace reaches is the hit.
+ */
+function hexWalk(src: PickSource, v: ViewPoint, top: number, bottom: number): PickHit {
+  const { view, heights, grid } = src;
+  const { c, s } = AXES[(view as Extract<View, { kind: "isometric" }>).turn]!;
+  const a = toWorld(view, v);
+  const d = { x: 2 * K * s, y: 2 * K * c };
+  const at = (z: number): Point => ({ x: a.x + z * d.x, y: a.y + z * d.y });
+  const flat = (p: Point, z: number, visited: number): PickHit => ({ point: p, z, cell: cellAtPoint(grid, p), visited });
+  const box = sceneExtent(grid, heights.bounds);
+  const zx = [(box.x0 - a.x) / d.x, (box.x1 - a.x) / d.x].sort((p, q) => p - q) as [number, number];
+  const zy = [(box.y0 - a.y) / d.y, (box.y1 - a.y) / d.y].sort((p, q) => p - q) as [number, number];
+  const enter = Math.min(top, zx[1], zy[1]);
+  const leave = Math.max(bottom, zx[0], zy[0]);
+  if (enter <= leave || enter < 0) return flat(at(0), 0, 0);
+  const intervalOf = (cell: GroundCell) => lineInterval(cellPolygon(grid, cell), a, d);
+  /** The cell the trace runs through just below z, among `cands`. */
+  const below = (z: number, cands: readonly GroundCell[]): GroundCell | null => {
+    let best: GroundCell | null = null;
+    let bestHi = -Infinity;
+    for (const cand of cands) {
+      const iv = intervalOf(cand);
+      if (!iv || iv[0] >= z - 1e-12 || iv[1] < z - 1e-9) continue;
+      if (iv[1] > bestHi) {
+        best = cand;
+        bestHi = iv[1];
+      }
+    }
+    return best;
+  };
+  let z = enter;
+  const first = cellAtPoint(grid, at(z));
+  const around = [first, ...neighborsOf(grid, first)];
+  // Where the trace starts on a top's edge or corner at that top's height, it meets that top there.
+  const start = at(z);
+  for (const c of around) if (heights.atCell(c) >= z && polygonSide(cellPolygon(grid, c), start) >= 0) return { point: start, z, cell: c, visited: 1 };
+  let cell = below(z, around) ?? first;
+  let visited = 0;
+  // A bound the walk never needs: z falls by a polygon's interval each step, and the box is crossed in finitely many.
+  const most = 8 * (heights.bounds.w + heights.bounds.h) + 64;
+  while (visited < most) {
+    visited++;
+    const ground = heights.atCell(cell);
+    if (z <= ground) return { point: at(z), z, cell, visited };
+    const iv = intervalOf(cell);
+    const out = Math.max(iv ? iv[0] : z, leave);
+    if (ground >= out) return { point: at(ground), z: ground, cell, visited };
+    if (out >= z || out <= leave) {
+      z = Math.min(z, out);
+      break;
+    }
+    z = out;
+    const next = below(z, neighborsOf(grid, cell)) ?? cellAtPoint(grid, at(z - 1e-9));
+    if (sameCell(next, cell)) break;
+    cell = next;
+  }
+  // Past the box the ground is 0: its top when the trace is still above it.
+  if (z > 0) return flat(at(0), 0, visited);
+  return flat(at(z), z, visited);
+}
+
 function cellOf(x: number, step: number, n: number): number {
   const cell = step > 0 ? Math.floor(x) : Math.ceil(x) - 1;
   return Math.min(n - 1, Math.max(0, cell));

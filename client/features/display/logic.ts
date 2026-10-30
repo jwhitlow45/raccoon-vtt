@@ -1,4 +1,5 @@
-import type { RoomState, Token } from "#shared/model.ts";
+import type { RoomState, Scene, Token } from "#shared/model.ts";
+import { isHex, sceneGrid } from "#shared/rules/grid.ts";
 import { fitRect, type Camera, type Rect, type Size } from "../../lib/camera.ts";
 import { drawnHeights, isometric, K, TOP_DOWN, toView, toWorld, viewBox, type DrawnHeights, type Turn, type View, type ViewBox, type ViewPoint } from "../../lib/view.ts";
 import { fitTarget } from "../../lib/fitTarget.ts";
@@ -84,9 +85,9 @@ export function followCamera(viewport: Size, view: ViewRect, shown: View = TOP_D
  * (lib/view.ts drawnHeights), so a fit never shows terrain the players
  * have not seen.
  */
-export function displaySeen(input: { room: Pick<RoomState, "buildChunks" | "fogTiles" | "meta">; scene: { id: string; bounds: { w: number; h: number } }; fog: boolean }): DrawnHeights {
+export function displaySeen(input: { room: Pick<RoomState, "buildChunks" | "fogTiles" | "meta">; scene: Pick<Scene, "id" | "bounds" | "gridShape">; fog: boolean }): DrawnHeights {
   const { room, scene } = input;
-  return drawnHeights({ chunks: room.buildChunks, sceneId: scene.id, bounds: scene.bounds, fog: input.fog ? room.fogTiles : null, stand: true }, room.meta.settings.feetPerCell);
+  return drawnHeights({ chunks: room.buildChunks, sceneId: scene.id, bounds: scene.bounds, grid: sceneGrid(scene), fog: input.fog ? room.fogTiles : null, stand: true }, room.meta.settings.feetPerCell);
 }
 
 /**
@@ -109,19 +110,18 @@ export function followGround(view: ViewRect, seen: DrawnHeights | null): Rect {
   let box = boxOf(r.y1);
   if (!seen || seen.high <= 0) return rect(box);
   const search = boxOf(r.y1 + K * seen.high);
-  const { w, h } = seen.bounds;
-  for (let y = Math.max(0, Math.floor(search.y0)); y < Math.min(h, Math.ceil(search.y1)); y++) {
-    for (let x = Math.max(0, Math.floor(search.x0)); x < Math.min(w, Math.ceil(search.x1)); x++) {
-      const g = seen.at(x, y);
-      if (g <= 0) continue;
-      const corners = [toView(dm, { x, y }), toView(dm, { x: x + 1, y }), toView(dm, { x, y: y + 1 }), toView(dm, { x: x + 1, y: y + 1 })];
-      const vx0 = Math.min(...corners.map((c) => c.x));
-      const vx1 = Math.max(...corners.map((c) => c.x));
-      const vy0 = Math.min(...corners.map((c) => c.y)) - K * g;
-      const vy1 = Math.max(...corners.map((c) => c.y));
-      if (vx1 < r.x0 || vx0 > r.x1 || vy1 < r.y0 || vy0 > r.y1) continue;
-      box = { x0: Math.min(box.x0, x), y0: Math.min(box.y0, y), x1: Math.max(box.x1, x + 1), y1: Math.max(box.y1, y + 1) };
-    }
+  // Each raised cell by its own polygon, a hex's six corners on a hex scene, so its full projected bounds are the ones the relief draws.
+  for (const cell of seen.cellsIn(search)) {
+    const g = seen.atCell(cell);
+    if (g <= 0) continue;
+    const poly = seen.polygon(cell);
+    const corners = poly.map((p) => toView(dm, p));
+    const vx0 = Math.min(...corners.map((c) => c.x));
+    const vx1 = Math.max(...corners.map((c) => c.x));
+    const vy0 = Math.min(...corners.map((c) => c.y)) - K * g;
+    const vy1 = Math.max(...corners.map((c) => c.y));
+    if (vx1 < r.x0 || vx0 > r.x1 || vy1 < r.y0 || vy0 > r.y1) continue;
+    for (const p of poly) box = { x0: Math.min(box.x0, p.x), y0: Math.min(box.y0, p.y), x1: Math.max(box.x1, p.x), y1: Math.max(box.y1, p.y) };
   }
   return rect(box);
 }
@@ -141,10 +141,9 @@ function rect(b: { x0: number; y0: number; x1: number; y1: number }): Rect {
 /** The highest seen ground inside a world box, in cells, at least 0. */
 function highestIn(seen: DrawnHeights, box: Rect): number {
   let top = 0;
-  const { w, h } = seen.bounds;
-  for (let y = Math.max(0, Math.floor(box.y)); y < Math.min(h, Math.ceil(box.y + box.height)); y++) {
-    for (let x = Math.max(0, Math.floor(box.x)); x < Math.min(w, Math.ceil(box.x + box.width)); x++) top = Math.max(top, seen.at(x, y));
-  }
+  // A square's far edges are left out, as the cells a box covers always were.
+  const far = isHex(seen.grid) ? 0 : 1e-9;
+  for (const c of seen.cellsIn({ x0: box.x, y0: box.y, x1: Math.max(box.x, box.x + box.width - far), y1: Math.max(box.y, box.y + box.height - far) })) top = Math.max(top, seen.atCell(c));
   return top;
 }
 

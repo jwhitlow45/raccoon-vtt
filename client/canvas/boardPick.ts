@@ -1,9 +1,10 @@
 import { DEFAULT_SETTINGS, type BuildChunk, type RoomState, type Scene } from "#shared/model.ts";
-import { occupiedRange, type FootprintToken } from "#shared/rules/footprint.ts";
+import type { FootprintToken } from "#shared/rules/footprint.ts";
 import { sceneGrid, type Grid } from "#shared/rules/grid.ts";
 import { screenToView, viewToScreen, type Camera, type GroundMap, type Insets, type Point, type Size } from "../lib/camera.ts";
 import { footprint, type ViewToken } from "../lib/scene.ts";
-import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, standScale, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickSource, type View } from "../lib/view.ts";
+import { cellsMeeting, footprintCells, ruleBoundPoint } from "../lib/groundCells.ts";
+import { arrowStep, drawnBase, drawnFootprintGround, drawnHeights, flatHeights, heightsStand, pickWalk, standScale, TOP_DOWN, toView, toWorld, type DrawnHeights, type DrawnSource, type PickHit, type PickSource, type View } from "../lib/view.ts";
 import { scopeSlot, type RoomScope } from "../state/scope.ts";
 import { FogView } from "./relief/fogView.ts";
 import { creatureStands } from "./relief/stand.ts";
@@ -44,7 +45,7 @@ export const boardPickSlot = scopeSlot(() => ({ read: null as (() => BoardPick |
 
 /** Top-down's pick, with no heights: what a tool reads before the canvas has measured itself, and in tests. */
 export function flatPick(camera: Camera, bounds: { w: number; h: number } = { w: 0, h: 0 }, grid: Grid = sceneGrid({})): BoardPick {
-  return { camera, view: TOP_DOWN, grid, heights: flatHeights(bounds), src: null, feetPerCell: 5, canvasHeight: Infinity, at: (c) => flatPick(c, bounds, grid), standScale: standScale(false) };
+  return { camera, view: TOP_DOWN, grid, heights: flatHeights(bounds, grid), src: null, feetPerCell: 5, canvasHeight: Infinity, at: (c) => flatPick(c, bounds, grid), standScale: standScale(false) };
 }
 
 /** The board's pick in this Room, or Top-down's at the tool's camera. */
@@ -52,18 +53,27 @@ export function boardPickOf(ctx: { scope: RoomScope; camera(): Camera }): BoardP
   return ctx.scope.get(boardPickSlot).read?.() ?? flatPick(ctx.camera());
 }
 
-/** The world point a press at `screen` means: the first drawn ground its ray meets (view.ts pickGround). */
+/**
+ * The world point a press at `screen` means, for the rules: the first
+ * drawn ground its ray meets (view.ts pickGround), moved toward the hit
+ * cell's center as far as `hexAt` needs to name that cell
+ * (groundCells.ts ruleBoundPoint), so a placement or a tap reads the hex
+ * whose surface showed under the finger.
+ */
 export function pressAt(pick: BoardPick, screen: Point): Point {
-  return pickWalk(pick, screen).point;
+  return pressHit(pick, screen).rule;
+}
+
+/** A press's hit: the walk's geometric point, height and cell, and the point the rules read (`pressAt`). */
+export function pressHit(pick: BoardPick, screen: Point): PickHit & { rule: Point } {
+  const hit = pickWalk(pick, screen);
+  return { ...hit, rule: ruleBoundPoint(pick.grid, hit.cell, hit.point) };
 }
 
 /** A cell's drawn ground in cells of height, under a world point: 0 in Top-down, off the scene and below the stand threshold. */
 export function drawnAt(pick: Pick<BoardPick, "view" | "heights">, p: Point): number {
   if (pick.view.kind === "topDown") return 0;
-  const x = Math.floor(p.x);
-  const y = Math.floor(p.y);
-  const { w, h } = pick.heights.bounds;
-  return x < 0 || y < 0 || x >= w || y >= h ? 0 : pick.heights.at(x, y);
+  return pick.heights.atPoint(p);
 }
 
 /** The view shown with its drawn ground at a world point, in cells: what a mark standing on the ground reads, such as a pin's tip (pins/rules.ts PinView). */
@@ -105,9 +115,9 @@ export function pressGap(pick: Pick<BoardPick, "view" | "camera" | "heights">, p
  */
 export function tokenBase(pick: Pick<BoardPick, "view" | "grid" | "src" | "feetPerCell" | "camera" | "canvasHeight">, token: FootprintToken, stands = true): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  const range = occupiedRange(pick.grid, token);
-  const ground = drawnFootprintGround(pick.src, range) / pick.feetPerCell;
-  return drawnRing(pick, stands)(drawnBase(pick.src, range, token.elevation) / pick.feetPerCell, ground);
+  const cells = footprintCells(pick.grid, token);
+  const ground = drawnFootprintGround(pick.src, cells) / pick.feetPerCell;
+  return drawnRing(pick, stands)(drawnBase(pick.src, cells, token.elevation) / pick.feetPerCell, ground);
 }
 
 /**
@@ -132,16 +142,15 @@ export function standsFor(pick: Pick<BoardPick, "src" | "grid">, aboveFog: (t: V
 /** The highest drawn ground under a footprint, in cells (view.ts drawnFootprintGround): where a ghost of it stands. 0 in Top-down. */
 export function groundUnder(pick: Pick<BoardPick, "view" | "grid" | "src" | "feetPerCell">, token: Omit<FootprintToken, "elevation">): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  return drawnFootprintGround(pick.src, occupiedRange(pick.grid, token)) / pick.feetPerCell;
+  return drawnFootprintGround(pick.src, footprintCells(pick.grid, token)) / pick.feetPerCell;
 }
 
 /** The highest drawn ground under a world rectangle's cells, in cells, down in a pit when every cell is: where an outline row's box stands. 0 in Top-down. */
 export function groundIn(pick: Pick<BoardPick, "view" | "src" | "feetPerCell">, rect: { x: number; y: number; width: number; height: number }): number {
   if (pick.view.kind === "topDown" || !pick.src) return 0;
-  const x0 = Math.floor(rect.x);
-  const y0 = Math.floor(rect.y);
-  const range = { x0, y0, x1: Math.max(x0 + 1, Math.ceil(rect.x + rect.width)), y1: Math.max(y0 + 1, Math.ceil(rect.y + rect.height)) };
-  return drawnFootprintGround(pick.src, range) / pick.feetPerCell;
+  // Its far edges left out, as a footprint's are, so a box ending on a cell line reads no cell past it.
+  const box = { x0: rect.x, y0: rect.y, x1: Math.max(rect.x, rect.x + rect.width - 1e-9), y1: Math.max(rect.y, rect.y + rect.height - 1e-9) };
+  return drawnFootprintGround(pick.src, cellsMeeting(pick.src.grid, box, null)) / pick.feetPerCell;
 }
 
 /** Where a token's ring's center shows on screen: its footprint's middle where its ring draws (`tokenBase`). */
@@ -154,13 +163,9 @@ export function ringCenter(pick: Pick<BoardPick, "view" | "grid" | "camera" | "s
 export function liftIn(heights: DrawnHeights, rect: { x: number; y: number; width: number; height: number }): number {
   if (heights.high <= 0) return 0;
   const { w, h } = heights.bounds;
-  const x0 = Math.max(0, Math.floor(rect.x));
-  const y0 = Math.max(0, Math.floor(rect.y));
-  const x1 = Math.min(w, Math.ceil(rect.x + rect.width));
-  const y1 = Math.min(h, Math.ceil(rect.y + rect.height));
-  if (x0 === 0 && y0 === 0 && x1 === w && y1 === h) return heights.high;
+  if (rect.x <= 0 && rect.y <= 0 && rect.x + rect.width >= w && rect.y + rect.height >= h) return heights.high;
   let top = 0;
-  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) top = Math.max(top, heights.at(x, y));
+  for (const c of heights.cellsIn({ x0: rect.x, y0: rect.y, x1: rect.x + rect.width, y1: rect.y + rect.height })) top = Math.max(top, heights.atCell(c));
   return top;
 }
 
@@ -214,7 +219,7 @@ export function boardPickFor(
   if (view.kind === "topDown") return { ...flatPick(camera, scene.bounds, grid), canvasHeight: input.canvasHeight ?? Infinity, at, standScale: standScale(input.lowPower) };
   const feetPerCell = room?.meta.settings.feetPerCell ?? DEFAULT_SETTINGS.feetPerCell;
   const fog = input.role === "player" && input.fog ? (room?.fogTiles ?? NO_FOG) : null;
-  const { src, heights } = memo.get({ chunks: room?.buildChunks ?? NO_CHUNKS, sceneId: scene.id, bounds: scene.bounds, fog, feetPerCell, scale: camera.scale, lowPower: input.lowPower });
+  const { src, heights } = memo.get({ chunks: room?.buildChunks ?? NO_CHUNKS, sceneId: scene.id, bounds: scene.bounds, grid, fog, feetPerCell, scale: camera.scale, lowPower: input.lowPower });
   return { camera, view, grid, heights, src, feetPerCell, canvasHeight: input.canvasHeight ?? Infinity, at, standScale: standScale(input.lowPower) };
 }
 
@@ -226,6 +231,8 @@ export type DrawnInput = {
   chunks: Readonly<Record<string, BuildChunk>>;
   sceneId: string;
   bounds: { w: number; h: number };
+  /** The scene's grid: drawn heights read its cells, hexes on a hex scene. */
+  grid: Grid;
   /** A player's fog on a scene with fog on, else null: the DM and a scene without fog see all the ground. */
   fog: RoomState["fogTiles"] | null;
   feetPerCell: number;
@@ -250,13 +257,14 @@ export class DrawnHeightsMemo {
       last.input.chunks === input.chunks &&
       last.input.fog === input.fog &&
       last.input.sceneId === input.sceneId &&
+      last.input.grid === input.grid &&
       last.input.bounds.w === input.bounds.w &&
       last.input.bounds.h === input.bounds.h &&
       last.input.feetPerCell === input.feetPerCell
     ) {
       return last;
     }
-    const src: DrawnSource = { chunks: input.chunks, sceneId: input.sceneId, bounds: { w: input.bounds.w, h: input.bounds.h }, fog: input.fog, stand };
+    const src: DrawnSource = { chunks: input.chunks, sceneId: input.sceneId, bounds: { w: input.bounds.w, h: input.bounds.h }, grid: input.grid, fog: input.fog, stand };
     const next = { input, stand, src, heights: drawnHeights(src, input.feetPerCell) };
     this.#last = next;
     return next;

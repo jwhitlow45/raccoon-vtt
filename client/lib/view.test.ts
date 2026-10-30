@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import Konva from "konva";
 import { CHUNK_CELLS, MAX_HEIGHT_FT, MIN_HEIGHT_FT, type BuildChunk, type RoomState } from "#shared/model.ts";
-import type { CellRange } from "#shared/rules/footprint.ts";
-import { gridOfShape, SQUARES } from "#shared/rules/grid.ts";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { encodeHeights } from "#shared/rules/heights.ts";
 import { hexCenter, type HexGrid } from "#shared/rules/hex.ts";
 import { reveal, rng, room, scene } from "#shared/testutil.ts";
 import { groundSource } from "../features/builder/heights/ground.ts";
+import { groundSurface, type GroundCell } from "./groundCells.ts";
 import { screenToView, viewToScreen, type Camera, type Point } from "./camera.ts";
 import {
   arrowStep,
@@ -41,9 +41,11 @@ import {
 
 const TURNS: readonly Turn[] = [0, 1, 2, 3];
 
-/** The cells a footprint of w by h covers from x, y, as footprint.ts occupiedRange gives them. */
-function rectRange(x: number, y: number, w: number, h: number): CellRange {
-  return { x0: x, y0: y, x1: x + w, y1: y + h };
+/** The cells a footprint of w by h covers from x, y, as groundCells.ts footprintCells gives a square footprint's. */
+function rectRange(x: number, y: number, w: number, h: number): GroundCell[] {
+  const out: GroundCell[] = [];
+  for (let row = y; row < y + h; row++) for (let col = x; col < x + w; col++) out.push({ col, row });
+  return out;
 }
 const CAM: Camera = { x: 317.25, y: -41.5, scale: 40 };
 
@@ -302,7 +304,7 @@ function heightsRoom(heights: Record<string, number>): RoomState {
 }
 
 function drawn(state: RoomState, role: "dm" | "player", stand = true): DrawnSource {
-  return { ...groundSource(state, state.scenes.s1!, role), stand };
+  return { ...groundSource(state, state.scenes.s1!, role), grid: SQUARES, stand };
 }
 
 describe("drawn heights (section 4.3)", () => {
@@ -381,7 +383,8 @@ describe("drawn heights (section 4.3)", () => {
 /** Drawn heights from a map of cells to cells of height, on a w by h scene. */
 function heightsOf(w: number, h: number, cells: Record<string, number>): DrawnHeights {
   const values = Object.values(cells);
-  return { bounds: { w, h }, low: Math.min(0, ...values), high: Math.max(0, ...values), at: (x, y) => cells[`${x},${y}`] ?? 0 };
+  const surface = groundSurface(SQUARES, { w, h }, (c) => cells[`${c.col},${c.row}`] ?? 0);
+  return { ...surface, low: Math.min(0, ...values), high: Math.max(0, ...values), at: (x, y) => surface.atCell({ col: x, row: y }) };
 }
 
 function cellOf(p: Point): string {
@@ -421,14 +424,11 @@ describe("pickGround (section 4.3)", () => {
     }
   });
 
-  test("on flat ground, and on a hex scene before H3, it is the point at 0 under the press", () => {
+  test("on flat ground it is the point at 0 under the press", () => {
     for (const turn of TURNS) {
       const view = isometric(turn);
       const screen = screenOf(view, { x: 7.3, y: 2.9 }, 0);
-      for (const src of [
-        { camera: CAM, view, grid: SQUARES, heights: flatHeights({ w: 16, h: 16 }) },
-        { camera: CAM, view, grid: gridOfShape("hexRows"), heights: heightsOf(16, 16, { "7,2": 4 }) },
-      ]) {
+      for (const src of [{ camera: CAM, view, grid: SQUARES, heights: flatHeights({ w: 16, h: 16 }) }]) {
         const p = pickGround(src, screen);
         near(p.x, 7.3, 1e-9, "x");
         near(p.y, 2.9, 1e-9, "y");

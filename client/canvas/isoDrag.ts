@@ -1,9 +1,10 @@
 import type { RoomState } from "#shared/model.ts";
-import { occupiedRange, type CellRange, type FootprintToken } from "#shared/rules/footprint.ts";
+import type { FootprintToken } from "#shared/rules/footprint.ts";
 import { standing, type Standing } from "#shared/rules/heights.ts";
 import { dropView, seenSeat, type DropToken, type Role } from "../features/movement/drop.ts";
 import { screenToView, viewToScreen, type Camera, type Point } from "../lib/camera.ts";
 import { footprint, snapPosition } from "../lib/scene.ts";
+import { footprintCells, type GroundCell } from "../lib/groundCells.ts";
 import { drawnBase, seenFootprintGround, toView, toWorld, type DrawnHeights, type DrawnSource, type View, type ViewPoint } from "../lib/view.ts";
 import type { Grid } from "#shared/rules/grid.ts";
 
@@ -147,7 +148,7 @@ export function levelsOf(heights: DrawnHeights): readonly number[] {
   let levels = levelCache.get(heights);
   if (levels) return levels;
   const seen = new Set<number>([0]);
-  for (let y = 0; y < heights.bounds.h; y++) for (let x = 0; x < heights.bounds.w; x++) seen.add(heights.at(x, y));
+  for (const c of heights.cellsIn({ x0: 0, y0: 0, x1: heights.bounds.w, y1: heights.bounds.h })) seen.add(heights.atCell(c));
   levels = [...seen].sort((a, b) => b - a);
   levelCache.set(heights, levels);
   return levels;
@@ -166,19 +167,16 @@ export function dragGround(heights: DrawnHeights, token: Placed, grid: Grid): Dr
   const size = footprint(token);
   return {
     levels: levelsOf(heights),
-    footGround: (at) => highest(heights, occupiedRange(grid, { ...token, x: at.x, y: at.y, squeeze: undefined })),
+    footGround: (at) => highest(heights, footprintCells(grid, { ...token, x: at.x, y: at.y, squeeze: undefined })),
     snap: (at) => snapPosition(grid, at.x, at.y, size),
   };
 }
 
-function highest(heights: DrawnHeights, r: CellRange): number {
+/** The highest drawn ground over a footprint's own cells, from minus infinity, so a footprint wholly in pits reads its pits. Off the scene a cell reads 0. */
+function highest(heights: DrawnHeights, cells: readonly GroundCell[]): number {
   let top = -Infinity;
-  for (let y = r.y0; y < r.y1; y++) for (let x = r.x0; x < r.x1; x++) top = Math.max(top, inScene(heights, x, y) ? heights.at(x, y) : 0);
+  for (const c of cells) top = Math.max(top, heights.atCell(c));
   return top === -Infinity ? 0 : top;
-}
-
-function inScene(heights: DrawnHeights, x: number, y: number): boolean {
-  return x >= 0 && y >= 0 && x < heights.bounds.w && y < heights.bounds.h;
 }
 
 /**
@@ -192,7 +190,7 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
   const drawn = input.drawn ?? UNCAPPED;
   const size = footprint(token);
   const ruleOf = (t: Placed, base: number): DragRule => ruleFor(seenStanding(src, grid, t), base);
-  const ownBase = drawnBase(src, occupiedRange(grid, token), token.elevation) / feetPerCell;
+  const ownBase = drawnBase(src, footprintCells(grid, token), token.elevation) / feetPerCell;
   const own = ruleOf(token, ownBase);
   const seat = seenSeat(dropView(room, role), token);
   if (!seat) return { w: size.w, h: size.h, own, seat: null, drawn };
@@ -202,7 +200,7 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
     h: size.h,
     own,
     seat: {
-      base: drawnBase(src, occupiedRange(grid, holder), holder.elevation) / feetPerCell,
+      base: drawnBase(src, footprintCells(grid, holder), holder.elevation) / feetPerCell,
       keptAt: seat.keptAt,
       // Off a holder on the ground the token walks, off a flier it keeps its own height, off one inside the ground its own base.
       off: ruleFor(seenStanding(src, grid, holder), ownBase),
@@ -214,7 +212,7 @@ export function dragPlan(input: { room: RoomState; role: Role; src: DrawnSource;
 const UNCAPPED: DragPlan["drawn"] = (base) => base;
 
 function seenStanding(src: DrawnSource, grid: Grid, t: Placed): Standing {
-  return standing(t.elevation, seenFootprintGround(src, occupiedRange(grid, t)));
+  return standing(t.elevation, seenFootprintGround(src, footprintCells(grid, t)));
 }
 
 function ruleFor(footing: Standing, base: number): DragRule {

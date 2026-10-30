@@ -105,7 +105,7 @@ describe("where marks go in Isometric", () => {
     const placed = flatPressTokens(new Map(), [token("flat", { x: 6, y: 6, size: "large" })], 0, () => 2, ground);
     assert.deepEqual(placed.get("flat")!.press, cells);
     const board = readFileSync(new URL("./relief/IsoBoard.tsx", import.meta.url), "utf8");
-    assert.match(board, /flatPressTokens\(flatCache\.current, flat, turn, flatGround, groundAt\)/);
+    assert.match(board, /flatPressTokens\(flatCache\.current, flat, turn, flatGround, groundAt, grid\)/);
     assert.match(board, /renderToken\(t, flatIsoOf\.get\(t\.id\)!\)/);
   });
 

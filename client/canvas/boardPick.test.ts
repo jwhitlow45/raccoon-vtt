@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { SQUARES } from "#shared/rules/grid.ts";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { CHUNK_CELLS, type BuildChunk, type RoomState } from "#shared/model.ts";
@@ -123,7 +124,7 @@ describe("the board's pick (docs/design-v1-isometric-view.md 6.1)", () => {
   test("the drawn heights are made again only when the build, the fog or the threshold changes", () => {
     const state = heightsRoom({ "3,3": 10 });
     const memo = new DrawnHeightsMemo();
-    const input = { chunks: state.buildChunks, sceneId: "s1", bounds: { w: 16, h: 16 }, fog: null, feetPerCell: 5, scale: 40, lowPower: false };
+    const input = { chunks: state.buildChunks, sceneId: "s1", bounds: { w: 16, h: 16 }, grid: SQUARES, fog: null, feetPerCell: 5, scale: 40, lowPower: false };
     const first = memo.get(input);
     assert.equal(memo.get({ ...input, scale: 41 }), first, "a zoom that keeps heights standing reads the same heights");
     assert.notEqual(memo.get({ ...input, scale: 11 }).heights, first.heights, "below the threshold they lie flat");

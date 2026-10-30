@@ -28,6 +28,8 @@ export type IsoGround = {
   place: "ground" | "moving" | "upright";
   /** The drawn ground under a point in cells, in cells of height (lib/view.ts drawnGround): 0 outside the scene, below the threshold and on ground this viewer has not seen. */
   ground: (x: number, y: number) => number;
+  /** On hexes, the highest drawn ground of the hexes a box holds (isoPlace.ts hexBoxGround). Absent on squares, whose boxes read their cells. */
+  top?: (box: { x0: number; y0: number; x1: number; y1: number }) => number;
 };
 
 export const IsoGroundContext = createContext<IsoGround | null>(null);
