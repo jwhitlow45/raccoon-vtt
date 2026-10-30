@@ -4,7 +4,7 @@ import type { LogEntry, RoomState, Viewer } from "#shared/model.ts";
 import { projectArchivedLog, projectState } from "#shared/project.ts";
 import { SessionFold, type LogSession } from "../http/logExport.ts";
 import { previewOmits } from "./fanout.ts";
-import { ScanCancelledError, type Scan } from "./logScanBudget.ts";
+import { ScanBusyError, ScanCancelledError, type Scan } from "./logScanBudget.ts";
 import { declareLogScan, fetchLogIds, readLogEntries, type LogBound, type LogScanRange } from "./persistence.ts";
 
 /**
@@ -31,6 +31,19 @@ export const SUMMARIES_KEPT = 8;
 export const SUMMARY_BYTES = 1024 * 1024;
 
 const CURSOR = "log_history";
+/** How long a scan keeps asking for a connection the pool cannot give, as long as a lease is waited for, and how often. */
+const CONNECTION_WAIT_MS = 1_000;
+const CONNECTION_RETRY_MS = 50;
+/** How long dropping a cancelled scan's connection waits for its backend's cancel. */
+const CANCEL_WAIT_MS = 1_000;
+
+/** The pool had no connection to give within its checkout timeout. */
+class ConnectionUnavailable extends Error {
+  constructor(cause: unknown) {
+    super("no log scan connection", { cause });
+    this.name = "ConnectionUnavailable";
+  }
+}
 
 /** What one request reads the archive as. */
 export type HistoryView = {
@@ -127,6 +140,8 @@ type Canonical = { sessions: LogSession[]; lines: number; bytes: number };
 export type LogHistoryOptions = {
   /** The pool scans take their cursors' connections from, apart from the rooms' own. */
   pool: Pick<pg.Pool, "connect">;
+  /** Where a cancelled scan's backend query is cancelled from: any pool but the scans' own. */
+  cancelPool?: Pick<pg.Pool, "query">;
   batchRows?: number;
   summaryBytes?: number;
   /** For tests: runs in each batch's turn, after its rows are read. */
@@ -135,15 +150,19 @@ export type LogHistoryOptions = {
 
 export class LogHistory {
   #pool: Pick<pg.Pool, "connect">;
+  #cancelPool: Pick<pg.Pool, "query"> | undefined;
   #batchRows: number;
   #summaryBytes: number;
   #onBatch: LogHistoryOptions["onBatch"];
   /** Canonical session lists, least recently used first. */
   #summaries = new Map<string, Canonical>();
   #summaryTotal = 0;
+  /** Lists being found now, by key. */
+  #folding = new Map<string, Promise<Canonical | null>>();
 
   constructor(opts: LogHistoryOptions) {
     this.#pool = opts.pool;
+    this.#cancelPool = opts.cancelPool;
     this.#batchRows = opts.batchRows ?? HISTORY_BATCH_ROWS;
     this.#summaryBytes = opts.summaryBytes ?? SUMMARY_BYTES;
     this.#onBatch = opts.onBatch;
@@ -152,35 +171,57 @@ export class LogHistory {
   /**
    * The view's readable lines over a range, a batch at a time, each batch
    * projected in its own turn. Batches with nothing readable are passed
-   * over, never answered. The cursor's connection is taken in the first
-   * turn and held to the end, and a cancelled scan drops it at once, which
-   * ends its query.
+   * over, never answered.
+   *
+   * The cursor's connection is taken in the first turn and held to the
+   * end. Every step on it is bounded and stops when the scan is cancelled:
+   * taking it (the pool's checkout timeout, or the cancel, which disposes
+   * of a connection handed over too late), each query (the pool's query
+   * timeout), and the rollback at the end. A cancelled scan cancels its
+   * backend's query, then drops the connection, without a rollback. A
+   * connection the pool cannot give now frees the turn and is asked for
+   * again, until the lease wait runs out.
    */
   async *batches(view: HistoryView, range: Pick<LogScanRange, "order" | "lower" | "upper">, scan: Scan, pass: "page" | "sessions" | "bounds" | "lines"): AsyncGenerator<LogEntry[]> {
     let client: pg.PoolClient | null = null;
-    let dropped = false;
-    const drop = () => {
-      if (client && !dropped) {
-        dropped = true;
-        client.release(true);
-      }
+    let released = false;
+    let ended = false;
+    const onEnd = () => {
+      ended = true;
     };
+    const drop = () => {
+      const held = client;
+      if (!held || released) return;
+      released = true;
+      void this.#cancelBackend(held, ended).finally(() => held.release(true));
+    };
+    // Kept until the connection is released, so a cancel during the closing rollback still drops it.
     scan.signal.addEventListener("abort", drop);
+    let unavailableSince: number | null = null;
     try {
       for (;;) {
-        const batch = await scan.batch(async () => {
-          if (!client) {
-            client = await this.#pool.connect();
-            if (scan.signal.aborted) drop();
-            // One snapshot for the cursor and every entry read beside it.
-            await client.query("begin isolation level repeatable read read only");
-            await declareLogScan(client, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.seq });
-          }
-          const ids = await fetchLogIds(client, CURSOR, this.#batchRows);
-          const rows = await readLogEntries(client, view.roomId, ids);
-          await this.#onBatch?.({ roomId: view.roomId, pass });
-          return { entries: projectRows(view, rows), done: ids.length < this.#batchRows };
-        });
+        let batch: { entries: LogEntry[]; done: boolean };
+        try {
+          batch = await scan.batch(async () => {
+            if (!client) {
+              client = await this.#connect(scan);
+              client.once("end", onEnd);
+              // One snapshot for the cursor and every entry read beside it.
+              await client.query("begin isolation level repeatable read read only");
+              await declareLogScan(client, CURSOR, { ...range, roomId: view.roomId, maxSeq: view.seq });
+            }
+            const ids = await fetchLogIds(client, CURSOR, this.#batchRows);
+            const rows = await readLogEntries(client, view.roomId, ids);
+            await this.#onBatch?.({ roomId: view.roomId, pass });
+            return { entries: projectRows(view, rows), done: ids.length < this.#batchRows };
+          });
+        } catch (err) {
+          if (!(err instanceof ConnectionUnavailable) || scan.signal.aborted) throw err;
+          unavailableSince ??= scan.now();
+          if (scan.now() - unavailableSince >= CONNECTION_WAIT_MS) throw new ScanBusyError();
+          await scan.wait(CONNECTION_RETRY_MS);
+          continue;
+        }
         if (batch.entries.length > 0) yield batch.entries;
         if (batch.done) return;
       }
@@ -188,18 +229,70 @@ export class LogHistory {
       if (scan.signal.aborted) throw new ScanCancelledError(scan.signal.reason);
       throw err;
     } finally {
-      scan.signal.removeEventListener("abort", drop);
       const held = client as pg.PoolClient | null;
-      if (held && !dropped) {
-        dropped = true;
-        try {
-          await held.query("rollback");
-          held.release();
-        } catch {
-          held.release(true);
+      if (held && !released) {
+        // A cancelled scan's connection is already dropped (the abort listener), so only an ended one is left here.
+        if (ended) drop();
+        else {
+          try {
+            await held.query("rollback");
+          } catch {
+            drop();
+          }
+          if (!released) {
+            released = true;
+            held.release();
+          }
         }
       }
+      scan.signal.removeEventListener("abort", drop);
+      held?.removeListener("end", onEnd);
     }
+  }
+
+  /** A connection for the scan, or ConnectionUnavailable. Cancelling stops the wait, and a connection handed over after that is disposed of. */
+  #connect(scan: Scan): Promise<pg.PoolClient> {
+    if (scan.signal.aborted) return Promise.reject(new ScanCancelledError(scan.signal.reason));
+    return new Promise<pg.PoolClient>((resolve, reject) => {
+      let settled = false;
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        reject(new ScanCancelledError(scan.signal.reason));
+      };
+      scan.signal.addEventListener("abort", onAbort, { once: true });
+      this.#pool.connect().then(
+        (client) => {
+          scan.signal.removeEventListener("abort", onAbort);
+          if (settled) client.release(true);
+          else {
+            settled = true;
+            resolve(client);
+          }
+        },
+        (err: unknown) => {
+          scan.signal.removeEventListener("abort", onAbort);
+          if (settled) return;
+          settled = true;
+          reject(new ConnectionUnavailable(err));
+        },
+      );
+    });
+  }
+
+  /**
+   * Cancels what the scan's backend is running, so a long sort does not run on after its lease is freed. Skipped
+   * when the connection has already ended, since its process id could belong to another session by then.
+   */
+  async #cancelBackend(client: pg.PoolClient, ended: boolean): Promise<void> {
+    const pid = (client as { processID?: number | null }).processID;
+    if (ended || !this.#cancelPool || typeof pid !== "number") return;
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, CANCEL_WAIT_MS);
+    });
+    await Promise.race([this.#cancelPool.query("select pg_cancel_backend($1)", [pid]).then(() => undefined, () => undefined), late]);
+    clearTimeout(timer);
   }
 
   /**
@@ -214,10 +307,10 @@ export class LogHistory {
       ? { order: "asc", lower: bound(q.after!, false) }
       : { order: "desc", ...(q.before !== undefined ? { upper: bound(q.before, false) } : {}) };
     const got: LogEntry[] = [];
-    scan: for await (const batch of this.batches(view, range, scan, "page")) {
+    reading: for await (const batch of this.batches(view, range, scan, "page")) {
       for (const entry of batch) {
         got.push(entry);
-        if (got.length === q.limit) break scan;
+        if (got.length === q.limit) break reading;
       }
     }
     if (got.length === 0) return { entries: [], nextBefore: null, nextAfter: null };
@@ -236,13 +329,54 @@ export class LogHistory {
    * keep is found again by each request, which keeps only its own page.
    */
   async sessions(view: HistoryView, q: { before?: string; limit: number }, scan: Scan): Promise<SessionPage> {
-    const key = `${view.roomId}|${view.seq}|${view.viewer.memberId}|${view.viewer.role}|${view.sceneId ?? ""}|${view.previewBy ?? ""}`;
+    const key = `${view.roomId}|${view.seq}|${stateSerial(view.state)}|${view.viewer.memberId}|${view.viewer.role}|${view.sceneId ?? ""}|${view.previewBy ?? ""}`;
+    const hit = this.#hit(key);
+    if (hit) return { ...sliceSessions(hit.sessions, q.before, q.limit), lines: hit.lines };
+    // A second request for a list being found waits for that one, holding nothing, rather than finding it again.
+    const pending = this.#folding.get(key);
+    if (pending) {
+      const found = await pending;
+      if (found) {
+        this.#hit(key);
+        return { ...sliceSessions(found.sessions, q.before, q.limit), lines: found.lines };
+      }
+    }
+    let share!: (list: Canonical | null) => void;
+    const shared = new Promise<Canonical | null>((resolve) => (share = resolve));
+    this.#folding.set(key, shared);
+    try {
+      const { list, page } = await this.#foldSessions(view, q, scan);
+      if (list) this.#remember(key, list);
+      share(list);
+      return page;
+    } catch (err) {
+      share(null);
+      throw err;
+    } finally {
+      if (this.#folding.get(key) === shared) this.#folding.delete(key);
+    }
+  }
+
+  /** What the session cache holds, for tests. */
+  get cached(): { lists: number; bytes: number } {
+    let bytes = 0;
+    for (const list of this.#summaries.values()) bytes += list.bytes;
+    if (bytes !== this.#summaryTotal) throw new Error(`session cache total ${this.#summaryTotal} is not its lists' ${bytes}`);
+    return { lists: this.#summaries.size, bytes };
+  }
+
+  /** The cached list for a key, marked most recently used. */
+  #hit(key: string): Canonical | undefined {
     const hit = this.#summaries.get(key);
     if (hit) {
       this.#summaries.delete(key);
       this.#summaries.set(key, hit);
-      return { ...sliceSessions(hit.sessions, q.before, q.limit), lines: hit.lines };
     }
+    return hit;
+  }
+
+  /** One pass over the view's lines: the page asked for, and the whole list when it is small enough to keep. */
+  async #foldSessions(view: HistoryView, q: { before?: string; limit: number }, scan: Scan): Promise<{ list: Canonical | null; page: SessionPage }> {
     let list: LogSession[] | null = [];
     let bytes = 0;
     // Once the list outgrows the budget only the sessions this page can need are kept: the newest `limit + 1` before `before`.
@@ -268,13 +402,10 @@ export class LogHistory {
     }
     fold.end();
     const all = list as LogSession[] | null;
-    if (all !== null) {
-      this.#remember(key, { sessions: all, lines, bytes });
-      return { ...sliceSessions(all, q.before, q.limit), lines };
-    }
+    if (all !== null) return { list: { sessions: all, lines, bytes }, page: { ...sliceSessions(all, q.before, q.limit), lines } };
     const more = ring.length > q.limit;
     const page = ring.slice(-q.limit).reverse();
-    return { sessions: page, lines, nextSessionsBefore: more ? page[page.length - 1]!.firstId : null };
+    return { list: null, page: { sessions: page, lines, nextSessionsBefore: more ? page[page.length - 1]!.firstId : null } };
   }
 
   /** The first and last readable lines an export covers, read without keeping any line between. */
@@ -310,6 +441,11 @@ export class LogHistory {
   }
 
   #remember(key: string, list: Canonical): void {
+    const old = this.#summaries.get(key);
+    if (old) {
+      this.#summaries.delete(key);
+      this.#summaryTotal -= old.bytes;
+    }
     this.#summaries.set(key, list);
     this.#summaryTotal += list.bytes;
     for (const [old, kept] of this.#summaries) {
@@ -318,6 +454,24 @@ export class LogHistory {
       this.#summaryTotal -= kept.bytes;
     }
   }
+}
+
+/**
+ * A number for each committed state the reader has seen. A room keeps one
+ * state object from one commit to the next, and a load makes a new one, so
+ * this tells apart two loads of a room at the same seq: an old import's lines
+ * can reach the archive as a room loads (persistence.ts loadRoom) without any
+ * op, and a list kept from before must not answer for after.
+ */
+const stateSerials = new WeakMap<RoomState, number>();
+let lastSerial = 0;
+function stateSerial(state: RoomState): number {
+  let serial = stateSerials.get(state);
+  if (serial === undefined) {
+    serial = ++lastSerial;
+    stateSerials.set(state, serial);
+  }
+  return serial;
 }
 
 /** A view's readable lines among `rows`, against its one captured state. */

@@ -16,6 +16,8 @@ import { registerDmRoutes } from "./http/dm.ts";
 import { registerExportRoutes, type ExportOptions } from "./http/export.ts";
 import { registerJoinRoutes } from "./http/join.ts";
 import { registerLogRoutes, type LogRouteOptions } from "./http/log.ts";
+import { watchPoolErrors } from "./db.ts";
+import { DEFAULT_SCAN_BUDGET, LogScanBudget } from "./rooms/logScanBudget.ts";
 import { registerReceiptRoutes } from "./http/receipts.ts";
 import { registerMemberRoutes } from "./http/members.ts";
 import { registerRoomRoutes } from "./http/rooms.ts";
@@ -51,12 +53,14 @@ export type AppDeps = {
 };
 
 /**
- * Connections the log archive's scans may hold, apart from the rooms' pool:
- * the scan budget's two page leases and two export leases
- * (server/rooms/logScanBudget.ts), so no archive reader can take a
- * connection a room needs to commit.
+ * The log archive's scans take their connections from a pool of their own,
+ * one connection per lease of the scan budget (server/rooms/logScanBudget.ts),
+ * so no archive reader can take a connection a room needs to commit. Taking a
+ * connection and every query on one are bounded, so a stalled connection
+ * cannot hold a scan's turn or lease past its request's deadline.
  */
-const LOG_SCAN_CONNECTIONS = 4;
+const LOG_SCAN_CHECKOUT_MS = 500;
+const LOG_SCAN_QUERY_MS = 15_000;
 
 /**
  * Builds the HTTP and WebSocket server without listening, so integration
@@ -142,10 +146,14 @@ export async function buildApp({ config, pool, gateway, hasher, rooms, ws, expor
   await registerAdminRoutes(app, kit);
   await registerWebSocket(app, { manager, config, options: ws });
   await registerExportRoutes(app, kit, { manager, options: exportOptions });
-  const scanPool = new pg.Pool({ ...pool.options, max: LOG_SCAN_CONNECTIONS });
-  scanPool.on("error", (err) => app.log.warn({ err }, "idle log scan connection failed"));
+  const budget = log?.budget;
+  const leases = budget instanceof LogScanBudget ? budget.options.leases : { ...DEFAULT_SCAN_BUDGET.leases, ...budget?.leases };
+  const scanPool = new pg.Pool({ ...pool.options, max: leases.page + leases.export, connectionTimeoutMillis: LOG_SCAN_CHECKOUT_MS, query_timeout: LOG_SCAN_QUERY_MS });
+  // A connection that drops while a scan holds it errors on the client, which must never go unheard.
+  watchPoolErrors(scanPool, (err, where) => app.log.warn({ err, where }, "log scan connection failed"));
   app.addHook("onClose", async () => scanPool.end());
-  await registerLogRoutes(app, kit, { manager, options: { ...log, pool: scanPool } });
+  // A cancelled scan's backend query is cancelled from the rooms' pool, never from the scans' own, which may be full.
+  await registerLogRoutes(app, kit, { manager, options: { ...log, pool: scanPool, history: { cancelPool: pool, ...log?.history } } });
   await registerReceiptRoutes(app, kit, { manager });
   await registerXCardRoutes(app, kit, { manager });
   await registerPlayerViewRoutes(app, kit, { manager });

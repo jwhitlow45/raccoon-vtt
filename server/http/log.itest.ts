@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { after, before, describe, test } from "node:test";
 import pg from "pg";
 import { uuidv7 } from "#shared/ids.ts";
+import { createInitialState } from "#shared/initial.ts";
 import type { LogEntry } from "#shared/model.ts";
 import type { Op } from "#shared/protocol.ts";
 import { rng } from "#shared/testutil.ts";
@@ -260,8 +262,9 @@ describe("archive reads in turns", () => {
     g.reached();
     await g.release;
   };
+  const budget = new LogScanBudget();
   before(async () => {
-    t = await startEngine({ log: { history: { batchRows: 2, onBatch } } });
+    t = await startEngine({ log: { budget, history: { batchRows: 2, onBatch } } });
   });
   after(() => t.close());
 
@@ -514,14 +517,14 @@ describe("the archive reader against an array", () => {
           );
         await store(rows);
         const history = new LogHistory({ pool: scanPool, batchRows: 1 + Math.floor(random() * 600) });
-        const answers = async (who: Who) => {
+        const answers = async (who: Who, reader = history) => {
           const view = captureView({ state, seq: seq + 1 }, roomId, who);
           const scan = budget.open({ pool: "page", roomId, memberId: who.memberId });
           try {
             const back: string[] = [];
             let before: string | undefined;
             for (;;) {
-              const page = await history.page(view, { before, limit: 20 + Math.floor(random() * 81) }, scan);
+              const page = await reader.page(view, { before, limit: 20 + Math.floor(random() * 81) }, scan);
               back.unshift(...page.entries.map((e) => e.id));
               if (page.nextBefore === null) break;
               before = page.nextBefore;
@@ -529,13 +532,13 @@ describe("the archive reader against an array", () => {
             const forward: string[] = [];
             let after = "0:0";
             for (;;) {
-              const page = await history.page(view, { after, limit: 20 + Math.floor(random() * 81) }, scan);
+              const page = await reader.page(view, { after, limit: 20 + Math.floor(random() * 81) }, scan);
               forward.push(...page.entries.map((e) => e.id));
               if (page.nextAfter === null) break;
               after = page.nextAfter;
             }
-            const sessions = await history.sessions(view, { limit: 50 }, scan);
-            const ends = await history.bounds(view, {}, scan);
+            const sessions = await reader.sessions(view, { limit: 50 }, scan);
+            const ends = await reader.bounds(view, {}, scan);
             return { back, forward, lines: sessions.lines, sessions: sessions.sessions.map((s) => [s.firstId, s.lastId, s.lines]), ends: ends ? [ends.first.id, ends.last.id] : null };
           } finally {
             scan.close();
@@ -562,10 +565,314 @@ describe("the archive reader against an array", () => {
           extra.push({ id: `${s}:${50_000 + extra.length}`, at: at2, kind: "whisper", from: dmId, to: [players[0]!], text: "private" });
         }
         await store(extra);
-        for (const who of viewers.slice(2)) assert.deepEqual(await answers(who), first.get(who.memberId), `seed ${seed} private additions`);
+        // A fresh reader, so the session lists are found again rather than read from the cache.
+        const again = new LogHistory({ pool: scanPool, batchRows: 1 + Math.floor(random() * 600) });
+        for (const who of viewers.slice(2)) assert.deepEqual(await answers(who, again), first.get(who.memberId), `seed ${seed} private additions`);
       }
     } finally {
       budget.close();
+      await scanPool.end();
+    }
+  });
+});
+
+/** A scan connection whose answers a test controls. Pending queries fail when it is destroyed, as a real one's do. */
+class FakeConnection extends EventEmitter {
+  processID = 4242;
+  readonly steps: string[];
+  readonly released: (boolean | undefined)[] = [];
+  hang: RegExp | null = null;
+  #rows: LogEntry[];
+  #at = 0;
+  #pending: ((err: Error) => void)[] = [];
+
+  constructor(rows: LogEntry[], steps: string[]) {
+    super();
+    this.#rows = rows;
+    this.steps = steps;
+  }
+
+  query(text: string, params?: unknown[]): Promise<{ rows: unknown[] }> {
+    const word = text.trim().split(/\s+/)[0]!.toLowerCase();
+    this.steps.push(word);
+    if (this.hang?.test(text.trim())) return new Promise((_resolve, reject) => this.#pending.push(reject));
+    if (word === "fetch") {
+      const n = Number(/fetch (\d+)/.exec(text)![1]);
+      const ids = this.#rows.slice(this.#at, this.#at + n).map((r) => ({ id: r.id }));
+      this.#at += ids.length;
+      return Promise.resolve({ rows: ids });
+    }
+    if (text.includes("id = any")) {
+      const ids = new Set(params![1] as string[]);
+      return Promise.resolve({ rows: this.#rows.filter((r) => ids.has(r.id)).map((r) => ({ id: r.id, entry: r })) });
+    }
+    return Promise.resolve({ rows: [] });
+  }
+
+  release(destroy?: boolean): void {
+    this.steps.push(destroy ? "destroy" : "release");
+    this.released.push(destroy);
+    if (destroy) for (const reject of this.#pending.splice(0)) reject(new Error("Connection terminated"));
+  }
+}
+
+describe("a scan's connection, every step bounded and cancellable", () => {
+  const dm = { id: "dm1", rev: 1, name: "DM", color: "#f7df00", kind: "dm" as const, createdAt: "2026-01-01T00:00:00Z" };
+  const state = createInitialState({ roomName: "Fake", dm: dm as never });
+  const rows: LogEntry[] = Array.from({ length: 6 }, (_, i) => ({ id: `1:${i}`, at: "2025-10-01T19:00:00.000Z", kind: "chat", from: dm.id, text: `line ${i}` }));
+  const view = captureView({ state, seq: 10 }, "FAKEROOM", { memberId: dm.id, role: "dm" });
+  const tick = () => new Promise<void>((r) => setImmediate(r));
+
+  function rig(connect: () => Promise<unknown>, cancelLog?: string[]) {
+    let now = 0;
+    const timers: { at: number; fn: () => void }[] = [];
+    const budget = new LogScanBudget({
+      now: () => now,
+      setTimer: (fn, ms) => {
+        const t = { at: now + ms, fn };
+        timers.push(t);
+        return t;
+      },
+      clearTimer: (t) => void timers.splice(timers.indexOf(t as never), 1),
+    });
+    const advance = (ms: number) => {
+      now += ms;
+      for (const t of timers.filter((x) => x.at <= now)) {
+        timers.splice(timers.indexOf(t), 1);
+        t.fn();
+      }
+    };
+    const cancelPool = { query: (_sql: string, params: unknown[]) => (cancelLog?.push(`cancel ${String(params[0])}`), Promise.resolve({ rows: [] })) };
+    const history = new LogHistory({ pool: { connect } as never, cancelPool: cancelPool as never, batchRows: 2 });
+    const scan = budget.open({ pool: "page", roomId: "FAKEROOM", memberId: dm.id });
+    return { budget, history, scan, advance };
+  }
+
+  test("a checkout still waiting is given up on cancel, and a connection handed over after that is closed", async () => {
+    let hand!: (c: FakeConnection) => void;
+    const late = new FakeConnection(rows, []);
+    const { budget, history, scan } = rig(() => new Promise((resolve) => (hand = resolve)));
+    const page = history.page(view, { limit: 50 }, scan).then(
+      () => "served",
+      (err: unknown) => (err instanceof ScanCancelledError ? "cancelled" : String(err)),
+    );
+    await tick();
+    assert.equal(budget.usage.turns.page, 1);
+    scan.cancel(new Error("deadline"));
+    assert.equal(await page, "cancelled");
+    assert.equal(budget.usage.turns.page, 0);
+    scan.close();
+    assert.equal(budget.usage.leases.page, 0);
+    hand(late);
+    await tick();
+    assert.deepEqual(late.released, [true], "the late connection is closed, never used");
+  });
+
+  test("a checkout the pool cannot give frees the turn and is asked again, until the lease wait runs out", async () => {
+    let calls = 0;
+    const good = new FakeConnection(rows, []);
+    const { budget, history, scan, advance } = rig(() => (++calls <= 2 ? Promise.reject(new Error("timeout exceeded when trying to connect")) : Promise.resolve(good)));
+    const page = history.page(view, { limit: 50 }, scan);
+    for (let i = 0; i < 2; i++) {
+      await tick();
+      assert.equal(budget.usage.turns.page, 0, "no turn is held while waiting for a connection");
+      advance(50);
+    }
+    assert.equal((await page).entries.length, 6);
+    assert.equal(calls, 3);
+    scan.close();
+
+    const never = rig(() => Promise.reject(new Error("timeout exceeded when trying to connect")));
+    const refused = never.history.page(view, { limit: 50 }, never.scan).then(
+      () => "served",
+      (err: unknown) => (err instanceof ScanBusyError ? "busy" : String(err)),
+    );
+    for (let i = 0; i < 25; i++) {
+      await tick();
+      never.advance(50);
+    }
+    assert.equal(await refused, "busy");
+    never.scan.close();
+    assert.deepEqual(never.budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+  });
+
+  test("a cancelled scan cancels its backend's query first, then drops the connection without a rollback", async () => {
+    const steps: string[] = [];
+    const conn = new FakeConnection(rows, steps);
+    const { history, scan } = rig(() => Promise.resolve(conn), steps);
+    let fetches = 0;
+    const query = conn.query.bind(conn);
+    conn.query = (text: string, params?: unknown[]) => {
+      if (/^fetch/.test(text) && ++fetches === 2) conn.hang = /^fetch/;
+      return query(text, params);
+    };
+    const page = history.page(view, { limit: 50 }, scan).then(
+      () => "served",
+      (err: unknown) => (err instanceof ScanCancelledError ? "cancelled" : String(err)),
+    );
+    for (let i = 0; i < 20 && fetches < 2; i++) await tick();
+    scan.cancel(new Error("client went away"));
+    assert.equal(await page, "cancelled");
+    await tick();
+    assert.deepEqual(steps.slice(-2), ["cancel 4242", "destroy"]);
+    assert.ok(!steps.includes("rollback"));
+    scan.close();
+  });
+
+  test("a closing rollback that stalls is dropped when the scan is cancelled, and an ended connection is not cancelled by its old id", async () => {
+    const steps: string[] = [];
+    const conn = new FakeConnection(rows, steps);
+    conn.hang = /^rollback/;
+    const { budget, history, scan } = rig(() => Promise.resolve(conn), steps);
+    let settled = false;
+    const page = history.page(view, { limit: 50 }, scan).finally(() => (settled = true));
+    for (let i = 0; i < 20 && !steps.includes("rollback"); i++) await tick();
+    await tick();
+    assert.equal(settled, false, "the rollback is still waiting");
+    conn.emit("end");
+    scan.cancel(new Error("deadline"));
+    await page;
+    assert.deepEqual(conn.released, [true]);
+    assert.ok(!steps.some((s) => s.startsWith("cancel")), "an ended connection's id is never cancelled");
+    scan.close();
+    assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+  });
+});
+
+describe("archive scans and what happens around them", () => {
+  let t: Engine;
+  const budget = new LogScanBudget();
+  const counted: Record<string, number> = {};
+  let gate: { pass: string; reached: () => void; release: Promise<void> } | null = null;
+  const onBatch = async ({ pass }: { pass: string }) => {
+    counted[pass] = (counted[pass] ?? 0) + 1;
+    const g = gate;
+    if (!g || g.pass !== pass) return;
+    gate = null;
+    g.reached();
+    await g.release;
+  };
+  before(async () => {
+    t = await startEngine({ log: { budget, history: { batchRows: 2, onBatch } } });
+  });
+  after(() => t.close());
+
+  function pause(pass: string): { reached: Promise<void>; release: () => void } {
+    let reached!: () => void;
+    let release!: () => void;
+    const at = new Promise<void>((r) => (reached = r));
+    gate = { pass, reached, release: new Promise<void>((r) => (release = r)) };
+    return { reached: at, release };
+  }
+
+  async function roomWithLines(name: string): Promise<{ dm: TestClient; roomId: string; dmId: string }> {
+    const dm = t.client();
+    const { roomId } = await dm.createRoom(name);
+    const dmId = (await dm.me(roomId)).memberId!;
+    for (let i = 0; i < 6; i++) {
+      const entry = { id: `0:${i}`, at: "2025-10-01T19:00:00.000Z", kind: "chat", from: dmId, text: `line ${i}` };
+      await t.pool.query("insert into room_log (room_id, id, at, entry) values ($1, $2, $3, $4)", [roomId, entry.id, entry.at, JSON.stringify(entry)]);
+    }
+    return { dm, roomId, dmId };
+  }
+
+  const idle = async () => {
+    for (let i = 0; i < 100 && budget.usage.scans > 0; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.deepEqual(budget.usage, { turns: { page: 0, export: 0 }, leases: { page: 0, export: 0 }, waiting: 0, scans: 0 });
+  };
+
+  test("a scan whose connection the database ends fails its request, and the server goes on", async () => {
+    const { dm, roomId } = await roomWithLines("Dropped");
+    const paused = pause("page");
+    const pending = dm.get(`/api/rooms/${roomId}/log?limit=50`);
+    await paused.reached;
+    const { rows } = await t.pool.query<{ pid: number }>(
+      "select pid from pg_stat_activity where datname = current_database() and state = 'idle in transaction' and query like 'select id, entry from room_log%'",
+    );
+    assert.equal(rows.length, 1, "the gated scan's backend");
+    await t.pool.query("select pg_terminate_backend($1)", [rows[0]!.pid]);
+    await new Promise((r) => setTimeout(r, 100));
+    paused.release();
+    const res = await pending;
+    assert.ok(res.statusCode >= 500, `${res.statusCode} ${res.body}`);
+    await idle();
+    assert.equal((await dm.get(`/api/rooms/${roomId}/log?limit=50`)).statusCode, 200, "the next page is read on a new connection");
+  });
+
+  test("deleting a room while one of its pages waits ends the page busy and frees its lease", async () => {
+    const { dm, roomId } = await roomWithLines("Deleted");
+    const paused = pause("page");
+    const pending = dm.get(`/api/rooms/${roomId}/log?limit=50`);
+    await paused.reached;
+    const gone = await dm.delete(`/api/rooms/${roomId}`, { name: "Deleted" });
+    assert.equal(gone.statusCode, 204, gone.body);
+    paused.release();
+    const res = await pending;
+    assert.equal(res.statusCode, 503, res.body);
+    assert.equal(res.json<{ error: string }>().error, "busy");
+    await idle();
+  });
+
+  test("two listings of one list at once find it once, and later ones read it from the cache", async () => {
+    const { dm, roomId } = await roomWithLines("Twice");
+    const phone = t.client();
+    phone.token = dm.token;
+    const before = counted.sessions ?? 0;
+    const paused = pause("sessions");
+    const first = dm.get(`/api/rooms/${roomId}/log/sessions`);
+    await paused.reached;
+    const second = phone.get(`/api/rooms/${roomId}/log/sessions`);
+    await new Promise((r) => setTimeout(r, 50));
+    paused.release();
+    const [a, b] = await Promise.all([first, second]);
+    assert.equal(a.statusCode, 200, a.body);
+    assert.equal(b.body, a.body);
+    const found = (counted.sessions ?? 0) - before;
+    for (let i = 0; i < 3; i++) assert.equal((await dm.get(`/api/rooms/${roomId}/log/sessions`)).body, a.body);
+    assert.equal((counted.sessions ?? 0) - before, found, "the repeats read no rows");
+    assert.ok(found <= 5, `one pass over 6 lines in batches of 2, not two (${found} batches)`);
+  });
+
+  test("a list found twice at once is held once in the cache, and is still a hit afterwards", async () => {
+    const { roomId, dmId } = await roomWithLines("Held once");
+    const actor = await t.manager.acquire(roomId);
+    const view = captureView(actor.committed, roomId, { memberId: dmId, role: "dm" });
+    const scanPool = new pg.Pool({ connectionString: t.config.DATABASE_URL, max: 2 });
+    const own = new LogScanBudget();
+    let batches = 0;
+    let hold: (() => void) | null = null;
+    const held = new Promise<void>((r) => (hold = r));
+    let waiting = true;
+    const history = new LogHistory({
+      pool: scanPool,
+      batchRows: 2,
+      onBatch: async () => {
+        batches++;
+        if (waiting) {
+          waiting = false;
+          await held;
+        }
+      },
+    });
+    try {
+      const run = () => {
+        const scan = own.open({ pool: "page", roomId, memberId: dmId });
+        return history.sessions(view, { limit: 25 }, scan).finally(() => scan.close());
+      };
+      const one = run();
+      for (let i = 0; i < 50 && batches === 0; i++) await new Promise((r) => setTimeout(r, 10));
+      const two = run();
+      await new Promise((r) => setTimeout(r, 20));
+      hold!();
+      const [x, y] = await Promise.all([one, two]);
+      assert.deepEqual(y, x);
+      const after = batches;
+      assert.equal(history.cached.lists, 1);
+      await run();
+      assert.equal(batches, after, "a hit");
+      assert.equal(history.cached.lists, 1);
+    } finally {
+      own.close();
       await scanPool.end();
     }
   });

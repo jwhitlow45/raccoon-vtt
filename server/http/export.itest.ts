@@ -1022,6 +1022,28 @@ describe("an imported log in the archive (shared/logRings.ts)", () => {
     }
   });
 
+  test("a session list kept before a reload is not used after it, though the seq is the same and the load wrote lines", async () => {
+    const assets = t.app.assets;
+    let room = false;
+    assets.archiveDiskOk = () => Promise.resolve(room);
+    try {
+      const { roomId, importer } = await importWithLog((i) => ({ id: `${i + 1}:0`, at: "2026-10-01T00:00:00.000Z", kind: "chat", text: `line ${i}` }), 20);
+      const lines = async () => {
+        const res = await importer.get(`/api/rooms/${roomId}/log/sessions`);
+        assert.equal(res.statusCode, 200, res.body);
+        return res.json<{ lines: number }>().lines;
+      };
+      assert.equal(await lines(), 0, "the short disk kept the import's lines out of the archive");
+      const seq = t.manager.get(roomId)!.committed.seq;
+      await t.manager.unload(roomId, CLOSE.evicted, false);
+      room = true;
+      assert.equal(await lines(), 20, "the reload's repair wrote them, and the list is found again");
+      assert.equal(t.manager.get(roomId)!.committed.seq, seq);
+    } finally {
+      delete (assets as { archiveDiskOk?: unknown }).archiveDiskOk;
+    }
+  });
+
   test("a load writes no seq-0 line again once the archive holds some of the import's, so rows an older archive lost stay lost", async () => {
     const { roomId, importer } = await importWithLog((i) => ({ id: `${i + 1}:0`, at: "2026-10-01T00:00:00.000Z", kind: "chat", text: `line ${i}` }), 20);
     // As the trim to LEGACY_LOG_STORED rows an archive once took after each snapshot left it: its oldest rows gone.
