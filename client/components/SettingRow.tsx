@@ -26,7 +26,9 @@ export function SettingRow(props: { name: string; help?: ReactNode; wide?: boole
   const ids: SettingIds = { nameId, helpId: props.help ? helpId : undefined };
   const control = typeof props.children === "function" ? props.children(ids) : props.children;
   return (
+    // Marked for the spacing check (e2e/helpers/spacing.ts), which holds a settings section's label one distance over its first row.
     <div
+      data-setting-row=""
       style={{
         display: "flex",
         flexWrap: props.wide ? "wrap" : "nowrap",

@@ -19,6 +19,11 @@ import { Icon, type IconName } from "./Icon.tsx";
  * is for a section about something that cannot be undone (the DM link,
  * deleting the room), in `dangerText`, 5.9:1 on a surface. `action` sits
  * at the right, such as "Reorder" beside "All scenes".
+ *
+ * `data-section-label` marks the label for the spacing check
+ * (e2e/helpers/spacing.ts): on the heading when it stands alone, on its
+ * row when it shares one with an action or a fold, so whatever wraps in
+ * that row counts as the label.
  */
 export function SectionLabel(props: {
   children: ReactNode;
@@ -32,14 +37,19 @@ export function SectionLabel(props: {
   const Heading = props.level === 2 ? "h2" : props.level === 4 ? "h4" : "h3";
   const label = (
     // Its own width first ("1 1 auto", as FoldLabel's), so in the wrapping row below an action that does not fit beside it wraps under it. With a basis of 0 the action always took the line, and narrow fonts squeezed the label to a few pixels, its words running into the buttons.
-    <Heading id={props.id} tabIndex={props.tabIndex} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, ...sectionLabelLook(props.tone) }}>
+    <Heading
+      id={props.id}
+      tabIndex={props.tabIndex}
+      data-section-label={props.action ? undefined : ""}
+      style={{ flex: "1 1 auto", minWidth: 0, margin: 0, ...sectionLabelLook(props.tone) }}
+    >
       {props.children}
     </Heading>
   );
   if (!props.action) return label;
   return (
     // The action wraps under the label where a narrow panel has no room for both, rather than run out of the panel.
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
+    <div data-section-label="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: theme.touch }}>
       {label}
       {props.action}
     </div>
@@ -160,7 +170,7 @@ function FoldLabel(props: { id: string; label: ReactNode; tone?: "danger"; fold:
   const { fold } = props;
   const Heading = props.level === 4 ? "h4" : "h3";
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2) }}>
+    <div data-section-label="" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: theme.space(2) }}>
       <Heading id={props.id} style={{ flex: "1 1 auto", minWidth: 0, margin: 0, display: "flex" }}>
         <button
           ref={fold.foldRef}

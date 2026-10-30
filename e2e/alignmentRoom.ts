@@ -16,6 +16,7 @@ import { trapPreset } from "../shared/srd/traps.ts";
 import { barControl, ConsoleWatch, dragCells, expandBar, multiSelect, OpSocket, openSceneGroup, openSideTab, pagePoint, pickOption, pickTool, pressOption, reopenRoom, ROOT, sceneGroup, sceneGroupFold, Shots, sideTabName, SocketWatch, startServer, tapCell, touchSwipe, untilReady, waitFor, wholeInReach, type Server } from "./harness.ts";
 import { DEFAULT_SNAPSHOT_BUDGET } from "../server/rooms/budgets.ts";
 import { alignmentLines, headerLines, headerPlaces, leadLines, LIMIT_PX, measureAlignment, menuWordLines, pillLines, popoverScrollbarLines, proficiencyHeightLines, proficiencyLines, toastLaneLines, toastsUnderCards, type HeaderPlace, type PillPoint } from "./helpers/alignment.ts";
+import { measureSpacing, spacingLines, type SpacingFinding } from "./helpers/spacing.ts";
 import { moreMenuFixture } from "./helpers/menuFixture.ts";
 
 /**
@@ -326,6 +327,7 @@ class Sweep {
     if (await popovers.count()) await this.add(page, screen, await popoverScrollbarLines(popovers, `${this.at} ${screen}`));
     await this.add(page, screen, await proficiencyLines(shown, `${this.at} ${screen}`, false));
     await this.add(page, screen, await proficiencyHeightLines(shown, `${this.at} ${screen}`, false));
+    await this.add(page, screen, spacingLines(await measureSpacing(shown), `${this.at} ${screen}`));
   }
 
   /** The board's pills, as `screen`, with each trap name's pointer it read counted as a screen of its own. */
@@ -3177,6 +3179,199 @@ export function helperTest(): void {
       await page.close();
     }
   });
+
+  /*
+   * sp-0: the spacing helper (e2e/helpers/spacing.ts) on drawn cases, each
+   * a page of its own that scrolls, so a root inside it is held against
+   * the whole page. Each rule's shape as the audit found it fails, the
+   * shape its fix leaves passes, and each exemption passes
+   * (docs/design-v1-spacing-pass.md 6).
+   */
+  test("sp-0. the spacing helper on drawn cases: names over cards, a field's label, section labels and their rows, settings sections and headings fail as the audit found them and pass as fixed, the exemptions pass, and a root with no scroller is measured alone, at 100% and 130%", async () => {
+    const page = await dmContext.newPage();
+    const switchRow = (name: string) =>
+      `<div role="switch" aria-checked="false" class="row"><span class="words"><span class="name">${name}</span><span class="help">A line about ${name}.</span></span><span class="track"></span></div>`;
+    const cards = (style = "") => `<div class="cards" data-card-group style="${style}"><label class="card"><input type="radio" name="c">Phone size</label><label class="card"><input type="radio" name="c">Full size</label></div>`;
+    const label = (words: string, tag = "h3") => `<${tag} class="label" data-section-label>${words}</${tag}>`;
+    const foldRow = (words: string, summary = "") =>
+      `<div class="foldrow" data-section-label><h3><button aria-expanded="true">${words}</button></h3>${summary ? `<span class="summary">${summary}</span>` : ""}</div>`;
+    try {
+      for (const scale of [1, 1.3]) {
+        await page.setContent(`<style>
+          * { box-sizing: border-box }
+          body { margin: 0; font: 14px/1.4 sans-serif; color: #eee; background: #111 }
+          .page, .flat { width: 300px; zoom: ${scale}; margin-bottom: 24px }
+          .page { max-height: 3000px; overflow-y: auto }
+          section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 16px 0; border-top: 1px solid #444 }
+          section.tight { gap: 4px }
+          .label { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.2 }
+          .row { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 8px 0 }
+          .words { flex: 1; min-width: 0; display: grid; gap: 2px }
+          .name { font-size: 16px; font-weight: 600; line-height: 1.2 }
+          .help { margin: 0; font-size: 13px; line-height: 1.4 }
+          .track { width: 44px; height: 24px; border: 1px solid #888; border-radius: 12px }
+          fieldset { margin: 0; padding: 0; border: none; min-width: 0 }
+          fieldset.grid { display: grid; gap: 4px }
+          legend { padding: 0; font-size: 16px; font-weight: 600; line-height: 1.2 }
+          .column { display: grid; min-width: 0 }
+          .cards { display: grid; gap: 4px; min-width: 0 }
+          .card { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 4px 8px; border: 1px solid #777; border-radius: 6px }
+          .foldrow { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px }
+          .foldrow h3 { flex: 1 1 auto; min-width: 0; margin: 0; display: flex }
+          .foldrow button { flex: 1; display: flex; align-items: center; min-height: 44px; padding: 0; background: none; border: none; color: inherit; font: 700 13px/1.2 sans-serif; letter-spacing: 0.06em; text-transform: uppercase; text-align: left }
+          .summary { font-size: 13px; line-height: 1.4 }
+          .notelabel { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px }
+          .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px }
+          .three button { min-height: 44px }
+          h4.plain { margin: 0; font-size: 14px; font-weight: 600 }
+          h3.plain-h3 { margin: 0; font-size: 18px; font-weight: 700; line-height: 1.2 }
+          p { margin: 0 }
+        </style>
+        <div class="page" id="cards-bare"><fieldset class="grid"><legend>Map images</legend>${cards()}</fieldset></div>
+        <div class="page" id="cards-bare-help"><fieldset class="grid"><legend>Turn timer</legend><div class="cards"><p class="help">How long a turn lasts.</p>${cards()}</div></fieldset></div>
+        <div class="page" id="cards-fixed"><fieldset><legend>Map images</legend><div class="column">${cards("margin-top: 8px")}</div></fieldset></div>
+        <div class="page" id="cards-fixed-help"><fieldset><legend>Turn timer</legend><div class="column"><p class="help" style="margin-top: 4px">How long a turn lasts.</p>${cards("margin-top: 8px")}</div></fieldset></div>
+        <div class="page" id="cards-radiogroup"><div class="column"><span class="name" id="rg-near">Players see</span><div role="radiogroup" aria-labelledby="rg-near" class="cards" data-card-group style="margin-top: 4px"><label class="card"><input type="radio" name="r">Explore</label></div></div></div>
+        <div class="page" id="cards-radiogroup-fixed"><div class="column"><span class="name" id="rg-far">Players see</span><div role="radiogroup" aria-labelledby="rg-far" class="cards" data-card-group style="margin-top: 8px"><label class="card"><input type="radio" name="r2">Explore</label></div></div></div>
+
+        <div class="page" id="field-far"><form style="display: grid; gap: 12px"><label for="code-far">Code from the DM's screen</label><input id="code-far"><button type="button">Connect</button></form></div>
+        <div class="page" id="field-near"><form style="display: grid; gap: 4px"><label for="code-near">Code from the DM's screen</label><input id="code-near"></form></div>
+
+        <div class="page" id="label-help"><section>${label("Interface size")}<p class="help">The bars, panels and the names on tokens.</p></section></div>
+        <div class="page" id="label-switch"><section>${label("Battery")}${switchRow("Low power")}</section></div>
+        <div class="page" id="label-tight"><section class="tight">${label("Farther away")}<p class="help">Rows farther off.</p></section></div>
+        <div class="page" id="grid-label-far"><div class="column" role="group"><h4 class="label" data-section-label style="padding-bottom: 8px">Saves for 3</h4><div class="three"><button>Str</button><button>Dex</button><button>Con</button></div></div></div>
+        <div class="page" id="grid-label-near"><div class="column" role="group"><h4 class="label" data-section-label style="padding-bottom: 4px">Saves for 3</h4><div class="three"><button>Str</button><button>Dex</button><button>Con</button></div></div></div>
+        <div class="page" id="note-label-far"><div class="column"><div class="notelabel" data-section-label style="padding-bottom: 8px"><h4 class="label">Saves</h4><span class="summary">Each creature rolls its own, with its own bonus and advantage</span></div><div class="three"><button>Str</button><button>Dex</button><button>Con</button></div></div></div>
+        <div class="page" id="note-label-near"><div class="column"><div class="notelabel" data-section-label style="padding-bottom: 4px"><h4 class="label">Saves</h4><span class="summary">Each creature rolls its own, with its own bonus and advantage</span></div><div class="three"><button>Str</button><button>Dex</button><button>Con</button></div></div></div>
+        <div class="page" id="fold-label-far"><section>${foldRow("Fog and party vision", "Fog on, party vision on, three light sources")}<div class="column">${switchRow("Fog")}</div></section></div>
+        <div class="page" id="fold-label-near"><section class="tight">${foldRow("Fog and party vision", "Fog on, party vision on, three light sources")}<div class="column">${switchRow("Fog")}</div></section></div>
+
+        <div class="page" id="settings-bare"><section>${label("Battery")}${switchRow("Low power")}</section><section id="bare">${label("Map detail")}<fieldset><legend>Map images</legend><div class="column">${cards("margin-top: 8px")}</div></fieldset></section><section>${label("Sounds")}${switchRow("Turn sound")}</section></div>
+        <div class="page" id="settings-padded"><section>${label("Battery")}${switchRow("Low power")}</section><section id="padded">${label("Map detail")}<div style="padding: 8px 0"><fieldset><legend>Map images</legend><div class="column">${cards("margin-top: 8px")}</div></fieldset></div></section><section>${label("Sounds")}${switchRow("Turn sound")}</section></div>
+        <div class="page" id="settings-mixed"><section>${foldRow("Fog and party vision")}<div class="column">${switchRow("Fog")}${switchRow("Party vision")}</div></section><section>${label("Players", "h4")}${switchRow("Players move")}</section><section>${label("Battery", "h4")}${switchRow("Low power")}</section></div>
+        <div class="page" id="settings-padding"><section>${label("Battery", "h4")}${switchRow("Low power")}</section><div class="column" style="padding-top: 16px; border-top: 1px solid #444"><h4 class="label" data-section-label style="padding-bottom: 8px">Saves</h4>${switchRow("Roll for all")}</div><section>${label("Sounds", "h4")}${switchRow("Turn sound")}</section></div>
+        <div class="page" id="settings-folds"><section>${foldRow("Fog")}<div class="column">${switchRow("Fog")}</div></section><section>${foldRow("Map detail")}<fieldset><legend>Map images</legend><div class="column">${cards("margin-top: 8px")}</div></fieldset></section><section>${foldRow("Sounds")}${switchRow("Turn sound")}</section></div>
+
+        <div class="page" id="heads-off"><div class="column" style="gap: 4px"><h4 class="plain">Changes</h4><p>What changed in the rules.</p></div><div class="column" style="gap: 8px"><h4 class="plain">Credits</h4><p>Who made the art.</p></div></div>
+        <div class="page" id="heads-ruled"><div class="column" style="gap: 4px"><h3 class="plain-h3">Adult Red Dragon</h3><p>Monster, CR 17.</p></div><div class="column" style="gap: 8px"><h3 class="plain-h3" style="padding-bottom: 2px; border-bottom: 1px solid #444">Adult Red Dragon</h3><p>Huge Dragon (Chromatic), Chaotic Evil</p></div></div>
+        <div class="page" id="heads-plain-h3"><div class="column" style="gap: 4px"><h3 class="plain-h3">Adult Red Dragon</h3><p>Monster, CR 17.</p></div><div class="column" style="gap: 8px"><h3 class="plain-h3">Adult Red Dragon</h3><p>Huge Dragon (Chromatic), Chaotic Evil</p></div></div>
+        <div class="page" id="heads-even"><div class="column" style="gap: 4px"><h4 class="plain">Changes</h4><p>What changed in the rules.</p></div><div class="column" style="gap: 4px"><h4 class="plain">Credits</h4><p>Who made the art.</p></div></div>
+
+        <div class="page" id="exempt">
+          <section>${label("Sight")}<div data-setting-row class="row" style="flex-wrap: wrap; gap: 8px 12px"><div class="words" style="flex: 1 1 100%"><span class="name">Sight</span><span class="help">Who sees what.</span></div><div role="radiogroup" aria-label="Sight" style="display: flex; gap: 4px"><label><input type="radio" name="s">Party</label><label><input type="radio" name="s">Each</label></div></div></section>
+          <div role="menu" style="display: grid"><div role="group" aria-labelledby="menu-draw" style="display: grid"><div id="menu-draw" aria-hidden="true" class="label" style="padding: 8px 12px 4px">Draw</div><button role="menuitem" class="row">Pen</button><button role="menuitem" class="row">Line</button></div></div>
+          <div role="group" aria-labelledby="measure-shape" style="display: grid; gap: 4px"><div id="measure-shape" class="label" style="padding-top: 4px">Shape</div><div style="display: flex; gap: 4px"><button>Circle</button><button>Cone</button></div></div>
+          <div role="group" aria-label="Crypts" style="display: grid"><span class="label" style="padding: 4px 0">Crypts</span><label for="copy-crypt" class="row" style="padding: 4px 0"><input type="checkbox" id="copy-crypt">Crypt</label></div>
+          <div style="display: grid; gap: 12px"><label for="objects" class="row"><input type="checkbox" id="objects">Objects block sight</label></div>
+          <div class="column"><h4 class="label" style="padding-block: 8px; border-top: 1px solid #444">1st level</h4><div class="row">Magic missile</div></div>
+          <div class="column" style="gap: 12px"><h4 class="label" style="padding-block: 8px">2nd level</h4><div class="row">Hold person</div></div>
+          <fieldset><legend>Dice</legend><div class="column"><div class="three" data-card-group style="margin-top: 8px"><label style="position: relative; display: grid; justify-items: center; padding: 8px 4px; border: 1px solid #777"><input type="radio" name="d" style="position: absolute; inset: 0; opacity: 0">Ruby</label></div></div></fieldset>
+          <div data-panel-group style="display: grid; border-top: 1px solid #444"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 48px"><h3 style="margin: 0; display: flex; flex: 1 1 auto"><button aria-expanded="true" style="flex: 1; min-height: 48px">Combat</button></h3></div><div class="column" style="padding-top: 4px">${switchRow("Hidden")}</div></div>
+          <div data-panel-group style="display: grid; border-top: 1px solid #444"><div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 48px"><h3 style="margin: 0; display: flex; flex: 1 1 auto"><span style="display: grid; align-content: center; min-height: 48px">Stat block</span></h3><button style="min-height: 44px">Attach a stat block</button></div><div class="column" style="padding-top: 12px"><p>Its stat block.</p></div></div>
+          <div class="column" style="gap: 4px"><h3 style="margin: 0; font-size: 16px"><button aria-expanded="true" style="padding: 0; border: none; background: none; color: inherit; font: inherit">Notes</button></h3><p>Its notes.</p></div>
+          <div class="column" style="gap: 12px"><h3 style="margin: 0; font-size: 16px"><button aria-expanded="true" style="padding: 0; border: none; background: none; color: inherit; font: inherit">Position</button></h3><p>Where it stands.</p></div>
+        </div>
+
+        <div class="flat" id="alone"><section id="alone-root">${label("Show a handout")}<p class="help">Pick an image.</p></section><fieldset class="grid"><legend>Show to</legend>${cards()}</fieldset></div>
+        <div class="page" id="inside"><section id="inside-root">${label("Show a handout")}<p class="help">Pick an image.</p></section><fieldset class="grid"><legend>Show to</legend>${cards()}</fieldset></div>`);
+
+        const at = `sp-0 ${scale}`;
+        const found = (selector: string) => measureSpacing(page.locator(selector));
+        const lines = async (selector: string) => spacingLines(await found(selector), `${at} ${selector}`);
+        /** A measured pair by its rule and words, so a case that passes is shown to have been measured. */
+        const pair = (findings: SpacingFinding[], rule: SpacingFinding["rule"], name: string, over?: string) => {
+          const hit = findings.find((f) => f.rule === rule && f.name.toLowerCase() === name.toLowerCase() && (over === undefined || f.over === over));
+          assert.ok(hit, `${at}: no ${rule} pair for "${name}" in ${JSON.stringify(findings)}`);
+          return hit;
+        };
+        const fails = async (selector: string, pattern: RegExp) => {
+          const got = await lines(selector);
+          assert.ok(got.some((l) => pattern.test(l)), `${at} ${selector} must fail with ${pattern}: ${JSON.stringify(got)}`);
+          return got;
+        };
+        const passes = async (selector: string) => assert.deepEqual(await lines(selector), [], `${at} ${selector} must pass`);
+
+        // Rule 1: a legend is not a grid item, so a fieldset's gap leaves its cards and help on it. Margins under it pass, with a help and without.
+        assert.deepEqual(await lines("#cards-bare"), [`${at} #cards-bare: "Map images" sits 0 px over its first card, wants 8`]);
+        await fails("#cards-bare-help", /"Turn timer" sits 0 px over its help, wants 4$/);
+        await fails("#cards-bare-help", /"Turn timer"'s help sits 4 px over its first card, wants 8$/);
+        await passes("#cards-fixed");
+        assert.equal(pair(await found("#cards-fixed"), "card-name", "Map images").gap, 8);
+        await passes("#cards-fixed-help");
+        const helped = await found("#cards-fixed-help");
+        assert.deepEqual([pair(helped, "card-name", "Turn timer", "its help").gap, helped.find((f) => f.help)?.gap], [4, 8]);
+        // The radio group form, named by aria-labelledby, as Players see.
+        await fails("#cards-radiogroup", /"Players see" sits 4 px over its first card, wants 8$/);
+        await passes("#cards-radiogroup-fixed");
+        pair(await found("#cards-radiogroup-fixed"), "card-name", "Players see");
+        // Rule 1: a field's label first in its one-column grid, as the pairing page's code.
+        await fails("#field-far", /label "Code from the DM's screen" sits 12 px over its field, wants 4$/);
+        await passes("#field-near");
+        pair(await found("#field-near"), "field-label", "Code from the DM's screen");
+
+        // Rule 2 counts layout boxes: a label 8 over a help and over a switch's row passes, though the switch's words stand 16 under it.
+        await passes("#label-help");
+        await passes("#label-switch");
+        assert.equal(pair(await found("#label-switch"), "section-label", "Battery").gap, 8);
+        await fails("#label-tight", /section label "Farther away" sits 4 px over "Rows farther off\.", wants 8$/);
+        // Three label rows, each passing at 8 and failing at 4: a grid label's own padding, a note wrapped under its h4, a fold's summary wrapped under its name.
+        for (const [shape, words] of [["grid-label", "Saves for 3"], ["note-label", "Saves"], ["fold-label", "Fog and party vision"]] as const) {
+          await passes(`#${shape}-far`);
+          pair(await found(`#${shape}-far`), "section-label", words);
+          await fails(`#${shape}-near`, new RegExp(`section label "${words}" sits 4 px over`));
+        }
+        const rows = await page.locator("#note-label-far .notelabel, #fold-label-far .foldrow").evaluateAll((els) =>
+          els.map((el) => (el as unknown as { getBoundingClientRect(): { height: number } }).getBoundingClientRect().height),
+        );
+        assert.ok(rows[0]! > 30 * scale && rows[1]! > 50 * scale, `the note and the summary wrap to a line of their own: ${rows.join(", ")}`);
+
+        // Rule 3: a bare choice among switch rows stands its label 8 nearer than the rest, through the scroller from the bare section alone.
+        await fails("#bare", /section label "Map detail" stands [\d.]+ px over "Map images", where 2 other settings sections stand [\d.]+$/);
+        const bare = pair(await found("#bare"), "settings", "Map detail");
+        assert.ok(bare.want - bare.gap > 6, `the bare choice stands about a row's padding nearer: ${JSON.stringify(bare)}`);
+        await passes("#padded");
+        // A fold's row and a lone label over switch rows in one scroller pass, each held to labels of its own kind (VisionSettings.tsx's Fog and party vision).
+        await passes("#settings-mixed");
+        const mixed = await found("#settings-mixed");
+        for (const words of ["Fog and party vision", "Players", "Battery"]) pair(mixed, "settings", words);
+        // A label whose own padding carries the gap stands its words where the others do: rule 3 reads from the heading's words, not its box.
+        await passes("#settings-padding");
+        const padded = await found("#settings-padding");
+        for (const words of ["Battery", "Saves", "Sounds"]) pair(padded, "settings", words);
+        await fails("#settings-folds", /section label "Map detail" stands [\d.]+ px over "Map images", where 2 other settings sections stand/);
+        // Measured once, however many roots in the scroller match.
+        const once = await lines("#settings-bare section");
+        assert.deepEqual(once.map((l) => l.replace(/^.*?: /, "")), (await lines("#bare")).map((l) => l.replace(/^.*?: /, "")), "a scroller is measured once per call");
+
+        // Rule 4: two h4s of one look, 4 and 8 over their text.
+        await fails("#heads-off", /h4 "Credits" sits 8 px over "Who made the art\.", where 1 other h4 of its look sits 4$/);
+        // A ruled heading is a look of its own (D-261030-525): a stat block's ruled title 8 over its line beside a creature header's plain one 4 over its line passes, and two plain ones at 4 and 8 still fail.
+        await passes("#heads-ruled");
+        assert.equal((await found("#heads-ruled")).filter((f) => f.rule === "headings").length, 2, "both titles are measured");
+        await fails("#heads-plain-h3", /h3 "Adult Red Dragon" sits 8 px over "Huge Dragon \(Chromatic\), Chaotic Evil", where 1 other h3 of its look sits 4$/);
+        await passes("#heads-even");
+        pair(await found("#heads-even"), "headings", "Credits");
+
+        // The exemptions: a SettingRow's name, a menu's group headings, the measure tool's titles, Copy settings' folders, checkbox rows, the spell level h4s, a tile's own label, a group's header with its fold or its action, and headings that hold their disclosure.
+        await passes("#exempt");
+        const exempt = await found("#exempt");
+        pair(exempt, "section-label", "Sight");
+        pair(exempt, "card-name", "Dice");
+        for (const words of ["Draw", "Shape", "Crypts", "Crypt", "Objects block sight", "1st level", "2nd level", "Ruby", "Combat", "Stat block", "Notes", "Position"]) {
+          assert.ok(!exempt.some((f) => f.name === words), `${at}: "${words}" is exempt, and measured: ${JSON.stringify(exempt)}`);
+        }
+
+        // A root with no scroller is measured alone. Inside one, the whole scroller is.
+        await passes("#alone-root");
+        assert.ok(!(await found("#alone-root")).some((f) => f.name === "Show to"), "a root with no scroller reads only itself");
+        await fails("#alone", /"Show to" sits 0 px over its first card, wants 8$/);
+        await fails("#inside-root", /"Show to" sits 0 px over its first card, wants 8$/);
+      }
+    } finally {
+      await page.close();
+    }
+  });
 }
 
 /** pl3-a: the room, which each file builds first. */
@@ -5054,6 +5249,41 @@ export function sceneSettingsTests(): void {
         await shots.take(page, `alignment-${sweep.at}-show-a-handout`);
         await handout.getByRole("button", { name: "Cancel", exact: true }).click();
         await closeSheets(page);
+        // The Universal VTT import, whose Players see is the same cards, from a file written as maps.e2e.ts writes one: its open window is a portal that lets light through, so both of the dialog's named choices show.
+        const keep = await sharp({ create: { width: 500, height: 400, channels: 3, background: { r: 150, g: 140, b: 120 } } }).png().toBuffer();
+        const portal = (a: { x: number; y: number }, b: { x: number; y: number }, closed: boolean) => ({ position: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, bounds: [a, b], rotation: 0, closed, freestanding: false });
+        const uvtt = {
+          format: 0.3,
+          resolution: { map_origin: { x: 0.5, y: 0.5 }, map_size: { x: 10, y: 8 }, pixels_per_grid: 50 },
+          line_of_sight: [[{ x: 1, y: 1 }, { x: 9, y: 1 }, { x: 9, y: 7 }, { x: 1, y: 7 }, { x: 1, y: 1 }]],
+          objects_line_of_sight: [],
+          portals: [portal({ x: 4, y: 1 }, { x: 5, y: 1 }, true), portal({ x: 6, y: 7 }, { x: 7, y: 7 }, false)],
+          environment: { baked_lighting: true, ambient_light: "ffffffff" },
+          lights: [{ position: { x: 5.5, y: 4.5 }, range: 4, intensity: 1, color: "ffeccd8b", shadows: true }],
+          image: keep.toString("base64"),
+        };
+        const scenes = await openDmPanel(page, "Scenes");
+        await scenes.getByLabel("From a Universal VTT file", { exact: true }).setInputFiles({ name: "Sunken_keep.dd2vtt", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uvtt)) });
+        const importer = page.getByRole("dialog", { name: "Import a Universal VTT map" });
+        await importer.getByRole("radiogroup", { name: "Players see", exact: true }).waitFor({ timeout: 30_000 });
+        await importer.getByText("Portals that don't block light import as", { exact: true }).waitFor();
+        await sweep.measure(page, "uvtt-import", importer);
+        await shots.take(page, `alignment-${sweep.at}-uvtt-import`);
+        await page.keyboard.press("Escape");
+        await importer.waitFor({ state: "detached" });
+        await closeSheets(page);
+        // The table display's pairing page, in a page of its own at this size. It takes no interface size, so 130% draws as 100%.
+        const tv = await page.context().newPage();
+        try {
+          await tv.setViewportSize({ width: at.size.width, height: at.size.height });
+          await tv.goto(`${server.origin}/display`);
+          const pairing = tv.locator("section").filter({ has: tv.getByLabel("Code from the DM's screen", { exact: true }) });
+          await pairing.waitFor();
+          await sweep.measure(tv, "display-pair", pairing);
+          await shots.take(tv, `alignment-${sweep.at}-display-pair`);
+        } finally {
+          await tv.close();
+        }
       } finally {
         // The page's own scene goes with it: the next size opens the room anew on the players' scene.
         await forget();

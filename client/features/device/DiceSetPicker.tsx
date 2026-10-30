@@ -92,7 +92,8 @@ export function DiceSetPicker() {
     <fieldset disabled={!on} style={{ margin: 0, padding: 0, border: "none", minWidth: 0, display: "grid", gap: theme.space(1) }}>
       <legend style={{ padding: 0, fontSize: theme.font.input, fontWeight: theme.weight.strong, color: on ? theme.color.text : theme.color.textDisabled }}>Dice</legend>
       {on ? null : <Help>Turn on Roll animation to throw dice.</Help>}
-      <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_MIN_PX}px, 1fr))`, gap: theme.space(1) }}>
+      {/* Marked as a card group for the spacing check (e2e/helpers/spacing.ts), as RadioCards' cards are. */}
+      <div data-card-group="" style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${TILE_MIN_PX}px, 1fr))`, gap: theme.space(1) }}>
         {DICE_SETS.map((set) => {
           const picked = set.id === chosen;
           return (

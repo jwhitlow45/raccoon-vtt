@@ -36,6 +36,9 @@ const NAME: CSSProperties = { padding: 0, fontSize: theme.font.input, fontWeight
  * hand, said in a polite line under the cards that stays mounted while
  * empty so a screen reader hears it as it comes, together with `none`.
  * Only what the line says takes room.
+ *
+ * `data-card-group` marks the cards' column for the spacing check
+ * (e2e/helpers/spacing.ts), which holds the name over its first card.
  */
 export function RadioCards<V extends string>(props: {
   legend: string;
@@ -140,6 +143,7 @@ export function RadioCards<V extends string>(props: {
           aria-describedby={describedBy}
           aria-busy={props.busy ? true : undefined}
           aria-disabled={disabled ? true : undefined}
+          data-card-group=""
           style={{ display: "grid", gap: theme.space(1), marginTop: theme.space(1), minWidth: 0 }}
         >
           {cards}
@@ -158,7 +162,7 @@ export function RadioCards<V extends string>(props: {
       <legend style={nameStyle}>{props.legend}</legend>
       <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>
         {props.help ? <Help id={helpId}>{props.help}</Help> : null}
-        <div style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>{cards}</div>
+        <div data-card-group="" style={{ display: "grid", gap: theme.space(1), minWidth: 0 }}>{cards}</div>
       </div>
     </fieldset>
   );

@@ -136,7 +136,7 @@ describe("several selected: the card and the groups (5.3)", () => {
       assert.equal(named.get(`${a} save for 2`), a);
       assert.equal(named.get(`${a} check for 2`), a);
     }
-    const label = /<h4 id="([^"]+)" style="([^"]*)">Saves for 2<\/h4>/.exec(markup);
+    const label = /<h4 id="([^"]+)" data-section-label="" style="([^"]*)">Saves for 2<\/h4>/.exec(markup);
     assert.ok(label, "the saves' label, an h4 under the group's h3");
     assert.match(label[2]!, new RegExp(`font-size:${theme.font.small}px;font-weight:${theme.weight.bold}`));
     assert.match(label[2]!, /text-transform:uppercase/);

@@ -691,7 +691,8 @@ const ACTION_SECTIONS: readonly (readonly [Exclude<NamedRoll["section"], "spells
  */
 function GroupLabel(props: { children: ReactNode; note?: string | undefined }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: theme.space(2), rowGap: 0, paddingBottom: theme.space(1) }}>
+    // The section label marker sits on the row, so a note that wraps under the h4 counts as label (e2e/helpers/spacing.ts).
+    <div data-section-label="" style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: theme.space(2), rowGap: 0, paddingBottom: theme.space(1) }}>
       <h4 style={{ margin: 0, ...sectionLabelLook() }}>{props.children}</h4>
       {props.note ? <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, minWidth: 0 }}>{props.note}</span> : null}
     </div>

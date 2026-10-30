@@ -188,7 +188,7 @@ function Cell(props: { text: string; name: string; disabled: string | null; busy
 /** A capitals label inside a group, an h4 under the group's h3 (6.6), in the panel's one label look. */
 function GridLabel(props: { id: string; children: ReactNode }) {
   return (
-    <h4 id={props.id} style={{ margin: 0, paddingBottom: theme.space(1), ...sectionLabelLook() }}>
+    <h4 id={props.id} data-section-label="" style={{ margin: 0, paddingBottom: theme.space(1), ...sectionLabelLook() }}>
       {props.children}
     </h4>
   );
