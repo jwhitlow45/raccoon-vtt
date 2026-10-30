@@ -145,6 +145,10 @@ panelFile(null, () => {
         await groupInput.blur();
         const several = group.locator("[data-damage-summary]").filter({ has: dm.locator("[data-damage-target]") });
         await several.getByText("Bog Thing:", { exact: true }).waitFor();
+        assert.deepEqual(await damageSummaryAlignment(several, `${at}-before-expand`), []);
+        // At the shortest enlarged size the group can rest again after typing. Measure the visible slip, not its clipped description.
+        await expandBar(group);
+        assert.equal(await several.locator("..").evaluate((element) => element.tagName), "FORM", "the multi-target slip is outside the resting strip's clipped description");
         assert.deepEqual(await several.locator("[data-damage-result]").allTextContents(), ["28", "14", "10", "52"]);
         assert.equal(await several.locator("s").count(), 0);
         assert.equal(await several.locator("[data-damage-target]").count(), 1);

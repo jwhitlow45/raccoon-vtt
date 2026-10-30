@@ -4,6 +4,7 @@ import type { Locator } from "playwright-core";
 export async function damageSummaryAlignment(root: Locator, screen: string): Promise<string[]> {
   return root.evaluateAll((roots, screen) => {
     type Element = {
+      tagName: string;
       matches(selector: string): boolean;
       querySelector(selector: string): Element | null;
       querySelectorAll(selector: string): ArrayLike<Element>;
@@ -24,7 +25,9 @@ export async function damageSummaryAlignment(root: Locator, screen: string): Pro
         const bounds = summary.getBoundingClientRect();
         for (const element of Array.from(summary.querySelectorAll("*"))) {
           const box = element.getBoundingClientRect();
-          if (box.width > 0 && (box.left < bounds.left - 1 || box.right > bounds.right + 1)) lines.push(`${screen}: damage summary content extends past the slip's edge`);
+          if (box.width > 0 && (box.left < bounds.left - 1 || box.right > bounds.right + 1)) {
+            lines.push(`${screen}: damage summary content extends past the slip's edge: ${element.tagName.toLowerCase()} "${element.textContent?.trim().slice(0, 48) ?? ""}" at ${box.left.toFixed(2)}..${box.right.toFixed(2)}, slip ${bounds.left.toFixed(2)}..${bounds.right.toFixed(2)}`);
+          }
         }
         const icons: number[] = [];
         for (const part of Array.from(summary.querySelectorAll("[data-damage-part], [data-damage-defense-entry]"))) {

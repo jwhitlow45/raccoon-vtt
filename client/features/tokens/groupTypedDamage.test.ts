@@ -114,3 +114,27 @@ test("FL3-OPUS-4: plain group previews have no trailing period", () => {
     assert.doesNotMatch(markup, /7 damage, to each of 5\./);
   }
 });
+
+test("FL-4: a resting group's clipped HP description keeps the field's width and allows wrapping", () => {
+  for (const scrolls of [false, true]) {
+    const view = projectState(fixture(), DM, { sceneId: "s1" }) as RoomState;
+    const tokens = Object.values(view.tokens);
+    const targets = hpTargets(tokens, { ...DM, characters: view.characters, playersApplyDamage: true });
+    const scope = new RoomScope();
+    scope.get(hpDraftSlot).set(hpDraftKey("bar", targets), { mode: "damage", text: "28 cold + 14 slashing + 10 piercing", crit: false });
+    const store = createStore(() => ({ view, you: DM }));
+    const el = createElement(GroupHpEntry, { tokens, place: "bar", rest: { resting: true, scrolls, items: [], shown: null, onStatus() {} } });
+    const markup = renderToStaticMarkup(createElement(RoomProvider, { store: store as never, actions: {} as never, ui: {} as never, children: createElement(RoomScopeProvider, { scope, children: el }) }));
+    const descriptionId = /aria-label="HP change"[^>]*aria-describedby="([^"]+)"/.exec(markup)?.[1]?.split(" ")[0];
+    assert.ok(descriptionId, "the resting field retains its accessible description");
+    const description = markup.slice(markup.indexOf(`<div id="${descriptionId}"`));
+    const opening = description.slice(0, description.indexOf(">") + 1);
+    assert.match(opening, /position:absolute/);
+    assert.match(opening, /height:1px;overflow:hidden;clip:rect\(0 0 0 0\)/, "the description remains clipped");
+    assert.match(opening, /width:100%/, "a full damage grid cannot fit inside a 1 px description");
+    assert.match(opening, /white-space:normal/, "the description must not force the slip's words onto one line");
+    assert.match(markup, /<form[^>]*position:relative/, "the description's width belongs to the HP field's form");
+    assert.match(description, /data-damage-summary/);
+    assert.match(description.replace(/<[^>]*>/g, ""), /Resistant: Resists Cold, 38/);
+  }
+});

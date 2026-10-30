@@ -311,7 +311,7 @@ export function HpEntry(props: {
       onBlur={(e) => {
         if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) setFieldFirstInPage(fieldFirst);
       }}
-      style={{ display: "grid", gap: theme.space(1) }}
+      style={{ position: "relative", display: "grid", gap: theme.space(1) }}
     >
       <div style={{ display: "grid", gap: theme.space(1) }}>{rows}</div>
       {chipRow.length > 0 ? (
@@ -330,7 +330,8 @@ export function HpEntry(props: {
       {critBox ? <Checkbox checked={crit} onChange={setCrit} label={CRIT_WORDS} /> : null}
       {resting ? (
         <>
-          <div id={descriptionId} style={VISUALLY_HIDDEN}>
+          {/* Keep the clipped preview at the field's width. Its amount columns cannot fit in a 1 px text box. */}
+          <div id={descriptionId} style={{ ...VISUALLY_HIDDEN, width: "100%", whiteSpace: "normal" }}>
             {feedback}
             {lines.map((line) => (
               <Note key={line}>{line}</Note>
