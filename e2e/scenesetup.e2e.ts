@@ -997,7 +997,36 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
           await page.goto(`${server.origin}/r/${run.roomId}`);
           await page.getByRole("status", { name: "Connected" }).first().waitFor();
           const rowOf = (panel: Locator, name: string) => panel.getByRole("button", { name: new RegExp(`^${name}(?![A-Za-z])`) }).first();
+          const compareRows = async (state: string) => {
+            const panel = await scenesPanel(page);
+            const rows = [];
+            for (const scene of made) {
+              const row = rowOf(panel, scene.name);
+              rows.push(await row.evaluate((node) => {
+                type Box = { left: number; right: number; top: number };
+                type El = { children: ArrayLike<El>; parentElement: El; getBoundingClientRect(): Box };
+                const button = node as unknown as El;
+                const line = button.parentElement;
+                const origin = line.getBoundingClientRect();
+                const thumb = button.children[0]!.getBoundingClientRect();
+                const text = button.children[1]!.getBoundingClientRect();
+                const action = line.children[1]!.getBoundingClientRect();
+                return { thumbLeft: thumb.left - origin.left, thumbTop: thumb.top - origin.top, textLeft: text.left - origin.left, textTop: text.top - origin.top, actionRight: action.right - origin.right };
+              }));
+              lines.push(...alignmentLines(await measureAlignment(row.locator("xpath=ancestor::li[1]")), `FU40-B ${screen} ${state} ${scene.name}`));
+            }
+            for (const key of ["thumbLeft", "thumbTop", "textLeft", "textTop", "actionRight"] as const) {
+              const positions = rows.map((row) => row[key]);
+              assert.ok(Math.max(...positions) - Math.min(...positions) <= 1, `FU40-B ${screen} ${state}: ${key} differs across DM, player and ordinary rows: ${positions.join(", ")}`);
+            }
+          };
+          await ops.send({ t: "room.setPlayerScene", sceneId: made[2]!.id });
           await view(made[0]!.id, page);
+          await rowOf(await scenesPanel(page), made[2]!.name).locator("xpath=ancestor::li[1]").getByText("Players here", { exact: true }).waitFor();
+          await compareRows("normal");
+          await (await scenesPanel(page)).getByRole("button", { name: "Reorder", exact: true }).click();
+          await compareRows("arranging");
+          await (await scenesPanel(page)).getByRole("button", { name: "Done", exact: true }).click();
           // A scene loading.
           held.frames = [];
           await rowOf(await scenesPanel(page), made[1]!.name).click();
@@ -1006,6 +1035,7 @@ describe("raccoon-vtt scene setup run", { timeout: 900_000 }, () => {
           const found = alignmentLines(await measureAlignment(loadingRow.locator("xpath=ancestor::li[1]")), `${screen} scene-row-loading`);
           if (found.length > 0 || screens === 1) await shots.take(page, `fu35b-1-${screen}-row-loading`);
           lines.push(...found);
+          await compareRows("loading");
           release();
           await waitFor(`${screen}: ${made[1]!.name} loaded`, async () => ((await loadingRow.textContent())?.includes("loading…") ? null : true));
           // Players moved, waiting for the server.
