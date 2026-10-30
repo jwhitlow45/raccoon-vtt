@@ -2674,10 +2674,22 @@ export type LogEntry = {
  * its place, null for a roll every player could read.
  */
 export type LineParts = {
+  /** A correction copy's frozen authorization witnesses. Never projected to players. */
+  correction?: CorrectionWitness[];
   exact?: MemberId[];
   label?: MemberId[];
   to?: MemberId[];
   rolls?: (MemberId[] | null)[];
+};
+
+export type CorrectionWitness = {
+  key: string;
+  owner: boolean;
+  /** A deleted companion definition remains readable as absent by its character's existing owners. */
+  characterId?: string;
+  /** Public Actor fields whose presence still permits reading the notice. Owners need no field test. */
+  fields?: string[];
+  name?: string;
 };
 
 /** Who is looking: used by projection and permissions. */

@@ -1,4 +1,5 @@
 import { chunkKey, compareLogIds, doorChunk, holderChunkKey, holderTileKey, keys, parseKey, partsKey, readEntity, sightOf, tileKey, viewMapsOf, wallChunk, writeEntity, type EntityKey, type SightMap } from "./keys.ts";
+import { projectCorrection } from "./undoCorrection.ts";
 import {
   CHUNK_CELLS,
   FOG_SUBCELLS,
@@ -3093,7 +3094,7 @@ const ANY_PLAYER: Viewer = { memberId: "", role: "player" };
  *
  * A chat line reaches all. A whisper is its parties' (whisperParties).
  */
-export type LineReach = { audience: "shared"; parts?: LineParts } | { audience: "party"; views: [string, LogEvent][] } | { audience: "dm" };
+export type LineReach = { audience: "shared"; parts?: LineParts } | { audience: "party"; views: [string, LogEvent, LineParts?][] } | { audience: "dm" };
 
 type Read = { id: string; ctx: Ctx; view: LogEvent | null };
 
@@ -3550,6 +3551,10 @@ function projectLogEntryCtx(ctx: Ctx, entry: LogEntry): LogEntry | null {
   const whole = parts === undefined && copyOf === undefined;
   if (entry.kind === "chat") return whole ? entry : line;
   if (!entry.data) return null;
+  if (entry.data.type === "correction") {
+    const data = projectCorrection(ctx.state, ctx.viewer, entry.data, parts?.correction, (key) => projectEntityCtx(ctx, key));
+    return data ? { ...line, data } : null;
+  }
   const data = projectEventCtx(ctx, parts ? withinParts(entry.data, parts, me) : entry.data, audience === "party");
   if (!data) return null;
   return data === entry.data && whole ? entry : { ...line, data };
@@ -3900,6 +3905,10 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
       out.push(key);
     }
   };
+  // Current ownership and sight can narrow a frozen correction's readers without editing its log row.
+  if (touched.some((key) => !key.startsWith("log:"))) {
+    for (const line of state.log) if (line.data?.type === "correction") add(keys.log(line.id));
+  }
   // The DM's projected meta carries retained HP undo ids, which can change
   // when a log line is added or dropped without changing the stored meta.
   if (touched.some((key) => key.startsWith("log:"))) add(keys.meta);

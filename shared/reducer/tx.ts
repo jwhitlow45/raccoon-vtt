@@ -7,6 +7,7 @@ import type {
   FogTile,
   LogEntry,
   LogEvent,
+  LineParts,
   RoomMeta,
   RoomState,
   Scene,
@@ -109,6 +110,7 @@ export class Tx {
   private book: Book | null = null;
   /** The reminders the op wrote, each with the record of the turn it belongs to. */
   private readonly reminders = new Map<LogEntry, { book: Book; reminder: Reminder }>();
+  private readonly frozenReach = new Map<LogEntry, LineReach>();
 
   constructor(state: RoomState, actor: Viewer, env: Env) {
     this.state = { ...state };
@@ -290,6 +292,8 @@ export class Tx {
     const reachOf = lineReader(this.state);
     const reaches = this.unsettled.map((u): LineReach | null => {
       if (!("line" in u) || u.line.kind !== "event") return null;
+      const frozen = this.frozenReach.get(u.line);
+      if (frozen) return frozen;
       if (!this.reminders.has(u.line)) return reachOf(u.line);
       return dmNumbered(u.line.id) ? { audience: "dm" } : reachOf(u.line);
     });
@@ -335,11 +339,11 @@ export class Tx {
         const lines = [dmLine];
         const readers: string[] = [];
         if (reach.audience === "party") {
-          for (const [reader, view] of reach.views) {
+          for (const [reader, view, parts] of reach.views) {
             const count = copies.get(reader) ?? 0;
             if (count >= PARTY_SLOT) continue;
             copies.set(reader, count + 1);
-            lines.push(write({ kind: entry.kind, to: [reader], data: view, copyOf: dmLine.id }, partyIndex(ranks.get(reader)!, count), cutLine));
+            lines.push(write({ kind: entry.kind, to: [reader], data: view, copyOf: dmLine.id, ...(parts ? { parts } : {}) }, partyIndex(ranks.get(reader)!, count), cutLine));
             readers.push(reader);
           }
         }
@@ -446,6 +450,11 @@ export class Tx {
 
   addEvent(data: LogEvent): LogEntry {
     return this.addLog({ kind: "event", data });
+  }
+
+  addCorrection(data: Extract<LogEvent, { type: "correction" }>, views: [string, LogEvent, LineParts][]): void {
+    const line = this.addEvent(data);
+    this.frozenReach.set(line, views.length ? { audience: "party", views } : { audience: "dm" });
   }
 
   /**

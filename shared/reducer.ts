@@ -13,7 +13,8 @@ import {
 } from "./reducer/actors.ts";
 import { remindAfter, remindTurnEnd } from "./reducer/areaTriggers.ts";
 import { linkPass, settleMounts, tokenAttach, tokenDetach } from "./reducer/attach.ts";
-import { attaches, trapsGoOff } from "./migrate.ts";
+import { attaches, trapsGoOff, writesUndoCorrections } from "./migrate.ts";
+import { correctionViews } from "./undoCorrection.ts";
 import { projectState, stableStringify } from "./project.ts";
 import {
   encounterAdd,
@@ -179,6 +180,9 @@ export function applyOp(state: RoomState, op: Op, actor: Viewer, env: Env): Appl
     if (traps?.wrote && dispatched) trapWrote = new Set(tx.touched().filter((key) => !dispatched.has(key)));
     if (plan && op.t === "sys.restore") capRestoredDues(tx, state.traps);
     remindAfter(tx, state, moved);
+    if (writesUndoCorrections(env.opVersion) && op.t === "sys.restore" && op.correction && op.scope && op.undid === undefined && actor.role === "dm") {
+      tx.addCorrection({ type: "correction", from: op.from, scope: op.scope, label: op.correction.label }, correctionViews(state, tx.state, tx.touched(), op.from, op.scope));
+    }
     tx.finish();
   } catch (err) {
     if (err instanceof Refuse) return { ok: false, code: err.code, message: err.message };

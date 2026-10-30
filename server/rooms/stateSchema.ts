@@ -8,6 +8,7 @@ import { DAMAGE_TYPES } from "#shared/rules/damage.ts";
 import { withLevelInRange } from "#shared/srd/conditions.ts";
 import {
   MAX_ALT_IMAGES,
+  MAX_RESTORE_ENTRIES,
   castSchemas,
   trapSchemas,
   TRAP_SOUNDS,
@@ -857,6 +858,7 @@ const logEntry = z.strictObject({
   data: logEvent.optional(),
   parts: z
     .strictObject({
+      correction: z.array(z.strictObject({ key: z.string().min(1).max(160), owner: z.boolean(), characterId: id.optional(), fields: z.array(z.string().min(1).max(40)).max(30).optional(), name: z.string().min(1).max(200).optional() })).max(MAX_RESTORE_ENTRIES).optional(),
       exact: partReaders.optional(),
       label: partReaders.optional(),
       to: partReaders.optional(),

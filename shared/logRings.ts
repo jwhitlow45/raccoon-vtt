@@ -219,9 +219,22 @@ export function dmNumbered(id: string): boolean {
 export function cutLine(line: LogEntry): LogEntry {
   const fits = (e: LogEntry) => serializedBytes(e) <= LIMITS.apartLineBytes;
   let out = line;
-  if (out.parts !== undefined) {
+  if (out.parts !== undefined && out.data?.type !== "correction") {
     const { parts: _parts, ...rest } = out;
     out = rest;
+  }
+  if (fits(out)) return out;
+  if (out.data?.type === "correction" && out.parts?.correction) {
+    // A very large gesture keeps as many authorization witnesses as the existing per-line byte cap permits.
+    const witnesses = out.parts.correction;
+    let low = 1;
+    let high = witnesses.length;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (fits({ ...out, parts: { correction: witnesses.slice(0, middle) } })) low = middle;
+      else high = middle - 1;
+    }
+    out = { ...out, parts: { correction: witnesses.slice(0, low) } };
   }
   if (fits(out)) return out;
   if (out.kind === "event" && (out.text !== undefined || out.from !== undefined)) {

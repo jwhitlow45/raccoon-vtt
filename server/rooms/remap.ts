@@ -1,5 +1,5 @@
 import { uuidv7 } from "#shared/ids.ts";
-import { chunkKey, compareLogIds, holderChunkKey, holderTileKey, tileKey } from "#shared/keys.ts";
+import { chunkKey, compareLogIds, holderChunkKey, holderTileKey, tileKey, parseKey } from "#shared/keys.ts";
 import { tilesAcross } from "#shared/rules/fog.ts";
 import { isPlainId } from "#shared/rules/traps.ts";
 import { cutLine, DM_LINE_BASE, lineAudience, partyIndex, rosterRanks } from "#shared/logRings.ts";
@@ -647,6 +647,10 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
   const ranks = rosterRanks(out.members);
   const copies = new Map<string, number>();
   let shared = 0;
+  blocks.assign(state.log.flatMap((line) => (line.parts?.correction ?? []).flatMap((witness) => {
+    const parsed = parseKey(witness.key);
+    return parsed?.kind === "companionBlock" && witness.characterId !== undefined && characters.has(witness.characterId) ? [parsed.id] : [];
+  })));
   for (const e of state.log) {
     let id: string;
     const audience = lineAudience(e);
@@ -658,6 +662,20 @@ export function remapState(state: RoomState, opts: RemapOptions): RoomState {
     if (e.to !== undefined) next.to = e.to.map((member) => members.of(member));
     // Only a shared line has part readers (LineParts).
     if (parts !== undefined && !apart) next.parts = remapParts(parts, memberList);
+    if (e.data?.type === "correction" && parts?.correction) {
+      const correction = parts.correction.flatMap((witness) => {
+        const parsed = parseKey(witness.key);
+        if (!parsed || !("id" in parsed)) return [];
+        const ids = parsed.kind === "token" ? tokens : parsed.kind === "character" ? characters : parsed.kind === "companionBlock" ? blocks : null;
+        const characterId = witness.characterId;
+        if (characterId !== undefined && !characters.has(characterId)) return [];
+        // A deleted definition's id still identifies absence in its owner's library.
+        const missingBlock = parsed.kind === "companionBlock" && characterId !== undefined;
+        return ids && (ids.has(parsed.id) || missingBlock) ? [{ ...witness, key: `${parsed.kind}:${ids.of(parsed.id)}`, ...(characterId !== undefined ? { characterId: characters.of(characterId) } : {}) }] : [];
+      });
+      if (audience === "party" && correction.length === 0) continue;
+      next.parts = { correction };
+    }
     if (dmLineIds.has(e.id)) id = dmLineIds.get(e.id)!;
     else if (audience === "party") {
       const reader = next.to![0];
