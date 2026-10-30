@@ -3161,7 +3161,15 @@ async function shapeScrollbarScreen(sweep: Sweep, page: Page, size: Size, scale:
   await panel.getByRole("button", { name: /shapes?, take a shape$|^Take a shape$/ }).first().click();
   const picker = page.getByRole("dialog", { name: "Take a shape", exact: true });
   await picker.getByRole("button", { name: "Choose known forms", exact: true }).waitFor();
-  const classic = await page.addStyleTag({ content: 'dialog[aria-label="Take a shape"] > section > div::-webkit-scrollbar { width: 16px; height: 16px; }' });
+  // Adopt the test sheet because the app's CSP rejects inline style elements.
+  const classic = await page.evaluateHandle(() => {
+    type Sheet = { replaceSync(css: string): void };
+    const browser = globalThis as unknown as { CSSStyleSheet: new () => Sheet; document: { adoptedStyleSheets: Sheet[] } };
+    const sheet = new browser.CSSStyleSheet();
+    sheet.replaceSync('dialog[aria-label="Take a shape"] > section > div::-webkit-scrollbar { width: 16px; height: 16px; }');
+    browser.document.adoptedStyleSheets = [...browser.document.adoptedStyleSheets, sheet];
+    return sheet;
+  });
   try {
     const search = picker.getByRole("searchbox", { name: "Search creatures" });
     const body = picker.locator(":scope > section > div").first();
@@ -3193,7 +3201,11 @@ async function shapeScrollbarScreen(sweep: Sweep, page: Page, size: Size, scale:
     await shortList();
     assert.ok(Math.abs((await metrics()).width - short.width) <= LIMIT_PX, "clearing the long list keeps the same width too");
   } finally {
-    await classic.evaluate((el) => (el as unknown as { remove(): void }).remove());
+    await classic.evaluate((sheet) => {
+      const doc = (globalThis as unknown as { document: { adoptedStyleSheets: unknown[] } }).document;
+      doc.adoptedStyleSheets = doc.adoptedStyleSheets.filter((entry) => entry !== sheet);
+    });
+    await classic.dispose();
     await picker.getByRole("button", { name: "Close Take a shape", exact: true }).click();
     await picker.waitFor({ state: "detached" });
   }
