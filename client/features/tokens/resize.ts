@@ -110,16 +110,7 @@ export function backTo(size: CreatureSize, base: readonly Exclude<CreatureSize, 
   return base[0]!;
 }
 
-/** The six sizes' names, as the size lists show them. */
-export const SIZE_WORDS: Record<CreatureSize, string> = {
-  tiny: "Tiny",
-  small: "Small",
-  medium: "Medium",
-  large: "Large",
-  huge: "Huge",
-  gargantuan: "Gargantuan",
-  custom: "Custom",
-};
+export { SIZE_WORDS } from "./sizeWords.ts";
 
 /** A Custom token's size as words: "Custom, 2 by 3 squares", with ", set by the DM" for its owners. */
 export function customWords(token: Pick<Token, "w" | "h">, forOwner: boolean): string {

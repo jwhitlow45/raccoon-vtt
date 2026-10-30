@@ -2,7 +2,8 @@ import "../../components/testing/register.ts";
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { gridOfShape, SQUARES } from "#shared/rules/grid.ts";
-import { sceneCellWord, shapeChoice, sizeWords, storedShape } from "./words.ts";
+import { sceneCellWord, shapeChoice, sizeWords, storedShape, tokenSizeLabel } from "./words.ts";
+import { SIZE_WORDS } from "../tokens/resize.ts";
 
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -10,6 +11,22 @@ const { ShapeRow, shapeReasons, shapeRefusal } = await import("./ShapeRow.tsx");
 const { room, scene } = await import("#shared/testutil.ts");
 
 describe("hex grid words (docs/design-v1-hex-grids.md section 8)", () => {
+  test("FU39-OPUS-5: size labels use the shared size words on squares and both hex orientations", () => {
+    const original = { ...SIZE_WORDS };
+    try {
+      // A wording change must reach both the existing size controls and the hex labels.
+      SIZE_WORDS.large = "Large creature";
+      SIZE_WORDS.custom = "Custom size";
+      assert.equal(tokenSizeLabel("large"), "Large creature");
+      for (const shape of ["hexRows", "hexColumns"] as const) {
+        assert.equal(tokenSizeLabel("large", shape), "Large creature (3 hexes)");
+        assert.equal(tokenSizeLabel("custom", shape), "Custom size");
+      }
+    } finally {
+      Object.assign(SIZE_WORDS, original);
+    }
+  });
+
   test("a scene names its cell by its shape, squares by default", () => {
     assert.equal(sceneCellWord({}), "square");
     assert.equal(sceneCellWord({}, true), "squares");
