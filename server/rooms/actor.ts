@@ -1119,6 +1119,7 @@ export class RoomActor {
       const rides = step.poses && step.rides && step.rides.length > 0 ? { rides: step.rides } : {};
       const checked = checkServerOp({ t: "sys.restore", entries, from: op.t, scope: historyScope, ...(viewer.role === "dm" ? { correction: { label: step.label } } : {}), deps: true, ...(step.teleport ? { teleport: true as const } : {}), ...routes, ...rides, ...(quiet ? { quiet } : {}) });
       if (!checked.ok) {
+        this.#undo.consume(viewer.memberId, op.t, historyScope, historyHead);
         this.#refuse(key, wm, n, "invalid", checked.message);
         return;
       }
@@ -1219,7 +1220,7 @@ export class RoomActor {
     const naturalScope = undoScope(op, before);
     const actionScope = naturalScope === "none" ? "none" : declaredSetup ? "setup" : naturalScope;
     if (sameGroup && actionScope !== "none" && actionScope !== priorGroup.scope) {
-      this.#refuse(key, wm, n, "invalid", "this gesture's undo scope was fixed by its first accepted part");
+      this.#refuse(key, wm, n, "invalid", "this gesture's undo scope was fixed by its first accepted part", admitted);
       return;
     }
     // The DM's builder ops ask before players' remembered map is forgotten, unless sent with the yes (5.3).

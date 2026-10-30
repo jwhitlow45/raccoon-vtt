@@ -909,3 +909,51 @@ test("per-player sight freezes correction recipients and narrows later live and 
     assert.equal(notices(blackout, P1).length, 0, "blackout removes target-based notices");
   });
 });
+
+test("an invalid restore consumes the expected head without changing state", async (t) => {
+  const f = scopeFixture();
+  const hidden = uuidv7();
+  f.state.tokens[f.goblin] = token(f.goblin, { sceneId: f.sceneId, ownerIds: [f.player.id], attached: { to: hidden, kind: "drag" } });
+  f.state.tokens[hidden] = token(hidden, { sceneId: f.sceneId, visibility: "dm", attached: { to: f.goblin, kind: "drag" } });
+  const h = await scopeActor(t, f.state);
+  const dm = await h.connect(f.dm);
+  const player = await h.connect(f.player);
+  await player.apply({ t: "token.move", tokenId: f.goblin, x: 4, y: 3 });
+  const head = player.head().id;
+  await dm.apply({ t: "token.deleteMany", tokenIds: [f.goblin, hidden] });
+  const before = h.actor.committed.state;
+  const event = await player.send({ t: "undo", head });
+  assert.equal(event.rejects?.[0]?.code, "invalid");
+  assert.match(event.rejects![0]!.message, /server op sys.restore does not validate/);
+  assert.equal(player.history().play.undo.head, null, "invalid serialized restore cannot remain an unusable head");
+  unchanged(before, h.actor.committed.state);
+  assert.equal(player.history().play.redo.depth, 0);
+});
+
+test("a contradictory tagged gesture keeps its refusal receipt on ungrouped retry", async (t) => {
+  const f = scopeFixture();
+  const h = await scopeActor(t, f.state);
+  const dm = await h.connect(f.dm);
+  const group = uuidv7();
+  await dm.apply(ac(f.goblin), group);
+  const op = { t: "actor.outcome", plan: uuidv7(), targets: [{ target: { tokenId: f.goblin }, amount: 4 }] };
+  const refused = await dm.send(op, group);
+  assert.equal(refused.rejects?.[0]?.code, "invalid");
+  const retried = await dm.send(op);
+  assert.equal(retried.rejects?.[0]?.message, refused.rejects?.[0]?.message, "a settled tag cannot bypass the original refusal");
+  assert.equal(inline(h.actor.committed.state, f.goblin).hp.cur, 20);
+});
+
+for (const scope of ["play", "setup"] as const) test(`history recording reports ${scope} overflow separately from no-effect entries`, () => {
+  const stacks = new UndoStacks();
+  const history = { scope };
+  const entry = { key: "token:one", value: { x: 1 }, expectHash: guardHash("token:one", { x: 2 }) };
+  assert.equal(stacks.push("dm", [entry], "move", undefined, undefined, undefined, undefined, false, undefined, undefined, false, history), "recorded");
+  const old = stacks.summary("dm", "dm", 0, 0);
+  const noEffect = { ...entry, expectHash: guardHash(entry.key, entry.value) };
+  assert.equal(stacks.push("dm", [noEffect], "no effect", undefined, undefined, undefined, undefined, false, undefined, undefined, false, history), "none");
+  assert.deepEqual(stacks.summary("dm", "dm", 0, 0), old);
+  const oversized = Array.from({ length: 5_001 }, (_, i) => ({ ...entry, key: `token:${i}` }));
+  assert.equal(stacks.push("dm", oversized, "too large", undefined, undefined, undefined, undefined, false, undefined, undefined, false, history), "too-large");
+  assert.deepEqual(stacks.depth("dm", scope), { undo: 0, redo: 0 });
+});
