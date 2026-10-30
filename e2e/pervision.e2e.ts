@@ -1280,6 +1280,50 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     }
   });
 
+  test("FU40-B HXVA-PV8-KONVA: repeated token taps after leaving Isometric never query its hidden stage", async () => {
+    await pickView(dm, "isometric");
+    await waitFor("the goblin on the isometric board", async () => await isoNode(dm, run.goblinId));
+    await pickView(dm, "follow");
+    const point = await waitFor("the top-down token and hidden isometric stages", () => dm.evaluate((id) => {
+      type Stage = {
+        width(): number;
+        listening(): boolean;
+        getPointerPosition(): unknown;
+        container(): { getBoundingClientRect(): { left: number; top: number } };
+        findOne(selector: string): { getClientRect(): { x: number; y: number; width: number; height: number } } | undefined;
+      };
+      const w = globalThis as unknown as {
+        Konva: { stages: Stage[] };
+        __fu40Pointer?: { reads: number; restore: (() => void)[] };
+      };
+      const shown = w.Konva.stages.find((s) => s.width() > 0 && s.listening());
+      const hidden = w.Konva.stages.filter((s) => s.width() === 0 && s.listening());
+      const node = shown?.findOne(`#${id}`);
+      if (!shown || !node || !hidden.length) return null;
+      const probe = { reads: 0, restore: [] as (() => void)[] };
+      for (const stage of hidden) {
+        const read = stage.getPointerPosition;
+        stage.getPointerPosition = function () { probe.reads++; return read.call(this); };
+        probe.restore.push(() => { stage.getPointerPosition = read; });
+      }
+      w.__fu40Pointer = probe;
+      const box = node.getClientRect();
+      const container = shown.container().getBoundingClientRect();
+      return { x: container.left + box.x + box.width / 2, y: container.top + box.y + box.height / 2 };
+    }, run.goblinId));
+    try {
+      await dm.mouse.click(point.x, point.y);
+      await dm.mouse.click(point.x, point.y);
+      assert.equal(await dm.evaluate(() => (globalThis as unknown as { __fu40Pointer: { reads: number } }).__fu40Pointer.reads), 0);
+    } finally {
+      await dm.evaluate(() => {
+        const w = globalThis as unknown as { __fu40Pointer?: { restore: (() => void)[] } };
+        w.__fu40Pointer?.restore.forEach((restore) => restore());
+        delete w.__fu40Pointer;
+      });
+    }
+  });
+
   test("LP25-B-VIEWAS-2. a wait the server names for the preview's snapshot, as past the snapshot budget, keeps View as a player loading past design 7.4's 10 s, with no failure and no Try again, and the snapshot as the wait runs out shows Ana's view (D-261029-150)", async () => {
     previews.hold = true;
     await openSideTab(dm, "DM");

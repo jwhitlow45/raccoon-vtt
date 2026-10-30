@@ -1369,10 +1369,11 @@ export function MapStage(props: {
    */
   const tappedAgain = useCallback(
     (front: string): string => {
+      if (shownRef.current.kind !== "isometric") return front;
       const stage = isoStageRef.current;
       const p = stage?.getPointerPosition();
       const selectedNow = store.getState().local.selectedId;
-      if (shownRef.current.kind !== "isometric" || !stage || !p || selectedNow === null) return front;
+      if (!stage || !p || selectedNow === null) return front;
       const relief = stage.getLayers()[0];
       const under = (n: Konva.Node) => {
         const r = n.getClientRect();
