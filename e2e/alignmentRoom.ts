@@ -2850,6 +2850,45 @@ export function alignmentFile(title: string, steps: () => void): void {
 
 /** pl3-0: the helper on drawn cases, which needs no room. */
 export function helperTest(): void {
+  test("fl5-c. grouped and ungrouped menu rows share an edge, and shifted groups or rows still fail", async () => {
+    const page = await dmContext.newPage();
+    try {
+      for (const scale of [1, 1.3]) {
+        await page.setContent(`<style>
+          * { box-sizing: border-box }
+          [role="menu"], [role="group"] { display: grid; grid-template-columns: minmax(0, 1fr) }
+          [role="menu"] { width: 200px; font: 14px/20px sans-serif; zoom: ${scale} }
+          [role^="menuitem"] { display: flex; align-items: center; min-height: 44px; padding: 0 12px; border: 1px solid transparent }
+          [aria-checked="true"] { background: #333; border-color: #777 }
+          .heading { padding: 8px 13px 4px }
+        </style><div role="menu">
+          <div role="menuitemcheckbox"><span>Two panels</span></div>
+          <div role="group" aria-label="Prepare">
+            <div class="heading">Prepare</div>
+            <div role="menuitemradio"><span>Monsters</span></div>
+            <div role="menuitemradio" aria-checked="true"><span>Encounters</span></div>
+          </div>
+          <div role="menuitem"><span>Menu</span></div>
+        </div>`);
+        const menu = page.getByRole("menu");
+        const group = menu.getByRole("group");
+        const lines = async () => alignmentLines(await measureAlignment(menu), `fl5-c ${scale}`);
+        assert.deepEqual(await lines(), [], "a transparent group must preserve its rows' content edges");
+        for (const shift of [-3, 3]) {
+          await group.evaluate((el, x) => { (el as unknown as { style: { transform: string } }).style.transform = `translateX(${x}px)`; }, shift);
+          assert.ok((await lines()).some((line) => line.includes(": edge ")), `a group moved ${shift}px must fail`);
+        }
+        await group.evaluate((el) => { (el as unknown as { style: { transform: string } }).style.transform = ""; });
+        for (const padding of [9, 15]) {
+          await group.getByRole("menuitemradio").first().evaluate((el, px) => { (el as unknown as { style: { paddingLeft: string } }).style.paddingLeft = `${px}px`; }, padding);
+          assert.ok((await lines()).some((line) => line.includes(": edge ")), `a grouped row with ${padding}px padding must fail`);
+        }
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   test("fl5-a. the menu word check catches a word squeezed below the menu's width, but accepts word boundaries and an oversized word", async () => {
     const page = await dmContext.newPage();
     try {
@@ -3361,6 +3400,17 @@ function moreMenuTest(size: Size, scale: number, at: string): void {
       const menu = page.getByRole("menu", { name: "More panels" });
       const box = page.locator("[data-rvtt-popover]");
       await menu.waitFor();
+      const edges = await menu.evaluate((el) => {
+        type Element = { getBoundingClientRect(): { left: number; right: number }; getAttribute(name: string): string | null; querySelectorAll(selector: string): ArrayLike<Element> };
+        const root = el as unknown as Element;
+        const rect = root.getBoundingClientRect();
+        return Array.from(root.querySelectorAll('[role="group"], [role^="menuitem"]')).map((part) => {
+          const box = part.getBoundingClientRect();
+          return { role: part.getAttribute("role"), left: box.left - rect.left, right: box.right - rect.right };
+        });
+      });
+      assert.ok(edges.some((edge) => edge.role === "group") && edges.some((edge) => edge.role?.startsWith("menuitem")), "the menu must contain both group and item boxes");
+      assert.ok(edges.every((edge) => Math.abs(edge.left) <= LIMIT_PX && Math.abs(edge.right) <= LIMIT_PX), `${at}: group and item boxes must share the menu's edges: ${JSON.stringify(edges)}`);
       await sweep.measure(page, "fl5-more-fixture", box);
       if (sweep.lines.length) console.error(sweep.lines.join("\n"));
       const wrapped = await menu.locator('[role^="menuitem"]').evaluateAll((items) => {

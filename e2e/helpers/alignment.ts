@@ -297,7 +297,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
 
   /** A part of what the eye reads. `start` marks a part set at its line's start, not centered or at the end, the only kind an edge follows. */
   /** `wrap` is the nearest flex row that wraps holding it, from the measured element down, if any. */
-  type Atom = Box & { kind: "text" | "icon" | "box"; what: string; start?: boolean; wrap?: DomElement | null };
+  type Atom = Box & { kind: "text" | "icon" | "box"; what: string; start?: boolean; wrap?: DomElement | null; element?: DomElement };
   type Item = { node: DomNode; v: Box; first: Box; box: Box; boxed: boolean; mode: "center" | "start" | "baseline" | "other"; what: string };
 
   const style = (el: DomElement) => win.getComputedStyle(el);
@@ -496,7 +496,7 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
           if (!shown(ch) || (placedApart(ch) && !(placed && style(ch).position === "absolute"))) continue;
           const start = setAtStart(node, container);
           if (isPicture(ch)) add({ kind: "icon", ...rectOf(ch), what: ch.getAttribute("role") === "img" ? `img "${ch.getAttribute("aria-label") ?? ""}"` : tag(ch), start, wrap }, clip);
-          else if (FIELD.includes(tag(ch)) || ch.matches(INTERACTIVE) || paints(ch)) add({ kind: "box", ...rectOf(ch), what: say(ch), start, wrap }, clip);
+          else if (FIELD.includes(tag(ch)) || ch.matches(INTERACTIVE) || paints(ch)) add({ kind: "box", ...rectOf(ch), what: say(ch), start, wrap, element: ch }, clip);
           else walk(ch, clips(ch) ? cutBy(clip, rectOf(ch)) : clip, wrap);
         }
       }
@@ -641,13 +641,20 @@ function measureInPage(roots: DomElement[], opts: PageOptions): Finding[] {
   function edgeOf(row: DomElement): { words: number | null; box: number | null; notice: boolean; inset: boolean } | null {
     if (row.matches("[aria-expanded]") || row.querySelector(":scope > [aria-expanded], :scope > * > [aria-expanded]")) return null;
     const parts = atomsOf(row).filter((a) => a.start);
-    const words = parts.length ? round(Math.min(...parts.map((a) => a.l))) : null;
     const box = paints(row) ? round(rectOf(row).l) : null;
+    const nested = row.matches('ul, ol, fieldset, [role="group"], [role="list"], [role="radiogroup"]');
+    const column = nested && box === null && parts.every((a, i) => i === 0 || a.t >= parts[i - 1]!.b - 1);
+    // A transparent column keeps each nested row's own edge. Comparing its controls' outer boxes with an ungrouped row's words counts that row's padding as drift.
+    const starts = parts.map((a) => {
+      const edge = column && a.element ? edgeOf(a.element) : null;
+      return edge?.words ?? edge?.box ?? a.l;
+    });
+    const words = starts.length ? round(Math.min(...starts)) : null;
     if (words === null && box === null) return null;
     const chosen = row.matches('[aria-checked="true"], [aria-selected="true"], [aria-pressed="true"]') || (tag(row) === "label" && row.querySelector("input:checked") !== null);
     const notice = box !== null && !chosen && !row.matches(INTERACTIVE) && !row.matches("label, li, summary");
     let inset = false;
-    if (words !== null && row.matches('ul, ol, fieldset, [role="group"], [role="list"], [role="radiogroup"]')) {
+    if (words !== null && nested) {
       const b = boxes(row);
       const own = b.inner.l + b.pad.l;
       inset = Math.abs(words - own) <= LIMIT && (b.pad.l > LIMIT || (parseFloat(style(row).getPropertyValue("margin-left")) || 0) > LIMIT);
