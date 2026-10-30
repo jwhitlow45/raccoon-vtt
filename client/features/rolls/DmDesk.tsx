@@ -35,7 +35,6 @@ import {
   chipsStayShown,
   deskLayout,
   dcText,
-  dmAnswerText,
   foldedChips,
   heldBySaveEnds,
   newestFirst,
@@ -52,6 +51,7 @@ import { RequestSheet } from "./RequestSheet.tsx";
 import { deskTraps, foldedWithTraps } from "../traps/desk.ts";
 import { TrapCard } from "../traps/TrapCard.tsx";
 import { cardStyle, ResultBadge } from "./parts.tsx";
+import { DmAnswerLine, RequestTestLabels } from "./RequestTestLabels.tsx";
 
 const NO_ROLLS = {};
 const NO_CASTS = {};
@@ -285,7 +285,7 @@ export function DmDesk() {
   );
 }
 
-function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(): void; request: RollRequest; open: boolean; onToggle(): void }) {
+export function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(): void; request: RollRequest; open: boolean; onToggle(): void }) {
   const { request } = props;
   const tally = tallyText(request);
   const asking = request.targets.filter((t) => t.change !== undefined);
@@ -296,14 +296,14 @@ function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(
   const hidden = request.resultShown ? "" : ", pass or fail hidden from players";
   return (
     <section role="group" aria-label={`Roll request: ${title}`} style={{ ...cardStyle, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: theme.space(1) }}>
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(1) }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(1) }}>
         <button
           ref={props.toggleRef}
           type="button"
           onClick={props.onToggle}
           aria-expanded={props.open}
           style={{
-            flex: 1,
+            flex: "1 1 180px",
             minWidth: 0,
             minHeight: theme.touch,
             display: "grid",
@@ -317,7 +317,10 @@ function DmCard(props: { toggleRef(el: HTMLButtonElement | null): void; onClose(
             cursor: "pointer",
           }}
         >
-          <span style={{ fontWeight: theme.weight.bold, fontSize: theme.font.body14 }}>{title}</span>
+          <span data-request-heading="" style={{ fontWeight: theme.weight.bold, fontSize: theme.font.body14 }}>
+            <RequestTestLabels request={request} target={request.targets.length === 1 ? request.targets[0] : undefined} />
+            {dc ? <span style={{ whiteSpace: "nowrap" }}>{`, ${dc}`}</span> : null}
+          </span>
           <span style={{ fontSize: theme.font.small, color: theme.color.textMuted, fontVariantNumeric: "tabular-nums" }}>
             {tally.answered}
             {hidden}
@@ -363,18 +366,19 @@ function TargetRow(props: { request: RollRequest; target: RollTarget }) {
     <li
       style={{
         display: "flex",
+        flexWrap: "wrap",
         alignItems: "center",
         gap: theme.space(1),
         borderTop: `${theme.line.border}px solid ${theme.color.border}`,
         paddingTop: theme.space(1),
       }}
     >
-      <div style={{ flex: 1, minWidth: 0, display: "grid" }}>
+      <div style={{ flex: "1 1 160px", minWidth: 0, display: "grid" }}>
         <span style={{ display: "flex", alignItems: "center", gap: theme.space(1), minWidth: 0 }}>
           <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: theme.font.body14 }}>{name}</strong>
           <ResultBadge result={target.result} wantsMark={wantsMark(request, target)} />
         </span>
-        <span style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{dmAnswerText(target, request.test)}</span>
+        <span style={{ fontSize: theme.font.body14 }}><DmAnswerLine request={request} target={target} /></span>
         {answered(target) ? (
           // It acts in place, so it reads as a quiet button rather than a link's accent (docs/design-v1-visual.md F24).
           <Button

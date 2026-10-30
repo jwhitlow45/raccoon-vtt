@@ -1,4 +1,7 @@
 import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { ProficientTest } from "./ProficientTest.tsx";
+import { ProficientEvent } from "./ProficientEvent.tsx";
+import { rollTarget, rollTest } from "./proficiencyPresentation.ts";
 import { naturalOf, rolledTerms } from "#shared/dice/roll.ts";
 import { creatureName, describeEvent, diceText, keptFrom, labelText, memberName, rolledFormula, type LogNames } from "#shared/logText.ts";
 import type { DiceResult, DiceRoll, LogEntry } from "#shared/model.ts";
@@ -139,6 +142,8 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
   // "Thorn 9 Thorn, Longsword damage" said the name twice where a player rolls for the character of the same name.
   const what = [creature !== null && creature === props.by ? null : creature, roll.label === undefined ? undefined : labelText(roll.label)].filter(Boolean).join(", ");
   const verdict = rollVerdict(roll, props.row);
+  const target = rollTarget(roll);
+  const test = rollTest(roll);
   const formula = rolledFormula(roll);
   const again = props.end !== undefined && props.end !== null;
   const split = !again && props.floor === true;
@@ -164,10 +169,10 @@ function RollLine(props: { roll: DiceRoll; row: { dc?: number; ac?: number }; na
       >
         <LastGrows>
           {props.lead}
-          <span style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{roll.total.toLocaleString("en-US")}</span>
+          <span style={{ fontSize: target && test ? theme.font.body14 : theme.font.input, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{target && test ? <ProficientTest creature={target} test={test}>{roll.label} {roll.total.toLocaleString("en-US")}</ProficientTest> : roll.total.toLocaleString("en-US")}</span>
           {what ? (
             <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>
-              {what}
+              {target && test ? creature : what}
             </span>
           ) : null}
           {/* The formula and its dice wrap together, so a line never holds dice with no words, which would read as a label above them. */}
@@ -236,7 +241,7 @@ function Row(props: { row: RecentRow; names: LogNames; me: string; dm: boolean; 
     return (
       <li data-roll-row={row.ids.join(" ")} style={base}>
         <div style={{ ...FLOOR, gap: theme.space(1) }}>
-          <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{describeEvent(row.line, names, props.dm)}</span>
+          <span style={{ fontSize: theme.font.body14, overflowWrap: "anywhere" }}>{<ProficientEvent data={row.line} names={names} dm={props.dm} />}</span>
           {row.line.dice ? <DiceFaces result={row.line.dice} /> : null}
         </div>
       </li>
@@ -296,10 +301,17 @@ export function RecentRolls(props: { names: LogNames; me: string; open: string |
   const { fold } = useDiceFolds();
   const rows = useMemo(() => recentRolls(log, held), [log, held]);
   const summary = recentSummary(rows, props.names, dm);
+  const newest = rows[0];
+  const first = newest?.kind === "dice" ? newest.rolls[0] : undefined;
+  const target = first ? rollTarget(first) : null;
+  const test = first ? rollTest(first) : null;
+  const structuredSummary = first && target && test ? (
+    <>{creatureName(props.names, first)} <ProficientTest creature={target} test={test}>{first.label} {first.total.toLocaleString("en-US")}</ProficientTest>{newest?.kind === "dice" && newest.rolls.length > 1 ? ` and ${newest.rolls.length - 1} more` : ""}</>
+  ) : newest?.kind === "answer" ? <ProficientEvent data={newest.line} names={props.names} dm={dm} /> : null;
   return (
     // A group is no landmark (components/Panel.tsx), so the mark sits on a plain box around it.
     <div data-dice-recent="" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)" }}>
-      <Group label="Recent rolls" {...fold("recent")} summary={summary ?? undefined}>
+      <Group label="Recent rolls" {...fold("recent")} summaryWrap={structuredSummary !== null} summary={structuredSummary ?? summary ?? undefined}>
         {rows.length === 0 ? (
           <Empty>No rolls yet. Type a formula or tap a die.</Empty>
         ) : (

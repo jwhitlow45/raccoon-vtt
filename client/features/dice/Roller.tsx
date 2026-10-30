@@ -1,4 +1,6 @@
 import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { ProficientTest } from "./ProficientTest.tsx";
+import { rollTarget, rollTest } from "./proficiencyPresentation.ts";
 import { addDie, formatFormula, parseRollText } from "#shared/dice/formula.ts";
 import { labelText } from "#shared/logText.ts";
 import type { DiceRoll, LogEntry } from "#shared/model.ts";
@@ -142,6 +144,9 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
   else {
     const verdict = shownVerdict(first, data);
     const label = head.label !== undefined ? labelText(head.label) : "once" in last ? last.label : undefined;
+    const target = rollTarget(first);
+    const test = rollTest(first);
+    const marked = target !== null && test !== null && rolls.length === 1;
     body = (
       <button
         type="button"
@@ -149,8 +154,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         aria-label={`Show this roll in Recent rolls`}
         style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: theme.space(2), minWidth: 0, flex: 1, minHeight: LAST_LINE_PX, overflow: "hidden", whiteSpace: "nowrap" }}
       >
-        <span style={{ flex: "none", fontSize: theme.font.heading, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{head.total.toLocaleString("en-US")}</span>
-        <ResultRest sum={head.sums} label={label} dice={head.dice} more={head.more} verdict={verdict} />
+        <span style={{ flex: "none", fontSize: marked ? theme.font.body14 : theme.font.heading, fontWeight: theme.weight.bold, fontVariantNumeric: "tabular-nums" }}>{marked ? <ProficientTest creature={target} test={test}>{label} {head.total.toLocaleString("en-US")}</ProficientTest> : head.total.toLocaleString("en-US")}</span>
+        <ResultRest sum={head.sums} label={marked ? undefined : label} dice={head.dice} more={head.more} verdict={verdict} />
       </button>
     );
   }
@@ -172,8 +177,8 @@ export function LastResult(props: { onOpen(lineId: string): void }) {
         minWidth: 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
-        <div style={{ display: "flex", alignItems: "center", flex: 1, minWidth: 0 }}>{body}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: theme.space(2), minHeight: LAST_LINE_PX, fontSize: theme.font.body14 }}>
+        <div style={{ display: "flex", alignItems: "center", flex: "1 1 190px", minWidth: 0 }}>{body}</div>
         {again ? (
           <Button size="sm" variant="quiet" icon="again" busy={waiting} style={{ flex: "none" }} onClick={() => panel.again(again.rolls, again.to, throws.origin())}>
             Again

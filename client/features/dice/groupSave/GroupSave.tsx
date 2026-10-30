@@ -1,4 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ProficientTest } from "../ProficientTest.tsx";
+import { testLabel } from "../options.ts";
 import { bonusFor } from "#shared/dice/bonus.ts";
 import type { AdvantageSource } from "#shared/dice/formula.ts";
 import { uuidv7 } from "#shared/ids.ts";
@@ -959,6 +961,7 @@ function GroupRow(props: {
           />
         </div>
       </div>
+      {page.test.kind !== "none" ? <span style={{ fontSize: theme.font.small }}><ProficientTest creature={row.target} test={page.test}>{testLabel(page.test)}{row.bonus !== null ? ` ${signedText(row.bonus)}` : ""}</ProficientTest></span> : null}
       {takes && editing ? (
         <RowDamageField name={row.name} value={s.amount} computed={outcome.computed} summary={outcome.summary} onChange={(value) => props.onChange(setAmount(page, row.holder, value))} />
       ) : null}

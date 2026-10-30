@@ -1,3 +1,5 @@
+import { ProficientTest } from "../dice/ProficientTest.tsx";
+import { signedText } from "../dice/options.ts";
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { Effect, RollRequest, RollTarget, RoomState } from "#shared/model.ts";
@@ -51,7 +53,7 @@ import {
   type AnswerFlow,
   type AnswerOffers,
   type AnswerOp,
-  askLine,
+  dcText,
   CARD_MIN_WIDTH,
   cardFoldsUnderSheet,
   chipLine,
@@ -60,7 +62,6 @@ import {
   chipsStayShown,
   deskLayout,
   draftKey,
-  finalAnswerText,
   finalForPlayer,
   foldedChips,
   foldsAfterSend,
@@ -81,6 +82,7 @@ import {
   type AnswerDraft,
 } from "./logic.ts";
 import { cardStyle, focusable } from "./parts.tsx";
+import { compactTestName, PlayerAnswerLine, RequestTestLabels } from "./RequestTestLabels.tsx";
 
 const NO_ROLLS = {};
 
@@ -427,7 +429,7 @@ function useCreature(target: RollTarget): { name: string; effects: readonly Effe
   return { name, effects, noBlock: character && character.stats === undefined && editsPcStats(you, character) ? character.id : null };
 }
 
-function RollCard(props: {
+export function RollCard(props: {
   cardRef: RefObject<HTMLElement | null>;
   request: RollRequest;
   drafts: Map<string, AnswerDraft>;
@@ -587,6 +589,7 @@ function RollCard(props: {
         {...(props.sheet ? { [GRAB_ATTR]: "" } : {})}
         style={{
           display: "flex",
+          flexWrap: "wrap",
           alignItems: "flex-start",
           gap: theme.space(2),
           // At the foot it reaches over the card's top padding, taken back from its margin, so the grabber drawn there is on the grab area, stuck or not. Its content stands the grabber's room under the card's top edge, as a sheet header's buttons do.
@@ -608,9 +611,14 @@ function RollCard(props: {
         {/* In the header's top padding, the grabber's room. */}
         {props.sheet ? <SheetGrabber /> : null}
         {/* Set down so its first line's middle meets Later's, as a checkbox meets its label's first line (docs/design-v1-polish.md R1): a question on several lines starts beside Later rather than centering on it. */}
-        <div style={{ flex: 1, minWidth: 0, display: "grid", gap: theme.space(0.5), paddingTop: QUESTION_DROP }}>
+        <div style={{ flex: "1 1 180px", minWidth: 0, display: "grid", gap: theme.space(0.5), paddingTop: QUESTION_DROP }}>
           {/* The DC joins the question's line (5.1), one line less on every card. */}
-          <div style={{ fontSize: theme.font.input, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>{askLine(request)}</div>
+          <div data-request-heading="" style={{ fontSize: theme.font.body14, fontWeight: theme.weight.bold, lineHeight: theme.leading.tight }}>
+            The DM asks for <RequestTestLabels request={request} target={request.targets.length === 1 ? request.targets[0] : undefined} />
+            {request.spell ? " against a spell" : ""}
+            {dcText(request, "player") ? <span style={{ whiteSpace: "nowrap" }}>{`, ${dcText(request, "player")}`}</span> : null}
+            {request.note ? `: ${request.note}` : ""}.
+          </div>
         </div>
         {done ? (
           <Button ref={headerButton} size="sm" aria-label="Done, fold it into a chip" title="Done, fold it into a chip" onClick={props.onFold}>
@@ -900,9 +908,10 @@ function CreatureAnswer(props: {
       }}
     >
       {props.several || target.tokenId !== undefined ? <strong style={{ fontSize: theme.font.input }}>{name}</strong> : null}
+      {!two && !target.dice && !final ? <span style={{ fontSize: theme.font.body14 }}><ProficientTest creature={ref} test={test}>{compactTestName(test)}{bonuses[picked] !== null && bonuses[picked] !== undefined ? ` ${signedText(bonuses[picked]!)}` : ""}</ProficientTest></span> : null}
       {target.dice || final ? (
         <>
-          {target.dice ? <RolledResult target={target} /> : <div style={{ fontSize: theme.font.body14 }}>{finalAnswerText(target, request.test)}. Final.</div>}
+          {target.dice ? <RolledResult request={request} target={target} /> : <div style={{ fontSize: theme.font.body14 }}><PlayerAnswerLine request={request} target={target} /></div>}
           <AskChange
             target={target}
             name={name}
@@ -926,7 +935,7 @@ function CreatureAnswer(props: {
               label="Which one you rolled"
               value={choice}
               grow
-              options={request.test.choices.map((c, i) => ({ value: i as 0 | 1, label: choiceLabel(choiceText(c), bonuses[i] ?? null) }))}
+              options={request.test.choices.map((c, i) => ({ value: i as 0 | 1, title: choiceLabel(choiceText(c), bonuses[i] ?? null), label: <ProficientTest creature={ref} test={testOf(request, i)}>{choiceLabel(compactTestName(testOf(request, i)), bonuses[i] ?? null)}</ProficientTest> }))}
               onChange={(i) => {
                 setChoice(i);
                 keep({ choice: i });
@@ -1080,7 +1089,7 @@ function CreatureAnswer(props: {
               ) : null}
             </div>
           ) : null}
-          {answered(target) ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}>{chipLine(request, target)}</div> : null}
+          {answered(target) ? <div style={{ fontSize: theme.font.small, color: theme.color.textMuted }}><PlayerAnswerLine request={request} target={target} /></div> : null}
           {flow.error ? (
             <div role="alert" style={{ fontSize: theme.font.small, color: theme.color.dangerText }}>
               {flow.error}
@@ -1093,7 +1102,7 @@ function CreatureAnswer(props: {
 }
 
 /** How far the question stands under Later's top: its first line, 16 px at tight leading, centered on Later's 44 px. */
-const QUESTION_DROP = (theme.touch - theme.font.input * theme.leading.tight) / 2;
+const QUESTION_DROP = (theme.touch - theme.font.body14 * theme.leading.tight) / 2;
 
 /** The bonus field, as wide as "-20" in the 16 px field (Appendix A: 64 px). */
 const BONUS_FIELD_WIDTH = 64;
@@ -1168,7 +1177,7 @@ function viewportBound(): Rect {
  * (1d20+5 with Advantage: 12, 7 dropped). Pass." with a dropped die struck
  * through, a natural 20 or 1, then "Final."
  */
-function RolledResult(props: { target: RollTarget }) {
+export function RolledResult(props: { request: RollRequest; target: RollTarget }) {
   const { target } = props;
   const dice = target.dice!;
   const shown = rolledDice(dice);
@@ -1176,7 +1185,7 @@ function RolledResult(props: { target: RollTarget }) {
   const verdict = verdictText(target);
   return (
     <div style={{ fontSize: theme.font.body14 }}>
-      Rolled <strong>{target.total ?? dice.total}</strong> ({shown.formula}
+      Rolled <RequestTestLabels request={props.request} target={target} total={target.total ?? dice.total} /> ({shown.formula}
       {shown.faces.length > 0 ? ": " : ""}
       {shown.faces.map((f, i) => (
         <Fragment key={i}>
@@ -1202,7 +1211,7 @@ function RolledResult(props: { target: RollTarget }) {
  * the card to change the answer while the request is open, except when
  * every answer on it is final, which the chip then says in plain text.
  */
-function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null>; request: RollRequest; onOpen(): void }) {
+export function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null>; request: RollRequest; onOpen(): void }) {
   const { request } = props;
   const names = useRoomView((s) => (s.view ? request.targets.map((t) => creatureName(s.view!, t)).join("|") : ""));
   const several = request.targets.length > 1;
@@ -1218,7 +1227,10 @@ function RollChip(props: { buttonRef?: RefObject<HTMLButtonElement | null>; requ
     display: "grid",
     gap: theme.space(0.5),
   } as const;
-  const text = lines.map((line, i) => <span key={i}>{line}</span>);
+  const text = lines.map((_line, i) => {
+    const target = request.targets[i]!;
+    return <span key={i}>{several ? `${names.split("|")[i] ?? ""}: ` : ""}<PlayerAnswerLine request={request} target={target} /></span>;
+  });
   if (!changeable) {
     return (
       <div role="status" style={style}>

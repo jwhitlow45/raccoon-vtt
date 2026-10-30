@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject } from "react";
+import { ProficientToast } from "../features/dice/ProficientToast.tsx";
 import { createPortal, flushSync } from "react-dom";
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
@@ -2217,7 +2218,7 @@ function ToastNote(props: { toast: Toast; onDismiss(): void; form?: "stack" | "r
             : { display: "contents" }}
       >
         <button type="button" data-toast={boxed ? undefined : ""} aria-label={row ? t.text : undefined} onClick={row ? props.onWhole : props.onDismiss} style={wordsStyle}>
-          {!row && !action && t.die ? <ToastD20 die={t.die} text={t.text} /> : t.text}
+          {!row && !action && t.die ? <ToastD20 die={t.die} text={<ProficientToast toast={t} />} /> : <ProficientToast toast={t} />}
         </button>
         {action ? (
           <Button
@@ -2251,7 +2252,7 @@ const TOAST_RING_PX = 2;
  * and a natural 1 is outlined in danger. The icon is hidden from a screen
  * reader, so the verdict follows the text as hidden words.
  */
-function ToastD20(props: { die: ToastDie; text: string }) {
+function ToastD20(props: { die: ToastDie; text: ReactNode }) {
   const { die } = props;
   const outer = TOAST_DIE_PX / 2 + TOAST_RING_GAP_PX + TOAST_RING_PX;
   return (

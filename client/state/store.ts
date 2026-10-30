@@ -259,7 +259,7 @@ export type RoomUi = {
    * may carry one button. `logged` says the log keeps its words too
    * (types.ts Toast).
    */
-  notify(text: string, tone?: Toast["tone"], die?: ToastDie, action?: ToastAction, logged?: boolean): void;
+  notify(text: string, tone?: Toast["tone"], die?: ToastDie, action?: ToastAction, logged?: boolean, rolls?: Toast["rolls"]): void;
   dismissToast(id: number): void;
   /** The toast layer drew these toasts: each drawn for the first time starts its time (toastsLeft). */
   toastsDrawn(ids: readonly number[]): void;
@@ -607,10 +607,10 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     });
   }
 
-  function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction, logged = false): void {
+  function pushToast(text: string, tone: Toast["tone"] = "error", die?: ToastDie, action?: ToastAction, logged = false, rolls?: Toast["rolls"]): void {
     const toasts = get().toasts;
     if (toasts.some((t) => t.text === text)) return;
-    store.setState({ toasts: withToast(toasts, { id: ++toastSeq, text, tone, ...(die ? { die } : {}), ...(action ? { action } : {}), ...(logged ? { logged: true as const } : {}) }) });
+    store.setState({ toasts: withToast(toasts, { id: ++toastSeq, text, tone, ...(rolls ? { rolls } : {}), ...(die ? { die } : {}), ...(action ? { action } : {}), ...(logged ? { logged: true as const } : {}) }) });
   }
 
   // ------------------------------------------------------------ sending
@@ -715,8 +715,8 @@ export function createRoomStore(options: RoomStoreOptions): RoomStore {
     crossWide(wide) {
       setLocal(crossWide(get().local, wide));
     },
-    notify(text, tone = "info", die, action, logged) {
-      pushToast(text, tone, die, action, logged);
+    notify(text, tone = "info", die, action, logged, rolls) {
+      pushToast(text, tone, die, action, logged, rolls);
     },
     dismissToast(id) {
       const toasts = get().toasts;

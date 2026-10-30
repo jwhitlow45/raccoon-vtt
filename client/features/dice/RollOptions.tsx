@@ -1,5 +1,7 @@
+import { ProficiencyLabel } from "../../components/ProficiencyMark.tsx";
+import type { Proficiency } from "#shared/rules/proficiency.ts";
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { bonusFor, type D20Test, type NamedRoll } from "#shared/dice/bonus.ts";
+import { bonusFor, testOf, type D20Test, type NamedRoll } from "#shared/dice/bonus.ts";
 import { critRuleOf } from "#shared/dice/crit.ts";
 import { limitedUses, type LimitedUse } from "#shared/dice/uses.ts";
 import { ABILITY_KEYS, SKILL_KEYS, type AbilityKey, type Actor, type RoomState, type SkillKey } from "#shared/model.ts";
@@ -32,7 +34,7 @@ import { useOpenPcStats } from "../pcstats/open.ts";
 import { d20Text, parseBonus } from "../rolls/card.ts";
 import { editsPcStats } from "../tokens/access.ts";
 import { Note, SmallButton } from "../tokens/ui.tsx";
-import { creatureBlock, creatureRolls, type CreatureRolls, type DiceView } from "./creature.ts";
+import { creatureBlock, creatureRolls, creatureProficiency, type CreatureRolls, type DiceView } from "./creature.ts";
 import { CreatureCard, DICE_CARD } from "./CreatureCard.tsx";
 import { creatureLook } from "./creatureLook.ts";
 import { foldKey, foldKind, useDiceFolds, type CreatureGroup } from "./diceFolds.ts";
@@ -74,6 +76,7 @@ import {
   testLabel,
   typedTap,
   typedText,
+  type GroupWaiting,
   type Marks,
   type Pickable,
   type TypedBonus,
@@ -462,6 +465,45 @@ function CardBody(props: Shown) {
   );
 }
 
+/** Keep folded status words intact while each known test stays with its bonus and marker. */
+function proficientFoldSummary(ctx: Ctx, group: "saves" | "skills", waiting?: GroupWaiting, note = ""): ReactNode {
+  const numbers = ctx.rolls.numbers;
+  const entries: { label: string; test: D20Test }[] = [];
+  if (numbers && group === "saves") {
+    for (const ability of ABILITY_KEYS) {
+      const name = ABILITY_SHORT[ability].charAt(0) + ABILITY_SHORT[ability].slice(1).toLowerCase();
+      entries.push({ label: `${name} ${signedText(numbers.abilities[ability].save)}`, test: { kind: "save", ability } });
+    }
+  } else if (numbers) {
+    for (const skill of SKILL_KEYS) {
+      const ability = SKILLS[skill].ability;
+      const test: D20Test = { kind: "check", ability, skill };
+      const bonus = bonusFor(numbers, test) ?? 0;
+      if (bonus > (bonusFor(numbers, { kind: "check", ability }) ?? 0)) entries.push({ label: `${SKILLS[skill].name} ${signedText(bonus)}`, test });
+    }
+  }
+  const mark = (label: string, test?: D20Test) => test && (test.kind === "save" || (test.kind === "check" && test.skill))
+    ? <ProficiencyLabel key={label} level={creatureProficiency(ctx.dice, ctx.creature, test)}>{label}</ProficiencyLabel>
+    : <span key={label} style={{ whiteSpace: "nowrap" }}>{label}</span>;
+  const parts: ReactNode[] = [];
+  if (waiting?.asked.length) {
+    const requested = new Map<string, D20Test>();
+    for (const request of Object.values(ctx.dice.view.rolls)) {
+      const target = request.targets.find((t) => creatureKey(ctx.dice.view, t) === ctx.key);
+      if (!target || target.total !== undefined || target.result !== undefined) continue;
+      request.test.choices.forEach((choice, index) => {
+        const label = request.test.kind === "check" && choice.skill ? `${SKILLS[choice.skill].name} check` : `${ABILITY_SHORT[choice.ability]} ${request.test.kind}`;
+        if (!requested.has(label)) requested.set(label, testOf(request, index));
+      });
+    }
+    parts.push(<span key="asked">Asked: {waiting.asked.flatMap((label, index) => [...(index ? [", "] : []), mark(label, requested.get(label))])}</span>);
+  }
+  const rest = foldSummary(group === "saves" ? { group, note, saves: null } : { group, skills: [] }, waiting ? { ...waiting, asked: [] } : undefined);
+  if (rest) parts.push(rest);
+  if (entries.length) parts.push(<span key="numbers">{entries.flatMap(({ label, test }, index) => [...(index ? [", "] : []), mark(label, test)])}</span>);
+  return parts.length ? parts.flatMap((part, index) => [...(index ? [" · "] : []), part]) : "";
+}
+
 /**
  * The groups under the card (docs/design-v1-dice-pass.md 6.1), in the
  * order players know, each folding as this device last left it for this
@@ -507,7 +549,7 @@ function OptionGroups(props: Shown) {
           <RowCast dice={dice} creatureKey={ctx.key} creature={creature} name={props.name} blocked={ctx.blocked} named={null} rowSlot={null} blockHere />
         </div>
       ) : null}
-      <Group label="Saves and checks" {...groupFold("saves")} summary={foldSummary({ group: "saves", note: sharedNote, saves: numbers ? Object.fromEntries(ABILITY_KEYS.map((a) => [a, numbers.abilities[a].save])) : null }, asks.saves)}>
+      <Group label="Saves and checks" {...groupFold("saves")} summaryWrap summary={proficientFoldSummary(ctx, "saves", asks.saves, sharedNote)}>
         <Grid label="Saves" note={numbers ? saveNote : undefined}>
           {ABILITY_KEYS.map((a) =>
             !numbers ? (
@@ -528,13 +570,8 @@ function OptionGroups(props: Shown) {
       <Group
         label="Skills"
         {...groupFold("skills")}
-        summary={foldSummary(
-          {
-            group: "skills",
-            skills: numbers ? SKILL_KEYS.map((s) => ({ name: SKILLS[s].name, bonus: bonusFor(numbers, { kind: "check", ability: SKILLS[s].ability, skill: s }) ?? 0, check: bonusFor(numbers, { kind: "check", ability: SKILLS[s].ability }) ?? 0 })) : [],
-          },
-          asks.skills,
-        )}
+        summaryWrap
+        summary={proficientFoldSummary(ctx, "skills", asks.skills)}
       >
         {/* Room for Animal Handling, its bonus and the busy mark at the cell's 14 px type. */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 200px), 1fr))", gridAutoRows: "1fr", gap: theme.space(1) }}>
@@ -702,7 +739,7 @@ function Grid(props: { label: string; note?: string; children: ReactNode }) {
  * until its line lands. Its result shows in the panel's newest-roll line at the top (the project owner,
  * 2026-10-17: "it should just be in the header"), so a row never grows when a roll lands.
  */
-function OptionCell(props: { text: string; tag?: string | undefined; name: string; row: string; disabled: string | null; onTap(): void; pressed?: boolean; grow?: boolean; fill?: boolean; nowrap?: boolean }) {
+function OptionCell(props: { level?: Proficiency; text: string; tag?: string | undefined; name: string; row: string; disabled: string | null; onTap(): void; pressed?: boolean; grow?: boolean; fill?: boolean; nowrap?: boolean }) {
   const { waiting } = useRowResult(props.row);
   return (
     <button
@@ -717,7 +754,7 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
       }}
       style={{
         minHeight: theme.touch,
-        padding: `0 ${theme.space(3)}px`,
+        padding: `0 ${theme.space(props.level === undefined ? 3 : 1.5)}px`,
         display: "flex",
         // The words never cut: a tag with no room beside them goes under them, and the button grows a line.
         flexWrap: "wrap",
@@ -742,7 +779,7 @@ function OptionCell(props: { text: string; tag?: string | undefined; name: strin
     >
       {/* Skills keep their names whole in wider columns. Other options may wrap inside the cell. */}
       <span style={{ minWidth: 0, fontSize: theme.font.body14, fontWeight: theme.weight.strong, textAlign: props.fill ? "center" : "left", overflowWrap: "anywhere", whiteSpace: props.nowrap ? "nowrap" : undefined }}>
-        {waiting ? `${props.text}…` : props.text}
+        {props.level !== undefined ? <ProficiencyLabel level={props.level}>{waiting ? `${props.text}…` : props.text}</ProficiencyLabel> : waiting ? `${props.text}…` : props.text}
       </span>
       {props.tag ? <span style={{ flex: "none", fontSize: theme.font.tiny, fontWeight: theme.weight.strong, color: theme.color.textMuted, whiteSpace: "nowrap" }}>{props.tag}</span> : null}
     </button>
@@ -773,13 +810,16 @@ function D20Cell(props: { ctx: Ctx; test: D20Test; bonus: number; unknown?: { ty
   const own = presetTag(preset)
     .split(" ")
     .filter((part) => part && !said.includes(part));
+  const level = test.kind === "save" || (test.kind === "check" && test.skill) ? creatureProficiency(ctx.dice, ctx.creature, test) : undefined;
+  const proficiencyName = level === "expert" ? "Expertise" : level === "prof" ? "Proficient" : "";
   const tag = [route.kind === "answer" ? "Asked" : "", ...own].filter(Boolean).join(" ");
   return (
     <OptionCell
       text={props.text}
-      nowrap={test.kind === "check" && test.skill !== undefined}
+      level={level}
+      nowrap={level !== undefined}
       tag={tag || undefined}
-      name={[label, how, words].filter(Boolean).join(", ")}
+      name={[label, proficiencyName, how, words].filter(Boolean).join(", ")}
       row={row}
       disabled={ctx.blocked ?? tap.waits}
       grow={props.grow}

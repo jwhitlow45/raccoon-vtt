@@ -1,4 +1,4 @@
-import type { MemberId, RoomState, SceneId } from "#shared/model.ts";
+import type { DiceRoll, MemberId, RoomState, SceneId } from "#shared/model.ts";
 import type { ClientOp, EphEvent, RefusalCode } from "#shared/protocol.ts";
 import type { ProjectedState } from "#shared/project.ts";
 import type { ConnectionState } from "../lib/connection.ts";
@@ -96,7 +96,7 @@ export const EMPTY_EPHEMERAL: Ephemeral = Object.freeze({
  * the only kind a stack too tall for its room may drop (review
  * FU22B-OP-4): a refusal or an error that the log never sees stays.
  */
-export type Toast = { id: number; text: string; tone: "error" | "info"; die?: ToastDie; action?: ToastAction; shownAt?: number; pausedAt?: number; logged?: true };
+export type Toast = { id: number; text: string; rolls?: readonly DiceRoll[]; tone: "error" | "info"; die?: ToastDie; action?: ToastAction; shownAt?: number; pausedAt?: number; logged?: true };
 
 /**
  * A toast's one button, beside its words, such as the falling off

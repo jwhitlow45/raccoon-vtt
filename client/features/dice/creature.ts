@@ -2,6 +2,8 @@ import { creatureBonus, creatureNumbers, type NamedRoll, type RollNumbers, type 
 import { blockDefenses, effectDefenses, type Defense } from "#shared/dice/defenses.ts";
 import { blockActions, hasTrait, multiattackNote } from "#shared/dice/named.ts";
 import { pcDefenses, pcNamedRolls } from "#shared/rules/pcStats.ts";
+import { numbersFromStatBlock, proficiencyFor, type Proficiency } from "#shared/rules/proficiency.ts";
+import type { D20Test } from "#shared/dice/bonus.ts";
 import type { Actor, Character, CompanionBlock, CustomMonster, RoomState, Token } from "#shared/model.ts";
 import type { ActorTarget } from "#shared/protocol.ts";
 import type { SrdMonster, StatBlockMonster } from "#shared/srd/monsters.ts";
@@ -46,6 +48,12 @@ export type DiceView = {
 // A room monster's or a companion's block becomes its Markdown view once per version, so blockActions' cache holds across renders.
 const roomViews = new WeakMap<CustomMonster, StatBlockMonster>();
 const storedViews = new WeakMap<CompanionBlock, StatBlockMonster>();
+const proficiencyNumbers = new WeakMap<StatBlockMonster, RollNumbers | null>();
+
+function blockProficiencyNumbers(block: StatBlockMonster): RollNumbers | null {
+  if (!proficiencyNumbers.has(block)) proficiencyNumbers.set(block, numbersFromStatBlock(block));
+  return proficiencyNumbers.get(block) ?? null;
+}
 
 function roomView(monster: CustomMonster): StatBlockMonster {
   let view = roomViews.get(monster);
@@ -134,6 +142,22 @@ function blockFound(dice: DiceView, found: Found): StatBlockMonster | null {
 export function creatureBlock(dice: DiceView, creature: ActorTarget): StatBlockMonster | null {
   const found = find(dice.view, creature);
   return found ? blockFound(dice, found) : null;
+}
+
+/** Current proficiency from sources this viewer may read, including a druid's retained flags. */
+export function creatureProficiency(dice: DiceView, creature: ActorTarget, test: D20Test): Proficiency {
+  const found = find(dice.view, creature);
+  if (!found || (found.character && !readsCharacter(dice, found.character))) return "none";
+  const block = blockFound(dice, found);
+  const numbers = block ? blockProficiencyNumbers(block) : null;
+  const shaped = found.character?.actor.srdId !== undefined;
+  if (shaped && !numbers) return "none";
+  const stats = found.character?.stats;
+  return proficiencyFor(test, {
+    ...(stats && (!shaped || found.actor.wildShape) ? { stats } : {}),
+    ...(block && numbers ? { monster: { numbers, cr: block.cr } } : {}),
+    ...(shaped && found.actor.wildShape ? { wildShape: true } : {}),
+  });
 }
 
 /**

@@ -207,7 +207,7 @@ describe("the creature's card and groups", () => {
   }
 
   // A group's heading less its folded line, which describes it rather than naming it.
-  const headings = (markup: string, tag: "h3" | "h4") => [...markup.matchAll(new RegExp(`<${tag}[^>]*>(.*?)</${tag}>`, "g"))].map((m) => m[1]!.replace(/<span id="[^"]*-summary".*?<\/span>/, "").replace(/<[^>]*>/g, "").trim());
+  const headings = (markup: string, tag: "h3" | "h4") => [...markup.matchAll(new RegExp(`<${tag}[^>]*>(.*?)</${tag}>`, "g"))].map((m) => m[1]!.replace(/<span id="[^"]*-summary".*/, "").replace(/<[^>]*>/g, "").trim());
 
   test("one creature: a region named for it wraps its card, whose header names it, and its groups in today's order, Initiative in the card", () => {
     const markup = draw({ state: room2({}, false), body: "player" });
@@ -222,9 +222,34 @@ describe("the creature's card and groups", () => {
   test("a folded group draws its line and none of its controls, and an open one draws them", () => {
     const markup = draw({ state: room2({}, false), body: "player" });
     assert.doesNotMatch(markup, /DEX \+7/, "Saves and checks folded on a phone draws no cell");
-    assert.match(markup, /aria-expanded="false"[^>]*>.*?Saves and checks.*?Str \+0, Dex \+7/, "its folded line says the saves");
+    assert.match(markup, /aria-expanded="false"[^>]*>.*?Saves and checks/, "the group is folded");
+    assert.match(markup.replace(/<[^>]*>/g, ""), /Saves and checks.*?Str \+0, Dex \+7/, "its folded line says the saves");
     assert.match(markup, /Rapier/, "Actions starts open");
     assert.deepEqual(headings(markup, "h4"), ["Cantrips", "Level 1"], "Spells by level, each an h4");
+  });
+
+  test("fl7: folded save and skill summaries retain each proficiency beside its name and bonus", () => {
+    const state = room2({}, false);
+    state.characters.thorn!.stats!.skills = { stealth: "prof", perception: "expert" };
+    const markup = draw({ state, body: "list" });
+    const labels = markup.split('data-proficiency-label=""').slice(1);
+    assert.equal(labels.length, 8, "six saves and two trained skills while folded");
+    assert.ok(labels.some((label) => label.includes('data-proficiency-marker="prof"') && label.includes("Dex +7")));
+    assert.ok(labels.some((label) => label.includes('data-proficiency-marker="expert"') && label.includes("Perception +7")));
+    assert.ok(labels.some((label) => label.includes('data-proficiency-marker="prof"') && label.includes("Stealth +7")));
+  });
+
+  test("fl7: a folded waiting request marks its known skill identity and keeps the Asked status", () => {
+    const request: RollRequest = { id: "q1", rev: 0, test: { kind: "check", choices: [{ ability: "str", skill: "perception" }] }, dcShown: false, resultShown: true, at: "", targets: [{ characterId: "thorn" }] };
+    const state = room2({ q1: request }, false);
+    state.characters.thorn!.stats!.skills = { perception: "expert" };
+    const scope = new RoomScope();
+    draw({ scope, state, body: "list" });
+    scope.get(diceFoldsSlot).tap("pc.skills", false, false);
+    const markup = draw({ scope, state, body: "list" });
+    const labels = markup.split('data-proficiency-label=""').slice(1);
+    assert.ok(labels.some((label) => label.includes('data-proficiency-marker="expert"') && label.includes("Perception check")));
+    assert.match(markup.replace(/<[^>]*>/g, ""), /Asked: Perception check · Perception \+7/);
   });
 
   test("two or more: tabs across the card, named by the creatures, the picked one the Tab stop, each controlling the region, and no heading repeats the name", () => {
@@ -259,12 +284,12 @@ describe("the creature's card and groups", () => {
     const request: RollRequest = { id: "q1", rev: 0, test: { kind: "save", choices: [{ ability: "dex" }] }, dcShown: false, resultShown: true, at: "2026-10-23T20:00:00.000Z", targets: [{ characterId: "thorn" }] };
     const scope = new RoomScope();
     const first = draw({ scope, state: room2({ q1: request }, false), body: "list" });
-    assert.match(first, /DEX \+7[^<]*<\/span><span[^>]*>Asked/, "Saves and checks opened on the render that first saw the ask");
+    assert.match(first, /DEX \+7[^<]*(?:<\/span>)+<span[^>]*>Asked/, "Saves and checks opened on the render that first saw the ask");
     // The viewer folds it, and the options draw again, as after a tab pick.
     scope.get(diceFoldsSlot).tap("pc.saves", false, false);
     const again = draw({ scope, state: room2({ q1: request }, false), body: "list" });
     assert.doesNotMatch(again, /DEX \+7/, "seen, so it stays folded");
-    assert.match(again, /Asked: DEX save · Str \+0/, "its line leads with the ask still waiting");
+    assert.match(again.replace(/<[^>]*>/g, ""), /Asked: DEX save · Str \+0/, "its line leads with the ask still waiting");
   });
 
   test("an ask for a monster opens the monster's Saves and checks, never a character's", () => {
