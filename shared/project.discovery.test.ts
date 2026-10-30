@@ -4,7 +4,7 @@ import { astraRegion, autoAt, chunksOf, edge, fogRoom, heights, knownAt, lift, l
 import { mapSchemas } from "./protocol.ts";
 import { keys } from "./keys.ts";
 import type { FreeWall, Label, PlayerChunk, RoomState, Scene, Stamp } from "./model.ts";
-import { allKeys, dependents, heldChunks, namedByMemory, pieceId, playerChunk, projectEntity, projectState, stableStringify } from "./project.ts";
+import { allKeys, dependents, heldChunks, namedByMemory, pieceId, playerChunk, playerChunkBatch, projectEntity, projectState, stableStringify } from "./project.ts";
 import { encodeTile, fullTileBits } from "./rules/fog.ts";
 import { groundOf, PIECE_GRID, wallSpans } from "./rules/held.ts";
 import { sceneGrid } from "./rules/grid.ts";
@@ -854,5 +854,57 @@ describe("players' chunks kept while nothing they read changes", () => {
     const moved = { ...state, fogTiles: { ...state.fogTiles } };
     lift(moved, "dm", { x: 0, y: 0, w: 12, h: 10 });
     assert.notEqual(playerChunk(moved, { sceneId: "s1", cx: 0, cy: 0 }, null), a);
+  });
+});
+
+
+describe("batch chunk projection", () => {
+  test("neighbor cuts match cold projections with remembered walls and reuse unchanged chunks", () => {
+    const state = fogRoom({ vision: true, perPlayer: true, bounds: { w: 80, h: 80 } });
+    state.holders.s1 = { sceneId: "s1", rev: 0, entries: [{ memberId: "p1", on: true }] };
+    lift(state, "party", { x: 0, y: 0, w: 64, h: 64 });
+    lift(state, { holder: "p1" }, { x: 16, y: 16, w: 32, h: 32 });
+    lift(state, "dm", { x: 32, y: 16, w: 16, h: 32 });
+    const w = wall(state, "abcdefghijkl", [28, 31], [36, 33]);
+    wall(state, "mnopqrstuvwx", [36, 33], [42, 34.5]);
+    wall(state, "zyxwvutsrqpo", [11, 18], [19, 18]);
+    remember(state, null, 1, 1, { walls: { [w.id]: [{ wall: { ...w, a: [28, 30], b: [32, 31] }, cells: ["28,30", "29,30", "30,30", "31,30"] }] } });
+    remember(state, "p1", 1, 1, { walls: { [w.id]: [{ wall: { ...w, a: [28, 29], b: [32, 30] }, cells: ["28,29", "29,29", "30,29", "31,29"] }] } });
+    const positions = Array.from({ length: 9 }, (_, i) => ({ cx: 1 + i % 3, cy: 1 + Math.floor(i / 3) }));
+    for (const view of [null, "p1"]) {
+      const cold = heldChunks(deepClone(state), "s1", view);
+      const chunks = playerChunkBatch(state, "s1", positions, view);
+      for (const [key, value] of chunks) assert.equal(stableStringify(value), stableStringify(cold[key] ?? null), `${view}:${key}`);
+      const again = playerChunkBatch(state, "s1", positions, view);
+      for (const [key, value] of chunks) assert.equal(again.get(key), value, "unchanged positions reuse their objects");
+    }
+    // The same writable collection changes in place between projections.
+    const writable = deepClone(state);
+    markWritable(writable.buildChunks);
+    const before = playerChunkBatch(writable, "s1", positions, null);
+    writable.buildChunks["s1:2,2"]!.walls = [];
+    const after = playerChunkBatch(writable, "s1", positions, null);
+    const cold = heldChunks(deepClone(writable), "s1", null);
+    assert.notEqual(stableStringify([...before]), stableStringify([...after]));
+    for (const [key, value] of after) assert.equal(stableStringify(value), stableStringify(cold[key] ?? null));
+  });
+
+  test("only missing positions contribute walls to a batch cut", () => {
+    const state = fogRoom({ bounds: { w: 160, h: 160 } });
+    lift(state, "dm", { x: 0, y: 0, w: 160, h: 160 });
+    wall(state, "abcdefghijkl", [17, 18], [21, 18]);
+    wall(state, "mnopqrstuvwx", [129, 130], [133, 130]);
+    const positions = [{ cx: 1, cy: 1 }, { cx: 8, cy: 8 }];
+    const before = playerChunkBatch(state, "s1", positions, null);
+    const after = { ...state };
+    wall(after, "abcdefghijkl", [17, 18], [21, 18], { kind: "window" });
+    let farCuts = 0;
+    const ground = groundOf(after, "s1", null)!;
+    const live = ground.keyLive;
+    ground.keyLive = (key) => { if (key.startsWith("13")) farCuts++; return live(key); };
+    const chunks = playerChunkBatch(after, "s1", positions, null);
+    assert.equal(farCuts, 0, "unchanged distant chunks do not enter the cut");
+    assert.equal(chunks.get("s1:8,8"), before.get("s1:8,8"));
+    assert.notEqual(chunks.get("s1:1,1"), before.get("s1:1,1"));
   });
 });

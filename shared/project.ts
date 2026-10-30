@@ -1572,6 +1572,39 @@ export function playerChunk(state: RoomState, at: { sceneId: string; cx: number;
   return out;
 }
 
+/**
+ * A batch's positions for one fog class. Only cache misses contribute their
+ * neighborhoods to the cut, so neighboring positions share wall work and
+ * unrelated held chunks never force a scene-wide cut.
+ */
+export function playerChunkBatch(state: RoomState, sceneId: string, positions: readonly { cx: number; cy: number }[], view: FogClass): Map<string, PlayerChunk | null> {
+  const out = new Map<string, PlayerChunk | null>();
+  const scene = state.scenes[sceneId];
+  const own = view !== null && holdsOwnSight(state, sceneId, view) ? view : null;
+  const ground = scene?.fogEnabled ? groundOf(state, sceneId, own) : null;
+  const missing: { cx: number; cy: number; key: string; memo: Memo | null }[] = [];
+  for (const { cx, cy } of positions) {
+    const key = chunkKey(sceneId, cx, cy);
+    if (out.has(key)) continue;
+    out.set(key, null);
+    if (!scene || !ground || !inPositions(scene, cx, cy) || !heldNear(ground, cx, cy, 4)) continue;
+    const memo = memoKey(state, scene, own, ground, cx, cy);
+    const hit = memo === null ? undefined : recall(memo);
+    if (hit !== undefined) out.set(key, hit);
+    else missing.push({ cx, cy, key, memo });
+  }
+  if (!scene || !ground || missing.length === 0) return out;
+  const near = new Set<string>();
+  for (const { cx, cy } of missing) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) near.add(`${cx + dx},${cy + dy}`);
+  const filed = scenePieces(state, scene, ground, near, missing.length === 1 ? missing[0] : undefined);
+  for (const { cx, cy, key, memo } of missing) {
+    const chunk = chunkFor(state, scene, ground, cx, cy, filed.get(`${cx},${cy}`) ?? NO_WALLS);
+    out.set(key, chunk);
+    if (memo !== null) keep(memo, chunk);
+  }
+  return out;
+}
+
 /** Every position's chunk of one scene with fog on for one class, by chunk key, as a snapshot holds them: the free walls cut once for the whole scene. */
 export function heldChunks(state: RoomState, sceneId: string, view: FogClass): Record<string, PlayerChunk> {
   const scene = state.scenes[sceneId];
@@ -3894,9 +3927,10 @@ function perPlayerKeys(state: RoomState): EntityKey[] {
  * any of them. On wave 4 scenes, the fog tile an explored write changes and
  * what stands on a tile where exploring or the party's sight changed
  * (tileDependents). On hex scenes, the tokens around a written chunk
- * (wallDependents).
+ * (wallDependents). With both states of a batch, scene changes invalidate
+ * all chunk positions only when their projection inputs differ.
  */
-export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] {
+export function dependents(state: RoomState, touched: EntityKey[], other?: RoomState): EntityKey[] {
   const seen = new Set(touched);
   const out: EntityKey[] = [];
   const add = (key: EntityKey) => {
@@ -3988,9 +4022,13 @@ export function dependents(state: RoomState, touched: EntityKey[]): EntityKey[] 
       for (const id of Object.keys(chunk?.labels ?? {})) add(keys.label(id));
       for (const id of Object.keys(chunk?.stamps ?? {})) add(keys.stamp(id));
     } else if (parsed.kind === "scene") {
-      // A scene's size moves its positions and the side pieces round at.
+      // Comparing both sides avoids rebuilding a scene for a name or walls-version write.
+      // Callers with one state keep the conservative dependency set.
       const scene = state.scenes[parsed.id];
-      if (scene?.fogEnabled) for (const { cx, cy } of chunkPositions(scene)) add(keys.chunk(scene.id, cx, cy));
+      const was = other?.scenes[parsed.id];
+      if (scene?.fogEnabled && (!was || sceneFields(scene) !== sceneFields(was) || stableStringify(scene.vision) !== stableStringify(was.vision))) {
+        for (const { cx, cy } of chunkPositions(scene)) add(keys.chunk(scene.id, cx, cy));
+      }
     } else if (parsed.kind === "explored") {
       add(keys.fog(parsed.sceneId, parsed.tx, parsed.ty));
       onTile(parsed.sceneId, parsed.tx, parsed.ty);

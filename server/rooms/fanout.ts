@@ -1,7 +1,7 @@
 import { chunkKey, doorChunk, keys, parseKey, partsKey, readEntity, type EntityKey } from "#shared/keys.ts";
 import { linesPastStart } from "#shared/logRings.ts";
 import type { Label, LogEntry, RoomState, Stamp, Trap, Viewer } from "#shared/model.ts";
-import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
+import { allKeys, changedSightKeys, dependents, diffProjection, hashValue, namedByMemory, perPlayerScene, playerChunkBatch, projectEntity, projectState, sightHolders, stampCells, viewerSceneId, type HeldEntry, type ProjectedState } from "#shared/project.ts";
 import type { Change, RefusalCode } from "#shared/protocol.ts";
 import type { OpAcknowledgment } from "#shared/undoContract.ts";
 import { visionRules, type PartySight } from "#shared/ruleHooks.ts";
@@ -72,7 +72,7 @@ export function candidateKeys(batch: CommittedBatch, watched: Iterable<string> =
   const touched = [...batch.touched, ...changedSightKeys(batch.before, batch.after, watched)];
   // A viewer's live log starts where a ring of their own fills (shared/logRings.ts), which the roster bounds, so the lines it passed over come and go.
   const passed = linesPastStart(batch.before, batch.after, viewers).map((id) => keys.log(id));
-  return new Set([...touched, ...dependents(batch.before, touched), ...dependents(batch.after, touched), ...passed]);
+  return new Set([...touched, ...dependents(batch.before, touched, batch.after), ...dependents(batch.after, touched, batch.before), ...passed]);
 }
 
 /** The scenes the batch's viewers hold: the player scene, unless a blackout hides it, and each DM's own. */
@@ -210,6 +210,7 @@ class Projector {
       return out;
     }
     const of = this.#classesOf(conn);
+    this.#prepareChunks(conn, of.fog, candidates);
     for (const key of candidates) {
       const kind = key.slice(0, key.indexOf(":"));
       if (SCENE_KINDS.has(kind)) out.set(key, this.#shared(of.scene, key, own(key)));
@@ -223,6 +224,20 @@ class Projector {
       for (const [key, value] of out) if (key.startsWith("log:") && value !== null && previewOmits(value as LogEntry, conn.previewBy)) out.set(key, null);
     }
     return out;
+  }
+
+  /** Populate the class once, cutting the union of changed chunks' neighborhoods together. */
+  #prepareChunks(conn: Connection, cls: string, candidates: readonly EntityKey[]): void {
+    if (this.#byClass.has(cls)) return;
+    const values = new Map<EntityKey, unknown>();
+    this.#byClass.set(cls, values);
+    const sceneId = viewerSceneId(this.#state, conn.viewer, { sceneId: conn.sceneId });
+    if (sceneId === null || !this.#state.scenes[sceneId]?.fogEnabled) return;
+    const positions = candidates.flatMap((key) => {
+      const parsed = parseKey(key);
+      return parsed?.kind === "chunk" && parsed.sceneId === sceneId ? [parsed] : [];
+    });
+    for (const [at, chunk] of playerChunkBatch(this.#state, sceneId, positions, conn.memberId)) values.set(`chunk:${at}`, chunk);
   }
 
   #shared(cls: string, key: EntityKey, make: () => unknown): unknown {

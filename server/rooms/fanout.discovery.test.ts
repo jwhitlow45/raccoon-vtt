@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { astraRegion, discoveryOp, discoveryState, fogRoom, lift, moveAstraRegion, remember, TERRAINS } from "#shared/discoveryTestutil.ts";
+import { astraRegion, discoveryOp, discoveryState, fogRoom, lift, moveAstraRegion, remember, wall, TERRAINS } from "#shared/discoveryTestutil.ts";
 import { keys, type EntityKey } from "#shared/keys.ts";
 import { CHUNK_CELLS, type Label, type MemoryEntries, type RoomState, type Stamp, type Viewer } from "#shared/model.ts";
 import { applyChanges, projectState, stableStringify, type ProjectedState } from "#shared/project.ts";
@@ -8,9 +8,10 @@ import { exploreFor, playersOf, withCellVision } from "#shared/perPlayerTestutil
 import { opSchema, type Change, type Op, type ServerMessage } from "#shared/protocol.ts";
 import { applyOp } from "#shared/reducer.ts";
 import { clearVisionCache } from "#shared/rules/vision.ts";
-import { DM, P1, P2, actor, chance, deepClone, env, int, pick, rng, room, scene, token } from "#shared/testutil.ts";
+import { DM, P1, P2, actor, member, chance, deepClone, env, int, pick, rng, room, scene, token } from "#shared/testutil.ts";
+import { groundOf } from "#shared/rules/held.ts";
 import { Connection } from "./connection.ts";
-import { buildSnapshot, publishBatch, type CommittedBatch } from "./fanout.ts";
+import { buildSnapshot, candidateKeys, publishBatch, type CommittedBatch } from "./fanout.ts";
 
 /**
  * The fan-out over map discovery's rooms (docs/design-v1-map-discovery.md
@@ -243,5 +244,60 @@ describe("a remembered label through the fan-out", () => {
     publish("edited", all, batchOf(12, state, edited.state, edited.touched, edited.global));
     assert.equal(all[0]!.view.labels.L?.text, "Newer");
     assert.equal(all[1]!.view.labels.L?.text, "Old");
+  });
+});
+
+
+describe("shared chunk work for a discovery batch", () => {
+  test("a local wall edit cuts once for nine positions in each of seven fog classes", (t) => {
+    const before = fogRoom({ vision: true, perPlayer: true, bounds: { w: 80, h: 80 } });
+    const viewers: Viewer[] = Array.from({ length: 6 }, (_, i) => ({ memberId: `p${i + 1}`, role: "player" }));
+    for (const viewer of viewers) before.members[viewer.memberId] = member(viewer.memberId);
+    before.holders.s1 = { sceneId: "s1", rev: 0, entries: viewers.map((v) => ({ memberId: v.memberId, on: true })) };
+    lift(before, "party", { x: 0, y: 0, w: 80, h: 80 });
+    for (const viewer of viewers) lift(before, { holder: viewer.memberId }, { x: 0, y: 0, w: 80, h: 80 });
+    for (let i = 0; i < 10; i++) {
+      const w = wall(before, `wall${String(i).padStart(8, "0")}`, [30, 30 + i / 16], [34, 30 + i / 16], i < 8 ? { kind: "door", state: "closed", secret: false, discovered: false } : { kind: "wall" });
+      if (i === 0) for (const [j, viewer] of viewers.entries()) remember(before, viewer.memberId, 2, 1, { walls: { [w.id]: [{ wall: { ...w, a: [30, 28 + j / 16], b: [34, 28 + j / 16] }, cells: Array.from({ length: 5 }, (_, x) => `${30 + x},28`) }] } });
+    }
+    const all = [...viewers, DISPLAY].map((viewer, i) => socket(before, viewer, null, i));
+    const after = { ...before, scenes: { ...before.scenes, s1: { ...before.scenes.s1!, wallsVersion: 1 } } };
+    wall(after, "wall00000009", [30, 30.75], [34, 30.75], { kind: "window" });
+    let cuts = 0;
+    for (const view of [...viewers.map((v) => v.memberId), null]) {
+      const ground = groundOf(after, "s1", view)!;
+      const live = ground.keyLive;
+      ground.keyLive = (key) => { cuts++; return live(key); };
+    }
+    const batch = batchOf(1, before, after, [keys.scene("s1"), keys.chunk("s1", 2, 1)], false);
+    publish("local wall edit", all, batch);
+    t.diagnostic(`${cuts} wall-cell classifications`);
+    assert.ok(cuts > 0, "the changed walls were cut");
+    assert.ok(cuts <= 7 * 10 * 12, `${cuts} wall-cell classifications exceed one cut per class`);
+    assert.equal([...candidateKeys(batch)].filter((key) => key.startsWith("chunk:")).length, 9, "only neighboring positions are candidates");
+  });
+
+  test("scene metadata leaves chunks alone, while projection settings invalidate them", () => {
+    const before = fogRoom({ vision: true, bounds: { w: 48, h: 48 } });
+    lift(before, "party", { x: 0, y: 0, w: 48, h: 48 });
+    wall(before, "abcdefghijkl", [30, 30], [34, 30]);
+    const changed = (patch: Partial<RoomState["scenes"][string]>) => ({ ...before, scenes: { ...before.scenes, s1: { ...before.scenes.s1!, ...patch } } });
+    for (const patch of [{ name: "Renamed" }, { wallsVersion: 2 }, { background: "#123456" }]) {
+      const after = changed(patch);
+      const batch = batchOf(1, before, after, [keys.scene("s1")], false);
+      assert.equal([...candidateKeys(batch)].filter((key) => key.startsWith("chunk:")).length, 0);
+      publish("metadata", [socket(before, P1, null, 0)], batch);
+    }
+    for (const patch of [
+      { bounds: { w: 32, h: 32 } }, { gridShape: "hexRows" as const }, { autoWalls: "off" as const },
+      { fogEnabled: false }, { vision: { on: false, light: "bright" as const } },
+      { vision: { on: true, light: "dark" as const } }, { vision: { on: true, light: "bright" as const, perPlayer: true as const } },
+    ]) {
+      const after = changed(patch);
+      const batch = batchOf(1, before, after, [keys.scene("s1")], false);
+      assert.ok([...candidateKeys(batch)].filter((key) => key.startsWith("chunk:")).length >= 16, JSON.stringify(patch));
+      // Settings ops publish globally because they can also change sight and fog classes.
+      publish("projection settings", [socket(before, P1, null, 0)], { ...batch, global: true });
+    }
   });
 });
