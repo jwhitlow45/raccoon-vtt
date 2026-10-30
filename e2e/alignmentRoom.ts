@@ -1,3 +1,4 @@
+import { UndoWire, setupHistory } from "./helpers/undoScope.ts";
 import { damageSummaryAlignment } from "./helpers/damageSummary.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -5403,4 +5404,80 @@ export function md4Tests(): void {
     assert.deepEqual(lines, [], "the forget question out of line");
     withinSnapshotBudget("md4-b");
   });
+}
+
+// Undo batch A roots. Keep this block independent of the parallel alignment additions.
+export function undoScopeAlignmentTests(names: readonly string[]): void {
+  for (const name of names) {
+    const size = [...SIZES, COMBAT_SMALL].find((candidate) => candidate.name === name);
+    assert.ok(size, `unknown Undo alignment size ${name}`);
+    for (const scale of name === "480x320" ? [1.3] : SCALES) {
+      test(`undo-scope-alignment-${name}-${scale}: history, retained refusal, confirmation and loading within ${LIMIT_PX} px`, async () => {
+        const sweep = new Sweep(`undo-scope-${name}-${scale}`);
+        await newDmSession();
+        const page = await dmPageFor(size);
+        let hold = false;
+        const held: (() => void)[] = [];
+        await page.routeWebSocket(/\/ws\?room=/, (socket) => {
+          const upstream = socket.connectToServer();
+          upstream.onMessage((message) => {
+            const parsed = JSON.parse(String(message)) as { t?: string };
+            if (hold && parsed.t === "history") held.push(() => socket.send(message));
+            else socket.send(message);
+          });
+        });
+        await openAt(page, size, scale);
+        const wire = await UndoWire.open({ origin: server.origin, roomId: run.roomId, cookie: await cookieOf(dmContext) });
+        const characterId = randomUUID();
+        try {
+          await wire.apply({ t: "character.create", character: { id: characterId, name: "Bree, keeper of the western beacon and the lanterns along the harbor", size: "medium", ownerIds: [], actor: actor() } });
+          await wire.apply({ t: "character.update", characterId, patch: { actor: { ac: 19 } } });
+          await wire.apply({ t: "actor.hp", target: { characterId }, change: { kind: "damage", amount: 4 } });
+          const { sheet, opener } = await setupHistory(page);
+          await sweep.measure(page, "undo-scope-sheet", sheet);
+          await shots.take(page, `undo-scope-${name}-${scale}-setup`);
+          const undo = sheet.getByRole("button", { name: "Undo setup", exact: true });
+          await untilReady(undo, "Setup Undo");
+          await undo.click();
+          const retained = sheet.locator("[data-history-review]");
+          await retained.waitFor();
+          await retained.getByRole("button", { name: "Review step", exact: true }).click();
+          await sweep.measure(page, "undo-scope-retained", retained);
+          for (const name of ["Retry", "Discard this step"]) {
+            const control = retained.getByRole("button", { name, exact: true });
+            await control.scrollIntoViewIfNeeded();
+            assert.ok(await wholeInReach(control), `${name} is not obscured at ${sweep.at}`);
+            assert.ok((await control.boundingBox())!.height >= 44, `${name} has a touch target`);
+          }
+          await retained.getByRole("button", { name: "Discard this step", exact: true }).click();
+          const confirmation = page.getByRole("dialog", { name: "Discard this step", exact: true });
+          await confirmation.getByText("Discard this undo step? The game stays as it is.", { exact: true }).waitFor();
+          await sweep.measure(page, "undo-scope-discard", confirmation);
+          await shots.take(page, `undo-scope-${name}-${scale}-discard`);
+          const confirm = confirmation.getByRole("button", { name: "Discard this step", exact: true });
+          await confirm.scrollIntoViewIfNeeded();
+          assert.ok(await wholeInReach(confirm), "confirmation stays reachable on short screens");
+          await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+          await page.keyboard.press("Escape");
+          assert.ok(await opener.evaluate((button) => button === button.ownerDocument.activeElement));
+          hold = true;
+          await reopenRoom(page);
+          const loading = (await setupHistory(page)).sheet;
+          await loading.getByText("Loading undo history…", { exact: true }).waitFor();
+          await sweep.measure(page, "undo-scope-loading", loading);
+          await shots.take(page, `undo-scope-${name}-${scale}-loading`);
+          hold = false;
+          for (const deliver of held.splice(0)) deliver();
+          await loading.getByText("Loading undo history…", { exact: true }).waitFor({ state: "hidden" });
+          await page.keyboard.press("Escape");
+          assert.deepEqual(sweep.lines, [], `Undo history alignment at ${sweep.at}`);
+        } finally {
+          hold = false;
+          for (const deliver of held.splice(0)) deliver();
+          wire.close();
+          sweep.tally();
+        }
+      });
+    }
+  }
 }

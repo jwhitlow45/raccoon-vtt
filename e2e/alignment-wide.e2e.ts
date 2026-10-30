@@ -1,4 +1,4 @@
-import { alignmentFile, combatSmallTest, noErrorsTest, roomTest, sizeTests, someSizesTest } from "./alignmentRoom.ts";
+import { undoScopeAlignmentTests, alignmentFile, combatSmallTest, noErrorsTest, roomTest, sizeTests, someSizesTest } from "./alignmentRoom.ts";
 
 /**
  * The alignment sweep at its wider windows (e2e/alignmentRoom.ts says what
@@ -12,5 +12,6 @@ alignmentFile("the sideways phone, the tablet, the desktop and 480 x 320", () =>
   sizeTests(["844x390", "820x1180", "1440x900"]);
   combatSmallTest();
   someSizesTest("wide");
+  undoScopeAlignmentTests(["1440x900", "844x390", "480x320"]);
   noErrorsTest();
 });

@@ -9,6 +9,7 @@ import { ddbCharacterId, ddbSheetUrl } from "../shared/ddb/link.ts";
 import { readDdbCharacter } from "../shared/ddb/read.ts";
 import type { PcStats } from "../shared/model.ts";
 import { barControl, ConsoleWatch, openSideTab, OpSocket, reopenRoom, Shots, sleep, SocketWatch, startServer, tapCell, waitFor, wholeInReach, type Server } from "./harness.ts";
+import { setupHistory } from "./helpers/undoScope.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 
 /**
@@ -754,12 +755,17 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await review.waitFor({ state: "detached" });
   });
 
-  test("rs-10. the DM at 1440 x 900 on Bree's page, by keys alone: focus moves to the review's first line, Overwrite all reports aria-pressed, Apply by Enter keeps focus on the primary, Escape returns it to Re-sync, and the toolbar's Undo names the re-sync and the dialog's Undo", async () => {
+  test("undo-scope-resync. the DM at 1440 x 900 on Bree's page, by keys alone: focus moves to the review's first line, Overwrite all reports aria-pressed, Apply by Enter keeps focus on the primary, Escape returns it to Re-sync, and Setup Undo reverses the re-sync and the dialog's Undo", async () => {
     await reopen(dm, { width: 1440, height: 900 });
     const panel = await openCharacters(dm);
     await openCard(panel, run.bree.characterId);
     const resync = panel.getByRole("button", { name: "Re-sync from D&D Beyond", exact: true });
-    const toolbarUndo = dm.locator("header:has(h1)").first().getByRole("button", { name: "Undo", exact: true });
+    const undoSetupByKeys = async () => {
+      const { sheet } = await setupHistory(dm);
+      await sheet.getByRole("button", { name: "Undo setup", exact: true }).focus();
+      await dm.keyboard.press("Enter");
+      return sheet;
+    };
 
     /** Re-sync by Enter, Overwrite all by Space, and Apply by Enter, leaving the done state open. */
     const syncByKeys = async () => {
@@ -786,10 +792,10 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await done.waitFor({ state: "detached" });
     await waitFor("focus back on Re-sync", async () => ((await focused(dm)) === "button Re-sync from D&D Beyond" ? true : null));
     assert.equal(breeIn(dmSocket)!.level, 6);
-    await toolbarUndo.focus();
-    await dm.keyboard.press("Enter");
-    await dm.getByText("Undid re-syncing Bree from D&D Beyond.", { exact: true }).first().waitFor();
-    await waitFor("the toolbar's Undo took the re-sync back", () => (breeIn(dmSocket)?.level === 5 && breeIn(dmSocket)?.actor.ac === 17 ? true : null));
+    let history = await undoSetupByKeys();
+    await history.getByText("Undid setup: re-syncing Bree from D&D Beyond.", { exact: true }).waitFor();
+    await dm.keyboard.press("Escape");
+    await waitFor("Setup Undo took the re-sync back", () => (breeIn(dmSocket)?.level === 5 && breeIn(dmSocket)?.actor.ac === 17 ? true : null));
 
     done = await syncByKeys();
     await tabTo(dm, "button Undo the re-sync", true);
@@ -800,9 +806,9 @@ describe("raccoon-vtt re-sync from d&d beyond", { timeout: 600_000 }, () => {
     await dm.keyboard.press("Escape");
     await undone.waitFor({ state: "detached" });
     await waitFor("focus back on Re-sync", async () => ((await focused(dm)) === "button Re-sync from D&D Beyond" ? true : null));
-    await toolbarUndo.focus();
-    await dm.keyboard.press("Enter");
-    await dm.getByText("Undid undoing Bree's re-sync.", { exact: true }).first().waitFor();
+    history = await undoSetupByKeys();
+    await history.getByText("Undid setup: undoing Bree's re-sync.", { exact: true }).waitFor();
+    await dm.keyboard.press("Escape");
     await waitFor("the re-sync back", () => (breeIn(dmSocket)?.level === 6 ? true : null));
     await reopen(dm, DESKTOP);
   });
