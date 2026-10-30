@@ -4,9 +4,9 @@ import { AssetError } from "./errors.ts";
 import { KeyedMutex } from "./locks.ts";
 
 /**
- * Bytes a room owns in Postgres and on the asset volume (design sections 10.1
- * and 10.5): asset variants, the snapshot, op rows, log rows, watermark
- * rows and roll receipts (docs/design-v1-dice.md 1.2). Row sizes come from
+ * The bytes a room's storage quota counts (design sections 10.1 and 10.5):
+ * asset variants, the snapshot, op rows, watermark rows and roll receipts
+ * (docs/design-v1-dice.md 1.2), for the room id `$1`. Row sizes come from
  * pg_column_size, which is what the room actually costs on disk after TOAST
  * compression.
  *
@@ -14,19 +14,31 @@ import { KeyedMutex } from "./locks.ts";
  * files are shared by every room that picked the work, and the catalog
  * bounds how many a room can hold, so it is nothing a room can grow
  * without end.
+ *
+ * The log archive is left out too. It keeps every line for good, each for
+ * the members who may read it, so it is nothing the members can see in full
+ * or delete, and the quota counts only what they can. The free-disk floor
+ * bounds it instead (hasFreeDisk), and the admin page shows it in a room's
+ * size on disk (ROOM_ARCHIVE_BYTES_SQL).
  */
-export async function roomStoredBytes(db: pg.Pool | pg.PoolClient, roomId: string): Promise<number> {
-  const { rows } = await db.query<{ bytes: string }>(
-    `select
+export const ROOM_QUOTA_BYTES_SQL = `
        coalesce((select sum(bytes) from assets where room_id = $1 and starter is null), 0)
      + coalesce((select sum(pg_column_size(s.*)) from room_snapshots s where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(o.*)) from room_ops o where room_id = $1), 0)
-     + coalesce((select sum(pg_column_size(l.*)) from room_log l where room_id = $1), 0)
      + coalesce((select sum(pg_column_size(w.*)) from client_watermarks w where room_id = $1), 0)
-     + coalesce((select sum(pg_column_size(r.*)) from roll_receipts r where room_id = $1), 0)
-     as bytes`,
-    [roomId],
-  );
+     + coalesce((select sum(pg_column_size(r.*)) from roll_receipts r where room_id = $1), 0)`;
+
+/** The log archive's bytes for the room id `$1`, which a room's size on disk counts and its quota does not. */
+export const ROOM_ARCHIVE_BYTES_SQL = `coalesce((select sum(pg_column_size(l.*)) from room_log l where room_id = $1), 0)`;
+
+export async function roomStoredBytes(db: pg.Pool | pg.PoolClient, roomId: string): Promise<number> {
+  const { rows } = await db.query<{ bytes: string }>(`select ${ROOM_QUOTA_BYTES_SQL} as bytes`, [roomId]);
+  return Number(rows[0]?.bytes ?? 0);
+}
+
+/** A room's bytes on disk: what its quota counts plus its log archive. The admin page and CLI list this. */
+export async function roomPhysicalBytes(db: pg.Pool | pg.PoolClient, roomId: string): Promise<number> {
+  const { rows } = await db.query<{ bytes: string }>(`select ${ROOM_QUOTA_BYTES_SQL} + ${ROOM_ARCHIVE_BYTES_SQL} as bytes`, [roomId]);
   return Number(rows[0]?.bytes ?? 0);
 }
 
@@ -136,9 +148,19 @@ export class Reservation {
  * every other room share.
  */
 export async function assertFreeDisk(dir: string, minFreeBytes: number): Promise<void> {
-  if (minFreeBytes <= 0) return;
-  const stats = await statfs(dir);
-  if (stats.bavail * stats.bsize < minFreeBytes) {
+  if (!(await hasFreeDisk(dir, minFreeBytes))) {
     throw new AssetError(507, "storage_full", { closeConnection: true });
   }
+}
+
+/**
+ * Whether the volume holding `dir` has at least `minFreeBytes` free. The
+ * log archive asks it before each write as well as uploads do, since the
+ * database shares this volume: the floor leaves Postgres room to keep
+ * committing ops when one room's history has grown large.
+ */
+export async function hasFreeDisk(dir: string, minFreeBytes: number): Promise<boolean> {
+  if (minFreeBytes <= 0) return true;
+  const stats = await statfs(dir);
+  return stats.bavail * stats.bsize >= minFreeBytes;
 }

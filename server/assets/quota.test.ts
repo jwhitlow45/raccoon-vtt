@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { AssetError } from "./errors.ts";
-import { RoomQuota } from "./quota.ts";
+import { assertFreeDisk, hasFreeDisk, ROOM_ARCHIVE_BYTES_SQL, ROOM_QUOTA_BYTES_SQL, RoomQuota } from "./quota.ts";
 
 function quota413(err: unknown): boolean {
   return err instanceof AssetError && err.status === 413 && err.code === "quota_exceeded";
@@ -101,5 +101,21 @@ describe("RoomQuota", () => {
     await quota.reserve("A", 1000);
     await quota.reserve("B", 1000);
     assert.equal(quota.reservedBytes("A"), 1000);
+  });
+});
+
+describe("the free-disk floor", () => {
+  test("is one check for uploads and the log archive: met, not met, or off", async () => {
+    const here = import.meta.dirname;
+    assert.equal(await hasFreeDisk(here, 0), true);
+    assert.equal(await hasFreeDisk(here, 1), true);
+    assert.equal(await hasFreeDisk(here, Number.MAX_SAFE_INTEGER), false);
+    await assert.rejects(assertFreeDisk(here, Number.MAX_SAFE_INTEGER), (err: unknown) => err instanceof AssetError && err.status === 507);
+    await assert.rejects(hasFreeDisk("/no/such/volume/here", 1));
+  });
+
+  test("the quota's sum leaves the log archive out, which only a room's size on disk counts", () => {
+    assert.doesNotMatch(ROOM_QUOTA_BYTES_SQL, /room_log/);
+    assert.match(ROOM_ARCHIVE_BYTES_SQL, /from room_log/);
   });
 });

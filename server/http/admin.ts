@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type pg from "pg";
 import { z } from "zod";
+import { ROOM_ARCHIVE_BYTES_SQL, ROOM_QUOTA_BYTES_SQL } from "../assets/quota.ts";
 import { AdminLoginLimits, AdminSessions, adminCookieSettings } from "../auth/adminSessions.ts";
 import { enforce, HttpError, parseBody, roomParam, type AuthKit, accessRoutes } from "../auth/http.ts";
 import { parseRoomId } from "../auth/roomId.ts";
@@ -37,7 +38,11 @@ export type AdminRoom = {
   name: string;
   createdAt: string;
   lastActiveAt: string;
-  /** The quota's own sum (server/assets/quota.ts): a file shared by rooms counts in each. */
+  /**
+   * The room's size on disk: what its storage quota counts (server/assets/quota.ts), a file shared by rooms counted
+   * in each, plus its log archive, which the quota leaves out. So a room can show more than its quota and still take
+   * uploads.
+   */
   bytes: number;
   images: number;
   loaded: boolean;
@@ -70,9 +75,11 @@ export type AdminStorage = {
 
 /**
  * Every room with what the admin page shows of it, newest activity first.
- * The size is the quota's own sum (roomStoredBytes), starter picks left out
- * as there, so the page, the CLI's list-rooms and the quota agree. The
- * image count counts them, since they are the room's images all the same.
+ * The size is the room's size on disk (roomPhysicalBytes): the quota's own
+ * sum, starter picks left out as there, plus the log archive, which uploads
+ * and the read-only switch never count. The page and the CLI's list-rooms
+ * agree. The image count counts starter picks, since they are the room's
+ * images all the same.
  */
 export async function listRoomsForAdmin(pool: pg.Pool): Promise<Array<Omit<AdminRoom, "loaded" | "sockets">>> {
   const { rows } = await pool.query<{
@@ -85,15 +92,11 @@ export async function listRoomsForAdmin(pool: pg.Pool): Promise<Array<Omit<Admin
     images: number;
     bytes: string;
   }>(
-    `select r.id, r.name, r.created_at, r.last_active_at, r.pinned, r.read_only,
-       (select count(*)::int from assets a where a.room_id = r.id) as images,
-       coalesce((select sum(a.bytes) from assets a where a.room_id = r.id and a.starter is null), 0)
-       + coalesce((select sum(pg_column_size(s.*)) from room_snapshots s where s.room_id = r.id), 0)
-       + coalesce((select sum(pg_column_size(o.*)) from room_ops o where o.room_id = r.id), 0)
-       + coalesce((select sum(pg_column_size(l.*)) from room_log l where l.room_id = r.id), 0)
-       + coalesce((select sum(pg_column_size(w.*)) from client_watermarks w where w.room_id = r.id), 0)
-       as bytes
-     from rooms r order by r.last_active_at desc, r.id`,
+    // The quota's own sums, per room. Its subqueries alias their tables with one letter, so the room here has a longer name.
+    `select room.id, room.name, room.created_at, room.last_active_at, room.pinned, room.read_only,
+       (select count(*)::int from assets a where a.room_id = room.id) as images,
+       ${ROOM_QUOTA_BYTES_SQL.replaceAll("$1", "room.id")} + ${ROOM_ARCHIVE_BYTES_SQL.replaceAll("$1", "room.id")} as bytes
+     from rooms room order by room.last_active_at desc, room.id`,
   );
   return rows.map((r) => ({
     id: r.id,

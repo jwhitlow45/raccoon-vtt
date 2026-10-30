@@ -179,8 +179,9 @@ async function main(args: string[]): Promise<void> {
         break;
       }
       case "list-rooms": {
-        // Size counts what the quota counts (design section 10.5): asset
-        // bytes plus the room's rows. The admin page lists the same numbers.
+        // Size is the room's size on disk: what the quota counts (design
+        // section 10.5), asset bytes plus the room's rows, and its log
+        // archive, which the quota leaves out. The admin page lists the same.
         const rows = await listRoomsForAdmin(pool);
         if (rows.length === 0) console.log("No rooms.");
         for (const r of rows) {

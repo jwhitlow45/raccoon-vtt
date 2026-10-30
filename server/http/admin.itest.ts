@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { LightMyRequestResponse } from "fastify";
 import { MockAgent } from "undici";
-import { roomStoredBytes } from "../assets/quota.ts";
+import { roomPhysicalBytes, roomStoredBytes } from "../assets/quota.ts";
 import { PIPELINE } from "../assets/kinds.ts";
 import { variantPath } from "../assets/store.ts";
 import { solid } from "../assets/testImages.ts";
@@ -199,7 +199,7 @@ describe("the admin page", () => {
     assert.equal((await admin.request("GET", "/api/admin/rooms")).statusCode, 200, "the same hash still accepts it");
   });
 
-  test("the room listing is an allowlist whose numbers match the quota's, with loaded rooms and their sockets", async () => {
+  test("the room listing is an allowlist whose sizes are on disk, archive included, with loaded rooms and their sockets", async () => {
     const admin = new AdminBrowser(() => t);
     await admin.login();
     const dm = t.client();
@@ -209,11 +209,16 @@ describe("the admin page", () => {
     assert.equal(up.statusCode, 200);
     const socket = await t.connect(roomId, dm);
     await socket.snapshot("dm");
+    await socket.apply({ t: "log.chat", text: "a line for the archive" });
     const res = await admin.request("GET", "/api/admin/rooms");
     const room = res.json<{ rooms: AdminRoom[] }>().rooms.find((r) => r.id === roomId);
     assert.ok(room);
     assert.deepEqual(Object.keys(room).sort(), ["bytes", "createdAt", "id", "images", "lastActiveAt", "loaded", "name", "pinned", "readOnly", "sockets"]);
-    assert.equal(room.bytes, await roomStoredBytes(t.pool, roomId));
+    assert.equal(room.bytes, await roomPhysicalBytes(t.pool, roomId));
+    // The log archive (the chat above) is on disk but outside the quota.
+    const { rows } = await t.pool.query<{ bytes: number }>("select coalesce(sum(pg_column_size(l.*)), 0)::int as bytes from room_log l where room_id = $1", [roomId]);
+    assert.ok(rows[0]!.bytes > 0);
+    assert.equal(room.bytes, (await roomStoredBytes(t.pool, roomId)) + rows[0]!.bytes);
     assert.equal(room.images, 1);
     assert.equal(room.loaded, true);
     assert.equal(room.sockets, 1);
@@ -225,7 +230,7 @@ describe("the admin page", () => {
     for (let i = 0; i < 100 && t.manager.get(roomId); i++) await new Promise((r) => setTimeout(r, 20));
     assert.equal(t.manager.get(roomId), null);
     const settled = (await admin.request("GET", "/api/admin/rooms")).json<{ rooms: AdminRoom[] }>().rooms.find((r) => r.id === roomId)!;
-    assert.equal(settled.bytes, await roomStoredBytes(t.pool, roomId));
+    assert.equal(settled.bytes, await roomPhysicalBytes(t.pool, roomId));
     const cli = await run(process.execPath, ["scripts/admin.ts", "list-rooms"], {
       cwd: fileURLToPath(new URL("../../", import.meta.url)),
       env: { PATH: process.env.PATH ?? "", DATABASE_URL: t.config.DATABASE_URL },
