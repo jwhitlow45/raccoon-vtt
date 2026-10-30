@@ -285,7 +285,7 @@ export function ImportDialog(props: { file: File; target: ImportTarget; device: 
           if (answered === ops.length) resolve();
         };
         for (const op of ops) {
-          if (actions.dispatch(op, { group, onAnswer: settle }) === null) settle("refused");
+          if (actions.dispatch(op, { group, groupScope: "setup", onAnswer: settle }) === null) settle("refused");
         }
       });
       await finish(scene, plan, answers, startScene);

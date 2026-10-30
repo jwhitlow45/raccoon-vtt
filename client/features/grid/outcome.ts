@@ -100,7 +100,7 @@ export function putBack(input: {
     if (found) store.setState({ found: { ...found, backRefused: refused } });
     return false;
   }
-  dispatchGesture(input.actions, fallbackOps(scene, fallback));
+  dispatchGesture(input.actions, fallbackOps(scene, fallback), { groupScope: "setup" });
   store.setState({ found: null, box: boxAround(fallback, middleOf(box, scene.map, grid), back) });
   return true;
 }
@@ -166,7 +166,7 @@ export function showOutcome(input: {
   }
   const to = gridOfShape(found.shape);
   if (mapShape(to) !== mapShape(grid)) return otherShape({ ...input, found, grid, to });
-  if (found.tier === "high") dispatchGesture(input.actions, gridOps(scene, found.cal, input.fit));
+  if (found.tier === "high") dispatchGesture(input.actions, gridOps(scene, found.cal, input.fit), { groupScope: "setup" });
   const box = boxAround(found.cal, input.at, grid);
   const note: FoundNote = {
     sceneId: scene.id,
@@ -197,7 +197,7 @@ function otherShape(input: Parameters<typeof showOutcome>[0] & { found: FoundGri
   const high = found.tier === "high";
   if ((high || found.shapeSure === true) && !found.contested && refusal === null) {
     const switched: ClientOp = { t: "scene.update", sceneId: scene.id, patch: { gridShape: mapShape(to) } };
-    dispatchGesture(input.actions, high ? [switched, ...gridOps({ ...scene, gridShape: shapeOfGrid(to) }, found.cal, input.fit)] : [switched]);
+    dispatchGesture(input.actions, high ? [switched, ...gridOps({ ...scene, gridShape: shapeOfGrid(to) }, found.cal, input.fit)] : [switched], { groupScope: "setup" });
     const note: FoundNote = {
       sceneId: scene.id,
       outcome: high ? "applied" : "offered",
