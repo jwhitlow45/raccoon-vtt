@@ -578,13 +578,87 @@ export function clipToPits(g: CanvasRenderingContext2D, pits: readonly (readonly
 }
 
 /**
+ * The pit openings an area below 0 shows through (volumes.ts pitsUnder):
+ * each connected region's openings at 0, world polygons, and the region a
+ * world point below 0 lies over, or -1 over none.
+ */
+export type AreaPits = { regions: readonly (readonly (readonly Pt[])[])[]; at(x: number, y: number): number };
+
+export const NO_AREA_PITS: AreaPits = { regions: [], at: () => -1 };
+
+/** A part below 0 split by the pit region under it, kept with the part, which never changes once drawn, for the pits it was split by. */
+const shares = new WeakMap<BandPart, { pits: AreaPits; byRegion: Map<number, BandPart> }>();
+
+const LINES = ["outline", "hidden", "guide", "guideHidden"] as const;
+
+/**
+ * Each pit region's share of a part below 0: a loop by the region under
+ * its middle, a line segment by the region under its own middle. A loop
+ * or segment over no region's pit lies under the ground, and nothing
+ * shows it.
+ */
+function sharesOf(part: BandPart, pits: AreaPits): Map<number, BandPart> {
+  const kept = shares.get(part);
+  if (kept && kept.pits === pits) return kept.byRegion;
+  const loops = new Map<number, { far: Float64Array[]; near: Float64Array[] }>();
+  const lines = new Map<number, Record<(typeof LINES)[number], number[]>>();
+  for (const which of ["far", "near"] as const) {
+    for (const q of part[which]) {
+      let x = 0;
+      let y = 0;
+      for (let i = 0; i + 2 < q.length; i += 3) {
+        x += q[i]!;
+        y += q[i + 1]!;
+      }
+      const r = pits.at((3 * x) / q.length, (3 * y) / q.length);
+      if (r < 0) continue;
+      let own = loops.get(r);
+      if (!own) loops.set(r, (own = { far: [], near: [] }));
+      own[which].push(q);
+    }
+  }
+  for (const which of LINES) {
+    const q = part[which];
+    for (let i = 3; i + 2 < q.length; i += 3) {
+      const ax = q[i - 3]!;
+      const bx = q[i]!;
+      if (Number.isNaN(ax) || Number.isNaN(bx)) continue;
+      const [ay, az, by, bz] = [q[i - 2]!, q[i - 1]!, q[i + 1]!, q[i + 2]!];
+      const r = pits.at((ax + bx) / 2, (ay + by) / 2);
+      if (r < 0) continue;
+      let own = lines.get(r);
+      if (!own) lines.set(r, (own = { outline: [], hidden: [], guide: [], guideHidden: [] }));
+      const out = own[which];
+      const n = out.length;
+      // A segment going on from the last one its region took joins that line, so a dash runs on along it.
+      if (!(n >= 3 && out[n - 3] === ax && out[n - 2] === ay && out[n - 1] === az)) {
+        if (n > 0) out.push(NaN, NaN, NaN);
+        out.push(ax, ay, az);
+      }
+      out.push(bx, by, bz);
+    }
+  }
+  const byRegion = new Map<number, BandPart>();
+  for (const r of new Set([...loops.keys(), ...lines.keys()])) {
+    const l = loops.get(r);
+    const s = lines.get(r);
+    const line = (which: (typeof LINES)[number]) => Float64Array.from(s?.[which] ?? []);
+    byRegion.set(r, { far: l?.far ?? [], near: l?.near ?? [], outline: line("outline"), hidden: line("hidden"), guide: line("guide"), guideHidden: line("guideHidden") });
+  }
+  shares.set(part, { pits, byRegion });
+  return byRegion;
+}
+
+/**
  * Draws bands of one area as one run (docs/design-v1-iso-area-shapes.md
  * 4.3 and 5): its far loops filled, its near loops filled, its hidden
  * lines, then its outline and guides, in view units with `unit` view
  * units to a screen pixel. The parts inside a pit's opening draw clipped
- * to the openings of `pits`.
+ * to the openings of the region under them, each region's apart: one
+ * region's opening swept up would show another's part over the flat
+ * ground between them (review HXREL1-OPUS-10).
  */
-export function drawVolume(g: CanvasRenderingContext2D, high: readonly BandPart[], low: readonly BandPart[], pits: readonly (readonly { x: number; y: number }[])[], look: VolumeLook, turn: Turn, unit: number): void {
+export function drawVolume(g: CanvasRenderingContext2D, high: readonly BandPart[], low: readonly BandPart[], pits: AreaPits, look: VolumeLook, turn: Turn, unit: number): void {
   const { c, s } = turnAxes(turn);
   const a = theme.area;
   const dim = look.dm ? a.dmOpacity : 1;
@@ -631,12 +705,22 @@ export function drawVolume(g: CanvasRenderingContext2D, high: readonly BandPart[
     stroke(["guide"], a.volumeGuide, a.thinWidthPx, null);
   };
   fills(high);
-  if (pits.length > 0 && low.some((p) => p.far.length + p.near.length + p.outline.length + p.hidden.length + p.guide.length + p.guideHidden.length > 0)) {
-    g.save();
-    clipToPits(g, pits, turn);
-    fills(low);
-    strokes(low);
-    g.restore();
+  if (pits.regions.length > 0) {
+    const byRegion = new Map<number, BandPart[]>();
+    for (const p of low) {
+      for (const [r, share] of sharesOf(p, pits)) {
+        let list = byRegion.get(r);
+        if (!list) byRegion.set(r, (list = []));
+        list.push(share);
+      }
+    }
+    for (const [r, parts] of byRegion) {
+      g.save();
+      clipToPits(g, pits.regions[r]!, turn);
+      fills(parts);
+      strokes(parts);
+      g.restore();
+    }
   }
   strokes(high);
   g.restore();

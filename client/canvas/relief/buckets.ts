@@ -5,7 +5,7 @@ import type { GroundCell } from "../../lib/groundCells.ts";
 import { keySpan, neighborOf } from "../../lib/groundCells.ts";
 import type { Turn } from "../../lib/view.ts";
 import type { BandDraw } from "../../features/areas/volume.ts";
-import type { VolumeLook } from "./drawRelief.ts";
+import type { AreaPits, VolumeLook } from "./drawRelief.ts";
 import { boundsOf, cellPieces, keyOf, localKeyOf, polyBox, RANK, sortKey, wallItems, type CellPiece, type PieceSource, type PitRegion, type StaticPiece, type VBox } from "./pieces.ts";
 import type { WallPiece } from "./runs.ts";
 
@@ -81,8 +81,8 @@ export type VolumePiece = {
   draws: readonly BandDraw[];
   bounds: VBox;
   look: VolumeLook;
-  /** The openings at 0 of the pits under the area's plan and those joined to them side by side, as far as their reach down the screen, world polygons, which clip what lies inside them (design 4.3, Pits, volumes.ts pitsUnder). */
-  pits: readonly (readonly { x: number; y: number }[])[];
+  /** The openings at 0 of the pits under the area's plan and those joined to them side by side, by region, as far as their reach down the screen: each clips the parts over its own region (design 4.3, Pits, volumes.ts pitsUnder). */
+  pits: AreaPits;
 };
 
 /** What a run draws: the relief's pieces and areas' bands. */

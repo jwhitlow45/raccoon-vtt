@@ -8,6 +8,7 @@ import { ctxOf } from "../../features/areas/volumeTesting.ts";
 import { groupWalls, meets, ReliefIndex, stretches, type Item, type StandeeIn, type VolumePiece } from "./buckets.ts";
 import { boundsOf, facesOf, keyOf, sortKey, type PieceSource } from "./pieces.ts";
 import { bandPieces, pitsUnder, sideOf } from "./volumes.ts";
+import { NO_AREA_PITS } from "./drawRelief.ts";
 import type { WallPiece } from "./runs.ts";
 import { SQUARES } from "#shared/rules/grid.ts";
 import { groundSurface, type GroundCell } from "../../lib/groundCells.ts";
@@ -305,7 +306,7 @@ function bandsOf(t: Pick<AreaTemplateInput, "shape" | "size" | "origin"> & Parti
 
 /** A band made up for a case: its key at its middle, over everything. */
 function band(area: string, b: number): VolumePiece {
-  return { kind: "volume", id: `v${area}:${b}`, area, band: b, key: b + 0.5, draws: [], bounds: EVERYTHING, look: LOOK, pits: [] };
+  return { kind: "volume", id: `v${area}:${b}`, area, band: b, key: b + 0.5, draws: [], bounds: EVERYTHING, look: LOOK, pits: NO_AREA_PITS };
 }
 
 type Entry = { kind: "standee"; id: string } | { kind: "band"; area: string; band: number } | { kind: "cell"; id: string; key: number };
@@ -541,7 +542,7 @@ describe("areas standing as their real shapes in the depth list (docs/design-v1-
       assert.ok(pieces.length >= 2);
       for (const p of pieces) {
         // Each opening a square's polygon, its first corner the cell's key.
-        const pits = p.pits.map((c) => `${c[0]!.x},${c[0]!.y}`);
+        const pits = p.pits.regions.flat().map((c) => `${c[0]!.x},${c[0]!.y}`);
         // The cells under its plan, every one a pit's.
         assert.ok(["11,11", "12,11", "11,12", "12,12"].every((c) => pits.includes(c)) && pits.every((c) => ground[c] === -4), `turn ${turn}: ${pits}`);
         for (const d of p.draws) assert.ok(d.high.far.length + d.high.near.length === 0, `turn ${turn}: all of it lies inside the opening`);

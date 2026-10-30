@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { flatHeights, type DrawnHeights } from "../../lib/view.ts";
+import { flatHeights, K, turnAxes, type DrawnHeights } from "../../lib/view.ts";
 import { SQUARES, type Grid } from "#shared/rules/grid.ts";
-import { groundSurface } from "../../lib/groundCells.ts";
-import { drawVolume } from "./drawRelief.ts";
+import { cellAtPoint, cellId, cellPolygon, groundSurface, neighborsOf } from "../../lib/groundCells.ts";
+import { drawVolume, pitSweep } from "./drawRelief.ts";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { FOG_SUBCELLS, type FogTile } from "#shared/model.ts";
@@ -359,7 +359,7 @@ describe("an area below 0 shows only through its own pits (review HXR1-ASTRA-1)"
     const now = v.now(0, VIEW, w);
     assert.ok(now.standing.has("c"));
     const pits = now.pieces[0]!.pits;
-    assert.deepEqual(pits, [heights.polygon({ col: 2, row: 2 })], "its own pit's opening alone");
+    assert.deepEqual(pits.regions, [[heights.polygon({ col: 2, row: 2 })]], "its own pit's opening alone");
     // The sample over flat ground (3.4798, 3.4798), where (4,4)'s opening swept up would let the cube's fill through.
     const at = fillsAt({ x: 0, y: 2.460587276 });
     const high = now.pieces.flatMap((p) => p.draws.map((d) => d.high));
@@ -368,7 +368,7 @@ describe("an area below 0 shows only through its own pits (review HXR1-ASTRA-1)"
     assert.equal(at.count(), 0);
     // With (4,4)'s opening too, the sample is filled: it tells the two apart.
     const both = fillsAt({ x: 0, y: 2.460587276 });
-    drawVolume(both.g, high, low, [...pits, heights.polygon({ col: 4, row: 4 })], LOOK, 0, 1 / 32);
+    drawVolume(both.g, high, low, { regions: [[...pits.regions[0]!, heights.polygon({ col: 4, row: 4 })]], at: pits.at }, LOOK, 0, 1 / 32);
     assert.ok(both.count() > 0);
   });
 
@@ -382,7 +382,173 @@ describe("an area below 0 shows only through its own pits (review HXR1-ASTRA-1)"
     v.sync([{ id: "c", template: cube, ctx: ctxOf(bounds, null), look: LOOK }], w);
     settle(v, w);
     const pits = v.now(0, VIEW, w).pieces[0]!.pits;
-    assert.deepEqual(new Set(pits), new Set([heights.polygon({ col: 2, row: 2 }), heights.polygon({ col: 3, row: 2 }), heights.polygon({ col: 4, row: 2 })]));
+    assert.equal(pits.regions.length, 1, "one region");
+    assert.deepEqual(new Set(pits.regions[0]), new Set([heights.polygon({ col: 2, row: 2 }), heights.polygon({ col: 3, row: 2 }), heights.polygon({ col: 4, row: 2 })]));
+  });
+});
+
+describe("each part below 0 shows only through its own pit region (review HXREL1-OPUS-10)", () => {
+  type P = { x: number; y: number };
+  const inPoly = (poly: readonly P[], q: P) => {
+    let odd = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i]!;
+      const b = poly[j]!;
+      if (a.y > q.y !== b.y > q.y && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) odd = !odd;
+    }
+    return odd;
+  };
+
+  /**
+   * Over a grid of view points round the area, production drawVolume fills
+   * a point from the parts below 0 exactly where an independent reading
+   * says one of them covers it and the opening of the pit region under
+   * that part, swept up, holds it: the pits joined side by side, found here
+   * from the heights. Returns how many of those points a clip by every
+   * region's openings together would fill wrongly, so a case can show it
+   * tells the two apart.
+   */
+  function checkRegions(label: string, grid: Grid, cells: Record<string, number>, template: AreaTemplateInput, withParts: number, bounds = { w: 12, h: 12 }): number {
+    const heights = heightsOn(grid, bounds, cells);
+    // The regions, by flood over side neighbors from each pit.
+    const region = new Map<number, number>();
+    const openings: (readonly P[])[][] = [];
+    for (const key of Object.keys(cells)) {
+      const [col, row] = key.split(",").map(Number) as [number, number];
+      if (heights.atCell({ col, row }) >= 0 || region.has(cellId({ col, row }))) continue;
+      const r = openings.length;
+      openings.push([]);
+      const queue = [{ col, row }];
+      region.set(cellId({ col, row }), r);
+      while (queue.length > 0) {
+        const c = queue.pop()!;
+        openings[r]!.push(heights.polygon(c));
+        for (const n of neighborsOf(grid, c)) {
+          if (heights.atCell(n) < 0 && !region.has(cellId(n))) {
+            region.set(cellId(n), r);
+            queue.push(n);
+          }
+        }
+      }
+    }
+    // A face along a pit's wall has its middle on the wall: a hair to each side finds the pit.
+    const regionAt = (x: number, y: number) => {
+      for (const [dx, dy] of [[0, 0], [1e-4, 0], [-1e-4, 0], [0, 1e-4], [0, -1e-4], [1e-4, 1e-4], [1e-4, -1e-4], [-1e-4, 1e-4], [-1e-4, -1e-4]] as const) {
+        const r = region.get(cellId(cellAtPoint(grid, { x: x + dx, y: y + dy })));
+        if (r !== undefined) return r;
+      }
+      return -1;
+    };
+    let wrong = 0;
+    for (const turn of [0, 1, 2, 3] as const) {
+      const w: VolumeWorld = { heights, tiles: null, px: 32, fog: new FogView(null, "s1", bounds), live: null };
+      const v = new BoardVolumes();
+      v.sync([{ id: "a", template, ctx: ctxOf(bounds, null, {}, grid), look: LOOK }], w);
+      settle(v, w, turn);
+      const now = v.now(turn, VIEW, w);
+      assert.ok(now.standing.has("a"), `${label} turn ${turn}: it stands`);
+      const low = now.pieces.flatMap((p) => p.draws.map((d) => d.low));
+      const { c, s } = turnAxes(turn);
+      const loops: { poly: P[]; region: number }[] = [];
+      for (const part of low) {
+        for (const q of [...part.far, ...part.near]) {
+          const poly: P[] = [];
+          let cx = 0;
+          let cy = 0;
+          for (let i = 0; i + 2 < q.length; i += 3) {
+            poly.push({ x: c * q[i]! - s * q[i + 1]!, y: (s * q[i]! + c * q[i + 1]!) / 2 - K * q[i + 2]! });
+            cx += q[i]!;
+            cy += q[i + 1]!;
+          }
+          loops.push({ poly, region: regionAt((3 * cx) / q.length, (3 * cy) / q.length) });
+        }
+      }
+      const regions = new Set(loops.map((l) => l.region));
+      assert.ok(!regions.has(-1) && regions.size === withParts, `${label} turn ${turn}: parts below 0 over ${[...regions]}`);
+      const sweeps = openings.map((list) => list.map((o) => pitSweep(turn, o)));
+      const inSweep = (r: number, q: P) => r >= 0 && sweeps[r]!.some((sw) => inPoly(sw, q));
+      const xs = loops.flatMap((l) => l.poly.map((q) => q.x));
+      const ys = loops.flatMap((l) => l.poly.map((q) => q.y));
+      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+      for (let i = 0; i < 48; i++) {
+        for (let j = 0; j < 48; j++) {
+          const q = { x: x0 + ((x1 - x0) * (i + 0.5137)) / 48, y: y0 + ((y1 - y0) * (j + 0.4721)) / 48 };
+          const covering = loops.filter((l) => inPoly(l.poly, q));
+          const want = covering.some((l) => inSweep(l.region, q));
+          const at = fillsAt(q);
+          drawVolume(at.g, [], low, now.pieces[0]!.pits, LOOK, turn, 1 / 32);
+          assert.equal(at.count() > 0, want, `${label} turn ${turn}: view point ${q.x}, ${q.y}`);
+          if (!want && covering.some((l) => l.region >= 0 && openings.some((_, r) => inSweep(r, q)))) wrong++;
+        }
+      }
+    }
+    return wrong;
+  }
+
+  test("squares: a 15 ft cube over lone pits (2,2) and (4,4), flat ground between, one behind the other on the screen: neither pit's opening shows the other's part", () => {
+    // A cube's origin is the middle of its face, 1.5 cells before its middle at (3.5, 3.5).
+    const cube: AreaTemplateInput = { id: "a", rev: 1, shape: "cube", size: 15, origin: { x: 2, y: 3.5, z: -4 }, yaw: 0, includeOrigin: true };
+    assert.ok(checkRegions("squares", SQUARES, { "2,2": -4, "4,4": -4 }, cube, 2) > 0, "a clip by both openings together would show a part over the flat ground");
+  });
+
+  test("hex rows: a 20 ft cube over lone pits (2,2) and (4,4), flat hexes between: neither pit's opening shows the other's part", () => {
+    const rows: Grid = { shape: "hex", orient: "rows" };
+    const middle = (col: number, row: number) => cellPolygon(rows, { col, row }).reduce((m, q, _, all) => ({ x: m.x + q.x / all.length, y: m.y + q.y / all.length }), { x: 0, y: 0 });
+    const [a, b] = [middle(2, 2), middle(4, 4)];
+    // Its bottom 1.2 cells down, so (2,2)'s part shows between that pit's near rim and (4,4)'s opening on the screen.
+    const cube: AreaTemplateInput = { id: "a", rev: 1, shape: "cube", size: 20, origin: { x: (a.x + b.x) / 2 - 2, y: (a.y + b.y) / 2, z: 4 }, yaw: 0, includeOrigin: true };
+    assert.ok(checkRegions("hex rows", rows, { "2,2": -4, "4,4": -4 }, cube, 2) > 0, "a clip by both openings together would show a part over the flat ground");
+  });
+
+  test("a sphere over a winding pit from its middle to its edge, with a lone pit diagonally past that edge in its box's corner: the corner's opening shows nothing of it", () => {
+    // Radius 4 round (6.5, 6.5): the shell crosses (9,9), and (10,10)'s nearest corner lies 4.95 away, inside the box but past the plan.
+    const ball: AreaTemplateInput = { id: "a", rev: 1, shape: "sphere", size: 20, origin: { x: 6.5, y: 6.5, z: -4 }, yaw: 0, includeOrigin: true };
+    const pits = { "6,6": -4, "7,6": -4, "7,7": -4, "8,7": -4, "8,8": -4, "9,8": -4, "9,9": -4, "10,10": -4 };
+    assert.ok(checkRegions("sphere", SQUARES, pits, ball, 1) > 0, "a clip by both openings together would show a part over the flat ground");
+  });
+
+  test("a part whose middle lies on its pit's wall, as a grid-snapped cube's face does, finds that pit on either grid", () => {
+    for (const grid of [SQUARES, { shape: "hex", orient: "rows" } as Grid]) {
+      const bounds = { w: 8, h: 8 };
+      const heights = heightsOn(grid, bounds, { "2,2": -4 });
+      const poly = heights.polygon({ col: 2, row: 2 });
+      const middle = poly.reduce((m, q) => ({ x: m.x + q.x / poly.length, y: m.y + q.y / poly.length }), { x: 0, y: 0 });
+      const cube: AreaTemplateInput = { id: "a", rev: 1, shape: "cube", size: 5, origin: { x: middle.x - 0.5, y: middle.y, z: -2 }, yaw: 0, includeOrigin: true };
+      const w: VolumeWorld = { heights, tiles: null, px: 32, fog: new FogView(null, "s1", bounds), live: null };
+      const v = new BoardVolumes();
+      v.sync([{ id: "a", template: cube, ctx: ctxOf(bounds, null, {}, grid), look: LOOK }], w);
+      settle(v, w);
+      const pits = v.now(0, VIEW, w).pieces[0]!.pits;
+      assert.equal(pits.regions.length, 1, grid.shape);
+      // Every side's middle lies on the wall between the pit and flat ground.
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i]!;
+        const b = poly[(i + 1) % poly.length]!;
+        assert.equal(pits.at((a.x + b.x) / 2, (a.y + b.y) / 2), 0, `${grid.shape} side ${i}`);
+      }
+      assert.equal(pits.at(middle.x, middle.y), 0);
+      assert.equal(pits.at(middle.x + 2.5, middle.y), -1, "flat ground is no pit's");
+    }
+  });
+
+  test("the reviewer's case: 5 ft cells, pits (8,8) and (11,11) at -10 cells, a 20 ft sphere at (8,8) 30 ft down: nothing paints at view point (0, 7.4)", () => {
+    const bounds = { w: 16, h: 16 };
+    const heights = heightsOn(SQUARES, bounds, { "8,8": -10, "11,11": -10 });
+    const w: VolumeWorld = { heights, tiles: null, px: 32, fog: new FogView(null, "s1", bounds), live: null };
+    const ball: AreaTemplateInput = { id: "a", rev: 1, shape: "sphere", size: 20, origin: { x: 8, y: 8, z: -30 }, yaw: 0, includeOrigin: true };
+    const v = new BoardVolumes();
+    v.sync([{ id: "a", template: ball, ctx: ctxOf(bounds, null), look: LOOK }], w);
+    settle(v, w);
+    const now = v.now(0, VIEW, w);
+    assert.ok(now.standing.has("a"));
+    const low = now.pieces.flatMap((p) => p.draws.map((d) => d.low));
+    const at = fillsAt({ x: 0, y: 7.4 });
+    drawVolume(at.g, [], low, now.pieces[0]!.pits, LOOK, 0, 1 / 32);
+    assert.equal(at.count(), 0);
+    // Both openings as one region would paint it there: the case tells the two apart.
+    const both = fillsAt({ x: 0, y: 7.4 });
+    drawVolume(both.g, [], low, { regions: [[heights.polygon({ col: 8, row: 8 }), heights.polygon({ col: 11, row: 11 })]], at: () => 0 }, LOOK, 0, 1 / 32);
+    assert.ok(both.count() > 0);
   });
 });
 
@@ -404,6 +570,49 @@ describe("an area that stood, over ground that changed (design 8, review HXR1-AS
     assert.equal(shows(v.now(0, VIEW, raised)), " waiting", "flat and waiting while the new shape builds");
     settle(v, raised);
     assert.equal(shows(v.now(0, VIEW, raised)), "s");
+  });
+
+  test("a fog change over many standing areas reads the ground a bounded number of times, however many areas stand, with a deep pit far off (review HXR1-ASTRA-7)", () => {
+    const wide = { w: 60, h: 60 };
+    const cells = { "55,55": -100 };
+    let reads = 0;
+    // Drawn heights whose readers count, as every fog change makes them anew with the same ground.
+    const counted = (): DrawnHeights => {
+      const h = heightsOn(ROWS, wide, cells);
+      return { ...h, atCell: (c) => (reads++, h.atCell(c)), at: (x, y) => (reads++, h.at(x, y)) };
+    };
+    const readsFor = (n: number) => {
+      const cubes = Array.from({ length: n }, (_, i): VolumeEntry => ({ id: `c${i}`, template: { id: `c${i}`, rev: 1, shape: "cube", size: 5, origin: { x: 4 + (i % 10) * 4, y: 4 + Math.floor(i / 10) * 4, z: 5 }, yaw: 0, includeOrigin: true }, ctx: ctxOf(wide, null, {}, ROWS), look: LOOK }));
+      const v = new BoardVolumes();
+      const before: VolumeWorld = { heights: counted(), tiles: null, px: 32, fog: new FogView(null, "s1", wide), live: null };
+      v.sync(cubes, before);
+      settle(v, before);
+      assert.equal(v.now(0, VIEW, before).standing.size, n);
+      const after: VolumeWorld = { ...before, heights: counted(), fog: new FogView(null, "s1", wide) };
+      reads = 0;
+      v.sync(cubes, after);
+      assert.equal(v.now(0, VIEW, after).standing.size, n, "the same ground: every cube stays standing");
+      return reads;
+    };
+    const few = readsFor(5);
+    const many = readsFor(40);
+    // At most the scene's cells, read in each snapshot once, shared by every area.
+    const sceneCells = 60 * 70;
+    assert.ok(many <= 2 * sceneCells, `${many} ground reads for 40 areas`);
+    assert.ok(many <= few + 2 * 40, `${few} reads for 5 areas, ${many} for 40`);
+  });
+
+  test("an area wholly above 0 keeps standing when a deep pit changes far from it: no pit's opening shows any of it (review HXR1-ASTRA-7)", () => {
+    const v = new BoardVolumes();
+    const cube: AreaTemplateInput = { id: "c", rev: 1, shape: "cube", size: 5, origin: { x: 4, y: 4, z: 5 }, yaw: 0, includeOrigin: true };
+    const before = at(heightsOn(ROWS, bounds, { "12,12": -100 }));
+    v.sync([{ id: "c", template: cube, ctx: ctxOf(bounds, null), look: LOOK }], before);
+    settle(v, before);
+    assert.equal(shows(v.now(0, VIEW, before)), "c");
+    // The pit 8 hexes off made shallower: within its old reach of 174 cells down the screen, nowhere under the cube.
+    const after = at(heightsOn(ROWS, bounds, { "12,12": -99 }));
+    v.sync([{ id: "c", template: cube, ctx: ctxOf(bounds, null), look: LOOK }], after);
+    assert.equal(shows(v.now(0, VIEW, after)), "c", "it stands meanwhile");
   });
 
   test("a fog change that leaves the drawn ground as it was keeps the sphere standing while its next shape builds", () => {

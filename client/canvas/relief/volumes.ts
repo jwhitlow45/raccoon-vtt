@@ -1,10 +1,10 @@
 import { CHUNK_CELLS } from "#shared/model.ts";
 import type { AreaContext, AreaTemplateInput } from "#shared/rules/aoe.ts";
 import { bandKey, VolumeCache, type BandDraw, type Volume, type WorldBox } from "../../features/areas/volume.ts";
-import { cellId, neighborsOf, type GroundCell } from "../../lib/groundCells.ts";
+import { cellAtPoint, cellId, neighborsOf, type GroundCell } from "../../lib/groundCells.ts";
 import { K, turnAxes, type DrawnHeights, type Turn } from "../../lib/view.ts";
 import { meets, type VolumePiece } from "./buckets.ts";
-import type { VolumeLook } from "./drawRelief.ts";
+import { NO_AREA_PITS, type AreaPits, type VolumeLook } from "./drawRelief.ts";
 import type { FogView } from "./fogView.ts";
 import type { VBox } from "./pieces.ts";
 import { VolumeStand, type LiveSub } from "./stand.ts";
@@ -89,50 +89,80 @@ function drawnInView(vol: Volume, turn: Turn, view: VBox): boolean {
 }
 
 /**
- * The openings at 0 of the pit regions under a built volume's plan, world
- * polygons, which clip what lies inside them (design 4.3): the pits its
- * plan meets and every pit joined to them side by side (the index's
- * regions, buckets.ts), as far as the deepest drawn pit's reach down the
- * screen past its box, so a part below 0 shows through a neighbor's
- * opening in its region as well as its own
- * (docs/design-v1-iso-hex-relief.md 5.2), and never through an unrelated
- * pit's, whose opening swept up would show it over flat ground (review
- * HXR1-ASTRA-1). Kept per volume: its drawn heights are part of its key.
+ * How far past its box, in cells, the ground can show a volume whose
+ * lowest point is `z0`, on drawn ground whose deepest pit is `low`: a part
+ * below 0 shows through a pit's opening as far down the screen as it lies
+ * deep, and no part lies below the deepest pit's floor. A volume wholly
+ * above 0 shows through none (review HXR1-ASTRA-7).
  */
-const pitsOf = new WeakMap<Volume, readonly (readonly { x: number; y: number }[])[]>();
+function pitReach(z0: number, low: number): number {
+  return z0 < 0 ? 2 * K * Math.max(0, -Math.max(z0, low)) + 1 : 0;
+}
 
-export function pitsUnder(vol: Volume, heights: Pick<DrawnHeights, "grid" | "low" | "cellsIn" | "atCell" | "polygon">): readonly (readonly { x: number; y: number }[])[] {
+/** A hair each way from a point, for a part whose middle lies on a pit's wall. */
+const NUDGES = [0, 0, 1e-6, 0, -1e-6, 0, 0, 1e-6, 0, -1e-6, 1e-6, 1e-6, 1e-6, -1e-6, -1e-6, 1e-6, -1e-6, -1e-6];
+
+/**
+ * The pit regions under a built volume (design 4.3): the pits its box
+ * meets and every pit joined to them side by side (the index's regions,
+ * buckets.ts), as far as its reach down the screen past its box, each
+ * region with its openings at 0, world polygons, which clip the parts that
+ * lie over that region and no others (drawRelief.ts drawVolume). So a part
+ * below 0 shows through a neighbor's opening in its region as well as its
+ * own (docs/design-v1-iso-hex-relief.md 5.2), and never through another
+ * region's, whose opening swept up would show it over the flat ground
+ * between. A region with no part over it, such as a pit in a sphere's box
+ * corner past its round plan, clips nothing (reviews HXR1-ASTRA-1,
+ * HXREL1-OPUS-10). Kept per volume: its drawn heights are part of its key.
+ */
+const pitsOf = new WeakMap<Volume, AreaPits>();
+
+export function pitsUnder(vol: Volume, heights: Pick<DrawnHeights, "grid" | "low" | "cellsIn" | "atCell" | "polygon">): AreaPits {
   let pits = pitsOf.get(vol);
   if (pits) return pits;
+  pits = NO_AREA_PITS;
   const box = vol.box;
-  const out: (readonly { x: number; y: number }[])[] = [];
   // Only a solid reaching below the ground at 0 can lie in a pit.
   if (box && box.z0 < 0) {
-    const reach = 2 * K * Math.max(0, -heights.low) + 1;
+    const reach = pitReach(box.z0, heights.low);
     const near = new Map<number, GroundCell>();
     for (const c of heights.cellsIn({ x0: box.x0 - reach, y0: box.y0 - reach, x1: box.x1 + reach, y1: box.y1 + reach })) if (heights.atCell(c) < 0) near.set(cellId(c), c);
-    // From the pits under the plan, through pits side by side, as the index joins its regions.
-    const joined = new Set<number>();
-    const queue: GroundCell[] = [];
-    for (const c of heights.cellsIn(box)) {
-      const id = cellId(c);
-      if (near.has(id) && !joined.has(id)) {
-        joined.add(id);
-        queue.push(c);
-      }
-    }
-    while (queue.length > 0) {
-      for (const n of neighborsOf(heights.grid, queue.pop()!)) {
-        const id = cellId(n);
-        if (near.has(id) && !joined.has(id)) {
-          joined.add(id);
-          queue.push(n);
+    // From each pit under the box, through pits side by side, as the index joins its regions.
+    const regionOf = new Map<number, number>();
+    const regions: (readonly { x: number; y: number }[])[][] = [];
+    for (const seed of heights.cellsIn(box)) {
+      const id = cellId(seed);
+      if (!near.has(id) || regionOf.has(id)) continue;
+      const r = regions.length;
+      const openings: (readonly { x: number; y: number }[])[] = [];
+      regions.push(openings);
+      regionOf.set(id, r);
+      const queue = [near.get(id)!];
+      while (queue.length > 0) {
+        const c = queue.pop()!;
+        openings.push(heights.polygon(c));
+        for (const n of neighborsOf(heights.grid, c)) {
+          const nid = cellId(n);
+          if (near.has(nid) && !regionOf.has(nid)) {
+            regionOf.set(nid, r);
+            queue.push(near.get(nid)!);
+          }
         }
       }
     }
-    for (const [id, c] of near) if (joined.has(id)) out.push(heights.polygon(c));
+    if (regions.length > 0) {
+      const grid = heights.grid;
+      const at = (x: number, y: number) => {
+        for (let i = 0; i < NUDGES.length; i += 2) {
+          const r = regionOf.get(cellId(cellAtPoint(grid, { x: x + NUDGES[i]!, y: y + NUDGES[i + 1]! })));
+          if (r !== undefined) return r;
+        }
+        return -1;
+      };
+      pits = { regions, at };
+    }
   }
-  pitsOf.set(vol, (pits = out));
+  pitsOf.set(vol, pits);
   return pits;
 }
 
@@ -141,7 +171,7 @@ export function pitsUnder(vol: Volume, heights: Pick<DrawnHeights, "grid" | "low
  * `keys` have drawn so far: each band once, with every bucket's part of it
  * and their box (buckets.ts VolumePiece).
  */
-export function bandPieces(vol: Volume, turn: Turn, keys: readonly string[], id: string, look: VolumeLook, pits: readonly (readonly { x: number; y: number }[])[]): VolumePiece[] {
+export function bandPieces(vol: Volume, turn: Turn, keys: readonly string[], id: string, look: VolumeLook, pits: AreaPits): VolumePiece[] {
   const byBand = new Map<number, { draws: BandDraw[]; box: VBox }>();
   for (const key of keys) {
     const d = vol.drawnNow(key, turn);
@@ -163,22 +193,44 @@ export function bandPieces(vol: Volume, turn: Turn, keys: readonly string[], id:
 const builtOn = new WeakMap<Volume, DrawnHeights>();
 
 /**
- * Whether the drawn ground a volume stands on reads the same in `now` as
- * it did in `was`: the grid, the bounds, and every cell under its box and
- * as far around as a pit's opening can show it, by content, since heights
- * are made anew on every fog change.
+ * The boxes of the cells whose drawn ground differs between two snapshots
+ * of one grid and bounds, or null when the grid or bounds differ: found
+ * once a sync, by one pass over the scene, and shared by every area it
+ * compares, so a fog change, which makes new heights with the same ground,
+ * costs the scene's cells and not the scene's cells for every area
+ * (review HXR1-ASTRA-7).
  */
-export function sameGroundUnder(vol: Volume, was: DrawnHeights | undefined, now: DrawnHeights): boolean {
-  if (!was) return false;
-  if (was === now) return true;
+export function groundChanges(was: DrawnHeights, now: DrawnHeights): VBox[] | null {
   const a = was.grid;
   const b = now.grid;
-  if (a.shape !== b.shape || (a.shape === "hex" && b.shape === "hex" && a.orient !== b.orient)) return false;
-  if (was.bounds.w !== now.bounds.w || was.bounds.h !== now.bounds.h) return false;
+  if (a.shape !== b.shape || (a.shape === "hex" && b.shape === "hex" && a.orient !== b.orient)) return null;
+  if (was.bounds.w !== now.bounds.w || was.bounds.h !== now.bounds.h) return null;
+  const out: VBox[] = [];
+  for (const c of now.cellsIn({ x0: 0, y0: 0, x1: now.bounds.w, y1: now.bounds.h })) {
+    if (was.atCell(c) === now.atCell(c)) continue;
+    const poly = now.polygon(c);
+    out.push({ x0: Math.min(...poly.map((p) => p.x)), y0: Math.min(...poly.map((p) => p.y)), x1: Math.max(...poly.map((p) => p.x)), y1: Math.max(...poly.map((p) => p.y)) });
+  }
+  return out;
+}
+
+/**
+ * Whether the drawn ground a volume stands on reads the same in `now` as
+ * it did in `was`: the grid, the bounds, and every cell under its box and,
+ * for a volume reaching below 0, as far around as a pit's opening can show
+ * it, by content, since heights are made anew on every fog change.
+ * `changes` gives the cells that differ, shared across a sync's areas.
+ */
+export function sameGroundUnder(vol: Volume, was: DrawnHeights | undefined, now: DrawnHeights, changes: (was: DrawnHeights) => readonly VBox[] | null = (w) => groundChanges(w, now)): boolean {
+  if (!was) return false;
+  if (was === now) return true;
+  const changed = changes(was);
+  if (!changed) return false;
+  if (changed.length === 0) return true;
   const box = vol.box ?? vol.reach;
-  const reach = 2 * K * Math.max(0, -Math.min(was.low, now.low)) + 1;
-  for (const c of now.cellsIn({ x0: box.x0 - reach, y0: box.y0 - reach, x1: box.x1 + reach, y1: box.y1 + reach })) if (was.atCell(c) !== now.atCell(c)) return false;
-  return true;
+  const reach = pitReach(box.z0, Math.min(was.low, now.low));
+  const [x0, y0, x1, y1] = [box.x0 - reach, box.y0 - reach, box.x1 + reach, box.y1 + reach];
+  return !changed.some((c) => c.x0 <= x1 && c.x1 >= x0 && c.y0 <= y1 && c.y1 >= y0);
 }
 
 type Slot = {
@@ -212,12 +264,17 @@ export class BoardVolumes {
    */
   sync(entries: readonly VolumeEntry[], world: VolumeWorld): void {
     const next = new Map<string, Slot>();
+    const changes = new Map<DrawnHeights, readonly VBox[] | null>();
+    const changesFrom = (was: DrawnHeights) => {
+      if (!changes.has(was)) changes.set(was, groundChanges(was, world.heights));
+      return changes.get(was)!;
+    };
     for (const entry of entries) {
       const old = this.#slots.get(entry.id);
       const vol = this.#cache.get({ template: entry.template, ctx: entry.ctx, heights: world.heights, tiles: world.tiles, px: world.px, coarse: false });
       if (vol && !builtOn.has(vol)) builtOn.set(vol, world.heights);
       let shown = old?.shown ?? null;
-      if (shown && shown !== vol && !sameGroundUnder(shown, builtOn.get(shown), world.heights)) shown = null;
+      if (shown && shown !== vol && !sameGroundUnder(shown, builtOn.get(shown), world.heights, changesFrom)) shown = null;
       next.set(entry.id, { entry, next: vol, shown, turns: shown ? (old?.turns ?? new Set()) : new Set() });
     }
     this.#slots = next;
