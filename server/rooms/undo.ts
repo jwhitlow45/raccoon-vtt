@@ -188,14 +188,14 @@ export class UndoStacks {
    * It keeps where its last op left each token, and names its last op as its
    * origin.
    */
-  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[], trapped = false, history: RecordHistory = {}): void {
-    if (inverse.length === 0) return;
+  push(memberId: string, inverse: RestoreEntry[], label: string, group?: string, poses?: Record<string, Pose>, origin?: Origin, tally?: Tally, teleport = false, walk?: Walk, rides?: Ride[], trapped = false, history: RecordHistory = {}): "recorded" | "none" | "too-large" {
+    if (inverse.length === 0) return "none";
     // Reducers can write a new revision without changing a value. Compare the
     // entire inverse before recording so a no-effect edit preserves Redo,
     // while an effective edit keeps all its guards for an atomic restore.
     if (inverse.every((entry) => entry.expectRev === null
       ? entry.value === null
-      : entry.expectRev === undefined && entry.expectHash !== undefined && guardMatches(entry, entry.value ?? null))) return;
+      : entry.expectRev === undefined && entry.expectHash !== undefined && guardMatches(entry, entry.value ?? null))) return "none";
     label = label.slice(0, 200);
     const member = this.#member(memberId);
     const s = member[history.scope ?? "play"];
@@ -204,7 +204,7 @@ export class UndoStacks {
     if (inverse.length > MAX_RESTORE_ENTRIES) {
       s.undo = [];
       member.latest = null;
-      return;
+      return "too-large";
     }
     const top = s.undo.at(-1);
     if (group !== undefined && top?.group === group && member.latest === top && (top.poses === undefined) === (poses === undefined)) {
@@ -231,7 +231,7 @@ export class UndoStacks {
         else delete top.values;
         delete top.retained;
         this.#identify(top);
-        return;
+        return "recorded";
       }
     }
     const named = group !== undefined && tally ? describeTally(tally) : undefined;
@@ -251,6 +251,7 @@ export class UndoStacks {
     member.latest = recorded;
     s.undo.push(recorded);
     if (s.undo.length > UNDO_DEPTH) s.undo.splice(0, s.undo.length - UNDO_DEPTH);
+    return "recorded";
   }
 
   /** Removes the newest entry. Live restores use consume after validation or an explicit conflict drop. */

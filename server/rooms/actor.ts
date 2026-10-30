@@ -1072,7 +1072,7 @@ export class RoomActor {
         wm.staged = n;
         const batch = this.#ensureBatch();
         push(batch.acks, key, n);
-        push(batch.ackDetails, key, { n, scope: "none", changed: false });
+        if (this.#clients.get(key)?.ackDetails) push(batch.ackDetails, key, { n, scope: "none", changed: false, recorded: false });
         batch.watermarks.set(key, n);
         this.#scheduleCommit();
         return;
@@ -1236,7 +1236,7 @@ export class RoomActor {
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
-    push(batch.ackDetails, key, { n, scope: actionScope, changed: reduced.changed });
+    let recording: ReturnType<UndoStacks["push"]> = "none";
     if (blocked) push(batch.blocked, key, n);
     // A door a player opened or closed, whether or not it changed, shows as it is to everyone who shares that memory (5.3, MD-O-6).
     if (op.t === "door.set" && viewer.role === "player") batch.doors.push({ sceneId: op.sceneId, door: op.door, memberId: viewer.memberId });
@@ -1266,8 +1266,9 @@ export class RoomActor {
       const walk: Walk | undefined =
         poses && op.t === "token.move" && !teleport ? { tokenId: op.tokenId, route: op.route ?? [[op.x, op.y, 0, 0]], routed: op.route !== undefined } : undefined;
       const rides = poses ? ridesChanged(before, this.#staged.state) : undefined;
-      this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}) });
+      recording = this.#undo.push(viewer.memberId, inverse, describeOp(clientOp, before, viewer, this.#staged.state), cmd.group, poses, { client: key, n }, tallyOf(clientOp, before, this.#staged.state), teleport, walk, rides, reduced.trapped === true, { scope: viewer.role === "dm" ? actionScope : "play", declared: cmd.groupScope === "setup" || (sameGroup && priorGroup.declared), ...(viewer.role === "dm" ? { values: dmHistoryValues(inverse, this.#staged.state, actionScope === "play") } : {}) });
     }
+    if (conn.ackDetails) push(batch.ackDetails, key, { n, scope: actionScope, changed: reduced.changed, recorded: recording === "recorded", ...(recording === "too-large" ? { tooLarge: true as const } : {}) });
     this.#scheduleCommit();
   }
 
@@ -1347,7 +1348,7 @@ export class RoomActor {
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
-    push(batch.ackDetails, key, { n, scope, changed: false });
+    if (this.#clients.get(key)?.ackDetails) push(batch.ackDetails, key, { n, scope, changed: false, recorded: false });
     batch.watermarks.set(key, n);
     this.#scheduleCommit();
   }
@@ -1500,7 +1501,7 @@ export class RoomActor {
     wm.staged = n;
     const batch = this.#ensureBatch();
     push(batch.acks, key, n);
-    push(batch.ackDetails, key, { n, scope: "none", changed: false });
+    if (this.#clients.get(key)?.ackDetails) push(batch.ackDetails, key, { n, scope: "none", changed: false, recorded: false });
     batch.watermarks.set(key, n);
     this.#scheduleCommit();
   }
@@ -1559,7 +1560,7 @@ export class RoomActor {
     // is explored at once: a later op in the batch that looks away must not leave the line resting on ground never held.
     if (result.log.some((e) => e.data?.type === "area")) this.#exploreNow(batch);
     this.lastOpAt = this.#opts.now();
-    // Read only when the op goes on an undo stack: working it out hashes what the op touched.
+    // Both values are lazy. History reads the inverse, while only an opted-in sender needs semantic acknowledgment hashes.
     return {
       ok: true,
       get inverse() {

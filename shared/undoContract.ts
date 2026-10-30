@@ -10,6 +10,10 @@ export type OpAcknowledgment = {
   scope: UndoScope;
   /** A semantic state change the sender may read. Revisions and geometry cache versions alone do not count. */
   changed: boolean;
+  /** Whether this accepted command created or merged a fresh history step. Older servers omit it. */
+  recorded?: boolean;
+  /** Its inverse exceeded the entry limit and cleared that scope's Undo. */
+  tooLarge?: true;
 };
 
 export type HistoryTarget = {
@@ -119,6 +123,8 @@ export const opAcknowledgmentSchema = z.strictObject({
   n: commandNumber,
   scope: z.enum(["play", "setup", "none"]),
   changed: z.boolean(),
+  recorded: z.boolean().optional(),
+  tooLarge: z.literal(true).optional(),
 }) satisfies z.ZodType<OpAcknowledgment>;
 
 const absent = z.never().optional();

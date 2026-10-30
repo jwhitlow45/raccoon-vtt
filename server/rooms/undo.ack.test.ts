@@ -4,8 +4,9 @@ import { uuidv7 } from "#shared/ids.ts";
 import type { Member, RoomState } from "#shared/model.ts";
 import { projectState } from "#shared/project.ts";
 import { serverMessageSchema, type ServerMessage } from "#shared/protocol.ts";
-import { member, trap } from "#shared/testutil.ts";
-import type { OpAcknowledgment } from "#shared/undoContract.ts";
+import { encodeTile, fullTileBits } from "#shared/rules/fog.ts";
+import { member, scene, token, trap } from "#shared/testutil.ts";
+import { opAcknowledgmentSchema, type OpAcknowledgment } from "#shared/undoContract.ts";
 import { scopeActor, scopeFixture, scopeObserver, until, type ScopeClient } from "./undoScopeTesting.ts";
 
 type Event = Extract<ServerMessage, { t: "ev" }>;
@@ -14,7 +15,7 @@ const oldEventSchema = serverMessageSchema.options.find((schema): schema is Extr
 function details(event: Event | undefined, expected: OpAcknowledgment[]): void {
   assert.ok(event, "the sender receives its committed acknowledgment event");
   assert.ok(serverMessageSchema.safeParse(event).success);
-  assert.deepEqual(event.ackDetails, expected, "details describe exactly this client's accepted operations");
+  assert.deepEqual(event.ackDetails, expected.map((detail) => ({ recorded: detail.changed && detail.scope !== "none", ...detail })), "details describe exactly this client's accepted operations");
   for (const detail of expected) assert.ok(event.acks?.includes(detail.n), "each detail has a matching ack");
 }
 
@@ -269,11 +270,82 @@ test("equal player projections yield equal metadata despite hidden trap and priv
     if (hiddenEffects) assert.equal(committed.traps[trapId]!.state, "sprung");
     const serialized = JSON.stringify(player.sent.filter((m) => m.t === "ev"));
     for (const secret of [trapId, f.goblin, f.dm.id, privateName, "Private trap name", "Private Log text", dm.head("setup").id]) assert.ok(!serialized.includes(secret), "no private key, label, head or foreign metadata reaches the player's events");
-    assert.deepEqual(Object.keys(event!.ackDetails![0]!).sort(), ["changed", "n", "scope"]);
+    assert.deepEqual(Object.keys(event!.ackDetails![0]!).sort(), ["changed", "n", "recorded", "scope"]);
     await h.actor.op(player.conn, ++player.n, { t: "token.move", tokenId: f.pc, x: 9, y: 3 });
     await h.flush();
     details(ack(player, 2), [{ n: 2, scope: "play", changed: false }]);
     results.push({ before, after, effective: event!.ackDetails, noEffect: ack(player, 2)!.ackDetails });
   }
   assert.deepEqual(results[1], results[0], "different secret state and effects cannot change player projections or acknowledgment metadata");
+});
+
+
+test("oversized accepted Setup changes report no history and a size warning only to their sender", async (t) => {
+  const f = scopeFixture();
+  for (let group = 0; group < 11; group++) {
+    const sceneId = uuidv7();
+    f.state.scenes[sceneId] = scene(sceneId);
+    for (let i = 0; i < 460; i++) {
+      const id = uuidv7();
+      f.state.tokens[id] = token(id, { sceneId, actor: { ref: f.bree } });
+    }
+  }
+  const h = await ackActor(t, f.state);
+  const dm = await h.connect(f.dm);
+  const second = await h.connect(f.dm);
+  const player = await h.connect(f.player);
+  await dm.apply({ t: "room.update", name: "An older Setup step" });
+  const event = await dm.apply({ t: "character.delete", characterId: f.bree });
+  assert.deepEqual(event.ackDetails, [{ n: 2, scope: "setup", changed: true, recorded: false, tooLarge: true }]);
+  assert.equal(dm.history().setup?.undo.depth, 0);
+  assert.equal(h.actor.committed.state.characters[f.bree], undefined);
+  for (const other of [second, player]) assert.equal(other.sent.some((m) => m.t === "ev" && m.ackDetails !== undefined), false);
+});
+
+test("semantic acknowledgment hashing runs only after hello opt-in", async (t) => {
+  const f = scopeFixture();
+  const h = await scopeActor(t, f.state);
+  const legacy = await h.connect(f.dm);
+  const modern = await h.connect(f.dm, undefined, undefined, true);
+  let hashes = 0;
+  const stringify = JSON.stringify;
+  t.mock.method(JSON, "stringify", function (...args: Parameters<typeof JSON.stringify>) {
+    if (new Error().stack?.includes("acknowledgmentValueHash")) hashes++;
+    return stringify(...args);
+  });
+  await legacy.apply({ t: "room.update", name: "Legacy save" });
+  assert.equal(hashes, 0, "legacy saves must not compute opt-in acknowledgment values");
+  await modern.apply({ t: "room.update", name: "Modern save" });
+  assert.ok(hashes > 0, "opted-in saves compute their semantic effect");
+});
+
+
+test("bookkeeping-only changes can be effective without recording history", async (t) => {
+  const f = scopeFixture();
+  const key = `${f.sceneId}:0,0`;
+  f.state.exploredTiles[key] = { sceneId: f.sceneId, tx: 0, ty: 0, rev: 0, bits: encodeTile(fullTileBits()) };
+  const h = await ackActor(t, f.state);
+  const dm = await h.connect(f.dm);
+  const event = await dm.apply({ t: "fog.reset", sceneId: f.sceneId, to: "hidden" });
+  assert.equal(h.actor.committed.state.exploredTiles[key], undefined);
+  assert.deepEqual(event.ackDetails, [{ n: 1, scope: "play", changed: true, recorded: false }]);
+  assert.equal(dm.history().play.undo.depth, 0);
+});
+
+test("recording acknowledgment extensions accept old payloads and enforce their bounds", () => {
+  const old = { n: 1, scope: "setup", changed: true };
+  assert.ok(opAcknowledgmentSchema.safeParse(old).success);
+  assert.ok(opAcknowledgmentSchema.safeParse({ ...old, recorded: false, tooLarge: true }).success);
+  for (const fields of [{ recorded: "true" }, { tooLarge: false }, { recorded: true, secret: "private" }]) {
+    assert.equal(opAcknowledgmentSchema.safeParse({ ...old, ...fields }).success, false);
+  }
+});
+
+test("an effective player HP change reports no history when that action is not eligible", async (t) => {
+  const f = scopeFixture();
+  const h = await ackActor(t, f.state);
+  const player = await h.connect(f.player);
+  const event = await player.apply({ t: "actor.hp", target: { characterId: f.bree }, change: { kind: "damage", amount: 4 } });
+  assert.deepEqual(event.ackDetails, [{ n: 1, scope: "play", changed: true, recorded: false }]);
+  assert.equal(player.history().play.undo.depth, 0);
 });
