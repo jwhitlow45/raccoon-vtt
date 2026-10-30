@@ -6,10 +6,10 @@ import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { chromium, type Browser, type BrowserContext, type Locator, type Page, type WebSocketRoute } from "playwright-core";
 import sharp from "sharp";
-import type { BuildChunk, EdgeFeature, RoomState } from "#shared/model.ts";
+import { FOG_SUBCELLS, type BuildChunk, type EdgeFeature, type RoomState } from "#shared/model.ts";
 import { applyChanges, type ProjectedState } from "#shared/project.ts";
 import { privateFieldsIn } from "#shared/privateFields.ts";
-import { isCellFullyFogged } from "#shared/rules/fog.ts";
+import { isCellFullyFogged, isSubcellFogged } from "#shared/rules/fog.ts";
 import { alignmentLines, measureAlignment } from "./helpers/alignment.ts";
 import { assertNoticeCover, watchNoticeCover } from "./fu38b.steps.ts";
 import { assertCanvasAt, ConsoleWatch, dragCells, expandBar, openSideTab, OpSocket, pagePoint, Shots, sideTabName, SocketWatch, startServer, tapCell, waitFor, type Server } from "./harness.ts";
@@ -85,6 +85,8 @@ const LABEL_TEXT = "Old altar";
 const WHISPER = "Meet me by the old well";
 /** Ground nobody ever explores: past Thorn's torch in the north hall, behind the wall from Bree. */
 const NOBODY_AT = { x: 15, y: 0 };
+/** Bree at BREE_LATER sees part of this square, but its lower-left corner stays unexplored. */
+const FLAT_CONTROL_AT = { x: 0, y: 18 };
 /** A member's name at the 80 characters a name may take (shared/protocol.ts MAX_NAME), with no space to wrap at. */
 const LONG_NAME = "W".repeat(80);
 const VIEW_AS_A_PLAYER = "View as a player";
@@ -1235,10 +1237,15 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
     const imp = randomUUID();
     const pc = randomUUID();
     await ops.send(creature(imp, "Imp", NOBODY_AT, { disposition: "hostile" }));
-    await ops.send(creature(pc, "FU39-C flat control", NOBODY_AT, { kind: "pc" }));
+    // A wholly fogged unowned PC is withheld, and an owned PC stands above fog. This one straddles Bree's torchlight.
+    await ops.send(creature(pc, "FU39-C flat control", FLAT_CONTROL_AT, { kind: "pc" }));
     try {
-      await waitFor("FU39-C controls in the pages' copies", () => sockets.dm.state?.tokens[imp] && sockets.dm.state.tokens[pc] && sockets.ben.state?.tokens[pc] ? true : null);
+      await waitFor("FU39-C controls in the DM's copy", () => sockets.dm.state?.tokens[imp] && sockets.dm.state.tokens[pc] ? true : null);
+      await waitFor("FU39-C flat control in Ben's copy", () => sockets.ben.state?.tokens[pc] ? true : null);
       const dmState = sockets.dm.state!;
+      const benState = sockets.ben.state!;
+      assert.equal(isCellFullyFogged(benState.fogTiles, run.sceneId, FLAT_CONTROL_AT), false, "Ben has explored part of the PC control's square");
+      assert.equal(isSubcellFogged(benState.fogTiles, run.sceneId, FLAT_CONTROL_AT.x * FOG_SUBCELLS, (FLAT_CONTROL_AT.y + 1) * FOG_SUBCELLS - 1), true, "the PC control's lower-left corner stays fogged on Ben's map");
       assert.equal(isCellFullyFogged(dmState.fogTiles, run.sceneId, GOBLIN_LATER), true, "FU39-C: the DM's own fog still covers the goblin");
       assert.equal(isCellFullyFogged(dmState.exploredTiles, run.sceneId, GOBLIN_LATER), false, "the goblin's ground is not in the party's explored layer");
       assert.equal(isCellFullyFogged(dmState.exploredTiles, run.sceneId, NOBODY_AT) && isCellFullyFogged(dmState.fogTiles, run.sceneId, NOBODY_AT), true, "someone revealed the imp's ground");
@@ -1250,7 +1257,7 @@ describe("raccoon-vtt per-player vision run", { timeout: 600_000 }, () => {
         return n?.as === "standee" && n.opacity === 0.5 ? true : null;
       });
       assert.deepEqual(await isoNode(dm, run.goblinId), { as: "standee", opacity: 1 }, "the DM's goblin on explored ground");
-      assert.deepEqual(await isoNode(dm, pc), { as: "standee", opacity: 0.5 }, "FU39-C: the DM's PC control on unexplored ground");
+      assert.deepEqual(await isoNode(dm, pc), { as: "standee", opacity: 1 }, "FU39-C: the DM's PC control on partly explored ground");
       await shots.take(dm, "pervision-dm-isometric-goblin-bright-imp-dim");
 
       // Ben's own Bree stands in her light, so his board is up and drawn, and neither creature reached his page to stand or lie flat.
