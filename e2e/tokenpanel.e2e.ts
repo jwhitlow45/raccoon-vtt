@@ -146,14 +146,40 @@ panelFile(null, () => {
         const several = group.locator("[data-damage-summary]").filter({ has: dm.locator("[data-damage-target]") });
         await several.getByText("Bog Thing:", { exact: true }).waitFor();
         assert.deepEqual(await damageSummaryAlignment(several, `${at}-before-expand`), []);
-        // At the shortest enlarged size the group can rest again after typing. Measure the visible slip, not its clipped description.
+        // Multi-select's footer prevents expansion at the shortest enlarged size. The bar's toggle keeps the group while freeing that room.
+        await (await barControl(group, "Multi-select")).click();
+        await dm.getByRole("button", { name: "Done", exact: true }).waitFor({ state: "hidden" });
+        await waitFor("the group to leave the scrolling strip", async () => (await group.getAttribute("data-bar-state")) !== "scrolls" ? true : null);
         await expandBar(group);
-        assert.equal(await several.locator("..").evaluate((element) => element.tagName), "FORM", "the multi-target slip is outside the resting strip's clipped description");
+        const presentation = await several.evaluate((element) => {
+          type Node = El & { parentElement: Node | null; closest(selector: string): Node | null; ownerDocument: { defaultView: { getComputedStyle(node: Node): Record<string, string> } } };
+          const slip = element as unknown as Node;
+          const form = slip.closest("form");
+          if (!form) return ["no containing HP form"];
+          const box = slip.getBoundingClientRect();
+          const field = form.getBoundingClientRect();
+          const errors: string[] = [];
+          if (box.width < 1 || box.height < 1) errors.push("the slip has no drawn area");
+          if (box.left < field.left - 1 || box.right > field.right + 1) errors.push("the slip extends past the HP entry's width");
+          // The outer bar may scroll vertically. No wrapper inside the entry may hide or clip the slip itself.
+          for (let node: Node | null = slip; node; node = node.parentElement) {
+            const style = node.ownerDocument.defaultView.getComputedStyle(node);
+            const bounds = node.getBoundingClientRect();
+            if (style.display === "none" || style.visibility !== "visible" || style.opacity === "0") errors.push("the slip or its wrapper is hidden");
+            if (style.clip !== "auto" || style.clipPath !== "none") errors.push("the slip or its wrapper has a clip");
+            if (style.overflowX !== "visible" && (box.left < bounds.left - 1 || box.right > bounds.right + 1)) errors.push("the slip is clipped horizontally inside the entry");
+            if (style.overflowY !== "visible" && (box.top < bounds.top - 1 || box.bottom > bounds.bottom + 1)) errors.push("the slip is clipped vertically inside the entry");
+            if (node === form) break;
+          }
+          return errors;
+        });
+        assert.deepEqual(presentation, [], `${at}: the multi-target slip fits the HP entry and has no clipped wrapper`);
         assert.deepEqual(await several.locator("[data-damage-result]").allTextContents(), ["28", "14", "10", "52"]);
         assert.equal(await several.locator("s").count(), 0);
         assert.equal(await several.locator("[data-damage-target]").count(), 1);
         assert.deepEqual(await damageSummaryAlignment(several, at), []);
         assert.deepEqual(alignmentLines(await measureAlignment(several), at), []);
+        await several.scrollIntoViewIfNeeded();
         await shots.take(dm, `${at}-multi-target-summary`);
         await groupInput.fill("");
         await dm.getByRole("button", { name: "Deselect all", exact: true }).first().click();
